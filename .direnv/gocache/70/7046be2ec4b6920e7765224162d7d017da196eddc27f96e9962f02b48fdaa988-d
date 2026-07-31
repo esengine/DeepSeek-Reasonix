@@ -1,0 +1,6 @@
+./bzip2.go
+./diff.go
+./doc.go
+./encoding.go
+./patch.go
+./seek.go

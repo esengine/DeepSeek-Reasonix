@@ -1,0 +1,77 @@
+{
+  "name": "inline-style-parser",
+  "version": "0.2.7",
+  "description": "An inline style parser.",
+  "main": "./cjs/index.js",
+  "module": "./esm/index.mjs",
+  "types": "./esm/index.d.mts",
+  "exports": {
+    "import": {
+      "types": "./esm/index.d.mts",
+      "default": "./esm/index.mjs"
+    },
+    "require": {
+      "types": "./cjs/index.d.cts",
+      "default": "./cjs/index.js"
+    }
+  },
+  "scripts": {
+    "build": "run-s build:*",
+    "build:cjs": "rollup --config rollup.cjs.config.mjs --failAfterWarnings && cp index.d.ts cjs/index.d.cts",
+    "build:esm": "rollup --config rollup.esm.config.mjs --failAfterWarnings && cp index.d.ts esm/index.d.mts",
+    "build:umd": "rollup --config rollup.umd.config.mjs --failAfterWarnings",
+    "clean": "rm -rf cjs dist esm",
+    "lint": "eslint .",
+    "lint:fix": "npm run lint -- --fix",
+    "lint:package": "publint",
+    "prepare": "husky",
+    "prepublishOnly": "npm run lint && npm run build && npm test",
+    "test": "jest --colors --testPathIgnorePatterns=test/index.test.mjs",
+    "test:ci": "CI=true npm test -- --ci --coverage --collectCoverageFrom=cjs/index.js",
+    "test:esm": "node --test **/*.test.mjs",
+    "test:watch": "npm test -- --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/remarkablemark/inline-style-parser.git"
+  },
+  "bugs": {
+    "url": "https://github.com/remarkablemark/inline-style-parser/issues"
+  },
+  "keywords": [
+    "inline-style-parser",
+    "inline-style",
+    "style",
+    "parser",
+    "css"
+  ],
+  "devDependencies": {
+    "@commitlint/cli": "20.1.0",
+    "@commitlint/config-conventional": "20.0.0",
+    "@eslint/compat": "2.0.0",
+    "@eslint/eslintrc": "3.3.1",
+    "@eslint/js": "9.39.1",
+    "@rollup/plugin-commonjs": "29.0.0",
+    "@rollup/plugin-node-resolve": "16.0.3",
+    "@rollup/plugin-terser": "0.4.4",
+    "css": "3.0.0",
+    "eslint": "9.39.1",
+    "eslint-plugin-prettier": "5.5.4",
+    "eslint-plugin-simple-import-sort": "12.1.1",
+    "globals": "16.5.0",
+    "husky": "9.1.7",
+    "jest": "30.2.0",
+    "lint-staged": "16.2.6",
+    "npm-run-all": "4.1.5",
+    "prettier": "3.6.2",
+    "publint": "0.3.15",
+    "rollup": "4.53.2"
+  },
+  "files": [
+    "/cjs",
+    "/dist",
+    "/esm",
+    "/index.d.ts"
+  ],
+  "license": "MIT"
+}

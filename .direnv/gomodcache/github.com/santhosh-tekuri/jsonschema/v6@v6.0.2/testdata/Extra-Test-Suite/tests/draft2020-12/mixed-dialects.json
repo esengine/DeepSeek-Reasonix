@@ -1,0 +1,67 @@
+[
+	{
+		"description": "draft4",
+		"schema": {
+			"$defs": {
+				"one": {
+					"id": "http://temp.com/one.json",
+     				"$schema": "http://json-schema.org/draft-04/schema",
+					"$comment": "should ignore unevaluatedProperties",
+					"type": "object",
+					"properties": {
+						"a": { "type": "number" }
+					},
+					"unevaluatedProperties": 1 
+				}
+			},
+			"$ref": "#/$defs/one"
+		},
+		"tests": [
+			{
+				"description": "valid",
+				"data": { "a": 1 },
+				"valid": true
+			},
+			{
+				"description": "b is not considered unevaluated",
+				"data": { "a": 1, "b": 2 },
+				"valid": true
+			},
+			{
+				"description": "invalid",
+				"data": { "a": "one" },
+				"valid": false
+			}
+		]
+	},
+	{
+		"description": "subschema without applicator",
+		"schema": {
+			"$defs": {
+				"one": {
+					"$id": "http://temp.com/one.json",
+     				"$schema": "http://localhost:1234/draft2020-12/no-applicator.json",
+					"$comment": "should ignore unevaluatedProperties",
+					"type": "object",
+					"allOf": [
+						1,
+						{ "type": "number" }
+					] 
+				}
+			},
+			"$ref": "#/$defs/one"
+		},
+		"tests": [
+			{
+				"description": "valid",
+				"data": {},
+				"valid": true
+			},
+			{
+				"description": "invalid",
+				"data": 1,
+				"valid": false
+			}
+		]
+	}
+]

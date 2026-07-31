@@ -1,0 +1,6 @@
+./common.go
+./doc.go
+./export.go
+./labels.go
+./old.go
+./sequence.go

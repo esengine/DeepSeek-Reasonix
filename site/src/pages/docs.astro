@@ -3,21 +3,9 @@ import Base from '../layouts/Base.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const R2_LATEST = 'https://dl.reasonix.io/latest';
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
-
-let desktopVersion = 'v1.1.0';
-let goVer = '1.1.0';
-try {
-  const r = await fetch(`${R2_LATEST}/latest.json`);
-  if (r.ok) {
-    const d = await r.json();
-    const version = String(d.version || desktopVersion).replace(/^v?/, 'v');
-    desktopVersion = version;
-    goVer = desktopVersion.replace(/^v/, '') || goVer;
-  }
-} catch {}
-const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
+const desktopStableFallback = `${repo}/releases/latest/download`;
+const goVer = 'latest';
 ---
 <Base
   title="Docs — Reasonix"
@@ -114,39 +102,39 @@ brew install esengine/reasonix/reasonix</div>
           <li><span class="l-en">Scriptable runs through <code>reasonix run</code>, including piped input and explicit model selection.</span><span class="l-zh">可脚本化的 <code>reasonix run</code>,支持管道输入和显式模型选择。</span></li>
         </ul>
       </div>
-      <div class="callout"><span class="ico">!</span><span><span class="l-en">To install the legacy <strong>0.x</strong> version, pin it explicitly with <code>npm i -g reasonix@0.53.2</code>. The commands above, Homebrew, and desktop/release downloads install Reasonix 1.x; the current desktop download build is <strong>v<span class="rxv">{goVer}</span></strong>.</span><span class="l-zh">如需安装 legacy <strong>0.x</strong> 版本,请显式 pin: <code>npm i -g reasonix@0.53.2</code>。上方命令、Homebrew 与桌面端/Release 下载对应 Reasonix 1.x；当前桌面端下载构建为 <strong>v<span class="rxv">{goVer}</span></strong>。</span></span></div>
+      <div class="callout"><span class="ico">!</span><span><span class="l-en">To install the legacy <strong>0.x</strong> version, pin it explicitly with <code>npm i -g reasonix@0.53.2</code>. The commands above, Homebrew, and desktop/release downloads install Reasonix 1.x; the current desktop download build is <strong><span data-release-version="desktop">{goVer}</span></strong>.</span><span class="l-zh">如需安装 legacy <strong>0.x</strong> 版本,请显式 pin: <code>npm i -g reasonix@0.53.2</code>。上方命令、Homebrew 与桌面端/Release 下载对应 Reasonix 1.x；当前桌面端下载构建为 <strong><span data-release-version="desktop">{goVer}</span></strong>。</span></span></div>
 
       <h2 id="desktop"><span class="l-en">Desktop app</span><span class="l-zh">桌面端</span></h2>
       <div class="desktop-panel">
         <div class="desktop-panel-head">
-          <span class="desktop-kicker"><span class="l-en">Native app · v<span class="rxv">{goVer}</span></span><span class="l-zh">原生桌面端 · v<span class="rxv">{goVer}</span></span></span>
+          <span class="desktop-kicker"><span class="l-en">Native app · <span data-release-version="desktop">{goVer}</span></span><span class="l-zh">原生桌面端 · <span data-release-version="desktop">{goVer}</span></span></span>
           <h3><span class="l-en">Use Reasonix with a full desktop workspace</span><span class="l-zh">用完整桌面工作区运行 Reasonix</span></h3>
           <p><span class="l-en">The desktop app runs the same local Reasonix engine as the CLI, with visual sessions, settings, MCP status, memory, checkpoints, tool approvals, and IM bot connections in one place.</span><span class="l-zh">桌面端运行与 CLI 相同的本地 Reasonix 引擎,并把可视化会话、设置、MCP 状态、记忆、检查点、工具审批和 IM Bot 连接集中到一个工作区。</span></p>
         </div>
         <div class="desktop-downloads" aria-label="Desktop downloads">
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-darwin-universal.dmg`} data-desktop-asset="Reasonix-darwin-universal.dmg" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-darwin-universal.dmg`} data-desktop-asset="Reasonix-darwin-universal.dmg" download>
             <strong>macOS</strong>
             <span><span class="l-en">Universal DMG · Apple Silicon + Intel</span><span class="l-zh">通用 DMG · Apple Silicon + Intel</span></span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-windows-amd64-installer.exe`} data-desktop-asset="Reasonix-windows-amd64-installer.exe" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-windows-amd64-installer.exe`} data-desktop-asset="Reasonix-windows-amd64-installer.exe" download>
             <strong>Windows</strong>
             <span><span class="l-en">x64 installer</span><span class="l-zh">x64 安装器</span></span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-linux-amd64.deb`} data-desktop-asset="Reasonix-linux-amd64.deb" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-linux-amd64.deb`} data-desktop-asset="Reasonix-linux-amd64.deb" download>
             <strong>Linux</strong>
             <span><span class="l-en">Debian / Ubuntu .deb</span><span class="l-zh">Debian / Ubuntu .deb</span></span>
           </a>
         </div>
         <div class="desktop-downloads desktop-downloads--secondary" aria-label="Alternate desktop downloads">
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-darwin-arm64.zip`} data-desktop-asset="Reasonix-darwin-arm64.zip" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-darwin-arm64.zip`} data-desktop-asset="Reasonix-darwin-arm64.zip" download>
             <strong>macOS</strong>
             <span>Apple Silicon zip</span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-windows-arm64-installer.exe`} data-desktop-asset="Reasonix-windows-arm64-installer.exe" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-windows-arm64-installer.exe`} data-desktop-asset="Reasonix-windows-arm64-installer.exe" download>
             <strong>Windows</strong>
             <span>ARM64 installer</span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-linux-amd64.tar.gz`} data-desktop-asset="Reasonix-linux-amd64.tar.gz" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-linux-amd64.tar.gz`} data-desktop-asset="Reasonix-linux-amd64.tar.gz" download>
             <strong>Linux</strong>
             <span><span class="l-en">Generic amd64 tarball</span><span class="l-zh">通用 amd64 压缩包</span></span>
           </a>
@@ -265,6 +253,10 @@ reasonix                  <span class="c"># interactive session, prompts before 
 reasonix run "&lt;task&gt;"     <span class="c"># autonomous run, honours deny rules</span>
 reasonix serve            <span class="c"># browser UI at 127.0.0.1:8787</span>
 reasonix bot doctor       <span class="c"># check saved IM bot connections</span></div>
+      <p><span class="l-en">Run <code>reasonix upgrade</code> to update on the saved channel. Use <code>reasonix upgrade preview</code> or <code>reasonix upgrade stable</code> to switch channels, remember the choice globally, and update the same native CLI binary. Fresh and older configs start on Stable; project config cannot change the channel.</span><span class="l-zh">运行 <code>reasonix upgrade</code> 会按已保存渠道更新。使用 <code>reasonix upgrade preview</code> 或 <code>reasonix upgrade stable</code> 可切换渠道、全局记住选择，并更新同一个原生 CLI 二进制文件。全新和旧版配置默认使用正式版，项目配置不能更改此渠道。</span></p>
+      <div class="codeblock">reasonix upgrade
+reasonix upgrade preview
+reasonix upgrade stable</div>
       <p><span class="l-en">Inside a session, slash commands run locally — <code>/help</code> lists them all:</span><span class="l-zh">会话中,斜杠命令在本地运行——<code>/help</code> 列出全部:</span></p>
       <div class="codeblock">/compact   /new      /clear    /rewind   /tree
 /branch    /switch   /todo     /model    /mouse   /mcp
@@ -286,6 +278,9 @@ default_model = "deepseek-flash"
 
 [ui]
 shortcut_layout = "desktop"        <span class="c"># optional compatibility setting</span>
+
+[cli]
+update_channel = "stable"          <span class="c"># user-global native CLI channel</span>
 
 [agent]
 reasoning_language = "auto"        <span class="c"># auto|zh|en</span>

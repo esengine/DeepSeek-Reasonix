@@ -1,0 +1,92 @@
+{
+  "name": "@bramus/specificity",
+  "version": "2.4.2",
+  "description": "Calculate specificity of a CSS Selector",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": {
+      "browser": "./dist/index.js",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./core": {
+      "import": "./src/core/index.js"
+    },
+    "./util": {
+      "import": "./src/util/index.js"
+    },
+    "./compare": {
+      "import": "./src/util/compare.js"
+    },
+    "./filter": {
+      "import": "./src/util/filter.js"
+    },
+    "./sort": {
+      "import": "./src/util/sort.js"
+    }
+  },
+  "unpkg": "./dist/index.js",
+  "jsdelivr": "./dist/index.js",
+  "files": [
+    "bin",
+    "src",
+    "dist",
+    "index.d.ts"
+  ],
+  "types": "./index.d.ts",
+  "bin": {
+    "specificity": "./bin/cli.js"
+  },
+  "scripts": {
+    "build-esm": "esbuild --bundle ./src/index.js --outfile=./dist/index.js --format=esm --sourcemap --minify",
+    "build-cjs": "esbuild --bundle ./src/index.js --outfile=./dist/index.cjs --format=cjs --sourcemap --minify",
+    "lint": "prettier --check '{src,test}/**/*.{ts,tsx,js,jsx}'",
+    "format": "prettier --write '{src,test}/**/*.{ts,tsx,js,jsx}'",
+    "build": "npm run build-esm && npm run build-cjs",
+    "prepack": "npm run prevent-dirty-tree && npm run test",
+    "prepublish": "npm run build",
+    "pretest": "npm run build",
+    "test": "mocha",
+    "prebenchmark": "npm run build",
+    "benchmark": "node ./benchmark/bench.cjs",
+    "beta-version-patch": "npm version $(semver $npm_package_version -i prerelease --preid beta)",
+    "beta-version-minor": "npm version $(semver $npm_package_version -i preminor --preid beta)",
+    "beta-version-major": "npm version $(semver $npm_package_version -i premajor --preid beta)",
+    "rc-version": "npm version $(semver $npm_package_version -i prerelease --preid rc)",
+    "final-release": "npm version $(semver $npm_package_version -i)",
+    "preversion": "npm run prevent-dirty-tree && npm run test",
+    "prevent-dirty-tree": "exit $(git status --porcelain | wc -l)"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bramus/specificity.git"
+  },
+  "keywords": [
+    "css",
+    "specificity"
+  ],
+  "author": {
+    "name": "Bramus Van Damme",
+    "email": "bramus@bram.us",
+    "twitter": "@bramus",
+    "web": "https://www.bram.us/"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/bramus/specificity/issues"
+  },
+  "homepage": "https://github.com/bramus/specificity#readme",
+  "devDependencies": {
+    "benchmark": "^2.1.4",
+    "esbuild": "^0.25.0",
+    "microtime": "^3.1.1",
+    "mocha": "^11.1.0",
+    "prettier": "^3.5.1",
+    "semver": "^7.7.1"
+  },
+  "dependencies": {
+    "css-tree": "^3.0.0"
+  }
+}

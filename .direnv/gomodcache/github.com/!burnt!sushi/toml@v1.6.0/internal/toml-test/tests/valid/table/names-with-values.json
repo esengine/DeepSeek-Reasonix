@@ -1,0 +1,46 @@
+{
+    "a": {
+        " x ": {
+            "key": {"type": "integer", "value": "4"}
+        },
+        "b": {
+            "c": {
+                "key": {"type": "integer", "value": "1"}
+            }
+        },
+        "b.c": {
+            "key": {"type": "integer", "value": "2"}
+        },
+        "d.e": {
+            "key": {"type": "integer", "value": "3"}
+        }
+    },
+    "d": {
+        "e": {
+            "f": {
+                "key": {"type": "integer", "value": "5"}
+            }
+        }
+    },
+    "g": {
+        "h": {
+            "i": {
+                "key": {"type": "integer", "value": "6"}
+            }
+        }
+    },
+    "j": {
+        "ʞ": {
+            "l": {
+                "key": {"type": "integer", "value": "7"}
+            }
+        }
+    },
+    "x": {
+        "1": {
+            "2": {
+                "key": {"type": "integer", "value": "8"}
+            }
+        }
+    }
+}

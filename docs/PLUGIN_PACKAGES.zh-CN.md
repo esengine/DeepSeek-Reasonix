@@ -310,7 +310,10 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
   `sh -c`/`bash -c` Hook 会复用 Git for Windows Bash 探测，即使 Bash 不在
   `cmd.exe` 的 `PATH` 中也能执行；带目录的显式解释器路径保持
   不变。如果机器确实没有可用 Bash，hook 会返回清晰的依赖提示，而不是本地化的
-  “无法识别 sh”乱码。旧代码页输出也会在进入界面前转换为 UTF-8。`PreToolUse` 和
+  “无法识别 sh”乱码。通过 `[tools.shell] prefer = "bash"` 和
+  `path = ".../bash.exe"` 配置的非标准目录或便携版 Bash 也会被显式 Bash Hook 复用。
+  `reasonix plugin doctor <名称>` 和 `reasonix doctor capabilities` 会在 Hook 首次触发前
+  报告缺失的 Shell 依赖。旧代码页输出也会在进入界面前转换为 UTF-8。`PreToolUse` 和
   `UserPromptSubmit` hook 仍可
   通过退出码 2 或退出码 0 时的 JSON 拒绝形态拒绝该次调用（`PreToolUse` 用
   `hookSpecificOutput.permissionDecision`，`UserPromptSubmit` 用顶层

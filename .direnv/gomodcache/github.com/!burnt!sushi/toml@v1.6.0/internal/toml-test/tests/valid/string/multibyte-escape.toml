@@ -1,0 +1,9 @@
+# Test each multibyte length: 2, 3, and 4 bytes:
+# ɑ € 𐫱
+
+basic-1    = "\u0251 \u20ac \U00010AF1 \u0251\u20ac\U00010AF1"
+ml-basic-1 = """\u0251 \u20ac \U00010AF1 \u0251\u20ac\U00010AF1"""
+
+# Again, but only using \U
+basic-2    = "\U00000251 \U000020ac \U00010AF1 \U00000251\U000020ac\U00010AF1"
+ml-basic-2 = """\U00000251 \U000020ac \U00010AF1 \U00000251\U000020ac\U00010AF1"""

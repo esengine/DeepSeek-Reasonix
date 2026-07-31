@@ -1,0 +1,485 @@
+==============================
+If statements
+==============================
+
+<?php
+
+if ($a > 0) {
+  echo "Yes";
+}
+
+if ($a==0) {
+  echo "bad";
+} else {
+  echo "good";
+}
+
+if ($a==0) {
+  echo "bad";
+} elseif ($a==3) {
+  echo "bad";
+} else {
+  echo "good";
+}
+
+---
+
+(program
+  (php_tag)
+  (if_statement
+    condition: (parenthesized_expression (binary_expression
+      left: (variable_name (name))
+      right: (integer)))
+    body: (compound_statement (echo_statement (encapsed_string (string_content)))))
+  (if_statement
+    condition: (parenthesized_expression (binary_expression
+      left: (variable_name (name))
+      right: (integer)))
+    body: (compound_statement (echo_statement (encapsed_string (string_content))))
+    alternative: (else_clause
+      body: (compound_statement (echo_statement (encapsed_string (string_content))))))
+  (if_statement
+    condition: (parenthesized_expression (binary_expression
+      left: (variable_name (name))
+      right: (integer)))
+    body: (compound_statement (echo_statement (encapsed_string (string_content))))
+    alternative: (else_if_clause
+      condition: (parenthesized_expression (binary_expression
+        left: (variable_name (name))
+        right: (integer)))
+      body: (compound_statement (echo_statement (encapsed_string (string_content)))))
+    alternative: (else_clause
+      body: (compound_statement (echo_statement (encapsed_string (string_content)))))))
+
+==============================
+Alternative if statements
+==============================
+
+<?php
+
+if ($a) echo 1; else echo 0;
+if ($a):
+  echo 1;
+  echo 2;
+else:
+  echo 0;
+endif;
+
+---
+
+(program
+  (php_tag)
+  (if_statement
+    condition: (parenthesized_expression (variable_name (name)))
+    body: (echo_statement (integer))
+    alternative: (else_clause
+      body: (echo_statement (integer))))
+  (if_statement
+    condition: (parenthesized_expression (variable_name (name)))
+    body: (colon_block
+      (echo_statement (integer))
+      (echo_statement (integer)))
+    alternative: (else_clause
+      body: (colon_block
+        (echo_statement (integer))))))
+
+==============================
+While statements
+==============================
+
+<?php
+while ($a < 10) {
+  echo $a;
+  $a++;
+}
+
+---
+
+(program
+  (php_tag)
+  (while_statement
+    condition: (parenthesized_expression (binary_expression
+      left: (variable_name (name))
+      right: (integer)))
+    body: (compound_statement
+      (echo_statement (variable_name (name)))
+      (expression_statement (update_expression argument: (variable_name (name)))))))
+
+==============================
+Alternative while statements
+==============================
+
+<?php
+
+while ($a<5) echo $a++;
+while ($a<9):
+  echo ++$a;
+  echo $b;
+endwhile;
+
+---
+
+(program
+  (php_tag)
+  (while_statement
+    condition: (parenthesized_expression (binary_expression
+      left: (variable_name (name))
+      right: (integer)))
+    body: (echo_statement (update_expression argument: (variable_name (name)))))
+  (while_statement
+    condition: (parenthesized_expression (binary_expression
+      left: (variable_name (name))
+      right: (integer)))
+    body: (colon_block
+      (echo_statement (update_expression argument: (variable_name (name))))
+      (echo_statement (variable_name (name))))))
+
+==============================
+For statements
+==============================
+
+<?php
+
+for($a=0;$a<5;$a++) echo $a;
+for($a=0;$a<5;$a++):
+  echo $a;
+endfor;
+for($a=0;$a<5;$a++) {
+  echo $a;
+}
+
+
+---
+
+(program
+  (php_tag)
+  (for_statement
+    initialize: (assignment_expression
+      left: (variable_name (name))
+      right: (integer))
+    condition: (binary_expression
+      left: (variable_name (name))
+      right: (integer))
+    update: (update_expression argument: (variable_name (name)))
+    body: (echo_statement (variable_name (name))))
+  (for_statement
+    initialize: (assignment_expression
+      left: (variable_name (name))
+      right: (integer))
+    condition: (binary_expression
+      left: (variable_name (name))
+      right: (integer))
+    update: (update_expression argument: (variable_name (name)))
+    body: (echo_statement (variable_name (name))))
+  (for_statement
+    initialize: (assignment_expression
+      left: (variable_name
+        (name))
+      right: (integer))
+    condition: (binary_expression
+      left: (variable_name
+        (name))
+      right: (integer))
+    update: (update_expression
+      argument: (variable_name
+        (name)))
+    body: (compound_statement
+      (echo_statement
+        (variable_name
+          (name))))))
+
+==============================
+Switch statements
+==============================
+
+<?php
+switch ($a) {
+  case 0:
+  echo "bad";
+  break;
+  case 1:
+  echo "good";
+  break;
+  default:
+  echo "bad";
+  break;
+}
+
+---
+
+(program
+  (php_tag)
+  (switch_statement
+    condition: (parenthesized_expression (variable_name (name)))
+    body: (switch_block
+      (case_statement
+        value: (integer)
+        (echo_statement (encapsed_string (string_content))) (break_statement))
+      (case_statement
+        value: (integer)
+        (echo_statement (encapsed_string (string_content))) (break_statement))
+      (default_statement
+        (echo_statement (encapsed_string (string_content))) (break_statement)))))
+
+==============================
+Alternative switch statements
+==============================
+
+<?php
+
+switch ($a):
+  case 0;
+  echo 0;
+  break;
+  case 5:
+  echo 1;
+  break;
+  default;
+  echo 0;
+  break;
+endswitch;
+
+---
+
+(program
+  (php_tag)
+  (switch_statement
+    condition: (parenthesized_expression (variable_name (name)))
+    body: (switch_block
+      (case_statement
+        value: (integer)
+        (echo_statement (integer))
+        (break_statement))
+      (case_statement
+        value: (integer)
+        (echo_statement (integer))
+        (break_statement))
+      (default_statement
+        (echo_statement (integer))
+        (break_statement)))))
+
+==============================
+Include statement
+==============================
+
+<?php
+include "015.inc";
+
+---
+
+(program
+  (php_tag)
+  (expression_statement (include_expression (encapsed_string (string_content)))))
+
+==============================
+Do-while statements
+==============================
+
+<?php
+do {
+  echo $i;
+  $i--;
+} while($i>0);
+
+---
+
+(program
+  (php_tag)
+  (do_statement
+    body: (compound_statement
+      (echo_statement (variable_name (name)))
+      (expression_statement (update_expression argument: (variable_name (name)))))
+    condition: (parenthesized_expression (binary_expression
+      left: (variable_name (name))
+      right: (integer)))))
+
+==============================
+Try statements
+==============================
+
+<?php
+
+try {
+} catch (MyException) {
+} catch (OtherException|YetAnotherException $e) {
+} finally {
+}
+
+try {
+  ThrowException();
+} catch (MyException $exception) {
+  print "There was an exception: " . $exception->getException();
+  print "\n";
+}
+
+---
+
+(program
+  (php_tag)
+  (try_statement
+    body: (compound_statement)
+    (catch_clause
+      type: (type_list
+        (named_type (name))
+      )
+      body: (compound_statement))
+    (catch_clause
+      type: (type_list
+        (named_type (name))
+        (named_type (name))
+      )
+      name: (variable_name (name))
+      body: (compound_statement))
+    (finally_clause
+      body: (compound_statement)))
+  (try_statement
+    body: (compound_statement
+      (expression_statement (function_call_expression
+        function: (name)
+        arguments: (arguments))))
+    (catch_clause
+      type: (type_list
+        (named_type (name))
+      )
+      name: (variable_name (name))
+      body: (compound_statement
+        (expression_statement (print_intrinsic (binary_expression
+          left: (encapsed_string (string_content))
+          right: (member_call_expression
+            object: (variable_name (name))
+            name: (name)
+            arguments: (arguments)))))
+        (expression_statement (print_intrinsic (encapsed_string (escape_sequence))))))))
+
+==============================
+Foreach statements
+==============================
+
+<?php
+foreach ($a as $b[0]) {
+  echo $b[0]."\n";
+}
+
+foreach($arr as $key => $value);
+
+foreach($a as $b):
+  echo $a;
+  echo $b;
+endforeach;
+
+---
+
+(program
+  (php_tag)
+  (foreach_statement
+    (variable_name (name))
+    (subscript_expression (variable_name (name)) (integer))
+    body: (compound_statement
+      (echo_statement (binary_expression
+        left: (subscript_expression (variable_name (name)) (integer))
+        right: (encapsed_string (escape_sequence))))))
+  (foreach_statement
+    (variable_name (name))
+    (pair (variable_name (name)) (variable_name (name))))
+  (foreach_statement
+    (variable_name (name))
+    (variable_name (name))
+    body: (colon_block
+      (echo_statement (variable_name (name)))
+      (echo_statement (variable_name (name))))))
+
+=================================
+Case insensitive keywords
+=================================
+
+<?php
+
+FOREACH ($a AS $b) {
+  DO {
+    if ($c) {
+      d();
+    } else {
+      e();
+    }
+  } while ($f);
+}
+
+---
+
+(program
+  (php_tag)
+  (foreach_statement
+    (variable_name (name))
+    (variable_name (name))
+    (compound_statement
+      (do_statement
+        (compound_statement
+          (if_statement
+            (parenthesized_expression (variable_name (name)))
+            (compound_statement
+              (expression_statement (function_call_expression (name) (arguments))))
+              (else_clause
+                (compound_statement
+                  (expression_statement (function_call_expression (name) (arguments)))))))
+        (parenthesized_expression (variable_name (name)))))))
+
+
+=========================================
+Accessing Constants
+=========================================
+
+<?php
+
+echo ANOTHER_CONST;
+echo ANIMALS[1];
+
+---
+
+(program
+  (php_tag)
+  (echo_statement
+    (name)
+  )
+  (echo_statement
+    (subscript_expression
+      (name)
+      (integer)
+    )
+  )
+)
+
+=========================================
+Named label and goto statement
+=========================================
+
+<?php
+
+foo:
+goto foo;
+
+---
+
+(program
+  (php_tag)
+  (named_label_statement (name))
+  (goto_statement (name)))
+
+=========================================
+Exit statements
+=========================================
+
+<?php
+
+exit;
+exit();
+exit(1);
+exit('Goodbye');
+
+---
+
+(program
+  (php_tag)
+  (exit_statement)
+  (exit_statement)
+  (exit_statement (integer))
+  (exit_statement (string (string_content))))

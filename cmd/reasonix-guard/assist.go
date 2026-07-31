@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 	_ "reasonix/internal/provider/anthropic"
 	_ "reasonix/internal/provider/dashscope"
@@ -50,9 +51,11 @@ func runAssist(args []string) int {
 	}
 	if *jsonOut {
 		if code := printJSON(struct {
-			Plan    repair.RepairPlan          `json:"plan"`
-			Preview []repair.RepairPlanPreview `json:"preview"`
-		}{plan, preview}); code != 0 {
+			Plan      repair.RepairPlan          `json:"plan"`
+			PlanID    string                     `json:"planId"`
+			Preview   []repair.RepairPlanPreview `json:"preview"`
+			PreviewID string                     `json:"previewId"`
+		}{plan, repair.RepairPlanID(plan), preview, repair.RepairPlanPreviewID(plan, preview)}); code != 0 {
 			return code
 		}
 	} else {
@@ -65,6 +68,7 @@ func runAssist(args []string) int {
 		fmt.Println("repair plan not applied")
 		return 0
 	}
+	opts.ExpectedPreviewID = repair.RepairPlanPreviewID(plan, preview)
 	result, err := repair.ApplyRepairPlan(plan, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -85,6 +89,7 @@ func runApplyPlan(args []string) int {
 	file := fs.String("file", "", "RepairPlan JSON file")
 	yes := fs.Bool("yes", false, "confirm plan application non-interactively")
 	allowProject := fs.Bool("allow-project", false, "allow project reasonix.toml repair")
+	previewID := fs.String("preview-id", "", "expected preview ID from a prior dry-run")
 	jsonOut := fs.Bool("json", false, "print JSON")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 0 || strings.TrimSpace(*file) == "" {
 		return 2
@@ -108,10 +113,21 @@ func runApplyPlan(args []string) int {
 	if !*jsonOut {
 		printPlanPreview(plan, preview)
 	}
+	actualPreviewID := repair.RepairPlanPreviewID(plan, preview)
+	expectedPreviewID := strings.TrimSpace(*previewID)
+	if *yes && expectedPreviewID == "" {
+		fmt.Fprintln(os.Stderr, "error: --preview-id is required with --yes; preview the plan and confirm its current previewId first")
+		return 2
+	}
+	if expectedPreviewID != "" && expectedPreviewID != actualPreviewID {
+		fmt.Fprintf(os.Stderr, "error: repair plan preview changed since confirmation; re-preview and re-confirm (expected %s, got %s)\n", expectedPreviewID, actualPreviewID)
+		return 1
+	}
 	if !*yes && !confirmPlan() {
 		fmt.Println("repair plan not applied")
 		return 0
 	}
+	opts.ExpectedPreviewID = actualPreviewID
 	result, err := repair.ApplyRepairPlan(plan, opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -141,15 +157,7 @@ func requestRepairPlan(ctx context.Context, root, modelRef string, report repair
 	if entry.RequiresAPIKey() && entry.APIKey() == "" {
 		return repair.RepairPlan{}, fmt.Errorf("AI assistance provider %q has no configured API key", entry.Name)
 	}
-	p, err := provider.New(entry.Kind, provider.Config{
-		Name: entry.Name, BaseURL: entry.BaseURL, Model: entry.Model, APIKey: entry.APIKey(),
-		Extra: map[string]any{
-			"api_key_env": entry.APIKeyEnv, "api_key_source": entry.APIKeySourceLabel(),
-			"thinking": entry.Thinking, "effort": entry.Effort, "reasoning_protocol": entry.ReasoningProtocol,
-			"chat_url": entry.ChatURL, "headers": entry.Headers, "extra_body": entry.ExtraBody,
-			"auth_header": entry.AuthHeader, "proxy_spec": cfg.NetworkProxySpec(),
-		},
-	})
+	p, err := provider.New(entry.Kind, repairPlanProviderConfig(entry, cfg.NetworkProxySpec()))
 	if err != nil {
 		return repair.RepairPlan{}, err
 	}
@@ -185,6 +193,20 @@ func requestRepairPlan(ctx context.Context, root, modelRef string, report repair
 		return repair.RepairPlan{}, err
 	}
 	return resolveProviderSnapshotAliases(plan, snapshotAliases)
+}
+
+func repairPlanProviderConfig(entry *config.ProviderEntry, proxy netclient.ProxySpec) provider.Config {
+	return provider.Config{
+		Name: entry.Name, BaseURL: entry.BaseURL, Model: entry.Model, APIKey: entry.APIKey(),
+		Extra: map[string]any{
+			"api_key_env": entry.APIKeyEnv, "api_key_source": entry.APIKeySourceLabel(),
+			"thinking": entry.Thinking, "effort": config.EffectiveEffort(entry), "supported_efforts": entry.SupportedEfforts,
+			"reasoning_protocol": config.ReasoningProtocolForEntry(entry),
+			"chat_url":           entry.ChatURL, "headers": entry.Headers, "extra_body": entry.ExtraBody,
+			"auth_header": entry.AuthHeader, "proxy_spec": proxy,
+			"vision": config.EffectiveVision(entry), "vision_detail": entry.VisionDetail,
+		},
+	}
 }
 
 func loadAIProviderConfig(root string) (*config.Config, error) {

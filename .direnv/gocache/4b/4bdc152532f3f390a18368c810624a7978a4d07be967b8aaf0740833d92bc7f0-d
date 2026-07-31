@@ -1,0 +1,10 @@
+./agent_unix.go
+./auth.go
+./client.go
+./dial.go
+./host.go
+./knownhosts.go
+./paths.go
+./remote.go
+./sshconfig.go
+./status.go

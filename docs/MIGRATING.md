@@ -85,6 +85,47 @@ v0.x sessions are in a custom Windows install/data directory, use
 See
 [Configuration paths](./CONFIG_PATHS.md) for the full path list and limitations.
 
+## Context Engine v2 upgrade
+
+Instruction and memory upgrades are automatic and do not require a setup mode,
+re-index command, or new configuration:
+
+| Existing data | Upgrade behavior |
+| --- | --- |
+| `REASONIX.md`, `AGENTS.md`, `CLAUDE.md` | Loaded as standing instructions with source, directory, precedence, imports, and diagnostics. Existing file names remain valid. |
+| Nested instruction files | Resolve from workspace root to the active target path; within one directory, `.local.md` wins. Deeper directories still outrank broader ones. |
+| Legacy fact without `id` / `revision` | Receives a deterministic scope-aware `legacy-*` ID and starts at revision 1. Migration is idempotent. |
+| Legacy fact without `metadata.scope` | Scope is inferred from the project/global directory that already owns the file. |
+| Existing `MEMORY.md` | Treated as a derived index and rebuilt from active fact files; hand-carried stale entries do not become facts. |
+| Existing active facts | Remain active and gain revision history only when subsequently changed. |
+| Existing archive entries | Remain excluded from recall and can be recovered explicitly from Context Center or `/memory recover`. |
+| Old Memory v5 transcript | Remains readable; previews recover the original user prompt from `<memory-compiler-execution>`. |
+| `[agent].memory_compiler` | Retired and removed by the existing one-time config migration. |
+
+The first current boot persists missing identity/timestamp metadata without
+changing the fact body. Compatibility routing fields keep older Reasonix
+clients from moving a fact into the wrong scope directory if versions share the
+same state root.
+
+After upgrading, use these diagnostics instead of editing migration state:
+
+```text
+/memory
+/memory instructions
+/memory recall
+/memory revisions <id-or-name>
+/memory archived
+```
+
+New relevant facts are recalled automatically. Only bounded, non-sensitive,
+create-only project/reference facts may be saved without a confirmation;
+global facts, preferences, feedback, updates, duplicates, sensitive content,
+and every archive operation remain explicit user decisions. The desktop
+Suggestions tab scans automatically but never saves a candidate until accepted.
+
+See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for the full precedence,
+freshness, recovery, cache, privacy, and remote-workspace contract.
+
 ## What's the same
 
 The agent core carries over: the loop, tools (read/write/edit/glob/grep/bash/…),

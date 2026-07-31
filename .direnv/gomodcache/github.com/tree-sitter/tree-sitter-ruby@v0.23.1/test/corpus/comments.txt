@@ -1,0 +1,105 @@
+========
+comments
+========
+
+# anything else here should be ignored
+
+---
+
+(program (comment))
+
+===================
+empty block comment
+===================
+
+=begin
+=end
+
+---
+
+(program (comment))
+
+======================
+one-line block comment
+======================
+
+=begin
+whatever
+=end
+
+---
+
+(program (comment))
+
+======================================
+block comment with comment after begin
+======================================
+
+=begin rdoc
+=end
+
+---
+
+(program (comment))
+
+======================================
+block comment with comment after end
+======================================
+
+=begin 
+=end rdoc
+
+---
+
+(program (comment))
+
+=========================
+multi-line block comments
+=========================
+
+=begin
+whatever
+multiple lines of whatever
+=end
+
+---
+
+(program (comment))
+
+=========================
+multi-line block comments followed by standard comment
+=========================
+
+=begin
+whatever
+multiple lines of whatever
+=end
+# Another comment
+
+---
+
+(program (comment) (comment))
+
+=========================
+multi-line block comments with almost end
+=========================
+
+=begin
+=e
+=en
+=end
+
+---
+
+(program (comment))
+
+=========================
+block comment without newline after end
+=========================
+
+=begin
+comment
+=end
+---
+
+(program (comment))

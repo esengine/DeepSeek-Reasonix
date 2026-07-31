@@ -17,13 +17,19 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 
 ## Memory
 
-- Hierarchical docs: `REASONIX.md` (this file, committed/shared), `REASONIX.local.md`
-  (personal, git-ignored), user-global `~/.config/reasonix/REASONIX.md`, and any
-  `REASONIX.md` in an ancestor dir. `AGENTS.md` is accepted as a fallback name.
+- Standing instructions are hierarchical: committed/shared `REASONIX.md`,
+  `AGENTS.md`, and `CLAUDE.md`; personal `*.local.md` variants; matching files in
+  ancestor directories; and user-global files under the memory state root
+  (`REASONIX_STATE_HOME`, otherwise `REASONIX_HOME`, otherwise `~/.reasonix` on
+  macOS/Linux or `%APPDATA%\reasonix` on Windows). All distinct supported files
+  in a directory load; `AGENTS.md` is not merely a fallback.
 - `@path` on its own line imports another file's contents.
-- `#<note>` in chat quick-adds a line here. The `remember` tool saves durable
-  facts to the per-project auto-memory store (frontmatter files + `MEMORY.md`
-  index), which loads into the prefix on the next session.
+- `#<note>` in chat quick-adds an always-on instruction. The `remember` tool
+  instead saves a fallible background fact (frontmatter file + `MEMORY.md`
+  index). Fact `type` classifies content; independent `scope` controls whether it
+  is project-only (the default) or explicitly global. The index loads into the
+  stable prefix on the next session; global user/feedback bodies also load as
+  lower-priority compatibility guidance. The current turn receives a tail note.
 
 ## Notes
 

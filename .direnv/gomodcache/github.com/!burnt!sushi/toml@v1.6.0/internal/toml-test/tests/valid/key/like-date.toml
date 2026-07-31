@@ -1,0 +1,25 @@
+# '-' is a valid character in keys: make a key that looks like a date.
+2001-02-03   = 1
+"2001-02-04" = 2
+'2001-02-05' = 3
+
+# Also include datetime and time for good measure; these need to be quoted as
+# ':' isn't a valid bare key.
+"2001-02-06T15:16:17+01:00" = 4
+"2001-02-07T15:16:17"       = 5
+"15:16:17"                  = 6
+
+# Dotted keys
+a.2001-02-08 = 7
+a.2001-02-09.2001-02-10 = 8
+2001-02-11.a.2001-02-12 = 9
+
+# Table names
+[2002-01-02]
+k = 10
+
+[2002-01-02.2024-01-03]
+k = 11
+
+[[2002-01-04]]
+k = 12

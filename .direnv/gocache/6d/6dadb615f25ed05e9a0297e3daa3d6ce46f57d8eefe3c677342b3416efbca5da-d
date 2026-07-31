@@ -1,0 +1,3 @@
+./atomicwrite.go
+./globset.go
+./replacefallback_other.go

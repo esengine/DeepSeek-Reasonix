@@ -1,0 +1,14 @@
+{
+    "x": {
+        "c": {"type": "integer", "value": "3"},
+        "d": {"type": "integer", "value": "4"},
+        "y": {
+            "z": {
+                "w": {
+                    "a": {"type": "integer", "value": "1"},
+                    "b": {"type": "integer", "value": "2"}
+                }
+            }
+        }
+    }
+}

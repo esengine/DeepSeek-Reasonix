@@ -1,0 +1,5 @@
+./diff.go
+./export.go
+./merge.go
+./ndiff.go
+./unified.go

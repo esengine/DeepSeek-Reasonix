@@ -1,0 +1,11 @@
+[[product]]
+name = "Hammer"
+sku = 738594937
+
+[[product]]  # empty table within the array
+
+[[product]]
+name = "Nail"
+sku = 284758393
+
+color = "gray"

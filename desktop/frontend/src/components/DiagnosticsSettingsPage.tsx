@@ -182,7 +182,7 @@ export function DiagnosticsSettingsPage({
           >
             {report.instructions.docs.map((d) => (
               <div key={`${d.order}-${d.path}`} className="diag-row">
-                <span>{d.order}. [{d.scope}]</span>
+                <span>{d.order}. [{d.scope} · {d.depth}]</span>
                 <span className="diag-path">{d.path}</span>
               </div>
             ))}

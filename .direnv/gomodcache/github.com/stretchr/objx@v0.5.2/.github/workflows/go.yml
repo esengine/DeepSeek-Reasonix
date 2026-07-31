@@ -1,0 +1,51 @@
+name: Go
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+
+  build:
+    env:
+      CC_TEST_REPORTER_ID: 68feaa3410049ce73e145287acbcdacc525087a30627f96f04e579e75bd71c00
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go: [ '1.22', '1.21', '1.20' ]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Pre-run
+      run: |
+        curl -L https://codeclimate.com/downloads/test-reporter/test-reporter-latest-linux-amd64 > ./cc-test-reporter
+        chmod +x ./cc-test-reporter
+        ./cc-test-reporter before-build
+        curl -sL https://taskfile.dev/install.sh | sh
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go }}
+
+    - name: Setup go module cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+
+    - name: Lint
+      run: diff -u <(echo -n) <(./bin/task lint)
+
+    - name: Test
+      run: ./bin/task test-coverage
+
+    - name: Post run
+      run: ./cc-test-reporter after-build format-coverage -t gocov --prefix github.com/stretchr/objx .cover/c.out --exit-code $?
+

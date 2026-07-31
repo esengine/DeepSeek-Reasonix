@@ -101,6 +101,11 @@ func main() {
 	if handled, exitCode := RunRemoteAskPassHelper(context.Background(), os.Args[1:], os.Getenv, os.Stdout); handled {
 		os.Exit(exitCode)
 	}
+	// Detached macOS self-update child: wait for the old PID, hold the shared
+	// repair mutation lock, then swap the .app bundle. Must run before Wails.
+	if handled, exitCode := maybeRunMacUpdateHandoff(os.Args[1:]); handled {
+		os.Exit(exitCode)
+	}
 	capturePreviousFatalCrash()
 	installFatalCrashOutput()
 
@@ -126,9 +131,13 @@ func main() {
 	startupState, _ := tracker.Begin(version, launch.SafeMode)
 	trackerOwned := startupState.PID == os.Getpid()
 	installProfile := telemetryInstallProfile()
-	updateFrom, updateTo := "", ""
+	updateFrom, updateTo, healthyUpdateCreatedAt, healthyUpdateTransactionID := "", "", "", ""
 	if tx, err := repair.ReadPendingUpdate(); err == nil {
 		updateFrom, updateTo = tx.FromVersion, tx.ToVersion
+		if strings.TrimSpace(tx.ToVersion) == strings.TrimSpace(version) {
+			healthyUpdateCreatedAt = tx.CreatedAt
+			healthyUpdateTransactionID = repair.UpdateTransactionID(tx)
+		}
 	}
 	if trackerOwned {
 		_ = tracker.MarkLaunchContext(installProfile, updateFrom, updateTo)
@@ -141,6 +150,8 @@ func main() {
 
 	app := NewApp()
 	app.previousRun = previousRun
+	app.healthyUpdateCreatedAt = healthyUpdateCreatedAt
+	app.healthyUpdateTransactionID = healthyUpdateTransactionID
 	if trackerOwned {
 		app.startupTracker = tracker
 	}

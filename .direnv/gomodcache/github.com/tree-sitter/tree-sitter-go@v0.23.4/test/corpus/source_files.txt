@@ -1,0 +1,188 @@
+============================================
+Package clauses
+============================================
+
+package main
+
+----
+
+(source_file
+  (package_clause
+    (package_identifier)))
+
+============================================
+Single import declarations
+============================================
+
+package a
+
+import "net/http"
+import . "some/dsl"
+import _ "os"
+import alias "some/package"
+
+----
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (import_declaration
+    (import_spec
+      (interpreted_string_literal
+        (interpreted_string_literal_content))))
+  (import_declaration
+    (import_spec
+      (dot)
+      (interpreted_string_literal
+        (interpreted_string_literal_content))))
+  (import_declaration
+    (import_spec
+      (blank_identifier)
+      (interpreted_string_literal
+        (interpreted_string_literal_content))))
+  (import_declaration
+    (import_spec
+      (package_identifier)
+      (interpreted_string_literal
+        (interpreted_string_literal_content)))))
+
+============================================
+Grouped import declarations
+============================================
+
+package a
+
+import()
+import ("fmt")
+import (
+  "net/http"
+  . "some/dsl"
+  _ "os"
+  alias "some/package"
+)
+
+----
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (import_declaration
+    (import_spec_list))
+  (import_declaration
+    (import_spec_list
+      (import_spec
+        (interpreted_string_literal
+          (interpreted_string_literal_content)))))
+  (import_declaration
+    (import_spec_list
+      (import_spec
+        (interpreted_string_literal
+          (interpreted_string_literal_content)))
+      (import_spec
+        (dot)
+        (interpreted_string_literal
+          (interpreted_string_literal_content)))
+      (import_spec
+        (blank_identifier)
+        (interpreted_string_literal
+          (interpreted_string_literal_content)))
+      (import_spec
+        (package_identifier)
+        (interpreted_string_literal
+          (interpreted_string_literal_content))))))
+
+============================================
+Block comments
+============================================
+
+/*
+ * This is a great package
+ */
+package a
+
+----
+
+(source_file
+  (comment)
+  (package_clause
+    (package_identifier)))
+
+============================================
+Comments with asterisks
+============================================
+
+package main
+
+/* a */
+const a
+
+/* b **/
+const b
+
+/* c ***/
+const c
+
+/* d
+
+***/
+const d
+
+---
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (comment)
+  (const_declaration
+    (const_spec
+      (identifier)))
+  (comment)
+  (const_declaration
+    (const_spec
+      (identifier)))
+  (comment)
+  (const_declaration
+    (const_spec
+      (identifier)))
+  (comment)
+  (const_declaration
+    (const_spec
+      (identifier))))
+
+============================================
+Non-ascii variable names
+============================================
+
+package main
+
+const (
+  α
+  Α
+  µs  // micro sign (not mu)
+  δ1
+  ΔΔΔ
+  ω_omega
+  Ω_OMEGA
+)
+
+---
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (const_declaration
+    (const_spec
+      (identifier))
+    (const_spec
+      (identifier))
+    (const_spec
+      (identifier))
+    (comment)
+    (const_spec
+      (identifier))
+    (const_spec
+      (identifier))
+    (const_spec
+      (identifier))
+    (const_spec
+      (identifier))))

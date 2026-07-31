@@ -1,0 +1,7 @@
+Host example      # this comment terminates a Host line
+    HostName example.com    # aligned eol comment 1
+    ForwardX11Timeout 52w   # aligned eol comment 2
+# This comment takes up a whole line
+          # This comment is offset and takes up a whole line
+    AddressFamily inet      # aligned eol comment 3    
+    Port 4242 #compact comment

@@ -6,6 +6,7 @@ type ProfilePatch struct {
 	CollaborationMode *CollaborationMode `json:"collaborationMode,omitempty"`
 	TokenMode         *TokenMode         `json:"tokenMode,omitempty"`
 	ToolApprovalMode  *ToolApprovalMode  `json:"toolApprovalMode,omitempty"`
+	Goal              *string            `json:"goal,omitempty"`
 }
 
 type ProfileSelection struct {
@@ -17,7 +18,7 @@ type ProfileSelection struct {
 }
 
 func (p ProfilePatch) Validate() error {
-	if p.Model == nil && p.Effort == nil && p.CollaborationMode == nil && p.TokenMode == nil && p.ToolApprovalMode == nil {
+	if p.Model == nil && p.Effort == nil && p.CollaborationMode == nil && p.TokenMode == nil && p.ToolApprovalMode == nil && p.Goal == nil {
 		return validationError("profile patch must contain at least one field")
 	}
 	return nil

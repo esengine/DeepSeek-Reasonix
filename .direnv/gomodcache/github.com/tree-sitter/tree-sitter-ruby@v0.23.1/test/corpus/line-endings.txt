@@ -1,0 +1,23 @@
+=================
+CRLF line endings
+=================
+
+puts 'hi'
+x = foo()
+
+---
+
+(program
+  (call (identifier) (argument_list (string (string_content))))
+  (assignment (identifier) (call (identifier) (argument_list))))
+
+=======================
+CRLF multiline comments
+=======================
+
+=begin
+=end
+
+---
+
+(program (comment))

@@ -1,0 +1,2286 @@
+======
+symbol
+======
+
+:foo
+:foo!
+:foo?
+:foo=
+:@foo
+:@foo_0123_bar
+:@@foo
+:$foo
+:$0
+:_bar
+:åäö
+:_
+
+---
+
+(program
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol))
+
+======
+symbol operators
+======
+
+:+
+:-
+:+@
+:-@
+:[]
+:[]=
+:&
+:!
+:`
+:^
+:|
+:~
+:/
+:%
+:*
+:**
+:==
+:===
+:=~
+:>
+:>=
+:>>
+:<
+:<=
+:<<
+:<=>
+:!=
+:!~
+
+---
+
+(program
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol)
+  (simple_symbol))
+
+====================
+single quoted symbol
+====================
+
+:''
+:'foo bar'
+:'#{'
+
+---
+
+(program
+  (delimited_symbol)
+  (delimited_symbol
+    (string_content))
+  (delimited_symbol
+    (string_content)))
+
+====================
+double quoted symbol
+====================
+
+:"foo bar"
+:"#"
+
+---
+
+(program
+  (delimited_symbol
+    (string_content))
+  (delimited_symbol
+    (string_content)))
+
+=======================================
+double quoted symbol with interpolation
+=======================================
+
+:"foo #{bar}"
+
+---
+
+(program
+  (delimited_symbol
+    (string_content)
+    (interpolation
+      (identifier))))
+
+=======================================
+interpolation with no content
+=======================================
+
+:"foo #{}"
+
+---
+
+(program
+  (delimited_symbol
+    (string_content)
+    (interpolation)))
+
+=========================================
+percent symbol with unbalanced delimiters
+=========================================
+
+%s/a/
+%s\a\
+%s#a#
+
+---
+
+(program
+  (delimited_symbol
+    (string_content))
+  (delimited_symbol
+    (string_content))
+  (delimited_symbol
+    (string_content)))
+
+=======================================
+percent symbol with balanced delimiters
+=======================================
+
+%s{a{b}c}
+%s<a<b>c>
+%s(a(b)c)
+%s[a[b]c]
+
+---
+
+(program
+  (delimited_symbol
+    (string_content))
+  (delimited_symbol
+    (string_content))
+  (delimited_symbol
+    (string_content))
+  (delimited_symbol
+    (string_content)))
+
+=======================================
+global variables
+=======================================
+
+$foo
+$$
+$!
+$@
+$&
+$`
+$'
+$+
+$~
+$=
+$/
+$\
+$,
+$;
+$.
+$<
+$>
+$_
+$0
+$*
+$$
+$?
+$:
+$"
+$0
+$1
+$2
+$3
+$4
+$5
+$6
+$7
+$8
+$9
+$0
+$10
+$stdin
+$stdout
+$stderr
+$DEBUG
+$FILENAME
+$LOAD_PATH
+$VERBOSE
+
+---
+
+(program
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable)
+  (global_variable))
+
+=======
+integer
+=======
+
+1234
+
+---
+
+(program
+  (integer))
+
+=======
+integer as object
+=======
+
+3.times
+
+---
+
+(program
+  (call
+    (integer)
+    (identifier)))
+
+=======================
+integer with underscore
+=======================
+
+1_234
+
+---
+
+(program
+  (integer))
+
+===========================
+integer with decimal prefix
+===========================
+
+0d1_234
+0D1_234
+
+---
+
+(program
+  (integer)
+  (integer))
+
+===============================
+integer with hexadecimal prefix
+===============================
+
+0xa_bcd_ef0_123_456_789
+
+---
+
+(program
+  (integer))
+
+===============================
+integer with hexadecimal prefix capitalised
+===============================
+
+0Xa_bcd_ef0_123_456_789
+
+---
+
+(program
+  (integer))
+
+=========================
+integer with octal prefix
+=========================
+
+01234567
+0o1234567
+
+---
+
+(program
+  (integer)
+  (integer))
+
+==========================
+integer with binary prefix
+==========================
+0b1_0
+0B1_0
+
+---
+
+(program
+  (integer)
+  (integer))
+
+=====
+float
+=====
+
+1.234_5e678_90
+1E30
+1.0e+6
+1.0e-6
+
+---
+
+(program
+  (float)
+  (float)
+  (float)
+  (float))
+
+=====
+complex
+=====
+
+-2i
++2i
+1+1i
+1-10i
+10+3i
+12-34i
+
+-2.2i
++2.2i
+1+1.2i
+1-10.2i
+10+3.2i
+12-34.2i
+
+-2ri
++2.2ri
+1+1ri
+1-10.2ri
+10+3ri
+12-34.2ri
+
+---
+
+(program
+  (unary
+    operand: (complex
+      (integer)))
+  (unary
+    operand: (complex
+      (integer)))
+  (binary
+    left: (integer)
+    right: (complex
+      (integer)))
+  (binary
+    left: (integer)
+    right: (complex
+      (integer)))
+  (binary
+    left: (integer)
+    right: (complex
+      (integer)))
+  (binary
+    left: (integer)
+    right: (complex
+      (integer)))
+  (unary
+    operand: (complex
+      (float)))
+  (unary
+    operand: (complex
+      (float)))
+  (binary
+    left: (integer)
+    right: (complex
+      (float)))
+  (binary
+    left: (integer)
+    right: (complex
+      (float)))
+  (binary
+    left: (integer)
+    right: (complex
+      (float)))
+  (binary
+    left: (integer)
+    right: (complex
+      (float)))
+  (unary
+    operand: (complex
+      (rational
+        (integer))))
+  (unary
+    operand: (complex
+      (rational
+        (float))))
+  (binary
+    left: (integer)
+    right: (complex
+      (rational
+        (integer))))
+  (binary
+    left: (integer)
+    right: (complex
+      (rational
+        (float))))
+  (binary
+    left: (integer)
+    right: (complex
+      (rational
+        (integer))))
+  (binary
+    left: (integer)
+    right: (complex
+      (rational
+        (float)))))
+
+========
+rational
+========
+
+2/3r
+1.2r
++1.2r
+-2r
+0b01r
+0o7r
+0d1r
+0x12r
+
+---
+
+(program
+  (binary
+    (integer)
+    (rational
+      (integer)))
+  (rational
+    (float))
+  (unary
+    (rational
+      (float)))
+  (unary
+    (rational
+      (integer)))
+  (rational
+    (integer))
+  (rational
+    (integer))
+  (rational
+    (integer))
+  (rational
+    (integer)))
+
+=======
+boolean
+=======
+
+true
+false
+
+---
+
+(program
+  (true)
+  (false))
+
+===
+nil
+===
+
+nil
+
+---
+
+(program
+  (nil))
+
+====================
+single-quoted string
+====================
+
+''
+' '
+'  '
+
+---
+
+(program
+  (string)
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+==============================================
+single-quoted strings with backslashes
+==============================================
+
+'\''
+'\\ \n'
+'\x00\x01\x02'
+
+---
+
+(program
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+=================================================
+single-quoted string with pound and curly brace
+=================================================
+
+'#{hello'
+
+---
+
+(program
+  (string
+    (string_content)))
+
+====================
+double-quoted string
+====================
+
+""
+" "
+"  "
+
+---
+
+(program
+  (string)
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+==============================================
+double-quoted strings with escape sequences
+==============================================
+
+"\""
+"\\"
+"\d"
+"\#{foo}"
+"\u{1F600}"
+"\u{1F600 1F600}"
+
+---
+
+(program
+  (string
+    (escape_sequence))
+  (string
+    (escape_sequence))
+  (string
+    (escape_sequence))
+  (string
+    (escape_sequence)
+    (string_content))
+  (string
+    (escape_sequence))
+  (string
+    (escape_sequence)))
+
+=================================
+double-quoted string with just pound
+=================================
+
+"#"
+
+---
+
+(program
+  (string
+    (string_content)))
+
+=============
+interpolation
+=============
+
+"#{foo}"
+"foo#@foo"
+"#@@foo"
+"#$foo"
+"#$%"
+"#$1"
+"#$_1"
+"#$-AB"
+"#$-10"
+"#@1"
+"#@@1"
+"#{':foo' unless bar}"
+
+---
+
+(program
+  (string
+    (interpolation
+      (identifier)))
+  (string
+    (string_content)
+    (interpolation
+      (instance_variable)))
+  (string
+    (interpolation
+      (class_variable)))
+  (string
+    (interpolation
+      (global_variable)))
+  (string
+    (string_content))
+  (string
+    (interpolation
+      (global_variable)))
+  (string
+    (interpolation
+      (global_variable)))
+  (string
+    (interpolation
+      (global_variable))
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (interpolation
+      (unless_modifier
+        (string
+          (string_content))
+        (identifier)))))
+
+===========================================
+percent q string with unbalanced delimiters
+===========================================
+
+%q/a/
+%q\a\
+%q#a#
+
+---
+
+(program
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+=========================================
+percent q string with balanced delimiters
+=========================================
+
+%q<a<b>c>
+%q{a{b}c}
+%q[a[b]c]
+%q(a(b)c)
+
+---
+
+(program
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+=========================================
+percent string with unbalanced delimiters
+=========================================
+
+%/a/
+%\a\
+%#a#
+
+---
+
+(program
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+=========================================
+percent string with balanced delimiters
+=========================================
+
+%<a<b>c>
+%{a{b}c}
+%[a[b]c]
+%(a(b)c)
+
+---
+
+(program
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+===========================================
+percent Q string with unbalanced delimiters
+===========================================
+
+%Q#a#
+%Q/a/
+%Q\a\
+
+---
+
+(program
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+=========================================
+percent Q string with balanced delimiters
+=========================================
+
+%Q<a<b>c>
+%Q{a{b}c}
+%Q[a[b]c]
+%Q(a(b)c)
+
+---
+
+(program
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content))
+  (string
+    (string_content)))
+
+===============
+string chaining
+===============
+
+%q(a) "b" "c"
+"d" "e"
+
+---
+
+(program
+  (chained_string
+    (string
+      (string_content))
+    (string
+      (string_content))
+    (string
+      (string_content)))
+  (chained_string
+    (string
+      (string_content))
+    (string
+      (string_content))))
+
+==========================
+newline-delimited strings
+==========================
+
+flash[:notice] = "Pattern addition failed for '%s' in '%s'", %
+                  [pattern, key]
+
+----
+
+(program
+  (assignment
+    (element_reference
+      (identifier)
+      (simple_symbol))
+    (right_assignment_list
+      (string
+        (string_content))
+      (string
+        (string_content)))))
+
+==========================
+% formatting that looks like a newline-delimited strings
+==========================
+
+foo("%s '%s' " %
+  [a, b])
+
+----
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (binary
+        (string
+          (string_content))
+        (array
+          (identifier)
+          (identifier))))))
+
+========================================
+Single character string literals
+========================================
+
+?a
+??
+?\n
+?\\
+?\377
+?\u{41}
+?\M-a
+?\C-a
+?\M-\C-a
+?あ
+?\u028f
+?\u{028f}
+?\xff
+foo(?/)
+
+---
+
+(program
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (character)
+  (call
+    (identifier)
+    (argument_list
+      (character))))
+
+========================================
+nested strings with different delimiters
+========================================
+
+"abc#{
+  %r(def(ghi#{
+    `whoami`
+  })klm)
+}nop"
+
+
+---
+
+(program
+  (string
+    (string_content)
+    (interpolation
+      (regex
+        (string_content)
+        (interpolation
+          (subshell
+            (string_content)))
+        (string_content)))
+    (string_content)))
+
+========================================
+basic heredocs
+========================================
+
+<<TEXT
+heredoc \x01 content
+TEXT
+
+<<TEXT1
+  TEXT1 ok if indented
+TEXT1
+
+<<TEXT_B
+* heredoc content
+TEXT_B
+
+<<~TEXT
+content
+TEXT
+
+if indentation_works?
+  <<-sql
+  heredoc content
+  sql
+
+  <<~TEXT
+  TEXT
+
+  <<~EOF
+    content
+  EOF
+end
+
+<<'..end src/parser.c modeval..id7a99570e05'
+heredoc content
+..end src/parser.c modeval..id7a99570e05
+
+---
+
+(program
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (escape_sequence)
+    (heredoc_content)
+    (heredoc_end))
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end))
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end))
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end))
+  (if
+    (call
+      (identifier))
+    (then
+      (heredoc_beginning)
+      (heredoc_body
+        (heredoc_content)
+        (heredoc_end))
+      (heredoc_beginning)
+      (heredoc_body
+        (heredoc_content)
+        (heredoc_end))
+      (heredoc_beginning)
+      (heredoc_body
+        (heredoc_content)
+        (heredoc_end))))
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end)))
+
+========================================
+heredoc with interspersed end word
+========================================
+
+<<-eos
+  repositories
+eos
+
+---
+
+(program
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end)))
+
+========================================
+heredoc with end word in content
+========================================
+
+<<HTML
+<HTML>
+  <HEAD></HEAD><BODY></BODY>
+</HTML>
+HTML
+
+<<a
+attr_accessor
+a
+
+---
+
+(program
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end))
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end)))
+
+========================================
+heredocs in context starting with dot
+========================================
+
+def foo
+  select(<<-SQL)
+  .
+  SQL
+end
+
+---
+
+(program
+  (method
+    (identifier)
+    (body_statement
+      (call
+        (identifier)
+        (argument_list
+          (heredoc_beginning)))
+      (heredoc_body
+        (heredoc_content)
+        (heredoc_end)))))
+
+========================================
+heredocs with method continuation
+========================================
+
+select(<<-SQL)
+ab
+SQL
+  .join()
+
+---
+
+(program
+  (call
+    receiver: (call
+      method: (identifier)
+      arguments: (argument_list
+        (heredoc_beginning)))
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end))
+    method: (identifier)
+    arguments: (argument_list)))
+
+========================================
+heredocs with suffix dot method continuation
+========================================
+
+joins(<<~SQL).
+   `foo`
+SQL
+where("a")
+
+---
+
+(program
+  (call
+    receiver: (call
+      method: (identifier)
+      arguments: (argument_list
+        (heredoc_beginning)))
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end))
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content)))))
+
+========================================
+multiple heredocs with method continuation
+========================================
+
+joins(<<~SQL).where(<<~SQL).
+  `one`
+SQL
+  `two`
+SQL
+group("b")
+
+---
+
+(program
+  (call
+    receiver: (call
+      receiver: (call
+        method: (identifier)
+        arguments: (argument_list
+          (heredoc_beginning)))
+      method: (identifier)
+      arguments: (argument_list
+        (heredoc_beginning)))
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end))
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end))
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content)))))
+
+========================================
+heredocs with interpolation
+========================================
+
+<<TEXT
+a
+b #{[1, "c #{2} d", 3]} e
+#{4} f #{foo.bar}
+#{a if b}
+#{
+  # multiline
+  foo(
+    1,
+    bar
+  ).baz
+}
+#@foo#@@bar#$0
+g
+TEXT
+
+return
+
+---
+
+(program
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (interpolation
+      (array
+        (integer)
+        (string
+          (string_content)
+          (interpolation
+            (integer))
+          (string_content))
+        (integer)))
+    (heredoc_content)
+    (interpolation
+      (integer))
+    (heredoc_content)
+    (interpolation
+      (call
+        (identifier)
+        (identifier)))
+    (heredoc_content)
+    (interpolation
+      (if_modifier
+        (identifier)
+        (identifier)))
+    (heredoc_content)
+    (interpolation
+      (comment)
+      (call
+        (call
+          (identifier)
+          (argument_list
+            (integer)
+            (identifier)))
+        (identifier)))
+    (heredoc_content)
+    (interpolation
+      (instance_variable))
+    (interpolation
+      (class_variable))
+    (interpolation
+      (global_variable))
+    (heredoc_content)
+    (heredoc_end))
+  (return))
+
+========================================
+heredocs with in args, pairs, and arrays
+========================================
+
+foo.new(
+  select: <<-TEXT,
+    heredoc content,
+  TEXT
+  conditions: <<-TEXT
+    heredoc content
+  TEXT
+)
+{
+  select: <<-TEXT,
+    heredoc content,
+  TEXT
+  conditions: <<-TEXT
+    heredoc content
+  TEXT
+}
+
+[
+  <<-TEXT,
+  a
+  TEXT
+  <<-TEXT
+  b
+  TEXT
+]
+
+foo[
+  1,
+  <<-TEXT
+  hi
+  TEXT
+  ] = 3
+
+---
+
+(program
+  (call
+    receiver: (identifier)
+    method: (identifier)
+    arguments: (argument_list
+      (pair
+        key: (hash_key_symbol)
+        value: (heredoc_beginning))
+      (heredoc_body
+        (heredoc_content)
+        (heredoc_end))
+      (pair
+        key: (hash_key_symbol)
+        value: (heredoc_beginning))
+      (heredoc_body
+        (heredoc_content)
+        (heredoc_end))))
+  (hash
+    (pair
+      key: (hash_key_symbol)
+      value: (heredoc_beginning))
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end))
+    (pair
+      key: (hash_key_symbol)
+      value: (heredoc_beginning))
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end)))
+  (array
+    (heredoc_beginning)
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end))
+    (heredoc_beginning)
+    (heredoc_body
+      (heredoc_content)
+      (heredoc_end)))
+  (assignment
+    left: (element_reference
+      object: (identifier)
+      (integer)
+      (heredoc_beginning)
+      (heredoc_body
+        (heredoc_content)
+        (heredoc_end)))
+    right: (integer)))
+
+==============================================================
+heredocs with method calls and interpolation with method calls
+==============================================================
+
+foo(<<-STR.strip_heredoc.tr()
+    content #{ foo; bar().foo}
+  STR
+)
+
+---
+
+(program
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (call
+        receiver: (call
+          receiver: (heredoc_beginning)
+          method: (identifier))
+        method: (identifier)
+        arguments: (argument_list))
+      (heredoc_body
+        (heredoc_content)
+        (interpolation
+          (identifier)
+          (call
+            receiver: (call
+              method: (identifier)
+              arguments: (argument_list))
+            method: (identifier)))
+        (heredoc_content)
+        (heredoc_end)))))
+
+========================================
+multiple heredocs
+========================================
+
+puts <<-ONE.size, <<-TWO.size
+first heredoc content
+ONE
+second heredoc content
+TWO
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (call
+        (heredoc_beginning)
+        (identifier))
+      (call
+        (heredoc_beginning)
+        (identifier))))
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end))
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end)))
+
+========================================
+heredoc content that starts with a dot
+========================================
+
+-> {
+  select(<<-SQL)
+  .
+  SQL
+}
+
+---
+
+(program
+  (lambda
+    (block
+      (block_body
+        (call
+          (identifier)
+          (argument_list
+            (heredoc_beginning)))
+        (heredoc_body
+          (heredoc_content)
+          (heredoc_end))))))
+
+========================================
+un-terminated heredocs
+========================================
+
+<<-ONE
+
+---
+
+(program
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end)))
+
+=================================
+no interpolation or escape sequences in single quoted heredoc
+=================================
+
+<<'EOF'
+This is \not\ an interpolation: #{foo}
+EOF
+
+<<~'EOF'
+This is \not\ an interpolation: #{foo}
+EOF
+
+<<-'EOF'
+This is \not\ an interpolation: #{foo}
+EOF
+
+---
+
+(program
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end))
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end))
+  (heredoc_beginning)
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end)))
+
+==================
+backticks subshell
+==================
+
+`/usr/bin/env test blah blah`
+
+---
+
+(program
+  (subshell
+    (string_content)))
+
+==============================
+backticks subshell with escape
+==============================
+
+`/usr/bin/env test blah \`blah\``
+
+---
+
+(program
+  (subshell
+    (string_content)
+    (escape_sequence)
+    (string_content)
+    (escape_sequence)))
+
+===========
+empty array
+===========
+
+[]
+
+---
+
+(program
+  (array))
+
+=====
+array
+=====
+
+[ foo, bar ]
+[foo, *bar]
+[foo, *@bar]
+[foo, *$bar]
+[foo, :bar => 1]
+
+---
+
+(program
+  (array
+    (identifier)
+    (identifier))
+  (array
+    (identifier)
+    (splat_argument
+      (identifier)))
+  (array
+    (identifier)
+    (splat_argument
+      (instance_variable)))
+  (array
+    (identifier)
+    (splat_argument
+      (global_variable)))
+  (array
+    (identifier)
+    (pair
+      (simple_symbol)
+      (integer))))
+
+=====
+array as object
+=====
+
+[1, 2].any? { |i| i > 1 }
+
+---
+
+(program
+  (call
+    receiver: (array
+      (integer)
+      (integer))
+    method: (identifier)
+    block: (block
+      parameters: (block_parameters
+        (identifier))
+      body: (block_body
+        (binary
+          left: (identifier)
+          right: (integer))))))
+
+=========================
+array with trailing comma
+=========================
+
+[ foo, ]
+
+---
+
+(program
+  (array
+    (identifier)))
+
+=====================
+empty percent w array
+=====================
+
+%w()
+
+---
+
+(program
+  (string_array))
+
+==========================
+unbalanced percent w array
+==========================
+
+%w/one two/
+
+---
+
+(program
+  (string_array
+    (bare_string
+      (string_content))
+    (bare_string
+      (string_content))))
+
+===============
+percent w array
+===============
+
+%w(word word)
+
+---
+
+(program
+  (string_array
+    (bare_string
+      (string_content))
+    (bare_string
+      (string_content))))
+
+===================================
+percent W array with interpolations
+===================================
+
+%W(a #{b} c)
+
+---
+
+(program
+  (string_array
+    (bare_string
+      (string_content))
+    (bare_string
+      (interpolation
+        (identifier)))
+    (bare_string
+      (string_content))))
+
+=====================
+empty percent i array
+=====================
+
+%i()
+
+---
+
+(program
+  (symbol_array))
+
+==========================
+unbalanced percent i array
+==========================
+
+%i/one two/
+
+---
+
+(program
+  (symbol_array
+    (bare_symbol
+      (string_content))
+    (bare_symbol
+      (string_content))))
+
+===============
+percent i array
+===============
+
+%i(word word)
+
+---
+
+(program
+  (symbol_array
+    (bare_symbol
+      (string_content))
+    (bare_symbol
+      (string_content))))
+
+====================================
+percent I array with interpolations
+====================================
+
+%I(a #{b} c)
+
+---
+
+(program
+  (symbol_array
+    (bare_symbol
+      (string_content))
+    (bare_symbol
+      (interpolation
+        (identifier)))
+    (bare_symbol
+      (string_content))))
+
+====================================
+percent i array with spaces
+====================================
+
+%I{
+  *
+  /#{something}+
+  ok
+}
+
+---
+
+(program
+  (symbol_array
+    (bare_symbol
+      (string_content))
+    (bare_symbol
+      (string_content)
+      (interpolation
+        (identifier))
+      (string_content))
+    (bare_symbol
+      (string_content))))
+
+==========
+empty hash
+==========
+
+{}
+
+---
+
+(program
+  (hash))
+
+=========================
+hash with no spaces
+=========================
+
+{:name=>"foo"}
+
+---
+
+(program
+  (hash
+    (pair
+      (simple_symbol)
+      (string
+        (string_content)))))
+
+=========================
+hash with expression keys
+=========================
+
+{ "a" => 1, "b" => 2 }
+{ [] => 1 }
+{ foo => 1 }
+
+---
+
+(program
+  (hash
+    (pair
+      (string
+        (string_content))
+      (integer))
+    (pair
+      (string
+        (string_content))
+      (integer)))
+  (hash
+    (pair
+      (array)
+      (integer)))
+  (hash
+    (pair
+      (identifier)
+      (integer))))
+
+=========================
+hash with reserved word key
+=========================
+
+{
+  alias: :foo,
+  and: :foo,
+  begin: :foo,
+  break: :foo,
+  case: :foo,
+  class: :foo,
+  def: :foo,
+  defined: :foo,
+  do: :foo,
+  else: :foo,
+  elsif: :foo,
+  end: :foo,
+  ensure: :foo,
+  false: :foo,
+  for: :foo,
+  in: :foo,
+  module: :foo,
+  next: :foo,
+  nil: :foo,
+  not: :foo,
+  or: :foo,
+  redo: :foo,
+  rescue: :foo,
+  retry: :foo,
+  return: :foo,
+  self: :foo,
+  super: :foo,
+  then: :foo,
+  true: :foo,
+  undef: :foo,
+  when: :foo,
+  yield: :foo,
+  if: :foo,
+  unless: :foo,
+  while: :foo,
+  until: :foo,
+  until:
+}
+
+---
+
+(program
+  (hash
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol)
+      (simple_symbol))
+    (pair
+      (hash_key_symbol))))
+
+======================
+hash with keyword keys
+======================
+
+{ a: 1, b: 2, "c": 3 }
+{a:
+  1, B:2, "c":3 }
+{ a:, B:
+}
+
+---
+
+(program
+  (hash
+    (pair
+      (hash_key_symbol)
+      (integer))
+    (pair
+      (hash_key_symbol)
+      (integer))
+    (pair
+      (string
+        (string_content))
+      (integer)))
+  (hash
+    (pair
+      (hash_key_symbol)
+      (integer))
+    (pair
+      (hash_key_symbol)
+      (integer))
+    (pair
+      (string
+        (string_content))
+      (integer)))
+  (hash
+    (pair
+      (hash_key_symbol))
+    (pair
+      (hash_key_symbol))))
+
+========================
+hash with trailing comma
+========================
+
+{ a: 1, }
+
+---
+
+(program
+  (hash
+    (pair
+      (hash_key_symbol)
+      (integer))))
+
+========================
+hash initialization with hash splat
+========================
+
+{a: 1, **{b: 2}}
+
+---
+
+(program
+  (hash
+    (pair
+      (hash_key_symbol)
+      (integer))
+    (hash_splat_argument
+      (hash
+        (pair
+          (hash_key_symbol)
+          (integer))))))
+
+========================
+hash with line breaks and inline comments
+========================
+
+{
+  :pusher => pusher,
+
+  # Only warm caches if there are fewer than 10 tags and branches.
+  :should_warm_caches_after => 10,
+}
+
+---
+
+(program
+  (hash
+    (pair
+      (simple_symbol)
+      (identifier))
+    (comment)
+    (pair
+      (simple_symbol)
+      (integer))))
+
+==================
+regular expression
+==================
+
+/^(foo|bar[^_])$/i
+
+---
+
+(program
+  (regex
+    (string_content)))
+
+=====================================
+regular expression with interpolation
+=====================================
+
+/word#{foo}word/
+/word#word/
+/#/
+
+---
+
+(program
+  (regex
+    (string_content)
+    (interpolation
+      (identifier))
+    (string_content))
+  (regex
+    (string_content))
+  (regex
+    (string_content)))
+
+=======================================================
+percent r regular expression with unbalanced delimiters
+=======================================================
+
+%r/a/
+%r\a\
+%r#a#
+
+---
+
+(program
+  (regex
+    (string_content))
+  (regex
+    (string_content))
+  (regex
+    (string_content)))
+
+=====================================================
+percent r regular expression with balanced delimiters
+=====================================================
+
+%r<a<b>c>
+%r{a{b}c}
+%r[a[b]c]
+%r(a(b)c)
+%r(#)
+
+---
+
+(program
+  (regex
+    (string_content))
+  (regex
+    (string_content))
+  (regex
+    (string_content))
+  (regex
+    (string_content))
+  (regex
+    (string_content)))
+
+=========================================================================
+percent r regular expression with unbalanced delimiters and interpolation
+=========================================================================
+
+%r/a#{b}c/
+
+---
+
+(program
+  (regex
+    (string_content)
+    (interpolation
+      (identifier))
+    (string_content)))
+
+=======================================================================
+percent r regular expression with balanced delimiters and interpolation
+=======================================================================
+
+%r(a#{b}c)
+
+---
+
+(program
+  (regex
+    (string_content)
+    (interpolation
+      (identifier))
+    (string_content)))
+
+==============
+empty function
+==============
+
+-> {}
+
+---
+
+(program
+  (lambda
+    (block)))
+
+==================
+lambda literal with body
+==================
+
+-> { foo }
+
+---
+
+(program
+  (lambda
+    (block
+      (block_body
+        (identifier)))))
+
+====================
+lambda literal with an arg
+====================
+
+-> foo { 1 }
+-> (foo) { 1 }
+-> *foo { 1 }
+-> foo: 1 { 2 }
+-> foo, bar { 2 }
+
+---
+
+(program
+  (lambda
+    (lambda_parameters
+      (identifier))
+    (block
+      (block_body
+        (integer))))
+  (lambda
+    (lambda_parameters
+      (identifier))
+    (block
+      (block_body
+        (integer))))
+  (lambda
+    (lambda_parameters
+      (splat_parameter
+        (identifier)))
+    (block
+      (block_body
+        (integer))))
+  (lambda
+    (lambda_parameters
+      (keyword_parameter
+        (identifier)
+        (integer)))
+    (block
+      (block_body
+        (integer))))
+  (lambda
+    (lambda_parameters
+      (identifier)
+      (identifier))
+    (block
+      (block_body
+        (integer)))))
+
+===========================
+lambda literal with multiple args
+===========================
+
+-> (a, b, c) {
+  1
+  2
+}
+
+---
+
+(program
+  (lambda
+    (lambda_parameters
+      (identifier)
+      (identifier)
+      (identifier))
+    (block
+      (block_body
+        (integer)
+        (integer)))))
+
+====================
+lambda literal with do end
+====================
+
+-> (foo) do
+  1
+end
+
+---
+
+(program
+  (lambda
+    (lambda_parameters
+      (identifier))
+    (do_block
+      (body_statement
+        (integer)))))
+
+====================
+non-ascii identifiers
+====================
+
+Cß
+@äö
+@@äö
+:äö
+äö
+
+---
+
+(program
+  (constant)
+  (instance_variable)
+  (class_variable)
+  (simple_symbol)
+  (identifier))

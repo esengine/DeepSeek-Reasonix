@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/memory"
 	"reasonix/internal/planmode"
 	"reasonix/internal/skill"
 )
@@ -137,13 +138,31 @@ func (c *Controller) Compose(text string) string {
 }
 
 func (c *Controller) compose(text, source string, includeHookContext bool) string {
+	goal, goalStatus, goalResearchMode, autoResearchTaskID := c.goals.snapshot()
+	return c.composeWithGoal(
+		text,
+		source,
+		includeHookContext,
+		goal,
+		goalStatus,
+		goalResearchMode,
+		autoResearchTaskID,
+	)
+}
+
+func (c *Controller) composeWithGoal(
+	text, source string,
+	includeHookContext bool,
+	goal, goalStatus string,
+	goalResearchMode GoalResearchMode,
+	autoResearchTaskID string,
+) string {
 	c.mu.Lock()
 	plan := c.planMode
 	responseLanguage := c.responseLanguage
 	reasoningLanguage := c.reasoningLanguage
 	c.mu.Unlock()
 	notes := c.memory.drainPending()
-	goal, goalStatus, goalResearchMode, autoResearchTaskID := c.goals.snapshot()
 
 	if strings.TrimSpace(goal) != "" && goalStatus == GoalStatusRunning {
 		prefix := activeGoalBlock(goal, goalResearchMode)
@@ -184,8 +203,27 @@ func (c *Controller) compose(text, source string, includeHookContext bool) strin
 		if block := c.drainHookContextBlock(); block != "" {
 			text = block + "\n\n" + text
 		}
+		// Relevant facts ride only the real user-turn tail. This preserves the
+		// stable system/tool prefix and keeps synthetic recovery turns free of
+		// accidental recall. A just-written fact already arrives in memory-update.
+		if len(notes) == 0 {
+			if block := c.memory.recall(source).Block(); block != "" {
+				text = strings.TrimRight(text, "\n") + "\n\n" + block
+			}
+		} else {
+			c.memory.recordRecall(memory.RecallResult{
+				Query:      strings.TrimSpace(source),
+				Suppressed: "memory update already supplies the new fact",
+			})
+		}
 	}
 	return text
+}
+
+// LastMemoryRecall returns the last real turn's automatic-recall decision for
+// diagnostics and context-management surfaces.
+func (c *Controller) LastMemoryRecall() memory.RecallResult {
+	return c.memory.lastRecallResult()
 }
 
 func (c *Controller) enqueueHookContexts(contexts []string) {

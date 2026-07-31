@@ -1,0 +1,29 @@
+name: Fuzz Parser
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - typescript/src/scanner.c
+      - tsx/src/scanner.c
+      - common/scanner.h
+  pull_request:
+    paths:
+      - typescript/src/scanner.c
+      - tsx/src/scanner.c
+      - common/scanner.h
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [typescript, tsx]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Fuzz ${{matrix.language}} parser
+        uses: tree-sitter/fuzz-action@v4
+        with:
+          directory: ${{matrix.language}}

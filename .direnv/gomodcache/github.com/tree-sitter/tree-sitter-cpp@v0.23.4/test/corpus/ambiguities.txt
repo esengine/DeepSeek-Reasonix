@@ -1,0 +1,176 @@
+================================================
+template functions vs relational expressions
+================================================
+
+T1 a = b < c > d;
+T2 e = f<T3>(g);
+int a = std::get<0>(t);
+if (x.y < z) break; // Not a template missing a '>'
+if (x.y < x->y && x.y > 50) break;
+if (x.foo < 0 || bar >= 1) break;
+if (x.Base::foo < 0 || bar >= 1) {
+  bool i = x.Base::foo < 0 || 1 > (5); // No way to tell
+}
+
+---
+
+(translation_unit
+  (declaration
+    (type_identifier)
+    (init_declarator
+      (identifier)
+      (binary_expression
+        (binary_expression (identifier) (identifier))
+        (identifier))))
+  (declaration
+    (type_identifier)
+    (init_declarator
+      (identifier)
+      (call_expression
+        (template_function (identifier) (template_argument_list
+          (type_descriptor (type_identifier))))
+        (argument_list (identifier)))))
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (identifier)
+      (call_expression
+        (qualified_identifier
+          (namespace_identifier)
+          (template_function
+            (identifier)
+            (template_argument_list (number_literal))))
+        (argument_list (identifier)))))
+  (if_statement
+    (condition_clause
+      (binary_expression
+        (field_expression
+          (identifier)
+          (field_identifier))
+        (identifier)))
+    (break_statement))
+  (comment)
+  (if_statement
+    (condition_clause
+      (binary_expression
+        (binary_expression
+          (field_expression
+            (identifier)
+            (field_identifier))
+          (field_expression
+            (identifier)
+            (field_identifier)))
+        (binary_expression
+          (field_expression
+            (identifier)
+            (field_identifier))
+          (number_literal))))
+    (break_statement))
+  (if_statement
+    (condition_clause
+      (binary_expression
+        (binary_expression
+          (field_expression
+            (identifier)
+            (field_identifier))
+          (number_literal))
+        (binary_expression
+          (identifier)
+          (number_literal))))
+    (break_statement))
+  (if_statement
+    (condition_clause
+      (binary_expression
+        (binary_expression
+          (field_expression
+            (identifier)
+            (qualified_identifier
+              (namespace_identifier)
+              (field_identifier)))
+          (number_literal))
+        (binary_expression
+          (identifier)
+          (number_literal))))
+    (compound_statement
+      (declaration
+        (primitive_type)
+        (init_declarator
+          (identifier)
+          (binary_expression
+            (binary_expression
+              (field_expression
+                (identifier)
+                (qualified_identifier
+                  (namespace_identifier)
+                  (field_identifier)))
+              (number_literal))
+            (binary_expression
+              (number_literal)
+              (parenthesized_expression
+                (number_literal))))))
+    (comment))))
+
+=================================================
+function declarations vs variable initializations
+=================================================
+
+// Function declarations
+T1 a(T2 *b);
+T3 c(T4 &d, T5 &&e);
+
+// Variable declarations with initializers
+T7 f(g.h);
+T6 i{j};
+
+---
+
+(translation_unit
+  (comment)
+  (declaration
+    (type_identifier)
+    (function_declarator
+      (identifier)
+      (parameter_list (parameter_declaration (type_identifier) (pointer_declarator (identifier))))))
+  (declaration
+    (type_identifier)
+    (function_declarator
+      (identifier)
+      (parameter_list
+        (parameter_declaration (type_identifier) (reference_declarator (identifier)))
+        (parameter_declaration (type_identifier) (reference_declarator (identifier))))))
+
+  (comment)
+  (declaration
+    (type_identifier)
+    (init_declarator
+      (identifier)
+      (argument_list (field_expression (identifier) (field_identifier)))))
+  (declaration
+    (type_identifier)
+    (init_declarator
+      (identifier)
+      (initializer_list (identifier)))))
+
+================================================
+template classes vs relational expressions
+================================================
+
+int main() {
+  T1<T2> v1;
+  T1<T2> v2 = v3;
+}
+
+---
+
+(translation_unit (function_definition
+  (primitive_type)
+  (function_declarator (identifier) (parameter_list))
+  (compound_statement
+    (declaration
+      (template_type (type_identifier)
+        (template_argument_list (type_descriptor (type_identifier))))
+      (identifier))
+    (declaration
+      (template_type (type_identifier)
+        (template_argument_list (type_descriptor (type_identifier))))
+      (init_declarator (identifier) (identifier))))))

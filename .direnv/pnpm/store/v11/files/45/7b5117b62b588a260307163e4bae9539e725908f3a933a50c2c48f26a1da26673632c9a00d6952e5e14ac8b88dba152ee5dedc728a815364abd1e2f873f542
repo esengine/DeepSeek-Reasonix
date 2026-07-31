@@ -1,0 +1,45 @@
+{
+  "name": "robust-predicates",
+  "version": "3.0.3",
+  "description": "Fast robust predicates for computational geometry",
+  "keywords": [
+    "computational geometry",
+    "robust arithmetic"
+  ],
+  "author": "Vladimir Agafonkin",
+  "license": "Unlicense",
+  "type": "module",
+  "main": "index.js",
+  "unpkg": "umd/predicates.min.js",
+  "module": "index.js",
+  "exports": "./index.js",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "mkdir -p esm && node compile.js",
+    "lint": "eslint *.js src test/test.js",
+    "pretest": "npm run lint && npm run build",
+    "test": "node --test",
+    "cov": "node --test --experimental-test-coverage",
+    "bench": "node bench.js",
+    "prepublishOnly": "npm run test && rollup -c"
+  },
+  "devDependencies": {
+    "@rollup/plugin-terser": "^1.0.0",
+    "eslint": "^10.1.0",
+    "eslint-config-mourner": "^4.1.0",
+    "nextafter": "^1.0.0",
+    "robust-in-sphere": "^1.2.1",
+    "robust-orientation": "^1.2.1",
+    "rollup": "^4.59.1"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "esm",
+    "umd"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mourner/robust-predicates.git"
+  }
+}

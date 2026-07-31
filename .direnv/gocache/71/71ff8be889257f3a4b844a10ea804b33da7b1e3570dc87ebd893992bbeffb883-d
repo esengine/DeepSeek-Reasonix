@@ -1,0 +1,14 @@
+./attrs.go
+./buffer.go
+./extended_packets.go
+./extensions.go
+./filexfer.go
+./fx.go
+./fxp.go
+./handle_packets.go
+./init_packets.go
+./open_packets.go
+./packets.go
+./path_packets.go
+./permissions.go
+./response_packets.go

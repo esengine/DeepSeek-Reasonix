@@ -1,0 +1,861 @@
+================================================================================
+Declaration statements
+================================================================================
+
+package main
+
+func main() {
+  var x = y
+  const x = 5
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (var_declaration
+        (var_spec
+          (identifier)
+          (expression_list
+            (identifier))))
+      (const_declaration
+        (const_spec
+          (identifier)
+          (expression_list
+            (int_literal)))))))
+
+================================================================================
+Expression statements
+================================================================================
+
+package main
+
+func main() {
+  foo(5)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (int_literal)))))))
+
+================================================================================
+Send statements
+================================================================================
+
+package main
+
+func main() {
+  foo <- 5
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (send_statement
+        (identifier)
+        (int_literal)))))
+
+================================================================================
+Increment/Decrement statements
+================================================================================
+
+package main
+
+func main() {
+  i++
+  j--
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (inc_statement
+        (identifier))
+      (dec_statement
+        (identifier)))))
+
+================================================================================
+Assignment statements
+================================================================================
+
+package main
+
+func main() {
+  a = 1
+  b, c += 2, 3
+  d *= 3
+  e += 1
+  f /= 2
+  g <<= 1
+  h >>= 1
+  i %= 1
+  j &= 2
+  k &^= 3
+  l -= 1
+  m |= 2
+  n ^= 2
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier)
+          (identifier))
+        (expression_list
+          (int_literal)
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal)))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (int_literal))))))
+
+================================================================================
+Short var declarations
+================================================================================
+
+package main
+
+func main() {
+  a, b := 1, 2
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (short_var_declaration
+        (expression_list
+          (identifier)
+          (identifier))
+        (expression_list
+          (int_literal)
+          (int_literal))))))
+
+================================================================================
+If statements
+================================================================================
+
+package main
+
+func main() {
+  if a {
+    b()
+  }
+
+  if a := b(); c {
+    d()
+  }
+
+  if a {
+    b()
+  } else {
+    c()
+  }
+
+  if b {
+    c()
+  } else if d {
+    e()
+  } else {
+    f()
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (if_statement
+        condition: (identifier)
+        consequence: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list)))))
+      (if_statement
+        initializer: (short_var_declaration
+          left: (expression_list
+            (identifier))
+          right: (expression_list
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list))))
+        condition: (identifier)
+        consequence: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list)))))
+      (if_statement
+        condition: (identifier)
+        consequence: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list))))
+        alternative: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list)))))
+      (if_statement
+        condition: (identifier)
+        consequence: (block
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list))))
+        alternative: (if_statement
+          condition: (identifier)
+          consequence: (block
+            (expression_statement
+              (call_expression
+                function: (identifier)
+                arguments: (argument_list))))
+          alternative: (block
+            (expression_statement
+              (call_expression
+                function: (identifier)
+                arguments: (argument_list)))))))))
+
+================================================================================
+For statements
+================================================================================
+
+package main
+
+func main() {
+  for {
+    a()
+    goto loop
+  }
+
+  loop: for i := 0; i < 5; i++ {
+    a()
+    break loop
+  }
+
+loop2:
+  for ; i < 10; i++ {
+    a()
+    continue loop2
+  }
+
+  for ;; {
+    a()
+    continue
+  }
+
+  for x := range y {
+    a(x)
+    break
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (for_statement
+        (block
+          (expression_statement
+            (call_expression
+              (identifier)
+              (argument_list)))
+          (goto_statement
+            (label_name))))
+      (labeled_statement
+        (label_name)
+        (for_statement
+          (for_clause
+            (short_var_declaration
+              (expression_list
+                (identifier))
+              (expression_list
+                (int_literal)))
+            (binary_expression
+              (identifier)
+              (int_literal))
+            (inc_statement
+              (identifier)))
+          (block
+            (expression_statement
+              (call_expression
+                (identifier)
+                (argument_list)))
+            (break_statement
+              (label_name)))))
+      (labeled_statement
+        (label_name)
+        (for_statement
+          (for_clause
+            (binary_expression
+              (identifier)
+              (int_literal))
+            (inc_statement
+              (identifier)))
+          (block
+            (expression_statement
+              (call_expression
+                (identifier)
+                (argument_list)))
+            (continue_statement
+              (label_name)))))
+      (for_statement
+        (for_clause)
+        (block
+          (expression_statement
+            (call_expression
+              (identifier)
+              (argument_list)))
+          (continue_statement)))
+      (for_statement
+        (range_clause
+          (expression_list
+            (identifier))
+          (identifier))
+        (block
+          (expression_statement
+            (call_expression
+              (identifier)
+              (argument_list
+                (identifier))))
+          (break_statement))))))
+
+================================================================================
+Switch statements
+================================================================================
+
+func main() {
+  switch e {
+    case 1, 2:
+      a()
+      fallthrough
+    case 3:
+      d()
+    default:
+      c()
+      break
+  }
+
+  switch {
+    case true:
+      return
+  }
+
+  switch f := y(); f {
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (expression_switch_statement
+        value: (identifier)
+        (expression_case
+          value: (expression_list
+            (int_literal)
+            (int_literal))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list)))
+          (fallthrough_statement))
+        (expression_case
+          value: (expression_list
+            (int_literal))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list))))
+        (default_case
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list)))
+          (break_statement)))
+      (expression_switch_statement
+        (expression_case
+          value: (expression_list
+            (true))
+          (return_statement)))
+      (expression_switch_statement
+        initializer: (short_var_declaration
+          left: (expression_list
+            (identifier))
+          right: (expression_list
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list))))
+        value: (identifier)))))
+
+================================================================================
+Type switch statements
+================================================================================
+
+func main() {
+  switch e.(type) {
+    case []Person:
+      a()
+    case *Dog:
+      break
+  }
+  switch i := x.(type) {
+    case nil:
+    	printString("x is nil")
+    case int:
+    	printInt(i)
+    case float64:
+    	printFloat64(i)
+    case func(int) float64:
+    	printFunction(i)
+    case bool, string:
+    	printString("type is bool or string")
+    default:
+    	printString("don't know the type")
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (type_switch_statement
+        value: (identifier)
+        (type_case
+          type: (slice_type
+            element: (type_identifier))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list))))
+        (type_case
+          type: (pointer_type
+            (type_identifier))
+          (break_statement)))
+      (type_switch_statement
+        alias: (expression_list
+          (identifier))
+        value: (identifier)
+        (type_case
+          type: (type_identifier)
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (interpreted_string_literal
+                  (interpreted_string_literal_content))))))
+        (type_case
+          type: (type_identifier)
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (identifier)))))
+        (type_case
+          type: (type_identifier)
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (identifier)))))
+        (type_case
+          type: (function_type
+            parameters: (parameter_list
+              (parameter_declaration
+                type: (type_identifier)))
+            result: (type_identifier))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (identifier)))))
+        (type_case
+          type: (type_identifier)
+          type: (type_identifier)
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (interpreted_string_literal
+                  (interpreted_string_literal_content))))))
+        (default_case
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (interpreted_string_literal
+                  (interpreted_string_literal_content))))))))))
+
+================================================================================
+Select statements
+================================================================================
+
+package main
+
+func main() {
+  select {
+    case x := <-c:
+      println(x)
+    case y <- c:
+      println(5)
+    case <-time.After(1):
+      println(6)
+    default:
+      return
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (select_statement
+        (communication_case
+          communication: (receive_statement
+            left: (expression_list
+              (identifier))
+            right: (unary_expression
+              operand: (identifier)))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (identifier)))))
+        (communication_case
+          communication: (send_statement
+            channel: (identifier)
+            value: (identifier))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (int_literal)))))
+        (communication_case
+          communication: (receive_statement
+            right: (unary_expression
+              operand: (call_expression
+                function: (selector_expression
+                  operand: (identifier)
+                  field: (field_identifier))
+                arguments: (argument_list
+                  (int_literal)))))
+          (expression_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (int_literal)))))
+        (default_case
+          (return_statement))))))
+
+================================================================================
+Go and defer statements
+================================================================================
+
+package main
+
+func main() {
+  defer x.y()
+  go x.y()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (defer_statement
+        (call_expression
+          (selector_expression
+            (identifier)
+            (field_identifier))
+          (argument_list)))
+      (go_statement
+        (call_expression
+          (selector_expression
+            (identifier)
+            (field_identifier))
+          (argument_list))))))
+
+================================================================================
+Nested statement blocks
+================================================================================
+
+func main() {
+  {
+    println("hi")
+  }
+  {
+    println("bye")
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (argument_list
+              (interpreted_string_literal
+                (interpreted_string_literal_content))))))
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (argument_list
+              (interpreted_string_literal
+                (interpreted_string_literal_content)))))))))
+
+================================================================================
+Labels at the ends of statement blocks
+================================================================================
+
+func main() {
+  {
+  end_of_block:
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_declaration
+    name: (identifier)
+    parameters: (parameter_list)
+    body: (block
+      (block
+        (labeled_statement
+          label: (label_name))))))
+
+================================================================================
+Empty statements
+================================================================================
+
+package main
+
+func main() {
+	;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (empty_statement))))
+
+================================================================================
+Nested control statements
+================================================================================
+
+package main
+
+func main() {
+  for i, v := range vectors {
+    func() {
+      if v == v {
+        fmt.Println("something: %v", vectors[i])
+      }
+    }()
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (for_statement
+        (range_clause
+          (expression_list
+            (identifier)
+            (identifier))
+          (identifier))
+        (block
+          (expression_statement
+            (call_expression
+              (func_literal
+                (parameter_list)
+                (block
+                  (if_statement
+                    (binary_expression
+                      (identifier)
+                      (identifier))
+                    (block
+                      (expression_statement
+                        (call_expression
+                          (selector_expression
+                            (identifier)
+                            (field_identifier))
+                          (argument_list
+                            (interpreted_string_literal
+                              (interpreted_string_literal_content))
+                            (index_expression
+                              (identifier)
+                              (identifier)))))))))
+              (argument_list))))))))
+
+================================================================================
+Top-level statements
+================================================================================
+
+foo(5)
+x := T { a: b }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (identifier)
+      (argument_list
+        (int_literal))))
+  (short_var_declaration
+    (expression_list
+      (identifier))
+    (expression_list
+      (composite_literal
+        (type_identifier)
+        (literal_value
+          (keyed_element
+            (literal_element
+              (identifier))
+            (literal_element
+              (identifier))))))))

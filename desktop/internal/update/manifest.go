@@ -18,6 +18,7 @@ type Manifest struct {
 	DownloadPage   string           `json:"download_page"`             // human-facing download page (macOS manual-update fallback)
 	Platforms      map[string]Asset `json:"platforms"`                 // keyed by PlatformKey, e.g. "darwin-arm64"
 	NativePackages map[string]Asset `json:"native_packages,omitempty"` // optional OS package assets, e.g. linux-amd64 → .deb
+	Downloads      map[string]Asset `json:"downloads,omitempty"`       // optional signed human-download assets keyed by exact filename
 }
 
 // Asset is one platform's downloadable artifact plus the metadata the updater

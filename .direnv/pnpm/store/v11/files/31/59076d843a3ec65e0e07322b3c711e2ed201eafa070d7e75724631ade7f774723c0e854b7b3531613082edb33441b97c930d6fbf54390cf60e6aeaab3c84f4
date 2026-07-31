@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "module": "UMD",
+    "target": "es5",
+    "diagnostics": true,
+    "noEmit": true,
+    "noImplicitAny": true,
+    "noImplicitThis": true,
+    "strictNullChecks": false,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": "./",
+    "typeRoots": [
+      "./"
+    ],
+    "types": []
+  },
+  "files": [
+    "dist/svg-pan-zoom.d.ts",
+    "tests/test_typescript.ts"
+  ]
+}

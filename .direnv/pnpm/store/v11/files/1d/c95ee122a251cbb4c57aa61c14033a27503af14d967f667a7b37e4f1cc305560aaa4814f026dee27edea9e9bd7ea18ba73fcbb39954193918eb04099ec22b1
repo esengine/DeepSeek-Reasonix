@@ -1,0 +1,72 @@
+{
+  "name": "svg-pan-zoom",
+  "version": "3.6.2",
+  "main": "dist/svg-pan-zoom.js",
+  "module": "src/svg-pan-zoom.js",
+  "types": "dist/svg-pan-zoom.d.ts",
+  "browser": "src/browserify.js",
+  "license": "BSD-2-Clause",
+  "description": "JavaScript library for panning and zooming an SVG image from the mouse, touches and programmatically.",
+  "scripts": {
+    "start": "gulp",
+    "lint": "tslint 'dist/svg-pan-zoom.d.ts'",
+    "test": "tsc && gulp test",
+    "build": "gulp build",
+    "server": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bumbu/svg-pan-zoom"
+  },
+  "bugs": {
+    "url": "https://github.com/bumbu/svg-pan-zoom/issues"
+  },
+  "contributors": [
+    "Andrea Leofreddi <a.leofreddi@vleo.net>",
+    "Anders Riutta <git@andersriutta.com>",
+    "Zeng Xiaohui",
+    "Barry Coughlan (https://github.com/bcoughlan)",
+    "Risingson",
+    "bumbu alex (http://bumbu.me>)",
+    "Alexander Pico <apico@gladstone.ucsf.edu>",
+    "Kyran Burraston (http://kyranburraston.co.uk)",
+    "Risingson (https://github.com/Risingson)",
+    "Siddhanathan Shanmugam <siddhanathan+social@gmail.com>",
+    "Karina Simard (https://github.com/ksimard)",
+    "Christopher Clark <chris.clark@sparkfun.com>",
+    "Vladimir Prus (http://vladimirprus.com)",
+    "Barry Coughlan (https://github.com/bcoughlan)",
+    "Ionică Bizău (http://ionicabizau.net/)",
+    "Ciprian Placintă (https://github.com/CiprianPlacinta)",
+    "Riccardo Santoro (https://github.com/VeNoMiS)",
+    "César Vidril (https://github.com/Yimiprod)",
+    "Androl Genhald (https://github.com/AndrolGenhald)",
+    "James Newell (https://github.com/musicfuel)",
+    "KoenkookpotPlasmans (https://github.com/KoenkookpotPlasmans)",
+    "Hassan Shaikley (http://hassanshaikley.github.io/)"
+  ],
+  "keywords": [
+    "svg",
+    "pan",
+    "zoom"
+  ],
+  "devDependencies": {
+    "browserify": "^16.5.0",
+    "eslint-config-prettier": "^6.5.0",
+    "eslint-plugin-prettier": "^3.1.1",
+    "gulp": "^4.0.2",
+    "gulp-eslint": "^6.0.0",
+    "gulp-header": "^2.0.9",
+    "gulp-if": "^2.0.2",
+    "gulp-qunit": "^2.1.0",
+    "gulp-rename": "^1.4.0",
+    "gulp-uglify": "^3.0.2",
+    "prettier": "^1.18.2",
+    "qunit": "^2.9.3",
+    "qunitjs": "npm:qunit@^2.9.3",
+    "tslint": "^4.5.1",
+    "typescript": "^3.6.4",
+    "vinyl-buffer": "^1.0.1",
+    "vinyl-source-stream": "^2.0.0"
+  }
+}

@@ -1,0 +1,49 @@
+leading-zero = 03.14
+leading-zero-neg = -03.14
+leading-zero-plus = +03.14
+
+leading-dot = .12345
+leading-dot-neg = -.12345
+leading-dot-plus = +.12345
+
+trailing-dot = 1.
+trailing-dot-min = -1.
+trailing-dot-plus = +1.
+
+trailing-exp = 0.0E
+trailing-exp-dot =  0.e
+trailing-exp-minus = 0.0e-
+trailing-exp-plus = 0.0e+
+
+trailing-us = 1.2_
+leading-us = _1.2
+us-before-dot = 1_.2
+us-after-dot = 1._2
+
+double-dot-01 = 0..1
+double-dot-02 = 0.1.2
+
+exp-dot-01 = 1e2.3
+exp-dot-02 = 1.e2
+exp-dot-03 = 3.e+20
+
+exp-double-e-01 = 1ee2
+exp-double-e-02 = 1e2e3
+
+exp-leading-us = 1e_23
+exp-trailing-us = 1e23_
+exp-double-us = 1e__23
+
+exp-trailing-us-01 = 1_e2
+exp-trailing-us-02 = 1.2_e2
+
+inf-incomplete-01 = in
+inf-incomplete-02 = +in
+inf-incomplete-03 = -in
+
+nan-incomplete-01 = na
+nan-incomplete-02 = +na
+nan-incomplete-03 = -na
+
+nan_underscore = na_n
+inf_underscore = in_f

@@ -1,0 +1,11 @@
+
+Host hasidentity
+  IdentityFile file1
+
+Host has2identity
+  IdentityFile f1
+  IdentityFile f2
+
+Host protocol1
+  Protocol 1
+

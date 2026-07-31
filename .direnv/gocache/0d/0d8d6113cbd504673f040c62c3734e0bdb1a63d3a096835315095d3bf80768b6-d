@@ -1,0 +1,16 @@
+./apireq.go
+./apiresp.go
+./appticketmanager.go
+./cache.go
+./config.go
+./constants.go
+./errors.go
+./httpclient.go
+./httptransport.go
+./logger.go
+./reqoption.go
+./reqtranslator.go
+./serialization.go
+./tokenmanager.go
+./utils.go
+./version.go

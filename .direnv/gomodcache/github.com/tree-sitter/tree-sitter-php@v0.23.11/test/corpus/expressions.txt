@@ -1,0 +1,1973 @@
+==========================
+Dynamic variable names
+==========================
+
+<?php
+$$k = $v;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement (assignment_expression
+    (dynamic_variable_name (variable_name (name)))
+    (variable_name (name)))))
+
+==========================
+Exponentiation
+==========================
+
+<?php
+$foo = 2 ** 2;
+$a = 3;
+echo $a ** -$a;
+$a ** $c += $b;
+$a ** $c = $b;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      left: (variable_name (name))
+      right: (binary_expression
+        left: (integer)
+        right: (integer))))
+  (expression_statement
+    (assignment_expression
+      left: (variable_name (name))
+      right: (integer)))
+  (echo_statement
+    (binary_expression
+      left: (variable_name (name))
+      right: (unary_op_expression
+        argument: (variable_name (name)))))
+  (expression_statement
+    (binary_expression
+      left: (variable_name (name))
+      right: (augmented_assignment_expression
+        left: (variable_name (name))
+        right: (variable_name (name)))))
+  (expression_statement
+    (binary_expression
+      left: (variable_name (name))
+      right: (assignment_expression
+        left: (variable_name (name))
+        right: (variable_name (name))))))
+
+==========================
+Reserved Identifiers as Names
+==========================
+
+<?php
+$foo = new self();
+
+---
+
+(program
+  (php_tag)
+  (expression_statement (assignment_expression
+    (variable_name (name))
+    (object_creation_expression
+      (name)
+      (arguments)))))
+
+==========================
+Unary op with assignment expressions
+==========================
+
+<?php
+
+if (!$foo = $bar) {
+}
+
+---
+(program
+  (php_tag)
+  (if_statement
+    condition: (parenthesized_expression (unary_op_expression
+      argument: (assignment_expression
+        left: (variable_name (name))
+        right: (variable_name (name)))))
+    body: (compound_statement)))
+
+===============================
+Capitalized logical operators
+===============================
+
+<?php
+a() OR b() XOR C();
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      (function_call_expression (name) (arguments))
+      (binary_expression
+        (function_call_expression (name) (arguments))
+        (function_call_expression (name) (arguments))))))
+
+=================================
+Cast expressions in assignments
+=================================
+
+<?php
+
+(int) $foo = (integer) $bar;
+(int) $foo += 5;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (cast_expression (cast_type) (variable_name (name)))
+      (cast_expression (cast_type) (variable_name (name)))))
+   (expression_statement
+    (augmented_assignment_expression
+      (cast_expression (cast_type) (variable_name (name)))
+      (integer))))
+
+=================================
+Cast include
+=================================
+
+<?php
+$a = (array) include 'some.php';
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      left: (variable_name (name))
+      right: (cast_expression
+        type: (cast_type)
+        value: (include_expression (string (string_content)))
+      )
+    )
+  )
+)
+
+==========================
+Reserved words as function calls
+==========================
+
+<?php
+$foo = new static($this->current());
+
+---
+
+(program
+  (php_tag)
+  (expression_statement (assignment_expression
+    (variable_name (name))
+    (object_creation_expression
+      (name)
+      (arguments
+        (argument (member_call_expression (variable_name (name)) (name) (arguments))))))))
+
+==========================
+Scoped self call expressions
+==========================
+
+<?php
+
+m::self();
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (scoped_call_expression
+      (name)
+      (name)
+      (arguments))))
+
+========================================
+Symmetric array destructuring
+========================================
+
+<?php
+$data = [
+    [1, 'Tom'],
+    [2, 'Fred'],
+];
+
+// list() style
+list($id1, $name1) = $data[0];
+
+// Support trailing commma
+list($id1, $name1,) = $data[0];
+
+// Support skipping arguments
+list(, $name1) = $data[0];
+
+// [] style
+[$id1, $name1] = $data[0];
+
+// Support trailing commma
+[$id1, $name1,] = $data[0];
+
+// Support skipping arguments
+[, $name1] = $data[0];
+
+[$error, $canonicalized] = Json::canonicalize($actual);
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name (name))
+      (array_creation_expression
+        (array_element_initializer
+          (array_creation_expression
+            (array_element_initializer (integer))
+            (array_element_initializer (string (string_content)))
+          )
+        )
+        (array_element_initializer
+          (array_creation_expression
+            (array_element_initializer (integer))
+            (array_element_initializer (string (string_content)))
+          )
+        )
+      )
+    )
+  )
+  (comment)
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (variable_name (name))
+        (variable_name (name))
+      )
+      (subscript_expression
+        (variable_name (name))
+        (integer)
+      )
+    )
+  )
+  (comment)
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (variable_name (name))
+        (variable_name (name))
+      )
+      (subscript_expression
+        (variable_name (name))
+        (integer)
+      )
+    )
+  )
+  (comment)
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (variable_name (name))
+      )
+      (subscript_expression
+        (variable_name (name))
+        (integer)
+      )
+    )
+  )
+  (comment)
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (variable_name (name))
+        (variable_name (name))
+      )
+      (subscript_expression
+        (variable_name (name))
+        (integer)
+      )
+    )
+  )
+  (comment)
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (variable_name (name))
+        (variable_name (name))
+      )
+      (subscript_expression
+        (variable_name (name))
+        (integer)
+      )
+    )
+  )
+  (comment)
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (variable_name (name))
+      )
+      (subscript_expression
+        (variable_name (name))
+        (integer)
+      )
+    )
+  )
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (variable_name (name))
+        (variable_name (name))
+      )
+      (scoped_call_expression
+        (name)
+        (name)
+        (arguments
+          (argument
+            (variable_name (name))
+          )
+        )
+      )
+    )
+  )
+)
+
+================================================================
+Precedence of assignment, `or`, `xor`, and `and`
+================================================================
+
+<?php
+$x = true and false;
+$x = true or false;
+$x = true xor false;
+$x = true and true or true xor true and true;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      (assignment_expression
+        (variable_name (name))
+        (boolean))
+      (boolean)))
+  (expression_statement
+    (binary_expression
+      (assignment_expression
+        (variable_name (name))
+        (boolean))
+      (boolean)))
+  (expression_statement
+    (binary_expression
+      (assignment_expression
+        (variable_name (name))
+        (boolean))
+      (boolean)))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (assignment_expression
+          (variable_name (name))
+          (boolean))
+        (boolean))
+      (binary_expression
+        (boolean)
+        (binary_expression
+          (boolean)
+          (boolean))))))
+
+============================================
+Associativity of conditional
+============================================
+
+<?php
+true ? false : true ? "a" : "b";
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (conditional_expression
+      (conditional_expression
+        (boolean)
+        (boolean)
+        (boolean))
+      (encapsed_string (string_content))
+      (encapsed_string (string_content)))))
+
+=================================================
+Associativity of null-coalescence
+=================================================
+
+<?php
+NULL ?? NULL ?? 1;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      (null)
+      (binary_expression
+        (null)
+        (integer)))))
+
+=========================================
+Associativity of negation
+=========================================
+
+<?php
+-1 * -1;
+!$i instanceof object;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      left: (unary_op_expression
+        argument: (integer))
+      right: (unary_op_expression
+        argument: (integer))))
+  (expression_statement
+    (unary_op_expression
+      argument: (binary_expression
+        left: (variable_name (name))
+        right: (name)))))
+
+====================================
+Augmented assignment
+====================================
+
+<?php
+$i .= $j = "a";
+$i += $j += 3;
+$i .= "a" . "b";
+"a" . $i .= "b";
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (augmented_assignment_expression
+      (variable_name
+        (name))
+      (assignment_expression
+        (variable_name
+          (name))
+        (encapsed_string (string_content)))))
+  (expression_statement
+    (augmented_assignment_expression
+      (variable_name
+        (name))
+      (augmented_assignment_expression
+        (variable_name
+          (name))
+        (integer))))
+  (expression_statement
+    (augmented_assignment_expression
+      (variable_name
+        (name))
+      (binary_expression
+        (encapsed_string (string_content))
+        (encapsed_string (string_content)))))
+  (expression_statement
+    (binary_expression
+      (encapsed_string (string_content))
+      (augmented_assignment_expression
+        (variable_name
+          (name))
+        (encapsed_string (string_content))))))
+
+=======================================
+Nested assignemnts
+==============================
+
+<?php
+$c = $d[0] = $d[2] = $i;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name (name))
+      (assignment_expression
+        (subscript_expression (variable_name (name)) (integer))
+        (assignment_expression
+          (subscript_expression (variable_name (name)) (integer))
+          (variable_name (name)))))))
+
+===============================================
+All binary op precedence levels
+===============================================
+
+<?php
+1 or 2 xor 3 and $i .= 4 ?? 5 || 6 && 7 | 8 ^ 9 & 10 == 11 > 12 << 13 + 14 * (int) 15 instanceof foo;
+(int) 1 instanceof foo / 3 - 4 >> 5 <= 6 <=> 7 & 8 ^ 9 | 10 && 11 || 12 ?? $i += 13 and 14 xor 15 or 16;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      (integer)
+      (binary_expression
+        (integer)
+        (binary_expression
+          (integer)
+          (augmented_assignment_expression
+            (variable_name
+              (name))
+            (binary_expression
+              (integer)
+              (binary_expression
+                (integer)
+                (binary_expression
+                  (integer)
+                  (binary_expression
+                    (integer)
+                    (binary_expression
+                      (integer)
+                      (binary_expression
+                        (integer)
+                        (binary_expression
+                          (integer)
+                          (binary_expression
+                            (integer)
+                            (binary_expression
+                              (integer)
+                              (binary_expression
+                                (integer)
+                                (binary_expression
+                                  (integer)
+                                  (binary_expression
+                                    (cast_expression
+                                      (cast_type)
+                                      (integer))
+                                      (name))))))))))))))))))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (binary_expression
+          (binary_expression
+            (binary_expression
+              (binary_expression
+                (binary_expression
+                  (binary_expression
+                    (binary_expression
+                      (binary_expression
+                        (binary_expression
+                          (binary_expression
+                            (binary_expression
+                              (binary_expression
+                                (binary_expression
+                                  (cast_expression
+                                    (cast_type)
+                                    (integer))
+                                    (name))
+                                (integer))
+                              (integer))
+                            (integer))
+                          (integer))
+                        (integer))
+                      (integer))
+                    (integer))
+                  (integer))
+                (integer))
+              (integer))
+            (augmented_assignment_expression
+              (variable_name
+                (name))
+              (integer)))
+          (integer))
+        (integer))
+      (integer))))
+
+==============================
+Concatenation precedence
+==============================
+
+<?php
+
+"3" . "5" + 7;
+
+---
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      (encapsed_string (string_content))
+      (binary_expression
+        (encapsed_string (string_content))
+        (integer)
+      )
+    )
+  )
+)
+
+==============================
+Arrays
+==============================
+
+<?php
+print_r([1, 2, 3]);
+print_r(["foo" => "orange", "bar" => "apple", "baz" => "lemon"]);
+$a = [...$values];
+
+---
+
+(program
+  (php_tag)
+  (expression_statement (function_call_expression
+    (name)
+    (arguments
+      (argument
+        (array_creation_expression
+          (array_element_initializer (integer))
+          (array_element_initializer (integer))
+          (array_element_initializer (integer)))))))
+  (expression_statement
+    (function_call_expression
+      (name)
+      (arguments
+        (argument
+          (array_creation_expression
+            (array_element_initializer (encapsed_string (string_content)) (encapsed_string (string_content)))
+            (array_element_initializer (encapsed_string (string_content)) (encapsed_string (string_content)))
+            (array_element_initializer (encapsed_string (string_content)) (encapsed_string (string_content))))))))
+  (expression_statement
+    (assignment_expression
+      (variable_name (name))
+      (array_creation_expression
+        (array_element_initializer
+          (variadic_unpacking
+            (variable_name (name))))))))
+
+===============================================
+Anonymous functions
+===============================================
+
+<?php
+header_register_callback(
+  function() { echo "sent";}
+);
+
+ob_start(function($buffer) use (&$storage) { $storage .= $buffer; }, 20);
+ob_start(function($buffer) use (&$storage,) { $storage .= $buffer; }, 20);
+
+static function &($a) { return $a; };
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (function_call_expression
+      function: (name)
+      arguments: (arguments
+        (argument
+          (anonymous_function
+            parameters: (formal_parameters)
+            body: (compound_statement
+              (echo_statement (encapsed_string (string_content)))))))))
+  (expression_statement
+    (function_call_expression
+      function: (name)
+      arguments: (arguments
+        (argument
+          (anonymous_function
+            parameters: (formal_parameters (simple_parameter name: (variable_name (name))))
+            (anonymous_function_use_clause (by_ref (variable_name (name))))
+            body: (compound_statement (expression_statement (augmented_assignment_expression
+              left: (variable_name (name))
+              right: (variable_name (name)))))))
+        (argument (integer)))))
+  (expression_statement
+    (function_call_expression
+      function: (name)
+      arguments: (arguments
+        (argument
+          (anonymous_function
+            parameters: (formal_parameters (simple_parameter name: (variable_name (name))))
+            (anonymous_function_use_clause (by_ref (variable_name (name))))
+            body: (compound_statement (expression_statement (augmented_assignment_expression
+              left: (variable_name (name))
+              right: (variable_name (name)))))))
+        (argument (integer)))))
+  (expression_statement
+    (anonymous_function
+      static_modifier: (static_modifier)
+      reference_modifier: (reference_modifier)
+      parameters: (formal_parameters
+        (simple_parameter
+          name: (variable_name
+            (name))))
+      body: (compound_statement
+        (return_statement
+          (variable_name
+            (name)))))))
+
+
+================================
+Throw expressions
+================================
+
+<?php
+throw new Exception(__METHOD__);
+
+$value = !empty($array)
+    ? reset($array)
+    : throw new InvalidArgumentException();
+
+$condition && throw new Exception();
+$condition || throw new Exception();
+$condition and throw new Exception();
+$condition or throw new Exception();
+
+throw $this->createNotFoundException();
+throw static::createNotFoundException();
+throw $userIsAuthorized ? new ForbiddenException() : new UnauthorizedException();
+throw $maybeNullException ?? new Exception();
+throw $exception = new Exception();
+throw $condition1 && $condition2 ? new Exception1() : new Exception2();
+throw $exception ??= new Exception();
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (throw_expression
+      (object_creation_expression
+        (name)
+        (arguments (argument (name))))))
+  (expression_statement
+    (assignment_expression
+      left: (variable_name (name))
+      right: (conditional_expression
+        condition: (unary_op_expression
+          argument: (function_call_expression
+            function: (name)
+            arguments: (arguments (argument (variable_name (name))))))
+        body: (function_call_expression
+          function: (name)
+          arguments: (arguments (argument (variable_name (name)))))
+        alternative: (throw_expression
+          (object_creation_expression
+            (name)
+            (arguments))))))
+  (expression_statement
+    (binary_expression
+      left: (variable_name (name))
+      right: (throw_expression
+        (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (binary_expression
+      left: (variable_name (name))
+      right: (throw_expression
+        (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (binary_expression
+      left: (variable_name (name))
+      right: (throw_expression
+        (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (binary_expression
+      left: (variable_name (name))
+      right: (throw_expression
+        (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (throw_expression
+      (member_call_expression
+        object: (variable_name (name))
+        name: (name)
+        arguments: (arguments))))
+  (expression_statement
+    (throw_expression
+      (scoped_call_expression
+        scope: (relative_scope)
+        name: (name)
+        arguments: (arguments))))
+  (expression_statement
+    (throw_expression
+      (conditional_expression
+        condition: (variable_name (name))
+        body: (object_creation_expression
+          (name)
+          (arguments))
+        alternative: (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (throw_expression
+      (binary_expression
+        left: (variable_name (name))
+        right: (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (throw_expression
+      (assignment_expression
+        left: (variable_name (name))
+        right: (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (throw_expression
+      (conditional_expression
+        condition: (binary_expression
+          left: (variable_name (name))
+          right: (variable_name (name)))
+        body: (object_creation_expression
+          (name)
+          (arguments))
+        alternative: (object_creation_expression
+          (name)
+          (arguments)))))
+  (expression_statement
+    (throw_expression
+      (augmented_assignment_expression
+        left: (variable_name (name))
+        right: (object_creation_expression
+          (name)
+          (arguments))))))
+
+===============================================
+Nullsafe operator
+===============================================
+
+<?php
+
+$a?->b;
+$a?->b($c);
+new $a?->b;
+$country = $session?->user?->getAddress()?->country;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (nullsafe_member_access_expression
+      (variable_name (name))
+      (name)
+    )
+  )
+  (expression_statement
+    (nullsafe_member_call_expression
+      (variable_name (name))
+      (name)
+      (arguments (argument (variable_name (name))))
+    )
+  )
+  (expression_statement
+    (object_creation_expression
+      (nullsafe_member_access_expression
+        (variable_name (name))
+        (name)
+      )
+    )
+  )
+  (expression_statement
+    (assignment_expression
+      (variable_name (name))
+      (nullsafe_member_access_expression
+        (nullsafe_member_call_expression
+          (nullsafe_member_access_expression
+            (variable_name (name))
+            (name)
+          )
+          (name)
+          (arguments)
+        )
+        (name)
+      )
+    )
+  )
+)
+
+
+===============================================
+First class callable syntax
+===============================================
+
+<?php
+foo(...);
+$this->foo(...);
+A::foo(...);
+
+// These are invalid, but accepted on the parser level.
+new Foo(...);
+
+#[Foo(...)]
+function foo() {}
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (function_call_expression
+      (name)
+      (arguments (variadic_placeholder))
+    )
+  )
+  (expression_statement
+    (member_call_expression
+      (variable_name (name))
+      (name)
+      (arguments (variadic_placeholder))
+    )
+  )
+  (expression_statement
+    (scoped_call_expression
+      (name)
+      (name)
+      (arguments (variadic_placeholder))
+    )
+  )
+
+  (comment)
+  (expression_statement
+    (object_creation_expression
+      (name)
+      (arguments (variadic_placeholder))
+    )
+  )
+
+  (function_definition
+    (attribute_list
+      (attribute_group
+        (attribute
+          (name)
+          (arguments (variadic_placeholder))
+        )
+      )
+    )
+    (name)
+    (formal_parameters)
+    (compound_statement)
+  )
+)
+
+
+===============================================
+Match expressions
+===============================================
+
+<?php
+
+$statement = match ($a) {
+    Lexer::T_SELECT, $c, => $b,
+    Lexer::T_UPDATE => updateStatement(),
+    Lexer::T_DELETE => $this->DeleteStatement(),
+    default => $this->syntaxError('SELECT, UPDATE or DELETE'),
+};
+
+---
+
+ (program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name (name))
+      (match_expression
+        (parenthesized_expression (variable_name (name)))
+        (match_block
+          (match_conditional_expression
+            (match_condition_list
+              (class_constant_access_expression
+                (name)
+                (name)
+              )
+              (variable_name (name))
+            )
+            (variable_name (name))
+          )
+          (match_conditional_expression
+            (match_condition_list
+              (class_constant_access_expression
+                (name)
+                (name)
+              )
+            )
+            (function_call_expression (name) (arguments))
+          )
+          (match_conditional_expression
+            (match_condition_list
+              (class_constant_access_expression
+                (name)
+                (name)
+              )
+            )
+            (member_call_expression
+              (variable_name (name))
+              (name)
+              (arguments)
+            )
+          )
+          (match_default_expression
+            (member_call_expression
+              (variable_name (name))
+              (name)
+              (arguments (argument (string (string_content))))
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+===============================================
+Arrow functions
+===============================================
+
+<?php
+
+fn(bool $a) => $a;
+fn($x = 42) => $x;
+static fn(&$x) => $x;
+fn&($x) => $x;
+fn($x, ...$rest) => $rest;
+fn(): int => $x;
+
+$fn1 = fn($x) => $x + $y;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (arrow_function
+      parameters: (formal_parameters
+        (simple_parameter
+          type: (primitive_type)
+          name: (variable_name (name))
+        )
+      )
+      body: (variable_name (name))
+    )
+  )
+  (expression_statement
+    (arrow_function
+      parameters: (formal_parameters
+        (simple_parameter
+          name: (variable_name (name))
+          default_value: (integer))
+        )
+        body: (variable_name (name)
+      )
+    )
+  )
+  (expression_statement
+    (arrow_function
+      static_modifier: (static_modifier)
+      parameters: (formal_parameters
+        (simple_parameter
+          reference_modifier: (reference_modifier)
+          name: (variable_name (name))
+        )
+      )
+      body: (variable_name (name))
+    )
+  )
+  (expression_statement
+    (arrow_function
+      reference_modifier: (reference_modifier)
+      parameters: (formal_parameters
+        (simple_parameter
+          name: (variable_name (name))
+        )
+      )
+      body: (variable_name (name))
+    )
+  )
+  (expression_statement
+    (arrow_function
+      parameters: (formal_parameters
+        (simple_parameter
+          name: (variable_name (name))) (variadic_parameter name: (variable_name (name)))) body: (variable_name (name))))
+  (expression_statement
+    (arrow_function
+      parameters: (formal_parameters)
+      return_type: (primitive_type)
+      body: (variable_name (name))
+    )
+  )
+  (expression_statement
+    (assignment_expression
+      left: (variable_name (name))
+      right: (arrow_function
+        parameters: (formal_parameters
+          (simple_parameter
+            name: (variable_name (name))
+          )
+        )
+        body: (binary_expression
+          left: (variable_name (name))
+          right: (variable_name (name))
+        )
+      )
+    )
+  )
+)
+
+====================================
+Functions with named arguments
+====================================
+
+<?php
+
+array_fill(start_index: 0, num: 100, value: $val);
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (function_call_expression
+      (name)
+      (arguments
+        (argument (name) (integer))
+        (argument (name) (integer))
+        (argument (name) (variable_name (name)))
+      )
+    )
+  )
+)
+
+==========================================
+Precedence between concatenation and shift
+==========================================
+
+<?php
+$a . $c << $b ;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      (variable_name
+        (name))
+        (binary_expression
+          (variable_name
+            (name))
+          (variable_name
+            (name))))))
+
+
+====================================
+References
+====================================
+
+<?php
+
+$a =& new B;
+$a = &$x;
+
+function test($a, &... $b) {}
+function test($a, Type &... $b) {}
+
+static fn(&$x) => $x;
+fn&($x) => $x;
+
+function() use($a, &$b) {};
+function &($a) {};
+
+foreach ($a as &$b) {}
+foreach ($a as $b => &$c) {}
+
+f(&$a);
+
+function a(&$b) {}
+function &a($b) {}
+
+$target = &$GLOBALS['_' . \strtoupper($array)];
+
+array('a', &$b, 'c' => 'd', 'e' => &$f);
+
+[&$x];
+
+list(&$v) = $x;
+
+list('k' => &$v) = $x;
+
+[&$v] = $x;
+
+['k' => &$v] = $x;
+
+class A {
+    function foo() {
+        $this->a = 3;
+        return [&$this->a];
+    }
+}
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (reference_assignment_expression
+      (variable_name (name))
+      (object_creation_expression (name))
+    )
+  )
+  (expression_statement
+    (reference_assignment_expression
+      (variable_name (name))
+      (variable_name (name))
+    )
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (variable_name (name))
+      )
+      (variadic_parameter
+        (reference_modifier)
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (variable_name (name))
+      )
+      (variadic_parameter
+        (named_type (name))
+        (reference_modifier)
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+  (expression_statement
+    (arrow_function
+      (static_modifier)
+      (formal_parameters
+        (simple_parameter
+          (reference_modifier)
+          (variable_name (name))
+        )
+      )
+      (variable_name (name))
+    )
+  )
+  (expression_statement
+    (arrow_function
+      (reference_modifier)
+      (formal_parameters
+        (simple_parameter
+          (variable_name (name))
+        )
+      )
+      (variable_name (name))
+    )
+  )
+  (expression_statement
+    (anonymous_function
+      (formal_parameters)
+      (anonymous_function_use_clause
+        (variable_name (name))
+        (by_ref (variable_name (name)))
+      )
+      (compound_statement)
+    )
+  )
+  (expression_statement
+    (anonymous_function
+      (reference_modifier)
+      (formal_parameters
+        (simple_parameter
+          (variable_name (name))
+        )
+      )
+      (compound_statement)
+    )
+  )
+  (foreach_statement
+    (variable_name (name))
+    (by_ref (variable_name (name)))
+    (compound_statement)
+  )
+  (foreach_statement
+    (variable_name (name))
+    (pair
+      (variable_name (name))
+      (by_ref (variable_name (name)))
+    )
+    (compound_statement)
+  )
+  (expression_statement
+    (function_call_expression
+      (name)
+      (arguments
+        (argument
+          (reference_modifier)
+          (variable_name (name))
+        )
+      )
+    )
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (reference_modifier)
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+  (function_definition
+    (reference_modifier)
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+  (expression_statement
+    (reference_assignment_expression
+      (variable_name (name))
+      (subscript_expression
+        (variable_name (name))
+        (binary_expression
+          (string (string_content))
+          (function_call_expression
+            (qualified_name (name))
+            (arguments
+              (argument (variable_name (name)))
+            )
+          )
+        )
+      )
+    )
+  )
+  (expression_statement
+    (array_creation_expression
+      (array_element_initializer (string (string_content)))
+      (array_element_initializer (by_ref (variable_name (name))))
+      (array_element_initializer (string (string_content)) (string (string_content)))
+      (array_element_initializer (string (string_content)) (by_ref (variable_name (name))))
+    )
+  )
+  (expression_statement
+    (array_creation_expression
+      (array_element_initializer (by_ref (variable_name (name))))
+    )
+  )
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (by_ref
+          (variable_name (name))
+        )
+      )
+      (variable_name (name))
+    )
+  )
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (string (string_content))
+        (by_ref (variable_name (name)))
+      )
+      (variable_name (name))
+    )
+  )
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (by_ref (variable_name (name)))
+      )
+      (variable_name (name))
+    )
+  )
+  (expression_statement
+    (assignment_expression
+      (list_literal
+        (string (string_content))
+        (by_ref (variable_name (name)))
+      )
+      (variable_name (name))
+    )
+  )
+  (class_declaration
+    (name)
+    (declaration_list
+      (method_declaration
+        (name)
+        (formal_parameters)
+        (compound_statement
+          (expression_statement
+            (assignment_expression
+              (member_access_expression
+                (variable_name (name))
+                (name)
+              )
+              (integer)
+            )
+          )
+          (return_statement
+            (array_creation_expression
+              (array_element_initializer
+                (by_ref
+                  (member_access_expression
+                    (variable_name (name))
+                    (name)
+                  )
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+)
+
+===============================================
+Empty match expressions
+===============================================
+
+<?php
+
+$statement = match ($a) {
+};
+
+---
+
+ (program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name (name))
+      (match_expression
+        (parenthesized_expression (variable_name (name)))
+        (match_block)
+      )
+    )
+  )
+)
+
+===============================================
+Dynamic class constant access
+===============================================
+
+<?php
+Foo::{$bar};
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (class_constant_access_expression
+      (name)
+      (name (variable_name (name))))))
+
+
+===============================================
+Class instantiation
+===============================================
+
+<?php
+
+// old style
+(new Foo())::CONSTANT;
+(new Foo())::$staticProperty;
+(new Foo())::staticMethod();
+(new Foo())->property;
+(new Foo())->method();
+(new Foo())();
+(new Foo(['value']))[0];
+
+// class name
+new Foo()::CONSTANT;
+new Foo()::$staticProperty;
+new Foo()::staticMethod();
+new Foo()->property;
+new Foo()->method();
+new Foo()();
+new Foo(['value'])[0];
+
+// dynamic class name
+new $fooClass()::CONSTANT;
+new $fooClass()::$staticProperty;
+new $fooClass()::staticMethod();
+new $fooClass()->property;
+new $fooClass()->method();
+new $fooClass()();
+new $fooClass(['value'])[0];
+
+// expression
+new (trim(' Foo '))()::CONSTANT;
+new (trim(' Foo '))()::$staticProperty;
+new (trim(' Foo '))()::staticMethod();
+new (trim(' Foo '))()->property;
+new (trim(' Foo '))()->method();
+new (trim(' Foo '))()();
+new (trim(' Foo '))(['value'])[0];
+
+// anonymous class
+new class { const CONSTANT = 'constant'; }::CONSTANT;
+new class { public static $staticProperty = 'staticProperty'; }::$staticProperty;
+new class { public static function staticMethod() { return 'staticMethod'; } }::staticMethod();
+new class { public $property = 'property'; }->property;
+new class { public function method() { return 'method'; } }->method();
+new class { public function __invoke() { return '__invoke'; } }();
+new class (['value']) extends ArrayObject {}[0];
+---
+
+(program
+  (php_tag)
+  (comment)
+  (expression_statement
+    (class_constant_access_expression
+      (parenthesized_expression
+        (object_creation_expression
+          (name)
+          (arguments)))
+      (name)))
+  (expression_statement
+    (scoped_property_access_expression
+      (parenthesized_expression
+        (object_creation_expression
+          (name)
+          (arguments)))
+      (variable_name
+        (name))))
+  (expression_statement
+    (scoped_call_expression
+      (parenthesized_expression
+        (object_creation_expression
+          (name)
+          (arguments)))
+      (name)
+      (arguments)))
+  (expression_statement
+    (member_access_expression
+      (parenthesized_expression
+        (object_creation_expression
+          (name)
+          (arguments)))
+      (name)))
+  (expression_statement
+    (member_call_expression
+      (parenthesized_expression
+        (object_creation_expression
+          (name)
+          (arguments)))
+      (name)
+      (arguments)))
+  (expression_statement
+    (function_call_expression
+      (parenthesized_expression
+        (object_creation_expression
+          (name)
+          (arguments)))
+      (arguments)))
+  (expression_statement
+    (subscript_expression
+      (parenthesized_expression
+        (object_creation_expression
+          (name)
+          (arguments
+            (argument
+              (array_creation_expression
+                (array_element_initializer
+                  (string
+                    (string_content))))))))
+      (integer)))
+  (comment)
+  (expression_statement
+    (class_constant_access_expression
+      (object_creation_expression
+        (name)
+        (arguments))
+      (name)))
+  (expression_statement
+    (scoped_property_access_expression
+      (object_creation_expression
+        (name)
+        (arguments))
+      (variable_name
+        (name))))
+  (expression_statement
+    (scoped_call_expression
+      (object_creation_expression
+        (name)
+        (arguments))
+      (name)
+      (arguments)))
+  (expression_statement
+    (member_access_expression
+      (object_creation_expression
+        (name)
+        (arguments))
+      (name)))
+  (expression_statement
+    (member_call_expression
+      (object_creation_expression
+        (name)
+        (arguments))
+      (name)
+      (arguments)))
+  (expression_statement
+    (function_call_expression
+      (object_creation_expression
+        (name)
+        (arguments))
+      (arguments)))
+  (expression_statement
+    (subscript_expression
+      (object_creation_expression
+        (name)
+        (arguments
+          (argument
+            (array_creation_expression
+              (array_element_initializer
+                (string
+                  (string_content)))))))
+      (integer)))
+  (comment)
+  (expression_statement
+    (class_constant_access_expression
+      (object_creation_expression
+        (variable_name
+          (name))
+        (arguments))
+      (name)))
+  (expression_statement
+    (scoped_property_access_expression
+      (object_creation_expression
+        (variable_name
+          (name))
+        (arguments))
+      (variable_name
+        (name))))
+  (expression_statement
+    (scoped_call_expression
+      (object_creation_expression
+        (variable_name
+          (name))
+        (arguments))
+      (name)
+      (arguments)))
+  (expression_statement
+    (member_access_expression
+      (object_creation_expression
+        (variable_name
+          (name))
+        (arguments))
+      (name)))
+  (expression_statement
+    (member_call_expression
+      (object_creation_expression
+        (variable_name
+          (name))
+        (arguments))
+      (name)
+      (arguments)))
+  (expression_statement
+    (function_call_expression
+      (object_creation_expression
+        (variable_name
+          (name))
+        (arguments))
+      (arguments)))
+  (expression_statement
+    (subscript_expression
+      (object_creation_expression
+        (variable_name
+          (name))
+        (arguments
+          (argument
+            (array_creation_expression
+              (array_element_initializer
+                (string
+                  (string_content)))))))
+      (integer)))
+  (comment)
+  (expression_statement
+    (class_constant_access_expression
+      (object_creation_expression
+        (parenthesized_expression
+          (function_call_expression
+            (name)
+            (arguments
+              (argument
+                (string
+                  (string_content))))))
+        (arguments))
+      (name)))
+  (expression_statement
+    (scoped_property_access_expression
+      (object_creation_expression
+        (parenthesized_expression
+          (function_call_expression
+            (name)
+            (arguments
+              (argument
+                (string
+                  (string_content))))))
+        (arguments))
+      (variable_name
+        (name))))
+  (expression_statement
+    (scoped_call_expression
+      (object_creation_expression
+        (parenthesized_expression
+          (function_call_expression
+            (name)
+            (arguments
+              (argument
+                (string
+                  (string_content))))))
+        (arguments))
+      (name)
+      (arguments)))
+  (expression_statement
+    (member_access_expression
+      (object_creation_expression
+        (parenthesized_expression
+          (function_call_expression
+            (name)
+            (arguments
+              (argument
+                (string
+                  (string_content))))))
+        (arguments))
+      (name)))
+  (expression_statement
+    (member_call_expression
+      (object_creation_expression
+        (parenthesized_expression
+          (function_call_expression
+            (name)
+            (arguments
+              (argument
+                (string
+                  (string_content))))))
+        (arguments))
+      (name)
+      (arguments)))
+  (expression_statement
+    (function_call_expression
+      (object_creation_expression
+        (parenthesized_expression
+          (function_call_expression
+            (name)
+            (arguments
+              (argument
+                (string
+                  (string_content))))))
+        (arguments))
+      (arguments)))
+  (expression_statement
+    (subscript_expression
+      (object_creation_expression
+        (parenthesized_expression
+          (function_call_expression
+            (name)
+            (arguments
+              (argument
+                (string
+                  (string_content))))))
+        (arguments
+          (argument
+            (array_creation_expression
+              (array_element_initializer
+                (string
+                  (string_content)))))))
+      (integer)))
+  (comment)
+  (expression_statement
+    (class_constant_access_expression
+      (object_creation_expression
+        (anonymous_class
+          (declaration_list
+            (const_declaration
+              (const_element
+                (name)
+                (string
+                  (string_content)))))))
+      (name)))
+  (expression_statement
+    (scoped_property_access_expression
+      (object_creation_expression
+        (anonymous_class
+          (declaration_list
+            (property_declaration
+              (visibility_modifier)
+              (static_modifier)
+              (property_element
+                (variable_name
+                  (name))
+                (string
+                 (string_content)))))))
+      (variable_name
+        (name))))
+  (expression_statement
+    (scoped_call_expression
+      (object_creation_expression
+        (anonymous_class
+          (declaration_list
+            (method_declaration
+              (visibility_modifier)
+              (static_modifier)
+              (name)
+              (formal_parameters)
+              (compound_statement
+                (return_statement
+                  (string
+                    (string_content))))))))
+      (name)
+      (arguments)))
+  (expression_statement
+    (member_access_expression
+      (object_creation_expression
+        (anonymous_class
+          (declaration_list
+            (property_declaration
+              (visibility_modifier)
+              (property_element
+                (variable_name
+                  (name))
+                (string
+                 (string_content)))))))
+      (name)))
+  (expression_statement
+    (member_call_expression
+      (object_creation_expression
+        (anonymous_class
+          (declaration_list
+            (method_declaration
+              (visibility_modifier)
+              (name)
+              (formal_parameters)
+              (compound_statement
+                (return_statement
+                  (string
+                    (string_content))))))))
+      (name)
+      (arguments)))
+  (expression_statement
+    (function_call_expression
+      (object_creation_expression
+        (anonymous_class
+          (declaration_list
+            (method_declaration
+              (visibility_modifier)
+              (name)
+              (formal_parameters)
+              (compound_statement
+                (return_statement
+                  (string
+                    (string_content))))))))
+      (arguments)))
+  (expression_statement
+    (subscript_expression
+      (object_creation_expression
+        (anonymous_class
+          (arguments
+            (argument
+              (array_creation_expression
+                (array_element_initializer
+                  (string
+                    (string_content))))))
+          (base_clause
+            (name))
+          (declaration_list)))
+      (integer))))
+
+
+===============================================
+UTF-8 identifiers
+===============================================
+
+<?php
+$漢字;
+
+<<<漢漢字
+  This is a heredoc
+漢漢字;
+
+<<<'字漢'
+  This is a nowdoc.
+字漢;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (variable_name (name)))
+    (expression_statement
+      (heredoc
+        (heredoc_start)
+        (heredoc_body
+          (string_content))
+        (heredoc_end)))
+    (expression_statement
+      (nowdoc
+        (heredoc_start)
+        (nowdoc_body
+          (nowdoc_string))
+        (heredoc_end))))
+
+===============================================
+Yield expressions
+===============================================
+
+<?php
+
+yield;
+yield $a;
+yield from $a;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (yield_expression))
+  (expression_statement
+    (yield_expression
+      (array_element_initializer
+        (variable_name (name)))))
+  (expression_statement
+    (yield_expression (variable_name (name)))))

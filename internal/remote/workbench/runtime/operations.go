@@ -278,6 +278,11 @@ type goalController interface {
 	GoalStatus() string
 }
 
+type durableGoalController interface {
+	goalController
+	SetGoalDurable(string, string) error
+}
+
 func protocolGoal(ctrl goalController) (string, protocol.GoalStatus) {
 	goal := strings.TrimSpace(ctrl.Goal())
 	status := protocol.GoalStatus(ctrl.GoalStatus())

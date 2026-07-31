@@ -1,0 +1,60 @@
+{
+  "name": "rehype-katex",
+  "version": "7.0.1",
+  "description": "rehype plugin to transform inline and block math with KaTeX",
+  "license": "MIT",
+  "keywords": [
+    "hast",
+    "html",
+    "katex",
+    "latex",
+    "markdown",
+    "math",
+    "mdast",
+    "plugin",
+    "rehype",
+    "rehype-plugin",
+    "remark",
+    "tex",
+    "unified"
+  ],
+  "repository": "https://github.com/remarkjs/remark-math/tree/main/packages/rehype-katex",
+  "bugs": "https://github.com/remarkjs/remark-math/issues",
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/unified"
+  },
+  "author": "Junyoung Choi <fluke8259@gmail.com> (https://rokt33r.github.io)",
+  "contributors": [
+    "Junyoung Choi <fluke8259@gmail.com> (https://rokt33r.github.io)",
+    "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)"
+  ],
+  "sideEffects": false,
+  "type": "module",
+  "exports": "./index.js",
+  "files": [
+    "lib/",
+    "index.d.ts.map",
+    "index.d.ts",
+    "index.js"
+  ],
+  "dependencies": {
+    "@types/hast": "^3.0.0",
+    "@types/katex": "^0.16.0",
+    "hast-util-from-html-isomorphic": "^2.0.0",
+    "hast-util-to-text": "^4.0.0",
+    "katex": "^0.16.0",
+    "unist-util-visit-parents": "^6.0.0",
+    "vfile": "^6.0.0"
+  },
+  "scripts": {
+    "test-api": "node --conditions development test.js",
+    "test": "npm run build && npm run test-api"
+  },
+  "xo": {
+    "prettier": true,
+    "rules": {
+      "unicorn/prefer-at": "off"
+    }
+  }
+}

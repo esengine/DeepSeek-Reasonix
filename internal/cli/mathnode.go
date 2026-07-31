@@ -12,7 +12,8 @@ var kindMath = ast.NewNodeKind("Math")
 
 type mathNode struct {
 	ast.BaseInline
-	value   string
+	value   string // Unicode rendering for terminal display
+	source  string // original LaTeX source (e.g. "\alpha", "\frac{1}{2}")
 	display bool
 }
 
@@ -62,5 +63,6 @@ func (p *mathParser) Parse(parent ast.Node, block text.Reader, pc parser.Context
 	}
 
 	block.Advance(delim + closeAt + delim)
-	return &mathNode{value: latexToUnicode(string(bytes.TrimSpace(inner))), display: display}
+	src := string(bytes.TrimSpace(inner))
+	return &mathNode{value: latexToUnicode(src), source: src, display: display}
 }

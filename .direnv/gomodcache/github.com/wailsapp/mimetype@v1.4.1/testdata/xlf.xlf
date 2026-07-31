@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="1.2" xsi:schemaLocation="urn:oasis:names:tc:xliff:document:1.2 http://docs.oasis-open.org/xliff/v1.2/os/xliff-core-1.2-strict.xsd">
+  <file original="App/Base.lproj/CBMain.storyboard" source-language="en" target-language="en" datatype="plaintext">
+    <header>
+      <tool tool-id="com.apple.dt.xcode" build-num="10E1001"/>
+    </header>
+    <body>
+      <trans-unit id="JPg-N1-33I.title">
+        <source>Prices</source>
+        <target>Prices</target>
+        <note>Class = "UITabBarItem"; title = "Prices"; ObjectID = "JPg-N1-33I";</note>
+      </trans-unit>
+      <trans-unit id="Rl0-UQ-u6L.title">
+        <source>Settings</source>
+        <target>Settings</target>
+        <note>Class = "UITabBarItem"; title = "Settings"; ObjectID = "Rl0-UQ-u6L";</note>
+      </trans-unit>
+      <trans-unit id="Vvv-j3-51d.title">
+        <source>Invite</source>
+        <target>Invite</target>
+        <note>Class = "UITabBarItem"; title = "Invite"; ObjectID = "Vvv-j3-51d";</note>
+      </trans-unit>
+      <trans-unit id="xxg-wY-IeR.title">
+        <source>Alerts</source>
+        <target>Alerts</target>
+        <note>Class = "UITabBarItem"; title = "Alerts"; ObjectID = "xxg-wY-IeR";</note>
+      </trans-unit>
+      <trans-unit id="zV5-gU-jfH.title">
+        <source>Accounts</source>
+        <target>Accounts</target>
+        <note>Class = "UITabBarItem"; title = "Accounts"; ObjectID = "zV5-gU-jfH";</note>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

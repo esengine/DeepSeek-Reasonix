@@ -17,7 +17,7 @@ reasonix-guard undo [--json]
 reasonix-guard launch [--app PATH] [--safe-mode] [--detach]
 reasonix-guard recover [--root PATH] [--project]
 reasonix-guard assist [--model PROVIDER/MODEL] [--apply] [--allow-project]
-reasonix-guard apply-plan --file PLAN.json [--yes] [--allow-project]
+reasonix-guard apply-plan --file PLAN.json [--preview-id ID] [--yes] [--allow-project]
 reasonix doctor repair [--root PATH] [--apply] [--project] [--json]
 ```
 
@@ -84,5 +84,22 @@ Guard/启动器二进制，或整个应用 Bundle（macOS）。只有新版本�
 预览和配置统一 diff，再要求用户确认。计划不能运行 shell、修改凭据或会话正文，也不能
 指定任意文件路径。
 
-所有新增状态文件都是可选且向后兼容的；旧版 Reasonix 会直接忽略，缺失新字段时按安全
-零值处理。
+机器可读的 `assist` 输出包含 `planId` 和 `previewId`。Host 在 dry-run 后延迟确认时，
+必须把同一个 `previewId` 传给 `apply-plan`；Guard 会在写入前重新计算预览，并在计划、
+动作列表、文件 diff、派生状态输入或待回滚更新事务发生变化时拒绝执行。非交互式
+`apply-plan --yes` 必须同时提供 `--preview-id`；交互式确认则自动绑定同一次调用中展示
+的预览。自行管理确认边界的 Go 包调用方保持源码兼容，并可通过
+`ApplyPlanOptions.ExpectedPreviewID` 启用相同校验。
+
+已确认的配置、快照和派生状态变更会在 Reasonix 进程间串行化。修复事务记录与撤销会先于
+各目标锁串行化，因此不同目标的并发修复不会交换或丢失撤销记录。Guard 获取目标锁后会
+重新校验已确认的动作及其输入，并核对最终重命名实际移走的节点。如果其他进程在修复期间
+重新创建目标文件，该进程的写入优先：Guard 不会覆盖新文件，并会报告已确认状态被移到的
+隔离位置。待确认更新的回滚绑定完整事务身份，而不只比较版本号或时间戳。文件更新保持
+`pending-update.json` 不可变，并把完整的已安装 release unit 写入当前事务专属、仅创建一次
+的 sidecar；因此进程崩溃不会在两个状态文件替换之间隐藏回滚事务。
+
+新增字段和 sidecar 都是增量数据：旧版 Reasonix 会忽略未知数据，当前版本也仍能读取缺少
+新绑定的旧事务。缺失绑定只表示安全零值，不构成破坏性操作授权；无法证明节点归属时，
+自动 handoff、健康提交或 app-bundle 回滚都会 fail closed。旧 app-bundle 备份没有目录树
+摘要时，只有显式确认且绑定该备份的修复计划预览才能执行恢复。

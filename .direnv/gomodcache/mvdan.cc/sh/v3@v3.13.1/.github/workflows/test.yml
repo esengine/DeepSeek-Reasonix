@@ -1,0 +1,220 @@
+on: [push, pull_request]
+name: Test
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.25.x, 1.26.x]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v5
+    - uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+        cache: false
+
+    - run: go test ./...
+    - run: cd moreinterp && go test ./...
+
+    - run: go test -race ./...
+      if: matrix.os == 'ubuntu-latest'
+    - run: GOARCH=386 go test -count=1 ./...
+      if: matrix.os == 'ubuntu-latest'
+    - name: confirm tests with Bash 5.2
+      run: |
+        go install mvdan.cc/dockexec@latest
+        CGO_ENABLED=0 go test -run TestRunnerRunConfirm -exec 'dockexec bash:5.2' ./interp
+      if: matrix.os == 'ubuntu-latest'
+
+    # Test that we can build for platforms that we can't currently test on.
+    - if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.26.x'
+      run: |
+        GOOS=plan9 GOARCH=amd64 go build ./...
+        GOOS=js GOARCH=wasm go build ./...
+
+    # Static checks from this point forward. Only run on one Go version and on
+    # Linux, since it's the fastest platform, and the tools behave the same.
+    - if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.26.x'
+      run: diff <(echo -n) <(gofmt -s -d .)
+    - if: matrix.os == 'ubuntu-latest' && matrix.go-version == '1.26.x'
+      run: go vet ./...
+
+  test-linux-alpine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v5
+    - name: Test as root, without cgo, and with busybox
+      run: docker run -v="$PWD:/pwd" -w=/pwd --user=1000 -e=GOCACHE=/tmp -e=CGO_ENABLED=0 golang:1.26.0-alpine go test ./...
+
+  docker:
+    name: Build and test Docker images
+    # Only deploy if previous stages pass.
+    needs: [test, test-linux-alpine]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+        # this is needed because we restart the docker daemon for experimental
+        # support
+        options: "--restart always"
+    env:
+      # Export environment variables for all stages.
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_DEPLOY_IMAGES: false
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      DOCKER_REPO: shfmt
+      # We use all platforms for which FROM images in our Dockerfile are
+      # available.
+      DOCKER_PLATFORMS: >
+        linux/386
+        linux/amd64
+        linux/arm/v7
+        linux/arm64/v8
+        linux/ppc64le
+
+      # linux/s390x TODO: reenable when we figure out its weird errors when
+      # fetching dependencies, including:
+      #
+      # zip: checksum error
+      # Get "https://proxy.golang.org/...": local error: tls: bad record MAC
+      # Get "https://proxy.golang.org/...": local error: tls: unexpected message
+      # Get "https://proxy.golang.org/...": x509: certificate signed by unknown authority
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0 # also fetch tags for 'git describe'
+    # Enable docker daemon experimental support (for 'pull --platform').
+    - name: Enable experimental support
+      run: |
+        config='/etc/docker/daemon.json'
+        if [[ -e "$config" ]]; then
+          sudo sed -i -e 's/{/{ "experimental": true, /' "$config"
+        else
+          echo '{ "experimental": true }' | sudo tee "$config"
+        fi
+        sudo systemctl restart docker
+    - uses: docker/setup-qemu-action@v3
+    - uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: network=host
+    - name: Set up env vars
+      run: |
+        set -vx
+        # Export environment variable for later stages.
+        if echo "$GITHUB_REF" | grep -q '^refs/heads/master$'; then
+          # Pushes to the master branch deploy 'latest'.
+          echo "TAG=latest" >> $GITHUB_ENV
+        elif echo "$GITHUB_REF" | grep -q '^refs/heads/docker-push-test$'; then
+          # Pushes to the test branch deploy 'latest-test'.
+          echo "TAG=latest-test" >> $GITHUB_ENV
+        elif echo "$GITHUB_REF" | grep -q '^refs/tags/'; then
+          # Pushes to a git tag use it as the docker tag.
+          echo "TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
+        else
+          # Otherwise, we build and test the image locally, but we don't push it.
+          echo "TAG=${GITHUB_SHA::8}" >> $GITHUB_ENV
+        fi
+        echo "DOCKER_BASE=test/${{ env.DOCKER_REPO }}" >> $GITHUB_ENV
+        echo "DOCKER_BUILD_PLATFORMS=${DOCKER_PLATFORMS// /,}" >> $GITHUB_ENV
+    - name: Build and push to local registry
+      uses: docker/build-push-action@v5
+      with:
+        provenance: false # temporarily work around https://github.com/containers/skopeo/issues/1874
+        context: .
+        file: ./cmd/shfmt/Dockerfile
+        platforms: ${{ env.DOCKER_BUILD_PLATFORMS }}
+        push: true
+        tags: localhost:5000/${{ env.DOCKER_BASE }}:${{ env.TAG }}
+    - name: Build and push to local registry (alpine)
+      uses: docker/build-push-action@v5
+      with:
+        provenance: false # temporarily work around https://github.com/containers/skopeo/issues/1874
+        context: .
+        file: ./cmd/shfmt/Dockerfile
+        platforms: ${{ env.DOCKER_BUILD_PLATFORMS }}
+        push: true
+        tags: localhost:5000/${{ env.DOCKER_BASE }}:${{ env.TAG }}-alpine
+        target: alpine
+    - name: Test multi-arch Docker images locally
+      run: |
+        for platform in $DOCKER_PLATFORMS; do
+          for ext in '' '-alpine'; do
+            image="localhost:5000/${DOCKER_BASE}:${TAG}${ext}"
+            msg="Testing docker image $image on platform $platform"
+            line="${msg//?/=}"
+            printf "\n${line}\n${msg}\n${line}\n"
+            docker pull -q --platform "$platform" "$image"
+            if [[ -n "$ext" ]]; then
+              echo -n "Image architecture: "
+              docker run --rm --entrypoint /bin/sh "$image" -c 'uname -m'
+            fi
+            version=$(docker run --rm "$image" --version)
+            echo "shfmt version: $version"
+            if [[ $TAG != "latest" ]] &&
+              [[ $TAG != "latest-test" ]] &&
+              [[ $TAG != "$version" ]] &&
+              ! echo "$version" | grep -q "$TAG"; then
+              echo "Version mismatch: shfmt $version tagged as $TAG"
+              exit 1
+            fi
+            docker run --rm -v "$PWD:/mnt" -w '/mnt' "$image" -d cmd/shfmt/docker-entrypoint.sh
+          done
+        done
+    - name: Check GitHub settings
+      if: >
+        github.event_name == 'push' &&
+        github.repository == 'mvdan/sh' &&
+        (github.ref == 'refs/heads/master' ||
+        github.ref == 'refs/heads/docker-push-test' ||
+        startsWith(github.ref, 'refs/tags/'))
+      run: |
+        missing=()
+        [[ -n "${{ secrets.DOCKER_USER }}" ]] || missing+=(DOCKER_USER)
+        [[ -n "${{ secrets.DOCKER_TOKEN }}" ]] || missing+=(DOCKER_TOKEN)
+        for i in "${missing[@]}"; do
+          echo "Missing github secret: $i"
+        done
+        (( ${#missing[@]} == 0 )) || exit 1
+        echo "DOCKER_DEPLOY_IMAGES=true" >> $GITHUB_ENV
+    - name: Login to DockerHub
+      if: ${{ env.DOCKER_DEPLOY_IMAGES == 'true' }}
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USER }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+    - name: Push images to DockerHub
+      if: ${{ env.DOCKER_DEPLOY_IMAGES == 'true' }}
+      run: |
+        for ext in '' '-alpine'; do
+          image_src="${DOCKER_BASE}:${TAG}${ext}"
+
+          image_dsts=("${{ secrets.DOCKER_USER }}/${{ env.DOCKER_REPO }}:${TAG}${ext}")
+          if echo $TAG | grep -q '^v3\.[0-9]\+\.[0-9]\+$'; then
+            image_dsts+=("${{ secrets.DOCKER_USER }}/${{ env.DOCKER_REPO }}:v3${ext}")
+          elif [[ $TAG == latest-test ]]; then
+            image_dsts+=("${{ secrets.DOCKER_USER }}/${{ env.DOCKER_REPO }}:v3-test${ext}")
+          fi
+
+          # Show what we're doing.
+          msg="Copy multi-arch docker images to DockerHub ($image_src with ${#image_dsts[@]} destinations)"
+          line="${msg//?/=}"
+          printf "\n${line}\n${msg}\n${line}\n"
+
+          for image_dst in "${image_dsts[@]}"; do
+            skopeo copy --all --src-tls-verify=0 docker://localhost:5000/$image_src docker://docker.io/$image_dst
+          done
+        done
+    - name: Update DockerHub description
+      if: ${{ env.DOCKER_DEPLOY_IMAGES == 'true' }}
+      uses: peter-evans/dockerhub-description@v4
+      with:
+        username: ${{ secrets.DOCKER_USER }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+        repository: ${{ secrets.DOCKER_USER }}/${{ env.DOCKER_REPO }}
+        readme-filepath: README.md

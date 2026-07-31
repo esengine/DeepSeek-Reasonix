@@ -1,0 +1,92 @@
+====================
+conditional modifier
+====================
+
+foo if bar
+return if false
+return true if foo bar
+return nil if foo
+
+---
+
+(program
+  (if_modifier
+    (identifier)
+    (identifier))
+  (if_modifier
+    (return)
+    (false))
+  (if_modifier
+    (return (argument_list (true)))
+    (call (identifier) (argument_list (identifier))))
+  (if_modifier
+    (return (argument_list (nil)))
+    (identifier)))
+
+==============
+while modifier
+==============
+
+foo while bar
+
+---
+
+(program (while_modifier
+  body: (identifier)
+  condition: (identifier)))
+
+===============
+unless modifier
+===============
+
+foo unless bar
+
+---
+
+(program (unless_modifier
+  body: (identifier)
+  condition: (identifier)))
+
+==============
+until modifier
+==============
+
+foo until bar
+
+---
+
+(program (until_modifier (identifier) (identifier)))
+
+========
+alias
+========
+
+alias :foo :bar
+alias foo bar
+alias $FOO $&
+alias foo +
+
+---
+
+(program
+  (alias (simple_symbol) (simple_symbol))
+  (alias (identifier) (identifier))
+  (alias (global_variable) (global_variable))
+  (alias (identifier) (operator)))
+
+========
+undef
+========
+
+undef :foo
+undef foo
+undef +
+undef :foo, :bar
+
+---
+
+(program
+  (undef (simple_symbol))
+  (undef (identifier))
+  (undef (operator))
+  (undef (simple_symbol) (simple_symbol)))

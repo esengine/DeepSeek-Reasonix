@@ -138,7 +138,7 @@ export function saveRightDockPreviewWidth(width: number): void {
 // dock survives restart. maximized/preview stay session-local — they are view
 // layout, not a durable preference. (Resize drag flags, button-press animation
 // flags, measured footer height, and viewport width stay as useState in App.tsx.)
-export type RightDockMode = "context" | "files" | "changed" | "remote";
+export type RightDockMode = "context" | "files" | "changed" | "remote" | "terminal";
 
 function loadWorkspacePanelOpen(): boolean {
   if (typeof window === "undefined") return WORKSPACE_PANEL_DEFAULT_OPEN;

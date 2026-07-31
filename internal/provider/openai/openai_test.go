@@ -680,6 +680,93 @@ func TestBuildRequestTemperatureSerialization(t *testing.T) {
 	}
 }
 
+func TestBuildRequestKimiK3OfficialWireShape(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "kimi-cn",
+		BaseURL: "https://api.moonshot.cn/v1",
+		Model:   "kimi-k3",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":             "max",
+			"supported_efforts":  []string{"low", "high", "max"},
+			"reasoning_protocol": "openai",
+			"extra_body": map[string]any{
+				"top_p":                 0.5,
+				"n":                     2,
+				"presence_penalty":      1,
+				"frequency_penalty":     1,
+				"max_completion_tokens": 99,
+				"trace_id":              "keep-me",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !provider.RequiresReasoningRoundTrip(p) {
+		t.Fatal("official Kimi K3 must retain raw reasoning for complete assistant-message replay")
+	}
+	req := p.(*client).buildRequest(provider.Request{
+		Temperature: provider.TemperaturePtr(0),
+		MaxTokens:   2000,
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "first"},
+			{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "provider reasoning"},
+			{Role: provider.RoleUser, Content: "use a tool"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{}`}}},
+			{Role: provider.RoleTool, ToolCallID: "call-1", Name: "lookup", Content: "result"},
+		},
+	})
+	if req.Temperature != nil || req.MaxTokens != 0 || req.MaxCompletionTokens != 2000 {
+		t.Fatalf("Kimi K3 request limits = temperature %v, max_tokens %d, max_completion_tokens %d", req.Temperature, req.MaxTokens, req.MaxCompletionTokens)
+	}
+	if req.ReasoningEffort != "max" {
+		t.Fatalf("reasoning_effort = %q, want max", req.ReasoningEffort)
+	}
+	if got := req.Messages[1].ReasoningContent; got == nil || *got != "provider reasoning" {
+		t.Fatalf("plain assistant reasoning_content = %v, want provider reasoning", got)
+	}
+	if got := req.Messages[3].ReasoningContent; got == nil || *got != "" {
+		t.Fatalf("tool-call assistant reasoning_content = %v, want explicit empty string", got)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, field := range []string{"temperature", "max_tokens", "top_p", "n", "presence_penalty", "frequency_penalty"} {
+		if _, ok := wire[field]; ok {
+			t.Fatalf("official Kimi K3 payload must omit %q: %s", field, body)
+		}
+	}
+	if wire["max_completion_tokens"] != float64(2000) || wire["trace_id"] != "keep-me" {
+		t.Fatalf("Kimi K3 payload lost output budget or unrelated extra body: %s", body)
+	}
+
+	gateway, err := New(provider.Config{
+		Name:    "opencode-go",
+		BaseURL: "https://opencode.ai/zen/go/v1",
+		Model:   "kimi-k3",
+		Extra: map[string]any{
+			"effort":            "max",
+			"supported_efforts": []string{"high", "max"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New gateway: %v", err)
+	}
+	if provider.RequiresReasoningRoundTrip(gateway) {
+		t.Fatal("Kimi-specific wire policy must not be inferred for a relay")
+	}
+	gatewayReq := gateway.(*client).buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0), MaxTokens: 77})
+	if gatewayReq.Temperature == nil || gatewayReq.MaxTokens != 77 || gatewayReq.MaxCompletionTokens != 0 {
+		t.Fatalf("relay request was changed by official Kimi compatibility: %+v", gatewayReq)
+	}
+}
+
 func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -1399,5 +1486,72 @@ func TestBuildRequestDefaultsEmptyToolParameters(t *testing.T) {
 	}
 	if got, want := string(fn["parameters"]), `{"properties":{},"type":"object"}`; got != want {
 		t.Fatalf("nil parameters should default to %s, got %s in %s", want, got, body)
+	}
+}
+
+func TestNormaliseUsageAnthropicStyleFallback(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want provider.Usage
+	}{
+		{
+			name: "cache hit",
+			json: `{"usage":{"input_tokens":21,"output_tokens":393,"cache_creation_input_tokens":0,"cache_read_input_tokens":188086}}`,
+			want: provider.Usage{
+				PromptTokens:     188107,
+				CompletionTokens: 393,
+				TotalTokens:      188500,
+				CacheHitTokens:   188086,
+				CacheMissTokens:  21,
+			},
+		},
+		{
+			name: "cache creation",
+			json: `{"usage":{"input_tokens":21,"output_tokens":393,"cache_creation_input_tokens":188086,"cache_read_input_tokens":0}}`,
+			want: provider.Usage{
+				PromptTokens:     188107,
+				CompletionTokens: 393,
+				TotalTokens:      188500,
+				CacheMissTokens:  188107,
+			},
+		},
+		{
+			name: "DeepSeek fields take priority",
+			json: `{"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_cache_hit_tokens":30,"prompt_cache_miss_tokens":70,"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":888,"cache_read_input_tokens":999}}`,
+			want: provider.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+				CacheHitTokens:   30,
+				CacheMissTokens:  70,
+			},
+		},
+		{
+			name: "OpenAI nested fields take priority",
+			json: `{"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":40},"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":888,"cache_read_input_tokens":999}}`,
+			want: provider.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+				CacheHitTokens:   40,
+				CacheMissTokens:  60,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var response streamResponse
+			if err := json.Unmarshal([]byte(tc.json), &response); err != nil {
+				t.Fatalf("unmarshal usage fixture: %v", err)
+			}
+			if response.Usage == nil {
+				t.Fatal("usage fixture did not decode usage")
+			}
+			if got := normaliseUsage(response.Usage); got == nil || *got != tc.want {
+				t.Fatalf("normaliseUsage() = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }

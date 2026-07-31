@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title>Tests</title>
+    <link rel="stylesheet" href="assets/qunit.css">
+
+    <script src="assets/jquery.min.js"></script>
+    <script src="assets/qunit.js"></script>
+    <!--[if !IE]> --><script src="assets/blanket.js"></script><!-- <![endif]-->
+
+    <script src="../dist/svg-pan-zoom.js" data-cover></script>
+</head>
+<body>
+<div id="qunit"></div>
+<div id="qunit-fixture"></div>
+
+<div id="container-inline" style="width: 700px; height: 300px; border:1px solid black; ">
+  <svg id="test-inline" xmlns="http://www.w3.org/2000/svg" style="display: inline; width: inherit; height: inherit;" version="1.1">
+    <g id="g4" fill="none">
+      <rect width="800" height="800" style="fill:rgb(0,0,255);stroke-width:3;stroke:rgb(0,0,0)" />
+    </g>
+  </svg>
+</div>
+
+<div id="container-inline-viewbox" style="width: 700px; height: 300px; border:1px solid black;">
+  <svg id="test-viewbox" xmlns="http://www.w3.org/2000/svg" style="display: inline; width: inherit; height: inherit;" viewBox="0 0 70 30" version="1.1">
+    <g id="g4" fill="none">
+      <rect width="8" height="8" x="30" y="10" style="fill:rgb(0,255,255);stroke-width:1;stroke:rgb(0,0,0)" />
+    </g>
+  </svg>
+</div>
+
+<div id="container-inline-transform" style="width: 700px; height: 300px; border:1px solid black; ">
+  <svg id="test-transform" xmlns="http://www.w3.org/2000/svg" style="display: inline; width: inherit; height: inherit;" version="1.1">
+    <g id="g4" fill="none" transform="matrix(0.5,0,0,0.5,100,50)">
+      <rect width="400" height="400" style="fill:rgb(255,0,255);stroke-width:3;stroke:rgb(0,0,0)" />
+    </g>
+  </svg>
+</div>
+
+<div id="container-inline-viewbox-transform" style="width: 700px; height: 300px; border:1px solid black; ">
+  <svg id="test-viewbox-transform" xmlns="http://www.w3.org/2000/svg" style="display: inline; width: inherit; height: inherit;" viewBox="0 0 350 150" version="1.1">
+    <g id="g4" fill="none" transform="matrix(0.5,0,0,0.5,100,50)">
+      <rect width="200" height="200" style="fill:rgb(255,0,255);stroke-width:3;stroke:rgb(0,0,0)" />
+    </g>
+  </svg>
+</div>
+
+<script src="test_api.js"></script>
+
+</body>
+</html>

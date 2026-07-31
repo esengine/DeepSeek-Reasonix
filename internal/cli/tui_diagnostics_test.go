@@ -12,6 +12,7 @@ import (
 
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/i18n"
 )
 
 func TestTUIDiagnosticsKeepProcessAndPluginLogsOffTerminal(t *testing.T) {
@@ -123,5 +124,23 @@ func TestCLIProfileBuildOptionsPropagateInteractiveOwners(t *testing.T) {
 	}
 	if opts.HeadlessApprovalMode != control.ToolApprovalAuto {
 		t.Fatalf("HeadlessApprovalMode = %q, want %q", opts.HeadlessApprovalMode, control.ToolApprovalAuto)
+	}
+}
+
+func TestCLIProfileBuildOptionsUseResolvedLocaleForAutoPricing(t *testing.T) {
+	defer i18n.DetectLanguage("en")
+	for _, tt := range []struct {
+		language string
+		want     string
+	}{
+		{language: "en", want: "USD"},
+		{language: "zh", want: "CNY"},
+		{language: "zh-TW", want: "CNY"},
+	} {
+		i18n.DetectLanguage(tt.language)
+		opts := cliProfileBuildOptions("provider/model", 0, false, event.Discard, "balanced", cliBuildOverrides{})
+		if opts.AutoPricingCurrency != tt.want {
+			t.Errorf("language %q auto pricing currency = %q, want %q", tt.language, opts.AutoPricingCurrency, tt.want)
+		}
 	}
 }

@@ -1,0 +1,5 @@
+./apply.go
+./doc.go
+./hide_noop.go
+./minisign.go
+./patcher.go

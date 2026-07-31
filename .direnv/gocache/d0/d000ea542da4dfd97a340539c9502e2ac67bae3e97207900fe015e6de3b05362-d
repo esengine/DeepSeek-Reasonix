@@ -1,0 +1,6 @@
+./configwrite.go
+./contract.go
+./progress.go
+./resolved.go
+./subagentguard.go
+./tool.go

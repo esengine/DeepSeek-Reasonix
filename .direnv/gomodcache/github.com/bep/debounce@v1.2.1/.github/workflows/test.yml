@@ -1,0 +1,50 @@
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+  workflow_dispatch:
+name: Test
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      matrix:
+        go-version: [1.18.x]
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Install staticcheck
+      run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      shell: bash
+    - name: Install golint
+      run: go install golang.org/x/lint/golint@latest
+      shell: bash
+    - name: Update PATH
+      run: echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+      shell: bash
+    - name: Checkout code
+      uses: actions/checkout@v1
+    - name: Fmt
+      if: matrix.os != 'windows-latest'
+      run: "diff <(gofmt -d .) <(printf '')"
+      shell: bash
+    - name: Vet
+      run: go vet ./...
+    - name: Staticcheck
+      run: staticcheck ./...
+    - name: Lint
+      run: golint ./...
+    - name: Test
+      run: go test -race .
+    - name: Upload coverage
+      if: success() && matrix.os == 'ubuntu-latest'
+      run: |
+        curl -s https://codecov.io/bash | bash
+      env:
+        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      shell: bash

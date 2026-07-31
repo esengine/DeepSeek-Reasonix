@@ -1,0 +1,721 @@
+============
+empty method
+============
+
+def foo
+end
+
+def foo?
+end
+
+def foo!
+end
+
+---
+
+(program
+  (method (identifier))
+  (method (identifier))
+  (method (identifier)))
+
+=====================
+method with body
+=====================
+
+def foo
+  bar
+end
+
+---
+
+(program (method (identifier) (body_statement (identifier))))
+
+=====================
+"end"-less method
+=====================
+
+def foo = bar
+def foo() = bar
+def foo(x) = bar
+def Object.foo = bar
+def Object.foo (x) = bar
+def foo() = bar rescue (print "error")
+
+---
+
+(program
+  (method name: (identifier) body: (identifier))
+  (method name: (identifier) parameters: (method_parameters) body: (identifier))
+  (method name: (identifier) parameters: (method_parameters (identifier)) body: (identifier))
+  (singleton_method object: (constant) name: (identifier) body: (identifier))
+  (singleton_method object: (constant) name: (identifier) parameters: (method_parameters (identifier)) body: (identifier))
+  (method name: (identifier) parameters: (method_parameters)
+    body: (rescue_modifier
+      body: (identifier)
+      handler: (parenthesized_statements (call method: (identifier) arguments: (argument_list (string (string_content)))))
+    )
+  )
+)
+
+===========================
+method as attribute setter
+===========================
+
+def foo=
+end
+
+---
+
+(program (method (setter (identifier))))
+
+==============================
+method definition of operators
+==============================
+
+def `(a)
+  "`"
+end
+
+def +@(a)
+end
+
+def -@(a)
+end
+
+def ~@(a)
+end
+
+def %(a)
+end
+
+def ..(a)
+end
+
+def !~(a)
+end
+
+---
+
+(program
+  (method (operator) (method_parameters (identifier)) (body_statement (string (string_content))))
+  (method (operator) (method_parameters (identifier)))
+  (method (operator) (method_parameters (identifier)))
+  (method (operator) (method_parameters (identifier)))
+  (method (operator) (method_parameters (identifier)))
+  (method (operator) (method_parameters (identifier)))
+  (method (operator) (method_parameters (identifier))))
+
+===================================================
+method with forward slash name and regex ambiguity
+===================================================
+
+puts /(/
+
+def /(name)
+end
+
+def / name
+end
+
+---
+
+(program
+  (call (identifier) (argument_list (regex (string_content))))
+  (method (operator) (method_parameters (identifier)))
+  (method (operator) (method_parameters (identifier))))
+
+
+===========================
+method with call to super
+===========================
+
+def foo
+  super
+end
+
+def foo
+  bar.baz { super }
+end
+
+def foo
+  super.bar a, b
+end
+
+---
+
+(program
+  (method (identifier) (body_statement (super)))
+  (method
+    (identifier)
+    (body_statement (call (identifier) (identifier) (block (block_body (super))))))
+  (method
+    (identifier)
+    (body_statement (call (super) (identifier) (argument_list (identifier) (identifier))))))
+
+===========================
+method with args
+===========================
+
+def foo(bar)
+end
+
+def foo(bar); end
+def foo(bar) end
+
+---
+
+(program
+  (method (identifier) (method_parameters (identifier)))
+  (method (identifier) (method_parameters (identifier)))
+  (method (identifier) (method_parameters (identifier))))
+
+================================
+method with unparenthesized args
+================================
+
+def foo bar
+end
+
+---
+
+(program (method (identifier) (method_parameters (identifier))))
+
+=========================
+method with multiple args
+=========================
+
+def foo(bar, quux)
+end
+
+---
+
+(program (method (identifier) (method_parameters (identifier) (identifier))))
+
+=========================================
+method with multiple unparenthesized args
+=========================================
+
+def foo bar, quux
+end
+
+---
+
+(program (method (identifier) (method_parameters (identifier) (identifier))))
+
+=========================================
+method with keyword parameters
+=========================================
+
+def foo(bar: nil, baz:)
+end
+
+---
+
+(program
+  (method (identifier)
+    (method_parameters
+      (keyword_parameter (identifier) (nil))
+      (keyword_parameter (identifier)))))
+
+=========================================
+method with default parameters
+=========================================
+
+def foo(bar = nil)
+end
+
+def foo(bar=nil)
+end
+
+---
+
+(program
+  (method (identifier)
+    (method_parameters (optional_parameter (identifier) (nil))))
+  (method (identifier)
+    (method_parameters (optional_parameter (identifier) (nil)))))
+
+=========================================
+method with interesting params
+=========================================
+
+def foo(*options)
+end
+
+def foo(x, *options)
+end
+
+def foo(x, *options, y)
+end
+
+def foo(**options)
+end
+
+def foo(name:, **)
+end
+
+def foo(x, **nil)
+end
+
+def foo(&block)
+end
+
+def foo(&)
+end
+
+def foo(...)
+  super(...)
+end
+
+def foo(a, b, ...)
+  bar(b, ...)
+end
+
+def foo ...
+  3
+end
+
+def foo
+  ... 3
+end
+
+def foo
+  .. 3
+end
+
+---
+
+(program
+  (method (identifier) (method_parameters (splat_parameter (identifier))))
+  (method (identifier) (method_parameters (identifier) (splat_parameter (identifier))))
+  (method (identifier) (method_parameters (identifier) (splat_parameter (identifier)) (identifier)))
+  (method (identifier) (method_parameters (hash_splat_parameter (identifier))))
+  (method (identifier) (method_parameters (keyword_parameter (identifier)) (hash_splat_parameter)))
+  (method (identifier) (method_parameters (identifier) (hash_splat_nil)))
+  (method (identifier) (method_parameters (block_parameter (identifier))))
+  (method (identifier) (method_parameters (block_parameter)))
+  (method (identifier) (method_parameters (forward_parameter))
+    (body_statement (call (super) (argument_list (forward_argument))))
+  )
+  (method (identifier) (method_parameters (identifier) (identifier) (forward_parameter))
+    (body_statement (call (identifier) (argument_list (identifier) (forward_argument))))
+  )
+  (method (identifier) (method_parameters (forward_parameter))
+    (body_statement (integer))
+  )
+  (method (identifier) (body_statement (range (integer))))
+  (method (identifier) (body_statement (range (integer))))
+)
+
+=========================================
+singleton method
+=========================================
+
+def self.foo
+end
+
+---
+
+(program (singleton_method (self) (identifier)))
+
+=========================================
+singleton method with body
+=========================================
+
+def self.foo
+  bar
+end
+
+---
+
+(program (singleton_method (self) (identifier) (body_statement (identifier))))
+
+
+=========================================
+singleton method with arg
+=========================================
+
+def self.foo(bar)
+end
+
+---
+
+(program (singleton_method (self) (identifier) (method_parameters (identifier))))
+
+=========================================
+singleton method with un-parenthesized arg
+=========================================
+
+def self.foo bar
+end
+
+---
+
+(program (singleton_method (self) (identifier) (method_parameters (identifier))))
+
+=========================================
+singleton method with args
+=========================================
+
+def self.foo(bar, baz)
+end
+
+---
+
+(program (singleton_method (self) (identifier) (method_parameters (identifier) (identifier))))
+
+
+=========================================
+singleton method with un-parenthesized args
+=========================================
+
+def self.foo bar, baz
+end
+
+---
+
+(program (singleton_method (self) (identifier) (method_parameters (identifier) (identifier))))
+
+===========
+empty class
+===========
+
+class Foo
+end
+
+class Foo; end
+
+class Foo::Bar
+end
+
+class ::Foo::Bar
+end
+
+class Cß
+end
+
+---
+
+(program
+  (class (constant))
+  (class (constant))
+  (class (scope_resolution (constant) (constant)))
+  (class (scope_resolution (scope_resolution (constant)) (constant)))
+  (class (constant)))
+
+==============
+empty subclass
+==============
+
+class Foo < Bar
+end
+
+---
+
+(program (class (constant) (superclass (constant))))
+
+==================================
+empty subclass of namespaced class
+==================================
+
+class Foo < Bar::Quux
+end
+
+class Foo < ::Bar
+end
+
+class Foo < Bar::Baz.new(foo)
+end
+
+---
+
+(program
+  (class
+    (constant)
+    (superclass (scope_resolution (constant) (constant))))
+  (class
+    (constant)
+    (superclass (scope_resolution (constant))))
+  (class
+    (constant)
+    (superclass (call (scope_resolution (constant) (constant)) (identifier) (argument_list (identifier))))))
+
+=======================================
+one-line class/module def without ;
+=======================================
+
+module NoActiveModel class Resource; end; end
+class String def foo; end end
+
+---
+
+(program
+  (module
+    name: (constant)
+    body: (body_statement
+      (class
+        name: (constant))))
+  (class
+    name: (constant)
+    body: (body_statement
+      (method
+        name: (identifier)))))
+
+=======================================
+unparenthesized call as superclass
+=======================================
+
+class A < B.new \
+  :c,
+  :d
+end
+
+---
+
+(program (class
+  name: (constant)
+  superclass: (superclass (call
+    receiver: (constant)
+    method: (identifier)
+    arguments: (argument_list
+      (simple_symbol)
+      (simple_symbol))))))
+
+===============
+class with body
+===============
+
+class Foo
+	def bar
+	end
+end
+
+---
+
+(program (class (constant) (body_statement (method (identifier)))))
+
+====================
+class with operators
+====================
+
+class A
+  def ==; end
+  def !=(other); end
+end
+
+---
+
+(program
+  (class
+    name: (constant)
+    body: (body_statement
+      (method
+        name: (operator))
+      (method
+        name: (operator)
+        parameters: (method_parameters
+          (identifier))))))
+
+=========================================
+class within dynamically-computed module
+=========================================
+
+class foo()::Bar
+end
+
+---
+
+(program (class (scope_resolution (call (identifier) (argument_list)) (constant))))
+
+===============
+singleton class
+===============
+
+class << self
+end
+
+class <<self
+end
+
+class << Foo
+end
+
+class << Foo::Bar
+end
+
+---
+
+(program
+  (singleton_class (self))
+  (singleton_class (self))
+  (singleton_class (constant))
+  (singleton_class (scope_resolution (constant) (constant))))
+
+
+============
+empty module
+============
+
+module Foo
+end
+
+module Foo::Bar
+end
+
+---
+
+(program
+  (module (constant))
+  (module (scope_resolution (constant) (constant))))
+
+================
+module with body
+================
+
+module Foo
+	def bar
+	end
+end
+
+---
+
+(program (module (constant) (body_statement (method (identifier)))))
+
+========================
+module without semicolon
+========================
+
+module Foo end
+
+---
+
+(program (module (constant)))
+
+=======
+__END__
+=======
+
+word
+__END__
+word
+x
+ab
+d
+
+---
+
+(program (identifier) (uninterpreted))
+
+========================================
+__END__ followed by a comment
+========================================
+
+word
+__END__
+# comment
+
+---
+
+(program (identifier) (uninterpreted))
+
+========================================
+__END__ at end of file, without new line
+========================================
+
+word
+__END__
+---
+
+(program (identifier) (uninterpreted))
+
+==============================
+module with class with methods
+==============================
+
+module A
+  class B < C
+    include D::E.f.g
+
+    attr_reader :h
+
+    # i
+    def j
+      k
+    end
+
+    def self.l
+    end
+  end
+end
+
+---
+
+(program (module (constant)
+  (body_statement
+    (class (constant) (superclass (constant))
+      (body_statement
+        (call (identifier) (argument_list
+          (call
+            (call
+              (scope_resolution (constant) (constant))
+              (identifier))
+            (identifier))))
+
+      (call (identifier) (argument_list (simple_symbol)))
+
+      (comment)
+      (method (identifier) (body_statement (identifier)))
+      (singleton_method (self) (identifier)))))))
+
+
+===========
+empty BEGIN block
+===========
+
+BEGIN {
+
+}
+
+---
+
+(program (begin_block))
+
+===========
+BEGIN block
+===========
+
+baz
+BEGIN {
+foo
+}
+bar
+
+---
+
+(program (identifier) (begin_block (identifier)) (identifier))
+
+===========
+empty END block
+===========
+
+END {
+
+}
+
+---
+
+(program (end_block))
+
+===========
+END block
+===========
+
+baz
+END {
+foo
+}
+bar
+
+---
+
+(program (identifier) (end_block (identifier)) (identifier))

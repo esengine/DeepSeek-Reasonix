@@ -1,0 +1,661 @@
+================================================================================
+Concept definition
+================================================================================
+
+template <class T, class U>
+concept Derived = std::is_base_of<U, T>::value;
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier))
+      (type_parameter_declaration
+        (type_identifier)))
+    (concept_definition
+      (identifier)
+      (qualified_identifier
+        (namespace_identifier)
+        (qualified_identifier
+          (template_type
+            (type_identifier)
+            (template_argument_list
+              (type_descriptor
+                (type_identifier))
+              (type_descriptor
+                (type_identifier))))
+          (identifier))))))
+
+================================================================================
+Concept definition with requires expression
+================================================================================
+
+template<typename T>
+concept Hashable = requires(T a) {
+    { std::hash<T>{}(a) } -> std::convertible_to<std::size_t>;
+};
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (concept_definition
+      (identifier)
+      (requires_expression
+        (parameter_list
+          (parameter_declaration
+            (type_identifier)
+            (identifier)))
+        (requirement_seq
+          (compound_requirement
+            (call_expression
+              (compound_literal_expression
+                (qualified_identifier
+                  (namespace_identifier)
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (type_identifier)))))
+                (initializer_list))
+              (argument_list
+                (identifier)))
+            (trailing_return_type
+              (type_descriptor
+                (qualified_identifier
+                  (namespace_identifier)
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (qualified_identifier
+                          (namespace_identifier)
+                          (type_identifier))))))))))))))
+
+================================================================================
+Requires clauses and expressions
+================================================================================
+
+template<typename T>
+void f(T&&) requires Eq<T>; // can appear as the last element of a function declarator
+
+template<typename T> requires Addable<T> // or right after a template parameter list
+T add(T a, T b) { return a + b; }
+
+template<typename T>
+concept Addable = requires (T x) { x + x; }; // requires-expression
+
+template<typename T>
+    requires requires (T x) { x + x; } // ad-hoc constraint, note keyword used twice
+T add(T a, T b) { return a + b; }
+
+template<typename T>
+    requires (!std::is_same_v<T, bool>) // parenthesized expressions are allowed
+void f(T);
+
+template<typename T> requires Addable<T> && Subtractable<T> // conjunctions
+T f(T);
+
+template<typename T> requires Addable<T> and Subtractable<T> // conjunctions
+T f(T);
+
+template<typename T> requires Addable<T> || Subtractable<T> // disjunctions
+T f(T);
+
+template<typename T> requires Addable<T> or Subtractable<T> // conjunctions
+T f(T);
+
+template<typename T> requires false || true // boolean literals
+T f(T);
+
+template<typename... T> requires (... && Addable<T>) // fold expressions
+T f(T);
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (declaration
+      (primitive_type)
+      (function_declarator
+        (identifier)
+        (parameter_list
+          (parameter_declaration
+            (type_identifier)
+            (abstract_reference_declarator)))
+        (requires_clause
+          (template_type
+            (type_identifier)
+            (template_argument_list
+              (type_descriptor
+                (type_identifier))))))))
+  (comment)
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (requires_clause
+      (template_type
+        (type_identifier)
+        (template_argument_list
+          (type_descriptor
+            (type_identifier)))))
+    (comment)
+    (function_definition
+      (type_identifier)
+      (function_declarator
+        (identifier)
+        (parameter_list
+          (parameter_declaration
+            (type_identifier)
+            (identifier))
+          (parameter_declaration
+            (type_identifier)
+            (identifier))))
+      (compound_statement
+        (return_statement
+          (binary_expression
+            (identifier)
+            (identifier))))))
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (concept_definition
+      (identifier)
+      (requires_expression
+        (parameter_list
+          (parameter_declaration
+            (type_identifier)
+            (identifier)))
+        (requirement_seq
+          (simple_requirement
+            (binary_expression
+              (identifier)
+              (identifier)))))))
+  (comment)
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (requires_clause
+      (requires_expression
+        (parameter_list
+          (parameter_declaration
+            (type_identifier)
+            (identifier)))
+        (requirement_seq
+          (simple_requirement
+            (binary_expression
+              (identifier)
+              (identifier))))))
+    (comment)
+    (function_definition
+      (type_identifier)
+      (function_declarator
+        (identifier)
+        (parameter_list
+          (parameter_declaration
+            (type_identifier)
+            (identifier))
+          (parameter_declaration
+            (type_identifier)
+            (identifier))))
+      (compound_statement
+        (return_statement
+          (binary_expression
+            (identifier)
+            (identifier))))))
+      (template_declaration
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (unary_expression
+            (qualified_identifier
+              (namespace_identifier)
+              (template_function
+                (identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier))
+                  (type_descriptor
+                    (primitive_type)))))))
+        (comment)
+        (declaration
+          (primitive_type)
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier))))))
+      (template_declaration
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (constraint_conjunction
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))))
+        (comment)
+        (declaration
+          (type_identifier)
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier))))))
+      (template_declaration
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (constraint_conjunction
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))))
+        (comment)
+        (declaration
+          (type_identifier)
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier))))))
+      (template_declaration
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (constraint_disjunction
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))))
+        (comment)
+        (declaration
+          (type_identifier)
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier))))))
+      (template_declaration
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (constraint_disjunction
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))
+            (template_type
+              (type_identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))))
+        (comment)
+        (declaration
+          (type_identifier)
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier))))))
+      (template_declaration
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (constraint_disjunction
+            (false)
+            (true)))
+        (comment)
+        (declaration
+          (type_identifier)
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier))))))
+      (template_declaration
+        (template_parameter_list
+          (variadic_type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (fold_expression
+            (template_function
+              (identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier))))))
+        (comment)
+        (declaration
+          (type_identifier)
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier)))))))
+
+================================================================================
+Compound requirements
+================================================================================
+
+template<typename T> concept C2 =
+requires(T x) {
+    {*x} -> std::convertible_to<typename T::inner>; // the expression *x must be valid
+                                                    // AND the type T::inner must be valid
+                                                    // AND the result of *x must be convertible to T::inner
+    {x + 1} -> std::same_as<int>; // the expression x + 1 must be valid
+                               // AND std::same_as<decltype((x + 1)), int> must be satisfied
+                               // i.e., (x + 1) must be a prvalue of type int
+    {x * 1} -> std::convertible_to<T>; // the expression x * 1 must be valid
+                                       // AND its result must be convertible to T
+};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (concept_definition
+      (identifier)
+      (requires_expression
+        (parameter_list
+          (parameter_declaration
+            (type_identifier)
+            (identifier)))
+        (requirement_seq
+          (compound_requirement
+            (pointer_expression
+              (identifier))
+            (trailing_return_type
+              (type_descriptor
+                (qualified_identifier
+                  (namespace_identifier)
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (dependent_type
+                          (qualified_identifier
+                            (namespace_identifier)
+                            (type_identifier))))))))))
+          (comment)
+          (comment)
+          (comment)
+          (compound_requirement
+            (binary_expression
+              (identifier)
+              (number_literal))
+            (trailing_return_type
+              (type_descriptor
+                (qualified_identifier
+                  (namespace_identifier)
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (primitive_type))))))))
+          (comment)
+          (comment)
+          (comment)
+          (compound_requirement
+            (binary_expression
+              (identifier)
+              (number_literal))
+            (trailing_return_type
+              (type_descriptor
+                (qualified_identifier
+                  (namespace_identifier)
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (type_identifier))))))))
+          (comment)
+          (comment))))))
+
+================================================================================
+Nested requirements
+================================================================================
+
+template <class T>
+concept Semiregular = DefaultConstructible<T> &&
+    CopyConstructible<T> && Destructible<T> && CopyAssignable<T> &&
+requires(T a, size_t n) {
+    requires Same<T*, decltype(&a)>;  // nested: "Same<...> evaluates to true"
+    { a.~T() } noexcept;  // compound: "a.~T()" is a valid expression that doesn't throw
+    requires Same<T*, decltype(new T)>; // nested: "Same<...> evaluates to true"
+    requires Same<T*, decltype(new T[n])>; // nested
+    { delete new T };  // compound
+    { delete new T[n] }; // compound
+};
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (concept_definition
+      (identifier)
+      (binary_expression
+        (binary_expression
+          (binary_expression
+            (binary_expression
+              (template_function
+                (identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier))))
+              (template_function
+                (identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier)))))
+            (template_function
+              (identifier)
+              (template_argument_list
+                (type_descriptor
+                  (type_identifier)))))
+          (template_function
+            (identifier)
+            (template_argument_list
+              (type_descriptor
+                (type_identifier)))))
+        (requires_expression
+          (parameter_list
+            (parameter_declaration
+              (type_identifier)
+              (identifier))
+            (parameter_declaration
+              (primitive_type)
+              (identifier)))
+          (requirement_seq
+            (simple_requirement
+              (requires_clause
+                (template_type
+                  (type_identifier)
+                  (template_argument_list
+                    (type_descriptor
+                      (type_identifier)
+                      (abstract_pointer_declarator))
+                    (type_descriptor
+                      (decltype
+                        (pointer_expression
+                          (identifier))))))))
+            (comment)
+            (compound_requirement
+              (call_expression
+                (field_expression
+                  (identifier)
+                  (destructor_name
+                    (identifier)))
+                (argument_list)))
+            (comment)
+            (simple_requirement
+              (requires_clause
+                (template_type
+                  (type_identifier)
+                  (template_argument_list
+                    (type_descriptor
+                      (type_identifier)
+                      (abstract_pointer_declarator))
+                    (type_descriptor
+                      (decltype
+                        (new_expression
+                          (type_identifier))))))))
+            (comment)
+            (simple_requirement
+              (requires_clause
+                (template_type
+                  (type_identifier)
+                  (template_argument_list
+                    (type_descriptor
+                      (type_identifier)
+                      (abstract_pointer_declarator))
+                    (type_descriptor
+                      (decltype
+                        (new_expression
+                          (type_identifier)
+                          (new_declarator
+                            (identifier)))))))))
+            (comment)
+            (compound_requirement
+              (delete_expression
+                (new_expression
+                  (type_identifier))))
+            (comment)
+            (compound_requirement
+              (delete_expression
+                (new_expression
+                  (type_identifier)
+                  (new_declarator
+                    (identifier)))))
+            (comment)))))))
+
+================================================================================
+Constraints
+================================================================================
+
+template <EqualityComparable T>
+void f(const T&); // constrained function template declaration
+
+void f(const EqualityComparable auto&); // constrained function template declaration
+
+Sortable auto foo = f();
+Sortable<T> auto bar = g();
+NS::Concept<T> auto baz = h();
+
+Sortable decltype(auto) foo = i();
+
+---
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list
+      (parameter_declaration
+        (type_identifier)
+        (identifier)))
+    (declaration
+      (primitive_type)
+      (function_declarator
+        (identifier)
+        (parameter_list
+          (parameter_declaration
+            (type_qualifier)
+            (type_identifier)
+            (abstract_reference_declarator))))))
+  (comment)
+  (declaration
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list
+        (parameter_declaration
+          (type_qualifier)
+          (placeholder_type_specifier
+            (type_identifier)
+            (auto))
+          (abstract_reference_declarator)))))
+  (comment)
+  (declaration
+    (placeholder_type_specifier
+      (type_identifier)
+      (auto))
+    (init_declarator
+      (identifier)
+      (call_expression
+        (identifier)
+        (argument_list))))
+  (declaration
+    (placeholder_type_specifier
+      (template_type
+        (type_identifier)
+        (template_argument_list
+          (type_descriptor
+            (type_identifier))))
+      (auto))
+    (init_declarator
+      (identifier)
+      (call_expression
+        (identifier)
+        (argument_list))))
+  (declaration
+    (placeholder_type_specifier
+      (qualified_identifier
+        (namespace_identifier)
+        (template_type
+          (type_identifier)
+          (template_argument_list
+            (type_descriptor
+              (type_identifier)))))
+      (auto))
+    (init_declarator
+      (identifier)
+      (call_expression
+        (identifier)
+        (argument_list))))
+  (declaration
+    (placeholder_type_specifier
+      (type_identifier)
+      (decltype
+        (auto)))
+    (init_declarator
+      (identifier)
+      (call_expression
+        (identifier)
+        (argument_list)))))

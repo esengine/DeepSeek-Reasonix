@@ -1,0 +1,13 @@
+name = { first = "Tom", last = "Preston-Werner" }
+point = {x=1, y=2}
+animal = { type.name = "pug" }
+contact = {
+    personal = {
+        name = "Donald Duck",
+        email = "donald@duckburg.com",
+    },
+    work = {
+        name = "Coin cleaner",
+        email = "donald@ScroogeCorp.com",
+    },
+}

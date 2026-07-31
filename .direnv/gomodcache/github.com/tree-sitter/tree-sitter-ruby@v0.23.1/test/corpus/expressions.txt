@@ -1,0 +1,2883 @@
+================
+scope resolution
+================
+
+Foo::Bar
+::Bar
+
+puts ::Foo::Bar
+
+---
+
+(program
+  (scope_resolution
+    scope: (constant)
+    name: (constant))
+  (scope_resolution
+    name: (constant))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (scope_resolution
+        scope: (scope_resolution
+          name: (constant))
+        name: (constant)))))
+
+============
+element reference
+============
+
+foo[bar]
+foo[*bar]
+foo[* bar]
+foo[]
+
+---
+
+(program
+  (element_reference
+    object: (identifier)
+    (identifier))
+  (element_reference
+    object: (identifier)
+    (splat_argument
+      (identifier)))
+  (element_reference
+    object: (identifier)
+    (splat_argument
+      (identifier)))
+  (element_reference
+    object: (identifier)))
+
+============
+element reference with string
+============
+
+foo["bar"]
+
+---
+
+(program
+  (element_reference
+    (identifier)
+    (string
+      (string_content))))
+
+============
+element reference with symbol
+============
+
+foo[:bar]
+
+---
+
+(program
+  (element_reference
+    (identifier)
+    (simple_symbol)))
+
+============
+element assignment
+============
+
+foo[bar] = 1
+
+---
+
+(program
+  (assignment
+    left: (element_reference
+      object: (identifier)
+      (identifier))
+    right: (integer)))
+
+===============
+vacuous literal
+===============
+
+()
+
+---
+
+(program
+  (parenthesized_statements))
+
+===============
+empty statement
+===============
+
+;
+
+---
+
+(program
+  (empty_statement))
+
+===================
+yield without value
+===================
+
+yield
+
+---
+
+(program
+  (yield))
+
+=====
+yield
+=====
+
+yield foo
+yield foo, bar
+yield(baz)
+
+---
+
+(program
+  (yield
+    (argument_list
+      (identifier)))
+  (yield
+    (argument_list
+      (identifier)
+      (identifier)))
+  (yield
+    (argument_list
+      (identifier))))
+
+===
+not
+===
+
+not foo
+
+---
+
+(program
+  (unary
+    (identifier)))
+
+===
+and
+===
+
+foo and bar
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+===
+or
+===
+
+foo or bar
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+====================
+and or associativity
+====================
+
+a or b and c
+
+---
+
+(program
+  (binary
+    (binary
+      (identifier)
+      (identifier))
+    (identifier)))
+
+========
+defined?
+========
+
+defined? foo
+defined? Foo.bar
+defined?(foo)
+defined?($foo)
+defined?(@foo)
+defined?(@äö).should be_true
+
+---
+
+(program
+  (unary
+    operand: (identifier))
+  (unary
+    operand: (call
+      receiver: (constant)
+      method: (identifier)))
+  (unary
+    operand: (parenthesized_statements
+      (identifier)))
+  (unary
+    operand: (parenthesized_statements
+      (global_variable)))
+  (unary
+    operand: (parenthesized_statements
+      (instance_variable)))
+  (call
+    receiver: (unary
+      operand: (parenthesized_statements
+        (instance_variable)))
+    method: (identifier)
+    arguments: (argument_list
+      (identifier))))
+
+==========
+assignment
+==========
+
+x = y
+x = *args
+FALSE = "false"
+TRUE = "true"
+NIL = "nil"
+
+---
+
+(program
+  (assignment
+    (identifier)
+    (identifier))
+  (assignment
+    (identifier)
+    (splat_argument
+      (identifier)))
+  (assignment
+    (constant)
+    (string
+      (string_content)))
+  (assignment
+    (constant)
+    (string
+      (string_content)))
+  (assignment
+    (constant)
+    (string
+      (string_content))))
+
+=====================
+multiple assignment
+=====================
+
+x, y = [1, 2]
+x, * = [1, 2]
+x, *args = [1, 2]
+x, y = *foo
+self.foo, self.bar = target.a?, target.b
+(x, y) = foo
+(a, b, c = 1)
+
+---
+
+(program
+  (assignment
+    (left_assignment_list
+      (identifier)
+      (identifier))
+    (array
+      (integer)
+      (integer)))
+  (assignment
+    (left_assignment_list
+      (identifier)
+      (rest_assignment))
+    (array
+      (integer)
+      (integer)))
+  (assignment
+    (left_assignment_list
+      (identifier)
+      (rest_assignment
+        (identifier)))
+    (array
+      (integer)
+      (integer)))
+  (assignment
+    (left_assignment_list
+      (identifier)
+      (identifier))
+    (splat_argument
+      (identifier)))
+  (assignment
+    (left_assignment_list
+      (call
+        (self)
+        (identifier))
+      (call
+        (self)
+        (identifier)))
+    (right_assignment_list
+      (call
+        (identifier)
+        (identifier))
+      (call
+        (identifier)
+        (identifier))))
+  (assignment
+    (left_assignment_list
+      (destructured_left_assignment
+        (identifier)
+        (identifier)))
+    (identifier))
+  (parenthesized_statements
+    (assignment
+      (left_assignment_list
+        (identifier)
+        (identifier)
+        (identifier))
+      (integer))))
+
+==================================================
+multiple assignment with multiple right hand sides
+==================================================
+
+foo = 1, 2
+x, y = foo, bar
+
+---
+
+(program
+  (assignment
+    (identifier)
+    (right_assignment_list
+      (integer)
+      (integer)))
+  (assignment
+    (left_assignment_list
+      (identifier)
+      (identifier))
+    (right_assignment_list
+      (identifier)
+      (identifier))))
+
+==================================================
+destructured left hand side assignment
+==================================================
+
+a, (b, c), d, (e, (f, g)) = foo
+
+---
+
+(program
+  (assignment
+    left: (left_assignment_list
+      (identifier)
+      (destructured_left_assignment
+        (identifier)
+        (identifier))
+      (identifier)
+      (destructured_left_assignment
+        (identifier)
+        (destructured_left_assignment
+          (identifier)
+          (identifier))))
+    right: (identifier)))
+
+==========
+assignment from method call
+==========
+
+x = foo a, b
+x = foo a, :b => 1, :c => 2
+
+---
+
+(program
+  (assignment
+    (identifier)
+    (call
+      (identifier)
+      (argument_list
+        (identifier)
+        (identifier))))
+  (assignment
+    (identifier)
+    (call
+      (identifier)
+      (argument_list
+        (identifier)
+        (pair
+          (simple_symbol)
+          (integer))
+        (pair
+          (simple_symbol)
+          (integer))))))
+
+==========
+math assignment
+==========
+
+x += y
+x -= y
+x *= y
+x **= y
+x /= y
+puts "/hi"
+
+---
+
+(program
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (call
+    (identifier)
+    (argument_list
+      (string
+        (string_content)))))
+
+==========
+operator assignment
+==========
+
+x ||= y
+x &&= y
+x &= y
+x |= y
+x %= y
+x >>= y
+x <<= y
+x ^= y
+
+---
+
+(program
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier))
+  (operator_assignment
+    (identifier)
+    (identifier)))
+
+===========
+conditional
+===========
+
+a ? b : c
+
+a ? b
+  : c
+
+---
+
+(program
+  (conditional
+    condition: (identifier)
+    consequence: (identifier)
+    alternative: (identifier))
+  (conditional
+    condition: (identifier)
+    consequence: (identifier)
+    alternative: (identifier)))
+
+===========================================
+conditional and character literal ambiguity
+===========================================
+
+true ?")":"c"
+
+---
+
+(program
+  (conditional
+    (true)
+    (string
+      (string_content))
+    (string
+      (string_content))))
+
+===========================================
+conditional with reserved identifiers
+===========================================
+
+foo ? true: false
+foo ? return: false
+
+---
+
+(program
+  (conditional
+    (identifier)
+    (true)
+    (false))
+  (conditional
+    (identifier)
+    (return)
+    (false)))
+
+===============
+inclusive range
+===============
+
+a..b
+
+---
+
+(program
+  (range
+    (identifier)
+    (identifier)))
+
+===============
+exclusive range
+===============
+
+a...b
+
+---
+
+(program
+  (range
+    (identifier)
+    (identifier)))
+
+==========
+boolean or
+==========
+
+a || b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+===========
+boolean and
+===========
+
+a && b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+===========
+boolean and/or
+===========
+
+a || b && c
+a && b || c
+
+---
+
+(program
+  (binary
+    left: (identifier)
+    right: (binary
+      left: (identifier)
+      right: (identifier)))
+  (binary
+    left: (binary
+      left: (identifier)
+      right: (identifier))
+    right: (identifier)))
+
+==========
+relational
+==========
+
+a == b
+a != b
+a === b
+a <=> b
+a =~ b
+a !~ b
+a==b
+a!=b
+a===b
+a<=>b
+a=~b
+a!~b # not a binary operation
+
+---
+
+(program
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (unary
+        operand: (identifier))))
+  (comment))
+
+==========
+comparison
+==========
+
+a < b
+a <= b
+a > b
+a >= b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier))
+  (binary
+    (identifier)
+    (identifier))
+  (binary
+    (identifier)
+    (identifier))
+  (binary
+    (identifier)
+    (identifier)))
+
+==========
+bitwise or
+==========
+
+a | b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+===========
+bitwise xor
+===========
+
+a ^ b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+===========
+bitwise and
+===========
+
+a & b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+=====
+shift
+=====
+
+a >> b
+a << b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier))
+  (binary
+    (identifier)
+    (identifier)))
+
+========
+additive
+========
+
+a + b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+==============
+multiplicative
+==============
+
+a * b
+a*b
+a *b
+a* b
+
+---
+
+(program
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (splat_argument
+        (identifier))))
+  (binary
+    left: (identifier)
+    right: (identifier)))
+
+==============
+binary operations
+==============
+
+2+2*2
+
+---
+
+(program
+  (binary
+    (integer)
+    (binary
+      (integer)
+      (integer))))
+
+===========
+unary minus
+===========
+
+-a
+foo -a, bar
+foo(-a, bar)
+
+---
+
+(program
+  (unary
+    (identifier))
+  (call
+    (identifier)
+    (argument_list
+      (unary
+        (identifier))
+      (identifier)))
+  (call
+    (identifier)
+    (argument_list
+      (unary
+        (identifier))
+      (identifier))))
+
+===========
+binary minus
+===========
+
+foo-a
+@ivar-1
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier))
+  (binary
+    (instance_variable)
+    (integer)))
+
+===========
+exponential
+===========
+
+a ** b
+
+---
+
+(program
+  (binary
+    (identifier)
+    (identifier)))
+
+====
+minus, call, exponential, range
+====
+
+a - 1
+a-1
+a -1
+a- 1
+(-1.foo)
+
+a - b
+a-b
+a -b
+a- b
+(-b.foo)
+
+-2**10
+-x**10
+
+1..-1
+1 .. -1
+1.. -1
+1 ..-1
+
+---
+
+(program
+  (binary
+    left: (identifier)
+    right: (integer))
+  (binary
+    left: (identifier)
+    right: (integer))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (unary
+        operand: (integer))))
+  (binary
+    left: (identifier)
+    right: (integer))
+  (parenthesized_statements
+    (call
+      receiver: (unary
+        operand: (integer))
+      method: (identifier)))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (unary
+        operand: (identifier))))
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (parenthesized_statements
+    (unary
+      operand: (call
+        receiver: (identifier)
+        method: (identifier))))
+  (unary
+    operand: (binary
+      left: (integer)
+      right: (integer)))
+  (unary
+    operand: (binary
+      left: (identifier)
+      right: (integer)))
+  (range
+    begin: (integer)
+    end: (unary
+      operand: (integer)))
+  (range
+    begin: (integer)
+    end: (unary
+      operand: (integer)))
+  (range
+    begin: (integer)
+    end: (unary
+      operand: (integer)))
+  (range
+    begin: (integer)
+    end: (unary
+      operand: (integer))))
+
+==========
+complement
+==========
+
+!a
+
+---
+
+(program
+  (unary
+    (identifier)))
+
+===============================
+method call
+===============================
+
+foo
+foo()
+print "hello"
+print("hello")
+exit!
+exit!()
+include?
+include?("hello")
+include? "hello"
+exit! if done
+exit!() if done
+
+---
+
+(program
+  (identifier)
+  (call
+    method: (identifier)
+    arguments: (argument_list))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))))
+  (call
+    method: (identifier))
+  (call
+    method: (identifier)
+    arguments: (argument_list))
+  (call
+    method: (identifier))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))))
+  (if_modifier
+    body: (call
+      method: (identifier))
+    condition: (identifier))
+  (if_modifier
+    body: (call
+      method: (identifier)
+      arguments: (argument_list))
+    condition: (identifier)))
+
+====================================
+nested unparenthesized method calls
+====================================
+
+puts get_name self, true
+puts(get_name self, true)
+
+---
+
+(program
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (call
+        method: (identifier)
+        arguments: (argument_list
+          (self)
+          (true)))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (call
+        method: (identifier)
+        arguments: (argument_list
+          (self)
+          (true))))))
+
+===============================
+method call with arguments on multiple lines
+===============================
+
+foo a,
+  b, c
+
+---
+
+(program
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (identifier)
+      (identifier)
+      (identifier))))
+
+===============================
+method call with trailing comma
+===============================
+
+foo(a, b,)
+foo(bar(a),)
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (identifier)
+      (identifier)))
+  (call
+    (identifier)
+    (argument_list
+      (call
+        (identifier)
+        (argument_list
+          (identifier))))))
+
+==============================================
+keyword arguments, no space, trailing comma
+==============================================
+
+foo(a:b)
+foo(a_:b)
+foo(a2:b)
+foo(a_:b,)
+foo(a2:b,)
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (identifier)))))
+
+===============================
+method call with receiver
+===============================
+
+foo.bar
+foo.bar()
+foo.bar "hi"
+foo.bar "hi", 2
+foo.bar("hi")
+foo.bar("hi", 2)
+
+---
+
+(program
+  (call
+    receiver: (identifier)
+    method: (identifier))
+  (call
+    receiver: (identifier)
+    method: (identifier)
+    arguments: (argument_list))
+  (call
+    receiver: (identifier)
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))))
+  (call
+    receiver: (identifier)
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))
+      (integer)))
+  (call
+    receiver: (identifier)
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))))
+  (call
+    receiver: (identifier)
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))
+      (integer))))
+
+===============================
+implicit call
+===============================
+
+foo[bar].()
+foo.(1, 2)
+
+---
+
+(program
+  (call
+    receiver: (element_reference
+      object: (identifier)
+      (identifier))
+    arguments: (argument_list))
+  (call
+    receiver: (identifier)
+    arguments: (argument_list
+      (integer)
+      (integer))))
+
+===============================
+implicit call with block
+===============================
+
+a.() {}
+a.(b: c) do
+  d
+end
+
+---
+
+(program
+  (call
+    receiver: (identifier)
+    arguments: (argument_list)
+    block: (block))
+  (call
+    receiver: (identifier)
+    arguments: (argument_list
+      (pair
+        key: (hash_key_symbol)
+        value: (identifier)))
+    block: (do_block
+      body: (body_statement
+        (identifier)))))
+
+===============================
+call with operator method name
+===============================
+
+foo.[]()
+
+---
+
+(program
+  (call
+    receiver: (identifier)
+    method: (operator)
+    arguments: (argument_list)))
+
+===============================
+method call with :: operator
+===============================
+
+foo::bar
+::Foo::bar
+Foo::Bar::baz
+
+---
+
+(program
+  (call
+    (identifier)
+    (identifier))
+  (call
+    (scope_resolution
+      (constant))
+    (identifier))
+  (call
+    (scope_resolution
+      (constant)
+      (constant))
+    (identifier)))
+
+===============================
+method call with safe navigation operator
+===============================
+
+foo&.bar
+
+---
+
+(program
+  (call
+    (identifier)
+    (identifier)))
+
+===============================
+calls to methods on negated literals
+===============================
+
+-1.class.should eq(Fixnum)
+-0.1.class
+
+---
+
+(program
+  (call
+    receiver: (call
+      receiver: (unary
+        operand: (integer))
+      method: (identifier))
+    method: (identifier)
+    arguments: (argument_list
+      (call
+        method: (identifier)
+        arguments: (argument_list
+          (constant)))))
+  (call
+    receiver: (unary
+      operand: (float))
+    method: (identifier)))
+
+===============================
+method call with hash args
+===============================
+
+foo(:a => true)
+foo([] => 1)
+foo(bar => 1)
+foo :a => true, :c => 1
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (simple_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (array)
+        (integer))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (identifier)
+        (integer))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (simple_symbol)
+        (true))
+      (pair
+        (simple_symbol)
+        (integer)))))
+
+===============================
+method call with keyword args
+===============================
+
+foo(a: true)
+foo a: true
+foo B: true
+foo a: ;
+foo B:
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)))))
+
+===============================
+method call with reserved keyword args
+===============================
+
+foo(if: true)
+foo alias: true
+foo and: true
+foo begin: true
+foo break: true
+foo case: true
+foo class: true
+foo def: true
+foo defined: true
+foo do: true
+foo else: true
+foo elsif: true
+foo end: true
+foo ensure: true
+foo false: true
+foo for: true
+foo if: true
+foo in: true
+foo module: true
+foo next: true
+foo nil: true
+foo not: true
+foo or: true
+foo redo: true
+foo rescue: true
+foo retry: true
+foo return: true
+foo self: true
+foo super: true
+foo then: true
+foo true: true
+foo undef: true
+foo unless: true
+foo until: true
+foo when: true
+foo while: true
+foo yield: true
+foo yield:
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)
+        (true))))
+  (call
+    (identifier)
+    (argument_list
+      (pair
+        (hash_key_symbol)))))
+
+===============================
+method call with paren args
+===============================
+
+foo (b), a
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (parenthesized_statements
+        (identifier))
+      (identifier))))
+
+===============================
+method call with block argument
+===============================
+
+foo(&:sort)
+foo(&bar)
+foo(&bar, 1)
+foo &bar
+foo &bar, 1
+foo(&)
+foo(&, 1)
+foo &;
+foo 1, &;
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (block_argument
+        (simple_symbol))))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument
+        (identifier))
+      (integer)))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument
+        (identifier))
+      (integer)))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument)))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument)
+      (integer)))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument)))
+  (call
+    (identifier)
+    (argument_list
+      (integer)
+      (block_argument))))
+
+===============================
+method call with splat argument
+===============================
+
+foo(*bar)
+foo *bar
+foo *%w{ .. lib }
+foo *(bar.baz)
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument
+        (string_array
+          (bare_string
+            (string_content))
+          (bare_string
+            (string_content))))))
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument
+        (parenthesized_statements
+          (call
+            (identifier)
+            (identifier)))))))
+
+===============================
+method call lambda argument
+===============================
+
+foo :bar, -> (a) { 1 }
+foo :bar, -> (a) { where(:c => b) }
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (simple_symbol)
+      (lambda
+        (lambda_parameters
+          (identifier))
+        (block
+          (block_body
+            (integer))))))
+  (call
+    (identifier)
+    (argument_list
+      (simple_symbol)
+      (lambda
+        (lambda_parameters
+          (identifier))
+        (block
+          (block_body
+            (call
+              (identifier)
+              (argument_list
+                (pair
+                  (simple_symbol)
+                  (identifier))))))))))
+
+===============================
+method call lambda argument and do block
+===============================
+
+foo :bar, -> (a) { 1 } do
+end
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (simple_symbol)
+      (lambda
+        (lambda_parameters
+          (identifier))
+        (block
+          (block_body
+            (integer)))))
+    (do_block)))
+
+===============================================
+chained method calls with blocks but no parens
+===============================================
+
+a.b c, *d do |e|
+  f
+end.g h { |i|
+  i
+}.j do
+  k
+end
+
+---
+
+(program
+  (call
+    receiver: (call
+      receiver: (identifier)
+      method: (identifier)
+      arguments: (argument_list
+        (identifier)
+        (splat_argument
+          (identifier)))
+      block: (do_block
+        parameters: (block_parameters
+          (identifier))
+        body: (body_statement
+          (identifier))))
+    method: (identifier)
+    arguments: (argument_list
+      (call
+        receiver: (call
+          method: (identifier)
+          block: (block
+            parameters: (block_parameters
+              (identifier))
+            body: (block_body
+              (identifier))))
+        method: (identifier)
+        block: (do_block
+          body: (body_statement
+            (identifier)))))))
+
+===============================
+method calls in binary expression
+===============================
+
+one two or
+  three four, five and
+  six seven, eight, nine
+
+---
+
+(program
+  (binary
+    left: (binary
+      left: (call
+        method: (identifier)
+        arguments: (argument_list
+          (identifier)))
+      right: (call
+        method: (identifier)
+        arguments: (argument_list
+          (identifier)
+          (identifier))))
+    right: (call
+      method: (identifier)
+      arguments: (argument_list
+        (identifier)
+        (identifier)
+        (identifier)))))
+
+===============================
+method calls in unary expression
+===============================
+
+!a.b c
+
+---
+
+(program
+  (unary
+    operand: (call
+      receiver: (identifier)
+      method: (identifier)
+      arguments: (argument_list
+        (identifier)))))
+
+===============================
+method calls with splat argument
+===============================
+
+foo(*bar)
+foo(*[bar, baz].quoz)
+foo(x, *bar)
+foo(*bar.baz)
+foo(**baz)
+foo **bar, baz
+foo(*)
+foo(x, *)
+foo(**)
+foo x, **
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument
+        (call
+          (array
+            (identifier)
+            (identifier))
+          (identifier)))))
+  (call
+    (identifier)
+    (argument_list
+      (identifier)
+      (splat_argument
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument
+        (call
+          (identifier)
+          (identifier)))))
+  (call
+    (identifier)
+    (argument_list
+      (hash_splat_argument
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (hash_splat_argument
+        (identifier))
+      (identifier)))
+  (call
+    (identifier)
+    (argument_list
+      (splat_argument)))
+  (call
+    (identifier)
+    (argument_list
+      (identifier)
+      (splat_argument)))
+  (call
+    (identifier)
+    (argument_list
+      (hash_splat_argument)))
+  (call
+    (identifier)
+    (argument_list
+      (identifier)
+      (hash_splat_argument))))
+
+============================
+method call without parens
+============================
+
+include D::E.f
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (call
+        (scope_resolution
+          (constant)
+          (constant))
+        (identifier)))))
+
+============================
+method call with line break
+============================
+
+Foo
+  .bar!
+  .baz
+
+Foo \
+  .bar
+
+Foo \
+  &.bar
+  &.baz
+
+Foo
+  # a comment
+  .bar
+  .baz
+
+---
+
+(program
+  (call
+    (call
+      (constant)
+      (identifier))
+    (identifier))
+  (call
+    (constant)
+    (identifier))
+  (call
+    (call
+      (constant)
+      (identifier))
+    (identifier))
+  (call
+    (call
+      (constant)
+      (comment)
+      (identifier))
+    (identifier)))
+
+======================================
+method call with block argument do end
+======================================
+
+foo do |i|
+  bar
+rescue E
+  baz
+ensure
+  quux
+end
+
+foo do
+  |i| i
+end
+
+foo do; end
+
+foo(a) do |i|
+  foo
+end
+
+foo.bar a do |i|
+  foo
+end
+
+foo(a) do |name: i, *args|
+end
+
+---
+
+(program
+  (call
+    method: (identifier)
+    block: (do_block
+      parameters: (block_parameters
+        (identifier))
+      body: (body_statement
+        (identifier)
+        (rescue
+          exceptions: (exceptions
+            (constant))
+          body: (then
+            (identifier)))
+        (ensure
+          (identifier)))))
+  (call
+    method: (identifier)
+    block: (do_block
+      parameters: (block_parameters
+        (identifier))
+      body: (body_statement
+        (identifier))))
+  (call
+    method: (identifier)
+    block: (do_block))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (identifier))
+    block: (do_block
+      parameters: (block_parameters
+        (identifier))
+      body: (body_statement
+        (identifier))))
+  (call
+    receiver: (identifier)
+    method: (identifier)
+    arguments: (argument_list
+      (identifier))
+    block: (do_block
+      parameters: (block_parameters
+        (identifier))
+      body: (body_statement
+        (identifier))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (identifier))
+    block: (do_block
+      parameters: (block_parameters
+        (keyword_parameter
+          name: (identifier)
+          value: (identifier))
+        (splat_parameter
+          name: (identifier))))))
+
+===============================
+method call with block argument curly
+===============================
+
+foo { |i| foo }
+foo items.any? { |i| i > 0 }
+foo(bar, baz) { quux }
+
+---
+
+(program
+  (call
+    method: (identifier)
+    block: (block
+      parameters: (block_parameters
+        (identifier))
+      body: (block_body
+        (identifier))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (call
+        receiver: (identifier)
+        method: (identifier)
+        block: (block
+          parameters: (block_parameters
+            (identifier))
+          body: (block_body
+            (binary
+              left: (identifier)
+              right: (integer)))))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (identifier)
+      (identifier))
+    block: (block
+      body: (block_body
+        (identifier)))))
+
+===============================
+method call with block shadow arguments
+===============================
+
+foo { |; i, j| }
+foo { |x, y ; i, j| }
+
+---
+
+(program
+  (call
+    method: (identifier)
+    block: (block
+      parameters: (block_parameters
+        locals: (identifier)
+        locals: (identifier))))
+  (call
+    method: (identifier)
+    block: (block
+      parameters: (block_parameters
+        (identifier)
+        (identifier)
+        locals: (identifier)
+        locals: (identifier)))))
+
+===============================
+method call with capitalized name
+===============================
+
+request.GET
+
+---
+
+(program
+  (call
+    (identifier)
+    (constant)))
+
+===============================
+destructured parameters
+===============================
+
+-> (d, *f, (x, y)) {}
+
+def foo(d, *f, (x, y))
+end
+
+def foo d, *f, (x, y)
+end
+
+foo do |a, (c, d, *f, (x, y)), *e|
+end
+
+---
+
+(program
+  (lambda
+    (lambda_parameters
+      (identifier)
+      (splat_parameter
+        (identifier))
+      (destructured_parameter
+        (identifier)
+        (identifier)))
+    (block))
+  (method
+    (identifier)
+    (method_parameters
+      (identifier)
+      (splat_parameter
+        (identifier))
+      (destructured_parameter
+        (identifier)
+        (identifier))))
+  (method
+    (identifier)
+    (method_parameters
+      (identifier)
+      (splat_parameter
+        (identifier))
+      (destructured_parameter
+        (identifier)
+        (identifier))))
+  (call
+    (identifier)
+    (do_block
+      (block_parameters
+        (identifier)
+        (destructured_parameter
+          (identifier)
+          (identifier)
+          (splat_parameter
+            (identifier))
+          (destructured_parameter
+            (identifier)
+            (identifier)))
+        (splat_parameter
+          (identifier))))))
+
+==================================================
+element reference and method with array arguments
+==================================================
+
+foo []
+foo [1]
+foo[1]
+
+---
+
+(program
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (array)))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (array
+        (integer))))
+  (element_reference
+    object: (identifier)
+    (integer)))
+
+=====================================
+element reference on call expression
+=====================================
+
+d(a) [0]
+d.find { |x| x > 1 } [0]
+d.find { |x| x > 1 } [0] == 0
+
+---
+
+(program
+  (element_reference
+    (call
+      (identifier)
+      (argument_list
+        (identifier)))
+    (integer))
+  (element_reference
+    (call
+      (identifier)
+      (identifier)
+      (block
+        (block_parameters
+          (identifier))
+        (block_body
+          (binary
+            (identifier)
+            (integer)))))
+    (integer))
+  (binary
+    (element_reference
+      (call
+        (identifier)
+        (identifier)
+        (block
+          (block_parameters
+            (identifier))
+          (block_body
+            (binary
+              (identifier)
+              (integer)))))
+      (integer))
+    (integer)))
+
+============================
+element reference with block
+============================
+
+foo[:bar] { |baz| baz }
+
+foo[:bar] do |baz|
+  baz
+end
+
+---
+
+(program
+  (element_reference
+    (identifier)
+    (simple_symbol)
+    (block
+      (block_parameters
+        (identifier))
+      (block_body
+        (identifier))))
+  (element_reference
+    (identifier)
+    (simple_symbol)
+    (do_block
+      (block_parameters
+        (identifier))
+      (body_statement
+        (identifier)))))
+
+======================================
+call with array and block
+======================================
+
+fun [0] { |x| x }
+
+fun [0] do
+  puts 1
+end
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (array
+        (integer)))
+    (block
+      (block_parameters
+        (identifier))
+      (block_body
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (array
+        (integer)))
+    (do_block
+      (body_statement
+        (call
+          (identifier)
+          (argument_list
+            (integer)))))))
+
+========================================================================
+call with normal and keyword argument with value that looks like a block
+========================================================================
+render "foo/bars/show", locals: { }
+render "foo/bars/show", locals: { display_text: dt, safe_text: "hello" }
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (string
+        (string_content))
+      (pair
+        (hash_key_symbol)
+        (hash))))
+  (call
+    (identifier)
+    (argument_list
+      (string
+        (string_content))
+      (pair
+        (hash_key_symbol)
+        (hash
+          (pair
+            (hash_key_symbol)
+            (identifier))
+          (pair
+            (hash_key_symbol)
+            (string
+              (string_content))))))))
+
+========================================================================
+call with keyword argument on different lines
+========================================================================
+
+render :show_details, 5,
+    description:
+      "Some long " \
+      "piece of text.",
+    dark_mode: false
+
+render "/foo/bar", params:
+    {
+        id: 3,
+        title: "Hello world"
+    },
+    headers: { Accept: "text/html" }
+
+render "/foo/bar", params:
+    {
+        id: 3,
+        title: "Hello world"
+    }
+
+---
+
+(program
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (simple_symbol)
+      (integer)
+      (pair
+        key: (hash_key_symbol)
+        value: (chained_string
+          (string
+            (string_content))
+          (string
+            (string_content))))
+      (pair
+        key: (hash_key_symbol)
+        value: (false))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))
+      (pair
+        key: (hash_key_symbol)
+        value: (hash
+          (pair
+            key: (hash_key_symbol)
+            value: (integer))
+          (pair
+            key: (hash_key_symbol)
+            value: (string
+              (string_content)))))
+      (pair
+        key: (hash_key_symbol)
+        value: (hash
+          (pair
+            key: (hash_key_symbol)
+            value: (string
+              (string_content)))))))
+  (call
+    method: (identifier)
+    arguments: (argument_list
+      (string
+        (string_content))
+      (pair
+        key: (hash_key_symbol)
+        value: (hash
+          (pair
+            key: (hash_key_symbol)
+            value: (integer))
+          (pair
+            key: (hash_key_symbol)
+            value: (string
+              (string_content))))))))
+
+==============
+empty lambda expression
+==============
+
+lambda {}
+
+---
+
+(program
+  (call
+    (identifier)
+    (block)))
+
+==================
+lambda expressions
+==================
+
+lambda { foo }
+lambda(&block) { foo }
+lambda(&lambda{})
+
+---
+
+(program
+  (call
+    (identifier)
+    (block
+      (block_body
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument
+        (identifier)))
+    (block
+      (block_body
+        (identifier))))
+  (call
+    (identifier)
+    (argument_list
+      (block_argument
+        (call
+          (identifier)
+          (block))))))
+
+====================
+lambda expression with an arg
+====================
+
+lambda { |foo| 1 }
+
+---
+
+(program
+  (call
+    (identifier)
+    (block
+      (block_parameters
+        (identifier))
+      (block_body
+        (integer)))))
+
+===========================
+lambda expression with multiple args
+===========================
+
+lambda { |a, b, c|
+  1
+  2
+}
+
+---
+
+(program
+  (call
+    (identifier)
+    (block
+      (block_parameters
+        (identifier)
+        (identifier)
+        (identifier))
+      (block_body
+        (integer)
+        (integer)))))
+
+===========================
+lambda expression with trailing comma
+===========================
+
+lambda { |a, b,|
+  1
+}
+
+---
+
+(program
+  (call
+    (identifier)
+    (block
+      (block_parameters
+        (identifier)
+        (identifier))
+      (block_body
+        (integer)))))
+
+===========================
+lambda expression with optional arg
+===========================
+
+lambda { |a, b=nil|
+  1
+}
+
+---
+
+(program
+  (call
+    (identifier)
+    (block
+      (block_parameters
+        (identifier)
+        (optional_parameter
+          (identifier)
+          (nil)))
+      (block_body
+        (integer)))))
+
+===========================
+lambda expression with keyword arg
+===========================
+
+lambda { |a, b: nil|
+  1
+}
+
+---
+
+(program
+  (call
+    (identifier)
+    (block
+      (block_parameters
+        (identifier)
+        (keyword_parameter
+          (identifier)
+          (nil)))
+      (block_body
+        (integer)))))
+
+====================
+lambda expression with do end
+====================
+
+lambda do |foo|
+  1
+end
+
+---
+
+(program
+  (call
+    (identifier)
+    (do_block
+      (block_parameters
+        (identifier))
+      (body_statement
+        (integer)))))
+
+============================
+lambda and proc as variables
+============================
+
+proc = Proc.new
+lambda = lambda {}
+proc = proc {}
+
+---
+
+(program
+  (assignment
+    (identifier)
+    (call
+      (constant)
+      (identifier)))
+  (assignment
+    (identifier)
+    (call
+      (identifier)
+      (block)))
+  (assignment
+    (identifier)
+    (call
+      (identifier)
+      (block))))
+
+===============================
+backslash-newline as line continuation
+===============================
+
+foo \
+  a, b
+
+"abc \
+de"
+
+foo \
+  "abc"
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (identifier)
+      (identifier)))
+  (string
+    (string_content)
+    (escape_sequence)
+    (string_content))
+  (call
+    (identifier)
+    (argument_list
+      (string
+        (string_content)))))
+
+===============================
+basic division
+===============================
+
+10 / 5
+x / y
+x /
+5
+---
+
+(program
+  (binary
+    (integer)
+    (integer))
+  (binary
+    (identifier)
+    (identifier))
+  (binary
+    (identifier)
+    (integer)))
+
+===============================
+division without spaces
+===============================
+
+h/w
+"#{foo}"
+
+Time.at(timestamp/1000)
+"#{timestamp}"
+
+---
+
+(program
+  (binary
+    left: (identifier)
+    right: (identifier))
+  (string
+    (interpolation
+      (identifier)))
+  (call
+    receiver: (constant)
+    method: (identifier)
+    arguments: (argument_list
+      (binary
+        left: (identifier)
+        right: (integer))))
+  (string
+    (interpolation
+      (identifier))))
+
+===============================
+regex as parameter
+===============================
+
+foo /bar/
+
+---
+
+(program
+  (call
+    (identifier)
+    (argument_list
+      (regex
+        (string_content)))))
+
+===============================
+regex with opening space
+===============================
+
+foo
+/ bar/
+
+---
+
+(program
+  (identifier)
+  (regex
+    (string_content)))
+
+===============================
+forward slash operator as method
+===============================
+
+Foo / "bar"
+"/edit"
+
+---
+
+(program
+  (binary
+    (constant)
+    (string
+      (string_content)))
+  (string
+    (string_content)))
+
+===============================
+multiline regex
+===============================
+
+/ a
+  b/
+
+---
+
+(program
+  (regex
+    (string_content)))

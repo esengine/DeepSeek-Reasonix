@@ -1,0 +1,114 @@
+{
+  "name": "uuid",
+  "version": "14.0.1",
+  "description": "RFC9562 UUIDs",
+  "type": "module",
+  "funding": [
+    "https://github.com/sponsors/broofa",
+    "https://github.com/sponsors/ctavan"
+  ],
+  "commitlint": {
+    "extends": [
+      "@commitlint/config-conventional"
+    ]
+  },
+  "keywords": [
+    "uuid",
+    "guid",
+    "rfc4122",
+    "rfc9562"
+  ],
+  "license": "MIT",
+  "bin": {
+    "uuid": "./dist-node/bin/uuid"
+  },
+  "sideEffects": false,
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "node": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist-node/index.js"
+      },
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "dist-node",
+    "!**/test"
+  ],
+  "devDependencies": {
+    "@biomejs/biome": "2.4.10",
+    "@commitlint/cli": "20.5.0",
+    "@commitlint/config-conventional": "20.5.0",
+    "bundlewatch": "0.4.1",
+    "commander": "14.0.3",
+    "globals": "17.4.0",
+    "jest": "30.3.0",
+    "lefthook": "1.11.13",
+    "lint-staged": "16.4.0",
+    "neostandard": "0.13.0",
+    "npm-run-all2": "8.0.4",
+    "prettier": "3.8.3",
+    "release-please": "17.3.0",
+    "runmd": "2.1.1",
+    "standard-version": "9.5.0",
+    "typescript": "5.4.3"
+  },
+  "optionalDevDependencies": {
+    "@wdio/browserstack-service": "9.27.0",
+    "@wdio/cli": "9.27.0",
+    "@wdio/jasmine-framework": "9.27.0",
+    "@wdio/local-runner": "9.27.0",
+    "@wdio/spec-reporter": "9.27.0",
+    "@wdio/static-server-service": "9.27.0"
+  },
+  "scripts": {
+    "build": "./scripts/build.sh",
+    "build:watch": "tsc --watch -p tsconfig.json",
+    "bundlewatch": "npm run pretest:browser && bundlewatch --config bundlewatch.config.json",
+    "docs:diff": "npm run docs && git diff README.md",
+    "docs": "npm run build && npx runmd --output=README.md README_js.md",
+    "biome:check": "biome check .",
+    "biome:fix": "biome check --write .",
+    "examples:browser:rollup:build": "cd examples/browser-rollup && npm run build",
+    "examples:browser:webpack:build": "cd examples/browser-webpack && npm run build",
+    "examples:node:esmodules:test": "cd examples/node-esmodules && npm test",
+    "examples:node:jest:test": "cd examples/node-jest && npm test",
+    "examples:node:typescript:test": "cd examples/typescript && npm test",
+    "lint": "npm run biome:check",
+    "md": "runmd --watch --output=README.md README_js.md",
+    "prepack": "npm run build -- --no-pack",
+    "prepare": "lefthook install",
+    "prepublishOnly": "npm run build",
+    "pretest:benchmark": "npm run build",
+    "pretest:browser": "./scripts/iodd && npm run build && npm-run-all --parallel examples:browser:**",
+    "pretest:node": "npm run build",
+    "pretest": "npm run build",
+    "format": "biome format --write .",
+    "format:check": "biome format --check .",
+    "release": "standard-version --no-verify",
+    "test:benchmark": "cd examples/benchmark && npm test",
+    "test:browser": "wdio run ./wdio.conf.js",
+    "test:node": "npm-run-all --parallel examples:node:**",
+    "test:watch": "node --test --enable-source-maps --watch dist-node/test/*.js",
+    "test": "node --test --enable-source-maps dist-node/test/*.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/uuidjs/uuid.git"
+  },
+  "lint-staged": {
+    "*": [
+      "biome check --write --no-errors-on-unmatched"
+    ]
+  },
+  "standard-version": {
+    "scripts": {
+      "postchangelog": "biome format --write CHANGELOG.md"
+    }
+  },
+  "packageManager": "npm@11.12.1"
+}

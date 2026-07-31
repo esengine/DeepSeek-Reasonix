@@ -5,8 +5,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/instruction"
 	"reasonix/internal/memory"
 	"reasonix/internal/skill"
 )
@@ -40,6 +42,8 @@ func TestSlashArgItems(t *testing.T) {
 		ProviderNames:   []string{"deepseek-flash", "deepseek-pro", "custom"},
 		CurrentProvider: "deepseek-flash",
 		PluginNames:     []string{"superpowers", "workflow-kit"},
+		MemoryRefs:      []string{"mem-cache", "cache-first"},
+		MemoryArchives:  []string{"/tmp/memory archive/cache-first.md"},
 	}
 
 	// /skills subcommands
@@ -152,6 +156,11 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "auto") || !has(items, "zh") || !has(items, "en") || has(items, "中文") {
 		t.Errorf("/reasoning-language should offer only auto/zh/en; got %v", labelsOf(items))
 	}
+	// /currency
+	items, _ = SlashArgItems("/currency ", data)
+	if !has(items, "auto") || !has(items, "CNY") || !has(items, "USD") {
+		t.Errorf("/currency should offer only auto/CNY/USD; got %v", labelsOf(items))
+	}
 	// /theme
 	items, _ = SlashArgItems("/theme ", data)
 	if !has(items, "auto") || !has(items, "light") || !has(items, "graphite") || !has(items, "glacier") {
@@ -180,6 +189,21 @@ func TestSlashArgItems(t *testing.T) {
 	if !has(items, "superpowers") || !has(items, "workflow-kit") {
 		t.Errorf("/plugins show should list plugin names; got %v", labelsOf(items))
 	}
+	// /memory diagnostics and recovery commands.
+	items, _ = SlashArgItems("/memory ", data)
+	for _, want := range []string{"recall", "revisions", "restore", "archived", "recover", "instructions"} {
+		if !has(items, want) {
+			t.Errorf("/memory missing subcommand %q; got %v", want, labelsOf(items))
+		}
+	}
+	items, _ = SlashArgItems("/memory revisions ", data)
+	if !has(items, "mem-cache") || !has(items, "cache-first") {
+		t.Errorf("/memory revisions should offer active memory refs; got %v", labelsOf(items))
+	}
+	items, _ = SlashArgItems("/memory recover ", data)
+	if !has(items, "/tmp/memory archive/cache-first.md") {
+		t.Errorf("/memory recover should offer archive paths; got %v", labelsOf(items))
+	}
 }
 
 func TestMemoryListTextIncludesSavedMemories(t *testing.T) {
@@ -194,7 +218,7 @@ func TestMemoryListTextIncludesSavedMemories(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := New(Options{Memory: &memory.Set{Store: store}})
-	out := c.memoryListText()
+	out := MemoryCommandText(c, "")
 	for _, want := range []string{"saved memories", "[Cache first](cache-first.md)", "Preserve prompt cache stability"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("/memory output missing %q:\n%s", want, out)
@@ -218,7 +242,7 @@ func TestMemoryListTextIncludesArchivedMemories(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := New(Options{Memory: &memory.Set{Store: store}})
-	out := c.memoryListText()
+	out := MemoryCommandText(c, "")
 	for _, want := range []string{"archived memories", "[Stale plan](" + archive + ")", "Superseded by the new retrieval design"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("/memory output missing %q:\n%s", want, out)
@@ -226,6 +250,205 @@ func TestMemoryListTextIncludesArchivedMemories(t *testing.T) {
 	}
 	if strings.Contains(out, "saved memories\n  [Stale plan]") {
 		t.Fatalf("archived memory should not appear as active saved memory:\n%s", out)
+	}
+}
+
+func TestMemoryListTextIncludesEveryScopeAndObservableMetadata(t *testing.T) {
+	root := t.TempDir()
+	projectDir := filepath.Join(root, "project")
+	globalDir := filepath.Join(root, "global")
+	globalStore := memory.Store{Dir: globalDir}
+	globalSaved, err := globalStore.SaveWithOptions(memory.Memory{
+		Name: "shared-policy", Title: "Global policy", Description: "global fallback",
+		Type: memory.TypeReference, Scope: memory.FactScopeGlobal, Body: "Use the global endpoint.",
+	}, memory.SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectStore := memory.Store{Dir: projectDir}
+	projectSaved, err := projectStore.SaveWithOptions(memory.Memory{
+		Name: "shared-policy", Title: "Project policy", Description: "project override",
+		Type: memory.TypeProject, Scope: memory.FactScopeProject, Body: "Use the project endpoint.",
+	}, memory.SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := memory.Store{Dir: projectDir, GlobalDir: globalDir}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+	out := MemoryCommandText(c, "")
+	for _, want := range []string{
+		globalSaved.Memory.ID,
+		projectSaved.Memory.ID,
+		"revision=1",
+		"scope=global",
+		"scope=project",
+		"type=reference",
+		"type=project",
+		"freshness=fresh",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("/memory output missing %q:\n%s", want, out)
+		}
+	}
+	if got := strings.Count(out, "shared-policy.md"); got != 2 {
+		t.Fatalf("/memory should show both same-name scoped facts, got %d:\n%s", got, out)
+	}
+}
+
+func TestManagementMemoryRecallAndInstructionDiagnostics(t *testing.T) {
+	now := time.Now().UTC()
+	set := &memory.Set{
+		Docs: []memory.Source{{
+			Path: "/workspace/AGENTS.md", Scope: memory.ScopeProject,
+			Directory: "/workspace", Imports: []instruction.Import{{Path: "/workspace/shared.md", SourcePath: "/workspace/AGENTS.md"}},
+			Order: 2,
+		}},
+		InstructionDiagnostics: []instruction.Diagnostic{{
+			Code: "import_cycle", Path: "/workspace/shared.md", SourcePath: "/workspace/AGENTS.md", Line: 4, Message: "cycle detected",
+		}},
+	}
+	var notices []string
+	c := New(Options{
+		Memory: set,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+	c.memory.recordRecall(memory.RecallResult{
+		Query: "Which cache policy applies?",
+		Hits: []memory.RecallHit{{
+			Memory: memory.Memory{
+				ID: "mem-cache", Revision: 3, Name: "cache-policy", Scope: memory.FactScopeProject,
+				Type: memory.TypeProject, UpdatedAt: now,
+			},
+			Score: 4.25, Freshness: memory.FreshnessFresh, Reason: "matched cache, policy; project scope",
+		}},
+		CharBudget: 2400, UsedChars: 280, Omitted: 1,
+	})
+
+	if !c.managementNotice("/memory recall") {
+		t.Fatal("/memory recall was not handled")
+	}
+	if !c.managementNotice("/memory instructions") {
+		t.Fatal("/memory instructions was not handled")
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{
+		"Which cache policy applies?",
+		"mem-cache",
+		"score=4.250",
+		"reason=matched cache, policy; project scope",
+		"budget=280/2400",
+		"omitted=1",
+		"precedence=1",
+		"directory=/workspace",
+		"import=/workspace/shared.md",
+		"import_cycle",
+		"/workspace/AGENTS.md:4",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("/memory diagnostics missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestManagementMemoryRevisionRestore(t *testing.T) {
+	userDir := t.TempDir()
+	cwd := filepath.Join(t.TempDir(), "project")
+	store := memory.StoreFor(userDir, cwd)
+	first, err := store.SaveWithOptions(memory.Memory{
+		Name: "provider-policy", Title: "Provider policy", Description: "first version",
+		Type: memory.TypeProject, Body: "Use provider A.",
+	}, memory.SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := first.Memory
+	updated.Description = "second version"
+	updated.Body = "Use provider B."
+	second, err := store.SaveWithOptions(updated, memory.SaveOptions{
+		ExpectedRevision: first.Memory.Revision, RequireExpectedRevision: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notices []string
+	c := New(Options{
+		Memory: &memory.Set{Store: store, CWD: cwd, UserDir: userDir},
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+
+	if !c.managementNotice("/memory revisions " + second.Memory.ID) {
+		t.Fatal("/memory revisions was not handled")
+	}
+	if !c.managementNotice("/memory restore " + second.Memory.ID + " 1") {
+		t.Fatal("/memory restore was not handled")
+	}
+	active, ok := c.Memory().Store.Read(second.Memory.ID)
+	if !ok {
+		t.Fatal("restored memory is not active")
+	}
+	if active.Revision != 3 || active.Body != "Use provider A." {
+		t.Fatalf("restored memory = revision %d body %q", active.Revision, active.Body)
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{"revision=2", "active", "revision=1", "restored provider-policy", "revision=3"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("/memory revision flow missing %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestManagementMemoryArchiveRecoveryAcceptsQuotedPathWithSpaces(t *testing.T) {
+	userDir := filepath.Join(t.TempDir(), "reasonix home with spaces")
+	cwd := filepath.Join(t.TempDir(), "project")
+	store := memory.StoreFor(userDir, cwd)
+	saved, err := store.SaveWithOptions(memory.Memory{
+		Name: "archived-policy", Title: "Archived policy", Description: "recover me",
+		Type: memory.TypeProject, Body: "Archived body.",
+	}, memory.SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath, err := store.Archive(saved.Memory.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var notices []string
+	c := New(Options{
+		Memory: &memory.Set{Store: store, CWD: cwd, UserDir: userDir},
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e.Text)
+			}
+		}),
+	})
+
+	if !c.managementNotice("/memory archived") {
+		t.Fatal("/memory archived was not handled")
+	}
+	if !c.managementNotice(`/memory recover "` + archivePath + `"`) {
+		t.Fatal("/memory recover was not handled")
+	}
+	active, ok := c.Memory().Store.Read(saved.Memory.ID)
+	if !ok {
+		t.Fatal("recovered memory is not active")
+	}
+	if active.Revision != 2 {
+		t.Fatalf("recovered revision = %d, want 2", active.Revision)
+	}
+	joined := strings.Join(notices, "\n")
+	for _, want := range []string{archivePath, "recovered archived-policy", "revision=2"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("/memory archive flow missing %q:\n%s", want, joined)
+		}
 	}
 }
 

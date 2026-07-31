@@ -1,0 +1,8 @@
+./request.go
+./request_finalizer.go
+./responsewriter.go
+_cgo_gotypes.go
+request_linux.cgo1.go
+responsewriter_linux.cgo1.go
+webkit2_legacy.cgo1.go
+_cgo_import.go

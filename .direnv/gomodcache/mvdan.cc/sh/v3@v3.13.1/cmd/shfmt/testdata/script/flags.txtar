@@ -1,0 +1,285 @@
+exec shfmt -h
+! stderr 'flag provided but not defined'
+stderr 'usage: shfmt'
+stderr 'Utilities' # definitely includes our help text
+! stderr 'help requested' # don't duplicate usage output
+! stderr '-test\.' # don't show the test binary's usage func
+
+exec shfmt --help
+stderr 'usage: shfmt'
+
+exec shfmt -version
+stdout 'devel|v3'
+! stderr .
+
+exec shfmt --version
+stdout 'devel|v3'
+! stderr .
+
+! exec shfmt -ln=bash -p
+stderr 'cannot coexist'
+
+! exec shfmt --language-dialect=bash --posix
+stderr 'cannot coexist'
+
+! exec shfmt -ln=bad
+stderr 'unknown shell language'
+
+! exec shfmt --to-json file
+stderr '--to-json can only be used with stdin'
+
+! exec shfmt -filename=foo file
+stderr '-filename can only be used with stdin'
+
+# Check all the -ln variations.
+
+stdin input-posix
+! exec shfmt
+
+stdin input-posix
+exec shfmt -ln=posix
+stdout 'let'
+
+stdin input-posix
+exec shfmt -p
+stdout 'let'
+
+stdin input-posix
+! exec shfmt -ln=mksh
+
+stdin input-posix
+! exec shfmt -ln=bash
+
+stdin input-mksh
+exec shfmt -ln=mksh
+stdout 'coprocess'
+
+stdin input-mksh
+! exec shfmt
+
+# Ensure that the default "bash" language works with and without flags.
+stdin input-bash
+exec shfmt
+stdout loop
+
+# Ensure that -ln=auto works on stdin via filename.
+stdin input-mksh
+exec shfmt -filename=input.mksh
+stdout 'coprocess'
+
+# Ensure that -ln=auto works on stdin via shebang.
+stdin input-mksh-shebang
+exec shfmt
+stdout 'coprocess'
+
+# Ensure that -ln=auto works on stdin using the fallback.
+stdin input-bash
+exec shfmt
+stdout 'loop'
+
+# The default -ln=auto shouldn't require an extension or shebang,
+# as long as we're explicitly formatting a file.
+exec shfmt input-tiny
+stdout foo
+
+# -ln=auto should prefer a shebang if the extension is only ".sh".
+stdin input-mksh-shebang
+exec shfmt -filename=input.sh
+stdout 'coprocess'
+
+# An explicit -ln=auto should still work.
+stdin input-mksh
+exec shfmt -ln=auto -filename=input.mksh
+stdout 'coprocess'
+
+# Certain filenames are recognised like an extension.
+stdin input-zsh
+exec shfmt -filename=/etc/zprofile
+stdout '\${}'
+cp input-zsh .zshrc
+exec shfmt .zshrc
+stdout '\${}'
+
+# Explicitly state language on parse errors
+stdin input-bash-arrays
+! exec shfmt -ln=auto -filename=input.sh
+stderr 'parsed as posix via -ln=auto'
+
+stdin input-bash-extglobs
+! exec shfmt -filename=input.sh
+stderr 'parsed as posix via -ln=auto'
+
+stdin flags-input
+exec shfmt -i 2
+cmp stdout flags-output.indent-golden
+
+stdin flags-input
+exec shfmt --indent 2
+cmp stdout flags-output.indent-golden
+
+stdin flags-input
+exec shfmt -bn
+cmp stdout flags-output.binary-next-line-golden
+
+stdin flags-input
+exec shfmt --binary-next-line
+cmp stdout flags-output.binary-next-line-golden
+
+stdin flags-input
+exec shfmt -ci
+cmp stdout flags-output.case-indent-golden
+
+stdin flags-input
+exec shfmt --case-indent
+cmp stdout flags-output.case-indent-golden
+
+stdin flags-input
+exec shfmt -sr
+cmp stdout flags-output.space-redirects-golden
+
+stdin flags-input
+exec shfmt --space-redirects
+cmp stdout flags-output.space-redirects-golden
+
+stdin flags-input
+exec shfmt -kp
+cmp stdout flags-output.keep-padding-golden
+
+stdin flags-input
+exec shfmt --keep-padding
+cmp stdout flags-output.keep-padding-golden
+
+stdin flags-input
+exec shfmt -fn
+cmp stdout flags-output.func-next-line-golden
+
+stdin flags-input
+exec shfmt --func-next-line
+cmp stdout flags-output.func-next-line-golden
+
+-- input-posix --
+let a+
+-- input-bash --
+for ((;;)); do loop; done
+-- input-tiny --
+foo
+-- input-mksh --
+coprocess |&
+-- input-zsh --
+${} =(bar)
+-- input-mksh-shebang --
+#!/bin/mksh
+coprocess |&
+-- input-bash-extglobs --
+#!/bin/sh
+echo !(a)
+-- input-bash-arrays --
+#!/bin/sh
+foo=(bar)
+
+-- flags-input --
+foo() {
+	bar &&
+		baz
+
+	case $i in
+	j)
+		z
+		;;
+	esac
+
+	space >redirs
+
+	keep    padding
+}
+-- flags-output.indent-golden --
+foo() {
+  bar &&
+    baz
+
+  case $i in
+  j)
+    z
+    ;;
+  esac
+
+  space >redirs
+
+  keep padding
+}
+-- flags-output.binary-next-line-golden --
+foo() {
+	bar \
+		&& baz
+
+	case $i in
+	j)
+		z
+		;;
+	esac
+
+	space >redirs
+
+	keep padding
+}
+-- flags-output.case-indent-golden --
+foo() {
+	bar &&
+		baz
+
+	case $i in
+		j)
+			z
+			;;
+	esac
+
+	space >redirs
+
+	keep padding
+}
+-- flags-output.space-redirects-golden --
+foo() {
+	bar &&
+		baz
+
+	case $i in
+	j)
+		z
+		;;
+	esac
+
+	space > redirs
+
+	keep padding
+}
+-- flags-output.keep-padding-golden --
+foo() {
+	bar &&
+		baz
+
+	case $i in
+	j)
+		z
+		;;
+	esac
+
+	space >redirs
+
+	keep  padding
+}
+-- flags-output.func-next-line-golden --
+foo()
+{
+	bar &&
+		baz
+
+	case $i in
+	j)
+		z
+		;;
+	esac
+
+	space >redirs
+
+	keep padding
+}

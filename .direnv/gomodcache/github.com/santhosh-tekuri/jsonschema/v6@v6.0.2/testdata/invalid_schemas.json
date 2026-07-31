@@ -1,0 +1,273 @@
+[
+	{
+		"description": "InvalidJsonPointer",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$ref": "#/a~0b~~cd"
+		},
+		"errors": [
+			"InvalidJsonPointerError{URL:\"http://invalid-schemas.com/schema.json#/a~0b~~cd\"}"
+		]
+	},
+	{
+		"description": "UnsupportedUrlScheme",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$ref": "ftp://mars.com/schema.json"
+		},
+		"errors": [
+			"LoadURLError{URL:\"ftp://mars.com/schema.json\"",
+			"UnsupportedURLSchemeError"
+		]
+	},
+	{
+		"description": "ValidationError",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"patternProperties": {
+				"^(abc]": {
+					"type": "string"
+				}
+			}
+		},
+		"errors": [
+			"SchemaValidationError{URL:\"http://invalid-schemas.com/schema.json#\""
+		]
+	},
+	{
+		"description": "ValidationError-nonsubschema",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"dummy": {
+				"type": 1
+			},
+			"$ref": "#/dummy"
+		},
+		"errors": [
+			"SchemaValidationError{URL:\"http://invalid-schemas.com/schema.json#/dummy\""
+		]
+	},
+	{
+		"description": "JsonPointerNotFound-obj",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$ref": "#/$defs/something"
+		},
+		"errors": [
+			"JSONPointerNotFoundError{URL:\"http://invalid-schemas.com/schema.json#/$defs/something\"}"
+		]
+	},
+	{
+		"description": "JsonPointerNotFound-arr-pos",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$ref": "#/dummy/0",
+			"dummy": []
+		},
+		"errors": [
+			"JSONPointerNotFoundError{URL:\"http://invalid-schemas.com/schema.json#/dummy/0\"}"
+		]
+	},
+	{
+		"description": "JsonPointerNotFound-arr-neg",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$ref": "#/dummy/-1",
+			"dummy": []
+		},
+		"errors": [
+			"JSONPointerNotFoundError{URL:\"http://invalid-schemas.com/schema.json#/dummy/-1\"}"
+		]
+	},
+	{
+		"description": "JsonPointerNotFound-primitive",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$ref": "#/$schema/something"
+		},
+		"errors": [
+			"JSONPointerNotFoundError{URL:\"http://invalid-schemas.com/schema.json#/$schema/something\"}"
+		]
+	},
+	{
+		"description": "InvalidRegex",
+		"schema": {
+			"$schema": "https://json-schema.org/draft-04/schema",
+			"patternProperties": {
+				"^(abc]": {
+					"type": "string"
+				}
+			}
+		},
+		"errors": [
+			"InvalidRegexError{URL:\"http://invalid-schemas.com/schema.json#/patternProperties\", Regex:\"^(abc]\", "
+		]
+	},
+	{
+		"description": "DuplicateId",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$defs": {
+				"a": {
+					"$id": "http://a.com/b",
+					"$defs": {
+						"b": {
+							"$id": "a.json"
+						},
+						"c": {
+							"$id": "a.json"
+						}
+					}
+				}
+			}
+		},
+		"errors": [
+			"DuplicateIDError",
+			"URL:\"http://invalid-schemas.com/schema.json\"",
+			"ID:\"http://a.com/a.json\"",
+			"\"/$defs/a/$defs/b\"",
+			"\"/$defs/a/$defs/c\""
+		]
+	},
+	{
+		"description": "DuplicateAnchor",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"$defs": {
+				"a": {
+					"$id": "http://a.com/b",
+					"$defs": {
+						"b": {
+							"$anchor": "a1"
+						},
+						"c": {
+							"$anchor": "a1"
+						}
+					}
+				}
+			}
+		},
+		"errors": [
+			"DuplicateAnchorError",
+			"Anchor:\"a1\"",
+			"URL:\"http://invalid-schemas.com/schema.json\"",
+			"\"/$defs/a/$defs/b\"",
+			"\"/$defs/a/$defs/c\""
+		]
+	},
+	{
+		"description": "UnsupportedDraft",
+		"remotes": {
+			"http://remotes/a.json": {
+				"$schema": "http://remotes/b.json"
+			},
+			"http://remotes/b.json": {
+				"$schema": "http://remotes/b.json"
+			}
+		},
+		"schema": {
+			"$schema": "http://remotes/a.json"
+		},
+		"errors": [
+			"UnsupportedDraftError{URL:\"http://remotes/b.json\"}"
+		]
+	},
+	{
+		"description": "MetaSchemaCycle",
+		"remotes": {
+			"http://remotes/a.json": {
+				"$schema": "http://remotes/b.json"
+			},
+			"http://remotes/b.json": {
+				"$schema": "http://remotes/a.json"
+			}
+		},
+		"schema": {
+			"$schema": "http://remotes/a.json"
+		},
+		"errors": [
+			"MetaSchemaCycleError{URL:\"http://remotes/a.json\"}"
+		]
+	},
+	{
+		"description": "AnchorNotFound-local",
+		"schema": {
+			"$ref": "sample.json#abcd",
+			"$defs": {
+				"a": {
+					"$id": "sample.json"
+				}
+			}
+		},
+		"errors": [
+			"AnchorNotFoundError{URL:\"http://invalid-schemas.com/schema.json\", Reference:\"http://invalid-schemas.com/sample.json#abcd\"}"
+		]
+	},
+	{
+		"description": "AnchorNotFound-remote",
+		"remotes": {
+			"http://remotes/a.json": {}
+		},
+		"schema": {
+			"$ref": "http://remotes/a.json#abcd"
+		},
+		"errors": [
+			"AnchorNotFoundError{URL:\"http://remotes/a.json\", Reference:\"http://remotes/a.json#abcd\"}"
+		]
+	},
+	{
+		"description": "UnsupportedVocabulary-required",
+		"remotes": {
+			"http://remotes/a.json": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema#",
+				"$vocabulary": {
+					"https://json-schema.org/draft/2019-09/vocab/format": true
+				}
+			}
+		},
+		"schema": {
+			"$schema": "http://remotes/a.json"
+		},
+		"errors": [
+			"UnsupportedVocabularyError{URL:\"http://remotes/a.json\", Vocabulary:\"https://json-schema.org/draft/2019-09/vocab/format\"}"
+		]
+	},
+	{
+		"description": "UnsupportedVocabulary-optioanl",
+		"remotes": {
+			"http://remotes/a.json": {
+				"$schema": "https://json-schema.org/draft/2020-12/schema#",
+				"$vocabulary": {
+					"https://json-schema.org/draft/2019-09/vocab/format": false
+				}
+			}
+		},
+		"schema": {
+			"$schema": "http://remotes/a.json"
+		}
+	},
+	{
+		"description": "MetaSchemaMismatch",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema#",
+			"$defs": {
+				"one": {
+					"$id": "temp",
+					"$schema": "https://json-schema.org/draft/2019-09/schema#"
+				}
+			}
+		}
+	},
+	{
+		"description": "MetaSchemaMismatch-nomismatch",
+		"schema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema#",
+			"$defs": {
+				"one": {
+					"$id": "temp",
+					"$schema": "https://json-schema.org/draft/2020-12/schema"
+				}
+			}
+		}
+	}
+]

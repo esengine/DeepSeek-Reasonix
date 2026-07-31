@@ -51,13 +51,17 @@ type runResultUsage struct {
 }
 
 type runResult struct {
-	Type         string         `json:"type"`
-	Subtype      string         `json:"subtype"`
-	IsError      bool           `json:"is_error"`
-	DurationMS   int64          `json:"duration_ms"`
-	NumTurns     int            `json:"num_turns"`
-	Result       string         `json:"result"`
-	SessionID    string         `json:"session_id,omitempty"`
+	Type       string  `json:"type"`
+	Subtype    string  `json:"subtype"`
+	IsError    bool    `json:"is_error"`
+	DurationMS int64   `json:"duration_ms"`
+	NumTurns   int     `json:"num_turns"`
+	Result     string  `json:"result"`
+	SessionID  string  `json:"session_id,omitempty"`
+	TotalCost  float64 `json:"total_cost"`
+	Currency   string  `json:"currency,omitempty"`
+	// TotalCostUSD is the released compatibility alias. It mirrors TotalCost;
+	// new consumers must pair TotalCost with Currency instead of assuming USD.
 	TotalCostUSD float64        `json:"total_cost_usd"`
 	Usage        runResultUsage `json:"usage"`
 }
@@ -118,6 +122,8 @@ type runOutputSink struct {
 	final               string
 	usage               runResultUsage
 	cost                float64
+	currency            string
+	mixedCurrencies     bool
 	turns               int
 	sequence            uint64
 	machineToolIDs      map[string]string
@@ -150,6 +156,12 @@ func (s *runOutputSink) Emit(e event.Event) {
 		s.usage.CacheCreationInputTokens += e.Usage.CacheMissTokens
 		if e.Pricing != nil {
 			s.cost += e.Pricing.Cost(e.Usage)
+			currency := pricingCurrencyCode(e.Pricing.Currency)
+			if s.currency == "" {
+				s.currency = currency
+			} else if currency != s.currency {
+				s.mixedCurrencies = true
+			}
 		}
 	}
 	if e.Kind == event.TurnDone {
@@ -168,6 +180,9 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 	defer s.mu.Unlock()
 	if s.err != nil {
 		return s.err
+	}
+	if s.mixedCurrencies && s.format != runOutputText && s.format != runOutputEventsJSONL {
+		return fmt.Errorf("cannot total costs across mixed pricing currencies")
 	}
 	if s.format == runOutputText {
 		if s.final != "" {
@@ -211,9 +226,26 @@ func (s *runOutputSink) Finalize(sessionID string, started time.Time, runErr err
 		NumTurns:     turns,
 		Result:       resultText,
 		SessionID:    sessionID,
+		TotalCost:    s.cost,
+		Currency:     s.currency,
 		TotalCostUSD: s.cost,
 		Usage:        s.usage,
 	})
+}
+
+func pricingCurrencyCode(value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToUpper(value) {
+	case "", "CNY", "RMB", "CNH", "¥", "￥":
+		return "CNY"
+	case "USD", "$", "US$":
+		return "USD"
+	default:
+		if len(value) == 3 {
+			return strings.ToUpper(value)
+		}
+		return value
+	}
 }
 
 func (s *runOutputSink) machineEventRecordFor(e event.Event, sequence uint64) machineEventRecord {

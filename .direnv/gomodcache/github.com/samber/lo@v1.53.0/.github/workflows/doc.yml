@@ -1,0 +1,64 @@
+name: Documentation
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+  push:
+    paths:
+      - 'docs/**'
+
+jobs:
+  build-doc:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./docs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+
+      - name: Install dependencies
+        run: npm i
+
+      - name: Build Docusaurus project
+        run: npm run build
+
+
+  # validate-doc:
+  #   runs-on: ubuntu-latest
+  #   defaults:
+  #     run:
+  #       working-directory: ./docs
+
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v6
+
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v6
+
+  #     - name: Install dependencies
+  #       run: npm i
+
+  #     - name: Run docs helpers checks
+  #       run: |
+  #         node docs/scripts/check-duplicates-in-category.js
+  #         node docs/scripts/check-similar-exists.js
+  #         node docs/scripts/check-filename-matches-frontmatter.js
+  #         node docs/scripts/check-similar-keys-exist-in-directory.js
+  #         node docs/scripts/check-cross-references.js
+
+  #     - name: Sync function signatures
+  #       run: npm run sync:function-signatures
+  #     - name: Commit and push changes
+  #       uses: stefanzweifel/git-auto-commit-action@v5
+  #       with:
+  #         commit_message: 'docs: sync function signatures from source'
+  #         commit_user_name: github-actions[bot]
+  #         commit_user_email: github-actions[bot]@users.noreply.github.com
+  #         file_pattern: docs/data/*.md

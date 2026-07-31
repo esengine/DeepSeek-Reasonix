@@ -1,0 +1,190 @@
+================================================================================
+Quotes in backticks
+================================================================================
+
+<?php
+`"'`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (shell_command_expression
+      (string_content))))
+
+================================================================================
+Escape sequences in backticks
+================================================================================
+
+<?php
+`echo hello\nworld`;
+`\x6c\x73`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (shell_command_expression
+      (string_content)
+      (escape_sequence)
+      (string_content)))
+  (expression_statement
+    (shell_command_expression
+      (escape_sequence)
+      (escape_sequence))))
+
+================================================================================
+Variable interpolation in backticks
+================================================================================
+
+<?php
+$cmd = 'ls';
+`$cmd`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name
+        (name))
+      (string (string_content))))
+  (expression_statement
+    (shell_command_expression
+      (variable_name
+        (name)))))
+
+================================================================================
+Member access expression in backticks
+================================================================================
+
+<?php
+$obj = new stdClass();
+$obj->cmd = 'ls';
+`$obj->cmd`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name
+        (name))
+      (object_creation_expression
+        (name)
+        (arguments))))
+  (expression_statement
+    (assignment_expression
+      (member_access_expression
+        (variable_name
+          (name))
+        (name))
+      (string (string_content))))
+  (expression_statement
+    (shell_command_expression
+      (member_access_expression
+        (variable_name
+          (name))
+        (name)))))
+
+================================================================================
+Array subscript expression in backticks
+================================================================================
+
+<?php
+$cmd = array('ls');
+`$cmd[0]`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name
+        (name))
+      (array_creation_expression
+        (array_element_initializer
+          (string (string_content))))))
+  (expression_statement
+    (shell_command_expression
+      (subscript_expression
+        (variable_name
+          (name))
+        (integer)))))
+
+================================================================================
+Complex interpolation in backticks
+================================================================================
+
+<?php
+$cmd = 'ls';
+`{$cmd}`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (assignment_expression
+      (variable_name
+        (name))
+      (string (string_content))))
+  (expression_statement
+    (shell_command_expression
+      (variable_name
+        (name)))))
+
+================================================================================
+Nesting of expression in backticks
+================================================================================
+
+<?php
+`echo {` && `echo }`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      (shell_command_expression
+        (string_content))
+      (shell_command_expression
+        (string_content)))))
+
+================================================================================
+Nested escaped backticks
+================================================================================
+
+<?php
+`\`echo ls\``;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (shell_command_expression
+      (escape_sequence)
+      (string_content)
+      (escape_sequence))))
+
+================================================================================
+Comment in backticks
+================================================================================
+
+<?php
+`echo /* hello */`;
+
+--------------------------------------------------------------------------------
+
+(program
+  (php_tag)
+  (expression_statement
+    (shell_command_expression
+      (string_content))))

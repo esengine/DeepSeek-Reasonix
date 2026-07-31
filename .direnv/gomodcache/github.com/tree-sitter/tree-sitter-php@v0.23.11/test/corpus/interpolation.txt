@@ -1,0 +1,244 @@
+====================
+no interpolated text
+====================
+
+<?php
+echo "hi";
+---
+
+(program
+  (php_tag)
+  (echo_statement (encapsed_string (string_content))))
+
+===============================
+interpolated text at beginning
+===============================
+
+<div>
+<?php
+echo "hi";
+---
+
+(program
+  (text)
+  (php_tag)
+  (echo_statement (encapsed_string (string_content))))
+
+===============================
+interpolated text at end
+===============================
+
+<?php
+echo "hi";
+?>
+
+<div>
+
+---
+
+(program
+  (php_tag)
+  (echo_statement (encapsed_string (string_content)))
+  (text_interpolation (text)))
+
+===============================
+interpolated text in middle
+===============================
+
+<?php
+echo "hi";
+?>
+
+<div>
+
+<?php
+echo "bye";
+?>
+
+---
+
+(program
+  (php_tag)
+  (echo_statement (encapsed_string (string_content)))
+  (text_interpolation
+    (text)
+    (php_tag))
+  (echo_statement (encapsed_string (string_content)))
+  (text_interpolation))
+
+==============================
+short open tag: On
+==============================
+
+<?
+echo "Used a short tag\n";
+?>
+Finished
+
+---
+
+(program
+  (php_tag)
+  (echo_statement (encapsed_string (string_content) (escape_sequence)))
+  (text_interpolation (text)))
+
+==============================
+short open tag: Off
+==============================
+
+<div>one</div>
+
+<?php
+$a = 'This gets echoed twice';
+?>
+
+<?= $a ?>
+
+<div>two</div>
+
+<? $b=3; ?>
+
+<?php
+   echo "{$b}";
+?>
+
+<?= "{$b}" ?>
+
+---
+
+(program
+  (text)
+  (php_tag)
+  (expression_statement (assignment_expression (variable_name (name)) (string (string_content))))
+  (text_interpolation (php_tag))
+  (expression_statement (variable_name (name)))
+  (text_interpolation (text) (php_tag))
+  (expression_statement (assignment_expression (variable_name (name)) (integer)))
+  (text_interpolation (php_tag))
+  (echo_statement (encapsed_string (variable_name (name))))
+  (text_interpolation (php_tag))
+  (expression_statement (encapsed_string (variable_name (name))))
+  (text_interpolation))
+
+======================
+Single line php comment
+======================
+
+<ul class="foo"><?php // this is a comment ?></ul>
+
+<?php
+// foo?
+// foo? bar?
+echo "hi";
+
+---
+
+(program
+  (text)
+  (php_tag)
+  (comment)
+  (text_interpolation (text) (php_tag))
+  (comment)
+  (comment)
+  (echo_statement (encapsed_string (string_content))))
+
+
+=======================================
+Single line comment without any content
+=======================================
+
+<?php
+# Check if PHP xml isn't compiled
+#
+if ( ! function_exists('xml_parser_create') ) {
+  echo $test;
+}
+
+---
+
+(program
+  (php_tag)
+  (comment)
+  (comment)
+  (if_statement
+    condition: (parenthesized_expression
+      (unary_op_expression
+        argument: (function_call_expression
+          function: (name)
+          arguments: (arguments (argument (string (string_content)))))))
+    body: (compound_statement (echo_statement (variable_name (name))))))
+
+=====================================
+Closing tags before the first PHP tag
+=====================================
+
+a ?> b <?php c;
+
+---
+
+(program
+  (text)
+  (php_tag)
+  (expression_statement
+    (name)))
+
+====================================
+WordPress colon blocks
+====================================
+
+<?php
+
+if ($post) :
+        ?>
+        <?php
+
+        if ( $open ) {
+            $attachment_id;
+        }
+
+        ?>
+    <?php
+    else :
+        $post;
+
+    endif;
+
+    ?>
+
+---
+
+(program
+  (php_tag)
+  (if_statement
+    condition: (parenthesized_expression (variable_name (name)))
+    body: (colon_block
+      (text_interpolation (php_tag))
+      (if_statement
+        condition: (parenthesized_expression (variable_name (name)))
+        body: (compound_statement (expression_statement (variable_name (name))))
+      )
+    )
+    (text_interpolation (php_tag))
+    alternative: (else_clause
+      body: (colon_block
+        (expression_statement (variable_name (name)))
+      )
+    )
+  )
+  (text_interpolation)
+)
+
+===============================
+octothorpe immediately after text interpolation
+===============================
+
+<a href="<?=$url?>#intro">Intro</a>
+
+---
+
+(program
+  (text)
+  (php_tag)
+  (expression_statement
+    (variable_name (name)))
+  (text_interpolation (text)))

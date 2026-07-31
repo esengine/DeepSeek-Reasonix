@@ -1,0 +1,17 @@
+%FDF-1.2
+
+1 0 obj
+<<
+/FDF << /Fields 2 0 R>>
+>>
+endobj
+2 0 obj
+[<< /T (field) /V (Value) >>
+]
+endobj
+trailer
+<<
+/Root 1 0 R
+
+>>
+%%EOF

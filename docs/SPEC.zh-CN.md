@@ -151,7 +151,17 @@ Reasonix 通过低频 compaction 保持 cache-first：
 
 tool result 的 snip/prune 不删除消息，确保 assistant `tool_calls` 与 tool result 配对。摘要只折叠 assistant/tool 工作；正常大小的用户回合和既有 digest 原样保留。被移除的原文归档到 `reasonix/archive/<timestamp>.jsonl`。
 
-`history` tool 支持对 session 与归档进行 BM25 搜索；`memory` tool 用于检索自动记忆，`remember` 与 `forget` 负责写入和归档。智能体发起的记忆写操作每次都需要人工确认，不能由 YOLO、自动审查或子智能体代为批准。详细约定见 `SESSION_MEMORY_RETRIEVAL.md`。
+`history` tool 支持对 session 与归档进行 BM25 搜索；`memory` tool 用于检索自动记忆，
+`remember` 与 `forget` 负责写入和归档。每个真实用户回合前，Reasonix 会用原始用户消息执行
+有预算的 BM25 自动召回，把命中作为低权限 user-turn 后缀追加；泛化请求会被抑制，等价事实优先
+项目级版本，stale 内容会降权。这不会修改稳定 system prompt 或工具 schema。
+
+拥有当前项目 store 的父 controller（包括顶层 headless）只有在新事实有界、非敏感、纯创建，且明确属于 project/reference 时才能
+免确认保存。全局事实、偏好、feedback、更新、重复项、敏感/超长内容和所有 `forget` 仍需
+新鲜人工确认，Auto、YOLO、Guardian、permission hook 或子智能体都不能代为批准；子智能体和
+不拥有该作用域 controller 的 headless surface 会 fail closed。事实带有不变 ID、单调 revision、时间、type 与 scope；更新先快照旧版本，
+restore 与 archive recovery 会创建更高 revision，并拒绝路径逃逸、符号链接、冲突和覆盖。
+详细约定见 [`SESSION_MEMORY_RETRIEVAL.zh-CN.md`](SESSION_MEMORY_RETRIEVAL.zh-CN.md)。
 
 ### 3.7 权限
 
@@ -165,12 +175,13 @@ type Policy struct { Mode Decision; Allow, Ask, Deny []Rule }
 func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Decision
 ```
 
-- rule 可以是 `Tool` 或 `Tool(specifier)`，例如 `Bash(go test:*)`、`Edit(docs/**)`。
+- rule 可以是 `Tool` 或 `Tool(specifier)`，例如 `Bash(go test:*)`、`Edit(docs/**)`；`Bash=<literal>` 是整条 Bash 命令的精确授权格式，其中 glob 与 Shell 元字符都按普通字符匹配。
 - 优先级为 `deny > ask > allow > fallback`；只读工具 fallback 为 Allow，写工具 fallback 使用 `Mode`。
 - 交互模式中的 Ask 由用户选择单次允许、session scope 允许、持久允许或拒绝；显式 Deny 在所有模式下都不可绕过。
+- 动态 Bash 分两级：参数/算术展开、赋值、不含嵌套执行的 heredoc、普通文件重定向与 Shell glob 不能复用裸 `Bash`、前缀或 glob Allow，保存时只生成 `Bash=<literal>`，但仍遵循普通 fallback，因此 Auto 与获批计划窗口可无提示执行。命令/进程替换、动态命令名、无法解析结构，以及 `eval`、`source`、Shell `-c`、PowerShell/cmd 命令字符串、运行时内联代码参数属于嵌套/间接执行；交互 Ask/Auto 必须人工批准，Guardian 与 hook allow 不能代替，无头 Ask/Auto/DontAsk 直接拒绝，只有完全相同的 literal 或 YOLO 可以绕过。
 - 安装 MCP server 即授权其全部工具，不再有 server、raw tool、writer 或 destructive 的第二套审批策略；项目 `reasonix.toml` 与 `.mcp.json` 声明同样默认可信，不需要额外启动确认，显式全局 `deny` 仍然优先。全局安装写入用户 `config.toml`，项目声明保留在原项目文件；同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。编辑写回当前生效来源，删除高优先级声明后露出下一层。`readOnlyHint` 与 `destructiveHint` 仅用于调度、Plan/严格只读边界及缓存到实时安全分类复核，不会新增逐调用审批。严格只读子智能体 registry 仍仅暴露已授权且 `readOnlyHint: true`、无 `destructiveHint` 的 MCP；双模型 Planner 通过固定 `use_capability` 代理（从不暴露直接 `mcp__*` schema）调用已授权、非 destructive 的 MCP，不再要求 `readOnlyHint`，destructive 工具留给 Executor。Balanced 双模型的 Executor 使用独立 frontend 复用同一稳定代理，因此 Planner 发现的 capability ID 可在 handoff 后直接执行，同时保持两侧 ledger/audit 隔离。分发前代理会再次复核当前 controller 的 enable、授权和完整运行时连接身份；共享 Host 中仅 server 同名不构成复用权限。
 - Plan 是协作流程，不等于全工具只读。普通 built-in 与 Bash 仍走 Ask/Auto/YOLO 和 Sandbox；独立双模型 Planner 允许已授权、非 destructive 的 MCP（即使没有 `readOnlyHint`），但在规划阶段持续阻止 destructive 与未授权目标；没有独立 Planner 的单模型 Plan 仍阻止 MCP writer/destructive。
-- Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划。
+- Plan 只能由用户显式选择进入，与当前工具审批姿态相互独立；普通聊天不会自动切换到 Plan。Auto/YOLO 不会回答 `ask`，也不会替用户批准 `exit_plan_mode`，获批计划的短期自动执行窗口也不会自动批准后续计划或嵌套/间接 Bash。
 - 桌面端协作模式分为 `normal`、`plan` 和 `goal`。Goal 会持续推进目标，直到完成、同一阻塞状态重复三次、用户停止或达到安全续跑边界。只有用户在输入框中选择 Goal 或运行 `/goal` 显式启动后，长周期研究、调试、优化或实现目标才可启用 AutoResearch；普通聊天不会隐式切换协作模式，也不会创建持久化 AutoResearch 状态。动态状态保存在 `.reasonix/autoresearch/.../`。
 
 ### 3.8 Slash command
@@ -216,6 +227,9 @@ flag > ./reasonix.toml > 用户 config.toml > 内置默认值
 ```toml
 default_model = "deepseek"
 
+[cli]                          # 仅用户全局生效，项目 reasonix.toml 不能覆盖
+update_channel = "stable"      # stable|preview；缺失或未知值回退到 stable
+
 [agent]
 temperature = 0.0
 reasoning_language = "auto"
@@ -247,6 +261,10 @@ allow = ["Bash(go test:*)", "Bash(git status:*)"]
 [serve]
 auth_mode = "none"
 ```
+
+原生 CLI 更新渠道保存在用户配置中。`reasonix upgrade` 跟随已保存渠道，
+`reasonix upgrade stable|preview` 会切换渠道并更新同一个已安装二进制文件。高级参数
+`--channel` 只供自动化做单次覆盖，不改变保存值。
 
 `[sandbox]` 是权限策略之下的强制执行层。file writer 默认限制在 workspace root、Reasonix 用户配置目录和 `allow_write`；`forbid_read` 可阻止读取敏感路径。macOS 使用 Seatbelt，Linux 使用 bubblewrap；若声明 enforce 但平台 backend 不可用，Bash 应拒绝执行而不是静默降级。Windows 当前没有 OS 级 Bash sandbox，file tool 的路径限制仍然生效。
 

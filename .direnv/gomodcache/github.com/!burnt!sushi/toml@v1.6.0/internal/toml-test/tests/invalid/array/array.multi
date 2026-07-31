@@ -1,0 +1,18 @@
+double-comma-01 = [1,,2]
+double-comma-02 = [1,2,,]
+
+only-comma-01 = [,]
+only-comma-02 = [,,]
+
+no-comma-01 = [true false]
+no-comma-02 = [ 1 2 3 ]
+no-comma-03 = [ 1 #,]
+
+no-close-01 = [ 1, 2, 3
+no-close-02 = [1,
+no-close-03 = [42 #]
+no-close-04 = [{ key = 42
+no-close-05 = [{ key = 42}
+no-close-06 = [{ key = 42 #}]
+no-close-07 = [{ key = 42} #]
+no-close-08 = [

@@ -1,0 +1,163 @@
+================================================================================
+Async function
+================================================================================
+
+async fn abc() {}
+
+async fn main() {
+    let x = futures.await?;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_item
+    (function_modifiers)
+    (identifier)
+    (parameters)
+    (block))
+  (function_item
+    (function_modifiers)
+    (identifier)
+    (parameters)
+    (block
+      (let_declaration
+        (identifier)
+        (try_expression
+          (await_expression
+            (identifier)))))))
+
+================================================================================
+Await expression
+================================================================================
+
+futures.await;
+futures.await?;
+futures.await?.await?;
+futures.await?.function().await?;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (await_expression
+      (identifier)))
+  (expression_statement
+    (try_expression
+      (await_expression
+        (identifier))))
+  (expression_statement
+    (try_expression
+      (await_expression
+        (try_expression
+          (await_expression
+            (identifier))))))
+  (expression_statement
+    (try_expression
+      (await_expression
+        (call_expression
+          (field_expression
+            (try_expression
+              (await_expression
+                (identifier)))
+            (field_identifier))
+          (arguments))))))
+
+================================================================================
+Async Block
+================================================================================
+
+async {}
+async { let x = 10; }
+async move {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (async_block
+      (block)))
+  (expression_statement
+    (async_block
+      (block
+        (let_declaration
+          (identifier)
+          (integer_literal)))))
+  (expression_statement
+    (async_block
+      (block))))
+
+================================================================================
+Async closure
+================================================================================
+
+let _ = async || ();
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    (closure_expression
+      (closure_parameters)
+      (unit_expression))))
+
+================================================================================
+Async move async move closure
+================================================================================
+
+let a = async move || async move {};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    (identifier)
+    (closure_expression
+      (closure_parameters)
+      (async_block
+        (block)))))
+
+
+================================================================================
+Try Block
+================================================================================
+
+try {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (try_block
+      (block))))
+
+================================================================================
+Gen Block
+================================================================================
+
+gen {}
+gen { let x = 10; }
+gen { yield (); }
+gen move {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (gen_block
+      (block)))
+  (expression_statement
+    (gen_block
+      (block
+        (let_declaration
+          (identifier)
+          (integer_literal)))))
+  (expression_statement
+    (gen_block
+      (block
+        (expression_statement
+          (yield_expression
+            (unit_expression))))))
+  (expression_statement
+    (gen_block
+      (block))))

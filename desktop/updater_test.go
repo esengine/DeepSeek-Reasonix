@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -21,6 +23,7 @@ import (
 	"time"
 
 	"reasonix/desktop/internal/update"
+	"reasonix/internal/repair"
 )
 
 func TestNormalizeVersion(t *testing.T) {
@@ -42,6 +45,93 @@ func TestNormalizeVersion(t *testing.T) {
 		if got != c.want || ok != c.ok {
 			t.Errorf("normalizeVersion(%q) = (%q,%v), want (%q,%v)", c.in, got, ok, c.want, c.ok)
 		}
+	}
+}
+
+func TestValidateUpdaterRequestBindsChannelVersionAndID(t *testing.T) {
+	tests := []struct {
+		name    string
+		request string
+		channel string
+		version string
+		wantErr bool
+	}{
+		{name: "stable", request: "web-stable-1", channel: "stable", version: "v1.18.0"},
+		{name: "preview", request: "web-preview-1", channel: "preview", version: "v1.18.0-preview.1"},
+		{name: "preview rejects stable version", request: "web-preview-2", channel: "preview", version: "v1.18.0", wantErr: true},
+		{name: "stable rejects preview version", request: "web-stable-2", channel: "stable", version: "v1.18.0-preview.1", wantErr: true},
+		{name: "empty request", channel: "stable", version: "v1.18.0", wantErr: true},
+		{name: "unsafe request", request: "web request", channel: "stable", version: "v1.18.0", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request, selected, version, err := validateUpdaterRequest(tt.request, tt.channel, tt.version)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateUpdaterRequest() error = %v, wantErr=%v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				return
+			}
+			if request != tt.request || selected != tt.channel || version != tt.version {
+				t.Fatalf("validateUpdaterRequest() = (%q, %q, %q)", request, selected, version)
+			}
+		})
+	}
+}
+
+func TestUpdaterWailsMethodContracts(t *testing.T) {
+	appType := reflect.TypeOf((*App)(nil))
+	tests := []struct {
+		name   string
+		numIn  int
+		numOut int
+	}{
+		{name: "DownloadUpdate", numIn: 2, numOut: 2},
+		{name: "InstallUpdate", numIn: 2, numOut: 1},
+		{name: "DownloadUpdateRequest", numIn: 4, numOut: 2},
+		{name: "InstallUpdateRequest", numIn: 4, numOut: 1},
+	}
+	for _, tt := range tests {
+		method, ok := appType.MethodByName(tt.name)
+		if !ok {
+			t.Fatalf("App.%s is missing", tt.name)
+		}
+		if method.Type.NumIn() != tt.numIn || method.Type.NumOut() != tt.numOut {
+			t.Fatalf(
+				"App.%s signature = %v inputs/%v outputs, want %v/%v",
+				tt.name,
+				method.Type.NumIn(),
+				method.Type.NumOut(),
+				tt.numIn,
+				tt.numOut,
+			)
+		}
+	}
+}
+
+func TestUpdaterNativeOperationsFailFastWhileBusy(t *testing.T) {
+	app := NewApp()
+	finishFirst, err := app.beginUpdaterOperation("first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.beginUpdaterOperation("second"); !errors.Is(err, errUpdateInProgress) {
+		t.Fatalf("second updater operation error = %v, want errUpdateInProgress", err)
+	}
+	finishFirst()
+	finishSecond, err := app.beginUpdaterOperation("second")
+	if err != nil {
+		t.Fatalf("operation did not become available after release: %v", err)
+	}
+	finishSecond()
+}
+
+func TestExpectedUpdateVersionRejectsAdvancedPointer(t *testing.T) {
+	if err := ensureExpectedUpdateVersion("preview", "v1.18.0-preview.1", "v1.18.0-preview.2"); err == nil {
+		t.Fatal("advanced pointer unexpectedly matched the checked version")
+	}
+	if err := ensureExpectedUpdateVersion("stable", "v1.18.0", "v1.18.0"); err != nil {
+		t.Fatalf("identical pointer rejected: %v", err)
 	}
 }
 
@@ -206,11 +296,29 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 	if preview[3] != releaseGatewayBase+"/canary/latest.json" {
 		t.Errorf("preview gateway compatibility fallback = %q, want the legacy canary gateway", preview[3])
 	}
-	if strings.Contains(downloadPage(), "/releases/latest") {
-		t.Errorf("download page should not use GitHub's repository-wide latest release: %q", downloadPage())
+	if strings.Contains(downloadPage("stable"), "/releases/latest") {
+		t.Errorf("download page should not use GitHub's repository-wide latest release: %q", downloadPage("stable"))
 	}
-	if downloadPage() != "https://reasonix.io/?download=desktop#start" {
-		t.Errorf("download page = %q, want the desktop install deep link", downloadPage())
+	if downloadPage("stable") != "https://reasonix.io/?channel=stable&download=desktop#start" {
+		t.Errorf("stable download page = %q, want the Stable desktop install deep link", downloadPage("stable"))
+	}
+	if downloadPage("preview") != "https://reasonix.io/?channel=preview&download=desktop#start" {
+		t.Errorf("preview download page = %q, want the Preview desktop install deep link", downloadPage("preview"))
+	}
+	if got := manifestDownloadPage("preview", "https://reasonix.io/?download=desktop#start"); got != "https://reasonix.io/?channel=preview&download=desktop#start" {
+		t.Errorf("manifest Preview page = %q", got)
+	}
+	if got := manifestDownloadPage("preview", "https://example.com/releases"); got != "https://example.com/releases" {
+		t.Errorf("external manifest download page = %q, want unchanged", got)
+	}
+	for _, unsafe := range []string{
+		"javascript:alert(1)",
+		"http://reasonix.io/#start",
+		"https://user@reasonix.io/#start",
+	} {
+		if got := manifestDownloadPage("preview", unsafe); got != downloadPage("preview") {
+			t.Errorf("unsafe manifest page %q = %q, want official Preview fallback", unsafe, got)
+		}
 	}
 }
 
@@ -227,6 +335,12 @@ func TestManifestChannelValidation(t *testing.T) {
 		{name: "Preview rejects legacy Canary", channel: "preview", version: "v1.17.21-canary.56", wantError: true},
 		{name: "Preview rejects Stable", channel: "preview", version: "v1.17.21", wantError: true},
 		{name: "Stable rejects Preview", channel: "stable", version: "v1.18.0-preview.7", wantError: true},
+		{name: "Stable requires v prefix", channel: "stable", version: "1.17.21", wantError: true},
+		{name: "Stable rejects build metadata", channel: "stable", version: "v1.17.21+build.1", wantError: true},
+		{name: "Stable rejects prerelease", channel: "stable", version: "v1.17.21-rc.1", wantError: true},
+		{name: "Preview requires numeric build", channel: "preview", version: "v1.18.0-preview.foo", wantError: true},
+		{name: "Preview rejects extra suffix", channel: "preview", version: "v1.18.0-preview.1.extra", wantError: true},
+		{name: "Preview rejects leading zero build", channel: "preview", version: "v1.18.0-preview.01", wantError: true},
 		{name: "invalid version", channel: "preview", version: "dev", wantError: true},
 	}
 	for _, tt := range tests {
@@ -239,6 +353,266 @@ func TestManifestChannelValidation(t *testing.T) {
 	}
 }
 
+func validDesktopManifest(t *testing.T, selected, manifestVersion string) update.Manifest {
+	t.Helper()
+	tag := desktopReleaseTag(selected, manifestVersion)
+	manifest := update.Manifest{
+		Version:        manifestVersion,
+		DownloadPage:   manifestDownloadPageURL,
+		Platforms:      map[string]update.Asset{},
+		NativePackages: map[string]update.Asset{},
+		Downloads:      map[string]update.Asset{},
+	}
+	requiredAssets := append([]requiredDesktopAsset(nil), requiredDesktopUpdaterAssets...)
+	requiredAssets = append(requiredAssets, requiredDesktopDownloadAssets...)
+	for _, required := range requiredAssets {
+		assetURL := fmt.Sprintf("%s/%s/%s", r2Base, tag, required.filename)
+		asset := update.Asset{
+			URL:    assetURL,
+			Sig:    assetURL + ".minisig",
+			Size:   1024,
+			SHA256: strings.Repeat("a", 64),
+		}
+		switch required.group {
+		case "platforms":
+			manifest.Platforms[required.key] = asset
+		case "native_packages":
+			manifest.NativePackages[required.key] = asset
+		case "downloads":
+			manifest.Downloads[required.key] = asset
+		}
+	}
+	return manifest
+}
+
+func TestDesktopManifestValidation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*update.Manifest)
+	}{
+		{
+			name: "missing required platform asset",
+			mutate: func(m *update.Manifest) {
+				delete(m.Platforms, "darwin-arm64")
+			},
+		},
+		{
+			name: "wrong filename",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.URL = strings.Replace(asset.URL, "Reasonix-", "Other-", 1)
+				asset.Sig = asset.URL + ".minisig"
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "HTTP asset URL",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.URL = strings.Replace(asset.URL, "https://", "http://", 1)
+				asset.Sig = asset.URL + ".minisig"
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "asset URL userinfo",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.URL = strings.Replace(asset.URL, "https://", "https://user@", 1)
+				asset.Sig = asset.URL + ".minisig"
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "wrong asset host",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.URL = strings.Replace(asset.URL, "dl.reasonix.io", "example.com", 1)
+				asset.Sig = asset.URL + ".minisig"
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "wrong release tag",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.URL = strings.Replace(asset.URL, desktopReleaseTag("stable", m.Version), "desktop-v9.9.9", 1)
+				asset.Sig = asset.URL + ".minisig"
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "signature is not exact URL suffix",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.Sig = asset.URL + ".sig"
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "zero size",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.Size = 0
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "negative size",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.Size = -1
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "size above release maximum",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.Size = maxDesktopReleaseAssetSize + 1
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "uppercase SHA",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.SHA256 = strings.Repeat("A", 64)
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "short SHA",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.SHA256 = strings.Repeat("a", 63)
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "nonhex SHA",
+			mutate: func(m *update.Manifest) {
+				asset := m.Platforms["darwin-arm64"]
+				asset.SHA256 = strings.Repeat("g", 64)
+				m.Platforms["darwin-arm64"] = asset
+			},
+		},
+		{
+			name: "missing download page",
+			mutate: func(m *update.Manifest) {
+				m.DownloadPage = ""
+			},
+		},
+		{
+			name: "wrong download page",
+			mutate: func(m *update.Manifest) {
+				m.DownloadPage = "https://reasonix.io/?channel=stable&download=desktop#start"
+			},
+		},
+	}
+
+	if err := validateDesktopManifest("stable", ptr(validDesktopManifest(t, "stable", "v1.18.0"))); err != nil {
+		t.Fatalf("valid Stable manifest: %v", err)
+	}
+	if err := validateDesktopManifest("preview", ptr(validDesktopManifest(t, "preview", "v1.19.0-preview.7"))); err != nil {
+		t.Fatalf("valid Preview manifest: %v", err)
+	}
+	t.Run("legacy manifests remain upgradeable", func(t *testing.T) {
+		stable := validDesktopManifest(t, "stable", "v1.17.21")
+		stable.Downloads = nil
+		if err := validateDesktopManifest("stable", &stable); err != nil {
+			t.Fatalf("legacy Stable manifest: %v", err)
+		}
+
+		preview := validDesktopManifest(t, "preview", "v1.18.0-preview.62")
+		immutableBase := r2Base + "/desktop-v1.18.0-preview.62/"
+		rollingBase := r2Base + "/desktop-preview/"
+		for key, asset := range preview.Platforms {
+			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			preview.Platforms[key] = asset
+		}
+		for key, asset := range preview.NativePackages {
+			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			preview.NativePackages[key] = asset
+		}
+		preview.Downloads = nil
+		if err := validateDesktopManifest("preview", &preview); err != nil {
+			t.Fatalf("legacy Preview manifest: %v", err)
+		}
+	})
+	t.Run("empty downloads is not a legacy manifest", func(t *testing.T) {
+		manifest := validDesktopManifest(t, "stable", "v1.17.21")
+		manifest.Downloads = map[string]update.Asset{}
+		if err := validateDesktopManifest("stable", &manifest); err == nil {
+			t.Fatal("manifest with empty downloads bypassed the new-format asset requirements")
+		}
+	})
+	t.Run("new Preview manifest rejects rolling asset base", func(t *testing.T) {
+		manifest := validDesktopManifest(t, "preview", "v1.19.0-preview.7")
+		immutableBase := r2Base + "/desktop-v1.19.0-preview.7/"
+		rollingBase := r2Base + "/desktop-preview/"
+		for key, asset := range manifest.Platforms {
+			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			manifest.Platforms[key] = asset
+		}
+		for key, asset := range manifest.NativePackages {
+			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			manifest.NativePackages[key] = asset
+		}
+		for key, asset := range manifest.Downloads {
+			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			manifest.Downloads[key] = asset
+		}
+		if err := validateDesktopManifest("preview", &manifest); err == nil {
+			t.Fatal("new Preview manifest accepted mutable rolling assets")
+		}
+	})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := validDesktopManifest(t, "stable", "v1.18.0")
+			tt.mutate(&manifest)
+			if err := validateDesktopManifest("stable", &manifest); err == nil {
+				t.Fatal("validateDesktopManifest accepted malformed manifest")
+			}
+		})
+	}
+
+	t.Run("invalid native package", func(t *testing.T) {
+		manifest := validDesktopManifest(t, "stable", "v1.18.0")
+		native := manifest.NativePackages["linux-amd64"]
+		native.Sig = native.URL + ".sig"
+		manifest.NativePackages["linux-amd64"] = native
+		if err := validateDesktopManifest("stable", &manifest); err == nil {
+			t.Fatal("validateDesktopManifest accepted malformed native package")
+		}
+	})
+
+	t.Run("mixed official bases", func(t *testing.T) {
+		manifest := validDesktopManifest(t, "stable", "v1.18.0")
+		asset := manifest.Platforms["darwin-arm64"]
+		asset.URL = strings.Replace(
+			asset.URL,
+			r2Base+"/desktop-v1.18.0/",
+			"https://github.com/esengine/DeepSeek-Reasonix/releases/download/desktop-v1.18.0/",
+			1,
+		)
+		asset.Sig = asset.URL + ".minisig"
+		manifest.Platforms["darwin-arm64"] = asset
+		if err := validateDesktopManifest("stable", &manifest); err == nil {
+			t.Fatal("validateDesktopManifest accepted mixed R2 and GitHub asset bases")
+		}
+	})
+}
+
+func ptr[T any](value T) *T {
+	return &value
+}
+
 func TestFetchManifestSkipsLegacyCanaryBuildForPreview(t *testing.T) {
 	var calls []string
 	client := &http.Client{Transport: rtFunc(func(req *http.Request) (*http.Response, error) {
@@ -247,11 +621,15 @@ func TestFetchManifestSkipsLegacyCanaryBuildForPreview(t *testing.T) {
 		if strings.Contains(req.URL.Path, "/canary/") {
 			version = "v1.18.0-preview.7"
 		}
-		body := fmt.Sprintf(`{"version":%q}`, version)
+		manifest := validDesktopManifest(t, "preview", version)
+		body, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Status:     "200 OK",
-			Body:       io.NopCloser(strings.NewReader(body)),
+			Body:       io.NopCloser(bytes.NewReader(body)),
 			Header:     make(http.Header),
 		}, nil
 	})}
@@ -266,6 +644,79 @@ func TestFetchManifestSkipsLegacyCanaryBuildForPreview(t *testing.T) {
 	if len(calls) != 2 || !strings.Contains(calls[0], "/preview/") || !strings.Contains(calls[1], "/canary/") {
 		t.Fatalf("endpoint calls = %q, want Preview first and legacy Canary fallback second", calls)
 	}
+}
+
+func TestFetchManifestSkipsMalformedSuccessfulResponse(t *testing.T) {
+	var calls []string
+	client := &http.Client{Transport: rtFunc(func(req *http.Request) (*http.Response, error) {
+		calls = append(calls, req.URL.String())
+		manifest := validDesktopManifest(t, "preview", "v1.18.0-preview.7")
+		if strings.Contains(req.URL.Path, "/preview/") {
+			delete(manifest.Platforms, update.CurrentPlatform())
+		}
+		body, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(bytes.NewReader(body)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+
+	manifest, err := fetchManifest(context.Background(), client, nil, "preview")
+	if err != nil {
+		t.Fatalf("fetchManifest: %v", err)
+	}
+	if manifest.Version != "v1.18.0-preview.7" {
+		t.Fatalf("version = %q, want valid fallback manifest", manifest.Version)
+	}
+	if len(calls) != 2 || !strings.Contains(calls[0], "/preview/") || !strings.Contains(calls[1], "/canary/") {
+		t.Fatalf("endpoint calls = %q, want malformed 200 to fall through", calls)
+	}
+}
+
+func TestValidateUpdateRedirect(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    string
+		wantError bool
+	}{
+		{name: "Reasonix first-party redirect", target: "https://dl.reasonix.io/file"},
+		{name: "GitHub redirect", target: "https://github.com/file"},
+		{name: "GitHub HTTPS asset redirect", target: "https://release-assets.githubusercontent.com/file"},
+		{name: "HTTPS downgrade", target: "http://release-assets.githubusercontent.com/file", wantError: true},
+		{name: "userinfo", target: "https://user@release-assets.githubusercontent.com/file", wantError: true},
+		{name: "missing hostname", target: "https:///file", wantError: true},
+		{name: "arbitrary HTTPS host", target: "https://example.com/file", wantError: true},
+		{name: "Reasonix suffix spoof", target: "https://dl.reasonix.io.evil.invalid/file", wantError: true},
+		{name: "GitHub suffix spoof", target: "https://release-assets.githubusercontent.com.evil.invalid/file", wantError: true},
+		{name: "explicit port", target: "https://dl.reasonix.io:443/file", wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, tt.target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = validateUpdateRedirect(req, nil)
+			if (err != nil) != tt.wantError {
+				t.Fatalf("validateUpdateRedirect(%q) error = %v, wantError=%v", tt.target, err, tt.wantError)
+			}
+		})
+	}
+	t.Run("redirect limit", func(t *testing.T) {
+		req, err := http.NewRequest(http.MethodGet, "https://release-assets.githubusercontent.com/file", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		via := make([]*http.Request, 10)
+		if err := validateUpdateRedirect(req, via); err == nil {
+			t.Fatal("validateUpdateRedirect accepted more than 10 redirects")
+		}
+	})
 }
 
 func withUpdateCacheDir(t *testing.T) string {
@@ -503,6 +954,146 @@ func TestExtractBinary(t *testing.T) {
 	}
 }
 
+func TestExtractLinuxReleaseUnitRejectsAmbiguousMembers(t *testing.T) {
+	makeArchive := func(t *testing.T, headers []tar.Header, bodies [][]byte) []byte {
+		t.Helper()
+		var buf bytes.Buffer
+		gz := gzip.NewWriter(&buf)
+		tw := tar.NewWriter(gz)
+		for i, header := range headers {
+			if err := tw.WriteHeader(&header); err != nil {
+				t.Fatal(err)
+			}
+			if i < len(bodies) {
+				if _, err := tw.Write(bodies[i]); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		if err := tw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := gz.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return buf.Bytes()
+	}
+	base := func(name string, body []byte) tar.Header {
+		return tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}
+	}
+	headers := []tar.Header{
+		base("reasonix-desktop", []byte("desktop")),
+		base("reasonix-guard", []byte("guard")),
+		base("reasonix", []byte("cli")),
+	}
+	bodies := [][]byte{[]byte("desktop"), []byte("guard"), []byte("cli")}
+	if got, err := extractLinuxReleaseUnit(makeArchive(t, headers, bodies)); err != nil ||
+		string(got["reasonix-desktop"]) != "desktop" {
+		t.Fatalf("complete release extraction = %v, %q", err, got["reasonix-desktop"])
+	}
+
+	duplicateHeaders := append(append([]tar.Header(nil), headers...), base("nested/reasonix", []byte("duplicate")))
+	duplicateBodies := append(append([][]byte(nil), bodies...), []byte("duplicate"))
+	if _, err := extractLinuxReleaseUnit(makeArchive(t, duplicateHeaders, duplicateBodies)); err == nil ||
+		!strings.Contains(err.Error(), "appears more than once") {
+		t.Fatalf("duplicate release member error = %v", err)
+	}
+
+	nonRegular := append([]tar.Header(nil), headers...)
+	nonRegular[1] = tar.Header{Name: "reasonix-guard", Typeflag: tar.TypeSymlink, Linkname: "outside"}
+	nonRegularBodies := [][]byte{bodies[0], nil, bodies[2]}
+	if _, err := extractLinuxReleaseUnit(makeArchive(t, nonRegular, nonRegularBodies)); err == nil ||
+		!strings.Contains(err.Error(), "not a regular file") {
+		t.Fatalf("non-regular release member error = %v", err)
+	}
+}
+
+func TestApplyLinuxHoldsReleaseUnitLockDuringReplace(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	exe := filepath.Join(dir, "reasonix-desktop")
+	releasePaths := releaseUnitPathsFor(dir, "linux")
+	for _, path := range releasePaths {
+		if err := os.WriteFile(path, []byte("old"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prepared, err := repair.PrepareFileUpdate("v1", "v2", exe, releasePaths[1:]...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalPath := currentExecutablePathForLinux
+	originalApply := applyLinuxReleaseUnit
+	currentExecutablePathForLinux = func() string { return exe }
+	entered := make(chan struct{})
+	releaseReplace := make(chan struct{})
+	applyLinuxReleaseUnit = func(
+		tx *repair.UpdateTransaction,
+		exe string,
+		bin, guard, cli []byte,
+	) ([]repair.FileUpdateInstallReceipt, error) {
+		close(entered)
+		<-releaseReplace
+		return originalApply(tx, exe, bin, guard, cli)
+	}
+	t.Cleanup(func() {
+		currentExecutablePathForLinux = originalPath
+		applyLinuxReleaseUnit = originalApply
+	})
+
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, name := range []string{"reasonix-desktop", "reasonix-guard", "reasonix"} {
+		body := []byte(name)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	applyDone := make(chan error, 1)
+	go func() { applyDone <- applyLinux(buf.Bytes(), prepared) }()
+	select {
+	case <-entered:
+	case err := <-applyDone:
+		t.Fatalf("applyLinux failed before replacement: %v", err)
+	}
+
+	lockDone := make(chan error, 1)
+	go func() {
+		unlock, err := repair.LockRepairMutations(releasePaths...)
+		if err == nil {
+			unlock()
+		}
+		lockDone <- err
+	}()
+	select {
+	case err := <-lockDone:
+		close(releaseReplace)
+		t.Fatalf("competing updater lock acquired during Linux replacement: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	close(releaseReplace)
+	if err := <-applyDone; err != nil {
+		t.Fatalf("applyLinux: %v", err)
+	}
+	if err := <-lockDone; err != nil {
+		t.Fatalf("competing lock after replacement: %v", err)
+	}
+	if _, ok := repair.ReadUpdateApplyFailure(); ok {
+		t.Fatal("successful Linux release-unit publish left an interruption marker")
+	}
+}
+
 func fastRetry(t *testing.T) {
 	t.Helper()
 	restore := retryBackoff
@@ -659,6 +1250,32 @@ func TestDownloadFallsBackToSecondClient(t *testing.T) {
 	}
 }
 
+func TestDownloadRejectsBodyShorterThanManifestSize(t *testing.T) {
+	fastRetry(t)
+	body := []byte("short")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	if _, err := download(context.Background(), srv.Client(), nil, srv.URL, int64(len(body)+1), nil); err == nil {
+		t.Fatal("download accepted fewer bytes than the manifest declared")
+	}
+}
+
+func TestDownloadRejectsBodyLongerThanManifestSize(t *testing.T) {
+	fastRetry(t)
+	body := bytes.Repeat([]byte("x"), 64)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(body)
+	}))
+	defer srv.Close()
+
+	if _, err := download(context.Background(), srv.Client(), nil, srv.URL, 8, nil); err == nil {
+		t.Fatal("download accepted more bytes than the manifest declared")
+	}
+}
+
 func TestFetchBytesFallsBackToSecondClient(t *testing.T) {
 	fastRetry(t)
 	primary := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
@@ -727,6 +1344,71 @@ func TestFetchBytesDoesNotRetryPermanentHTTPStatus(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("permanent HTTP error made %d requests, want 1", got)
+	}
+}
+
+func TestFetchBytesRejectsOversizeResponsesWithoutRetry(t *testing.T) {
+	fastRetry(t)
+	t.Run("declared content length", func(t *testing.T) {
+		var calls int32
+		client := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+			atomic.AddInt32(&calls, 1)
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				Status:        "200 OK",
+				ContentLength: 9,
+				Body:          io.NopCloser(strings.NewReader("ignored")),
+				Header:        make(http.Header),
+			}, nil
+		})}
+		if _, err := fetchBytesFallbackForChannelSized(
+			context.Background(),
+			client,
+			nil,
+			"stable",
+			"https://example.invalid/latest.json",
+			8,
+		); !errors.Is(err, errUpdateResponseTooLarge) {
+			t.Fatalf("declared oversize error = %v, want errUpdateResponseTooLarge", err)
+		}
+		if got := atomic.LoadInt32(&calls); got != 1 {
+			t.Fatalf("declared oversize response made %d requests, want 1", got)
+		}
+	})
+
+	t.Run("chunked body", func(t *testing.T) {
+		client := &http.Client{Transport: rtFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode:    http.StatusOK,
+				Status:        "200 OK",
+				ContentLength: -1,
+				Body:          io.NopCloser(strings.NewReader("123456789")),
+				Header:        make(http.Header),
+			}, nil
+		})}
+		if _, err := fetchBytesFallbackForChannelSized(
+			context.Background(),
+			client,
+			nil,
+			"stable",
+			"https://example.invalid/latest.json",
+			8,
+		); !errors.Is(err, errUpdateResponseTooLarge) {
+			t.Fatalf("chunked oversize error = %v, want errUpdateResponseTooLarge", err)
+		}
+	})
+}
+
+func TestDownloadRejectsAssetSizeAboveMaximum(t *testing.T) {
+	if _, err := download(
+		context.Background(),
+		&http.Client{},
+		nil,
+		"https://dl.reasonix.io/file",
+		maxDesktopReleaseAssetSize+1,
+		nil,
+	); err == nil {
+		t.Fatal("download accepted an asset size above the release maximum")
 	}
 }
 

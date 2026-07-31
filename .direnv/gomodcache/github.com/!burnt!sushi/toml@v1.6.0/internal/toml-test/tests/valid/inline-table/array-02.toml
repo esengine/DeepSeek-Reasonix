@@ -1,0 +1,5 @@
+# "No newlines are allowed between the curly braces unless they are valid within
+# a value"
+
+a = { a = [
+]}

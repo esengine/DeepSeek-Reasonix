@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>My Sample Project</title>
+        <script data-main="require-main" src="http://cdnjs.cloudflare.com/ajax/libs/require.js/2.1.16/require.js"></script>
+    </head>
+    <body>
+        <h1>Demo for svg-pan-zoom: Using Require.js</h1>
+        <embed id="demo-tiger" type="image/svg+xml" style="width: 500px; height: 500px; border:1px solid black; " src="tiger.svg" />
+    </body>
+</html>
+

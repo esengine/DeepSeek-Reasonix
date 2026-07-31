@@ -47,7 +47,7 @@ auto_start = false
 `)
 
 	// Instruction file.
-	write(t, filepath.Join(root, "AGENTS.md"), "# Agents\nUse go test.\n")
+	write(t, filepath.Join(root, "AGENTS.md"), "# Agents\nUse go test.\n@../secret.md\n")
 
 	r := capdiag.Collect(capdiag.Options{
 		Root:            root,
@@ -75,7 +75,7 @@ auto_start = false
 	}
 	for _, want := range []string{
 		"skill.shadowed", "skill.missing_description", "command.shadowed",
-		"hook.invalid_matcher", "mcp.command_not_found",
+		"hook.invalid_matcher", "mcp.command_not_found", "instruction.import_outside_source",
 	} {
 		if !codes[want] {
 			t.Fatalf("missing issue code %s in %+v", want, codes)

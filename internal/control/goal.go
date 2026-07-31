@@ -13,6 +13,7 @@ import (
 	"unicode"
 
 	"reasonix/internal/evidence"
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/store"
 )
@@ -45,11 +46,11 @@ type goalMachine struct {
 	turns              int
 	blocks             int
 	block              string
-	interceptMsg       string
 	intercepts         int
 	strict             bool
 	selfCheckDone      bool
 	idleTurns          int
+	continuationEpoch  uint64
 
 	// statePath is the persisted goal-state sidecar; empty disables persistence.
 	statePath string
@@ -73,25 +74,56 @@ type goalState struct {
 	Todos              []evidence.TodoItem         `json:"todos,omitempty"`
 }
 
+// goalMachineSnapshot is an in-memory rollback point for durable Goal updates.
+// Persistence paths and mutexes are deliberately excluded.
+type goalMachineSnapshot struct {
+	goal               string
+	status             string
+	researchMode       GoalResearchMode
+	autoResearchTaskID string
+	scopeID            string
+	deliveryCheckpoint evidence.DeliveryCheckpoint
+	turns              int
+	blocks             int
+	block              string
+	intercepts         int
+	strict             bool
+	selfCheckDone      bool
+	idleTurns          int
+}
+
 // goalAdvanceInput carries everything the FSM needs for one continuation step,
 // gathered by the caller off the machine's lock.
 type goalAdvanceInput struct {
-	status     string // parsed marker status ("" when the turn carried no marker)
-	reason     string // blocked reason from the marker, if any
-	toolCalled bool   // whether the last turn made any tool call
-	todos      []evidence.TodoItem
-	readiness  string // executor.GoalReadinessFailure()
+	status        string // parsed marker status ("" when the turn carried no marker)
+	reason        string // blocked reason from the marker, if any
+	toolCalled    bool   // whether the last turn made any tool call
+	todos         []evidence.TodoItem
+	readiness     string  // executor.GoalReadinessFailure()
+	expectedEpoch *uint64 // owning turn's lifecycle; nil for direct FSM calls
 }
 
 // goalAdvanceResult reports the FSM step's outcome. data/path/ok describe the
 // state to persist (built under mu when something changed); notice is surfaced
 // to the user; cont reports whether the goal loop should continue.
 type goalAdvanceResult struct {
-	notice string
-	cont   bool
-	path   string
-	data   []byte
-	ok     bool
+	notice            string
+	intercept         string
+	cont              bool
+	continuationEpoch uint64
+	path              string
+	data              []byte
+	ok                bool
+}
+
+// goalContinuationSnapshot binds a continuation to the exact Goal lifecycle
+// state admitted for its synthetic turn. The orchestrator uses these captured
+// fields throughout the turn instead of re-reading a possibly replaced Goal.
+type goalContinuationSnapshot struct {
+	goal               string
+	researchMode       GoalResearchMode
+	autoResearchTaskID string
+	scopeID            string
 }
 
 // goalStatePath derives a session's persisted goal-state sidecar.
@@ -102,6 +134,31 @@ func goalStatePath(sessionPath string) string {
 func (g *goalMachine) setStatePath(path string) {
 	g.mu.Lock()
 	g.statePath = path
+	g.mu.Unlock()
+}
+
+func (g *goalMachine) capture() goalMachineSnapshot {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return goalMachineSnapshot{
+		goal: g.goal, status: g.status, researchMode: g.researchMode,
+		autoResearchTaskID: g.autoResearchTaskID, scopeID: g.scopeID,
+		deliveryCheckpoint: g.deliveryCheckpoint, turns: g.turns,
+		blocks: g.blocks, block: g.block,
+		intercepts: g.intercepts, strict: g.strict,
+		selfCheckDone: g.selfCheckDone, idleTurns: g.idleTurns,
+	}
+}
+
+func (g *goalMachine) restore(snapshot goalMachineSnapshot) {
+	g.mu.Lock()
+	g.goal, g.status, g.researchMode = snapshot.goal, snapshot.status, snapshot.researchMode
+	g.autoResearchTaskID, g.scopeID = snapshot.autoResearchTaskID, snapshot.scopeID
+	g.deliveryCheckpoint, g.turns = snapshot.deliveryCheckpoint, snapshot.turns
+	g.blocks, g.block = snapshot.blocks, snapshot.block
+	g.intercepts = snapshot.intercepts
+	g.strict, g.selfCheckDone, g.idleTurns = snapshot.strict, snapshot.selfCheckDone, snapshot.idleTurns
+	g.continuationEpoch++
 	g.mu.Unlock()
 }
 
@@ -125,6 +182,15 @@ func (g *goalMachine) currentAutoResearchTaskID() string {
 		return ""
 	}
 	return g.autoResearchTaskID
+}
+
+// continuationToken captures the Goal lifecycle that owns an outgoing turn.
+// The matching assistant output may advance the FSM only while this epoch is
+// still current.
+func (g *goalMachine) continuationToken() uint64 {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.continuationEpoch
 }
 
 func (g *goalMachine) deliveryScope() (id, task string, ok bool) {
@@ -174,8 +240,9 @@ func (g *goalMachine) set(goal string, mode GoalResearchMode, autoResearchTaskID
 	if goal != "" && g.goal == goal && g.status == GoalStatusRunning && g.researchMode == mode && g.autoResearchTaskID == autoResearchTaskID {
 		return "", nil, false
 	}
+	g.continuationEpoch++
 	g.turns, g.blocks, g.block = 0, 0, ""
-	g.interceptMsg, g.intercepts = "", 0
+	g.intercepts = 0
 	g.selfCheckDone, g.idleTurns, g.strict = false, 0, false
 	if goal == "" {
 		g.goal, g.status, g.researchMode, g.autoResearchTaskID = "", GoalStatusStopped, GoalResearchAuto, ""
@@ -201,10 +268,10 @@ func (g *goalMachine) setStrict(strict bool, todos []evidence.TodoItem) (string,
 func (g *goalMachine) stop(status string, todos []evidence.TodoItem) (string, []byte, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	g.continuationEpoch++
 	if strings.TrimSpace(g.goal) != "" && g.status == GoalStatusRunning {
 		g.status = status
 	}
-	g.interceptMsg = ""
 	g.intercepts = 0
 	g.selfCheckDone = false
 	g.idleTurns = 0
@@ -217,9 +284,10 @@ func (g *goalMachine) resume(todos []evidence.TodoItem) (path string, data []byt
 	if strings.TrimSpace(g.goal) == "" || g.status == GoalStatusComplete {
 		return "", nil, false, false
 	}
+	g.continuationEpoch++
 	g.status = GoalStatusRunning
 	g.blocks, g.block = 0, ""
-	g.interceptMsg, g.intercepts = "", 0
+	g.intercepts = 0
 	g.selfCheckDone, g.idleTurns = false, 0
 	if g.scopeID == "" {
 		g.scopeID = newGoalScopeID()
@@ -244,16 +312,43 @@ func (g *goalMachine) deliveryState() evidence.DeliveryCheckpoint {
 	return g.deliveryCheckpoint
 }
 
-// takeIntercept consumes a pending continuation-turn override, if any.
-func (g *goalMachine) takeIntercept() (string, bool) {
+// acceptContinuation checks an advance result before the orchestrator surfaces
+// its notice. admitContinuation revalidates after synchronous notice callbacks
+// and captures the Goal state at the synthetic-turn admission boundary.
+func (g *goalMachine) acceptContinuation(res goalAdvanceResult) (string, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.interceptMsg == "" {
+	if !res.cont ||
+		res.continuationEpoch != g.continuationEpoch ||
+		strings.TrimSpace(g.goal) == "" ||
+		g.status != GoalStatusRunning {
 		return "", false
 	}
-	msg := g.interceptMsg
-	g.interceptMsg = ""
-	return msg, true
+	return res.intercept, true
+}
+
+// admitContinuation atomically validates an advance result and captures the
+// Goal state used to compose and scope its synthetic turn. Keeping validation
+// and capture in one critical section prevents a stale intercept from being
+// paired with a replacement Goal between those operations.
+func (g *goalMachine) admitContinuation(res goalAdvanceResult) (goalContinuationSnapshot, bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !res.cont ||
+		res.continuationEpoch != g.continuationEpoch ||
+		strings.TrimSpace(g.goal) == "" ||
+		g.status != GoalStatusRunning {
+		return goalContinuationSnapshot{}, false
+	}
+	if g.scopeID == "" {
+		g.scopeID = newGoalScopeID()
+	}
+	return goalContinuationSnapshot{
+		goal:               g.goal,
+		researchMode:       g.researchMode,
+		autoResearchTaskID: g.autoResearchTaskID,
+		scopeID:            g.scopeID,
+	}, true
 }
 
 // advance runs one continuation step of the goal FSM from already-gathered
@@ -262,25 +357,30 @@ func (g *goalMachine) takeIntercept() (string, bool) {
 func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if in.expectedEpoch != nil && *in.expectedEpoch != g.continuationEpoch {
+		return goalAdvanceResult{cont: false}
+	}
 	if strings.TrimSpace(g.goal) == "" || g.status != GoalStatusRunning {
 		return goalAdvanceResult{cont: false}
 	}
+	g.continuationEpoch++
 	g.turns++
 	var notice string
+	var intercept string
 	switch in.status {
 	case GoalStatusComplete:
 		if incomplete := formatIncompleteTodos(in.todos, in.readiness); len(incomplete) > 0 && (g.strict || g.intercepts == 0) {
 			// In strict mode every claim is blocked until todos are done;
 			// otherwise only the first consecutive claim is intercepted.
 			g.intercepts++
-			g.interceptMsg = incomplete
+			intercept = incomplete
 			break
 		}
 		// Todos are all done — in strict mode run self-check before final
 		// completion. Non-strict mode completes immediately.
 		if g.strict && !g.selfCheckDone {
 			g.selfCheckDone = true
-			g.interceptMsg = goalSelfCheckTurn
+			intercept = goalSelfCheckTurn
 			break
 		}
 		// Self-check passed — complete the goal.
@@ -291,9 +391,9 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.status = GoalStatusComplete
 		g.blocks = 0
 		g.block = ""
-		g.interceptMsg = ""
 		notice = goalCompleteNotice
 	case GoalStatusBlocked:
+		g.idleTurns = 0
 		reason := cleanGoalBlockReason(in.reason)
 		if reason == "" {
 			reason = "blocked"
@@ -318,14 +418,14 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 	// Idle detection: if the agent went multiple turns without any tool calls,
 	// inject a reminder to make progress (unless the goal is already completing
 	// or hitting the auto-turn limit).
-	if notice == "" && g.interceptMsg == "" {
+	if notice == "" && intercept == "" {
 		if in.toolCalled {
 			g.idleTurns = 0
 		} else {
 			g.idleTurns++
 			if g.idleTurns >= maxGoalIdleTurns {
 				g.idleTurns = 0
-				g.interceptMsg = "No tool calls in recent turns. Either make progress with tools or signal [goal:blocked:<reason>]."
+				intercept = "No tool calls in recent turns. Either make progress with tools or signal [goal:blocked:<reason>]."
 			}
 		}
 	}
@@ -334,11 +434,15 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.block = "goal continuation limit reached"
 		g.intercepts = 0
 		g.selfCheckDone = false
-		g.interceptMsg = ""
 		g.idleTurns = 0
 		notice = g.block
 	}
-	res := goalAdvanceResult{notice: notice, cont: notice == ""}
+	res := goalAdvanceResult{
+		notice:            notice,
+		intercept:         intercept,
+		cont:              notice == "",
+		continuationEpoch: g.continuationEpoch,
+	}
 	if notice != "" {
 		res.path, res.data, res.ok = g.buildStateLocked(in.todos)
 	}
@@ -374,20 +478,25 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 	return g.statePath, b, true
 }
 
-// writeState persists pre-marshaled goal-state bytes to disk, OFF mu and
+// writeStateErr persists pre-marshaled goal-state bytes to disk, OFF mu and
 // serialized by writeMu so concurrent saves don't interleave or land out of
-// order. Best-effort: failures are logged, not surfaced.
-func (g *goalMachine) writeState(path string, data []byte) {
+// order. Atomic replacement keeps the prior state intact when a write fails.
+func (g *goalMachine) writeStateErr(path string, data []byte) error {
 	if path == "" || data == nil {
-		return
+		return nil
 	}
 	g.writeMu.Lock()
 	defer g.writeMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		slog.Warn("controller: goal state dir", "err", err)
-		return
+		return err
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	return fileutil.AtomicWriteFile(path, data, 0o644)
+}
+
+// writeState preserves the existing best-effort behavior for background Goal
+// progress. Callers that need transactional persistence use writeStateErr.
+func (g *goalMachine) writeState(path string, data []byte) {
+	if err := g.writeStateErr(path, data); err != nil {
 		slog.Warn("controller: write goal state", "err", err)
 	}
 }
@@ -481,8 +590,9 @@ func (g *goalMachine) restoreFromState(sessionPath string) {
 	g.blocks = state.Blocks
 	g.block = state.Block
 	g.strict = state.Strict
-	g.interceptMsg, g.intercepts = "", 0
+	g.intercepts = 0
 	g.selfCheckDone, g.idleTurns = false, 0
+	g.continuationEpoch++
 }
 
 // formatIncompleteTodos renders the reminder shown when [goal:complete] arrives

@@ -1,0 +1,1410 @@
+================================================================================
+Identifiers
+================================================================================
+
+fn main() {
+  abc;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_item
+    (identifier)
+    (parameters)
+    (block
+      (expression_statement
+        (identifier)))))
+
+================================================================================
+Raw identifiers
+================================================================================
+
+fn main() {
+  (r#abc as r#Def).r#ghi;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_item
+    (identifier)
+    (parameters)
+    (block
+      (expression_statement
+        (field_expression
+          (parenthesized_expression
+            (type_cast_expression
+              (identifier)
+              (type_identifier)))
+          (field_identifier))))))
+
+================================================================================
+Unary operator expressions
+================================================================================
+
+-num;
+!bits;
+*boxed_thing;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (unary_expression
+      (identifier)))
+  (expression_statement
+    (unary_expression
+      (identifier)))
+  (expression_statement
+    (unary_expression
+      (identifier))))
+
+================================================================================
+Reference expressions
+================================================================================
+
+&a;
+&mut self.name;
+&raw const b;
+&raw mut self.age;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (reference_expression
+      (identifier)))
+  (expression_statement
+    (reference_expression
+      (mutable_specifier)
+      (field_expression
+        (self)
+        (field_identifier))))
+  (expression_statement
+    (reference_expression
+      (identifier)))
+  (expression_statement
+    (reference_expression
+      (mutable_specifier)
+      (field_expression
+        (self)
+        (field_identifier)))))
+
+================================================================================
+Try expressions
+================================================================================
+
+a.unwrap()?;
+&a?;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (try_expression
+      (call_expression
+        (field_expression
+          (identifier)
+          (field_identifier))
+        (arguments))))
+  (expression_statement
+    (reference_expression
+      (try_expression
+        (identifier)))))
+
+================================================================================
+Binary operator expressions
+================================================================================
+
+a * b;
+a / b;
+a % b;
+a + b;
+a - b;
+a >> b;
+a << b;
+a == b;
+a && b;
+a || b;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier))))
+
+================================================================================
+Grouped expressions
+================================================================================
+
+(0);
+(2 * (3 + 4));
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (parenthesized_expression
+      (integer_literal)))
+  (expression_statement
+    (parenthesized_expression
+      (binary_expression
+        (integer_literal)
+        (parenthesized_expression
+          (binary_expression
+            (integer_literal)
+            (integer_literal)))))))
+
+================================================================================
+Range expressions
+================================================================================
+
+1..2;
+3..;
+..4;
+..;
+1..b;
+a..b;
+1..(1);
+(1)..1;
+(1)..(1);
+1..{1};
+for i in 1.. {
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (range_expression
+      (integer_literal)
+      (integer_literal)))
+  (expression_statement
+    (range_expression
+      (integer_literal)))
+  (expression_statement
+    (range_expression
+      (integer_literal)))
+  (expression_statement
+    (range_expression))
+  (expression_statement
+    (range_expression
+      (integer_literal)
+      (identifier)))
+  (expression_statement
+    (range_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (range_expression
+      (integer_literal)
+      (parenthesized_expression
+        (integer_literal))))
+  (expression_statement
+    (range_expression
+      (parenthesized_expression
+        (integer_literal))
+      (integer_literal)))
+  (expression_statement
+    (range_expression
+      (parenthesized_expression
+        (integer_literal))
+      (parenthesized_expression
+        (integer_literal))))
+  (expression_statement
+    (range_expression
+      (integer_literal)
+      (block
+        (integer_literal))))
+  (expression_statement
+    (for_expression
+      (identifier)
+      (range_expression
+        (integer_literal))
+      (block))))
+
+================================================================================
+Assignment expressions
+================================================================================
+
+x = y;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (identifier))))
+
+================================================================================
+Compound assignment expressions
+================================================================================
+
+x += 1;
+x += y;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (compound_assignment_expr
+      left: (identifier)
+      right: (integer_literal)))
+  (expression_statement
+    (compound_assignment_expr
+      left: (identifier)
+      right: (identifier))))
+
+================================================================================
+Type cast expressions
+================================================================================
+
+1000 as u8;
+let character = integer as char;
+let size: f64 = 1.0 + -len(values) as f64 + 1.0;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (type_cast_expression
+      value: (integer_literal)
+      type: (primitive_type)))
+  (let_declaration
+    pattern: (identifier)
+    value: (type_cast_expression
+      value: (identifier)
+      type: (primitive_type)))
+  (let_declaration
+    pattern: (identifier)
+    type: (primitive_type)
+    value: (binary_expression
+      left: (binary_expression
+        left: (float_literal)
+        right: (type_cast_expression
+          value: (unary_expression
+            (call_expression
+              function: (identifier)
+              arguments: (arguments
+                (identifier))))
+          type: (primitive_type)))
+      right: (float_literal))))
+
+================================================================================
+Call expressions
+================================================================================
+
+foo();
+add(1i32, 2i32);
+add(
+    1i32,
+    2i32,
+);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (arguments)))
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (arguments
+        (integer_literal)
+        (integer_literal))))
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (arguments
+        (integer_literal)
+        (integer_literal)))))
+
+================================================================================
+Array expressions
+================================================================================
+
+[];
+[1, 2, 3];
+["a", "b", "c"];
+[0; 128];
+[
+    #[cfg(foo)]
+    "foo",
+    #[cfg(bar)]
+    "bar",
+];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (array_expression))
+  (expression_statement
+    (array_expression
+      (integer_literal)
+      (integer_literal)
+      (integer_literal)))
+  (expression_statement
+    (array_expression
+      (string_literal
+        (string_content))
+      (string_literal
+        (string_content))
+      (string_literal
+        (string_content))))
+  (expression_statement
+    (array_expression
+      (integer_literal)
+      length: (integer_literal)))
+  (expression_statement
+    (array_expression
+      (attribute_item
+        (attribute
+          (identifier)
+          arguments: (token_tree
+            (identifier))))
+      (string_literal
+        (string_content))
+      (attribute_item
+        (attribute
+          (identifier)
+          arguments: (token_tree
+            (identifier))))
+      (string_literal
+        (string_content)))))
+
+================================================================================
+Tuple expressions
+================================================================================
+
+();
+(0,);
+let (x, y, z) = (1, 2, 3);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (unit_expression))
+  (expression_statement
+    (tuple_expression
+      (integer_literal)))
+  (let_declaration
+    (tuple_pattern
+      (identifier)
+      (identifier)
+      (identifier))
+    (tuple_expression
+      (integer_literal)
+      (integer_literal)
+      (integer_literal))))
+
+================================================================================
+Struct expressions
+================================================================================
+
+NothingInMe {};
+Point {x: 10.0, y: 20.0};
+let a = SomeStruct { field1, field2: expression, field3, };
+let u = game::User {name: "Joe", age: 35, score: 100_000};
+let i = Instant { 0: Duration::from_millis(0) };
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (struct_expression
+      (type_identifier)
+      (field_initializer_list)))
+  (expression_statement
+    (struct_expression
+      (type_identifier)
+      (field_initializer_list
+        (field_initializer
+          (field_identifier)
+          (float_literal))
+        (field_initializer
+          (field_identifier)
+          (float_literal)))))
+  (let_declaration
+    (identifier)
+    (struct_expression
+      (type_identifier)
+      (field_initializer_list
+        (shorthand_field_initializer
+          (identifier))
+        (field_initializer
+          (field_identifier)
+          (identifier))
+        (shorthand_field_initializer
+          (identifier)))))
+  (let_declaration
+    (identifier)
+    (struct_expression
+      (scoped_type_identifier
+        (identifier)
+        (type_identifier))
+      (field_initializer_list
+        (field_initializer
+          (field_identifier)
+          (string_literal
+            (string_content)))
+        (field_initializer
+          (field_identifier)
+          (integer_literal))
+        (field_initializer
+          (field_identifier)
+          (integer_literal)))))
+  (let_declaration
+    (identifier)
+    (struct_expression
+      (type_identifier)
+      (field_initializer_list
+        (field_initializer
+          (integer_literal)
+          (call_expression
+            (scoped_identifier
+              (identifier)
+              (identifier))
+            (arguments
+              (integer_literal))))))))
+
+================================================================================
+Struct expressions with update initializers
+================================================================================
+
+let u = User{name, ..current_user()};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (let_declaration
+    (identifier)
+    (struct_expression
+      (type_identifier)
+      (field_initializer_list
+        (shorthand_field_initializer
+          (identifier))
+        (base_field_initializer
+          (call_expression
+            (identifier)
+            (arguments)))))))
+
+================================================================================
+If expressions
+================================================================================
+
+fn main() {
+  if n == 1 {
+  } else if n == 2 {
+  } else {
+  }
+}
+
+let y = if x == 5 { 10 } else { 15 };
+
+if foo && bar {}
+
+if foo && bar || baz {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_item
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (expression_statement
+        (if_expression
+          condition: (binary_expression
+            left: (identifier)
+            right: (integer_literal))
+          consequence: (block)
+          alternative: (else_clause
+            (if_expression
+              condition: (binary_expression
+                left: (identifier)
+                right: (integer_literal))
+              consequence: (block)
+              alternative: (else_clause
+                (block))))))))
+  (let_declaration
+    pattern: (identifier)
+    value: (if_expression
+      condition: (binary_expression
+        left: (identifier)
+        right: (integer_literal))
+      consequence: (block
+        (integer_literal))
+      alternative: (else_clause
+        (block
+          (integer_literal)))))
+  (expression_statement
+    (if_expression
+      condition: (binary_expression
+        left: (identifier)
+        right: (identifier))
+      consequence: (block)))
+  (expression_statement
+    (if_expression
+      condition: (binary_expression
+        left: (binary_expression
+          left: (identifier)
+          right: (identifier))
+        right: (identifier))
+      consequence: (block))))
+
+================================================================================
+Basic if let expressions
+================================================================================
+
+if let Some(a) = b
+    && c
+    && d
+    && let Some(e) = f
+{
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (if_expression
+      condition: (let_chain
+        (let_condition
+          pattern: (tuple_struct_pattern
+            type: (identifier)
+            (identifier))
+          value: (identifier))
+        (identifier)
+        (identifier)
+        (let_condition
+          pattern: (tuple_struct_pattern
+            type: (identifier)
+            (identifier))
+          value: (identifier)))
+      consequence: (block))))
+
+================================================================================
+If let expressions
+================================================================================
+
+if let ("Bacon", b) = dish {
+}
+
+if let Some("chained") = a && b && let (C, D) = e {
+}
+
+if foo && let bar = || baz && quux {}
+
+if a && let b = || c || d && e {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (if_expression
+      condition: (let_condition
+        pattern: (tuple_pattern
+          (string_literal
+            (string_content))
+          (identifier))
+        value: (identifier))
+      consequence: (block)))
+  (expression_statement
+    (if_expression
+      condition: (let_chain
+        (let_condition
+          pattern: (tuple_struct_pattern
+            type: (identifier)
+            (string_literal
+              (string_content)))
+          value: (identifier))
+        (identifier)
+        (let_condition
+          pattern: (tuple_pattern
+            (identifier)
+            (identifier))
+          value: (identifier)))
+      consequence: (block)))
+  (expression_statement
+    (if_expression
+      condition: (let_chain
+        (identifier)
+        (let_condition
+          pattern: (identifier)
+          value: (closure_expression
+            parameters: (closure_parameters)
+            body: (binary_expression
+              left: (identifier)
+              right: (identifier)))))
+      consequence: (block)))
+  (expression_statement
+    (if_expression
+      condition: (let_chain
+        (identifier)
+        (let_condition
+          pattern: (identifier)
+          value: (closure_expression
+            parameters: (closure_parameters)
+            body: (binary_expression
+              left: (identifier)
+              right: (binary_expression
+                left: (identifier)
+                right: (identifier))))))
+      consequence: (block))))
+
+================================================================================
+While let expressions
+================================================================================
+
+while let ("Bacon", b) = dish {
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (while_expression
+      (let_condition
+        (tuple_pattern
+          (string_literal
+            (string_content))
+          (identifier))
+        (identifier))
+      (block))))
+
+================================================================================
+Match expressions
+================================================================================
+
+match x {
+    1 => { "one" }
+    2 => "two",
+    -1 => 1,
+    -3.14 => 3,
+
+    #[attr1]
+    3 => "three",
+    macro!(4) => "four",
+    _ => "something else",
+}
+
+let msg = match x {
+    0 | 1 | 10 => "one of zero, one, or ten",
+    y if y < 20 => "less than 20, but not zero, one, or ten",
+    y if y == 200 =>
+      if a {
+        "200 (but this is not very stylish)"
+      }
+    y if let Some(z) = foo && z && let Some(w) = bar => "very chained",
+    _ => "something else",
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      value: (identifier)
+      body: (match_block
+        (match_arm
+          pattern: (match_pattern
+            (integer_literal))
+          value: (block
+            (string_literal
+              (string_content))))
+        (match_arm
+          pattern: (match_pattern
+            (integer_literal))
+          value: (string_literal
+            (string_content)))
+        (match_arm
+          pattern: (match_pattern
+            (negative_literal
+              (integer_literal)))
+          value: (integer_literal))
+        (match_arm
+          pattern: (match_pattern
+            (negative_literal
+              (float_literal)))
+          value: (integer_literal))
+        (match_arm
+          (attribute_item
+            (attribute
+              (identifier)))
+          pattern: (match_pattern
+            (integer_literal))
+          value: (string_literal
+            (string_content)))
+        (match_arm
+          pattern: (match_pattern
+            (macro_invocation
+              macro: (identifier)
+              (token_tree
+                (integer_literal))))
+          value: (string_literal
+            (string_content)))
+        (match_arm
+          pattern: (match_pattern)
+          value: (string_literal
+            (string_content))))))
+  (let_declaration
+    pattern: (identifier)
+    value: (match_expression
+      value: (identifier)
+      body: (match_block
+        (match_arm
+          pattern: (match_pattern
+            (or_pattern
+              (or_pattern
+                (integer_literal)
+                (integer_literal))
+              (integer_literal)))
+          value: (string_literal
+            (string_content)))
+        (match_arm
+          pattern: (match_pattern
+            (identifier)
+            condition: (binary_expression
+              left: (identifier)
+              right: (integer_literal)))
+          value: (string_literal
+            (string_content)))
+        (match_arm
+          pattern: (match_pattern
+            (identifier)
+            condition: (binary_expression
+              left: (identifier)
+              right: (integer_literal)))
+          value: (if_expression
+            condition: (identifier)
+            consequence: (block
+              (string_literal
+                (string_content)))))
+        (match_arm
+          pattern: (match_pattern
+            (identifier)
+            condition: (let_chain
+              (let_condition
+                pattern: (tuple_struct_pattern
+                  type: (identifier)
+                  (identifier))
+                value: (identifier))
+              (identifier)
+              (let_condition
+                pattern: (tuple_struct_pattern
+                  type: (identifier)
+                  (identifier))
+                value: (identifier))))
+          value: (string_literal
+            (string_content)))
+        (match_arm
+          pattern: (match_pattern)
+          value: (string_literal
+            (string_content)))))))
+
+================================================================================
+While expressions
+================================================================================
+
+while !done {
+  done = true;
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (while_expression
+      condition: (unary_expression
+        (identifier))
+      body: (block
+        (expression_statement
+          (assignment_expression
+            left: (identifier)
+            right: (boolean_literal)))))))
+
+================================================================================
+Loop expressions
+================================================================================
+
+'outer: loop {
+  'inner: loop {
+    break 'outer;
+    break true;
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (loop_expression
+      (label
+        (identifier))
+      (block
+        (expression_statement
+          (loop_expression
+            (label
+              (identifier))
+            (block
+              (expression_statement
+                (break_expression
+                  (label
+                    (identifier))))
+              (expression_statement
+                (break_expression
+                  (boolean_literal))))))))))
+
+================================================================================
+For expressions
+================================================================================
+
+for e in v {
+  bar(e);
+}
+
+for i in 0..256 {
+  bar(i);
+}
+
+'outer: for x in 0..10 {
+    'inner: for y in 0..10 {
+        if x % 2 == 0 { continue 'outer; }
+        if y % 2 == 0 { continue 'inner; }
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (for_expression
+      (identifier)
+      (identifier)
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (identifier)))))))
+  (expression_statement
+    (for_expression
+      (identifier)
+      (range_expression
+        (integer_literal)
+        (integer_literal))
+      (block
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments
+              (identifier)))))))
+  (expression_statement
+    (for_expression
+      (label
+        (identifier))
+      (identifier)
+      (range_expression
+        (integer_literal)
+        (integer_literal))
+      (block
+        (expression_statement
+          (for_expression
+            (label
+              (identifier))
+            (identifier)
+            (range_expression
+              (integer_literal)
+              (integer_literal))
+            (block
+              (expression_statement
+                (if_expression
+                  (binary_expression
+                    (binary_expression
+                      (identifier)
+                      (integer_literal))
+                    (integer_literal))
+                  (block
+                    (expression_statement
+                      (continue_expression
+                        (label
+                          (identifier)))))))
+              (expression_statement
+                (if_expression
+                  (binary_expression
+                    (binary_expression
+                      (identifier)
+                      (integer_literal))
+                    (integer_literal))
+                  (block
+                    (expression_statement
+                      (continue_expression
+                        (label
+                          (identifier))))))))))))))
+
+================================================================================
+Field expressions
+================================================================================
+
+mystruct.myfield;
+foo().x;
+value.0.1.iter();
+1.max(2);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (field_expression
+      (identifier)
+      (field_identifier)))
+  (expression_statement
+    (field_expression
+      (call_expression
+        (identifier)
+        (arguments))
+      (field_identifier)))
+  (expression_statement
+    (call_expression
+      (field_expression
+        (field_expression
+          (field_expression
+            (identifier)
+            (integer_literal))
+          (integer_literal))
+        (field_identifier))
+      (arguments)))
+  (expression_statement
+    (call_expression
+      (field_expression
+        (integer_literal)
+        (field_identifier))
+      (arguments
+        (integer_literal)))))
+
+================================================================================
+Method call expressions
+================================================================================
+
+mystruct.foo();
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (field_expression
+        (identifier)
+        (field_identifier))
+      (arguments))))
+
+================================================================================
+Index expressions
+================================================================================
+
+([1, 2, 3, 4])[0];
+arr[10];
+arr[n];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (index_expression
+      (parenthesized_expression
+        (array_expression
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)
+          (integer_literal)))
+      (integer_literal)))
+  (expression_statement
+    (index_expression
+      (identifier)
+      (integer_literal)))
+  (expression_statement
+    (index_expression
+      (identifier)
+      (identifier))))
+
+================================================================================
+Scoped functions
+================================================================================
+
+a::b();
+C::<D>::e();
+::f();
+::g::h();
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (scoped_identifier
+        (identifier)
+        (identifier))
+      (arguments)))
+  (expression_statement
+    (call_expression
+      (scoped_identifier
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_identifier)))
+        (identifier))
+      (arguments)))
+  (expression_statement
+    (call_expression
+      (scoped_identifier
+        (identifier))
+      (arguments)))
+  (expression_statement
+    (call_expression
+      (scoped_identifier
+        (scoped_identifier
+          (identifier))
+        (identifier))
+      (arguments))))
+
+================================================================================
+Scoped functions with fully qualified syntax
+================================================================================
+
+<Dog as Animal>::eat(d);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (scoped_identifier
+        (bracketed_type
+          (qualified_type
+            (type_identifier)
+            (type_identifier)))
+        (identifier))
+      (arguments
+        (identifier)))))
+
+================================================================================
+Scoped functions with macros as types
+================================================================================
+
+<Token![]>::foo();
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (scoped_identifier
+        (bracketed_type
+          (macro_invocation
+            (identifier)
+            (token_tree)))
+        (identifier))
+      (arguments))))
+
+================================================================================
+Scoped identifier with nested super
+================================================================================
+
+super::super::foo();
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (scoped_identifier
+        (scoped_identifier
+          (super)
+          (super))
+        (identifier))
+      (arguments))))
+
+================================================================================
+Generic functions
+================================================================================
+
+std::sizeof::<u32>();
+foo::<8>();
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      function: (generic_function
+        function: (scoped_identifier
+          path: (identifier)
+          name: (identifier))
+        type_arguments: (type_arguments
+          (primitive_type)))
+      arguments: (arguments)))
+  (expression_statement
+    (call_expression
+      function: (generic_function
+        function: (identifier)
+        type_arguments: (type_arguments
+          (integer_literal)))
+      arguments: (arguments))))
+
+================================================================================
+Closures
+================================================================================
+
+a.map(|(b, c)| b.push(c));
+d.map(move |mut e| {
+    f(e);
+    g(e)
+});
+h(|| -> i { j });
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (field_expression
+        (identifier)
+        (field_identifier))
+      (arguments
+        (closure_expression
+          (closure_parameters
+            (tuple_pattern
+              (identifier)
+              (identifier)))
+          (call_expression
+            (field_expression
+              (identifier)
+              (field_identifier))
+            (arguments
+              (identifier)))))))
+  (expression_statement
+    (call_expression
+      (field_expression
+        (identifier)
+        (field_identifier))
+      (arguments
+        (closure_expression
+          (closure_parameters
+            (mut_pattern
+              (mutable_specifier)
+              (identifier)))
+          (block
+            (expression_statement
+              (call_expression
+                (identifier)
+                (arguments
+                  (identifier))))
+            (call_expression
+              (identifier)
+              (arguments
+                (identifier))))))))
+  (expression_statement
+    (call_expression
+      (identifier)
+      (arguments
+        (closure_expression
+          (closure_parameters)
+          (type_identifier)
+          (block
+            (identifier)))))))
+
+================================================================================
+Closures with typed parameteres
+================================================================================
+
+a.map(|b: usize| b.push(c));
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (field_expression
+        (identifier)
+        (field_identifier))
+      (arguments
+        (closure_expression
+          (closure_parameters
+            (parameter
+              (identifier)
+              (primitive_type)))
+          (call_expression
+            (field_expression
+              (identifier)
+              (field_identifier))
+            (arguments
+              (identifier))))))))
+
+================================================================================
+Generators
+================================================================================
+
+move || {
+    while i <= n {
+        yield i;
+        i += 1;
+    }
+    return;
+};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (closure_expression
+      (closure_parameters)
+      (block
+        (expression_statement
+          (while_expression
+            (binary_expression
+              (identifier)
+              (identifier))
+            (block
+              (expression_statement
+                (yield_expression
+                  (identifier)))
+              (expression_statement
+                (compound_assignment_expr
+                  (identifier)
+                  (integer_literal))))))
+        (expression_statement
+          (return_expression))))))
+
+================================================================================
+Unsafe blocks
+================================================================================
+
+const a : A = unsafe { foo() };
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (const_item
+    (identifier)
+    (type_identifier)
+    (unsafe_block
+      (block
+        (call_expression
+          (identifier)
+          (arguments))))))
+
+================================================================================
+Inline const or Const blocks as expression
+================================================================================
+
+const { 1 + 3 };
+if *x < 0 { const { &4i32.pow(4) } } else { x }
+let three_ranges = [const { (0..=5).into_inner() }; 3];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (const_block
+      body: (block
+        (binary_expression
+          left: (integer_literal)
+          right: (integer_literal)))))
+  (empty_statement)
+  (expression_statement
+    (if_expression
+      condition: (binary_expression
+        left: (unary_expression
+          (identifier))
+        right: (integer_literal))
+      consequence: (block
+        (expression_statement
+          (const_block
+            body: (block
+              (reference_expression
+                value: (call_expression
+                  function: (field_expression
+                    value: (integer_literal)
+                    field: (field_identifier))
+                  arguments: (arguments
+                    (integer_literal))))))))
+      alternative: (else_clause
+        (block
+          (identifier)))))
+  (let_declaration
+    pattern: (identifier)
+    value: (array_expression
+      (const_block
+        body: (block
+          (call_expression
+            function: (field_expression
+              value: (parenthesized_expression
+                (range_expression
+                  (integer_literal)
+                  (integer_literal)))
+              field: (field_identifier))
+            arguments: (arguments))))
+      length: (integer_literal))))
+
+================================================================================
+Raw reference expression conflicts
+================================================================================
+some_call(&raw);
+let a = &raw const b;
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (call_expression
+      (identifier)
+      (arguments
+        (reference_expression
+          (identifier)))))
+  (let_declaration
+    (identifier)
+    (reference_expression
+      (identifier))))

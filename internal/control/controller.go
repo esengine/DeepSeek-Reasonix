@@ -257,14 +257,15 @@ type approvalReply struct {
 }
 
 type pendingApproval struct {
-	tool      string
-	subject   string
-	reason    string
-	fresh     bool
-	autoDrain bool
-	kind      string // tool | plan | recovery; empty = tool
-	recovery  *event.RecoveryApproval
-	reply     chan approvalReply
+	tool         string
+	subject      string
+	reason       string
+	fresh        bool
+	requireHuman bool
+	autoDrain    bool
+	kind         string // tool | plan | recovery; empty = tool
+	recovery     *event.RecoveryApproval
+	reply        chan approvalReply
 }
 
 // pendingAsk is an in-flight ask question batch. questions is retained so the
@@ -619,7 +620,7 @@ func (c *Controller) markEditedForNewUser(startMessages int, original string) {
 		if msgs[i].Role != provider.RoleUser {
 			continue
 		}
-		if msgs[i].Content == original {
+		if agent.UserMessageText(msgs[i]) == original {
 			return
 		}
 		msgs[i].Edited = true
@@ -778,6 +779,7 @@ func (c *Controller) spawnGuardedTurn(ctx context.Context, cancel context.Cancel
 // beginRotation refuses while running or finishing, and the drain flips
 // finishing directly into running.
 func (c *Controller) finishGuardedTurn(err error) {
+	c.memory.clearAutoRemember()
 	c.mu.Lock()
 	cancelRequested := c.canceling
 	c.running = false
@@ -1205,9 +1207,9 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			runRefTurn(input, display)
 			return
 		}
-		// Read-only management verbs (/model /memory /skills /hooks /mcp) emit a
-		// listing Notice, so Submit-based frontends (desktop, HTTP) get them with
-		// no extra wiring. (The chat TUI handles these itself with richer output.)
+		// Management verbs (/model /memory /skills /hooks /mcp) emit a Notice, so
+		// Submit-based frontends (desktop, HTTP) get them with no extra wiring.
+		// The chat TUI handles these itself with richer output.
 		fields := strings.Fields(trimmed)
 		switch fields[0] {
 		case "/tree":
@@ -1627,6 +1629,7 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 	ctx = jobs.WithSession(ctx, parentSession)
 	ctx = agent.WithUserImages(ctx, c.inputImages(input))
 	rawInput := input
+	ctx = agent.WithRawUserInput(ctx, rawInput)
 	input = c.Compose(input)
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
@@ -1949,6 +1952,26 @@ func (c *Controller) newInteractiveGate() *permission.Gate {
 	return gate
 }
 
+func (c *Controller) allowLowRiskRemember(args json.RawMessage) bool {
+	mem := c.Memory()
+	if mem != nil {
+		if assessment := memory.AssessRememberWrite(mem.Store, args); assessment.AutoAllow {
+			c.memory.authorizeAutoRemember(args)
+			return true
+		}
+	}
+	c.memory.revokeAutoRemember(args)
+	return false
+}
+
+func (c *Controller) newHeadlessGate(mode string) *freshHumanHeadlessGate {
+	gate := BuildHeadlessApprovalGate(c.policy, mode)
+	gate.allowLowRiskFreshAction = func(toolName string, args json.RawMessage) bool {
+		return toolName == memoryRememberTool && c.allowLowRiskRemember(args)
+	}
+	return gate
+}
+
 type denyPermissionApprover struct{}
 
 func (denyPermissionApprover) Approve(context.Context, string, string, json.RawMessage) (bool, bool, error) {
@@ -1989,22 +2012,17 @@ func rulesWithoutFreshHumanApproval(rules []permission.Rule) []permission.Rule {
 //     approver); deny rules and fresh decisions still fail closed.
 //   - dontAsk: deny anything that would ask, and deny the writer fallback too.
 //
-// deny rules and fresh-human tools (memory, plan, sandbox, config) stay enforced
-// by the gate for every mode. ask/manual/acceptEdits are not routed here — the
-// caller leaves them at ToolApprovalAsk, keeping boot's default headless gate,
-// which resolves ordinary ask decisions to allow for `reasonix run` autonomy.
+// Deny rules and fresh-human tools (memory, plan, sandbox, config) stay enforced
+// by the gate for every mode. The only exception is a controller-assessed,
+// create-only project/reference memory; every other memory write remains denied.
 func (c *Controller) ApplyHeadlessApprovalMode(mode string) {
 	mode = normalizeToolApprovalMode(mode)
 	c.approval.setMode(mode)
 	if c.subagentGate != nil {
 		c.subagentGate.Update(mode)
 	}
-	if c.executor == nil {
-		return
-	}
-	switch mode {
-	case ToolApprovalYolo, ToolApprovalAuto, ToolApprovalDontAsk:
-		c.executor.SetGate(BuildHeadlessApprovalGate(c.policy, mode))
+	if c.executor != nil {
+		c.executor.SetGate(c.newHeadlessGate(mode))
 	}
 }
 
@@ -2182,14 +2200,47 @@ func (c *Controller) SetGoal(goal string) {
 	c.SetGoalWithResearchMode(goal, GoalResearchAuto)
 }
 
+// SetGoalDurable updates the Goal only when its sidecar can be replaced
+// atomically. Remote Profile transactions persist autoResearchCreateToken
+// before calling this method so crash recovery owns any newly-created task.
+func (c *Controller) SetGoalDurable(goal, autoResearchCreateToken string) error {
+	snapshot := c.goals.capture()
+	setup := c.prepareAutoResearchTask(goal, GoalResearchAuto, autoResearchCreateToken)
+	path, data, persist := c.goals.set(goal, GoalResearchAuto, setup.taskID, c.goalTodos())
+	if setup.blockReason != "" {
+		path, data, persist = c.goals.stop(GoalStatusBlocked, c.goalTodos())
+	}
+	if persist {
+		if err := c.goals.writeStateErr(path, data); err != nil {
+			c.goals.restore(snapshot)
+			if setup.created && c.autoResearch != nil {
+				if removeErr := c.autoResearch.RemoveTask(setup.taskID, setup.createToken); removeErr != nil {
+					slog.Warn("controller: rollback autoresearch task", "task_id", setup.taskID, "err", removeErr)
+				}
+			}
+			return err
+		}
+	}
+	if setup.notice != "" {
+		c.notice(setup.notice)
+	}
+	if setup.blockReason != "" {
+		c.notice("autoresearch resume failed: " + setup.blockReason)
+	}
+	return nil
+}
+
 func (c *Controller) SetGoalWithResearchMode(goal string, researchMode GoalResearchMode) {
-	taskID, blockReason := c.ensureAutoResearchTask(goal, researchMode)
-	path, data, ok := c.goals.set(goal, researchMode, taskID, c.goalTodos())
+	setup := c.prepareAutoResearchTask(goal, researchMode, "")
+	if setup.notice != "" {
+		c.notice(setup.notice)
+	}
+	path, data, ok := c.goals.set(goal, researchMode, setup.taskID, c.goalTodos())
 	c.persistGoalState(path, data, ok)
-	if blockReason != "" {
+	if setup.blockReason != "" {
 		path, data, ok := c.goals.stop(GoalStatusBlocked, c.goalTodos())
 		c.persistGoalState(path, data, ok)
-		c.notice("autoresearch resume failed: " + blockReason)
+		c.notice("autoresearch resume failed: " + setup.blockReason)
 	}
 }
 
@@ -2216,25 +2267,33 @@ func (c *Controller) persistGoalDeliveryCheckpoint() {
 	c.persistGoalState(path, data, ok)
 }
 
-func (c *Controller) ensureAutoResearchTask(goal string, researchMode GoalResearchMode) (string, string) {
+type autoResearchSetup struct {
+	taskID      string
+	createToken string
+	blockReason string
+	notice      string
+	created     bool
+}
+
+func (c *Controller) prepareAutoResearchTask(goal string, researchMode GoalResearchMode, createToken string) autoResearchSetup {
 	goal = strings.TrimSpace(goal)
 	if goal == "" || c.autoResearch == nil || !shouldUseAutoResearch(goal, researchMode) {
-		return "", ""
+		return autoResearchSetup{}
 	}
 	currentGoal, currentStatus, _, currentTaskID := c.goals.snapshot()
 	if strings.TrimSpace(currentGoal) == goal && currentStatus == GoalStatusRunning && strings.TrimSpace(currentTaskID) != "" {
-		return currentTaskID, ""
+		return autoResearchSetup{taskID: currentTaskID}
 	}
 	if task, ok, err := c.autoResearch.ResumeFromGoalText(goal); err != nil {
 		slog.Warn("controller: resume autoresearch task", "err", err)
 		if ok {
-			return "", err.Error()
+			return autoResearchSetup{blockReason: err.Error()}
 		}
 	} else if ok {
-		c.notice("autoresearch task resumed: " + task.ID)
-		return task.ID, ""
+		return autoResearchSetup{taskID: task.ID, notice: "autoresearch task resumed: " + task.ID}
 	}
 	task, err := c.autoResearch.CreateTask(goal, autoresearch.CreateOptions{
+		CreateToken: createToken,
 		AllowedOperations: autoresearch.AllowedOperations{
 			Write:   true,
 			Network: false,
@@ -2244,10 +2303,14 @@ func (c *Controller) ensureAutoResearchTask(goal string, researchMode GoalResear
 	})
 	if err != nil {
 		slog.Warn("controller: create autoresearch task", "err", err)
-		return "", ""
+		return autoResearchSetup{}
 	}
-	c.notice("autoresearch task created: " + task.ID)
-	return task.ID, ""
+	return autoResearchSetup{
+		taskID:      task.ID,
+		createToken: task.CreateToken,
+		notice:      "autoresearch task created: " + task.ID,
+		created:     true,
+	}
 }
 
 func defaultAutoResearchSuccessCriteria() []autoresearch.SuccessCriterion {
@@ -4650,31 +4713,9 @@ func (c *Controller) AddMCPServer(e config.PluginEntry) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var previous config.PluginEntry
-	hadPrevious := false
-	for _, configured := range config.LoadForEdit(config.UserConfigPath()).Plugins {
-		if configured.Name == e.Name {
-			previous, hadPrevious = configured, true
-			previous.Source = config.MCPSourceUserConfig
-			break
-		}
-	}
-	if _, err := config.UpsertPluginInSourceForRoot(c.workspaceRoot, e); err != nil {
+	if _, err := config.InstallUserPluginForRoot(c.workspaceRoot, e, true); err != nil {
 		c.DisconnectMCPServer(e.Name)
 		return 0, fmt.Errorf("saving MCP server config: %w", err)
-	}
-	// Install implies durable enable so the next session keeps the server in the
-	// catalog without a second activation step.
-	if err := config.DefaultMCPActivationStore().SetServerEnabled(e, c.WorkspaceRoot(), true); err != nil {
-		c.DisconnectMCPServer(e.Name)
-		var saveErr error
-		if hadPrevious {
-			_, saveErr = config.UpsertPluginInSourceForRoot(c.workspaceRoot, previous)
-		} else {
-			_, _, saveErr = config.RemovePluginFromSourceForRoot(c.workspaceRoot, e)
-		}
-		c.syncCapabilityRuntimeFromConfig(e.Name, nil)
-		return 0, errors.Join(err, saveErr)
 	}
 	return n, nil
 }
@@ -5271,6 +5312,28 @@ func (c *Controller) QueueMemory(note string) {
 	c.memory.queue(note)
 }
 
+// ClaimAutoMemoryWrite consumes the one-shot create-only authorization issued
+// by gateApprover for a low-risk project fact.
+func (c *Controller) ClaimAutoMemoryWrite(args json.RawMessage) bool {
+	return c.memory.claimAutoRemember(args)
+}
+
+func (c *Controller) MemoryRevisions(ref string) []memory.Memory {
+	return c.memory.revisions(ref)
+}
+
+// RestoreMemory restores an older active-memory revision as a new audited
+// revision and applies it to the next user turn.
+func (c *Controller) RestoreMemory(ref string, revision int) (memory.Memory, error) {
+	return c.memory.restore(ref, revision)
+}
+
+// RestoreArchivedMemory recovers an archived fact as a new audited revision and
+// applies it to the next user turn.
+func (c *Controller) RestoreArchivedMemory(archivePath string) (memory.Memory, error) {
+	return c.memory.restoreArchived(archivePath)
+}
+
 // Memory returns the loaded memory snapshot (nil when memory is disabled), for
 // frontends that surface a memory panel or the /memory command. The returned
 // *Set is immutable — mutations go through QuickAdd / SaveDoc.
@@ -5290,14 +5353,22 @@ func (g gateApprover) Approve(ctx context.Context, tool, subject string, args js
 }
 
 func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject string, args json.RawMessage) (bool, bool, string, error) {
-	subject = approvalDisplaySubject(tool, subject, args)
-	// Check pre-approval first — YOLO mode, the just-approved-plan window, and
-	// session grants all short-circuit here, before any prompt or guardian
-	// review. Deny rules already bit at the policy level before this point.
-	if g.c.approval.preApproved(tool, subject, args) {
+	if tool == memoryRememberTool && g.c.allowLowRiskRemember(args) {
 		return true, false, "", nil
 	}
-	if g.c.guardianSess != nil {
+	subject = approvalDisplaySubject(tool, subject, args)
+	requireHuman := strings.EqualFold(tool, "bash") && permission.BashSubjectRequiresExplicitApproval(subject)
+	// Check pre-approval first, before any prompt or Guardian review. Dynamic
+	// Bash accepts only YOLO or an exact session grant here; ordinary calls also
+	// accept the just-approved-plan window. Deny rules already bit at the policy
+	// level before this point.
+	if requireHuman && g.c.approval.preApprovedForRequiredHuman(tool, subject) {
+		return true, false, "", nil
+	}
+	if !requireHuman && g.c.approval.preApproved(tool, subject, args) {
+		return true, false, "", nil
+	}
+	if g.c.guardianSess != nil && !requireHuman {
 		allow, reason, reviewErr := g.c.guardianSess.Review(ctx, tool, args, g.c.executor.Session())
 		if reviewErr != nil {
 			return false, false, "", reviewErr
@@ -5313,6 +5384,10 @@ func (g gateApprover) ApproveWithReason(ctx context.Context, tool, subject strin
 			return false, false, reason, nil
 		}
 		return true, remember, "", nil
+	}
+	if requireHuman {
+		allow, remember, err := g.c.requestApprovalWithReasonOptions(ctx, tool, subject, args, "", approvalDecisionOptions{requireHuman: true})
+		return allow, remember, "", err
 	}
 	allow, remember, err := g.c.requestApproval(ctx, tool, subject, args)
 	return allow, remember, "", err
@@ -5842,7 +5917,11 @@ func (c *Controller) requestApproval(ctx context.Context, tool, subject string, 
 }
 
 func (c *Controller) requestApprovalWithReason(ctx context.Context, tool, subject string, args json.RawMessage, reason string) (bool, bool, error) {
-	r, err := c.requestApprovalDecision(ctx, tool, subject, args, reason)
+	return c.requestApprovalWithReasonOptions(ctx, tool, subject, args, reason, approvalDecisionOptions{})
+}
+
+func (c *Controller) requestApprovalWithReasonOptions(ctx context.Context, tool, subject string, args json.RawMessage, reason string, opts approvalDecisionOptions) (bool, bool, error) {
+	r, err := c.requestApprovalDecisionWithOptions(ctx, tool, subject, args, reason, opts)
 	if err != nil {
 		return false, false, err
 	}
@@ -5857,10 +5936,6 @@ func (c *Controller) requestApprovalWithReason(ctx context.Context, tool, subjec
 	return r.allow, false, nil
 }
 
-func (c *Controller) requestApprovalDecision(ctx context.Context, tool, subject string, args json.RawMessage, reason string) (approvalReply, error) {
-	return c.requestApprovalDecisionWithOptions(ctx, tool, subject, args, reason, approvalDecisionOptions{})
-}
-
 func (c *Controller) requestFreshApprovalDecision(ctx context.Context, tool, subject string, args json.RawMessage, reason string) (approvalReply, error) {
 	return c.requestApprovalDecisionWithOptions(ctx, tool, subject, args, reason, approvalDecisionOptions{fresh: true})
 }
@@ -5870,13 +5945,17 @@ type approvalDecisionOptions struct {
 	// permission. It may reuse an explicit session grant, but YOLO/auto approval
 	// must not answer or drain the prompt.
 	fresh bool
+	// requireHuman marks an ordinary tool approval that Auto, an approved-plan
+	// window, Guardian, or an allowing hook must not answer. Unlike fresh it
+	// retains the ordinary four-choice UI and YOLO remains an explicit bypass.
+	requireHuman bool
 }
 
 func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, tool, subject string, args json.RawMessage, reason string, opts approvalDecisionOptions) (approvalReply, error) {
 	// YOLO/full access and the just-approved-plan execution window auto-allow
 	// approval-gated tools without prompting. Plan approval is a user decision,
 	// not a tool permission, so it deliberately stays interactive.
-	if c.approval.preApprovedForDecision(tool, subject, args, opts.fresh) {
+	if c.approval.preApprovedForDecisionOptions(tool, subject, args, opts.fresh, opts.requireHuman) {
 		return approvalReply{allow: true}, nil
 	}
 
@@ -5885,7 +5964,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 
 	// Re-check: a session grant may have landed while we queued behind another
 	// prompt for the same subject.
-	if c.approval.preApprovedForDecision(tool, subject, args, opts.fresh) {
+	if c.approval.preApprovedForDecisionOptions(tool, subject, args, opts.fresh, opts.requireHuman) {
 		return approvalReply{allow: true}, nil
 	}
 
@@ -5895,7 +5974,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 	// runs synchronously and before the dialog is shown. Native Reasonix
 	// PermissionRequest hooks stay advisory-only (see claudePermissionBlocking).
 	//
-	// A hook's auto-allow must never stand in for a fresh human decision:
+	// A hook's auto-allow must never stand in for a human-required decision:
 	// sandbox escapes, Reasonix config writes, memory remember/forget, and
 	// plan approval (RequiresFreshHumanApprovalTool) are deliberately excluded
 	// from YOLO/auto-approval and Guardian too, so a broadly-matched plugin
@@ -5906,7 +5985,7 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 			switch {
 			case !*decision:
 				return approvalReply{}, nil
-			case !opts.fresh && !requiresFreshApprovalTool(tool):
+			case !opts.fresh && !opts.requireHuman && !requiresFreshApprovalTool(tool):
 				return approvalReply{allow: true}, nil
 			}
 			// An "allow" opinion on a fresh-human-required decision is
@@ -5916,8 +5995,8 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 
 	var id string
 	var reply chan approvalReply
-	if opts.fresh {
-		id, reply = c.approval.registerDecision(tool, subject, reason, true)
+	if opts.fresh || opts.requireHuman {
+		id, reply = c.approval.registerDecision(tool, subject, reason, opts.fresh, opts.requireHuman)
 	} else {
 		id, reply = c.approval.register(tool, subject, reason)
 	}

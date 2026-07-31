@@ -1,0 +1,13 @@
+go test fuzz v1
+string("ec!!ho ${(")
+byte('\x01')
+bool(true)
+bool(false)
+byte('\x00')
+bool(false)
+bool(false)
+bool(true)
+bool(false)
+bool(true)
+bool(false)
+bool(false)

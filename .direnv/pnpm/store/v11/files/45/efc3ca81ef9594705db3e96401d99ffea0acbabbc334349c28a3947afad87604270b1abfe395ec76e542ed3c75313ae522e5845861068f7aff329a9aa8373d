@@ -1,0 +1,105 @@
+{
+  "name": "@upsetjs/venn.js",
+  "description": "Area Proportional Venn and Euler Diagrams",
+  "version": "2.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "author": {
+    "name": "Ben Frederickson",
+    "email": "ben@benfrederickson.com",
+    "url": "https://www.benfrederickson.com"
+  },
+  "contributors": [
+    {
+      "name": "Samuel Gratzl",
+      "email": "samu@sgratzl.com",
+      "url": "https://wwww.sgratzl.com"
+    }
+  ],
+  "license": "MIT",
+  "homepage": "https://github.com/upsetjs/venn.js",
+  "bugs": {
+    "url": "https://github.com/upsetjs/venn.js/issues"
+  },
+  "keywords": [
+    "Venn",
+    "Euler"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/upsetjs/venn.js.git"
+  },
+  "directories": {
+    "example": "examples",
+    "test": "tests"
+  },
+  "type": "module",
+  "main": "build/venn.esm.js",
+  "module": "build/venn.esm.js",
+  "require": "build/venn.js",
+  "unpkg": "build/venn.min.js",
+  "jsdelivr": "build/venn.min.js",
+  "types": "src/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./build/venn.esm.js",
+      "require": "./build/index.js",
+      "scripts": "./build/venn.min.js",
+      "types": "./src/index.d.ts"
+    }
+  },
+  "sideEffects": false,
+  "files": [
+    "build",
+    "src/**/*.js",
+    "src/**/*.d.ts"
+  ],
+  "browserslist": [
+    "Firefox ESR",
+    "last 2 Chrome versions",
+    "last 2 Firefox versions"
+  ],
+  "optionalDependencies": {
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/plugin-transform-runtime": "^7.25.9",
+    "@babel/preset-env": "^7.26.0",
+    "@eslint/js": "^9.15.0",
+    "@rollup/plugin-babel": "^6.0.4",
+    "@rollup/plugin-commonjs": "^28.0.1",
+    "@rollup/plugin-node-resolve": "^15.3.0",
+    "@yarnpkg/sdks": "^3.2.0",
+    "canvas": "^2.11.2",
+    "d3-selection": "^3.0.0",
+    "d3-transition": "^3.0.1",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "fmin": "patch:fmin@npm%3A0.0.4#~/.yarn/patches/fmin-npm-0.0.4-e439f499bd.patch",
+    "globals": "^15.12.0",
+    "jest-image-snapshot": "^6.4.0",
+    "jsdom": "^25.0.1",
+    "prettier": "^3.3.3",
+    "rimraf": "^6.0.1",
+    "rollup": "^4.27.2",
+    "rollup-plugin-terser": "^7.0.2",
+    "vite": "^5.4.11",
+    "vitest": "^2.1.5"
+  },
+  "scripts": {
+    "clean": "rimraf --glob build *.tgz",
+    "watch": "rollup -c -w",
+    "lint": "eslint src",
+    "test": "vitest --passWithNoTests",
+    "test:watch": "vitest --watch",
+    "posttest": "npm run lint",
+    "prebuild": "npm run clean && npm test",
+    "build": "rollup -c",
+    "format": "prettier --write examples \"*.{md,json,js,yml}\" \"{.github,src,examples}/**\""
+  },
+  "packageManager": "yarn@4.5.1"
+}

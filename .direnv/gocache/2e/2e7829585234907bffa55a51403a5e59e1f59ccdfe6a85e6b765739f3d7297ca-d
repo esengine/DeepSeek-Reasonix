@@ -1,0 +1,5 @@
+./file.go
+./pe.go
+./section.go
+./string.go
+./symbol.go

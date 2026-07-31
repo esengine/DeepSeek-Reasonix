@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/colorprofile"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -115,6 +117,8 @@ func statuslineCommandHasModel(cmd tea.Cmd, model string) bool {
 }
 
 func TestIdleStatuslineIsCompact(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.TrueColor
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineView(t, false)
@@ -139,6 +143,8 @@ func TestIdleStatuslineIsCompact(t *testing.T) {
 }
 
 func TestYoloStatuslineUsesDangerPill(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.TrueColor
 	i18n.DetectLanguage("en")
 
 	content := renderStatuslineView(t, true)
@@ -155,6 +161,8 @@ func TestYoloStatuslineUsesDangerPill(t *testing.T) {
 }
 
 func TestPlanStatuslineUsesBluePill(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.TrueColor
 	i18n.DetectLanguage("en")
 
 	content := renderPlanStatuslineView(t)
@@ -257,10 +265,8 @@ func TestStatuslineShowsWorkModeAndBalanceInPersistentFooter(t *testing.T) {
 
 func TestEffortTagExplicitValueUsesThemeInfo(t *testing.T) {
 	i18n.DetectLanguage("en")
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
 	for _, tt := range []struct {
 		mode, infoSGR string

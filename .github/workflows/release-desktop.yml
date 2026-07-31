@@ -85,12 +85,61 @@ on:
         default: false
         type: boolean
 
+concurrency:
+  # A channel pointer is a monotonic public state machine. Serialize every
+  # publisher for the same normalized channel, including the legacy canary alias.
+  group: release-desktop-${{ (inputs.channel == 'preview' || inputs.channel == 'canary') && 'preview' || 'stable' }}
+  cancel-in-progress: false
+
 permissions:
   contents: write # create the release and upload artifacts
 
 jobs:
+  resolve:
+    name: resolve Desktop release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      channel: ${{ steps.release.outputs.channel }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+      sha: ${{ steps.candidate.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Resolve version and channel
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          IN_CHANNEL: ${{ inputs.channel }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_BASE_VERSION: ${{ inputs.base_version }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: bash scripts/resolve-desktop-release.sh
+
+      - name: Resolve immutable candidate
+        id: candidate
+        env:
+          RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          IN_ORCHESTRATED: ${{ inputs.orchestrated }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          CALLER_EVENT_NAME: ${{ github.event_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+          CALLER_SHA: ${{ github.sha }}
+          CALLER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: bash scripts/resolve-desktop-candidate.sh
+
   orchestration-guard:
     name: verify approved orchestrator
+    needs: resolve
     if: ${{ inputs.orchestrated }}
     runs-on: ubuntu-latest
     permissions:
@@ -119,6 +168,7 @@ jobs:
 
   release-gate:
     name: approve standalone desktop release
+    needs: resolve
     if: ${{ !inputs.orchestrated }}
     runs-on: ubuntu-latest
     permissions:
@@ -126,16 +176,17 @@ jobs:
     # Keep Preview fast, but do not make its public, formally signed binaries an
     # unreviewed path. The `canary` environment must use the same required
     # reviewers as `release`.
-    environment: ${{ (github.event_name == 'workflow_dispatch' && inputs.channel == 'preview') && 'canary' || 'release' }}
+    environment: ${{ needs.resolve.outputs.channel == 'preview' && 'canary' || 'release' }}
     steps:
       - env:
-          RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-        run: echo "Approved standalone desktop release $RELEASE_TAG"
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: echo "Approved standalone desktop $RELEASE_CHANNEL release $RELEASE_TAG"
 
   signing-contract:
     name: validate SignPath release contract
-    needs: [orchestration-guard, release-gate]
-    if: ${{ always() && !cancelled() && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
+    needs: [resolve, orchestration-guard, release-gate]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && ((inputs.orchestrated && needs.orchestration-guard.result == 'success') || (!inputs.orchestrated && needs.release-gate.result == 'success')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -186,15 +237,15 @@ jobs:
 
   cache-guard:
     name: cache hit guard
-    needs: signing-contract
-    if: ${{ always() && !cancelled() && needs.signing-contract.result == 'success' }}
+    needs: [resolve, signing-contract]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.signing-contract.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - uses: actions/setup-go@v6
         with:
@@ -206,8 +257,8 @@ jobs:
 
   build:
     name: build (${{ matrix.name }})
-    needs: cache-guard
-    if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
+    needs: [resolve, cache-guard]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.cache-guard.result == 'success' }}
     permissions:
       contents: read # checkout only; the publish job holds contents: write
       actions: read # SignPath reads run details + downloads the unsigned artifact
@@ -232,7 +283,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
+          ref: ${{ needs.resolve.outputs.sha }}
 
       - uses: actions/setup-go@v6
         with:
@@ -305,17 +356,6 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
 
-      - name: Resolve version
-        id: ver
-        run: bash scripts/resolve-desktop-release.sh
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          IN_CHANNEL: ${{ inputs.channel }}
-          IN_TAG: ${{ inputs.tag }}
-          IN_BASE_VERSION: ${{ inputs.base_version }}
-          REF_NAME: ${{ github.ref_name }}
-          RUN_NUMBER: ${{ github.run_number }}
-
       # Official Windows releases must fail closed. Forks can still exercise
       # unsigned packaging without repository secrets, but esengine releases
       # may never publish an unsigned payload or installer.
@@ -336,7 +376,7 @@ jobs:
           APPLE_API_KEY_PATH: ${{ runner.temp }}/notary.p8
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
-        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.channel }}"
+        run: scripts/desktop-build.sh "${{ matrix.platform }}" "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.channel }}"
 
       # Sign every executable that users actually run before rebuilding the
       # portable archive and NSIS installer. Signing only the finished NSIS
@@ -385,8 +425,21 @@ jobs:
             -TimeoutSeconds 1800 `
             -WaitForExternalApproval:$waitForExternalApproval
 
+      - name: Bind signed Windows payload to release manifest
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
+        working-directory: desktop
+        env:
+          MINISIGN_PRIVATE_KEY: ${{ secrets.MINISIGN_PRIVATE_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          go run ./cmd/sign windows-payload ../signed-payload "${{ needs.resolve.outputs.version }}"
+          go run ./cmd/sign sign ../signed-payload/reasonix-payload.json
+          go run ./cmd/sign verify ../signed-payload/reasonix-payload.json
+
       - name: Rebuild Windows packages from signed payload
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
+        env:
+          REASONIX_REQUIRE_PAYLOAD_MANIFEST: "1"
         run: scripts/package-windows-desktop.sh "${{ matrix.platform == 'windows/arm64' && 'arm64' || 'amd64' }}" signed-payload
 
       # The second request signs the rebuilt NSIS container. Release signing
@@ -457,11 +510,13 @@ jobs:
           name: dist-${{ matrix.name }}
           path: dist/*
           if-no-files-found: error
+          # Same-run handoff to the publish job only; 7 days covers debugging.
+          retention-days: 7
 
   publish:
     name: publish release
-    needs: build
-    if: ${{ always() && !cancelled() && needs.build.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight }}
+    needs: [resolve, build]
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.build.result == 'success' && !inputs.production_signing_smoke && !inputs.signing_preflight }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -472,7 +527,33 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
+          fetch-depth: 0
+          ref: ${{ needs.resolve.outputs.sha }}
+
+      # A standalone recovery may build an older Stable tag. Keep the release
+      # control plane on the protected workflow commit so newly-added
+      # authorization and recovery scripts remain available, while the source
+      # tree above stays pinned to the immutable candidate.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: release-control
+          ref: ${{ github.workflow_sha }}
+
+      - name: Revalidate immutable Desktop candidate
+        env:
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          IN_ORCHESTRATED: ${{ inputs.orchestrated }}
+          APPROVED_SHA: ${{ needs.resolve.outputs.sha }}
+          CALLER_EVENT_NAME: ${{ github.event_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+          CALLER_SHA: ${{ github.sha }}
+          CALLER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          REQUIRE_CURRENT_MAIN: false
+          VERIFY_RELEASE_CHECKOUT: true
+        run: bash release-control/scripts/resolve-desktop-candidate.sh
 
       - uses: actions/setup-go@v6
         with:
@@ -490,32 +571,38 @@ jobs:
           pattern: dist-*
           merge-multiple: true
 
-      - name: Resolve version
-        id: ver
-        run: bash scripts/resolve-desktop-release.sh
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          IN_CHANNEL: ${{ inputs.channel }}
-          IN_TAG: ${{ inputs.tag }}
-          IN_BASE_VERSION: ${{ inputs.base_version }}
-          REF_NAME: ${{ github.ref_name }}
-          RUN_NUMBER: ${{ github.run_number }}
-
       # Generate latest.json with GitHub release download URLs; the mirror step
       # rewrites them to R2 afterwards. GITHUB_REPOSITORY is provided by the runner.
       - name: Generate manifest
         working-directory: desktop
-        run: go run ./cmd/sign manifest ../dist "${{ steps.ver.outputs.version }}" "${{ steps.ver.outputs.tag }}"
+        run: go run ./cmd/sign manifest ../dist "${{ needs.resolve.outputs.version }}" "${{ needs.resolve.outputs.tag }}"
+
+      - name: Validate generated manifest before publication
+        env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          validation_channel="$CHANNEL"
+          if [ "$CHANNEL" != "preview" ] && [ "$PRERELEASE" = "true" ]; then
+            validation_channel="any"
+          fi
+          bash release-control/scripts/validate-desktop-release-manifest.sh \
+            "$validation_channel" "$VERSION" \
+            "https://github.com/esengine/DeepSeek-Reasonix/releases/download/${TAG}/" \
+            dist/latest.json
 
       - name: Download orchestrator-reviewed release notes
-        if: ${{ inputs.orchestrated && steps.ver.outputs.channel != 'preview' }}
+        if: ${{ inputs.orchestrated && needs.resolve.outputs.channel != 'preview' }}
         uses: actions/download-artifact@v8
         with:
           name: stable-reviewed-release-notes
           path: /tmp/stable-reviewed-release-notes
 
       - name: Use orchestrator-reviewed release notes
-        if: ${{ inputs.orchestrated && steps.ver.outputs.channel != 'preview' }}
+        if: ${{ inputs.orchestrated && needs.resolve.outputs.channel != 'preview' }}
         run: |
           test -s /tmp/stable-reviewed-release-notes/release-notes.md
           cp /tmp/stable-reviewed-release-notes/release-notes.md /tmp/release-notes.md
@@ -524,8 +611,8 @@ jobs:
       # the signed dist via the preview-dist artifact below. Stable publishes a
       # GitHub release as usual.
       - name: Render reviewed release notes
-        if: ${{ !inputs.orchestrated && steps.ver.outputs.channel != 'preview' }}
-        run: node scripts/release-notes.mjs render --version "${{ steps.ver.outputs.version }}" --output /tmp/release-notes.md
+        if: ${{ !inputs.orchestrated && needs.resolve.outputs.channel != 'preview' }}
+        run: node scripts/release-notes.mjs render --version "${{ needs.resolve.outputs.version }}" --output /tmp/release-notes.md
 
       - name: Revalidate approved release ref
         if: ${{ inputs.orchestrated }}
@@ -535,27 +622,28 @@ jobs:
         run: bash scripts/verify-release-tag.sh
 
       - name: Publish GitHub release
-        if: steps.ver.outputs.channel != 'preview'
+        if: needs.resolve.outputs.channel != 'preview'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # Keep the repository homepage focused on the installable desktop app;
-          # the CLI release line is configured not to claim repository-wide latest.
-          args=(--title "Reasonix Desktop ${{ steps.ver.outputs.version }}" --notes-file /tmp/release-notes.md)
-          if [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
-            args+=(--prerelease --latest=false)
-          else
-            args+=(--latest)
-          fi
-          gh release create "${{ steps.ver.outputs.tag }}" dist/* "${args[@]}"
+        # Keep the repository homepage focused on the installable desktop app;
+        # the CLI release line is configured not to claim repository-wide latest.
+        run: >-
+          bash release-control/scripts/publish-desktop-github-release.sh
+          "${{ needs.resolve.outputs.tag }}"
+          "${{ needs.resolve.outputs.version }}"
+          "${{ needs.resolve.outputs.prerelease }}"
+          /tmp/release-notes.md
+          dist
 
       - name: Upload preview dist for mirror
-        if: steps.ver.outputs.channel == 'preview'
+        if: needs.resolve.outputs.channel == 'preview'
         uses: actions/upload-artifact@v7
         with:
           name: preview-dist
           path: dist/*
           if-no-files-found: error
+          # Same-run handoff to the mirror step only; 7 days covers debugging.
+          retention-days: 7
 
   attest-signing-contract:
     name: record standalone SignPath attestation
@@ -583,34 +671,45 @@ jobs:
 
   mirror:
     name: mirror to R2
-    needs: publish
+    needs: [resolve, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write # gh release download + compatibility manifest upload
       actions: write # dispatch pages.yml to re-bake the site version
     # Stable keeps GitHub as a fallback when R2 is unavailable. Preview has no
     # GitHub release, so it must fail closed before attempting publication.
-    if: ${{ always() && !cancelled() && needs.publish.result == 'success' && github.repository_owner == 'esengine' }}
+    if: ${{ always() && !cancelled() && needs.resolve.result == 'success' && needs.publish.result == 'success' && github.repository_owner == 'esengine' }}
     env:
       HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
+          fetch-depth: 0
+          ref: ${{ needs.resolve.outputs.sha }}
 
-      - name: Resolve version
-        id: ver
-        run: bash scripts/resolve-desktop-release.sh
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: release-control
+          ref: ${{ github.workflow_sha }}
+
+      - name: Revalidate immutable Desktop candidate
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          IN_CHANNEL: ${{ inputs.channel }}
-          IN_TAG: ${{ inputs.tag }}
-          IN_BASE_VERSION: ${{ inputs.base_version }}
-          REF_NAME: ${{ github.ref_name }}
-          RUN_NUMBER: ${{ github.run_number }}
+          RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
+          IN_ORCHESTRATED: ${{ inputs.orchestrated }}
+          APPROVED_SHA: ${{ needs.resolve.outputs.sha }}
+          CALLER_EVENT_NAME: ${{ github.event_name }}
+          CALLER_REF: ${{ github.ref }}
+          CALLER_REF_PROTECTED: ${{ github.ref_protected }}
+          CALLER_SHA: ${{ github.sha }}
+          CALLER_WORKFLOW_SHA: ${{ github.workflow_sha }}
+          REQUIRE_CURRENT_MAIN: false
+          VERIFY_RELEASE_CHECKOUT: true
+        run: bash release-control/scripts/resolve-desktop-candidate.sh
 
       - name: Require R2 for Preview
-        if: steps.ver.outputs.channel == 'preview' && env.HAS_R2 != 'true'
+        if: needs.resolve.outputs.channel == 'preview' && env.HAS_R2 != 'true'
         run: |
           echo "::error::R2 credentials are required because Preview has no GitHub release fallback"
           exit 1
@@ -625,19 +724,19 @@ jobs:
       # Preview has no GitHub release — pull the signed dist from the workflow
       # artifact. Stable pulls from the published release.
       - name: Download preview dist
-        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel == 'preview'
+        if: env.HAS_R2 == 'true' && needs.resolve.outputs.channel == 'preview'
         uses: actions/download-artifact@v8
         with:
           name: preview-dist
           path: assets
 
       - name: Download release assets
-        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'preview'
+        if: env.HAS_R2 == 'true' && needs.resolve.outputs.channel != 'preview'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p assets
-          gh release download "${{ steps.ver.outputs.tag }}" -R "${{ github.repository }}" -D assets
+          gh release download "${{ needs.resolve.outputs.tag }}" -R "${{ github.repository }}" -D assets
 
       # Rewrite both url and sig inside latest.json from github.com to the R2 CDN,
       # so the updater pulls the manifest AND the heavy artifacts from R2.
@@ -645,7 +744,7 @@ jobs:
         if: env.HAS_R2 == 'true'
         env:
           R2_PUBLIC_BASE: https://dl.reasonix.io
-          TAG: ${{ steps.ver.outputs.tag }}
+          TAG: ${{ needs.resolve.outputs.tag }}
         run: |
           f=assets/latest.json
           jq --arg base "$R2_PUBLIC_BASE" --arg tag "$TAG" '
@@ -656,9 +755,30 @@ jobs:
             | if .native_packages then
                 .native_packages |= with_entries(.value |= rewrite_asset)
               else . end
+            | if .downloads then
+                .downloads |= with_entries(.value |= rewrite_asset)
+              else . end
           ' "$f" > "$f.new"
           mv "$f.new" "$f"
           cat "$f"
+
+      - name: Validate R2 manifest before upload
+        if: env.HAS_R2 == 'true'
+        env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          validation_channel="$CHANNEL"
+          if [ "$CHANNEL" != "preview" ] && [ "$PRERELEASE" = "true" ]; then
+            validation_channel="any"
+          fi
+          bash release-control/scripts/validate-desktop-release-manifest.sh \
+            "$validation_channel" "$VERSION" \
+            "https://dl.reasonix.io/${TAG}/" \
+            assets/latest.json
 
       - name: Configure AWS CLI for R2
         if: env.HAS_R2 == 'true'
@@ -667,26 +787,216 @@ jobs:
           aws configure set aws_secret_access_key "${{ secrets.R2_SECRET_ACCESS_KEY }}"
           aws configure set region auto
 
-      - name: Mirror to R2
+      - name: Mirror immutable assets and advance R2 pointer
+        id: mirror_r2
         if: env.HAS_R2 == 'true'
         env:
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
-          TAG: ${{ steps.ver.outputs.tag }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
+          set -euo pipefail
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          aws s3 cp assets/ "s3://${R2_BUCKET}/${TAG}/" --recursive --endpoint-url "$ENDPOINT"
-          # The pointer a release moves is its channel's alone: preview writes
-          # preview/, stable writes latest/. A stable prerelease (rc) moves neither.
-          if [ "${{ steps.ver.outputs.channel }}" = "preview" ]; then
-            aws s3 cp assets/ "s3://${R2_BUCKET}/preview/" --recursive --endpoint-url "$ENDPOINT"
-            # Compatibility only: old clients still poll canary/latest.json.
-            aws s3 cp assets/ "s3://${R2_BUCKET}/canary/" --recursive --endpoint-url "$ENDPOINT"
-          elif [ "${{ steps.ver.outputs.prerelease }}" = "true" ]; then
-            echo "prerelease — leaving R2 latest/ untouched"
-          else
-            aws s3 cp assets/ "s3://${R2_BUCKET}/latest/" --recursive --endpoint-url "$ENDPOINT"
+
+          download_optional() {
+            local key="$1"
+            local output="$2"
+            local error_file
+            error_file="$(mktemp)"
+            if aws s3 cp "s3://${R2_BUCKET}/${key}" "$output" \
+              --endpoint-url "$ENDPOINT" >/dev/null 2>"$error_file"; then
+              rm -f "$error_file"
+              return 0
+            fi
+            if grep -Eiq '404|NoSuchKey|Not Found' "$error_file"; then
+              rm -f "$error_file"
+              return 3
+            fi
+            cat "$error_file" >&2
+            rm -f "$error_file"
+            return 1
+          }
+
+          validation_channel="$CHANNEL"
+          if [ "$CHANNEL" != "preview" ] && [ "$PRERELEASE" = "true" ]; then
+            validation_channel="any"
           fi
+          asset_base="https://dl.reasonix.io/${TAG}/"
+
+          # A version directory is immutable once written. Recovery may fill an
+          # incomplete candidate subset, but it may never replace conflicting or
+          # unexpected content, including an already-written latest.json.
+          existing_directory="$(mktemp -d)"
+          existing_keys="$(
+            aws s3api list-objects-v2 \
+              --bucket "$R2_BUCKET" \
+              --prefix "${TAG}/" \
+              --query 'Contents[].Key' \
+              --output text \
+              --endpoint-url "$ENDPOINT"
+          )"
+          if [ -n "$existing_keys" ] && [ "$existing_keys" != "None" ]; then
+            aws s3 cp "s3://${R2_BUCKET}/${TAG}/" "$existing_directory/" \
+              --recursive --endpoint-url "$ENDPOINT"
+            bash release-control/scripts/verify-desktop-release-directory.sh \
+              --allow-missing assets "$existing_directory"
+            if [ -f "$existing_directory/latest.json" ]; then
+              bash release-control/scripts/validate-desktop-release-manifest.sh \
+                "$validation_channel" "$VERSION" "$asset_base" \
+                "$existing_directory/latest.json"
+              cmp -s assets/latest.json "$existing_directory/latest.json"
+            fi
+          fi
+
+          aws s3 cp assets/ "s3://${R2_BUCKET}/${TAG}/" \
+            --recursive \
+            --endpoint-url "$ENDPOINT" \
+            --cache-control "public, max-age=31536000, immutable"
+          published_directory="$(mktemp -d)"
+          aws s3 cp "s3://${R2_BUCKET}/${TAG}/" "$published_directory/" \
+            --recursive --endpoint-url "$ENDPOINT"
+          bash release-control/scripts/verify-desktop-release-directory.sh \
+            assets "$published_directory"
+
+          aws s3 cp "s3://${R2_BUCKET}/${TAG}/latest.json" \
+            /tmp/reasonix-desktop-tag-latest.json --endpoint-url "$ENDPOINT"
+          bash release-control/scripts/validate-desktop-release-manifest.sh \
+            "$validation_channel" "$VERSION" "$asset_base" \
+            /tmp/reasonix-desktop-tag-latest.json
+          cmp -s assets/latest.json /tmp/reasonix-desktop-tag-latest.json
+
+          # Internal RCs retain their immutable record but never move a public
+          # channel pointer.
+          if [ "$PRERELEASE" = "true" ] && [ "$CHANNEL" != "preview" ]; then
+            echo "pointer_moved=false" >> "$GITHUB_OUTPUT"
+            echo "internal Desktop prerelease $VERSION; public pointers remain unchanged"
+            exit 0
+          fi
+
+          validate_current_pointer() {
+            local current_channel="$1"
+            local current_version="$2"
+            local current_file="$3"
+            local current_base="https://dl.reasonix.io/desktop-${current_version}/"
+            if bash release-control/scripts/validate-desktop-release-manifest.sh \
+              "$current_channel" "$current_version" "$current_base" \
+              "$current_file"; then
+              return 0
+            fi
+
+            local legacy_base="$current_base"
+            if [ "$current_channel" = "preview" ]; then
+              legacy_base="https://dl.reasonix.io/desktop-preview/"
+            fi
+            if bash release-control/scripts/validate-desktop-release-manifest.sh \
+              "legacy-${current_channel}" "$current_version" "$legacy_base" \
+              "$current_file"; then
+              echo "using legacy $current_channel manifest $current_version only as the monotonic migration baseline"
+              return 0
+            fi
+            echo "::error::existing Desktop $current_channel pointer is invalid"
+            return 1
+          }
+
+          pointer_decision=""
+          pointer_state=""
+          if [ "$CHANNEL" = "preview" ]; then
+            preview_manifest=-
+            preview_version=""
+            preview_download=/tmp/reasonix-desktop-current-preview.json
+            if download_optional "preview/latest.json" "$preview_download"; then
+              preview_version="$(jq -er '.version | strings' "$preview_download")"
+              validate_current_pointer preview "$preview_version" "$preview_download"
+              preview_manifest="$preview_download"
+            else
+              status=$?
+              if [ "$status" -ne 3 ]; then
+                exit "$status"
+              fi
+            fi
+
+            canary_manifest=-
+            canary_version=""
+            canary_download=/tmp/reasonix-desktop-current-canary.json
+            if download_optional "canary/latest.json" "$canary_download"; then
+              canary_version="$(jq -er '.version | strings' "$canary_download")"
+              validate_current_pointer preview "$canary_version" "$canary_download"
+              canary_manifest="$canary_download"
+            else
+              status=$?
+              if [ "$status" -ne 3 ]; then
+                exit "$status"
+              fi
+            fi
+
+            pointer_decision="$(
+              bash release-control/scripts/decide-desktop-pointer-update.sh \
+                preview assets/latest.json "$preview_manifest" "$canary_manifest"
+            )"
+            pointer_state="preview=${preview_version:-unset}, canary=${canary_version:-unset}"
+          else
+            current_version=""
+            current_manifest=/tmp/reasonix-desktop-current-pointer.json
+            if download_optional "latest/latest.json" "$current_manifest"; then
+              current_version="$(jq -er '.version | strings' "$current_manifest")"
+              validate_current_pointer stable "$current_version" "$current_manifest"
+            else
+              status=$?
+              if [ "$status" -ne 3 ]; then
+                exit "$status"
+              fi
+            fi
+            pointer_decision="$(
+              bash release-control/scripts/decide-desktop-pointer-update.sh \
+                stable assets/latest.json \
+                "$([ -n "$current_version" ] && printf '%s' "$current_manifest" || printf '%s' -)"
+            )"
+            pointer_state="${current_version:-unset}"
+          fi
+
+          IFS=$'\t' read -r pointer_action pointer_source <<< "$pointer_decision"
+          if [ "$pointer_action" = "skip" ]; then
+            echo "pointer_moved=false" >> "$GITHUB_OUTPUT"
+            echo "Desktop $CHANNEL pointer remains $pointer_state; candidate $VERSION is not newer and needs no repair"
+            exit 0
+          fi
+          if [ "$pointer_action" != "update" ] || [ ! -f "$pointer_source" ]; then
+            echo "::error::invalid Desktop pointer decision: $pointer_decision"
+            exit 1
+          fi
+          pointer_version="$(jq -er '.version | strings' "$pointer_source")"
+
+          publish_pointer() {
+            local destination="$1"
+            local downloaded="/tmp/reasonix-desktop-${destination}-latest.json"
+            aws s3 cp "$pointer_source" "s3://${R2_BUCKET}/${destination}/latest.json" \
+              --endpoint-url "$ENDPOINT" \
+              --content-type "application/json; charset=utf-8" \
+              --cache-control "public, max-age=300, stale-if-error=86400"
+            aws s3 cp "s3://${R2_BUCKET}/${destination}/latest.json" "$downloaded" \
+              --endpoint-url "$ENDPOINT"
+            validate_current_pointer "$CHANNEL" "$pointer_version" "$downloaded"
+            cmp -s "$pointer_source" "$downloaded"
+          }
+
+          if [ "$CHANNEL" = "preview" ]; then
+            # Write compatibility first. If the primary write fails, a rerun
+            # still observes the old primary and safely retries both writes.
+            publish_pointer canary
+            publish_pointer preview
+            if ! cmp -s /tmp/reasonix-desktop-canary-latest.json /tmp/reasonix-desktop-preview-latest.json; then
+              echo "::error::Desktop Preview and Canary pointers diverged after publication"
+              exit 1
+            fi
+          else
+            publish_pointer latest
+          fi
+          echo "pointer_moved=true" >> "$GITHUB_OUTPUT"
+          echo "pointer_version=$pointer_version" >> "$GITHUB_OUTPUT"
+          echo "Desktop $CHANNEL pointer -> $pointer_version"
 
       # dl.reasonix.io serves 403 to GitHub Actions egress IPs (Cloudflare bot
       # protection), so smoke the mirrored objects over the authenticated S3 API
@@ -695,49 +1005,53 @@ jobs:
       - name: Smoke desktop release pointers
         if: env.HAS_R2 == 'true'
         env:
-          TAG: ${{ steps.ver.outputs.tag }}
-          VERSION: ${{ steps.ver.outputs.version }}
-          CHANNEL: ${{ steps.ver.outputs.channel }}
-          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          POINTER_MOVED: ${{ steps.mirror_r2.outputs.pointer_moved }}
+          POINTER_VERSION: ${{ steps.mirror_r2.outputs.pointer_version }}
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_BUCKET: ${{ secrets.R2_BUCKET }}
         run: |
           set -euo pipefail
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           f=assets/latest.json
-          jq -e --arg version "$VERSION" --arg prefix "https://dl.reasonix.io/${TAG}/" '
-            .version == $version and
-            .download_page == "https://reasonix.io/?download=desktop#start" and
-            ([.platforms[] | (.url, .sig)] |
-              all(type == "string" and startswith($prefix) and (contains("/releases/latest/") | not))) and
-            (.platforms["linux-amd64"].url | type == "string" and endswith(".tar.gz")) and
-            (.native_packages | type == "object") and
-            (.native_packages["linux-amd64"] | type == "object") and
-            (.native_packages["linux-amd64"].url | type == "string" and startswith($prefix) and endswith(".deb") and (contains("/releases/latest/") | not)) and
-            (.native_packages["linux-amd64"].sig | type == "string" and startswith($prefix) and endswith(".deb.minisig") and (contains("/releases/latest/") | not)) and
-            (.native_packages["linux-amd64"].sha256 | type == "string" and length > 0) and
-            (.native_packages["linux-amd64"].size | type == "number" and . > 0)
-          ' "$f" >/dev/null
+          validation_channel="$CHANNEL"
+          if [ "$CHANNEL" != "preview" ] && [ "$PRERELEASE" = "true" ]; then
+            validation_channel="any"
+          fi
+          asset_base="https://dl.reasonix.io/${TAG}/"
+          bash release-control/scripts/validate-desktop-release-manifest.sh \
+            "$validation_channel" "$VERSION" "$asset_base" "$f"
 
           aws s3 cp "s3://${R2_BUCKET}/${TAG}/latest.json" /tmp/reasonix-desktop-tag-latest.json --endpoint-url "$ENDPOINT"
-          jq -e --arg version "$VERSION" '.version == $version' /tmp/reasonix-desktop-tag-latest.json >/dev/null
-          if [ "$CHANNEL" = "preview" ]; then
-            pointer="preview"
-          elif [ "$PRERELEASE" = "true" ]; then
-            pointer=""
-          else
+          bash release-control/scripts/validate-desktop-release-manifest.sh \
+            "$validation_channel" "$VERSION" "$asset_base" \
+            /tmp/reasonix-desktop-tag-latest.json
+          cmp -s "$f" /tmp/reasonix-desktop-tag-latest.json
+
+          if [ "$POINTER_MOVED" = "true" ]; then
             pointer="latest"
-          fi
-          if [ -n "$pointer" ]; then
+            [ "$CHANNEL" = "preview" ] && pointer="preview"
             aws s3 cp "s3://${R2_BUCKET}/${pointer}/latest.json" /tmp/reasonix-desktop-pointer-latest.json --endpoint-url "$ENDPOINT"
-            jq -e --arg version "$VERSION" '.version == $version' /tmp/reasonix-desktop-pointer-latest.json >/dev/null
+            pointer_base="https://dl.reasonix.io/desktop-${POINTER_VERSION}/"
+            if ! bash release-control/scripts/validate-desktop-release-manifest.sh \
+              "$CHANNEL" "$POINTER_VERSION" "$pointer_base" \
+              /tmp/reasonix-desktop-pointer-latest.json; then
+              legacy_base="$pointer_base"
+              [ "$CHANNEL" = "preview" ] && legacy_base="https://dl.reasonix.io/desktop-preview/"
+              bash release-control/scripts/validate-desktop-release-manifest.sh \
+                "legacy-${CHANNEL}" "$POINTER_VERSION" "$legacy_base" \
+                /tmp/reasonix-desktop-pointer-latest.json
+            fi
             if [ "$CHANNEL" = "preview" ]; then
               aws s3 cp "s3://${R2_BUCKET}/canary/latest.json" /tmp/reasonix-desktop-canary-latest.json --endpoint-url "$ENDPOINT"
-              jq -e --arg version "$VERSION" '.version == $version' /tmp/reasonix-desktop-canary-latest.json >/dev/null
+              cmp -s /tmp/reasonix-desktop-pointer-latest.json /tmp/reasonix-desktop-canary-latest.json
             fi
           fi
 
-          jq -r '(.platforms[] | .url, .sig), ((.native_packages // {})[] | .url, .sig)' "$f" | while IFS= read -r asset; do
+          jq -r '(.platforms[] | .url, .sig), ((.native_packages // {})[] | .url, .sig), ((.downloads // {})[] | .url, .sig)' "$f" | while IFS= read -r asset; do
             [ -n "$asset" ] || continue
             key="${asset#https://dl.reasonix.io/}"
             aws s3api head-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$ENDPOINT" >/dev/null
@@ -754,13 +1068,15 @@ jobs:
       - name: Probe public release gateway
         if: env.HAS_R2 == 'true'
         env:
-          VERSION: ${{ steps.ver.outputs.version }}
-          CHANNEL: ${{ steps.ver.outputs.channel }}
-          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+          POINTER_MOVED: ${{ steps.mirror_r2.outputs.pointer_moved }}
+          POINTER_VERSION: ${{ steps.mirror_r2.outputs.pointer_version }}
         run: |
           set -euo pipefail
-          if [ "$PRERELEASE" = "true" ] && [ "$CHANNEL" != "preview" ]; then
-            echo "prerelease — no pointer moved; skipping gateway probe"
+          if [ "$POINTER_MOVED" != "true" ]; then
+            echo "Desktop $CHANNEL pointer did not move; skipping gateway probe"
             exit 0
           fi
           chan="stable"
@@ -771,10 +1087,10 @@ jobs:
           code="$(curl -sS -A "Go-http-client/2.0" -o /tmp/gateway-latest.json -w '%{http_code}' "$url" || true)"
           case "$code" in
             200)
-              if jq -e --arg version "$VERSION" '.version == $version' /tmp/gateway-latest.json >/dev/null; then
-                echo "gateway serves $VERSION on $chan"
+              if jq -e --arg version "$POINTER_VERSION" '.version == $version' /tmp/gateway-latest.json >/dev/null; then
+                echo "gateway serves $POINTER_VERSION on $chan"
               else
-                echo "::error::gateway responded 200 but serves $(jq -r '.version // "<none>"' /tmp/gateway-latest.json), want $VERSION — stale or wrong pointer"
+                echo "::error::gateway responded 200 but serves $(jq -r '.version // "<none>"' /tmp/gateway-latest.json), want $POINTER_VERSION — stale or wrong pointer"
                 exit 1
               fi
               ;;
@@ -791,10 +1107,10 @@ jobs:
           esac
 
       - name: Attach desktop manifest to matching CLI release
-        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'preview' && steps.ver.outputs.prerelease != 'true'
+        if: env.HAS_R2 == 'true' && needs.resolve.outputs.channel != 'preview' && needs.resolve.outputs.prerelease != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
           if gh release view "$VERSION" >/dev/null 2>&1; then
@@ -806,7 +1122,7 @@ jobs:
       # Stable release moved R2 latest/ — rebuild the site so its build-time baked
       # version + JSON-LD follow (site.js's runtime .rxv refresh can't touch first paint / SEO).
       - name: Refresh site to the new version
-        if: env.HAS_R2 == 'true' && steps.ver.outputs.channel != 'preview' && steps.ver.outputs.prerelease != 'true'
+        if: env.HAS_R2 == 'true' && needs.resolve.outputs.channel != 'preview' && needs.resolve.outputs.prerelease != 'true' && steps.mirror_r2.outputs.pointer_moved == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run pages.yml --ref main-v2

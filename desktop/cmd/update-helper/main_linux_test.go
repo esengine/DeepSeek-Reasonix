@@ -86,20 +86,40 @@ func TestAcceptDebIdentity(t *testing.T) {
 	}
 }
 
-func TestAcceptVersionUpgrade(t *testing.T) {
-	if err := acceptVersionUpgrade(1); err != nil {
-		t.Fatal(err)
+func TestAcceptVersionTransition(t *testing.T) {
+	tests := []struct {
+		name          string
+		cmp           int
+		candidate     string
+		installed     string
+		wantDowngrade bool
+		wantErr       bool
+	}{
+		{name: "ordinary upgrade", cmp: 1, candidate: "1.3.0", installed: "1.2.0"},
+		{name: "equal rejected", cmp: 0, candidate: "1.2.0", installed: "1.2.0", wantErr: true},
+		{name: "preview to older stable", cmp: -1, candidate: "1.2.0", installed: "1.3.0~preview.1", wantDowngrade: true},
+		{name: "stable to older stable rejected", cmp: -1, candidate: "1.2.0", installed: "1.3.0", wantErr: true},
+		{name: "preview to older preview rejected", cmp: -1, candidate: "1.2.0~preview.1", installed: "1.3.0~preview.1", wantErr: true},
+		{name: "rc to stable rejected", cmp: -1, candidate: "1.2.0", installed: "1.3.0~rc.1", wantErr: true},
+		{name: "internal preview rejected", cmp: -1, candidate: "1.2.0", installed: "1.3.0~preview.1+internal", wantErr: true},
+		{name: "malformed stable rejected", cmp: -1, candidate: "01.2.0", installed: "1.3.0~preview.1", wantErr: true},
+		{name: "malformed preview rejected", cmp: -1, candidate: "1.2.0", installed: "1.3.0~preview.01", wantErr: true},
 	}
-	if err := acceptVersionUpgrade(0); err == nil {
-		t.Fatal("equal version must be rejected")
-	}
-	if err := acceptVersionUpgrade(-1); err == nil {
-		t.Fatal("downgrade must be rejected")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			allowDowngrade, err := acceptVersionTransition(tt.cmp, tt.candidate, tt.installed)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if allowDowngrade != tt.wantDowngrade {
+				t.Fatalf("allowDowngrade = %v, want %v", allowDowngrade, tt.wantDowngrade)
+			}
+		})
 	}
 }
 
 func TestAptInstallArgvFixed(t *testing.T) {
-	argv := aptInstallArgv("/tmp/pkg.deb")
+	argv := aptInstallArgv("/tmp/pkg.deb", false)
 	want := []string{
 		"/usr/bin/apt-get",
 		"install",
@@ -121,6 +141,14 @@ func TestAptInstallArgvFixed(t *testing.T) {
 		if strings.Contains(joined, bad) {
 			t.Fatalf("forbidden apt option present: %s in %v", bad, argv)
 		}
+	}
+
+	downgradeArgv := aptInstallArgv("/tmp/pkg.deb", true)
+	if strings.Count(strings.Join(downgradeArgv, " "), "--allow-downgrades") != 1 {
+		t.Fatalf("constrained downgrade argv = %v", downgradeArgv)
+	}
+	if downgradeArgv[len(downgradeArgv)-1] != "/tmp/pkg.deb" {
+		t.Fatalf("package path must remain the final fixed argument: %v", downgradeArgv)
 	}
 }
 
@@ -234,10 +262,10 @@ func baseFakeDeps(p *installProbe) installDeps {
 		},
 		installedVersion: func() (string, error) { return "1.1.0", nil },
 		compareVersions:  func(a, b string) (int, error) { return 1, nil },
-		aptInstall: func(pkgPath string) error {
+		aptInstall: func(pkgPath string, allowDowngrade bool) error {
 			p.aptCalls = append(p.aptCalls, pkgPath)
 			// Assert argv shape through the pure helper used by production.
-			argv := aptInstallArgv(pkgPath)
+			argv := aptInstallArgv(pkgPath, allowDowngrade)
 			if argv[0] != aptGetPath || argv[1] != "install" {
 				return fmt.Errorf("bad argv: %v", argv)
 			}
@@ -275,8 +303,11 @@ func TestRunInstallSuccessEmitsInstallingPhaseBeforeApt(t *testing.T) {
 	var probe installProbe
 	d := baseFakeDeps(&probe)
 	aptStarted := false
-	d.aptInstall = func(pkgPath string) error {
+	d.aptInstall = func(pkgPath string, allowDowngrade bool) error {
 		aptStarted = true
+		if allowDowngrade {
+			t.Fatal("ordinary upgrade unexpectedly enabled downgrades")
+		}
 		if len(probe.phases) == 0 || probe.phases[0] != "installing" {
 			t.Fatalf("phase installing must be emitted before apt; phases=%v", probe.phases)
 		}
@@ -305,6 +336,7 @@ func TestRunInstallTable(t *testing.T) {
 		wantCode    int
 		wantCodeStr string
 		wantPhase   bool // installing emitted only on success path past validation
+		wantOK      bool
 	}
 	cases := []tc{
 		{
@@ -392,9 +424,30 @@ func TestRunInstallTable(t *testing.T) {
 			wantCodeStr: "package_rejected",
 		},
 		{
+			name: "preview to stable downgrade allowed",
+			mutate: func(d *installDeps, p *installProbe) {
+				d.inspectDeb = func(string) (debIdentity, error) {
+					return debIdentity{Package: packageName, Version: "1.2.0", Arch: "amd64"}, nil
+				}
+				d.installedVersion = func() (string, error) { return "1.3.0~preview.1", nil }
+				d.compareVersions = func(a, b string) (int, error) { return -1, nil }
+				d.aptInstall = func(pkgPath string, allowDowngrade bool) error {
+					if !allowDowngrade {
+						return errors.New("preview-to-stable downgrade flag missing")
+					}
+					p.aptCalls = append(p.aptCalls, pkgPath)
+					return nil
+				}
+			},
+			args:      []string{"install", "--package", pkg, "--signature", sig},
+			wantCode:  exitOK,
+			wantPhase: true,
+			wantOK:    true,
+		},
+		{
 			name: "apt busy",
 			mutate: func(d *installDeps, _ *installProbe) {
-				d.aptInstall = func(string) error {
+				d.aptInstall = func(string, bool) error {
 					return errors.New("Could not get lock /var/lib/dpkg/lock-frontend")
 				}
 			},
@@ -406,7 +459,7 @@ func TestRunInstallTable(t *testing.T) {
 		{
 			name: "apt non-zero",
 			mutate: func(d *installDeps, _ *installProbe) {
-				d.aptInstall = func(string) error {
+				d.aptInstall = func(string, bool) error {
 					return errors.New("E: Sub-process /usr/bin/dpkg returned an error code (1)")
 				}
 			},
@@ -442,8 +495,8 @@ func TestRunInstallTable(t *testing.T) {
 				t.Fatal("expected a written result")
 			}
 			last := probe.results[len(probe.results)-1]
-			if last.OK {
-				t.Fatalf("expected failure result, got %+v", last)
+			if last.OK != tc.wantOK {
+				t.Fatalf("result OK = %v, want %v: %+v", last.OK, tc.wantOK, last)
 			}
 			if tc.wantCodeStr != "" && last.Code != tc.wantCodeStr {
 				t.Fatalf("code = %q, want %q", last.Code, tc.wantCodeStr)

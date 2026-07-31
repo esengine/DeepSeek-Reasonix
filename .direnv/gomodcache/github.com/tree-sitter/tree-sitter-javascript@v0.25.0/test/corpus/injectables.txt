@@ -1,0 +1,43 @@
+============================================
+JSDoc
+============================================
+
+/*
+ * @return {void}
+ */
+function foo() {}
+
+----
+
+(program
+  (comment)
+  (function_declaration
+    (identifier)
+    (formal_parameters)
+    (statement_block)))
+
+============================================
+JSX
+============================================
+
+const foo = 2;
+
+<div>{{foo}}</div>
+
+----
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (expression_statement
+    (jsx_element
+      (jsx_opening_element
+        (identifier))
+      (jsx_expression
+        (object
+          (shorthand_property_identifier)))
+      (jsx_closing_element
+        (identifier)))))
+

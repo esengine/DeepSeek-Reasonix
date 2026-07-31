@@ -1,0 +1,31 @@
+[
+    {
+        "description": "validation of duration strings",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "format": "email"
+        },
+        "tests": [
+            {
+                "description": "non printable character",
+                "data": "a\tb@gmail.com",
+                "valid": false
+            },
+            {
+                "description": "tab ok if quoted",
+                "data": "\"a\tb\"@gmail.com",
+                "valid": true
+            },
+            {
+                "description": "quote inside quoted",
+                "data": "\"a\"b\"@gmail.com",
+                "valid": false
+            },
+            {
+                "description": "backslash inside quoted",
+                "data": "\"a\\b\"@gmail.com",
+                "valid": false
+            }
+        ]
+    }
+]

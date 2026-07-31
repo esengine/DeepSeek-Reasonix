@@ -2,11 +2,38 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"reasonix/internal/config"
+	"reasonix/internal/netclient"
 	"reasonix/internal/repair"
 )
+
+func TestRepairPlanProviderConfigPreservesKimiK3Efforts(t *testing.T) {
+	entry := &config.ProviderEntry{
+		Name:              "opencode-go",
+		Kind:              "openai",
+		BaseURL:           "https://opencode.ai/zen/go/v1",
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"high", "max"},
+		DefaultEffort:     "max",
+	}
+	got := repairPlanProviderConfig(entry, netclient.ProxySpec{})
+	if effort := got.Extra["effort"]; effort != "max" {
+		t.Fatalf("effort = %#v, want max", effort)
+	}
+	if efforts, ok := got.Extra["supported_efforts"].([]string); !ok || !reflect.DeepEqual(efforts, []string{"high", "max"}) {
+		t.Fatalf("supported_efforts = %#v, want [high max]", got.Extra["supported_efforts"])
+	}
+	if protocol := got.Extra["reasoning_protocol"]; protocol != config.ReasoningProtocolOpenAI {
+		t.Fatalf("reasoning_protocol = %#v, want openai", protocol)
+	}
+}
 
 // TestProviderSafeReportDropsUserControlledContent pins the outbound-privacy
 // contract: the payload sent to the AI provider must carry only allowlisted
@@ -119,6 +146,81 @@ func TestResolveProviderSnapshotAliases(t *testing.T) {
 	}
 	if _, err := resolveProviderSnapshotAliases(plan, nil); err == nil {
 		t.Fatal("unknown snapshot alias was accepted")
+	}
+}
+
+func writeDerivedStatePlan(t *testing.T) (string, repair.RepairPlan) {
+	t.Helper()
+	file := filepath.Join(t.TempDir(), "plan.json")
+	raw := []byte(`{"schemaVersion":1,"summary":"rebuild tabs","actions":[{"type":"rebuild_derived_state","target":"tabs","reason":"malformed"}]}`)
+	if err := os.WriteFile(file, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := repair.DecodeRepairPlan(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return file, plan
+}
+
+func TestApplyPlanYesRequiresConfirmedPreviewID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	tabs := filepath.Join(home, "desktop-tabs.json")
+	if err := os.WriteFile(tabs, []byte("bad-tabs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, _ := writeDerivedStatePlan(t)
+	if got := runApplyPlan([]string{"--file", file, "--yes"}); got != 2 {
+		t.Fatalf("exit code = %d, want missing preview ID usage refusal", got)
+	}
+	if got, err := os.ReadFile(tabs); err != nil || string(got) != "bad-tabs" {
+		t.Fatalf("unbound --yes touched derived state: %q, %v", got, err)
+	}
+}
+
+func TestApplyPlanRejectsStateChangedAfterPreview(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	tabs := filepath.Join(home, "desktop-tabs.json")
+	if err := os.WriteFile(tabs, []byte("first-state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, plan := writeDerivedStatePlan(t)
+	preview, err := repair.PreviewRepairPlan(plan, repair.ApplyPlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewID := repair.RepairPlanPreviewID(plan, preview)
+	if err := os.WriteFile(tabs, []byte("changed-after-preview"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := runApplyPlan([]string{"--file", file, "--preview-id", previewID, "--yes"}); got != 1 {
+		t.Fatalf("exit code = %d, want stale preview refusal", got)
+	}
+	if got, err := os.ReadFile(tabs); err != nil || string(got) != "changed-after-preview" {
+		t.Fatalf("stale preview touched derived state: %q, %v", got, err)
+	}
+}
+
+func TestApplyPlanAcceptsCurrentConfirmedPreviewID(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	tabs := filepath.Join(home, "desktop-tabs.json")
+	if err := os.WriteFile(tabs, []byte("bad-tabs"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	file, plan := writeDerivedStatePlan(t)
+	preview, err := repair.PreviewRepairPlan(plan, repair.ApplyPlanOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	previewID := repair.RepairPlanPreviewID(plan, preview)
+	if got := runApplyPlan([]string{"--file", file, "--preview-id", previewID, "--yes"}); got != 0 {
+		t.Fatalf("exit code = %d, want confirmed preview application", got)
+	}
+	if _, err := os.Stat(tabs); !os.IsNotExist(err) {
+		t.Fatalf("confirmed repair did not quarantine derived state: %v", err)
 	}
 }
 

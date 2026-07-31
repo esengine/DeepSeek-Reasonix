@@ -1,0 +1,34 @@
+linters-settings:
+  misspell:
+    locale: US
+
+  staticcheck:
+    checks: ["all", "-SA1019"]
+
+linters:
+  disable-all: true
+  enable:
+    - durationcheck
+    - gocritic
+    - gofmt
+    - goimports
+    - gomodguard
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - tenv
+    - typecheck
+    - unconvert
+    - unused
+
+issues:
+  exclude-use-default: false
+  exclude:
+      - "package-comments: should have a package comment"
+      - "exitAfterDefer:"
+      - "captLocal:"
+
+service:
+  golangci-lint-version: 1.57.2 # use the fixed version to not introduce new linters unexpectedly

@@ -1,0 +1,27 @@
+[
+    {
+        "description": "percent in dependencies",
+        "schema": {
+            "dependencies": {
+                "a%20b": { "required": ["x"] }
+            }
+        },
+        "tests": [
+            {
+                "description": "valid",
+                "data": {
+                    "a%20b": null,
+                    "x": 1
+                },
+                "valid": true
+            },
+            {
+                "description": "invalid",
+                "data": {
+                    "a%20b": null
+                },
+                "valid": false
+            }
+        ]
+    }
+]

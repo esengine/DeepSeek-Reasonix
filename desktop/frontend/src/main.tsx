@@ -7,7 +7,7 @@ import { installGlobalCrashHandlers, installPerformancePressureMonitor } from ".
 import { installWailsNonFileDragErrorSuppression } from "./lib/bridge";
 import { installBreadcrumbConsoleHook } from "./lib/breadcrumbs";
 import { installMessageSelectionCopy } from "./lib/messageSelectionCopy";
-import { LocaleProvider } from "./lib/i18n";
+import { LocaleProvider, preloadDetectedLocale } from "./lib/i18n";
 import { ToastProvider } from "./lib/toast";
 import { initFontFamily } from "./lib/fontFamily";
 import { initTextSize } from "./lib/textSize";
@@ -81,15 +81,25 @@ if (typeof window !== "undefined" && window.runtime) {
 
 const root = document.getElementById("root");
 if (!root) throw new Error("missing #root");
+const rootElement = root;
 
-createRoot(root).render(
-  <StrictMode>
-    <ErrorBoundary>
-      <LocaleProvider>
-        <ToastProvider>
-          <App />
-        </ToastProvider>
-      </LocaleProvider>
-    </ErrorBoundary>
-  </StrictMode>,
-);
+async function mountApp() {
+  try {
+    await preloadDetectedLocale();
+  } catch (error) {
+    console.error("failed to preload desktop locale", error);
+  }
+  createRoot(rootElement).render(
+    <StrictMode>
+      <ErrorBoundary>
+        <LocaleProvider>
+          <ToastProvider>
+            <App />
+          </ToastProvider>
+        </LocaleProvider>
+      </ErrorBoundary>
+    </StrictMode>,
+  );
+}
+
+void mountApp();

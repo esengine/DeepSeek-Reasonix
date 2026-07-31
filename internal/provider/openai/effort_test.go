@@ -47,6 +47,25 @@ func TestEffortNormalization(t *testing.T) {
 	}
 }
 
+func TestExplicitSupportedEffortsPreservesKimiK3Max(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "opencode-go",
+		BaseURL: "https://opencode.ai/zen/go/v1",
+		Model:   "kimi-k3",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":            "max",
+			"supported_efforts": []string{"high", "max"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := p.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "max" {
+		t.Fatalf("reasoning_effort = %q, want explicitly supported max", got)
+	}
+}
+
 func TestEffortInvalidRejected(t *testing.T) {
 	_, err := New(provider.Config{
 		Name: "p", BaseURL: "https://api.xiaomimimo.com/v1", Model: "m", APIKey: "k",

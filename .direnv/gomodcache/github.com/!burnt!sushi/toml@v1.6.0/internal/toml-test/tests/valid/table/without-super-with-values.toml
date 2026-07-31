@@ -1,0 +1,9 @@
+# [x] you
+# [x.y] don't
+# [x.y.z] need these
+[x.y.z.w] # for this to work
+a = 1
+b = 2
+[x] # defining a super-table afterwards is ok
+c = 3
+d = 4

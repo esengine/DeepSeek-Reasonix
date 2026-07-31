@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/command"
 	"reasonix/internal/control"
+	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/skill"
@@ -22,6 +23,10 @@ type runtimeCapabilities interface {
 	DisabledSkills() []skill.Skill
 	ConfiguredMCPNames() []string
 	DisconnectedMCPNames() []string
+}
+
+type runtimeMemoryCatalog interface {
+	Memory() *memory.Set
 }
 
 func buildSessionCatalog(ctx context.Context, ctrl SessionController) protocol.SessionCatalogResult {
@@ -129,6 +134,9 @@ func (s *Server) composerSlashArgs(p protocol.ComposerSlashArgsParams) (protocol
 	}
 	if host := capabilities.Host(); host != nil {
 		data.ServerNames = host.ServerNames()
+	}
+	if memoryCatalog, ok := sess.ctrl.(runtimeMemoryCatalog); ok {
+		data.MemoryRefs, data.MemoryArchives = control.MemoryCompletionData(memoryCatalog.Memory())
 	}
 	sort.Strings(data.PluginNames)
 	sort.Strings(data.ModelRefs)

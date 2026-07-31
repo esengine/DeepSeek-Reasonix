@@ -5,7 +5,7 @@ import { useDeferredClose } from "../lib/useMountTransition";
 import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
-import { useUpdater } from "../lib/useUpdater";
+import { switchUpdaterChannel, useUpdater } from "../lib/useUpdater";
 import {
   applyTheme,
   getTheme,
@@ -186,8 +186,10 @@ export function SettingsPanel({
       if (typeof result === "string" && result.trim()) {
         setWarning(result.trim());
       }
+      return true;
     } catch (e) {
       setErr(formatSettingsError(e, t));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -366,7 +368,7 @@ export function SettingsPanel({
   );
 }
 
-function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<unknown>) => Promise<void>; children: ReactNode }) {
+function SettingsPageShell({ s: _s, tab, children }: { s: SettingsView | null; tab: SettingsTab; busy: boolean; apply: (fn: () => Promise<unknown>) => Promise<boolean>; children: ReactNode }) {
   const t = useT();
   const descKey = `settings.pageDesc.${tab}` as keyof typeof import("../locales/en").en;
   const desc = t(descKey as any);
@@ -486,7 +488,7 @@ function settingsTabPageTitle(id: SettingsTab, t: ReturnType<typeof useT>): stri
 type SectionProps = {
   s: SettingsView;
   busy: boolean;
-  apply: (fn: () => Promise<unknown>) => Promise<void>;
+  apply: (fn: () => Promise<unknown>) => Promise<boolean>;
 };
 
 type ModelsSectionProps = SectionProps & {
@@ -1352,6 +1354,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     autoApproveTools: Boolean(view.autoApproveTools ?? view.bypass),
     bypass: Boolean(view.autoApproveTools ?? view.bypass),
     desktopLanguage: normalizeLangPref(view.desktopLanguage),
+    desktopCurrency: normalizeDesktopCurrency(view.desktopCurrency),
     desktopLayoutStyle: normalizeDesktopLayoutStyle(view.desktopLayoutStyle),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
@@ -1363,6 +1366,12 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     checkUpdates: view.checkUpdates !== false,
     updateChannel: view.updateChannel === "preview" ? "preview" : "stable",
   };
+}
+
+type DesktopCurrency = "" | "CNY" | "USD";
+
+function normalizeDesktopCurrency(currency: string | undefined): DesktopCurrency {
+  return currency === "CNY" || currency === "USD" ? currency : "";
 }
 
 type CloseBehavior = "background" | "quit";
@@ -1509,6 +1518,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   useEffect(() => () => mouseDragCleanupRef.current?.(), []);
   const defaultToolApprovalMode = normalizeToolApprovalMode(s.defaultToolApprovalMode);
   const languagePref = normalizeLangPref(s.desktopLanguage);
+  const desktopCurrency = normalizeDesktopCurrency(s.desktopCurrency);
   const desktopLayoutStyle = normalizeDesktopLayoutStyle(s.desktopLayoutStyle);
   const [genMusicPreset, setGenMusicPreset] = useState<GenerativePreset>(getGenerativePreset());
   const [soundPref, setSoundPref] = useState<SoundWavPref>(getSuccessPreference());
@@ -1676,6 +1686,20 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               onClick={() => setLanguage(pref)}
             >
               {pref === "" ? t("settings.langAuto") : pref === "zh" ? "中文" : "English"}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
+      <SettingsField label={t("settings.currency")}>
+        <div className="set-seg">
+          {(["", "CNY", "USD"] as DesktopCurrency[]).map((currency) => (
+            <button
+              key={currency || "auto"}
+              className={`set-seg__btn${desktopCurrency === currency ? " set-seg__btn--on" : ""}`}
+              disabled={busy || agentRunning}
+              onClick={() => void apply(() => app.SetDesktopCurrency(currency))}
+            >
+              {currency === "" ? t("settings.currencyAuto") : currency}
             </button>
           ))}
         </div>
@@ -6192,8 +6216,8 @@ function PermissionsSection({ s, busy, apply }: SectionProps) {
             list={list}
             rules={s.permissions[list]}
             busy={busy}
-            onAdd={(rule) => apply(() => app.AddPermissionRule(list, rule))}
-            onRemove={(rule) => apply(() => app.RemovePermissionRule(list, rule))}
+            onAdd={async (rule) => { await apply(() => app.AddPermissionRule(list, rule)); }}
+            onRemove={async (rule) => { await apply(() => app.RemovePermissionRule(list, rule)); }}
           />
         ))}
       </div>
@@ -6654,8 +6678,8 @@ function SandboxSection({ s, busy, apply, windows }: SectionProps & { windows: b
         list="allow_write"
         rules={sb.allowWrite}
         busy={busy}
-        onAdd={(d) => set({ allowWrite: [...sb.allowWrite, d] })}
-        onRemove={(d) => set({ allowWrite: sb.allowWrite.filter((x) => x !== d) })}
+        onAdd={async (d) => { await set({ allowWrite: [...sb.allowWrite, d] }); }}
+        onRemove={async (d) => { await set({ allowWrite: sb.allowWrite.filter((x) => x !== d) }); }}
       />
     </SettingsSection>
   );
@@ -6683,10 +6707,10 @@ function UpdatesSection({
   telemetry: boolean;
   metrics: boolean;
   settingsBusy: boolean;
-  applySettings: (fn: () => Promise<void>) => Promise<void>;
+  applySettings: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useT();
-  const { status, check, download: downloadUpdate, install: installUpdate, openDownload, reset } = useUpdater();
+  const { status, check, download: downloadUpdate, install: installUpdate, openDownload, reset: resetUpdater } = useUpdater();
   const selectedChannel = updateChannel === "preview" ? "preview" : "stable";
   const [version, setVersion] = useState("");
   useEffect(() => {
@@ -6699,31 +6723,128 @@ function UpdatesSection({
     status.kind === "verifying" ||
     status.kind === "authorizing" ||
     status.kind === "installing";
+  const updateStatus =
+    status.kind === "checking" ? t("updater.checking") :
+    status.kind === "upToDate" ? t("updater.upToDate") :
+    status.kind === "available" ? t("updater.available", { v: status.info.latest }) :
+    status.kind === "downloading" ? t("updater.downloading", {
+      done: mb(status.received),
+      total: mb(status.total),
+      pct: status.total > 0 ? Math.round((status.received / status.total) * 100) : 0,
+    }) :
+    status.kind === "verifying" ? t("updater.verifying") :
+    status.kind === "downloaded" ? t("updater.downloaded", { v: status.info.latest }) :
+    status.kind === "authorizing" ? t("updater.authorizing") :
+    status.kind === "installing" ? (
+      status.info?.requiresElevation || status.info?.installMode === "deb"
+        ? t("updater.installingPackage")
+        : t("updater.installing")
+    ) :
+    status.kind === "done" ? t("updater.done") :
+    status.kind === "error" ? t("updater.failed", { msg: status.message }) :
+    "";
+  const updateStatusTone =
+    status.kind === "error" ? "error" :
+    status.kind === "available" ? "available" :
+    status.kind === "checking" || updaterBusy ? "busy" :
+    status.kind === "upToDate" || status.kind === "done" ? "success" :
+    "neutral";
 
   return (
     <SettingsSection title={t("updater.title")}>
       <SettingsField
-        className="settings-field--wide-copy"
-        label={t("updater.channelSettingLabel")}
-        hint={t("updater.channelSettingHint")}
+        className="settings-field--wide-copy updates-control"
+        label={
+          <div className="updates-control__summary">
+            <div className="updates-control__version">
+              {t("updater.currentVersion", { v: version || "…" })}
+            </div>
+            <div className={`updates-control__status updates-control__status--${updateStatusTone}`} role="status" aria-live="polite">
+              {updateStatus && (
+                <>
+                  {updateStatusTone === "success" && <CheckCircle2 size={14} aria-hidden="true" />}
+                  {updateStatusTone === "busy" && <Loader2 className="updates-control__spinner" size={14} aria-hidden="true" />}
+                  <span>{updateStatus}</span>
+                </>
+              )}
+            </div>
+          </div>
+        }
       >
-        <div className="provider-add-segmented" role="group" aria-label={t("updater.channelSettingLabel")}>
-          {(["stable", "preview"] as const).map((nextChannel) => (
+        <div className="updates-control__controls">
+          <div className="provider-add-segmented" role="group" aria-label={t("updater.channelSettingLabel")}>
+            {(["stable", "preview"] as const).map((nextChannel) => (
+              <button
+                key={nextChannel}
+                type="button"
+                disabled={settingsBusy || updaterBusy}
+                className={selectedChannel === nextChannel ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
+                aria-pressed={selectedChannel === nextChannel}
+                onClick={() => {
+                  if (nextChannel === selectedChannel) return;
+                  void switchUpdaterChannel(
+                    nextChannel,
+                    resetUpdater,
+                    () => applySettings(() => app.SetDesktopUpdateChannel(nextChannel)),
+                    check,
+                  );
+                }}
+              >
+                {nextChannel === "stable" ? t("updater.channelStable") : t("updater.channelPreview")}
+              </button>
+            ))}
+          </div>
+          <Tooltip label={t("updater.checkButton")}>
             <button
-              key={nextChannel}
+              className="chip chip--icon"
               type="button"
               disabled={settingsBusy || updaterBusy}
-              className={selectedChannel === nextChannel ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
-              onClick={() => {
-                if (nextChannel === selectedChannel) return;
-                void applySettings(() => app.SetDesktopUpdateChannel(nextChannel)).then(reset);
-              }}
+              aria-label={t("updater.checkButton")}
+              onClick={() => void check(selectedChannel)}
             >
-              {nextChannel === "stable" ? t("updater.channelStable") : t("updater.channelPreview")}
+              <RefreshCw className={status.kind === "checking" ? "updates-control__spinner" : undefined} size={14} aria-hidden="true" />
             </button>
-          ))}
+          </Tooltip>
         </div>
       </SettingsField>
+      <div className="updates-control__hint">
+        <div>{t("updater.channelSettingHint")}</div>
+        <div>{t("updater.channelAutoCheckHint")}</div>
+      </div>
+      {(status.kind === "available" || status.kind === "downloaded") && (
+        <div className="updates-control__action">
+          <div className="updates-control__action-copy">
+            {status.kind === "available" && (
+              <div>
+                {t("updater.channelLabel", {
+                  channel: status.info.channel === "preview" ? t("updater.channelPreview") : t("updater.channelStable"),
+                })}
+              </div>
+            )}
+            {status.kind === "available" && !status.info.canSelfUpdate && <div>{status.info.manualReason || t("updater.macHint")}</div>}
+          </div>
+          {status.kind === "available" && (
+            <button
+              className="btn btn--primary btn--small"
+              disabled={settingsBusy || updaterBusy}
+              onClick={() => downloadUpdate(status.info)}
+            >
+              {status.info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
+            </button>
+          )}
+          {status.kind === "downloaded" && (
+            <button
+              className="btn btn--primary btn--small"
+              disabled={settingsBusy || updaterBusy}
+              onClick={installUpdate}
+            >
+              {status.info.requiresElevation || status.info.installMode === "deb"
+                ? t("updater.authorizeInstall")
+                : t("updater.restartInstall")}
+            </button>
+          )}
+        </div>
+      )}
       <SettingsField
         className="settings-field--wide-copy"
         label={t("updater.autoCheckLabel")}
@@ -6757,56 +6878,9 @@ function UpdatesSection({
           onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
         />
       </SettingsField>
-      <SettingsField label={t("updater.currentVersion", { v: version || "…" })}>
-        <button className="btn btn--small" disabled={updaterBusy} onClick={() => void check(selectedChannel)}>
-          {status.kind === "checking" ? t("updater.checking") : t("updater.checkButton")}
-        </button>
-      </SettingsField>
-      {status.kind === "available" && (
-        <div className="mem-hint">{t("updater.channelLabel", { channel: status.info.channel || "stable" })}</div>
-      )}
-      {status.kind === "upToDate" && <div className="mem-hint">{t("updater.upToDate")}</div>}
-      {status.kind === "available" && (
-        <>
-          <SettingsField label={t("updater.available", { v: status.info.latest })}>
-            <button className="btn btn--primary btn--small" onClick={() => downloadUpdate(status.info)}>
-              {status.info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
-            </button>
-          </SettingsField>
-          {!status.info.canSelfUpdate && <div className="mem-hint">{status.info.manualReason || t("updater.macHint")}</div>}
-        </>
-      )}
-      {status.kind === "downloading" && (
-        <div className="mem-hint">
-          {t("updater.downloading", {
-            done: mb(status.received),
-            total: mb(status.total),
-            pct: status.total > 0 ? Math.round((status.received / status.total) * 100) : 0,
-          })}
-        </div>
-      )}
-      {status.kind === "verifying" && <div className="mem-hint">{t("updater.verifying")}</div>}
-      {status.kind === "downloaded" && (
-        <SettingsField label={t("updater.downloaded", { v: status.info.latest })}>
-          <button className="btn btn--primary btn--small" onClick={installUpdate}>
-            {status.info.requiresElevation || status.info.installMode === "deb"
-              ? t("updater.authorizeInstall")
-              : t("updater.restartInstall")}
-          </button>
-        </SettingsField>
-      )}
-      {status.kind === "authorizing" && <div className="mem-hint">{t("updater.authorizing")}</div>}
-      {status.kind === "installing" && (
-        <div className="mem-hint">
-          {status.info?.requiresElevation || status.info?.installMode === "deb"
-            ? t("updater.installingPackage")
-            : t("updater.installing")}
-        </div>
-      )}
-      {status.kind === "done" && <div className="mem-hint">{t("updater.done")}</div>}
       {status.kind === "error" && (
         <div className="banner banner--error">
-          {t("updater.failed", { msg: status.message })}
+          {updateStatus}
           {status.manualHint && (
             <div className="mem-hint">
               <button className="btn btn--small" onClick={openDownload}>

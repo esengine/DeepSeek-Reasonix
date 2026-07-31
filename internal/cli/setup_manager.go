@@ -851,9 +851,9 @@ func commitProviderSetupSession(s *providerSetupSession, configPath string) (boo
 	if len(s.operations) == 0 {
 		return false, nil
 	}
-	unlock := func() {}
-	if config.IsUserConfigPath(configPath) {
-		unlock = config.LockUserConfigEdits()
+	unlock, err := config.LockConfigFileEdits(configPath)
+	if err != nil {
+		return false, err
 	}
 	defer unlock()
 

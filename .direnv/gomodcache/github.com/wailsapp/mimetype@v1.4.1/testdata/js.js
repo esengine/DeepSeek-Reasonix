@@ -1,0 +1,3 @@
+#!/bin/node
+function main(){
+}

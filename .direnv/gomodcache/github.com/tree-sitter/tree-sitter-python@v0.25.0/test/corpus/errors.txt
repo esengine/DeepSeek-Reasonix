@@ -1,0 +1,74 @@
+====================================
+An error before a string literal
+:error
+====================================
+
+def a(b):
+    c.
+
+    """
+    d
+    """
+
+    e
+
+---
+
+(module
+  (function_definition
+    (identifier)
+    (parameters
+      (identifier))
+    (ERROR
+      (identifier))
+    (block
+      (expression_statement
+        (string
+          (string_start)
+          (string_content)
+          (string_end)))
+      (expression_statement
+        (identifier)))))
+
+=================================================
+Error detected at globally reserved keyword
+=================================================
+
+def test_comprehension():
+    [x for.    # Should error here, and not use def as a method call
+
+    def valid_func():    # Should parse as valid function
+        pass
+
+def test_incomplete_call():
+    print(    # Should error here
+    class Example:    # Should still parse as valid class definition
+        pass
+
+---
+
+(module
+  (function_definition
+    (identifier)
+    (parameters)
+    (ERROR
+      (identifier))
+    (comment)
+    (block
+      (function_definition
+        (identifier)
+        (parameters)
+        (comment)
+        (block
+          (pass_statement)))))
+  (function_definition
+    (identifier)
+    (parameters)
+    (ERROR)
+    (comment)
+    (block
+      (class_definition
+        (identifier)
+        (comment)
+        (block
+          (pass_statement))))))

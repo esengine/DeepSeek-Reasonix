@@ -1,0 +1,242 @@
+stdin empty.sh
+exec shfmt -tojson # old flag name
+cmp stdout empty.sh.json
+! stderr .
+
+stdin simple.sh
+exec shfmt --to-json
+cmp stdout simple.sh.json
+
+stdin arithmetic.sh
+exec shfmt --to-json
+cmp stdout arithmetic.sh.json
+
+stdin comment.sh
+exec shfmt --to-json
+cmp stdout comment.sh.json
+
+-- empty.sh --
+-- empty.sh.json --
+{
+	"Type": "File"
+}
+-- simple.sh --
+foo
+-- simple.sh.json --
+{
+	"Type": "File",
+	"Pos": {
+		"Offset": 0,
+		"Line": 1,
+		"Col": 1
+	},
+	"End": {
+		"Offset": 3,
+		"Line": 1,
+		"Col": 4
+	},
+	"Stmts": [
+		{
+			"Pos": {
+				"Offset": 0,
+				"Line": 1,
+				"Col": 1
+			},
+			"End": {
+				"Offset": 3,
+				"Line": 1,
+				"Col": 4
+			},
+			"Cmd": {
+				"Type": "CallExpr",
+				"Pos": {
+					"Offset": 0,
+					"Line": 1,
+					"Col": 1
+				},
+				"End": {
+					"Offset": 3,
+					"Line": 1,
+					"Col": 4
+				},
+				"Args": [
+					{
+						"Pos": {
+							"Offset": 0,
+							"Line": 1,
+							"Col": 1
+						},
+						"End": {
+							"Offset": 3,
+							"Line": 1,
+							"Col": 4
+						},
+						"Parts": [
+							{
+								"Type": "Lit",
+								"Pos": {
+									"Offset": 0,
+									"Line": 1,
+									"Col": 1
+								},
+								"End": {
+									"Offset": 3,
+									"Line": 1,
+									"Col": 4
+								},
+								"ValuePos": {
+									"Offset": 0,
+									"Line": 1,
+									"Col": 1
+								},
+								"ValueEnd": {
+									"Offset": 3,
+									"Line": 1,
+									"Col": 4
+								},
+								"Value": "foo"
+							}
+						]
+					}
+				]
+			},
+			"Position": {
+				"Offset": 0,
+				"Line": 1,
+				"Col": 1
+			}
+		}
+	]
+}
+-- arithmetic.sh --
+((2))
+-- arithmetic.sh.json --
+{
+	"Type": "File",
+	"Pos": {
+		"Offset": 0,
+		"Line": 1,
+		"Col": 1
+	},
+	"End": {
+		"Offset": 5,
+		"Line": 1,
+		"Col": 6
+	},
+	"Stmts": [
+		{
+			"Pos": {
+				"Offset": 0,
+				"Line": 1,
+				"Col": 1
+			},
+			"End": {
+				"Offset": 5,
+				"Line": 1,
+				"Col": 6
+			},
+			"Cmd": {
+				"Type": "ArithmCmd",
+				"Pos": {
+					"Offset": 0,
+					"Line": 1,
+					"Col": 1
+				},
+				"End": {
+					"Offset": 5,
+					"Line": 1,
+					"Col": 6
+				},
+				"Left": {
+					"Offset": 0,
+					"Line": 1,
+					"Col": 1
+				},
+				"Right": {
+					"Offset": 3,
+					"Line": 1,
+					"Col": 4
+				},
+				"X": {
+					"Type": "Word",
+					"Pos": {
+						"Offset": 2,
+						"Line": 1,
+						"Col": 3
+					},
+					"End": {
+						"Offset": 3,
+						"Line": 1,
+						"Col": 4
+					},
+					"Parts": [
+						{
+							"Type": "Lit",
+							"Pos": {
+								"Offset": 2,
+								"Line": 1,
+								"Col": 3
+							},
+							"End": {
+								"Offset": 3,
+								"Line": 1,
+								"Col": 4
+							},
+							"ValuePos": {
+								"Offset": 2,
+								"Line": 1,
+								"Col": 3
+							},
+							"ValueEnd": {
+								"Offset": 3,
+								"Line": 1,
+								"Col": 4
+							},
+							"Value": "2"
+						}
+					]
+				}
+			},
+			"Position": {
+				"Offset": 0,
+				"Line": 1,
+				"Col": 1
+			}
+		}
+	]
+}
+-- comment.sh --
+#
+-- comment.sh.json --
+{
+	"Type": "File",
+	"Pos": {
+		"Offset": 0,
+		"Line": 1,
+		"Col": 1
+	},
+	"End": {
+		"Offset": 1,
+		"Line": 1,
+		"Col": 2
+	},
+	"Last": [
+		{
+			"Pos": {
+				"Offset": 0,
+				"Line": 1,
+				"Col": 1
+			},
+			"End": {
+				"Offset": 1,
+				"Line": 1,
+				"Col": 2
+			},
+			"Hash": {
+				"Offset": 0,
+				"Line": 1,
+				"Col": 1
+			}
+		}
+	]
+}

@@ -67,6 +67,42 @@ cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe
 
 完整路径和限制见[配置路径](./CONFIG_PATHS.zh-CN.md)。
 
+## Context Engine v2 升级
+
+指令与记忆升级会自动完成，不需要 setup mode、re-index 命令或新配置：
+
+| 现有数据 | 升级行为 |
+| --- | --- |
+| `REASONIX.md`、`AGENTS.md`、`CLAUDE.md` | 作为常驻指令加载，并附带来源、目录、precedence、imports 和 diagnostics；原文件名继续有效。 |
+| 嵌套指令文件 | 从 workspace root 解析到当前目标路径；同一目录内 `.local.md` 优先，更深目录仍高于更浅目录。 |
+| 没有 `id` / `revision` 的旧事实 | 获得确定性的 scope-aware `legacy-*` ID，并从 revision 1 开始；migration 幂等。 |
+| 没有 `metadata.scope` 的旧事实 | 根据原本拥有该文件的 project/global 目录推导 scope。 |
+| 现有 `MEMORY.md` | 作为派生 index，根据 active fact 文件重建；陈旧手写条目不会变成事实。 |
+| 现有 active facts | 保持 active，之后发生修改时才开始产生 revision history。 |
+| 现有 archive entries | 继续排除在 recall 外，可从 Context Center 或 `/memory recover` 显式恢复。 |
+| 旧 Memory v5 transcript | 继续可读；preview 会从 `<memory-compiler-execution>` 恢复原始用户提示。 |
+| `[agent].memory_compiler` | 已退役，由既有一次性配置 migration 清除。 |
+
+升级后第一次当前版本启动会补齐缺失的 identity/time metadata，不修改 fact body。若新旧版本
+共享同一 state root，兼容路由字段会避免旧客户端把事实移到错误 scope 目录。
+
+升级后请使用诊断命令，不要手工修改 migration state：
+
+```text
+/memory
+/memory instructions
+/memory recall
+/memory revisions <id-or-name>
+/memory archived
+```
+
+新的相关事实会自动召回。只有有界、非敏感、纯创建的 project/reference 事实可以免确认保存；
+全局事实、偏好、feedback、更新、重复项、敏感内容和所有归档操作仍是显式用户决定。桌面
+Suggestions tab 会自动扫描，但候选在用户接受前绝不会写入。
+
+完整 precedence、freshness、恢复、cache、隐私与远程 workspace 契约见
+[Context Engine v2](./SESSION_MEMORY_RETRIEVAL.zh-CN.md)。
+
 ## 保持不变的部分
 
 agent 核心延续了原有能力：循环、读写编辑与 glob/grep/bash 等工具、子智能体（`task`、explore/research/review）、Skill、Hook、Plan 模式、MCP 客户端，以及针对 DeepSeek 前缀缓存的设计。

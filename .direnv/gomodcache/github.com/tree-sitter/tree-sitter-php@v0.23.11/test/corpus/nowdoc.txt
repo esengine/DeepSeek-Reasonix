@@ -1,0 +1,20 @@
+==========================
+Nowdocs
+==========================
+
+<?php
+
+<<<'PHP'
+<?php echo phpversion().PHP_SAPI;
+PHP;
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (nowdoc
+      identifier: (heredoc_start)
+      value: (nowdoc_body
+        (nowdoc_string))
+      end_tag: (heredoc_end))))

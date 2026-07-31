@@ -982,19 +982,32 @@ func TestApplyMCPReplaceDisconnectsLiveServerBeforeConnect(t *testing.T) {
 func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
-	// Pre-create a directory at the config path so cfg.SaveTo will fail
-	// (it cannot overwrite a non-empty directory with the file it wants).
-	if err := os.MkdirAll(filepath.Join(project, "reasonix.toml"), 0o755); err != nil {
+	configPath := filepath.Join(project, "reasonix.toml")
+	if err := os.WriteFile(configPath, []byte("# valid before connect\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(project, "reasonix.toml", "blocker"), "x")
 
 	var disconnects atomic.Int32
 	stub := &stubConnector{toolCount: 2, disconnectCalls: &disconnects}
 	tl := NewTool(Options{
 		ProjectRoot: project,
 		HomeDir:     home,
-		ConnectMCP:  stub.connector(),
+		ConnectMCP: func(entry config.PluginEntry) (MCPConnectResult, error) {
+			result, err := stub.connector()(entry)
+			if err != nil {
+				return result, err
+			}
+			// Simulate an external destructive change after the live connection
+			// succeeds but before the strict commit-time reload.
+			if err := os.Remove(configPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(configPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(configPath, "blocker"), "x")
+			return result, nil
+		},
 		OnDisconnect: func(string) bool {
 			disconnects.Add(1)
 			return true

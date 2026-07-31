@@ -348,6 +348,17 @@ func WorkspaceLeaseDir() string {
 	return filepath.Join(dir, "reasonix", "workspace-leases")
 }
 
+// RepairMutationLockDir stores target-path repair locks in the OS-user cache.
+// It deliberately ignores Reasonix home/cache overrides: isolated instances
+// can still repair the same project reasonix.toml, so their locks must converge.
+func RepairMutationLockDir() string {
+	dir := osUserCacheDir()
+	if strings.TrimSpace(dir) == "" {
+		return ""
+	}
+	return filepath.Join(dir, "reasonix", "repair-mutation-locks")
+}
+
 // DeliveryWorktreeDir is durable storage for user-visible isolated Delivery
 // workspaces. Explicit state/home overrides remain authoritative. Windows uses
 // LocalAppData by default so large Git worktrees do not roam with the user's

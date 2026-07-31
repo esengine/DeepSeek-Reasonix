@@ -284,13 +284,22 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   TUI, desktop panel) but are excluded from active-memory retrieval. Memory
   search uses the same relative BM25 floor and guides the agent to fall back to
   history when exact original wording or tool output matters.
-- Agent-initiated `remember` and `forget` calls require a fresh human approval
-  each time, even when tool auto-approval or YOLO/full-access mode is enabled.
-  Guardian/safety review cannot answer these prompts on the user's behalf. In
-  non-interactive headless runs or sub-agents, these tools are refused rather
-  than auto-approved. The approval request includes a compact preview of the
-  memory being saved or archived, while external notification hooks only receive
-  the tool name.
+- Before each real user turn, bounded BM25 recall selects relevant active facts
+  from the raw user message and appends them as a low-authority user-turn suffix.
+  Generic turns are suppressed, project facts override equivalent global
+  fallbacks, stale facts are down-ranked, and recall is bounded by result/character
+  budgets. This never mutates the stable system prompt or tool schemas.
+- The owning controller may auto-allow only a bounded, non-sensitive,
+  create-only project/reference `remember`, including in a top-level headless
+  run. Global facts, preferences, feedback,
+  updates, duplicates, sensitive/oversized content, and every `forget` require a
+  fresh human approval even under Auto or YOLO. Guardian/safety review cannot
+  answer these prompts on the user's behalf. Sub-agents and headless surfaces
+  without the owning scoped controller fail closed. The approval request includes a compact preview, while
+  external notification hooks only receive the tool name.
+- Facts carry immutable IDs, monotonic revisions, timestamps, type, and scope.
+  Updates snapshot the previous revision; restore and archive recovery create a
+  higher revision and reject path escapes, symlinks, collisions, and overwrites.
   User-initiated memory edits in the local UI are already explicit user actions.
   See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
   detailed implementation contract.
@@ -333,8 +342,10 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   Bash and file mutation approvals use Claude Code-style families such as
   `Bash(npm run build)`, `Bash(npm run test:*)`, and `Edit(docs/**)`. Built-in
   file mutations include writes, edits, notebook edits, symbol/range deletes,
-  and `move_file` renames/moves. Legacy
-  lowercase tool IDs and `tool=literal` rules still load for compatibility. The
+  and `move_file` renames/moves. Legacy lowercase tool IDs still load for
+  compatibility. `Bash=<literal>` is the exact-command form: metacharacters in
+  the literal are ordinary characters and only the identical complete command
+  matches. The
   `:*` suffix marks a Bash command-prefix approval; generated prefix rules also
   reject later commands that introduce shell operators, so `Bash(go test:*)`
   does not cover `go test ./... && rm -rf tmp`.
@@ -344,6 +355,16 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   known keys — `command` (bash), `path` / `file_path` (file tools), `pattern`
   (grep/glob) — so tools need not change. A rule whose subject the args don't
   expose only matches in its bare `Tool` form.
+- **Dynamic Bash.** Parameter/arithmetic expansions, assignments, heredocs, unproved
+  redirects, and shell globs cannot reuse bare Bash, prefix, or glob allows;
+  remembered approvals are exact `Bash=<literal>` rules. They still follow the
+  normal posture fallback, so Auto and an approved-plan window may execute them
+  without prompting. Nested or indirect execution is stricter: command and
+  process substitution, a dynamic command name, parse failures, `eval`,
+  `source`, shell `-c`, PowerShell/cmd command strings, and runtime inline-code
+  flags require a human in interactive Ask/Auto. Guardian, allowing hooks, and
+  the approved-plan window cannot answer that decision; only an identical exact
+  grant or YOLO can bypass it.
 - **Precedence.** `deny` > `ask` > `allow` > fallback. Fallback is `Allow` for
   read-only tools and `Mode` (default `Ask`) for writers. `deny` always wins, so
   a broad `allow = ["Bash"]` can still be carved by `deny = ["Bash(rm -rf*)"]`;
@@ -359,7 +380,9 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   built-in file-mutating tools share it. A
   non-interactive run
   (`reasonix run`, a sub-agent, anything with no TTY / no approver) cannot prompt, so
-  it resolves `Ask` to **allow** — preserving autonomous behaviour. A `Deny` is a
+  ordinary `Ask` resolves to **allow** — preserving autonomous behaviour. Nested
+  or indirect Bash is the exception: headless Ask/Auto/DontAsk reject it unless
+  an identical literal grant exists; only YOLO may bypass that human requirement. A `Deny` is a
   hard block in *every* mode: the tool never executes and the model receives a
   "blocked" result it can adapt to (the same shape as a plan-mode refusal).
 - **MCP authorization.** Installing an MCP server authorizes all of its tools;
@@ -406,7 +429,12 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   `yolo` ("Yolo批准"). `auto` lets the permission policy auto-approve the writer
   fallback while preserving explicit ask/deny rules; `yolo` skips ordinary tool
   permission prompts for approval-gated tools such as writers and Bash. Explicit
-  deny rules and forced fresh reviews still apply.
+  deny rules and forced fresh reviews still apply. Nested or indirect Bash
+  commands require a human in interactive Ask/Auto even during the approved-plan
+  window; ordinary expansions, assignments, redirects, and globs continue under
+  Auto fallback but cannot inherit reusable Bash rules. YOLO is the sole mode
+  bypass for the human-required class, while an identical exact literal remains
+  an ordinary explicit authorization.
   Neither posture answers `ask` questions or approves `exit_plan_mode` plans.
   Plan Mode is entered only through an explicit user choice and remains
   independent of the active tool-approval posture. After a user approves a
@@ -628,6 +656,9 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 # shortcut_layout = "desktop"       # classic|desktop; compatibility setting
 # cursor_shape = "bar"              # CLI/TUI textarea cursor: underline|block|bar
 
+[cli]                               # user/global only; project reasonix.toml cannot override
+update_channel = "stable"           # stable|preview; missing/unknown values resolve to stable
+
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
 temperature       = 0.0
@@ -706,6 +737,11 @@ args    = []
 # url     = "https://mcp.stripe.com"
 # headers = { Authorization = "Bearer ${STRIPE_KEY}" }   # ${VAR} / ${VAR:-default} expanded
 ```
+
+The native CLI update channel is persisted in the user config. `reasonix
+upgrade` follows it, while `reasonix upgrade stable|preview` changes it and
+updates the same installed binary. The advanced `--channel` flag is a one-off
+override for automation and does not change the saved value.
 
 The executor tracks an adaptive progress lease while a todo is active. A new
 completion, unique successful read, command, or mutation renews the lease;

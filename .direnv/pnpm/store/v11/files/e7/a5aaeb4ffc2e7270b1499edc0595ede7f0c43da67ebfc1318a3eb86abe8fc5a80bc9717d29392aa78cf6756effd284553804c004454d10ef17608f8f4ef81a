@@ -1,0 +1,30 @@
+name: Feature Request
+description: Request a new feature.
+title: "[FR]: "
+labels: ["feature", "request", "enhancement", "triage"]
+projects: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill out this feature request!
+  - type: textarea
+    id: feat-summary
+    attributes:
+      label: Feature Summary
+      description: In a few sentences or less, provide a concise description of the feature being requested.
+      placeholder: "New feature that does ___; it can be used when ..."
+    validations:
+      required: true
+  - type: textarea
+    id: detailed-description
+    attributes:
+      label: Detailed description of new feature.
+      description: |
+        Please provide a detailed description of proposed feature.
+          - What problem would this new feature solve?
+          - How will this change affect users?
+          - Is it a modification to existing functionality? Are you requesting a new/modified function input or output? Please provide an example of what the change might look like?
+      placeholder: "New feature details."
+    validations:
+      required: true

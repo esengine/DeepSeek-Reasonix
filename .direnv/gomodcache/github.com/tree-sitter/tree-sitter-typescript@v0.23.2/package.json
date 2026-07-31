@@ -1,0 +1,59 @@
+{
+  "name": "tree-sitter-typescript",
+  "version": "0.23.2",
+  "description": "TypeScript and TSX grammars for tree-sitter",
+  "repository": "https://github.com/tree-sitter/tree-sitter-typescript",
+  "license": "MIT",
+  "author": "Max Brunsfeld <maxbrunsfeld@gmail.com>",
+  "maintainers": [
+    "Amaan Qureshi <amaanq12@gmail.com>"
+  ],
+  "main": "bindings/node",
+  "types": "bindings/node",
+  "keywords": [
+    "incremental",
+    "parsing",
+    "tree-sitter",
+    "typescript",
+    "tsx"
+  ],
+  "files": [
+    "binding.gyp",
+    "prebuilds/**",
+    "bindings/node/*",
+    "queries/*",
+    "typescript/grammar.js",
+    "tsx/grammar.js",
+    "tree-sitter.json",
+    "typescript/package.json",
+    "tsx/package.json",
+    "typescript/src/**",
+    "tsx/src/**",
+    "common/**",
+    "*.wasm"
+  ],
+  "dependencies": {
+    "node-addon-api": "^8.2.2",
+    "node-gyp-build": "^4.8.2",
+    "tree-sitter-javascript": "^0.23.1"
+  },
+  "peerDependencies": {
+    "tree-sitter": "^0.21.0"
+  },
+  "peerDependenciesMeta": {
+    "tree-sitter": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "eslint": ">=9.14.0",
+    "eslint-config-treesitter": "^1.0.2",
+    "tree-sitter-cli": "^0.24.4",
+    "prebuildify": "^6.0.1"
+  },
+  "scripts": {
+    "install": "node-gyp-build",
+    "lint": "eslint common/define-grammar.js",
+    "test": "node --test bindings/node/*_test.js"
+  }
+}

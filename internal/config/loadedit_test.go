@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -40,6 +39,24 @@ api_key_env = "X_KEY"
 	}
 }
 
+func TestMergeTOMLProviderAccessPreservesExplicitEmpty(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(path, []byte("[desktop]\nprovider_access = []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	access, declared, err := mergeTOMLProviderAccess([]string{path})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if !declared {
+		t.Fatal("provider_access declaration was not detected")
+	}
+	if access == nil || len(access) != 0 {
+		t.Fatalf("provider_access = %#v, want a non-nil empty slice", access)
+	}
+}
+
 func TestLoadForEditDecodesGB18030TOML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -65,7 +82,7 @@ api_key_env = "LOCAL_KEY"
 	}
 }
 
-func TestLoadForEditMigratesLegacyMCPTiers(t *testing.T) {
+func TestLoadForEditNormalizesLegacyMCPTiersWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reasonix.toml")
 	body := `
@@ -92,11 +109,8 @@ model = "m"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(updated), "\ntier") {
-		t.Fatalf("legacy tier lines should be removed from file:\n%s", updated)
-	}
-	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `name = "local"`) {
-		t.Fatalf("migration should preserve ordinary config:\n%s", updated)
+	if string(updated) != body {
+		t.Fatalf("LoadForEdit must not rewrite config outside its caller's edit transaction:\n%s", updated)
 	}
 }
 

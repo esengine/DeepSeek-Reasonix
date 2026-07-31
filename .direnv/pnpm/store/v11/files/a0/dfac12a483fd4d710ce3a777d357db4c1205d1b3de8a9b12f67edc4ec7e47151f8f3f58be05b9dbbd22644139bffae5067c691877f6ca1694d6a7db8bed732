@@ -1,0 +1,79 @@
+{
+  "name": "@asamuzakjp/dom-selector",
+  "description": "A CSS selector engine.",
+  "author": "asamuzaK",
+  "license": "MIT",
+  "homepage": "https://github.com/asamuzaK/domSelector#readme",
+  "bugs": {
+    "url": "https://github.com/asamuzaK/domSelector/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/asamuzaK/domSelector.git"
+  },
+  "files": [
+    "src",
+    "types"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "@asamuzakjp/generational-cache": "^1.0.1",
+    "@asamuzakjp/nwsapi": "^2.3.9",
+    "bidi-js": "^1.0.3",
+    "css-tree": "^3.2.1",
+    "is-potential-custom-element-name": "^1.0.1"
+  },
+  "devDependencies": {
+    "@types/css-tree": "^2.3.11",
+    "@types/node": "^25.6.0",
+    "benchmark": "^2.1.4",
+    "c8": "^11.0.0",
+    "chai": "^6.2.2",
+    "commander": "^14.0.3",
+    "eslint": "^9.39.4",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-jsdoc": "^62.9.0",
+    "eslint-plugin-prettier": "^5.5.5",
+    "eslint-plugin-regexp": "^3.1.0",
+    "eslint-plugin-unicorn": "^64.0.0",
+    "globals": "^17.5.0",
+    "jsdom": "^29.0.2",
+    "mitata": "^1.0.34",
+    "mocha": "^11.7.5",
+    "neostandard": "^0.13.0",
+    "prettier": "^3.8.3",
+    "sinon": "^21.1.2",
+    "typescript": "^6.0.3",
+    "wpt-runner": "^7.0.0"
+  },
+  "overrides": {
+    "c8": {
+      "yargs": "^18.0.0"
+    },
+    "jsdom": "$jsdom",
+    "serialize-javascript": "^7.0.4"
+  },
+  "scripts": {
+    "bench": "node benchmark/bench.js",
+    "bench:cache": "node benchmark/bench-cache.js",
+    "bench:cacheMonster": "node benchmark/bench-cache-monster.js",
+    "bench:sizzle": "node benchmark/bench-sizzle.js",
+    "build": "npm run tsc && npm run lint && npm test",
+    "lint": "eslint --fix .",
+    "test": "c8 --reporter=text mocha --exit test/**/*.test.js",
+    "test:wpt": "node test/wpt/wpt-runner.js",
+    "tsc": "node scripts/index clean --dir=types -i && npx tsc",
+    "update:wpt": "git submodule update --init --recursive --remote"
+  },
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
+  "version": "7.1.1"
+}

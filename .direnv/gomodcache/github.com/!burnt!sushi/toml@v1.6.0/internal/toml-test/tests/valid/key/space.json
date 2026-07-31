@@ -1,0 +1,8 @@
+{
+    "  much \t\t  whitespace  \t\n  \r\n  ": {"type": "integer", "value": "3"},
+    " c d ":                             {"type": "integer", "value": "2"},
+    "a b":                               {"type": "integer", "value": "1"},
+    " tbl ": {
+        "\ttab\ttab\t": {"type": "string", "value": "tab"}
+    }
+}

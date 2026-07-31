@@ -1,0 +1,81 @@
+import { ValueKeyIteratee } from "../_internal/ValueKeyIteratee.mjs";
+import { ValueKeyIterateeTypeGuard } from "../_internal/ValueKeyIterateeTypeGuard.mjs";
+
+//#region src/compat/object/pickBy.d.ts
+/**
+ * Creates a new object composed of the properties that satisfy the predicate function.
+ *
+ * @template T - The type of object values.
+ * @template S - The type of filtered values.
+ * @param object - The source object.
+ * @param predicate - The function invoked per property.
+ * @returns Returns the new filtered object.
+ *
+ * @example
+ * const users = {
+ *   'fred': { 'user': 'fred', 'age': 40 },
+ *   'pebbles': { 'user': 'pebbles', 'age': 1 }
+ * };
+ * pickBy(users, ({ age }) => age < 40);
+ * // => { 'pebbles': { 'user': 'pebbles', 'age': 1 } }
+ */
+declare function pickBy<T, S extends T>(object: Record<string, T> | null | undefined, predicate: ValueKeyIterateeTypeGuard<T, S>): Record<string, S>;
+/**
+ * Creates a new object composed of the properties that satisfy the predicate function.
+ *
+ * @template T - The type of object values.
+ * @template S - The type of filtered values.
+ * @param object - The source object.
+ * @param predicate - The function invoked per property.
+ * @returns Returns the new filtered object.
+ *
+ * @example
+ * const array = [1, 2, 3, 4];
+ * pickBy(array, (value) => value % 2 === 0);
+ * // => { 1: 2, 3: 4 }
+ */
+declare function pickBy<T, S extends T>(object: Record<number, T> | null | undefined, predicate: ValueKeyIterateeTypeGuard<T, S>): Record<number, S>;
+/**
+ * Creates a new object composed of the properties that satisfy the predicate function.
+ *
+ * @template T - The type of object values.
+ * @param object - The source object.
+ * @param [predicate] - The function invoked per property.
+ * @returns Returns the new filtered object.
+ *
+ * @example
+ * const object = { 'a': 1, 'b': '2', 'c': 3 };
+ * pickBy(object, (value) => typeof value === 'string');
+ * // => { 'b': '2' }
+ */
+declare function pickBy<T>(object: Record<string, T> | null | undefined, predicate?: ValueKeyIteratee<T>): Record<string, T>;
+/**
+ * Creates a new object composed of the properties that satisfy the predicate function.
+ *
+ * @template T - The type of object values.
+ * @param object - The source object.
+ * @param [predicate] - The function invoked per property.
+ * @returns Returns the new filtered object.
+ *
+ * @example
+ * const array = [1, 2, 3, 4];
+ * pickBy(array, (value) => value > 2);
+ * // => { 2: 3, 3: 4 }
+ */
+declare function pickBy<T>(object: Record<number, T> | null | undefined, predicate?: ValueKeyIteratee<T>): Record<number, T>;
+/**
+ * Creates a new object composed of the properties that satisfy the predicate function.
+ *
+ * @template T - The type of object.
+ * @param object - The source object.
+ * @param [predicate] - The function invoked per property.
+ * @returns Returns the new filtered object.
+ *
+ * @example
+ * const object = { 'a': 1, 'b': '2', 'c': 3 };
+ * pickBy(object, (value) => typeof value === 'string');
+ * // => { 'b': '2' }
+ */
+declare function pickBy<T extends object>(object: T | null | undefined, predicate?: ValueKeyIteratee<T[keyof T]>): Partial<T>;
+//#endregion
+export { pickBy };

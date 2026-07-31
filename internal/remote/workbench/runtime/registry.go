@@ -65,6 +65,9 @@ func (s *Server) ensureSessionsRestored(ctx context.Context) error {
 	if path == "" {
 		return nil
 	}
+	if err := s.recoverProfileTransaction(); err != nil {
+		return err
+	}
 	s.registryMu.Lock()
 	defer s.registryMu.Unlock()
 	if !s.registryRead {

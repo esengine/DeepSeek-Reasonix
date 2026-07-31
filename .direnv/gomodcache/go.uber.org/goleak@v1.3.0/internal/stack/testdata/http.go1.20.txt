@@ -1,0 +1,64 @@
+goroutine 1 [running]:
+main.getStackBuffer()
+	/home/abg/src/goleak/internal/stack/testdata/http.go:44 +0x4f
+main.main()
+	/home/abg/src/goleak/internal/stack/testdata/http.go:18 +0x2a
+
+goroutine 20 [IO wait]:
+internal/poll.runtime_pollWait(0x7866b1e34f08, 0x72)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/runtime/netpoll.go:306 +0x89
+internal/poll.(*pollDesc).wait(0xc0000dc000?, 0x16?, 0x0)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/internal/poll/fd_poll_runtime.go:84 +0x32
+internal/poll.(*pollDesc).waitRead(...)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Accept(0xc0000dc000)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/internal/poll/fd_unix.go:614 +0x2bd
+net.(*netFD).accept(0xc0000dc000)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/fd_unix.go:172 +0x35
+net.(*TCPListener).accept(0xc0000a00f0)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/tcpsock_posix.go:148 +0x25
+net.(*TCPListener).Accept(0xc0000a00f0)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/tcpsock.go:297 +0x3d
+net/http.(*Server).Serve(0xc000076000, {0x73dbe0, 0xc0000a00f0})
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/server.go:3059 +0x385
+net/http.Serve({0x73dbe0, 0xc0000a00f0}, {0x0?, 0x0})
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/server.go:2581 +0x74
+created by main.start
+	/home/abg/src/goleak/internal/stack/testdata/http.go:27 +0x8e
+
+goroutine 24 [select]:
+net/http.(*persistConn).readLoop(0xc0000b4480)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/transport.go:2227 +0xd85
+created by net/http.(*Transport).dialConn
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/transport.go:1765 +0x16ea
+
+goroutine 25 [select]:
+net/http.(*persistConn).writeLoop(0xc0000b4480)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/transport.go:2410 +0xf2
+created by net/http.(*Transport).dialConn
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/transport.go:1766 +0x173d
+
+goroutine 4 [IO wait]:
+internal/poll.runtime_pollWait(0x7866b1e34d28, 0x72)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/runtime/netpoll.go:306 +0x89
+internal/poll.(*pollDesc).wait(0xc00007e000?, 0xc000106000?, 0x0)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/internal/poll/fd_poll_runtime.go:84 +0x32
+internal/poll.(*pollDesc).waitRead(...)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc00007e000, {0xc000106000, 0x1000, 0x1000})
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/internal/poll/fd_unix.go:167 +0x299
+net.(*netFD).Read(0xc00007e000, {0xc000106000?, 0x4a92e6?, 0x0?})
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/fd_posix.go:55 +0x29
+net.(*conn).Read(0xc000014028, {0xc000106000?, 0x0?, 0xc0000781e8?})
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/net.go:183 +0x45
+net/http.(*connReader).Read(0xc0000781e0, {0xc000106000, 0x1000, 0x1000})
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/server.go:782 +0x171
+bufio.(*Reader).fill(0xc000104000)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/bufio/bufio.go:106 +0xff
+bufio.(*Reader).Peek(0xc000104000, 0x4)
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/bufio/bufio.go:144 +0x5d
+net/http.(*conn).serve(0xc000100000, {0x73df98, 0xc0000780f0})
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/server.go:2030 +0x77c
+created by net/http.(*Server).Serve
+	/home/abg/.gimme/versions/go1.20.10.linux.amd64/src/net/http/server.go:3089 +0x5ed
+

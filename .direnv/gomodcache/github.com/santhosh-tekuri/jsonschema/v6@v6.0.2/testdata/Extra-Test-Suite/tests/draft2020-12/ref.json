@@ -1,0 +1,74 @@
+[
+    {
+        "description": "percent-encoded json-pointer",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "a b": {"type": "number"}
+            },
+            "$ref": "#/$defs/a%20b"
+        },
+        "tests": [
+            {
+                "description": "match",
+                "data": 1,
+                "valid": true
+            },
+            {
+                "description": "mismatch",
+                "data": "foobar",
+                "valid": false
+            }
+        ]
+    },
+    {
+        "description": "precent in resource ptr",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "a%20b": {
+                    "$id": "http://temp.com/ab",
+                    "type": "number"
+                }
+            },
+            "$ref": "http://temp.com/ab"
+        },
+        "tests": [
+            {
+                "description": "match",
+                "data": 1,
+                "valid": true
+            },
+            {
+                "description": "mismatch",
+                "data": "foobar",
+                "valid": false
+            }
+        ]
+    },
+    {
+        "description": "precent in anchor ptr",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "a%20b": {
+                    "$anchor": "abcd",
+                    "type": "number"
+                }
+            },
+            "$ref": "#abcd"
+        },
+        "tests": [
+            {
+                "description": "match",
+                "data": 1,
+                "valid": true
+            },
+            {
+                "description": "mismatch",
+                "data": "foobar",
+                "valid": false
+            }
+        ]
+    }
+]

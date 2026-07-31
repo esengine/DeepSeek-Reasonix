@@ -1,0 +1,7 @@
+./builtin_embed.go
+./builtins.go
+./index.go
+./inspect.go
+./profile.go
+./skill.go
+./tools.go

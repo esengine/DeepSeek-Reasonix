@@ -1,0 +1,477 @@
+================================================================================
+Call expressions
+================================================================================
+
+package main
+
+func main() {
+  a(b, c...)
+
+  a(
+    b,
+    c,
+  )
+
+  a(
+    b,
+    c...,
+  )
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)
+            (variadic_argument
+              (identifier)))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)
+            (identifier))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)
+            (variadic_argument
+              (identifier))))))))
+
+================================================================================
+Nested call expressions
+================================================================================
+
+package main
+
+func main() {
+  a(b(c(d)))
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (call_expression
+              (identifier)
+              (argument_list
+                (call_expression
+                  (identifier)
+                  (argument_list
+                    (identifier)))))))))))
+
+================================================================================
+Generic call expressions
+================================================================================
+
+package main
+
+func main() {
+  a[b](c)
+  a[b, c](d)
+  a[b[c], d](e[f])
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (type_conversion_expression
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_elem
+                (type_identifier))))
+          (identifier)))
+      (expression_statement
+        (type_conversion_expression
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_elem
+                (type_identifier))
+              (type_elem
+                (type_identifier))))
+          (identifier)))
+      (expression_statement
+        (type_conversion_expression
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_elem
+                (generic_type
+                  (type_identifier)
+                  (type_arguments
+                    (type_elem
+                      (type_identifier)))))
+              (type_elem
+                (type_identifier))))
+          (index_expression
+            (identifier)
+            (identifier)))))))
+
+================================================================================
+Calls to 'make' and 'new'
+================================================================================
+
+package main
+
+func main() {
+  make(chan<- int)
+
+  // `new` and `make` can also be used as variable names
+  make(chan<- int, (new - old), make.stuff)
+
+  make(chan<- int, 5, 10)
+  new(map[string]string)
+}
+
+func fake_new(new func() int) int {
+  return new()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (channel_type
+              (type_identifier)))))
+      (comment)
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (channel_type
+              (type_identifier))
+            (parenthesized_expression
+              (binary_expression
+                (identifier)
+                (identifier)))
+            (selector_expression
+              (identifier)
+              (field_identifier)))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (channel_type
+              (type_identifier))
+            (int_literal)
+            (int_literal))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (map_type
+              (type_identifier)
+              (type_identifier)))))))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (function_type
+          (parameter_list)
+          (type_identifier))))
+    (type_identifier)
+    (block
+      (return_statement
+        (expression_list
+          (call_expression
+            (identifier)
+            (argument_list)))))))
+
+================================================================================
+Selector expressions
+================================================================================
+
+package main
+
+func main() {
+  a.b.c()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (selector_expression
+            (selector_expression
+              (identifier)
+              (field_identifier))
+            (field_identifier))
+          (argument_list))))))
+
+================================================================================
+Indexing expressions
+================================================================================
+
+package main
+
+func main() {
+  _ = a[1]
+  _ = b[:]
+  _ = c[1:]
+  _ = d[1:2]
+  _ = e[:2:3]
+  _ = f[1:2:3]
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (index_expression
+            (identifier)
+            (int_literal))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (slice_expression
+            (identifier))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (slice_expression
+            (identifier)
+            (int_literal))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (slice_expression
+            (identifier)
+            (int_literal)
+            (int_literal))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (slice_expression
+            (identifier)
+            (int_literal)
+            (int_literal))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (slice_expression
+            (identifier)
+            (int_literal)
+            (int_literal)
+            (int_literal)))))))
+
+================================================================================
+Type assertion expressions
+================================================================================
+
+package main
+
+func main() {
+  _ = a.(p.Person)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (type_assertion_expression
+            (identifier)
+            (qualified_type
+              (package_identifier)
+              (type_identifier))))))))
+
+================================================================================
+Type conversion expressions
+================================================================================
+
+package main
+
+func main() {
+  _ = []a.b(c.d)
+  _ = ([]a.b)(c.d)
+  _ = <-chan int(c) // conversion to channel type
+  <-(chan int(c)) // receive statement
+  // These type conversions cannot be distinguished from call expressions
+  T(x)
+  (*Point)(p)
+  e.f(g)
+  (e.f)(g)
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (type_conversion_expression
+            (slice_type
+              (qualified_type
+                (package_identifier)
+                (type_identifier)))
+            (selector_expression
+              (identifier)
+              (field_identifier)))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (type_conversion_expression
+            (parenthesized_type
+              (slice_type
+                (qualified_type
+                  (package_identifier)
+                  (type_identifier))))
+            (selector_expression
+              (identifier)
+              (field_identifier)))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (type_conversion_expression
+            (channel_type
+              (type_identifier))
+            (identifier))))
+      (comment)
+      (expression_statement
+        (unary_expression
+          (parenthesized_expression
+            (type_conversion_expression
+              (channel_type
+                (type_identifier))
+              (identifier)))))
+      (comment)
+      (comment)
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier))))
+      (expression_statement
+        (call_expression
+          (parenthesized_expression
+            (unary_expression
+              (identifier)))
+          (argument_list
+            (identifier))))
+      (expression_statement
+        (call_expression
+          (selector_expression
+            (identifier)
+            (field_identifier))
+          (argument_list
+            (identifier))))
+      (expression_statement
+        (call_expression
+          (parenthesized_expression
+            (selector_expression
+              (identifier)
+              (field_identifier)))
+          (argument_list
+            (identifier)))))))
+
+================================================================================
+Unary expressions
+================================================================================
+
+package main
+
+func main() {
+  _ = !<-a
+  _ = *foo()
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (unary_expression
+            (unary_expression
+              (identifier)))))
+      (assignment_statement
+        (expression_list
+          (identifier))
+        (expression_list
+          (unary_expression
+            (call_expression
+              (identifier)
+              (argument_list))))))))

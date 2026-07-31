@@ -1,0 +1,5 @@
+./dct.go
+./huffman.go
+./reader.go
+./scan.go
+./writer.go

@@ -12,6 +12,8 @@
 //     reasoning_effort, matching LongCat's OpenAI-compatible API.
 //   - ollama.com → accepts hosted Ollama Cloud's reasoning_effort scale,
 //     including max, and omits the field for none/disabled.
+//   - official Kimi API + kimi-k3 preserves complete assistant messages and
+//     uses K3's fixed-sampling/max_completion_tokens request shape.
 //   - everything else (MiMo and other OpenAI-compatible gateways) uses the
 //     vanilla reasoning_effort scale (low/medium/high).
 //
@@ -68,6 +70,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if effort == "auto" {
 		effort = ""
 	}
+	supportedEfforts, _ := cfg.Extra["supported_efforts"].([]string)
+	explicitMaxEffort := supportsEffort(supportedEfforts, "max")
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	chatURL, _ := cfg.Extra["chat_url"].(string)
@@ -75,17 +79,26 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
 	vision, _ := cfg.Extra["vision"].(bool)
+	explicitModelVision, _ := cfg.Extra["vision_model_explicit"].(bool)
+	officialDeepSeek := IsDeepSeek(cfg.BaseURL)
+	// DeepSeek's official chat API accepts string message content only. Keep
+	// this provider-boundary guard even though config capability resolution
+	// normally prevents image attachments from reaching this layer. A positive
+	// model-scoped capability can opt in without letting stale provider-wide
+	// vision=true settings affect current text-only models.
+	vision = vision && (!officialDeepSeek || explicitModelVision)
 	visionDetail, _ := cfg.Extra["vision_detail"].(string)
 	visionDetail = strings.ToLower(strings.TrimSpace(visionDetail))
 	if visionDetail != "low" && visionDetail != "high" {
 		visionDetail = "" // auto — omit the field
 	}
-	deepseek := protocol == "deepseek" || (protocol == "" && IsDeepSeek(cfg.BaseURL))
+	deepseek := protocol == "deepseek" || (protocol == "" && officialDeepSeek)
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
 	zhipu := protocol == "" && IsZhipu(cfg.BaseURL)
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
 	ollamaCloud := protocol == "" && IsOllamaCloud(cfg.BaseURL)
 	dashscope := protocol == "" && IsDashScope(cfg.BaseURL)
+	kimiK3 := IsKimiAPI(cfg.BaseURL) && strings.EqualFold(strings.TrimSpace(cfg.Model), "kimi-k3")
 	// Optional explicit `thinking` config field — a vendor-agnostic escape hatch
 	// (credit @eghrhegpe, #5063) for OpenAI-compatible providers we don't
 	// auto-detect (e.g. opencode.ai). "enabled"/"disabled" drive thinking.type;
@@ -175,11 +188,14 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		}
 	case effort != "":
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
-		// high); "max" is a DeepSeek-ism MiMo et al. reject with 400, so clamp it
-		// to the OpenAI ceiling and reject other values at boot, not at request time.
+		// high) by default. Preserve max only when the resolved model explicitly
+		// advertises it (for example OpenCode Go's Kimi K3); otherwise max remains
+		// clamped to the OpenAI ceiling because MiMo and similar backends reject it.
 		switch effort {
 		case "max":
-			effort = "high"
+			if !explicitMaxEffort {
+				effort = "high"
+			}
 		case "low", "medium", "high":
 		default:
 			return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
@@ -204,6 +220,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		zhipu:        zhipu,
 		longcat:      longcat,
 		dashscope:    dashscope,
+		kimiK3:       kimiK3,
 		mimo:         IsMiMo(cfg.BaseURL),
 		thinkingType: thinkingType,
 		vision:       vision,
@@ -212,6 +229,16 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		http:         httpClient,
 		idleTimeout:  defaultStreamIdleTimeout,
 	}, nil
+}
+
+func supportsEffort(levels []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, level := range levels {
+		if strings.ToLower(strings.TrimSpace(level)) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func newHTTPClient(cfg provider.Config) (*http.Client, error) {
@@ -240,6 +267,7 @@ type client struct {
 	zhipu        bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
 	longcat      bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
 	dashscope    bool          // true for DashScope (aliyuncs.com) — multi-model endpoint; thinking protocol varies per model name
+	kimiK3       bool          // true only for kimi-k3 on Moonshot's official direct API hosts
 	mimo         bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
 	thinkingType string        // explicit `thinking` config override (enabled|disabled); "" = no override
 	vision       bool          // model accepts image input — embed attached images as image_url parts
@@ -253,6 +281,10 @@ func (c *client) Name() string { return c.name }
 
 func (c *client) RequiresToolCallReasoning() bool {
 	return c != nil && c.deepseek && c.thinkingType != "disabled"
+}
+
+func (c *client) RequiresReasoningRoundTrip() bool {
+	return c != nil && c.kimiK3
 }
 
 func (c *client) WarnOnMissingToolCallReasoning() bool {
@@ -524,9 +556,16 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		// the key only when a thinking-mode round left reasoning in the history
 		// (dropping it would invalidate the prompt-cache prefix of mixed
 		// thinking-on→off sessions for no gain).
-		if c.deepseek && m.Role == provider.RoleAssistant && len(m.ToolCalls) > 0 {
-			if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
+		if m.Role == provider.RoleAssistant {
+			switch {
+			case c.kimiK3 && (m.ReasoningContent != "" || len(m.ToolCalls) > 0):
+				// Kimi K3 requires the complete assistant message on multi-turn
+				// and tool-call requests, including provider-issued reasoning.
 				cm.ReasoningContent = &m.ReasoningContent
+			case c.deepseek && len(m.ToolCalls) > 0:
+				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
+					cm.ReasoningContent = &m.ReasoningContent
+				}
 			}
 		}
 		for _, tc := range m.ToolCalls {
@@ -575,6 +614,14 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		ExtraBody:       c.extraBody,
 	}
 	switch {
+	case c.kimiK3:
+		// K3 fixes its sampling values and recommends omitting them. It also
+		// names the output budget max_completion_tokens rather than max_tokens.
+		out.Temperature = nil
+		out.MaxTokens = 0
+		out.MaxCompletionTokens = req.MaxTokens
+		out.ExtraBody = omitExtraBodyFields(out.ExtraBody,
+			"temperature", "top_p", "n", "presence_penalty", "frequency_penalty", "max_completion_tokens")
 	case c.deepseek:
 		// DeepSeek's CoT is controlled by `thinking` plus `reasoning_effort` for
 		// depth. Thinking is on by default but can be turned off via
@@ -895,12 +942,29 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	return emitted, nil
 }
 
-// normaliseUsage folds the two cache-hit shapes the OpenAI-compatible ecosystem
-// uses into a single Usage: DeepSeek puts prompt_cache_{hit,miss}_tokens at the
-// top of usage; OpenAI and MiMo put it nested under prompt_tokens_details.
-// Whichever side reports non-zero wins; miss is derived when only hit is given.
+// normaliseUsage folds the cache shapes used by OpenAI-compatible providers into
+// a single Usage. DeepSeek reports prompt_cache_{hit,miss}_tokens at the top of
+// usage; OpenAI and MiMo put cache hits under prompt_tokens_details; some
+// compatible gateways return Anthropic-style input/cache counters instead.
 // Reasoning tokens land in completion_tokens_details on thinking-mode models.
 func normaliseUsage(u *wireUsage) *provider.Usage {
+	prompt := u.PromptTokens
+	anthropicPrompt := prompt == 0 &&
+		(u.InputTokens != 0 || u.CacheCreationInputTokens != 0 || u.CacheReadInputTokens != 0)
+	if anthropicPrompt {
+		// Anthropic-style input_tokens excludes both cache reads and cache
+		// writes, while Reasonix PromptTokens represents the complete input.
+		prompt = u.InputTokens + u.CacheCreationInputTokens + u.CacheReadInputTokens
+	}
+	completion := u.CompletionTokens
+	if completion == 0 {
+		completion = u.OutputTokens
+	}
+	total := u.TotalTokens
+	if total == 0 && (prompt != 0 || completion != 0) {
+		total = prompt + completion
+	}
+
 	hit := u.PromptCacheHitTokens
 	miss := u.PromptCacheMissTokens
 	if hit == 0 && u.PromptTokensDetails != nil {
@@ -911,17 +975,27 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 	if hit == 0 && u.CachedTokens > 0 {
 		hit = u.CachedTokens
 	}
-	if miss == 0 && hit > 0 && u.PromptTokens > hit {
-		miss = u.PromptTokens - hit
+	if hit == 0 {
+		hit = u.CacheReadInputTokens
+	}
+	if miss == 0 {
+		switch {
+		case anthropicPrompt:
+			// Cache writes are still uncached input for Reasonix pricing and
+			// cache-ratio accounting.
+			miss = u.InputTokens + u.CacheCreationInputTokens
+		case hit > 0 && prompt > hit:
+			miss = prompt - hit
+		}
 	}
 	reasoning := 0
 	if u.CompletionTokensDetails != nil {
 		reasoning = u.CompletionTokensDetails.ReasoningTokens
 	}
 	return &provider.Usage{
-		PromptTokens:     u.PromptTokens,
-		CompletionTokens: u.CompletionTokens,
-		TotalTokens:      u.TotalTokens,
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+		TotalTokens:      total,
 		CacheHitTokens:   hit,
 		CacheMissTokens:  miss,
 		ReasoningTokens:  reasoning,
@@ -931,16 +1005,37 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 // --- OpenAI-compatible wire protocol ---
 
 type chatRequest struct {
-	Model           string         `json:"model"`
-	Messages        []chatMessage  `json:"messages"`
-	Tools           []chatTool     `json:"tools,omitempty"`
-	Stream          bool           `json:"stream"`
-	StreamOptions   *streamOptions `json:"stream_options,omitempty"`
-	Temperature     *float64       `json:"temperature,omitempty"`
-	MaxTokens       int            `json:"max_tokens,omitempty"`
-	ReasoningEffort string         `json:"reasoning_effort,omitempty"`
-	Thinking        *thinkingMode  `json:"thinking,omitempty"`
-	ExtraBody       map[string]any `json:"-"`
+	Model               string         `json:"model"`
+	Messages            []chatMessage  `json:"messages"`
+	Tools               []chatTool     `json:"tools,omitempty"`
+	Stream              bool           `json:"stream"`
+	StreamOptions       *streamOptions `json:"stream_options,omitempty"`
+	Temperature         *float64       `json:"temperature,omitempty"`
+	MaxTokens           int            `json:"max_tokens,omitempty"`
+	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	Thinking            *thinkingMode  `json:"thinking,omitempty"`
+	ExtraBody           map[string]any `json:"-"`
+}
+
+func omitExtraBodyFields(in map[string]any, names ...string) map[string]any {
+	if len(in) == 0 {
+		return nil
+	}
+	omit := make(map[string]struct{}, len(names))
+	for _, name := range names {
+		omit[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
+	}
+	out := make(map[string]any, len(in))
+	for name, value := range in {
+		if _, blocked := omit[strings.ToLower(strings.TrimSpace(name))]; !blocked {
+			out[name] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (r chatRequest) MarshalJSON() ([]byte, error) {
@@ -1054,20 +1149,23 @@ type streamResponse struct {
 	} `json:"error"`
 }
 
-// wireUsage covers both DeepSeek's top-level cache fields and the
-// OpenAI/MiMo nested details — normaliseUsage chooses whichever side
-// reports values.
+// wireUsage covers DeepSeek's top-level cache fields, OpenAI/MiMo's nested
+// details, and Anthropic-style fallbacks returned by compatible gateways.
 type wireUsage struct {
-	PromptTokens          int `json:"prompt_tokens"`
-	CompletionTokens      int `json:"completion_tokens"`
-	TotalTokens           int `json:"total_tokens"`
-	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
-	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
+	PromptTokens             int `json:"prompt_tokens"`
+	CompletionTokens         int `json:"completion_tokens"`
+	TotalTokens              int `json:"total_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	PromptCacheHitTokens     int `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens    int `json:"prompt_cache_miss_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	// DashScope returns cached_tokens at the top level (not nested under
 	// prompt_tokens_details) on some models. Mirrors qwen-code's
 	// extendedUsage.cached_tokens fallback.
-	CachedTokens int `json:"cached_tokens"`
-	PromptTokensDetails   *struct {
+	CachedTokens         int `json:"cached_tokens"`
+	PromptTokensDetails *struct {
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"prompt_tokens_details"`
 	CompletionTokensDetails *struct {

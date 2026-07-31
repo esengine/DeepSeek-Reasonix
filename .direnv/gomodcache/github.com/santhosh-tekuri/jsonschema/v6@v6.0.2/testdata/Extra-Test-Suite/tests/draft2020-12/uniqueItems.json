@@ -1,0 +1,21 @@
+[
+    {
+        "description": "zero fraction",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "uniqueItems": true
+        },
+        "tests": [
+            {
+                "description": "with fraction",
+                "data": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, -1, -2, -3, -4, -5, -6, -7, -8, -9, -10, 2.0],
+                "valid": false 
+            },
+            {
+                "description": "without fraction",
+                "data": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, -1, -2, -3, -4, -5, -6, -7, -8, -9, -10, 2],
+                "valid": false
+            }
+        ]
+    }
+]

@@ -1,0 +1,23 @@
+[
+    {
+        "description": "validation of time strings",
+        "schema": { "format": "time" },
+        "tests": [
+            {
+                "description": "contains alphabets",
+                "data": "ab:cd:efZ",
+                "valid": false
+            },
+            {
+                "description": "no digit in second fraction",
+                "data": "23:20:50.Z",
+                "valid": false
+            },
+            {
+                "description": "alphabets in offset",
+                "data": "08:30:06+ab:cd",
+                "valid": false
+            }
+        ]
+    }
+]

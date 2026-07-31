@@ -1,0 +1,4 @@
+= "no key name"           # INVALID
+"""key""" = "not allowed" # INVALID
+"" = "blank"              # VALID but discouraged
+'' = 'blank'              # VALID but discouraged

@@ -1,0 +1,4 @@
+./all.go
+./gbk.go
+./hzgb2312.go
+./tables.go

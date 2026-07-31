@@ -1,0 +1,13 @@
+go test fuzz v1
+string("`\\$\\\\000")
+byte('\x02')
+bool(true)
+bool(false)
+byte('\x00')
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+bool(false)
+bool(false)

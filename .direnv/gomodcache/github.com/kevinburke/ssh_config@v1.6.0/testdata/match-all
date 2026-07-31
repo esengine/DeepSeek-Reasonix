@@ -1,0 +1,6 @@
+Host special
+    Port 1111
+
+Match all
+    Port 4567
+    User matchuser

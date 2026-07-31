@@ -100,8 +100,11 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the inst
 !define REASONIX_LAUNCHER "reasonix-launcher.exe"
 !define REASONIX_CLI "reasonix-cli.exe"
 !define REASONIX_PORTABLE_ENTRY "Reasonix.exe"
+!define REASONIX_PAYLOAD_MANIFEST "reasonix-payload.json"
+!define REASONIX_PAYLOAD_SIGNATURE "reasonix-payload.json.minisig"
 !define REASONIX_UNLOCK_RETRIES 60
 Var ReasonixUpdateMode
+Var ReasonixStageMode
 InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation" # Reuse the previous install path on update; .onInit falls back to the default on first install.
 InstallDir "${REASONIX_DEFAULT_INSTALLDIR}" # Per-user install location (no admin rights required).
 ShowInstDetails show # This will always show the installation details.
@@ -149,6 +152,7 @@ Function .onInit
    ; destination, then closes automatically after the file copy so the helper
    ; can relaunch Reasonix. A normal manual installer keeps the full wizard.
    StrCpy $ReasonixUpdateMode "0"
+   StrCpy $ReasonixStageMode "0"
    ${GetParameters} $R0
    ClearErrors
    ${GetOptions} $R0 "/REASONIXUPDATE=" $R1
@@ -157,6 +161,13 @@ Function .onInit
    StrCpy $ReasonixUpdateMode "1"
 
 reasonix_update_mode_done:
+   ClearErrors
+   ${GetOptions} $R0 "/REASONIXSTAGE=" $R2
+   IfErrors reasonix_stage_mode_done
+   StrCmp $R2 "1" 0 reasonix_stage_mode_done
+   StrCpy $ReasonixStageMode "1"
+
+reasonix_stage_mode_done:
 
    ; InstallDirRegKey leaves $INSTDIR empty when the InstallLocation value is
    ; missing. Older installers still wrote DisplayIcon, so use its parent folder
@@ -262,11 +273,29 @@ FunctionEnd
 Section
     !insertmacro wails.setShellContext
 
+    ; Current auto-update helpers extract the signed installer payload into a
+    ; unique temporary directory, then compare-and-publish the exact claimed
+    ; release unit. Legacy helpers omit /REASONIXSTAGE and retain the historical
+    ; in-place update behavior required to upgrade into the hardened release.
+    StrCmp $ReasonixStageMode "1" reasonix_copy_payload
     !insertmacro wails.webview2runtime
 
     Call reasonix.waitForExecutableUnlock
 
+reasonix_copy_payload:
     SetOutPath $INSTDIR
+
+    ; The release workflow embeds a minisign-authenticated manifest after
+    ; SignPath has signed the five executable members. Only the extraction
+    ; handoff needs these files; a normal installation does not persist them.
+    StrCmp $ReasonixStageMode "1" 0 reasonix_payload_metadata_done
+    !if /FileExists "${REASONIX_PAYLOAD_MANIFEST}"
+    File "/oname=${REASONIX_PAYLOAD_MANIFEST}" "${REASONIX_PAYLOAD_MANIFEST}"
+    !endif
+    !if /FileExists "${REASONIX_PAYLOAD_SIGNATURE}"
+    File "/oname=${REASONIX_PAYLOAD_SIGNATURE}" "${REASONIX_PAYLOAD_SIGNATURE}"
+    !endif
+reasonix_payload_metadata_done:
 
     !insertmacro wails.files
     !if /FileExists "${REASONIX_UPDATE_HELPER}"
@@ -279,6 +308,7 @@ Section
     !endif
     !if /FileExists "${REASONIX_LAUNCHER}"
     File "/oname=${REASONIX_LAUNCHER}" "${REASONIX_LAUNCHER}"
+    StrCmp $ReasonixStageMode "1" reasonix_launcher_payload_done
     ; Portable archives expose Reasonix.exe as a second copy of the Guard
     ; launcher. Preserve that layout only when upgrading an existing portable
     ; directory, and keep the alias in lockstep with the canonical launcher.
@@ -291,9 +321,12 @@ reasonix_no_portable_entry:
     ; in-place upgrade from a launcher build that had no Windows resources.
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "launch --detach" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "launch --detach" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
+reasonix_launcher_payload_done:
     !else
+    StrCmp $ReasonixStageMode "1" reasonix_launcher_payload_done_no_launcher
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
+reasonix_launcher_payload_done_no_launcher:
     !endif
     !if /FileExists "${REASONIX_CLI}"
     File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"
@@ -301,10 +334,12 @@ reasonix_no_portable_entry:
     !warning "${REASONIX_CLI} was not found; remote upload installation will be unavailable."
     !endif
 
+    StrCmp $ReasonixStageMode "1" reasonix_section_done
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
 
     !insertmacro reasonix.writeUninstaller
+reasonix_section_done:
 SectionEnd
 
 Section "uninstall"

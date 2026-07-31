@@ -1,0 +1,584 @@
+================================================================================
+Single const declarations without types
+================================================================================
+
+package main
+
+const zero = 0
+const one, two = 1, 2
+const three, four, five = 3, 4, 5
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (const_declaration
+    (const_spec
+      (identifier)
+      (expression_list
+        (int_literal))))
+  (const_declaration
+    (const_spec
+      (identifier)
+      (identifier)
+      (expression_list
+        (int_literal)
+        (int_literal))))
+  (const_declaration
+    (const_spec
+      (identifier)
+      (identifier)
+      (identifier)
+      (expression_list
+        (int_literal)
+        (int_literal)
+        (int_literal)))))
+
+================================================================================
+Single const declarations with types
+================================================================================
+
+package main
+
+const zero int = 0
+const one, two uint64 = 1, 2
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (const_declaration
+    (const_spec
+      (identifier)
+      (type_identifier)
+      (expression_list
+        (int_literal))))
+  (const_declaration
+    (const_spec
+      (identifier)
+      (identifier)
+      (type_identifier)
+      (expression_list
+        (int_literal)
+        (int_literal)))))
+
+================================================================================
+Grouped const declarations
+================================================================================
+
+package main
+
+const (
+  zero = 0
+  one = 1
+)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (const_declaration
+    (const_spec
+      (identifier)
+      (expression_list
+        (int_literal)))
+    (const_spec
+      (identifier)
+      (expression_list
+        (int_literal)))))
+
+================================================================================
+Const declarations with implicit values
+================================================================================
+
+package main
+
+const (
+  zero = iota
+  one
+  two
+)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (const_declaration
+    (const_spec
+      (identifier)
+      (expression_list
+        (iota)))
+    (const_spec
+      (identifier))
+    (const_spec
+      (identifier))))
+
+================================================================================
+Var declarations without types
+================================================================================
+
+package main
+
+var zero = 0
+var one, two = 1, 2
+var three, four, five = 3, 4, 5
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (var_declaration
+    (var_spec
+      (identifier)
+      (expression_list
+        (int_literal))))
+  (var_declaration
+    (var_spec
+      (identifier)
+      (identifier)
+      (expression_list
+        (int_literal)
+        (int_literal))))
+  (var_declaration
+    (var_spec
+      (identifier)
+      (identifier)
+      (identifier)
+      (expression_list
+        (int_literal)
+        (int_literal)
+        (int_literal)))))
+
+================================================================================
+Var declarations with types
+================================================================================
+
+package main
+
+var zero int = 0
+var one, two uint64 = 1, 2
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (var_declaration
+    (var_spec
+      (identifier)
+      (type_identifier)
+      (expression_list
+        (int_literal))))
+  (var_declaration
+    (var_spec
+      (identifier)
+      (identifier)
+      (type_identifier)
+      (expression_list
+        (int_literal)
+        (int_literal)))))
+
+================================================================================
+Var declarations with no expressions
+================================================================================
+
+package main
+
+var zero int
+var one, two uint64
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (var_declaration
+    (var_spec
+      (identifier)
+      (type_identifier)))
+  (var_declaration
+    (var_spec
+      (identifier)
+      (identifier)
+      (type_identifier))))
+
+================================================================================
+Grouped var declarations
+================================================================================
+
+package main
+
+var (
+  zero = 0
+  one = 1
+)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (var_declaration
+    (var_spec_list
+      (var_spec
+        (identifier)
+        (expression_list
+          (int_literal)))
+      (var_spec
+        (identifier)
+        (expression_list
+          (int_literal))))))
+
+================================================================================
+Function declarations
+================================================================================
+
+package main
+
+func f1() {}
+func f2(a File, b, c, d Thing) int {}
+func f2() (File, Thing) {}
+func f2() (result int, err error) {}
+func f(x ... int, y ... int)
+func g1[T, U any, V interface{}, W Foo[Bar[T]]](a Foo[T]) {}
+func g1[T, U any, V interface{}, W Foo[Bar[T]]](a Foo[T]) {}
+func g2(a foo.bar[int]) {}
+func f[A int|string, B ~int, C ~int|~string]()
+func f2(a File, b, c, d Thing) int {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (type_identifier))
+      (parameter_declaration
+        (identifier)
+        (identifier)
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (parameter_list
+      (parameter_declaration
+        (type_identifier))
+      (parameter_declaration
+        (type_identifier)))
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (type_identifier))
+      (parameter_declaration
+        (identifier)
+        (type_identifier)))
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (variadic_parameter_declaration
+        (identifier)
+        (type_identifier))
+      (variadic_parameter_declaration
+        (identifier)
+        (type_identifier))))
+  (function_declaration
+    (identifier)
+    (type_parameter_list
+      (type_parameter_declaration
+        (identifier)
+        (identifier)
+        (type_constraint
+          (type_identifier)))
+      (type_parameter_declaration
+        (identifier)
+        (type_constraint
+          (interface_type)))
+      (type_parameter_declaration
+        (identifier)
+        (type_constraint
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_elem
+                (generic_type
+                  (type_identifier)
+                  (type_arguments
+                    (type_elem
+                      (type_identifier))))))))))
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_elem
+              (type_identifier))))))
+    (block))
+  (function_declaration
+    (identifier)
+    (type_parameter_list
+      (type_parameter_declaration
+        (identifier)
+        (identifier)
+        (type_constraint
+          (type_identifier)))
+      (type_parameter_declaration
+        (identifier)
+        (type_constraint
+          (interface_type)))
+      (type_parameter_declaration
+        (identifier)
+        (type_constraint
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_elem
+                (generic_type
+                  (type_identifier)
+                  (type_arguments
+                    (type_elem
+                      (type_identifier))))))))))
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_elem
+              (type_identifier))))))
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (generic_type
+          (qualified_type
+            (package_identifier)
+            (type_identifier))
+          (type_arguments
+            (type_elem
+              (type_identifier))))))
+    (block))
+  (function_declaration
+    (identifier)
+    (type_parameter_list
+      (type_parameter_declaration
+        (identifier)
+        (type_constraint
+          (type_identifier)
+          (type_identifier)))
+      (type_parameter_declaration
+        (identifier)
+        (type_constraint
+          (negated_type
+            (type_identifier))))
+      (type_parameter_declaration
+        (identifier)
+        (type_constraint
+          (negated_type
+            (type_identifier))
+          (negated_type
+            (type_identifier)))))
+    (parameter_list))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (type_identifier))
+      (parameter_declaration
+        (identifier)
+        (identifier)
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block)))
+
+================================================================================
+Single-line function declarations
+================================================================================
+
+package main
+
+func f1() { a() }
+func f2() { a(); b() }
+func f3() { a(); b(); }
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list)))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list)))))
+  (function_declaration
+    (identifier)
+    (parameter_list)
+    (block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list))))))
+
+================================================================================
+Variadic function declarations
+================================================================================
+
+package main
+
+func f1(a ...*int) {}
+func f2(a int, b ...int) {}
+func f3(...bool) {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (variadic_parameter_declaration
+        (identifier)
+        (pointer_type
+          (type_identifier))))
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (type_identifier))
+      (variadic_parameter_declaration
+        (identifier)
+        (type_identifier)))
+    (block))
+  (function_declaration
+    (identifier)
+    (parameter_list
+      (variadic_parameter_declaration
+        (type_identifier)))
+    (block)))
+
+================================================================================
+Method declarations
+================================================================================
+
+package main
+
+func (self Person) Equals(other Person) bool {}
+func (v *Value) ObjxMap(optionalDefault ...(Map)) Map {}
+func (p *T1) M1()
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (method_declaration
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (type_identifier)))
+    (field_identifier)
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (type_identifier)))
+    (type_identifier)
+    (block))
+  (method_declaration
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (pointer_type
+          (type_identifier))))
+    (field_identifier)
+    (parameter_list
+      (variadic_parameter_declaration
+        (identifier)
+        (parenthesized_type
+          (type_identifier))))
+    (type_identifier)
+    (block))
+  (method_declaration
+    (parameter_list
+      (parameter_declaration
+        (identifier)
+        (pointer_type
+          (type_identifier))))
+    (field_identifier)
+    (parameter_list)))
+
+================================================================================
+Type declarations
+================================================================================
+
+package main
+
+type a b
+type (
+  a b
+  c d
+)
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (package_clause
+    (package_identifier))
+  (type_declaration
+    (type_spec
+      (type_identifier)
+      (type_identifier)))
+  (type_declaration
+    (type_spec
+      (type_identifier)
+      (type_identifier))
+    (type_spec
+      (type_identifier)
+      (type_identifier))))

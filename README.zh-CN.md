@@ -131,6 +131,7 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
   [CLI 命令参考](./docs/CLI.zh-CN.md) · [配置路径](./docs/CONFIG_PATHS.zh-CN.md) ·
   [ACP 编辑器接入](./docs/ACP.zh-CN.md)
 - **功能与排障：** [子智能体 Profile](./docs/SUBAGENT_PROFILES.zh-CN.md) ·
+  [Context Engine v2](./docs/SESSION_MEMORY_RETRIEVAL.zh-CN.md) ·
   [能力诊断](./docs/CAPABILITY_DIAGNOSTICS.zh-CN.md) ·
   [恢复与安全模式](./docs/RECOVERY.zh-CN.md) ·
   [机器人使用指南](./docs/BOT_GUIDE.zh-CN.md) ·

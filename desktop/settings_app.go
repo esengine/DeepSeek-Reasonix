@@ -266,6 +266,7 @@ type SettingsView struct {
 	Agent                   AgentView            `json:"agent"`
 	Bot                     BotSettingsView      `json:"bot"`
 	DesktopLanguage         string               `json:"desktopLanguage"`
+	DesktopCurrency         string               `json:"desktopCurrency"`
 	DesktopLayoutStyle      string               `json:"desktopLayoutStyle"`
 	DesktopTheme            string               `json:"desktopTheme"`
 	DesktopThemeStyle       string               `json:"desktopThemeStyle"`
@@ -902,6 +903,7 @@ func (a *App) Settings() SettingsView {
 		},
 		Bot:                     botSettingsView(cfg.Bot),
 		DesktopLanguage:         cfg.DesktopLanguage(),
+		DesktopCurrency:         cfg.DesktopCurrency(),
 		DesktopLayoutStyle:      cfg.DesktopLayoutStyle(),
 		DesktopTheme:            cfg.DesktopTheme(),
 		DesktopThemeStyle:       cfg.DesktopThemeStyle(),
@@ -923,7 +925,7 @@ func (a *App) Settings() SettingsView {
 	}
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	resolver := config.NewCredentialResolverForRoot(root)
-	v.OfficialProviders = officialProviderViewsForRootWithResolver(officialProviderAddedSet(cfg), cfg.DeepSeekOfficialPricingLanguage(), root, resolver)
+	v.OfficialProviders = officialProviderViewsForRootWithResolver(officialProviderAddedSet(cfg), a.desktopOfficialPricingLanguage(cfg), root, resolver)
 	v.ProviderPresets = providerPresetViewsForRootWithResolver(cfg, root, resolver)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
@@ -1230,9 +1232,9 @@ func appendSettingsWarning(existing, warning string) string {
 	return existing + "\n" + warning
 }
 
-// loadDesktopUserConfigForEdit loads the user config for a write path and
-// persists any pending one-time legacy migrations (provider-access normalize,
-// legacy bot-config move) to disk as part of the load.
+// loadDesktopUserConfigForEdit loads the user config for a write path. Pending
+// legacy migrations are assembled in memory and reach disk through the locked
+// user-config save, never by rewriting a project file as a side effect.
 //
 // Contract: the caller must already hold config.LockUserConfigEdits() across
 // its whole load→mutate→SaveTo cycle, so the migration write-back cannot race
@@ -1251,7 +1253,10 @@ func (a *App) loadDesktopUserConfigForEditForRoot(root string) (*config.Config, 
 		return nil, "", fmt.Errorf("cannot resolve user config directory")
 	}
 	if _, err := os.Stat(userPath); err == nil {
-		cfg := config.LoadForEdit(userPath)
+		cfg, err := config.LoadForEditReadOnlyStrict(userPath)
+		if err != nil {
+			return nil, "", err
+		}
 		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
 			return nil, "", err
 		}
@@ -1260,7 +1265,10 @@ func (a *App) loadDesktopUserConfigForEditForRoot(root string) (*config.Config, 
 		}
 		return cfg, userPath, nil
 	}
-	cfg := config.LoadForEdit(userPath)
+	cfg, err := config.LoadForEditReadOnlyStrict(userPath)
+	if err != nil {
+		return nil, "", err
+	}
 	legacyPath := config.SourcePathForRoot(root)
 	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
 		if err := normalizeLegacyDesktopProviderAccessForSettings(cfg, userPath); err != nil {
@@ -1268,10 +1276,11 @@ func (a *App) loadDesktopUserConfigForEditForRoot(root string) (*config.Config, 
 		}
 		return cfg, userPath, nil
 	}
-	legacyCfg := config.LoadForEdit(legacyPath)
-	if err := normalizeLegacyDesktopProviderAccessForSettings(legacyCfg, legacyPath); err != nil {
+	legacyCfg, err := config.LoadForEditReadOnlyStrict(legacyPath)
+	if err != nil {
 		return nil, "", err
 	}
+	normalizeLegacyDesktopProviderAccessInMemory(legacyCfg, legacyPath)
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
 	if err := migrateLegacyBotConfigToUser(cfg, legacyCfg, userPath); err != nil {
 		return nil, "", err
@@ -1292,7 +1301,7 @@ func (a *App) loadDesktopUserConfigForView() (*config.Config, string, error) {
 }
 
 func (a *App) loadDesktopUserConfigForViewForRoot(root string) (*config.Config, string, error) {
-	return a.loadDesktopUserConfigReadOnlyForRoot(root, config.LoadForEditWithoutCredentials)
+	return a.loadDesktopUserConfigReadOnlyForRoot(root, config.LoadForEditWithoutCredentialsReadOnlyStrict)
 }
 
 // loadDesktopUserConfigForViewWithCredentials is loadDesktopUserConfigForView
@@ -1306,27 +1315,37 @@ func (a *App) loadDesktopUserConfigForViewWithCredentials() (*config.Config, str
 }
 
 func (a *App) loadDesktopUserConfigForViewWithCredentialsForRoot(root string) (*config.Config, string, error) {
-	return a.loadDesktopUserConfigReadOnlyForRoot(root, config.LoadForEdit)
+	return a.loadDesktopUserConfigReadOnlyForRoot(root, config.LoadForEditReadOnlyStrict)
 }
 
 // loadDesktopUserConfigReadOnlyForRoot is the shared pure-read loader behind
 // the View variants: same shape as loadDesktopUserConfigForEdit, but every
 // legacy migration stays in memory (zero SaveTo) and resolves from root.
-func (a *App) loadDesktopUserConfigReadOnlyForRoot(root string, load func(string) *config.Config) (*config.Config, string, error) {
+func (a *App) loadDesktopUserConfigReadOnlyForRoot(root string, load func(string) (*config.Config, error)) (*config.Config, string, error) {
 	userPath := config.UserConfigPath()
 	if userPath == "" {
 		return nil, "", fmt.Errorf("cannot resolve user config directory")
 	}
 	if _, err := os.Stat(userPath); err == nil {
-		cfg := load(userPath)
+		cfg, err := load(userPath)
+		if err != nil {
+			return nil, "", err
+		}
 		normalizeLegacyDesktopProviderAccessInMemory(cfg, userPath)
 		legacyPath := config.SourcePathForRoot(root)
 		if legacyPath != "" && !sameConfigPath(legacyPath, userPath) {
-			mergeLegacyBotConfigInMemory(cfg, load(legacyPath))
+			legacyCfg, err := load(legacyPath)
+			if err != nil {
+				return nil, "", err
+			}
+			mergeLegacyBotConfigInMemory(cfg, legacyCfg)
 		}
 		return cfg, userPath, nil
 	}
-	cfg := load(userPath)
+	cfg, err := load(userPath)
+	if err != nil {
+		return nil, "", err
+	}
 	legacyPath := config.SourcePathForRoot(root)
 	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
 		normalizeLegacyDesktopProviderAccessInMemory(cfg, userPath)
@@ -1335,7 +1354,10 @@ func (a *App) loadDesktopUserConfigReadOnlyForRoot(root string, load func(string
 	// The user config does not exist yet: serve the legacy config as the view.
 	// It already carries any legacy bot config, so no merge is needed; the
 	// write path creates the migrated user file later.
-	legacyCfg := load(legacyPath)
+	legacyCfg, err := load(legacyPath)
+	if err != nil {
+		return nil, "", err
+	}
 	normalizeLegacyDesktopProviderAccessInMemory(legacyCfg, legacyPath)
 	legacyCfg.ConfigVersion = config.Default().ConfigVersion
 	return legacyCfg, userPath, nil
@@ -1352,7 +1374,10 @@ func (a *App) migrateLegacyBotConfigToUserForRoot(root string, userCfg *config.C
 	if legacyPath == "" || sameConfigPath(legacyPath, userPath) {
 		return nil
 	}
-	legacyCfg := config.LoadForEdit(legacyPath)
+	legacyCfg, err := config.LoadForEditReadOnlyStrict(legacyPath)
+	if err != nil {
+		return err
+	}
 	return migrateLegacyBotConfigToUser(userCfg, legacyCfg, userPath)
 }
 
@@ -1630,6 +1655,7 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -1693,6 +1719,9 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 		oldCtrl.Close()
 	}
 	a.persistTabSessionPath(tab, path)
+	if setting == "currency" {
+		a.repriceTabUsageForCurrentCurrency(tab)
+	}
 	a.clearDeferredRebuild(tab.ID)
 	a.notifyTabRuntimeRebuilt(tab)
 	a.emitReady(a.ctx)
@@ -1766,7 +1795,7 @@ func selectableDesktopModelRef(c *config.Config, ref string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unknown model %q", ref)
 	}
-	if !modelProviderAccessAllowed(providerAccessSet(c.Desktop.ProviderAccess), entry.Name) {
+	if !modelProviderAccessAllowed(c.Desktop.ProviderAccess, entry.Name) {
 		return "", fmt.Errorf("model %q is not available because provider %q is not added", ref, entry.Name)
 	}
 	if !entry.Configured() {
@@ -2999,7 +3028,18 @@ func (a *App) SetStatusBarItems(items []string) error {
 // language preference used by model-facing desktop sessions.
 func (a *App) SetDesktopLanguage(lang string) error {
 	responseLanguage := ""
-	if err := a.applyConfigOnly(func(c *config.Config) error {
+	pricingChanged := false
+	if cfg, _, err := a.loadDesktopUserConfigForView(); err == nil && cfg.DesktopCurrency() == "" {
+		targetCurrency := a.desktopAutoPricingCurrency()
+		switch strings.ToLower(strings.TrimSpace(lang)) {
+		case "zh":
+			targetCurrency = "CNY"
+		case "en":
+			targetCurrency = "USD"
+		}
+		pricingChanged = a.desktopEffectivePricingCurrency(cfg) != targetCurrency
+	}
+	mutate := func(c *config.Config) error {
 		if err := c.SetDesktopLanguage(lang); err != nil {
 			return err
 		}
@@ -3008,21 +3048,113 @@ func (a *App) SetDesktopLanguage(lang string) error {
 		}
 		responseLanguage = c.ResponseLanguage()
 		return nil
-	}); err != nil {
+	}
+	var err error
+	if pricingChanged {
+		_, err = a.applyConfigChangeWithWarning("currency", mutate)
+	} else {
+		err = a.applyConfigOnly(mutate)
+	}
+	if err != nil {
 		return err
+	}
+	if pricingChanged {
+		a.scheduleCurrencyRefreshForOtherTabs()
+	}
+	if strings.TrimSpace(lang) != "" && !strings.EqualFold(strings.TrimSpace(lang), "auto") {
+		a.setDesktopLocale(lang)
 	}
 	a.updateTrayLocale(lang)
 	a.applyResponseLanguageToLiveControllers(responseLanguage)
 	return nil
 }
 
+// SetDesktopCurrency updates the official pricing region independently from UI
+// language. Rebuild the active controller so subsequent usage carries the new
+// currency and regional rates through the existing structured cost fields.
+func (a *App) SetDesktopCurrency(currency string) error {
+	_, err := a.applyConfigChangeWithWarning("currency", func(c *config.Config) error {
+		return c.SetDesktopCurrency(currency)
+	})
+	if err == nil {
+		a.scheduleCurrencyRefreshForOtherTabs()
+	}
+	return err
+}
+
+func (a *App) scheduleCurrencyRefreshForOtherTabs() {
+	if a == nil || a.ctx == nil {
+		return
+	}
+	a.mu.RLock()
+	activeID := a.activeTabID
+	tabIDs := make([]string, 0, len(a.tabs))
+	for id, tab := range a.tabs {
+		if id != activeID && tab != nil && tab.Ctrl != nil && !tab.removed {
+			tabIDs = append(tabIDs, id)
+		}
+	}
+	a.mu.RUnlock()
+	for _, id := range tabIDs {
+		a.scheduleDeferredRebuild(id, "currency")
+	}
+}
+
+func (a *App) scheduleCurrencyRefreshForAllTabs() {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	tabIDs := make([]string, 0, len(a.tabs))
+	for id, tab := range a.tabs {
+		if tab != nil && tab.Ctrl != nil && !tab.removed {
+			tabIDs = append(tabIDs, id)
+		}
+	}
+	a.mu.RUnlock()
+	for _, id := range tabIDs {
+		a.scheduleDeferredRebuild(id, "currency")
+	}
+}
+
+func (a *App) desktopPricingFollowsDetectedLocale() bool {
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	return err == nil && cfg.DesktopPricingFollowsDetectedLocale()
+}
+
+func (a *App) desktopEffectivePricingCurrency(cfg *config.Config) string {
+	if cfg == nil {
+		return a.desktopAutoPricingCurrency()
+	}
+	if cfg.DesktopPricingFollowsDetectedLocale() {
+		return a.desktopAutoPricingCurrency()
+	}
+	return cfg.DeepSeekOfficialPricingCurrency()
+}
+
+func (a *App) desktopOfficialPricingLanguage(cfg *config.Config) string {
+	if a.desktopEffectivePricingCurrency(cfg) == "CNY" {
+		return "zh"
+	}
+	return "en"
+}
+
 // SetTrayLocale mirrors the resolved desktop UI language into the native tray
 // menu. It is runtime-only; the persisted preference remains [desktop].language.
 func (a *App) SetTrayLocale(locale string) error {
-	if locale != "zh" {
-		locale = "en"
+	previousCurrency := a.desktopAutoPricingCurrency()
+	a.setDesktopLocale(locale)
+	pricingCurrencyChanged := previousCurrency != a.desktopAutoPricingCurrency()
+	trayLocale := "en"
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(locale)), "zh") {
+		trayLocale = "zh"
 	}
-	a.updateTrayLocale(locale)
+	a.updateTrayLocale(trayLocale)
+	if pricingCurrencyChanged && a.desktopPricingFollowsDetectedLocale() {
+		a.scheduleCurrencyRefreshForAllTabs()
+		a.kickDeferredRebuildRetry()
+	}
+	a.emitProjectTreeChanged()
 	return nil
 }
 

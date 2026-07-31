@@ -1,0 +1,33 @@
+{
+    "remotes": {
+        "http://localhost:1234/draft2020-12/locationIndependentIdentifier.json": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "refToInteger": {
+                    "$ref": "#foo"
+                },
+                "A": {
+                    "$anchor": "foo",
+                    "type": "integer"
+                }
+            }
+        }
+    },
+    "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+             "a": {
+                "$ref": "http://localhost:1234/draft2020-12/locationIndependentIdentifier.json#foo"
+              },
+              "b": {
+                "$ref": "http://localhost:1234/draft2020-12/locationIndependentIdentifier.json#foo"
+              } 
+        }
+    },
+    "data": {
+        "a": 1,
+        "b": "hello"
+    },
+    "valid": false
+}

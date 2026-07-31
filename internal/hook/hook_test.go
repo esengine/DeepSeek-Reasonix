@@ -70,7 +70,12 @@ func requireNode(t *testing.T) {
 // built test binary can stall for seconds on a loaded machine, and these
 // tests assert behavior, not latency. Tests asserting the timeout path keep
 // their own tight budgets — that direction cannot flake under load.
-const realSpawnTimeout = 15 * time.Second
+//
+// 15s proved insufficient on a loaded Windows GitHub runner
+// (TestLoadNormalizesQuotedNodeEvalHooksPerProject timed out at 15.03s in
+// CI), so the budget is 60s; the ceiling only fires on a genuine hang, so
+// a larger value costs nothing when children exit normally.
+const realSpawnTimeout = 60 * time.Second
 
 const sampleSettings = `{"hooks":{"PreToolUse":[{"match":"bash","command":"echo pre"}],"Stop":[{"command":"echo stop"}]}}`
 
@@ -423,6 +428,101 @@ func TestLoadSuperpowersV611SessionStartExecutionContract(t *testing.T) {
 	}
 	if h.Cwd != root || h.PayloadFormat != "claude" || h.Env["CLAUDE_PLUGIN_ROOT"] != root {
 		t.Fatalf("Claude execution metadata = %+v", h)
+	}
+}
+
+func TestLoadSuperpowersV620PreservesExplicitBashRequirement(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".reasonix", "plugins", "superpowers")
+	writeHookTestFile(t, filepath.Join(root, pluginpkg.CodexManifest), `{
+  "name": "superpowers",
+  "version": "6.2.0",
+  "skills": "./skills/"
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "startup|clear|compact",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start",
+        "shell": "bash",
+        "async": false
+      }]
+    }]
+  }
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "run-hook.cmd"), "@echo off\r\n")
+	if err := pluginpkg.Upsert(filepath.Join(home, ".reasonix"), pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "6.2.0",
+		ManifestKind: "codex",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Load(LoadOptions{HomeDir: home, ProjectRoot: filepath.Join(home, "workspace")})
+	if len(got) != 1 {
+		t.Fatalf("hooks = %+v, want the upstream superpowers 6.2.0 SessionStart hook", got)
+	}
+	h := got[0]
+	if h.ExecutionMode != ExecutionShell || h.Shell != "bash" || h.Argv != nil {
+		t.Fatalf("execution contract = mode %q shell %q argv %#v, want explicit Bash shell form",
+			h.ExecutionMode, h.Shell, h.Argv)
+	}
+	if !requiresWindowsBash(h.HookConfig) {
+		t.Fatal("superpowers 6.2.0 hook should declare a Windows Bash runtime dependency")
+	}
+	if want := `"` + filepath.ToSlash(root) + `/hooks/run-hook.cmd" session-start`; h.Command != want {
+		t.Fatalf("command = %q, want %q", h.Command, want)
+	}
+}
+
+func TestPluginExplicitBashCommandUsesPOSIXCompatibleRoot(t *testing.T) {
+	root := `C:\Users\Test User\AppData\Roaming\reasonix\plugins\superpowers`
+	config := pluginHookExecutionConfigForPlatform(pluginpkg.Hook{
+		Command:      `"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start`,
+		ShellCommand: true,
+		Shell:        "bash",
+	}, root, "windows")
+	want := `"C:/Users/Test User/AppData/Roaming/reasonix/plugins/superpowers/hooks/run-hook.cmd" session-start`
+	if config.Command != want {
+		t.Fatalf("explicit Bash command = %q, want POSIX-compatible root %q", config.Command, want)
+	}
+}
+
+func TestExplicitBashRuntimeUsesConfiguredPath(t *testing.T) {
+	wantPath := filepath.Join(t.TempDir(), "PortableGit", "bin", "bash.exe")
+	var resolvedPath string
+	options := RuntimeOptionsForShell("bash", wantPath)
+	err := checkRuntimeForPlatform(HookConfig{
+		Command:       `"C:\\Users\\Test User\\plugins\\superpowers\\hooks\\run-hook.cmd" session-start`,
+		ExecutionMode: ExecutionShell,
+		Shell:         "bash",
+	}, options, "windows", func(path string) (string, error) {
+		resolvedPath = path
+		return path, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedPath != wantPath {
+		t.Fatalf("resolved Bash path = %q, want configured path %q", resolvedPath, wantPath)
+	}
+}
+
+func TestExplicitBashRuntimeReportsMissingDependency(t *testing.T) {
+	err := checkRuntimeForPlatform(HookConfig{
+		Command:       `"C:\\Users\\Test User\\plugins\\superpowers\\hooks\\run-hook.cmd" session-start`,
+		ExecutionMode: ExecutionShell,
+		Shell:         "bash",
+	}, RuntimeOptions{}, "windows", func(string) (string, error) {
+		return "", missingWindowsHookBashError()
+	})
+	if err == nil || !strings.Contains(err.Error(), "Git Bash") {
+		t.Fatalf("missing Bash runtime error = %v", err)
 	}
 }
 

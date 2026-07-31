@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <script src="../dist/svg-pan-zoom.js"></script>
+  </head>
+
+  <body>
+    <h1>Demo for svg-pan-zoom: SVG in HTML 'object' element</h1>
+    <object id="demo-tiger" type="image/svg+xml" data="tiger.svg" style="width: 500px; height: 500px; border:1px solid black; ">Your browser does not support SVG</object>
+    <div class="controls">
+      <button id="zoom-in">Zoom in</button>
+      <button id="zoom-out">Zoom out</button>
+      <button id="reset">Reset</button>
+    </div>
+
+    <script>
+      // Don't use window.onLoad like this in production, because it can only listen to one function.
+      window.onload = function() {
+        var panZoom = svgPanZoom('#demo-tiger', {
+          zoomEnabled: true,
+          controlIconsEnabled: false
+        });
+
+        document.getElementById('zoom-in').addEventListener('click', function(ev){
+          ev.preventDefault()
+
+          panZoom.zoomIn()
+        });
+
+        document.getElementById('zoom-out').addEventListener('click', function(ev){
+          ev.preventDefault()
+
+          panZoom.zoomOut()
+        });
+
+        document.getElementById('reset').addEventListener('click', function(ev){
+          ev.preventDefault()
+
+          panZoom.resetZoom()
+        });
+      };
+    </script>
+
+  </body>
+
+</html>

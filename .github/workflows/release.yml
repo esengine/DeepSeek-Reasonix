@@ -49,6 +49,13 @@ on:
 permissions:
   contents: write # create the release and upload archives
 
+concurrency:
+  # A channel pointer is a monotonic public state machine. Serialize all
+  # publishers for the same channel so an older recovery run cannot pass its
+  # read-before-write window after a newer release has published.
+  group: release-cli-${{ inputs.channel || 'stable' }}
+  cancel-in-progress: false
+
 jobs:
   resolve:
     name: resolve CLI release
@@ -216,6 +223,149 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
         run: gh release edit "$TAG" --notes-file /tmp/release-notes.md
+
+      - name: Publish CLI release metadata to R2
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          if [ "$HAS_R2" != "true" ]; then
+            echo "R2 secrets not configured; skipping CLI release metadata"
+            exit 0
+          fi
+
+          channel=""
+          if [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            channel="stable"
+          elif [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$ ]]; then
+            channel="preview"
+          else
+            echo "internal CLI release $TAG; publishing only immutable metadata"
+          fi
+
+          required_assets='[
+            "reasonix-darwin-amd64.tar.gz",
+            "reasonix-darwin-arm64.tar.gz",
+            "reasonix-linux-amd64.tar.gz",
+            "reasonix-linux-arm64.tar.gz",
+            "reasonix-windows-amd64.zip",
+            "reasonix-windows-arm64.zip",
+            "SHA256SUMS"
+          ]'
+          gh api "repos/${{ github.repository }}/releases/tags/$TAG" > /tmp/cli-release.raw.json
+          jq --arg tag "$TAG" --argjson required "$required_assets" '
+            if .tag_name != $tag then error("release tag mismatch") else . end |
+            if .draft then error("draft release cannot be published") else . end |
+            . as $release |
+            ($release.assets | map({key: .name, value: .}) | from_entries) as $assets |
+            if ($required | all(. as $name | $assets[$name] != null))
+            then {
+              tag_name: $release.tag_name,
+              prerelease: $release.prerelease,
+              html_url: $release.html_url,
+              assets: [
+                $required[] as $name |
+                $assets[$name] |
+                {
+                  name: .name,
+                  browser_download_url: .browser_download_url,
+                  size: .size
+                }
+              ]
+            }
+            else error("release is missing one or more required CLI assets")
+            end
+          ' /tmp/cli-release.raw.json > /tmp/cli-release.json
+          if [ -n "$channel" ]; then
+            bash scripts/validate-cli-release-manifest.sh \
+              "$channel" "$TAG" "${{ github.repository }}" /tmp/cli-release.json
+          else
+            bash scripts/validate-cli-release-manifest.sh \
+              any "$TAG" "${{ github.repository }}" /tmp/cli-release.json
+          fi
+
+          endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          validation_channel="${channel:-any}"
+          immutable_key="cli/releases/${TAG}/latest.json"
+          immutable_error="$(mktemp)"
+          if aws s3 cp "s3://${R2_BUCKET}/${immutable_key}" /tmp/cli-release.immutable.json \
+            --endpoint-url "$endpoint" 2>"$immutable_error"; then
+            bash scripts/validate-cli-release-manifest.sh \
+              "$validation_channel" "$TAG" "${{ github.repository }}" \
+              /tmp/cli-release.immutable.json
+            if ! cmp -s /tmp/cli-release.json /tmp/cli-release.immutable.json; then
+              echo "::error::immutable CLI release metadata for $TAG already exists with different content"
+              exit 1
+            fi
+            echo "immutable CLI release metadata for $TAG already exists; preserving it"
+          elif grep -Eiq '404|NoSuchKey|Not Found' "$immutable_error"; then
+            aws s3 cp /tmp/cli-release.json "s3://${R2_BUCKET}/${immutable_key}" \
+              --endpoint-url "$endpoint" \
+              --content-type "application/json; charset=utf-8" \
+              --cache-control "public, max-age=31536000, immutable"
+          else
+            cat "$immutable_error" >&2
+            exit 1
+          fi
+          rm -f "$immutable_error"
+
+          aws s3 cp "s3://${R2_BUCKET}/${immutable_key}" /tmp/cli-release.immutable.json \
+            --endpoint-url "$endpoint"
+          bash scripts/validate-cli-release-manifest.sh \
+            "$validation_channel" "$TAG" "${{ github.repository }}" \
+            /tmp/cli-release.immutable.json
+          cmp -s /tmp/cli-release.json /tmp/cli-release.immutable.json
+
+          if [ -z "$channel" ]; then
+            echo "internal CLI release $TAG; Stable and Preview pointers remain unchanged"
+            exit 0
+          fi
+
+          current_tag=""
+          pointer_error="$(mktemp)"
+          if aws s3 cp "s3://${R2_BUCKET}/cli/${channel}/latest.json" /tmp/cli-release.pointer.json \
+            --endpoint-url "$endpoint" 2>"$pointer_error"; then
+            current_tag="$(jq -er '.tag_name | strings' /tmp/cli-release.pointer.json)"
+            bash scripts/validate-cli-release-manifest.sh \
+              "$channel" "$current_tag" "${{ github.repository }}" /tmp/cli-release.pointer.json
+          elif grep -Eiq '404|NoSuchKey|Not Found' "$pointer_error"; then
+            echo "CLI $channel pointer does not exist yet"
+          else
+            cat "$pointer_error" >&2
+            exit 1
+          fi
+          rm -f "$pointer_error"
+
+          pointer_manifest=-
+          if [ -n "$current_tag" ]; then
+            pointer_manifest=/tmp/cli-release.pointer.json
+          fi
+          pointer_decision="$(
+            bash scripts/decide-cli-pointer-update.sh \
+              "$channel" /tmp/cli-release.json "$pointer_manifest"
+          )"
+          if [ "$pointer_decision" = "skip" ]; then
+            echo "CLI $channel pointer remains ${current_tag:-unset}; candidate $TAG is not newer and needs no repair"
+            exit 0
+          fi
+          aws s3 cp /tmp/cli-release.json "s3://${R2_BUCKET}/cli/${channel}/latest.json" \
+            --endpoint-url "$endpoint" \
+            --content-type "application/json; charset=utf-8" \
+            --cache-control "public, max-age=300, stale-if-error=86400"
+
+          aws s3 cp "s3://${R2_BUCKET}/cli/${channel}/latest.json" /tmp/cli-release.pointer.json \
+            --endpoint-url "$endpoint"
+          bash scripts/validate-cli-release-manifest.sh \
+            "$channel" "$TAG" "${{ github.repository }}" /tmp/cli-release.pointer.json
+          cmp -s /tmp/cli-release.json /tmp/cli-release.pointer.json
+          echo "CLI $channel pointer -> $TAG"
 
       - name: Attach desktop manifest compatibility asset
         env:

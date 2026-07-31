@@ -1,0 +1,193 @@
+================================
+declaration specs
+================================
+
+struct __declspec(dllexport) s2
+{
+};
+
+union __declspec(noinline) u2 {
+};
+
+---
+
+(translation_unit
+  (struct_specifier
+    (ms_declspec_modifier
+      (identifier))
+    name: (type_identifier)
+    body: (field_declaration_list))
+  (union_specifier
+    (ms_declspec_modifier
+      (identifier))
+    name: (type_identifier)
+    body: (field_declaration_list)))
+
+================================
+pointers
+================================
+
+struct s2
+{
+    int * __restrict x;
+    int * __sptr psp;
+    int * __uptr pup;
+    int * __unaligned pup;
+};
+
+void sum2(int n, int * __restrict a, int * __restrict b,
+          int * c, int * d) {
+   int i;
+   for (i = 0; i < n; i++) {
+      a[i] = b[i] + c[i];
+      c[i] = b[i] + d[i];
+    }
+}
+
+void MyFunction(char * __uptr myValue);
+
+---
+
+(translation_unit
+  (struct_specifier
+    name: (type_identifier)
+    body: (field_declaration_list
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_restrict_modifier))
+          declarator: (field_identifier)))
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_signed_ptr_modifier))
+          declarator: (field_identifier)))
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_unsigned_ptr_modifier))
+          declarator: (field_identifier)))
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_unaligned_ptr_modifier))
+          declarator: (field_identifier)))))
+  (function_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (identifier))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            (ms_pointer_modifier
+              (ms_restrict_modifier))
+            declarator: (identifier)))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            (ms_pointer_modifier
+              (ms_restrict_modifier))
+            declarator: (identifier)))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            declarator: (identifier)))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            declarator: (identifier)))))
+    body: (compound_statement
+      (declaration
+        type: (primitive_type)
+        declarator: (identifier))
+      (for_statement
+        initializer: (assignment_expression
+          left: (identifier)
+          right: (number_literal))
+        condition: (binary_expression
+          left: (identifier)
+          right: (identifier))
+        update: (update_expression
+          argument: (identifier))
+        body: (compound_statement
+          (expression_statement
+            (assignment_expression
+              left: (subscript_expression
+                argument: (identifier)
+                indices: (subscript_argument_list
+                  (identifier)))
+              right: (binary_expression
+                left: (subscript_expression
+                  argument: (identifier)
+                  indices: (subscript_argument_list
+                    (identifier)))
+                right: (subscript_expression
+                  argument: (identifier)
+                  indices: (subscript_argument_list
+                    (identifier))))))
+          (expression_statement
+            (assignment_expression
+              left: (subscript_expression
+                argument: (identifier)
+                indices: (subscript_argument_list
+                  (identifier)))
+              right: (binary_expression
+                left: (subscript_expression
+                  argument: (identifier)
+                  indices: (subscript_argument_list
+                    (identifier)))
+                right: (subscript_expression
+                  argument: (identifier)
+                  indices: (subscript_argument_list
+                    (identifier))))))))))
+  (declaration
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            (ms_pointer_modifier
+              (ms_unsigned_ptr_modifier))
+            declarator: (identifier)))))))
+
+================================
+call modifiers
+================================
+
+__cdecl void mymethod(){
+    return;
+}
+
+__fastcall void mymethod(){
+    return;
+}
+
+---
+
+(translation_unit
+  (function_definition
+    (ms_call_modifier)
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement
+      (return_statement)))
+  (function_definition
+    (ms_call_modifier)
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement
+      (return_statement))))

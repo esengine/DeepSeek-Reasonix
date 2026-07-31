@@ -131,16 +131,21 @@ var English = Messages{
 	DiffFoldEnabledFmt:                     "diff folded to %d lines (/diff-fold to expand)",
 	DiffFoldDisabled:                       "diff expanded — showing all lines (/diff-fold to fold)",
 
-	OutputStyleNone:    "no output styles available",
-	OutputStyleHeader:  "output styles:",
-	OutputStyleHint:    "set agent.output_style in reasonix.toml to apply one (takes effect next session)",
-	ThemeHeader:        "themes:",
-	ThemeHint:          "switch with /theme <auto|light|dark|style>",
-	ThemeChangedFmt:    "theme switched to %s / %s",
-	ThemeUnknownFmt:    "unknown theme %q",
-	LanguageHeader:     "languages:",
-	LanguageHint:       "switch with /language <auto|en|zh>",
-	LanguageChangedFmt: "language set to %s (resolved: %s)",
+	OutputStyleNone:           "no output styles available",
+	OutputStyleHeader:         "output styles:",
+	OutputStyleHint:           "set agent.output_style in reasonix.toml to apply one (takes effect next session)",
+	ThemeHeader:               "themes:",
+	ThemeHint:                 "switch with /theme <auto|light|dark|style>",
+	ThemeChangedFmt:           "theme switched to %s / %s",
+	ThemeUnknownFmt:           "unknown theme %q",
+	LanguageHeader:            "languages:",
+	LanguageHint:              "switch with /language <auto|en|zh>",
+	LanguageChangedFmt:        "language set to %s (resolved: %s)",
+	CurrencyHeader:            "pricing currency:",
+	CurrencyHint:              "switch with /currency <auto|CNY|USD>",
+	CurrencyChangedFmt:        "pricing currency set to %s (resolved: %s)",
+	RuntimeRefreshBusy:        "finish or cancel active work and stop background jobs before changing this setting",
+	RuntimeRefreshUnavailable: "runtime refresh is unavailable in this session",
 
 	CompactionWorking: "compacting conversation…",
 	CompactionTitle:   "Context compacted",
@@ -239,7 +244,7 @@ var English = Messages{
 	CmdModel:            "switch model",
 	CmdStatus:           "show session status",
 	CmdWorkMode:         "switch work mode",
-	CmdMemory:           "show memory files",
+	CmdMemory:           "inspect instructions, memory, and recovery",
 	CmdMigrate:          "retry legacy data migration",
 	CmdGoal:             "set or clear the active goal",
 	CmdRemember:         "save a memory note",
@@ -252,6 +257,7 @@ var English = Messages{
 	CmdOutputStyle:      "list output styles",
 	CmdTheme:            "switch CLI theme",
 	CmdLanguage:         "switch CLI language",
+	CmdCurrency:         "switch pricing currency",
 	CmdSkill:            "manage skills",
 	CmdVerbose:          "toggle thinking text",
 	CmdReloadCmd:        "reload custom commands",
@@ -505,6 +511,31 @@ var English = Messages{
 	UpgradeApplyFailed:         "failed to apply update: %v",
 	UpgradeSuccessFmt:          "Updated %s → %s",
 
+	ReportNoPending:           "No pending CLI crash reports.",
+	ReportHeaderFmt:           "CLI crash report %s",
+	ReportCapturedFmt:         "Captured: %s",
+	ReportPreviewOnlyFmt:      "Preview only. Run `reasonix report send %s` to send this report.",
+	ReportSendPrompt:          "Send this sanitized report to crash.reasonix.io?",
+	ReportKept:                "Report kept locally.",
+	ReportDeletedFmt:          "Deleted CLI crash report %s.",
+	ReportSentFmt:             "Sent CLI crash report %s.",
+	ReportSafeModeBlocked:     "crash reports cannot be sent in Safe Mode; the local report was kept",
+	ReportConfigFailedFmt:     "cannot load network configuration: %v",
+	ReportUploadFailedFmt:     "report upload failed; the local report was kept: %v",
+	ReportSentDeleteFailedFmt: "report was sent but the local copy could not be deleted: %v",
+	ReportUsageBody: `Usage:
+  reasonix report                 preview the newest local report and confirm sending
+  reasonix report list            list local CLI crash reports
+  reasonix report show [ID]       preview a report (newest when ID is omitted)
+  reasonix report send [ID]       send a reviewed report and delete it after success
+  reasonix report delete [ID]     delete a local report without sending`,
+
+	CLITelemetryConsentNotice:           "Reasonix can send anonymous, content-free CLI usage statistics to crash.reasonix.io: a random install ID, version, OS, and fixed quality buckets. It never sends prompts, answers, code, paths, model or tool content, or environment variables. You can disable this later with `reasonix config telemetry off`.",
+	CLITelemetryConsentPrompt:           "Allow anonymous CLI usage statistics?",
+	CLITelemetryConsentInvalid:          "Please answer y or n.",
+	CLITelemetryConsentSaveFailedFmt:    "CLI telemetry remains disabled because the preference could not be saved: %v",
+	CLITelemetryConsentCleanupFailedFmt: "CLI telemetry is disabled, but pending statistics could not be deleted: %v",
+
 	UsageBody: `reasonix — a config- and plugin-driven coding agent (multi-model)
 
 Usage:
@@ -517,6 +548,8 @@ Usage:
   reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
   reasonix config reasoning-language [auto|zh|en]        configure visible reasoning language
+  reasonix config telemetry [auto|on|off]                configure content-free CLI usage metrics
+  reasonix report [list|show|send|delete] [ID]           review and explicitly send local CLI crash reports
   reasonix mcp <add|remove|list|import>                 manage MCP servers in reasonix.toml
   reasonix subagent <list|create|edit|delete|try|run>   manage and run isolated subagent profiles
   reasonix init                                         show how to generate project memory (AGENTS.md)
@@ -528,7 +561,7 @@ Usage:
   reasonix hook list|status --json [--dir PATH]         inspect redacted hook state
   reasonix task list|show --json [--dir PATH]           inspect redacted task state
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
-  reasonix upgrade [--check] [--force]                   self-update to the latest release (also: reasonix update)
+  reasonix upgrade [stable|preview] [--check] [--force]  self-update on the saved channel (advanced: --channel; also: reasonix update)
   reasonix version
   reasonix help
 

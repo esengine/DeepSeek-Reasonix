@@ -12,12 +12,18 @@ Tool permission is independent of collaboration mode:
 | Mode | Behavior | Good for | Not ideal for |
 | --- | --- | --- | --- |
 | Ask | Request approval before controlled tools (writes, commands, etc.). | Unfamiliar repos, high-risk edits, production-related work, step-by-step review. | Many low-risk repeated operations, or when you already trust continuous execution. |
-| Auto | Auto-approve ordinary tool permissions; explicit `ask` / `deny` rules, plan confirmation, and memory write/delete still apply. | Daily code reading, small fixes, tests, normal implementation in a trusted workspace. | When you want every write or command confirmed by hand. |
+| Auto | Auto-approve ordinary tool permissions; explicit `ask` / `deny` rules and plan confirmation still apply. A bounded new project/reference memory can use the safe create-only path; other memory mutations still ask. | Daily code reading, small fixes, tests, normal implementation in a trusted workspace. | When you want every write or command confirmed by hand. |
 | Yolo | Skip ordinary tool permission prompts so writes and commands run with fewer interruptions; `deny` rules, plan confirmation, ask questions, and forced fresh approvals still apply. | Temporary branches, roll-backable worktrees, bulk mechanical edits after a confirmed plan. | Production, sensitive files, delete/publish/push, or unclear requirements. |
 
 ## Ask mode
 
 Ask is the most conservative tool-permission mode. When Reasonix needs approval for a tool call, an approval card appears so you can allow once, allow for the session, always allow, or deny.
+
+Dynamic Bash never inherits a broader Bash, prefix, or glob rule. Parameter/arithmetic expansions,
+assignments, redirects, heredocs, and globs still follow the normal mode
+fallback, while nested/indirect execution requires this human approval path in
+interactive Ask and Auto. Reusable choices save the identical complete command
+as `Bash=<literal>`.
 
 ### Approval card shortcuts
 
@@ -37,7 +43,11 @@ Auto still respects:
 - Explicit `deny` rules.
 - Explicit `ask` rules.
 - Plan-mode “start execution” confirmation.
-- Fresh human approval for memory write/delete (`remember` / `forget`).
+- Fresh human approval for global, preference, feedback, update, duplicate,
+  sensitive, or oversized `remember` calls, and every `forget`. A new bounded,
+  non-sensitive project/reference fact can be classified as create-only and
+  saved without a prompt.
+- Human approval for nested or indirect Bash execution, even inside an approved-plan execution window. Guardian and allowing hooks cannot replace it; parameter/arithmetic expansions, assignments, redirects, and globs remain on Auto's fast path.
 - MCP destructive calls when the effective policy is `auto`, `prompt`, or `writes`.
 - Ask questions (never auto-answered).
 
@@ -57,6 +67,7 @@ Auto is designed as a behavior, not another feature to configure:
 - **Try another approach**, Plan **Start execution**, a real tool-permission mode change, and a new ordinary user message each open a fresh Episode. Goal auto-continues and sub-agents inherit the current Episode. Explicit **Continue task** grants stay on TaskScope across Episode rotation.
 - Reviewer unavailability does not turn ordinary recovery into a prompt. A detected structured plan transition is handed to the user rather than silently decided by Auto.
 - Headless runs fail closed when a genuine plan decision is required.
+- Headless Ask/Auto/DontAsk also fail closed on nested or indirect Bash unless the identical `Bash=<literal>` was explicitly granted.
 - These boundaries are effective only in Auto. Ask and YOLO keep their existing approval semantics, and there is no separate safety setting to learn.
 
 Auto is not a filesystem snapshot or rollback mechanism. Use a clean Git branch or disposable worktree when changes must be reversible. Plan decides whether to start; Auto handles ordinary execution afterward.
@@ -66,6 +77,9 @@ Auto Guard has no writer-tool allowlist or reset ritual for users to manage. Per
 ## Yolo mode
 
 Yolo maximizes continuous execution. Ordinary tool permission prompts are skipped so writes and commands interrupt less.
+
+Yolo is the only approval posture that may bypass the nested/indirect-Bash human
+requirement. It still does not bypass explicit `deny` rules or the sandbox.
 
 ### How to enable
 

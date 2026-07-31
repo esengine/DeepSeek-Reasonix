@@ -166,6 +166,7 @@ func (m *chatTUI) slashArgData() control.ArgData {
 		data.DisabledSkills = m.ctrl.DisabledSkills()
 		data.ConfiguredMCP = m.ctrl.ConfiguredMCPNames()
 		data.DisconnectedMCP = m.ctrl.DisconnectedMCPNames()
+		data.MemoryRefs, data.MemoryArchives = control.MemoryCompletionData(m.ctrl.Memory())
 	}
 	if m.host != nil {
 		data.ServerNames = m.host.ServerNames()
@@ -179,7 +180,7 @@ func (m *chatTUI) explicitSubcommandItems(val string) ([]compItem, int, bool) {
 		return nil, 0, false
 	}
 	switch cmd {
-	case "/mcp", "/skill", "/skills", "/plugin", "/plugins":
+	case "/mcp", "/skill", "/skills", "/plugin", "/plugins", "/memory":
 	default:
 		return nil, 0, false
 	}
@@ -203,7 +204,7 @@ func (m *chatTUI) bareSubcommandSpace(val string) bool {
 		return false
 	}
 	switch fields[0] {
-	case "/mcp", "/skill", "/skills", "/plugin", "/plugins":
+	case "/mcp", "/skill", "/skills", "/plugin", "/plugins", "/memory":
 		return true
 	default:
 		return false

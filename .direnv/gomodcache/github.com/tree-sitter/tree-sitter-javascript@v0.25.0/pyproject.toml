@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=62.4.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tree-sitter-javascript"
+description = "JavaScript grammar for tree-sitter"
+version = "0.25.0"
+keywords = ["incremental", "parsing", "tree-sitter", "javascript"]
+classifiers = [
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Compilers",
+  "Topic :: Text Processing :: Linguistic",
+  "Typing :: Typed",
+]
+authors = [
+  { name = "Max Brunsfeld", email = "maxbrunsfeld@gmail.com" },
+  { name = "Amaan Qureshi", email = "amaanq12@gmail.com" },
+]
+requires-python = ">=3.10"
+license.text = "MIT"
+readme = "README.md"
+
+[project.urls]
+Homepage = "https://github.com/tree-sitter/tree-sitter-javascript"
+
+[project.optional-dependencies]
+core = ["tree-sitter~=0.24"]
+
+[tool.cibuildwheel]
+build = "cp310-*"
+build-frontend = "build"

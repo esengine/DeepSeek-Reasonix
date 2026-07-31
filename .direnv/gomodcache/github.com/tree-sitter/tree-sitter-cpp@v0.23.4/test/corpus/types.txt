@@ -1,0 +1,188 @@
+==========================================
+The auto type
+==========================================
+
+void foo() {
+  auto x = 1;
+}
+
+---
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator (identifier) (parameter_list))
+    (compound_statement
+      (declaration (placeholder_type_specifier (auto)) (init_declarator (identifier) (number_literal))))))
+
+==========================================
+Namespaced types
+==========================================
+
+std::string my_string;
+std::vector<int>::size_typ my_string;
+
+---
+
+(translation_unit
+  (declaration
+    (qualified_identifier (namespace_identifier) (type_identifier))
+    (identifier))
+  (declaration
+    (qualified_identifier
+      (namespace_identifier)
+      (qualified_identifier
+        (template_type
+          (type_identifier)
+          (template_argument_list (type_descriptor (primitive_type))))
+        (type_identifier)))
+    (identifier)))
+
+==========================================
+Dependent type names
+==========================================
+
+template<typename T>
+struct X : B<T>
+{
+    typename T::A* pa;
+};
+
+---
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list (type_parameter_declaration (type_identifier)))
+    (struct_specifier
+      (type_identifier)
+      (base_class_clause
+        (template_type (type_identifier) (template_argument_list (type_descriptor (type_identifier)))))
+      (field_declaration_list
+        (field_declaration
+          (dependent_type (qualified_identifier (namespace_identifier) (type_identifier)))
+          (pointer_declarator (field_identifier)))))))
+
+==========================================
+Template types with empty argument lists
+==========================================
+
+use_future_t<> use_future;
+
+---
+
+(translation_unit
+  (declaration (template_type (type_identifier) (template_argument_list)) (identifier)))
+
+================================
+Function types as template arguments
+================================
+
+typedef std::function<T(int)> MyFunc;
+typedef std::function<void(int)> b;
+
+---
+
+(translation_unit
+  (type_definition
+    (qualified_identifier
+      (namespace_identifier)
+      (template_type
+        (type_identifier)
+        (template_argument_list
+          (type_descriptor
+            (type_identifier)
+            (abstract_function_declarator (parameter_list
+              (parameter_declaration (primitive_type))))))))
+    (type_identifier))
+  (type_definition
+    (qualified_identifier
+      (namespace_identifier)
+      (template_type
+        (type_identifier)
+        (template_argument_list
+          (type_descriptor
+            (primitive_type)
+            (abstract_function_declarator (parameter_list
+              (parameter_declaration (primitive_type))))))))
+    (type_identifier)))
+
+====================================================
+Decltype
+====================================================
+
+decltype(A) x;
+decltype(B) foo(void x, decltype(C) y);
+template<typename T, typename U> auto add(T t, U u) -> decltype(t + u);
+array<decltype(foo)::type, 5> arr;
+
+---
+
+(translation_unit
+  (declaration
+    (decltype (identifier))
+    (identifier))
+  (declaration
+    (decltype (identifier))
+    (function_declarator (identifier)
+      (parameter_list
+        (parameter_declaration (primitive_type) (identifier))
+        (parameter_declaration (decltype (identifier)) (identifier)))))
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration (type_identifier)) (type_parameter_declaration (type_identifier)))
+    (declaration
+      (placeholder_type_specifier (auto))
+      (function_declarator
+        (identifier)
+        (parameter_list
+          (parameter_declaration (type_identifier) (identifier))
+          (parameter_declaration (type_identifier) (identifier)))
+        (trailing_return_type
+          (type_descriptor
+            (decltype (binary_expression (identifier) (identifier))))))))
+  (declaration
+    (template_type
+      (type_identifier)
+      (template_argument_list
+        (type_descriptor
+          (qualified_identifier
+            (decltype (identifier))
+            (type_identifier)))
+        (number_literal)))
+    (identifier)))
+
+====================================================
+Trailing return type
+====================================================
+
+auto a::foo() const -> const A<B>& {}
+auto b::foo() const -> A<B> const& {}
+
+---
+
+(translation_unit
+  (function_definition
+    (placeholder_type_specifier (auto))
+    (function_declarator
+      (qualified_identifier (namespace_identifier) (identifier))
+      (parameter_list)
+      (type_qualifier)
+      (trailing_return_type
+        (type_descriptor
+          (type_qualifier)
+          (template_type (type_identifier) (template_argument_list (type_descriptor (type_identifier))))
+          (abstract_reference_declarator))))
+      (compound_statement))
+  (function_definition
+    (placeholder_type_specifier (auto))
+    (function_declarator
+      (qualified_identifier (namespace_identifier) (identifier))
+      (parameter_list)
+      (type_qualifier)
+      (trailing_return_type
+        (type_descriptor
+          (template_type (type_identifier) (template_argument_list (type_descriptor (type_identifier))))
+          (type_qualifier)
+          (abstract_reference_declarator))))
+    (compound_statement))
+)

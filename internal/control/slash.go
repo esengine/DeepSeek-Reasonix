@@ -39,6 +39,8 @@ type ArgData struct {
 	ProviderNames   []string
 	CurrentProvider string
 	PluginNames     []string
+	MemoryRefs      []string
+	MemoryArchives  []string
 }
 
 // SlashArgItems completes the arguments of a management slash command
@@ -46,7 +48,7 @@ type ArgData struct {
 // the token being typed and the byte offset where that token begins, so a caller
 // replaces just that token. Only structured commands participate (/mcp /model
 // /skills /plugins /hooks /effort /goal /reasoning-language
-// /theme /language);
+// /theme /language /currency /memory);
 // others yield nil. Single source of truth for CLI + desktop.
 func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 	cmdEnd := strings.IndexAny(line, " \t")
@@ -80,10 +82,48 @@ func SlashArgItems(line string, d ArgData) ([]SlashItem, int) {
 		raw = themeArgItems(prior)
 	case "/language":
 		raw = languageArgItems(prior)
+	case "/currency":
+		raw = currencyArgItems(prior)
+	case "/memory":
+		raw = memoryArgItems(prior, d)
 	default:
 		return nil, from
 	}
 	return filterSlash(raw, line, from, cur), from
+}
+
+func memoryArgItems(prior []string, d ArgData) []SlashItem {
+	if len(prior) <= 1 {
+		return []SlashItem{
+			{Label: "recall", Insert: "recall", Hint: "show the latest automatic recall decision"},
+			{Label: "revisions", Insert: "revisions ", Hint: "show revision history", Descend: true},
+			{Label: "restore", Insert: "restore ", Hint: "restore an older revision", Descend: true},
+			{Label: "archived", Insert: "archived", Hint: "show archived facts"},
+			{Label: "recover", Insert: "recover ", Hint: "recover an archived fact", Descend: true},
+			{Label: "instructions", Insert: "instructions", Hint: "show precedence, imports, and diagnostics"},
+		}
+	}
+	switch prior[1] {
+	case "revisions", "restore":
+		if len(prior) != 2 {
+			return nil
+		}
+		items := make([]SlashItem, 0, len(d.MemoryRefs))
+		for _, ref := range d.MemoryRefs {
+			items = append(items, SlashItem{Label: ref, Insert: ref})
+		}
+		return items
+	case "recover":
+		if len(prior) != 2 {
+			return nil
+		}
+		items := make([]SlashItem, 0, len(d.MemoryArchives))
+		for _, path := range d.MemoryArchives {
+			items = append(items, SlashItem{Label: path, Insert: `"` + path + `"`})
+		}
+		return items
+	}
+	return nil
 }
 
 func goalArgItems(prior []string) []SlashItem {
@@ -117,6 +157,17 @@ func languageArgItems(prior []string) []SlashItem {
 		{Label: "auto", Insert: "auto", Hint: i18n.M.ArgLanguageAuto},
 		{Label: "en", Insert: "en", Hint: i18n.M.ArgLanguageEn},
 		{Label: "zh", Insert: "zh", Hint: i18n.M.ArgLanguageZh},
+	}
+}
+
+func currencyArgItems(prior []string) []SlashItem {
+	if len(prior) != 1 {
+		return nil
+	}
+	return []SlashItem{
+		{Label: "auto", Insert: "auto", Hint: "follow the resolved CLI locale"},
+		{Label: "CNY", Insert: "CNY", Hint: "Chinese yuan pricing"},
+		{Label: "USD", Insert: "USD", Hint: "US dollar pricing"},
 	}
 }
 
@@ -385,7 +436,8 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			c.notice(c.providerListText())
 		}
 	case "/memory":
-		c.notice(c.memoryListText())
+		args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+		c.notice(MemoryCommandText(c, args))
 	case "/migrate", "/migration":
 		args := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
 		migration.RunLegacyRescueCommand(args, c.sink)
@@ -558,59 +610,6 @@ func (c *Controller) providerSwitchText(name string) string {
 		}
 	}
 	return fmt.Sprintf(i18n.M.ProviderUnknownFmt, name)
-}
-
-func (c *Controller) memoryListText() string {
-	mem := c.memory.current()
-	if mem == nil {
-		return i18n.M.ListMemoryNone
-	}
-	saved := mem.Store.List()
-	archived := mem.Store.ListArchived()
-	if len(mem.Docs) == 0 && len(saved) == 0 && len(archived) == 0 {
-		return i18n.M.ListMemoryNone
-	}
-	var b strings.Builder
-	if len(mem.Docs) > 0 {
-		b.WriteString(i18n.M.ListMemoryHeader + "\n")
-		for _, d := range mem.Docs {
-			fmt.Fprintf(&b, "  (%s) %s\n", d.Scope, d.Path)
-		}
-	}
-	if len(saved) > 0 {
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(i18n.M.ListMemorySaved + "\n")
-		for _, m := range saved {
-			fmt.Fprintf(&b, "  [%s](%s.md) (%s) %s\n", memoryDisplayTitle(m.Title, m.Name), m.Name, m.Type, memoryOneLine(m.Description))
-		}
-	}
-	if len(archived) > 0 {
-		if b.Len() > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(i18n.M.ListMemoryArchived + "\n")
-		for _, m := range archived {
-			when := ""
-			if !m.ArchivedAt.IsZero() {
-				when = " — " + m.ArchivedAt.Format("2006-01-02 15:04:05Z")
-			}
-			fmt.Fprintf(&b, "  [%s](%s) (%s)%s %s\n", memoryDisplayTitle(m.Title, m.Name), m.Path, m.Type, when, memoryOneLine(m.Description))
-		}
-	}
-	return strings.TrimRight(b.String(), "\n")
-}
-
-func memoryDisplayTitle(title, name string) string {
-	if t := memoryOneLine(title); t != "" {
-		return t
-	}
-	return strings.ReplaceAll(name, "-", " ")
-}
-
-func memoryOneLine(s string) string {
-	return strings.Join(strings.Fields(s), " ")
 }
 
 func (c *Controller) skillListText() string {

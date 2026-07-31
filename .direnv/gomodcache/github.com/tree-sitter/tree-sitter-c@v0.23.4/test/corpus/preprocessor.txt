@@ -1,0 +1,449 @@
+================================================================================
+Include directives
+================================================================================
+
+#include "some/path.h"
+#include <stdint.h>
+#include MACRO
+#include MACRO(arg1, arg2)
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_include
+    path: (string_literal
+      (string_content)))
+  (preproc_include
+    path: (system_lib_string))
+  (preproc_include
+    path: (identifier))
+  (preproc_include
+    path: (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (identifier)
+        (identifier)))))
+
+================================================================================
+Object-like macro definitions
+================================================================================
+
+#define ONE
+    #define TWO int a = b;
+#define THREE \
+  c == d ? \
+  e : \
+  f
+#define FOUR (mno * pq)
+#define FIVE(a,b) x \
+                  + y
+#define SIX(a,   \
+            b) x \
+               + y
+#define SEVEN 7/* seven has an
+                * annoying comment */
+#define EIGHT(x) do { \
+        x = x + 1;  \
+        x = x / 2;  \
+    } while (x > 0);
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_def
+    name: (identifier))
+  (preproc_def
+    name: (identifier)
+    value: (preproc_arg))
+  (preproc_def
+    name: (identifier)
+    value: (preproc_arg))
+  (preproc_def
+    name: (identifier)
+    value: (preproc_arg))
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params
+      (identifier)
+      (identifier))
+    value: (preproc_arg))
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params
+      (identifier)
+      (identifier))
+    value: (preproc_arg))
+  (preproc_def
+    name: (identifier)
+    value: (preproc_arg)
+    (comment))
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params
+      (identifier))
+    value: (preproc_arg)))
+
+================================================================================
+Function-like macro definitions
+================================================================================
+
+#define ONE() a
+#define TWO(b) c
+#define THREE(d, e) f
+#define FOUR(...) g
+#define FIVE(h, i, ...) j
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params)
+    value: (preproc_arg))
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params
+      (identifier))
+    value: (preproc_arg))
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params
+      (identifier)
+      (identifier))
+    value: (preproc_arg))
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params)
+    value: (preproc_arg))
+  (preproc_function_def
+    name: (identifier)
+    parameters: (preproc_params
+      (identifier)
+      (identifier))
+    value: (preproc_arg)))
+
+================================================================================
+Ifdefs
+================================================================================
+
+#ifndef DEFINE1
+int j;
+#endif
+
+#ifdef DEFINE2
+ssize_t b;
+#define c 32
+#elif defined DEFINE3
+#else
+int b;
+#define c 16
+#endif
+
+#ifdef DEFINE2
+#else
+#  ifdef DEFINE3
+#  else
+#  endif
+#endif
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_ifdef
+    name: (identifier)
+    (declaration
+      type: (primitive_type)
+      declarator: (identifier)))
+  (preproc_ifdef
+    name: (identifier)
+    (declaration
+      type: (primitive_type)
+      declarator: (identifier))
+    (preproc_def
+      name: (identifier)
+      value: (preproc_arg))
+    alternative: (preproc_elif
+      condition: (preproc_defined
+        (identifier))
+      alternative: (preproc_else
+        (declaration
+          type: (primitive_type)
+          declarator: (identifier))
+        (preproc_def
+          name: (identifier)
+          value: (preproc_arg)))))
+  (preproc_ifdef
+    name: (identifier)
+    alternative: (preproc_else
+      (preproc_ifdef
+        name: (identifier)
+        alternative: (preproc_else)))))
+
+================================================================================
+Elifdefs
+================================================================================
+
+#ifndef DEFINE1
+int j;
+#elifndef DEFINE2
+int k;
+#endif
+
+#ifdef DEFINE2
+ssize_t b;
+#elifdef DEFINE3
+ssize_t c;
+#else
+int b;
+#endif
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_ifdef
+    (identifier)
+    (declaration
+      (primitive_type)
+      (identifier))
+    (preproc_elifdef
+      (identifier)
+      (declaration
+        (primitive_type)
+        (identifier))))
+  (preproc_ifdef
+    (identifier)
+    (declaration
+      (primitive_type)
+      (identifier))
+    (preproc_elifdef
+      (identifier)
+      (declaration
+        (primitive_type)
+        (identifier))
+      (preproc_else
+        (declaration
+          (primitive_type)
+          (identifier))))))
+
+================================================================================
+Mixing #elif and #elifdef
+================================================================================
+
+#ifndef DEFINE1
+int i;
+#elif  defined(DEFINE2)
+int j;
+#endif
+
+#if defined DEFINE3
+int a;
+#elifdef DEFINE4
+int b;
+#else
+int c;
+#endif
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_ifdef
+    name: (identifier)
+    (declaration
+      type: (primitive_type)
+      declarator: (identifier))
+    alternative: (preproc_elif
+      condition: (preproc_defined
+        (identifier))
+      (declaration
+        type: (primitive_type)
+        declarator: (identifier))))
+  (preproc_if
+    condition: (preproc_defined
+      (identifier))
+    (declaration
+      type: (primitive_type)
+      declarator: (identifier))
+    alternative: (preproc_elifdef
+      name: (identifier)
+      (declaration
+        type: (primitive_type)
+        declarator: (identifier))
+      alternative: (preproc_else
+        (declaration
+          type: (primitive_type)
+          declarator: (identifier))))))
+
+================================================================================
+General if blocks
+================================================================================
+
+#if defined(__GNUC__) && defined(__PIC__)
+#define inline inline __attribute__((always_inline))
+#elif defined(_WIN32)
+#define something
+#elif !defined(SOMETHING_ELSE)
+#define SOMETHING_ELSE
+#else
+#include <something>
+#endif
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_if
+    condition: (binary_expression
+      left: (preproc_defined
+        (identifier))
+      right: (preproc_defined
+        (identifier)))
+    (preproc_def
+      name: (identifier)
+      value: (preproc_arg))
+    alternative: (preproc_elif
+      condition: (preproc_defined
+        (identifier))
+      (preproc_def
+        name: (identifier))
+      alternative: (preproc_elif
+        condition: (unary_expression
+          argument: (preproc_defined
+            (identifier)))
+        (preproc_def
+          name: (identifier))
+        alternative: (preproc_else
+          (preproc_include
+            path: (system_lib_string)))))))
+
+================================================================================
+Preprocessor conditionals in functions
+================================================================================
+
+int main() {
+  #if d
+    puts("1");
+  #else
+    puts("2");
+  #endif
+
+  #if a
+    return 0;
+  #elif b
+    return 1;
+  #elif c
+    return 2;
+  #else
+    return 3;
+  #endif
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (preproc_if
+        (identifier)
+        (expression_statement
+          (call_expression
+            (identifier)
+            (argument_list
+              (string_literal
+                (string_content)))))
+        (preproc_else
+          (expression_statement
+            (call_expression
+              (identifier)
+              (argument_list
+                (string_literal
+                  (string_content)))))))
+      (preproc_if
+        (identifier)
+        (return_statement
+          (number_literal))
+        (preproc_elif
+          (identifier)
+          (return_statement
+            (number_literal))
+          (preproc_elif
+            (identifier)
+            (return_statement
+              (number_literal))
+            (preproc_else
+              (return_statement
+                (number_literal)))))))))
+
+================================================================================
+Preprocessor conditionals in struct/union bodies
+================================================================================
+
+struct S {
+#ifdef _WIN32
+  LONG f2;
+#else
+  uint32_t f2;
+#endif
+};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (struct_specifier
+    (type_identifier)
+    (field_declaration_list
+      (preproc_ifdef
+        (identifier)
+        (field_declaration
+          (type_identifier)
+          (field_identifier))
+        (preproc_else
+          (field_declaration
+            (primitive_type)
+            (field_identifier)))))))
+
+================================================================================
+Unknown preprocessor directives
+================================================================================
+
+#pragma mark - UIViewController
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_call
+    directive: (preproc_directive)
+    argument: (preproc_arg)))
+
+================================================================================
+Preprocessor expressions
+================================================================================
+
+#if A(B || C) && \
+    !D(F)
+
+uint32_t a;
+
+#endif
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (preproc_if
+    (binary_expression
+      (call_expression
+        (identifier)
+        (argument_list
+          (binary_expression
+            (identifier)
+            (identifier))))
+      (unary_expression
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)))))
+    (declaration
+      (primitive_type)
+      (identifier))))

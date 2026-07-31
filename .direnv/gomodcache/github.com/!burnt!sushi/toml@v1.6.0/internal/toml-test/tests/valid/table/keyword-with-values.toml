@@ -1,0 +1,11 @@
+[true]
+k = 1
+
+[false]
+k = 2
+
+[inf]
+k = 3
+
+[nan]
+k = 4

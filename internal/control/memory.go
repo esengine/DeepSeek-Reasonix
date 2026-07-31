@@ -1,6 +1,8 @@
 package control
 
 import (
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -32,12 +34,75 @@ type memoryManager struct {
 	// next outgoing turn — never into the cache-stable system prefix — so a fresh
 	// memory takes effect this session without busting the prompt cache; it joins
 	// the prefix naturally on the next session.
-	pending []string
+	pending    []string
+	lastRecall memory.RecallResult
+	autoWrites map[[32]byte]int
 
 	// writeMu serializes memory writes so each write+reload+swap is atomic with
 	// respect to the others. Taken OFF mu, so a read (current/drainPending) never
 	// blocks behind a write's disk I/O.
 	writeMu sync.Mutex
+}
+
+func (m *memoryManager) authorizeAutoRemember(args json.RawMessage) {
+	key := sha256.Sum256(args)
+	m.mu.Lock()
+	if m.autoWrites == nil {
+		m.autoWrites = map[[32]byte]int{}
+	}
+	m.autoWrites[key]++
+	m.mu.Unlock()
+}
+
+func (m *memoryManager) revokeAutoRemember(args json.RawMessage) {
+	key := sha256.Sum256(args)
+	m.mu.Lock()
+	delete(m.autoWrites, key)
+	m.mu.Unlock()
+}
+
+func (m *memoryManager) clearAutoRemember() {
+	m.mu.Lock()
+	m.autoWrites = nil
+	m.mu.Unlock()
+}
+
+func (m *memoryManager) claimAutoRemember(args json.RawMessage) bool {
+	key := sha256.Sum256(args)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.autoWrites[key] <= 0 {
+		return false
+	}
+	if m.autoWrites[key] == 1 {
+		delete(m.autoWrites, key)
+	} else {
+		m.autoWrites[key]--
+	}
+	return true
+}
+
+func (m *memoryManager) recall(query string) memory.RecallResult {
+	mem := m.current()
+	store := memory.Store{}
+	if mem != nil {
+		store = mem.Store
+	}
+	result := memory.AutoRecall(store, query, memory.RecallOptions{})
+	m.recordRecall(result)
+	return result
+}
+
+func (m *memoryManager) recordRecall(result memory.RecallResult) {
+	m.mu.Lock()
+	m.lastRecall = result
+	m.mu.Unlock()
+}
+
+func (m *memoryManager) lastRecallResult() memory.RecallResult {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastRecall
 }
 
 func newMemoryManager(set *memory.Set) memoryManager {
@@ -134,7 +199,7 @@ func (m *memoryManager) saveMemory(fact memory.Memory) (string, error) {
 		return "", err
 	}
 	m.applyWrite(mem,
-		"Saved memory \""+fact.Name+"\": "+strings.Join(strings.Fields(fact.Description), " "))
+		"Saved memory \""+fact.Name+"\": "+strings.Join(strings.Fields(fact.Description), " ")+"\n"+strings.TrimSpace(fact.Body))
 	return path, nil
 }
 
@@ -154,8 +219,48 @@ func (m *memoryManager) forget(name string) error {
 		return err
 	}
 	m.applyWrite(mem,
-		"Forgot memory \""+name+"\" — disregard its line still shown in the saved-memories index until next session.")
+		"Forgot memory \""+name+"\" — disregard its loaded guidance and background-index entry for the rest of this session.")
 	return nil
+}
+
+func (m *memoryManager) revisions(ref string) []memory.Memory {
+	mem := m.current()
+	if mem == nil {
+		return nil
+	}
+	return mem.Store.Revisions(ref)
+}
+
+func (m *memoryManager) restore(ref string, revision int) (memory.Memory, error) {
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+	mem := m.current()
+	if mem == nil {
+		return memory.Memory{}, fmt.Errorf("memory unavailable")
+	}
+	result, err := mem.Store.Restore(ref, revision)
+	if err != nil {
+		return memory.Memory{}, err
+	}
+	m.applyWrite(mem, fmt.Sprintf("Restored memory %q as revision %d: %s\n%s",
+		result.Memory.Name, result.Memory.Revision, strings.Join(strings.Fields(result.Memory.Description), " "), strings.TrimSpace(result.Memory.Body)))
+	return result.Memory, nil
+}
+
+func (m *memoryManager) restoreArchived(archivePath string) (memory.Memory, error) {
+	m.writeMu.Lock()
+	defer m.writeMu.Unlock()
+	mem := m.current()
+	if mem == nil {
+		return memory.Memory{}, fmt.Errorf("memory unavailable")
+	}
+	result, err := mem.Store.RestoreArchived(archivePath)
+	if err != nil {
+		return memory.Memory{}, err
+	}
+	m.applyWrite(mem, fmt.Sprintf("Recovered archived memory %q as revision %d: %s\n%s",
+		result.Memory.Name, result.Memory.Revision, strings.Join(strings.Fields(result.Memory.Description), " "), strings.TrimSpace(result.Memory.Body)))
+	return result.Memory, nil
 }
 
 // queue rides a note on the next turn — the model's remember/forget tool path

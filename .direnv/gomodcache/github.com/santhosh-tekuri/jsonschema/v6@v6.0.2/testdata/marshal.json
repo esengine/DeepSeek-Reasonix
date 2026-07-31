@@ -1,0 +1,172 @@
+[
+	{
+		"description": "4-id",
+		"draft": 4,
+		"schema": {
+			"id": "http://fake.com/a"
+		}
+	},
+	{
+		"description": "id",
+		"schema": {
+			"$id": "http://fake.com/a"
+		}
+	},
+	{
+		"description": "4-id-anchor",
+		"draft": 4,
+		"schema": {
+			"id": "http://fake.com/a#test"
+		}
+	},
+	{
+		"description": "4-anchor",
+		"draft": 4,
+		"schema": {
+			"id": "#test"
+		}
+	},
+	{
+		"description": "anchor",
+		"schema": {
+			"$anchor": "test"
+		}
+	},
+	{
+		"description": "4-emptyschema",
+		"draft": 4,
+		"schema": {}
+	},
+	{
+		"description": "6-emptyschema",
+		"draft": 6,
+		"schema": {},
+		"marshal": true
+	},
+	{
+		"description": "booleanSchema",
+		"schema": true
+	},
+	{
+		"description": "type-string",
+		"schema": {
+			"type": "number"
+		}
+	},
+	{
+		"description": "type-strings",
+		"schema": {
+			"type": [
+				"number",
+				"string"
+			]
+		}
+	},
+	{
+		"description": "type-singleItemArray",
+		"schema": {
+			"type": [
+				"string"
+			]
+		},
+		"marshal": {
+			"type": "string"
+		}
+	},
+	{
+		"description": "enum",
+		"schema": {
+			"enum": [
+				null,
+				true,
+				"string",
+				1.5,
+				{}
+			]
+		}
+	},
+	{
+		"description": "properties",
+		"schema": {
+			"properties": {
+				"a": {
+					"type": "string"
+				},
+				"b": {
+					"type": "number"
+				},
+				"c": {
+					"type": "boolean"
+				}
+			}
+		}
+	},
+	{
+		"description": "title",
+		"schema": {
+			"title": "this is title"
+		}
+	},
+	{
+		"description": "desciption",
+		"schema": {
+			"description": "this is description"
+		}
+	},
+	{
+		"description": "$comment",
+		"schema": {
+			"$comment": "this is comment"
+		}
+	},
+	{
+		"description": "default",
+		"schema": {
+			"default": "this is default"
+		}
+	},
+	{
+		"description": "default-null",
+		"schema": {
+			"default": null
+		}
+	},
+	{
+		"description": "readOnly-true",
+		"schema": {
+			"readOnly": true
+		}
+	},
+	{
+		"description": "readOnly-false",
+		"schema": {
+			"readOnly": false
+		},
+		"marshal": {}
+	},
+	{
+		"description": "writeOnly-true",
+		"schema": {
+			"writeOnly": true
+		}
+	},
+	{
+		"description": "writeOnly-false",
+		"schema": {
+			"writeOnly": false
+		},
+		"marshal": {}
+	},
+	{
+		"description": "examples",
+		"schema": {
+			"examples": [
+				null,
+				true,
+				"string",
+				1.5,
+				{}
+			]
+		}
+	}
+]

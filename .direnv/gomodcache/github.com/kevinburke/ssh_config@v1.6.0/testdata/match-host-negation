@@ -1,0 +1,7 @@
+Match Host *.example.com !*.test.example.com
+    Port 2222
+    User prod
+
+Host *.example.com
+    Port 22
+    User default

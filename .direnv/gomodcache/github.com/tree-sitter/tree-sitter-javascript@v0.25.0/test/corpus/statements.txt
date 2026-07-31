@@ -1,0 +1,1464 @@
+============================================
+Assignments
+============================================
+
+a = 0;
+var b = 0;
+const c = 0;
+let d = 0;
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (number)))
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number))))
+
+============================================
+'undefined' is a variable
+============================================
+
+undefined = 42;
+var undefined = 42;
+const undefined = 42;
+let undefined = 42;
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (undefined)
+      (number)))
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number))))
+
+============================================
+Imports
+============================================
+
+import defaultMember from "module-name";
+import * as name from "module-name";
+import { member } from "module-name";
+import { member1 , member2 } from "module-name";
+import { member1 , member2 as alias2 } from "module-name";
+import { "string name" as alias } from "module-name";
+import defaultMember, { member1, member2 as alias2 } from "module-name";
+import defaultMember, * as name from "module-name";
+import "module-name";
+import { member1 , member2 as alias2, } from "module-name";
+import pkg from "./package.json" with { type: "json" };
+import("a");
+import("a").then((m) => {});
+import.meta.url;
+import { b } from
+'b'; /* comment */ import
+ { a } from 'a';
+
+----
+
+(program
+  (import_statement
+    (import_clause
+      (identifier))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (namespace_import
+        (identifier)))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier)
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (string
+            (string_fragment))
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (identifier)
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier)
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (identifier)
+      (namespace_import
+        (identifier)))
+    (string
+      (string_fragment)))
+  (import_statement
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier)
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (identifier))
+    (string
+      (string_fragment))
+    (import_attribute
+      (object
+        (pair
+          (property_identifier)
+          (string
+            (string_fragment))))))
+  (expression_statement
+    (call_expression
+      (import)
+      (arguments
+        (string
+          (string_fragment)))))
+  (expression_statement
+    (call_expression
+      (member_expression
+        (call_expression
+          (import)
+          (arguments
+            (string
+              (string_fragment))))
+        (property_identifier))
+      (arguments
+        (arrow_function
+          (formal_parameters
+            (identifier))
+          (statement_block)))))
+  (expression_statement
+    (member_expression
+      (meta_property)
+      (property_identifier)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (comment)
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment))))
+
+============================================
+Exports
+============================================
+
+export { name1, name2, name3, nameN };
+export { variable1 as name1, variable2 as name2, nameN };
+export { variable1 as "string name" };
+export let name1, name2, nameN;
+export let name1 = value1, name2 = value2, name3, nameN;
+
+export default expression;
+export default { field1: 42, field2: [] }
+export default function () { }
+export default function name1() { }
+export { name1 as default };
+
+export * from 'foo';
+export * as someIdentifier from "someModule";
+export * as "string name" from "someModule";
+export { name1, name2, nameN } from 'foo';
+export { import1 as name1, import2 as name2, nameN } from 'foo';
+export { import1 as "string name" } from 'foo';
+export { "string import" as "string export" } from 'foo';
+
+----
+
+(program
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (identifier))
+      (export_specifier
+        name: (identifier))
+      (export_specifier
+        name: (identifier))
+      (export_specifier
+        name: (identifier))))
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (identifier)
+        alias: (identifier))
+      (export_specifier
+        name: (identifier)
+        alias: (identifier))
+      (export_specifier
+        name: (identifier))))
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (identifier)
+        alias: (string
+          (string_fragment)))))
+  (export_statement
+    declaration: (lexical_declaration
+      (variable_declarator
+        name: (identifier))
+      (variable_declarator
+        name: (identifier))
+      (variable_declarator
+        name: (identifier))))
+  (export_statement
+    declaration: (lexical_declaration
+      (variable_declarator
+        name: (identifier)
+        value: (identifier))
+      (variable_declarator
+        name: (identifier)
+        value: (identifier))
+      (variable_declarator
+        name: (identifier))
+      (variable_declarator
+        name: (identifier))))
+  (export_statement
+    value: (identifier))
+  (export_statement
+    value: (object
+      (pair
+        key: (property_identifier)
+        value: (number))
+      (pair
+        key: (property_identifier)
+        value: (array))))
+  (export_statement
+    value: (function_expression
+      parameters: (formal_parameters)
+      body: (statement_block)))
+  (export_statement
+    declaration: (function_declaration
+      name: (identifier)
+      parameters: (formal_parameters)
+      body: (statement_block)))
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (identifier))))
+  (export_statement
+    source: (string
+      (string_fragment)))
+  (export_statement
+    (namespace_export
+      (identifier))
+    source: (string
+      (string_fragment)))
+  (export_statement
+    (namespace_export
+      (string
+        (string_fragment)))
+    source: (string
+      (string_fragment)))
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (identifier))
+      (export_specifier
+        name: (identifier))
+      (export_specifier
+        name: (identifier)))
+    source: (string
+      (string_fragment)))
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (identifier)
+        alias: (identifier))
+      (export_specifier
+        name: (identifier)
+        alias: (identifier))
+      (export_specifier
+        name: (identifier)))
+    source: (string
+      (string_fragment)))
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (identifier)
+        alias: (string
+          (string_fragment))))
+    source: (string
+      (string_fragment)))
+  (export_statement
+    (export_clause
+      (export_specifier
+        name: (string
+          (string_fragment))
+        alias: (string
+          (string_fragment))))
+    source: (string
+      (string_fragment))))
+
+============================================
+Decorators before exports
+============================================
+
+@injectable()
+export class Foo {
+}
+
+---
+
+(program
+  (export_statement
+    decorator: (decorator
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))
+    declaration: (class_declaration
+      name: (identifier)
+      body: (class_body))))
+
+============================================
+If statements
+============================================
+
+if (x)
+  log(y);
+
+if (a.b) {
+  log(c);
+  d;
+}
+
+if (n-->0){}
+
+----
+
+(program
+  (if_statement
+    condition: (parenthesized_expression
+      (identifier))
+    consequence: (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (identifier)))))
+  (if_statement
+    condition: (parenthesized_expression
+      (member_expression
+        object: (identifier)
+        property: (property_identifier)))
+    consequence: (statement_block
+      (expression_statement
+        (call_expression
+          function: (identifier)
+          arguments: (arguments
+            (identifier))))
+      (expression_statement
+        (identifier))))
+  (if_statement
+    condition: (parenthesized_expression
+      (binary_expression
+        left: (update_expression
+          argument: (identifier))
+        right: (number)))
+    consequence: (statement_block)))
+
+============================================
+If-else statements
+============================================
+
+if (x)
+  y;
+else if (a)
+  b;
+
+if (a) {
+  c;
+  d;
+} else {
+  e;
+}
+
+----
+
+(program
+  (if_statement
+    condition: (parenthesized_expression
+      (identifier))
+    consequence: (expression_statement
+      (identifier))
+    alternative: (else_clause
+      (if_statement
+        condition: (parenthesized_expression
+          (identifier))
+        consequence: (expression_statement
+          (identifier)))))
+  (if_statement
+    condition: (parenthesized_expression
+      (identifier))
+    consequence: (statement_block
+      (expression_statement
+        (identifier))
+      (expression_statement
+        (identifier)))
+    alternative: (else_clause
+      (statement_block
+        (expression_statement
+          (identifier))))))
+
+============================================
+For statements
+============================================
+
+for (var a, b; c; d)
+  e;
+
+for (i = 0, init(); i < 10; i++)
+  log(y);
+
+for (;;) {
+  z;
+  continue;
+}
+
+for (var i = 0
+  ; i < l
+  ; i++) {
+}
+
+for (let in {});
+
+for (let j 
+  of k);
+
+---
+
+(program
+  (for_statement
+    initializer: (variable_declaration
+      (variable_declarator
+        name: (identifier))
+      (variable_declarator
+        name: (identifier)))
+    condition: (identifier)
+    increment: (identifier)
+    body: (expression_statement
+      (identifier)))
+  (for_statement
+    initializer: (sequence_expression
+      (assignment_expression
+        left: (identifier)
+        right: (number))
+      (call_expression
+        function: (identifier)
+        arguments: (arguments)))
+    condition: (binary_expression
+      left: (identifier)
+      right: (number))
+    increment: (update_expression
+      argument: (identifier))
+    body: (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (arguments
+          (identifier)))))
+  (for_statement
+    initializer: (empty_statement)
+    condition: (empty_statement)
+    body: (statement_block
+      (expression_statement
+        (identifier))
+      (continue_statement)))
+  (for_statement
+    initializer: (variable_declaration
+      (variable_declarator
+        name: (identifier)
+        value: (number)))
+    condition: (binary_expression
+      left: (identifier)
+      right: (identifier))
+    increment: (update_expression
+      argument: (identifier))
+    body: (statement_block))
+  (for_in_statement
+    left: (identifier)
+    right: (object)
+    body: (empty_statement))
+  (for_in_statement
+    left: (identifier)
+    right: (identifier)
+    body: (empty_statement)))
+
+============================================
+For-in statements
+============================================
+
+for (item in items)
+  item();
+
+for (var item in items || {})
+  item();
+
+for (const {thing} in things)
+  thing();
+
+for (x in a, b, c)
+  foo();
+
+for (x[i] in a) {}
+
+for (x.y in a) {}
+
+for ([a, b] in c) {}
+
+for ((a) in b) {}
+
+for (var foo = bar in baz) {}
+
+---
+
+(program
+  (for_in_statement
+    (identifier)
+    (identifier)
+    (expression_statement
+      (call_expression
+        (identifier)
+        (arguments))))
+  (for_in_statement
+    (identifier)
+    (binary_expression
+      (identifier)
+      (object))
+    (expression_statement
+      (call_expression
+        (identifier)
+        (arguments))))
+  (for_in_statement
+    (object_pattern
+      (shorthand_property_identifier_pattern))
+    (identifier)
+    (expression_statement
+      (call_expression
+        (identifier)
+        (arguments))))
+  (for_in_statement
+    (identifier)
+    (sequence_expression
+      (identifier)
+      (identifier)
+      (identifier))
+    (expression_statement
+      (call_expression
+        (identifier)
+        (arguments))))
+  (for_in_statement
+    (subscript_expression
+      (identifier)
+      (identifier))
+    (identifier)
+    (statement_block))
+  (for_in_statement
+    (member_expression
+      (identifier)
+      (property_identifier))
+    (identifier)
+    (statement_block))
+  (for_in_statement
+    (array_pattern
+      (identifier)
+      (identifier))
+    (identifier)
+    (statement_block))
+  (for_in_statement
+    (parenthesized_expression
+      (identifier))
+    (identifier)
+    (statement_block))
+  (for_in_statement
+    (identifier)
+    (identifier)
+    (identifier)
+    (statement_block)))
+
+==========================================
+For loops beginning with an in-expression
+==========================================
+
+for (key in something && i = 0; i < n; i++) {
+  doSomething();
+}
+
+---
+
+(program
+  (for_statement
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (assignment_expression
+        (identifier)
+        (number)))
+    (binary_expression
+      (identifier)
+      (identifier))
+    (update_expression
+      (identifier))
+    (statement_block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments))))))
+
+============================================
+For-of statements
+============================================
+
+for (a of b)
+  process(a);
+
+for (let {a, b} of items || [])
+  process(a, b);
+
+---
+
+(program
+  (for_in_statement
+    (identifier)
+    (identifier)
+    (expression_statement
+      (call_expression
+        (identifier)
+        (arguments
+          (identifier)))))
+  (for_in_statement
+    (object_pattern
+      (shorthand_property_identifier_pattern)
+      (shorthand_property_identifier_pattern))
+    (binary_expression
+      (identifier)
+      (array))
+    (expression_statement
+      (call_expression
+        (identifier)
+        (arguments
+          (identifier)
+          (identifier))))))
+
+============================================
+For-await-of statements
+============================================
+
+for await (const chunk of stream) {
+  str += chunk;
+}
+
+---
+
+(program
+  (for_in_statement
+    (identifier)
+    (identifier)
+    (statement_block
+      (expression_statement
+        (augmented_assignment_expression
+          (identifier)
+          (identifier))))))
+
+============================================
+While statements
+============================================
+
+while (a)
+  b();
+
+while (a) {
+
+}
+
+---
+
+(program
+  (while_statement
+    condition: (parenthesized_expression
+      (identifier))
+    body: (expression_statement
+      (call_expression
+        function: (identifier)
+        arguments: (arguments))))
+  (while_statement
+    condition: (parenthesized_expression
+      (identifier))
+    body: (statement_block)))
+
+============================================
+Do statements
+============================================
+
+do {
+  a;
+} while (b)
+
+do a; while (b)
+
+do {} while (b)
+
+do do; while (a) while (a)
+
+for (a in b) { do ; while (a) break; }
+
+do
+  if (true)
+    do {
+    } while (false);
+while (0);
+
+---
+
+(program
+  (do_statement
+    body: (statement_block
+      (expression_statement
+        (identifier)))
+    condition: (parenthesized_expression
+      (identifier)))
+  (do_statement
+    body: (expression_statement
+      (identifier))
+    condition: (parenthesized_expression
+      (identifier)))
+  (do_statement
+    body: (statement_block)
+    condition: (parenthesized_expression
+      (identifier)))
+  (do_statement
+    body: (do_statement
+      body: (empty_statement)
+      condition: (parenthesized_expression
+        (identifier)))
+    condition: (parenthesized_expression
+      (identifier)))
+  (for_in_statement
+    left: (identifier)
+    right: (identifier)
+    body: (statement_block
+      (do_statement
+        body: (empty_statement)
+        condition: (parenthesized_expression
+          (identifier)))
+      (break_statement)))
+  (do_statement
+    body: (if_statement
+      condition: (parenthesized_expression
+        (true))
+      consequence: (do_statement
+        body: (statement_block)
+        condition: (parenthesized_expression
+          (false))))
+    condition: (parenthesized_expression
+      (number))))
+
+============================================
+Return statements
+============================================
+
+return;
+return 5;
+return 1,2;
+return async;
+return a;
+
+---
+
+(program
+  (return_statement)
+  (return_statement
+    (number))
+  (return_statement
+    (sequence_expression
+      (number)
+      (number)))
+  (return_statement
+    (identifier))
+  (return_statement
+    (identifier)))
+
+============================================
+Variable declarations
+============================================
+
+var x = 1;
+var x, y = {}, z;
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (variable_declaration
+    (variable_declarator
+      (identifier))
+    (variable_declarator
+      (identifier)
+      (object))
+    (variable_declarator
+      (identifier))))
+
+============================================
+Using declarations
+============================================
+
+using file = getFile();
+await using resource = getResource();
+using x = a, y = b;
+
+---
+
+(program
+  (using_declaration
+    (variable_declarator
+      (identifier)
+      (call_expression
+        (identifier)
+        (arguments))))
+  (using_declaration
+    (variable_declarator
+      (identifier)
+      (call_expression
+        (identifier)
+        (arguments))))
+  (using_declaration
+    (variable_declarator
+      (identifier)
+      (identifier))
+    (variable_declarator
+      (identifier)
+      (identifier))))
+
+============================================
+Using declarations in for loops
+============================================
+
+for (using item of items) {
+  process(item);
+}
+
+for await (await using resource of resources) {
+  consume(resource);
+}
+
+---
+
+(program
+  (for_in_statement
+    (identifier)
+    (identifier)
+    (statement_block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier))))))
+  (for_in_statement
+    (identifier)
+    (identifier)
+    (statement_block
+      (expression_statement
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier)))))))
+
+============================================
+'of' as identifier in declarations
+============================================
+
+for (let of of []) break;
+for (const of = '';;) break;
+const of = 2;
+
+---
+
+(program
+  (for_in_statement
+    (identifier)
+    (array)
+    (break_statement))
+  (for_statement
+    (lexical_declaration
+      (variable_declarator
+        (identifier)
+        (string)))
+    (empty_statement)
+    (break_statement))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number))))
+
+============================================
+Comments
+============================================
+
+{
+
+  // This is a property
+  aProperty: 1,
+
+  /*
+   * This is a method
+   */
+  aMethod: function() {}
+};
+
+---
+
+(program
+  (expression_statement
+    (object
+      (comment)
+      (pair
+        (property_identifier)
+        (number))
+      (comment)
+      (pair
+        (property_identifier)
+        (function_expression
+          (formal_parameters)
+          (statement_block))))))
+
+==========================================
+Comments between statements
+==========================================
+
+// this is the beginning of the script.
+// here we go.
+var thing = {
+
+  // this is a property.
+  // its value is a function.
+  key: function(x /* this is a parameter */) {
+    // this is one statement
+    one();
+    // this is another statement
+    two();
+  }
+};
+
+let foo = bar
+  // this is a comment
+  ? 'baz' : 'thud';
+
+let a /* >_< */ = 1
+
+---
+
+(program
+  (comment)
+  (comment)
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (object
+        (comment)
+        (comment)
+        (pair
+          (property_identifier)
+          (function_expression
+            (formal_parameters
+              (identifier)
+              (comment))
+            (statement_block
+              (comment)
+              (expression_statement
+                (call_expression
+                  (identifier)
+                  (arguments)))
+              (comment)
+              (expression_statement
+                (call_expression
+                  (identifier)
+                  (arguments)))))))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (ternary_expression
+        (identifier)
+        (comment)
+        (string
+          (string_fragment))
+        (string
+          (string_fragment)))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (comment)
+      (number))))
+
+============================================
+Comments with asterisks
+============================================
+
+/* a */
+const a = 1;
+
+/* b **/
+const b = 1;
+
+/* c ***/
+const c = 1;
+
+/* d
+
+***/
+const d = 1;
+
+class E {
+    f() {
+    } /*** com
+    ment ***/
+    g() {
+    }
+}
+
+---
+
+(program
+  (comment)
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (comment)
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (comment)
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (comment)
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (number)))
+  (class_declaration
+    (identifier)
+    (class_body
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))
+      (comment)
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block)))))
+
+==========================================
+Comments within expressions
+==========================================
+
+y // comment
+  * z;
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (comment)
+      (identifier))))
+
+==========================================
+HTML Comments
+==========================================
+
+<!-- we can put whatever we like here. this affects one line only.
+y * z;
+<!-- and here as well. these do not have to have matching close comments.
+
+x + 1; --> for some reason you can put text after a close comment.
+
+--> note that the x + 1 above should be rejected according to the spec.
+--> it should instead be rejected as invalid.
+--> you are supposed to only have whitespace or comments before
+--> an HTML close comment.
+
+---
+
+(program
+  (html_comment)
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (html_comment)
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (number)))
+  (html_comment)
+  (html_comment)
+  (html_comment)
+  (html_comment)
+  (html_comment))
+
+============================================
+Switch statements
+============================================
+
+switch (x) {
+  case 1:
+  case 2:
+    something();
+    break;
+  case "three":
+    somethingElse();
+    break;
+  default:
+    return 4;
+}
+
+---
+
+(program
+  (switch_statement
+    (parenthesized_expression
+      (identifier))
+    (switch_body
+      (switch_case
+        (number))
+      (switch_case
+        (number)
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments)))
+        (break_statement))
+      (switch_case
+        (string
+          (string_fragment))
+        (expression_statement
+          (call_expression
+            (identifier)
+            (arguments)))
+        (break_statement))
+      (switch_default
+        (return_statement
+          (number))))))
+
+============================================
+Throw statements
+============================================
+
+throw new Error("uh oh");
+
+---
+
+(program
+  (throw_statement
+    (new_expression
+      (identifier)
+      (arguments
+        (string
+          (string_fragment))))))
+
+============================================
+Throw statements with sequence expressions
+============================================
+
+throw f = 1, f;
+throw g = 2, g
+---
+
+(program
+  (throw_statement
+    (sequence_expression
+      (assignment_expression
+        (identifier)
+        (number))
+      (identifier)))
+  (throw_statement
+    (sequence_expression
+      (assignment_expression
+        (identifier)
+        (number))
+      (identifier))))
+
+============================================
+Try catch finally statements
+============================================
+
+try { a; } catch (b) { c; }
+try { d; } finally { e; }
+try { f; } catch { g; } finally { h; }
+try { throw [a, b] } catch ([c, d]) { }
+
+---
+
+(program
+  (try_statement
+    (statement_block
+      (expression_statement
+        (identifier)))
+    (catch_clause
+      (identifier)
+      (statement_block
+        (expression_statement
+          (identifier)))))
+  (try_statement
+    (statement_block
+      (expression_statement
+        (identifier)))
+    (finally_clause
+      (statement_block
+        (expression_statement
+          (identifier)))))
+  (try_statement
+    (statement_block
+      (expression_statement
+        (identifier)))
+    (catch_clause
+      (statement_block
+        (expression_statement
+          (identifier))))
+    (finally_clause
+      (statement_block
+        (expression_statement
+          (identifier)))))
+  (try_statement
+    (statement_block
+      (throw_statement
+        (array
+          (identifier)
+          (identifier))))
+    (catch_clause
+      (array_pattern
+        (identifier)
+        (identifier))
+      (statement_block))))
+
+============================================
+Empty statements
+============================================
+
+if (true) { ; };;;
+if (true) {} else {}
+
+---
+
+(program
+  (if_statement
+    (parenthesized_expression
+      (true))
+    (statement_block
+      (empty_statement)))
+  (empty_statement)
+  (empty_statement)
+  (empty_statement)
+  (if_statement
+    (parenthesized_expression
+      (true))
+    (statement_block)
+    (else_clause
+      (statement_block))))
+
+============================================
+Labeled statements
+============================================
+
+theLoop:
+for (;;) {
+  if (a) {
+    break theLoop;
+  } else {
+    continue theLoop;
+  }
+}
+
+label
+: {
+  break label;
+}
+
+async:
+while (true) {
+  continue async;
+}
+
+---
+
+(program
+  (labeled_statement
+    label: (statement_identifier)
+    body: (for_statement
+      initializer: (empty_statement)
+      condition: (empty_statement)
+      body: (statement_block
+        (if_statement
+          condition: (parenthesized_expression
+            (identifier))
+          consequence: (statement_block
+            (break_statement
+              label: (statement_identifier)))
+          alternative: (else_clause
+            (statement_block
+              (continue_statement
+                label: (statement_identifier))))))))
+  (labeled_statement
+    label: (statement_identifier)
+    body: (statement_block
+      (break_statement
+        label: (statement_identifier))))
+  (labeled_statement
+    label: (statement_identifier)
+    body: (while_statement
+      condition: (parenthesized_expression
+        (true))
+      body: (statement_block
+        (continue_statement
+          label: (statement_identifier))))))
+
+============================================
+Debugger statements
+============================================
+
+debugger;
+debugger
+
+---
+
+(program
+  (debugger_statement)
+  (debugger_statement))
+
+============================================
+With statements
+============================================
+
+with (x) { i; }
+
+with (x) { }
+
+---
+
+(program
+  (with_statement
+    object: (parenthesized_expression
+      (identifier))
+    body: (statement_block
+      (expression_statement
+        (identifier))))
+  (with_statement
+    object: (parenthesized_expression
+      (identifier))
+    body: (statement_block)))
+
+==========================================
+Hash bang lines
+==========================================
+
+#!/usr/bin/env node
+
+console.log("HI")
+
+---
+
+(program
+  (hash_bang_line)
+  (expression_statement
+    (call_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (arguments
+        (string
+          (string_fragment))))))
+
+==========================================
+U+2028 as a line terminator
+==========================================
+
+let x = { a: //  3
+}
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (object
+        (pair
+          (property_identifier)
+          (comment)
+          (number))))))

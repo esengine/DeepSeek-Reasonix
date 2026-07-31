@@ -4,24 +4,17 @@ import SiteHeader from '../components/SiteHeader.astro';
 import community from '../data/community.json';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const R2_LATEST = 'https://dl.reasonix.io/latest';
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
+const repoReleases = `${repo}/releases`;
+const desktopStableFallback = repoReleases;
 const vscodeMarketplace = 'https://marketplace.visualstudio.com/items?itemName=SivanLiu.reasonix-agent';
 const openVsx = 'https://open-vsx.org/extension/SivanLiu/reasonix-agent';
 const vscodeExtensionRepo = 'https://github.com/SivanCola/reasonix-vscode';
 
-let desktopVersion = 'v1.1.0';
-let goVer = '1.1.0';
-try {
-  const r = await fetch(`${R2_LATEST}/latest.json`);
-  if (r.ok) {
-    const d = await r.json();
-    const version = String(d.version || desktopVersion).replace(/^v?/, 'v');
-    desktopVersion = version;
-    goVer = desktopVersion.replace(/^v/, '') || goVer;
-  }
-} catch {}
-const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
+// Release versions are resolved in the browser from the live channel pointers.
+// Static markup says "latest" and uses durable fallbacks instead of baking a
+// stale version into every link when a build-time network request fails.
+const goVer = 'latest';
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
 const avClass = (i) => 'av' + (i % 5 === 2 ? ' sm' : i % 7 === 3 ? ' lg' : '');
@@ -38,7 +31,6 @@ const ld = {
   url: 'https://reasonix.io/',
   applicationCategory: 'DeveloperApplication',
   operatingSystem: 'macOS, Windows, Linux',
-  softwareVersion: goVer,
   license: `${repo}/blob/main-v2/LICENSE`,
   downloadUrl: `${repo}/releases`,
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
@@ -77,6 +69,7 @@ const ld = {
           <span class="install-kicker"><span class="l-en">CLI / TUI</span><span class="l-zh">CLI / TUI</span></span>
           <strong><span class="l-en">Terminal-native agent with the same local Reasonix engine.</span><span class="l-zh">终端原生入口,使用同一套本地 Reasonix 引擎。</span></strong>
           <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
+          <a class="install-option__more" href="?download=cli#start" data-goto="cli"><span class="l-en">Native archives &amp; Preview →</span><span class="l-zh">原生安装包与预览版 →</span></a>
         </div>
       </div>
       <nav class="also reveal" style="--d:0.22s" aria-label="More ways to use Reasonix / 更多使用方式">
@@ -110,7 +103,7 @@ const ld = {
         <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
         <div class="term">
           <div class="term-bar"><i></i><i></i><i></i><span class="title">~/app — reasonix</span></div>
-          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> reasonix <span class="t-dim">v<span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-warm">●</span> <span class="t-dim">2 files · cache 94.2% → 95.1%</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
+          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> reasonix <span class="t-dim"><span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-warm">●</span> <span class="t-dim">2 files · cache 94.2% → 95.1%</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
           <div class="term-stat"><span>cache <b data-cnt="95.1" data-dec="1" data-suf="% hit">95.1% hit</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>model <b>deepseek-v4-flash</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
         </div>
       </div>
@@ -276,44 +269,53 @@ const ld = {
     <p class="reveal" style="--d:0.08s"><span class="l-en">Open source under MIT. Bring your own DeepSeek API key — your code never leaves your machine and the model.</span><span class="l-zh">MIT 开源。使用你自己的 DeepSeek API Key——代码不会离开你的机器与模型。</span></p>
 
     <div class="dl reveal" style="--d:0.14s">
-      <div class="dl-tabs" role="tablist">
-        <button class="dl-tab active" type="button" data-pane="desktop" role="tab"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
-        <button class="dl-tab" type="button" data-pane="npm" role="tab">npm</button>
-        <button class="dl-tab" type="button" data-pane="brew" role="tab">Homebrew</button>
-        <button class="dl-tab" type="button" data-pane="vscode" role="tab"><span class="l-en">Editor extension</span><span class="l-zh">编辑器扩展</span></button>
+      <div class="dl-tabs" role="tablist" aria-label="Download method / 下载方式">
+        <button class="dl-tab active" id="download-tab-desktop" type="button" data-pane="desktop" role="tab" aria-controls="download-pane-desktop" aria-selected="true" tabindex="0"><span class="l-en">Desktop</span><span class="l-zh">桌面端</span></button>
+        <button class="dl-tab" id="download-tab-cli" type="button" data-pane="cli" role="tab" aria-controls="download-pane-cli" aria-selected="false" tabindex="-1">CLI</button>
+        <button class="dl-tab" id="download-tab-npm" type="button" data-pane="npm" role="tab" aria-controls="download-pane-npm" aria-selected="false" tabindex="-1">npm</button>
+        <button class="dl-tab" id="download-tab-brew" type="button" data-pane="brew" role="tab" aria-controls="download-pane-brew" aria-selected="false" tabindex="-1">Homebrew</button>
+        <button class="dl-tab" id="download-tab-vscode" type="button" data-pane="vscode" role="tab" aria-controls="download-pane-vscode" aria-selected="false" tabindex="-1"><span class="l-en">Editor extension</span><span class="l-zh">编辑器扩展</span></button>
       </div>
 
-      <div class="dl-pane active" data-pane="desktop">
+      <div class="dl-pane active" id="download-pane-desktop" data-pane="desktop" role="tabpanel" aria-labelledby="download-tab-desktop">
+        <div class="release-channel-switch" data-release-switch="desktop" role="group" aria-label="Desktop release channel / 桌面端发布渠道">
+          <button class="active" type="button" data-release-channel="stable" aria-pressed="true"><span class="l-en">Stable</span><span class="l-zh">正式版</span></button>
+          <button type="button" data-release-channel="preview" aria-pressed="false"><span class="l-en">Preview</span><span class="l-zh">预览版</span></button>
+        </div>
+        <div class="release-channel-summary" data-release-summary="desktop" aria-live="polite">
+          <span data-channel-copy="stable"><span class="l-en">Recommended for everyday work · current version <span data-release-version="desktop">latest</span></span><span class="l-zh">推荐日常使用 · 当前版本 <span data-release-version="desktop">latest</span></span></span>
+          <span data-channel-copy="preview" hidden><span class="l-en">Official signed builds every 1–2 days · may be less stable · <span data-release-version="desktop">latest</span></span><span class="l-zh">每 1–2 天发布的官方签名构建 · 稳定性可能较低 · <span data-release-version="desktop">latest</span></span></span>
+        </div>
         <div class="os-grid">
           <div class="os-card" data-os="mac">
             <h4>macOS</h4>
             <span class="meta"><span class="l-en">Universal DMG · Apple Silicon &amp; Intel</span><span class="l-zh">通用 DMG · Apple Silicon 与 Intel</span></span>
-            <a class="btn btn-light" href={`${R2_DESKTOP}/Reasonix-darwin-universal.dmg`} data-desktop-asset="Reasonix-darwin-universal.dmg" download><span class="l-en">Download Universal · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载通用版 · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={desktopStableFallback} data-desktop-asset="Reasonix-darwin-universal.dmg"><span class="l-en">Download Universal · <span data-release-version="desktop">latest</span></span><span class="l-zh">下载通用版 · <span data-release-version="desktop">latest</span></span></a>
             <div class="os-options" aria-label="macOS alternate downloads">
-              <a href={`${R2_DESKTOP}/Reasonix-darwin-arm64.zip`} data-desktop-asset="Reasonix-darwin-arm64.zip" download>Apple Silicon zip</a>
-              <a href={`${R2_DESKTOP}/Reasonix-darwin-amd64.zip`} data-desktop-asset="Reasonix-darwin-amd64.zip" download>Intel zip</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-darwin-arm64.zip">Apple Silicon zip</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-darwin-amd64.zip">Intel zip</a>
             </div>
           </div>
           <div class="os-card" data-os="win">
             <h4>Windows</h4>
             <span class="meta"><span class="l-en">Installer · Windows 10+ · x64 / ARM64</span><span class="l-zh">安装器 · Windows 10+ · x64 / ARM64</span></span>
-            <a class="btn btn-light" href={`${R2_DESKTOP}/Reasonix-windows-amd64-installer.exe`} data-desktop-asset="Reasonix-windows-amd64-installer.exe" download><span class="l-en">Download · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={desktopStableFallback} data-desktop-asset="Reasonix-windows-amd64-installer.exe"><span class="l-en">Download · <span data-release-version="desktop">latest</span></span><span class="l-zh">下载 · <span data-release-version="desktop">latest</span></span></a>
             <div class="os-options" aria-label="Windows alternate downloads">
-              <a href={`${R2_DESKTOP}/Reasonix-windows-arm64-installer.exe`} data-desktop-asset="Reasonix-windows-arm64-installer.exe" download>ARM64 installer</a>
-              <a href={`${R2_DESKTOP}/Reasonix-windows-amd64.zip`} data-desktop-asset="Reasonix-windows-amd64.zip" download>Portable zip</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-windows-arm64-installer.exe">ARM64 installer</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-windows-amd64.zip">Portable zip</a>
             </div>
           </div>
           <div class="os-card" data-os="linux">
             <h4>Linux</h4>
             <span class="meta"><span class="l-en">Debian / Ubuntu package · amd64</span><span class="l-zh">Debian / Ubuntu 安装包 · amd64</span></span>
-            <a class="btn btn-light" href={`${R2_DESKTOP}/Reasonix-linux-amd64.deb`} data-desktop-asset="Reasonix-linux-amd64.deb" download><span class="l-en">Download .deb · v<span class="rxv">{goVer}</span></span><span class="l-zh">下载 .deb · v<span class="rxv">{goVer}</span></span></a>
+            <a class="btn btn-light" href={desktopStableFallback} data-desktop-asset="Reasonix-linux-amd64.deb"><span class="l-en">Download .deb · <span data-release-version="desktop">latest</span></span><span class="l-zh">下载 .deb · <span data-release-version="desktop">latest</span></span></a>
             <div class="os-options" aria-label="Linux alternate downloads">
-              <a href={`${R2_DESKTOP}/Reasonix-linux-amd64.tar.gz`} data-desktop-asset="Reasonix-linux-amd64.tar.gz" download>Generic tar.gz</a>
+              <a href={desktopStableFallback} data-desktop-asset="Reasonix-linux-amd64.tar.gz">Generic tar.gz</a>
               <a href={`${repo}/releases`}><span class="l-en">All releases</span><span class="l-zh">全部版本</span></a>
             </div>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> · built-in auto-updates · same engine as the CLI · <a href={`${repo}/releases`}>all releases →</a></span><span class="l-zh">v<span class="rxv">{goVer}</span> · 内置自动更新 · 与 CLI 同一引擎 · <a href={`${repo}/releases`}>全部版本 →</a></span></div>
+        <div class="dl-note"><span class="l-en">Switch channels later in Settings → Updates · <a href={`${repo}/releases`}>all releases →</a></span><span class="l-zh">安装后可在“设置 → 更新”中切换渠道 · <a href={`${repo}/releases`}>全部版本 →</a></span></div>
         <div class="dl-help">
           <strong><span class="l-en">macOS opens with a quarantine warning?</span><span class="l-zh">macOS 提示无法打开或已损坏?</span></strong>
           <span><span class="l-en">If the app was installed from the official download and placed in <code>/Applications</code>, quit Reasonix, then run:</span><span class="l-zh">如果来自官网下载并已放入 <code>/Applications</code>,先退出 Reasonix,再运行:</span></span>
@@ -323,7 +325,40 @@ const ld = {
         </div>
       </div>
 
-      <div class="dl-pane" data-pane="vscode">
+      <div class="dl-pane" id="download-pane-cli" data-pane="cli" role="tabpanel" aria-labelledby="download-tab-cli" hidden>
+        <div class="release-channel-switch" data-release-switch="cli" role="group" aria-label="CLI release channel / CLI 发布渠道">
+          <button class="active" type="button" data-release-channel="stable" aria-pressed="true"><span class="l-en">Stable</span><span class="l-zh">正式版</span></button>
+          <button type="button" data-release-channel="preview" aria-pressed="false"><span class="l-en">Preview</span><span class="l-zh">预览版</span></button>
+        </div>
+        <div class="release-channel-summary" data-release-summary="cli" aria-live="polite">
+          <span data-channel-copy="stable"><span class="l-en">Switch to Stable and remember this choice · <span data-release-version="cli">latest</span></span><span class="l-zh">切换到正式版并记住此选择 · <span data-release-version="cli">latest</span></span></span>
+          <span data-channel-copy="preview" hidden><span class="l-en">Switch to protected Preview and remember this choice · <span data-release-version="cli">latest</span></span><span class="l-zh">切换到受保护的预览版并记住此选择 · <span data-release-version="cli">latest</span></span></span>
+        </div>
+        <span class="install release-upgrade-command"><span class="ps1">$</span><span data-release-command="cli">reasonix upgrade stable</span><button data-copy="reasonix upgrade stable">Copy</button></span>
+        <div class="os-grid cli-os-grid">
+          <div class="os-card" data-os="mac">
+            <h4>macOS</h4>
+            <span class="meta">Apple Silicon / Intel · tar.gz</span>
+            <a class="btn btn-light" href={repoReleases} data-cli-asset="reasonix-darwin-arm64.tar.gz"><span class="l-en">Apple Silicon · <span data-release-version="cli">latest</span></span><span class="l-zh">Apple Silicon · <span data-release-version="cli">latest</span></span></a>
+            <div class="os-options"><a href={repoReleases} data-cli-asset="reasonix-darwin-amd64.tar.gz">Intel tar.gz</a></div>
+          </div>
+          <div class="os-card" data-os="win">
+            <h4>Windows</h4>
+            <span class="meta">Windows 10+ · x64 / ARM64 · zip</span>
+            <a class="btn btn-light" href={repoReleases} data-cli-asset="reasonix-windows-amd64.zip"><span class="l-en">Download x64 · <span data-release-version="cli">latest</span></span><span class="l-zh">下载 x64 · <span data-release-version="cli">latest</span></span></a>
+            <div class="os-options"><a href={repoReleases} data-cli-asset="reasonix-windows-arm64.zip">ARM64 zip</a></div>
+          </div>
+          <div class="os-card" data-os="linux">
+            <h4>Linux</h4>
+            <span class="meta">amd64 / ARM64 · tar.gz</span>
+            <a class="btn btn-light" href={repoReleases} data-cli-asset="reasonix-linux-amd64.tar.gz"><span class="l-en">Download amd64 · <span data-release-version="cli">latest</span></span><span class="l-zh">下载 amd64 · <span data-release-version="cli">latest</span></span></a>
+            <div class="os-options"><a href={repoReleases} data-cli-asset="reasonix-linux-arm64.tar.gz">ARM64 tar.gz</a></div>
+          </div>
+        </div>
+        <div class="dl-note"><span class="l-en"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · npm and Homebrew continue to track Stable</span><span class="l-zh"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · npm 与 Homebrew 继续跟随正式版</span></div>
+      </div>
+
+      <div class="dl-pane" id="download-pane-vscode" data-pane="vscode" role="tabpanel" aria-labelledby="download-tab-vscode" hidden>
         <div class="os-grid editor-grid">
           <div class="os-card editor-card editor-card--primary">
             <span class="os-chip"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
@@ -340,11 +375,11 @@ const ld = {
         <div class="dl-note editor-note"><span class="l-en">Extension ID <code>SivanLiu.reasonix-agent</code> · requires Reasonix 1.0+ installed and configured locally · the extension connects to <code>reasonix acp</code> and does not bundle the CLI · <a href={vscodeExtensionRepo}>source code →</a></span><span class="l-zh">扩展 ID <code>SivanLiu.reasonix-agent</code> · 需要先在本机安装并配置 Reasonix 1.0+ · 扩展连接 <code>reasonix acp</code>，不内置 CLI · <a href={vscodeExtensionRepo}>查看源码 →</a></span></div>
       </div>
 
-      <div class="dl-pane" data-pane="npm">
+      <div class="dl-pane" id="download-pane-npm" data-pane="npm" role="tabpanel" aria-labelledby="download-tab-npm" hidden>
         <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
         <div class="chan">
           <div class="chan-row rec">
-            <code>npm i -g reasonix</code><span class="v">v<span class="rxv">{goVer}</span></span>
+            <code>npm i -g reasonix</code><span class="v"><span class="rxv">{goVer}</span></span>
             <span class="s"><span class="l-en">Stable 1.x · one binary · no Node · actively developed</span><span class="l-zh">稳定 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
             <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
           </div>
@@ -354,12 +389,12 @@ const ld = {
             <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${base}/changelog/v${goVer}/`}>v<span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
+        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
       </div>
 
-      <div class="dl-pane" data-pane="brew">
+      <div class="dl-pane" id="download-pane-brew" data-pane="brew" role="tabpanel" aria-labelledby="download-tab-brew" hidden>
         <span class="install"><span class="ps1">$</span>brew install esengine/reasonix/reasonix<button data-copy="brew install esengine/reasonix/reasonix">Copy</button></span>
-        <div class="dl-note"><span class="l-en">v<span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh">v<span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
+        <div class="dl-note"><span class="l-en"><span class="rxv">{goVer}</span> (Go rewrite) · macOS &amp; Linux · update with <span class="mono">brew upgrade</span></span><span class="l-zh"><span class="rxv">{goVer}</span>(Go 重写)· macOS 与 Linux · 通过 <span class="mono">brew upgrade</span> 更新</span></div>
       </div>
     </div>
   </section>
@@ -380,7 +415,7 @@ const ld = {
     </div>
     <div class="foot-sub">
       <span><span class="l-en">Engineered around DeepSeek's prefix cache.</span><span class="l-zh">围绕 DeepSeek 前缀缓存而设计。</span></span>
-      <span class="ver">v<span class="rxv">{goVer}</span> · stable</span>
+      <span class="ver"><span class="rxv">{goVer}</span> · stable</span>
     </div>
   </footer>
 </Base>

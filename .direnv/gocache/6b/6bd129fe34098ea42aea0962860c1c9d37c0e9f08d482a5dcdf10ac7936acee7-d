@@ -1,0 +1,4 @@
+./defs_linux.go
+./defs_linux_amd64.go
+./syscall_linux.go
+./asm_linux_amd64.s

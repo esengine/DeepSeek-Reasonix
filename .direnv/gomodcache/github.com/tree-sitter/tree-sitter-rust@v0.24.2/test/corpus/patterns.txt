@@ -1,0 +1,563 @@
+================================================================================
+Tuple struct patterns
+================================================================================
+
+match x {
+  Some(x) => "some",
+  std::None() => "none"
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      (identifier)
+      (match_block
+        (match_arm
+          (match_pattern
+            (tuple_struct_pattern
+              (identifier)
+              (identifier)))
+          (string_literal
+            (string_content)))
+        (match_arm
+          (match_pattern
+            (tuple_struct_pattern
+              (scoped_identifier
+                (identifier)
+                (identifier))))
+          (string_literal
+            (string_content)))))))
+
+================================================================================
+Reference patterns
+================================================================================
+
+match x {
+  A(ref x) => x.0,
+  ref mut y => y,
+  & mut  z => z,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      (identifier)
+      (match_block
+        (match_arm
+          (match_pattern
+            (tuple_struct_pattern
+              (identifier)
+              (ref_pattern
+                (identifier))))
+          (field_expression
+            (identifier)
+            (integer_literal)))
+        (match_arm
+          (match_pattern
+            (ref_pattern
+              (mut_pattern
+                (mutable_specifier)
+                (identifier))))
+          (identifier))
+        (match_arm
+          (match_pattern
+            (reference_pattern
+              (mutable_specifier)
+              (identifier)))
+          (identifier))))))
+
+================================================================================
+Struct patterns
+================================================================================
+
+match x {
+  Person{name, age} if age < 5 => ("toddler", name),
+  Person{name: adult_name, age: _} => ("adult", adult_name),
+}
+
+match y {
+  Bar::T1(_, Some::<isize>(x)) => println!("{x}"),
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      (identifier)
+      (match_block
+        (match_arm
+          (match_pattern
+            (struct_pattern
+              (type_identifier)
+              (field_pattern
+                (shorthand_field_identifier))
+              (field_pattern
+                (shorthand_field_identifier)))
+            (binary_expression
+              (identifier)
+              (integer_literal)))
+          (tuple_expression
+            (string_literal
+              (string_content))
+            (identifier)))
+        (match_arm
+          (match_pattern
+            (struct_pattern
+              (type_identifier)
+              (field_pattern
+                (field_identifier)
+                (identifier))
+              (field_pattern
+                (field_identifier))))
+          (tuple_expression
+            (string_literal
+              (string_content))
+            (identifier))))))
+  (expression_statement
+    (match_expression
+      (identifier)
+      (match_block
+        (match_arm
+          (match_pattern
+            (tuple_struct_pattern
+              (scoped_identifier
+                (identifier)
+                (identifier))
+              (tuple_struct_pattern
+                (generic_type
+                  (type_identifier)
+                  (type_arguments
+                    (primitive_type)))
+                (identifier))))
+          (macro_invocation
+            (identifier)
+            (token_tree
+              (string_literal
+                (string_content)))))))))
+
+================================================================================
+Ignored patterns
+================================================================================
+
+match x {
+  (a, ..) => a,
+  B(..) => c,
+  D::E{f: g, ..} => g
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      (identifier)
+      (match_block
+        (match_arm
+          (match_pattern
+            (tuple_pattern
+              (identifier)
+              (remaining_field_pattern)))
+          (identifier))
+        (match_arm
+          (match_pattern
+            (tuple_struct_pattern
+              (identifier)
+              (remaining_field_pattern)))
+          (identifier))
+        (match_arm
+          (match_pattern
+            (struct_pattern
+              (scoped_type_identifier
+                (identifier)
+                (type_identifier))
+              (field_pattern
+                (field_identifier)
+                (identifier))
+              (remaining_field_pattern)))
+          (identifier))))))
+
+================================================================================
+Captured patterns
+================================================================================
+
+match x {
+  a @ A(_) | b @ B(..) => a,
+  a @ 1 ... 5 => a,
+  Some(1 ... 5) => a,
+  a @ b...c => a,
+  a @ b..=c => a,
+  d.. => a,
+  ..d => d,
+  a @ ..=5 => a
+}
+
+match name {
+  | "IPV6_FLOWINFO"
+  | "IPV6_FLOWLABEL_MGR"
+  | "IPV6_FLOWINFO_SEND" => true,
+  _ => false,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      value: (identifier)
+      body: (match_block
+        (match_arm
+          pattern: (match_pattern
+            (or_pattern
+              (captured_pattern
+                (identifier)
+                (tuple_struct_pattern
+                  type: (identifier)))
+              (captured_pattern
+                (identifier)
+                (tuple_struct_pattern
+                  type: (identifier)
+                  (remaining_field_pattern)))))
+          value: (identifier))
+        (match_arm
+          pattern: (match_pattern
+            (captured_pattern
+              (identifier)
+              (range_pattern
+                left: (integer_literal)
+                right: (integer_literal))))
+          value: (identifier))
+        (match_arm
+          pattern: (match_pattern
+            (tuple_struct_pattern
+              type: (identifier)
+              (range_pattern
+                left: (integer_literal)
+                right: (integer_literal))))
+          value: (identifier))
+        (match_arm
+          pattern: (match_pattern
+            (captured_pattern
+              (identifier)
+              (range_pattern
+                left: (identifier)
+                right: (identifier))))
+          value: (identifier))
+        (match_arm
+          pattern: (match_pattern
+            (captured_pattern
+              (identifier)
+              (range_pattern
+                left: (identifier)
+                right: (identifier))))
+          value: (identifier))
+        (match_arm
+          pattern: (match_pattern
+            (range_pattern
+              left: (identifier)))
+          value: (identifier))
+        (match_arm
+          pattern: (match_pattern
+            (range_pattern
+              right: (identifier)))
+          value: (identifier))
+        (match_arm
+          pattern: (match_pattern
+            (captured_pattern
+              (identifier)
+              (range_pattern
+                right: (integer_literal))))
+          value: (identifier)))))
+  (expression_statement
+    (match_expression
+      value: (identifier)
+      body: (match_block
+        (match_arm
+          pattern: (match_pattern
+            (or_pattern
+              (or_pattern
+                (or_pattern
+                  (string_literal
+                    (string_content)))
+                (string_literal
+                  (string_content)))
+              (string_literal
+                (string_content))))
+          value: (boolean_literal))
+        (match_arm
+          pattern: (match_pattern)
+          value: (boolean_literal))))))
+
+================================================================================
+Or patterns
+================================================================================
+
+if let A(x) | B(x) = expr {
+    do_stuff_with(x);
+}
+
+while let A(x) | B(x) = expr {
+    do_stuff_with(x);
+}
+
+let Ok(index) | Err(index) = slice.binary_search(&x);
+
+for ref a | b in c {}
+
+let Ok(x) | Err(x) = binary_search(x);
+
+for A | B | C in c {}
+
+|(Ok(x) | Err(x))| expr();
+
+let ref mut x @ (A | B | C);
+
+fn foo((1 | 2 | 3): u8) {}
+
+if let x!() | y!() = () {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (if_expression
+      condition: (let_condition
+        pattern: (or_pattern
+          (tuple_struct_pattern
+            type: (identifier)
+            (identifier))
+          (tuple_struct_pattern
+            type: (identifier)
+            (identifier)))
+        value: (identifier))
+      consequence: (block
+        (expression_statement
+          (call_expression
+            function: (identifier)
+            arguments: (arguments
+              (identifier)))))))
+  (expression_statement
+    (while_expression
+      condition: (let_condition
+        pattern: (or_pattern
+          (tuple_struct_pattern
+            type: (identifier)
+            (identifier))
+          (tuple_struct_pattern
+            type: (identifier)
+            (identifier)))
+        value: (identifier))
+      body: (block
+        (expression_statement
+          (call_expression
+            function: (identifier)
+            arguments: (arguments
+              (identifier)))))))
+  (let_declaration
+    pattern: (or_pattern
+      (tuple_struct_pattern
+        type: (identifier)
+        (identifier))
+      (tuple_struct_pattern
+        type: (identifier)
+        (identifier)))
+    value: (call_expression
+      function: (field_expression
+        value: (identifier)
+        field: (field_identifier))
+      arguments: (arguments
+        (reference_expression
+          value: (identifier)))))
+  (expression_statement
+    (for_expression
+      pattern: (or_pattern
+        (ref_pattern
+          (identifier))
+        (identifier))
+      value: (identifier)
+      body: (block)))
+  (let_declaration
+    pattern: (or_pattern
+      (tuple_struct_pattern
+        type: (identifier)
+        (identifier))
+      (tuple_struct_pattern
+        type: (identifier)
+        (identifier)))
+    value: (call_expression
+      function: (identifier)
+      arguments: (arguments
+        (identifier))))
+  (expression_statement
+    (for_expression
+      pattern: (or_pattern
+        (or_pattern
+          (identifier)
+          (identifier))
+        (identifier))
+      value: (identifier)
+      body: (block)))
+  (expression_statement
+    (closure_expression
+      parameters: (closure_parameters
+        (tuple_pattern
+          (or_pattern
+            (tuple_struct_pattern
+              type: (identifier)
+              (identifier))
+            (tuple_struct_pattern
+              type: (identifier)
+              (identifier)))))
+      body: (call_expression
+        function: (identifier)
+        arguments: (arguments))))
+  (let_declaration
+    pattern: (ref_pattern
+      (mut_pattern
+        (mutable_specifier)
+        (captured_pattern
+          (identifier)
+          (tuple_pattern
+            (or_pattern
+              (or_pattern
+                (identifier)
+                (identifier))
+              (identifier)))))))
+  (function_item
+    name: (identifier)
+    parameters: (parameters
+      (parameter
+        pattern: (tuple_pattern
+          (or_pattern
+            (or_pattern
+              (integer_literal)
+              (integer_literal))
+            (integer_literal)))
+        type: (primitive_type)))
+    body: (block))
+  (expression_statement
+    (if_expression
+      condition: (let_condition
+        pattern: (or_pattern
+          (macro_invocation
+            macro: (identifier)
+            (token_tree))
+          (macro_invocation
+            macro: (identifier)
+            (token_tree)))
+        value: (unit_expression))
+      consequence: (block))))
+
+================================================================================
+Inline const or Const blocks as pattern
+================================================================================
+
+fn foo(x: i32) {
+    const CUBE: i32 = 3.pow(3);
+    match x {
+        CUBE => println!("three cubed"),
+        _ => {}
+    }
+}
+
+fn foo(x: i32) {
+    match x {
+        const { 3.pow(3) } => println!("three cubed"),
+        _ => {}
+    }
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (function_item
+    name: (identifier)
+    parameters: (parameters
+      (parameter
+        pattern: (identifier)
+        type: (primitive_type)))
+    body: (block
+      (const_item
+        name: (identifier)
+        type: (primitive_type)
+        value: (call_expression
+          function: (field_expression
+            value: (integer_literal)
+            field: (field_identifier))
+          arguments: (arguments
+            (integer_literal))))
+      (expression_statement
+        (match_expression
+          value: (identifier)
+          body: (match_block
+            (match_arm
+              pattern: (match_pattern
+                (identifier))
+              value: (macro_invocation
+                macro: (identifier)
+                (token_tree
+                  (string_literal
+                    (string_content)))))
+            (match_arm
+              pattern: (match_pattern)
+              value: (block)))))))
+  (function_item
+    name: (identifier)
+    parameters: (parameters
+      (parameter
+        pattern: (identifier)
+        type: (primitive_type)))
+    body: (block
+      (expression_statement
+        (match_expression
+          value: (identifier)
+          body: (match_block
+            (match_arm
+              pattern: (match_pattern
+                (const_block
+                  body: (block
+                    (call_expression
+                      function: (field_expression
+                        value: (integer_literal)
+                        field: (field_identifier))
+                      arguments: (arguments
+                        (integer_literal))))))
+              value: (macro_invocation
+                macro: (identifier)
+                (token_tree
+                  (string_literal
+                    (string_content)))))
+            (match_arm
+              pattern: (match_pattern)
+              value: (block))))))))
+
+================================================================================
+Pattern with turbofish
+================================================================================
+
+match y {
+    None::<T> => 17,
+    _ => 42,
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (match_expression
+      (identifier)
+      (match_block
+        (match_arm
+          (match_pattern
+            (generic_pattern
+              (identifier)
+              (type_arguments
+                (type_identifier))))
+          (integer_literal))
+        (match_arm
+          (match_pattern)
+          (integer_literal))))))

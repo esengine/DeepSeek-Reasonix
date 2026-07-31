@@ -304,6 +304,79 @@ func TestSubmitInvocationDisplayRunsInlineSkillWithoutArguments(t *testing.T) {
 	}
 }
 
+func TestSubmitInvocationDisplayRunsInlineSkillInsideActiveGoal(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("Notes listed.\n\n[goal:complete]"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	events := make(chan event.Event, 8)
+	c := New(Options{
+		Runner:   ag,
+		Executor: ag,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.TurnDone || e.Kind == event.Notice {
+				events <- e
+			}
+		}),
+		Skills: []skill.Skill{{Name: "notes", Body: "INSPECT_NOTES", RunAs: skill.RunInline, Scope: skill.ScopeGlobal}},
+	})
+	defer c.Close()
+	c.SetGoalWithResearchMode("list the existing notes", GoalResearchOff)
+	c.SubmitInvocationDisplay(
+		"list the existing notes",
+		"list the existing notes",
+		[]InvocationRequest{{Name: "notes", Kind: "skill", Offset: 0}},
+	)
+	waitForTurnDone(t, events)
+
+	if prov.call != 1 {
+		t.Fatalf("active Goal structured turns = %d, want 1", prov.call)
+	}
+	input := firstUserMessage(ag.Session().Messages)
+	for _, want := range []string{"<active-goal>\nlist the existing notes", "INSPECT_NOTES", "list the existing notes"} {
+		if !strings.Contains(input, want) {
+			t.Fatalf("active Goal structured input missing %q: %q", want, input)
+		}
+	}
+}
+
+func TestSubmitInvocationDisplayRunsSubagentSkillInsideActiveGoal(t *testing.T) {
+	sess := agent.NewSession("")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 8)
+	var gotTask string
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.TurnDone || e.Kind == event.Notice {
+				events <- e
+			}
+		}),
+		Skills: []skill.Skill{{
+			Name: "research", Body: "RESEARCH_NOTES", RunAs: skill.RunSubagent, Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: func(_ context.Context, _ skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
+			gotTask = task
+			return "Notes listed.\n\n[goal:complete]", nil
+		},
+	})
+	defer c.Close()
+	c.SetGoalWithResearchMode("list the existing notes", GoalResearchOff)
+	c.SubmitInvocationDisplay(
+		"list the existing notes",
+		"list the existing notes",
+		[]InvocationRequest{{Name: "research", Kind: "subagent", Offset: 0}},
+	)
+	waitForTurnDone(t, events)
+
+	if !strings.Contains(gotTask, "<active-goal>\nlist the existing notes") {
+		t.Fatalf("active Goal subagent task missing goal: %q", gotTask)
+	}
+	if !strings.Contains(gotTask, "list the existing notes") {
+		t.Fatalf("active Goal subagent task missing user task: %q", gotTask)
+	}
+}
+
 func TestSubmitSlashSubagentUsesPermissionedRunnerInPlanMode(t *testing.T) {
 	sess := agent.NewSession("parent system")
 	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
@@ -635,6 +708,39 @@ func TestSyntheticComposeDoesNotDrainSessionStartHookContext(t *testing.T) {
 	}
 	if again := c.Compose("again"); strings.Contains(again, "<hook-context") {
 		t.Fatalf("hook context should be drained once, got %q", again)
+	}
+}
+
+func TestComposeAutomaticallyRecallsMemoryOnlyForRealUserTurns(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	if _, err := store.Save(memory.Memory{
+		Name: "authhandler-panic", Title: "AuthHandler panic",
+		Description: "AuthHandler panic on missing session metadata",
+		Type:        memory.TypeProject, Scope: memory.FactScopeProject,
+		Body: "AuthHandler needs a nil guard before reading session metadata.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+
+	got := c.Compose("fix AuthHandler panic with missing session metadata")
+	if !strings.Contains(got, "<memory-recall>") || !strings.Contains(got, "nil guard") {
+		t.Fatalf("real user turn did not receive automatic recall: %q", got)
+	}
+	if !strings.HasPrefix(got, "fix AuthHandler panic with missing session metadata") {
+		t.Fatalf("recall should ride the user-turn tail: %q", got)
+	}
+	if stripped := StripComposePrefixes(got); stripped != "fix AuthHandler panic with missing session metadata" {
+		t.Fatalf("StripComposePrefixes = %q", stripped)
+	}
+	trace := c.LastMemoryRecall()
+	if len(trace.Hits) != 1 || trace.Hits[0].Memory.ID == "" {
+		t.Fatalf("recall trace = %+v", trace)
+	}
+
+	synthetic := c.ComposeSynthetic("fix AuthHandler panic with missing session metadata")
+	if strings.Contains(synthetic, "<memory-recall>") {
+		t.Fatalf("synthetic turn received automatic recall: %q", synthetic)
 	}
 }
 

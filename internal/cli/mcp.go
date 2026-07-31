@@ -3,7 +3,6 @@ package cli
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -809,19 +808,8 @@ func probeMCPReadiness(entry config.PluginEntry) (plugin.MCPInstallResult, error
 
 func persistCLIInstalledMCP(workspace string, entry config.PluginEntry) error {
 	entry.Source = config.MCPSourceUserConfig
-	if _, err := config.UpsertPluginInSourceForRoot(workspace, entry); err != nil {
-		return err
-	}
-	store := config.DefaultMCPActivationStore()
-	activationErr := store.SetServerEnabled(entry, workspace, true)
-	if !entry.ShouldAutoStart() {
-		activationErr = store.ClearServer(entry, workspace)
-	}
-	if activationErr != nil {
-		_, _, rollbackErr := config.RemovePluginFromSourceForRoot(workspace, entry)
-		return errors.Join(activationErr, rollbackErr)
-	}
-	return nil
+	_, err := config.InstallUserPluginForRoot(workspace, entry, entry.ShouldAutoStart())
+	return err
 }
 
 func mcpRemoveCLI(args []string) int {

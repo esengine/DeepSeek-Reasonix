@@ -5,14 +5,16 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/provider"
 )
 
 func TestAssistantMarkdownHasIdentityAndIndentedBody(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = false
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
 	configureCLITheme("dark")
 
 	rendered := renderAssistantMarkdown("A concise answer that wraps across the available width.", 32)
@@ -37,8 +39,8 @@ func TestAssistantMarkdownHasIdentityAndIndentedBody(t *testing.T) {
 }
 
 func TestReplaySectionsKeepAssistantIdentity(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = false
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
 	configureCLITheme("dark")
 
 	sections := replaySectionsFor([]provider.Message{
@@ -54,8 +56,8 @@ func TestReplaySectionsKeepAssistantIdentity(t *testing.T) {
 }
 
 func TestReplaySectionsRestoreInterruptedLocalOutput(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = false
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
 	configureCLITheme("dark")
 
 	sections := replaySectionsFor([]provider.Message{
@@ -134,6 +136,217 @@ func TestSelectedTextMultiLine(t *testing.T) {
 	m.sel = selection{active: true, anchor: selPos{line: 0, col: 3}, head: selPos{line: 0, col: 3}}
 	if got := m.selectedText(); got != "" {
 		t.Errorf("empty selection should yield no text, got %q", got)
+	}
+}
+
+func TestSelectedTextRestoresMathWithoutReusingRawColumns(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.width = 80
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	source := transcriptSource{kind: transcriptSourceMarkdown, raw: `before $\alpha$ after`}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	lineIndex := -1
+	for i, line := range m.wrappedLines {
+		if strings.Contains(ansi.Strip(line), "before α after") {
+			lineIndex = i
+			break
+		}
+	}
+	if lineIndex < 0 {
+		t.Fatalf("rendered transcript did not contain the math line:\n%s", ansi.Strip(rendered))
+	}
+
+	plain := ansi.Strip(m.wrappedLines[lineIndex])
+	formulaByte := strings.Index(plain, "α")
+	afterByte := strings.Index(plain, "after")
+	if formulaByte < 0 || afterByte < 0 {
+		t.Fatalf("math line = %q", plain)
+	}
+	formulaCol := ansi.StringWidth(plain[:formulaByte])
+	afterCol := ansi.StringWidth(plain[:afterByte])
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: lineIndex, col: formulaCol},
+		head:   selPos{line: lineIndex, col: formulaCol + ansi.StringWidth("α")},
+	}
+	if got, want := m.selectedText(), `$\alpha$`; got != want {
+		t.Fatalf("formula selection = %q, want %q", got, want)
+	}
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: lineIndex, col: afterCol},
+		head:   selPos{line: lineIndex, col: afterCol + ansi.StringWidth("after")},
+	}
+	if got, want := m.selectedText(), "after"; got != want {
+		t.Fatalf("text after formula = %q, want %q", got, want)
+	}
+}
+
+func TestSelectedTextRestoresMathFromReplayBundle(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.width = 80
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	source := transcriptSource{
+		kind: transcriptSourceReplayBundle,
+		history: []provider.Message{
+			{Role: provider.RoleAssistant, Content: `before $\alpha$ after`},
+			{LocalOnly: true, Content: `local $\beta$ recovery`},
+		},
+	}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	lineIndex := -1
+	formulaCol := -1
+	for i, line := range m.wrappedLines {
+		plain := ansi.Strip(line)
+		formulaByte := strings.Index(plain, "α")
+		if formulaByte < 0 {
+			continue
+		}
+		lineIndex = i
+		formulaCol = ansi.StringWidth(plain[:formulaByte])
+		break
+	}
+	if lineIndex < 0 {
+		t.Fatalf("rendered replay bundle did not contain the formula:\n%s", ansi.Strip(rendered))
+	}
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: lineIndex, col: formulaCol},
+		head:   selPos{line: lineIndex, col: formulaCol + ansi.StringWidth("α")},
+	}
+	if got, want := m.selectedText(), `$\alpha$`; got != want {
+		t.Fatalf("replayed formula selection = %q, want %q", got, want)
+	}
+
+	copyLines, ok := m.copyTranscriptLines()
+	if !ok {
+		t.Fatal("copy rendition diverged from the displayed replay bundle")
+	}
+	sourcesByID := make(map[string]string)
+	for _, line := range copyLines {
+		for _, span := range line.math {
+			if source, exists := sourcesByID[span.id]; exists && source != span.source {
+				t.Fatalf("formula marker %q reused for %q and %q", span.id, source, span.source)
+			}
+			sourcesByID[span.id] = span.source
+		}
+	}
+	if len(sourcesByID) != 2 {
+		t.Fatalf("replay formula markers = %v, want two unique formulas", sourcesByID)
+	}
+	foundSources := make(map[string]bool)
+	for _, source := range sourcesByID {
+		foundSources[source] = true
+	}
+	for _, want := range []string{`$\alpha$`, `$\beta$`} {
+		if !foundSources[want] {
+			t.Fatalf("replay formula markers = %v, missing %q", sourcesByID, want)
+		}
+	}
+}
+
+func TestSelectedTextPreservesProseAroundMath(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.width = 80
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	source := transcriptSource{kind: transcriptSourceMarkdown, raw: `before $\frac{1}{2}$ after`}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	for i, line := range m.wrappedLines {
+		plain := ansi.Strip(line)
+		startByte := strings.Index(plain, "before")
+		endByte := strings.Index(plain, " after")
+		if startByte < 0 || endByte < 0 {
+			continue
+		}
+		startCol := ansi.StringWidth(plain[:startByte])
+		endCol := ansi.StringWidth(plain[:endByte+len(" after")])
+		m.sel = selection{
+			active: true,
+			anchor: selPos{line: i, col: startCol},
+			head:   selPos{line: i, col: endCol},
+		}
+		if got, want := m.selectedText(), `before $\frac{1}{2}$ after`; got != want {
+			t.Fatalf("mixed selection = %q, want %q", got, want)
+		}
+		return
+	}
+	t.Fatalf("rendered transcript did not contain the expected mixed line:\n%s", ansi.Strip(rendered))
+}
+
+func TestSelectedTextRestoresMathWrappedAcrossDisplayLinesOnce(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.width = 10
+	contentWidth := transcriptContentWidth(m.width, m.nativeScrollback)
+	m.viewport.SetWidth(contentWidth)
+	const latex = `\alpha+\beta+\gamma+\delta+\epsilon+\zeta`
+	source := transcriptSource{kind: transcriptSourceMarkdown, raw: `$` + latex + `$`}
+	rendered := m.renderTranscriptSource(source, m.width)
+	m.transcript = []string{rendered}
+	m.transcriptSources = []transcriptSource{source}
+	m.wrappedLines = strings.Split(wrapTranscript(rendered, contentWidth), "\n")
+
+	copyLines, ok := m.copyTranscriptLines()
+	if !ok {
+		t.Fatal("copy rendition diverged from the displayed transcript")
+	}
+	firstLine, lastLine := -1, -1
+	firstCol, lastCol := 0, 0
+	for i, line := range copyLines {
+		if len(line.math) == 0 {
+			continue
+		}
+		if firstLine < 0 {
+			firstLine = i
+			firstCol = line.math[0].start
+		}
+		lastLine = i
+		lastCol = line.math[len(line.math)-1].end
+	}
+	if firstLine < 0 || lastLine <= firstLine {
+		t.Fatalf("expected formula to wrap across lines:\n%s", ansi.Strip(rendered))
+	}
+
+	m.sel = selection{
+		active: true,
+		anchor: selPos{line: firstLine, col: firstCol},
+		head:   selPos{line: lastLine, col: lastCol},
+	}
+	if got, want := m.selectedText(), `$`+latex+`$`; got != want {
+		t.Fatalf("wrapped formula selection = %q, want %q", got, want)
 	}
 }
 

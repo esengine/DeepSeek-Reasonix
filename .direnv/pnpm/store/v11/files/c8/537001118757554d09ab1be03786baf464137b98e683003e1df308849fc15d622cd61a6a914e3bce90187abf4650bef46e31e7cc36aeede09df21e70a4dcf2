@@ -1,0 +1,11 @@
+/*!
+ * Physics2DPlugin 3.15.0
+ * https://gsap.com
+ * 
+ * @license Copyright 2026, GreenSock. All rights reserved.
+ * Subject to the terms at https://gsap.com/standard-license.
+ * @author: Jack Doyle, jack@greensock.com
+ */
+
+!function(e,t){"object"==typeof exports&&"undefined"!=typeof module?t(exports):"function"==typeof define&&define.amd?define(["exports"],t):t((e=e||self).window=e.window||{})}(this,function(e){"use strict";function j(){return t||"undefined"!=typeof window&&(t=window.gsap)&&t.registerPlugin&&t}function k(e){return Math.round(1e4*e)/1e4}function l(e){t=e||j(),v||(o=t.utils.getUnit,f=t.core.getStyleSaver,w=t.core.reverting||function(){},v=1)}function m(e,t,i,s,n){var r=e._gsap,a=r.get(e,t);this.p=t,this.set=r.set(e,t),this.s=this.val=parseFloat(a),this.u=o(a)||0,this.vel=i||0,this.v=this.vel/n,s||0===s?(this.acc=s,this.a=this.acc/(n*n)):this.acc=this.a=0}var t,v,o,f,w,u=Math.PI/180,i={version:"3.15.0",name:"physics2D",register:l,init:function init(e,t,i){v||l();var s=this,n=+t.angle||0,r=+t.velocity||0,a=+t.acceleration||0,o=t.xProp||"x",p=t.yProp||"y",c=t.accelerationAngle||0===t.accelerationAngle?+t.accelerationAngle:n;s.styles=f&&f(e,t.xProp&&"x"!==t.xProp?t.xProp+","+t.yProp:"transform"),s.target=e,s.tween=i,s.step=0,s.sps=30,t.gravity&&(a=+t.gravity,c=90),n*=u,c*=u,s.fr=1-(+t.friction||0),s._props.push(o,p),s.xp=new m(e,o,Math.cos(n)*r,Math.cos(c)*a,s.sps),s.yp=new m(e,p,Math.sin(n)*r,Math.sin(c)*a,s.sps),s.skipX=s.skipY=0},render:function render(e,t){var i,s,n,r,a,o,p=t.xp,l=t.yp,c=t.tween,v=t.target,f=t.step,u=t.sps,h=t.fr,d=t.skipX,g=t.skipY,y=c._from?c._dur-c._time:c._time;if(c._time||!w()){if(1===h)n=y*y*.5,i=p.s+p.vel*y+p.acc*n,s=l.s+l.vel*y+l.acc*n;else{for(r=o=(0|(y*=u))-f,o<0&&(p.v=p.vel/u,l.v=l.vel/u,p.val=p.s,l.val=l.s,r=o=(t.step=0)|y),a=y%1*h;o--;)p.v+=p.a,l.v+=l.a,p.v*=h,l.v*=h,p.val+=p.v,l.val+=l.v;i=p.val+p.v*a,s=l.val+l.v*a,t.step+=r}d||p.set(v,p.p,k(i)+p.u),g||l.set(v,l.p,k(s)+l.u)}else t.styles.revert()},kill:function kill(e){this.xp.p===e&&(this.skipX=1),this.yp.p===e&&(this.skipY=1)}};j()&&t.registerPlugin(i),e.Physics2DPlugin=i,e.default=i;if (typeof(window)==="undefined"||window!==e){Object.defineProperty(e,"__esModule",{value:!0})} else {delete e.default}});
+

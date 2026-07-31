@@ -1,0 +1,24 @@
+name: Go
+
+on:
+  push:
+    branches: [ v2_rewrite ]
+  pull_request:
+    branches: [ v2_rewrite ]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.12
+
+      - name: GolangCI-Linter
+        uses: Mushus/golangci-linter@v1.1.2
+        with:
+          basePath: ./v2

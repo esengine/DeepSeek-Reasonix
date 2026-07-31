@@ -129,7 +129,9 @@ var (
 	statusAutoColor  = cliColor{"#f59e0b", 214}
 	statusPlanColor  = cliColor{"#2563eb", 27}
 	statusYoloColor  = cliColor{"#e5484d", 167}
-	statusShellColor = cliColor{"#16a34a", 71} // green — shell mode indicator
+	statusShellColor = cliColor{"#16a34a", 71}
+	modeTagLight     = cliColor{"#ffffff", 231}
+	modeTagDark      = cliColor{"#111827", 234}
 )
 
 func (m chatTUI) statusModeColor() cliColor {

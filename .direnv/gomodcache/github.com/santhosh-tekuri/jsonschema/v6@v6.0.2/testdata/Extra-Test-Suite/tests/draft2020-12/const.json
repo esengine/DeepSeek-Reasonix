@@ -1,0 +1,21 @@
+[
+    {
+        "description": "zero fraction",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "const": 2
+        },
+        "tests": [
+            {
+                "description": "with fraction",
+                "data": 2.0,
+                "valid": true
+            },
+            {
+                "description": "without fraction",
+                "data": 2,
+                "valid": true
+            }
+        ]
+    }
+]

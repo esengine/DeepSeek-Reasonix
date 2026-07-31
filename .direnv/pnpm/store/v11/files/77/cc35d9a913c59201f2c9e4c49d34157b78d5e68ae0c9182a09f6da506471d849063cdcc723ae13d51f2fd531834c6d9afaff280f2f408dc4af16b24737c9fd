@@ -1,0 +1,1 @@
+{"version":3,"file":"diagnostics-channel-browser.d.ts","sourceRoot":"","sources":["../../../src/diagnostics-channel-browser.ts"],"names":[],"mappings":"AAEA,OAAO,EACL,KAAK,OAAO,EACZ,KAAK,cAAc,EACpB,MAAM,0BAA0B,CAAA;AACjC,YAAY,EAAE,cAAc,EAAE,OAAO,EAAE,CAAA;AAGvC,eAAO,MAAM,OAAO,EAAY,OAAO,CAAC,OAAO,CAAC,CAAA;AAChD,eAAO,MAAM,OAAO,EAAY,cAAc,CAAC,OAAO,CAAC,CAAA"}

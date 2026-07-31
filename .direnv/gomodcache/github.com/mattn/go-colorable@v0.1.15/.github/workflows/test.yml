@@ -1,0 +1,36 @@
+name: test
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        go:
+          - '1.26'
+          - '1.25'
+          - '1.24'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+      - name: test
+        shell: bash
+        run: |
+          ./go.test.sh
+      - name: upload coverage report
+        uses: codecov/codecov-action@v2
+        with:
+          env_vars: OS,GO
+        env:
+          OS: ${{ matrix.os }}
+          GO: ${{ matrix.go }}

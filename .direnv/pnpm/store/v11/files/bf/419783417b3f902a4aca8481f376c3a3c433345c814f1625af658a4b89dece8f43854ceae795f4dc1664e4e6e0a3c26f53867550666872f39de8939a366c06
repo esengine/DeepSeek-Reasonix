@@ -1,0 +1,187 @@
+{
+  "scripts": {
+    "prepare": "husky",
+    "lint": "xo src/*.ts",
+    "format": "npm run format:js && npm run format:md",
+    "format:md": "prettier --write --parser markdown '**/*.md'",
+    "format:js": "prettier --write '{src,demos,scripts,test,website}/*.{js,ts}'",
+    "commit-amend-build": "scripts/commit-amend-build.sh",
+    "prebuild": "rimraf dist",
+    "dev": "cross-env NODE_ENV=development BABEL_ENV=rollup rollup -w -c config/rollup.config.js -o dist/purify.js",
+    "build": "npm run build:types && npm run build:rollup && npm run build:fix-types && npm run build:cleanup",
+    "build:types": "tsc -p config/tsconfig.json --outDir dist/types --declaration --emitDeclarationOnly",
+    "build:rollup": "rollup -c config/rollup.config.js",
+    "build:fix-types": "node ./scripts/fix-types.js",
+    "build:umd": "rollup -c config/rollup.config.js -f umd -o dist/purify.js",
+    "build:umd:min": "rollup -c config/rollup.config.js -f umd -o dist/purify.min.js -p terser",
+    "build:es": "rollup -c config/rollup.config.js -f es -o dist/purify.es.mjs",
+    "build:cjs": "rollup -c config/rollup.config.js -f cjs -o dist/purify.cjs.js",
+    "build:cov": "rollup -c config/rollup.coverage.config.js",
+    "build:cleanup": "rimraf dist/types",
+    "bench": "node scripts/benchmark.js",
+    "test": "cross-env NODE_ENV=test BABEL_ENV=rollup npm run lint && npm run test:jsdom && npm run test:browser -- --project=chromium",
+    "test:jsdom": "cross-env NODE_ENV=test BABEL_ENV=rollup node test/jsdom-node-runner --dot",
+    "test:happydom": "cross-env NODE_ENV=test BABEL_ENV=rollup node test/happydom-node-runner --dot",
+    "test:browser": "playwright test --config config/playwright.config.js",
+    "test:browser:install": "playwright install",
+    "test:browser:legacy": "node test/browser/legacy-runner.js",
+    "test:ci": "cross-env NODE_ENV=test BABEL_ENV=rollup npm run test:jsdom && npm run test:browser",
+    "test:fuzz": "cross-env NODE_ENV=test BABEL_ENV=rollup node test/fuzz/sanitize.fast-check.js",
+    "coverage": "rimraf .nyc_output coverage dist/purify.cov.cjs.js && npm run build:cov && cross-env NODE_ENV=test DOMPURIFY_COV=1 node test/jsdom-node-runner --dot && nyc report --reporter=html --reporter=text --report-dir=coverage",
+    "verify-typescript": "node ./typescript/verify.js"
+  },
+  "main": "./dist/purify.cjs.js",
+  "module": "./dist/purify.es.mjs",
+  "browser": "./dist/purify.js",
+  "production": "./dist/purify.min.js",
+  "types": "./dist/purify.cjs.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/purify.es.d.mts",
+        "default": "./dist/purify.es.mjs"
+      },
+      "default": {
+        "types": "./dist/purify.cjs.d.ts",
+        "default": "./dist/purify.cjs.js"
+      }
+    },
+    "./purify.min.js": "./dist/purify.min.js",
+    "./purify.js": "./dist/purify.js",
+    "./dist/purify.min.js": "./dist/purify.min.js",
+    "./dist/purify.js": "./dist/purify.js"
+  },
+  "files": [
+    "dist",
+    "src",
+    "LICENSE-MPL"
+  ],
+  "xo": {
+    "semicolon": true,
+    "space": 2,
+    "extends": [
+      "prettier"
+    ],
+    "plugins": [
+      "prettier"
+    ],
+    "rules": {
+      "import/no-useless-path-segments": 0,
+      "unicorn/prefer-optional-catch-binding": 0,
+      "unicorn/prefer-node-remove": 0,
+      "prettier/prettier": [
+        "error",
+        {
+          "trailingComma": "es5",
+          "singleQuote": true
+        }
+      ],
+      "camelcase": [
+        "error",
+        {
+          "properties": "never"
+        }
+      ],
+      "@typescript-eslint/ban-types": 0,
+      "@typescript-eslint/consistent-type-definitions": 0,
+      "@typescript-eslint/indent": 0,
+      "@typescript-eslint/naming-convention": 0,
+      "@typescript-eslint/no-throw-literal": 0,
+      "@typescript-eslint/no-unnecessary-boolean-literal-compare": 0,
+      "@typescript-eslint/no-unsafe-argument": 0,
+      "@typescript-eslint/no-unsafe-assignment": 0,
+      "@typescript-eslint/no-unsafe-call": 0,
+      "@typescript-eslint/no-unsafe-return": 0,
+      "@typescript-eslint/prefer-includes": 0,
+      "@typescript-eslint/prefer-optional-chain": 0,
+      "@typescript-eslint/prefer-nullish-coalescing": 0,
+      "@typescript-eslint/restrict-plus-operands": 0,
+      "unicorn/prevent-abbreviations": 0,
+      "unicorn/prefer-global-this": 0,
+      "n/file-extension-in-import": 0,
+      "logical-assignment-operators": 0,
+      "@typescript-eslint/switch-exhaustiveness-check": 0
+    },
+    "globals": [
+      "window",
+      "VERSION"
+    ]
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": ">=20",
+      "onFail": "warn"
+    }
+  },
+  "optionalDependencies": {
+    "@types/trusted-types": "^2.0.7"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "@babel/preset-typescript": "^7.29.7",
+    "@playwright/test": "^1.61.0",
+    "@rollup/plugin-babel": "^7.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-replace": "^6.0.1",
+    "@rollup/plugin-terser": "^1.0.0",
+    "@rollup/plugin-typescript": "^12.3.0",
+    "@types/estree": "^1.0.9",
+    "@types/node": "^26.0.0",
+    "babel-plugin-istanbul": "^8.0.0",
+    "cross-env": "^10.1.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "fast-check": "^4.8.0",
+    "happy-dom": "^20.10.6",
+    "husky": "^9.1.0",
+    "jquery": "^3.6.0",
+    "jsdom": "^29.1.1",
+    "nyc": "^18.0.0",
+    "prettier": "^3.8.4",
+    "qunit": "^2.26.0",
+    "qunit-tap": "^1.5.0",
+    "rimraf": "^6.0.1",
+    "rollup": "^4.62.2",
+    "rollup-plugin-dts": "^6.4.1",
+    "tslib": "^2.7.0",
+    "typescript": "^5.6.3",
+    "xo": "^0.60.0"
+  },
+  "resolutions": {
+    "natives": "1.1.6"
+  },
+  "name": "dompurify",
+  "description": "DOMPurify is a DOM-only, super-fast, uber-tolerant XSS sanitizer for HTML, MathML and SVG. It runs as JavaScript and works in all modern browsers, as well as in Node.js (via jsdom). DOMPurify is written by security people who have vast background in web attacks and XSS. Fear not.",
+  "version": "3.4.12",
+  "directories": {
+    "test": "test"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/cure53/DOMPurify.git"
+  },
+  "keywords": [
+    "dom",
+    "xss",
+    "html",
+    "svg",
+    "mathml",
+    "security",
+    "secure",
+    "sanitizer",
+    "sanitize",
+    "filter",
+    "purify"
+  ],
+  "author": "Dr.-Ing. Mario Heiderich, Cure53 <mario@cure53.de> (https://cure53.de/)",
+  "license": "(MPL-2.0 OR Apache-2.0)",
+  "bugs": {
+    "url": "https://github.com/cure53/DOMPurify/issues"
+  },
+  "homepage": "https://github.com/cure53/DOMPurify",
+  "overrides": {
+    "js-yaml": "^4.2.0"
+  }
+}

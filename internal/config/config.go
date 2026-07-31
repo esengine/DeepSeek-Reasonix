@@ -14,7 +14,6 @@ import (
 	"runtime"
 	"strings"
 
-	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
@@ -44,7 +43,9 @@ type Config struct {
 	Language         string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
 	CredentialsStore string              `toml:"credentials_store"`
 	UI               UIConfig            `toml:"ui"`
+	CLI              CLIConfig           `toml:"cli"`
 	Desktop          DesktopConfig       `toml:"desktop"`
+	Telemetry        TelemetryConfig     `toml:"telemetry"`
 	Notifications    NotificationsConfig `toml:"notifications"`
 	Agent            AgentConfig         `toml:"agent"`
 	Providers        []ProviderEntry     `toml:"providers"`
@@ -71,6 +72,44 @@ type Config struct {
 	pluginPackageSkillOwners   map[string][]string
 	pluginPackageAgentOwners   map[string][]string
 	safeMode                   bool
+	editLoadErr                error
+}
+
+// TelemetryConfig controls content-free CLI usage metrics. It is user-global:
+// project reasonix.toml values are ignored so a cloned repository cannot opt a
+// user into reporting.
+type TelemetryConfig struct {
+	CLIMetrics string `toml:"cli_metrics"` // auto|on|off; empty means consent has not been requested
+}
+
+// CLITelemetryConfigured reports whether the user has made an explicit CLI
+// telemetry choice. The runtime policy still treats an absent value as auto,
+// but persistence must preserve absence until the first eligible consent prompt.
+func (c *Config) CLITelemetryConfigured() bool {
+	if c == nil {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Telemetry.CLIMetrics)) {
+	case "auto", "on", "off":
+		return true
+	default:
+		return false
+	}
+}
+
+// CLITelemetryMode returns the normalized CLI telemetry policy.
+func (c *Config) CLITelemetryMode() string {
+	if c == nil {
+		return "auto"
+	}
+	switch strings.ToLower(strings.TrimSpace(c.Telemetry.CLIMetrics)) {
+	case "on":
+		return "on"
+	case "off":
+		return "off"
+	default:
+		return "auto"
+	}
 }
 
 // SafeMode reports whether this configuration was built for recovery startup.
@@ -132,11 +171,19 @@ type UIConfig struct {
 	CursorShape    string `toml:"cursor_shape"`    // block|underline|bar; empty defaults to bar
 }
 
+// CLIConfig controls user-global native CLI behavior. It is separate from
+// project runtime settings so a repository cannot change the installed
+// binary's update channel.
+type CLIConfig struct {
+	UpdateChannel string `toml:"update_channel"` // stable|preview; empty and unknown values resolve to stable
+}
+
 // DesktopConfig controls desktop-only UI preferences. It is intentionally
 // separate from top-level language and [ui] so desktop choices do not affect CLI
 // language, terminal colours, or provider-visible prompt/request data.
 type DesktopConfig struct {
 	Language                string   `toml:"language"`                   // auto|en|zh; empty/auto = browser/OS auto-detect
+	Currency                string   `toml:"currency"`                   // user-global auto|CNY|USD pricing preference shared by desktop and CLI
 	LayoutStyle             string   `toml:"layout_style"`               // classic|workbench|creation; desktop layout style
 	Theme                   string   `toml:"theme"`                      // auto|dark|light; empty resolves to auto
 	ThemeStyle              string   `toml:"theme_style"`                // graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
@@ -271,6 +318,23 @@ func (c *Config) DesktopLanguage() string {
 		return "en"
 	case "zh":
 		return "zh"
+	default:
+		return ""
+	}
+}
+
+// DesktopCurrency returns the explicit user-global pricing currency. The
+// persisted field keeps its original desktop namespace for compatibility;
+// empty means the pricing region follows the desktop/CLI language.
+func (c *Config) DesktopCurrency() string {
+	if c == nil {
+		return ""
+	}
+	switch strings.ToUpper(strings.TrimSpace(c.Desktop.Currency)) {
+	case "CNY", "RMB", "CNH":
+		return "CNY"
+	case "USD":
+		return "USD"
 	default:
 		return ""
 	}
@@ -442,6 +506,23 @@ func (c *Config) DesktopCheckUpdates() bool {
 		return true
 	}
 	return *c.Desktop.CheckUpdates
+}
+
+// NormalizeCLIUpdateChannel returns the canonical native CLI update channel.
+// Missing and unknown values fail closed to Stable.
+func NormalizeCLIUpdateChannel(ch string) string {
+	if strings.EqualFold(strings.TrimSpace(ch), "preview") {
+		return "preview"
+	}
+	return "stable"
+}
+
+// CLIUpdateChannel returns the user-global native CLI update channel.
+func (c *Config) CLIUpdateChannel() string {
+	if c == nil {
+		return "stable"
+	}
+	return NormalizeCLIUpdateChannel(c.CLI.UpdateChannel)
 }
 
 // NormalizeDesktopUpdateChannel returns the canonical desktop update channel.
@@ -1153,6 +1234,9 @@ type ProviderEntry struct {
 	ContextWindow  int                          `toml:"context_window"`
 	Price          *provider.Pricing            `toml:"price"`  // legacy/provider-wide fallback
 	Prices         map[string]*provider.Pricing `toml:"prices"` // optional per-model prices; keys are model ids
+
+	persistedOfficialCurrency string
+
 	// Thinking / Effort are provider-kind-specific knobs forwarded to the provider
 	// via Config.Extra. The anthropic provider reads Thinking="adaptive" to enable
 	// extended thinking and Effort ("low".."max") to tune depth. The
@@ -1672,8 +1756,8 @@ func Default() *Config {
 			Weixin:             WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
 		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPrice()},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPrice()},
+			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD()},
+			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD()},
 		},
 	}
 }
@@ -1683,7 +1767,7 @@ func Default() *Config {
 // main config into an unparseable state that leaves the app with no usable
 // models (#4615, #4708).
 func (c *Config) WriteFile(path string) error {
-	return fileutil.AtomicWriteFile(path, []byte(RenderTOMLForScope(c, renderScopeForPath(path))), configFilePerm(path))
+	return atomicWriteToConfigFile(path, RenderTOMLForScope(c, renderScopeForPath(path)), configFilePerm(path))
 }
 
 // Provider returns the named provider entry.
@@ -1775,6 +1859,88 @@ func (c *Config) ResolveModelWithFallback(ref string) (resolvedRef string, fallb
 		return p.Name + "/" + p.DefaultModel(), true, true
 	}
 	return "", false, false
+}
+
+// ResolveNewSessionChatModel selects the model for a newly-created chat
+// session. Configured candidates win; if every chat candidate is keyless, the
+// valid default (or first chat model) is preserved so callers can surface their
+// existing missing-key recovery UI. An unknown default is also preserved for
+// the CLI's actionable configuration error. Provider order is otherwise stable.
+func (c *Config) ResolveNewSessionChatModel() (resolvedRef string, fallback bool, ok bool) {
+	return c.resolveNewSessionChatModel(nil, true)
+}
+
+func (c *Config) resolveNewSessionChatModel(providerAllowed func(string) bool, preserveUnknownDefault bool) (resolvedRef string, fallback bool, ok bool) {
+	if c == nil {
+		return "", false, false
+	}
+	if providerAllowed == nil {
+		providerAllowed = func(string) bool { return true }
+	}
+
+	def := strings.TrimSpace(c.DefaultModel)
+	keylessDefault := ""
+	if def != "" {
+		if entry, found := c.ResolveModel(def); found {
+			if providerAllowed(entry.Name) && IsLikelyChatModel(entry.Model) {
+				if entry.Configured() {
+					return def, false, true
+				}
+				keylessDefault = def
+			}
+		} else if preserveUnknownDefault {
+			// CLI/boot callers need the stale value intact so their existing
+			// unknown-model error can name it and explain the providers that
+			// replaced it. Desktop uses its recovery UI and does not preserve it.
+			return def, false, true
+		}
+	}
+
+	keylessFallback := ""
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if !providerAllowed(p.Name) {
+			continue
+		}
+		chatModels := p.ChatModelList()
+		if len(chatModels) == 0 {
+			continue
+		}
+		model := chatModels[0]
+		for _, candidate := range chatModels {
+			if candidate == p.DefaultModel() {
+				model = candidate
+				break
+			}
+		}
+		resolved := p.Name + "/" + model
+		if p.Configured() {
+			return resolved, true, true
+		}
+		if keylessFallback == "" {
+			keylessFallback = resolved
+		}
+	}
+	if keylessDefault != "" {
+		return keylessDefault, false, true
+	}
+	if keylessFallback != "" {
+		return keylessFallback, true, true
+	}
+	return "", false, false
+}
+
+// ResolveDesktopNewSessionModel selects the model for a newly-created desktop
+// session. It shares the chat-model fallback policy with other frontends while
+// limiting candidates to providers exposed by the desktop access catalog.
+func (c *Config) ResolveDesktopNewSessionModel() (resolvedRef string, fallback bool, ok bool) {
+	if c == nil {
+		return "", false, false
+	}
+	access := desktopProviderAccessMap(c.Desktop.ProviderAccess)
+	return c.resolveNewSessionChatModel(func(name string) bool {
+		return c.Desktop.ProviderAccess == nil || access[strings.TrimSpace(name)]
+	}, false)
 }
 
 // APIKey resolves the entry's API key from its api_key_env.

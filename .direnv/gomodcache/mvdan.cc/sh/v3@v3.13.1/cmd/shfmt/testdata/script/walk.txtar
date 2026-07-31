@@ -1,0 +1,215 @@
+mkdir symlink/subdir
+# Remember that the symlink target is relative to the symlink directory.
+[symlink] symlink symlink/subdir/symlink-file -> ../../modify/ext-shebang.sh
+[symlink] symlink symlink/symlink-shebang.sh -> ../modify/ext-shebang.sh
+[symlink] cp modify/ext.bash symlink/target-ext-bash # a copy that won't be formatted on its own
+[symlink] symlink symlink/symlink-ext.bash -> target-ext-bash
+[symlink] symlink symlink/symlink-dir -> subdir
+[symlink] symlink symlink/symlink-none -> nonexistent
+
+# Other non-regular files like FIFOs could cause issues like blocking reads
+# when we look for shebangs. We use the "mkfifo" tool here, available on Linux.
+[exec:mkfifo] exec mkfifo named-pipe
+
+exec shfmt -f .
+! stderr .
+cmpenv stdout find.golden
+
+exec shfmt --find .
+! stderr .
+cmpenv stdout find.golden
+
+# try to format missing paths
+! exec shfmt nonexistent
+stderr -count=1 nonexistent
+
+! exec shfmt nonexistent-1 nonexistent-2 nonexistent-3
+stderr -count=1 nonexistent-1
+stderr -count=1 nonexistent-2
+stderr -count=1 nonexistent-3
+
+# format an entire directory without -l or -w
+! exec shfmt .
+stdout 'foo'
+stdout 'bin/env'
+stderr -count=1 'parse-error\.sh'
+
+# just -l, as a dry run
+! exec shfmt --list .
+stderr -count=1 'parse-error\.sh'
+! stderr '^modify'
+cmpenv stdout modify.golden
+
+# format an entire directory with -l and -w
+! exec shfmt -l -w .
+stderr -count=1 'parse-error\.sh'
+! stderr '^modify'
+cmpenv stdout modify.golden
+
+# parse-error again, but now as a lone file
+! exec shfmt error/parse-error.sh
+stderr -count=1 'parse-error\.sh'
+
+# format files directly which we would ignore when walking directories
+exec shfmt none/ext-shebang.other
+stdout 'foo'
+exec shfmt none/noext-noshebang
+stdout 'foo'
+[symlink] exec shfmt symlink/symlink-shebang.sh
+[symlink] stdout 'foo'
+[symlink] exec shfmt symlink/symlink-dir
+[symlink] ! stdout . # note that filepath.WalkDir does not follow symlinks
+
+# writing to non-regular files is forbidden as they'd be replaced by a regular file.
+[symlink] ! exec shfmt -l symlink/symlink-ext.bash
+[symlink] stdout 'symlink-ext.bash'
+[symlink] ! exec shfmt -w symlink/symlink-ext.bash
+[symlink] stderr 'refusing to atomically replace'
+[symlink] ! exec shfmt -l symlink/symlink-ext.bash
+[symlink] stdout 'symlink-ext.bash'
+
+# -f on files should still check extension and shebang
+exec shfmt -f modify/ext.sh modify/shebang-sh none/ext-shebang.other none/noext-noshebang
+stdout -count=2 '^modify'
+! stdout '^none'
+
+# -ln shouldn't be overwritten by a filename
+mkdir modify-ln
+cp modify/ext.mksh modify-ln
+! exec shfmt -ln=bash modify-ln
+stderr '|& must be followed by a statement'
+rm modify-ln
+
+# -ln shouldn't be overwritten by a shebang
+mkdir modify-ln
+cp modify/shebang-mksh modify-ln
+! exec shfmt -ln=bash modify-ln
+stderr '|& must be followed by a statement'
+rm modify-ln
+
+-- find.golden --
+error${/}parse-error.sh
+modify${/}dir${/}ext.sh
+modify${/}ext-shebang.sh
+modify${/}ext.bash
+modify${/}ext.bats
+modify${/}ext.mksh
+modify${/}ext.sh
+modify${/}ext.zsh
+modify${/}shebang-args
+modify${/}shebang-bash
+modify${/}shebang-bash.sh
+modify${/}shebang-env-bash
+modify${/}shebang-env-bats
+modify${/}shebang-env-sh
+modify${/}shebang-mksh
+modify${/}shebang-sh
+modify${/}shebang-space
+modify${/}shebang-tabs
+modify${/}shebang-usr-sh
+modify${/}shebang-zsh
+-- modify.golden --
+modify${/}dir${/}ext.sh
+modify${/}ext-shebang.sh
+modify${/}ext.bash
+modify${/}ext.bats
+modify${/}ext.mksh
+modify${/}ext.sh
+modify${/}ext.zsh
+modify${/}shebang-args
+modify${/}shebang-bash
+modify${/}shebang-bash.sh
+modify${/}shebang-env-bash
+modify${/}shebang-env-bats
+modify${/}shebang-env-sh
+modify${/}shebang-mksh
+modify${/}shebang-sh
+modify${/}shebang-space
+modify${/}shebang-tabs
+modify${/}shebang-usr-sh
+modify${/}shebang-zsh
+-- modify/shebang-sh --
+#!/bin/sh
+ foo
+-- modify/shebang-bash --
+#!/bin/bash
+ foo=(bar)
+-- modify/shebang-bash.sh --
+#!/bin/bash
+ foo=(bar)
+-- modify/shebang-usr-sh --
+#!/usr/bin/sh
+ foo
+-- modify/shebang-env-bash --
+#!/usr/bin/env bash
+ foo=(bar)
+-- modify/shebang-env-sh --
+#!/bin/env sh
+ foo
+-- modify/shebang-mksh --
+#!/bin/mksh
+ foo |&
+-- modify/shebang-zsh --
+#!/bin/zsh
+ ${+foo}
+-- modify/shebang-env-bats --
+#!/usr/bin/env bats
+ @test "foo" { bar; }
+-- modify/shebang-space --
+#! /bin/sh
+ foo
+-- modify/shebang-tabs --
+#!	/bin/env	sh
+ foo
+-- modify/shebang-args --
+#!/bin/bash -e -x
+ foo
+-- modify/ext.sh --
+ foo
+-- modify/ext.bash --
+ foo=(bar)
+-- modify/ext.mksh --
+ foo |&
+-- modify/ext.zsh --
+ ${+foo}
+-- modify/ext.bats --
+ @test "foo" { bar; }
+-- modify/ext-shebang.sh --
+#!/bin/sh
+ foo
+-- modify/dir/ext.sh --
+foo
+
+-- none/.hidden --
+foo long enough
+-- none/.hidden-shebang --
+#!/bin/sh
+ foo
+-- none/..hidden-shebang --
+#!/bin/sh
+ foo
+-- none/noext-empty --
+foo
+-- none/noext-noshebang --
+foo long enough
+-- none/shebang-nonewline --
+#!/bin/shfoo
+-- none/ext.other --
+foo
+-- none/empty --
+-- none/ext-shebang.other --
+#!/bin/sh
+ foo
+-- none/shebang-nospace --
+#!/bin/envsh
+ foo
+
+-- skip/.git/ext.sh --
+foo
+-- skip/.svn/ext.sh --
+foo
+-- skip/.hg/ext.sh --
+foo
+
+-- error/parse-error.sh --
+foo(

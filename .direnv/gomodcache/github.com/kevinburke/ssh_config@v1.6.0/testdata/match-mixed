@@ -1,0 +1,21 @@
+Host bastion
+    Port 22
+    User root
+
+Match Host *.prod.example.com
+    Port 2222
+    User deploy
+    IdentityFile ~/.ssh/prod_key1
+    IdentityFile ~/.ssh/prod_key2
+
+Host *.example.com
+    Port 80
+    User webuser
+
+Match Host *.staging.example.com
+    Port 3333
+    User staging
+
+Match all
+    User fallback
+    IdentityFile ~/.ssh/default_key

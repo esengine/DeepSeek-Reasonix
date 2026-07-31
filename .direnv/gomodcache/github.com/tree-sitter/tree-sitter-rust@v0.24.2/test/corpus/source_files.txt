@@ -1,0 +1,267 @@
+============================================
+Block comments
+============================================
+
+/*
+ * Block comments
+ */
+
+/* Comment with asterisks **/
+
+/** Outer block comment */
+
+
+/*! Inner block comment */
+/**/
+
+----
+
+(source_file
+  (block_comment)
+  (block_comment)
+  (block_comment
+    outer: (outer_doc_comment_marker)
+    doc: (doc_comment))
+  (block_comment
+    inner: (inner_doc_comment_marker)
+    doc: (doc_comment))
+  (block_comment))
+
+============================================
+Nested block comments
+============================================
+
+/* /* double nested */ */
+
+// ---
+
+/*/*/* triple nested */*/*/
+
+// ---
+
+/****
+  /****
+    nested with extra stars which makes it a regular block comment
+    and not a block doc comment
+  ****/
+****/
+
+// ---
+
+----
+
+(source_file
+  (block_comment)
+  (line_comment)
+  (block_comment)
+  (line_comment)
+  (block_comment)
+  (line_comment))
+
+============================================
+Line comments
+============================================
+
+// Comment
+
+/// Outer line doc comment
+
+//! Inner line doc comment
+
+----
+
+(source_file
+  (line_comment)
+  (line_comment
+    outer: (outer_doc_comment_marker)
+    doc: (doc_comment))
+  (line_comment
+    inner: (inner_doc_comment_marker)
+    doc: (doc_comment)))
+
+====================================
+Line doc comments
+====================================
+//!  - Inner line doc
+//!! - Still an inner line doc (but with a bang at the beginning)
+
+//   - Only a comment
+///  - Outer line doc (exactly 3 slashes)
+///
+//// - Only a comment
+
+---
+
+(source_file
+  (line_comment
+    inner: (inner_doc_comment_marker)
+    doc: (doc_comment))
+  (line_comment
+    inner: (inner_doc_comment_marker)
+    doc: (doc_comment))
+  (line_comment)
+  (line_comment
+    outer: (outer_doc_comment_marker)
+    doc: (doc_comment))
+  (line_comment
+    outer: (outer_doc_comment_marker)
+    doc: (doc_comment))
+  (line_comment))
+
+====================================
+Block doc comments
+====================================
+
+/*!  - Inner block doc */
+/*!! - Still an inner block doc (but with a bang at the beginning) */
+
+/*   - Only a comment */
+/**  - Outer block doc (exactly) 2 asterisks */
+/*** - Only a comment */
+
+----
+
+(source_file
+  (block_comment
+    inner: (inner_doc_comment_marker)
+    doc: (doc_comment))
+  (block_comment
+    inner: (inner_doc_comment_marker)
+    doc: (doc_comment))
+  (block_comment)
+  (block_comment
+    outer: (outer_doc_comment_marker)
+    doc: (doc_comment))
+  (block_comment))
+
+=====================================
+Nested doc block comments
+=====================================
+
+/*   /* */  /** */  /*! */  */
+/*!  /* */  /** */  /*! */  */
+/**  /* */  /** */  /*! */  */
+
+----
+
+(source_file
+  (block_comment)
+  (block_comment
+    inner: (inner_doc_comment_marker)
+    doc: (doc_comment))
+  (block_comment
+    outer: (outer_doc_comment_marker)
+    doc: (doc_comment)))
+
+====================================
+Comments degenerate cases
+====================================
+
+//!
+
+/*!*/
+
+//
+
+///
+let x; // <- immediate item after an empty line doc comment
+
+/**/
+
+/***/
+
+----
+
+(source_file
+  (line_comment
+    (inner_doc_comment_marker)
+    (doc_comment))
+  (block_comment
+    (inner_doc_comment_marker))
+  (line_comment)
+  (line_comment
+    (outer_doc_comment_marker)
+    (doc_comment))
+  (let_declaration
+    (identifier))
+  (line_comment)
+  (block_comment)
+  (block_comment))
+
+================================================================================
+Line doc comment with no EOL
+================================================================================
+
+//! Doc comment
+--------------------------------------------------------------------------------
+
+(source_file
+  (line_comment
+    (inner_doc_comment_marker)
+    (doc_comment)))
+
+=====================================
+Greek letters in identifiers
+=====================================
+
+const σ1 : Σ = 0;
+const ψ_2 : Ψ = 1;
+
+---
+
+(source_file
+  (const_item
+    (identifier)
+    (type_identifier)
+    (integer_literal))
+  (const_item
+    (identifier)
+    (type_identifier)
+    (integer_literal)))
+
+================================================================================
+Shebang line containing spaces
+================================================================================
+
+#!/usr/bin/env -S cargo +nightly -Zscript
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (shebang))
+
+================================================================================
+Empty shebang with code after
+================================================================================
+
+#!
+fn main() {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (shebang)
+  (function_item
+    (identifier)
+    (parameters)
+    (block)))
+
+================================================================================
+Immediate inner attribute
+================================================================================
+
+#![feature(thing)]
+fn main() {}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (inner_attribute_item
+    (attribute
+      (identifier)
+      (token_tree
+        (identifier))))
+  (function_item
+    (identifier)
+    (parameters)
+    (block)))

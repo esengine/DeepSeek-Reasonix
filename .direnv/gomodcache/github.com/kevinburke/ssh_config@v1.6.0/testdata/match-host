@@ -1,0 +1,9 @@
+Match Host *.example.com
+    Port 2222
+    User admin
+    IdentityFile ~/.ssh/prod_key
+
+Host *.example.com
+    Port 22
+    User developer
+    IdentityFile ~/.ssh/dev_key

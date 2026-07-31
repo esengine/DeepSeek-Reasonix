@@ -1,6 +1,11 @@
 // Run: tsx src/__tests__/message-selection-copy.test.ts
 
-import { messageSelectionCopyText } from "../lib/messageSelectionCopy";
+import { JSDOM } from "jsdom";
+
+import {
+  messageSelectionContextText,
+  messageSelectionCopyText,
+} from "../lib/messageSelectionCopy";
 
 let passed = 0;
 let failed = 0;
@@ -88,6 +93,95 @@ eq(
   null,
   "does not claim copy events without writable clipboard data",
 );
+
+function installDOMGlobals(dom: JSDOM) {
+  Object.assign(globalThis, {
+    Node: dom.window.Node,
+    Element: dom.window.Element,
+    HTMLElement: dom.window.HTMLElement,
+  });
+}
+
+function inlineKatex(source: string, rendered: string): string {
+  return `<span class="katex"><span class="katex-mathml"><math><semantics>` +
+    `<annotation encoding="application/x-tex">${source}</annotation>` +
+    `</semantics></math></span><span class="katex-html">${rendered}</span></span>`;
+}
+
+{
+  const dom = new JSDOM(
+    `<div class="msg__body" id="message">before ${inlineKatex("\\alpha", "α")} after</div>`,
+  );
+  installDOMGlobals(dom);
+  const doc = dom.window.document;
+  const message = doc.getElementById("message")!;
+  const range = doc.createRange();
+  range.selectNodeContents(message);
+  const selection = dom.window.getSelection()!;
+  selection.addRange(range);
+  eq(
+    messageSelectionContextText(doc, message),
+    "before $\\alpha$ after",
+    "restores one inline formula without dropping surrounding prose",
+  );
+}
+
+{
+  const dom = new JSDOM(
+    `<div class="msg__body" id="message">${inlineKatex("\\frac{1}{2}", "½")}</div>`,
+  );
+  installDOMGlobals(dom);
+  const doc = dom.window.document;
+  const message = doc.getElementById("message")!;
+  const rendered = message.querySelector(".katex-html")!.firstChild!;
+  const range = doc.createRange();
+  range.setStart(rendered, 0);
+  range.setEnd(rendered, 1);
+  const selection = dom.window.getSelection()!;
+  selection.addRange(range);
+  eq(
+    messageSelectionContextText(doc, message),
+    "$\\frac{1}{2}$",
+    "selecting part of a formula copies the complete source",
+  );
+}
+
+{
+  const dom = new JSDOM(
+    `<div class="msg__body" id="message">x and ${inlineKatex("x", "x")} plus x</div>`,
+  );
+  installDOMGlobals(dom);
+  const doc = dom.window.document;
+  const message = doc.getElementById("message")!;
+  const range = doc.createRange();
+  range.selectNodeContents(message);
+  const selection = dom.window.getSelection()!;
+  selection.addRange(range);
+  eq(
+    messageSelectionContextText(doc, message),
+    "x and $x$ plus x",
+    "does not replace identical prose around a formula",
+  );
+}
+
+{
+  const dom = new JSDOM(
+    `<div class="msg__body" id="message">before <span class="katex-display">` +
+      `${inlineKatex("x^2", "x²")}</span> after</div>`,
+  );
+  installDOMGlobals(dom);
+  const doc = dom.window.document;
+  const message = doc.getElementById("message")!;
+  const range = doc.createRange();
+  range.selectNodeContents(message);
+  const selection = dom.window.getSelection()!;
+  selection.addRange(range);
+  eq(
+    messageSelectionContextText(doc, message),
+    "before $$\nx^2\n$$ after",
+    "restores display math delimiters",
+  );
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

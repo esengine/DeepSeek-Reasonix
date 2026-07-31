@@ -1,0 +1,3 @@
+./chacha_generic.go
+./chacha_noasm.go
+./xor.go

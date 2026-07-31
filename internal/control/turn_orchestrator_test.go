@@ -16,12 +16,32 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/hook"
 	"reasonix/internal/provider"
+	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
 
 type plannerMetadataRunner struct {
 	meta  plannerTurnMetadata
 	input string
+}
+
+type goalReplacingRunner struct {
+	c        *Controller
+	executor *agent.Agent
+	calls    int
+}
+
+func (r *goalReplacingRunner) Run(context.Context, string) error {
+	r.calls++
+	if r.calls == 1 {
+		r.c.SetGoal("replacement goal")
+		r.executor.ReplaceTodoState(nil)
+		r.executor.Session().Add(provider.Message{
+			Role:    provider.RoleAssistant,
+			Content: "Old Goal turn finished.\n\n[goal:complete]",
+		})
+	}
+	return nil
 }
 
 func (r *plannerMetadataRunner) Run(ctx context.Context, input string) error {
@@ -102,6 +122,120 @@ func TestTurnOrchestratorTypedSyntheticTurnDoesNotDependOnPrefix(t *testing.T) {
 	}
 }
 
+func TestGoalTurnOutputCannotAdvanceReplacementGoal(t *testing.T) {
+	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession("system"), agent.Options{}, event.Discard)
+	runner := &goalReplacingRunner{executor: executor}
+	c := New(Options{
+		Runner:     runner,
+		Executor:   executor,
+		SessionDir: t.TempDir(),
+	})
+	runner.c = c
+	c.SetGoal("old goal")
+
+	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(
+		context.Background(),
+		"work on the old goal",
+		"work on the old goal",
+		"",
+	); err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1 old-Goal turn", runner.calls)
+	}
+	if got := c.Goal(); got != "replacement goal" {
+		t.Fatalf("Goal() = %q, want replacement Goal to remain active", got)
+	}
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("GoalStatus() = %q, want replacement Goal to remain running", got)
+	}
+}
+
+func TestGoalContinuationNoticeCannotMoveOldInterceptIntoReplacementGoal(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	session := agent.NewSession("")
+	session.Add(provider.Message{
+		Role:    provider.RoleAssistant,
+		Content: "All done.\n\n[goal:complete]",
+	})
+	executor := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
+	executor.SeedTodoState([]evidence.TodoItem{{
+		Content: "unfinished work from old goal",
+		Status:  "in_progress",
+	}})
+
+	var c *Controller
+	replaced := false
+	c = New(Options{
+		Runner:   runner,
+		Executor: executor,
+		Sink: event.FuncSink(func(e event.Event) {
+			if replaced ||
+				e.Kind != event.Notice ||
+				!strings.Contains(e.Text, "Goal still has unfinished task state") {
+				return
+			}
+			replaced = true
+			c.SetGoal("replacement goal")
+		}),
+	})
+	c.SetGoal("old goal")
+
+	if err := newTurnOrchestrator(c).continueGoal(
+		context.Background(),
+		c.goals.continuationToken(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !replaced {
+		t.Fatal("test setup: Notice callback did not replace the active Goal")
+	}
+	if got := c.Goal(); got != "replacement goal" {
+		t.Fatalf("Goal() = %q, want replacement goal", got)
+	}
+	if len(runner.inputs) != 0 {
+		t.Fatalf("stale continuation reached runner with input %q", runner.inputs[0])
+	}
+}
+
+func TestGoalContinuationOutputCannotAdvanceReplacementGoal(t *testing.T) {
+	session := agent.NewSession("system")
+	session.Add(provider.Message{
+		Role:    provider.RoleAssistant,
+		Content: "All done.\n\n[goal:complete]",
+	})
+	executor := agent.New(nil, tool.NewRegistry(), session, agent.Options{}, event.Discard)
+	executor.SeedTodoState([]evidence.TodoItem{{
+		Content: "unfinished work from old goal",
+		Status:  "in_progress",
+	}})
+	runner := &goalReplacingRunner{executor: executor}
+	c := New(Options{
+		Runner:     runner,
+		Executor:   executor,
+		SessionDir: t.TempDir(),
+	})
+	runner.c = c
+	c.SetGoal("old goal")
+
+	if err := newTurnOrchestrator(c).continueGoal(
+		context.Background(),
+		c.goals.continuationToken(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("runner calls = %d, want 1 old-Goal continuation", runner.calls)
+	}
+	if got := c.Goal(); got != "replacement goal" {
+		t.Fatalf("Goal() = %q, want replacement Goal to remain active", got)
+	}
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("GoalStatus() = %q, want replacement Goal to remain running", got)
+	}
+}
+
 func TestTurnOrchestratorStopHookIgnoresCanceledTurnContext(t *testing.T) {
 	runCtx, cancel := context.WithCancel(context.Background())
 	var stopCalls int
@@ -139,6 +273,7 @@ func TestTurnOrchestratorStopHookIgnoresCanceledTurnContext(t *testing.T) {
 type recordingSessionRunner struct {
 	session *agent.Session
 	inputs  []string
+	raw     []string
 }
 
 type deliveryScopeErrorRunner struct {
@@ -236,6 +371,7 @@ func TestRecoveryPauseKeepsGoalRunningAndDeliveryScope(t *testing.T) {
 
 func (r *recordingSessionRunner) Run(ctx context.Context, input string) error {
 	r.inputs = append(r.inputs, input)
+	r.raw = append(r.raw, agent.RawUserInput(ctx, input))
 	r.session.Add(provider.Message{Role: provider.RoleUser, Content: input})
 	return nil
 }
@@ -376,6 +512,45 @@ func TestTurnOrchestratorRefTurnRecordsVisibleDisplay(t *testing.T) {
 	}
 	if gotContent != runner.inputs[0] {
 		t.Fatalf("display recorder content = %q, want persisted model input %q", gotContent, runner.inputs[0])
+	}
+}
+
+func TestTurnOrchestratorRefTurnPreservesExpandedPasteForRouting(t *testing.T) {
+	const label = "[Pasted text #1 · 2 lines]"
+	const display = "inspect\n\n" + label
+	const expanded = display + "\n\n--- Begin " + label + " ---\nroute-expanded-paste\nfunc main() {}\n--- End " + label + " ---"
+
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	runner := &recordingSessionRunner{session: sess}
+	reg := tool.NewRegistry()
+	reg.Add(capabilityTestTool{name: "run_skill"})
+	c := New(Options{
+		Runner:   runner,
+		Executor: exec,
+		Registry: reg,
+		Skills: []skill.Skill{{
+			Name:        "paste-review",
+			Description: "review code",
+			Triggers:    []string{"route-expanded-paste"},
+			Scope:       skill.ScopeBuiltin,
+		}},
+	})
+	resolve := func(context.Context, string) (string, []string) {
+		return "<file path=\"notes.txt\">\nreference\n</file>", nil
+	}
+
+	if err := c.runRefTurnWithResolverSync(context.Background(), expanded, expanded, display, "", resolve); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.inputs) != 1 || !strings.Contains(runner.inputs[0], "Referenced context:") || !strings.Contains(runner.inputs[0], expanded) {
+		t.Fatalf("provider input = %+v, want resolved context and expanded paste", runner.inputs)
+	}
+	if !strings.Contains(runner.inputs[0], "skill:paste-review prefer") {
+		t.Fatalf("expanded pasted text did not drive capability routing:\n%s", runner.inputs[0])
+	}
+	if len(runner.raw) != 1 || runner.raw[0] != expanded {
+		t.Fatalf("persisted raw input = %+v, want complete user input %q", runner.raw, expanded)
 	}
 }
 

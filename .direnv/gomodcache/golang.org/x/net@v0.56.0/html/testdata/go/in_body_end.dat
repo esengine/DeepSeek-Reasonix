@@ -1,0 +1,17 @@
+#data
+<svg><desc><span></desc><mtext><style><!--</style><img src=1 onerror=alert(1)>-->
+#errors
+#document
+| <html>
+|   <head>
+|   <body>
+|     <svg svg>
+|       <svg desc>
+|         <span>
+|           <mtext>
+|             <style>
+|               "<!--"
+|             <img>
+|               onerror="alert(1)"
+|               src="1"
+|             "-->"

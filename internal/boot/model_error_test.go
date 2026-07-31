@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/config"
 	"reasonix/internal/event"
 
 	_ "reasonix/internal/provider/openai"
@@ -187,5 +188,107 @@ api_key_env = "`+keyEnv+`"
 		if strings.Contains(n, keyEnv) {
 			t.Fatalf("did not expect missing-key notice for loopback no-auth provider; got %v", notices)
 		}
+	}
+}
+
+// TestBuildKeylessDefaultFallsBackToConfiguredProvider: when the configured
+// default_model is resolvable but its API key is missing, Build should fall
+// through to the next provider that IS configured rather than fail with
+// "missing env X_API_KEY" (issue #6996). The fallback only kicks in when
+// the caller did not pass an explicit Options.Model — explicit choices
+// still fail loudly so the user is not silently rerouted.
+func TestBuildKeylessDefaultFallsBackToConfiguredProvider(t *testing.T) {
+	const keylessEnv = "REASONIX_KEYLESS_DEFAULT_FALLBACK_KEYLESS"
+	const configuredEnv = "REASONIX_KEYLESS_DEFAULT_FALLBACK_CONFIGURED"
+
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	if _, err := config.SetCredential(configuredEnv, "sk-test"); err != nil {
+		t.Fatalf("seed configured key: %v", err)
+	}
+
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "deepseek/deepseek-v4-flash"
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "`+keylessEnv+`"
+
+[[providers]]
+name = "audio"
+kind = "openai"
+base_url = "https://audio.example.com/v1"
+model = "tts-1"
+api_key_env = "`+configuredEnv+`"
+
+[[providers]]
+name = "minimax"
+kind = "openai"
+base_url = "https://api.MiniMax.chat/v1"
+model = "MiniMax-M3"
+api_key_env = "`+configuredEnv+`"
+`)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build should fall back to a configured provider instead of failing on the keyless default: %v", err)
+	}
+	defer ctrl.Close()
+	if got, want := ctrl.Label(), "MiniMax-M3"; got != want {
+		t.Fatalf("controller label = %q, want %q (the next provider's model with a configured key)", got, want)
+	}
+}
+
+// TestBuildExplicitKeylessModelStillFails: an Options.Model that the user
+// passed explicitly must keep its fail-fast behavior even when another
+// provider is configured and could be used as a fallback. The user asked
+// for that specific ref, so we must not silently reroute them.
+func TestBuildExplicitKeylessModelStillFails(t *testing.T) {
+	const keylessEnv = "REASONIX_EXPLICIT_KEYLESS_KEY"
+	const configuredEnv = "REASONIX_EXPLICIT_KEYLESS_CONFIGURED"
+
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+	if _, err := config.SetCredential(configuredEnv, "sk-test"); err != nil {
+		t.Fatalf("seed configured key: %v", err)
+	}
+
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "minimax/MiniMax-M3"
+
+[[providers]]
+name = "deepseek"
+kind = "openai"
+base_url = "https://api.deepseek.com"
+model = "deepseek-v4-flash"
+api_key_env = "`+keylessEnv+`"
+
+[[providers]]
+name = "minimax"
+kind = "openai"
+base_url = "https://api.MiniMax.chat/v1"
+model = "MiniMax-M3"
+api_key_env = "`+configuredEnv+`"
+`)
+
+	_, err := Build(context.Background(), Options{
+		Sink:       event.Discard,
+		Model:      "deepseek/deepseek-v4-flash",
+		RequireKey: true,
+	})
+	if err == nil {
+		t.Fatal("explicit keyless ref must fail loudly even with a configured fallback available")
+	}
+	if !strings.Contains(err.Error(), keylessEnv) {
+		t.Fatalf("error %q should mention %q", err.Error(), keylessEnv)
 	}
 }

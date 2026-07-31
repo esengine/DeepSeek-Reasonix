@@ -17,13 +17,26 @@ get a tailored request shape automatically — no extra config needed.
 | MiniMax M3 | `api.minimaxi.com`, `*.minimaxi.com` | `thinking.type` (`adaptive`\|`disabled`) | `auto`, `adaptive`, `disabled` | No depth scale; `reasoning_effort` is omitted. |
 | Zhipu GLM | `open.bigmodel.cn` / `*.bigmodel.cn`, `api.z.ai` / `*.z.ai` | `thinking.type` (`enabled`\|`disabled`) | `auto`, `enabled`, `disabled` | **`reasoning_effort` is silently ignored** by the endpoint, so reasoning is driven purely through `thinking.type`. |
 
+## Explicit per-model scales
+
+| Provider/model | Base URL | Reasoning control | `/effort` levels | Notes |
+|----------------|----------|-------------------|------------------|-------|
+| Kimi CN/Global `kimi-k3` | `api.moonshot.cn/v1`, `api.moonshot.ai/v1` | `reasoning_effort` | `low`, `high`, `max` | Always thinks; defaults to `max`. Reasonix replays the complete assistant message, uses `max_completion_tokens`, and omits K3's fixed sampling fields. |
+| OpenCode Go `kimi-k3` | `opencode.ai/zen/go/v1` | `reasoning_effort` | `high`, `max` | Relay-specific scale; defaults to `max` and keeps the relay's standard OpenAI-compatible request shape. |
+
 ## Everything else (standard `reasoning_effort`)
 
 Any other OpenAI-compatible backend falls through to the standard
-`reasoning_effort` scale (`low`\|`medium`\|`high`). Surveyed popular providers
-that need **no special handling** because they already follow this convention:
+`reasoning_effort` scale (`low`\|`medium`\|`high`). A resolved provider/model
+entry may explicitly advertise a different supported scale; in that case
+Reasonix preserves those declared values instead of applying the generic
+ceiling. Curated per-model capability metadata can opt into another scale as
+shown above.
 
-Qwen (`dashscope.aliyuncs.com`), Moonshot/Kimi (`api.moonshot.cn`), Yi
+Surveyed popular providers that need **no special handling** because they
+already follow the standard convention:
+
+Qwen (`dashscope.aliyuncs.com`), Yi
 (`api.01.ai`), SiliconFlow (`api.siliconflow.cn`), Stepfun (`api.stepfun.com`),
 Groq (`api.groq.com`), Together (`api.together.xyz`), OpenRouter
 (`openrouter.ai`), Perplexity (`api.perplexity.ai`), xAI (`api.x.ai`).

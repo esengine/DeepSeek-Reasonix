@@ -1,0 +1,42 @@
+cp input.sh input.sh.orig
+
+stdin input.sh
+exec shfmt
+cmp stdout input.sh.golden
+! stderr .
+
+stdin input.sh
+exec shfmt -
+cmp stdout input.sh.golden
+! stderr .
+
+exec shfmt input.sh
+cmp stdout input.sh.golden
+! stderr .
+
+! exec shfmt -l input.sh
+stdout 'input\.sh'
+! stdout foo
+! stderr .
+cmp input.sh input.sh.orig
+
+! exec shfmt -l input.sh input.sh
+stdout -count=2 'input.sh'
+
+exec shfmt -l -w input.sh
+stdout 'input\.sh'
+! stdout foo
+! stderr .
+cmp input.sh input.sh.golden
+
+cp input.sh.orig input.sh
+exec shfmt --list --write input.sh
+stdout 'input\.sh'
+! stdout foo
+! stderr .
+cmp input.sh input.sh.golden
+
+-- input.sh --
+ foo
+-- input.sh.golden --
+foo

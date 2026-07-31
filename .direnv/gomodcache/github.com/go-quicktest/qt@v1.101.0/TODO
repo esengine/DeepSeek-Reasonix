@@ -1,0 +1,35 @@
+## Possible things to do
+
+var defaultRetryStrategy = &retry.Strategy{
+	Delay: time.Millisecond,
+	MaxDelay: 200 * time.Millisecond,
+	MaxDuration: 5 * time.Second
+}
+
+var defaultStableStrategy = &retry.Strategy{
+	Delay: time.Millisecond,
+	MaxDuration: 50 * time.Millisecond,
+}
+
+func Eventually[T any](f func() T, checker func(T) Checker, retry *retry.Strategy) Checker
+func EventuallyStable[T any](f func() T, checker func(T) Checker, retry, stableRetry *retry.Strategy) Checker
+
+// QT provides a version of the Assert and Check primitives
+// that use a customizable Format function.
+//
+// For example:
+//
+//	package mypackage
+//
+//	import _qt "github.com/go-quicktest/qt"
+//
+//	var qt = _qt.QT{
+//		Format: myFormat,
+//	}
+type QT struct {
+	Format func(interface{}) string
+}
+
+func (qt QT) Assert(t testing.TB, checker Checker, comment ...Comment)
+func (qt QT) Check(t testing.TB, checker Checker, comment ...Comment) bool
+

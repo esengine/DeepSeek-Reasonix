@@ -128,6 +128,44 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 	}
 }
 
+func TestModelMessagesUsesProviderContentWithoutMutatingStoredMessage(t *testing.T) {
+	stored := []Message{{
+		Role:            RoleUser,
+		Content:         "fix the bug",
+		ProviderContent: "<reasoning-language>zh</reasoning-language>\n\nfix the bug",
+	}}
+
+	model := ModelMessages(stored)
+	if len(model) != 1 {
+		t.Fatalf("ModelMessages length = %d, want 1", len(model))
+	}
+	if got := model[0].Content; got != stored[0].ProviderContent {
+		t.Fatalf("model content = %q, want provider content %q", got, stored[0].ProviderContent)
+	}
+	if model[0].ProviderContent != "" {
+		t.Fatalf("provider-local field leaked into model message: %q", model[0].ProviderContent)
+	}
+	if stored[0].Content != "fix the bug" || stored[0].ProviderContent == "" {
+		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
+func TestModelMessagesStripsRawContentWithoutChangingLegacyContent(t *testing.T) {
+	const rendered = "<reasoning-language>zh</reasoning-language>\n\nfix the bug"
+	stored := []Message{{Role: RoleUser, Content: rendered, RawContent: "fix the bug"}}
+
+	model := ModelMessages(stored)
+	if len(model) != 1 || model[0].Content != rendered {
+		t.Fatalf("provider-visible content changed: %+v", model)
+	}
+	if model[0].RawContent != "" {
+		t.Fatalf("raw display metadata leaked into provider request: %+v", model[0])
+	}
+	if stored[0].RawContent != "fix the bug" || stored[0].Content != rendered {
+		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
 func TestLocalOnlySentinelIsSafeWhenNewFieldsAreIgnoredByLegacyReader(t *testing.T) {
 	legacyView := []Message{
 		{Role: RoleUser, Content: "task"},

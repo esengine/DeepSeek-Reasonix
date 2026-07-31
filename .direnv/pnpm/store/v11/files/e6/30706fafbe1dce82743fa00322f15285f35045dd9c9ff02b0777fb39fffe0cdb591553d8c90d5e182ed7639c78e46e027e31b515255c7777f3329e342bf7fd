@@ -1,0 +1,12 @@
+import type { VennDB, VennData, VennTextData, VennStyleData } from './vennTypes.js';
+export declare const addSubsetData: VennDB['addSubsetData'];
+export declare const getSubsetData: () => VennData[];
+export declare const addTextData: VennDB['addTextData'];
+export declare const addStyleData: VennDB['addStyleData'];
+export declare const getStyleData: () => VennStyleData[];
+export declare const validateUnionIdentifiers: VennDB['validateUnionIdentifiers'];
+export declare const getTextData: () => VennTextData[];
+export declare const getCurrentSets: VennDB['getCurrentSets'];
+export declare const getIndentMode: VennDB['getIndentMode'];
+export declare const setIndentMode: VennDB['setIndentMode'];
+export declare const db: VennDB;

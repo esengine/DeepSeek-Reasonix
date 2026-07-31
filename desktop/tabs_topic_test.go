@@ -132,7 +132,7 @@ func TestSessionListCacheRefillsAfterInvalidate(t *testing.T) {
 	first := []agent.SessionInfo{{Path: filepath.Join(dir, "first.jsonl")}}
 	second := []agent.SessionInfo{{Path: filepath.Join(dir, "second.jsonl")}}
 
-	token := cache.versionToken()
+	token := cache.versionToken(dir)
 	cache.put(dir, first, map[string]string{"first.jsonl": "First"}, token)
 	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "first.jsonl" || titles["first.jsonl"] != "First" {
 		t.Fatalf("initial cache entry = %+v, %+v, %v", infos, titles, ok)
@@ -147,10 +147,152 @@ func TestSessionListCacheRefillsAfterInvalidate(t *testing.T) {
 		t.Fatalf("stale token repopulated cache after invalidate")
 	}
 
-	token = cache.versionToken()
+	token = cache.versionToken(dir)
 	cache.put(dir, second, map[string]string{"second.jsonl": "Second"}, token)
 	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "second.jsonl" || titles["second.jsonl"] != "Second" {
 		t.Fatalf("refilled cache entry = %+v, %+v, %v", infos, titles, ok)
+	}
+}
+
+func TestSessionListCacheInvalidatesOnlyChangedDirectory(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	changedDir := filepath.Join(t.TempDir(), "changed")
+	untouchedDir := filepath.Join(t.TempDir(), "untouched")
+	changedToken := cache.versionToken(changedDir)
+	untouchedToken := cache.versionToken(untouchedDir)
+	cache.put(changedDir, []agent.SessionInfo{{Path: filepath.Join(changedDir, "old.jsonl")}}, nil, changedToken)
+	cache.put(untouchedDir, []agent.SessionInfo{{Path: filepath.Join(untouchedDir, "keep.jsonl")}}, nil, untouchedToken)
+
+	if !cache.invalidateDirs(changedDir) {
+		t.Fatal("invalidateDirs reported no changed directory")
+	}
+	if _, _, ok := cache.get(changedDir); ok {
+		t.Fatal("changed directory survived scoped invalidation")
+	}
+	if infos, _, ok := cache.get(untouchedDir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "keep.jsonl" {
+		t.Fatalf("unrelated directory was invalidated: %+v, %v", infos, ok)
+	}
+
+	cache.put(changedDir, []agent.SessionInfo{{Path: filepath.Join(changedDir, "stale.jsonl")}}, nil, changedToken)
+	if _, _, ok := cache.get(changedDir); ok {
+		t.Fatal("stale directory token repopulated cache after scoped invalidation")
+	}
+
+	equivalentDir := filepath.Join(untouchedDir, ".")
+	if !cache.invalidateDirs(equivalentDir) {
+		t.Fatal("invalidateDirs rejected an equivalent cleaned directory")
+	}
+	if _, _, ok := cache.get(untouchedDir); ok {
+		t.Fatal("equivalent directory spelling did not invalidate the absolute cache key")
+	}
+	if got := sessionListCacheDirForPath(""); got != "" {
+		t.Fatalf("empty session path resolved to cache directory %q", got)
+	}
+}
+
+func TestSessionListCacheExpiresForExternalProcessReconciliation(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	dir := t.TempDir()
+	token := cache.versionToken(dir)
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, token)
+
+	key := sessionListCacheDirKey(dir)
+	cache.mu.Lock()
+	entry := cache.byDir[key]
+	entry.cachedAt = time.Now().Add(-sessionListCacheTTL)
+	cache.byDir[key] = entry
+	cache.mu.Unlock()
+
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatal("expired directory listing remained cached")
+	}
+	if _, exists := cache.byDir[key]; exists {
+		t.Fatal("expired directory listing was not removed")
+	}
+}
+
+func TestProjectTreeMetadataChangePreservesSessionListings(t *testing.T) {
+	oldProjectCache := projectSessionCache
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	t.Cleanup(func() {
+		projectSessionCache = oldProjectCache
+	})
+
+	dir := t.TempDir()
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "keep.jsonl")}}, nil, projectSessionCache.versionToken(dir))
+	emitted := 0
+	app := NewApp()
+	app.projectTreeChangedHook = func() { emitted++ }
+	app.emitProjectTreeMetadataChanged()
+
+	if _, _, ok := projectSessionCache.get(dir); !ok {
+		t.Fatal("metadata-only project tree change invalidated session listing")
+	}
+	if emitted != 1 {
+		t.Fatalf("project tree hook calls = %d, want 1", emitted)
+	}
+}
+
+func TestSessionListCacheForgetRejectsInFlightFillAndReadd(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	dir := t.TempDir()
+	staleToken := cache.versionToken(dir)
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, staleToken)
+
+	if !cache.forgetDirs(dir) {
+		t.Fatal("forgetDirs reported no removed directory")
+	}
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatal("forgotten directory remained cached")
+	}
+	cache.mu.Lock()
+	_, versionRetained := cache.dirVersions[sessionListCacheDirKey(dir)]
+	cache.mu.Unlock()
+	if versionRetained {
+		t.Fatal("forgotten directory retained lifecycle metadata")
+	}
+
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "stale.jsonl")}}, nil, staleToken)
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatal("in-flight pre-removal fill repopulated forgotten directory")
+	}
+
+	readdToken := cache.versionToken(dir)
+	if readdToken.dirVersion == staleToken.dirVersion {
+		t.Fatal("re-added directory reused its pre-removal token")
+	}
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "fresh.jsonl")}}, nil, readdToken)
+	infos, _, ok := cache.get(dir)
+	if !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "fresh.jsonl" {
+		t.Fatalf("re-added directory did not accept fresh listing: %+v, %v", infos, ok)
+	}
+}
+
+func TestRemoveWorkspaceForgetsProjectSessionCache(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldProjectCache := projectSessionCache
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	t.Cleanup(func() { projectSessionCache = oldProjectCache })
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Cached Project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	staleToken := projectSessionCache.versionToken(dir)
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, staleToken)
+
+	app := NewApp()
+	if err := app.RemoveWorkspace(projectRoot); err != nil {
+		t.Fatalf("RemoveWorkspace: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("removed workspace session listing remained cached")
+	}
+
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "stale.jsonl")}}, nil, staleToken)
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("removed workspace accepted an in-flight stale cache fill")
 	}
 }
 
@@ -163,6 +305,7 @@ func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
 	})
 
 	dir := t.TempDir()
+	otherDir := t.TempDir()
 	sessionPath := filepath.Join(dir, "rename-me.jsonl")
 	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write session: %v", err)
@@ -172,8 +315,9 @@ func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
 	app := NewApp()
 	app.setTestCtrl(ctrl, "")
 
-	token := projectSessionCache.versionToken()
+	token := projectSessionCache.versionToken(dir)
 	projectSessionCache.put(dir, []agent.SessionInfo{{Path: sessionPath}}, map[string]string{"rename-me.jsonl": "old"}, token)
+	projectSessionCache.put(otherDir, []agent.SessionInfo{{Path: filepath.Join(otherDir, "keep.jsonl")}}, nil, projectSessionCache.versionToken(otherDir))
 	if _, _, ok := projectSessionCache.get(dir); !ok {
 		t.Fatalf("expected primed project tree cache")
 	}
@@ -182,6 +326,53 @@ func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
 	}
 	if _, _, ok := projectSessionCache.get(dir); ok {
 		t.Fatalf("RenameSession should invalidate project tree cache")
+	}
+	if _, _, ok := projectSessionCache.get(otherDir); !ok {
+		t.Fatalf("RenameSession invalidated an unrelated session directory")
+	}
+}
+
+func TestArchiveAndRestoreSessionInvalidateOnlyOwningDirectory(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldProjectCache := projectSessionCache
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	t.Cleanup(func() {
+		projectSessionCache = oldProjectCache
+	})
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := writeLegacySession(t, dir, "scoped-cache.jsonl", "cache scope", time.Now())
+	otherDir := t.TempDir()
+	prime := func(cacheDir, sessionPath string) {
+		projectSessionCache.put(cacheDir, []agent.SessionInfo{{Path: sessionPath}}, nil, projectSessionCache.versionToken(cacheDir))
+	}
+	prime(dir, path)
+	prime(otherDir, filepath.Join(otherDir, "keep.jsonl"))
+
+	app := NewApp()
+	if err := app.DeleteSession(path); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("DeleteSession kept the owning directory cached")
+	}
+	if _, _, ok := projectSessionCache.get(otherDir); !ok {
+		t.Fatal("DeleteSession invalidated an unrelated directory")
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "scoped-cache.jsonl", "scoped-cache.jsonl")
+	prime(dir, path)
+	if err := app.RestoreSession(trashPath); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("RestoreSession kept the owning directory cached")
+	}
+	if _, _, ok := projectSessionCache.get(otherDir); !ok {
+		t.Fatal("RestoreSession invalidated an unrelated directory")
 	}
 }
 

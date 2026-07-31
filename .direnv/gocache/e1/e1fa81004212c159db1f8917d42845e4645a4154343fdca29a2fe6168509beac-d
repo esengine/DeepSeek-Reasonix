@@ -1,0 +1,6 @@
+./converter.go
+./filters.go
+./nearest.go
+./resize.go
+./thumbnail.go
+./ycc.go

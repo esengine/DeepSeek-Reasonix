@@ -1,0 +1,2216 @@
+=======================================
+Built-in types
+=======================================
+
+var x: string = 'hi';
+var y: number;
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (predefined_type))
+      (string
+        (string_fragment))))
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (predefined_type)))))
+
+=======================================
+Parenthesized types
+=======================================
+
+var x: (string);
+var x: ({a: any});
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (parenthesized_type
+          (predefined_type)))))
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (parenthesized_type
+          (object_type
+            (property_signature
+              (property_identifier)
+              (type_annotation
+                (predefined_type)))))))))
+
+=======================================
+Object types
+=======================================
+
+let person: {name: string, age: number};
+let thing: { [type: string]: string };
+type T = { [K in keyof T]-?: any }
+type T = { [K in keyof T]?: any }
+type T = { -readonly [K in keyof T]: any }
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (object_type
+          (property_signature
+            (property_identifier)
+            (type_annotation
+              (predefined_type)))
+          (property_signature
+            (property_identifier)
+            (type_annotation
+              (predefined_type)))))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (object_type
+          (index_signature
+            (identifier)
+            (predefined_type)
+            (type_annotation
+              (predefined_type)))))))
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (index_signature
+        (mapped_type_clause
+          (type_identifier)
+          (index_type_query
+            (type_identifier)))
+        (omitting_type_annotation
+          (predefined_type)))))
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (index_signature
+        (mapped_type_clause
+          (type_identifier)
+          (index_type_query
+            (type_identifier)))
+        (opting_type_annotation
+          (predefined_type)))))
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (index_signature
+        (mapped_type_clause
+          (type_identifier)
+          (index_type_query
+            (type_identifier)))
+        (type_annotation
+          (predefined_type))))))
+
+=======================================
+Object types with call signatures
+=======================================
+
+let MyFunction: {
+  (string): string,
+  length: number
+};
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (object_type
+          (call_signature
+            (formal_parameters
+              (required_parameter
+                (identifier)))
+            (type_annotation
+              (predefined_type)))
+          (property_signature
+            (property_identifier)
+            (type_annotation
+              (predefined_type))))))))
+
+====================================================
+Index signatures
+====================================================
+
+type Foo = {
+  [b: string]: any;
+  readonly [c: number]: string;
+}
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (index_signature
+        (identifier)
+        (predefined_type)
+        (type_annotation
+          (predefined_type)))
+      (index_signature
+        (identifier)
+        (predefined_type)
+        (type_annotation
+          (predefined_type))))))
+
+====================================================
+Object types with automatic semicolon insertion
+====================================================
+
+type Something = {
+  length: number
+  (string): string
+  [index:string] : number
+}
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type)))
+      (call_signature
+        (formal_parameters
+          (required_parameter
+            (identifier)))
+        (type_annotation
+          (predefined_type)))
+      (index_signature
+        (identifier)
+        (predefined_type)
+        (type_annotation
+          (predefined_type))))))
+
+==========================================================
+Automatic semicolon disabled before return type
+==========================================================
+
+function f(): any {
+  'a';
+  'b';
+}
+
+function
+f
+()
+ :
+ any {
+  'a'
+  'b'
+}
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters)
+    (type_annotation
+      (predefined_type))
+    (statement_block
+      (expression_statement
+        (string
+          (string_fragment)))
+      (expression_statement
+        (string
+          (string_fragment)))))
+  (function_declaration
+    (identifier)
+    (formal_parameters)
+    (type_annotation
+      (predefined_type))
+    (statement_block
+      (expression_statement
+        (string
+          (string_fragment)))
+      (expression_statement
+        (string
+          (string_fragment))))))
+
+=======================================
+Array types
+=======================================
+
+let x: X[];
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (array_type
+          (type_identifier))))))
+
+=======================================
+Function types
+=======================================
+
+let x: (result: string) => any;
+const foo: (this: Readable, size?: number) => any;
+
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (function_type
+          (formal_parameters
+            (required_parameter
+              (identifier)
+              (type_annotation
+                (predefined_type))))
+          (predefined_type)))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (function_type
+          (formal_parameters
+            (required_parameter
+              (this)
+              (type_annotation
+                (type_identifier)))
+            (optional_parameter
+              (identifier)
+              (type_annotation
+                (predefined_type))))
+          (predefined_type))))))
+
+======================================
+Functions with destructured parameters
+======================================
+
+let foo: ({a}: Foo) => number
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (function_type
+          (formal_parameters
+            (required_parameter
+              (object_pattern
+                (shorthand_property_identifier_pattern))
+              (type_annotation
+                (type_identifier))))
+          (predefined_type))))))
+
+=======================================
+Constructor types
+=======================================
+
+let x: new < T1, T2 > ( p1, p2 ) => R;
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (constructor_type
+          (type_parameters
+            (type_parameter
+              (type_identifier))
+            (type_parameter
+              (type_identifier)))
+          (formal_parameters
+            (required_parameter
+              (identifier))
+            (required_parameter
+              (identifier)))
+          (type_identifier))))))
+
+=======================================
+Symbol types
+=======================================
+
+const symFoo: unique symbol = Symbol("foo");
+const symBar: symbol = Symbol.for("bar");
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (predefined_type))
+      (call_expression
+        (identifier)
+        (arguments
+          (string
+            (string_fragment))))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (predefined_type))
+      (call_expression
+        (member_expression
+          (identifier)
+          (property_identifier))
+        (arguments
+          (string
+            (string_fragment)))))))
+
+=======================================
+Type annotations in parenthesized expressions
+=======================================
+
+const range = (document: any).selection.createRange()
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (call_expression
+        (member_expression
+          (member_expression
+            (parenthesized_expression
+              (identifier)
+              (type_annotation
+                (predefined_type)))
+            (property_identifier))
+          (property_identifier))
+        (arguments)))))
+
+=======================================
+Flow Maybe Types
+=======================================
+
+const editor: ?CodeEditor
+const miscArray: ?T[]
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (flow_maybe_type
+          (type_identifier)))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (flow_maybe_type
+          (array_type
+            (type_identifier)))))))
+
+=======================================
+Flow Import Types
+=======================================
+
+import type {UserID, User} from "./User.js";
+import {type UserID, type User} from "./User.js";
+import typeof {jimiguitar as GuitarT} from "./User.js";
+import type UserID, {addUser, removeUser} from './User.js';
+
+import type from './User.js';
+import type, {addUser} from './User.js';
+import {type} from './User.js';
+import {addUser as type} from './User.js';
+import {type as addUser} from './User.js';
+import {type, addUser} from './User.js';
+import {addUser, type} from './User.js';
+import type, {addUser, type User} from './User.js';
+
+---
+
+(program
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier)
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (identifier)
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (identifier))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (identifier)
+      (named_imports
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier)
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier)
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment)))
+  (import_statement
+    (import_clause
+      (identifier)
+      (named_imports
+        (import_specifier
+          (identifier))
+        (import_specifier
+          (identifier))))
+    (string
+      (string_fragment))))
+
+=======================================
+Type-only Export
+=======================================
+
+export type { UserType }
+export type { UserType } from "./User.js";
+export type { A, B, C as D } from 'mymodule';
+
+---
+
+(program
+  (export_statement
+    (export_clause
+      (export_specifier
+        (identifier))))
+  (export_statement
+    (export_clause
+      (export_specifier
+        (identifier)))
+    (string
+      (string_fragment)))
+  (export_statement
+    (export_clause
+      (export_specifier
+        (identifier))
+      (export_specifier
+        (identifier))
+      (export_specifier
+        (identifier)
+        (identifier)))
+    (string
+      (string_fragment))))
+
+=======================================
+Flow Export Types
+=======================================
+
+export type UserType = {};
+export interface UserInterface {}
+
+---
+
+(program
+  (export_statement
+    (type_alias_declaration
+      (type_identifier)
+      (object_type)))
+  (export_statement
+    (interface_declaration
+      (type_identifier)
+      (interface_body))))
+
+=======================================
+Type alias declarations
+=======================================
+
+type FileMergeData = {
+  document: Doc,
+  headDocument: Doc,
+  baseDocument: Doc,
+  conflicts: ConflictInfo[]
+}
+
+type ConflictInfo = {
+  start?: LineHandle,
+  middle?: LineHandle,
+  end?: LineHandle
+}
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (array_type
+            (type_identifier))))))
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier))))))
+
+=======================================
+Enum declarations
+=======================================
+
+enum Test {
+    A,
+    'B',
+    'C' = Math.floor(Math.random() * 1000),
+    D = 10,
+    E
+}
+
+enum Style {
+    None = 0,
+    Bold = 1,
+    Italic = 2,
+    Underline = 4,
+    Emphasis = Bold | Italic,
+    Hyperlink = Bold | Underline
+}
+
+---
+
+(program
+  (enum_declaration
+    (identifier)
+    (enum_body
+      (property_identifier)
+      (string
+        (string_fragment))
+      (enum_assignment
+        (string
+          (string_fragment))
+        (call_expression
+          (member_expression
+            (identifier)
+            (property_identifier))
+          (arguments
+            (binary_expression
+              (call_expression
+                (member_expression
+                  (identifier)
+                  (property_identifier))
+                (arguments))
+              (number)))))
+      (enum_assignment
+        (property_identifier)
+        (number))
+      (property_identifier)))
+  (enum_declaration
+    (identifier)
+    (enum_body
+      (enum_assignment
+        (property_identifier)
+        (number))
+      (enum_assignment
+        (property_identifier)
+        (number))
+      (enum_assignment
+        (property_identifier)
+        (number))
+      (enum_assignment
+        (property_identifier)
+        (number))
+      (enum_assignment
+        (property_identifier)
+        (binary_expression
+          (identifier)
+          (identifier)))
+      (enum_assignment
+        (property_identifier)
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+=======================================
+Interface declarations
+=======================================
+
+interface A { a: string; }
+
+interface B extends A { b: string; }
+
+interface Friend {
+    name: string;
+    favoriteColor?: string;
+}
+
+interface G<T, U extends B> {
+    x: T;
+    y: U;
+}
+
+interface X {
+  hook: {
+  }
+  get(key: Key): Promise<T>;
+}
+
+interface Enum extends Bar, Baz, Foo<A> {
+  public toEnum(): Int;
+}
+
+---
+
+(program
+  (interface_declaration
+    (type_identifier)
+    (interface_body
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type)))))
+  (interface_declaration
+    (type_identifier)
+    (extends_type_clause
+      (type_identifier))
+    (interface_body
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type)))))
+  (interface_declaration
+    (type_identifier)
+    (interface_body
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type)))))
+  (interface_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)
+        (constraint
+          (type_identifier))))
+    (interface_body
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (type_identifier)))))
+  (interface_declaration
+    (type_identifier)
+    (interface_body
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (object_type)))
+      (method_signature
+        (property_identifier)
+        (formal_parameters
+          (required_parameter
+            (identifier)
+            (type_annotation
+              (type_identifier))))
+        (type_annotation
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_identifier)))))))
+  (interface_declaration
+    (type_identifier)
+    (extends_type_clause
+      (type_identifier)
+      (type_identifier)
+      (generic_type
+        (type_identifier)
+        (type_arguments
+          (type_identifier))))
+    (interface_body
+      (method_signature
+        (accessibility_modifier)
+        (property_identifier)
+        (formal_parameters)
+        (type_annotation
+          (type_identifier))))))
+
+=======================================
+Generic types
+=======================================
+
+class A<
+  B,
+  C,
+> {}
+
+class D extends A<
+  X,
+  Y,
+> {}
+
+class E extends funThatEvalsToClass()<
+  X,
+  Y,
+> {}
+
+class F extends G, H<T> {}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (class_body))
+  (class_declaration
+    (type_identifier)
+    (class_heritage
+      (extends_clause
+        (identifier)
+        (type_arguments
+          (type_identifier)
+          (type_identifier))))
+    (class_body))
+  (class_declaration
+    (type_identifier)
+    (class_heritage
+      (extends_clause
+        (call_expression
+          (identifier)
+          (arguments))
+        (type_arguments
+          (type_identifier)
+          (type_identifier))))
+    (class_body))
+  (class_declaration
+    (type_identifier)
+    (class_heritage
+      (extends_clause
+        (identifier)
+        (identifier)
+        (type_arguments
+          (type_identifier))))
+    (class_body)))
+
+=======================================
+Existential types
+=======================================
+
+let x: Array<*>
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (existential_type)))))))
+
+=======================================
+Flow Union types
+=======================================
+
+type U = number | string;
+type Z = | "foo" | "bar";
+type Z = | "foo";
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (union_type
+      (predefined_type)
+      (predefined_type)))
+  (type_alias_declaration
+    (type_identifier)
+    (union_type
+      (union_type
+        (literal_type
+          (string
+            (string_fragment))))
+      (literal_type
+        (string
+          (string_fragment)))))
+  (type_alias_declaration
+    (type_identifier)
+    (union_type
+      (literal_type
+        (string
+          (string_fragment))))))
+
+=======================================
+Flow Intersection types
+=======================================
+
+type BrowserStats$ResourceTiming = number & string;
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (intersection_type
+      (predefined_type)
+      (predefined_type))))
+
+=======================================
+Flow exact object types
+=======================================
+
+type BrowserStats = {|
+  url: string,
+  ms: number
+|}
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (object_type
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type)))
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type))))))
+
+=======================================
+Literal types
+=======================================
+
+let x: 2
+let x: 2 | -3 | +4
+let x: "string"
+let x: false
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (literal_type
+          (number)))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (union_type
+          (union_type
+            (literal_type
+              (number))
+            (literal_type
+              (unary_expression
+                (number))))
+          (literal_type
+            (unary_expression
+              (number)))))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (literal_type
+          (string
+            (string_fragment))))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (literal_type
+          (false))))))
+
+=======================================
+Flow type parameter constraint syntax
+=======================================
+
+type HandlerFunction<T: Element> = void
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (constraint
+          (type_identifier))))
+    (predefined_type)))
+
+=======================================
+Nested type arguments
+=======================================
+
+interface X {
+  x(): Promise<Array<Foo>>;
+}
+
+var y: Map<number, Promise<Map<bool, Map<Foo, Bar>>>>
+
+---
+
+(program
+  (interface_declaration
+    (type_identifier)
+    (interface_body
+      (method_signature
+        (property_identifier)
+        (formal_parameters)
+        (type_annotation
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (generic_type
+                (type_identifier)
+                (type_arguments
+                  (type_identifier)))))))))
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (predefined_type)
+            (generic_type
+              (type_identifier)
+              (type_arguments
+                (generic_type
+                  (type_identifier)
+                  (type_arguments
+                    (type_identifier)
+                    (generic_type
+                      (type_identifier)
+                      (type_arguments
+                        (type_identifier)
+                        (type_identifier)))))))))))))
+
+=======================================
+predefined types as identifiers
+=======================================
+
+let score: (string: string, query: string) => number
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (function_type
+          (formal_parameters
+            (required_parameter
+              (identifier)
+              (type_annotation
+                (predefined_type)))
+            (required_parameter
+              (identifier)
+              (type_annotation
+                (predefined_type))))
+          (predefined_type))))))
+
+=======================================
+Non-null assertion operator
+=======================================
+
+const repository = foo++!
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (non_null_expression
+        (update_expression
+          (identifier))))))
+
+=======================================
+Type query and index type query types
+=======================================
+
+type T = keyof Person;
+type T = keyof Person.P;
+type T = keyof Person<P>;
+type T = keyof (Person);
+
+type T = typeof Person;
+type T = typeof Person.P;
+type T = typeof import('person');
+
+type T = keyof typeof Person;
+
+type T = keyof U[number];
+type T = keyof U & V;
+
+type T = typeof array[number];
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (index_type_query
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (index_type_query
+      (nested_type_identifier
+        (identifier)
+        (type_identifier))))
+  (type_alias_declaration
+    (type_identifier)
+    (index_type_query
+      (generic_type
+        (type_identifier)
+        (type_arguments
+          (type_identifier)))))
+  (type_alias_declaration
+    (type_identifier)
+    (index_type_query
+      (parenthesized_type
+        (type_identifier))))
+  (type_alias_declaration
+    (type_identifier)
+    (type_query
+      (identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_query
+      (member_expression
+        (identifier)
+        (property_identifier))))
+  (type_alias_declaration
+    (type_identifier)
+    (type_query
+      (call_expression
+        (import)
+        (arguments
+          (string
+            (string_fragment))))))
+  (type_alias_declaration
+    (type_identifier)
+    (index_type_query
+      (type_query
+        (identifier))))
+  (type_alias_declaration
+    (type_identifier)
+    (index_type_query
+      (lookup_type
+        (type_identifier)
+        (predefined_type))))
+  (type_alias_declaration
+    (type_identifier)
+    (intersection_type
+      (index_type_query
+        (type_identifier))
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (lookup_type
+      (type_query
+        (identifier))
+      (predefined_type))))
+
+=======================================
+Lookup types
+=======================================
+
+type K1 = Foo[bar]
+type K1 = Foo['bar' | 'baz']
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (lookup_type
+      (type_identifier)
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (lookup_type
+      (type_identifier)
+      (union_type
+        (literal_type
+          (string
+            (string_fragment)))
+        (literal_type
+          (string
+            (string_fragment)))))))
+
+=======================================
+Mapped types
+=======================================
+
+export type NoInfer<T> = T & { [K in keyof T]: T[K] };
+
+---
+
+(program
+  (export_statement
+    (type_alias_declaration
+      (type_identifier)
+      (type_parameters
+        (type_parameter
+          (type_identifier)))
+      (intersection_type
+        (type_identifier)
+        (object_type
+          (index_signature
+            (mapped_type_clause
+              (type_identifier)
+              (index_type_query
+                (type_identifier)))
+            (type_annotation
+              (lookup_type
+                (type_identifier)
+                (type_identifier)))))))))
+
+=======================================
+Assertion functions checking a value
+=======================================
+
+function f(x: any): asserts x {
+}
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters
+      (required_parameter
+        (identifier)
+        (type_annotation
+          (predefined_type))))
+    (asserts_annotation
+      (asserts
+        (identifier)))
+    (statement_block)))
+
+=======================================
+Assertion functions checking a type
+=======================================
+
+function f(x: any): asserts x is number {
+}
+
+class Foo<T> {
+  test(): this is T {}
+}
+
+function isT(t: T): t is T {
+  return true
+}
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters
+      (required_parameter
+        (identifier)
+        (type_annotation
+          (predefined_type))))
+    (asserts_annotation
+      (asserts
+        (type_predicate
+          (identifier)
+          (predefined_type))))
+    (statement_block))
+  (class_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (class_body
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (type_predicate_annotation
+          (type_predicate
+            (this)
+            (type_identifier)))
+        (statement_block))))
+  (function_declaration
+    (identifier)
+    (formal_parameters
+      (required_parameter
+        (identifier)
+        (type_annotation
+          (type_identifier))))
+    (type_predicate_annotation
+      (type_predicate
+        (identifier)
+        (type_identifier)))
+    (statement_block
+      (return_statement
+        (true)))))
+
+=======================================
+Type of an assertion function
+=======================================
+
+declare const f: (x: any) => asserts x;
+declare const g: (x: any) => asserts x is number;
+
+---
+
+(program
+  (ambient_declaration
+    (lexical_declaration
+      (variable_declarator
+        (identifier)
+        (type_annotation
+          (function_type
+            (formal_parameters
+              (required_parameter
+                (identifier)
+                (type_annotation
+                  (predefined_type))))
+            (asserts
+              (identifier)))))))
+  (ambient_declaration
+    (lexical_declaration
+      (variable_declarator
+        (identifier)
+        (type_annotation
+          (function_type
+            (formal_parameters
+              (required_parameter
+                (identifier)
+                (type_annotation
+                  (predefined_type))))
+            (asserts
+              (type_predicate
+                (identifier)
+                (predefined_type)))))))))
+
+==================================
+Type predicate and predefined types
+==================================
+
+function isFish(pet: Fish): pet is Fish {
+}
+
+function isFish(object: Fish): object is Fish {
+}
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters
+      (required_parameter
+        (identifier)
+        (type_annotation
+          (type_identifier))))
+    (type_predicate_annotation
+      (type_predicate
+        (identifier)
+        (type_identifier)))
+    (statement_block))
+  (function_declaration
+    (identifier)
+    (formal_parameters
+      (required_parameter
+        (identifier)
+        (type_annotation
+          (type_identifier))))
+    (type_predicate_annotation
+      (type_predicate
+        (identifier)
+        (type_identifier)))
+    (statement_block)))
+
+==================================
+Read-only arrays
+==================================
+
+type t = a[]
+type t = readonly a[]
+type t = readonly a[][]
+type t = (readonly a[])[]
+type t = readonly (readonly a[]) []
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (array_type
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (readonly_type
+      (array_type
+        (type_identifier))))
+  (type_alias_declaration
+    (type_identifier)
+    (readonly_type
+      (array_type
+        (array_type
+          (type_identifier)))))
+  (type_alias_declaration
+    (type_identifier)
+    (array_type
+      (parenthesized_type
+        (readonly_type
+          (array_type
+            (type_identifier))))))
+  (type_alias_declaration
+    (type_identifier)
+    (readonly_type
+      (array_type
+        (parenthesized_type
+          (readonly_type
+            (array_type
+              (type_identifier))))))))
+
+==================================
+Tuple types
+==================================
+
+type t = []
+type t = [A,]
+type t = [A|B, C]
+type t = readonly [A[], B.C]
+
+// special optional and rest type syntax
+type t = [string?, ...B]
+
+// labeled elements
+type t = [a: A, b?: B, ...c: C[]]
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (tuple_type))
+  (type_alias_declaration
+    (type_identifier)
+    (tuple_type
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (tuple_type
+      (union_type
+        (type_identifier)
+        (type_identifier))
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (readonly_type
+      (tuple_type
+        (array_type
+          (type_identifier))
+        (nested_type_identifier
+          (identifier)
+          (type_identifier)))))
+  (comment)
+  (type_alias_declaration
+    (type_identifier)
+    (tuple_type
+      (optional_type
+        (predefined_type))
+      (rest_type
+        (type_identifier))))
+  (comment)
+  (type_alias_declaration
+    (type_identifier)
+    (tuple_type
+      (required_parameter
+        (identifier)
+        (type_annotation
+          (type_identifier)))
+      (optional_parameter
+        (identifier)
+        (type_annotation
+          (type_identifier)))
+      (required_parameter
+        (rest_pattern
+          (identifier))
+        (type_annotation
+          (array_type
+            (type_identifier)))))))
+
+==================================
+Conditional types
+==================================
+
+type T = X extends Y ? Z : Y
+type T = X extends ?Y ? ?X : Y
+type F<T, X, Y> = ((t: T) => X extends Y ? X : Y) extends ((t: T) => X extends Y ? Y : X) ? X : Y
+type F<T, X, Y> = (t: T) => X extends Y ? X : Y extends (t: T) => X extends Y ? Y : X ? X : Y
+type T<X, Y> = T extends X<infer Y> ? Y : X
+type T<X> = X extends (infer X)[] ? X : never;
+type T<X> = T extends { x: infer X } ? X : never;
+type T<X> = T extends { x: infer X extends number } ? X : never;
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (conditional_type
+      (type_identifier)
+      (type_identifier)
+      (type_identifier)
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (conditional_type
+      (type_identifier)
+      (flow_maybe_type
+        (type_identifier))
+      (flow_maybe_type
+        (type_identifier))
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (conditional_type
+      (parenthesized_type
+        (function_type
+          (formal_parameters
+            (required_parameter
+              (identifier)
+              (type_annotation
+                (type_identifier))))
+          (conditional_type
+            (type_identifier)
+            (type_identifier)
+            (type_identifier)
+            (type_identifier))))
+      (parenthesized_type
+        (function_type
+          (formal_parameters
+            (required_parameter
+              (identifier)
+              (type_annotation
+                (type_identifier))))
+          (conditional_type
+            (type_identifier)
+            (type_identifier)
+            (type_identifier)
+            (type_identifier))))
+      (type_identifier)
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (function_type
+      (formal_parameters
+        (required_parameter
+          (identifier)
+          (type_annotation
+            (type_identifier))))
+      (conditional_type
+        (type_identifier)
+        (type_identifier)
+        (type_identifier)
+        (conditional_type
+          (type_identifier)
+          (function_type
+            (formal_parameters
+              (required_parameter
+                (identifier)
+                (type_annotation
+                  (type_identifier))))
+            (conditional_type
+              (type_identifier)
+              (type_identifier)
+              (type_identifier)
+              (type_identifier)))
+          (type_identifier)
+          (type_identifier)))))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (conditional_type
+      (type_identifier)
+      (generic_type
+        (type_identifier)
+        (type_arguments
+          (infer_type
+            (type_identifier))))
+      (type_identifier)
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (conditional_type
+      (type_identifier)
+      (array_type
+        (parenthesized_type
+          (infer_type
+            (type_identifier))))
+      (type_identifier)
+      (predefined_type)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (conditional_type
+      (type_identifier)
+      (object_type
+        (property_signature
+          (property_identifier)
+          (type_annotation
+            (infer_type
+              (type_identifier)))))
+      (type_identifier)
+      (predefined_type)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (conditional_type
+      (type_identifier)
+      (object_type
+        (property_signature
+          (property_identifier)
+          (type_annotation
+            (infer_type
+              (type_identifier)
+              (predefined_type)))))
+      (type_identifier)
+      (predefined_type))))
+
+==================================
+Template literal types
+==================================
+
+type A<B, C> = `${B}${C}`;
+type A = `${B[0]}-foo-${C}-bar-${D<U, D>}`
+type A = `[${'a'}${0}]`
+type A<B, C> = B extends C
+  ? C extends string
+    ? `${C}${"" extends C ? "" : "."}${B}`
+    : never
+  : never
+type Trim<S extends string> = S extends `${infer R}` ? Trim<R>  : S;
+type A = `${true & ('foo' | false)}`;
+type StringToNumber<S extends string> = S extends `${infer N extends number}` ? N : never;
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (template_literal_type
+      (template_type
+        (type_identifier))
+      (template_type
+        (type_identifier))))
+  (type_alias_declaration
+    (type_identifier)
+    (template_literal_type
+      (template_type
+        (lookup_type
+          (type_identifier)
+          (literal_type
+            (number))))
+      (string_fragment)
+      (template_type
+        (type_identifier))
+      (string_fragment)
+      (template_type
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_identifier)
+            (type_identifier))))))
+  (type_alias_declaration
+    (type_identifier)
+    (template_literal_type
+      (string_fragment)
+      (template_type
+        (literal_type
+          (string
+            (string_fragment))))
+      (template_type
+        (literal_type
+          (number)))
+      (string_fragment)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (conditional_type
+      (type_identifier)
+      (type_identifier)
+      (conditional_type
+        (type_identifier)
+        (predefined_type)
+        (template_literal_type
+          (template_type
+            (type_identifier))
+          (template_type
+            (conditional_type
+              (literal_type
+                (string))
+              (type_identifier)
+              (literal_type
+                (string))
+              (literal_type
+                (string
+                  (string_fragment)))))
+          (template_type
+            (type_identifier)))
+        (predefined_type))
+      (predefined_type)))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (constraint
+          (predefined_type))))
+    (conditional_type
+      (type_identifier)
+      (template_literal_type
+        (template_type
+          (infer_type
+            (type_identifier))))
+      (generic_type
+        (type_identifier)
+        (type_arguments
+          (type_identifier)))
+      (type_identifier)))
+  (type_alias_declaration
+    (type_identifier)
+    (template_literal_type
+      (template_type
+        (intersection_type
+          (literal_type
+            (true))
+          (parenthesized_type
+            (union_type
+              (literal_type
+                (string
+                  (string_fragment)))
+              (literal_type
+                (false))))))))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (constraint
+          (predefined_type))))
+    (conditional_type
+      (type_identifier)
+      (template_literal_type
+        (template_type
+          (infer_type
+            (type_identifier)
+            (predefined_type))))
+      (type_identifier)
+      (predefined_type))))
+
+==================================
+Mapped type 'as' clauses
+==================================
+
+type A<B> = { [B in keyof C & string as `get${Capitalize<P>}`]: () => A[B] };
+type A<B> = { [B in keyof C & string as `${P}1` | `${P}2`]: A[B] }
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (object_type
+      (index_signature
+        (mapped_type_clause
+          (type_identifier)
+          (intersection_type
+            (index_type_query
+              (type_identifier))
+            (predefined_type))
+          (template_literal_type
+            (string_fragment)
+            (template_type
+              (generic_type
+                (type_identifier)
+                (type_arguments
+                  (type_identifier))))))
+        (type_annotation
+          (function_type
+            (formal_parameters)
+            (lookup_type
+              (type_identifier)
+              (type_identifier)))))))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (object_type
+      (index_signature
+        (mapped_type_clause
+          (type_identifier)
+          (intersection_type
+            (index_type_query
+              (type_identifier))
+            (predefined_type))
+          (union_type
+            (template_literal_type
+              (template_type
+                (type_identifier))
+              (string_fragment))
+            (template_literal_type
+              (template_type
+                (type_identifier))
+              (string_fragment))))
+        (type_annotation
+          (lookup_type
+            (type_identifier)
+            (type_identifier)))))))
+
+============================
+typeof in generic arguments
+============================
+
+type T = Foo<Bar<typeof bar>>
+type T = Foo<Bar<typeof bar.baz>>
+type T = Foo<Bar<typeof bar["baz"]>>
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_query
+              (identifier)))))))
+  (type_alias_declaration
+    (type_identifier)
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_query
+              (member_expression
+                (identifier)
+                (property_identifier))))))))
+  (type_alias_declaration
+    (type_identifier)
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (lookup_type
+              (type_query
+                (identifier))
+              (literal_type
+                (string
+                  (string_fragment))))))))))
+
+==================================
+Literal types and pre-defined types
+==================================
+
+type T = Foo<any, unknown, number, string, void, true, false, null, undefined, 0, "foo">
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (generic_type
+      (type_identifier)
+      (type_arguments
+        (predefined_type)
+        (predefined_type)
+        (predefined_type)
+        (predefined_type)
+        (predefined_type)
+        (literal_type
+          (true))
+        (literal_type
+          (false))
+        (literal_type
+          (null))
+        (literal_type
+          (undefined))
+        (literal_type
+          (number))
+        (literal_type
+          (string
+            (string_fragment)))))))
+
+==================================
+Extends
+==================================
+
+type Foo<T extends abstract new (...args: any) => any> = T;
+type Foo<T extends new (...args: any) => any> = T;
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (constraint
+          (constructor_type
+            (formal_parameters
+              (required_parameter
+                (rest_pattern
+                  (identifier))
+                (type_annotation
+                  (predefined_type))))
+            (predefined_type)))))
+    (type_identifier))
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)
+        (constraint
+          (constructor_type
+            (formal_parameters
+              (required_parameter
+                (rest_pattern
+                  (identifier))
+                (type_annotation
+                  (predefined_type))))
+            (predefined_type)))))
+    (type_identifier)))
+
+========
+Abstract
+========
+
+type Foo<T> = abstract new () => T;
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (constructor_type
+      (formal_parameters)
+      (type_identifier))))
+
+=========================
+Indexed Access Precedence
+=========================
+
+// These should generate the same AST aside from the parenthesized_type node
+type X1 = typeof Y[keyof typeof Z];
+type X2 = (typeof Y)[keyof typeof Z];
+
+---
+
+(program
+  (comment)
+  (type_alias_declaration
+    (type_identifier)
+    (lookup_type
+      (type_query
+        (identifier))
+      (index_type_query
+        (type_query
+          (identifier)))))
+  (type_alias_declaration
+    (type_identifier)
+    (lookup_type
+      (parenthesized_type
+        (type_query
+          (identifier)))
+      (index_type_query
+        (type_query
+          (identifier))))))
+
+=========================
+Typeof instantiation expressions
+=========================
+
+// This is a special construct, different from both "typeof (f<T>)" and
+// "(typeof f)<T>" (which are both invalid)
+type T = typeof f<T>;
+
+---
+
+(program
+  (comment)
+  (comment)
+  (type_alias_declaration
+    (type_identifier)
+    (type_query
+      (instantiation_expression
+        (identifier)
+        (type_arguments
+          (type_identifier))))))
+
+=========================
+Typeof this
+=========================
+
+class A {
+  colors: [ { color: "green", code: "#E5F8F2" } ]
+  color: (typeof this.colors)[number] = this.colors[0]
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (public_field_definition
+        (property_identifier)
+        (type_annotation
+          (tuple_type
+            (object_type
+              (property_signature
+                (property_identifier)
+                (type_annotation
+                  (literal_type
+                    (string
+                      (string_fragment)))))
+              (property_signature
+                (property_identifier)
+                (type_annotation
+                  (literal_type
+                    (string
+                      (string_fragment)))))))))
+      (public_field_definition
+        (property_identifier)
+        (type_annotation
+          (lookup_type
+            (parenthesized_type
+              (type_query
+                (member_expression
+                  (this)
+                  (property_identifier))))
+            (predefined_type)))
+        (subscript_expression
+          (member_expression
+            (this)
+            (property_identifier))
+          (number))))))
+
+=========================
+Import in type
+=========================
+
+type Foo = import('node:fs').ReadStream & {
+  bar();
+};
+
+---
+
+(program
+  (type_alias_declaration
+    (type_identifier)
+    (intersection_type
+      (member_expression
+        (call_expression
+          (import)
+          (arguments
+            (string
+              (string_fragment))))
+        (property_identifier))
+      (object_type
+        (method_signature
+          (property_identifier)
+          (formal_parameters))))))
+
+=========================
+Import assert
+=========================
+
+import something from 'foo.css' assert { type: 'css' }
+
+---
+
+(program
+  (import_statement
+    (import_clause
+      (identifier))
+    (string
+      (string_fragment))
+    (import_attribute
+      (object
+        (pair
+          (property_identifier)
+          (string
+            (string_fragment)))))))

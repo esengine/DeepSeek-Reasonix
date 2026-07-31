@@ -15,7 +15,6 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
-	"reasonix/internal/control"
 	"reasonix/internal/filelock"
 	"reasonix/internal/fileutil"
 	"reasonix/internal/store"
@@ -1269,7 +1268,7 @@ func sessionDisplayResolverFromMap(displays sessionDisplayMap, sessionPath strin
 				return display
 			}
 		}
-		return control.StripComposePrefixes(content)
+		return historyReplayUserContent(content)
 	}
 }
 

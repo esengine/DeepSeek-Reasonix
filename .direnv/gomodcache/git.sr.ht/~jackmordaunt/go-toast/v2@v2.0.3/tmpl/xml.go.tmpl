@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<toast activationType="{{.ActivationType}}" launch="{{.ActivationArguments}}" duration="{{.Duration}}">
+    <visual>
+        <binding template="ToastGeneric">
+            {{if .HeroIcon}}
+            <image placement="hero" src="{{.HeroIcon}}" />
+            {{end}}
+            {{if .Icon}}
+            <image placement="appLogoOverride" src="{{.Icon}}" {{if .IconCrop}} hint-crop="{{.IconCrop}}" {{end}} />
+            {{end}}
+            {{if .Title}}
+            <text hint-maxLines="1"><![CDATA[{{.Title}}]]></text>
+            {{end}}
+            {{if .Body}}
+            <text><![CDATA[{{.Body}}]]></text>
+            {{end}}
+        </binding>
+    </visual>
+    {{if ne .Audio "silent"}}
+	<audio src="{{.Audio}}" loop="{{.Loop}}" />
+	{{else}}
+	<audio silent="true" />
+	{{end}}
+    {{if .Actions}}
+    <actions>
+        {{range .Inputs}}
+        <input id="{{.ID}}" title="{{.Title}}" placeHolderContent="{{.Placeholder}}" {{if .Selections}} type="selection" {{else}} type="text" {{end}}>
+            {{range .Selections}}
+            <selection id="{{.ID}}" content="{{.Content}}" />
+            {{end}}
+        </input>
+        {{end}}
+        {{range .Actions}}
+        <action activationType="{{.Type}}" content="{{.Content}}" arguments="{{.Arguments}}" {{if .InputID}} hint-inputId="{{.InputID}}" {{end}} />
+        {{end}}
+    </actions>
+    {{end}}
+</toast>

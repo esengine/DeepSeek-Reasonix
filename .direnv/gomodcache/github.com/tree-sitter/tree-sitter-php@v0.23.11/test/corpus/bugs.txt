@@ -1,0 +1,238 @@
+=========================================
+Parse error when using self as constant
+=========================================
+
+<?php
+define('self', 'value');
+var_dump(self);
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (function_call_expression
+      function: (name)
+      arguments: (arguments
+        (argument (string (string_content)))
+        (argument (string (string_content))))))
+  (expression_statement
+    (function_call_expression
+      function: (name)
+      arguments: (arguments (argument (name))))))
+
+=========================================
+Incorrect precedence for error suppression operator
+=========================================
+
+<?php
+@trigger_error("a") && trigger_error("b");
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (binary_expression
+      left: (error_suppression_expression
+        (function_call_expression
+          function: (name)
+          arguments: (arguments
+            (argument
+              (encapsed_string
+                (string_content))))))
+      right: (function_call_expression
+        function: (name)
+        arguments: (arguments
+          (argument
+            (encapsed_string
+              (string_content))))))))
+
+=========================================
+Error when using expressions as named argument
+=========================================
+
+<?php
+foo(array: null);
+foo(bool: null);
+foo(callable: null);
+foo(false: null);
+foo(float: null);
+foo(fn: null);
+foo(function: null);
+foo(int: null);
+foo(iterable: null);
+foo(match: null);
+foo(mixed: null);
+foo(namespace: null);
+foo(null: null);
+foo(numeric: null);
+foo(object: null);
+foo(parent: null);
+foo(self: null);
+foo(static: null);
+foo(string: null);
+foo(throw: null);
+foo(true: null);
+foo(void: null);
+
+---
+
+(program
+  (php_tag)
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null)))))
+    (expression_statement
+      (function_call_expression
+        function: (name)
+        arguments: (arguments (argument name: (name) (null))))))
+
+=========================================
+Error when closing tag is in a string
+=========================================
+
+<?php
+$foo = "?>";
+$foo = <<<EOF
+  ?>
+  EOF;
+$foo = <<<'EOF'
+  ?>
+  EOF;
+$foo = '?>';
+
+---
+
+(program
+  (php_tag)
+    (expression_statement
+      (assignment_expression
+        left: (variable_name (name))
+        right: (encapsed_string (string_content))))
+    (expression_statement
+      (assignment_expression
+        left: (variable_name
+          (name))
+        right: (heredoc
+          identifier: (heredoc_start)
+          value: (heredoc_body
+            (string_content))
+          end_tag: (heredoc_end))))
+    (expression_statement
+      (assignment_expression
+        left: (variable_name
+          (name))
+        right: (nowdoc
+          identifier: (heredoc_start)
+          value: (nowdoc_body
+            (nowdoc_string))
+          end_tag: (heredoc_end))))
+    (expression_statement
+      (assignment_expression
+        left: (variable_name (name))
+        right: (string (string_content)))))
+
+=========================================
+Error with comment inside binary expression
+=========================================
+
+<?php
+if (
+  true
+  // this is a comment
+  || false
+) {}
+
+---
+
+(program
+  (php_tag)
+  (if_statement
+    condition: (parenthesized_expression
+      (binary_expression
+        left: (boolean)
+        (comment)
+        right: (boolean)))
+    body: (compound_statement)))

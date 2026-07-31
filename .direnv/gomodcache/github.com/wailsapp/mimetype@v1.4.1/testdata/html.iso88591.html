@@ -1,0 +1,59 @@
+<html><head id="Head1"><meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1"><meta name="lang" content="es"><meta name="robots" content="index,follow"><meta name="language" content="es"><meta name="Googlebot" content="all"><meta name="description" content="Publicidad, Noticias"><meta name="language" content="Spanish"><meta name="lang" content="es"><meta name="robots" content="index,follow"><meta name="twitter:card" content="summary"><meta property="og:type" content="article"><title>
+            hello website
+</title>
+    <script type="text/javascript" async="" src="https://certify-js.alexametrics.com/atrk.js"></script>
+    <script src="https://www.google-analytics.com/urchin.js" type="text/javascript"></script>
+    <script language="javascript" type="text/javascript" src="https://ajax.googleapis.com/ajax/libs/jquery/1.9.1/jquery.min.js"></script>
+<!-- End Alexa Certify Javascript -->
+
+    <script type="text/javascript">
+
+        function getQueryVariable(variable) {
+            var query = window.location.search.substring(1);
+            var vars = query.split("&");
+            for (var i = 0; i < vars.length; i++) {
+                var pair = vars[i].split("=");
+                if (pair[0] == variable) {
+                    return pair[1];
+                }
+            }
+            return "";
+        }
+
+        var dt = getQueryVariable("dt");
+        var BodyID = getQueryVariable("BodyID");
+
+        //Build Querystring
+
+        if ((null != BodyID) && (BodyID != 'undefined') && (BodyID != '')) {
+            strHomepageUrl = strHomepageUrl + '?xp=28-04-2021 0:00:00&BodyID=' + BodyID;
+        }
+        else {
+            BodyID = '0';
+            strHomepageUrl = strHomepageUrl + '?xp=28-04-2021 0:00:00&BodyID=' + BodyID;
+        }
+
+        if ((null != dt) && (dt != 'undefined') && (dt != '')) {
+            strHeaderUrl = strHeaderUrl + '?xp=28-04-2021 0:00:00&dt=' + dt;
+            strHomepageUrl = strHomepageUrl + '&xp=28-04-2021 0:00:00&dt=' + dt;
+        }
+        else{
+            strHeaderUrl = strHeaderUrl + '?xp=28-04-2021 0:00:00' ;
+            strHomepageUrl = strHomepageUrl + '&xp=28-04-2021 0:00:00';
+        }
+
+        if (IsMobile == 0) {
+            document.write('<frameset id="parentframe" framespacing="0" frameborder="0" border="0" rows="70,*">');
+            document.write('<frame name="header" src="' + strHeaderUrl + '" noresize frameborder="0" scrolling="no">');
+            document.write('<frame name="content" src="' + strHomepageUrl + '"frameborder="0" scrolling="yes">');
+            document.write('</frameset>');
+        }
+
+    </script></head><frameset id="parentframe" framespacing="0" frameborder="0" border="0" rows="70,*"></frameset>
+
+
+
+
+
+
+</html>

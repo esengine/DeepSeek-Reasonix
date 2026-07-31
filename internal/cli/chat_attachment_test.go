@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/base64"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -11,7 +12,10 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 func TestExpandPastedBlocksImage(t *testing.T) {
@@ -27,6 +31,180 @@ func TestExpandPastedBlocksImage(t *testing.T) {
 	}
 	if displayLineForImageRefs(got) != "look at [image1] and "+renderFoldedPasteBlock(m.pastedBlocks[1]) {
 		t.Fatalf("image ref should collapse to a label in the bubble: %q", displayLineForImageRefs(got))
+	}
+}
+
+func TestRecoverOrphanedPasteLabelFromHistory(t *testing.T) {
+	block := pastedBlock{
+		label: "[Pasted text #4 · 2 lines]",
+		text:  "old\nbody",
+	}
+	history := []provider.Message{{
+		Role:    provider.RoleUser,
+		Content: renderFoldedPasteBlock(block),
+	}}
+
+	got := recoverOrphanedPasteLabelsFromHistory("repeat "+block.label, nil, history)
+	want := "repeat " + renderFoldedPasteBlock(block)
+	if got != want {
+		t.Fatalf("recovered paste = %q, want %q", got, want)
+	}
+}
+
+func TestRecoverOrphanedPasteLabelPreservesOriginalWhitespace(t *testing.T) {
+	block := pastedBlock{
+		label: "[Pasted text #5 · 5 lines]",
+		text:  "\n  first line\nsecond line  \n\n",
+	}
+	history := []provider.Message{{
+		Role:    provider.RoleUser,
+		Content: renderFoldedPasteBlock(block),
+	}}
+
+	got := recoverOrphanedPasteLabelsFromHistory(block.label, nil, history)
+	want := renderFoldedPasteBlock(block)
+	if got != want {
+		t.Fatalf("recovered paste = %q, want exact original %q", got, want)
+	}
+}
+
+func TestRecoverOrphanedPasteLabelPreservesEmbeddedEndMarker(t *testing.T) {
+	label := "[Pasted text #4 · 3 lines]"
+	block := pastedBlock{
+		label: label,
+		text:  "first\n--- End " + label + " ---\nlast",
+	}
+	history := []provider.Message{{
+		Role:    provider.RoleUser,
+		Content: renderFoldedPasteBlock(block),
+	}}
+
+	got := recoverOrphanedPasteLabelsFromHistory(label, nil, history)
+	want := renderFoldedPasteBlock(block)
+	if got != want {
+		t.Fatalf("recovered paste = %q, want exact original %q", got, want)
+	}
+}
+
+func TestRecoverOrphanedPasteLabelLeavesConflictingExpansionsUnchanged(t *testing.T) {
+	label := "[Pasted text #4 · 2 lines]"
+	history := []provider.Message{
+		{Role: provider.RoleUser, Content: renderFoldedPasteBlock(pastedBlock{label: label, text: "old\nbody"})},
+		{Role: provider.RoleAssistant, Content: renderFoldedPasteBlock(pastedBlock{label: label, text: "untrusted\nbody"})},
+		{Role: provider.RoleUser, Content: renderFoldedPasteBlock(pastedBlock{label: label, text: "new\nbody"})},
+	}
+
+	if got := recoverOrphanedPasteLabelsFromHistory(label, nil, history); got != label {
+		t.Fatalf("ambiguous paste = %q, want unchanged label %q", got, label)
+	}
+}
+
+func TestRecoverOrphanedPasteLabelAcceptsRepeatedIdenticalExpansion(t *testing.T) {
+	label := "[Pasted text #4 · 2 lines]"
+	block := pastedBlock{label: label, text: "same\nbody"}
+	history := []provider.Message{
+		{Role: provider.RoleUser, Content: renderFoldedPasteBlock(block)},
+		{Role: provider.RoleAssistant, Content: renderFoldedPasteBlock(pastedBlock{label: label, text: "untrusted\nbody"})},
+		{Role: provider.RoleUser, Content: renderFoldedPasteBlock(block)},
+	}
+
+	got := recoverOrphanedPasteLabelsFromHistory(label, nil, history)
+	want := renderFoldedPasteBlock(block)
+	if got != want {
+		t.Fatalf("recovered paste = %q, want identical user expansion %q", got, want)
+	}
+}
+
+func TestRecoverOrphanedPasteLabelLeavesUnverifiedTextUnchanged(t *testing.T) {
+	sent := "explain [Pasted text #9 · 10 lines] syntax"
+	history := []provider.Message{{
+		Role:    provider.RoleAssistant,
+		Content: renderFoldedPasteBlock(pastedBlock{label: "[Pasted text #9 · 10 lines]", text: "assistant\ncontent"}),
+	}}
+
+	if got := recoverOrphanedPasteLabelsFromHistory(sent, nil, history); got != sent {
+		t.Fatalf("unverified label = %q, want unchanged %q", got, sent)
+	}
+}
+
+func TestRecoverOrphanedPasteLabelDoesNotReexpandRenderedBlock(t *testing.T) {
+	block := pastedBlock{label: "[Pasted text #4 · 2 lines]", text: "old\nbody"}
+	rendered := renderFoldedPasteBlock(block)
+	history := []provider.Message{{Role: provider.RoleUser, Content: rendered}}
+
+	if got := recoverOrphanedPasteLabelsFromHistory(rendered, nil, history); got != rendered {
+		t.Fatalf("rendered block = %q, want unchanged %q", got, rendered)
+	}
+}
+
+func TestNextPasteIDForHistoryContinuesAcrossReload(t *testing.T) {
+	history := []provider.Message{
+		{Role: provider.RoleUser, Content: "[Pasted text #2 · 4 lines]"},
+		{Role: provider.RoleAssistant, Content: "--- Begin [Pasted text #7 · 3 lines] ---"},
+	}
+	if got := nextPasteIDForHistory(history); got != 8 {
+		t.Fatalf("nextPasteIDForHistory = %d, want 8", got)
+	}
+	if got := nextPasteIDForHistory(nil); got != 1 {
+		t.Fatalf("nextPasteIDForHistory(nil) = %d, want 1", got)
+	}
+}
+
+func TestNextPasteIDForHistoryDoesNotOverflow(t *testing.T) {
+	history := []provider.Message{{
+		Role:    provider.RoleAssistant,
+		Content: foldedPasteLabel(math.MaxInt, 1),
+	}}
+	if got := nextPasteIDForHistory(history); got != 1 {
+		t.Fatalf("nextPasteIDForHistory = %d, want 1", got)
+	}
+}
+
+func TestTakeNextPasteIDSkipsUsedIDsAcrossWrap(t *testing.T) {
+	history := []provider.Message{
+		{Role: provider.RoleUser, Content: foldedPasteLabel(1, 1)},
+		{Role: provider.RoleAssistant, Content: foldedPasteLabel(math.MaxInt-1, 1)},
+		{Role: provider.RoleAssistant, Content: foldedPasteLabel(math.MaxInt, 1)},
+	}
+	next, used := pasteIDStateForHistory(history)
+	m := &chatTUI{nextPasteID: next, usedPasteIDs: used}
+
+	if got := m.takeNextPasteID(); got != 2 {
+		t.Fatalf("takeNextPasteID = %d, want first unused ID 2", got)
+	}
+	if m.nextPasteID != 3 {
+		t.Fatalf("nextPasteID = %d, want 3", m.nextPasteID)
+	}
+}
+
+func TestTakeNextPasteIDWrapsAfterMaxInt(t *testing.T) {
+	m := &chatTUI{nextPasteID: math.MaxInt}
+	if got := m.takeNextPasteID(); got != math.MaxInt {
+		t.Fatalf("first takeNextPasteID = %d, want %d", got, math.MaxInt)
+	}
+	if got := m.takeNextPasteID(); got != 1 {
+		t.Fatalf("wrapped takeNextPasteID = %d, want 1", got)
+	}
+}
+
+func TestTakeNextPasteIDSynchronizesAdoptedControllerHistory(t *testing.T) {
+	first := pastedBlock{label: "[Pasted text #1 · 1 lines]", text: "first"}
+	session := agent.NewSession("system")
+	session.Add(provider.Message{Role: provider.RoleUser, Content: renderFoldedPasteBlock(first)})
+	executor := agent.New(nil, nil, session, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: executor, Label: "review"})
+	t.Cleanup(ctrl.Close)
+
+	m := newChatTUI(ctrl, "", make(chan event.Event), 80)
+
+	second := pastedBlock{label: "[Pasted text #2 · 1 lines]", text: "second"}
+	adopted := agent.NewSession("system")
+	adopted.Add(provider.Message{Role: provider.RoleUser, Content: renderFoldedPasteBlock(first)})
+	adopted.Add(provider.Message{Role: provider.RoleUser, Content: renderFoldedPasteBlock(second)})
+	executor.SetSession(adopted)
+
+	if got := m.takeNextPasteID(); got != 3 {
+		t.Fatalf("takeNextPasteID after adopted history = %d, want 3", got)
 	}
 }
 

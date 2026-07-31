@@ -1,0 +1,1 @@
+This directory is used for the static middleware test

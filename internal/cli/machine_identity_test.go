@@ -112,7 +112,7 @@ func TestEventsJSONLRejectsCorruptIdentityBeforeRuntimeSetup(t *testing.T) {
 	}
 	var code int
 	stderr := captureStderr(t, func() {
-		code = runAgent([]string{"--events-jsonl", "do not start a provider run"})
+		code = runAgent([]string{"--events-jsonl", "do not start a provider run"}, "dev")
 	})
 	if code != 1 || !strings.Contains(stderr, "machine identity is unavailable") {
 		t.Fatalf("run exit=%d stderr=%q", code, stderr)

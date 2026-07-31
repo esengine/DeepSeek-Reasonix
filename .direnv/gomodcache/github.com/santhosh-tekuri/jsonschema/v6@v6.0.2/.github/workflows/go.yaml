@@ -1,0 +1,34 @@
+name: gotest
+on: [push, pull_request]
+jobs:
+  gotest:
+    name: gotest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        go: [1.21]
+    steps:
+    - name: setup go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ matrix.go }}
+    - name: checkout
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+      # https://github.com/golang/go/issues/49138
+    - name: disable MallocNanoZone for macos-latest
+      run: echo "MallocNanoZone=0" >> $GITHUB_ENV
+      if: runner.os == 'macOS'
+    - name: test
+      run: go test -race -coverprofile coverage.txt -covermode atomic
+    - name: upload coverage
+      uses: codecov/codecov-action@v3
+      with:
+        files: coverage.txt
+    - name: golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: v1.57.2
+        args: --timeout=5m

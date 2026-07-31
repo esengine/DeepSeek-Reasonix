@@ -63,6 +63,9 @@ func historyPage(sess *session, snapshotID protocol.SnapshotID, beforeTurn, page
 	messages := make([]protocol.HistoryMessage, 0, len(selected))
 	for _, message := range selected {
 		content := message.Content
+		if message.Role == provider.RoleUser {
+			content = agent.UserMessageText(message)
+		}
 		item := protocol.HistoryMessage{
 			Role: string(message.Role), Content: &content, CreatedAtMs: message.CreatedAt,
 			WorkDurationMs: message.WorkDurationMs, ToolCallID: message.ToolCallID,
@@ -98,8 +101,9 @@ func visibleHistoryUser(message provider.Message) bool {
 	if message.Role != provider.RoleUser {
 		return false
 	}
-	if _, steer := agent.SteerText(message.Content); steer {
+	content := agent.UserMessageText(message)
+	if _, steer := agent.SteerText(content); steer {
 		return false
 	}
-	return !control.IsSyntheticUserMessage(message.Content)
+	return !control.IsSyntheticUserMessage(content)
 }

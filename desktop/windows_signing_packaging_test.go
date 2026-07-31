@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/xml"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,6 +51,7 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		"name: Upload unsigned Windows payload for SignPath",
 		"name: Submit Windows payload for Authenticode signing",
 		"name: Approve and download signed Windows payload",
+		"name: Bind signed Windows payload to release manifest",
 		"name: Rebuild Windows packages from signed payload",
 		"name: Upload unsigned installer for SignPath",
 		"name: Submit installer for Authenticode signing",
@@ -85,6 +87,10 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`steps.submit-windows-installer.outputs.signing-request-id`,
 		`scripts/complete-signpath-request.ps1`,
 		`-WaitForExternalApproval:$waitForExternalApproval`,
+		`go run ./cmd/sign windows-payload ../signed-payload "${{ needs.resolve.outputs.version }}"`,
+		`go run ./cmd/sign sign ../signed-payload/reasonix-payload.json`,
+		`go run ./cmd/sign verify ../signed-payload/reasonix-payload.json`,
+		`REASONIX_REQUIRE_PAYLOAD_MANIFEST: "1"`,
 	} {
 		if !strings.Contains(workflow, want) {
 			t.Errorf("desktop release workflow is missing signing contract %q", want)
@@ -116,6 +122,10 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`cp "$PAYLOAD/$LAUNCHERNAME.exe" "$INSTALLER_DIR/$LAUNCHERNAME.exe"`,
 		`cp "$PAYLOAD/$UPDATE_HELPER" "$INSTALLER_DIR/$UPDATE_HELPER"`,
 		`cp "$PAYLOAD/$WINDOWS_CLINAME.exe" "$INSTALLER_DIR/$WINDOWS_CLINAME.exe"`,
+		`rm -f -- "$INSTALLER_DIR/$PAYLOAD_MANIFEST" "$INSTALLER_DIR/$PAYLOAD_SIGNATURE"`,
+		`cp "$PAYLOAD/$PAYLOAD_MANIFEST" "$INSTALLER_DIR/$PAYLOAD_MANIFEST"`,
+		`cp "$PAYLOAD/$PAYLOAD_SIGNATURE" "$INSTALLER_DIR/$PAYLOAD_SIGNATURE"`,
+		`REASONIX_REQUIRE_PAYLOAD_MANIFEST`,
 		`"-DARG_REASONIX_SIGNED_UNINSTALLER=${uninstaller_path}"`,
 		`cp "$PAYLOAD/$LAUNCHERNAME.exe" "$portable_staging/$APPNAME.exe"`,
 		`"$ROOT/scripts/verify-windows-portable.sh" "$portable_staging"`,
@@ -157,6 +167,51 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		if !strings.Contains(completer, want) {
 			t.Errorf("SignPath request completer is missing %q", want)
 		}
+	}
+}
+
+func TestWindowsPackagerRejectsMissingOrPartialRequiredPayloadManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		manifest  bool
+		signature bool
+		want      string
+	}{
+		{name: "missing", want: "signed Windows packaging requires"},
+		{name: "manifest only", manifest: true, want: "must be provided together"},
+		{name: "signature only", signature: true, want: "must be provided together"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := t.TempDir()
+			for _, name := range []string{
+				"reasonix-desktop.exe",
+				"reasonix-guard.exe",
+				"reasonix-launcher.exe",
+				"reasonix-update-helper.exe",
+				"reasonix-cli.exe",
+				"reasonix-uninstall.exe",
+			} {
+				if err := os.WriteFile(filepath.Join(payload, name), []byte(name), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.manifest {
+				if err := os.WriteFile(filepath.Join(payload, "reasonix-payload.json"), []byte("{}"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.signature {
+				if err := os.WriteFile(filepath.Join(payload, "reasonix-payload.json.minisig"), []byte("sig"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command("bash", "../scripts/package-windows-desktop.sh", "amd64", payload)
+			cmd.Env = append(os.Environ(), "REASONIX_REQUIRE_PAYLOAD_MANIFEST=1")
+			output, err := cmd.CombinedOutput()
+			if err == nil || !strings.Contains(string(output), tc.want) {
+				t.Fatalf("packager error = %v, output = %q, want %q", err, output, tc.want)
+			}
+		})
 	}
 }
 

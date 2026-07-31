@@ -470,13 +470,15 @@ export function recoverSelectionAfterEdit(
   return collapsedAt(fallback.end);
 }
 
-function slashQueryAt(text: string, selection: RichComposerSelection): RichSlashQuery | null {
+export function slashQueryAt(text: string, selection: RichComposerSelection): RichSlashQuery | null {
   if (selection.start !== selection.end) return null;
   const before = text.slice(0, selection.start);
-  const match = /(?:^|\s)\/([A-Za-z0-9_.:-]*)$/.exec(before);
+  const match = /\/([A-Za-z0-9_.:-]*)$/.exec(before);
   if (!match) return null;
   const slashOffset = before.length - match[1].length - 1;
-  return { from: slashOffset, to: selection.start, query: match[1].toLowerCase() };
+  let tokenEnd = selection.start;
+  while (tokenEnd < text.length && /[A-Za-z0-9_.:-]/.test(text[tokenEnd])) tokenEnd += 1;
+  return { from: slashOffset, to: tokenEnd, query: match[1].toLowerCase() };
 }
 
 let nextInvocationID = 1;
@@ -563,7 +565,14 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
     const root = rootRef.current;
     if (!root) return;
     const selection = readSelection(root);
-    onSelectionChange(selection, slashQueryAt(text, selection));
+    const liveText = modelFromDom(root, known).text;
+    // A real selection event supersedes any browser-echo caret restoration
+    // that has not reached the layout effect yet.
+    if (pendingSelectionRef.current) pendingSelectionRef.current = selection;
+    // A keyup can arrive before React has echoed the preceding browser input
+    // back through props. Read the live DOM so slash completion sees the
+    // just-typed token instead of one render behind.
+    onSelectionChange(selection, slashQueryAt(liveText, selection));
   };
 
   const replaceRange = (value: string, start: number, end: number) => {
@@ -588,6 +597,15 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
       const target = { start, end, afterInvocationId };
       pendingSelectionRef.current = target;
       requestAnimationFrame(() => {
+        const pending = pendingSelectionRef.current;
+        if (
+          !pending
+          || pending.start !== target.start
+          || pending.end !== target.end
+          || pending.afterInvocationId !== target.afterInvocationId
+        ) {
+          return;
+        }
         const root = rootRef.current;
         if (!root) return;
         root.focus();

@@ -1,0 +1,41 @@
+{
+  "name": "@braintree/sanitize-url",
+  "version": "7.1.2",
+  "description": "A url sanitizer",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "author": "",
+  "scripts": {
+    "prepublishOnly": "npm run build",
+    "prebuild": "prettier --write .",
+    "build": "tsc --declaration",
+    "lint": "eslint --ext js,ts .",
+    "posttest": "npm run lint",
+    "test": "vitest",
+    "coverage": "vitest run --coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/braintree/sanitize-url.git"
+  },
+  "keywords": [],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/braintree/sanitize-url/issues"
+  },
+  "homepage": "https://github.com/braintree/sanitize-url#readme",
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^24.0.0",
+    "@typescript-eslint/eslint-plugin": "^5.54.1",
+    "@vitest/coverage-v8": "^4.0.16",
+    "chai": "^6.2.2",
+    "eslint": "^8.36.0",
+    "eslint-config-braintree": "^6.0.0-typescript-prep-rc.2",
+    "eslint-plugin-prettier": "^5.5.4",
+    "happy-dom": "^20.0.11",
+    "prettier": "^3.7.4",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.16"
+  }
+}

@@ -1,4 +1,4 @@
-import { Check, ChevronDown, ChevronRight, FileText, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
+import { Activity, AlertTriangle, ArchiveRestore, Check, ChevronDown, ChevronRight, FileText, History, Pencil, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
@@ -17,10 +17,30 @@ function displayTitle(fact: MemoryFact): string {
   return fact.title || fact.name.replaceAll("-", " ");
 }
 
+function memoryFactKey(fact: MemoryFact): string {
+  return fact.id || `${fact.scope}:${fact.name}`;
+}
+
+function formatMemoryTime(value?: string): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+}
+
+function freshnessLabel(value: string, t: ReturnType<typeof useT>): string {
+  switch (value) {
+    case "fresh": return t("memory.freshness.fresh");
+    case "current": return t("memory.freshness.current");
+    case "stale": return t("memory.freshness.stale");
+    default: return value;
+  }
+}
+
 function memoryMatches(fact: MemoryFact, normalizedQuery: string, typeFilter: string): boolean {
   if (typeFilter !== "all" && fact.type !== typeFilter) return false;
   if (!normalizedQuery) return true;
-  return [displayTitle(fact), fact.name, fact.description, fact.type, fact.body]
+  return [displayTitle(fact), fact.name, fact.description, fact.type, fact.scope, fact.body]
     .join(" ")
     .toLowerCase()
     .includes(normalizedQuery);
@@ -45,6 +65,8 @@ function ArchivedMemoryList({
   renderWithLinks,
   t,
   hideHeader = false,
+  busy = false,
+  onRestore,
 }: {
   archives: MemoryArchive[];
   totalArchives: number;
@@ -53,6 +75,8 @@ function ArchivedMemoryList({
   renderWithLinks: (text: string) => ReactNode[];
   t: ReturnType<typeof useT>;
   hideHeader?: boolean;
+  busy?: boolean;
+  onRestore?: (archive: MemoryArchive) => Promise<void> | void;
 }) {
   if (totalArchives === 0) return null;
   return (
@@ -82,6 +106,7 @@ function ArchivedMemoryList({
                   <span className="mem-fact__main">
                     <span className="mem-fact__title">{displayTitle(f)}</span>
                     <span className="mem-fact__meta">
+                      <MemoryFactScope scope={f.scope} t={t} />
                       {f.type && <span className="mem-fact__type" data-mem-type={f.type}>{memoryTypeLabel(f.type, t)}</span>}
                       <span className="mem-fact__slug">{f.name}</span>
                       {f.archivedAt && (
@@ -101,6 +126,20 @@ function ArchivedMemoryList({
                       <div className="mem-empty">{t("memory.noBody")}</div>
                     )}
                     <div className="mem-archive__path">{f.path}</div>
+                    {onRestore && (
+                      <div className="mem-fact__actions">
+                        <span className="mem-hint mem-hint--inline">{t("memory.restoreArchivedHint")}</span>
+                        <button
+                          className="btn btn--small"
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void onRestore(f)}
+                        >
+                          <ArchiveRestore size={13} />
+                          {t("memory.restoreArchived")}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </article>
@@ -130,6 +169,8 @@ function memoryScopeLabel(scope: string, t: ReturnType<typeof useT>): string {
   switch (scope) {
     case "project":
       return t("memory.scope.project");
+    case "global":
+      return t("memory.scope.global");
     case "user":
       return t("memory.scope.user");
     case "local":
@@ -139,6 +180,11 @@ function memoryScopeLabel(scope: string, t: ReturnType<typeof useT>): string {
     default:
       return scope;
   }
+}
+
+function MemoryFactScope({ scope, t }: { scope: string; t: ReturnType<typeof useT> }) {
+  if (!scope) return null;
+  return <span className="mem-fact__scope" data-mem-scope={scope}>{memoryScopeLabel(scope, t)}</span>;
 }
 
 function memoryTypeLabel(type: string, t: ReturnType<typeof useT>): string {
@@ -200,30 +246,6 @@ function suggestionStamp(value?: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString();
-}
-
-const AUTO_MEMORY_SUGGESTIONS_KEY = "reasonix.memory.autoSuggestions";
-
-function readAutoSuggestionsPreference(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.localStorage.getItem(AUTO_MEMORY_SUGGESTIONS_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function writeAutoSuggestionsPreference(enabled: boolean) {
-  if (typeof window === "undefined") return;
-  try {
-    if (enabled) {
-      window.localStorage.setItem(AUTO_MEMORY_SUGGESTIONS_KEY, "1");
-    } else {
-      window.localStorage.removeItem(AUTO_MEMORY_SUGGESTIONS_KEY);
-    }
-  } catch {
-    // Ignore storage failures; the toggle still works for this render.
-  }
 }
 
 // MemoryPanel is the desktop memory manager: a right-side drawer over the loaded
@@ -299,27 +321,30 @@ export function MemoryPanel({
     [archives, normalizedQuery, normalizedFilter, typeFilter],
   );
 
-  const scrollToFact = (name: string) => {
-    const el = factRefs.current[name];
+  const scrollToFact = (key: string) => {
+    const el = factRefs.current[key];
     if (!el) return;
     el.scrollIntoView({ block: "center", behavior: "auto" });
-    setHighlight(name);
-    window.setTimeout(() => setHighlight((h) => (h === name ? null : h)), 1200);
+    setHighlight(key);
+    window.setTimeout(() => setHighlight((h) => (h === key ? null : h)), 1200);
   };
 
   // Clear active filters when the target is hidden, else the [[link]] is a silent no-op.
   const jumpTo = (name: string) => {
     if (!factNames.has(name)) return;
-    const visible = filteredFacts.some((f) => f.name === name);
-    setExpanded(name);
+    const target = facts.find((f) => f.name === name && f.scope === "project") ?? facts.find((f) => f.name === name);
+    if (!target) return;
+    const key = memoryFactKey(target);
+    const visible = filteredFacts.some((f) => memoryFactKey(f) === key);
+    setExpanded(key);
     setConfirmForget(null);
     if (!visible) {
       setQuery("");
       setTypeFilter("all");
-      window.setTimeout(() => scrollToFact(name), 0);
+      window.setTimeout(() => scrollToFact(key), 0);
       return;
     }
-    scrollToFact(name);
+    scrollToFact(key);
   };
 
   // renderWithLinks turns [[name]] tokens into in-panel jumps; a token with no
@@ -350,13 +375,13 @@ export function MemoryPanel({
     return out;
   };
 
-  const forgetFact = async (name: string) => {
+  const forgetFact = async (ref: string) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     try {
-      await onForget(name);
-      if (expanded === name) setExpanded(null);
+      await onForget(ref);
+      if (expanded === ref) setExpanded(null);
       setConfirmForget(null);
     } catch (err) {
       setError(errorMessage(err));
@@ -488,22 +513,23 @@ export function MemoryPanel({
               ) : (
                 <div className="mem-facts">
                   {filteredFacts.map((f) => {
-                    const isOpen = expanded === f.name;
+                    const key = memoryFactKey(f);
+                    const isOpen = expanded === key;
                     const links = uniqueLinks(f.body, factNames);
                     const missing = links.filter((link) => !link.exists);
                     return (
                       <article
-                        className={`mem-fact${highlight === f.name ? " mem-fact--hl" : ""}`}
+                        className={`mem-fact${highlight === key ? " mem-fact--hl" : ""}`}
                         data-mem-type={f.type || "other"}
-                        key={f.name}
+                        key={key}
                         ref={(el) => {
-                          factRefs.current[f.name] = el;
+                          factRefs.current[key] = el;
                         }}
                       >
                         <button
                           className="mem-fact__summary"
                           onClick={() => {
-                            setExpanded(isOpen ? null : f.name);
+                            setExpanded(isOpen ? null : key);
                             setConfirmForget(null);
                           }}
                           type="button"
@@ -512,6 +538,7 @@ export function MemoryPanel({
                           <span className="mem-fact__main">
                             <span className="mem-fact__title">{displayTitle(f)}</span>
                             <span className="mem-fact__meta">
+                              <MemoryFactScope scope={f.scope} t={t} />
                               {f.type && <span className="mem-fact__type" data-mem-type={f.type}>{memoryTypeLabel(f.type, t)}</span>}
                               <span className="mem-fact__slug">{f.name}</span>
                             </span>
@@ -554,7 +581,7 @@ export function MemoryPanel({
                               <span className="mem-hint mem-hint--inline">
                                 {t("memory.appliesNow")}
                               </span>
-                              {confirmForget === f.name ? (
+                              {confirmForget === key ? (
                                 <div className="mem-confirm">
                                   <button
                                     className="btn btn--small"
@@ -566,7 +593,7 @@ export function MemoryPanel({
                                   </button>
                                   <button
                                     className="btn btn--small mem-danger"
-                                    onClick={() => void forgetFact(f.name)}
+                                    onClick={() => void forgetFact(f.id || f.name)}
                                     disabled={busy}
                                     type="button"
                                   >
@@ -576,7 +603,7 @@ export function MemoryPanel({
                                ) : (
                                 <button
                                   className="btn btn--small mem-fact__forget"
-                                  onClick={() => setConfirmForget(f.name)}
+                                  onClick={() => setConfirmForget(key)}
                                   disabled={busy}
                                   type="button"
                                 >
@@ -723,7 +750,8 @@ export function MemoryPanel({
                 <div className="mem-empty">{filter ? t("memory.noFilterMatch") : t("memory.noFacts")}</div>
               ) : (
                 filteredFacts.map((f) => (
-                  <div className="mem-fact" key={f.name} title={f.body}>
+                  <div className="mem-fact" key={memoryFactKey(f)} title={f.body}>
+                    <span className={`badge badge--${f.scope}`}>{memoryScopeLabel(f.scope, t)}</span>
                     <span className={`badge badge--${f.type}`}>{memoryTypeLabel(f.type, t)}</span>
                     <div className="mem-fact__text">
                       <div className="mem-fact__name">{f.name}</div>
@@ -764,15 +792,15 @@ export function MemorySettingsPage() {
 	const [expandedDoc, setExpandedDoc] = useState<string | null>(null);
 	const [confirmForget, setConfirmForget] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
-	const [tab, setTab] = useState<"saved" | "archived" | "docs" | "suggestions">("saved");
+	const [tab, setTab] = useState<"saved" | "archived" | "docs" | "activity" | "suggestions">("saved");
 	const [showAdd, setShowAdd] = useState(false);
 	const [showStorage, setShowStorage] = useState(false);
 	const [suggestions, setSuggestions] = useState<MemorySuggestionsView | null>(null);
 	const [suggestionBusy, setSuggestionBusy] = useState(false);
 	const [expandedSuggestion, setExpandedSuggestion] = useState<string | null>(null);
 	const [acceptedSuggestions, setAcceptedSuggestions] = useState<Record<string, string>>({});
-	const [autoSuggestions, setAutoSuggestions] = useState(readAutoSuggestionsPreference);
-	const autoSuggestionsRequested = useRef(false);
+	const [revisions, setRevisions] = useState<Record<string, MemoryFact[]>>({});
+	const [revisionBusy, setRevisionBusy] = useState<string | null>(null);
 	const factRefs = useRef<Record<string, HTMLElement | null>>({});
 
 	useEffect(() => {
@@ -815,13 +843,24 @@ export function MemorySettingsPage() {
 		// Clear view immediately so stale data from the previous workspace
 		// doesn't persist while the new workspace loads.
 		setView((prev) => {
-			if (prev && tabId) return { ...prev, facts: [], archives: [], docs: [] };
+			if (prev && tabId) return {
+				...prev,
+				facts: [], archives: [], docs: [], conflicts: [], instructionDiagnostics: [],
+				lastRecall: { query: "", hits: [], omitted: 0, charBudget: 0, usedChars: 0 },
+			};
 			return prev;
 		});
 		setView(tabId ? await app.MemoryForTab(tabId).catch(() => null) : await app.Memory().catch(() => null));
 	}, [effectiveTabId]);
 
 	useEffect(() => { void reload(); }, [reload]);
+	useEffect(() => {
+		setRevisions({});
+		setExpanded(null);
+		setExpandedArchive(null);
+		setExpandedDoc(null);
+		setSuggestions(null);
+	}, [effectiveTabId]);
 
 	// Workspace selector: custom styled dropdown matching settings-subtab height
 	const wsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -894,17 +933,10 @@ export function MemorySettingsPage() {
 		}
 	}, [effectiveTabId, suggestionBusy]);
 
-	const setAutoSuggestionsPreference = useCallback((enabled: boolean) => {
-		autoSuggestionsRequested.current = false;
-		setAutoSuggestions(enabled);
-		writeAutoSuggestionsPreference(enabled);
-	}, []);
-
 	useEffect(() => {
-		if (tab !== "suggestions" || !autoSuggestions || suggestions || suggestionBusy || autoSuggestionsRequested.current) return;
-		autoSuggestionsRequested.current = true;
+		if (tab !== "suggestions" || suggestions || suggestionBusy) return;
 		void refreshSuggestions();
-	}, [autoSuggestions, refreshSuggestions, suggestionBusy, suggestions, tab]);
+	}, [refreshSuggestions, suggestionBusy, suggestions, tab]);
 
 	const facts = view?.facts ?? [];
 	const archives = view?.archives ?? [];
@@ -929,27 +961,30 @@ export function MemorySettingsPage() {
 		[archives, normalizedQuery, typeFilter],
 	);
 
-	const scrollToFact = useCallback((name: string) => {
-		const el = factRefs.current[name];
+	const scrollToFact = useCallback((key: string) => {
+		const el = factRefs.current[key];
 		if (!el) return;
 		el.scrollIntoView({ block: "center", behavior: "auto" });
-		setHighlight(name);
-		window.setTimeout(() => setHighlight((h) => (h === name ? null : h)), 1200);
+		setHighlight(key);
+		window.setTimeout(() => setHighlight((h) => (h === key ? null : h)), 1200);
 	}, []);
 
 	const jumpTo = useCallback((name: string) => {
 		if (!factNames.has(name)) return;
-		const visible = filteredFacts.some((f) => f.name === name);
-		setExpanded(name);
+		const target = facts.find((f) => f.name === name && f.scope === "project") ?? facts.find((f) => f.name === name);
+		if (!target) return;
+		const key = memoryFactKey(target);
+		const visible = filteredFacts.some((f) => memoryFactKey(f) === key);
+		setExpanded(key);
 		setConfirmForget(null);
 		if (!visible) {
 			setQuery("");
 			setTypeFilter("all");
-			window.setTimeout(() => scrollToFact(name), 0);
+			window.setTimeout(() => scrollToFact(key), 0);
 			return;
 		}
-		scrollToFact(name);
-	}, [factNames, filteredFacts, scrollToFact]);
+		scrollToFact(key);
+	}, [factNames, facts, filteredFacts, scrollToFact]);
 
 	const renderWithLinks = useCallback((text: string): ReactNode[] => {
 		const out: ReactNode[] = [];
@@ -977,15 +1012,15 @@ export function MemorySettingsPage() {
 		return out;
 	}, [factNames, jumpTo, t]);
 
-	const forgetFact = useCallback(async (name: string) => {
+	const forgetFact = useCallback(async (ref: string, key: string) => {
 		if (busy) return;
 		setBusy(true);
 		setError(null);
 		try {
-			if (effectiveTabId) await app.ForgetForTab(effectiveTabId, name);
-			else await app.Forget(name);
+			if (effectiveTabId) await app.ForgetForTab(effectiveTabId, ref);
+			else await app.Forget(ref);
 			await reload();
-			if (expanded === name) setExpanded(null);
+			if (expanded === key) setExpanded(null);
 			setConfirmForget(null);
 		} catch (err) {
 			setError(errorMessage(err));
@@ -993,6 +1028,65 @@ export function MemorySettingsPage() {
 			setBusy(false);
 		}
 	}, [busy, expanded, reload, effectiveTabId]);
+
+	const loadRevisions = useCallback(async (fact: MemoryFact) => {
+		const ref = fact.id || fact.name;
+		const key = memoryFactKey(fact);
+		if (!ref || revisions[key] || revisionBusy === key) return;
+		setRevisionBusy(key);
+		try {
+			const items = effectiveTabId
+				? await app.MemoryRevisionsForTab(effectiveTabId, ref)
+				: await app.MemoryRevisions(ref);
+			setRevisions((prev) => ({ ...prev, [key]: items ?? [] }));
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setRevisionBusy(null);
+		}
+	}, [effectiveTabId, revisionBusy, revisions]);
+
+	const restoreRevision = useCallback(async (fact: MemoryFact, revision: number) => {
+		const ref = fact.id || fact.name;
+		const key = memoryFactKey(fact);
+		if (!ref || busy) return;
+		setBusy(true);
+		setError(null);
+		try {
+			if (effectiveTabId) await app.RestoreMemoryRevisionForTab(effectiveTabId, ref, revision);
+			else await app.RestoreMemoryRevision(ref, revision);
+			setRevisions((prev) => {
+				const next = { ...prev };
+				delete next[key];
+				return next;
+			});
+			await reload();
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setBusy(false);
+		}
+	}, [busy, effectiveTabId, reload]);
+
+	const restoreArchive = useCallback(async (archive: MemoryArchive) => {
+		if (busy) return;
+		setBusy(true);
+		setError(null);
+		try {
+			const restored = effectiveTabId
+				? await app.RestoreArchivedMemoryForTab(effectiveTabId, archive.path)
+				: await app.RestoreArchivedMemory(archive.path);
+			await reload();
+			setExpandedArchive(null);
+			setExpanded(restored.name || archive.name);
+			setHighlight(restored.name || archive.name);
+			setTab("saved");
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setBusy(false);
+		}
+	}, [busy, effectiveTabId, reload]);
 
 	const scopes = view?.scopes ?? [];
 	const activeScope =
@@ -1133,6 +1227,15 @@ export function MemorySettingsPage() {
 					>
 						<span>{t("memory.instructionFiles")}</span>
 					</button>
+					<button
+						className={"settings-subtab" + (tab === "activity" ? " settings-subtab--active" : "")}
+						role="tab"
+						aria-selected={tab === "activity"}
+						type="button"
+						onClick={() => setTab("activity")}
+					>
+						<span>{t("memory.activity")}</span>
+					</button>
 				</div>
 				<div className="memory-tabs-row__spacer" />
 				{wsSelector}
@@ -1155,58 +1258,17 @@ export function MemorySettingsPage() {
 						<div className="mem-section__title">{t("memory.savedMemories")}</div>
 						<div className="mem-note">{t("memory.fallibleNote")}</div>
 					</div>
-					<div className="mem-section__actions">
-						<button
-							className="btn btn--small"
-							type="button"
-							disabled={busy}
-							onClick={() => setShowAdd((v) => !v)}
-						>
-							{showAdd ? t("common.collapse") : <><Plus size={13} />{t("memory.addMemory")}</>}
-						</button>
-					</div>
 				</div>
-				{showAdd && (
-					<div className="mem-add-card">
-						<div className="mem-add-card__head">
-							<div>
-								<strong>{t("memory.addMemory")}</strong>
-								<span>{t("memory.addMemoryHint")}</span>
-							</div>
-						</div>
-						<div className="mem-add">
-							<Tooltip label={t("memory.whereToSave")}>
-								<select
-									className="mem-select"
-									value={activeScope}
-									onChange={(e) => setScope(e.target.value)}
-								>
-									{scopes.map((s) => (
-										<option key={s.scope} value={s.scope}>
-											{memoryScopeLabel(s.scope, t)}
-										</option>
-									))}
-								</select>
-							</Tooltip>
-							<input
-								className="mem-input"
-								placeholder={t("memory.notePlaceholder")}
-								value={note}
-								onChange={(e) => setNote(e.target.value)}
-								onKeyDown={(e) => {
-									if (e.key === "Enter") void submitNote();
-								}}
-							/>
-							<button
-								className="btn btn--primary btn--small"
-								onClick={() => void submitNote()}
-								disabled={busy || !note.trim()}
-							>
-								{t("memory.remember")}
-							</button>
-						</div>
-						<div className="mem-hint">
-							{scopes.find((s) => s.scope === activeScope)?.path}
+				{view.conflicts.length > 0 && (
+					<div className="mem-context-notice" role="status">
+						<AlertTriangle size={15} />
+						<div>
+							<strong>{t("memory.overridesTitle", { count: view.conflicts.length })}</strong>
+							{view.conflicts.map((conflict) => (
+								<span key={`${conflict.projectId}:${conflict.globalId}:${conflict.key}`}>
+									{t("memory.overrideExplanation", { project: conflict.projectName, global: conflict.globalName })}
+								</span>
+							))}
 						</div>
 					</div>
 				)}
@@ -1244,15 +1306,6 @@ export function MemorySettingsPage() {
 					<div className="mem-empty mem-empty--cta">
 						<strong>{t("memory.emptySavedTitle")}</strong>
 						<span>{t("memory.emptySavedBody")}</span>
-						<button
-							className="btn btn--primary btn--small"
-							type="button"
-							disabled={busy}
-							onClick={() => setShowAdd(true)}
-						>
-							<Plus size={13} />
-							{t("memory.addMemory")}
-						</button>
 					</div>
 				) : filteredFacts.length === 0 ? (
 					<div className="mem-empty">
@@ -1271,23 +1324,26 @@ export function MemorySettingsPage() {
 				) : (
 					<div className="mem-facts">
 						{filteredFacts.map((f) => {
-							const isOpen = expanded === f.name;
+							const key = memoryFactKey(f);
+							const isOpen = expanded === key;
 							const links = uniqueLinks(f.body, factNames);
 							const missing = links.filter((link) => !link.exists);
+							const factRevisions = revisions[key];
 							return (
 								<article
-									className={"mem-fact" + (highlight === f.name ? " mem-fact--hl" : "")}
+									className={"mem-fact" + (highlight === key ? " mem-fact--hl" : "")}
 									data-mem-type={f.type || "other"}
-									key={f.name}
+									key={key}
 									ref={(el) => {
-										factRefs.current[f.name] = el;
+										factRefs.current[key] = el;
 									}}
 								>
 									<button
 										className="mem-fact__summary"
 										onClick={() => {
-											setExpanded(isOpen ? null : f.name);
+											setExpanded(isOpen ? null : key);
 											setConfirmForget(null);
+											if (!isOpen) void loadRevisions(f);
 										}}
 										type="button"
 									>
@@ -1295,7 +1351,9 @@ export function MemorySettingsPage() {
 										<span className="mem-fact__main">
 											<span className="mem-fact__title">{displayTitle(f)}</span>
 											<span className="mem-fact__meta">
+												<MemoryFactScope scope={f.scope} t={t} />
 												{f.type && <span className="mem-fact__type" data-mem-type={f.type}>{memoryTypeLabel(f.type, t)}</span>}
+												<span className={`mem-freshness mem-freshness--${f.freshness || "current"}`}>{freshnessLabel(f.freshness, t)}</span>
 												<span className="mem-fact__slug">{f.name}</span>
 											</span>
 											<span className="mem-fact__desc">{f.description}</span>
@@ -1328,16 +1386,39 @@ export function MemorySettingsPage() {
 											) : (
 												<div className="mem-empty">{t("memory.noBody")}</div>
 											)}
-											{missing.length > 0 && (
+										{missing.length > 0 && (
 												<div className="mem-deadline">
 													{t("memory.missingLinks", { n: missing.length })}
 												</div>
-											)}
-											<div className="mem-fact__actions">
+										)}
+										<div className="mem-fact__provenance">
+											<span>{t("memory.factId")}: <code>{f.id || f.name}</code></span>
+											<span>{t("memory.revision", { revision: f.revision || 1 })}</span>
+											{f.updatedAt && <span>{t("memory.updatedAt", { time: formatMemoryTime(f.updatedAt) })}</span>}
+										</div>
+										<div className="mem-revisions">
+											<div className="mem-revisions__head"><History size={13} /><strong>{t("memory.revisionHistory")}</strong></div>
+											{revisionBusy === key ? (
+												<span className="mem-note">{t("memory.loadingRevisions")}</span>
+											) : !factRevisions || factRevisions.length === 0 ? (
+												<span className="mem-note">{t("memory.noRevisions")}</span>
+											) : factRevisions.map((revision) => (
+												<div className="mem-revision" key={`${key}:${revision.revision}`}>
+													<div>
+														<strong>{t("memory.revision", { revision: revision.revision || 1 })}</strong>
+														<span>{formatMemoryTime(revision.updatedAt || revision.createdAt)}</span>
+													</div>
+													<button className="btn btn--small" type="button" disabled={busy} onClick={() => void restoreRevision(f, revision.revision || 1)}>
+														<ArchiveRestore size={13} />{t("memory.restoreRevision")}
+													</button>
+												</div>
+											))}
+										</div>
+										<div className="mem-fact__actions">
 												<span className="mem-hint mem-hint--inline">
 													{t("memory.appliesNow")}
 												</span>
-												{confirmForget === f.name ? (
+											{confirmForget === key ? (
 													<div className="mem-confirm">
 														<button
 															className="btn btn--small"
@@ -1349,7 +1430,7 @@ export function MemorySettingsPage() {
 														</button>
 														<button
 															className="btn btn--small mem-danger"
-															onClick={() => void forgetFact(f.name)}
+														onClick={() => void forgetFact(f.id || f.name, key)}
 															disabled={busy}
 															type="button"
 														>
@@ -1359,7 +1440,7 @@ export function MemorySettingsPage() {
 												) : (
 													<button
 														className="btn btn--small mem-fact__forget"
-														onClick={() => setConfirmForget(f.name)}
+													onClick={() => setConfirmForget(key)}
 														disabled={busy}
 														type="button"
 													>
@@ -1397,23 +1478,6 @@ export function MemorySettingsPage() {
 							{suggestions ? t("memory.refreshSuggestions") : t("memory.scanSuggestions")}
 						</button>
 					</div>
-				</div>
-				<div className="mem-suggestion-settings">
-					<div>
-						<strong>{t("memory.autoSuggestions")}</strong>
-						<span>{t("memory.autoSuggestionsHint")}</span>
-					</div>
-					<Tooltip label={autoSuggestions ? t("memory.disableAutoSuggestions") : t("memory.enableAutoSuggestions")}>
-						<label className="cap-switch">
-							<input
-								type="checkbox"
-								checked={autoSuggestions}
-								onChange={(e) => setAutoSuggestionsPreference(e.target.checked)}
-								aria-label={t("memory.autoSuggestions")}
-							/>
-							<span className="cap-switch__track" />
-						</label>
-					</Tooltip>
 				</div>
 				{error && <div className="mem-error" role="alert">{error}</div>}
 				{!suggestions ? (
@@ -1456,13 +1520,14 @@ export function MemorySettingsPage() {
 													type="button"
 													onClick={() => setExpandedSuggestion(open ? null : candidate.id)}
 												>
-													{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-													<span className="mem-fact__main">
-														<span className="mem-fact__title">{candidate.title || candidate.name}</span>
-														<span className="mem-fact__meta">
-															<span className="mem-fact__type" data-mem-type={candidate.type}>{memoryTypeLabel(candidate.type, t)}</span>
-															<span className="mem-fact__slug">{candidate.name}</span>
-														</span>
+												{open ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+												<span className="mem-fact__main">
+													<span className="mem-fact__title">{candidate.title || candidate.name}</span>
+													<span className="mem-fact__meta">
+														<MemoryFactScope scope={candidate.scope} t={t} />
+														<span className="mem-fact__type" data-mem-type={candidate.type}>{memoryTypeLabel(candidate.type, t)}</span>
+														<span className="mem-fact__slug">{candidate.name}</span>
+													</span>
 														<span className="mem-fact__desc">{candidate.description}</span>
 													</span>
 												</button>
@@ -1561,6 +1626,50 @@ export function MemorySettingsPage() {
 				)}
 			</section>}
 
+			{tab === "activity" && <section className="mem-section">
+				<div className="mem-section__head">
+					<div>
+						<div className="mem-section__title">{t("memory.recallTitle")}</div>
+						<div className="mem-note">{t("memory.recallHint")}</div>
+					</div>
+				</div>
+				<div className="mem-recall-summary">
+					<Activity size={16} />
+					<div>
+						<strong>{view.lastRecall.query || t("memory.noRecallQuery")}</strong>
+						<span>{t("memory.recallBudget", { used: view.lastRecall.usedChars, budget: view.lastRecall.charBudget, omitted: view.lastRecall.omitted })}</span>
+					</div>
+				</div>
+				{view.lastRecall.suppressed && (
+					<div className="mem-context-notice mem-context-notice--muted">
+						<AlertTriangle size={15} />
+						<span>{t("memory.recallSuppressed", { reason: view.lastRecall.suppressed })}</span>
+					</div>
+				)}
+				{view.lastRecall.hits.length === 0 ? (
+					<div className="mem-empty">{t("memory.noRecallHits")}</div>
+				) : (
+					<div className="mem-recall-hits">
+						{view.lastRecall.hits.map((hit) => (
+							<div className="mem-recall-hit" key={`${hit.id}:${hit.revision}`}>
+								<div className="mem-recall-hit__head">
+									<strong>{hit.title || hit.name}</strong>
+									<span>{Math.round(hit.score * 100)}%</span>
+								</div>
+								<div className="mem-fact__meta">
+									<MemoryFactScope scope={hit.scope} t={t} />
+									<span className="mem-fact__type" data-mem-type={hit.type}>{memoryTypeLabel(hit.type, t)}</span>
+									<span className={`mem-freshness mem-freshness--${hit.freshness}`}>{freshnessLabel(hit.freshness, t)}</span>
+									<span>{t("memory.revision", { revision: hit.revision })}</span>
+								</div>
+								<p>{hit.snippet}</p>
+								<small>{hit.reason}</small>
+							</div>
+						))}
+					</div>
+				)}
+			</section>}
+
 			{tab === "archived" && <section className="mem-section">
 				<div className="mem-section__head">
 					<div>
@@ -1604,14 +1713,16 @@ export function MemorySettingsPage() {
 					</div>
 				) : (
 					<ArchivedMemoryList
-					archives={filteredArchives}
-					totalArchives={archives.length}
-					expanded={expandedArchive}
-					setExpanded={setExpandedArchive}
-					renderWithLinks={renderWithLinks}
-					t={t}
-					hideHeader
-				/>
+						archives={filteredArchives}
+						totalArchives={archives.length}
+						expanded={expandedArchive}
+						setExpanded={setExpandedArchive}
+						renderWithLinks={renderWithLinks}
+						t={t}
+						hideHeader
+						busy={busy}
+						onRestore={restoreArchive}
+					/>
 				)}
 			</section>}
 
@@ -1621,7 +1732,73 @@ export function MemorySettingsPage() {
 						<div className="mem-section__title">{t("memory.instructionFiles")}</div>
 						<div className="mem-note">{t("memory.instructionFilesHint")}</div>
 					</div>
+					<div className="mem-section__actions">
+						<button
+							className="btn btn--small"
+							type="button"
+							disabled={busy}
+							onClick={() => setShowAdd((v) => !v)}
+						>
+							{showAdd ? t("common.collapse") : <><Plus size={13} />{t("memory.addMemory")}</>}
+						</button>
+					</div>
 				</div>
+				{view.instructionDiagnostics.length > 0 && (
+					<div className="mem-instruction-diagnostics">
+						<div className="mem-instruction-diagnostics__title"><AlertTriangle size={14} />{t("memory.instructionDiagnostics")}</div>
+						{view.instructionDiagnostics.map((diagnostic, index) => (
+							<div className="mem-instruction-diagnostic" key={`${diagnostic.code}:${diagnostic.path}:${diagnostic.line || index}`}>
+								<strong>{diagnostic.code}</strong>
+								<span>{diagnostic.message}</span>
+								<code>{diagnostic.path}{diagnostic.line ? `:${diagnostic.line}` : ""}</code>
+							</div>
+						))}
+					</div>
+				)}
+				{showAdd && (
+					<div className="mem-add-card">
+						<div className="mem-add-card__head">
+							<div>
+								<strong>{t("memory.addMemory")}</strong>
+								<span>{t("memory.addMemoryHint")}</span>
+							</div>
+						</div>
+						<div className="mem-add">
+							<Tooltip label={t("memory.whereToSave")}>
+								<select
+									className="mem-select"
+									value={activeScope}
+									onChange={(e) => setScope(e.target.value)}
+								>
+									{scopes.map((s) => (
+										<option key={s.scope} value={s.scope}>
+											{memoryScopeLabel(s.scope, t)}
+										</option>
+									))}
+								</select>
+							</Tooltip>
+							<input
+								className="mem-input"
+								placeholder={t("memory.notePlaceholder")}
+								value={note}
+								onChange={(e) => setNote(e.target.value)}
+								onKeyDown={(e) => {
+									if (e.key === "Enter") void submitNote();
+								}}
+							/>
+							<button
+								className="btn btn--primary btn--small"
+								onClick={() => void submitNote()}
+								disabled={busy || !note.trim()}
+							>
+								{t("memory.remember")}
+							</button>
+						</div>
+						<div className="mem-hint">
+							{scopes.find((s) => s.scope === activeScope)?.path}
+						</div>
+					</div>
+				)}
 				{view.docs.length === 0 && (
 					<div className="mem-empty">{t("memory.noDocs")}</div>
 				)}
@@ -1648,6 +1825,7 @@ export function MemorySettingsPage() {
 										<strong>{memoryDocTitle(d.scope, t)}</strong>
 										<span className="mem-doc__path">{d.path}</span>
 										<small>{memoryDocHint(d.scope, t)}</small>
+										<small>{t("memory.instructionPrecedence", { precedence: d.precedence + 1, directory: d.directory || t("memory.globalDirectory") })}</small>
 									</div>
 								</button>
 								<div className="mem-doc__head-actions">
@@ -1689,7 +1867,15 @@ export function MemorySettingsPage() {
 									</div>
 								</div>
 							) : open ? (
-								<pre className="mem-doc__body">{d.body}</pre>
+								<div className="mem-doc__expanded">
+									<pre className="mem-doc__body">{d.body}</pre>
+									{d.imports.length > 0 && (
+										<div className="mem-doc__imports">
+											<strong>{t("memory.instructionImports")}</strong>
+											{d.imports.map((item) => <code key={`${item.sourcePath}:${item.path}`}>{item.sourcePath} → {item.path}</code>)}
+										</div>
+									)}
+								</div>
 							) : null}
 						</div>
 					);

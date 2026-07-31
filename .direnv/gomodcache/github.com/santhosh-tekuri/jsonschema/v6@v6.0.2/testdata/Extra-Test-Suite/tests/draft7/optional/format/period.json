@@ -1,0 +1,98 @@
+[
+    {
+        "description": "validation of period",
+        "schema": { "format": "period" },
+        "tests": [
+            {
+                "description": "all string formats ignore integers",
+                "data": 12,
+                "valid": true
+            },
+            {
+                "description": "all string formats ignore floats",
+                "data": 13.7,
+                "valid": true
+            },
+            {
+                "description": "all string formats ignore objects",
+                "data": {},
+                "valid": true
+            },
+            {
+                "description": "all string formats ignore arrays",
+                "data": [],
+                "valid": true
+            },
+            {
+                "description": "all string formats ignore booleans",
+                "data": false,
+                "valid": true
+            },
+            {
+                "description": "all string formats ignore nulls",
+                "data": null,
+                "valid": true
+            },
+            {
+                "description": "both-explicit",
+                "data": "1963-06-19T08:30:06Z/1963-06-19T08:30:07Z",
+                "valid": true
+            },
+            {
+                "description": "start-explicit",
+                "data": "1963-06-19T08:30:06Z/P4DT12H30M5S",
+                "valid": true
+            },
+            {
+                "description": "end-explicit",
+                "data": "P4DT12H30M5S/1963-06-19T08:30:06Z",
+                "valid": true
+            },
+            {
+                "description": "none-explicit",
+                "data": "P4DT12H30M5S/P4DT12H30M5S",
+                "valid": false
+            },
+            {
+                "description": "just date",
+                "data": "1963-06-19T08:30:06Z",
+                "valid": false
+            },
+            {
+                "description": "just duration",
+                "data": "P4DT12H30M5S",
+                "valid": false
+            },
+            {
+                "description": "more than two",
+                "data": "1963-06-19T08:30:06Z/1963-06-19T08:30:07Z/1963-06-19T08:30:07Z",
+                "valid": false
+            },
+            {
+                "description": "separated by space",
+                "data": "1963-06-19T08:30:06Z 1963-06-19T08:30:07Z",
+                "valid": false
+            },
+            {
+                "description": "separated by hyphen",
+                "data": "1963-06-19T08:30:06Z-1963-06-19T08:30:07Z",
+                "valid": false
+            },
+            {
+                "description": "invalid components",
+                "data": "foo/bar",
+                "valid": false
+            },
+            {
+                "description": "emtpy components",
+                "data": "/",
+                "valid": false
+            },
+            {
+                "description": "empty string",
+                "data": "",
+                "valid": false
+            }
+        ]
+    }
+]

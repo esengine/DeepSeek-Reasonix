@@ -1,0 +1,9 @@
+{
+  "main": "../bindings/node/typescript",
+  "private": true,
+  "scripts": {
+    "build": "tree-sitter generate",
+    "prestart": "tree-sitter build --wasm",
+    "start": "tree-sitter playground"
+  }
+}

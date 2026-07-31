@@ -1,0 +1,16 @@
+[
+    {
+        "description": "validation of duration strings",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "format": "duration"
+        },
+        "tests": [
+            {
+                "description": "more than one T",
+                "data": "PT1MT1S",
+                "valid": false
+            }
+        ]
+    }
+]

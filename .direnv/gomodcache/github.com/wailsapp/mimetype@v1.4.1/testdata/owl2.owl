@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Ontology xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://www.w3.org/2002/07/owl# http://www.w3.org/2009/09/owl2-xml.xsd"
+    xmlns="http://www.w3.org/2002/07/owl#"
+    xml:base="http://example.com/myOntology"
+    ontologyIRI="http://example.com/myOntology">
+    
+    <Prefix name="myOnt" IRI="http://example.com/myOntology#"/>
+    <Import>http://example.com/someOtherOntology</Import>
+
+    <Declaration>
+        <Class IRI="#Animal"/>
+    </Declaration>
+    <Declaration>
+        <Class abbreviatedIRI="myOnt:Tabloid"/>
+    </Declaration>
+    <Declaration>
+        <ObjectProperty IRI="#eats"/>
+    </Declaration>
+    <Declaration>
+        <ObjectProperty IRI="#reads"/>
+    </Declaration>
+
+    <SubClassOf>
+        <Class abbreviatedIRI="myOnt:Animal"/>
+        <ObjectAllValuesFrom>
+            <ObjectProperty IRI="#reads"/>
+            <Class IRI="#Tabloid"/>
+        </ObjectAllValuesFrom>
+    </SubClassOf>
+</Ontology>

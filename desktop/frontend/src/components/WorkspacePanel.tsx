@@ -22,6 +22,7 @@ import {
   Minimize2,
   RefreshCw,
   Search,
+  TerminalSquare,
   X,
 } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -192,6 +193,7 @@ export function WorkspacePanel({
   onPreviewModeChange,
   onAddToChat,
   onAddCodeToChat,
+  onOpenInTerminal,
   onRequestPanelWidth,
   onFileTreeRefresh,
   refreshKey,
@@ -216,6 +218,7 @@ export function WorkspacePanel({
   onPreviewModeChange?: (active: boolean) => void;
   onAddToChat?: (text: string) => void;
   onAddCodeToChat?: (path: string, code: string) => void;
+  onOpenInTerminal?: (path: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
   refreshKey?: number;
@@ -2081,6 +2084,17 @@ export function WorkspacePanel({
                 label: t("workspace.revealInFileManager"),
                 onSelect: revealInFileManager,
               },
+              ...(onOpenInTerminal
+                ? [{
+                    icon: <TerminalSquare size={14} />,
+                    label: t("workspace.openInTerminal"),
+                    onSelect: () => {
+                      const target = treeMenu;
+                      setTreeMenu(null);
+                      onOpenInTerminal(target.path);
+                    },
+                  }]
+                : []),
             ]}
           />
         </FloatingMenu>

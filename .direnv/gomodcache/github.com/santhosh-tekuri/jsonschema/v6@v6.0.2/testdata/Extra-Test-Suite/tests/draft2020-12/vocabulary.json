@@ -1,0 +1,22 @@
+[
+	{
+		"description": "using keywords from disabled vocabulary",
+		"schema": {
+			"$schema": "http://localhost:1234/draft2020-12/no-applicator.json",
+			"type": "number",
+			"allOf": 1
+		},
+		"tests": [
+			{
+				"description": "number is valid",
+				"data": 1,
+				"valid": true
+			},
+			{
+				"description": "string is invalid",
+				"data": "hello",
+				"valid": false
+			}
+		]
+	}
+]

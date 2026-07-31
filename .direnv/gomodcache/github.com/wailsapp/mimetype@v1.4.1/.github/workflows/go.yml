@@ -1,0 +1,59 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+name: run tests
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install Go
+      uses: actions/setup-go@v2.2.0
+      with:
+        go-version: 1.16
+    - name: Checkout code
+      uses: actions/checkout@v2.4.0
+    - name: Run linters
+      uses: golangci/golangci-lint-action@v2.5.2
+      with:
+        version: "v1.37.1"
+
+  test:
+    strategy:
+      matrix:
+        go-version: ["1.12.0", "^1.17.6"]
+        platform: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+    - name: Install Go
+      if: success()
+      uses: actions/setup-go@v2.2.0
+      with:
+        go-version: ${{ matrix.go-version }}
+    - name: Checkout code
+      uses: actions/checkout@v2.4.0
+    - name: Run tests
+      run: go test -race ./...
+
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install Go
+      if: success()
+      uses: actions/setup-go@v2.2.0
+      with:
+        go-version: 1.16
+    - name: Checkout code
+      uses: actions/checkout@v2.4.0
+    - name: Calc coverage
+      run: |
+        go test -v -covermode=count -coverprofile=coverage.out
+    - name: Convert coverage.out to coverage.lcov
+      uses: jandelgado/gcov2lcov-action@v1.0.8
+    - name: Coveralls
+      uses: coverallsapp/github-action@1.1.3
+      with:
+          github-token: ${{ secrets.github_token }}
+          path-to-lcov: coverage.lcov

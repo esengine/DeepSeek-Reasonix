@@ -1,0 +1,8 @@
+1     = true
+1.2   = true
+0123  = true
+01.23 = true
+23.01 = true
+-1    = true
+-01   = true
+

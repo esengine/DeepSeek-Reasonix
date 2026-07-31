@@ -1,0 +1,985 @@
+=========================================
+Interface declarations
+=========================================
+
+<?php
+
+interface ThrowableInterface {
+    public function getMessage();
+}
+
+class Exception_foo implements ThrowableInterface {
+    public $foo = "foo";
+
+    public function getMessage() {
+        return $this->foo;
+    }
+}
+
+---
+
+(program
+  (php_tag)
+  (interface_declaration
+    name: (name)
+    body: (declaration_list
+      (method_declaration
+        (visibility_modifier)
+        name: (name)
+        parameters: (formal_parameters))))
+  (class_declaration
+    name: (name)
+    (class_interface_clause
+      (name))
+    body: (declaration_list
+      (property_declaration
+        (visibility_modifier)
+        (property_element
+          name: (variable_name
+            (name))
+          default_value: (encapsed_string
+            (string_content))))
+      (method_declaration
+        (visibility_modifier)
+        name: (name)
+        parameters: (formal_parameters)
+        body: (compound_statement
+          (return_statement
+            (member_access_expression
+              object: (variable_name
+                (name))
+              name: (name))))))))
+
+==========================
+Use declarations
+==========================
+
+<?php
+
+trait AbstractTrait
+{
+    use LoggerAwareTrait;
+    use LoggerAwareTrait, OtherTrait {}
+    use LoggerAwareTrait, OtherTrait;
+}
+
+class AbstractCache
+{
+    use AbstractTrait {
+        deleteItems as private;
+        AbstractTrait::deleteItem as delete;
+        AbstractTrait::hasItem as has;
+    }
+}
+
+---
+
+(program
+  (php_tag)
+  (trait_declaration
+    (name)
+    (declaration_list
+      (use_declaration
+        (name))
+      (use_declaration
+        (name)
+        (name)
+        (use_list))
+      (use_declaration
+        (name)
+        (name))))
+  (class_declaration
+    (name)
+    (declaration_list
+      (use_declaration
+        (name)
+        (use_list
+          (use_as_clause
+            (name)
+            (visibility_modifier))
+          (use_as_clause
+            (class_constant_access_expression
+              (name)
+              (name))
+            (name))
+          (use_as_clause
+            (class_constant_access_expression
+              (name)
+              (name))
+            (name)))))))
+
+==========================
+Namespace use declarations
+==========================
+
+<?php
+
+namespace Foo\Bar\Baz;
+
+use Foo\Bar\Baz;
+use Foo\Bar\Baz as Qux;
+use Foo\Bar\Baz, Foo\Bar\Qux;
+
+use function Foo\Bar\foo;
+use function Foo\Bar\foo as bar;
+
+use const Foo\Bar\BAZ;
+use const Foo\Bar\BAZ as QUX;
+
+use Foo\Bar\{Baz, Qux};
+use function Foo\Bar\{foo, bar};
+use const Foo\Bar\{BAZ, QUX};
+
+use Foo\Bar\{
+    Baz,
+    Qux as Quux,
+    function foo,
+    function bar as baz,
+    const BAZ,
+    const QUX as QUUX
+};
+
+---
+
+(program
+  (php_tag)
+  (namespace_definition
+    name: (namespace_name
+      (name)
+      (name)
+      (name)))
+  (namespace_use_declaration
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name))))
+  (namespace_use_declaration
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name))
+      alias: (name)))
+  (namespace_use_declaration
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name)))
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name))))
+  (namespace_use_declaration
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name))))
+  (namespace_use_declaration
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name))
+      alias: (name)))
+  (namespace_use_declaration
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name))))
+  (namespace_use_declaration
+    (namespace_use_clause
+      (qualified_name
+        prefix: (namespace_name
+          (name)
+          (name))
+        (name))
+      alias: (name)))
+  (namespace_use_declaration
+    (namespace_name
+      (name)
+      (name))
+    body: (namespace_use_group
+      (namespace_use_clause
+        (name))
+      (namespace_use_clause
+        (name))))
+  (namespace_use_declaration
+    (namespace_name
+      (name)
+      (name))
+    body: (namespace_use_group
+      (namespace_use_clause
+        (name))
+      (namespace_use_clause
+        (name))))
+  (namespace_use_declaration
+    (namespace_name
+      (name)
+      (name))
+    body: (namespace_use_group
+      (namespace_use_clause
+        (name))
+      (namespace_use_clause
+        (name))))
+  (namespace_use_declaration
+    (namespace_name
+      (name)
+      (name))
+    body: (namespace_use_group
+      (namespace_use_clause
+        (name))
+      (namespace_use_clause
+        (name)
+        alias: (name))
+      (namespace_use_clause
+        (name))
+      (namespace_use_clause
+        (name)
+        alias: (name))
+      (namespace_use_clause
+        (name))
+      (namespace_use_clause
+        (name)
+        alias: (name)))))
+
+==========================
+Namespace names in namespaces
+==========================
+
+<?php
+
+namespace Be \ ta {
+    class A {}
+    class B {}
+}
+
+---
+
+(program
+  (php_tag)
+  (namespace_definition
+    name: (namespace_name
+      (name)
+      (name))
+    body: (compound_statement
+      (class_declaration
+        name: (name)
+        body: (declaration_list))
+      (class_declaration
+        name: (name)
+        body: (declaration_list)))))
+
+==============================
+Class declarations
+==============================
+
+<?php
+class foo {
+  function __construct($name) {
+    $GLOBALS['List']= &$this;
+    $this->Name = $name;
+    $GLOBALS['List']->echoName();
+  }
+
+  function echoName() {
+    $GLOBALS['names'][]=$this->Name;
+  }
+}
+
+---
+
+(program
+  (php_tag)
+  (class_declaration
+    name: (name)
+    body: (declaration_list
+      (method_declaration
+        name: (name)
+        parameters: (formal_parameters
+          (simple_parameter
+            name: (variable_name
+              (name))))
+        body: (compound_statement
+          (expression_statement
+            (reference_assignment_expression
+              left: (subscript_expression
+                (variable_name
+                  (name))
+                (string
+                  (string_content)))
+              right: (variable_name
+                (name))))
+          (expression_statement
+            (assignment_expression
+              left: (member_access_expression
+                object: (variable_name
+                  (name))
+                name: (name))
+              right: (variable_name
+                (name))))
+          (expression_statement
+            (member_call_expression
+              object: (subscript_expression
+                (variable_name
+                  (name))
+                (string
+                  (string_content)))
+              name: (name)
+              arguments: (arguments)))))
+      (method_declaration
+        name: (name)
+        parameters: (formal_parameters)
+        body: (compound_statement
+          (expression_statement
+            (assignment_expression
+              left: (subscript_expression
+                (subscript_expression
+                  (variable_name
+                    (name))
+                  (string
+                    (string_content))))
+              right: (member_access_expression
+                object: (variable_name
+                  (name))
+                name: (name)))))))))
+
+========================================
+Class declarations with base classes
+========================================
+
+<?php
+class A extends B {
+
+}
+
+---
+
+(program
+  (php_tag)
+  (class_declaration
+    name: (name)
+    (base_clause
+      (name))
+    body: (declaration_list)))
+
+==========================
+Function parameters
+==========================
+
+<?php
+function test(int $a, string ...$b)
+{
+}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    name: (name)
+    parameters: (formal_parameters
+      (simple_parameter
+        type: (primitive_type)
+        name: (variable_name
+          (name)))
+      (variadic_parameter
+        type: (primitive_type)
+        name: (variable_name
+          (name))))
+    body: (compound_statement)))
+
+====================================
+Functions with default parameters
+====================================
+
+<?php
+function a($arg = self::bar) {
+	echo $arg;
+}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (variable_name
+          (name))
+        (class_constant_access_expression
+          (relative_scope)
+          (name))))
+    (compound_statement
+      (echo_statement
+        (variable_name
+          (name))))))
+
+========================================================================
+Static variables in functions
+========================================================================
+
+<?php
+function blah()
+{
+  static $hey=0, $yo=0;
+}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    (name)
+    (formal_parameters)
+    (compound_statement
+      (function_static_declaration
+        (static_variable_declaration
+          (variable_name
+            (name))
+          (integer))
+        (static_variable_declaration
+          (variable_name
+            (name))
+          (integer))))))
+
+=========================================
+Defining Constants
+=========================================
+
+<?php
+
+define("CONSTANT", "Hello world.");
+const CONSTANT = 'Hello World';
+const ANOTHER_CONST = CONSTANT.'; Goodbye World';
+const ANIMALS = array('dog', 'cat', 'bird');
+define('ANIMALS', array(
+    'dog',
+    'cat',
+    'bird'
+));
+
+---
+
+(program
+  (php_tag)
+  (expression_statement
+    (function_call_expression
+      (name)
+      (arguments
+        (argument
+          (encapsed_string
+            (string_content)))
+        (argument
+          (encapsed_string
+            (string_content))))))
+  (const_declaration
+    (const_element
+      (name)
+      (string
+        (string_content))))
+  (const_declaration
+    (const_element
+      (name)
+      (binary_expression
+        (name)
+        (string
+          (string_content)))))
+  (const_declaration
+    (const_element
+      (name)
+      (array_creation_expression
+        (array_element_initializer
+          (string
+            (string_content)))
+        (array_element_initializer
+          (string
+            (string_content)))
+        (array_element_initializer
+          (string
+            (string_content))))))
+  (expression_statement
+    (function_call_expression
+      (name)
+      (arguments
+        (argument
+          (string
+            (string_content)))
+        (argument
+          (array_creation_expression
+            (array_element_initializer
+              (string
+                (string_content)))
+            (array_element_initializer
+              (string
+                (string_content)))
+            (array_element_initializer
+              (string
+                (string_content)))))))))
+
+=======================================
+Attributes
+=======================================
+
+<?php
+
+#[Test]
+function a(#[Test] $a) {
+  $c;
+}
+
+#[Test]
+interface A {
+}
+
+#[Test]
+trait B {
+}
+
+class PostsController
+{
+  #[Test]
+  const CONSTANT = 'constant value';
+
+  #[Test]
+  private string $a = '';
+
+  #[Route("/api/posts/{id}", ["GET"])]
+  public function get(#[Test] $id) { /* ... */ }
+}
+
+#[MyAttribute]
+#[\MyExample\MyAttribute]
+#[MyAttribute(1234)]
+#[MyAttribute(MyAttribute::VALUE)]
+#[MyAttribute(array("key" => "value"))]
+#[MyAttribute(100 + 200)]
+class Thing
+{
+}
+
+new #[ExampleAttribute] class() {};
+#[ExampleAttribute] fn($x) => $x;
+$baz = #[ExampleAttribute] function($x) {return $x;};
+
+class A {
+  #[\Assert\All(
+      new \Assert\NotNull,
+      new \Assert\Length(min: 5))
+  ]
+  public string $name = '';
+
+}
+
+#[
+    A1,
+    A2(),
+    A3(0),
+    A4(x: 1),
+]
+function a() {
+}
+
+class B {
+  public function __construct(
+    #[A]
+    public string $a,
+  ) {
+  }
+}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    attributes: (attribute_list
+      (attribute_group
+        (attribute
+          (name))))
+    name: (name)
+    parameters: (formal_parameters
+      (simple_parameter
+        attributes: (attribute_list
+          (attribute_group
+            (attribute
+              (name))))
+        name: (variable_name
+          (name))))
+    body: (compound_statement
+      (expression_statement
+        (variable_name
+          (name)))))
+  (interface_declaration
+    attributes: (attribute_list
+      (attribute_group
+        (attribute
+          (name))))
+    name: (name)
+    body: (declaration_list))
+  (trait_declaration
+    attributes: (attribute_list
+      (attribute_group
+        (attribute
+          (name))))
+    name: (name)
+    body: (declaration_list))
+  (class_declaration
+    name: (name)
+    body: (declaration_list
+      (const_declaration
+        attributes: (attribute_list
+          (attribute_group
+            (attribute
+              (name))))
+        (const_element
+          (name)
+          (string
+            (string_content))))
+      (property_declaration
+        attributes: (attribute_list
+          (attribute_group
+            (attribute
+              (name))))
+        (visibility_modifier)
+        type: (primitive_type)
+        (property_element
+          name: (variable_name
+            (name))
+          default_value: (string)))
+      (method_declaration
+        attributes: (attribute_list
+          (attribute_group
+            (attribute
+              (name)
+              parameters: (arguments
+                (argument
+                  (encapsed_string
+                    (string_content)))
+                (argument
+                  (array_creation_expression
+                    (array_element_initializer
+                      (encapsed_string
+                        (string_content)))))))))
+        (visibility_modifier)
+        name: (name)
+        parameters: (formal_parameters
+          (simple_parameter
+            attributes: (attribute_list
+              (attribute_group
+                (attribute
+                  (name))))
+            name: (variable_name
+              (name))))
+        body: (compound_statement
+          (comment)))))
+  (class_declaration
+    attributes: (attribute_list
+      (attribute_group
+        (attribute
+          (name)))
+      (attribute_group
+        (attribute
+          (qualified_name
+            prefix: (namespace_name
+              (name))
+            (name))))
+      (attribute_group
+        (attribute
+          (name)
+          parameters: (arguments
+            (argument
+              (integer)))))
+      (attribute_group
+        (attribute
+          (name)
+          parameters: (arguments
+            (argument
+              (class_constant_access_expression
+                (name)
+                (name))))))
+      (attribute_group
+        (attribute
+          (name)
+          parameters: (arguments
+            (argument
+              (array_creation_expression
+                (array_element_initializer
+                  (encapsed_string
+                    (string_content))
+                  (encapsed_string
+                    (string_content))))))))
+      (attribute_group
+        (attribute
+          (name)
+          parameters: (arguments
+            (argument
+              (binary_expression
+                left: (integer)
+                right: (integer)))))))
+    name: (name)
+    body: (declaration_list))
+  (expression_statement
+    (object_creation_expression
+      (anonymous_class
+        attributes: (attribute_list
+          (attribute_group
+            (attribute
+              (name))))
+        (arguments)
+        body: (declaration_list))))
+  (expression_statement
+    (arrow_function
+      attributes: (attribute_list
+        (attribute_group
+          (attribute
+            (name))))
+      parameters: (formal_parameters
+        (simple_parameter
+          name: (variable_name
+            (name))))
+      body: (variable_name
+        (name))))
+  (expression_statement
+    (assignment_expression
+      left: (variable_name
+        (name))
+      right: (anonymous_function
+        attributes: (attribute_list
+          (attribute_group
+            (attribute
+              (name))))
+        parameters: (formal_parameters
+          (simple_parameter
+            name: (variable_name
+              (name))))
+        body: (compound_statement
+          (return_statement
+            (variable_name
+              (name)))))))
+  (class_declaration
+    name: (name)
+    body: (declaration_list
+      (property_declaration
+        attributes: (attribute_list
+          (attribute_group
+            (attribute
+              (qualified_name
+                prefix: (namespace_name
+                  (name))
+                (name))
+              parameters: (arguments
+                (argument
+                  (object_creation_expression
+                    (qualified_name
+                      prefix: (namespace_name
+                        (name))
+                      (name))))
+                (argument
+                  (object_creation_expression
+                    (qualified_name
+                      prefix: (namespace_name
+                        (name))
+                      (name))
+                    (arguments
+                      (argument
+                        name: (name)
+                        (integer)))))))))
+        (visibility_modifier)
+        type: (primitive_type)
+        (property_element
+          name: (variable_name
+            (name))
+          default_value: (string)))))
+  (function_definition
+    attributes: (attribute_list
+      (attribute_group
+        (attribute
+          (name))
+        (attribute
+          (name)
+          parameters: (arguments))
+        (attribute
+          (name)
+          parameters: (arguments
+            (argument
+              (integer))))
+        (attribute
+          (name)
+          parameters: (arguments
+            (argument
+              name: (name)
+              (integer))))))
+    name: (name)
+    parameters: (formal_parameters)
+    body: (compound_statement))
+  (class_declaration
+    name: (name)
+    body: (declaration_list
+      (method_declaration
+        (visibility_modifier)
+        name: (name)
+        parameters: (formal_parameters
+          (property_promotion_parameter
+            attributes: (attribute_list
+              (attribute_group
+                (attribute
+                  (name))))
+            visibility: (visibility_modifier)
+            type: (primitive_type)
+            name: (variable_name
+              (name))))
+        body: (compound_statement)))))
+
+=======================================
+Enums
+=======================================
+
+<?php
+
+enum A {}
+enum B implements Bar, Baz {
+}
+enum C: int implements Bar {}
+
+enum Suit: string
+{
+  case Hearts = 'H';
+  case Diamonds;
+  case Clubs = "C";
+  case Spades = <<<TXT
+      S
+      TXT;
+
+  // Fulfills the interface contract.
+  public function color(): string {
+    return match($this) {
+      Suit::Hearts, Suit::Diamonds => 'Red',
+      Suit::Clubs, Suit::Spades => 'Black',
+    };
+  }
+}
+
+enum D: int
+{
+    case Minus_1 = -1;
+    case Zero = 0;
+    case Plus_1 = +1;
+}
+
+enum E: string
+{
+    case StringConcat = 'Hello ' . "World";
+}
+
+---
+
+(program
+  (php_tag)
+  (enum_declaration
+    (name)
+    (enum_declaration_list))
+  (enum_declaration
+    (name)
+    (class_interface_clause
+      (name)
+      (name))
+    (enum_declaration_list))
+  (enum_declaration
+    (name)
+    (primitive_type)
+    (class_interface_clause
+      (name))
+    (enum_declaration_list))
+  (enum_declaration
+    (name)
+    (primitive_type)
+    (enum_declaration_list
+      (enum_case
+        (name)
+        (string
+          (string_content)))
+      (enum_case
+        (name))
+      (enum_case
+        (name)
+        (encapsed_string
+          (string_content)))
+      (enum_case
+        (name)
+        (heredoc
+          (heredoc_start)
+          (heredoc_body
+            (string_content))
+          (heredoc_end)))
+      (comment)
+      (method_declaration
+        (visibility_modifier)
+        (name)
+        (formal_parameters)
+        (primitive_type)
+        (compound_statement
+          (return_statement
+            (match_expression
+              (parenthesized_expression
+                (variable_name
+                  (name)))
+              (match_block
+                (match_conditional_expression
+                  (match_condition_list
+                    (class_constant_access_expression
+                      (name)
+                      (name))
+                    (class_constant_access_expression
+                      (name)
+                      (name)))
+                  (string
+                    (string_content)))
+                (match_conditional_expression
+                  (match_condition_list
+                    (class_constant_access_expression
+                      (name)
+                      (name))
+                    (class_constant_access_expression
+                      (name)
+                      (name)))
+                  (string
+                    (string_content))))))))))
+  (enum_declaration
+    (name)
+    (primitive_type)
+    (enum_declaration_list
+      (enum_case
+        (name)
+        (unary_op_expression
+          (integer)))
+      (enum_case
+        (name)
+        (integer))
+      (enum_case
+        (name)
+        (unary_op_expression
+          (integer)))))
+  (enum_declaration
+    (name)
+    (primitive_type)
+    (enum_declaration_list
+      (enum_case
+        (name)
+        (binary_expression
+          (string
+            (string_content))
+          (encapsed_string
+            (string_content)))))))

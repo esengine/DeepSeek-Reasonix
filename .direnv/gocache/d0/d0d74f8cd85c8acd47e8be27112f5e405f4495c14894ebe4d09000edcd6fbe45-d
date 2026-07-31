@@ -1,0 +1,14 @@
+./compiler.go
+./content.go
+./draft.go
+./format.go
+./loader.go
+./objcompiler.go
+./output.go
+./position.go
+./root.go
+./roots.go
+./schema.go
+./util.go
+./validator.go
+./vocab.go

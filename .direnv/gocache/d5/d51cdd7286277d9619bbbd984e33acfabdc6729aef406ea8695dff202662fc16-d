@@ -1,0 +1,3 @@
+./claude_compat.go
+./describe.go
+./pluginpkg.go

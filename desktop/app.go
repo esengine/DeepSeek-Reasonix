@@ -18,6 +18,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	goruntime "runtime"
 	"sort"
 	"strconv"
@@ -51,6 +52,7 @@ import (
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/remote/protocol"
+	"reasonix/internal/remote/workbench/target"
 	"reasonix/internal/repair"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
@@ -167,6 +169,9 @@ type App struct {
 	// runtimeMutationBeforeLockHook is test-only. Set it before starting concurrent
 	// calls and never mutate it afterward.
 	runtimeMutationBeforeLockHook func(string)
+	// modelSwitchTimingHook is test-only. Production diagnostics use the same
+	// sanitized timing record through debug logging.
+	modelSwitchTimingHook func(modelSwitchTiming)
 	// rebindCandidateHook is test-only. It exposes deterministic transaction
 	// boundaries without weakening the production lock order. Set it before
 	// starting a rebind and never mutate it until that rebind returns.
@@ -177,6 +182,12 @@ type App struct {
 	// CancelTrySubagentProfile).
 	tryRunMu     sync.Mutex
 	tryRunCancel context.CancelFunc
+
+	// updaterOperationMu guards the single native download/install operation.
+	// Checks are read-only and may overlap; cache mutation and installation fail
+	// fast when another updater operation is already active.
+	updaterOperationMu sync.Mutex
+	updaterOperationID string
 
 	// deferredRebuild tracks tabs whose settings were saved but whose runtime
 	// could not refresh because the session lease was held by another process.
@@ -200,6 +211,7 @@ type App struct {
 
 	forceQuit           atomic.Bool
 	backgroundMaximised atomic.Bool
+	desktopLocale       atomic.Int32
 	trayReady           bool
 	tray                *desktopTray
 	hangWatchdogMu      sync.Mutex
@@ -220,6 +232,11 @@ type App struct {
 
 	runtimeEvents asyncRuntimeEmitter
 
+	// terminals owns local PTY/ConPTY sessions. It is intentionally separate
+	// from chat runtimes: terminal lifecycle must never acquire App.mu or the
+	// controller rebuild locks while process I/O is blocked.
+	terminals *terminalManager
+
 	// Remote SSH module: the manager is created lazily on the first remote
 	// binding call and closed on shutdown.
 	remoteMu        sync.Mutex
@@ -239,6 +256,11 @@ type App struct {
 
 	startupTracker *repair.StartupTracker
 	previousRun    repair.PreviousRunObservation
+	// Healthy-update identity is captured before Wails starts. A process only
+	// commits the complete probationary transaction it booted from, never a
+	// rewritten or later same-version retry.
+	healthyUpdateCreatedAt     string
+	healthyUpdateTransactionID string
 	// startupReady records that the window reached domReady. The shutdown path
 	// treats an exit before this point as an incomplete start: it must neither
 	// reset the crash-loop counter nor bless a probationary update, or a build
@@ -440,6 +462,7 @@ func NewApp() *App {
 		botInstalls:         map[string]*botInstallSession{},
 		botRuntime:          newDesktopBotRuntime(),
 	}
+	a.terminals = newTerminalManager(a)
 	a.botBridge = a.newBotBridge()
 	return a
 }
@@ -697,7 +720,7 @@ func (a *App) restoreOrBuildTabs() {
 		if lang == "" {
 			lang = cfg.Language
 		}
-		i18n.DetectLanguage(lang)
+		a.setDesktopLocale(i18n.DetectLanguage(lang))
 	}
 	if cfgErr != nil || singleSurfaceLayoutStyle(startupCfg.DesktopLayoutStyle()) {
 		f = singleSurfaceTabsFile(f)
@@ -774,19 +797,44 @@ func (a *App) createTabEntry(scope, workspaceRoot, topicID string) *WorkspaceTab
 	return a.createTabEntryWithID(scope, workspaceRoot, topicID, newTabID())
 }
 
-func desktopNewSessionDefaults() (string, string) {
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	return strings.TrimSpace(cfg.DefaultModel), normalizeToolApprovalMode(cfg.DesktopDefaultToolApprovalMode())
+func desktopNewSessionDefaults(scope, workspaceRoot string) (string, string) {
+	userCfg := config.LoadForEdit(config.UserConfigPath())
+	modelCfg := userCfg
+	if strings.TrimSpace(scope) == "project" && strings.TrimSpace(workspaceRoot) != "" {
+		if cfg, err := config.LoadForRootReadOnly(workspaceRoot); err == nil {
+			modelCfg = cfg
+		}
+	}
+	return resolveNewSessionModel(modelCfg), normalizeToolApprovalMode(userCfg.DesktopDefaultToolApprovalMode())
+}
+
+// resolveNewSessionModel picks the model a fresh session starts on. A
+// default_model that resolves but has no API key in the current environment
+// would boot every new tab straight into the missing-key notice, so fall
+// through to the first provider that is actually configured, mirroring the
+// Configured() gate in Config.ResolveModelWithFallback's fallback chain. An
+// allowed chat default is preserved when every eligible provider is keyless so
+// the existing missing-key notice still tells the user what to fix. When no
+// desktop-accessible chat model exists, the empty result lets tab startup show
+// an actionable setup error instead of re-admitting an ineligible default.
+func resolveNewSessionModel(cfg *config.Config) string {
+	def := strings.TrimSpace(cfg.DefaultModel)
+	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, def)
+	if resolved, _, ok := cfg.ResolveDesktopNewSessionModel(); ok {
+		return resolved
+	}
+	return ""
 }
 
 func (a *App) createTabEntryWithID(scope, workspaceRoot, topicID, id string) *WorkspaceTab {
-	model, toolApprovalMode := desktopNewSessionDefaults()
+	model, toolApprovalMode := desktopNewSessionDefaults(scope, workspaceRoot)
 	return &WorkspaceTab{
 		ID:               id,
 		Scope:            scope,
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitleForTab(scope, workspaceRoot, topicID),
+		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID),
 		model:            model,
 		tokenMode:        boot.TokenModeFull,
 		mode:             tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo),
@@ -816,6 +864,12 @@ func (a *App) shutdown(context.Context) {
 	a.stopBotRuntime()
 	a.stopRemoteRuntime()
 	a.stopTray()
+	// Terminal process shutdown is independent from controller teardown. Do it
+	// before acquiring runtime lifecycle locks so a slow PTY cannot delay while
+	// holding locks used by Wails-bound chat calls.
+	if a.terminals != nil {
+		a.terminals.closeAll()
+	}
 	// Save window geometry synchronously from Go so it's persisted even if the
 	// frontend's beforeunload promise hasn't resolved yet.
 	a.saveWindowStateSync()
@@ -864,7 +918,7 @@ func (a *App) shutdown(context.Context) {
 		// recovery threshold and the update backups stay rollback-ready.
 		_ = a.startupTracker.MarkClean()
 		if !config.SafeModeRequested() {
-			_ = repair.MarkUpdateHealthy(version)
+			_ = repair.MarkUpdateHealthyExact(version, a.healthyUpdateCreatedAt, a.healthyUpdateTransactionID)
 			_ = repair.RecordHealthyConfig(version)
 		}
 	}
@@ -950,7 +1004,7 @@ func (a *App) domReady(_ context.Context) {
 				return
 			}
 			if !config.SafeModeRequested() {
-				if err := repair.MarkUpdateHealthy(version); err != nil {
+				if err := repair.MarkUpdateHealthyExact(version, a.healthyUpdateCreatedAt, a.healthyUpdateTransactionID); err != nil {
 					slog.Warn("desktop: commit healthy update", "err", err)
 				}
 				if err := repair.RecordHealthyConfig(version); err != nil {
@@ -1180,12 +1234,29 @@ type InvocationRequest struct {
 	Offset int    `json:"offset"`
 }
 
-func (a *App) SubmitInvocationsToTab(tabID, display, input string, invocations []InvocationRequest) error {
-	remoteInvocations := make([]protocol.Invocation, 0, len(invocations))
+func protocolInvocationRequests(invocations []InvocationRequest) []protocol.Invocation {
+	out := make([]protocol.Invocation, 0, len(invocations))
 	for _, invocation := range invocations {
-		remoteInvocations = append(remoteInvocations, protocol.Invocation{Name: invocation.Name, Kind: protocol.InvocationKind(invocation.Kind)})
+		out = append(out, protocol.Invocation{
+			Name: invocation.Name,
+			Kind: protocol.InvocationKind(invocation.Kind),
+		})
 	}
-	if handled, err := a.workbenchSubmit(input, display, "", remoteInvocations, false); handled {
+	return out
+}
+
+func controlInvocationRequests(invocations []InvocationRequest) []control.InvocationRequest {
+	out := make([]control.InvocationRequest, 0, len(invocations))
+	for _, invocation := range invocations {
+		out = append(out, control.InvocationRequest{
+			Name: invocation.Name, Kind: invocation.Kind, Offset: invocation.Offset,
+		})
+	}
+	return out
+}
+
+func (a *App) SubmitInvocationsToTab(tabID, display, input string, invocations []InvocationRequest) error {
+	if handled, err := a.workbenchSubmit(input, display, "", protocolInvocationRequests(invocations), false); handled {
 		return err
 	}
 	admission, ctrl, err := a.beginTabTurn(tabID, true)
@@ -1195,15 +1266,123 @@ func (a *App) SubmitInvocationsToTab(tabID, display, input string, invocations [
 	defer admission.abort()
 	tab := admission.tab
 	a.ensureTabTopicIndexedForUserTurn(tab)
-	requests := make([]control.InvocationRequest, 0, len(invocations))
-	for _, invocation := range invocations {
-		requests = append(requests, control.InvocationRequest{
-			Name: invocation.Name, Kind: invocation.Kind, Offset: invocation.Offset,
-		})
-	}
-	ctrl.SubmitInvocationDisplay(display, input, requests)
+	ctrl.SubmitInvocationDisplay(display, input, controlInvocationRequests(invocations))
 	admission.finish(ctrl)
 	return nil
+}
+
+func workbenchTargetChangedErr() error {
+	return fmt.Errorf("Execution target changed before the Goal could start; retry from the intended tab")
+}
+
+func (a *App) submitInitialGoalToLocalTab(
+	tabID, toolApprovalMode, goal, display, input string,
+	invocations []InvocationRequest,
+) ([]string, error) {
+	admission, ctrl, err := a.beginTabTurn(tabID, true)
+	if err != nil {
+		return []string{}, err
+	}
+	defer admission.abort()
+
+	tab := admission.tab
+	toolApprovalMode = normalizeToolApprovalMode(toolApprovalMode)
+	goal = strings.TrimSpace(goal)
+	if goal == "" {
+		return []string{}, fmt.Errorf("goal is required")
+	}
+	a.mu.Lock()
+	if a.tabs[tab.ID] != tab {
+		a.mu.Unlock()
+		return []string{}, a.workspaceNotReadyErr(nil)
+	}
+	tab.toolApprovalMode = toolApprovalMode
+	tab.goal = goal
+	tab.mode = tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo)
+	a.saveTabsLocked()
+	a.mu.Unlock()
+
+	ctrl.SetPlanMode(false)
+	drained := applyTabToolApprovalModeToController(ctrl, toolApprovalMode)
+	syncTabGoalToController(ctrl, goal)
+	a.ensureTabTopicIndexedForUserTurn(tab)
+	if len(invocations) > 0 {
+		ctrl.SubmitInvocationDisplay(display, input, controlInvocationRequests(invocations))
+	} else {
+		ctrl.SubmitDisplay(display, input)
+	}
+	admission.finish(ctrl)
+	return drained, nil
+}
+
+// SubmitInitialGoalToTab keeps Goal activation and the first turn on the
+// workbench projection the user submitted from. Wails dispatches bound methods
+// on separate goroutines, so tabID alone cannot distinguish a stale Remote
+// projection from the Local controller underneath the same tab.
+func (a *App) SubmitInitialGoalToTab(
+	tabID, goal, display, input string,
+	invocations []InvocationRequest,
+	collaborationMode, toolApprovalMode string,
+	targetKind string,
+	targetIdentityGen, targetRequestSeq uint64,
+) ([]string, error) {
+	k := a.workbench()
+	k.transitionMu.Lock()
+	active, identityGen, requestSeq := k.targets.Active()
+	expectedKind := target.Kind(strings.TrimSpace(targetKind))
+	if (expectedKind != target.KindLocal && expectedKind != target.KindRemote) ||
+		active.Kind != expectedKind ||
+		identityGen != targetIdentityGen ||
+		requestSeq != targetRequestSeq {
+		k.transitionMu.Unlock()
+		return []string{}, workbenchTargetChangedErr()
+	}
+
+	if active.Kind == target.KindLocal {
+		drained, err := a.submitInitialGoalToLocalTab(
+			tabID, toolApprovalMode, goal, display, input, invocations,
+		)
+		k.transitionMu.Unlock()
+		return drained, err
+	}
+
+	cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench()
+	if !ok || remoteTabID != tabID {
+		k.transitionMu.Unlock()
+		return []string{}, workbenchTargetChangedErr()
+	}
+	goal = strings.TrimSpace(goal)
+	input = strings.TrimSpace(input)
+	if goal == "" || input == "" {
+		k.transitionMu.Unlock()
+		return []string{}, fmt.Errorf("goal and input are required")
+	}
+	ctx, cancel := context.WithTimeout(a.bootContext(), 30*time.Second)
+	defer cancel()
+	remoteCollaboration := protocol.CollaborationMode(normalizeCollaborationMode(collaborationMode))
+	remoteApproval := protocol.ToolApprovalMode(normalizeToolApprovalMode(toolApprovalMode))
+	remoteGoal := goal
+	_, err := cli.Request(ctx, string(protocol.MethodSessionProfileSet), protocol.SessionProfileSetParams{
+		Patch: protocol.ProfilePatch{
+			CollaborationMode: &remoteCollaboration,
+			ToolApprovalMode:  &remoteApproval,
+			Goal:              &remoteGoal,
+		},
+	})
+	if err == nil {
+		_, err = cli.Request(ctx, string(protocol.MethodSessionSubmit), protocol.SessionSubmitParams{
+			Input: input, DisplayText: display, Invocations: protocolInvocationRequests(invocations),
+		})
+	}
+	generation := cli.Generation()
+	k.transitionMu.Unlock()
+	if err != nil {
+		a.warnForTab(remoteTabID, err.Error())
+		go a.workbenchRefreshSnapshot(generation, remoteTabID)
+		return []string{}, err
+	}
+	go a.workbenchRefreshSnapshot(generation, remoteTabID)
+	return []string{}, nil
 }
 
 func (a *App) SubmitEditedDisplayToTab(tabID, display, input, original string) error {
@@ -1804,6 +1983,73 @@ func (a *App) SetCollaborationMode(mode string) {
 	a.SetCollaborationModeForTab("", mode)
 }
 
+// SetComposerProfileForTab applies the controller-facing profile axes under one
+// turn gate. Frontends use this before submit and after controller rebuilds so a
+// turn cannot observe collaboration, approval, and goal from different UI
+// generations.
+func (a *App) SetComposerProfileForTab(tabID, collaborationMode, toolApprovalMode, goal string) ([]string, error) {
+	collaborationMode = normalizeCollaborationMode(collaborationMode)
+	toolApprovalMode = normalizeToolApprovalMode(toolApprovalMode)
+	goal = strings.TrimSpace(goal)
+
+	remoteCollaboration := protocol.CollaborationMode(collaborationMode)
+	remoteApproval := protocol.ToolApprovalMode(toolApprovalMode)
+	remoteGoal := goal
+	if handled, err := a.workbenchSetProfile(protocol.ProfilePatch{
+		CollaborationMode: &remoteCollaboration,
+		ToolApprovalMode:  &remoteApproval,
+		Goal:              &remoteGoal,
+	}); handled {
+		if err != nil {
+			a.warnForTab(tabID, err.Error())
+			return []string{}, err
+		}
+		return []string{}, nil
+	}
+
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return []string{}, fmt.Errorf("tab is no longer available")
+	}
+	tab.turnStartMu.Lock()
+	defer tab.turnStartMu.Unlock()
+
+	a.mu.Lock()
+	if a.tabs[tab.ID] != tab {
+		a.mu.Unlock()
+		return []string{}, fmt.Errorf("tab is no longer available")
+	}
+	tab.toolApprovalMode = toolApprovalMode
+	if goal != "" {
+		tab.goal = goal
+		tab.mode = tabModeFromAxes(false, toolApprovalMode == control.ToolApprovalYolo)
+	} else {
+		tab.goal = ""
+		tab.mode = tabModeFromAxes(collaborationMode == "plan", toolApprovalMode == control.ToolApprovalYolo)
+	}
+	ctrl := tab.Ctrl
+	mode := tab.mode
+	goal = tab.goal
+	tabIDForSave := tab.ID
+	a.mu.Unlock()
+
+	if ctrl != nil {
+		ctrl.SetPlanMode(tabModeHasPlan(mode))
+	}
+	drained := applyTabToolApprovalModeToController(ctrl, toolApprovalMode)
+	syncTabGoalToController(ctrl, goal)
+
+	a.mu.Lock()
+	if a.tabs[tabIDForSave] == tab {
+		a.saveTabsLocked()
+	}
+	a.mu.Unlock()
+	if drained == nil {
+		return []string{}, nil
+	}
+	return drained, nil
+}
+
 func (a *App) SetCollaborationModeForTab(tabID, mode string) {
 	remoteMode := protocol.CollaborationMode(normalizeCollaborationMode(mode))
 	if handled, _ := a.workbenchSetProfile(protocol.ProfilePatch{CollaborationMode: &remoteMode}); handled {
@@ -2018,7 +2264,7 @@ func (a *App) NewSessionForTab(tabID string) error {
 	a.assignFreshSessionTopic(tab)
 	a.persistTabSessionPath(tab, ctrl.SessionPath())
 	a.invalidatePromptHistoryCache()
-	a.emitProjectTreeChanged()
+	a.emitProjectTreeChangedForSessionDirs(ctrl.SessionDir())
 	return nil
 }
 
@@ -2032,6 +2278,7 @@ func (a *App) assignFreshSessionTopic(tab *WorkspaceTab) {
 	workspaceRoot := tab.WorkspaceRoot
 	tab.TopicID = topicID
 	tab.TopicTitle = defaultTopicTitle
+	tab.topicTitleSource = topicTitleSourceAuto
 	if current := a.tabs[tab.ID]; current == tab {
 		a.saveTabsLocked()
 	}
@@ -2063,6 +2310,7 @@ func (a *App) ensureTabTopicIndexedForUserTurn(tab *WorkspaceTab) {
 	workspaceRoot := tab.WorkspaceRoot
 	tab.TopicID = topicID
 	tab.TopicTitle = defaultTopicTitle
+	tab.topicTitleSource = topicTitleSourceAuto
 	if current := a.tabs[tab.ID]; current == tab {
 		a.saveTabsLocked()
 	}
@@ -2077,8 +2325,9 @@ func (a *App) ensureTabTopicIndexedForUserTurn(tab *WorkspaceTab) {
 
 	_ = ensureTopicIndexed(scope, workspaceRoot, topicID, defaultTopicTitle, topicTitleSourceAuto)
 	_ = setTopicCreatedAt(topicTitleRoot(scope, workspaceRoot), topicID, time.Now().UnixMilli())
-	a.persistTabSessionPath(tab, a.currentSessionPathFor(tab))
-	a.emitProjectTreeChanged()
+	path := a.currentSessionPathFor(tab)
+	a.persistTabSessionPath(tab, path)
+	a.emitProjectTreeChangedForSessionDirs(sessionListCacheDirForPath(path))
 }
 
 func messagesHaveConversationContent(messages []provider.Message) bool {
@@ -2202,6 +2451,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    snap.model,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     newSink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -2263,7 +2513,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 		newCtrl.Close()
 		tab.releaseSessionLease()
 		oldCtrl.CloseAfterDestroy()
-		a.emitProjectTreeChanged()
+		a.emitProjectTreeChangedForSessionDirs(newCtrl.SessionDir())
 		return fmt.Errorf("tab %q changed while clearing the session", tab.ID)
 	}
 	tab.Ctrl = newCtrl
@@ -2284,7 +2534,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 	tab.resetTelemetry(path)
 	a.persistTabSessionPath(tab, path)
 	oldCtrl.CloseAfterDestroy()
-	a.emitProjectTreeChanged()
+	a.emitProjectTreeChangedForSessionDirs(newCtrl.SessionDir())
 	a.notifyTabRuntimeRebuilt(tab)
 	return nil
 }
@@ -2558,7 +2808,7 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 		return TabMeta{}, err
 	}
 	topicID := newTopicID()
-	topicTitle := forkTopicTitle(sourceTitle)
+	topicTitle := a.forkTopicTitle(sourceTitle)
 	titleRoot := workspaceRoot
 	if scope == "global" {
 		titleRoot = ""
@@ -2584,6 +2834,7 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 		WorkspaceRoot:    workspaceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
+		topicTitleSource: topicTitleSourceManual,
 		SessionPath:      newPath,
 		model:            model,
 		effort:           effort,
@@ -2603,7 +2854,7 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 	meta := a.tabMeta(tab, activateFork)
 	a.mu.Unlock()
 
-	a.emitProjectTreeChanged()
+	a.emitProjectTreeChangedForSessionDirs(sessionListCacheDirForPath(newPath))
 	a.startTabControllerBuild(tab)
 	return meta, nil
 }
@@ -3044,7 +3295,7 @@ func (a *App) deleteSession(path string, requireRedundantRecovery bool) error {
 			return err
 		}
 	}
-	a.emitProjectTreeChanged()
+	a.emitProjectTreeChangedForSessionDirs(dir)
 	a.invalidatePromptHistoryCache()
 	return nil
 }
@@ -3403,15 +3654,19 @@ func (a *App) openTransientBlankRuntime(scope, workspaceRoot string) error {
 		}
 	}
 
-	model, toolApprovalMode := desktopNewSessionDefaults()
+	model, toolApprovalMode := desktopNewSessionDefaults(scope, actualRoot)
 	sessionPath, err := createEmptySessionFile(desktopSessionDir(actualRoot), model)
 	if err != nil {
+		return err
+	}
+	if err := pinNewEmptySessionBranchMeta(sessionPath, scope, actualRoot, "", defaultTopicTitle); err != nil {
 		return err
 	}
 	tab := &WorkspaceTab{
 		Scope:            scope,
 		WorkspaceRoot:    actualRoot,
 		TopicTitle:       defaultTopicTitle,
+		topicTitleSource: topicTitleSourceAuto,
 		SessionPath:      sessionPath,
 		model:            model,
 		tokenMode:        boot.TokenModeFull,
@@ -3513,7 +3768,7 @@ func (a *App) restoreSession(path string) error {
 	if err := restoreSessionTopicIndex(dir, target); err != nil {
 		return err
 	}
-	a.emitProjectTreeChanged()
+	a.emitProjectTreeChangedForSessionDirs(dir)
 	a.invalidatePromptHistoryCache()
 	return nil
 }
@@ -3610,7 +3865,7 @@ func (a *App) RenameSession(path, title string) error {
 		return err
 	}
 	a.invalidatePromptHistoryCache()
-	a.emitProjectTreeChanged()
+	a.emitProjectTreeChangedForSessionDirs(dir)
 	return nil
 }
 
@@ -3733,12 +3988,35 @@ func (a *App) OpenChannelSessionPageForTab(tabID, path string, limit int) (Histo
 }
 
 func (a *App) setTabReadOnly(tabID string, readOnly bool) {
+	var terminalSessions []*terminalSession
 	a.mu.Lock()
-	if tab := a.tabs[tabID]; tab != nil && tab.ReadOnly != readOnly {
-		tab.ReadOnly = readOnly
-		a.saveTabsLocked()
+	tab := a.tabs[tabID]
+	if tab == nil || tab.ReadOnly == readOnly {
+		a.mu.Unlock()
+		return
 	}
+	if a.terminals != nil {
+		if readOnly {
+			// Close the creation gate and detach existing sessions before
+			// exposing the tab as read-only. The process I/O cleanup happens
+			// after App.mu is released.
+			terminalSessions = a.terminals.detachForTab(tabID)
+		} else {
+			// Reopen the terminal gate before exposing the tab as writable. A
+			// concurrent create must never observe writable App state while
+			// the terminal manager still treats this tab as closed.
+			a.terminals.reopenForTab(tabID)
+		}
+	}
+	tab.ReadOnly = readOnly
+	a.saveTabsLocked()
 	a.mu.Unlock()
+	if len(terminalSessions) > 0 {
+		// Existing shells can keep modifying the workspace without renderer
+		// input, so entering a read-only channel must terminate them as part of
+		// the same capability transition.
+		a.terminals.closeSessions(terminalSessions)
+	}
 }
 
 func (a *App) rebindTabToSessionPath(tab *WorkspaceTab, sessionPath string) error {
@@ -3804,6 +4082,86 @@ func (a *App) rebindTabToLoadedSessionPath(tab *WorkspaceTab, sessionPath string
 	a.supersedeTabBuildLocked(tab)
 	source := snapshotTabRuntimeLocked(tab)
 	a.mu.Unlock()
+
+	// If the target session has a detached runtime (from a recent running-session
+	// detach), reattach it instead of building a new controller. This avoids the
+	// Windows LockFileEx/LOCKFILE_EXCLUSIVE_LOCK conflict where a second handle
+	// from the same process cannot lock a file already held by the detached
+	// controller's fd (#6955).
+	targetKey := sessionRuntimeKey(sessionPath)
+	a.mu.Lock()
+	detached := a.detachedSessions[targetKey]
+	hasDetached := detached != nil && detached.Ctrl != nil
+	a.mu.Unlock()
+
+	if hasDetached {
+		a.runtimeAdmissionMu.Lock()
+		tab.turnStartMu.Lock()
+
+		a.mu.Lock()
+		if tab.removed || a.tabs[tab.ID] != tab || tab.Ctrl != source.ctrl {
+			a.mu.Unlock()
+			tab.turnStartMu.Unlock()
+			a.runtimeAdmissionMu.Unlock()
+			return fmt.Errorf("tab changed while reattaching session; retry")
+		}
+		a.mu.Unlock()
+
+		if source.ctrl != nil {
+			if err := a.snapshotTabForAction(tab, "switching sessions"); err != nil {
+				tab.turnStartMu.Unlock()
+				a.runtimeAdmissionMu.Unlock()
+				return err
+			}
+			if oldPath := a.reconciledSessionPathForTab(tab); oldPath != "" {
+				if err := a.saveTabSessionMeta(tab, oldPath); err != nil {
+					tab.turnStartMu.Unlock()
+					a.runtimeAdmissionMu.Unlock()
+					return fmt.Errorf("save current session metadata before switching sessions: %w", err)
+				}
+			}
+		}
+
+		a.mu.Lock()
+		if tab.removed || a.tabs[tab.ID] != tab || tab.Ctrl != source.ctrl {
+			a.mu.Unlock()
+			tab.turnStartMu.Unlock()
+			a.runtimeAdmissionMu.Unlock()
+			return fmt.Errorf("tab changed while reattaching session; retry")
+		}
+		a.mu.Unlock()
+
+		detachSource := controllerHasActiveRuntimeWork(source.ctrl)
+		oldCtrl, oldSink, oldLease, oldHostKey, attached := a.reattachDetachedSessionRuntimeForRebind(
+			tab, source, sessionPath, detachSource,
+		)
+		if !attached {
+			tab.turnStartMu.Unlock()
+			a.runtimeAdmissionMu.Unlock()
+			return fmt.Errorf("failed to reattach detached session runtime")
+		}
+
+		if oldSink != nil {
+			oldSink.setBinding("", nil)
+			oldSink.clearContext()
+		}
+		if oldCtrl != nil {
+			oldCtrl.Close()
+		}
+		if oldHostKey != "" {
+			a.releaseSharedHost(oldHostKey)
+		}
+		if oldLease != nil {
+			oldLease.Release()
+		}
+
+		a.clearDeferredRebuild(tab.ID)
+		a.emitReady(a.ctx, tab.ID)
+
+		tab.turnStartMu.Unlock()
+		a.runtimeAdmissionMu.Unlock()
+		return nil
+	}
 
 	a.runtimeAdmissionMu.Lock()
 	defer a.runtimeAdmissionMu.Unlock()
@@ -3962,6 +4320,78 @@ func (a *App) rebindTabToLoadedSessionPath(tab *WorkspaceTab, sessionPath string
 	return nil
 }
 
+// reattachDetachedSessionRuntimeForRebind atomically replaces tab with the
+// already-running detached target. If the visible source is still active, its
+// controller, sink, lease, and runtime registry entry move to detachedSessions
+// in the same App.mu transaction; an idle source is returned for off-lock
+// teardown. The caller must hold runtimeRebuildMu, runtimeAdmissionMu, and
+// tab.turnStartMu so detachSource cannot become stale through new turn admission.
+func (a *App) reattachDetachedSessionRuntimeForRebind(
+	tab *WorkspaceTab,
+	source tabRuntimeSnapshot,
+	sessionPath string,
+	detachSource bool,
+) (control.SessionAPI, *tabEventSink, *agent.SessionLease, string, bool) {
+	key := sessionRuntimeKey(sessionPath)
+	if tab == nil || key == "" {
+		return nil, nil, nil, "", false
+	}
+
+	a.mu.Lock()
+	if tab.removed || a.tabs[tab.ID] != tab || tab.Ctrl != source.ctrl {
+		a.mu.Unlock()
+		return nil, nil, nil, "", false
+	}
+	detached := a.detachedSessions[key]
+	if detached == nil || detached.Ctrl == nil {
+		a.mu.Unlock()
+		return nil, nil, nil, "", false
+	}
+	if rt := a.runtimeForTabLocked(detached); rt != nil {
+		if rt.Phase != sessionRuntimeReady {
+			a.mu.Unlock()
+			return nil, nil, nil, "", false
+		}
+	} else if !detached.Ready {
+		// Compatibility for detached runtimes created before the process-local
+		// registry existed.
+		a.mu.Unlock()
+		return nil, nil, nil, "", false
+	}
+
+	oldCtrl := tab.Ctrl
+	oldSink := tab.sink
+	var oldLease *agent.SessionLease
+	oldHostKey := ""
+	if detachSource {
+		if !a.detachRuntimeForReplacementLocked(tab) {
+			a.mu.Unlock()
+			return nil, nil, nil, "", false
+		}
+		// Ownership moved to the detached clone. Nothing from the source may be
+		// closed or released after the target becomes visible.
+		oldCtrl = nil
+		oldSink = nil
+	} else {
+		// Prevent applyRuntimeTab from overwriting resources owned by the idle
+		// source. Teardown remains outside the app lock as on the normal rebuild
+		// path; the detached target already owns a separate shared-host ref.
+		oldLease = tab.takeSessionLease()
+		oldHostKey = takeTabSharedHostKey(tab)
+	}
+
+	delete(a.detachedSessions, key)
+	applyRuntimeTab(tab, detached, sessionPath, a.ctx, a)
+	a.saveTabsLocked()
+	attachedCtrl := tab.Ctrl
+	a.mu.Unlock()
+
+	if attachedCtrl != nil {
+		attachedCtrl.ReplayPendingPrompts()
+	}
+	return oldCtrl, oldSink, oldLease, oldHostKey, true
+}
+
 type sessionRebindCandidate struct {
 	app               *App
 	ctrl              control.SessionAPI
@@ -4053,6 +4483,7 @@ func (a *App) buildSessionRebindCandidate(
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    model,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     a.desktopControllerSink(sink, cfg.Notifications),
 		WorkspaceRoot:            root,
 		SessionDir:               sessionDir,
@@ -4866,7 +5297,8 @@ func (a *App) RemoveWorkspace(dir string) error {
 			clearWorkspace()
 		}
 	}
-	a.emitProjectTreeChanged()
+	projectSessionCache.forgetDirs(desktopSessionDir(dir))
+	a.emitProjectTreeMetadataChanged()
 	return nil
 }
 
@@ -5021,7 +5453,7 @@ func historyProviderMessagesWithPersistedTimes(msgs []provider.Message, sessionP
 	}
 	needsPersistedTime := false
 	for _, msg := range msgs {
-		if msg.Role == provider.RoleUser && msg.CreatedAt <= 0 && agent.IsUserAuthoredTurn(msg.Content) {
+		if msg.Role == provider.RoleUser && msg.CreatedAt <= 0 && agent.IsUserAuthoredTurn(agent.UserMessageText(msg)) {
 			needsPersistedTime = true
 			break
 		}
@@ -5225,16 +5657,84 @@ func (a *App) HistoryCheckpointTurnsForTab(tabID string) []int {
 	)
 }
 
+var pastedTextDisplayLabelPattern = regexp.MustCompile(`^\[(?:已粘贴文本|已貼上文字|Pasted text) #[0-9]+ · [0-9]+ (?:行|lines)\]$`)
+
+// historyReplayUserContent keeps only user-authored replay data. Provider-facing
+// capability, goal, hook, and resolved-reference context must not be resubmitted.
+func historyReplayUserContent(content string) string {
+	return control.StripReferencedContextPrefix(control.StripComposePrefixes(content))
+}
+
+// collapseLegacyExpandedPasteDisplay repairs sessions whose user-authored replay
+// source still contains an expanded pasted-text block. This includes transcripts
+// written before RawContent existed. The expanded block remains in SubmitText so
+// edit replay can still reconstruct the card and recover its full payload.
+func collapseLegacyExpandedPasteDisplay(content string) string {
+	const beginPrefix = "--- Begin "
+	for scan := 0; scan < len(content); {
+		beginOffset := strings.Index(content[scan:], beginPrefix)
+		if beginOffset < 0 {
+			break
+		}
+		begin := scan + beginOffset
+		labelStart := begin + len(beginPrefix)
+		labelEndOffset := strings.Index(content[labelStart:], " ---")
+		if labelEndOffset < 0 {
+			break
+		}
+		labelEnd := labelStart + labelEndOffset
+		label := content[labelStart:labelEnd]
+		beginEnd := labelEnd + len(" ---")
+		if !pastedTextDisplayLabelPattern.MatchString(label) {
+			scan = beginEnd
+			continue
+		}
+		endMarker := "--- End " + label + " ---"
+		endOffset := strings.Index(content[beginEnd:], endMarker)
+		if endOffset < 0 {
+			scan = beginEnd
+			continue
+		}
+		labelCopy := strings.LastIndex(content[:begin], label)
+		if labelCopy < 0 || strings.TrimSpace(content[labelCopy+len(label):begin]) != "" {
+			scan = beginEnd
+			continue
+		}
+		end := beginEnd + endOffset + len(endMarker)
+		content = content[:labelCopy+len(label)] + content[end:]
+		scan = labelCopy + len(label)
+	}
+	return strings.TrimSpace(content)
+}
+
+// historyUserDisplayContent prefers a persisted display sidecar when one exists.
+// Comparing it with the deterministic fallback distinguishes a sidecar hit
+// without changing the resolver API used throughout history pagination.
+func historyUserDisplayContent(msg provider.Message, resolveUserContent func(string) string) string {
+	resolved := strings.TrimSpace(resolveUserContent(msg.Content))
+	fallback := strings.TrimSpace(historyReplayUserContent(msg.Content))
+	if resolved != "" && resolved != fallback {
+		return resolved
+	}
+	replaySource := agent.UserMessageText(msg)
+	if msg.RawContent == "" {
+		replaySource = fallback
+	}
+	return collapseLegacyExpandedPasteDisplay(replaySource)
+}
+
 func historyCheckpointTurns(msgs []provider.Message, resolveUserContent func(string) string, checkpointTurns map[int]int) []int {
 	out := make([]int, 0)
 	for index, msg := range msgs {
 		if msg.Role != provider.RoleUser {
 			continue
 		}
-		if _, isSteer := agent.SteerText(msg.Content); isSteer {
+		content := agent.UserMessageText(msg)
+		if _, isSteer := agent.SteerText(content); isSteer {
 			continue
 		}
-		if control.IsSyntheticUserMessage(resolveUserContent(msg.Content)) {
+		content = historyUserDisplayContent(msg, resolveUserContent)
+		if control.IsSyntheticUserMessage(content) {
 			continue
 		}
 		turn, ok := checkpointTurns[index]
@@ -5269,7 +5769,7 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 	suppressCanonicalTurn := false
 	for index, m := range msgs {
 		if suppressCanonicalTurn {
-			if m.Role != provider.RoleUser || !agent.IsUserAuthoredTurn(m.Content) {
+			if m.Role != provider.RoleUser || !agent.IsUserAuthoredTurn(agent.UserMessageText(m)) {
 				continue
 			}
 			suppressCanonicalTurn = false
@@ -5283,11 +5783,11 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 			// regular user bubble or being filtered as synthetic (#4044).
 			// Check against the raw m.Content: resolveUserContent applies
 			// StripComposePrefixes which trims trailing whitespace.
-			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
+			if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
 				out = append(out, HistoryMessage{Role: "notice", Content: "↪ " + steerText})
 				continue
 			}
-			content = resolveUserContent(m.Content)
+			content = historyUserDisplayContent(m, resolveUserContent)
 			if control.IsSyntheticUserMessage(content) {
 				continue
 			}
@@ -5309,15 +5809,16 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 			hm.MemoryCitations = append([]provider.MemoryCitation(nil), m.MemoryCitations...)
 		}
 		if m.Role == provider.RoleUser && content != m.Content {
+			replay := historyReplayUserContent(m.Content)
 			if agent.ContainsMemoryCompilerExecution(m.Content) {
 				// Never expose the compiler contract itself. A safely unwrapped
 				// slash invocation is useful display metadata, though: it lets the
 				// frontend restore the selected skill/subagent in history and trash.
-				if replay := control.StripComposePrefixes(m.Content); strings.HasPrefix(strings.TrimSpace(replay), "/") && replay != content {
+				if strings.HasPrefix(strings.TrimSpace(replay), "/") && replay != content {
 					hm.SubmitText = replay
 				}
-			} else {
-				hm.SubmitText = m.Content
+			} else if replay != content {
+				hm.SubmitText = replay
 			}
 		}
 		if (m.Role == provider.RoleAssistant || m.LocalOnly) && len(m.ToolCalls) > 0 {
@@ -5348,10 +5849,11 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 			})
 		}
 		if m.Role == provider.RoleUser {
-			if turns := plannerByUserHash[messageDisplayKey(m.Content)]; len(turns) > 0 {
+			key := messageDisplayKey(agent.UserMessageText(m))
+			if turns := plannerByUserHash[key]; len(turns) > 0 {
 				out = append(out, cloneHistoryMessages(turns[0].Messages)...)
 				suppressCanonicalTurn = plannerDisplaySuppressesCanonical(turns[0])
-				plannerByUserHash[messageDisplayKey(m.Content)] = turns[1:]
+				plannerByUserHash[key] = turns[1:]
 			}
 		}
 	}
@@ -5419,10 +5921,12 @@ func isVisibleHistoryUser(msg provider.Message, resolveUserContent func(string) 
 	if msg.Role != provider.RoleUser {
 		return false
 	}
-	if _, isSteer := agent.SteerText(msg.Content); isSteer {
+	content := agent.UserMessageText(msg)
+	if _, isSteer := agent.SteerText(content); isSteer {
 		return false
 	}
-	return !control.IsSyntheticUserMessage(resolveUserContent(msg.Content))
+	content = historyUserDisplayContent(msg, resolveUserContent)
+	return !control.IsSyntheticUserMessage(content)
 }
 
 func providerMessagesForVisibleTurnRange(msgs []provider.Message, resolveUserContent func(string) string, startTurn, endTurn int) ([]provider.Message, []int) {
@@ -6029,6 +6533,7 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 	a.mu.RUnlock()
 
 	var info ContextInfo
+	var snap tabTelemetrySnapshot
 	if tab != nil {
 		// Re-key first: a controller-side rotation (typed /new) may have
 		// swapped sessions without the App noticing, and the stale totals
@@ -6039,7 +6544,7 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 				tab.syncTelemetryToSession(sp)
 			}
 		}
-		snap := tab.telemetrySnapshot()
+		snap = tab.telemetrySnapshot()
 		info.SessionTokens = snap.Usage.TotalTokens
 		info.SessionCost = snap.Usage.SessionCost
 		info.SessionCurrency = snap.Usage.SessionCurrency
@@ -6053,6 +6558,13 @@ func (a *App) ContextUsageForTab(tabID string) ContextInfo {
 	used, window := ctrl.ContextSnapshot()
 	info.Used = used
 	info.Window = window
+	// Session rebind (project-tree switch) rebuilds the controller: the fresh
+	// executor has no per-turn usage yet, so ContextSnapshot reports used=0.
+	// Fall back to the telemetry-persisted last-used value so the status bar
+	// shows the fill percentage from the last turn instead of 0%.
+	if used == 0 && snap.Usage.LastUsedTokens > 0 {
+		info.Used = snap.Usage.LastUsedTokens
+	}
 	info.CompactRatio = ctrl.CompactRatio()
 	return info
 }
@@ -6479,11 +6991,16 @@ func (a *App) AutoResearchRecordEvidence(tabID, criterionID string, input AutoRe
 	})
 }
 
-func (a *App) SetGoal(goal string) {
-	a.SetGoalForTab("", goal)
+func (a *App) SetGoal(goal string) error {
+	return a.SetGoalForTab("", goal)
 }
 
-func (a *App) SetGoalForTab(tabID, goal string) {
+// SetGoalForTab activates or clears a Goal on the given tab.
+//
+// Failures must return error so the Wails Promise rejects: the first Goal turn
+// can submit a structured Skill without a /goal prose fallback, and the
+// frontend aborts that submit when activation fails.
+func (a *App) SetGoalForTab(tabID, goal string) error {
 	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
 		var err error
 		if strings.TrimSpace(goal) == "" {
@@ -6493,14 +7010,14 @@ func (a *App) SetGoalForTab(tabID, goal string) {
 		}
 		if err != nil {
 			a.warnForTab(remoteTabID, err.Error())
-		} else {
-			a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
+			return err
 		}
-		return
+		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
+		return nil
 	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
-		return
+		return a.workspaceNotReadyErr(nil)
 	}
 	tab.turnStartMu.Lock()
 	defer tab.turnStartMu.Unlock()
@@ -6509,7 +7026,7 @@ func (a *App) SetGoalForTab(tabID, goal string) {
 	a.mu.Lock()
 	if a.tabs[tab.ID] != tab {
 		a.mu.Unlock()
-		return
+		return a.workspaceNotReadyErr(nil)
 	}
 	tab.goal = goal
 	if goal != "" {
@@ -6528,6 +7045,7 @@ func (a *App) SetGoalForTab(tabID, goal string) {
 		a.saveTabsLocked()
 	}
 	a.mu.Unlock()
+	return nil
 }
 
 // The composer re-syncs collaboration mode and Goal immediately before every
@@ -6545,12 +7063,12 @@ func syncTabGoalToController(ctrl control.SessionAPI, goal string) {
 	ctrl.SetGoal(goal)
 }
 
-func (a *App) ClearGoal() {
-	a.SetGoal("")
+func (a *App) ClearGoal() error {
+	return a.SetGoal("")
 }
 
-func (a *App) ClearGoalForTab(tabID string) {
-	a.SetGoalForTab(tabID, "")
+func (a *App) ClearGoalForTab(tabID string) error {
+	return a.SetGoalForTab(tabID, "")
 }
 
 // ResumeGoalForTab re-enters a blocked or stopped Goal while preserving its
@@ -6796,6 +7314,7 @@ func (a *App) SlashArgs(input string) SlashArgsResult {
 	if h := ctrl.Host(); h != nil {
 		data.ServerNames = h.ServerNames()
 	}
+	data.MemoryRefs, data.MemoryArchives = control.MemoryCompletionData(ctrl.Memory())
 	items, from := control.SlashArgItems(input, data)
 	// Non-nil so it serializes as a JSON array, never null — the frontend filters
 	// over it directly.
@@ -8954,11 +9473,10 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	if entry, ok := cfg.ResolveModel(curModel); ok {
 		curModel = entry.Name + "/" + entry.Model
 	}
-	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	out := []ModelInfo{}
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, p.Name) || !p.Configured() {
 			continue
 		}
 		for _, m := range p.ChatModelList() {
@@ -8969,11 +9487,17 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	return out
 }
 
-func modelProviderAccessAllowed(access map[string]bool, name string) bool {
-	if len(access) == 0 {
+func modelProviderAccessAllowed(access []string, name string) bool {
+	if access == nil {
 		return true
 	}
-	return access[strings.TrimSpace(name)]
+	name = strings.TrimSpace(name)
+	for _, candidate := range access {
+		if strings.TrimSpace(candidate) == name {
+			return true
+		}
+	}
+	return false
 }
 
 func controllerHasActiveRuntimeWork(ctrl control.SessionAPI) bool {
@@ -9103,6 +9627,11 @@ func (a *App) canReclaimCurrentProcessSessionLease(tab *WorkspaceTab, path strin
 			return false
 		}
 	}
+	// A detached runtime's controller still holds the OS lock; refuse reclaim
+	// even when PID matches (#6955).
+	if detached := a.detachedSessions[key]; detached != nil && detached.Ctrl != nil {
+		return false
+	}
 	return true
 }
 
@@ -9113,7 +9642,19 @@ func (a *App) SetModel(name string) error {
 	return a.SetModelForTab("", name)
 }
 
-func (a *App) SetModelForTab(tabID, name string) error {
+type modelSwitchTiming struct {
+	Total          time.Duration
+	LockWait       time.Duration
+	Prepare        time.Duration
+	Config         time.Duration
+	Snapshot       time.Duration
+	Build          time.Duration
+	LeaseAndResume time.Duration
+	SwapAndPersist time.Duration
+	Outcome        string
+}
+
+func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	if strings.TrimSpace(name) != "" {
 		if handled, err := a.workbenchSetProfile(protocol.ProfilePatch{Model: &name}); handled {
 			return err
@@ -9132,11 +9673,40 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if name == currentModel {
 		return nil
 	}
+	timing := modelSwitchTiming{}
+	totalStarted := time.Now()
+	defer func() {
+		timing.Total = time.Since(totalStarted)
+		if retErr != nil {
+			timing.Outcome = "failed"
+		} else {
+			timing.Outcome = "ok"
+		}
+		slog.Debug(
+			"desktop: model switch timing",
+			"tab", tab.ID,
+			"outcome", timing.Outcome,
+			"total_ms", timing.Total.Milliseconds(),
+			"lock_wait_ms", timing.LockWait.Milliseconds(),
+			"prepare_ms", timing.Prepare.Milliseconds(),
+			"config_ms", timing.Config.Milliseconds(),
+			"snapshot_ms", timing.Snapshot.Milliseconds(),
+			"build_ms", timing.Build.Milliseconds(),
+			"lease_resume_ms", timing.LeaseAndResume.Milliseconds(),
+			"swap_persist_ms", timing.SwapAndPersist.Milliseconds(),
+		)
+		if a.modelSwitchTimingHook != nil {
+			a.modelSwitchTimingHook(timing)
+		}
+	}()
 	// Same build+swap shape as rebuildSetting; hold the same lock so a settings
 	// rebuild (manual or from the deferred-rebuild retry loop) and a model
 	// switch cannot interleave on one tab.
+	stageStarted := time.Now()
 	a.runtimeRebuildMu.Lock()
+	timing.LockWait = time.Since(stageStarted)
 	defer a.runtimeRebuildMu.Unlock()
+	stageStarted = time.Now()
 	tab.turnStartMu.Lock()
 	defer tab.turnStartMu.Unlock()
 	prevPath := a.reconciledSessionPathForTab(tab)
@@ -9165,9 +9735,11 @@ func (a *App) SetModelForTab(tabID, name string) error {
 			return rebuildControllerActiveWorkError("model")
 		}
 	}
+	timing.Prepare = time.Since(stageStarted)
 	// Snapshot the tab profile under a.mu: SetModeForTab/SetGoalForTab and the
 	// event sink write these fields under the lock while this rebuild runs
 	// off-lock.
+	stageStarted = time.Now()
 	snap := a.tabRuntimeSnapshot(tab)
 	runtime := snap.normalizedRuntime()
 	cfg, err := config.LoadForRoot(snap.workspaceRoot)
@@ -9178,7 +9750,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if !ok {
 		return fmt.Errorf("unknown model %q", name)
 	}
-	if !modelProviderAccessAllowed(providerAccessSet(cfg.Desktop.ProviderAccess), entry.Name) {
+	if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, entry.Name) {
 		return fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
 	}
 	name = entry.Name + "/" + entry.Model
@@ -9191,7 +9763,9 @@ func (a *App) SetModelForTab(tabID, name string) error {
 			effortOverride = &normalized
 		}
 	}
+	timing.Config = time.Since(stageStarted)
 
+	stageStarted = time.Now()
 	var carried []provider.Message
 	oldCtrl := a.controllerForTab(tab)
 	if oldCtrl != nil {
@@ -9207,14 +9781,17 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		prevPath = sessionPathAfterSnapshot(oldCtrl, prevPath)
 		carried = oldCtrl.History()
 	}
+	timing.Snapshot = time.Since(stageStarted)
 
 	// Preserve the shared plugin host across controller rebuilds — the tab
 	// stays in the same workspace root, so MCP processes must not be restarted.
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
 
+	stageStarted = time.Now()
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    name,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -9228,9 +9805,11 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	if err != nil {
 		return err
 	}
+	timing.Build = time.Since(stageStarted)
 	a.bindControllerDisplayRecorder(newCtrl)
 	configureControllerRuntime(newCtrl, oldCtrl, runtime)
 
+	stageStarted = time.Now()
 	path := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())
 	if err := a.ensureTabSessionLeaseForRebuild(tab, path, "model"); err != nil {
 		newCtrl.Close()
@@ -9241,6 +9820,8 @@ func (a *App) SetModelForTab(tabID, name string) error {
 		newCtrl.Close()
 		return err
 	}
+	timing.LeaseAndResume = time.Since(stageStarted)
+	stageStarted = time.Now()
 	a.mu.Lock()
 	if current := a.tabs[tab.ID]; current != tab {
 		// The tab was closed/replaced while we built the new controller off-lock;
@@ -9268,6 +9849,7 @@ func (a *App) SetModelForTab(tabID, name string) error {
 	a.clearDeferredRebuild(tab.ID)
 	a.persistTabSessionPath(tab, path)
 	a.notifyTabRuntimeRebuilt(tab)
+	timing.SwapAndPersist = time.Since(stageStarted)
 	return nil
 }
 
@@ -9390,6 +9972,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -9529,6 +10112,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model:                    modelRef,
 		RequireKey:               false,
+		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -10703,29 +11287,90 @@ func workspaceRelativeIn(path, workspaceRoot string) (string, bool) {
 
 // --- memory panel (frontend ⇄ controller) ---
 
-// MemoryDoc is one loaded doc-memory file for the panel: path, scope, and body.
+type MemoryImport struct {
+	Path       string `json:"path"`
+	SourcePath string `json:"sourcePath"`
+}
+
+// MemoryDoc is one resolved instruction file with applicability metadata.
 type MemoryDoc struct {
-	Path  string `json:"path"`
-	Scope string `json:"scope"`
-	Body  string `json:"body"`
+	Path       string         `json:"path"`
+	Scope      string         `json:"scope"`
+	Directory  string         `json:"directory,omitempty"`
+	Body       string         `json:"body"`
+	Imports    []MemoryImport `json:"imports"`
+	Depth      int            `json:"depth"`
+	Order      int            `json:"order"`
+	Precedence int            `json:"precedence"`
+}
+
+type InstructionDiagnostic struct {
+	Code       string `json:"code"`
+	Path       string `json:"path"`
+	SourcePath string `json:"sourcePath,omitempty"`
+	Line       int    `json:"line,omitempty"`
+	Message    string `json:"message"`
 }
 
 // MemoryFact is one saved auto-memory, surfaced read-only in the panel.
 type MemoryFact struct {
+	ID          string `json:"id,omitempty"`
+	Revision    int    `json:"revision,omitempty"`
+	CreatedAt   string `json:"createdAt,omitempty"`
+	UpdatedAt   string `json:"updatedAt,omitempty"`
 	Name        string `json:"name"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description"`
 	Type        string `json:"type"`
+	Scope       string `json:"scope"`
 	Body        string `json:"body"`
+	Freshness   string `json:"freshness"`
+}
+
+type MemoryConflict struct {
+	Key         string `json:"key"`
+	ProjectID   string `json:"projectId"`
+	ProjectName string `json:"projectName"`
+	GlobalID    string `json:"globalId"`
+	GlobalName  string `json:"globalName"`
+	Resolution  string `json:"resolution"`
+}
+
+type MemoryRecallHit struct {
+	ID        string  `json:"id"`
+	Revision  int     `json:"revision"`
+	Name      string  `json:"name"`
+	Title     string  `json:"title,omitempty"`
+	Type      string  `json:"type"`
+	Scope     string  `json:"scope"`
+	Score     float64 `json:"score"`
+	Freshness string  `json:"freshness"`
+	Reason    string  `json:"reason"`
+	Snippet   string  `json:"snippet"`
+}
+
+type MemoryRecallTrace struct {
+	Query      string            `json:"query"`
+	Hits       []MemoryRecallHit `json:"hits"`
+	Omitted    int               `json:"omitted"`
+	CharBudget int               `json:"charBudget"`
+	UsedChars  int               `json:"usedChars"`
+	Suppressed string            `json:"suppressed,omitempty"`
 }
 
 // MemoryArchive is one archived auto-memory kept only for inspection.
 type MemoryArchive struct {
+	ID          string `json:"id,omitempty"`
+	Revision    int    `json:"revision,omitempty"`
+	CreatedAt   string `json:"createdAt,omitempty"`
+	UpdatedAt   string `json:"updatedAt,omitempty"`
 	Name        string `json:"name"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description"`
 	Type        string `json:"type"`
+	Scope       string `json:"scope"`
 	Body        string `json:"body"`
+	Freshness   string `json:"freshness"`
 	Path        string `json:"path"`
 	ArchivedAt  string `json:"archivedAt,omitempty"`
 }
@@ -10739,13 +11384,16 @@ type MemoryScope struct {
 // MemoryView is the whole memory panel payload: hierarchical docs, active saved
 // facts, archived facts, and the writable scopes for the quick-add selector.
 type MemoryView struct {
-	Docs           []MemoryDoc     `json:"docs"`
-	Facts          []MemoryFact    `json:"facts"`
-	Archives       []MemoryArchive `json:"archives"`
-	Scopes         []MemoryScope   `json:"scopes"`
-	StoreDir       string          `json:"storeDir"`
-	StoreGlobalDir string          `json:"storeGlobalDir,omitempty"`
-	Available      bool            `json:"available"`
+	Docs                   []MemoryDoc             `json:"docs"`
+	Facts                  []MemoryFact            `json:"facts"`
+	Archives               []MemoryArchive         `json:"archives"`
+	Scopes                 []MemoryScope           `json:"scopes"`
+	InstructionDiagnostics []InstructionDiagnostic `json:"instructionDiagnostics"`
+	Conflicts              []MemoryConflict        `json:"conflicts"`
+	LastRecall             MemoryRecallTrace       `json:"lastRecall"`
+	StoreDir               string                  `json:"storeDir"`
+	StoreGlobalDir         string                  `json:"storeGlobalDir,omitempty"`
+	Available              bool                    `json:"available"`
 }
 
 // writableScopes are the quick-add targets the panel offers, broad → specific.
@@ -10798,21 +11446,41 @@ func (a *App) memoryForCtrl(ctrl control.SessionAPI, fallback bool) MemoryView {
 	view.StoreGlobalDir = set.Store.GlobalDir
 	view.Available = true
 	for _, d := range set.Docs {
-		view.Docs = append(view.Docs, MemoryDoc{Path: d.Path, Scope: string(d.Scope), Body: d.Body})
-	}
-	for _, f := range set.Store.List() {
-		view.Facts = append(view.Facts, MemoryFact{
-			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
+		imports := make([]MemoryImport, 0, len(d.Imports))
+		for _, imported := range d.Imports {
+			imports = append(imports, MemoryImport{Path: imported.Path, SourcePath: imported.SourcePath})
+		}
+		view.Docs = append(view.Docs, MemoryDoc{
+			Path: d.Path, Scope: string(d.Scope), Directory: d.Directory, Body: d.Body,
+			Imports: imports, Depth: d.Depth, Order: d.Order, Precedence: d.Order,
 		})
 	}
+	for _, diagnostic := range set.InstructionDiagnostics {
+		view.InstructionDiagnostics = append(view.InstructionDiagnostics, InstructionDiagnostic{
+			Code: diagnostic.Code, Path: diagnostic.Path, SourcePath: diagnostic.SourcePath,
+			Line: diagnostic.Line, Message: diagnostic.Message,
+		})
+	}
+	allFacts := set.Store.ListAll()
+	for _, f := range allFacts {
+		view.Facts = append(view.Facts, memoryFactView(f))
+	}
+	for _, conflict := range memory.FindOverrides(allFacts) {
+		view.Conflicts = append(view.Conflicts, MemoryConflict{
+			Key: conflict.Key, ProjectID: conflict.Project.ID, ProjectName: conflict.Project.Name,
+			GlobalID: conflict.Global.ID, GlobalName: conflict.Global.Name, Resolution: "project_over_global",
+		})
+	}
+	view.LastRecall = memoryRecallTraceView(ctrl.LastMemoryRecall())
 	for _, f := range set.Store.ListArchived() {
 		archivedAt := ""
 		if !f.ArchivedAt.IsZero() {
 			archivedAt = f.ArchivedAt.Format(time.RFC3339)
 		}
 		view.Archives = append(view.Archives, MemoryArchive{
-			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Body: f.Body,
-			Path: f.Path, ArchivedAt: archivedAt,
+			ID: f.ID, Revision: f.Revision, CreatedAt: formatMemoryTime(f.CreatedAt), UpdatedAt: formatMemoryTime(f.UpdatedAt),
+			Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Scope: string(f.Scope), Body: f.Body,
+			Freshness: memory.FreshnessFor(f.Memory, time.Now().UTC()), Path: f.Path, ArchivedAt: archivedAt,
 		})
 	}
 	for _, sc := range writableScopes {
@@ -10823,8 +11491,19 @@ func (a *App) memoryForCtrl(ctrl control.SessionAPI, fallback bool) MemoryView {
 	return view
 }
 
+func formatMemoryTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+
 func emptyMemoryView() MemoryView {
-	return MemoryView{Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Archives: []MemoryArchive{}, Scopes: []MemoryScope{}}
+	return MemoryView{
+		Docs: []MemoryDoc{}, Facts: []MemoryFact{}, Archives: []MemoryArchive{}, Scopes: []MemoryScope{},
+		InstructionDiagnostics: []InstructionDiagnostic{}, Conflicts: []MemoryConflict{},
+		LastRecall: MemoryRecallTrace{Hits: []MemoryRecallHit{}},
+	}
 }
 
 // Remember quick-adds a one-line note to the doc-memory file for scope — the
@@ -10894,6 +11573,136 @@ func (a *App) forgetForCtrl(ctrl control.SessionAPI, name string, fallback bool)
 		}
 	}
 	return ctrl.ForgetMemory(name)
+}
+
+// RestoreArchivedMemory recovers one archived fact without replacing active
+// memory. The store preserves its identity and creates a new audited revision.
+func (a *App) RestoreArchivedMemory(archivePath string) (MemoryFact, error) {
+	if a.activeWorkbenchTargetIsRemote() {
+		return MemoryFact{}, remoteMemoryUnavailableErr()
+	}
+	return a.restoreArchivedMemoryForCtrl(nil, archivePath, true)
+}
+
+func (a *App) RestoreArchivedMemoryForTab(tabID, archivePath string) (MemoryFact, error) {
+	if a.activeWorkbenchTargetIsRemote() {
+		return MemoryFact{}, remoteMemoryUnavailableErr()
+	}
+	if tabID == "" {
+		return a.restoreArchivedMemoryForCtrl(nil, archivePath, true)
+	}
+	return a.restoreArchivedMemoryForCtrl(a.ctrlByTabID(tabID), archivePath, false)
+}
+
+func (a *App) restoreArchivedMemoryForCtrl(ctrl control.SessionAPI, archivePath string, fallback bool) (MemoryFact, error) {
+	if ctrl == nil {
+		if !fallback {
+			return MemoryFact{}, nil
+		}
+		a.mu.RLock()
+		ctrl = a.activeCtrlLocked()
+		a.mu.RUnlock()
+		if ctrl == nil {
+			return MemoryFact{}, nil
+		}
+	}
+	restored, err := ctrl.RestoreArchivedMemory(archivePath)
+	if err != nil {
+		return MemoryFact{}, err
+	}
+	return memoryFactView(restored), nil
+}
+
+func memoryFactView(f memory.Memory) MemoryFact {
+	return MemoryFact{
+		ID: f.ID, Revision: f.Revision, CreatedAt: formatMemoryTime(f.CreatedAt), UpdatedAt: formatMemoryTime(f.UpdatedAt),
+		Name: f.Name, Title: f.Title, Description: f.Description, Type: string(f.Type), Scope: string(f.Scope), Body: f.Body,
+		Freshness: memory.FreshnessFor(f, time.Now().UTC()),
+	}
+}
+
+func memoryRecallTraceView(trace memory.RecallResult) MemoryRecallTrace {
+	view := MemoryRecallTrace{
+		Query: trace.Query, Hits: []MemoryRecallHit{}, Omitted: trace.Omitted,
+		CharBudget: trace.CharBudget, UsedChars: trace.UsedChars, Suppressed: trace.Suppressed,
+	}
+	for _, hit := range trace.Hits {
+		view.Hits = append(view.Hits, MemoryRecallHit{
+			ID: hit.Memory.ID, Revision: hit.Memory.Revision, Name: hit.Memory.Name, Title: hit.Memory.Title,
+			Type: string(hit.Memory.Type), Scope: string(hit.Memory.Scope), Score: hit.Score,
+			Freshness: hit.Freshness, Reason: hit.Reason, Snippet: hit.Snippet,
+		})
+	}
+	return view
+}
+
+func (a *App) MemoryRevisions(ref string) []MemoryFact {
+	return a.memoryRevisionsForCtrl(nil, ref, true)
+}
+
+func (a *App) MemoryRevisionsForTab(tabID, ref string) []MemoryFact {
+	if tabID == "" {
+		return a.memoryRevisionsForCtrl(nil, ref, true)
+	}
+	return a.memoryRevisionsForCtrl(a.ctrlByTabID(tabID), ref, false)
+}
+
+func (a *App) memoryRevisionsForCtrl(ctrl control.SessionAPI, ref string, fallback bool) []MemoryFact {
+	out := []MemoryFact{}
+	if a.activeWorkbenchTargetIsRemote() {
+		return out
+	}
+	if ctrl == nil {
+		if !fallback {
+			return out
+		}
+		a.mu.RLock()
+		ctrl = a.activeCtrlLocked()
+		a.mu.RUnlock()
+		if ctrl == nil {
+			return out
+		}
+	}
+	for _, revision := range ctrl.MemoryRevisions(ref) {
+		out = append(out, memoryFactView(revision))
+	}
+	return out
+}
+
+func (a *App) RestoreMemoryRevision(ref string, revision int) (MemoryFact, error) {
+	if a.activeWorkbenchTargetIsRemote() {
+		return MemoryFact{}, remoteMemoryUnavailableErr()
+	}
+	return a.restoreMemoryRevisionForCtrl(nil, ref, revision, true)
+}
+
+func (a *App) RestoreMemoryRevisionForTab(tabID, ref string, revision int) (MemoryFact, error) {
+	if a.activeWorkbenchTargetIsRemote() {
+		return MemoryFact{}, remoteMemoryUnavailableErr()
+	}
+	if tabID == "" {
+		return a.restoreMemoryRevisionForCtrl(nil, ref, revision, true)
+	}
+	return a.restoreMemoryRevisionForCtrl(a.ctrlByTabID(tabID), ref, revision, false)
+}
+
+func (a *App) restoreMemoryRevisionForCtrl(ctrl control.SessionAPI, ref string, revision int, fallback bool) (MemoryFact, error) {
+	if ctrl == nil {
+		if !fallback {
+			return MemoryFact{}, nil
+		}
+		a.mu.RLock()
+		ctrl = a.activeCtrlLocked()
+		a.mu.RUnlock()
+		if ctrl == nil {
+			return MemoryFact{}, nil
+		}
+	}
+	restored, err := ctrl.RestoreMemory(ref, revision)
+	if err != nil {
+		return MemoryFact{}, err
+	}
+	return memoryFactView(restored), nil
 }
 
 // SaveDoc overwrites a memory doc with the panel editor's contents. The controller
@@ -11020,10 +11829,9 @@ func (a *App) NeedsOnboarding() bool {
 		// Do not cover their recovery path with an onboarding gate.
 		return false
 	}
-	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	for i := range cfg.Providers {
 		p := &cfg.Providers[i]
-		if !modelProviderAccessAllowed(access, p.Name) || !p.Configured() || len(p.ChatModelList()) == 0 {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, p.Name) || !p.Configured() || len(p.ChatModelList()) == 0 {
 			continue
 		}
 		return false

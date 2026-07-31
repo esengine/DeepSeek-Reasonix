@@ -1,0 +1,1 @@
+import { templateSettings } from "./template.mjs";

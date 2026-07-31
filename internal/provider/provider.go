@@ -37,8 +37,17 @@ const (
 
 // Message is a single conversation message.
 type Message struct {
-	Role             Role     `json:"role"`
-	Content          string   `json:"content,omitempty"`
+	Role Role `json:"role"`
+	// Content is the provider-visible conversation content. Keeping this legacy
+	// field provider-visible preserves replay for older CLI/Desktop releases.
+	Content string `json:"content,omitempty"`
+	// RawContent is the user-authored form of a user turn, when it differs from
+	// Content because the host added transient context. Older releases ignore
+	// this field and still replay the provider-visible Content safely.
+	RawContent string `json:"raw_content,omitempty"`
+	// ProviderContent is a transitional field written by early Context Engine v2
+	// builds. Loaders migrate it into Content/RawContent before normal use.
+	ProviderContent  string   `json:"provider_content,omitempty"`
 	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…) on user (attachments) and tool (MCP image results) messages; embedded only for vision-capable models
 	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
@@ -181,18 +190,29 @@ func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(ms
 // handed to any provider. Healthy sessions without such records keep their
 // original backing slice, preserving the allocation and prompt-cache fast path.
 func ModelMessages(msgs []Message) []Message {
+	needsCopy := false
 	for _, m := range msgs {
-		if m.LocalOnly {
-			out := make([]Message, 0, len(msgs)-1)
-			for _, candidate := range msgs {
-				if !candidate.LocalOnly {
-					out = append(out, candidate)
-				}
-			}
-			return out
+		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" {
+			needsCopy = true
+			break
 		}
 	}
-	return msgs
+	if !needsCopy {
+		return msgs
+	}
+	out := make([]Message, 0, len(msgs))
+	for _, candidate := range msgs {
+		if candidate.LocalOnly {
+			continue
+		}
+		if candidate.ProviderContent != "" {
+			candidate.Content = candidate.ProviderContent
+			candidate.ProviderContent = ""
+		}
+		candidate.RawContent = ""
+		out = append(out, candidate)
+	}
+	return out
 }
 
 // NormalizeMessages repairs a conversation history so it satisfies the tool-call
@@ -718,6 +738,24 @@ func RequiresToolCallReasoning(p Provider) bool {
 	}
 	policy, ok := p.(ToolCallReasoningPolicy)
 	return ok && policy.RequiresToolCallReasoning()
+}
+
+// ReasoningRoundTripPolicy is optionally implemented by providers that require
+// every assistant message to preserve provider-issued reasoning in later
+// requests. This is broader than ToolCallReasoningPolicy, which covers only
+// assistant tool_calls turns.
+type ReasoningRoundTripPolicy interface {
+	RequiresReasoningRoundTrip() bool
+}
+
+// RequiresReasoningRoundTrip reports whether raw provider reasoning must be
+// retained and replayed on all assistant messages.
+func RequiresReasoningRoundTrip(p Provider) bool {
+	if nilutil.IsNil(p) {
+		return false
+	}
+	policy, ok := p.(ReasoningRoundTripPolicy)
+	return ok && policy.RequiresReasoningRoundTrip()
 }
 
 // MissingToolCallReasoningWarningPolicy is optionally implemented by providers

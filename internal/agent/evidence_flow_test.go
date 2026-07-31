@@ -83,7 +83,7 @@ func toolResults(s *Session, name string) []string {
 
 func sessionHasUserMessageContaining(s *Session, needle string) bool {
 	for _, m := range s.Messages {
-		if m.Role == provider.RoleUser && strings.Contains(m.Content, needle) {
+		if m.Role == provider.RoleUser && strings.Contains(provider.ModelMessages([]provider.Message{m})[0].Content, needle) {
 			return true
 		}
 	}

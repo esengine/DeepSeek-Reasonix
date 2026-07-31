@@ -1,0 +1,107 @@
+{
+  "name": "zustand",
+  "description": "🐻 Bear necessities for state management in React",
+  "private": false,
+  "type": "commonjs",
+  "version": "5.0.14",
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "typesVersions": {
+    ">=4.5": {
+      "esm/*": [
+        "esm/*"
+      ],
+      "*": [
+        "*"
+      ]
+    },
+    "*": {
+      "esm/*": [
+        "ts_version_4.5_and_above_is_required.d.ts"
+      ],
+      "*": [
+        "ts_version_4.5_and_above_is_required.d.ts"
+      ]
+    }
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "react-native": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      },
+      "import": {
+        "types": "./esm/index.d.mts",
+        "default": "./esm/index.mjs"
+      },
+      "default": {
+        "types": "./index.d.ts",
+        "default": "./index.js"
+      }
+    },
+    "./*": {
+      "react-native": {
+        "types": "./*.d.ts",
+        "default": "./*.js"
+      },
+      "import": {
+        "types": "./esm/*.d.mts",
+        "default": "./esm/*.mjs"
+      },
+      "default": {
+        "types": "./*.d.ts",
+        "default": "./*.js"
+      }
+    }
+  },
+  "files": [
+    "**"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=12.20.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pmndrs/zustand.git"
+  },
+  "keywords": [
+    "react",
+    "state",
+    "manager",
+    "management",
+    "redux",
+    "store"
+  ],
+  "author": "Paul Henschel",
+  "contributors": [
+    "Jeremy Holcomb (https://github.com/JeremyRH)",
+    "Daishi Kato (https://github.com/dai-shi)"
+  ],
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/pmndrs/zustand/issues"
+  },
+  "homepage": "https://github.com/pmndrs/zustand",
+  "peerDependencies": {
+    "@types/react": ">=18.0.0",
+    "immer": ">=9.0.6",
+    "react": ">=18.0.0",
+    "use-sync-external-store": ">=1.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@types/react": {
+      "optional": true
+    },
+    "immer": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "use-sync-external-store": {
+      "optional": true
+    }
+  }
+}

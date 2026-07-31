@@ -1,0 +1,298 @@
+================================
+declaration specs
+================================
+
+struct __declspec(dllexport) s2
+{
+};
+
+union __declspec(noinline) u2 {
+};
+
+---
+
+(translation_unit
+  (struct_specifier
+    (ms_declspec_modifier
+      (identifier))
+    name: (type_identifier)
+    body: (field_declaration_list))
+  (union_specifier
+    (ms_declspec_modifier
+      (identifier))
+    name: (type_identifier)
+    body: (field_declaration_list)))
+
+================================
+pointers
+================================
+
+struct s2
+{
+    int * __restrict x;
+    int * __sptr psp;
+    int * __uptr pup;
+    int * __unaligned pup;
+};
+
+void sum2(int n, int * __restrict a, int * __restrict b,
+          int * c, int * d) {
+   int i;
+   for (i = 0; i < n; i++) {
+      a[i] = b[i] + c[i];
+      c[i] = b[i] + d[i];
+    }
+}
+
+void MyFunction(char * __uptr myValue);
+
+---
+
+(translation_unit
+  (struct_specifier
+    name: (type_identifier)
+    body: (field_declaration_list
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_restrict_modifier))
+          declarator: (field_identifier)))
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_signed_ptr_modifier))
+          declarator: (field_identifier)))
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_unsigned_ptr_modifier))
+          declarator: (field_identifier)))
+      (field_declaration
+        type: (primitive_type)
+        declarator: (pointer_declarator
+          (ms_pointer_modifier
+            (ms_unaligned_ptr_modifier))
+          declarator: (field_identifier)))))
+  (function_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (identifier))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            (ms_pointer_modifier
+              (ms_restrict_modifier))
+            declarator: (identifier)))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            (ms_pointer_modifier
+              (ms_restrict_modifier))
+            declarator: (identifier)))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            declarator: (identifier)))
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            declarator: (identifier)))))
+    body: (compound_statement
+      (declaration
+        type: (primitive_type)
+        declarator: (identifier))
+      (for_statement
+        initializer: (assignment_expression
+          left: (identifier)
+          right: (number_literal))
+        condition: (binary_expression
+          left: (identifier)
+          right: (identifier))
+        update: (update_expression
+          argument: (identifier))
+        body: (compound_statement
+          (expression_statement
+            (assignment_expression
+              left: (subscript_expression
+                argument: (identifier)
+                index: (identifier))
+              right: (binary_expression
+                left: (subscript_expression
+                  argument: (identifier)
+                  index: (identifier))
+                right: (subscript_expression
+                  argument: (identifier)
+                  index: (identifier)))))
+          (expression_statement
+            (assignment_expression
+              left: (subscript_expression
+                argument: (identifier)
+                index: (identifier))
+              right: (binary_expression
+                left: (subscript_expression
+                  argument: (identifier)
+                  index: (identifier))
+                right: (subscript_expression
+                  argument: (identifier)
+                  index: (identifier)))))))))
+  (declaration
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list
+        (parameter_declaration
+          type: (primitive_type)
+          declarator: (pointer_declarator
+            (ms_pointer_modifier
+              (ms_unsigned_ptr_modifier))
+            declarator: (identifier)))))))
+
+================================
+call modifiers
+================================
+
+__cdecl void mymethod(){
+    return;
+}
+
+__fastcall void mymethod(){
+    return;
+}
+
+void __stdcall f() { }
+
+void (__stdcall g)() { }
+
+void __stdcall h();
+
+void (__stdcall j());
+
+typedef void(__stdcall *fp)();
+
+---
+
+(translation_unit
+  (function_definition
+    (ms_call_modifier)
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement
+      (return_statement)))
+  (function_definition
+    (ms_call_modifier)
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement
+      (return_statement)))
+  (function_definition
+    type: (primitive_type)
+    (ms_call_modifier)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement))
+  (function_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (parenthesized_declarator
+        (ms_call_modifier)
+        (identifier))
+      parameters: (parameter_list))
+    body: (compound_statement))
+  (declaration
+    type: (primitive_type)
+    declarator: (ms_call_modifier)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list)))
+  (declaration
+    type: (primitive_type)
+    declarator: (parenthesized_declarator
+      (ms_call_modifier)
+      (function_declarator
+        declarator: (identifier)
+        parameters: (parameter_list))))
+  (type_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (parenthesized_declarator
+        (ms_call_modifier)
+        (pointer_declarator
+          declarator: (type_identifier)))
+      parameters: (parameter_list))))
+
+================================
+SEH exception handling
+================================
+
+int main() {
+    int arg;
+    __try {
+        __try {
+            arg = 1;
+            __leave;
+        } __except (-1) {
+            arg = 2;
+        }
+        __leave;
+        arg = 3;
+    } __finally {
+        printf("arg: %d\n", arg);
+    }
+}
+
+---
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (declaration
+        (primitive_type)
+        (identifier))
+      (seh_try_statement
+        (compound_statement
+          (seh_try_statement
+            (compound_statement
+              (expression_statement
+                (assignment_expression
+                  (identifier)
+                  (number_literal)))
+              (seh_leave_statement))
+            (seh_except_clause
+              (parenthesized_expression
+                (number_literal))
+              (compound_statement
+                (expression_statement
+                  (assignment_expression
+                    (identifier)
+                    (number_literal))))))
+          (seh_leave_statement)
+          (expression_statement
+            (assignment_expression
+              (identifier)
+              (number_literal))))
+        (seh_finally_clause
+          (compound_statement
+            (expression_statement
+              (call_expression
+                (identifier)
+                (argument_list
+                  (string_literal
+                    (string_content)
+                    (escape_sequence))
+                  (identifier))))))))))

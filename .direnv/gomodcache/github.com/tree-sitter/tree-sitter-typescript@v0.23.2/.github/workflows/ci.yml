@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "scripts.js"
+      - "common/*"
+      - "*/grammar.js"
+      - "*/src/**"
+      - "bindings/**"
+      - "binding.gyp"
+  pull_request:
+    paths:
+      - "scripts.js"
+      - "common/*"
+      - "*/grammar.js"
+      - "*/src/**"
+      - "bindings/**"
+      - "binding.gyp"
+
+concurrency:
+  group: ${{github.workflow}}-${{github.ref}}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test parsers
+    runs-on: ${{matrix.os}}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Set up tree-sitter
+        uses: tree-sitter/setup-action/cli@v1
+      - name: Set up examples
+        run: |-
+          git clone https://github.com/desktop/desktop examples/desktop --single-branch --depth=1 --filter=blob:none
+          git clone https://github.com/reduxjs/redux examples/redux --single-branch --depth=1 --filter=blob:none
+          git clone https://github.com/microsoft/vscode examples/vscode --single-branch --depth=1 --filter=blob:none
+      - name: Run tests
+        uses: tree-sitter/parser-test-action@v2
+        with:
+          test-rust: true
+          test-node: true
+          test-python: true
+          test-go: true
+          test-swift: true
+      - name: Parse examples
+        id: test
+        uses: tree-sitter/parse-action@v4
+        with:
+          files: |
+            examples/**/*.ts
+            examples/**/*.tsx
+            !examples/redux/src/types/store.ts
+            !examples/vscode/src/bootstrap-window.ts

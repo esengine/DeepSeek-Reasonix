@@ -15,6 +15,7 @@ interface ContextWindowRingProps {
   context?: ContextInfo;
   tabId?: string;
   turnCost?: number;
+  currency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
   balance?: BalanceInfo;
@@ -40,7 +41,7 @@ function fmtDuration(ms: number, t: ReturnType<typeof useI18n>['t']): string {
   return t("context.durationMinutesSeconds", { minutes, seconds });
 }
 
-export function ContextWindowRing({ enabled = true, context, tabId, turnCost, cacheHitTokens, cacheMissTokens, balance }: ContextWindowRingProps) {
+export function ContextWindowRing({ enabled = true, context, tabId, turnCost, currency, cacheHitTokens, cacheMissTokens, balance }: ContextWindowRingProps) {
   const { locale, t } = useI18n();
   const [open, setOpen] = useState(false);
   const [info, setInfo] = useState<ContextPanelInfo | null>(null);
@@ -120,6 +121,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, ca
   const sessionCost = info?.sessionCost && info.sessionCost > 0
     ? formatMoneyLocalized(info.sessionCost, info.sessionCurrency, { locale, empty: "dash" })
     : undefined;
+  const turnCostLabel = formatMoneyLocalized(turnCost, info?.sessionCurrency || currency, { locale, empty: "dash" });
 
   return (
     <>
@@ -195,7 +197,7 @@ export function ContextWindowRing({ enabled = true, context, tabId, turnCost, ca
             {turnCost != null && turnCost > 0 && (
               <div className="context-ring-popover__row">
                 <span className="context-ring-popover__label">{t("status.turnCostLabel")}</span>
-                <span className="context-ring-popover__value">{turnCost.toFixed(4)}</span>
+                <span className="context-ring-popover__value">{turnCostLabel}</span>
               </div>
             )}
             {sessionCost && (

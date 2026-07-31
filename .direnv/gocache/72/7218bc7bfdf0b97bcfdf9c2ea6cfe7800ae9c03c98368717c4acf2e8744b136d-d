@@ -1,0 +1,12 @@
+./coff.go
+./cursor.go
+./doc.go
+./errors.go
+./exe.go
+./icon.go
+./id.go
+./manifest.go
+./pesum.go
+./reader.go
+./rsrc.go
+./winres.go

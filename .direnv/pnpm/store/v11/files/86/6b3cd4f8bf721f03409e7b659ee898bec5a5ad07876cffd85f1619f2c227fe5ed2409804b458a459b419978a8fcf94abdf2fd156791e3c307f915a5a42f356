@@ -1,0 +1,44 @@
+{
+  "name": "whatwg-mimetype",
+  "description": "Parses, serializes, and manipulates MIME types, according to the WHATWG MIME Sniffing Standard",
+  "keywords": [
+    "content-type",
+    "mime type",
+    "mimesniff",
+    "http",
+    "whatwg"
+  ],
+  "version": "5.0.0",
+  "author": "Domenic Denicola <d@domenic.me> (https://domenic.me/)",
+  "license": "MIT",
+  "repository": "jsdom/whatwg-mimetype",
+  "main": "lib/index.js",
+  "files": [
+    "lib/"
+  ],
+  "scripts": {
+    "test": "node --test",
+    "coverage": "c8 node --test --experimental-test-coverage",
+    "lint": "eslint",
+    "pretest": "node scripts/get-latest-platform-tests.mjs"
+  },
+  "devDependencies": {
+    "@domenic/eslint-config": "^4.0.1",
+    "@exodus/bytes": "^1.9.0",
+    "c8": "^10.1.3",
+    "eslint": "^9.39.2",
+    "printable-string": "^0.3.0"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "c8": {
+    "reporter": [
+      "html"
+    ],
+    "exclude": [
+      "scripts/",
+      "test/"
+    ]
+  }
+}

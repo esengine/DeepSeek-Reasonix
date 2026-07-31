@@ -1,0 +1,33 @@
+[
+	{
+		"description": "draft2012",
+		"schema": {
+			"definitions": {
+				"one": {
+					"$id": "http://temp.com/one.json",
+     				"$schema": "https://json-schema.org/draft/2020-12/schema",
+					"type": "object",
+					"properties": {
+						"a": { "type": "number" }
+					},
+					"unevaluatedProperties": false
+				}
+			},
+			"allOf": [
+				{ "$ref": "#/definitions/one" }
+			]
+		},
+		"tests": [
+			{
+				"description": "valid",
+				"data": { "a": 1 },
+				"valid": true
+			},
+			{
+				"description": "invalid",
+				"data": { "a": 1, "b": 2 },
+				"valid": false
+			}
+		]
+	}
+]

@@ -1,0 +1,309 @@
+============================================
+Automatic semicolon insertion
+============================================
+
+if (a) {
+  var b = c
+  d()
+  e()
+  return f
+}
+
+---
+
+(program
+  (if_statement
+    (parenthesized_expression (identifier))
+    (statement_block
+      (variable_declaration (variable_declarator (identifier) (identifier)))
+      (expression_statement (call_expression (identifier) (arguments)))
+      (expression_statement (call_expression (identifier) (arguments)))
+      (return_statement (identifier)))))
+
+============================================
+Semicolon insertion before update expressions
+============================================
+
+if (a)
+  d()
+++b
+
+if (a)
+  d()
+--b
+
+---
+(program
+  (if_statement
+    (parenthesized_expression (identifier))
+    (expression_statement
+      (call_expression (identifier) (arguments))))
+  (expression_statement (update_expression (identifier)))
+
+  (if_statement
+    (parenthesized_expression (identifier))
+    (expression_statement
+      (call_expression (identifier) (arguments))))
+  (expression_statement (update_expression (identifier))))
+
+==========================================
+property access across lines
+==========================================
+
+object
+  .someProperty
+  .otherProperty
+
+---
+
+(program (expression_statement
+  (member_expression
+    (member_expression (identifier) (property_identifier))
+    (property_identifier))))
+
+===========================================
+indented code after blocks
+===========================================
+
+  function x() {}
+  return z;
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters)
+    (statement_block))
+  (return_statement (identifier)))
+
+================================================
+operator expressions split across lines
+================================================
+
+a
+  ? b
+  : c
+
+a
+  || b
+
+a
+  ^ b
+
+a
+  !== b
+
+a
+  !b; // standalone statement
+
+---
+
+(program
+  (expression_statement (ternary_expression (identifier) (identifier) (identifier)))
+  (expression_statement (binary_expression (identifier) (identifier)))
+  (expression_statement (binary_expression (identifier) (identifier)))
+  (expression_statement (binary_expression (identifier) (identifier)))
+  (expression_statement (identifier))
+  (expression_statement (unary_expression (identifier)))
+  (comment))
+
+================================================
+Alphabetical infix operators split across lines
+================================================
+
+a
+  i;
+
+a
+  in b;
+
+a
+  ins;
+
+a
+  inst;
+
+a
+  instanceof b;
+
+a
+  instanceofX;
+
+---
+
+(program
+  (expression_statement (identifier))
+  (expression_statement (identifier))
+
+  (expression_statement (binary_expression (identifier) (identifier)))
+
+  (expression_statement (identifier))
+  (expression_statement (identifier))
+
+  (expression_statement (identifier))
+  (expression_statement (identifier))
+
+  (expression_statement (binary_expression (identifier) (identifier)))
+
+  (expression_statement (identifier))
+  (expression_statement (identifier)))
+
+===========================================
+Single-line if/else statements
+===========================================
+
+if (a) {b} else {c}
+
+---
+
+(program
+  (if_statement (parenthesized_expression (identifier))
+    (statement_block (expression_statement (identifier)))
+    (else_clause
+      (statement_block (expression_statement (identifier))))))
+
+===========================================
+single-line blocks without semicolons
+===========================================
+
+function a() {b}
+function c() {return d}
+
+---
+
+(program
+  (function_declaration (identifier) (formal_parameters) (statement_block
+    (expression_statement (identifier))))
+  (function_declaration (identifier) (formal_parameters) (statement_block
+    (return_statement (identifier)))))
+
+==============================================
+Multi-line chained expressions in var declarations
+==============================================
+
+var a = new A()
+  .b({c: 'd'})
+  .e()
+
+---
+
+(program
+  (variable_declaration (variable_declarator
+    (identifier)
+    (call_expression
+      (member_expression
+        (call_expression
+          (member_expression
+            (new_expression (identifier) (arguments))
+            (property_identifier))
+          (arguments
+            (object
+              (pair (property_identifier) (string (string_fragment))))))
+        (property_identifier))
+      (arguments)))))
+
+==============================================
+if/for/while/do statements without semicolons
+==============================================
+
+if (a) { if (b) return c }
+if (d) { for (;;) break }
+if (e) { for (f in g) break }
+if (h) { for (i of j) continue }
+if (k) { while (l) break }
+if (m) { do { n; } while (o) }
+if (p) { var q }
+
+---
+
+(program
+  (if_statement (parenthesized_expression (identifier)) (statement_block
+    (if_statement
+      (parenthesized_expression (identifier))
+      (return_statement (identifier)))))
+  (if_statement (parenthesized_expression (identifier)) (statement_block
+    (for_statement
+      (empty_statement)
+      (empty_statement)
+      (break_statement))))
+  (if_statement (parenthesized_expression (identifier)) (statement_block
+    (for_in_statement (identifier) (identifier)
+      (break_statement))))
+  (if_statement (parenthesized_expression (identifier)) (statement_block
+    (for_in_statement (identifier) (identifier)
+      (continue_statement))))
+  (if_statement (parenthesized_expression (identifier)) (statement_block
+    (while_statement
+      (parenthesized_expression (identifier))
+      (break_statement))))
+  (if_statement (parenthesized_expression (identifier)) (statement_block
+    (do_statement
+      (statement_block (expression_statement (identifier)))
+      (parenthesized_expression (identifier)))))
+  (if_statement (parenthesized_expression (identifier)) (statement_block
+    (variable_declaration (variable_declarator (identifier))))))
+
+=====================================================
+Single-line declarations without semicolons
+=====================================================
+
+function a () { function b () {} function *c () {} class D {} return }
+---
+
+(program
+  (function_declaration (identifier) (formal_parameters) (statement_block
+    (function_declaration (identifier) (formal_parameters) (statement_block))
+    (generator_function_declaration (identifier) (formal_parameters) (statement_block))
+    (class_declaration (identifier) (class_body))
+    (return_statement))))
+
+=====================================================
+Comments after statements without semicolons
+=====================================================
+
+let a // comment at end of declaration
+
+// comment outside of declaration
+let b /* comment between declarators */, c
+
+/** comment with *stars* **/ /* comment with /slashes/ */
+/* third comment in a row */
+
+let d
+
+let e
+/* back to back *//* comments */
+
+class C {
+  method/*comment*/() {}
+}
+
+b
+/* interleaved non-semi-insertion */
+  .c
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator (identifier)))
+  (comment)
+  (comment)
+  (lexical_declaration
+    (variable_declarator (identifier))
+    (comment)
+    (variable_declarator (identifier)))
+  (comment)
+  (comment)
+  (comment)
+  (lexical_declaration (variable_declarator (identifier)))
+  (lexical_declaration (variable_declarator (identifier)))
+  (comment)
+  (comment)
+  (class_declaration (identifier) (class_body (method_definition
+    (property_identifier)
+    (comment)
+    (formal_parameters)
+    (statement_block))))
+  (expression_statement
+    (member_expression (identifier) (comment) (property_identifier))))

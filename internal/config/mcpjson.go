@@ -40,7 +40,11 @@ type mcpServerSpec struct {
 // file is not an error (returns nil, nil). A present-but-malformed file is an
 // error so a typo surfaces loudly instead of silently dropping every server.
 func loadMCPJSON(path string) ([]PluginEntry, error) {
-	b, err := fileencoding.ReadFileUTF8(path)
+	resolved, err := resolveConfigAccessPath(path, false)
+	if err != nil {
+		return nil, fmt.Errorf("mcp config %s: %w", path, err)
+	}
+	b, err := fileencoding.ReadFileUTF8(resolved)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}
@@ -292,7 +296,11 @@ func RemoveMCPJSONPlugin(path, name string) (bool, error) {
 func readMCPJSONRaw(path string) (map[string]json.RawMessage, map[string]json.RawMessage, error) {
 	root := map[string]json.RawMessage{}
 	servers := map[string]json.RawMessage{}
-	b, err := fileencoding.ReadFileUTF8(path)
+	resolved, err := resolveConfigAccessPath(path, false)
+	if err != nil {
+		return nil, nil, fmt.Errorf("mcp config %s: %w", path, err)
+	}
+	b, err := fileencoding.ReadFileUTF8(resolved)
 	if os.IsNotExist(err) {
 		return root, servers, nil
 	}
@@ -397,20 +405,9 @@ func writeMCPJSONServers(path string, root map[string]json.RawMessage, servers m
 }
 
 func clearMCPJSONAuthentication(path, name string) (PluginEntry, bool, error) {
-	b, err := fileencoding.ReadFileUTF8(path)
-	if os.IsNotExist(err) {
-		return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
-	}
+	root, servers, err := readMCPJSONRaw(path)
 	if err != nil {
-		return PluginEntry{}, false, fmt.Errorf("mcp config %s: %w", path, err)
-	}
-	var root map[string]json.RawMessage
-	if err := json.Unmarshal(b, &root); err != nil {
-		return PluginEntry{}, false, fmt.Errorf("mcp config %s: %w", path, err)
-	}
-	var servers map[string]json.RawMessage
-	if err := json.Unmarshal(root["mcpServers"], &servers); err != nil || servers == nil {
-		return PluginEntry{}, false, fmt.Errorf("clear plugin authentication: no plugin %q", name)
+		return PluginEntry{}, false, err
 	}
 	raw, ok := servers[name]
 	if !ok {
@@ -542,7 +539,11 @@ func writeMCPJSON(path string, root map[string]json.RawMessage) error {
 		return fmt.Errorf("mcp config %s: %w", path, err)
 	}
 	out = append(out, '\n')
-	dir := filepath.Dir(path)
+	resolved, err := resolveConfigAccessPath(path, false)
+	if err != nil {
+		return fmt.Errorf("mcp config %s: %w", path, err)
+	}
+	dir := filepath.Dir(resolved)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mcp config %s: create dir: %w", path, err)
 	}
@@ -560,7 +561,7 @@ func writeMCPJSON(path string, root map[string]json.RawMessage) error {
 		os.Remove(tmpPath)
 		return fmt.Errorf("mcp config %s: close temp: %w", path, err)
 	}
-	if err := fileutil.ReplaceFile(tmpPath, path); err != nil {
+	if err := fileutil.ReplaceFile(tmpPath, resolved); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}

@@ -2,6 +2,338 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.18.0",
+      "date": "2026-07-29",
+      "channel": "stable",
+      "title": {
+        "en": "Context Engine v2, Integrated Terminal, and Dual Release Channels",
+        "zh": "上下文引擎 v2、内置终端与双发布渠道"
+      },
+      "summary": {
+        "en": "Reasonix 1.18.0 introduces Context Engine v2, integrated Desktop terminal sessions, and public Stable and Preview channels. It also adds Kimi K3, regional CNY/USD pricing and broader localization, improves large-session responsiveness, and hardens repair, authorization, artifact, telemetry, and release paths.",
+        "zh": "Reasonix 1.18.0 引入上下文引擎 v2、桌面端内置终端会话，以及公开的 Stable 与 Preview 双渠道；同时新增 Kimi K3、区域化人民币/美元计价与更完整的本地化，改善大型会话响应，并加固修复、授权、产物、遥测和发布链路。"
+      },
+      "surfaces": [
+        "agent",
+        "cli",
+        "config",
+        "desktop",
+        "mcp",
+        "provider",
+        "security",
+        "updates"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Reasonix User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Comprehensive guide for using Reasonix.",
+            "zh": "Reasonix 使用综合指南。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ba2c4d31b7ad39cd635b153dc015f454ed14ee1a/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Reasonix User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Comprehensive guide for using Reasonix in Chinese.",
+            "zh": "Reasonix 使用综合指南（中文版）。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ba2c4d31b7ad39cd635b153dc015f454ed14ee1a/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Reasoning Providers Configuration",
+            "zh": "推理提供商配置"
+          },
+          "body": {
+            "en": "How to configure AI model providers in Reasonix.",
+            "zh": "如何在 Reasonix 中配置 AI 模型提供商。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ba2c4d31b7ad39cd635b153dc015f454ed14ee1a/docs/REASONING_PROVIDERS.md"
+        },
+        {
+          "title": {
+            "en": "Release Process",
+            "zh": "发布流程"
+          },
+          "body": {
+            "en": "Details on Reasonix release channels and process.",
+            "zh": "Reasonix 发布渠道与流程详情。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/ba2c4d31b7ad39cd635b153dc015f454ed14ee1a/docs/RELEASING.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Context Engine v2",
+            "zh": "上下文引擎 v2"
+          },
+          "body": {
+            "en": "The new context engine coordinates context budgeting, source breakdowns, compaction, and model-aware limits across CLI and Desktop sessions.",
+            "zh": "全新的上下文引擎统一协调 CLI 与桌面会话的上下文预算、来源明细、压缩和模型感知限制。"
+          },
+          "refs": [
+            7001
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Integrated Desktop terminal sessions",
+            "zh": "桌面端内置终端会话"
+          },
+          "body": {
+            "en": "Desktop workspaces can now create and manage integrated terminal sessions, including shell selection, persisted output history, and explicit Add to Chat handoff.",
+            "zh": "桌面工作区现可创建和管理内置终端会话，支持选择 Shell、保留输出历史，并通过明确的“添加到聊天”操作传递内容。"
+          },
+          "refs": [
+            6994
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Stable and Preview channels",
+            "zh": "Stable 与 Preview 双发布渠道"
+          },
+          "body": {
+            "en": "Desktop and native CLI now expose separate public Stable and Preview channels. Preview versions use independent prerelease identifiers while sharing the same 1.18.0 base version.",
+            "zh": "桌面版和原生 CLI 现提供独立的公开 Stable 与 Preview 渠道。预览版使用独立的预发布标识，同时与稳定版共享 1.18.0 基础版本。"
+          },
+          "refs": [
+            6155,
+            6997
+          ]
+        },
+        {
+          "kind": "security",
+          "title": {
+            "en": "Safer repairs, authorization, and artifacts",
+            "zh": "更安全的修复、授权与产物处理"
+          },
+          "body": {
+            "en": "Guard repair previews are now bound to the exact approved state, dynamic Bash authorization fails closed when ownership is unclear, and background-job artifact paths reject traversal attempts.",
+            "zh": "Guard 修复预览现与获批的精确状态绑定；动态 Bash 授权在所有权不明确时安全拒绝；后台任务产物路径会拒绝路径穿越。"
+          },
+          "refs": [
+            6973,
+            6985,
+            6936
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Kimi K3 for official APIs and OpenCode Go",
+              "zh": "官方 API 与 OpenCode Go 支持 Kimi K3"
+            },
+            "body": {
+              "en": "Kimi K3 is available through Kimi CN, Kimi Global, and OpenCode Go. Official APIs include native vision, a 1,048,576-token context window, and model-specific reasoning controls.",
+              "zh": "Kimi K3 现已支持 Kimi 国内版、Kimi 全球版与 OpenCode Go；官方 API 具备原生视觉、1,048,576 token 上下文窗口和模型专用推理控制。"
+            },
+            "refs": [
+              6921
+            ]
+          },
+          {
+            "title": {
+              "en": "Regional pricing and broader localization",
+              "zh": "区域化计价与更完整的本地化"
+            },
+            "body": {
+              "en": "Official DeepSeek usage can use CNY or USD regional pricing, CLI output carries structured currency totals, and more Desktop and Web text follows the selected language.",
+              "zh": "DeepSeek 官方用量可使用人民币或美元区域价格；CLI 输出包含结构化币种总额；更多桌面端与 Web 文案会跟随所选语言。"
+            },
+            "refs": [
+              6945
+            ]
+          },
+          {
+            "title": {
+              "en": "Project-root scope for machine interfaces",
+              "zh": "机器接口支持项目根目录作用域"
+            },
+            "body": {
+              "en": "Session, Task, and Recovery machine interfaces can select a project with --project-root while preserving the existing --dir session-store contract.",
+              "zh": "Session、Task 与 Recovery 机器接口可通过 --project-root 选择项目，同时保留现有 --dir Session 存储目录契约。"
+            },
+            "refs": [
+              6970
+            ]
+          },
+          {
+            "title": {
+              "en": "Privacy-preserving CLI telemetry and crash reports",
+              "zh": "隐私友好的 CLI 遥测与崩溃报告"
+            },
+            "body": {
+              "en": "CLI diagnostics can report bounded, redacted reliability signals without including prompts, responses, credentials, or local paths.",
+              "zh": "CLI 诊断可上报经过限制与脱敏的可靠性信号，不包含提示词、响应、凭据或本地路径。"
+            },
+            "refs": [
+              6984
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Skills can be inserted anywhere in the composer",
+              "zh": "可在输入框任意位置插入 Skill"
+            },
+            "body": {
+              "en": "Desktop slash completion now preserves surrounding text and structured ordering when inserting skills or subagents at the beginning, middle, or end of a task.",
+              "zh": "桌面端斜杠补全现在可在任务开头、中间或末尾插入 Skill 或 Subagent，并保留周围文本及结构化顺序。"
+            },
+            "refs": [
+              6964
+            ]
+          },
+          {
+            "title": {
+              "en": "More reliable model defaults and configuration saves",
+              "zh": "更可靠的模型默认值与配置保存"
+            },
+            "body": {
+              "en": "New sessions resolve an eligible configured model, keyless CLI startup falls back safely, and MCP entries remain in their owning configuration source when saved.",
+              "zh": "新会话会解析可用的已配置模型；CLI 无密钥启动会安全回退；保存配置时 MCP 条目仍保留在其所属来源中。"
+            },
+            "refs": [
+              6999,
+              7002,
+              6913
+            ]
+          },
+          {
+            "title": {
+              "en": "Large-session responsiveness",
+              "zh": "大型会话响应性能"
+            },
+            "body": {
+              "en": "Desktop history and transcript processing now archive heavy tool payloads and reduce repeated work, preventing freezes in large sessions.",
+              "zh": "桌面端历史记录与会话处理会归档大型工具载荷并减少重复计算，避免大型会话卡顿。"
+            },
+            "refs": [
+              6993
+            ]
+          },
+          {
+            "title": {
+              "en": "Release integrity and faster CI",
+              "zh": "发布完整性与更快的 CI"
+            },
+            "body": {
+              "en": "Stable and Preview publishing now verifies candidate identity, signing contracts, channel manifests, and required per-OS checks while avoiding unrelated CI work.",
+              "zh": "Stable 与 Preview 发布现会校验候选提交身份、签名合约、渠道清单和各系统必需检查，同时跳过无关 CI 工作。"
+            },
+            "refs": [
+              6944,
+              6997,
+              7022,
+              7023,
+              7025
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Goal and agent continuation reliability",
+              "zh": "Goal 与 Agent 续跑可靠性"
+            },
+            "body": {
+              "en": "Initial Goal messages can invoke skills correctly, and stale edit retries no longer loop across Goal continuations.",
+              "zh": "Goal 首条消息现在可以正确调用 Skill，陈旧的编辑重试也不会在 Goal 续跑之间形成循环。"
+            },
+            "refs": [
+              6991,
+              7012
+            ]
+          },
+          {
+            "title": {
+              "en": "Clean tab and session transitions",
+              "zh": "干净可靠的标签页与会话切换"
+            },
+            "body": {
+              "en": "Reusing a blank tab no longer restores stale transcript or tool data after a newer navigation intent.",
+              "zh": "复用空白标签页时，不再于较新的导航操作之后恢复旧会话或工具数据。"
+            },
+            "refs": [
+              6909
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows Desktop rendering and plugin hooks",
+              "zh": "Windows 桌面渲染与插件 Hook"
+            },
+            "body": {
+              "en": "Windows transcripts repaint cleanly without stale pixels, and plugin Bash hooks detect the correct runtime.",
+              "zh": "Windows 会话内容现在可干净重绘、不再残留像素，插件 Bash Hook 也会检测正确的运行时。"
+            },
+            "refs": [
+              7019,
+              6980
+            ]
+          },
+          {
+            "title": {
+              "en": "Trusted session artifact semantics",
+              "zh": "可信 Session 产物路径语义"
+            },
+            "body": {
+              "en": "Artifact routing preserves valid trusted session paths while rejecting control-character rebinding and clearing stale persistence bindings.",
+              "zh": "产物路由在保留合法可信 Session 路径语义的同时，会拒绝控制字符重绑定并清除陈旧持久化绑定。"
+            },
+            "refs": [
+              6937
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "warning",
+          "title": {
+            "en": "Guard automation must bind the reviewed preview",
+            "zh": "Guard 自动化必须绑定已审阅预览"
+          },
+          "body": {
+            "en": "Non-interactive reasonix-guard apply-plan --yes now requires the preview ID returned by the reviewed plan. Interactive use continues to bind it automatically.",
+            "zh": "非交互执行 reasonix-guard apply-plan --yes 现在必须携带已审阅计划返回的 preview ID；交互式使用仍会自动绑定。"
+          },
+          "refs": [
+            6973
+          ]
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "PaulDing98",
+        "mchenziyi",
+        "myipanta",
+        "par73e",
+        "xiaoshuai1024"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.18.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.17.21...desktop-v1.18.0",
+        "download": "https://reasonix.io/?download=desktop#start"
+      }
+    },
+    {
       "version": "1.17.21",
       "date": "2026-07-25",
       "channel": "stable",

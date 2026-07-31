@@ -1,0 +1,10 @@
+./expand_amd64.go
+./expand_reference.go
+./filter.go
+./filter_amd64.go
+./scan_amd64.go
+./scan_go.go
+./scan_reference.go
+./expand_amd64.s
+./filter_amd64.s
+./scan_amd64.s

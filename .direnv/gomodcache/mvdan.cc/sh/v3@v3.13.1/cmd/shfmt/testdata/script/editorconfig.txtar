@@ -1,0 +1,288 @@
+cp input.sh input.sh.orig
+
+# Using stdin should use EditorConfig.
+stdin input.sh
+exec shfmt
+cmp stdout input.sh.golden
+! stderr .
+
+# Verify that -filename works well with EditorConfig.
+stdin stdin-filename-bash
+exec shfmt
+
+stdin stdin-filename-bash
+! exec shfmt -filename=foo_posix.sh
+stderr '^foo_posix.sh:.* arrays are a bash.*parsed as posix via EditorConfig'
+
+stdin stdin-filename-bash
+! exec shfmt -filename=${WORK}/foo_posix.sh
+stderr ^${WORK@R}/'foo_posix.sh:.* arrays are a bash.*parsed as posix via EditorConfig'
+
+# Using a file path should use EditorConfig, including with the use of flags
+# like -l.
+exec shfmt input.sh
+cmp stdout input.sh.golden
+! stderr .
+
+! exec shfmt -l input.sh
+stdout 'input\.sh'
+! stderr .
+
+# Using any formatting option should skip all EditorConfig usage.
+exec shfmt -p input.sh
+cmp stdout input.sh.orig
+! stderr .
+
+exec shfmt -l -p input.sh
+! stdout .
+! stderr .
+
+exec shfmt -sr input.sh
+cmp stdout input.sh.orig
+! stderr .
+
+# Check that EditorConfig files merge properly.
+exec shfmt morespaces/input.sh
+cmp stdout morespaces/input.sh.golden
+! stderr .
+
+# Check a folder with all other knobs.
+exec shfmt -l otherknobs
+! stdout .
+! stderr .
+
+# Files found by walking directories are skipped if they match ignore=true properties.
+! exec shfmt -l ignored
+stdout 'regular\.sh'
+! stdout 'ignored\.sh'
+! stderr .
+
+# EditorConfig ignore=true properties are obeyed even when any formatting flags
+# are used, which cause formatting options from EditorConfig files to be skipped.
+! exec shfmt -i=0 -l ignored
+stdout 'regular\.sh'
+! stdout 'ignored\.sh'
+! stderr .
+
+# Formatting files directly does not obey ignore=true properties by default.
+# Test the various modes in which shfmt can run.
+! exec shfmt -l input.sh ignored/1_lone_ignored.sh ignored/third_party/bad_syntax_ignored.sh
+stdout -count=1 'input\.sh$'
+stdout -count=1 'ignored\.sh$'
+stderr -count=1 'ignored\.sh.* must be followed by'
+! exec shfmt -d input.sh ignored/1_lone_ignored.sh ignored/third_party/bad_syntax_ignored.sh
+stdout -count=2 'input\.sh$'
+stdout -count=2 'ignored\.sh$'
+stderr -count=1 'ignored\.sh.* must be followed by'
+! exec shfmt input.sh ignored/1_lone_ignored.sh ignored/third_party/bad_syntax_ignored.sh
+stdout -count=1 'indented'
+stdout -count=1 'echo foo'
+stderr -count=1 'ignored\.sh.* must be followed by'
+stdin ignored/1_lone_ignored.sh
+exec shfmt --filename=ignored/1_lone_ignored.sh
+stdout -count=1 'echo foo'
+! stderr .
+
+# Formatting files directly obeys ignore=true when --apply-ignore is given.
+# Test the same modes that the earlier section does.
+! exec shfmt --apply-ignore -l input.sh ignored/1_lone_ignored.sh ignored/third_party/bad_syntax_ignored.sh
+stdout -count=1 'input\.sh$'
+! stdout 'ignored\.sh'
+! stderr .
+! exec shfmt --apply-ignore -d input.sh ignored/1_lone_ignored.sh ignored/third_party/bad_syntax_ignored.sh
+stdout -count=2 'input\.sh$'
+! stdout 'ignored\.sh'
+! stderr .
+exec shfmt --apply-ignore input.sh ignored/1_lone_ignored.sh ignored/third_party/bad_syntax_ignored.sh
+stdout -count=1 'indented'
+! stdout 'echo foo'
+! stderr .
+stdin ignored/1_lone_ignored.sh
+exec shfmt --apply-ignore --filename=ignored/1_lone_ignored.sh
+! stdout .
+! stderr .
+! exec shfmt --apply-ignore --diff hidden/.script.sh
+stdout -count=1 '^\+   indented'
+
+# Check EditorConfig [[language]] sections, used primarily for extension-less strings with shebangs.
+exec shfmt -d shebang
+! stdout .
+! stderr .
+
+# Verify that sibling EditorConfig files do not get their settings mixed up,
+# which could happen if we incrementally use their flags without care.
+exec shfmt -d multiconfig
+! stdout .
+! stderr .
+
+-- .editorconfig --
+root = true
+
+[*]
+indent_style = space
+indent_size = 3
+
+[*_posix.sh]
+shell_variant = posix
+-- input.sh --
+{
+	indented
+}
+-- input.sh.golden --
+{
+   indented
+}
+-- stdin-filename-bash --
+array=(
+	element
+)
+-- morespaces/.editorconfig --
+[*.sh]
+indent_size = 6
+-- morespaces/input.sh --
+{
+	indented
+}
+-- morespaces/input.sh.golden --
+{
+      indented
+}
+-- otherknobs/.editorconfig --
+root = true
+
+[*_bash.sh]
+shell_variant = bash
+
+[*_mksh.sh]
+shell_variant = mksh
+
+[indent.sh]
+# check its default; we tested "space" above.
+
+[binary_next_line.sh]
+binary_next_line = true
+
+[switch_case_indent.sh]
+switch_case_indent = true
+
+[space_redirects.sh]
+space_redirects = true
+
+[keep_padding.sh]
+keep_padding = true
+
+[function_next_line.sh]
+function_next_line = true
+
+[simplify.sh]
+simplify = true
+
+[minify.sh]
+minify = true
+
+-- otherknobs/shell_variant_bash.sh --
+array=(elem)
+-- otherknobs/shell_variant_mksh.sh --
+coprocess |&
+-- otherknobs/indent.sh --
+{
+	indented
+}
+-- otherknobs/binary_next_line.sh --
+foo \
+	| bar
+-- otherknobs/switch_case_indent.sh --
+case "$1" in
+	A) echo foo ;;
+esac
+-- otherknobs/space_redirects.sh --
+echo foo > bar
+-- otherknobs/keep_padding.sh --
+echo  foo    bar
+-- otherknobs/function_next_line.sh --
+foo()
+{
+	echo foo
+}
+-- otherknobs/simplify.sh --
+foo() {
+	((bar))
+}
+-- otherknobs/minify.sh --
+foo(){
+((bar))
+}
+-- ignored/.editorconfig --
+root = true
+
+[third_party/**]
+ignore = true
+
+[1_lone_ignored.sh]
+ignore = true
+
+[2_dir_ignored]
+ignore = true
+
+-- ignored/third_party/bad_syntax_ignored.sh --
+bad (syntax
+-- ignored/1_lone_ignored.sh --
+echo   foo
+-- ignored/2_dir_ignored/ignored.sh --
+echo   foo
+-- ignored/3_regular/regular.sh --
+echo   foo
+-- shebang/.editorconfig --
+root = true
+
+[*]
+indent_style = space
+indent_size = 1
+
+[[shell]]
+indent_size = 2
+
+[[bash]]
+indent_size = 4
+
+[[zsh]]
+indent_size = 5
+
+-- shebang/binsh --
+#!/bin/sh
+
+{
+  indented
+}
+-- shebang/binbash --
+#!/bin/bash
+
+{
+    indented
+}
+array=(elem)
+-- shebang/binzsh --
+#!/bin/zsh
+
+{
+     indented
+}
+array=(elem)
+-- hidden/.script.sh --
+{
+indented
+}
+-- multiconfig/space_redirects/.editorconfig --
+[*]
+space_redirects = true
+-- multiconfig/space_redirects/f.sh --
+foo > bar
+foo &&
+   bar
+-- multiconfig/binary_next_line/.editorconfig --
+[*]
+binary_next_line = true
+-- multiconfig/binary_next_line/f.sh --
+foo >bar
+foo \
+   && bar

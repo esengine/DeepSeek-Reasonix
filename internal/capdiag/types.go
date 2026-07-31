@@ -77,9 +77,11 @@ type InstructionsReport struct {
 
 // InstructionDoc is one REASONIX.md / AGENTS.md / CLAUDE.md source.
 type InstructionDoc struct {
-	Path  string `json:"path"`
-	Scope string `json:"scope"`
-	Order int    `json:"order"`
+	Path      string `json:"path"`
+	Scope     string `json:"scope"`
+	Directory string `json:"directory,omitempty"`
+	Depth     int    `json:"depth"`
+	Order     int    `json:"order"`
 }
 
 // AssetReport covers skills or commands.

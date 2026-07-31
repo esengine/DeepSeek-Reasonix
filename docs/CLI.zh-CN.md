@@ -38,6 +38,32 @@ reasonix --dir /path/to/project
 
 适用时，参数可以放在 prompt 前面或后面。
 
+## 更新原生 CLI
+
+```sh
+reasonix upgrade                  # 按已保存渠道更新（初始为正式版）
+reasonix upgrade preview          # 切换到预览版、记住选择并更新
+reasonix upgrade stable           # 切回正式版、记住选择并更新
+```
+
+所选渠道是用户全局设置，保存在 Reasonix 用户配置的 `[cli].update_channel` 中。全新
+或旧版配置默认使用 Stable，项目内的 `reasonix.toml` 不能覆盖这个选择。Stable 与
+Preview 会替换同一个原生 CLI 二进制文件，不会并行安装。
+
+Preview 只接受受保护的 `vX.Y.Z-preview.N` 发布；内部 RC 不属于任何公开渠道。
+切换渠道时允许安装版本号更低的目标，这样较新的 Preview 才能返回当前 Stable。
+
+自动化脚本仍可使用 `--channel stable|preview` 做一次性覆盖，不改变已保存渠道：
+
+```sh
+reasonix upgrade preview --check          # 保存 Preview，只检查目标版本
+reasonix upgrade --channel preview        # 脚本单次升级到 Preview
+reasonix upgrade --channel stable --force # 单次重装 Stable
+```
+
+`--check` 只报告目标而不安装，`--force` 重新安装目标渠道的当前版本。别名
+`reasonix update` 的行为完全相同。
+
 ## 配置供应商
 
 ```sh
@@ -64,6 +90,24 @@ Provider 定义只保存 `api_key_env` 变量名。即使使用 `--local`，Key 
 setup 会询问是否共享该凭据；两个 provider 使用不同 Key 时，应改用不同变量名。通过
 setup 添加或删除 provider 时，也会同步维护桌面端 provider access，因此相同模型可以
 直接在桌面端使用。
+
+### 配置区域定价货币
+
+使用用户全局货币命令查看或选择 DeepSeek 官方区域价格表：
+
+```sh
+reasonix config currency             # 显示已保存值和最终解析结果
+reasonix config currency auto        # 跟随解析后的 locale
+reasonix config currency CNY
+reasonix config currency USD
+```
+
+`auto` 会把简体或繁体中文 locale 解析为 CNY，把英文及其他 locale 解析为 USD。显式
+选择 `CNY` 或 `USD` 后，货币不再跟随界面语言。该偏好只保存在用户全局配置中，项目
+`reasonix.toml` 无法覆盖，因此不支持 `--local`。自定义 provider 价格不会被修改。
+
+在交互式会话中，`/currency` 显示已保存值和最终解析结果；
+`/currency auto|CNY|USD` 会修改偏好并刷新当前运行时，同时保留当前对话。
 
 ## 一次性运行与自动化
 
@@ -106,6 +150,8 @@ reasonix run "运行测试" --output-format stream-json
   "num_turns": 1,
   "result": "...",
   "session_id": "...",
+  "total_cost": 0,
+  "currency": "CNY",
   "total_cost_usd": 0,
   "usage": {
     "input_tokens": 0,
@@ -115,6 +161,12 @@ reasonix run "运行测试" --output-format stream-json
   }
 }
 ```
+
+`total_cost` 使用 `currency` 给出的 ISO 货币代码计价；DeepSeek 官方价格目前会输出
+`CNY` 或 `USD`。`total_cost_usd` 作为数字兼容别名继续保留，并与 `total_cost` 数值
+相同；即使 `currency` 为 `CNY`，它也不会按旧字段名自动换算为美元。新接入必须同时读取
+`total_cost` 和 `currency`。如果一次结构化运行包含多种货币，Reasonix 会直接报错，
+不会输出容易误解的合计金额。
 
 执行失败时使用 `subtype: "error_during_execution"` 和 `is_error: true`。
 结构化模式会把运行时错误保留在 JSON 中，不再额外重复输出一份人类可读错误。
@@ -138,18 +190,19 @@ PID 或 hostname。这里的“只读”是指不会修改 transcript、runtime�
 状态；首次使用脱敏机器接口时，Reasonix 可能会在用户状态目录初始化一个私有身份密钥：
 
 ```sh
-reasonix session list --json [--dir SESSION_DIR]
-reasonix session show <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session status <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR]
-reasonix task list --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
-reasonix task show <task-id> --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix session list --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session show <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
+reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
 
-对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录；未指定时，Reasonix
-选择当前项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
+对于 `session` 和 `task`，`--dir` 明确指定 session 存储目录，`--project-root`
+则解析指定项目的 session store；两者不能同时使用。都未指定时，Reasonix 选择当前
+项目的 session store。对于 `hook`，`--dir` 是 `--project-root` 的别名。
 `hook list` 的状态值为 `active` 或 `invalid`；`invalid` 表示配置的
 event 因事件名、命令/context 来源或工具事件 matcher 无效而无法执行。非工具事件
 会忽略 matcher。
@@ -217,7 +270,8 @@ reasonix --allowed-tools "Bash(go test ./...)" --allowed-tools read_file
 `ask`、`manual`、`acceptEdits` 保留 run 自主性，放行普通审批决策；`auto` 仍自动批准
 普通 fallback，但对命中显式 ask 规则的命令改为拒绝，而不是无人值守地执行；`dontAsk`
 拒绝；`bypassPermissions` 执行一切，仅始终需要人工新鲜批准的工具（记忆、plan、沙箱
-逃逸、受管配置写入）除外。
+逃逸、受管配置写入）除外。在所有模式下，拥有当前项目 store 的顶层 controller 仍可创建
+有界、非敏感、create-only 的 project/reference 记忆；其他记忆变更在无人确认时仍会被拒绝。
 
 ## 附加目录
 
@@ -279,6 +333,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/status` | 显示模型、effort、cache、Git、后台任务，以及工作模式或余额信息。 |
 | `/work-mode [economy\|balanced\|delivery]` | 查看或切换运行时工作模式；`/profile` 是别名。 |
 | `/theme [auto\|light\|dark\|style]` | 查看或切换 CLI 背景模式和强调色。 |
+| `/currency [auto\|CNY\|USD]` | 查看或切换用户全局官方定价货币，并刷新当前运行时。 |
 | `/paste-image` | 读取剪贴板图片并插入可编辑的附件标记。 |
 | `/mouse` | 切换应用内鼠标选区、滚动条和滚轮处理。 |
 | `/effort` | 查看或切换 reasoning effort。 |
@@ -286,9 +341,30 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/verbose` | 切换详细 reasoning 显示。 |
 | `/sandbox` | 查看沙盒状态。 |
 | `/goal` | 启动、查看或清除长周期 Goal。 |
-| `/mcp`、`/skills`、`/hooks`、`/memory` | 查看和管理扩展或记忆。 |
+| `/mcp`、`/skills`、`/hooks` | 查看和管理扩展。 |
+| `/remember <note>` | 把常驻 note 追加到项目指令文档；`# <note>` 是快捷方式。 |
+| `/memory [subcommand]` | 查看指令、记忆 provenance、召回、revision 与恢复。 |
 | `/rewind` | 把对话和/或代码恢复到更早的 turn。 |
 | `/tree`、`/branch`、`/switch` | 查看或切换会话分支。 |
 
 切换模型、effort 或工作模式会重建运行时，同时保留当前对话、会话级权限覆盖、附加目录
 访问权限和 session ownership。
+
+### 记忆诊断与恢复
+
+直接运行 `/memory` 会显示全部 project/global active facts，不会隐藏跨 scope 的同名条目。
+每条事实包含稳定 ID、revision、scope、type、freshness 和 description。斜杠补全会提供
+可用子命令、active ID/name，以及当前 store 拥有的 archive path。
+
+| 命令 | 用途 |
+| --- | --- |
+| `/memory instructions` | 显示解析后的指令 precedence、目录、imports 和 diagnostics。 |
+| `/memory recall` | 解释最近一次自动召回的 query、hits、score、原因、freshness 和预算。 |
+| `/memory revisions <id-or-name>` | 显示 active revision 与不可变历史。 |
+| `/memory restore <id-or-name> <revision>` | 把旧内容恢复为一个单调递增的新 revision。 |
+| `/memory archived` | 列出 archive facts 及其受管路径。 |
+| `/memory recover <archive-path>` | 不覆盖 active data，把 archive 恢复为新 revision。 |
+
+这些命令始终作用于当前 session controller。Remote Workbench 使用远程 memory catalog，
+绝不回退读取桌面本机记忆。权限、自动召回、写入确认和迁移行为见
+[Context Engine v2](./SESSION_MEMORY_RETRIEVAL.zh-CN.md)。

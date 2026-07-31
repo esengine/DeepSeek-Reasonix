@@ -1,0 +1,173 @@
+============================================
+Numbers
+============================================
+
+04000
+400
+100n
+0xffffffffn
+0b00111n
+0o1234n
+0xa_b_c
+0o1_1
+0b1_000_000
+1_2_3
+12_3.4_5e6_7
+.4_5e6_7
+0b1_000_000n
+01
+00000123
+
+---
+
+(program
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number))
+  (expression_statement (number)))
+
+============================================
+Unicode identifiers
+============================================
+
+const últimaVez = 1
+{ 県: '大阪府', '': '' }
+
+---
+
+(program
+  (lexical_declaration (variable_declarator (identifier) (number)))
+  (expression_statement
+    (object
+      (pair (property_identifier) (string (string_fragment)))
+      (pair (string) (string)))))
+
+==========================================
+Strings containing comment-like content
+==========================================
+
+"//ok\n//what"
+
+---
+
+(program
+  (expression_statement
+    (string (string_fragment) (escape_sequence) (string_fragment))))
+
+==========================================
+Quote escaping
+==========================================
+
+"";
+'';
+"\"";
+"a\"b";
+'\'';
+'a\'b';
+"it's a tiny tiny world";
+'"hello"';
+
+---
+
+(program
+  (expression_statement (string))
+  (expression_statement (string))
+  (expression_statement (string (escape_sequence)))
+  (expression_statement
+    (string (string_fragment) (escape_sequence) (string_fragment)))
+  (expression_statement (string (escape_sequence)))
+  (expression_statement
+    (string (string_fragment) (escape_sequence) (string_fragment)))
+  (expression_statement (string (string_fragment)))
+  (expression_statement (string (string_fragment))))
+
+==========================================
+Line continuations
+==========================================
+
+"hello\
+world";
+
+'hello\
+world';
+
+---
+
+(program
+  (expression_statement
+    (string (string_fragment) (escape_sequence) (string_fragment)))
+  (expression_statement
+    (string (string_fragment) (escape_sequence) (string_fragment))))
+
+=========================================================
+JSX strings with unescaped newlines for TSX attributes
+=========================================================
+
+<Element Attribute="hello
+                    world"></Element>;
+
+<Element Attribute='hello
+                    world'></Element>;
+
+---
+
+(program
+  (expression_statement
+    (jsx_element
+      (jsx_opening_element
+        (identifier)
+        (jsx_attribute (property_identifier) (string (string_fragment))))
+      (jsx_closing_element
+        (identifier))))
+ (expression_statement
+   (jsx_element
+     (jsx_opening_element
+       (identifier)
+       (jsx_attribute (property_identifier) (string (string_fragment))))
+     (jsx_closing_element
+       (identifier)))))
+
+===============================================
+JSX with HTML character references (entities)
+===============================================
+
+<a>foo &nbsp; bar</a>;
+
+<abbr title="foo &nbsp; \n bar">foo</abbr>;
+
+----
+
+(program
+	(expression_statement
+		(jsx_element
+			(jsx_opening_element
+				(identifier))
+			(jsx_text)
+			(html_character_reference)
+			(jsx_text)
+			(jsx_closing_element
+				(identifier))))
+	(expression_statement
+		(jsx_element
+			(jsx_opening_element
+				(identifier)
+			(jsx_attribute
+				(property_identifier)
+				(string
+					(string_fragment)
+					(html_character_reference)
+					(string_fragment))))
+			(jsx_text)
+			(jsx_closing_element
+				(identifier)))))

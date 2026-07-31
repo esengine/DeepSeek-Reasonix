@@ -1,0 +1,1646 @@
+================================================================================
+Scoped function calls
+================================================================================
+
+int main() {
+  abc::def("hello", "world");
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (expression_statement
+        (call_expression
+          (qualified_identifier
+            (namespace_identifier)
+            (identifier))
+          (argument_list
+            (string_literal
+              (string_content))
+            (string_literal
+              (string_content))))))))
+
+================================================================================
+Compound literals without parentheses
+================================================================================
+
+T x = T{0};
+U<V> y = U<V>{0};
+int x = int{1};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (type_identifier)
+    (init_declarator
+      (identifier)
+      (compound_literal_expression
+        (type_identifier)
+        (initializer_list
+          (number_literal)))))
+  (declaration
+    (template_type
+      (type_identifier)
+      (template_argument_list
+        (type_descriptor
+          (type_identifier))))
+    (init_declarator
+      (identifier)
+      (compound_literal_expression
+        (template_type
+          (type_identifier)
+          (template_argument_list
+            (type_descriptor
+              (type_identifier))))
+        (initializer_list
+          (number_literal)))))
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (identifier)
+      (compound_literal_expression
+        (primitive_type)
+        (initializer_list
+          (number_literal))))))
+
+================================================================================
+Explicit destructor calls
+================================================================================
+
+int main() {
+  foo.~Foo();
+  bar->~Bar();
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (expression_statement
+        (call_expression
+          (field_expression
+            (identifier)
+            (destructor_name
+              (identifier)))
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (field_expression
+            (identifier)
+            (destructor_name
+              (identifier)))
+          (argument_list))))))
+
+================================================================================
+New and Delete expressions
+================================================================================
+
+int main() {
+  auto a = new T();
+  auto b = new U::V<W, X>{};
+  auto c = new (&d) T;
+  auto d = new T[5][3]();
+  auto e = new int[5];
+  d = new(2, f) T;
+  delete a;
+  ::delete[] c;
+  ::new (foo(x)) T(this, x);
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (declaration
+        (placeholder_type_specifier
+          (auto))
+        (init_declarator
+          (identifier)
+          (new_expression
+            (type_identifier)
+            (argument_list))))
+      (declaration
+        (placeholder_type_specifier
+          (auto))
+        (init_declarator
+          (identifier)
+          (new_expression
+            (qualified_identifier
+              (namespace_identifier)
+              (template_type
+                (type_identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier))
+                  (type_descriptor
+                    (type_identifier)))))
+            (initializer_list))))
+      (declaration
+        (placeholder_type_specifier
+          (auto))
+        (init_declarator
+          (identifier)
+          (new_expression
+            (argument_list
+              (pointer_expression
+                (identifier)))
+            (type_identifier))))
+      (declaration
+        (placeholder_type_specifier
+          (auto))
+        (init_declarator
+          (identifier)
+          (new_expression
+            (type_identifier)
+            (new_declarator
+              (number_literal)
+              (new_declarator
+                (number_literal)))
+            (argument_list))))
+      (declaration
+        (placeholder_type_specifier
+          (auto))
+        (init_declarator
+          (identifier)
+          (new_expression
+            (primitive_type)
+            (new_declarator
+              (number_literal)))))
+      (expression_statement
+        (assignment_expression
+          (identifier)
+          (new_expression
+            (argument_list
+              (number_literal)
+              (identifier))
+            (type_identifier))))
+      (expression_statement
+        (delete_expression
+          (identifier)))
+      (expression_statement
+        (delete_expression
+          (identifier)))
+      (expression_statement
+        (new_expression
+          (argument_list
+            (call_expression
+              (identifier)
+              (argument_list
+                (identifier))))
+          (type_identifier)
+          (argument_list
+            (this)
+            (identifier)))))))
+
+================================================================================
+Initializer lists as arguments
+================================================================================
+
+int main() {
+  pairs.push_back({true, false});
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (expression_statement
+        (call_expression
+          (field_expression
+            (identifier)
+            (field_identifier))
+          (argument_list
+            (initializer_list
+              (true)
+              (false))))))))
+
+================================================================================
+Initializer list as assignment expression RHS
+================================================================================
+
+void test() {
+    int b = int{1};
+    b = int{2};
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (declaration
+        (primitive_type)
+        (init_declarator
+          (identifier)
+          (compound_literal_expression
+            (primitive_type)
+            (initializer_list
+              (number_literal)))))
+      (expression_statement
+        (assignment_expression
+          (identifier)
+          (compound_literal_expression
+            (primitive_type)
+            (initializer_list
+              (number_literal))))))))
+
+================================================================================
+Lambda expressions
+================================================================================
+
+auto f = [&](int x) -> bool {
+  return true;
+};
+
+auto f = [x, y](int z) {
+  return false;
+};
+
+auto f = [] {
+  return false;
+};
+
+auto f = [] <typename T> () {
+  return T();
+};
+
+auto f = [] <typename T> requires Hashable<T> {
+  return T();
+};
+
+auto f = [... args = std::forward<Args>(args)](auto &&func) mutable {
+  return std::invoke(std::forward<decltype(func)>(func), std::forward<Args>(args)...);
+};
+
+auto f = [&arg, &...etc = etc] {};
+
+auto f = [=, *this, &args...] {};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier
+          (lambda_default_capture))
+        (abstract_function_declarator
+          (parameter_list
+            (parameter_declaration
+              (primitive_type)
+              (identifier)))
+          (trailing_return_type
+            (type_descriptor
+              (primitive_type))))
+        (compound_statement
+          (return_statement
+            (true))))))
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier
+          (identifier)
+          (identifier))
+        (abstract_function_declarator
+          (parameter_list
+            (parameter_declaration
+              (primitive_type)
+              (identifier))))
+        (compound_statement
+          (return_statement
+            (false))))))
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier)
+        (compound_statement
+          (return_statement
+            (false))))))
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier)
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (abstract_function_declarator
+          (parameter_list))
+        (compound_statement
+          (return_statement
+            (call_expression
+              (identifier)
+              (argument_list)))))))
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier)
+        (template_parameter_list
+          (type_parameter_declaration
+            (type_identifier)))
+        (requires_clause
+          (template_type
+            (type_identifier)
+            (template_argument_list
+              (type_descriptor
+                (type_identifier)))))
+        (compound_statement
+          (return_statement
+            (call_expression
+              (identifier)
+              (argument_list)))))))
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier
+          (lambda_capture_initializer
+            (identifier)
+            (call_expression
+              (qualified_identifier
+                (namespace_identifier)
+                (template_function
+                  (identifier)
+                  (template_argument_list
+                    (type_descriptor
+                      (type_identifier)))))
+              (argument_list
+                (identifier)))))
+        (abstract_function_declarator
+          (parameter_list
+            (parameter_declaration
+              (placeholder_type_specifier
+                (auto))
+              (reference_declarator
+                (identifier))))
+          (type_qualifier))
+        (compound_statement
+          (return_statement
+            (call_expression
+              (qualified_identifier
+                (namespace_identifier)
+                (identifier))
+              (argument_list
+                (call_expression
+                  (qualified_identifier
+                    (namespace_identifier)
+                    (template_function
+                      (identifier)
+                      (template_argument_list
+                        (type_descriptor
+                          (decltype
+                            (identifier))))))
+                  (argument_list
+                    (identifier)))
+                (parameter_pack_expansion
+                  (call_expression
+                    (qualified_identifier
+                      (namespace_identifier)
+                      (template_function
+                        (identifier)
+                        (template_argument_list
+                          (type_descriptor
+                            (type_identifier)))))
+                    (argument_list
+                      (identifier)))))))))))
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier
+          (identifier)
+          (lambda_capture_initializer
+            (identifier)
+            (identifier)))
+        (compound_statement))))
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (lambda_expression
+        (lambda_capture_specifier
+          (lambda_default_capture)
+          (this)
+          (parameter_pack_expansion
+            (identifier)))
+        (compound_statement)))))
+
+================================================================================
+Nested template calls
+================================================================================
+
+class A {
+  A() : T::template Nested<int>::type() {}
+  A() : T::template Nested<int>::template Nested2<float>::type() {}
+
+  B<C::D<E, F>>::G field;
+  using B<C>::template D<int>;
+
+  H<I<J>> method() {
+    K::L<M<N>> variable1 = K::L<M<N>>{};
+    typename K::template L<M<N>>::type variable2;
+    typename K::template L<M<N>>::template O<P>::type variable3;
+  }
+
+  typename Z::template Nested<int>::type x;
+  typename X::template Nested<int>::Y::template Nested2<D> x;
+};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (class_specifier
+    (type_identifier)
+    (field_declaration_list
+      (function_definition
+        (function_declarator
+          (identifier)
+          (parameter_list))
+        (field_initializer_list
+          (field_initializer
+            (qualified_identifier
+              (namespace_identifier)
+              (qualified_identifier
+                (dependent_name
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (primitive_type)))))
+                (field_identifier)))
+            (argument_list)))
+        (compound_statement))
+      (function_definition
+        (function_declarator
+          (identifier)
+          (parameter_list))
+        (field_initializer_list
+          (field_initializer
+            (qualified_identifier
+              (namespace_identifier)
+              (qualified_identifier
+                (dependent_name
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (primitive_type)))))
+                (qualified_identifier
+                  (dependent_name
+                    (template_type
+                      (type_identifier)
+                      (template_argument_list
+                        (type_descriptor
+                          (primitive_type)))))
+                  (field_identifier))))
+            (argument_list)))
+        (compound_statement))
+      (field_declaration
+        (qualified_identifier
+          (template_type
+            (type_identifier)
+            (template_argument_list
+              (type_descriptor
+                (qualified_identifier
+                  (namespace_identifier)
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (type_identifier))
+                      (type_descriptor
+                        (type_identifier))))))))
+          (type_identifier))
+        (field_identifier))
+      (using_declaration
+        (qualified_identifier
+          (template_type
+            (type_identifier)
+            (template_argument_list
+              (type_descriptor
+                (type_identifier))))
+          (dependent_name
+            (template_function
+              (identifier)
+              (template_argument_list
+                (type_descriptor
+                  (primitive_type)))))))
+      (function_definition
+        (template_type
+          (type_identifier)
+          (template_argument_list
+            (type_descriptor
+              (template_type
+                (type_identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier)))))))
+        (function_declarator
+          (field_identifier)
+          (parameter_list))
+        (compound_statement
+          (declaration
+            (qualified_identifier
+              (namespace_identifier)
+              (template_type
+                (type_identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (template_type
+                      (type_identifier)
+                      (template_argument_list
+                        (type_descriptor
+                          (type_identifier))))))))
+            (init_declarator
+              (identifier)
+              (compound_literal_expression
+                (qualified_identifier
+                  (namespace_identifier)
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (template_type
+                          (type_identifier)
+                          (template_argument_list
+                            (type_descriptor
+                              (type_identifier))))))))
+                (initializer_list))))
+          (declaration
+            (dependent_type
+              (qualified_identifier
+                (namespace_identifier)
+                (qualified_identifier
+                  (dependent_name
+                    (template_type
+                      (type_identifier)
+                      (template_argument_list
+                        (type_descriptor
+                          (template_type
+                            (type_identifier)
+                            (template_argument_list
+                              (type_descriptor
+                                (type_identifier))))))))
+                  (type_identifier))))
+            (identifier))
+          (declaration
+            (dependent_type
+              (qualified_identifier
+                (namespace_identifier)
+                (qualified_identifier
+                  (dependent_name
+                    (template_type
+                      (type_identifier)
+                      (template_argument_list
+                        (type_descriptor
+                          (template_type
+                            (type_identifier)
+                            (template_argument_list
+                              (type_descriptor
+                                (type_identifier))))))))
+                  (qualified_identifier
+                    (dependent_name
+                      (template_type
+                        (type_identifier)
+                        (template_argument_list
+                          (type_descriptor
+                            (type_identifier)))))
+                    (type_identifier)))))
+            (identifier))))
+      (field_declaration
+        (dependent_type
+          (qualified_identifier
+            (namespace_identifier)
+            (qualified_identifier
+              (dependent_name
+                (template_type
+                  (type_identifier)
+                  (template_argument_list
+                    (type_descriptor
+                      (primitive_type)))))
+              (type_identifier))))
+        (field_identifier))
+      (field_declaration
+        (dependent_type
+          (qualified_identifier
+            (namespace_identifier)
+            (qualified_identifier
+              (dependent_name
+                (template_type
+                  (type_identifier)
+                  (template_argument_list
+                    (type_descriptor
+                      (primitive_type)))))
+              (qualified_identifier
+                (namespace_identifier)
+                (dependent_name
+                  (template_type
+                    (type_identifier)
+                    (template_argument_list
+                      (type_descriptor
+                        (type_identifier)))))))))
+        (field_identifier)))))
+
+================================================================================
+Comma expressions at the start of blocks
+================================================================================
+
+int main() { a(), b(); }
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (expression_statement
+        (comma_expression
+          (call_expression
+            (identifier)
+            (argument_list))
+          (call_expression
+            (identifier)
+            (argument_list)))))))
+
+================================================================================
+Nullptr
+================================================================================
+
+void *x = nullptr;
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (pointer_declarator
+        (identifier))
+      (null))))
+
+================================================================================
+Raw string literals
+================================================================================
+
+const char *s1 = R"(
+  This is a string. It ends with ')' and a quote.
+)";
+
+const char *s2 = R"FOO(
+  This is a string. It ends with ')FOO' and a quote.
+)FOO";
+
+const char *s3 = uR"FOO(
+  This is a string. It ends with ')FOO' and a quote.
+)FOO";
+
+const char *s4 = UR"FOO(
+  This is a string. It ends with ')FOO' and a quote.
+)FOO";
+
+const char *s5 = u8R"FOO(
+  This is a string. It ends with ')FOO' and a quote.
+)FOO";
+
+const char *s6 = LR"FOO(
+  This is a string. It ends with ')FOO' and a quote.
+)FOO";
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (type_qualifier)
+    (primitive_type)
+    (init_declarator
+      (pointer_declarator
+        (identifier))
+      (raw_string_literal
+        (raw_string_content))))
+  (declaration
+    (type_qualifier)
+    (primitive_type)
+    (init_declarator
+      (pointer_declarator
+        (identifier))
+      (raw_string_literal
+        (raw_string_delimiter)
+        (raw_string_content)
+        (raw_string_delimiter))))
+  (declaration
+    (type_qualifier)
+    (primitive_type)
+    (init_declarator
+      (pointer_declarator
+        (identifier))
+      (raw_string_literal
+        (raw_string_delimiter)
+        (raw_string_content)
+        (raw_string_delimiter))))
+  (declaration
+    (type_qualifier)
+    (primitive_type)
+    (init_declarator
+      (pointer_declarator
+        (identifier))
+      (raw_string_literal
+        (raw_string_delimiter)
+        (raw_string_content)
+        (raw_string_delimiter))))
+  (declaration
+    (type_qualifier)
+    (primitive_type)
+    (init_declarator
+      (pointer_declarator
+        (identifier))
+      (raw_string_literal
+        (raw_string_delimiter)
+        (raw_string_content)
+        (raw_string_delimiter))))
+  (declaration
+    (type_qualifier)
+    (primitive_type)
+    (init_declarator
+      (pointer_declarator
+        (identifier))
+      (raw_string_literal
+        (raw_string_delimiter)
+        (raw_string_content)
+        (raw_string_delimiter)))))
+
+================================================================================
+Template calls
+================================================================================
+
+int main() {
+  // '<' and '>' as template argument list delimiters
+  if (a<b && c>()) {}
+
+  // '<' and '>' as binary operators
+  if (a < b && c >= d) {}
+
+  Q::template R<S>();
+  this->template f<T>();
+  foo.template f<U>();
+}
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (comment)
+      (if_statement
+        (condition_clause
+          (call_expression
+            (template_function
+              (identifier)
+              (template_argument_list
+                (binary_expression
+                  (identifier)
+                  (identifier))))
+            (argument_list)))
+        (compound_statement))
+      (comment)
+      (if_statement
+        (condition_clause
+          (binary_expression
+            (binary_expression
+              (identifier)
+              (identifier))
+            (binary_expression
+              (identifier)
+              (identifier))))
+        (compound_statement))
+      (expression_statement
+        (call_expression
+          (qualified_identifier
+            (namespace_identifier)
+            (dependent_name
+              (template_function
+                (identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier))))))
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (field_expression
+            (this)
+            (dependent_name
+              (template_method
+                (field_identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier))))))
+          (argument_list)))
+      (expression_statement
+        (call_expression
+          (field_expression
+            (identifier)
+            (dependent_name
+              (template_method
+                (field_identifier)
+                (template_argument_list
+                  (type_descriptor
+                    (type_identifier))))))
+          (argument_list))))))
+
+================================================================================
+Parameter pack expansions
+================================================================================
+
+container<A,B,C...> t1;
+container<C...,A,B> t2;
+
+typedef Tuple<Pair<Args1, Args2>...> type;
+
+f(&args...); // expands to f(&E1, &E2, &E3)
+f(n, ++args...); // expands to f(n, ++E1, ++E2, ++E3);
+f(++args..., n); // expands to f(++E1, ++E2, ++E3, n);
+f(const_cast<const Args*>(&args)...); // f(const_cast<const E1*>(&X1), const_cast<const E2*>(&X2), const_cast<const E3*>(&X3))
+f(h(args...) + args...); // expands to f(h(E1,E2,E3) + E1, h(E1,E2,E3) + E2, h(E1,E2,E3) + E3)
+
+const int size = sizeof...(args) + 2;
+int res[size] = {1,args...,2};
+int dummy[sizeof...(Ts)] = { (std::cout << args, 0)... };
+
+auto lm = [&, args...] { return g(args...); };
+
+class X : public Mixins... {
+public:
+    X(const Mixins&... mixins) : Mixins(mixins)... { }
+};
+
+template <typename... Args>
+void wrap(Args&&... args) {
+    f(forward<Args>(args)...);
+}
+
+void f(T...) {}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    type: (template_type
+      name: (type_identifier)
+      arguments: (template_argument_list
+        (type_descriptor
+          type: (type_identifier))
+        (type_descriptor
+          type: (type_identifier))
+        (parameter_pack_expansion
+          pattern: (type_descriptor
+            type: (type_identifier)))))
+    declarator: (identifier))
+  (declaration
+    type: (template_type
+      name: (type_identifier)
+      arguments: (template_argument_list
+        (parameter_pack_expansion
+          pattern: (type_descriptor
+            type: (type_identifier)))
+        (type_descriptor
+          type: (type_identifier))
+        (type_descriptor
+          type: (type_identifier))))
+    declarator: (identifier))
+  (type_definition
+    type: (template_type
+      name: (type_identifier)
+      arguments: (template_argument_list
+        (parameter_pack_expansion
+          pattern: (type_descriptor
+            type: (template_type
+              name: (type_identifier)
+              arguments: (template_argument_list
+                (type_descriptor
+                  type: (type_identifier))
+                (type_descriptor
+                  type: (type_identifier))))))))
+    declarator: (type_identifier))
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (parameter_pack_expansion
+          pattern: (pointer_expression
+            argument: (identifier))))))
+  (comment)
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (identifier)
+        (parameter_pack_expansion
+          pattern: (update_expression
+            argument: (identifier))))))
+  (comment)
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (parameter_pack_expansion
+          pattern: (update_expression
+            argument: (identifier)))
+        (identifier))))
+  (comment)
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (parameter_pack_expansion
+          pattern: (call_expression
+            function: (template_function
+              name: (identifier)
+              arguments: (template_argument_list
+                (type_descriptor
+                  (type_qualifier)
+                  type: (type_identifier)
+                  declarator: (abstract_pointer_declarator))))
+            arguments: (argument_list
+              (pointer_expression
+                argument: (identifier))))))))
+  (comment)
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      arguments: (argument_list
+        (parameter_pack_expansion
+          pattern: (binary_expression
+            left: (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (parameter_pack_expansion
+                  pattern: (identifier))))
+            right: (identifier))))))
+  (comment)
+  (declaration
+    (type_qualifier)
+    type: (primitive_type)
+    declarator: (init_declarator
+      declarator: (identifier)
+      value: (binary_expression
+        left: (sizeof_expression
+          value: (identifier))
+        right: (number_literal))))
+  (declaration
+    type: (primitive_type)
+    declarator: (init_declarator
+      declarator: (array_declarator
+        declarator: (identifier)
+        size: (identifier))
+      value: (initializer_list
+        (number_literal)
+        (parameter_pack_expansion
+          pattern: (identifier))
+        (number_literal))))
+  (declaration
+    type: (primitive_type)
+    declarator: (init_declarator
+      declarator: (array_declarator
+        declarator: (identifier)
+        size: (sizeof_expression
+          value: (identifier)))
+      value: (initializer_list
+        (parameter_pack_expansion
+          pattern: (parenthesized_expression
+            (comma_expression
+              left: (binary_expression
+                left: (qualified_identifier
+                  scope: (namespace_identifier)
+                  name: (identifier))
+                right: (identifier))
+              right: (number_literal)))))))
+  (declaration
+    type: (placeholder_type_specifier
+      (auto))
+    declarator: (init_declarator
+      declarator: (identifier)
+      value: (lambda_expression
+        captures: (lambda_capture_specifier
+          (lambda_default_capture)
+          (parameter_pack_expansion
+            pattern: (identifier)))
+        body: (compound_statement
+          (return_statement
+            (call_expression
+              function: (identifier)
+              arguments: (argument_list
+                (parameter_pack_expansion
+                  pattern: (identifier)))))))))
+  (class_specifier
+    name: (type_identifier)
+    (base_class_clause
+      (access_specifier)
+      (type_identifier))
+    body: (field_declaration_list
+      (access_specifier)
+      (function_definition
+        declarator: (function_declarator
+          declarator: (identifier)
+          parameters: (parameter_list
+            (variadic_parameter_declaration
+              (type_qualifier)
+              type: (type_identifier)
+              declarator: (reference_declarator
+                (variadic_declarator
+                  (identifier))))))
+        (field_initializer_list
+          (field_initializer
+            (field_identifier)
+            (argument_list
+              (identifier))))
+        body: (compound_statement))))
+  (template_declaration
+    parameters: (template_parameter_list
+      (variadic_type_parameter_declaration
+        (type_identifier)))
+    (function_definition
+      type: (primitive_type)
+      declarator: (function_declarator
+        declarator: (identifier)
+        parameters: (parameter_list
+          (variadic_parameter_declaration
+            type: (type_identifier)
+            declarator: (reference_declarator
+              (variadic_declarator
+                (identifier))))))
+      body: (compound_statement
+        (expression_statement
+          (call_expression
+            function: (identifier)
+            arguments: (argument_list
+              (parameter_pack_expansion
+                pattern: (call_expression
+                  function: (template_function
+                    name: (identifier)
+                    arguments: (template_argument_list
+                      (type_descriptor
+                        type: (type_identifier))))
+                  arguments: (argument_list
+                    (identifier))))))))))
+  (function_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list
+        (variadic_parameter_declaration
+          type: (type_identifier)
+          declarator: (variadic_declarator))))
+    body: (compound_statement)))
+
+================================================================================
+Concatenated string literals
+================================================================================
+
+"a" "b" "c";
+R"(a)" R"(b)" R"(c)";
+"a" R"(b)" L"c" R"FOO(d)FOO";
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (concatenated_string
+      (string_literal
+        (string_content))
+      (string_literal
+        (string_content))
+      (string_literal
+        (string_content))))
+  (expression_statement
+    (concatenated_string
+      (raw_string_literal
+        (raw_string_content))
+      (raw_string_literal
+        (raw_string_content))
+      (raw_string_literal
+        (raw_string_content))))
+  (expression_statement
+    (concatenated_string
+      (string_literal
+        (string_content))
+      (raw_string_literal
+        (raw_string_content))
+      (string_literal
+        (string_content))
+      (raw_string_literal
+        (raw_string_delimiter)
+        (raw_string_content)
+        (raw_string_delimiter)))))
+
+================================================================================
+User-defined literals
+================================================================================
+
+1.2_km;
+"foo" "bar"_baz;
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (user_defined_literal
+      (number_literal)
+      (literal_suffix)))
+  (expression_statement
+    (user_defined_literal
+      (concatenated_string
+        (string_literal
+          (string_content))
+        (string_literal
+          (string_content)))
+      (literal_suffix))))
+
+================================================================================
+Primitive types ctor
+================================================================================
+
+x = int(1);
+x = new int(1);
+x = (int(1) + float(2));
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (call_expression
+        (primitive_type)
+        (argument_list
+          (number_literal)))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (new_expression
+        (primitive_type)
+        (argument_list
+          (number_literal)))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (parenthesized_expression
+        (binary_expression
+          (call_expression
+            (primitive_type)
+            (argument_list
+              (number_literal)))
+          (call_expression
+            (primitive_type)
+            (argument_list
+              (number_literal))))))))
+
+================================================================================
+Array assignment expression
+================================================================================
+
+array_[i] = s[i];
+array_[{i}] = s[{1,2,3}];
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (assignment_expression
+      (subscript_expression
+        (identifier)
+        (subscript_argument_list
+          (identifier)))
+      (subscript_expression
+        (identifier)
+        (subscript_argument_list
+          (identifier)))))
+  (expression_statement
+    (assignment_expression
+      (subscript_expression
+        (identifier)
+        (subscript_argument_list
+          (initializer_list
+            (identifier))))
+      (subscript_expression
+        (identifier)
+        (subscript_argument_list
+          (initializer_list
+            (number_literal)
+            (number_literal)
+            (number_literal)))))))
+
+================================================================================
+Coroutines
+================================================================================
+
+co_await fn();
+co_await var;
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (co_await_expression
+      (call_expression
+        (identifier)
+        (argument_list))))
+  (expression_statement
+    (co_await_expression
+      (identifier))))
+
+================================================================================
+Three-way comparison
+================================================================================
+
+auto x = a <=> b;
+
+bool y = 0 > a <=> b;
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (identifier)
+      (binary_expression
+        (number_literal)
+        (binary_expression
+          (identifier)
+          (identifier))))))
+
+================================================================================
+Fold Expressions
+================================================================================
+
+bool t  = (... + IndexOf<T>);
+bool t2 = (IndexOf<T> + ...);
+bool t3 = (1 + ... + IndexOf<T>);
+bool t3 = (IndexOf<T> + ... + 1);
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (identifier)
+      (fold_expression
+        (template_function
+          (identifier)
+          (template_argument_list
+            (type_descriptor
+              (type_identifier)))))))
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (identifier)
+      (fold_expression
+        (template_function
+          (identifier)
+          (template_argument_list
+            (type_descriptor
+              (type_identifier)))))))
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (identifier)
+      (fold_expression
+        (number_literal)
+        (template_function
+          (identifier)
+          (template_argument_list
+            (type_descriptor
+              (type_identifier)))))))
+  (declaration
+    (primitive_type)
+    (init_declarator
+      (identifier)
+      (fold_expression
+        (template_function
+          (identifier)
+          (template_argument_list
+            (type_descriptor
+              (type_identifier))))
+        (number_literal)))))
+
+================================================================================
+Alternative tokens (digraphs)
+================================================================================
+
+if (not marked and (x < left or right < x)) {}
+
+operator not_eq(int) { return true; }
+
+foo and_eq bar();
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (if_statement
+    (condition_clause
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (parenthesized_expression
+          (binary_expression
+            (binary_expression
+              (identifier)
+              (identifier))
+            (binary_expression
+              (identifier)
+              (identifier))))))
+    (compound_statement))
+  (function_definition
+    (function_declarator
+      (operator_name)
+      (parameter_list
+        (parameter_declaration
+          (primitive_type))))
+    (compound_statement
+      (return_statement
+        (true))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (call_expression
+        (identifier)
+        (argument_list)))))
+
+================================================================================
+Subscript expression
+================================================================================
+
+auto x = a[1, 2, 3];
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (placeholder_type_specifier
+      (auto))
+    (init_declarator
+      (identifier)
+      (subscript_expression
+        (identifier)
+        (subscript_argument_list
+          (number_literal)
+          (number_literal)
+          (number_literal))))))
+
+================================================================================
+Dependent operator templates
+================================================================================
+
+x.template operator()<int>();
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (call_expression
+      (field_expression
+        (identifier)
+        (dependent_name
+          (template_method
+            (operator_name)
+            (template_argument_list
+              (type_descriptor
+                (primitive_type))))))
+      (argument_list))))
+
+================================================================================
+Numeric literals
+================================================================================
+
+void f() {
+  0123'4567;
+  0b1001'0110;
+  0B10;
+  0xabcd'1234;
+  0XABCD;
+  1'234;
+  -123;
+  123l;
+  123u;
+  123ULL;
+  123z;
+  123UZ;
+
+  1.0;
+  -1.0;
+  1.f;
+  .1f;
+  1.0l;
+  1.0f16;
+  1.0bf16;
+  1.e1;
+  1.0e1;
+  0xa.bp1;
+  0xap-1;
+  0x.ap-1;
+}
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal))
+      (expression_statement
+        (number_literal)))))
+
+================================================================================
+While with assignment expression
+================================================================================
+
+while ((a = b)) {}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (while_statement
+    (condition_clause
+      (parenthesized_expression
+        (assignment_expression
+          (identifier)
+          (identifier))))
+    (compound_statement)))
+
+================================================================================
+Parenthesized Expressions that are not Fold Expressions
+================================================================================
+
+int main() {
+  if ((a = a + 1)) {
+    (a += 1) %= 2;
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (if_statement
+        (condition_clause
+          (parenthesized_expression
+            (assignment_expression
+              (identifier)
+              (binary_expression
+                (identifier)
+                (number_literal)))))
+        (compound_statement
+          (expression_statement
+            (assignment_expression
+              (parenthesized_expression
+                (assignment_expression
+                  (identifier)
+                  (number_literal)))
+              (number_literal))))))))
+
+================================================================================
+Complex fold expression
+================================================================================
+
+template <typename... Args> void negateValues(Args... args) {
+  ((std::cout << !args << " "), ...);
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (template_declaration
+    (template_parameter_list
+      (variadic_type_parameter_declaration
+        (type_identifier)))
+    (function_definition
+      (primitive_type)
+      (function_declarator
+        (identifier)
+        (parameter_list
+          (variadic_parameter_declaration
+            (type_identifier)
+            (variadic_declarator
+              (identifier)))))
+      (compound_statement
+        (expression_statement
+          (fold_expression
+            (parenthesized_expression
+              (binary_expression
+                (binary_expression
+                  (qualified_identifier
+                    (namespace_identifier)
+                    (identifier))
+                  (unary_expression
+                    (identifier)))
+                (string_literal
+                  (string_content))))))))))

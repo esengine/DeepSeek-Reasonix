@@ -1,4 +1,13 @@
-import { downloadPaneFromURL } from "./download-link.js";
+import { downloadPaneFromURL, downloadURLForPane, releaseChannelFromURL } from "./download-link.js";
+import {
+  cliReleaseModel,
+  cliUpgradeCommand,
+  desktopGitHubReleaseModel,
+  desktopReleaseModel,
+  fetchFirstJSON,
+  normalizePublicReleaseChannel,
+  releaseVersionLabel,
+} from "./release-channels.js";
 import { initTheme } from "./theme.js";
 
 // Reasonix site — vanilla interactions
@@ -64,11 +73,37 @@ import { initTheme } from "./theme.js";
   const tabs = Array.from(document.querySelectorAll(".dl-tab"));
   const panes = Array.from(document.querySelectorAll(".dl-pane"));
   const activatePane = (name) => {
-    tabs.forEach((b) => b.classList.toggle("active", b.dataset.pane === name));
-    panes.forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
+    tabs.forEach((b) => {
+      const active = b.dataset.pane === name;
+      b.classList.toggle("active", active);
+      b.setAttribute("aria-selected", active ? "true" : "false");
+      b.tabIndex = active ? 0 : -1;
+    });
+    panes.forEach((p) => {
+      const active = p.dataset.pane === name;
+      p.classList.toggle("active", active);
+      p.hidden = !active;
+    });
   };
   tabs.forEach((tab) => {
-    tab.addEventListener("click", () => activatePane(tab.dataset.pane));
+    tab.addEventListener("click", () => {
+      activatePane(tab.dataset.pane);
+      reflectPaneURL(tab.dataset.pane);
+    });
+    tab.addEventListener("keydown", (event) => {
+      const current = tabs.indexOf(tab);
+      let next = -1;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") next = (current + 1) % tabs.length;
+      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = (current - 1 + tabs.length) % tabs.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = tabs.length - 1;
+      if (next < 0) return;
+      event.preventDefault();
+      const nextTab = tabs[next];
+      activatePane(nextTab.dataset.pane);
+      reflectPaneURL(nextTab.dataset.pane);
+      nextTab.focus();
+    });
   });
 
   /* OS detection — hero download button + card badge + highlight */
@@ -94,6 +129,7 @@ import { initTheme } from "./theme.js";
   };
 
   const requestedPane = downloadPaneFromURL(window.location.href);
+  const requestedReleaseChannel = releaseChannelFromURL(window.location.href);
   if (requestedPane) {
     activatePane(requestedPane);
     if (requestedPane === "desktop") flashOSCard();
@@ -105,9 +141,12 @@ import { initTheme } from "./theme.js";
 
   /* links that deep-link into a specific download tab */
   document.querySelectorAll("[data-goto]").forEach((a) => {
-    a.addEventListener("click", () => {
+    a.addEventListener("click", (event) => {
+      event.preventDefault();
       activatePane(a.dataset.goto);
+      reflectPaneURL(a.dataset.goto);
       if (a.hasAttribute("data-os-dl")) flashOSCard();
+      document.getElementById("start")?.scrollIntoView({ block: "start" });
       setTimeout(queueSweep, 500);
     });
   });
@@ -194,37 +233,140 @@ import { initTheme } from "./theme.js";
     });
   });
 
-  /* refresh the published version and immutable desktop download links between rebuilds */
-  const desktopAssets = [
-    "Reasonix-darwin-universal.dmg",
-    "Reasonix-darwin-arm64.zip",
-    "Reasonix-darwin-amd64.zip",
-    "Reasonix-windows-amd64-installer.exe",
-    "Reasonix-windows-arm64-installer.exe",
-    "Reasonix-windows-amd64.zip",
-    "Reasonix-linux-amd64.deb",
-    "Reasonix-linux-amd64.tar.gz",
-  ];
-  const localPreview = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-  if (!localPreview) {
-    fetch("https://dl.reasonix.io/latest/latest.json", { cache: "no-cache" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-      const rawVersion = String((d && d.version) || "");
-      const versionMatch = rawVersion.match(/^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/);
-      if (!versionMatch) return;
-      const v = versionMatch[1];
-      const desktopBase = "https://dl.reasonix.io/desktop-v" + v;
-      document.querySelectorAll(".rxv").forEach((e) => { e.textContent = v; });
-      desktopAssets.forEach((asset) => {
-        document.querySelectorAll('[data-desktop-asset="' + asset + '"]').forEach((a) => {
-          a.href = desktopBase + "/" + asset;
-        });
-      });
-      document.querySelectorAll("a.rxnotes").forEach((a) => {
-        a.href = new URL("changelog/v" + v + "/", window.location.origin + "/").href;
-      });
+  /* public release channels */
+  const releaseModels = {
+    desktop: { stable: null, preview: null },
+    cli: { stable: null, preview: null },
+  };
+  const selectedChannels = { desktop: "stable", cli: "stable" };
+  const releasesPage = "https://github.com/esengine/DeepSeek-Reasonix/releases";
+  const reflectPaneURL = (surface) => {
+    const nextURL = downloadURLForPane(window.location.href, surface, selectedChannels[surface]);
+    if (nextURL) window.history.replaceState(null, "", nextURL);
+  };
+
+  // npm / Homebrew / generic product chips track the CLI stable line only.
+  // Desktop and CLI download panes render their own versions via
+  // [data-release-version="<surface>"]; never let Desktop and CLI race on .rxv.
+  const updateCLIPackageVersion = (model) => {
+    if (!model) return;
+    document.querySelectorAll(".rxv").forEach((element) => { element.textContent = releaseVersionLabel(model); });
+    document.querySelectorAll("a.rxnotes").forEach((link) => {
+      link.href = new URL("changelog/v" + model.displayVersion + "/", window.location.origin + "/").href;
+    });
+  };
+
+  // Never synthesize public artifact URLs. If every required asset is not
+  // attested by live release data, fall back to the release list instead of a
+  // plausible-looking URL that may 404.
+  const fallbackReleaseURL = () => releasesPage;
+
+  const renderReleaseSurface = (surface) => {
+    const channel = selectedChannels[surface];
+    const model = releaseModels[surface][channel];
+    document.querySelectorAll('[data-release-version="' + surface + '"]').forEach((element) => {
+      element.textContent = releaseVersionLabel(model);
+    });
+    document.querySelectorAll('[data-release-summary="' + surface + '"] [data-channel-copy]').forEach((copy) => {
+      copy.hidden = copy.dataset.channelCopy !== channel;
+    });
+    document.querySelectorAll('[data-release-switch="' + surface + '"] [data-release-channel]').forEach((button) => {
+      const active = button.dataset.releaseChannel === channel;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+
+    const assetAttribute = "data-" + surface + "-asset";
+    document.querySelectorAll("[" + assetAttribute + "]").forEach((link) => {
+      const asset = link.getAttribute(assetAttribute);
+      const target = model?.assets?.[asset] || fallbackReleaseURL(surface, channel, asset);
+      link.href = target;
+      if (target === releasesPage) link.removeAttribute("download");
+      else link.setAttribute("download", "");
+    });
+
+    if (surface === "cli") {
+      const command = cliUpgradeCommand(channel);
+      document.querySelectorAll('[data-release-command="cli"]').forEach((element) => { element.textContent = command; });
+      document.querySelectorAll('.release-upgrade-command [data-copy]').forEach((button) => { button.dataset.copy = command; });
+    }
+  };
+
+  const selectReleaseChannel = (surface, value, reflectURL) => {
+    selectedChannels[surface] = normalizePublicReleaseChannel(value);
+    renderReleaseSurface(surface);
+    if (reflectURL) reflectPaneURL(surface);
+  };
+
+  document.querySelectorAll("[data-release-switch]").forEach((group) => {
+    const surface = group.dataset.releaseSwitch;
+    group.querySelectorAll("[data-release-channel]").forEach((button) => {
+      button.addEventListener("click", () => selectReleaseChannel(surface, button.dataset.releaseChannel, true));
+    });
+  });
+  if (requestedReleaseChannel && (requestedPane === "desktop" || requestedPane === "cli")) {
+    selectedChannels[requestedPane] = requestedReleaseChannel;
+  }
+  renderReleaseSurface("desktop");
+  renderReleaseSurface("cli");
+
+  const desktopEndpoints = {
+    stable: [
+      "https://crash.reasonix.io/v1/desktop/releases/stable/latest.json",
+      "https://dl.reasonix.io/latest/latest.json",
+    ],
+    preview: [
+      "https://crash.reasonix.io/v1/desktop/releases/preview/latest.json",
+      "https://crash.reasonix.io/v1/desktop/releases/canary/latest.json",
+      "https://dl.reasonix.io/preview/latest.json",
+      "https://dl.reasonix.io/canary/latest.json",
+    ],
+  };
+  ["stable", "preview"].forEach((channel) => {
+    const manifestModel = fetchFirstJSON(
+      desktopEndpoints[channel],
+      fetch,
+      (manifest) => Boolean(desktopReleaseModel(manifest, channel)),
+    )
+      .then((manifest) => desktopReleaseModel(manifest, channel));
+    const modelRequest = channel === "stable"
+      ? manifestModel.catch(() => fetchFirstJSON(
+        ["https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/latest"],
+        fetch,
+        (release) => Boolean(desktopGitHubReleaseModel(release)),
+      ).then(desktopGitHubReleaseModel))
+      : manifestModel;
+    modelRequest
+      .then((model) => {
+        if (!model) return;
+        releaseModels.desktop[channel] = model;
+        if (selectedChannels.desktop === channel) renderReleaseSurface("desktop");
       })
       .catch(() => {});
-  }
+  });
+
+  let githubCLIReleases;
+  const fallbackCLIReleases = () => {
+    githubCLIReleases ??= fetchFirstJSON([
+      "https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases?per_page=100",
+    ]).catch(() => null);
+    return githubCLIReleases;
+  };
+  ["stable", "preview"].forEach((channel) => {
+    fetchFirstJSON(
+      [`https://crash.reasonix.io/v1/cli/releases/${channel}/latest.json`],
+      fetch,
+      (payload) => Boolean(cliReleaseModel(Array.isArray(payload) ? payload : [payload], channel)),
+    )
+      .catch(() => fallbackCLIReleases())
+      .then((payload) => {
+        const releases = Array.isArray(payload) ? payload : payload ? [payload] : [];
+        const model = cliReleaseModel(releases, channel);
+        if (!model) return;
+        releaseModels.cli[channel] = model;
+        if (channel === "stable") updateCLIPackageVersion(model);
+        if (selectedChannels.cli === channel) renderReleaseSurface("cli");
+      })
+      .catch(() => {});
+  });
 })();

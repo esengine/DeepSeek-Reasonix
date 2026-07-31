@@ -7,13 +7,19 @@
 #           or the stable release orchestrator's workflow_call input.
 #   preview: a manual dispatch with channel=preview (legacy canary accepted);
 #            version is synthesized from base_version + the monotonic run_number,
-#            tag is the rolling `desktop-preview`, and it is always a prerelease.
+#            tag is the matching immutable asset directory, and it is always a
+#            prerelease.
 set -euo pipefail
 
 stable_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
 release_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-([0-9A-Za-z-]+)(\.[0-9A-Za-z-]+)*)?$'
+preview_semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$'
 
 if [ "${IN_CHANNEL:-stable}" = "preview" ] || [ "${IN_CHANNEL:-stable}" = "canary" ]; then
+	if [ -n "${IN_TAG:-}" ]; then
+		echo "::error::Desktop Preview versions are synthesized from protected main-v2; tag must be empty" >&2
+		exit 1
+	fi
 	base="${IN_BASE_VERSION:?preview dispatch requires base_version}"
 	base="${base#v}"
 	base="${base#desktop-v}"
@@ -22,7 +28,7 @@ if [ "${IN_CHANNEL:-stable}" = "preview" ] || [ "${IN_CHANNEL:-stable}" = "canar
 		exit 1
 	fi
 	version="v${base}-preview.${RUN_NUMBER}"
-	tag="desktop-preview"
+	tag="desktop-${version}"
 	channel="preview"
 	prerelease="true"
 else
@@ -39,6 +45,10 @@ else
 		exit 1
 	fi
 	version="${tag#desktop-}"
+	if [[ "${version#v}" =~ $preview_semver_re ]]; then
+		echo "::error::Desktop Preview versions must use channel=preview without a Git tag, got: $tag" >&2
+		exit 1
+	fi
 	channel="stable"
 	case "$version" in
 	*-*) prerelease="true" ;;

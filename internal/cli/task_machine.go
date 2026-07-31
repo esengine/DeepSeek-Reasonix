@@ -34,10 +34,11 @@ type machineTaskShow struct {
 }
 
 type taskMachineOptions struct {
-	dir       string
-	sessionID string
-	target    string
-	json      bool
+	dir         string
+	projectRoot string
+	sessionID   string
+	target      string
+	json        bool
 }
 
 func taskCommand(args []string) int {
@@ -61,9 +62,7 @@ func runTaskCommand(args []string, out io.Writer) int {
 	if !options.json {
 		return writeMachineError(out, command, "invalid_argument", "--json is required")
 	}
-	if options.dir == "" {
-		options.dir = resolveCLISessionDir()
-	}
+	options.dir = resolveMachineSessionDir(options.dir, options.projectRoot)
 	identityKey, err := loadMachineIdentityKey()
 	if err != nil {
 		return writeMachineError(out, command, "machine_identity_unavailable", "machine identity is unavailable")
@@ -103,6 +102,12 @@ func parseTaskMachineOptions(args []string, operation string) (taskMachineOption
 			}
 			i++
 			options.dir = args[i]
+		case "--project-root":
+			if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
+				return options, "invalid_argument", "--project-root requires a value"
+			}
+			i++
+			options.projectRoot = args[i]
 		case "--session":
 			if i+1 >= len(args) || !validMachineID(args[i+1]) {
 				return options, "invalid_argument", "--session requires a valid identifier"
@@ -121,6 +126,9 @@ func parseTaskMachineOptions(args []string, operation string) (taskMachineOption
 			}
 			options.target = arg
 		}
+	}
+	if options.dir != "" && options.projectRoot != "" {
+		return options, "invalid_argument", "--dir and --project-root cannot be combined"
 	}
 	if operation == "show" && options.target == "" {
 		return options, "invalid_argument", "a task identifier is required"

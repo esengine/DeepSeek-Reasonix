@@ -39,6 +39,38 @@ Running `reasonix` without a subcommand starts the interactive terminal UI. Use
 
 Flags may appear before or after the prompt where applicable.
 
+## Update the native CLI
+
+```sh
+reasonix upgrade                  # update on the saved channel (Stable initially)
+reasonix upgrade preview          # switch to Preview, remember it, and update
+reasonix upgrade stable           # switch back to Stable, remember it, and update
+```
+
+The selected channel is user-global and is stored as
+`[cli].update_channel` in the Reasonix user config. A fresh or older config
+defaults to Stable, and a project's `reasonix.toml` cannot override this choice.
+Stable and Preview replace the same native CLI binary; they are not installed
+side by side.
+
+Preview accepts only protected `vX.Y.Z-preview.N` releases; internal RCs are
+excluded from both public channels. Switching channels may install a
+numerically older target, which is required when returning from a newer Preview
+to the current Stable release.
+
+For automation, `--channel stable|preview` remains a one-off override and does
+not change the saved channel:
+
+```sh
+reasonix upgrade preview --check          # save Preview, only check its target
+reasonix upgrade --channel preview        # one-off Preview update for a script
+reasonix upgrade --channel stable --force # one-off Stable reinstall
+```
+
+`--check` reports the target without installing it, while `--force` reinstalls
+the target channel's current release. The `reasonix update` alias behaves the
+same way.
+
 ## Configure providers
 
 ```sh
@@ -68,6 +100,28 @@ that credential; choose a different variable name when the providers use
 different keys. Providers added or removed through setup are also added to or
 removed from desktop provider access, so the same models are available in the
 desktop app.
+
+### Configure regional pricing currency
+
+Use the user-global currency command to inspect or select the official DeepSeek
+regional price table:
+
+```sh
+reasonix config currency             # show the saved and resolved currency
+reasonix config currency auto        # follow the resolved locale
+reasonix config currency CNY
+reasonix config currency USD
+```
+
+`auto` resolves Simplified or Traditional Chinese locales to CNY and English or
+other locales to USD. An explicit `CNY` or `USD` selection remains independent
+from the UI language. This preference is stored in the user config and cannot
+be overridden by project `reasonix.toml`; `--local` is therefore not supported.
+Custom provider prices are preserved.
+
+In an interactive session, `/currency` shows the saved and resolved values, and
+`/currency auto|CNY|USD` changes the preference and refreshes the current
+runtime without discarding the conversation.
 
 ## One-shot and automation
 
@@ -110,6 +164,8 @@ The final structured object has this shape:
   "num_turns": 1,
   "result": "...",
   "session_id": "...",
+  "total_cost": 0,
+  "currency": "USD",
   "total_cost_usd": 0,
   "usage": {
     "input_tokens": 0,
@@ -119,6 +175,13 @@ The final structured object has this shape:
   }
 }
 ```
+
+`total_cost` is denominated in the ISO currency code from `currency`, currently
+`CNY` or `USD` for official DeepSeek pricing. `total_cost_usd` remains as a
+numeric compatibility alias and mirrors `total_cost`; despite its legacy name,
+it is not converted to USD when `currency` is `CNY`. New consumers must use
+`total_cost` together with `currency`. A structured run fails instead of
+reporting a misleading total if usage contains mixed currencies.
 
 Execution failures use `subtype: "error_during_execution"` and
 `is_error: true`. Structured modes keep runtime errors in JSON instead of also
@@ -146,18 +209,20 @@ first redacted-machine invocation may initialize a private identity key in the
 Reasonix user-state directory:
 
 ```sh
-reasonix session list --json [--dir SESSION_DIR]
-reasonix session show <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session status <machine-session-id> --json [--dir SESSION_DIR]
-reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR]
-reasonix task list --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
-reasonix task show <task-id> --json [--dir SESSION_DIR] [--session MACHINE_SESSION_ID]
+reasonix session list --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session show <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --project-root PATH]
+reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
+reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
 
 For `session` and `task`, `--dir` explicitly selects the session storage
-directory; without it, Reasonix selects the current project's session store.
+directory, while `--project-root` resolves the selected project's session
+store. The two options cannot be combined. Without either option, Reasonix
+selects the current project's session store.
 For `hook`, `--dir` is an alias for `--project-root`.
 `hook list` reports `active` or `invalid`; `invalid` means the
 configured event cannot execute because its event, command/context source, or
@@ -233,7 +298,9 @@ autonomy and let ordinary approval decisions proceed; `auto` still auto-approves
 the normal fallback but denies a command that matches an explicit ask rule rather
 than running it unattended; `dontAsk` denies; and `bypassPermissions` runs
 everything except tools that always require fresh human approval (memory, plan,
-sandbox escape, managed config write).
+sandbox escape, managed config write). In every mode, the owning top-level
+controller may still create a bounded, non-sensitive, create-only project or
+reference memory; all other memory mutations remain denied without a human.
 
 ## Additional directories
 
@@ -308,6 +375,7 @@ the displayed list matches the commands the TUI accepts.
 | `/status` | Show model, effort, cache, Git, background jobs, and profile or balance details. |
 | `/work-mode [economy\|balanced\|delivery]` | View or change the runtime profile; `/profile` is an alias. |
 | `/theme [auto\|light\|dark\|style]` | View or change the CLI background mode and accent palette. |
+| `/currency [auto\|CNY\|USD]` | View or change the user-global official pricing currency and refresh the runtime. |
 | `/paste-image` | Read a clipboard image and insert an editable attachment token. |
 | `/mouse` | Toggle in-app mouse selection, scrollbar, and wheel handling. |
 | `/effort` | View or change reasoning effort. |
@@ -315,10 +383,33 @@ the displayed list matches the commands the TUI accepts.
 | `/verbose` | Toggle expanded reasoning display. |
 | `/sandbox` | Inspect sandbox status. |
 | `/goal` | Start, inspect, or clear a long-running goal. |
-| `/mcp`, `/skills`, `/hooks`, `/memory` | Inspect and manage extensions or memory. |
+| `/mcp`, `/skills`, `/hooks` | Inspect and manage extensions. |
+| `/remember <note>` | Append a standing note to the project instruction document; `# <note>` is a shortcut. |
+| `/memory [subcommand]` | Inspect instructions, memory provenance, recall, revisions, and recovery. |
 | `/rewind` | Restore conversation and/or code to an earlier turn. |
 | `/tree`, `/branch`, `/switch` | Inspect or navigate conversation branches. |
 
 Switching model, effort, or work mode rebuilds the runtime while preserving the
 active conversation, session-scoped permission overrides, additional directory
 access, and session ownership.
+
+### Memory diagnostics and recovery
+
+Bare `/memory` shows all active project/global facts without hiding same-name
+entries. Facts include their stable ID, revision, scope, type, freshness, and
+description. Slash completion offers the available subcommands, active IDs and
+names, and owned archive paths.
+
+| Command | Purpose |
+| --- | --- |
+| `/memory instructions` | Show resolved instruction precedence, directories, imports, and diagnostics. |
+| `/memory recall` | Explain the latest automatic recall query, hits, scores, reasons, freshness, and budget. |
+| `/memory revisions <id-or-name>` | Show the active revision and immutable history. |
+| `/memory restore <id-or-name> <revision>` | Restore old content as a new monotonic revision. |
+| `/memory archived` | List archived facts and their owned paths. |
+| `/memory recover <archive-path>` | Recover an archive as a new revision without overwriting active data. |
+
+These commands run against the active session controller. In a Remote Workbench
+they use the remote memory catalog and never fall back to local desktop memory.
+See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for authority, automatic
+recall, write confirmation, and migration behavior.

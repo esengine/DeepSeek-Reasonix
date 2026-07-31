@@ -1,0 +1,249 @@
+================================================================================
+pointer declarations vs expressions
+================================================================================
+
+TSLanguage *(*lang_parser)(void);
+
+char (*ptr_to_array)[];
+
+int main() {
+  // declare a function pointer
+  T1 * b(T2 a);
+
+  // evaluate expressions
+  c * d(5);
+  e(f * g);
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (type_identifier)
+    (pointer_declarator
+      (function_declarator
+        (parenthesized_declarator
+          (pointer_declarator
+            (identifier)))
+        (parameter_list
+          (parameter_declaration
+            (primitive_type))))))
+  (expression_statement
+    (subscript_expression
+      (call_expression
+        (primitive_type)
+        (argument_list
+          (pointer_expression
+            (identifier))))
+      (subscript_argument_list)))
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (comment)
+      (declaration
+        (type_identifier)
+        (pointer_declarator
+          (function_declarator
+            (identifier)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier)
+                (identifier))))))
+      (comment)
+      (expression_statement
+        (binary_expression
+          (identifier)
+          (call_expression
+            (identifier)
+            (argument_list
+              (number_literal)))))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (binary_expression
+              (identifier)
+              (identifier))))))))
+
+================================================================================
+casts vs multiplications
+================================================================================
+
+/*
+ * ambiguities
+ */
+
+int main() {
+  // cast
+  a((B *)c);
+
+  // parenthesized product
+  d((e * f));
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (comment)
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (comment)
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (cast_expression
+              (type_descriptor
+                (type_identifier)
+                (abstract_pointer_declarator))
+              (identifier)))))
+      (comment)
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (parenthesized_expression
+              (binary_expression
+                (identifier)
+                (identifier)))))))))
+
+================================================================================
+function calls vs parenthesized declarators vs macro types
+================================================================================
+
+int main() {
+  /*
+   * Could be either:
+   *   - function call
+   *   - declaration w/ parenthesized declarator
+   *   - declaration w/ macro type, no declarator
+   */
+  ABC(d);
+
+  /*
+   * Normal declaration
+   */
+  efg hij;
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (comment)
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier))))
+      (comment)
+      (declaration
+        (type_identifier)
+        (identifier)))))
+
+================================================================================
+Call expressions vs empty declarations w/ macros as types
+================================================================================
+
+int main() {
+  int a = 1;
+  b(a);
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (declaration
+        (primitive_type)
+        (init_declarator
+          (identifier)
+          (number_literal)))
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (identifier)))))))
+
+================================================================================
+Comments after for loops with ambiguities
+================================================================================
+
+int main() {
+  for (a *b = c; d; e) {
+    aff;
+  }
+
+  // a-comment
+
+  g;
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (for_statement
+        (declaration
+          (type_identifier)
+          (init_declarator
+            (pointer_declarator
+              (identifier))
+            (identifier)))
+        (identifier)
+        (identifier)
+        (compound_statement
+          (expression_statement
+            (identifier))))
+      (comment)
+      (expression_statement
+        (identifier)))))
+
+================================================================================
+Top-level macro invocations
+================================================================================
+
+DEFINE_SOMETHING(THING_A, "this is a thing a");
+DEFINE_SOMETHING(THING_B, "this is a thing b", "thanks");
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (call_expression
+      (identifier)
+      (argument_list
+        (identifier)
+        (string_literal
+          (string_content)))))
+  (expression_statement
+    (call_expression
+      (identifier)
+      (argument_list
+        (identifier)
+        (string_literal
+          (string_content))
+        (string_literal
+          (string_content))))))

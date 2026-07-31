@@ -6,23 +6,31 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"debug/pe"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"golang.org/x/sys/windows"
+
+	"reasonix/internal/repair"
 )
 
 const windowsUpdateHelperFileName = "reasonix-update-helper.exe"
 
-// installerCommand runs the NSIS updater in its visible, progress-only update
-// mode, forcing $INSTDIR to dir via /D= so the update overwrites the current
-// install in place. NSIS requires /D= to be the final, unquoted token taken
+var claimWindowsUpdateHelperExecutionFn = claimVerifiedWindowsUpdateHelperExecution
+
+// installerCommand runs the NSIS updater in its visible, progress-only staging
+// mode, forcing $INSTDIR to dir via /D= so the signed payload is extracted away
+// from the live install. NSIS requires /D= to be the final, unquoted token taken
 // verbatim to the end of the line, so the raw command line is set directly —
 // exec.Command would quote a path containing spaces (e.g. C:\Users\Jane Doe\...)
 // and NSIS would then mis-parse the target directory.
@@ -32,24 +40,42 @@ func installerCommand(name, dir string) *exec.Cmd {
 	return cmd
 }
 
-func startWindowsUpdateHandoff(installerPath, installDir, relaunchPath, toVersion string) error {
+func startWindowsUpdateHandoff(installerPath, installerSHA256, installDir, relaunchPath string, prepared *repair.UpdateTransaction) error {
 	// The helper is the only process that can observe an installer failure after
 	// the desktop exits and route recovery back through Guard. Starting NSIS
 	// directly here would make a failed/partial install indistinguishable from a
 	// successful handoff, so a missing or quarantined helper must fail safely.
-	return startWindowsUpdateHelper(installerPath, installDir, relaunchPath, toVersion)
+	return startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaunchPath, prepared)
 }
 
-func startWindowsUpdateHelper(installerPath, installDir, relaunchPath, toVersion string) error {
+func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaunchPath string, prepared *repair.UpdateTransaction) error {
 	if installDir == "" {
 		return os.ErrNotExist
 	}
-	helperPath, err := prepareWindowsUpdateHelper(installDir)
+	preparedHelperSHA256, err := preparedWindowsUpdateHelperSHA256(prepared, installDir)
 	if err != nil {
 		return err
 	}
+	helperPath, helperSHA256, err := prepareWindowsUpdateHelper(installDir, preparedHelperSHA256)
+	if err != nil {
+		return err
+	}
+	releaseExecution, err := claimWindowsUpdateHelperExecutionFn(helperPath, helperSHA256)
+	if err != nil {
+		return fmt.Errorf("claim copied Windows update helper: %w", err)
+	}
+	defer releaseExecution()
 	err = retryWindowsUpdateHelperStart(func() error {
-		cmd := exec.Command(helperPath, windowsUpdateHandoffArgs(os.Getpid(), installerPath, installDir, relaunchPath, toVersion)...)
+		cmd := exec.Command(helperPath, windowsUpdateHandoffArgs(
+			os.Getpid(),
+			installerPath,
+			installerSHA256,
+			installDir,
+			relaunchPath,
+			prepared.ToVersion,
+			prepared.CreatedAt,
+			repair.UpdateTransactionID(prepared),
+		)...)
 		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		return cmd.Start()
 	})
@@ -59,33 +85,123 @@ func startWindowsUpdateHelper(installerPath, installDir, relaunchPath, toVersion
 	return nil
 }
 
-func prepareWindowsUpdateHelper(installDir string) (string, error) {
+func preparedWindowsUpdateHelperSHA256(prepared *repair.UpdateTransaction, installDir string) (string, error) {
+	if prepared == nil || prepared.TargetKind != "file" || repair.UpdateTransactionID(prepared) == "" {
+		return "", fmt.Errorf("prepare Windows update helper: transaction identity is incomplete")
+	}
+	helperPath := filepath.Clean(filepath.Join(installDir, windowsUpdateHelperFileName))
+	for _, file := range prepared.Files {
+		if !strings.EqualFold(filepath.Clean(file.TargetPath), helperPath) {
+			continue
+		}
+		if file.MissingBefore || !validWindowsSHA256(file.SHA256) {
+			return "", fmt.Errorf("prepare Windows update helper: prepared helper identity is incomplete")
+		}
+		return strings.TrimSpace(file.SHA256), nil
+	}
+	return "", fmt.Errorf("prepare Windows update helper: helper is outside the prepared release unit")
+}
+
+func validWindowsSHA256(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func prepareWindowsUpdateHelper(installDir, preparedSHA256 string) (string, [sha256.Size]byte, error) {
 	src := filepath.Join(installDir, windowsUpdateHelperFileName)
 	data, err := os.ReadFile(src)
 	if err != nil {
-		return "", err
+		return "", [sha256.Size]byte{}, err
+	}
+	expectedSHA256 := sha256.Sum256(data)
+	if !strings.EqualFold(hex.EncodeToString(expectedSHA256[:]), strings.TrimSpace(preparedSHA256)) {
+		return "", [sha256.Size]byte{}, fmt.Errorf("packaged Windows update helper changed after transaction prepare")
 	}
 	if err := validateWindowsUpdateHelper(data, runtime.GOARCH); err != nil {
-		return "", fmt.Errorf("validate packaged Windows update helper: %w", err)
+		return "", [sha256.Size]byte{}, fmt.Errorf("validate packaged Windows update helper: %w", err)
 	}
 	dir, err := updateCacheDir()
 	if err != nil {
-		return "", err
+		return "", [sha256.Size]byte{}, err
 	}
-	cleanupWindowsUpdateHelpers(dir)
-	dst := filepath.Join(dir, "reasonix-update-helper-"+time.Now().UTC().Format("20060102150405.000000000")+".exe")
-	if err := writeAtomic(dst, data, 0o700); err != nil {
-		return "", err
+	dst, err := stageWindowsUpdateHelperCopy(dir, data)
+	if err != nil {
+		return "", [sha256.Size]byte{}, err
 	}
-	copied, err := os.ReadFile(dst)
+	return dst, expectedSHA256, nil
+}
+
+func stageWindowsUpdateHelperCopy(dir string, data []byte) (string, error) {
+	staged, err := os.CreateTemp(dir, "reasonix-update-helper-*.exe")
 	if err != nil {
 		return "", err
 	}
-	if sha256.Sum256(copied) != sha256.Sum256(data) {
-		_ = os.Remove(dst)
-		return "", fmt.Errorf("copied Windows update helper failed integrity verification")
+	dst := staged.Name()
+	fail := func(err error) (string, error) {
+		_ = staged.Close()
+		// Preserve the exclusively-created node on failure. A path-based remove
+		// after close could delete an unrelated replacement.
+		return "", err
+	}
+	if _, err := staged.Write(data); err != nil {
+		return fail(err)
+	}
+	if err := staged.Sync(); err != nil {
+		return fail(err)
+	}
+	if err := staged.Chmod(0o700); err != nil {
+		return fail(err)
+	}
+	if err := staged.Close(); err != nil {
+		return "", err
 	}
 	return dst, nil
+}
+
+func claimVerifiedWindowsUpdateHelperExecution(path string, expectedSHA256 [sha256.Size]byte) (func(), error) {
+	pathUTF16, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	handle, err := windows.CreateFile(
+		pathUTF16,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_SEQUENTIAL_SCAN,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(handle), path)
+	fail := func(err error) (func(), error) {
+		_ = file.Close()
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return fail(err)
+	}
+	if !info.Mode().IsRegular() {
+		return fail(fmt.Errorf("copied Windows update helper is not a regular file"))
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return fail(err)
+	}
+	if !bytes.Equal(hash.Sum(nil), expectedSHA256[:]) {
+		return fail(fmt.Errorf("copied Windows update helper changed before execution"))
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() { _ = file.Close() })
+	}, nil
 }
 
 func validateWindowsUpdateHelper(data []byte, goarch string) error {
@@ -159,14 +275,4 @@ func windowsUpdateHelperStartError(err error) error {
 		return fmt.Errorf("start Windows update helper: Windows error %d (%s)", errno, errno.Error())
 	}
 	return fmt.Errorf("start Windows update helper: process creation failed")
-}
-
-func cleanupWindowsUpdateHelpers(dir string) {
-	matches, err := filepath.Glob(filepath.Join(dir, "reasonix-update-helper-*.exe"))
-	if err != nil {
-		return
-	}
-	for _, name := range matches {
-		_ = os.Remove(name)
-	}
 }

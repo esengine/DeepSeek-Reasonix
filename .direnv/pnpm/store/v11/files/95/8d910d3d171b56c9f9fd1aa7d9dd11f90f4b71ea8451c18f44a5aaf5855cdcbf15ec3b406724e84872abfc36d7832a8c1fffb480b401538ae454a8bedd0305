@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <script src="../dist/svg-pan-zoom.js"></script>
+  </head>
+
+  <body>
+    <h1>Demo for svg-pan-zoom: In-line SVG</h1>
+    <div id="container" style="width: 897px; height: 500px; border:1px solid black; ">
+<svg ev="http://www.w3.org/2001/xml-events" xlink="http://www.w3.org/1999/xlink" style="overflow: hidden; background-color:white; " height="497" width="897" preserveAspectRatio="xMidYMid" xmlns:ev="http://www.w3.org/2001/xml-events" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/1999/xlink" baseProfile="full" version="1.1" id="pvjs-diagram-1"><g class="svg-pan-zoom_viewport"><defs id="defs"><marker refX="12" markerHeight="12" markerWidth="12" viewBox="0 0 12 12" refY="6" preserveAspectRatio="none" markerUnits="strokeWidth" orient="auto" id="id-arrow-end-000000"><g transform="rotate(180, 6, 6)" id="g-id-arrow-end-000000"><rect fill="white" stroke="white" height="1.2" width="2" y="5.4" x="0"></rect><polygon fill="#000000" stroke-width="0" points="12,11 0,6 12,1"></polygon></g></marker><style type="text/css">	svg {
+		color-interpolation: auto;
+		image-rendering: auto;
+		shape-rendering: auto;
+		vector-effect: non-scaling-stroke;
+                background: white;
+	/* removed fill and stroke since they override marker specs */
+	/*	fill: white;
+    		stroke: black; */
+	}
+
+	/* default color for pathway elements */
+	.default-fill-color {
+		fill: black;
+	}
+	.default-stroke-color {
+		stroke: black;
+	}
+
+	/* default color of the background drawing board */
+	.board-fill-color {
+		fill: white;
+	}
+	.board-stroke-color {
+		stroke: white;
+	}
+
+	.text-area {
+		font-family: Sans-Serif, Helvetica, Arial;
+		text-align: center;
+		vertical-align: middle;
+		font-size: 10px;
+		fill: black;
+		fill-opacity: 1;
+		stroke: none;
+	}
+
+	.citation {
+		font-family: Sans-Serif, Helvetica, Arial;
+		text-align: center;
+		vertical-align: top;
+		font-size: 7px;
+		fill: #999999;
+		fill-opacity: 1;
+		stroke: none;
+	}
+
+	.info-box {
+		font-family: Sans-Serif;
+		font-size: 10px;
+		fill: black;
+		stroke: none;
+		text-align: left;
+		vertical-align: top;
+	}
+
+	.info-box-item-property-name {
+		font-weight: bold;
+	}
+
+	.info-box-item-property-value {
+	}
+
+	.data-node {
+		text-align: right;
+		fill-opacity: 1;
+		fill: white;
+		stroke: black;
+		stroke-width: 1;
+		stroke-dasharray: 0;
+		stroke-miterlimit: 1;
+    		pointer-events:auto;
+	}
+	.data-node:hover {
+	 	cursor: pointer;
+	}
+
+	.has-xref:hover {
+		cursor: pointer;
+	}
+
+	.data-node.gene-product {
+	}
+
+	.metabolite {
+		stroke: blue;
+	}
+
+	.data-node.metabolite &gt; .text-area {
+		fill: blue;
+		fill-opacity: 1;
+		stroke: none;
+	}
+
+	.data-node.pathway {
+		stroke: none;
+		fill-opacity: 0;
+	}
+
+	.data-node.pathway &gt; .text-area {
+		fill: rgb(20,150,30);
+		fill-opacity: 1;
+		font-size: 12px;
+		font-weight: bold;
+	}
+
+	.data-node.protein {
+	}
+
+	.data-node.rna {
+	}
+
+	.data-node.unknown {
+	}
+
+	.label {
+		stroke: null;
+		stroke-width: 0;
+		fill-opacity: 0;
+		stroke-dasharray: 0;
+		stroke-miterlimit: 1;
+	}
+
+	.shape {
+		fill-opacity: 0;
+		stroke: black;
+		stroke-dasharray: 0;
+		stroke-miterlimit: 1;
+	}
+
+	.shape.none {
+		fill: none;
+		fill-opacity: 0;
+		stroke: none;
+	}
+
+	g.group-node &gt; .shape {
+		fill-opacity: 0.098;
+		stroke: gray;
+		stroke-miterlimit: 1;
+		stroke-width: 1px;
+    		pointer-events:none;
+	}
+
+	.group-node {
+		fill-opacity: 0.098;
+		stroke: gray;
+		stroke-miterlimit: 1;
+		stroke-width: 1px;
+    		pointer-events:none;
+	}
+
+	.group-node &gt; .text-area {
+		fill-opacity: 0.4;
+		font-family: Serif, Times;
+		font-size: 32px;
+		fill: black;
+		stroke-width: 0;
+		font-weight: bold;
+  	}
+
+	.group-node.none {
+		fill: rgb(180,180,100);
+		stroke-dasharray: 5,3;
+	}
+
+	.group-node.none &gt; .text-area {
+		display: none;
+  	}
+
+	/*.group-node.none:hover {
+		fill: rgb(255,180,100);
+		fill-opacity: 0.05;
+	}*/
+
+	.group-node.group {
+		fill-opacity: 0;
+		stroke: none;
+	}
+
+	.group-node.group &gt; .text-area {
+		display: none;
+  	}
+	/*.group-node.group:hover {
+		fill: rgb(0,0,255);
+		stroke-width: 1px;
+		stroke-dasharray: 5,3;
+		stroke: gray;
+		fill-opacity: 0.1;
+	}*/
+
+	.group-node.complex {
+		fill: rgb(180,180,100);
+	}
+
+	.group-node.complex &gt; .text-area {
+		display: none;
+  	}
+	/*.group-node.complex:hover {
+		fill: rgb(255,0,0);
+		fill-opacity: 0.05;
+	}*/
+
+  	.group-node.pathway {
+		fill: rgb(0,255,0);
+		stroke-dasharray: 5,3;
+	}
+	/*.group-node.pathway:hover {
+		fill: rgb(0,255,0);
+		fill-opacity: 0.2;
+	}*/
+	.group-node.pathway &gt; .text-area {
+		fill: rgb(20,150,30);
+		stroke: rgb(20,150,30);
+  }
+
+  .cellular-component {
+		fill-opacity: 0;
+		stroke: silver;
+	}
+
+  .graphical-line {
+		fill:none;
+		stroke: black;
+		stroke-width: 1px;
+	}
+
+	.interaction {
+		fill:none;
+		stroke: black;
+		stroke-width: 1px;
+	}
+
+	marker {
+		/* this is what should work per the spec
+		   stroke-dasharray: none; */
+		/* but I need to add this to make it work in Safari */
+		stroke-dasharray: 9999999999999999999999999;
+	}
+
+  .marker-end {
+    -webkit-transform: rotate(180deg);
+    -webkit-transform-origin: 50% 50%;
+
+    -o-transform: rotate(180deg);
+    -o-transform-origin: 50% 50%;
+
+    transform: rotate(180deg);
+    transform-origin: 50% 50%;
+  }
+
+	.solid-stroke {
+		/* this is what should work per the spec
+		   stroke-dasharray: none; */
+		/* but I need to add this to make it work in Safari */
+		stroke-dasharray: 9999999999999999999999999;
+	}
+
+	.dashed-stroke {
+		stroke-dasharray: 5,3;
+	}
+
+  .highlighted-node {
+		fill: yellow;
+    fill-opacity: 0.2;
+		stroke: orange;
+    stroke-width: 3px;
+  }
+</style></defs><g transform="matrix(0.7330383480825958, 0, 0, 0.7330383480825958, 213.54301868239918, 20.00000000000003) " id="viewport"><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="d4c36" fill="transparent" d="M576.6666666666667,166.2L576.6666666666667,240.5333333333333"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="df717" fill="transparent" d="M576.6666666666667,259.5333333333333L576.6666666666667,323.8666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="fabc6" fill="transparent" d="M576.6666666666667,342.8666666666667L577.0833333333335,413.8666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="d1108" fill="transparent" d="M577.0833333333335,432.8666666666667L578,511"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="f7030" fill="transparent" d="M576.6666666666667,69.53333333333333L576.6666666666667,147.2"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="ab829" fill="transparent" d="M416.66666666666663,166.2L416.83333333333326,240.5333333333333"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e1a8f" fill="transparent" d="M416.83333333333326,259.5333333333333L418.33333333333326,323.8666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="aa931" fill="transparent" d="M418.33333333333326,342.8666666666667L417.83333333333326,414.8666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="f38d1" fill="transparent" d="M417.83333333333326,433.8666666666667L419,512"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e93d2" fill="transparent" d="M166.66666666666666,244.53333333333333L166.66666666666666,336.8666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="b1418" fill="transparent" d="M264.6666666666667,243.53333333333333L265,334"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e34e7" fill="transparent" d="M65.33333333333334,244.53333333333333L65.58333333333334,329.8666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" stroke-dasharray="5,3" id="c7220" fill="transparent" d="M65.58333333333334,348.8666666666667L65,413"></path><path stroke="#000000" stroke-width="1" stroke-dasharray="5,3" id="da43e" fill="transparent" d="M378.16666666666663,333.3666666666667L358.16666666666663,333.3666666666667L358.16666666666663,539L413.35190476190473,539L413.35190476190473,559"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" stroke-dasharray="5,3" id="d0d0f" fill="transparent" d="M413.3333333333333,557.7L414.3333333333333,627.7"></path><path stroke="#000000" stroke-width="1" stroke-dasharray="5,3" id="caa3e" fill="transparent" d="M618.3333333333335,333.3666666666667L650,333.3666666666667L650,538.0207841284838L587.0439300897497,538.0207841284838L587.0439300897497,558.0207841284838"></path><path stroke="#000000" stroke-width="1" stroke-dasharray="5,3" id="e6600" fill="transparent" d="M620.0000000000002,423.3666666666667L638.3333333333335,426.2614202713211"></path><path stroke="#000000" stroke-width="1" stroke-dasharray="5,3" id="f9fa2" fill="transparent" d="M618,521L638.3333333333335,516.179795181022"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" stroke-dasharray="5,3" id="c1a22" fill="transparent" d="M587,556L589,648"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="a2b06" fill="transparent" d="M577.3333333333334,90.36666666666666L576.6666666666667,100.6"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e6f64" fill="transparent" d="M577.3333333333334,186.7L576.6666666666667,195.9333333333333"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="a2640" fill="transparent" d="M576.3333333333334,275.7L576.6666666666667,290"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="c1686" fill="transparent" d="M576.3333333333334,360.7L576.8333333333335,371.26666666666665"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="f6034" fill="transparent" d="M577.3333333333334,459.7L577.5456658722892,472.2742110780289"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="dad44" fill="transparent" d="M588.3333333333334,563.7L587.8,592.8"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="b6219" fill="transparent" d="M417.3333333333333,184.36666666666667L416.7333333333333,195.9333333333333"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e3373" fill="transparent" d="M418.3333333333333,272.7L417.4333333333333,285.26666666666665"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="b7111" fill="transparent" d="M418.3333333333333,367.03333333333336L418.08596082320844,378.48830812463837"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e3ac1" fill="transparent" d="M420.3333333333333,455.7L418.29999999999995,465.12"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="b60c9" fill="transparent" d="M414.3333333333333,576.7L413.7333333333333,585.7"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e8be5" fill="transparent" d="M266.3333333333333,256.3666666666667L264.8,279.72"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e5206" fill="transparent" d="M167.66666666666666,254.36666666666667L166.66666666666666,281.4666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="f0326" fill="transparent" d="M65.33333333333333,267.3666666666667L65.43333333333334,278.6666666666667"></path><path marker-end="url(#id-arrow-end-000000)" stroke="#000000" stroke-width="1" id="e2589" fill="transparent" d="M66.33333333333333,363.7L65.35000000000001,374.52"></path><path stroke="#000000" stroke-width="1" id="ef9" fill="#ffffff" d="M14.833333333333314,128.5L309.5,128.5L309.5,189.5L14.833333333333314,189.5Z"></path><g pointer-events="none" font-size="10" fill="#000000" font-weight="bold" id="text-for-ef9" transform="translate(162.16666666666666 159)"><text text-anchor="middle" dominant-baseline="central" y="-2.2em" x="0" id="text-line0"></text><text text-anchor="middle" dominant-baseline="central" y="-1.1em" x="0" id="text-line1">Synthesis pathways for biogenic amines</text><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line2">follow solid arrows through enzymatic steps,</text><text text-anchor="middle" dominant-baseline="central" y="1.1em" x="0" id="text-line3">while degradation steps follow dashed arrows.</text><text text-anchor="middle" dominant-baseline="central" y="2.2em" x="0" id="text-line4"></text></g><path stroke="#808080" stroke-width="1" stroke-dasharray="5,3" fill-opacity="0.1" id="d0ba6" fill="#b4b464" d="M548.8333333333334,562.2L627.8333333333334,562.2L627.8333333333334,621.2L548.8333333333334,621.2Z"></path><path stroke="#808080" stroke-width="1" stroke-dasharray="5,3" fill-opacity="0.1" id="e3e52" fill="#b4b464" d="M226.83333333333331,254.86666666666667L305.8333333333333,254.86666666666667L305.8333333333333,313.8666666666667L226.83333333333331,313.8666666666667Z"></path><path stroke="#808080" stroke-width="1" stroke-dasharray="5,3" fill-opacity="0.1" id="b3433" fill="#b4b464" d="M128.16666666666666,252.86666666666667L207.16666666666666,252.86666666666667L207.16666666666666,311.8666666666667L128.16666666666666,311.8666666666667Z"></path><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="c51" fill="#ffffff" d="M546.8333333333334,186.2L607.8333333333334,186.2L607.8333333333334,207.2L546.8333333333334,207.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-c51" transform="translate(577.3333333333334 196.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Th</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="fd9" fill="#ffffff" d="M545.8333333333334,275.2L606.8333333333334,275.2L606.8333333333334,296.2L545.8333333333334,296.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-fd9" transform="translate(576.3333333333334 285.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Ddc</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="bf8" fill="#ffffff" d="M545.8333333333334,360.2L606.8333333333334,360.2L606.8333333333334,381.2L545.8333333333334,381.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-bf8" transform="translate(576.3333333333334 370.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Dbh</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="ce1" fill="#ffffff" d="M546.8333333333334,459.2L607.8333333333334,459.2L607.8333333333334,480.2L546.8333333333334,480.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-ce1" transform="translate(577.3333333333334 469.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Pnmt</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="da0" fill="#ffffff" d="M546.8333333333334,89.86666666666666L607.8333333333334,89.86666666666666L607.8333333333334,110.86666666666666L546.8333333333334,110.86666666666666Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-da0" transform="translate(577.3333333333334 100.36666666666666)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Pah</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="b44" fill="#ffffff" d="M386.8333333333333,183.86666666666667L447.8333333333333,183.86666666666667L447.8333333333333,204.86666666666667L386.8333333333333,204.86666666666667Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-b44" transform="translate(417.3333333333333 194.36666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Tph1</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="c29" fill="#ffffff" d="M387.8333333333333,272.2L448.8333333333333,272.2L448.8333333333333,293.2L387.8333333333333,293.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-c29" transform="translate(418.3333333333333 282.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Ddc</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="f4d" fill="#ffffff" d="M389.8333333333333,455.2L450.8333333333333,455.2L450.8333333333333,476.2L389.8333333333333,476.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-f4d" transform="translate(420.3333333333333 465.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">ASMT</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="beb" fill="#ffffff" d="M137.16666666666666,261.8666666666667L198.16666666666666,261.8666666666667L198.16666666666666,282.8666666666667L137.16666666666666,282.8666666666667Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-beb" transform="translate(167.66666666666666 272.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Hdc</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="a57" fill="#ffffff" d="M137.16666666666666,281.8666666666667L198.16666666666666,281.8666666666667L198.16666666666666,302.8666666666667L137.16666666666666,302.8666666666667Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-a57" transform="translate(167.66666666666666 292.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Ddc</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="e25" fill="#ffffff" d="M235.83333333333331,263.8666666666667L296.8333333333333,263.8666666666667L296.8333333333333,284.8666666666667L235.83333333333331,284.8666666666667Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-e25" transform="translate(266.3333333333333 274.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Gad1</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="a07" fill="#ffffff" d="M235.83333333333331,283.8666666666667L296.8333333333333,283.8666666666667L296.8333333333333,304.8666666666667L235.83333333333331,304.8666666666667Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-a07" transform="translate(266.3333333333333 294.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Gad2</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="dbf" fill="#ffffff" d="M34.83333333333333,266.8666666666667L95.83333333333333,266.8666666666667L95.83333333333333,287.8666666666667L34.83333333333333,287.8666666666667Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-dbf" transform="translate(65.33333333333333 277.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Chat</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="d8e" fill="#ffffff" d="M557.8333333333334,591.2L618.8333333333334,591.2L618.8333333333334,612.2L557.8333333333334,612.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-d8e" transform="translate(588.3333333333334 601.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Comt1</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="fc6" fill="#ffffff" d="M557.8333333333334,571.2L618.8333333333334,571.2L618.8333333333334,592.2L557.8333333333334,592.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-fc6" transform="translate(588.3333333333334 581.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Maoa</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="d77" fill="#ffffff" d="M35.83333333333333,363.2L96.83333333333333,363.2L96.83333333333333,384.2L35.83333333333333,384.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-d77" transform="translate(66.33333333333333 373.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Ache</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="e9e" fill="#ffffff" d="M383.8333333333333,576.2L444.8333333333333,576.2L444.8333333333333,597.2L383.8333333333333,597.2Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-e9e" transform="translate(414.3333333333333 586.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Maoa</text></g><path class="has-xref" typeof="gpml:DataNode gpml:GeneProduct " stroke="#000000" stroke-width="1" id="dd5" fill="#ffffff" d="M387.8333333333333,366.53333333333336L448.8333333333333,366.53333333333336L448.8333333333333,387.53333333333336L387.8333333333333,387.53333333333336Z"></path><g pointer-events="none" font-size="10" fill="#000000" id="text-for-dd5" transform="translate(418.3333333333333 377.03333333333336)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Aanat</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="db9" fill="#ffffff" d="M540,146.7L613.3333333333334,146.7L613.3333333333334,166.7L540,166.7Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-db9" transform="translate(576.6666666666666 156.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Tyrosine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="c6b" fill="#ffffff" d="M543,240.03333333333333L610.3333333333334,240.03333333333333L610.3333333333334,260.0333333333333L543,260.0333333333333Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-c6b" transform="translate(576.6666666666666 250.03333333333333)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">L-Dopa</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="d52" fill="#ffffff" d="M534.5,323.3666666666667L618.8333333333334,323.3666666666667L618.8333333333334,343.3666666666667L534.5,343.3666666666667Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-d52" transform="translate(576.6666666666666 333.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Dopamine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="f5c" fill="#ffffff" d="M533.6666666666667,413.3666666666667L620.5000000000001,413.3666666666667L620.5000000000001,433.3666666666667L533.6666666666667,433.3666666666667Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-f5c" transform="translate(577.0833333333334 423.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Norepinephrine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="ddb" fill="#ffffff" d="M519.5,50.03333333333333L633.8333333333334,50.03333333333333L633.8333333333334,70.03333333333333L519.5,70.03333333333333Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-ddb" transform="translate(576.6666666666666 60.03333333333333)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Phenylalanine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="f3d" fill="#ffffff" d="M369,146.7L464.3333333333333,146.7L464.3333333333333,166.7L369,166.7Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-f3d" transform="translate(416.6666666666667 156.7)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Tryptophan</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="b36" fill="#ffffff" d="M353.16666666666663,240.03333333333333L480.49999999999994,240.03333333333333L480.49999999999994,260.0333333333333L353.16666666666663,260.0333333333333Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-b36" transform="translate(416.8333333333333 250.03333333333333)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">5-Hydroxy-tryptophan</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="dc9" fill="#ffffff" d="M377.66666666666663,323.3666666666667L458.99999999999994,323.3666666666667L458.99999999999994,343.3666666666667L377.66666666666663,343.3666666666667Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-dc9" transform="translate(418.3333333333333 333.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Serotonin</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="b72" fill="#ffffff" d="M372.16666666666663,414.3666666666667L463.49999999999994,414.3666666666667L463.49999999999994,434.3666666666667L372.16666666666663,434.3666666666667Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-b72" transform="translate(417.8333333333333 424.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Acetylserotonin</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="c6d" fill="#ffffff" d="M130,225.03333333333333L203.33333333333331,225.03333333333333L203.33333333333331,245.03333333333333L130,245.03333333333333Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-c6d" transform="translate(166.66666666666666 235.03333333333333)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Histidine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="f6f" fill="#ffffff" d="M125.5,336.3666666666667L207.83333333333331,336.3666666666667L207.83333333333331,356.3666666666667L125.5,356.3666666666667Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-f6f" transform="translate(166.66666666666666 346.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Histamine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="e8f" fill="#ffffff" d="M223.00000000000003,224.03333333333333L306.33333333333337,224.03333333333333L306.33333333333337,244.03333333333333L223.00000000000003,244.03333333333333Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-e8f" transform="translate(264.6666666666667 234.03333333333333)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Glutamate</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="a7b" fill="#ffffff" d="M32.666666666666664,225.03333333333333L98,225.03333333333333L98,245.03333333333333L32.666666666666664,245.03333333333333Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-a7b" transform="translate(65.33333333333333 235.03333333333333)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Choline</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="d7b" fill="#ffffff" d="M24.666666666666664,329.3666666666667L106.5,329.3666666666667L106.5,349.3666666666667L24.666666666666664,349.3666666666667Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-d7b" transform="translate(65.58333333333333 339.3666666666667)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Acetylcholine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="b1e2d" fill="#ffffff" d="M537.5,510.5L618.5,510.5L618.5,531.5L537.5,531.5Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-b1e2d" transform="translate(578 521)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Epinephrine</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="e1406" fill="#ffffff" d="M378.5,511.5L459.5,511.5L459.5,532.5L378.5,532.5Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-e1406" transform="translate(419 522)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">Melatonin</text></g><path class="has-xref" typeof="gpml:DataNode gpml:Metabolite " stroke="#0000ff" stroke-width="1" id="b7962" fill="#ffffff" d="M224.5,333.5L305.5,333.5L305.5,354.5L224.5,354.5Z"></path><g pointer-events="none" font-size="10" fill="#0000ff" id="text-for-b7962" transform="translate(265 344)"><text text-anchor="middle" dominant-baseline="central" y="0em" x="0" id="text-line0">GABA</text></g><g class="text-area info-box" id="info-box-0"><text y="14" x="0" class="item" id="info-box-text0"><tspan class="info-box-item-property-name">Title: </tspan><tspan class="info-box-item-property-value">Biogenic Amine Synthesis</tspan></text><text y="28" x="0" class="item" id="info-box-text1"><tspan class="info-box-item-property-name">Organism: </tspan><tspan class="info-box-item-property-value">Mus musculus</tspan></text></g></g></g></svg>
+    </div>
+
+    <script>
+      // Don't use window.onLoad like this in production, because it can only listen to one function.
+      window.onload = function() {
+        svgPanZoom('#pvjs-diagram-1', {
+          zoomEnabled: true,
+          controlIconsEnabled: true
+        });
+      };
+    </script>
+
+  </body>
+
+</html>

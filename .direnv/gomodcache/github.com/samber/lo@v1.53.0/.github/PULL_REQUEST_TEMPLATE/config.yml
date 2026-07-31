@@ -1,0 +1,8 @@
+template_chooser:
+  enabled: true
+  default: "other.md"
+  choices:
+    - name: "New Helper"
+      file: "new_helper.md"
+    - name: "Other Changes"
+      file: "other.md"

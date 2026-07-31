@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta name="viewport" content="user-scalable=no, width=device-width, initial-scale=1, maximum-scale=1">
+    <script src="../dist/svg-pan-zoom.js"></script>
+    <style>
+      svg{
+        opacity: 0.5;
+      }
+      svg.active{
+        opacity: 1;
+      }
+      svg.active.hovered{
+        border: 3px solid blue;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="limit-div" style="width: 602px; height: 420px; border:1px solid black; ">
+      <svg id="limit-svg" xmlns="http://www.w3.org/2000/svg" style="display: inline; width: inherit; min-width: inherit; max-width: inherit; height: inherit; min-height: inherit; max-height: inherit;" version="1.1">
+        <defs>
+          <linearGradient id="linear-gradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" style="stop-color:rgb(56,121,217);stop-opacity:1" />
+            <stop offset="100%" style="stop-color:rgb(138,192,7);stop-opacity:1" />
+          </linearGradient>
+        </defs>
+        <g fill="none">
+          <g stroke="#000" fill="#FFF">
+            <rect x="5" y="5" width="240" height="240" fill="url(#linear-gradient)"/>
+            <path d="M 5 5  L 245 245 Z"/>
+          </g>
+        </g>
+      </svg>
+    </div>
+
+    <script>
+      // Don't use window.onLoad like this in production, because it can only listen to one function.
+      window.onload = function() {
+        var svgActive = false
+          , svgHovered = false
+
+        // Expose to window namespace for testing purposes
+        window.panZoom = svgPanZoom('#limit-svg', {
+          zoomEnabled: true
+        , controlIconsEnabled: true
+        , zoomEnabled: false
+        , fit: 1
+        , center: 1
+        , customEventsHandler: {
+            init: function(options){
+              function updateSvgClassName(){
+                options.svgElement.setAttribute('class', '' + (svgActive ? 'active':'') + (svgHovered ? ' hovered':''))
+              }
+
+              this.listeners = {
+                click: function(){
+                  if (svgActive) {
+                    options.instance.disableZoom()
+                    svgActive = false
+                  } else {
+                    options.instance.enableZoom()
+                    svgActive = true
+                  }
+
+                  updateSvgClassName()
+                },
+                mouseenter: function(){
+                  svgHovered = true
+
+                  updateSvgClassName()
+                },
+                mouseleave: function(){
+                  svgActive = false
+                  svgHovered = false
+                  options.instance.disableZoom()
+
+                  updateSvgClassName()
+                }
+              }
+
+              this.listeners.mousemove = this.listeners.mouseenter
+
+              for (var eventName in this.listeners){
+                options.svgElement.addEventListener(eventName, this.listeners[eventName])
+              }
+            }
+          , destroy: function(options){
+              for (var eventName in this.listeners){
+                options.svgElement.removeEventListener(eventName, this.listeners[eventName])
+              }
+            }
+          }
+        });
+      };
+    </script>
+
+  </body>
+
+</html>

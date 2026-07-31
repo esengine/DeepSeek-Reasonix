@@ -53,6 +53,9 @@ func TestMemorySuggestionsAcceptMemoryCandidate(t *testing.T) {
 	if len(view.Memories) == 0 {
 		t.Fatalf("MemorySuggestions() memories = %+v, want at least one candidate", view.Memories)
 	}
+	if view.Memories[0].Scope != string(memory.FactScopeProject) {
+		t.Fatalf("candidate scope = %q, want project", view.Memories[0].Scope)
+	}
 	path, err := app.AcceptMemorySuggestion(view.Memories[0])
 	if err != nil {
 		t.Fatalf("AcceptMemorySuggestion: %v", err)
@@ -61,7 +64,7 @@ func TestMemorySuggestionsAcceptMemoryCandidate(t *testing.T) {
 		t.Fatal("AcceptMemorySuggestion returned empty path")
 	}
 	got := store.List()
-	if len(got) != 1 || !strings.Contains(got[0].Body, "中文回复") {
+	if len(got) != 1 || got[0].Scope != memory.FactScopeProject || !strings.Contains(got[0].Body, "中文回复") {
 		t.Fatalf("saved memories = %+v, want confirmed candidate body", got)
 	}
 }
@@ -334,5 +337,34 @@ func TestHistoryMemoryCandidateNamesStableAcrossRefreshes(t *testing.T) {
 				i, first.Memories[i].Name, first.Memories[i].ID,
 				second.Memories[i].Name, second.Memories[i].ID)
 		}
+	}
+}
+
+func TestMemorySuggestionsDeduplicateAllScopedFactsAndInstructionBodies(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userDir := t.TempDir()
+	cwd := t.TempDir()
+	sessionDir := t.TempDir()
+	store := memory.StoreFor(userDir, cwd)
+	if _, err := (memory.Store{Dir: store.GlobalDir}).Save(memory.Memory{
+		Name: "response-language", Description: "Global response language", Scope: memory.FactScopeGlobal, Type: memory.TypeUser,
+		Body: "Always answer in Chinese unless the user explicitly asks for English.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (memory.Store{Dir: store.Dir}).Save(memory.Memory{
+		Name: "response-language-project", Description: "Project response language", Scope: memory.FactScopeProject, Type: memory.TypeProject,
+		Body: "Always answer in Chinese unless the user explicitly asks for English.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	set := &memory.Set{Store: store, CWD: cwd, UserDir: userDir, Docs: []memory.Source{{Body: "Always use tabs for indentation."}}}
+	writeSuggestionSession(t, sessionDir, "dedupe.jsonl",
+		provider.Message{Role: provider.RoleUser, Content: "Always answer in Chinese unless the user explicitly asks for English."},
+		provider.Message{Role: provider.RoleUser, Content: "Always use tabs for indentation."},
+	)
+	got := suggestMemories(set, loadSuggestionSessions(sessionDir, suggestionSessionLimit))
+	if len(got) != 0 {
+		t.Fatalf("suggestions = %+v, want all candidates covered by scoped facts/docs to be omitted", got)
 	}
 }

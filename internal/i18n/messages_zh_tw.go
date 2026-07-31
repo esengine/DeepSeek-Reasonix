@@ -126,16 +126,21 @@ var ChineseTraditional = Messages{
 	PlanModeReadOnlyCommandTrustFailedFmt:  "儲存計劃模式唯讀命令信任 %s 失敗：%v",
 	DiffFoldedFmt:                          "… 還有 %d 行",
 
-	OutputStyleNone:    "沒有可用的輸出風格",
-	OutputStyleHeader:  "輸出風格：",
-	OutputStyleHint:    "在 reasonix.toml 設定 agent.output_style 即可啟用（下次會話生效）",
-	ThemeHeader:        "主題：",
-	ThemeHint:          "使用 /theme <auto|light|dark|style> 切換",
-	ThemeChangedFmt:    "已切換主題為 %s / %s",
-	ThemeUnknownFmt:    "未知主題 %q",
-	LanguageHeader:     "語言：",
-	LanguageHint:       "使用 /language <auto|en|zh|zh-TW> 切換",
-	LanguageChangedFmt: "語言已設為 %s（當前解析為：%s）",
+	OutputStyleNone:           "沒有可用的輸出風格",
+	OutputStyleHeader:         "輸出風格：",
+	OutputStyleHint:           "在 reasonix.toml 設定 agent.output_style 即可啟用（下次會話生效）",
+	ThemeHeader:               "主題：",
+	ThemeHint:                 "使用 /theme <auto|light|dark|style> 切換",
+	ThemeChangedFmt:           "已切換主題為 %s / %s",
+	ThemeUnknownFmt:           "未知主題 %q",
+	LanguageHeader:            "語言：",
+	LanguageHint:              "使用 /language <auto|en|zh|zh-TW> 切換",
+	LanguageChangedFmt:        "語言已設為 %s（當前解析為：%s）",
+	CurrencyHeader:            "計價貨幣：",
+	CurrencyHint:              "使用 /currency <auto|CNY|USD> 切換",
+	CurrencyChangedFmt:        "計價貨幣已設為 %s（目前解析為：%s）",
+	RuntimeRefreshBusy:        "請先完成或取消目前工作，並停止背景任務後再修改此設定",
+	RuntimeRefreshUnavailable: "本會話不支援重新整理執行階段",
 
 	CompactionWorking: "正在壓縮對話…",
 	CompactionTitle:   "上下文已壓縮",
@@ -228,7 +233,7 @@ var ChineseTraditional = Messages{
 	CmdModel:            "切換模型",
 	CmdStatus:           "顯示工作階段狀態",
 	CmdWorkMode:         "切換工作模式",
-	CmdMemory:           "檢視記憶檔案",
+	CmdMemory:           "檢視指令、記憶與復原狀態",
 	CmdMigrate:          "重試舊資料遷移",
 	CmdRemember:         "儲存一條記憶",
 	CmdForget:           "刪除一條已存記憶",
@@ -240,6 +245,7 @@ var ChineseTraditional = Messages{
 	CmdOutputStyle:      "列出輸出風格",
 	CmdTheme:            "切換 CLI 主題",
 	CmdLanguage:         "切換 CLI 語言",
+	CmdCurrency:         "切換計價貨幣",
 	CmdSkill:            "管理 skills",
 	CmdVerbose:          "切換 thinking 原文顯示",
 	CmdReloadCmd:        "重載自定義命令",
@@ -454,6 +460,31 @@ var ChineseTraditional = Messages{
 	SelectOneHint:  "(↑/↓ · Enter · q 取消)",
 	SelectManyHint: "(↑/↓ · Space · Enter · q)",
 
+	ReportNoPending:           "沒有待處理的 CLI 當機報告。",
+	ReportHeaderFmt:           "CLI 當機報告 %s",
+	ReportCapturedFmt:         "擷取時間：%s",
+	ReportPreviewOnlyFmt:      "目前僅預覽。執行 `reasonix report send %s` 可傳送這份報告。",
+	ReportSendPrompt:          "將這份已脫敏報告傳送到 crash.reasonix.io？",
+	ReportKept:                "報告已保留在本機。",
+	ReportDeletedFmt:          "已刪除 CLI 當機報告 %s。",
+	ReportSentFmt:             "已傳送 CLI 當機報告 %s。",
+	ReportSafeModeBlocked:     "Safe Mode 下不能傳送當機報告；本機報告已保留",
+	ReportConfigFailedFmt:     "無法載入網路設定：%v",
+	ReportUploadFailedFmt:     "報告上傳失敗；本機報告已保留：%v",
+	ReportSentDeleteFailedFmt: "報告已傳送，但無法刪除本機副本：%v",
+	ReportUsageBody: `用法：
+  reasonix report                 預覽最新本機報告並確認是否傳送
+  reasonix report list            列出本機 CLI 當機報告
+  reasonix report show [ID]       預覽報告（省略 ID 時使用最新一份）
+  reasonix report send [ID]       傳送已審閱報告，成功後刪除本機副本
+  reasonix report delete [ID]     不傳送，直接刪除本機報告`,
+
+	CLITelemetryConsentNotice:           "Reasonix 可以向 crash.reasonix.io 傳送匿名、完全不含內容的 CLI 使用統計：隨機安裝 ID、版本、作業系統和固定品質分桶。絕不會傳送 prompt、回答、程式碼、路徑、模型或工具內容、環境變數。之後可執行 `reasonix config telemetry off` 關閉。",
+	CLITelemetryConsentPrompt:           "允許傳送匿名 CLI 使用統計嗎？",
+	CLITelemetryConsentInvalid:          "請輸入 y 或 n。",
+	CLITelemetryConsentSaveFailedFmt:    "由於無法儲存偏好設定，CLI 使用統計仍維持關閉：%v",
+	CLITelemetryConsentCleanupFailedFmt: "CLI 使用統計已關閉，但無法刪除待傳送統計：%v",
+
 	UsageBody: `reasonix — 由設定和插件驅動的 coding agent（多模型）
 
 用法：
@@ -466,6 +497,8 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
+  reasonix config telemetry [auto|on|off]                設定不含內容的 CLI 使用統計
+  reasonix report [list|show|send|delete] [ID]           審閱並明確傳送本機 CLI 當機報告
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
   reasonix subagent <list|create|edit|delete|try|run>   管理和執行隔離子智慧體 profile
   reasonix init                                         查看如何產生專案記憶（AGENTS.md）
@@ -477,7 +510,7 @@ var ChineseTraditional = Messages{
   reasonix hook list|status --json [--dir PATH]         檢視脫敏 Hook 狀態
   reasonix task list|show --json [--dir PATH]           檢視脫敏 Task 狀態
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
-  reasonix upgrade [--check] [--force]                   自更新至最新版本（也可用：reasonix update）
+  reasonix upgrade [stable|preview] [--check] [--force]  按已儲存渠道自更新（進階用法：--channel；別名：reasonix update）
   reasonix version
   reasonix help
 

@@ -1,0 +1,41 @@
+name: Tests (SIMD)
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - 'exp/simd/**'
+  pull_request:
+    paths:
+      - 'exp/simd/**'
+
+env:
+  GOEXPERIMENT: simd
+
+jobs:
+  test-simd:
+    # GitHub hosted runners run on several architectures.
+    # Using Ubicloud ensures we run on AVX512.
+    runs-on: ubicloud-standard-2
+    strategy:
+      fail-fast: false
+      matrix:
+        go:
+          - "stable"
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Test
+        run: make test
+
+      - name: Benchmark
+        run: |
+          cd exp/simd/
+          GOEXPERIMENT=simd go test -run=^Benchmark -benchmem -bench ./...

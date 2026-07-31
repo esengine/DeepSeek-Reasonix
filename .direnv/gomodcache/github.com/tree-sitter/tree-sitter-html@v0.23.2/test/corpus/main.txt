@@ -1,0 +1,382 @@
+===================================
+Tags
+===================================
+<span>Hello</span>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (text)
+    (end_tag (tag_name))))
+
+===================================
+Tags with attributes
+===================================
+<input value=yes class="a" data-💩></input>
+---
+
+(document
+  (element
+    (start_tag
+      (tag_name)
+      (attribute
+        (attribute_name)
+        (attribute_value))
+      (attribute
+        (attribute_name)
+        (quoted_attribute_value (attribute_value)))
+      (attribute
+        (attribute_name)))
+    (end_tag (tag_name))))
+
+===================================
+Nested tags
+===================================
+<div>
+  <span>a</span>
+  b
+  <b>c</b>
+  Multi-line
+  text
+</div>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (element
+      (start_tag (tag_name))
+      (text)
+      (end_tag (tag_name)))
+    (text)
+    (element
+      (start_tag (tag_name))
+      (text)
+      (end_tag (tag_name)))
+    (text)
+    (end_tag (tag_name))))
+
+==================================
+Void tags
+==================================
+<form><img src="something.png"><br><input type=submit value=Ok /></form>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (element
+      (start_tag
+        (tag_name)
+        (attribute (attribute_name) (quoted_attribute_value (attribute_value)))))
+    (element (start_tag (tag_name)))
+    (element
+      (self_closing_tag
+        (tag_name)
+        (attribute (attribute_name) (attribute_value))
+        (attribute (attribute_name) (attribute_value))))
+    (end_tag (tag_name))))
+
+==================================
+Void tags at EOF
+==================================
+<img src="something.png">
+---
+
+(document
+  (element
+    (start_tag
+      (tag_name)
+      (attribute (attribute_name) (quoted_attribute_value (attribute_value))))))
+
+==================================
+Custom tags
+==================================
+<something:different>
+  <atom-text-editor mini>
+    Hello
+  </atom-text-editor>
+</something:different>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (element
+      (start_tag (tag_name) (attribute (attribute_name)))
+      (text)
+      (end_tag (tag_name)))
+    (end_tag (tag_name))))
+
+==================================
+Comments
+==================================
+<!-- hello -->
+<!-- world ->-> -- > ->->->-- -> still comment -->
+<div>
+  <!-- <span>something</span> -->
+</div>
+---
+
+(document
+  (comment)
+  (comment)
+  (element
+    (start_tag (tag_name))
+    (comment)
+    (end_tag (tag_name))))
+
+==================================
+Raw text elements
+==================================
+<script>
+  </s
+  </sc
+  </scr
+  </scri
+  </scrip
+</script>
+
+<style>
+  </ </s </st </sty </styl
+</style>
+
+<script>
+</SCRIPT>
+
+---
+
+(document
+  (script_element
+    (start_tag (tag_name))
+    (raw_text)
+    (end_tag (tag_name)))
+  (style_element
+    (start_tag (tag_name))
+    (raw_text)
+    (end_tag (tag_name)))
+  (script_element
+    (start_tag (tag_name))
+    (raw_text)
+    (end_tag (tag_name))))
+
+==================================
+All-caps doctype
+==================================
+<!DOCTYPE html PUBLIC
+  "-//W3C//DTD XHTML 1.0 Transitional//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+---
+
+(document
+  (doctype))
+
+==================================
+Lowercase doctype
+==================================
+<!doctype html>
+---
+
+(document
+  (doctype))
+
+==================================
+LI elements without close tags
+==================================
+<ul>
+  <li>One
+  <li>Two
+</ul>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (element (start_tag (tag_name)) (text))
+    (element (start_tag (tag_name)) (text))
+    (end_tag (tag_name))))
+
+======================================
+DT and DL elements without close tags
+======================================
+<dl>
+  <dt>Coffee
+  <dt>Café
+  <dd>Black hot drink
+  <dt>Milk
+  <dd>White cold drink
+</dl>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (element (start_tag (tag_name)) (text))
+    (element (start_tag (tag_name)) (text))
+    (element (start_tag (tag_name)) (text))
+    (element (start_tag (tag_name)) (text))
+    (element (start_tag (tag_name)) (text))
+    (end_tag (tag_name))))
+
+======================================
+P elements without close tags
+======================================
+<p>One
+<div>Two</div>
+<p>Three
+<p>Four
+<h1>Five</h1>
+---
+
+(document
+  (element (start_tag (tag_name)) (text))
+  (element (start_tag (tag_name)) (text) (end_tag (tag_name)))
+  (element (start_tag (tag_name)) (text))
+  (element (start_tag (tag_name)) (text))
+  (element (start_tag (tag_name)) (text) (end_tag (tag_name))))
+
+======================================
+Ruby annotation elements without close tags
+======================================
+<ruby>東<rb>京<rt>とう<rt>きょう</ruby>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (text)
+    (element (start_tag (tag_name)) (text))
+    (element (start_tag (tag_name)) (text))
+    (element (start_tag (tag_name)) (text))
+    (end_tag (tag_name))))
+
+=======================================
+COLGROUP elements without end tags
+=======================================
+<table>
+  <colgroup>
+    <col style="background-color: #0f0">
+    <col span="2">
+  <tr>
+    <th>Lime</th>
+    <th>Lemon</th>
+    <th>Orange</th>
+  </tr>
+</table>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (element
+      (start_tag (tag_name))
+      (element (start_tag
+        (tag_name)
+        (attribute (attribute_name) (quoted_attribute_value (attribute_value)))))
+      (element (start_tag
+        (tag_name)
+        (attribute (attribute_name) (quoted_attribute_value (attribute_value))))))
+    (element
+      (start_tag (tag_name))
+      (element (start_tag (tag_name)) (text) (end_tag (tag_name)))
+      (element (start_tag (tag_name)) (text) (end_tag (tag_name)))
+      (element (start_tag (tag_name)) (text) (end_tag (tag_name)))
+      (end_tag (tag_name)))
+    (end_tag (tag_name))))
+
+=========================================
+TR, TD, and TH elements without end tags
+=========================================
+<table>
+  <tr>
+    <th>One
+    <th>Two
+  <tr>
+    <td>Three
+    <td>Four
+</table>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (element
+      (start_tag (tag_name))
+      (element (start_tag (tag_name)) (text))
+      (element (start_tag (tag_name)) (text)))
+    (element
+      (start_tag (tag_name))
+      (element (start_tag (tag_name)) (text))
+      (element (start_tag (tag_name)) (text)))
+    (end_tag (tag_name))))
+
+==============================
+Named entities in tag contents
+==============================
+
+<p>Lorem ipsum &nbsp; dolor sit &copy; amet.</p>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (text)
+    (entity)
+    (text)
+    (entity)
+    (text)
+    (end_tag (tag_name))))
+
+================================
+Numeric entities in tag contents
+================================
+
+<p>Lorem ipsum &#160; dolor sit &#8212; amet.</p>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (text)
+    (entity)
+    (text)
+    (entity)
+    (text)
+    (end_tag (tag_name))))
+
+=================================
+Multiple entities in tag contents
+=================================
+
+<p>Lorem ipsum &#xA0; dolor &#xa0; sit &nbsp; amet.</p>
+---
+
+(document
+  (element
+    (start_tag (tag_name))
+    (text)
+    (entity)
+    (text)
+    (entity)
+    (text)
+    (entity)
+    (text)
+    (end_tag (tag_name))))
+
+==================================
+Omitted end tags for html and head
+==================================
+
+<!doctype html><html><head>
+
+---
+
+(document
+  (doctype)
+  (element
+    (start_tag
+      (tag_name))
+    (element
+      (start_tag
+        (tag_name)))))

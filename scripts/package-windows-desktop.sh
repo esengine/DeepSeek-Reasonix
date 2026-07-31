@@ -29,6 +29,8 @@ GUARDNAME="reasonix-guard"
 LAUNCHERNAME="reasonix-launcher"
 UPDATE_HELPER="reasonix-update-helper.exe"
 WINDOWS_CLINAME="reasonix-cli"
+PAYLOAD_MANIFEST="reasonix-payload.json"
+PAYLOAD_SIGNATURE="$PAYLOAD_MANIFEST.minisig"
 
 [ -d "$payload_input" ] || { echo "Windows payload directory is missing: $payload_input" >&2; exit 1; }
 PAYLOAD="$(cd "$payload_input" && pwd)"
@@ -51,6 +53,19 @@ payload_exe_count=$(find "$PAYLOAD" -maxdepth 1 -type f -iname '*.exe' | wc -l |
 	exit 1
 }
 
+manifest_present=0
+signature_present=0
+[ -s "$PAYLOAD/$PAYLOAD_MANIFEST" ] && manifest_present=1
+[ -s "$PAYLOAD/$PAYLOAD_SIGNATURE" ] && signature_present=1
+if [ "$manifest_present" != "$signature_present" ]; then
+	echo "Windows payload manifest and signature must be provided together" >&2
+	exit 1
+fi
+if [ "${REASONIX_REQUIRE_PAYLOAD_MANIFEST:-0}" = "1" ] && [ "$manifest_present" != "1" ]; then
+	echo "signed Windows packaging requires $PAYLOAD_MANIFEST and $PAYLOAD_SIGNATURE" >&2
+	exit 1
+fi
+
 # Replace every source consumed by project.nsi before compiling the installer.
 # Copying preserves the Authenticode certificate table returned by SignPath.
 cp "$PAYLOAD/$BINNAME.exe" "$BIN_DIR/$BINNAME.exe"
@@ -58,6 +73,11 @@ cp "$PAYLOAD/$GUARDNAME.exe" "$INSTALLER_DIR/$GUARDNAME.exe"
 cp "$PAYLOAD/$LAUNCHERNAME.exe" "$INSTALLER_DIR/$LAUNCHERNAME.exe"
 cp "$PAYLOAD/$UPDATE_HELPER" "$INSTALLER_DIR/$UPDATE_HELPER"
 cp "$PAYLOAD/$WINDOWS_CLINAME.exe" "$INSTALLER_DIR/$WINDOWS_CLINAME.exe"
+rm -f -- "$INSTALLER_DIR/$PAYLOAD_MANIFEST" "$INSTALLER_DIR/$PAYLOAD_SIGNATURE"
+if [ "$manifest_present" = "1" ]; then
+	cp "$PAYLOAD/$PAYLOAD_MANIFEST" "$INSTALLER_DIR/$PAYLOAD_MANIFEST"
+	cp "$PAYLOAD/$PAYLOAD_SIGNATURE" "$INSTALLER_DIR/$PAYLOAD_SIGNATURE"
+fi
 
 [ -s "$INSTALLER_DIR/wails_tools.nsh" ] || {
 	echo "wails_tools.nsh is missing; run the initial Wails -nsis build first" >&2

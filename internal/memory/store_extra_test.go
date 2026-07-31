@@ -157,8 +157,8 @@ func TestRenderRoundTrip(t *testing.T) {
 	if fm["description"] != "A test fact" {
 		t.Errorf("description = %q", fm["description"])
 	}
-	if fm["type"] != "user" {
-		t.Errorf("type = %q", fm["type"])
+	if got := persistedFactType(fm); got != TypeUser {
+		t.Errorf("type = %q", got)
 	}
 	if !strings.Contains(body, "The body of the fact.") {
 		t.Errorf("body = %q", body)

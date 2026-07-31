@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.2//EN"
+  "http://www.web3d.org/specifications/x3d-3.2.dtd">
+
+<X3D profile="Interchange" version="3.2"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema-instance"
+     xsd:noNamespaceSchemaLocation="http://www.web3d.org/specifications/x3d-3.2.xsd">
+<Scene>
+  <Shape>
+    <IndexedFaceSet coordIndex="0 1 2">
+      <Coordinate point="0 0 0 1 0 0 0.5 1 0"/>
+    </IndexedFaceSet>
+  </Shape>
+</Scene>
+</X3D>

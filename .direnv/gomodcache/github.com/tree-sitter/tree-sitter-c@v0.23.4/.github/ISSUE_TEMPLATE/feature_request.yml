@@ -1,0 +1,36 @@
+name: Feature Request
+description: Suggest a new feature
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: checkboxes
+    attributes:
+      label: Did you check the tree-sitter docs?
+      description: Make sure you read all the docs before submitting a feature request
+      options:
+        - label: I have read all the [tree-sitter docs](https://tree-sitter.github.io/tree-sitter/using-parsers) if it relates to using the parser
+          required: false
+  - type: textarea
+    validations:
+      required: true
+    attributes:
+      label: Is your feature request related to a problem? Please describe.
+      description: A clear and concise description of what the problem is. Ex. I think the grammar models this rule incorrectly and can be improved, or the C spec has officially added a new feature that should be added to the grammar.
+  - type: textarea
+    validations:
+      required: true
+    attributes:
+      label: Describe the solution you'd like
+      description: A clear and concise description of what you want to happen.
+  - type: textarea
+    validations:
+      required: true
+    attributes:
+      label: Describe alternatives you've considered
+      description: A clear and concise description of any alternative solutions or features you've considered.
+  - type: textarea
+    validations:
+      required: false
+    attributes:
+      label: Additional context
+      description: Add any other context or screenshots about the feature request here. If your feature request is related to a new C feature, please include a link to the relevant **official** C documentation.

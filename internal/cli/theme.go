@@ -17,7 +17,10 @@ import (
 )
 
 type cliColor struct {
-	hex   string
+	hex string
+	// Distance-based downsampling collapses the dark, low-chroma diff backgrounds
+	// to plain grey and loses the red/green tint that carries their meaning, so
+	// the 256-colour fallback stays hand-chosen rather than computed.
 	xterm int
 }
 
@@ -103,9 +106,14 @@ var (
 		{name: "linen", mode: "light", accent: cliColor{"#bd5d4d", 167}, description: "muted coral light accent"},
 		{name: "glacier", mode: "light", accent: cliColor{"#357fa8", 74}, description: "cool blue light accent"},
 	}
-	activeCLITheme                  = applyCLIThemeStyle(cliDarkTheme, cliThemeStyles[0])
-	queryTerminalBackgroundForTheme = queryTerminalBackground
+	activeCLITheme = applyCLIThemeStyle(cliDarkTheme, cliThemeStyles[0])
+	// activeBackgroundProbe stays inert unless a caller that owns stdin opts in
+	// through withTerminalProbe; terminalProbe is what opting in installs.
+	activeBackgroundProbe = noTerminalBackground
+	terminalProbe         = queryTerminalBackground
 )
+
+func noTerminalBackground() (terminalRGB, bool) { return terminalRGB{}, false }
 
 // cliCursorShape is the active cursor shape for the textarea input, configured
 // via [ui] cursor_shape. Defaults to the slim bar used by the chat composer.
@@ -155,7 +163,7 @@ func resolveCLIThemeMode(mode string) string {
 	case "dark":
 		return "dark"
 	case "auto", "":
-		if rgb, ok := queryTerminalBackgroundForTheme(); ok {
+		if rgb, ok := activeBackgroundProbe(); ok {
 			if rgb.looksLight() {
 				return "light"
 			}
@@ -210,23 +218,18 @@ func defaultCLIThemeStyle(mode string) cliThemeStyle {
 	return cliThemeStyles[0]
 }
 
-// withoutTerminalProbe resolves a theme with the OSC background probe disabled —
-// for callers running while something else (the live TUI) owns stdin, where a
-// raw-mode read would fight the TUI's input reader. "auto" then falls back to the
-// COLORFGBG heuristic.
-func withoutTerminalProbe(fn func()) {
-	prev := queryTerminalBackgroundForTheme
-	queryTerminalBackgroundForTheme = func() (terminalRGB, bool) { return terminalRGB{}, false }
-	defer func() { queryTerminalBackgroundForTheme = prev }()
+// withTerminalProbe resolves "auto" against a live OSC 11 query. Probing reads
+// stdin in raw mode, so only a caller that owns stdin may opt in; everyone else
+// gets the COLORFGBG fallback and never fights the TUI's input reader.
+func withTerminalProbe(fn func()) {
+	prev := activeBackgroundProbe
+	activeBackgroundProbe = terminalProbe
+	defer func() { activeBackgroundProbe = prev }()
 	fn()
 }
 
 func setCLIThemeMode(mode string) cliPalette {
-	// A runtime /theme switch runs inside the TUI, which owns stdin, so resolving
-	// "auto" must not live-probe the terminal here.
-	withoutTerminalProbe(func() {
-		activeCLITheme = resolveCLIThemeWithStyle(mode, activeCLITheme.style)
-	})
+	activeCLITheme = resolveCLIThemeWithStyle(mode, activeCLITheme.style)
 	refreshCLIStyles()
 	return activeCLITheme
 }
@@ -313,9 +316,8 @@ func colorFGBGLooksLight() bool {
 }
 
 func fgSGR(c cliColor) string {
-	if supportsTrueColor() && c.hex != "" {
-		r, g, b, ok := parseHexColor(c.hex)
-		if ok {
+	if trueColorTerminal() {
+		if r, g, b, ok := parseHexColor(c.hex); ok {
 			return fmt.Sprintf("\033[38;2;%d;%d;%dm", r, g, b)
 		}
 	}
@@ -323,9 +325,8 @@ func fgSGR(c cliColor) string {
 }
 
 func bgSGR(c cliColor) string {
-	if supportsTrueColor() && c.hex != "" {
-		r, g, b, ok := parseHexColor(c.hex)
-		if ok {
+	if trueColorTerminal() {
+		if r, g, b, ok := parseHexColor(c.hex); ok {
 			return fmt.Sprintf("\033[48;2;%d;%d;%dm", r, g, b)
 		}
 	}
@@ -343,42 +344,40 @@ func parseHexColor(hex string) (int, int, int, bool) {
 	return int(r), int(g), int(b), errR == nil && errG == nil && errB == nil
 }
 
-func supportsTrueColor() bool {
-	ct := strings.ToLower(os.Getenv("COLORTERM"))
-	if strings.Contains(ct, "truecolor") || strings.Contains(ct, "24bit") {
-		return true
-	}
-	switch os.Getenv("TERM_PROGRAM") {
-	case "iTerm.app", "WezTerm", "vscode":
-		return true
-	default:
-		return false
-	}
-}
-
 func themeFg(c cliColor, s string) string {
 	return sgr(fgSGR(c), s)
 }
 
+// themeLipColor pre-resolves the fallback rather than handing lipgloss a 24-bit
+// value: the bubbletea renderer would otherwise downsample it with the same
+// distance metric the hand-chosen xterm indices exist to avoid.
 func themeLipColor(c cliColor) color.Color {
-	if supportsTrueColor() && c.hex != "" {
+	if trueColorTerminal() {
 		return lipgloss.Color(c.hex)
 	}
 	return lipgloss.Color(strconv.Itoa(c.xterm))
 }
 
 func themeStyle(c cliColor) lipgloss.Style {
-	if !colorEnabled {
+	if !colorOn() {
 		return lipgloss.NewStyle()
 	}
 	return lipgloss.NewStyle().Foreground(themeLipColor(c))
 }
 
 func withThemeBorderFG(st lipgloss.Style, c cliColor) lipgloss.Style {
-	if !colorEnabled {
+	if !colorOn() {
 		return st
 	}
 	return st.BorderForeground(themeLipColor(c))
+}
+
+func modeTagStyle(background, foreground cliColor) lipgloss.Style {
+	st := lipgloss.NewStyle().Bold(true).Padding(0, 1)
+	if !colorOn() {
+		return st
+	}
+	return st.Background(themeLipColor(background)).Foreground(themeLipColor(foreground))
 }
 
 func init() {
@@ -405,7 +404,7 @@ func refreshCLIStyles() {
 func applyTextareaTheme(ti *textarea.Model) {
 	plain := lipgloss.NewStyle()
 	weak := themeStyle(activeCLITheme.faint)
-	if !colorEnabled {
+	if !colorOn() {
 		weak = plain
 	}
 
@@ -430,7 +429,7 @@ func applyTextareaTheme(ti *textarea.Model) {
 		Placeholder:      weak,
 		Prompt:           weak,
 	}
-	if colorEnabled {
+	if colorOn() {
 		styles.Cursor.Color = themeLipColor(activeCLITheme.accent)
 	} else {
 		styles.Cursor.Color = nil
@@ -446,13 +445,14 @@ func applyTextareaTheme(ti *textarea.Model) {
 	ti.SetStyles(styles)
 }
 
-func (m *chatTUI) runThemeSubcommand(input string) {
+func (m *chatTUI) runThemeSubcommand(input string) tea.Cmd {
 	args := tokenizeArgs(input)
 	if len(args) < 2 {
 		m.notice(i18n.M.ThemeHeader + "\n" + describeCLIThemes() + "\n" + i18n.M.ThemeHint)
-		return
+		return nil
 	}
 	name := strings.ToLower(args[1])
+	previous := activeCLITheme
 	var theme cliPalette
 	switch name {
 	case "auto", "light", "dark":
@@ -461,7 +461,7 @@ func (m *chatTUI) runThemeSubcommand(input string) {
 		next, ok := setCLIThemeStyle(name)
 		if !ok {
 			m.notice(fmt.Sprintf(i18n.M.ThemeUnknownFmt, name) + "\n" + describeCLIThemes())
-			return
+			return nil
 		}
 		theme = next
 	}
@@ -470,6 +470,7 @@ func (m *chatTUI) runThemeSubcommand(input string) {
 
 	// Persist to user config so the choice survives restart.
 	m.persistTheme(name)
+	return m.startThemeSweep(previous, theme)
 }
 
 func (m *chatTUI) persistTheme(inputName string) {

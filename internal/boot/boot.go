@@ -107,6 +107,11 @@ type Options struct {
 	// so each tab loads its own config/skills/hooks without changing the process
 	// cwd — enabling concurrent multi-project sessions.
 	WorkspaceRoot string
+	// AutoPricingCurrency supplies a frontend-resolved pricing region when the
+	// persisted desktop currency and language settings are all automatic. It is
+	// applied to the in-memory config only and never turns Auto into a persisted
+	// CNY/USD choice.
+	AutoPricingCurrency string
 	// ExtraPlugins are session-scoped MCP servers supplied by a host transport
 	// (for example ACP session/new). They are connected eagerly for this
 	// controller but are not persisted to reasonix.toml.
@@ -197,6 +202,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if err != nil {
 		return nil, err
 	}
+	applyRuntimeAutoPricingCurrency(cfg, opts.AutoPricingCurrency)
 	// Arm the credential-protection layers from the user-global [secrets]
 	// section before any tool, hook, or plugin subprocess can spawn. Package
 	// globals are correct here because [secrets] is user-global (project
@@ -204,9 +210,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	secrets.SetFilterSubprocessEnv(cfg.Secrets.FilterSubprocessEnv)
 	secrets.SetProtectSensitiveFiles(cfg.Secrets.ProtectSensitiveFiles)
 	secrets.RegisterCredentialEnvKeys(cfg.CredentialEnvNames())
+	// Fall through a keyless default_model to the next configured chat model
+	// instead of hard-failing every command on "missing env X_API_KEY" (issue
+	// #6996). The fallback only kicks in when the caller did not pass an
+	// explicit opts.Model; explicit choices still fail loudly.
 	modelName := opts.Model
 	if modelName == "" {
-		modelName = cfg.DefaultModel
+		if resolved, _, ok := cfg.ResolveNewSessionChatModel(); ok {
+			modelName = resolved
+		}
 	}
 	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, modelName)
 	tokenMode := NormalizeTokenMode(opts.TokenMode)
@@ -416,6 +428,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// controller's transient turn-injection and fold in on the next session.
 	mem := &memory.Set{CWD: root}
 	if !cfg.SafeMode() {
+		if _, err := memory.StoreFor(config.MemoryUserDir(), root).MigrateV2(); err != nil {
+			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Memory metadata migration did not complete.", Detail: err.Error()})
+		}
 		mem = memory.Load(memory.Options{CWD: root, UserDir: config.MemoryUserDir()})
 	}
 	projectChecks := instruction.ExtractHostChecks(mem.Docs)
@@ -750,9 +765,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if !cfg.SafeMode() {
 		resolvedHooks = hook.Load(hook.LoadOptions{ProjectRoot: root})
 	}
+	hookRuntime := hook.RuntimeOptions{}
+	if shell.Kind == sandbox.ShellBash {
+		hookRuntime.BashPath = shell.Path
+	}
 	hookRunner := hook.NewRunner(
-		resolvedHooks,
-		root, nil,
+		resolvedHooks, root, hook.NewDefaultSpawner(hookRuntime),
 		func(msg string) { sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg}) },
 	)
 	// The `task` tool spawns sub-agents that reuse the parent's provider and
@@ -848,11 +866,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// so task tools created later still receive the session-shared substrate.
 	var capRuntime *agent.MCPCapabilityRuntime
 	newTaskTool := func() *agent.TaskTool {
-		return agent.NewTaskTool(execProv, entry.Price, reg, maxSteps,
-			entry.ContextWindow, cfg.Agent.RecentKeep, cfg.Agent.SoftCompactRatio, cfg.Agent.ToolResultSnipRatio, cfg.Agent.CompactRatio, cfg.Agent.CompactForceRatio,
-			cfg.Agent.Temperature, config.ArchiveDir(), "", headlessGate,
-			keepPolicy,
-			taskModel, taskEffort, resolveSubagentProvider).
+		return agent.NewTaskToolWithOptions(agent.TaskToolOptions{
+			Provider:            execProv,
+			Pricing:             entry.Price,
+			ParentRegistry:      reg,
+			MaxSteps:            maxSteps,
+			ContextWindow:       entry.ContextWindow,
+			RecentKeep:          cfg.Agent.RecentKeep,
+			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
+			CompactRatio:        cfg.Agent.CompactRatio,
+			CompactForceRatio:   cfg.Agent.CompactForceRatio,
+			Temperature:         cfg.Agent.Temperature,
+			ArchiveDir:          config.ArchiveDir(),
+			SysPrompt:           "",
+			Gate:                headlessGate,
+			KeepPolicy:          keepPolicy,
+			SubagentModel:       taskModel,
+			SubagentEffort:      taskEffort,
+			ResolveProvider:     resolveSubagentProvider,
+		}).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity).
 			WithMaxSubagentDepth(maxSubagentDepth).
@@ -1763,6 +1796,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	return ctrl, nil
 }
 
+func applyRuntimeAutoPricingCurrency(cfg *config.Config, currency string) {
+	if cfg != nil {
+		cfg.ApplyRuntimeAutoPricingCurrency(currency)
+	}
+}
+
 func rememberPermissionRule(workspaceRoot, rule string) control.RememberResult {
 	path := rememberPermissionConfigPath(workspaceRoot)
 	result := control.RememberResult{Rule: strings.TrimSpace(rule), Path: path}
@@ -1814,10 +1853,20 @@ func rememberPermissionConfigPath(workspaceRoot string) string {
 func rememberPlanModeReadOnlyCommand(workspaceRoot, prefix string) control.PlanModeReadOnlyCommandTrustResult {
 	prefix = strings.TrimSpace(prefix)
 	path := rememberPermissionConfigPath(workspaceRoot)
-	edit := config.LoadForEdit(path)
 	result := control.PlanModeReadOnlyCommandTrustResult{Prefix: prefix, Path: path}
 	if prefix == "" {
 		result.Err = fmt.Errorf("empty plan-mode read-only command prefix")
+		return result
+	}
+	unlock, err := config.LockConfigFileEdits(path)
+	if err != nil {
+		result.Err = err
+		return result
+	}
+	defer unlock()
+	edit, err := config.LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		result.Err = err
 		return result
 	}
 	if coveredBy := coveredPlanModeReadOnlyCommand(edit.Agent.PlanModeReadOnlyCommands, prefix); coveredBy != "" {
@@ -2173,18 +2222,20 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 		// provider-kind-specific knobs. EffectiveEffort applies a configured
 		// default_effort when the user has not explicitly selected /effort.
 		Extra: map[string]any{
-			"api_key_env":        e.APIKeyEnv,
-			"api_key_source":     e.APIKeySourceLabel(),
-			"thinking":           e.Thinking,
-			"effort":             config.EffectiveEffort(e),
-			"reasoning_protocol": config.ReasoningProtocolForEntry(e),
-			"chat_url":           e.ChatURL,
-			"headers":            e.Headers,
-			"extra_body":         e.ExtraBody,
-			"auth_header":        e.AuthHeader,
-			"proxy_spec":         proxy,
-			"vision":             config.EffectiveVision(e),
-			"vision_detail":      e.VisionDetail,
+			"api_key_env":           e.APIKeyEnv,
+			"api_key_source":        e.APIKeySourceLabel(),
+			"thinking":              e.Thinking,
+			"effort":                config.EffectiveEffort(e),
+			"supported_efforts":     e.SupportedEfforts,
+			"reasoning_protocol":    config.ReasoningProtocolForEntry(e),
+			"chat_url":              e.ChatURL,
+			"headers":               e.Headers,
+			"extra_body":            e.ExtraBody,
+			"auth_header":           e.AuthHeader,
+			"proxy_spec":            proxy,
+			"vision":                config.EffectiveVision(e),
+			"vision_model_explicit": config.ExplicitModelVision(e),
+			"vision_detail":         e.VisionDetail,
 		},
 	})
 }

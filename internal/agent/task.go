@@ -274,39 +274,94 @@ type TaskTool struct {
 	capabilityRuntime *MCPCapabilityRuntime
 }
 
+// TaskToolOptions holds the construction parameters for a TaskTool.
+// Prefer NewTaskToolWithOptions for new call sites; the positional NewTaskTool
+// remains as a compatibility wrapper for one full iteration cycle.
+type TaskToolOptions struct {
+	Provider            provider.Provider
+	Pricing             *provider.Pricing
+	ParentRegistry      *tool.Registry
+	MaxSteps            int
+	ContextWindow       int
+	RecentKeep          int
+	SoftCompactRatio    float64
+	ToolResultSnipRatio float64
+	CompactRatio        float64
+	CompactForceRatio   float64
+	Temperature         float64
+	ArchiveDir          string
+	SysPrompt           string
+	Gate                Gate
+	KeepPolicy          KeepPolicy
+	SubagentModel       string
+	SubagentEffort      string
+	ResolveProvider     func(string, string) (provider.Provider, *provider.Pricing, int, error)
+}
+
+// NewTaskToolWithOptions is the internal standard constructor for TaskTool.
+// An empty SysPrompt still resolves to DefaultTaskSystemPrompt. No extra
+// validation or default overrides are applied beyond the historical NewTaskTool
+// behavior.
+func NewTaskToolWithOptions(opts TaskToolOptions) *TaskTool {
+	sysPrompt := opts.SysPrompt
+	if sysPrompt == "" {
+		sysPrompt = DefaultTaskSystemPrompt
+	}
+	return &TaskTool{
+		prov:                opts.Provider,
+		pricing:             opts.Pricing,
+		parentReg:           opts.ParentRegistry,
+		maxSteps:            opts.MaxSteps,
+		contextWindow:       opts.ContextWindow,
+		recentKeep:          opts.RecentKeep,
+		softCompactRatio:    opts.SoftCompactRatio,
+		toolResultSnipRatio: opts.ToolResultSnipRatio,
+		compactRatio:        opts.CompactRatio,
+		compactForceRatio:   opts.CompactForceRatio,
+		temperature:         opts.Temperature,
+		archiveDir:          opts.ArchiveDir,
+		keepPolicy:          opts.KeepPolicy,
+		sysPrompt:           sysPrompt,
+		gate:                opts.Gate,
+		subagentModel:       opts.SubagentModel,
+		subagentEffort:      opts.SubagentEffort,
+		resolveProvider:     opts.ResolveProvider,
+		maxSubagentDepth:    DefaultMaxSubagentDepth,
+	}
+}
+
 // NewTaskTool wires a task tool to the parent agent's environment so its
 // sub-agents can use the same provider and tools. sysPrompt is the system
 // prompt every sub-agent starts with; pass "" for DefaultTaskSystemPrompt. gate
 // is the permission gate sub-agents inherit — pass the headless variant so
 // deny rules still bite while autonomous sub-agents are never blocked on an
 // interactive prompt (there is no UI to answer one).
+//
+// Compatibility wrapper: new call sites should prefer NewTaskToolWithOptions.
+// The positional form is kept for at least one full iteration cycle.
 func NewTaskTool(prov provider.Provider, pricing *provider.Pricing, parentReg *tool.Registry,
 	maxSteps, contextWindow, recentKeep int, softCompactRatio, toolResultSnipRatio, compactRatio, compactForceRatio, temperature float64, archiveDir, sysPrompt string, gate Gate,
 	keepPolicy KeepPolicy, subagentModel, subagentEffort string, resolveProvider func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
-	if sysPrompt == "" {
-		sysPrompt = DefaultTaskSystemPrompt
-	}
-	return &TaskTool{
-		prov:                prov,
-		pricing:             pricing,
-		parentReg:           parentReg,
-		maxSteps:            maxSteps,
-		contextWindow:       contextWindow,
-		recentKeep:          recentKeep,
-		softCompactRatio:    softCompactRatio,
-		toolResultSnipRatio: toolResultSnipRatio,
-		compactRatio:        compactRatio,
-		compactForceRatio:   compactForceRatio,
-		temperature:         temperature,
-		archiveDir:          archiveDir,
-		keepPolicy:          keepPolicy,
-		sysPrompt:           sysPrompt,
-		gate:                gate,
-		subagentModel:       subagentModel,
-		subagentEffort:      subagentEffort,
-		resolveProvider:     resolveProvider,
-		maxSubagentDepth:    DefaultMaxSubagentDepth,
-	}
+	return NewTaskToolWithOptions(TaskToolOptions{
+		Provider:            prov,
+		Pricing:             pricing,
+		ParentRegistry:      parentReg,
+		MaxSteps:            maxSteps,
+		ContextWindow:       contextWindow,
+		RecentKeep:          recentKeep,
+		SoftCompactRatio:    softCompactRatio,
+		ToolResultSnipRatio: toolResultSnipRatio,
+		CompactRatio:        compactRatio,
+		CompactForceRatio:   compactForceRatio,
+		Temperature:         temperature,
+		ArchiveDir:          archiveDir,
+		SysPrompt:           sysPrompt,
+		Gate:                gate,
+		KeepPolicy:          keepPolicy,
+		SubagentModel:       subagentModel,
+		SubagentEffort:      subagentEffort,
+		ResolveProvider:     resolveProvider,
+	})
 }
 
 // WithTranscripts enables persisted sub-agent transcript continuation for this

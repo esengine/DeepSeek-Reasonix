@@ -1,0 +1,97 @@
+====================================
+Unexpected string literal prefixes
+====================================
+
+const A: &[&str] = &[
+    @"asdf",
+    <"asdf",
+    >"asdf",
+    :"asdf"
+];
+
+---
+
+(source_file
+    (const_item
+    name: (identifier)
+    type: (reference_type
+        type: (array_type
+        element: (reference_type
+            type: (primitive_type))))
+    value: (reference_expression
+        value: (array_expression
+            (ERROR)
+            (string_literal
+                (string_content))
+            (ERROR)
+            (string_literal
+                (string_content))
+            (ERROR)
+            (string_literal
+                (string_content))
+            (ERROR)
+            (string_literal
+                (string_content))))))
+
+====================================
+Json macro contents
+====================================
+
+({ "session_id": session_id, "output": output })
+
+---
+
+(source_file
+    (expression_statement
+        (parenthesized_expression
+            (block
+                (ERROR
+                    (string_literal
+                        (string_content))
+                    (identifier)
+                    (string_literal
+                        (string_content)))
+                (identifier)))
+        (MISSING ";")))
+
+====================================
+Longer json macro contents
+====================================
+
+({
+    "src": {
+        "file1.rs": "fn foo() {}"
+        "file2.rs": "fn bar() {}",
+    },
+    "test": {
+        "foo": "bar"
+    }
+})
+
+---
+
+(source_file
+    (expression_statement
+        (tuple_expression
+            (block
+                (ERROR
+                    (string_literal
+                        (string_content))
+                    (string_literal
+                        (string_content))
+                    (string_literal
+                        (string_content))
+                    (string_literal
+                        (string_content)))
+                (string_literal
+                    (string_content))
+                (ERROR))
+                (ERROR
+                    (string_literal
+                        (string_content))
+                    (string_literal
+                        (string_content)))
+                (string_literal
+                    (string_content))
+                (ERROR))
+        (MISSING ";")))

@@ -1,0 +1,11 @@
+/*!
+ * CustomWiggle 3.15.0
+ * https://gsap.com
+ * 
+ * @license Copyright 2026, GreenSock. All rights reserved.
+ * Subject to the terms at https://gsap.com/standard-license.
+ * @author: Jack Doyle, jack@greensock.com
+ */
+
+!function(e,t){"object"==typeof exports&&"undefined"!=typeof module?t(exports):"function"==typeof define&&define.amd?define(["exports"],t):t((e=e||self).window=e.window||{})}(this,function(e){"use strict";function g(){return n||"undefined"!=typeof window&&(n=window.gsap)&&n.registerPlugin&&n}function i(e){return e}function j(e){if(!C)if(n=g(),M=n&&n.parseEase("_CE")){for(var t in y)y[t]=M("",y[t]);C=1,o("wiggle").config=function(e){return"object"==typeof e?o("",e):o("wiggle("+e+")",{wiggles:+e})}}else e&&console.warn("Please gsap.registerPlugin(CustomEase, CustomWiggle)")}function k(t,e){return"function"!=typeof t&&(t=n.parseEase(t)||M("",t)),t.custom||!e?t:function(e){return 1-t(e)}}var n,C,M,y={easeOut:"M0,1,C0.7,1,0.6,0,1,0",easeInOut:"M0,0,C0.1,0,0.24,1,0.444,1,0.644,1,0.6,0,1,0",anticipate:"M0,0,C0,0.222,0.024,0.386,0,0.4,0.18,0.455,0.65,0.646,0.7,0.67,0.9,0.76,1,0.846,1,1",uniform:"M0,0,C0,0.95,0,1,0,1,0,1,1,1,1,1,1,1,1,0,1,0"},o=function _create(e,t){C||j(1);var n,o,s,u,r,a,g,f,l,c=0|((t=t||{}).wiggles||10),p=1/c,d=p/2,m="anticipate"===t.type,h=y[t.type]||y.easeOut,w=i;if(m&&(w=h,h=y.easeOut),t.timingEase&&(w=k(t.timingEase)),t.amplitudeEase&&(h=k(t.amplitudeEase,!0)),f=[0,0,(a=w(d))/4,0,a/2,g=m?-h(d):h(d),a,g],"random"===t.type){for(f.length=4,n=w(p),o=2*Math.random()-1,l=2;l<c;l++)d=n,g=o,n=w(p*l),o=2*Math.random()-1,s=Math.atan2(o-f[f.length-3],n-f[f.length-4]),u=Math.cos(s)*p,r=Math.sin(s)*p,f.push(d-u,g-r,d,g,d+u,g+r);f.push(n,0,1,0)}else{for(l=1;l<c;l++)f.push(w(d+p/2),g),d+=p,g=(0<g?-1:1)*h(l*p),a=w(d),f.push(w(d-p/2),g,a,g);f.push(w(d+p/4),g,w(d+p/4),0,1,0)}for(l=f.length;-1<--l;)f[l]=~~(1e3*f[l])/1e3;return f[2]="C"+f[2],M(e,"M"+f.join(","))},t=(CustomWiggle.create=function create(e,t){return o(e,t)},CustomWiggle.register=function register(e){n=e,j()},CustomWiggle);function CustomWiggle(e,t){this.ease=o(e,t)}g()&&n.registerPlugin(t),t.version="3.15.0",e.CustomWiggle=t,e.default=t;if (typeof(window)==="undefined"||window!==e){Object.defineProperty(e,"__esModule",{value:!0})} else {delete e.default}});
+

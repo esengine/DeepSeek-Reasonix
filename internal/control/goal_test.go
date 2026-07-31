@@ -756,6 +756,26 @@ func TestGoalRepeatedBlockedStopsAfterThreeTurns(t *testing.T) {
 	}
 }
 
+func TestGoalBlockedSignalDoesNotTriggerIdleIntercept(t *testing.T) {
+	g := &goalMachine{
+		goal:      "wait for user review",
+		status:    GoalStatusRunning,
+		idleTurns: maxGoalIdleTurns - 1,
+	}
+
+	res := g.advance(goalAdvanceInput{
+		status: GoalStatusBlocked,
+		reason: "waiting for user review",
+	})
+
+	if !res.cont {
+		t.Fatal("first blocked signal should keep the goal audit running")
+	}
+	if res.intercept != "" {
+		t.Fatalf("blocked signal triggered idle intercept %q", res.intercept)
+	}
+}
+
 func TestGoalRestartResetsBlockedAudit(t *testing.T) {
 	prov := &scriptedTurns{turns: [][]provider.Chunk{
 		textTurn("Blocked.\n\n[goal:blocked:needs credentials]"),
@@ -891,6 +911,63 @@ func TestGoalInterceptsCompleteWithIncompleteTodos(t *testing.T) {
 	if c.GoalStatus() != GoalStatusComplete {
 		t.Fatalf("GoalStatus() = %q, want complete (second [goal:complete] should override)", c.GoalStatus())
 	}
+}
+
+func TestGoalAdvanceResultCannotCrossGoalLifecycle(t *testing.T) {
+	newResult := func(t *testing.T, g *goalMachine) goalAdvanceResult {
+		t.Helper()
+		g.set("old goal", GoalResearchAuto, "", nil)
+		res := g.advance(goalAdvanceInput{
+			status:     GoalStatusComplete,
+			toolCalled: true,
+			todos: []evidence.TodoItem{{
+				Content: "unfinished work from old goal",
+				Status:  "in_progress",
+			}},
+		})
+		if res.intercept == "" {
+			t.Fatal("test setup: expected an incomplete-todo intercept")
+		}
+		return res
+	}
+
+	t.Run("current result is accepted", func(t *testing.T) {
+		var g goalMachine
+		res := newResult(t, &g)
+		if got, ok := g.acceptContinuation(res); !ok || got != res.intercept {
+			t.Fatalf("acceptContinuation() = (%q, %v), want current intercept", got, ok)
+		}
+	})
+
+	t.Run("replacement goal invalidates result", func(t *testing.T) {
+		var g goalMachine
+		res := newResult(t, &g)
+		g.set("replacement goal", GoalResearchAuto, "", nil)
+		if got, ok := g.acceptContinuation(res); ok {
+			t.Fatalf("replacement goal accepted stale intercept %q", got)
+		}
+	})
+
+	t.Run("stop and resume invalidates result", func(t *testing.T) {
+		var g goalMachine
+		res := newResult(t, &g)
+		g.stop(GoalStatusStopped, nil)
+		if _, _, _, resumed := g.resume(nil); !resumed {
+			t.Fatal("test setup: goal did not resume")
+		}
+		if got, ok := g.acceptContinuation(res); ok {
+			t.Fatalf("resumed goal accepted stale intercept %q", got)
+		}
+	})
+
+	t.Run("newer advance invalidates result", func(t *testing.T) {
+		var g goalMachine
+		res := newResult(t, &g)
+		g.advance(goalAdvanceInput{toolCalled: true})
+		if got, ok := g.acceptContinuation(res); ok {
+			t.Fatalf("newer FSM step accepted stale intercept %q", got)
+		}
+	})
 }
 
 // TestGoalOverrideCompletesRemainingTodos verifies that when the goal

@@ -1,0 +1,57 @@
+stdin input.sh
+! exec shfmt -d
+cmp stdout input.sh.stdindiff
+! stderr .
+
+stdin input.sh
+! exec shfmt --diff
+cmp stdout input.sh.stdindiff
+! stderr .
+
+! exec shfmt -d input.sh
+cmp stdout input.sh.filediff
+! stderr .
+
+! exec shfmt -d input.sh input.sh
+stdout -count=4 'input.sh.orig'
+
+env FORCE_COLOR=true
+stdin input.sh
+! exec shfmt -d
+stdout '\x1b\[31m- foo'
+! stderr .
+env FORCE_COLOR=
+
+! exec shfmt -d .
+cmp stdout input.sh.filediff
+! stderr .
+
+-- input.sh --
+ foo
+
+
+bar
+-- input.sh.golden --
+foo
+
+bar
+-- input.sh.stdindiff --
+diff <standard input>.orig <standard input>
+--- <standard input>.orig
++++ <standard input>
+@@ -1,4 +1,3 @@
+- foo
+-
++foo
+ 
+ bar
+-- input.sh.filediff --
+diff input.sh.orig input.sh
+--- input.sh.orig
++++ input.sh
+@@ -1,4 +1,3 @@
+- foo
+-
++foo
+ 
+ bar

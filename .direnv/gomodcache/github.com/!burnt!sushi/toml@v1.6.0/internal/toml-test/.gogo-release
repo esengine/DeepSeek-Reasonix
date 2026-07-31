@@ -1,0 +1,1 @@
+build_flags="-trimpath -ldflags '-w -s -X \"zgo.at/zli.version=$tag$commit_info\" -X \"zgo.at/zli.progname=toml-test\"' ./cmd/toml-test"

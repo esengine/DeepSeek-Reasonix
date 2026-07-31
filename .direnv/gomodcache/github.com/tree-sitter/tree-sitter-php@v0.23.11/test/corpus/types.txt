@@ -1,0 +1,458 @@
+=========================
+Type names
+=========================
+
+<?php
+function a(): A {}
+function b(): A\B {}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    (name) (formal_parameters)
+    (named_type (name))
+    (compound_statement))
+  (function_definition
+    (name) (formal_parameters)
+    (named_type (qualified_name (namespace_name (name)) (name)))
+    (compound_statement)))
+
+=========================
+Primitive types
+=========================
+
+<?php
+function a(): int {}
+function b(): callable {}
+function c(): iterable {}
+function d(): never {}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    (name) (formal_parameters)
+    (primitive_type)
+    (compound_statement))
+  (function_definition
+    (name) (formal_parameters)
+    (primitive_type)
+    (compound_statement))
+  (function_definition
+    (name) (formal_parameters)
+    (primitive_type)
+    (compound_statement))
+  (function_definition
+    (name) (formal_parameters)
+    (bottom_type)
+    (compound_statement)))
+
+=======================
+Intersection type
+=======================
+<?php
+
+class Test {
+    public A&B $prop;
+}
+
+function test(A&B $a): A&B {}
+
+function test(Type&MoreTypes &... $b) {}
+
+function test(Type&MoreTypes &$b) {}
+---
+(program
+  (php_tag)
+  (class_declaration
+    (name)
+    (declaration_list
+      (property_declaration
+        (visibility_modifier)
+        (intersection_type
+          (named_type (name))
+          (named_type (name))
+        )
+        (property_element
+          (variable_name (name))
+        )
+      )
+    )
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (intersection_type
+          (named_type (name))
+          (named_type (name))
+        )
+        (variable_name (name))
+      )
+    )
+    (intersection_type
+      (named_type (name))
+      (named_type (name))
+    )
+    (compound_statement)
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (variadic_parameter
+        (intersection_type
+          (named_type (name))
+          (named_type (name))
+        )
+        (reference_modifier)
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (intersection_type
+          (named_type (name))
+          (named_type (name))
+        )
+        (reference_modifier)
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+)
+
+=======================
+Disjunctive Normal Form type
+=======================
+<?php
+
+class Test {
+    public (A&B)|C|null $prop;
+}
+
+function test((A&B)|(A&C) $a): A|(A&B)|(A&C)|D {}
+
+function test((Type&MoreTypes)|A|B &... $b) {}
+
+function test(A|B|(Type&MoreTypes)|C &$b) {}
+---
+(program
+  (php_tag)
+  (class_declaration
+    (name)
+    (declaration_list
+      (property_declaration
+        (visibility_modifier)
+        (disjunctive_normal_form_type
+          (intersection_type
+            (named_type (name))
+            (named_type (name))
+          )
+          (named_type (name))
+          (primitive_type)
+        )
+        (property_element
+          (variable_name (name))
+        )
+      )
+    )
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (disjunctive_normal_form_type
+          (intersection_type
+            (named_type (name))
+            (named_type (name))
+          )
+          (intersection_type
+            (named_type (name))
+            (named_type (name))
+          )
+        )
+        (variable_name (name))
+      )
+    )
+    (disjunctive_normal_form_type
+      (named_type (name))
+      (intersection_type
+        (named_type (name))
+        (named_type (name))
+      )
+      (intersection_type
+        (named_type (name))
+        (named_type (name))
+      )
+      (named_type (name))
+    )
+    (compound_statement)
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (variadic_parameter
+        (disjunctive_normal_form_type
+          (intersection_type
+            (named_type (name))
+            (named_type (name))
+          )
+          (named_type (name))
+          (named_type (name))
+        )
+        (reference_modifier)
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (disjunctive_normal_form_type
+          (named_type (name))
+          (named_type (name))
+          (intersection_type
+            (named_type (name))
+            (named_type (name))
+          )
+          (named_type (name))
+        )
+        (reference_modifier)
+        (variable_name (name))
+      )
+    )
+    (compound_statement)
+  )
+)
+
+=======================
+Optional types
+=======================
+
+<?php
+
+function a(): ?array {}
+function b(): ?Something {}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    (name) (formal_parameters)
+    (optional_type (primitive_type))
+    (compound_statement))
+  (function_definition
+    (name) (formal_parameters)
+    (optional_type (named_type (name)))
+    (compound_statement)))
+
+
+==========================
+Union types
+==========================
+
+<?php
+
+function a(int|string|null $var) : ?int|MyClass {}
+
+---
+
+(program
+  (php_tag)
+  (function_definition
+    name: (name)
+    parameters: (formal_parameters
+      (simple_parameter
+        type: (union_type
+          (primitive_type)
+          (primitive_type)
+          (primitive_type)
+        )
+        name: (variable_name (name))
+      )
+    )
+    return_type: (union_type
+      (optional_type (primitive_type))
+      (named_type (name)
+    ))
+    body: (compound_statement)
+  )
+)
+
+==========================
+Mixed type
+==========================
+
+<?php
+
+function a(mixed|string $var) : mixed {
+
+}
+---
+
+(program
+  (php_tag)
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+        (union_type
+          (primitive_type)
+          (primitive_type)
+        )
+        (variable_name (name))
+      )
+    )
+    (primitive_type)
+    (compound_statement)
+  )
+)
+
+==========================
+Static type
+==========================
+
+<?php
+
+function a(string $var) : static {
+
+}
+---
+
+(program
+  (php_tag)
+  (function_definition
+    (name)
+    (formal_parameters
+      (simple_parameter
+       (primitive_type)
+        (variable_name (name))
+      )
+    )
+    (named_type (name))
+    (compound_statement)
+  )
+)
+
+===============================================
+Null type
+===============================================
+
+<?php
+
+class Nil {
+    public null $nil = null;
+ 
+    public function foo(null $v): null { }
+}
+
+---
+
+ (program
+  (php_tag)
+  (class_declaration
+    (name)
+    (declaration_list
+      (property_declaration
+        (visibility_modifier)
+        (primitive_type)
+        (property_element
+          (variable_name
+            (name))
+          (null)))
+      (method_declaration
+        (visibility_modifier)
+        (name)
+        (formal_parameters
+          (simple_parameter
+           (primitive_type)
+            (variable_name
+              (name))))
+        (primitive_type)
+        (compound_statement)))))
+
+===============================================
+False type
+===============================================
+
+<?php
+
+class Falsy {
+    public false $nil = false;
+ 
+    public function foo(false $v): false { }
+}
+
+---
+
+ (program
+  (php_tag)
+  (class_declaration
+    (name)
+    (declaration_list
+      (property_declaration
+        (visibility_modifier)
+        (primitive_type)
+        (property_element
+          (variable_name
+            (name))
+          (boolean)))
+      (method_declaration
+        (visibility_modifier)
+        (name)
+        (formal_parameters
+          (simple_parameter
+           (primitive_type)
+            (variable_name
+              (name))))
+        (primitive_type)
+        (compound_statement)))))
+
+===============================================
+True type
+===============================================
+
+<?php
+
+class Truthy {
+    public true $truthy = true;
+ 
+    public function foo(true $v): true {}
+}
+
+---
+
+ (program
+  (php_tag)
+  (class_declaration
+    (name)
+    (declaration_list
+      (property_declaration
+        (visibility_modifier)
+        (primitive_type)
+        (property_element
+          (variable_name
+            (name))
+          (boolean)))
+      (method_declaration
+        (visibility_modifier)
+        (name)
+        (formal_parameters
+          (simple_parameter
+           (primitive_type)
+            (variable_name
+              (name))))
+        (primitive_type)
+        (compound_statement)))))
+

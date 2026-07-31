@@ -454,13 +454,17 @@ func editBuiltinSubagentProfile(sk skill.Skill, values subagentProfileFlags) err
 		deleteSubagentOverrideAliases(cfg.Agent.SubagentEfforts, sk.Name)
 		level := strings.TrimSpace(values.effort.value)
 		if level != "" && level != "auto" {
-			model := subagentOverride(cfg.Agent.SubagentModels, sk.Name)
-			if model == "" {
-				model = strings.TrimSpace(cfg.Agent.SubagentModel)
+			explicit := subagentOverride(cfg.Agent.SubagentModels, sk.Name)
+			if explicit == "" {
+				explicit = strings.TrimSpace(cfg.Agent.SubagentModel)
 			}
+			model := explicit
 			if model == "" {
-				model = cfg.DefaultModel
+				model, _, _ = cfg.ResolveNewSessionChatModel()
 			}
+			// Profile editing is an offline configuration operation. The model
+			// must resolve so effort capabilities can be validated, but it does
+			// not need a credential until the profile is actually run.
 			entry, ok := cfg.ResolveModel(model)
 			if !ok {
 				return fmt.Errorf("unknown subagent model %q", model)

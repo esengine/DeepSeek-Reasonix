@@ -2,7 +2,9 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
+	"reasonix/internal/control"
 	"reasonix/internal/i18n"
 )
 
@@ -10,13 +12,13 @@ import (
 // of Claude Code's /memory. It surfaces the doc files and the auto-memory store
 // path so the user can open and edit them directly, since the in-terminal UI
 // doesn't shell out to an editor.
-func (m *chatTUI) showMemory() {
-	set := m.ctrl.Memory()
-	if set == nil || (set.Empty() && len(set.Store.ListArchived()) == 0) {
-		m.notice(i18n.M.MemoryNone)
+func (m *chatTUI) showMemory(input string) {
+	args := strings.TrimSpace(strings.TrimPrefix(input, "/memory"))
+	if args == "" {
+		m.commitLine(renderMemory(m.width, m.ctrl.Memory()))
 		return
 	}
-	m.commitLine(renderMemory(m.width, set))
+	m.commitLine(viewProtectLines(control.MemoryCommandText(m.ctrl, args), m.width))
 }
 
 // forgetMemory deletes a saved auto-memory by name (the slug shown in /memory).

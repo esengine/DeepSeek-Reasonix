@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -42,6 +41,24 @@ func LoadForRootReadOnly(root string) (*Config, error) {
 	return loadForRoot(root, false)
 }
 
+// LoadUserConfigReadOnly loads only the trusted user-global config. It never
+// reads project reasonix.toml files and never performs on-disk migrations.
+// Host-owned features that may execute a configured binary should use this
+// instead of LoadForRoot so an untrusted checkout cannot choose the process.
+func LoadUserConfigReadOnly() (*Config, error) {
+	if SafeModeRequested() {
+		return loadSafeModeForRoot("."), nil
+	}
+	cfg := Default()
+	if path := userConfigLoadPath(); path != "" {
+		if err := mergeFile(cfg, path); err != nil {
+			return nil, err
+		}
+	}
+	normalizeConfigForEdit(cfg)
+	return cfg, nil
+}
+
 func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	root = resolveRoot(root)
 	if SafeModeRequested() {
@@ -55,6 +72,14 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	projectTOML := "reasonix.toml"
 	if root != "." {
 		projectTOML = filepath.Join(root, "reasonix.toml")
+	}
+	if primary := userConfigPath(); primary != "" {
+		if _, err := resolveConfigAccessPath(primary, true); err != nil {
+			return nil, err
+		}
+	}
+	if _, err := resolveConfigAccessPath(projectTOML, false); err != nil {
+		return nil, err
 	}
 
 	mergeTOML := mergeFile
@@ -72,13 +97,20 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 		userDefaultModelExplicit = tomlFileDefinesKey(uc, "default_model")
 	}
 	userDefaultModel := cfg.DefaultModel
+	globalCLI := cfg.CLI
 	globalSecrets := cfg.Secrets
 	globalRemote := cfg.Remote.Clone()
+	globalDesktopLanguage := cfg.Desktop.Language
+	globalPricingCurrency := cfg.Desktop.Currency
+	globalTelemetry := cfg.Telemetry
 
 	tomlSources = append(tomlSources, projectTOML)
 	if err := mergeTOML(cfg, projectTOML); err != nil {
 		return nil, err
 	}
+	// The native CLI update channel controls the one user-installed binary.
+	// A repository-local reasonix.toml must never switch that global choice.
+	cfg.CLI = globalCLI
 	// Secret protection is a user-global security control: a cloned repo's
 	// reasonix.toml must not be able to flip on the workflow-breaking env/path
 	// protections.
@@ -87,6 +119,13 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	// must not be able to inject hosts, jump chains, or port forwards that
 	// steer where Reasonix opens connections.
 	cfg.Remote = globalRemote
+	// Desktop language and pricing currency are user-level regional preferences.
+	// A repository must not be able to alter how the user's spend is shown.
+	cfg.Desktop.Language = globalDesktopLanguage
+	cfg.Desktop.Currency = globalPricingCurrency
+	// CLI telemetry is an explicit user-global privacy choice. Project config
+	// cannot opt a user in or out, including when the global value is absent.
+	cfg.Telemetry = globalTelemetry
 	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
 	// only the last file's. Re-merge by name across all sources (later wins) so a
 	// project reasonix.toml doesn't drop the global config's MCP servers.
@@ -138,6 +177,9 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	normalizeLegacyMCPTiers(cfg)
 	normalizeLegacyStepFunBaseURLs(cfg)
 	normalizeLegacyLongCatContextWindows(cfg)
+	normalizeLegacyQwenContextWindows(cfg)
+	normalizeLegacyKimiK3Catalog(cfg)
+	normalizeLegacyOpenCodeGoKimiK3Catalog(cfg)
 	normalizeLegacyMimoCustomProviders(cfg)
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -183,6 +225,7 @@ func loadSafeModeForRoot(root string) *Config {
 	// every reporting path off instead of inheriting the enabled defaults.
 	cfg.Desktop.Telemetry = safeModeBoolPtr(false)
 	cfg.Desktop.Metrics = safeModeBoolPtr(false)
+	cfg.Telemetry.CLIMetrics = "off"
 	cfg.setExpansionEnv(nil)
 	cfg.CredentialsStore = credentialsStoreMode()
 	resolveProviderCredentialsForRoot(root, cfg)
@@ -298,7 +341,12 @@ func backfillDeepSeekPro(c *Config) {
 	for _, bp := range Default().Providers {
 		if bp.Name == "deepseek-pro" {
 			bp.APIKeyEnv = flash.APIKeyEnv
-			bp.Price = deepSeekV4PriceForModel(c.DeepSeekOfficialPricingLanguage(), proModel)
+			currency := c.DeepSeekOfficialPricingCurrency()
+			if c.DesktopCurrency() == "" && flash.persistedOfficialCurrency != "" {
+				currency = flash.persistedOfficialCurrency
+				bp.persistedOfficialCurrency = currency
+			}
+			bp.Price = deepSeekV4PriceForModel(currency, proModel)
 			c.Providers = append(c.Providers, bp)
 			return
 		}
@@ -309,12 +357,16 @@ func backfillDeepSeekOfficialPrices(c *Config) {
 	if c == nil {
 		return
 	}
-	defaults := deepSeekV4PricesForConfig(c)
 	for i := range c.Providers {
 		p := &c.Providers[i]
 		if officialProviderKind(p) != "deepseek" {
 			continue
 		}
+		currency := c.DeepSeekOfficialPricingCurrency()
+		if c.DesktopCurrency() == "" && p.persistedOfficialCurrency != "" {
+			currency = p.persistedOfficialCurrency
+		}
+		defaults := DeepSeekV4PricesForCurrency(currency)
 		if p.Price != nil {
 			continue
 		}
@@ -367,7 +419,11 @@ func mergeTOMLPlugins(paths []string) ([]PluginEntry, error) {
 	var merged []PluginEntry
 	index := map[string]int{}
 	for _, path := range paths {
-		if _, err := os.Stat(path); err != nil {
+		_, exists, err := statConfigPath(path)
+		if err != nil {
+			return nil, fmt.Errorf("config %s: %w", path, err)
+		}
+		if !exists {
 			continue
 		}
 		var f Config
@@ -404,13 +460,18 @@ func mergeTOMLProviders(paths []string) ([]ProviderEntry, map[string]providerSou
 	sources := map[string]providerSourceScope{}
 	saw := false
 	for _, path := range paths {
-		if _, err := os.Stat(path); err != nil {
+		_, exists, err := statConfigPath(path)
+		if err != nil {
+			return nil, nil, nil, false, fmt.Errorf("config %s: %w", path, err)
+		}
+		if !exists {
 			continue
 		}
 		var f Config
 		if _, err := decodeTOMLFile(path, &f); err != nil {
 			return nil, nil, nil, false, fmt.Errorf("config %s: %w", path, err)
 		}
+		markPersistedDeepSeekOfficialPricing(&f)
 		if len(f.Providers) == 0 {
 			continue
 		}
@@ -457,7 +518,11 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 	seen := map[string]bool{}
 	saw := false
 	for _, path := range paths {
-		if _, err := os.Stat(path); err != nil {
+		_, exists, err := statConfigPath(path)
+		if err != nil {
+			return nil, false, fmt.Errorf("config %s: %w", path, err)
+		}
+		if !exists {
 			continue
 		}
 		var f Config
@@ -467,6 +532,12 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 		}
 		if !meta.IsDefined("desktop", "provider_access") {
 			continue
+		}
+		if !saw {
+			// Preserve declaration state even when the list is explicitly empty.
+			// A nil slice means legacy/undeclared access; a non-nil empty slice
+			// means the user intentionally removed every desktop provider.
+			merged = []string{}
 		}
 		saw = true
 		for _, name := range f.Desktop.ProviderAccess {
@@ -497,11 +568,12 @@ func InspectConfigFileDeclarations(path string) (ConfigFileDeclarations, error) 
 	if path == "" {
 		return declarations, nil
 	}
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return declarations, nil
-		}
+	_, exists, err := statConfigPath(path)
+	if err != nil {
 		return declarations, err
+	}
+	if !exists {
+		return declarations, nil
 	}
 	var f Config
 	meta, err := decodeTOMLFile(path, &f)
@@ -534,7 +606,7 @@ func DesktopProviderAccessDeclared(path string) (bool, error) {
 // of resetting to defaults. Reasonix's global .env is loaded so api_key_env
 // resolution works while the wizard decides which keys are still missing.
 func LoadForEdit(path string) *Config {
-	return loadForEdit(path, true, true)
+	return loadForEdit(path, true, false)
 }
 
 // LoadForEditReadOnlyStrict is the error-returning commit-time variant. It must
@@ -544,6 +616,13 @@ func LoadForEditReadOnlyStrict(path string) (*Config, error) {
 	return loadForEditStrict(path, true, false)
 }
 
+// LoadForEditWithoutCredentialsReadOnlyStrict is the credential-free strict
+// edit loader. It never writes migrations and never substitutes defaults for a
+// malformed file.
+func LoadForEditWithoutCredentialsReadOnlyStrict(path string) (*Config, error) {
+	return loadForEditStrict(path, false, false)
+}
+
 // ValidateFile parses one TOML config in isolation without loading credentials,
 // applying migrations, or writing the file. A missing file is valid.
 func ValidateFile(path string) error {
@@ -551,15 +630,26 @@ func ValidateFile(path string) error {
 	if path == "" {
 		return nil
 	}
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	_, exists, err := statConfigPath(path)
+	if err != nil {
 		return err
+	}
+	if !exists {
+		return nil
 	}
 	cfg := Default()
 	if _, err := decodeTOMLFile(path, cfg); err != nil {
 		return fmt.Errorf("config %s: %w", path, err)
+	}
+	return nil
+}
+
+// ValidateBytes parses one in-memory TOML config without loading credentials,
+// applying migrations, or writing any state.
+func ValidateBytes(data []byte) error {
+	cfg := Default()
+	if _, err := decodeTOMLBytes(data, cfg); err != nil {
+		return fmt.Errorf("config: %w", err)
 	}
 	return nil
 }
@@ -575,11 +665,12 @@ func loadForEdit(path string, loadCredentials, persistMigrations bool) *Config {
 	}
 	cfg = Default()
 	normalizeConfigForEdit(cfg)
+	cfg.editLoadErr = err
 	return cfg
 }
 
 func LoadForEditWithoutCredentials(path string) *Config {
-	return loadForEdit(path, false, true)
+	return loadForEdit(path, false, false)
 }
 
 func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*Config, error) {
@@ -587,13 +678,6 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 		loadDotEnvForEditPath(path)
 	}
 	cfg := Default()
-	if persistMigrations {
-		if _, err := os.Stat(path); err == nil {
-			if err := migrateLegacyMCPTiersFile(path); err != nil {
-				return nil, fmt.Errorf("config %s: %w", path, err)
-			}
-		}
-	}
 	if err := mergeFile(cfg, path); err != nil {
 		return nil, err
 	}
@@ -616,6 +700,9 @@ func normalizeConfigForEdit(cfg *Config) bool {
 	normalizeLegacyMCPTiers(cfg)
 	changed = normalizeLegacyStepFunBaseURLs(cfg) || changed
 	changed = normalizeLegacyLongCatContextWindows(cfg) || changed
+	changed = normalizeLegacyQwenContextWindows(cfg) || changed
+	changed = normalizeLegacyKimiK3Catalog(cfg) || changed
+	changed = normalizeLegacyOpenCodeGoKimiK3Catalog(cfg) || changed
 	changed = normalizeLegacyMimoCustomProviders(cfg) || changed
 	normalizeLegacyProviderModels(cfg)
 	normalizeDesktopOfficialProviderAccess(cfg)
@@ -650,11 +737,30 @@ func loadDotEnvForEditPath(path string) {
 
 // mergeFile decodes a TOML file onto cfg if it exists. An absent file is not an error.
 func mergeFile(cfg *Config, path string) error {
-	if _, err := os.Stat(path); err != nil {
+	resolved, exists, err := statConfigPath(path)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return nil
 	}
-	if _, err := decodeTOMLFile(path, cfg); err != nil {
+	meta, err := decodeTOMLFileResolved(resolved, cfg)
+	if err != nil {
 		return fmt.Errorf("config %s: %w", path, err)
+	}
+	if meta.IsDefined("providers") {
+		var persisted Config
+		if _, err := decodeTOMLFileResolved(resolved, &persisted); err != nil {
+			return fmt.Errorf("config %s: %w", path, err)
+		}
+		markPersistedDeepSeekOfficialPricing(&persisted)
+		markers := map[string]string{}
+		for i := range persisted.Providers {
+			markers[providerMergeKey(persisted.Providers[i])] = persisted.Providers[i].persistedOfficialCurrency
+		}
+		for i := range cfg.Providers {
+			cfg.Providers[i].persistedOfficialCurrency = markers[providerMergeKey(cfg.Providers[i])]
+		}
 	}
 	return nil
 }
@@ -693,12 +799,6 @@ func normalizeLegacyAgentStepLimits(c *Config) bool {
 	return found
 }
 
-// retiredConfigKeyMigrationMu serializes the independent one-time removals
-// below. They may target the same user/project TOML files from concurrent
-// desktop builds, so separate locks could race and restore a key another
-// migration had just removed.
-var retiredConfigKeyMigrationMu sync.Mutex
-
 // MigrateLegacyAgentStepLimitsForRoot removes retired [agent] step-limit keys
 // from the user and project config selected for root. Boot calls it immediately
 // before LoadForRoot, so config-only/read-only commands never rewrite files and
@@ -736,28 +836,7 @@ func MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
 // before runtime decoding. A process-wide lock makes concurrent desktop tab
 // builds observe a single migration; the atomic rewrite protects other readers.
 func migrateLegacyAgentStepLimitsFile(path string) (bool, error) {
-	retiredConfigKeyMigrationMu.Lock()
-	defer retiredConfigKeyMigrationMu.Unlock()
-
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	raw, err := fileencoding.ReadFileUTF8(path)
-	if err != nil {
-		return false, err
-	}
-	next, changed := stripLegacyAgentStepLimitLines(string(raw))
-	if !changed {
-		return false, nil
-	}
-	if err := fileutil.AtomicWriteFile(path, []byte(next), info.Mode().Perm()); err != nil {
-		return false, err
-	}
-	return true, nil
+	return migrateRetiredConfigKeysFile(path, stripLegacyAgentStepLimitLines)
 }
 
 func stripLegacyAgentStepLimitLines(raw string) (string, bool) {
@@ -799,28 +878,7 @@ func MigrateLegacyRedactToolOutputForRoot(root string) (bool, error) {
 }
 
 func migrateLegacyRedactToolOutputFile(path string) (bool, error) {
-	retiredConfigKeyMigrationMu.Lock()
-	defer retiredConfigKeyMigrationMu.Unlock()
-
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	raw, err := fileencoding.ReadFileUTF8(path)
-	if err != nil {
-		return false, err
-	}
-	next, changed := stripLegacyRedactToolOutputLines(string(raw))
-	if !changed {
-		return false, nil
-	}
-	if err := fileutil.AtomicWriteFile(path, []byte(next), info.Mode().Perm()); err != nil {
-		return false, err
-	}
-	return true, nil
+	return migrateRetiredConfigKeysFile(path, stripLegacyRedactToolOutputLines)
 }
 
 func stripLegacyRedactToolOutputLines(raw string) (string, bool) {
@@ -862,25 +920,35 @@ func MigrateLegacyMemoryCompilerForRoot(root string) (bool, error) {
 }
 
 func migrateLegacyMemoryCompilerFile(path string) (bool, error) {
-	retiredConfigKeyMigrationMu.Lock()
-	defer retiredConfigKeyMigrationMu.Unlock()
+	return migrateRetiredConfigKeysFile(path, stripLegacyMemoryCompilerLines)
+}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	raw, err := fileencoding.ReadFileUTF8(path)
+func migrateRetiredConfigKeysFile(path string, strip func(string) (string, bool)) (bool, error) {
+	unlock, err := LockConfigFileEdits(path)
 	if err != nil {
 		return false, err
 	}
-	next, changed := stripLegacyMemoryCompilerLines(string(raw))
+	defer unlock()
+	resolved, exists, err := statConfigPath(path)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	info, err := os.Stat(resolved)
+	if err != nil {
+		return false, err
+	}
+	raw, err := fileencoding.ReadFileUTF8(resolved)
+	if err != nil {
+		return false, err
+	}
+	next, changed := strip(string(raw))
 	if !changed {
 		return false, nil
 	}
-	if err := fileutil.AtomicWriteFile(path, []byte(next), info.Mode().Perm()); err != nil {
+	if err := fileutil.AtomicWriteFile(resolved, []byte(next), info.Mode().Perm()); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -891,19 +959,8 @@ func stripLegacyMemoryCompilerLines(raw string) (string, bool) {
 }
 
 func migrateLegacyMCPTiersFile(path string) error {
-	info, err := os.Stat(path)
-	if err != nil {
-		return err
-	}
-	raw, err := fileencoding.ReadFileUTF8(path)
-	if err != nil {
-		return err
-	}
-	next, changed := stripLegacyMCPTierLines(string(raw))
-	if !changed {
-		return nil
-	}
-	return os.WriteFile(path, []byte(next), info.Mode().Perm())
+	_, err := migrateRetiredConfigKeysFile(path, stripLegacyMCPTierLines)
+	return err
 }
 
 func stripLegacyMCPTierLines(raw string) (string, bool) {
@@ -1140,6 +1197,186 @@ func normalizeLegacyLongCatContextWindows(c *Config) bool {
 		changed = true
 	}
 	return changed
+}
+
+// normalizeLegacyQwenContextWindows upgrades only installed official Qwen
+// presets that still carry the old zero context window and untouched model
+// catalog. Custom endpoints, catalogs, provider-wide windows, and existing
+// per-model override values remain user-owned.
+func normalizeLegacyQwenContextWindows(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	changed := false
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		if p.ContextWindow != 0 {
+			continue
+		}
+		presetID := qwenPresetIDForMigration(*p)
+		if presetID == "" {
+			continue
+		}
+		preset, ok := CuratedProviderPreset(presetID)
+		if !ok || len(preset.Entries) != 1 {
+			continue
+		}
+		canonical := preset.Entries[0]
+		if !strings.EqualFold(strings.TrimSpace(p.Kind), strings.TrimSpace(canonical.Kind)) ||
+			normalizedBaseURLForMigration(p.BaseURL) != normalizedBaseURLForMigration(canonical.BaseURL) ||
+			!stringSlicesEqual(p.Models, canonical.Models) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.ContextWindow = canonical.ContextWindow
+		mergeMissingQwenContextOverrides(p, canonical.ModelOverrides)
+		changed = true
+	}
+	return changed
+}
+
+func qwenPresetIDForMigration(p ProviderEntry) string {
+	presetID := strings.TrimSpace(p.PresetID)
+	if presetID == "" {
+		presetID = strings.TrimSpace(p.Name)
+	}
+	switch presetID {
+	case "qwen-cn",
+		"qwen-global",
+		"qwen-coding-plan-cn",
+		"qwen-coding-plan-cn-anthropic",
+		"qwen-coding-plan-global",
+		"qwen-coding-plan-global-anthropic":
+		return presetID
+	default:
+		return ""
+	}
+}
+
+func mergeMissingQwenContextOverrides(p *ProviderEntry, defaults map[string]ProviderModelOverride) {
+	if p == nil || len(defaults) == 0 {
+		return
+	}
+	if p.ModelOverrides == nil {
+		p.ModelOverrides = make(map[string]ProviderModelOverride, len(defaults))
+	}
+	for defaultKey, defaultOverride := range defaults {
+		overrideKey := defaultKey
+		for key := range p.ModelOverrides {
+			if strings.EqualFold(strings.TrimSpace(key), defaultKey) {
+				overrideKey = key
+				break
+			}
+		}
+		override := p.ModelOverrides[overrideKey]
+		if override.ContextWindow == 0 {
+			override.ContextWindow = defaultOverride.ContextWindow
+			p.ModelOverrides[overrideKey] = override
+		}
+	}
+}
+
+// normalizeLegacyKimiK3Catalog upgrades only untouched Kimi direct-API model
+// catalogs on the official regional endpoints. Custom model lists, endpoints,
+// defaults, credentials, and provider-wide settings remain user-owned.
+func normalizeLegacyKimiK3Catalog(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	changed := false
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		name := strings.TrimSpace(p.Name)
+		var baseURL string
+		switch {
+		case presetID == "kimi-cn" || (presetID == "" && name == "kimi-cn"):
+			baseURL = "https://api.moonshot.cn/v1"
+		case presetID == "kimi-global" || (presetID == "" && name == "kimi-global"):
+			baseURL = "https://api.moonshot.ai/v1"
+		default:
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != baseURL ||
+			!stringSlicesEqual(p.Models, legacyKimiAPIModels) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.Models = append([]string(nil), kimiAPIModels...)
+		p.VisionModels = migrateKimiK3VisionModels(p.VisionModels, legacyKimiAPIModels)
+		mergeMissingKimiK3Override(p, kimiK3DirectOverride())
+		changed = true
+	}
+	return changed
+}
+
+// migrateKimiK3VisionModels preserves explicit provider-level vision choices.
+// A nil list or an exact copy of the old preset list indicates that the user
+// has not customized vision support and should receive Kimi K3's capability.
+func migrateKimiK3VisionModels(current, legacy []string) []string {
+	if current != nil && (legacy == nil || !stringSlicesEqual(current, legacy)) {
+		return current
+	}
+	return mergeModelLists([]string{"kimi-k3"}, current)
+}
+
+func mergeMissingKimiK3Override(p *ProviderEntry, defaults ProviderModelOverride) {
+	if p.ModelOverrides == nil {
+		p.ModelOverrides = map[string]ProviderModelOverride{}
+	}
+	overrideKey := "kimi-k3"
+	for key := range p.ModelOverrides {
+		if strings.EqualFold(strings.TrimSpace(key), overrideKey) {
+			overrideKey = key
+			break
+		}
+	}
+	kimiK3 := p.ModelOverrides[overrideKey]
+	if strings.TrimSpace(kimiK3.ReasoningProtocol) == "" {
+		kimiK3.ReasoningProtocol = defaults.ReasoningProtocol
+	}
+	if kimiK3.SupportedEfforts == nil {
+		kimiK3.SupportedEfforts = append([]string(nil), defaults.SupportedEfforts...)
+	}
+	if strings.TrimSpace(kimiK3.DefaultEffort) == "" && containsString(normalizedEffortLevels(kimiK3.SupportedEfforts), defaults.DefaultEffort) {
+		kimiK3.DefaultEffort = defaults.DefaultEffort
+	}
+	if kimiK3.ContextWindow <= 0 {
+		kimiK3.ContextWindow = defaults.ContextWindow
+	}
+	p.ModelOverrides[overrideKey] = kimiK3
+}
+
+// normalizeLegacyOpenCodeGoKimiK3Catalog upgrades only the untouched model
+// catalog from the original editable OpenCode Go preset. A user-curated model
+// list or custom endpoint is left alone, while other provider edits (headers,
+// key env, provider-wide context) survive the additive K3 capability update.
+func normalizeLegacyOpenCodeGoKimiK3Catalog(c *Config) bool {
+	if c == nil {
+		return false
+	}
+	for i := range c.Providers {
+		p := &c.Providers[i]
+		presetID := strings.TrimSpace(p.PresetID)
+		if (presetID != "opencode-go" && (presetID != "" || strings.TrimSpace(p.Name) != "opencode-go")) ||
+			!strings.EqualFold(strings.TrimSpace(p.Kind), "openai") ||
+			normalizedBaseURLForMigration(p.BaseURL) != "https://opencode.ai/zen/go/v1" ||
+			!stringSlicesEqual(p.Models, legacyOpenCodeGoModels) ||
+			strings.TrimSpace(p.Model) != "" {
+			continue
+		}
+		p.Models = append([]string(nil), opencodeGoModels...)
+		p.VisionModels = migrateKimiK3VisionModels(p.VisionModels, nil)
+		mergeMissingKimiK3Override(p, ProviderModelOverride{
+			ReasoningProtocol: ReasoningProtocolOpenAI,
+			SupportedEfforts:  []string{"high", "max"},
+			DefaultEffort:     "max",
+			ContextWindow:     1_048_576,
+		})
+		return true
+	}
+	return false
 }
 
 func normalizeLegacyMimoProviderCatalogs(c *Config) bool {
@@ -1572,7 +1809,12 @@ func ensureDeepSeekOfficialProvider(c *Config) {
 	}
 	if old, ok := c.Provider("deepseek-flash"); ok {
 		entry = officialProviderFromLegacy(entry, old)
-		entry.Prices = deepSeekV4PricesForConfig(c)
+		currency := c.DeepSeekOfficialPricingCurrency()
+		if c.DesktopCurrency() == "" && old.persistedOfficialCurrency != "" {
+			currency = old.persistedOfficialCurrency
+			entry.persistedOfficialCurrency = currency
+		}
+		entry.Prices = DeepSeekV4PricesForCurrency(currency)
 		entry.Models = mergeModelLists([]string{"deepseek-v4-flash", "deepseek-v4-pro"}, old.ModelList())
 		entry.Default = firstKnownModel(entry.Default, entry.Models, "deepseek-v4-flash")
 	}
@@ -1618,6 +1860,7 @@ func officialProviderFromLegacy(entry ProviderEntry, old *ProviderEntry) Provide
 	entry.SupportedEfforts = append([]string(nil), old.SupportedEfforts...)
 	entry.DefaultEffort = old.DefaultEffort
 	entry.NoProxy = old.NoProxy
+	entry.persistedOfficialCurrency = old.persistedOfficialCurrency
 	return entry
 }
 

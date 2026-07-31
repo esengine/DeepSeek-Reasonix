@@ -14,6 +14,9 @@ let passed = 0;
 let failed = 0;
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
+const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
+const terminalPanelSource = readFileSync(resolve(testDir, "../components/TerminalPanel.tsx"), "utf8");
+const terminalRailSource = readFileSync(resolve(testDir, "../components/TerminalSessionRail.tsx"), "utf8");
 
 function eq(a: unknown, b: unknown, label: string) {
   if (a === b) {
@@ -155,6 +158,95 @@ eq(
   /setWorkspacePanelOpen\(true\);[\s\S]*?saveWorkspacePanelOpen\(true\);/.test(appSource),
   true,
   "opening the dock persists the expanded preference for the next launch",
+);
+eq(
+  /rightDockMode === "terminal"[\s\S]*?workspacePanelRenderWidth >= rightDockMinRenderWidth/.test(appSource),
+  true,
+  "terminal remains renderable when a narrow viewport cannot fit the side dock",
+);
+eq(
+  /const addTerminalOutputToComposer = useCallback\(async \(sessionId: string\) => \{[\s\S]*?app\.TerminalOutputForTab\(activeTabId, sessionId\)[\s\S]*?addWorkspaceTextToComposer\(/.test(appSource),
+  true,
+  "terminal output reaches chat only through the explicit add-output action",
+);
+eq(
+  /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-open \.workbench-dock[\s\S]*?display: flex !important/.test(stylesSource),
+  true,
+  "terminal drawer stays visible on narrow viewports",
+);
+eq(
+  /\.layout--terminal-open \{[\s\S]*?grid-template-rows: var\(--app-chrome-height\) minmax\(0, 1fr\) minmax\(220px, min\(42vh, 440px\)\) var\(--statusbar-height\)/.test(stylesSource),
+  true,
+  "terminal-open layout reserves a grid row for the status bar below the terminal drawer",
+);
+eq(
+  /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-open \.workbench-dock,[\s\S]*?grid-row: 3;[\s\S]*?\.layout--workbench-chrome-hidden\.layout--terminal-open \.workbench-dock,[\s\S]*?grid-row: 2;/.test(stylesSource),
+  true,
+  "narrow classic terminal stays below chat while chrome-hidden terminal uses row two",
+);
+eq(
+  /sidebarImDetailConnection \? "layout--statusbar-hidden" : ""/.test(appSource)
+    && /\.layout\.layout--statusbar-hidden,[\s\S]*?--statusbar-height: 0px;/.test(stylesSource),
+  true,
+  "IM detail collapses the status bar row when the bar is not rendered",
+);
+eq(
+  /\.sidebar--workbench \{[\s\S]*?padding: 16px 16px 10px;/.test(stylesSource)
+    && /\.app--darwin \.sidebar--workbench,\s*\.sidebar--workbench \{[\s\S]*?padding: 14px 12px 10px;/.test(stylesSource),
+  true,
+  "workbench sidebar does not reserve the docked status bar twice",
+);
+eq(
+  /\.layout--terminal-open \.workbench-dock__tools \{\s*display: none;\s*\}/.test(stylesSource),
+  true,
+  "terminal drawer hides the redundant workspace tab strip",
+);
+eq(
+  /\.app--creation \.layout--creation-chrome-hidden\.layout--terminal-open \{[\s\S]*?grid-template-rows: minmax\(0, 1fr\) minmax\(220px, min\(42vh, 440px\)\)/.test(stylesSource)
+    && /\.app--creation \.layout--creation-chrome-hidden\.layout--terminal-open \.workbench-dock \{[\s\S]*?grid-row: 2/.test(stylesSource),
+  true,
+  "creation style keeps the terminal drawer below the chat pane",
+);
+eq(
+  /sessions\.length > 0 && \([\s\S]*?<TerminalSessionRail/.test(terminalPanelSource),
+  true,
+  "the single terminal session keeps a visible close control",
+);
+eq(
+  /const syncWorkspace = useTerminalStore[\s\S]*?const capabilityChanged = previous\.tabId === tabId && previous\.readOnly !== readOnly[\s\S]*?void syncWorkspace\(tabId, capabilityChanged\)/.test(terminalPanelSource),
+  true,
+  "terminal panel refreshes changed capability while reusing an in-flight first-open request",
+);
+eq(
+  /readOnly=\{Boolean\(activeTab\?\.readOnly\)\}/.test(appSource)
+    && /const terminalReadOnly = readOnly \|\| Boolean\(workspace\?\.readOnly\)/.test(terminalPanelSource),
+  true,
+  "terminal controls follow the active tab read-only boundary",
+);
+eq(
+  /terminal-session-rail__new|onNew/.test(terminalRailSource),
+  false,
+  "terminal tab strip does not duplicate the header's new-session action",
+);
+eq(
+  /className="terminal-shell-select"[\s\S]*?shellOptions\.map/.test(terminalPanelSource),
+  true,
+  "terminal header renders the backend-approved shell options",
+);
+eq(
+  /createSession\(tabId, "\.", selectedShellId\)/.test(terminalPanelSource),
+  true,
+  "new terminal sessions use the selected shell",
+);
+eq(
+  /createSession\(tabId, "\.", "default"\)/.test(terminalPanelSource),
+  false,
+  "new terminal sessions are not hard-coded to the default shell",
+);
+eq(
+  /const TerminalPanel = lazy\(\(\) => import\("\.\/components\/TerminalPanel"\)/.test(appSource),
+  true,
+  "terminal and xterm load only when the terminal drawer opens",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

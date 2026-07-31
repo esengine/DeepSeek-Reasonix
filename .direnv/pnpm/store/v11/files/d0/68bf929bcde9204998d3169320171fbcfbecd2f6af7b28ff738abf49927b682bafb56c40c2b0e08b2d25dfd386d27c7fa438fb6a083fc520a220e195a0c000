@@ -1,0 +1,298 @@
+{
+  "name": "@exodus/bytes",
+  "version": "1.15.1",
+  "description": "Various operations on Uint8Array data",
+  "keywords": [
+    "encoding",
+    "Uint8Array",
+    "TextDecoder",
+    "TextEncoder",
+    "utf8",
+    "utf16",
+    "hex",
+    "base64",
+    "base32",
+    "base58",
+    "base58check",
+    "bech32",
+    "bech32m",
+    "wif"
+  ],
+  "scripts": {
+    "lint": "eslint .",
+    "typedoc": "typedoc && mkdir -p doc/assets && cp -r theme/styles doc/assets/",
+    "test:javascriptcore": "npm run test:jsc --",
+    "test:v8": "exodus-test --engine=v8:bundle",
+    "test:jsc": "exodus-test --engine=jsc:bundle",
+    "test:spidermonkey": "exodus-test --engine=spidermonkey:bundle",
+    "test:hermes": "exodus-test --engine=hermes:bundle",
+    "test:quickjs": "exodus-test --engine=quickjs:bundle",
+    "test:xs": "exodus-test --engine=xs:bundle",
+    "test:engine262": "exodus-test --engine=engine262:bundle",
+    "test:graaljs": "exodus-test --engine=graaljs:bundle",
+    "test:escargot": "exodus-test --engine=escargot:bundle",
+    "test:boa": "exodus-test --engine=boa:bundle",
+    "test:deno": "exodus-test --engine=deno:pure",
+    "test:bun": "exodus-test --engine=bun:pure",
+    "test:workerd": "exodus-test --engine=workerd:bundle",
+    "test:electron:bundle": "exodus-test --engine=electron:bundle",
+    "test:electron:as-node": "exodus-test --engine=electron-as-node:test",
+    "test:chrome:puppeteer": "exodus-test --engine=chrome:puppeteer",
+    "test:chromium:playwright": "exodus-test --engine=chromium:playwright",
+    "test:webkit:playwright": "exodus-test --engine=webkit:playwright",
+    "test:firefox:puppeteer": "exodus-test --engine=firefox:puppeteer --testTimeout=60000",
+    "test:firefox:playwright": "exodus-test --engine=firefox:playwright --testTimeout=60000",
+    "test:servo:bundle": "exodus-test --engine=servo:bundle",
+    "test": "exodus-test",
+    "size": "esbuild --minify --bundle",
+    "jsvu": "jsvu",
+    "playwright": "exodus-test --playwright",
+    "benchmark": "exodus-test --concurrency=1 benchmarks/*.bench.js",
+    "coverage": "exodus-test --coverage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ExodusOSS/bytes.git"
+  },
+  "author": "Exodus Movement, Inc.",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ExodusOSS/bytes/issues"
+  },
+  "homepage": "https://github.com/ExodusOSS/bytes",
+  "engines": {
+    "node": "^20.19.0 || ^22.12.0 || >=24.0.0"
+  },
+  "type": "module",
+  "files": [
+    "/fallback/_utils.js",
+    "/fallback/base32.js",
+    "/fallback/base58check.js",
+    "/fallback/base64.js",
+    "/fallback/encoding.js",
+    "/fallback/encoding.api.js",
+    "/fallback/encoding.labels.js",
+    "/fallback/encoding.util.js",
+    "/fallback/hex.js",
+    "/fallback/latin1.js",
+    "/fallback/percent.js",
+    "/fallback/platform.js",
+    "/fallback/platform.browser.js",
+    "/fallback/platform.native.js",
+    "/fallback/multi-byte.encodings.cjs",
+    "/fallback/multi-byte.encodings.json",
+    "/fallback/multi-byte.js",
+    "/fallback/multi-byte.table.js",
+    "/fallback/single-byte.encodings.js",
+    "/fallback/single-byte.js",
+    "/fallback/utf16.js",
+    "/fallback/utf8.js",
+    "/fallback/utf8.auto.js",
+    "/fallback/utf8.auto.browser.js",
+    "/fallback/utf8.auto.native.js",
+    "/array.js",
+    "/array.d.ts",
+    "/assert.js",
+    "/base32.js",
+    "/base32.d.ts",
+    "/base58.js",
+    "/base58.d.ts",
+    "/base58check.js",
+    "/base58check.d.ts",
+    "/base58check.node.js",
+    "/base64.js",
+    "/base64.d.ts",
+    "/bech32.js",
+    "/bech32.d.ts",
+    "/bigint.js",
+    "/bigint.d.ts",
+    "/encoding-browser.js",
+    "/encoding-browser.browser.js",
+    "/encoding-browser.native.js",
+    "/encoding-browser.d.ts",
+    "/encoding.js",
+    "/encoding.d.ts",
+    "/encoding-lite.js",
+    "/encoding-lite.d.ts",
+    "/hex.js",
+    "/hex.d.ts",
+    "/hex.node.js",
+    "/index.js",
+    "/index.d.ts",
+    "/multi-byte.js",
+    "/multi-byte.d.ts",
+    "/multi-byte.node.js",
+    "/single-byte.js",
+    "/single-byte.d.ts",
+    "/single-byte.node.js",
+    "/utf16.js",
+    "/utf16.d.ts",
+    "/utf16.browser.js",
+    "/utf16.native.js",
+    "/utf16.node.js",
+    "/utf8.js",
+    "/utf8.d.ts",
+    "/utf8.node.js",
+    "/whatwg.js",
+    "/whatwg.d.ts",
+    "/wif.js",
+    "/wif.d.ts"
+  ],
+  "main": "index.js",
+  "module": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./array.js": {
+      "types": "./array.d.ts",
+      "default": "./array.js"
+    },
+    "./base32.js": {
+      "types": "./base32.d.ts",
+      "default": "./base32.js"
+    },
+    "./base58.js": {
+      "types": "./base58.d.ts",
+      "default": "./base58.js"
+    },
+    "./base58check.js": {
+      "types": "./base58check.d.ts",
+      "node": "./base58check.node.js",
+      "default": "./base58check.js"
+    },
+    "./base64.js": {
+      "types": "./base64.d.ts",
+      "default": "./base64.js"
+    },
+    "./bech32.js": {
+      "types": "./bech32.d.ts",
+      "default": "./bech32.js"
+    },
+    "./bigint.js": {
+      "types": "./bigint.d.ts",
+      "default": "./bigint.js"
+    },
+    "./hex.js": {
+      "types": "./hex.d.ts",
+      "node": "./hex.node.js",
+      "default": "./hex.js"
+    },
+    "./multi-byte.js": {
+      "types": "./multi-byte.d.ts",
+      "node": "./multi-byte.node.js",
+      "default": "./multi-byte.js"
+    },
+    "./single-byte.js": {
+      "types": "./single-byte.d.ts",
+      "node": "./single-byte.node.js",
+      "default": "./single-byte.js"
+    },
+    "./encoding.js": {
+      "types": "./encoding.d.ts",
+      "default": "./encoding.js"
+    },
+    "./encoding-lite.js": {
+      "types": "./encoding-lite.d.ts",
+      "default": "./encoding-lite.js"
+    },
+    "./encoding-browser.js": {
+      "types": "./encoding-browser.d.ts",
+      "node": "./encoding-browser.js",
+      "react-native": "./encoding-browser.native.js",
+      "browser": "./encoding-browser.browser.js",
+      "default": "./encoding-browser.js"
+    },
+    "./utf16.js": {
+      "types": "./utf16.d.ts",
+      "node": "./utf16.node.js",
+      "react-native": "./utf16.native.js",
+      "browser": "./utf16.browser.js",
+      "default": "./utf16.js"
+    },
+    "./utf8.js": {
+      "types": "./utf8.d.ts",
+      "node": "./utf8.node.js",
+      "default": "./utf8.js"
+    },
+    "./whatwg.js": {
+      "types": "./whatwg.d.ts",
+      "default": "./whatwg.js"
+    },
+    "./wif.js": {
+      "types": "./wif.d.ts",
+      "default": "./wif.js"
+    }
+  },
+  "browser": {
+    "./utf16.js": "./utf16.browser.js",
+    "./fallback/platform.js": "./fallback/platform.browser.js",
+    "./fallback/utf8.auto.js": "./fallback/utf8.auto.browser.js"
+  },
+  "react-native": {
+    "./encoding-browser.js": "./encoding-browser.native.js",
+    "./utf16.js": "./utf16.native.js",
+    "./fallback/platform.js": "./fallback/platform.native.js",
+    "./fallback/utf8.auto.js": "./fallback/utf8.auto.native.js"
+  },
+  "sideEffects": [
+    "./encoding.js"
+  ],
+  "peerDependencies": {
+    "@noble/hashes": "^1.8.0 || ^2.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@noble/hashes": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@ethersproject/strings": "^5.8.0",
+    "@exodus/crypto": "^1.0.0-rc.30",
+    "@exodus/eslint-config": "^5.24.0",
+    "@exodus/prettier": "^1.0.0",
+    "@exodus/test": "1.0.0-rc.115",
+    "@hexagon/base64": "^2.0.4",
+    "@noble/hashes": "^2.0.1",
+    "@oslojs/encoding": "^1.1.0",
+    "@petamoriken/float16": "^3.9.3",
+    "@scure/base": "^1.2.6",
+    "@stablelib/base64": "^2.0.1",
+    "@stablelib/hex": "^2.0.1",
+    "@types/node": "^22.12.0",
+    "base-x": "^5.0.1",
+    "base32.js": "^0.1.0",
+    "base58-js": "^3.0.3",
+    "base64-js": "^1.5.1",
+    "bech32": "^2.0.0",
+    "bs58": "^6.0.0",
+    "bs58check": "^4.0.0",
+    "bstring": "^0.3.9",
+    "buffer": "^6.0.3",
+    "c8": "^10.1.3",
+    "decode-utf8": "^1.0.1",
+    "electron": "39.4.0",
+    "encode-utf8": "^2.0.0",
+    "esbuild": "^0.27.3",
+    "eslint": "^8.44.0",
+    "fast-base64-decode": "^2.0.0",
+    "fast-base64-encode": "^1.0.0",
+    "hextreme": "^1.0.7",
+    "hi-base32": "^0.5.1",
+    "iconv-lite": "^0.7.0",
+    "jsvu": "^3.0.3",
+    "punycode": "^2.3.1",
+    "text-encoding": "^0.7.0",
+    "typedoc": "^0.28.16",
+    "typescript": "^5.9.3",
+    "uint8array-tools": "^0.0.9",
+    "utf8": "^3.0.0",
+    "web-streams-polyfill": "^4.2.0",
+    "wif": "^5.0.0",
+    "workerd": "^1.20260301.1"
+  },
+  "prettier": "@exodus/prettier",
+  "packageManager": "pnpm@10.12.1+sha256.889bac470ec93ccc3764488a19d6ba8f9c648ad5e50a9a6e4be3768a5de387a3"
+}

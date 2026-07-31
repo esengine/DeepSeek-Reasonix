@@ -1,0 +1,145 @@
+goroutine 1 [running]:
+main.getStackBuffer()
+	/home/abg/src/goleak/internal/stack/testdata/http.go:44 +0x49
+main.main()
+	/home/abg/src/goleak/internal/stack/testdata/http.go:18 +0x1d
+
+goroutine 20 [IO wait]:
+internal/poll.runtime_pollWait(0x7c3a3d619e48, 0x72)
+	/usr/lib/go/src/runtime/netpoll.go:343 +0x85
+internal/poll.(*pollDesc).wait(0xc0000da000?, 0x16?, 0x0)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Accept(0xc0000da000)
+	/usr/lib/go/src/internal/poll/fd_unix.go:611 +0x2ac
+net.(*netFD).accept(0xc0000da000)
+	/usr/lib/go/src/net/fd_unix.go:172 +0x29
+net.(*TCPListener).accept(0xc0000ba0c0)
+	/usr/lib/go/src/net/tcpsock_posix.go:152 +0x1e
+net.(*TCPListener).Accept(0xc0000ba0c0)
+	/usr/lib/go/src/net/tcpsock.go:315 +0x30
+net/http.(*Server).Serve(0xc000078000, {0x738a20, 0xc0000ba0c0})
+	/usr/lib/go/src/net/http/server.go:3056 +0x364
+net/http.Serve({0x738a20, 0xc0000ba0c0}, {0x0?, 0x0})
+	/usr/lib/go/src/net/http/server.go:2595 +0x6c
+created by main.start in goroutine 1
+	/home/abg/src/goleak/internal/stack/testdata/http.go:27 +0x87
+[originating from goroutine 1]:
+main.start(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:30 +0x87
+main.main(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:14 +0x13
+
+goroutine 24 [select]:
+net/http.(*persistConn).readLoop(0xc0000be480)
+	/usr/lib/go/src/net/http/transport.go:2238 +0xd25
+created by net/http.(*Transport).dialConn in goroutine 21
+	/usr/lib/go/src/net/http/transport.go:1776 +0x169f
+[originating from goroutine 21]:
+net/http.(*Transport).dialConn(...)
+	/usr/lib/go/src/net/http/transport.go:1777 +0x169f
+net/http.(*Transport).dialConnFor(...)
+	/usr/lib/go/src/net/http/transport.go:1469 +0x9f
+created by net/http.(*Transport).queueForDial
+	/usr/lib/go/src/net/http/transport.go:1436 +0x3cb
+[originating from goroutine 1]:
+net/http.(*Transport).queueForDial(...)
+	/usr/lib/go/src/net/http/transport.go:1437 +0x3cb
+net/http.(*Request).Context(...)
+	/usr/lib/go/src/net/http/request.go:346 +0x4c9
+net/http.(*Transport).roundTrip(...)
+	/usr/lib/go/src/net/http/transport.go:591 +0x73a
+net/http.(*Transport).RoundTrip(...)
+	/usr/lib/go/src/net/http/roundtrip.go:17 +0x13
+net/http.send(...)
+	/usr/lib/go/src/net/http/client.go:260 +0x606
+net/http.(*Client).send(...)
+	/usr/lib/go/src/net/http/client.go:182 +0x98
+net/http.(*Client).do(...)
+	/usr/lib/go/src/net/http/client.go:724 +0x912
+net/http.(*Client).Get(...)
+	/usr/lib/go/src/net/http/client.go:488 +0x5f
+net/http.(*Client).Get(...)
+	/usr/lib/go/src/net/http/client.go:488 +0x60
+main.start(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:32 +0x111
+main.start(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:32 +0x112
+main.main(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:14 +0x13
+
+goroutine 4 [IO wait]:
+internal/poll.runtime_pollWait(0x7c3a3d619d50, 0x72)
+	/usr/lib/go/src/runtime/netpoll.go:343 +0x85
+internal/poll.(*pollDesc).wait(0xc00007e000?, 0xc000106000?, 0x0)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc00007e000, {0xc000106000, 0x1000, 0x1000})
+	/usr/lib/go/src/internal/poll/fd_unix.go:164 +0x27a
+net.(*netFD).Read(0xc00007e000, {0xc000106000?, 0x4a8965?, 0x0?})
+	/usr/lib/go/src/net/fd_posix.go:55 +0x25
+net.(*conn).Read(0xc000046018, {0xc000106000?, 0x0?, 0xc000064248?})
+	/usr/lib/go/src/net/net.go:179 +0x45
+net/http.(*connReader).Read(0xc000064240, {0xc000106000, 0x1000, 0x1000})
+	/usr/lib/go/src/net/http/server.go:791 +0x14b
+bufio.(*Reader).fill(0xc000104000)
+	/usr/lib/go/src/bufio/bufio.go:113 +0x103
+bufio.(*Reader).Peek(0xc000104000, 0x4)
+	/usr/lib/go/src/bufio/bufio.go:151 +0x53
+net/http.(*conn).serve(0xc000100000, {0x739108, 0xc000064150})
+	/usr/lib/go/src/net/http/server.go:2044 +0x75c
+created by net/http.(*Server).Serve in goroutine 20
+	/usr/lib/go/src/net/http/server.go:3086 +0x5cb
+[originating from goroutine 20]:
+net/http.(*Server).Serve(...)
+	/usr/lib/go/src/net/http/server.go:3086 +0x5cb
+net/http.Serve(...)
+	/usr/lib/go/src/net/http/server.go:2595 +0x6c
+created by main.start
+	/home/abg/src/goleak/internal/stack/testdata/http.go:27 +0x87
+[originating from goroutine 1]:
+main.start(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:30 +0x87
+main.main(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:14 +0x13
+
+goroutine 25 [select]:
+net/http.(*persistConn).writeLoop(0xc0000be480)
+	/usr/lib/go/src/net/http/transport.go:2421 +0xe5
+created by net/http.(*Transport).dialConn in goroutine 21
+	/usr/lib/go/src/net/http/transport.go:1777 +0x16f1
+[originating from goroutine 21]:
+net/http.(*Transport).dialConn(...)
+	/usr/lib/go/src/net/http/transport.go:1778 +0x16f1
+net/http.(*Transport).dialConnFor(...)
+	/usr/lib/go/src/net/http/transport.go:1469 +0x9f
+created by net/http.(*Transport).queueForDial
+	/usr/lib/go/src/net/http/transport.go:1436 +0x3cb
+[originating from goroutine 1]:
+net/http.(*Transport).queueForDial(...)
+	/usr/lib/go/src/net/http/transport.go:1437 +0x3cb
+net/http.(*Request).Context(...)
+	/usr/lib/go/src/net/http/request.go:346 +0x4c9
+net/http.(*Transport).roundTrip(...)
+	/usr/lib/go/src/net/http/transport.go:591 +0x73a
+net/http.(*Transport).RoundTrip(...)
+	/usr/lib/go/src/net/http/roundtrip.go:17 +0x13
+net/http.send(...)
+	/usr/lib/go/src/net/http/client.go:260 +0x606
+net/http.(*Client).send(...)
+	/usr/lib/go/src/net/http/client.go:182 +0x98
+net/http.(*Client).do(...)
+	/usr/lib/go/src/net/http/client.go:724 +0x912
+net/http.(*Client).Get(...)
+	/usr/lib/go/src/net/http/client.go:488 +0x5f
+net/http.(*Client).Get(...)
+	/usr/lib/go/src/net/http/client.go:488 +0x60
+main.start(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:32 +0x111
+main.start(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:32 +0x112
+main.main(...)
+	/home/abg/src/goleak/internal/stack/testdata/http.go:14 +0x13
+

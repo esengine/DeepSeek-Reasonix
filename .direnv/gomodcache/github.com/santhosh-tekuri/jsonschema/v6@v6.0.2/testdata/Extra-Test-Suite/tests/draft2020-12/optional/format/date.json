@@ -1,0 +1,16 @@
+[
+    {
+        "description": "validation of date strings",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "format": "date"
+        },
+        "tests": [
+            {
+                "description": "contains alphabets",
+                "data": "yyyy-mm-dd",
+                "valid": false
+            }
+        ]
+    }
+]

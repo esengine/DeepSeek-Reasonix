@@ -1,0 +1,233 @@
+================================================================================
+Integer literals
+================================================================================
+
+0;
+0___0;
+123;
+0usize;
+123i32;
+123u32;
+123_u32;
+0xff_u8;
+0o70_i16;
+0b1111_1111_1001_0000_i32;
+1u128;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal))
+  (expression_statement
+    (integer_literal)))
+
+================================================================================
+Floating-point literals
+================================================================================
+
+123.123;
+2.;
+123.0f64;
+0.1f64;
+0.1f32;
+12E+99_f64;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (float_literal))
+  (expression_statement
+    (float_literal))
+  (expression_statement
+    (float_literal))
+  (expression_statement
+    (float_literal))
+  (expression_statement
+    (float_literal))
+  (expression_statement
+    (float_literal)))
+
+================================================================================
+String literals
+================================================================================
+
+"";
+"abc";
+c"foo";
+b"foo\nbar";
+"foo\
+    bar";
+"\"foo\"";
+"/* foo bar */ foo bar";
+"foo\x42\x43bar";
+"foo \x42  \x43 bar";
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (string_literal))
+  (expression_statement
+    (string_literal
+      (string_content)))
+  (expression_statement
+    (string_literal
+      (string_content)))
+  (expression_statement
+    (string_literal
+      (string_content)
+      (escape_sequence)
+      (string_content)))
+  (expression_statement
+    (string_literal
+      (string_content)
+      (escape_sequence)
+      (string_content)))
+  (expression_statement
+    (string_literal
+      (escape_sequence)
+      (string_content)
+      (escape_sequence)))
+  (expression_statement
+    (string_literal
+      (string_content)))
+  (expression_statement
+    (string_literal
+      (string_content)
+      (escape_sequence)
+      (escape_sequence)
+      (string_content)))
+  (expression_statement
+    (string_literal
+      (string_content)
+      (escape_sequence)
+      (string_content)
+      (escape_sequence)
+      (string_content))))
+
+================================================================================
+Raw string literals
+================================================================================
+
+r#"abc"#; r##"ok"##;
+r##"foo #"# bar"##;
+r###"foo ##"## bar"###;
+r######"foo ##### bar"######;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (raw_string_literal
+      (string_content)))
+  (expression_statement
+    (raw_string_literal
+      (string_content)))
+  (expression_statement
+    (raw_string_literal
+      (string_content)))
+  (expression_statement
+    (raw_string_literal
+      (string_content)))
+  (expression_statement
+    (raw_string_literal
+      (string_content))))
+
+================================================================================
+Raw byte string literals
+================================================================================
+
+br#"abc"#;
+br##"abc"##;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (raw_string_literal
+      (string_content)))
+  (expression_statement
+    (raw_string_literal
+      (string_content))))
+
+================================================================================
+Raw C string literals
+================================================================================
+
+cr#"abc"#;
+cr##"abc"##;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (raw_string_literal
+      (string_content)))
+  (expression_statement
+    (raw_string_literal
+      (string_content))))
+
+================================================================================
+Character literals
+================================================================================
+
+'a';
+'\'';
+'\0';
+b'x';
+'\t';
+'\xff';
+'\\';
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (char_literal))
+  (expression_statement
+    (char_literal))
+  (expression_statement
+    (char_literal))
+  (expression_statement
+    (char_literal))
+  (expression_statement
+    (char_literal))
+  (expression_statement
+    (char_literal))
+  (expression_statement
+    (char_literal)))
+
+================================================================================
+Boolean literals
+================================================================================
+
+true;
+false;
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (boolean_literal))
+  (expression_statement
+    (boolean_literal)))

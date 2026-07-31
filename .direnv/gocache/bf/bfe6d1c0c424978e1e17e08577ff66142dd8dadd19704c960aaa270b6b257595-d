@@ -1,0 +1,4 @@
+./minisign.go
+./private.go
+./public.go
+./signature.go

@@ -1,0 +1,4 @@
+./appearance.go
+./mac.go
+./preferences.go
+./titlebar.go

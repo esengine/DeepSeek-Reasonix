@@ -1,0 +1,64 @@
+goroutine 1 [running]:
+main.getStackBuffer()
+	/home/abg/src/goleak/internal/stack/testdata/http.go:44 +0x49
+main.main()
+	/home/abg/src/goleak/internal/stack/testdata/http.go:18 +0x1d
+
+goroutine 4 [IO wait]:
+internal/poll.runtime_pollWait(0x7bf130ae7ea0, 0x72)
+	/usr/lib/go/src/runtime/netpoll.go:343 +0x85
+internal/poll.(*pollDesc).wait(0xc000132000?, 0x4?, 0x0)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Accept(0xc000132000)
+	/usr/lib/go/src/internal/poll/fd_unix.go:611 +0x2ac
+net.(*netFD).accept(0xc000132000)
+	/usr/lib/go/src/net/fd_unix.go:172 +0x29
+net.(*TCPListener).accept(0xc0000600e0)
+	/usr/lib/go/src/net/tcpsock_posix.go:152 +0x1e
+net.(*TCPListener).Accept(0xc0000600e0)
+	/usr/lib/go/src/net/tcpsock.go:315 +0x30
+net/http.(*Server).Serve(0xc00008c000, {0x738a20, 0xc0000600e0})
+	/usr/lib/go/src/net/http/server.go:3056 +0x364
+net/http.Serve({0x738a20, 0xc0000600e0}, {0x0?, 0x0})
+	/usr/lib/go/src/net/http/server.go:2595 +0x6c
+created by main.start in goroutine 1
+	/home/abg/src/goleak/internal/stack/testdata/http.go:27 +0x87
+
+goroutine 20 [select]:
+net/http.(*persistConn).readLoop(0xc000112480)
+	/usr/lib/go/src/net/http/transport.go:2238 +0xd25
+created by net/http.(*Transport).dialConn in goroutine 5
+	/usr/lib/go/src/net/http/transport.go:1776 +0x169f
+
+goroutine 21 [select]:
+net/http.(*persistConn).writeLoop(0xc000112480)
+	/usr/lib/go/src/net/http/transport.go:2421 +0xe5
+created by net/http.(*Transport).dialConn in goroutine 5
+	/usr/lib/go/src/net/http/transport.go:1777 +0x16f1
+
+goroutine 8 [IO wait]:
+internal/poll.runtime_pollWait(0x7bf130ae7cb0, 0x72)
+	/usr/lib/go/src/runtime/netpoll.go:343 +0x85
+internal/poll.(*pollDesc).wait(0xc000132200?, 0xc000142000?, 0x0)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:84 +0x27
+internal/poll.(*pollDesc).waitRead(...)
+	/usr/lib/go/src/internal/poll/fd_poll_runtime.go:89
+internal/poll.(*FD).Read(0xc000132200, {0xc000142000, 0x1000, 0x1000})
+	/usr/lib/go/src/internal/poll/fd_unix.go:164 +0x27a
+net.(*netFD).Read(0xc000132200, {0xc000142000?, 0x4a8965?, 0x0?})
+	/usr/lib/go/src/net/fd_posix.go:55 +0x25
+net.(*conn).Read(0xc000044070, {0xc000142000?, 0x0?, 0xc00007ad28?})
+	/usr/lib/go/src/net/net.go:179 +0x45
+net/http.(*connReader).Read(0xc00007ad20, {0xc000142000, 0x1000, 0x1000})
+	/usr/lib/go/src/net/http/server.go:791 +0x14b
+bufio.(*Reader).fill(0xc000102540)
+	/usr/lib/go/src/bufio/bufio.go:113 +0x103
+bufio.(*Reader).Peek(0xc000102540, 0x4)
+	/usr/lib/go/src/bufio/bufio.go:151 +0x53
+net/http.(*conn).serve(0xc000134240, {0x739108, 0xc00008e0f0})
+	/usr/lib/go/src/net/http/server.go:2044 +0x75c
+created by net/http.(*Server).Serve in goroutine 4
+	/usr/lib/go/src/net/http/server.go:3086 +0x5cb
+

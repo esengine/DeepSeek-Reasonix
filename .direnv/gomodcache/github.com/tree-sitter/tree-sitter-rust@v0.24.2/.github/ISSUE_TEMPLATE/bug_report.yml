@@ -1,0 +1,59 @@
+name: Bug Report
+description: File a bug or issue
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Before** reporting an issue, make sure to search [existing issues](https://github.com/tree-sitter/tree-sitter-rust/issues). Usage questions such as ***"How do I...?"*** either belong in [Discussions](https://github.com/tree-sitter/tree-sitter/discussions) upstream or in our [Discord server](https://discord.gg/w7nTvsVJhm) and will be closed.
+        If your issue is related to a bug in your editor-experience because your editor *leverages* tree-sitter and this parser, then it is likely your issue does *NOT* belong here and belongs in the relevant editor's repository.
+  - type: checkboxes
+    attributes:
+      label: Did you check existing issues?
+      description: Make sure you've checked all of the below before submitting an issue
+      options:
+        - label: I have read all the [tree-sitter docs](https://tree-sitter.github.io/tree-sitter/using-parsers) if it relates to using the parser
+          required: false
+        - label: I have searched the existing issues of tree-sitter-rust
+          required: true
+  - type: input
+    attributes:
+      label: "Tree-Sitter CLI Version, if relevant (output of `tree-sitter --version`)"
+      placeholder: "tree-sitter 0.20.8 (6bbb50bef8249e6460e7d69e42cc8146622fa4fd)"
+    validations:
+      required: false
+  - type: textarea
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is. Please include any related errors you see such as parsing errors or tree-sitter cli errors.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Steps To Reproduce/Bad Parse Tree
+      description: Steps to reproduce the behavior. If you have a bad parse tree, please include it here. You can get this by running `tree-sitter parse <path-to-file>` and copying the output.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Expected Behavior/Parse Tree
+      description: A concise description of what you expected to happen, or in the case of a bad parse tree, the expected parse tree.
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Repro
+      description: Minimal code to reproduce this issue. Ideally this should be reproducible with the C library or the tree-sitter cli, do not suggest an editor or external tool.
+      value: |
+        // Example code that causes the issue
+        fn foo() {
+          // Code that fails to parse, or causes an error
+        }
+      render: Rust
+    validations:
+      required: false

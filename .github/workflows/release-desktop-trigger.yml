@@ -27,6 +27,10 @@ jobs:
               core.setFailed(`Unexpected default branch: ${process.env.CONTROL_PLANE_REF}`);
               return;
             }
+            if (/^desktop-v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-preview\.(?:0|[1-9]\d*)$/.test(process.env.RELEASE_TAG)) {
+              core.setFailed(`Desktop Preview must be dispatched without a Git tag: ${process.env.RELEASE_TAG}`);
+              return;
+            }
             await github.rest.actions.createWorkflowDispatch({
               owner: context.repo.owner,
               repo: context.repo.repo,

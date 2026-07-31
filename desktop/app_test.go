@@ -28,6 +28,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/memory"
@@ -473,7 +474,9 @@ func TestMetaForTabIncludesWorkspaceContext(t *testing.T) {
 	if strings.Contains(string(raw), "sandboxPath") || strings.Contains(string(raw), configuredSandboxRoot) {
 		t.Fatalf("meta should not expose configured sandbox root as sandboxPath: %s", raw)
 	}
-	deadline := time.Now().Add(time.Second)
+	// The first git process launch can be noticeably slower on Windows runners
+	// while MetaForTab intentionally keeps the caller path non-blocking.
+	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if got = app.MetaForTab("tab-1"); got.GitBranch == "feature/meta" {
 			break
@@ -596,17 +599,77 @@ func TestMemoryViewReturnsNonNilArraysBeforeStartup(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	view := NewApp().Memory()
-	if view.Docs == nil || view.Facts == nil || view.Archives == nil || view.Scopes == nil {
+	if view.Docs == nil || view.Facts == nil || view.Archives == nil || view.Scopes == nil || view.InstructionDiagnostics == nil || view.Conflicts == nil || view.LastRecall.Hits == nil {
 		t.Fatalf("Memory() arrays must be non-nil before startup: %+v", view)
 	}
 	raw, err := json.Marshal(view)
 	if err != nil {
 		t.Fatalf("marshal Memory(): %v", err)
 	}
-	for _, bad := range []string{`"docs":null`, `"facts":null`, `"archives":null`, `"scopes":null`} {
+	for _, bad := range []string{`"docs":null`, `"facts":null`, `"archives":null`, `"scopes":null`, `"instructionDiagnostics":null`, `"conflicts":null`, `"hits":null`} {
 		if strings.Contains(string(raw), bad) {
 			t.Fatalf("Memory() JSON contains %s; frontend expects []: %s", bad, raw)
 		}
+	}
+	if revisions := NewApp().MemoryRevisions("missing"); revisions == nil {
+		t.Fatal("MemoryRevisions must return [] before startup, not nil")
+	}
+}
+
+func TestMemoryViewIncludesRecallFreshnessAndOverrides(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	root := t.TempDir()
+	store := memory.Store{Dir: filepath.Join(root, "project"), GlobalDir: filepath.Join(root, "global")}
+	if _, err := (memory.Store{Dir: store.GlobalDir}).Save(memory.Memory{
+		Name: "deploy-target", Title: "Deploy target", Description: "legacy deployment target", Scope: memory.FactScopeGlobal, Type: memory.TypeProject, Body: "Deploy payments to the legacy cluster.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (memory.Store{Dir: store.Dir}).Save(memory.Memory{
+		Name: "deploy-target", Title: "Deploy target", Description: "current deployment target", Scope: memory.FactScopeProject, Type: memory.TypeProject, Body: "Deploy payments to the green cluster.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := control.New(control.Options{Memory: &memory.Set{Store: store}})
+	ctrl.Compose("deploy payments target cluster")
+	app := NewApp()
+	app.setTestCtrl(ctrl, "test-model")
+
+	view := app.Memory()
+	if len(view.Facts) != 2 || view.Facts[0].Freshness == "" || view.Facts[1].Freshness == "" {
+		t.Fatalf("facts with freshness = %+v", view.Facts)
+	}
+	if len(view.Conflicts) != 1 || view.Conflicts[0].Resolution != "project_over_global" {
+		t.Fatalf("conflicts = %+v", view.Conflicts)
+	}
+	if view.LastRecall.Query != "deploy payments target cluster" || len(view.LastRecall.Hits) != 1 || view.LastRecall.Hits[0].Scope != "project" {
+		t.Fatalf("last recall = %+v", view.LastRecall)
+	}
+}
+
+func TestMemoryRevisionAPIRestoresSelectedRevision(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	store := memory.Store{Dir: t.TempDir()}
+	first, err := store.SaveWithOptions(memory.Memory{Name: "fact", Description: "one", Body: "v1"}, memory.SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveWithOptions(memory.Memory{ID: first.Memory.ID, Name: "fact", Description: "two", Body: "v2"}, memory.SaveOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Memory: &memory.Set{Store: store}}), "test-model")
+
+	revisions := app.MemoryRevisions(first.Memory.ID)
+	if len(revisions) != 1 || revisions[0].Revision != 1 {
+		t.Fatalf("revisions = %+v", revisions)
+	}
+	restored, err := app.RestoreMemoryRevision(first.Memory.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Revision != 3 || restored.Body != "v1" {
+		t.Fatalf("restored = %+v", restored)
 	}
 }
 
@@ -638,10 +701,12 @@ func TestMemoryViewIncludesActiveAndArchivedFacts(t *testing.T) {
 
 	app := NewApp()
 	app.setTestCtrl(control.New(control.Options{Memory: &memory.Set{
-		Docs:    []memory.Source{{Path: filepath.Join(cwd, "AGENTS.md"), Scope: memory.ScopeProject, Body: "Project instructions"}},
-		Store:   store,
-		CWD:     cwd,
-		UserDir: userDir,
+		Docs: []memory.Source{{
+			Path: filepath.Join(cwd, "AGENTS.md"), Scope: memory.ScopeProject, Directory: cwd,
+			Body: "Project instructions", Imports: []instruction.Import{{Path: filepath.Join(cwd, "shared.md"), SourcePath: filepath.Join(cwd, "AGENTS.md")}},
+		}},
+		InstructionDiagnostics: []instruction.Diagnostic{{Code: "import_cycle", Path: "shared.md", SourcePath: filepath.Join(cwd, "AGENTS.md"), Line: 3, Message: "cycle"}},
+		Store:                  store, CWD: cwd, UserDir: userDir,
 	}}), "test-model")
 
 	view := app.Memory()
@@ -651,15 +716,54 @@ func TestMemoryViewIncludesActiveAndArchivedFacts(t *testing.T) {
 	if len(view.Docs) != 1 || view.Docs[0].Scope != "project" || !strings.Contains(view.Docs[0].Body, "Project instructions") {
 		t.Fatalf("Memory() docs = %+v", view.Docs)
 	}
-	if len(view.Facts) != 1 || view.Facts[0].Name != "active-fact" || view.Facts[0].Type != "project" {
+	if view.Docs[0].Directory != cwd || len(view.Docs[0].Imports) != 1 || len(view.InstructionDiagnostics) != 1 || view.InstructionDiagnostics[0].Code != "import_cycle" {
+		t.Fatalf("Memory() instruction provenance = docs %+v diagnostics %+v", view.Docs, view.InstructionDiagnostics)
+	}
+	if len(view.Facts) != 1 || view.Facts[0].Name != "active-fact" || view.Facts[0].Type != "project" || view.Facts[0].Scope != "project" {
 		t.Fatalf("Memory() active facts = %+v", view.Facts)
 	}
-	if len(view.Archives) != 1 || view.Archives[0].Name != "archived-fact" || view.Archives[0].Type != "feedback" ||
+	if view.Facts[0].ID == "" || view.Facts[0].Revision != 1 || view.Facts[0].CreatedAt == "" || view.Facts[0].UpdatedAt == "" {
+		t.Fatalf("Memory() active fact metadata = %+v", view.Facts[0])
+	}
+	if len(view.Archives) != 1 || view.Archives[0].Name != "archived-fact" || view.Archives[0].Type != "feedback" || view.Archives[0].Scope != "project" ||
 		view.Archives[0].Path == "" || view.Archives[0].ArchivedAt == "" {
 		t.Fatalf("Memory() archived facts = %+v", view.Archives)
 	}
+	if view.Archives[0].ID == "" || view.Archives[0].Revision != 1 || view.Archives[0].CreatedAt == "" || view.Archives[0].UpdatedAt == "" {
+		t.Fatalf("Memory() archived fact metadata = %+v", view.Archives[0])
+	}
 	if len(view.Scopes) != 3 {
 		t.Fatalf("Memory() scopes = %+v, want user/project/local", view.Scopes)
+	}
+}
+
+func TestRestoreArchivedMemoryRecoversFactForCurrentSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	userDir := t.TempDir()
+	cwd := t.TempDir()
+	store := memory.StoreFor(userDir, cwd)
+	first, err := store.SaveWithOptions(memory.Memory{
+		Name: "restorable-fact", Description: "recover me", Body: "Recovered guidance.",
+	}, memory.SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	archivePath, err := store.Archive(first.Memory.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	app.setTestCtrl(control.New(control.Options{Memory: &memory.Set{Store: store, CWD: cwd, UserDir: userDir}}), "test-model")
+	if _, err := app.RestoreArchivedMemory(archivePath); err != nil {
+		t.Fatal(err)
+	}
+	view := app.Memory()
+	if len(view.Facts) != 1 || view.Facts[0].ID != first.Memory.ID || view.Facts[0].Revision != 2 {
+		t.Fatalf("restored memory view = %+v", view)
+	}
+	if len(view.Archives) != 0 {
+		t.Fatalf("restored archive remained visible: %+v", view.Archives)
 	}
 }
 
@@ -2847,6 +2951,21 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestModelsForTabListsNothingWhenProviderAccessExplicitlyEmpty(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.Desktop.ProviderAccess = []string{}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	if models := NewApp().Models(); len(models) != 0 {
+		t.Fatalf("Models() = %+v, want no models when provider access is explicitly empty", models)
+	}
+}
+
 func TestModelsForTabListsCustomMultiModelProviderWithoutMetadata(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "LOCAL_API_KEY", "sk-test")
@@ -3102,6 +3221,8 @@ func TestSetModelForTabRefreshesCarriedSystemPromptWithoutChangingDefaults(t *te
 	app.tabs = map[string]*WorkspaceTab{tab.ID: tab, sibling.ID: sibling}
 	app.tabOrder = []string{tab.ID, sibling.ID}
 	app.activeTabID = tab.ID
+	var switchTiming modelSwitchTiming
+	app.modelSwitchTimingHook = func(timing modelSwitchTiming) { switchTiming = timing }
 	t.Cleanup(func() {
 		if tab.Ctrl != nil {
 			tab.Ctrl.Close()
@@ -3129,6 +3250,12 @@ func TestSetModelForTabRefreshesCarriedSystemPromptWithoutChangingDefaults(t *te
 	}
 	if sibling.model != "old/old-model" {
 		t.Fatalf("sibling tab model after session switch = %q, want old/old-model", sibling.model)
+	}
+	if switchTiming.Outcome != "ok" || switchTiming.Total <= 0 {
+		t.Fatalf("model switch timing = %+v, want successful non-zero observation", switchTiming)
+	}
+	if switchTiming.Build <= 0 || switchTiming.LeaseAndResume <= 0 || switchTiming.SwapAndPersist <= 0 {
+		t.Fatalf("model switch stage timing incomplete: %+v", switchTiming)
 	}
 }
 
@@ -9904,7 +10031,11 @@ func startNonCooperativeSessionJob(t *testing.T, jm *jobs.Manager, sessionPath s
 
 func waitNotRunning(t *testing.T, ctrl control.SessionAPI) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
+	// Windows release runners can take more than one second to schedule the
+	// controller's asynchronous completion while the full desktop suite is
+	// active. Keep a bounded responsiveness check without treating scheduler
+	// delay as a leaked controller.
+	deadline := time.Now().Add(5 * time.Second)
 	for ctrl.Running() {
 		if time.Now().After(deadline) {
 			t.Fatal("controller still running")

@@ -14,6 +14,8 @@ export type ShortcutAction =
   | "settings.open"
   | "tab.close"
   | "shell.toggle"
+  | "terminal.toggle"
+  | "terminal.newSession"
   | "sidebar.toggle"
   | "textSize.increase"
   | "textSize.decrease"
@@ -158,6 +160,24 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
       linux: { key: "b", ctrl: true, shift: true },
     },
     preventDefault: true,
+  },
+  {
+    action: "terminal.toggle",
+    section: "view",
+    labelKey: "shortcuts.action.terminalToggle",
+    descriptionKey: "shortcuts.desc.terminalToggle",
+    defaults: allPlatforms({ key: "`", ctrl: true }),
+    preventDefault: true,
+    allowInEditable: true,
+  },
+  {
+    action: "terminal.newSession",
+    section: "view",
+    labelKey: "shortcuts.action.terminalNewSession",
+    descriptionKey: "shortcuts.desc.terminalNewSession",
+    defaults: allPlatforms({ key: "`", ctrl: true, shift: true }),
+    preventDefault: true,
+    allowInEditable: true,
   },
   {
     action: "sidebar.toggle",

@@ -111,7 +111,7 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 			msgs := c.executor.Session().Snapshot()
 			for i := len(msgs) - 1; i >= 0; i-- {
 				if string(msgs[i].Role) == "user" && strings.TrimSpace(msgs[i].Content) != "" {
-					text := strings.TrimSpace(msgs[i].Content)
+					text := agent.UserMessageText(msgs[i])
 					if len(text) > 800 {
 						return text[:800] + "…"
 					}
@@ -275,6 +275,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 		recoveryFirstNonEmpty(pending.Subject, pending.Tool),
 		recoveryFirstNonEmpty(pending.Rationale, "Auto Guard"),
 		true,
+		false,
 		recovery.ApprovalKindRecovery,
 		ev.Recovery,
 	)

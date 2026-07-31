@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  run-tests:
+    name: Run test cases
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        go: ['1.24', '1.23']
+        exclude:
+          - os: macos-latest
+            go: '1.24'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Run tests
+        run: |
+          make integration
+          make integration_w_race
+
+      - name: Run tests on 32-bit arch
+        if: startsWith(matrix.os, 'ubuntu-')
+        run: |
+          make integration
+        env:
+          GOARCH: 386

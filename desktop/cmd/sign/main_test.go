@@ -55,6 +55,7 @@ func TestGenManifest(t *testing.T) {
 	names := []string{
 		"Reasonix-darwin-arm64.zip",
 		"Reasonix-darwin-amd64.zip",
+		"Reasonix-darwin-universal.dmg",
 		"Reasonix-windows-amd64-installer.exe",
 		"Reasonix-windows-amd64.zip", // portable download, not the updater channel
 		"Reasonix-windows-arm64-installer.exe",
@@ -136,6 +137,21 @@ func TestGenManifest(t *testing.T) {
 	if deb.Sig != deb.URL+".minisig" || deb.SHA256 == "" || deb.Size == 0 {
 		t.Fatalf("native linux asset incomplete: %+v", deb)
 	}
+	if len(m.Downloads) != 2 {
+		t.Fatalf("want 2 website downloads, got %d: %+v", len(m.Downloads), m.Downloads)
+	}
+	for _, name := range []string{"Reasonix-darwin-universal.dmg", "Reasonix-windows-amd64.zip"} {
+		asset, ok := m.Downloads[name]
+		if !ok {
+			t.Fatalf("website download %q missing", name)
+		}
+		if !strings.HasSuffix(asset.URL, "/"+name) ||
+			asset.Sig != asset.URL+".minisig" ||
+			asset.SHA256 == "" ||
+			asset.Size == 0 {
+			t.Fatalf("website download %q incomplete: %+v", name, asset)
+		}
+	}
 }
 
 // TestGenManifestIgnoresUnknownNativePackages ensures a .deb without a known
@@ -164,5 +180,31 @@ func TestGenManifestIgnoresUnknownNativePackages(t *testing.T) {
 	}
 	if len(m.NativePackages) != 0 {
 		t.Fatalf("unexpected native_packages: %+v", m.NativePackages)
+	}
+}
+
+func TestGenWindowsPayloadManifestHashesExactReleaseUnit(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range update.WindowsPayloadFileNames() {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("payload:"+name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := genWindowsPayloadManifest(dir, "v2.3.4"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, update.WindowsPayloadManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := update.DecodeWindowsPayloadManifest(b, "v2.3.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range update.WindowsPayloadFileNames() {
+		want := update.WindowsPayloadSHA256([]byte("payload:" + name))
+		if hashes[name] != want {
+			t.Fatalf("manifest hash for %s = %q, want %q", name, hashes[name], want)
+		}
 	}
 }

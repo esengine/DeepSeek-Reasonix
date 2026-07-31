@@ -3,12 +3,17 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,20 +24,35 @@ import (
 
 const parentExitTimeout = 2 * time.Minute
 
+var (
+	waitForProcessExitFn       = waitForProcessExit
+	runInstallerFn             = runInstaller
+	startRelaunchFn            = startRelaunch
+	claimPendingFileUpdateFn   = repair.ClaimPendingFileUpdateExact
+	installStagedReleaseUnitFn = installStagedWindowsReleaseUnit
+	recordInstalledUpdateFn    = repair.RecordClaimedFileUpdateInstalled
+	stageInstallerFn           = stageVerifiedInstaller
+	claimInstallerExecutionFn  = claimVerifiedInstallerForExecution
+	lstatUpdateStagingFn       = os.Lstat
+)
+
 func main() {
 	os.Exit(run(os.Args[1:]))
 }
 
 func run(args []string) int {
 	var parentPID uint
-	var installer, installDir, relaunch, toVersion string
+	var installer, installerSHA256, installDir, relaunch, toVersion, createdAt, transactionID string
 	fs := flag.NewFlagSet("reasonix-update-helper", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.UintVar(&parentPID, "parent-pid", 0, "Reasonix process id to wait for before installing")
 	fs.StringVar(&installer, "installer", "", "verified NSIS installer path")
+	fs.StringVar(&installerSHA256, "installer-sha256", "", "expected SHA-256 of the verified NSIS installer")
 	fs.StringVar(&installDir, "install-dir", "", "Reasonix installation directory")
 	fs.StringVar(&relaunch, "relaunch", "", "Reasonix executable to start after the installer succeeds")
 	fs.StringVar(&toVersion, "to-version", "", "Reasonix version being installed")
+	fs.StringVar(&createdAt, "created-at", "", "pending update creation timestamp")
+	fs.StringVar(&transactionID, "transaction-id", "", "complete pending update identity")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -41,40 +61,307 @@ func run(args []string) int {
 		logger.Print("missing --installer")
 		return 2
 	}
+	if !validSHA256(installerSHA256) {
+		logger.Print("missing or invalid --installer-sha256")
+		return 2
+	}
 	if toVersion == "" {
 		logger.Print("missing --to-version")
 		return 2
 	}
+	if createdAt == "" {
+		logger.Print("missing --created-at")
+		return 2
+	}
+	if transactionID == "" {
+		logger.Print("missing --transaction-id")
+		return 2
+	}
+	if installDir == "" {
+		logger.Print("missing --install-dir")
+		return 2
+	}
 	if parentPID != 0 {
-		if err := waitForProcessExit(uint32(parentPID), parentExitTimeout); err != nil {
+		if err := waitForProcessExitFn(uint32(parentPID), parentExitTimeout); err != nil {
 			logger.Printf("wait for parent process %d: %v", parentPID, err)
 			return 1
 		}
 	}
-	if err := runInstaller(installer, installDir); err != nil {
-		logger.Printf("run installer: %v", err)
-		// The desktop already exited cleanly, so nothing would notice this
-		// failure: record it and relaunch through Guard, which rolls the
-		// release unit back on startup (the helper itself runs from the cache
-		// directory, outside the validated install, and must not restore
-		// binaries directly).
-		if markErr := repair.MarkUpdateApplyFailed(toVersion, err.Error()); markErr != nil {
-			logger.Printf("record install failure: %v", markErr)
+	// The old desktop may acquire the pending lock during its normal shutdown.
+	// Wait for that exact process first, then claim the transaction and hold both
+	// pending and target locks across the installer replacement window.
+	claimed, releaseClaim, err := claimPendingFileUpdateFn(
+		toVersion,
+		createdAt,
+		transactionID,
+		filepath.Join(installDir, "reasonix-desktop.exe"),
+		windowsReleaseUnitPaths(installDir),
+		parentExitTimeout,
+	)
+	if err != nil {
+		logger.Printf("claim pending update: %v", err)
+		return 1
+	}
+	defer releaseClaim()
+	recoverUnstarted := func() int {
+		releaseClaim()
+		if cancelErr := repair.CancelPendingUpdateExact(claimed); cancelErr != nil {
+			logger.Printf("cancel unstarted update: %v", cancelErr)
 		}
 		if relaunch != "" {
-			if relaunchErr := startRelaunch(relaunch, installDir); relaunchErr != nil {
-				logger.Printf("relaunch after failed install: %v", relaunchErr)
+			if relaunchErr := startRelaunchFn(relaunch, installDir); relaunchErr != nil {
+				logger.Printf("relaunch after unstarted update failure: %v", relaunchErr)
 			}
 		}
 		return 1
 	}
+	claimedInstaller, cleanupInstaller, err := stageInstallerFn(installer, installerSHA256)
+	if err != nil {
+		logger.Printf("bind update installer: %v", err)
+		return recoverUnstarted()
+	}
+	defer func() {
+		if cleanupErr := cleanupInstaller(); cleanupErr != nil {
+			logger.Printf("preserving update installer staging: %v", cleanupErr)
+		}
+	}()
+	stagingDir, err := os.MkdirTemp("", "reasonix-update-stage-*")
+	if err != nil {
+		logger.Printf("create update staging: %v", err)
+		return recoverUnstarted()
+	}
+	stagingOwner, err := lstatUpdateStagingFn(stagingDir)
+	if err != nil {
+		logger.Printf("bind update staging: %v", err)
+		return recoverUnstarted()
+	}
+	defer func() {
+		if cleanupErr := cleanupOwnedWindowsUpdateDirectory(stagingDir, stagingOwner); cleanupErr != nil {
+			logger.Printf("preserving update staging: %v", cleanupErr)
+		}
+	}()
+	releaseInstallerExecution, err := claimInstallerExecutionFn(claimedInstaller, installerSHA256)
+	if err != nil {
+		logger.Printf("recheck staged installer: %v", err)
+		return recoverUnstarted()
+	}
+	installerErr := runInstallerFn(claimedInstaller, stagingDir)
+	releaseInstallerExecution()
+	if installerErr != nil {
+		logger.Printf("extract installer payload: %v", installerErr)
+		return recoverUnstarted()
+	}
+	publishStarted, receipts, err := installStagedReleaseUnitFn(claimed, stagingDir)
+	if err != nil {
+		logger.Printf("publish staged release unit: %v", err)
+		if !publishStarted {
+			releaseClaim()
+			if cancelErr := repair.CancelPendingUpdateExact(claimed); cancelErr != nil {
+				logger.Printf("cancel unstarted update: %v", cancelErr)
+			}
+		}
+		if relaunch != "" {
+			if relaunchErr := startRelaunchFn(relaunch, installDir); relaunchErr != nil {
+				logger.Printf("relaunch after publish failure: %v", relaunchErr)
+			}
+		}
+		return 1
+	}
+	if _, err := recordInstalledUpdateFn(claimed, receipts...); err != nil {
+		logger.Printf("record installed release unit: %v", err)
+		if markErr := repair.MarkUpdateApplyFailedExact(claimed, err.Error()); markErr != nil {
+			logger.Printf("record install failure: %v", markErr)
+		}
+		if relaunch != "" {
+			if relaunchErr := startRelaunchFn(relaunch, installDir); relaunchErr != nil {
+				logger.Printf("relaunch after failed install verification: %v", relaunchErr)
+			}
+		}
+		return 1
+	}
+	if err := repair.ClearUpdateApplyFailureExact(claimed); err != nil {
+		logger.Printf("clear completed update marker: %v", err)
+	}
 	if relaunch != "" {
-		if err := startRelaunch(relaunch, installDir); err != nil {
+		if err := startRelaunchFn(relaunch, installDir); err != nil {
 			logger.Printf("relaunch: %v", err)
 			return 1
 		}
 	}
 	return 0
+}
+
+func validSHA256(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
+}
+
+func stageVerifiedInstaller(sourcePath, expectedSHA256 string) (string, func() error, error) {
+	if !validSHA256(expectedSHA256) {
+		return "", nil, fmt.Errorf("installer SHA-256 is invalid")
+	}
+	sourceInfo, err := os.Lstat(sourcePath)
+	if err != nil {
+		return "", nil, err
+	}
+	if !sourceInfo.Mode().IsRegular() {
+		return "", nil, fmt.Errorf("installer is not a regular file")
+	}
+	dir, err := os.MkdirTemp("", "reasonix-update-installer-*")
+	if err != nil {
+		return "", nil, err
+	}
+	owner, err := os.Lstat(dir)
+	if err != nil {
+		return "", nil, err
+	}
+	cleanup := func() error {
+		return cleanupOwnedWindowsUpdateDirectory(dir, owner)
+	}
+	fail := func(err error) (string, func() error, error) {
+		_ = cleanup()
+		return "", nil, err
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return fail(err)
+	}
+	defer source.Close()
+	stagedPath := filepath.Join(dir, "reasonix-installer.exe")
+	staged, err := os.OpenFile(stagedPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o700)
+	if err != nil {
+		return fail(err)
+	}
+	hash := sha256.New()
+	_, copyErr := io.Copy(io.MultiWriter(staged, hash), source)
+	syncErr := staged.Sync()
+	closeErr := staged.Close()
+	switch {
+	case copyErr != nil:
+		return fail(copyErr)
+	case syncErr != nil:
+		return fail(syncErr)
+	case closeErr != nil:
+		return fail(closeErr)
+	case !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), strings.TrimSpace(expectedSHA256)):
+		return fail(fmt.Errorf("installer SHA-256 changed after desktop verification"))
+	}
+	if err := verifyInstallerSHA256(stagedPath, expectedSHA256); err != nil {
+		return fail(err)
+	}
+	return stagedPath, cleanup, nil
+}
+
+func verifyInstallerSHA256(path, expectedSHA256 string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("installer is not a regular file")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, f); err != nil {
+		return err
+	}
+	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), strings.TrimSpace(expectedSHA256)) {
+		return fmt.Errorf("installer SHA-256 mismatch")
+	}
+	return nil
+}
+
+func claimVerifiedInstallerForExecution(path, expectedSHA256 string) (func(), error) {
+	if !validSHA256(expectedSHA256) {
+		return nil, fmt.Errorf("installer SHA-256 is invalid")
+	}
+	pathUTF16, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	handle, err := windows.CreateFile(
+		pathUTF16,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_SEQUENTIAL_SCAN,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	file := os.NewFile(uintptr(handle), path)
+	fail := func(err error) (func(), error) {
+		_ = file.Close()
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return fail(err)
+	}
+	if !info.Mode().IsRegular() {
+		return fail(fmt.Errorf("installer is not a regular file"))
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return fail(err)
+	}
+	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), strings.TrimSpace(expectedSHA256)) {
+		return fail(fmt.Errorf("installer SHA-256 mismatch"))
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() { _ = file.Close() })
+	}, nil
+}
+
+func installStagedWindowsReleaseUnit(
+	claimed *repair.UpdateTransaction,
+	stagingDir string,
+) (bool, []repair.FileUpdateInstallReceipt, error) {
+	members, err := loadWindowsStagedReleaseUnit(claimed, stagingDir)
+	if err != nil {
+		return false, nil, err
+	}
+	// Persist recovery intent before the first live rename. If the helper exits
+	// between release-unit members, Guard rolls the exact pending transaction
+	// back instead of launching a mixed install.
+	if err := repair.MarkUpdateApplyFailedExact(claimed, "Windows update publish did not complete"); err != nil {
+		return false, nil, fmt.Errorf("record update recovery intent: %w", err)
+	}
+	receipts, err := publishLoadedFileUpdateReleaseUnit(claimed, members, repair.PublishClaimedFileUpdateMemberExact)
+	if err != nil {
+		return true, receipts, err
+	}
+	return true, receipts, nil
+}
+
+func windowsReleaseUnitPaths(installDir string) []string {
+	if installDir == "" {
+		return nil
+	}
+	names := []string{
+		"reasonix-desktop.exe",
+		"reasonix-guard.exe",
+		"reasonix-launcher.exe",
+		"reasonix-update-helper.exe",
+		"reasonix-cli.exe",
+		"Reasonix.exe",
+	}
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		paths = append(paths, filepath.Join(installDir, name))
+	}
+	return paths
 }
 
 func newLogger() *log.Logger {
@@ -117,10 +404,53 @@ func waitForProcessExit(pid uint32, timeout time.Duration) error {
 func runInstaller(installer, installDir string) error {
 	cmd := exec.Command(installer)
 	// Keep the helper itself hidden, but let the NSIS update-progress window be
-	// visible. The dedicated /REASONIXUPDATE mode prevents directory changes and
-	// closes automatically after the update finishes.
+	// visible. /REASONIXSTAGE makes the signed installer extract only; the helper
+	// performs every live replacement through the claimed transaction.
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: installerCommandLine(installer, installDir)}
 	return cmd.Run()
+}
+
+func cleanupOwnedWindowsUpdateDirectory(path string, owner os.FileInfo) error {
+	if path == "" || owner == nil || !owner.IsDir() {
+		return fmt.Errorf("Windows update cleanup identity is incomplete")
+	}
+	for attempt := 0; attempt < 16; attempt++ {
+		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
+		from, err := windows.UTF16PtrFromString(path)
+		if err != nil {
+			return err
+		}
+		to, err := windows.UTF16PtrFromString(cleanup)
+		if err != nil {
+			return err
+		}
+		if err := windows.MoveFileEx(from, to, windows.MOVEFILE_WRITE_THROUGH); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			if os.IsExist(err) {
+				continue
+			}
+			return err
+		}
+		actual, err := os.Lstat(cleanup)
+		if err != nil {
+			return err
+		}
+		if !os.SameFile(owner, actual) {
+			restoreFrom, fromErr := windows.UTF16PtrFromString(cleanup)
+			restoreTo, toErr := windows.UTF16PtrFromString(path)
+			if fromErr != nil || toErr != nil {
+				return fmt.Errorf("Windows update staging changed before cleanup; preserve replacement at %s", cleanup)
+			}
+			if restoreErr := windows.MoveFileEx(restoreFrom, restoreTo, windows.MOVEFILE_WRITE_THROUGH); restoreErr != nil {
+				return fmt.Errorf("Windows update staging changed before cleanup; preserve replacement at %s: %w", cleanup, restoreErr)
+			}
+			return fmt.Errorf("Windows update staging changed before cleanup")
+		}
+		return os.RemoveAll(cleanup)
+	}
+	return fmt.Errorf("cannot allocate Windows update cleanup path")
 }
 
 func startRelaunch(relaunch, installDir string) error {

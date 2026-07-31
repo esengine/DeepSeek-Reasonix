@@ -1,0 +1,319 @@
+================================================================================
+Scoped function definitions
+================================================================================
+
+int T::foo() { return 1; }
+int T::foo() const { return 0; }
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (qualified_identifier
+        (namespace_identifier)
+        (identifier))
+      (parameter_list))
+    (compound_statement
+      (return_statement
+        (number_literal))))
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (qualified_identifier
+        (namespace_identifier)
+        (identifier))
+      (parameter_list)
+      (type_qualifier))
+    (compound_statement
+      (return_statement
+        (number_literal)))))
+
+================================================================================
+Constructor definitions
+================================================================================
+
+T::T() {}
+
+T::T() : f1(0), f2(1, 2) {
+  puts("HI");
+}
+
+T::T() : Base<T>() {}
+
+T::T() try : f1(0) {} catch(...) {}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (function_declarator
+      (qualified_identifier
+        (namespace_identifier)
+        (identifier))
+      (parameter_list))
+    (compound_statement))
+  (function_definition
+    (function_declarator
+      (qualified_identifier
+        (namespace_identifier)
+        (identifier))
+      (parameter_list))
+    (field_initializer_list
+      (field_initializer
+        (field_identifier)
+        (argument_list
+          (number_literal)))
+      (field_initializer
+        (field_identifier)
+        (argument_list
+          (number_literal)
+          (number_literal))))
+    (compound_statement
+      (expression_statement
+        (call_expression
+          (identifier)
+          (argument_list
+            (string_literal
+              (string_content)))))))
+  (function_definition
+    (function_declarator
+      (qualified_identifier
+        (namespace_identifier)
+        (identifier))
+      (parameter_list))
+    (field_initializer_list
+      (field_initializer
+        (template_method
+          (field_identifier)
+          (template_argument_list
+            (type_descriptor
+              (type_identifier))))
+        (argument_list)))
+    (compound_statement))
+  (function_definition
+    (function_declarator
+      (qualified_identifier
+        (namespace_identifier)
+        (identifier))
+      (parameter_list))
+    (try_statement
+      (field_initializer_list
+        (field_initializer
+          (field_identifier)
+          (argument_list
+            (number_literal))))
+      (compound_statement)
+      (catch_clause
+        (parameter_list)
+        (compound_statement)))))
+
+================================================================================
+Explicit constructor definitions
+================================================================================
+
+class C {
+  explicit C(int f) : f_(f) {}
+
+ private:
+  int f_;
+};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (class_specifier
+    (type_identifier)
+    (field_declaration_list
+      (function_definition
+        (explicit_function_specifier)
+        (function_declarator
+          (identifier)
+          (parameter_list
+            (parameter_declaration
+              (primitive_type)
+              (identifier))))
+        (field_initializer_list
+          (field_initializer
+            (field_identifier)
+            (argument_list
+              (identifier))))
+        (compound_statement))
+      (access_specifier)
+      (field_declaration
+        (primitive_type)
+        (field_identifier)))))
+
+================================================================================
+Explicit constructor declaration
+================================================================================
+
+class C {
+  explicit C(int f);
+  explicit(true) C(long f);
+};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (class_specifier
+    (type_identifier)
+    (field_declaration_list
+      (declaration
+        (explicit_function_specifier)
+        (function_declarator
+          (identifier)
+          (parameter_list
+            (parameter_declaration
+              (primitive_type)
+              (identifier)))))
+      (declaration
+        (explicit_function_specifier
+          (true))
+        (function_declarator
+          (identifier)
+          (parameter_list
+            (parameter_declaration
+              (sized_type_specifier)
+              (identifier))))))))
+
+================================================================================
+Default, delete, and pure virtual methods
+================================================================================
+
+class A : public B {
+  A() = default;
+  A(A &&) = delete;
+  void f() = delete;
+  A& operator=(const A&) = default;
+  A& operator=(A&&) = delete;
+  ~A() = 0;
+};
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (class_specifier
+    (type_identifier)
+    (base_class_clause
+      (access_specifier)
+      (type_identifier))
+    (field_declaration_list
+      (function_definition
+        (function_declarator
+          (identifier)
+          (parameter_list))
+        (default_method_clause))
+      (function_definition
+        (function_declarator
+          (identifier)
+          (parameter_list
+            (parameter_declaration
+              (type_identifier)
+              (abstract_reference_declarator))))
+        (delete_method_clause))
+      (function_definition
+        (primitive_type)
+        (function_declarator
+          (field_identifier)
+          (parameter_list))
+        (delete_method_clause))
+      (function_definition
+        (type_identifier)
+        (reference_declarator
+          (function_declarator
+            (operator_name)
+            (parameter_list
+              (parameter_declaration
+                (type_qualifier)
+                (type_identifier)
+                (abstract_reference_declarator)))))
+        (default_method_clause))
+      (function_definition
+        (type_identifier)
+        (reference_declarator
+          (function_declarator
+            (operator_name)
+            (parameter_list
+              (parameter_declaration
+                (type_identifier)
+                (abstract_reference_declarator)))))
+        (delete_method_clause))
+      (function_definition
+        (function_declarator
+          (destructor_name
+            (identifier))
+          (parameter_list))
+        (pure_virtual_clause)))))
+
+================================================================================
+Destructor definitions
+================================================================================
+
+~T() {}
+T::~T() {}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (function_declarator
+      (destructor_name
+        (identifier))
+      (parameter_list))
+    (compound_statement))
+  (function_definition
+    (function_declarator
+      (qualified_identifier
+        (namespace_identifier)
+        (destructor_name
+          (identifier)))
+      (parameter_list))
+    (compound_statement)))
+
+================================================================================
+Function-try-block definitions
+================================================================================
+
+void foo() try {} catch(...) {}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (try_statement
+      (compound_statement)
+      (catch_clause
+        (parameter_list)
+        (compound_statement)))))
+
+================================================================================
+Conversion operator definitions
+================================================================================
+
+T::operator int() try { throw 1; } catch (...) { return 2; }
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (qualified_identifier
+      (namespace_identifier)
+      (operator_cast
+        (primitive_type)
+        (abstract_function_declarator
+          (parameter_list))))
+    (try_statement
+      (compound_statement
+        (throw_statement
+          (number_literal)))
+      (catch_clause
+        (parameter_list)
+        (compound_statement
+          (return_statement
+            (number_literal)))))))

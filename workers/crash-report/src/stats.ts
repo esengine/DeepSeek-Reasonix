@@ -227,6 +227,12 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
   settings_bot_connection_status: { en: "Bot: connection status", zh: "机器人：连接状态" },
   settings_bot_connection_model: { en: "Bot: connection model", zh: "机器人：连接模型" },
   settings_bot_connection_approval: { en: "Bot: connection approval", zh: "机器人：连接审批" },
+  cli_mode: { en: "CLI mode", zh: "CLI 模式" },
+  cli_profile: { en: "CLI profile", zh: "CLI 配置档" },
+  cli_permission_mode: { en: "CLI permission mode", zh: "CLI 权限模式" },
+  cli_session_mode: { en: "CLI session mode", zh: "CLI 会话模式" },
+  cli_turn_latency: { en: "CLI turn latency", zh: "CLI turn 延迟" },
+  cli_exit: { en: "CLI turn outcome", zh: "CLI turn 结果" },
 };
 
 const AGENT_METRIC_SIGNALS = [
@@ -248,6 +254,8 @@ const AGENT_METRIC_SIGNALS = [
   "desktop_update_transition",
   "desktop_restore",
   "desktop_webview2_failure",
+  "cli_turn_latency",
+  "cli_exit",
   "recovery_failure",
   "recovery_rule_continue",
   "recovery_review_continue",
@@ -264,7 +272,7 @@ const SETTINGS_METRIC_GROUPS: { en: string; zh: string; signals: string[] }[] = 
   {
     en: "Client",
     zh: "客户端",
-    signals: ["client_surface", "client_version", "settings_language"],
+    signals: ["client_surface", "client_version", "settings_language", "cli_mode", "cli_profile", "cli_permission_mode", "cli_session_mode"],
   },
   {
     en: "Appearance and layout",
@@ -586,6 +594,7 @@ export function renderStats(
     overview: OverviewCounts;
     latestVersion: string;
     filters: {
+      surface: "desktop" | "cli";
       status: string;
       source: string;
       version: string;
@@ -607,8 +616,11 @@ export function renderStats(
   const anyPing = days.some((d) => d.opens > 0);
   const agentMetrics = data.metrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
   const previousAgentMetrics = data.previousMetrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
-  const settingsMetrics = data.metrics.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
-  const settingsMetricUsers = data.metricUsers.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
+  const isSettingsSignal = (signal: string) =>
+    signal === "client_surface" || signal === "client_version" || signal.startsWith("settings_") ||
+    ["cli_mode", "cli_profile", "cli_permission_mode", "cli_session_mode"].includes(signal);
+  const settingsMetrics = data.metrics.filter((r) => isSettingsSignal(r.signal));
+  const settingsMetricUsers = data.metricUsers.filter((r) => isSettingsSignal(r.signal));
   const cache = cacheHitRate(agentMetrics);
   const providerRate = ratioPer100(agentMetrics, "provider_error");
   const toolRate = ratioPer100(agentMetrics, "tool_error");
@@ -633,6 +645,7 @@ export function renderStats(
     put("version", data.filters.version);
     put("os", data.filters.os);
     put("platform", data.filters.platform);
+    put("surface", data.filters.surface === "cli" ? "cli" : "");
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
     if (data.filters.windowDays === 7) params.set("window", "7d");
@@ -652,6 +665,10 @@ export function renderStats(
   const windowControls = `<div class="segmented" aria-label="Time window">
 <a class="${range === 7 ? "active" : ""}"${range === 7 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "7d" }))}">7d</a>
 <a class="${range === 30 ? "active" : ""}"${range === 30 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "" }))}">30d</a>
+</div>`;
+  const surfaceControls = `<div class="segmented" aria-label="Client surface">
+<a class="${data.filters.surface === "desktop" ? "active" : ""}"${data.filters.surface === "desktop" ? ` aria-current="true"` : ""} href="${esc(filterQS({ surface: "" }))}">${i18n("Desktop", "桌面端")}</a>
+<a class="${data.filters.surface === "cli" ? "active" : ""}"${data.filters.surface === "cli" ? ` aria-current="true"` : ""} href="${esc(filterQS({ surface: "cli" }))}">CLI</a>
 </div>`;
   const preferenceControls = `<div class="segmented" aria-label="Preference metric mode">
 <a class="${data.filters.preferenceMode === "users" ? "active" : ""}"${data.filters.preferenceMode === "users" ? ` aria-current="true"` : ""} href="${esc(
@@ -741,10 +758,10 @@ ${filters}
     "Reasonix · Crash & Telemetry",
     "health",
     `${dashboardNav}
-<div id="top" class="hero-line"><div><h1>${i18n("Crash & Telemetry", "桌面端健康看板")}</h1><p class="sub">${i18nHTML(
+<div id="top" class="hero-line"><div><h1>${i18n("Crash & Telemetry", "客户端健康看板")}</h1><p class="sub">${i18nHTML(
       `${rangeText} window · anonymous launch pings, opt-in aggregate metrics, and user-sent diagnostic reports only`,
       `${rangeText} 时间窗口 · 仅包含匿名启动 ping、opt-in 汇总指标和用户发送的诊断报告`,
-    )}</p></div>${windowControls}</div>
+    )}</p></div><div class="module-actions">${surfaceControls}${windowControls}</div></div>
 ${pageOverview}
 <div class="grid">
 ${activeModuleHTML[activeModule]}

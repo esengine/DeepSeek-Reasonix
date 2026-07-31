@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: saturday
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
+    labels: [dependencies]
+    open-pull-requests-limit: 1
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly
+      day: sunday
+    commit-message:
+      prefix: build
+    labels: [dependencies]
+    open-pull-requests-limit: 1

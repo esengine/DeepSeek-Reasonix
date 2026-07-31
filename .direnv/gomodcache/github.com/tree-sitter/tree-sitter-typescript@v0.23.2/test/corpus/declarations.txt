@@ -1,0 +1,1469 @@
+==================================
+Ambient declarations
+==================================
+
+declare class Error {
+  constructor: Function
+}
+
+declare var foo: number;
+
+declare const bar = "baz";
+
+declare function greet(greeting: string): void;
+
+declare namespace myLib {
+    function makeGreeting(s: string): string;
+    let numberOfGreetings: number;
+
+    interface LogOptions {
+      verbose?: boolean;
+    }
+    interface AlertOptions {
+      modal: boolean;
+      title?: string;
+      color?: string;
+    }
+}
+
+declare class Greeter {
+  constructor(greeting: string);
+
+  greeting: string;
+  showGreeting(): void;
+}
+
+declare module Foo.Bar { export var foo; };
+
+declare module Foo {
+  break;
+  continue;
+  debugger;
+  do { } while (true);
+  for (x in null) { }
+  for (;;) { }
+  if (true) { } else { }
+  1;
+  return;
+  switch (x) {
+      case 1:
+          break;
+      default:
+          break;
+  }
+  throw "hello";
+  try { }
+  catch (e) { }
+  finally { }
+}
+
+---
+
+(program
+  (ambient_declaration
+    (class_declaration
+      name: (type_identifier)
+      body: (class_body
+        (public_field_definition
+          name: (property_identifier)
+          type: (type_annotation
+            (type_identifier))))))
+  (ambient_declaration
+    (variable_declaration
+      (variable_declarator
+        name: (identifier)
+        type: (type_annotation
+          (predefined_type)))))
+  (ambient_declaration
+    (lexical_declaration
+      (variable_declarator
+        name: (identifier)
+        value: (string
+          (string_fragment)))))
+  (ambient_declaration
+    (function_signature
+      name: (identifier)
+      parameters: (formal_parameters
+        (required_parameter
+          pattern: (identifier)
+          type: (type_annotation
+            (predefined_type))))
+      return_type: (type_annotation
+        (predefined_type))))
+  (ambient_declaration
+    (internal_module
+      name: (identifier)
+      body: (statement_block
+        (function_signature
+          name: (identifier)
+          parameters: (formal_parameters
+            (required_parameter
+              pattern: (identifier)
+              type: (type_annotation
+                (predefined_type))))
+          return_type: (type_annotation
+            (predefined_type)))
+        (lexical_declaration
+          (variable_declarator
+            name: (identifier)
+            type: (type_annotation
+              (predefined_type))))
+        (interface_declaration
+          name: (type_identifier)
+          body: (interface_body
+            (property_signature
+              name: (property_identifier)
+              type: (type_annotation
+                (predefined_type)))))
+        (interface_declaration
+          name: (type_identifier)
+          body: (interface_body
+            (property_signature
+              name: (property_identifier)
+              type: (type_annotation
+                (predefined_type)))
+            (property_signature
+              name: (property_identifier)
+              type: (type_annotation
+                (predefined_type)))
+            (property_signature
+              name: (property_identifier)
+              type: (type_annotation
+                (predefined_type))))))))
+  (ambient_declaration
+    (class_declaration
+      name: (type_identifier)
+      body: (class_body
+        (method_signature
+          name: (property_identifier)
+          parameters: (formal_parameters
+            (required_parameter
+              pattern: (identifier)
+              type: (type_annotation
+                (predefined_type)))))
+        (public_field_definition
+          name: (property_identifier)
+          type: (type_annotation
+            (predefined_type)))
+        (method_signature
+          name: (property_identifier)
+          parameters: (formal_parameters)
+          return_type: (type_annotation
+            (predefined_type))))))
+  (ambient_declaration
+    (module
+      name: (nested_identifier
+        object: (identifier)
+        property: (property_identifier))
+      body: (statement_block
+        (export_statement
+          declaration: (variable_declaration
+            (variable_declarator
+              name: (identifier)))))))
+  (empty_statement)
+  (ambient_declaration
+    (module
+      name: (identifier)
+      body: (statement_block
+        (break_statement)
+        (continue_statement)
+        (debugger_statement)
+        (do_statement
+          body: (statement_block)
+          condition: (parenthesized_expression
+            (true)))
+        (for_in_statement
+          left: (identifier)
+          right: (null)
+          body: (statement_block))
+        (for_statement
+          initializer: (empty_statement)
+          condition: (empty_statement)
+          body: (statement_block))
+        (if_statement
+          condition: (parenthesized_expression
+            (true))
+          consequence: (statement_block)
+          alternative: (else_clause
+            (statement_block)))
+        (expression_statement
+          (number))
+        (return_statement)
+        (switch_statement
+          value: (parenthesized_expression
+            (identifier))
+          body: (switch_body
+            (switch_case
+              value: (number)
+              body: (break_statement))
+            (switch_default
+              body: (break_statement))))
+        (throw_statement
+          (string
+            (string_fragment)))
+        (try_statement
+          body: (statement_block)
+          handler: (catch_clause
+            parameter: (identifier)
+            body: (statement_block))
+          finalizer: (finally_clause
+            body: (statement_block)))))))
+
+==================================================
+Exception handling
+==================================================
+
+try {}
+catch (e: unknown) {}
+finally {}
+
+---
+
+(program
+  (try_statement
+    body: (statement_block)
+    handler: (catch_clause
+      parameter: (identifier)
+      type: (type_annotation
+        (predefined_type))
+      body: (statement_block))
+    finalizer: (finally_clause
+      body: (statement_block))))
+
+==================================================
+Flow-style ambient class declarations with commas
+==================================================
+
+declare interface IFoo {
+  bar(): number,
+  baz(): IBaz,
+}
+
+declare class Foo {
+  bar(): number,
+  baz(): Baz,
+}
+
+---
+
+(program
+  (ambient_declaration
+    (interface_declaration
+      (type_identifier)
+      (interface_body
+        (method_signature
+          (property_identifier)
+          (formal_parameters)
+          (type_annotation
+            (predefined_type)))
+        (method_signature
+          (property_identifier)
+          (formal_parameters)
+          (type_annotation
+            (type_identifier))))))
+  (ambient_declaration
+    (class_declaration
+      (type_identifier)
+      (class_body
+        (method_signature
+          (property_identifier)
+          (formal_parameters)
+          (type_annotation
+            (predefined_type)))
+        (method_signature
+          (property_identifier)
+          (formal_parameters)
+          (type_annotation
+            (type_identifier)))))))
+
+==================================
+Flow module.exports declarations
+==================================
+
+declare module.exports: {
+  foo: string;
+}
+
+---
+
+(program
+  (ambient_declaration
+    (property_identifier)
+    (object_type
+      (property_signature
+        (property_identifier)
+        (type_annotation
+          (predefined_type))))))
+
+==================================
+Ambient exports
+==================================
+
+export default function point(x: number, y: number) {
+    return { x, y };
+}
+
+// a comment
+
+export default class A {}
+
+export async function readFile(filename: string): Promise<Buffer>
+
+---
+
+(program
+  (export_statement
+    (function_declaration
+      (identifier)
+      (formal_parameters
+        (required_parameter
+          (identifier)
+          (type_annotation
+            (predefined_type)))
+        (required_parameter
+          (identifier)
+          (type_annotation
+            (predefined_type))))
+      (statement_block
+        (return_statement
+          (object
+            (shorthand_property_identifier)
+            (shorthand_property_identifier))))))
+  (comment)
+  (export_statement
+    (class_declaration
+      (type_identifier)
+      (class_body)))
+  (export_statement
+    (function_signature
+      (identifier)
+      (formal_parameters
+        (required_parameter
+          (identifier)
+          (type_annotation
+            (predefined_type))))
+      (type_annotation
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (type_identifier)))))))
+
+==================================
+Typeof types
+==================================
+
+declare class Linter {
+    static findConfiguration: typeof findConfiguration;
+}
+
+---
+
+(program
+  (ambient_declaration
+    (class_declaration
+      (type_identifier)
+      (class_body
+        (public_field_definition
+          (property_identifier)
+          (type_annotation
+            (type_query
+              (identifier))))))))
+
+==================================
+Export assignments
+==================================
+
+export = Linter;
+export = {};
+
+---
+
+(program
+  (export_statement
+    (identifier))
+  (export_statement
+    (object)))
+
+==================================
+Import aliases
+==================================
+
+import r = X.N;
+
+---
+
+(program
+  (import_alias
+    (identifier)
+    (nested_identifier
+      (identifier)
+      (property_identifier))))
+
+==================================
+Import aliases in modules
+==================================
+
+module C {
+  import r = X.N;
+}
+
+---
+
+(program
+  (module
+    (identifier)
+    (statement_block
+      (import_alias
+        (identifier)
+        (nested_identifier
+          (identifier)
+          (property_identifier))))))
+
+==================================
+Export import aliases
+==================================
+
+module M {
+    export module N {
+    }
+    export import X = N;
+}
+
+---
+
+(program
+  (module
+    (identifier)
+    (statement_block
+      (export_statement
+        (module
+          (identifier)
+          (statement_block)))
+      (export_statement
+        (import_alias
+          (identifier)
+          (identifier))))))
+
+==================================
+Property signatures with accessibility modifiers
+==================================
+
+export interface IAppState {
+  public readonly users: ReadonlyArray<User>
+}
+
+export class CloningRepository {
+  public readonly id = CloningRepositoryID++
+}
+
+
+---
+
+(program
+  (export_statement
+    (interface_declaration
+      (type_identifier)
+      (interface_body
+        (property_signature
+          (accessibility_modifier)
+          (property_identifier)
+          (type_annotation
+            (generic_type
+              (type_identifier)
+              (type_arguments
+                (type_identifier))))))))
+  (export_statement
+    (class_declaration
+      (type_identifier)
+      (class_body
+        (public_field_definition
+          (accessibility_modifier)
+          (property_identifier)
+          (update_expression
+            (identifier)))))))
+
+==================================
+Ambient type declarations
+==================================
+
+declare type IndexableType = string | number | Date | Array<string | number | Date>;
+
+---
+
+(program
+  (ambient_declaration
+    (type_alias_declaration
+      (type_identifier)
+      (union_type
+        (union_type
+          (union_type
+            (predefined_type)
+            (predefined_type))
+          (type_identifier))
+        (generic_type
+          (type_identifier)
+          (type_arguments
+            (union_type
+              (union_type
+                (predefined_type)
+                (predefined_type))
+              (type_identifier))))))))
+
+==================================
+Ambient module declarations
+==================================
+
+module Promise {
+    var on: {}
+    export function resolve<R>(value?: Thenable<R>): Promise<R>;
+}
+
+declare module "example"
+
+declare module "example" { }
+
+---
+
+(program
+  (module
+    (identifier)
+    (statement_block
+      (variable_declaration
+        (variable_declarator
+          (identifier)
+          (type_annotation
+            (object_type))))
+      (export_statement
+        (function_signature
+          (identifier)
+          (type_parameters
+            (type_parameter
+              (type_identifier)))
+          (formal_parameters
+            (optional_parameter
+              (identifier)
+              (type_annotation
+                (generic_type
+                  (type_identifier)
+                  (type_arguments
+                    (type_identifier))))))
+          (type_annotation
+            (generic_type
+              (type_identifier)
+              (type_arguments
+                (type_identifier))))))))
+  (ambient_declaration
+    (module
+      (string
+        (string_fragment))))
+  (ambient_declaration
+    (module
+      (string
+        (string_fragment))
+      (statement_block))))
+
+=================================
+Accessibility modifiers as pair keywords
+=================================
+
+x = { name, description, private: private_ }
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (object
+        (shorthand_property_identifier)
+        (shorthand_property_identifier)
+        (pair
+          (property_identifier)
+          (identifier))))))
+
+=================================
+Type casts
+=================================
+
+foo as any as Array<number>
+bar satisfies number[]
+"foobar" as const
+
+---
+
+(program
+  (expression_statement
+    (as_expression
+      (as_expression
+        (identifier)
+        (predefined_type))
+      (generic_type
+        (type_identifier)
+        (type_arguments
+          (predefined_type)))))
+  (expression_statement
+    (satisfies_expression
+      (identifier)
+      (array_type
+        (predefined_type))))
+  (expression_statement
+    (as_expression
+      (string
+        (string_fragment)))))
+
+=================================
+Ambient export function declarations
+=================================
+
+export interface Foo {
+  export function OrderedMap<K, V>(iter: Iterable.Keyed<K, V>): OrderedMap<K, V>;
+}
+
+---
+
+(program
+  (export_statement
+    (interface_declaration
+      (type_identifier)
+      (interface_body
+        (export_statement
+          (function_signature
+            (identifier)
+            (type_parameters
+              (type_parameter
+                (type_identifier))
+              (type_parameter
+                (type_identifier)))
+            (formal_parameters
+              (required_parameter
+                (identifier)
+                (type_annotation
+                  (generic_type
+                    (nested_type_identifier
+                      (identifier)
+                      (type_identifier))
+                    (type_arguments
+                      (type_identifier)
+                      (type_identifier))))))
+            (type_annotation
+              (generic_type
+                (type_identifier)
+                (type_arguments
+                  (type_identifier)
+                  (type_identifier))))))))))
+
+=================================
+Ambient type alias declarations in namespaces
+=================================
+
+declare namespace moment {
+  type formatFunction = () => string;
+
+  export var x: string;
+  export class foo {
+
+  }
+  export function utc(): Moment;
+  export const enum Blah { Blaz, Bloz, Bleez }
+}
+
+---
+
+(program
+  (ambient_declaration
+    (internal_module
+      (identifier)
+      (statement_block
+        (type_alias_declaration
+          (type_identifier)
+          (function_type
+            (formal_parameters)
+            (predefined_type)))
+        (export_statement
+          (variable_declaration
+            (variable_declarator
+              (identifier)
+              (type_annotation
+                (predefined_type)))))
+        (export_statement
+          (class_declaration
+            (type_identifier)
+            (class_body)))
+        (export_statement
+          (function_signature
+            (identifier)
+            (formal_parameters)
+            (type_annotation
+              (type_identifier))))
+        (export_statement
+          (enum_declaration
+            (identifier)
+            (enum_body
+              (property_identifier)
+              (property_identifier)
+              (property_identifier))))))))
+
+=================================
+Export interfaces in namespaces
+=================================
+
+declare namespace Foo {
+  export interface Bar {
+  }
+}
+
+---
+
+(program
+  (ambient_declaration
+    (internal_module
+      (identifier)
+      (statement_block
+        (export_statement
+          (interface_declaration
+            (type_identifier)
+            (interface_body)))))))
+
+=================================
+Namespaces as internal modules
+=================================
+
+namespace Foo {
+}
+
+namespace Bar {
+  var x;
+}
+
+---
+
+(program
+  (expression_statement
+    (internal_module
+      (identifier)
+      (statement_block)))
+  (expression_statement
+    (internal_module
+      (identifier)
+      (statement_block
+        (variable_declaration
+          (variable_declarator
+            (identifier)))))))
+
+===========================================
+Method declarations with keywords as names
+===========================================
+
+class Foo {
+  private async() {};
+  get(): Result {};
+  private set(plugin) {};
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (method_definition
+        (accessibility_modifier)
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (type_annotation
+          (type_identifier))
+        (statement_block))
+      (method_definition
+        (accessibility_modifier)
+        (property_identifier)
+        (formal_parameters
+          (required_parameter
+            (identifier)))
+        (statement_block)))))
+
+=======================================
+Classes with method signatures
+=======================================
+
+class Foo {
+  public async waitFor<T>(func: () => T | Promise<T | undefined>, accept?: (result: T) => boolean | Promise<boolean>, timeoutMessage?: string, retryCount?: number): Promise<T>;
+
+  public readonly async bar?<T>();
+  private static bar();
+  private static async bar(): T;
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (method_signature
+        (accessibility_modifier)
+        (property_identifier)
+        (type_parameters
+          (type_parameter
+            (type_identifier)))
+        (formal_parameters
+          (required_parameter
+            (identifier)
+            (type_annotation
+              (function_type
+                (formal_parameters)
+                (union_type
+                  (type_identifier)
+                  (generic_type
+                    (type_identifier)
+                    (type_arguments
+                      (union_type
+                        (type_identifier)
+                        (literal_type
+                          (undefined)))))))))
+          (optional_parameter
+            (identifier)
+            (type_annotation
+              (function_type
+                (formal_parameters
+                  (required_parameter
+                    (identifier)
+                    (type_annotation
+                      (type_identifier))))
+                (union_type
+                  (predefined_type)
+                  (generic_type
+                    (type_identifier)
+                    (type_arguments
+                      (predefined_type)))))))
+          (optional_parameter
+            (identifier)
+            (type_annotation
+              (predefined_type)))
+          (optional_parameter
+            (identifier)
+            (type_annotation
+              (predefined_type))))
+        (type_annotation
+          (generic_type
+            (type_identifier)
+            (type_arguments
+              (type_identifier)))))
+      (method_signature
+        (accessibility_modifier)
+        (property_identifier)
+        (type_parameters
+          (type_parameter
+            (type_identifier)))
+        (formal_parameters))
+      (method_signature
+        (accessibility_modifier)
+        (property_identifier)
+        (formal_parameters))
+      (method_signature
+        (accessibility_modifier)
+        (property_identifier)
+        (formal_parameters)
+        (type_annotation
+          (type_identifier))))))
+
+=======================================
+Classes with property names as strings or numbers
+=======================================
+
+class Foo {
+  static 2: string;
+  public static 2: string = 'string';
+  public static readonly 'hello'?: int = 'string';
+  static readonly 'hello'?: int = 'string';
+  readonly 'hello'?: int = 'string';
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (public_field_definition
+        (number)
+        (type_annotation
+          (predefined_type)))
+      (public_field_definition
+        (accessibility_modifier)
+        (number)
+        (type_annotation
+          (predefined_type))
+        (string
+          (string_fragment)))
+      (public_field_definition
+        (accessibility_modifier)
+        (string
+          (string_fragment))
+        (type_annotation
+          (type_identifier))
+        (string
+          (string_fragment)))
+      (public_field_definition
+        (string
+          (string_fragment))
+        (type_annotation
+          (type_identifier))
+        (string
+          (string_fragment)))
+      (public_field_definition
+        (string
+          (string_fragment))
+        (type_annotation
+          (type_identifier))
+        (string
+          (string_fragment))))))
+
+===========================================================
+Classes with decorator calls that have type arguments
+===========================================================
+
+class Foo {
+  @bar<T>()
+  method() {
+  }
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (decorator
+        (call_expression
+          (identifier)
+          (type_arguments
+            (type_identifier))
+          (arguments)))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block)))))
+
+=======================================
+Classes with decorators
+=======================================
+
+@baz @bam class Foo {
+  @foo static 2: string;
+  @bar.buzz(grue) public static 2: string = 'string';
+  @readonly readonly 'hello'?: int = 'string';
+  @readonly fooBar(@required param: any, @optional param2?: any) {
+  }
+}
+
+---
+
+(program
+  (class_declaration
+    (decorator
+      (identifier))
+    (decorator
+      (identifier))
+    (type_identifier)
+    (class_body
+      (public_field_definition
+        (decorator
+          (identifier))
+        (number)
+        (type_annotation
+          (predefined_type)))
+      (public_field_definition
+        (decorator
+          (call_expression
+            (member_expression
+              (identifier)
+              (property_identifier))
+            (arguments
+              (identifier))))
+        (accessibility_modifier)
+        (number)
+        (type_annotation
+          (predefined_type))
+        (string
+          (string_fragment)))
+      (public_field_definition
+        (decorator
+          (identifier))
+        (string
+          (string_fragment))
+        (type_annotation
+          (type_identifier))
+        (string
+          (string_fragment)))
+      (decorator
+        (identifier))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (required_parameter
+            (decorator
+              (identifier))
+            (identifier)
+            (type_annotation
+              (predefined_type)))
+          (optional_parameter
+            (decorator
+              (identifier))
+            (identifier)
+            (type_annotation
+              (predefined_type))))
+        (statement_block)))))
+
+=======================================
+Classes with methods with and without trailing semicolons on one line
+=======================================
+
+class Foo<Bar> extends Baz { bar = 5; static one(a) { return a; }; two(b) { return b; } three(c) { return c; } }
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier)))
+    (class_heritage
+      (extends_clause
+        (identifier)))
+    (class_body
+      (public_field_definition
+        (property_identifier)
+        (number))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (required_parameter
+            (identifier)))
+        (statement_block
+          (return_statement
+            (identifier))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (required_parameter
+            (identifier)))
+        (statement_block
+          (return_statement
+            (identifier))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (required_parameter
+            (identifier)))
+        (statement_block
+          (return_statement
+            (identifier)))))))
+
+=======================================
+Classes with static blocks
+=======================================
+
+class Foo {
+  static {
+    this.#bar = '';
+  }
+  static {
+    this.baz();
+  }
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (class_static_block
+        (statement_block
+          (expression_statement
+            (assignment_expression
+              (member_expression
+                (this)
+                (private_property_identifier))
+              (string)))))
+      (class_static_block
+        (statement_block
+          (expression_statement
+            (call_expression
+              (member_expression
+                (this)
+                (property_identifier))
+              (arguments))))))))
+
+=======================================
+Global namespace declarations
+=======================================
+
+declare global {
+}
+
+---
+
+(program
+  (ambient_declaration
+    (statement_block)))
+
+=======================================
+Abstract classes
+=======================================
+
+abstract class Foo {
+}
+
+abstract class Animal {
+    readonly abstract prop: string;
+    requiredProp!: string;
+    abstract makeSound(): void;
+    abstract get readonlyProp(): string;
+    protected abstract readonlyProp?(): string;
+    move(): void {
+        console.log("roaming the earth...");
+    }
+}
+
+@bar
+abstract class Foo {
+}
+
+---
+
+(program
+  (abstract_class_declaration
+    name: (type_identifier)
+    body: (class_body))
+  (abstract_class_declaration
+    name: (type_identifier)
+    body: (class_body
+      (public_field_definition
+        name: (property_identifier)
+        type: (type_annotation
+          (predefined_type)))
+      (public_field_definition
+        name: (property_identifier)
+        type: (type_annotation
+          (predefined_type)))
+      (abstract_method_signature
+        name: (property_identifier)
+        parameters: (formal_parameters)
+        return_type: (type_annotation
+          (predefined_type)))
+      (abstract_method_signature
+        name: (property_identifier)
+        parameters: (formal_parameters)
+        return_type: (type_annotation
+          (predefined_type)))
+      (abstract_method_signature
+        (accessibility_modifier)
+        name: (property_identifier)
+        parameters: (formal_parameters)
+        return_type: (type_annotation
+          (predefined_type)))
+      (method_definition
+        name: (property_identifier)
+        parameters: (formal_parameters)
+        return_type: (type_annotation
+          (predefined_type))
+        body: (statement_block
+          (expression_statement
+            (call_expression
+              function: (member_expression
+                object: (identifier)
+                property: (property_identifier))
+              arguments: (arguments
+                (string
+                  (string_fragment)))))))))
+  (abstract_class_declaration
+    decorator: (decorator
+      (identifier))
+    name: (type_identifier)
+    body: (class_body)))
+
+=======================================
+Decorator with parenthesized expression
+=======================================
+
+class C {
+    @(super.decorate)
+    method2() { }
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (decorator
+        (parenthesized_expression
+          (member_expression
+            (identifier)
+            (property_identifier))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block)))))
+
+==================================
+Index type queries
+==================================
+
+export type Extracted = keyof Pick<Base, "id">
+
+---
+
+(program
+  (export_statement
+    declaration: (type_alias_declaration
+      name: (type_identifier)
+      value: (index_type_query
+        (generic_type
+          name: (type_identifier)
+          type_arguments: (type_arguments
+            (type_identifier)
+            (literal_type
+              (string
+                (string_fragment)))))))))
+
+==================================
+Definite assignment assertions
+==================================
+
+var a!: b;
+let a!: b;
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (type_identifier))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (type_annotation
+        (type_identifier)))))
+
+====================================
+Top-level exports
+====================================
+
+export default abstract class C { }
+export default class C { }
+export class C { }
+export default interface I { }
+export interface I { }
+
+---
+
+(program
+  (export_statement
+    (abstract_class_declaration
+      (type_identifier)
+      (class_body)))
+  (export_statement
+    (class_declaration
+      (type_identifier)
+      (class_body)))
+  (export_statement
+    (class_declaration
+      (type_identifier)
+      (class_body)))
+  (export_statement
+    (interface_declaration
+      (type_identifier)
+      (interface_body)))
+  (export_statement
+    (interface_declaration
+      (type_identifier)
+      (interface_body))))
+
+=======================================
+Classes with generic parameters
+=======================================
+
+class A<
+  B,
+  C,
+> {}
+
+class D extends A<
+  X,
+  Y,
+> {}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (type_parameters
+      (type_parameter
+        (type_identifier))
+      (type_parameter
+        (type_identifier)))
+    (class_body))
+  (class_declaration
+    (type_identifier)
+    (class_heritage
+      (extends_clause
+        (identifier)
+        (type_arguments
+          (type_identifier)
+          (type_identifier))))
+    (class_body)))
+
+=======================================
+Classes with extensions
+=======================================
+
+class A extends B<C>(D) implements C {}
+export class A extends B<C>(D) implements C {}
+
+class A extends B<C>(D)<E> implements C {}
+export class A extends B<C>(D)<E> implements C {}
+
+export class A extends B<C, D> implements C {}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_heritage
+      (extends_clause
+        (call_expression
+          (identifier)
+          (type_arguments
+            (type_identifier))
+          (arguments
+            (identifier))))
+      (implements_clause
+        (type_identifier)))
+    (class_body))
+  (export_statement
+    (class_declaration
+      (type_identifier)
+      (class_heritage
+        (extends_clause
+          (call_expression
+            (identifier)
+            (type_arguments
+              (type_identifier))
+            (arguments
+              (identifier))))
+        (implements_clause
+          (type_identifier)))
+      (class_body)))
+  (class_declaration
+    (type_identifier)
+    (class_heritage
+      (extends_clause
+        (call_expression
+          (identifier)
+          (type_arguments
+            (type_identifier))
+          (arguments
+            (identifier)))
+        (type_arguments
+          (type_identifier)))
+      (implements_clause
+        (type_identifier)))
+    (class_body))
+  (export_statement
+    (class_declaration
+      (type_identifier)
+      (class_heritage
+        (extends_clause
+          (call_expression
+            (identifier)
+            (type_arguments
+              (type_identifier))
+            (arguments
+              (identifier)))
+          (type_arguments
+            (type_identifier)))
+        (implements_clause
+          (type_identifier)))
+      (class_body)))
+  (export_statement
+    (class_declaration
+      (type_identifier)
+      (class_heritage
+        (extends_clause
+          (identifier)
+          (type_arguments
+            (type_identifier)
+            (type_identifier)))
+        (implements_clause
+          (type_identifier)))
+      (class_body))))
+
+==========================================================================
+Semicolon is not automatically inserted for method definitions with a body
+==========================================================================
+
+class Foo {
+  public bar()
+  {
+  }
+}
+
+---
+
+(program
+  (class_declaration
+    (type_identifier)
+    (class_body
+      (method_definition
+        (accessibility_modifier)
+        (property_identifier)
+        (formal_parameters)
+        (statement_block)))))
+
+=====================
+Override modifier
+=====================
+
+abstract class Foo {
+  abstract baz(): void;
+}
+
+class Bar extends Foo {
+  override baz() {}
+}
+
+---
+
+(program
+  (abstract_class_declaration
+    name: (type_identifier)
+    body: (class_body
+      (abstract_method_signature
+        name: (property_identifier)
+        parameters: (formal_parameters)
+        return_type: (type_annotation
+          (predefined_type)))))
+  (class_declaration
+    name: (type_identifier)
+    (class_heritage
+      (extends_clause
+        value: (identifier)))
+    body: (class_body
+      (method_definition
+        (override_modifier)
+        name: (property_identifier)
+        parameters: (formal_parameters)
+        body: (statement_block)))))

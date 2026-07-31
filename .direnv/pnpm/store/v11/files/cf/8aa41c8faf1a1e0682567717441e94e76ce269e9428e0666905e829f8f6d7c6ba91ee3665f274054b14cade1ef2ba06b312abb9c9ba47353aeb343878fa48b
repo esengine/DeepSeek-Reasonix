@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+
+  <head>
+    <script src="../dist/svg-pan-zoom.js"></script>
+  </head>
+
+  <body>
+    <h1>Demo for svg-pan-zoom: Sinchronized pan and zoom</h1>
+    <embed id="demo-tiger" type="image/svg+xml" style="width: 400px; height: 400px; border:1px solid black; float: left;" src="tiger.svg" />
+    <embed id="demo-tiger2" type="image/svg+xml" style="width: 400px; height: 400px; border:1px solid red; " src="tiger.svg" />
+
+    <script>
+      // Don't use window.onLoad like this in production, because it can only listen to one function.
+      window.onload = function() {
+        // Expose variable to use for testing
+        window.zoomTiger = svgPanZoom('#demo-tiger', {
+          zoomEnabled: true,
+          controlIconsEnabled: true,
+          // Uncomment this in order to get Y asis synchronized pan
+          beforePan: function(oldP, newP) {return {y:false}},
+        });
+
+        // Expose variable to use for testing
+        window.zoomTiger2 = svgPanZoom('#demo-tiger2', {
+          zoomEnabled: true,
+          controlIconsEnabled: true,
+        });
+
+        zoomTiger.setOnZoom(function(level){
+          zoomTiger2.zoom(level)
+          zoomTiger2.pan(zoomTiger.getPan())
+        })
+
+        zoomTiger.setOnPan(function(point){
+          zoomTiger2.pan(point)
+        })
+
+        zoomTiger2.setOnZoom(function(level){
+          zoomTiger.zoom(level)
+          zoomTiger.pan(zoomTiger2.getPan())
+        })
+
+        zoomTiger2.setOnPan(function(point){
+          zoomTiger.pan(point)
+        })
+      };
+    </script>
+
+  </body>
+
+</html>

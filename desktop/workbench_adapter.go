@@ -80,7 +80,7 @@ type WorkbenchTargetStateView struct {
 	HostID      string            `json:"hostId,omitempty"`
 	Workspace   string            `json:"workspace,omitempty"`
 	IdentityGen uint64            `json:"identityGen"`
-	RequestSeq  uint64            `json:"requestSeq,omitempty"`
+	RequestSeq  uint64            `json:"requestSeq"`
 	Error       string            `json:"error,omitempty"`
 	Reconnect   target.RemoteHint `json:"reconnect"`
 }
@@ -689,11 +689,10 @@ func localProviderRefs(cfg *config.Config) []string {
 	if cfg == nil {
 		return nil
 	}
-	access := providerAccessSet(cfg.Desktop.ProviderAccess)
 	refs := make([]string, 0, len(cfg.Providers))
 	for i := range cfg.Providers {
 		pe := &cfg.Providers[i]
-		if !modelProviderAccessAllowed(access, pe.Name) || !pe.Configured() {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, pe.Name) || !pe.Configured() {
 			continue
 		}
 		models := pe.ChatModelList()

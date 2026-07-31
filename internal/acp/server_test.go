@@ -523,7 +523,11 @@ func drainPrompt(t *testing.T, c *rpcClient, promptCh chan frame) ([]frame, fram
 					return notifs, resp
 				}
 			}
-		case <-time.After(2 * time.Second):
+		// A full prompt crosses the ACP server, controller, agent, and transcript
+		// persistence path. Loaded Windows release runners can leave that
+		// asynchronous pipeline idle for more than two seconds, so keep a
+		// generous but bounded responsiveness limit for the end-to-end helper.
+		case <-time.After(5 * time.Second):
 			t.Fatal("session/prompt: timed out")
 		}
 	}

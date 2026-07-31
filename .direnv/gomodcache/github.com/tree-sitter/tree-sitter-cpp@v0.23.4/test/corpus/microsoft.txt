@@ -1,0 +1,32 @@
+================================
+declaration specs
+================================
+
+struct __declspec(dllexport) s2
+{
+};
+
+union __declspec(noinline) u2 {
+};
+
+class __declspec(uuid) u2 {
+};
+
+---
+
+(translation_unit
+  (struct_specifier
+    (ms_declspec_modifier
+      (identifier))
+    name: (type_identifier)
+    body: (field_declaration_list))
+  (union_specifier
+    (ms_declspec_modifier
+      (identifier))
+    name: (type_identifier)
+    body: (field_declaration_list))
+  (class_specifier
+    (ms_declspec_modifier
+      (identifier))
+    name: (type_identifier)
+    body: (field_declaration_list)))

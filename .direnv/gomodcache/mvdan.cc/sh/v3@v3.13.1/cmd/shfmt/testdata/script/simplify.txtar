@@ -1,0 +1,24 @@
+exec shfmt -s input.sh
+cmp stdout input.sh.simplify-golden
+
+exec shfmt --simplify input.sh
+cmp stdout input.sh.simplify-golden
+
+exec shfmt -mn input.sh
+cmp stdout input.sh.minify-golden
+
+exec shfmt --minify input.sh
+cmp stdout input.sh.minify-golden
+
+-- input.sh --
+foo() {
+	(( $bar ))
+}
+-- input.sh.simplify-golden --
+foo() {
+	((bar))
+}
+-- input.sh.minify-golden --
+foo(){
+((bar))
+}

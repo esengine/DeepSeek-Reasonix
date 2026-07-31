@@ -1,0 +1,620 @@
+================================================================================
+Returning braced initializer lists
+================================================================================
+
+T main() {
+  return {0, 5};
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (type_identifier)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (return_statement
+        (initializer_list
+          (number_literal)
+          (number_literal))))))
+
+================================================================================
+Range-based for loops
+================================================================================
+
+T main() {
+  for (Value &value : values) {
+    cout << value;
+  }
+
+  for (const auto &value : values) {
+    cout << value;
+  }
+
+  for (const auto &value : {1, 2, 3}) {
+    cout << value;
+  }
+
+  for (auto n = v.size(); auto i : v) {
+    cout << --n + i << ' ';
+  }
+
+  for (using elem_t = T::value_type; elem_t i : v) {
+    cout << --n + i << ' ';
+  }
+
+  for (int x; int v : {1}) {}
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    type: (type_identifier)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement
+      (for_range_loop
+        type: (type_identifier)
+        declarator: (reference_declarator
+          (identifier))
+        right: (identifier)
+        body: (compound_statement
+          (expression_statement
+            (binary_expression
+              left: (identifier)
+              right: (identifier)))))
+      (for_range_loop
+        (type_qualifier)
+        type: (placeholder_type_specifier
+          (auto))
+        declarator: (reference_declarator
+          (identifier))
+        right: (identifier)
+        body: (compound_statement
+          (expression_statement
+            (binary_expression
+              left: (identifier)
+              right: (identifier)))))
+      (for_range_loop
+        (type_qualifier)
+        type: (placeholder_type_specifier
+          (auto))
+        declarator: (reference_declarator
+          (identifier))
+        right: (initializer_list
+          (number_literal)
+          (number_literal)
+          (number_literal))
+        body: (compound_statement
+          (expression_statement
+            (binary_expression
+              left: (identifier)
+              right: (identifier)))))
+      (for_range_loop
+        initializer: (init_statement
+          (declaration
+            type: (placeholder_type_specifier
+              (auto))
+            declarator: (init_declarator
+              declarator: (identifier)
+              value: (call_expression
+                function: (field_expression
+                  argument: (identifier)
+                  field: (field_identifier))
+                arguments: (argument_list)))))
+        type: (placeholder_type_specifier
+          (auto))
+        declarator: (identifier)
+        right: (identifier)
+        body: (compound_statement
+          (expression_statement
+            (binary_expression
+              left: (binary_expression
+                left: (identifier)
+                right: (binary_expression
+                  left: (update_expression
+                    argument: (identifier))
+                  right: (identifier)))
+              right: (char_literal
+                (character))))))
+      (for_range_loop
+        initializer: (init_statement
+          (alias_declaration
+            name: (type_identifier)
+            type: (type_descriptor
+              type: (qualified_identifier
+                scope: (namespace_identifier)
+                name: (type_identifier)))))
+        type: (type_identifier)
+        declarator: (identifier)
+        right: (identifier)
+        body: (compound_statement
+          (expression_statement
+            (binary_expression
+              left: (binary_expression
+                left: (identifier)
+                right: (binary_expression
+                  left: (update_expression
+                    argument: (identifier))
+                  right: (identifier)))
+              right: (char_literal
+                (character))))))
+      (for_range_loop
+        initializer: (init_statement
+          (declaration
+            type: (primitive_type)
+            declarator: (identifier)))
+        type: (primitive_type)
+        declarator: (identifier)
+        right: (initializer_list
+          (number_literal))
+        body: (compound_statement)))))
+
+================================================================================
+Constexpr if statements
+================================================================================
+
+T f() {
+  if constexpr (std::is_pointer_v<T>)
+    return *t;
+  else
+    return t;
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    type: (type_identifier)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement
+      (if_statement
+        condition: (condition_clause
+          value: (qualified_identifier
+            scope: (namespace_identifier)
+            name: (template_function
+              name: (identifier)
+              arguments: (template_argument_list
+                (type_descriptor
+                  type: (type_identifier))))))
+        consequence: (return_statement
+          (pointer_expression
+            argument: (identifier)))
+        alternative: (else_clause
+          (return_statement
+            (identifier)))))))
+
+================================================================================
+If statements with declarations
+================================================================================
+
+void f() {
+  if (const int x = foo()) { }
+  if (const int x { foo() }) { }
+  if (const int x = foo(); x != 0) { }
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    type: (primitive_type)
+    declarator: (function_declarator
+      declarator: (identifier)
+      parameters: (parameter_list))
+    body: (compound_statement
+      (if_statement
+        condition: (condition_clause
+          value: (declaration
+            (type_qualifier)
+            type: (primitive_type)
+            declarator: (identifier)
+            value: (call_expression
+              function: (identifier)
+              arguments: (argument_list))))
+        consequence: (compound_statement))
+      (if_statement
+        condition: (condition_clause
+          value: (declaration
+            (type_qualifier)
+            type: (primitive_type)
+            declarator: (identifier)
+            value: (initializer_list
+              (call_expression
+                function: (identifier)
+                arguments: (argument_list)))))
+        consequence: (compound_statement))
+      (if_statement
+        condition: (condition_clause
+          initializer: (init_statement
+            (declaration
+              (type_qualifier)
+              type: (primitive_type)
+              declarator: (init_declarator
+                declarator: (identifier)
+                value: (call_expression
+                  function: (identifier)
+                  arguments: (argument_list)))))
+          value: (binary_expression
+            left: (identifier)
+            right: (number_literal)))
+        consequence: (compound_statement)))))
+
+================================================================================
+Try/catch statements
+================================================================================
+
+void main() {
+  try {
+      f();
+  } catch (const std::overflow_error) {
+      // f() throws std::overflow_error (same type rule)
+  } catch (const exception &e) {
+      // f() throws std::logic_error (base class rule)
+  } catch (...) {
+      // f() throws std::string or int or any other unrelated type
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (try_statement
+        (compound_statement
+          (expression_statement
+            (call_expression
+              (identifier)
+              (argument_list))))
+        (catch_clause
+          (parameter_list
+            (parameter_declaration
+              (type_qualifier)
+              (qualified_identifier
+                (namespace_identifier)
+                (type_identifier))))
+          (compound_statement
+            (comment)))
+        (catch_clause
+          (parameter_list
+            (parameter_declaration
+              (type_qualifier)
+              (type_identifier)
+              (reference_declarator
+                (identifier))))
+          (compound_statement
+            (comment)))
+        (catch_clause
+          (parameter_list)
+          (compound_statement
+            (comment)))))))
+
+================================================================================
+Throw statements
+================================================================================
+
+void main() {
+     throw e;
+     throw x + 1;
+     throw "exception";
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (throw_statement
+        (identifier))
+      (throw_statement
+        (binary_expression
+          (identifier)
+          (number_literal)))
+      (throw_statement
+        (string_literal
+          (string_content))))))
+
+================================================================================
+Noexcept specifier
+================================================================================
+
+void foo() noexcept;
+void foo() noexcept(true);
+template<class T> T foo() noexcept(sizeof(T) < 4);
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list)
+      (noexcept)))
+  (declaration
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list)
+      (noexcept
+        (true))))
+  (template_declaration
+    (template_parameter_list
+      (type_parameter_declaration
+        (type_identifier)))
+    (declaration
+      (type_identifier)
+      (function_declarator
+        (identifier)
+        (parameter_list)
+        (noexcept
+          (binary_expression
+            (sizeof_expression
+              (parenthesized_expression
+                (identifier)))
+            (number_literal)))))))
+
+================================================================================
+Throw specifier
+================================================================================
+
+void foo() throw();
+void foo() throw(int);
+void foo() throw(std::string, char *);
+void foo() throw(float) { }
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (declaration
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list)
+      (throw_specifier)))
+  (declaration
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list)
+      (throw_specifier
+        (type_descriptor
+          (primitive_type)))))
+  (declaration
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list)
+      (throw_specifier
+        (type_descriptor
+          (qualified_identifier
+            (namespace_identifier)
+            (type_identifier)))
+        (type_descriptor
+          (primitive_type)
+          (abstract_pointer_declarator)))))
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list)
+      (throw_specifier
+        (type_descriptor
+          (primitive_type))))
+    (compound_statement)))
+
+================================================================================
+Assignment
+================================================================================
+
+a::b::c = 1;
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (expression_statement
+    (assignment_expression
+      (qualified_identifier
+        (namespace_identifier)
+        (qualified_identifier
+          (namespace_identifier)
+          (identifier)))
+      (number_literal))))
+
+================================================================================
+Attributes
+================================================================================
+
+void f() {
+  [[a]] switch (b) {
+   [[c]] case 1: {}
+  }
+  [[a]] while (true) {}
+  [[a]] if (true) {}
+  [[a]] for (auto x : y) {}
+  [[a]] for (;;) {}
+  [[a]] return;
+  [[a]] a;
+  [[a]];
+  [[a]] label: {}
+  [[a]] goto label;
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list))
+    (compound_statement
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (switch_statement
+          (condition_clause
+            (identifier))
+          (compound_statement
+            (attributed_statement
+              (attribute_declaration
+                (attribute
+                  (identifier)))
+              (case_statement
+                (number_literal)
+                (compound_statement))))))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (while_statement
+          (condition_clause
+            (true))
+          (compound_statement)))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (if_statement
+          (condition_clause
+            (true))
+          (compound_statement)))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (for_range_loop
+          (placeholder_type_specifier
+            (auto))
+          (identifier)
+          (identifier)
+          (compound_statement)))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (for_statement
+          (compound_statement)))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (return_statement))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (expression_statement
+          (identifier)))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (expression_statement))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (labeled_statement
+          (statement_identifier)
+          (compound_statement)))
+      (attributed_statement
+        (attribute_declaration
+          (attribute
+            (identifier)))
+        (goto_statement
+          (statement_identifier))))))
+
+================================================================================
+Coroutines
+================================================================================
+
+co_return 1;
+co_return;
+co_yield 1;
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (co_return_statement
+    (number_literal))
+  (co_return_statement)
+  (co_yield_statement
+    (number_literal)))
+
+================================================================================
+Switch statements
+================================================================================
+
+void foo(int a) {
+  switch (a) {
+    case 1:
+      for (auto i : vec) {}
+    case 2:
+      try {
+        // do something
+      } catch(...) {}
+      throw 1;
+    case 3:
+      co_return;
+    default:
+      co_yield a;
+  }
+}
+
+--------------------------------------------------------------------------------
+
+(translation_unit
+  (function_definition
+    (primitive_type)
+    (function_declarator
+      (identifier)
+      (parameter_list
+        (parameter_declaration
+          (primitive_type)
+          (identifier))))
+    (compound_statement
+      (switch_statement
+        (condition_clause
+          (identifier))
+        (compound_statement
+          (case_statement
+            (number_literal)
+            (for_range_loop
+              (placeholder_type_specifier
+                (auto))
+              (identifier)
+              (identifier)
+              (compound_statement)))
+          (case_statement
+            (number_literal)
+            (try_statement
+              (compound_statement
+                (comment))
+              (catch_clause
+                (parameter_list)
+                (compound_statement)))
+            (throw_statement
+              (number_literal)))
+          (case_statement
+            (number_literal)
+            (co_return_statement))
+          (case_statement
+            (co_yield_statement
+              (identifier))))))))

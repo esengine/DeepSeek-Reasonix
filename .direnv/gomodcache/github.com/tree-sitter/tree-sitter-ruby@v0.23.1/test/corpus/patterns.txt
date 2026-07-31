@@ -1,0 +1,382 @@
+================
+pattern matching
+================
+
+case expr
+  in 5 then true
+  else false
+end
+
+case expr
+  in x unless x < 0
+  then true
+  in x if x < 0
+  then true
+  else false
+end
+
+case expr
+  in 5
+  in 5,
+  in 1, 2
+  in 1, 2,
+  in 1, 2, 3
+  in 1, 2, 3,
+  in 1, 2, 3, *
+  in 1, *x, 3
+  in *
+  in *, 3, 4
+  in *, 3, *
+  in *a, 3, *b
+  in a:
+  in a: 5
+  in a: 5,
+  in a: 5, b:, **
+  in a: 5, b:, **map
+  in a: 5, b:, **nil
+  in **nil
+  in [5]
+  in [5,]
+  in [1, 2]
+  in [1, 2,]
+  in [1, 2, 3]
+  in [1, 2, 3,]
+  in [1, 2, 3, *]
+  in [1, *x, 3]
+  in [*]
+  in [*, 3, 4]
+  in [*, 3, *]
+  in [*a, 3, *b]
+  in {a:}
+  in {a: 5}
+  in {a: 5,}
+  in {a: 5, b:, **}
+  in {a: 5, b:, **map}
+  in {a: 5, b:, **nil}
+  in {**nil}
+  in {}
+  in []
+end
+
+-----
+
+(program
+  (case_match (identifier)
+    (in_clause
+      (integer)
+      (then (true))
+    )
+    (else (false)))
+  (case_match (identifier)
+    (in_clause
+      (identifier)
+      (unless_guard (binary (identifier) (integer)))
+      (then (true))
+    )
+    (in_clause
+      (identifier)
+      (if_guard (binary (identifier) (integer)))
+      (then (true))
+    )
+    (else (false))
+  )
+
+  (case_match (identifier)
+    (in_clause (integer))
+    (in_clause (array_pattern (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (integer)))
+    (in_clause (array_pattern (integer) (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (integer) (integer)))
+    (in_clause (array_pattern (integer) (integer) (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (integer) (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (splat_parameter (identifier)) (integer)))
+    (in_clause (array_pattern (splat_parameter)))
+    (in_clause (array_pattern (splat_parameter) (integer) (integer)))
+    (in_clause (find_pattern (splat_parameter) (integer) (splat_parameter)))
+    (in_clause (find_pattern (splat_parameter (identifier)) (integer) (splat_parameter (identifier))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer)) (keyword_pattern (hash_key_symbol)) (hash_splat_parameter)))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer)) (keyword_pattern (hash_key_symbol)) (hash_splat_parameter (identifier))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer)) (keyword_pattern (hash_key_symbol)) (hash_splat_nil)))
+    (in_clause (hash_pattern (hash_splat_nil)))
+    (in_clause (array_pattern (integer)))
+    (in_clause (array_pattern (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (integer)))
+    (in_clause (array_pattern (integer) (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (integer) (integer)))
+    (in_clause (array_pattern (integer) (integer) (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (integer) (integer) (splat_parameter)))
+    (in_clause (array_pattern (integer) (splat_parameter (identifier)) (integer)))
+    (in_clause (array_pattern (splat_parameter)))
+    (in_clause (array_pattern (splat_parameter) (integer) (integer)))
+    (in_clause (find_pattern (splat_parameter) (integer) (splat_parameter)))
+    (in_clause (find_pattern (splat_parameter (identifier)) (integer) (splat_parameter (identifier))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer)) (keyword_pattern (hash_key_symbol)) (hash_splat_parameter)))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer)) (keyword_pattern (hash_key_symbol)) (hash_splat_parameter (identifier))))
+    (in_clause (hash_pattern (keyword_pattern (hash_key_symbol) (integer)) (keyword_pattern (hash_key_symbol)) (hash_splat_nil)))
+    (in_clause (hash_pattern (hash_splat_nil)))
+    (in_clause (hash_pattern))
+    (in_clause (array_pattern))
+  )
+)
+
+=====================
+more pattern matching
+=====================
+
+case expr
+  in 5
+  in ^foo
+  in ^$foo
+  in ^@foo
+  in ^@@foo
+  in ^(1+1)
+  in ^(foo)
+  in ^(Foo::Bar)
+  in var
+  in "string"
+  in %w(foo bar)
+  in %i(foo bar)
+  in /.*abc[0-9]/
+  in 5 .. 10
+  in .. 10
+  in 5 ..
+  in 5 => x
+  in 5 | ^foo | var | "string"
+  in Foo
+  in Foo::Bar
+  in ::Foo::Bar
+  in (nil | self | true | false | __LINE__ | __FILE__ | __ENCODING__)
+  in -> x { x == 10 }
+  in :foo
+  in :"foo bar"
+  in -5 | +10
+end
+
+--------
+
+ (program
+   (case_match (identifier)
+     (in_clause (integer))
+     (in_clause (variable_reference_pattern (identifier)))
+     (in_clause (variable_reference_pattern (global_variable)))
+     (in_clause (variable_reference_pattern (instance_variable)))
+     (in_clause (variable_reference_pattern (class_variable)))
+     (in_clause (expression_reference_pattern (binary (integer) (integer))))
+     (in_clause (expression_reference_pattern (identifier)))
+     (in_clause (expression_reference_pattern (scope_resolution (constant) (constant))))
+     (in_clause (identifier))
+     (in_clause (string (string_content)))
+     (in_clause (string_array (bare_string (string_content)) (bare_string (string_content))))
+     (in_clause (symbol_array (bare_symbol (string_content)) (bare_symbol (string_content))))
+     (in_clause (regex (string_content)))
+     (in_clause (range (integer) (integer)))
+     (in_clause (range (integer)))
+     (in_clause (range (integer)))
+     (in_clause (as_pattern (integer) (identifier)))
+     (in_clause
+       (alternative_pattern
+         (integer)
+         (variable_reference_pattern (identifier))
+         (identifier)
+         (string (string_content))
+       )
+     )
+     (in_clause (constant))
+     (in_clause (scope_resolution (constant) (constant)))
+     (in_clause (scope_resolution (scope_resolution (constant)) (constant)))
+     (in_clause
+       (parenthesized_pattern
+         (alternative_pattern
+           (nil)
+           (self)
+           (true)
+           (false)
+           (line)
+           (file)
+           (encoding)
+         )
+       )
+     )
+     (in_clause (lambda (lambda_parameters (identifier)) (block (block_body (binary (identifier) (integer))))))
+     (in_clause (simple_symbol))
+     (in_clause (delimited_symbol (string_content)))
+     (in_clause
+       (alternative_pattern
+         (unary (integer))
+         (unary (integer))
+       )
+     )
+   )
+)
+
+==============
+array patterns
+==============
+case expr
+  in [];
+  in [x];
+  in [x, ];
+  in Foo::Bar[];
+  in Foo();
+  in Bar(*);
+  in Bar(a, b, *c, d, e);
+end
+
+--------------
+
+(program
+  (case_match (identifier)
+    (in_clause (array_pattern))
+    (in_clause (array_pattern (identifier)))
+    (in_clause (array_pattern (identifier) (splat_parameter)))
+    (in_clause (array_pattern (scope_resolution (constant) (constant))))
+    (in_clause (array_pattern (constant)))
+    (in_clause (array_pattern (constant) (splat_parameter)))
+    (in_clause
+      (array_pattern
+        (constant)
+        (identifier)
+        (identifier)
+        (splat_parameter (identifier))
+        (identifier)
+        (identifier)
+      )
+    )
+  )
+)
+
+=============
+find patterns
+=============
+
+case expr
+  in [*, x, *];
+  in [*x, 1, 2, *y];
+  in Foo::Bar[*, 1, *];
+  in Foo(*, Bar, *);
+end
+
+-------------
+
+(program
+  (case_match (identifier)
+    (in_clause (find_pattern (splat_parameter) (identifier) (splat_parameter)))
+    (in_clause (find_pattern (splat_parameter (identifier)) (integer) (integer) (splat_parameter (identifier))))
+    (in_clause (find_pattern
+       (scope_resolution (constant) (constant))
+       (splat_parameter)
+       (integer)
+       (splat_parameter))
+    )
+    (in_clause (find_pattern (constant) (splat_parameter) (constant) (splat_parameter)))
+  )
+)
+
+=============
+hash patterns
+=============
+
+case expr
+  in {};
+  in {x:};
+  in Foo::Bar[ x:1 ];
+  in Foo::Bar[ x:1, a:, **rest ];
+  in Foo( y:);
+  in Bar( ** );
+  in Bar( a: 1, **nil);
+end
+
+-------------
+
+(program (case_match (identifier)
+  (in_clause (hash_pattern))
+  (in_clause (hash_pattern (keyword_pattern (hash_key_symbol))))
+  (in_clause (hash_pattern
+        (scope_resolution (constant) (constant))
+        (keyword_pattern (hash_key_symbol) (integer))
+  ))
+  (in_clause (hash_pattern
+    (scope_resolution (constant) (constant))
+    (keyword_pattern (hash_key_symbol) (integer))
+    (keyword_pattern (hash_key_symbol))
+    (hash_splat_parameter (identifier))
+  ))
+  (in_clause (hash_pattern (constant) (keyword_pattern (hash_key_symbol))))
+  (in_clause (hash_pattern (constant) (hash_splat_parameter)))
+  (in_clause (hash_pattern (constant) (keyword_pattern (hash_key_symbol) (integer)) (hash_splat_nil)))
+  )
+)
+
+=====================
+pattern matching with fancy string literals
+=====================
+
+case expr
+  in "string";
+  in `ls`;
+  in <<"DOC" then end
+some text
+DOC
+
+---
+
+(program
+  (case_match
+    value: (identifier)
+    clauses: (in_clause
+      pattern: (string
+        (string_content)))
+    clauses: (in_clause
+      pattern: (subshell
+        (string_content)))
+    clauses: (in_clause
+      pattern: (heredoc_beginning)
+      body: (then)))
+  (heredoc_body
+    (heredoc_content)
+    (heredoc_end)))
+
+=================
+one-line patterns
+=================
+
+x in Foo(y:)
+
+case foo in 5 in true then 1 end
+case foo in 5; in true then 1 end
+case (foo x) in 5; in true then 1 end
+
+x => 6 | 7
+return x => 6 | 7
+
+-----------------
+
+(program
+  (test_pattern (identifier) (hash_pattern (constant) (keyword_pattern (hash_key_symbol))))
+
+  (case_match (test_pattern (identifier) (integer)) (in_clause (true) (then (integer))))
+  (case_match (test_pattern (identifier) (integer)) (in_clause (true) (then (integer))))
+  (case_match (test_pattern (parenthesized_statements (call (identifier) (argument_list (identifier)))) (integer))
+    (in_clause (true) (then (integer))))
+
+  (match_pattern (identifier) (alternative_pattern (integer) (integer)))
+  (return (argument_list (pair (identifier) (binary (integer) (integer)))))
+
+)
+
+=====================================
+one-line patterns: incorrectly parsed
+=====================================
+foo x in 5 # FIXME: should be parsed as `(foo x) in 5` instead of `foo (x in 5)`
+
+-----------------
+
+(program
+  (call (identifier) (argument_list (test_pattern (identifier) (integer)))) (comment)
+)

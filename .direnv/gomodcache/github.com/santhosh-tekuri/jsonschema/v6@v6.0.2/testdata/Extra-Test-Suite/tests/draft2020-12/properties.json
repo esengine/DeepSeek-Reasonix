@@ -1,0 +1,26 @@
+[
+    {
+        "description": "special characters",
+        "schema": {
+            "properties": {
+                "a%20b/c": { "type": "number" }
+            }
+        },
+        "tests": [
+            {
+                "description": "valid",
+                "data": {
+                    "a%20b/c": 1
+                },
+                "valid": true
+            },
+            {
+                "description": "invalid",
+                "data": {
+                    "a%20b/c": "hello"
+                },
+                "valid": false
+            }
+        ]
+    }
+]

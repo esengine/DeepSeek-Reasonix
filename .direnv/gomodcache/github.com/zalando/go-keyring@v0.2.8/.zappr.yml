@@ -1,0 +1,8 @@
+approvals:
+  groups:
+    zalando:
+      minimum: 2
+      from:
+        orgs:
+          - "zalando"
+X-Zalando-Team: teapot

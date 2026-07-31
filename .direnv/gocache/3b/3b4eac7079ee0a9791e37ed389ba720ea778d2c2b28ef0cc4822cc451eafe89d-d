@@ -1,0 +1,6 @@
+./ansi.go
+./ansi8.go
+./iterator.go
+./reader.go
+./splitfunc.go
+./trie.go

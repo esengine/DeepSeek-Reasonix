@@ -81,7 +81,7 @@ export function UpdateBanner({
               ? t("updater.authorizeInstall")
               : t("updater.restartInstall")}
           </button>
-          <button className="btn btn--small" onClick={reset}>
+          <button className="btn btn--small" onClick={() => reset()}>
             {t("updater.dismiss")}
           </button>
         </div>
@@ -114,7 +114,7 @@ export function UpdateBanner({
           <button className="btn btn--small btn--primary" onClick={() => void check()}>
             {t("updater.retry")}
           </button>
-          <button className="btn btn--small" onClick={reset}>
+          <button className="btn btn--small" onClick={() => reset()}>
             {t("updater.dismiss")}
           </button>
         </div>

@@ -1,0 +1,50 @@
+[
+    {
+        "description": "skip then when if is false",
+        "schema": {
+            "if": false,
+            "then": {
+                "$ref": "blah/blah.json"
+            },
+            "else": {
+                "type": "number"
+            }
+        },
+        "tests": [
+            {
+                "description": "number is valid",
+                "data": 0,
+                "valid": true
+            },
+            {
+                "description": "string is invalid",
+                "data": "hello",
+                "valid": false
+            }
+        ]
+    },
+    {
+        "description": "skip else when if is true",
+        "schema": {
+            "if": true,
+            "then": {
+                "type": "number"
+            },
+            "else": {
+                "$ref": "blah/blah.json"
+            }
+        },
+        "tests": [
+            {
+                "description": "number is valid",
+                "data": 0,
+                "valid": true
+            },
+            {
+                "description": "string is invalid",
+                "data": "hello",
+                "valid": false
+            }
+        ]
+    }
+]

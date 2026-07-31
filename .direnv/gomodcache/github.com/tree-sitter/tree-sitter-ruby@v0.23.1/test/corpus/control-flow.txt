@@ -1,0 +1,725 @@
+=====================
+empty while statement
+=====================
+
+while foo do
+end
+
+---
+
+(program (while
+  condition: (identifier)
+  body: (do)))
+
+================
+while without do
+================
+
+while foo
+end
+
+---
+
+(program (while
+  condition: (identifier)
+  body: (do)))
+
+=========================
+while statement with body
+=========================
+
+while foo do
+  bar
+end
+
+---
+
+(program (while
+  condition: (identifier)
+  body: (do (identifier))))
+
+=====================
+empty until statement
+=====================
+
+until foo bar do
+end
+
+---
+
+(program (until
+  condition: (call
+    method: (identifier)
+    arguments: (argument_list (identifier)))
+  body: (do)))
+
+=========================
+until statement with body
+=========================
+
+until foo do
+  bar
+end
+
+---
+
+(program (until
+  (identifier)
+  (do (identifier))))
+
+==================
+empty if statement
+==================
+
+if foo
+end
+
+---
+
+(program (if
+  condition: (identifier)))
+
+=======================
+empty if/else statement
+=======================
+
+if foo then
+else
+end
+
+if true then ;; 123; end
+
+---
+
+(program
+  (if
+    condition: (identifier)
+    consequence: (then)
+    alternative: (else))
+  (if
+    condition: (true)
+    consequence: (then
+      (empty_statement)
+      (empty_statement)
+      (integer))))
+
+==================================
+single-line if then else statement
+==================================
+
+if foo then bar else quux end
+
+---
+
+(program (if (identifier) (then (identifier)) (else (identifier))))
+
+========
+if elsif
+========
+
+if foo
+  bar
+elsif quux
+  baz
+end
+
+---
+
+(program
+  (if (identifier) (then (identifier))
+  (elsif (identifier) (then (identifier)))))
+
+=============
+if elsif else
+=============
+
+if foo
+  bar
+elsif quux
+  baz
+else
+  bat
+end
+
+---
+
+(program
+  (if (identifier)
+    (then (identifier))
+    (elsif
+      (identifier)
+      (then (identifier))
+      (else (identifier)))))
+
+======================
+empty unless statement
+======================
+
+unless foo
+end
+
+---
+
+(program (unless (identifier)))
+
+================================
+empty unless statement with then
+================================
+
+unless foo then
+  hi
+end
+
+---
+
+(program
+  (unless
+    condition: (identifier)
+    consequence: (then
+      (identifier))))
+
+================================
+empty unless statement with else
+================================
+
+unless foo
+else
+end
+
+---
+
+(program
+  (unless
+    condition: (identifier)
+    alternative: (else)))
+
+===
+for
+===
+
+for x in y do
+	f
+end
+
+for x, in y
+	f
+end
+
+for x, *y in z do
+	f
+end
+
+for (k, v) in y do
+	f
+end
+
+---
+
+(program
+  (for
+    pattern: (identifier)
+    value: (in (identifier))
+    body: (do (identifier)))
+  (for
+    pattern: (left_assignment_list
+      (identifier))
+    value: (in (identifier))
+    body: (do (identifier)))
+  (for
+    pattern: (left_assignment_list
+      (identifier)
+      (rest_assignment (identifier)))
+    value: (in (identifier))
+    body: (do (identifier)))
+  (for
+    pattern: (left_assignment_list
+      (destructured_left_assignment
+        (identifier)
+        (identifier)))
+    value: (in (identifier))
+    body: (do (identifier))))
+
+==============
+for without do
+==============
+
+for x in y
+  f
+end
+
+---
+
+(program (for
+  pattern: (identifier)
+  value: (in (identifier))
+  body: (do (identifier))))
+
+==============
+next
+==============
+
+for x in y
+  next
+end
+
+---
+
+(program (for (identifier) (in (identifier)) (do (next))))
+
+==============
+retry
+==============
+
+for x in y
+  retry
+end
+
+---
+
+(program (for
+  pattern: (identifier)
+  value: (in (identifier))
+  body: (do (retry))))
+
+==============
+break
+==============
+
+while b
+  break
+end
+
+---
+
+(program (while (identifier) (do (break))))
+
+==============
+redo
+==============
+
+while b
+  redo
+end
+
+---
+
+
+(program (while (identifier) (do (redo))))
+
+===========
+empty begin
+===========
+
+begin
+end
+
+---
+
+(program (begin))
+
+===============
+begin with body
+===============
+
+begin
+	foo
+end
+
+---
+
+(program (begin (identifier)))
+
+===============
+begin with else
+===============
+
+begin
+	foo
+else
+  bar
+end
+
+---
+
+(program
+  (begin (identifier)
+    (else (identifier))))
+
+===============
+begin with ensure
+===============
+
+begin
+	foo
+ensure
+  bar
+end
+
+---
+
+(program
+  (begin (identifier)
+    (ensure (identifier))))
+
+=======================
+begin with empty rescue
+=======================
+
+begin
+rescue
+end
+
+begin
+rescue then
+end
+
+begin
+rescue
+  bar
+end
+
+---
+
+(program
+  (begin (rescue))
+  (begin (rescue (then)))
+  (begin (rescue (then (identifier)))))
+
+===========================
+begin with rescue with args
+===========================
+
+begin
+rescue x
+end
+
+begin
+rescue x then
+end
+
+begin
+rescue x
+  bar
+end
+
+begin
+rescue => x
+  bar
+end
+
+begin
+rescue x, y
+  bar
+end
+
+begin
+rescue Error => x
+end
+
+begin
+rescue Error => x
+  bar
+end
+
+---
+
+(program
+  (begin (rescue (exceptions (identifier))))
+  (begin (rescue (exceptions (identifier)) (then)))
+  (begin (rescue (exceptions (identifier)) (then (identifier))))
+  (begin (rescue (exception_variable (identifier)) (then (identifier))))
+  (begin (rescue (exceptions (identifier) (identifier)) (then (identifier))))
+  (begin (rescue (exceptions (constant)) (exception_variable (identifier))))
+  (begin (rescue (exceptions (constant)) (exception_variable (identifier)) (then (identifier)))))
+
+===========================
+begin with rescue with splat args
+===========================
+
+begin
+rescue *args
+end
+
+---
+
+(program (begin (rescue (exceptions (splat_argument (identifier))))))
+
+=================
+rescue modifier
+=================
+
+foo rescue nil
+
+if foo rescue nil
+elsif bar rescue nil
+end
+
+unless foo rescue nil
+end
+
+---
+
+(program
+  (rescue_modifier (identifier) (nil))
+  (if (rescue_modifier (identifier) (nil)) (elsif (rescue_modifier (identifier) (nil))))
+  (unless (rescue_modifier (identifier) (nil))))
+
+=================
+rescue modifier in assignments
+=================
+
+x = foo rescue 1
+x += foo rescue 1
+x, y = foo rescue 1
+x = bar, foo rescue 1
+x = foo 1 rescue 2
+x += foo 1 rescue 2
+
+---
+
+(program
+  (assignment
+    left: (identifier)
+    right: (rescue_modifier
+      body: (identifier)
+      handler: (integer)))
+  (operator_assignment
+    left: (identifier)
+    right: (rescue_modifier
+      body: (identifier)
+      handler: (integer)))
+  (assignment
+    left: (left_assignment_list
+      (identifier)
+      (identifier))
+    right: (rescue_modifier
+      body: (identifier)
+      handler: (integer)))
+  (rescue_modifier
+    body: (assignment
+      left: (identifier)
+      right: (right_assignment_list
+        (identifier)
+        (identifier)))
+    handler: (integer))
+  (assignment
+    left: (identifier)
+    right: (rescue_modifier
+      body: (call
+        method: (identifier)
+        arguments: (argument_list
+          (integer)))
+      handler: (integer)))
+  (operator_assignment
+    left: (identifier)
+    right: (rescue_modifier
+      body: (call
+        method: (identifier)
+        arguments: (argument_list
+          (integer)))
+      handler: (integer))))
+
+============================
+begin with all the trimmings
+============================
+
+begin
+	foo
+rescue x
+  retry
+else
+	quux
+ensure
+  baz
+end
+
+---
+
+(program
+  (begin (identifier)
+    (rescue (exceptions (identifier)) (then (retry)))
+    (else (identifier))
+    (ensure (identifier))))
+
+======
+return
+======
+
+return foo
+
+---
+
+(program (return (argument_list (identifier))))
+
+====================
+return without value
+====================
+
+return
+
+---
+
+(program (return))
+
+====
+case
+====
+
+case foo
+when bar
+end
+
+case 
+  foo
+when bar
+end
+
+---
+
+(program
+  (case (identifier)
+  (when (pattern (identifier))))
+  (case (identifier)
+  (when (pattern (identifier)))))
+
+==============
+case with else
+==============
+
+case foo
+when bar
+else
+end
+
+case key
+when bar
+else; leaf
+end
+
+---
+
+(program
+  (case
+    (identifier)
+    (when (pattern (identifier)))
+    (else))
+  (case
+    (identifier)
+    (when (pattern (identifier)))
+    (else (identifier))))
+
+==============================
+case with multiple when blocks
+==============================
+
+case a
+when b
+  c
+when d
+  e
+else
+  f
+end
+
+---
+
+(program
+  (case (identifier)
+    (when (pattern (identifier)) (then (identifier)))
+    (when (pattern (identifier)) (then (identifier)))
+    (else (identifier))))
+
+
+==============================
+case without line break
+==============================
+
+case a when b
+ c end
+
+---
+
+(program
+  (case (identifier)
+    (when
+      (pattern
+        (identifier))
+      (then
+        (identifier)))))
+
+==============================
+case with splat parameter in when
+==============================
+
+case a
+when *foo
+  c
+end
+
+---
+
+(program
+  (case
+    (identifier)
+    (when
+      (pattern (splat_argument (identifier)))
+      (then (identifier)))))
+
+==============
+case with assignment
+==============
+
+x = case foo
+when bar
+else
+end
+
+---
+
+(program (assignment (identifier)
+  (case (identifier)
+    (when (pattern (identifier)))
+    (else))))
+
+==============
+case with expression
+==============
+
+x = case foo = bar | baz
+when bar
+else
+end
+
+---
+
+(program (assignment (identifier)
+  (case (assignment (identifier) (binary (identifier) (identifier)))
+    (when (pattern (identifier)))
+    (else))))
+
+==============================
+case without expression
+==============================
+
+case when b
+ c end
+
+case 
+when b then c
+end
+
+---
+
+(program
+  (case
+    (when
+      (pattern
+        (identifier))
+      (then
+        (identifier))))
+  (case
+    (when
+      (pattern
+        (identifier))
+      (then
+        (identifier)))))

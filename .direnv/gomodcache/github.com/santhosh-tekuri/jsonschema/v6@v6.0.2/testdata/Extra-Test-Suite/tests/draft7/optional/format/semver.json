@@ -1,0 +1,150 @@
+[
+	{
+		"description": "validation of semver",
+		"schema": {
+			"format": "semver"
+		},
+		"tests": [
+			{
+				"description": "all string formats ignore integers",
+				"data": 12,
+				"valid": true
+			},
+			{
+				"description": "all string formats ignore floats",
+				"data": 13.7,
+				"valid": true
+			},
+			{
+				"description": "all string formats ignore objects",
+				"data": {},
+				"valid": true
+			},
+			{
+				"description": "all string formats ignore arrays",
+				"data": [],
+				"valid": true
+			},
+			{
+				"description": "all string formats ignore booleans",
+				"data": false,
+				"valid": true
+			},
+			{
+				"description": "all string formats ignore nulls",
+				"data": null,
+				"valid": true
+			},
+			{
+				"description": "valid1",
+				"data": "1.0.0-alpha",
+				"valid": true
+			},
+			{
+				"description": "valid2",
+				"data": "1.0.0-alpha.1",
+				"valid": true
+			},
+			{
+				"description": "valid3",
+				"data": "1.0.0-alpha.beta",
+				"valid": true
+			},
+			{
+				"description": "valid4",
+				"data": "1.0.0-beta",
+				"valid": true
+			},
+			{
+				"description": "valid5",
+				"data": "1.0.0-beta.2",
+				"valid": true
+			},
+			{
+				"description": "valid6",
+				"data": "1.0.0-beta.11",
+				"valid": true
+			},
+			{
+				"description": "valid7",
+				"data": "1.0.0-rc.1",
+				"valid": true
+			},
+			{
+				"description": "valid8",
+				"data": "1.0.0",
+				"valid": true
+			},
+			{
+				"description": "build1",
+				"data": "1.0.0-alpha+001",
+				"valid": true
+			},
+			{
+				"description": "build2",
+				"data": "1.0.0+20130313144700",
+				"valid": true
+			},
+			{
+				"description": "build3",
+				"data": "1.0.0-beta+exp.sha.5114f85",
+				"valid": true
+			},
+			{
+				"description": "build4",
+				"data": "1.0.0+21AF26D3----117B344092BD",
+				"valid": true
+			},
+			{
+				"description": "prerelease1",
+				"data": "1.0.0-0.3.7",
+				"valid": true
+			},
+			{
+				"description": "prerelease2",
+				"data": "1.0.0-x.7.z.92",
+				"valid": true
+			},
+			{
+				"description": "prerelease3",
+				"data": "1.0.0-x-y-z.--",
+				"valid": true
+			},
+			{
+				"description": "bad",
+				"data": "bad",
+				"valid": false
+			},
+			{
+				"description": "valid",
+				"data": "1.2.3+test.01",
+				"valid": true
+			},
+			{
+				"description": "no version-core",
+				"data": "-1.2.3",
+				"valid": false
+			},
+			{
+				"description": "underscore in pre-release identifier",
+				"data": "0.88.0-11_e4e5dcabb",
+				"valid": false
+			},
+			{
+				"description": "underscore in build identifier",
+				"data": "0.88.0+11_e4e5dcabb",
+				"valid": false
+			},
+			{
+				"description": "letter in version-core",
+				"data": "1.2.3x",
+				"valid": false
+			},
+			{
+				"description": "version starting with zero",
+				"data": "0x1.3.4",
+				"valid": false
+			}
+		]
+	}
+]

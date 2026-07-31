@@ -33,6 +33,7 @@ type MemorySuggestion struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
 	Type        string   `json:"type"`
+	Scope       string   `json:"scope"`
 	Body        string   `json:"body"`
 	Reason      string   `json:"reason"`
 	Evidence    []string `json:"evidence"`
@@ -154,6 +155,7 @@ func (a *App) AcceptMemorySuggestionForTab(tabID string, in MemorySuggestion) (s
 		Title:       oneLine(in.Title),
 		Description: desc,
 		Type:        memory.NormalizeType(in.Type),
+		Scope:       memory.NormalizeFactScope(in.Scope),
 		Body:        body,
 	})
 }
@@ -238,7 +240,7 @@ func suggestMemories(set *memory.Set, sessions []suggestionSession) []MemorySugg
 			if msg.Role != provider.RoleUser {
 				continue
 			}
-			statement, reason := extractMemoryStatement(msg.Content)
+			statement, reason := extractMemoryStatement(agent.UserMessageText(msg))
 			if statement == "" {
 				continue
 			}
@@ -256,6 +258,7 @@ func suggestMemories(set *memory.Set, sessions []suggestionSession) []MemorySugg
 				Title:       title,
 				Description: oneLine(statement),
 				Type:        string(typ),
+				Scope:       string(memory.FactScopeProject),
 				Body:        memoryCandidateBody(statement, reason, sess),
 				Reason:      reason,
 				Evidence:    []string{sessionEvidence(sess, statement)},
@@ -308,7 +311,7 @@ func existingMemoryText(set *memory.Set) []string {
 	for _, d := range set.Docs {
 		out = append(out, normalizeSuggestionKey(d.Body))
 	}
-	for _, f := range set.Store.List() {
+	for _, f := range set.Store.ListAll() {
 		out = append(out, normalizeSuggestionKey(strings.Join([]string{f.Name, f.Title, f.Description, f.Body}, " ")))
 	}
 	return out
@@ -452,7 +455,7 @@ func workflowEvidence(cat workflowCategory, sessions []suggestionSession) []stri
 			if msg.Role != provider.RoleUser {
 				continue
 			}
-			text := oneLine(msg.Content)
+			text := oneLine(agent.UserMessageText(msg))
 			if text == "" || !hasAny(strings.ToLower(text), cat.Keywords...) {
 				continue
 			}

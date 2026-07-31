@@ -14,6 +14,9 @@
 //	                             size + sha256, and write <dir>/latest.json with GitHub
 //	                             release download URLs. The R2 mirror step rewrites those
 //	                             URLs to the CDN afterwards (url + sig fields together).
+//
+//	windows-payload <dir> <ver> Write a deterministic manifest of the exact
+//	                             executables embedded in the Windows installer.
 package main
 
 import (
@@ -37,6 +40,11 @@ import (
 // generator and the updater agree on update.PlatformKey output.
 var platforms = []string{"darwin-arm64", "darwin-amd64", "windows-amd64", "windows-arm64", "linux-amd64"}
 
+var websiteDownloads = map[string]struct{}{
+	"Reasonix-darwin-universal.dmg": {},
+	"Reasonix-windows-amd64.zip":    {},
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -50,6 +58,11 @@ func main() {
 			usage()
 		}
 		err = genManifest(os.Args[2], os.Args[3], os.Args[4])
+	case "windows-payload":
+		if len(os.Args) != 4 {
+			usage()
+		}
+		err = genWindowsPayloadManifest(os.Args[2], os.Args[3])
 	case "genkey":
 		if len(os.Args) != 3 {
 			usage()
@@ -70,8 +83,32 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag>\n  genkey <dir>\n  verify <file>")
+	fmt.Fprintln(os.Stderr, "usage:\n  sign <file>...\n  manifest <dir> <version> <tag>\n  windows-payload <dir> <version>\n  genkey <dir>\n  verify <file>")
 	os.Exit(2)
+}
+
+func genWindowsPayloadManifest(dir, version string) error {
+	hashes := make(map[string]string)
+	for _, name := range update.WindowsPayloadFileNames() {
+		path := filepath.Join(dir, name)
+		info, err := os.Lstat(path)
+		if err != nil {
+			return fmt.Errorf("Windows payload %s: %w", name, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("Windows payload %s is not a regular file", name)
+		}
+		_, sum, err := hashFile(path)
+		if err != nil {
+			return err
+		}
+		hashes[name] = sum
+	}
+	b, err := update.EncodeWindowsPayloadManifest(version, hashes)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(dir, update.WindowsPayloadManifestName), b, 0o644)
 }
 
 // verifyFile checks <file> against <file>.minisig using the embedded public key —
@@ -178,6 +215,7 @@ func genManifest(dir, version, tag string) error {
 		DownloadPage:   "https://reasonix.io/?download=desktop#start",
 		Platforms:      map[string]update.Asset{},
 		NativePackages: map[string]update.Asset{},
+		Downloads:      map[string]update.Asset{},
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -189,7 +227,8 @@ func genManifest(dir, version, tag string) error {
 			continue
 		}
 		key, kind := matchArtifact(name)
-		if key == "" {
+		_, websiteDownload := websiteDownloads[name]
+		if key == "" && !websiteDownload {
 			continue
 		}
 		size, sum, err := hashFile(filepath.Join(dir, name))
@@ -198,13 +237,19 @@ func genManifest(dir, version, tag string) error {
 		}
 		url := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s", repo, tag, name)
 		asset := update.Asset{URL: url, Sig: url + ".minisig", Size: size, SHA256: sum}
-		switch kind {
-		case artifactNative:
-			m.NativePackages[key] = asset
-			fmt.Printf("manifest native: %s -> %s (%d bytes)\n", key, name, size)
-		default:
-			m.Platforms[key] = asset
-			fmt.Printf("manifest: %s -> %s (%d bytes)\n", key, name, size)
+		if websiteDownload {
+			m.Downloads[name] = asset
+			fmt.Printf("manifest download: %s (%d bytes)\n", name, size)
+		}
+		if key != "" {
+			switch kind {
+			case artifactNative:
+				m.NativePackages[key] = asset
+				fmt.Printf("manifest native: %s -> %s (%d bytes)\n", key, name, size)
+			default:
+				m.Platforms[key] = asset
+				fmt.Printf("manifest: %s -> %s (%d bytes)\n", key, name, size)
+			}
 		}
 	}
 	if len(m.Platforms) == 0 {
@@ -212,6 +257,9 @@ func genManifest(dir, version, tag string) error {
 	}
 	if len(m.NativePackages) == 0 {
 		m.NativePackages = nil // omit empty map so older tooling sees a clean document
+	}
+	if len(m.Downloads) == 0 {
+		m.Downloads = nil
 	}
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

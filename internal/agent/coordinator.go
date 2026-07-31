@@ -785,7 +785,16 @@ func (c *Coordinator) persistExecutorNoOp(ctx context.Context, input, plan strin
 	if c == nil || c.executor == nil || c.executor.session == nil {
 		return
 	}
-	c.executor.session.Add(provider.Message{Role: provider.RoleUser, Content: c.executor.withTurnPreferences(input), Images: userImages(ctx), CreatedAt: time.Now().UnixMilli()})
+	rawInput := RawUserInput(ctx, input)
+	providerContent := c.executor.withTurnPreferences(input)
+	rawContent := ""
+	if providerContent != rawInput {
+		rawContent = rawInput
+	}
+	c.executor.session.Add(provider.Message{
+		Role: provider.RoleUser, Content: providerContent, RawContent: rawContent,
+		Images: userImages(ctx), CreatedAt: time.Now().UnixMilli(),
+	})
 	c.executor.session.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
 }
 
@@ -800,10 +809,15 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 	// providers reject), and Run's executor fallback keeps the turn alive
 	// after this error, so the planner session must stay coherent.
 	before := c.plannerSess.Snapshot()
-	c.plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: input})
+	rawInput := RawUserInput(ctx, input)
+	rawContent := ""
+	if input != rawInput {
+		rawContent = rawInput
+	}
+	c.plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: input, RawContent: rawContent})
 
 	ch, err := c.planner.Stream(ctx, provider.Request{
-		Messages:    c.plannerSess.Messages,
+		Messages:    provider.ModelMessages(c.plannerSess.Messages),
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})
 	if err != nil {

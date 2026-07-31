@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 )
 
 // The lease registry folds session paths through agent.CanonicalSessionPath
@@ -122,6 +123,33 @@ func TestCanReclaimAllowsMissingLeaseInfo(t *testing.T) {
 	}}
 	if app.canReclaimCurrentProcessSessionLease(tab, path, foreign) {
 		t.Fatal("foreign-holder lease error must not allow reclaim")
+	}
+}
+
+func TestCanReclaimRejectsDetachedRuntimeOwner(t *testing.T) {
+	app := NewApp()
+	tab := &WorkspaceTab{ID: "visible"}
+	app.tabs = map[string]*WorkspaceTab{tab.ID: tab}
+	path := filepath.Join(t.TempDir(), "Sessions", "detached-owner.jsonl")
+	ctrl := control.New(control.Options{
+		SessionDir:  filepath.Dir(path),
+		SessionPath: path,
+		Label:       "detached",
+	})
+	t.Cleanup(ctrl.Close)
+	app.detachedSessions[sessionRuntimeKey(path)] = &WorkspaceTab{
+		ID:          "detached",
+		SessionPath: path,
+		Ctrl:        ctrl,
+	}
+	err := &agent.SessionLeaseError{Path: path, Info: &agent.SessionLeaseInfo{
+		SessionPath: path,
+		WriterID:    agent.SessionWriterID(),
+		PID:         os.Getpid(),
+	}}
+
+	if app.canReclaimCurrentProcessSessionLease(tab, path, err) {
+		t.Fatal("detached runtime owner must block same-process lease reclaim")
 	}
 }
 

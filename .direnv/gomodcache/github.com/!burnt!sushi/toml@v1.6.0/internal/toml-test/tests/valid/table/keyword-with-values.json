@@ -1,0 +1,14 @@
+{
+    "false": {
+        "k": {"type": "integer", "value": "2"}
+    },
+    "inf": {
+        "k": {"type": "integer", "value": "3"}
+    },
+    "nan": {
+        "k": {"type": "integer", "value": "4"}
+    },
+    "true": {
+        "k": {"type": "integer", "value": "1"}
+    }
+}

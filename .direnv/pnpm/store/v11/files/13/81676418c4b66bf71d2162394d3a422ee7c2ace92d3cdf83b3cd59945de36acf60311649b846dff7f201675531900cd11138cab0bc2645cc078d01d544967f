@@ -1,0 +1,41 @@
+{
+  "name": "@gsap/react",
+  "version": "2.1.2",
+  "description": "Tools for using GSAP in React, like useGSAP() which is a drop-in replacement for useLayoutEffect()/useEffect()",
+  "main": "./dist/index.js",
+  "module": "./src/index.js",
+  "types": "./types/index.d.ts",
+  "keywords": [
+    "react",
+    "gsap",
+    "useeffect",
+    "uselayouteffect",
+    "usegsap",
+    "animation",
+    "greensock",
+    "javascript"
+  ],
+  "files": [
+    "src",
+    "types",
+    "dist",
+    "README.md"
+  ],
+  "author": "Jack Doyle (jack@greensock.com)",
+  "license": "SEE LICENSE AT https://gsap.com/standard-license",
+  "peerDependencies": {
+    "gsap": "^3.12.5",
+    "react": ">=17"
+  },
+  "bugs": {
+    "url": "https://gsap.com/community/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/greensock/react.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "homepage": "https://github.com/greensock/react#readme"
+}

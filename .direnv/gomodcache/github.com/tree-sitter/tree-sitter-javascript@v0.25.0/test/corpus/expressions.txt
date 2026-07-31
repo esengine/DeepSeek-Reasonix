@@ -1,0 +1,2346 @@
+============================================
+Strings
+============================================
+
+"A string with \"double\" and 'single' quotes";
+'A string with "double" and \'single\' quotes';
+'\\'
+"\\"
+
+'A string with new \
+line';
+
+----
+
+(program
+  (expression_statement
+    (string
+      (string_fragment)
+      (escape_sequence)
+      (string_fragment)
+      (escape_sequence)
+      (string_fragment)))
+  (expression_statement
+    (string
+      (string_fragment)
+      (escape_sequence)
+      (string_fragment)
+      (escape_sequence)
+      (string_fragment)))
+  (expression_statement
+    (string
+      (escape_sequence)))
+  (expression_statement
+    (string
+      (escape_sequence)))
+  (expression_statement
+    (string
+      (string_fragment)
+      (escape_sequence)
+      (string_fragment))))
+
+============================================
+Template strings
+============================================
+
+`one line`;
+`multi
+  line`;
+
+`multi
+  ${2 + 2}
+  hello
+  ${1 + 1, 2 + 2}
+  line`;
+
+`$$$$`;
+`$$$$${ 1 }`;
+
+`(a|b)$`;
+
+`$`;
+
+`$${'$'}$$${'$'}$$$$`;
+
+`\ `;
+
+`The command \`git ${args.join(' ')}\` exited with an unexpected code: ${exitCode}. The caller should either handle this error, or expect that exit code.`;
+
+`\\`;
+
+`//`;
+
+----
+
+(program
+  (expression_statement
+    (template_string
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (string_fragment)
+      (template_substitution
+        (binary_expression
+          (number)
+          (number)))
+      (string_fragment)
+      (template_substitution
+        (sequence_expression
+          (binary_expression
+            (number)
+            (number))
+          (binary_expression
+            (number)
+            (number))))
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (string_fragment)
+      (template_substitution
+        (number))))
+  (expression_statement
+    (template_string
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (string_fragment)
+      (template_substitution
+        (string
+          (string_fragment)))
+      (string_fragment)
+      (template_substitution
+        (string
+          (string_fragment)))
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (escape_sequence)))
+  (expression_statement
+    (template_string
+      (string_fragment)
+      (escape_sequence)
+      (string_fragment)
+      (template_substitution
+        (call_expression
+          (member_expression
+            (identifier)
+            (property_identifier))
+          (arguments
+            (string
+              (string_fragment)))))
+      (escape_sequence)
+      (string_fragment)
+      (template_substitution
+        (identifier))
+      (string_fragment)))
+  (expression_statement
+    (template_string
+      (escape_sequence)))
+  (expression_statement
+    (template_string
+      (string_fragment))))
+
+============================================
+Complex function calls with template strings
+============================================
+new f()`hello`;
+new f`hello`;
+arr[0]`hello`;
+f`hello``goodbye`;
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      (new_expression
+        (identifier)
+        (arguments))
+      (template_string
+        (string_fragment))))
+  (expression_statement
+    (new_expression
+      (call_expression
+        (identifier)
+        (template_string
+          (string_fragment)))))
+  (expression_statement
+    (call_expression
+      (subscript_expression
+        (identifier)
+        (number))
+      (template_string
+        (string_fragment))))
+  (expression_statement
+    (call_expression
+      (call_expression
+        (identifier)
+        (template_string
+          (string_fragment)))
+      (template_string
+        (string_fragment)))))
+
+============================================
+Function calls with template strings
+============================================
+
+f `hello`;
+f
+`hello`;
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      (identifier)
+      (template_string
+        (string_fragment))))
+  (expression_statement
+    (call_expression
+      (identifier)
+      (template_string
+        (string_fragment)))))
+
+============================================
+Numbers
+============================================
+
+101;
+3.14;
+3.14e+1;
+0x1ABCDEFabcdef;
+0o7632157312;
+0b1010101001;
+1e+3;
+
+---
+
+(program
+  (expression_statement
+    (number))
+  (expression_statement
+    (number))
+  (expression_statement
+    (number))
+  (expression_statement
+    (number))
+  (expression_statement
+    (number))
+  (expression_statement
+    (number))
+  (expression_statement
+    (number)))
+
+============================================
+Variables
+============================================
+
+theVar;
+theVar2;
+$_;
+\u0061\u{62}cd;
+
+---
+
+(program
+  (expression_statement
+    (identifier))
+  (expression_statement
+    (identifier))
+  (expression_statement
+    (identifier))
+  (expression_statement
+    (identifier)))
+
+============================================
+Multi-line variable declarations
+============================================
+
+var a = b
+  , c = d
+  , e = f;
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (identifier))
+    (variable_declarator
+      (identifier)
+      (identifier))
+    (variable_declarator
+      (identifier)
+      (identifier))))
+
+============================================
+Booleans
+============================================
+
+this;
+null;
+undefined;
+true;
+false;
+
+---
+
+(program
+  (expression_statement
+    (this))
+  (expression_statement
+    (null))
+  (expression_statement
+    (undefined))
+  (expression_statement
+    (true))
+  (expression_statement
+    (false)))
+
+============================================
+Regexps
+============================================
+
+/one\\/;
+/one/g;
+/one/i;
+/one/gim;
+/on\/e/gim;
+/on[^/]afe/gim;
+/[\]/]/;
+/<!--/;
+/a///comment;
+
+---
+
+(program
+  (expression_statement
+    (regex
+      (regex_pattern)))
+  (expression_statement
+    (regex
+      (regex_pattern)
+      (regex_flags)))
+  (expression_statement
+    (regex
+      (regex_pattern)
+      (regex_flags)))
+  (expression_statement
+    (regex
+      (regex_pattern)
+      (regex_flags)))
+  (expression_statement
+    (regex
+      (regex_pattern)
+      (regex_flags)))
+  (expression_statement
+    (regex
+      (regex_pattern)
+      (regex_flags)))
+  (expression_statement
+    (regex
+      (regex_pattern)))
+  (expression_statement
+    (regex
+      (regex_pattern)))
+  (expression_statement
+    (regex
+      (regex_pattern))
+    (comment)))
+
+============================================
+Comments take precedence over regexes
+============================================
+
+  foo
+    ? /* comment */bar
+    : baz
+
+---
+
+(program
+  (expression_statement
+    (ternary_expression
+      (identifier)
+      (comment)
+      (identifier)
+      (identifier))))
+
+============================================
+Objects
+============================================
+
+{};
+{ a: "b" };
+{ c: "d", "e": f, 1: 2 };
+{
+  g: h
+}
+
+{
+  [methodName]() {
+  }
+}
+
+---
+
+(program
+  (statement_block)
+  (empty_statement)
+  (expression_statement
+    (object
+      (pair
+        (property_identifier)
+        (string
+          (string_fragment)))))
+  (expression_statement
+    (object
+      (pair
+        (property_identifier)
+        (string
+          (string_fragment)))
+      (pair
+        (string
+          (string_fragment))
+        (identifier))
+      (pair
+        (number)
+        (number))))
+  (expression_statement
+    (object
+      (pair
+        (property_identifier)
+        (identifier))))
+  (expression_statement
+    (object
+      (method_definition
+        (computed_property_name
+          (identifier))
+        (formal_parameters)
+        (statement_block)))))
+
+============================================
+Objects with shorthand properties
+============================================
+
+x = {a, b, get};
+y = {a,};
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (object
+        (shorthand_property_identifier)
+        (shorthand_property_identifier)
+        (shorthand_property_identifier))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (object
+        (shorthand_property_identifier)))))
+
+============================================
+Objects with method definitions
+============================================
+
+{
+  foo: true,
+
+  add(a, b) {
+    return a + b;
+  },
+
+  get bar() { return c; },
+
+  set bar(a) { c = a; },
+
+  *barGenerator() { yield c; },
+
+  get() { return 1; }
+};
+
+---
+
+(program
+  (expression_statement
+    (object
+      (pair
+        (property_identifier)
+        (true))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (identifier)
+          (identifier))
+        (statement_block
+          (return_statement
+            (binary_expression
+              (identifier)
+              (identifier)))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block
+          (return_statement
+            (identifier))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block
+          (expression_statement
+            (assignment_expression
+              (identifier)
+              (identifier)))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block
+          (expression_statement
+            (yield_expression
+              (identifier)))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block
+          (return_statement
+            (number)))))))
+
+============================================
+Objects with reserved words for keys
+============================================
+
+{
+  finally() {},
+  catch() {},
+  get: function () {},
+  set: function () {},
+  static: true,
+  async: true,
+  await: true,
+};
+
+---
+
+(program
+  (expression_statement
+    (object
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))
+      (pair
+        (property_identifier)
+        (function_expression
+          (formal_parameters)
+          (statement_block)))
+      (pair
+        (property_identifier)
+        (function_expression
+          (formal_parameters)
+          (statement_block)))
+      (pair
+        (property_identifier)
+        (true))
+      (pair
+        (property_identifier)
+        (true))
+      (pair
+        (property_identifier)
+        (true)))))
+
+============================================
+Classes
+============================================
+
+class Foo {
+  #e
+
+  static one(a) { return a; };
+  two(b) { return b; }
+  three(c) { return c; }
+  #four(d) { return this.#e; }
+}
+
+class Foo extends require('another-class') {
+  constructor() {
+    super()
+  }
+
+  static
+  {
+    this.#foo = 'bar';
+  }
+
+  bar() {
+    super.a()
+    this.#baz()
+  }
+
+  #baz() {
+    super.a()
+  }
+}
+
+class A{;}
+
+---
+
+(program
+  (class_declaration
+    (identifier)
+    (class_body
+      (field_definition
+        (private_property_identifier))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block
+          (return_statement
+            (identifier))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block
+          (return_statement
+            (identifier))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block
+          (return_statement
+            (identifier))))
+      (method_definition
+        (private_property_identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block
+          (return_statement
+            (member_expression
+              (this)
+              (private_property_identifier)))))))
+  (class_declaration
+    (identifier)
+    (class_heritage
+      (call_expression
+        (identifier)
+        (arguments
+          (string
+            (string_fragment)))))
+    (class_body
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block
+          (expression_statement
+            (call_expression
+              (super)
+              (arguments)))))
+      (class_static_block
+        (statement_block
+          (expression_statement
+            (assignment_expression
+              (member_expression
+                (this)
+                (private_property_identifier))
+              (string
+                (string_fragment))))))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block
+          (expression_statement
+            (call_expression
+              (member_expression
+                (super)
+                (property_identifier))
+              (arguments)))
+          (expression_statement
+            (call_expression
+              (member_expression
+                (this)
+                (private_property_identifier))
+              (arguments)))))
+      (method_definition
+        (private_property_identifier)
+        (formal_parameters)
+        (statement_block
+          (expression_statement
+            (call_expression
+              (member_expression
+                (super)
+                (property_identifier))
+              (arguments)))))))
+  (class_declaration
+    (identifier)
+    (class_body)))
+
+============================================
+Classes with reserved words as methods
+============================================
+
+class Foo {
+  catch() {}
+  finally() {}
+  await() {}
+}
+
+---
+
+(program
+  (class_declaration
+    (identifier)
+    (class_body
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block)))))
+
+============================================
+Class Property Fields
+============================================
+
+class Foo {
+	static foo = 2
+}
+
+class Bar {
+  static get
+  baz() { return 1; }
+}
+
+---
+
+(program
+  (class_declaration
+    (identifier)
+    (class_body
+      (field_definition
+        (property_identifier)
+        (number))))
+  (class_declaration
+    (identifier)
+    (class_body
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block
+          (return_statement
+            (number)))))))
+
+============================================
+Private Class Property Fields
+============================================
+
+class Foo {
+	static #FOO = 2
+}
+
+class Bar {
+  #BAZ; static foo(quux) { return #BAZ in quux; }
+}
+
+---
+
+(program
+  (class_declaration
+    (identifier)
+    (class_body
+      (field_definition
+        (private_property_identifier)
+        (number))))
+  (class_declaration
+    (identifier)
+    (class_body
+      (field_definition
+        (private_property_identifier))
+      (method_definition
+        (property_identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block
+          (return_statement
+            (binary_expression
+              (private_property_identifier)
+              (identifier))))))))
+
+============================================
+Class Decorators
+============================================
+
+@reload
+@eval
+class Foo {
+	@foo.bar(baz) static foo() {
+
+	}
+
+	@foo bar = 'baz';
+}
+
+---
+
+(program
+  (class_declaration
+    (decorator
+      (identifier))
+    (decorator
+      (identifier))
+    (identifier)
+    (class_body
+      (method_definition
+        (decorator
+          (call_expression
+            (member_expression
+              (identifier)
+              (property_identifier))
+            (arguments
+              (identifier))))
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))
+      (field_definition
+        (decorator
+          (identifier))
+        (property_identifier)
+        (string
+          (string_fragment))))))
+
+============================================
+Arrays
+============================================
+
+[];
+[ "item1" ];
+[ "item1", ];
+[ "item1", item2 ];
+[ , item2 ];
+[ item2 = 5 ];
+
+---
+
+(program
+  (expression_statement
+    (array))
+  (expression_statement
+    (array
+      (string
+        (string_fragment))))
+  (expression_statement
+    (array
+      (string
+        (string_fragment))))
+  (expression_statement
+    (array
+      (string
+        (string_fragment))
+      (identifier)))
+  (expression_statement
+    (array
+      (identifier)))
+  (expression_statement
+    (array
+      (assignment_expression
+        (identifier)
+        (number)))))
+
+============================================
+Functions
+============================================
+
+[
+  function() {},
+  function(arg1, ...arg2) {
+    arg2;
+  },
+  function stuff() {},
+  function trailing(a,) {},
+  function trailing(a,b,) {},
+  function reserved(async) {},
+  function rest(...[_ = x]) {}
+]
+
+---
+
+(program
+  (expression_statement
+    (array
+      (function_expression
+        (formal_parameters)
+        (statement_block))
+      (function_expression
+        (formal_parameters
+          (identifier)
+          (rest_pattern
+            (identifier)))
+        (statement_block
+          (expression_statement
+            (identifier))))
+      (function_expression
+        (identifier)
+        (formal_parameters)
+        (statement_block))
+      (function_expression
+        (identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block))
+      (function_expression
+        (identifier)
+        (formal_parameters
+          (identifier)
+          (identifier))
+        (statement_block))
+      (function_expression
+        (identifier)
+        (formal_parameters
+          (identifier))
+        (statement_block))
+      (function_expression
+        (identifier)
+        (formal_parameters
+          (rest_pattern
+            (array_pattern
+              (assignment_pattern
+                (identifier)
+                (identifier)))))
+        (statement_block)))))
+
+===================================================
+Arrow functions
+===================================================
+
+a => 1;
+() => 2;
+(d, e) => 3;
+(f, g) => {
+  return h;
+};
+(trailing,) => 4;
+(h, trailing,) => 5;
+(set, kv) => 2;
+async => async + 1;
+
+---
+
+(program
+  (expression_statement
+    (arrow_function
+      (identifier)
+      (number)))
+  (expression_statement
+    (arrow_function
+      (formal_parameters)
+      (number)))
+  (expression_statement
+    (arrow_function
+      (formal_parameters
+        (identifier)
+        (identifier))
+      (number)))
+  (expression_statement
+    (arrow_function
+      (formal_parameters
+        (identifier)
+        (identifier))
+      (statement_block
+        (return_statement
+          (identifier)))))
+  (expression_statement
+    (arrow_function
+      (formal_parameters
+        (identifier))
+      (number)))
+  (expression_statement
+    (arrow_function
+      (formal_parameters
+        (identifier)
+        (identifier))
+      (number)))
+  (expression_statement
+    (arrow_function
+      (formal_parameters
+        (identifier)
+        (identifier))
+      (number)))
+  (expression_statement
+    (arrow_function
+      (identifier)
+      (binary_expression
+        (identifier)
+        (number)))))
+
+============================================
+Generator Functions
+============================================
+
+[
+  function *() {},
+  function *generateStuff(arg1, arg2) {
+    yield;
+    yield arg2;
+    yield * foo();
+  }
+]
+
+---
+
+(program
+  (expression_statement
+    (array
+      (generator_function
+        (formal_parameters)
+        (statement_block))
+      (generator_function
+        (identifier)
+        (formal_parameters
+          (identifier)
+          (identifier))
+        (statement_block
+          (expression_statement
+            (yield_expression))
+          (expression_statement
+            (yield_expression
+              (identifier)))
+          (expression_statement
+            (yield_expression
+              (call_expression
+                (identifier)
+                (arguments)))))))))
+
+============================================
+Function parameters with default values
+============================================
+
+function a({b}, c = d, e = f, async = true) {
+}
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters
+      (object_pattern
+        (shorthand_property_identifier_pattern))
+      (assignment_pattern
+        (identifier)
+        (identifier))
+      (assignment_pattern
+        (identifier)
+        (identifier))
+      (assignment_pattern
+        (identifier)
+        (true)))
+    (statement_block)))
+
+============================================
+Property access
+============================================
+
+x.someProperty;
+x[someVariable];
+x["some-string"];
+
+---
+
+(program
+  (expression_statement
+    (member_expression
+      (identifier)
+      (property_identifier)))
+  (expression_statement
+    (subscript_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (subscript_expression
+      (identifier)
+      (string
+        (string_fragment)))))
+
+============================================
+Chained Property access
+============================================
+
+return returned.promise()
+  .done( newDefer.resolve )
+  .fail( newDefer.reject )
+
+---
+
+(program
+  (return_statement
+    (call_expression
+      (member_expression
+        (call_expression
+          (member_expression
+            (call_expression
+              (member_expression
+                (identifier)
+                (property_identifier))
+              (arguments))
+            (property_identifier))
+          (arguments
+            (member_expression
+              (identifier)
+              (property_identifier))))
+        (property_identifier))
+      (arguments
+        (member_expression
+          (identifier)
+          (property_identifier))))))
+
+============================================
+Chained callbacks
+============================================
+
+return this.map(function (a) {
+  return a.b;
+})
+
+// a comment
+
+.filter(function (c) {
+  return c.d;
+})
+
+---
+
+(program
+  (return_statement
+    (call_expression
+      (member_expression
+        (call_expression
+          (member_expression
+            (this)
+            (property_identifier))
+          (arguments
+            (function_expression
+              (formal_parameters
+                (identifier))
+              (statement_block
+                (return_statement
+                  (member_expression
+                    (identifier)
+                    (property_identifier)))))))
+        (comment)
+        (property_identifier))
+      (arguments
+        (function_expression
+          (formal_parameters
+            (identifier))
+          (statement_block
+            (return_statement
+              (member_expression
+                (identifier)
+                (property_identifier)))))))))
+
+============================================
+Function calls
+============================================
+
+x.someMethod(arg1, "arg2");
+function(x, y) {
+
+}(a, b);
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (arguments
+        (identifier)
+        (string
+          (string_fragment)))))
+  (expression_statement
+    (call_expression
+      (function_expression
+        (formal_parameters
+          (identifier)
+          (identifier))
+        (statement_block))
+      (arguments
+        (identifier)
+        (identifier)))))
+
+============================================
+Optional chaining property access
+============================================
+
+a . b;
+a ?. b;
+
+---
+
+(program
+  (expression_statement
+    (member_expression
+      (identifier)
+      (property_identifier)))
+  (expression_statement
+    (member_expression
+      (identifier)
+      (optional_chain)
+      (property_identifier))))
+
+============================================
+Optional chaining array access
+============================================
+
+a [b];
+a ?. [b];
+
+---
+
+(program
+  (expression_statement
+    (subscript_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (subscript_expression
+      (identifier)
+      (optional_chain)
+      (identifier))))
+
+============================================
+Optional function calls
+============================================
+
+a?.(b);
+a[b]?.(c);
+d.e?.(f);
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      (identifier)
+      (optional_chain)
+      (arguments
+        (identifier))))
+  (expression_statement
+    (call_expression
+      (subscript_expression
+        (identifier)
+        (identifier))
+      (optional_chain)
+      (arguments
+        (identifier))))
+  (expression_statement
+    (call_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (optional_chain)
+      (arguments
+        (identifier)))))
+
+============================================
+Constructor calls
+============================================
+
+new module.Klass(1, "two");
+new Thing;
+new new module.Klass(1)("two");
+new new Thing;
+
+---
+
+(program
+  (expression_statement
+    (new_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (arguments
+        (number)
+        (string
+          (string_fragment)))))
+  (expression_statement
+    (new_expression
+      (identifier)))
+  (expression_statement
+    (new_expression
+      (new_expression
+        (member_expression
+          (identifier)
+          (property_identifier))
+        (arguments
+          (number)))
+      (arguments
+        (string
+          (string_fragment)))))
+  (expression_statement
+    (new_expression
+      (new_expression
+        (identifier)))))
+
+============================================
+Await Expressions
+============================================
+
+await asyncFunction();
+await asyncPromise;
+
+---
+
+(program
+  (expression_statement
+    (await_expression
+      (call_expression
+        (identifier)
+        (arguments))))
+  (expression_statement
+    (await_expression
+      (identifier))))
+
+============================================
+Async Functions and Methods
+============================================
+
+async function foo() {}
+
+{
+  async bar() {
+  }
+}
+
+class Foo {
+  async bar() {}
+}
+
+async (a) => { return foo; };
+
+async function* foo() { yield 1; }
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters)
+    (statement_block))
+  (expression_statement
+    (object
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))))
+  (class_declaration
+    (identifier)
+    (class_body
+      (method_definition
+        (property_identifier)
+        (formal_parameters)
+        (statement_block))))
+  (expression_statement
+    (arrow_function
+      (formal_parameters
+        (identifier))
+      (statement_block
+        (return_statement
+          (identifier)))))
+  (generator_function_declaration
+    (identifier)
+    (formal_parameters)
+    (statement_block
+      (expression_statement
+        (yield_expression
+          (number))))))
+
+============================================
+Math operators
+============================================
+
+i++;
+i--;
+i + j * 3 - j % 5;
+2 ** i * 3;
+2 * i ** 3;
+2 ** i ** 3;
++x;
+-x;
+let + 5;
+
+---
+
+(program
+  (expression_statement
+    (update_expression
+      (identifier)))
+  (expression_statement
+    (update_expression
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (binary_expression
+          (identifier)
+          (number)))
+      (binary_expression
+        (identifier)
+        (number))))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (number)
+        (identifier))
+      (number)))
+  (expression_statement
+    (binary_expression
+      (number)
+      (binary_expression
+        (identifier)
+        (number))))
+  (expression_statement
+    (binary_expression
+      (number)
+      (binary_expression
+        (identifier)
+        (number))))
+  (expression_statement
+    (unary_expression
+      (identifier)))
+  (expression_statement
+    (unary_expression
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (number))))
+
+============================================
+Boolean operators
+============================================
+
+i || j;
+i && j;
+!a && !b || !c && !d;
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (unary_expression
+          (identifier)))
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (unary_expression
+          (identifier))))))
+
+============================================
+The null-coalescing operator
+============================================
+
+x = b ?? c();
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (binary_expression
+        (identifier)
+        (call_expression
+          (identifier)
+          (arguments))))))
+
+============================================
+Bitwise operators
+============================================
+
+i >> j;
+i >>> j;
+i << j;
+i & j;
+i | j;
+~i ^ ~j
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (unary_expression
+        (identifier))
+      (unary_expression
+        (identifier)))))
+
+============================================
+Relational operators
+============================================
+
+x < y;
+x <= y;
+x == y;
+x === y;
+x != y;
+x !== y;
+x >= y;
+x > y;
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier))))
+
+==============================================
+Assignments
+==============================================
+
+x = 0;
+x.y = 0;
+x["y"] = 0;
+async = 0;
+(x) = 1;
+(x) += 1;
+x &&= 0;
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (assignment_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (number)))
+  (expression_statement
+    (assignment_expression
+      (subscript_expression
+        (identifier)
+        (string
+          (string_fragment)))
+      (number)))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (assignment_expression
+      (parenthesized_expression
+        (identifier))
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (parenthesized_expression
+        (identifier))
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number))))
+
+==============================================
+The comma operator
+==============================================
+
+a = 1, b = 2;
+c = {d: (3, 4 + 5, 6)};
+
+---
+
+(program
+  (expression_statement
+    (sequence_expression
+      (assignment_expression
+        (identifier)
+        (number))
+      (assignment_expression
+        (identifier)
+        (number))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (object
+        (pair
+          (property_identifier)
+          (parenthesized_expression
+            (sequence_expression
+              (number)
+              (binary_expression
+                (number)
+                (number))
+              (number))))))))
+
+==============================================
+Ternaries
+==============================================
+
+condition ? case1 : case2;
+
+x.y = some.condition ?
+  some.case :
+  some.other.case;
+
+a?.1:.2
+
+---
+
+(program
+  (expression_statement
+    (ternary_expression
+      (identifier)
+      (identifier)
+      (identifier)))
+  (expression_statement
+    (assignment_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (ternary_expression
+        (member_expression
+          (identifier)
+          (property_identifier))
+        (member_expression
+          (identifier)
+          (property_identifier))
+        (member_expression
+          (member_expression
+            (identifier)
+            (property_identifier))
+          (property_identifier)))))
+  (expression_statement
+    (ternary_expression
+      (identifier)
+      (number)
+      (number))))
+
+==============================================
+Type operators
+==============================================
+
+typeof x;
+x instanceof String;
+
+---
+
+(program
+  (expression_statement
+    (unary_expression
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (identifier))))
+
+============================================
+The delete operator
+============================================
+
+delete thing['prop'];
+true ? delete thing.prop : null;
+
+---
+
+(program
+  (expression_statement
+    (unary_expression
+      (subscript_expression
+        (identifier)
+        (string
+          (string_fragment)))))
+  (expression_statement
+    (ternary_expression
+      (true)
+      (unary_expression
+        (member_expression
+          (identifier)
+          (property_identifier)))
+      (null))))
+
+============================================
+The void operator
+============================================
+
+a = void b()
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (unary_expression
+        (call_expression
+          (identifier)
+          (arguments))))))
+
+==============================================
+Augmented assignments
+==============================================
+
+s |= 1;
+t %= 2;
+w ^= 3;
+x += 4;
+y.z *= 5;
+async += 1;
+a >>= 1;
+b >>>= 1;
+c <<= 1;
+
+---
+
+(program
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number)))
+  (expression_statement
+    (augmented_assignment_expression
+      (identifier)
+      (number))))
+
+==============================================
+Operator precedence
+==============================================
+
+a <= b && c >= d;
+a.b = c ? d : e;
+a && b(c) && d;
+a && new b(c) && d;
+typeof a == b && c instanceof d
+a && b | c;
+a - b << c;
+a in b != c in d;
+await a || b;
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (expression_statement
+    (assignment_expression
+      (member_expression
+        (identifier)
+        (property_identifier))
+      (ternary_expression
+        (identifier)
+        (identifier)
+        (identifier))))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (call_expression
+          (identifier)
+          (arguments
+            (identifier))))
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (new_expression
+          (identifier)
+          (arguments
+            (identifier))))
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (identifier))
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (identifier)))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (identifier)
+        (identifier))
+      (binary_expression
+        (identifier)
+        (identifier))))
+  (expression_statement
+    (binary_expression
+      (await_expression
+        (identifier))
+      (identifier))))
+
+==============================================
+Simple JSX elements
+==============================================
+
+a = <div className='b' tabIndex={1} />;
+b = <Foo.Bar>a <span>b</span> c</Foo.Bar>;
+b = <Foo.Bar.Baz.Baz></Foo.Bar.Baz.Baz>;
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_self_closing_element
+        (identifier)
+        (jsx_attribute
+          (property_identifier)
+          (string
+            (string_fragment)))
+        (jsx_attribute
+          (property_identifier)
+          (jsx_expression
+            (number))))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_element
+        (jsx_opening_element
+          (member_expression
+            (identifier)
+            (property_identifier)))
+        (jsx_text)
+        (jsx_element
+          (jsx_opening_element
+            (identifier))
+          (jsx_text)
+          (jsx_closing_element
+            (identifier)))
+        (jsx_text)
+        (jsx_closing_element
+          (member_expression
+            (identifier)
+            (property_identifier))))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_element
+        (jsx_opening_element
+          (member_expression
+            (member_expression
+              (member_expression
+                (identifier)
+                (property_identifier))
+              (property_identifier))
+            (property_identifier)))
+        (jsx_closing_element
+          (member_expression
+            (member_expression
+              (member_expression
+                (identifier)
+                (property_identifier))
+              (property_identifier))
+            (property_identifier)))))))
+
+==============================================
+Anonymous JSX element
+==============================================
+
+a = <></>;
+a = <E><></></E>;
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_element
+        (jsx_opening_element)
+        (jsx_closing_element))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_element
+        (jsx_opening_element
+          (identifier))
+        (jsx_element
+          (jsx_opening_element)
+          (jsx_closing_element))
+        (jsx_closing_element
+          (identifier))))))
+
+==============================================
+Expressions within JSX elements
+==============================================
+
+a = <a b c={d}> e {f} g </a>
+h = <i>{...j}</i>
+b = <Text {...j} />
+b = <Text {...j}></Text>
+
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_element
+        (jsx_opening_element
+          (identifier)
+          (jsx_attribute
+            (property_identifier))
+          (jsx_attribute
+            (property_identifier)
+            (jsx_expression
+              (identifier))))
+        (jsx_text)
+        (jsx_expression
+          (identifier))
+        (jsx_text)
+        (jsx_closing_element
+          (identifier)))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_element
+        (jsx_opening_element
+          (identifier))
+        (jsx_expression
+          (spread_element
+            (identifier)))
+        (jsx_closing_element
+          (identifier)))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_self_closing_element
+        (identifier)
+        (jsx_expression
+          (spread_element
+            (identifier))))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (jsx_element
+        (jsx_opening_element
+          (identifier)
+          (jsx_expression
+            (spread_element
+              (identifier))))
+        (jsx_closing_element
+          (identifier))))))
+
+==============================================
+Expressions with rest elements
+==============================================
+
+foo(...rest)
+foo = [...[bar] = [baz]]
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      (identifier)
+      (arguments
+        (spread_element
+          (identifier)))))
+  (expression_statement
+    (assignment_expression
+      (identifier)
+      (array
+        (spread_element
+          (assignment_expression
+            (array_pattern
+              (identifier))
+            (array
+              (identifier))))))))
+
+==============================================
+Forward slashes after parenthesized expressions
+==============================================
+
+(foo - bar) / baz
+if (foo - bar) /baz/;
+(this.a() / this.b() - 1) / 2
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (parenthesized_expression
+        (binary_expression
+          (identifier)
+          (identifier)))
+      (identifier)))
+  (if_statement
+    (parenthesized_expression
+      (binary_expression
+        (identifier)
+        (identifier)))
+    (expression_statement
+      (regex
+        (regex_pattern))))
+  (expression_statement
+    (binary_expression
+      (parenthesized_expression
+        (binary_expression
+          (binary_expression
+            (call_expression
+              (member_expression
+                (this)
+                (property_identifier))
+              (arguments))
+            (call_expression
+              (member_expression
+                (this)
+                (property_identifier))
+              (arguments)))
+          (number)))
+      (number))))
+
+==============================================
+Non-breaking spaces as whitespace
+==============================================
+
+⁠// Type definitions for Dexie v1.4.1
+﻿// Project: https://github.com/dfahlander/Dexie.js
+​// Definitions by: David Fahlander <http://github.com/dfahlander>
+// Definitions: https://github.com/DefinitelyTyped/DefinitelyTyped
+
+---
+
+(program
+  (comment)
+  (comment)
+  (comment)
+  (comment))
+
+==============================================
+Yield expressions
+==============================================
+
+yield db.users.where('[endpoint+email]')
+
+---
+
+(program
+  (expression_statement
+    (yield_expression
+      (call_expression
+        (member_expression
+          (member_expression
+            (identifier)
+            (property_identifier))
+          (property_identifier))
+        (arguments
+          (string
+            (string_fragment)))))))
+
+============================================
+Reserved words as identifiers
+============================================
+
+function await(await) { await: await (await + await (0)); }
+
+---
+
+(program
+  (function_declaration
+    (identifier)
+    (formal_parameters (identifier))
+    (statement_block
+      (labeled_statement
+        (statement_identifier)
+        (expression_statement
+          (await_expression
+            (parenthesized_expression
+              (await_expression
+                (unary_expression
+                  (await_expression
+                    (parenthesized_expression
+                      (number))))))))))))
+
+============================================
+JSX
+============================================
+
+var a = <Foo></Foo>
+b = <Foo.Bar></Foo.Bar>
+c = <> <Foo /> </>
+d = <Bar> <Foo /> </Bar>
+e = <Foo bar/>
+f = <Foo bar="string" baz={2} data-i8n="dialogs.welcome.heading" bam />
+g = <Avatar userId={foo.creatorId} />
+h = <input checked={this.state.selectedNewStreetType === 'new-street-default' || !this.state.selectedNewStreetType}> </input>
+i = <Foo:Bar bar={}>{...children}</Foo:Bar>
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      name: (identifier)
+      value: (jsx_element
+        open_tag: (jsx_opening_element
+          name: (identifier))
+        close_tag: (jsx_closing_element
+          name: (identifier)))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_element
+        open_tag: (jsx_opening_element
+          name: (member_expression
+            object: (identifier)
+            property: (property_identifier)))
+        close_tag: (jsx_closing_element
+          name: (member_expression
+            object: (identifier)
+            property: (property_identifier))))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_element
+        open_tag: (jsx_opening_element)
+        (jsx_text)
+        (jsx_self_closing_element
+          name: (identifier))
+        (jsx_text)
+        close_tag: (jsx_closing_element))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_element
+        open_tag: (jsx_opening_element
+          name: (identifier))
+        (jsx_text)
+        (jsx_self_closing_element
+          name: (identifier))
+        (jsx_text)
+        close_tag: (jsx_closing_element
+          name: (identifier)))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_self_closing_element
+        name: (identifier)
+        attribute: (jsx_attribute
+          (property_identifier)))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_self_closing_element
+        name: (identifier)
+        attribute: (jsx_attribute
+          (property_identifier)
+          (string
+            (string_fragment)))
+        attribute: (jsx_attribute
+          (property_identifier)
+          (jsx_expression
+            (number)))
+        attribute: (jsx_attribute
+          (property_identifier)
+          (string
+            (string_fragment)))
+        attribute: (jsx_attribute
+          (property_identifier)))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_self_closing_element
+        name: (identifier)
+        attribute: (jsx_attribute
+          (property_identifier)
+          (jsx_expression
+            (member_expression
+              object: (identifier)
+              property: (property_identifier)))))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_element
+        open_tag: (jsx_opening_element
+          name: (identifier)
+          attribute: (jsx_attribute
+            (property_identifier)
+            (jsx_expression
+              (binary_expression
+                left: (binary_expression
+                  left: (member_expression
+                    object: (member_expression
+                      object: (this)
+                      property: (property_identifier))
+                    property: (property_identifier))
+                  right: (string
+                    (string_fragment)))
+                right: (unary_expression
+                  argument: (member_expression
+                    object: (member_expression
+                      object: (this)
+                      property: (property_identifier))
+                    property: (property_identifier)))))))
+        (jsx_text)
+        close_tag: (jsx_closing_element
+          name: (identifier)))))
+  (expression_statement
+    (assignment_expression
+      left: (identifier)
+      right: (jsx_element
+        open_tag: (jsx_opening_element
+          name: (jsx_namespace_name
+            (identifier)
+            (identifier))
+          attribute: (jsx_attribute
+            (property_identifier)
+            (jsx_expression)))
+        (jsx_expression
+          (spread_element
+            (identifier)))
+        close_tag: (jsx_closing_element
+          name: (jsx_namespace_name
+            (identifier)
+            (identifier)))))))

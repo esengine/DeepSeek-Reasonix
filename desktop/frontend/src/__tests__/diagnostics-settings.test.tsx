@@ -75,7 +75,7 @@ function baseReport(runtime: boolean): CapabilityDiagnosticsReport {
       plugins: 0,
       mcp_servers: 1,
     },
-    instructions: { docs: [{ path: "<workspace>/AGENTS.md", scope: "project", order: 1 }] },
+    instructions: { docs: [{ path: "<workspace>/AGENTS.md", scope: "project", directory: "<workspace>", depth: 0, order: 1 }] },
     skills: {
       roots: [{ path: "<workspace>/.reasonix/skills", scope: "project", status: "ok" }],
       entries: [{ name: "demo", path: "<workspace>/.reasonix/skills/demo/SKILL.md", status: "winner" }],

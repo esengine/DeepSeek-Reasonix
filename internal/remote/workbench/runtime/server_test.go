@@ -22,12 +22,14 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
 	remotebroker "reasonix/internal/remote/broker"
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/rpcwire"
 	"reasonix/internal/skill"
+	"reasonix/internal/store"
 )
 
 type fakeController struct {
@@ -99,6 +101,9 @@ type profileFakeController struct {
 	*persistentFakeController
 	planMode     bool
 	approvalMode string
+	goal         string
+	goalStatus   string
+	goalWriteErr error
 }
 
 type rotatingFakeController struct {
@@ -127,6 +132,36 @@ func (c *profileFakeController) SetPlanMode(enabled bool) { c.planMode = enabled
 func (c *profileFakeController) SetToolApprovalMode(mode string) {
 	c.approvalMode = mode
 }
+func (c *profileFakeController) SetGoal(goal string) {
+	c.goal = strings.TrimSpace(goal)
+	if c.goal == "" {
+		c.goalStatus = ""
+	} else {
+		c.goalStatus = string(protocol.GoalRunning)
+	}
+}
+func (c *profileFakeController) SetGoalDurable(goal, _ string) error {
+	if c.goalWriteErr != nil {
+		return c.goalWriteErr
+	}
+	if c.sessionPath == "" {
+		return errors.New("missing session path")
+	}
+	if err := os.WriteFile(store.SessionGoalState(c.sessionPath), []byte(strings.TrimSpace(goal)+"\n"), 0o644); err != nil {
+		return err
+	}
+	c.SetGoal(goal)
+	return nil
+}
+func (c *profileFakeController) ResumeGoal() bool {
+	if c.goal == "" {
+		return false
+	}
+	c.goalStatus = string(protocol.GoalRunning)
+	return true
+}
+func (c *profileFakeController) Goal() string       { return c.goal }
+func (c *profileFakeController) GoalStatus() string { return c.goalStatus }
 
 func (c *persistentFakeController) SessionPath() string { return c.sessionPath }
 func (c *persistentFakeController) SetSessionPath(path string) {
@@ -160,6 +195,7 @@ type catalogController struct {
 	disabled     []skill.Skill
 	configured   []string
 	disconnected []string
+	memory       *memory.Set
 }
 
 func (*catalogController) Host() *plugin.Host { return nil }
@@ -181,6 +217,7 @@ func (c *catalogController) ConfiguredMCPNames() []string {
 func (c *catalogController) DisconnectedMCPNames() []string {
 	return append([]string(nil), c.disconnected...)
 }
+func (c *catalogController) Memory() *memory.Set { return c.memory }
 
 func (c *projectionController) Checkpoints() []checkpoint.Meta {
 	return append([]checkpoint.Meta(nil), c.checkpoints...)
@@ -271,6 +308,14 @@ func (c *fakeController) AdoptHistory(h []provider.Message, _ string) {
 }
 
 func TestSessionCatalogAndSlashArgsUseHostControllerCapabilities(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	saved, err := store.SaveWithOptions(memory.Memory{
+		Name: "remote-policy", Title: "Remote policy", Description: "remote-only fact",
+		Type: memory.TypeProject, Body: "Use the remote workspace policy.",
+	}, memory.SaveOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctrl := &catalogController{
 		fakeController: &fakeController{model: "local/model"},
 		commands: []command.Command{
@@ -279,6 +324,7 @@ func TestSessionCatalogAndSlashArgsUseHostControllerCapabilities(t *testing.T) {
 		},
 		skills:     []skill.Skill{{Name: "explore", Description: "Explore the Host", Scope: skill.ScopeProject}},
 		configured: []string{"connected", "offline"}, disconnected: []string{"offline"},
+		memory: &memory.Set{Store: store},
 	}
 	catalog := buildSessionCatalog(context.Background(), ctrl)
 	if len(catalog.Commands) != 1 || catalog.Commands[0].Name != "review" {
@@ -307,6 +353,21 @@ func TestSessionCatalogAndSlashArgsUseHostControllerCapabilities(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("slash args = %+v", result.Items)
+	}
+
+	result, err = server.composerSlashArgs(protocol.ComposerSlashArgsParams{
+		RuntimeQuery: protocol.RuntimeQuery{ExpectedHostEpoch: server.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_catalog"},
+		Input:        "/memory revisions ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	found = false
+	for _, item := range result.Items {
+		found = found || item.Label == saved.Memory.ID
+	}
+	if !found {
+		t.Fatalf("remote /memory completion did not use the Host memory catalog: %+v", result.Items)
 	}
 }
 
@@ -858,19 +919,24 @@ func TestSetProfileRegistryFailurePreservesUsableSession(t *testing.T) {
 
 	t.Run("metadata update rolls back", func(t *testing.T) {
 		srv, sess, old, _ := newServer(t)
+		old.SetGoal("keep the existing goal")
 		collaboration := protocol.CollaborationPlan
 		approval := protocol.ToolApprovalYOLO
+		goal := "replace the goal"
 		_, err := srv.setProfile(context.Background(), protocol.SessionProfileSetParams{
 			SessionMutation: protocol.SessionMutation{
 				ExpectedHostEpoch: srv.hostEpoch, Target: srv.target(sess.id), ExpectedRuntimeEpoch: sess.runtimeEpoch,
 			},
-			Patch: protocol.ProfilePatch{CollaborationMode: &collaboration, ToolApprovalMode: &approval},
+			Patch: protocol.ProfilePatch{CollaborationMode: &collaboration, ToolApprovalMode: &approval, Goal: &goal},
 		})
 		if err == nil {
 			t.Fatal("profile update succeeded despite registry failure")
 		}
 		if sess.collaboration != protocol.CollaborationNormal || sess.toolApproval != protocol.ToolApprovalAsk || old.planMode || old.approvalMode != string(protocol.ToolApprovalAsk) {
 			t.Fatalf("profile after failed persist = collaboration=%q approval=%q controller=(%v,%q)", sess.collaboration, sess.toolApproval, old.planMode, old.approvalMode)
+		}
+		if old.Goal() != "keep the existing goal" {
+			t.Fatalf("goal changed despite failed profile transaction: %q", old.Goal())
 		}
 	})
 
@@ -894,6 +960,321 @@ func TestSetProfileRegistryFailurePreservesUsableSession(t *testing.T) {
 			t.Fatalf("replacement controllers = %d closed=%v", len(*built), len(*built) == 1 && (*built)[0].closed)
 		}
 	})
+}
+
+func TestSetProfileAppliesGoalInSameTransaction(t *testing.T) {
+	workspace := t.TempDir()
+	sessionDir := t.TempDir()
+	registryPath := filepath.Join(t.TempDir(), "sessions.json")
+	srv := New(Options{Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath})
+	srv.registryRead = true
+	ctrl := &profileFakeController{persistentFakeController: &persistentFakeController{
+		fakeController: &fakeController{model: "local/model"}, sessionDir: sessionDir,
+		sessionPath: filepath.Join(sessionDir, "session.jsonl"),
+	}}
+	target := srv.installTestSession(ctrl)
+	if err := srv.persistSessionRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	collaboration := protocol.CollaborationGoal
+	approval := protocol.ToolApprovalAuto
+	goal := "finish the remote profile migration"
+
+	result, err := srv.setProfile(context.Background(), protocol.SessionProfileSetParams{
+		SessionMutation: protocol.SessionMutation{
+			ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+		},
+		Patch: protocol.ProfilePatch{
+			CollaborationMode: &collaboration,
+			ToolApprovalMode:  &approval,
+			Goal:              &goal,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResolvedProfile.CollaborationMode != collaboration || result.ResolvedProfile.ToolApprovalMode != approval {
+		t.Fatalf("resolved profile = %+v", result.ResolvedProfile)
+	}
+	if ctrl.planMode || ctrl.approvalMode != string(approval) || ctrl.Goal() != goal || ctrl.GoalStatus() != string(protocol.GoalRunning) {
+		t.Fatalf("controller profile = plan:%v approval:%q goal:%q status:%q", ctrl.planMode, ctrl.approvalMode, ctrl.Goal(), ctrl.GoalStatus())
+	}
+	if _, err := os.Stat(srv.profileTransactionPath()); !os.IsNotExist(err) {
+		t.Fatalf("profile transaction journal remains after commit: %v", err)
+	}
+}
+
+func TestSetProfileRebuildAppliesGoalInSameTransaction(t *testing.T) {
+	workspace := t.TempDir()
+	sessionDir := t.TempDir()
+	registryPath := filepath.Join(t.TempDir(), "sessions.json")
+	var replacement *profileFakeController
+	srv := New(Options{
+		Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath,
+		BuildController: func(_ context.Context, model string, _ *string, _ event.Sink) (SessionController, error) {
+			replacement = &profileFakeController{persistentFakeController: &persistentFakeController{
+				fakeController: &fakeController{model: model}, sessionDir: sessionDir,
+			}}
+			return replacement, nil
+		},
+	})
+	srv.registryRead = true
+	old := &profileFakeController{persistentFakeController: &persistentFakeController{
+		fakeController: &fakeController{model: "local/old"}, sessionDir: sessionDir,
+		sessionPath: filepath.Join(sessionDir, "session.jsonl"),
+	}, approvalMode: string(protocol.ToolApprovalAsk)}
+	target := srv.installTestSession(old)
+	if err := srv.persistSessionRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	model := "local/new"
+	collaboration := protocol.CollaborationGoal
+	approval := protocol.ToolApprovalAuto
+	goal := "finish the rebuilt remote profile"
+
+	result, err := srv.setProfile(context.Background(), protocol.SessionProfileSetParams{
+		SessionMutation: protocol.SessionMutation{
+			ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+		},
+		Patch: protocol.ProfilePatch{
+			Model:             &model,
+			CollaborationMode: &collaboration,
+			ToolApprovalMode:  &approval,
+			Goal:              &goal,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Disposition != protocol.ProfileRebuilt || replacement == nil {
+		t.Fatalf("rebuild result = %+v replacement=%v", result, replacement != nil)
+	}
+	if !old.closed || replacement.closed || replacement.Goal() != goal || replacement.GoalStatus() != string(protocol.GoalRunning) {
+		t.Fatalf("controller lifecycle oldClosed=%v newClosed=%v goal=%q status=%q", old.closed, replacement.closed, replacement.Goal(), replacement.GoalStatus())
+	}
+	if _, err := os.Stat(srv.profileTransactionPath()); !os.IsNotExist(err) {
+		t.Fatalf("profile transaction journal remains after rebuild commit: %v", err)
+	}
+}
+
+func TestSetProfileGoalWriteFailureRollsBackRegistry(t *testing.T) {
+	workspace := t.TempDir()
+	sessionDir := t.TempDir()
+	registryPath := filepath.Join(t.TempDir(), "sessions.json")
+	srv := New(Options{Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath})
+	srv.registryRead = true
+	ctrl := &profileFakeController{persistentFakeController: &persistentFakeController{
+		fakeController: &fakeController{model: "local/model"}, sessionDir: sessionDir,
+		sessionPath: filepath.Join(sessionDir, "session.jsonl"),
+	}, approvalMode: string(protocol.ToolApprovalAsk), goalWriteErr: errors.New("injected Goal write failure")}
+	target := srv.installTestSession(ctrl)
+	if err := srv.persistSessionRegistry(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	collaboration := protocol.CollaborationGoal
+	approval := protocol.ToolApprovalAuto
+	goal := "must not commit"
+	_, err = srv.setProfile(context.Background(), protocol.SessionProfileSetParams{
+		SessionMutation: protocol.SessionMutation{
+			ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+		},
+		Patch: protocol.ProfilePatch{
+			CollaborationMode: &collaboration,
+			ToolApprovalMode:  &approval,
+			Goal:              &goal,
+		},
+	})
+	var remoteErr *protocol.RemoteError
+	if !errors.As(err, &remoteErr) || remoteErr.Code != protocol.ErrSessionPersistFailed {
+		t.Fatalf("setProfile error = %v, want SESSION_PERSIST_FAILED", err)
+	}
+	after, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("registry changed after failed Goal write:\nbefore=%s\nafter=%s", before, after)
+	}
+	sess := srv.sessions[target.SessionID]
+	if sess.collaboration != protocol.CollaborationNormal || sess.toolApproval != protocol.ToolApprovalAsk {
+		t.Fatalf("session profile changed after failed Goal write: %+v", resolvedProfile(sess))
+	}
+	if ctrl.planMode || ctrl.approvalMode != string(protocol.ToolApprovalAsk) || ctrl.Goal() != "" {
+		t.Fatalf("controller changed after failed Goal write: plan=%v approval=%q goal=%q", ctrl.planMode, ctrl.approvalMode, ctrl.Goal())
+	}
+	if _, err := os.Stat(srv.profileTransactionPath()); !os.IsNotExist(err) {
+		t.Fatalf("profile transaction journal remains after rollback: %v", err)
+	}
+}
+
+func TestProfileTransactionRecoveryFencesPartialDurableUpdates(t *testing.T) {
+	writeRegistry := func(t *testing.T, path, workspace, model string) []byte {
+		t.Helper()
+		body, err := json.Marshal(runtimeSessionRegistry{
+			Version: runtimeSessionRegistryVersion, Workspace: canonicalRegistryWorkspace(workspace),
+			Sessions: []runtimeSessionRecord{{ID: "session_test", Path: "session.jsonl", Model: model, TopicID: "topic_test"}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = append(body, '\n')
+		if err := os.WriteFile(path, body, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return body
+	}
+	assertBytes := func(t *testing.T, path string, want []byte) {
+		t.Helper()
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("%s contents = %q, want %q", path, got, want)
+		}
+	}
+
+	for _, tc := range []struct {
+		name      string
+		commit    bool
+		wantModel string
+		wantGoal  string
+	}{
+		{name: "prepared rolls back", wantModel: "local/old", wantGoal: "old goal\n"},
+		{name: "committed stays applied", commit: true, wantModel: "local/new", wantGoal: "new goal\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			sessionDir := t.TempDir()
+			registryPath := filepath.Join(t.TempDir(), "sessions.json")
+			sessionPath := filepath.Join(sessionDir, "session.jsonl")
+			oldRegistry := writeRegistry(t, registryPath, workspace, "local/old")
+			goalPath := store.SessionGoalState(sessionPath)
+			oldGoal := []byte("old goal\n")
+			if err := os.WriteFile(goalPath, oldGoal, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			srv := New(Options{Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath})
+			txn, err := srv.beginProfileGoalTransaction(sessionPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			newRegistry := writeRegistry(t, registryPath, workspace, "local/new")
+			newGoal := []byte("new goal\n")
+			if err := os.WriteFile(goalPath, newGoal, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.commit {
+				if err := srv.commitProfileGoalTransaction(txn); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			restarted := New(Options{Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath})
+			if err := restarted.recoverProfileTransaction(); err != nil {
+				t.Fatal(err)
+			}
+			wantRegistry := oldRegistry
+			if tc.commit {
+				wantRegistry = newRegistry
+			}
+			assertBytes(t, registryPath, wantRegistry)
+			assertBytes(t, goalPath, []byte(tc.wantGoal))
+			if _, err := os.Stat(restarted.profileTransactionPath()); !os.IsNotExist(err) {
+				t.Fatalf("profile transaction journal remains after recovery: %v", err)
+			}
+			var registry runtimeSessionRegistry
+			if err := json.Unmarshal(wantRegistry, &registry); err != nil {
+				t.Fatal(err)
+			}
+			if registry.Sessions[0].Model != tc.wantModel {
+				t.Fatalf("recovered model = %q, want %q", registry.Sessions[0].Model, tc.wantModel)
+			}
+		})
+	}
+}
+
+func TestProfileTransactionRecoveryOwnsAutoResearchSideEffects(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		commit        bool
+		wantTaskCount int
+		wantGoal      bool
+	}{
+		{name: "prepared removes created task"},
+		{name: "committed preserves created task", commit: true, wantTaskCount: 1, wantGoal: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workspace := t.TempDir()
+			sessionDir := t.TempDir()
+			registryPath := filepath.Join(t.TempDir(), "sessions.json")
+			sessionPath := filepath.Join(sessionDir, "session.jsonl")
+			srv := New(Options{Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath})
+			txn, err := srv.beginProfileGoalTransaction(sessionPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if txn.journal.AutoResearchCreateToken == "" {
+				t.Fatal("prepared profile transaction has no AutoResearch create token")
+			}
+			ctrl := control.New(control.Options{
+				SessionDir: sessionDir, SessionPath: sessionPath,
+				WorkspaceRoot: workspace, Label: "profile-recovery",
+			})
+			t.Cleanup(ctrl.Close)
+			goal := "investigate the root cause, implement the fix, and verify the performance regression"
+			if err := ctrl.SetGoalDurable(goal, txn.journal.AutoResearchCreateToken); err != nil {
+				t.Fatal(err)
+			}
+			taskRoot := filepath.Join(workspace, ".reasonix", "autoresearch")
+			entries, err := os.ReadDir(taskRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(entries) != 1 {
+				t.Fatalf("AutoResearch task count before recovery = %d, want 1", len(entries))
+			}
+			tokenPath := filepath.Join(taskRoot, entries[0].Name(), ".create_token")
+			token, err := os.ReadFile(tokenPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.TrimSpace(string(token)) != txn.journal.AutoResearchCreateToken {
+				t.Fatalf("AutoResearch create token = %q, want transaction token", token)
+			}
+			if tc.commit {
+				if err := srv.commitProfileGoalTransaction(txn); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			restarted := New(Options{Workspace: workspace, SessionDir: sessionDir, RegistryPath: registryPath})
+			if err := restarted.recoverProfileTransaction(); err != nil {
+				t.Fatal(err)
+			}
+			entries, err = os.ReadDir(taskRoot)
+			if err != nil && !os.IsNotExist(err) {
+				t.Fatal(err)
+			}
+			if len(entries) != tc.wantTaskCount {
+				t.Fatalf("AutoResearch task count after recovery = %d, want %d", len(entries), tc.wantTaskCount)
+			}
+			_, goalErr := os.Stat(store.SessionGoalState(sessionPath))
+			if tc.wantGoal && goalErr != nil {
+				t.Fatalf("committed Goal sidecar missing after recovery: %v", goalErr)
+			}
+			if !tc.wantGoal && !os.IsNotExist(goalErr) {
+				t.Fatalf("prepared Goal sidecar remains after recovery: %v", goalErr)
+			}
+			if _, err := os.Stat(restarted.profileTransactionPath()); !os.IsNotExist(err) {
+				t.Fatalf("profile transaction journal remains after recovery: %v", err)
+			}
+		})
+	}
 }
 
 func TestSetProfileRejectsAllControllerActiveWork(t *testing.T) {
@@ -1368,6 +1749,84 @@ func TestRuntimeGitEmptyCollectionsEncodeAsArrays(t *testing.T) {
 	encodedDetail, err := json.Marshal(detail)
 	if err != nil || !bytes.Contains(encodedDetail, []byte(`"files":[]`)) {
 		t.Fatalf("encoded empty commit detail = %s err=%v", encodedDetail, err)
+	}
+}
+
+func TestWorkspaceCatalogEmptyEffortLevelsEncodeAsArray(t *testing.T) {
+	srv := New(Options{Workspace: t.TempDir(), Version: "test"})
+	hostSide, desktopSide := net.Pipe()
+	hostWire := rpcwire.NewConn(hostSide, hostSide, rpcwire.Options{
+		Name: "workspace-catalog-host", StrictJSONRPC: true,
+		MaxInboundBytes: protocol.FrameBytes, MaxOutboundBytes: protocol.FrameBytes,
+	})
+	desktopWire := rpcwire.NewConn(desktopSide, desktopSide, rpcwire.Options{
+		Name: "workspace-catalog-desktop", StrictJSONRPC: true,
+		MaxInboundBytes: protocol.FrameBytes, MaxOutboundBytes: protocol.FrameBytes,
+	})
+	desktopBroker, err := remotebroker.Attach(desktopWire, remotebroker.Options{
+		Catalog: func(context.Context, map[string]struct{}) ([]protocol.BrokerProviderDescriptor, error) {
+			return []protocol.BrokerProviderDescriptor{
+				{Ref: "local/basic", DisplayName: "Local", Model: "basic"},
+				{
+					Ref: "local/reasoning", DisplayName: "Local", Model: "reasoning",
+					SupportedEfforts: []string{"medium", "high"}, DefaultEffort: "high",
+				},
+			}, nil
+		},
+		Open: func(context.Context, string, string, provider.Request) (<-chan provider.Chunk, error) {
+			return nil, errors.New("unexpected provider open")
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := desktopBroker.Activate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.broker.Attach(hostWire, 1); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(func() {
+		cancel()
+		desktopBroker.Close()
+		_ = hostSide.Close()
+		_ = desktopSide.Close()
+	})
+	go desktopWire.Serve(ctx)
+	go hostWire.Serve(ctx)
+
+	result, err := srv.workspaceCatalog(protocol.WorkspaceCatalogParams{
+		ExpectedHostEpoch: srv.hostEpoch,
+		WorkspaceID:       srv.workspaceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Models) != 2 {
+		t.Fatalf("models = %#v, want two catalog entries", result.Models)
+	}
+	if levels := result.Models[0].Effort.Levels; levels == nil || len(levels) != 0 {
+		t.Fatalf("basic effort levels = %#v, want allocated empty slice", levels)
+	}
+	if levels := result.Models[1].Effort.Levels; len(levels) != 2 || levels[0] != "medium" || levels[1] != "high" {
+		t.Fatalf("reasoning effort levels = %#v, want [medium high]", levels)
+	}
+
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"levels":[]`)) {
+		t.Fatalf("encoded workspace catalog = %s, want empty effort levels array", raw)
+	}
+	decoded, err := protocol.DecodeResult(protocol.MethodCatalogWorkspace, raw)
+	if err != nil {
+		t.Fatalf("decode workspace catalog: %v", err)
+	}
+	decodedCatalog := decoded.(protocol.WorkspaceCatalogResult)
+	if levels := decodedCatalog.Models[0].Effort.Levels; levels == nil || len(levels) != 0 {
+		t.Fatalf("decoded basic effort levels = %#v, want allocated empty slice", levels)
 	}
 }
 

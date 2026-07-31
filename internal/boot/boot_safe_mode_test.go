@@ -11,8 +11,70 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/event"
+	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 )
+
+func TestBuildSafeModeDoesNotMigrateMemoryMetadata(t *testing.T) {
+	isolateConfigHome(t)
+	project := robustTempDir(t)
+	t.Setenv("REASONIX_SAFE_MODE", "1")
+	store := memory.StoreFor(config.MemoryUserDir(), project)
+	if err := os.MkdirAll(store.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.Dir, "legacy.md")
+	legacy := "---\nname: legacy\ndescription: old\nmetadata:\n  type: project\n  scope: project\n---\n\nbody\n"
+	if err := os.WriteFile(path, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctrl, err := Build(context.Background(), Options{WorkspaceRoot: project, SessionDir: filepath.Join(t.TempDir(), "sessions"), Sink: event.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrl.Close()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != legacy {
+		t.Fatalf("Safe Mode migrated memory metadata:\n%s", got)
+	}
+}
+
+func TestBuildMemoryMigrationFailureWarnsAndContinues(t *testing.T) {
+	isolateConfigHome(t)
+	project := robustTempDir(t)
+	t.Setenv("REASONIX_SAFE_MODE", "")
+	globalDir := filepath.Join(config.MemoryUserDir(), "memory", "global")
+	if err := os.MkdirAll(filepath.Dir(globalDir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(globalDir, []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var notices []event.Event
+	ctrl, err := Build(context.Background(), Options{
+		WorkspaceRoot: project,
+		SessionDir:    filepath.Join(t.TempDir(), "sessions"),
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices = append(notices, e)
+			}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Build should continue after memory migration failure: %v", err)
+	}
+	ctrl.Close()
+	for _, notice := range notices {
+		if notice.Level == event.LevelWarn && strings.Contains(notice.Text, "Memory metadata migration") && notice.Detail != "" {
+			return
+		}
+	}
+	t.Fatalf("memory migration warning missing: %+v", notices)
+}
 
 func TestBuildSafeModeLeavesDeprecatedStepLimitsUntouched(t *testing.T) {
 	isolateConfigHome(t)

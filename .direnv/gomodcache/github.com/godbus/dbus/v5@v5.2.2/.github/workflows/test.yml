@@ -1,0 +1,55 @@
+name: Test
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+permissions:
+  contents: read
+
+jobs:
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 1.23
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.6
+
+  test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        go-version: ['1.20', '1.21', '1.22', '1.23']
+
+    steps:
+
+    - name: Set up Go
+      uses: actions/setup-go@v3
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Install dbus
+      run: sudo apt-get update && sudo apt-get install dbus dbus-x11
+
+    - name: Build
+      run: go build -race -v ./...
+
+    - name: Test
+      run: go test -race -v ./...
+
+  codespell:
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v3
+    - uses: codespell-project/actions-codespell@master

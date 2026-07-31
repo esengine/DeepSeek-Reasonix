@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -73,7 +74,7 @@ type installDeps struct {
 	inspectDeb       func(path string) (debIdentity, error)
 	installedVersion func() (string, error)
 	compareVersions  func(a, b string) (int, error)
-	aptInstall       func(pkgPath string) error
+	aptInstall       func(pkgPath string, allowDowngrade bool) error
 	verifyInstalled  func(want string) error
 	writePhase       func(phase string)
 	writeResult      func(helperResult)
@@ -213,7 +214,8 @@ func runInstall(d installDeps, args []string) int {
 		d.writeResult(helperResult{OK: false, Error: "version compare failed", Code: "package_rejected"})
 		return exitPackageRejected
 	}
-	if err := acceptVersionUpgrade(cmp); err != nil {
+	allowDowngrade, err := acceptVersionTransition(cmp, candidate.Version, installed)
+	if err != nil {
 		d.writeResult(helperResult{OK: false, Error: err.Error(), Code: "package_rejected"})
 		return exitPackageRejected
 	}
@@ -222,7 +224,7 @@ func runInstall(d installDeps, args []string) int {
 	// desktop to leave "authorizing" before the long apt-get call.
 	d.writePhase("installing")
 
-	if err := d.aptInstall(pkgCopy); err != nil {
+	if err := d.aptInstall(pkgCopy, allowDowngrade); err != nil {
 		code := "install_failed"
 		exit := exitInstallFailed
 		if isPackageManagerBusy(err) {
@@ -266,24 +268,40 @@ func acceptDebIdentity(id debIdentity, goArch string) error {
 	return nil
 }
 
-// acceptVersionUpgrade requires candidate > installed (cmp from compareDebVersions).
-func acceptVersionUpgrade(cmp int) error {
-	if cmp <= 0 {
-		return errors.New("candidate version is not strictly newer")
+var (
+	stableDebVersionRE  = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	previewDebVersionRE = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)~preview\.(0|[1-9][0-9]*)$`)
+)
+
+// acceptVersionTransition permits ordinary upgrades and the one intentional
+// downgrade: replacing a public Preview package with a public Stable package
+// after the user switches channels.
+func acceptVersionTransition(cmp int, candidate, installed string) (bool, error) {
+	switch {
+	case cmp > 0:
+		return false, nil
+	case cmp == 0:
+		return false, errors.New("candidate version is not strictly newer")
+	case stableDebVersionRE.MatchString(candidate) && previewDebVersionRE.MatchString(installed):
+		return true, nil
+	default:
+		return false, errors.New("candidate downgrade is not an allowed preview-to-stable transition")
 	}
-	return nil
 }
 
 // aptInstallArgv is the fixed absolute apt-get argv (never shell). Pure for tests.
-func aptInstallArgv(pkgPath string) []string {
-	return []string{
+func aptInstallArgv(pkgPath string, allowDowngrade bool) []string {
+	argv := []string{
 		aptGetPath,
 		"install",
 		"--assume-yes",
 		"--only-upgrade",
 		"--no-remove",
-		pkgPath,
 	}
+	if allowDowngrade {
+		argv = append(argv, "--allow-downgrades")
+	}
+	return append(argv, pkgPath)
 }
 
 func inspectDeb(path string) (debIdentity, error) {
@@ -336,8 +354,8 @@ func compareDebVersions(a, b string) (int, error) {
 	return 0, errors.New("compare-versions failed")
 }
 
-func aptInstallOnlyUpgrade(pkgPath string) error {
-	argv := aptInstallArgv(pkgPath)
+func aptInstallOnlyUpgrade(pkgPath string, allowDowngrade bool) error {
+	argv := aptInstallArgv(pkgPath, allowDowngrade)
 	cmd := exec.Command(argv[0], argv[1:]...)
 	// Fixed absolute argv only — never shell.
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")

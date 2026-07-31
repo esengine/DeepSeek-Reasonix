@@ -1,0 +1,7 @@
+# Keep whitespace inside quotes keys at all positions.
+"a b"   = 1
+" c d " = 2
+"  much 		  whitespace  	\n  \r\n  " = 3
+
+[ " tbl " ]
+"\ttab\ttab\t" = "tab"

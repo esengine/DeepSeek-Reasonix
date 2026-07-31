@@ -1,0 +1,5 @@
+./readiness.go
+./schema.go
+./store.go
+./summary.go
+./task.go

@@ -1,5 +1,5 @@
-import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Item, LiveStream } from "../lib/useController";
+import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
@@ -262,7 +262,8 @@ function partitionTurnItems(
 
 export function Transcript({
   items,
-  live,
+  live: liveProp,
+  liveStore,
   tabId,
   footerHeight = 0,
   onPrompt,
@@ -289,6 +290,7 @@ export function Transcript({
 }: {
   items: Item[];
   live?: LiveStream;
+  liveStore?: ControllerLiveStore;
   tabId?: string;
   footerHeight?: number;
   onPrompt: (text: string) => void;
@@ -314,6 +316,15 @@ export function Transcript({
   invocationMetadata?: InvocationMetadataMap;
 }) {
   const t = useT();
+  const subscribeLive = useCallback(
+    (listener: () => void) => liveStore?.subscribe(tabId, listener) ?? (() => {}),
+    [liveStore, tabId],
+  );
+  const getLiveSnapshot = useCallback(
+    () => liveStore?.getSnapshot(tabId) ?? liveProp,
+    [liveProp, liveStore, tabId],
+  );
+  const live = useSyncExternalStore(subscribeLive, getLiveSnapshot, getLiveSnapshot);
   const {
     scrollRef,
     stick,

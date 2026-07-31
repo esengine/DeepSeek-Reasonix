@@ -1,0 +1,40 @@
+const require_identity = require("../../function/identity.js");
+const require_keys = require("./keys.js");
+//#region src/compat/object/forOwn.ts
+/**
+* Iterates over an object's properties and calls the `iteratee` function for each property.
+*
+* It only iterates over the object's own properties, not including inherited properties or properties with `Symbol` keys.
+*
+* The `iteratee` function can terminate the iteration early by returning `false`.
+*
+* @template T - The type of the object.
+* @param object The object to iterate over.
+* @param [iteratee=identity] The function invoked per iteration. If not provided, the identity function will be used.
+* @return {T | null | undefined} Returns object.
+*
+* @example
+* function Foo() {
+*   this.a = 1;
+*   this.b = 2;
+* }
+*
+* Foo.prototype.c = 3;
+*
+* forOwn(new Foo(), function(value, key) {
+*   console.log(key);
+* });
+* // => Logs 'a' then 'b' (iteration order is not guaranteed).
+*/
+function forOwn(object, iteratee = require_identity.identity) {
+	if (object == null) return object;
+	const iterable = Object(object);
+	const keys$1 = require_keys.keys(object);
+	for (let i = 0; i < keys$1.length; ++i) {
+		const key = keys$1[i];
+		if (iteratee(iterable[key], key, iterable) === false) break;
+	}
+	return object;
+}
+//#endregion
+exports.forOwn = forOwn;

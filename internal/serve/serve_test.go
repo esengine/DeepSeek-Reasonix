@@ -20,6 +20,12 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
+	if !strings.Contains(titlePrompt, "same language as the user's message") {
+		t.Fatalf("title prompt does not preserve the user's language: %q", titlePrompt)
+	}
+}
+
 // fakeRunner stands in for an agent.Runner: it records the composed input and
 // returns without emitting model events, so the controller's TurnDone is the
 // observable signal.

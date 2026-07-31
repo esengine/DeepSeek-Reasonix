@@ -1,0 +1,67 @@
+{
+  "grammars": [
+    {
+      "name": "php",
+      "camelcase": "PHP",
+      "scope": "source.php",
+      "path": "php",
+      "external-files": "common/scanner.h",
+      "file-types": [
+        "php"
+      ],
+      "highlights": "queries/highlights.scm",
+      "injections": [
+        "queries/injections.scm",
+        "queries/injections-text.scm"
+      ],
+      "tags": "queries/tags.scm"
+    },
+    {
+      "name": "php_only",
+      "camelcase": "PHP_Only",
+      "scope": "source.php",
+      "path": "php_only",
+      "external-files": "common/scanner.h",
+      "highlights": "queries/highlights.scm",
+      "injections": "queries/injections.scm",
+      "tags": "queries/tags.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.23.11",
+    "license": "MIT",
+    "description": "PHP grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "Josh Vera"
+      },
+      {
+        "name": "Max Brunsfeld",
+        "email": "maxbrunsfeld@gmail.com"
+      },
+      {
+        "name": "Amaan Qureshi",
+        "email": "amaanq12@gmail.com"
+      },
+      {
+        "name": "Caleb White",
+        "email": "cdwhite3@pm.me"
+      },
+      {
+        "name": "Christian Frøystad",
+        "email": "christian@xist.no"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/tree-sitter/tree-sitter-php"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "go": true,
+    "node": true,
+    "python": true,
+    "rust": true,
+    "swift": true
+  }
+}

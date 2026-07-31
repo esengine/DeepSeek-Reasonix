@@ -1,0 +1,1 @@
+This directory contains source code to produce a very small 32-bit PE DLL for testing purposes. It can be built with GNU make on Windows or Linux, and assumes that an Open Watcom v2 snapshot can be found at `C:\WATCOM` on Windows and `/opt/watcom` on Linux, overridden using the `WATCOM` make variable (like `make WATCOM=$HOME/watcom`.)

@@ -1,0 +1,10 @@
+./decode.go
+./deprecated.go
+./doc.go
+./encode.go
+./error.go
+./lex.go
+./meta.go
+./parse.go
+./type_fields.go
+./type_toml.go

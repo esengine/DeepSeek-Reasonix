@@ -15,18 +15,20 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/minio/selfupdate"
 	"golang.org/x/mod/semver"
 
 	"reasonix/desktop/internal/update"
 	"reasonix/internal/config"
 	"reasonix/internal/netclient"
+	"reasonix/internal/repair"
 )
 
 // updater.go is the transport-free core of the desktop auto-updater: manifest
@@ -41,14 +43,45 @@ import (
 // gateway still avoids GitHub's repository-wide /releases/latest shortcut so the
 // app is not coupled to GitHub's homepage badge semantics.
 const (
-	r2Base                  = "https://dl.reasonix.io"
-	releaseGatewayBase      = "https://crash.reasonix.io/v1/desktop/releases"
-	downloadPageURL         = "https://reasonix.io/?download=desktop#start"
-	httpTimeout             = 15 * time.Second
-	manifestEndpointTimeout = 5 * time.Second
+	r2Base                     = "https://dl.reasonix.io"
+	releaseGatewayBase         = "https://crash.reasonix.io/v1/desktop/releases"
+	downloadPageURL            = "https://reasonix.io/#start"
+	manifestDownloadPageURL    = "https://reasonix.io/?download=desktop#start"
+	httpTimeout                = 15 * time.Second
+	manifestEndpointTimeout    = 5 * time.Second
+	maxDesktopReleaseAssetSize = int64(1 << 30)
+	maxDesktopManifestSize     = int64(1 << 20)
+	maxDesktopSignatureSize    = int64(64 << 10)
 )
 
 var fetchAttemptTimeout = 5 * time.Second
+
+var (
+	stableDesktopVersionRE  = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	previewDesktopVersionRE = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$`)
+	sha256RE                = regexp.MustCompile(`^[0-9a-f]{64}$`)
+)
+
+type requiredDesktopAsset struct {
+	group    string
+	key      string
+	filename string
+}
+
+var (
+	requiredDesktopUpdaterAssets = []requiredDesktopAsset{
+		{group: "platforms", key: "darwin-arm64", filename: "Reasonix-darwin-arm64.zip"},
+		{group: "platforms", key: "darwin-amd64", filename: "Reasonix-darwin-amd64.zip"},
+		{group: "platforms", key: "windows-amd64", filename: "Reasonix-windows-amd64-installer.exe"},
+		{group: "platforms", key: "windows-arm64", filename: "Reasonix-windows-arm64-installer.exe"},
+		{group: "platforms", key: "linux-amd64", filename: "Reasonix-linux-amd64.tar.gz"},
+		{group: "native_packages", key: "linux-amd64", filename: "Reasonix-linux-amd64.deb"},
+	}
+	requiredDesktopDownloadAssets = []requiredDesktopAsset{
+		{group: "downloads", key: "Reasonix-darwin-universal.dmg", filename: "Reasonix-darwin-universal.dmg"},
+		{group: "downloads", key: "Reasonix-windows-amd64.zip", filename: "Reasonix-windows-amd64.zip"},
+	}
+)
 
 // githubManifestFallback is the stable channel's last-resort manifest source.
 // dl.reasonix.io and crash.reasonix.io share one Cloudflare zone, so bot
@@ -113,8 +146,37 @@ func updaterUserAgent(selected string) string {
 
 // downloadPage is the human-facing releases page shown when self-update is
 // unavailable (macOS) or the manifest omits its own link.
-func downloadPage() string {
-	return downloadPageURL
+func downloadPage(selected string) string {
+	u, _ := url.Parse(downloadPageURL)
+	query := u.Query()
+	query.Set("download", "desktop")
+	query.Set("channel", normalizeUpdateChannel(selected))
+	u.RawQuery = query.Encode()
+	return u.String()
+}
+
+func manifestDownloadPage(selected, manifestPage string) string {
+	manifestPage = strings.TrimSpace(manifestPage)
+	if manifestPage == "" {
+		return downloadPage(selected)
+	}
+	u, err := url.Parse(manifestPage)
+	if err != nil ||
+		u.Scheme != "https" ||
+		u.Hostname() == "" ||
+		u.User != nil {
+		return downloadPage(selected)
+	}
+	host := strings.ToLower(u.Hostname())
+	if host != "reasonix.io" && !strings.HasSuffix(host, ".reasonix.io") {
+		return u.String()
+	}
+	query := u.Query()
+	query.Set("download", "desktop")
+	query.Set("channel", normalizeUpdateChannel(selected))
+	u.RawQuery = query.Encode()
+	u.Fragment = "start"
+	return u.String()
 }
 
 // UpdateInfo is the CheckUpdate result that drives the frontend's update banner.
@@ -138,20 +200,24 @@ type UpdateInfo struct {
 // UpdateDownloadResult is returned after an artifact has been downloaded,
 // verified, and stored in the local updater cache.
 type UpdateDownloadResult struct {
-	Version string `json:"version"`
-	Channel string `json:"channel"`
-	Path    string `json:"path"`
-	Size    int64  `json:"size"`
-	SHA256  string `json:"sha256"`
+	RequestID string `json:"requestId"`
+	Version   string `json:"version"`
+	Channel   string `json:"channel"`
+	Path      string `json:"path"`
+	Size      int64  `json:"size"`
+	SHA256    string `json:"sha256"`
 }
 
 // updateProgress is the payload of the "updater:progress" Wails event emitted
 // throughout DownloadUpdate / InstallUpdate.
 type updateProgress struct {
-	Phase    string `json:"phase"` // downloading | verifying | downloaded | authorizing | installing | done | error
-	Received int64  `json:"received"`
-	Total    int64  `json:"total"`
-	Err      string `json:"err,omitempty"`
+	RequestID string `json:"requestId"`
+	Version   string `json:"version"`
+	Channel   string `json:"channel"`
+	Phase     string `json:"phase"` // downloading | verifying | downloaded | authorizing | installing | done | error
+	Received  int64  `json:"received"`
+	Total     int64  `json:"total"`
+	Err       string `json:"err,omitempty"`
 }
 
 func httpClient() (*http.Client, error) { return newHTTPClient(false) }
@@ -165,7 +231,42 @@ func newHTTPClient(forceIPv4 bool) (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{ForceIPv4: forceIPv4})
+	c, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{ForceIPv4: forceIPv4})
+	if err != nil {
+		return nil, err
+	}
+	c.CheckRedirect = validateUpdateRedirect
+	return c, nil
+}
+
+func validateUpdateRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("update: stopped after 10 redirects")
+	}
+	if req == nil || req.URL == nil {
+		return errors.New("update: redirect has no target URL")
+	}
+	if !strings.EqualFold(req.URL.Scheme, "https") {
+		return fmt.Errorf("update: refusing redirect to non-HTTPS URL %q", req.URL.String())
+	}
+	if req.URL.Hostname() == "" {
+		return fmt.Errorf("update: refusing redirect without a hostname %q", req.URL.String())
+	}
+	if req.URL.User != nil {
+		return fmt.Errorf("update: refusing redirect with userinfo %q", req.URL.String())
+	}
+	if req.URL.Port() != "" || !isTrustedUpdateRedirectHost(req.URL.Hostname()) {
+		return fmt.Errorf("update: refusing redirect to untrusted host %q", req.URL.Host)
+	}
+	return nil
+}
+
+func isTrustedUpdateRedirectHost(host string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	return host == "reasonix.io" ||
+		strings.HasSuffix(host, ".reasonix.io") ||
+		host == "github.com" ||
+		strings.HasSuffix(host, ".githubusercontent.com")
 }
 
 // canSelfUpdate reports whether in-place update is possible. Windows and Linux
@@ -204,20 +305,106 @@ func normalizeVersion(v string) (string, bool) {
 // contain an old test-signed vX.Y.Z-canary.N build until the first Preview
 // release mirrors over it; new Preview clients must skip that manifest.
 func validateManifestChannel(selected string, m *update.Manifest) error {
-	version, ok := normalizeVersion(m.Version)
-	if !ok {
-		return fmt.Errorf("%s manifest has invalid version %q", normalizeUpdateChannel(selected), m.Version)
-	}
-	prerelease := semver.Prerelease(version)
 	switch normalizeUpdateChannel(selected) {
 	case "preview":
-		if !strings.HasPrefix(prerelease, "-preview.") {
+		if !previewDesktopVersionRE.MatchString(m.Version) {
 			return fmt.Errorf("preview manifest has non-Preview version %q", m.Version)
 		}
 	default:
-		if prerelease != "" {
-			return fmt.Errorf("stable manifest has prerelease version %q", m.Version)
+		if !stableDesktopVersionRE.MatchString(m.Version) {
+			return fmt.Errorf("stable manifest has invalid release version %q", m.Version)
 		}
+	}
+	return nil
+}
+
+func desktopReleaseTag(_ string, version string) string {
+	return "desktop-" + version
+}
+
+func desktopAssetBases(selected, version string, allowLegacyPreview bool) []string {
+	tag := desktopReleaseTag(selected, version)
+	bases := []string{fmt.Sprintf("%s/%s/", r2Base, tag)}
+	switch normalizeUpdateChannel(selected) {
+	case "preview":
+		if allowLegacyPreview {
+			bases = append(bases, r2Base+"/desktop-preview/")
+		}
+	default:
+		bases = append(bases, fmt.Sprintf(
+			"https://github.com/esengine/DeepSeek-Reasonix/releases/download/%s/",
+			tag,
+		))
+	}
+	return bases
+}
+
+func validateManifestAsset(selected, version, filename string, asset update.Asset, allowLegacyPreview bool) (string, error) {
+	base := ""
+	for _, candidate := range desktopAssetBases(selected, version, allowLegacyPreview) {
+		if asset.URL == candidate+filename {
+			base = candidate
+			break
+		}
+	}
+	if base == "" {
+		return "", fmt.Errorf("asset URL %q is not the official %s path for %s", asset.URL, normalizeUpdateChannel(selected), filename)
+	}
+	if asset.Sig != asset.URL+".minisig" {
+		return "", fmt.Errorf("asset signature URL %q does not match %q", asset.Sig, asset.URL+".minisig")
+	}
+	if asset.Size <= 0 || asset.Size > maxDesktopReleaseAssetSize {
+		return "", fmt.Errorf("asset %s has invalid size %d", filename, asset.Size)
+	}
+	if !sha256RE.MatchString(asset.SHA256) {
+		return "", fmt.Errorf("asset %s has invalid SHA-256 %q", filename, asset.SHA256)
+	}
+	return base, nil
+}
+
+func validateDesktopManifest(selected string, m *update.Manifest) error {
+	selected = normalizeUpdateChannel(selected)
+	if err := validateManifestChannel(selected, m); err != nil {
+		return err
+	}
+	if m.DownloadPage != manifestDownloadPageURL {
+		return fmt.Errorf("%s manifest has invalid download page %q", selected, m.DownloadPage)
+	}
+	// Older public manifests predate the two website-only download assets. Keep
+	// accepting their six signed updater artifacts so an upgrade to the first
+	// release containing this validator does not strand existing Stable/Preview
+	// users. Once downloads is present it is a new-format manifest: all eight
+	// assets are mandatory and Preview must use the immutable version directory.
+	legacyManifest := m.Downloads == nil
+	requiredAssets := append([]requiredDesktopAsset(nil), requiredDesktopUpdaterAssets...)
+	if !legacyManifest {
+		requiredAssets = append(requiredAssets, requiredDesktopDownloadAssets...)
+	}
+	base := ""
+	for _, required := range requiredAssets {
+		var assets map[string]update.Asset
+		switch required.group {
+		case "platforms":
+			assets = m.Platforms
+		case "native_packages":
+			assets = m.NativePackages
+		case "downloads":
+			assets = m.Downloads
+		default:
+			return fmt.Errorf("unsupported manifest asset group %q", required.group)
+		}
+		asset, ok := assets[required.key]
+		if !ok {
+			return fmt.Errorf("%s manifest has no %s asset for %s", selected, required.group, required.key)
+		}
+		assetBase, err := validateManifestAsset(selected, m.Version, required.filename, asset, legacyManifest)
+		if err != nil {
+			return fmt.Errorf("%s %s asset: %w", required.group, required.key, err)
+		}
+		if base != "" && assetBase != base {
+			return fmt.Errorf("%s manifest mixes asset bases %q and %q", selected, base, assetBase)
+		}
+		base = assetBase
 	}
 	return nil
 }
@@ -242,7 +429,7 @@ func fetchManifest(ctx context.Context, c, fallback *http.Client, selected strin
 			errs = append(errs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}
-		if err := validateManifestChannel(selected, &m); err != nil {
+		if err := validateDesktopManifest(selected, &m); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", url, err))
 			continue
 		}
@@ -257,13 +444,13 @@ func fetchManifest(ctx context.Context, c, fallback *http.Client, selected strin
 func fetchManifestBytes(ctx context.Context, c, fallback *http.Client, selected, url string) ([]byte, error) {
 	attemptTimeout := manifestEndpointTimeout / 2
 	attemptCtx, cancel := context.WithTimeout(ctx, attemptTimeout)
-	data, err := fetchBytesOnce(attemptCtx, c, selected, url)
+	data, err := fetchBytesOnce(attemptCtx, c, selected, url, maxDesktopManifestSize)
 	cancel()
 	if err == nil || !isTransientFetchError(err) || fallback == nil {
 		return data, err
 	}
 	attemptCtx, cancel = context.WithTimeout(ctx, attemptTimeout)
-	fallbackData, fallbackErr := fetchBytesOnce(attemptCtx, fallback, selected, url)
+	fallbackData, fallbackErr := fetchBytesOnce(attemptCtx, fallback, selected, url, maxDesktopManifestSize)
 	cancel()
 	if fallbackErr == nil {
 		return fallbackData, nil
@@ -286,10 +473,7 @@ func evaluateWithProfile(current string, m *update.Manifest, profile installProf
 // profile and selected update channel are known.
 func evaluateWithProfileForChannel(current, selected string, m *update.Manifest, profile installProfile) UpdateInfo {
 	selected = normalizeUpdateChannel(selected)
-	page := m.DownloadPage
-	if page == "" {
-		page = downloadPage()
-	}
+	page := manifestDownloadPage(selected, m.DownloadPage)
 	info := UpdateInfo{
 		Current:           current,
 		Latest:            m.Version,
@@ -401,6 +585,11 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	}
 	name := tmp.Name()
 	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
 		tmp.Close()
 		_ = os.Remove(name)
 		return err
@@ -616,6 +805,9 @@ type httpStatusError struct {
 func (e *httpStatusError) Error() string { return fmt.Sprintf("GET %s: %s", e.url, e.status) }
 
 func isTransientFetchError(err error) bool {
+	if errors.Is(err, errUpdateResponseTooLarge) {
+		return false
+	}
 	var statusErr *httpStatusError
 	if !errors.As(err, &statusErr) {
 		return true
@@ -636,6 +828,15 @@ func fetchBytesFallback(ctx context.Context, c, fallback *http.Client, url strin
 }
 
 func fetchBytesFallbackForChannel(ctx context.Context, c, fallback *http.Client, selected, url string) ([]byte, error) {
+	return fetchBytesFallbackForChannelSized(ctx, c, fallback, selected, url, maxDesktopManifestSize)
+}
+
+func fetchBytesFallbackForChannelSized(
+	ctx context.Context,
+	c, fallback *http.Client,
+	selected, url string,
+	maxBytes int64,
+) ([]byte, error) {
 	selected = normalizeUpdateChannel(selected)
 	var data []byte
 	err := retryTransient(ctx, func(attempt int) error {
@@ -645,14 +846,19 @@ func fetchBytesFallbackForChannel(ctx context.Context, c, fallback *http.Client,
 		}
 		var e error
 		attemptCtx, cancel := context.WithTimeout(ctx, fetchAttemptTimeout)
-		data, e = fetchBytesOnce(attemptCtx, client, selected, url)
+		data, e = fetchBytesOnce(attemptCtx, client, selected, url, maxBytes)
 		cancel()
 		return e
 	})
 	return data, err
 }
 
-func fetchBytesOnce(ctx context.Context, c *http.Client, selected, url string) ([]byte, error) {
+var errUpdateResponseTooLarge = errors.New("update: response exceeds allowed size")
+
+func fetchBytesOnce(ctx context.Context, c *http.Client, selected, url string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("update: invalid response size limit %d", maxBytes)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
@@ -666,7 +872,17 @@ func fetchBytesOnce(ctx context.Context, c *http.Client, selected, url string) (
 	if resp.StatusCode != http.StatusOK {
 		return nil, &httpStatusError{url: url, status: resp.Status, code: resp.StatusCode}
 	}
-	return io.ReadAll(resp.Body)
+	if resp.ContentLength > maxBytes {
+		return nil, fmt.Errorf("%w: GET %s declared %d bytes, maximum is %d", errUpdateResponseTooLarge, url, resp.ContentLength, maxBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: GET %s exceeded %d bytes", errUpdateResponseTooLarge, url, maxBytes)
+	}
+	return data, nil
 }
 
 // download fetches url into memory, invoking onProgress as bytes arrive. A transient
@@ -680,16 +896,23 @@ func download(ctx context.Context, c, fallback *http.Client, url string, total i
 
 func downloadForChannel(ctx context.Context, c, fallback *http.Client, selected, url string, total int64, onProgress func(received, total int64)) ([]byte, error) {
 	selected = normalizeUpdateChannel(selected)
+	if total < 0 || total > maxDesktopReleaseAssetSize {
+		return nil, fmt.Errorf("update: invalid expected asset size %d", total)
+	}
+	expectedSize := total
 	var buf bytes.Buffer
 	err := retryTransient(ctx, func(attempt int) error {
 		client := c
 		if attempt > 1 && fallback != nil {
 			client = fallback
 		}
-		return downloadInto(ctx, client, selected, url, &buf, &total, onProgress)
+		return downloadInto(ctx, client, selected, url, expectedSize, &buf, &total, onProgress)
 	})
 	if err != nil {
 		return nil, err
+	}
+	if expectedSize > 0 && int64(buf.Len()) != expectedSize {
+		return nil, fmt.Errorf("update: downloaded size mismatch: got %d want %d", buf.Len(), expectedSize)
 	}
 	return buf.Bytes(), nil
 }
@@ -699,7 +922,7 @@ func downloadForChannel(ctx context.Context, c, fallback *http.Client, selected,
 // remaining bytes; a 200 means the server ignored Range, so buf is reset and the
 // whole file re-downloaded. total is refined from the response for the progress
 // denominator (Content-Length on 200, the size field of Content-Range on 206).
-func downloadInto(ctx context.Context, c *http.Client, selected, url string, buf *bytes.Buffer, total *int64, onProgress func(received, total int64)) error {
+func downloadInto(ctx context.Context, c *http.Client, selected, url string, expectedSize int64, buf *bytes.Buffer, total *int64, onProgress func(received, total int64)) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
@@ -717,18 +940,38 @@ func downloadInto(ctx context.Context, c *http.Client, selected, url string, buf
 	case http.StatusOK:
 		buf.Reset()
 		if resp.ContentLength > 0 {
+			if resp.ContentLength > maxDesktopReleaseAssetSize {
+				return fmt.Errorf("update: response size %d exceeds maximum %d", resp.ContentLength, maxDesktopReleaseAssetSize)
+			}
 			*total = resp.ContentLength
 		}
 	case http.StatusPartialContent:
 		if t := totalFromContentRange(resp.Header.Get("Content-Range")); t > 0 {
+			if t > maxDesktopReleaseAssetSize {
+				return fmt.Errorf("update: response size %d exceeds maximum %d", t, maxDesktopReleaseAssetSize)
+			}
 			*total = t
 		}
 	default:
 		return fmt.Errorf("GET %s: %s", url, resp.Status)
 	}
 	have := int64(buf.Len())
-	pr := &progressReader{r: resp.Body, received: have, lastEmit: have, total: *total, onProgress: onProgress}
+	if expectedSize > 0 && have > expectedSize {
+		return fmt.Errorf("update: downloaded size exceeds manifest: got at least %d want %d", have, expectedSize)
+	}
+	limit := maxDesktopReleaseAssetSize - have + 1
+	if expectedSize > 0 {
+		limit = expectedSize - have + 1
+	}
+	body := io.LimitReader(resp.Body, limit)
+	pr := &progressReader{r: body, received: have, lastEmit: have, total: *total, onProgress: onProgress}
 	_, err = io.Copy(buf, pr)
+	if err == nil && expectedSize > 0 && int64(buf.Len()) > expectedSize {
+		return fmt.Errorf("update: downloaded size exceeds manifest: got at least %d want %d", buf.Len(), expectedSize)
+	}
+	if err == nil && int64(buf.Len()) > maxDesktopReleaseAssetSize {
+		return fmt.Errorf("update: downloaded size exceeds maximum %d", maxDesktopReleaseAssetSize)
+	}
 	return err
 }
 
@@ -799,36 +1042,138 @@ func extractBinary(targz []byte, name string) ([]byte, error) {
 	return nil, fmt.Errorf("update: %q not found in archive", name)
 }
 
+func extractLinuxReleaseUnit(targz []byte) (map[string][]byte, error) {
+	const (
+		desktop = "reasonix-desktop"
+		guard   = "reasonix-guard"
+		cli     = "reasonix"
+	)
+	want := map[string]struct{}{desktop: {}, guard: {}, cli: {}}
+	found := make(map[string][]byte, len(want))
+	gz, err := gzip.NewReader(bytes.NewReader(targz))
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		name := path.Base(strings.TrimSpace(h.Name))
+		if _, ok := want[name]; !ok {
+			continue
+		}
+		if h.Typeflag != tar.TypeReg || h.Size < 0 {
+			return nil, fmt.Errorf("update: release member %q is not a regular file", name)
+		}
+		if _, duplicate := found[name]; duplicate {
+			return nil, fmt.Errorf("update: release member %q appears more than once", name)
+		}
+		body, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, err
+		}
+		found[name] = body
+	}
+	if len(found) != len(want) {
+		for name := range want {
+			if _, ok := found[name]; !ok {
+				return nil, fmt.Errorf("update: release member %q not found in archive", name)
+			}
+		}
+	}
+	return found, nil
+}
+
 // applyLinux replaces the running binary with the one inside the downloaded
 // tar.gz; the caller relaunches afterwards.
-func applyLinux(targz []byte) error {
-	bin, err := extractBinary(targz, "reasonix-desktop")
+func applyLinux(targz []byte, prepared *repair.UpdateTransaction) error {
+	release, err := extractLinuxReleaseUnit(targz)
 	if err != nil {
 		return err
 	}
-	guard, err := extractBinary(targz, "reasonix-guard")
-	if err != nil {
-		return err
-	}
-	cli, err := extractBinary(targz, "reasonix")
-	if err != nil {
-		return err
-	}
-	exe := currentExecutablePath()
+	bin := release["reasonix-desktop"]
+	guard := release["reasonix-guard"]
+	cli := release["reasonix"]
+	exe := currentExecutablePathForLinux()
 	if exe == "" {
 		return fmt.Errorf("update: current executable path is unavailable")
 	}
-	if err := writeAtomic(filepath.Join(filepath.Dir(exe), "reasonix"), cli, 0o700); err != nil {
-		return fmt.Errorf("update CLI sidecar: %w", err)
+	releasePaths := releaseUnitPathsFor(filepath.Dir(exe), "linux")
+	if prepared == nil {
+		return fmt.Errorf("update: prepared transaction is unavailable")
 	}
-	if err := writeAtomic(filepath.Join(filepath.Dir(exe), "reasonix-guard"), guard, 0o700); err != nil {
-		return fmt.Errorf("update Guard: %w", err)
+	claimed, releaseClaim, err := repair.ClaimPendingFileUpdateExact(
+		prepared.ToVersion,
+		prepared.CreatedAt,
+		repair.UpdateTransactionID(prepared),
+		exe,
+		releasePaths,
+		2*time.Minute,
+	)
+	if err != nil {
+		return fmt.Errorf("update: claim prepared transaction: %w", err)
 	}
-	return selfupdate.Apply(bytes.NewReader(bin), selfupdate.Options{})
+	defer releaseClaim()
+	if err := repair.MarkUpdateApplyFailedExact(claimed, "Linux update publish did not complete"); err != nil {
+		return fmt.Errorf("update: record recovery intent: %w", err)
+	}
+	receipts, err := applyLinuxReleaseUnit(claimed, exe, bin, guard, cli)
+	if err != nil {
+		return err
+	}
+	if _, err := repair.RecordClaimedFileUpdateInstalled(claimed, receipts...); err != nil {
+		return fmt.Errorf("update: record installed release unit: %w", err)
+	}
+	// pending-update.json remains immutable; the transaction-unique sidecar now
+	// binds every installed member. A crash before marker cleanup is safe:
+	// startup correlates the exact transaction and rolls the release unit back.
+	_ = repair.ClearUpdateApplyFailureExact(claimed)
+	return nil
 }
 
-func applyWindowsFile(path, toVersion string) error {
-	return startWindowsUpdateHandoff(path, currentInstallDir(), currentLauncherPath(), toVersion)
+var currentExecutablePathForLinux = currentExecutablePath
+
+var applyLinuxReleaseUnit = func(
+	claimed *repair.UpdateTransaction,
+	exe string,
+	bin, guard, cli []byte,
+) ([]repair.FileUpdateInstallReceipt, error) {
+	receipts := make([]repair.FileUpdateInstallReceipt, 0, 3)
+	receipt, err := repair.PublishClaimedFileUpdateMemberExact(claimed, filepath.Join(filepath.Dir(exe), "reasonix"), cli, 0o700)
+	if err != nil {
+		return receipts, fmt.Errorf("update CLI sidecar: %w", err)
+	}
+	receipts = append(receipts, receipt)
+	receipt, err = repair.PublishClaimedFileUpdateMemberExact(claimed, filepath.Join(filepath.Dir(exe), "reasonix-guard"), guard, 0o700)
+	if err != nil {
+		return receipts, fmt.Errorf("update Guard: %w", err)
+	}
+	receipts = append(receipts, receipt)
+	receipt, err = repair.PublishClaimedFileUpdateMemberExact(claimed, exe, bin, 0o700)
+	if err != nil {
+		return receipts, fmt.Errorf("update desktop: %w", err)
+	}
+	receipts = append(receipts, receipt)
+	return receipts, nil
+}
+
+func applyWindowsFile(path, expectedSHA256 string, prepared *repair.UpdateTransaction) error {
+	if prepared == nil {
+		return fmt.Errorf("update: prepared transaction is unavailable")
+	}
+	return startWindowsUpdateHandoff(
+		path,
+		expectedSHA256,
+		currentInstallDir(),
+		currentLauncherPath(),
+		prepared,
+	)
 }
 
 func currentExecutablePath() string {
@@ -861,11 +1206,28 @@ func updateSiblingArtifacts() []string {
 	if dir == "" {
 		return nil
 	}
-	names := updateSiblingNames(runtime.GOOS)
-	if len(names) == 0 {
+	paths := releaseUnitPathsFor(dir, runtime.GOOS)
+	if len(paths) <= 1 {
 		return nil
 	}
+	return paths[1:]
+}
+
+func releaseUnitPathsFor(dir, goos string) []string {
+	if dir == "" {
+		return nil
+	}
+	names := updateSiblingNames(goos)
 	paths := make([]string, 0, len(names))
+	switch goos {
+	case "linux":
+		paths = append(paths, filepath.Join(dir, "reasonix-desktop"))
+	case "windows":
+		paths = append(paths, filepath.Join(dir, "reasonix-desktop.exe"))
+	}
+	if len(names) == 0 {
+		return paths
+	}
 	for _, name := range names {
 		paths = append(paths, filepath.Join(dir, name))
 	}

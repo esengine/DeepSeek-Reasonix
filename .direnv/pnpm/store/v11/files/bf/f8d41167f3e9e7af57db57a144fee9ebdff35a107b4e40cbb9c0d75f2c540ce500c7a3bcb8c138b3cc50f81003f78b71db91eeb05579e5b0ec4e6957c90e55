@@ -1,0 +1,50 @@
+{
+  "name": "remark-math",
+  "version": "6.0.0",
+  "description": "remark plugin to parse and stringify math",
+  "license": "MIT",
+  "keywords": [
+    "katex",
+    "latex",
+    "markdown",
+    "math",
+    "mdast",
+    "plugin",
+    "remark",
+    "remark-plugin",
+    "tex",
+    "unified"
+  ],
+  "repository": "https://github.com/remarkjs/remark-math/tree/main/packages/remark-math",
+  "bugs": "https://github.com/remarkjs/remark-math/issues",
+  "funding": {
+    "type": "opencollective",
+    "url": "https://opencollective.com/unified"
+  },
+  "author": "Junyoung Choi <fluke8259@gmail.com> (https://rokt33r.github.io)",
+  "contributors": [
+    "Junyoung Choi <fluke8259@gmail.com> (https://rokt33r.github.io)",
+    "Titus Wormer <tituswormer@gmail.com> (https://wooorm.com)"
+  ],
+  "sideEffects": false,
+  "type": "module",
+  "exports": "./index.js",
+  "files": [
+    "lib/",
+    "index.d.ts",
+    "index.js"
+  ],
+  "dependencies": {
+    "@types/mdast": "^4.0.0",
+    "mdast-util-math": "^3.0.0",
+    "micromark-extension-math": "^3.0.0",
+    "unified": "^11.0.0"
+  },
+  "scripts": {
+    "test-api": "node --conditions development test.js",
+    "test": "npm run build && npm run test-api"
+  },
+  "xo": {
+    "prettier": true
+  }
+}

@@ -1,0 +1,8 @@
+./doublestar.go
+./glob.go
+./globoptions.go
+./globwalk.go
+./match.go
+./utils.go
+./utils_unix.go
+./validate.go

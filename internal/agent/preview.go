@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"regexp"
 	"strings"
+
+	"reasonix/internal/provider"
 )
 
 var reTransientUserBlock = regexp.MustCompile(`(?s)^\s*<(?:response-language|reasoning-language|memory-update|background-jobs|active-goal|hook-context|capability-route|interrupted-turn-recovery)(?:\s+[^>]*)?>.*?</(?:response-language|reasoning-language|memory-update|background-jobs|active-goal|hook-context|capability-route|interrupted-turn-recovery)>\s*\n?`)
@@ -64,7 +66,21 @@ func StripTransientUserBlocks(content string) string {
 		s = next
 	}
 	s = stripTrailingDeliveryRuntime(s)
+	s = stripTrailingMemoryRecall(s)
 	return strings.TrimLeft(s, " \t\r\n")
+}
+
+func stripTrailingMemoryRecall(s string) string {
+	trimmed := strings.TrimRight(s, " \t\r\n")
+	const open = "<memory-recall>"
+	const close = "</memory-recall>"
+	if !strings.HasSuffix(trimmed, close) {
+		return s
+	}
+	if index := strings.LastIndex(trimmed, open); index >= 0 {
+		return strings.TrimRight(trimmed[:index], " \t\r\n")
+	}
+	return s
 }
 
 // unwrapMemoryCompilerExecution replaces a <memory-compiler-execution> contract
@@ -131,6 +147,61 @@ func UserPreviewText(content string) string {
 	s = HandoffTask(s)
 	s = StripTransientUserBlocks(s)
 	return strings.TrimSpace(s)
+}
+
+// UserMessageText returns the best user-authored view of a persisted user turn.
+// New sessions carry the exact raw text explicitly; older sessions fall back to
+// deterministic wrapper stripping.
+func UserMessageText(msg provider.Message) string {
+	if msg.RawContent != "" {
+		return strings.TrimSpace(msg.RawContent)
+	}
+	return UserPreviewText(msg.Content)
+}
+
+// migrateLegacyProviderContent canonicalizes both historical user-turn shapes:
+// legacy turns kept provider-visible text only in Content, while early Context
+// Engine v2 builds inverted Content and ProviderContent. Canonical sessions
+// keep provider-visible bytes in Content so previous releases replay them
+// safely, with user-authored text in RawContent for current display/search.
+func migrateLegacyProviderContent(msgs []provider.Message) []provider.Message {
+	var upgraded []provider.Message
+	for i, msg := range msgs {
+		if msg.Role != provider.RoleUser {
+			continue
+		}
+		switch {
+		case msg.ProviderContent != "":
+			if upgraded == nil {
+				upgraded = append([]provider.Message(nil), msgs...)
+			}
+			if upgraded[i].RawContent == "" {
+				upgraded[i].RawContent = msg.Content
+			}
+			upgraded[i].Content = msg.ProviderContent
+			upgraded[i].ProviderContent = ""
+		case msg.RawContent == "" && hasLegacyProviderWrapper(msg.Content):
+			if upgraded == nil {
+				upgraded = append([]provider.Message(nil), msgs...)
+			}
+			upgraded[i].RawContent = UserPreviewText(msg.Content)
+		}
+	}
+	if upgraded != nil {
+		return upgraded
+	}
+	return msgs
+}
+
+func hasLegacyProviderWrapper(content string) bool {
+	if ContainsMemoryCompilerExecution(content) || reTransientUserBlock.MatchString(content) {
+		return true
+	}
+	if stripTrailingDeliveryRuntime(content) != content {
+		return true
+	}
+	stripped := StripTransientUserBlocks(content)
+	return HandoffTask(stripped) != stripped
 }
 
 // SyntheticUserPrefixes lists the openings of host-injected user-role messages

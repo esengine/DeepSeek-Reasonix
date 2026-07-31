@@ -1,0 +1,15 @@
+{
+    "language": "en-US",
+    "messages": [
+        {
+            "id": [
+                "testMessage",
+                "Test message"
+            ],
+            "key": "Test message",
+            "message": "Test message",
+            "translation": "",
+            "position": "testdata/test60555/main.go:17:10"
+        }
+    ]
+}

@@ -1,0 +1,340 @@
+==================================
+Functions with typed parameters
+==================================
+
+function greeter(person: string) {
+  return "Hello, " + person;
+}
+
+function foo<T>(x: T): T {
+
+}
+
+function foo<T, U>(a: T[], f: (x: T) => U): U[] {
+
+}
+
+function foo<T, U>(this: T[]): U[] {
+  return []
+}
+
+function foo<const T, const U extends string>(x: T, y: U) {
+
+}
+
+---
+
+(program
+  (function_declaration
+    name: (identifier)
+    parameters: (formal_parameters (required_parameter pattern: (identifier) type: (type_annotation (predefined_type))))
+    body: (statement_block
+      (return_statement (binary_expression
+        left: (string (string_fragment))
+        right: (identifier)))))
+  (function_declaration
+    name: (identifier)
+    type_parameters: (type_parameters (type_parameter name: (type_identifier)))
+    parameters: (formal_parameters (required_parameter pattern: (identifier) type: (type_annotation (type_identifier))))
+    return_type: (type_annotation (type_identifier))
+    body: (statement_block))
+  (function_declaration
+    name: (identifier)
+    type_parameters: (type_parameters (type_parameter name: (type_identifier)) (type_parameter name: (type_identifier)))
+    parameters: (formal_parameters
+      (required_parameter
+        pattern: (identifier)
+        type: (type_annotation (array_type (type_identifier))))
+      (required_parameter
+        pattern: (identifier)
+        type: (type_annotation
+          (function_type
+            parameters: (formal_parameters (required_parameter pattern: (identifier) type: (type_annotation (type_identifier))))
+            return_type: (type_identifier)))))
+    return_type: (type_annotation (array_type (type_identifier)))
+    body: (statement_block))
+  (function_declaration
+    name: (identifier)
+    type_parameters: (type_parameters (type_parameter name: (type_identifier)) (type_parameter name: (type_identifier)))
+    parameters: (formal_parameters
+      (required_parameter
+        pattern: (this)
+        type: (type_annotation (array_type (type_identifier)))))
+    return_type: (type_annotation (array_type (type_identifier)))
+    body: (statement_block (return_statement (array))))
+  (function_declaration
+    name: (identifier)
+    type_parameters: (type_parameters
+      (type_parameter name: (type_identifier))
+      (type_parameter name: (type_identifier) constraint: (constraint (predefined_type))))
+    parameters: (formal_parameters
+      (required_parameter
+        pattern: (identifier)
+        type: (type_annotation (type_identifier)))
+      (required_parameter
+        pattern: (identifier)
+        type: (type_annotation (type_identifier))))
+    body: (statement_block)))
+
+==================================
+New object with type arguments
+==================================
+
+const lines = new Array<DiffLine>()
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (new_expression
+        (identifier)
+        (type_arguments (type_identifier))
+        (arguments)))))
+
+===================================================
+Function calls with array and tuple type arguments
+===================================================
+
+a.b<[C]>();
+a<C.D[]>();
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      function: (member_expression
+        object: (identifier)
+        property: (property_identifier))
+      type_arguments: (type_arguments (tuple_type (type_identifier)))
+      arguments: (arguments)))
+  (expression_statement
+    (call_expression
+      function: (identifier)
+      type_arguments: (type_arguments
+        (array_type (nested_type_identifier
+          module: (identifier)
+          name: (type_identifier))))
+    arguments: (arguments))))
+
+=========================================================
+Function calls with optional chaining and type arguments
+=========================================================
+
+A?.<B>();
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      (identifier)
+      (type_arguments (type_identifier))
+      (arguments))))
+
+==================================
+Arrow functions and generators with call signatures
+==================================
+
+<A>(amount, interestRate, duration): number => 2
+
+function* foo<A>(amount, interestRate, duration): number {
+	yield amount * interestRate * duration / 12
+}
+
+(module: any): number => 2
+
+---
+
+(program
+  (expression_statement
+    (arrow_function
+      type_parameters: (type_parameters (type_parameter name: (type_identifier)))
+      parameters: (formal_parameters
+        (required_parameter pattern: (identifier))
+        (required_parameter pattern: (identifier))
+        (required_parameter pattern: (identifier)))
+      return_type: (type_annotation (predefined_type))
+      body: (number)))
+    (generator_function_declaration
+      name: (identifier)
+      type_parameters: (type_parameters (type_parameter name: (type_identifier)))
+      parameters: (formal_parameters
+        (required_parameter pattern: (identifier))
+        (required_parameter pattern: (identifier))
+        (required_parameter pattern: (identifier)))
+      return_type: (type_annotation (predefined_type))
+      body: (statement_block
+        (expression_statement (yield_expression (binary_expression
+          left: (binary_expression left: (binary_expression left: (identifier) right: (identifier)) right: (identifier))
+          right: (number))))))
+  (expression_statement
+    (arrow_function
+      parameters: (formal_parameters (required_parameter pattern: (identifier) type: (type_annotation (predefined_type))))
+      return_type: (type_annotation (predefined_type))
+      body: (number))))
+
+==================================
+Arrow function with parameter named async
+==================================
+
+const x = async => async;
+
+---
+
+(program
+  (lexical_declaration (variable_declarator (identifier) (arrow_function (identifier) (identifier)))))
+
+==================================
+Super
+==================================
+
+class A extends B {
+    constructor(x: number, y: number) {
+        super(x);
+    }
+    public toString() {
+        return super.toString() + " y=" + this.y;
+    }
+}
+
+---
+
+(program
+  (class_declaration
+    name: (type_identifier)
+    (class_heritage (extends_clause value: (identifier)))
+    body: (class_body
+      (method_definition
+        name: (property_identifier)
+        parameters: (formal_parameters
+          (required_parameter pattern: (identifier) type: (type_annotation (predefined_type)))
+          (required_parameter pattern: (identifier) type: (type_annotation (predefined_type))))
+        body: (statement_block
+          (expression_statement (call_expression
+            function: (super)
+            arguments: (arguments (identifier))))))
+      (method_definition
+        (accessibility_modifier)
+        name: (property_identifier)
+        parameters: (formal_parameters)
+        body: (statement_block
+          (return_statement
+            (binary_expression
+              left: (binary_expression
+                left: (call_expression
+                  function: (member_expression
+                    object: (super)
+                    property: (property_identifier))
+                  arguments: (arguments))
+                right: (string (string_fragment)))
+              right: (member_expression
+                object: (this)
+                property: (property_identifier)))))))))
+
+
+==================
+Function signature
+==================
+
+export default function foo(): bar
+
+---
+
+(program
+  (export_statement
+    (function_signature
+      (identifier)
+      (formal_parameters)
+      (type_annotation (type_identifier)))))
+
+=============================================================
+Ambiguity between function signature and function declaration
+=============================================================
+
+function foo()
+{}
+
+function foo(bar)
+function foo(bar): baz;
+function foo(bar)
+
+function foo(): () => { [key: foo]: bar }
+function foo(): () => { [key: foo]: bar } {}
+
+---
+
+(program
+  (function_declaration
+    name: (identifier)
+    parameters: (formal_parameters)
+    body: (statement_block))
+  (function_signature
+    name: (identifier)
+    parameters: (formal_parameters (required_parameter pattern: (identifier))))
+  (function_signature
+    name: (identifier)
+    parameters: (formal_parameters (required_parameter pattern: (identifier)))
+    return_type: (type_annotation (type_identifier)))
+  (function_signature
+    name: (identifier)
+    parameters: (formal_parameters
+      (required_parameter pattern: (identifier))))
+  (function_signature
+    name: (identifier)
+    parameters: (formal_parameters)
+    return_type: (type_annotation
+      (function_type
+        parameters: (formal_parameters)
+        return_type: (object_type
+          (index_signature
+            name: (identifier)
+            index_type: (type_identifier)
+            type: (type_annotation (type_identifier)))))))
+  (function_declaration
+    name: (identifier)
+    parameters: (formal_parameters)
+    return_type: (type_annotation
+      (function_type
+        parameters: (formal_parameters)
+        return_type: (object_type
+          (index_signature
+            name: (identifier)
+            index_type: (type_identifier)
+            type: (type_annotation (type_identifier))))))
+    body: (statement_block)))
+
+====================================================================================
+Ambiguity between function signature and function declaration: comments and newlines
+====================================================================================
+
+function foo()
+  // above is a signature
+foo();
+
+function bar()
+  // above is a function declaration
+{}
+
+function foo()
+  : number;
+
+---
+
+(program
+  (function_signature (identifier) (formal_parameters))
+  (comment)
+  (expression_statement (call_expression (identifier) (arguments)))
+
+  (function_declaration
+    (identifier)
+    (formal_parameters)
+    (comment)
+    (statement_block))
+
+  (function_signature
+    (identifier)
+    (formal_parameters)
+    (type_annotation (predefined_type))))

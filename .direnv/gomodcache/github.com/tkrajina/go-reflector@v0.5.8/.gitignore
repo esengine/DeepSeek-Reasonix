@@ -1,0 +1,5 @@
+*.sw?
+tags
+.DS_Store
+/.idea
+

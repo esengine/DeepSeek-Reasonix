@@ -1,0 +1,49 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  schedule:
+    - cron: '0 3 * * 1'
+
+jobs:
+  analyze:
+    name: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+    permissions:
+      # required for codeql analysis
+      security-events: write
+
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: 'stable'
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          args: --timeout 120s --max-same-issues 50
+
+      - name: Bearer
+        uses: bearer/bearer-action@v2
+        with:
+          skip-path: 'docs/'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: go
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v4
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+
+      # - name: Install mdsf
+      #   uses: hougesen/mdsf@main
+      # - name: Run mdsf
+      #   run: mdsf --debug --log-level warn docs/

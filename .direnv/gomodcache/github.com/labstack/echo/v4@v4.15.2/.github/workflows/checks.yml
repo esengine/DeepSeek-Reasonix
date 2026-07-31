@@ -1,0 +1,46 @@
+name: Run checks
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read #  to fetch code (actions/checkout)
+
+env:
+  # run static analysis only with the latest Go version
+  LATEST_GO_VERSION: "1.26"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.LATEST_GO_VERSION }}
+          check-latest: true
+
+      - name: Run golint
+        run: |
+          go install golang.org/x/lint/golint@latest
+          golint -set_exit_status ./...
+
+      - name: Run staticcheck
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+      - name: Run govulncheck
+        run: |
+          go version
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

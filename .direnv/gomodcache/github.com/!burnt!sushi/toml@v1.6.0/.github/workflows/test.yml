@@ -1,0 +1,31 @@
+{
+  "name": "go test",
+  "on":   ["push", "pull_request"],
+  "jobs": {
+    "test": {
+      "strategy": {
+        "matrix": {
+          "go-version": ["1.18.x", "1.25.x"],
+          "os":         ["ubuntu-latest", "macos-latest", "windows-latest"]
+        }
+      },
+      "runs-on": "${{ matrix.os }}",
+      "env": {"GOPROXY": "direct"},
+      "steps": [{
+          "name": "Install Go",
+          "uses": "actions/setup-go@v4",
+          "with": {"go-version": "${{ matrix.go-version }}"}
+        }, {
+          "name": "Checkout code",
+          "uses": "actions/checkout@v4"
+        }, {
+          "name": "Test",
+          "run":  "go test -race ./..."
+        }, {
+          "name": "Test on 32bit",
+          "if":   "runner.os == 'Linux'",
+          "run":  "GOARCH=386 go test ./..."
+        }]
+    }
+  }
+}

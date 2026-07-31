@@ -1,0 +1,27 @@
+# Identical to newline.toml, but with comments that shouldn't affect the
+# results.
+
+trailing-comma-1 = {#comment
+	# comment
+	c = 1,#comment
+	#comment
+}#comment
+trailing-comma-2 = { c = 1, }#comment
+
+tbl-1 = {#comment
+	hello = "world",#comment
+	1     = 2,#comment
+	arr   = [1,#comment
+	         2,#comment
+	         3,#comment
+	        ],#comment
+	tbl = {#comment
+		 k = 1,#comment
+	}#comment
+}#comment
+
+tbl-2 = {#comment
+	k = """
+	Hello
+	"""#comment
+}#comment

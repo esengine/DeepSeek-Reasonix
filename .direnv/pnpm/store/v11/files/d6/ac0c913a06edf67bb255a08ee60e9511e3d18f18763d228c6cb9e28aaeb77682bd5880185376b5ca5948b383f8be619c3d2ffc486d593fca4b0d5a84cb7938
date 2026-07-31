@@ -1,0 +1,476 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:ev="http://www.w3.org/2001/xml-events" id="pvjs-diagram-1" version="1.1" baseProfile="full" preserveAspectRatio="xMidYMid" width="800" height="800" style="overflow: hidden; background-color:white; ">
+  <g id="viewport-20140818210236254" class="svg-pan-zoom_viewport" transform="matrix(0.8874098658561707,0,0,0.8874098658561707,76.00001460228304,233.02083809993746)">
+    <path d="M291.1752645502646,599.7195767195753C485.6382275132279,599.7195767195753,485.6382275132279,716.6455026455017,291.1752645502646,716.6455026455017C96.71230158730134,716.6455026455017,96.71230158730134,599.7195767195753,291.1752645502646,599.7195767195753M291.1752645502646,605.7195767195753C477.6382275132279,605.7195767195753,477.6382275132279,710.6455026455017,291.1752645502646,710.6455026455017C104.71230158730134,710.6455026455017,104.71230158730134,605.7195767195753,291.1752645502646,605.7195767195753"
+    fill="transparent" id="a0e3c" stroke-width="3" stroke="#c0c0c0" class="has-xref"></path>
+    <path d="M25.619047619048047,92.30952380952357C25.619047619048047,86.87573380952357,30.185257619048045,82.30952380952357,35.61904761904805,82.30952380952357L891.5000000000003,82.30952380952357C896.9337900000004,82.30952380952357,901.5000000000003,86.87573380952357,901.5000000000003,92.30952380952357L901.5000000000003,324.8333333333331C901.5000000000003,330.2671233333331,896.9337900000004,334.8333333333331,891.5000000000003,334.8333333333331L35.61904761904805,334.8333333333331C30.185257619048045,334.8333333333331,25.619047619048047,330.2671233333331,25.619047619048047,324.8333333333331L25.619047619048047,92.30952380952357M31.619047619048047,98.30952380952357C31.619047619048047,92.87573380952357,36.185257619048045,88.30952380952357,41.61904761904805,88.30952380952357L885.5000000000003,88.30952380952357C890.9337900000004,88.30952380952357,895.5000000000003,92.87573380952357,895.5000000000003,98.30952380952357L895.5000000000003,318.8333333333331C895.5000000000003,324.2671233333331,890.9337900000004,328.8333333333331,885.5000000000003,328.8333333333331L41.61904761904805,328.8333333333331C36.185257619048045,328.8333333333331,31.619047619048047,324.2671233333331,31.619047619048047,318.8333333333331L31.619047619048047,98.30952380952357"
+    fill="transparent" id="e459e" stroke-width="3" stroke="#c0c0c0" class="has-xref"></path>
+    <path d="M352.1904761904764,581.0000000000001L285,627" fill="transparent" id="ida73c84b7" stroke-width="1" stroke="#000000"></path>
+    <path d="M386.6666666666667,164.4873208379272L346.4363200446836,165.1225648258281" fill="transparent" stroke-width="1" id="id54cd1002" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M454.1904761904762,209.4761904761904L454.2,236" fill="transparent" stroke-width="1" id="idd98747a1" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M659.376506134835,132.73746377756174L632.4896407396504,159.76748817956675" fill="transparent" stroke-width="1" id="idfd21ef1c" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M670.380952380953,283.9523809523805L646.3999999999995,296.3999999999999" fill="transparent" stroke-width="1" id="ide734686c" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M392.1904761904765,499.6190476190473L437.1183927969269,515.469697967972" fill="transparent" stroke-width="1" id="id7fb4b630" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M547.809523809524,501.1904761904762L524.3691362507187,524.060977024626" fill="transparent" stroke-width="1" id="id7b27d8" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M392.1904761904765,452.2380952380956L418.8904761904764,425.80476190476196" fill="transparent" stroke-width="1" id="id6eef87c" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M474.3333333333335,427.66666666666697L474.2857142857143,383.3333333333333" fill="transparent" stroke-width="1" id="idfb69689" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M377.1904761904765,373.8333333333333L377.1904761904765,340.3333333333333" fill="transparent" id="b008b" stroke-width="1" stroke="#008040"></path>
+    <path d="M255.5238095238094,409.57142857142884L267.80952380952397,383.3333333333333" fill="transparent" stroke-width="1" id="id1e5724f9" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M205.33333333333334,174.4873208379272L205.08166969147004,236" fill="transparent" stroke-width="1" id="id37ab2a8b" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M547.0372388652227,543.3540352711274L520.761904761905,559.047619047619" fill="transparent" id="id5b3e22b6" stroke-width="1" stroke="#000000"></path>
+    <path d="M565.4761904761907,559.047619047619L489.35714285714295,494.26190476190493" fill="transparent" stroke-width="1" id="iddc51ad2b" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M367.1904761904764,561.0000000000001L469.6904761904763,494.26190476190493" fill="transparent" stroke-width="1" id="id7808eadf" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M565.1071428571432,392.8333333333333L489.35714285714295,475.26190476190493" fill="transparent" stroke-width="1" id="id9d3f4991" stroke="#000000" marker-start="url(#id-arrow-start-000000)" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M385.0238095238098,392.8333333333333L469.6904761904763,475.26190476190493" fill="transparent" stroke-width="1" id="idd2373b45" stroke="#000000" marker-start="url(#id-arrow-start-000000)" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M553.0238095238099,383.3333333333333L392.8571428571431,383.3333333333333" fill="transparent" stroke-width="1" id="idc6341a29" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M205.33333333333337,383.3333333333333L361.52380952380986,383.3333333333333" fill="transparent" stroke-width="1" id="id8511f007" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M131,320.3333333333333L316,246" fill="transparent" stroke-width="1" id="id22e28379" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M409,236L522,236.00000000000003" fill="transparent" stroke-width="1" id="id2d08a86c" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M196.00000000000003,373.8333333333333L231.66666666666663,340.3333333333333" fill="transparent" id="ide0f0a17c" stroke-width="1" stroke="#000000"></path>
+    <path d="M347,226L346,118" fill="transparent" stroke-width="1" id="id5693288b" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M177.33333333333334,373.8333333333333L146,340.3333333333333" fill="transparent" id="id6ca21b57" stroke-width="1" stroke="#000000"></path>
+    <path d="M377.1904761904765,320.3333333333333L378,246" fill="transparent" stroke-width="1" id="id436f346c" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M584,246.00000000000003L739.9999999999987,371.9999999999998" fill="transparent" stroke-width="1" id="id1e7f7971" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M666.9115312435517,184.89464744822337L704.5,180" fill="transparent" stroke-width="1" id="idad027bce" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M138.0771775082692,164.4873208379272L175.33333333333334,164.4873208379272" fill="transparent" stroke-width="1" id="id71c845e6" stroke="#ff0000" marker-end="url(#id-tbar-end-ff0000)"></path>
+    <path d="M160.0771775082692,236L285,236" fill="transparent" stroke-width="1" id="ida14b6441" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M584.482734566084,124.72359141038902L704.5,212.33333333333334" fill="transparent" stroke-width="1" id="id29bceef9" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M552.3160678994172,134.22359141038902L553,226.00000000000003" fill="transparent" stroke-width="1" id="idaf2a986" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <path d="M231.66666666666663,320.3333333333333L347,246" fill="transparent" stroke-width="1" id="ida9302f64" stroke="#000000" marker-end="url(#id-arrow-end-000000)"></path>
+    <g transform="translate(577.1904761904765 383.3333333333333)" font-weight="bold" id="text-for-fca" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">VLDL</text>
+    </g>
+    <g transform="translate(361.01851851851836 678.0092592592584)" font-weight="bold" id="text-for-f20" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Tissues</text>
+    </g>
+    <g transform="translate(813.7037037037032 451.70634920634876)" font-weight="bold" id="text-for-fbb" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Plasma</text>
+    </g>
+    <g transform="translate(377.19047619047655 383.3333333333333)" font-weight="bold" id="text-for-c83" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">IDL</text>
+    </g>
+    <g transform="translate(186.66666666666666 383.3333333333333)" font-weight="bold" id="text-for-d57" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">LDL</text>
+    </g>
+    <g transform="translate(479.5238095238097 484.76190476190493)" font-weight="bold" id="text-for-cdf" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">HDL</text>
+    </g>
+    <g transform="translate(848.0952380952393 68.09523809523814)" font-weight="bold" id="text-for-e46" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Cell Membrane</text>
+    </g>
+    <g transform="translate(552.3160678994171 124.72359141038902)" id="text-for-fa9" font-weight="bold" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Free FA</text>
+    </g>
+    <g transform="translate(756.6666666666667 180)" id="text-for-d24" font-weight="bold" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Phospholipid</text>
+    </g>
+    <g transform="translate(756.6666666666666 212.33333333333334)" id="text-for-c66" font-weight="bold" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Triglycerides</text>
+    </g>
+    <g transform="translate(856.6666666666666 320)" font-weight="bold" id="text-for-b93" fill="#000000" font-size="12">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Liver cell</text>
+    </g>
+    <g transform="translate(739.9999999999987 419.9999999999998)" id="text-for-f90e3" fill-opacity="0.1" font-weight="bold" fill="#808080" font-size="1">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Group object</text>
+    </g>
+    <path d="M532.309523809524,480.6904761904762L593.309523809524,480.6904761904762L593.309523809524,501.6904761904762L532.309523809524,501.6904761904762Z" fill="#ffffff" id="c4e" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(562.809523809524 491.1904761904762)" id="text-for-c4e" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Pltp</text>
+    </g>
+    <path d="M57.57717750826917,153.9873208379272L138.5771775082692,153.9873208379272L138.5771775082692,174.9873208379272L57.57717750826917,174.9873208379272Z" fill="#ffffff" id="e4e59" stroke-width="1" stroke="#ff0033" class="has-xref"></path>
+    <g transform="translate(98.07717750826917 164.4873208379272)" id="text-for-e4e59" font-weight="bold" fill="#ff0033" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Statin</text>
+    </g>
+    <path d="M244.5,626.5L325.5,626.5L325.5,647.5L244.5,647.5Z" fill="#ffffff" id="afd21" stroke-width="1" stroke="#0000ff" class="has-xref"></path>
+    <g transform="translate(285 637)" id="text-for-afd21" fill="#0000ff" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Cholesterol</text>
+    </g>
+    <path d="M284.5,225.5L409.5,225.5L409.5,246.5L284.5,246.5Z" fill="#ffffff" id="ba3f8" stroke-width="1" stroke="#0000ff" class="has-xref"></path>
+    <g transform="translate(347 236)" id="text-for-ba3f8" fill="#0000ff" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Cholesterol</text>
+    </g>
+    <path d="M35.57717750826919,225.5L160.5771775082692,225.5L160.5771775082692,246.5L35.57717750826919,246.5Z" fill="#ffffff" id="f6a60" stroke-width="1" stroke="#0000ff" class="has-xref"></path>
+    <g transform="translate(98.07717750826919 236)" id="text-for-f6a60" fill="#0000ff" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Acetyl-CoA</text>
+    </g>
+    <path d="M283.5,97.5L408.5,97.5L408.5,118.5L283.5,118.5Z" fill="#ffffff" id="ecd6d" stroke-width="1" stroke="#0000ff" class="has-xref"></path>
+    <g transform="translate(346 108)" id="text-for-ecd6d" fill="#0000ff" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Cholic acid</text>
+    </g>
+    <path d="M100.5,319.8333333333333L161.5,319.8333333333333L161.5,340.8333333333333L100.5,340.8333333333333Z" fill="#ffffff" id="c40" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(131 330.3333333333333)" id="text-for-c40" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Scarb1</text>
+    </g>
+    <path d="M709.4999999999987,379.4999999999998L770.4999999999987,379.4999999999998L770.4999999999987,400.4999999999998L709.4999999999987,400.4999999999998Z" fill="#ffffff" id="a5e" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(739.9999999999987 389.9999999999998)" id="text-for-a5e" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Apoc3</text>
+    </g>
+    <path d="M709.4999999999987,439.4999999999998L770.4999999999987,439.4999999999998L770.4999999999987,460.4999999999998L709.4999999999987,460.4999999999998Z" fill="#ffffff" id="a64" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(739.9999999999987 449.9999999999998)" id="text-for-a64" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Apoc2</text>
+    </g>
+    <path d="M709.4999999999987,419.4999999999998L770.4999999999987,419.4999999999998L770.4999999999987,440.4999999999998L709.4999999999987,440.4999999999998Z" fill="#ffffff" id="fad" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(739.9999999999987 429.9999999999998)" id="text-for-fad" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Apoe</text>
+    </g>
+    <path d="M709.4999999999987,399.4999999999998L770.4999999999987,399.4999999999998L770.4999999999987,420.4999999999998L709.4999999999987,420.4999999999998Z" fill="#ffffff" id="f9d" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(739.9999999999987 409.9999999999998)" id="text-for-f9d" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Apoc1</text>
+    </g>
+    <path d="M549.9761904761907,558.547619047619L610.9761904761907,558.547619047619L610.9761904761907,579.547619047619L549.9761904761907,579.547619047619Z" fill="#ffffff" id="b95" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(580.4761904761907 569.047619047619)" id="text-for-b95" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Apoa4</text>
+    </g>
+    <path d="M475.261904761905,558.547619047619L536.261904761905,558.547619047619L536.261904761905,579.547619047619L475.261904761905,579.547619047619Z" fill="#ffffff" id="e58" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(505.761904761905 569.047619047619)" id="text-for-e58" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Apoa1</text>
+    </g>
+    <path d="M521.5,225.50000000000003L646.5,225.50000000000003L646.5,246.50000000000003L521.5,246.50000000000003Z" fill="#ffffff" id="a24b2" stroke-width="1" stroke="#0000ff" class="has-xref"></path>
+    <g transform="translate(584 236.00000000000003)" id="text-for-a24b2" fill="#0000ff" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Cholesterol Ester</text>
+    </g>
+    <path d="M336.6904761904764,560.5000000000001L397.6904761904764,560.5000000000001L397.6904761904764,581.5000000000001L336.6904761904764,581.5000000000001Z" fill="#ffffff" id="d75" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(367.1904761904764 571.0000000000001)" id="text-for-d75" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Abca1</text>
+    </g>
+    <path d="M346.6904761904765,479.1190476190473L407.6904761904765,479.1190476190473L407.6904761904765,500.1190476190473L346.6904761904765,500.1190476190473Z" fill="#ffffff" id="f82" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(377.1904761904765 489.6190476190473)" id="text-for-f82" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Lcat</text>
+    </g>
+    <path d="M346.6904761904765,451.7380952380956L407.6904761904765,451.7380952380956L407.6904761904765,472.7380952380956L346.6904761904765,472.7380952380956Z" fill="#ffffff" id="b7b" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(377.1904761904765 462.2380952380956)" id="text-for-b7b" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Cetp</text>
+    </g>
+    <path d="M225.0238095238094,409.07142857142884L286.0238095238094,409.07142857142884L286.0238095238094,430.07142857142884L225.0238095238094,430.07142857142884Z" fill="#ffffff" id="af7" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(255.5238095238094 419.57142857142884)" id="text-for-af7" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Lipc</text>
+    </g>
+    <path d="M443.8333333333335,407.16666666666697L504.8333333333335,407.16666666666697L504.8333333333335,428.16666666666697L443.8333333333335,428.16666666666697Z" fill="#ffffff" id="c3e" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(474.3333333333335 417.66666666666697)" id="text-for-c3e" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Lpl</text>
+    </g>
+    <path d="M346.6904761904765,319.8333333333333L407.6904761904765,319.8333333333333L407.6904761904765,340.8333333333333L346.6904761904765,340.8333333333333Z" fill="#ffffff" id="a36" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(377.1904761904765 330.3333333333333)" id="text-for-a36" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Lrp1</text>
+    </g>
+    <path d="M201.16666666666666,319.8333333333333L262.16666666666663,319.8333333333333L262.16666666666663,340.8333333333333L201.16666666666666,340.8333333333333Z" fill="#ffffff" id="d72" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(231.66666666666666 330.3333333333333)" id="text-for-d72" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Ldlr</text>
+    </g>
+    <path d="M643.876506134835,112.23746377756173L704.876506134835,112.23746377756173L704.876506134835,133.23746377756174L643.876506134835,133.23746377756174Z" fill="#ffffff" id="be0" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(674.376506134835 122.73746377756173)" id="text-for-be0" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Dgat1</text>
+    </g>
+    <path d="M654.880952380953,263.4523809523805L715.880952380953,263.4523809523805L715.880952380953,284.4523809523805L654.880952380953,284.4523809523805Z" fill="#ffffff" id="f8e" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(685.380952380953 273.9523809523805)" id="text-for-f8e" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Mttp</text>
+    </g>
+    <path d="M423.6904761904762,188.9761904761904L484.6904761904762,188.9761904761904L484.6904761904762,209.9761904761904L423.6904761904762,209.9761904761904Z" fill="#ffffff" id="e6e" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(454.1904761904762 199.4761904761904)" id="text-for-e6e" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Soat1</text>
+    </g>
+    <path d="M386.1666666666667,153.9873208379272L447.1666666666667,153.9873208379272L447.1666666666667,174.9873208379272L386.1666666666667,174.9873208379272Z" fill="#ffffff" id="da7" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(416.6666666666667 164.4873208379272)" id="text-for-da7" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Cyp7a1</text>
+    </g>
+    <path d="M174.83333333333334,153.9873208379272L235.83333333333334,153.9873208379272L235.83333333333334,174.9873208379272L174.83333333333334,174.9873208379272Z" fill="#ffffff" id="e04" stroke-width="1" stroke="#000000" class="has-xref"></path>
+    <g transform="translate(205.33333333333334 164.4873208379272)" id="text-for-e04" fill="#000000" font-size="10">
+      <text id="text-line0" x="0" y="0em" dominant-baseline="central" text-anchor="middle">Hmgcr</text>
+    </g>
+    <g id="info-box-0" class="text-area info-box">
+      <text id="info-box-text0" class="item" x="0" y="14">
+        <tspan class="info-box-item-property-name">Title:</tspan>
+        <tspan class="info-box-item-property-value">Statin Pathway</tspan>
+      </text>
+      <text id="info-box-text1" class="item" x="0" y="28">
+        <tspan class="info-box-item-property-name">Organism:</tspan>
+        <tspan class="info-box-item-property-value">Mus musculus</tspan>
+      </text>
+    </g>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <text class="citation" transform="translate(0 0)"></text>
+    <defs>
+      <style type="text/css">
+        svg {
+          color-interpolation: auto;
+          image-rendering: auto;
+          shape-rendering: auto;
+          vector-effect: non-scaling-stroke;
+          background: white;
+          /* removed fill and stroke since they override marker specs */
+          /*	fill: white;
+    		stroke: black; */
+        }
+        /* default color for pathway elements */
+        .default-fill-color {
+          fill: black;
+        }
+        .default-stroke-color {
+          stroke: black;
+        }
+        /* default color of the background drawing board */
+        .board-fill-color {
+          fill: white;
+        }
+        .board-stroke-color {
+          stroke: white;
+        }
+        .text-area {
+          font-family: Sans-Serif, Helvetica, Arial;
+          text-align: center;
+          vertical-align: middle;
+          font-size: 10px;
+          fill: black;
+          fill-opacity: 1;
+          stroke: none;
+        }
+        .citation {
+          font-family: Sans-Serif, Helvetica, Arial;
+          text-align: center;
+          vertical-align: top;
+          font-size: 7px;
+          fill: #999999;
+          fill-opacity: 1;
+          stroke: none;
+        }
+        .info-box {
+          font-family: Sans-Serif;
+          font-size: 10px;
+          fill: black;
+          stroke: none;
+          text-align: left;
+          vertical-align: top;
+        }
+        .info-box-item-property-name {
+          font-weight: bold;
+        }
+        .info-box-item-property-value {} .data-node {
+          text-align: right;
+          fill-opacity: 1;
+          fill: white;
+          stroke: black;
+          stroke-width: 1;
+          stroke-dasharray: 0;
+          stroke-miterlimit: 1;
+          pointer-events: auto;
+        }
+        .data-node: hover {
+          cursor: pointer;
+        }
+        .has-xref: hover {
+          cursor: pointer;
+        }
+        .data-node.gene-product {} .metabolite {
+          stroke: blue;
+        }
+        .data-node.metabolite &gt;
+        .text-area {
+          fill: blue;
+          fill-opacity: 1;
+          stroke: none;
+        }
+        .data-node.pathway {
+          stroke: none;
+          fill-opacity: 0;
+        }
+        .data-node.pathway &gt;
+        .text-area {
+          fill: rgb(20, 150, 30);
+          fill-opacity: 1;
+          font-size: 12px;
+          font-weight: bold;
+        }
+        .data-node.protein {} .data-node.rna {} .data-node.unknown {} .label {
+          stroke: null;
+          stroke-width: 0;
+          fill-opacity: 0;
+          stroke-dasharray: 0;
+          stroke-miterlimit: 1;
+        }
+        .shape {
+          fill-opacity: 0;
+          stroke: black;
+          stroke-dasharray: 0;
+          stroke-miterlimit: 1;
+        }
+        .shape.none {
+          fill: none;
+          fill-opacity: 0;
+          stroke: none;
+        }
+        g.group-node &gt;
+        .shape {
+          fill-opacity: 0.098;
+          stroke: gray;
+          stroke-miterlimit: 1;
+          stroke-width: 1px;
+          pointer-events: none;
+        }
+        .group-node {
+          fill-opacity: 0.098;
+          stroke: gray;
+          stroke-miterlimit: 1;
+          stroke-width: 1px;
+          pointer-events: none;
+        }
+        .group-node &gt;
+        .text-area {
+          fill-opacity: 0.4;
+          font-family: Serif, Times;
+          font-size: 32px;
+          fill: black;
+          stroke-width: 0;
+          font-weight: bold;
+        }
+        .group-node.none {
+          fill: rgb(180, 180, 100);
+          stroke-dasharray: 5, 3;
+        }
+        .group-node.none &gt;
+        .text-area {
+          display: none;
+        }
+        /*.group-node.none:hover {
+		fill: rgb(255,180,100);
+		fill-opacity: 0.05;
+	}*/
+        .group-node.group {
+          fill-opacity: 0;
+          stroke: none;
+        }
+        .group-node.group &gt;
+        .text-area {
+          display: none;
+        }
+        /*.group-node.group:hover {
+		fill: rgb(0,0,255);
+		stroke-width: 1px;
+		stroke-dasharray: 5,3;
+		stroke: gray;
+		fill-opacity: 0.1;
+	}*/
+        .group-node.complex {
+          fill: rgb(180, 180, 100);
+        }
+        .group-node.complex &gt;
+        .text-area {
+          display: none;
+        }
+        /*.group-node.complex:hover {
+		fill: rgb(255,0,0);
+		fill-opacity: 0.05;
+	}*/
+        .group-node.pathway {
+          fill: rgb(0, 255, 0);
+          stroke-dasharray: 5, 3;
+        }
+        /*.group-node.pathway:hover {
+		fill: rgb(0,255,0);
+		fill-opacity: 0.2;
+	}*/
+        .group-node.pathway &gt;
+        .text-area {
+          fill: rgb(20, 150, 30);
+          stroke: rgb(20, 150, 30);
+        }
+        .cellular-component {
+          fill-opacity: 0;
+          stroke: silver;
+        }
+        .graphical-line {
+          fill: none;
+          stroke: black;
+          stroke-width: 1px;
+        }
+        .interaction {
+          fill: none;
+          stroke: black;
+          stroke-width: 1px;
+        }
+        marker {
+          /* this is what should work per the spec
+		   stroke-dasharray: none; */
+          /* but I need to add this to make it work in Safari */
+          stroke-dasharray: 9999999999999999999999999;
+        }
+        .marker-end {
+          -webkit-transform: rotate(180deg);
+          -webkit-transform-origin: 50% 50%;
+          -o-transform: rotate(180deg);
+          -o-transform-origin: 50% 50%;
+          transform: rotate(180deg);
+          transform-origin: 50% 50%;
+        }
+        .solid-stroke {
+          /* this is what should work per the spec
+		   stroke-dasharray: none; */
+          /* but I need to add this to make it work in Safari */
+          stroke-dasharray: 9999999999999999999999999;
+        }
+        .dashed-stroke {
+          stroke-dasharray: 5, 3;
+        }
+      </style>
+      <marker id="id-arrow-end-000000" orient="auto" markerUnits="strokeWidth" preserveAspectRatio="none" refY="6" viewBox="0 0 12 12" markerWidth="12" markerHeight="12" refX="12">
+        <g id="g-id-arrow-end-000000" transform="rotate(180, 6, 6)">
+          <rect x="0" y="5.4" width="2" height="1.2" stroke="white" fill="white"></rect>
+          <polygon points="12,11 0,6 12,1" stroke-width="0" fill="#000000"></polygon>
+        </g>
+      </marker>
+      <marker id="id-arrow-start-000000" orient="auto" markerUnits="strokeWidth" preserveAspectRatio="none" refY="6" viewBox="0 0 12 12" markerWidth="12" markerHeight="12" refX="0">
+        <g id="g-id-arrow-start-000000">
+          <rect x="0" y="5.4" width="2" height="1.2" stroke="white" fill="white"></rect>
+          <polygon points="12,11 0,6 12,1" stroke-width="0" fill="#000000"></polygon>
+        </g>
+      </marker>
+      <marker id="id-tbar-end-ff0000" orient="auto" markerUnits="strokeWidth" preserveAspectRatio="none" refY="10" viewBox="0 0 10 20" markerWidth="10" markerHeight="20" refX="10">
+        <g id="g-id-tbar-end-ff0000" transform="rotate(180, 5, 10)">
+          <rect x="0" y="9" width="8" height="2" fill="white"></rect>
+          <line x="0" y="0" width="12" height="12" stroke="#ff0000" stroke-width="1.8" x1="7" y1="0" x2="7" y2="20"></line>
+        </g>
+      </marker>
+      <style type="text/css">
+        .svg-pan-zoom-control {
+          cursor: pointer;
+          fill: black;
+          fill-opacity: 0.333;
+        }
+        .svg-pan-zoom-control: hover {
+          fill-opacity: 0.8;
+        }
+        .svg-pan-zoom-control-background {
+          fill: white;
+          fill-opacity: 0.5;
+        }
+        .svg-pan-zoom-control-background {
+          fill-opacity: 0.8;
+        }
+      </style>
+    </defs>
+  </g>
+</svg>

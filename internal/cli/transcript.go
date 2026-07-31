@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/base64"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -94,17 +96,42 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	case transcriptSourceBanner:
 		return strings.TrimRight(renderTUIBanner(m.label, source.raw, contentWidth), "\n")
 	case transcriptSourceReplayBundle:
-		var b strings.Builder
-		b.WriteString(renderTUIBanner(m.label, source.raw, contentWidth))
-		for _, section := range replaySectionsFor(source.history, contentWidth) {
-			b.WriteString(section)
-		}
-		return strings.TrimRight(b.String(), "\n")
+		return m.renderReplayBundle(source, contentWidth, renderAssistantMarkdown)
 	case transcriptSourceTurnReceipt:
 		return renderTurnReceiptBand(source.raw, contentWidth)
 	default:
 		return ""
 	}
+}
+
+func (m chatTUI) renderReplayBundle(
+	source transcriptSource,
+	contentWidth int,
+	renderAssistant func(string, int) string,
+) string {
+	var b strings.Builder
+	b.WriteString(renderTUIBanner(m.label, source.raw, contentWidth))
+	for _, section := range replaySectionsForWithAssistantRenderer(
+		source.history,
+		contentWidth,
+		renderAssistant,
+	) {
+		b.WriteString(section)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m chatTUI) renderReplayBundleCopy(
+	source transcriptSource,
+	contentWidth int,
+	prefix string,
+) string {
+	assistantIndex := 0
+	return m.renderReplayBundle(source, contentWidth, func(raw string, width int) string {
+		messagePrefix := prefix + "-" + strconv.Itoa(assistantIndex)
+		assistantIndex++
+		return renderAssistantMarkdownCopy(raw, width, messagePrefix)
+	})
 }
 
 const assistantTranscriptIndent = "  "
@@ -122,6 +149,28 @@ func renderAssistantMarkdown(raw string, contentWidth int) string {
 	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
 	renderer := newMarkdownRenderer(bodyWidth)
 	rendered := renderer.Render(raw)
+	if rendered == "" {
+		rendered = raw
+	}
+	body := strings.TrimRight(rendered, "\n")
+	header := indent + accent("◆") + " " + bold("Reasonix")
+	if body == "" {
+		return header
+	}
+	return header + "\n\n" + indentTranscriptBlock(body, indent)
+}
+
+// renderAssistantMarkdownCopy mirrors renderAssistantMarkdown's visible output
+// and adds zero-width math markers for on-demand clipboard reconstruction.
+func renderAssistantMarkdownCopy(raw string, contentWidth int, prefix string) string {
+	contentWidth = max(contentWidth, 1)
+	indent := assistantTranscriptIndent
+	if contentWidth <= visibleWidth(indent) {
+		indent = ""
+	}
+	bodyWidth := max(contentWidth-visibleWidth(indent), 1)
+	renderer := newMarkdownRenderer(bodyWidth)
+	rendered := renderer.RenderCopy(raw, prefix)
 	if rendered == "" {
 		rendered = raw
 	}
@@ -176,6 +225,50 @@ func (m *chatTUI) commitTranscriptSource(source transcriptSource) {
 	rendered := m.renderTranscriptSource(source, m.width)
 	*m.pendingCommit = append(*m.pendingCommit, rendered)
 	m.appendTranscriptBlock(rendered, source)
+}
+
+const (
+	copyMathStartPrefix = "\x1b]1337;reasonix-copy-math="
+	copyMathEndPrefix   = "\x1b]1337;reasonix-copy-math-end="
+	copyMathTerminator  = "\x07"
+)
+
+func copyMathStartMarker(id, source string) string {
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(source))
+	return copyMathStartPrefix + id + ";" + encoded + copyMathTerminator
+}
+
+func copyMathEndMarker(id string) string {
+	return copyMathEndPrefix + id + copyMathTerminator
+}
+
+// buildCopyTranscript renders semantic Markdown only when a copy is requested.
+// The visible text stays byte-for-byte equivalent after ANSI stripping, while
+// math markers retain the source needed to map display cells back to LaTeX.
+func (m chatTUI) buildCopyTranscript(contentWidth int) (string, int, bool) {
+	if len(m.transcriptSources) != len(m.transcript) {
+		return "", 0, false
+	}
+	var b strings.Builder
+	markers := 0
+	for i, source := range m.transcriptSources {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		switch source.kind {
+		case transcriptSourceMarkdown:
+			rendered := renderAssistantMarkdownCopy(source.raw, contentWidth, strconv.Itoa(i))
+			markers += strings.Count(rendered, copyMathStartPrefix)
+			b.WriteString(rendered)
+		case transcriptSourceReplayBundle:
+			rendered := m.renderReplayBundleCopy(source, contentWidth, strconv.Itoa(i))
+			markers += strings.Count(rendered, copyMathStartPrefix)
+			b.WriteString(rendered)
+		default:
+			b.WriteString(m.transcript[i])
+		}
+	}
+	return b.String(), markers, true
 }
 
 // transcriptResizeAnchor identifies the transcript block at the top of the
@@ -408,14 +501,134 @@ func selSpan(idx int, start, end selPos, cw int) (lo, hi int, ok bool) {
 	return lo, hi, true
 }
 
-// selectedText is the plain (ANSI-stripped) text of the active selection, lines
-// joined with '\n', for the clipboard.
-func (m chatTUI) selectedText() string {
-	if !m.sel.active || m.sel.empty() {
-		return ""
+type copyMathSpan struct {
+	start  int
+	end    int
+	id     string
+	source string
+}
+
+type copyTranscriptLine struct {
+	text string
+	math []copyMathSpan
+}
+
+type activeCopyMath struct {
+	id     string
+	source string
+	start  int
+}
+
+func parseCopyTranscript(wrapped string) ([]copyTranscriptLine, int, bool) {
+	rawLines := strings.Split(wrapped, "\n")
+	lines := make([]copyTranscriptLine, 0, len(rawLines))
+	var active *activeCopyMath
+	parsedMarkers := 0
+
+	for _, raw := range rawLines {
+		var clean strings.Builder
+		var spans []copyMathSpan
+		column := 0
+		position := 0
+
+		for position < len(raw) {
+			startAt := strings.Index(raw[position:], copyMathStartPrefix)
+			endAt := strings.Index(raw[position:], copyMathEndPrefix)
+			if startAt >= 0 {
+				startAt += position
+			}
+			if endAt >= 0 {
+				endAt += position
+			}
+
+			markerAt := -1
+			isStart := false
+			switch {
+			case startAt >= 0 && (endAt < 0 || startAt < endAt):
+				markerAt, isStart = startAt, true
+			case endAt >= 0:
+				markerAt = endAt
+			}
+			if markerAt < 0 {
+				chunk := raw[position:]
+				clean.WriteString(chunk)
+				column += ansi.StringWidth(chunk)
+				break
+			}
+
+			chunk := raw[position:markerAt]
+			clean.WriteString(chunk)
+			column += ansi.StringWidth(chunk)
+
+			prefix := copyMathEndPrefix
+			if isStart {
+				prefix = copyMathStartPrefix
+			}
+			payloadStart := markerAt + len(prefix)
+			terminatorAt := strings.Index(raw[payloadStart:], copyMathTerminator)
+			if terminatorAt < 0 {
+				return nil, 0, false
+			}
+			terminatorAt += payloadStart
+			payload := raw[payloadStart:terminatorAt]
+			position = terminatorAt + len(copyMathTerminator)
+
+			if isStart {
+				parts := strings.SplitN(payload, ";", 2)
+				if len(parts) != 2 || active != nil {
+					return nil, 0, false
+				}
+				decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
+				if err != nil {
+					return nil, 0, false
+				}
+				active = &activeCopyMath{id: parts[0], source: string(decoded), start: column}
+				parsedMarkers++
+				continue
+			}
+
+			if active == nil || active.id != payload {
+				return nil, 0, false
+			}
+			spans = append(spans, copyMathSpan{
+				start: active.start, end: column, id: active.id, source: active.source,
+			})
+			active = nil
+		}
+
+		if active != nil {
+			spans = append(spans, copyMathSpan{
+				start: active.start, end: column, id: active.id, source: active.source,
+			})
+			active.start = 0
+		}
+		lines = append(lines, copyTranscriptLine{text: clean.String(), math: spans})
 	}
-	lines := m.wrappedLines
-	start, end := m.sel.ordered()
+	if active != nil {
+		return nil, 0, false
+	}
+	return lines, parsedMarkers, true
+}
+
+func (m chatTUI) copyTranscriptLines() ([]copyTranscriptLine, bool) {
+	contentWidth := m.viewport.Width()
+	marked, expectedMarkers, ok := m.buildCopyTranscript(contentWidth)
+	if !ok {
+		return nil, false
+	}
+	lines, parsedMarkers, ok := parseCopyTranscript(wrapTranscript(marked, contentWidth))
+	if !ok || parsedMarkers != expectedMarkers || len(lines) != len(m.wrappedLines) {
+		return nil, false
+	}
+	for i := range lines {
+		if ansi.Strip(lines[i].text) != ansi.Strip(m.wrappedLines[i]) {
+			return nil, false
+		}
+	}
+	return lines, true
+}
+
+func selectedDisplayText(lines []string, start, end selPos) string {
 	var out []string
 	for idx := start.line; idx <= end.line && idx < len(lines); idx++ {
 		lo, hi := 0, ansi.StringWidth(lines[idx])
@@ -428,6 +641,62 @@ func (m chatTUI) selectedText() string {
 		out = append(out, strings.TrimRight(ansi.Strip(ansi.Cut(lines[idx], lo, hi)), " "))
 	}
 	return strings.Join(out, "\n")
+}
+
+func selectedCopyText(lines []copyTranscriptLine, start, end selPos) string {
+	seen := make(map[string]bool)
+	var out []string
+	for idx := start.line; idx <= end.line && idx < len(lines); idx++ {
+		line := lines[idx]
+		lo, hi := 0, ansi.StringWidth(line.text)
+		if idx == start.line {
+			lo = start.col
+		}
+		if idx == end.line {
+			hi = end.col
+		}
+
+		var selected strings.Builder
+		cursor := lo
+		touchedMath := false
+		for _, span := range line.math {
+			if span.end <= lo || span.start >= hi {
+				continue
+			}
+			touchedMath = true
+			if span.start > cursor {
+				selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, min(span.start, hi))))
+			}
+			if !seen[span.id] {
+				selected.WriteString(span.source)
+				seen[span.id] = true
+			}
+			cursor = max(cursor, min(span.end, hi))
+		}
+		if cursor < hi {
+			selected.WriteString(ansi.Strip(ansi.Cut(line.text, cursor, hi)))
+		}
+		if selected.Len() == 0 && touchedMath {
+			continue
+		}
+		out = append(out, strings.TrimRight(selected.String(), " "))
+	}
+	return strings.Join(out, "\n")
+}
+
+// selectedText is the plain text of the active display-cell selection. Math is
+// reconstructed on demand from semantic transcript sources; if the marked copy
+// rendition ever diverges from the visible transcript, the safe fallback keeps
+// the exact displayed text rather than applying mismatched coordinates.
+func (m chatTUI) selectedText() string {
+	if !m.sel.active || m.sel.empty() {
+		return ""
+	}
+	start, end := m.sel.ordered()
+	if lines, ok := m.copyTranscriptLines(); ok {
+		return selectedCopyText(lines, start, end)
+	}
+	return selectedDisplayText(m.wrappedLines, start, end)
 }
 
 // scrollbarThumb returns the thumb's [start, start+size) row span for a viewport

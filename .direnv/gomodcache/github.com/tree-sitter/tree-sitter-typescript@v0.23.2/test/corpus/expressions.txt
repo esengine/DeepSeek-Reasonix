@@ -1,0 +1,426 @@
+==================================
+As expressions
+==================================
+
+h as `hello`
+T as {} & { [t: T]: T }
+T as {} & { [t: T]: T } & { [g: G]: G }
+
+---
+
+(program
+  (expression_statement
+    (as_expression
+      (identifier)
+      (template_literal_type
+        (string_fragment))))
+  (expression_statement
+    (as_expression
+      (identifier)
+      (intersection_type
+        (object_type)
+        (object_type
+          (index_signature
+            (identifier)
+            (type_identifier)
+            (type_annotation
+              (type_identifier)))))))
+  (expression_statement
+    (as_expression
+      (identifier)
+      (intersection_type
+        (intersection_type
+          (object_type)
+          (object_type
+            (index_signature
+              (identifier)
+              (type_identifier)
+              (type_annotation
+                (type_identifier)))))
+        (object_type
+          (index_signature
+            (identifier)
+            (type_identifier)
+            (type_annotation
+              (type_identifier))))))))
+
+==================================
+Satisfies expressions
+==================================
+
+h satisfies `hello`
+T satisfies {} & { [t: T]: T }
+T satisfies {} & { [t: T]: T } & { [g: G]: G }
+
+---
+
+(program
+  (expression_statement
+    (satisfies_expression
+      (identifier)
+      (template_literal_type
+        (string_fragment))))
+  (expression_statement
+    (satisfies_expression
+      (identifier)
+      (intersection_type
+        (object_type)
+        (object_type
+          (index_signature
+            (identifier)
+            (type_identifier)
+            (type_annotation
+              (type_identifier)))))))
+  (expression_statement
+    (satisfies_expression
+      (identifier)
+      (intersection_type
+        (intersection_type
+          (object_type)
+          (object_type
+            (index_signature
+              (identifier)
+              (type_identifier)
+              (type_annotation
+                (type_identifier)))))
+        (object_type
+          (index_signature
+            (identifier)
+            (type_identifier)
+            (type_annotation
+              (type_identifier))))))))
+
+==================================
+Typeof expressions
+==================================
+
+typeof class {} === "function";
+
+typeof module === "object" && typeof module.exports === "object"
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (unary_expression
+        (class
+          (class_body)))
+      (string
+        (string_fragment))))
+  (expression_statement
+    (binary_expression
+      (binary_expression
+        (unary_expression
+          (identifier))
+        (string
+          (string_fragment)))
+      (binary_expression
+        (unary_expression
+          (member_expression
+            (identifier)
+            (property_identifier)))
+        (string
+          (string_fragment))))))
+
+==================================
+Array with empty elements
+==================================
+
+[, a, , b, , , , s, , , ]
+
+---
+
+(program
+  (expression_statement
+    (array
+      (identifier)
+      (identifier)
+      (identifier))))
+
+==================================
+Variable named 'module'
+==================================
+
+var module;
+module;
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      (identifier)))
+  (expression_statement
+    (identifier)))
+
+==================================
+Multi-line variable declarations
+==================================
+
+var a = b
+  , c = d
+  , e = f
+
+---
+
+(program
+  (variable_declaration
+    (variable_declarator
+      (identifier)
+      (identifier))
+    (variable_declarator
+      (identifier)
+      (identifier))
+    (variable_declarator
+      (identifier)
+      (identifier))))
+
+=====================================
+The 'less than' operator
+=====================================
+
+i < foo.length;
+i < type.length;
+i < string.length;
+
+---
+
+(program
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (member_expression
+        (identifier)
+        (property_identifier))))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (member_expression
+        (identifier)
+        (property_identifier))))
+  (expression_statement
+    (binary_expression
+      (identifier)
+      (member_expression
+        (identifier)
+        (property_identifier)))))
+
+=====================================
+Subscript expressions in if statements
+=====================================
+
+if ( foo ) {
+	set[ 1 ].apply()
+}
+
+---
+
+(program
+  (if_statement
+    (parenthesized_expression
+      (identifier))
+    (statement_block
+      (expression_statement
+        (call_expression
+          (member_expression
+            (subscript_expression
+              (identifier)
+              (number))
+            (property_identifier))
+          (arguments))))))
+
+====================================
+Objects with reserved words as keys
+====================================
+
+{
+  public: true,
+  private: true,
+  readonly: true
+};
+
+{
+  readonly: 1,
+  abstract: 1,
+  static: 1
+};
+
+---
+
+(program
+  (expression_statement
+    (object
+      (pair
+        key: (property_identifier)
+        value: (true))
+      (pair
+        key: (property_identifier)
+        value: (true))
+      (pair
+        key: (property_identifier)
+        value: (true))))
+  (expression_statement
+    (object
+      (pair
+        key: (property_identifier)
+        value: (number))
+      (pair
+        key: (property_identifier)
+        value: (number))
+      (pair
+        key: (property_identifier)
+        value: (number)))))
+
+====================================
+Assignment to non-null LHS
+====================================
+
+foo! = bar;
+foo! += bar;
+(foo)! = bar;
+(foo)! += bar;
+
+---
+
+(program
+  (expression_statement
+    (assignment_expression
+      (non_null_expression
+        (identifier))
+      (identifier)))
+  (expression_statement
+    (augmented_assignment_expression
+      (non_null_expression
+        (identifier))
+      (identifier)))
+  (expression_statement
+    (assignment_expression
+      (non_null_expression
+        (parenthesized_expression
+          (identifier)))
+      (identifier)))
+  (expression_statement
+    (augmented_assignment_expression
+      (non_null_expression
+        (parenthesized_expression
+          (identifier)))
+      (identifier))))
+
+==================================
+Generic calls
+==================================
+
+f<T>(x)
+
+---
+
+(program
+  (expression_statement
+    (call_expression
+      (identifier)
+      (type_arguments
+        (type_identifier))
+      (arguments
+        (identifier)))))
+
+==================================
+Instantiation expressions
+==================================
+
+const makeHammerBox = makeBox<Hammer>;
+const makeStringBox = makeBox<string>;
+const ErrorMap = Map<string, Error>;
+
+---
+
+(program
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (instantiation_expression
+        (identifier)
+        (type_arguments
+          (type_identifier)))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (instantiation_expression
+        (identifier)
+        (type_arguments
+          (predefined_type)))))
+  (lexical_declaration
+    (variable_declarator
+      (identifier)
+      (instantiation_expression
+        (identifier)
+        (type_arguments
+          (predefined_type)
+          (type_identifier))))))
+
+==========================
+Type assertions
+:language(typescript)
+==========================
+
+<A>b;
+<C<D>>e.f;
+
+---
+
+(program
+  (expression_statement (type_assertion
+    (type_arguments (type_identifier))
+    (identifier)))
+  (expression_statement (type_assertion
+    (type_arguments (generic_type
+      (type_identifier)
+      (type_arguments (type_identifier))))
+    (member_expression
+      (identifier)
+      (property_identifier)))))
+
+==========================================================
+Type arguments in JSX
+:language(tsx)
+==========================================================
+
+<Element<T>>hi</Element>;
+<Element<T> />;
+<>fragment</>;
+
+---
+
+(program
+  (expression_statement
+    (jsx_element
+      (jsx_opening_element (identifier) (type_arguments (type_identifier)))
+      (jsx_text)
+      (jsx_closing_element (identifier))))
+  (expression_statement
+    (jsx_self_closing_element
+       (identifier) (type_arguments (type_identifier))))
+  (expression_statement
+    (jsx_element
+      (jsx_opening_element)
+      (jsx_text)
+      (jsx_closing_element))))
+
+==================================
+Ternary expression
+==================================
+
+a ? function(){ return true } : b;
+
+---
+
+(program
+  (expression_statement
+    (ternary_expression
+      (identifier)
+      (function_expression
+        (formal_parameters)
+        (statement_block
+          (return_statement
+            (true))))
+      (identifier))))

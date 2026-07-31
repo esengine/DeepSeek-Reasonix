@@ -1,0 +1,275 @@
+================================================================================
+Macro invocation - no arguments
+================================================================================
+
+a!();
+b![];
+c!{};
+d::e!();
+f::g::h!{};
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree)))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree)))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree)))
+  (expression_statement
+    (macro_invocation
+      (scoped_identifier
+        (identifier)
+        (identifier))
+      (token_tree)))
+  (expression_statement
+    (macro_invocation
+      (scoped_identifier
+        (scoped_identifier
+          (identifier)
+          (identifier))
+        (identifier))
+      (token_tree))))
+
+================================================================================
+Macro invocation - arbitrary tokens
+================================================================================
+
+a!(* a *);
+a!(& a &);
+a!(- a -);
+a!(b + c + +);
+a!('a'..='z');
+a!('\u{0}'..='\u{2}');
+a!('lifetime)
+default!(a);
+union!(a);
+a!($);
+a!($());
+a!($ a $);
+a!(${$([ a ])});
+a!($a $a:ident $($a);*);
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier)
+        (identifier))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (char_literal)
+        (char_literal))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (char_literal)
+        (char_literal))))
+  (macro_invocation
+    (identifier)
+    (token_tree
+      (identifier)))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree)))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (token_tree))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (token_tree
+          (token_tree
+            (token_tree
+              (identifier)))))))
+  (expression_statement
+    (macro_invocation
+      (identifier)
+      (token_tree
+        (identifier)
+        (identifier)
+        (identifier)
+        (token_tree
+          (identifier))))))
+
+================================================================================
+Macro invocation with comments
+================================================================================
+
+ok! {
+  // one
+  /* two */
+}
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (macro_invocation
+    (identifier)
+    (token_tree
+      (line_comment)
+      (block_comment))))
+
+================================================================================
+Macro definition
+================================================================================
+
+macro_rules! say_hello {
+    () => (
+        println!("Hello!");
+    )
+}
+
+macro_rules! four {
+    () => {1 + 3};
+}
+
+macro_rules! foo {
+    (x => $e:expr) => (println!("mode X: {}", $e));
+    (y => $e:expr) => (println!("mode Y: {}", $e))
+}
+
+macro_rules! o_O {
+    (
+      $($x:expr; [ $( $y:expr ),* ]);*
+    ) => {
+      $($($x + $e),*),*
+    }
+}
+
+macro_rules! zero_or_one {
+    ($($e:expr),?) => {
+        $($e),?
+    };
+}
+
+macro_rules! empty [
+    () => {};
+];
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (macro_definition
+    name: (identifier)
+    (macro_rule
+      left: (token_tree_pattern)
+      right: (token_tree
+        (identifier)
+        (token_tree
+          (string_literal
+            (string_content))))))
+  (macro_definition
+    name: (identifier)
+    (macro_rule
+      left: (token_tree_pattern)
+      right: (token_tree
+        (integer_literal)
+        (integer_literal))))
+  (macro_definition
+    name: (identifier)
+    (macro_rule
+      left: (token_tree_pattern
+        (identifier)
+        (token_binding_pattern
+          name: (metavariable)
+          type: (fragment_specifier)))
+      right: (token_tree
+        (identifier)
+        (token_tree
+          (string_literal
+            (string_content))
+          (metavariable))))
+    (macro_rule
+      left: (token_tree_pattern
+        (identifier)
+        (token_binding_pattern
+          name: (metavariable)
+          type: (fragment_specifier)))
+      right: (token_tree
+        (identifier)
+        (token_tree
+          (string_literal
+            (string_content))
+          (metavariable)))))
+  (macro_definition
+    name: (identifier)
+    (macro_rule
+      left: (token_tree_pattern
+        (token_repetition_pattern
+          (token_binding_pattern
+            name: (metavariable)
+            type: (fragment_specifier))
+          (token_tree_pattern
+            (token_repetition_pattern
+              (token_binding_pattern
+                name: (metavariable)
+                type: (fragment_specifier))))))
+      right: (token_tree
+        (token_repetition
+          (token_repetition
+            (metavariable)
+            (metavariable))))))
+  (macro_definition
+    name: (identifier)
+    (macro_rule
+      left: (token_tree_pattern
+        (token_repetition_pattern
+          (token_binding_pattern
+            name: (metavariable)
+            type: (fragment_specifier))))
+      right: (token_tree
+        (token_repetition
+          (metavariable)))))
+  (macro_definition
+    name: (identifier)
+    (macro_rule
+      left: (token_tree_pattern)
+      right: (token_tree))))

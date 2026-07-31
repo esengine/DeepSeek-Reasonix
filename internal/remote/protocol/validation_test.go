@@ -48,6 +48,10 @@ func TestNestedBusinessValidation(t *testing.T) {
 	if _, err := decodeAndValidate(json.RawMessage(emptyPatch), typeOf[SessionProfileSetParams]()); err == nil {
 		t.Fatal("empty profile patch accepted")
 	}
+	clearGoalPatch := `{` + validSessionEnvelope + `,"patch":{"goal":""}}`
+	if _, err := decodeAndValidate(json.RawMessage(clearGoalPatch), typeOf[SessionProfileSetParams]()); err != nil {
+		t.Fatalf("goal-clear profile patch rejected: %v", err)
+	}
 	badPath := `{"expectedHostEpoch":"host-1","target":{"workspaceId":"workspace-1","sessionId":"session-1"},"expectedRuntimeEpoch":"runtime-1","path":"../secret"}`
 	if _, err := decodeAndValidate(json.RawMessage(badPath), typeOf[FilePreviewParams]()); err == nil {
 		t.Fatal("workspace-escaping path accepted")
@@ -55,6 +59,14 @@ func TestNestedBusinessValidation(t *testing.T) {
 	badPointer := ExternalizedField{JSONPointer: "/tool/~2output", ContentRef: "ref-1", SHA256: strings.Repeat("a", 64)}
 	if err := validateDecoded(badPointer); err == nil {
 		t.Fatal("invalid RFC 6901 escape accepted")
+	}
+}
+
+func TestProfilePatchSchemaAllowsGoalOnlyTransactions(t *testing.T) {
+	contract := customSchemaContracts[typeOf[ProfilePatch]()]
+	joined := strings.Join(contract.Invariants, "\n")
+	if !strings.Contains(joined, "at_least_one(model,effort,collaborationMode,tokenMode,toolApprovalMode,goal)") {
+		t.Fatalf("ProfilePatch schema invariant does not include goal: %q", joined)
 	}
 }
 

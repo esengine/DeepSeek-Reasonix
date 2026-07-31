@@ -1,0 +1,3 @@
+var p=Object.defineProperty;var t=(o,r)=>p(o,"name",{value:r,configurable:!0});import a from"node:repl";import{v as l}from"./package-Bj47PlGH.mjs";import{t as c}from"./index-XurvG3JN.mjs";import"node:path";import"node:url";import"esbuild";import"node:crypto";import"./node-features-B9BBLzwu.mjs";import"node:fs";import"node:os";import"./temporary-directory-BDDVQOvU.mjs";console.log(`Welcome to tsx v${l} (Node.js ${process.version}).
+Type ".help" for more information.`);const s=a.start(),{eval:f}=s,v=t(async function(o,r,e,i){const m=await c(o,e,{loader:"ts",tsconfigRaw:{compilerOptions:{preserveValueImports:!0}},define:{require:"global.require"}}).catch(n=>(console.log(n.message),{code:`
+`}));return f.call(this,m.code,r,e,i)},"preEval");s.eval=v;

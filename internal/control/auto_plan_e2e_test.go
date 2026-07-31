@@ -38,6 +38,9 @@ func (s *scriptedTurns) Stream(_ context.Context, _ provider.Request) (<-chan pr
 func firstUserMessage(msgs []provider.Message) string {
 	for _, m := range msgs {
 		if m.Role == provider.RoleUser {
+			if m.ProviderContent != "" {
+				return m.ProviderContent
+			}
 			return m.Content
 		}
 	}

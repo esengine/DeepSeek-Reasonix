@@ -1,0 +1,85 @@
+{
+  "name": "ts-dedent",
+  "version": "2.3.0",
+  "description": "TypeScript package which smartly trims and strips indentation from multi-line strings",
+  "author": "Tamino Martinius <dev@zaku.eu>",
+  "main": "./dist/index.js",
+  "module": "./esm/index.js",
+  "jsnext:main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "import": {
+      "types": "./esm/index.d.ts",
+      "default": "./esm/index.js"
+    },
+    "require": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "license": "MIT",
+  "files": [
+    "dist",
+    "esm",
+    "src"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tamino-martinius/node-ts-dedent.git"
+  },
+  "keywords": [
+    "dedent",
+    "deindent",
+    "indentation",
+    "multi-line string",
+    "multiline strings",
+    "template literals",
+    "template strings",
+    "ts",
+    "typescript",
+    "es6",
+    "harmony"
+  ],
+  "engines": {
+    "node": ">=6.10"
+  },
+  "scripts": {
+    "coverage": "rm -rf coverage* && jest --coverage",
+    "pretest": "npm run lint",
+    "test": "jest",
+    "test:scripts": "node --test .github/scripts/__tests__/*.mjs",
+    "lint": "eslint .",
+    "watch": "tsc -w",
+    "ci": "npm run coverage",
+    "compile": "rm -rf dist/* && rm -rf esm/* && tsc --module commonjs --outdir dist && tsc --module es6 --outdir esm && node .github/scripts/write-build-markers.mjs",
+    "preversion": "npm run compile && git add ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.4.1",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.11",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.60.1"
+  },
+  "jest": {
+    "transform": {
+      ".ts": [
+        "ts-jest",
+        {
+          "tsconfig": "tsconfig.jest.json"
+        }
+      ]
+    },
+    "testRegex": "\\.(test|spec)\\.ts$",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "json"
+    ],
+    "moduleNameMapper": {
+      "^ts-dedent$": "<rootDir>/src/index.ts"
+    }
+  }
+}

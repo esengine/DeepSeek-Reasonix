@@ -1,0 +1,2 @@
+Host kevinburke.ssh_config.test.example.com
+    Include ~/kevinburke-ssh-config-shell-include

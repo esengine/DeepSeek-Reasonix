@@ -1,0 +1,6 @@
+./cpu.go
+./cpu_x86.go
+./cpu_x86_other.go
+./datacache_x86.go
+./cpu.s
+./cpu_x86.s

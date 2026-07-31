@@ -1,0 +1,26 @@
+[
+    {
+        "description": "guard against infinite recursion",
+        "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": {
+                "alice": {
+                    "$anchor": "alice",
+                    "allOf": [{"$ref": "#bob"}]
+                },
+                "bob": {
+                    "$anchor": "bob",
+                    "allOf": [{"$ref": "#alice"}]
+                }
+            },
+            "$ref": "#alice"
+        },
+        "tests": [
+            {
+                "description": "infinite recursion detected",
+                "data": {},
+                "valid": false
+            }
+        ]
+    }
+]
