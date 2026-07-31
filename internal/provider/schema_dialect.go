@@ -19,6 +19,20 @@ func IsMiMoEndpoint(rawURL string) bool {
 	return host != "xiaomimimo.com" && strings.HasSuffix(host, ".xiaomimimo.com")
 }
 
+// IsDashScopeEndpoint reports whether rawURL points at Alibaba DashScope's API
+// (any *.aliyuncs.com subdomain, including token-plan and compatible-mode
+// endpoints). DashScope's server-side session cache is opt-in via the
+// x-dashscope-session-cache header regardless of wire protocol (OpenAI or
+// Anthropic), so both providers need this detection.
+func IsDashScopeEndpoint(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host != "aliyuncs.com" && strings.HasSuffix(host, ".aliyuncs.com")
+}
+
 // NormalizeLegacyTupleItemsForDraft202012 rewrites only the pre-2020-12 tuple
 // keywords in a JSON Schema. It is intentionally separate from
 // CanonicalizeSchema: provider implementations must opt in only after the target

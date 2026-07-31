@@ -272,10 +272,15 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
+		// Responses API SSE uses "data:{...}" (no space); be lenient.
+		var data string
+		if strings.HasPrefix(line, "data: ") {
+			data = strings.TrimPrefix(line, "data: ")
+		} else if strings.HasPrefix(line, "data:") {
+			data = strings.TrimPrefix(line, "data:")
+		} else {
 			continue
 		}
-		data := strings.TrimPrefix(line, "data: ")
 		if data == "[DONE]" {
 			break
 		}
@@ -353,6 +358,8 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 					}
 				}
 			}
+			// Responses API sends no [DONE]; stop after completed.
+			goto done
 		}
 	}
 
@@ -362,6 +369,8 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 		c.lastResponseID = responseID
 		c.mu.Unlock()
 	}
+
+done:
 
 	if err := scanner.Err(); err != nil {
 		out <- provider.Chunk{Type: provider.ChunkError, Err: err}

@@ -109,6 +109,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		effort:      effort,
 		vision:      vision,
 		mimo:        provider.IsMiMoEndpoint(root),
+		dashscope:   provider.IsDashScopeEndpoint(root),
 		headers:     cleanCustomHeaders(headers),
 		authHeader:  authHeader,
 		http:        httpClient, // no overall timeout; lifecycle is ctx-driven
@@ -132,6 +133,7 @@ type client struct {
 	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
 	vision      bool   // model accepts image input — embed attached images as base64 image blocks
 	mimo        bool   // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
+	dashscope   bool   // true for DashScope — opts into server-side session cache via header
 	headers     map[string]string
 	authHeader  bool // send Authorization: Bearer instead of Anthropic's x-api-key header
 	http        *http.Client
@@ -215,6 +217,12 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		}
 		httpReq.Header.Set("anthropic-version", anthropicVersion)
 		applyCustomHeaders(httpReq.Header, c.headers)
+		if c.dashscope {
+			// DashScope's server-side session cache is opt-in via this header.
+			// It applies regardless of wire protocol (OpenAI or Anthropic), so
+			// the Anthropic client must set it too or prefix-cache hits crater.
+			httpReq.Header.Set("x-dashscope-session-cache", "enable")
+		}
 		return httpReq, nil
 	}
 	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)

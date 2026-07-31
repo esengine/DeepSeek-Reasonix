@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1307,6 +1308,14 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		}
 		streamRecoveries = 0
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
+		fmt.Fprintf(os.Stderr, "[cache-diag] sys=%s tools=%s changed=%v reasons=%v hit=%d miss=%d\n",
+			cacheDiagnostics.SystemHash,
+			cacheDiagnostics.ToolsHash,
+			cacheDiagnostics.PrefixChanged,
+			cacheDiagnostics.PrefixChangeReasons,
+			cacheDiagnostics.CacheHitTokens,
+			cacheDiagnostics.CacheMissTokens,
+		)
 		a.lastPrefixShape = prefixShape
 		a.haveLastPrefixShape = true
 		if usage != nil && usage.TotalTokens > 0 {
