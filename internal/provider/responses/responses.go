@@ -212,6 +212,24 @@ func New(cfg Config) provider.Provider {
 	}
 }
 
+// sendChunk delivers a chunk without blocking the SSE reader indefinitely:
+// first a non-blocking attempt, then a ctx-aware blocking send. Returns false
+// when the caller's context is done (reader gone), so the stream loop can stop
+// decoding early instead of stalling scanner.Scan() on a slow consumer.
+func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) bool {
+	select {
+	case out <- chunk:
+		return true
+	default:
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case out <- chunk:
+		return true
+	}
+}
+
 func (c *client) Name() string { return c.name }
 
 // ResetContext clears the previous_response_id, forcing the next Stream call
@@ -222,6 +240,12 @@ func (c *client) ResetContext() {
 	c.mu.Unlock()
 }
 
+// Stream starts a streaming completion against POST /v1/responses. Stateful
+// mode reuses previous_response_id when the conversation is a simple
+// continuation; stateless mode (DeepSeek) always sends the full input array.
+// Cancelling ctx aborts the request; the returned channel closes at stream
+// end. Mid-stream transport cuts surface as ChunkError with a
+// StreamInterruptedError so the agent can append a recovery prompt.
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	body, usePrevID := c.buildRequestBody(req)
 	jsonBody, err := json.Marshal(body)
@@ -351,8 +375,18 @@ func lastUserContent(msgs []provider.Message) string {
 }
 
 // messagesToInput converts Reasonix messages to the Responses API input array
-// format. System messages become instructions; tool results become
-// function_call_output items.
+// format. Mapping:
+//
+//	user/assistant   → {"role": ..., "content": ...}
+//	system           → {"role": "system", "content": ...} (the API also accepts
+//	                   a top-level instructions string; the provider keeps the
+//	                   system message in-band so multi-system sessions survive)
+//	assistant tool calls → {"type": "function_call", name, arguments, call_id}
+//	tool results     → {"type": "function_call_output", call_id, output}
+//
+// The function_call / function_call_output pairs must stay adjacent in input
+// order (the API merges them onto the surrounding assistant message), which
+// the single pass preserves.
 func messagesToInput(msgs []provider.Message) []map[string]any {
 	input := make([]map[string]any, 0, len(msgs))
 	for _, m := range msgs {
@@ -475,32 +509,46 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 		switch event.Type {
 		case "response.output_text.delta":
-			out <- provider.Chunk{Type: provider.ChunkText, Text: event.Delta}
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkText, Text: event.Delta}) {
+				return
+			}
 
 		case "response.output_text.done", "response.content_part.done":
 			// Full text of the completed content part. Sent only when the
 			// delta stream may have been incomplete (DeepSeek emits these with
 			// the assembled text); callers dedupe by turning deltas off.
 			if event.Text != "" {
-				out <- provider.Chunk{Type: provider.ChunkText, Text: event.Text}
+				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkText, Text: event.Text}) {
+					return
+				}
 			}
 
 		case "response.reasoning_summary_text.delta":
 			// DashScope dialect
-			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: event.Delta}
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: event.Delta}) {
+				return
+			}
 
 		case "response.reasoning_text.delta":
 			// DeepSeek dialect
-			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: event.Delta}
+			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkReasoning, Text: event.Delta}) {
+				return
+			}
 
 		case "response.output_item.added":
 			if event.Item != nil && event.Item.Type == "function_call" {
-				out <- provider.Chunk{
+				if !sendChunk(ctx, out, provider.Chunk{
+
 					Type: provider.ChunkToolCallStart,
+
 					ToolCall: &provider.ToolCall{
-						ID:   event.Item.CallID,
+
+						ID: event.Item.CallID,
+
 						Name: event.Item.Name,
 					},
+				}) {
+					return
 				}
 			}
 
@@ -508,48 +556,75 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			// DashScope dialect: tool call arguments streaming.
 			// The delta carries {delta: "..."} with the item in the event.
 			if event.Item != nil {
-				out <- provider.Chunk{
+				if !sendChunk(ctx, out, provider.Chunk{
+
 					Type: provider.ChunkToolCallArgsDelta,
+
 					ToolCall: &provider.ToolCall{
-						ID:   event.Item.CallID,
+
+						ID: event.Item.CallID,
+
 						Name: event.Item.Name,
 					},
+
 					ArgChars: len(event.Delta),
+				}) {
+					return
 				}
 			}
 
 		case "response.function_call_arguments.delta":
 			// DeepSeek dialect: the delta is the raw partial argument string.
-			out <- provider.Chunk{
+			if !sendChunk(ctx, out, provider.Chunk{
+
 				Type: provider.ChunkToolCallArgsDelta,
+
 				ToolCall: &provider.ToolCall{
+
 					ID: event.FunctionCallID(),
 				},
+
 				ArgChars: len(event.Delta),
+			}) {
+				return
 			}
 
 		case "response.function_call_arguments.done":
 			// DeepSeek dialect: complete arguments for the call.
 			if event.Item != nil {
-				out <- provider.Chunk{
+				if !sendChunk(ctx, out, provider.Chunk{
+
 					Type: provider.ChunkToolCall,
+
 					ToolCall: &provider.ToolCall{
-						ID:        event.Item.CallID,
-						Name:      event.Item.Name,
+
+						ID: event.Item.CallID,
+
+						Name: event.Item.Name,
+
 						Arguments: event.Item.Arguments,
 					},
+				}) {
+					return
 				}
 			}
 
 		case "response.output_item.done":
 			if event.Item != nil && event.Item.Type == "function_call" {
-				out <- provider.Chunk{
+				if !sendChunk(ctx, out, provider.Chunk{
+
 					Type: provider.ChunkToolCall,
+
 					ToolCall: &provider.ToolCall{
-						ID:        event.Item.CallID,
-						Name:      event.Item.Name,
+
+						ID: event.Item.CallID,
+
+						Name: event.Item.Name,
+
 						Arguments: event.Item.Arguments,
 					},
+				}) {
+					return
 				}
 			}
 
@@ -570,16 +645,26 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 					if u.OutputTokensDetails != nil {
 						reasoning = u.OutputTokensDetails.ReasoningTokens
 					}
-					out <- provider.Chunk{
+					if !sendChunk(ctx, out, provider.Chunk{
+
 						Type: provider.ChunkUsage,
+
 						Usage: &provider.Usage{
-							PromptTokens:     u.InputTokens,
+
+							PromptTokens: u.InputTokens,
+
 							CompletionTokens: u.OutputTokens,
-							TotalTokens:      u.TotalTokens,
-							CacheHitTokens:   cached,
-							CacheMissTokens:  u.InputTokens - cached,
-							ReasoningTokens:  reasoning,
+
+							TotalTokens: u.TotalTokens,
+
+							CacheHitTokens: cached,
+
+							CacheMissTokens: u.InputTokens - cached,
+
+							ReasoningTokens: reasoning,
 						},
+					}) {
+						return
 					}
 				}
 			}
@@ -588,7 +673,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				if event.Response != nil && event.Response.Error != nil {
 					msg = "responses: " + event.Response.Error.Message
 				}
-				out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s", msg)}
+				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s", msg)}) {
+					return
+				}
 			}
 			// Responses API sends no [DONE]; stop after the terminal event.
 			goto done
@@ -609,10 +696,14 @@ done:
 		// A mid-stream transport cut after some output was already delivered is
 		// recoverable: the agent can append a tail recovery prompt instead of
 		// replaying the whole request (which would duplicate visible text).
-		out <- provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}}
+		if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}}) {
+			return
+		}
 		return
 	}
-	out <- provider.Chunk{Type: provider.ChunkDone}
+	if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkDone}) {
+		return
+	}
 }
 
 // sseEvent is the wire format for Responses API SSE events.

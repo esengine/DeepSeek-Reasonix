@@ -309,3 +309,37 @@ func TestDetectVendorAndModeDefaults(t *testing.T) {
 		t.Errorf("explicit Stateful=false should win, got %q", got)
 	}
 }
+
+func TestSendChunkContextCancelUnblocks(t *testing.T) {
+	out := make(chan provider.Chunk) // unbuffered, no reader
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	// Must return false promptly instead of blocking forever.
+	done := make(chan bool, 1)
+	go func() { done <- sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkDone}) }()
+	select {
+	case ok := <-done:
+		if ok {
+			t.Fatal("sendChunk on cancelled ctx should return false")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("sendChunk blocked on cancelled context")
+	}
+}
+
+func TestSendChunkBufferedDelivers(t *testing.T) {
+	out := make(chan provider.Chunk, 1)
+	ctx := context.Background()
+	if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkText, Text: "x"}) {
+		t.Fatal("sendChunk should deliver into buffered channel")
+	}
+	select {
+	case c := <-out:
+		if c.Text != "x" {
+			t.Fatalf("got %q", c.Text)
+		}
+	default:
+		t.Fatal("chunk not delivered")
+	}
+}
