@@ -401,7 +401,7 @@ func streamResponses(jsonBody []byte) (ttft time.Duration, inputTokens, cachedTo
 		if data == "[DONE]" {
 			break
 		}
-		if firstToken && strings.Contains(data, "output_text.delta") {
+		if firstToken && (strings.Contains(data, "output_text.delta") || strings.Contains(data, "reasoning_text.delta")) {
 			ttft = time.Since(start)
 			firstToken = false
 		}
@@ -419,7 +419,7 @@ func streamResponses(jsonBody []byte) (ttft time.Duration, inputTokens, cachedTo
 			} `json:"response"`
 		}
 		if json.Unmarshal([]byte(data), &event) == nil {
-			if event.Type == "response.completed" && event.Response != nil {
+			if (event.Type == "response.completed" || event.Type == "response.incomplete") && event.Response != nil {
 				responseID = event.Response.ID
 				if event.Response.Usage != nil {
 					inputTokens = event.Response.Usage.InputTokens
