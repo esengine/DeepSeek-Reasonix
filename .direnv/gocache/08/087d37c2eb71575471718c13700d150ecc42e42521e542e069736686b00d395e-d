@@ -1,5 +1,0 @@
-./fsync.go
-./hardlink.go
-./openssh.go
-./posix-rename.go
-./statvfs.go

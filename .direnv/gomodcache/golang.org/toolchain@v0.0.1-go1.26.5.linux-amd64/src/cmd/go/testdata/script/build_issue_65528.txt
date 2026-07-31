@@ -1,9 +1,0 @@
-go build
-
--- go.mod --
-module test
-
-go 1.0
-
--- p.go --
-package p

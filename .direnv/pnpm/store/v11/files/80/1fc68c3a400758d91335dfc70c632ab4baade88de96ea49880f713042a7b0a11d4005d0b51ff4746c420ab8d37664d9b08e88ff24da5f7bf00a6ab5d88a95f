@@ -1,1 +1,0 @@
-import { forEachRight } from "./forEachRight.mjs";

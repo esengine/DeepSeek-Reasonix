@@ -1,6 +1,0 @@
-./app.go
-./app_debug_not.go
-./app_devtools_not.go
-./app_obfuscated_not.go
-./app_preflight_unix.go
-./app_production.go

@@ -1,7 +1,0 @@
-{"HeadingLevel": 5}
--- input --
-# Heading
--- markdown --
-##### Heading {#hdr-Heading}
--- html --
-<h5 id="hdr-Heading">Heading</h5>

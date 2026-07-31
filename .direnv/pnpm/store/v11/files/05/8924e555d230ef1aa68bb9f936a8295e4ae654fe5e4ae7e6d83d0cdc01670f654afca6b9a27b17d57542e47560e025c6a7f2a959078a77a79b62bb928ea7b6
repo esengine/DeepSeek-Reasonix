@@ -1,5 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: Contact Developer Support
-    url: https://developer.paypal.com/braintree/help
-    about: If you need help troubleshooting your integration, reach out to Braintree Support. Only open a GitHub issue if you've found an issue with our SDK.

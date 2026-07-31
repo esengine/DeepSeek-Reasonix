@@ -1,2 +1,0 @@
-! go asdf
-stderr '^go asdf: unknown command'

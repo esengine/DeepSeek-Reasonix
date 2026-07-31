@@ -1,3 +1,0 @@
-go test fuzz v1
-string("\U000600a04")
-byte('\x00')

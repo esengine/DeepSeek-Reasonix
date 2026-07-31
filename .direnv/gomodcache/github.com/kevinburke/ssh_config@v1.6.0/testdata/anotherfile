@@ -1,3 +1,0 @@
-# Not sure that this actually works; Include might need to be relative to the
-# load directory.
-Compression yes

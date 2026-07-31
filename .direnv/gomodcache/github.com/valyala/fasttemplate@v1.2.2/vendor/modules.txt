@@ -1,2 +1,0 @@
-# github.com/valyala/bytebufferpool v1.0.0
-github.com/valyala/bytebufferpool

@@ -1,6 +1,0 @@
-./batch_command_other.go
-./command_normalize.go
-./hook.go
-./inspect.go
-./runner.go
-./windows_compat.go

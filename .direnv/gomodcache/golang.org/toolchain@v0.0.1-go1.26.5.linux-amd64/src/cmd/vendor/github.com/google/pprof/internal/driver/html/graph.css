@@ -1,7 +1,0 @@
-#graph {
-    cursor: grab;
-}
-
-#graph:active {
-    cursor: grabbing;
-}

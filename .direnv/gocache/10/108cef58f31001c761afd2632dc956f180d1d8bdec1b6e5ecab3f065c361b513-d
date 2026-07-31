@@ -1,6 +1,0 @@
-./binding.go
-./boundMethod.go
-./db.go
-./generate.go
-./parameter.go
-./reflect.go

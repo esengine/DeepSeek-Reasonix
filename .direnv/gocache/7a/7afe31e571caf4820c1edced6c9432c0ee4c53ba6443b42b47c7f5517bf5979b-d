@@ -1,9 +1,0 @@
-./budget.go
-./decision.go
-./fingerprint.go
-./gate.go
-./persist.go
-./reviewer.go
-./rules.go
-./state.go
-./types.go

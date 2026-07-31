@@ -1,1 +1,0 @@
-var o=Object.defineProperty;var t=(e,r)=>o(e,"name",{value:r,configurable:!0});import{createRequire as p}from"module";import a from"node:path";import{t as s}from"./temporary-directory-BDDVQOvU.mjs";var m=p(import.meta.url);const i=process.platform==="win32",n=t(e=>{const r=a.join(s,`${e}.pipe`);return i?`\\\\?\\pipe\\${r}`:r},"getPipePath");export{n as g,i,m as r};

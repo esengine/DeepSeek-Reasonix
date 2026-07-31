@@ -1,1 +1,0 @@
-import { templateSettings } from "./template.js";

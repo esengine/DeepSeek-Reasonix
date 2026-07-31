@@ -1,7 +1,0 @@
-./provider.go
-./resolver.go
-./retry.go
-./schema_canonicalize.go
-./schema_dialect.go
-./schema_error.go
-./schema_validate.go

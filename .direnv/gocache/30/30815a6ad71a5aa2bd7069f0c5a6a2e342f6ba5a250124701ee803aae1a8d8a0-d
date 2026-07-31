@@ -1,4 +1,0 @@
-./sha1.go
-./sha1block.go
-./sha1block_amd64.go
-./sha1block_amd64.s

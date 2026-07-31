@@ -1,8 +1,0 @@
--- .Play --
-package main
-
-func foo(int)
-
-func main() {
-	foo(42)
-}

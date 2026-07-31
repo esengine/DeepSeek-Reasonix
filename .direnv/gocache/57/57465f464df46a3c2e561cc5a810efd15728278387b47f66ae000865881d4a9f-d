@@ -1,6 +1,0 @@
-./config.go
-./lexer.go
-./parser.go
-./position.go
-./token.go
-./validators.go

@@ -1,6 +1,0 @@
-./client.go
-./jsonrpc.go
-./manager.go
-./position.go
-./results.go
-./tool.go

@@ -1,4 +1,0 @@
-./poly1305.go
-./sum_asm.go
-./sum_generic.go
-./sum_amd64.s

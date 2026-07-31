@@ -1,1 +1,0 @@
-import { head } from "./head.mjs";

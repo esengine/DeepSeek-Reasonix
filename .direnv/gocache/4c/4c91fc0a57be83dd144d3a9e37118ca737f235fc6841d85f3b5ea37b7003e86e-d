@@ -1,5 +1,0 @@
-./cast.go
-./sha256.go
-./sha256block.go
-./sha256block_amd64.go
-./sha256block_amd64.s

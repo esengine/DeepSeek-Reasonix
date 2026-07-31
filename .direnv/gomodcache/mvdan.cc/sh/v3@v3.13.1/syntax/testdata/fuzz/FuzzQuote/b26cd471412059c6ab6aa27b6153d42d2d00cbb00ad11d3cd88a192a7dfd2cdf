@@ -1,3 +1,0 @@
-go test fuzz v1
-string("\xb6")
-byte('\x01')

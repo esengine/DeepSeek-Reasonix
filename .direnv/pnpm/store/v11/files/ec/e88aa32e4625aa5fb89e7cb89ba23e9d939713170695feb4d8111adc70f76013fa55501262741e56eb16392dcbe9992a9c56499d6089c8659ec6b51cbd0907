@@ -1,7 +1,0 @@
-{
-  "extends": "tslint:recommended",
-  "rules": {
-    "no-namespace": [true, "allow-declarations"],
-    "interface-name": false
-  }
-}

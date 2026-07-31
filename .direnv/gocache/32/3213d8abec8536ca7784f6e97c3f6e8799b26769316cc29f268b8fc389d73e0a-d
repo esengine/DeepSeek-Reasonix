@@ -1,4 +1,0 @@
-./systray.go
-./systray_menu_unix.go
-./systray_notifier_unix.go
-./systray_unix.go

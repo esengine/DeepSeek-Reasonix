@@ -1,9 +1,0 @@
-
-Host hasquotedidentity
-  IdentityFile "/Users/testuser/.ssh/quoted_key"
-
-Host hasquotedhostname
-  HostName "example.com"
-
-Host hasunquotedidentity
-  IdentityFile /Users/testuser/.ssh/unquoted_key

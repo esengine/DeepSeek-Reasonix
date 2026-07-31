@@ -1,8 +1,0 @@
-./consts.go
-./consts_norace.go
-./intrinsics.go
-./nih.go
-./no_dit.go
-./sys.go
-./zversion.go
-./empty.s

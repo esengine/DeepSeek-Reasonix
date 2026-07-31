@@ -1,6 +1,0 @@
-./bootstrap.go
-./install.go
-./launch.go
-./lock.go
-./platform.go
-./state.go
