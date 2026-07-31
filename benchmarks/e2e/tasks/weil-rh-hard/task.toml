@@ -1,3 +1,7 @@
+[问题: RH · 病态6黎曼基座失配]
+[三重元标准: 几何闭包(有限域)+原生共轭(Weil递推)+全局编码(泛函方程)]
+[评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分]
+
 prompt = """Write a Python script weil.py in the workdir that re-derives the machine-verified Weil finite-field Riemann hypothesis (WeilRH.agda: GF(3)/GF(9) dual instances, 0 postulate, L3 (RH.agda: functional equation + Weil boundary + ζ symmetry)).
 
 Verified facts (from the Agda library):

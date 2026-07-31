@@ -1,3 +1,7 @@
+[问题: Hodge · 病态1连续同调膨胀]
+[三重元标准: 几何闭包(有限闭链)+原生共轭(Frobenius作用)+全局编码(dimℋ独立)]
+[评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分]
+
 prompt = """Write a Python script hodge.py in the workdir that re-derives the machine-verified core of the Sovereign Hodge framework (Hodge.agda: torus chain complex, h⁰≡h¹≡1, χ=0, rank-nullity 3, 0 postulate, L3 (Hodge_L3.agda: dimℋ independent + Hodge decomposition)).
 
 Verified facts (from the Agda library):

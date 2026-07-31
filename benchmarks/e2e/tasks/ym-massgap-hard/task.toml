@@ -1,3 +1,7 @@
+[问题: Yang-Mills · 病态3指数映射软化]
+[三重元标准: 几何闭包(GF9格点)+原生共轭(σ=z³)+全局编码(det≠0⇒λ>0)]
+[评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分]
+
 prompt = """Write a Python script ym.py in the workdir that re-derives the machine-verified core of the Sovereign Yang-Mills mass-gap framework (YM.agda: SU(2,GF(9)) ≅ 2A₄, mass-gap-I2, triv-gap2/3/4, L3 proven (YM_L3.agda: det≠0 ⇒ λ_min>0, 0 postulate)).
 
 Verified facts (from the Agda library):

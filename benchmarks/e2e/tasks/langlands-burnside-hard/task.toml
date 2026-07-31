@@ -1,3 +1,7 @@
+[问题: Langlands · 病态4根系逃逸]
+[三重元标准: 几何闭包(GL₂有限)+原生共轭(Deligne-Lusztig)+全局编码(5760穷举)]
+[评分: 完成即验证路径得分; answer.txt 正确=L3 100分, 仅脚本过=L2 70分]
+
 prompt = """Write a Python script langlands.py in the workdir that re-derives the machine-verified Burnside checks of the Sovereign Langlands framework (Langlands.agda: A₄ + S₄ dual instances, GL₂(GF(9)) subgroups, 0 postulate, L3 (GL2TestVectors.agda: GL₂(5760) ℤ orthogonality)).
 
 Verified facts (from the Agda library):
