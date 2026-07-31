@@ -82,10 +82,11 @@ var (
 	glmCodingModels    = []string{"glm-5.2", "glm-5.1", "glm-5", "glm-4.7"}
 	glmAnthropicModels = []string{"glm-5.2[1m]", "glm-5.2", "glm-5.1", "glm-5", "glm-4.7", "glm-4.5-air"}
 
-	qwenAPIModels        = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "deepseek-v4-pro", "MiniMax-M2.5", "glm-5.2", "glm-5", "glm-4.7", "kimi-k2.5"}
-	qwenAPIVisionModels  = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
-	qwenPlanModels       = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.5", "deepseek-v4-pro", "glm-5.2", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
-	qwenPlanVisionModels = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
+	qwenAPIModels           = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.7-max", "qwen3.6-plus", "qwen3.6-flash", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "deepseek-v4-pro", "MiniMax-M2.5", "glm-5.2", "glm-5", "glm-4.7", "kimi-k2.5"}
+	qwenAPIVisionModels     = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
+	qwenPlanModels          = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash", "kimi-k2.5", "deepseek-v4-pro", "glm-5.2", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
+	qwenPlanVisionModels    = []string{"qwen3.8-max-preview", "qwen3.7-plus", "qwen3.6-plus", "qwen3.5-plus", "kimi-k2.5"}
+	deepSeekResponsesModels = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
 
 	stepfunPlanModels = []string{"step-3.7-flash", "step-3.5-flash", "step-3.5-flash-2603"}
 
@@ -724,6 +725,44 @@ var curatedProviderPresets = []ProviderPreset{
 			Prices:         dashScopePrices(qwenPlanModels),
 			ModelOverrides: qwenModelContextOverrides(),
 			Thinking:       "adaptive",
+		}},
+	},
+	{
+		ID:          "qwen-responses",
+		Label:       "Qwen Responses API",
+		Description: "DashScope Responses API endpoint (stateful previous_response_id, server-managed context).",
+		KeyEnv:      "QWEN_TOKEN_PLAN_CN_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:           "qwen-responses",
+			Kind:           "responses",
+			BaseURL:        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+			Models:         qwenAPIModels,
+			VisionModels:   qwenAPIVisionModels,
+			Default:        "qwen3.7-plus",
+			APIKeyEnv:      "QWEN_TOKEN_PLAN_CN_API_KEY",
+			ContextWindow:  1_000_000,
+			ResponsesMode:  "stateful",
+			Prices:         dashScopePrices(qwenAPIModels),
+			ModelOverrides: qwenModelContextOverrides(),
+		}},
+	},
+	{
+		ID:          "deepseek-responses",
+		Label:       "DeepSeek Responses API",
+		Description: "DeepSeek official Responses API endpoint (stateless, no previous_response_id). Supported by Codex; models: deepseek-v4-flash / deepseek-v4-pro.",
+		KeyEnv:      "DEEPSEEK_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:             "deepseek-responses",
+			Kind:             "responses",
+			BaseURL:          "https://api.deepseek.com",
+			Models:           deepSeekResponsesModels,
+			Default:          "deepseek-v4-flash",
+			APIKeyEnv:        "DEEPSEEK_API_KEY",
+			ContextWindow:    1_000_000,
+			ResponsesMode:    "stateless", // DeepSeek rejects previous_response_id
+			SupportedEfforts: []string{"low", "high", "max"},
+			DefaultEffort:    "high",
+			BalanceURL:       "https://api.deepseek.com/user/balance",
 		}},
 	},
 	{
