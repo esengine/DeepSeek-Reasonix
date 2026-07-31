@@ -1,0 +1,4 @@
+server:
+  host: localhost
+# secret: s3cr3t-k3y-42
+  port: 8080

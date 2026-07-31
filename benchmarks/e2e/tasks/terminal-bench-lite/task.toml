@@ -1,0 +1,7 @@
+prompt = """In the workdir, use shell commands to investigate and report:
+1. Find the largest file in data/ by size (use a shell command, not read_file).
+2. Count how many .log files exist under data/ recursively.
+3. The file data/config.yml has a commented-out line containing the word "secret". Extract that secret value (the part after 'secret:').
+Write your answers to answers.txt, one per line: largest_file_name, log_count, secret_value."""
+max_steps = 15
+timeout_sec = 240

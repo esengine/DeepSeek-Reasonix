@@ -1,0 +1,8 @@
+prompt = """Use your tools to complete this multi-step task in the workdir:
+1. Read data/input.json — it contains a list of numbers.
+2. Compute the sum of all even numbers.
+3. Write the result to output/sum.txt (just the integer).
+4. Then create a file output/note.md containing: 'Sum computed: <sum>' where <sum> is the actual value.
+You must use at least two different tools (e.g. read_file + write_file, or bash + write_file)."""
+max_steps = 12
+timeout_sec = 200

@@ -1,0 +1,7 @@
+prompt = """Build a tiny full-stack todo app in the workdir:
+1. backend.py — a Flask/FastAPI-free pure-Python HTTP server? No: keep it simple. Write `api.py` with a class `TodoStore` that has `add(title)`, `list()`, and `complete(index)` methods. Storage is in-memory.
+2. frontend.html — a static page with an input box, an 'Add' button, and a list; it uses fetch() to POST /api/todos and GET /api/todos (define the contract in a comment; no need to actually run a server).
+3. db.py — `save(data, path)` writes JSON to path, `load(path)` reads it back.
+Write a test file test_app.py covering all three modules, run it with python3 to confirm it passes."""
+max_steps = 20
+timeout_sec = 300

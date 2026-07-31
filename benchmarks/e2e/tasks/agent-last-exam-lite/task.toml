@@ -1,0 +1,8 @@
+prompt = """Solve this multi-step puzzle in the workdir:
+1. Read data/clue1.txt — a riddle. Its answer is a 4-letter word.
+2. Read data/clue2.txt — contains a filename pattern like 'part_<word>.txt'.
+3. Find the file matching the pattern in data/, read it, it contains a number.
+4. The final answer is the number multiplied by 2, plus 1.
+Write only the final number to answer.txt."""
+max_steps = 12
+timeout_sec = 200

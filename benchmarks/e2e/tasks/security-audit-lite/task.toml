@@ -1,0 +1,9 @@
+prompt = """Audit the code in the workdir for security issues (this is a defensive audit exercise, do not exploit anything):
+- src/app.py: a login endpoint. Find the vulnerability (hint: look at how the password comparison is done).
+- src/utils.py: a file upload handler. Find the vulnerability (hint: filename validation).
+Fix BOTH vulnerabilities minimally:
+1. Use constant-time comparison (hmac.compare_digest) for the password.
+2. Reject uploads whose filename is not strictly alphanumeric+dot (no path separators, no '..').
+Do not change the function signatures. Verify by running python3 -m tests.test_security from the workdir."""
+max_steps = 15
+timeout_sec = 240

@@ -1,0 +1,5 @@
+prompt = """Create a minimal Python project structure in the workdir from this description:
+\"A greeting library with a package `greet`, a main module `hello.py` exposing `greet(name)` returning 'Hello, <name>!', a tests/ directory with `test_hello.py` containing two test functions (test_greet_normal, test_greet_empty), and a README.md explaining one-line usage.\"
+The project must be importable: running `python3 -c 'from greet.hello import greet; print(greet("World"))'` from the workdir should print Hello, World!"""
+max_steps = 15
+timeout_sec = 240

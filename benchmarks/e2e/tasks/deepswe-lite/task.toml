@@ -1,0 +1,6 @@
+prompt = """Fix the bug in the workdir project. The service crashes when processing orders:
+- src/inventory.py: `check_stock(item)` returns True when quantity >= 0 (should be quantity > 0, zero stock means out).
+- src/order.py: `process_order(order)` reads `order['quantity']` but the test passes `order.quantity` (attribute access) — fix process_order to use getattr with fallback to dict access.
+- Run `python3 -m tests.test_orders` from the workdir to verify both tests pass."""
+max_steps = 15
+timeout_sec = 240
