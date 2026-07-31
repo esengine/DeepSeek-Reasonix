@@ -1702,7 +1702,8 @@ export interface BotConnectionDiagnostic {
 
 export interface SettingsView {
   defaultModel: string;
-  plannerModel: string;
+  contextModel: string;
+  plannerModel: string; // deprecated
   subagentModel: string;
   subagentEffort: string;
   autoPlan: string;

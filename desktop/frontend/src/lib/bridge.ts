@@ -377,6 +377,7 @@ export interface AppBindings {
   TrustProjectHooks(): Promise<void>;
   TrustProjectHooksForRoot(projectRoot: string): Promise<void>;
   SetDefaultModel(ref: string): Promise<void>;
+  SetContextModel(ref: string): Promise<void>;
   SetPlannerModel(ref: string): Promise<void>;
   SetSubagentModel(ref: string): Promise<void>;
   SetSubagentEffort(level: string): Promise<void>;
@@ -1445,6 +1446,7 @@ function makeMockApp(): AppBindings {
   const settings: SettingsView = {
     defaultModel: "deepseek",
     plannerModel: "",
+    contextModel: "",
     subagentModel: "",
     subagentEffort: "",
     autoPlan: "off",
@@ -3940,6 +3942,11 @@ function makeMockApp(): AppBindings {
       settings.defaultModel = ref;
     },
     async SetPlannerModel(ref: string) {
+      settings.plannerModel = ref;
+      settings.contextModel = ref;
+    },
+    async SetContextModel(ref: string) {
+      settings.contextModel = ref;
       settings.plannerModel = ref;
     },
     async SetSubagentModel(ref: string) {

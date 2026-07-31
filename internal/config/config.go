@@ -1140,11 +1140,20 @@ func (c *Config) BashModeForGOOS(goos string) string {
 	}
 }
 
-// AgentConfig configures the harness loop. PlannerModel is optional: when set
-// to another provider's name it enables two-model collaboration, where the
-// planner handles low-frequency planning in its own session (kept separate so
-// each model's prompt prefix stays cache-stable). SubagentModel is the optional
-// default for runAs=subagent skills; SubagentModels overrides it per skill name.
+// AgentConfig configures the harness loop.
+//
+// ContextModel is the optional dedicated model for pre-turn context research:
+// when set to a configured provider name, every non-trivial turn is first
+// handled by a read-only research agent in its own session, which collects
+// relevant context and produces a summary for the main executor.  This keeps
+// each model's prompt prefix cache-stable.
+//
+// PlannerModel is the deprecated name for the same field.  It is still read
+// for backward compatibility with older configs, but config loading migrates
+// it into ContextModel on startup.
+//
+// SubagentModel is the optional default for runAs=subagent skills;
+// SubagentModels overrides it per skill name.
 type AgentConfig struct {
 	SystemPrompt     string `toml:"system_prompt"`
 	SystemPromptFile string `toml:"system_prompt_file"`
@@ -1154,7 +1163,8 @@ type AgentConfig struct {
 	MaxSteps            int     `toml:"max_steps"`
 	PlannerMaxSteps     int     `toml:"planner_max_steps"`
 	Temperature         float64 `toml:"temperature"`
-	PlannerModel        string  `toml:"planner_model"`
+	PlannerModel        string  `toml:"planner_model"` // deprecated; migrated to ContextModel on load
+	ContextModel        string  `toml:"context_model"`
 	GuardianModel       string  `toml:"guardian_model"`
 	GuardianTemperature float64 `toml:"guardian_temperature"`
 	// RecoveryModel optionally names a dedicated model for the independent

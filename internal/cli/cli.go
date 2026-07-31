@@ -2075,7 +2075,7 @@ func providersWithMissingKeys(cfg *config.Config) []config.ProviderEntry {
 	}
 	refs := []string{
 		cfg.DefaultModel,
-		cfg.Agent.PlannerModel,
+		cfg.Agent.ContextModel,
 		cfg.Agent.SubagentModel,
 	}
 	if len(cfg.Agent.SubagentModels) > 0 {

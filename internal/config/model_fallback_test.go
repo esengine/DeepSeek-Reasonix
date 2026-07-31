@@ -246,7 +246,7 @@ func TestModelRefsProvider(t *testing.T) {
 func TestRemoveProviderMigratesDanglingRefs(t *testing.T) {
 	c := testModelFallbackConfig(t)
 	c.DefaultModel = "model-a2"
-	c.Agent.PlannerModel = "prov-a"
+	c.Agent.ContextModel = "prov-a"
 	c.Agent.SubagentModel = "prov-a/model-a1"
 	c.Agent.SubagentModels = map[string]string{
 		"review":  "prov-a/model-a2",
@@ -263,8 +263,8 @@ func TestRemoveProviderMigratesDanglingRefs(t *testing.T) {
 	if c.DefaultModel != "prov-b" {
 		t.Fatalf("default_model = %q, want prov-b", c.DefaultModel)
 	}
-	if c.Agent.PlannerModel != "prov-b" {
-		t.Fatalf("planner_model = %q, want prov-b", c.Agent.PlannerModel)
+	if c.Agent.ContextModel != "prov-b" {
+		t.Fatalf("context_model = %q, want prov-b", c.Agent.ContextModel)
 	}
 	if c.Agent.SubagentModel != "prov-b" {
 		t.Fatalf("subagent_model = %q, want prov-b", c.Agent.SubagentModel)
@@ -301,7 +301,7 @@ func TestRemoveProviderBlocksDefaultWithoutFallback(t *testing.T) {
 func TestRemoveProviderClearsOptionalRefsWithoutFallback(t *testing.T) {
 	c := testModelFallbackConfig(t)
 	c.DefaultModel = "prov-b"
-	c.Agent.PlannerModel = "prov-a/model-a1"
+	c.Agent.ContextModel = "prov-a/model-a1"
 	c.Agent.SubagentModel = "prov-a"
 	c.Agent.SubagentModels = map[string]string{"review": "prov-a/model-a2"}
 	c.Providers[1].APIKeyEnv = "REASONIX_TEST_EMPTY"
@@ -310,8 +310,8 @@ func TestRemoveProviderClearsOptionalRefsWithoutFallback(t *testing.T) {
 	if err := c.RemoveProvider("prov-a"); err != nil {
 		t.Fatalf("RemoveProvider: %v", err)
 	}
-	if c.Agent.PlannerModel != "" {
-		t.Fatalf("planner_model = %q, want cleared", c.Agent.PlannerModel)
+	if c.Agent.ContextModel != "" {
+		t.Fatalf("context_model = %q, want cleared", c.Agent.ContextModel)
 	}
 	if c.Agent.SubagentModel != "" {
 		t.Fatalf("subagent_model = %q, want cleared", c.Agent.SubagentModel)

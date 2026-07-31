@@ -13613,6 +13613,12 @@ body > .mermaid-diagram--fullscreen {
 .subagents-builtin-overrides__field .mem-select {
   width: 100%;
 }
+.subagents-builtin-model-hint {
+  color: var(--fg-subtle);
+  font-size: 10px;
+  line-height: 1.4;
+  padding-top: 2px;
+}
 .subagents-builtin-overrides__status {
   min-height: 34px;
   display: inline-flex;

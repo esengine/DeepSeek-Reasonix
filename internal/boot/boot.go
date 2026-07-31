@@ -168,7 +168,7 @@ func recoveryHeadlessMode(opts Options) bool {
 }
 
 // Build loads config, resolves the model(s), and returns a Controller wrapping a
-// single Agent, or a two-model Coordinator when agent.planner_model is set. The
+// single Agent, or a two-model Coordinator when agent.context_model is set. The
 // returned controller owns plugin subprocesses; call Close (via Controller.Close)
 // to release them.
 func Build(ctx context.Context, opts Options) (*control.Controller, error) {
@@ -1590,19 +1590,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 
 	var runner agent.Runner = executor
 	label := entry.Model
-	// Two-model collaboration: a distinct planner_model wraps the executor in a
-	// Coordinator with its own session, kept separate for cache stability. The
-	// planner gets the same standing memory context and a filtered read-only
-	// research tool set, so it can inspect rules/code without side effects.
-	if pm := cfg.Agent.PlannerModel; pm != "" && !tokenEconomy {
-		pe, ok := resolveOptionalEntry(opts, cfg, pm)
+	// Two-model collaboration: a distinct context_model runs a pre-turn
+	// read-only research agent in its own session, kept separate for cache
+	// stability. The research agent gets the same standing memory context and
+	// a filtered read-only tool set, so it can inspect rules/code without
+	// side effects.
+	if cm := cfg.Agent.ContextModel; cm != "" && !tokenEconomy {
+		pe, ok := resolveOptionalEntry(opts, cfg, cm)
 		if !ok {
-			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
+			return nil, fmt.Errorf("context_model %q is not a configured provider", cm)
 		}
 		if pe.Model != entry.Model {
 			plannerProv, err := resolveProvider(opts, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(pe)})
 			if err != nil {
-				return nil, fmt.Errorf("planner %q: %w", pm, err)
+				return nil, fmt.Errorf("context model %q: %w", cm, err)
 			}
 			plannerSess := agent.NewSession(agent.PlannerPromptWithContext(mem.Block()))
 			// Planner owns an independent ledger/audit and use_capability frontend

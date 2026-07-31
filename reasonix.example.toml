@@ -37,7 +37,7 @@ soft_compact_ratio  = 0.5   # notice only; keeps the cache-first prefix intact
 tool_result_snip_ratio = 0.6   # snip stale tool results before summary compaction
 compact_ratio       = 0.8   # try compacting when prompt reaches this fraction
 compact_force_ratio = 0.9   # force compacting at this high-water mark
-# planner_model = "deepseek-pro"   # optional: enable two-model collaboration
+# context_model = "deepseek-pro"   # optional: pre-turn context research (deprecated key: planner_model)
 # subagent_model = "deepseek-pro"   # optional default for runAs=subagent skills
 # subagent_models = { review = "deepseek-pro", security_review = "deepseek-pro" }   # per-skill overrides
 # max_subagent_concurrency = 6   # session-wide sub-agent concurrency (task/fleet/skills)
