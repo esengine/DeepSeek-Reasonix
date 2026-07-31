@@ -310,9 +310,12 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 	}
 
 	// Effort → reasoning.effort (replaces deprecated enable_thinking).
-	// Vendor effort ladders differ: DashScope accepts low/medium/high/xhigh/max;
-	// DeepSeek accepts low/high/max only (its default is high). Normalise by
-	// vendor so an unsupported tier never 400s.
+	// Vendor effort ladders differ, so normalise per vendor so an unsupported
+	// tier never 400s:
+	//   DashScope: low/medium/high/xhigh/max
+	//   DeepSeek:  none/minimal/low/medium/high/xhigh/max (official docs;
+	//              Codex's catalog low/high/max is a client UI subset)
+	//   MiniMax:   none/minimal/low/medium/high
 	effort := c.effort
 	switch c.vendor {
 	case "deepseek":
