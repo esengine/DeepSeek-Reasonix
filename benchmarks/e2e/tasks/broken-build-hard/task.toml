@@ -1,0 +1,8 @@
+prompt = """The workdir project is broken in THREE independent ways. Find and fix all of them, then make the test suite pass.
+1. app/models.py: `User` dataclass has a field `name` but `greeting()` references `self.username` (AttributeError).
+2. app/db.py: `get_user(db, user_id)` filters with `id == user_id` but the DB rows use key `"uid"` (wrong result).
+3. app/__init__.py imports `from .models import User, AdminUser` but AdminUser doesn't exist — create it as a subclass of User with an extra `role = "admin"` field.
+Additionally: tests/test_app.py has a test that expects `get_user` to raise KeyError for missing users — make db.py raise KeyError when the user_id is not found (don't change the test).
+Run python3 -m tests.test_app to verify ALL tests pass."""
+max_steps = 20
+timeout_sec = 300

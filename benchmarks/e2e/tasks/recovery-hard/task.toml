@@ -1,0 +1,6 @@
+prompt = """Complete the task despite obstacles in the workdir:
+1. data/target.txt exists but contains corrupted bytes — the first 20 bytes are garbage, then valid UTF-8 text follows. Read the file, skip the garbage, and extract the message (the valid text after byte 20).
+2. The extracted message contains a filename, e.g. 'readme.txt'. That file ALSO has garbage-prefix corruption. Clean it and read its content — it's a number.
+3. Write the final number to answer.txt. If any tool call fails midway, retry with a different approach — do not give up."""
+max_steps = 15
+timeout_sec = 240

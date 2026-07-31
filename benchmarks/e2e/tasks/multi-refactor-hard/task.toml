@@ -1,0 +1,8 @@
+prompt = """Refactor the workdir project (a small e-commerce pricing system) WITHOUT changing behavior:
+- src/pricing.py: has a duplicated discount calculation (compute_discount appears in both apply_coupon and apply_bulk_discount with slightly different rounding). Extract ONE shared helper and make both use it. The rounding must match the CURRENT behavior exactly: round(x, 2).
+- src/tax.py: uses a global constant TAX_RATE = 0.08. Move it to a config.py with a DEFAULT_TAX_RATE, and have tax.py import it (keep the name TAX_RATE available in tax.py for backward compat).
+- src/receipt.py: has dead code (an unused function format_legacy). Remove it.
+- Do NOT change any public function signatures or return values.
+- Run python3 -m tests.test_pricing to verify all tests still pass after refactoring."""
+max_steps = 20
+timeout_sec = 300

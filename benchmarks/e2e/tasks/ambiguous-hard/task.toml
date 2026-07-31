@@ -1,0 +1,9 @@
+prompt = """The workdir has data/sales.csv (columns: date,product,units,unit_price) and data/returns.csv (columns: date,product,units).
+The business owner wants: "net revenue by product for the last 30 days, but I also want to see which products are losing money when you factor in a 15% restocking fee on returns."
+There is no exact spec — decide the reasonable interpretation, implement it in analysis.py with a function `net_revenue_by_product(sales_path, returns_path)` returning a dict {product: net_revenue}, and a function `losing_products(net_revenue)` returning products with negative net revenue.
+Interpretation note: the restocking fee means the refunded return costs the business the return value PLUS 15% (i.e. net revenue is reduced by units × unit_price × 1.15 for each return within the window).
+Document your interpretation in NOTES.md (3-5 sentences).
+The data: sales.csv covers the last 30 days; returns.csv may include older dates — exclude returns older than 30 days (compare by parsing ISO dates).
+Write and run a test to verify your implementation."""
+max_steps = 20
+timeout_sec = 300

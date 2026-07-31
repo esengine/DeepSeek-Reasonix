@@ -1,0 +1,6 @@
+prompt = """The workdir has slow.py with a deliberately inefficient function `find_duplicates(items)` that is O(n^2). Optimize it to O(n) using a set, WITHOUT changing the function signature or return type (a list of duplicated items, order doesn't matter).
+Also optimize `common_prefix(a, b)` — it currently builds intermediate strings in a loop; make it efficient while returning the same result.
+There is a benchmark harness in bench.py — your optimized code should complete `find_duplicates` on a list of 100,000 items (1..50000 repeated twice) in under 1 second. The original takes ~30s.
+Write your optimized code to optimized.py (import the two functions from it), keep slow.py untouched, and run python3 bench.py to verify."""
+max_steps = 20
+timeout_sec = 300
