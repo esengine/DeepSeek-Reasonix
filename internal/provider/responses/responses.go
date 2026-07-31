@@ -141,7 +141,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		return nil, fmt.Errorf("responses: HTTP %d: %s", resp.StatusCode, string(b))
 	}
 
-	out := make(chan provider.Chunk, 16)
+	out := make(chan provider.Chunk, 64)
 	go c.readStream(resp, out, usePrevID)
 	return out, nil
 }
@@ -311,6 +311,14 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 		case "response.output_text.delta":
 			out <- provider.Chunk{Type: provider.ChunkText, Text: event.Delta}
 
+		case "response.output_text.done", "response.content_part.done":
+			// Full text of the completed content part. Sent only when the
+			// delta stream may have been incomplete (DeepSeek emits these with
+			// the assembled text); callers dedupe by turning deltas off.
+			if event.Text != "" {
+				out <- provider.Chunk{Type: provider.ChunkText, Text: event.Text}
+			}
+
 		case "response.reasoning_summary_text.delta":
 			// DashScope dialect
 			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: event.Delta}
@@ -331,7 +339,8 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 			}
 
 		case "response.mcp_call_arguments.delta":
-			// DashScope dialect: tool call arguments streaming
+			// DashScope dialect: tool call arguments streaming.
+			// The delta carries {delta: "..."} with the item in the event.
 			if event.Item != nil {
 				out <- provider.Chunk{
 					Type: provider.ChunkToolCallArgsDelta,
@@ -339,17 +348,29 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 						ID:   event.Item.CallID,
 						Name: event.Item.Name,
 					},
+					ArgChars: len(event.Delta),
 				}
 			}
 
 		case "response.function_call_arguments.delta":
-			// DeepSeek dialect: tool call arguments streaming
+			// DeepSeek dialect: the delta is the raw partial argument string.
+			out <- provider.Chunk{
+				Type: provider.ChunkToolCallArgsDelta,
+				ToolCall: &provider.ToolCall{
+					ID: event.FunctionCallID(),
+				},
+				ArgChars: len(event.Delta),
+			}
+
+		case "response.function_call_arguments.done":
+			// DeepSeek dialect: complete arguments for the call.
 			if event.Item != nil {
 				out <- provider.Chunk{
-					Type: provider.ChunkToolCallArgsDelta,
+					Type: provider.ChunkToolCall,
 					ToolCall: &provider.ToolCall{
-						ID:   event.Item.CallID,
-						Name: event.Item.Name,
+						ID:        event.Item.CallID,
+						Name:      event.Item.Name,
+						Arguments: event.Item.Arguments,
 					},
 				}
 			}
@@ -408,17 +429,21 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 		}
 	}
 
+done:
 	// Store the response ID for the next turn's previous_response_id.
+	// Reached from both the normal loop end ([DONE]/EOF) and terminal events
+	// (response.completed/incomplete/failed jump here via goto).
 	if responseID != "" {
 		c.mu.Lock()
 		c.lastResponseID = responseID
 		c.mu.Unlock()
 	}
 
-done:
-
 	if err := scanner.Err(); err != nil {
-		out <- provider.Chunk{Type: provider.ChunkError, Err: err}
+		// A mid-stream transport cut after some output was already delivered is
+		// recoverable: the agent can append a tail recovery prompt instead of
+		// replaying the whole request (which would duplicate visible text).
+		out <- provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}}
 		return
 	}
 	out <- provider.Chunk{Type: provider.ChunkDone}
@@ -428,8 +453,20 @@ done:
 type sseEvent struct {
 	Type     string       `json:"type"`
 	Delta    string       `json:"delta"`
+	Text     string       `json:"text"`
 	Item     *sseItem     `json:"item"`
+	ItemID   string       `json:"item_id"`
 	Response *sseResponse `json:"response"`
+}
+
+// FunctionCallID returns the function_call id for tool-argument events.
+// OpenAI's Responses API events carry the id at the event top level for
+// function_call_arguments.delta events; the nested item may be absent.
+func (e sseEvent) FunctionCallID() string {
+	if e.Item != nil && e.Item.CallID != "" {
+		return e.Item.CallID
+	}
+	return e.ItemID
 }
 
 type sseItem struct {
