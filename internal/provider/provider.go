@@ -589,6 +589,30 @@ type Usage struct {
 	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
 }
 
+// ResponsesUsage normalises a Responses API usage block (OpenAI Responses
+// format: input_tokens / output_tokens / input_tokens_details.cached_tokens /
+// output_tokens_details.reasoning_tokens) into the shared Usage shape, deriving
+// cache-miss as input − cached when the server omits it.
+func ResponsesUsage(input, output, total, cached, reasoning int) *Usage {
+	if total == 0 && (input != 0 || output != 0) {
+		total = input + output
+	}
+	miss := 0
+	if cached > 0 && input > cached {
+		miss = input - cached
+	} else if cached == 0 {
+		miss = input
+	}
+	return &Usage{
+		PromptTokens:     input,
+		CompletionTokens: output,
+		TotalTokens:      total,
+		CacheHitTokens:   cached,
+		CacheMissTokens:  miss,
+		ReasoningTokens:  reasoning,
+	}
+}
+
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
 // is a display symbol or ISO-like code (default "¥"). toml tags let config decode it.
 type Pricing struct {

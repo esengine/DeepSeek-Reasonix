@@ -279,7 +279,6 @@ func TestResponsesReasoningDialects(t *testing.T) {
 
 func boolPtr(v bool) *bool { return &v }
 
-
 func TestDetectVendorAndModeDefaults(t *testing.T) {
 	cases := []struct {
 		baseURL string
@@ -414,5 +413,25 @@ func TestResponsesFailedAuthEventSurfacesAuthError(t *testing.T) {
 	}
 	if ae.KeyEnv != "QWEN_API_KEY" || ae.Status != 401 || !ae.HasKey {
 		t.Fatalf("AuthError fields wrong: %+v", ae)
+	}
+}
+
+func TestProviderResponsesUsageNormalisation(t *testing.T) {
+	cases := []struct {
+		name                                    string
+		input, output, total, cached, reasoning int
+		wantHit, wantMiss, wantTotal            int
+	}{
+		{"full", 100, 20, 120, 80, 5, 80, 20, 120},
+		{"no-cache", 100, 20, 0, 0, 0, 0, 100, 120}, // total derived, miss = input
+		{"partial-cache", 100, 20, 120, 30, 0, 30, 70, 120},
+		{"all-cached", 100, 20, 120, 100, 0, 100, 0, 120},
+	}
+	for _, c := range cases {
+		u := provider.ResponsesUsage(c.input, c.output, c.total, c.cached, c.reasoning)
+		if u.CacheHitTokens != c.wantHit || u.CacheMissTokens != c.wantMiss || u.TotalTokens != c.wantTotal {
+			t.Errorf("%s: got hit=%d miss=%d total=%d, want %d/%d/%d", c.name,
+				u.CacheHitTokens, u.CacheMissTokens, u.TotalTokens, c.wantHit, c.wantMiss, c.wantTotal)
+		}
 	}
 }

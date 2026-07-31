@@ -325,11 +325,18 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 	if len(req.Tools) > 0 {
 		tools := make([]map[string]any, 0, len(req.Tools))
 		for _, t := range req.Tools {
+			parameters := t.Parameters
+			if len(parameters) == 0 {
+				// A tool with no declared parameters must still send a
+				// well-formed JSON Schema object ("type":"object"); some
+				// Responses API backends reject an empty/absent schema.
+				parameters = provider.CanonicalizeSchema(nil)
+			}
 			tools = append(tools, map[string]any{
 				"type":        "function",
 				"name":        t.Name,
 				"description": t.Description,
-				"parameters":  json.RawMessage(t.Parameters),
+				"parameters":  json.RawMessage(parameters),
 			})
 		}
 		body["tools"] = tools
@@ -646,23 +653,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 						reasoning = u.OutputTokensDetails.ReasoningTokens
 					}
 					if !sendChunk(ctx, out, provider.Chunk{
-
-						Type: provider.ChunkUsage,
-
-						Usage: &provider.Usage{
-
-							PromptTokens: u.InputTokens,
-
-							CompletionTokens: u.OutputTokens,
-
-							TotalTokens: u.TotalTokens,
-
-							CacheHitTokens: cached,
-
-							CacheMissTokens: u.InputTokens - cached,
-
-							ReasoningTokens: reasoning,
-						},
+						Type:  provider.ChunkUsage,
+						Usage: provider.ResponsesUsage(u.InputTokens, u.OutputTokens, u.TotalTokens, cached, reasoning),
 					}) {
 						return
 					}
