@@ -314,7 +314,9 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 	// DeepSeek accepts low/high/max only (its default is high). Normalise by
 	// vendor so an unsupported tier never 400s.
 	effort := c.effort
-	if c.vendor == "deepseek" {
+	switch c.vendor {
+	case "deepseek":
+		// DeepSeek accepts low/high/max only (default high).
 		switch effort {
 		case "", "high":
 			effort = "high" // DeepSeek default_reasoning_level
@@ -326,6 +328,20 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 			effort = "disabled"
 		default:
 			effort = "high"
+		}
+	case "minimax":
+		// MiniMax: effort none/minimal/low/medium/high. Omitted reasoning
+		// disables it for M3; minimal/low/medium/high enable without tuning
+		// depth; M2.x cannot disable reasoning.
+		switch effort {
+		case "", "minimal", "low", "medium", "high":
+			// pass through; "" = omit reasoning entirely (M3 default off)
+		case "disabled", "none":
+			effort = "none"
+		case "xhigh", "max":
+			effort = "high"
+		default:
+			effort = ""
 		}
 	}
 	if effort == "disabled" {

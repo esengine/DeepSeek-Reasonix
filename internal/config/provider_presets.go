@@ -442,7 +442,7 @@ var curatedProviderPresets = []ProviderPreset{
 	{
 		ID:          "minimax-responses",
 		Label:       "MiniMax Responses API",
-		Description: "MiniMax OpenAI Responses API endpoint (Create Response, documented).",
+		Description: "MiniMax OpenAI Responses API endpoint (Create Response, documented; stateless, no previous_response_id).",
 		KeyEnv:      "MINIMAX_API_KEY",
 		Entries: []ProviderEntry{{
 			Name:          "minimax-responses",
@@ -453,7 +453,10 @@ var curatedProviderPresets = []ProviderPreset{
 			Default:       "MiniMax-M3",
 			APIKeyEnv:     "MINIMAX_API_KEY",
 			ContextWindow: 1048576,
-			ResponsesMode: "stateful", // MiniMax documents previous_response_id support
+			// MiniMax's Responses API is stateless: no previous_response_id,
+			// store always false. Reasoning defaults OFF for M3 (omitted or
+			// effort:none); minimal/low/medium/high enable without tuning depth.
+			ResponsesMode: "stateless",
 		}},
 	},
 	{
