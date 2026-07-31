@@ -76,6 +76,26 @@ model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
 # also preset: deepseek-pro
 
+# Responses API providers (kind "responses"): the OpenAI Responses protocol,
+# supported by DashScope/Qwen (stateful previous_response_id, server-managed
+# context), DeepSeek (stateless), MiniMax and Volcano Ark. Vendor defaults are
+# auto-detected from base_url; override with responses_mode.
+#
+# [[providers]]
+# name        = "qwen-responses"
+# kind        = "responses"
+# base_url    = "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+# model       = "qwen3.7-plus"
+# api_key_env = "QWEN_TOKEN_PLAN_CN_API_KEY"
+#
+# [[providers]]
+# name        = "deepseek-responses"
+# kind        = "responses"
+# base_url    = "https://api.deepseek.com"
+# model       = "deepseek-v4-flash"
+# api_key_env = "DEEPSEEK_API_KEY"
+# responses_mode = "stateless"   # DeepSeek auto-detected anyway; explicit override supported
+
 [tools]
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
