@@ -137,3 +137,28 @@ func TestFetchModelsEmptyResponse(t *testing.T) {
 		t.Errorf("want empty list, got %v", models)
 	}
 }
+
+func TestFetchModelsCodexCatalogFormat(t *testing.T) {
+	// Codex-style catalog: {"models":[{"slug":...}]} — used by DeepSeek's
+	// Responses API model directory.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{"slug": "deepseek-v4-pro", "context_window": 1048576, "display_name": "DeepSeek-V4-Pro"},
+				{"slug": "deepseek-v4-flash", "context_window": 1048576, "display_name": "DeepSeek-V4-Flash"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	models, err := FetchModels(context.Background(), srv.URL, "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("want 2 models, got %d: %v", len(models), models)
+	}
+	if models[0] != "deepseek-v4-flash" || models[1] != "deepseek-v4-pro" {
+		t.Errorf("want sorted [deepseek-v4-flash deepseek-v4-pro], got %v", models)
+	}
+}
