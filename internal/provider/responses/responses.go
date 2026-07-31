@@ -22,10 +22,18 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
+
+// defaultStreamIdleTimeout caps how long a started SSE stream may go silent
+// before it's treated as a dropped connection — a half-open TCP connection
+// (proxy switched mid-stream) sends no RST, so scanner.Scan() would block
+// forever. Generous on purpose; live streams emit far more often.
+const defaultStreamIdleTimeout = 120 * time.Second
 
 func init() {
 	provider.Register("responses", newFromConfig)
@@ -41,14 +49,20 @@ func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 		stateful = &v
 	}
 	mode, _ := cfg.Extra["mode"].(string)
+	proxy, _ := cfg.Extra["proxy_spec"].(netclient.ProxySpec)
+	keyEnv, _ := cfg.Extra["api_key_env"].(string)
+	keySource, _ := cfg.Extra["api_key_source"].(string)
 	return New(Config{
-		Name:     cfg.Name,
-		APIKey:   cfg.APIKey,
-		BaseURL:  cfg.BaseURL,
-		Model:    cfg.Model,
-		Effort:   effort,
-		Mode:     mode,
-		Stateful: stateful,
+		Name:      cfg.Name,
+		APIKey:    cfg.APIKey,
+		BaseURL:   cfg.BaseURL,
+		Model:     cfg.Model,
+		Effort:    effort,
+		Mode:      mode,
+		Stateful:  stateful,
+		Proxy:     proxy,
+		KeyEnv:    keyEnv,
+		KeySource: keySource,
 	}), nil
 }
 
@@ -75,7 +89,19 @@ type Config struct {
 	// SessionCache enables the x-dashscope-session-cache header (DashScope;
 	// default true).
 	SessionCache *bool
+
+	// Proxy carries the resolved network proxy spec from the config Extra.
+	// nil means the process environment proxy applies.
+	Proxy netclient.ProxySpec
+
+	// KeyEnv names the api_key_env the key came from; KeySource its
+	// human-readable source. Surfaced in AuthError messages.
+	KeyEnv    string
+	KeySource string
 }
+
+// ProxySpec returns the configured proxy spec.
+func (c Config) ProxySpec() any { return c.Proxy }
 
 // mode resolves the effective context mode: explicit Mode wins, then legacy
 // Stateful, then vendor auto-detection (stateless for DeepSeek, stateful
@@ -125,15 +151,30 @@ func DetectVendor(baseURL string) string {
 type client struct {
 	name         string
 	apiKey       string
+	keyEnv       string // api_key_env name, surfaced in auth errors
+	keySource    string // source of keyEnv, surfaced in auth errors
 	baseURL      string
 	model        string
 	effort       string
 	mode         string // "stateful" (previous_response_id) | "stateless" (full input)
 	sessionCache bool
 	http         *http.Client
+	authed       atomic.Bool   // a request has succeeded — gate transient-401 retry
+	idleTimeout  time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
 
 	mu             sync.Mutex
 	lastResponseID string // previous_response_id for server-managed context
+}
+
+// sendOpts feeds SendWithRetry's auth/retry behavior.
+func (c *client) sendOpts() provider.SendOptions {
+	return provider.SendOptions{
+		Provider:   c.name,
+		KeyEnv:     c.keyEnv,
+		KeySource:  c.keySource,
+		KeyPresent: c.apiKey != "",
+		RetryAuth:  c.authed.Load(),
+	}
 }
 
 // New creates a Responses API provider.
@@ -142,17 +183,32 @@ func New(cfg Config) provider.Provider {
 	if cfg.SessionCache != nil {
 		sc = *cfg.SessionCache
 	}
+	// netclient.NewHTTPClient honors the proxy spec (env proxy or explicit
+	// proxy_spec from config); transport timeouts are generous because
+	// thinking-mode models can be silent for a while before the first token.
+	httpClient := &http.Client{Timeout: 300 * time.Second}
+	if spec, ok := cfg.ProxySpec().(netclient.ProxySpec); ok {
+		if c, err := netclient.NewHTTPClient(spec, netclient.TransportOptions{
+			DialTimeout:           30 * time.Second,
+			KeepAlive:             30 * time.Second,
+			TLSHandshakeTimeout:   15 * time.Second,
+			ResponseHeaderTimeout: 120 * time.Second,
+		}); err == nil {
+			httpClient = c
+		}
+	}
 	return &client{
 		name:         cfg.Name,
 		apiKey:       cfg.APIKey,
+		keyEnv:       cfg.KeyEnv,
+		keySource:    cfg.KeySource,
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		model:        cfg.Model,
 		effort:       cfg.Effort,
 		mode:         cfg.mode(),
 		sessionCache: sc,
-		http: &http.Client{
-			Timeout: 300 * time.Second,
-		},
+		http:         httpClient,
+		idleTimeout:  defaultStreamIdleTimeout,
 	}
 }
 
@@ -173,33 +229,42 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		return nil, fmt.Errorf("responses: marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/responses", bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("responses: create request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	if c.sessionCache {
-		httpReq.Header.Set("x-dashscope-session-cache", "enable")
+	newReq := func(ctx context.Context) (*http.Request, error) {
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/responses", bytes.NewReader(jsonBody))
+		if err != nil {
+			return nil, fmt.Errorf("responses: create request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+		if c.sessionCache {
+			httpReq.Header.Set("x-dashscope-session-cache", "enable")
+		}
+		return httpReq, nil
 	}
 
-	resp, err := c.http.Do(httpReq)
+	// SendWithRetry handles 401/403 → AuthError (actionable message naming the
+	// key env), transient-401 retry after the first success, and 429 backoff.
+	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
 	if err != nil {
-		return nil, fmt.Errorf("responses: %w", err)
+		// If the previous_response_id expired (7-day TTL), reset and let the
+		// caller retry with full history.
+		if resp != nil && resp.StatusCode == http.StatusBadRequest {
+			c.ResetContext()
+		}
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		// If the previous_response_id expired (7-day TTL), reset and let the
-		// caller retry with full history.
 		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(b), "not found") {
 			c.ResetContext()
 		}
 		return nil, fmt.Errorf("responses: HTTP %d: %s", resp.StatusCode, string(b))
 	}
+	c.authed.Store(true)
 
 	out := make(chan provider.Chunk, 64)
-	go c.readStream(resp, out, usePrevID)
+	go c.readStream(ctx, resp, out, usePrevID)
 	return out, nil
 }
 
@@ -335,16 +400,60 @@ func messagesToInput(msgs []provider.Message) []map[string]any {
 
 // readStream parses the Responses API SSE event stream and maps events to
 // provider.Chunk values.
-func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, usePrevID bool) {
+func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<- provider.Chunk, usePrevID bool) {
 	defer resp.Body.Close()
 	defer close(out)
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 4*1024*1024), 4*1024*1024)
 
+	// SSE stall watchdog: a half-open connection sends no RST, so scanner.Scan()
+	// would block forever. Close the body when idle exceeds the timeout; the
+	// scan loop then unblocks and reports a recoverable interrupted error.
+	idleTimeout := c.idleTimeout
+	if idleTimeout <= 0 {
+		idleTimeout = defaultStreamIdleTimeout
+	}
+	done := make(chan struct{})
+	defer close(done)
+	activity := make(chan struct{}, 1)
+	var stalled atomic.Bool
+	go func() {
+		idle := time.NewTimer(idleTimeout)
+		defer idle.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				resp.Body.Close()
+				return
+			case <-done:
+				return
+			case <-idle.C:
+				stalled.Store(true)
+				resp.Body.Close()
+				return
+			case <-activity:
+				if !idle.Stop() {
+					select {
+					case <-idle.C:
+					default:
+					}
+				}
+				idle.Reset(idleTimeout)
+			}
+		}
+	}()
+	notifyActivity := func() {
+		select {
+		case activity <- struct{}{}:
+		default:
+		}
+	}
+
 	var responseID string
 
 	for scanner.Scan() {
+		notifyActivity()
 		line := scanner.Text()
 		// Responses API SSE uses "data:{...}" (no space); be lenient.
 		var data string
