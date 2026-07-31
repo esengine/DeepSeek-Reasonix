@@ -669,12 +669,25 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				}
 			}
 			if event.Type == "response.failed" {
-				msg := "responses: response failed"
 				if event.Response != nil && event.Response.Error != nil {
-					msg = "responses: " + event.Response.Error.Message
-				}
-				if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s", msg)}) {
-					return
+					// An authentication-shaped failure (invalid/expired key,
+					// no permission) surfaces as a provider.AuthError so the
+					// agent shows an actionable message naming the key env.
+					// Otherwise a plain error carries the server's reason.
+					if err := authErrorFromResponse(c, event.Response.Error); err != nil {
+						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err}) {
+							return
+						}
+					} else {
+						msg := "responses: " + event.Response.Error.Message
+						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s", msg)}) {
+							return
+						}
+					}
+				} else {
+					if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("responses: response failed")}) {
+						return
+					}
 				}
 			}
 			// Responses API sends no [DONE]; stop after the terminal event.
@@ -703,6 +716,37 @@ done:
 	}
 	if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkDone}) {
 		return
+	}
+}
+
+// authErrorFromResponse maps an authentication-shaped server error to a
+// provider.AuthError (status 401/403 semantics). Returns nil when the error
+// is not authentication-related.
+func authErrorFromResponse(c *client, se *sseError) error {
+	if se == nil {
+		return nil
+	}
+	code := strings.ToLower(strings.TrimSpace(se.Code))
+	msg := strings.ToLower(strings.TrimSpace(se.Message))
+	auth := strings.Contains(code, "auth") || strings.Contains(code, "invalid_api_key") ||
+		strings.Contains(code, "permission") || strings.Contains(code, "unauthorized") ||
+		strings.Contains(code, "forbidden") ||
+		strings.Contains(msg, "api key") || strings.Contains(msg, "invalid key") ||
+		strings.Contains(msg, "unauthorized") || strings.Contains(msg, "authentication")
+	if !auth {
+		return nil
+	}
+	status := 401
+	if strings.Contains(code, "forbidden") || strings.Contains(msg, "permission") {
+		status = 403
+	}
+	return &provider.AuthError{
+		Provider:  c.name,
+		KeyEnv:    c.keyEnv,
+		KeySource: c.keySource,
+		Status:    status,
+		HasKey:    c.apiKey != "",
+		Body:      se.Message,
 	}
 }
 

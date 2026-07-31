@@ -343,3 +343,76 @@ func TestSendChunkBufferedDelivers(t *testing.T) {
 		t.Fatal("chunk not delivered")
 	}
 }
+
+func TestResponsesCompactionFallsBackToFullInput(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		fl := w.(http.Flusher)
+		w.Write([]byte(`data:{"type":"response.output_text.delta","delta":"ok"}` + "\n\n"))
+		w.Write([]byte(`data:{"type":"response.completed","response":{"id":"resp_x","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
+		fl.Flush()
+	}))
+	t.Cleanup(srv.Close)
+
+	p := New(Config{Name: "test", APIKey: "k", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
+	c := p.(*client)
+
+	// Turn 1: establishes previous_response_id.
+	collect(t, p, provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "first"},
+	}})
+	if c.lastResponseID == "" {
+		t.Fatal("turn 1 should record response id")
+	}
+
+	// Simulate compaction: session rewritten to system+summary, context reset.
+	c.ResetContext()
+	if c.lastResponseID != "" {
+		t.Fatal("ResetContext must clear previous_response_id")
+	}
+
+	// Turn 2 after compaction: must send full input, no previous_response_id.
+	collect(t, p, provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "summary..."},
+		{Role: provider.RoleUser, Content: "continue"},
+	}})
+	if _, has := bodies[1]["previous_response_id"]; has {
+		t.Fatal("post-compaction turn must not carry previous_response_id")
+	}
+	if _, ok := bodies[1]["input"].([]any); !ok {
+		t.Fatalf("post-compaction input should be full array, got %#v", bodies[1]["input"])
+	}
+}
+
+func TestResponsesFailedAuthEventSurfacesAuthError(t *testing.T) {
+	srv := mockResponsesServer(t, []string{
+		`{"type":"response.failed","response":{"id":"resp_1","error":{"code":"invalid_api_key","message":"Incorrect API key"}}}`,
+	})
+	p := New(Config{Name: "test", APIKey: "k", KeyEnv: "QWEN_API_KEY", KeySource: ".env", BaseURL: srv.URL, Model: "qwen3.7-plus", Stateful: boolPtr(true)})
+	chunks := collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+
+	var ae *provider.AuthError
+	for i := range chunks {
+		if chunks[i].Type == provider.ChunkError {
+			ae, _ = chunks[i].Err.(*provider.AuthError)
+			if ae != nil {
+				break
+			}
+		}
+	}
+	if ae == nil {
+		t.Fatal("expected AuthError from invalid_api_key failed event")
+	}
+	if ae.KeyEnv != "QWEN_API_KEY" || ae.Status != 401 || !ae.HasKey {
+		t.Fatalf("AuthError fields wrong: %+v", ae)
+	}
+}
