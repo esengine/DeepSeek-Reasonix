@@ -440,3 +440,41 @@ func TestProviderResponsesUsageNormalisation(t *testing.T) {
 		}
 	}
 }
+
+func TestDeepSeekEffortNormalisation(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string // "" = no reasoning field sent
+	}{
+		{"", "high"}, // DeepSeek default_reasoning_level
+		{"high", "high"},
+		{"low", "low"},
+		{"medium", "high"}, // DeepSeek has no medium
+		{"xhigh", "high"},
+		{"max", "high"}, // DeepSeek max maps to high (no separate tier above)
+		{"disabled", "disabled"},
+	}
+	for _, c := range cases {
+		var got string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if r, ok := body["reasoning"].(map[string]any); ok {
+				got, _ = r["effort"].(string)
+			} else if body["enable_thinking"] == false {
+				got = "disabled"
+			}
+			w.Header().Set("Content-Type", "text/event-stream")
+			fl := w.(http.Flusher)
+			w.Write([]byte(`data:{"type":"response.completed","response":{"id":"r","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}` + "\n\n"))
+			fl.Flush()
+		}))
+		p := New(Config{Name: "t", APIKey: "k", BaseURL: srv.URL, Model: "deepseek-v4-flash", Effort: c.in})
+		p.(*client).vendor = "deepseek" // mock URL can't be vendor-detected
+		collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
+		srv.Close()
+		if got != c.want {
+			t.Errorf("effort %q → %q, want %q", c.in, got, c.want)
+		}
+	}
+}

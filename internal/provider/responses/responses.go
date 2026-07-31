@@ -156,6 +156,7 @@ type client struct {
 	baseURL      string
 	model        string
 	effort       string
+	vendor       string // DetectVendor(baseURL); "" when unknown (tests may override)
 	mode         string // "stateful" (previous_response_id) | "stateless" (full input)
 	sessionCache bool
 	http         *http.Client
@@ -205,6 +206,7 @@ func New(cfg Config) provider.Provider {
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		model:        cfg.Model,
 		effort:       cfg.Effort,
+		vendor:       DetectVendor(cfg.BaseURL),
 		mode:         cfg.mode(),
 		sessionCache: sc,
 		http:         httpClient,
@@ -307,11 +309,29 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 		"stream": true,
 	}
 
-	// Effort → reasoning.effort (replaces deprecated enable_thinking)
-	if c.effort == "disabled" {
+	// Effort → reasoning.effort (replaces deprecated enable_thinking).
+	// Vendor effort ladders differ: DashScope accepts low/medium/high/xhigh/max;
+	// DeepSeek accepts low/high/max only (its default is high). Normalise by
+	// vendor so an unsupported tier never 400s.
+	effort := c.effort
+	if c.vendor == "deepseek" {
+		switch effort {
+		case "", "high":
+			effort = "high" // DeepSeek default_reasoning_level
+		case "medium", "xhigh", "max":
+			effort = "high"
+		case "low":
+			effort = "low"
+		case "disabled":
+			effort = "disabled"
+		default:
+			effort = "high"
+		}
+	}
+	if effort == "disabled" {
 		body["enable_thinking"] = false
-	} else if c.effort != "" {
-		body["reasoning"] = map[string]any{"effort": c.effort}
+	} else if effort != "" {
+		body["reasoning"] = map[string]any{"effort": effort}
 	}
 
 	if req.MaxTokens > 0 {
