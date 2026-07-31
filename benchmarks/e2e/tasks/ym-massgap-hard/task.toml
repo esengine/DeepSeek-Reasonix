@@ -1,4 +1,4 @@
-prompt = """Write a Python script ym.py in the workdir that re-derives the machine-verified core of the Sovereign Yang-Mills mass-gap framework (YM.agda: SU(2,GF(9)) ≅ 2A₄, mass-gap-I2, triv-gap2/3/4, L3-structure-closed by the triple-completeness compiler).
+prompt = """Write a Python script ym.py in the workdir that re-derives the machine-verified core of the Sovereign Yang-Mills mass-gap framework (YM.agda: SU(2,GF(9)) ≅ 2A₄, mass-gap-I2, triv-gap2/3/4, L3 proven (YM_L3.agda: det≠0 ⇒ λ_min>0, 0 postulate)).
 
 Verified facts (from the Agda library):
 1. The gauge group is SU(2,GF(9)) ≅ 2A₄, the binary tetrahedral group of 24 elements. |2A₄| = 24 = |Q₈|·|C₃| = 8·3.

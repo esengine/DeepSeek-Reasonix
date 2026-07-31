@@ -1,4 +1,4 @@
-prompt = """Write a Python script pvsnp.py in the workdir that re-derives the machine-verified core of the Sovereign P vs NP framework (PvsNP.agda: holographic-penetration conjecture, 0 postulate, L1.5 — irreducible-instance verified, general form open).
+prompt = """Write a Python script pvsnp.py in the workdir that re-derives the machine-verified core of the Sovereign P vs NP framework (PvsNP.agda: holographic-penetration conjecture, 0 postulate, L1.5 (PvsNP_L15.agda: 3×3 irreducible exhaustive decision)).
 
 Verified facts (from the Agda library):
 1. A polynomial p(x) = x² + ax + b over GF(3) is IRREDUCIBLE iff it has NO root in {0,1,2} (has-root T₀ T₁ ≡ T₀, refl).
