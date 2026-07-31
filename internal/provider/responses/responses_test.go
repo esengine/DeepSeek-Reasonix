@@ -444,15 +444,19 @@ func TestProviderResponsesUsageNormalisation(t *testing.T) {
 func TestDeepSeekEffortNormalisation(t *testing.T) {
 	cases := []struct {
 		in   string
-		want string // "" = no reasoning field sent
+		want string // "" = reasoning omitted (model default, thinking on)
 	}{
-		{"", "high"}, // DeepSeek default_reasoning_level
-		{"high", "high"},
+		{"", ""}, // unset → model default (thinking on)
+		{"auto", ""},
+		{"disabled", "none"},
+		{"off", "none"},
+		{"none", "none"},
+		{"minimal", "minimal"},
 		{"low", "low"},
-		{"medium", "high"}, // DeepSeek has no medium
-		{"xhigh", "high"},
-		{"max", "high"}, // DeepSeek max maps to high (no separate tier above)
-		{"disabled", "disabled"},
+		{"medium", "medium"},
+		{"high", "high"},
+		{"xhigh", "xhigh"},
+		{"max", "max"},
 	}
 	for _, c := range cases {
 		var got string
@@ -461,8 +465,6 @@ func TestDeepSeekEffortNormalisation(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			if r, ok := body["reasoning"].(map[string]any); ok {
 				got, _ = r["effort"].(string)
-			} else if body["enable_thinking"] == false {
-				got = "disabled"
 			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			fl := w.(http.Flusher)

@@ -316,18 +316,19 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 	effort := c.effort
 	switch c.vendor {
 	case "deepseek":
-		// DeepSeek accepts low/high/max only (default high).
+		// DeepSeek Responses API supports the full ladder:
+		// none/minimal/low/medium/high/xhigh/max (official docs). Omitted
+		// reasoning uses the model default (thinking ON). Codex's catalog
+		// (low/high/max) is a client UI subset, not an API limit.
 		switch effort {
-		case "", "high":
-			effort = "high" // DeepSeek default_reasoning_level
-		case "medium", "xhigh", "max":
-			effort = "high"
-		case "low":
-			effort = "low"
-		case "disabled":
-			effort = "disabled"
+		case "":
+			// leave unset → model default (thinking on)
+		case "disabled", "off", "none":
+			effort = "none"
+		case "auto":
+			effort = ""
 		default:
-			effort = "high"
+			// minimal/low/medium/high/xhigh/max pass through verbatim
 		}
 	case "minimax":
 		// MiniMax: effort none/minimal/low/medium/high. Omitted reasoning
