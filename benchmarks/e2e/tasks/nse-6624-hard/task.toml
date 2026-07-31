@@ -1,0 +1,20 @@
+prompt = """Write a Python script ns.py in the workdir that re-derives the machine-verified constants of the Sovereign discrete Navier-Stokes framework (NSE.agda, 12 theorems / 0 postulate, L3 by the triple-completeness compiler).
+
+These are "constitution-locked" axioms — all verified by refl in Agda. Your job: reproduce the numbers with Python and check every identity.
+
+Verified constants (from NSE.agda):
+1. f0 = 432 (Huangzhong base frequency, Hz)
+2. POLAR = 144, TOROIDAL = 46, TOTAL = POLAR × TOROIDAL = 6624 (grid-verify: TOTAL ≡ 6624)
+3. Pythagorean comma = 3^12 / 2^19 (comma-verify: 3^12 ≡ 531441, 2^19 ≡ 524288)
+4. Curie-point density ρ = 3^13 / 2^22 ≈ 0.38012 (ρ-num = 1594323, ρ-den = 4194304)
+5. State space = GF(3)^12 = 3^12 = 531441
+
+Write ns.py that:
+- Computes each constant (3**12, 2**19, 2**22, 3**13, 144*46, 432) and asserts the identities above
+- Verifies TOTAL == 6624, comma numerator == 531441, comma denominator == 524288
+- Prints "PASS <name>" per check and "ALL PASS" only if every check passed
+- Writes 3**12 − 2**19 to answer.txt
+
+Run with: python3 ns.py"""
+max_steps = 15
+timeout_sec = 300

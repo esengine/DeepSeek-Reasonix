@@ -1,0 +1,18 @@
+prompt = """Write a Python script ym.py in the workdir that re-derives the machine-verified core of the Sovereign Yang-Mills mass-gap framework (YM.agda: SU(2,GF(9)) ≅ 2A₄, mass-gap-I2, triv-gap2/3/4, L3-structure-closed by the triple-completeness compiler).
+
+Verified facts (from the Agda library):
+1. The gauge group is SU(2,GF(9)) ≅ 2A₄, the binary tetrahedral group of 24 elements. |2A₄| = 24 = |Q₈|·|C₃| = 8·3.
+2. Each U ∈ 2A₄ embeds as a 2×2 matrix over GF(9) with det(U) = 1 (in GF(9)).
+3. The mass gap on the trivial (vacuum) configuration: det2-gf9(I₂) ≢ 0, det3-gf9(I₃) ≢ 0, det4-gf9(I₄) ≢ 0 — the determinant of the transfer matrix at the identity is NONZERO, which is the discrete mass-gap statement (λ_min > 0 ⇐ det ≠ 0).
+
+Write ym.py that:
+- Generates the 24 elements of 2A₄ as unit quaternions (doubled to integer tuples (a,b,c,d): the 8 axis elements ±(1,0,0,0),(0,1,0,0),(0,0,1,0),(0,0,0,1) plus the 16 sign combos of (1,1,1,1)) — verify |2A₄| = 24
+- Implements quaternion multiplication and verifies closure (product of any two elements is in the set)
+- Verifies the mass-gap on the identity: the "determinant" of the identity 2×2 matrix [1 0; 0 1] over GF(9) is 1 ≠ 0 (use the GF(9) arithmetic: elements are a+bα, α²=2 mod 3; det(ad−bc) of the identity = 1)
+- Verifies the group contains the central element −1 of order 2 (the quaternion (0,0,0,0)-scaled: (−1,0,0,0)) and that it is the UNIQUE order-2 element
+- Prints "PASS <name>" per check and "ALL PASS" only if all pass
+- Writes the order of the central element −1 (should be 2) to answer.txt
+
+Run with: python3 ym.py"""
+max_steps = 20
+timeout_sec = 360

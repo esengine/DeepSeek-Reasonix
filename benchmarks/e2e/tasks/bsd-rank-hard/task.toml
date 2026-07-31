@@ -1,0 +1,17 @@
+prompt = """Write a Python script bsd.py in the workdir that re-derives the machine-verified point counts of the Sovereign BSD framework (BSD.agda / BSD9.agda, 0 postulate, trace-recursion method).
+
+Verified facts (from the Agda library):
+1. Over GF(3), the curve E: y² = x³ + x + b for b = 0, 1, 2 has #E = 4 points (including the point at infinity), so the Frobenius trace t₁ = q + 1 − #E = 3 + 1 − 4 = 0 (trace-E1-zero: 4∸4 ≡ 0).
+2. The GF(9) point count follows from the trace recursion t₂ = t₁² − 2q (in ℤ): with t₁ = 0, q = 3 → t₂ = 0 − 6 = −6, hence #E(GF(9)) = q² + 1 − t₂ = 9 + 1 − (−6) = 16. This sits exactly at the Hasse upper bound q²+1+2q = 16.
+3. Hasse bound: |#E − (q+1)| ≤ 2√q for every non-singular curve.
+
+Write bsd.py that:
+- Brute-force counts #E(GF(3)) for y² = x³ + x + b (b = 0,1,2), asserting each is 4 and t₁ = 0
+- Implements the trace recursion t₂ = t₁² − 2q and derives #E(GF(9)) = 16
+- Verifies the Hasse bounds: |4 − 4| ≤ 2√3 and |16 − 10| ≤ 2·3
+- Prints "PASS <name>" per check and "ALL PASS" only if all pass
+- Writes the GF(9) point count (16) to answer.txt
+
+Run with: python3 bsd.py"""
+max_steps = 15
+timeout_sec = 300

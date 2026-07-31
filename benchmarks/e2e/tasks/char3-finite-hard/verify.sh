@@ -8,12 +8,12 @@ assert char3.gf3_add(1, char3.gf3_add(1, 1)) == 0
 # x³ ≡ x for all 3 elements
 for x in range(3):
     assert pow(x, 3, 3) == x % 3, f"x³≠x for {x}"
-# over Q: x³-x ≠ 0 identically (e.g. x=2 → 6 ≠ 0)
+# over Q: x³-x ≠ 0 identically
 assert 2**3 - 2 != 0
-# embed_check demonstrates contradiction
-assert char3.embed_check() is False  # embedding impossible
+# embedding must be impossible; embed_check() returns False
+assert char3.embed_check() is False, "embed_check must return False (impossible)"
 ans = open("answer.txt").read().strip()
 assert ans == "3", f"answer.txt: {ans}"
-print("char3: 1+1+1=0, x³≡x for 3 elements, no embedding to Q")
+print("char3 verified: 1+1+1=0, x³≡x on 3 elements, embedding impossible")
 PY
 echo OK

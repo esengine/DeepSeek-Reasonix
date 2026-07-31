@@ -4,7 +4,7 @@ A common misconception: "this is just a curiosity — any theorem about finite f
 
 Your task:
 1. Write char3.py demonstrating: in GF(3) arithmetic (mod 3), 1+1+1 = 0.
-2. Prove the embedding impossibility by contradiction in code: attempt to construct a "field embedding" φ from GF(3) to ℚ and show φ(1)+φ(1)+φ(1) = 0 forces 3 = 0 in ℚ, which is False — implement embed_check() that demonstrates the contradiction.
+2. Prove the embedding impossibility by contradiction in code: attempt to construct a "field embedding" φ from GF(3) to ℚ and show φ(1)+φ(1)+φ(1) = 0 forces 3 = 0 in ℚ, which is False. Implement embed_check() returning whether an embedding is POSSIBLE (False = impossible, i.e. the contradiction is proven).
 3. Also show the DISCRETE-ONLY theorem: in GF(3), the polynomial x³-x vanishes at ALL 3 elements (x³≡x for all x), but over ℚ the polynomial x³-x has only 3 roots while a degree-3 polynomial over an infinite field cannot have finitely many roots unless zero — i.e. x³-x ≠ 0 identically over ℚ (find a rational x where x³-x ≠ 0).
 4. Write to answer.txt the number of elements where x³≡x in GF(3) (should be 3)."""
 max_steps = 20
