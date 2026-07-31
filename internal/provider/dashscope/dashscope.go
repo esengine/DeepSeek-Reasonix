@@ -31,12 +31,14 @@ func init() {
 // newFromConfig adapts the provider.Factory signature to our client.
 func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 	effort, _ := cfg.Extra["effort"].(string)
+	stateful, _ := cfg.Extra["stateful"].(bool)
 	return New(Config{
-		Name:    cfg.Name,
-		APIKey:  cfg.APIKey,
-		BaseURL: cfg.BaseURL,
-		Model:   cfg.Model,
-		Effort:  effort,
+		Name:     cfg.Name,
+		APIKey:   cfg.APIKey,
+		BaseURL:  cfg.BaseURL,
+		Model:    cfg.Model,
+		Effort:   effort,
+		Stateful: stateful,
 	}), nil
 }
 
@@ -48,18 +50,25 @@ type Config struct {
 	Model   string
 	Effort  string // "", "low", "medium", "high", "xhigh", "disabled"
 
+	// Stateful enables server-managed context via previous_response_id.
+	// DashScope supports it; DeepSeek's Responses API is stateless and
+	// rejects previous_response_id — set Stateful=false for DeepSeek so
+	// every turn sends the full input array.
+	Stateful bool
+
 	// SessionCache enables the x-dashscope-session-cache header (default true).
 	SessionCache *bool
 }
 
 type client struct {
-	name    string
-	apiKey  string
-	baseURL string
-	model   string
-	effort  string
+	name         string
+	apiKey       string
+	baseURL      string
+	model        string
+	effort       string
+	stateful     bool // DashScope: previous_response_id; DeepSeek: stateless
 	sessionCache bool
-	http    *http.Client
+	http         *http.Client
 
 	mu             sync.Mutex
 	lastResponseID string // previous_response_id for server-managed context
@@ -77,6 +86,7 @@ func New(cfg Config) provider.Provider {
 		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
 		model:        cfg.Model,
 		effort:       cfg.Effort,
+		stateful:     cfg.Stateful,
 		sessionCache: sc,
 		http: &http.Client{
 			Timeout: 300 * time.Second,
@@ -174,9 +184,11 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool) {
 		body["tools"] = tools
 	}
 
-	// Decide: use previous_response_id or send full input
+	// Decide: use previous_response_id (stateful DashScope) or send full input.
+	// DeepSeek's Responses API is stateless and rejects previous_response_id,
+	// so every turn sends the complete input array.
 	usePrevID := false
-	if prevID != "" && isSimpleContinuation(req.Messages) {
+	if c.stateful && prevID != "" && isSimpleContinuation(req.Messages) {
 		// Only the last user message is new; server has the rest.
 		lastUser := lastUserContent(req.Messages)
 		body["input"] = lastUser
@@ -295,6 +307,11 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 			out <- provider.Chunk{Type: provider.ChunkText, Text: event.Delta}
 
 		case "response.reasoning_summary_text.delta":
+			// DashScope dialect
+			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: event.Delta}
+
+		case "response.reasoning_text.delta":
+			// DeepSeek dialect
 			out <- provider.Chunk{Type: provider.ChunkReasoning, Text: event.Delta}
 
 		case "response.output_item.added":
@@ -309,7 +326,19 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 			}
 
 		case "response.mcp_call_arguments.delta":
-			// Tool call arguments streaming (if exposed)
+			// DashScope dialect: tool call arguments streaming
+			if event.Item != nil {
+				out <- provider.Chunk{
+					Type: provider.ChunkToolCallArgsDelta,
+					ToolCall: &provider.ToolCall{
+						ID:   event.Item.CallID,
+						Name: event.Item.Name,
+					},
+				}
+			}
+
+		case "response.function_call_arguments.delta":
+			// DeepSeek dialect: tool call arguments streaming
 			if event.Item != nil {
 				out <- provider.Chunk{
 					Type: provider.ChunkToolCallArgsDelta,
@@ -332,7 +361,11 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 				}
 			}
 
-		case "response.completed":
+		case "response.completed", "response.incomplete", "response.failed":
+			// completed: normal end (both dialects). incomplete: output hit
+			// max_output_tokens (DeepSeek). failed: error (DeepSeek). All three
+			// carry the full response object with usage; the stream ends here
+			// with no [DONE] marker.
 			if event.Response != nil {
 				responseID = event.Response.ID
 				if event.Response.Usage != nil {
@@ -358,7 +391,14 @@ func (c *client) readStream(resp *http.Response, out chan<- provider.Chunk, useP
 					}
 				}
 			}
-			// Responses API sends no [DONE]; stop after completed.
+			if event.Type == "response.failed" {
+				msg := "dashscope: response failed"
+				if event.Response != nil && event.Response.Error != nil {
+					msg = "dashscope: " + event.Response.Error.Message
+				}
+				out <- provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s", msg)}
+			}
+			// Responses API sends no [DONE]; stop after the terminal event.
 			goto done
 		}
 	}
@@ -381,9 +421,9 @@ done:
 
 // sseEvent is the wire format for Responses API SSE events.
 type sseEvent struct {
-	Type     string `json:"type"`
-	Delta    string `json:"delta"`
-	Item     *sseItem `json:"item"`
+	Type     string       `json:"type"`
+	Delta    string       `json:"delta"`
+	Item     *sseItem     `json:"item"`
 	Response *sseResponse `json:"response"`
 }
 
@@ -398,12 +438,18 @@ type sseItem struct {
 type sseResponse struct {
 	ID    string    `json:"id"`
 	Usage *sseUsage `json:"usage"`
+	Error *sseError `json:"error"`
+}
+
+type sseError struct {
+	Message string `json:"message"`
+	Code    string `json:"code,omitempty"`
 }
 
 type sseUsage struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	TotalTokens  int `json:"total_tokens"`
+	InputTokens        int `json:"input_tokens"`
+	OutputTokens       int `json:"output_tokens"`
+	TotalTokens        int `json:"total_tokens"`
 	InputTokensDetails *struct {
 		CachedTokens int `json:"cached_tokens"`
 	} `json:"input_tokens_details"`
