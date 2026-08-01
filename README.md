@@ -12,6 +12,8 @@
   <a href="./docs/ACP.md">ACP</a>
   &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
+ &nbsp;·&nbsp;
+  <a href="./docs/PLUGINS.md">Plugins</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
   &nbsp;·&nbsp;
@@ -194,7 +196,6 @@ for designing the project logo, and to
   <br/>
   <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a></sub>
 </p>
-
 ---
 
 <p align="center"><sub><strong>Support this project</strong></sub></p>
