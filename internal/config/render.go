@@ -417,6 +417,23 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# path   = \"/opt/homebrew/bin/bash\"   # absolute path to the shell executable; empty = PATH lookup\n\n")
 	}
 
+	// [tools.powershell] is opt-in and rendered only when configured, so a
+	// default config round-trips to a byte-identical tool list.
+	if ps := c.Tools.PowerShell; ps.Enabled != nil || ps.Prefer != "" || ps.Path != "" {
+		b.WriteString("[tools.powershell]\n")
+		fmt.Fprintf(&b, "enabled = %t   # opt-in dedicated PowerShell tool (default off; Windows-oriented)\n", c.PowerShellToolEnabled())
+		if ps.Prefer != "" {
+			fmt.Fprintf(&b, "prefer = %q   # pwsh|powershell; empty/default = pwsh (PowerShell 7+)\n", ps.Prefer)
+		} else {
+			b.WriteString("# prefer = \"pwsh\"   # pwsh|powershell; empty/default = pwsh (PowerShell 7+)\n")
+		}
+		if ps.Path != "" {
+			fmt.Fprintf(&b, "path   = %q   # absolute path to the PowerShell executable; empty = discovery\n\n", ps.Path)
+		} else {
+			b.WriteString("# path   = \"C:\\Program Files\\PowerShell\\7\\pwsh.exe\"   # absolute path to the PowerShell executable; empty = discovery\n\n")
+		}
+	}
+
 	renderLSPConfig(&b, c.LSP)
 
 	b.WriteString("[skills]\n")
@@ -1102,6 +1119,21 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if c.Tools.Shell.Path != d.Tools.Shell.Path {
 			fmt.Fprintf(&b, "path = %q\n", c.Tools.Shell.Path)
+		}
+		b.WriteString("\n")
+	}
+
+	// [tools.powershell]
+	if !reflect.DeepEqual(c.Tools.PowerShell, d.Tools.PowerShell) {
+		b.WriteString("[tools.powershell]\n")
+		if !reflect.DeepEqual(c.Tools.PowerShell.Enabled, d.Tools.PowerShell.Enabled) && c.Tools.PowerShell.Enabled != nil {
+			fmt.Fprintf(&b, "enabled = %t\n", *c.Tools.PowerShell.Enabled)
+		}
+		if c.Tools.PowerShell.Prefer != d.Tools.PowerShell.Prefer {
+			fmt.Fprintf(&b, "prefer = %q\n", c.Tools.PowerShell.Prefer)
+		}
+		if c.Tools.PowerShell.Path != d.Tools.PowerShell.Path {
+			fmt.Fprintf(&b, "path = %q\n", c.Tools.PowerShell.Path)
 		}
 		b.WriteString("\n")
 	}

@@ -710,6 +710,14 @@ mcp_call_timeout_seconds = 300   # default MCP call safety cap; plugin/tool over
 prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shell tool's interpreter
 # path = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"   # explicit executable for the chosen shell
 
+# Dedicated powershell tool — opt-in (default off), Windows-oriented. Registered alongside
+# bash only when enabled = true; an explicit [tools].enabled list must also name "powershell".
+# Omitting this section keeps the default tool list (and cached prompt prefix) unchanged.
+# [tools.powershell]
+# enabled = true             # register the powershell tool
+# prefer  = "pwsh"           # pwsh (PowerShell 7+, default) | powershell (Windows PowerShell 5.1)
+# path    = "C:\\Program Files\\PowerShell\\7\\pwsh.exe"   # explicit executable; empty = auto-discovery
+
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots
 # excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders

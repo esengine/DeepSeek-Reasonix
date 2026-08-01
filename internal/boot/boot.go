@@ -504,6 +504,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	searchSpec := builtin.ResolveSearch(cfg.Tools.Search.Engine, cfg.Tools.Search.RgPath, stderr)
 	bashTimeout := time.Duration(cfg.BashTimeoutSeconds()) * time.Second
+	// The powershell tool is opt-in: resolution (and its probe subprocesses)
+	// only runs when [tools.powershell] enabled = true.
+	psShell, psEnabled := resolvePowerShellTool(cfg, stderr, sandbox.ResolvePowerShell)
 	enabledBuiltins := cfg.Tools.Enabled
 	if tokenEconomy {
 		enabledBuiltins = tokenEconomyBuiltins(enabledBuiltins)
@@ -513,7 +516,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// startup built-ins. Do not pass that filtered empty slice to addBuiltins,
 	// where an empty list intentionally means "all built-ins".
 	if !tokenEconomy || len(cfg.Tools.Enabled) == 0 || len(enabledBuiltins) > 0 {
-		addBuiltins(reg, enabledBuiltins, writeRoots, bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec, forbidReadRoots, readPathResolver, sessionGuard, managedConfig, opts.FileOverlay, opts.TerminalRunner)
+		addBuiltins(reg, enabledBuiltins, writeRoots, bashSpec, bashTimeout, searchSpec, stderr, root, proxySpec, forbidReadRoots, readPathResolver, sessionGuard, managedConfig, opts.FileOverlay, opts.TerminalRunner, psShell, psEnabled)
 	}
 	// Use the caller-supplied shared host when set, so controllers for the same
 	// workspace root reuse running MCP processes (e.g. one CodeGraph daemon
@@ -2278,24 +2281,36 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 // and makes bash warn when a command references them. managedConfig names the
 // Reasonix-owned config files writable outside writeRoots after a fresh
 // per-write human approval.
-func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string, proxySpec netclient.ProxySpec, forbidReadRoots []string, readPathResolver *builtin.PathResolver, sessionGuard builtin.SessionDataGuard, managedConfig builtin.ManagedConfigPaths, overlay builtin.FileOverlay, terminal builtin.TerminalRunner) {
+// psEnabled gates the opt-in powershell tool ([tools.powershell] enabled =
+// true): unless set, the tool is kept out of the registry even when
+// [tools].enabled names it, so the default tool list — and the cache-stable
+// system-prompt prefix built from it — is byte-identical to a config without
+// the section. psShell is the resolved interpreter bound to the tool.
+func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sandbox.Spec, bashTimeout time.Duration, searchSpec builtin.SearchSpec, stderr io.Writer, workDir string, proxySpec netclient.ProxySpec, forbidReadRoots []string, readPathResolver *builtin.PathResolver, sessionGuard builtin.SessionDataGuard, managedConfig builtin.ManagedConfigPaths, overlay builtin.FileOverlay, terminal builtin.TerminalRunner, psShell sandbox.Shell, psEnabled bool) {
 	// If a workspace directory is set, use workspace-bound tools that resolve
 	// paths relative to that directory. Otherwise fall back to the process-cwd
 	// compile-time builtins.
 	if workDir != "" {
-		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, ForbidReadRoots: forbidReadRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec, ProxySpec: proxySpec, ReadPaths: readPathResolver, SessionGuard: sessionGuard, ManagedConfig: managedConfig, FileOverlay: overlay, Terminal: terminal}
+		ws := builtin.Workspace{Dir: workDir, WriteRoots: writeRoots, ForbidReadRoots: forbidReadRoots, Bash: bashSpec, BashTimeout: bashTimeout, Search: searchSpec, ProxySpec: proxySpec, ReadPaths: readPathResolver, SessionGuard: sessionGuard, ManagedConfig: managedConfig, FileOverlay: overlay, Terminal: terminal, PowerShellEnabled: psEnabled, PowerShell: psShell}
 		for _, t := range ws.Tools(enabled...) {
 			reg.Add(t)
 		}
 		return
 	}
 
+	psAllowed := psEnabled && builtinToolEnabled(enabled, "powershell")
 	if len(enabled) == 0 {
 		for _, t := range tool.Builtins() {
+			if t.Name() == "powershell" && !psAllowed {
+				continue
+			}
 			reg.Add(t)
 		}
 	} else {
 		for _, name := range enabled {
+			if name == "powershell" && !psAllowed {
+				continue
+			}
 			if t, ok := tool.LookupBuiltin(name); ok {
 				reg.Add(t)
 			} else {
@@ -2312,11 +2327,31 @@ func addBuiltins(reg *tool.Registry, enabled, writeRoots []string, bashSpec sand
 		builtin.ConfineSearch(searchSpec, bashSpec, forbidReadRoots),
 		builtin.ConfineWebFetch(proxySpec))
 	confined = append(confined, builtin.ConfineReaders(forbidReadRoots)...)
+	if psAllowed {
+		confined = append(confined, builtin.ConfinePowerShell(bashSpec, psShell, sessionGuard, bashTimeout))
+	}
 	for _, t := range confined {
 		if _, ok := reg.Get(t.Name()); ok {
 			reg.Add(t)
 		}
 	}
+}
+
+// resolvePowerShellTool resolves the interpreter for the opt-in powershell
+// tool. The tool is disabled by default: when [tools.powershell] enabled is
+// unset/false this returns psEnabled=false without touching the resolver, so a
+// default boot never pays for (or warns from) PowerShell discovery. When
+// enabled but no interpreter is found, the tool stays registered — it reports
+// an actionable error per call — and boot warns once here.
+func resolvePowerShellTool(cfg *config.Config, stderr io.Writer, resolve func(prefer, path string, warn io.Writer) sandbox.Shell) (sandbox.Shell, bool) {
+	if !cfg.PowerShellToolEnabled() {
+		return sandbox.Shell{}, false
+	}
+	sh := resolve(cfg.Tools.PowerShell.Prefer, cfg.Tools.PowerShell.Path, stderr)
+	if sh.Path == "" {
+		fmt.Fprintln(stderr, "warning: [tools.powershell] is enabled but no PowerShell interpreter was found; the powershell tool will report an error on each call. Install PowerShell 7 or set [tools.powershell] path.")
+	}
+	return sh, true
 }
 
 func builtinToolEnabled(enabled []string, name string) bool {
