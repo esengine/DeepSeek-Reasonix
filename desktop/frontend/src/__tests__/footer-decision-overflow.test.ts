@@ -87,12 +87,27 @@ eq(finalDeclaration(".composer-decision-host--hidden", "display"), "none !import
 // `.app--creation .footer`, `.footer.footer--compact`, …) go unchecked. No
 // footer rule other than the decision modifier may turn the footer into a
 // clip/scroll container, or the upward-popping composer menus get clipped again.
+// Matching is scoped to each selector's rightmost (target) compound, so rules
+// that merely descend from `.footer` (e.g. `.footer .child`) are not misread as
+// footer rules, and the decision exemption applies only to the parts that
+// actually target the footer element.
 
-// True if one comma-split selector styles the footer ELEMENT itself — `.footer`
-// or a `.footer--modifier`, optionally ancestor-qualified or combined with other
-// classes — but not a BEM child such as `.footer__x`.
+// The element a selector styles is its rightmost compound — the segment after
+// the last combinator. An ancestor `.footer` (e.g. `.footer .child`) styles the
+// child, not the footer, so only that rightmost compound decides whether a rule
+// targets the footer element. `.footer__*` BEM children are not the footer.
+function footerTarget(selectorPart: string): string {
+  return selectorPart.split(/[\s>+~]+/).pop() ?? "";
+}
+
 function targetsFooterElement(selectorPart: string): boolean {
-  return /(^|[\s>+~,(])\.footer(?!__)(--[a-z-]+)?(?=$|[\s>+~).,:[])/.test(selectorPart);
+  return /\.footer(?!__)(--[a-z-]+)?(?=$|[.:\[])/.test(footerTarget(selectorPart));
+}
+
+// True if the part targets the footer through the decision modifier — the one
+// state allowed to turn the footer into a scroll/clip container.
+function isDecisionTarget(selectorPart: string): boolean {
+  return footerTarget(selectorPart).includes(".footer--decision");
 }
 
 function declValue(body: string, property: string): string | undefined {
@@ -110,8 +125,9 @@ function footerClipOffenders(): string[] {
   while ((match = rule.exec(styles)) !== null) {
     const selectorList = match[1].trim();
     const parts = selectorList.split(",").map((part) => part.trim());
-    if (!parts.some(targetsFooterElement)) continue;
-    if (parts.every((part) => part.includes(".footer--decision"))) continue;
+    const footerParts = parts.filter(targetsFooterElement);
+    if (footerParts.length === 0) continue;
+    if (footerParts.every(isDecisionTarget)) continue;
     const body = match[2];
     const clips =
       (declValue(body, "overflow") ?? "visible") !== "visible" ||
