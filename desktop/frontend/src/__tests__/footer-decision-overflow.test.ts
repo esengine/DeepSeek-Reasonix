@@ -81,5 +81,48 @@ eq(/terminalPanelOpen && !sidebarCreation \? "footer--compact" : ""/.test(appSou
 // owns the footer, so a menu can never open in the decision state.
 eq(finalDeclaration(".composer-decision-host--hidden", "display"), "none !important", "composer host stays hidden under a decision (menus cannot open)");
 
+// AC6 — guard the detection gap noted in #7128's review: the exact-match
+// helpers above only see selectors equal to `.footer` / `.footer--decision`, so
+// ancestor-qualified or combined variants (`:root[data-theme-style] .footer`,
+// `.app--creation .footer`, `.footer.footer--compact`, …) go unchecked. No
+// footer rule other than the decision modifier may turn the footer into a
+// clip/scroll container, or the upward-popping composer menus get clipped again.
+
+// True if one comma-split selector styles the footer ELEMENT itself — `.footer`
+// or a `.footer--modifier`, optionally ancestor-qualified or combined with other
+// classes — but not a BEM child such as `.footer__x`.
+function targetsFooterElement(selectorPart: string): boolean {
+  return /(^|[\s>+~,(])\.footer(?!__)(--[a-z-]+)?(?=$|[\s>+~).,:[])/.test(selectorPart);
+}
+
+function declValue(body: string, property: string): string | undefined {
+  const declaration = new RegExp(`(?:^|;)\\s*${property}\\s*:\\s*([^;]+)`, "g");
+  let value: string | undefined;
+  let match: RegExpExecArray | null;
+  while ((match = declaration.exec(body)) !== null) value = match[1].trim();
+  return value;
+}
+
+function footerClipOffenders(): string[] {
+  const offenders: string[] = [];
+  const rule = /([^{}]+)\{([^{}]*)\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = rule.exec(styles)) !== null) {
+    const selectorList = match[1].trim();
+    const parts = selectorList.split(",").map((part) => part.trim());
+    if (!parts.some(targetsFooterElement)) continue;
+    if (parts.every((part) => part.includes(".footer--decision"))) continue;
+    const body = match[2];
+    const clips =
+      (declValue(body, "overflow") ?? "visible") !== "visible" ||
+      (declValue(body, "overflow-y") ?? "visible") !== "visible" ||
+      (declValue(body, "overflow-x") ?? "visible") !== "visible";
+    if (clips || declValue(body, "max-height") !== undefined) offenders.push(selectorList);
+  }
+  return offenders;
+}
+
+eq(footerClipOffenders().join(", "), "", "no footer rule except .footer--decision clips or caps the footer");
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
