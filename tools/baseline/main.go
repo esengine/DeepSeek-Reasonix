@@ -271,7 +271,9 @@ func collectOne(prov provider.Provider, prompt string, idx int, timeout time.Dur
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: prompt},
 		},
-		MaxTokens: 1024,
+		// No MaxTokens cap: let the model finish naturally so the baseline
+		// measures real performance, not a truncation artifact. (DashScope
+		// also returns all-zero usage on truncation, which would skew stats.)
 	}
 
 	start := time.Now()
@@ -297,6 +299,16 @@ func collectOne(prov provider.Provider, prompt string, idx int, timeout time.Dur
 			// count reasoning tokens but don't include in output text
 		case provider.ChunkUsage:
 			if u := chunk.Usage; u != nil {
+				// DashScope returns all-zero usage on a truncated response
+				// (max_output_tokens hit): output_tokens/input_tokens/total_tokens
+				// are all 0. Don't clobber real token counts with that; the
+				// finish reason still tells us the stream ended.
+				if u.TotalTokens == 0 && u.CompletionTokens == 0 && u.PromptTokens == 0 {
+					if s.FinishReason == "" {
+						s.FinishReason = u.FinishReason
+					}
+					break
+				}
 				s.OutputTokens = u.CompletionTokens
 				s.PromptTokens = u.PromptTokens
 				s.ReasoningTok = u.ReasoningTokens
