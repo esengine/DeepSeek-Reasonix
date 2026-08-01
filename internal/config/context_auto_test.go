@@ -40,6 +40,13 @@ func TestNormalizeModelName(t *testing.T) {
 		{"model|tag", "model"},                         // pipe suffix stripped
 		{"ollama/mistral:7b", "mistral"},               // prefix then tag
 		{"plain-model", "plain-model"},
+		// Edge cases: combined separators, empty input, trailing/leading tags.
+		{"foo|bar:baz", "foo"}, // pipe wins, then colon would apply to the remainder
+		{"foo:bar|baz", "foo"}, // pipe first yields "foo:bar", colon then strips to "foo"
+		{"foo|", "foo"},        // trailing pipe
+		{"foo:", "foo"},        // trailing colon
+		{":30b", ""},           // tag-only input collapses to empty
+		{"", ""},               // empty input passes through
 	}
 	for _, tc := range cases {
 		if got := normalizeModelName(tc.in); got != tc.want {
@@ -70,6 +77,18 @@ func TestResolveModelAutoContextWindow(t *testing.T) {
 				APIKeyEnv:     "OPENAI_API_KEY",
 				ContextWindow: 999_999, // user-set budget must win over inference
 			},
+			{
+				Name:      "override-budget",
+				Kind:      "openai",
+				Model:     "deepseek-v4-flash",
+				Models:    []string{"deepseek-v4-flash"},
+				Default:   "deepseek-v4-flash",
+				BaseURL:   "https://api.deepseek.com",
+				APIKeyEnv: "DEEPSEEK_API_KEY",
+				ModelOverrides: map[string]ProviderModelOverride{
+					"deepseek-v4-flash": {ContextWindow: 42}, // override wins over the 1M inference
+				},
+			},
 		},
 	}
 
@@ -89,6 +108,16 @@ func TestResolveModelAutoContextWindow(t *testing.T) {
 	}
 	if got, want := e.ContextWindow, 999_999; got != want {
 		t.Errorf("explicit-budget ContextWindow = %d, want %d (user-set preserved)", got, want)
+	}
+
+	// A per-model override beats inference: the 1M pattern matches, but the
+	// override's budget is applied first and must not be clobbered.
+	e, ok = cfg.ResolveModel("override-budget")
+	if !ok {
+		t.Fatal("ResolveModel(override-budget) failed")
+	}
+	if got, want := e.ContextWindow, 42; got != want {
+		t.Errorf("override-budget ContextWindow = %d, want %d (override wins)", got, want)
 	}
 
 	// Unmatched model keeps 0 = compaction disabled (conservative).
