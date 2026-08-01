@@ -790,21 +790,21 @@ var curatedProviderPresets = []ProviderPreset{
 	{
 		ID:          "deepseek-responses",
 		Label:       "DeepSeek Responses API",
-		Description: "DeepSeek official Responses API endpoint (stateless, no previous_response_id). Supported by Codex; models: deepseek-v4-flash / deepseek-v4-pro.",
+		Description: "DeepSeek official stateless Responses API for deepseek-v4-flash.",
 		KeyEnv:      "DEEPSEEK_API_KEY",
 		Entries: []ProviderEntry{{
 			Name:             "deepseek-responses",
 			Kind:             "responses",
 			BaseURL:          "https://api.deepseek.com",
-			ModelsURL:        "https://api.deepseek.com/models",
 			Models:           deepSeekResponsesModels,
 			Default:          "deepseek-v4-flash",
 			APIKeyEnv:        "DEEPSEEK_API_KEY",
+			BalanceURL:       "https://api.deepseek.com/user/balance",
 			ContextWindow:    1_000_000,
+			Price:            deepSeekV4FlashPriceUSD(),
 			ResponsesMode:    "stateless", // DeepSeek rejects previous_response_id
 			SupportedEfforts: []string{"low", "high", "max"},
 			DefaultEffort:    "high",
-			BalanceURL:       "https://api.deepseek.com/user/balance",
 		}},
 	},
 	{

@@ -65,6 +65,20 @@ func AutoContextWindow(model string) int {
 	return 0
 }
 
+// applyAutoContextWindow fills ContextWindow from the resolved model name when
+// the instance has no explicit budget. An explicit context_window (config or
+// model override) already applied takes precedence; when inference also fails,
+// ContextWindow stays 0 — which the agent treats as "compaction disabled", the
+// conservative choice for an unknown window.
+func (e *ProviderEntry) applyAutoContextWindow() {
+	if e == nil || e.ContextWindow != 0 {
+		return
+	}
+	if w := AutoContextWindow(e.Model); w > 0 {
+		e.ContextWindow = w
+	}
+}
+
 // normalizeModelName strips provider prefixes (e.g. "qwen/qwen3.7-plus" →
 // "qwen3.7-plus"), lowercases, and trims whitespace. Mirrors qwen-code's
 // normalize() for the common cases.
@@ -74,12 +88,12 @@ func normalizeModelName(model string) string {
 	if idx := strings.LastIndex(s, "/"); idx >= 0 {
 		s = s[idx+1:]
 	}
-	// Strip pipe/colon suffixes (ollama tags)
+	// Strip pipe/colon suffixes (ollama tags): "model:30b" → "model"
 	if idx := strings.LastIndex(s, "|"); idx >= 0 {
-		s = s[idx+1:]
+		s = s[:idx]
 	}
 	if idx := strings.LastIndex(s, ":"); idx >= 0 {
-		s = s[idx+1:]
+		s = s[:idx]
 	}
 	return s
 }

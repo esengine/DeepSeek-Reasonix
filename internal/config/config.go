@@ -1813,6 +1813,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 			cp.Model = model
 			cp.applyModelPrice()
 			cp.applyModelOverride()
+			cp.applyAutoContextWindow()
 			return &cp, true
 		}
 	}
@@ -1822,6 +1823,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		cp.Model = e.DefaultModel()
 		cp.applyModelPrice()
 		cp.applyModelOverride()
+		cp.applyAutoContextWindow()
 		return &cp, true
 	}
 	// a bare model name → the provider that lists it
@@ -1831,6 +1833,7 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 			cp.Model = ref
 			cp.applyModelPrice()
 			cp.applyModelOverride()
+			cp.applyAutoContextWindow()
 			return &cp, true
 		}
 	}
