@@ -32,6 +32,70 @@ const STYLE_NAME_KEY: Record<ThemeStyle, DictKey> = {
   amber: "settings.style.amber.zh",
 };
 
+// Desk Pet is macOS-only (requires native NSWindow + WKWebView).
+function isMacOS(): boolean {
+  return (navigator.platform || "").toLowerCase().includes("mac");
+}
+
+function DeskPetToggle() {
+  const t = useT();
+  const [enabled, setEnabled] = useState<boolean>(true);
+  const [loading, setLoading] = useState(true);
+  const [isMac, setIsMac] = useState(true); // default true for initial render
+
+  useEffect(() => {
+    const p = (navigator.platform || "").toLowerCase();
+    setIsMac(p.includes("mac"));
+  }, []);
+
+  useEffect(() => {
+    if (!isMac) { setLoading(false); return; }
+    app.AppPetEnabled()
+      .then(setEnabled)
+      .catch(() => setEnabled(false))
+      .finally(() => setLoading(false));
+  }, [isMac]);
+
+  const handleToggle = async () => {
+    setLoading(true);
+    try {
+      const newVal = await app.AppPetToggle();
+      setEnabled(newVal);
+    } catch {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isMac) return null; // Desk Pet is macOS-only
+
+  return (
+    <div className="set-seg appearance-overview__segmented" role="radiogroup" aria-label={t("settings.deskPet")}>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={enabled}
+        className={`set-seg__btn${enabled ? " set-seg__btn--on" : ""}`}
+        disabled={loading}
+        onClick={handleToggle}
+      >
+        {t("settings.deskPet.on")}
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={!enabled}
+        className={`set-seg__btn${!enabled ? " set-seg__btn--on" : ""}`}
+        disabled={loading}
+        onClick={handleToggle}
+      >
+        {t("settings.deskPet.off")}
+      </button>
+    </div>
+  );
+}
+
 function textSizeLabel(size: TextSize, t: (key: never) => string): string {
   switch (size) {
     case "small":
@@ -576,6 +640,13 @@ export function AppearanceOverview({
               </div>
             </div>
           </div>
+        ) : null}
+
+        {isMacOS() ? (
+        <div className="appearance-overview__row">
+          <div className="appearance-overview__row-label">{t("settings.deskPet")}</div>
+          <DeskPetToggle />
+        </div>
         ) : null}
 
         <div className="appearance-overview__row appearance-overview__row--footer">

@@ -200,6 +200,11 @@ type DesktopConfig struct {
 	ProviderAccess          []string `toml:"provider_access"`            // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking          bool     `toml:"expand_thinking"`            // true = show reasoning text expanded by default; false = collapsed
 	ConversationWidth       string   `toml:"conversation_width"`         // standard|full; max transcript width; empty = standard
+	PetEnabled              *bool    `toml:"pet_enabled"`                // desktop pet toggle; nil defaults to true
+	PetScale                float64  `toml:"pet_scale"`                  // 0.5-1.5 zoom factor; 0 means 1.0
+	PetSlug                 string   `toml:"pet_slug"`                   // current pet slug; empty = default
+	PetPosX                 int      `toml:"pet_pos_x"`                  // last window x position (screen coords)
+	PetPosY                 int      `toml:"pet_pos_y"`                  // last window y position (screen coords)
 }
 
 // DesktopExternalOpener returns the user-selected external opener id. The
@@ -210,6 +215,45 @@ func (c *Config) DesktopExternalOpener() string {
 		return ""
 	}
 	return strings.ToLower(strings.TrimSpace(c.Desktop.ExternalOpener))
+}
+
+// DesktopPetEnabled reports whether the desktop pet is enabled.
+// Defaults to true when the config value is nil.
+func (c *Config) DesktopPetEnabled() bool {
+	if c == nil || c.Desktop.PetEnabled == nil {
+		return true
+	}
+	return *c.Desktop.PetEnabled
+}
+
+// DesktopPetScale returns the pet zoom factor (0.5-1.5). 0 means 1.0.
+func (c *Config) DesktopPetScale() float64 {
+	if c == nil || c.Desktop.PetScale == 0 {
+		return 1.0
+	}
+	if c.Desktop.PetScale < 0.5 {
+		return 0.5
+	}
+	if c.Desktop.PetScale > 1.5 {
+		return 1.5
+	}
+	return c.Desktop.PetScale
+}
+
+// DesktopPetSlug returns the current pet slug. Empty = default.
+func (c *Config) DesktopPetSlug() string {
+	if c == nil {
+		return ""
+	}
+	return c.Desktop.PetSlug
+}
+
+// DesktopPetPos returns the last saved pet window position.
+func (c *Config) DesktopPetPos() (int, int) {
+	if c == nil {
+		return 0, 0
+	}
+	return c.Desktop.PetPosX, c.Desktop.PetPosY
 }
 
 // NotificationsConfig controls optional system notifications for CLI chat/run.

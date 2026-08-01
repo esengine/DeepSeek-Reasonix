@@ -523,10 +523,27 @@ func (a *App) startup(ctx context.Context) {
 	// After restoreOrBuildTabs is launched: the GC's first sweep waits on
 	// tabsRestored so it never observes the pre-restore empty tab map.
 	a.startRecoveryGC()
+
+	// Phase 0 Spike: start native transparent pet window (macOS, non-Wails).
+	// The pet window is created after a short delay to let the main Wails
+	// window settle. Initial state (sprite, scale, position, pet list) is
+	// pushed from petOnWebViewReady() after the WKWebView loads — no need
+	// to call PetSetState here.
+	if !petIsDisabled() {
+		cfg := petLoadConfig()
+		homeDir := config.MemoryUserDir()
+		scale := cfg.DesktopPetScale()
+		posX, posY := cfg.Desktop.PetPosX, cfg.Desktop.PetPosY
+		go func() {
+			time.Sleep(300 * time.Millisecond)
+			CreatePetWindow(homeDir, scale, posX, posY)
+		}()
+	}
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
 	if a.forceQuit.Swap(false) || consumeSystemQuitRequested() {
+		PetCloseWindow()
 		return false
 	}
 	cfg, _, err := a.loadDesktopUserConfigForView()
@@ -535,14 +552,18 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	}
 	if cfg.DesktopCloseBehavior() == "background" {
 		if !a.backgroundCloseHasRestorePath() {
+			PetCloseWindow()
 			return false
 		}
 		a.backgroundMaximised.Store(runtime.WindowIsMaximised(ctx))
 		a.saveWindowStateSync()
 		a.snapshotAllTabs()
 		hideForBackground(ctx)
+		// Hide the pet window when we background the main app.
+		PetEvaluateJS("document.body.style.display='none'")
 		return true
 	}
+	PetCloseWindow()
 	return false
 }
 
