@@ -50,7 +50,6 @@ import { NoticeCard, Transcript } from "./components/Transcript";
 import { Composer } from "./components/Composer";
 import { TranscriptSelectionMenu } from "./components/TranscriptSelectionMenu";
 import { TodoPanel } from "./components/TodoPanel";
-import { ApprovalModal } from "./components/ApprovalModal";
 import { AskCard } from "./components/AskCard";
 import { UndoRewindBanner } from "./components/UndoRewindBanner";
 import { ClearContextCard } from "./components/ClearContextCard";
@@ -66,7 +65,6 @@ import { RemoteConnectionTimeoutError, useRemoteStore, waitForRemoteConnection }
 import { CommandPalette, type PaletteItem } from "./components/CommandPalette";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { UpdaterProvider } from "./lib/useUpdater";
-import { ContextPanel } from "./components/ContextPanel";
 import { WorkspacePanel } from "./components/WorkspacePanel";
 import { Tooltip } from "./components/Tooltip";
 import { StartupSplash } from "./components/StartupSplash";
@@ -282,6 +280,8 @@ const HistoryPanel = lazy(() => import("./components/HistoryPanel").then((module
 const SettingsPanel = lazy(() => import("./components/SettingsPanel").then((module) => ({ default: module.SettingsPanel })));
 const RemotePanel = lazy(() => import("./components/RemotePanel").then((module) => ({ default: module.RemotePanel })));
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
+const ApprovalModal = lazy(() => import("./components/ApprovalModal").then((module) => ({ default: module.ApprovalModal })));
+const ContextPanel = lazy(() => import("./components/ContextPanel").then((module) => ({ default: module.ContextPanel })));
 
 const CHAT_MIN_WIDTH = 400;
 const CHAT_COMFORT_MIN_WIDTH = 560;
@@ -4562,6 +4562,7 @@ export default function App() {
             )}
             {decisionSurface === "tool_approval" || decisionSurface === "plan_approval"
               ? state.approval && (
+              <Suspense fallback={null}>
               <ApprovalModal
                 key={`${activeTabId ?? ""}:${state.approval.id}`}
                 approval={state.approval}
@@ -4595,6 +4596,7 @@ export default function App() {
                 }}
                 toolApprovalMode={toolApprovalMode}
               />
+              </Suspense>
               )
             : decisionSurface === "ask"
               ? state.ask && (
@@ -4771,6 +4773,7 @@ export default function App() {
                   <RemotePanel onClose={() => setWorkspacePanel(false)} />
                 </Suspense>
               ) : rightDockMode === "context" && desktopLayoutStyle !== "creation" ? (
+                <Suspense fallback={null}>
                 <ContextPanel
                   tabId={activeTabId}
                   context={state.context}
@@ -4786,6 +4789,7 @@ export default function App() {
                   refreshKey={dockRefreshKey + state.contextPanelSeq}
                   usageSeq={state.usageSeq}
                 />
+                </Suspense>
               ) : (
                 <WorkspacePanel
                   open={workspacePanelRenderable}

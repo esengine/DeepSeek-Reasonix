@@ -8,7 +8,7 @@ import {
   contextBreakdown,
   contextWindowStatus,
   formatCacheHitRate,
-} from "./ContextPanel";
+} from "./contextPanelUtils";
 
 interface ContextWindowRingProps {
   enabled?: boolean;
