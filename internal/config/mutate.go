@@ -289,16 +289,35 @@ func configEditLockRegistryDir() (string, error) {
 	}
 	digest := sha256.Sum256([]byte(identity))
 	if runtime.GOOS != "windows" {
-		// The OS-wide temporary root is invariant across process-specific TMPDIR
-		// overrides. The per-user directory is verified and forced to mode 0700
-		// before the advisory lock file is opened.
-		return filepath.Join(string(filepath.Separator), "tmp", fmt.Sprintf("reasonix-config-locks-%x", digest[:8])), nil
+		// Prefer the OS-wide /tmp for cross-process lock stability (invariant
+		// across per-process TMPDIR overrides), but fall back to os.TempDir()
+		// when /tmp is not writable (read-only containers, etc.).
+		lockRoot := string(filepath.Separator) + "tmp"
+		if !dirWritable(lockRoot) {
+			lockRoot = os.TempDir()
+		}
+		// The per-user directory is verified and forced to mode 0700 before the
+		// advisory lock file is opened.
+		return filepath.Join(lockRoot, fmt.Sprintf("reasonix-config-locks-%x", digest[:8])), nil
 	}
 	home := strings.TrimSpace(current.HomeDir)
 	if home == "" {
 		return "", fmt.Errorf("lock config edits: OS user home unavailable")
 	}
 	return filepath.Join(filepath.Clean(home), ".reasonix", "locks", fmt.Sprintf("config-edits-%x", digest[:8])), nil
+}
+
+// dirWritable reports whether a process with the current privileges can create
+// a file in dir (by probing with a temporary file that is removed immediately).
+func dirWritable(dir string) bool {
+	f, err := os.CreateTemp(dir, ".rw-check-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	f.Close()
+	os.Remove(name)
+	return true
 }
 
 func configEditPathKey(path string) (string, error) {

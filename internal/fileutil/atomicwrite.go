@@ -17,6 +17,18 @@ var (
 	renameFile = os.Rename
 )
 
+// TempDirFor returns the directory that should be used for temporary files
+// destined for targetDir. When the TMPDIR environment variable is set and
+// non-empty it is used instead of targetDir, so callers that rename the temp
+// file into targetDir must use ReplaceFile (which handles cross-device renames)
+// rather than os.Rename directly.
+func TempDirFor(targetDir string) string {
+	if d := os.Getenv("TMPDIR"); d != "" {
+		return d
+	}
+	return targetDir
+}
+
 // AtomicWriteFile writes data to path crash-safely: it writes to a sibling tmp
 // file, fsyncs it so the bytes reach disk (guarding against power loss, not just
 // process crash — see #4615), then atomically renames it onto path via
@@ -50,13 +62,21 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 }
 
 func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error) {
-	dir := filepath.Dir(path)
+	destDir := filepath.Dir(path)
 	dirPerm := os.FileMode(0o755)
 	if perm&0o077 == 0 {
 		dirPerm = 0o700
 	}
-	if err := os.MkdirAll(dir, dirPerm); err != nil {
+	if err := os.MkdirAll(destDir, dirPerm); err != nil {
 		return "", fmt.Errorf("create dir for %s: %w", path, err)
+	}
+	dir := TempDirFor(destDir)
+	if dir != destDir {
+		// TMPDIR may differ from destDir; ensure it exists before creating
+		// temp files there.
+		if err := os.MkdirAll(dir, dirPerm); err != nil {
+			return "", fmt.Errorf("create temp dir %s: %w", dir, err)
+		}
 	}
 	tmp, err := os.CreateTemp(dir, ".atomic-*.tmp")
 	if err != nil {
