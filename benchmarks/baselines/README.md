@@ -5,10 +5,11 @@ model-watchdog anomaly detection. Regenerate with:
 
 ```bash
 # DeepSeek V4 Flash (OpenAI kind, api.deepseek.com)
-go run ./tools/baseline -model deepseek-flash -n 20 -out benchmarks/baselines/deepseek-v4-flash.json
+# -verbose keeps the per-sample array so the artifact matches the checked-in one.
+go run ./tools/baseline -model deepseek-flash -n 20 -verbose -out benchmarks/baselines/deepseek-v4-flash.json
 
 # Qwen 3.8 Max Preview (dashscope-responses kind, Token Plan endpoint)
-go run ./tools/baseline -model qwen-Token-plan-cn/qwen3.8-max-preview -n 20 -out benchmarks/baselines/qwen3.8-max-preview.json
+go run ./tools/baseline -model qwen-Token-plan-cn/qwen3.8-max-preview -n 20 -verbose -out benchmarks/baselines/qwen3.8-max-preview.json
 ```
 
 Both runs need the proxy env (`https_proxy=http://127.0.0.1:10808`) and

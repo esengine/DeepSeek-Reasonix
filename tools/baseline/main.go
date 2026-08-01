@@ -221,6 +221,7 @@ func main() {
 
 	latStats := computeStats(latencies)
 	ttftStats := computeStats(ttfts)
+	charStats := computeStats(chars)
 
 	baseline := Baseline{
 		Model:       entry.Model,
@@ -230,7 +231,7 @@ func main() {
 		CreatedAt:   time.Now().UTC().Format(time.RFC3339),
 		LatencyMs:   latStats,
 		TTFTMs:      ttftStats,
-		OutputChars: computeStats(chars),
+		OutputChars: charStats,
 		OutputTok:   computeStats(outToks),
 		PromptTok:   computeStats(promptToks),
 		Thresholds: map[string]float64{
@@ -240,8 +241,8 @@ func main() {
 			// 🟡 soft gates
 			"latency_mean_yellow": round2(latStats.Mean + 3*latStats.Stddev), // mean+3σ
 			"ttft_mean_yellow":    round2(ttftStats.Mean + 3*ttftStats.Stddev),
-			"output_chars_upper":  round2(computeStats(chars).Mean + 3*computeStats(chars).Stddev),
-			"output_chars_lower":  round2(math.Max(0, computeStats(chars).Mean-3*computeStats(chars).Stddev)),
+			"output_chars_upper":  round2(charStats.Mean + 3*charStats.Stddev),
+			"output_chars_lower":  round2(math.Max(0, charStats.Mean-3*charStats.Stddev)),
 		},
 	}
 	if *verbose {
