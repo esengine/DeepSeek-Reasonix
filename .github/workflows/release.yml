@@ -48,6 +48,11 @@ on:
         required: false
         default: stable
         type: string
+      allow_preview_recovery:
+        description: "Allow an approved Preview tag from main-v2 history"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write # create the release and upload archives
@@ -92,6 +97,9 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
           RELEASE_CHANNEL: ${{ steps.release.outputs.channel }}
+          IN_ORCHESTRATED: ${{ inputs.orchestrated }}
+          IN_ORCHESTRATOR: ${{ inputs.orchestrator }}
+          ALLOW_PREVIEW_RECOVERY: ${{ inputs.allow_preview_recovery }}
         run: |
           set -euo pipefail
           git fetch origin main-v2
@@ -100,9 +108,14 @@ jobs:
             echo "::error::$RELEASE_TAG points to $sha, which is not on main-v2 history"
             exit 1
           fi
-          if [ "$RELEASE_CHANNEL" = "preview" ] && [ "$sha" != "$(git rev-parse origin/main-v2)" ]; then
-            echo "::error::CLI Preview must tag current main-v2; $RELEASE_TAG points to $sha"
-            exit 1
+          if [ "$ALLOW_PREVIEW_RECOVERY" = "true" ]; then
+            if [ "$IN_ORCHESTRATED" != "true" ] || [ "$IN_ORCHESTRATOR" != "preview" ] || [ "$RELEASE_CHANNEL" != "preview" ]; then
+              echo "::error::Preview recovery requires the approved Preview orchestrator"
+              exit 1
+            fi
+          elif [ "$RELEASE_CHANNEL" = "preview" ] && [ "$sha" != "$(git rev-parse origin/main-v2)" ]; then
+              echo "::error::CLI Preview must tag current main-v2; $RELEASE_TAG points to $sha"
+              exit 1
           fi
           echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - name: Verify existing protected tag
@@ -182,6 +195,28 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ needs.resolve.outputs.sha }}
+      # Recovery may build an immutable tag that predates the current recovery
+      # policy. Keep product sources pinned above, but execute publication
+      # decisions from the protected workflow commit.
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: release-control
+          ref: ${{ github.workflow_sha }}
+      - name: Isolate release-control checkout from product git state
+        run: |
+          set -euo pipefail
+          git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+          exclude_file="$git_common_dir/info/exclude"
+          if ! grep -qxF '/release-control/' "$exclude_file"; then
+            printf '%s\n' '/release-control/' >> "$exclude_file"
+          fi
+          git check-ignore -q release-control/
+          dirty="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$dirty" ]; then
+            printf 'product checkout is dirty before release:\n%s\n' "$dirty" >&2
+            exit 1
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -210,7 +245,46 @@ jobs:
           RELEASE_TAG: ${{ needs.resolve.outputs.tag }}
           APPROVED_SHA: ${{ needs.resolve.outputs.sha }}
         run: bash scripts/verify-release-tag.sh
+      - name: Decide whether CLI artifacts need publication
+        id: publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          CHANNEL: ${{ needs.resolve.outputs.channel }}
+          PRERELEASE: ${{ needs.resolve.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          validation_channel="$CHANNEL"
+          if [ "$CHANNEL" = "stable" ] && [ "$PRERELEASE" = "true" ]; then
+            validation_channel=any
+          fi
+          release_json=/tmp/existing-cli-release.json
+          release_error=/tmp/existing-cli-release.error
+          checksums=/tmp/existing-cli-release-SHA256SUMS
+          if gh api "repos/${{ github.repository }}/releases/tags/$TAG" \
+            >"$release_json" 2>"$release_error"; then
+            gh release download "$TAG" -R "${{ github.repository }}" \
+              --pattern SHA256SUMS --output "$checksums"
+            decision="$(
+              bash release-control/scripts/decide-cli-release-publication.sh \
+                "$validation_channel" "$TAG" "${{ github.repository }}" \
+                "$release_json" "$checksums"
+            )"
+            echo "existing CLI release $TAG is complete and checksum-bound; reusing it"
+          elif grep -Eiq 'HTTP 404|Not Found' "$release_error"; then
+            decision="$(
+              bash release-control/scripts/decide-cli-release-publication.sh \
+                "$validation_channel" "$TAG" "${{ github.repository }}" - -
+            )"
+            echo "CLI release $TAG does not exist; GoReleaser will publish it"
+          else
+            cat "$release_error" >&2
+            exit 1
+          fi
+          test "$decision" = "publish" -o "$decision" = "reuse"
+          echo "decision=$decision" >> "$GITHUB_OUTPUT"
       - uses: goreleaser/goreleaser-action@v7
+        if: ${{ steps.publication.outputs.decision == 'publish' }}
         with:
           version: '~> v2'
           args: release --clean

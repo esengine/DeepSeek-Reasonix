@@ -1,6 +1,9 @@
 package agent
 
-import "strings"
+import (
+	"strings"
+	"unicode/utf8"
+)
 
 // heuristicInputIsTask reports whether a user input reads as an actionable
 // task rather than conversational chat. The delivery evidence gate uses it to
@@ -40,15 +43,38 @@ func heuristicInputIsTask(input string) bool {
 		"谢谢你", "辛苦了",
 	}
 	for _, phrase := range chatPhrases {
-		if strings.Contains(normalized, phrase) {
-			return false
+		index := strings.Index(normalized, phrase)
+		if index < 0 {
+			continue
 		}
+		// Acknowledgement wording only short-circuits a purely conversational
+		// turn. Preserve a real task before it or after an explicit transition,
+		// e.g. "thanks for fixing that; now update the tests".
+		if prefix := strings.TrimSpace(normalized[:index]); prefix != "" && heuristicInputHasStrongTaskSignal(prefix) {
+			return true
+		}
+		if deliveryTaskHasFollowUpAfterChat(normalized[index+len(phrase):]) {
+			return true
+		}
+		return false
 	}
+	// Default for ambiguous input: a false negative (task treated as chat)
+	// disarms delivery gates, so only short ambiguous inputs stay conversational.
+	return heuristicInputHasStrongTaskSignal(normalized) || len(words) > 5
+}
 
-	// File references are a strong task signal.
-	if strings.Contains(trimmed, "@") || strings.Contains(trimmed, ".go") ||
-		strings.Contains(trimmed, ".js") || strings.Contains(trimmed, ".py") ||
-		strings.Contains(trimmed, ".ts") {
+func heuristicInputHasStrongTaskSignal(input string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(input))
+	// File references and concrete commands are strong task signals. Shared
+	// parsing keeps email addresses and remote product names from accidentally
+	// arming the delivery gate while covering ordinary repository file types.
+	if deliveryTaskHasFileReference(normalized) || deliveryTaskHasCommand(normalized) {
+		return true
+	}
+	// Mutation intent has a richer, negation-aware vocabulary than this generic
+	// task heuristic. Reuse it so short requests such as "push the branch" do not
+	// bypass delivery gates merely because the two keyword lists drift apart.
+	if deliveryTaskNeedsMutation(normalized) {
 		return true
 	}
 
@@ -70,10 +96,13 @@ func heuristicInputIsTask(input string) bool {
 	actionNeedles := []string{
 		"fix", "debug", "repair", "resolve", "reproduce",
 		"create", "add", "write", "edit", "update", "change", "delete", "remove", "rename",
-		"review", "inspect", "analyze", "check", "test", "run", "build", "implement", "refactor",
+		"review", "inspect", "analyze", "check", "audit", "verify", "test", "run", "build", "implement", "refactor", "modify", "patch", "replace",
+		"configure", "upgrade", "downgrade", "enable", "disable", "merge", "make changes", "make a change", "make the changes",
+		"make the requested changes", "make the necessary changes", "make these changes", "make those changes", "make code changes",
 		"continue work", "continue the", "continue this",
 		"修复", "调试", "解决", "复现", "创建", "新建", "添加", "编写", "编辑", "修改", "更新",
-		"删除", "移除", "重命名", "评审", "检查", "分析", "测试", "运行", "构建", "实现", "重构", "继续处理",
+		"删除", "移除", "重命名", "评审", "检查", "分析", "审计", "验证", "测试", "运行", "构建", "实现", "重构", "继续处理",
+		"调整", "替换", "移动", "升级", "降级", "启用", "禁用", "合并", "改动", "打补丁",
 		"看看", "看下", "帮我看", "帮我看下", "处理下", "处理一下", "排查", "定位",
 	}
 
@@ -83,10 +112,36 @@ func heuristicInputIsTask(input string) bool {
 		}
 	}
 
-	// Default for ambiguous input: a false negative (task treated as chat)
-	// disarms the delivery gates, which is worse than a false positive, so
-	// short ambiguous inputs read as chat and longer ones as tasks.
-	return len(words) > 5
+	return false
+}
+
+func deliveryTaskHasFollowUpAfterChat(input string) bool {
+	for index, current := range input {
+		switch current {
+		case '.', ',', ';', '!', '?', '。', '，', '；', '！', '？':
+			candidate := strings.TrimSpace(input[index+utf8.RuneLen(current):])
+			if candidate != "" && heuristicInputHasStrongTaskSignal(candidate) {
+				return true
+			}
+		}
+	}
+	for _, cue := range []string{
+		" but ", " however ", " nevertheless ", " now ", " then ", " and ", " please ", " so ", " therefore ",
+		"但是", "但请", "不过", "现在", "然后", "所以", "请", "继续", "再",
+	} {
+		for rest := input; ; {
+			index := strings.Index(rest, cue)
+			if index < 0 {
+				break
+			}
+			candidate := strings.TrimSpace(rest[index+len(cue):])
+			if candidate != "" && heuristicInputHasStrongTaskSignal(candidate) {
+				return true
+			}
+			rest = rest[index+len(cue):]
+		}
+	}
+	return false
 }
 
 func containsTaskNeedle(input, needle string) bool {

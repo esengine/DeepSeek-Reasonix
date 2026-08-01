@@ -243,7 +243,7 @@ func resolveConfigEditTarget(path string) (configEditTarget, error) {
 	if err != nil {
 		return configEditTarget{}, err
 	}
-	userOwned := isUserConfigPath(path) || samePath(path, legacyConfigPath())
+	userOwned := isUserConfigPath(path) || samePath(path, legacyConfigPath()) || samePath(path, UserCredentialsPath())
 	resolved, err := resolveConfigAccessPathUnpinned(path, userOwned)
 	if err != nil {
 		return configEditTarget{}, fmt.Errorf("lock config edits: %w", err)

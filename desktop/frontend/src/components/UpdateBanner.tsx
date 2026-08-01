@@ -88,6 +88,8 @@ export function UpdateBanner({
       );
     case "authorizing":
       return <div className="banner banner--update">{t("updater.authorizing")}</div>;
+    case "recovering":
+      return <div className="banner banner--update">{t("updater.recovering")}</div>;
     case "installing":
       return (
         <div className="banner banner--update">

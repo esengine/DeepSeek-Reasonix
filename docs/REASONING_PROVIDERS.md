@@ -13,7 +13,8 @@ get a tailored request shape automatically — no extra config needed.
 
 | Provider | Base URL | Reasoning control | `/effort` levels | Notes |
 |----------|----------|-------------------|------------------|-------|
-| DeepSeek | `api.deepseek.com`, `*.deepseek.com` | `thinking.type` + `reasoning_effort` (depth) | `auto`, `disabled`, `high`, `max` | Thinking on by default; `disabled` turns it off via `thinking.type=disabled`. |
+| DeepSeek V4 Flash | `api.deepseek.com`, `*.deepseek.com` | `thinking.type` + `reasoning_effort` (depth) | `auto`, `disabled`, `low`, `high`, `max` | Thinking on by default; `disabled` turns it off via `thinking.type=disabled`. Compatibility input `medium` normalizes to `high`, while `xhigh` normalizes to `high`. |
+| DeepSeek V4 Pro | `api.deepseek.com`, `*.deepseek.com` | `thinking.type` + `reasoning_effort` (depth) | `auto`, `disabled`, `high`, `max` | Thinking on by default; `disabled` turns it off via `thinking.type=disabled`. Compatibility inputs `low`/`medium` normalize to `high`, while `xhigh` normalizes to `max`. |
 | MiniMax M3 | `api.minimaxi.com`, `*.minimaxi.com` | `thinking.type` (`adaptive`\|`disabled`) | `auto`, `adaptive`, `disabled` | No depth scale; `reasoning_effort` is omitted. |
 | Zhipu GLM | `open.bigmodel.cn` / `*.bigmodel.cn`, `api.z.ai` / `*.z.ai` | `thinking.type` (`enabled`\|`disabled`) | `auto`, `enabled`, `disabled` | **`reasoning_effort` is silently ignored** by the endpoint, so reasoning is driven purely through `thinking.type`. |
 
@@ -23,6 +24,25 @@ get a tailored request shape automatically — no extra config needed.
 |----------------|----------|-------------------|------------------|-------|
 | Kimi CN/Global `kimi-k3` | `api.moonshot.cn/v1`, `api.moonshot.ai/v1` | `reasoning_effort` | `low`, `high`, `max` | Always thinks; defaults to `max`. Reasonix replays the complete assistant message, uses `max_completion_tokens`, and omits K3's fixed sampling fields. |
 | OpenCode Go `kimi-k3` | `opencode.ai/zen/go/v1` | `reasoning_effort` | `high`, `max` | Relay-specific scale; defaults to `max` and keeps the relay's standard OpenAI-compatible request shape. |
+
+## DeepSeek Anthropic-compatible endpoint
+
+The optional `deepseek-anthropic` preset targets
+`https://api.deepseek.com/anthropic`. It keeps the official Chat Completions
+provider as Reasonix's default, but provides a native Messages API path for
+compatibility testing and Anthropic-oriented clients. Reasonix emits
+`thinking.type=enabled|disabled` with `output_config.effort`, replays unsigned
+DeepSeek thinking blocks from historical tool-call turns, omits unsupported
+images, and relies on DeepSeek's automatic prefix cache instead of ignored
+`cache_control` markers.
+
+The preset exposes the current model-specific effort scales: Flash supports
+`auto`, `disabled`, `low`, `high`, and `max`, while Pro exposes `auto`,
+`disabled`, `high`, and `max` because its current `low` input maps to `high`.
+The Anthropic-compatible endpoint accepts `low|high|max` on the wire. Legacy
+`medium` normalizes to `high`; legacy `xhigh` normalizes to `high` for Flash and
+`max` for Pro. Claude Opus aliases use the Pro mapping, while Sonnet/Haiku and
+unsupported model names follow DeepSeek's documented Flash fallback.
 
 ## Everything else (standard `reasoning_effort`)
 

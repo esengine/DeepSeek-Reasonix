@@ -10,14 +10,51 @@ import (
 
 func TestDesktopStartupRecoveryNormalLaunch(t *testing.T) {
 	recovered := false
+	reconciled := false
 	safeMode, proceed := runDesktopStartupRecovery(false, false, desktopStartupRecoveryDeps{
 		recoverFailedInstall: func() (repair.UpdateRollbackResult, *repair.UpdateApplyFailure, error) {
 			recovered = true
 			return repair.UpdateRollbackResult{}, nil, nil
 		},
+		reconcilePendingUpdate: func() (repair.PendingUpdateReconcileResult, error) {
+			reconciled = true
+			return repair.PendingUpdateReconcileResult{}, nil
+		},
 	})
-	if !recovered || safeMode || !proceed {
-		t.Fatalf("recovered=%v safeMode=%v proceed=%v, want true false true", recovered, safeMode, proceed)
+	if !recovered || !reconciled || safeMode || !proceed {
+		t.Fatalf("recovered=%v reconciled=%v safeMode=%v proceed=%v", recovered, reconciled, safeMode, proceed)
+	}
+}
+
+func TestDesktopStartupRecoveryReconcilesAbandonedUpdateBeforeCrashThreshold(t *testing.T) {
+	var relaunched string
+	markedClean := false
+	safeMode, proceed := runDesktopStartupRecovery(false, false, desktopStartupRecoveryDeps{
+		reconcilePendingUpdate: func() (repair.PendingUpdateReconcileResult, error) {
+			return repair.PendingUpdateReconcileResult{
+				Pending:     true,
+				RolledBack:  true,
+				FromVersion: "v1",
+				ToVersion:   "v2",
+				TargetPath:  "/Applications/Reasonix.app",
+			}, nil
+		},
+		markClean: func() error { markedClean = true; return nil },
+		relaunch:  func(path string) error { relaunched = path; return nil },
+	})
+	if safeMode || proceed || !markedClean || relaunched != "/Applications/Reasonix.app" {
+		t.Fatalf("safeMode=%v proceed=%v markedClean=%v relaunched=%q", safeMode, proceed, markedClean, relaunched)
+	}
+}
+
+func TestDesktopStartupRecoveryLeavesProbationaryUpdate(t *testing.T) {
+	safeMode, proceed := runDesktopStartupRecovery(false, false, desktopStartupRecoveryDeps{
+		reconcilePendingUpdate: func() (repair.PendingUpdateReconcileResult, error) {
+			return repair.PendingUpdateReconcileResult{Pending: true, AwaitingHealth: true}, repair.ErrPendingUpdateAwaitingHealth
+		},
+	})
+	if safeMode || !proceed {
+		t.Fatalf("safeMode=%v proceed=%v", safeMode, proceed)
 	}
 }
 

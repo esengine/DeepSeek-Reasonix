@@ -62,14 +62,23 @@ ok(
   "DeepSeek Responses preset uses a localized description",
 );
 ok(
-  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
-    source.includes('"settings.addProvider.preset.deepseekResponsesDesc"'),
-  ),
-  "DeepSeek Responses description is present in every supported locale",
+  /case "deepseek-anthropic":\s*return t\("settings\.addProvider\.preset\.deepseekAnthropicDesc"\)/.test(settingsSource),
+  "DeepSeek Anthropic preset uses a localized description",
 );
 ok(
-  /function mockProviderPresetDisplayRank\(id: string\): number \{\s*if \(id === "deepseek-responses"\) return -1;/.test(bridgeSource),
-  "browser mock ranks DeepSeek Responses first among presets so it is second after DeepSeek Official",
+  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+    source.includes('"settings.addProvider.preset.deepseekResponsesDesc"') &&
+    source.includes('"settings.addProvider.preset.deepseekAnthropicDesc"'),
+  ),
+  "DeepSeek protocol preset descriptions are present in every supported locale",
+);
+ok(
+  /mockPreset\("deepseek-anthropic",\s*"DeepSeek Anthropic"/.test(bridgeSource),
+  "browser mock exposes the DeepSeek Anthropic preset",
+);
+ok(
+  /function mockProviderPresetDisplayRank\(id: string\): number \{\s*if \(id === "deepseek-responses"\) return -1;\s*if \(id === "deepseek-anthropic"\) return 0;/.test(bridgeSource),
+  "browser mock ranks Responses first and Anthropic as the adjacent compatibility preset",
 );
 
 const values = new Map<string, string>();

@@ -27,6 +27,11 @@ var errUpdateInProgress = errors.New("update: another download or install is alr
 
 var updaterRequestIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
+var (
+	pendingUpdateExistsForInstall    = repair.PendingUpdateExists
+	reconcilePendingUpdateForInstall = repair.ReconcilePendingUpdate
+)
+
 func validateUpdaterRequest(requestID, selectedChannel, expectedVersion string) (string, string, string, error) {
 	requestID = strings.TrimSpace(requestID)
 	if !updaterRequestIDRE.MatchString(requestID) {
@@ -287,6 +292,9 @@ func (a *App) InstallUpdateRequest(selectedChannel, expectedVersion, requestID s
 	if artifactKindFromMeta(meta.ArtifactKind) != artifactKindFromMeta(wantKind) {
 		return a.failUpdate(requestID, selectedChannel, expectedVersion, errUpdateCacheMismatch)
 	}
+	if err := a.reconcilePendingUpdateBeforeInstall(requestID, meta); err != nil {
+		return err
+	}
 
 	switch profile.Mode {
 	case installModeDeb:
@@ -294,6 +302,24 @@ func (a *App) InstallUpdateRequest(selectedChannel, expectedVersion, requestID s
 	default:
 		return a.installPortableUpdate(requestID, meta, data)
 	}
+}
+
+// reconcilePendingUpdateBeforeInstall runs before install-mode dispatch so a
+// profile change cannot let the deb or portable path bypass an unfinished
+// release-unit transaction from the previous attempt.
+func (a *App) reconcilePendingUpdateBeforeInstall(requestID string, meta *cachedUpdate) error {
+	if pendingUpdateExistsForInstall() {
+		a.emitProgress(requestID, meta.Channel, meta.Version, "recovering", meta.Size, meta.Size, "")
+	}
+	if _, err := reconcilePendingUpdateForInstall(version); err != nil {
+		if errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
+			err = fmt.Errorf("update recovery: the previous update is still completing its startup health check; wait briefly and try again")
+		} else {
+			err = fmt.Errorf("update recovery: could not safely finish the previous update: %w", err)
+		}
+		return a.failUpdate(requestID, meta.Channel, meta.Version, err)
+	}
+	return nil
 }
 
 func (a *App) installDebUpdate(requestID string, meta *cachedUpdate) error {

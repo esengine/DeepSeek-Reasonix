@@ -5,6 +5,15 @@ set -euo pipefail
 
 release_tag="${RELEASE_TAG:?RELEASE_TAG is required}"
 release_remote="${RELEASE_REMOTE:-origin}"
+allow_recovery="${ALLOW_PREVIEW_RECOVERY:-false}"
+
+case "$allow_recovery" in
+true | false) ;;
+*)
+	echo "::error::ALLOW_PREVIEW_RECOVERY must be true or false, got: $allow_recovery" >&2
+	exit 2
+	;;
+esac
 
 if [[ ! "$release_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.([1-9][0-9]*)$ ]]; then
 	echo "::error::Preview release tag must be vMAJOR.MINOR.PATCH-preview.N, got: $release_tag" >&2
@@ -24,9 +33,20 @@ if [ -z "$main_sha" ] || [ "$checkout_sha" != "$main_sha" ]; then
 	echo "::error::Preview control checkout must equal current $release_remote/main-v2 ($main_sha), got $checkout_sha" >&2
 	exit 1
 fi
-if [ -z "$tag_sha" ] || [ "$tag_sha" != "$main_sha" ]; then
-	echo "::error::$release_tag must point to current $release_remote/main-v2 ($main_sha), got ${tag_sha:-missing}" >&2
+if [ -z "$tag_sha" ]; then
+	echo "::error::$release_tag is missing from $release_remote" >&2
 	exit 1
+fi
+if [ "$tag_sha" != "$main_sha" ]; then
+	if [ "$allow_recovery" != "true" ]; then
+		echo "::error::$release_tag must point to current $release_remote/main-v2 ($main_sha), got $tag_sha" >&2
+		exit 1
+	fi
+	if ! git cat-file -e "$tag_sha^{commit}" 2>/dev/null ||
+		! git merge-base --is-ancestor "$tag_sha" "$main_sha"; then
+		echo "::error::Preview recovery tag $release_tag must remain on $release_remote/main-v2 history" >&2
+		exit 1
+	fi
 fi
 
 {
@@ -36,7 +56,7 @@ fi
 	echo "cli_tag=$release_tag"
 	echo "desktop_tag=desktop-v${base_version}-preview.${preview_number}"
 	echo "npm_version=${base_version}-canary.${preview_number}"
-	echo "sha=$main_sha"
+	echo "sha=$tag_sha"
 } >>"${GITHUB_OUTPUT:-/dev/stdout}"
 
-echo "Preview release resolved: ${release_tag#v} at $main_sha"
+echo "Preview release resolved: ${release_tag#v} at $tag_sha (recovery=$allow_recovery)"

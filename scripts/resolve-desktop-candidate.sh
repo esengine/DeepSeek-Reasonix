@@ -8,6 +8,7 @@ set -euo pipefail
 channel="${RELEASE_CHANNEL:?RELEASE_CHANNEL is required}"
 tag="${RELEASE_TAG:?RELEASE_TAG is required}"
 orchestrated="${IN_ORCHESTRATED:-false}"
+orchestrator="${IN_ORCHESTRATOR:-}"
 approved_sha="${APPROVED_SHA:-}"
 caller_event="${CALLER_EVENT_NAME:-}"
 caller_ref="${CALLER_REF:-}"
@@ -25,6 +26,19 @@ true | false) ;;
 	exit 2
 	;;
 esac
+if [ "$orchestrated" = "true" ]; then
+	case "$orchestrator" in
+	stable | preview) ;;
+	*)
+		echo "::error::IN_ORCHESTRATOR must be stable or preview for an orchestrated Desktop release, got: $orchestrator" >&2
+		exit 2
+		;;
+	esac
+	if [ "$orchestrator" != "$channel" ]; then
+		echo "::error::the $orchestrator orchestrator cannot authorize a Desktop $channel candidate" >&2
+		exit 1
+	fi
+fi
 case "$require_current_main" in
 true | false) ;;
 *)
@@ -53,10 +67,6 @@ stable)
 preview)
 	if [[ ! "$tag" =~ $preview_tag_pattern ]]; then
 		echo "::error::Preview Desktop candidate requires desktop-vMAJOR.MINOR.PATCH-preview.N: $tag" >&2
-		exit 1
-	fi
-	if [ "$orchestrated" = "true" ]; then
-		echo "::error::the stable orchestrator cannot authorize a Desktop Preview candidate" >&2
 		exit 1
 	fi
 	;;
@@ -111,7 +121,7 @@ if [ "$channel" = "stable" ]; then
 elif git show-ref --verify --quiet "refs/tags/$tag"; then
 	echo "::error::Desktop Preview uses an immutable asset directory, not a Git tag: $tag" >&2
 	exit 1
-elif [ "$require_current_main" = "true" ] && [ "$candidate" != "$main_sha" ]; then
+elif [ "$orchestrated" != "true" ] && [ "$require_current_main" = "true" ] && [ "$candidate" != "$main_sha" ]; then
 	echo "::error::Desktop Preview must use current main-v2 $main_sha, got: $candidate" >&2
 	exit 1
 fi

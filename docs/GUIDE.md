@@ -352,7 +352,11 @@ Custom provider** for proxies, aggregators, or self-hosted services that speak
 the OpenAI-compatible chat API or Anthropic-compatible Messages API.
 
 For common providers, choose **Add model service -> Recommended preset** instead.
-Reasonix can prefill editable custom-provider entries for Kimi CN, Kimi Global,
+The official DeepSeek service continues to use its specially adapted OpenAI Chat
+Completions path by default; add the optional **DeepSeek Anthropic** preset only
+when Anthropic Messages compatibility is needed. The two entries do not replace
+each other. Reasonix can prefill editable custom-provider entries for Kimi CN,
+Kimi Global,
 Kimi Coding Plan, MiMo API, MiMo Anthropic, MiMo Token Plan CN/SGP/AMS and their
 Anthropic-compatible variants, MiniMax CN/Global API, MiniMax CN/Global
 Anthropic, GLM CN, Z.AI Global, GLM/Z.AI Coding Plan OpenAI-compatible and

@@ -28,6 +28,11 @@ func TestHeuristicInputIsTask(t *testing.T) {
 		{"create component", "create a component", true},
 		{"修复问题", "修复这个问题", true},
 		{"run tests", "run tests", true},
+		{"modify config", "modify config", true},
+		{"make changes", "make the requested changes", true},
+		{"adjust config", "调整现有配置", true},
+		{"push branch", "push the branch", true},
+		{"publish release", "publish release", true},
 		{"看看", "帮我看看这个错误", true},
 		{"帮我看下", "帮我看下这个问题", true},
 		{"处理下", "处理下这个 issue", true},
@@ -40,6 +45,9 @@ func TestHeuristicInputIsTask(t *testing.T) {
 		{"test later", "I'll test it later", false},
 		{"test was helpful", "that test was helpful", false},
 		{"辛苦了", "辛苦了", false},
+		{"thanks then update", "thanks for fixing that, now update the tests", true},
+		{"chinese thanks then update", "谢谢你，请继续修改配置", true},
+		{"task before thanks", "review this PR; thanks for the help", true},
 
 		// Actionable problem descriptions without imperative verbs.
 		{"auth not working", "the auth isn't working", true},
@@ -52,7 +60,11 @@ func TestHeuristicInputIsTask(t *testing.T) {
 
 		// File references.
 		{"file reference", "what about @auth.go", true},
+		{"localized file reference", "检查（@配置.yaml）", true},
 		{"python file", "check main.py", true},
+		{"markdown file", "why does README.md render incorrectly", true},
+		{"relative script", "why does ./scripts/verify.sh fail", true},
+		{"email is not file reference", "thanks, email me@example.com later", false},
 
 		// Edge cases.
 		{"empty", "", false},

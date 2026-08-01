@@ -55,16 +55,9 @@ expected_tag="desktop-${version}"
 github_base="https://github.com/esengine/DeepSeek-Reasonix/releases/download/${expected_tag}/"
 r2_base="https://dl.reasonix.io/${expected_tag}/"
 legacy_preview_base="https://dl.reasonix.io/desktop-preview/"
-if [ "$channel" = "legacy-preview" ]; then
-	allowed_base="$legacy_preview_base"
-else
-	allowed_base=""
-fi
-if [ -n "$allowed_base" ] && [ "$asset_base" != "$allowed_base" ]; then
-	echo "invalid legacy Desktop asset base: $asset_base" >&2
-	exit 1
-fi
-if [ -z "$allowed_base" ] && [ "$asset_base" != "$github_base" ] && [ "$asset_base" != "$r2_base" ]; then
+if [ "$channel" = "legacy-preview" ] && [ "$asset_base" = "$legacy_preview_base" ]; then
+	:
+elif [ "$asset_base" != "$github_base" ] && [ "$asset_base" != "$r2_base" ]; then
 	echo "invalid official Desktop asset base: $asset_base" >&2
 	exit 1
 fi

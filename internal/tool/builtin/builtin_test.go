@@ -14,6 +14,7 @@ import (
 	"testing"
 	"unicode/utf16"
 
+	"go.uber.org/goleak"
 	"golang.org/x/text/encoding/simplifiedchinese"
 
 	"reasonix/internal/tool"
@@ -553,5 +554,32 @@ func TestGrepGB18030(t *testing.T) {
 	out := runTool(t, grepTool{}, map[string]any{"pattern": "函数", "path": dir})
 	if !strings.Contains(out, "函数") {
 		t.Errorf("expected match in decoded GB18030 text, got:\n%s", out)
+	}
+}
+
+func TestGrepGB18030TruncationDoesNotLeakGoroutine(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	var content strings.Builder
+	for range grepMaxMatches {
+		content.WriteString("命中\n")
+	}
+	content.WriteString(strings.Repeat("padding\n", 2000))
+	gb, err := simplifiedchinese.GB18030.NewEncoder().String(content.String())
+	if err != nil {
+		t.Fatalf("encode GB18030: %v", err)
+	}
+
+	path := filepath.Join(t.TempDir(), "many-matches.gbk")
+	if err := os.WriteFile(path, []byte(gb), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	out := runTool(t, grepTool{}, map[string]any{"pattern": "命中", "path": path})
+	if got := strings.Count(out, ":命中"); got != grepMaxMatches {
+		t.Fatalf("matches = %d, want %d:\n%s", got, grepMaxMatches, out)
+	}
+	if !strings.Contains(out, "truncated at 200 matches") {
+		t.Fatalf("missing truncation marker:\n%s", out)
 	}
 }

@@ -471,3 +471,19 @@ func TestRunPreservesOriginalRequiredToolCallReasoningAcrossHook(t *testing.T) {
 		t.Fatal("translated display text leaked into provider-visible tool-call reasoning")
 	}
 }
+
+func TestRunStoresTransformedNonToolReasoningForToolCallOnlyProvider(t *testing.T) {
+	mp := testutil.NewMock("deepseek-proxy", testutil.Turn{
+		Reasoning: "original reasoning",
+		Text:      "done",
+	})
+	h := &stubHooks{hasPostLLM: true, postLLMOut: "translated display"}
+	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{Hooks: h}, event.Discard)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := assistantReasoning(a.session.Messages); got != "translated display" {
+		t.Fatalf("stored non-tool reasoning = %q, want transformed display text", got)
+	}
+}

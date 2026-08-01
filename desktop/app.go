@@ -176,6 +176,10 @@ type App struct {
 	// boundaries without weakening the production lock order. Set it before
 	// starting a rebind and never mutate it until that rebind returns.
 	rebindCandidateHook func(string) error
+	// providerCatalogBeforeCredentialLockHook is test-only. It pauses catalog
+	// compare-and-apply after its optimistic credential snapshot but before the
+	// shared credential lock and authoritative re-read.
+	providerCatalogBeforeCredentialLockHook func(string)
 
 	// tryRunMu guards tryRunCancel — the cancel handle for the single
 	// in-flight settings-page subagent try run (TrySubagentProfile /
@@ -6644,8 +6648,9 @@ func (a *App) Balance() BalanceInfo {
 }
 
 func (a *App) BalanceForTab(tabID string) BalanceInfo {
+	currency := a.balanceDisplayCurrency()
 	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodSessionBalance, protocol.SessionBalanceParams{})
+		raw, err := a.workbenchRequest(protocol.MethodSessionBalance, protocol.SessionBalanceParams{Currency: currency})
 		if err != nil {
 			return BalanceInfo{Err: err.Error()}
 		}
@@ -6667,7 +6672,18 @@ func (a *App) BalanceForTab(tabID string) BalanceInfo {
 	if b == nil {
 		return BalanceInfo{} // provider declares no balance endpoint
 	}
-	return BalanceInfo{Available: true, Display: b.Display()}
+	return BalanceInfo{Available: true, Display: b.DisplayForCurrency(currency)}
+}
+
+// balanceDisplayCurrency mirrors the effective pricing currency selected in
+// Settings. Auto resolves through the current desktop locale, matching the
+// controller rebuild path used by cost telemetry.
+func (a *App) balanceDisplayCurrency() string {
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	if err != nil {
+		return ""
+	}
+	return a.desktopEffectivePricingCurrency(cfg)
 }
 
 // JobView is one running background job (bash/task started with

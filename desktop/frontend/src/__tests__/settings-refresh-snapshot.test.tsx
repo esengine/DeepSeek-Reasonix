@@ -202,6 +202,7 @@ globalThis.CustomEvent = dom.window.CustomEvent;
 globalThis.KeyboardEvent = dom.window.KeyboardEvent;
 globalThis.MouseEvent = dom.window.MouseEvent;
 globalThis.localStorage = dom.window.localStorage;
+globalThis.sessionStorage = dom.window.sessionStorage;
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
@@ -514,6 +515,97 @@ ok(document.querySelector(".bot-simple-advanced")?.textContent?.includes("local 
 
 await act(async () => {
   botsRoot.unmount();
+});
+
+// Models tab: switching away invalidates an in-flight background discovery so
+// its older completion cannot attempt a stale catalog write.
+sessionStorage.clear();
+const providerRaceRootEl = document.createElement("div");
+document.body.appendChild(providerRaceRootEl);
+const providerRaceRoot = createRoot(providerRaceRootEl);
+const providerRaceSettings = baseSettings("standard");
+providerRaceSettings.defaultModel = "race-provider/old-model";
+providerRaceSettings.providers = [{
+  name: "race-provider",
+  builtIn: false,
+  added: true,
+  kind: "openai",
+  baseUrl: "https://old.example.com/v1",
+  chatUrl: "",
+  models: ["old-model"],
+  visionModels: [],
+  visionModelsConfigured: false,
+  modelsUrl: "",
+  default: "missing-default",
+  apiKeyEnv: "RACE_PROVIDER_API_KEY",
+  headers: { "X-Gateway-Token": "private-gateway-secret" },
+  extraBody: {},
+  authHeader: false,
+  keySet: true,
+  requiresKey: true,
+  configured: true,
+  keySource: "global",
+  keySourcePath: "",
+  balanceUrl: "",
+  contextWindow: 128_000,
+  reasoningProtocol: "",
+  thinking: "",
+  supportedEfforts: [],
+  defaultEffort: "",
+  modelOverrides: [],
+  modelCatalogFingerprint: "old-fingerprint",
+}];
+let resolveProviderBatch: ((models: Record<string, string[]>) => void) | undefined;
+const providerBatch = new Promise<Record<string, string[]>>((resolve) => {
+  resolveProviderBatch = resolve;
+});
+let providerBatchCalls = 0;
+let providerCatalogSaveCalls = 0;
+window.go = {
+  main: {
+    App: {
+      Settings: async () => providerRaceSettings,
+      FetchAllProviderModels: async () => {
+        providerBatchCalls += 1;
+        return providerBatch;
+      },
+      SaveProviderModelCatalogs: async () => {
+        providerCatalogSaveCalls += 1;
+        return ["race-provider"];
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  providerRaceRoot.render(
+    <LocaleProvider>
+      <SettingsPanel initialTab="models" desktopPlatform="linux" onClose={() => {}} onChanged={() => {}} />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+await waitFor("provider background discovery", () => providerBatchCalls === 1);
+const providerRefreshStorageKeys = Array.from({ length: sessionStorage.length }, (_, index) => sessionStorage.key(index) ?? "");
+ok(providerRefreshStorageKeys.some((key) => key.includes("old-fingerprint")), "provider auto-refresh cooldown uses the opaque catalog fingerprint");
+ok(providerRefreshStorageKeys.every((key) => !key.includes("private-gateway-secret")), "provider auto-refresh cooldown does not persist header secrets");
+const accessModelsButton = Array.from(providerRaceRootEl.querySelectorAll(".settings-subtab")).find(
+  (button) => button.textContent?.trim() === "Access",
+) as HTMLButtonElement | undefined;
+if (!accessModelsButton) throw new Error("provider Access subtab did not render");
+await act(async () => {
+  accessModelsButton.click();
+  await flushPromises();
+});
+await act(async () => {
+  resolveProviderBatch?.({ "race-provider": ["old-model", "stale-fetched-model"] });
+  await flushPromises();
+});
+await waitFor("stale provider discovery completion", () => providerBatchCalls === 1);
+eq(providerCatalogSaveCalls, 0, "leaving the models usage tab suppresses the stale background catalog write");
+
+await act(async () => {
+  providerRaceRoot.unmount();
 });
 dom.window.close();
 

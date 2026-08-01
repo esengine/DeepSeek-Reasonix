@@ -13,7 +13,10 @@ import (
 
 func preparePackagedStartupRecovery(tracker *repair.StartupTracker, recommended, explicitSafeMode bool) (bool, bool) {
 	return runDesktopStartupRecovery(recommended, explicitSafeMode, desktopStartupRecoveryDeps{
-		recoverFailedInstall:  repair.RecoverFailedInstall,
+		recoverFailedInstall: repair.RecoverFailedInstall,
+		reconcilePendingUpdate: func() (repair.PendingUpdateReconcileResult, error) {
+			return repair.ReconcilePendingUpdate(version)
+		},
 		rollbackPendingUpdate: repair.RollbackPendingUpdate,
 		repairGlobalConfig: func() error {
 			_, err := repair.InspectAndRepairConfig(repair.ConfigOptions{Apply: true, OnlyScope: "global"})

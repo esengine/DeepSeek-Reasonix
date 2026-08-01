@@ -23,6 +23,7 @@ import {
 } from "../lib/invocationDisplay";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
+import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
 import { useToast } from "../lib/toast";
 import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
@@ -731,6 +732,7 @@ export function Composer({
   const editHistoryByDraftRef = useRef<Record<string, ComposerEditHistory>>({});
   const pendingNativeInputTypeRef = useRef<string | undefined>(undefined);
   const composerCardRef = useRef<HTMLDivElement>(null);
+  const composerWrapRef = useRef<HTMLDivElement>(null);
   const contentMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const intentMenuAnchorRef = useRef<HTMLButtonElement>(null);
   const profileMenuAnchorRef = useRef<HTMLButtonElement>(null);
@@ -1422,6 +1424,13 @@ export function Composer({
           : atRaw !== null && !dismissed
             ? "at"
             : null;
+  const menuOpen = menuMode !== null;
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+    const anchor = composerWrapRef.current;
+    if (!anchor) return;
+    return observeComposerMenuViewport(anchor);
+  }, [menuOpen]);
   const countBase =
     menuMode === "slash"
       ? slashMatches.length
@@ -3639,6 +3648,7 @@ export function Composer({
 
   return (
     <div
+      ref={composerWrapRef}
       className={`composer-wrap${decisionPending ? " composer-wrap--decision-pending" : ""}`}
       style={{ "--wails-drop-target": "drop" } as CSSProperties}
       onDropCapture={onFileDropCapture}

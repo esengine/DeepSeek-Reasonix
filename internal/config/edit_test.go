@@ -708,24 +708,28 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 }
 
 func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModels(t *testing.T) {
-	for _, baseURL := range []string{
-		"https://api.deepseek.com",
-		"https://api.deepseek.com/v1",
-		"https://eu.deepseek.com/v1",
+	for _, endpoint := range []struct {
+		kind    string
+		baseURL string
+	}{
+		{kind: "openai", baseURL: "https://api.deepseek.com"},
+		{kind: "openai", baseURL: "https://api.deepseek.com/v1"},
+		{kind: "openai", baseURL: "https://eu.deepseek.com/v1"},
+		{kind: "anthropic", baseURL: "https://api.deepseek.com/anthropic"},
 	} {
 		official := &ProviderEntry{
 			Name:              "deepseek",
-			Kind:              "openai",
-			BaseURL:           baseURL,
+			Kind:              endpoint.kind,
+			BaseURL:           endpoint.baseURL,
 			Model:             "deepseek-v4-pro",
 			Vision:            true,
 			ReasoningProtocol: ReasoningProtocolDeepSeek,
 		}
 		if EffectiveVision(official) {
-			t.Fatalf("official DeepSeek endpoint %q must remain text-only", baseURL)
+			t.Fatalf("official DeepSeek endpoint %q must remain text-only", endpoint.baseURL)
 		}
 		if ExplicitModelVision(official) {
-			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", baseURL)
+			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", endpoint.baseURL)
 		}
 	}
 

@@ -11,6 +11,11 @@ on:
         description: "Existing protected CLI Preview tag, e.g. v1.19.0-preview.3"
         required: true
         type: string
+      recovery:
+        description: "Recover an existing partially published Preview from main-v2 history"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   # Every Preview version advances the same public CLI, Desktop, and npm
@@ -46,6 +51,7 @@ jobs:
         id: release
         env:
           RELEASE_TAG: ${{ inputs.tag }}
+          ALLOW_PREVIEW_RECOVERY: ${{ inputs.recovery }}
         run: bash scripts/resolve-preview-release.sh
       - name: Validate exact reviewed Preview notes
         env:
@@ -123,6 +129,7 @@ jobs:
       approved_sha: ${{ needs.authorize.outputs.sha }}
       orchestrated: true
       orchestrator: preview
+      allow_preview_recovery: ${{ inputs.recovery }}
     secrets: inherit
 
   npm:

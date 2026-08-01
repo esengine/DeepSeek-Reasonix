@@ -989,6 +989,152 @@ func TestMacUpdateHandoffParserRejectsFilesystemPaths(t *testing.T) {
 	}
 }
 
+func TestMacUpdateHandoffParserRequiresCompletePipePair(t *testing.T) {
+	_, err := parseMacUpdateHandoffArgs([]string{
+		"-to-version", "v2",
+		"-created-at", "2026-07-28T00:00:00Z",
+		"-transaction-id", strings.Repeat("a", 64),
+		"-ready-fd", "3",
+	})
+	if err == nil || !strings.Contains(err.Error(), "pipe arguments") {
+		t.Fatalf("partial pipe pair error = %v", err)
+	}
+}
+
+func TestMacUpdateHandoffHandshakeWaitsForParentRelease(t *testing.T) {
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proceedReader, proceedWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyReader.Close()
+	defer proceedWriter.Close()
+
+	done := make(chan error, 1)
+	go func() {
+		done <- completeMacHandoffHandshake(macUpdateHandoffConfig{
+			ReadyFD:   int(readyWriter.Fd()),
+			ProceedFD: int(proceedReader.Fd()),
+		})
+	}()
+	if err := waitForMacHandoffReady(readyReader, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		t.Fatalf("handshake completed before parent release: %v", err)
+	default:
+	}
+	if _, err := proceedWriter.Write([]byte("go")); err != nil {
+		t.Fatal(err)
+	}
+	if err := proceedWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handshake did not finish after parent release")
+	}
+}
+
+func TestMacUpdateHandoffHandshakeRejectsParentExit(t *testing.T) {
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proceedReader, proceedWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyReader.Close()
+	if err := proceedWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- completeMacHandoffHandshake(macUpdateHandoffConfig{
+			ReadyFD:   int(readyWriter.Fd()),
+			ProceedFD: int(proceedReader.Fd()),
+		})
+	}()
+	if err := waitForMacHandoffReady(readyReader, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "parent release") {
+			t.Fatalf("parent exit error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("handshake did not observe parent exit")
+	}
+}
+
+func TestMacUpdateHandoffParentExitCancelsPreparedTransaction(t *testing.T) {
+	root := t.TempDir()
+	oldApp := filepath.Join(root, "Reasonix.app")
+	newApp := filepath.Join(root, "staging", "Reasonix.app")
+	pending := filepath.Join(root, "pending.json")
+	for _, dir := range []string{oldApp, newApp} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(oldApp, "marker"), []byte("old"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(newApp, "marker"), []byte("new"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pending, []byte("pending"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tx := &repair.UpdateTransaction{
+		ToVersion:          "v2",
+		CreatedAt:          "2026-07-28T00:00:00Z",
+		TargetKind:         "app-bundle",
+		TargetPath:         oldApp,
+		BackupPath:         oldApp + ".reasonix-update-backup",
+		HandoffAppPath:     newApp,
+		HandoffStagingPath: filepath.Dir(newApp),
+		HandoffOwnerPID:    os.Getpid(),
+	}
+	installMacHandoffTestDeps(t, tx, pending, filepath.Join(root, "update.log"), nil)
+	readyReader, readyWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proceedReader, proceedWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyReader.Close()
+	if err := proceedWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := macHandoffConfigFor(tx)
+	cfg.ReadyFD = int(readyWriter.Fd())
+	cfg.ProceedFD = int(proceedReader.Fd())
+
+	if code := runMacUpdateHandoff(cfg); code == 0 {
+		t.Fatal("handoff accepted a parent that exited before release")
+	}
+	if _, err := os.Stat(pending); !os.IsNotExist(err) {
+		t.Fatalf("abandoned pending transaction survived: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(oldApp, "marker")); err != nil || string(got) != "old" {
+		t.Fatalf("original app changed = %q, %v", got, err)
+	}
+}
+
 func TestMacHandoffRenameDoesNotReplaceExistingDestination(t *testing.T) {
 	dir := t.TempDir()
 	source := filepath.Join(dir, "source")

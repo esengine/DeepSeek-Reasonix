@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -54,6 +55,12 @@ var credentialSourceTracker = struct {
 	sync.Mutex
 	byKey map[string]trackedCredentialSource
 }{byKey: map[string]trackedCredentialSource{}}
+
+// userCredentialEditMu serializes Reasonix-owned credential-store writes.
+// LockUserCredentialEdits also takes a path-derived advisory file lock so a
+// Desktop window, CLI process, or background catalog save can share one
+// compare-and-apply boundary with credential rotation.
+var userCredentialEditMu sync.Mutex
 
 var storedCredentialValueLookup = storedCredentialValue
 var legacyKeyringCredentialValueLookup = legacyKeyringCredentialValue
@@ -261,6 +268,11 @@ func StoreCredentialLines(lines []string) (string, error) {
 	if len(assignments) == 0 {
 		return CredentialsTargetDescription(), nil
 	}
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return "", err
+	}
+	defer unlock()
 	if err := storeCredentialsInFile(UserCredentialsPath(), assignments); err != nil {
 		return "", err
 	}
@@ -290,12 +302,61 @@ func RemoveCredential(key string) error {
 	if key == "" || !isCredentialKey(key) {
 		return nil
 	}
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return err
+	}
+	defer unlock()
 	if path := UserCredentialsPath(); path != "" {
 		if err := removeCredentialFromFile(path, key); err != nil {
 			return err
 		}
 	}
 	return os.Unsetenv(key)
+}
+
+// LockUserCredentialEdits serializes credential-store compare/write
+// transactions in this process and across Reasonix processes. When both the
+// user config and credential store are needed, acquire LockUserConfigEdits
+// first, then this lock.
+func LockUserCredentialEdits() (func(), error) {
+	userCredentialEditMu.Lock()
+	path := UserCredentialsPath()
+	if strings.TrimSpace(path) == "" {
+		userCredentialEditMu.Unlock()
+		return nil, fmt.Errorf("credentials store unavailable")
+	}
+	unlockFile, err := acquireConfigFileEditLockWithTimeout(path, configEditLockTimeout)
+	if err != nil {
+		userCredentialEditMu.Unlock()
+		return nil, fmt.Errorf("lock credential edits: %w", err)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			unlockFile()
+			userCredentialEditMu.Unlock()
+		})
+	}, nil
+}
+
+// CredentialStoreRevision returns a content-derived revision for the current
+// Reasonix credential store. Callers performing compare-and-apply must hold
+// LockUserCredentialEdits from this read through their commit.
+func CredentialStoreRevision() string {
+	path := UserCredentialsPath()
+	if strings.TrimSpace(path) == "" {
+		return "unavailable"
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "missing"
+		}
+		return "unreadable"
+	}
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("sha256:%x", sum[:])
 }
 
 func CredentialIsSet(key string) bool {

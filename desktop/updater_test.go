@@ -126,6 +126,51 @@ func TestUpdaterNativeOperationsFailFastWhileBusy(t *testing.T) {
 	finishSecond()
 }
 
+func TestUpdaterReconcilesPendingUpdateBeforeInstallModeDispatch(t *testing.T) {
+	originalExists := pendingUpdateExistsForInstall
+	originalReconcile := reconcilePendingUpdateForInstall
+	t.Cleanup(func() {
+		pendingUpdateExistsForInstall = originalExists
+		reconcilePendingUpdateForInstall = originalReconcile
+	})
+
+	called := false
+	pendingUpdateExistsForInstall = func() bool { return true }
+	reconcilePendingUpdateForInstall = func(runningVersion string) (repair.PendingUpdateReconcileResult, error) {
+		called = true
+		if runningVersion != version {
+			t.Fatalf("running version = %q, want %q", runningVersion, version)
+		}
+		return repair.PendingUpdateReconcileResult{Pending: true, Cleared: true}, nil
+	}
+	meta := &cachedUpdate{Channel: "preview", Version: "v1.18.0-preview.65", Size: 42}
+	if err := (&App{}).reconcilePendingUpdateBeforeInstall("install-1", meta); err != nil {
+		t.Fatal(err)
+	}
+	if !called {
+		t.Fatal("pending update reconciliation was skipped")
+	}
+}
+
+func TestUpdaterBlocksInstallWhilePreviousReleaseAwaitsHealth(t *testing.T) {
+	originalExists := pendingUpdateExistsForInstall
+	originalReconcile := reconcilePendingUpdateForInstall
+	t.Cleanup(func() {
+		pendingUpdateExistsForInstall = originalExists
+		reconcilePendingUpdateForInstall = originalReconcile
+	})
+
+	pendingUpdateExistsForInstall = func() bool { return true }
+	reconcilePendingUpdateForInstall = func(string) (repair.PendingUpdateReconcileResult, error) {
+		return repair.PendingUpdateReconcileResult{Pending: true, AwaitingHealth: true}, repair.ErrPendingUpdateAwaitingHealth
+	}
+	meta := &cachedUpdate{Channel: "preview", Version: "v1.18.0-preview.65", Size: 42}
+	err := (&App{}).reconcilePendingUpdateBeforeInstall("install-1", meta)
+	if err == nil || !strings.Contains(err.Error(), "startup health check") {
+		t.Fatalf("health-check recovery error = %v", err)
+	}
+}
+
 func TestExpectedUpdateVersionRejectsAdvancedPointer(t *testing.T) {
 	if err := ensureExpectedUpdateVersion("preview", "v1.18.0-preview.1", "v1.18.0-preview.2"); err == nil {
 		t.Fatal("advanced pointer unexpectedly matched the checked version")

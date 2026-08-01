@@ -81,6 +81,9 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 		`cp "$cli_out" "$app/Contents/MacOS/$CLINAME"`,
 		`[ "$bundle_executable" = "$BINNAME" ]`,
 		`Print :CFBundleIconFile`,
+		`darwin_icon="$ROOT/desktop/build/darwin/icon.icns"`,
+		`cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`,
+		`cmp -s "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`,
 		`Contents/Resources/$bundle_icon`,
 		`-H windowsgui`,
 		`stamp_windows_executable "$guard_out" "Reasonix Guard"`,
@@ -109,6 +112,12 @@ func TestDesktopPackagesPreserveNativePlatformLaunchers(t *testing.T) {
 	}
 	if strings.Contains(build, `"$staging/$CLINAME.exe"`) {
 		t.Fatal("Windows package must not collide reasonix.exe with the Reasonix.exe launcher")
+	}
+	darwinIconCopy := strings.Index(build, `cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"`)
+	developerIDSign := strings.Index(build, `codesign --force --deep --timestamp --options runtime`)
+	adHocSign := strings.Index(build, `codesign --force --deep -s - "$app"`)
+	if darwinIconCopy < 0 || developerIDSign < 0 || adHocSign < 0 || darwinIconCopy > developerIDSign || darwinIconCopy > adHocSign {
+		t.Fatalf("macOS icon must be replaced before signing (copy=%d developer-id=%d ad-hoc=%d)", darwinIconCopy, developerIDSign, adHocSign)
 	}
 
 	workflowData, err := os.ReadFile("../.github/workflows/release-desktop.yml")

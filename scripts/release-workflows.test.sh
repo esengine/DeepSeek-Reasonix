@@ -41,6 +41,9 @@ if grep -Fq 'group: preview-release-${{ inputs.tag }}' "$repo_root/.github/workf
 	exit 1
 fi
 grep -Eq '^    environment: canary$' "$repo_root/.github/workflows/release-preview.yml"
+grep -Eq '^      recovery:$' "$repo_root/.github/workflows/release-preview.yml"
+grep -Fq 'ALLOW_PREVIEW_RECOVERY: ${{ inputs.recovery }}' "$repo_root/.github/workflows/release-preview.yml"
+grep -Fq 'allow_preview_recovery: ${{ inputs.recovery }}' "$repo_root/.github/workflows/release-preview.yml"
 grep -Eq '^  signpath-preflight:$' "$repo_root/.github/workflows/release-preview.yml"
 grep -Eq 'signing_preflight: true' "$repo_root/.github/workflows/release-preview.yml"
 grep -Eq 'signing_preflight_verified: true' "$repo_root/.github/workflows/release-preview.yml"
@@ -71,18 +74,55 @@ grep -Eq 'GORELEASER_CURRENT_TAG:.*needs\.resolve\.outputs\.tag' \
 grep -Eq 'bash scripts/resolve-cli-release\.sh' "$repo_root/.github/workflows/release.yml"
 grep -Eq 'git merge-base --is-ancestor.*origin/main-v2' "$repo_root/.github/workflows/release.yml"
 grep -Eq 'CLI Preview must tag current main-v2' "$repo_root/.github/workflows/release.yml"
+grep -Fq 'ALLOW_PREVIEW_RECOVERY: ${{ inputs.allow_preview_recovery }}' "$repo_root/.github/workflows/release.yml"
+grep -Eq 'Preview recovery requires the approved Preview orchestrator' "$repo_root/.github/workflows/release.yml"
 grep -Eq "channel == 'stable'.*HOMEBREW_TAP_TOKEN" "$repo_root/.github/workflows/release.yml"
+grep -Fq 'name: Isolate release-control checkout from product git state' \
+	"$repo_root/.github/workflows/release.yml"
+grep -Fq "grep -qxF '/release-control/'" "$repo_root/.github/workflows/release.yml"
+grep -Fq 'git check-ignore -q release-control/' "$repo_root/.github/workflows/release.yml"
+release_control_isolation_line="$(
+	grep -n -m1 'name: Isolate release-control checkout from product git state' \
+		"$repo_root/.github/workflows/release.yml" | cut -d: -f1
+)"
+goreleaser_action_line="$(
+	grep -n -m1 'uses: goreleaser/goreleaser-action@' \
+		"$repo_root/.github/workflows/release.yml" | cut -d: -f1
+)"
+[ "$release_control_isolation_line" -lt "$goreleaser_action_line" ]
+
+# A protected control-plane checkout must remain available to the workflow
+# without making the immutable product checkout dirty for GoReleaser.
+mkdir -p "$test_root/product-checkout/release-control"
+git init -q "$test_root/product-checkout"
+printf 'control plane\n' >"$test_root/product-checkout/release-control/marker"
+[ "$(git -C "$test_root/product-checkout" status --porcelain --untracked-files=all)" = \
+	'?? release-control/marker' ]
+product_git_common_dir="$(
+	git -C "$test_root/product-checkout" rev-parse --path-format=absolute --git-common-dir
+)"
+product_exclude="$product_git_common_dir/info/exclude"
+printf '%s\n' '/release-control/' >>"$product_exclude"
+git -C "$test_root/product-checkout" check-ignore -q release-control/
+[ -z "$(git -C "$test_root/product-checkout" status --porcelain --untracked-files=all)" ]
 grep -Eq "needs\.build\.result == 'success'" "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq "needs\.publish\.result == 'success'" "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'options: \[stable, preview\]' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq '^  resolve:$' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'sha:.*steps\.candidate\.outputs\.sha' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'bash scripts/resolve-desktop-candidate.sh' "$repo_root/.github/workflows/release-desktop.yml"
+[ "$(grep -Fc 'IN_ORCHESTRATOR: ${{ inputs.orchestrator }}' "$repo_root/.github/workflows/release-desktop.yml")" = "3" ]
 [ "$(grep -Fc 'name: Revalidate immutable Desktop candidate' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
 [ "$(grep -Fc 'ref: ${{ needs.resolve.outputs.sha }}' "$repo_root/.github/workflows/release-desktop.yml")" -ge 4 ]
-[ "$(grep -Fc 'path: release-control' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
+[ "$(grep -Ec '^          path: release-control$' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
 [ "$(grep -Fc 'ref: ${{ github.workflow_sha }}' "$repo_root/.github/workflows/release-desktop.yml")" -ge 2 ]
 [ "$(grep -Fc 'bash release-control/scripts/resolve-desktop-candidate.sh' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
+[ "$(grep -Fc 'RELEASE_TAG: ${{ inputs.approved_cli_tag }}' "$repo_root/.github/workflows/release-desktop.yml")" = "3" ]
+if sed -n '/^  mirror:/,$p' "$repo_root/.github/workflows/release-desktop.yml" |
+	grep -Fq 'RELEASE_TAG: ${{ inputs.tag }}'; then
+	echo "Desktop mirror must revalidate the orchestrator-approved CLI tag" >&2
+	exit 1
+fi
 if sed -n '/name: publish release/,/name: mirror to R2/p' \
 	"$repo_root/.github/workflows/release-desktop.yml" |
 	grep -Eq 'bash scripts/(resolve-desktop-candidate|validate-desktop-release-manifest|publish-desktop-github-release)\.sh'; then
@@ -158,8 +198,33 @@ fi
 grep -Fq 'scripts/decide-desktop-pointer-update.sh' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'scripts/verify-desktop-release-directory.sh' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'scripts/compare-desktop-release-manifests.sh' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'go -C release-control/desktop build -o "$signature_verifier" ./cmd/sign' \
+	"$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'verify_signature_directory assets' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'verify_signature_directory "$existing_directory"' \
+	"$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq -- '--allow-authenticated-payload-differences' \
+	"$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'cp "$payload" "assets/$payload_relative"' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'cp "$signature" "assets/$relative"' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'verify-desktop-release-manifest-assets.sh' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'verify_signature_directory "$published_directory"' \
+	"$repo_root/.github/workflows/release-desktop.yml"
+manifest_adoption_line="$(grep -nF 'cp "$existing_directory/latest.json" assets/latest.json' \
+	"$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"
+authenticated_compare_line="$(grep -nF -- '--allow-authenticated-payload-differences assets "$existing_directory"' \
+	"$repo_root/.github/workflows/release-desktop.yml" | cut -d: -f1)"
+if [ -z "$manifest_adoption_line" ] || [ -z "$authenticated_compare_line" ] ||
+	[ "$manifest_adoption_line" -ge "$authenticated_compare_line" ]; then
+	echo "Desktop recovery must adopt a validated existing manifest before directory comparison" >&2
+	exit 1
+fi
 grep -Fq 'download_optional "preview/latest.json"' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'download_optional "canary/latest.json"' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq '"legacy-${current_channel}" "$current_version" "$current_base"' \
+	"$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq 'legacy-preview "$current_version" "$legacy_preview_base"' \
+	"$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'publish_pointer canary' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'publish_pointer preview' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'cmp -s /tmp/reasonix-desktop-canary-latest.json /tmp/reasonix-desktop-preview-latest.json' \
@@ -223,6 +288,16 @@ grep -Fq "group: release-cli-\${{ inputs.channel || 'stable' }}" "$cli_release_w
 grep -Fq 'scripts/decide-cli-pointer-update.sh' "$cli_release_workflow"
 grep -Fq 'scripts/validate-cli-release-manifest.sh' "$cli_release_workflow"
 grep -Fq 'scripts/compare-cli-release-manifests.sh' "$cli_release_workflow"
+grep -Eq 'name: Decide whether CLI artifacts need publication' "$cli_release_workflow"
+grep -Fq 'path: release-control' "$cli_release_workflow"
+grep -Fq 'ref: ${{ github.workflow_sha }}' "$cli_release_workflow"
+grep -Fq 'release-control/scripts/decide-cli-release-publication.sh' "$cli_release_workflow"
+if sed -n '/^  goreleaser:/,$p' "$cli_release_workflow" |
+	grep -Fq 'bash scripts/decide-cli-release-publication.sh'; then
+	echo "CLI recovery uses candidate-controlled publication policy" >&2
+	exit 1
+fi
+grep -Fq "if: \${{ steps.publication.outputs.decision == 'publish' }}" "$cli_release_workflow"
 grep -Fq 'immutable CLI release metadata for $TAG already exists with different content' "$cli_release_workflow"
 grep -Fq 'cmp -s /tmp/cli-release.json /tmp/cli-release.pointer.json' "$cli_release_workflow"
 grep -Eq 'internal CLI release .*Stable and Preview pointers remain unchanged' "$cli_release_workflow"
@@ -286,6 +361,86 @@ for asset in \
 	SHA256SUMS; do
 	grep -Fq "\"$asset\"" "$cli_release_workflow"
 done
+publication_decider="$repo_root/scripts/decide-cli-release-publication.sh"
+test -x "$publication_decider"
+[ "$(bash "$publication_decider" stable v1.2.3 esengine/DeepSeek-Reasonix - -)" = "publish" ]
+publication_checksums="$test_root/cli-publication-SHA256SUMS"
+publication_release="$test_root/cli-publication-release.json"
+publication_hash="0000000000000000000000000000000000000000000000000000000000000000"
+publication_assets='[
+	"reasonix-darwin-amd64.tar.gz",
+	"reasonix-darwin-arm64.tar.gz",
+	"reasonix-linux-amd64.tar.gz",
+	"reasonix-linux-arm64.tar.gz",
+	"reasonix-windows-amd64.zip",
+	"reasonix-windows-arm64.zip",
+	"SHA256SUMS"
+]'
+for asset in \
+	reasonix-darwin-amd64.tar.gz \
+	reasonix-darwin-arm64.tar.gz \
+	reasonix-linux-amd64.tar.gz \
+	reasonix-linux-arm64.tar.gz \
+	reasonix-windows-amd64.zip \
+	reasonix-windows-arm64.zip; do
+	printf '%s  %s\n' "$publication_hash" "$asset"
+done >"$publication_checksums"
+publication_checksum_hash="$(shasum -a 256 "$publication_checksums" | awk '{print $1}')"
+jq -n \
+	--arg repo "esengine/DeepSeek-Reasonix" \
+	--arg tag "v1.2.3" \
+	--arg archive_hash "$publication_hash" \
+	--arg checksum_hash "$publication_checksum_hash" \
+	--argjson names "$publication_assets" '
+	{
+		tag_name: $tag,
+		draft: false,
+		prerelease: false,
+		html_url: ("https://github.com/" + $repo + "/releases/tag/" + $tag),
+		assets: [
+			$names[] as $name |
+			{
+				name: $name,
+				state: "uploaded",
+				size: 1,
+				browser_download_url:
+					("https://github.com/" + $repo + "/releases/download/" + $tag + "/" + $name),
+				digest: ("sha256:" + (if $name == "SHA256SUMS" then $checksum_hash else $archive_hash end))
+			}
+		]
+	}
+' >"$publication_release"
+[ "$(bash "$publication_decider" stable v1.2.3 esengine/DeepSeek-Reasonix \
+	"$publication_release" "$publication_checksums")" = "reuse" ]
+publication_preview="$test_root/cli-publication-preview-release.json"
+jq '.tag_name = "v1.2.3-preview.4" | .prerelease = true |
+	.html_url = "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v1.2.3-preview.4" |
+	.assets |= map(.browser_download_url |= sub("/v1.2.3/"; "/v1.2.3-preview.4/"))' \
+	"$publication_release" >"$publication_preview"
+[ "$(bash "$publication_decider" preview v1.2.3-preview.4 esengine/DeepSeek-Reasonix \
+	"$publication_preview" "$publication_checksums")" = "reuse" ]
+publication_rc="$test_root/cli-publication-rc-release.json"
+jq '.tag_name = "v1.2.3-rc.1" | .prerelease = true |
+	.html_url = "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v1.2.3-rc.1" |
+	.assets |= map(.browser_download_url |= sub("/v1.2.3/"; "/v1.2.3-rc.1/"))' \
+	"$publication_release" >"$publication_rc"
+[ "$(bash "$publication_decider" any v1.2.3-rc.1 esengine/DeepSeek-Reasonix \
+	"$publication_rc" "$publication_checksums")" = "reuse" ]
+publication_partial="$test_root/cli-publication-partial-release.json"
+jq '.assets |= map(select(.name != "reasonix-linux-arm64.tar.gz"))' \
+	"$publication_release" >"$publication_partial"
+if bash "$publication_decider" stable v1.2.3 esengine/DeepSeek-Reasonix \
+	"$publication_partial" "$publication_checksums" >/dev/null 2>&1; then
+	echo "CLI publication decider accepted a partial existing release" >&2
+	exit 1
+fi
+publication_bad_checksums="$test_root/cli-publication-bad-SHA256SUMS"
+sed '1s/^0/1/' "$publication_checksums" >"$publication_bad_checksums"
+if bash "$publication_decider" stable v1.2.3 esengine/DeepSeek-Reasonix \
+	"$publication_release" "$publication_bad_checksums" >/dev/null 2>&1; then
+	echo "CLI publication decider accepted mismatched checksums" >&2
+	exit 1
+fi
 manifest_validator="$repo_root/scripts/validate-cli-release-manifest.sh"
 manifest_comparator="$repo_root/scripts/compare-cli-release-manifests.sh"
 test -x "$manifest_validator"
@@ -494,6 +649,40 @@ if bash "$desktop_directory_verifier" "$candidate_directory" "$existing_director
 fi
 cp "$candidate_directory/b" "$existing_directory/b"
 bash "$desktop_directory_verifier" "$candidate_directory" "$existing_directory"
+printf 'candidate-signature\n' >"$candidate_directory/a.minisig"
+printf 'existing-signature\n' >"$existing_directory/a.minisig"
+if bash "$desktop_directory_verifier" "$candidate_directory" "$existing_directory" >/dev/null 2>&1; then
+	echo "Desktop release directory verifier accepted a byte-distinct signature without opt-in" >&2
+	exit 1
+fi
+bash "$desktop_directory_verifier" --allow-signature-differences \
+	"$candidate_directory" "$existing_directory"
+printf 'candidate-payload\n' >"$candidate_directory/signed"
+printf 'existing-payload\n' >"$existing_directory/signed"
+printf 'candidate-signature\n' >"$candidate_directory/signed.minisig"
+printf 'existing-signature\n' >"$existing_directory/signed.minisig"
+if bash "$desktop_directory_verifier" --allow-signature-differences \
+	"$candidate_directory" "$existing_directory" >/dev/null 2>&1; then
+	echo "Desktop release directory verifier accepted a byte-distinct payload without authenticated-payload opt-in" >&2
+	exit 1
+fi
+bash "$desktop_directory_verifier" --allow-authenticated-payload-differences \
+	"$candidate_directory" "$existing_directory"
+printf '' >"$existing_directory/signed.minisig"
+if bash "$desktop_directory_verifier" --allow-authenticated-payload-differences \
+	"$candidate_directory" "$existing_directory" >/dev/null 2>&1; then
+	echo "Desktop release directory verifier accepted a byte-distinct payload with an empty signature" >&2
+	exit 1
+fi
+cp "$candidate_directory/signed" "$existing_directory/signed"
+cp "$candidate_directory/signed.minisig" "$existing_directory/signed.minisig"
+printf '' >"$existing_directory/a.minisig"
+if bash "$desktop_directory_verifier" --allow-signature-differences \
+	"$candidate_directory" "$existing_directory" >/dev/null 2>&1; then
+	echo "Desktop release directory verifier accepted an empty recovered signature" >&2
+	exit 1
+fi
+cp "$candidate_directory/a.minisig" "$existing_directory/a.minisig"
 printf 'conflict\n' >"$existing_directory/a"
 if bash "$desktop_directory_verifier" --allow-missing "$candidate_directory" "$existing_directory" >/dev/null 2>&1; then
 	echo "Desktop release directory verifier accepted conflicting immutable content" >&2
@@ -505,6 +694,28 @@ if bash "$desktop_directory_verifier" --allow-missing "$candidate_directory" "$e
 	echo "Desktop release directory verifier accepted an unexpected immutable object" >&2
 	exit 1
 fi
+
+recovery_candidate_directory="$test_root/desktop-directory-recovery-candidate"
+recovery_existing_directory="$test_root/desktop-directory-recovery-existing"
+mkdir -p "$recovery_candidate_directory" "$recovery_existing_directory"
+printf 'candidate-payload\n' >"$recovery_candidate_directory/artifact"
+printf 'candidate-signature\n' >"$recovery_candidate_directory/artifact.minisig"
+printf 'existing-payload\n' >"$recovery_existing_directory/artifact"
+printf 'existing-signature\n' >"$recovery_existing_directory/artifact.minisig"
+printf '{"version":"v1.2.3","release_notes_url":"https://reasonix.io/changelog/v1.2.3/","marker":"candidate"}\n' \
+	>"$recovery_candidate_directory/latest.json"
+printf '{"version":"v1.2.3","release_notes_url":"https://reasonix.io/changelog/v1.2.3/","marker":"existing"}\n' \
+	>"$recovery_existing_directory/latest.json"
+if bash "$desktop_directory_verifier" --allow-missing --allow-legacy-manifest \
+	--allow-authenticated-payload-differences \
+	"$recovery_candidate_directory" "$recovery_existing_directory" >/dev/null 2>&1; then
+	echo "Desktop recovery accepted a conflicting manifest before validated adoption" >&2
+	exit 1
+fi
+cp "$recovery_existing_directory/latest.json" "$recovery_candidate_directory/latest.json"
+bash "$desktop_directory_verifier" --allow-missing --allow-legacy-manifest \
+	--allow-authenticated-payload-differences \
+	"$recovery_candidate_directory" "$recovery_existing_directory"
 
 legacy_candidate_directory="$test_root/desktop-directory-legacy-candidate"
 legacy_existing_directory="$test_root/desktop-directory-legacy-existing"
@@ -531,6 +742,38 @@ mv "$legacy_existing_directory/latest-conflict.json" "$legacy_existing_directory
 if bash "$desktop_directory_verifier" --allow-legacy-manifest \
 	"$legacy_candidate_directory" "$legacy_existing_directory" >/dev/null 2>&1; then
 	echo "Desktop release directory verifier ignored a non-legacy manifest difference" >&2
+	exit 1
+fi
+
+desktop_manifest_asset_verifier="$repo_root/scripts/verify-desktop-release-manifest-assets.sh"
+test -x "$desktop_manifest_asset_verifier"
+manifest_asset_directory="$test_root/desktop-manifest-assets"
+mkdir -p "$manifest_asset_directory"
+printf 'manifest-bound-payload\n' >"$manifest_asset_directory/payload.zip"
+printf 'manifest-bound-native\n' >"$manifest_asset_directory/payload.deb"
+manifest_asset_sha="$(shasum -a 256 "$manifest_asset_directory/payload.zip" | awk '{print $1}')"
+manifest_asset_size="$(wc -c <"$manifest_asset_directory/payload.zip" | tr -d '[:space:]')"
+manifest_native_sha="$(shasum -a 256 "$manifest_asset_directory/payload.deb" | awk '{print $1}')"
+manifest_native_size="$(wc -c <"$manifest_asset_directory/payload.deb" | tr -d '[:space:]')"
+jq -n \
+	--arg url "https://dl.reasonix.io/desktop-v1.2.3/payload.zip" \
+	--arg sha "$manifest_asset_sha" \
+	--argjson size "$manifest_asset_size" \
+	--arg native_url "https://dl.reasonix.io/desktop-v1.2.3/payload.deb" \
+	--arg native_sha "$manifest_native_sha" \
+	--argjson native_size "$manifest_native_size" \
+	'{
+		platforms: {test: {url: $url, sha256: $sha, size: $size}},
+		native_packages: {test: {url: $native_url, sha256: $native_sha, size: $native_size}},
+		downloads: {}
+	}' \
+	>"$manifest_asset_directory/latest.json"
+bash "$desktop_manifest_asset_verifier" \
+	"$manifest_asset_directory/latest.json" "$manifest_asset_directory"
+printf 'corrupted-payload\n' >"$manifest_asset_directory/payload.zip"
+if bash "$desktop_manifest_asset_verifier" \
+	"$manifest_asset_directory/latest.json" "$manifest_asset_directory" >/dev/null 2>&1; then
+	echo "Desktop release manifest asset verifier accepted a mismatched payload" >&2
 	exit 1
 fi
 
@@ -859,6 +1102,14 @@ jq 'del(.downloads)' "$test_root/desktop-rolling-preview.json" \
 	>"$test_root/desktop-legacy-preview.json"
 bash "$desktop_validator" legacy-preview "$desktop_preview_version" \
 	"https://dl.reasonix.io/desktop-preview/" "$test_root/desktop-legacy-preview.json"
+jq 'del(.release_notes_url, .downloads)' "$desktop_preview_manifest" \
+	>"$test_root/desktop-legacy-preview-immutable.json"
+bash "$desktop_validator" legacy-preview "$desktop_preview_version" \
+	"$desktop_preview_base" "$test_root/desktop-legacy-preview-immutable.json"
+jq '.release_notes_url = null' "$desktop_preview_manifest" \
+	>"$test_root/desktop-null-legacy-preview-immutable.json"
+bash "$desktop_validator" legacy-preview "$desktop_preview_version" \
+	"$desktop_preview_base" "$test_root/desktop-null-legacy-preview-immutable.json"
 jq 'del(.downloads)' "$desktop_stable_manifest" >"$test_root/desktop-legacy-stable.json"
 bash "$desktop_validator" legacy-stable "$desktop_stable_version" \
 	"$desktop_stable_base" "$test_root/desktop-legacy-stable.json"
@@ -934,6 +1185,20 @@ git clone -q "$test_root/remote.git" "$test_root/repo"
 		CALLER_SHA="$approved_sha" CALLER_WORKFLOW_SHA="$approved_sha" \
 		"$desktop_candidate_resolver"
 	grep -Eq '^sha='"$approved_sha"'$' "$test_root/desktop-preview-candidate.out"
+	GITHUB_OUTPUT="$test_root/desktop-orchestrated-preview-candidate.out" \
+		RELEASE_CHANNEL=preview RELEASE_TAG=desktop-v1.3.0-preview.42 \
+		IN_ORCHESTRATED=true IN_ORCHESTRATOR=preview APPROVED_SHA="$approved_sha" \
+		"$desktop_candidate_resolver"
+	grep -Eq '^sha='"$approved_sha"'$' "$test_root/desktop-orchestrated-preview-candidate.out"
+	if GITHUB_OUTPUT="$test_root/desktop-wrong-orchestrator-candidate.out" \
+		RELEASE_CHANNEL=preview RELEASE_TAG=desktop-v1.3.0-preview.42 \
+		IN_ORCHESTRATED=true IN_ORCHESTRATOR=stable APPROVED_SHA="$approved_sha" \
+		"$desktop_candidate_resolver" >"$test_root/desktop-wrong-orchestrator-candidate.log" 2>&1; then
+		echo "stable orchestrator unexpectedly authorized a Desktop Preview candidate" >&2
+		exit 1
+	fi
+	grep -Eq 'stable orchestrator cannot authorize a Desktop preview candidate' \
+		"$test_root/desktop-wrong-orchestrator-candidate.log"
 	if GITHUB_OUTPUT="$test_root/desktop-unprotected-candidate.out" \
 		RELEASE_CHANNEL=preview RELEASE_TAG=desktop-v1.3.0-preview.42 \
 		IN_ORCHESTRATED=false CALLER_EVENT_NAME=workflow_dispatch \
@@ -977,6 +1242,22 @@ git clone -q "$test_root/remote.git" "$test_root/repo"
 	git commit --allow-empty -q -m "release workflow fix"
 	git push -q origin main-v2
 	recovery_workflow_sha="$(git rev-parse HEAD)"
+	if RELEASE_TAG=v1.3.0-preview.42 \
+		"$repo_root/scripts/resolve-preview-release.sh" >"$test_root/stale-preview.log" 2>&1; then
+		echo "stale Preview tag unexpectedly passed normal release resolution" >&2
+		exit 1
+	fi
+	grep -Eq 'must point to current .*main-v2' "$test_root/stale-preview.log"
+	GITHUB_OUTPUT="$test_root/preview-recovery.out" ALLOW_PREVIEW_RECOVERY=true \
+		RELEASE_TAG=v1.3.0-preview.42 "$repo_root/scripts/resolve-preview-release.sh"
+	grep -Eq '^sha='"$approved_sha"'$' "$test_root/preview-recovery.out"
+	if ALLOW_PREVIEW_RECOVERY=invalid RELEASE_TAG=v1.3.0-preview.42 \
+		"$repo_root/scripts/resolve-preview-release.sh" >"$test_root/invalid-preview-recovery.log" 2>&1; then
+		echo "invalid Preview recovery mode unexpectedly passed" >&2
+		exit 1
+	fi
+	grep -Eq 'ALLOW_PREVIEW_RECOVERY must be true or false' \
+		"$test_root/invalid-preview-recovery.log"
 	if GITHUB_OUTPUT="$test_root/desktop-stale-preview-candidate.out" \
 		RELEASE_CHANNEL=preview RELEASE_TAG=desktop-v1.3.0-preview.42 \
 		IN_ORCHESTRATED=false CALLER_EVENT_NAME=workflow_dispatch \
@@ -988,6 +1269,12 @@ git clone -q "$test_root/remote.git" "$test_root/repo"
 	fi
 	grep -Eq 'Desktop Preview must use current main-v2' \
 		"$test_root/desktop-stale-preview-candidate.log"
+	GITHUB_OUTPUT="$test_root/desktop-orchestrated-preview-recovery-candidate.out" \
+		RELEASE_CHANNEL=preview RELEASE_TAG=desktop-v1.3.0-preview.42 \
+		IN_ORCHESTRATED=true IN_ORCHESTRATOR=preview APPROVED_SHA="$approved_sha" \
+		"$desktop_candidate_resolver"
+	grep -Eq '^sha='"$approved_sha"'$' \
+		"$test_root/desktop-orchestrated-preview-recovery-candidate.out"
 	GITHUB_OUTPUT="$test_root/desktop-stable-recovery-candidate.out" \
 		RELEASE_CHANNEL=stable RELEASE_TAG=desktop-v1.2.3 \
 		IN_ORCHESTRATED=false CALLER_EVENT_NAME=workflow_dispatch \

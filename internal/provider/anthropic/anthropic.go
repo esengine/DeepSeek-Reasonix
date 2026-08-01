@@ -9,12 +9,15 @@
 //     requires the *signed* thinking block be replayed on the next turn when a tool
 //     call followed thinking, so Message carries ReasoningSignature alongside
 //     ReasoningContent and this provider replays the signed block on the next
-//     request. Some Anthropic-compatible gateways such as LongCat instead use
-//     thinking.type enabled|disabled; those values are passed through without
-//     Anthropic's display/output_config fields. Off by default because the field is
-//     provider-specific. (redacted_thinking blocks are not yet captured/replayed.)
-//   - No temperature/top_p. Current Claude models (Opus 4.8/4.7) reject sampling
-//     parameters with a 400; Anthropic steers behavior via prompting instead.
+//     request. DeepSeek's Anthropic endpoint instead uses unsigned thinking blocks,
+//     thinking.type enabled|disabled, and output_config.effort; requests carrying
+//     tools must replay all provider reasoning. Some other compatible gateways such
+//     as LongCat use the binary toggle without output_config. (redacted_thinking
+//     blocks are not yet captured/replayed.)
+//   - Native Anthropic requests omit temperature/top_p. Current Claude models
+//     (Opus 4.8/4.7) reject sampling parameters with a 400; Anthropic steers
+//     behavior via prompting instead. DeepSeek's compatible endpoint accepts the
+//     caller's temperature, so that field is preserved only for DeepSeek.
 package anthropic
 
 import (
@@ -31,6 +34,7 @@ import (
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 // defaultStreamIdleTimeout caps how long a started SSE stream may go silent before
@@ -105,6 +109,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		keySource:   keySource,
 		baseURL:     root,
 		model:       cfg.Model,
+		deepseek:    openai.IsDeepSeek(root),
 		thinking:    thinking,
 		effort:      effort,
 		vision:      vision,
@@ -129,6 +134,7 @@ type client struct {
 	keySource   string // source of keyEnv, surfaced in auth errors
 	baseURL     string
 	model       string
+	deepseek    bool   // official DeepSeek Anthropic endpoint: unsigned reasoning replay + automatic cache
 	thinking    string // "adaptive" enables extended thinking; "" = off (config-driven)
 	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
 	vision      bool   // model accepts image input — embed attached images as base64 image blocks
@@ -142,6 +148,43 @@ type client struct {
 }
 
 func (c *client) Name() string { return c.name }
+
+func (c *client) deepSeekThinkingEnabled() bool {
+	return c != nil && c.deepseek && c.thinking != "disabled" && c.effort != "disabled"
+}
+
+// deepSeekAnthropicUsesProEffortMapping mirrors DeepSeek's model routing for the
+// Anthropic endpoint. Opus aliases route to V4 Pro; Sonnet/Haiku aliases and
+// unsupported model names route to V4 Flash.
+func deepSeekAnthropicUsesProEffortMapping(model string) bool {
+	model = strings.ToLower(strings.TrimSpace(model))
+	return model == "deepseek-v4-pro" || strings.HasPrefix(model, "claude-opus")
+}
+
+func normalizeDeepSeekAnthropicEffort(model, effort string) string {
+	switch effort {
+	case "low":
+		if deepSeekAnthropicUsesProEffortMapping(model) {
+			return "high"
+		}
+		return "low"
+	case "medium":
+		return "high"
+	case "xhigh":
+		if deepSeekAnthropicUsesProEffortMapping(model) {
+			return "max"
+		}
+		return "high"
+	case "high", "max":
+		return effort
+	default:
+		return ""
+	}
+}
+
+func (c *client) RequiresToolCallReasoning() bool {
+	return c.deepSeekThinkingEnabled()
+}
 
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
@@ -289,11 +332,14 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 			appendBlocks("user", block)
 		case provider.RoleAssistant:
 			var blocks []contentBlock
-			// Replay the signed thinking block first (Anthropic requires it precede
-			// the tool_use it led to). Only when thinking is on and we have both the
-			// text and its signature — reasoning without a signature (e.g. from an
-			// openai-compatible provider) can't be replayed as a thinking block.
-			if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
+			// Replay provider reasoning before the tool_use it led to. DeepSeek uses
+			// unsigned thinking blocks and requires the reasoning from a tool-call
+			// turn in every subsequent request, even if the current request no longer
+			// declares tools or has since disabled thinking. Anthropic proper requires
+			// a signature, so reasoning without one cannot be replayed on that endpoint.
+			if c.deepseek && len(m.ToolCalls) > 0 && m.ReasoningContent != "" {
+				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent})
+			} else if c.thinking == "adaptive" && m.ReasoningContent != "" && m.ReasoningSignature != "" {
 				blocks = append(blocks, contentBlock{Type: "thinking", Thinking: m.ReasoningContent, Signature: m.ReasoningSignature})
 			}
 			if m.Content != "" {
@@ -322,19 +368,23 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		tools = append(tools, anthTool{Name: t.Name, Description: t.Description, InputSchema: schema})
 	}
 
-	// Prompt-cache breakpoints (ephemeral, prefix-match). Render order is
+	// Prompt-cache breakpoints (ephemeral, prefix-match). DeepSeek ignores
+	// cache_control and manages prefix caching automatically, so keep those fields
+	// off its wire entirely. Render order for native Anthropic is
 	// tools → system → messages, so a marker on the last system block caches
 	// tools+system together; with no system, mark the last tool. A marker on the
 	// last block of the last message caches the conversation prefix, accruing hits
 	// incrementally as turns are appended. Max 4 breakpoints; we use ≤2.
-	if n := len(system); n > 0 {
-		system[n-1].CacheControl = ephemeral()
-	} else if n := len(tools); n > 0 {
-		tools[n-1].CacheControl = ephemeral()
-	}
-	if n := len(msgs); n > 0 {
-		if k := len(msgs[n-1].Content); k > 0 {
-			msgs[n-1].Content[k-1].CacheControl = ephemeral()
+	if !c.deepseek {
+		if n := len(system); n > 0 {
+			system[n-1].CacheControl = ephemeral()
+		} else if n := len(tools); n > 0 {
+			tools[n-1].CacheControl = ephemeral()
+		}
+		if n := len(msgs); n > 0 {
+			if k := len(msgs[n-1].Content); k > 0 {
+				msgs[n-1].Content[k-1].CacheControl = ephemeral()
+			}
 		}
 	}
 
@@ -350,21 +400,41 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 		Tools:     tools,
 		Stream:    true,
 	}
-	// Extended thinking is opt-in and provider-specific. Anthropic proper uses
-	// type=adaptive plus display/output_config. LongCat-style compatible gateways
-	// use the simpler enabled|disabled knob and do not accept output_config.
-	switch c.thinking {
-	case "adaptive":
-		r.Thinking = &thinkingConfig{Type: "adaptive", Display: "summarized"}
-		if c.effort != "" {
-			r.OutputConfig = &outputConfig{Effort: c.effort}
-		}
-	case "enabled", "disabled":
+	// Extended thinking is provider-specific. DeepSeek defaults to enabled and
+	// accepts output_config.effort alongside its binary toggle. Anthropic proper
+	// uses type=adaptive plus display/output_config. LongCat-style compatible
+	// gateways use the simpler enabled|disabled knob and reject output_config.
+	if c.deepseek {
+		r.Temperature = req.Temperature
 		t := c.thinking
-		if c.effort == "enabled" || c.effort == "disabled" {
-			t = c.effort
+		if t != "disabled" {
+			t = "enabled"
+		}
+		if c.effort == "disabled" {
+			t = "disabled"
 		}
 		r.Thinking = &thinkingConfig{Type: t}
+		if t != "disabled" {
+			effort := normalizeDeepSeekAnthropicEffort(c.model, c.effort)
+			switch effort {
+			case "low", "high", "max":
+				r.OutputConfig = &outputConfig{Effort: effort}
+			}
+		}
+	} else {
+		switch c.thinking {
+		case "adaptive":
+			r.Thinking = &thinkingConfig{Type: "adaptive", Display: "summarized"}
+			if c.effort != "" {
+				r.OutputConfig = &outputConfig{Effort: c.effort}
+			}
+		case "enabled", "disabled":
+			t := c.thinking
+			if c.effort == "enabled" || c.effort == "disabled" {
+				t = c.effort
+			}
+			r.Thinking = &thinkingConfig{Type: t}
+		}
 	}
 	return r
 }
@@ -609,6 +679,7 @@ type anthRequest struct {
 	System       []textBlock     `json:"system,omitempty"`
 	Messages     []anthMessage   `json:"messages"`
 	Tools        []anthTool      `json:"tools,omitempty"`
+	Temperature  *float64        `json:"temperature,omitempty"`
 	Thinking     *thinkingConfig `json:"thinking,omitempty"`
 	OutputConfig *outputConfig   `json:"output_config,omitempty"`
 	Stream       bool            `json:"stream"`
@@ -620,7 +691,7 @@ type thinkingConfig struct {
 }
 
 type outputConfig struct {
-	Effort string `json:"effort,omitempty"` // low | medium | high | xhigh | max
+	Effort string `json:"effort,omitempty"` // low | high | max
 }
 
 type textBlock struct {

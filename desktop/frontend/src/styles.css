@@ -5992,11 +5992,19 @@ body > .mermaid-diagram--fullscreen {
 /* ── footer: composer + status line ──────────────────────────────────────── */
 .footer {
   flex: 0 0 auto;
-  max-height: calc(100% - var(--topicbar-height));
-  overflow-y: auto;
   border-top: 1px solid var(--border-soft);
   background: var(--chat-bg);
   padding: 12px 32px 10px;
+}
+/* Decision cards (plan/tool approval, ask, clear-context) can grow tall; cap
+   the footer and let it scroll so approval buttons never slip behind the
+   status bar (#7030). Scoped to the decision state only: an unconditional
+   overflow here clips the upward-popping "/" and "@" menus (.slashmenu), whose
+   containing block .composer-wrap lives inside the footer. The composer is
+   hidden while a decision owns the footer, so the two states never overlap. */
+.footer--decision {
+  max-height: calc(100% - var(--topicbar-height));
+  overflow-y: auto;
 }
 
 /* ── undo-rewind banner (above composer after a rewind) ─────────────── */
@@ -6183,7 +6191,9 @@ body > .mermaid-diagram--fullscreen {
   bottom: calc(100% + 6px);
   left: 0;
   right: 0;
-  max-height: min(360px, 50vh);
+  /* 360px remains the preferred cap. The composer writes the real space above
+     its anchor while a menu is open; 50vh is a no-JS/pre-measure fallback. */
+  max-height: min(360px, var(--composer-menu-available-height, 50vh));
   overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);

@@ -1,10 +1,11 @@
-import { lazy, memo, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
+import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
 import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
+import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
 import { switchUpdaterChannel, useUpdater } from "../lib/useUpdater";
 import {
   applyTheme,
@@ -52,7 +53,7 @@ import {
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
-import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
+import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { AppearanceOverview } from "./AppearanceOverview";
 import { applyConfiguredBaseAppearance, setBaseAppearance } from "../lib/themePack";
 import { InlineConfirmButton } from "./InlineConfirmButton";
@@ -1276,6 +1277,7 @@ function normalizeProviderView(p: ProviderView): ProviderView {
     configured: providerIsConfigured({ ...p, requiresKey }),
     keySource: p.keySource ?? "",
     keySourcePath: p.keySourcePath ?? "",
+    modelCatalogFingerprint: p.modelCatalogFingerprint ?? "",
   };
 }
 
@@ -4022,6 +4024,7 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
     initialFocus?.target === "model-access" ? "access" : "usage",
   );
   const autoRefreshKeyRef = useRef("");
+  const autoRefreshGenerationRef = useRef(0);
   const refs = useMemo(() => allRefs(s), [s.providers]);
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
@@ -4044,6 +4047,9 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
     : Math.min(3, subagentConcurrency);
 
   useEffect(() => {
+    const generation = ++autoRefreshGenerationRef.current;
+    let cancelled = false;
+    const stale = () => cancelled || autoRefreshGenerationRef.current !== generation;
     if (subtab !== "usage") return;
     const groups = providerAccessGroups(s.providers.filter((p) => p.added), t);
     const candidates = groups
@@ -4052,29 +4058,74 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
         return provider ? { group, provider } : null;
       })
       .filter((item): item is { group: ProviderAccessGroup; provider: ProviderView } => Boolean(item));
-    const refreshKey = candidates.map(({ group, provider }) => `${group.id}:${provider.apiKeyEnv || provider.name}:${provider.baseUrl}`).join("|");
+    // The backend token covers provider identity, current catalog, headers,
+    // and credential revision without persisting sensitive header values in
+    // sessionStorage. Older payloads without the token simply skip this
+    // opportunistic background refresh; manual refresh remains available.
+    if (candidates.some(({ provider }) => !provider.modelCatalogFingerprint?.trim())) return;
+    const refreshKey = candidates.map(({ group, provider }) => JSON.stringify([
+      group.id,
+      provider.modelCatalogFingerprint!.trim(),
+    ])).join("|");
     if (!refreshKey || autoRefreshKeyRef.current === refreshKey) return;
+
+    // Session-level cooldown per provider set: reopening the panel does not
+    // refetch the same providers, while a changed set refreshes immediately.
+    const autoRefreshStorageKey = `settings-auto-refresh-at:${refreshKey}`;
+    const lastAutoRefresh = sessionStorage.getItem(autoRefreshStorageKey);
+    if (lastAutoRefresh && Date.now() - Number(lastAutoRefresh) < 30_000) return;
+
+    // Respect slow network hints; background model-list refresh can wait.
+    if (shouldSkipAutoRefresh()) return;
+
     autoRefreshKeyRef.current = refreshKey;
+    sessionStorage.setItem(autoRefreshStorageKey, String(Date.now()));
 
     void backgroundApply(async () => {
+      // Batch-fetch models for all candidates in one round-trip.
+      const providersToFetch = candidates.map((c) => c.provider).filter((p) => p.models && p.models.length > 0);
+      let batchResults: Record<string, string[]> = {};
+      try {
+        batchResults = await app.FetchAllProviderModels(providersToFetch) as Record<string, string[]>;
+      } catch {
+        // Batch failed entirely — fall back to per-provider cached calls below.
+      }
+      if (stale()) return;
+
+      const updates: ProviderModelCatalogUpdate[] = [];
       for (const { provider } of candidates) {
-        // Background auto-refresh only protects a user-curated model list.
-        // If the user hasn't specified any models, don't silently populate
-        // the provider with every model from the API.
+        if (stale()) return;
         if (!provider.models || provider.models.length === 0) continue;
         try {
-          const fetched = await app.FetchProviderModels(provider);
-          if (fetched.length === 0) continue;
+          const fetched = batchResults[provider.name]
+            ?? await cachedFetchProviderModels((p) => app.FetchProviderModels(p), provider);
+          if (stale()) return;
+          if (!fetched || fetched.length === 0) continue;
           const models = mergedFetchedProviderModels(provider.models, fetched, { preserveCurated: true });
           const currentDefault = providerDefaultModel(provider.default, models);
           const visionModels = provider.visionModels.filter((model) => models.includes(model));
           if (sameStringList(provider.models, models) && provider.default === currentDefault && sameStringList(provider.visionModels, visionModels)) continue;
-          await app.SaveProvider({ ...provider, models, default: currentDefault, visionModels });
+          const expectedFingerprint = provider.modelCatalogFingerprint?.trim() ?? "";
+          if (!expectedFingerprint) continue;
+          updates.push({ name: provider.name, expectedFingerprint, models, default: currentDefault, visionModels });
         } catch {
           // Background discovery is opportunistic; manual refresh shows errors.
         }
       }
+      if (updates.length > 0) {
+        try {
+          if (stale()) return;
+          // Compare and apply narrow catalog updates in one transaction.
+          await app.SaveProviderModelCatalogs(updates);
+        } catch {
+          // Background discovery is opportunistic; explicit edits show errors.
+        }
+      }
     });
+    return () => {
+      cancelled = true;
+      if (autoRefreshGenerationRef.current === generation) autoRefreshGenerationRef.current += 1;
+    };
   }, [backgroundApply, s.providers, subtab, t]);
 
   return (
@@ -4562,7 +4613,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     try {
       let fetched: string[];
       try {
-        fetched = await app.FetchProviderModels(p);
+        fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), p, true);
       } catch (e) {
         setGroupFetchResult(group.id, {
           kind: "warn",
@@ -4578,10 +4629,12 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
         return;
       }
       const draft = modelDraftForFetch(p, fetched);
-      setGroupModelDraft(group.id, draft);
-      setGroupFetchResult(group.id, {
-        kind: "ok",
-        text: t("settings.fetchModelsReadyForProvider", { provider: group.label, n: draft.candidates.length }),
+      startTransition(() => {
+        setGroupModelDraft(group.id, draft);
+        setGroupFetchResult(group.id, {
+          kind: "ok",
+          text: t("settings.fetchModelsReadyForProvider", { provider: group.label, n: draft.candidates.length }),
+        });
       });
     } finally {
       setFetchingProvider(null);
@@ -4603,8 +4656,9 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     try {
       await apply(async () => {
         await app.SaveProviderKey(apiKeyEnv, value);
+        invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
         try {
-          const fetched = await app.FetchProviderModels({ ...probe, apiKeyEnv });
+          const fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), { ...probe, apiKeyEnv });
           if (fetched.length > 0) {
             const draft = modelDraftForFetch({ ...probe, apiKeyEnv }, fetched);
             setGroupModelDraft(group.id, draft);
@@ -4634,12 +4688,28 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
     if (!apiKeyEnv) return;
     setGroupFetchResult(group.id, null);
     setGroupModelDraft(group.id, null);
-    await apply(() => app.SetProviderKey(apiKeyEnv, value));
+    await apply(async () => {
+      const warning = await app.SetProviderKey(apiKeyEnv, value);
+      invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
+      return warning;
+    });
   };
 
   const clearProviderKey = async (apiKeyEnv: string) => {
     if (!apiKeyEnv) return;
-    await apply(() => app.ClearProviderKey(apiKeyEnv));
+    await apply(async () => {
+      await app.ClearProviderKey(apiKeyEnv);
+      invalidateProviderCacheByAPIKeyEnv(apiKeyEnv);
+    });
+  };
+
+  const saveProvider = async (provider: ProviderView, key: string) => {
+    if (key) {
+      const warning = await app.SaveProviderWithKey(provider, key);
+      invalidateProviderCacheByAPIKeyEnv(provider.apiKeyEnv);
+      return warning;
+    }
+    await app.SaveProvider(provider);
   };
 
   const saveModelDraft = async (group: ProviderAccessGroup) => {
@@ -4708,7 +4778,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
               setAdding(null);
             }}
             onResetPreset={(id) => apply(() => app.ResetProviderPresetAccess(id)).then(() => setAdding(null))}
-            onAddCustom={(pv, key) => apply(() => key ? app.SaveProviderWithKey(pv, key) : app.SaveProvider(pv)).then(() => setAdding(null))}
+            onAddCustom={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then(() => setAdding(null))}
           />
         )}
         {adding === null && groups.map((group) => (
@@ -4724,7 +4794,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             kinds={s.providerKinds}
             onEdit={setEditing}
             onCancelEdit={() => setEditing(null)}
-            onSave={(pv, key) => apply(() => key ? app.SaveProviderWithKey(pv, key) : app.SaveProvider(pv)).then(() => {
+            onSave={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then(() => {
               setEditing(null);
               setGroupModelDraft(group.id, null);
             })}
@@ -4830,6 +4900,8 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
   switch (preset.id) {
     case "deepseek-responses":
       return t("settings.addProvider.preset.deepseekResponsesDesc");
+    case "deepseek-anthropic":
+      return t("settings.addProvider.preset.deepseekAnthropicDesc");
     case "longcat-openai":
       return t("settings.addProvider.preset.longcatOpenAIDesc");
     case "longcat-anthropic":
@@ -5342,9 +5414,11 @@ function ProviderModelDraftPicker({
   const selected = new Set(draft.selected);
   const vision = new Set(draft.visionModels);
   const q = debouncedQuery.trim().toLowerCase();
-  const visibleCandidates = q
-    ? draft.candidates.filter((model) => model.toLowerCase().includes(q))
-    : draft.candidates;
+  const visibleCandidates = useMemo(
+    () => (q ? draft.candidates.filter((model) => model.toLowerCase().includes(q)) : draft.candidates),
+    [draft.candidates, q],
+  );
+  const deferredCandidates = useDeferredValue(visibleCandidates);
   const disabled = busy || fetching;
 
   return (
@@ -5371,10 +5445,10 @@ function ProviderModelDraftPicker({
         onChange={(e) => setQuery(e.target.value)}
       />
       <div className="provider-model-draft__list" role="list" aria-label={t("settings.modelCandidates")}>
-        {visibleCandidates.length > 0 ? visibleCandidates.map((model) => {
+        {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
           const enabled = selected.has(model);
           return (
-            <div className="provider-model-draft__option" key={model}>
+            <div className="provider-model-draft__option" key={model} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -5579,6 +5653,7 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   const visibleCandidates = q
     ? candidates.filter((model) => model.toLowerCase().includes(q))
     : candidates;
+  const deferredCandidates = useDeferredValue(visibleCandidates);
   return (
     <div className="provider-model-draft provider-model-draft--inline">
       <div className="provider-model-draft__head">
@@ -5606,10 +5681,10 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
         />
       )}
       <div className="provider-model-draft__list" role="list" aria-label={t("settings.modelCandidates")}>
-        {visibleCandidates.length > 0 ? visibleCandidates.map((model) => {
+        {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
           const enabled = selected.has(model);
           return (
-            <div className="provider-model-draft__option" key={model}>
+            <div className="provider-model-draft__option" key={model} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -5753,8 +5828,11 @@ function ProviderEditor({
     try {
       const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
       if (!apiKeyEnv.trim()) setApiKeyEnv(effectiveApiKeyEnv);
-      if (keyDraft.trim()) await app.SaveProviderKey(effectiveApiKeyEnv, keyDraft.trim());
-      const fetched = await app.FetchProviderModels({
+      if (keyDraft.trim()) {
+        await app.SaveProviderKey(effectiveApiKeyEnv, keyDraft.trim());
+        invalidateProviderCacheByAPIKeyEnv(effectiveApiKeyEnv);
+      }
+      const fetched = await cachedFetchProviderModels((provider) => app.FetchProviderModels(provider), {
         name: name.trim() || t("settings.newProviderDraftName"),
         builtIn: initial?.builtIn ?? false,
         added: initial?.added ?? true,
@@ -5778,7 +5856,7 @@ function ProviderEditor({
         supportedEfforts: cleanedSupportedEfforts,
         defaultEffort: cleanDefaultEffort,
         modelOverrides: mergeProviderModelContextWindows(initial?.modelOverrides, parseProviderListInput(models), modelContextWindows),
-      });
+      }, true);
       if (fetched.length === 0) {
         setFetchFallback(t("settings.fetchModelsManualFallbackEmpty"));
         return;
@@ -6724,6 +6802,7 @@ function UpdatesSection({
     status.kind === "downloading" ||
     status.kind === "verifying" ||
     status.kind === "authorizing" ||
+    status.kind === "recovering" ||
     status.kind === "installing";
   const updateStatus =
     status.kind === "checking" ? t("updater.checking") :
@@ -6737,6 +6816,7 @@ function UpdatesSection({
     status.kind === "verifying" ? t("updater.verifying") :
     status.kind === "downloaded" ? t("updater.downloaded", { v: status.info.latest }) :
     status.kind === "authorizing" ? t("updater.authorizing") :
+    status.kind === "recovering" ? t("updater.recovering") :
     status.kind === "installing" ? (
       status.info?.requiresElevation || status.info?.installMode === "deb"
         ? t("updater.installingPackage")

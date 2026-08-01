@@ -417,3 +417,230 @@ func TestPreviewStripsDeliveryMarkerAndSyntheticTurns(t *testing.T) {
 		t.Fatal("readiness retry not detected as synthetic")
 	}
 }
+
+func TestDeliveryTaskNeedsEvidenceSkipsDiagnosticConversations(t *testing.T) {
+	// Diagnostic/troubleshooting conversations ask "what's wrong" or "why"
+	// without requesting code changes. They must not demand host-observable
+	// work — the agent can only give advice, not mutate files.
+	diagnostic := []string{
+		"what's wrong with my wifi",
+		"I don't want to install dependencies",
+		"please don't install any dependencies",
+		"why can't I install the plugin?",
+		"why can't I run WPS?",
+		"why can't I check my email in Outlook?",
+		"can you analyze why WPS won't open?",
+		"why did the plugin update fail?",
+		"can you explain why install keeps failing?",
+		"why does this make a difference?",
+		"why does the node selection matter?",
+		"why is `Python` popular?",
+		"what does `context.Context` mean?",
+		"why can't I open github.com/?",
+		"为什么wps导入zetero参考文献报错",
+		"为什么无法安装插件",
+		"为什么不能安装插件",
+		"为什么 WPS 不能运行",
+		"为什么无法检查 Outlook 邮件",
+		"分析一下为什么 WPS 不能运行",
+		"为什么安装插件失败",
+		"为什么更新配置后报错",
+		"帮我看看这是什么问题",
+		"为什么zotero连接不上，我不敢重新安装",
+		"诊断数据库连接失败的原因",
+		"这软件打不开了，怎么回事",
+	}
+	for _, input := range diagnostic {
+		if deliveryTaskNeedsEvidence(input) {
+			t.Errorf("diagnostic input %q incorrectly classified as needing evidence", input)
+		}
+	}
+
+	// Mutation-worded tasks still require evidence.
+	taskInputs := []string{
+		"fix the crash in a.go",
+		"帮我修复wps的崩溃问题",
+		"create a new login endpoint",
+		"添加一个单元测试",
+		"modify the existing config",
+		"patch the parser",
+		"replace the old endpoint",
+		"make the requested changes",
+		"调整现有配置",
+		"替换旧接口",
+		"thanks for fixing that, now update the tests",
+		"谢谢你，请继续修改配置",
+	}
+	for _, input := range taskInputs {
+		if !deliveryTaskNeedsEvidence(input) {
+			t.Errorf("mutation task %q incorrectly classified as NOT needing evidence", input)
+		}
+	}
+}
+
+func TestDeliveryTaskNeedsEvidenceKeepsReadOnlyTechnicalWork(t *testing.T) {
+	inputs := []string{
+		"review this pull request and report whether it is correct",
+		"run go test ./... and tell me why it fails",
+		"why does go test fail?",
+		"why does go build ./... fail?",
+		"why does npm run build fail?",
+		"why does git status fail?",
+		"why does `custom-lint --strict` fail?",
+		"why does ./scripts/verify.sh fail?",
+		"为什么 go build ./... 会失败",
+		"why can't I run main.go?",
+		"why does README.md render incorrectly?",
+		"reproduce the crash and identify the root cause",
+		"inspect main.go for security vulnerabilities",
+		"诊断当前项目的数据库连接失败原因",
+	}
+	for _, input := range inputs {
+		if !deliveryTaskNeedsEvidence(input) {
+			t.Errorf("read-only technical task %q did not require host-observable evidence", input)
+		}
+		if deliveryTaskNeedsMutation(input) {
+			t.Errorf("read-only technical task %q incorrectly required a mutation", input)
+		}
+	}
+}
+
+func TestDeliveryTaskNeedsMutationHandlesMixedIntent(t *testing.T) {
+	mutationInputs := []string{
+		"modify the existing config",
+		"patch the parser",
+		"make the requested changes",
+		"I don't want to install dependencies, but update the existing config",
+		"I can't install dependencies; please edit the existing config instead",
+		"I can't install dependencies and please update the config",
+		"do not install dependencies and please update the config",
+		"I can't install dependencies so update the config",
+		"I can't install dependencies please update the existing config",
+		"can you explain why it fails and fix it",
+		"我不想安装新依赖，请修改现有配置修复这个问题",
+		"我无法安装新依赖，但请修改现有配置",
+		"无法安装新依赖请修改配置",
+		"不要安装依赖请更新配置",
+		"无法安装新依赖所以修改配置",
+		"为什么这个方案失败，请修复它",
+		"调整现有配置",
+		"替换旧接口",
+	}
+	for _, input := range mutationInputs {
+		if !deliveryTaskNeedsMutation(input) {
+			t.Errorf("mixed-intent input %q did not require a mutation", input)
+		}
+	}
+
+	readOnlyInputs := []string{
+		"review only; do not fix anything",
+		"I don't want to install dependencies",
+		"please don't install any dependencies",
+		"why can't I install the plugin?",
+		"do not install and update dependencies",
+		"don't fix or update anything",
+		"只分析，不要修改代码",
+		"请不要安装或更新依赖",
+		"不想请团队修改代码",
+		"禁止申请修改配置",
+		"为什么无法安装插件",
+		"为什么不能安装插件",
+		"为什么zotero连接不上，我不敢重新安装",
+	}
+	for _, input := range readOnlyInputs {
+		if deliveryTaskNeedsMutation(input) {
+			t.Errorf("read-only input %q incorrectly required a mutation", input)
+		}
+	}
+}
+
+func TestDeliveryMixedIntentRequiresMutationEvidence(t *testing.T) {
+	inputs := []string{
+		"I can't install dependencies and please update the config",
+		"无法安装新依赖请修改配置",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Add(fakeReadFileTool{})
+			reg.Add(fakeWriterTool{})
+			answer := []provider.Chunk{
+				{Type: provider.ChunkText, Text: "Done; the config is updated."},
+				{Type: provider.ChunkDone},
+			}
+			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
+			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+			err := a.Run(context.Background(), input)
+			var readinessErr *FinalReadinessError
+			if !errors.As(err, &readinessErr) {
+				t.Fatalf("text-only completion escaped the mutation gate: %v", err)
+			}
+			if !strings.Contains(readinessErr.Reason, "state change") {
+				t.Fatalf("readiness reason = %q, want missing state change", readinessErr.Reason)
+			}
+		})
+	}
+}
+
+func TestDeliveryReadOnlyTechnicalTaskRequiresEvidence(t *testing.T) {
+	inputs := []string{
+		"review this pull request and report whether it is correct",
+		"why does go build ./... fail?",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Add(fakeReadFileTool{})
+			reg.Add(fakeWriterTool{})
+			answer := []provider.Chunk{
+				{Type: provider.ChunkText, Text: "Reviewed; everything is correct."},
+				{Type: provider.ChunkDone},
+			}
+			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
+			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+			err := a.Run(context.Background(), input)
+			var readinessErr *FinalReadinessError
+			if !errors.As(err, &readinessErr) {
+				t.Fatalf("text-only technical work escaped the evidence gate: %v", err)
+			}
+			if !strings.Contains(readinessErr.Reason, "host-observable work") {
+				t.Fatalf("readiness reason = %q, want missing host-observable work", readinessErr.Reason)
+			}
+			if strings.Contains(readinessErr.Reason, "state change") {
+				t.Fatalf("read-only work incorrectly required a mutation: %q", readinessErr.Reason)
+			}
+		})
+	}
+}
+
+func TestDeliveryDiagnosticConversationCompletes(t *testing.T) {
+	// End-to-end: a diagnostic troubleshooting conversation with no mutation
+	// keywords must complete without a FinalReadinessError — the agent can
+	// give advice but can't write files on the user's machine.
+	inputs := []string{
+		"为什么wps导入zetero参考文献报错，请你帮我诊断一下",
+		"分析一下为什么 WPS 不能运行",
+		"why can't I check my email in Outlook?",
+		"what does `context.Context` mean?",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Add(fakeReadFileTool{})
+			reg.Add(fakeWriterTool{})
+			// The model gives advice text (no tool calls) — a diagnostic response.
+			advice := []provider.Chunk{
+				{Type: provider.ChunkText, Text: "请尝试以下步骤：1. 检查端口监听 2. 重新注册插件"},
+				{Type: provider.ChunkDone},
+			}
+			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{advice}}
+			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+			if err := a.Run(context.Background(), input); err != nil {
+				t.Fatalf("diagnostic conversation deadlocked: %v", err)
+			}
+			if prov.call != 1 {
+				t.Fatalf("diagnostic conversation had %d provider calls, want 1 (no readiness retries)", prov.call)
+			}
+		})
+	}
+}

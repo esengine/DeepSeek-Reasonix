@@ -1,10 +1,12 @@
 package repair
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -51,6 +53,121 @@ func prepareTestAppBundleHandoff(t *testing.T) (*UpdateTransaction, string) {
 		t.Fatal(err)
 	}
 	return tx, staging
+}
+
+func TestReconcilePendingUpdateCancelsAbandonedSameVersionAppHandoff(t *testing.T) {
+	tx, staging := prepareTestAppBundleHandoff(t)
+
+	result, err := ReconcilePendingUpdate(tx.ToVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Pending || !result.Cleared || result.RolledBack || result.AwaitingHealth {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if _, err := os.Stat(PendingUpdatePath()); !os.IsNotExist(err) {
+		t.Fatalf("pending transaction survived reconcile: %v", err)
+	}
+	if _, err := os.Stat(staging); !os.IsNotExist(err) {
+		t.Fatalf("verified handoff staging survived reconcile: %v", err)
+	}
+	if err := VerifyAppBundleUpdateHandoffOriginal(tx); err != nil {
+		t.Fatalf("original bundle changed during reconcile: %v", err)
+	}
+}
+
+func TestReconcilePendingUpdateLeavesProbationaryTarget(t *testing.T) {
+	tx, staging := prepareTestAppBundleHandoff(t)
+	if err := os.Rename(tx.TargetPath, tx.BackupPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tx.HandoffAppPath, tx.TargetPath); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ReconcilePendingUpdate(tx.ToVersion)
+	if !errors.Is(err, ErrPendingUpdateAwaitingHealth) {
+		t.Fatalf("reconcile error = %v", err)
+	}
+	if !result.Pending || !result.AwaitingHealth || result.Cleared || result.RolledBack {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if _, err := ReadPendingUpdate(); err != nil {
+		t.Fatalf("probationary transaction was removed: %v", err)
+	}
+	if _, err := os.Stat(staging); err != nil {
+		t.Fatalf("probationary staging was removed: %v", err)
+	}
+}
+
+func TestReconcilePendingUpdateRollsBackPublishedAppHandoff(t *testing.T) {
+	tx, _ := prepareTestAppBundleHandoff(t)
+	if err := os.Rename(tx.TargetPath, tx.BackupPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(tx.HandoffAppPath, tx.TargetPath); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ReconcilePendingUpdate(tx.FromVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Pending || !result.RolledBack || result.Cleared || result.AwaitingHealth {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if err := VerifyAppBundleUpdateHandoffOriginal(tx); err != nil {
+		t.Fatalf("previous app bundle was not restored: %v", err)
+	}
+	if _, err := os.Stat(PendingUpdatePath()); !os.IsNotExist(err) {
+		t.Fatalf("pending transaction survived rollback: %v", err)
+	}
+}
+
+func TestReconcilePendingUpdateRejectsTransactionRewrittenBeforeCancelLock(t *testing.T) {
+	tx, _ := prepareTestAppBundleHandoff(t)
+	attempted := make(chan struct{})
+	allow := make(chan struct{})
+	originalAcquire := acquirePendingUpdateLock
+	var once sync.Once
+	acquirePendingUpdateLock = func() (func(), error) {
+		blocked := false
+		once.Do(func() {
+			blocked = true
+			close(attempted)
+		})
+		if blocked {
+			<-allow
+		}
+		return originalAcquire()
+	}
+	t.Cleanup(func() { acquirePendingUpdateLock = originalAcquire })
+
+	type outcome struct {
+		result PendingUpdateReconcileResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := ReconcilePendingUpdate(tx.FromVersion)
+		done <- outcome{result: result, err: err}
+	}()
+	<-attempted
+	changed := *tx
+	changed.ToVersion = "v3"
+	if err := overwritePendingUpdateForTest(&changed); err != nil {
+		t.Fatal(err)
+	}
+	close(allow)
+
+	got := <-done
+	if got.err == nil || !strings.Contains(got.err.Error(), "changed") {
+		t.Fatalf("reconcile outcome = %+v, %v", got.result, got.err)
+	}
+	current, err := ReadPendingUpdate()
+	if err != nil || current.FromVersion != changed.FromVersion {
+		t.Fatalf("rewritten pending update = %+v, %v", current, err)
+	}
 }
 
 func TestClaimPendingAppBundleUpdateHandoffReturnsRecordedPaths(t *testing.T) {

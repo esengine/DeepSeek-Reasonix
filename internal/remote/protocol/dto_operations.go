@@ -259,7 +259,10 @@ type SessionContextResult struct {
 	Context ContextView `json:"context"`
 }
 
-type SessionBalanceParams struct{ RuntimeQuery }
+type SessionBalanceParams struct {
+	RuntimeQuery
+	Currency string `json:"currency,omitempty"`
+}
 
 type SessionBalanceResult struct {
 	Available bool   `json:"available"`

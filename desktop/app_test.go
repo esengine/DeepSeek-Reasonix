@@ -5008,6 +5008,32 @@ func TestConnectKeyRestoresDeepSeekProviderAccess(t *testing.T) {
 	}
 }
 
+func TestBalanceForTabUsesDesktopPricingCurrency(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	cfg := config.Default()
+	cfg.Desktop.Currency = "USD"
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save USD desktop currency: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"70.16"},{"currency":"USD","total_balance":"9.82"}]}`)
+	}))
+	defer srv.Close()
+
+	app := NewApp()
+	app.ctx = context.Background()
+	ctrl := control.New(control.Options{BalanceURL: srv.URL, BalanceClient: srv.Client()})
+	t.Cleanup(ctrl.Close)
+	app.setTestCtrl(ctrl, "deepseek/deepseek-v4-flash")
+
+	got := app.BalanceForTab("test")
+	if !got.Available || got.Display != "$9.82" || got.Err != "" {
+		t.Fatalf("USD desktop balance = %+v, want available $9.82", got)
+	}
+}
+
 func TestConnectKeyRebuildLeaseHeldKeepsCurrentController(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv(onboardingKeyEnv, "")

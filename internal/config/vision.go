@@ -71,12 +71,12 @@ func EffectiveVision(e *ProviderEntry) bool {
 	if enabled, explicit := explicitModelVision(e); explicit {
 		return enabled
 	}
-	// DeepSeek's official chat API accepts string message content only. Treat
+	// DeepSeek's official APIs currently accept text message content only. Treat
 	// current official models as text-only when only the legacy provider-wide
 	// vision flag is set, so stale configs cannot make requests 400. A concrete
 	// model can still opt in through vision_models or a model override when
 	// DeepSeek documents a future multimodal request shape.
-	if isOpenAIProviderKind(e) && openai.IsDeepSeek(e.BaseURL) {
+	if openai.IsDeepSeek(e.BaseURL) {
 		return false
 	}
 	if e.Vision {

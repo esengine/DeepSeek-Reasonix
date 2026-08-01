@@ -741,6 +741,29 @@ func TestRemoveCredentialMarksClearedAndSetRemovesMarker(t *testing.T) {
 	}
 }
 
+func TestCredentialStoreRevisionChangesForSameLengthReplacement(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("AppData", filepath.Join(home, "AppData"))
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	if got := CredentialStoreRevision(); got != "missing" {
+		t.Fatalf("initial credential revision = %q, want missing", got)
+	}
+	if _, err := SetCredential("REVISION_KEY", "old-key"); err != nil {
+		t.Fatalf("SetCredential(old): %v", err)
+	}
+	oldRevision := CredentialStoreRevision()
+	if _, err := SetCredential("REVISION_KEY", "new-key"); err != nil {
+		t.Fatalf("SetCredential(new): %v", err)
+	}
+	newRevision := CredentialStoreRevision()
+	if oldRevision == newRevision {
+		t.Fatalf("same-length replacement kept credential revision %q", oldRevision)
+	}
+}
+
 func TestStoreCredentialLinesRejectsUnsafeFileLines(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
