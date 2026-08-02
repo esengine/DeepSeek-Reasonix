@@ -32,7 +32,7 @@ hooks:
 
 cross:
 	@mkdir -p dist
-	@for p in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do \
+	@for p in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 android/arm64 windows/amd64 windows/arm64; do \
 		os=$${p%/*}; arch=$${p#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 		echo "build $$os/$$arch"; \
 		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -ldflags "$(LDFLAGS)" -o dist/reasonix-$$os-$$arch$$ext ./cmd/reasonix; \

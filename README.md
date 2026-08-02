@@ -55,7 +55,7 @@
   summary, stale tool output is snipped/pruned before summary compaction, and the
   built-in tool schema contract is documented for regression review.
 - **Zero-friction distribution.** `CGO_ENABLED=0` single binary; cross-compile
-  to six targets with one command. The only dependency is a TOML parser.
+  to seven targets with one command. The only dependency is a TOML parser.
 
 ## Install
 
@@ -72,8 +72,22 @@ npm i -g reasonix                  # any OS; pulls the prebuilt native binary
 brew install esengine/reasonix/reasonix   # macOS
 ```
 
-Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
-every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
+On Android, run it natively in [Termux](https://termux.com/) (Node.js 18+ via
+`pkg install nodejs`):
+
+```sh
+pkg install nodejs
+npm i -g reasonix
+reasonix --version
+```
+
+Android builds are PIE executables (`GOOS=android`), which the Android kernel
+requires; the npm package ships a matching `@reasonix/cli-android-arm64`
+prebuilt binary for ARM64 devices.
+
+Prebuilt archives (`darwin|linux|windows|android × amd64|arm64`) and
+`SHA256SUMS` are on every
+[GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 
 ### Path B: Desktop app
 
@@ -105,7 +119,7 @@ approvals, model selection, and workspace sessions.
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
 cd DeepSeek-Reasonix
 make build      # -> bin/reasonix(.exe)
-make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
+make cross      # -> dist/ (darwin|linux|windows|android × amd64|arm64)
 ```
 
 ## Quick start
