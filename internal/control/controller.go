@@ -117,7 +117,7 @@ type Controller struct {
 	reasoningLanguage string
 	// disableColdResumePrune skips stale-tool-result elision on cold resume.
 	// Zero value keeps the prune on (the cheaper default).
-	disableColdResumePrune            bool
+	disableColdResumePrune bool
 	// testCacheColdAfter overrides cacheColdAfter() in tests. Zero uses the
 	// vendor-aware resolution from config.
 	testCacheColdAfter                time.Duration

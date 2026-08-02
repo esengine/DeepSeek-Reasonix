@@ -28,9 +28,9 @@ var modelContextPatterns = []struct {
 	// bare qwen fallback.
 	{regexp.MustCompile(`^qwen3-coder-plus`), 1_000_000},
 	{regexp.MustCompile(`^qwen3-coder-flash`), 1_000_000},
-	{regexp.MustCompile(`^qwen3\.\d`), 1_000_000}, // qwen3.7-plus/max, qwen3.6-*, qwen3.5-*
-	{regexp.MustCompile(`^qwen-plus`), 1_000_000},   // main + dated snapshots
-	{regexp.MustCompile(`^qwen-flash`), 1_000_000},  // main + dated snapshots
+	{regexp.MustCompile(`^qwen3\.\d`), 1_000_000},  // qwen3.7-plus/max, qwen3.6-*, qwen3.5-*
+	{regexp.MustCompile(`^qwen-plus`), 1_000_000},  // main + dated snapshots
+	{regexp.MustCompile(`^qwen-flash`), 1_000_000}, // main + dated snapshots
 	{regexp.MustCompile(`^coder-model$`), 1_000_000},
 	// Qwen — 256K tier (qwen3-max and snapshots)
 	{regexp.MustCompile(`^qwen3-max`), 262_144},
