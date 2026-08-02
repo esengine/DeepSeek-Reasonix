@@ -1,9 +1,16 @@
 package cli
 
 import (
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"reasonix/internal/agent"
+	"reasonix/internal/control"
+	"reasonix/internal/event"
+	"reasonix/internal/planmode"
+	"reasonix/internal/provider"
 )
 
 // TestUpDownRecallsHistoryWhileRunning proves ↑/↓ recall the submitted-input
@@ -67,5 +74,49 @@ func TestUpDownRecallsHistoryWhileIdle(t *testing.T) {
 	m = m0.(chatTUI)
 	if got := m.input.Value(); got != "first prompt" {
 		t.Fatalf("↑ while idle should recall history, got %q", got)
+	}
+}
+
+// TestSubmittedInputsFromHistory proves a resumed session seeds the ↑/↓
+// recall list from the user's own prompts: steer and host-reflection messages
+// are skipped, compose prefixes are stripped, consecutive duplicates collapse.
+func TestSubmittedInputsFromHistory(t *testing.T) {
+	history := []provider.Message{
+		{Role: provider.RoleUser, Content: "first prompt"},
+		{Role: provider.RoleAssistant, Content: "reply"},
+		{Role: provider.RoleUser, Content: agent.MidTurnSteerPrefix + "\nadjust the plan"},
+		{Role: provider.RoleUser, Content: agent.HostReflectionPrefix + "\nsome guidance"},
+		{Role: provider.RoleUser, Content: planmode.Marker + "\n\nsecond prompt"},
+		{Role: provider.RoleUser, Content: "second prompt"},
+	}
+	got := submittedInputsFromHistory(history)
+	want := []string{"first prompt", "second prompt"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("submittedInputsFromHistory = %v, want %v", got, want)
+	}
+}
+
+// TestResumedSessionUpDownRecallsHistory proves a chatTUI built over a
+// resumed controller's history lets ↑ recall the previous session's prompt.
+func TestResumedSessionUpDownRecallsHistory(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "s.jsonl")
+	saveTestSession(t, path, "first prompt")
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctrl.Resume(loaded, path)
+
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	if len(m.submittedInputs) != 1 || m.submittedInputs[0] != "first prompt" {
+		t.Fatalf("resumed history = %v, want [first prompt]", m.submittedInputs)
+	}
+	m0, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	m = m0.(chatTUI)
+	if got := m.input.Value(); got != "first prompt" {
+		t.Fatalf("↑ after resume should recall the past prompt, got %q", got)
 	}
 }

@@ -611,15 +611,18 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 	history := ctrl.History()
 	nextPasteID, usedPasteIDs := pasteIDStateForHistory(history)
 	return chatTUI{
-		ctrl:                 ctrl,
-		label:                ctrl.Label(),
-		modelRef:             ctrl.ModelRef(),
-		missing:              missing,
-		nativeScrollback:     nativeScrollback,
-		mouseCaptureOff:      mouseCaptureOffByDefault(),
-		input:                ti,
-		spinner:              sp,
-		titleCache:           &sessionTitleCache{},
+		ctrl:             ctrl,
+		label:            ctrl.Label(),
+		modelRef:         ctrl.ModelRef(),
+		missing:          missing,
+		nativeScrollback: nativeScrollback,
+		mouseCaptureOff:  mouseCaptureOffByDefault(),
+		input:            ti,
+		spinner:          sp,
+		titleCache:       &sessionTitleCache{},
+		// Seed ↑/↓ history with the resumed session's own prompts, so
+		// `-c`/`-r` land with recall already available.
+		submittedInputs:      submittedInputsFromHistory(history),
 		submittedInputCursor: -1,
 		queueEditCursor:      -1,
 		nextPasteID:          nextPasteID,
@@ -723,6 +726,34 @@ func (m *chatTUI) rememberSubmittedInput(input string) {
 	}
 	m.submittedInputCursor = -1
 	m.submittedInputDraft = ""
+}
+
+// submittedInputsFromHistory extracts the user's own prompts from a session's
+// message history to seed the ↑/↓ recall list, so a resumed session
+// (`-c`/`-r`) lands with history already available. Steer and host-reflection
+// messages are internal guidance, not user input; per-turn compose prefixes
+// (plan markers, language blocks) are stripped.
+func submittedInputsFromHistory(history []provider.Message) []string {
+	var out []string
+	for _, msg := range history {
+		if msg.Role != provider.RoleUser {
+			continue
+		}
+		if _, isSteer := agent.SteerText(msg.Content); isSteer {
+			continue
+		}
+		if _, isReflection := agent.HostReflectionText(msg.Content); isReflection {
+			continue
+		}
+		content := strings.TrimSpace(control.StripComposePrefixes(msg.Content))
+		if content == "" {
+			continue
+		}
+		if len(out) == 0 || out[len(out)-1] != content {
+			out = append(out, content)
+		}
+	}
+	return out
 }
 
 func (m *chatTUI) recallSubmittedInput(delta int) bool {
