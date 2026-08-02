@@ -280,7 +280,9 @@ type SessionLoadParams struct {
 }
 
 // SessionLoadResult is the empty ack; the conversation has already arrived as a
-// burst of session/update notifications by the time it is sent.
+// burst of session/update notifications by the time it is sent. Replayed tool
+// results use a tighter display clip than live turns so hosts that full-rerender
+// on every update are less likely to freeze on long transcripts.
 type SessionLoadResult struct {
 	Models        *SessionModelState    `json:"models,omitempty"`
 	Modes         *SessionModeState     `json:"modes,omitempty"`

@@ -675,3 +675,100 @@ func TestClip(t *testing.T) {
 		t.Errorf("clip note missing: %q", got[len(got)-40:])
 	}
 }
+
+func TestUpdateSinkCoalescesConsecutiveTextChunks(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+
+	sink.Emit(event.Event{Kind: event.Text, Text: "Hel"})
+	sink.Emit(event.Event{Kind: event.Text, Text: "lo"})
+	sink.Emit(event.Event{Kind: event.Text, Text: "!"})
+	if got := len(fn.notifs); got != 0 {
+		t.Fatalf("buffered text flushed early: %d notifications", got)
+	}
+
+	sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "c1", Name: "bash", Args: `{"command":"git status"}`,
+	}})
+	if got := len(fn.notifs); got != 2 {
+		t.Fatalf("after tool dispatch got %d notifications, want 1 message + 1 tool_call", got)
+	}
+	u := fn.updateMap(t, 0)
+	if u["sessionUpdate"] != "agent_message_chunk" {
+		t.Fatalf("update 0 = %v, want agent_message_chunk", u["sessionUpdate"])
+	}
+	if content, _ := u["content"].(map[string]any); content["text"] != "Hello!" {
+		t.Fatalf("coalesced text = %v, want Hello!", content["text"])
+	}
+}
+
+func TestUpdateSinkFlushesCoalesceOnKindChangeAndTurnEnd(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+
+	sink.Emit(event.Event{Kind: event.Reasoning, Text: "plan"})
+	sink.Emit(event.Event{Kind: event.Text, Text: "do it"})
+	if got := len(fn.notifs); got != 1 {
+		t.Fatalf("kind change should flush thought first: got %d", got)
+	}
+	if u := fn.updateMap(t, 0); u["sessionUpdate"] != "agent_thought_chunk" {
+		t.Fatalf("update 0 = %v, want agent_thought_chunk", u["sessionUpdate"])
+	}
+
+	sink.clearTurnContext()
+	if got := len(fn.notifs); got != 2 {
+		t.Fatalf("turn end should flush message: got %d", got)
+	}
+	u := fn.updateMap(t, 1)
+	if u["sessionUpdate"] != "agent_message_chunk" {
+		t.Fatalf("update 1 = %v, want agent_message_chunk", u["sessionUpdate"])
+	}
+	if content, _ := u["content"].(map[string]any); content["text"] != "do it" {
+		t.Fatalf("flushed text = %v", content)
+	}
+}
+
+func TestUpdateSinkCoalesceFlushesAtByteBudget(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+
+	chunk := strings.Repeat("a", chunkCoalesceMaxBytes/2)
+	sink.Emit(event.Event{Kind: event.Text, Text: chunk})
+	if got := len(fn.notifs); got != 0 {
+		t.Fatalf("under-budget chunk flushed early: %d", got)
+	}
+	sink.Emit(event.Event{Kind: event.Text, Text: chunk})
+	if got := len(fn.notifs); got != 1 {
+		t.Fatalf("at-budget coalesce should flush once, got %d", got)
+	}
+	u := fn.updateMap(t, 0)
+	if content, _ := u["content"].(map[string]any); content["text"] != chunk+chunk {
+		t.Fatalf("budget flush text len = %d, want %d", len(content["text"].(string)), len(chunk)*2)
+	}
+}
+
+func TestUpdateSinkReplayClipsToolResultsTightly(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	long := strings.Repeat("d", maxReplayResultChars+25)
+	sink.replay([]provider.Message{{
+		Role:       provider.RoleTool,
+		ToolCallID: "c1",
+		Content:    long,
+	}})
+
+	u := fn.updateMap(t, 0)
+	arr, _ := u["content"].([]any)
+	wrap, _ := arr[0].(map[string]any)
+	inner, _ := wrap["content"].(map[string]any)
+	got, _ := inner["text"].(string)
+	if !strings.HasPrefix(got, strings.Repeat("d", maxReplayResultChars)) {
+		t.Fatalf("replay clip did not keep the head")
+	}
+	if !strings.Contains(got, "25 more chars truncated") {
+		t.Fatalf("replay clip note missing: %q", got[len(got)-50:])
+	}
+	if strings.Contains(got, strings.Repeat("d", maxResultChars)) {
+		t.Fatal("replay used the live clip budget instead of the tighter replay budget")
+	}
+}

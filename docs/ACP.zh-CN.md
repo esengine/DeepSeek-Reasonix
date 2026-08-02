@@ -121,6 +121,11 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 - 当前 mode 和配置项更新；
 - 针对受权限控制工具及用户问题的 `session/request_permission` 请求。
 
+连续的 `agent_message_chunk` / `agent_thought_chunk` 会在小字节预算内合并发送，减轻
+在每条 `session/update` 上都全量重绘 UI 的 Host（如 VS Code webview）在 token 流下卡死
+的风险。`session/load` 回放工具结果时也会使用更紧的展示裁剪；若 Host 已有 transcript
+视图，优先使用 `session/resume`。
+
 Host 应让 `session/prompt` 请求保持打开，直到 Reasonix 返回停止原因；期间仍需同时处理
 双向 request 和 notification。
 
