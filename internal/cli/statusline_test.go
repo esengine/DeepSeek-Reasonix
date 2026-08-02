@@ -135,14 +135,14 @@ func TestIdleStatuslineIsCompact(t *testing.T) {
 		}
 	}
 	if strings.Contains(plain, "[auto]") {
-		t.Fatalf("idle status line should use pill label, not bracketed tag:\n%s", plain)
+		t.Fatalf("idle status line should use the flat mode label, not a bracketed tag:\n%s", plain)
 	}
-	if !strings.Contains(content, "\x1b[48;2;245;158;11m") {
-		t.Fatalf("Auto status line should use amber pill background, got:\n%q", content)
+	if !strings.Contains(content, "\x1b[1;38;2;201;179;131m● Auto") {
+		t.Fatalf("Auto status line should use flat amber mode text, got:\n%q", content)
 	}
 }
 
-func TestYoloStatuslineUsesDangerPill(t *testing.T) {
+func TestYoloStatuslineUsesDangerModeText(t *testing.T) {
 	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	activeColorProfile = colorprofile.TrueColor
 	i18n.DetectLanguage("en")
@@ -153,14 +153,14 @@ func TestYoloStatuslineUsesDangerPill(t *testing.T) {
 		t.Fatalf("YOLO status line missing warning text:\n%s", plain)
 	}
 	if strings.Contains(plain, "[YOLO]") {
-		t.Fatalf("YOLO status line should use a pill label, not bracketed tag:\n%s", plain)
+		t.Fatalf("YOLO status line should use the flat mode label, not a bracketed tag:\n%s", plain)
 	}
-	if !strings.Contains(content, "\x1b[48;2;229;72;77m") {
-		t.Fatalf("YOLO status line should use danger pill background, got:\n%q", content)
+	if !strings.Contains(content, "\x1b[1;38;2;217;128;122m● YOLO") {
+		t.Fatalf("YOLO status line should use flat danger mode text, got:\n%q", content)
 	}
 }
 
-func TestPlanStatuslineUsesBluePill(t *testing.T) {
+func TestPlanStatuslineUsesGraphiteAccentModeText(t *testing.T) {
 	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	activeColorProfile = colorprofile.TrueColor
 	i18n.DetectLanguage("en")
@@ -170,8 +170,8 @@ func TestPlanStatuslineUsesBluePill(t *testing.T) {
 	if !strings.Contains(plain, "Plan") || !strings.Contains(plain, "ready") || !strings.Contains(plain, "Shift+Tab ask/auto/plan · Ctrl+Y YOLO") {
 		t.Fatalf("plan status line missing mode status:\n%s", plain)
 	}
-	if !strings.Contains(content, "\x1b[48;2;37;99;235m") {
-		t.Fatalf("Plan status line should use blue pill background, got:\n%q", content)
+	if !strings.Contains(content, "\x1b[1;38;2;154;163;178m● Plan") {
+		t.Fatalf("Plan status line should use flat graphite accent mode text, got:\n%q", content)
 	}
 }
 
@@ -271,8 +271,8 @@ func TestEffortTagExplicitValueUsesThemeInfo(t *testing.T) {
 	for _, tt := range []struct {
 		mode, infoSGR string
 	}{
-		{mode: "dark", infoSGR: "\033[1;38;5;80m"},
-		{mode: "light", infoSGR: "\033[1;38;5;25m"},
+		{mode: "dark", infoSGR: "\033[1;38;5;109m"},
+		{mode: "light", infoSGR: "\033[1;38;5;30m"},
 	} {
 		t.Run(tt.mode, func(t *testing.T) {
 			configureCLITheme(tt.mode)

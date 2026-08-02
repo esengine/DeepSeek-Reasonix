@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/alecthomas/chroma/v2"
+	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -220,7 +222,8 @@ func (r *mdRenderer) renderBlock(buf *strings.Builder, node ast.Node, src []byte
 			w = 8
 		}
 		buf.WriteString(strings.Repeat(" ", indent))
-		buf.WriteString(dim(strings.Repeat("─", w)))
+		// Full-width rule in the quiet border colour — a separator, not content.
+		buf.WriteString(themeFg(activeCLITheme.border, strings.Repeat("─", w)))
 		buf.WriteString("\n\n")
 	default:
 		// Unknown block: drop into children rather than dropping content.
@@ -230,12 +233,18 @@ func (r *mdRenderer) renderBlock(buf *strings.Builder, node ast.Node, src []byte
 
 func (r *mdRenderer) renderHeading(buf *strings.Builder, n *ast.Heading, src []byte, indent int) {
 	inline := r.collectInline(n, src)
+	// h1/h2 wear bold + accent; h3 and below drop the colour and keep bold
+	// default-foreground, so a "###" in a long response doesn't pile on
+	// visual weight.
+	head := bold(accent(inline))
+	if n.Level > 2 {
+		head = bold(inline)
+	}
 	buf.WriteString(strings.Repeat(" ", indent))
-	buf.WriteString(bold(accent(inline)))
+	buf.WriteString(head)
 	buf.WriteString("\n")
-	// Level-1 headings get an accent underline; deeper levels rely on
-	// bold+colour alone so the hierarchy reads at a glance without piling
-	// on visual weight on every "###" in a long response.
+	// Level-1 headings get an accent underline; deeper levels rely on the
+	// text treatment alone so the hierarchy reads at a glance.
 	if n.Level == 1 {
 		buf.WriteString(strings.Repeat(" ", indent))
 		buf.WriteString(accent(strings.Repeat("─", visibleWidth(inline))))
@@ -310,15 +319,62 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 }
 
 func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, indent int) {
-	prefix := strings.Repeat(" ", indent) + dim("│ ")
+	// The gutter rail uses the theme border colour — quieter than the old dim.
+	prefix := strings.Repeat(" ", indent) + themeFg(activeCLITheme.border, "│ ")
+	lines := make([]string, 0, n.Lines().Len())
 	for i := 0; i < n.Lines().Len(); i++ {
 		l := n.Lines().At(i)
-		line := strings.TrimRight(string(l.Value(src)), "\n")
+		lines = append(lines, strings.TrimRight(string(l.Value(src)), "\n"))
+	}
+	body := highlightFencedCode(n, src, lines)
+	for i, line := range lines {
 		buf.WriteString(prefix)
-		buf.WriteString(accent(line))
+		if body != nil {
+			buf.WriteString(body[i])
+		} else {
+			buf.WriteString(accent(line))
+		}
 		buf.WriteString("\n")
 	}
 	buf.WriteString("\n")
+}
+
+// highlightFencedCode runs a fenced block through chroma when the terminal
+// shows colour and a lexer can be found — the fence info string first
+// (lexers.Match), then content analysis (lexers.Analyse). It returns nil when
+// the block should keep the plain accent path. The output keeps exactly one
+// row per source line, so width handling and the gutter layout are untouched:
+// highlighting only adds colour.
+func highlightFencedCode(n ast.Node, src []byte, lines []string) []string {
+	if !colorOn() || len(lines) == 0 {
+		return nil
+	}
+	var lexer chroma.Lexer
+	if fenced, ok := n.(*ast.FencedCodeBlock); ok {
+		if lang := string(fenced.Language(src)); lang != "" {
+			lexer = lexers.Match(lang)
+		}
+	}
+	code := strings.Join(lines, "\n")
+	if lexer == nil {
+		lexer = lexers.Analyse(code)
+	}
+	if lexer == nil {
+		return nil
+	}
+	it, err := lexer.Tokenise(nil, code)
+	if err != nil {
+		return nil
+	}
+	var b strings.Builder
+	if chromaFmt.Format(&b, chromaStyleForTheme(), it) != nil {
+		return nil
+	}
+	highlighted := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")
+	if len(highlighted) != len(lines) {
+		return nil
+	}
+	return highlighted
 }
 
 func (r *mdRenderer) renderBlockquote(buf *strings.Builder, n *ast.Blockquote, src []byte, indent int) {

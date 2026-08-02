@@ -83,16 +83,16 @@ const workbenchAutoLightBlock = blockAfter(workbenchSource, ":root:not([data-the
 ok(workbenchRefreshIndex >= 0, "styles include the native workbench theme refresh section");
 ok(workbenchAutoLightMediaIndex >= 0, "workbench refresh has an auto-mode light media override");
 ok(
-  workbenchLightBlock.includes("--bg: #e9edf3;") && workbenchAutoLightBlock.includes("--bg: #e9edf3;"),
+  workbenchLightBlock.includes("--bg: #eceff5;") && workbenchAutoLightBlock.includes("--bg: #eceff5;"),
   "auto light mode keeps the workbench light background after late root overrides",
 );
 ok(
-  workbenchLightBlock.includes("--fg: #121722;") && workbenchAutoLightBlock.includes("--fg: #121722;"),
+  workbenchLightBlock.includes("--fg: #141a26;") && workbenchAutoLightBlock.includes("--fg: #141a26;"),
   "auto light mode keeps the workbench light foreground after late root overrides",
 );
 ok(
-  workbenchLightBlock.includes("--workspace-files-bg: #f1f4f8;") &&
-    workbenchAutoLightBlock.includes("--workspace-files-bg: #f1f4f8;"),
+  workbenchLightBlock.includes("--workspace-files-bg: #eef2f7;") &&
+    workbenchAutoLightBlock.includes("--workspace-files-bg: #eef2f7;"),
   "auto light mode keeps workbench panel surfaces aligned with forced light mode",
 );
 

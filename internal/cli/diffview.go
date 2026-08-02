@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
@@ -24,18 +25,22 @@ const (
 	// diffFoldLimit is the max lines to show in a diff when folding is enabled
 	// (/diff-fold toggle). 0 means show all lines.
 	diffFoldLimit = 40
-
-	bgDiffAdd = "\033[48;5;22m"
-	bgDiffDel = "\033[48;5;52m"
-	fgDiffAdd = "\033[1;38;5;46m"
-	fgDiffDel = "\033[1;38;5;203m"
 )
 
 var (
-	diffChromaStyle = styles.Get("github-dark")
-	diffChromaFmt   = formatters.Get("terminal256")
-	hunkRE          = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
+	chromaFmt = formatters.Get("terminal256")
+	hunkRE    = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 )
+
+// chromaStyleForTheme picks the chroma style matching the active theme's mode.
+// Dark mode uses onedark — a low-saturation blue-grey ramp that stays inside the
+// monochrome graphite family instead of the punchy github-dark palette.
+func chromaStyleForTheme() *chroma.Style {
+	if activeCLITheme.name == "light" {
+		return styles.Get("github")
+	}
+	return styles.Get("onedark")
+}
 
 // diffStat renders a change's "+A -B" tally, green/red, omitting a zero side.
 func diffStat(d event.FileDiff) string {
@@ -257,7 +262,7 @@ func highlightCode(path, code string) string {
 		return code
 	}
 	var b strings.Builder
-	if diffChromaFmt.Format(&b, diffChromaStyle, it) != nil {
+	if chromaFmt.Format(&b, chromaStyleForTheme(), it) != nil {
 		return code
 	}
 	return strings.TrimRight(b.String(), "\n")

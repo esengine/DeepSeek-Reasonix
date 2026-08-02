@@ -1,4 +1,4 @@
-// Formats a tool call as a Claude-style card line: a "● Verb(primary arg)"
+// Formats a tool call as a two-column card line: a "● Verb  primary-arg"
 // header instead of the raw "-> name {json}", plus the "⎿" continuation gutter.
 package cli
 
@@ -52,7 +52,7 @@ var toolVerb = map[string]string{
 	"use_capability": "MCP",
 }
 
-// toolArgKey is the JSON field shown in parentheses for each tool (wait is
+// toolArgKey is the JSON field shown next to the verb for each tool (wait is
 // special-cased — it carries a job_ids array, not a scalar).
 var toolArgKey = map[string]string{
 	"bash":          "command",
@@ -116,7 +116,7 @@ func toolDisplayName(name string) string {
 	return name
 }
 
-// toolArg pulls the primary argument shown in the card's parentheses.
+// toolArg pulls the primary argument shown after the card's verb.
 func toolArg(name, args string) string {
 	var m map[string]any
 	if json.Unmarshal([]byte(args), &m) != nil {
@@ -164,19 +164,21 @@ func argList(v any) string {
 	return strings.Join(parts, ", ")
 }
 
-// toolCard renders the dispatch line: "  ⏺ Verb(arg)", arg clamped to width.
+// toolCard renders the dispatch line: "  ● Verb  arg", arg clamped to width.
 func toolCard(name, args string, width int) string {
 	return "  " + toolDot(name) + " " + toolHead(name, toolArg(name, args), width)
 }
 
-// toolHead builds "Verb(arg)" with the verb bold and the arg clamped to fit the
-// remaining width; shared by toolCard and the diff block header.
+// toolHead builds "Verb  arg": the verb bold, then two spaces, then the arg in
+// the theme's muted colour, clamped to fit the remaining width (the two
+// separator cells take over the old parentheses' width budget). Shared by
+// toolCard and the diff block header.
 func toolHead(name, arg string, width int) string {
 	label := toolDisplayName(name)
 	head := bold(label)
 	if arg != "" {
 		avail := width - 4 - len([]rune(label)) - 2
-		head += dim("(") + clampPlain(arg, avail) + dim(")")
+		head += "  " + themeFg(activeCLITheme.muted, clampPlain(arg, avail))
 	}
 	return head
 }

@@ -67,7 +67,7 @@ func (m chatTUI) renderCopyPicker() string {
 	if p == nil {
 		return ""
 	}
-	w := max(m.width, 10)
+	w := max(m.contentWidth(), 10)
 	var b strings.Builder
 	b.WriteString(accent(i18n.M.SlashCopyListHeader) + "\n")
 	for i, part := range p.parts {

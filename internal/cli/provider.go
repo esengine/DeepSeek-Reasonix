@@ -160,5 +160,5 @@ func (m chatTUI) renderQuickPicker() string {
 	if m.quickPick == nil {
 		return ""
 	}
-	return m.quickPick.render(m.width)
+	return m.quickPick.render(m.contentWidth())
 }

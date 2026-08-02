@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/event"
 )
@@ -48,8 +49,16 @@ func TestDiffBodyNoFoldWhenShort(t *testing.T) {
 func TestDiffBlockHeader(t *testing.T) {
 	d := event.FileDiff{Diff: "@@ -1 +1 @@\n-a\n+b\n", Added: 1, Removed: 1}
 	block := diffBlock("edit_file", `{"path":"pkg/x.go"}`, d, 80, 40)
-	if len(block) == 0 || !strings.Contains(block[0], "Update") || !strings.Contains(block[0], "pkg/x.go") {
-		t.Fatalf("header should name verb + path, got %q", block[0])
+	if len(block) == 0 {
+		t.Fatal("expected a diff block")
+	}
+	// The header reuses toolHead's two-column form: verb, two spaces, path.
+	plain := ansi.Strip(block[0])
+	if !strings.Contains(plain, "Update  pkg/x.go") {
+		t.Fatalf("header should name verb and path two-column style, got %q", plain)
+	}
+	if strings.Contains(plain, "(") || strings.Contains(plain, ")") {
+		t.Fatalf("header keeps the old parenthesised arg, got %q", plain)
 	}
 }
 
@@ -72,10 +81,11 @@ func TestDiffBarReappliesBackground(t *testing.T) {
 	defer func(prev colorprofile.Profile) { activeColorProfile = prev }(activeColorProfile)
 	activeColorProfile = colorprofile.ANSI256
 
-	line := diffBar('+', "a + b", "x.go", 40, bgDiffAdd, fgDiffAdd, 12, 3)
+	bg, fg := bgSGR(activeCLITheme.diffAddBG), fgSGR(activeCLITheme.success)
+	line := diffBar('+', "a + b", "x.go", 40, bg, fg, 12, 3)
 	// Syntax highlighting emits multiple \033[0m resets; each must re-arm the bar
 	// background, so the bg sequence appears more than once and the row ends reset.
-	if strings.Count(line, bgDiffAdd) < 2 {
+	if strings.Count(line, bg) < 2 {
 		t.Fatalf("background not re-applied after chroma resets: %q", line)
 	}
 	if !strings.HasSuffix(line, ansiReset) {

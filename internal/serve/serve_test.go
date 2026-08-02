@@ -167,6 +167,27 @@ func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	}
 }
 
+func TestHistoryMessagesStripTransientUserBlocks(t *testing.T) {
+	got := historyMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "<reasoning-language>\n必须使用简体中文书写全部可见思考/推理文本\n</reasoning-language>\n\n修复这个bug"},
+		{Role: provider.RoleUser, Content: "plain input", RawContent: "raw plain input"},
+	})
+
+	if len(got) != 2 {
+		t.Fatalf("history length = %d, want 2", len(got))
+	}
+	if got[0].Content != "修复这个bug" {
+		t.Fatalf("user content = %q, want the stripped input", got[0].Content)
+	}
+	if strings.Contains(got[0].Content, "<reasoning-language>") {
+		t.Fatalf("user content still carries the transient block: %q", got[0].Content)
+	}
+	// RawContent wins when present — the exact user-authored text.
+	if got[1].Content != "raw plain input" {
+		t.Fatalf("user content = %q, want RawContent", got[1].Content)
+	}
+}
+
 func TestSessionsListPreviewStripsTransientReasoningLanguageBlock(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")

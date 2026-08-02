@@ -3,6 +3,9 @@ package cli
 import (
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestRenderEmpty covers the contract that empty / whitespace-only input
@@ -97,6 +100,72 @@ func TestRenderConstructs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRenderHeadingLevelColours pins the DeepCode v2 heading hierarchy: h1/h2
+// render bold + accent, h3 and below bold with the default foreground.
+func TestRenderHeadingLevelColours(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	configureCLITheme("dark")
+
+	r := newMarkdownRenderer(80)
+	out := r.Render("# Top\n\n## Mid\n\n### Deep\n\n#### Deeper\n")
+	accentSGR := fgSGR(activeCLITheme.accent)
+	lines := strings.Split(out, "\n")
+	lineFor := func(text string) string {
+		t.Helper()
+		for _, ln := range lines {
+			if strings.Contains(ansi.Strip(ln), text) {
+				return ln
+			}
+		}
+		t.Fatalf("rendered output lost the %q heading:\n%s", text, out)
+		return ""
+	}
+	for _, text := range []string{"Top", "Mid"} {
+		ln := lineFor(text)
+		if !strings.Contains(ln, ansiBold) || !strings.Contains(ln, accentSGR) {
+			t.Errorf("h1/h2 heading %q should be bold + accent: %q", text, ln)
+		}
+	}
+	for _, text := range []string{"Deep", "Deeper"} {
+		ln := lineFor(text)
+		if !strings.Contains(ln, ansiBold) {
+			t.Errorf("h3+ heading %q should stay bold: %q", text, ln)
+		}
+		if strings.Contains(ln, accentSGR) {
+			t.Errorf("h3+ heading %q should drop the accent colour: %q", text, ln)
+		}
+	}
+}
+
+// TestRenderThematicBreakBorderColour pins the full-width rule in the theme
+// border colour (DeepCode v2) instead of the old faint dim, and the plain
+// NO_COLOR fallback.
+func TestRenderThematicBreakBorderColour(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	configureCLITheme("dark")
+
+	r := newMarkdownRenderer(40)
+	rule := strings.Repeat("─", 40)
+	out := r.Render("above\n\n---\n\nbelow")
+	if !strings.Contains(out, fgSGR(activeCLITheme.border)+rule) {
+		t.Errorf("thematic break should be a full-width rule in the border colour:\n%q", out)
+	}
+	if strings.Contains(out, fgSGR(activeCLITheme.faint)+rule) {
+		t.Errorf("thematic break still uses the old faint colour:\n%q", out)
+	}
+
+	activeColorProfile = colorprofile.NoTTY
+	out = r.Render("above\n\n---\n\nbelow")
+	if !strings.Contains(out, rule) {
+		t.Errorf("NO_COLOR thematic break should keep the plain rule:\n%q", out)
+	}
+	if strings.Contains(out, "\033[") {
+		t.Errorf("NO_COLOR thematic break should carry no escape codes:\n%q", out)
 	}
 }
 

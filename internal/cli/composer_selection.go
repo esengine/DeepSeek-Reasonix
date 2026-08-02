@@ -229,7 +229,7 @@ func (m *chatTUI) scrollComposer(delta int) bool {
 }
 
 func (m chatTUI) mouseOverComposer(screenX, screenY int) bool {
-	if m.hideComposer() || screenX < 0 || screenX >= max(m.width, 10) {
+	if m.hideComposer() || screenX < 0 || screenX >= max(m.contentWidth(), 10) {
 		return false
 	}
 	_, contentY, ok := m.composerOrigin()
@@ -348,9 +348,9 @@ func (m chatTUI) selectedComposerText() string {
 }
 
 // composerOrigin returns the terminal cell occupied by textarea content (after
-// the input box's top border, left padding, and prompt gutter). Deriving it from
-// the two cursor positions keeps hit-testing aligned with every optional panel
-// above the box.
+// the input box's top border, left border + padding, and prompt gutter).
+// Deriving it from the two cursor positions keeps hit-testing aligned with
+// every optional panel above the box.
 func (m chatTUI) composerOrigin() (x, y int, ok bool) {
 	if m.hideComposer() {
 		return 0, 0, false

@@ -14,7 +14,7 @@ func (m chatTUI) renderMCPManager() string {
 	if m.mcp == nil {
 		return ""
 	}
-	return m.mcp.render(m.width)
+	return m.mcp.render(m.contentWidth())
 }
 
 func (p *mcpManager) render(width int) string {

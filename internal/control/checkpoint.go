@@ -58,7 +58,11 @@ func (m *checkpointManager) enabled() bool {
 }
 
 // begin opens a checkpoint for the turn about to run, recording msgIndex as the
-// conversation-rewind boundary. No-op when checkpoints are disabled.
+// conversation-rewind boundary. No-op when checkpoints are disabled. The prompt
+// is stored verbatim (the composed input); list() strips Compose-injected
+// prefixes (<reasoning-language>, <memory-update>, plan marker, …) on read so
+// rewind pickers and the composer prefill show the user's actual input, not
+// host-injected XML blocks.
 func (m *checkpointManager) begin(input string, msgIndex int) {
 	m.mu.Lock()
 	store := m.store
@@ -98,7 +102,10 @@ func (m *checkpointManager) boundary(turn int) (int, bool) {
 	return b, ok
 }
 
-// list returns the checkpoint metadata (nil when disabled).
+// list returns the checkpoint metadata (nil when disabled). Prompts are
+// stripped of Compose-injected prefixes again on read, so checkpoints persisted
+// by older releases (which stored the composed input verbatim) render the
+// user's real input in rewind pickers too.
 func (m *checkpointManager) list() []checkpoint.Meta {
 	m.mu.Lock()
 	store := m.store
@@ -106,7 +113,11 @@ func (m *checkpointManager) list() []checkpoint.Meta {
 	if store == nil {
 		return nil
 	}
-	return store.List()
+	metas := store.List()
+	for i := range metas {
+		metas[i].Prompt = StripComposePrefixes(metas[i].Prompt)
+	}
+	return metas
 }
 
 func (m *checkpointManager) fileState(path string) (checkpoint.FileState, bool) {

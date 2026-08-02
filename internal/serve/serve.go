@@ -689,6 +689,13 @@ func historyMessages(msgs []provider.Message) []historyMessage {
 			}
 		}
 		hm := historyMessage{Role: string(m.Role), Content: m.Content}
+		if m.Role == provider.RoleUser {
+			// Serve the user-authored text, not the provider-visible composed
+			// input: Compose prepends transient XML blocks (<reasoning-language>,
+			// <memory-update>, plan marker, …) that must never surface in a
+			// client's transcript (rewind/reconnect repopulates from here).
+			hm.Content = agent.UserMessageText(m)
+		}
 		if m.Role == provider.RoleAssistant {
 			hm.Reasoning = m.ReasoningContent
 			if len(m.ToolCalls) > 0 {

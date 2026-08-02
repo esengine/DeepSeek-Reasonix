@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/provider"
 )
 
 func TestFlattenPrompt(t *testing.T) {
@@ -339,4 +341,22 @@ func TestAcpSessionSetCancelNil(t *testing.T) {
 	sess := &acpSession{id: "test"}
 	sess.finish()
 	sess.abort() // should not panic
+}
+
+func TestTitleFromHistoryStripsTransientUserBlocks(t *testing.T) {
+	history := []provider.Message{
+		{Role: provider.RoleSystem, Content: "system"},
+		{Role: provider.RoleUser, Content: "<reasoning-language>\n必须使用简体中文书写全部可见思考/推理文本\n</reasoning-language>\n\n修复这个bug"},
+	}
+	if got := titleFromHistory(history); got != "修复这个bug" {
+		t.Fatalf("title = %q, want the stripped user input", got)
+	}
+
+	// RawContent wins when present.
+	withRaw := []provider.Message{
+		{Role: provider.RoleUser, Content: "<memory-update>\nx\n</memory-update>\n\ncomposed", RawContent: "user typed this"},
+	}
+	if got := titleFromHistory(withRaw); got != "user typed this" {
+		t.Fatalf("title = %q, want RawContent", got)
+	}
 }

@@ -126,12 +126,19 @@ func (m chatTUI) gitTag() string {
 }
 
 var (
-	statusAutoColor  = cliColor{"#f59e0b", 214}
-	statusPlanColor  = cliColor{"#2563eb", 27}
-	statusYoloColor  = cliColor{"#e5484d", 167}
-	statusShellColor = cliColor{"#16a34a", 71}
-	modeTagLight     = cliColor{"#ffffff", 231}
-	modeTagDark      = cliColor{"#111827", 234}
+	// Mode colours are derived from the active theme in refreshCLIStyles
+	// (theme.go): auto = warn amber, plan = signature accent, yolo = danger,
+	// shell = success. Declared here, assigned there, so a theme switch
+	// repaints the status/mode tags like every other style.
+	statusAutoColor  cliColor
+	statusPlanColor  cliColor
+	statusYoloColor  cliColor
+	statusShellColor cliColor
+	// Tag foregrounds are fixed ink values used on the selection chip
+	// (compSelStyle in theme.go): dark ink on the light graphite accent,
+	// near-white on the dark graphite accent.
+	modeTagLight = cliColor{"#f8f5f2", 255}
+	modeTagDark  = cliColor{"#17130f", 233}
 )
 
 func (m chatTUI) statusModeColor() cliColor {

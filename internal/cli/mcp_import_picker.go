@@ -81,7 +81,7 @@ func (m chatTUI) renderMCPImport() string {
 	if p == nil {
 		return ""
 	}
-	w := max(m.width, 10)
+	w := max(m.contentWidth(), 10)
 	var b strings.Builder
 	b.WriteString(accent("Import MCP from cc-switch") + "\n")
 	b.WriteString(dim("Space select · Enter import · Esc cancel") + "\n\n")

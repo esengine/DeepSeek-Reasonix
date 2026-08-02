@@ -243,10 +243,11 @@ func TestComposerSelectionTracksSoftWrapAndNewlines(t *testing.T) {
 	m.input.SetValue("1234567890中文\nsecond")
 	x, y, _ := m.composerOrigin()
 
-	// The configured textarea content width is 12 cells. Drag from the final two
-	// ASCII characters on the first visual row through the two wide CJK runes on
-	// the wrapped row and into the explicit second logical line.
-	m = updateComposerMouseTestTUI(t, m, tea.MouseClickMsg{X: x + 10, Y: y, Button: tea.MouseLeft})
+	// The configured textarea content width is 8 cells: row 0 holds "12345678",
+	// the wrapped row "90中文", then the explicit second logical line. Drag from
+	// after "90" on the wrapped row through the two wide CJK runes and into the
+	// explicit second logical line.
+	m = updateComposerMouseTestTUI(t, m, tea.MouseClickMsg{X: x + 2, Y: y + 1, Button: tea.MouseLeft})
 	m = updateComposerMouseTestTUI(t, m, tea.MouseMotionMsg{X: x + 3, Y: y + 2, Button: tea.MouseLeft})
 	m = updateComposerMouseTestTUI(t, m, tea.MouseReleaseMsg{X: x + 3, Y: y + 2, Button: tea.MouseLeft})
 

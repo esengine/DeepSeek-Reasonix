@@ -18,7 +18,7 @@ func (m chatTUI) renderSkillPicker() string {
 	if p == nil {
 		return ""
 	}
-	w := max(viewWidth(m.width), 40)
+	w := max(viewWidth(m.contentWidth()), 40)
 	switch p.mode {
 	case pickerSkills:
 		return managerContentPanelStyle(w).Render(m.renderSkillPickerSkills())
@@ -56,7 +56,7 @@ func (m chatTUI) skillPickerFooterHint() string {
 
 func (m chatTUI) renderSkillPickerSkills() string {
 	p := m.skillPick
-	w := max(viewWidth(m.width), 40)
+	w := max(viewWidth(m.contentWidth()), 40)
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "%s\n", viewHeader("Manage skills"))
@@ -164,7 +164,7 @@ func (m chatTUI) renderSkillPickerSources() string {
 
 	roots := p.visibleRoots()
 	for i, r := range roots {
-		label := sourceRowLabel(r, m.width)
+		label := sourceRowLabel(r, m.contentWidth())
 		b.WriteString(rowLine(i == p.sourceSel, i+1, "", label, false))
 		b.WriteByte('\n')
 	}
@@ -187,7 +187,7 @@ func (m chatTUI) renderSkillPickerSourceSkills() string {
 	}
 	skills := p.selectedRootSkills()
 	b.WriteString(accent(i18n.M.SkillPickerSourceTitle))
-	b.WriteString("  " + dim(viewCompactPath(root.dir, max(8, m.width-18))))
+	b.WriteString("  " + dim(viewCompactPath(root.dir, max(8, m.contentWidth()-18))))
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 	if len(skills) == 0 {
@@ -201,7 +201,7 @@ func (m chatTUI) renderSkillPickerSourceSkills() string {
 		b.WriteByte('\n')
 	}
 	for i := start; i < end; i++ {
-		b.WriteString(renderSkillRow(i+1, i == p.sourceSkillSel, skills[i], p.skillEnabled(skills[i].Name), m.width))
+		b.WriteString(renderSkillRow(i+1, i == p.sourceSkillSel, skills[i], p.skillEnabled(skills[i].Name), m.contentWidth()))
 		b.WriteByte('\n')
 	}
 	if end < len(skills) {
@@ -214,7 +214,7 @@ func (m chatTUI) renderSkillPickerSourceSkills() string {
 func (m chatTUI) renderSkillPickerDetail() string {
 	p := m.skillPick
 	var b strings.Builder
-	b.WriteString(renderSkillDetailHeader(p.detailSkill, m.width))
+	b.WriteString(renderSkillDetailHeader(p.detailSkill, m.contentWidth()))
 	b.WriteByte('\n')
 	b.WriteByte('\n')
 	enabled := i18n.M.SkillPickerDisabledLabel
@@ -228,7 +228,7 @@ func (m chatTUI) renderSkillPickerDetail() string {
 		b.WriteString(rowLine(i == p.detailAction, i+1, "", action.label, false))
 		b.WriteByte('\n')
 	}
-	if body := renderSkillBodyPreview(p.detailSkill, m.width, 6); body != "" {
+	if body := renderSkillBodyPreview(p.detailSkill, m.contentWidth(), 6); body != "" {
 		b.WriteByte('\n')
 		b.WriteString(body)
 	}
@@ -242,7 +242,7 @@ func (m chatTUI) renderSkillPickerConfirmDelete() string {
 	b.WriteByte('\n')
 	path := skillDeleteTargetLabel(p.deleteSkill)
 	if path != "" {
-		b.WriteString(dim("  " + viewCompactPath(path, max(8, m.width-4))))
+		b.WriteString(dim("  " + viewCompactPath(path, max(8, m.contentWidth()-4))))
 		b.WriteByte('\n')
 	}
 	b.WriteByte('\n')

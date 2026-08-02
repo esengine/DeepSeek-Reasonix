@@ -213,8 +213,8 @@ func (s *updateSink) replay(msgs []provider.Message) {
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleUser:
-			text := m.Content
-			if steer, ok := agent.SteerText(text); ok {
+			text := agent.UserMessageText(m)
+			if steer, ok := agent.SteerText(m.Content); ok {
 				text = steer
 			}
 			if text != "" {

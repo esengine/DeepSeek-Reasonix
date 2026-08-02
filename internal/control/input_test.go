@@ -641,7 +641,7 @@ func TestRunComposesResponseLanguagePreference(t *testing.T) {
 		t.Fatalf("runner inputs = %d, want 1", len(runner.inputs))
 	}
 	got := runner.inputs[0]
-	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, "hi") {
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "in English") || !strings.HasSuffix(got, "hi") {
 		t.Fatalf("headless Run should compose the response language preference, got %q", got)
 	}
 }
@@ -794,7 +794,7 @@ func TestComposeSyntheticResponseLanguagePreference(t *testing.T) {
 	c := New(Options{ResponseLanguage: "en"})
 
 	got := c.ComposeSynthetic(planApprovedMessage)
-	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, planApprovedMessage) {
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "in English") || !strings.HasSuffix(got, planApprovedMessage) {
 		t.Fatalf("ComposeSynthetic should prefix response language, got %q", got)
 	}
 	if !IsSyntheticUserMessage(got) {

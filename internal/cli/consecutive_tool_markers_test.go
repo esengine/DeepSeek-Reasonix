@@ -37,18 +37,18 @@ func TestParallelBashMarkersKeepOwnLineCount(t *testing.T) {
 	// "⎿ 22 lines".
 	cardIdx := map[string]int{}
 	for i, ln := range transcript {
-		if idx, ok := cardIdx["c1"]; !ok && strings.Contains(ln, "Bash(ls)") {
+		if idx, ok := cardIdx["c1"]; !ok && strings.Contains(ln, "Bash  ls") {
 			_ = idx
 			if _, seen := cardIdx["c1"]; !seen {
 				cardIdx["c1"] = i
 				continue
 			}
 		}
-		if _, seen := cardIdx["c2"]; !seen && len(cardIdx) == 1 && strings.Contains(ln, "Bash(ls)") {
+		if _, seen := cardIdx["c2"]; !seen && len(cardIdx) == 1 && strings.Contains(ln, "Bash  ls") {
 			cardIdx["c2"] = i
 			continue
 		}
-		if _, seen := cardIdx["c3"]; !seen && len(cardIdx) == 2 && strings.Contains(ln, "Bash(ls)") {
+		if _, seen := cardIdx["c3"]; !seen && len(cardIdx) == 2 && strings.Contains(ln, "Bash  ls") {
 			cardIdx["c3"] = i
 		}
 	}

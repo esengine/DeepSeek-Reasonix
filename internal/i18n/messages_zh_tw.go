@@ -47,6 +47,7 @@ var ChineseTraditional = Messages{
 	ChatToolWorkingFmt:                     "%s 執行中 · %d 秒",
 	ChatStatusRetryingFmt:                  "%s 正在重試 (%d/%d)… (Esc 取消)",
 	ChatStatusCancellingFmt:                "%s 正在停止… (%d 秒 · Ctrl+C 退出)",
+	ChatEscCancelConfirm:                   "再按 Esc 確認取消本輪",
 	ChatStatusIdle:                         "就緒",
 	ChatStatusYoloIdle:                     "已跳過核准",
 	ChatStatusCycleHint:                    "Shift+Tab 循環詢問/自動/計畫 · Ctrl+Y YOLO",

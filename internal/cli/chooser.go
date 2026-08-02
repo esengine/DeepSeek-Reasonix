@@ -157,9 +157,14 @@ func (m chatTUI) chooserActivate(row int) (tea.Model, tea.Cmd) {
 	switch {
 	case row < len(q.Options):
 		if q.Multi {
-			// Space toggles; Enter confirms current selections and advances.
-			// (Toggling is handled in handleChooserKey; we only arrive here
-			// via Enter or number keys, both of which should commit.)
+			// Enter on a row selects it when not already selected, then
+			// advances — an Enter on an unselected row must never submit an
+			// empty answer (which the controller reads as "skip" and cancels
+			// a running turn).
+			if !c.sel[c.tab][row] {
+				c.sel[c.tab][row] = true
+				c.custom[c.tab] = ""
+			}
 			return m.chooserAdvance()
 		}
 		c.sel[c.tab] = map[int]bool{row: true}
@@ -208,7 +213,7 @@ func (m chatTUI) renderChooser() string {
 	if c == nil {
 		return ""
 	}
-	w := max(m.width, 10)
+	w := max(m.contentWidth(), 10)
 	var b strings.Builder
 
 	if len(c.questions) > 1 {
@@ -297,7 +302,10 @@ func (m chatTUI) chooserOptionRow(j int, opt event.AskOption, multi bool) string
 	return line
 }
 
-// rowLine formats a selectable row: "❯ N. <box><label>", highlighted when current.
+// rowLine formats a selectable row: "❯ N. <box><label>". The current row wears
+// the reverse accent chip (compSelStyle) with a padding space on each side so
+// it reads as a chip; the other rows get the same padding so the columns don't
+// jump as the cursor moves.
 func rowLine(cur bool, num int, box, label string, active bool) string {
 	prefix := "  "
 	if cur {
@@ -305,11 +313,11 @@ func rowLine(cur bool, num int, box, label string, active bool) string {
 	}
 	body := fmt.Sprintf("%d. %s%s", num, box, label)
 	if cur {
-		body = bold(body)
+		body = compSelStyle.Render(" " + body + " ")
 	} else if active {
-		body = yellow(body)
+		body = yellow(" " + body + " ")
 	} else {
-		body = dim(body)
+		body = dim(" " + body + " ")
 	}
 	return prefix + body
 }
@@ -321,6 +329,6 @@ func headerOr(q event.AskQuestion, i int) string {
 	return fmt.Sprintf("Q%d", i+1)
 }
 
-// choicePanelStyle frames the question card, matching the input box's top/bottom
-// rule but in the accent colour.
+// choicePanelStyle frames the question card with a quiet top/bottom rule in
+// the theme border colour, matching the composer's resting frame.
 var choicePanelStyle lipgloss.Style

@@ -204,10 +204,10 @@ function syncNativeWindowBackground(theme: Theme): void {
   if (!runtime?.WindowSetBackgroundColour) return;
   const resolved = getResolvedTheme(theme);
   if (resolved === "light") {
-    // Light shell: matches graphite --bg (#f4f3ef).
-    runtime.WindowSetBackgroundColour(244, 243, 239, 255);
+    // Light shell: matches the light --bg (#eceff5).
+    runtime.WindowSetBackgroundColour(236, 239, 245, 255);
   } else {
-    // Dark shell: matches :root --bg (#090a0c).
-    runtime.WindowSetBackgroundColour(9, 10, 12, 255);
+    // Dark shell: matches :root --bg (#0a0c11).
+    runtime.WindowSetBackgroundColour(10, 12, 17, 255);
   }
 }

@@ -407,6 +407,9 @@ func receiptHint(label string, items []string) string {
 	if len(items) == 0 {
 		return ""
 	}
+	if len(items) > 5 {
+		items = items[:5]
+	}
 	for i, item := range items {
 		if len(item) > 80 {
 			items[i] = item[:80] + "…"
@@ -417,11 +420,13 @@ func receiptHint(label string, items []string) string {
 
 // allCommandHints builds a combined hint from both the per-turn ledger and the
 // full session history, so the model can self-correct a mismatched citation.
+// The list is capped small so the error stays one compact paragraph instead of
+// a wall of commands that chat surfaces fold away as pasted text.
 func allCommandHints(ctx context.Context, ledger *evidence.Ledger) string {
 	seen := map[string]bool{}
 	var cmds []string
 	if ledger != nil {
-		for _, c := range ledger.SuccessfulCommands(8) {
+		for _, c := range ledger.SuccessfulCommands(4) {
 			if !seen[c] {
 				seen[c] = true
 				cmds = append(cmds, c)
@@ -444,11 +449,11 @@ func allCommandHints(ctx context.Context, ledger *evidence.Ledger) string {
 				}
 				seen[c] = true
 				cmds = append(cmds, c)
-				if len(cmds) >= 12 {
+				if len(cmds) >= 5 {
 					break
 				}
 			}
-			if len(cmds) >= 12 {
+			if len(cmds) >= 5 {
 				break
 			}
 		}

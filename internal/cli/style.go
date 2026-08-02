@@ -26,7 +26,7 @@ const (
 	ansiReverse = "\033[7m"
 	// ansiAccent is the dark graphite accent as a literal escape, for tests that
 	// pin the concrete sequence instead of the active theme.
-	ansiAccent = "\033[38;5;173m"
+	ansiAccent = "\033[38;5;247m"
 )
 
 func sgr(code, s string) string {

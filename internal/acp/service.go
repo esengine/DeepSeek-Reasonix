@@ -2499,7 +2499,7 @@ func sessionInfoMatchesCwd(info SessionInfo, filter string) bool {
 func titleFromHistory(history []provider.Message) string {
 	for _, m := range history {
 		if m.Role == provider.RoleUser {
-			if title := previewTitle(m.Content); title != "" {
+			if title := previewTitle(agent.UserMessageText(m)); title != "" {
 				return title
 			}
 		}

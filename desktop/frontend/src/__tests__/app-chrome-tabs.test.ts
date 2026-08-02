@@ -325,7 +325,7 @@ ok(
     "inset 0 -2px 0 var(--project-accent, var(--accent))",
   ) &&
     finalDeclaration(":root[data-theme-style] .tabbar__tab--active:focus-visible", "box-shadow")?.includes(
-      "0 0 0 3px var(--accent-soft)",
+      "var(--focus-ring)",
     ),
   "keyboard focus on the active tab keeps both the focus ring and the accent underline",
 );
