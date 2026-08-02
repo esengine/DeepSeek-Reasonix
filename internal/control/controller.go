@@ -3661,7 +3661,12 @@ const (
 	conflictForkedBranch
 )
 
-const recoveryDepthCapNoticeText = "repeated save conflicts were detected; saved the current conflict copy in place"
+// recoveryDepthCapNoticeText warns that session-save conflicts kept recurring
+// even on recovery branches, so the transcript was force-saved onto the
+// current branch to stop the fork chain. The wording names the real cause —
+// another writer on the same session file — because users routinely
+// misread this as a file-edit conflict and chase the wrong fix.
+const recoveryDepthCapNoticeText = "repeated session-save conflicts were detected; saved the current transcript in place"
 
 func (c *Controller) emitRecoveryDepthCapNotice(path string) {
 	key := filepath.Clean(strings.TrimSpace(path))
@@ -3675,7 +3680,9 @@ func (c *Controller) emitRecoveryDepthCapNotice(path string) {
 	}
 	c.recoveryDepthCapNotices[key] = true
 	c.mu.Unlock()
-	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: recoveryDepthCapNoticeText})
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+		Text:   recoveryDepthCapNoticeText,
+		Detail: fmt.Sprintf("another Reasonix instance or an external editor appears to be writing this session file (%s); close the other instance or stop editing the session file manually, then continue here", filepath.Base(path))})
 }
 
 func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRewrite bool) (string, conflictOutcome, error) {

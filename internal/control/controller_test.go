@@ -2022,7 +2022,7 @@ func TestSnapshotConflictAtRecoveryDepthCapForceSavesCurrentBranch(t *testing.T)
 		t.Fatalf("disk tail = %q, want force-saved local transcript", got)
 	}
 	notices := sink.notices()
-	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "saved the current conflict copy in place") {
+	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "repeated session-save conflicts were detected") {
 		t.Fatalf("notices = %v, want depth-cap notice", notices)
 	}
 	if stale.NeedsRewriteSave() {
