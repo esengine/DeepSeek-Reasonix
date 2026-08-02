@@ -118,6 +118,9 @@ type Controller struct {
 	// disableColdResumePrune skips stale-tool-result elision on cold resume.
 	// Zero value keeps the prune on (the cheaper default).
 	disableColdResumePrune            bool
+	// testCacheColdAfter overrides cacheColdAfter() in tests. Zero uses the
+	// vendor-aware resolution from config.
+	testCacheColdAfter                time.Duration
 	shell                             sandbox.Shell                    // interpreter for user-invoked "!" commands; zero = auto
 	startedOnce                       bool                             // guards the one-shot SessionStart hook on first turn
 	closeOnce                         sync.Once                        // makes close idempotent under racing teardown paths
@@ -3354,13 +3357,33 @@ func (c *Controller) ResetPlannerSession() {
 	}
 }
 
-// cacheColdAfter approximates how long the provider keeps a prompt prefix
+// cacheColdAfter resolves how long the active provider keeps a prompt prefix
 // cached. A session idle longer than this resumes against a cold cache, so a
 // history rewrite at that moment costs no extra cache misses — it only shrinks
-// the full-price first request. Deliberately conservative: too small burns a
-// live cache (~4× the miss tokens, measured), too large only forgoes a prune.
-// Tighten from benchmarks/cache-ttl-probe data, never below measured retention.
-var cacheColdAfter = 24 * time.Hour
+// the full-price first request. The TTL is vendor-aware: DashScope 5m,
+// DeepSeek 60m, Anthropic 5m, unknown 10m. Users can override per-provider
+// with cache_ttl_minutes in config.toml.
+func (c *Controller) cacheColdAfter() time.Duration {
+	if c.testCacheColdAfter > 0 || c.testCacheColdAfter == -1 {
+		if c.testCacheColdAfter == -1 {
+			return 0
+		}
+		return c.testCacheColdAfter
+	}
+	cfg, err := config.LoadForRoot(c.workspaceRoot)
+	if err != nil {
+		return 10 * time.Minute
+	}
+	ref := c.modelRef
+	if ref == "" {
+		ref = cfg.DefaultModel
+	}
+	entry, ok := cfg.ResolveModel(ref)
+	if !ok {
+		return 10 * time.Minute
+	}
+	return entry.EffectiveCacheTTL()
+}
 
 // maybeColdResumePrune elides stale tool results when a resumed session has
 // been idle past the provider's cache retention, then persists the pruned
@@ -3377,7 +3400,7 @@ func (c *Controller) maybeColdResumePrune(path string) {
 		return
 	}
 	last := m.UpdatedAt
-	if time.Since(last) < cacheColdAfter {
+	if time.Since(last) < c.cacheColdAfter() {
 		return
 	}
 	st, err := c.executor.PruneStaleToolResults()
