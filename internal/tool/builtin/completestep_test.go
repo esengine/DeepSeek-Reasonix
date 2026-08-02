@@ -792,3 +792,19 @@ func TestCompleteStepPendingHintNamesActiveSubStep(t *testing.T) {
 		t.Fatalf("pending hint should point at the active sub-step, got %v", err)
 	}
 }
+
+// TestAllCommandHintsShowsFullCommands proves the retry hint lists commands in
+// full (never truncated), so a model can cite one verbatim instead of guessing
+// the hidden tail and failing the strict per-segment match again.
+func TestAllCommandHintsShowsFullCommands(t *testing.T) {
+	long := "cd /d/Repos/ztu-ai/backend && python -m pytest tests/test_path_preference.py -q --no-header 2>&1 | tail -2"
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.Receipt{ToolName: "bash", Command: long, Success: true})
+	hint := allCommandHints(context.Background(), ledger)
+	if !strings.Contains(hint, long) {
+		t.Fatalf("hint should carry the full command (len %d), got: %s", len(long), hint)
+	}
+	if strings.Contains(hint, "…") {
+		t.Fatalf("hint truncated a command: %s", hint)
+	}
+}

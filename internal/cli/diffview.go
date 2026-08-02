@@ -211,7 +211,8 @@ func clampPlain(s string, w int) string {
 	if w < 1 {
 		w = 1
 	}
-	return ansi.Truncate(expandTabs(s), w, "")
+	// Ellipsis marks the cut so a clamped row never reads as a broken word.
+	return ansi.Truncate(expandTabs(s), w, "…")
 }
 
 // expandTabs replaces tabs with spaces to the next tabWidth stop. A literal tab

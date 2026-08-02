@@ -94,3 +94,23 @@ func TestToolCardClampsArgToWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestToolCardClampUsesEllipsis proves a clamped card header ends with "…"
+// instead of a hard-cut word fragment.
+func TestToolCardClampUsesEllipsis(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	got := toolCard("bash", `{"command":"cd /deep/path && grep -rn MissingToolCallReasoningWarningFingerprint internal"}`+"", 40)
+	plain := ansi.Strip(got)
+	if strings.Contains(plain, "Fingerprint\" internal") {
+		t.Fatalf("clamped card should cut the long command, got: %q", plain)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(plain), "…") {
+		t.Fatalf("clamped card should end with an ellipsis, got: %q", plain)
+	}
+	if width := ansi.StringWidth(got); width > 40 {
+		t.Fatalf("clamped card width = %d, want <= 40: %q", width, got)
+	}
+}

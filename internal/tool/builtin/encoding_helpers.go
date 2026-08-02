@@ -384,7 +384,26 @@ func nearestContentLine(oldString, content string) (int, string, bool) {
 	if bestScore < 3 {
 		return 0, "", false
 	}
+	// The hint line must stay a single clean row: drop the CRLF carriage
+	// return (it would render as a stray "\r" escape in the quoted error) and
+	// clamp over-long lines so the message stays scannable.
+	bestText = strings.TrimSuffix(bestText, "\r")
+	if bestText = oneLineHint(bestText); bestText == "" {
+		return 0, "", false
+	}
 	return bestLine, bestText, true
+}
+
+// oneLineHint flattens and clamps a hint row for error messages: at most
+// nearestHintMaxRunes visible runes, embedded line breaks collapsed.
+const nearestHintMaxRunes = 60
+
+func oneLineHint(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if r := []rune(s); len(r) > nearestHintMaxRunes {
+		return string(r[:nearestHintMaxRunes-1]) + "…"
+	}
+	return s
 }
 
 func oldStringMatchLineSummary(oldString, content string, limit int) string {
@@ -395,20 +414,35 @@ func oldStringMatchLineSummary(oldString, content string, limit int) string {
 	if target == "" {
 		return ""
 	}
-	var matches []int
-	for i, line := range splitLineSegments(content) {
+	lines := splitLineSegments(content)
+	type match struct {
+		no   int
+		text string
+		next string // the following row: how the model tells identical duplicates apart
+	}
+	var matches []match
+	for i, line := range lines {
 		text := strings.TrimSuffix(line.raw, "\n")
 		text = strings.TrimSuffix(text, "\r")
 		if strings.Contains(text, target) {
-			matches = append(matches, i+1)
+			next := ""
+			if i+1 < len(lines) {
+				n := strings.TrimSuffix(lines[i+1].raw, "\n")
+				n = strings.TrimSuffix(n, "\r")
+				next = oneLineHint(n)
+			}
+			matches = append(matches, match{no: i + 1, text: oneLineHint(text), next: next})
 		}
 	}
 	if len(matches) == 0 {
 		return ""
 	}
+	// Each hit carries its row's content and the following row, so the model
+	// can tell identical duplicates apart and extend the old_string with the
+	// unique nearby code instead of guessing blind at bare line numbers.
 	var b strings.Builder
 	b.WriteString("; matching lines include ")
-	for i, line := range matches {
+	for i, m := range matches {
 		if i >= limit {
 			b.WriteString(", ...")
 			break
@@ -416,7 +450,11 @@ func oldStringMatchLineSummary(oldString, content string, limit int) string {
 		if i > 0 {
 			b.WriteString(", ")
 		}
-		fmt.Fprint(&b, line)
+		if m.next != "" {
+			fmt.Fprintf(&b, "%d: %q (next %d: %q)", m.no, m.text, m.no+1, m.next)
+		} else {
+			fmt.Fprintf(&b, "%d: %q", m.no, m.text)
+		}
 	}
 	return b.String()
 }

@@ -410,18 +410,16 @@ func receiptHint(label string, items []string) string {
 	if len(items) > 5 {
 		items = items[:5]
 	}
-	for i, item := range items {
-		if len(item) > 80 {
-			items[i] = item[:80] + "…"
-		}
-	}
 	return fmt.Sprintf("; %s: %q — cite one as it actually ran, or run the check now", label, items)
 }
 
 // allCommandHints builds a combined hint from both the per-turn ledger and the
 // full session history, so the model can self-correct a mismatched citation.
 // The list is capped small so the error stays one compact paragraph instead of
-// a wall of commands that chat surfaces fold away as pasted text.
+// a wall of commands that chat surfaces fold away as pasted text; each entry
+// is shown in full because a truncated command cannot be cited verbatim — a
+// model guessing the hidden tail (e.g. "tail -2" vs "tail -3") fails the
+// strict per-segment match and loops the failure.
 func allCommandHints(ctx context.Context, ledger *evidence.Ledger) string {
 	seen := map[string]bool{}
 	var cmds []string
@@ -460,12 +458,6 @@ func allCommandHints(ctx context.Context, ledger *evidence.Ledger) string {
 	}
 	if len(cmds) == 0 {
 		return ""
-	}
-	// Truncate long entries for readability.
-	for i, c := range cmds {
-		if len(c) > 80 {
-			cmds[i] = c[:80] + "…"
-		}
 	}
 	return fmt.Sprintf("; commands that ran: %q — pick the matching one and retry complete_step", cmds)
 }

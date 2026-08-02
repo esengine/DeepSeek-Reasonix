@@ -294,7 +294,7 @@ func TestEditFileNotUniqueReportsMatchingLines(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected not-unique error")
 	}
-	for _, want := range []string{"not unique", "matching lines include 1, 3, 5", "repeated separator lines"} {
+	for _, want := range []string{"not unique", "matching lines include 1: ", "repeated separator lines"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error should mention %q: %v", want, err)
 		}
