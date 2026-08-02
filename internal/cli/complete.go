@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/control"
 	"reasonix/internal/fileref"
@@ -601,16 +602,17 @@ type pickerSheetRow struct {
 }
 
 // renderPickerSheet renders the shared bottom-sheet picker used by the slash
-// menu and every subcommand picker (/mcp, /skills, /model, …): rows windowed
-// around the selection, the selected row as a full-width accent band, a dim
-// hint footer, and a draggable scrollbar on the right edge when the list
-// overflows. Rows sit on a slightly lighter surface than the chat background
-// (pickerSheetStyle) so the pop-up reads as a distinct overlay. Every line is
-// padded to `width` with non-clearable blank cells so bubbletea's delta
-// renderer has no ordinary trailing-space run to collapse into EL/ECH erase
-// sequences — that avoids ghost cells on terminals (mintty) with unreliable
-// erases after wide CJK glyphs.
-func renderPickerSheet(items []pickerSheetRow, sel, rows, width int, hint string) string {
+// menu, every subcommand picker (/mcp, /skills, /model, …), the quick pickers
+// (/resume, /model, /provider), and the rewind picker: an optional title and
+// search line, rows windowed around the selection, the selected row as a
+// full-width accent band, a dim hint footer, and a draggable scrollbar on the
+// right edge when the list overflows. Rows sit on a slightly lighter surface
+// than the chat background (pickerSheetStyle) so the pop-up reads as a
+// distinct overlay. Every line is padded to `width` with non-clearable blank
+// cells so bubbletea's delta renderer has no ordinary trailing-space run to
+// collapse into EL/ECH erase sequences — that avoids ghost cells on terminals
+// (mintty) with unreliable erases after wide CJK glyphs.
+func renderPickerSheet(title, search string, items []pickerSheetRow, sel, rows, width int, hint string) string {
 	if len(items) == 0 {
 		return ""
 	}
@@ -635,12 +637,23 @@ func renderPickerSheet(items []pickerSheetRow, sel, rows, width int, hint string
 	}
 
 	var b strings.Builder
+	if title != "" {
+		b.WriteString(accent(title) + "\n")
+	}
+	if search != "" {
+		b.WriteString("  " + dim("Search: ") + search + "\n")
+	}
 	for i := start; i < end; i++ {
 		it := items[i]
 		body := it.label
 		if it.hint != "" {
 			body += "  " + dim(it.hint)
 		}
+		// Clamp long labels/hints (model names, skill descriptions) to the
+		// content width so the sheet never overflows the terminal. The
+		// selected row adds two padding cells on each side, so the body
+		// budget reserves them.
+		body = ansi.Truncate(body, max(contentW-4, 1), "…")
 		bar := ""
 		if showScrollbar {
 			if rel := i - start; rel >= thumbStart && rel < thumbStart+thumbSize {
@@ -659,7 +672,7 @@ func renderPickerSheet(items []pickerSheetRow, sel, rows, width int, hint string
 		}
 		b.WriteByte('\n')
 	}
-	b.WriteString(pickerSheetStyle.Render(padCompletionLine(dim(hint), width)))
+	b.WriteString(pickerSheetStyle.Render(padCompletionLine(ansi.Truncate(dim(hint), width, "…"), width)))
 	return b.String()
 }
 
@@ -678,7 +691,7 @@ func (m chatTUI) renderCompletion() string {
 	for i, it := range m.completion.items {
 		rows[i] = pickerSheetRow{label: it.label, hint: it.hint}
 	}
-	return renderPickerSheet(rows, m.completion.sel, m.completionPanelRows(), m.contentWidth(), hint)
+	return renderPickerSheet("", "", rows, m.completion.sel, m.completionPanelRows(), m.contentWidth(), hint)
 }
 
 // completionPanelRows is the picker's item-row count: the tall bottom sheet,
@@ -719,13 +732,11 @@ func completionWindowStart(sel, total, rows int) int {
 	return start
 }
 
-// completionMenuBounds returns the screen row span [top, bottom) of the
-// completion panel, including its hint footer, mirroring the bottom-region
-// layout View() paints. (0, 0) when no menu is shown.
-func (m chatTUI) completionMenuBounds() (top, bottom int) {
-	if !m.completion.active || len(m.completion.items) == 0 {
-		return 0, 0
-	}
+// bottomSheetBounds returns the screen row span [top, bottom) a bottom sheet
+// of `rows` total rows occupies above the composer/status block. Every bottom
+// sheet (completion menu, quick picker, rewind picker) renders in the same
+// slot, so they share this geometry. (0, 0) when the terminal size is unknown.
+func (m chatTUI) bottomSheetBounds(rows int) (top, bottom int) {
 	bottom = m.height - m.statusLineCount
 	if !m.hideComposer() {
 		bottom -= m.input.Height() + 2
@@ -744,7 +755,6 @@ func (m chatTUI) completionMenuBounds() (top, bottom int) {
 			bottom -= strings.Count(main, "\n") + 1
 		}
 	}
-	rows := m.completionPanelRows() + 1 // items + hint footer
 	top = bottom - rows
 	if top < 0 {
 		top = 0
@@ -753,6 +763,28 @@ func (m chatTUI) completionMenuBounds() (top, bottom int) {
 		bottom = top
 	}
 	return top, bottom
+}
+
+// sheetDragSel maps a scrollbar drag row to a selection index: the thumb
+// tracks the visible window, and the selection leads the window by half a
+// panel so the highlight stays under the pointer.
+func sheetDragSel(rows, total, rowInMenu, grabOffset int) int {
+	windowTop := scrollbarYOffset(rows, rowInMenu, total, grabOffset)
+	sel := windowTop + rows/2
+	if sel > total-1 {
+		sel = total - 1
+	}
+	return sel
+}
+
+// completionMenuBounds returns the screen row span [top, bottom) of the
+// completion panel, including its hint footer, mirroring the bottom-region
+// layout View() paints. (0, 0) when no menu is shown.
+func (m chatTUI) completionMenuBounds() (top, bottom int) {
+	if !m.completion.active || len(m.completion.items) == 0 {
+		return 0, 0
+	}
+	return m.bottomSheetBounds(m.completionPanelRows() + 1) // items + hint footer
 }
 
 // inCompletionScrollbar reports whether (x, y) is on the completion panel's
@@ -776,9 +808,21 @@ func (m chatTUI) inCompletionScrollbar(x, y int) bool {
 // doesn't jump to the cursor on click.
 func (m chatTUI) completionScrollbarGrabRowOffset(row int) int {
 	rows := m.completionPanelRows()
-	thumbStart, thumbSize := scrollbarThumb(rows, completionWindowStart(m.completion.sel, len(m.completion.items), rows), len(m.completion.items))
-	if row >= thumbStart && row < thumbStart+thumbSize {
-		return row - thumbStart
+	top, _ := m.completionMenuBounds()
+	rowInMenu := row - top
+	if rowInMenu < 0 {
+		rowInMenu = 0
+	}
+	return sheetScrollbarGrabRowOffset(rowInMenu, rows, len(m.completion.items), completionWindowStart(m.completion.sel, len(m.completion.items), rows))
+}
+
+// sheetScrollbarGrabRowOffset returns where inside the thumb a click at
+// rowInMenu (relative to the item rows) grabbed, so the thumb doesn't jump to
+// the cursor on click.
+func sheetScrollbarGrabRowOffset(rowInMenu, rows, total, windowStart int) int {
+	thumbStart, thumbSize := scrollbarThumb(rows, windowStart, total)
+	if rowInMenu >= thumbStart && rowInMenu < thumbStart+thumbSize {
+		return rowInMenu - thumbStart
 	}
 	return thumbSize / 2
 }
@@ -801,9 +845,25 @@ func (m *chatTUI) dragCompletionScrollbar(row int) {
 	if rowInMenu >= rows {
 		rowInMenu = rows - 1
 	}
-	windowTop := scrollbarYOffset(rows, rowInMenu, total, m.completionScrollbarGrabOffset)
-	m.completion.sel = windowTop + rows/2
-	if m.completion.sel > total-1 {
-		m.completion.sel = total - 1
+	grab := 0
+	if m.sheetScrollbar != nil {
+		grab = m.sheetScrollbar.grab
+	}
+	m.completion.sel = sheetDragSel(rows, total, rowInMenu, grab)
+}
+
+// dragSheetScrollbar dispatches an in-flight scrollbar drag to the active
+// bottom sheet's model.
+func (m *chatTUI) dragSheetScrollbar(row int) {
+	if m.sheetScrollbar == nil {
+		return
+	}
+	switch m.sheetScrollbar.panel {
+	case "quick":
+		m.dragQuickPickerScrollbar(row)
+	case "rewind":
+		m.dragRewindScrollbar(row)
+	default:
+		m.dragCompletionScrollbar(row)
 	}
 }

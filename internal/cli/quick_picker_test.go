@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -208,5 +209,69 @@ func TestQuickPickerProviderSingleModelSwitch(t *testing.T) {
 	}
 	if swMsg.ctrl != newCtrl || swMsg.oldCtrl != oldCtrl {
 		t.Fatal("modelSwitchMsg did not carry the expected controllers")
+	}
+}
+
+// TestQuickPickerScrollbarClickDragRelease proves the quick picker's sheet
+// scrollbar supports click-drag scrolling, sharing the bottom-sheet drag
+// state machine with the completion menu.
+func TestQuickPickerScrollbarClickDragRelease(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+	items := make([]quickPickerItem, 20)
+	for i := range items {
+		items[i] = quickPickerItem{ID: fmt.Sprintf("m%d", i), Label: fmt.Sprintf("model-%d", i)}
+	}
+	m.quickPick = &quickPicker{kind: quickPickerModel, title: "Select model", items: items, selected: 0}
+	barX := m.contentWidth() - 1
+	rows := m.quickPickerItemRows()
+	top, _ := m.bottomSheetBounds(rows + m.quickPickerHeaderRows() + 1)
+
+	m0, _ = m.Update(tea.MouseClickMsg{X: barX, Y: top + m.quickPickerHeaderRows() + 2, Button: tea.MouseLeft})
+	m = m0.(chatTUI)
+	if m.sheetScrollbar == nil || m.sheetScrollbar.panel != "quick" {
+		t.Fatal("left-click on the quick picker scrollbar should start a drag")
+	}
+	if m.quickPick.selected == 0 {
+		t.Fatal("clicking mid-scrollbar should move the quick picker selection")
+	}
+
+	// Drag to the sheet bottom reaches the end of the list.
+	bottom := top + m.quickPickerHeaderRows() + rows - 1
+	m0, _ = m.Update(tea.MouseMotionMsg{X: barX, Y: bottom, Button: tea.MouseLeft})
+	m = m0.(chatTUI)
+	windowTop := completionWindowStart(m.quickPick.selected, len(items), rows)
+	if want := len(items) - rows; windowTop != want {
+		t.Fatalf("dragging to the bottom should reach the list end, windowTop=%d want %d (sel=%d)", windowTop, want, m.quickPick.selected)
+	}
+
+	m0, _ = m.Update(tea.MouseReleaseMsg{X: barX, Y: bottom, Button: tea.MouseLeft})
+	m = m0.(chatTUI)
+	if m.sheetScrollbar != nil {
+		t.Fatal("mouse release should end the quick picker scrollbar drag")
+	}
+}
+
+// TestQuickPickerWheelScrollsSheet proves the wheel over the quick picker
+// moves its selection instead of the transcript.
+func TestQuickPickerWheelScrollsSheet(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+	items := make([]quickPickerItem, 12)
+	for i := range items {
+		items[i] = quickPickerItem{ID: fmt.Sprintf("m%d", i), Label: fmt.Sprintf("model-%d", i)}
+	}
+	m.quickPick = &quickPicker{kind: quickPickerModel, title: "Select model", items: items, selected: 0}
+	rows := m.quickPickerItemRows()
+	top, _ := m.bottomSheetBounds(rows + m.quickPickerHeaderRows() + 1)
+
+	m0, _ = m.Update(tea.MouseWheelMsg{X: 10, Y: top + 1, Button: tea.MouseWheelDown})
+	m = m0.(chatTUI)
+	if m.quickPick.selected != 1 {
+		t.Fatalf("wheel down over the quick picker should move selection, sel=%d", m.quickPick.selected)
 	}
 }

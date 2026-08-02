@@ -341,11 +341,21 @@ func TestChatResumeCommandMovesLease(t *testing.T) {
 
 func TestChatNewSessionTakesFreshLease(t *testing.T) {
 	m, active, _ := chatLeaseFixture(t)
+	// Seed some transcript content; /new must clear the main output screen.
+	m.commitLine("  › old conversation content")
+	m.commitLine("  ◆ Reasonix\n\n  old answer")
 
 	if cmd := m.runSlashCommand("/new"); cmd != nil {
 		t.Fatal("/new should not return a tea.Cmd")
 	}
 
+	joined := strings.Join(m.transcript, "\n")
+	if strings.Contains(joined, "old conversation") || strings.Contains(joined, "old answer") {
+		t.Fatalf("/new should clear the old transcript, got:\n%s", joined)
+	}
+	if len(m.transcript) == 0 {
+		t.Fatal("/new should leave the fresh banner")
+	}
 	fresh := m.ctrl.SessionPath()
 	if fresh == active {
 		t.Fatalf("/new did not rotate the session path")

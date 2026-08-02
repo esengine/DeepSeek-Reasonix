@@ -24,6 +24,10 @@ type rewindPicker struct {
 	scope int // index into rewindScopes (stage 1)
 }
 
+// rewindSheetRows is the rewind picker's item-row count when rendered as the
+// shared bottom sheet (same panel and scrollbar as the slash pickers).
+const rewindSheetRows = 10
+
 var rewindActions = []struct {
 	kind  string // "scope" | "fork" | "summ-from" | "summ-upto"
 	scope control.RewindScope
@@ -158,22 +162,20 @@ func (m chatTUI) renderRewind() string {
 		return ""
 	}
 	w := max(m.contentWidth(), 10)
-	var b strings.Builder
 	if r.stage == 0 {
-		b.WriteString(accent(i18n.M.RewindPickTitle) + "\n")
+		rows := make([]pickerSheetRow, len(r.metas))
 		for i, meta := range r.metas {
-			b.WriteString(rowLine(i == r.sel, meta.Turn+1, "", turnLabel(meta, w), false) + "\n")
+			rows[i] = pickerSheetRow{label: turnLabel(meta, w), hint: meta.Time.Local().Format("2006-01-02 15:04")}
 		}
-		b.WriteString(dim(i18n.M.RewindPickHint))
-		return choicePanelStyle.Width(w).Render(b.String())
+		return renderPickerSheet(i18n.M.RewindPickTitle, "", rows, r.sel, rewindSheetRows, w, i18n.M.RewindPickHint)
 	}
 	meta := r.metas[r.sel]
-	b.WriteString(accent(fmt.Sprintf(i18n.M.RewindRestoreTitleFmt, meta.Turn+1)) + dim(oneLine(meta.Prompt, 48)) + "\n")
+	rows := make([]pickerSheetRow, len(rewindActions))
 	for i := range rewindActions {
-		b.WriteString(rowLine(i == r.scope, i+1, "", rewindActionLabel(i), false) + "\n")
+		rows[i] = pickerSheetRow{label: rewindActionLabel(i)}
 	}
-	b.WriteString(dim(i18n.M.RewindApplyHint))
-	return choicePanelStyle.Width(w).Render(b.String())
+	title := fmt.Sprintf(i18n.M.RewindRestoreTitleFmt, meta.Turn+1) + dim(oneLine(meta.Prompt, 48))
+	return renderPickerSheet(title, "", rows, r.scope, rewindSheetRows, w, i18n.M.RewindApplyHint)
 }
 
 func rewindActionLabel(i int) string {
@@ -192,6 +194,94 @@ func rewindActionLabel(i int) string {
 		return i18n.M.RewindSummarizeUpto
 	default:
 		return ""
+	}
+}
+
+// rewindItemCount is the number of selectable rows in the current rewind
+// stage: the turn list in stage 0, the action list in stage 1.
+func (m chatTUI) rewindItemCount() int {
+	r := m.rewind
+	if r == nil {
+		return 0
+	}
+	if r.stage == 0 {
+		return len(r.metas)
+	}
+	return len(rewindActions)
+}
+
+// rewindSheetRows is the number of item rows the rewind sheet shows.
+func (m chatTUI) rewindSheetRows() int {
+	n := m.rewindItemCount()
+	if n < rewindSheetRows {
+		return n
+	}
+	return rewindSheetRows
+}
+
+// inRewindScrollbar reports whether (x, y) is on the rewind picker's
+// scrollbar column (only when the list overflows the sheet).
+func (m chatTUI) inRewindScrollbar(x, y int) bool {
+	if m.rewind == nil {
+		return false
+	}
+	n := m.rewindItemCount()
+	rows := m.rewindSheetRows()
+	if n <= rows || rows <= 0 {
+		return false
+	}
+	top, _ := m.bottomSheetBounds(rows + 2) // title + items + hint footer
+	if y < top+1 || y >= top+1+rows {
+		return false
+	}
+	return x == m.contentWidth()-1
+}
+
+// rewindScrollbarGrabRowOffset returns where inside the thumb a click
+// grabbed, so the thumb doesn't jump to the cursor.
+func (m chatTUI) rewindScrollbarGrabRowOffset(row int) int {
+	if m.rewind == nil {
+		return 0
+	}
+	n := m.rewindItemCount()
+	rows := m.rewindSheetRows()
+	top, _ := m.bottomSheetBounds(rows + 2)
+	rowInMenu := row - (top + 1)
+	if rowInMenu < 0 {
+		rowInMenu = 0
+	}
+	sel := m.rewind.sel
+	if m.rewind.stage == 1 {
+		sel = m.rewind.scope
+	}
+	return sheetScrollbarGrabRowOffset(rowInMenu, rows, n, completionWindowStart(sel, n, rows))
+}
+
+// dragRewindScrollbar maps a drag row to a list position and moves the
+// selection there (the turn list in stage 0, the action list in stage 1).
+func (m *chatTUI) dragRewindScrollbar(row int) {
+	r := m.rewind
+	if r == nil || m.sheetScrollbar == nil {
+		return
+	}
+	n := m.rewindItemCount()
+	rows := m.rewindSheetRows()
+	if n <= rows {
+		return
+	}
+	top, _ := m.bottomSheetBounds(rows + 2)
+	rowInMenu := row - (top + 1)
+	if rowInMenu < 0 {
+		rowInMenu = 0
+	}
+	if rowInMenu >= rows {
+		rowInMenu = rows - 1
+	}
+	sel := sheetDragSel(rows, n, rowInMenu, m.sheetScrollbar.grab)
+	if r.stage == 0 {
+		r.sel = sel
+	} else {
+		r.scope = sel
 	}
 }
 

@@ -247,10 +247,12 @@ type chatTUI struct {
 	// dead target and dragging it never leaves a transcript selection behind.
 	scrollbarDrag       bool
 	scrollbarGrabOffset int
-	// completionScrollbarDrag owns left-button drags on the completion menu's
-	// right-edge scrollbar, mirroring scrollbarDrag for the tall picker sheet.
-	completionScrollbarDrag       bool
-	completionScrollbarGrabOffset int
+	// sheetScrollbar owns a left-button drag on a bottom-sheet picker's
+	// scrollbar column — the completion menu, the quick picker (/model,
+	// /provider, /resume), or the rewind picker. panel identifies the active
+	// sheet so motion/release dispatch to its model; grab is the offset inside
+	// the thumb where the drag started.
+	sheetScrollbar *sheetScrollbarDrag
 	// copyNoticeText is a transient "copied to clipboard" hint shown on the status
 	// line after a mouse-drag, right-click, or Ctrl+C selection copy; "" when none
 	// is showing. copyNoticeSeq guards its expiry tick so an older copy's timer
@@ -411,6 +413,13 @@ type tuiState int
 type sessionTitleCache struct {
 	path  string
 	title string
+}
+
+// sheetScrollbarDrag is the in-flight state of a left-button drag on a bottom
+// sheet's scrollbar column (completion menu, quick picker, or rewind picker).
+type sheetScrollbarDrag struct {
+	panel string // "completion" | "quick" | "rewind"
+	grab  int    // offset inside the thumb where the drag started
 }
 
 const (
@@ -951,19 +960,33 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		// Wheel over the completion panel scrolls the picker, not the transcript.
+		// Wheel over an open bottom sheet scrolls the picker, not the
+		// transcript — the completion menu, the quick picker, or the rewind
+		// picker all share the same sheet slot.
 		if m.completion.active {
 			if top, bottom := m.completionMenuBounds(); msg.Y >= top && msg.Y < bottom {
-				delta := 0
-				switch msg.Button {
-				case tea.MouseWheelUp:
-					delta = -1
-				case tea.MouseWheelDown:
-					delta = 1
-				}
+				delta := wheelDelta(msg.Button)
 				if delta != 0 {
 					m.moveCompletion(delta)
 				}
+				return m, nil
+			}
+		}
+		if p := m.quickPick; p != nil {
+			rows := m.quickPickerItemRows()
+			if top, _ := m.bottomSheetBounds(rows + m.quickPickerHeaderRows() + 1); msg.Y >= top && msg.Y < top+rows+m.quickPickerHeaderRows() {
+				items := p.filteredItems()
+				if len(items) > 0 {
+					p.selected = clampInt(p.selected+wheelDelta(msg.Button), len(items))
+				}
+				return m, nil
+			}
+		}
+		if m.rewind != nil {
+			rows := m.rewindSheetRows()
+			if top, _ := m.bottomSheetBounds(rows + 2); msg.Y >= top && msg.Y < top+2+rows {
+				delta := wheelDelta(msg.Button)
+				m.moveRewind(delta)
 				return m, nil
 			}
 		}
@@ -1030,11 +1053,21 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.composerSel = composerSelection{}
 		}
-		if msg.Button == tea.MouseLeft && m.inCompletionScrollbar(msg.X, msg.Y) {
-			m.completionScrollbarDrag = true
-			m.completionScrollbarGrabOffset = m.completionScrollbarGrabRowOffset(msg.Y)
-			m.dragCompletionScrollbar(msg.Y)
-			return m, nil
+		if msg.Button == tea.MouseLeft {
+			switch {
+			case m.inCompletionScrollbar(msg.X, msg.Y):
+				m.sheetScrollbar = &sheetScrollbarDrag{panel: "completion", grab: m.completionScrollbarGrabRowOffset(msg.Y)}
+				m.dragCompletionScrollbar(msg.Y)
+				return m, nil
+			case m.inQuickPickerScrollbar(msg.X, msg.Y):
+				m.sheetScrollbar = &sheetScrollbarDrag{panel: "quick", grab: m.quickPickerScrollbarGrabRowOffset(msg.Y)}
+				m.dragQuickPickerScrollbar(msg.Y)
+				return m, nil
+			case m.inRewindScrollbar(msg.X, msg.Y):
+				m.sheetScrollbar = &sheetScrollbarDrag{panel: "rewind", grab: m.rewindScrollbarGrabRowOffset(msg.Y)}
+				m.dragRewindScrollbar(msg.Y)
+				return m, nil
+			}
 		}
 		if msg.Button == tea.MouseLeft && m.inScrollbar(msg.X, msg.Y) {
 			m.sel = selection{}
@@ -1067,8 +1100,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.completionScrollbarDrag {
-			m.dragCompletionScrollbar(msg.Y)
+		if m.sheetScrollbar != nil {
+			m.dragSheetScrollbar(msg.Y)
 			return m, nil
 		}
 		if m.scrollbarDrag {
@@ -1133,10 +1166,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// terminal convention), while the highlight stays on as the visual
 		// "what's selected" cue and a right-click can still re-copy it. A plain
 		// click (no drag) clears any prior selection.
-		if m.completionScrollbarDrag {
-			m.dragCompletionScrollbar(msg.Y)
-			m.completionScrollbarDrag = false
-			m.completionScrollbarGrabOffset = 0
+		if m.sheetScrollbar != nil {
+			m.dragSheetScrollbar(msg.Y)
+			m.sheetScrollbar = nil
 			return m, nil
 		}
 		if m.scrollbarDrag {
@@ -1368,12 +1400,20 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.navigateQueue(-1) {
 					return m, nil
 				}
+				// No queued messages to browse: fall back to the submitted-input
+				// history so ↑/↓ still recall past prompts while a turn runs.
+				if m.recallSubmittedInput(-1) {
+					return m, nil
+				}
 			} else if m.recallSubmittedInput(-1) {
 				return m, nil
 			}
 		case "down":
 			if m.state == tuiRunning {
 				if m.navigateQueue(1) {
+					return m, nil
+				}
+				if m.recallSubmittedInput(1) {
 					return m, nil
 				}
 			} else if m.recallSubmittedInput(1) {
@@ -3337,6 +3377,36 @@ func cacheRateLabel(format string, hit, denom int) string {
 // number on a non-compacting DeepSeek session) and the session-aggregate rate
 // Σhit/Σ(hit+miss) (the steadier, cost-oriented number that matches the legacy
 // dashboard). "" before any cache tokens have been reported.
+// moveRewind moves the rewind picker's selection by delta, wrapping the turn
+// list in stage 0 and the action list in stage 1.
+func (m *chatTUI) moveRewind(delta int) {
+	r := m.rewind
+	if r == nil {
+		return
+	}
+	if r.stage == 0 {
+		if n := len(r.metas); n > 0 {
+			r.sel = ((r.sel+delta)%n + n) % n
+		}
+		return
+	}
+	if n := len(rewindActions); n > 0 {
+		r.scope = ((r.scope+delta)%n + n) % n
+	}
+}
+
+// wheelDelta maps a wheel button to a selection step: -1 up, +1 down, 0 for
+// non-wheel buttons.
+func wheelDelta(btn tea.MouseButton) int {
+	switch btn {
+	case tea.MouseWheelUp:
+		return -1
+	case tea.MouseWheelDown:
+		return 1
+	}
+	return 0
+}
+
 func (m chatTUI) cacheStatus() (body string, rate float64, ok bool) {
 	now := ""
 	nowRate := 0.0
@@ -4421,8 +4491,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			return nil
 		}
 		m.followSessionLease()
-		// Native scrollback keeps the old transcript; mark the fork with a fresh banner.
-		m.resetFreshContextView(false)
+		// A new conversation starts from a clean screen: drop the previous
+		// session's transcript entirely (scrollback grows unbounded otherwise
+		// and long sessions get visually noisy), then show the fresh banner.
+		m.resetFreshContextView(true)
 		m.notice(i18n.M.SlashNewDone)
 	case "/clear":
 		m.echoLocalCommand(input)

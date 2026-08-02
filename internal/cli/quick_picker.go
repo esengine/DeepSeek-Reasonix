@@ -5,7 +5,6 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/charmbracelet/x/ansi"
 )
 
 const quickPickerMaxVisible = 8
@@ -119,46 +118,33 @@ func (p *quickPicker) render(width int) string {
 	if p == nil {
 		return ""
 	}
-	w := max(width, 10)
-	contentWidth := max(w-8, 12)
 	items := p.filteredItems()
 	if p.selected >= len(items) {
 		p.selected = max(len(items)-1, 0)
 	}
-
-	var b strings.Builder
-	b.WriteString(accent(p.title) + "\n")
-	if p.query != "" {
-		b.WriteString("  " + dim("Search: ") + p.query + "\n")
-	}
 	if len(items) == 0 {
-		b.WriteString(dim("  No matches") + "\n")
-	} else {
-		start, end := quickPickerWindow(len(items), p.selected)
-		if start > 0 {
-			b.WriteString(dim("  ↑ more") + "\n")
+		// No matches: keep the sheet frame with a hint instead of an empty box.
+		return renderPickerSheet(p.title, p.query, nil, 0, quickPickerMaxVisible, width, "No matches")
+	}
+	rows := make([]pickerSheetRow, len(items))
+	for i, item := range items {
+		hint := ""
+		if item.Description != "" {
+			hint = item.Description
 		}
-		for i := start; i < end; i++ {
-			item := items[i]
-			label := ansi.Truncate(item.Label, contentWidth, "…")
-			if item.Status != "" {
-				label += " " + dim("("+item.Status+")")
+		if item.Status != "" {
+			if hint != "" {
+				hint += " · "
 			}
-			b.WriteString(rowLine(i == p.selected, i+1, "", label, item.Status == "active") + "\n")
-			if item.Description != "" {
-				b.WriteString(dim("     "+ansi.Truncate(item.Description, contentWidth, "…")) + "\n")
-			}
+			hint += item.Status
 		}
-		if end < len(items) {
-			b.WriteString(dim("  ↓ more") + "\n")
-		}
+		rows[i] = pickerSheetRow{label: item.Label, hint: hint}
 	}
 	hint := p.hint
 	if hint == "" {
 		hint = "Type to filter · ↑/↓ navigate · Enter select · Esc cancel"
 	}
-	b.WriteString(dim(hint))
-	return choicePanelStyle.Width(w).Render(b.String())
+	return renderPickerSheet(p.title, p.query, rows, p.selected, quickPickerMaxVisible, width, hint)
 }
 
 func quickPickerWindow(total, selected int) (int, int) {
@@ -173,4 +159,90 @@ func quickPickerWindow(total, selected int) (int, int) {
 		start = maxStart
 	}
 	return start, start + quickPickerMaxVisible
+}
+
+// quickPickerItemRows returns the number of item rows the quick picker's
+// sheet shows: at most quickPickerMaxVisible, never more than the list.
+func (m chatTUI) quickPickerItemRows() int {
+	p := m.quickPick
+	if p == nil {
+		return 0
+	}
+	items := p.filteredItems()
+	if len(items) < quickPickerMaxVisible {
+		return len(items)
+	}
+	return quickPickerMaxVisible
+}
+
+// quickPickerHeaderRows counts the title + search lines above the item rows.
+func (m chatTUI) quickPickerHeaderRows() int {
+	if m.quickPick == nil {
+		return 0
+	}
+	h := 1
+	if m.quickPick.query != "" {
+		h++
+	}
+	return h
+}
+
+// inQuickPickerScrollbar reports whether (x, y) is on the quick picker's
+// scrollbar column (only when the filtered list overflows the sheet).
+func (m chatTUI) inQuickPickerScrollbar(x, y int) bool {
+	p := m.quickPick
+	if p == nil {
+		return false
+	}
+	items := p.filteredItems()
+	rows := m.quickPickerItemRows()
+	if len(items) <= rows || rows <= 0 {
+		return false
+	}
+	top, _ := m.bottomSheetBounds(rows + m.quickPickerHeaderRows() + 1) // + hint footer
+	itemsTop := top + m.quickPickerHeaderRows()
+	if y < itemsTop || y >= itemsTop+rows {
+		return false
+	}
+	return x == m.contentWidth()-1
+}
+
+// quickPickerScrollbarGrabRowOffset returns where inside the thumb a click
+// grabbed, so the thumb doesn't jump to the cursor.
+func (m chatTUI) quickPickerScrollbarGrabRowOffset(row int) int {
+	p := m.quickPick
+	if p == nil {
+		return 0
+	}
+	items := p.filteredItems()
+	rows := m.quickPickerItemRows()
+	top, _ := m.bottomSheetBounds(rows + m.quickPickerHeaderRows() + 1)
+	rowInMenu := row - (top + m.quickPickerHeaderRows())
+	if rowInMenu < 0 {
+		rowInMenu = 0
+	}
+	return sheetScrollbarGrabRowOffset(rowInMenu, rows, len(items), completionWindowStart(p.selected, len(items), rows))
+}
+
+// dragQuickPickerScrollbar maps a drag row to a list position and moves the
+// selection there.
+func (m *chatTUI) dragQuickPickerScrollbar(row int) {
+	p := m.quickPick
+	if p == nil || m.sheetScrollbar == nil {
+		return
+	}
+	items := p.filteredItems()
+	rows := m.quickPickerItemRows()
+	if len(items) <= rows {
+		return
+	}
+	top, _ := m.bottomSheetBounds(rows + m.quickPickerHeaderRows() + 1)
+	rowInMenu := row - (top + m.quickPickerHeaderRows())
+	if rowInMenu < 0 {
+		rowInMenu = 0
+	}
+	if rowInMenu >= rows {
+		rowInMenu = rows - 1
+	}
+	p.selected = sheetDragSel(rows, len(items), rowInMenu, m.sheetScrollbar.grab)
 }

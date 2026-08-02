@@ -105,7 +105,7 @@ func TestCompletionScrollbarClickDragRelease(t *testing.T) {
 	// Left-click on the scrollbar column starts a drag and moves the selection.
 	m0, _ := m.Update(tea.MouseClickMsg{X: barX, Y: top + 2, Button: tea.MouseLeft})
 	m = m0.(chatTUI)
-	if !m.completionScrollbarDrag {
+	if m.sheetScrollbar == nil || m.sheetScrollbar.panel != "completion" {
 		t.Fatal("left-click on the completion scrollbar should start a drag")
 	}
 	if m.completion.sel == 0 {
@@ -128,7 +128,7 @@ func TestCompletionScrollbarClickDragRelease(t *testing.T) {
 	// Release ends the drag.
 	m0, _ = m.Update(tea.MouseReleaseMsg{X: barX, Y: bottom, Button: tea.MouseLeft})
 	m = m0.(chatTUI)
-	if m.completionScrollbarDrag {
+	if m.sheetScrollbar != nil {
 		t.Fatal("mouse release should end the completion scrollbar drag")
 	}
 }
