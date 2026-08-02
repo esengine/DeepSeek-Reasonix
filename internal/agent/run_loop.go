@@ -32,9 +32,19 @@ type runLoopState struct {
 	todoProgress         int
 	trackingTodoProgress bool
 	todoStallRounds      int
-	seenTodoProgress     map[string]struct{}
+	// todoWorkRounds counts consecutive tool-call rounds that produced fresh
+	// host-observed work (read/command/mutation) without advancing the todo.
+	// Unlike todoStallRounds — which work deliberately renews — this accumulates
+	// so a productive model is still nudged to sign off the current item as it
+	// finishes, instead of batching every completion at the end of the task.
+	todoWorkRounds   int
+	seenTodoProgress map[string]struct{}
 
 	executorHandoff bool
+	// failureNudgeStep is the tool-loop step of the last failure-reflection
+	// nudge (-1 = none yet this turn). A nudge is injected at most every two
+	// rounds so a long recovery is guided without being nagged.
+	failureNudgeStep int
 	// input is the user turn text after withTurnPreferences (used by handoff
 	// nudges that inspect the original request wording).
 	input string
@@ -167,6 +177,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 		todoStallRounds:      0,
 		seenTodoProgress:     make(map[string]struct{}),
 		executorHandoff:      a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker),
+		failureNudgeStep:     -1,
 		input:                input,
 	}
 	state.todoProgress, state.trackingTodoProgress = a.canonicalTodoProgress()
@@ -403,6 +414,23 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 			Name:       call.Name,
 		})
 	}
+	// Failed tool calls deserve a structured reassessment before the next
+	// model round: the model already sees the raw error texts, but a short
+	// nudge to analyse before acting cuts blind retries (self-correction
+	// pattern). Injected at most every two rounds so long recoveries are
+	// guided, not nagged; the todo-stall and loop guards stay the hard stops.
+	if len(batch.failedNames) > 0 && (state.failureNudgeStep < 0 || step-state.failureNudgeStep >= 2) {
+		state.failureNudgeStep = step
+		a.session.Add(provider.Message{
+			Role:    provider.RoleUser,
+			Content: a.withTurnPreferences(hostReflectionMessage(batch.failedNames)),
+		})
+		a.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+			Text:   "tool failures; asking the assistant to analyse before acting",
+			Detail: fmt.Sprintf("injected a failure-reflection nudge after %d failed tool call(s): %s", len(batch.failedNames), strings.Join(batch.failedNames, ", ")),
+		})
+	}
 	// If the context was cancelled during tool execution, return after storing
 	// the batch results so the session keeps paired tool-call history.
 	if ctx.Err() != nil {
@@ -423,10 +451,22 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		switch {
 		case !nextTracking:
 			state.todoStallRounds = 0
-		case !state.trackingTodoProgress || nextProgress > state.todoProgress || hostProgress:
+			state.todoWorkRounds = 0
+		case !state.trackingTodoProgress || nextProgress > state.todoProgress:
+			// A completion advanced the list (or tracking just started): full
+			// reset of both the stall lease and the sign-off counter.
 			state.todoStallRounds = 0
+			state.todoWorkRounds = 0
+		case hostProgress:
+			// Productive work renews the stall lease (a working model is not
+			// stalled), but it accumulates the sign-off counter so the current
+			// todo item gets signed off as it finishes rather than all at once
+			// during final verification.
+			state.todoStallRounds = 0
+			state.todoWorkRounds++
 		default:
 			state.todoStallRounds++
+			state.todoWorkRounds = 0
 		}
 		state.todoProgress, state.trackingTodoProgress = nextProgress, nextTracking
 		if state.todoStallRounds == todoProgressNudgeRounds {
@@ -445,6 +485,20 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 				Detail: fmt.Sprintf("the current todo has no new completion, unique read, command, or mutation for %d consecutive tool-call rounds after a host reassessment; work is saved and can be resumed", state.todoStallRounds),
 			})
 			return false, &todoStallPause{rounds: state.todoStallRounds}
+		}
+		// Sign-off reminder: productive rounds without a completion deserve a
+		// nudge too. It is a reminder only — the turn keeps running — and it
+		// repeats on a fixed cadence so a model that keeps working without
+		// signing off is re-prompted rather than batch-completing at the end.
+		if state.todoWorkRounds == todoSignoffNudgeRounds {
+			state.todoWorkRounds = 0 // re-arm for the next cadence
+			nudge := todoSignoffNudgeMessage()
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
+			a.sink.Emit(event.Event{
+				Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+				Text:   "Sign off the current todo item as it finishes.",
+				Detail: fmt.Sprintf("the current todo produced fresh work for %d consecutive tool-call rounds without a complete_step sign-off; reminding the assistant to sign off each item as it is done", todoSignoffNudgeRounds),
+			})
 		}
 	}
 

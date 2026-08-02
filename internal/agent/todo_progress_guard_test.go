@@ -137,3 +137,80 @@ func mustBuiltinTool(t *testing.T, name string) tool.Tool {
 	}
 	return builtin
 }
+
+func TestTodoSignoffNudgePromptsProductiveModelToSignOff(t *testing.T) {
+	turns := []testutil.Turn{{ToolCalls: []provider.ToolCall{{
+		ID: "todo", Name: "todo_write",
+		Arguments: `{"todos":[{"content":"finish the task","status":"in_progress"}]}`,
+	}}}}
+	// Fresh unique reads every round: productive work that renews the stall
+	// lease but accumulates the sign-off counter past its nudge threshold.
+	for i := 0; i < todoSignoffNudgeRounds; i++ {
+		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID: fmt.Sprintf("read-%d", i), Name: "inspect",
+			Arguments: fmt.Sprintf(`{"path":"file-%d.txt"}`, i),
+		}}})
+	}
+	turns = append(turns,
+		testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID: "done", Name: "complete_step",
+			Arguments: `{"step":"finish the task","result":"done","evidence":[{"kind":"files","summary":"read the files","paths":["file-0.txt"]}]}`,
+		}}},
+		testutil.Turn{Text: "done"},
+	)
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "inspect", readOnly: true})
+	reg.Add(mustBuiltinTool(t, "todo_write"))
+	reg.Add(mustBuiltinTool(t, "complete_step"))
+	a := New(testutil.NewMock("m", turns...), reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "finish the todo"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !sessionContains(a, "Sign-off check") {
+		t.Fatal("productive rounds without a sign-off should receive the sign-off reminder")
+	}
+}
+
+func TestTodoSignoffNudgeResetsAfterCompletion(t *testing.T) {
+	turns := []testutil.Turn{{ToolCalls: []provider.ToolCall{{
+		ID: "todo", Name: "todo_write",
+		Arguments: `{"todos":[{"content":"finish the task","status":"in_progress"}]}`,
+	}}}}
+	// A few productive rounds, then a sign-off (completion) — after that the
+	// sign-off counter resets, so a follow-up run of work must not have been
+	// pre-counted toward the nudge from before the completion.
+	for i := 0; i < todoSignoffNudgeRounds-1; i++ {
+		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID: fmt.Sprintf("read-%d", i), Name: "inspect",
+			Arguments: fmt.Sprintf(`{"path":"a-%d.txt"}`, i),
+		}}})
+	}
+	turns = append(turns,
+		testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID: "done", Name: "complete_step",
+			Arguments: `{"step":"finish the task","result":"done","evidence":[{"kind":"files","summary":"did the work","paths":["a-0.txt"]}]}`,
+		}}},
+	)
+	// After completion, further work re-accumulates from zero; one round below
+	// the threshold must not carry the pre-completion count.
+	for i := 0; i < todoSignoffNudgeRounds-1; i++ {
+		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
+			ID: fmt.Sprintf("read-b-%d", i), Name: "inspect",
+			Arguments: fmt.Sprintf(`{"path":"b-%d.txt"}`, i),
+		}}})
+	}
+	turns = append(turns, testutil.Turn{Text: "done"})
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "inspect", readOnly: true})
+	reg.Add(mustBuiltinTool(t, "todo_write"))
+	reg.Add(mustBuiltinTool(t, "complete_step"))
+	a := New(testutil.NewMock("m", turns...), reg, NewSession(""), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "finish the todo"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sessionContains(a, "Sign-off check") {
+		t.Fatal("sign-off counter should reset after a completion; no reminder before the re-accumulated threshold")
+	}
+}

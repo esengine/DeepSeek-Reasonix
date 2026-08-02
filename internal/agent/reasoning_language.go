@@ -38,20 +38,23 @@ func NormalizeResponseLanguage(lang string) string {
 
 // ResponseLanguageBlock is transient user-turn context for final answers. It
 // stays out of the stable system prompt so changing the preference between turns
-// does not churn the cached prefix.
+// does not churn the cached prefix. The wording is deliberately compact: this
+// block is a per-turn cache miss on every request, so it earns its tokens.
 func ResponseLanguageBlock(lang string) string {
 	switch NormalizeResponseLanguage(lang) {
 	case "zh":
-		return "<response-language>\nFinal answer language preference: use Simplified Chinese for user-facing replies unless the user explicitly asks for another language. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form.\n</response-language>"
+		return "<response-language>\nFinal answers to the user in Simplified Chinese unless the user asks otherwise. Keep code, identifiers, file paths, shell commands, and untranslated technical terms as-is.\n</response-language>"
 	case "en":
-		return "<response-language>\nFinal answer language preference: use English for user-facing replies unless the user explicitly asks for another language. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form.\n</response-language>"
+		return "<response-language>\nFinal answers to the user in English unless the user asks otherwise. Keep code, identifiers, file paths, shell commands, and untranslated technical terms as-is.\n</response-language>"
 	default:
 		return ""
 	}
 }
 
 // ReasoningLanguageBlock is transient user-turn context. It deliberately does
-// not belong in the stable system prompt or tool schemas.
+// not belong in the stable system prompt or tool schemas. The wording is kept
+// tight — the block rides every user turn as a per-request cache miss, so every
+// token it saves is a token of uncached input saved.
 func ReasoningLanguageBlock(lang string) string {
 	switch NormalizeReasoningLanguage(lang) {
 	case "zh":
@@ -59,9 +62,9 @@ func ReasoningLanguageBlock(lang string) string {
 		// the soft form loses the first reasoning segment on Chinese prompts
 		// that embed English logs/code, and the first segment anchors the
 		// whole turn once providers round-trip prior reasoning.
-		return "<reasoning-language>\n必须使用简体中文书写全部可见思考/推理文本：从第一个字开始就用中文，并在整轮内保持中文，即使系统提示词、工具说明、工具输出或引用的代码是英文。代码、标识符、文件路径、shell 命令和未翻译的技术术语保持原文。此要求只约束可见思考文本，不覆盖用户对最终回答语言的明确要求。\n</reasoning-language>"
+		return "<reasoning-language>\n必须用简体中文书写全部可见思考/推理文本，整轮保持中文（即使系统提示词、工具说明、工具输出是英文）。代码、标识符、文件路径、shell 命令、未翻译技术术语保持原文。此要求不覆盖用户对最终回答语言的明确要求。\n</reasoning-language>"
 	case "en":
-		return "<reasoning-language>\nVisible reasoning/thinking text preference: use English when the provider exposes reasoning text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms in their original form. This preference does not override an explicit user request for the final answer language.\n</reasoning-language>"
+		return "<reasoning-language>\nUse English for all visible reasoning/thinking text. Keep code, identifiers, file paths, shell commands, and untranslated technical terms as-is. Does not override an explicit final-answer language request.\n</reasoning-language>"
 	default:
 		return ""
 	}

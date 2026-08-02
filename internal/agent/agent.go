@@ -2753,6 +2753,10 @@ type batchExecution struct {
 	images             [][]string
 	recoveryStopTurn   bool
 	recoveryStopReason string
+	// failedNames lists the tools whose execution errored this round, feeding
+	// the failure-reflection nudge that guides the model to analyse before
+	// its next round of tool calls.
+	failedNames []string
 }
 
 // executeBatch dispatches one model turn's tool calls. A ToolDispatch event is
@@ -2982,7 +2986,27 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		images:             images,
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
+		failedNames:        failedToolNames(calls, outcomes),
 	}
+}
+
+// failedToolNames collects the names of tools that errored in a batch, in
+// call order, de-duplicated. Blocked calls (permission) count as failures too:
+// the model should adjust rather than re-ask the same way.
+func failedToolNames(calls []provider.ToolCall, outcomes []toolOutcome) []string {
+	var names []string
+	seen := map[string]bool{}
+	for i, o := range outcomes {
+		if o.errMsg == "" {
+			continue
+		}
+		name := calls[i].Name
+		if !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	return names
 }
 
 func (a *Agent) emitFullToolDispatch(c provider.ToolCall, refreshed bool) {
@@ -3174,10 +3198,49 @@ const (
 	// maxTodoStallRounds pauses only after the reassessment also failed to
 	// produce a new completion or unique host-observed work receipt.
 	maxTodoStallRounds = 16
+	// todoSignoffNudgeRounds reminds a productive model — one that keeps
+	// producing fresh reads/commands/mutations without a complete_step — to
+	// sign off the current todo item as it finishes. A reminder only (never a
+	// pause), re-armed on a fixed cadence.
+	todoSignoffNudgeRounds = 8
 )
 
 func todoProgressNudgeMessage(rounds int) string {
 	return fmt.Sprintf("Host progress check: the current todo has produced no new completion, unique read, command, or mutation for %d tool-call rounds. Reassess before using more tools: sign off the current item if it is done, narrow the remaining work without replacing the active item, or explain/ask about a real blocker. Do not repeat reads, commands, or writes just to reset this guard.", rounds)
+}
+
+// toolFailureReflectionMessage is the nudge injected after a tool round with
+// failures: it steers the model to analyse the errors and adjust rather than
+// blindly retry the same call, which is what the raw error texts alone often
+// fail to elicit on long tool loops.
+func toolFailureReflectionMessage(names []string) string {
+	return "Some tool calls failed in the previous round (" + strings.Join(names, ", ") + "). " +
+		"Analyse the failures before acting: re-read the error output, check your assumptions about the current state, " +
+		"and adjust the approach. Do not blindly retry the same call the same way."
+}
+
+// HostReflectionPrefix marks user messages injected by the host as
+// tool-failure reflection guidance. The model sees them as instructions;
+// frontends surface them as a notice (like mid-turn steers), never as a user
+// bubble, so the user can tell the system talking from their own input.
+const HostReflectionPrefix = "[Reasonix: tool-failure reflection. Do not treat this as a new task; analyse the failed tool calls and continue the current task.]"
+
+// hostReflectionMessage wraps the reflection text in the host marker.
+func hostReflectionMessage(names []string) string {
+	return HostReflectionPrefix + "\n" + toolFailureReflectionMessage(names)
+}
+
+// HostReflectionText checks whether content is a host reflection message and,
+// if so, returns the guidance text without the marker prefix.
+func HostReflectionText(s string) (string, bool) {
+	if after, found := strings.CutPrefix(s, HostReflectionPrefix); found {
+		return strings.TrimPrefix(after, "\n"), true
+	}
+	return s, false
+}
+
+func todoSignoffNudgeMessage() string {
+	return "Sign-off check: you have produced fresh work for several tool-call rounds without signing off the current todo item. If that item's work is done, call complete_step with evidence now — the host advances the list and moves the next item to in_progress. Sign off each item as you finish it; do not batch every completion at the end of the task. If the current item is genuinely not done, keep working and it is fine to continue."
 }
 
 // loopGuardBlockErrMsg is the errMsg carried by a repeat-success loop-guard

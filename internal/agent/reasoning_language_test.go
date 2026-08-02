@@ -8,7 +8,7 @@ import (
 func TestWithResponseLanguageOnlySkipsLeadingInjectedBlock(t *testing.T) {
 	userMention := "explain why <response-language> appears in this file"
 	got := WithResponseLanguage(userMention, "en")
-	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "use English") || !strings.HasSuffix(got, userMention) {
+	if !strings.HasPrefix(got, "<response-language>") || !strings.Contains(got, "in English") || !strings.HasSuffix(got, userMention) {
 		t.Fatalf("WithResponseLanguage should prefix user-authored tag mentions, got %q", got)
 	}
 
@@ -46,7 +46,7 @@ func TestReasoningLanguageBlockZhStaysImperative(t *testing.T) {
 	// Chinese prompts that embed English logs/code; keep it from regressing
 	// back into a suggestion.
 	block := ReasoningLanguageBlock("zh")
-	for _, want := range []string{"必须使用简体中文", "整轮", "不覆盖用户对最终回答语言的明确要求"} {
+	for _, want := range []string{"必须用简体中文", "整轮", "不覆盖用户对最终回答语言的明确要求"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("zh reasoning block lost required anchor %q:\n%s", want, block)
 		}
@@ -77,7 +77,7 @@ func TestWithReasoningLanguageAutoUsesRawSourceOverReferencedContext(t *testing.
 	if !strings.HasPrefix(got, "<reasoning-language>") || !strings.Contains(got, "简体中文") {
 		t.Fatalf("auto reasoning language should use raw source over referenced context, got %q", got)
 	}
-	if strings.Contains(got, "use English") {
+	if strings.Contains(got, "in English") {
 		t.Fatalf("referenced English code should not make auto prefer English:\n%s", got)
 	}
 }
