@@ -293,6 +293,19 @@ func (c *client) WarnOnMissingToolCallReasoning() bool {
 	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model, c.thinkingType)
 }
 
+// MissingToolCallReasoningExpected reports whether an empty reasoning block on
+// a tool-call turn is the model's normal behaviour: with auto thinking (no
+// explicit thinking.type), lightweight DeepSeek models may return a tool call
+// without a reasoning block on rounds that need no extended thought. With
+// thinking explicitly enabled, a missing block is a real fault and stays a
+// warning.
+func (c *client) MissingToolCallReasoningExpected() bool {
+	if !c.deepseek || strings.TrimSpace(c.thinkingType) != "" {
+		return false
+	}
+	return expectsDeepSeekToolCallReasoning(c.model, c.thinkingType)
+}
+
 func expectsDeepSeekToolCallReasoning(model, thinkingType string) bool {
 	if strings.EqualFold(strings.TrimSpace(thinkingType), "enabled") {
 		return true

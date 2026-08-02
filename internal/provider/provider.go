@@ -781,6 +781,26 @@ type MissingToolCallReasoningWarningIdentityPolicy interface {
 	MissingToolCallReasoningWarningIdentity() string
 }
 
+// MissingToolCallReasoningExpectedPolicy marks providers where an empty
+// reasoning_content on a tool-call turn is an expected model behaviour (auto
+// thinking on lightweight models) rather than a compatibility incident.
+type MissingToolCallReasoningExpectedPolicy interface {
+	MissingToolCallReasoningExpected() bool
+}
+
+// MissingToolCallReasoningExpected reports whether the provider treats a
+// missing reasoning block on a tool-call turn as expected behaviour (info
+// level) instead of a compatibility fault (warning).
+func MissingToolCallReasoningExpected(p Provider) bool {
+	if nilutil.IsNil(p) {
+		return false
+	}
+	if policy, ok := p.(MissingToolCallReasoningExpectedPolicy); ok {
+		return policy.MissingToolCallReasoningExpected()
+	}
+	return false
+}
+
 // WarnOnMissingToolCallReasoning reports whether a tool_calls turn with empty
 // reasoning_content should surface a visible warning.
 func WarnOnMissingToolCallReasoning(p Provider) bool {

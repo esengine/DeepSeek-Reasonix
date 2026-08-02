@@ -660,3 +660,32 @@ func TestRunStoresTransformedNonToolReasoningForToolCallOnlyProvider(t *testing.
 		t.Fatalf("stored non-tool reasoning = %q, want transformed display text", got)
 	}
 }
+
+type expectedMissingReasoningProvider struct {
+	*testutil.MockProvider
+}
+
+func (p expectedMissingReasoningProvider) RequiresToolCallReasoning() bool        { return true }
+func (p expectedMissingReasoningProvider) MissingToolCallReasoningExpected() bool { return true }
+
+// TestRunExpectedMissingToolCallReasoningIsSilent proves that when the
+// provider declares a missing reasoning block expected (auto thinking on
+// lightweight models), the incident is fully silent: no notice, no warning —
+// the round proceeds with auto reasoning exactly as designed.
+func TestRunExpectedMissingToolCallReasoningIsSilent(t *testing.T) {
+	mp := testutil.NewMock("deepseek-flash",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
+		testutil.Turn{Text: "done"},
+	)
+	sink := &recordSink{}
+	a := New(expectedMissingReasoningProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	for _, e := range sink.kinds(event.Notice) {
+		if strings.Contains(e.Text, "thinking") {
+			t.Fatalf("expected-behaviour incident should be silent, got notice: %s", e.Text)
+		}
+	}
+}

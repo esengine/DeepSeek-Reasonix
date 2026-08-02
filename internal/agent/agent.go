@@ -1323,6 +1323,15 @@ func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasonin
 	if a.missingReasoningWarnPendingResolveAt.IsZero() {
 		a.missingReasoningWarnStateChecked = true
 	}
+	if provider.MissingToolCallReasoningExpected(a.prov) {
+		// Auto thinking on a lightweight model: a tool-call round without a
+		// reasoning block is the model's normal behaviour on simple rounds,
+		// and the round proceeds with auto reasoning exactly as designed. No
+		// user-facing notice — there is nothing to act on, so the transcript
+		// stays clean. Explicit thinking mode missing a block is a real fault
+		// and still warns below.
+		return
+	}
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 		Text:   fmt.Sprintf("%s returned tool calls without replayable thinking content; continuing with degraded reasoning (shown once for this incident)", a.prov.Name()),
 		Detail: fmt.Sprintf("this round carried %d tool call(s), but the endpoint omitted the thinking content DeepSeek requires clients to replay. Check the selected model, endpoint, and reasoning protocol. Repeated broken rounds are rate-limited for this exact provider configuration for up to 24 hours; a healthy tool-call turn re-arms future regressions.", len(calls))})

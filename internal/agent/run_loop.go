@@ -425,10 +425,13 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 			Role:    provider.RoleUser,
 			Content: a.withTurnPreferences(hostReflectionMessage(batch.failedNames)),
 		})
+		// The failed-tool card above already names the errors; this notice only
+		// marks the reassessment so the transcript doesn't look like a silent
+		// retry.
 		a.sink.Emit(event.Event{
 			Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
-			Text:   "tool failures; asking the assistant to analyse before acting",
-			Detail: fmt.Sprintf("injected a failure-reflection nudge after %d failed tool call(s): %s", len(batch.failedNames), strings.Join(batch.failedNames, ", ")),
+			Text:   fmt.Sprintf("asked the assistant to reassess %d failed tool call(s) before continuing", len(batch.failedNames)),
+			Detail: strings.Join(batch.failedNames, ", "),
 		})
 	}
 	// If the context was cancelled during tool execution, return after storing
