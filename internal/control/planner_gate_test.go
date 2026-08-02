@@ -464,3 +464,25 @@ func TestPlannerPolicyUsesPristineMetadataInsteadOfInjectedContext(t *testing.T)
 		t.Fatalf("decision used injected context instead of pristine user text: %+v", got)
 	}
 }
+
+func TestPlannerResearchRoundsScalesWithComplexity(t *testing.T) {
+	cases := []struct {
+		name string
+		f    plannerFeatures
+		want int
+	}{
+		{"high risk keeps full budget", plannerFeatures{work: true, highRisk: true}, plannerFullResearchRounds},
+		{"cross-surface keeps full budget", plannerFeatures{work: true, crossSurface: true}, plannerFullResearchRounds},
+		{"structured keeps full budget", plannerFeatures{structured: true}, plannerFullResearchRounds},
+		{"ambiguous work gets medium", plannerFeatures{work: true, ambiguous: true}, plannerMediumResearchRounds},
+		{"complex scoped work gets medium", plannerFeatures{work: true, complex: true}, plannerMediumResearchRounds},
+		{"plain work gets light", plannerFeatures{work: true}, plannerLightResearchRounds},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := plannerResearchRounds(tc.f); got != tc.want {
+				t.Fatalf("plannerResearchRounds(%+v) = %d, want %d", tc.f, got, tc.want)
+			}
+		})
+	}
+}

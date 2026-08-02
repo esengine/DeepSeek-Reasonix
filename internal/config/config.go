@@ -1253,6 +1253,13 @@ type ProviderEntry struct {
 	// Empty = provider default.
 	Thinking string `toml:"thinking"`
 	Effort   string `toml:"effort"`
+	// ToolsStrict enables the provider's strict function-calling mode
+	// (DeepSeek beta: base_url must point at the /beta endpoint). Every tool
+	// schema is rewritten to the strict form — all object properties required
+	// with additionalProperties:false, unsupported subset keywords removed —
+	// so the server validates the model's tool arguments instead of accepting
+	// sloppy JSON.
+	ToolsStrict bool `toml:"tools_strict"`
 	// Vision marks the model as accepting image input. When set, images the user
 	// attaches are embedded in the request (image_url for openai-kind, base64
 	// blocks for anthropic). Off by default: text-only models 400 on image input,

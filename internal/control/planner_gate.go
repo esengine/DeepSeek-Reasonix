@@ -12,9 +12,27 @@ import (
 )
 
 const (
-	plannerLightResearchRounds = 2
-	plannerFullResearchRounds  = 6
+	plannerLightResearchRounds  = 2
+	plannerMediumResearchRounds = 4
+	plannerFullResearchRounds   = 6
 )
+
+// plannerResearchRounds picks the planner's research budget for a full-depth
+// plan by task complexity. High-risk, cross-surface, and structured requests
+// keep the full budget; ambiguous and complex-but-scoped intents get a medium
+// budget (they need more study than a simple task, without over-researching);
+// everything else that still plans gets the light budget, so simple work is
+// not over-studied while genuinely broad work keeps enough rounds.
+func plannerResearchRounds(f plannerFeatures) int {
+	switch {
+	case f.highRisk || f.crossSurface || f.structured:
+		return plannerFullResearchRounds
+	case f.ambiguous || f.complex:
+		return plannerMediumResearchRounds
+	default:
+		return plannerLightResearchRounds
+	}
+}
 
 const (
 	plannerReasonExplicitPlanMode    = "explicit_plan_mode"
@@ -134,17 +152,20 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 	}
 
 	features := plannerFeaturesFor(text, lower)
+	// Feature-driven full-depth plans size their research budget to the task
+	// (see plannerResearchRounds): broad/risky work keeps the full budget,
+	// scoped work gets a lighter one.
 	if features.work && features.highRisk {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonHighRisk)
+		return plannerPlanDecisionRounds(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonHighRisk, plannerResearchRounds(features))
 	}
 	if features.multiFile || features.crossSurface {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonCrossSurface)
+		return plannerPlanDecisionRounds(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonCrossSurface, plannerResearchRounds(features))
 	}
 	if features.structured {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonStructuredRequest)
+		return plannerPlanDecisionRounds(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonStructuredRequest, plannerResearchRounds(features))
 	}
 	if features.complex {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonComplexIntent)
+		return plannerPlanDecisionRounds(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonComplexIntent, plannerResearchRounds(features))
 	}
 	if features.atomic {
 		return plannerExecutorDecision(plannerReasonAtomicEdit)
@@ -156,13 +177,13 @@ func DecidePlannerRoute(ctx context.Context, input string) agent.PlannerDecision
 		return plannerExecutorDecision(plannerReasonReadOnlyAction)
 	}
 	if meta.GoalActive && features.work {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonGoalActive)
+		return plannerPlanDecisionRounds(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonGoalActive, plannerResearchRounds(features))
 	}
 	if meta.DeliveryProfile && features.work {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonWorkRequest)
+		return plannerPlanDecisionRounds(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonWorkRequest, plannerResearchRounds(features))
 	}
 	if features.work && features.ambiguous {
-		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonAmbiguousWork)
+		return plannerPlanDecisionRounds(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthFull, plannerReasonAmbiguousWork, plannerResearchRounds(features))
 	}
 	if features.work && features.anchored {
 		return plannerPlanDecision(agent.PlannerRoutePlanAndExecute, agent.PlannerDepthLight, plannerReasonAnchoredWork)
@@ -186,6 +207,12 @@ func plannerPlanDecision(route agent.PlannerRoute, depth agent.PlannerDepth, rea
 	if depth == agent.PlannerDepthFull {
 		rounds = plannerFullResearchRounds
 	}
+	return plannerPlanDecisionRounds(route, depth, reason, rounds)
+}
+
+// plannerPlanDecisionRounds is plannerPlanDecision with an explicit research
+// budget, used by the feature-driven routes that size the planner to the task.
+func plannerPlanDecisionRounds(route agent.PlannerRoute, depth agent.PlannerDepth, reason string, rounds int) agent.PlannerDecision {
 	return agent.PlannerDecision{
 		Route:             route,
 		Depth:             depth,

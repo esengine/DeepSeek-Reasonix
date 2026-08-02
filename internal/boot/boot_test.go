@@ -658,7 +658,7 @@ model = "x"
 	if len(reqs) == 0 {
 		t.Fatal("provider requests = 0, want at least one")
 	}
-	if got := bootLastUser(reqs[0]); !strings.Contains(got, "<response-language>") || !strings.Contains(got, "use English") {
+	if got := bootLastUser(reqs[0]); !strings.Contains(got, "<response-language>") || !strings.Contains(got, "in English") {
 		t.Fatalf("first user turn = %q, want English response preference", got)
 	}
 }

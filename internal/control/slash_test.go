@@ -522,3 +522,79 @@ func TestManagementMigrateFromImportsExplicitSessions(t *testing.T) {
 		}
 	}
 }
+
+func TestSkillArgItemsIncludesInstalledSkills(t *testing.T) {
+	d := ArgData{
+		Skills: []skill.Skill{
+			{Name: "review", Scope: skill.ScopeProject, Description: "review the diff"},
+			{Name: "explore", Scope: skill.ScopeGlobal, Description: "investigate"},
+		},
+	}
+	items, from := SlashArgItems("/skills ", d)
+	if from != len("/skills ") {
+		t.Fatalf("replaceFrom = %d, want %d", from, len("/skills "))
+	}
+	if !has(items, "show") || !has(items, "enable") || !has(items, "paths") {
+		t.Fatalf("/skills picker missing management commands: %v", labelsOf(items))
+	}
+	if !has(items, "review") || !has(items, "explore") {
+		t.Fatalf("/skills picker missing installed skills: %v", labelsOf(items))
+	}
+	// Management commands rank before the skills.
+	showIdx, reviewIdx := -1, -1
+	for i, it := range items {
+		switch it.Label {
+		case "show":
+			showIdx = i
+		case "review":
+			reviewIdx = i
+		}
+	}
+	if showIdx < 0 || reviewIdx < 0 || reviewIdx < showIdx {
+		t.Fatalf("skills should follow the management commands: %v", labelsOf(items))
+	}
+	// A picked skill inserts its name plus a space, ready to run.
+	for _, it := range items {
+		if it.Label == "explore" && it.Insert != "explore " {
+			t.Fatalf("skill insert = %q, want %q", it.Insert, "explore ")
+		}
+	}
+}
+
+func TestMCPArgItemsIncludesConfiguredServers(t *testing.T) {
+	d := ArgData{
+		ServerNames:     []string{"filesystem"},
+		ConfiguredMCP:   []string{"filesystem", "github"},
+		DisconnectedMCP: []string{"github"},
+	}
+	items, _ := SlashArgItems("/mcp ", d)
+	for _, want := range []string{"add", "connect", "show", "tools", "remove", "import"} {
+		if !has(items, want) {
+			t.Fatalf("/mcp picker missing management command %q: %v", want, labelsOf(items))
+		}
+	}
+	if !has(items, "filesystem") || !has(items, "github") {
+		t.Fatalf("/mcp picker missing configured servers: %v", labelsOf(items))
+	}
+	addIdx, fsIdx := -1, -1
+	for i, it := range items {
+		switch it.Label {
+		case "add":
+			addIdx = i
+		case "filesystem":
+			fsIdx = i
+		}
+	}
+	if addIdx < 0 || fsIdx < 0 || fsIdx < addIdx {
+		t.Fatalf("servers should follow the management commands: %v", labelsOf(items))
+	}
+	// Connected servers are hinted as such.
+	for _, it := range items {
+		if it.Label == "filesystem" && it.Hint != "connected" {
+			t.Fatalf("connected server hint = %q, want connected", it.Hint)
+		}
+		if it.Label == "github" && it.Hint != "server" {
+			t.Fatalf("configured-only server hint = %q, want server", it.Hint)
+		}
+	}
+}

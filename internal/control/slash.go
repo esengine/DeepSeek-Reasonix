@@ -241,7 +241,7 @@ func currentEffortEntry(d ArgData) *config.ProviderEntry {
 
 func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 	if len(prior) <= 1 {
-		return []SlashItem{
+		items := []SlashItem{
 			{Label: "add", Insert: "add ", Hint: i18n.M.ArgMcpAdd, Descend: true},
 			{Label: "connect", Insert: "connect ", Hint: "connect a configured MCP server", Descend: true},
 			{Label: "show", Insert: "show ", Hint: "show MCP server details", Descend: true},
@@ -249,6 +249,19 @@ func mcpArgItems(prior []string, cur string, d ArgData) []SlashItem {
 			{Label: "remove", Insert: "remove ", Hint: i18n.M.ArgMcpRemove, Descend: true},
 			{Label: "import", Insert: "import", Hint: "import MCP servers from cc-switch"},
 		}
+		// The configured servers follow the management commands so the picker
+		// doubles as a shortcut: pick one and Enter opens its manager.
+		for _, name := range allMCPArgNames(d) {
+			hint := "server"
+			for _, c := range d.ServerNames {
+				if c == name {
+					hint = "connected"
+					break
+				}
+			}
+			items = append(items, SlashItem{Label: name, Insert: name + " ", Hint: hint})
+		}
+		return items
 	}
 	switch prior[1] {
 	case "remove", "rm":
@@ -338,13 +351,19 @@ func providerArgItems(prior []string, d ArgData) []SlashItem {
 
 func skillArgItems(prior []string, d ArgData) []SlashItem {
 	if len(prior) <= 1 {
-		return []SlashItem{
+		items := []SlashItem{
 			{Label: "show", Insert: "show ", Hint: i18n.M.ArgSkillShow, Descend: true},
 			{Label: "enable", Insert: "enable ", Hint: "enable a disabled skill", Descend: true},
 			{Label: "disable", Insert: "disable ", Hint: "disable an enabled skill", Descend: true},
 			{Label: "new", Insert: "new ", Hint: i18n.M.ArgSkillNew},
 			{Label: "paths", Insert: "paths", Hint: i18n.M.ArgSkillPaths},
 		}
+		// The installed skills follow the management commands so the picker
+		// doubles as a launcher: pick one and Enter runs /skills <name>.
+		for _, s := range d.Skills {
+			items = append(items, SlashItem{Label: s.Name, Insert: s.Name + " ", Hint: string(s.Scope)})
+		}
+		return items
 	}
 	if (prior[1] == "show" || prior[1] == "cat") && len(prior) == 2 {
 		var items []SlashItem

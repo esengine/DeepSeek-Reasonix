@@ -111,6 +111,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// auto-detect (e.g. opencode.ai). "enabled"/"disabled" drive thinking.type;
 	// anything else is ignored so an unknown value never breaks a request.
 	thinkingType, _ := cfg.Extra["thinking"].(string)
+	strictTools, _ := cfg.Extra["tools_strict"].(bool)
 	thinkingType = strings.ToLower(strings.TrimSpace(thinkingType))
 	if thinkingType != "enabled" && thinkingType != "disabled" {
 		thinkingType = ""
@@ -221,6 +222,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		longcat:       longcat,
 		kimiK3:        kimiK3,
 		mimo:          IsMiMo(cfg.BaseURL),
+		strictTools:   strictTools,
 		thinkingType:  thinkingType,
 		vision:        vision,
 		visionDetail:  visionDetail,
@@ -268,6 +270,7 @@ type client struct {
 	longcat       bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
 	kimiK3        bool          // true only for kimi-k3 on Moonshot's official direct API hosts
 	mimo          bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
+	strictTools   bool          // strict function-calling mode (DeepSeek beta): server-validated tool schemas
 	thinkingType  string        // explicit `thinking` config override (enabled|disabled); "" = no override
 	vision        bool          // model accepts image input — embed attached images as image_url parts
 	visionDetail  string        // image_url detail hint (low|high); "" = auto/omit
@@ -703,9 +706,18 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		if c.mimo {
 			parameters = provider.NormalizeLegacyTupleItemsForDraft202012(parameters)
 		}
+		fn := chatFunction{Name: t.Name, Description: t.Description, Parameters: parameters}
+		if c.strictTools {
+			// Strict function-calling mode (DeepSeek beta): the server validates
+			// the model's tool arguments against the schema, which must carry
+			// every property as required with additionalProperties:false.
+			strict := true
+			fn.Strict = &strict
+			fn.Parameters = provider.StrictifySchema(parameters)
+		}
 		tools = append(tools, chatTool{
 			Type:     "function",
-			Function: chatFunction{Name: t.Name, Description: t.Description, Parameters: parameters},
+			Function: fn,
 		})
 	}
 
@@ -1187,6 +1199,7 @@ type chatFunction struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description,omitempty"`
 	Parameters  json.RawMessage `json:"parameters,omitempty"`
+	Strict      *bool           `json:"strict,omitempty"`
 }
 
 type chatToolCall struct {
