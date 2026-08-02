@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -24,6 +25,9 @@ func footerHint(hint string) string {
 	return themeFg(activeCLITheme.subtle, hint)
 }
 
+// footerValue is the band's readable value level. muted keeps ≈8.8:1 (dark) /
+// ≈6.3:1 (light) contrast on the chat surface — well above the faint band base
+// and the subtle labels — so it stays the value colour on the flat footer.
 func footerValue(value string) string {
 	return themeFg(activeCLITheme.muted, value)
 }
@@ -43,31 +47,23 @@ func footerMetric(label, value string) string {
 	return footerLabel(label) + " " + value
 }
 
-// renderTurnReceipt attaches the completed turn's token and cost breakdown to
-// the assistant response. Unlike the persistent footer, this is historical
-// message metadata: it stays in transcript scrollback and deliberately uses a
-// quieter palette than runtime/session state.
-func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics) string {
+// renderTurnReceipt attaches the completed turn's token total and cost to the
+// assistant response as one short line — per-turn usage stays out of the
+// flow (detailed accounting lives in /cost).
+// turnNo is the 1-based turn number (0 = unknown, no number rendered);
+// hasCheckpoint marks turns the /rewind picker can return to (⟲).
+func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDiagnostics, turnNo int, hasCheckpoint bool) string {
 	if u == nil || u.TotalTokens == 0 {
 		return ""
 	}
 
 	groups := []string{shortTokens(u.TotalTokens) + " tok"}
-	if u.PromptTokens > 0 {
-		cached := u.CacheHitTokens
-		fresh := u.CacheMissTokens
-		if fresh == 0 {
-			fresh = max(u.PromptTokens-cached, 0)
+	if turnNo > 0 {
+		tag := strconv.Itoa(turnNo)
+		if hasCheckpoint {
+			tag = "⟲ " + tag
 		}
-		groups = append(groups,
-			"in "+shortTokens(u.PromptTokens),
-			"cached "+shortTokens(cached),
-			"new "+shortTokens(fresh),
-		)
-	}
-	groups = append(groups, "out "+shortTokens(u.CompletionTokens))
-	if u.ReasoningTokens > 0 {
-		groups = append(groups, "reasoning "+shortTokens(u.ReasoningTokens))
+		groups = append([]string{tag}, groups...)
 	}
 	if p != nil {
 		groups = append(groups, fmt.Sprintf("%s%.4f", p.Symbol(), p.Cost(u)))
@@ -79,13 +75,6 @@ func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDia
 		styled = append(styled, footerValue(group))
 	}
 	receipt := statusFooterIndent + footerLabel(i18n.M.ChatTurnReceiptLabel) + "  " + strings.Join(styled, separator)
-	if d != nil && d.PrefixChanged {
-		reasons := strings.Join(d.PrefixChangeReasons, "+")
-		if reasons == "" {
-			reasons = "unknown"
-		}
-		receipt += separator + themeFg(activeCLITheme.warn, "cache prefix changed: "+reasons)
-	}
 	return receipt
 }
 
@@ -262,9 +251,10 @@ func (m chatTUI) statusTelemetryGroups() []string {
 	return data
 }
 
-// renderStatusBlock owns the complete persistent footer layout. The optional
-// data band is separated from interaction state when Git or telemetry exists;
-// narrow screens add deliberate left-aligned rows only between semantic groups.
+// renderStatusBlock owns the complete persistent footer layout. When Git or
+// telemetry exists, a blank in-band spacer row separates the data band from
+// interaction state; narrow screens add deliberate left-aligned rows only
+// between semantic groups.
 func (m chatTUI) renderStatusBlock(primary string, width int) string {
 	if width <= 0 {
 		width = 1
@@ -293,13 +283,16 @@ func hideStatusHintWhenKeyNamesCannotFit(primary string, width int) string {
 	return primary
 }
 
+// statusFooterDivider yields a hairline "─" rule between the interaction row
+// and the data band. With the tinted status band gone (flat styling), the rule
+// is what separates the two rows; the row itself still counts in
+// computeStatusLineCount's three-row geometry so the viewport height stays
+// truthful.
 func statusFooterDivider(width int) string {
-	width = max(width, 1)
-	if width <= visibleWidth(statusFooterIndent) {
-		return themeFg(activeCLITheme.border, strings.Repeat("─", width))
+	if width <= 0 {
+		return ""
 	}
-	ruleWidth := width - visibleWidth(statusFooterIndent)
-	return statusFooterIndent + themeFg(activeCLITheme.border, strings.Repeat("─", ruleWidth))
+	return themeFg(activeCLITheme.border, strings.Repeat("─", width))
 }
 
 func layoutStatusSides(left, right string, width int) string {

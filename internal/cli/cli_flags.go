@@ -7,10 +7,24 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/spf13/pflag"
+
 	"reasonix/internal/agent"
 )
 
 const resumePickerSentinel = "__reasonix_resume_picker__"
+
+// registerResumeFlags registers the resume-family flags shared by the
+// interactive session and `run` entry points: --continue/-c, --resume (with
+// resumeShort as its shorthand, "" for none) and --copy. It returns their
+// value pointers so callers can attach per-command extras, e.g. the
+// interactive resume picker sentinel.
+func registerResumeFlags(fs *pflag.FlagSet, resumeUsage, resumeShort string) (cont *bool, resume *string, copySession *bool) {
+	cont = fs.BoolP("continue", "c", false, "resume the most recent saved session")
+	resume = fs.StringP("resume", resumeShort, "", resumeUsage)
+	copySession = fs.Bool("copy", false, "with --resume/--continue: duplicate the selected session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
+	return cont, resume, copySession
+}
 
 func splitAllowedToolRules(values []string) ([]string, error) {
 	var rules []string

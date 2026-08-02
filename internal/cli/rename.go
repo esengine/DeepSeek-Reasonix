@@ -54,5 +54,6 @@ func (m *chatTUI) runRenameCommand(input string) {
 		return
 	}
 
+	m.invalidateTitleCache()
 	m.notice(fmt.Sprintf(i18n.M.RenameDoneFmt, title))
 }

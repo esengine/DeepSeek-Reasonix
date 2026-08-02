@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"image/color"
 	"reflect"
 	"strings"
 	"testing"
@@ -24,8 +25,8 @@ func TestConfigureCLIThemeSwitchesModeAndDefaultStyle(t *testing.T) {
 	if activeCLITheme.name != "light" || activeCLITheme.style != "sandstone" {
 		t.Fatalf("light theme = %s/%s, want light/sandstone", activeCLITheme.name, activeCLITheme.style)
 	}
-	if got := accent("x"); !strings.HasPrefix(got, "\033[38;5;173m") {
-		t.Fatalf("light default accent = %q, want sandstone xterm 173", got)
+	if got := accent("x"); !strings.HasPrefix(got, "\033[38;5;240m") {
+		t.Fatalf("light default accent = %q, want sandstone xterm 240", got)
 	}
 
 	configureCLITheme("dark")
@@ -74,8 +75,8 @@ func TestThemeRendersAtProfileFidelity(t *testing.T) {
 	configureCLIThemeWithStyle("dark", "graphite")
 
 	activeColorProfile = colorprofile.TrueColor
-	if got := accent("x"); !strings.HasPrefix(got, "\033[38;2;217;119;87m") {
-		t.Fatalf("truecolor accent = %q, want 24-bit #d97757", got)
+	if got := accent("x"); !strings.HasPrefix(got, "\033[38;2;154;163;178m") {
+		t.Fatalf("truecolor accent = %q, want 24-bit #9aa3b2", got)
 	}
 
 	activeColorProfile = colorprofile.ANSI256
@@ -250,7 +251,7 @@ func TestApplyTextareaThemeHonorsCursorShape(t *testing.T) {
 	}
 }
 
-func TestComposerBorderAndCursorTrackThemeAccent(t *testing.T) {
+func TestComposerBorderTracksThemeBorder(t *testing.T) {
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
 	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
@@ -259,18 +260,26 @@ func TestComposerBorderAndCursorTrackThemeAccent(t *testing.T) {
 	for _, theme := range cliThemeStyles {
 		t.Run(theme.name, func(t *testing.T) {
 			configureCLITheme(theme.name)
-			want := themeLipColor(activeCLITheme.accent)
-			if got := inputBoxStyle.GetBorderTopForeground(); !reflect.DeepEqual(got, want) {
-				t.Fatalf("composer top border color = %v, want theme accent %v", got, want)
-			}
-			if got := inputBoxStyle.GetBorderBottomForeground(); !reflect.DeepEqual(got, want) {
-				t.Fatalf("composer bottom border color = %v, want theme accent %v", got, want)
+			// The rounded composer frame stays quiet: theme border colour on
+			// all four sides; the accent is reserved for the cursor and the
+			// running-state border the View applies.
+			wantBorder := themeLipColor(activeCLITheme.border)
+			for side, got := range map[string]color.Color{
+				"top":    inputBoxStyle.GetBorderTopForeground(),
+				"bottom": inputBoxStyle.GetBorderBottomForeground(),
+				"left":   inputBoxStyle.GetBorderLeftForeground(),
+				"right":  inputBoxStyle.GetBorderRightForeground(),
+			} {
+				if !reflect.DeepEqual(got, wantBorder) {
+					t.Fatalf("composer %s border color = %v, want theme border %v", side, got, wantBorder)
+				}
 			}
 
+			wantAccent := themeLipColor(activeCLITheme.accent)
 			ti := textarea.New()
 			applyTextareaTheme(&ti)
-			if got := ti.Styles().Cursor.Color; !reflect.DeepEqual(got, want) {
-				t.Fatalf("composer cursor color = %v, want theme accent %v", got, want)
+			if got := ti.Styles().Cursor.Color; !reflect.DeepEqual(got, wantAccent) {
+				t.Fatalf("composer cursor color = %v, want theme accent %v", got, wantAccent)
 			}
 		})
 	}

@@ -70,11 +70,8 @@ func TestIngestSeparatesReasoningFromAnswer(t *testing.T) {
 	}
 
 	m.ingestEvent(event.Event{Kind: event.Text, Text: "Hello answer"}) // answer begins → block collapses
-	if len(m.transcript) != 2 || !strings.Contains(m.transcript[0], "thought for") {
-		t.Fatalf("block should collapse to a duration summary plus answer separator, transcript=%v", m.transcript)
-	}
-	if strings.TrimSpace(m.transcript[1]) != "" {
-		t.Fatalf("reasoning/answer separator = %q, want one blank block", m.transcript[1])
+	if len(m.transcript) != 0 {
+		t.Fatalf("finished thinking should leave no marker behind, transcript=%v", m.transcript)
 	}
 	if strings.Contains(strings.Join(m.transcript, "\n"), "…reasoning…") {
 		t.Fatalf("collapsed reasoning text should be removed, transcript=%v", m.transcript)
@@ -87,11 +84,12 @@ func TestIngestSeparatesReasoningFromAnswer(t *testing.T) {
 	}
 
 	m.commitPending() // turn end
-	if len(m.transcript) != 3 || !strings.Contains(m.transcript[2], "Hello") {
-		t.Fatalf("answer should commit as a separate entry, transcript=%v", m.transcript)
+	joined := strings.Join(m.transcript, "\n")
+	if !strings.Contains(joined, "Hello") {
+		t.Fatalf("answer should commit as its own entry, transcript=%v", m.transcript)
 	}
-	if plain := ansi.Strip(m.transcript[2]); !strings.HasPrefix(plain, "  ◆ Reasonix\n\n  Hello answer") {
-		t.Fatalf("answer should have an explicit assistant identity and indented body, got %q", plain)
+	if strings.Contains(joined, "thinking") || strings.Contains(joined, "thought for") {
+		t.Fatalf("finished thinking must leave no summary residue, transcript=%v", m.transcript)
 	}
 }
 
@@ -167,7 +165,7 @@ func TestIngestEventFlushesAnswer(t *testing.T) {
 	if strings.TrimSpace((*m.pendingCommit)[1]) != "" {
 		t.Errorf("second commit should be a blank spacer, got %q", (*m.pendingCommit)[1])
 	}
-	if !strings.Contains((*m.pendingCommit)[2], "Read(x)") {
+	if !strings.Contains((*m.pendingCommit)[2], "Read  x") {
 		t.Errorf("third commit should be the tool card, got %q", (*m.pendingCommit)[2])
 	}
 	if m.pending.Len() != 0 {

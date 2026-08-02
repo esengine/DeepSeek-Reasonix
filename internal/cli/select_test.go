@@ -1,7 +1,10 @@
 package cli
 
 import (
+	"strings"
 	"testing"
+
+	"reasonix/internal/agent"
 )
 
 func TestFrameLines(t *testing.T) {
@@ -122,5 +125,67 @@ func TestFilterMenuItems(t *testing.T) {
 	// No match.
 	if got := filterMenuItems(items, "claude"); len(got) != 0 {
 		t.Errorf("claude: got %d, want 0", len(got))
+	}
+}
+
+func TestCollapseBreaks(t *testing.T) {
+	// A multi-line preview must never leak a physical newline into a
+	// selectOne/selectMany row: the cursor-up redraw math counts exactly one
+	// terminal line per item, and a stray break desyncs it (the menu then
+	// appears to duplicate itself across the screen).
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"plain", "plain"},
+		{"a\nb", "a b"},
+		{"a\r\nb", "a  b"},
+		{"line1\n\n```go\ncode\n```", "line1  ```go code ```"},
+		{"\n", " "},
+	}
+	for _, tt := range tests {
+		if got := collapseBreaks(tt.in); got != tt.want {
+			t.Errorf("collapseBreaks(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+	if got := collapseBreaks("unchanged"); got != "unchanged" {
+		t.Errorf("collapseBreaks(unchanged) = %q", got)
+	}
+}
+
+func TestFitWidth(t *testing.T) {
+	tests := []struct {
+		in    string
+		width int
+		want  string
+	}{
+		{"short", 10, "short"},
+		{"exactly-ten", 10, "exactly-t…"},
+		{"abcd", 2, "a…"},
+		{"abcd", 1, "…"},
+		{"abc", 0, "…"},
+		// Wide (CJK) runes count as two display columns, so a narrow terminal
+		// can never soft-wrap a row into a second physical line.
+		{"中文中文中文", 6, "中文…"},
+		{"中文中文中文", 4, "中…"},
+		{"ab中文cd", 6, "ab中…"},
+	}
+	for _, tt := range tests {
+		if got := fitWidth(tt.in, tt.width); got != tt.want {
+			t.Errorf("fitWidth(%q, %d) = %q, want %q", tt.in, tt.width, got, tt.want)
+		}
+	}
+}
+
+func TestSessionPickerLabelCollapsesNewlines(t *testing.T) {
+	label := sessionPickerLabel(agent.SessionInfo{
+		Preview: "fix the parser\n\n```go\npanic(1)\n```",
+		Turns:   3,
+	})
+	if strings.ContainsAny(label, "\r\n") {
+		t.Fatalf("sessionPickerLabel leaked a newline: %q", label)
+	}
+	if !strings.Contains(label, "3 turns · fix the parser") {
+		t.Fatalf("sessionPickerLabel = %q, want preview prefix preserved", label)
 	}
 }

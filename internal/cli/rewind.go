@@ -136,14 +136,18 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 	if err := m.ctrl.Rewind(meta.Turn, act.scope); err != nil {
 		return m, nil
 	}
-	// The controller emits a notice marking the rewind point; the committed
-	// transcript stays in terminal scrollback (v2 has no managed viewport), so for a
-	// conversation/both rewind we prefill the composer with that turn's prompt to
-	// re-send or edit — Claude Code's behavior — while the model's context is
-	// truncated underneath.
-	if act.scope != control.RewindCode && strings.TrimSpace(meta.Prompt) != "" {
-		m.input.SetValue(meta.Prompt)
-		m.growInputToFit()
+	if act.scope != control.RewindCode {
+		// Rebuild the transcript from the truncated conversation so the main
+		// output screen actually returns to the rewind point instead of keeping
+		// the full history on screen. Code-only rewinds leave the conversation
+		// untouched, so the transcript stays.
+		m.replayActiveBranch(fmt.Sprintf("rewound to turn %d", meta.Turn+1))
+		// Prefill the composer with that turn's prompt to re-send or edit
+		// while the model's context is truncated underneath.
+		if strings.TrimSpace(meta.Prompt) != "" {
+			m.input.SetValue(meta.Prompt)
+			m.growInputToFit()
+		}
 	}
 	return m, nil
 }
@@ -153,7 +157,7 @@ func (m chatTUI) renderRewind() string {
 	if r == nil {
 		return ""
 	}
-	w := max(m.width, 10)
+	w := max(m.contentWidth(), 10)
 	var b strings.Builder
 	if r.stage == 0 {
 		b.WriteString(accent(i18n.M.RewindPickTitle) + "\n")

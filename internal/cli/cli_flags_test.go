@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
+
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 )
@@ -42,6 +44,55 @@ func TestNormalizeOptionalResumeArg(t *testing.T) {
 	got = normalizeOptionalResumeArg([]string{"-r", "--copy"})
 	if !reflect.DeepEqual(got, []string{"-r", "--copy"}) {
 		t.Fatalf("bare resume args = %#v", got)
+	}
+}
+
+func TestRegisterResumeFlagsShorthands(t *testing.T) {
+	// Interactive registration: -c and -r are real shorthands, and a bare
+	// --resume/-r (no value) opens the picker via NoOptDefVal.
+	cases := []struct {
+		args       []string
+		wantCont   bool
+		wantResume string
+		wantCopy   bool
+	}{
+		{args: []string{"-c"}, wantCont: true},
+		{args: []string{"-c=true"}, wantCont: true},
+		{args: []string{"--continue"}, wantCont: true},
+		{args: []string{"--continue=true"}, wantCont: true},
+		{args: []string{"-r"}, wantResume: resumePickerSentinel},
+		{args: []string{"--resume"}, wantResume: resumePickerSentinel},
+		{args: []string{"-r", "provider-config"}, wantResume: "provider-config"},
+		{args: []string{"-r=provider-config"}, wantResume: "provider-config"},
+		{args: []string{"--resume", "provider-config"}, wantResume: "provider-config"},
+		{args: []string{"--copy", "-c"}, wantCont: true, wantCopy: true},
+	}
+	for _, tc := range cases {
+		fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
+		fs.SetInterspersed(true)
+		cont, resume, copySession := registerResumeFlags(fs, "resume by session ID/query", "r")
+		fs.Lookup("resume").NoOptDefVal = resumePickerSentinel
+		if err := fs.Parse(normalizeOptionalResumeArg(tc.args)); err != nil {
+			t.Errorf("Parse(%v) err = %v", tc.args, err)
+			continue
+		}
+		if *cont != tc.wantCont || *resume != tc.wantResume || *copySession != tc.wantCopy {
+			t.Errorf("Parse(%v) = (cont=%v, resume=%q, copy=%v), want (cont=%v, resume=%q, copy=%v)",
+				tc.args, *cont, *resume, *copySession, tc.wantCont, tc.wantResume, tc.wantCopy)
+		}
+	}
+
+	// run registration: no -r shorthand, but --resume still works.
+	fsRun := pflag.NewFlagSet("run", pflag.ContinueOnError)
+	contRun, resumeRun, _ := registerResumeFlags(fsRun, "resume a specific session file", "")
+	if err := fsRun.Parse([]string{"--resume", "some-path.jsonl", "-c"}); err != nil {
+		t.Fatalf("run Parse(--resume ... -c) err = %v", err)
+	}
+	if !*contRun || *resumeRun != "some-path.jsonl" {
+		t.Fatalf("run Parse = (cont=%v, resume=%q), want (true, %q)", *contRun, *resumeRun, "some-path.jsonl")
+	}
+	if err := fsRun.Parse([]string{"-r"}); err == nil {
+		t.Fatal("run Parse(-r) should fail: run has no -r shorthand")
 	}
 }
 

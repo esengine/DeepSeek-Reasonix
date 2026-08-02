@@ -159,6 +159,8 @@ func saveTestImageAttachment(t *testing.T, root string) string {
 // (unlike Ctrl+C) did not stop a running turn: an active completion menu
 // captured Esc to close itself and returned before reaching the running-turn
 // cancel branch, while Ctrl+C — not in the completion switch — fell through.
+// Cancellation is two-stage since the confirmation was added: the first Esc
+// arms it (and closes the completion menu), the second cancels.
 func TestEscCancelsRunningTurnWithCompletionOpen(t *testing.T) {
 	r := &blockingTurnRunner{started: make(chan struct{})}
 	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
@@ -170,7 +172,15 @@ func TestEscCancelsRunningTurnWithCompletionOpen(t *testing.T) {
 	m.state = tuiRunning
 	m.completion.active = true // e.g. a "/" typed into the composer while waiting
 
-	_, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	next, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEscape}) // closes the menu, arms the confirmation
+	m = next.(chatTUI)
+	if !m.escCancelArmed {
+		t.Fatal("first Esc should arm the cancel confirmation after closing the completion menu")
+	}
+	if m.completion.active {
+		t.Fatal("Esc should close the completion menu")
+	}
+	_, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEscape}) // second Esc confirms
 
 	deadline := time.Now().Add(2 * time.Second)
 	for ctrl.Running() {
@@ -287,10 +297,11 @@ func TestCompletionMenuPadsWithNonBreakingSpaces(t *testing.T) {
 		if got := ansi.StringWidth(line); got != 80 {
 			t.Fatalf("line %d visual width = %d, want 80: %q", i, got, line)
 		}
-		if !strings.HasSuffix(line, "\u00a0") {
+		plain := ansi.Strip(line)
+		if !strings.HasSuffix(plain, "\u00a0") {
 			t.Fatalf("line %d should end with non-breaking padding, got %q", i, line)
 		}
-		if strings.HasSuffix(line, " ") {
+		if strings.HasSuffix(plain, " ") {
 			t.Fatalf("line %d should not end with clearable ASCII space, got %q", i, line)
 		}
 	}
@@ -629,7 +640,7 @@ func TestComposerPromptReservesWidthAndOffsetsCJKCursor(t *testing.T) {
 	if !strings.HasPrefix(firstLine, "❯ 你好") {
 		t.Fatalf("composer first line = %q, want prompt before CJK input", firstLine)
 	}
-	if got, want := m.input.Width(), 40-4-composerPromptWidth; got != want {
+	if got, want := m.input.Width(), 40-6-composerPromptWidth; got != want {
 		t.Fatalf("textarea content width = %d, want %d after prompt gutter", got, want)
 	}
 	cursor := m.input.Cursor()
@@ -1119,7 +1130,7 @@ func TestApprovalArrowKeysMoveVisibleSelection(t *testing.T) {
 		t.Fatalf("approval selection = %d, want 1", m.approvalSelection)
 	}
 	banner := ansi.Strip(m.renderApprovalBanner())
-	if !strings.Contains(banner, "❯ 2.") {
+	if !strings.Contains(banner, "❯  2.") {
 		t.Fatalf("approval banner should highlight second row:\n%s", banner)
 	}
 }
@@ -1253,10 +1264,10 @@ func TestIngestEventRoutesByKind(t *testing.T) {
 		ev   event.Event
 		want string
 	}{
-		{"dispatch", event.Event{Kind: event.ToolDispatch, Tool: event.Tool{Name: "read_file", Args: `{"path":"x"}`}}, "● Read(x)"},
+		{"dispatch", event.Event{Kind: event.ToolDispatch, Tool: event.Tool{Name: "read_file", Args: `{"path":"x"}`}}, "● Read  x"},
 		{"blocked", event.Event{Kind: event.ToolResult, Tool: event.Tool{Name: "bash", Err: "blocked by permission policy"}}, "● Bash ⊘ blocked by permission policy"},
 		{"usage", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200, CacheHitTokens: 900, CacheMissTokens: 100}}, "TURN  1.2K tok"},
-		{"usage-diagnostics", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}, CacheDiagnostics: &event.CacheDiagnostics{PrefixChanged: true, PrefixChangeReasons: []string{"tools"}}}, "cache prefix changed: tools"},
+		{"usage-diagnostics", event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}, CacheDiagnostics: &event.CacheDiagnostics{PrefixChanged: true, PrefixChangeReasons: []string{"tools"}}}, "TURN  1.2K tok"},
 		{"notice-info", event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compacted 8 messages → summary"}, "  · compacted 8 messages → summary"},
 		{"notice-warn", event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "response truncated: hit max output tokens"}, "  ! response truncated: hit max output tokens"},
 		{"phase", event.Event{Kind: event.Phase, Text: "planner · planning"}, "[planner · planning]"},
@@ -1326,7 +1337,10 @@ func TestUserBubbleEchoedImmediately(t *testing.T) {
 	}
 }
 
-func TestUserBubbleIsLightweightTranscriptLine(t *testing.T) {
+// TestUserBubbleIsSolidRoleBand pins the user turn as a full-width band on
+// the user-bubble surface — the role separation that keeps user turns
+// distinct from the assistant's plain flowing text.
+func TestUserBubbleIsSolidRoleBand(t *testing.T) {
 	prevColor := activeColorProfile
 	activeColorProfile = colorprofile.ANSI256
 	defer func() { activeColorProfile = prevColor }()
@@ -1337,10 +1351,14 @@ func TestUserBubbleIsLightweightTranscriptLine(t *testing.T) {
 		t.Fatalf("user bubble missing prompt text: %q", plain)
 	}
 	if got == plain {
-		t.Fatalf("user bubble should use themed foreground color when color is enabled: %q", got)
+		t.Fatalf("user bubble should use themed colors when color is enabled: %q", got)
 	}
-	if w := ansi.StringWidth(plain); w > 20 {
-		t.Fatalf("user bubble should not render as a full-width input-like block, width=%d text=%q", w, plain)
+	// The band spans the full content width (NBSP padding inside the block).
+	if w := ansi.StringWidth(plain); w != 80 {
+		t.Fatalf("user bubble band width = %d, want full content width 80: %q", w, plain)
+	}
+	if !strings.Contains(got, "48;5;") {
+		t.Fatalf("user bubble should wear the user-bubble background band: %q", got)
 	}
 }
 
@@ -4040,5 +4058,332 @@ func TestShiftTabLeavesDontAskForAskMode(t *testing.T) {
 	m.cycleMode()
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
 		t.Fatalf("Shift+Tab from dontAsk = %q, want ask", got)
+	}
+}
+
+// --- DeepCode v2 visuals -------------------------------------------------
+
+// TestTUIBannerPinsSingleLineTitle pins the banner's flat layout: one
+// "◆ reasonix · label" row with the tip below, no tall graphic block.
+func TestTUIBannerSparkAndInfoColumns(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+
+	wide := renderTUIBanner("deepseek-v4-pro", "", 80)
+	lines := strings.Split(strings.TrimRight(wide, "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("banner rows = %d, want 2 (title + tip):\n%s", len(lines), wide)
+	}
+	plain := ansi.Strip(wide)
+	if !strings.Contains(plain, "◆ reasonix") || !strings.Contains(plain, "· deepseek-v4-pro") {
+		t.Fatalf("banner should carry title + label, got %q", plain)
+	}
+	if !strings.Contains(plain, i18n.M.ChatTip) {
+		t.Fatalf("banner row 2 should carry the tip, got %q", plain)
+	}
+	if !strings.Contains(lines[0], fgSGR(activeCLITheme.accent)) {
+		t.Fatalf("banner title should carry the accent colour: %q", lines[0])
+	}
+	if strings.Contains(plain, "▄") || strings.Contains(plain, "█") {
+		t.Fatalf("flat banner should not render the spark graphic:\n%s", plain)
+	}
+}
+
+func TestTUIBannerKeepsMissingKeyWarning(t *testing.T) {
+	out := ansi.Strip(renderTUIBanner("model", "no API key", 80))
+	if !strings.Contains(out, "! no API key") {
+		t.Fatalf("banner should keep the missing-key warning:\n%s", out)
+	}
+}
+
+// TestComposerFrameBorderFollowsState proves the rounded composer frame
+// switches border colour by state with running > shell > plain precedence.
+func TestComposerFrameBorderFollowsState(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+
+	borderTop := func(code string) string { return code + "╭" }
+	newModel := func() chatTUI {
+		ctrl := control.New(control.Options{})
+		m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+		m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		return m0.(chatTUI)
+	}
+
+	m := newModel()
+	if got := m.View().Content; !strings.Contains(got, borderTop(fgSGR(activeCLITheme.border))) {
+		t.Fatal("idle composer frame should use the quiet theme border colour")
+	}
+
+	m.state = tuiRunning
+	if got := m.View().Content; !strings.Contains(got, borderTop(fgSGR(activeCLITheme.accent))) {
+		t.Fatal("running composer frame should use the accent colour")
+	}
+
+	// Running wins over shell mode.
+	m.input.SetValue("!ls")
+	if got := m.View().Content; !strings.Contains(got, borderTop(fgSGR(activeCLITheme.accent))) {
+		t.Fatal("running shell-mode composer frame should keep the accent colour")
+	}
+
+	// Shell mode alone wears the success colour.
+	m.state = tuiIdle
+	if got := m.View().Content; !strings.Contains(got, borderTop(fgSGR(statusShellColor))) {
+		t.Fatal("shell-mode composer frame should use the success colour")
+	}
+}
+
+// TestViewCursorOffsetIncludesSideBorder pins the cursor math for the framed
+// composer: the terminal cursor sits 2 columns right of the textarea cursor
+// (left border + left padding) in both layout branches.
+func TestViewCursorOffsetIncludesSideBorder(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+
+	local := m.input.Cursor()
+	if local == nil {
+		t.Fatal("focused composer should expose a cursor")
+	}
+	v := m.View()
+	if v.Cursor == nil {
+		t.Fatal("alt-screen view should place the composer cursor")
+	}
+	if got, want := v.Cursor.X, local.X+2; got != want {
+		t.Fatalf("alt-screen cursor X = %d, want textarea X + 2 = %d (left border + padding)", got, want)
+	}
+
+	native := m
+	native.nativeScrollback = true
+	vn := native.View()
+	if vn.Cursor == nil {
+		t.Fatal("native-scrollback view should place the composer cursor")
+	}
+	if got, want := vn.Cursor.X, local.X+2; got != want {
+		t.Fatalf("native-scrollback cursor X = %d, want textarea X + 2 = %d", got, want)
+	}
+}
+
+// TestWorkingLineAccentVerbAndEscHint pins the running status line: the verb
+// in accent, the metrics faint, and a faint "esc interrupt" hint that is the
+// first thing dropped under width pressure. Retry and cancelling keep their
+// plain branches.
+func TestWorkingLineAccentVerbAndEscHint(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+	i18n.DetectLanguage("en")
+
+	newRunning := func(width int) chatTUI {
+		ctrl := control.New(control.Options{})
+		m := newChatTUI(ctrl, "", make(chan event.Event, 1), width)
+		m0, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
+		m = m0.(chatTUI)
+		m.state = tuiRunning
+		m.elapsed = 5
+		return m
+	}
+
+	m := newRunning(80)
+	styled := m.runningWorkingLine(false, true)
+	if !strings.Contains(styled, accent(" "+i18n.M.ChatThinking)) {
+		t.Fatalf("working line verb should wear the accent: %q", styled)
+	}
+	if !strings.Contains(ansi.Strip(styled), "esc interrupt") {
+		t.Fatalf("wide working line should carry the esc hint: %q", ansi.Strip(styled))
+	}
+	// Styled and plain variants must have identical visible text so the status
+	// row accounting in computeStatusLineCount matches the painted rows.
+	plain := m.runningWorkingLine(false, false)
+	if got, want := ansi.Strip(styled), ansi.Strip(plain); got != want {
+		t.Fatalf("styled working line visible text = %q, want same as plain %q", got, want)
+	}
+
+	narrow := newRunning(24)
+	if got := ansi.Strip(narrow.runningWorkingLine(false, true)); strings.Contains(got, "esc interrupt") {
+		t.Fatalf("narrow working line should drop the esc hint: %q", got)
+	}
+
+	retry := newRunning(80)
+	retry.retryAttempt, retry.retryMax = 2, 5
+	if got := ansi.Strip(retry.runningWorkingLine(false, true)); !strings.Contains(got, "retrying (2/5)") || strings.Contains(got, "esc interrupt") {
+		t.Fatalf("retry branch should stay plain without the esc hint: %q", got)
+	}
+
+	if got := ansi.Strip(m.runningWorkingLine(true, true)); strings.Contains(got, "esc interrupt") {
+		t.Fatalf("cancelling branch should not carry the esc hint: %q", got)
+	}
+}
+
+// TestApprovalBannerWarnFrameAndHint pins the action-oriented approval card:
+// warn frame, bold-warn pause glyph, and the shortcut hint line.
+func TestApprovalBannerWarnFrameAndHint(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{ID: "approval-1", Tool: "bash", Subject: "echo hi"}
+	banner := m.renderApprovalBanner()
+
+	warnCode := fmt.Sprintf("38;5;%d", activeCLITheme.warn.xterm)
+	if !strings.Contains(banner, warnCode) {
+		t.Fatalf("approval card should use the warn frame colour %s:\n%s", warnCode, banner)
+	}
+	if !strings.Contains(banner, "⏸") {
+		t.Fatalf("approval card should keep the pause glyph:\n%s", banner)
+	}
+	plain := ansi.Strip(banner)
+	if !strings.Contains(plain, "y approve · a always · p plan · n nope · ↑/↓ · ⏎") {
+		t.Fatalf("approval card hint line missing:\n%s", plain)
+	}
+}
+
+// TestTodoPanelProgressBar pins the task panel: a 10-cell bar (filled cells in
+// success, empty ones in the border colour), accent in-progress marker, and the
+// faint done/total count.
+func TestTodoPanelProgressBar(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+
+	m := newTestChatTUI()
+	m.todoArgs = `{"todos":[` +
+		`{"content":"first","status":"completed"},` +
+		`{"content":"second","status":"completed"},` +
+		`{"content":"third","status":"in_progress"},` +
+		`{"content":"fourth","status":"pending"}]}`
+	panel := m.renderTodoPanel()
+	plain := ansi.Strip(panel)
+
+	if !strings.Contains(plain, "Tasks") {
+		t.Fatalf("todo panel header missing:\n%s", plain)
+	}
+	// 2 of 4 done → 5 of 10 cells filled.
+	if !strings.Contains(plain, "▓▓▓▓▓░░░░░") {
+		t.Fatalf("todo panel should render a 5/10 progress bar:\n%s", plain)
+	}
+	if !strings.Contains(plain, "2/4") {
+		t.Fatalf("todo panel should show the done/total count:\n%s", plain)
+	}
+	if !strings.Contains(panel, accent("▶")+" third") {
+		t.Fatalf("in-progress row should be accent ▶ + plain label:\n%s", panel)
+	}
+	if !strings.Contains(plain, "● first") || !strings.Contains(plain, "○ fourth") {
+		t.Fatalf("completed/pending rows should keep ●/○ markers:\n%s", plain)
+	}
+}
+
+// TestUserBubbleAccentMarkerPlainBody pins the user bubble: a bold accent "›"
+// marker, the body in the default foreground, an accent "[plan]" chip in plan
+// mode, and an unchanged NO_COLOR fallback.
+func TestUserBubbleAccentMarkerPlainBody(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+
+	got := renderUserBubble("hello world", 80, false)
+	if plain := ansi.Strip(got); !strings.Contains(plain, "› hello world") {
+		t.Fatalf("user bubble missing prompt text: %q", plain)
+	}
+	// The body keeps the default foreground inside the role band: the marker's
+	// style closes right before the text.
+	if !strings.Contains(got, "\x1b[m hello world") {
+		t.Fatalf("user bubble body should stay in the default foreground after the marker: %q", got)
+	}
+
+	plan := renderUserBubble("do it", 80, true)
+	if !strings.Contains(plan, accent("[plan]")) {
+		t.Fatalf("plan bubble should carry the accent [plan] chip: %q", plan)
+	}
+	if plain := ansi.Strip(plan); !strings.Contains(plain, "› [plan] do it") {
+		t.Fatalf("plan bubble text = %q, want › [plan] prefix", plain)
+	}
+
+	activeColorProfile = colorprofile.NoTTY
+	refreshCLIStyles()
+	if got := renderUserBubble("x", 80, false); got != "│ › x" {
+		t.Fatalf("NO_COLOR user bubble = %q, want %q", got, "│ › x")
+	}
+	if got := renderUserBubble("x", 80, true); got != "│ › [plan] x" {
+		t.Fatalf("NO_COLOR plan bubble = %q, want %q", got, "│ › [plan] x")
+	}
+}
+
+// TestReasoningGutterUsesBorderColor pins the thinking blocks: the "▎" marker
+// rail and the "⎿" connector use the theme border colour instead of dim.
+func TestReasoningGutterUsesBorderColor(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+
+	marker := reasoningMarker(i18n.M.ChatThinking)
+	if !strings.Contains(marker, themeFg(activeCLITheme.border, "▎")) {
+		t.Fatalf("reasoning marker rail should use the border colour: %q", marker)
+	}
+	if !strings.Contains(marker, dim(i18n.M.ChatThinking)) {
+		t.Fatalf("reasoning marker label should stay faint: %q", marker)
+	}
+
+	block := reasoningBlock("a thought", 80, 0)
+	if !strings.Contains(block, themeFg(activeCLITheme.border, connector)) {
+		t.Fatalf("reasoning connector gutter should use the border colour: %q", block)
+	}
+}
+
+// TestEscCancelNeedsSecondEsc pins the two-stage running-turn cancel: the first
+// Esc only arms a confirmation (shown on the working line) instead of killing
+// the turn, the second Esc cancels, and any other key disarms and continues.
+func TestEscCancelNeedsSecondEsc(t *testing.T) {
+	i18n.DetectLanguage("en")
+	defer i18n.DetectLanguage("en")
+	ctrl := control.New(control.Options{})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.state = tuiRunning
+	m.elapsed = 3
+
+	if m.escCancelArmed {
+		t.Fatal("cancel confirmation should start disarmed")
+	}
+	// The working line carries the plain "esc interrupt" hint before arming.
+	if got := m.runningWorkingLine(false, false); !strings.Contains(got, "esc interrupt") {
+		t.Fatalf("working line before arming = %q, want the plain esc hint", got)
+	}
+
+	// First Esc: arms only — the turn is not cancelled.
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m1 := next.(chatTUI)
+	if !m1.escCancelArmed {
+		t.Fatal("first Esc should arm the cancel confirmation")
+	}
+	if m1.state != tuiRunning {
+		t.Fatalf("state after first Esc = %v, want tuiRunning (not cancelled yet)", m1.state)
+	}
+	// The working line now shows the confirm prompt.
+	if got := m1.runningWorkingLine(false, false); !strings.Contains(got, "Press Esc again to cancel") {
+		t.Fatalf("working line after arming = %q, want the confirm prompt", got)
+	}
+
+	// Any other key disarms and continues running.
+	next, _ = m1.Update(tea.KeyPressMsg{Code: 'a'})
+	m2 := next.(chatTUI)
+	if m2.escCancelArmed {
+		t.Fatal("a non-Esc key should disarm the cancel confirmation")
+	}
+	if m2.state != tuiRunning {
+		t.Fatalf("state after disarming key = %v, want tuiRunning", m2.state)
+	}
+
+	// Second Esc (after re-arming): cancels.
+	m2.escCancelArmed = true
+	next, _ = m2.Update(tea.KeyPressMsg{Code: tea.KeyEsc})
+	m3 := next.(chatTUI)
+	if m3.escCancelArmed {
+		t.Fatal("second Esc should consume the confirmation")
 	}
 }

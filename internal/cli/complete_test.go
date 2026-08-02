@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/command"
@@ -285,8 +287,9 @@ func TestFileItemsHiddenWhenDotTyped(t *testing.T) {
 	}
 }
 
-// TestSlashArgCompletionMCPSubcommands proves explicit help syntax opens the
-// subcommand menu; a bare trailing space stays submit-ready.
+// TestSlashArgCompletionMCPSubcommands proves the /mcp subcommand picker opens
+// both from the explicit "?" help syntax and from a bare trailing space (the
+// /mcp <space> bottom-sheet picker).
 func TestSlashArgCompletionMCPSubcommands(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/mcp?")
@@ -309,8 +312,11 @@ func TestSlashArgCompletionMCPSubcommands(t *testing.T) {
 
 	m.input.SetValue("/mcp ")
 	m.updateCompletion()
-	if m.completion.active {
-		t.Fatalf("/mcp <space> should not open the argument menu: %+v", m.completion)
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/mcp <space> should pop the subcommand picker: %+v", m.completion)
+	}
+	if !hasLabel(m.completion.items, "add") {
+		t.Fatalf("/mcp <space> should list the same subcommands as /mcp?: %+v", labels(m.completion.items))
 	}
 }
 
@@ -386,10 +392,12 @@ func TestEnterOnMCPWithTrailingSpaceSubmitsManager(t *testing.T) {
 	m := newTestChatTUI()
 	m.input.SetValue("/mcp ")
 	m.updateCompletion()
-	if m.completion.active {
-		t.Fatalf("/mcp <space> should stay submit-ready before Enter: %+v", m.completion)
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/mcp <space> should pop the subcommand picker: %+v", m.completion)
 	}
 
+	// Enter on the bare "/mcp " line still submits the manager command: the
+	// overlay-command check wins over accepting the highlighted subcommand.
 	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	next := got.(chatTUI)
 	if next.mcp == nil || next.mcp.stage != mcpStageList {
@@ -699,5 +707,47 @@ func TestSubsequenceMatchUnit(t *testing.T) {
 		if got := subsequenceMatch(strings.ToLower(c.target), strings.ToLower(c.query)); got != c.want {
 			t.Errorf("subsequenceMatch(%q, %q) = %v, want %v", c.target, c.query, got, c.want)
 		}
+	}
+}
+
+// TestCompletionMenuSelectedItemChipPadding pins the completion menu's selected
+// row: a reverse accent chip with a padding space on each side, while the other
+// rows carry the same padding so labels and hints don't shift as the selection
+// moves.
+func TestCompletionMenuSelectedItemChipPadding(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
+	refreshCLIStyles()
+
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.width = 80
+	m.completion.active = true
+	m.completion.items = []compItem{
+		{label: "review", hint: "look at changes"},
+		{label: "clear", hint: "start fresh"},
+	}
+	m.completion.sel = 1
+	m.completion.kind = compSlash
+
+	lines := strings.Split(strings.TrimRight(m.renderCompletion(), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("completion menu rows = %d, want 3 (2 items + footer)", len(lines))
+	}
+	// Unselected rows sit on the sheet surface (pickerSheetStyle) with the
+	// same two-space indent as the selected row, so labels don't shift.
+	if got := ansi.Strip(lines[0]); !strings.HasPrefix(got, "  review ") {
+		t.Fatalf("unselected completion row = %q, want sheet row padding", got)
+	}
+	if got := ansi.Strip(lines[1]); !strings.HasPrefix(got, "  clear ") {
+		t.Fatalf("selected completion row = %q, want full-width band", got)
+	}
+	if !strings.Contains(lines[1], "48;5;") {
+		t.Fatalf("selected completion row should wear the accent background: %q", lines[1])
+	}
+	// The selected row's background band spans the full sheet width, not just
+	// the label chip.
+	if got := ansi.Strip(lines[1]); !strings.HasSuffix(strings.TrimRight(got, "\u00a0"), "  ") {
+		t.Fatalf("selected completion row should carry trailing band padding: %q", got)
 	}
 }

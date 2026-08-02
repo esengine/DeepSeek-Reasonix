@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -74,6 +75,16 @@ type chatTUI struct {
 	composerScrollOffset   int
 	composerScrollDetached bool
 	spinner                spinner.Model
+	// titleCache memoizes the active session's display title for the window
+	// title. View is a value receiver called every frame, so the memo (keyed
+	// by session path, mutated through the pointer) avoids a meta sidecar read
+	// per frame; /rename invalidates it because it renames without a path
+	// change.
+	titleCache *sessionTitleCache
+	// titleSpin is the window-title spinner frame index, advanced by the same
+	// spinner.TickMsg that drives the in-TUI spinner, so the running indicator
+	// animates without leaking ANSI styling into the OSC title sequence.
+	titleSpin int
 
 	submittedInputs      []string
 	submittedInputCursor int
@@ -98,6 +109,12 @@ type chatTUI struct {
 	// startup and after each turn so the status line stays roughly current without
 	// blocking the event loop.
 	balance string
+
+	// prefixChurns counts cache-prefix resets by cause ("system" / "tools" /
+	// "log_rewrite"), surfaced in /status so users can see what breaks the
+	// DeepSeek prefix cache mid-session (e.g. connecting an MCP server changes
+	// the tools schema and resets it).
+	prefixChurns map[string]int
 
 	// todoArgs is the latest todo_write call's raw args; it drives the task list
 	// pinned just above the input (see renderTodoPanel). "" when there's no list.
@@ -209,8 +226,18 @@ type chatTUI struct {
 	// cards, and replay bundles are regenerated after a resize.
 	transcriptSources []transcriptSource
 	wrappedLines      []string // transcript wrapped to viewport width (rendered each frame)
-	viewport          viewport.Model
-	sel               selection
+	// wrappedText is wrappedLines joined with "\n" — the viewport content.
+	// Maintained incrementally on growth-only re-feeds so long conversations
+	// don't re-join the whole transcript per block.
+	wrappedText string
+	// wrapFrom is how many transcript lines are already wrapped into
+	// wrappedLines. Content is append-only, so a growth-only re-feed wraps just
+	// the new lines instead of re-wrapping the whole transcript every block
+	// (which stalls the UI on long conversations). Reset to 0 on any full
+	// re-wrap (width change, in-place rewrite, clear).
+	wrapFrom int
+	viewport viewport.Model
+	sel      selection
 	// autoScroll drives edge-drag scrolling: -1 up, +1 down, 0 off. dragX is the
 	// column the drag is held at, so the ticker can extend the selection head.
 	autoScroll int
@@ -220,6 +247,10 @@ type chatTUI struct {
 	// dead target and dragging it never leaves a transcript selection behind.
 	scrollbarDrag       bool
 	scrollbarGrabOffset int
+	// completionScrollbarDrag owns left-button drags on the completion menu's
+	// right-edge scrollbar, mirroring scrollbarDrag for the tall picker sheet.
+	completionScrollbarDrag       bool
+	completionScrollbarGrabOffset int
 	// copyNoticeText is a transient "copied to clipboard" hint shown on the status
 	// line after a mouse-drag, right-click, or Ctrl+C selection copy; "" when none
 	// is showing. copyNoticeSeq guards its expiry tick so an older copy's timer
@@ -267,6 +298,10 @@ type chatTUI struct {
 	quickPick *quickPicker
 	copyPick  *copyPicker
 	lastEsc   time.Time
+	// escCancelArmed is the running-turn cancel confirmation: the first Esc
+	// arms it (and shows a hint on the working line), the second Esc cancels,
+	// and any other key disarms and continues.
+	escCancelArmed bool
 
 	// mcp is the interactive "/mcp" manager overlay. mcpDisabled tracks servers
 	// turned off only for this chat session, matching the desktop connector
@@ -368,6 +403,15 @@ type chatTUI struct {
 }
 
 type tuiState int
+
+// sessionTitleCache memoizes the display title resolved for a session path so
+// View() (a value receiver running every frame) does not re-read the meta
+// sidecar. The cache lives behind a pointer so the value copy in View can
+// update it persistently.
+type sessionTitleCache struct {
+	path  string
+	title string
+}
 
 const (
 	tuiIdle tuiState = iota
@@ -566,6 +610,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		mouseCaptureOff:      mouseCaptureOffByDefault(),
 		input:                ti,
 		spinner:              sp,
+		titleCache:           &sessionTitleCache{},
 		submittedInputCursor: -1,
 		queueEditCursor:      -1,
 		nextPasteID:          nextPasteID,
@@ -805,6 +850,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	wasAtBottom := m.viewport.AtBottom()
 	prevLines := len(m.transcript)
 	prevWidth := m.width
+	prevContentW := m.contentWidth() // sidebar appearing/disappearing also reflows
 	prevYOff := m.viewport.YOffset()
 	var resizeAnchor transcriptResizeAnchor
 	if size, ok := msg.(tea.WindowSizeMsg); ok && size.Width != m.width && !wasAtBottom {
@@ -814,29 +860,51 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	cm := next.(chatTUI)
 
-	contentW := transcriptContentWidth(cm.width, cm.nativeScrollback)
+	contentW := transcriptContentWidth(cm.contentWidth(), cm.nativeScrollback)
 	cm.viewport.SetWidth(contentW)
 	// Recompute the wrapped status-line count so bottomRows reserves the right
-	// height for the viewport. Use cm.width (same as boxW in View()) so the
-	// wrapping width matches what View() actually renders.
-	cm.statusLineCount = cm.computeStatusLineCount(cm.width)
+	// height for the viewport. Use the effective content width (same as boxW in
+	// View()) so the wrapping width matches what View() actually renders.
+	cm.statusLineCount = cm.computeStatusLineCount(cm.contentWidth())
 	// Keep the composer proportional to the live terminal instead of letting its
 	// absolute row cap crowd the transcript and fixed status rows on short
 	// windows. Textarea remains the owner of the scroll offset and caret reveal.
 	cm.syncInputHeightLimit()
 	cm.viewport.SetHeight(cm.transcriptHeight())
-	if cm.width != prevWidth {
-		cm.reflowTranscript(cm.width)
+	if cm.width != prevWidth || cm.contentWidth() != prevContentW {
+		cm.reflowTranscript(cm.contentWidth())
 		// Selection coordinates are visual-line based and cannot survive a
 		// semantic reflow without selecting unrelated text.
 		cm.sel = selection{}
 	}
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
-	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.transcriptDirty {
-		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
-		cm.viewport.SetContent(wrapped)
-		cm.wrappedLines = strings.Split(wrapped, "\n")
+	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.contentWidth() != prevContentW || cm.transcriptDirty {
+		// A width change or an in-place transcript rewrite needs a full
+		// re-wrap; plain growth wraps only the new lines (transcript is
+		// append-only, so the existing wrappedLines stay valid).
+		full := cm.width != prevWidth || cm.contentWidth() != prevContentW || cm.transcriptDirty
+		if full || cm.wrapFrom == 0 || cm.wrapFrom > len(cm.transcript) {
+			cm.wrapFrom = 0
+			wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
+			cm.wrappedLines = strings.Split(wrapped, "\n")
+			cm.wrapFrom = len(cm.transcript)
+			cm.wrappedText = wrapped
+			cm.viewport.SetContent(wrapped)
+		} else {
+			fresh := wrapTranscript(strings.Join(cm.transcript[cm.wrapFrom:], "\n"), contentW)
+			cm.wrappedLines = append(cm.wrappedLines, strings.Split(fresh, "\n")...)
+			cm.wrapFrom = len(cm.transcript)
+			// Append to the cached joined text instead of re-joining the whole
+			// transcript every block — on long conversations the full join is
+			// O(n) per tool result and dominates the re-feed cost.
+			if cm.wrappedText == "" {
+				cm.wrappedText = fresh
+			} else {
+				cm.wrappedText += "\n" + fresh
+			}
+			cm.viewport.SetContent(cm.wrappedText)
+		}
 		if wasAtBottom {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
 		} else if cm.width != prevWidth && resizeAnchor.valid {
@@ -870,7 +938,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.followComposerCursor()
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.SetWidth(max(msg.Width-4, 1))
+		m.input.SetWidth(max(msg.Width-6, 1))
 		// Commit the banner — and a resumed session's transcript — once, now
 		// that the width is known.
 		if !m.started {
@@ -883,6 +951,22 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
+		// Wheel over the completion panel scrolls the picker, not the transcript.
+		if m.completion.active {
+			if top, bottom := m.completionMenuBounds(); msg.Y >= top && msg.Y < bottom {
+				delta := 0
+				switch msg.Button {
+				case tea.MouseWheelUp:
+					delta = -1
+				case tea.MouseWheelDown:
+					delta = 1
+				}
+				if delta != 0 {
+					m.moveCompletion(delta)
+				}
+				return m, nil
+			}
+		}
 		if m.mouseOverComposer(msg.X, msg.Y) {
 			delta := 0
 			switch msg.Button {
@@ -946,6 +1030,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.composerSel = composerSelection{}
 		}
+		if msg.Button == tea.MouseLeft && m.inCompletionScrollbar(msg.X, msg.Y) {
+			m.completionScrollbarDrag = true
+			m.completionScrollbarGrabOffset = m.completionScrollbarGrabRowOffset(msg.Y)
+			m.dragCompletionScrollbar(msg.Y)
+			return m, nil
+		}
 		if msg.Button == tea.MouseLeft && m.inScrollbar(msg.X, msg.Y) {
 			m.sel = selection{}
 			m.autoScroll = 0
@@ -975,6 +1065,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if at, ok := m.composerCaretAt(msg.X, msg.Y, true); ok {
 				m.composerSel.head = at.offset
 			}
+			return m, nil
+		}
+		if m.completionScrollbarDrag {
+			m.dragCompletionScrollbar(msg.Y)
 			return m, nil
 		}
 		if m.scrollbarDrag {
@@ -1039,6 +1133,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// terminal convention), while the highlight stays on as the visual
 		// "what's selected" cue and a right-click can still re-copy it. A plain
 		// click (no drag) clears any prior selection.
+		if m.completionScrollbarDrag {
+			m.dragCompletionScrollbar(msg.Y)
+			m.completionScrollbarDrag = false
+			m.completionScrollbarGrabOffset = 0
+			return m, nil
+		}
 		if m.scrollbarDrag {
 			m.dragScrollbar(msg.Y)
 			m.scrollbarDrag = false
@@ -1088,6 +1188,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyPressMsg:
+		// Any non-Esc keystroke while the running-turn cancel confirmation is
+		// armed means the user is not cancelling — disarm it and process the
+		// key normally.
+		if m.escCancelArmed && msg.String() != "esc" {
+			m.escCancelArmed = false
+		}
 		// Any keystroke dismisses a finished selection (copy is a right-click),
 		// with a few exceptions: Ctrl/Super/Meta+C copies the selection, the
 		// paste shortcuts keep it so the async clipboard result can replace
@@ -1303,13 +1409,21 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case m.state == tuiRunning && m.bubblePending:
 				m.unsendPending()
 			case m.state == tuiRunning:
-				m.ctrl.Cancel()
-				// Defensive: if the controller is no longer running (cancel
-				// completed synchronously, e.g. for shell commands), transition
-				// to idle immediately instead of waiting for TurnDone.
-				if !m.ctrl.Running() {
-					m.state = tuiIdle
-					m.confirmBubbleSent()
+				// Two-stage cancel confirmation: the first Esc arms it and
+				// shows a hint on the working line; the second Esc cancels, so
+				// a stray Esc never kills a running turn outright.
+				if m.escCancelArmed {
+					m.escCancelArmed = false
+					m.ctrl.Cancel()
+					// Defensive: if the controller is no longer running (cancel
+					// completed synchronously, e.g. for shell commands), transition
+					// to idle immediately instead of waiting for TurnDone.
+					if !m.ctrl.Running() {
+						m.state = tuiIdle
+						m.confirmBubbleSent()
+					}
+				} else {
+					m.escCancelArmed = true
 				}
 			default:
 				// Idle (any mode): a double-Esc on an empty composer opens the
@@ -1748,6 +1862,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.state == tuiRunning {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
+			m.titleSpin = (m.titleSpin + 1) % len(spinner.Dot.Frames)
 			cmds = append(cmds, cmd)
 		}
 	}
@@ -1808,6 +1923,8 @@ func (m *chatTUI) clearTranscriptDisplay() {
 	m.transcript = nil
 	m.transcriptSources = nil
 	m.wrappedLines = nil
+	m.wrappedText = ""
+	m.wrapFrom = 0
 	m.viewport.SetContent("")
 	m.shellOutputs = make(map[string]string)
 	m.shellExpanded = make(map[string]bool)
@@ -1869,6 +1986,25 @@ func clampWidth(s string, width int) string {
 	// boundaries, preserving ANSI and counting wide chars — exactly what we want,
 	// and lines already within width pass through unchanged.
 	return ansi.Hardwrap(s, width, false)
+}
+
+// turnReceiptContext resolves the 1-based turn number of the just-completed
+// turn and whether that turn has a checkpoint (/rewind can return here). The
+// checkpoint store opens one checkpoint per user turn at turn start, so
+// Checkpoints() already includes the current turn by the time the Usage event
+// lands (turn end). 0/false when checkpoints are unavailable.
+func (m chatTUI) turnReceiptContext() (turnNo int, hasCheckpoint bool) {
+	if m.ctrl == nil {
+		return 0, false
+	}
+	metas := m.ctrl.Checkpoints()
+	turnNo = len(metas)
+	if turnNo == 0 {
+		return 0, false
+	}
+	// The store keeps turn numbers contiguous from 0; the final entry is the
+	// current turn's checkpoint.
+	return turnNo, metas[turnNo-1].Turn == turnNo-1
 }
 
 // commitLine queues one finalized block for the next scrollback flush.
@@ -1992,7 +2128,7 @@ func (m chatTUI) renderMainManagerFooter() string {
 	if strings.TrimSpace(hint) == "" {
 		return ""
 	}
-	w := max(viewWidth(m.width), 40)
+	w := max(viewWidth(m.contentWidth()), 40)
 	return managerFooterPanelStyle(w).Render(dim(hint))
 }
 
@@ -2003,7 +2139,7 @@ func (m chatTUI) renderTranscriptWithMainManager(card string) string {
 	}
 	cw := m.viewport.Width()
 	if cw <= 0 {
-		cw = max(m.width-1, 1)
+		cw = max(m.contentWidth()-1, 1)
 	}
 
 	cardLines := strings.Split(strings.TrimRight(card, "\n"), "\n")
@@ -2084,7 +2220,27 @@ func reasoningBlock(raw string, width, maxLines int) string {
 	if maxLines > 0 && len(lines) > maxLines {
 		lines = lines[len(lines)-maxLines:]
 	}
-	return connectorBlock(lines)
+	return reasoningConnectorBlock(lines)
+}
+
+// reasoningMarker renders a "▎ thinking…"/"▎ thought for Ns" header line: the
+// rail in the theme border colour (quieter than dim), the label in faint.
+func reasoningMarker(text string) string {
+	return "  " + themeFg(activeCLITheme.border, "▎") + " " + dim(text)
+}
+
+// reasoningConnectorBlock mirrors connectorBlock but paints the "⎿" gutter in
+// the theme border colour; connectorBlock's dim gutter stays with tool cards.
+func reasoningConnectorBlock(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	indent := strings.Repeat(" ", len([]rune(connector)))
+	out := themeFg(activeCLITheme.border, connector) + lines[0]
+	for _, ln := range lines[1:] {
+		out += "\n" + indent + ln
+	}
+	return out
 }
 
 // toolStreamTailLines caps how many trailing output lines a running tool shows;
@@ -2438,7 +2594,7 @@ func (m *chatTUI) commitReasoning() {
 		if strings.TrimSpace(m.reasoning.String()) != "" || !m.thinkStart.IsZero() {
 			secs := int(time.Since(m.thinkStart).Seconds())
 			m.commitSpacer()
-			m.commitLine(dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)))
+			m.commitLine(reasoningMarker(fmt.Sprintf(i18n.M.ChatThoughtForFmt, secs)))
 			if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
 				m.commitLine(reasoningBlock(m.reasoning.String(), m.width, 0))
 			}
@@ -2453,7 +2609,9 @@ func (m *chatTUI) commitReasoning() {
 		return
 	}
 	secs := int(time.Since(m.thinkStart).Seconds())
-	m.setTranscriptBlock(m.reasoningLineIdx, dim(fmt.Sprintf("  ▎ "+i18n.M.ChatThoughtForFmt, secs)), transcriptSource{kind: transcriptSourceFixed})
+	// The finished thought leaves no trace by default — it collapses
+	// completely and only the live "▎ thinking…" marker is ever shown.
+	// Verbose mode keeps the marker as the title of the kept block.
 	if m.reasoningTextIdx >= 0 {
 		if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
 			raw := m.reasoning.String()
@@ -2463,6 +2621,11 @@ func (m *chatTUI) commitReasoning() {
 		} else {
 			m.removeTranscriptBlock(m.reasoningTextIdx)
 		}
+	}
+	if m.showReasoning {
+		m.setTranscriptBlock(m.reasoningLineIdx, reasoningMarker(fmt.Sprintf(i18n.M.ChatThoughtForFmt, secs)), transcriptSource{kind: transcriptSourceFixed})
+	} else {
+		m.removeTranscriptBlock(m.reasoningLineIdx)
 	}
 	m.transcriptDirty = true
 	m.reasoning.Reset()
@@ -2771,10 +2934,12 @@ func freshApprovalAllowsSession(toolName string) bool {
 }
 
 var (
-	// Input box: only top + bottom borders, no sides. The concrete colors are
-	// refreshed from the active CLI theme during startup.
+	// Input box: a full rounded container (all four borders + left padding).
+	// The concrete colors are refreshed from the active CLI theme during
+	// startup; View() recolors the border for the running/shell states.
 	inputBoxStyle    lipgloss.Style
 	todoPanelStyle   lipgloss.Style
+	todoSidebarStyle lipgloss.Style
 	statusBlockStyle lipgloss.Style
 	workingStyle     lipgloss.Style
 )
@@ -2798,10 +2963,16 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 	if cancelRequested {
 		working = fmt.Sprintf("  "+i18n.M.ChatStatusCancellingFmt, m.spinner.View(), m.elapsed)
 	} else {
-		working = fmt.Sprintf("  "+i18n.M.ChatStatusThinkingFmt, m.spinner.View(), m.elapsed)
+		spin := m.spinner.View()
+		working = "  " + accentWorkingVerb(fmt.Sprintf(i18n.M.ChatStatusThinkingFmt, spin, m.elapsed), spin, styled)
 	}
 	if m.turnTokens > 0 {
-		working += " · ↓" + shortTokens(m.turnTokens)
+		tokens := " · ↓" + shortTokens(m.turnTokens)
+		if styled {
+			working += dim(tokens)
+		} else {
+			working += tokens
+		}
 	}
 	if n := len(m.pendingInterject); n > 0 {
 		var queued string
@@ -2816,12 +2987,106 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 			working += queued
 		}
 	}
+	if !cancelRequested {
+		// Trailing affordance, faint — the first thing dropped under width
+		// pressure. The styled and plain variants carry identical visible text
+		// so computeStatusLineCount measures the same row count View paints.
+		// When the first Esc armed the cancel confirmation, replace the plain
+		// hint with the confirm prompt so the user sees what to do next.
+		hint := " · esc interrupt"
+		if m.escCancelArmed {
+			hint = " · " + i18n.M.ChatEscCancelConfirm
+		}
+		if visibleWidth(working)+len(hint) <= max(m.contentWidth(), 10) {
+			if styled {
+				working += dim(hint)
+			} else {
+				working += hint
+			}
+		}
+	}
 	return working
+}
+
+// accentWorkingVerb recolors the working line's verb ("thinking…") in the
+// accent and the metrics parenthetical in faint; the spinner keeps its own
+// accent style. Every ChatStatusThinkingFmt catalog entry has the shape
+// "<spinner> <verb> (<metrics>)", so the first " (" after the spinner is the
+// split point. Unstyled callers (width accounting) get the plain string.
+func accentWorkingVerb(body, spin string, styled bool) string {
+	if !styled {
+		return body
+	}
+	rest := strings.TrimPrefix(body, spin)
+	idx := strings.Index(rest, " (")
+	if idx < 0 {
+		return body
+	}
+	return spin + accent(rest[:idx]) + dim(rest[idx:])
+}
+
+// sessionDisplayTitle returns the active session's display title (custom
+// rename, else topic title), "" when there is no session or no title yet. The
+// result is memoized per session path so the per-frame View call does not
+// re-read the meta sidecar.
+func (m chatTUI) sessionDisplayTitle() string {
+	if m.ctrl == nil {
+		return ""
+	}
+	path := m.ctrl.SessionPath()
+	if path == "" {
+		return ""
+	}
+	// Only non-empty titles are memoized: a session with no title yet may gain
+	// one at any time (auto topic title, /rename), and the cache must not pin
+	// the untitled state.
+	if m.titleCache != nil && m.titleCache.path == path && m.titleCache.title != "" {
+		return m.titleCache.title
+	}
+	title := ""
+	if meta, ok, err := agent.LoadBranchMeta(path); err == nil && ok {
+		// Custom rename wins, then the auto topic title, then the first user
+		// prompt — so `-c`/`-r` into an existing session always shows what it
+		// is, and only a brand-new conversation falls back to "Reasonix".
+		title = strings.TrimSpace(firstNonEmpty(meta.CustomTitle, meta.TopicTitle, meta.Preview))
+	}
+	// The OSC title sequence must stay a single printable line: strip ANSI,
+	// collapse line breaks, and clamp the width.
+	title = ansi.Truncate(ansi.Strip(collapseBreaks(title)), 60, "…")
+	if title != "" && m.titleCache != nil {
+		m.titleCache.path = path
+		m.titleCache.title = title
+	}
+	return title
+}
+
+// windowTitle is the terminal window title: the active session's display
+// title, or "Reasonix" for a fresh conversation with no title yet. While a
+// turn runs, a spinner frame is prefixed so the title shows live progress.
+func (m chatTUI) windowTitle() string {
+	title := m.sessionDisplayTitle()
+	if title == "" {
+		title = "Reasonix"
+	}
+	if m.state == tuiRunning {
+		return spinner.Dot.Frames[m.titleSpin%len(spinner.Dot.Frames)] + " " + title
+	}
+	return title
+}
+
+// invalidateTitleCache drops the memoized window title so the next frame
+// reloads it. /rename changes the title without a session-path change, so it
+// must invalidate explicitly.
+func (m *chatTUI) invalidateTitleCache() {
+	if m.titleCache != nil {
+		m.titleCache.path = ""
+	}
 }
 
 func (m chatTUI) View() tea.View {
 	if m.themeSweep != nil {
 		v := tea.NewView(m.themeSweep.render())
+		v.WindowTitle = m.windowTitle()
 		if !m.nativeScrollback {
 			v.AltScreen = true
 			if m.mouseCaptureOff {
@@ -2832,7 +3097,7 @@ func (m chatTUI) View() tea.View {
 		}
 		return v
 	}
-	boxW := m.width
+	boxW := m.contentWidth()
 	if boxW < 10 {
 		boxW = 10
 	}
@@ -2841,28 +3106,30 @@ func (m chatTUI) View() tea.View {
 	cancelRequested := m.cancelRequested()
 	var box string
 	if !hideComposer {
+		// Border state precedence: running (accent "alive" signal) wins over
+		// shell mode (success), which wins over the plain theme border.
 		style := inputBoxStyle.Width(boxW)
 		if shellMode {
 			style = withThemeBorderFG(style, statusShellColor)
+		}
+		if m.state == tuiRunning {
+			style = withThemeBorderFG(style, activeCLITheme.accent)
 		}
 		box = style.Render(m.renderComposerInput())
 	}
 
 	var modeTag string
 	if shellMode {
-		modeTag = modeTagStyle(statusShellColor, modeTagLight).Render("Shell")
+		modeTag = modeTagStyle(statusShellColor).Render("● Shell")
 	} else {
-		background := statusAutoColor
-		foreground := modeTagDark
+		color := statusAutoColor
 		switch {
 		case m.ctrl.AutoApproveTools():
-			background = statusYoloColor
-			foreground = modeTagLight
+			color = statusYoloColor
 		case m.planMode:
-			background = statusPlanColor
-			foreground = modeTagLight
+			color = statusPlanColor
 		}
-		modeTag = modeTagStyle(background, foreground).Render(m.modeTagText())
+		modeTag = modeTagStyle(color).Render("● " + m.modeTagText())
 	}
 
 	primaryStatus := m.primaryStatusLine(modeTag, shellMode, cancelRequested)
@@ -2942,10 +3209,15 @@ func (m chatTUI) View() tea.View {
 	parts = append(parts, statusBlockStyle.Width(boxW).MaxWidth(boxW).Render(statusBlock))
 
 	if m.nativeScrollback {
-		v := tea.NewView(strings.Join(parts, "\n"))
+		body := strings.Join(parts, "\n")
+		if side := m.renderTodoSidebar(m.bottomRows()); side != "" {
+			body = lipgloss.JoinHorizontal(lipgloss.Top, body, side)
+		}
+		v := tea.NewView(body)
+		v.WindowTitle = m.windowTitle()
 		if !hideComposer {
 			if cur := m.composerCursor(); cur != nil {
-				cur.X += 1
+				cur.X += 2 // left border + PaddingLeft(1)
 				cur.Y += rowsAboveBox + 1
 				v.Cursor = cur
 			}
@@ -2954,13 +3226,19 @@ func (m chatTUI) View() tea.View {
 	}
 
 	// Full-screen frame: the transcript viewport on top (it pads to exactly its
-	// height), the pinned bottom region beneath. Alt-screen owns the grid, so
+	// height), the pinned bottom region beneath, and — on wide terminals — the
+	// task-list sidebar as a right-hand column. Alt-screen owns the grid, so
 	// resize repaints cleanly — no scrollback reflow, no ghost borders.
 	mainArea := m.renderTranscript()
 	if card := m.renderMainManager(); card != "" {
 		mainArea = m.renderTranscriptWithMainManager(card)
 	}
-	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
+	left := mainArea + "\n" + strings.Join(parts, "\n")
+	if side := m.renderTodoSidebar(m.height); side != "" {
+		left = lipgloss.JoinHorizontal(lipgloss.Top, left, side)
+	}
+	v := tea.NewView(left)
+	v.WindowTitle = m.windowTitle()
 	v.AltScreen = true
 	if m.mouseCaptureOff {
 		// Release the mouse to the terminal: native click-drag selection and
@@ -2972,11 +3250,11 @@ func (m chatTUI) View() tea.View {
 	}
 	// Anchor the real terminal cursor at the textarea's insertion point only when
 	// the composer is visible. input.Cursor() is relative to the textarea; offset
-	// by the viewport height + rows above + the box's top border row (+1 column
-	// for PaddingLeft).
+	// by the viewport height + rows above + the box's top border row (+2 columns
+	// for the left border + PaddingLeft(1)).
 	if !hideComposer {
 		if cur := m.composerCursor(); cur != nil {
-			cur.X += 1
+			cur.X += 2
 			cur.Y += m.viewport.Height() + rowsAboveBox + 1
 			v.Cursor = cur
 		}
@@ -3093,7 +3371,46 @@ func (m chatTUI) cacheTag() string {
 	if !ok {
 		return ""
 	}
+	// A compact reset counter rides the status line so cache-prefix resets
+	// (tools/system/log_rewrite churn) are visible without opening /status;
+	// the per-cause breakdown lives in the /status prefix row.
+	if len(m.prefixChurns) > 0 {
+		total := 0
+		for _, n := range m.prefixChurns {
+			total += n
+		}
+		body += " · " + fmt.Sprintf("reset×%d", total)
+	}
 	return dim(body)
+}
+
+// prefixChurnTag summarises cache-prefix resets by cause for /status, e.g.
+// "3 resets: tools×2, log_rewrite×1". "" when nothing has churned. This is
+// the diagnostic half of the cache story: the hit rate shows the cost, the
+// churn causes show what resets the DeepSeek prefix cache mid-session.
+func (m chatTUI) prefixChurnTag() string {
+	if len(m.prefixChurns) == 0 {
+		return ""
+	}
+	reasons := make([]string, 0, len(m.prefixChurns))
+	total := 0
+	for reason, n := range m.prefixChurns {
+		reasons = append(reasons, reason)
+		total += n
+	}
+	sort.Strings(reasons)
+	parts := make([]string, 0, len(reasons))
+	for _, reason := range reasons {
+		parts = append(parts, fmt.Sprintf("%s×%d", reason, m.prefixChurns[reason]))
+	}
+	return dim(fmt.Sprintf("%d reset%s: %s", total, pluralSuffix(total), strings.Join(parts, ", ")))
+}
+
+func pluralSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // jobsTag shows the count of running background jobs in the status line. Job
@@ -3186,12 +3503,16 @@ func (m chatTUI) renderApprovalBanner() string {
 		text += "\n" + strings.Join(planDetails, "\n")
 	}
 	var b strings.Builder
-	b.WriteString("⏸ " + text + "\n")
+	pause := "⏸"
+	if colorOn() {
+		pause = themeStyle(activeCLITheme.warn).Bold(true).Render("⏸")
+	}
+	b.WriteString(pause + " " + text + "\n")
 	for i, choice := range approvalChoices(m.pendingApproval) {
 		b.WriteString(rowLine(i == m.approvalSelection, i+1, "", choice.label, false) + "\n")
 	}
-	b.WriteString(dim("↑/↓ navigate · Enter select · y/a/p/n shortcuts"))
-	return choicePanelStyle.Width(w).Render(b.String())
+	b.WriteString(dim("y approve · a always · p plan · n nope · ↑/↓ · ⏎"))
+	return approvalPanelStyle.Width(w).Render(b.String())
 }
 
 func compactApprovalPlan(plan string) string {
@@ -3251,6 +3572,15 @@ func approvalToolLabel(toolName string) string {
 // is truncated with a "+N more" footer so the bottom region stays compact.
 const todoPanelMaxRows = 8
 
+// todoSidebarMinWidth is the terminal width at which the task list moves from
+// the pinned bottom panel into a dedicated right-hand column. Below it the
+// compact bottom panel is used so the chat column keeps enough room.
+const todoSidebarMinWidth = 100
+
+// todoSidebarWidth is the width of the right-hand task-list column on wide
+// terminals.
+const todoSidebarWidth = 32
+
 type todoPanelTodo struct {
 	Content    string `json:"content"`
 	Status     string `json:"status"`
@@ -3258,60 +3588,181 @@ type todoPanelTodo struct {
 	Level      int    `json:"level"`
 }
 
+// contentWidth returns the width available to the chat column: the full
+// terminal width, minus the right-hand todo sidebar when it is active on a wide
+// terminal. View(), Update(), and every bottom panel render against this width
+// so nothing collides with the sidebar.
+func (m chatTUI) contentWidth() int {
+	return contentWidthFor(m.width, m.todoSidebarActive())
+}
+
+func contentWidthFor(width int, sidebarActive bool) int {
+	if sidebarActive {
+		return max(width-todoSidebarWidth, 40)
+	}
+	return width
+}
+
+// todoSidebarActive reports whether the task list should render as the
+// right-hand column instead of the pinned bottom panel: a wide enough terminal
+// and a list to show. The column stays put once a list exists — it renders the
+// finished state (all-green bullets) rather than vanishing mid-session, so the
+// chat column width never jumps when the last item completes.
+func (m chatTUI) todoSidebarActive() bool {
+	return m.width >= todoSidebarMinWidth && todoArgsHasList(m.todoArgs)
+}
+
+// parseTodoPanelArgs decodes the latest todo_write args, if any.
+func parseTodoPanelArgs(args string) ([]todoPanelTodo, bool) {
+	var p struct {
+		Todos []todoPanelTodo `json:"todos"`
+	}
+	if err := json.Unmarshal([]byte(args), &p); err != nil || len(p.Todos) == 0 {
+		return nil, false
+	}
+	return p.Todos, true
+}
+
+// todoArgsHasList reports whether the latest todo_write args carry a non-empty
+// task list, regardless of completion state — the sidebar persists from the
+// first list until the session clears it, so its column width stays stable.
+func todoArgsHasList(args string) bool {
+	_, ok := parseTodoPanelArgs(args)
+	return ok
+}
+
 // renderTodoPanel renders the task list pinned above the input from the latest
 // todo_write call (m.todoArgs): a "Tasks done/total" header, completed items
 // dimmed/checked, the in-progress one highlighted (its activeForm if given),
 // pending ones muted. It returns "" when there's no list or every item is done,
 // so the panel appears while work is outstanding and clears itself when finished.
+// On wide terminals the task list moves to the right-hand sidebar
+// (renderTodoSidebar), so the bottom panel stays empty there.
 func (m chatTUI) renderTodoPanel() string {
-	var p struct {
-		Todos []todoPanelTodo `json:"todos"`
+	if m.todoSidebarActive() {
+		return ""
 	}
-	if err := json.Unmarshal([]byte(m.todoArgs), &p); err != nil || len(p.Todos) == 0 {
+	todos, ok := parseTodoPanelArgs(m.todoArgs)
+	if !ok {
 		return ""
 	}
 	done := 0
-	for _, t := range p.Todos {
+	for _, t := range todos {
 		if t.Status == "completed" {
 			done++
 		}
 	}
-	if done == len(p.Todos) {
+	if done == len(todos) {
 		return "" // all finished — clear the panel
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s %s\n", accent("To-dos"), dim(fmt.Sprintf("%d/%d", done, len(p.Todos))))
-	start, end := todoPanelWindow(p.Todos)
+	// 10-cell progress bar: completed cells in success, the rest in the quiet
+	// border colour, with the done/total count in faint.
+	filled := done * 10 / len(todos)
+	bar := green(strings.Repeat("▓", filled)) + themeFg(activeCLITheme.border, strings.Repeat("░", 10-filled))
+	fmt.Fprintf(&b, "%s %s %s\n", accent("Tasks"), bar, dim(fmt.Sprintf("%d/%d", done, len(todos))))
+	start, end := todoPanelWindow(todos)
 	if start > 0 {
 		b.WriteString(dim(fmt.Sprintf("  +%d above", start)) + "\n")
 	}
-	for _, t := range p.Todos[start:end] {
+	for _, t := range todos[start:end] {
 		indent := "  "
 		if t.Level >= 1 {
 			indent = "      " // sub-steps sit under their phase
 		}
 		switch t.Status {
 		case "completed":
-			b.WriteString(indent + green("✔") + " " + dim(t.Content) + "\n")
+			b.WriteString(indent + green("●") + " " + dim(t.Content) + "\n")
 		case "in_progress":
 			label := t.Content
 			if t.ActiveForm != "" {
 				label = t.ActiveForm
 			}
-			b.WriteString(indent + yellow("▶ "+label) + "\n")
+			b.WriteString(indent + accent("▶") + " " + label + "\n")
 		default:
 			b.WriteString(indent + dim("○ "+t.Content) + "\n")
 		}
 	}
-	if end < len(p.Todos) {
-		b.WriteString(dim(fmt.Sprintf("  +%d more", len(p.Todos)-end)) + "\n")
+	if end < len(todos) {
+		b.WriteString(dim(fmt.Sprintf("  +%d more", len(todos)-end)) + "\n")
 	}
-	return todoPanelStyle.Width(max(m.width, 10)).Render(strings.TrimRight(b.String(), "\n"))
+	return todoPanelStyle.Width(max(m.contentWidth(), 10)).Render(strings.TrimRight(b.String(), "\n"))
 }
 
-func todoPanelWindow(todos []todoPanelTodo) (int, int) {
-	if len(todos) <= todoPanelMaxRows {
+// renderTodoSidebar renders the task list as a right-hand column on wide
+// terminals (todoSidebarMinWidth+ columns). It shows the same data as the
+// renderTodoSidebar renders the task list as a compact right-hand column on
+// wide terminals (todoSidebarMinWidth+ columns). Unlike the pinned bottom
+// panel it renders beside the chat column, but its height hugs its content —
+// the column never stretches to the full screen, so the composer row stays
+// clean beside it. Returns "" when the sidebar is inactive (narrow terminal
+// or no outstanding work).
+func (m chatTUI) renderTodoSidebar(height int) string {
+	if !m.todoSidebarActive() {
+		return ""
+	}
+	todos, ok := parseTodoPanelArgs(m.todoArgs)
+	if !ok {
+		return ""
+	}
+	done := 0
+	for _, t := range todos {
+		if t.Status == "completed" {
+			done++
+		}
+	}
+	// No early return when every item is done: the finished list (all-green
+	// bullets) stays rendered so the column does not vanish and the chat
+	// column width stays stable while the session is still live.
+
+	inner := max(todoSidebarWidth-2, 10) // minus the two vertical borders
+	var b strings.Builder
+	if height >= 3 {
+		fmt.Fprintf(&b, "%s %d/%d\n", accent("Tasks"), done, len(todos))
+	}
+	// One header row is reserved above; the "+N above"/"+N more" footers each
+	// take a row of their own below the window.
+	avail := max(height-4, 1)
+	start, end := todoWindow(todos, avail)
+	if start > 0 {
+		b.WriteString(dim(fmt.Sprintf("+%d above", start)) + "\n")
+	}
+	for _, t := range todos[start:end] {
+		indent := ""
+		if t.Level >= 1 {
+			indent = "   " // sub-steps sit under their phase
+		}
+		var line string
+		switch t.Status {
+		case "completed":
+			line = green("●") + " " + dim(t.Content)
+		case "in_progress":
+			label := t.Content
+			if t.ActiveForm != "" {
+				label = t.ActiveForm
+			}
+			line = accent("▶") + " " + label
+		default:
+			line = dim("○ " + t.Content)
+		}
+		b.WriteString(indent + ansi.Truncate(line, max(inner-2, 4), "…") + "\n")
+	}
+	if end < len(todos) {
+		b.WriteString(dim(fmt.Sprintf("+%d more", len(todos)-end)) + "\n")
+	}
+	// Compact: no fixed Height — the column ends where its content ends, so a
+	// short task list never leaves a hollow bordered column beside the input.
+	return todoSidebarStyle.Width(todoSidebarWidth).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+// todoWindow returns the [start, end) window of todos that fits maxRows rows,
+// keeping the in-progress item visible.
+func todoWindow(todos []todoPanelTodo, maxRows int) (int, int) {
+	if maxRows <= 0 {
+		return 0, 0
+	}
+	if len(todos) <= maxRows {
 		return 0, len(todos)
 	}
 	active := -1
@@ -3322,16 +3773,20 @@ func todoPanelWindow(todos []todoPanelTodo) (int, int) {
 		}
 	}
 	if active < 0 {
-		return 0, todoPanelMaxRows
+		return 0, maxRows
 	}
-	start := active - todoPanelMaxRows/2
+	start := active - maxRows/2
 	if start < 0 {
 		start = 0
 	}
-	if maxStart := len(todos) - todoPanelMaxRows; start > maxStart {
+	if maxStart := len(todos) - maxRows; start > maxStart {
 		start = maxStart
 	}
-	return start, start + todoPanelMaxRows
+	return start, start + maxRows
+}
+
+func todoPanelWindow(todos []todoPanelTodo) (int, int) {
+	return todoWindow(todos, todoPanelMaxRows)
 }
 
 // truncateSubject trims a tool subject so the approval banner fits one line.
@@ -3369,11 +3824,11 @@ func (m chatTUI) computeStatusLineCount(width int) int {
 	cancelRequested := m.cancelRequested()
 
 	// Replicate the first status line (mode tag + state) from View().
-	// ModeTag is rendered with Padding(0,1) in View() — add the same padding
-	// here so the visible width matches exactly.
-	modeTag := " " + m.modeTagText() + " "
+	// ModeTag renders as flat "● <mode>" text — mirror the same prefix so the
+	// visible width matches exactly.
+	modeTag := "● " + m.modeTagText()
 	if shellMode {
-		modeTag = " Shell "
+		modeTag = "● Shell"
 	}
 	primaryStatus := m.primaryStatusLine(modeTag, shellMode, cancelRequested)
 	statusBlock := m.renderStatusBlock(primaryStatus, width)
@@ -3449,7 +3904,9 @@ func (m *chatTUI) syncInputHeightLimit() {
 	m.input.MaxHeight = limit
 	// SetWidth recalculates DynamicHeight from the full soft-wrapped content,
 	// clamping the visible viewport to the new limit while preserving the text.
-	m.input.SetWidth(max(m.width-4, 1))
+	// The box's side borders + left padding take 3 columns and 1 more keeps the
+	// text off the frame, so the textarea gets width-6 (see also WindowSizeMsg).
+	m.input.SetWidth(max(m.contentWidth()-6, 1))
 }
 
 func (m *chatTUI) growInputToFit() {
@@ -3734,7 +4191,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.commitSpacer()
 			m.thinkStart = time.Now()
 			m.reasoningLineIdx = len(m.transcript)
-			m.commitLine(dim("  ▎ " + i18n.M.ChatThinking))
+			m.commitLine(reasoningMarker(i18n.M.ChatThinking))
 			m.reasoningTextIdx = len(m.transcript)
 			m.commitLine("")
 			m.reasoningView = m.reasoningView[:0]
@@ -3801,7 +4258,19 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
 		}
-		if line := renderTurnReceipt(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
+		// Track cache-prefix resets by cause so /status can show what breaks
+		// the DeepSeek prefix cache mid-session (e.g. "tools" after an MCP
+		// connect).
+		if e.CacheDiagnostics != nil && e.CacheDiagnostics.PrefixChanged {
+			if m.prefixChurns == nil {
+				m.prefixChurns = map[string]int{}
+			}
+			for _, reason := range e.CacheDiagnostics.PrefixChangeReasons {
+				m.prefixChurns[reason]++
+			}
+		}
+		turnNo, hasCheckpoint := m.turnReceiptContext()
+		if line := renderTurnReceipt(e.Usage, e.Pricing, e.CacheDiagnostics, turnNo, hasCheckpoint); line != "" {
 			m.finalizeStreamed()
 			m.commitSpacer()
 			m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})
@@ -3887,6 +4356,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// and gate a plan-mode proposal on the user's approval. Autosave already
 		// happened in Controller so every frontend shares the same activity-time
 		// semantics.
+		m.escCancelArmed = false // the turn is over; a cancel confirmation no longer applies
 		m.commitReasoning()
 		m.commitPending()
 		// The bubble was echoed on Enter and an un-sent turn is swallowed above
@@ -4028,7 +4498,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		}
 	case "/skill", "/skills":
 		m.echoLocalCommand(input)
-		m.runSkillSubcommand(input)
+		if cmd := m.runSkillSubcommand(input); cmd != nil {
+			return cmd
+		}
 		if m.pendingModelSwitch != nil {
 			return m.pendingModelSwitch
 		}
@@ -4172,6 +4644,9 @@ func (m *chatTUI) showStatusDetails() {
 			lines = append(lines, "  cache      "+tag)
 		}
 	}
+	if tag := m.prefixChurnTag(); tag != "" {
+		lines = append(lines, "  prefix     "+tag)
+	}
 	if tag := m.gitTag(); tag != "" {
 		lines = append(lines, "  git        "+tag)
 	}
@@ -4313,8 +4788,11 @@ func (m *chatTUI) runExportCommand(input string) {
 	for _, msg := range msgs {
 		switch msg.Role {
 		case provider.RoleUser:
-			// Skip internal steer messages.
+			// Skip internal steer and host-reflection messages.
 			if _, isSteer := agent.SteerText(msg.Content); isSteer {
+				continue
+			}
+			if _, isReflection := agent.HostReflectionText(msg.Content); isReflection {
 				continue
 			}
 			content := exportUserContent(msg.Content)
@@ -4498,6 +4976,16 @@ func (m *chatTUI) runMCPSubcommand(input string) {
 	case "import":
 		m.openMCPImportPicker()
 	default:
+		// A configured server name as the subcommand opens its manager directly:
+		// the /mcp picker lists every server under the management commands.
+		if m.ctrl != nil {
+			for _, name := range m.ctrl.ConfiguredMCPNames() {
+				if name == args[1] {
+					m.openMCPManager(name)
+					return
+				}
+			}
+		}
 		m.notice("unknown /mcp subcommand " + args[1] + " — try: /mcp, /mcp list, /mcp show, /mcp add, /mcp connect, /mcp import, /mcp remove")
 	}
 }
@@ -4583,7 +5071,7 @@ func replaySectionsForWithAssistantRenderer(
 	for _, m := range history {
 		if m.LocalOnly {
 			if reasoning := strings.TrimSpace(m.ReasoningContent); reasoning != "" {
-				out = append(out, dim("  ▎ "+i18n.M.ChatThinking)+"\n"+reasoningBlock(reasoning, width, 0)+"\n\n")
+				out = append(out, reasoningMarker(i18n.M.ChatThinking)+"\n"+reasoningBlock(reasoning, width, 0)+"\n\n")
 			}
 			if body := strings.TrimSpace(m.Content); body != "" {
 				out = append(out, renderAssistant(body, width)+"\n\n")
@@ -4598,16 +5086,21 @@ func replaySectionsForWithAssistantRenderer(
 		}
 		switch m.Role {
 		case provider.RoleUser:
-			// Steer messages are surfaced as a notice line, not a user bubble.
+			// Steer and host-reflection messages are surfaced as a notice
+			// line, not a user bubble.
 			if steerText, isSteer := agent.SteerText(m.Content); isSteer {
 				out = append(out, fmt.Sprintf("  ↪ %s\n\n", steerText))
+				continue
+			}
+			if reflectionText, isReflection := agent.HostReflectionText(m.Content); isReflection {
+				out = append(out, fmt.Sprintf("  ↪ %s\n\n", reflectionText))
 				continue
 			}
 			content := control.StripComposePrefixes(m.Content)
 			out = append(out, renderUserBubble(content, width, false)+"\n\n")
 		case provider.RoleAssistant:
 			if reasoning := strings.TrimSpace(m.ReasoningContent); reasoning != "" {
-				out = append(out, dim("  ▎ "+i18n.M.ChatThinking)+"\n"+reasoningBlock(reasoning, width, 0)+"\n\n")
+				out = append(out, reasoningMarker(i18n.M.ChatThinking)+"\n"+reasoningBlock(reasoning, width, 0)+"\n\n")
 			}
 			body := strings.TrimSpace(m.Content)
 			if body != "" {
@@ -4625,11 +5118,13 @@ func interruptedTurnDisplayNotice() string {
 	return i18n.M.InterruptedRecovery
 }
 
-// renderTUIBanner is the title + tip + optional missing-key warning printed once
-// at the top of the session.
+// renderTUIBanner is the brand line printed once at the top of the session: a
+// single "◆ reasonix · label" row with the tip below, plus the optional
+// missing-key warning. No graphic — the flat graphite look keeps the header as
+// one quiet line instead of a tall brand block.
 func renderTUIBanner(label, missing string, width int) string {
 	var b strings.Builder
-	b.WriteString(accent("◆") + " " + bold("reasonix") + "  " + dim("· "+label) + "\n")
+	b.WriteString("  " + accent("◆") + " " + bold("reasonix") + "  " + dim("· "+label) + "\n")
 	b.WriteString(dim("  "+i18n.M.ChatTip) + "\n")
 	if missing != "" {
 		b.WriteString(wrapForViewport("  ! "+missing, width, activeCLITheme.warn) + "\n")
@@ -4645,19 +5140,35 @@ func wrapForViewport(text string, width int, fg cliColor) string {
 	return themeStyle(fg).Width(width).Render(text)
 }
 
-// renderUserBubble renders the just-submitted prompt as a transcript line. Keep
-// it visually lighter than the real bottom composer so a fresh session does not
-// look like it has a second input box in the transcript.
+// renderUserBubble renders the just-submitted prompt as a transcript line.
+// The whole row sits on the user-bubble surface (one step lighter than the
+// chat background) so user turns read as a block next to the assistant's
+// plain flowing text — a role-border idea adapted to a flat palette.
+// The "›" marker carries the accent (bold); the body stays in the default
+// foreground so long prompts don't shout. Plan mode prepends an accent
+// "[plan]" chip.
 func renderUserBubble(line string, width int, planMode bool) string {
 	line = displayLineForImageRefs(line)
-	prefix := "› "
-	if planMode {
-		prefix = "› [plan] "
-	}
 	if !colorOn() {
-		return "│ " + prefix + line
+		if planMode {
+			return "│ › [plan] " + line
+		}
+		return "│ › " + line
 	}
-	return "  " + accent(prefix+line)
+	marker := themeStyle(activeCLITheme.accent).Bold(true).Render("›")
+	prefix := "  " + marker + " "
+	if planMode {
+		prefix = "  " + marker + " " + accent("[plan]") + " "
+	}
+	// Pad each physical row to the content width before painting the
+	// background, so the block is a solid band across the transcript column
+	// (the width-aware re-wrap later treats these rows as already full-width).
+	width = max(width, 1)
+	lines := strings.Split(line, "\n")
+	for i, l := range lines {
+		lines[i] = userBubbleStyle.Render(padCompletionLine(prefix+l, width))
+	}
+	return strings.Join(lines, "\n")
 }
 
 var cliImageRefRe = regexp.MustCompile(`(?:^|\s)@\.reasonix/attachments/clipboard-\d{8}-\d{6}\.\d+(?:-(?:\d{6}|[a-f0-9]{8}))?\.(?:png|jpg|jpeg|gif|webp)`)

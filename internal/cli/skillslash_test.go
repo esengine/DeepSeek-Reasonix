@@ -6,10 +6,11 @@ import (
 	"reasonix/internal/skill"
 )
 
-// TestSlashItemsIncludesSkills proves every loaded skill is offered in the slash
-// menu as "/<name>" (so /init, /explore, … show up), and that typing the prefix
-// filters to it — the data path behind "type / to see the commands".
-func TestSlashItemsIncludesSkills(t *testing.T) {
+// TestSlashItemsExcludesSkills proves installed skills are NOT offered in the
+// slash menu as "/<name>" — they are reached through "/skills " (which pops
+// the same picker). Built-in verbs stay listed, and the skill data is still
+// discoverable via the /skills subcommand picker.
+func TestSlashItemsExcludesSkills(t *testing.T) {
 	m := newTestChatTUI()
 	m.skills = []skill.Skill{
 		{Name: "init", Description: "bootstrap AGENTS.md", RunAs: skill.RunInline},
@@ -22,49 +23,62 @@ func TestSlashItemsIncludesSkills(t *testing.T) {
 	for _, it := range m.slashItems() {
 		got[it.label] = true
 	}
-	for _, want := range []string{"/init", "/explore", "/superpowers:writing-plans", "/toolbox:writing-plans", "/skills", "/plugins", "/hooks", "/model"} {
+	for _, missing := range []string{"/init", "/explore", "/superpowers:writing-plans", "/toolbox:writing-plans"} {
+		if got[missing] {
+			t.Errorf("slash menu must not list skill %q; have %v", missing, labels(m.slashItems()))
+		}
+	}
+	for _, want := range []string{"/skills", "/plugins", "/hooks", "/model"} {
 		if !got[want] {
-			t.Errorf("slash menu missing %q; have %v", want, labels(m.slashItems()))
+			t.Errorf("slash menu missing built-in %q; have %v", want, labels(m.slashItems()))
 		}
 	}
 
-	// Typing "/init" filters the menu down to the init skill.
+	// Typing a skill's short name no longer opens a slash menu entry; the menu
+	// closes because nothing matches.
 	m.input.SetValue("/init")
 	m.updateCompletion()
-	if !m.completion.active {
-		t.Fatal("typing /init should open the slash menu")
-	}
-	found := false
-	for _, it := range m.completion.items {
-		if it.label == "/init" {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("/init not in filtered menu: %v", labels(m.completion.items))
+	if m.completion.active {
+		t.Fatalf("typing /init must not open the slash menu: %v", labels(m.completion.items))
 	}
 
-	// Typing the hidden short compatibility name still discovers every plugin's
-	// visible qualified name, so an ambiguous short name becomes a chooser.
-	m.input.SetValue("/writing-plans")
+	// The skills are still discoverable through the /skills picker: "/skills "
+	// pops the picker with the management commands AND every installed skill.
+	m.input.SetValue("/skills ")
 	m.updateCompletion()
-	if !m.completion.active {
-		t.Fatal("typing /writing-plans should open the slash menu")
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/skills <space> should pop the subcommand picker: %+v", m.completion)
 	}
-	filtered := map[string]int{}
+	if !hasLabel(m.completion.items, "show") {
+		t.Fatalf("/skills <space> should list the management commands: %+v", labels(m.completion.items))
+	}
+	found := map[string]int{}
 	for i, it := range m.completion.items {
-		filtered[it.label] = i
+		found[it.label] = i
 	}
-	for _, want := range []string{"/superpowers:writing-plans", "/toolbox:writing-plans"} {
-		if _, ok := filtered[want]; !ok {
-			t.Errorf("short skill query missing %q; have %v", want, labels(m.completion.items))
+	for _, want := range []string{"init", "explore"} {
+		if _, ok := found[want]; !ok {
+			t.Errorf("skill %q missing from /skills picker; have %v", want, labels(m.completion.items))
 		}
 	}
-	if idx, ok := filtered["/superpowers:writing-plans"]; ok {
-		m.completion.sel = idx
-		m.acceptCompletion()
-		if got := m.input.Value(); got != "/superpowers:writing-plans " {
-			t.Errorf("accept should fill the qualified skill name, got %q", got)
+	// Both plugin-qualified skills share the short name "writing-plans"; the
+	// picker lists them as-is (the qualified plugin names are the accept
+	// targets of the /slash-name compatibility filter).
+	n := 0
+	for _, it := range m.completion.items {
+		if it.label == "writing-plans" {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("writing-plans should appear twice (superpowers + toolbox), got %d", n)
+	}
+	// The management commands rank before the skills.
+	if showIdx, ok := found["show"]; ok {
+		for _, name := range []string{"init", "explore"} {
+			if found[name] < showIdx {
+				t.Errorf("skill %q should follow the management commands in the picker", name)
+			}
 		}
 	}
 }

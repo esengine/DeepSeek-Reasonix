@@ -13,7 +13,11 @@ import (
 	"reasonix/internal/skill"
 )
 
-func (m *chatTUI) runSkillSubcommand(input string) {
+// runSkillSubcommand handles "/skills <subcommand|skill-name>": the known
+// management verbs, or — because the /skills picker lists every installed
+// skill — a skill name, which runs the skill as a turn. Returns a tea.Cmd when
+// the invocation starts async work (running the skill), nil otherwise.
+func (m *chatTUI) runSkillSubcommand(input string) tea.Cmd {
 	args := tokenizeArgs(input)
 	sub := ""
 	if len(args) > 1 {
@@ -29,31 +33,43 @@ func (m *chatTUI) runSkillSubcommand(input string) {
 	case "show", "cat":
 		if len(args) < 3 {
 			m.notice("usage: /skills show <name>")
-			return
+			return nil
 		}
 		m.skillShow(args[2])
 	case "enable", "disable":
 		if len(args) < 3 {
 			m.notice("usage: /skills " + sub + " <name>")
-			return
+			return nil
 		}
 		m.skillSetEnabled(args[2], sub == "enable")
 	case "new", "init":
 		if len(args) < 3 {
 			m.notice("usage: /skills new <name> [--global]")
-			return
+			return nil
 		}
 		global := containsArg(args[3:], "--global")
 		m.skillNew(args[2], global)
 	case "paths":
 		m.skillPaths()
 	default:
+		// A skill name as the subcommand runs the skill directly: the picker
+		// lists every installed skill under the management commands, and Enter
+		// on one submits /skills <name>.
+		if len(args) > 1 && m.ctrl != nil {
+			skillLine := "/" + strings.Join(args[1:], " ")
+			if _, ok := m.ctrl.RunSkill(skillLine); ok {
+				return m.startControllerTurn(input, input, func() { m.ctrl.SubmitDisplay(input, input) })
+			}
+		}
 		hint := ""
-		if _, ok := m.ctrl.RunSkill("/" + args[1]); ok {
-			hint = " (to run it, type /" + args[1] + ")"
+		if len(args) > 1 {
+			if _, ok := m.ctrl.RunSkill("/" + args[1]); ok {
+				hint = " (to run it, type /skills " + args[1] + " <task>)"
+			}
 		}
 		m.notice("unknown /skills subcommand " + args[1] + hint + " — try: /skills, /skills manage, /skills show <name>, /skills enable <name>, /skills disable <name>, /skills new <name>, /skills paths")
 	}
+	return nil
 }
 
 func (m *chatTUI) skillList() {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
 	"golang.org/x/term"
 
 	"reasonix/internal/i18n"
@@ -26,6 +27,37 @@ func termHeight(fd int) int {
 		return 24
 	}
 	return h
+}
+
+// termWidth returns the terminal's column count, falling back to 80 on error.
+func termWidth(fd int) int {
+	w, _, err := term.GetSize(fd)
+	if err != nil || w <= 0 {
+		return 80
+	}
+	return w
+}
+
+// collapseBreaks collapses CR/LF in a menu row so a multi-line preview (e.g.
+// a user prompt with pasted code) cannot desync the cursor-up redraw math:
+// every item must occupy exactly one terminal line or the next frame's
+// \033[%dA lands on stale rows and the menu appears to duplicate itself.
+func collapseBreaks(s string) string {
+	if !strings.ContainsAny(s, "\r\n") {
+		return s
+	}
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
+// fitWidth truncates s to at most width display columns with an ellipsis,
+// counting wide (CJK) runes as two columns. selectOne/selectMany rows must fit
+// the terminal width or the cursor-up redraw math desyncs: a soft-wrapped row
+// occupies two physical lines while the frame height only counts one.
+func fitWidth(s string, width int) string {
+	if width < 1 {
+		width = 1
+	}
+	return ansi.Truncate(s, width, "…")
 }
 
 // fixedLines returns the number of non-item lines rendered each frame:
@@ -128,13 +160,15 @@ func selectOne(label string, items []menuItem) (int, error) {
 		if end > n {
 			end = n
 		}
+		maxDesc := termWidth(fd) - 18 // " ❯ " + 12-col name + gap, minus safety margin
 		for i := scroll; i < end; i++ {
 			it := filtered[i]
-			name := fmt.Sprintf("%-10s", it.name)
+			name := fmt.Sprintf("%-12s", collapseBreaks(fitWidth(it.name, 12)))
+			desc := collapseBreaks(fitWidth(it.desc, maxDesc))
 			if i == sel {
-				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s ", name, it.desc)))
+				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s ", name, desc)))
 			} else {
-				fmt.Fprintf(w, "\r\033[K   %s %s\r\n", name, dim(it.desc))
+				fmt.Fprintf(w, "\r\033[K   %s %s\r\n", name, dim(desc))
 			}
 		}
 		// if fewer items than viewport, pad with blank lines so the frame
@@ -312,6 +346,7 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 		if end > n {
 			end = n
 		}
+		maxDesc := termWidth(fd) - 26 // " ❯ " + box + 16-col name + gaps, minus safety margin
 		for i := scroll; i < end; i++ {
 			it := filtered[i]
 			origIdx := filterIdx[i]
@@ -319,11 +354,12 @@ func selectMany(label string, items []menuItem) ([]int, error) {
 			if checked[origIdx] {
 				box = "[x]"
 			}
-			name := fmt.Sprintf("%-14s", it.name)
+			name := fmt.Sprintf("%-16s", collapseBreaks(fitWidth(it.name, 16)))
+			desc := collapseBreaks(fitWidth(it.desc, maxDesc))
 			if i == cur {
-				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s %s ", box, name, it.desc)))
+				fmt.Fprintf(w, "\r\033[K%s\r\n", reverse(fmt.Sprintf(" ❯ %s %s %s ", box, name, desc)))
 			} else {
-				fmt.Fprintf(w, "\r\033[K   %s %s %s\r\n", box, name, dim(it.desc))
+				fmt.Fprintf(w, "\r\033[K   %s %s %s\r\n", box, name, dim(desc))
 			}
 		}
 		for i := end - scroll; i < vp; i++ {

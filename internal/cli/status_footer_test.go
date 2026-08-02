@@ -9,12 +9,11 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/control"
-	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 	"reasonix/internal/provider"
 )
 
-func TestTurnReceiptKeepsCompletePerTurnBreakdown(t *testing.T) {
+func TestTurnReceiptKeepsCompactPerTurnLine(t *testing.T) {
 	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	defer i18n.DetectLanguage("en")
 	activeColorProfile = colorprofile.NoTTY
@@ -30,17 +29,48 @@ func TestTurnReceiptKeepsCompletePerTurnBreakdown(t *testing.T) {
 		ReasoningTokens:  24,
 	}
 	p := &provider.Pricing{CacheHit: .1, Input: 1, Output: 2}
-	got := renderTurnReceipt(u, p, nil)
+	got := renderTurnReceipt(u, p, nil, 0, false)
+	// One short line: total tokens + cost. The in/cached/new/out/reasoning
+	// breakdown stays out of the flow.
 	for _, want := range []string{
-		"本轮", "14.0K tok", "in 13.6K", "cached 13.2K", "new 441",
-		"out 392", "reasoning 24", "¥0.0025",
+		"本轮", "14.0K tok", "¥0.0025",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("turn receipt %q missing %q", got, want)
 		}
 	}
+	for _, gone := range []string{"in 13.6K", "cached 13.2K", "new 441", "out 392", "reasoning 24"} {
+		if strings.Contains(got, gone) {
+			t.Fatalf("turn receipt %q should not carry the verbose breakdown %q", got, gone)
+		}
+	}
 	if strings.Contains(got, "\033[") {
 		t.Fatalf("NO_COLOR turn receipt contains escapes: %q", got)
+	}
+}
+
+// TestTurnReceiptTurnNumberAndCheckpointMark pins the turn counter and the
+// ⟲ rewind-available marker on the receipt.
+func TestTurnReceiptTurnNumberAndCheckpointMark(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+	i18n.DetectLanguage("en")
+
+	u := &provider.Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150}
+	// turnNo 0 (unknown) renders no counter: the label is followed straight by
+	// the token group.
+	if got := renderTurnReceipt(u, nil, nil, 0, false); !strings.HasPrefix(ansi.Strip(got), "  TURN  150 tok") {
+		t.Fatalf("turn 0 receipt should not render a counter: %q", got)
+	}
+	// Numbered turn without a checkpoint.
+	if got := renderTurnReceipt(u, nil, nil, 3, false); !strings.Contains(got, "TURN  3 ·") || strings.Contains(got, "⟲") {
+		t.Fatalf("turn 3 receipt = %q, want plain counter", got)
+	}
+	// Numbered turn with a checkpoint carries the ⟲ marker.
+	got := renderTurnReceipt(u, nil, nil, 3, true)
+	if !strings.Contains(got, "⟲ 3") {
+		t.Fatalf("checkpointed turn receipt = %q, want ⟲ marker", got)
 	}
 }
 
@@ -53,11 +83,16 @@ func TestTurnReceiptFallsBackToDerivedFreshTokensAndWrapsCleanly(t *testing.T) {
 
 	got := renderTurnReceipt(&provider.Usage{
 		PromptTokens: 1_200, CompletionTokens: 80, TotalTokens: 1_280, CacheHitTokens: 900,
-	}, nil, &event.CacheDiagnostics{PrefixChanged: true, PrefixChangeReasons: []string{"tools"}})
+	}, nil, nil, 0, false)
 	plain := ansi.Strip(got)
-	for _, want := range []string{"TURN", "cached 900", "new 300", "cache prefix changed: tools"} {
+	for _, want := range []string{"TURN", "1.3K tok"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("turn receipt %q missing %q", plain, want)
+		}
+	}
+	for _, gone := range []string{"cached 900", "new 300", "cache prefix changed"} {
+		if strings.Contains(plain, gone) {
+			t.Fatalf("turn receipt %q should not carry the verbose breakdown %q", plain, gone)
 		}
 	}
 	for i, line := range strings.Split(wrapTranscript(got, 32), "\n") {
@@ -68,10 +103,10 @@ func TestTurnReceiptFallsBackToDerivedFreshTokensAndWrapsCleanly(t *testing.T) {
 }
 
 func TestTurnReceiptIgnoresEmptyUsage(t *testing.T) {
-	if got := renderTurnReceipt(nil, nil, nil); got != "" {
+	if got := renderTurnReceipt(nil, nil, nil, 0, false); got != "" {
 		t.Fatalf("nil usage receipt = %q, want empty", got)
 	}
-	if got := renderTurnReceipt(&provider.Usage{}, nil, nil); got != "" {
+	if got := renderTurnReceipt(&provider.Usage{}, nil, nil, 0, false); got != "" {
 		t.Fatalf("empty usage receipt = %q, want empty", got)
 	}
 }
@@ -106,14 +141,14 @@ func TestTurnReceiptAdaptsContrastAcrossThemes(t *testing.T) {
 	for _, tt := range []struct {
 		mode, borderSGR, labelSGR, valueSGR string
 	}{
-		{mode: "dark", borderSGR: "\033[38;5;237m", labelSGR: "\033[38;5;248m", valueSGR: "\033[38;5;251m"},
-		{mode: "light", borderSGR: "\033[38;5;252m", labelSGR: "\033[38;5;241m", valueSGR: "\033[38;5;239m"},
+		{mode: "dark", borderSGR: "\033[38;5;236m", labelSGR: "\033[38;5;245m", valueSGR: "\033[38;5;250m"},
+		{mode: "light", borderSGR: "\033[38;5;253m", labelSGR: "\033[38;5;242m", valueSGR: "\033[38;5;239m"},
 	} {
 		t.Run(tt.mode, func(t *testing.T) {
 			configureCLITheme(tt.mode)
 			receipt := renderTurnReceipt(&provider.Usage{
 				PromptTokens: 900, CompletionTokens: 100, TotalTokens: 1_000,
-			}, nil, nil)
+			}, nil, nil, 0, false)
 			band := renderTurnReceiptBand(receipt, 80)
 			for _, want := range []string{tt.borderSGR + "─", tt.labelSGR + "TURN", tt.valueSGR + "1.0K tok"} {
 				if !strings.Contains(band, want) {
@@ -136,8 +171,8 @@ func TestStatusFooterSemanticPaletteAcrossThemes(t *testing.T) {
 	for _, tt := range []struct {
 		mode, labelSGR, valueSGR, infoSGR, secondarySGR string
 	}{
-		{mode: "dark", labelSGR: "\033[38;5;248m", valueSGR: "\033[38;5;251m", infoSGR: "\033[38;5;80m", secondarySGR: "\033[38;5;141m"},
-		{mode: "light", labelSGR: "\033[38;5;241m", valueSGR: "\033[38;5;239m", infoSGR: "\033[38;5;25m", secondarySGR: "\033[38;5;104m"},
+		{mode: "dark", labelSGR: "\033[38;5;245m", valueSGR: "\033[38;5;250m", infoSGR: "\033[38;5;109m", secondarySGR: "\033[38;5;146m"},
+		{mode: "light", labelSGR: "\033[38;5;242m", valueSGR: "\033[38;5;239m", infoSGR: "\033[38;5;30m", secondarySGR: "\033[38;5;104m"},
 	} {
 		t.Run(tt.mode, func(t *testing.T) {
 			configureCLITheme(tt.mode)
@@ -197,10 +232,10 @@ func TestStatusFooterGitAndDividerAdaptToTheme(t *testing.T) {
 	activeColorProfile = colorprofile.ANSI256
 
 	for _, tt := range []struct {
-		mode, gitSGR, borderSGR string
+		mode, gitSGR string
 	}{
-		{mode: "dark", gitSGR: "\033[38;5;179m", borderSGR: "\033[38;5;237m"},
-		{mode: "light", gitSGR: "\033[38;5;136m", borderSGR: "\033[38;5;252m"},
+		{mode: "dark", gitSGR: "\033[38;5;179m"},
+		{mode: "light", gitSGR: "\033[38;5;137m"},
 	} {
 		t.Run(tt.mode, func(t *testing.T) {
 			configureCLITheme(tt.mode)
@@ -210,9 +245,10 @@ func TestStatusFooterGitAndDividerAdaptToTheme(t *testing.T) {
 			if !strings.Contains(git, tt.gitSGR+"DeepSeek-Reasonix") {
 				t.Fatalf("%s Git identity should use warm semantic colour: %q", tt.mode, git)
 			}
-			divider := statusFooterDivider(40)
-			if !strings.Contains(divider, tt.borderSGR) || visibleWidth(divider) != 40 {
-				t.Fatalf("%s divider should use border token at full width: %q", tt.mode, divider)
+			if divider := statusFooterDivider(80); divider == "" {
+				t.Fatalf("%s divider should render a hairline rule, got empty", tt.mode)
+			} else if !strings.Contains(divider, "─") {
+				t.Fatalf("%s divider should draw a ─ rule, got %q", tt.mode, divider)
 			}
 		})
 	}
@@ -224,12 +260,12 @@ func TestContextFooterColorsOnlyValuesByUrgency(t *testing.T) {
 	configureCLITheme("dark")
 
 	normal := strings.Join(renderContextStatusGroups(10, 100, .8), " ")
-	if !strings.Contains(normal, "\033[38;5;248mCTX") || !strings.Contains(normal, "\033[38;5;251m10 (10%)") {
+	if !strings.Contains(normal, "\033[38;5;245mCTX") || !strings.Contains(normal, "\033[38;5;250m10 (10%)") {
 		t.Fatalf("normal context should use subtle label and neutral value: %q", normal)
 	}
 
 	warning := strings.Join(renderContextStatusGroups(75, 100, .8), " ")
-	if !strings.Contains(warning, "\033[38;5;248mCOMPACT") || !strings.Contains(warning, "\033[38;5;179m5%") {
+	if !strings.Contains(warning, "\033[38;5;245mCOMPACT") || !strings.Contains(warning, "\033[38;5;179m5%") {
 		t.Fatalf("near-threshold context should warn only on values: %q", warning)
 	}
 
@@ -377,7 +413,7 @@ func TestStatusFooterSwapsModelAndGitGroups(t *testing.T) {
 	primary := m.primaryStatusLine(" Auto ", false, false)
 	lines := strings.Split(ansi.Strip(m.renderStatusBlock(primary, 160)), "\n")
 	if len(lines) != 3 {
-		t.Fatalf("wide status block lines = %d, want two data rows plus divider:\n%s", len(lines), strings.Join(lines, "\n"))
+		t.Fatalf("wide status block lines = %d, want two data rows plus in-band spacer:\n%s", len(lines), strings.Join(lines, "\n"))
 	}
 	if !strings.Contains(lines[0], "MODEL deepseek-v4-flash   EFFORT auto   WORK balanced") {
 		t.Fatalf("first row should keep model, effort, and work in one session group:\n%s", strings.Join(lines, "\n"))
@@ -385,8 +421,8 @@ func TestStatusFooterSwapsModelAndGitGroups(t *testing.T) {
 	if strings.Contains(lines[0], "DeepSeek-Reasonix@") {
 		t.Fatalf("first row should not contain Git identity:\n%s", strings.Join(lines, "\n"))
 	}
-	if strings.Trim(lines[1], "─ ") != "" {
-		t.Fatalf("middle row should be a divider:\n%s", strings.Join(lines, "\n"))
+	if strings.TrimSpace(ansi.Strip(lines[1])) != strings.Repeat("─", 160) {
+		t.Fatalf("middle row should be a hairline divider:\n%s", strings.Join(lines, "\n"))
 	}
 	if !strings.Contains(lines[2], "DeepSeek-Reasonix@feature/responsive-footer") || strings.Contains(lines[2], "…") {
 		t.Fatalf("second row should preserve the full Git identity when it fits:\n%s", strings.Join(lines, "\n"))

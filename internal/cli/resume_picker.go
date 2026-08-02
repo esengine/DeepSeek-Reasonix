@@ -139,9 +139,9 @@ func (m chatTUI) renderResumePicker() string {
 		return ""
 	}
 	if r.quick != nil {
-		return r.quick.render(m.width)
+		return r.quick.render(m.contentWidth())
 	}
-	w := max(m.width, 10)
+	w := max(m.contentWidth(), 10)
 	var b strings.Builder
 	b.WriteString(accent(i18n.M.ResumePickTitle) + "\n")
 	for i, s := range r.sessions {
@@ -157,6 +157,8 @@ func (m chatTUI) renderResumePicker() string {
 
 // sessionPickerLabel is the "N turns · display title" line, truncated to fit.
 // Explicit session renames win, then topic titles, then the raw preview.
+// Newlines are collapsed so a multi-line user prompt cannot stretch the
+// picker row past its single-line slot.
 func sessionPickerLabel(s agent.SessionInfo) string {
 	preview := s.CustomTitle
 	if preview == "" {
@@ -168,5 +170,5 @@ func sessionPickerLabel(s agent.SessionInfo) string {
 	if preview == "" {
 		preview = "(no user message yet)"
 	}
-	return fmt.Sprintf("%d turns · %s", s.Turns, ansi.Truncate(preview, 60, "…"))
+	return fmt.Sprintf("%d turns · %s", s.Turns, ansi.Truncate(collapseBreaks(preview), 60, "…"))
 }

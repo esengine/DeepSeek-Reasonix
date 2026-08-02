@@ -12,7 +12,6 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/fileref"
 	"reasonix/internal/i18n"
-	"reasonix/internal/skill"
 )
 
 // compKind distinguishes the two completion menus.
@@ -49,6 +48,10 @@ const (
 	// maxCompRows caps how many menu rows show at once; the list windows around
 	// the selection when longer.
 	maxCompRows = 8
+	// completionPanelRows is the picker height the slash/arg menus render as a
+	// bottom sheet, with a draggable scrollbar on the right when the list
+	// overflows.
+	completionPanelRows = 10
 	// maxCompItems caps how many entries a single directory contributes, so a
 	// pathologically large directory can't blow up the menu — we read only one
 	// level (os.ReadDir), never the whole tree.
@@ -58,7 +61,8 @@ const (
 )
 
 // slashItems is the full set of slash commands offered for completion: the
-// built-in verbs, custom commands, skills (each as "/<name>"), and MCP prompts.
+// built-in verbs, custom commands, and MCP prompts. Installed skills are NOT
+// listed here — they are reached via "/skills " which pops the same picker.
 func (m *chatTUI) slashItems() []compItem {
 	items := builtinSlashItems()
 	for _, c := range m.commands {
@@ -66,13 +70,6 @@ func (m *chatTUI) slashItems() []compItem {
 			continue
 		}
 		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: customCommandHint(c)})
-	}
-	for _, s := range m.skills {
-		hint := s.Description
-		if s.RunAs == skill.RunSubagent {
-			hint = "🧬 " + hint
-		}
-		items = append(items, compItem{label: "/" + s.SlashName(), insert: "/" + s.SlashName() + " ", hint: skillCommandHint(s, hint)})
 	}
 	for _, p := range m.prompts() {
 		items = append(items, compItem{label: "/" + p.Name, insert: "/" + p.Name + " ", hint: p.Description})
@@ -106,11 +103,9 @@ func (m *chatTUI) updateCompletion() {
 				m.setCompletion(compSlash, items, 0)
 				return
 			}
-		} else if m.bareSubcommandSpace(val) {
-			m.completion = completion{}
-			return
 		} else if items, from, ok := m.slashArgItems(val); ok && len(items) > 0 {
-			// Past the command word — complete its structured arguments.
+			// Past the command word — complete its structured arguments. This
+			// is how "/skills " and "/mcp " pop their subcommand picker.
 			m.setCompletion(compSlashArg, items, from)
 			return
 		}
@@ -193,22 +188,6 @@ func (m *chatTUI) explicitSubcommandItems(val string) ([]compItem, int, bool) {
 		out[i].insert = " " + out[i].insert
 	}
 	return out, len(cmd), true
-}
-
-func (m *chatTUI) bareSubcommandSpace(val string) bool {
-	if !strings.ContainsAny(val, " \t") || strings.TrimRight(val, " \t") == val {
-		return false
-	}
-	fields := strings.Fields(val)
-	if len(fields) != 1 {
-		return false
-	}
-	switch fields[0] {
-	case "/mcp", "/skill", "/skills", "/plugin", "/plugins", "/memory":
-		return true
-	default:
-		return false
-	}
 }
 
 func slashItemsToComps(items []control.SlashItem) []compItem {
@@ -591,6 +570,16 @@ func (m *chatTUI) acceptCompletion() {
 
 var compSelStyle lipgloss.Style
 
+// pickerSheetStyle tints the bottom-sheet picker rows (slash menu and every
+// subcommand picker) with a slightly lighter surface than the chat background
+// so the pop-up reads as a distinct overlay; the selected row wears the
+// accent band (compSelStyle) instead.
+var pickerSheetStyle lipgloss.Style
+
+// userBubbleStyle paints user turns in the transcript as a solid band on the
+// user-bubble surface, separating them from the assistant's plain text flow.
+var userBubbleStyle lipgloss.Style
+
 const completionPadCell = "\u00a0"
 
 // padCompletionLine pads completion rows with NBSPs instead of ASCII spaces.
@@ -605,53 +594,216 @@ func padCompletionLine(s string, w int) string {
 	return s + strings.Repeat(completionPadCell, pad)
 }
 
-// renderCompletion draws the menu above the input box: matching items, windowed
-// around the selection, the current row highlighted, hints dimmed. Every line is
-// padded to m.width with non-clearable blank cells so bubbletea's delta renderer
-// has no ordinary trailing-space run to collapse into EL/ECH erase sequences.
-// That avoids ghost cells on terminals (mintty) with unreliable erases after
-// wide CJK glyphs.
-func (m chatTUI) renderCompletion() string {
-	if !m.completion.active || len(m.completion.items) == 0 {
+// pickerSheetRow is one selectable row of a bottom-sheet picker.
+type pickerSheetRow struct {
+	label string
+	hint  string
+}
+
+// renderPickerSheet renders the shared bottom-sheet picker used by the slash
+// menu and every subcommand picker (/mcp, /skills, /model, …): rows windowed
+// around the selection, the selected row as a full-width accent band, a dim
+// hint footer, and a draggable scrollbar on the right edge when the list
+// overflows. Rows sit on a slightly lighter surface than the chat background
+// (pickerSheetStyle) so the pop-up reads as a distinct overlay. Every line is
+// padded to `width` with non-clearable blank cells so bubbletea's delta
+// renderer has no ordinary trailing-space run to collapse into EL/ECH erase
+// sequences — that avoids ghost cells on terminals (mintty) with unreliable
+// erases after wide CJK glyphs.
+func renderPickerSheet(items []pickerSheetRow, sel, rows, width int, hint string) string {
+	if len(items) == 0 {
 		return ""
 	}
-	items := m.completion.items
-	start := 0
-	if len(items) > maxCompRows {
-		start = m.completion.sel - maxCompRows/2
-		if start < 0 {
-			start = 0
-		}
-		if start > len(items)-maxCompRows {
-			start = len(items) - maxCompRows
-		}
-	}
-	end := start + maxCompRows
+	start := completionWindowStart(sel, len(items), rows)
+	end := start + rows
 	if end > len(items) {
 		end = len(items)
+	}
+
+	// The scrollbar column appears only when the list overflows the panel.
+	showScrollbar := len(items) > rows
+	thumbStart, thumbSize := 0, 0
+	if showScrollbar {
+		thumbStart, thumbSize = scrollbarThumb(rows, start, len(items))
+	}
+	contentW := width
+	if showScrollbar {
+		contentW--
+	}
+	if contentW < 10 {
+		contentW = 10
 	}
 
 	var b strings.Builder
 	for i := start; i < end; i++ {
 		it := items[i]
-		var line string
-		if i == m.completion.sel {
-			line = accent("› ") + compSelStyle.Render(it.label)
-		} else {
-			line = "  " + it.label
-		}
+		body := it.label
 		if it.hint != "" {
-			line += "  " + dim(it.hint)
+			body += "  " + dim(it.hint)
 		}
-		b.WriteString(padCompletionLine(line, m.width))
+		bar := ""
+		if showScrollbar {
+			if rel := i - start; rel >= thumbStart && rel < thumbStart+thumbSize {
+				bar = scrollThumbStyle.Render("█")
+			} else {
+				bar = scrollTrackStyle.Render("│")
+			}
+		}
+		if i == sel {
+			// Full-width selection band: label, hint, and the NBSP padding all
+			// wear the accent background so the highlight is a solid row across
+			// the whole sheet (no floating chip).
+			b.WriteString(compSelStyle.Render(padCompletionLine("  "+body+"  ", contentW) + bar))
+		} else {
+			b.WriteString(pickerSheetStyle.Render(padCompletionLine("  "+body, contentW) + bar))
+		}
 		b.WriteByte('\n')
 	}
-	// A key-hint footer so users discover Tab — many won't know it accepts a
-	// completion, let alone descends into a folder.
+	b.WriteString(pickerSheetStyle.Render(padCompletionLine(dim(hint), width)))
+	return b.String()
+}
+
+// renderCompletion draws the picker sheet for the active completion menu. The
+// slash menu and every subcommand picker share renderPickerSheet, so all
+// command pop-ups look and behave identically (same panel, same scrollbar).
+func (m chatTUI) renderCompletion() string {
+	if !m.completion.active || len(m.completion.items) == 0 {
+		return ""
+	}
 	hint := i18n.M.CompHintSlash
 	if m.completion.kind == compAt {
 		hint = i18n.M.CompHintFile
 	}
-	b.WriteString(padCompletionLine(dim(hint), m.width))
-	return b.String()
+	rows := make([]pickerSheetRow, len(m.completion.items))
+	for i, it := range m.completion.items {
+		rows[i] = pickerSheetRow{label: it.label, hint: it.hint}
+	}
+	return renderPickerSheet(rows, m.completion.sel, m.completionPanelRows(), m.contentWidth(), hint)
+}
+
+// completionPanelRows is the picker's item-row count: the tall bottom sheet,
+// shrunk to leave room for the composer + status rows on short terminals, and
+// never larger than the item list itself.
+func (m chatTUI) completionPanelRows() int {
+	rows := completionPanelRows
+	if m.height > 0 {
+		if max := m.height - 10; max < rows { // reserve composer + status + working
+			rows = max
+		}
+	}
+	if rows < 4 {
+		rows = 4
+	}
+	if n := len(m.completion.items); rows > n {
+		rows = n
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	return rows
+}
+
+// completionWindowStart returns the first visible item index for the current
+// selection: the menu windows around the selection, clamped to the list.
+func completionWindowStart(sel, total, rows int) int {
+	if total <= rows {
+		return 0
+	}
+	start := sel - rows/2
+	if start < 0 {
+		start = 0
+	}
+	if start > total-rows {
+		start = total - rows
+	}
+	return start
+}
+
+// completionMenuBounds returns the screen row span [top, bottom) of the
+// completion panel, including its hint footer, mirroring the bottom-region
+// layout View() paints. (0, 0) when no menu is shown.
+func (m chatTUI) completionMenuBounds() (top, bottom int) {
+	if !m.completion.active || len(m.completion.items) == 0 {
+		return 0, 0
+	}
+	bottom = m.height - m.statusLineCount
+	if !m.hideComposer() {
+		bottom -= m.input.Height() + 2
+	}
+	if qi := m.renderQueueIndicator(); qi != "" {
+		bottom -= strings.Count(qi, "\n") + 1
+	}
+	if footer := m.renderMainManagerFooter(); footer != "" {
+		bottom -= strings.Count(footer, "\n") + 1
+	}
+	if m.state == tuiRunning {
+		bottom-- // working line
+	}
+	if m.nativeScrollback {
+		if main := m.renderMainManager(); main != "" {
+			bottom -= strings.Count(main, "\n") + 1
+		}
+	}
+	rows := m.completionPanelRows() + 1 // items + hint footer
+	top = bottom - rows
+	if top < 0 {
+		top = 0
+	}
+	if bottom < top {
+		bottom = top
+	}
+	return top, bottom
+}
+
+// inCompletionScrollbar reports whether (x, y) is on the completion panel's
+// scrollbar column (only when the list overflows; the hint row is excluded).
+func (m chatTUI) inCompletionScrollbar(x, y int) bool {
+	if !m.completion.active || len(m.completion.items) == 0 {
+		return false
+	}
+	if len(m.completion.items) <= m.completionPanelRows() {
+		return false
+	}
+	top, bottom := m.completionMenuBounds()
+	if y < top || y >= bottom-1 { // last row is the hint footer
+		return false
+	}
+	return x == m.contentWidth()-1
+}
+
+// completionScrollbarGrabRowOffset mirrors scrollbarGrabRowOffset for the
+// completion panel: where inside the thumb the drag grabbed, so the thumb
+// doesn't jump to the cursor on click.
+func (m chatTUI) completionScrollbarGrabRowOffset(row int) int {
+	rows := m.completionPanelRows()
+	thumbStart, thumbSize := scrollbarThumb(rows, completionWindowStart(m.completion.sel, len(m.completion.items), rows), len(m.completion.items))
+	if row >= thumbStart && row < thumbStart+thumbSize {
+		return row - thumbStart
+	}
+	return thumbSize / 2
+}
+
+// dragCompletionScrollbar maps a drag row to a list position and moves the
+// selection there. The render window centers on the selection, so the
+// selection leads the scrollbar window by half a panel to keep the thumb
+// under the pointer.
+func (m *chatTUI) dragCompletionScrollbar(row int) {
+	rows := m.completionPanelRows()
+	total := len(m.completion.items)
+	if total <= rows {
+		return
+	}
+	top, _ := m.completionMenuBounds()
+	rowInMenu := row - top
+	if rowInMenu < 0 {
+		rowInMenu = 0
+	}
+	if rowInMenu >= rows {
+		rowInMenu = rows - 1
+	}
+	windowTop := scrollbarYOffset(rows, rowInMenu, total, m.completionScrollbarGrabOffset)
+	m.completion.sel = windowTop + rows/2
+	if m.completion.sel > total-1 {
+		m.completion.sel = total - 1
+	}
 }

@@ -88,7 +88,7 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	case transcriptSourceMarkdown:
 		return renderAssistantMarkdown(source.raw, contentWidth)
 	case transcriptSourceUser:
-		return renderUserBubble(source.raw, terminalWidth, source.planMode)
+		return renderUserBubble(source.raw, contentWidth, source.planMode)
 	case transcriptSourceReasoning:
 		return reasoningBlock(source.raw, terminalWidth, source.maxLines)
 	case transcriptSourceToolCard:
@@ -738,8 +738,12 @@ func scrollbarYOffset(height, row, total, grabOffset int) int {
 }
 
 func scrollbarCell(row, total, height, thumbStart, thumbSize int) string {
+	// The track column is always visible — even with nothing to scroll — so
+	// the content width never shifts when the transcript crosses the
+	// one-screen boundary and the scrollbar never "disappears" at some
+	// terminal widths.
 	if total <= height {
-		return " "
+		return scrollTrackStyle.Render("│")
 	}
 	if row >= thumbStart && row < thumbStart+thumbSize {
 		return scrollThumbStyle.Render("█")

@@ -119,8 +119,11 @@ func TestSkillsQuestionOpensSubcommandCompletion(t *testing.T) {
 	}
 	m.input.SetValue("/skills ")
 	m.updateCompletion()
-	if m.completion.active {
-		t.Fatalf("/skills <space> should not open subcommand completion: %+v", m.completion)
+	if !m.completion.active || m.completion.kind != compSlashArg {
+		t.Fatalf("/skills <space> should pop the subcommand picker: %+v", m.completion)
+	}
+	if !hasLabel(m.completion.items, "show") {
+		t.Fatalf("/skills <space> should list the same subcommands as /skills?: %+v", m.completion.items)
 	}
 }
 
