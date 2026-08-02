@@ -80,7 +80,7 @@ export function ModelSwitcher({
   const keyword = query.trim().toLowerCase();
   const filtered = useMemo(
     () => keyword
-      ? models.filter((m) => m.model.toLowerCase().includes(keyword) || m.provider.toLowerCase().includes(keyword))
+      ? models.filter((m) => (m.model ?? '').toLowerCase().includes(keyword) || (m.provider ?? '').toLowerCase().includes(keyword))
       : models,
     [models, keyword],
   );
@@ -90,10 +90,11 @@ export function ModelSwitcher({
     const map = new Map<string, ModelInfo[]>();
     let currentProvider = "";
     for (const m of filtered) {
-      if (m.current) currentProvider = m.provider;
-      const list = map.get(m.provider);
+      const prov = m.provider ?? '';
+      if (m.current) currentProvider = prov;
+      const list = map.get(prov);
       if (list) list.push(m);
-      else map.set(m.provider, [m]);
+      else map.set(prov, [m]);
     }
     return [...map.entries()]
       .sort(([a], [b]) => {

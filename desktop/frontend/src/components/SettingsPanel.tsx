@@ -5529,12 +5529,13 @@ function providerBaseHost(baseUrl: string): string {
 }
 
 function canonicalOfficialProviderName(name: string): string {
-  switch (name.trim()) {
+  const safeName = (name ?? '').trim();
+  switch (safeName) {
     case "deepseek-flash":
     case "deepseek-pro":
       return "deepseek";
     default:
-      return name.trim();
+      return safeName;
   }
 }
 
@@ -5549,19 +5550,19 @@ function officialProviderKind(p: ProviderView): string {
 function providerGroupID(p: ProviderView): string {
   const official = officialProviderKind(p);
   if (official) return `builtin:${official}`;
-  return `custom:${p.name}`;
+  return `custom:${p.name ?? 'unknown'}`;
 }
 
 function providerGroupLabel(p: ProviderView, t?: ReturnType<typeof useT>): string {
   const id = providerGroupID(p);
   if (id === "builtin:deepseek") return t ? t("settings.providerLabel.deepseek") : "DeepSeek";
-  return p.name;
+  return p.name ?? '';
 }
 
 function providerGroupDescription(p: ProviderView, t: ReturnType<typeof useT>): string {
   const id = providerGroupID(p);
   if (id === "builtin:deepseek") return t("settings.providerDesc.deepseek");
-  return p.baseUrl;
+  return p.baseUrl ?? '';
 }
 
 function uniqueStrings(values: string[]): string[] {
