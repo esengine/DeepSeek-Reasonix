@@ -96,7 +96,7 @@ func normalizeUpdateChannel(ch string) string {
 }
 
 func configuredUpdateChannel() string {
-	cfg, err := config.Load()
+	cfg, err := config.LoadUpdateNetworkConfig()
 	if err != nil {
 		return "stable"
 	}
@@ -183,6 +183,10 @@ type UpdateInfo struct {
 	DownloadURL       string `json:"downloadUrl"`   // human-facing releases page (macOS path / fallback link)
 	AssetSize         int64  `json:"assetSize"`     // running platform's artifact size, for the progress bar
 	Err               string `json:"err,omitempty"` // set when the check itself failed (both endpoints down)
+	// Recovery carries the pending-update reconciliation outcome (explicit
+	// state/message/action) when an earlier update was not completed; the
+	// frontend shows it instead of a generic "pending update" error.
+	Recovery *updateRecoveryView `json:"recovery,omitempty"`
 }
 
 // UpdateDownloadResult is returned after an artifact has been downloaded,
@@ -215,7 +219,7 @@ func httpClient() (*http.Client, error) { return newHTTPClient(false) }
 func httpClientIPv4() (*http.Client, error) { return newHTTPClient(true) }
 
 func newHTTPClient(forceIPv4 bool) (*http.Client, error) {
-	cfg, err := config.Load()
+	cfg, err := config.LoadUpdateNetworkConfig()
 	if err != nil {
 		return nil, err
 	}

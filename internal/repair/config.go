@@ -297,11 +297,7 @@ func RecordHealthyConfig(version string) error {
 }
 
 func lastKnownGoodConfigPath() string {
-	root := config.MemoryUserDir()
-	if root == "" {
-		return ""
-	}
-	return filepath.Join(root, "repair", "config.toml.last-known-good")
+	return config.LastKnownGoodConfigPath()
 }
 
 func restoreLastKnownGoodConfig(dest string) error {

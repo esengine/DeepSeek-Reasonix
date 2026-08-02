@@ -195,11 +195,26 @@ export type SessionRuntimePhase = "starting" | "ready" | "lease_blocked" | "fail
 
 export interface SessionRuntimeIssue {
   code: "session_lease_held" | "startup_failed";
+  issueId?: string;
   message: string;
   retryable: boolean;
+  ownerKind?: string; // current_tab|current_detached|same_instance_hidden|external_process|stale_reclaimed|unknown
+  actions?: string[]; // always non-null from the backend: focus|retry|read_only|copy
   holderPid?: number;
   holderHost?: string;
   acquiredAt?: string;
+  holderSince?: string;
+}
+
+export interface ConfigRepairView {
+  outcome: string;
+  scope: string;
+  path: string;
+  detail: string;
+  repairedAt: string;
+  undoable: boolean;
+  canOpenFile: boolean;
+  transactionId?: string;
 }
 
 export interface SessionRuntimeView {
@@ -249,8 +264,19 @@ export interface TabMeta {
   recoveryDigest?: string;
   recoveryParentId?: string;
   startupErr?: string;
+  configError?: TabConfigError;
   active: boolean;
   cwd: string;
+}
+
+export interface TabConfigError {
+  path: string;
+  fileName: string;
+  line?: number;
+  column?: number;
+  message: string;
+  fixCount?: number;
+  hasPreview?: boolean;
 }
 
 export interface TerminalSessionView {
@@ -533,6 +559,8 @@ export interface Meta {
   ready: boolean;
   runtime?: SessionRuntimeView;
   startupErr?: string;
+  configError?: TabConfigError;
+
   eventChannel: string;
   cwd: string;
   workspaceRoot?: string;
@@ -1728,7 +1756,7 @@ export interface SettingsView {
   desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
-  closeBehavior: string; // "background" | "quit"
+  closeBehavior: string; // "smart" | "background" | "quit"; retained for config compatibility
   displayMode: string;   // "standard" | "compact"
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
@@ -1790,6 +1818,18 @@ export interface UpdateInfo {
   downloadUrl: string; // human-facing releases page (macOS path / fallback link)
   assetSize: number; // running platform's artifact size, for the progress bar
   err?: string; // set when the check itself failed (both endpoints down)
+  // recovery carries the pending-update reconciliation outcome (explicit
+  // state/message/action) when an earlier update was not completed.
+  recovery?: UpdateRecoveryView;
+}
+
+export interface UpdateRecoveryView {
+  state: "none" | "prepared" | "probationary" | "failed_install" | "restored" | "active_handoff" | "blocked" | string;
+  fromVersion?: string;
+  toVersion?: string;
+  message?: string;
+  action?: "commit" | "cancel" | "rollback" | "wait" | "none" | string;
+  retryable?: boolean;
 }
 
 export interface UpdateDownloadResult {
@@ -1805,7 +1845,18 @@ export interface UpdateProgress {
   requestId: string;
   version: string;
   channel: "stable" | "preview" | string;
-  phase: "downloading" | "verifying" | "downloaded" | "authorizing" | "recovering" | "installing" | "done" | "error";
+  phase:
+    | "downloading"
+    | "verifying"
+    | "downloaded"
+    | "authorizing"
+    | "recovering"
+    | "installing"
+    | "done"
+    | "error"
+    | "reconciling"
+    | "rolling_back"
+    | "recovered";
   received: number;
   total: number;
   err?: string;

@@ -1,6 +1,7 @@
 package repair
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -1509,6 +1510,10 @@ func writePendingUpdate(tx *UpdateTransaction, createOnly bool) error {
 }
 
 func removePendingUpdateExactVerified(expected *UpdateTransaction, verify func() error) error {
+	return removePendingUpdateExactRawVerified(expected, nil, verify)
+}
+
+func removePendingUpdateExactRawVerified(expected *UpdateTransaction, expectedRaw []byte, verify func() error) error {
 	if expected == nil {
 		return fmt.Errorf("clear pending update: transaction identity is incomplete")
 	}
@@ -1531,6 +1536,9 @@ func removePendingUpdateExactVerified(expected *UpdateTransaction, verify func()
 	b, err := os.ReadFile(cleanup)
 	if err != nil {
 		return restore(err)
+	}
+	if expectedRaw != nil && !bytes.Equal(b, expectedRaw) {
+		return restore(fmt.Errorf("clear pending update: pending transaction raw content changed"))
 	}
 	var actual UpdateTransaction
 	if err := json.Unmarshal(b, &actual); err != nil {

@@ -309,7 +309,11 @@ func normalizeCloseBehavior(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "quit", "exit":
 		return "quit"
+	case "smart":
+		return "smart"
 	default:
+		// Unknown values (including "smart" read by older binaries) degrade
+		// to the legacy background behavior.
 		return "background"
 	}
 }
@@ -377,12 +381,21 @@ func (c *Config) DesktopLayoutStyle() string {
 
 // DesktopCloseBehavior normalizes the desktop close-window preference. It falls
 // back to the legacy ui.close_behavior value for configs written before [desktop]
-// existed.
+// existed. Configs at the current schema version with no explicit preference
+// default to "smart" (idle quits, active tasks move to the tray); older configs
+// keep the legacy "background" default until the v6 migration writes it
+// explicitly.
 func (c *Config) DesktopCloseBehavior() string {
 	if strings.TrimSpace(c.Desktop.CloseBehavior) != "" {
 		return normalizeCloseBehavior(c.Desktop.CloseBehavior)
 	}
-	return normalizeCloseBehavior(c.UI.CloseBehavior)
+	if strings.TrimSpace(c.UI.CloseBehavior) != "" {
+		return normalizeCloseBehavior(c.UI.CloseBehavior)
+	}
+	if c != nil && c.ConfigVersion >= smartCloseConfigVersion {
+		return "smart"
+	}
+	return normalizeCloseBehavior("")
 }
 
 // UICloseBehavior is the legacy name for DesktopCloseBehavior.
@@ -1720,10 +1733,13 @@ const LanguagePolicy = `Reply in the same language the user is using in their mo
 	`whenever they switch. Let this also guide the language you think in. Always keep code, ` +
 	`identifiers, file paths, shell commands, and technical terms in their original form — never translate them.`
 
-// Default returns the built-in default configuration.
+// Default returns the built-in default configuration. New installs default
+// to the smart close behavior (idle quits, active tasks move to the tray) via
+// the version-gated accessor; configs upgraded from older versions explicitly
+// keep the legacy background behavior (see ApplyUserConfigUpgradesOnStartup).
 func Default() *Config {
 	return &Config{
-		ConfigVersion:    5,
+		ConfigVersion:    6,
 		DefaultModel:     "deepseek-flash",
 		CredentialsStore: CredentialsStoreAuto,
 		UI:               UIConfig{Theme: "auto"},
@@ -1787,9 +1803,27 @@ func Default() *Config {
 // WriteFile writes the configuration to path as annotated TOML. The write is
 // atomic + fsynced so an interrupted write or power loss can never truncate the
 // main config into an unparseable state that leaves the app with no usable
-// models (#4615, #4708).
+// models (#4615, #4708), and it runs through the validated write pipeline so
+// the persisted document is guaranteed to parse and round-trip semantically.
 func (c *Config) WriteFile(path string) error {
-	return atomicWriteToConfigFile(path, RenderTOMLForScope(c, renderScopeForPath(path)), configFilePerm(path))
+	scope := renderScopeForPath(path)
+	// Resolve the path once and write only the validated final target. This
+	// preserves valid symlinks and fails closed for broken user links or
+	// project links that escape their project root.
+	resolved, err := resolveConfigReadPath(path)
+	if err != nil {
+		return err
+	}
+	stateID, err := configFileStateID(resolved)
+	if err != nil {
+		return err
+	}
+	body, err := renderTOMLForScopeErr(c, scope)
+	if err != nil {
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	opts := writeConfigOptions{scope: scope, want: c}
+	return validateAndWriteConfigResolved(resolved, body, configFilePerm(path), opts, stateID)
 }
 
 // Provider returns the named provider entry.

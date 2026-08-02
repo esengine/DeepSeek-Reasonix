@@ -1,6 +1,9 @@
 // Run: tsx src/__tests__/statusbar-workspace.test.tsx
 
+import { JSDOM } from "jsdom";
 import React from "react";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StatusBar } from "../components/StatusBar";
 import { LocaleProvider } from "../lib/i18n";
@@ -121,12 +124,65 @@ console.log("\nstatus bar workspace");
 {
   const html = renderStatusBar({ items: ["model"] });
   ok(!html.includes("YOLO"), "status bar renders only configured status items, not mode indicators");
-  ok(!html.includes("后台作业") && !html.includes("Background jobs"), "status bar omits non-configurable job indicators");
+  ok(!html.includes("后台作业") && !html.includes("Background jobs"), "status bar hides the operational jobs entry while idle");
+}
+
+{
+  const html = renderStatusBar({
+    items: ["model"],
+    jobs: [{ id: "bash-1", kind: "bash", label: "run tests", status: "running", startedAt: 1 }],
+  });
+  ok(html.includes("Background jobs"), "running background jobs remain visible outside configurable metrics");
+  ok(html.includes("1"), "background jobs entry exposes the running count");
 }
 
 {
   const defaultItems = DEFAULT_STATUS_BAR_ITEMS as readonly string[];
   ok(!defaultItems.includes("autoresearch"), "autoresearch is not a configurable status bar UI item");
+}
+
+{
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.window = dom.window as unknown as Window & typeof globalThis;
+  globalThis.document = dom.window.document;
+  globalThis.Node = dom.window.Node;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.HTMLButtonElement = dom.window.HTMLButtonElement;
+  globalThis.Event = dom.window.Event;
+  globalThis.MouseEvent = dom.window.MouseEvent;
+  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+  globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
+  });
+
+  let stopped = "";
+  const rootEl = document.getElementById("root")!;
+  const root = createRoot(rootEl);
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <StatusBar
+          context={{ used: 0, window: 0, sessionTokens: 0 }}
+          running={false}
+          jobs={[{ id: "bash-1", kind: "bash", label: "run tests", status: "running", startedAt: 1 }]}
+          onCancelJob={async (jobID) => { stopped = jobID; return true; }}
+        />
+      </LocaleProvider>,
+    );
+  });
+  const jobsButton = rootEl.querySelector<HTMLButtonElement>(".statusbar__jobs-trigger");
+  await act(async () => { jobsButton?.click(); });
+  const stopButton = document.body.querySelector<HTMLButtonElement>(".jobs-popover__stop");
+  await act(async () => { stopButton?.click(); await Promise.resolve(); });
+  ok(stopped === "bash-1", "background jobs popover routes Stop to the selected job");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

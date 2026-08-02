@@ -42,6 +42,7 @@ import type {
   CapabilityDiagnosticsReport,
   CheckpointMeta,
   CommandInfo,
+  ConfigRepairView,
   ContextInfo,
   ContextPanelInfo,
   DirEntry,
@@ -263,6 +264,8 @@ export interface AppBindings {
   BalanceForTab(tabID: string): Promise<BalanceInfo>;
   Jobs(): Promise<JobView[]>;
   JobsForTab(tabID: string): Promise<JobView[]>;
+  CancelJob(jobID: string): Promise<boolean>;
+  CancelJobForTab(tabID: string, jobID: string): Promise<boolean>;
   ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string } | null>;
   Meta(): Promise<Meta>;
   MetaForTab(tabID: string): Promise<Meta>;
@@ -417,6 +420,13 @@ export interface AppBindings {
   DiagnoseBotConnection(id: string): Promise<BotConnectionDiagnostic>;
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
+  ConfigRepairStatus(): Promise<ConfigRepairView>;
+  UndoConfigRepair(transactionID: string): Promise<void>;
+  OpenConfigFile(): Promise<void>;
+  RestoreGlobalConfigSnapshot(): Promise<boolean>;
+  ApplyProjectConfigFix(tabID: string): Promise<void>;
+  OpenProjectConfigFile(tabID: string): Promise<void>;
+  ResolveSessionRuntimeIssue(tabID: string, issueID: string, action: string): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
   SetStatusBarStyle(style: string): Promise<void>;
   SetStatusBarItems(items: string[]): Promise<void>;
@@ -2935,6 +2945,12 @@ function makeMockApp(): AppBindings {
         async JobsForTab() {
           return this.Jobs();
         },
+        async CancelJob() {
+          return false;
+        },
+        async CancelJobForTab(_tabID, jobID) {
+          return this.CancelJob(jobID);
+        },
         async ToolResultForTab() {
           return null;
         },
@@ -4220,8 +4236,21 @@ function makeMockApp(): AppBindings {
           return diag;
         },
         async SetCloseBehavior(mode: string) {
-          settings.closeBehavior = mode === "quit" ? "quit" : "background";
+          settings.closeBehavior = mode === "smart" || mode === "quit" ? mode : "background";
         },
+        async ConfigRepairStatus() {
+          return { outcome: "", scope: "", path: "", detail: "", repairedAt: "", undoable: false, canOpenFile: false };
+        },
+        async UndoConfigRepair(_transactionID: string) {
+          throw new Error("mock UndoConfigRepair");
+        },
+        async OpenConfigFile() {},
+        async RestoreGlobalConfigSnapshot() {
+          return false;
+        },
+        async ApplyProjectConfigFix(_tabID: string) {},
+        async OpenProjectConfigFile(_tabID: string) {},
+        async ResolveSessionRuntimeIssue(_tabID: string, _issueID: string, _action: string) {},
         async SetDisplayMode(mode: string) {
           settings.displayMode = mode;
         },

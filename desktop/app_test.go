@@ -5622,6 +5622,17 @@ func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
 
 func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "old/old-model"
+	cfg.Desktop.ProviderAccess = []string{"old"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "old", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "old-model", APIKeyEnv: "OLD_MODEL_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
 
 	dir := config.SessionDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -5630,12 +5641,17 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	path := filepath.Join(dir, "jobs.jsonl")
 	jm := jobs.NewManager(event.Discard)
 	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
-	defer ctrl.Close()
 	app := NewApp()
-	app.setTestCtrl(ctrl, "")
+	app.ctx = context.Background()
+	app.setTestCtrl(ctrl, "old/old-model")
+	t.Cleanup(func() {
+		if current := app.activeCtrl(); current != nil {
+			current.Close()
+		}
+	})
 
 	release := make(chan struct{})
-	jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
+	job := jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -5643,11 +5659,21 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 			return "", nil
 		}
 	})
-	defer close(release)
+	t.Cleanup(func() { close(release) })
 
 	err := app.SetTokenMode("economy")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("SetTokenMode with background job error = %v, want background-job guard", err)
+	if err == nil || !strings.Contains(err.Error(), "background_jobs=1") {
+		t.Fatalf("SetTokenMode with background job error = %v, want exact background-job guard", err)
+	}
+	cancelled, err := app.CancelJobForTab("", job.ID)
+	if err != nil || !cancelled {
+		t.Fatalf("CancelJobForTab = %v, %v, want true, nil", cancelled, err)
+	}
+	if result := jm.WaitForSession(context.Background(), agent.BranchID(path), []string{job.ID}, 5); len(result) != 1 || result[0].Status != jobs.Killed {
+		t.Fatalf("stopped background job = %+v, want one killed result", result)
+	}
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode after stopping background job: %v", err)
 	}
 }
 

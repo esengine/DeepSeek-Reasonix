@@ -310,10 +310,12 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "quit", "exit":
 		c.Desktop.CloseBehavior = "quit"
+	case "smart":
+		c.Desktop.CloseBehavior = "smart"
 	case "", "background", "hide":
 		c.Desktop.CloseBehavior = "background"
 	default:
-		return fmt.Errorf("close behavior %q: must be quit|background", mode)
+		return fmt.Errorf("close behavior %q: must be smart|quit|background", mode)
 	}
 	return nil
 }
@@ -1518,7 +1520,7 @@ func (c *Config) SaveTo(path string) error {
 	if scope == RenderScopeProject {
 		return c.saveProjectIncrementalResolved(path, resolved)
 	}
-	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
+	return c.writeConfigFileResolvedValidated(resolved, scope, configFilePerm(path))
 }
 
 func (c *Config) SaveToScope(path string, scope RenderScope) error {
@@ -1541,10 +1543,14 @@ func (c *Config) SaveToScope(path string, scope RenderScope) error {
 	if err != nil {
 		return err
 	}
-	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
+	return c.writeConfigFileResolvedValidated(resolved, scope, configFilePerm(path))
 }
 
 func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string) error {
+	stateID, err := configFileStateID(resolvedPath)
+	if err != nil {
+		return err
+	}
 	raw, err := fileencoding.ReadFileUTF8(resolvedPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -1557,10 +1563,13 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	isNew := body == ""
 
 	if isNew {
-		return writeConfigFileResolved(resolvedPath, RenderTOMLForScope(c, RenderScopeProject), configFilePerm(logicalPath))
+		return c.writeConfigFileResolvedValidated(resolvedPath, RenderScopeProject, configFilePerm(logicalPath))
 	}
 
-	delta := RenderTOMLProjectDelta(c)
+	delta, err := renderTOMLProjectDeltaErr(c)
+	if err != nil {
+		return fmt.Errorf("save project config %s: %w", logicalPath, err)
+	}
 	if tomlBodyHasTopLevelKey(body, "config_version") && !tomlBodyHasTopLevelKey(delta, "config_version") {
 		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
 	}
@@ -1588,10 +1597,17 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 		body = removeTOMLSectionKey(body, "desktop", "default_auto_recovery_checkpoint")
 		body = removeTOMLSectionKey(body, "agent", "auto_recovery_checkpoint")
 	}
+	var extraChecks map[string]any
 	if writeProviderAccess {
-		body = upsertTOMLSectionKey(body, "desktop", "provider_access", "provider_access = "+renderStringArray(c.Desktop.ProviderAccess))
+		renderer := &tomlRenderer{}
+		body = upsertTOMLSectionKey(body, "desktop", "provider_access", "provider_access = "+renderer.stringArray(c.Desktop.ProviderAccess))
+		if renderer.err != nil {
+			return fmt.Errorf("save project config %s: %w", logicalPath, renderer.err)
+		}
+		extraChecks = map[string]any{"desktop.provider_access": append([]string(nil), c.Desktop.ProviderAccess...)}
 	}
-	return writeConfigFileResolved(resolvedPath, body, configFilePerm(logicalPath))
+	opts := writeConfigOptions{scope: RenderScopeProject, delta: delta, extraChecks: extraChecks}
+	return validateAndWriteConfigResolved(resolvedPath, body, configFilePerm(logicalPath), opts, stateID)
 }
 
 func shouldRemoveIneffectiveProjectSandboxBash(body string, c *Config) bool {
@@ -1700,11 +1716,36 @@ func writeConfigFile(path, body string) error {
 	return atomicWriteToConfigFile(path, body, configFilePerm(path))
 }
 
+// writeConfigFileResolvedValidated renders c for the given scope through the
+// validated write pipeline: the rendered TOML must parse, decode back to the
+// same persisted semantics, and match the intended config c; the file must
+// not have been modified by another process since this save began.
+func (c *Config) writeConfigFileResolvedValidated(resolved string, scope RenderScope, perm os.FileMode) error {
+	stateID, err := configFileStateID(resolved)
+	if err != nil {
+		return err
+	}
+	body, err := renderTOMLForScopeErr(c, scope)
+	if err != nil {
+		return fmt.Errorf("save config %s: %w", resolved, err)
+	}
+	opts := writeConfigOptions{scope: scope, want: c}
+	return validateAndWriteConfigResolved(resolved, body, perm, opts, stateID)
+}
+
+// writeConfigFileResolved writes a pre-rendered body through the validated
+// pipeline. The body must parse; callers that need semantic verification use
+// the delta/extraChecks options through saveProjectIncrementalResolved.
 func writeConfigFileResolved(path, body string, perm os.FileMode) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
-	return fileutil.AtomicWriteFile(path, []byte(body), perm)
+	stateID, err := configFileStateID(path)
+	if err != nil {
+		return err
+	}
+	opts := writeConfigOptions{scope: renderScopeForPath(path)}
+	return validateAndWriteConfigResolved(path, body, perm, opts, stateID)
 }
 
 // atomicWriteToConfigFile resolves the path once and writes only the validated
@@ -1715,10 +1756,7 @@ func atomicWriteToConfigFile(path, body string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if err := fileutil.AtomicWriteFile(resolved, []byte(body), perm); err != nil {
-		return fmt.Errorf("write symlink target %q: %w", resolved, err)
-	}
-	return nil
+	return writeConfigFileResolved(resolved, body, perm)
 }
 
 func configFilePerm(path string) os.FileMode {
@@ -1750,12 +1788,24 @@ func WritePermissionsAllow(path string, allow []string) error {
 	} else {
 		raw = nil
 	}
+	stateID, err := configFileStateID(resolved)
+	if err != nil {
+		return err
+	}
 
 	body := string(raw)
 	if body == "" {
-		body = fmt.Sprintf("[permissions]\nallow = %s\n", renderStringArray(allow))
+		renderer := &tomlRenderer{}
+		body = fmt.Sprintf("[permissions]\nallow = %s\n", renderer.stringArray(allow))
+		if renderer.err != nil {
+			return fmt.Errorf("write permissions: %w", renderer.err)
+		}
 	} else {
-		body = upsertTOMLSectionKey(body, "permissions", "allow", "allow = "+renderStringArray(allow))
+		renderer := &tomlRenderer{}
+		body = upsertTOMLSectionKey(body, "permissions", "allow", "allow = "+renderer.stringArray(allow))
+		if renderer.err != nil {
+			return fmt.Errorf("write permissions: %w", renderer.err)
+		}
 	}
 
 	var candidate Config
@@ -1765,7 +1815,15 @@ func WritePermissionsAllow(path string, allow []string) error {
 	if !slices.Equal(candidate.Permissions.Allow, allow) {
 		return fmt.Errorf("write permissions: validate updated allow: got %v, want %v", candidate.Permissions.Allow, allow)
 	}
-	return writeConfigFileResolved(resolved, body, configFilePerm(path))
+	// The surgical upsert body is deliberately partial (neither a full render
+	// nor a delta), so validation is parse + the permissions.allow field check
+	// below; the round-trip verification does not apply.
+	opts := writeConfigOptions{
+		scope:         renderScopeForPath(path),
+		extraChecks:   map[string]any{"permissions.allow": append([]string(nil), allow...)},
+		skipRoundTrip: true,
+	}
+	return validateAndWriteConfigResolved(resolved, body, configFilePerm(path), opts, stateID)
 }
 
 // replaceTOMLSection replaces the content of a named TOML section (including

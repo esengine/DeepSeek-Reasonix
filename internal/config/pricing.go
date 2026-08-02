@@ -274,6 +274,7 @@ const (
 	deepSeekPricingResetConfigVersion      = 3
 	windowsBashSandboxDefaultConfigVersion = 4
 	retiredAutoPlanConfigVersion           = 5
+	smartCloseConfigVersion                = 6
 )
 
 // ApplyUserConfigUpgradesOnStartup applies one-time startup migrations. It
@@ -321,6 +322,16 @@ func ApplyUserConfigUpgradesOnStartup(path string) (bool, error) {
 		// Mark every older config as migrated even when Auto Plan was already off;
 		// the v5 renderer removes both retired keys so older binaries also observe
 		// the manual-only default after a downgrade.
+		changed = true
+	}
+	if header.ConfigVersion < smartCloseConfigVersion {
+		// v6 introduced smart close. Users without an explicit close
+		// preference keep the legacy behavior by writing background
+		// explicitly; explicit background/quit choices are untouched. New
+		// installs (no config file) default to smart via Default().
+		if strings.TrimSpace(cfg.Desktop.CloseBehavior) == "" && strings.TrimSpace(cfg.UI.CloseBehavior) == "" {
+			cfg.Desktop.CloseBehavior = "background"
+		}
 		changed = true
 	}
 	if !changed {

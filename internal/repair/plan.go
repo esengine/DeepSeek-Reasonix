@@ -208,6 +208,14 @@ func repairPlanFileState(path string) string {
 	return repairPlanFileSnapshotAt(path).StateID
 }
 
+// FileStateID returns the repair state binding for a path: a stable
+// identifier of the file's current bytes and mode used to verify that a
+// confirmed repair plan still applies to the exact state that was previewed.
+// Exported for callers (e.g. the desktop) that preview and confirm repairs.
+func FileStateID(path string) string {
+	return repairPlanFileState(path)
+}
+
 func verifyRepairPlanStateIDFor(readPath, identityPath, expected string) error {
 	actual := repairPlanFileSnapshotFor(readPath, identityPath).StateID
 	if expected != actual {

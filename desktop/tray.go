@@ -10,6 +10,7 @@ type desktopTray struct {
 	end       func()
 	openItem  *systray.MenuItem
 	quitItem  *systray.MenuItem
+	tooltip   func(string)
 	once      sync.Once
 	ready     chan struct{}
 	readyOnce sync.Once
@@ -17,6 +18,15 @@ type desktopTray struct {
 
 func newDesktopTray() *desktopTray {
 	return &desktopTray{ready: make(chan struct{})}
+}
+
+// setTooltip updates the tray tooltip (e.g. the active task count after a
+// smart close hid the window with tasks still running).
+func (t *desktopTray) setTooltip(text string) {
+	if t == nil || t.tooltip == nil {
+		return
+	}
+	t.tooltip(text)
 }
 
 func (t *desktopTray) markReady() {
@@ -35,6 +45,7 @@ func (a *App) startTray() bool {
 		return true
 	}
 	t := newDesktopTray()
+	t.tooltip = func(text string) { systray.SetTooltip(text) }
 	a.tray = t
 	a.mu.Unlock()
 

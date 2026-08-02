@@ -12,6 +12,13 @@ import (
 )
 
 func preparePackagedStartupRecovery(tracker *repair.StartupTracker, recommended, explicitSafeMode bool) (bool, bool) {
+	// High-confidence Windows-path escape repairs are applied to the global
+	// config automatically (deterministic, reversible, backed up) before any
+	// recovery dialog, so first boot already heals deterministically damaged
+	// global configuration.
+	if report, err := repair.ApplyConfigEscapes(repair.ConfigEscapesOptions{}); err == nil && report.Global.Applied {
+		fmt.Fprintln(os.Stderr, "Reasonix repaired Windows paths in the global config (backup kept; reasonix-guard undo to restore).")
+	}
 	return runDesktopStartupRecovery(recommended, explicitSafeMode, desktopStartupRecoveryDeps{
 		recoverFailedInstall: repair.RecoverFailedInstall,
 		reconcilePendingUpdate: func() (repair.PendingUpdateReconcileResult, error) {

@@ -107,9 +107,12 @@ func TestUICloseBehaviorNormalizes(t *testing.T) {
 		in   string
 		want string
 	}{
-		{"", "background"},
+		// A config at the current schema version with no explicit preference
+		// defaults to smart close.
+		{"", "smart"},
 		{"QUIT", "quit"},
 		{"exit", "quit"},
+		{"smart", "smart"},
 		{" background ", "background"},
 		{"hide", "background"},
 		{"unknown", "background"},
@@ -118,6 +121,13 @@ func TestUICloseBehaviorNormalizes(t *testing.T) {
 		if got := c.UICloseBehavior(); got != tt.want {
 			t.Errorf("UICloseBehavior(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+	// Older schema versions without an explicit preference keep the legacy
+	// background default (downgrade safety).
+	legacy := Default()
+	legacy.ConfigVersion = 5
+	if got := legacy.DesktopCloseBehavior(); got != "background" {
+		t.Errorf("v5 unset close behavior = %q, want background", got)
 	}
 }
 

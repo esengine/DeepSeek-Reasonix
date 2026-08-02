@@ -36,9 +36,13 @@ import {
   TerminalSquare,
 } from "lucide-react";
 import { useToast } from "./lib/toast";
+import { ConfigRepairBanner } from "./components/ConfigRepairBanner";
+import { SessionIssueCard } from "./components/SessionIssueCard";
+import { TokenModeJobBlocker } from "./components/TokenModeJobBlocker";
 import { useGoalActionHandler } from "./lib/goalAction";
 import { useWailsResizeFix } from "./lib/useWailsResizeFix";
 import { asArray } from "./lib/array";
+import { stopBackgroundJobsAndSwitch, visibleBackgroundJobCount } from "./lib/tokenModeRecovery";
 import { createBoundedRefreshCoordinator, sameTabMetaLists, shouldRefreshTabMetaForEvent, TAB_META_MAX_IN_FLIGHT, tabMetaFallbackDelay } from "./lib/tabMetaRefresh";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT, type Translator } from "./lib/i18n";
 import { localizedNoticeText, useController, type Item, type LiveStream } from "./lib/useController";
@@ -57,6 +61,14 @@ import { ClearContextCard } from "./components/ClearContextCard";
 
 /** Footer decision surface kinds. Priority: tool/plan approval > ask > clear context. */
 type DecisionSurfaceKind = "tool_approval" | "plan_approval" | "ask" | "clear_context";
+type PendingTokenModeSwitch = {
+  id: number;
+  tabId: string;
+  mode: TokenMode;
+  jobCount: number;
+  busy: boolean;
+  error?: string;
+};
 import { StatusBar } from "./components/StatusBar";
 import { RemoteHostKeyDialog } from "./components/RemoteHostKeyDialog";
 import { RemoteSecretDialog } from "./components/RemoteSecretDialog";
@@ -1090,6 +1102,7 @@ export default function App() {
     setModel,
     setEffort,
     setTokenMode,
+    cancelJob,
     switchTab,
     openProjectTab,
     createDeliveryWorktree,
@@ -1109,6 +1122,8 @@ export default function App() {
   const [composerProfilesByTab, setComposerProfilesByTab] = useState<Record<string, ComposerProfile>>({});
   const runtimeTransitionTabsRef = useRef<Set<string>>(new Set());
   const [runtimeTransitionsByTab, setRuntimeTransitionsByTab] = useState<Record<string, true>>({});
+  const tokenModeRequestSeqRef = useRef(0);
+  const [pendingTokenModeSwitch, setPendingTokenModeSwitch] = useState<PendingTokenModeSwitch | null>(null);
   const yoloRestoreToolApprovalModesRef = useRef<Record<string, RestorableToolApprovalMode>>({});
   const userPlanModeByTabRef = useRef<UserPlanModeIntents>({});
   const [tabMetas, setTabMetas] = useState<TabMeta[]>([]);
@@ -1875,7 +1890,24 @@ export default function App() {
   const applyTokenMode = useCallback(
     async (m: TokenMode): Promise<void> => {
       const tabId = activeTabId;
-      if (!tabId || runtimeTransitionTabsRef.current.has(tabId) || m === composerProfile.tokenMode) return;
+      if (!tabId || runtimeTransitionTabsRef.current.has(tabId)) return;
+      if (m === composerProfile.tokenMode) {
+        setPendingTokenModeSwitch((current) => current?.tabId === tabId ? null : current);
+        return;
+      }
+      const backgroundJobCount = visibleBackgroundJobCount(state.backgroundJobs, state.jobs);
+      if (backgroundJobCount > 0) {
+        setPendingTokenModeSwitch({
+          id: ++tokenModeRequestSeqRef.current,
+          tabId,
+          mode: m,
+          jobCount: backgroundJobCount,
+          busy: false,
+        });
+        return;
+      }
+      tokenModeRequestSeqRef.current += 1;
+      setPendingTokenModeSwitch(null);
       const previous = composerProfile.tokenMode;
       runtimeTransitionTabsRef.current.add(tabId);
       setRuntimeTransitionsByTab((current) => ({ ...current, [tabId]: true }));
@@ -1897,8 +1929,59 @@ export default function App() {
         return next;
       });
     },
-    [activeTabId, composerProfile, setTokenMode],
+    [activeTabId, composerProfile, setTokenMode, state.backgroundJobs, state.jobs.length],
   );
+  const stopJobsAndApplyTokenMode = useCallback(async (): Promise<void> => {
+    const request = pendingTokenModeSwitch;
+    if (!request || request.busy || activeTabIdRef.current !== request.tabId) return;
+    setPendingTokenModeSwitch({ ...request, busy: true, error: undefined });
+    runtimeTransitionTabsRef.current.add(request.tabId);
+    setRuntimeTransitionsByTab((current) => ({ ...current, [request.tabId]: true }));
+    try {
+      const remaining = await stopBackgroundJobsAndSwitch(
+        () => app.JobsForTab(request.tabId),
+        (jobID) => cancelJob(jobID),
+        () => app.SetTokenModeForTab(request.tabId, request.mode),
+      );
+      if (remaining > 0) {
+        setPendingTokenModeSwitch((current) => current?.id === request.id ? {
+          ...current,
+          jobCount: remaining,
+          busy: false,
+          error: t("status.tokenModeJobsStillRunning", { n: remaining }),
+        } : current);
+        return;
+      }
+      // Apply only if this request is still current. A later request or tab
+      // navigation must not let this completion overwrite newer user intent.
+      if (tokenModeRequestSeqRef.current !== request.id) return;
+      setComposerProfilesByTab((current) => {
+        const profile = current[request.tabId] ?? composerProfile;
+        const pending = { ...profile.pending };
+        delete pending.tokenMode;
+        return { ...current, [request.tabId]: { ...profile, tokenMode: request.mode, pending } };
+      });
+      setPendingTokenModeSwitch(null);
+      if (activeTabIdRef.current === request.tabId) {
+        await refreshMeta();
+      }
+    } catch {
+      if (tokenModeRequestSeqRef.current !== request.id) return;
+      setPendingTokenModeSwitch((current) => current?.id === request.id ? {
+        ...current,
+        busy: false,
+        error: t("status.tokenModeStopAndSwitchFailed"),
+      } : current);
+    } finally {
+      runtimeTransitionTabsRef.current.delete(request.tabId);
+      setRuntimeTransitionsByTab((current) => {
+        if (!current[request.tabId]) return current;
+        const next = { ...current };
+        delete next[request.tabId];
+        return next;
+      });
+    }
+  }, [cancelJob, composerProfile, pendingTokenModeSwitch, refreshMeta, t]);
   // Shift+Tab toggles only the collaboration axis; Ctrl/Cmd+Y toggles YOLO on the
   // tool-permission axis while preserving the Ask/Auto base mode.
   const cycleMode = useCallback(() => {
@@ -3943,6 +4026,7 @@ export default function App() {
       ].filter(Boolean).join(" ")}
     >
       <ThemeBackground />
+      <ConfigRepairBanner api={app} t={t as Translator} />
       <div
         ref={layoutRef}
         className={[
@@ -4466,6 +4550,48 @@ export default function App() {
           {state.meta?.startupErr && (
             <div className="banner banner--error">{t("topbar.startupError", { msg: state.meta.startupErr })}</div>
           )}
+          {state.meta?.runtime?.phase === "lease_blocked" && state.meta.runtime.issue && (
+            <SessionIssueCard
+              key={`${activeTabId ?? ""}:${state.meta.runtime.issue.issueId ?? ""}`}
+              issue={state.meta.runtime.issue}
+              tabID={activeTabId ?? ""}
+              t={t as Translator}
+              api={app}
+            />
+          )}
+          {state.meta?.configError && (
+            <div className="banner banner--error banner--actionable">
+              <span className="banner__msg">
+                {t("topbar.configError", {
+                  file: state.meta.configError.fileName,
+                  line: state.meta.configError.line || 1,
+                  msg: state.meta.configError.message,
+                })}
+              </span>
+              {state.meta.configError.hasPreview && (
+                <button
+                  type="button"
+                  className="btn btn--small"
+                  onClick={() => {
+                    app.ApplyProjectConfigFix(activeTabId ?? "")
+                      .then(() => window.location.reload())
+                      .catch(() => {});
+                  }}
+                >
+                  {t("topbar.configFixApply", { n: state.meta.configError.fixCount ?? 0 })}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn btn--small"
+                onClick={() => {
+                  app.OpenProjectConfigFile(activeTabId ?? "").catch(() => {});
+                }}
+              >
+                {t("topbar.configOpenFile")}
+              </button>
+            </div>
+          )}
           {safeMode && (
             <div className="banner banner--warning">{t("guard.safeMode")}</div>
           )}
@@ -4618,6 +4744,19 @@ export default function App() {
             ) : null}
             {/* Composer stays mounted under a decision so per-session draft
                 caches (text, attachments, paste blocks, guidance) survive. */}
+            {!decisionSurface && pendingTokenModeSwitch && pendingTokenModeSwitch.tabId === activeTabId && (
+              <TokenModeJobBlocker
+                t={t as Translator}
+                count={Math.max(pendingTokenModeSwitch.jobCount, visibleBackgroundJobCount(state.backgroundJobs, state.jobs))}
+                busy={pendingTokenModeSwitch.busy}
+                error={pendingTokenModeSwitch.error}
+                onConfirm={() => void stopJobsAndApplyTokenMode()}
+                onCancel={() => {
+                  tokenModeRequestSeqRef.current += 1;
+                  setPendingTokenModeSwitch(null);
+                }}
+              />
+            )}
             <div
               className={decisionSurface ? "composer-decision-host composer-decision-host--hidden" : "composer-decision-host"}
               hidden={Boolean(decisionSurface) || undefined}
@@ -4862,6 +5001,8 @@ export default function App() {
             usage={state.usage}
             balance={state.balance}
             running={state.running || rewindCommitting}
+            jobs={state.jobs}
+            onCancelJob={cancelJob}
             sessionTurns={sessionTurns}
             sessionTokens={state.sessionTokens}
             turnTokens={state.turnTotalTokens}

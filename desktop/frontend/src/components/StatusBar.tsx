@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, Check, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Laptop, Layers, Percent, RefreshCw, Server, Settings, Unplug, Wallet, Zap } from "lucide-react";
+import { Activity, Check, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Laptop, Layers, Percent, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
 import { Tooltip } from "./Tooltip";
@@ -7,7 +7,7 @@ import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import { isRemoteDegradedWarning, isRemoteHostKeyMismatch, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
-import { type BalanceInfo, type ContextInfo, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
+import { type BalanceInfo, type ContextInfo, type JobView, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
 import { useRemoteStore } from "../store/remote";
 import type { WorkbenchActiveTarget } from "../lib/workbenchTarget";
 
@@ -179,6 +179,8 @@ export function StatusBar({
   remoteStatuses = {},
   workbenchTarget,
   onSwitchLocal,
+  jobs = [],
+  onCancelJob,
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -205,6 +207,8 @@ export function StatusBar({
   remoteStatuses?: Record<string, RemoteConnectionStatus>;
   workbenchTarget?: WorkbenchActiveTarget;
   onSwitchLocal?: () => void;
+  jobs?: JobView[];
+  onCancelJob?: (jobID: string) => Promise<boolean>;
 }) {
   const { locale, t } = useI18n();
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
@@ -359,6 +363,7 @@ export function StatusBar({
           workbenchTarget={workbenchTarget}
           onSwitchLocal={onSwitchLocal}
         />
+        <JobsStatusBarChip jobs={jobs} onCancelJob={onCancelJob} />
         {renderedItems.map(({ id, node }) => (
           <span className="statusbar__item" data-statusbar-item={id} key={id}>
             {node}
@@ -366,6 +371,77 @@ export function StatusBar({
         ))}
       </div>
     </div>
+  );
+}
+
+function JobsStatusBarChip({ jobs, onCancelJob }: { jobs: JobView[]; onCancelJob?: (jobID: string) => Promise<boolean> }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [stopping, setStopping] = useState<Set<string>>(() => new Set());
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (jobs.length === 0) setOpen(false);
+  }, [jobs.length]);
+  if (jobs.length === 0) return null;
+
+  const stop = async (jobID: string) => {
+    if (!onCancelJob || stopping.has(jobID)) return;
+    setStopping((current) => new Set(current).add(jobID));
+    try {
+      await onCancelJob(jobID);
+    } finally {
+      setStopping((current) => {
+        const next = new Set(current);
+        next.delete(jobID);
+        return next;
+      });
+    }
+  };
+
+  return (
+    <span className="statusbar__jobs">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="statusbar__jobs-trigger"
+        aria-label={`${t("status.jobsTitle")}: ${t("status.jobs", { n: jobs.length })}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        title={t("status.jobsTitle")}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Activity size={12} aria-hidden="true" />
+        <b>{jobs.length}</b>
+      </button>
+      <AnchoredPopover open={open} anchorRef={triggerRef} onClose={() => setOpen(false)} className="jobs-popover" align="start">
+        <section role="dialog" aria-label={t("status.jobsTitle")}>
+          <header className="jobs-popover__header">{t("status.jobsTitle")}</header>
+          <div className="jobs-popover__list">
+            {jobs.map((job) => {
+              const pending = stopping.has(job.id);
+              return (
+                <div className="jobs-popover__job" key={job.id}>
+                  <span className="jobs-popover__copy">
+                    <strong>{job.label || job.kind}</strong>
+                    <small>{job.kind} · {job.status}</small>
+                  </span>
+                  <button
+                    type="button"
+                    className="btn btn--small jobs-popover__stop"
+                    disabled={pending || !onCancelJob}
+                    onClick={() => void stop(job.id)}
+                  >
+                    <Square size={11} aria-hidden="true" />
+                    {pending ? t("status.jobStopping") : t("status.jobStop")}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      </AnchoredPopover>
+    </span>
   );
 }
 

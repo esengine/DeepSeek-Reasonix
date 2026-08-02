@@ -542,7 +542,7 @@ function settingsTabMeta(id: SettingsTab, s: SettingsView, t: ReturnType<typeof 
     case "models":
       return settingsModelMeta(s, t);
     case "general":
-      return `${desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t)} · ${closeBehaviorLabel(normalizeCloseBehavior(s.closeBehavior), t)}`;
+      return desktopLayoutStyleLabel(normalizeDesktopLayoutStyle(s.desktopLayoutStyle), t);
     case "providers":
       return t("settings.providerCount", { n: s.providers.length });
     case "bots":
@@ -1375,9 +1375,10 @@ function normalizeDesktopCurrency(currency: string | undefined): DesktopCurrency
   return currency === "CNY" || currency === "USD" ? currency : "";
 }
 
-type CloseBehavior = "background" | "quit";
+type CloseBehavior = "smart" | "background" | "quit";
 
 function normalizeCloseBehavior(mode: string | undefined): CloseBehavior {
+  if (mode === "smart") return "smart";
   return mode === "quit" ? "quit" : "background";
 }
 
@@ -1442,6 +1443,7 @@ function statusBarItemLabel(id: StatusBarItemId, t: ReturnType<typeof useT>): st
 }
 
 function closeBehaviorLabel(mode: CloseBehavior, t: ReturnType<typeof useT>): string {
+  if (mode === "smart") return t("settings.closeBehavior.smart");
   return mode === "quit" ? t("settings.closeBehavior.quit") : t("settings.closeBehavior.background");
 }
 
@@ -1721,7 +1723,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
       </SettingsField>
       <SettingsField label={t("settings.closeBehavior")}>
         <div className="set-seg">
-          {(["background", "quit"] as const).map((mode) => (
+          {(["smart", "background", "quit"] as const).map((mode) => (
             <button
               key={mode}
               className={`set-seg__btn${closeBehavior === mode ? " set-seg__btn--on" : ""}`}

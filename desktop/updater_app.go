@@ -82,6 +82,9 @@ func (a *App) Version() string { return version }
 // surfaces in UpdateInfo.Err rather than failing, so the UI can stay quiet.
 func (a *App) CheckUpdate(selectedChannel string) (*UpdateInfo, error) {
 	selectedChannel = targetUpdateChannel(selectedChannel)
+	// Reconcile any pending update first so a stale prepared transaction is
+	// cancelled (or a failed install rolled back) before the check runs.
+	recovery, _ := a.reconcileUpdatesBeforeAction("", "checking")
 	profile := detectInstallProfile()
 	c, err := httpClient()
 	if err != nil {
@@ -117,6 +120,7 @@ func (a *App) CheckUpdate(selectedChannel string) (*UpdateInfo, error) {
 		}, nil
 	}
 	info := evaluateForChannel(version, selectedChannel, m)
+	info.Recovery = recovery
 	return &info, nil
 }
 
@@ -235,6 +239,16 @@ func (a *App) InstallUpdateRequest(selectedChannel, expectedVersion, requestID s
 	requestID, selectedChannel, expectedVersion, err := validateUpdaterRequest(requestID, selectedChannel, expectedVersion)
 	if err != nil {
 		return err
+	}
+	// Reconcile before install: a probationary update must not be installed a
+	// second time, an in-flight handoff must not get a second transaction, and
+	// a damaged transaction fails closed.
+	recovery, reconcileErr := a.reconcileUpdatesBeforeAction(requestID, "installing")
+	if reconcileErr != nil {
+		return a.failUpdate(requestID, selectedChannel, expectedVersion, reconcileErr)
+	}
+	if err := updateRecoveryBlocksInstall(recovery); err != nil {
+		return a.failUpdate(requestID, selectedChannel, expectedVersion, err)
 	}
 	finish, err := a.beginUpdaterOperation(requestID)
 	if err != nil {

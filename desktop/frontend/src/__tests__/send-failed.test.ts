@@ -198,6 +198,8 @@ eq(readinessNotice.kind === "notice" && readinessNotice.detail, "Still needed: v
 eq(readinessNotice.kind === "notice" && readinessNotice.action, "continue_delivery", "final readiness offers a recovery action");
 const readinessUser = readinessState.items.find((it) => it.kind === "user");
 eq(readinessUser?.kind === "user" && Boolean(readinessUser.failed), false, "final readiness does not mark the delivered user message as failed");
+eq(readinessState.running, false, "an unclicked continue-check action does not keep the turn running");
+eq(readinessState.pendingPrompt, false, "an unclicked continue-check action does not create a pending prompt");
 
 const recovering = reducer(readinessState, { type: "user", text: "Continue checks", seq: readinessState.seq, deliveryRecovery: true });
 const recovered = reducer(recovering, { type: "event", e: { kind: "turn_done" } as WireEvent });

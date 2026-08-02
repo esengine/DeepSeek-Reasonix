@@ -1354,7 +1354,7 @@ func TestResetOfficialProviderPricingOnUpgradeRunsOnce(t *testing.T) {
 	}
 }
 
-func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsAdvancesToV5(t *testing.T) {
+func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsAdvancesToV6(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.toml")
 	setRuntimeGOOS(t, "darwin")
 
@@ -1385,8 +1385,8 @@ func TestApplyUserConfigUpgradesOnStartupVersion3NonWindowsAdvancesToV5(t *testi
 	if _, err := toml.DecodeFile(path, &got); err != nil {
 		t.Fatalf("decode migrated config: %v", err)
 	}
-	if got.ConfigVersion != 5 {
-		t.Fatalf("config_version = %d, want 5", got.ConfigVersion)
+	if got.ConfigVersion != 6 {
+		t.Fatalf("config_version = %d, want 6", got.ConfigVersion)
 	}
 	deepseek, _ := got.Provider("deepseek")
 	if p := deepseek.Prices["deepseek-v4-flash"]; p == nil || p.Output != 4 || p.Currency != "$" {

@@ -2954,6 +2954,13 @@ a[href] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.banner__sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--fg-dim);
+  font-size: var(--font-caption);
+  font-weight: 400;
+}
 .banner__hint {
   color: var(--fg-dim);
   font-size: var(--font-caption);
@@ -2964,10 +2971,93 @@ a[href] {
 .banner--actionable .btn {
   flex: 0 0 auto;
 }
+.banner__more {
+  position: relative;
+  flex: 0 0 auto;
+}
+.banner__more > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 2px;
+  color: var(--fg-dim);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.banner__more > summary::-webkit-details-marker {
+  display: none;
+}
+.banner__more[open] > summary svg {
+  transform: rotate(180deg);
+}
+.banner__more-actions {
+  position: absolute;
+  z-index: var(--z-popover);
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: max-content;
+  max-width: min(520px, calc(100vw - 24px));
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--fg-dim);
+  box-shadow: var(--shadow-2);
+}
+.banner__more-actions small {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spin {
+  animation: spin 0.9s linear infinite;
+}
 .banner__progress {
   width: 180px;
   height: 8px;
   accent-color: var(--accent);
+}
+
+.composer-recovery {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto 6px;
+  width: min(var(--maxw), calc(100% - 24px));
+  padding: 7px 8px 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--warn) 28%, var(--border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg-elev));
+  color: var(--fg);
+  font-size: var(--font-control-small);
+}
+.composer-recovery > svg {
+  flex: 0 0 auto;
+  color: var(--warn);
+}
+.composer-recovery__copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+}
+.composer-recovery__copy strong,
+.composer-recovery__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.composer-recovery__copy small {
+  margin-top: 2px;
+  color: var(--err);
+}
+.composer-recovery .btn {
+  flex: 0 0 auto;
 }
 
 /* ── transcript ──────────────────────────────────────────────────────────── */
@@ -7570,6 +7660,76 @@ body > .mermaid-diagram--fullscreen {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
+}
+.statusbar__jobs {
+  display: inline-flex;
+  align-items: center;
+}
+.statusbar__jobs-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--accent-strong);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.statusbar__jobs-trigger:hover,
+.statusbar__jobs-trigger:focus-visible,
+.statusbar__jobs-trigger[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+.jobs-popover {
+  width: min(360px, calc(100vw - 16px));
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: var(--shadow-2);
+  color: var(--fg);
+}
+.jobs-popover__header {
+  padding: 3px 5px 8px;
+  color: var(--fg-dim);
+  font-weight: 650;
+}
+.jobs-popover__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.jobs-popover__job {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
+}
+.jobs-popover__copy {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.jobs-popover__copy strong,
+.jobs-popover__copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.jobs-popover__copy small {
+  color: var(--fg-faint);
+}
+.jobs-popover__stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
 }
 .statusbar__item,
 .statusbar__item .tooltip-trigger {

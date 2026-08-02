@@ -493,9 +493,23 @@ var (
 	readRepairPreviousLink = os.Readlink
 )
 
-// UndoLastRepair restores the exact files moved aside by the latest repair. Any
-// currently repaired file is retained as a timestamped redo candidate.
+// UndoLastRepair restores the exact files moved aside by the latest repair.
 func UndoLastRepair() (*RepairTransaction, error) {
+	return undoRepairExact("")
+}
+
+// UndoRepairExact restores only the repair transaction named by expectedID.
+// A UI action must use this form so a stale banner can never undo a newer,
+// unrelated repair that committed after the banner was rendered.
+func UndoRepairExact(expectedID string) (*RepairTransaction, error) {
+	expectedID = strings.TrimSpace(expectedID)
+	if expectedID == "" {
+		return nil, fmt.Errorf("undo repair: transaction identity is required")
+	}
+	return undoRepairExact(expectedID)
+}
+
+func undoRepairExact(expectedID string) (*RepairTransaction, error) {
 	invocationLastState := repairPlanReleaseNodeState(repairTransactionPath())
 	invocationPendingState := repairPlanReleaseNodeState(pendingRepairTransactionPath())
 	unlockTransaction, err := lockRepairTransaction()
@@ -507,12 +521,32 @@ func UndoLastRepair() (*RepairTransaction, error) {
 		repairPlanReleaseNodeState(pendingRepairTransactionPath()) != invocationPendingState {
 		return nil, fmt.Errorf("undo repair: repair transaction changed while waiting")
 	}
+	if expectedID != "" {
+		// An in-flight repair may replace last-repair during reconciliation.
+		// Exact undo fails before reconciliation so a stale UI token performs no
+		// mutation at all.
+		if _, err := os.Lstat(pendingRepairTransactionPath()); err == nil {
+			return nil, fmt.Errorf("undo repair: repair transaction changed; undo action expired")
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("undo repair: inspect pending transaction: %w", err)
+		}
+		current, err := ReadLastRepair()
+		if err != nil {
+			return nil, err
+		}
+		if current.ID != expectedID {
+			return nil, fmt.Errorf("undo repair: repair transaction changed; undo action expired")
+		}
+	}
 	if err := reconcilePreparedRepairTransaction(); err != nil {
 		return nil, fmt.Errorf("undo repair: reconcile pending mutation: %w", err)
 	}
 	tx, err := ReadLastRepair()
 	if err != nil {
 		return nil, err
+	}
+	if expectedID != "" && tx.ID != expectedID {
+		return nil, fmt.Errorf("undo repair: repair transaction changed; undo action expired")
 	}
 	if tx.Undone {
 		return nil, fmt.Errorf("repair %s was already undone", tx.ID)
@@ -536,6 +570,9 @@ func UndoLastRepair() (*RepairTransaction, error) {
 	}
 	if repairPlanStateID(current) != invocationID {
 		return nil, fmt.Errorf("undo repair: last repair transaction changed while waiting")
+	}
+	if expectedID != "" && current.ID != expectedID {
+		return nil, fmt.Errorf("undo repair: repair transaction changed; undo action expired")
 	}
 	tx = current
 	if err := verifyUndoRepairBackups(tx); err != nil {

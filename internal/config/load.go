@@ -746,12 +746,12 @@ func mergeFile(cfg *Config, path string) error {
 	}
 	meta, err := decodeTOMLFileResolved(resolved, cfg)
 	if err != nil {
-		return fmt.Errorf("config %s: %w", path, err)
+		return newConfigLoadError(path, err)
 	}
 	if meta.IsDefined("providers") {
 		var persisted Config
 		if _, err := decodeTOMLFileResolved(resolved, &persisted); err != nil {
-			return fmt.Errorf("config %s: %w", path, err)
+			return newConfigLoadError(path, err)
 		}
 		markPersistedDeepSeekOfficialPricing(&persisted)
 		markers := map[string]string{}

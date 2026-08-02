@@ -277,7 +277,14 @@ func runLaunch(args []string) int {
 	} else if result.Cleared {
 		fmt.Fprintf(os.Stderr, "Reasonix Guard cleared an abandoned %s update before launch.\n", result.ToVersion)
 	}
-
+	// High-confidence Windows-path escape repairs are applied to the global
+	// config automatically (deterministic, reversible, backed up). Project
+	// reasonix.toml files are never auto-repaired.
+	if report, err := repair.ApplyConfigEscapes(repair.ConfigEscapesOptions{}); err != nil {
+		fmt.Fprintln(os.Stderr, "config path escape repair failed:", err)
+	} else if report.Global.Applied {
+		fmt.Fprintln(os.Stderr, "Reasonix Guard repaired Windows paths in the global config (backup kept; reasonix-guard undo to restore).")
+	}
 	tracker := repair.NewStartupTracker("")
 	useSafeMode := *safeMode || forceSafeMode
 	if !useSafeMode && tracker.SafeModeRecommended() {

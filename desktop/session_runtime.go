@@ -24,12 +24,19 @@ const (
 )
 
 type SessionRuntimeIssue struct {
-	Code       string `json:"code"`
-	Message    string `json:"message"`
-	Retryable  bool   `json:"retryable"`
-	HolderPID  int    `json:"holderPid,omitempty"`
-	HolderHost string `json:"holderHost,omitempty"`
-	AcquiredAt string `json:"acquiredAt,omitempty"`
+	Code        string   `json:"code"`
+	IssueID     string   `json:"issueId,omitempty"` // bound per issue; resolution re-validates it
+	Message     string   `json:"message"`
+	Retryable   bool     `json:"retryable"`
+	OwnerKind   string   `json:"ownerKind,omitempty"` // current_tab|current_detached|same_instance_hidden|external_process|stale_reclaimed|unknown
+	Actions     []string `json:"actions"`             // always a non-null array: focus|retry|read_only|copy
+	HolderPID   int      `json:"holderPid,omitempty"`
+	HolderHost  string   `json:"holderHost,omitempty"`
+	AcquiredAt  string   `json:"acquiredAt,omitempty"`
+	HolderSince string   `json:"holderSince,omitempty"`
+	// epoch binds the issue to the runtime epoch it was raised for; resolution
+	// rejects actions when the runtime advanced past it. Never serialized.
+	epoch string
 }
 
 type SessionRuntimeView struct {
@@ -77,8 +84,10 @@ func sessionRuntimeIssueForError(err error) *SessionRuntimeIssue {
 	}
 	issue := &SessionRuntimeIssue{
 		Code:      "startup_failed",
+		IssueID:   newSessionRuntimeID("issue"),
 		Message:   userFacingSessionLeaseError("", err).Error(),
 		Retryable: false,
+		Actions:   []string{},
 	}
 	if !errors.Is(err, agent.ErrSessionLeaseHeld) {
 		return issue
@@ -91,7 +100,43 @@ func sessionRuntimeIssueForError(err error) *SessionRuntimeIssue {
 		issue.HolderHost = strings.TrimSpace(leaseErr.Info.Hostname)
 		if !leaseErr.Info.AcquiredAt.IsZero() {
 			issue.AcquiredAt = leaseErr.Info.AcquiredAt.UTC().Format(time.RFC3339)
+			issue.HolderSince = time.Since(leaseErr.Info.AcquiredAt).Round(time.Second).String()
 		}
+	}
+	return issue
+}
+
+// classifySessionRuntimeIssue builds the issue with the owner classification
+// for the tab's session path: same-window tabs, background tasks, hidden
+// windows, external processes and stale locks each get distinct actions. The
+// issue is bound to the runtime epoch so resolution can reject stale actions.
+func (a *App) classifySessionRuntimeIssue(tab *WorkspaceTab, err error) *SessionRuntimeIssue {
+	issue := sessionRuntimeIssueForError(err)
+	if issue == nil || issue.Code != "session_lease_held" {
+		return issue
+	}
+	path := ""
+	if tab != nil {
+		path = tab.SessionPath
+	}
+	var leaseErr *agent.SessionLeaseError
+	if errors.As(err, &leaseErr) && leaseErr != nil && leaseErr.Info != nil && path == "" {
+		path = leaseErr.Info.SessionPath
+	}
+	kind, holderPID, holderHost, acquiredAt, holderSince := classifySessionOwner(path, leaseErr, a.sessionHeldByDetached(path))
+	issue.OwnerKind = kind
+	issue.Actions = sessionOwnerActions(kind)
+	if rt := a.runtimeForTabLocked(tab); rt != nil {
+		issue.epoch = rt.Epoch
+	}
+	switch kind {
+	case sessionOwnerExternal:
+		issue.HolderPID = holderPID
+		issue.HolderHost = holderHost
+		issue.AcquiredAt = acquiredAt
+		issue.HolderSince = holderSince
+	case sessionOwnerStale:
+		issue.HolderPID = holderPID
 	}
 	return issue
 }
@@ -193,7 +238,7 @@ func (a *App) setSessionRuntimePhaseLocked(tab *WorkspaceTab, phase SessionRunti
 		rt = a.newSessionRuntimeLocked(tab, key)
 	}
 	rt.Phase = phase
-	rt.Issue = sessionRuntimeIssueForError(err)
+	rt.Issue = a.classifySessionRuntimeIssue(tab, err)
 	if phase == sessionRuntimeStarting {
 		rt.Issue = nil
 		if rt.readyCh == nil {
@@ -242,10 +287,10 @@ func (a *App) sessionRuntimeViewLocked(tab *WorkspaceTab) SessionRuntimeView {
 		view.Phase = sessionRuntimeReady
 	case tab.StartupErrLeaseHeld:
 		view.Phase = sessionRuntimeLeaseBlocked
-		view.Issue = sessionRuntimeIssueForError(&agent.SessionLeaseError{})
+		view.Issue = a.classifySessionRuntimeIssue(tab, &agent.SessionLeaseError{})
 	case strings.TrimSpace(tab.StartupErr) != "":
 		view.Phase = sessionRuntimeFailed
-		view.Issue = &SessionRuntimeIssue{Code: "startup_failed", Message: tab.StartupErr}
+		view.Issue = &SessionRuntimeIssue{Code: "startup_failed", Message: tab.StartupErr, Actions: []string{}}
 	}
 	return view
 }
