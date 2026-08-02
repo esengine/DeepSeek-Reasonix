@@ -9,6 +9,12 @@ import (
 // the provider's base_url. Used by cold-resume prune to decide whether the
 // provider cache is still warm after a session idle period.
 //
+// The legacy main-v2 default (24h) is deliberately preserved for DeepSeek and
+// unknown vendors: DeepSeek's Context Caching on Disk retains prefixes for
+// "several hours to days", so the long-standing 24h threshold is correct for
+// it and must not regress. Only vendors with a documented, much shorter
+// cache TTL (DashScope 5m, Anthropic 5m) override it.
+//
 // Values are deliberately conservative: too small burns a live cache (the user
 // pays full price for a prefix that was still cached server-side), too large
 // only forgoes a prune opportunity. Tighten from measured retention data.
@@ -17,15 +23,15 @@ func DefaultCacheTTL(baseURL string) time.Duration {
 	case "dashscope":
 		// DashScope Session cache TTL is 5 minutes (documented).
 		return 5 * time.Minute
-	case "deepseek":
-		// DeepSeek does not publish TTL; measured retention exceeds 1 hour.
-		return 60 * time.Minute
 	case "anthropic":
 		// Anthropic ephemeral cache TTL is 5 minutes.
 		return 5 * time.Minute
 	default:
-		// Unknown vendor: conservative 10 minutes.
-		return 10 * time.Minute
+		// DeepSeek and unknown vendors keep the legacy 24h default.
+		// DeepSeek Context Caching on Disk retains prefixes for hours to
+		// days; shrinking this would prune still-warm caches and burn
+		// the user's live cache (measured ~4x miss cost).
+		return 24 * time.Hour
 	}
 }
 
