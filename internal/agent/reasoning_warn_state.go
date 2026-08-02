@@ -30,9 +30,15 @@ const missingReasoningWarnStateFilename = "tool-call-reasoning-warning.json"
 
 const (
 	missingReasoningWarnStateLockFilename = "tool-call-reasoning-warning.lock"
-	missingReasoningWarnStateVersion      = 2
+	missingReasoningWarnStateVersion      = 3
 	missingReasoningWarnStateCooldown     = 24 * time.Hour
 	missingReasoningWarnStateMaxIncidents = 256
+	// missingReasoningWarnResolveStreak is the number of consecutive healthy
+	// tool-call turns required to resolve an active incident. Endpoints such as
+	// deepseek-v4-flash intermittently return replayable thinking on tool-call
+	// turns; resolving on a single healthy turn would re-arm the cooldown on
+	// every round and re-warn on each tool call (#7059).
+	missingReasoningWarnResolveStreak = 3
 	// A diagnostic must never make a turn wait indefinitely behind another
 	// process. On contention or I/O failure, callers emit the warning rather
 	// than silently losing it.
@@ -45,6 +51,10 @@ type missingReasoningIncident struct {
 	LastMissingUnixMs      int64  `json:"lastMissingAtUnixMs,omitempty"`
 	LastMissingUnixNano    int64  `json:"lastMissingAtUnixNano,omitempty"`
 	LastResolvedAtUnixNano int64  `json:"lastResolvedAtUnixNano,omitempty"`
+	// ResolveStreak counts consecutive healthy tool-call turns; the incident
+	// resolves only after missingReasoningWarnResolveStreak consecutive turns
+	// so intermittent health cannot re-arm the cooldown every round.
+	ResolveStreak int `json:"resolveStreak,omitempty"`
 }
 
 type missingReasoningWarnDocument struct {
@@ -213,7 +223,9 @@ func (s *missingReasoningWarnState) load(now time.Time) (map[string]missingReaso
 		return nil, err
 	}
 	var doc missingReasoningWarnDocument
-	if json.Unmarshal(b, &doc) != nil || doc.Version != missingReasoningWarnStateVersion {
+	// v2 documents (no resolve streak) load as streak 0 so an upgrade keeps the
+	// existing incident and its cooldown instead of losing it.
+	if json.Unmarshal(b, &doc) != nil || (doc.Version != 2 && doc.Version != missingReasoningWarnStateVersion) {
 		return incidents, nil
 	}
 	for _, rawIncident := range doc.Incidents {
@@ -320,6 +332,8 @@ func (s *missingReasoningWarnState) persistClaimAt(fingerprint string, observedA
 		incident.LastMissingUnixMs = observedAt.UnixMilli()
 		incident.LastMissingUnixNano = observedAtUnixNano
 	}
+	// A missing observation breaks the consecutive healthy-turn streak.
+	incident.ResolveStreak = 0
 	incidents[fingerprint] = incident
 	if err := s.save(incidents); err != nil {
 		return true
@@ -410,7 +424,19 @@ func (s *missingReasoningWarnState) resolveAt(fingerprint string, observedAt tim
 	if !exists {
 		incident = missingReasoningIncident{Fingerprint: fingerprint}
 	}
-	incident.LastResolvedAtUnixNano = observedAtUnixNano
+	// Resolve only after missingReasoningWarnResolveStreak consecutive healthy
+	// tool-call turns. A single intermittent healthy turn (deepseek-v4-flash)
+	// records progress but must not re-arm the cooldown; once the streak is
+	// reached the incident resolves and a future regression warns again. The
+	// method reports whether the state was recorded correctly, not whether the
+	// streak threshold was reached, so the caller never retries a recorded
+	// healthy observation (which would double-count it).
+	if incident.ResolveStreak+1 >= missingReasoningWarnResolveStreak {
+		incident.LastResolvedAtUnixNano = observedAtUnixNano
+		incident.ResolveStreak = 0
+	} else {
+		incident.ResolveStreak++
+	}
 	incidents[fingerprint] = incident
 	return s.save(incidents) == nil
 }

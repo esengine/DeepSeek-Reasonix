@@ -561,6 +561,23 @@ func TestHealthyToolCallReasoningRearmsFutureRegression(t *testing.T) {
 	if got := run(healthy); got != 0 {
 		t.Fatalf("healthy turn warnings = %d, want 0", got)
 	}
+	// A single intermittent healthy turn must not re-arm the cooldown
+	// (deepseek-v4-flash returns thinking only occasionally; re-arming on one
+	// healthy turn would re-warn on every tool call).
+	if got := run(missing); got != 0 {
+		t.Fatalf("regression after a single healthy turn warnings = %d, want 0", got)
+	}
+	// Three consecutive healthy turns resolve the incident, so a later
+	// regression warns again.
+	if got := run(healthy); got != 0 {
+		t.Fatalf("healthy turn warnings = %d, want 0", got)
+	}
+	if got := run(healthy); got != 0 {
+		t.Fatalf("healthy turn warnings = %d, want 0", got)
+	}
+	if got := run(healthy); got != 0 {
+		t.Fatalf("healthy turn warnings = %d, want 0", got)
+	}
 	if got := run(missing); got != 1 {
 		t.Fatalf("post-recovery regression warnings = %d, want 1", got)
 	}

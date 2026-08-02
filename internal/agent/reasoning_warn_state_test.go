@@ -43,7 +43,7 @@ func TestMissingReasoningWarnStatePersistsCurrentIncidentAcrossInstances(t *test
 		t.Fatalf("state file missing after claim: %v", err)
 	}
 	latestObservedAt := observedAt.Add(time.Minute)
-	want := fmt.Sprintf(`{"version":2,"incidents":[{"fingerprint":"%s","warnedAtUnixMs":%d,"lastMissingAtUnixMs":%d,"lastMissingAtUnixNano":%d}]}`,
+	want := fmt.Sprintf(`{"version":3,"incidents":[{"fingerprint":"%s","warnedAtUnixMs":%d,"lastMissingAtUnixMs":%d,"lastMissingAtUnixNano":%d}]}`,
 		fingerprint, observedAt.UnixMilli(), latestObservedAt.UnixMilli(), latestObservedAt.UnixNano())
 	if got := string(b); got != want {
 		t.Fatalf("state file = %s, want %s", got, want)
@@ -90,9 +90,40 @@ func TestMissingReasoningWarnStateHealthyTurnRearmsRegression(t *testing.T) {
 	if !s.claimAt(fingerprint, now) {
 		t.Fatal("fresh incident must warn")
 	}
+	// A single healthy turn must not re-arm the incident: endpoints such as
+	// deepseek-v4-flash intermittently return thinking on tool-call turns, and
+	// resolving on one healthy turn would re-warn on every tool call.
 	s.resolveAt(fingerprint, now.Add(time.Minute))
-	if !s.claimAt(fingerprint, now.Add(2*time.Minute)) {
-		t.Fatal("regression after a healthy turn must warn again")
+	if s.claimAt(fingerprint, now.Add(2*time.Minute)) {
+		t.Fatal("single healthy turn re-armed the incident")
+	}
+	// Three consecutive healthy turns resolve the incident, so a later
+	// regression warns again.
+	s.resolveAt(fingerprint, now.Add(3*time.Minute))
+	s.resolveAt(fingerprint, now.Add(4*time.Minute))
+	s.resolveAt(fingerprint, now.Add(5*time.Minute))
+	if !s.claimAt(fingerprint, now.Add(6*time.Minute)) {
+		t.Fatal("regression after three consecutive healthy turns must warn again")
+	}
+}
+
+func TestMissingReasoningWarnStateIntermittentHealthDoesNotRearmEveryRound(t *testing.T) {
+	s := newMissingReasoningWarnState(t.TempDir())
+	fingerprint := warningFingerprint("config")
+	now := missingReasoningTestNow()
+	if !s.claimAt(fingerprint, now) {
+		t.Fatal("fresh incident must warn")
+	}
+	// Intermittent health (deepseek-v4-flash) must not re-arm the cooldown:
+	// a missing observation between healthy turns resets the streak, so the
+	// incident stays quiet for the whole 24h cooldown.
+	s.resolveAt(fingerprint, now.Add(time.Minute))
+	if s.claimAt(fingerprint, now.Add(2*time.Minute)) {
+		t.Fatal("intermittent healthy turn re-armed the incident")
+	}
+	s.resolveAt(fingerprint, now.Add(3*time.Minute))
+	if s.claimAt(fingerprint, now.Add(4*time.Minute)) {
+		t.Fatal("interrupted healthy streak re-armed the incident")
 	}
 }
 
@@ -126,12 +157,14 @@ func TestMissingReasoningWarnStateDelayedFailureCannotReviveResolvedIncident(t *
 		t.Fatal("fresh incident must warn")
 	}
 	s.resolveAt(fingerprint, healthyAt)
+	s.resolveAt(fingerprint, healthyAt.Add(time.Millisecond))
+	s.resolveAt(fingerprint, healthyAt.Add(2*time.Millisecond))
 	// Simulate a missing observation that happened before the healthy result but
 	// completed its cross-process transaction afterward.
 	if s.persistClaimAt(fingerprint, delayedMissingAt) {
 		t.Fatal("delayed pre-recovery failure revived a resolved incident")
 	}
-	if !s.claimAt(fingerprint, now) {
+	if !s.claimAt(fingerprint, now.Add(5*time.Millisecond)) {
 		t.Fatal("healthy result did not re-arm a later regression")
 	}
 }
@@ -178,8 +211,8 @@ func TestMissingReasoningWarnStateLegacyPreviewRearmsAndMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(b), `"providers"`) || !strings.Contains(string(b), `"version":2`) {
-		t.Fatalf("legacy state was not migrated to v2: %s", b)
+	if strings.Contains(string(b), `"providers"`) || !strings.Contains(string(b), `"version":3`) {
+		t.Fatalf("legacy state was not migrated to v3: %s", b)
 	}
 }
 
