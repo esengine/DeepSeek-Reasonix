@@ -939,6 +939,60 @@ func TestModalPanelsHideComposerBox(t *testing.T) {
 	}
 }
 
+// TestRewindPickerWindowsLongSession verifies the Esc-Esc turn list windows
+// long sessions (one row per turn) so the overlay cannot outgrow the terminal:
+// at most quickPickerMaxVisible rows render, with ↑/↓ more markers pointing at
+// the hidden turns and the window following the selection.
+func TestRewindPickerWindowsLongSession(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = m0.(chatTUI)
+
+	metas := make([]checkpoint.Meta, 12)
+	for i := range metas {
+		metas[i] = checkpoint.Meta{Turn: i, Prompt: fmt.Sprintf("turn %d", i)}
+	}
+
+	// Newest turn selected (default): window shows rows 4..11.
+	m.rewind = &rewindPicker{metas: metas, sel: 11}
+	card := m.renderRewind()
+	if !strings.Contains(card, "↑ more") {
+		t.Fatalf("newest selection should show ↑ more: %q", card)
+	}
+	if strings.Contains(card, "↓ more") {
+		t.Fatalf("newest selection must not show ↓ more: %q", card)
+	}
+	if !strings.Contains(card, "turn 11") || strings.Contains(card, "turn 0") {
+		t.Fatalf("window must cover rows 4..11, got: %q", card)
+	}
+
+	// Oldest turn selected: window shows rows 0..7.
+	m.rewind = &rewindPicker{metas: metas, sel: 0}
+	card = m.renderRewind()
+	if !strings.Contains(card, "↓ more") {
+		t.Fatalf("oldest selection should show ↓ more: %q", card)
+	}
+	if strings.Contains(card, "↑ more") {
+		t.Fatalf("oldest selection must not show ↑ more: %q", card)
+	}
+	if !strings.Contains(card, "turn 0") || strings.Contains(card, "turn 11") {
+		t.Fatalf("window must cover rows 0..7, got: %q", card)
+	}
+
+	// Short session (≤8 turns): every row visible, no markers.
+	m.rewind = &rewindPicker{metas: metas[:4], sel: 0}
+	card = m.renderRewind()
+	if strings.Contains(card, "more") {
+		t.Fatalf("short session must not show more markers: %q", card)
+	}
+	for i := 0; i < 4; i++ {
+		if !strings.Contains(card, fmt.Sprintf("turn %d", i)) {
+			t.Fatalf("short session row %d missing: %q", i, card)
+		}
+	}
+}
+
 func TestApprovalChoicesPreserveDecisionSemantics(t *testing.T) {
 	tests := []struct {
 		name string
