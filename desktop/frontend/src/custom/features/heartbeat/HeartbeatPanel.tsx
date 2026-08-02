@@ -6,10 +6,13 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Activity,
-  ChevronLeft,
+  ChevronDown,
+  ChevronRight,
   ChevronsUpDown,
-  Clock,
   Check,
+  Filter,
+  Folder,
+  Globe,
   Heart,
   MessageSquare,
   Play,
@@ -19,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 import { app } from "../../../lib/bridge";
-import { useT } from "../../../lib/i18n";
+import { useT, type Translator } from "../../../lib/i18n";
 import { AnchoredPopover } from "../../../components/AnchoredPopover";
 import {
   heartbeatListTasks,
@@ -29,6 +32,13 @@ import {
 } from "./heartbeat.bridge";
 import type { HeartbeatTask } from "./heartbeat.types";
 import type { WorkspaceView } from "../../../lib/types";
+
+interface HeartbeatPanelProps {
+  open: boolean;
+  onClose: () => void;
+  startNew?: boolean;
+  onOpenTopic?: (scope: string, workspaceRoot: string, topicId: string) => void;
+}
 
 const INTERVAL_MS: Record<"s" | "m" | "h", number> = {
   s: 1000,
@@ -98,8 +108,8 @@ export function heartbeatNextRunAt(task: Pick<HeartbeatTask, "interval" | "lastR
   return nextHeartbeatWindowTime(candidate, start, end).getTime();
 }
 
-function heartbeatIntervalLabel(interval: string | undefined, t: ReturnType<typeof useT>): string {
-  const cycleMatch = (interval || "").match(/^(\d+)[smh]\|(daily|weekly|biweekly|monthly|yearly)(?::([^@]*))?(?:@(\d{2}:\d{2}))?$/);
+function formatInterval(interval: string, t: Translator): string {
+  const cycleMatch = interval.match(/^(\d+)[smh]\|(daily|weekly|biweekly|monthly|yearly)(?::([^@]*))?(?:@(\d{2}:\d{2}))?$/);
   if (cycleMatch) {
     const [, , type, days, time] = cycleMatch;
     const timeStr = time ? ` ${time}` : "";
@@ -112,22 +122,31 @@ function heartbeatIntervalLabel(interval: string | undefined, t: ReturnType<type
       return `${t("heartbeat.cycleYearly")} ${parts[0] || "1"}/${parts[1] || "1"}${timeStr}`;
     }
   }
-  const clean = (interval || "").replace(/\|.*$/, "");
-  const m = clean.match(/^(\d+)([smh])$/);
-  if (!m) return clean;
-  const unitLabels: Record<string, string> = {
-    s: t("heartbeat.unitSec"),
-    m: t("heartbeat.unitMin"),
-    h: t("heartbeat.unitHour"),
-  };
-  return `${t("heartbeat.freqEvery")}${t("heartbeat.everyJoiner")}${m[1]}${unitLabels[m[2]] || m[2]}`;
+  const simple = interval.match(/^(\d+)([smh])$/);
+  if (simple) {
+    const unitLabels: Record<string, string> = {
+      s: t("heartbeat.unitSec"),
+      m: t("heartbeat.unitMin"),
+      h: t("heartbeat.unitHour"),
+    };
+    return `${simple[1]}${unitLabels[simple[2]] || simple[2]}`;
+  }
+  return interval;
 }
 
-interface HeartbeatPanelProps {
-  open: boolean;
-  onClose: () => void;
-  startNew?: boolean;
-  onOpenTopic: (scope: string, workspaceRoot: string, topicId: string) => void;
+function taskNextRun(task: HeartbeatTask): string | null {
+  if (!task.enabled || !task.lastRunAt) return null;
+  const cleaned = task.interval.replace(/\|.*$/, "");
+  const m = cleaned.match(/^(\d+)([smh])$/);
+  if (!m) return null;
+  const ms = parseInt(m[1]) * { s: 1000, m: 60000, h: 3600000 }[m[2] as "s" | "m" | "h"];
+  const next = task.lastRunAt + ms;
+  if (next <= Date.now()) return null;
+  const diff = next - Date.now();
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+  const d = new Date(next);
+  return `${(d.getMonth() + 1).toString().padStart(2, "0")}/${d.getDate().toString().padStart(2, "0")} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
 }
 
 export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: HeartbeatPanelProps) {
@@ -142,10 +161,15 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   const scopeFilterRef = useRef<HTMLButtonElement>(null);
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const statusFilterRef = useRef<HTMLButtonElement>(null);
+  const [expandedProjects, setExpandedProjects] = useState<Set<string> | null>(null);
   const [workspaceMap, setWorkspaceMap] = useState<Record<string, string>>({});
   const backdropRef = useRef<HTMLDivElement>(null);
   const dirtyRef = useRef(false);
   const startedRef = useRef(false);
+  // IDs of drafts created via Add/scoped-Add/startNew that have not been saved yet.
+  // They are intentionally absent from `tasks`, so the "clear editing" effect
+  // below must not close the editor for them.
+  const unsavedDraftIdsRef = useRef<Set<string>>(new Set());
 
   // Reset dirty ref when leaving edit mode
   useEffect(() => {
@@ -177,7 +201,6 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
       setEditing(null);
       setSearchQuery("");
       setStatusFilter("all");
-      setScopeFilter("all");
       startedRef.current = false;
       void loadTasks();
     }
@@ -188,6 +211,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
     if (open && startNew && !startedRef.current) {
       startedRef.current = true;
       void heartbeatGenerateID().then((id) => {
+        unsavedDraftIdsRef.current.add(id);
         setEditing({
           id,
           title: "",
@@ -202,6 +226,30 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
       }).catch(() => {});
     }
   }, [open, startNew]);
+
+  // Clear editing when the edited task is no longer in the filtered list.
+  // Unsaved drafts (created via Add/scoped-Add/startNew) are not yet in
+  // `tasks`; keep their editor open until the user saves or cancels.
+  useEffect(() => {
+    if (!editing) return;
+    if (unsavedDraftIdsRef.current.has(editing.id)) return;
+    // 过滤变化导致编辑任务不可见时，若有未保存改动先确认再关闭。
+    const closeIfNotDirty = () => {
+      if (dirtyRef.current) {
+        if (!window.confirm(t("heartbeat.discardChanges"))) return false;
+        dirtyRef.current = false;
+      }
+      return true;
+    };
+    const match = tasks.find(t => t.id === editing.id);
+    if (!match) { if (closeIfNotDirty()) setEditing(null); return; }
+    if (statusFilter === "enabled" && !match.enabled) { if (closeIfNotDirty()) setEditing(null); return; }
+    if (statusFilter === "disabled" && match.enabled) { if (closeIfNotDirty()) setEditing(null); return; }
+    if (searchQuery && !match.title.toLowerCase().includes(searchQuery.toLowerCase())) { if (closeIfNotDirty()) setEditing(null); return; }
+    // 与列表过滤一致：scopeFilter 过滤掉正在编辑的任务时关闭编辑器。
+    if (scopeFilter === "global" && (match.scope === "project" && match.workspaceRoot)) { if (closeIfNotDirty()) setEditing(null); return; }
+    if (scopeFilter !== "all" && scopeFilter !== "global" && (match.scope !== "project" || match.workspaceRoot !== scopeFilter)) { if (closeIfNotDirty()) setEditing(null); }
+  }, [tasks, editing?.id, statusFilter, searchQuery, scopeFilter, t]);
 
   const save = useCallback(
     async (next: HeartbeatTask[]) => {
@@ -218,6 +266,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
   const handleAdd = useCallback(async () => {
     try {
       const id = await heartbeatGenerateID();
+      unsavedDraftIdsRef.current.add(id);
       setEditing({
         id,
         title: "",
@@ -234,9 +283,31 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
     }
   }, []);
 
-  const handleEdit = useCallback((task: HeartbeatTask) => {
-    setEditing({ ...task });
+  const handleAddToScope = useCallback(async (scopeKey: string) => {
+    const id = await heartbeatGenerateID();
+    const isProject = scopeKey !== "global";
+    unsavedDraftIdsRef.current.add(id);
+    setEditing({
+      id,
+      title: "",
+      prompt: "",
+      interval: "30m",
+      enabled: true,
+      createdAt: Date.now(),
+      scope: isProject ? "project" : "global",
+      workspaceRoot: isProject ? scopeKey : "",
+    });
   }, []);
+
+  const handleEdit = useCallback((task: HeartbeatTask) => {
+    // 分栏模式下切换任务会丢弃当前编辑器未保存改动，先确认。
+    if (dirtyRef.current) {
+      if (!window.confirm(t("heartbeat.discardChanges"))) return;
+      dirtyRef.current = false;
+    }
+    unsavedDraftIdsRef.current.delete(task.id);
+    setEditing({ ...task });
+  }, [t]);
 
   const handleDelete = useCallback(
     async (id: string) => {
@@ -268,7 +339,9 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
         next.push(task);
       }
       await save(next);
-      setEditing(null);
+      // The draft is now persisted; stop treating it as an unsaved draft.
+      unsavedDraftIdsRef.current.delete(task.id);
+      setEditing({ ...task });
     },
     [tasks, save],
   );
@@ -307,14 +380,7 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
     <div ref={backdropRef} className="heartbeat-backdrop" onMouseDown={handleBackdrop}>
       <div className="heartbeat-modal">
         <header className="heartbeat-modal__header">
-          {editing ? (
-            <button className="heartbeat-modal__back" onClick={() => setEditing(null)}>
-              <ChevronLeft size={16} />
-            </button>
-          ) : (
-            <Activity size={16} />
-          )}
-          <span>{editing ? t("heartbeat.editTask") : t("heartbeat.scheduler")}</span>
+          <Activity size={16} />
           <button
             className="heartbeat-modal__close"
             onClick={onClose}
@@ -324,12 +390,11 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
           </button>
         </header>
 
-        {editing ? (
-          <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} onDirtyChange={(d) => { dirtyRef.current = d; }} />
-        ) : (
-          <div className="heartbeat-modal__body">
+        <div className="heartbeat-split">
+          {/* ── Left column: task list ── */}
+          <div className="heartbeat-split__left">
             <div className="heartbeat-toolbar">
-              <div className="heartbeat-toolbar__search">
+              <div className="heartbeat-toolbar__search heartbeat-toolbar__search--active">
                 <Search size={13} className="heartbeat-toolbar__search-icon" />
                 <input
                   className="heartbeat-toolbar__search-input"
@@ -346,12 +411,12 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
               <div className="heartbeat-scope-filter">
                 <button
                   ref={statusFilterRef}
-                  className="heartbeat-toolbar__btn heartbeat-toolbar__btn--select"
+                  className={`heartbeat-toolbar__btn heartbeat-toolbar__btn--icon${statusFilter !== "all" ? " heartbeat-toolbar__btn--active" : ""}`}
                   type="button"
                   onClick={() => setStatusFilterOpen((v) => !v)}
+                  title={statusFilterLabel(statusFilter)}
                 >
-                  <span>{statusFilterLabel(statusFilter)}</span>
-                  <ChevronsUpDown size={12} />
+                  <Filter size={13} />
                 </button>
                 <AnchoredPopover
                   open={statusFilterOpen}
@@ -446,175 +511,181 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
                   </div>
                 </AnchoredPopover>
               </div>
-              <button className="heartbeat-toolbar__btn heartbeat-toolbar__btn--primary" style={{ marginLeft: "auto" }} onClick={handleAdd}>
+              <button className="heartbeat-toolbar__btn heartbeat-toolbar__btn--icon" style={{ marginLeft: "auto" }} onClick={handleAdd} title={t("heartbeat.addTask")}>
                 <Plus size={14} />
-                {t("heartbeat.addTask")}
               </button>
             </div>
 
-            {(() => {
-              const filtered = tasks
-                .filter((task) => {
-                  if (statusFilter === "enabled" && !task.enabled) return false;
-                  if (statusFilter === "disabled" && task.enabled) return false;
-                  if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-                  if (scopeFilter === "global" && (task.scope === "project" && task.workspaceRoot)) return false;
-                  if (scopeFilter !== "all" && scopeFilter !== "global") {
-                    if (task.scope !== "project" || task.workspaceRoot !== scopeFilter) return false;
-                  }
-                  return true;
-                })
-                .sort((a, b) => {
-                  if (a.enabled && !b.enabled) return -1;
-                  if (!a.enabled && b.enabled) return 1;
-                  return 0;
+            <div className="heartbeat-split__list">
+              {(() => {
+                const filtered = tasks
+                  .filter((task) => {
+                    if (statusFilter === "enabled" && !task.enabled) return false;
+                    if (statusFilter === "disabled" && task.enabled) return false;
+                    if (searchQuery && !task.title.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+                    if (scopeFilter === "global" && (task.scope === "project" && task.workspaceRoot)) return false;
+                    if (scopeFilter !== "all" && scopeFilter !== "global") {
+                      if (task.scope !== "project" || task.workspaceRoot !== scopeFilter) return false;
+                    }
+                    return true;
+                  })
+                  .sort((a, b) => {
+                    if (a.enabled && !b.enabled) return -1;
+                    if (!a.enabled && b.enabled) return 1;
+                    return 0;
+                  });
+
+                // Group tasks by scope
+                const groups = new Map<string, HeartbeatTask[]>();
+                for (const task of filtered) {
+                  const key = task.scope === "project" && task.workspaceRoot
+                    ? task.workspaceRoot : "global";
+                  if (!groups.has(key)) groups.set(key, []);
+                  groups.get(key)!.push(task);
+                }
+
+                const sortedGroups = Array.from(groups.entries()).sort(([a], [b]) => {
+                  if (a === "global") return -1;
+                  if (b === "global") return 1;
+                  return (workspaceMap[a] || a).localeCompare(workspaceMap[b] || b);
                 });
 
-              const scopeLabel = (task: HeartbeatTask): string => {
-                if (task.scope !== "project" || !task.workspaceRoot) return t("heartbeat.scopeGlobal");
-                return workspaceMap[task.workspaceRoot] || task.workspaceRoot.split("/").pop() || task.workspaceRoot;
-              };
+                const toggleProject = (key: string) => {
+                  setExpandedProjects((prev) => {
+                    if (prev === null) {
+                      // All groups are currently expanded (null = all). The
+                      // first click must collapse the clicked group while
+                      // keeping every other group expanded, so seed the set
+                      // with all groups minus the clicked one.
+                      const next = new Set<string>();
+                      for (const [k] of groups) {
+                        if (k !== key) next.add(k);
+                      }
+                      return next;
+                    }
+                    const next = new Set(prev);
+                    if (next.has(key)) next.delete(key);
+                    else next.add(key);
+                    return next;
+                  });
+                };
 
-              return loading ? (
-                <div className="heartbeat-empty">
-                  <Heart size={24} className="heartbeat-pulse" />
-                  <span>{t("workspace.loading")}</span>
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="heartbeat-empty">
-                  <Heart size={24} />
-                  <span>{tasks.length === 0 ? t("heartbeat.noTasks") : t("heartbeat.noMatchingTasks")}</span>
-                </div>
-              ) : (
-                <ul className="heartbeat-tasklist">
-                  {filtered.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      scopeLabel={scopeLabel(task)}
-                      onToggle={() => {
-                        const next = tasks.map((t) =>
-                          t.id === task.id ? { ...t, enabled: !t.enabled } : t,
-                        );
-                        save(next);
-                      }}
-                      onEdit={() => handleEdit(task)}
-                      onTrigger={() => void handleTrigger(task.id)}
-                      onOpenTopic={onOpenTopic}
-                      onClose={onClose}
-                    />
-                  ))}
-                </ul>
-              );
-            })()}
+                const isGroupExpanded = (key: string): boolean => {
+                  if (expandedProjects === null) return true;
+                  return expandedProjects.has(key);
+                };
+
+                return loading ? (
+                  <div className="heartbeat-empty">
+                    <Heart size={24} className="heartbeat-pulse" />
+                    <span>{t("workspace.loading")}</span>
+                  </div>
+                ) : filtered.length === 0 ? (
+                  <div className="heartbeat-empty">
+                    <Heart size={24} />
+                    <span>{tasks.length === 0 ? t("heartbeat.noTasks") : t("heartbeat.noMatchingTasks")}</span>
+                  </div>
+                ) : (
+                  <div className="worktree-tree">
+                    {sortedGroups.map(([key, groupTasks]) => {
+                      const isExpanded = isGroupExpanded(key);
+                      const label = key === "global"
+                        ? t("heartbeat.scopeGlobal")
+                        : workspaceMap[key] || key.split("/").pop() || key;
+
+                      return (
+                        <div key={key}>
+                          {/* ── Group header (depth 0: 8px indent) ── */}
+                          <div
+                            className={`worktree-node worktree-node--scope${editing && groupTasks.some(t => t.id === editing.id) ? " worktree-node--scope-active" : ""}`}
+                            style={{ paddingLeft: "8px" }}
+                            onClick={() => toggleProject(key)}
+                          >
+                            <span className="worktree-node__icon">
+                              {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            </span>
+                            <span className="worktree-node__marker">
+                              {key === "global" ? <Globe size={13} /> : <Folder size={13} />}
+                            </span>
+                            <span className="worktree-node__label">{label}</span>
+                            <span className="worktree-node__scope-add" onClick={(e) => { e.stopPropagation(); void handleAddToScope(key); }} title={t("heartbeat.addTaskToScope", { name: label })}>
+                              <Plus size={12} strokeWidth={2.5} />
+                            </span>
+                          </div>
+
+                          {/* ── Tasks under group (depth 1: 14 + 16 = 30px indent) ── */}
+                          {isExpanded && groupTasks.map((task) => {
+                            const isSelected = editing?.id === task.id;
+                            return (
+                              <div
+                                key={task.id}
+                                className={`worktree-node worktree-node--task${isSelected ? " worktree-node--selected" : ""}`}
+                                style={{ paddingLeft: "21px" }}
+                                onClick={() => handleEdit(task)}
+                              >
+                                <span className="worktree-node__marker">
+                                  <span className={`worktree-node__dot${task.enabled ? " worktree-node__dot--on" : ""}`} />
+                                </span>
+                                <span className="worktree-node__label">{task.title || "(untitled)"}</span>
+                                <span className="worktree-node__tail">
+                                  <span className="worktree-node__interval">{formatInterval(task.interval, t)}{taskNextRun(task) ? ` ${taskNextRun(task)}` : ""}</span>
+                                  <span className="worktree-node__actions">
+                                  <button
+                                    className="worktree-node__action-btn"
+                                    onClick={(e) => { e.stopPropagation(); void handleTrigger(task.id); }}
+                                    title={t("heartbeat.runNow")}
+                                  >
+                                    <Play size={14} strokeWidth={1.9} />
+                                  </button>
+                                  <button
+                                    className="worktree-node__action-btn"
+                                    type="button"
+                                    disabled={!task.topicId}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (task.topicId && onOpenTopic) {
+                                        onClose();
+                                        onOpenTopic(task.scope || "global", task.workspaceRoot || "", task.topicId);
+                                      }
+                                    }}
+                                    title={task.topicId ? t("heartbeat.openTopic" as any) : ""}
+                                  >
+                                    <MessageSquare size={14} strokeWidth={1.9} />
+                                  </button>
+                                </span>
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
-        )}
+
+          {/* ── Vertical divider ── */}
+          <div className="heartbeat-split__divider" />
+
+          {/* ── Right column: detail / editor ── */}
+          <div className="heartbeat-split__right">
+            {editing ? (
+              <TaskEditor key={editing.id} task={editing} onSave={handleSaveEdit} onCancel={() => setEditing(null)} onDelete={() => { handleDelete(editing.id); setEditing(null); }} onDirtyChange={(d) => { dirtyRef.current = d; }} />
+            ) : (
+              <div className="heartbeat-split__empty">
+                <div className="heartbeat-split__empty-inner">
+                  <Activity size={28} />
+                  <span>{t("heartbeat.selectTask")}</span>
+                  <span className="heartbeat-split__empty-hint">{t("heartbeat.configHint")}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
-  );
-}
-
-// ── Task Card ─────────────────────────────────────────────────────────────────
-
-function TaskCard({
-  task,
-  scopeLabel,
-  onToggle,
-  onEdit,
-  onTrigger,
-  onOpenTopic,
-  onClose,
-}: {
-  task: HeartbeatTask;
-  scopeLabel: string;
-  onToggle: () => void;
-  onEdit: () => void;
-  onTrigger: () => void;
-  onOpenTopic: (scope: string, workspaceRoot: string, topicId: string) => void;
-  onClose: () => void;
-}) {
-  const t = useT();
-
-  const intervalLabel = heartbeatIntervalLabel(task.interval, t);
-
-  const nextRunLabel = (() => {
-    if (!task.enabled) return t("heartbeat.disabled");
-    const now = Date.now();
-    const next = heartbeatNextRunAt(task, now);
-    if (next === null) return task.lastRunAt ? "" : t("heartbeat.neverRun");
-    const diff = next - now;
-    if (diff <= 0) return t("heartbeat.due" as any);
-    if (diff < 60000) return t("heartbeat.soon" as any);
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}${t("heartbeat.minLater" as any)}`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}${t("heartbeat.hourLater" as any)}`;
-    const d = new Date(next);
-    return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
-  })();
-
-  const lastRunLabel = task.lastRunAt
-    ? (() => {
-        const d = new Date(task.lastRunAt);
-        const now = new Date();
-        const diff = now.getTime() - task.lastRunAt;
-        if (diff < 60000) return t("heartbeat.justNow" as any);
-        if (diff < 3600000) return `${Math.floor(diff / 60000)}${t("heartbeat.minAgo" as any)}`;
-        if (diff < 86400000) return `${Math.floor(diff / 3600000)}${t("heartbeat.hourAgo" as any)}`;
-        return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`;
-      })()
-    : t("heartbeat.neverRun");
-
-  return (
-    <li className={`heartbeat-card${!task.enabled ? " heartbeat-card--disabled" : ""}`}>
-      <div className="heartbeat-card__head">
-        <span className={`heartbeat-card__dot${task.enabled ? " heartbeat-card__dot--on" : ""}`} />
-        <span className="heartbeat-card__title">
-          <button
-            type="button"
-            className="heartbeat-card__title-btn"
-            onClick={onEdit}
-          >
-            <span className="heartbeat-card__title-text">{task.title || t("heartbeat.untitled")}</span>
-            <span className="heartbeat-card__title-scope">{scopeLabel}</span>
-          </button>
-        </span>
-        <span className="heartbeat-card__meta-item heartbeat-card__meta-item--compact">
-          <Clock size={10} />
-          {intervalLabel}
-          <span className="heartbeat-card__meta-sep">·</span>
-          {task.enabled ? nextRunLabel : lastRunLabel}
-        </span>
-        <span className="heartbeat-card__head-actions">
-          <button
-            className="heartbeat-card__open-btn heartbeat-card__open-btn--play"
-            onClick={onTrigger}
-            title={t("heartbeat.runNow")}
-          >
-            <Play size={12} />
-          </button>
-          <button
-            className="heartbeat-card__open-btn"
-            type="button"
-            disabled={!task.topicId}
-            onClick={() => {
-              if (task.topicId) {
-                onClose();
-                onOpenTopic(task.scope || "global", task.workspaceRoot || "", task.topicId);
-              }
-            }}
-            title={task.topicId ? (t("heartbeat.openTopic" as any)) : ""}
-          >
-            <MessageSquare size={13} />
-          </button>
-          <button
-            className={`heartbeat-card__toggle${task.enabled ? " heartbeat-card__toggle--on" : ""}`}
-            onClick={onToggle}
-            aria-label={task.enabled ? t("heartbeat.disable") : t("heartbeat.enabled")}
-          >
-            <span className="heartbeat-card__toggle-knob" />
-          </button>
-        </span>
-      </div>
-    </li>
   );
 }
 
@@ -676,39 +747,77 @@ function CycleEditor({
   setDraft: (field: keyof HeartbeatTask, value: string | boolean) => void;
 }) {
   const t = useT();
-  const cycleMatch = (draft.interval || "").match(/^(\d+)[smh]\|(daily|weekly|biweekly|monthly|yearly)(?::([^@]*))?(?:@(\d{2}:\d{2}))?$/);
+  const cycleMatch = draft.interval.match(/^(\d+)[smh]\|(daily|weekly|biweekly|monthly|yearly)(?::([^@]*))?(?:@(\d{2}:\d{2}))?$/);
   const [cycleType, setCycleType] = useState<string>(
     cycleMatch ? cycleMatch[2] : "daily"
   );
   const cycleDays = cycleMatch?.[3] || "";
   const cycleTime = cycleMatch?.[4] || "09:00";
   const [selectedDays, setSelectedDays] = useState<string[]>(
-    cycleDays ? cycleDays.split(",").filter(Boolean) :
-    defaultHeartbeatCycleDays(cycleMatch ? cycleMatch[2] : "daily")
+    cycleDays ? cycleDays.split(",") : ["mon","tue","wed","thu","fri","sat","sun"]
   );
   const [monthDay, setMonthDay] = useState(cycleDays || "1");
   const [yearMonth, setYearMonth] = useState(cycleDays.split("-")[0] || "1");
   const [yearDay, setYearDay] = useState(cycleDays.split("-")[1] || "1");
   const [timeVal, setTimeVal] = useState(cycleTime);
+  const [cycleOpen, setCycleOpen] = useState(false);
+  const cycleRef = useRef<HTMLDivElement>(null);
 
-  const hasWeekdays = cycleType === "daily" || cycleType === "weekly" || cycleType === "biweekly";
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!cycleOpen) return;
+    const close = (e: MouseEvent) => {
+      if (cycleRef.current && !cycleRef.current.contains(e.target as Node)) {
+        setCycleOpen(false);
+      }
+    };
+    document.addEventListener("click", close);
+    return () => document.removeEventListener("click", close);
+  }, [cycleOpen]);
 
   // Build interval string when config changes
-  const buildInterval = useCallback(heartbeatBuildCycleInterval, []);
+  const buildInterval = useCallback((ct: string, days: string[], tm: string) => {
+    const base: Record<string, string> = {
+      daily: "24h",
+      weekly: "168h",
+      biweekly: "336h",
+      monthly: "720h",
+      yearly: "8760h",
+    };
+    let suffix = `|${ct}`;
+    if (ct === "daily" || ct === "weekly" || ct === "biweekly") {
+      suffix += `:${days.join(",")}`;
+    } else if (ct === "monthly") {
+      suffix += `:${days[0] || "1"}`;
+    } else if (ct === "yearly") {
+      // days[0] = month, days[1] = day — each is a plain number, no dash
+      suffix += `:${days[0] || "1"}-${days[1] || "1"}`;
+    }
+    suffix += `@${tm}`;
+    return (base[ct] || "24h") + suffix;
+  }, []);
 
   const onCycleTypeChange = useCallback((ct: string) => {
     setCycleType(ct);
-    const days = defaultHeartbeatCycleDays(ct);
+    const days: string[] = [];
     setSelectedDays(days);
     setMonthDay("1");
     setYearMonth("1");
     setYearDay("1");
+    if (ct !== "daily" && ct !== "weekly" && ct !== "biweekly") {
+      setSelectedDays([]);
+    }
     setDraft("interval", buildInterval(ct, days, timeVal));
   }, [buildInterval, setDraft, timeVal]);
 
   const onDayToggle = useCallback((day: string) => {
     setSelectedDays((prev) => {
-      if (prev.includes(day) && prev.length <= 1) return prev;
+      // Weekly/biweekly schedules must keep at least one weekday selected;
+      // an empty weekday rule is rejected by the backend's schedule parser,
+      // silently turning the task into a rolling interval.
+      const isWeeklyLike = cycleType === "weekly" || cycleType === "biweekly";
+      const wouldBeEmpty = prev.includes(day) && prev.length === 1 && isWeeklyLike;
+      if (wouldBeEmpty) return prev;
       const next = prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day];
       setDraft("interval", buildInterval(cycleType, next, timeVal));
       return next;
@@ -732,7 +841,7 @@ function CycleEditor({
 
   const onTimeChange = useCallback((tm: string) => {
     setTimeVal(tm);
-    const days = hasWeekdays ? selectedDays
+    const days = cycleType === "daily" || cycleType === "weekly" || cycleType === "biweekly" ? selectedDays
       : cycleType === "monthly" ? [monthDay]
       : cycleType === "yearly" ? [yearMonth, yearDay]
       : [];
@@ -751,17 +860,29 @@ function CycleEditor({
   return (
     <div className="heartbeat-editor__cycle-wrap">
       <div className="heartbeat-editor__cycle-row">
-        <select
-          className="heartbeat-editor__freq-select"
-          value={cycleType}
-          onChange={(e) => onCycleTypeChange(e.target.value)}
-        >
-          <option value="daily">{t("heartbeat.cycleDaily")}</option>
-          <option value="weekly">{t("heartbeat.cycleWeekly")}</option>
-          <option value="biweekly">{t("heartbeat.cycleBiweekly")}</option>
-          <option value="monthly">{t("heartbeat.cycleMonthly")}</option>
-          <option value="yearly">{t("heartbeat.cycleYearly")}</option>
-        </select>
+        <div className="heartbeat-scope-wrap" ref={cycleRef}>
+          <button
+            className="heartbeat-scope-select"
+            onClick={() => setCycleOpen((v) => !v)}
+          >
+            {t(`heartbeat.cycle${cycleType.charAt(0).toUpperCase() + cycleType.slice(1)}` as any)}
+            <ChevronsUpDown size={12} />
+          </button>
+          {cycleOpen && (
+            <div className="heartbeat-project-menu heartbeat-project-menu--up">
+              {["daily", "weekly", "biweekly", "monthly", "yearly"].map((ct) => (
+                <button
+                  key={ct}
+                  className={`heartbeat-project-menu__item${cycleType === ct ? " heartbeat-project-menu__item--active" : ""}`}
+                  onClick={() => { onCycleTypeChange(ct); setCycleOpen(false); }}
+                >
+                  {t(`heartbeat.cycle${ct.charAt(0).toUpperCase() + ct.slice(1)}` as any)}
+                  {cycleType === ct && <Check size={12} className="heartbeat-filter-menu__check" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {cycleType === "monthly" && (
           <select
@@ -805,7 +926,7 @@ function CycleEditor({
           onChange={(e) => onTimeChange(e.target.value)}
         />
 
-        {hasWeekdays && (
+        {(cycleType === "weekly" || cycleType === "biweekly") && (
           <div className="set-seg">
             {WEEKDAYS.map((wd) => (
               <button
@@ -853,7 +974,6 @@ function TaskEditor({
   const projectRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    titleRef.current?.focus();
     app.ListWorkspaces().then((list) => setWorkspaces(list ?? [])).catch(() => {});
   }, []);
 
@@ -870,6 +990,11 @@ function TaskEditor({
 
   const [draft, setDraft] = useState(task);
   const initialTaskRef = useRef(task);
+  // 保存后父组件 setEditing({...task}) 传入新引用，同步基线使 isDirty
+  // 复位（保存按钮与 dirtyRef 不再保持脏状态）。
+  useEffect(() => {
+    initialTaskRef.current = task;
+  }, [task]);
   const isDirty = draft.title !== initialTaskRef.current.title
     || draft.prompt !== initialTaskRef.current.prompt
     || draft.interval !== initialTaskRef.current.interval
@@ -906,7 +1031,7 @@ function TaskEditor({
 
   // Detect frequency type from interval value
   const [freqType, setFreqType] = useState<"cycle" | "interval">(
-    (task.interval && task.interval.includes("|")) ? "cycle" : "interval"
+    task.interval.includes("|") ? "cycle" : "interval"
   );
 
   const isNew = !task.createdAt;
@@ -916,10 +1041,8 @@ function TaskEditor({
 
   return (
     <div className="heartbeat-editor">
-      <div className="heartbeat-editor__fields">
-        {/* Title */}
-        <div className="heartbeat-editor__field">
-        <label>{t("heartbeat.fieldTitle")}</label>
+      {/* Title */}
+      <div className="heartbeat-editor__field">
         <input
           ref={titleRef}
           className="heartbeat-editor__input"
@@ -931,28 +1054,32 @@ function TaskEditor({
 
       {/* Scope */}
       <div className="heartbeat-editor__field">
-        <label>{t("heartbeat.fieldScope")} <span className="heartbeat-editor__optional">{t("heartbeat.optional")}</span></label>
-        <div className="heartbeat-editor__scope-row">
+        <label>{t("heartbeat.scopeProject")}</label>
+        <div className="heartbeat-scope-wrap" ref={projectRef}>
           <button
-            className={`heartbeat-scope-btn${draft.scope !== "project" ? " heartbeat-scope-btn--active" : ""}`}
-            onClick={() => setDraft((prev) => ({ ...prev, scope: "global", workspaceRoot: "" }))}
+            className="heartbeat-scope-select"
+            onClick={() => setProjectOpen((v) => !v)}
           >
-            {t("heartbeat.scopeGlobal")}
+            {selectedWorkspace ? selectedWorkspace.name : t("heartbeat.scopeGlobal")}
+            <ChevronsUpDown size={12} />
           </button>
-          <div className="heartbeat-project-wrap" ref={projectRef}>
-            <button
-              className={`heartbeat-scope-btn${draft.scope === "project" ? " heartbeat-scope-btn--active" : ""}`}
-              onClick={() => setProjectOpen((v) => !v)}
-            >
-              {selectedWorkspace ? selectedWorkspace.name : t("heartbeat.scopeProject")}
-              <ChevronsUpDown size={12} />
-            </button>
-            {projectOpen && (
-              <div className="heartbeat-project-menu">
-                {workspaces.length === 0 ? (
-                  <div className="heartbeat-project-menu__empty">{t("heartbeat.noProjects")}</div>
-                ) : (
-                  workspaces.map((ws) => (
+          {projectOpen && (
+            <div className="heartbeat-project-menu">
+              {workspaces.length === 0 ? (
+                <div className="heartbeat-project-menu__empty">{t("heartbeat.noProjects")}</div>
+              ) : (
+                <>
+                  <button
+                    className={`heartbeat-project-menu__item${!draft.scope || draft.scope === "global" || !draft.workspaceRoot ? " heartbeat-project-menu__item--active" : ""}`}
+                    onClick={() => {
+                      setDraft((prev) => ({ ...prev, scope: "global", workspaceRoot: "" }));
+                      setProjectOpen(false);
+                    }}
+                  >
+                    {t("heartbeat.scopeGlobal")}
+                    {(!draft.scope || draft.scope === "global" || !draft.workspaceRoot) && <Check size={12} className="heartbeat-filter-menu__check" />}
+                  </button>
+                  {workspaces.map((ws) => (
                     <button
                       key={ws.path}
                       className={`heartbeat-project-menu__item${draft.workspaceRoot === ws.path ? " heartbeat-project-menu__item--active" : ""}`}
@@ -963,12 +1090,13 @@ function TaskEditor({
                     >
                       {ws.name}
                       {ws.current && <span className="heartbeat-project-menu__current">{t("heartbeat.currentWorkspace")}</span>}
+                      {draft.workspaceRoot === ws.path && <Check size={12} className="heartbeat-filter-menu__check" />}
                     </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -976,14 +1104,11 @@ function TaskEditor({
       <div className="heartbeat-editor__field">
         <label>{t("heartbeat.fieldPrompt")}</label>
         <textarea
-          ref={promptRef}
           className="heartbeat-editor__textarea"
           value={draft.prompt}
-          onChange={(e) => {
-            set("prompt", e.target.value);
-            // autoGrowPrompt is called via useEffect watching draft.prompt
-          }}
+          onChange={(e) => set("prompt", e.target.value)}
           placeholder={t("heartbeat.promptPlaceholder")}
+          rows={5}
         />
       </div>
 
@@ -1070,21 +1195,6 @@ function TaskEditor({
         <label>{t("heartbeat.fieldInterval")}</label>
         <div className="set-seg" style={{ alignSelf: "flex-start" }}>
           <button
-            className={`set-seg__btn${freqType === "cycle" ? " set-seg__btn--on" : ""}`}
-            onClick={() => {
-              setFreqType("cycle");
-              // Save the original interval so switching back can restore it
-              const cur = draft.interval || "";
-              const nextInterval = cur.includes("|") ? cur : "24h|daily@09:00";
-              if (!cur.includes("|")) {
-                intervalBeforeCycle.current = cur;
-              }
-              setDraft((prev) => ({ ...prev, interval: nextInterval, timeWindowStart: undefined, timeWindowEnd: undefined }));
-            }}
-          >
-            {t("heartbeat.freqCycle")}
-          </button>
-          <button
             className={`set-seg__btn${freqType === "interval" ? " set-seg__btn--on" : ""}`}
             onClick={() => {
               setFreqType("interval");
@@ -1100,6 +1210,21 @@ function TaskEditor({
           >
             {t("heartbeat.freqInterval")}
           </button>
+          <button
+            className={`set-seg__btn${freqType === "cycle" ? " set-seg__btn--on" : ""}`}
+            onClick={() => {
+              setFreqType("cycle");
+              // Initialize interval to daily schedule when switching to cycle mode
+              const cur = draft.interval || "";
+              const nextInterval = cur.includes("|") ? cur : "24h|daily@09:00";
+              if (!cur.includes("|")) {
+                intervalBeforeCycle.current = cur;
+              }
+              setDraft((prev) => ({ ...prev, interval: nextInterval, timeWindowStart: undefined, timeWindowEnd: undefined }));
+            }}
+          >
+            {t("heartbeat.freqCycle")}
+          </button>
         </div>
 
         {freqType === "cycle" ? <CycleEditor draft={draft} setDraft={set} /> : (
@@ -1108,51 +1233,51 @@ function TaskEditor({
             <input
               className="heartbeat-editor__freq-input"
               value={(() => {
-                const m = (draft.interval || "").match(/^(\d+)/);
+                const m = draft.interval.match(/^(\d+)/);
                 return m ? m[1] : "1";
               })()}
               onChange={(e) => {
                 const num = e.target.value.replace(/\D/g, "");
-                const mUnit = (draft.interval || "").match(/^(\d+)([smh])/);
+                const mUnit = draft.interval.match(/^(\d+)([smh])/);
                 const unit = mUnit ? mUnit[2] : "h";
-                // Guard: never save a bare unit string like "h" or "m"
                 setDraft((prev) => ({ ...prev, interval: num ? num + unit : "1" + unit }));
               }}
               placeholder="1"
             />
-            <select
-              className="heartbeat-editor__freq-select"
-              value={(() => {
-                const m = (draft.interval || "").match(/^(\d+)([smh])/);
-                return m ? m[2] : "h";
-              })()}
-              onChange={(e) => {
-                const num = (draft.interval || "").match(/^(\d+)/)?.[1] || "1";
-                setDraft((prev) => ({ ...prev, interval: num + e.target.value }));
-              }}
-            >
-              <option value="m">{t("heartbeat.unitMin")}</option>
-              <option value="h">{t("heartbeat.unitHour")}</option>
-            </select>
-            <span className="heartbeat-editor__freq-label" style={{ marginLeft: "6px" }}>
-              {draft.timeWindowStart || draft.timeWindowEnd ? (
-                <>{t("heartbeat.timeWindow")}</>
-              ) : (
-                <span className="heartbeat-editor__tw-add"
-                  onClick={() => setDraft((prev) => ({ ...prev, timeWindowStart: "09:00", timeWindowEnd: "17:00" }))}
-                >
-                  + {t("heartbeat.timeWindow")}
-                </span>
-              )}
-            </span>
-            {(draft.timeWindowStart || draft.timeWindowEnd) && (
-              <>
+            <div className="set-seg">
+              <button
+                className={`set-seg__btn${(() => {
+                  const m = draft.interval.match(/^(\d+)([smh])/);
+                  return (m ? m[2] : "h") === "m" ? " set-seg__btn--on" : "";
+                })()}`}
+                onClick={() => {
+                  const num = draft.interval.match(/^(\d+)/)?.[1] || "1";
+                  setDraft((prev) => ({ ...prev, interval: num + "m" }));
+                }}
+              >
+                {t("heartbeat.unitMin")}
+              </button>
+              <button
+                className={`set-seg__btn${(() => {
+                  const m = draft.interval.match(/^(\d+)([smh])/);
+                  return (m ? m[2] : "h") === "h" ? " set-seg__btn--on" : "";
+                })()}`}
+                onClick={() => {
+                  const num = draft.interval.match(/^(\d+)/)?.[1] || "1";
+                  setDraft((prev) => ({ ...prev, interval: num + "h" }));
+                }}
+              >
+                {t("heartbeat.unitHour")}
+              </button>
+            </div>
+            {draft.timeWindowStart || draft.timeWindowEnd ? (
+              <div className="heartbeat-editor__tw-inputs" style={{ marginLeft: "8px" }}>
                 <input
                   className="heartbeat-editor__freq-input heartbeat-editor__freq-input--time"
                   type="time"
                   value={draft.timeWindowStart || ""}
                   onChange={(e) => setDraft((prev) => ({ ...prev, timeWindowStart: e.target.value || undefined }))}
-                  placeholder="09:00"
+                  style={{ width: "90px" }}
                 />
                 <span className="heartbeat-editor__freq-label heartbeat-editor__tw-sep">—</span>
                 <input
@@ -1160,53 +1285,69 @@ function TaskEditor({
                   type="time"
                   value={draft.timeWindowEnd || ""}
                   onChange={(e) => setDraft((prev) => ({ ...prev, timeWindowEnd: e.target.value || undefined }))}
-                  placeholder="17:00"
+                  style={{ width: "90px" }}
                 />
                 <button
-                  className="heartbeat-card__open-btn heartbeat-editor__tw-clear"
+                  className="heartbeat-editor__tw-remove"
                   onClick={() => setDraft((prev) => ({ ...prev, timeWindowStart: undefined, timeWindowEnd: undefined }))}
-                  title={t("heartbeat.clearTimeWindow")}
+                  title={t("heartbeat.removeTimeWindow")}
                 >
-                  ×
+                  <X size={12} />
                 </button>
-              </>
+              </div>
+            ) : (
+              <span className="heartbeat-editor__tw-add" style={{ marginLeft: "8px" }}
+                onClick={() => setDraft((prev) => ({ ...prev, timeWindowStart: "09:00", timeWindowEnd: "17:00" }))}
+              >
+                + {t("heartbeat.timeWindow")}
+              </span>
             )}
           </div>
         )}
       </div>
 
-      </div>
-
       {/* Actions */}
       <div className="heartbeat-editor__actions">
-        {!isNew && !confirmingDelete && (
-          <button className="heartbeat-btn heartbeat-btn--danger" onClick={() => setConfirmingDelete(true)} style={{ marginRight: "auto" }}>
+        {!isNew && (
+          <button
+            className={`heartbeat-btn${confirmingDelete ? "" : " heartbeat-btn--danger"}`}
+            onClick={() => {
+              if (confirmingDelete) {
+                onDelete();
+              } else {
+                setConfirmingDelete(true);
+              }
+            }}
+          >
             <Trash2 size={13} />
-            {t("heartbeat.delete")}
+            {confirmingDelete ? t("heartbeat.confirmDelete") : t("heartbeat.delete")}
           </button>
         )}
-        {!isNew && confirmingDelete && (
-          <span className="heartbeat-editor__confirm-del" style={{ marginRight: "auto" }}>
-            <span>{t("heartbeat.confirmDelete")}</span>
-            <button className="heartbeat-btn heartbeat-btn--danger" onClick={onDelete}>
-              {t("common.delete")}
-            </button>
-            <button className="heartbeat-btn" onClick={() => setConfirmingDelete(false)}>
-              {t("common.cancel")}
-            </button>
-          </span>
-        )}
         <button
-          className="heartbeat-btn heartbeat-btn--primary"
-          onClick={() => onSave(draft)}
-          disabled={!draft.title.trim() || !draft.prompt.trim() || !isDirty}
-          title={!draft.title.trim() || !draft.prompt.trim() ? t("heartbeat.requiredFields") : !isDirty ? t("heartbeat.noChanges") : undefined}
+          className="heartbeat-btn"
+          onClick={() => {
+            const updated = { ...draft, enabled: !draft.enabled };
+            setDraft(updated);
+            // enabled 切换即时保存（onSave 立即持久化），同步基线使
+            // isDirty 不再把 enabled 当作未保存改动，保存按钮状态不受影响。
+            initialTaskRef.current = updated;
+            onSave(updated);
+          }}
         >
-          {isNew ? t("heartbeat.add") : t("heartbeat.save")}
+          {draft.enabled ? t("heartbeat.disable") : t("heartbeat.enabled")}
         </button>
-        <button className="heartbeat-btn" onClick={onCancel}>
-          {t("common.cancel")}
-        </button>
+        <span style={{ marginLeft: "auto", display: "flex", gap: "8px" }}>
+          <button
+            className={`heartbeat-btn${isDirty ? " heartbeat-btn--primary" : ""}`}
+            onClick={() => onSave(draft)}
+            disabled={!draft.title.trim() || !draft.prompt.trim() || (!isDirty && !isNew)}
+          >
+            {isNew ? t("heartbeat.add") : t("heartbeat.save")}
+          </button>
+          <button className="heartbeat-btn" onClick={onCancel}>
+            {t("common.cancel")}
+          </button>
+        </span>
       </div>
     </div>
   );
