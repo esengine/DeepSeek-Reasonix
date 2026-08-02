@@ -12,7 +12,7 @@
   <a href="./docs/ACP.md">ACP</a>
   &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
- &nbsp;·&nbsp;
+  &nbsp;·&nbsp;
   <a href="./docs/PLUGINS.md">Plugins</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>

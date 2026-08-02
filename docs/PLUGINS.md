@@ -1,45 +1,51 @@
 # Community Plugins
 
-Reasonix loads external tools as **MCP servers** — subprocesses it talks to over
-stdio JSON-RPC — declared in `reasonix.toml` (see
-[SPEC §3.3](./SPEC.md#33-plugins-internalplugin--mcp-client) and
-[§5](./SPEC.md#5-configuration-toml)). Plugins live in their own repos/packages and
-are **not** bundled into core; this page is a discovery list so users can find them
-and authors can be linked.
+Reasonix loads external tools as **MCP servers**. The normal discovery path is
+the official MCP Registry: use **Settings → MCP servers → Browse registry** or
+`reasonix mcp browse [query]`. See the [Guide](./GUIDE.md#plugins-mcp) for the
+installation and runtime model.
 
-> This is a discovery list, not an endorsement or a quality guarantee. Vet a
-> plugin before installing it — an installed MCP server is trusted with its tools.
+This page complements the registry with community servers that include
+Reasonix-specific setup guidance. Listings are links, not bundled dependencies,
+endorsements, or quality guarantees.
+
+> Installing or declaring an MCP server is a trust decision. A local stdio
+> server runs as a subprocess, and its `readOnlyHint` / `destructiveHint` values
+> are workflow metadata rather than containment against malicious code. Review
+> the public source and published package before adding one.
 
 ## How to add a plugin
 
 Each `[[plugins]]` entry names a server and how to launch it. `type` defaults to
-`stdio`; `${VAR}` / `${VAR:-default}` are expanded in `command` / `args` / `env`.
+`stdio`; `${VAR}` / `${VAR:-default}` are expanded in `command`, `args`, and
+`env`. Pin package versions so a reviewed configuration does not silently start
+running a different release. `-y` prevents `npx`'s first-run installation prompt
+from blocking the MCP stdio handshake.
 
 ```toml
 [[plugins]]
 name    = "example"
 command = "npx"
-args    = ["some-reasonix-plugin"]
+args    = ["-y", "some-reasonix-plugin@1.2.3"]
 # env   = { SOME_TOKEN = "${SOME_TOKEN}" }
 ```
 
-After launch, a plugin's tools appear in-session namespaced as
-`mcp__<name>__<tool>`. Run `/mcp` in the chat TUI to see connected servers and
-their tool counts.
+After launch, tools appear in-session as `mcp__<name>__<tool>`. Run `/mcp` in
+the chat TUI to inspect connected servers and their tool counts.
 
-## Plugins
+## Community plugins
 
-| Plugin | Tools | Install |
-| --- | --- | --- |
-| [reasonix-plugin-git-context](https://github.com/kashifmahi/reasonix-plugin-git-context) | Read-only git: `blame`, `log`, `show`, `diff`, `file_history`, `pickaxe`, `pr_context` | `npx reasonix-plugin-git-context` |
-
-<!-- Add your plugin above in the same format: name (link), a short tool summary,
-     and the launch command. Keep entries alphabetical by plugin name. -->
+No entries are listed yet. A listing must have a reachable public source
+repository and a published, versioned release so users can inspect what the
+documented command executes.
 
 ## Publishing your own
 
-1. Build an MCP server (any language) that speaks stdio JSON-RPC — see
+1. Build an MCP server (any language) that speaks stdio JSON-RPC; see
    `cmd/reasonix-plugin-example` for a runnable reference.
-2. Declare its tools with honest `annotations` (`readOnlyHint` for safe readers).
-3. Ship it as its own package with a README that includes the `[[plugins]]` snippet.
-4. Open a PR adding a row to the table above.
+2. Publish its source, license, tests, and versioned installation artifact.
+3. Declare its tools with honest annotations, including `readOnlyHint` only for
+   tools whose behavior is actually read-only.
+4. Document a complete, copyable `[[plugins]]` entry with a pinned version.
+5. Open a PR adding the entry to both this page and `PLUGINS.zh-CN.md`, keeping
+   entries alphabetical by plugin name.
