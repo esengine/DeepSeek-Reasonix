@@ -14,8 +14,18 @@ func TestAutoContextWindow(t *testing.T) {
 		{"gpt-5", 272_000},
 		{"gpt-4o", 131_072},
 		{"claude-3.7-sonnet", 200_000},
-		{"glm-5", 202_752},
+		{"glm-5", 204_800},            // official 200K tier (bigmodel.cn)
+		{"glm-5.2", 1_000_000},         // official 1M
+		{"glm-4.5", 131_072},           // official 128K (deprecated)
 		{"minimax-m3", 1_000_000},
+		{"minimax-m2.5", 204_800},      // official exact (platform.minimaxi.com)
+		{"minimax-m2.7", 204_800},
+		{"kimi-k3", 1_000_000},         // official 1M (platform.kimi.com)
+		{"kimi-k2.5", 262_144},         // official 256K
+		{"qwen-plus", 1_000_000},       // official 1M (help.aliyun.com)
+		{"qwen-flash", 1_000_000},      // official 1M
+		{"qwen3.7-max", 1_000_000},     // official 1M (not the 256K tier)
+		{"qwen3-max", 262_144},         // the only 256K qwen3
 		{"kimi-k2", 262_144},
 		{"seed-oss", 524_288},
 		{"gemini-2.5-pro", 1_000_000},

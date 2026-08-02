@@ -21,30 +21,45 @@ var modelContextPatterns = []struct {
 	{regexp.MustCompile(`^o\d`), 200_000},
 	// Anthropic
 	{regexp.MustCompile(`^claude-`), 200_000},
-	// Alibaba / Qwen — commercial API (1M)
+	// Alibaba / Qwen — verified against help.aliyun.com model docs (2026-08):
+	// qwen3.7/3.6/3.5 plus+flash, qwen3-coder-plus/flash, qwen-plus, qwen-flash
+	// all advertise 1M context. Only qwen3-max (256k) and its dated snapshots
+	// are the 256k tier. Order matters: specific coder/3.x patterns before the
+	// bare qwen fallback.
 	{regexp.MustCompile(`^qwen3-coder-plus`), 1_000_000},
 	{regexp.MustCompile(`^qwen3-coder-flash`), 1_000_000},
-	{regexp.MustCompile(`^qwen3\.\d`), 1_000_000},
-	{regexp.MustCompile(`^qwen-plus-latest$`), 1_000_000},
-	{regexp.MustCompile(`^qwen-flash-latest$`), 1_000_000},
+	{regexp.MustCompile(`^qwen3\.\d`), 1_000_000}, // qwen3.7-plus/max, qwen3.6-*, qwen3.5-*
+	{regexp.MustCompile(`^qwen-plus`), 1_000_000},   // main + dated snapshots
+	{regexp.MustCompile(`^qwen-flash`), 1_000_000},  // main + dated snapshots
 	{regexp.MustCompile(`^coder-model$`), 1_000_000},
-	// Qwen — 256K tier
+	// Qwen — 256K tier (qwen3-max and snapshots)
 	{regexp.MustCompile(`^qwen3-max`), 262_144},
-	{regexp.MustCompile(`^qwen3-coder-`), 262_144},
-	// Qwen fallback
-	{regexp.MustCompile(`^qwen`), 262_144},
+	{regexp.MustCompile(`^qwen3-coder-`), 262_144}, // qwen3-coder-next (unverified tier)
+	// Qwen fallback (older open qwen-* models: 128K tier)
+	{regexp.MustCompile(`^qwen`), 131_072},
 	// DeepSeek
 	{regexp.MustCompile(`^deepseek-v4`), 1_000_000},
 	{regexp.MustCompile(`^deepseek`), 131_072},
-	// Zhipu GLM
-	{regexp.MustCompile(`^glm-5(\.[01])?(-|$)`), 202_752},
+	// Zhipu GLM — verified against docs.bigmodel.cn (2026-08):
+	// glm-5.2=1M; glm-5/5.1/4.7=200K; glm-4.5=128K (deprecated).
+	// Order matters: 5.x/4.x specific tiers must precede the 5-9/2-digit
+	// general rule so glm-5 and glm-5.1 (200K) are not caught by it (1M).
+	{regexp.MustCompile(`^glm-5(\.0?[01])?(-|$)`), 204_800},
+	{regexp.MustCompile(`^glm-5\.2`), 1_000_000},
+	{regexp.MustCompile(`^glm-4\.5`), 131_072},
+	{regexp.MustCompile(`^glm-4\.7`), 204_800},
 	{regexp.MustCompile(`^glm-(?:[5-9]|\d{2,})`), 1_000_000},
-	{regexp.MustCompile(`^glm-`), 202_752},
-	// MiniMax
+	{regexp.MustCompile(`^glm-`), 204_800},
+	// MiniMax — verified against platform.minimaxi.com (2026-08):
+	// m3=1M; m2.5/m2.7=204,800 (exact official number).
 	{regexp.MustCompile(`(?i)^minimax-m3`), 1_000_000},
-	{regexp.MustCompile(`(?i)^minimax-m2\.5`), 196_608},
-	{regexp.MustCompile(`(?i)^minimax-`), 200_000},
-	// Moonshot / Kimi
+	{regexp.MustCompile(`(?i)^minimax-m2\.`), 204_800},
+	{regexp.MustCompile(`(?i)^minimax-m1`), 1_000_000}, // legacy M1 tier
+	{regexp.MustCompile(`(?i)^minimax-`), 204_800},
+	// Moonshot / Kimi — verified against platform.kimi.com (2026-08):
+	// kimi-k3=1M; kimi-k2.5/k2.6/k2.7=256K.
+	{regexp.MustCompile(`^kimi-k3`), 1_000_000},
+	{regexp.MustCompile(`^kimi-k2`), 262_144},
 	{regexp.MustCompile(`^kimi-`), 262_144},
 	// ByteDance Seed-OSS
 	{regexp.MustCompile(`^seed-oss`), 524_288},
