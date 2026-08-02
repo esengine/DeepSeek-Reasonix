@@ -9,6 +9,8 @@ package main
 import (
 	"context"
 	"embed"
+	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -138,6 +140,19 @@ func main() {
 			healthyUpdateCreatedAt = tx.CreatedAt
 			healthyUpdateTransactionID = repair.UpdateTransactionID(tx)
 		}
+	}
+	// Reconcile the pending update before the window opens: stale prepared
+	// transactions are cancelled, failed installs rolled back, restored
+	// transactions settled; probationary transactions are preserved for the
+	// healthy-start commit.
+	if result, err := repair.ReconcilePendingUpdate(version); err != nil {
+		if !errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
+			slog.Warn("update reconciliation failed", "err", err)
+		}
+	} else if result.RolledBack {
+		slog.Info("update recovery", "state", "restored", "from", result.FromVersion, "to", result.ToVersion)
+	} else if result.Cleared {
+		slog.Info("update recovery", "state", "cleared", "to", result.ToVersion)
 	}
 	if trackerOwned {
 		_ = tracker.MarkLaunchContext(installProfile, updateFrom, updateTo)
