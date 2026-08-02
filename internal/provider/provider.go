@@ -781,6 +781,15 @@ type MissingToolCallReasoningWarningIdentityPolicy interface {
 	MissingToolCallReasoningWarningIdentity() string
 }
 
+// MissingToolCallReasoningGuidancePolicy optionally supplies actionable,
+// endpoint-specific guidance appended to a missing-reasoning warning.
+// Adapters distinguish official endpoints (a genuine incident worth reporting)
+// from third-party relays that may not forward reasoning_content; an empty
+// string keeps the default generic guidance.
+type MissingToolCallReasoningGuidancePolicy interface {
+	MissingToolCallReasoningGuidance() string
+}
+
 // WarnOnMissingToolCallReasoning reports whether a tool_calls turn with empty
 // reasoning_content should surface a visible warning.
 func WarnOnMissingToolCallReasoning(p Provider) bool {

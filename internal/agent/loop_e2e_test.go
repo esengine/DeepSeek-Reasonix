@@ -30,6 +30,18 @@ func (p configuredToolCallReasoningProvider) MissingToolCallReasoningWarningIden
 	return p.identity
 }
 
+// guidedToolCallReasoningProvider simulates a third-party relay that requires
+// tool-call reasoning but supplies endpoint-specific guidance for it.
+type guidedToolCallReasoningProvider struct {
+	*testutil.MockProvider
+	guidance string
+}
+
+func (p guidedToolCallReasoningProvider) RequiresToolCallReasoning() bool { return true }
+func (p guidedToolCallReasoningProvider) MissingToolCallReasoningGuidance() string {
+	return p.guidance
+}
+
 func echoRegistry() *tool.Registry {
 	reg := tool.NewRegistry()
 	reg.Add(echoTool{})
@@ -414,6 +426,35 @@ func TestRunWarnsAndContinuesOnMissingToolCallReasoning(t *testing.T) {
 	}
 	if warns != 1 {
 		t.Fatalf("missing-reasoning warn notices = %d, want exactly 1 (first round warns, repeats stay silent)", warns)
+	}
+}
+
+// TestRunAppendsEndpointGuidanceToMissingReasoningWarn: providers that
+// implement MissingToolCallReasoningGuidancePolicy (e.g. the OpenAI adapter
+// for third-party relays) append actionable, endpoint-specific advice to the
+// missing-reasoning warning detail.
+func TestRunAppendsEndpointGuidanceToMissingReasoningWarn(t *testing.T) {
+	mp := testutil.NewMock("deepseek-proxy",
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}}},
+		testutil.Turn{Text: "done"},
+	)
+	sink := &recordSink{}
+	a := New(guidedToolCallReasoningProvider{mp, "relay hint: set capability mode to Plain chat"}, echoRegistry(), NewSession(""), Options{}, sink)
+
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	var detail string
+	for _, e := range sink.kinds(event.Notice) {
+		if e.Level == event.LevelWarn && strings.Contains(e.Text, "without replayable thinking content") {
+			detail = e.Detail
+		}
+	}
+	if detail == "" {
+		t.Fatal("missing-reasoning warn notice not emitted")
+	}
+	if !strings.Contains(detail, "relay hint: set capability mode to Plain chat") {
+		t.Fatalf("warn detail = %q, want endpoint guidance appended", detail)
 	}
 }
 

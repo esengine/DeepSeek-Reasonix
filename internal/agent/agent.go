@@ -1323,9 +1323,15 @@ func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasonin
 	if a.missingReasoningWarnPendingResolveAt.IsZero() {
 		a.missingReasoningWarnStateChecked = true
 	}
+	detail := fmt.Sprintf("this round carried %d tool call(s), but the endpoint omitted the thinking content DeepSeek requires clients to replay. Check the selected model, endpoint, and reasoning protocol. Repeated broken rounds are rate-limited for this exact provider configuration for up to 24 hours; a healthy tool-call turn re-arms future regressions.", len(calls))
+	if p, ok := a.prov.(provider.MissingToolCallReasoningGuidancePolicy); ok {
+		if guidance := strings.TrimSpace(p.MissingToolCallReasoningGuidance()); guidance != "" {
+			detail += " " + guidance
+		}
+	}
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
 		Text:   fmt.Sprintf("%s returned tool calls without replayable thinking content; continuing with degraded reasoning (shown once for this incident)", a.prov.Name()),
-		Detail: fmt.Sprintf("this round carried %d tool call(s), but the endpoint omitted the thinking content DeepSeek requires clients to replay. Check the selected model, endpoint, and reasoning protocol. Repeated broken rounds are rate-limited for this exact provider configuration for up to 24 hours; a healthy tool-call turn re-arms future regressions.", len(calls))})
+		Detail: detail})
 }
 
 // maxStepsPause is the deliberate stop when a positive tool-call budget runs

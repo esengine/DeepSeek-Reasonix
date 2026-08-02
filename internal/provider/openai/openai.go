@@ -205,28 +205,29 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	return &client{
-		name:          name,
-		apiKey:        cfg.APIKey,
-		keyEnv:        keyEnv,
-		keySource:     keySource,
-		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
-		chatURL:       chatURL,
-		prefixChatURL: prefixChatURL,
-		headers:       cleanCustomHeaders(headers),
-		extraBody:     cleanExtraBody(extraBody),
-		model:         normalizeModelID(cfg.BaseURL, cfg.Model),
-		deepseek:      deepseek,
-		minimax:       minimax,
-		zhipu:         zhipu,
-		longcat:       longcat,
-		kimiK3:        kimiK3,
-		mimo:          IsMiMo(cfg.BaseURL),
-		thinkingType:  thinkingType,
-		vision:        vision,
-		visionDetail:  visionDetail,
-		effort:        effort,
-		http:          httpClient,
-		idleTimeout:   defaultStreamIdleTimeout,
+		name:             name,
+		apiKey:           cfg.APIKey,
+		keyEnv:           keyEnv,
+		keySource:        keySource,
+		baseURL:          strings.TrimRight(cfg.BaseURL, "/"),
+		chatURL:          chatURL,
+		prefixChatURL:    prefixChatURL,
+		headers:          cleanCustomHeaders(headers),
+		extraBody:        cleanExtraBody(extraBody),
+		model:            normalizeModelID(cfg.BaseURL, cfg.Model),
+		deepseek:         deepseek,
+		officialDeepSeek: officialDeepSeek,
+		minimax:          minimax,
+		zhipu:            zhipu,
+		longcat:          longcat,
+		kimiK3:           kimiK3,
+		mimo:             IsMiMo(cfg.BaseURL),
+		thinkingType:     thinkingType,
+		vision:           vision,
+		visionDetail:     visionDetail,
+		effort:           effort,
+		http:             httpClient,
+		idleTimeout:      defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -251,29 +252,30 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name          string
-	apiKey        string
-	keyEnv        string // api_key_env name, surfaced in auth errors
-	keySource     string // source of keyEnv, surfaced in auth errors
-	baseURL       string
-	chatURL       string
-	prefixChatURL string // official DeepSeek Beta endpoint; empty for custom gateways
-	headers       map[string]string
-	extraBody     map[string]any
-	model         string
-	http          *http.Client
-	deepseek      bool
-	minimax       bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	zhipu         bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
-	longcat       bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
-	kimiK3        bool          // true only for kimi-k3 on Moonshot's official direct API hosts
-	mimo          bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
-	thinkingType  string        // explicit `thinking` config override (enabled|disabled); "" = no override
-	vision        bool          // model accepts image input — embed attached images as image_url parts
-	visionDetail  string        // image_url detail hint (low|high); "" = auto/omit
-	effort        string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
-	idleTimeout   time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
-	authed        atomic.Bool   // a request has succeeded — gate transient-401 retry
+	name             string
+	apiKey           string
+	keyEnv           string // api_key_env name, surfaced in auth errors
+	keySource        string // source of keyEnv, surfaced in auth errors
+	baseURL          string
+	chatURL          string
+	prefixChatURL    string // official DeepSeek Beta endpoint; empty for custom gateways
+	headers          map[string]string
+	extraBody        map[string]any
+	model            string
+	http             *http.Client
+	deepseek         bool
+	officialDeepSeek bool          // base_url is api.deepseek.com, not a third-party relay
+	minimax          bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	zhipu            bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
+	longcat          bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
+	kimiK3           bool          // true only for kimi-k3 on Moonshot's official direct API hosts
+	mimo             bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
+	thinkingType     string        // explicit `thinking` config override (enabled|disabled); "" = no override
+	vision           bool          // model accepts image input — embed attached images as image_url parts
+	visionDetail     string        // image_url detail hint (low|high); "" = auto/omit
+	effort           string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	idleTimeout      time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed           atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
 
 func (c *client) Name() string { return c.name }
@@ -314,6 +316,21 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 		"openai", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
 		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinkingType), strings.TrimSpace(c.effort),
 	}, "\x00")
+}
+
+// MissingToolCallReasoningGuidance appends endpoint-specific advice to the
+// missing-reasoning warning. Official api.deepseek.com and third-party relays
+// get different hints: relays commonly strip reasoning_content, while on the
+// official endpoint frequent absence on tool-call turns (notably with
+// deepseek-v4-flash) is an endpoint behavior the user can work around.
+func (c *client) MissingToolCallReasoningGuidance() string {
+	if c == nil || !c.deepseek || !c.RequiresToolCallReasoning() {
+		return ""
+	}
+	if !c.officialDeepSeek {
+		return "This base_url is not api.deepseek.com: third-party relays often omit reasoning_content. If the relay does not replay DeepSeek thinking, set the Model capability mode to Plain chat or OpenAI reasoning in Compatibility settings (reasoning_protocol in config.toml) to stop this check."
+	}
+	return "Official DeepSeek Thinking Mode requires reasoning_content on tool-call turns (see api-docs.deepseek.com/guides/thinking_mode). If this repeats on every tool-call round with deepseek-v4-flash, the endpoint is omitting it — thinking context for those rounds is lost, but the turn still completes. To silence the warning, set thinking=disabled for this provider, or use a model that returns thinking on tool calls."
 }
 
 func (c *client) sendOpts() provider.SendOptions {
