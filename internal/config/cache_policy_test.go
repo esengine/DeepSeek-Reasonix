@@ -12,10 +12,10 @@ func TestDefaultCacheTTL(t *testing.T) {
 	}{
 		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", 5 * time.Minute},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", 5 * time.Minute},
-		{"https://api.deepseek.com", 60 * time.Minute},
+		{"https://api.deepseek.com", 24 * time.Hour},
 		{"https://api.anthropic.com", 5 * time.Minute},
-		{"https://unknown.example.com/v1", 10 * time.Minute},
-		{"", 10 * time.Minute},
+		{"https://unknown.example.com/v1", 24 * time.Hour},
+		{"", 24 * time.Hour},
 	}
 	for _, tc := range cases {
 		if got := DefaultCacheTTL(tc.url); got != tc.want {
@@ -30,8 +30,8 @@ func TestEffectiveCacheTTLVendorDefault(t *testing.T) {
 		t.Fatalf("DashScope default = %v, want 5m", got)
 	}
 	e2 := &ProviderEntry{BaseURL: "https://api.deepseek.com"}
-	if got := e2.EffectiveCacheTTL(); got != 60*time.Minute {
-		t.Fatalf("DeepSeek default = %v, want 60m", got)
+	if got := e2.EffectiveCacheTTL(); got != 24*time.Hour {
+		t.Fatalf("DeepSeek default = %v, want 24h", got)
 	}
 }
 
@@ -42,8 +42,8 @@ func TestEffectiveCacheTTLOverride(t *testing.T) {
 	}
 	// Zero falls through to vendor default.
 	e2 := &ProviderEntry{BaseURL: "https://api.deepseek.com", CacheTTLMinutes: 0}
-	if got := e2.EffectiveCacheTTL(); got != 60*time.Minute {
-		t.Fatalf("zero override = %v, want 60m (vendor default)", got)
+	if got := e2.EffectiveCacheTTL(); got != 24*time.Hour {
+		t.Fatalf("zero override = %v, want 24h (vendor default)", got)
 	}
 }
 
