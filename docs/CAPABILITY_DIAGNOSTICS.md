@@ -87,6 +87,13 @@ Common codes: `mcp.command_not_found`, `mcp.invalid_transport`,
 with “Include current session runtime” to read the **active tab Host** without
 starting a second Host.
 
+Each MCP entry identifies the exact winning configuration with `source`,
+`source_path`, and `effective`. Startup failures also report `startup_stage`
+(`launch`, `authorization`, `initialize`, or `tools/list`),
+`startup_elapsed_ms`, and a bounded, credential-redacted `stderr` tail. This
+distinguishes duplicate/shadowed registration from a genuinely slow or broken
+handshake without exposing full process output.
+
 ### 4. Ask the agent (`reasonix-guide`)
 
 In an interactive session:

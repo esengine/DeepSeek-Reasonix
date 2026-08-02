@@ -111,18 +111,52 @@ func symbol(currency string) string {
 	}
 }
 
-// Display renders the primary balance compactly, e.g. "¥110.00". It prefers CNY,
-// then the first currency reported. "" when there's nothing to show.
+// Display renders the primary balance compactly, e.g. "¥110.00". It preserves
+// the legacy CNY-first behavior for callers that have no display-currency
+// preference.
 func (b *Balance) Display() string {
+	return b.DisplayForCurrency("")
+}
+
+// DisplayForCurrency renders the balance matching the requested pricing
+// currency. When the provider does not return that currency, it falls back to
+// Display's legacy CNY-first selection and prefixes the provider's real ISO
+// currency (for example "CNY ¥70.16"); it never performs an implicit
+// exchange-rate conversion.
+func (b *Balance) DisplayForCurrency(currency string) string {
 	if b == nil || len(b.Infos) == 0 {
 		return ""
 	}
 	pick := b.Infos[0]
+	preferred := normalizeCurrency(currency)
+	if preferred != "" {
+		for _, i := range b.Infos {
+			if normalizeCurrency(i.Currency) == preferred {
+				return symbol(i.Currency) + strings.TrimSpace(i.TotalBalance)
+			}
+		}
+	}
 	for _, i := range b.Infos {
-		if strings.EqualFold(i.Currency, "CNY") {
+		if normalizeCurrency(i.Currency) == "CNY" {
 			pick = i
 			break
 		}
 	}
-	return symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
+	display := symbol(pick.Currency) + strings.TrimSpace(pick.TotalBalance)
+	actual := normalizeCurrency(pick.Currency)
+	if preferred != "" && actual != "" && actual != preferred {
+		return actual + " " + display
+	}
+	return display
+}
+
+func normalizeCurrency(currency string) string {
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "CNY", "RMB", "CNH", "¥", "￥":
+		return "CNY"
+	case "USD", "$", "US$":
+		return "USD"
+	default:
+		return ""
+	}
 }

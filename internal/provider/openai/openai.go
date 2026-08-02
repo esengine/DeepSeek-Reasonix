@@ -290,21 +290,33 @@ func (c *client) RequiresReasoningRoundTrip() bool {
 }
 
 func (c *client) WarnOnMissingToolCallReasoning() bool {
-	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model)
+	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model, c.thinkingType)
 }
 
-func expectsDeepSeekToolCallReasoning(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	if !strings.Contains(model, "deepseek") || strings.Contains(model, "flash") {
-		return false
+func expectsDeepSeekToolCallReasoning(model, thinkingType string) bool {
+	if strings.EqualFold(strings.TrimSpace(thinkingType), "enabled") {
+		return true
 	}
-	// "-pro" must end a name segment: a bare Contains would also match the
-	// deepseek-prover math models, which do not emit tool-call reasoning.
-	return strings.Contains(model, "reasoner") ||
-		strings.Contains(model, "deepseek-r1") ||
-		strings.HasSuffix(model, "-pro") ||
-		strings.Contains(model, "-pro-") ||
-		strings.Contains(model, "-pro.")
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(model, "deepseek-v4-flash") ||
+		strings.Contains(model, "deepseek-v4-pro") ||
+		strings.Contains(model, "deepseek-v3.2") ||
+		strings.Contains(model, "deepseek-reasoner") ||
+		strings.Contains(model, "deepseek-r1")
+}
+
+func (c *client) MissingToolCallReasoningWarningIdentity() string {
+	if c == nil {
+		return ""
+	}
+	protocol := "openai"
+	if c.deepseek {
+		protocol = "deepseek"
+	}
+	return strings.Join([]string{
+		"openai", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinkingType), strings.TrimSpace(c.effort),
+	}, "\x00")
 }
 
 func (c *client) sendOpts() provider.SendOptions {

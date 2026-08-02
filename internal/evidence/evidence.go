@@ -1691,6 +1691,55 @@ func IsDeliveryVerificationCommand(command string) bool {
 	return bashCommandIsVerification(command)
 }
 
+type verificationCommandRecommendation struct {
+	label    string
+	examples []string
+}
+
+// verificationCommandRecommendations is the single source for the concrete
+// model-readable examples and the family labels used to diagnose test failures.
+// It is intentionally a safe recommended subset rather than an exhaustive
+// rendering of bashSegmentIsVerification: accepted commands that may install
+// dependencies or create workspace outputs should not be suggested as the
+// first recovery action.
+func verificationCommandRecommendations() []verificationCommandRecommendation {
+	return []verificationCommandRecommendation{
+		{label: "go test|vet", examples: []string{"go test ./...", "go vet ./..."}},
+		{label: "git diff --check", examples: []string{"git diff --check"}},
+		{label: "pytest/py.test", examples: []string{"pytest tests/", "py.test tests/"}},
+		{label: "gotestsum", examples: []string{"gotestsum"}},
+		{label: "staticcheck", examples: []string{"staticcheck ./..."}},
+		{label: "golangci-lint", examples: []string{"golangci-lint run"}},
+		{label: "tsc", examples: []string{"tsc --noEmit"}},
+		{label: "mypy (no report flag)", examples: []string{"mypy src/"}},
+		{label: "npm|pnpm|yarn|bun test|check|lint", examples: []string{"npm test", "pnpm check", "yarn lint", "bun test"}},
+		{label: "npm run test|check|lint|typecheck", examples: []string{"npm run typecheck"}},
+		{label: "cargo test|check|clippy", examples: []string{"cargo test", "cargo check", "cargo clippy"}},
+		{label: "node --check|--test", examples: []string{"node --check index.js", "node --test"}},
+		{label: "make|just test|check|lint|verify|ci", examples: []string{"make test", "just verify"}},
+		{label: "python -m pytest|unittest", examples: []string{"python -m pytest", "python -m unittest"}},
+		{label: "dotnet test", examples: []string{"dotnet test"}},
+		{label: "mvn|gradle test|check|verify", examples: []string{"mvn test", "gradle check"}},
+	}
+}
+
+// VerificationCommandSummary returns compact, model-readable recovery
+// guidance. It lists only recommended command families that the classifier
+// accepts, while omitting known self-installing and direct workspace-output
+// command forms from first-line guidance.
+func VerificationCommandSummary() string {
+	recommendations := verificationCommandRecommendations()
+	commands := make([]string, 0, len(recommendations))
+	for _, recommendation := range recommendations {
+		commands = append(commands, recommendation.examples...)
+	}
+	return "recommended recognized verification commands: " + strings.Join(commands, ", ") + ". " +
+		"Read-only inspection commands (grep/find/cat/wc/head/tail) are NOT verification; " +
+		"inline interpreters (node -e, python -c) are blocked in delivery mode. " +
+		"A read-only extraction pipeline ending in a recognized verifier " +
+		"(e.g. tail -n +1 file | node --check -) is accepted."
+}
+
 func bashSegmentIsVerification(fields []string) bool {
 	if len(fields) == 0 {
 		return false
@@ -1719,11 +1768,17 @@ func bashSegmentIsVerification(fields []string) bool {
 			}
 			return true
 		}
-		return args[0] == "build" && !hasCommandArg(args, "-o")
+		// A package pattern can expand to one main package, so even `go build
+		// ./...` may write a workspace binary. Package expansion and inherited
+		// GOFLAGS are unavailable to this static classifier; fail closed for all
+		// build forms and keep test/vet as the recognized Go verifiers.
+		return false
 	case "git":
 		return len(args) > 1 && args[0] == "diff" && hasCommandArg(args[1:], "--check")
-	case "pytest", "py.test", "gotestsum", "staticcheck", "golangci-lint", "tsc":
+	case "pytest", "py.test", "gotestsum", "staticcheck", "golangci-lint":
 		return true
+	case "tsc":
+		return tscSegmentIsVerification(args)
 	case "mypy":
 		for _, arg := range args {
 			if mypyFlagWritesReport(arg) {
@@ -1743,13 +1798,59 @@ func bashSegmentIsVerification(fields []string) bool {
 	case "make", "just":
 		return len(args) > 0 && hasCommandArg(args[:1], "test", "check", "lint", "verify", "ci")
 	case "python", "python3":
-		return len(args) > 1 && args[0] == "-m" && hasCommandArg(args[1:2], "pytest", "unittest", "compileall")
+		return len(args) > 1 && args[0] == "-m" && hasCommandArg(args[1:2], "pytest", "unittest")
 	case "dotnet":
 		return len(args) > 0 && args[0] == "test"
 	case "mvn", "mvnw", "gradle", "gradlew":
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
 	}
 	return false
+}
+
+// tscSegmentIsVerification accepts only one-shot, explicit no-emit type checks.
+// Bare tsc commands may emit JavaScript, declarations, and source maps; control
+// modes may write config, skip checking, exit after printing metadata, or watch
+// indefinitely. Any explicit false value wins conservatively even if another
+// no-emit flag appears in the same command.
+func tscSegmentIsVerification(args []string) bool {
+	noEmit := false
+	for i, arg := range args {
+		if tscFlagDisqualifiesVerification(arg) {
+			return false
+		}
+		switch strings.ToLower(arg) {
+		case "--noemit":
+			if i+1 < len(args) && strings.EqualFold(args[i+1], "false") {
+				return false
+			}
+			noEmit = true
+		case "--noemit=true":
+			noEmit = true
+		case "--noemit=false":
+			return false
+		}
+	}
+	return noEmit
+}
+
+// tscFlagDisqualifiesVerification rejects modes that do not perform a bounded
+// type check and destinations that write independently of JavaScript/declaration
+// emit. Default incremental metadata remains conventional verifier cache;
+// explicit output destinations and control modes fail closed as mutations.
+func tscFlagDisqualifiesVerification(arg string) bool {
+	name := strings.ToLower(arg)
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	switch name {
+	case "--tsbuildinfofile", "--generatetrace", "--generatecpuprofile",
+		"--init", "--help", "-h", "-?", "--all", "--version", "-v",
+		"--showconfig", "--listfilesonly", "--nocheck", "--watch", "-w",
+		"--build", "-b", "--clean":
+		return true
+	default:
+		return false
+	}
 }
 
 // npxSegmentIsVerification unwraps only known test runners invoked directly,
@@ -1761,28 +1862,77 @@ func npxSegmentIsVerification(args []string) bool {
 	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
 		return false
 	}
-	runner := strings.ToLower(filepath.Base(args[0]))
-	if strings.HasPrefix(runner, "@") {
+	runner, ok := npxRunnerName(args[0])
+	if !ok {
 		return false
 	}
-	if i := strings.LastIndexByte(runner, '@'); i > 0 {
-		runner = runner[:i]
-	}
+	runnerArgs := args[1:]
 	switch runner {
-	case "vitest", "jest":
+	case "vitest", "jest", "mocha", "ava", "eslint":
+		// Known test/lint runners are verification unless an argument asks them
+		// to update snapshots, collect coverage, or write a report.
+	case "prettier":
+		// Prettier without an explicit check mode formats to stdout and is not a
+		// project verification receipt. Keep only its read-only check forms.
+		if !hasCommandArg(runnerArgs, "--check", "-c", "--list-different") {
+			return false
+		}
+	case "tsc":
+		return tscSegmentIsVerification(runnerArgs)
 	default:
+		// Playwright/Cypress produce project reports, screenshots, or videos by
+		// default; tsx/ts-node execute source. They remain mutations.
 		return false
 	}
-	for _, arg := range args[1:] {
+	for _, arg := range runnerArgs {
 		name := strings.ToLower(arg)
 		if i := strings.IndexByte(name, '='); i >= 0 {
 			name = name[:i]
 		}
 		switch name {
-		case "--update", "-u", "--updatesnapshot":
+		case "--update", "-u", "--updatesnapshot", "--update-snapshots",
+			"--output-file", "-o", "--cache-location":
 			return false
 		}
-		if name == "--coverage" || strings.HasPrefix(name, "--coverage=") || strings.HasPrefix(name, "--coverage.") {
+		if name == "--coverage" || strings.HasPrefix(name, "--coverage.") {
+			return false
+		}
+	}
+	return true
+}
+
+// npxRunnerName accepts only a bare package name with an optional ordinary
+// version or dist-tag suffix. Paths and package protocols such as
+// eslint@npm:other-package must not inherit a known runner's trust boundary.
+func npxRunnerName(spec string) (string, bool) {
+	if spec == "" || strings.ContainsAny(spec, `/\`) {
+		return "", false
+	}
+	name := strings.ToLower(spec)
+	if strings.HasPrefix(name, "@") {
+		return "", false
+	}
+	if i := strings.LastIndexByte(name, '@'); i >= 0 {
+		if i == 0 || !plainNpxVersion(name[i+1:]) {
+			return "", false
+		}
+		name = name[:i]
+	}
+	return name, true
+}
+
+func plainNpxVersion(version string) bool {
+	if version == "" {
+		return false
+	}
+	for _, r := range version {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		switch r {
+		case '.', '-', '+', '_', '~', '^', '*':
+			continue
+		default:
 			return false
 		}
 	}

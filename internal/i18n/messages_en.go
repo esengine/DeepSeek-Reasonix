@@ -494,6 +494,7 @@ var English = Messages{
 
 	// self-update
 	UpgradeChecking:            "Checking for updates…",
+	UpgradeChannelDeprecated:   "Release channels are retired; using the official release.",
 	UpgradeDevBuild:            "dev builds cannot self-update",
 	UpgradeFetchFailed:         "failed to check for updates: %v",
 	UpgradeInvalidVersion:      "remote version is not valid semver",
@@ -562,7 +563,7 @@ Usage:
   reasonix hook list|status --json [--dir PATH]         inspect redacted hook state
   reasonix task list|show --json [--dir PATH]           inspect redacted task state
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
-  reasonix upgrade [stable|preview] [--check] [--force]  self-update on the saved channel (advanced: --channel; also: reasonix update)
+  reasonix upgrade [--check] [--force]                   update to the latest official release (also: reasonix update)
   reasonix version
   reasonix help
 

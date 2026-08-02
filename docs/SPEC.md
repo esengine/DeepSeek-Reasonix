@@ -704,6 +704,7 @@ enabled = true   # inject a stable startup summary of OS, shell, and common tool
 [tools]
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; plugin/tool overrides may raise it
 
 [tools.shell]
@@ -737,6 +738,7 @@ name    = "example"            # type defaults to "stdio"
 command = "reasonix-plugin-example"
 args    = []
 # env   = { FOO = "bar" }
+# startup_timeout_seconds = 60         # initialize + tools/list cap; 0 = global/default cap
 # call_timeout_seconds = 600            # per-server MCP call timeout; 0 = global/default cap
 # tool_timeout_seconds = { "generate_video" = 1800 }   # raw MCP tool names
 # [[plugins]]                   # a remote MCP server over Streamable HTTP
@@ -786,6 +788,13 @@ Code's exact `mcpServers` schema (`command`/`args`/`env`, `type`/`url`/`headers`
 `[[plugins]]`; on a name collision `reasonix.toml` wins (it is the more explicit,
 Reasonix-specific source). This lets a server already configured for Claude work in
 Reasonix unchanged.
+
+MCP startup has a separate lifecycle from an individual tool call. A caller
+waits briefly for cold startup, while the shared launch/authorization/
+`initialize`/`tools/list` sequence may continue in the background up to
+`mcp_startup_timeout_seconds` (default `30`). A per-server
+`startup_timeout_seconds` overrides that cap. MCP call timeouts begin only after
+the connection is ready.
 
 ```json
 { "mcpServers": {

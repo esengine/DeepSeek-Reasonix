@@ -4377,7 +4377,8 @@ function makeMockApp(): AppBindings {
           settings.checkUpdates = enabled;
         },
         async SetDesktopUpdateChannel(channel: string) {
-          settings.updateChannel = channel === "preview" ? "preview" : "stable";
+          void channel;
+          settings.updateChannel = "stable";
         },
         async SetDesktopTelemetry(enabled: boolean) {
           settings.telemetry = enabled;

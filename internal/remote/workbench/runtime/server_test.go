@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/billing"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/command"
 	"reasonix/internal/control"
@@ -38,6 +39,15 @@ type fakeController struct {
 	status        control.RuntimeStatus
 	steerAccepted bool
 	steers        []string
+}
+
+type balanceFakeController struct {
+	*fakeController
+	balance *billing.Balance
+}
+
+func (c *balanceFakeController) Balance(context.Context) (*billing.Balance, error) {
+	return c.balance, nil
 }
 
 type blockingController struct {
@@ -314,6 +324,56 @@ func (c *fakeController) SetSessionPath(string) {}
 func (c *fakeController) EnsureSessionPath()    {}
 func (c *fakeController) AdoptHistory(h []provider.Message, _ string) {
 	c.history = append([]provider.Message(nil), h...)
+}
+
+func TestSessionBalanceUsesRequestedPricingCurrency(t *testing.T) {
+	srv := New(Options{Workspace: t.TempDir(), Version: "test"})
+	ctrl := &balanceFakeController{
+		fakeController: &fakeController{model: "deepseek/deepseek-v4-flash"},
+		balance: &billing.Balance{Available: true, Infos: []billing.Info{
+			{Currency: "CNY", TotalBalance: "70.16"},
+			{Currency: "USD", TotalBalance: "9.82"},
+		}},
+	}
+	target := srv.installTestSession(ctrl)
+	result, err := srv.sessionBalance(context.Background(), protocol.SessionBalanceParams{
+		RuntimeQuery: protocol.RuntimeQuery{
+			ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+		},
+		Currency: "USD",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Available || result.Display != "$9.82" {
+		t.Fatalf("USD balance = %+v, want available $9.82", result)
+	}
+
+	ctrl.balance.Infos = []billing.Info{{Currency: "CNY", TotalBalance: "70.16"}}
+	mismatch, err := srv.sessionBalance(context.Background(), protocol.SessionBalanceParams{
+		RuntimeQuery: protocol.RuntimeQuery{
+			ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+		},
+		Currency: "USD",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !mismatch.Available || mismatch.Display != "CNY ¥70.16" {
+		t.Fatalf("CNY-only balance = %+v, want explicit non-converted currency", mismatch)
+	}
+
+	legacy, err := srv.sessionBalance(context.Background(), protocol.SessionBalanceParams{
+		RuntimeQuery: protocol.RuntimeQuery{
+			ExpectedHostEpoch: srv.hostEpoch, Target: target, ExpectedRuntimeEpoch: "runtime_test",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !legacy.Available || legacy.Display != "¥70.16" {
+		t.Fatalf("legacy balance = %+v, want CNY-first compatibility", legacy)
+	}
 }
 
 func TestSessionCatalogAndSlashArgsUseHostControllerCapabilities(t *testing.T) {

@@ -495,6 +495,7 @@ var Chinese = Messages{
 
 	// 自更新
 	UpgradeChecking:            "正在检查更新…",
+	UpgradeChannelDeprecated:   "发布渠道已停用；将使用最新正式版。",
 	UpgradeDevBuild:            "开发版本无法自更新",
 	UpgradeFetchFailed:         "检查更新失败：%v",
 	UpgradeInvalidVersion:      "远程版本不是有效的 semver",
@@ -563,7 +564,7 @@ var Chinese = Messages{
   reasonix hook list|status --json [--dir PATH]         查看脱敏 Hook 状态
   reasonix task list|show --json [--dir PATH]           查看脱敏 Task 状态
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
-  reasonix upgrade [stable|preview] [--check] [--force]  按已保存渠道自更新（高级用法：--channel；别名：reasonix update）
+  reasonix upgrade [--check] [--force]                   更新到最新正式版（别名：reasonix update）
   reasonix version
   reasonix help
 

@@ -240,6 +240,19 @@ func (p *hostProvider) WarnOnMissingToolCallReasoning() bool {
 	return p != nil && p.descriptor.WarnOnMissingToolCallReasoning
 }
 
+func (p *hostProvider) MissingToolCallReasoningWarningIdentity() string {
+	if p == nil {
+		return ""
+	}
+	effort := ""
+	if p.effort != nil {
+		effort = strings.TrimSpace(*p.effort)
+	}
+	return strings.Join([]string{
+		"remote-broker", strings.TrimSpace(p.ref), strings.TrimSpace(p.descriptor.Model), effort,
+	}, "\x00")
+}
+
 func (p *hostProvider) Stream(ctx context.Context, request provider.Request) (<-chan provider.Chunk, error) {
 	if p == nil || p.host == nil {
 		return nil, fmt.Errorf("provider broker is unavailable")

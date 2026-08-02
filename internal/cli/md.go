@@ -367,7 +367,7 @@ func highlightFencedCode(n ast.Node, src []byte, lines []string) []string {
 		return nil
 	}
 	var b strings.Builder
-	if chromaFmt.Format(&b, chromaStyleForTheme(), it) != nil {
+	if diffChromaFmt.Format(&b, activeDiffChromaStyle(), it) != nil {
 		return nil
 	}
 	highlighted := strings.Split(strings.TrimRight(b.String(), "\n"), "\n")

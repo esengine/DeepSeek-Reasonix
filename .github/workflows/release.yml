@@ -203,6 +203,20 @@ jobs:
           fetch-depth: 0
           path: release-control
           ref: ${{ github.workflow_sha }}
+      - name: Isolate release-control checkout from product git state
+        run: |
+          set -euo pipefail
+          git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+          exclude_file="$git_common_dir/info/exclude"
+          if ! grep -qxF '/release-control/' "$exclude_file"; then
+            printf '%s\n' '/release-control/' >> "$exclude_file"
+          fi
+          git check-ignore -q release-control/
+          dirty="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$dirty" ]; then
+            printf 'product checkout is dirty before release:\n%s\n' "$dirty" >&2
+            exit 1
+          fi
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod

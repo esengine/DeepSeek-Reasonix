@@ -528,14 +528,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// a single background catalog discovery. First real tool call uses
 	// EnsureConnected so parent/child/tab runtimes share one process.
 	pluginSpecOptions := PluginSpecOptions{
-		DefaultCallTimeout: time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
-		LaunchManager:      mcplaunch.ForWorkspace(config.ReasonixHomeDir(), root),
-		ConfigSource:       "workspace_config",
-		StateHome:          config.ReasonixHomeDir(),
-		WriterRoots:        writeRoots,
-		ForbidReadRoots:    forbidReadRoots,
-		Network:            networkEnabled,
-		PackageOwners:      pluginPackageOwners(cfg),
+		DefaultStartupTimeout: time.Duration(cfg.MCPStartupTimeoutSeconds()) * time.Second,
+		DefaultCallTimeout:    time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
+		LaunchManager:         mcplaunch.ForWorkspace(config.ReasonixHomeDir(), root),
+		ConfigSource:          "workspace_config",
+		StateHome:             config.ReasonixHomeDir(),
+		WriterRoots:           writeRoots,
+		ForbidReadRoots:       forbidReadRoots,
+		Network:               networkEnabled,
+		PackageOwners:         pluginPackageOwners(cfg),
 	}
 	autoStartEntries := cfg.EnabledPlugins(root, config.DefaultMCPActivationStore())
 	enabledMCPNames := make(map[string]bool, len(autoStartEntries))
@@ -555,9 +556,12 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// plugins, so a recovery boot never starts external processes.
 		extraPlugins = nil
 	}
-	extraSpecs := applyDefaultMCPCallTimeout(
-		applyKnownPluginOverrides(extraPlugins, root),
-		pluginSpecOptions.DefaultCallTimeout,
+	extraSpecs := applyDefaultMCPStartupTimeout(
+		applyDefaultMCPCallTimeout(
+			applyKnownPluginOverrides(extraPlugins, root),
+			pluginSpecOptions.DefaultCallTimeout,
+		),
+		pluginSpecOptions.DefaultStartupTimeout,
 	)
 	for i := range extraSpecs {
 		if strings.TrimSpace(extraSpecs[i].WorkspaceRoot) == "" {
@@ -1592,25 +1596,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Jobs:        jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
-		WriteScheduler:           subagentScheduler,
-		WriteWorkspaceRoot:       root,
-		ProjectChecks:            projectChecks,
-		DeliveryProfile:          tokenDelivery,
-		WorkspaceLease:           workspaceLease,
-		CapabilityLedger:         capLedger,
-		CapabilityAudit:          capAudit,
-		ContextWindow:            entry.ContextWindow,
-		SoftCompactRatio:         cfg.Agent.SoftCompactRatio,
-		ToolResultSnipRatio:      cfg.Agent.ToolResultSnipRatio,
-		CompactRatio:             cfg.Agent.CompactRatio,
-		CompactForceRatio:        cfg.Agent.CompactForceRatio,
-		RecentKeep:               cfg.Agent.RecentKeep,
-		ArchiveDir:               config.ArchiveDir(),
-		KeepPolicy:               keepPolicy,
-		ReasoningLanguage:        cfg.ReasoningLanguage(),
-		PlanModeReadOnlyCommands: cfg.Agent.PlanModeReadOnlyCommands,
-		SubagentDepth:            0,
-		MaxSubagentDepth:         maxSubagentDepth,
+		WriteScheduler:               subagentScheduler,
+		WriteWorkspaceRoot:           root,
+		ProjectChecks:                projectChecks,
+		DeliveryProfile:              tokenDelivery,
+		WorkspaceLease:               workspaceLease,
+		CapabilityLedger:             capLedger,
+		CapabilityAudit:              capAudit,
+		ContextWindow:                entry.ContextWindow,
+		SoftCompactRatio:             cfg.Agent.SoftCompactRatio,
+		ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
+		CompactRatio:                 cfg.Agent.CompactRatio,
+		CompactForceRatio:            cfg.Agent.CompactForceRatio,
+		RecentKeep:                   cfg.Agent.RecentKeep,
+		ArchiveDir:                   config.ArchiveDir(),
+		KeepPolicy:                   keepPolicy,
+		ReasoningLanguage:            cfg.ReasoningLanguage(),
+		PlanModeReadOnlyCommands:     cfg.Agent.PlanModeReadOnlyCommands,
+		SubagentDepth:                0,
+		MaxSubagentDepth:             maxSubagentDepth,
+		MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
 	}, sink)
 
 	var runner agent.Runner = executor
@@ -1644,20 +1649,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				plannerTools.Add(capRuntime.NewFrontend(plannerLedger, plannerAudit))
 			}
 			plannerOpts := agent.Options{
-				MaxSteps:                 0,
-				Gate:                     headlessGate,
-				ContextWindow:            pe.ContextWindow,
-				SoftCompactRatio:         cfg.Agent.SoftCompactRatio,
-				ToolResultSnipRatio:      cfg.Agent.ToolResultSnipRatio,
-				CompactRatio:             cfg.Agent.CompactRatio,
-				CompactForceRatio:        cfg.Agent.CompactForceRatio,
-				RecentKeep:               cfg.Agent.RecentKeep,
-				ArchiveDir:               config.ArchiveDir(),
-				KeepPolicy:               keepPolicy,
-				ReasoningLanguage:        cfg.ReasoningLanguage(),
-				PlanModeReadOnlyCommands: cfg.Agent.PlanModeReadOnlyCommands,
-				CapabilityLedger:         plannerLedger,
-				CapabilityAudit:          plannerAudit,
+				MaxSteps:                     0,
+				Gate:                         headlessGate,
+				ContextWindow:                pe.ContextWindow,
+				SoftCompactRatio:             cfg.Agent.SoftCompactRatio,
+				ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
+				CompactRatio:                 cfg.Agent.CompactRatio,
+				CompactForceRatio:            cfg.Agent.CompactForceRatio,
+				RecentKeep:                   cfg.Agent.RecentKeep,
+				ArchiveDir:                   config.ArchiveDir(),
+				KeepPolicy:                   keepPolicy,
+				ReasoningLanguage:            cfg.ReasoningLanguage(),
+				PlanModeReadOnlyCommands:     cfg.Agent.PlanModeReadOnlyCommands,
+				CapabilityLedger:             plannerLedger,
+				CapabilityAudit:              plannerAudit,
+				MissingReasoningWarnStateDir: config.MissingReasoningWarnStateDir(),
 			}
 			runner = agent.NewCoordinatorWithPlannerPolicy(plannerProv, plannerSess, pe.Price, plannerTools, plannerOpts, executor, cfg.Agent.Temperature, sink, control.NewPlannerPolicy())
 			label = entry.Model + " + planner " + pe.Model
@@ -1700,6 +1706,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			spec.LaunchManager = pluginSpecOptions.LaunchManager
 			if strings.TrimSpace(spec.ConfigSource) == "" {
 				spec.ConfigSource = pluginSpecOptions.ConfigSource
+			}
+			if spec.DefaultStartupTimeout <= 0 {
+				spec.DefaultStartupTimeout = pluginSpecOptions.DefaultStartupTimeout
 			}
 			applyMCPIsolation(spec, root, pluginSpecOptions)
 		},
@@ -2364,14 +2373,15 @@ func PluginSpecsForRoot(entries []config.PluginEntry, workspaceRoot string) []pl
 // PluginSpecOptions carries runtime policy that is not stored on each plugin
 // entry but still needs to reach plugin.Spec.
 type PluginSpecOptions struct {
-	DefaultCallTimeout time.Duration
-	LaunchManager      *mcplaunch.Manager
-	ConfigSource       string
-	StateHome          string
-	WriterRoots        []string
-	ForbidReadRoots    []string
-	Network            bool
-	PackageOwners      map[string]string
+	DefaultStartupTimeout time.Duration
+	DefaultCallTimeout    time.Duration
+	LaunchManager         *mcplaunch.Manager
+	ConfigSource          string
+	StateHome             string
+	WriterRoots           []string
+	ForbidReadRoots       []string
+	Network               bool
+	PackageOwners         map[string]string
 }
 
 // PluginSpecsForRootWithOptions maps configured plugin entries to plugin.Spec
@@ -2391,21 +2401,23 @@ func pluginSpecFromEntryWithOptions(e config.PluginEntry, workspaceRoot string, 
 		configSource = opts.ConfigSource
 	}
 	spec := plugin.ApplyKnownOverrides(plugin.Spec{
-		Name:               e.Name,
-		Package:            strings.TrimSpace(opts.PackageOwners[e.Name]),
-		Type:               e.Type,
-		Command:            e.Command,
-		Args:               e.Args,
-		Env:                e.Env,
-		URL:                e.URL,
-		Headers:            e.Headers,
-		DefaultCallTimeout: opts.DefaultCallTimeout,
-		CallTimeout:        secondsDuration(e.CallTimeoutSeconds),
-		ToolTimeouts:       toolTimeoutDurations(e.ToolTimeoutSeconds),
-		WorkspaceRoot:      strings.TrimSpace(workspaceRoot),
-		LaunchManager:      opts.LaunchManager,
-		ConfigSource:       configSource,
-		Authorized:         e.Source.UserAuthorized(),
+		Name:                  e.Name,
+		Package:               strings.TrimSpace(opts.PackageOwners[e.Name]),
+		Type:                  e.Type,
+		Command:               e.Command,
+		Args:                  e.Args,
+		Env:                   e.Env,
+		URL:                   e.URL,
+		Headers:               e.Headers,
+		DefaultStartupTimeout: opts.DefaultStartupTimeout,
+		StartupTimeout:        secondsDuration(e.StartupTimeoutSeconds),
+		DefaultCallTimeout:    opts.DefaultCallTimeout,
+		CallTimeout:           secondsDuration(e.CallTimeoutSeconds),
+		ToolTimeouts:          toolTimeoutDurations(e.ToolTimeoutSeconds),
+		WorkspaceRoot:         strings.TrimSpace(workspaceRoot),
+		LaunchManager:         opts.LaunchManager,
+		ConfigSource:          configSource,
+		Authorized:            e.Source.UserAuthorized(),
 	}, workspaceRoot)
 	if e.Source.ProjectScoped() && strings.TrimSpace(spec.Dir) == "" {
 		spec.Dir = workspaceRoot
@@ -2541,6 +2553,20 @@ func applyDefaultMCPCallTimeout(specs []plugin.Spec, timeout time.Duration) []pl
 		out[i] = spec
 		if out[i].DefaultCallTimeout <= 0 {
 			out[i].DefaultCallTimeout = timeout
+		}
+	}
+	return out
+}
+
+func applyDefaultMCPStartupTimeout(specs []plugin.Spec, timeout time.Duration) []plugin.Spec {
+	if len(specs) == 0 || timeout <= 0 {
+		return specs
+	}
+	out := make([]plugin.Spec, len(specs))
+	for i, spec := range specs {
+		out[i] = spec
+		if out[i].DefaultStartupTimeout <= 0 {
+			out[i].DefaultStartupTimeout = timeout
 		}
 	}
 	return out

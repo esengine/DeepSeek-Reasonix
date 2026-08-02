@@ -15,6 +15,7 @@ export type UpdateStatus =
   | { kind: "verifying"; info: UpdateInfo }
   | { kind: "downloaded"; info: UpdateInfo }
   | { kind: "authorizing"; info?: UpdateInfo }
+  | { kind: "recovering"; info?: UpdateInfo }
   | { kind: "installing"; info?: UpdateInfo }
   | { kind: "done" }
   | { kind: "error"; message: string; info?: UpdateInfo; manualHint?: boolean };
@@ -47,6 +48,7 @@ function offersManualFallback(message: string): boolean {
   return (
     low.includes("authorization failed") ||
     low.includes("manual update required") ||
+    low.includes("could not safely finish the previous update") ||
     low.includes("pkexec") ||
     low.includes("sudo apt install")
   );
@@ -138,7 +140,7 @@ function useUpdaterInternal(): Updater {
       const accepted =
         ((p.phase === "downloading" || p.phase === "verifying") && operation.kind === "downloading") ||
         (p.phase === "downloaded" && (operation.kind === "downloading" || operation.kind === "installing")) ||
-        ((p.phase === "authorizing" || p.phase === "installing" || p.phase === "done") && operation.kind === "installing") ||
+        ((p.phase === "authorizing" || p.phase === "recovering" || p.phase === "installing" || p.phase === "done") && operation.kind === "installing") ||
         (p.phase === "error" && (operation.kind === "downloading" || operation.kind === "installing"));
       if (!accepted) return;
       if (p.phase === "downloaded" || p.phase === "done" || p.phase === "error") {
@@ -158,6 +160,8 @@ function useUpdaterInternal(): Updater {
             return info ? { kind: "downloaded", info: { ...info, downloaded: true } } : cur;
           case "authorizing":
             return { kind: "authorizing", info };
+          case "recovering":
+            return { kind: "recovering", info };
           case "installing":
             return { kind: "installing", info };
           case "done":

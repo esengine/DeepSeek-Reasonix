@@ -42,6 +42,12 @@ func TestFetchDeepSeekShape(t *testing.T) {
 	if got := b.Display(); got != "¥110.00" {
 		t.Errorf("Display = %q, want %q", got, "¥110.00")
 	}
+	if got := b.DisplayForCurrency("USD"); got != "$15.30" {
+		t.Errorf("DisplayForCurrency(USD) = %q, want %q", got, "$15.30")
+	}
+	if got := b.DisplayForCurrency("¥"); got != "¥110.00" {
+		t.Errorf("DisplayForCurrency(¥) = %q, want %q", got, "¥110.00")
+	}
 }
 
 // An empty url is "not configured", not an error: (nil, nil), and Display on a nil
@@ -74,5 +80,8 @@ func TestDisplayUSDOnly(t *testing.T) {
 	b := &Balance{Available: true, Infos: []Info{{Currency: "USD", TotalBalance: "9.99"}}}
 	if got := b.Display(); got != "$9.99" {
 		t.Errorf("Display = %q, want %q", got, "$9.99")
+	}
+	if got := b.DisplayForCurrency("CNY"); got != "USD $9.99" {
+		t.Errorf("DisplayForCurrency(CNY) = %q, want explicit real fallback currency %q", got, "USD $9.99")
 	}
 }

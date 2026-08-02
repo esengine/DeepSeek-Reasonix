@@ -371,8 +371,8 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Desktop.CheckUpdates == nil || *got.Desktop.CheckUpdates {
 		t.Errorf("desktop.check_updates = %+v, want false", got.Desktop.CheckUpdates)
 	}
-	if got.DesktopUpdateChannel() != "preview" {
-		t.Errorf("desktop.update_channel = %q, want preview", got.DesktopUpdateChannel())
+	if got.DesktopUpdateChannel() != "stable" {
+		t.Errorf("desktop.update_channel = %q, want stable", got.DesktopUpdateChannel())
 	}
 	if got.Agent.RecoveryModel != "mimo-pro" || got.Agent.RecoveryTemperature != 0 {
 		t.Errorf("agent recovery settings not preserved: %+v", got.Agent)
@@ -585,13 +585,15 @@ approval_mode = "prompt"
 	}
 }
 
-func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
+func TestRenderTOMLPreservesMCPTimeouts(t *testing.T) {
 	cfg := Default()
 	cfg.Tools.MCPCallTimeoutSeconds = intPtr(450)
+	cfg.Tools.MCPStartupTimeoutSeconds = intPtr(45)
 	cfg.Plugins = []PluginEntry{{
-		Name:               "maker",
-		Command:            "maker-mcp",
-		CallTimeoutSeconds: 600,
+		Name:                  "maker",
+		Command:               "maker-mcp",
+		StartupTimeoutSeconds: 60,
+		CallTimeoutSeconds:    600,
 		ToolTimeoutSeconds: map[string]int{
 			"generate/video": 1800,
 			"search":         120,
@@ -601,6 +603,8 @@ func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
 	rendered := RenderTOML(cfg)
 	for _, want := range []string{
 		"mcp_call_timeout_seconds = 450",
+		"mcp_startup_timeout_seconds = 45",
+		"startup_timeout_seconds = 60",
 		"call_timeout_seconds = 600",
 		`tool_timeout_seconds = { "generate/video" = 1800, "search" = 120 }`,
 		"Raw MCP tool names",
@@ -616,6 +620,12 @@ func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
 	}
 	if got.Tools.MCPCallTimeoutSeconds == nil || *got.Tools.MCPCallTimeoutSeconds != 450 {
 		t.Fatalf("MCPCallTimeoutSeconds round trip = %v, want 450", got.Tools.MCPCallTimeoutSeconds)
+	}
+	if got.Tools.MCPStartupTimeoutSeconds == nil || *got.Tools.MCPStartupTimeoutSeconds != 45 {
+		t.Fatalf("MCPStartupTimeoutSeconds round trip = %v, want 45", got.Tools.MCPStartupTimeoutSeconds)
+	}
+	if got.Plugins[0].StartupTimeoutSeconds != 60 {
+		t.Fatalf("StartupTimeoutSeconds round trip = %d, want 60", got.Plugins[0].StartupTimeoutSeconds)
 	}
 	if got.Plugins[0].CallTimeoutSeconds != 600 {
 		t.Fatalf("CallTimeoutSeconds round trip = %d, want 600", got.Plugins[0].CallTimeoutSeconds)
@@ -773,10 +783,13 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c.Agent.RecoveryTemperature = 0.2
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 5", "[desktop]", `currency = "CNY"`, `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `update_channel = "preview"`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 5", "[desktop]", `currency = "CNY"`, `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
+	}
+	if strings.Contains(user, "update_channel") || strings.Contains(user, "[cli]") {
+		t.Fatalf("user render retained retired update channel:\n%s", user)
 	}
 
 	project := RenderTOMLForScope(c, RenderScopeProject)

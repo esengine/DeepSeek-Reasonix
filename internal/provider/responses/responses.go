@@ -139,6 +139,16 @@ func (c *client) Name() string { return c.name }
 // assistant tool-call turns so the stateless follow-up can replay it.
 func (c *client) RequiresToolCallReasoning() bool { return c.vendor == "deepseek" }
 
+func (c *client) MissingToolCallReasoningWarningIdentity() string {
+	if c == nil {
+		return ""
+	}
+	return strings.Join([]string{
+		"responses", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		strings.TrimSpace(c.model), strings.TrimSpace(c.vendor), strings.TrimSpace(c.mode), strings.TrimSpace(c.effort),
+	}, "\x00")
+}
+
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{Provider: c.name, KeyEnv: c.keyEnv, KeySource: c.keySource, KeyPresent: c.apiKey != "", RetryAuth: c.authed.Load()}
 }

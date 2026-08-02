@@ -64,6 +64,107 @@ func TestFileUpdateRollbackRestoresPreviousBinary(t *testing.T) {
 	}
 }
 
+func TestReconcilePendingFileUpdateCancelsPreparedReleaseUnit(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := PrepareFileUpdate("v1", "v2", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ReconcilePendingUpdate("v2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Cleared || result.RolledBack || result.AwaitingHealth {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "old" {
+		t.Fatalf("prepared target changed = %q, %v", got, err)
+	}
+	for _, file := range tx.Files {
+		if _, err := os.Stat(file.BackupPath); !os.IsNotExist(err) {
+			t.Fatalf("prepared backup survived cancellation: %v", err)
+		}
+	}
+	if PendingUpdateExists() {
+		t.Fatal("pending file update survived cancellation")
+	}
+}
+
+func TestReconcilePendingFileUpdateLeavesBoundProbationaryReleaseUnit(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := PrepareFileUpdate("v1", "v2", target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := PublishClaimedFileUpdateMemberExact(tx, target, []byte("new"), 0o700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RecordClaimedFileUpdateInstalled(tx, receipt); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ReconcilePendingUpdate("v2")
+	if !errors.Is(err, ErrPendingUpdateAwaitingHealth) {
+		t.Fatalf("reconcile error = %v", err)
+	}
+	if !result.Pending || !result.AwaitingHealth || result.Cleared || result.RolledBack {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "new" {
+		t.Fatalf("probationary target changed = %q, %v", got, err)
+	}
+	if !PendingUpdateExists() {
+		t.Fatal("probationary transaction was removed")
+	}
+}
+
+func TestReconcilePendingFileUpdateRollsBackPublishedReleaseUnit(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	target := filepath.Join(t.TempDir(), "reasonix-desktop")
+	originalExecutable := repairExecutable
+	repairExecutable = func() (string, error) { return filepath.Join(filepath.Dir(target), "reasonix-guard"), nil }
+	t.Cleanup(func() { repairExecutable = originalExecutable })
+	if err := os.WriteFile(target, []byte("old"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PrepareFileUpdate("v1", "v2", target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("new"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := ReconcilePendingUpdate("v1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.RolledBack || result.Cleared || result.AwaitingHealth {
+		t.Fatalf("reconcile result = %+v", result)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "old" {
+		t.Fatalf("published target was not restored = %q, %v", got, err)
+	}
+	if PendingUpdateExists() {
+		t.Fatal("pending file update survived rollback")
+	}
+}
+
 func TestAppBundleRollbackRestoresWhenLiveBundleIsMissing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)

@@ -203,19 +203,11 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 			all := append(peek, rest...)
 			src = bytes.NewReader(fileenc.Decode(all, enc))
 		} else {
-			// Non-BOM path: stream. The peek bytes are prepended via
-			// io.MultiReader; the remaining bytes flow through a decoder
-			// pipe so the scanner can stop as soon as the cap is reached.
+			// Non-BOM path: stream through the decoder so the scanner can
+			// stop as soon as the cap is reached without buffering the file.
 			dec := fileenc.Decoder(enc)
 			if dec != nil {
-				head := append([]byte(nil), peek...) // goroutine can outlive an early return; don't alias the reused buffer
-				pr, pw := io.Pipe()
-				go func() {
-					_, _ = pw.Write(head)
-					io.Copy(pw, f) //nolint:errcheck
-					pw.Close()
-				}()
-				src = transform.NewReader(pr, dec)
+				src = transform.NewReader(io.MultiReader(bytes.NewReader(peek), f), dec)
 			} else {
 				// UTF-8 or LossyUTF8 — no transformation needed.
 				src = io.MultiReader(bytes.NewReader(peek), f)

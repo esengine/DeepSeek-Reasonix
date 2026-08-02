@@ -6,7 +6,7 @@ import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
-import { switchUpdaterChannel, useUpdater } from "../lib/useUpdater";
+import { useUpdater } from "../lib/useUpdater";
 import {
   applyTheme,
   getTheme,
@@ -352,7 +352,6 @@ export function SettingsPanel({
                     <UpdatesSection
                       configPath={s.configPath}
                       checkUpdates={s.checkUpdates}
-                      updateChannel={s.updateChannel}
                       telemetry={s.telemetry !== false}
                       metrics={s.metrics !== false}
                       settingsBusy={busy}
@@ -1366,7 +1365,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
     conversationWidth: normalizeConversationWidth(view.conversationWidth),
     checkUpdates: view.checkUpdates !== false,
-    updateChannel: view.updateChannel === "preview" ? "preview" : "stable",
+    updateChannel: "stable",
   };
 }
 
@@ -6775,7 +6774,6 @@ const mb = (n: number) => (n / MB).toFixed(1);
 function UpdatesSection({
   configPath,
   checkUpdates,
-  updateChannel,
   telemetry,
   metrics,
   settingsBusy,
@@ -6783,15 +6781,14 @@ function UpdatesSection({
 }: {
   configPath: string;
   checkUpdates: boolean;
-  updateChannel: string;
   telemetry: boolean;
   metrics: boolean;
   settingsBusy: boolean;
   applySettings: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useT();
-  const { status, check, download: downloadUpdate, install: installUpdate, openDownload, reset: resetUpdater } = useUpdater();
-  const selectedChannel = updateChannel === "preview" ? "preview" : "stable";
+  const { status, check, download: downloadUpdate, install: installUpdate, openDownload } = useUpdater();
+  const selectedChannel = "stable";
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
@@ -6802,6 +6799,7 @@ function UpdatesSection({
     status.kind === "downloading" ||
     status.kind === "verifying" ||
     status.kind === "authorizing" ||
+    status.kind === "recovering" ||
     status.kind === "installing";
   const updateStatus =
     status.kind === "checking" ? t("updater.checking") :
@@ -6815,6 +6813,7 @@ function UpdatesSection({
     status.kind === "verifying" ? t("updater.verifying") :
     status.kind === "downloaded" ? t("updater.downloaded", { v: status.info.latest }) :
     status.kind === "authorizing" ? t("updater.authorizing") :
+    status.kind === "recovering" ? t("updater.recovering") :
     status.kind === "installing" ? (
       status.info?.requiresElevation || status.info?.installMode === "deb"
         ? t("updater.installingPackage")
@@ -6852,28 +6851,6 @@ function UpdatesSection({
         }
       >
         <div className="updates-control__controls">
-          <div className="provider-add-segmented" role="group" aria-label={t("updater.channelSettingLabel")}>
-            {(["stable", "preview"] as const).map((nextChannel) => (
-              <button
-                key={nextChannel}
-                type="button"
-                disabled={settingsBusy || updaterBusy}
-                className={selectedChannel === nextChannel ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
-                aria-pressed={selectedChannel === nextChannel}
-                onClick={() => {
-                  if (nextChannel === selectedChannel) return;
-                  void switchUpdaterChannel(
-                    nextChannel,
-                    resetUpdater,
-                    () => applySettings(() => app.SetDesktopUpdateChannel(nextChannel)),
-                    check,
-                  );
-                }}
-              >
-                {nextChannel === "stable" ? t("updater.channelStable") : t("updater.channelPreview")}
-              </button>
-            ))}
-          </div>
           <Tooltip label={t("updater.checkButton")}>
             <button
               className="chip chip--icon"
@@ -6888,19 +6865,11 @@ function UpdatesSection({
         </div>
       </SettingsField>
       <div className="updates-control__hint">
-        <div>{t("updater.channelSettingHint")}</div>
-        <div>{t("updater.channelAutoCheckHint")}</div>
+        <div>{t("updater.officialReleaseHint")}</div>
       </div>
       {(status.kind === "available" || status.kind === "downloaded") && (
         <div className="updates-control__action">
           <div className="updates-control__action-copy">
-            {status.kind === "available" && (
-              <div>
-                {t("updater.channelLabel", {
-                  channel: status.info.channel === "preview" ? t("updater.channelPreview") : t("updater.channelStable"),
-                })}
-              </div>
-            )}
             {status.kind === "available" && !status.info.canSelfUpdate && <div>{status.info.manualReason || t("updater.macHint")}</div>}
           </div>
           {status.kind === "available" && (

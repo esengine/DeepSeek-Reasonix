@@ -155,6 +155,19 @@ await act(async () => {
     requestId: installAttempts[0].requestId,
     version: installAttempts[0].version,
     channel: "preview",
+    phase: "recovering",
+    received: 42,
+    total: 42,
+  });
+});
+ok(document.getElementById("banner-status")?.textContent === "recovering", "stale update recovery is shared");
+ok(document.getElementById("settings-status")?.textContent === "recovering", "settings observes stale update recovery");
+
+await act(async () => {
+  __emitMockUpdater({
+    requestId: installAttempts[0].requestId,
+    version: installAttempts[0].version,
+    channel: "preview",
     phase: "installing",
     received: 42,
     total: 42,

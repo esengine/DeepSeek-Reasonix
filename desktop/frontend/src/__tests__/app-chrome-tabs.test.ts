@@ -639,6 +639,22 @@ ok(
   "maximized workbench dock keeps a draggable title region while tabs remain clickable",
 );
 
+ok(
+  finalDeclaration(":root[data-theme-style] .workbench-dock__tab--active::after", "bottom") === "1px",
+  "active dock underline stays inside the visible dock edge",
+);
+
+const narrowDockRule = stylesSource.match(/@container \(max-width: 420px\) \{[\s\S]*?\.app--windows-frameless\.app--workbench \.workbench-dock__tab[\s\S]*?\n\}/)?.[0] || "";
+ok(
+  narrowDockRule.includes("padding-left: clamp(") &&
+    narrowDockRule.includes("gap: clamp(") &&
+    narrowDockRule.includes("flex: 0 0 auto") &&
+    narrowDockRule.includes("max-width: none") &&
+    !narrowDockRule.includes("text-overflow: ellipsis") &&
+    !narrowDockRule.includes("overflow: hidden"),
+  "narrow Windows frameless workbench compresses spacing without shrinking or truncating dock tabs",
+);
+
 for (const selector of [
   ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar",
   ":root[data-theme-style] .layout--workbench-chrome-hidden .topicbar__chrome-btn",

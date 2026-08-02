@@ -4339,22 +4339,29 @@ func TestPartitionByTier(t *testing.T) {
 	}
 }
 
-func TestPluginSpecsMapConfiguredCallTimeouts(t *testing.T) {
+func TestPluginSpecsMapConfiguredMCPTimeouts(t *testing.T) {
 	specs := PluginSpecsForRootWithOptions([]config.PluginEntry{{
-		Name:               "maker",
-		Command:            "maker-mcp",
-		CallTimeoutSeconds: 600,
+		Name:                  "maker",
+		Command:               "maker-mcp",
+		StartupTimeoutSeconds: 45,
+		CallTimeoutSeconds:    600,
 		ToolTimeoutSeconds: map[string]int{
 			"generate_video": 1800,
 			" ":              120,
 			"zero":           0,
 		},
-	}}, "", PluginSpecOptions{DefaultCallTimeout: 300 * time.Second})
+	}}, "", PluginSpecOptions{
+		DefaultStartupTimeout: 30 * time.Second,
+		DefaultCallTimeout:    300 * time.Second,
+	})
 	if len(specs) != 1 {
 		t.Fatalf("PluginSpecs returned %d specs, want 1", len(specs))
 	}
 	if specs[0].DefaultCallTimeout != 5*time.Minute {
 		t.Fatalf("DefaultCallTimeout = %v, want 5m", specs[0].DefaultCallTimeout)
+	}
+	if specs[0].DefaultStartupTimeout != 30*time.Second || specs[0].StartupTimeout != 45*time.Second {
+		t.Fatalf("startup timeouts = default %v override %v, want 30s/45s", specs[0].DefaultStartupTimeout, specs[0].StartupTimeout)
 	}
 	if specs[0].CallTimeout != 10*time.Minute {
 		t.Fatalf("CallTimeout = %v, want 10m", specs[0].CallTimeout)
@@ -4458,6 +4465,19 @@ func TestApplyDefaultMCPCallTimeoutPreservesConfiguredDefault(t *testing.T) {
 	}
 	if specs[1].DefaultCallTimeout != 5*time.Minute {
 		t.Fatalf("empty DefaultCallTimeout = %v, want 5m", specs[1].DefaultCallTimeout)
+	}
+}
+
+func TestApplyDefaultMCPStartupTimeoutPreservesConfiguredDefault(t *testing.T) {
+	specs := applyDefaultMCPStartupTimeout([]plugin.Spec{
+		{Name: "configured", DefaultStartupTimeout: 20 * time.Second},
+		{Name: "empty"},
+	}, 30*time.Second)
+	if specs[0].DefaultStartupTimeout != 20*time.Second {
+		t.Fatalf("configured DefaultStartupTimeout overwritten: %v", specs[0].DefaultStartupTimeout)
+	}
+	if specs[1].DefaultStartupTimeout != 30*time.Second {
+		t.Fatalf("empty DefaultStartupTimeout = %v, want 30s", specs[1].DefaultStartupTimeout)
 	}
 }
 

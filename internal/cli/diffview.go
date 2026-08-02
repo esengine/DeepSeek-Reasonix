@@ -28,18 +28,18 @@ const (
 )
 
 var (
-	chromaFmt = formatters.Get("terminal256")
-	hunkRE    = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
+	diffChromaFmt = formatters.Get("terminal256")
+	hunkRE        = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 )
 
-// chromaStyleForTheme picks the chroma style matching the active theme's mode.
-// Dark mode uses onedark — a low-saturation blue-grey ramp that stays inside the
-// monochrome graphite family instead of the punchy github-dark palette.
-func chromaStyleForTheme() *chroma.Style {
+// Resolve on each render so runtime theme switches and theme-sweep preview
+// frames cannot retain syntax colours from the previous light/dark mode.
+func activeDiffChromaStyle() *chroma.Style {
+	mode := chroma.Dark
 	if activeCLITheme.name == "light" {
-		return styles.Get("github")
+		mode = chroma.Light
 	}
-	return styles.Get("onedark")
+	return styles.GetForMode("github-dark", mode)
 }
 
 // diffStat renders a change's "+A -B" tally, green/red, omitting a zero side.
@@ -262,7 +262,7 @@ func highlightCode(path, code string) string {
 		return code
 	}
 	var b strings.Builder
-	if chromaFmt.Format(&b, chromaStyleForTheme(), it) != nil {
+	if diffChromaFmt.Format(&b, activeDiffChromaStyle(), it) != nil {
 		return code
 	}
 	return strings.TrimRight(b.String(), "\n")

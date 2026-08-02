@@ -1461,7 +1461,7 @@ func (s *Server) sessionBalance(ctx context.Context, p protocol.SessionBalancePa
 	if balance == nil {
 		return protocol.SessionBalanceResult{Available: false}, nil
 	}
-	return protocol.SessionBalanceResult{Available: true, Display: balance.Display()}, nil
+	return protocol.SessionBalanceResult{Available: true, Display: balance.DisplayForCurrency(p.Currency)}, nil
 }
 
 func (s *Server) jobList(p protocol.JobListParams) (protocol.JobListResult, error) {

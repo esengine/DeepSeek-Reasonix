@@ -370,10 +370,11 @@ func TestAddWithLifecycleCoalescesConcurrentSameServer(t *testing.T) {
 	}
 }
 
-func TestLazyCacheHitStartupTimeoutCanRetry(t *testing.T) {
+func TestLazyCacheHitSlowStartupContinuesInBackground(t *testing.T) {
 	redirectCache(t)
 	spec := helperSpec()
-	spec.Env["GO_WANT_HELPER_INIT_MS"] = fmt.Sprint(int(defaultStartTimeout/time.Millisecond) + 200)
+	spec.StartupTimeout = 2 * time.Second
+	spec.Env["GO_WANT_HELPER_INIT_MS"] = "200"
 	writeMockCache(t, spec)
 
 	cs, ok := LoadCachedSchema(spec.Name, SchemaCacheKey(spec))
@@ -399,18 +400,24 @@ func TestLazyCacheHitStartupTimeoutCanRetry(t *testing.T) {
 	if !ok {
 		t.Fatalf("pre-Execute echo should be a *lazyTool, got %T", echo)
 	}
+	lazyEcho.shared.waitBudget = 25 * time.Millisecond
+	beforeName := echo.Name()
+	beforeDescription := echo.Description()
+	beforeSchema := string(echo.Schema())
 
-	if _, err := echo.Execute(ctx, json.RawMessage(`{"msg":"slow"}`)); err == nil || !strings.Contains(err.Error(), "startup timed out") {
-		t.Fatalf("first Execute error = %v, want startup timed out", err)
+	if _, err := echo.Execute(ctx, json.RawMessage(`{"msg":"slow"}`)); err == nil || !strings.Contains(err.Error(), "continues in background") {
+		t.Fatalf("first Execute error = %v, want background startup notice", err)
 	}
-
-	lazyEcho.shared.spec.Env["GO_WANT_HELPER_INIT_MS"] = "0"
+	waitForServer(t, host, spec.Name, 2*time.Second)
 	out, err := echo.Execute(ctx, json.RawMessage(`{"msg":"retry"}`))
 	if err != nil {
-		t.Fatalf("second Execute after timeout should retry: %v", err)
+		t.Fatalf("second Execute after background startup should succeed: %v", err)
 	}
 	if out != "echo: retry" {
 		t.Fatalf("Execute result = %q, want %q", out, "echo: retry")
+	}
+	if echo.Name() != beforeName || echo.Description() != beforeDescription || string(echo.Schema()) != beforeSchema {
+		t.Fatalf("provider-visible cached tool changed across background startup")
 	}
 }
 

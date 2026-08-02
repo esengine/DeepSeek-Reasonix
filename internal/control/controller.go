@@ -4786,6 +4786,7 @@ func (c *Controller) mcpSpec(e config.PluginEntry) plugin.Spec {
 		Env:                exp.Env,
 		URL:                exp.URL,
 		Headers:            exp.Headers,
+		StartupTimeout:     controllerMCPTimeout(exp.StartupTimeoutSeconds),
 		DefaultCallTimeout: c.mcpDefaultCallTimeout,
 		CallTimeout:        controllerMCPTimeout(exp.CallTimeoutSeconds),
 		ToolTimeouts:       controllerMCPToolTimeouts(exp.ToolTimeoutSeconds),

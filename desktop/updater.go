@@ -57,9 +57,8 @@ const (
 var fetchAttemptTimeout = 5 * time.Second
 
 var (
-	stableDesktopVersionRE  = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
-	previewDesktopVersionRE = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.(0|[1-9][0-9]*)$`)
-	sha256RE                = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	stableDesktopVersionRE = regexp.MustCompile(`^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$`)
+	sha256RE               = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 type requiredDesktopAsset struct {
@@ -88,9 +87,8 @@ var (
 // protection that 403s a user's egress IP takes out both first-party endpoints
 // at once (#6005); GitHub is separate infrastructure. Stable desktop releases
 // own the repo-wide latest badge and publish latest.json directly, while
-// release.yml also keeps a desktop-manifest mirror attached to stable CLI
-// releases for older publishing windows. Preview has no GitHub release, so its
-// chain remains first-party only.
+// The unified official Release carries the desktop manifest as a final fallback
+// when both first-party endpoints are unavailable.
 const githubManifestFallback = "https://github.com/esengine/DeepSeek-Reasonix/releases/latest/download/latest.json"
 
 func normalizeUpdateChannel(ch string) string {
@@ -106,9 +104,7 @@ func configuredUpdateChannel() string {
 }
 
 func targetUpdateChannel(selected string) string {
-	if strings.TrimSpace(selected) != "" {
-		return normalizeUpdateChannel(selected)
-	}
+	_ = selected
 	return configuredUpdateChannel()
 }
 
@@ -119,20 +115,11 @@ func runningUpdateChannel() string {
 // manifestEndpoints returns the manifest URLs for the selected update channel,
 // in the order fetchManifest tries them.
 func manifestEndpoints(selected string) []string {
-	switch normalizeUpdateChannel(selected) {
-	case "preview":
-		return []string{
-			r2Base + "/preview/latest.json",
-			r2Base + "/canary/latest.json",
-			releaseGatewayBase + "/preview/latest.json",
-			releaseGatewayBase + "/canary/latest.json",
-		}
-	default:
-		return []string{
-			r2Base + "/latest/latest.json",
-			releaseGatewayBase + "/stable/latest.json",
-			githubManifestFallback,
-		}
+	_ = selected
+	return []string{
+		r2Base + "/latest/latest.json",
+		releaseGatewayBase + "/stable/latest.json",
+		githubManifestFallback,
 	}
 }
 
@@ -147,10 +134,11 @@ func updaterUserAgent(selected string) string {
 // downloadPage is the human-facing releases page shown when self-update is
 // unavailable (macOS) or the manifest omits its own link.
 func downloadPage(selected string) string {
+	_ = selected
 	u, _ := url.Parse(downloadPageURL)
 	query := u.Query()
 	query.Set("download", "desktop")
-	query.Set("channel", normalizeUpdateChannel(selected))
+	query.Del("channel")
 	u.RawQuery = query.Encode()
 	return u.String()
 }
@@ -173,7 +161,7 @@ func manifestDownloadPage(selected, manifestPage string) string {
 	}
 	query := u.Query()
 	query.Set("download", "desktop")
-	query.Set("channel", normalizeUpdateChannel(selected))
+	query.Del("channel")
 	u.RawQuery = query.Encode()
 	u.Fragment = "start"
 	return u.String()
@@ -214,7 +202,7 @@ type updateProgress struct {
 	RequestID string `json:"requestId"`
 	Version   string `json:"version"`
 	Channel   string `json:"channel"`
-	Phase     string `json:"phase"` // downloading | verifying | downloaded | authorizing | installing | done | error
+	Phase     string `json:"phase"` // downloading | verifying | downloaded | authorizing | recovering | installing | done | error
 	Received  int64  `json:"received"`
 	Total     int64  `json:"total"`
 	Err       string `json:"err,omitempty"`
@@ -300,20 +288,12 @@ func normalizeVersion(v string) (string, bool) {
 	return semver.Canonical(v), true
 }
 
-// validateManifestChannel prevents compatibility fallbacks from crossing the
-// public channel boundary. In particular, the legacy canary/ pointer may still
-// contain an old test-signed vX.Y.Z-canary.N build until the first Preview
-// release mirrors over it; new Preview clients must skip that manifest.
+// validateManifestChannel rejects every prerelease. The selected value remains
+// in the signature for compatibility with existing callers.
 func validateManifestChannel(selected string, m *update.Manifest) error {
-	switch normalizeUpdateChannel(selected) {
-	case "preview":
-		if !previewDesktopVersionRE.MatchString(m.Version) {
-			return fmt.Errorf("preview manifest has non-Preview version %q", m.Version)
-		}
-	default:
-		if !stableDesktopVersionRE.MatchString(m.Version) {
-			return fmt.Errorf("stable manifest has invalid release version %q", m.Version)
-		}
+	_ = selected
+	if !stableDesktopVersionRE.MatchString(m.Version) {
+		return fmt.Errorf("official manifest has invalid release version %q", m.Version)
 	}
 	return nil
 }
@@ -323,20 +303,14 @@ func desktopReleaseTag(_ string, version string) string {
 }
 
 func desktopAssetBases(selected, version string, allowLegacyPreview bool) []string {
+	_ = selected
+	_ = allowLegacyPreview
 	tag := desktopReleaseTag(selected, version)
-	bases := []string{fmt.Sprintf("%s/%s/", r2Base, tag)}
-	switch normalizeUpdateChannel(selected) {
-	case "preview":
-		if allowLegacyPreview {
-			bases = append(bases, r2Base+"/desktop-preview/")
-		}
-	default:
-		bases = append(bases, fmt.Sprintf(
-			"https://github.com/esengine/DeepSeek-Reasonix/releases/download/%s/",
-			tag,
-		))
+	return []string{
+		fmt.Sprintf("%s/%s/", r2Base, tag),
+		fmt.Sprintf("https://github.com/esengine/DeepSeek-Reasonix/releases/download/%s/", tag),
+		fmt.Sprintf("https://github.com/esengine/DeepSeek-Reasonix/releases/download/%s/", version),
 	}
-	return bases
 }
 
 func validateManifestAsset(selected, version, filename string, asset update.Asset, allowLegacyPreview bool) (string, error) {
@@ -372,9 +346,8 @@ func validateDesktopManifest(selected string, m *update.Manifest) error {
 	}
 	// Older public manifests predate the two website-only download assets. Keep
 	// accepting their six signed updater artifacts so an upgrade to the first
-	// release containing this validator does not strand existing Stable/Preview
-	// users. Once downloads is present it is a new-format manifest: all eight
-	// assets are mandatory and Preview must use the immutable version directory.
+	// single-channel release does not strand existing users. Once downloads is
+	// present it is a new-format manifest and all eight assets are mandatory.
 	legacyManifest := m.Downloads == nil
 	requiredAssets := append([]requiredDesktopAsset(nil), requiredDesktopUpdaterAssets...)
 	if !legacyManifest {
@@ -410,7 +383,7 @@ func validateDesktopManifest(selected string, m *update.Manifest) error {
 }
 
 // fetchManifest pulls latest.json from each endpoint in order until one both
-// responds, decodes, and matches the selected public channel. Every endpoint's
+// responds, decodes, and matches an official release. Every endpoint's
 // failure is kept — a user staring at a gateway 403 (#6005) needs to see that
 // the R2 pointer failed too, not just whichever endpoint happened to die last.
 func fetchManifest(ctx context.Context, c, fallback *http.Client, selected string) (*update.Manifest, error) {

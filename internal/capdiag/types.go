@@ -173,19 +173,24 @@ type MCPReport struct {
 
 // MCPServerInfo is one merged MCP server.
 type MCPServerInfo struct {
-	Name          string        `json:"name"`
-	Source        string        `json:"source,omitempty"` // toml | mcp_json | plugin_package
-	PackageOwner  string        `json:"package_owner,omitempty"`
-	Transport     string        `json:"transport"`
-	StartIntent   string        `json:"start_intent"`      // automatic | off
-	Command       string        `json:"command,omitempty"` // redacted path form
-	URLHost       string        `json:"url_host,omitempty"`
-	EnvKeys       []string      `json:"env_keys,omitempty"`
-	HeaderKeys    []string      `json:"header_keys,omitempty"`
-	RuntimeStatus string        `json:"runtime_status,omitempty"` // connected | failed | deferred | disabled | skipped | probed
-	ToolCount     int           `json:"tool_count,omitempty"`
-	Tools         []MCPToolInfo `json:"tools,omitempty"`
-	Error         string        `json:"error,omitempty"`
+	Name             string        `json:"name"`
+	Source           string        `json:"source,omitempty"` // user_config | project_config | project_mcp_json | plugin_package | host_session
+	SourcePath       string        `json:"source_path,omitempty"`
+	Effective        bool          `json:"effective"`
+	PackageOwner     string        `json:"package_owner,omitempty"`
+	Transport        string        `json:"transport"`
+	StartIntent      string        `json:"start_intent"`      // automatic | off
+	Command          string        `json:"command,omitempty"` // redacted path form
+	URLHost          string        `json:"url_host,omitempty"`
+	EnvKeys          []string      `json:"env_keys,omitempty"`
+	HeaderKeys       []string      `json:"header_keys,omitempty"`
+	RuntimeStatus    string        `json:"runtime_status,omitempty"` // connected | failed | deferred | disabled | skipped | probed
+	ToolCount        int           `json:"tool_count,omitempty"`
+	Tools            []MCPToolInfo `json:"tools,omitempty"`
+	Error            string        `json:"error,omitempty"`
+	StartupStage     string        `json:"startup_stage,omitempty"`
+	StartupElapsedMS int64         `json:"startup_elapsed_ms,omitempty"`
+	Stderr           string        `json:"stderr,omitempty"`
 }
 
 // MCPToolInfo is one tool discovered during live/runtime probe.

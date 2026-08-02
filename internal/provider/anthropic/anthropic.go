@@ -184,6 +184,20 @@ func (c *client) RequiresToolCallReasoning() bool {
 	return c.deepSeekThinkingEnabled()
 }
 
+func (c *client) MissingToolCallReasoningWarningIdentity() string {
+	if c == nil {
+		return ""
+	}
+	protocol := "anthropic"
+	if c.deepseek {
+		protocol = "deepseek-anthropic"
+	}
+	return strings.Join([]string{
+		"anthropic", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinking), strings.TrimSpace(c.effort),
+	}, "\x00")
+}
+
 func (c *client) sendOpts() provider.SendOptions {
 	return provider.SendOptions{
 		Provider:   c.name,

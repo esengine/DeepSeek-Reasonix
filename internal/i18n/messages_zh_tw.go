@@ -511,7 +511,7 @@ var ChineseTraditional = Messages{
   reasonix hook list|status --json [--dir PATH]         檢視脫敏 Hook 狀態
   reasonix task list|show --json [--dir PATH]           檢視脫敏 Task 狀態
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
-  reasonix upgrade [stable|preview] [--check] [--force]  按已儲存渠道自更新（進階用法：--channel；別名：reasonix update）
+  reasonix upgrade [--check] [--force]                   更新到最新正式版（別名：reasonix update）
   reasonix version
   reasonix help
 
@@ -560,6 +560,7 @@ var ChineseTraditional = Messages{
 	ProviderPickLabel:          "選擇 %s 的一個模型",
 	ProviderNoModelsFmt:        "供應商 %s 沒有已配置的模型",
 	UpgradeChecking:            "正在檢查更新…",
+	UpgradeChannelDeprecated:   "發布渠道已停用；將使用最新正式版。",
 	UpgradeDevBuild:            "開發版本無法自更新",
 	UpgradeFetchFailed:         "檢查更新失敗：%v",
 	UpgradeInvalidVersion:      "遠端版本不是有效的 semver",

@@ -3442,8 +3442,8 @@ func (a *App) SetDesktopCheckUpdates(enabled bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCheckUpdates(enabled) })
 }
 
-// SetDesktopUpdateChannel changes the rolling update pointer used by startup
-// and manual checks. Legacy canary values are normalized to preview.
+// SetDesktopUpdateChannel is retained for older Wails clients. The config layer
+// clears the retired preference and every updater request uses Stable.
 func (a *App) SetDesktopUpdateChannel(channel string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopUpdateChannel(channel) })
 }

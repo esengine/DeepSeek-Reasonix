@@ -27,6 +27,7 @@ import (
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 	"reasonix/internal/tool"
 )
 
@@ -77,6 +78,12 @@ type Spec struct {
 	Env     map[string]string
 	URL     string
 	Headers map[string]string
+	// DefaultStartupTimeout is the background initialize + tools/list safety cap
+	// for this server. Zero keeps Reasonix's built-in default.
+	DefaultStartupTimeout time.Duration
+	// StartupTimeout overrides DefaultStartupTimeout for this server. It is
+	// host-only lifecycle policy and never changes provider-visible tool schemas.
+	StartupTimeout time.Duration
 	// DefaultCallTimeout is the global MCP call cap for this server. Zero keeps
 	// Reasonix's built-in defaultCallTimeout.
 	DefaultCallTimeout time.Duration
@@ -399,6 +406,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
 				}
 				c.close()
+				err = newStartupFailure("tools/list", phaseAStart, c.startupStderr(), err)
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("list tools from %q: %w", spec.Name, err)}
 				return
 			}
@@ -703,6 +711,9 @@ type Failure struct {
 	Name                   string
 	Transport              string
 	Error                  string
+	Stage                  string
+	Elapsed                time.Duration
+	Stderr                 string
 	RequiresLaunchApproval bool
 }
 
@@ -768,8 +779,16 @@ func (h *Host) Failures() []Failure {
 func (h *Host) ConnectingServers() []string {
 	h.spawningMu.Lock()
 	defer h.spawningMu.Unlock()
-	out := make([]string, 0, len(h.spawning))
-	for name := range h.spawning {
+	names := make(map[string]struct{}, len(h.spawning))
+	for key, attempt := range h.spawning {
+		name := key
+		if attempt != nil && strings.TrimSpace(attempt.server) != "" {
+			name = attempt.server
+		}
+		names[name] = struct{}{}
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
 		out = append(out, name)
 	}
 	sort.Strings(out)
@@ -784,8 +803,10 @@ func (h *Host) RecordFailure(s Spec, err error) {
 	if tt == "" {
 		tt = "stdio"
 	}
+	stage, elapsed, stderr := startupFailureDetails(err)
 	f := Failure{
 		Name: s.Name, Transport: tt, Error: summarizeFailureError(err),
+		Stage: stage, Elapsed: elapsed, Stderr: stderr,
 		RequiresLaunchApproval: requiresLaunchApproval(err),
 	}
 	for i := range h.failures {
@@ -869,26 +890,66 @@ func (h *Host) endDeferredSpawn() {
 var ErrSpawningInFlight = errors.New("server spawn already in progress")
 
 type spawnAttempt struct {
-	done  chan struct{}
-	tools []tool.Tool
-	err   error
+	server string
+	done   chan struct{}
+	tools  []tool.Tool
+	err    error
+}
+
+// ConnectionResult is the eventual result of a session-owned background MCP
+// handshake. Tools are provider adapters and remain off the caller's registry
+// unless the caller explicitly registers them.
+type ConnectionResult struct {
+	Tools []tool.Tool
+	Err   error
+}
+
+// EnsureConnectedInBackground starts or joins one shared initialize +
+// tools/list handshake owned by lifeCtx. The returned channel is buffered, so a
+// caller may stop waiting while the server continues toward readiness. Host
+// shutdown and Remove cancel the background work and wait for its goroutine.
+func (h *Host) EnsureConnectedInBackground(lifeCtx context.Context, s Spec) <-chan ConnectionResult {
+	result := make(chan ConnectionResult, 1)
+	startupBase, cancelStartupBase := context.WithCancel(lifeCtx)
+	generation := h.registerDeferredCancel(s.Name, cancelStartupBase)
+	if !h.beginDeferredSpawn() {
+		cancelStartupBase()
+		result <- ConnectionResult{Err: fmt.Errorf("plugin host is closed")}
+		return result
+	}
+	go func() {
+		defer h.endDeferredSpawn()
+		defer cancelStartupBase()
+		started := time.Now()
+		startupCtx, cancelStartup := context.WithTimeout(startupBase, s.startupTimeout())
+		tools, err := h.EnsureConnectedWithLifecycle(lifeCtx, startupCtx, s, generation)
+		cancelStartup()
+		if err != nil {
+			err = newStartupFailure("connect", started, "", err)
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, ErrDeferredSpawnCancelled) {
+				h.RecordFailure(s, err)
+			}
+		}
+		result <- ConnectionResult{Tools: tools, Err: err}
+	}()
+	return result
 }
 
 // beginSpawn atomically claims the sole right to spawn the named server.
 // Returns owner=true if the caller should proceed. When another caller is
 // already spawning the same server, owner=false and done is closed when that
 // spawn finishes.
-func (h *Host) beginSpawn(name string) (*spawnAttempt, bool) {
+func (h *Host) beginSpawn(key, server string) (*spawnAttempt, bool) {
 	h.spawningMu.Lock()
 	defer h.spawningMu.Unlock()
 	if h.spawning == nil {
 		h.spawning = make(map[string]*spawnAttempt)
 	}
-	if attempt, ok := h.spawning[name]; ok {
+	if attempt, ok := h.spawning[key]; ok {
 		return attempt, false
 	}
-	attempt := &spawnAttempt{done: make(chan struct{})}
-	h.spawning[name] = attempt
+	attempt := &spawnAttempt{server: server, done: make(chan struct{})}
+	h.spawning[key] = attempt
 	return attempt, true
 }
 
@@ -1009,6 +1070,8 @@ type mcpRuntimeSpecIdentity struct {
 	Env                     map[string]string
 	URL                     string
 	Headers                 map[string]string
+	DefaultStartupTimeout   time.Duration
+	StartupTimeout          time.Duration
 	DefaultCallTimeout      time.Duration
 	CallTimeout             time.Duration
 	ToolTimeouts            map[string]time.Duration
@@ -1043,6 +1106,8 @@ func mcpRuntimeSpecIdentityOf(s Spec) mcpRuntimeSpecIdentity {
 		Env:                     nonEmptyStringMap(s.Env),
 		URL:                     s.URL,
 		Headers:                 nonEmptyStringMap(s.Headers),
+		DefaultStartupTimeout:   s.DefaultStartupTimeout,
+		StartupTimeout:          s.StartupTimeout,
 		DefaultCallTimeout:      s.DefaultCallTimeout,
 		CallTimeout:             s.CallTimeout,
 		ToolTimeouts:            nonEmptyDurationMap(s.ToolTimeouts),
@@ -1170,7 +1235,7 @@ func (h *Host) addWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferr
 	if deferredGeneration != 0 {
 		spawnKey = fmt.Sprintf("%s#%d", s.Name, deferredGeneration)
 	}
-	attempt, owner := h.beginSpawn(spawnKey)
+	attempt, owner := h.beginSpawn(spawnKey, s.Name)
 	if !owner {
 		select {
 		case <-attempt.done:
@@ -1202,6 +1267,7 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 }
 
 func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferredGeneration uint64) ([]tool.Tool, error) {
+	startupStarted := time.Now()
 	h.mu.RLock()
 	if h.closed {
 		h.mu.RUnlock()
@@ -1216,6 +1282,7 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 	ts, err := c.listTools(callCtx)
 	if err != nil {
 		c.close()
+		err = newStartupFailure("tools/list", startupStarted, c.startupStderr(), err)
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
 	c.toolCount = len(ts)
@@ -1329,18 +1396,19 @@ var ErrDeferredSpawnCancelled = errors.New("deferred MCP spawn cancelled")
 // (prompts + resources) can still call it later. Callers that don't care pass
 // the same ctx for both.
 func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
+	started := time.Now()
 	var err error
 	s, err = applyStoredLauncherLock(s)
 	if err != nil {
-		return nil, err
+		return nil, newStartupFailure("launch", started, "", err)
 	}
 	s, err = resolveProjectLaunchAuthorization(callCtx, s)
 	if err != nil {
-		return nil, err
+		return nil, newStartupFailure("authorization", started, "", err)
 	}
 	t, err := newTransport(lifeCtx, s)
 	if err != nil {
-		return nil, err
+		return nil, newStartupFailure("launch", started, "", err)
 	}
 	tt := strings.ToLower(strings.TrimSpace(s.Type))
 	if tt == "" {
@@ -1349,6 +1417,7 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	c := &Client{name: s.Name, t: t, spec: s, transport: tt}
 	if err := c.initialize(callCtx); err != nil {
 		c.close()
+		err = newStartupFailure("initialize", started, c.startupStderr(), err)
 		return nil, err
 	}
 	return c, nil
@@ -1816,7 +1885,7 @@ func shortNameHash(s string) string {
 }
 
 func summarizeFailureError(err error) string {
-	msg := strings.Join(strings.Fields(err.Error()), " ")
+	msg := strings.Join(strings.Fields(secrets.RedactCredentials(err.Error())), " ")
 	const max = 500
 	if len(msg) > max {
 		msg = msg[:max] + "..."

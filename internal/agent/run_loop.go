@@ -317,7 +317,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		}
 		event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeFinalReadiness, Text: finalReadinessNoticeText(), Detail: readiness.reason})
-		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(finalReadinessRetryMessage(readiness.reason))})
+		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(finalReadinessRetryMessageFor(readiness))})
 		a.maybeCompact(ctx, usage)
 		return true, nil
 	}

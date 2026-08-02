@@ -1028,6 +1028,9 @@ func TestPluginMutators(t *testing.T) {
 	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", CallTimeoutSeconds: -1}); err == nil {
 		t.Error("negative call_timeout_seconds should error")
 	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", StartupTimeoutSeconds: -1}); err == nil {
+		t.Error("negative startup_timeout_seconds should error")
+	}
 	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", ToolTimeoutSeconds: map[string]int{"generate": -1}}); err == nil {
 		t.Error("negative tool_timeout_seconds should error")
 	}

@@ -1635,27 +1635,25 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	}
 }
 
-func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) {
+func TestWarnOnMissingToolCallReasoningFollowsDeepSeekThinkingModels(t *testing.T) {
 	tests := []struct {
-		name  string
 		model string
 		want  bool
 	}{
-		{name: "exact flash", model: "deepseek-v4-flash", want: false},
-		{name: "namespaced flash", model: "deepseek/deepseek-v4-flash", want: false},
-		{name: "exact pro", model: "deepseek-v4-pro", want: true},
-		{name: "namespaced pro", model: "deepseek/deepseek-v4-pro", want: true},
-		{name: "mixed case pro", model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
-		{name: "reasoner", model: "deepseek-reasoner", want: true},
-		{name: "r1", model: "deepseek-ai/DeepSeek-R1-0528", want: true},
-		{name: "generic deepseek", model: "deepseek-chat", want: false},
-		{name: "gateway deepseek v3", model: "deepseek-ai/DeepSeek-V3.2", want: false},
-		{name: "prover is not pro", model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
-		{name: "dated pro variant", model: "deepseek-v4-pro-0923", want: true},
-		{name: "dotted pro variant", model: "deepseek-v4-pro.1", want: true},
+		{model: "deepseek-v4-flash", want: true},
+		{model: "deepseek/deepseek-v4-flash", want: true},
+		{model: "deepseek-v4-pro", want: true},
+		{model: "deepseek/deepseek-v4-pro", want: true},
+		{model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
+		{model: "deepseek-reasoner", want: true},
+		{model: "deepseek-ai/DeepSeek-R1-0528", want: true},
+		{model: "deepseek-ai/DeepSeek-V3.2", want: true},
+		{model: "deepseek-chat", want: false},
+		{model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
+		{model: "custom-model", want: false},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.model, func(t *testing.T) {
 			p, err := New(provider.Config{
 				Name:    "deepseek-proxy",
 				BaseURL: "https://gateway.example/v1",
@@ -1675,6 +1673,17 @@ func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) 
 		})
 	}
 
+	explicitThinking, err := New(provider.Config{
+		Name: "custom-thinking", BaseURL: "https://gateway.example/v1", Model: "custom-model", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "deepseek", "thinking": "enabled"},
+	})
+	if err != nil {
+		t.Fatalf("New explicit thinking provider: %v", err)
+	}
+	if !provider.WarnOnMissingToolCallReasoning(explicitThinking) {
+		t.Fatal("explicit DeepSeek thinking must diagnose missing tool-call reasoning")
+	}
+
 	p, err := New(provider.Config{
 		Name:    "deepseek-v4-pro-openai-protocol",
 		BaseURL: "https://gateway.example/v1",
@@ -1687,6 +1696,35 @@ func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) 
 	}
 	if provider.WarnOnMissingToolCallReasoning(p) {
 		t.Fatal("OpenAI protocol should not warn using DeepSeek reasoning_content policy")
+	}
+	if provider.WarnOnMissingToolCallReasoning(&client{deepseek: true, thinkingType: "disabled"}) {
+		t.Fatal("disabled thinking must not diagnose missing tool-call reasoning")
+	}
+}
+
+func TestMissingToolCallReasoningWarningFingerprintTracksOpenAIConfiguration(t *testing.T) {
+	newProvider := func(baseURL, model string) provider.Provider {
+		p, err := New(provider.Config{
+			Name: "deepseek", BaseURL: baseURL, Model: model, APIKey: "secret",
+			Extra: map[string]any{"reasoning_protocol": "deepseek", "effort": "high"},
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return p
+	}
+	first := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-pro"))
+	same := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-pro"))
+	changedEndpoint := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://other.example/v1", "deepseek-v4-pro"))
+	changedModel := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-flash"))
+	if first != same {
+		t.Fatal("equivalent OpenAI configurations produced different fingerprints")
+	}
+	if first == changedEndpoint || first == changedModel {
+		t.Fatal("endpoint or model change did not re-key the warning fingerprint")
+	}
+	if len(first) != 64 || strings.Contains(first, "gateway") || strings.Contains(first, "deepseek") {
+		t.Fatalf("fingerprint is not an opaque SHA-256 digest: %q", first)
 	}
 }
 

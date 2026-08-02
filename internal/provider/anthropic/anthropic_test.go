@@ -461,6 +461,19 @@ func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	}
 }
 
+func TestMissingToolCallReasoningWarningFingerprintTracksAnthropicConfiguration(t *testing.T) {
+	first := &client{name: "deepseek", baseURL: "https://api.deepseek.com/anthropic", model: "deepseek-v4-pro", deepseek: true, thinking: "enabled", effort: "high"}
+	same := &client{name: "deepseek", baseURL: "https://api.deepseek.com/anthropic", model: "deepseek-v4-pro", deepseek: true, thinking: "enabled", effort: "high"}
+	flash := &client{name: "deepseek", baseURL: "https://api.deepseek.com/anthropic", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", effort: "high"}
+	got := provider.MissingToolCallReasoningWarningFingerprint(first)
+	if got != provider.MissingToolCallReasoningWarningFingerprint(same) {
+		t.Fatal("equivalent Anthropic configurations produced different fingerprints")
+	}
+	if got == provider.MissingToolCallReasoningWarningFingerprint(flash) {
+		t.Fatal("Anthropic model change did not re-key the warning fingerprint")
+	}
+}
+
 func TestBuildRequestDeepSeekReplaysOnlyToolCallReasoningFromHistory(t *testing.T) {
 	toolTurn := []provider.Message{
 		{Role: provider.RoleUser, Content: "weather?"},

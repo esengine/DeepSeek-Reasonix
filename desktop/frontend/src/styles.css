@@ -194,12 +194,18 @@
   --del-bg: rgba(232, 114, 108, 0.12);
   --del-fg: #ec8a84;
 
-  /* syntax (Ink Dark) */
-  --hl-keyword: #c792ea;
-  --hl-string: #9ece7e;
-  --hl-number: #e0a866;
-  --hl-comment: #5f6672;
-  --hl-func: #6cb5f0;
+  /* Opaque readability island for code and diffs. Theme packs replace these
+     with a flattened background and WCAG-adjusted syntax palette. */
+  --code-bg: #111319;
+  --code-border: var(--border-soft);
+  --code-fg: var(--fg);
+
+  /* syntax (One Dark-tuned) */
+  --hl-keyword: #c678dd;
+  --hl-string: #98c379;
+  --hl-number: #d19a66;
+  --hl-comment: #6a6a72;
+  --hl-func: #61afef;
   --hl-type: #e5c07b;
   --hl-builtin: #5bb8c4;
   --hl-meta: #828a96;
@@ -333,27 +339,28 @@
     --chat-user-border: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
     --chat-user-fg: var(--fg);
     --chat-user-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 8%, transparent);
-    --ok: #157f3e;
-    --warn: #a8620a;
-    --err: #cf3f3a;
-    --add-bg: rgba(21, 127, 62, 0.09);
-    --add-fg: #157f3e;
-    --del-bg: rgba(207, 63, 58, 0.08);
-    --del-fg: #cf3f3a;
-    /* syntax (Ink Light) */
-    --hl-keyword: #a32e8a;
-    --hl-string: #1a6e3c;
-    --hl-number: #9a6206;
-    --hl-comment: #6a7383;
-    --hl-func: #7b3fd4;
-    --hl-type: #0e7d8c;
-    --hl-builtin: #1f5fb8;
-    --hl-meta: #6a7383;
-    --list-row-title: #39415a;
-    --list-row-meta: #848da0;
-    --list-row-hover-bg: #e7ecf4;
-    --list-row-current-bg: color-mix(in srgb, var(--accent) 7%, var(--sidebar-hover));
-    --list-row-current-title: var(--fg);
+    --ok: #15803d;
+    --warn: #b45309;
+    --err: #dc2626;
+    --add-bg: rgba(21, 128, 61, 0.08);
+    --add-fg: #15803d;
+    --del-bg: rgba(220, 38, 38, 0.08);
+    --del-fg: #dc2626;
+    --code-bg: #f2f5f9;
+    /* syntax (light) */
+    --hl-keyword: #cf222e;
+    --hl-string: #0a3069;
+    --hl-number: #0550ae;
+    --hl-comment: #6e7781;
+    --hl-func: #8250df;
+    --hl-type: #116329;
+    --hl-builtin: #0550ae;
+    --hl-meta: #6e7781;
+    --list-row-title: #334155;
+    --list-row-meta: #8a94a6;
+    --list-row-hover-bg: #e8edf4;
+    --list-row-current-bg: #dde7f7;
+    --list-row-current-title: #111827;
     --list-row-current-meta: var(--accent);
     --tree-row-hover-bg: var(--workspace-files-hover);
     --tree-row-current-bg: color-mix(in srgb, var(--workspace-selection-bg) 42%, var(--workspace-files-bg));
@@ -401,27 +408,28 @@
   --chat-user-border: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
   --chat-user-fg: var(--fg);
   --chat-user-shadow: 0 8px 18px color-mix(in srgb, var(--accent) 8%, transparent);
-  --ok: #157f3e;
-  --warn: #a8620a;
-  --err: #cf3f3a;
-  --add-bg: rgba(21, 127, 62, 0.09);
-  --add-fg: #157f3e;
-  --del-bg: rgba(207, 63, 58, 0.08);
-  --del-fg: #cf3f3a;
-  /* syntax (Ink Light) */
-  --hl-keyword: #a32e8a;
-  --hl-string: #1a6e3c;
-  --hl-number: #9a6206;
-  --hl-comment: #6a7383;
-  --hl-func: #7b3fd4;
-  --hl-type: #0e7d8c;
-  --hl-builtin: #1f5fb8;
-  --hl-meta: #6a7383;
-  --list-row-title: #39415a;
-  --list-row-meta: #848da0;
-  --list-row-hover-bg: #e7ecf4;
-  --list-row-current-bg: color-mix(in srgb, var(--accent) 7%, var(--sidebar-hover));
-  --list-row-current-title: var(--fg);
+  --ok: #15803d;
+  --warn: #b45309;
+  --err: #dc2626;
+  --add-bg: rgba(21, 128, 61, 0.08);
+  --add-fg: #15803d;
+  --del-bg: rgba(220, 38, 38, 0.08);
+  --del-fg: #dc2626;
+  --code-bg: #f2f5f9;
+  /* syntax (light) */
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #0550ae;
+  --hl-comment: #6e7781;
+  --hl-func: #8250df;
+  --hl-type: #116329;
+  --hl-builtin: #0550ae;
+  --hl-meta: #6e7781;
+  --list-row-title: #334155;
+  --list-row-meta: #8a94a6;
+  --list-row-hover-bg: #e8edf4;
+  --list-row-current-bg: #dde7f7;
+  --list-row-current-title: #111827;
   --list-row-current-meta: var(--accent);
   --tree-row-hover-bg: var(--workspace-files-hover);
   --tree-row-current-bg: color-mix(in srgb, var(--workspace-selection-bg) 42%, var(--workspace-files-bg));
@@ -4952,15 +4960,15 @@ a[href] {
   position: relative;
   margin: 10px 0;
   padding: 11px 13px;
-  background: var(--bg-soft);
-  border: 1px solid var(--border-soft);
+  background: var(--code-bg, var(--bg-soft));
+  border: 1px solid var(--code-border, var(--border-soft));
   border-radius: 8px;
   font-family: var(--font-code-family);
   font-size: var(--font-code);
   line-height: 1.55;
   overflow: auto;
   white-space: pre;
-  color: var(--fg);
+  color: var(--code-fg, var(--fg));
 }
 .code--loading {
   opacity: 0.55;
@@ -5617,13 +5625,14 @@ body > .mermaid-diagram--fullscreen {
 /* ── diff ────────────────────────────────────────────────────────────────── */
 .diff {
   margin: 4px 0;
-  background: var(--bg-soft);
-  border: 1px solid var(--border-soft);
+  background: var(--code-bg, var(--bg-soft));
+  border: 1px solid var(--code-border, var(--border-soft));
   border-radius: 8px;
   font-family: var(--typography-code-font, var(--font-mono));
   font-size: var(--typography-code-size, calc(12.5px * var(--global-font-scale)));
   line-height: 1.55;
   overflow: auto;
+  color: var(--code-fg, var(--fg));
 }
 .diff__table {
   display: block;
@@ -5632,7 +5641,7 @@ body > .mermaid-diagram--fullscreen {
 }
 .diff__row {
   display: flex;
-  --diff-row-bg: var(--bg-soft);
+  --diff-row-bg: var(--code-bg, var(--bg-soft));
   background: var(--diff-row-bg);
   box-sizing: border-box;
   min-width: 100%;
@@ -5640,10 +5649,10 @@ body > .mermaid-diagram--fullscreen {
   white-space: pre;
 }
 .diff__row--add {
-  --diff-row-bg: linear-gradient(var(--add-bg), var(--add-bg)), var(--bg-soft);
+  --diff-row-bg: var(--code-add-bg, var(--code-bg, var(--bg-soft)));
 }
 .diff__row--del {
-  --diff-row-bg: linear-gradient(var(--del-bg), var(--del-bg)), var(--bg-soft);
+  --diff-row-bg: var(--code-del-bg, var(--code-bg, var(--bg-soft)));
 }
 .diff__gutter {
   position: sticky;
@@ -5655,7 +5664,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   padding: 0 8px 0 12px;
   background: var(--diff-row-bg);
-  box-shadow: 1px 0 0 var(--border-soft);
+  box-shadow: 1px 0 0 var(--code-border, var(--border-soft));
   user-select: none;
 }
 .diff__line {
@@ -5996,11 +6005,19 @@ body > .mermaid-diagram--fullscreen {
 /* ── footer: composer + status line ──────────────────────────────────────── */
 .footer {
   flex: 0 0 auto;
-  max-height: calc(100% - var(--topicbar-height));
-  overflow-y: auto;
   border-top: 1px solid var(--border-soft);
   background: var(--chat-bg);
   padding: 12px 32px 10px;
+}
+/* Decision cards (plan/tool approval, ask, clear-context) can grow tall; cap
+   the footer and let it scroll so approval buttons never slip behind the
+   status bar (#7030). Scoped to the decision state only: an unconditional
+   overflow here clips the upward-popping "/" and "@" menus (.slashmenu), whose
+   containing block .composer-wrap lives inside the footer. The composer is
+   hidden while a decision owns the footer, so the two states never overlap. */
+.footer--decision {
+  max-height: calc(100% - var(--topicbar-height));
+  overflow-y: auto;
 }
 
 /* ── undo-rewind banner (above composer after a rewind) ─────────────── */
@@ -6187,7 +6204,9 @@ body > .mermaid-diagram--fullscreen {
   bottom: calc(100% + 6px);
   left: 0;
   right: 0;
-  max-height: min(360px, 50vh);
+  /* 360px remains the preferred cap. The composer writes the real space above
+     its anchor while a menu is open; 50vh is a no-JS/pre-measure fallback. */
+  max-height: min(360px, var(--composer-menu-available-height, 50vh));
   overflow-y: auto;
   background: var(--bg-elev);
   border: 1px solid var(--border);
@@ -20744,6 +20763,8 @@ body > .mermaid-diagram--fullscreen {
   line-height: 1.55;
   max-height: 320px;
   overflow: auto;
+  background: var(--code-bg, var(--bg-soft));
+  color: var(--code-fg, var(--fg));
 }
 .inline-diff__table {
   display: block;
@@ -20752,17 +20773,17 @@ body > .mermaid-diagram--fullscreen {
 }
 .inline-diff__row {
   display: flex;
-  --inline-diff-row-bg: var(--bg-soft);
+  --inline-diff-row-bg: var(--code-bg, var(--bg-soft));
   background: var(--inline-diff-row-bg);
   box-sizing: border-box;
   min-width: 100%;
   width: 100%;
 }
 .inline-diff__row--add {
-  --inline-diff-row-bg: linear-gradient(var(--add-bg), var(--add-bg)), var(--bg-soft);
+  --inline-diff-row-bg: var(--code-add-bg, var(--code-bg, var(--bg-soft)));
 }
 .inline-diff__row--del {
-  --inline-diff-row-bg: linear-gradient(var(--del-bg), var(--del-bg)), var(--bg-soft);
+  --inline-diff-row-bg: var(--code-del-bg, var(--code-bg, var(--bg-soft)));
 }
 .inline-diff__gutter {
   position: sticky;
@@ -20774,7 +20795,7 @@ body > .mermaid-diagram--fullscreen {
   flex: 0 0 auto;
   padding: 0 6px 0 8px;
   background: var(--inline-diff-row-bg);
-  box-shadow: 1px 0 0 var(--border-soft);
+  box-shadow: 1px 0 0 var(--code-border, var(--border-soft));
   user-select: none;
 }
 .inline-diff__line {
@@ -27702,7 +27723,7 @@ body > .mermaid-diagram--fullscreen {
   position: absolute;
   left: 10px;
   right: 10px;
-  bottom: -1px;
+  bottom: 1px;
   height: 2px;
   border-radius: 2px;
   background: var(--accent);
@@ -33682,7 +33703,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock__tools,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workspace-panel,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .statusbar {
-  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-shell-pct, 80%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-shell-pct, 60%), transparent) !important;
 }
 
 /* Home: chat area — controlled by paneOpacity (面板透明度) */
@@ -33692,15 +33713,109 @@ body > .mermaid-diagram--fullscreen {
 
 /* Home: card elements — controlled by the paneOpacity card tier */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__usage,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__action-btn,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__icon-btn {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar__icon-btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .external-opener {
   background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-card-pct, 88%), transparent) !important;
 }
 
+/* Home: session/folder hover — session-hover tier */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .hist-item:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__topic:hover {
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-session-hover-pct, 76%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__folder:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__folder--active:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .project-tree__folder--menu-open:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-session-hover-pct, 76%), transparent) !important;
+}
+
+/* Home: child elements — neutral backgrounds */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__capacity-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__source-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__source-row,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__type-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .context-panel__view-switch,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .mermaid-diagram,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .md-code,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .copybtn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg-meta__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .turn-actions__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .rewind__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-shelf__card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-action,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-shelf__header-button,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .approval-subject,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .ask-shelf__detail,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .welcome__ex,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .banner--update {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: child elements — surface-2 base (composer chrome) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-modebar,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-task-mode-trigger,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .modelsw__trigger {
+  background: color-mix(in srgb, var(--surface-2) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: child elements — sidebar nav/utility hover (sidebar-hover base) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .sidebar__navitem:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .sidebar__utility-button:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: child elements — preserve original colors */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send {
+  background: color-mix(in srgb, var(--control-primary-bg) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--stop {
+  background: color-mix(in srgb, color-mix(in srgb, var(--err) 14%, var(--bg-elev-2)) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
+  background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg--user .msg__body {
+  background: color-mix(in srgb, var(--chat-user-bg) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .approval-reason {
+  background: color-mix(in srgb, color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg-soft)) var(--theme-pane-child-pct, 80%), transparent) !important;
+}
+
+/* Home: interact elements — hover/active states */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .turn-actions__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .rewind__btn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg-meta__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .msg-meta .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-task-mode-trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .modelsw__trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-action:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .prompt-shelf__header-button:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .welcome__ex:hover {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-interact-pct, 90%), transparent) !important;
+}
+/* Home: interact — colored button hover (use original darker formula, no transparency) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 88%, #000) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--stop:hover {
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2)) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 24%, var(--bg-elev-2)) !important;
+}
+/* Home: active modebar item hover — mirror send-btn darken pattern */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .composer-modebar__item--active:hover {
+  background: color-mix(in srgb, var(--composer-modebar-active-bg) 88%, #000) !important;
+}
+
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workspace-change-scope__head {
-  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-shell-pct, 80%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-shell-pct, 60%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .transcript,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .transcript-shell {
@@ -33714,7 +33829,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock__tools,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workspace-panel,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .statusbar {
-  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-shell-pct, 88%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-shell-pct, 78%), transparent) !important;
 }
 
 /* Task: chat area — controlled by paneOpacity (面板透明度) */
@@ -33724,15 +33839,107 @@ body > .mermaid-diagram--fullscreen {
 
 /* Task: card elements — controlled by the paneOpacity card tier */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__usage,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__action-btn,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__icon-btn {
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar__icon-btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .external-opener {
   background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-card-pct, 88%), transparent) !important;
 }
 
+/* Task: session/folder hover — session-hover tier */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .hist-item:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__topic:hover {
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-task-session-hover-pct, 94%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__folder:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__folder--active:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .project-tree__folder--menu-open:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-task-session-hover-pct, 94%), transparent) !important;
+}
+
+/* Task: child elements — neutral backgrounds */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__capacity-card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__source-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__source-row,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__type-overview,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .context-panel__view-switch,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .mermaid-diagram,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .md-code,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .copybtn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg-meta__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .turn-actions__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .rewind__btn,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-shelf__card,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-action,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-shelf__header-button,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .approval-subject,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .ask-shelf__detail,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .banner--update {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: child elements — surface-2 base (composer chrome) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-modebar,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-task-mode-trigger,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .modelsw__trigger {
+  background: color-mix(in srgb, var(--surface-2) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: child elements — sidebar nav/utility hover (sidebar-hover base) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .sidebar__navitem:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .sidebar__utility-button:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: child elements — preserve original colors */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send {
+  background: color-mix(in srgb, var(--control-primary-bg) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--stop {
+  background: color-mix(in srgb, color-mix(in srgb, var(--err) 14%, var(--bg-elev-2)) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
+  background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg--user .msg__body {
+  background: color-mix(in srgb, var(--chat-user-bg) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .approval-reason {
+  background: color-mix(in srgb, color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg-soft)) var(--theme-pane-task-child-pct, 98%), transparent) !important;
+}
+
+/* Task: interact elements — hover/active states */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .turn-actions__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .rewind__btn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg-meta__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .msg-meta .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-task-mode-trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .modelsw__trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-action:hover,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .prompt-shelf__header-button:hover {
+  background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-interact-pct, 100%), transparent) !important;
+}
+/* Task: interact — colored button hover (use original darker formula, no transparency) */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 88%, #000) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--stop:hover {
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2)) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 24%, var(--bg-elev-2)) !important;
+}
+/* Task: active modebar item hover — mirror send-btn darken pattern */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .composer-modebar__item--active:hover {
+  background: color-mix(in srgb, var(--composer-modebar-active-bg) 88%, #000) !important;
+}
+
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workspace-change-scope__head {
-  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-task-shell-pct, 88%), transparent) !important;
+  background: color-mix(in srgb, var(--bg-soft) var(--theme-pane-task-shell-pct, 78%), transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .transcript,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .transcript-shell {
@@ -33755,11 +33962,105 @@ body > .mermaid-diagram--fullscreen {
   background: transparent !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-card,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__usage,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__section,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__chrome-btn,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__action-btn,
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__icon-btn {
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar__icon-btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .external-opener {
   background: color-mix(in srgb, var(--bg-elev) 88%, transparent) !important;
+}
+
+/* Fallback: session/folder hover */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .hist-item:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__topic:hover {
+  background: color-mix(in srgb, var(--bg-soft) 76%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__folder:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__folder--active:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .project-tree__folder--menu-open:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) 76%, transparent) !important;
+}
+
+/* Fallback: child elements — neutral backgrounds */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__capacity-card,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__source-overview,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__source-row,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__type-overview,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .context-panel__view-switch,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .mermaid-diagram,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .md th,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .md-code,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .copybtn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg-meta__btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .turn-actions__btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .rewind__btn,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-shelf__card,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-action,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-shelf__header-button,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .approval-subject,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .ask-shelf__detail,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .welcome__ex,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .banner--update {
+  background: color-mix(in srgb, var(--bg-elev) 80%, transparent) !important;
+}
+
+/* Fallback: child elements — surface-2 base (composer chrome) */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-modebar,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-task-mode-trigger,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .modelsw__trigger {
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent) !important;
+}
+
+/* Fallback: child elements — sidebar nav/utility hover (sidebar-hover base) */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .sidebar__navitem:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .sidebar__utility-button:hover {
+  background: color-mix(in srgb, var(--sidebar-hover) 80%, transparent) !important;
+}
+
+/* Fallback: child elements — preserve original colors */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send {
+  background: color-mix(in srgb, var(--control-primary-bg) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--stop {
+  background: color-mix(in srgb, color-mix(in srgb, var(--err) 14%, var(--bg-elev-2)) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer {
+  background: color-mix(in srgb, color-mix(in srgb, var(--control-primary-bg) 16%, var(--bg-elev-2)) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg--user .msg__body {
+  background: color-mix(in srgb, var(--chat-user-bg) 80%, transparent) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .approval-reason {
+  background: color-mix(in srgb, color-mix(in srgb, var(--warning, #f59e0b) 10%, var(--bg-soft)) 80%, transparent) !important;
+}
+
+/* Fallback: interact elements — hover/active states */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .turn-actions__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .rewind__btn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg-meta__btn:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .msg-meta .copybtn:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-task-mode-trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .modelsw__trigger:hover:not(:disabled),
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-action:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .prompt-shelf__header-button:hover,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .welcome__ex:hover {
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent) !important;
+}
+/* Fallback: interact — colored button hover (use original darker formula, no transparency) */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 88%, #000) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--stop:hover {
+  background: color-mix(in srgb, var(--err) 38%, var(--bg-elev-2)) !important;
+}
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer__btn--send.composer__btn--steer:hover {
+  background: color-mix(in srgb, var(--control-primary-bg) 24%, var(--bg-elev-2)) !important;
+}
+/* Fallback: active modebar item hover — mirror send-btn darken pattern */
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .composer-modebar__item--active:hover {
+  background: color-mix(in srgb, var(--composer-modebar-active-bg) 88%, #000) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workspace-change-scope__head {
   background: color-mix(in srgb, var(--bg-soft) 80%, transparent) !important;
@@ -34951,7 +35252,15 @@ body > .mermaid-diagram--fullscreen {
   background: color-mix(in srgb, var(--tp-fg) 18%, transparent);
 }
 .theme-preview-surface__nav--dim { opacity: 0.5; width: 70%; }
-.theme-preview-surface__main { padding: 14px; display: flex; align-items: center; justify-content: center; }
+.theme-preview-surface__main {
+  min-width: 0;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
 .theme-preview-surface__card {
   width: min(220px, 90%);
   background: color-mix(in srgb, var(--tp-panel) var(--tp-pane-card-pct, 88%), transparent);
@@ -34964,6 +35273,57 @@ body > .mermaid-diagram--fullscreen {
 .theme-preview-surface__cta {
   margin-top: 4px; height: 22px; width: 72px; border-radius: 6px;
   background: var(--tp-accent);
+}
+.theme-preview-surface[data-variant="full"] .theme-preview-surface__chrome { min-height: 280px; }
+.theme-preview-surface__code-island {
+  width: min(360px, 92%);
+  overflow: hidden;
+  border: 1px solid var(--tp-code-border);
+  border-radius: min(var(--tp-radius, 8px), 9px);
+  background: var(--tp-code-bg);
+  color: var(--tp-code-fg);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--tp-bg) 38%, transparent);
+}
+.theme-preview-surface__code-label {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--tp-code-border);
+  color: color-mix(in srgb, var(--tp-code-fg) 72%, var(--tp-code-bg));
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.theme-preview-surface__code-line {
+  display: block;
+  overflow: hidden;
+  padding: 7px 8px;
+  color: var(--tp-code-fg);
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.theme-preview-surface__syntax--keyword { color: var(--tp-hl-keyword); }
+.theme-preview-surface__syntax--string { color: var(--tp-hl-string); }
+.theme-preview-surface__syntax--number { color: var(--tp-hl-number); }
+.theme-preview-surface__syntax--comment { color: var(--tp-hl-comment); font-style: italic; }
+.theme-preview-surface__syntax--func { color: var(--tp-hl-func); }
+.theme-preview-surface__syntax--type { color: var(--tp-hl-type); }
+.theme-preview-surface__diff-line {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  padding: 3px 8px;
+  border-top: 1px solid var(--tp-code-border);
+  color: var(--tp-code-fg);
+}
+.theme-preview-surface__diff-line--add {
+  background: var(--tp-code-add-bg);
+  color: var(--tp-add-fg);
+}
+.theme-preview-surface__diff-line--del {
+  background: var(--tp-code-del-bg);
+  color: var(--tp-del-fg);
 }
 .theme-preview-surface[data-preview-kind="base"] .theme-preview-surface__card {
   box-shadow: 0 10px 28px color-mix(in srgb, var(--tp-bg) 52%, transparent);
@@ -36145,4 +36505,31 @@ body > .mermaid-diagram--fullscreen {
    padding that would otherwise waste space between the status bar and terminal. */
 .footer.footer--compact {
   padding-bottom: 4px !important;
+}
+
+/* ── Windows frameless workbench: dock tab compression ─────────── */
+/* Only compress spacing; never shrink tabs or truncate labels.
+   Classic layout (.app--classic) is untouched. */
+@container (max-width: 420px) {
+  .app--windows-frameless.app--workbench .workbench-dock__tools,
+  :root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tools {
+    /* 420 px dock → 12 px left pad     300 px dock →  4 px          */
+    padding-left: clamp(4px, calc(6.667 * 1cqi - 16px), 12px);
+  }
+  .app--windows-frameless.app--workbench .workbench-dock__tabs,
+  :root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tabs {
+    /* 420 px dock →  2 px gap          300 px dock →  0 px          */
+    gap: clamp(0px, calc(1.667 * 1cqi - 5px), 2px);
+  }
+  .app--windows-frameless.app--workbench .workbench-dock__tab,
+  :root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tab {
+    flex: 0 0 auto;
+    min-width: auto;
+    max-width: none;
+    /* 420 px dock → 12 px padding      300 px dock →  4 px          */
+    padding-left:  clamp(4px, calc(6.667 * 1cqi - 16px), 12px);
+    padding-right: clamp(4px, calc(6.667 * 1cqi - 16px), 12px);
+    /* icon↔label gap: 420→6px          300→2px                     */
+    gap:           clamp(2px, calc(3.333 * 1cqi - 8px), 6px);
+  }
 }

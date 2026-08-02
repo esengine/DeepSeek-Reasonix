@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -261,9 +262,25 @@ func runLaunch(args []string) int {
 	} else if failure != nil && result.RolledBack {
 		fmt.Fprintf(os.Stderr, "Reasonix Guard restored %s after the %s installer failed.\n", result.ToVersion, result.FromVersion)
 	}
+	forceSafeMode := false
+	if result, err := repair.ReconcilePendingUpdate(version); err != nil {
+		if !errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
+			fmt.Fprintln(os.Stderr, "previous update recovery failed:", err)
+			if result.MixedInstall {
+				fmt.Fprintln(os.Stderr, "error: the installation may mix two releases; refusing to start. Re-run reasonix-guard to retry recovery, or reinstall Reasonix.")
+				return 1
+			}
+			forceSafeMode = true
+		}
+	} else if result.RolledBack {
+		fmt.Fprintf(os.Stderr, "Reasonix Guard restored %s before launch after an unfinished %s update.\n", result.FromVersion, result.ToVersion)
+	} else if result.Cleared {
+		fmt.Fprintf(os.Stderr, "Reasonix Guard cleared an abandoned %s update before launch.\n", result.ToVersion)
+	}
+
 	tracker := repair.NewStartupTracker("")
-	useSafeMode := *safeMode
-	if !*safeMode && tracker.SafeModeRecommended() {
+	useSafeMode := *safeMode || forceSafeMode
+	if !useSafeMode && tracker.SafeModeRecommended() {
 		if result, err := repair.RollbackPendingUpdate(); err != nil {
 			fmt.Fprintln(os.Stderr, "update rollback failed:", err)
 			if result.MixedInstall {

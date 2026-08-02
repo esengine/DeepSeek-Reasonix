@@ -334,6 +334,18 @@ func RemoteKnownHostsPath() string {
 	return filepath.Join(dir, "known_hosts")
 }
 
+// MissingReasoningWarnStateDir is the shared directory for rate-limited
+// provider diagnostics such as the missing tool-call thinking warning (#7059):
+// <Reasonix home>/state. Routed through the home resolver so REASONIX_HOME
+// isolation holds.
+func MissingReasoningWarnStateDir() string {
+	home := reasonixHomeDir()
+	if strings.TrimSpace(home) == "" {
+		return ""
+	}
+	return filepath.Join(home, "state")
+}
+
 // WorkspaceLeaseDir stores cross-process Delivery writer locks outside user
 // workspaces. It intentionally follows the cache root rather than project or
 // session state: taking a lease must never dirty the repository it protects.

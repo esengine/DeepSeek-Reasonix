@@ -197,4 +197,40 @@ func TestFinalReadinessRetryMessageKeepsUserChoicesInteractive(t *testing.T) {
 			t.Fatalf("finalReadinessRetryMessage() missing %q:\n%s", want, msg)
 		}
 	}
+	if strings.Contains(msg, "recognized verification commands") {
+		t.Fatal("todo-only retry should not inject unrelated verification guidance")
+	}
+}
+
+// TestFinalReadinessRetryMessageIncludesVerifierSummary guards the deadlock
+// fix: the retry message must tell the model which commands actually count as
+// verification, so it does not guess (python -c is blocked, grep is not
+// classified) and burn retries in a loop until the loop guard or an
+// interrupted turn ends the session.
+func TestFinalReadinessRetryMessageIncludesVerifierSummary(t *testing.T) {
+	msg := finalReadinessRetryMessageFor(finalReadinessCheck{
+		reason:              "run relevant verification after the latest mutation",
+		missingVerification: 1,
+	})
+	for _, want := range []string{
+		"recognized verification commands",
+		"node --check",
+		"python -m pytest",
+		"NOT verification",
+		"blocked in delivery mode",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("finalReadinessRetryMessage() missing verifier summary %q:\n%s", want, msg)
+		}
+	}
+}
+
+func TestFinalReadinessRetryMessageOmitsVerifierSummaryForOtherFailures(t *testing.T) {
+	msg := finalReadinessRetryMessageFor(finalReadinessCheck{
+		reason:        "inspect the changed result after the latest mutation",
+		missingReview: 1,
+	})
+	if strings.Contains(msg, "recognized verification commands") {
+		t.Fatalf("review-only retry should not inject verifier summary:\n%s", msg)
+	}
 }

@@ -169,7 +169,14 @@ darwin)
 	*.icns) ;;
 	*) bundle_icon="$bundle_icon.icns" ;;
 	esac
+	darwin_icon="$ROOT/desktop/build/darwin/icon.icns"
+	[ -s "$darwin_icon" ] || { echo "macOS source icon is missing: $darwin_icon" >&2; exit 1; }
+	# Wails v2 always regenerates iconfile.icns from build/appicon.png. Replace it
+	# with the platform-specific asset before signing so the macOS safe area does
+	# not force the shared Windows/Linux artwork to shrink as well.
+	cp "$darwin_icon" "$app/Contents/Resources/$bundle_icon"
 	[ -s "$app/Contents/Resources/$bundle_icon" ] || { echo "macOS bundle icon is missing: $bundle_icon" >&2; exit 1; }
+	cmp -s "$darwin_icon" "$app/Contents/Resources/$bundle_icon" || { echo "macOS bundle icon replacement failed: $bundle_icon" >&2; exit 1; }
 
 	# Two signing paths, selected by HAS_APPLE_CERT (set by release-desktop.yml when
 	# the APPLE_* secrets are present). With a real Developer ID cert + notarization

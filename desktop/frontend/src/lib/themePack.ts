@@ -3,6 +3,7 @@
 // resources — only semantic tokens, recipe enums, and local background images.
 
 import { applyTheme, getTheme, getThemeStyle, isThemeStyle, type Theme, type ThemeStyle } from "./theme";
+import { codeReadabilityDecls, deriveCodeReadabilityPalette } from "./codeReadability";
 
 export type ThemePackTokens = {
   light?: Record<string, string>;
@@ -346,7 +347,8 @@ function ensurePackStyleElement(): HTMLStyleElement {
   if (!el) {
     el = document.createElement("style");
     el.id = PACK_STYLE_ID;
-    // Append last so pack overrides win over stylesheets and Creation locals.
+    // Append last so pack root overrides win over the base stylesheets.
+    // Element-scoped Creation code palettes intentionally remain local.
     document.head.appendChild(el);
   } else if (el.parentElement === document.head) {
     document.head.appendChild(el);
@@ -362,8 +364,16 @@ function removePackStyleElement(): void {
 }
 
 function buildPackOverlayCSS(pack: ThemePackView): string {
-  const light = tokensToDecls(pack.tokens?.light);
-  const dark = tokensToDecls(pack.tokens?.dark);
+  const lightTokens = pack.tokens?.light || {};
+  const darkTokens = pack.tokens?.dark || {};
+  const light = joinDecls(
+    tokensToDecls(lightTokens),
+    codeReadabilityDecls(deriveCodeReadabilityPalette("light", pack.baseStyle, lightTokens)),
+  );
+  const dark = joinDecls(
+    tokensToDecls(darkTokens),
+    codeReadabilityDecls(deriveCodeReadabilityPalette("dark", pack.baseStyle, darkTokens)),
+  );
   const recipes = recipeDecls(pack.recipes);
   const chunks: string[] = [];
 
@@ -398,6 +408,10 @@ function buildPackOverlayCSS(pack: ThemePackView): string {
   }
 
   return chunks.join("\n");
+}
+
+function joinDecls(...groups: string[]): string {
+  return groups.filter(Boolean).join(";");
 }
 
 function tokensToDecls(tokens?: Record<string, string>): string {
@@ -457,6 +471,9 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
     // Clamp to 100% to prevent color-mix from receiving values > 100%.
     root.style.setProperty("--theme-pane-shell-pct", `${Math.min((homePane + 0.08) * 100, 100)}%`);
     root.style.setProperty("--theme-pane-card-pct", `${Math.min((homePane + 0.26) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-session-hover-pct", `${Math.min((homePane + 0.26) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-child-pct", `${Math.min((homePane + 0.30) * 100, 100)}%`);
+    root.style.setProperty("--theme-pane-interact-pct", `${Math.min((homePane + 0.40) * 100, 100)}%`);
     // Legacy aliases keep V1 tests and third-party diagnostics stable.
     root.style.setProperty("--theme-bg-image", `url("${cssUrlEscape(homeUrl)}")`);
     root.style.setProperty("--theme-bg-focus-x", `${clamp01(home.focusX) * 100}%`);
@@ -484,6 +501,9 @@ function applyBackgroundCSSVars(root: HTMLElement, pack: ThemePackView): void {
   root.style.setProperty("--theme-pane-task-alpha", String(taskPane));
   root.style.setProperty("--theme-pane-task-shell-pct", `${Math.min((taskPane + 0.08) * 100, 100)}%`);
   root.style.setProperty("--theme-pane-task-card-pct", `${Math.min((taskPane + 0.14) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-session-hover-pct", `${Math.min((taskPane + 0.26) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-child-pct", `${Math.min((taskPane + 0.30) * 100, 100)}%`);
+  root.style.setProperty("--theme-pane-task-interact-pct", `${Math.min((taskPane + 0.40) * 100, 100)}%`);
   const safe = taskSource?.safeArea === "left" || taskSource?.safeArea === "right" ? taskSource.safeArea : "center";
   root.setAttribute("data-theme-safe-area", safe);
   root.setAttribute("data-theme-has-bg", "true");
@@ -509,6 +529,12 @@ function clearBackgroundCSSVars(root: HTMLElement): void {
   root.style.removeProperty("--theme-pane-task-shell-pct");
   root.style.removeProperty("--theme-pane-card-pct");
   root.style.removeProperty("--theme-pane-task-card-pct");
+  root.style.removeProperty("--theme-pane-session-hover-pct");
+  root.style.removeProperty("--theme-pane-child-pct");
+  root.style.removeProperty("--theme-pane-interact-pct");
+  root.style.removeProperty("--theme-pane-task-session-hover-pct");
+  root.style.removeProperty("--theme-pane-task-child-pct");
+  root.style.removeProperty("--theme-pane-task-interact-pct");
   root.removeAttribute("data-theme-safe-area");
   root.removeAttribute("data-theme-has-bg");
 }

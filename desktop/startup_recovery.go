@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 
 	"reasonix/internal/repair"
@@ -15,13 +16,14 @@ const (
 )
 
 type desktopStartupRecoveryDeps struct {
-	recoverFailedInstall  func() (repair.UpdateRollbackResult, *repair.UpdateApplyFailure, error)
-	rollbackPendingUpdate func() (repair.UpdateRollbackResult, error)
-	repairGlobalConfig    func() error
-	choose                func() desktopRecoveryChoice
-	markClean             func() error
-	relaunch              func(string) error
-	report                func(string)
+	recoverFailedInstall   func() (repair.UpdateRollbackResult, *repair.UpdateApplyFailure, error)
+	reconcilePendingUpdate func() (repair.PendingUpdateReconcileResult, error)
+	rollbackPendingUpdate  func() (repair.UpdateRollbackResult, error)
+	repairGlobalConfig     func() error
+	choose                 func() desktopRecoveryChoice
+	markClean              func() error
+	relaunch               func(string) error
+	report                 func(string)
 }
 
 // runDesktopStartupRecovery mirrors Guard's preflight for the macOS bundle,
@@ -61,6 +63,28 @@ func runDesktopStartupRecovery(recommended, explicitSafeMode bool, deps desktopS
 		}
 		if result.RolledBack {
 			return safeMode, relaunchRestored(result)
+		}
+	}
+
+	// Reconcile abandoned pre-publish transactions on every launch instead of
+	// waiting for a crash loop. A target release still in its health-confirmation
+	// window remains probationary and is intentionally left untouched.
+	if deps.reconcilePendingUpdate != nil {
+		result, err := deps.reconcilePendingUpdate()
+		if err != nil && !errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
+			report("previous update recovery failed: " + err.Error())
+			if result.MixedInstall {
+				return safeMode, false
+			}
+			return true, true
+		}
+		if result.RolledBack {
+			return safeMode, relaunchRestored(repair.UpdateRollbackResult{
+				RolledBack:  true,
+				FromVersion: result.ToVersion,
+				ToVersion:   result.FromVersion,
+				TargetPath:  result.TargetPath,
+			})
 		}
 	}
 

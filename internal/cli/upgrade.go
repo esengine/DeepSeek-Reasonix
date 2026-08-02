@@ -55,14 +55,12 @@ type ghAsset struct {
 type cliReleaseChannel string
 
 const (
-	cliReleaseStable  cliReleaseChannel = "stable"
-	cliReleasePreview cliReleaseChannel = "preview"
+	cliReleaseStable cliReleaseChannel = "stable"
 )
 
 var (
-	stableCLITagPattern  = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
-	previewCLITagPattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)-preview\.(?:0|[1-9][0-9]*)$`)
-	requiredCLIAssets    = [...]string{
+	stableCLITagPattern = regexp.MustCompile(`^v(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)$`)
+	requiredCLIAssets   = [...]string{
 		"reasonix-darwin-amd64.tar.gz",
 		"reasonix-darwin-arm64.tar.gz",
 		"reasonix-linux-amd64.tar.gz",
@@ -75,12 +73,10 @@ var (
 
 func parseCLIReleaseChannel(value string) (cliReleaseChannel, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(cliReleaseStable):
+	case "", string(cliReleaseStable), "preview", "canary", "beta", "next":
 		return cliReleaseStable, nil
-	case string(cliReleasePreview):
-		return cliReleasePreview, nil
 	default:
-		return "", fmt.Errorf("release channel %q: must be stable or preview", value)
+		return "", fmt.Errorf("release channel %q is unsupported; Reasonix now uses the official release", value)
 	}
 }
 
@@ -100,14 +96,14 @@ func parseCLIUpgradeSyntax(args []string) (cliUpgradeSyntax, error) {
 	fs.SetOutput(io.Discard)
 	checkOnly := fs.Bool("check", false, "check for updates without installing")
 	force := fs.Bool("force", false, "reinstall even if already on the latest version")
-	channelValue := fs.String("channel", "", "release channel: stable or preview")
+	channelValue := fs.String("channel", "", "deprecated compatibility option; updates use the official release")
 	if err := fs.Parse(args); err != nil {
 		return cliUpgradeSyntax{}, err
 	}
 
 	var positional *cliReleaseChannel
 	if rest := fs.Args(); len(rest) > 1 {
-		return cliUpgradeSyntax{}, fmt.Errorf("upgrade accepts at most one positional channel (stable or preview)")
+		return cliUpgradeSyntax{}, fmt.Errorf("upgrade accepts at most one deprecated positional channel")
 	} else if len(rest) == 1 {
 		channel, err := parseCLIReleaseChannel(rest[0])
 		if err != nil || strings.TrimSpace(rest[0]) == "" {
@@ -122,7 +118,7 @@ func parseCLIUpgradeSyntax(args []string) (cliUpgradeSyntax, error) {
 	var flagChannel *cliReleaseChannel
 	if fs.Changed("channel") {
 		if strings.TrimSpace(*channelValue) == "" {
-			return cliUpgradeSyntax{}, fmt.Errorf("--channel requires stable or preview")
+			return cliUpgradeSyntax{}, fmt.Errorf("--channel requires a legacy channel value")
 		}
 		channel, err := parseCLIReleaseChannel(*channelValue)
 		if err != nil {
@@ -199,16 +195,20 @@ func upgradeCommand(args []string, version string) int {
 		fmt.Fprintf(os.Stderr, "%s cannot load config: empty result\n", i18n.M.ErrorPrefix)
 		return 1
 	}
+	legacyConfigChannel := strings.TrimSpace(cfg.CLI.UpdateChannel)
 	selectedChannel, persistChannel, err := resolveCLIUpgradeChannel(syntax, cfg.CLIUpdateChannel())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	if persistChannel {
+	if persistChannel || legacyConfigChannel != "" {
 		if err := persistCLIReleaseChannel(selectedChannel); err != nil {
 			fmt.Fprintf(os.Stderr, "%s cannot save CLI update channel: %v\n", i18n.M.ErrorPrefix, err)
 			return 1
 		}
+	}
+	if syntax.positional != nil || syntax.flagChannel != nil || legacyConfigChannel != "" {
+		fmt.Fprintln(os.Stderr, i18n.M.UpgradeChannelDeprecated)
 	}
 	spec := cfg.NetworkProxySpec()
 	c, err := netclient.NewHTTPClient(spec, netclient.TransportOptions{
@@ -221,7 +221,7 @@ func upgradeCommand(args []string, version string) int {
 	c.CheckRedirect = validateCLIUpgradeRedirect
 
 	// 3. Fetch latest release from GitHub API.
-	fmt.Printf("%s [%s]\n", i18n.M.UpgradeChecking, selectedChannel)
+	fmt.Println(i18n.M.UpgradeChecking)
 	rel, err := fetchLatestRelease(c, selectedChannel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s "+i18n.M.UpgradeFetchFailed+"\n", i18n.M.ErrorPrefix, err)
@@ -344,19 +344,14 @@ func isCLITag(tag string) bool {
 }
 
 func versionBelongsToCLIChannel(version string, channel cliReleaseChannel) bool {
-	switch channel {
-	case cliReleasePreview:
-		return previewCLITagPattern.MatchString(version)
-	default:
-		return stableCLITagPattern.MatchString(version)
-	}
+	return channel == cliReleaseStable && stableCLITagPattern.MatchString(version)
 }
 
 func releaseBelongsToCLIChannel(rel ghRelease, channel cliReleaseChannel) bool {
 	if !isCLITag(rel.TagName) || !versionBelongsToCLIChannel(rel.TagName, channel) {
 		return false
 	}
-	return rel.Prerelease == (channel == cliReleasePreview)
+	return !rel.Prerelease
 }
 
 func isHTTPSDownloadURL(raw string) bool {

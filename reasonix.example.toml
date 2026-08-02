@@ -124,6 +124,7 @@ enabled = true   # inject a stable startup summary of OS, shell, and common tool
 [tools]
 enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap; per-server overrides may raise it
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [tools.background_jobs]
@@ -172,6 +173,8 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
+# # Startup may continue in the background after the first caller stops waiting.
+# # startup_timeout_seconds = 60
 # # Per-server MCP call timeout; 0 keeps the global/default cap.
 # # call_timeout_seconds = 600
 # # Raw MCP tool names with per-tool call timeouts.

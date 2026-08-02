@@ -6,6 +6,8 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -770,6 +772,15 @@ type MissingToolCallReasoningWarningPolicy interface {
 	WarnOnMissingToolCallReasoning() bool
 }
 
+// MissingToolCallReasoningWarningIdentityPolicy optionally supplies the stable,
+// non-credential configuration identity used to rate-limit missing-reasoning
+// diagnostics. Implementations may include adapter kind, endpoint, model, and
+// thinking controls; the raw identity never leaves memory and is hashed before
+// persistence.
+type MissingToolCallReasoningWarningIdentityPolicy interface {
+	MissingToolCallReasoningWarningIdentity() string
+}
+
 // WarnOnMissingToolCallReasoning reports whether a tool_calls turn with empty
 // reasoning_content should surface a visible warning.
 func WarnOnMissingToolCallReasoning(p Provider) bool {
@@ -781,6 +792,25 @@ func WarnOnMissingToolCallReasoning(p Provider) bool {
 		return policy.WarnOnMissingToolCallReasoning()
 	}
 	return RequiresToolCallReasoning(p)
+}
+
+// MissingToolCallReasoningWarningFingerprint returns an opaque stable key for
+// one provider configuration. Concrete adapters distinguish endpoint/model/
+// protocol changes; providers without the optional policy retain a safe
+// type-and-name fallback. The digest prevents local state from exposing raw
+// endpoints or model identifiers.
+func MissingToolCallReasoningWarningFingerprint(p Provider) string {
+	if nilutil.IsNil(p) {
+		return ""
+	}
+	identity := fmt.Sprintf("%T\x00%s", p, strings.TrimSpace(p.Name()))
+	if policy, ok := p.(MissingToolCallReasoningWarningIdentityPolicy); ok {
+		if configured := strings.TrimSpace(policy.MissingToolCallReasoningWarningIdentity()); configured != "" {
+			identity = configured
+		}
+	}
+	digest := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(digest[:])
 }
 
 // Config is a resolved provider instance configuration.

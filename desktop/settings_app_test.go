@@ -1199,7 +1199,7 @@ func TestSetDesktopCheckUpdatesPersistsToUserConfig(t *testing.T) {
 	}
 }
 
-func TestSetDesktopUpdateChannelPersistsToUserConfig(t *testing.T) {
+func TestSetDesktopUpdateChannelMigratesToStable(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	app := NewApp()
@@ -1210,15 +1210,15 @@ func TestSetDesktopUpdateChannelPersistsToUserConfig(t *testing.T) {
 		t.Fatalf("SetDesktopUpdateChannel: %v", err)
 	}
 	view := app.Settings()
-	if view.UpdateChannel != "preview" {
-		t.Fatalf("Settings().UpdateChannel = %q, want preview", view.UpdateChannel)
+	if view.UpdateChannel != "stable" {
+		t.Fatalf("Settings().UpdateChannel = %q, want stable", view.UpdateChannel)
 	}
 	cfg := config.LoadForEdit(config.UserConfigPath())
-	if cfg.Desktop.UpdateChannel != "preview" {
-		t.Fatalf("desktop.update_channel = %q, want preview", cfg.Desktop.UpdateChannel)
+	if cfg.Desktop.UpdateChannel != "" {
+		t.Fatalf("desktop.update_channel = %q, want omitted legacy field", cfg.Desktop.UpdateChannel)
 	}
-	if cfg.DesktopUpdateChannel() != "preview" {
-		t.Fatalf("DesktopUpdateChannel() = %q, want preview", cfg.DesktopUpdateChannel())
+	if cfg.DesktopUpdateChannel() != "stable" {
+		t.Fatalf("DesktopUpdateChannel() = %q, want stable", cfg.DesktopUpdateChannel())
 	}
 }
 

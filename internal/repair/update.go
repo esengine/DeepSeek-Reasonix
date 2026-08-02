@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -88,6 +89,28 @@ type UpdateRollbackResult struct {
 	// the install now mixes binaries from two releases. Launchers must not
 	// start the desktop in this state.
 	MixedInstall bool `json:"mixedInstall,omitempty"`
+}
+
+// ErrPendingUpdateAwaitingHealth reports that the currently running release is
+// still the probationary target of a prior update. Callers must not cancel or
+// roll it back merely to start another update; the normal startup health
+// confirmation owns that transition.
+var ErrPendingUpdateAwaitingHealth = errors.New("previous update is awaiting startup health confirmation")
+
+// PendingUpdateReconcileResult describes the safe transition performed before
+// startup or a new install. Cleared means a pre-publish transaction was
+// cancelled while every original target still matched its prepared state.
+// RolledBack means replacement had started and the verified previous release
+// unit was restored.
+type PendingUpdateReconcileResult struct {
+	Pending        bool   `json:"pending"`
+	Cleared        bool   `json:"cleared,omitempty"`
+	RolledBack     bool   `json:"rolledBack,omitempty"`
+	MixedInstall   bool   `json:"mixedInstall,omitempty"`
+	AwaitingHealth bool   `json:"awaitingHealth,omitempty"`
+	FromVersion    string `json:"fromVersion,omitempty"`
+	ToVersion      string `json:"toVersion,omitempty"`
+	TargetPath     string `json:"targetPath,omitempty"`
 }
 
 // UpdateTransactionID returns a stable, opaque identity for the complete
@@ -1585,6 +1608,123 @@ func readPendingUpdateUnchecked() (*UpdateTransaction, error) {
 func HasPendingUpdate() bool {
 	_, err := ReadPendingUpdate()
 	return err == nil
+}
+
+// PendingUpdateExists reports the on-disk marker even when its contents are
+// malformed. It is intended only for progress/UI decisions; callers must use
+// ReadPendingUpdate or ReconcilePendingUpdate before authorizing mutations.
+func PendingUpdateExists() bool {
+	path := PendingUpdatePath()
+	if path == "" {
+		return false
+	}
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// ReconcilePendingUpdate resolves an older immutable update transaction before
+// startup or a new install. It first attempts the narrow cancellation path,
+// which succeeds only while every original target still matches the state
+// captured by prepare and no replacement state is durable. If publication has
+// started, it falls back to the exact verified rollback path. Both transitions
+// re-read the complete transaction under the pending and target mutation locks.
+//
+// A transaction targeting runningVersion is left untouched only when the
+// transaction also proves that its replacement release unit is installed and
+// its rollback state is intact. Version equality alone is not installation
+// evidence: a same-version/manual launch may observe an abandoned prepare.
+func ReconcilePendingUpdate(runningVersion string) (PendingUpdateReconcileResult, error) {
+	tx, err := ReadPendingUpdate()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return PendingUpdateReconcileResult{}, nil
+		}
+		return PendingUpdateReconcileResult{Pending: true}, fmt.Errorf("reconcile pending update: %w", err)
+	}
+	result := PendingUpdateReconcileResult{
+		Pending:     true,
+		FromVersion: tx.FromVersion,
+		ToVersion:   tx.ToVersion,
+		TargetPath:  tx.TargetPath,
+	}
+	if strings.TrimSpace(runningVersion) == strings.TrimSpace(tx.ToVersion) &&
+		pendingUpdateInstalledForHealth(tx) {
+		result.AwaitingHealth = true
+		return result, ErrPendingUpdateAwaitingHealth
+	}
+
+	// Cancel is deliberately attempted before rollback. For app bundles it
+	// requires the original tree and an absent backup; for file release units it
+	// requires every prepared target and no installed-state sidecar. A failed
+	// cancel never mutates the transaction or release unit.
+	if cancelErr := CancelPendingUpdateExact(tx); cancelErr == nil {
+		// Exact cancellation historically treats a different target version or
+		// creation time as an inert success. Re-check the public postcondition so
+		// reconciliation never reports a newer transaction as cleared.
+		current, currentErr := ReadPendingUpdate()
+		if os.IsNotExist(currentErr) {
+			result.Cleared = true
+			cleanupPendingUpdateStaging(tx)
+			return result, nil
+		}
+		if currentErr != nil {
+			return result, fmt.Errorf("reconcile pending update: verify cancellation: %w", currentErr)
+		}
+		if !reflect.DeepEqual(tx, current) {
+			return result, fmt.Errorf("reconcile pending update: pending transaction changed during cancellation")
+		}
+		return result, fmt.Errorf("reconcile pending update: transaction remained after cancellation")
+	}
+
+	rollback, rollbackErr := RollbackPendingUpdateExact(tx)
+	if rollbackErr != nil {
+		result.RolledBack = rollback.RolledBack
+		result.MixedInstall = rollback.MixedInstall
+		return result, fmt.Errorf("reconcile pending update: %w", rollbackErr)
+	}
+	if !rollback.RolledBack {
+		// Another exact owner may have committed or cancelled the transaction
+		// between the invocation snapshot and the locked transition.
+		if _, currentErr := ReadPendingUpdate(); os.IsNotExist(currentErr) {
+			return PendingUpdateReconcileResult{}, nil
+		}
+		return result, fmt.Errorf("reconcile pending update: transaction could not be cancelled or rolled back")
+	}
+	result.RolledBack = true
+	cleanupPendingUpdateStaging(tx)
+	return result, nil
+}
+
+// pendingUpdateInstalledForHealth requires transaction-bound evidence for the
+// complete replacement and rollback unit. It intentionally treats missing or
+// drifted evidence as uninstalled so reconciliation can take the existing
+// exact cancel/rollback paths instead of trusting a version string.
+func pendingUpdateInstalledForHealth(tx *UpdateTransaction) bool {
+	if tx == nil {
+		return false
+	}
+	switch tx.TargetKind {
+	case "app-bundle":
+		return VerifyAppBundleUpdateHandoffTarget(tx) == nil &&
+			VerifyAppBundleUpdateHandoffBackup(tx) == nil
+	case "file":
+		_, bound, err := installedFileUpdateTargets(tx, true)
+		return err == nil && bound
+	default:
+		return false
+	}
+}
+
+// cleanupPendingUpdateStaging is best-effort after the pending transaction has
+// been safely committed away. CleanupAppBundleUpdateHandoffStaging verifies the
+// complete recorded tree before removal, so drifted or recreated paths survive.
+func cleanupPendingUpdateStaging(tx *UpdateTransaction) {
+	if tx == nil || tx.TargetKind != "app-bundle" ||
+		strings.TrimSpace(tx.HandoffStagingPath) == "" ||
+		strings.TrimSpace(tx.HandoffStagingTreeID) == "" {
+		return
+	}
+	_ = CleanupAppBundleUpdateHandoffStaging(tx)
 }
 
 func readPendingUpdateInvocation() (*UpdateTransaction, string, map[string]string, error) {

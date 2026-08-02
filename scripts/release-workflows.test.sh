@@ -77,6 +77,34 @@ grep -Eq 'CLI Preview must tag current main-v2' "$repo_root/.github/workflows/re
 grep -Fq 'ALLOW_PREVIEW_RECOVERY: ${{ inputs.allow_preview_recovery }}' "$repo_root/.github/workflows/release.yml"
 grep -Eq 'Preview recovery requires the approved Preview orchestrator' "$repo_root/.github/workflows/release.yml"
 grep -Eq "channel == 'stable'.*HOMEBREW_TAP_TOKEN" "$repo_root/.github/workflows/release.yml"
+grep -Fq 'name: Isolate release-control checkout from product git state' \
+	"$repo_root/.github/workflows/release.yml"
+grep -Fq "grep -qxF '/release-control/'" "$repo_root/.github/workflows/release.yml"
+grep -Fq 'git check-ignore -q release-control/' "$repo_root/.github/workflows/release.yml"
+release_control_isolation_line="$(
+	grep -n -m1 'name: Isolate release-control checkout from product git state' \
+		"$repo_root/.github/workflows/release.yml" | cut -d: -f1
+)"
+goreleaser_action_line="$(
+	grep -n -m1 'uses: goreleaser/goreleaser-action@' \
+		"$repo_root/.github/workflows/release.yml" | cut -d: -f1
+)"
+[ "$release_control_isolation_line" -lt "$goreleaser_action_line" ]
+
+# A protected control-plane checkout must remain available to the workflow
+# without making the immutable product checkout dirty for GoReleaser.
+mkdir -p "$test_root/product-checkout/release-control"
+git init -q "$test_root/product-checkout"
+printf 'control plane\n' >"$test_root/product-checkout/release-control/marker"
+[ "$(git -C "$test_root/product-checkout" status --porcelain --untracked-files=all)" = \
+	'?? release-control/marker' ]
+product_git_common_dir="$(
+	git -C "$test_root/product-checkout" rev-parse --path-format=absolute --git-common-dir
+)"
+product_exclude="$product_git_common_dir/info/exclude"
+printf '%s\n' '/release-control/' >>"$product_exclude"
+git -C "$test_root/product-checkout" check-ignore -q release-control/
+[ -z "$(git -C "$test_root/product-checkout" status --porcelain --untracked-files=all)" ]
 grep -Eq "needs\.build\.result == 'success'" "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq "needs\.publish\.result == 'success'" "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'options: \[stable, preview\]' "$repo_root/.github/workflows/release-desktop.yml"

@@ -247,6 +247,7 @@ context_window = 1000000
 [tools]
 enabled = []
 bash_timeout_seconds = 120
+mcp_startup_timeout_seconds = 30
 mcp_call_timeout_seconds = 300
 
 [permissions]
@@ -272,6 +273,10 @@ auth_mode = "none"
 `[serve]` 控制 `reasonix serve` 的 browser frontend。默认 `auth_mode = "none"` 仅适合 loopback；暴露到其他机器时必须使用 token 或 password。只有位于可信 reverse proxy 后方时才能启用 `behind_proxy`。
 
 项目根目录的 `.mcp.json` 可使用 Claude Code 的 `mcpServers` schema；与 `reasonix.toml` 同名时，以后者为准。
+
+MCP 启动与单次工具调用使用不同生命周期。调用方只短暂等待冷启动，而共享的进程启动、授权、
+`initialize`、`tools/list` 可在后台继续，最长由 `mcp_startup_timeout_seconds`（默认 `30`）
+限制；单个服务器可用 `startup_timeout_seconds` 覆盖。MCP 调用超时只在连接就绪后开始计算。
 
 ## 6. 错误处理
 

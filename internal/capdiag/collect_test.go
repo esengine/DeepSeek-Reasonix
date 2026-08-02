@@ -62,6 +62,13 @@ auto_start = false
 	if r.Live {
 		t.Fatal("static mode must set live=false")
 	}
+	if len(r.MCP.Servers) != 1 {
+		t.Fatalf("MCP servers = %+v, want one effective entry", r.MCP.Servers)
+	}
+	mcp := r.MCP.Servers[0]
+	if !mcp.Effective || mcp.Source != "project_config" || mcp.SourcePath != "<workspace>/reasonix.toml" {
+		t.Fatalf("effective MCP provenance = %+v", mcp)
+	}
 	// Missing convention dirs should not produce warnings.
 	for _, is := range r.Issues {
 		if strings.Contains(is.Message, "missing") && is.Subsystem == "skills" && is.Code != "skill.missing_description" {

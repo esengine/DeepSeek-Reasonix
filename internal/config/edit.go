@@ -375,22 +375,21 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
-// SetDesktopUpdateChannel selects the desktop updater channel. Unknown values
-// fall back to stable; legacy canary/beta/next aliases are normalized to preview.
-func (c *Config) SetDesktopUpdateChannel(channel string) error {
-	c.Desktop.UpdateChannel = NormalizeDesktopUpdateChannel(channel)
+// SetDesktopUpdateChannel is retained for pre-single-channel Wails clients.
+// Clearing the legacy field keeps the next canonical write channel-free.
+func (c *Config) SetDesktopUpdateChannel(_ string) error {
+	c.Desktop.UpdateChannel = ""
 	return nil
 }
 
-// SetCLIUpdateChannel selects the user-global native CLI updater channel.
+// SetCLIUpdateChannel is retained for older CLI scripts. Every recognized
+// historical value migrates to the official channel and is omitted on save.
 func (c *Config) SetCLIUpdateChannel(channel string) error {
 	switch strings.ToLower(strings.TrimSpace(channel)) {
-	case "stable":
-		c.CLI.UpdateChannel = "stable"
-	case "preview":
-		c.CLI.UpdateChannel = "preview"
+	case "", "stable", "preview", "canary", "beta", "next":
+		c.CLI.UpdateChannel = ""
 	default:
-		return fmt.Errorf("CLI update channel %q: must be stable|preview", channel)
+		return fmt.Errorf("CLI update channel %q is unsupported; Reasonix now uses the official release channel", channel)
 	}
 	return nil
 }
@@ -1460,6 +1459,9 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 func validatePlugin(e PluginEntry) error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("plugin: name is required")
+	}
+	if e.StartupTimeoutSeconds < 0 {
+		return fmt.Errorf("plugin %q: startup_timeout_seconds must be >= 0", e.Name)
 	}
 	if e.CallTimeoutSeconds < 0 {
 		return fmt.Errorf("plugin %q: call_timeout_seconds must be >= 0", e.Name)
