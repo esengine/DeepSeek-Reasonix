@@ -1399,7 +1399,7 @@ func removeSessionFiles(absDir, abs string) error {
 // when it matches the file's mtime, otherwise a freshly generated one (cached
 // for next time), falling back to a truncated preview when generation is off.
 func (s *Server) sessionTitle(ctx context.Context, name, first string, mod int64) string {
-	if cached, ok := s.titles.get(name, mod); ok {
+	if cached, ok := s.titles.get(name); ok {
 		return cached
 	}
 	if title := s.generateTitle(ctx, first); title != "" {

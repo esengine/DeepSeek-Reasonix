@@ -6,20 +6,24 @@ import (
 	"testing"
 )
 
-func TestTitleCacheReusesUntilMtimeChanges(t *testing.T) {
+func TestTitleCacheStickyAcrossMtimeChanges(t *testing.T) {
 	dir := t.TempDir()
 	c := newTitleCache(dir)
 
-	if _, ok := c.get("a.jsonl", 100); ok {
+	if _, ok := c.get("a.jsonl"); ok {
 		t.Fatal("empty cache should miss")
 	}
 
 	c.put("a.jsonl", "First Title", 100)
-	if got, ok := c.get("a.jsonl", 100); !ok || got != "First Title" {
-		t.Fatalf("hit on matching mtime = %q,%v, want First Title,true", got, ok)
+	if got, ok := c.get("a.jsonl"); !ok || got != "First Title" {
+		t.Fatalf("hit after put = %q,%v, want First Title,true", got, ok)
 	}
-	if _, ok := c.get("a.jsonl", 200); ok {
-		t.Fatal("changed mtime should invalidate the cached title")
+	// Mtime churn on an active session must not invalidate: the title
+	// summarizes the first message, which never changes. Re-validating by
+	// mtime cost one LLM call on every sidebar poll while chatting.
+	c.put("a.jsonl", "First Title", 200)
+	if got, ok := c.get("a.jsonl"); !ok || got != "First Title" {
+		t.Fatalf("mtime change must not invalidate sticky title = %q,%v", got, ok)
 	}
 }
 
@@ -30,7 +34,7 @@ func TestTitleCachePersistsAcrossInstances(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, ".session-titles.json")); err != nil {
 		t.Fatalf("cache file not written: %v", err)
 	}
-	if got, ok := newTitleCache(dir).get("a.jsonl", 7); !ok || got != "Persisted" {
+	if got, ok := newTitleCache(dir).get("a.jsonl"); !ok || got != "Persisted" {
 		t.Fatalf("fresh instance get = %q,%v, want Persisted,true", got, ok)
 	}
 }
