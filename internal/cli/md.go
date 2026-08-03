@@ -321,6 +321,15 @@ func (r *mdRenderer) renderList(buf *strings.Builder, n *ast.List, src []byte, i
 func (r *mdRenderer) renderFenced(buf *strings.Builder, n ast.Node, src []byte, indent int) {
 	// The gutter rail uses the theme border colour — quieter than the old dim.
 	prefix := strings.Repeat(" ", indent) + themeFg(activeCLITheme.border, "│ ")
+	// Claude Code-style language tag: a small corner label above the block
+	// (fenced blocks only — indented code blocks carry no info string).
+	if fenced, ok := n.(*ast.FencedCodeBlock); ok {
+		if lang := string(fenced.Language(src)); lang != "" {
+			buf.WriteString(strings.Repeat(" ", indent))
+			buf.WriteString(themeFg(activeCLITheme.border, "┌ "+lang))
+			buf.WriteString("\n")
+		}
+	}
 	lines := make([]string, 0, n.Lines().Len())
 	for i := 0; i < n.Lines().Len(); i++ {
 		l := n.Lines().At(i)

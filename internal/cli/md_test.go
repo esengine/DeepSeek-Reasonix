@@ -75,6 +75,17 @@ func TestRenderConstructs(t *testing.T) {
 			contains: []string{"func main()"},
 		},
 		{
+			name:     "fenced code language tag",
+			in:       "```rust\nfn main() {}\n```\n",
+			contains: []string{"┌ rust", "fn main()"},
+		},
+		{
+			name:     "indented code has no language tag",
+			in:       "    indented code\n",
+			contains: []string{"indented code"},
+			notRaw:   []string{"┌ "},
+		},
+		{
 			name:     "thematic break",
 			in:       "above\n\n---\n\nbelow",
 			contains: []string{"above", "below", "─"},
