@@ -231,7 +231,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// archive. Most OpenAI-compatible backends do not replay it; providers
 		// with an explicit round-trip contract retain the raw provider text.
 		calls = a.withPreviewFileDiffs(calls)
-		a.warnMissingToolCallReasoning(calls, reasoning)
+		a.warnMissingToolCallReasoning(calls, reasoning, usage)
 		a.session.Add(provider.Message{
 			Role:               provider.RoleAssistant,
 			Content:            text,

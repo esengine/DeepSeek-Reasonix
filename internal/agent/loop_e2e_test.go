@@ -585,7 +585,7 @@ func TestHealthyToolCallReasoningRetriesTransientStateWriteFailure(t *testing.T)
 		return count
 	}
 
-	a.warnMissingToolCallReasoning(calls, "")
+	a.warnMissingToolCallReasoning(calls, "", nil)
 	if got := warnCount(); got != 1 {
 		t.Fatalf("initial warnings = %d, want 1", got)
 	}
@@ -598,15 +598,84 @@ func TestHealthyToolCallReasoningRetriesTransientStateWriteFailure(t *testing.T)
 			_ = os.Chmod(stateDir, 0o700)
 		}
 	}()
-	a.warnMissingToolCallReasoning(calls, "healthy reasoning")
+	a.warnMissingToolCallReasoning(calls, "healthy reasoning", nil)
 	if err := os.Chmod(stateDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	permissionsRestored = true
 
-	a.warnMissingToolCallReasoning(calls, "")
+	a.warnMissingToolCallReasoning(calls, "", nil)
 	if got := warnCount(); got != 2 {
 		t.Fatalf("warnings after transient healthy-state write failure = %d, want 2", got)
+	}
+}
+
+// TestRunSkipsMissingToolCallReasoningWarnWhenModelSkippedThinking: thinking
+// mode is opportunistic — deepseek-v4-flash and similar models may call tools
+// without producing reasoning_content (usage.reasoning_tokens == 0), which is
+// healthy model behaviour, not a lost-reasoning incident. The warning must
+// fire only when the service reports thinking tokens were spent
+// (reasoning_tokens > 0) yet no content arrived; with no usage telemetry the
+// conservative warning path stays in place.
+func TestRunSkipsMissingToolCallReasoningWarnWhenModelSkippedThinking(t *testing.T) {
+	warnCount := func(sink *recordSink) int {
+		var n int
+		for _, e := range sink.kinds(event.Notice) {
+			if e.Level == event.LevelWarn && strings.Contains(e.Text, "without replayable thinking content") {
+				n++
+			}
+		}
+		return n
+	}
+
+	// reasoning_tokens == 0: the model skipped thinking, so no warning.
+	mp := testutil.NewMock("deepseek-proxy",
+		testutil.Turn{
+			ToolCalls: []provider.ToolCall{{ID: "c1", Name: "echo", Arguments: `{"text":"hi"}`}},
+			Usage:     &provider.Usage{ReasoningTokens: 0},
+		},
+		testutil.Turn{Text: "done"},
+	)
+	sink := &recordSink{}
+	a := New(toolCallReasoningRequiredProvider{mp}, echoRegistry(), NewSession(""), Options{}, sink)
+	if err := a.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := warnCount(sink); got != 0 {
+		t.Fatalf("warn notices for a turn where the model skipped thinking (reasoning_tokens=0) = %d, want 0", got)
+	}
+
+	// reasoning_tokens > 0: thinking happened but no content arrived — incident.
+	mp2 := testutil.NewMock("deepseek-proxy",
+		testutil.Turn{
+			ToolCalls: []provider.ToolCall{{ID: "c2", Name: "echo", Arguments: `{"text":"hi"}`}},
+			Usage:     &provider.Usage{ReasoningTokens: 42},
+		},
+		testutil.Turn{Text: "done"},
+	)
+	sink2 := &recordSink{}
+	a2 := New(toolCallReasoningRequiredProvider{mp2}, echoRegistry(), NewSession(""), Options{}, sink2)
+	if err := a2.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := warnCount(sink2); got != 1 {
+		t.Fatalf("warn notices with reasoning_tokens=42 and no content = %d, want 1", got)
+	}
+
+	// usage == nil: unknown, keep the conservative warning path.
+	mp3 := testutil.NewMock("deepseek-proxy",
+		testutil.Turn{
+			ToolCalls: []provider.ToolCall{{ID: "c3", Name: "echo", Arguments: `{"text":"hi"}`}},
+		},
+		testutil.Turn{Text: "done"},
+	)
+	sink3 := &recordSink{}
+	a3 := New(toolCallReasoningRequiredProvider{mp3}, echoRegistry(), NewSession(""), Options{}, sink3)
+	if err := a3.Run(context.Background(), "go"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := warnCount(sink3); got != 1 {
+		t.Fatalf("warn notices with no usage telemetry = %d, want 1 (conservative)", got)
 	}
 }
 

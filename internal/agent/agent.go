@@ -1269,10 +1269,16 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 // warnMissingToolCallReasoning surfaces a thinking-mode tool-call turn that
 // arrived without replayable provider reasoning. DeepSeek requires that
 // thinking content to be returned and replayed, so absence is a compatibility
-// incident rather than a permanent provider trait. Repeated broken rounds are
-// rate-limited by exact provider configuration, while a healthy round resolves
-// the incident and re-arms a future regression (#6259, #7059).
-func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasoning string) {
+// incident rather than a permanent provider trait — except when the service
+// reports no thinking tokens were spent: thinking mode is opportunistic, so
+// models like deepseek-v4-flash may call tools directly without producing
+// reasoning_content (usage.reasoning_tokens == 0), which the API accepts and
+// never requires replaying. Only a turn where the service reports thinking
+// tokens (reasoning_tokens > 0) yet no content arrived counts as an incident.
+// Repeated broken rounds are rate-limited by exact provider configuration,
+// while a healthy round resolves the incident and re-arms a future regression
+// (#6259, #7059).
+func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasoning string, usage *provider.Usage) {
 	if len(calls) == 0 || !provider.WarnOnMissingToolCallReasoning(a.prov) {
 		return
 	}
@@ -1296,6 +1302,14 @@ func (a *Agent) warnMissingToolCallReasoning(calls []provider.ToolCall, reasonin
 				a.missingReasoningWarnStateChecked = false
 			}
 		}
+		return
+	}
+	// A tool-call turn without reasoning is only an incident when the service
+	// reports thinking tokens were spent: reasoning_tokens == 0 proves the
+	// model skipped thinking this round (healthy opportunistic behaviour), so
+	// there is nothing the client could have lost or must replay. Absent
+	// usage we stay conservative and keep the original warning path.
+	if usage != nil && usage.ReasoningTokens == 0 {
 		return
 	}
 	if a.warnedMissingToolCallReasoning {
