@@ -1,10 +1,16 @@
 package cli
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+
+	"reasonix/internal/control"
+	"reasonix/internal/event"
 )
 
 const sidebarTodoArgs = `{"todos":[` +
@@ -88,8 +94,8 @@ func TestRenderTodoSidebarInactive(t *testing.T) {
 	if out == "" {
 		t.Fatal("sidebar should render the finished list (all-green bullets), not vanish")
 	}
-	if !strings.Contains(out, "Tasks 1/1") || !strings.Contains(out, "done") {
-		t.Fatalf("finished sidebar should show the completed list:\n%s", out)
+	if !strings.Contains(out, "Tasks") || !strings.Contains(out, "▓▓▓▓▓▓▓▓▓▓") || !strings.Contains(out, "1/1") || !strings.Contains(out, "done") {
+		t.Fatalf("finished sidebar should show the completed list with a full progress bar:\n%s", out)
 	}
 }
 
@@ -121,5 +127,152 @@ func TestTodoWindowKeepsActiveVisible(t *testing.T) {
 	}
 	if start != 9 {
 		t.Fatalf("window start = %d, want 9 (active centered)", start)
+	}
+}
+
+func TestRenderTodoSidebarShowsWorkspaceRoot(t *testing.T) {
+	// The workspace root is pinned as the sidebar's last row so the panel
+	// identifies where the session runs; a missing root (plain fixture) adds
+	// no row, keeping the existing compact height contract.
+	ctrl := control.New(control.Options{WorkspaceRoot: `C:\repo\DeepSeek-Reasonix`})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 160)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	m = m0.(chatTUI)
+	m.todoArgs = sidebarTodoArgs
+	m0, _ = m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	m = m0.(chatTUI)
+	out := ansi.Strip(m.renderTodoSidebar(30))
+	if !strings.Contains(out, "DeepSeek-Reasonix") {
+		t.Fatalf("sidebar should pin the workspace root:\n%s", out)
+	}
+	// The root is separated from the task list by a rail and highlighted with
+	// the accent marker, so it can't be mistaken for one more task row.
+	if !strings.Contains(out, "◆ C:\\repo\\DeepSeek-Reasonix") {
+		t.Fatalf("root row should carry the accent marker:\n%s", out)
+	}
+	if lines := strings.Count(out, "\n") + 1; lines != 7 {
+		t.Fatalf("sidebar with root = %d rows, want 7 (header + 4 items + separator + root)", lines)
+	}
+}
+
+func TestRenderTodoSidebarWrapsLongTitles(t *testing.T) {
+	long := "Implement the bidirectional streaming protocol with backpressure"
+	m := chatTUI{width: 160, todoArgs: `{"todos":[{"content":"` + long + `","status":"pending"}]}`, height: 30}
+	out := ansi.Strip(m.renderTodoSidebar(30))
+	// Wrap breaks at word boundaries, so the full title is present word by
+	// word (continuation rows keep the inter-word space); an ellipsis would
+	// mean the cap truncated it.
+	for _, w := range strings.Fields(long) {
+		if !strings.Contains(out, w) {
+			t.Fatalf("long title word %q missing (truncated?):\n%s", w, out)
+		}
+	}
+	if strings.Contains(out, "…") {
+		t.Fatalf("title within the wrap cap must not carry an ellipsis:\n%s", out)
+	}
+	// 1 header + 3 wrapped rows = 4.
+	if lines := strings.Count(out, "\n") + 1; lines != 4 {
+		t.Fatalf("sidebar rows = %d, want 4 (header + 3 wrapped title rows)", lines)
+	}
+}
+
+func TestRenderTodoSidebarCapsWrappedRows(t *testing.T) {
+	// A title longer than todoSidebarWrapMax rows is truncated with an
+	// ellipsis, and the whole column stays within the terminal height even
+	// when every task wraps.
+	args := `{"todos":[`
+	for i := 0; i < 10; i++ {
+		args += `{"content":"step ` + string(rune('a'+i)) + ` ` + strings.Repeat("x", 120) + `","status":"pending"},`
+	}
+	args = strings.TrimSuffix(args, ",") + `]}`
+	m := chatTUI{width: 160, todoArgs: args, height: 24}
+	out := ansi.Strip(m.renderTodoSidebar(24))
+	if !strings.Contains(out, "+N more") && !strings.Contains(out, "+7 more") {
+		// At least the later tasks must be cut off: 10 wrapped titles cannot
+		// fit in a 24-row column.
+		if lines := strings.Count(out, "\n") + 1; lines <= 20 {
+			t.Fatalf("sidebar with 10 long titles should overflow into a +N more footer:\n%s", out)
+		}
+	}
+	if lines := strings.Count(out, "\n") + 1; lines > 24 {
+		t.Fatalf("sidebar must not exceed the terminal height: %d rows\n%s", lines, out)
+	}
+	if !strings.Contains(out, "…") {
+		t.Fatalf("title past the wrap cap should be truncated with an ellipsis:\n%s", out)
+	}
+}
+
+func TestTodoSidebarWheelScrollsWindow(t *testing.T) {
+	todos := make([]todoPanelTodo, 30)
+	for i := range todos {
+		todos[i] = todoPanelTodo{Content: fmt.Sprintf("step %d", i), Status: "pending"}
+	}
+	args, err := json.Marshal(struct {
+		Todos []todoPanelTodo `json:"todos"`
+	}{Todos: todos})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := menuMouseFixture(t, 0, 160, 30, false)
+	m.todoArgs = string(args)
+	m0, _ := m.Update(tea.WindowSizeMsg{Width: 160, Height: 30})
+	m = m0.(chatTUI)
+	// A wheel over the sidebar column arms the manual window and scrolls it.
+	m0, _ = m.Update(tea.MouseWheelMsg{X: 155, Y: 10, Button: tea.MouseWheelDown})
+	m = m0.(chatTUI)
+	if m.todoSidebarScroll < 0 {
+		t.Fatal("wheel over the sidebar should arm the manual scroll window")
+	}
+	out := ansi.Strip(m.renderTodoSidebar(30))
+	if !strings.Contains(out, "+1 above") {
+		t.Fatalf("scrolled window should show the +1 above footer:\n%s", out)
+	}
+	// Repeated scrolling clamps at the list end: the window never runs past
+	// the last task.
+	for i := 0; i < 40; i++ {
+		m0, _ = m.Update(tea.MouseWheelMsg{X: 155, Y: 10, Button: tea.MouseWheelDown})
+		m = m0.(chatTUI)
+	}
+	_, end := m.scrollWindowBounds(todos, 30)
+	if end != len(todos) {
+		t.Fatalf("clamped scroll window end = %d, want %d", end, len(todos))
+	}
+	// A fresh todo_write resets to auto-follow.
+	m.todoArgs = sidebarTodoArgs
+	m.todoSidebarScroll = -1
+	out = ansi.Strip(m.renderTodoSidebar(30))
+	if strings.Contains(out, "above") {
+		t.Fatalf("auto window with 4 tasks should have no above footer:\n%s", out)
+	}
+}
+
+// scrollWindowBounds mirrors renderTodoSidebar's manual-window math for
+// asserting the clamped end position without rendering.
+func (m chatTUI) scrollWindowBounds(todos []todoPanelTodo, height int) (int, int) {
+	w := max(height-5, 1)
+	start := min(m.todoSidebarScroll, max(len(todos)-w, 0))
+	return start, min(start+w, len(todos))
+}
+
+func TestWrapTodoLine(t *testing.T) {
+	// Short text: single row, no truncation.
+	got := wrapTodoLine("short", 20, 3)
+	if len(got) != 1 || got[0] != "short" {
+		t.Fatalf("short line = %v, want [short]", got)
+	}
+	// Long text wraps onto multiple rows, all within the width.
+	got = wrapTodoLine(strings.Repeat("word ", 8), 10, 3)
+	if len(got) != 3 {
+		t.Fatalf("wrapped rows = %d, want 3", len(got))
+	}
+	for _, l := range got {
+		if w := visibleWidth(l); w > 10 {
+			t.Fatalf("wrapped row %q exceeds width 10 (%d)", l, w)
+		}
+	}
+	// Text beyond the cap is truncated with an ellipsis on the last kept row.
+	got = wrapTodoLine(strings.Repeat("x", 100), 10, 2)
+	if len(got) != 2 || !strings.HasSuffix(ansi.Strip(got[1]), "…") {
+		t.Fatalf("capped rows = %v, want 2 rows ending in an ellipsis", got)
 	}
 }

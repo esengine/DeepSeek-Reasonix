@@ -569,6 +569,41 @@ func (m *chatTUI) acceptCompletion() {
 	}
 }
 
+// sheetClickSelect handles a left-click on the active bottom sheet: clicking
+// an item row moves the selection there, and clicking the already-selected
+// row accepts it (the Enter contract). It returns true when the click was
+// consumed by a sheet. Clicks on the sheet's scrollbar column are handled by
+// the scrollbar drag paths and must not reach here; clicks outside the chat
+// column (e.g. on the todo sidebar) are never interpreted as sheet rows.
+func (m *chatTUI) sheetClickSelect(x, y int) bool {
+	if !m.completion.active || len(m.completion.items) == 0 {
+		return false
+	}
+	top, bottom := m.completionMenuBounds()
+	if y < top || y >= bottom-1 { // last row is the hint footer
+		return false
+	}
+	if x < 0 || x >= m.contentWidth() {
+		return false
+	}
+	rowInMenu := y - top
+	rows := m.completionPanelRows()
+	if rowInMenu >= rows {
+		return false
+	}
+	start := completionWindowStart(m.completion.sel, len(m.completion.items), rows)
+	idx := start + rowInMenu
+	if idx >= len(m.completion.items) {
+		return false
+	}
+	if m.completion.sel == idx {
+		m.acceptCompletion()
+	} else {
+		m.completion.sel = idx
+	}
+	return true
+}
+
 var compSelStyle lipgloss.Style
 
 // pickerSheetStyle tints the bottom-sheet picker rows (slash menu and every

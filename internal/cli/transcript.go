@@ -38,6 +38,7 @@ type transcriptSource struct {
 	raw      string
 	aux      string
 	planMode bool
+	ts       string // HH:MM send time for user bubbles; "" = no timestamp
 	maxLines int
 	history  []provider.Message
 }
@@ -88,7 +89,7 @@ func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth 
 	case transcriptSourceMarkdown:
 		return renderAssistantMarkdown(source.raw, contentWidth)
 	case transcriptSourceUser:
-		return renderUserBubble(source.raw, contentWidth, source.planMode)
+		return renderUserBubble(source.raw, contentWidth, source.planMode, source.ts)
 	case transcriptSourceReasoning:
 		return reasoningBlock(source.raw, terminalWidth, source.maxLines)
 	case transcriptSourceToolCard:

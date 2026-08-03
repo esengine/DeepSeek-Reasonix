@@ -372,6 +372,13 @@ func (m *chatTUI) composerCaretAt(screenX, screenY int, clamp bool) (composerCar
 	if !ok {
 		return composerCaret{}, false
 	}
+	// The composer occupies the chat column only. A click beyond its right
+	// edge — e.g. on the todo sidebar column when the task list is pinned
+	// beside the chat — must never hit-test as a composer cell, or the
+	// resulting composer selection would swallow the next transcript drag.
+	if screenX < x || screenX >= x+m.input.Width()+composerPromptWidth {
+		return composerCaret{}, false
+	}
 	relY := screenY - y
 	if !clamp && (relY < 0 || relY >= m.input.Height()) {
 		return composerCaret{}, false

@@ -120,6 +120,10 @@ type chatTUI struct {
 	// pinned just above the input (see renderTodoPanel). "" when there's no list.
 	// Persists across turns until the work completes or a new session starts.
 	todoArgs string
+	// todoSidebarScroll is the manual scroll offset of the right-hand task list;
+	// -1 keeps the auto window centered on the in-progress item. A wheel over
+	// the sidebar column sets it; any new todo_write resets it to -1.
+	todoSidebarScroll int
 
 	// planMode mirrors the agent's plan-first workflow (Shift+Tab toggles it). The
 	// marker rides in outgoing user messages so the cache-stable prompt prefix is
@@ -625,6 +629,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		submittedInputs:      submittedInputsFromHistory(history),
 		submittedInputCursor: -1,
 		queueEditCursor:      -1,
+		todoSidebarScroll:    -1,
 		nextPasteID:          nextPasteID,
 		usedPasteIDs:         usedPasteIDs,
 		reasoningLineIdx:     -1,
@@ -1021,6 +1026,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		}
+		// A wheel over the right-hand task-list column scrolls its window
+		// instead of the transcript (the sidebar owns that column).
+		if m.todoSidebarActive() && msg.X >= m.contentWidth() {
+			m.scrollTodoSidebar(wheelDelta(msg.Button))
+			return m, nil
+		}
 		if m.mouseOverComposer(msg.X, msg.Y) {
 			delta := 0
 			switch msg.Button {
@@ -1097,6 +1108,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case m.inRewindScrollbar(msg.X, msg.Y):
 				m.sheetScrollbar = &sheetScrollbarDrag{panel: "rewind", grab: m.rewindScrollbarGrabRowOffset(msg.Y)}
 				m.dragRewindScrollbar(msg.Y)
+				return m, nil
+			case m.sheetClickSelect(msg.X, msg.Y):
+				// A left-click on a bottom-sheet row moves the selection
+				// there; clicking the selected row accepts it.
 				return m, nil
 			}
 		}
@@ -1660,6 +1675,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commitLine("")
 				m.commitTranscriptSource(transcriptSource{
 					kind: transcriptSourceUser, raw: line, planMode: m.planMode,
+					ts: time.Now().Format("15:04"),
 				})
 				m.bubblePending = true
 				m.turnDiscarded = false
@@ -3767,23 +3783,28 @@ func (m chatTUI) renderTodoPanel() string {
 	if start > 0 {
 		b.WriteString(dim(fmt.Sprintf("  +%d above", start)) + "\n")
 	}
+	// The panel has a top border plus left padding, so the usable row width is
+	// contentWidth-2; longer titles are truncated (the sidebar wraps instead).
+	panelWidth := max(m.contentWidth()-6, 8)
 	for _, t := range todos[start:end] {
 		indent := "  "
 		if t.Level >= 1 {
 			indent = "      " // sub-steps sit under their phase
 		}
+		var line string
 		switch t.Status {
 		case "completed":
-			b.WriteString(indent + green("●") + " " + dim(t.Content) + "\n")
+			line = indent + green("●") + " " + dim(t.Content)
 		case "in_progress":
 			label := t.Content
 			if t.ActiveForm != "" {
 				label = t.ActiveForm
 			}
-			b.WriteString(indent + accent("▶") + " " + label + "\n")
+			line = indent + accent("▶") + " " + label
 		default:
-			b.WriteString(indent + dim("○ "+t.Content) + "\n")
+			line = indent + dim("○ "+t.Content)
 		}
+		b.WriteString(ansi.Truncate(line, panelWidth, "…") + "\n")
 	}
 	if end < len(todos) {
 		b.WriteString(dim(fmt.Sprintf("  +%d more", len(todos)-end)) + "\n")
@@ -3792,13 +3813,12 @@ func (m chatTUI) renderTodoPanel() string {
 }
 
 // renderTodoSidebar renders the task list as a right-hand column on wide
-// terminals (todoSidebarMinWidth+ columns). It shows the same data as the
-// renderTodoSidebar renders the task list as a compact right-hand column on
-// wide terminals (todoSidebarMinWidth+ columns). Unlike the pinned bottom
+// terminals (todoSidebarMinWidth+ columns). Unlike the pinned bottom
 // panel it renders beside the chat column, but its height hugs its content —
 // the column never stretches to the full screen, so the composer row stays
-// clean beside it. Returns "" when the sidebar is inactive (narrow terminal
-// or no outstanding work).
+// clean beside it. The workspace root is pinned as the last row so the panel
+// always identifies where the session runs. Returns "" when the sidebar is
+// inactive (narrow terminal or no outstanding work).
 func (m chatTUI) renderTodoSidebar(height int) string {
 	if !m.todoSidebarActive() {
 		return ""
@@ -3806,6 +3826,10 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 	todos, ok := parseTodoPanelArgs(m.todoArgs)
 	if !ok {
 		return ""
+	}
+	root := ""
+	if m.ctrl != nil {
+		root = strings.TrimSpace(m.ctrl.WorkspaceRoot())
 	}
 	done := 0
 	for _, t := range todos {
@@ -3820,16 +3844,47 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 	inner := max(todoSidebarWidth-2, 10) // minus the two vertical borders
 	var b strings.Builder
 	if height >= 3 {
-		fmt.Fprintf(&b, "%s %d/%d\n", accent("Tasks"), done, len(todos))
+		// Same 10-cell progress bar as the pinned bottom panel, so the two
+		// task surfaces read identically: completed cells in success, the
+		// rest in the quiet border colour, done/total count in faint.
+		filled := done * 10 / len(todos)
+		bar := green(strings.Repeat("▓", filled)) + themeFg(activeCLITheme.border, strings.Repeat("░", 10-filled))
+		fmt.Fprintf(&b, "%s %s %s\n", accent("Tasks"), bar, dim(fmt.Sprintf("%d/%d", done, len(todos))))
 	}
-	// One header row is reserved above; the "+N above"/"+N more" footers each
-	// take a row of their own below the window.
-	avail := max(height-4, 1)
-	start, end := todoWindow(todos, avail)
+	start, end := todoWindow(todos, max(height-5, 1))
+	// A manual scroll (wheel over the sidebar column) overrides the auto
+	// window; the offset is clamped so the window never runs past the list.
+	if m.todoSidebarScroll >= 0 {
+		w := max(height-5, 1)
+		start = min(m.todoSidebarScroll, max(len(todos)-w, 0))
+		end = min(start+w, len(todos))
+	}
+	// Row budget: the header above, then the task lines, then the footers
+	// ("+N above", "+N more", and the workspace root) below. Long titles wrap
+	// onto continuation lines, so the rendered tasks are capped by the budget
+	// rather than by the item count — a wrapped title can never push the
+	// column past the terminal height.
+	footers := 1 // "+N more" slot
+	if start > 0 {
+		footers++
+	}
+	if root != "" {
+		footers += 2 // separator + highlighted path row
+	}
+	avail := max(height-1-footers, 1)
+	used := 0
 	if start > 0 {
 		b.WriteString(dim(fmt.Sprintf("+%d above", start)) + "\n")
+		used++
 	}
-	for _, t := range todos[start:end] {
+	last := start
+	// The lipgloss frame reserves 2 border columns plus 1 padding column, so
+	// the text area is inner-1 wide; sub-step indent is carved out of the wrap
+	// width so no rendered row exceeds the frame (lipgloss would wrap an
+	// over-wide row itself, misaligning the column).
+	wrapWidth := max(inner-1, 4)
+	for i := start; i < end; i++ {
+		t := todos[i]
 		indent := ""
 		if t.Level >= 1 {
 			indent = "   " // sub-steps sit under their phase
@@ -3847,14 +3902,78 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 		default:
 			line = dim("○ " + t.Content)
 		}
-		b.WriteString(indent + ansi.Truncate(line, max(inner-2, 4), "…") + "\n")
+		width := wrapWidth
+		if indent != "" {
+			width = max(wrapWidth-3, 4)
+		}
+		wrapped := wrapTodoLine(line, width, todoSidebarWrapMax)
+		if used+len(wrapped) > avail {
+			break
+		}
+		for _, wl := range wrapped {
+			b.WriteString(indent + wl + "\n")
+			used++
+		}
+		last++
 	}
-	if end < len(todos) {
-		b.WriteString(dim(fmt.Sprintf("+%d more", len(todos)-end)) + "\n")
+	if last < len(todos) {
+		b.WriteString(dim(fmt.Sprintf("+%d more", len(todos)-last)) + "\n")
+	}
+	if root != "" {
+		// The workspace root sits below a separator rail so it never reads as
+		// one more task row, and wears the accent instead of dim so the panel
+		// location is scannable at a glance.
+		b.WriteString(themeFg(activeCLITheme.border, strings.Repeat("─", max(inner-1, 1))) + "\n")
+		b.WriteString(accent("◆ ") + viewCompactPath(root, max(inner-4, 4)) + "\n")
 	}
 	// Compact: no fixed Height — the column ends where its content ends, so a
 	// short task list never leaves a hollow bordered column beside the input.
 	return todoSidebarStyle.Width(todoSidebarWidth).Render(strings.TrimRight(b.String(), "\n"))
+}
+
+// todoSidebarWrapMax caps how many rows one task title may occupy in the
+// sidebar; longer titles are truncated with an ellipsis on the last kept row
+// so a pathological title can't blow up the column past the terminal height.
+const todoSidebarWrapMax = 3
+
+// scrollTodoSidebar moves the manual task-list window by delta rows (clamped),
+// switching it out of the auto-follow mode. A wheel over the sidebar column
+// calls this; any new todo_write resets to auto-follow.
+func (m *chatTUI) scrollTodoSidebar(delta int) {
+	todos, ok := parseTodoPanelArgs(m.todoArgs)
+	if !ok || delta == 0 {
+		return
+	}
+	w := max(m.height-5, 1)
+	maxStart := max(len(todos)-w, 0)
+	off := m.todoSidebarScroll
+	if off < 0 {
+		// First manual scroll: start from the auto window's top so the wheel
+		// feels continuous with what is already on screen.
+		off, _ = todoWindow(todos, w)
+	}
+	// clampInt caps at total-1 (index semantics); an offset may reach maxStart.
+	off = min(max(off+delta, 0), maxStart)
+	m.todoSidebarScroll = off
+}
+
+// wrapTodoLine wraps a task line to width, ANSI-aware, capping the result at
+// maxLines rows. Content beyond the cap is truncated with an ellipsis on the
+// last kept row.
+func wrapTodoLine(line string, width, maxLines int) []string {
+	if width < 4 {
+		width = 4
+	}
+	if maxLines < 1 {
+		maxLines = 1
+	}
+	wrapped := strings.Split(ansi.Wrap(line, width, " "), "\n")
+	if len(wrapped) > maxLines {
+		kept := wrapped[:maxLines]
+		kept[maxLines-1] = ansi.Truncate(kept[maxLines-1], width-1, "…")
+		return kept
+	}
+	return wrapped
 }
 
 // todoWindow returns the [start, end) window of todos that fits maxRows rows,
@@ -3998,7 +4117,10 @@ func (m chatTUI) inputHeightLimit() int {
 
 func (m *chatTUI) syncInputHeightLimit() {
 	limit := m.inputHeightLimit()
-	if m.input.MaxHeight == limit {
+	width := max(m.contentWidth()-6, 1)
+	// The textarea reserves composerPromptWidth columns for the prompt gutter,
+	// so Width() reports the set width minus the gutter.
+	if m.input.MaxHeight == limit && m.input.Width() == width-composerPromptWidth {
 		return
 	}
 	m.followComposerCursor()
@@ -4007,7 +4129,11 @@ func (m *chatTUI) syncInputHeightLimit() {
 	// clamping the visible viewport to the new limit while preserving the text.
 	// The box's side borders + left padding take 3 columns and 1 more keeps the
 	// text off the frame, so the textarea gets width-6 (see also WindowSizeMsg).
-	m.input.SetWidth(max(m.contentWidth()-6, 1))
+	// The width is re-applied even when the height cap did not change: the todo
+	// sidebar appearing/disappearing shrinks/grows the chat column without any
+	// height change, and a stale textarea width would overflow the composer
+	// card and skew mouse hit-testing.
+	m.input.SetWidth(width)
 }
 
 func (m *chatTUI) growInputToFit() {
@@ -4203,6 +4329,7 @@ func (m *chatTUI) startControllerTurn(displayed, restore string, start func()) t
 	m.commitLine("") // blank line separating turns
 	m.commitTranscriptSource(transcriptSource{
 		kind: transcriptSourceUser, raw: displayed, planMode: m.planMode,
+		ts: time.Now().Format("15:04"),
 	})
 	m.bubblePending = true
 	m.turnDiscarded = false
@@ -4349,6 +4476,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.collapseToolOutput(e.Tool.ID, e.Tool.Output)
 		if e.Tool.Name == "todo_write" && e.Tool.Err == "" {
 			m.todoArgs = e.Tool.Args
+			m.todoSidebarScroll = -1 // a fresh list re-centers on the active item
 		}
 		if e.Tool.Err != "" {
 			m.finalizeStreamed()
@@ -5200,7 +5328,7 @@ func replaySectionsForWithAssistantRenderer(
 				continue
 			}
 			content := control.StripComposePrefixes(m.Content)
-			out = append(out, renderUserBubble(content, width, false)+"\n\n")
+			out = append(out, renderUserBubble(content, width, false, bubbleTime(m.CreatedAt))+"\n\n")
 		case provider.RoleAssistant:
 			if reasoning := strings.TrimSpace(m.ReasoningContent); reasoning != "" {
 				out = append(out, reasoningMarker(i18n.M.ChatThinking)+"\n"+reasoningBlock(reasoning, width, 0)+"\n\n")
@@ -5243,35 +5371,71 @@ func wrapForViewport(text string, width int, fg cliColor) string {
 	return themeStyle(fg).Width(width).Render(text)
 }
 
-// renderUserBubble renders the just-submitted prompt as a transcript line.
-// The whole row sits on the user-bubble surface (one step lighter than the
-// chat background) so user turns read as a block next to the assistant's
-// plain flowing text — a role-border idea adapted to a flat palette.
-// The "›" marker carries the accent (bold); the body stays in the default
-// foreground so long prompts don't shout. Plan mode prepends an accent
-// "[plan]" chip.
-func renderUserBubble(line string, width int, planMode bool) string {
+// renderUserBubble renders the just-submitted prompt as a transcript block:
+// the user's message is wrapped in a full border frame — a top rail with a
+// "You" label (plus the HH:MM send time when ts is non-empty), per-row side
+// rails, and a bottom rail — so user turns read as a distinct card next to
+// the assistant's plain flowing text (the OpenCode-style treatment). The body
+// rows still wear the user-bubble surface (one step lighter than the chat
+// background); the "›" marker carries the accent (bold); the body stays in
+// the default foreground so long prompts don't shout. Plan mode prepends an
+// accent "[plan]" chip.
+func renderUserBubble(line string, width int, planMode bool, ts string) string {
 	line = displayLineForImageRefs(line)
-	if !colorOn() {
-		if planMode {
-			return "│ › [plan] " + line
-		}
-		return "│ › " + line
+	width = max(width, 8)
+	bodyW := max(width-4, 4) // "│ " + body + " │"
+	marker := "›"
+	if colorOn() {
+		marker = themeStyle(activeCLITheme.accent).Bold(true).Render("›")
 	}
-	marker := themeStyle(activeCLITheme.accent).Bold(true).Render("›")
-	prefix := "  " + marker + " "
+	prefix := " " + marker + " "
 	if planMode {
-		prefix = "  " + marker + " " + accent("[plan]") + " "
+		prefix = " " + marker + " " + accent("[plan]") + " "
 	}
-	// Pad each physical row to the content width before painting the
-	// background, so the block is a solid band across the transcript column
-	// (the width-aware re-wrap later treats these rows as already full-width).
-	width = max(width, 1)
-	lines := strings.Split(line, "\n")
-	for i, l := range lines {
-		lines[i] = userBubbleStyle.Render(padCompletionLine(prefix+l, width))
+	body := strings.Split(line, "\n")
+	for i, l := range body {
+		padded := padCompletionLine(prefix+l, bodyW)
+		if colorOn() {
+			padded = userBubbleStyle.Render(padded)
+		}
+		body[i] = padded
 	}
-	return strings.Join(lines, "\n")
+	label := "You"
+	if ts != "" {
+		label = "You · " + ts
+	}
+	if colorOn() {
+		label = themeStyle(activeCLITheme.accent).Bold(true).Render(label)
+	}
+	rail := "│"
+	topL, topR, botL, botR, dash := "┌", "┐", "└", "┘", "─"
+	if colorOn() {
+		rail = themeFg(activeCLITheme.border, rail)
+		topL = themeFg(activeCLITheme.border, topL)
+		topR = themeFg(activeCLITheme.border, topR)
+		botL = themeFg(activeCLITheme.border, botL)
+		botR = themeFg(activeCLITheme.border, botR)
+		dash = themeFg(activeCLITheme.border, dash)
+	}
+	var b strings.Builder
+	// "┌─ " + label + " " + fill + "┐" must total `width` columns; the label
+	// may carry ANSI, so its visible width drives the fill.
+	fill := max(width-5-ansi.StringWidth(label), 0)
+	b.WriteString(topL + dash + " " + label + " " + strings.Repeat(dash, fill) + topR + "\n")
+	for _, l := range body {
+		b.WriteString(rail + " " + l + " " + rail + "\n")
+	}
+	b.WriteString(botL + strings.Repeat(dash, max(width-2, 0)) + botR)
+	return b.String()
+}
+
+// bubbleTime formats a message's unix-millisecond CreatedAt as HH:MM; "" when
+// the timestamp is unset (e.g. synthesized messages without local metadata).
+func bubbleTime(createdAt int64) string {
+	if createdAt <= 0 {
+		return ""
+	}
+	return time.UnixMilli(createdAt).Format("15:04")
 }
 
 var cliImageRefRe = regexp.MustCompile(`(?:^|\s)@\.reasonix/attachments/clipboard-\d{8}-\d{6}\.\d+(?:-(?:\d{6}|[a-f0-9]{8}))?\.(?:png|jpg|jpeg|gif|webp)`)

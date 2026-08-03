@@ -1312,7 +1312,7 @@ func TestUserBubbleEchoedImmediately(t *testing.T) {
 	// Stand in for startTurn's immediate echo (no controller in the unit harness).
 	m.bubbleStartIdx = len(m.transcript)
 	m.commitLine("")
-	m.commitLine(renderUserBubble("hello world", m.width, m.planMode))
+	m.commitLine(renderUserBubble("hello world", m.width, m.planMode, ""))
 	m.bubblePending = true
 	m.state = tuiRunning
 
@@ -1345,7 +1345,7 @@ func TestUserBubbleIsSolidRoleBand(t *testing.T) {
 	activeColorProfile = colorprofile.ANSI256
 	defer func() { activeColorProfile = prevColor }()
 
-	got := renderUserBubble("hello world", 80, false)
+	got := renderUserBubble("hello world", 80, false, "")
 	plain := ansi.Strip(got)
 	if !strings.Contains(plain, "› hello world") {
 		t.Fatalf("user bubble missing prompt text: %q", plain)
@@ -1353,12 +1353,102 @@ func TestUserBubbleIsSolidRoleBand(t *testing.T) {
 	if got == plain {
 		t.Fatalf("user bubble should use themed colors when color is enabled: %q", got)
 	}
-	// The band spans the full content width (NBSP padding inside the block).
-	if w := ansi.StringWidth(plain); w != 80 {
-		t.Fatalf("user bubble band width = %d, want full content width 80: %q", w, plain)
+	// Every frame row spans the full content width (NBSP padding inside the
+	// block): the top rail, each body row, and the bottom rail.
+	for i, l := range strings.Split(plain, "\n") {
+		if w := ansi.StringWidth(l); w != 80 {
+			t.Fatalf("user bubble row %d width = %d, want full content width 80: %q", i, w, l)
+		}
+	}
+	if !strings.Contains(plain, "┌─ You ") || !strings.HasSuffix(plain, "┘") {
+		t.Fatalf("user bubble should be framed with a You label:\n%s", plain)
 	}
 	if !strings.Contains(got, "48;5;") {
 		t.Fatalf("user bubble should wear the user-bubble background band: %q", got)
+	}
+}
+
+// TestUserBubbleFramesMultiline pins the OpenCode-style frame for multi-line
+// prompts: one rail row per physical line, a single top rail with the You
+// label, a single bottom rail, and every row exactly `width` columns wide.
+func TestUserBubbleFramesMultiline(t *testing.T) {
+	prevColor := activeColorProfile
+	activeColorProfile = colorprofile.ANSI256
+	defer func() { activeColorProfile = prevColor }()
+
+	got := renderUserBubble("first line\nsecond line", 40, false, "")
+	plain := ansi.Strip(got)
+	rows := strings.Split(plain, "\n")
+	if len(rows) != 4 {
+		t.Fatalf("two-line prompt should render 4 frame rows (top + 2 body + bottom), got %d:\n%s", len(rows), plain)
+	}
+	if !strings.HasPrefix(rows[0], "┌─ You ") || !strings.HasSuffix(rows[0], "┐") {
+		t.Fatalf("top rail with You label missing: %q", rows[0])
+	}
+	if !strings.Contains(rows[1], "› first line") || !strings.Contains(rows[2], "› second line") {
+		t.Fatalf("body rows should carry both prompt lines:\n%s", plain)
+	}
+	if !strings.HasPrefix(rows[3], "└") || !strings.HasSuffix(rows[3], "┘") {
+		t.Fatalf("bottom rail missing: %q", rows[3])
+	}
+	for i, r := range rows {
+		if w := ansi.StringWidth(r); w != 40 {
+			t.Fatalf("frame row %d width = %d, want 40: %q", i, w, r)
+		}
+	}
+	// The frame survives the transcript re-wrap pass unchanged (already
+	// full-width rows).
+	if re := ansi.Strip(wrapTranscript(plain, 40)); re != plain {
+		t.Fatalf("re-wrap should preserve the frame:\n%s", re)
+	}
+}
+
+// TestUserBubbleShowsSendTime pins the HH:MM timestamp on the frame's top
+// rail: "You · 14:32" when a time is given, plain "You" when not, with the
+// rail still spanning the full width. bubbleTime maps unix-ms CreatedAt.
+func TestUserBubbleShowsSendTime(t *testing.T) {
+	prevColor := activeColorProfile
+	activeColorProfile = colorprofile.NoTTY
+	defer func() { activeColorProfile = prevColor }()
+
+	got := renderUserBubble("hello", 40, false, "14:32")
+	rows := strings.Split(ansi.Strip(got), "\n")
+	if !strings.HasPrefix(rows[0], "┌─ You · 14:32 ") || !strings.HasSuffix(rows[0], "┐") {
+		t.Fatalf("top rail should carry the HH:MM send time: %q", rows[0])
+	}
+	for i, r := range rows {
+		if w := ansi.StringWidth(r); w != 40 {
+			t.Fatalf("row %d width = %d, want 40: %q", i, w, r)
+		}
+	}
+	// No timestamp: plain You label.
+	plain := ansi.Strip(renderUserBubble("hello", 40, false, ""))
+	if !strings.HasPrefix(plain, "┌─ You ") {
+		t.Fatalf("top rail without ts should stay plain You: %q", plain)
+	}
+
+	// bubbleTime formatting: unix ms -> HH:MM; zero/negative -> "".
+	if got := bubbleTime(time.Date(2026, 8, 3, 14, 32, 0, 0, time.Local).UnixMilli()); got != "14:32" {
+		t.Fatalf("bubbleTime = %q, want 14:32", got)
+	}
+	if got := bubbleTime(0); got != "" {
+		t.Fatalf("bubbleTime(0) = %q, want empty", got)
+	}
+}
+
+// TestReplayUserMessageUsesFrame pins the history-replay path: a user message
+// rendered through renderTranscriptSource wears the same bordered frame as a
+// freshly submitted prompt.
+func TestReplayUserMessageUsesFrame(t *testing.T) {
+	prevColor := activeColorProfile
+	activeColorProfile = colorprofile.ANSI256
+	defer func() { activeColorProfile = prevColor }()
+
+	m := chatTUI{nativeScrollback: true}
+	out := m.renderTranscriptSource(transcriptSource{kind: transcriptSourceUser, raw: "Which version?"}, 48)
+	plain := ansi.Strip(out)
+	if !strings.HasPrefix(plain, "┌─ You ") || !strings.Contains(plain, "› Which version?") || !strings.HasSuffix(plain, "┘") {
+		t.Fatalf("replayed user message should be framed:\n%s", plain)
 	}
 }
 
@@ -3297,7 +3387,7 @@ func TestUnsendRestoresFoldedPastePlaceholder(t *testing.T) {
 	m.ctrl = control.New(control.Options{})
 	m.bubbleStartIdx = len(m.transcript)
 	m.commitLine("")
-	m.commitLine(renderUserBubble("expanded JSON", m.width, m.planMode))
+	m.commitLine(renderUserBubble("expanded JSON", m.width, m.planMode, ""))
 	m.pendingRestore = "[Pasted text #1 · 5 lines] 这是什么?"
 	m.bubblePending = true
 	m.state = tuiRunning
@@ -4286,7 +4376,7 @@ func TestUserBubbleAccentMarkerPlainBody(t *testing.T) {
 	activeColorProfile = colorprofile.ANSI256
 	refreshCLIStyles()
 
-	got := renderUserBubble("hello world", 80, false)
+	got := renderUserBubble("hello world", 80, false, "")
 	if plain := ansi.Strip(got); !strings.Contains(plain, "› hello world") {
 		t.Fatalf("user bubble missing prompt text: %q", plain)
 	}
@@ -4296,7 +4386,7 @@ func TestUserBubbleAccentMarkerPlainBody(t *testing.T) {
 		t.Fatalf("user bubble body should stay in the default foreground after the marker: %q", got)
 	}
 
-	plan := renderUserBubble("do it", 80, true)
+	plan := renderUserBubble("do it", 80, true, "")
 	if !strings.Contains(plan, accent("[plan]")) {
 		t.Fatalf("plan bubble should carry the accent [plan] chip: %q", plan)
 	}
@@ -4306,11 +4396,15 @@ func TestUserBubbleAccentMarkerPlainBody(t *testing.T) {
 
 	activeColorProfile = colorprofile.NoTTY
 	refreshCLIStyles()
-	if got := renderUserBubble("x", 80, false); got != "│ › x" {
-		t.Fatalf("NO_COLOR user bubble = %q, want %q", got, "│ › x")
+	// NO_COLOR keeps the frame (box-drawing rails) but drops all colour: no
+	// background band, no accent marker.
+	plain := ansi.Strip(renderUserBubble("x", 80, false, ""))
+	if !strings.HasPrefix(plain, "┌─ You ") || !strings.Contains(plain, "\n│  › x") || !strings.HasSuffix(plain, "┘") {
+		t.Fatalf("NO_COLOR user bubble should keep the full frame:\n%q", plain)
 	}
-	if got := renderUserBubble("x", 80, true); got != "│ › [plan] x" {
-		t.Fatalf("NO_COLOR plan bubble = %q, want %q", got, "│ › [plan] x")
+	plain = ansi.Strip(renderUserBubble("x", 80, true, ""))
+	if !strings.Contains(plain, "\n│  › [plan] x") {
+		t.Fatalf("NO_COLOR plan bubble = %q, want › [plan] prefix", plain)
 	}
 }
 
