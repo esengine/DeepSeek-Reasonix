@@ -224,3 +224,82 @@ func TestSplitHostPath(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRemoteConnectSyntaxFlagOrder(t *testing.T) {
+	cases := []struct {
+		name      string
+		args      []string
+		openAlias bool
+		wantName  string
+		wantOpen  bool
+		wantWS    string
+		wantPort  int
+		wantErr   bool
+	}{
+		{
+			name:     "name then flags (documented / GUIDE order)",
+			args:     []string{"gpu-box", "--open", "--workspace", "/tmp/ws", "--local-port", "8080"},
+			wantName: "gpu-box",
+			wantOpen: true,
+			wantWS:   "/tmp/ws",
+			wantPort: 8080,
+		},
+		{
+			name:     "flags then name",
+			args:     []string{"--open", "--workspace", "/tmp/ws", "gpu-box"},
+			wantName: "gpu-box",
+			wantOpen: true,
+			wantWS:   "/tmp/ws",
+		},
+		{
+			name:     "single-dash open before name",
+			args:     []string{"-open", "gpu-box"},
+			wantName: "gpu-box",
+			wantOpen: true,
+		},
+		{
+			name:     "name only",
+			args:     []string{"gpu-box"},
+			wantName: "gpu-box",
+		},
+		{
+			name:      "open alias sets open without flag",
+			args:      []string{"gpu-box"},
+			openAlias: true,
+			wantName:  "gpu-box",
+			wantOpen:  true,
+		},
+		{
+			name:    "missing name",
+			args:    []string{"--open"},
+			wantErr: true,
+		},
+		{
+			name:    "extra positional after name-first flags",
+			args:    []string{"gpu-box", "extra"},
+			wantErr: true,
+		},
+		{
+			name:    "two names after flags",
+			args:    []string{"--open", "a", "b"},
+			wantErr: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := parseRemoteConnectSyntax(c.args, c.openAlias)
+			if c.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.name != c.wantName || got.open != c.wantOpen || got.workspace != c.wantWS || got.localPort != c.wantPort {
+				t.Fatalf("got %+v, want name=%q open=%v workspace=%q localPort=%d", got, c.wantName, c.wantOpen, c.wantWS, c.wantPort)
+			}
+		})
+	}
+}

@@ -127,27 +127,77 @@ func terminalHostKeyPrompt(_ context.Context, q remote.HostKeyQuestion) (bool, e
 	return answer == "y" || answer == "yes", nil
 }
 
-// remoteConnectCLI runs a foreground supervisor: connect, bootstrap serve,
-// forward the serve port and configured forwards, and hold the tunnel until
-// Ctrl-C. The remote serve keeps running after disconnect.
-func remoteConnectCLI(args []string, version string) int {
-	// args[0] is "connect" or "open".
-	openAlias := args[0] == "open"
+// remoteConnectSyntax is the parsed form of `reasonix remote connect|open …`.
+type remoteConnectSyntax struct {
+	name        string
+	workspace   string
+	localPort   int
+	noServe     bool
+	open        bool
+	forwardOnly bool
+}
+
+const remoteConnectUsage = "usage: reasonix remote connect <name> [flags]"
+
+// parseRemoteConnectSyntax accepts both documented orders:
+//
+//	reasonix remote connect <name> [flags]
+//	reasonix remote connect [flags] <name>
+//
+// Go's flag package stops at the first positional, so `<name> --open` used to
+// fail even though help/GUIDE show that form. We keep stdlib flags (so `-open`
+// still works) and only special-case a leading host name.
+func parseRemoteConnectSyntax(args []string, openAlias bool) (remoteConnectSyntax, error) {
 	fs := newFlagSet("remote connect")
 	workspace := fs.String("workspace", "", "remote workspace directory")
 	localPort := fs.Int("local-port", 0, "local port to bind for the serve tunnel (0 = auto)")
 	noServe := fs.Bool("no-serve", false, "only establish forwards; do not bootstrap serve")
 	open := fs.Bool("open", openAlias, "print/open the serve URL")
 	forwardOnly := fs.Bool("forward-only", false, "apply configured forwards only; no serve")
-	if err := fs.Parse(args[1:]); err != nil {
-		return 2
+
+	var name string
+	flagArgs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name = args[0]
+		flagArgs = args[1:]
+	}
+	if err := fs.Parse(flagArgs); err != nil {
+		return remoteConnectSyntax{}, err
 	}
 	rest := fs.Args()
-	if len(rest) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix remote connect <name> [flags]")
+	switch {
+	case name != "" && len(rest) == 0:
+		// name-first: connect <name> [flags]
+	case name == "" && len(rest) == 1:
+		// flags-first: connect [flags] <name>
+		name = rest[0]
+	default:
+		return remoteConnectSyntax{}, fmt.Errorf("%s", remoteConnectUsage)
+	}
+	return remoteConnectSyntax{
+		name:        name,
+		workspace:   *workspace,
+		localPort:   *localPort,
+		noServe:     *noServe,
+		open:        *open,
+		forwardOnly: *forwardOnly,
+	}, nil
+}
+
+// remoteConnectCLI runs a foreground supervisor: connect, bootstrap serve,
+// forward the serve port and configured forwards, and hold the tunnel until
+// Ctrl-C. The remote serve keeps running after disconnect.
+func remoteConnectCLI(args []string, version string) int {
+	// args[0] is "connect" or "open".
+	openAlias := args[0] == "open"
+	syntax, err := parseRemoteConnectSyntax(args[1:], openAlias)
+	if err != nil {
+		if err.Error() == remoteConnectUsage {
+			fmt.Fprintln(os.Stderr, remoteConnectUsage)
+		}
 		return 2
 	}
-	name := rest[0]
+	name := syntax.name
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -155,7 +205,7 @@ func remoteConnectCLI(args []string, version string) int {
 		return 1
 	}
 	entry, _ := cfg.RemoteHost(name)
-	ws := *workspace
+	ws := syntax.workspace
 	if ws == "" {
 		ws = entry.Workspace
 	}
@@ -198,7 +248,7 @@ func remoteConnectCLI(args []string, version string) int {
 		fmt.Fprintf(os.Stderr, "%s %v\n", i18n.M.ErrorPrefix, err)
 	}
 
-	if !*noServe && !*forwardOnly {
+	if !syntax.noServe && !syntax.forwardOnly {
 		res, err := bootstrap.EnsureServe(ctx, client, bootstrap.Options{
 			Workspace:      ws,
 			Install:        entry.ServeInstallMode(),
@@ -216,13 +266,13 @@ func remoteConnectCLI(args []string, version string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		localURL, ferr := forwardServe(client, res.State.Addr, *localPort, res.Token)
+		localURL, ferr := forwardServe(client, res.State.Addr, syntax.localPort, res.Token)
 		if ferr != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, ferr)
 			return 1
 		}
 		fmt.Printf(i18n.M.RemoteServeReadyFmt+"\n", localURL)
-		if *open {
+		if syntax.open {
 			_ = openInBrowser(localURL)
 		}
 	}
