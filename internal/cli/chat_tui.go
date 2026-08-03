@@ -3891,24 +3891,24 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 		if t.Level >= 1 {
 			indent = "   " // sub-steps sit under their phase
 		}
-		var line string
+		var icon, content string
 		switch t.Status {
 		case "completed":
-			line = green("●") + " " + dim(t.Content)
+			icon = green("●") + " "
+			content = dim(t.Content)
 		case "in_progress":
-			label := t.Content
+			content = t.Content
 			if t.ActiveForm != "" {
-				label = t.ActiveForm
+				content = t.ActiveForm
 			}
-			line = accent("▶") + " " + label
+			icon = accent("▶") + " "
 		default:
-			line = dim("○ " + t.Content)
+			icon = dim("○ ")
+			content = dim(t.Content)
 		}
-		width := wrapWidth
-		if indent != "" {
-			width = max(wrapWidth-3, 4)
-		}
-		wrapped := wrapTodoLine(line, width, todoSidebarWrapMax)
+		// Continuation rows hang under the bullet's text column so wrapped
+		// titles stay aligned with the icon row.
+		wrapped := wrapTodoLine(icon, content, wrapWidth, todoSidebarWrapMax)
 		if used+len(wrapped) > avail {
 			break
 		}
@@ -3959,23 +3959,35 @@ func (m *chatTUI) scrollTodoSidebar(delta int) {
 	m.todoSidebarScroll = off
 }
 
-// wrapTodoLine wraps a task line to width, ANSI-aware, capping the result at
-// maxLines rows. Content beyond the cap is truncated with an ellipsis on the
-// last kept row.
-func wrapTodoLine(line string, width, maxLines int) []string {
+// wrapTodoLine wraps a task title to width, ANSI-aware, capping the result at
+// maxLines rows. The bullet icon is kept on the first row and every
+// continuation row hangs under the text column that follows it (never under
+// the bullet), so wrapped titles stay aligned. Content beyond the cap is
+// truncated with an ellipsis on the last kept row.
+func wrapTodoLine(icon, content string, width, maxLines int) []string {
 	if width < 4 {
 		width = 4
 	}
 	if maxLines < 1 {
 		maxLines = 1
 	}
-	wrapped := strings.Split(ansi.Wrap(line, width, " "), "\n")
-	if len(wrapped) > maxLines {
-		kept := wrapped[:maxLines]
-		kept[maxLines-1] = ansi.Truncate(kept[maxLines-1], width-1, "…")
-		return kept
+	hang := ansi.StringWidth(icon)
+	contentW := max(width-hang, 4)
+	wrapped := strings.Split(ansi.Wrap(content, contentW, " "), "\n")
+	cap := maxLines
+	if len(wrapped) < cap {
+		cap = len(wrapped)
 	}
-	return wrapped
+	pad := strings.Repeat(" ", hang)
+	out := make([]string, 0, cap)
+	out = append(out, icon+wrapped[0])
+	for _, l := range wrapped[1:cap] {
+		out = append(out, pad+l)
+	}
+	if len(wrapped) > maxLines {
+		out[maxLines-1] = pad + ansi.Truncate(wrapped[maxLines-1], contentW-1, "…")
+	}
+	return out
 }
 
 // todoWindow returns the [start, end) window of todos that fits maxRows rows,

@@ -276,23 +276,32 @@ func (m chatTUI) scrollWindowBounds(todos []todoPanelTodo, height int) (int, int
 }
 
 func TestWrapTodoLine(t *testing.T) {
-	// Short text: single row, no truncation.
-	got := wrapTodoLine("short", 20, 3)
-	if len(got) != 1 || got[0] != "short" {
-		t.Fatalf("short line = %v, want [short]", got)
+	// Short text: single row, no truncation, bullet on the first row.
+	got := wrapTodoLine("○ ", "short", 20, 3)
+	if len(got) != 1 || got[0] != "○ short" {
+		t.Fatalf("short line = %v, want [○ short]", got)
 	}
-	// Long text wraps onto multiple rows, all within the width.
-	got = wrapTodoLine(strings.Repeat("word ", 8), 10, 3)
-	if len(got) != 3 {
-		t.Fatalf("wrapped rows = %d, want 3", len(got))
+	// Long text wraps onto multiple rows, all within the width; continuation
+	// rows hang under the bullet's text column (2 columns for "○ ").
+	got = wrapTodoLine("○ ", strings.Repeat("word ", 8), 12, 4)
+	if len(got) < 3 {
+		t.Fatalf("wrapped rows = %d, want >= 3", len(got))
 	}
 	for _, l := range got {
-		if w := visibleWidth(l); w > 10 {
-			t.Fatalf("wrapped row %q exceeds width 10 (%d)", l, w)
+		if w := visibleWidth(l); w > 12 {
+			t.Fatalf("wrapped row %q exceeds width 12 (%d)", l, w)
+		}
+	}
+	if !strings.HasPrefix(ansi.Strip(got[0]), "○ ") {
+		t.Fatalf("first row should carry the bullet: %q", got[0])
+	}
+	for _, l := range got[1:] {
+		if !strings.HasPrefix(ansi.Strip(l), "  ") {
+			t.Fatalf("continuation row should hang 2 columns: %q", l)
 		}
 	}
 	// Text beyond the cap is truncated with an ellipsis on the last kept row.
-	got = wrapTodoLine(strings.Repeat("x", 100), 10, 2)
+	got = wrapTodoLine("● ", strings.Repeat("x", 100), 10, 2)
 	if len(got) != 2 || !strings.HasSuffix(ansi.Strip(got[1]), "…") {
 		t.Fatalf("capped rows = %v, want 2 rows ending in an ellipsis", got)
 	}
