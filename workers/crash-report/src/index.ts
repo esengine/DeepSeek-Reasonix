@@ -126,9 +126,8 @@ export const CLI_TELEMETRY_SCHEMA_SQL = [
      os TEXT NOT NULL,
      PRIMARY KEY (date, signal, bucket, install_id)
    )`,
-  "CREATE INDEX IF NOT EXISTS cli_pings_version ON cli_pings (version)",
-  "CREATE INDEX IF NOT EXISTS cli_metrics_signal_bucket ON cli_metrics (signal, bucket)",
-  "CREATE INDEX IF NOT EXISTS cli_metric_users_signal_bucket ON cli_metric_users (signal, bucket)",
+  // No secondary indexes: each primary key already leads with `date`, which is
+  // what every dashboard query filters on. See migrate-window-index-fix.sql.
 ] as const;
 
 const cliTelemetrySchemaPromises = new WeakMap<object, Promise<void>>();

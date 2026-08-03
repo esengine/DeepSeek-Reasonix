@@ -9,6 +9,12 @@
 --   metric_users  5.3M rows:  31.6s -> 3.3s
 --   pings         568k rows:  672ms -> 459ms
 -- Dropping them also drops their write cost on the ingest path.
+--
+-- Run this only against a worker that no longer creates the cli_* three:
+-- ensureCLITelemetrySchema used to rebuild them on the next CLI request.
 DROP INDEX IF EXISTS metrics_signal_bucket;
 DROP INDEX IF EXISTS metric_users_signal_bucket;
 DROP INDEX IF EXISTS pings_version;
+DROP INDEX IF EXISTS cli_metrics_signal_bucket;
+DROP INDEX IF EXISTS cli_metric_users_signal_bucket;
+DROP INDEX IF EXISTS cli_pings_version;
