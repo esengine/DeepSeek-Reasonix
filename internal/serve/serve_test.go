@@ -313,6 +313,19 @@ func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	}
 }
 
+func TestServeIndexAutoModeButtonCanTurnAutoOff(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"async function toggleAutoMode(){",
+		"await setToolApprovalMode(auto?'ask':'auto');",
+		"if(m==='auto')await toggleAutoMode();",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing reversible Auto mode behavior %q", want)
+		}
+	}
+}
+
 func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 	html := string(indexHTML)
 	for _, want := range []string{
