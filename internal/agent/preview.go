@@ -149,6 +149,22 @@ func UserPreviewText(content string) string {
 	return strings.TrimSpace(s)
 }
 
+// pasteDisplayLabelPattern matches the UI display label line that desktop
+// prepends to pasted-text user turns, e.g.
+// "[已粘贴文本 #1 · 100 行]", "[已貼上文字 #2 · 5 行]", "[Pasted text #3 · 42 lines]".
+// The label is a UI artifact, not user content: session titles and previews
+// must not start with it, otherwise a paste-first session gets a title like
+// "[已粘贴文本 #1 · 100 行]…". Keep in sync with desktop/app.go
+// pastedTextDisplayLabelPattern and desktop/frontend composer.pastedLabel.
+var pasteDisplayLabelPattern = regexp.MustCompile(`(?m)^\[(?:已粘贴文本|已貼上文字|Pasted text) #[0-9]+ · [0-9]+ (?:行|lines)\][ \t]*\n?`)
+
+// StripPasteDisplayLabel removes the pasted-text display label line (and its
+// trailing newline) from user-authored content. Used by preview/title
+// derivation so UI chrome never leaks into session titles.
+func StripPasteDisplayLabel(content string) string {
+	return pasteDisplayLabelPattern.ReplaceAllString(content, "")
+}
+
 // UserMessageText returns the best user-authored view of a persisted user turn.
 // New sessions carry the exact raw text explicitly; older sessions fall back to
 // deterministic wrapper stripping.
@@ -212,6 +228,7 @@ func hasLegacyProviderWrapper(content string) bool {
 // sites in internal/agent/agent.go, internal/agent/compact.go, and
 // internal/control (plan approval, goal loop).
 var SyntheticUserPrefixes = []string{
+	"<reasoning-language>",
 	"Plan approved — plan mode is off",
 	"Host final-answer readiness check failed",
 	"You are already in the executor phase",
