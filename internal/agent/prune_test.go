@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -82,6 +83,52 @@ func TestPruneStaleToolResults(t *testing.T) {
 	}
 	if got := sess.RewriteVersion(); got != 1 {
 		t.Errorf("no-op pass bumped RewriteVersion to %d", got)
+	}
+}
+
+func TestProjectStaleToolResultsIsDeterministicAndPathFree(t *testing.T) {
+	big := strings.Repeat("alpha\n", 1200)
+	project := func(dir string) (string, PruneStats) {
+		sess := pruneFixture(big)
+		beforeMessages := sess.Snapshot()
+		beforeShape := CaptureShape(beforeMessages[0].Content, nil, sess.RewriteVersion())
+		a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ArchiveDir: dir, ToolResultProjection: true}, event.Discard)
+		st, err := a.ProjectStaleToolResults()
+		if err != nil {
+			t.Fatal(err)
+		}
+		afterMessages := sess.Snapshot()
+		afterShape := CaptureShape(afterMessages[0].Content, nil, sess.RewriteVersion())
+		if beforeShape.SystemHash != afterShape.SystemHash || beforeShape.ToolsHash != afterShape.ToolsHash {
+			t.Fatal("projection changed cache-stable system/tool shape")
+		}
+		if !reflect.DeepEqual(beforeMessages[4:], afterMessages[4:]) {
+			t.Fatal("projection changed the protected recent tail")
+		}
+		return sess.Snapshot()[3].Content, st
+	}
+	one, st1 := project(filepath.Join(t.TempDir(), "one"))
+	two, st2 := project(filepath.Join(t.TempDir(), "two"))
+	if one != two {
+		t.Fatal("projection changed with archive location")
+	}
+	if !strings.HasPrefix(one, projectedMarker) || !strings.Contains(one, "sha256=") {
+		t.Fatalf("unexpected projection: %.120q", one)
+	}
+	if strings.Contains(one, st1.Archive) || strings.Contains(two, st2.Archive) {
+		t.Fatal("projection leaked local archive path")
+	}
+	if st1.Results != 1 || st1.SavedChars <= 0 {
+		t.Fatalf("stats = %+v", st1)
+	}
+}
+
+func TestMaybeCompactProjectionReportsNextUsageCounters(t *testing.T) {
+	sess := pruneFixture(strings.Repeat("x", 5000))
+	a := New(nil, tool.NewRegistry(), sess, Options{ContextWindow: 1000, RecentKeep: 2, ToolResultProjection: true}, event.Discard)
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 650})
+	if a.pendingProjectedResults != 1 || a.pendingProjectionSavedChars <= 0 {
+		t.Fatalf("pending projection metrics = %d/%d", a.pendingProjectedResults, a.pendingProjectionSavedChars)
 	}
 }
 

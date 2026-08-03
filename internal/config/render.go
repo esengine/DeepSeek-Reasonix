@@ -227,6 +227,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 	fmt.Fprintf(&b, "soft_compact_ratio  = %s   # notice only; keeps cache-first prefix intact\n", formatFloat(c.Agent.SoftCompactRatio))
 	fmt.Fprintf(&b, "tool_result_snip_ratio = %s   # snip stale tool results at this fraction before summary compaction\n", formatFloat(c.Agent.ToolResultSnipRatio))
+	fmt.Fprintf(&b, "tool_result_projection = %t   # deterministic stale-result projection experiment\n", c.Agent.ToolResultProjection)
 	fmt.Fprintf(&b, "compact_ratio       = %s   # try compacting when prompt reaches this fraction\n", formatFloat(c.Agent.CompactRatio))
 	fmt.Fprintf(&b, "compact_force_ratio = %s   # force compacting at this high-water mark\n", formatFloat(c.Agent.CompactForceRatio))
 	if c.Agent.Keep != nil {
@@ -920,6 +921,10 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 	if c.Agent.ToolResultSnipRatio != d.Agent.ToolResultSnipRatio {
 		fmt.Fprintf(&agentBuf, "tool_result_snip_ratio = %s\n", formatFloat(c.Agent.ToolResultSnipRatio))
+		anyAgent = true
+	}
+	if c.Agent.ToolResultProjection != d.Agent.ToolResultProjection {
+		fmt.Fprintf(&agentBuf, "tool_result_projection = %t\n", c.Agent.ToolResultProjection)
 		anyAgent = true
 	}
 	if c.Agent.CompactRatio != d.Agent.CompactRatio {

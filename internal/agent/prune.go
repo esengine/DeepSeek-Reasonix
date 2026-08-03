@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
 
@@ -13,9 +14,10 @@ import (
 // them needs no summarizer call and never drops a message. tool_call/result
 // pairing and assistant content (including signed reasoning) are untouched.
 const (
-	snippedMarker = "[snipped tool result — "
-	prunedMarker  = "[elided tool result — "
-	minPruneBytes = 1024
+	snippedMarker   = "[snipped tool result — "
+	prunedMarker    = "[elided tool result — "
+	projectedMarker = "[projected tool result — "
+	minPruneBytes   = 1024
 )
 
 type toolResultMaintenanceMode int
@@ -23,6 +25,7 @@ type toolResultMaintenanceMode int
 const (
 	toolResultSnip toolResultMaintenanceMode = iota
 	toolResultPrune
+	toolResultProject
 )
 
 // PruneStats reports one maintenance pass.
@@ -44,6 +47,13 @@ func (a *Agent) SnipStaleToolResults() (PruneStats, error) {
 // snipped results to a shorter placeholder.
 func (a *Agent) PruneStaleToolResults() (PruneStats, error) {
 	return a.maintainStaleToolResults(toolResultPrune)
+}
+
+// ProjectStaleToolResults deterministically retains the salient head/tail of
+// stale results. Full originals are archived locally, but provider-visible text
+// contains only stable metadata and never an archive path or timestamp.
+func (a *Agent) ProjectStaleToolResults() (PruneStats, error) {
+	return a.maintainStaleToolResults(toolResultProject)
 }
 
 func (a *Agent) maintainStaleToolResults(mode toolResultMaintenanceMode) (PruneStats, error) {
@@ -118,10 +128,10 @@ func shouldMaintainToolResult(m provider.Message, mode toolResultMaintenanceMode
 	if m.LocalOnly || m.Role != provider.RoleTool {
 		return false
 	}
-	if strings.HasPrefix(m.Content, prunedMarker) {
+	if strings.HasPrefix(m.Content, prunedMarker) || strings.HasPrefix(m.Content, projectedMarker) {
 		return false
 	}
-	if mode == toolResultSnip {
+	if mode == toolResultSnip || mode == toolResultProject {
 		return len(m.Content) >= minPruneBytes && !strings.HasPrefix(m.Content, snippedMarker)
 	}
 	if strings.HasPrefix(m.Content, snippedMarker) {
@@ -134,7 +144,23 @@ func rewriteToolResult(m provider.Message, mode toolResultMaintenanceMode, archi
 	if mode == toolResultPrune {
 		return pruneToolResult(m, archive)
 	}
+	if mode == toolResultProject {
+		return projectToolResult(m, strategy)
+	}
 	return snipToolResult(m, archive, strategy)
+}
+
+func projectToolResult(m provider.Message, strategy snipStrategy) string {
+	sum := sha256.Sum256([]byte(m.Content))
+	headChars := minInt(strategy.headChars, 6000)
+	tailChars := minInt(strategy.tailChars, 2000)
+	if headChars+tailChars >= len(m.Content) {
+		headChars = len(m.Content) / 2
+		tailChars = len(m.Content) / 4
+	}
+	return fmt.Sprintf("%s%s; original_bytes=%d; sha256=%x; deterministic head/tail projection]\n%s\n[... %d bytes omitted ...]\n%s",
+		projectedMarker, m.Name, len(m.Content), sum[:8],
+		firstRunes(m.Content, headChars), omittedBytes(m.Content, headChars, tailChars), lastRunes(m.Content, tailChars))
 }
 
 func pruneToolResult(m provider.Message, archive string) string {

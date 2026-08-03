@@ -3,6 +3,7 @@ package evidence
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -28,6 +29,56 @@ func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	}
 	if ledger.HasSuccessfulCommand("go test ./internal/...") {
 		t.Fatal("failed bash command must not verify")
+	}
+}
+
+func TestProjectGoalEvidenceIsBoundedContentFreeAndClosesGeneration(t *testing.T) {
+	rawPath := "/private/work/secret.go"
+	cp := ProjectGoalEvidence(DeliveryCheckpoint{ScopeID: "goal-1", PendingMutation: true}, []Receipt{
+		{ToolName: "write_file", Args: json.RawMessage(`{"path":"/private/work/secret.go"}`), Success: true, Write: true, Mutation: true, Paths: []string{rawPath}, OutputBytes: 10},
+		{ToolName: "bash", Args: json.RawMessage(`{"command":"go test ./..."}`), Command: "go test ./...", Success: true, OutputBytes: 20},
+		{ToolName: "complete_step", Args: json.RawMessage(`{"step":"ship"}`), Success: true},
+	}, true)
+	if cp.EvidenceVersion != 1 || cp.MutationGeneration != 1 || cp.ClosedGeneration != 1 {
+		t.Fatalf("checkpoint generations = %+v", cp)
+	}
+	if cp.EvidenceLedger == nil || len(cp.EvidenceLedger.Entries) != 3 {
+		t.Fatalf("ledger = %+v", cp.EvidenceLedger)
+	}
+	b, err := json.Marshal(cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), rawPath) || strings.Contains(string(b), "go test ./...") {
+		t.Fatalf("ledger leaked raw content: %s", b)
+	}
+	entries := cp.EvidenceLedger.Entries
+	if entries[0].Kind != "mutation" || entries[1].Kind != "verification" || entries[2].Kind != "signoff" {
+		t.Fatalf("unexpected kinds: %+v", entries)
+	}
+}
+
+func TestProjectGoalEvidenceKeepsLatest64Entries(t *testing.T) {
+	var receipts []Receipt
+	for i := 0; i < 80; i++ {
+		receipts = append(receipts, Receipt{ToolName: "read_file", Args: json.RawMessage(fmt.Sprintf(`{"n":%d}`, i)), Success: true, Read: true, OutputBytes: 1})
+	}
+	cp := ProjectGoalEvidence(DeliveryCheckpoint{}, receipts, false)
+	if cp.EvidenceLedger == nil || len(cp.EvidenceLedger.Entries) != 64 {
+		t.Fatalf("ledger = %+v", cp.EvidenceLedger)
+	}
+	if cp.EvidenceLedger.Entries[0].Sequence != 17 || cp.EvidenceSequence != 80 {
+		t.Fatalf("sequence window = first %d last %d", cp.EvidenceLedger.Entries[0].Sequence, cp.EvidenceSequence)
+	}
+}
+
+func TestDeliveryCheckpointLegacyJSONRemainsConservative(t *testing.T) {
+	var cp DeliveryCheckpoint
+	if err := json.Unmarshal([]byte(`{"scopeID":"old","mutationObserved":true,"pendingMutation":true}`), &cp); err != nil {
+		t.Fatal(err)
+	}
+	if cp.ScopeID != "old" || !cp.PendingMutation || cp.EvidenceVersion != 0 || cp.EvidenceLedger != nil {
+		t.Fatalf("legacy checkpoint = %+v", cp)
 	}
 }
 

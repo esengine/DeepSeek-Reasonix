@@ -266,15 +266,17 @@ type AskAnswer struct {
 // the last turn. It rides on the Usage event so every frontend can show
 // cache-churn attribution.
 type CacheDiagnostics struct {
-	PrefixHash          string
-	PrefixChanged       bool
-	PrefixChangeReasons []string // "system", "tools", "log_rewrite"
-	SystemHash          string
-	ToolsHash           string
-	LogRewriteVersion   int
-	ToolSchemaTokens    int
-	CacheMissTokens     int
-	CacheHitTokens      int
+	PrefixHash           string
+	PrefixChanged        bool
+	PrefixChangeReasons  []string // "system", "tools", "log_rewrite"
+	SystemHash           string
+	ToolsHash            string
+	LogRewriteVersion    int
+	ToolSchemaTokens     int
+	CacheMissTokens      int
+	CacheHitTokens       int
+	ToolResultsProjected int
+	ProjectionSavedChars int
 }
 
 // FinalReadiness carries machine-readable recovery requirements on TurnDone.

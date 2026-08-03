@@ -654,6 +654,11 @@ func ckptDir(sessionPath string) string {
 func (c *Controller) rebindCheckpoints(sessionPath string) {
 	c.goals.setStatePath(goalStatePath(sessionPath))
 	c.checkpoints.rebind(ckptDir(sessionPath), c.workspaceRoot)
+	if c.executor != nil {
+		if err := c.executor.SetRunJournalPath(store.SessionRunJournal(sessionPath)); err != nil {
+			c.noticeDetail("Run journal is unavailable for this session.", err.Error())
+		}
+	}
 }
 
 // beginCheckpoint opens a checkpoint for the turn about to run, recording the

@@ -1214,10 +1214,11 @@ type AgentConfig struct {
 	// readable, but loading clears it and rendering omits it.
 	AutoPlanClassifier string `toml:"auto_plan_classifier"`
 	// Compaction window fractions: soft = notice only, compact = trigger, force = hard ceiling.
-	SoftCompactRatio    float64 `toml:"soft_compact_ratio"`
-	ToolResultSnipRatio float64 `toml:"tool_result_snip_ratio"`
-	CompactRatio        float64 `toml:"compact_ratio"`
-	CompactForceRatio   float64 `toml:"compact_force_ratio"`
+	SoftCompactRatio     float64 `toml:"soft_compact_ratio"`
+	ToolResultSnipRatio  float64 `toml:"tool_result_snip_ratio"`
+	ToolResultProjection bool    `toml:"tool_result_projection"`
+	CompactRatio         float64 `toml:"compact_ratio"`
+	CompactForceRatio    float64 `toml:"compact_force_ratio"`
 	// Keep controls which compactable messages stay verbatim beyond the current
 	// user-fact/digest floor and recent tail. Empty uses the conservative default
 	// of keeping error tool results.

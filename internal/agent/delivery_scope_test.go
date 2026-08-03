@@ -86,6 +86,10 @@ func TestDeliveryGoalScopeCarriesSignedOffMutationAcrossTurns(t *testing.T) {
 	if err := a.Run(ctx, "finish the goal"); err != nil {
 		t.Fatalf("verification-only completion should reuse scoped evidence: %v", err)
 	}
+	cp := a.DeliveryCheckpoint()
+	if cp.MutationGeneration != 1 || cp.ClosedGeneration != 1 {
+		t.Fatalf("same scoped receipts were projected twice: %+v", cp)
+	}
 }
 
 func TestDeliveryGoalRestoredPendingMutationCompletesWithoutNewWrite(t *testing.T) {
@@ -114,6 +118,8 @@ func TestDeliveryGoalRestoredPendingMutationCompletesWithoutNewWrite(t *testing.
 	}
 	if cp := a.DeliveryCheckpoint(); cp.PendingMutation {
 		t.Fatalf("checkpoint = %+v, want PendingMutation cleared after sign-off", cp)
+	} else if cp.MutationGeneration != 1 || cp.ClosedGeneration != 1 {
+		t.Fatalf("legacy mutation recovery did not close generation 1: %+v", cp)
 	}
 }
 

@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/nilutil"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/runjournal"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
@@ -426,6 +427,9 @@ type Agent struct {
 	// evidence is a per-user-turn ledger of host-observed tool receipts. It lets
 	// complete_step validate that cited evidence happened before the claim.
 	evidence *evidence.Ledger
+	// runJournal is a session-owned, content-free audit trail. It is rebound by
+	// the Controller whenever the session path rotates and never enters prompts.
+	runJournal *runjournal.Journal
 
 	// todoState is the host's canonical task list: the latest successful
 	// todo_write with completions applied by complete_step. Unlike the per-turn
@@ -455,6 +459,7 @@ type Agent struct {
 	deliveryScopeID             string
 	deliveryScopeActive         bool
 	deliveryCheckpoint          evidence.DeliveryCheckpoint
+	deliveryProjectedReceipts   int
 
 	// classifierTaskText is the host-trusted task text for delivery intent
 	// classification, set by sub-agent spawners whose Run input carries host
@@ -503,17 +508,20 @@ type Agent struct {
 	// under the window (consecutiveCompacts crosses the limit), so auto-compaction
 	// pauses instead of looping. softCompactNoticed gates the one-shot soft-ratio
 	// notice so it fires once per approach, not every turn.
-	contextWindow       int
-	softCompactRatio    float64
-	toolResultSnipRatio float64
-	compactRatio        float64
-	compactForceRatio   float64
-	softCompactNoticed  bool
-	recentKeep          int
-	archiveDir          string
-	keepPolicy          KeepPolicy
-	compactStuck        bool
-	consecutiveCompacts int
+	contextWindow               int
+	softCompactRatio            float64
+	toolResultSnipRatio         float64
+	compactRatio                float64
+	compactForceRatio           float64
+	softCompactNoticed          bool
+	recentKeep                  int
+	archiveDir                  string
+	keepPolicy                  KeepPolicy
+	compactStuck                bool
+	consecutiveCompacts         int
+	toolResultProjection        bool
+	pendingProjectedResults     int
+	pendingProjectionSavedChars int
 	// activeTurnCreatedAt identifies the real/synthetic user message that began
 	// the currently running turn. Compaction may rewrite older history while a
 	// tool loop is active, but it must keep this message and everything after it
@@ -1079,6 +1087,10 @@ type Options struct {
 	// depth 0; child subagents are depth 1. MaxSubagentDepth caps delegation.
 	SubagentDepth    int
 	MaxSubagentDepth int
+
+	// ToolResultProjection enables deterministic projection as an experiment
+	// profile. Default false preserves the legacy snip/prune baseline for A/B.
+	ToolResultProjection bool
 }
 
 // New constructs an Agent. MaxSteps <= 0 means no cap — the run loop continues
@@ -1145,6 +1157,8 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if reasoningByteLimit == 0 {
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
+	ledger := evidence.NewLedger()
+	journal := runjournal.New()
 	a := &Agent{
 		prov:                      prov,
 		tools:                     tools,
@@ -1172,7 +1186,8 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),
 		workspaceLease:            opts.WorkspaceLease,
 		missingReasoningWarnState: missingReasoningWarnStateFor(opts.MissingReasoningWarnStateDir),
-		evidence:                  evidence.NewLedger(),
+		evidence:                  ledger,
+		runJournal:                journal,
 		projectChecks:             append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		deliveryProfile:           opts.DeliveryProfile,
 		classifierTaskText:        opts.ClassifierTaskText,
@@ -1186,12 +1201,54 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		recentKeep:                opts.RecentKeep,
 		archiveDir:                opts.ArchiveDir,
 		keepPolicy:                opts.KeepPolicy,
+		toolResultProjection:      opts.ToolResultProjection,
 		subagentDepth:             subagentDepth,
 		maxSubagentDepth:          maxSubagentDepth,
 	}
+	ledger.SetObserver(a.recordRunJournalReceipt)
 	a.SetResponseLanguage(opts.ResponseLanguage)
 	a.SetReasoningLanguage(opts.ReasoningLanguage)
 	return a
+}
+
+// SetRunJournalPath binds the local runtime journal to the active session.
+func (a *Agent) SetRunJournalPath(path string) error {
+	if a == nil || a.runJournal == nil {
+		return nil
+	}
+	return a.runJournal.Bind(path)
+}
+
+func (a *Agent) recordRunJournalReceipt(r evidence.Receipt) {
+	if a == nil || a.runJournal == nil {
+		return
+	}
+	paths := make([]string, 0, len(r.Paths))
+	for _, p := range r.Paths {
+		if len(paths) == 8 {
+			break
+		}
+		paths = append(paths, runjournal.Digest(p))
+	}
+	success := r.Success
+	detail := "work"
+	switch {
+	case r.Mutation || r.Write:
+		detail = "mutation"
+	case r.ToolName == "todo_write":
+		detail = "criteria"
+	case r.ToolName == "complete_step":
+		detail = "signoff"
+	case r.ToolName == "review" || r.ToolName == "review_report" || (r.ToolName == "task" && r.Profile == "review"):
+		detail = "review"
+	case r.ToolName == "bash" && evidence.IsDeliveryVerificationCommand(r.Command):
+		detail = "verification"
+	case r.Read:
+		detail = "inspection"
+	}
+	_ = a.runJournal.Append(runjournal.Entry{Type: "tool_receipt", Tool: r.ToolName,
+		Success: &success, InputDigest: runjournal.Digest(string(r.Args)), PathDigests: paths,
+		OutputBytes: r.OutputBytes, Detail: detail})
 }
 
 func usageSourceOrDefault(source, fallback string) string {
@@ -1251,12 +1308,29 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 			runMaxStepsKey = limit.key
 		}
 	}
-	a.recoveryRunSeq.Add(1)
+	turnStartedAt := time.Now()
+	runSeq := a.recoveryRunSeq.Add(1)
+	runID := fmt.Sprintf("run-%d", runSeq)
+	scopeDigest := ""
+	if scope, ok := DeliveryExecutionScopeFromContext(ctx); ok {
+		scopeDigest = runjournal.Digest(scope.ID)
+	}
+	if a.runJournal != nil {
+		_ = a.runJournal.Append(runjournal.Entry{Type: "run_started", RunID: runID,
+			ScopeDigest: scopeDigest, InputDigest: runjournal.Digest(input)})
+		defer func() {
+			detail := "success"
+			if runErr != nil {
+				detail = "error"
+			}
+			_ = a.runJournal.Append(runjournal.Entry{Type: "run_finished", RunID: runID,
+				ScopeDigest: scopeDigest, DurationMS: time.Since(turnStartedAt).Milliseconds(), Detail: detail})
+		}()
+	}
 	if a.deliveryProfile && a.workspaceLease != nil {
 		a.workspaceLease.BeginRun()
 		defer a.workspaceLease.EndRun()
 	}
-	turnStartedAt := time.Now()
 	workDurationMs := func() int64 {
 		if elapsed := time.Since(turnStartedAt).Milliseconds(); elapsed > 0 {
 			return elapsed
@@ -1668,16 +1742,30 @@ func (a *Agent) updateDeliveryCheckpoint(runErr error) {
 	cp := a.deliveryCheckpoint
 	if cp.ScopeID != a.deliveryScopeID {
 		cp = evidence.DeliveryCheckpoint{ScopeID: a.deliveryScopeID}
+		a.deliveryProjectedReceipts = 0
 	}
 	cp.CriteriaEstablished = cp.CriteriaEstablished || a.deliveryCriteriaEstablished || a.evidence.HasSuccessfulTodoWrite()
 	cp.WorkObserved = cp.WorkObserved || a.evidence.HasSuccessfulWorkReceipt()
+	// Legacy checkpoints predate generation counters. Seed their already-known
+	// mutation as generation 1 before projecting any new receipt.
+	if cp.MutationObserved && cp.MutationGeneration == 0 {
+		cp.MutationGeneration = 1
+	}
 	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
 		cp.MutationObserved = true
 		cp.PendingMutation = true
 	}
-	if runErr == nil && cp.PendingMutation && a.deliveryMutationCheckpointReady() {
+	ready := runErr == nil && cp.PendingMutation && a.deliveryMutationCheckpointReady()
+	if ready {
 		cp.PendingMutation = false
 	}
+	receipts := a.evidence.Receipts()
+	start := a.deliveryProjectedReceipts
+	if start < 0 || start > len(receipts) {
+		start = 0
+	}
+	cp = evidence.ProjectGoalEvidence(cp, receipts[start:], ready)
+	a.deliveryProjectedReceipts = len(receipts)
 	a.deliveryCheckpoint = cp
 }
 

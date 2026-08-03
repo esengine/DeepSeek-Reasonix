@@ -34,3 +34,11 @@ func TestNormalizeBenchmarkProfile(t *testing.T) {
 		t.Fatal("unknown profile should fail")
 	}
 }
+
+func TestAppendBenchmarkProjectionProfileArgs(t *testing.T) {
+	got := appendBenchmarkProfileArgs([]string{"run"}, benchmarkProfileDeliveryProjection)
+	want := []string{"run", "--profile", "delivery", "--tool-result-projection"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %v, want %v", got, want)
+	}
+}

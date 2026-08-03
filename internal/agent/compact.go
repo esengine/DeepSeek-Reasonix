@@ -99,10 +99,25 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	}
 	if u.PromptTokens >= snip && u.PromptTokens < high {
 		ratio := a.tokPerChar()
-		if st, err := a.SnipStaleToolResults(); err == nil && st.Results > 0 {
+		var st PruneStats
+		var err error
+		if a.toolResultProjection {
+			st, err = a.ProjectStaleToolResults()
+		} else {
+			st, err = a.SnipStaleToolResults()
+		}
+		if err == nil && st.Results > 0 {
+			if a.toolResultProjection {
+				a.pendingProjectedResults += st.Results
+				a.pendingProjectionSavedChars += st.SavedChars
+			}
 			saved := int(float64(st.SavedChars) * ratio)
+			verb := "snipped"
+			if a.toolResultProjection {
+				verb = "projected"
+			}
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
-				"snipped %d stale tool results (~%d tokens est.) before compaction", st.Results, saved)})
+				"%s %d stale tool results (~%d tokens est.) before compaction", verb, st.Results, saved)})
 		}
 		return
 	}
@@ -120,7 +135,18 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	// Prune before folding: when eliding stale tool results alone clears the
 	// trigger, this turn's (paid) summarize call is skipped entirely.
 	ratio := a.tokPerChar()
-	if st, err := a.PruneStaleToolResults(); err == nil && st.Results > 0 {
+	var st PruneStats
+	var err error
+	if a.toolResultProjection {
+		st, err = a.ProjectStaleToolResults()
+	} else {
+		st, err = a.PruneStaleToolResults()
+	}
+	if err == nil && st.Results > 0 {
+		if a.toolResultProjection {
+			a.pendingProjectedResults += st.Results
+			a.pendingProjectionSavedChars += st.SavedChars
+		}
 		saved := int(float64(st.SavedChars) * ratio)
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
 			"pruned %d stale tool results (~%d tokens est.) before compaction", st.Results, saved)})

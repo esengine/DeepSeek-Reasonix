@@ -20,6 +20,8 @@ type RunMetrics struct {
 	Currency                       string  `json:"currency"`
 	Estimated                      bool    `json:"estimated,omitempty"`
 	Compactions                    int     `json:"compactions"`
+	ToolResultsProjected           int     `json:"tool_results_projected,omitempty"`
+	ProjectionSavedChars           int     `json:"projection_saved_chars,omitempty"`
 	ReadinessChecks                int     `json:"readiness_checks"`
 	ReadinessAllowed               int     `json:"readiness_allowed"`
 	ReadinessBlocks                int     `json:"readiness_blocks"`
@@ -84,6 +86,10 @@ func (s *metricsSink) Emit(e event.Event) {
 		s.m.CacheMissTokens += u.CacheMissTokens
 		s.m.Steps++
 		s.m.Estimated = s.m.Estimated || u.Estimated
+		if e.CacheDiagnostics != nil {
+			s.m.ToolResultsProjected += e.CacheDiagnostics.ToolResultsProjected
+			s.m.ProjectionSavedChars += e.CacheDiagnostics.ProjectionSavedChars
+		}
 		var stepCost float64
 		if p := e.Pricing; p != nil {
 			stepCost = (float64(u.CacheHitTokens)*p.CacheHit +

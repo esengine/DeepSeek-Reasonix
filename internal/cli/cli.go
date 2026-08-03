@@ -250,6 +250,7 @@ type cliBuildOverrides struct {
 	HeadlessApprovalMode string
 	Stderr               io.Writer
 	OnSessionRecovered   func(control.SessionRecoveryInfo) error
+	ToolResultProjection *bool
 }
 
 func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
@@ -273,6 +274,7 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		HeadlessApprovalMode: overrides.HeadlessApprovalMode,
 		AutoPricingCurrency:  cliAutoPricingCurrency(),
 		Stderr:               overrides.Stderr,
+		ToolResultProjection: overrides.ToolResultProjection,
 		OnSessionRecovered:   overrides.OnSessionRecovered,
 	}
 }
@@ -443,6 +445,7 @@ func runAgent(args []string, version string) int {
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
+	toolResultProjection := fs.Bool("tool-result-projection", false, "enable deterministic stale tool-result projection experiment")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	cont := fs.Bool("continue", false, "resume the most recent saved session")
 	fs.BoolVar(cont, "c", false, "shorthand for --continue")
@@ -645,6 +648,9 @@ func runAgent(args []string, version string) int {
 		WorkspaceRoot:        workspaceRoot,
 		HeadlessApprovalMode: permissions.approval,
 		OnSessionRecovered:   cliSessionRecoveredHandler(leases),
+	}
+	if fs.Changed("tool-result-projection") {
+		overrides.ToolResultProjection = toolResultProjection
 	}
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, profile, overrides)
 	if err != nil {

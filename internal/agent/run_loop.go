@@ -142,6 +142,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 			a.evidence.ResetBackgroundLeases()
 		default:
 			a.evidence.Reset()
+			a.deliveryProjectedReceipts = 0
 		}
 	}
 	a.preserveEvidenceOnce = false
@@ -156,6 +157,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	a.deliveryScopeActive = scoped
 	if scoped && a.deliveryCheckpoint.ScopeID != scope.ID {
 		a.deliveryCheckpoint = evidence.DeliveryCheckpoint{ScopeID: scope.ID}
+		a.deliveryProjectedReceipts = 0
 	}
 	// Re-lease this session's background-job mutations that no turn has
 	// committed yet. The Reset above just wiped any lease a failed or
@@ -450,11 +452,17 @@ func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiag
 	if usage == nil || usage.TotalTokens <= 0 {
 		return
 	}
+	if cacheDiagnostics != nil {
+		cacheDiagnostics.ToolResultsProjected = a.pendingProjectedResults
+		cacheDiagnostics.ProjectionSavedChars = a.pendingProjectionSavedChars
+	}
 	a.lastUsage.Store(usage)
 	a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing,
 		UsageSource:      a.usageSource,
 		CacheDiagnostics: cacheDiagnostics,
 		SessionHit:       int(a.sessCacheHit.Load()), SessionMiss: int(a.sessCacheMiss.Load())})
+	a.pendingProjectedResults = 0
+	a.pendingProjectionSavedChars = 0
 }
 
 // handleFinalResponse processes a no-tool assistant turn: recovery pause,

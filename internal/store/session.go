@@ -38,6 +38,17 @@ func SessionRecoveryState(sessionPath string) string {
 	return sessionStem(sessionPath) + ".recovery.json"
 }
 
+// SessionRunJournal is the content-limited runtime audit journal. The ndjson
+// suffix deliberately avoids .jsonl so older session scanners cannot mistake
+// it for a primary transcript.
+func SessionRunJournal(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".run-journal.ndjson"
+}
+
 // sessionStem strips the .jsonl suffix so a sidecar sits beside the session as
 // <id>.<kind> rather than <id>.jsonl.<kind>.
 func sessionStem(sessionPath string) string {
@@ -173,5 +184,6 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionEventIndex(sessionPath),
 		SessionConflictLog(sessionPath),
 		SessionRecoveryState(sessionPath),
+		SessionRunJournal(sessionPath),
 	}
 }

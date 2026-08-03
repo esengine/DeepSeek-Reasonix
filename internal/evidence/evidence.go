@@ -365,11 +365,33 @@ type BackgroundLease struct {
 // output. PendingMutation means a previously observed change still needs fresh
 // verification, review, and sign-off before the Goal can finalize.
 type DeliveryCheckpoint struct {
-	ScopeID             string `json:"scopeID,omitempty"`
-	CriteriaEstablished bool   `json:"criteriaEstablished,omitempty"`
-	WorkObserved        bool   `json:"workObserved,omitempty"`
-	MutationObserved    bool   `json:"mutationObserved,omitempty"`
-	PendingMutation     bool   `json:"pendingMutation,omitempty"`
+	ScopeID             string              `json:"scopeID,omitempty"`
+	CriteriaEstablished bool                `json:"criteriaEstablished,omitempty"`
+	WorkObserved        bool                `json:"workObserved,omitempty"`
+	MutationObserved    bool                `json:"mutationObserved,omitempty"`
+	PendingMutation     bool                `json:"pendingMutation,omitempty"`
+	EvidenceVersion     int                 `json:"evidenceVersion,omitempty"`
+	MutationGeneration  uint64              `json:"mutationGeneration,omitempty"`
+	ClosedGeneration    uint64              `json:"closedGeneration,omitempty"`
+	EvidenceSequence    uint64              `json:"evidenceSequence,omitempty"`
+	EvidenceLedger      *GoalEvidenceLedger `json:"evidenceLedger,omitempty"`
+}
+
+type GoalEvidenceLedger struct {
+	Entries []GoalEvidenceEntry `json:"entries,omitempty"`
+}
+
+// GoalEvidenceEntry is a bounded, content-free projection of a successful
+// receipt. It is additive checkpoint metadata: final readiness still requires
+// the live host gates, so old evidence can never authorize a new completion.
+type GoalEvidenceEntry struct {
+	Sequence    uint64   `json:"sequence"`
+	Generation  uint64   `json:"generation,omitempty"`
+	Kind        string   `json:"kind"`
+	Tool        string   `json:"tool,omitempty"`
+	InputDigest string   `json:"inputDigest,omitempty"`
+	PathDigests []string `json:"pathDigests,omitempty"`
+	OutputBytes int      `json:"outputBytes,omitempty"`
 }
 
 // Ledger stores the receipts available to complete_step for the current turn.
@@ -377,9 +399,21 @@ type Ledger struct {
 	mu               sync.Mutex
 	receipts         []Receipt
 	backgroundLeases []BackgroundLease
+	observer         func(Receipt)
 }
 
 func NewLedger() *Ledger { return &Ledger{} }
+
+// SetObserver installs an optional local audit observer. It runs after Record
+// releases the ledger lock and receives a defensive copy.
+func (l *Ledger) SetObserver(observer func(Receipt)) {
+	if l == nil {
+		return
+	}
+	l.mu.Lock()
+	l.observer = observer
+	l.mu.Unlock()
+}
 
 // Reset clears receipts and background leases between user turns.
 func (l *Ledger) Reset() {
@@ -456,13 +490,132 @@ func (l *Ledger) Record(r Receipt) {
 	}
 
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	if r.ToolName == "complete_step" && r.Step != "" && r.TodoStep == nil {
 		if match := latestTodoStep(r.Step, l.receipts); match.Found {
 			r.TodoStep = &match
 		}
 	}
 	l.receipts = append(l.receipts, r)
+	observer := l.observer
+	l.mu.Unlock()
+	if observer != nil {
+		observer(cloneReceipt(r))
+	}
+}
+
+// Receipts returns a defensive snapshot for content-limited checkpoint
+// projection. Raw fields remain in memory and are never copied into the
+// persisted projection itself.
+func (l *Ledger) Receipts() []Receipt {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]Receipt, len(l.receipts))
+	for i := range l.receipts {
+		out[i] = cloneReceipt(l.receipts[i])
+	}
+	return out
+}
+
+func cloneReceipt(r Receipt) Receipt {
+	r.Args = append(json.RawMessage(nil), r.Args...)
+	r.Paths = append([]string(nil), r.Paths...)
+	r.Todos = append([]TodoItem(nil), r.Todos...)
+	if r.TodoStep != nil {
+		cp := *r.TodoStep
+		r.TodoStep = &cp
+	}
+	return r
+}
+
+// ProjectGoalEvidence adds bounded receipt identities to a durable Goal
+// checkpoint. The host supplies closed only after all existing live readiness
+// gates passed; projection itself grants no authority.
+func ProjectGoalEvidence(cp DeliveryCheckpoint, receipts []Receipt, closed bool) DeliveryCheckpoint {
+	const maxEntries = 64
+	cp.EvidenceVersion = 1
+	entries := []GoalEvidenceEntry(nil)
+	if cp.EvidenceLedger != nil {
+		entries = append(entries, cp.EvidenceLedger.Entries...)
+	}
+	for _, r := range receipts {
+		if !r.Success {
+			continue
+		}
+		kind := goalEvidenceKind(r)
+		if kind == "" {
+			continue
+		}
+		if kind == "mutation" {
+			cp.MutationGeneration++
+		}
+		cp.EvidenceSequence++
+		e := GoalEvidenceEntry{
+			Sequence: cp.EvidenceSequence, Generation: cp.MutationGeneration,
+			Kind: kind, Tool: boundedEvidenceText(r.ToolName, 64),
+			InputDigest: evidenceDigest(string(r.Args)), OutputBytes: maxInt(r.OutputBytes, 0),
+		}
+		for _, p := range r.Paths {
+			if len(e.PathDigests) == 8 {
+				break
+			}
+			e.PathDigests = append(e.PathDigests, evidenceDigest(filepath.ToSlash(p)))
+		}
+		entries = append(entries, e)
+		if len(entries) > maxEntries {
+			entries = append([]GoalEvidenceEntry(nil), entries[len(entries)-maxEntries:]...)
+		}
+	}
+	if len(entries) > 0 {
+		cp.EvidenceLedger = &GoalEvidenceLedger{Entries: entries}
+	}
+	if closed && cp.MutationGeneration > 0 {
+		cp.ClosedGeneration = cp.MutationGeneration
+	}
+	return cp
+}
+
+func goalEvidenceKind(r Receipt) string {
+	switch {
+	case r.Mutation || r.Write:
+		return "mutation"
+	case r.ToolName == "todo_write":
+		return "criteria"
+	case r.ToolName == "complete_step":
+		return "signoff"
+	case r.ToolName == "review" || r.ToolName == "review_report" || (r.ToolName == "task" && r.Profile == "review"):
+		return "review"
+	case r.ToolName == "bash" && IsDeliveryVerificationCommand(r.Command):
+		return "verification"
+	case r.Read && r.OutputBytes > 0:
+		return "inspection"
+	case r.Command != "":
+		return "command"
+	default:
+		return "work"
+	}
+}
+
+func evidenceDigest(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return fmt.Sprintf("sha256:%x", sum)
+}
+
+func boundedEvidenceText(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if len(s) > n {
+		return s[:n]
+	}
+	return s
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // Len returns the number of receipts recorded this turn, giving callers a

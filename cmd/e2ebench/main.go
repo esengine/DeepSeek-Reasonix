@@ -29,14 +29,16 @@ type task struct {
 }
 
 type runMetrics struct {
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	CacheHitTokens   int     `json:"cache_hit_tokens"`
-	CacheMissTokens  int     `json:"cache_miss_tokens"`
-	Steps            int     `json:"steps"`
-	Cost             float64 `json:"cost"`
-	Currency         string  `json:"currency"`
-	Compactions      int     `json:"compactions"`
+	PromptTokens         int     `json:"prompt_tokens"`
+	CompletionTokens     int     `json:"completion_tokens"`
+	CacheHitTokens       int     `json:"cache_hit_tokens"`
+	CacheMissTokens      int     `json:"cache_miss_tokens"`
+	Steps                int     `json:"steps"`
+	Cost                 float64 `json:"cost"`
+	Currency             string  `json:"currency"`
+	Compactions          int     `json:"compactions"`
+	ToolResultsProjected int     `json:"tool_results_projected,omitempty"`
+	ProjectionSavedChars int     `json:"projection_saved_chars,omitempty"`
 
 	// Optional Delivery capability counters (omitempty for baseline/old metrics).
 	ReadinessChecks            int     `json:"readiness_checks,omitempty"`
@@ -76,16 +78,18 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -mode diff -base origin/main -repo . -attempts 3 -timeout 1800\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 		fmt.Fprintf(flag.CommandLine.Output(), "\n  # Run the same suite with the delivery contract:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -profile delivery\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
+		fmt.Fprintf(flag.CommandLine.Output(), "\n  # Run a resumable paired Harness A/B experiment:\n")
+		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -mode harness-ab -run-dir .reasonix-bench/run-001 -baseline-bin ./reasonix-main -candidate-bin ./reasonix-head\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 	}
 
-	mode := flag.String("mode", "suite", "suite | diff (diff = generate tests for the PR diff and grade with the repo's tests)")
+	mode := flag.String("mode", "suite", "suite | diff | harness-ab")
 	suite := flag.String("suite", "benchmarks/e2e", "suite root (contains tasks/<id>/)")
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
 	profileFlag := flag.String("profile", benchmarkProfileBaseline, "prompt profile: baseline | delivery")
 	outMD := flag.String("out", "", "write the markdown report here (default: stdout)")
 	outJSON := flag.String("json", "", "write the JSON report here (optional)")
-	budget := flag.Int("budget", 400_000, "abort once total tokens cross this (0 = no cap)")
+	budget := flag.Int("budget", 400_000, "token cap (suite: total; harness-ab: independently per arm; 0 = no cap)")
 	// diff-mode flags
 	repo := flag.String("repo", ".", "repo root (diff mode)")
 	base := flag.String("base", "", "base ref to diff the PR head against (diff mode)")
@@ -93,6 +97,16 @@ func main() {
 	maxSteps := flag.Int("max-steps", 80, "agent tool-call cap for the diff task")
 	timeoutSec := flag.Int("timeout", 1200, "agent timeout in seconds (diff mode)")
 	attempts := flag.Int("attempts", 1, "diff mode: retry up to N times until a run passes (stochastic agent)")
+	// harness-ab mode flags
+	runDir := flag.String("run-dir", "", "persistent experiment directory (harness-ab mode; required)")
+	runID := flag.String("run-id", "", "stable experiment ID (harness-ab mode; generated for a new run when empty)")
+	environmentID := flag.String("environment-id", "", "non-secret provider/model/pricing identity label (harness-ab mode)")
+	baselineBin := flag.String("baseline-bin", "reasonix", "baseline Reasonix binary (harness-ab mode)")
+	candidateBin := flag.String("candidate-bin", "reasonix", "candidate Reasonix binary (harness-ab mode)")
+	baselineProfile := flag.String("baseline-profile", benchmarkProfileBaseline, "baseline prompt profile (harness-ab mode)")
+	candidateProfile := flag.String("candidate-profile", benchmarkProfileBaseline, "candidate prompt profile (harness-ab mode)")
+	repetitions := flag.Int("repetitions", 1, "paired repetitions per task (harness-ab mode)")
+	infraRetries := flag.Int("infra-retries", 1, "retries for infrastructure failures only (harness-ab mode)")
 	flag.Parse()
 	profile, err := normalizeBenchmarkProfile(*profileFlag)
 	if err != nil {
@@ -107,6 +121,33 @@ func main() {
 		})
 		emit(report, *outMD, "")
 		return
+	}
+	if *mode == "harness-ab" {
+		baseline, err := normalizeBenchmarkProfile(*baselineProfile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "baseline profile:", err)
+			os.Exit(2)
+		}
+		candidate, err := normalizeBenchmarkProfile(*candidateProfile)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "candidate profile:", err)
+			os.Exit(2)
+		}
+		err = runHarnessAB(harnessABOpts{
+			suite: *suite, model: *model, runDir: *runDir, runID: *runID, environmentID: *environmentID,
+			baselineBin: *baselineBin, candidateBin: *candidateBin,
+			baselineProfile: baseline, candidateProfile: candidate,
+			repetitions: *repetitions, infraRetries: *infraRetries, tokenBudget: *budget,
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "harness-ab:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *mode != "suite" {
+		fmt.Fprintf(os.Stderr, "unknown mode %q (want suite, diff, or harness-ab)\n", *mode)
+		os.Exit(2)
 	}
 
 	tasks, err := loadTasks(*suite)

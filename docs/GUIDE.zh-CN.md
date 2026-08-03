@@ -61,6 +61,7 @@ reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en
 # max_subagent_concurrency = 6        # 会话级子代理总并发（task/fleet/skills）
 # max_parallel_writers = 3            # 互不重叠 write_paths 时的并行写入上限
 tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具输出
+tool_result_projection = false     # 可选的确定性旧结果投影实验
 
 [[providers]]
 name        = "deepseek-flash"

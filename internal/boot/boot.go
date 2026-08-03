@@ -86,6 +86,9 @@ type Options struct {
 	MaxStepsKey string
 	RequireKey  bool
 	Sink        event.Sink
+	// ToolResultProjection overrides the persisted experiment switch for this
+	// process only. Nil uses config; used by the benchmark harness profile.
+	ToolResultProjection *bool
 	// EffortOverride is a session-local reasoning effort override. Nil means use
 	// the resolved provider config; a non-nil empty string means provider default.
 	EffortOverride *string
@@ -200,6 +203,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	cfg, err := config.LoadForRoot(root)
 	if err != nil {
 		return nil, err
+	}
+	if opts.ToolResultProjection != nil {
+		cfg.Agent.ToolResultProjection = *opts.ToolResultProjection
 	}
 	applyRuntimeAutoPricingCurrency(cfg, opts.AutoPricingCurrency)
 	// Arm the credential-protection layers from the user-global [secrets]
@@ -847,24 +853,25 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	var capRuntime *agent.MCPCapabilityRuntime
 	newTaskTool := func() *agent.TaskTool {
 		return agent.NewTaskToolWithOptions(agent.TaskToolOptions{
-			Provider:            execProv,
-			Pricing:             entry.Price,
-			ParentRegistry:      reg,
-			MaxSteps:            maxSteps,
-			ContextWindow:       entry.ContextWindow,
-			RecentKeep:          cfg.Agent.RecentKeep,
-			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
-			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
-			CompactRatio:        cfg.Agent.CompactRatio,
-			CompactForceRatio:   cfg.Agent.CompactForceRatio,
-			Temperature:         cfg.Agent.Temperature,
-			ArchiveDir:          config.ArchiveDir(),
-			SysPrompt:           "",
-			Gate:                headlessGate,
-			KeepPolicy:          keepPolicy,
-			SubagentModel:       taskModel,
-			SubagentEffort:      taskEffort,
-			ResolveProvider:     resolveSubagentProvider,
+			Provider:             execProv,
+			Pricing:              entry.Price,
+			ParentRegistry:       reg,
+			MaxSteps:             maxSteps,
+			ContextWindow:        entry.ContextWindow,
+			RecentKeep:           cfg.Agent.RecentKeep,
+			SoftCompactRatio:     cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio:  cfg.Agent.ToolResultSnipRatio,
+			ToolResultProjection: cfg.Agent.ToolResultProjection,
+			CompactRatio:         cfg.Agent.CompactRatio,
+			CompactForceRatio:    cfg.Agent.CompactForceRatio,
+			Temperature:          cfg.Agent.Temperature,
+			ArchiveDir:           config.ArchiveDir(),
+			SysPrompt:            "",
+			Gate:                 headlessGate,
+			KeepPolicy:           keepPolicy,
+			SubagentModel:        taskModel,
+			SubagentEffort:       taskEffort,
+			ResolveProvider:      resolveSubagentProvider,
 		}).
 			WithTranscripts(subagentStore, root, modelName, entry.Effort).
 			WithTranscriptIdentityResolver(subagentIdentity).
@@ -956,25 +963,26 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// compaction or language settings — add new fields here, not per runner.
 	subagentSkillOptions := func(sctx context.Context, steps int, price *provider.Pricing, ctxWin, childDepth int) agent.Options {
 		return agent.Options{
-			MaxSteps:            steps,
-			Temperature:         cfg.Agent.Temperature,
-			Pricing:             price,
-			UsageSource:         event.UsageSourceSubagent,
-			Gate:                headlessGate,
-			ContextWindow:       ctxWin,
-			RecentKeep:          cfg.Agent.RecentKeep,
-			SoftCompactRatio:    cfg.Agent.SoftCompactRatio,
-			ToolResultSnipRatio: cfg.Agent.ToolResultSnipRatio,
-			CompactRatio:        cfg.Agent.CompactRatio,
-			CompactForceRatio:   cfg.Agent.CompactForceRatio,
-			ArchiveDir:          config.ArchiveDir(),
-			KeepPolicy:          keepPolicy,
-			ResponseLanguage:    agent.ResponseLanguageFromContext(sctx),
-			ReasoningLanguage:   agent.ReasoningLanguageFromContext(sctx),
-			SubagentDepth:       childDepth,
-			MaxSubagentDepth:    maxSubagentDepth,
-			DeliveryProfile:     tokenDelivery,
-			WorkspaceLease:      workspaceLease,
+			MaxSteps:             steps,
+			Temperature:          cfg.Agent.Temperature,
+			Pricing:              price,
+			UsageSource:          event.UsageSourceSubagent,
+			Gate:                 headlessGate,
+			ContextWindow:        ctxWin,
+			RecentKeep:           cfg.Agent.RecentKeep,
+			SoftCompactRatio:     cfg.Agent.SoftCompactRatio,
+			ToolResultSnipRatio:  cfg.Agent.ToolResultSnipRatio,
+			ToolResultProjection: cfg.Agent.ToolResultProjection,
+			CompactRatio:         cfg.Agent.CompactRatio,
+			CompactForceRatio:    cfg.Agent.CompactForceRatio,
+			ArchiveDir:           config.ArchiveDir(),
+			KeepPolicy:           keepPolicy,
+			ResponseLanguage:     agent.ResponseLanguageFromContext(sctx),
+			ReasoningLanguage:    agent.ReasoningLanguageFromContext(sctx),
+			SubagentDepth:        childDepth,
+			MaxSubagentDepth:     maxSubagentDepth,
+			DeliveryProfile:      tokenDelivery,
+			WorkspaceLease:       workspaceLease,
 		}
 	}
 	readOnlySkillRunner := func(sctx context.Context, sk skill.Skill, task string, runOpts skill.SubagentRunOptions) (string, error) {
@@ -1560,6 +1568,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ContextWindow:                entry.ContextWindow,
 		SoftCompactRatio:             cfg.Agent.SoftCompactRatio,
 		ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
+		ToolResultProjection:         cfg.Agent.ToolResultProjection,
 		CompactRatio:                 cfg.Agent.CompactRatio,
 		CompactForceRatio:            cfg.Agent.CompactForceRatio,
 		RecentKeep:                   cfg.Agent.RecentKeep,
@@ -1608,6 +1617,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				ContextWindow:                pe.ContextWindow,
 				SoftCompactRatio:             cfg.Agent.SoftCompactRatio,
 				ToolResultSnipRatio:          cfg.Agent.ToolResultSnipRatio,
+				ToolResultProjection:         cfg.Agent.ToolResultProjection,
 				CompactRatio:                 cfg.Agent.CompactRatio,
 				CompactForceRatio:            cfg.Agent.CompactForceRatio,
 				RecentKeep:                   cfg.Agent.RecentKeep,
