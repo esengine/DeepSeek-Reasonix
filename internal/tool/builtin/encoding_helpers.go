@@ -169,6 +169,9 @@ func matchedRangeSample(content, fallback string, ranges []editRange) string {
 
 func oldStringNotFoundError(path, oldString, content string) error {
 	hint := oldStringNotFoundHint(oldString, content)
+	if drift := indentationDriftHint(oldString, content); drift != "" {
+		hint = drift
+	}
 	if line, text, ok := nearestContentLine(oldString, content); ok {
 		return fmt.Errorf("old_string not found in %s (nearest line %d: %q).%s", path, line, text, hint)
 	}
@@ -230,7 +233,10 @@ func fuzzyEditRanges(content, old string) []editRange {
 			fuzzyMode{stripOldReadPrefixes: true, trimTrailing: true, expandTabs: true},
 		)
 	}
+	return fuzzyEditRangesWithModes(contentLines, oldLines, modes)
+}
 
+func fuzzyEditRangesWithModes(contentLines, oldLines []lineSegment, modes []fuzzyMode) []editRange {
 	for _, mode := range modes {
 		normOld := make([]string, len(oldLines))
 		for i, line := range oldLines {
@@ -253,6 +259,47 @@ func fuzzyEditRanges(content, old string) []editRange {
 		}
 	}
 	return nil
+}
+
+// indentationDriftHint diagnoses the common stale-context failure where the
+// old_string differs from the file only by leading whitespace — a formatter
+// (prettier/eslint) or manual edit re-indented the region after the read that
+// produced the old_string. Editing is deliberately NOT attempted in that case
+// (indentation is part of the code's structure; guessing could retarget the
+// wrong block), but the error message can say exactly what happened so the
+// model re-reads and retries once instead of flailing. Returns "" unless the
+// indentation-insensitive block resolves to exactly one place.
+func indentationDriftHint(oldString, content string) string {
+	// CRLF-only differences are diagnosed by oldStringNotFoundHint; exclude
+	// them here so they are not misattributed to indentation drift (the fuzzy
+	// trimTrailing normalization would erase the \r and look like a match).
+	if strings.Contains(content, "\r\n") {
+		normContent := strings.ReplaceAll(content, "\r\n", "\n")
+		normOld := strings.ReplaceAll(oldString, "\r\n", "\n")
+		if strings.Contains(normContent, normOld) {
+			return ""
+		}
+	}
+	contentLines := splitLineSegments(content)
+	oldLines := splitLineSegments(oldString)
+	if len(oldLines) == 0 || len(oldLines) > len(contentLines) {
+		return ""
+	}
+	oldHasReadPrefixes := allLinesHaveReadFilePrefix(oldLines)
+	modes := []fuzzyMode{
+		{trimTrailing: true, trimLeading: true},
+		{trimTrailing: true, trimLeading: true, expandTabs: true},
+	}
+	if oldHasReadPrefixes {
+		modes = append(modes,
+			fuzzyMode{stripOldReadPrefixes: true, trimTrailing: true, trimLeading: true},
+			fuzzyMode{stripOldReadPrefixes: true, trimTrailing: true, trimLeading: true, expandTabs: true},
+		)
+	}
+	if len(fuzzyEditRangesWithModes(contentLines, oldLines, modes)) == 1 {
+		return " The block matches the file except for leading indentation — the region was likely re-indented (formatter or manual edit) after your read. Re-read the file and retry with its current indentation."
+	}
+	return ""
 }
 
 func fuzzyWindowMatches(contentWindow, oldLines []lineSegment, normOld []string, mode fuzzyMode) bool {

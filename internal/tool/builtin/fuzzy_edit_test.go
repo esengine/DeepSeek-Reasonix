@@ -89,6 +89,75 @@ func TestEditFileFuzzyCRLFPreservesLineEndings(t *testing.T) {
 	}
 }
 
+// TestEditFileIndentDriftGivesActionableHint pins the stale-context diagnosis:
+// when the old_string matches the file except for leading indentation (a
+// formatter re-indented the region after the read), the edit is refused — the
+// tool never guesses across structural whitespace — but the error names the
+// cause so the model re-reads and retries once instead of flailing.
+func TestEditFileIndentDriftGivesActionableHint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "card.vue")
+	// The file on disk: 4-space indentation, as prettier left it.
+	seed := "<template>\n    <div class=\"stat-card\">\n        <h3>Stats</h3>\n    </div>\n</template>\n"
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The stale old_string: 2-space indentation from an earlier read.
+	_, err := (editFile{}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"path":       path,
+		"old_string": "  <div class=\"stat-card\">\n    <h3>Stats</h3>\n  </div>",
+		"new_string": "  <div class=\"stat-card\">\n    <h3>Monthly Stats</h3>\n  </div>",
+	}))
+	if err == nil {
+		t.Fatal("indentation drift must stay a refused edit, not a guessed one")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"old_string not found",
+		"leading indentation",
+		"Re-read the file",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("error %q does not carry the indentation-drift diagnosis %q", msg, want)
+		}
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != seed {
+		t.Fatalf("refused edit must not change the file: %q", got)
+	}
+}
+
+// TestEditFileIndentDriftAmbiguousKeepsGenericHint pins the safety net: when
+// several blocks match indentation-insensitively, no drift diagnosis is
+// emitted (naming indentation as the cause would mislead), and the edit is
+// still refused.
+func TestEditFileIndentDriftAmbiguousKeepsGenericHint(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "dup.txt")
+	// Two identical blocks: indentation-insensitive matching resolves to two
+	// places, so no drift diagnosis is emitted (it would mislead).
+	seed := "    block one\n        body\n    end\n    block one\n        body\n    end\n"
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := (editFile{}).Execute(context.Background(), argsJSON(t, map[string]any{
+		"path":       path,
+		"old_string": "  block one\n    body\n  end",
+		"new_string": "changed",
+	}))
+	if err == nil {
+		t.Fatal("expected old_string not found")
+	}
+	if strings.Contains(err.Error(), "leading indentation") {
+		t.Fatalf("ambiguous drift must not claim indentation is the cause: %v", err)
+	}
+}
+
 func TestEditFileCRLFNotFoundHintAvoidsMisattribution(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "win.txt")
