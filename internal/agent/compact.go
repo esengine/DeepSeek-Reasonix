@@ -26,6 +26,7 @@ const (
 	defaultToolResultSnipRatio = 0.6   // rewrite stale tool results cheaply before summary compaction
 	defaultCompactRatio        = 0.8   // trigger: prompt at this fraction of the window compacts
 	defaultCompactForceRatio   = 0.9   // force compaction at this high-water mark even for low-value folds
+	compactStuckRetryTurns     = 20    // turns before retrying compaction after becoming stuck
 	defaultCompactTarget       = 0.5   // safety cap: the kept tail never exceeds this fraction of the window
 	defaultTailTokens          = 16384 // verbatim recent-tail budget, in tokens
 	minRecentKeep              = 2     // never keep fewer recent messages than this
@@ -111,10 +112,21 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		// compaction buys; it clears the stuck latch and the run counter.
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
+		a.compactStuckTurns = 0
 		return
 	}
 	if a.compactStuck {
-		return
+		a.compactStuckTurns++
+		if a.compactStuckTurns < compactStuckRetryTurns {
+			return
+		}
+		// Retry: enough turns have passed since we got stuck — reset the latch
+		// and give compaction another chance. If the window is still too small
+		// the cycle repeats (two consecutive compacts → stuck again).
+		a.compactStuck = false
+		a.compactStuckTurns = 0
+		a.consecutiveCompacts = 0
+		a.softCompactNoticed = false
 	}
 	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
 	// Prune before folding: when eliding stale tool results alone clears the

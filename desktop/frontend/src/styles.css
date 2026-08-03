@@ -11133,6 +11133,21 @@ body > .mermaid-diagram--fullscreen {
   flex: 1;
   min-width: 0;
 }
+.set-compact-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.set-compact-row label {
+  flex-shrink: 0;
+  width: 140px;
+  font-size: var(--font-control);
+}
+.set-compact-input {
+  width: 80px;
+  flex: 0 0 auto;
+}
 .mem-select {
   padding-right: 30px;
   text-overflow: ellipsis;

@@ -463,6 +463,10 @@ export interface AppBindings {
   SetAgentParams(temperature: number, maxSteps: number, plannerMaxSteps: number, systemPrompt: string): Promise<void>;
   SetColdResumePrune(enabled: boolean): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
+  SetSoftCompactRatio(ratio: number): Promise<void>;
+  SetToolResultSnipRatio(ratio: number): Promise<void>;
+  SetCompactRatio(ratio: number): Promise<void>;
+  SetCompactForceRatio(ratio: number): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
@@ -1481,7 +1485,7 @@ function makeMockApp(): AppBindings {
       noProxy: "",
       proxy: { type: "socks5", server: "127.0.0.1", port: 7890, username: "", password: "" },
     },
-    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto" },
+    agent: { temperature: 0.2, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "You are Reasonix, a coding agent.", coldResumePrune: true, reasoningLanguage: "auto", softCompactRatio: 0.5, toolResultSnipRatio: 0.6, compactRatio: 0.8, compactForceRatio: 0.9 },
     bot: {
       enabled: !freshMock,
       model: "",
@@ -4446,6 +4450,18 @@ function makeMockApp(): AppBindings {
     async SetReasoningLanguage(lang: string) {
       const normalized = lang === "zh" || lang === "en" ? lang : "auto";
       settings.agent = { ...settings.agent, reasoningLanguage: normalized };
+    },
+    async SetSoftCompactRatio(ratio: number) {
+      settings.agent = { ...settings.agent, softCompactRatio: ratio };
+    },
+    async SetToolResultSnipRatio(ratio: number) {
+      settings.agent = { ...settings.agent, toolResultSnipRatio: ratio };
+    },
+    async SetCompactRatio(ratio: number) {
+      settings.agent = { ...settings.agent, compactRatio: ratio };
+    },
+    async SetCompactForceRatio(ratio: number) {
+      settings.agent = { ...settings.agent, compactForceRatio: ratio };
     },
     // ── Heartbeat mock ──
     async HeartbeatListTasks() { return []; },

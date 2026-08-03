@@ -1534,6 +1534,10 @@ export interface AgentView {
   systemPrompt: string;
   coldResumePrune: boolean;
   reasoningLanguage: string; // "auto" | "zh" | "en"
+  softCompactRatio: number;
+  toolResultSnipRatio: number;
+  compactRatio: number;
+  compactForceRatio: number;
 }
 
 export interface BotAllowlistView {

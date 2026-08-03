@@ -156,6 +156,10 @@ type AgentView struct {
 	SystemPrompt           string  `json:"systemPrompt"`
 	ColdResumePrune        bool    `json:"coldResumePrune"`
 	ReasoningLanguage      string  `json:"reasoningLanguage"`
+	SoftCompactRatio       float64 `json:"softCompactRatio"`
+	ToolResultSnipRatio    float64 `json:"toolResultSnipRatio"`
+	CompactRatio           float64 `json:"compactRatio"`
+	CompactForceRatio      float64 `json:"compactForceRatio"`
 }
 
 type BotAllowlistView struct {
@@ -952,6 +956,10 @@ func (a *App) Settings() SettingsView {
 				MaxParallelWriters:     agent.DefaultMaxParallelWriters,
 				ColdResumePrune:        true,
 				ReasoningLanguage:      "auto",
+				SoftCompactRatio:       config.Default().Agent.SoftCompactRatio,
+				ToolResultSnipRatio:    config.Default().Agent.ToolResultSnipRatio,
+				CompactRatio:           config.Default().Agent.CompactRatio,
+				CompactForceRatio:      config.Default().Agent.CompactForceRatio,
 			},
 			Bot:                     botSettingsView(config.BotConfig{}),
 			AutoPlan:                "off",
@@ -1027,6 +1035,10 @@ func (a *App) Settings() SettingsView {
 			SystemPrompt:           cfg.Agent.SystemPrompt,
 			ColdResumePrune:        cfg.ColdResumePruneEnabled(),
 			ReasoningLanguage:      cfg.ReasoningLanguage(),
+			SoftCompactRatio:       compactRatioOrDefault(cfg.Agent.SoftCompactRatio, config.Default().Agent.SoftCompactRatio),
+			ToolResultSnipRatio:    compactRatioOrDefault(cfg.Agent.ToolResultSnipRatio, config.Default().Agent.ToolResultSnipRatio),
+			CompactRatio:           compactRatioOrDefault(cfg.Agent.CompactRatio, config.Default().Agent.CompactRatio),
+			CompactForceRatio:      compactRatioOrDefault(cfg.Agent.CompactForceRatio, config.Default().Agent.CompactForceRatio),
 		},
 		Bot:                     botSettingsView(cfg.Bot),
 		DesktopLanguage:         cfg.DesktopLanguage(),
@@ -2046,6 +2058,13 @@ func desktopMaxSubagentDepth(depth int) int {
 		return 1
 	}
 	return agent.DefaultMaxSubagentDepth
+}
+
+func compactRatioOrDefault(v, defaultVal float64) float64 {
+	if v <= 0 {
+		return defaultVal
+	}
+	return v
 }
 
 // SetMaxSubagentDepth controls whether first-layer subagents may delegate once more.
@@ -3551,6 +3570,46 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps 
 
 func (a *App) SetColdResumePrune(enabled bool) error {
 	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
+}
+
+func (a *App) SetSoftCompactRatio(ratio float64) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		if ratio <= 0 {
+			ratio = config.Default().Agent.SoftCompactRatio
+		}
+		c.Agent.SoftCompactRatio = ratio
+		return nil
+	})
+}
+
+func (a *App) SetToolResultSnipRatio(ratio float64) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		if ratio <= 0 {
+			ratio = config.Default().Agent.ToolResultSnipRatio
+		}
+		c.Agent.ToolResultSnipRatio = ratio
+		return nil
+	})
+}
+
+func (a *App) SetCompactRatio(ratio float64) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		if ratio <= 0 {
+			ratio = config.Default().Agent.CompactRatio
+		}
+		c.Agent.CompactRatio = ratio
+		return nil
+	})
+}
+
+func (a *App) SetCompactForceRatio(ratio float64) error {
+	return a.applyConfigChange(func(c *config.Config) error {
+		if ratio <= 0 {
+			ratio = config.Default().Agent.CompactForceRatio
+		}
+		c.Agent.CompactForceRatio = ratio
+		return nil
+	})
 }
 
 func (a *App) SetReasoningLanguage(lang string) error {
