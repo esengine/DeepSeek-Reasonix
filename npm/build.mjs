@@ -13,6 +13,7 @@ const TARGETS = [
   { node: "darwin-x64", goos: "darwin", goarch: "amd64" },
   { node: "linux-arm64", goos: "linux", goarch: "arm64" },
   { node: "linux-x64", goos: "linux", goarch: "amd64" },
+  { node: "android-arm64", goos: "android", goarch: "arm64" },
   { node: "win32-arm64", goos: "windows", goarch: "arm64" },
   { node: "win32-x64", goos: "windows", goarch: "amd64" },
 ];

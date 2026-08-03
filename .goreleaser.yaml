@@ -15,7 +15,7 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Tag }}
-    goos: [darwin, linux, windows]
+    goos: [darwin, linux, windows, android]
     goarch: [amd64, arm64]
 
 archives:

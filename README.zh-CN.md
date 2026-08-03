@@ -50,7 +50,7 @@
   内置工具在编译期自注册。
 - **缓存友好的上下文维护**：启动时注入稳定的环境摘要；旧工具输出会先 snip/prune，
   再进入摘要 compaction；内置工具 schema 合约有文档和回归测试保护。
-- **零摩擦分发**：`CGO_ENABLED=0` 单二进制；一条命令交叉编译到六个目标平台。
+- **零摩擦分发**：`CGO_ENABLED=0` 单二进制；一条命令交叉编译到七个目标平台。
   唯一依赖是一个 TOML 解析库。
 
 ## 安装
@@ -67,8 +67,20 @@ npm i -g reasonix                  # 任意系统;自动拉取对应平台的原
 brew install esengine/reasonix/reasonix   # macOS
 ```
 
-预编译归档(`darwin|linux|windows × amd64|arm64`)和 `SHA256SUMS` 见每个
+预编译归档(`darwin|linux|windows|android × amd64|arm64`)和 `SHA256SUMS` 见每个
 [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases)。
+
+在 Android 上，可原生运行于 [Termux](https://termux.com/)（Node.js 18+，通过
+`pkg install nodejs` 安装）：
+
+```sh
+pkg install nodejs
+npm i -g reasonix
+reasonix --version
+```
+
+Android 构建是 PIE 可执行文件（`GOOS=android`），这是 Android 内核的硬性要求；
+npm 包会附带对应的 `@reasonix/cli-android-arm64` ARM64 预编译二进制。
 
 ### 路径 B：桌面端
 
@@ -98,7 +110,7 @@ Windows 安装器通过 [SignPath.io](https://signpath.io/) 完成代码签名�
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
 cd DeepSeek-Reasonix
 make build      # -> bin/reasonix(.exe)
-make cross      # -> dist/（darwin|linux|windows × amd64|arm64）
+make cross      # -> dist/（darwin|linux|windows|android × amd64|arm64）
 ```
 
 ## 快速开始
