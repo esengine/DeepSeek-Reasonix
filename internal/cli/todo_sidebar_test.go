@@ -145,6 +145,9 @@ func TestNewUserTurnClearsTodoSidebar(t *testing.T) {
 	if m.todoSidebarScroll != -1 {
 		t.Fatalf("sidebar scroll should reset to auto-follow, got %d", m.todoSidebarScroll)
 	}
+	if !m.forceGotoBottom {
+		t.Fatalf("sending a message should pin the view to the newest output")
+	}
 }
 
 func TestRenderTodoSidebarShowsWorkspaceRoot(t *testing.T) {
@@ -173,8 +176,8 @@ func TestRenderTodoSidebarShowsWorkspaceRoot(t *testing.T) {
 }
 
 func TestRenderTodoSidebarWrapsLongTitles(t *testing.T) {
-	// Long enough to wrap onto 3 rows at the 44-column content width.
-	long := "Implement the complete bidirectional streaming protocol with backpressure handling and reconnect logic"
+	// Long enough to wrap onto 3 rows at the 36-column content width (the cap).
+	long := "Implement the complete bidirectional streaming protocol with backpressure handling"
 	m := chatTUI{width: 160, todoArgs: `{"todos":[{"content":"` + long + `","status":"pending"}]}`, height: 30}
 	out := ansi.Strip(m.renderTodoSidebar(30))
 	// Wrap breaks at word boundaries, so the full title is present word by

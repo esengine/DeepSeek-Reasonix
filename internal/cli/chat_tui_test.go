@@ -1347,7 +1347,7 @@ func TestUserBubbleIsSolidRoleBand(t *testing.T) {
 
 	got := renderUserBubble("hello world", 80, false, "")
 	plain := ansi.Strip(got)
-	if !strings.Contains(plain, "› hello world") {
+	if !strings.Contains(plain, "hello world") {
 		t.Fatalf("user bubble missing prompt text: %q", plain)
 	}
 	if got == plain {
@@ -1360,7 +1360,7 @@ func TestUserBubbleIsSolidRoleBand(t *testing.T) {
 			t.Fatalf("user bubble row %d width = %d, want full content width 80: %q", i, w, l)
 		}
 	}
-	if !strings.Contains(plain, "┌─ You ") || !strings.HasSuffix(plain, "┘") {
+	if !strings.HasPrefix(plain, "╭") || !strings.Contains(plain, "You") || !strings.HasSuffix(plain, "╯") {
 		t.Fatalf("user bubble should be framed with a You label:\n%s", plain)
 	}
 	if !strings.Contains(got, "48;5;") {
@@ -1379,17 +1379,20 @@ func TestUserBubbleFramesMultiline(t *testing.T) {
 	got := renderUserBubble("first line\nsecond line", 40, false, "")
 	plain := ansi.Strip(got)
 	rows := strings.Split(plain, "\n")
-	if len(rows) != 4 {
-		t.Fatalf("two-line prompt should render 4 frame rows (top + 2 body + bottom), got %d:\n%s", len(rows), plain)
+	if len(rows) != 6 {
+		t.Fatalf("two-line prompt should render 6 frame rows (top + label + gap + 2 body + bottom), got %d:\n%s", len(rows), plain)
 	}
-	if !strings.HasPrefix(rows[0], "┌─ You ") || !strings.HasSuffix(rows[0], "┐") {
-		t.Fatalf("top rail with You label missing: %q", rows[0])
+	if !strings.HasPrefix(rows[0], "╭") || !strings.HasSuffix(rows[0], "╮") {
+		t.Fatalf("top rail missing: %q", rows[0])
 	}
-	if !strings.Contains(rows[1], "› first line") || !strings.Contains(rows[2], "› second line") {
+	if !strings.Contains(rows[1], "You") {
+		t.Fatalf("label row missing: %q", rows[1])
+	}
+	if !strings.Contains(rows[3], "first line") || !strings.Contains(rows[4], "second line") {
 		t.Fatalf("body rows should carry both prompt lines:\n%s", plain)
 	}
-	if !strings.HasPrefix(rows[3], "└") || !strings.HasSuffix(rows[3], "┘") {
-		t.Fatalf("bottom rail missing: %q", rows[3])
+	if !strings.HasPrefix(rows[5], "╰") || !strings.HasSuffix(rows[5], "╯") {
+		t.Fatalf("bottom rail missing: %q", rows[5])
 	}
 	for i, r := range rows {
 		if w := ansi.StringWidth(r); w != 40 {
@@ -1413,8 +1416,8 @@ func TestUserBubbleShowsSendTime(t *testing.T) {
 
 	got := renderUserBubble("hello", 40, false, "14:32")
 	rows := strings.Split(ansi.Strip(got), "\n")
-	if !strings.HasPrefix(rows[0], "┌─ You · 14:32 ") || !strings.HasSuffix(rows[0], "┐") {
-		t.Fatalf("top rail should carry the HH:MM send time: %q", rows[0])
+	if !strings.Contains(rows[1], "You · 14:32") {
+		t.Fatalf("label row should carry the HH:MM send time: %q", rows[1])
 	}
 	for i, r := range rows {
 		if w := ansi.StringWidth(r); w != 40 {
@@ -1423,8 +1426,8 @@ func TestUserBubbleShowsSendTime(t *testing.T) {
 	}
 	// No timestamp: plain You label.
 	plain := ansi.Strip(renderUserBubble("hello", 40, false, ""))
-	if !strings.HasPrefix(plain, "┌─ You ") {
-		t.Fatalf("top rail without ts should stay plain You: %q", plain)
+	if !strings.Contains(plain, "You") || strings.Contains(plain, "·") {
+		t.Fatalf("label without ts should stay plain You: %q", plain)
 	}
 
 	// bubbleTime formatting: unix ms -> HH:MM; zero/negative -> "".
@@ -1447,7 +1450,7 @@ func TestReplayUserMessageUsesFrame(t *testing.T) {
 	m := chatTUI{nativeScrollback: true}
 	out := m.renderTranscriptSource(transcriptSource{kind: transcriptSourceUser, raw: "Which version?"}, 48)
 	plain := ansi.Strip(out)
-	if !strings.HasPrefix(plain, "┌─ You ") || !strings.Contains(plain, "› Which version?") || !strings.HasSuffix(plain, "┘") {
+	if !strings.HasPrefix(plain, "╭") || !strings.Contains(plain, "You") || !strings.Contains(plain, "Which version?") || !strings.HasSuffix(plain, "╯") {
 		t.Fatalf("replayed user message should be framed:\n%s", plain)
 	}
 }
@@ -4368,43 +4371,44 @@ func TestTodoPanelProgressBar(t *testing.T) {
 	}
 }
 
-// TestUserBubbleAccentMarkerPlainBody pins the user bubble: a bold accent "›"
-// marker, the body in the default foreground, an accent "[plan]" chip in plan
-// mode, and an unchanged NO_COLOR fallback.
-func TestUserBubbleAccentMarkerPlainBody(t *testing.T) {
+// TestUserBubbleAccentLabelPlainBody pins the user bubble: a bold accent
+// label row ("You", with HH:MM when given), the body in the default
+// foreground, an accent "[plan]" chip in plan mode, and an unchanged NO_COLOR
+// fallback.
+func TestUserBubbleAccentLabelPlainBody(t *testing.T) {
 	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	activeColorProfile = colorprofile.ANSI256
 	refreshCLIStyles()
 
 	got := renderUserBubble("hello world", 80, false, "")
-	if plain := ansi.Strip(got); !strings.Contains(plain, "› hello world") {
+	if plain := ansi.Strip(got); !strings.Contains(plain, "hello world") {
 		t.Fatalf("user bubble missing prompt text: %q", plain)
 	}
-	// The body keeps the default foreground inside the role band: the marker's
-	// style closes right before the text.
-	if !strings.Contains(got, "\x1b[m hello world") {
-		t.Fatalf("user bubble body should stay in the default foreground after the marker: %q", got)
+	// The label row wears the bold accent; the body keeps the default
+	// foreground inside the role band.
+	if !strings.Contains(got, "\x1b[1;") || !strings.Contains(got, "You") {
+		t.Fatalf("user bubble label row should be bold accent: %q", got)
 	}
 
 	plan := renderUserBubble("do it", 80, true, "")
-	if !strings.Contains(plan, accent("[plan]")) {
-		t.Fatalf("plan bubble should carry the accent [plan] chip: %q", plan)
+	if plain := ansi.Strip(plan); !strings.Contains(plain, "[plan] You") {
+		t.Fatalf("plan bubble should carry the accent [plan] chip: %q", plain)
 	}
-	if plain := ansi.Strip(plan); !strings.Contains(plain, "› [plan] do it") {
-		t.Fatalf("plan bubble text = %q, want › [plan] prefix", plain)
+	if plain := ansi.Strip(plan); !strings.Contains(plain, "do it") {
+		t.Fatalf("plan bubble text = %q, want [plan] in label", plain)
 	}
 
 	activeColorProfile = colorprofile.NoTTY
 	refreshCLIStyles()
 	// NO_COLOR keeps the frame (box-drawing rails) but drops all colour: no
-	// background band, no accent marker.
+	// background band, no accent label.
 	plain := ansi.Strip(renderUserBubble("x", 80, false, ""))
-	if !strings.HasPrefix(plain, "┌─ You ") || !strings.Contains(plain, "\n│  › x") || !strings.HasSuffix(plain, "┘") {
+	if !strings.HasPrefix(plain, "╭") || !strings.Contains(plain, "You") || !strings.Contains(plain, "│ x") || !strings.HasSuffix(plain, "╯") {
 		t.Fatalf("NO_COLOR user bubble should keep the full frame:\n%q", plain)
 	}
 	plain = ansi.Strip(renderUserBubble("x", 80, true, ""))
-	if !strings.Contains(plain, "\n│  › [plan] x") {
-		t.Fatalf("NO_COLOR plan bubble = %q, want › [plan] prefix", plain)
+	if !strings.Contains(plain, "[plan] You") || !strings.Contains(plain, "│ x") {
+		t.Fatalf("NO_COLOR plan bubble = %q, want [plan] in label", plain)
 	}
 }
 

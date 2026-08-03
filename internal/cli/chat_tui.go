@@ -3698,7 +3698,7 @@ const todoSidebarMinWidth = 120
 
 // todoSidebarWidth is the width of the right-hand task-list column on wide
 // terminals.
-const todoSidebarWidth = 48
+const todoSidebarWidth = 40
 
 type todoPanelTodo struct {
 	Content    string `json:"content"`
@@ -4322,6 +4322,9 @@ func (m *chatTUI) startControllerTurn(displayed, restore string, start func()) t
 	// the list via todo_write when the new task actually has steps.
 	m.todoArgs = ""
 	m.todoSidebarScroll = -1
+	// Sending a message always pins the view to the newest output, even if
+	// the user had scrolled up to read history.
+	m.forceGotoBottom = true
 
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
@@ -5383,58 +5386,43 @@ func wrapForViewport(text string, width int, fg cliColor) string {
 // the user's message is wrapped in a full border frame — a top rail with a
 // "You" label (plus the HH:MM send time when ts is non-empty), per-row side
 // rails, and a bottom rail — so user turns read as a distinct card next to
-// the assistant's plain flowing text (the OpenCode-style treatment). The body
-// rows still wear the user-bubble surface (one step lighter than the chat
-// background); the "›" marker carries the accent (bold); the body stays in
-// the default foreground so long prompts don't shout. Plan mode prepends an
-// accent "[plan]" chip.
+// the assistant's plain flowing text (the OpenCode-style treatment). The frame
+// is component-built with lipgloss (rounded border, accent-coloured rails,
+// inner padding) instead of hand-joined rails, so over-wide lines — long URLs,
+// unbroken strings — wrap inside the frame instead of punching through the
+// sides. The label row carries the accent (bold) with the optional HH:MM
+// timestamp; plan mode prepends an accent "[plan]" chip. The body stays in the
+// default foreground so long prompts don't shout. NO_COLOR keeps the
+// pure-text frame without colours.
 func renderUserBubble(line string, width int, planMode bool, ts string) string {
 	line = displayLineForImageRefs(line)
 	width = max(width, 8)
-	bodyW := max(width-4, 4) // "│ " + body + " │"
-	marker := "›"
-	if colorOn() {
-		marker = themeStyle(activeCLITheme.accent).Bold(true).Render("›")
-	}
-	prefix := " " + marker + " "
-	if planMode {
-		prefix = " " + marker + " " + accent("[plan]") + " "
-	}
-	body := strings.Split(line, "\n")
-	for i, l := range body {
-		padded := padCompletionLine(prefix+l, bodyW)
-		if colorOn() {
-			padded = userBubbleStyle.Render(padded)
-		}
-		body[i] = padded
-	}
+	bodyW := max(width-4, 4) // rounded border (2) + inner padding (2)
+
 	label := "You"
 	if ts != "" {
 		label = "You · " + ts
 	}
+	if planMode {
+		label = "[plan] " + label
+	}
 	if colorOn() {
 		label = themeStyle(activeCLITheme.accent).Bold(true).Render(label)
 	}
-	rail := "│"
-	topL, topR, botL, botR, dash := "┌", "┐", "└", "┘", "─"
+
+	// Pre-wrap the body so word-boundary breaking and long-word splitting stay
+	// deterministic; the label row is separate (never wrapped mid-word).
+	body := wrapTranscript(line, bodyW)
+	style := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 1).
+		Width(width)
 	if colorOn() {
-		rail = themeFg(activeCLITheme.border, rail)
-		topL = themeFg(activeCLITheme.border, topL)
-		topR = themeFg(activeCLITheme.border, topR)
-		botL = themeFg(activeCLITheme.border, botL)
-		botR = themeFg(activeCLITheme.border, botR)
-		dash = themeFg(activeCLITheme.border, dash)
+		style = style.
+			BorderForeground(themeLipColor(activeCLITheme.accent)).
+			Background(userBubbleStyle.GetBackground())
 	}
-	var b strings.Builder
-	// "┌─ " + label + " " + fill + "┐" must total `width` columns; the label
-	// may carry ANSI, so its visible width drives the fill.
-	fill := max(width-5-ansi.StringWidth(label), 0)
-	b.WriteString(topL + dash + " " + label + " " + strings.Repeat(dash, fill) + topR + "\n")
-	for _, l := range body {
-		b.WriteString(rail + " " + l + " " + rail + "\n")
-	}
-	b.WriteString(botL + strings.Repeat(dash, max(width-2, 0)) + botR)
-	return b.String()
+	return style.Render(label + "\n\n" + body)
 }
 
 // bubbleTime formats a message's unix-millisecond CreatedAt as HH:MM; "" when
