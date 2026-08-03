@@ -416,10 +416,9 @@ jobs:
           bash scripts/release-workflows.test.sh
           node scripts/check-single-release-public-contract.mjs
 
-  # The site/ auth client has security-sensitive redirect-validation logic
-  # (safeNext) covered by node:test unit tests. Those tests use only Node
-  # builtins, so no `npm install` is needed — run them directly on every PR so
-  # a regression in redirect validation fails the build instead of shipping.
+  # Cover both the security-sensitive client tests and the same install/build
+  # path used by the Pages deployment. This keeps lockfile and Astro upgrades
+  # from being discovered only after merging to main-v2.
   site:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.site != 'false')
@@ -433,9 +432,85 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: install
+        run: npm ci
 
       - name: test
         run: npm test
+
+      - name: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run build
+
+  worker-pnpm:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: accounts
+            directory: workers/accounts
+            lockfile: workers/accounts/pnpm-lock.yaml
+          - name: forum
+            directory: workers/forum
+            lockfile: workers/forum/pnpm-lock.yaml
+    name: worker (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ matrix.directory }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+          run_install: false
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: ${{ matrix.lockfile }}
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+
+      - name: typecheck
+        run: pnpm typecheck
+
+      - name: deployment dry run
+        run: pnpm exec wrangler deploy --dry-run
+
+  worker-crash-report:
+    name: worker (crash-report)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/crash-report
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: workers/crash-report/package-lock.json
+
+      - name: install
+        run: npm ci
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: test
+        run: npm test
+
+      - name: deployment dry run
+        run: npx wrangler deploy --dry-run
 
   govulncheck:
     needs: changes

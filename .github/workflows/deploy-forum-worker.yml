@@ -35,4 +35,5 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           pnpm install --frozen-lockfile
+          pnpm typecheck
           npx wrangler deploy
