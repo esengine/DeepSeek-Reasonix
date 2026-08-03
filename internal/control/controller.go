@@ -5113,6 +5113,7 @@ func (c *Controller) ReleaseResources() {
 // Close stops plugin subprocesses and releases resources. A session that ever
 // started fires SessionEnd so a teardown hook runs.
 func (c *Controller) Close() {
+	_ = c.Snapshot()
 	c.close(true, closeJobsWithGrace)
 }
 
