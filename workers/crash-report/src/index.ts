@@ -699,8 +699,6 @@ type StatsFilters = {
   newLatest: boolean;
   regressed: boolean;
   windowDays: 7 | 30;
-  /** True only when the reader picked the window; a module default leaves it false. */
-  windowExplicit: boolean;
   preferenceMode: "users" | "opens";
 };
 
@@ -718,7 +716,6 @@ function statsFilters(url: URL): StatsFilters {
     newLatest: url.searchParams.get("new") === "latest",
     regressed: url.searchParams.get("regressed") === "1",
     windowDays: windowParam === "7d" ? 7 : 30,
-    windowExplicit: windowParam === "7d" || windowParam === "30d",
     preferenceMode: url.searchParams.get("prefs") === "opens" ? "opens" : "users",
   };
 }
@@ -992,15 +989,21 @@ async function metricRows(env: Env, days: 7 | 30, surface: ClientSurfaceName, pr
 // live exceeds what D1 spends on one query (see refreshMetricUserRollup). Null
 // here means "not computed yet", which the dashboard says out loud rather than
 // rendering as an empty result.
-async function rollupMetricUserRows(env: Env): Promise<{ signal: string; bucket: string; total: number }[] | null> {
+async function rollupMetricUserRows(
+  env: Env,
+): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
   try {
     await ensureRollupSchema(env);
     const rows = await env.DB.prepare(
-      `SELECT signal, bucket, total FROM metric_user_rollup WHERE window_days = ?1 ORDER BY signal, total DESC`,
+      `SELECT signal, bucket, total, computed_at FROM metric_user_rollup WHERE window_days = ?1 ORDER BY signal, total DESC`,
     )
       .bind(ROLLUP_WINDOW_DAYS)
-      .all<{ signal: string; bucket: string; total: number }>();
-    return rows.results.length ? rows.results : null;
+      .all<{ signal: string; bucket: string; total: number; computed_at: string }>();
+    if (!rows.results.length) return null;
+    // Oldest wins: the cursor refreshes a slice at a time, so this is how far
+    // behind the least recently recomputed signal is.
+    const computedAt = rows.results.reduce((min, r) => (r.computed_at < min ? r.computed_at : min), rows.results[0].computed_at);
+    return { rows: rows.results, computedAt };
   } catch (err) {
     console.warn("metric_user_rollup read failed", err);
     return null;
@@ -1015,14 +1018,14 @@ async function metricUserRows(
   env: Env,
   days: 7 | 30,
   surface: ClientSurfaceName,
-): Promise<{ signal: string; bucket: string; total: number }[] | null> {
+): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
   if (surface === "desktop" && days === ROLLUP_WINDOW_DAYS) return rollupMetricUserRows(env);
   try {
     const table = telemetryTableNames(surface).metricUsers;
     const rows = await env.DB.prepare(
       `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM ${table} WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
     ).all<{ signal: string; bucket: string; total: number }>();
-    return rows.results;
+    return { rows: rows.results, computedAt: "" };
   } catch (err) {
     console.warn("metric_users query failed", err);
     return null;
@@ -1038,10 +1041,6 @@ type MetricTotals = { signal: string; bucket: string; total: number }[];
 async function handleStats(request: Request, env: Env, user: User, activeModule: StatsModule): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
-  // The preferences module reads metric_users, whose 30-day window is past what
-  // D1 finishes in one query. Default it to the window that returns; an explicit
-  // 30d still runs, and says so when it fails.
-  if (activeModule === "preferences" && !filters.windowExplicit) filters.windowDays = 7;
   const days = filters.windowDays;
   const since = currentWindowSince(days);
   const surface = activeModule === "diagnostics" ? "desktop" : filters.surface;
@@ -1062,6 +1061,7 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   let previousMetrics: MetricTotals = [];
   let metricUsers: MetricTotals = [];
   let metricUsersUnavailable = false;
+  let metricUsersComputedAt = "";
   let sources: Bar[] = [];
   let overview: OverviewCounts = {
     latestAdoptionPct: null,
@@ -1104,14 +1104,15 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     const [metricsR, usersR] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
     metrics = metricsR;
     metricUsersUnavailable = usersR === null;
-    metricUsers = usersR ?? [];
+    metricUsers = usersR?.rows ?? [];
+    metricUsersComputedAt = usersR?.computedAt ?? "";
   } else {
     [metrics, previousMetrics] = await Promise.all([metricRows(env, days, surface), metricRows(env, days, surface, true)]);
   }
 
   return html(
     renderStats(
-      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, metricUsersUnavailable, sources, overview, latestVersion, filters },
+      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, metricUsersUnavailable, metricUsersComputedAt, sources, overview, latestVersion, filters },
       user,
       activeModule,
     ),

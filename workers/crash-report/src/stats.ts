@@ -591,6 +591,8 @@ export function renderStats(
     previousMetrics: MetricRow[];
     metricUsers: MetricRow[];
     metricUsersUnavailable: boolean;
+    /** Oldest computed_at in the rollup; empty when the window was queried live. */
+    metricUsersComputedAt: string;
     sources: { label: string; users: number }[];
     overview: OverviewCounts;
     latestVersion: string;
@@ -604,7 +606,6 @@ export function renderStats(
       newLatest: boolean;
       regressed: boolean;
       windowDays: 7 | 30;
-      windowExplicit: boolean;
       preferenceMode: "users" | "opens";
     };
   },
@@ -650,9 +651,7 @@ export function renderStats(
     put("surface", data.filters.surface === "cli" ? "cli" : "");
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
-    // Only carry the window when the reader chose it — otherwise the
-    // preferences module's 7d default would follow them into every other module.
-    if (data.filters.windowDays === 7 && data.filters.windowExplicit) params.set("window", "7d");
+    if (data.filters.windowDays === 7) params.set("window", "7d");
     if (module === "preferences" && data.filters.preferenceMode === "opens") params.set("prefs", "opens");
     for (const [k, v] of Object.entries(patch)) {
       if (v) params.set(k, v);
@@ -742,8 +741,16 @@ ${filters}
           `30 天去重统计由后台每小时预聚合，目前还没覆盖到全部信号。<a href="${sevenDayHref}">先看 7 天</a>。`,
         )
       : i18nHTML(`The ${rangeText} deduplication did not finish.`, `${rangeText} 的去重统计没能跑完。`);
+  // A precomputed window can silently go stale if the rollup cron stops, so the
+  // heading carries how old the least recently recomputed signal is.
+  const computedAt = data.metricUsersComputedAt
+    ? ` <b>${esc(data.metricUsersComputedAt.slice(0, 16).replace("T", " "))}Z</b>`
+    : "";
   const installsPanel = preferencePanel(
-    i18nHTML(`Deduplicated installs <b>— ${rangeText}</b>`, `按安装去重 <b>— ${rangeText}</b>`),
+    i18nHTML(
+      `Deduplicated installs <b>— ${rangeText}</b>${computedAt ? ` computed${computedAt}` : ""}`,
+      `按安装去重 <b>— ${rangeText}</b>${computedAt ? ` 统计于${computedAt}` : ""}`,
+    ),
     data.metricUsersUnavailable
       ? `<div class="empty">${unavailableNotice}</div>`
       : settingsDashboard(settingsMetricUsers, { collapseSections: true }),

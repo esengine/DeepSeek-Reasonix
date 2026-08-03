@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import {
   groupFingerprintFromPath,
   isDevelopmentReport,
@@ -449,6 +449,7 @@ describe("diagnostics dashboard lanes", () => {
       previousMetrics: [],
       metricUsers: [],
       metricUsersUnavailable: false,
+      metricUsersComputedAt: "",
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 4, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 1 },
       latestVersion: "v1.40.0",
@@ -462,7 +463,6 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
-        windowExplicit: false,
         preferenceMode: "users",
       },
     };
@@ -496,6 +496,7 @@ describe("diagnostics dashboard lanes", () => {
       previousMetrics: [],
       metricUsers: [],
       metricUsersUnavailable: false,
+      metricUsersComputedAt: "",
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
       latestVersion: "",
@@ -509,7 +510,6 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
-        windowExplicit: false,
         preferenceMode: "users",
       },
     };
@@ -533,7 +533,8 @@ describe("diagnostics dashboard lanes", () => {
       metrics: [],
       previousMetrics: [],
       metricUsers: [],
-      metricUsersUnavailable: true,
+        metricUsersUnavailable: true,
+      metricUsersComputedAt: "",
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
       latestVersion: "",
@@ -547,7 +548,6 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
-        windowExplicit: true,
         preferenceMode: "users",
       },
     };
@@ -562,17 +562,18 @@ describe("diagnostics dashboard lanes", () => {
     expect(installs).not.toContain("No settings preference metrics yet");
   });
 
-  it("keeps an unchosen 7d window out of the other modules' links", () => {
+  it("shows how old the precomputed window is", () => {
     type StatsData = Parameters<typeof renderStats>[0];
-    const base: StatsData = {
+    const data: StatsData = {
       daily: [],
       versions: [],
       platforms: [],
       crashes: [],
       metrics: [],
       previousMetrics: [],
-      metricUsers: [],
+      metricUsers: [{ signal: "settings_theme", bucket: "dark", total: 12 }],
       metricUsersUnavailable: false,
+      metricUsersComputedAt: "2026-08-03T07:28:41.019Z",
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
       latestVersion: "",
@@ -585,15 +586,11 @@ describe("diagnostics dashboard lanes", () => {
         platform: "",
         newLatest: false,
         regressed: false,
-        windowDays: 7,
-        windowExplicit: false,
+        windowDays: 30,
         preferenceMode: "users",
       },
     };
     const user = { id: 1, email: "viewer@example.com", role: "viewer", created_at: "", approved_at: "" } as const;
-
-    expect(renderStats(base, user, "preferences")).toContain('href="/stats"');
-    const chosen = { ...base, filters: { ...base.filters, windowExplicit: true } };
-    expect(renderStats(chosen, user, "preferences")).toContain("/stats?window=7d");
+    expect(renderStats(data, user, "preferences")).toContain("2026-08-03 07:28Z");
   });
 });
