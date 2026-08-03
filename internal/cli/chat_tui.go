@@ -1667,6 +1667,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.Reset()
 				m.pastedBlocks = nil
 				m.state = tuiRunning
+				m.todoArgs = ""
+				m.todoSidebarScroll = -1
 				m.runStart = time.Now()
 				m.elapsed = 0
 				m.turnTokens = 0
@@ -4315,6 +4317,12 @@ func (m *chatTUI) startTurnWithRaw(sent, displayed, restore, raw string) tea.Cmd
 // controller can choose inline vs isolated subagent execution from the live
 // skill's RunAs metadata without the TUI reimplementing that policy.
 func (m *chatTUI) startControllerTurn(displayed, restore string, start func()) tea.Cmd {
+	// A new user turn starts fresh: drop the previous task list so a stale
+	// sidebar can't imply the old work is still running. The agent re-seeds
+	// the list via todo_write when the new task actually has steps.
+	m.todoArgs = ""
+	m.todoSidebarScroll = -1
+
 	// Flush any half-streamed leftover before the new turn (defensive).
 	m.commitReasoning()
 	m.commitPending()

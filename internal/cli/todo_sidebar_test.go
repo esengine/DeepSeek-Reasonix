@@ -130,6 +130,23 @@ func TestTodoWindowKeepsActiveVisible(t *testing.T) {
 	}
 }
 
+// TestNewUserTurnClearsTodoSidebar pins the stale-list cleanup: submitting a
+// new user turn drops the previous task list (and its manual scroll), so the
+// sidebar cannot linger and imply the old work is still running. The agent
+// re-seeds the list via todo_write when the new task actually has steps.
+func TestNewUserTurnClearsTodoSidebar(t *testing.T) {
+	m := newTestChatTUI()
+	m.todoArgs = sidebarTodoArgs
+	m.todoSidebarScroll = 3
+	_ = m.startControllerTurn("hello", "hello", func() {})
+	if m.todoArgs != "" {
+		t.Fatalf("new user turn should clear the stale task list, got %q", m.todoArgs)
+	}
+	if m.todoSidebarScroll != -1 {
+		t.Fatalf("sidebar scroll should reset to auto-follow, got %d", m.todoSidebarScroll)
+	}
+}
+
 func TestRenderTodoSidebarShowsWorkspaceRoot(t *testing.T) {
 	// The workspace root is pinned as the sidebar's last row so the panel
 	// identifies where the session runs; a missing root (plain fixture) adds
