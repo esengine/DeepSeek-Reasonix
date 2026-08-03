@@ -69,11 +69,10 @@ func TestRenderTodoSidebar(t *testing.T) {
 	if !strings.Contains(out, "Wiring the CLI") {
 		t.Fatalf("sidebar should show the activeForm of the in-progress item:\n%s", out)
 	}
-	// Compact: the column hugs its content (header + 4 items + inter-item
-	// blank rows, open rails, no top/bottom frame), never stretching to the
-	// passed height.
-	if lines := strings.Count(out, "\n") + 1; lines != 8 {
-		t.Fatalf("sidebar height = %d rows, want 8 (header + 4 items + 3 spacing rows)", lines)
+	// Compact: the column hugs its content (header + 4 items, open rails, no
+	// top/bottom frame), never stretching to the passed height.
+	if lines := strings.Count(out, "\n") + 1; lines != 5 {
+		t.Fatalf("sidebar height = %d rows, want 5 (compact content height)", lines)
 	}
 }
 
@@ -151,8 +150,8 @@ func TestRenderTodoSidebarShowsWorkspaceRoot(t *testing.T) {
 	if !strings.Contains(out, "◆ C:\\repo\\DeepSeek-Reasonix") {
 		t.Fatalf("root row should carry the accent marker:\n%s", out)
 	}
-	if lines := strings.Count(out, "\n") + 1; lines != 11 {
-		t.Fatalf("sidebar with root = %d rows, want 11 (header + 4 items + 4 spacing rows + separator + root)", lines)
+	if lines := strings.Count(out, "\n") + 1; lines != 7 {
+		t.Fatalf("sidebar with root = %d rows, want 7 (header + 4 items + separator + root)", lines)
 	}
 }
 

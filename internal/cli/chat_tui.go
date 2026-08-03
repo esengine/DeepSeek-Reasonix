@@ -3907,17 +3907,13 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 			width = max(wrapWidth-3, 4)
 		}
 		wrapped := wrapTodoLine(line, width, todoSidebarWrapMax)
-		// One blank row after each task block opens up the line spacing; the
-		// trailing blank is trimmed by the final TrimRight.
-		if used+len(wrapped)+1 > avail {
+		if used+len(wrapped) > avail {
 			break
 		}
 		for _, wl := range wrapped {
 			b.WriteString(indent + wl + "\n")
 			used++
 		}
-		b.WriteString("\n")
-		used++
 		last++
 	}
 	if last < len(todos) {
