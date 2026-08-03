@@ -2115,10 +2115,16 @@ func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 		}
 		return strings.TrimSpace(string(b)), nil
 	}
+	return c.InlineSystemPrompt(), nil
+}
+
+// InlineSystemPrompt returns the configured system_prompt, or DefaultSystemPrompt
+// when unset. It is the fallback when system_prompt_file cannot be read.
+func (c *Config) InlineSystemPrompt() string {
 	if strings.TrimSpace(c.Agent.SystemPrompt) == "" {
-		return DefaultSystemPrompt, nil
+		return DefaultSystemPrompt
 	}
-	return c.Agent.SystemPrompt, nil
+	return c.Agent.SystemPrompt
 }
 
 // Validate checks that the selected model's provider is usable.

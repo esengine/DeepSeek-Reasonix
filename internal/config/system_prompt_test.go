@@ -67,6 +67,18 @@ func TestResolveSystemPromptForRootAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestResolveSystemPromptForRootMissingFile(t *testing.T) {
+	cfg := Default()
+	cfg.Agent.SystemPromptFile = "prompts/does-not-exist.md"
+
+	if _, err := cfg.ResolveSystemPromptForRoot(t.TempDir()); err == nil {
+		t.Fatal("expected error for missing system_prompt_file")
+	}
+	if got := cfg.InlineSystemPrompt(); got != DefaultSystemPrompt {
+		t.Fatalf("InlineSystemPrompt fallback = %q, want DefaultSystemPrompt", got)
+	}
+}
+
 func TestResolveSystemPromptForRootDecodesGB18030(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
