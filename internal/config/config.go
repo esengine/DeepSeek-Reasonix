@@ -2103,17 +2103,34 @@ func (c *Config) ResolveSystemPrompt() (string, error) {
 // ResolveSystemPromptForRoot is like ResolveSystemPrompt but resolves a relative
 // system_prompt_file against root. Desktop tabs pass their workspace root here so
 // prompt files are project-scoped even when the process cwd is elsewhere.
+// A relative path is probed under the workspace root first (project override),
+// then under the Reasonix home (global default); only when every location is
+// unreadable does it return an error, and callers fall back to the inline prompt.
 func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 	if c.Agent.SystemPromptFile != "" {
 		path := c.Agent.SystemPromptFile
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(resolveRoot(root), path)
+		if filepath.IsAbs(path) {
+			b, err := fileencoding.ReadFileUTF8(path)
+			if err != nil {
+				return "", fmt.Errorf("system_prompt_file: %w", err)
+			}
+			return strings.TrimSpace(string(b)), nil
 		}
-		b, err := fileencoding.ReadFileUTF8(path)
-		if err != nil {
-			return "", fmt.Errorf("system_prompt_file: %w", err)
+		candidates := []string{filepath.Join(resolveRoot(root), path)}
+		if home := ReasonixHomeDir(); home != "" {
+			candidates = append(candidates, filepath.Join(home, path))
 		}
-		return strings.TrimSpace(string(b)), nil
+		var firstErr error
+		for _, candidate := range candidates {
+			b, err := fileencoding.ReadFileUTF8(candidate)
+			if err == nil {
+				return strings.TrimSpace(string(b)), nil
+			}
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+		return "", fmt.Errorf("system_prompt_file: %w (tried: %s)", firstErr, strings.Join(candidates, ", "))
 	}
 	return c.InlineSystemPrompt(), nil
 }

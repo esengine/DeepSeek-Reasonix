@@ -27,6 +27,7 @@ func TestDefaultSystemPromptStaysLean(t *testing.T) {
 
 func TestResolveSystemPromptForRootRelativePath(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("REASONIX_HOME", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -68,19 +69,79 @@ func TestResolveSystemPromptForRootAbsolutePath(t *testing.T) {
 }
 
 func TestResolveSystemPromptForRootMissingFile(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+
 	cfg := Default()
 	cfg.Agent.SystemPromptFile = "prompts/does-not-exist.md"
 
-	if _, err := cfg.ResolveSystemPromptForRoot(t.TempDir()); err == nil {
+	_, err := cfg.ResolveSystemPromptForRoot(root)
+	if err == nil {
 		t.Fatal("expected error for missing system_prompt_file")
+	}
+	// All probed locations must be listed so users can see where it looked.
+	for _, tried := range []string{filepath.Join(root, "prompts", "does-not-exist.md"), filepath.Join(home, "prompts", "does-not-exist.md")} {
+		if !strings.Contains(err.Error(), tried) {
+			t.Fatalf("error %q does not list tried path %q", err, tried)
+		}
 	}
 	if got := cfg.InlineSystemPrompt(); got != DefaultSystemPrompt {
 		t.Fatalf("InlineSystemPrompt fallback = %q, want DefaultSystemPrompt", got)
 	}
 }
 
+func TestResolveSystemPromptForRootFallsBackToReasonixHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "prompts", "system.md"), []byte(" home prompt \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	cfg.Agent.SystemPromptFile = filepath.Join("prompts", "system.md")
+
+	// Workspace root has no such file; the Reasonix-home copy must win the probe.
+	got, err := cfg.ResolveSystemPromptForRoot(t.TempDir())
+	if err != nil {
+		t.Fatalf("ResolveSystemPromptForRoot: %v", err)
+	}
+	if got != "home prompt" {
+		t.Fatalf("system prompt = %q, want %q", got, "home prompt")
+	}
+}
+
+func TestResolveSystemPromptForRootWorkspaceWins(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	for dir, content := range map[string]string{home: "home prompt", root: "workspace prompt"} {
+		if err := os.MkdirAll(filepath.Join(dir, "prompts"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "prompts", "system.md"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cfg := Default()
+	cfg.Agent.SystemPromptFile = filepath.Join("prompts", "system.md")
+
+	got, err := cfg.ResolveSystemPromptForRoot(root)
+	if err != nil {
+		t.Fatalf("ResolveSystemPromptForRoot: %v", err)
+	}
+	if got != "workspace prompt" {
+		t.Fatalf("system prompt = %q, want workspace copy to win, got %q", got, "workspace prompt")
+	}
+}
+
 func TestResolveSystemPromptForRootDecodesGB18030(t *testing.T) {
 	root := t.TempDir()
+	t.Setenv("REASONIX_HOME", t.TempDir())
 	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
 		t.Fatal(err)
 	}
