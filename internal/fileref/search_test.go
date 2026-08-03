@@ -137,6 +137,7 @@ func TestSearchSkipsNoiseStillWorks(t *testing.T) {
 	writeFile(t, filepath.Join(root, "node_modules", "planind", "index.tsx")) // must be skipped
 	writeFile(t, filepath.Join(root, "build", "planind", "index.tsx"))        // skipDirNames
 	writeFile(t, filepath.Join(root, "dist", "planind", "index.tsx"))         // skipDirNames
+	writeFile(t, filepath.Join(root, "vendor", "planind", "package.go"))      // skipDirNames
 
 	got := Search(root, "planind", 50)
 	if containsPath(got, "node_modules/planind/index.tsx") {
@@ -148,7 +149,24 @@ func TestSearchSkipsNoiseStillWorks(t *testing.T) {
 	if containsPath(got, "dist/planind/index.tsx") {
 		t.Fatalf("Search should skip dist/, got %v", resultPaths(got))
 	}
+	if containsPath(got, "vendor/planind/package.go") {
+		t.Fatalf("Search should skip vendor/, got %v", resultPaths(got))
+	}
 	if !containsPath(got, "src/planind/index.tsx") {
 		t.Fatalf("Search should still return legitimate hit, got %v", resultPaths(got))
+	}
+}
+
+func TestSearchSkipsMavenTargetDirectory(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "src", "main", "java", "App.java"))
+	writeFile(t, filepath.Join(root, "target", "classes", "App.class"))
+
+	got := Search(root, "app", 50)
+	if containsPath(got, "target/classes/App.class") {
+		t.Fatalf("Search should skip Maven target/ build output, got %v", resultPaths(got))
+	}
+	if !containsPath(got, "src/main/java/App.java") {
+		t.Fatalf("Search should still return source files, got %v", resultPaths(got))
 	}
 }
