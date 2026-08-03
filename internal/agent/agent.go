@@ -3295,10 +3295,35 @@ func todoProgressNudgeMessage(rounds int) string {
 // failures: it steers the model to analyse the errors and adjust rather than
 // blindly retry the same call, which is what the raw error texts alone often
 // fail to elicit on long tool loops.
+// toolFailureReflectionMessage is the nudge injected after a tool round with
+// failures: it steers the model to analyse the errors and adjust rather than
+// blindly retry the same call, which is what the raw error texts alone often
+// fail to elicit on long tool loops. Edit-family failures get a pointed
+// addition: their old_string mismatch almost always comes from editing
+// against a stale read, so the nudge names the fix (re-read the file) instead
+// of letting the model retry blind against the same stale content.
 func toolFailureReflectionMessage(names []string) string {
-	return "Some tool calls failed in the previous round (" + strings.Join(names, ", ") + "). " +
+	msg := "Some tool calls failed in the previous round (" + strings.Join(names, ", ") + "). " +
 		"Analyse the failures before acting: re-read the error output, check your assumptions about the current state, " +
 		"and adjust the approach. Do not blindly retry the same call the same way."
+	for _, n := range names {
+		if isEditFailureTool(n) {
+			msg += " The failed edit's old_string did not match the file as it exists on disk — re-read that file (read_file) for its current content before retrying the edit, and base the new old_string on the fresh read."
+			break
+		}
+	}
+	return msg
+}
+
+// isEditFailureTool reports whether a tool's failure is typically an
+// old_string/content mismatch against a stale read, where re-reading the file
+// is the actionable fix.
+func isEditFailureTool(name string) bool {
+	switch name {
+	case "edit_file", "multi_edit", "delete_range", "delete_symbol", "notebook_edit":
+		return true
+	}
+	return false
 }
 
 // HostReflectionPrefix marks user messages injected by the host as

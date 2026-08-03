@@ -41,6 +41,15 @@ func TestToolFailureReflectionMessage(t *testing.T) {
 			t.Fatalf("reflection message %q missing %q", msg, want)
 		}
 	}
+	// Edit-family failures add the re-read guidance so the model doesn't
+	// retry blind against a stale old_string.
+	if !strings.Contains(msg, "re-read that file") {
+		t.Fatalf("edit failure should carry re-read guidance: %q", msg)
+	}
+	// Non-edit failures keep the generic nudge only.
+	if got := toolFailureReflectionMessage([]string{"bash"}); strings.Contains(got, "re-read that file") {
+		t.Fatalf("bash failure should not carry edit guidance: %q", got)
+	}
 }
 
 func TestHostReflectionText(t *testing.T) {
