@@ -3438,7 +3438,9 @@ export default function App() {
       }
       setRewindSignal((v) => v + 1);
       if (rs.scope === "both") {
-        // Code was only reverted now (deferred), so refresh the dock here.
+        // When "both" arrives via /rewind or the Go API (not the UI flow,
+        // which splits code/conversation), code was reverted inside Rewind
+        // and the dock needs a refresh here.
         setDockRefreshKey((v) => v + 1);
         setProjectRevision((v) => v + 1);
       }
@@ -3465,7 +3467,7 @@ export default function App() {
   }, [controllerReady, recoverDeliveryToTab, resumeControllerGoalForTab, state.meta?.goal, t]);
   commitThenSendRef.current = commitThenSend;
 
-  const handleMessageAction = useCallback((turn: number, scope: string) => {
+  const handleMessageAction = useCallback(async (turn: number, scope: string) => {
     const sourceTabId = activeTabId;
     if (!sourceTabId || activeTab?.readOnly) return;
     if (hydratePlaceholderActive) return;
@@ -3488,6 +3490,19 @@ export default function App() {
         setProjectRevision((v) => v + 1);
       });
       return;
+    }
+
+    // "both" rewinds code AND conversation. Execute the code revert immediately
+    // so checkpoint state is still current — the delayed commitThenSend path would
+    // otherwise race with background autosaves that may shift checkpoint boundaries
+    // (#6674). Only proceed with the optimistic conversation truncation when the
+    // code revert succeeds; otherwise abort so the user can retry.
+    if (scope === "both") {
+      const ok = await rewindForTab(sourceTabId, turn, "code");
+      if (!ok) return;
+      setDockRefreshKey((v) => v + 1);
+      setProjectRevision((v) => v + 1);
+      scope = "conversation"; // fall through to optimistic conversation rewind below
     }
 
     // Summarize only compresses the conversation log — no files touched,

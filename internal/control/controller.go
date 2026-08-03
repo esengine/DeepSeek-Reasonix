@@ -2949,6 +2949,9 @@ func (c *Controller) Rewind(turn int, scope RewindScope) error {
 		if len(written) > 0 || len(deleted) > 0 {
 			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 				Text: fmt.Sprintf("rewound code to turn %d — %d file(s) restored, %d removed", turn, len(written), len(deleted))})
+		} else {
+			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+				Text: fmt.Sprintf("rewound code to turn %d: no file snapshots found — code was not restored", turn)})
 		}
 	}
 	if scope == RewindConversation || scope == RewindBoth {
