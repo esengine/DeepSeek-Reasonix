@@ -1846,7 +1846,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case promptResolvedMsg:
 		switch {
 		case msg.err != nil:
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+msg.err.Error(), m.width, activeCLITheme.warn))
+			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+msg.err.Error(), m.contentWidth(), activeCLITheme.warn))
 		case strings.TrimSpace(msg.sent) == "":
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
@@ -2283,7 +2283,7 @@ func (m *chatTUI) streamReasoning(chunk string) {
 		m.reasoningView = m.reasoningView[:copy(m.reasoningView, m.reasoningView[drop:])]
 	}
 	raw := string(m.reasoningView)
-	m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.width, reasoningTailLines), transcriptSource{
+	m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.contentWidth(), reasoningTailLines), transcriptSource{
 		kind: transcriptSourceReasoning, raw: raw, maxLines: reasoningTailLines,
 	})
 	m.transcriptDirty = true
@@ -2416,7 +2416,7 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 	}
 	lines := make([]string, len(vis))
 	for i, ln := range vis {
-		lines[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+		lines[i] = dim(clampPlain(ln, m.contentWidth()-len([]rune(connector))))
 	}
 	m.transcript[m.toolStreamIdx] = connectorBlock(lines)
 	m.transcriptDirty = true
@@ -2455,14 +2455,14 @@ func (m *chatTUI) collapseToolOutput(id, resultOutput string) {
 				if total > shellPreviewLines {
 					preview := make([]string, shellPreviewLines+1)
 					for i := 0; i < shellPreviewLines; i++ {
-						preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
+						preview[i] = dim(clampPlain(lines[i], m.contentWidth()-len([]rune(connector))))
 					}
 					preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
 					m.commitLine(connectorBlock(preview))
 				} else {
 					rendered := make([]string, total)
 					for i, ln := range lines {
-						rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+						rendered[i] = dim(clampPlain(ln, m.contentWidth()-len([]rune(connector))))
 					}
 					m.commitLine(connectorBlock(rendered))
 				}
@@ -2544,14 +2544,14 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 		if total > shellPreviewLines {
 			preview := make([]string, shellPreviewLines+1)
 			for i := 0; i < shellPreviewLines; i++ {
-				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
+				preview[i] = dim(clampPlain(lines[i], m.contentWidth()-len([]rune(connector))))
 			}
 			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
 			m.transcript[idx] = connectorBlock(preview)
 		} else {
 			rendered := make([]string, total)
 			for i, ln := range lines {
-				rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
+				rendered[i] = dim(clampPlain(ln, m.contentWidth()-len([]rune(connector))))
 			}
 			m.transcript[idx] = connectorBlock(rendered)
 		}
@@ -2583,7 +2583,7 @@ func (m *chatTUI) toggleShellOutput() {
 	}
 	lines := strings.Split(strings.TrimRight(full, "\n"), "\n")
 	total := len(lines)
-	innerW := m.width - len([]rune(connector))
+	innerW := m.contentWidth() - len([]rune(connector))
 	if innerW < 10 {
 		innerW = 80
 	}
@@ -2683,7 +2683,7 @@ func (m *chatTUI) commitReasoning() {
 			m.commitSpacer()
 			m.commitLine(reasoningMarker(fmt.Sprintf(i18n.M.ChatThoughtForFmt, secs)))
 			if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
-				m.commitLine(reasoningBlock(m.reasoning.String(), m.width, 0))
+				m.commitLine(reasoningBlock(m.reasoning.String(), m.contentWidth(), 0))
 			}
 		}
 		m.reasoning.Reset()
@@ -2702,7 +2702,7 @@ func (m *chatTUI) commitReasoning() {
 	if m.reasoningTextIdx >= 0 {
 		if m.showReasoning && strings.TrimSpace(m.reasoning.String()) != "" {
 			raw := m.reasoning.String()
-			m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.width, 0), transcriptSource{
+			m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.contentWidth(), 0), transcriptSource{
 				kind: transcriptSourceReasoning, raw: raw,
 			})
 		} else {
@@ -2752,7 +2752,7 @@ func (m *chatTUI) streamAnswer() {
 		m.answerIdx = len(m.transcript)
 		m.commitTranscriptSource(source)
 	} else {
-		block := m.renderTranscriptSource(source, m.width)
+		block := m.renderTranscriptSource(source, m.contentWidth())
 		m.setTranscriptBlock(m.answerIdx, block, source)
 		m.transcriptDirty = true
 	}
@@ -2773,7 +2773,7 @@ func (m *chatTUI) commitPending() {
 	if m.answerIdx < 0 {
 		m.commitTranscriptSource(source)
 	} else {
-		block := m.renderTranscriptSource(source, m.width)
+		block := m.renderTranscriptSource(source, m.contentWidth())
 		m.setTranscriptBlock(m.answerIdx, block, source)
 		m.transcriptDirty = true
 	}
@@ -3584,7 +3584,7 @@ func shortTokens(n int) string {
 // renderApprovalBanner is the slim notice shown above the input while a tool
 // call (or a plan) awaits the user's decision.
 func (m chatTUI) renderApprovalBanner() string {
-	w := m.width
+	w := m.contentWidth()
 	if w < 10 {
 		w = 10
 	}
@@ -4452,7 +4452,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			// No longer a tool, but guard anyway: the plan is the assistant's reply.
 		default:
 			m.commitSpacer()
-			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.width, m.diffMaxLines); block != nil {
+			if block := diffBlock(e.Tool.Name, e.Tool.Args, e.Tool.FileDiff, m.contentWidth(), m.diffMaxLines); block != nil {
 				for _, ln := range block {
 					m.commitLine(ln)
 				}
@@ -4597,9 +4597,9 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		m.queueEditDraft = ""
 		m.clearSubmittedPastes()
 		if e.Outcome == event.TurnOutcomeRecoveryPaused {
-			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.width, activeCLITheme.info))
+			m.commitLine(wrapForViewport("⏸ "+i18n.M.RecoveryPaused, m.contentWidth(), activeCLITheme.info))
 		} else if e.Err != nil && e.Err.Error() != "" && !strings.Contains(e.Err.Error(), "context canceled") {
-			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.width, activeCLITheme.warn))
+			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+e.Err.Error(), m.contentWidth(), activeCLITheme.warn))
 		}
 		// Plan-mode approval is now driven by the controller (it emits an
 		// ApprovalRequest when a plan-mode turn produces a proposal), so there's
@@ -4663,7 +4663,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.finalizeStreamed()
 		m.clearTranscriptDisplay()
 		m.commitLine(strings.TrimRight(
-			renderTUIBanner(m.label, "", transcriptContentWidth(m.width, m.nativeScrollback)), "\n"))
+			renderTUIBanner(m.label, "", transcriptContentWidth(m.contentWidth(), m.nativeScrollback)), "\n"))
 		m.transcriptDirty = true
 		m.forceGotoBottom = true
 		m.notice(i18n.M.SlashClsDone)
@@ -4766,7 +4766,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		if len(styles) == 0 {
 			m.notice(i18n.M.OutputStyleNone)
 		} else {
-			m.commitLine(renderOutputStyles(m.width, styles, m.outputStyle))
+			m.commitLine(renderOutputStyles(m.contentWidth(), styles, m.outputStyle))
 		}
 	case "/diff-fold":
 		m.echoLocalCommand(input)
@@ -5228,7 +5228,7 @@ func (m *chatTUI) showMCPStatus() {
 		m.notice(i18n.M.SlashMCPNone)
 		return
 	}
-	m.commitLine(renderMCPStatus(m.width, m.host.Servers(), m.host.Prompts(), m.host.Resources(), m.host.Failures()))
+	m.commitLine(renderMCPStatus(m.contentWidth(), m.host.Servers(), m.host.Prompts(), m.host.Resources(), m.host.Failures()))
 }
 
 // notice queues a dim informational line to scrollback.

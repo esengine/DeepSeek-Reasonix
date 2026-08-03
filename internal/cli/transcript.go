@@ -223,7 +223,10 @@ func (m *chatTUI) reflowTranscript(terminalWidth int) {
 }
 
 func (m *chatTUI) commitTranscriptSource(source transcriptSource) {
-	rendered := m.renderTranscriptSource(source, m.width)
+	// Render against the chat column width (terminal minus the todo sidebar),
+	// not the full terminal width: with the task list pinned on the right,
+	// full-width blocks would spill into the sidebar column.
+	rendered := m.renderTranscriptSource(source, m.contentWidth())
 	*m.pendingCommit = append(*m.pendingCommit, rendered)
 	m.appendTranscriptBlock(rendered, source)
 }
