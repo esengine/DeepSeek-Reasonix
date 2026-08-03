@@ -3,6 +3,7 @@ package sessiontool
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -106,6 +107,32 @@ func TestListSessions_SingleSession(t *testing.T) {
 	}
 	if !strings.Contains(out, "1 turn") && !strings.Contains(out, "| 1 |") {
 		t.Errorf("expected turn count in output, got: %s", out)
+	}
+}
+
+func TestListSessions_UsesSidecarCountsForV5EventBackedSession(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "20260708-120000.000000000-deepseek-chat.jsonl")
+	if err := os.WriteFile(sessionPath, nil, 0o644); err != nil {
+		t.Fatalf("write empty checkpoint: %v", err)
+	}
+	if err := agent.SaveBranchMeta(sessionPath, agent.BranchMeta{
+		ID:            agent.BranchID(sessionPath),
+		Preview:       "cached V5 prompt",
+		Turns:         8,
+		SchemaVersion: agent.BranchMetaCountsVersion,
+	}); err != nil {
+		t.Fatalf("SaveBranchMeta: %v", err)
+	}
+
+	tool := NewListSessionsTool(dir)
+	out := runTool(t, tool, map[string]any{})
+
+	if !strings.Contains(out, "| 8 |") {
+		t.Fatalf("expected sidecar turn count in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "cached V5 prompt") {
+		t.Fatalf("expected sidecar preview in output, got:\n%s", out)
 	}
 }
 
