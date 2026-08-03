@@ -735,13 +735,17 @@ ${filters}
 <section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes)}</section>
 </section>`;
   const sevenDayHref = esc(filterQS({ window: "7d" }, "preferences"));
+  const unavailableNotice =
+    range === 30
+      ? i18nHTML(
+          `The 30-day deduplication is precomputed hourly and has not reached every signal yet. <a href="${sevenDayHref}">Use 7d</a> meanwhile.`,
+          `30 天去重统计由后台每小时预聚合，目前还没覆盖到全部信号。<a href="${sevenDayHref}">先看 7 天</a>。`,
+        )
+      : i18nHTML(`The ${rangeText} deduplication did not finish.`, `${rangeText} 的去重统计没能跑完。`);
   const installsPanel = preferencePanel(
     i18nHTML(`Deduplicated installs <b>— ${rangeText}</b>`, `按安装去重 <b>— ${rangeText}</b>`),
     data.metricUsersUnavailable
-      ? `<div class="empty">${i18nHTML(
-          `The ${rangeText} deduplication did not finish — that window is larger than one D1 query is given. <a href="${sevenDayHref}">Use 7d</a>.`,
-          `${rangeText} 的去重统计没能跑完 —— 这个窗口超出了单条 D1 查询的预算。<a href="${sevenDayHref}">改用 7 天</a>。`,
-        )}</div>`
+      ? `<div class="empty">${unavailableNotice}</div>`
       : settingsDashboard(settingsMetricUsers, { collapseSections: true }),
     data.filters.preferenceMode === "users",
   );

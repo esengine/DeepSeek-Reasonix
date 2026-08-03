@@ -988,6 +988,25 @@ async function metricRows(env: Env, days: 7 | 30, surface: ClientSurfaceName, pr
   return rows.results;
 }
 
+// The 30-day desktop window is served from the cron-built rollup: computing it
+// live exceeds what D1 spends on one query (see refreshMetricUserRollup). Null
+// here means "not computed yet", which the dashboard says out loud rather than
+// rendering as an empty result.
+async function rollupMetricUserRows(env: Env): Promise<{ signal: string; bucket: string; total: number }[] | null> {
+  try {
+    await ensureRollupSchema(env);
+    const rows = await env.DB.prepare(
+      `SELECT signal, bucket, total FROM metric_user_rollup WHERE window_days = ?1 ORDER BY signal, total DESC`,
+    )
+      .bind(ROLLUP_WINDOW_DAYS)
+      .all<{ signal: string; bucket: string; total: number }>();
+    return rows.results.length ? rows.results : null;
+  } catch (err) {
+    console.warn("metric_user_rollup read failed", err);
+    return null;
+  }
+}
+
 // Null means the query did not complete, which is distinct from "no rows": at
 // ~1M rows a day, the 30-day COUNT(DISTINCT install_id) exceeds what D1 will
 // spend on one query and comes back as a CPU-limit reset. Rendering that as an
@@ -997,6 +1016,7 @@ async function metricUserRows(
   days: 7 | 30,
   surface: ClientSurfaceName,
 ): Promise<{ signal: string; bucket: string; total: number }[] | null> {
+  if (surface === "desktop" && days === ROLLUP_WINDOW_DAYS) return rollupMetricUserRows(env);
   try {
     const table = telemetryTableNames(surface).metricUsers;
     const rows = await env.DB.prepare(
@@ -1331,6 +1351,101 @@ const RETENTION_MAX_CHUNKS = 200;
 // scheduled handler dispatches on controller.cron; every other trigger
 // (the retention cron, manual runs) falls through to the purge.
 const SENTINEL_CRON = "17 1,7,13,19 * * *";
+const ROLLUP_CRON = "23 * * * *";
+
+// The preferences module's 30-day COUNT(DISTINCT install_id) spans ~28M rows
+// and D1 abandons it mid-query. It cannot be summed from per-day totals either:
+// an install active on twelve days would count twelve times. So the window is
+// computed here instead, one signal at a time — a single signal takes ~1s, and
+// the cursor spreads the ~57 of them across hourly runs rather than blowing one
+// invocation's CPU budget.
+const ROLLUP_WINDOW_DAYS = 30;
+const ROLLUP_SIGNALS_PER_RUN = 8;
+
+const ROLLUP_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS metric_user_rollup (
+     window_days INTEGER NOT NULL,
+     signal TEXT NOT NULL,
+     bucket TEXT NOT NULL,
+     total INTEGER NOT NULL,
+     computed_at TEXT NOT NULL,
+     PRIMARY KEY (window_days, signal, bucket)
+   )`,
+  `CREATE TABLE IF NOT EXISTS metric_user_rollup_state (
+     id INTEGER PRIMARY KEY CHECK (id = 1),
+     next_signal INTEGER NOT NULL,
+     updated_at TEXT NOT NULL
+   )`,
+] as const;
+
+const rollupSchemaPromises = new WeakMap<object, Promise<void>>();
+
+function ensureRollupSchema(env: Pick<Env, "DB">): Promise<void> {
+  const key = env.DB as unknown as object;
+  const existing = rollupSchemaPromises.get(key);
+  if (existing) return existing;
+  const creation = env.DB
+    .batch(ROLLUP_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)))
+    .then(() => undefined)
+    .catch((err) => {
+      rollupSchemaPromises.delete(key);
+      throw err;
+    });
+  rollupSchemaPromises.set(key, creation);
+  return creation;
+}
+
+export async function refreshMetricUserRollup(env: Env, signalsPerRun = ROLLUP_SIGNALS_PER_RUN): Promise<void> {
+  await ensureRollupSchema(env);
+  const state = await env.DB.prepare("SELECT next_signal FROM metric_user_rollup_state WHERE id = 1").first<{
+    next_signal: number;
+  }>();
+  const start = Number(state?.next_signal ?? 0) % METRIC_SIGNALS.length;
+  const now = new Date().toISOString();
+  let advanced = 0;
+
+  for (let i = 0; i < signalsPerRun && i < METRIC_SIGNALS.length; i++) {
+    const signal = METRIC_SIGNALS[(start + i) % METRIC_SIGNALS.length];
+    try {
+      const rows = await env.DB.prepare(
+        `SELECT bucket, COUNT(DISTINCT install_id) AS total FROM metric_users
+         WHERE date >= date('now', '-${ROLLUP_WINDOW_DAYS - 1} day') AND signal = ?1
+         GROUP BY bucket`,
+      )
+        .bind(signal)
+        .all<{ bucket: string; total: number }>();
+      // Delete and insert in one batch so a reader never sees a signal
+      // half-replaced; an empty result still clears the previous window's rows.
+      await env.DB.batch([
+        env.DB
+          .prepare("DELETE FROM metric_user_rollup WHERE window_days = ?1 AND signal = ?2")
+          .bind(ROLLUP_WINDOW_DAYS, signal),
+        ...rows.results.map((r) =>
+          env.DB
+            .prepare(
+              `INSERT INTO metric_user_rollup (window_days, signal, bucket, total, computed_at)
+               VALUES (?1, ?2, ?3, ?4, ?5)`,
+            )
+            .bind(ROLLUP_WINDOW_DAYS, signal, r.bucket, r.total, now),
+        ),
+      ]);
+      advanced++;
+    } catch (err) {
+      // One signal timing out must not strand the cursor on it forever.
+      console.error(`rollup: ${signal} failed`, err);
+      advanced++;
+    }
+  }
+
+  await env.DB
+    .prepare(
+      `INSERT INTO metric_user_rollup_state (id, next_signal, updated_at) VALUES (1, ?1, ?2)
+       ON CONFLICT(id) DO UPDATE SET next_signal = ?1, updated_at = ?2`,
+    )
+    .bind((start + advanced) % METRIC_SIGNALS.length, now)
+    .run();
+  console.log(`rollup: refreshed ${advanced} signals from index ${start}`);
+}
 
 // Ingest sentinel. The 2026-07-03 blackout went unnoticed for ten days because
 // clients swallow ping failures by design and nothing watched the write path.
@@ -1560,6 +1675,10 @@ export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (controller.cron === SENTINEL_CRON) {
       ctx.waitUntil(runIngestSentinel(env));
+      return;
+    }
+    if (controller.cron === ROLLUP_CRON) {
+      ctx.waitUntil(refreshMetricUserRollup(env));
       return;
     }
     ctx.waitUntil(purgeExpiredStatsRows(env));
