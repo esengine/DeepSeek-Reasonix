@@ -1710,6 +1710,58 @@ func TestMouseRightClickWithoutSelectionPastesClipboardText(t *testing.T) {
 	}
 }
 
+func TestShiftInsertPastesClipboardText(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) { return "pasted text", nil }
+
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModShift})
+	m = next.(chatTUI)
+	if got := m.input.Value(); got != "before " {
+		t.Fatalf("Shift+Insert changed the composer before the async read: %q", got)
+	}
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+
+	if got := m.input.Value(); got != "before pasted text" {
+		t.Fatalf("Shift+Insert paste produced %q, want %q", got, "before pasted text")
+	}
+}
+
+func TestShiftInsertPasteOverSSHDoesNotReadRemoteClipboard(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
+	t.Setenv("SSH_CLIENT", "")
+	t.Setenv("SSH_TTY", "")
+
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("before ")
+
+	previous := readNativeClipboardText
+	t.Cleanup(func() { readNativeClipboardText = previous })
+	readNativeClipboardText = func() (string, error) {
+		t.Fatal("SSH Shift+Insert paste must not read the remote host clipboard")
+		return "", nil
+	}
+
+	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModShift})
+	m = next.(chatTUI)
+	result := clipboardTextPasteResultFromCmd(t, cmd)
+	if !result.remote {
+		t.Fatalf("SSH Shift+Insert paste result = %+v, want remote hint", result)
+	}
+
+	next, _ = m.Update(result)
+	m = next.(chatTUI)
+	if got := m.input.Value(); got != "before " {
+		t.Fatalf("SSH Shift+Insert paste changed composer to %q", got)
+	}
+}
+
 func TestMouseRightClickPasteOverSSHDoesNotReadRemoteClipboard(t *testing.T) {
 	t.Setenv("SSH_CONNECTION", "host 22 client 1234")
 	t.Setenv("SSH_CLIENT", "")
@@ -1992,6 +2044,85 @@ func TestMouseDragReleaseAutoCopies(t *testing.T) {
 	m3 := out.(chatTUI)
 	if m3.copyNoticeText != i18n.M.MouseCopiedHint {
 		t.Errorf("completed native copy notice = %q, want %q", m3.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+// TestCtrlInsertCopiesTranscriptSelection verifies the terminal-convention
+// Ctrl+Insert copy key copies an active transcript selection to the clipboard
+// and arms the copied notice, without Ctrl+C's destructive side effects.
+func TestCtrlInsertCopiesTranscriptSelection(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newTestChatTUI()
+	m.transcript = []string{"hello world"}
+	m.wrappedLines = []string{"hello world"}
+	m.sel = selection{active: true, anchor: selPos{line: 0, col: 0}, head: selPos{line: 0, col: 5}}
+
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+	writeNativeClipboardText = func(text string) error {
+		if text != "hello" {
+			t.Fatalf("native clipboard text = %q, want hello", text)
+		}
+		return nil
+	}
+
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModCtrl})
+	m2 := out.(chatTUI)
+	if m2.input.Value() != "" {
+		t.Fatalf("Ctrl+Insert must not touch the composer, got %q", m2.input.Value())
+	}
+	result := clipboardCopyResultFromCmd(t, cmd)
+	out, _ = m2.Update(result)
+	m3 := out.(chatTUI)
+	if m3.copyNoticeText != i18n.M.MouseCopiedHint {
+		t.Errorf("completed native copy notice = %q, want %q", m3.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+// TestCtrlInsertCopiesComposerSelection verifies Ctrl+Insert also copies an
+// active selection inside the composer, mirroring the Ctrl+C handling.
+func TestCtrlInsertCopiesComposerSelection(t *testing.T) {
+	setLocalClipboardSession(t)
+	m := newComposerMouseTestTUI(t, 60, 16)
+	m.input.SetValue("hello world")
+	m.composerSel = composerSelection{active: true, anchor: 0, head: 5, value: m.input.Value()}
+
+	previous := writeNativeClipboardText
+	t.Cleanup(func() { writeNativeClipboardText = previous })
+	writeNativeClipboardText = func(text string) error {
+		if text != "hello" {
+			t.Fatalf("native clipboard text = %q, want hello", text)
+		}
+		return nil
+	}
+
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModCtrl})
+	m2 := out.(chatTUI)
+	result := clipboardCopyResultFromCmd(t, cmd)
+	out, _ = m2.Update(result)
+	m3 := out.(chatTUI)
+	if m3.copyNoticeText != i18n.M.MouseCopiedHint {
+		t.Errorf("completed native copy notice = %q, want %q", m3.copyNoticeText, i18n.M.MouseCopiedHint)
+	}
+}
+
+// TestCtrlInsertWithoutSelectionIsNoOp verifies Ctrl+Insert with no active
+// selection leaves the composer and the session state untouched — unlike
+// Ctrl+C, it must never clear input or quit.
+func TestCtrlInsertWithoutSelectionIsNoOp(t *testing.T) {
+	m := newTestChatTUI()
+	m.input.SetValue("draft text")
+
+	out, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyInsert, Mod: tea.ModCtrl})
+	m2 := out.(chatTUI)
+	if cmd != nil {
+		t.Fatalf("Ctrl+Insert without a selection should be a no-op, got cmd %T", cmd)
+	}
+	if got := m2.input.Value(); got != "draft text" {
+		t.Fatalf("Ctrl+Insert without a selection changed the composer to %q", got)
+	}
+	if m2.state != tuiIdle {
+		t.Fatalf("Ctrl+Insert without a selection changed state to %v, want idle", m2.state)
 	}
 }
 

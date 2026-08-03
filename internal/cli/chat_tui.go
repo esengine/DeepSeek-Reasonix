@@ -1089,14 +1089,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		// Any keystroke dismisses a finished selection (copy is a right-click),
-		// with a few exceptions: Ctrl/Super/Meta+C copies the selection, the
-		// paste shortcuts keep it so the async clipboard result can replace
-		// it, and Left/Right collapse it to its ordered start/end.
+		// with a few exceptions: Ctrl/Super/Meta+C and Ctrl+Insert copy the
+		// selection, the paste shortcuts keep it so the async clipboard result
+		// can replace it, and Left/Right collapse it to its ordered start/end.
 		sel := m.sel
 		m.sel = selection{}
 		if m.validComposerSelection() && !m.composerSel.empty() {
 			switch {
-			case msg.String() == "ctrl+c" || msg.String() == "super+c" || msg.String() == "meta+c":
+			case msg.String() == "ctrl+c" || msg.String() == "super+c" || msg.String() == "meta+c" || msg.String() == "ctrl+insert":
 				cmds = append(cmds, m.copySelectionWithNotice(m.selectedComposerText()))
 				return m, finalize(m, cmds)
 			case imagePasteShortcut(msg.String(), runtime.GOOS):
@@ -1289,6 +1289,17 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, finalize(m, cmds)
 		}
+		// Shift+Insert is the classic terminal paste key. Most terminals
+		// intercept it themselves and deliver the clipboard text as bracketed
+		// paste (tea.PasteMsg); some forward the key sequence instead (e.g. via
+		// the kitty keyboard protocol). Bind it explicitly so paste works
+		// either way — same native-clipboard read path as right-click, so SSH
+		// sessions get the same remote hint and never read the remote host's
+		// clipboard.
+		if msg.String() == "shift+insert" {
+			cmds = append(cmds, pasteClipboardText())
+			return m, finalize(m, cmds)
+		}
 		switch msg.String() {
 		case "esc":
 			// "Back out" of the most specific in-progress state: un-send a just-sent
@@ -1326,6 +1337,21 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.Reset()
 					m.pastedBlocks = nil
 				}
+			}
+			return m, nil
+		case "ctrl+insert":
+			// Terminal-convention copy without Ctrl+C's destructive side
+			// effects: copy an active selection if there is one, otherwise do
+			// nothing (no clear-input, no cancel, no quit). The selection lives
+			// in-app because Reasonix owns the mouse, so the terminal's own
+			// Ctrl+Insert (which copies the terminal selection) would see an
+			// empty one.
+			if sel.active && !sel.empty() {
+				m.sel = sel // restore so selectedText() can read it
+				text := m.selectedText()
+				m.sel = selection{}
+				cmds = append(cmds, m.copySelectionWithNotice(text))
+				return m, finalize(m, cmds)
 			}
 			return m, nil
 		case "ctrl+c", "super+c", "meta+c":
