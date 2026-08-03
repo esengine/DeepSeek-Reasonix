@@ -1703,8 +1703,9 @@ function updateGoalUI(){
 async function setToolApprovalMode(mode){toolApprovalMode=mode;bypassMode=mode==='yolo';updateModeButtons();await post('/tool-approval-mode',{mode});}
 async function setPlan(on){planMode=on;updateModeButtons();await post('/plan',{on});}
 async function cycleMode(){if(goalMode){goalMode=false;updateGoalUI();return;}await setPlan(!planMode);setTimeout(fetchStatus,200);}
+async function toggleAutoMode(){const auto=!bypassMode&&toolApprovalMode==='auto';await setToolApprovalMode(auto?'ask':'auto');setTimeout(fetchStatus,200);}
 async function toggleYolo(){if(bypassMode){const restore=yoloRestoreMode==='auto'?'auto':'ask';await setToolApprovalMode(restore);}else{yoloRestoreMode=toolApprovalMode==='auto'?'auto':'ask';await setToolApprovalMode('yolo');}setTimeout(fetchStatus,200);}
-async function setMode(m){if(m==='auto')await setToolApprovalMode('auto');else if(m==='plan')await setPlan(!planMode);else if(m==='yolo')await toggleYolo();else if(m==='goal')toggleGoalMode();}
+async function setMode(m){if(m==='auto')await toggleAutoMode();else if(m==='plan')await setPlan(!planMode);else if(m==='yolo')await toggleYolo();else if(m==='goal')toggleGoalMode();}
 function toggleGoalMode(){
   if(goalActive){
     // Clear active goal
