@@ -1207,7 +1207,12 @@ func (s *Server) generateTitle(ctx context.Context, firstMsg string) string {
 			{Role: provider.RoleUser, Content: firstMsg},
 		},
 		Temperature: provider.TemperaturePtr(0),
-		MaxTokens:   20,
+		// Reasoning models (DeepSeek v4 thinks by default; the retired
+		// effort=off now falls back to thinking-on) burn part of the budget on
+		// reasoning before any visible title text. 20 tokens gets fully eaten
+		// by reasoning, yielding an empty title and a title cache that never
+		// fills — so /sessions re-generates every title on every request.
+		MaxTokens: 200,
 	})
 	if err != nil {
 		return ""
@@ -1394,7 +1399,7 @@ func removeSessionFiles(absDir, abs string) error {
 // when it matches the file's mtime, otherwise a freshly generated one (cached
 // for next time), falling back to a truncated preview when generation is off.
 func (s *Server) sessionTitle(ctx context.Context, name, first string, mod int64) string {
-	if cached, ok := s.titles.get(name, mod); ok {
+	if cached, ok := s.titles.get(name); ok {
 		return cached
 	}
 	if title := s.generateTitle(ctx, first); title != "" {

@@ -10,9 +10,11 @@ import (
 )
 
 // titleCache persists generated session titles to <dir>/.session-titles.json,
-// keyed by file name and invalidated by mtime, so the flash model is queried
-// once per session rather than on every sidebar refresh. Persistence is
-// best-effort: a missing or unreadable cache just regenerates.
+// keyed by file name, so the flash model is queried once per session rather
+// than on every sidebar refresh. Titles are sticky: they summarize the first
+// message, which never changes, so mtime churn on an active session must not
+// trigger regeneration. Persistence is best-effort: a missing or unreadable
+// cache just regenerates.
 type titleCache struct {
 	mu      sync.Mutex
 	dir     string
@@ -39,11 +41,11 @@ func (c *titleCache) load() {
 	}
 }
 
-func (c *titleCache) get(name string, mod int64) (string, bool) {
+func (c *titleCache) get(name string) (string, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.load()
-	if e, ok := c.entries[name]; ok && e.Mod == mod {
+	if e, ok := c.entries[name]; ok {
 		return e.Title, true
 	}
 	return "", false
