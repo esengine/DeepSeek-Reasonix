@@ -3692,11 +3692,11 @@ const todoPanelMaxRows = 8
 // todoSidebarMinWidth is the terminal width at which the task list moves from
 // the pinned bottom panel into a dedicated right-hand column. Below it the
 // compact bottom panel is used so the chat column keeps enough room.
-const todoSidebarMinWidth = 100
+const todoSidebarMinWidth = 120
 
 // todoSidebarWidth is the width of the right-hand task-list column on wide
 // terminals.
-const todoSidebarWidth = 32
+const todoSidebarWidth = 48
 
 type todoPanelTodo struct {
 	Content    string `json:"content"`
@@ -3878,11 +3878,11 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 		used++
 	}
 	last := start
-	// The lipgloss frame reserves 2 border columns plus 1 padding column, so
-	// the text area is inner-1 wide; sub-step indent is carved out of the wrap
-	// width so no rendered row exceeds the frame (lipgloss would wrap an
-	// over-wide row itself, misaligning the column).
-	wrapWidth := max(inner-1, 4)
+	// The lipgloss frame reserves 2 border columns plus 1 padding column on
+	// each side, so the text area is inner-2 wide; sub-step indent is carved
+	// out of the wrap width so no rendered row exceeds the frame (lipgloss
+	// would wrap an over-wide row itself, misaligning the column).
+	wrapWidth := max(inner-2, 4)
 	for i := start; i < end; i++ {
 		t := todos[i]
 		indent := ""
@@ -3907,13 +3907,17 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 			width = max(wrapWidth-3, 4)
 		}
 		wrapped := wrapTodoLine(line, width, todoSidebarWrapMax)
-		if used+len(wrapped) > avail {
+		// One blank row after each task block opens up the line spacing; the
+		// trailing blank is trimmed by the final TrimRight.
+		if used+len(wrapped)+1 > avail {
 			break
 		}
 		for _, wl := range wrapped {
 			b.WriteString(indent + wl + "\n")
 			used++
 		}
+		b.WriteString("\n")
+		used++
 		last++
 	}
 	if last < len(todos) {
@@ -3923,7 +3927,7 @@ func (m chatTUI) renderTodoSidebar(height int) string {
 		// The workspace root sits below a separator rail so it never reads as
 		// one more task row, and wears the accent instead of dim so the panel
 		// location is scannable at a glance.
-		b.WriteString(themeFg(activeCLITheme.border, strings.Repeat("─", max(inner-1, 1))) + "\n")
+		b.WriteString(themeFg(activeCLITheme.border, strings.Repeat("─", max(inner-2, 1))) + "\n")
 		b.WriteString(accent("◆ ") + viewCompactPath(root, max(inner-4, 4)) + "\n")
 	}
 	// Compact: no fixed Height — the column ends where its content ends, so a

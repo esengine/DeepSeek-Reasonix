@@ -419,7 +419,7 @@ func refreshCLIStyles() {
 	// column never reads as a second bordered window.
 	todoSidebarStyle = withThemeBorderFG(lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), false, true, false, true), activeCLITheme.border).
-		PaddingLeft(1)
+		PaddingLeft(1).PaddingRight(1)
 	// Status bar: flat faint text on the chat surface — no tinted band, so the
 	// footer reads as content, not chrome. The hairline divider (statusFooterDivider)
 	// separates the two information rows instead.

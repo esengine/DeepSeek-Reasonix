@@ -69,10 +69,11 @@ func TestRenderTodoSidebar(t *testing.T) {
 	if !strings.Contains(out, "Wiring the CLI") {
 		t.Fatalf("sidebar should show the activeForm of the in-progress item:\n%s", out)
 	}
-	// Compact: the column hugs its content (header + 4 items, open rails, no
-	// top/bottom frame), never stretching to the passed height.
-	if lines := strings.Count(out, "\n") + 1; lines != 5 {
-		t.Fatalf("sidebar height = %d rows, want 5 (compact content height)", lines)
+	// Compact: the column hugs its content (header + 4 items + inter-item
+	// blank rows, open rails, no top/bottom frame), never stretching to the
+	// passed height.
+	if lines := strings.Count(out, "\n") + 1; lines != 8 {
+		t.Fatalf("sidebar height = %d rows, want 8 (header + 4 items + 3 spacing rows)", lines)
 	}
 }
 
@@ -150,13 +151,14 @@ func TestRenderTodoSidebarShowsWorkspaceRoot(t *testing.T) {
 	if !strings.Contains(out, "◆ C:\\repo\\DeepSeek-Reasonix") {
 		t.Fatalf("root row should carry the accent marker:\n%s", out)
 	}
-	if lines := strings.Count(out, "\n") + 1; lines != 7 {
-		t.Fatalf("sidebar with root = %d rows, want 7 (header + 4 items + separator + root)", lines)
+	if lines := strings.Count(out, "\n") + 1; lines != 11 {
+		t.Fatalf("sidebar with root = %d rows, want 11 (header + 4 items + 4 spacing rows + separator + root)", lines)
 	}
 }
 
 func TestRenderTodoSidebarWrapsLongTitles(t *testing.T) {
-	long := "Implement the bidirectional streaming protocol with backpressure"
+	// Long enough to wrap onto 3 rows at the 44-column content width.
+	long := "Implement the complete bidirectional streaming protocol with backpressure handling and reconnect logic"
 	m := chatTUI{width: 160, todoArgs: `{"todos":[{"content":"` + long + `","status":"pending"}]}`, height: 30}
 	out := ansi.Strip(m.renderTodoSidebar(30))
 	// Wrap breaks at word boundaries, so the full title is present word by
@@ -170,7 +172,7 @@ func TestRenderTodoSidebarWrapsLongTitles(t *testing.T) {
 	if strings.Contains(out, "…") {
 		t.Fatalf("title within the wrap cap must not carry an ellipsis:\n%s", out)
 	}
-	// 1 header + 3 wrapped rows = 4.
+	// 1 header + 3 wrapped rows = 4 (the trailing spacing row is trimmed).
 	if lines := strings.Count(out, "\n") + 1; lines != 4 {
 		t.Fatalf("sidebar rows = %d, want 4 (header + 3 wrapped title rows)", lines)
 	}
