@@ -76,6 +76,13 @@ type Config struct {
 	// user/project files recovered via last-known-good or defaults). They never
 	// rewrite the original file; the UI may surface them for doctor repair.
 	loadWarnings []string
+	// editOrigin* bind a config loaded for edit to the exact file state it
+	// was read from. SaveTo must use this binding and must not re-authorize
+	// the current file after a concurrent change.
+	editOriginBound   bool
+	editOriginLogical string
+	editOriginPath    string
+	editOriginState   string
 }
 
 // TelemetryConfig controls content-free CLI usage metrics. It is user-global:
@@ -1822,9 +1829,28 @@ func Default() *Config {
 // WriteFile writes the configuration to path as annotated TOML. The write is
 // atomic + fsynced so an interrupted write or power loss can never truncate the
 // main config into an unparseable state that leaves the app with no usable
-// models (#4615, #4708).
+// models (#4615, #4708), and it runs through the validated write pipeline so
+// the persisted document is guaranteed to parse and round-trip semantically.
 func (c *Config) WriteFile(path string) error {
-	return atomicWriteToConfigFile(path, RenderTOMLForScope(c, renderScopeForPath(path)), configFilePerm(path))
+	scope := renderScopeForPath(path)
+	// Resolve the path once and write only the validated final target. This
+	// preserves valid symlinks and fails closed for broken user links or
+	// project links that escape their project root.
+	resolved, err := resolveConfigReadPath(path)
+	if err != nil {
+		return err
+	}
+	stateID, err := configFileStateID(resolved)
+	if err != nil {
+		return err
+	}
+	body, err := renderTOMLForScopeErr(c, scope)
+	if err != nil {
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	opts := writeConfigOptions{scope: scope, want: c}
+	_, err = validateAndWriteConfigResolved(resolved, body, configFilePerm(path), opts, stateID)
+	return err
 }
 
 // Provider returns the named provider entry.

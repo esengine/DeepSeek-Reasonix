@@ -1272,6 +1272,139 @@ status_bar_items = ["model", "cache", "balance"]
 	}
 }
 
+func TestLoadDesktopUserConfigForEditAdoptsConcurrentUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	project := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[desktop]
+theme = "light"
+
+[bot]
+enabled = true
+
+[[bot.connections]]
+id = "feishu-lark"
+provider = "feishu"
+domain = "lark"
+label = "Lark"
+enabled = true
+status = "connected"
+`), 0o644); err != nil {
+		t.Fatalf("write project config: %v", err)
+	}
+	// User config must be absent at the initial Stat so load takes the legacy
+	// seed path. Create it only inside the bind seam (between Stat and bind).
+	userPath := config.UserConfigPath()
+	if _, err := os.Stat(userPath); err == nil {
+		t.Fatalf("user config must start absent for concurrent-create path, found %s", userPath)
+	}
+	restore := config.SetBindAbsentEditTargetBeforeReadForTest(func(target string) {
+		if target != userPath {
+			t.Fatalf("bind seam target = %q, want %q", target, userPath)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatalf("mkdir user config dir: %v", err)
+		}
+		// Concurrent create: existing user content without bot.
+		if err := os.WriteFile(target, []byte(`
+default_model = "user-owned"
+
+[desktop]
+theme = "dark"
+`), 0o600); err != nil {
+			t.Fatalf("concurrent create user config: %v", err)
+		}
+	})
+	defer restore()
+
+	orig, _ := os.Getwd()
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
+	cfg, path, err := app.loadDesktopUserConfigForEdit()
+	if err != nil {
+		t.Fatalf("loadDesktopUserConfigForEdit: %v", err)
+	}
+	if path != userPath {
+		t.Fatalf("path = %q, want %q", path, userPath)
+	}
+	if cfg.DefaultModel != "user-owned" || cfg.DesktopTheme() != "dark" {
+		t.Fatalf("adopted config lost user content: model=%q theme=%q", cfg.DefaultModel, cfg.DesktopTheme())
+	}
+	if !cfg.Bot.Enabled || len(cfg.Bot.Connections) != 1 || cfg.Bot.Connections[0].ID != "feishu-lark" {
+		t.Fatalf("adopted config missing merged legacy bot: %+v", cfg.Bot)
+	}
+	// Subsequent SaveTo must still respect the adopted StateID binding.
+	if err := cfg.SetDesktopLanguage("en"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(userPath); err != nil {
+		t.Fatalf("SaveTo after adopt: %v", err)
+	}
+}
+
+func TestLoadDesktopUserConfigForEditSurfacesMalformedConcurrentUserConfig(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	project := robustTempDir(t)
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[desktop]
+theme = "light"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	userPath := config.UserConfigPath()
+	if _, err := os.Stat(userPath); err == nil {
+		t.Fatalf("user config must start absent for concurrent-create path, found %s", userPath)
+	}
+	malformed := "not = [ valid toml\n"
+	restore := config.SetBindAbsentEditTargetBeforeReadForTest(func(target string) {
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatalf("mkdir user config dir: %v", err)
+		}
+		if err := os.WriteFile(target, []byte(malformed), 0o600); err != nil {
+			t.Fatalf("concurrent create malformed user config: %v", err)
+		}
+	})
+	defer restore()
+
+	orig, _ := os.Getwd()
+	defer func() { _ = os.Chdir(orig) }()
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+
+	app := NewApp()
+	unlock := config.LockUserConfigEdits()
+	defer unlock()
+	_, _, err := app.loadDesktopUserConfigForEdit()
+	if err == nil {
+		t.Fatal("expected malformed user config load error")
+	}
+	// Bytes must be unchanged.
+	got, readErr := os.ReadFile(userPath)
+	if readErr != nil {
+		t.Fatalf("read user config: %v", readErr)
+	}
+	if string(got) != malformed {
+		t.Fatalf("malformed user config was rewritten: %q", got)
+	}
+	// Error must be the load/parse failure returned from adopt, not a silent
+	// overwrite or a bare ErrEditTargetExists without load context.
+	if errors.Is(err, config.ErrEditTargetExists) && err.Error() == config.ErrEditTargetExists.Error() {
+		t.Fatalf("expected load/parse error, got bare exists: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "toml") && !strings.Contains(err.Error(), "config") {
+		t.Fatalf("expected parse/load error, got %v", err)
+	}
+}
+
 func TestSettingsSubagentDefaultsRoundTrip(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	setDesktopTestCredential(t, "DEEPSEEK_API_KEY", "sk-test")

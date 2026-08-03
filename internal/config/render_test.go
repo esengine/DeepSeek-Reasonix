@@ -606,7 +606,7 @@ func TestRenderTOMLPreservesMCPTimeouts(t *testing.T) {
 		"mcp_startup_timeout_seconds = 45",
 		"startup_timeout_seconds = 60",
 		"call_timeout_seconds = 600",
-		`tool_timeout_seconds = { "generate/video" = 1800, "search" = 120 }`,
+		`tool_timeout_seconds = { "generate/video" = 1800, search = 120 }`,
 		"Raw MCP tool names",
 	} {
 		if !strings.Contains(rendered, want) {
@@ -1081,7 +1081,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	if !strings.Contains(rendered, `headers     = { HTTP-Referer = "https://app.example", X-Title = "Reasonix" }`) {
 		t.Fatalf("rendered TOML missing headers:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, `extra_body`) || !strings.Contains(rendered, `"enable_thinking" = true`) {
+	if !strings.Contains(rendered, `extra_body`) || !strings.Contains(rendered, `enable_thinking = true`) {
 		t.Fatalf("rendered TOML missing extra_body:\n%s", rendered)
 	}
 	if !strings.Contains(rendered, `auth_header = true`) {
@@ -1140,10 +1140,14 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 }
 
 func TestRenderStringMapQuotesNonBareTOMLKeys(t *testing.T) {
-	rendered := renderStringMap(map[string]string{
+	r := &tomlRenderer{}
+	rendered := r.stringMap(map[string]string{
 		"github:gh-fix-ci": "deepseek-pro",
 		"review":           "deepseek-flash",
 	})
+	if r.err != nil {
+		t.Fatalf("render failed: %v", r.err)
+	}
 	if !strings.Contains(rendered, `"github:gh-fix-ci" = "deepseek-pro"`) {
 		t.Fatalf("non-bare key was not quoted: %s", rendered)
 	}
@@ -1180,7 +1184,8 @@ func TestDesktopExternalOpenerUserScopeRoundTrip(t *testing.T) {
 }
 
 func TestRenderTOMLTablePathQuotesEachSegment(t *testing.T) {
-	got := renderTOMLTablePath("lsp", "servers", "c++", "github:gh-fix-ci")
+	r := &tomlRenderer{}
+	got := r.tablePath("lsp", "servers", "c++", "github:gh-fix-ci")
 	want := `lsp.servers."c++"."github:gh-fix-ci"`
 	if got != want {
 		t.Fatalf("renderTOMLTablePath = %q, want %q", got, want)

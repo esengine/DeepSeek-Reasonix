@@ -1489,6 +1489,98 @@ func validatePlugin(e PluginEntry) error {
 	return nil
 }
 
+// bindEditOriginState records the edit origin from a single load observation:
+// the resolved path and the StateID computed from the same bytes that were
+// decoded into this config. SaveTo must use this binding and must not re-read
+// the file's current StateID.
+func (c *Config) bindEditOriginState(logicalPath, resolved, stateID string) {
+	if c == nil {
+		return
+	}
+	c.editOriginBound = true
+	c.editOriginLogical = logicalPath
+	c.editOriginPath = resolved
+	c.editOriginState = stateID
+}
+
+// ErrEditTargetExists reports that BindAbsentEditTarget refused to authorize a
+// path that already has a file. Callers that intentionally handle a concurrent
+// create (Desktop legacy seed) should check errors.Is(err, ErrEditTargetExists)
+// before adopting the existing target.
+var ErrEditTargetExists = errors.New("edit target already exists")
+
+// bindAbsentEditTargetBeforeRead is an optional test seam invoked after path
+// validation and before the target existence check. Production leaves it nil.
+var bindAbsentEditTargetBeforeRead func(targetPath string)
+
+// SetBindAbsentEditTargetBeforeReadForTest installs a hook that runs just before
+// BindAbsentEditTarget checks whether the target exists. Used by Desktop tests
+// to deterministically create the target between the caller's Stat and bind.
+func SetBindAbsentEditTargetBeforeReadForTest(fn func(string)) (restore func()) {
+	prev := bindAbsentEditTargetBeforeRead
+	bindAbsentEditTargetBeforeRead = fn
+	return func() { bindAbsentEditTargetBeforeRead = prev }
+}
+
+// BindAbsentEditTarget rebinds this in-memory config's edit origin to
+// targetPath without reloading content, but only when the target is still
+// absent. Content may have been seeded from a different source (for example a
+// legacy project reasonix.toml); SaveTo(targetPath) then create-only publishes
+// against "absent". If another process created the target between the caller's
+// existence check and this bind, the call fails closed with ErrEditTargetExists
+// instead of authorizing an overwrite. Ordinary SaveTo still refuses accidental
+// cross-path writes.
+func (c *Config) BindAbsentEditTarget(targetPath string) error {
+	if c == nil {
+		return fmt.Errorf("bind absent edit target: nil config")
+	}
+	targetPath = strings.TrimSpace(targetPath)
+	if targetPath == "" {
+		return fmt.Errorf("bind absent edit target: empty config path")
+	}
+	if bindAbsentEditTargetBeforeRead != nil {
+		bindAbsentEditTargetBeforeRead(targetPath)
+	}
+	resolved, data, mode, exists, err := readConfigFileForEdit(targetPath)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("%w: %s", ErrEditTargetExists, resolved)
+	}
+	_ = data
+	_ = mode
+	c.bindEditOriginState(targetPath, resolved, "absent")
+	return nil
+}
+
+// editOriginStateForSave returns the StateID that must authorize a write to
+// resolved. When the config was loaded for edit, the load-time binding is used
+// and a path mismatch is rejected. Unbound configs (constructed in memory)
+// capture the current StateID once at save time.
+func (c *Config) editOriginStateForSave(resolved string) (string, error) {
+	if c != nil && c.editOriginBound {
+		if filepath.Clean(resolved) != filepath.Clean(c.editOriginPath) {
+			return "", fmt.Errorf("save config: edit origin was %q, refusing to write %q", c.editOriginPath, resolved)
+		}
+		return c.editOriginState, nil
+	}
+	return configFileStateID(resolved)
+}
+
+// rebindEditOriginPublished advances a pre-existing edit origin to the exact
+// StateID of the body this SaveTo just published. It never re-reads the path,
+// so a concurrent writer between publish and rebind cannot be authorized.
+// Constructed-in-memory configs that were never Load/BindAbsentEditTarget stay
+// unbound so one Config can seed multiple paths without cross-path refusal.
+func (c *Config) rebindEditOriginPublished(resolved, publishedState string) {
+	if c == nil || publishedState == "" || !c.editOriginBound {
+		return
+	}
+	c.editOriginPath = resolved
+	c.editOriginState = publishedState
+}
+
 // SaveTo writes the configuration to path as annotated TOML, atomically: it
 // writes a sibling temp file then renames, so a crash mid-write can't leave a
 // half-written reasonix.toml that fails to parse on next load. Parent directories
@@ -1516,9 +1608,17 @@ func (c *Config) SaveTo(path string) error {
 		return err
 	}
 	if scope == RenderScopeProject {
-		return c.saveProjectIncrementalResolved(path, resolved)
+		published, err := c.saveProjectIncrementalResolved(path, resolved)
+		if err == nil {
+			c.rebindEditOriginPublished(resolved, published)
+		}
+		return err
 	}
-	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
+	published, err := c.writeConfigFileResolvedValidated(resolved, scope, configFilePerm(path))
+	if err == nil {
+		c.rebindEditOriginPublished(resolved, published)
+	}
+	return err
 }
 
 func (c *Config) SaveToScope(path string, scope RenderScope) error {
@@ -1541,14 +1641,24 @@ func (c *Config) SaveToScope(path string, scope RenderScope) error {
 	if err != nil {
 		return err
 	}
-	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
+	published, err := c.writeConfigFileResolvedValidated(resolved, scope, configFilePerm(path))
+	if err == nil {
+		c.rebindEditOriginPublished(resolved, published)
+	}
+	return err
 }
 
-func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string) error {
+func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string) (string, error) {
+	// Use the load-time binding (or a single unbound capture). Never re-authorize
+	// after reading the body — a concurrent create/replace must fail closed.
+	stateID, err := c.editOriginStateForSave(resolvedPath)
+	if err != nil {
+		return "", err
+	}
 	raw, err := fileencoding.ReadFileUTF8(resolvedPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			return err
+			return "", err
 		}
 		raw = nil
 	}
@@ -1557,10 +1667,15 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	isNew := body == ""
 
 	if isNew {
-		return writeConfigFileResolved(resolvedPath, RenderTOMLForScope(c, RenderScopeProject), configFilePerm(logicalPath))
+		// Full project render for a file that was absent (or empty) at origin
+		// capture. create-only publish is enforced by expectedState == "absent".
+		return c.writeConfigFileResolvedValidatedWithState(resolvedPath, RenderScopeProject, configFilePerm(logicalPath), stateID)
 	}
 
-	delta := RenderTOMLProjectDelta(c)
+	delta, err := renderTOMLProjectDeltaErr(c)
+	if err != nil {
+		return "", fmt.Errorf("save project config %s: %w", logicalPath, err)
+	}
 	if tomlBodyHasTopLevelKey(body, "config_version") && !tomlBodyHasTopLevelKey(delta, "config_version") {
 		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
 	}
@@ -1571,7 +1686,7 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 	removeRetiredAutoGuard := hasLegacyDesktopAutoGuard || hasRetiredAgentAutoGuard
 	writeProviderAccess := c.Desktop.ProviderAccess != nil
 	if strings.TrimSpace(delta) == "" && !removePlugins && !removeSandboxBash && !removeRetiredAutoGuard && !writeProviderAccess {
-		return nil // no changes to write
+		return "", nil // no changes to write
 	}
 
 	// Parse delta into section blocks and merge each into body
@@ -1588,10 +1703,17 @@ func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string
 		body = removeTOMLSectionKey(body, "desktop", "default_auto_recovery_checkpoint")
 		body = removeTOMLSectionKey(body, "agent", "auto_recovery_checkpoint")
 	}
+	var extraChecks map[string]any
 	if writeProviderAccess {
-		body = upsertTOMLSectionKey(body, "desktop", "provider_access", "provider_access = "+renderStringArray(c.Desktop.ProviderAccess))
+		renderer := &tomlRenderer{}
+		body = upsertTOMLSectionKey(body, "desktop", "provider_access", "provider_access = "+renderer.stringArray(c.Desktop.ProviderAccess))
+		if renderer.err != nil {
+			return "", fmt.Errorf("save project config %s: %w", logicalPath, renderer.err)
+		}
+		extraChecks = map[string]any{"desktop.provider_access": append([]string(nil), c.Desktop.ProviderAccess...)}
 	}
-	return writeConfigFileResolved(resolvedPath, body, configFilePerm(logicalPath))
+	opts := writeConfigOptions{scope: RenderScopeProject, delta: delta, extraChecks: extraChecks}
+	return validateAndWriteConfigResolved(resolvedPath, body, configFilePerm(logicalPath), opts, stateID)
 }
 
 func shouldRemoveIneffectiveProjectSandboxBash(body string, c *Config) bool {
@@ -1700,11 +1822,43 @@ func writeConfigFile(path, body string) error {
 	return atomicWriteToConfigFile(path, body, configFilePerm(path))
 }
 
+// writeConfigFileResolvedValidated renders c for the given scope through the
+// validated write pipeline: the rendered TOML must parse, decode back to the
+// same persisted semantics, and match the intended config c; the file must
+// not have been modified since the edit origin was bound (or since this
+// unbound save began).
+func (c *Config) writeConfigFileResolvedValidated(resolved string, scope RenderScope, perm os.FileMode) (string, error) {
+	stateID, err := c.editOriginStateForSave(resolved)
+	if err != nil {
+		return "", err
+	}
+	return c.writeConfigFileResolvedValidatedWithState(resolved, scope, perm, stateID)
+}
+
+func (c *Config) writeConfigFileResolvedValidatedWithState(resolved string, scope RenderScope, perm os.FileMode, stateID string) (string, error) {
+	body, err := renderTOMLForScopeErr(c, scope)
+	if err != nil {
+		return "", fmt.Errorf("save config %s: %w", resolved, err)
+	}
+	opts := writeConfigOptions{scope: scope, want: c}
+	return validateAndWriteConfigResolved(resolved, body, perm, opts, stateID)
+}
+
+// writeConfigFileResolved writes a pre-rendered body through the validated
+// pipeline. The body must parse; callers that need semantic verification use
+// the delta/extraChecks options through saveProjectIncrementalResolved.
+// Unbound surgical writers capture StateID once at entry.
 func writeConfigFileResolved(path, body string, perm os.FileMode) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
-	return fileutil.AtomicWriteFile(path, []byte(body), perm)
+	stateID, err := configFileStateID(path)
+	if err != nil {
+		return err
+	}
+	opts := writeConfigOptions{scope: renderScopeForPath(path)}
+	_, err = validateAndWriteConfigResolved(path, body, perm, opts, stateID)
+	return err
 }
 
 // atomicWriteToConfigFile resolves the path once and writes only the validated
@@ -1715,10 +1869,7 @@ func atomicWriteToConfigFile(path, body string, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if err := fileutil.AtomicWriteFile(resolved, []byte(body), perm); err != nil {
-		return fmt.Errorf("write symlink target %q: %w", resolved, err)
-	}
-	return nil
+	return writeConfigFileResolved(resolved, body, perm)
 }
 
 func configFilePerm(path string) os.FileMode {
@@ -1741,6 +1892,12 @@ func WritePermissionsAllow(path string, allow []string) error {
 	if err != nil {
 		return err
 	}
+	// Capture StateID before reading/modifying so a concurrent change cannot
+	// be silently adopted as the surgical write baseline.
+	stateID, err := configFileStateID(resolved)
+	if err != nil {
+		return err
+	}
 	var raw []byte
 	if exists {
 		raw, err = fileencoding.ReadFileUTF8(resolved)
@@ -1753,9 +1910,17 @@ func WritePermissionsAllow(path string, allow []string) error {
 
 	body := string(raw)
 	if body == "" {
-		body = fmt.Sprintf("[permissions]\nallow = %s\n", renderStringArray(allow))
+		renderer := &tomlRenderer{}
+		body = fmt.Sprintf("[permissions]\nallow = %s\n", renderer.stringArray(allow))
+		if renderer.err != nil {
+			return fmt.Errorf("write permissions: %w", renderer.err)
+		}
 	} else {
-		body = upsertTOMLSectionKey(body, "permissions", "allow", "allow = "+renderStringArray(allow))
+		renderer := &tomlRenderer{}
+		body = upsertTOMLSectionKey(body, "permissions", "allow", "allow = "+renderer.stringArray(allow))
+		if renderer.err != nil {
+			return fmt.Errorf("write permissions: %w", renderer.err)
+		}
 	}
 
 	var candidate Config
@@ -1765,7 +1930,16 @@ func WritePermissionsAllow(path string, allow []string) error {
 	if !slices.Equal(candidate.Permissions.Allow, allow) {
 		return fmt.Errorf("write permissions: validate updated allow: got %v, want %v", candidate.Permissions.Allow, allow)
 	}
-	return writeConfigFileResolved(resolved, body, configFilePerm(path))
+	// The surgical upsert body is deliberately partial (neither a full render
+	// nor a delta), so validation is parse + the permissions.allow field check
+	// below; the round-trip verification does not apply.
+	opts := writeConfigOptions{
+		scope:         renderScopeForPath(path),
+		extraChecks:   map[string]any{"permissions.allow": append([]string(nil), allow...)},
+		skipRoundTrip: true,
+	}
+	_, err = validateAndWriteConfigResolved(resolved, body, configFilePerm(path), opts, stateID)
+	return err
 }
 
 // replaceTOMLSection replaces the content of a named TOML section (including

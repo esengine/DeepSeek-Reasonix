@@ -680,8 +680,20 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 		loadDotEnvForEditPath(path)
 	}
 	cfg := Default()
-	if err := mergeFile(cfg, path); err != nil {
-		return nil, err
+	// Read bytes once: the same payload is decoded and hashed into the edit
+	// origin StateID so a concurrent rewrite between parse and bind cannot
+	// attach old content to a newer file identity.
+	if strings.TrimSpace(path) != "" {
+		resolved, data, mode, exists, err := readConfigFileForEdit(path)
+		if err != nil {
+			return nil, err
+		}
+		if exists {
+			if err := mergeFileBytes(cfg, path, resolved, data); err != nil {
+				return nil, err
+			}
+		}
+		cfg.bindEditOriginState(path, resolved, configStateID(resolved, mode, data, exists))
 	}
 	changed := normalizeConfigForEdit(cfg)
 	if persistMigrations && changed && strings.TrimSpace(path) != "" {
@@ -746,22 +758,33 @@ func mergeFile(cfg *Config, path string) error {
 	if !exists {
 		return nil
 	}
-	// BurntSushi/toml decodes struct fields incrementally and can leave earlier
-	// fields mutated when a later value has the wrong type. Validate the complete
-	// file against a disposable Config before merging it into the active object.
-	// This makes user LKG fallback and project-level isolation transactional.
-	var validated Config
-	if _, err := decodeTOMLFileResolved(resolved, &validated); err != nil {
-		return fmt.Errorf("config %s: %w", path, err)
-	}
-	meta, err := decodeTOMLFileResolved(resolved, cfg)
+	data, err := os.ReadFile(resolved)
 	if err != nil {
-		return fmt.Errorf("config %s: %w", path, err)
+		return err
+	}
+	return mergeFileBytes(cfg, path, resolved, data)
+}
+
+// mergeFileBytes decodes raw config bytes into cfg. logicalPath is used only
+// for error messages; resolved identifies the file that produced data.
+//
+// BurntSushi/toml decodes struct fields incrementally and can leave earlier
+// fields mutated when a later value has the wrong type. Validate the complete
+// file against a disposable Config before merging it into the active object.
+// This makes user LKG fallback and project-level isolation transactional.
+func mergeFileBytes(cfg *Config, logicalPath, resolved string, data []byte) error {
+	var validated Config
+	if _, err := decodeTOMLBytes(data, &validated); err != nil {
+		return fmt.Errorf("config %s: %w", logicalPath, err)
+	}
+	meta, err := decodeTOMLBytes(data, cfg)
+	if err != nil {
+		return fmt.Errorf("config %s: %w", logicalPath, err)
 	}
 	if meta.IsDefined("providers") {
 		var persisted Config
-		if _, err := decodeTOMLFileResolved(resolved, &persisted); err != nil {
-			return fmt.Errorf("config %s: %w", path, err)
+		if _, err := decodeTOMLBytes(data, &persisted); err != nil {
+			return fmt.Errorf("config %s: %w", logicalPath, err)
 		}
 		markPersistedDeepSeekOfficialPricing(&persisted)
 		markers := map[string]string{}
