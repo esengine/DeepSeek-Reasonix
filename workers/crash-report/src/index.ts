@@ -699,6 +699,8 @@ type StatsFilters = {
   newLatest: boolean;
   regressed: boolean;
   windowDays: 7 | 30;
+  /** True only when the reader picked the window; a module default leaves it false. */
+  windowExplicit: boolean;
   preferenceMode: "users" | "opens";
 };
 
@@ -716,6 +718,7 @@ function statsFilters(url: URL): StatsFilters {
     newLatest: url.searchParams.get("new") === "latest",
     regressed: url.searchParams.get("regressed") === "1",
     windowDays: windowParam === "7d" ? 7 : 30,
+    windowExplicit: windowParam === "7d" || windowParam === "30d",
     preferenceMode: url.searchParams.get("prefs") === "opens" ? "opens" : "users",
   };
 }
@@ -985,7 +988,15 @@ async function metricRows(env: Env, days: 7 | 30, surface: ClientSurfaceName, pr
   return rows.results;
 }
 
-async function metricUserRows(env: Env, days: 7 | 30, surface: ClientSurfaceName): Promise<{ signal: string; bucket: string; total: number }[]> {
+// Null means the query did not complete, which is distinct from "no rows": at
+// ~1M rows a day, the 30-day COUNT(DISTINCT install_id) exceeds what D1 will
+// spend on one query and comes back as a CPU-limit reset. Rendering that as an
+// empty dashboard would read as "nobody uses these settings".
+async function metricUserRows(
+  env: Env,
+  days: 7 | 30,
+  surface: ClientSurfaceName,
+): Promise<{ signal: string; bucket: string; total: number }[] | null> {
   try {
     const table = telemetryTableNames(surface).metricUsers;
     const rows = await env.DB.prepare(
@@ -994,7 +1005,7 @@ async function metricUserRows(env: Env, days: 7 | 30, surface: ClientSurfaceName
     return rows.results;
   } catch (err) {
     console.warn("metric_users query failed", err);
-    return [];
+    return null;
   }
 }
 
@@ -1007,6 +1018,10 @@ type MetricTotals = { signal: string; bucket: string; total: number }[];
 async function handleStats(request: Request, env: Env, user: User, activeModule: StatsModule): Promise<Response> {
   const url = new URL(request.url);
   const filters = statsFilters(url);
+  // The preferences module reads metric_users, whose 30-day window is past what
+  // D1 finishes in one query. Default it to the window that returns; an explicit
+  // 30d still runs, and says so when it fails.
+  if (activeModule === "preferences" && !filters.windowExplicit) filters.windowDays = 7;
   const days = filters.windowDays;
   const since = currentWindowSince(days);
   const surface = activeModule === "diagnostics" ? "desktop" : filters.surface;
@@ -1026,6 +1041,7 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   let metrics: MetricTotals = [];
   let previousMetrics: MetricTotals = [];
   let metricUsers: MetricTotals = [];
+  let metricUsersUnavailable = false;
   let sources: Bar[] = [];
   let overview: OverviewCounts = {
     latestAdoptionPct: null,
@@ -1065,14 +1081,17 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     versions = versionsR;
     platforms = platformsR;
   } else if (activeModule === "preferences") {
-    [metrics, metricUsers] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
+    const [metricsR, usersR] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
+    metrics = metricsR;
+    metricUsersUnavailable = usersR === null;
+    metricUsers = usersR ?? [];
   } else {
     [metrics, previousMetrics] = await Promise.all([metricRows(env, days, surface), metricRows(env, days, surface, true)]);
   }
 
   return html(
     renderStats(
-      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, sources, overview, latestVersion, filters },
+      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, metricUsersUnavailable, sources, overview, latestVersion, filters },
       user,
       activeModule,
     ),

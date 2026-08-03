@@ -368,6 +368,7 @@ describe("diagnostics dashboard lanes", () => {
       metrics: [],
       previousMetrics: [],
       metricUsers: [],
+      metricUsersUnavailable: false,
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 4, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 1 },
       latestVersion: "v1.40.0",
@@ -381,6 +382,7 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
+        windowExplicit: false,
         preferenceMode: "users",
       },
     };
@@ -413,6 +415,7 @@ describe("diagnostics dashboard lanes", () => {
       metrics: [],
       previousMetrics: [],
       metricUsers: [],
+      metricUsersUnavailable: false,
       sources: [],
       overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
       latestVersion: "",
@@ -426,6 +429,7 @@ describe("diagnostics dashboard lanes", () => {
         newLatest: false,
         regressed: false,
         windowDays: 30,
+        windowExplicit: false,
         preferenceMode: "users",
       },
     };
@@ -437,5 +441,79 @@ describe("diagnostics dashboard lanes", () => {
     expect(html).toContain("surface=cli");
     expect(html).toContain('aria-label="Client surface"');
     expect(html).toContain('href="/stats"');
+  });
+
+  it("says the deduplication did not finish instead of showing an empty dashboard", () => {
+    type StatsData = Parameters<typeof renderStats>[0];
+    const data: StatsData = {
+      daily: [],
+      versions: [],
+      platforms: [],
+      crashes: [],
+      metrics: [],
+      previousMetrics: [],
+      metricUsers: [],
+      metricUsersUnavailable: true,
+      sources: [],
+      overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
+      latestVersion: "",
+      filters: {
+        surface: "desktop",
+        status: "",
+        source: "",
+        version: "",
+        os: "",
+        platform: "",
+        newLatest: false,
+        regressed: false,
+        windowDays: 30,
+        windowExplicit: true,
+        preferenceMode: "users",
+      },
+    };
+    const html = renderStats(
+      data,
+      { id: 1, email: "viewer@example.com", role: "viewer", created_at: "", approved_at: "" },
+      "preferences",
+    );
+    const installs = html.slice(html.indexOf("Deduplicated installs"), html.indexOf("Launch/open snapshots"));
+    expect(installs).toContain("did not finish");
+    expect(installs).toContain("window=7d");
+    expect(installs).not.toContain("No settings preference metrics yet");
+  });
+
+  it("keeps an unchosen 7d window out of the other modules' links", () => {
+    type StatsData = Parameters<typeof renderStats>[0];
+    const base: StatsData = {
+      daily: [],
+      versions: [],
+      platforms: [],
+      crashes: [],
+      metrics: [],
+      previousMetrics: [],
+      metricUsers: [],
+      metricUsersUnavailable: false,
+      sources: [],
+      overview: { latestAdoptionPct: null, openReports: 0, newLatestReports: 0, regressedReports: 0, criticalOpenReports: 0 },
+      latestVersion: "",
+      filters: {
+        surface: "desktop",
+        status: "",
+        source: "",
+        version: "",
+        os: "",
+        platform: "",
+        newLatest: false,
+        regressed: false,
+        windowDays: 7,
+        windowExplicit: false,
+        preferenceMode: "users",
+      },
+    };
+    const user = { id: 1, email: "viewer@example.com", role: "viewer", created_at: "", approved_at: "" } as const;
+
+    expect(renderStats(base, user, "preferences")).toContain('href="/stats"');
+    const chosen = { ...base, filters: { ...base.filters, windowExplicit: true } };
+    expect(renderStats(chosen, user, "preferences")).toContain("/stats?window=7d");
   });
 });

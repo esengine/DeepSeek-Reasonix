@@ -590,6 +590,7 @@ export function renderStats(
     metrics: MetricRow[];
     previousMetrics: MetricRow[];
     metricUsers: MetricRow[];
+    metricUsersUnavailable: boolean;
     sources: { label: string; users: number }[];
     overview: OverviewCounts;
     latestVersion: string;
@@ -603,6 +604,7 @@ export function renderStats(
       newLatest: boolean;
       regressed: boolean;
       windowDays: 7 | 30;
+      windowExplicit: boolean;
       preferenceMode: "users" | "opens";
     };
   },
@@ -648,7 +650,9 @@ export function renderStats(
     put("surface", data.filters.surface === "cli" ? "cli" : "");
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
-    if (data.filters.windowDays === 7) params.set("window", "7d");
+    // Only carry the window when the reader chose it — otherwise the
+    // preferences module's 7d default would follow them into every other module.
+    if (data.filters.windowDays === 7 && data.filters.windowExplicit) params.set("window", "7d");
     if (module === "preferences" && data.filters.preferenceMode === "opens") params.set("prefs", "opens");
     for (const [k, v] of Object.entries(patch)) {
       if (v) params.set(k, v);
@@ -730,9 +734,15 @@ ${developmentDiagnostics.length ? `<section class="module-panel"><h3>${i18nHTML(
 ${filters}
 <section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes)}</section>
 </section>`;
+  const sevenDayHref = esc(filterQS({ window: "7d" }, "preferences"));
   const installsPanel = preferencePanel(
     i18nHTML(`Deduplicated installs <b>— ${rangeText}</b>`, `按安装去重 <b>— ${rangeText}</b>`),
-    settingsDashboard(settingsMetricUsers, { collapseSections: true }),
+    data.metricUsersUnavailable
+      ? `<div class="empty">${i18nHTML(
+          `The ${rangeText} deduplication did not finish — that window is larger than one D1 query is given. <a href="${sevenDayHref}">Use 7d</a>.`,
+          `${rangeText} 的去重统计没能跑完 —— 这个窗口超出了单条 D1 查询的预算。<a href="${sevenDayHref}">改用 7 天</a>。`,
+        )}</div>`
+      : settingsDashboard(settingsMetricUsers, { collapseSections: true }),
     data.filters.preferenceMode === "users",
   );
   const opensPanel = preferencePanel(
