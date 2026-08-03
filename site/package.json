@@ -15,6 +15,9 @@
     "@fontsource-variable/outfit": "^5.1.0",
     "astro": "^7.1.3"
   },
+  "devDependencies": {
+    "sharp": "^0.35.3"
+  },
   "overrides": {
     "esbuild": "0.28.1"
   }
