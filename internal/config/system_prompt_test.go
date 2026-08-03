@@ -80,6 +80,9 @@ func TestResolveSystemPromptForRootMissingFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing system_prompt_file")
 	}
+	if !strings.Contains(err.Error(), "not found at any of these locations") {
+		t.Fatalf("error %q missing friendly not-found message", err)
+	}
 	// All probed locations must be listed so users can see where it looked.
 	for _, tried := range []string{filepath.Join(root, "prompts", "does-not-exist.md"), filepath.Join(home, "prompts", "does-not-exist.md")} {
 		if !strings.Contains(err.Error(), tried) {

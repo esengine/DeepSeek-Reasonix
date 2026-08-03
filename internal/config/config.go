@@ -2130,7 +2130,7 @@ func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 				firstErr = err
 			}
 		}
-		return "", fmt.Errorf("system_prompt_file: %w (tried: %s)", firstErr, strings.Join(candidates, ", "))
+		return "", fmt.Errorf("system_prompt_file %q not found at any of these locations: %s (%w)", path, strings.Join(candidates, ", "), firstErr)
 	}
 	return c.InlineSystemPrompt(), nil
 }
