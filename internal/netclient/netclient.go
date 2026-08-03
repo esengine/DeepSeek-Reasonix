@@ -6,6 +6,7 @@ package netclient
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -216,12 +217,23 @@ func environmentProxyFunc() func(*http.Request) (*url.URL, error) {
 // system proxy (Windows IE/PAC/WPAD) so corporate Windows machines work without
 // any manual HTTP_PROXY setup. Non-Windows resolves to env-only.
 func autoProxyFunc() func(*http.Request) (*url.URL, error) {
+	return autoProxyFuncWithResolver(sysproxy.ForURL, slog.Debug)
+}
+
+func autoProxyFuncWithResolver(systemProxy func(*url.URL) (*url.URL, error), debugf func(string, ...any)) func(*http.Request) (*url.URL, error) {
 	pf := httpproxy.FromEnvironment().ProxyFunc()
 	return func(req *http.Request) (*url.URL, error) {
 		if u, err := pf(req.URL); err != nil || u != nil {
 			return u, err
 		}
-		return sysproxy.ForURL(req.URL)
+		u, err := systemProxy(req.URL)
+		if err != nil || u != nil {
+			return u, err
+		}
+		if debugf != nil {
+			debugf("netclient: no proxy resolved for auto mode", "host", req.URL.Hostname())
+		}
+		return nil, nil
 	}
 }
 
