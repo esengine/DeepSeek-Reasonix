@@ -365,6 +365,7 @@ func TestRunRoutesBareInteractiveFlagsToSession(t *testing.T) {
 	for _, args := range [][]string{
 		{"--continue"},
 		{"--continue=true"},
+		{"-c"},
 		{"-c=true"},
 		{"--resume=true"},
 		{"-r=true"},
@@ -385,6 +386,19 @@ func TestRunRoutesBareInteractiveFlagsToSession(t *testing.T) {
 		if !reflect.DeepEqual(gotArgs, args) {
 			t.Fatalf("interactive args = %#v, want %#v", gotArgs, args)
 		}
+	}
+}
+
+// TestContinueShorthandParses guards #7156: BoolVar("c") registered a long
+// name, so bare -c failed as an unknown shorthand and exited 2 with no output.
+func TestContinueShorthandParses(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	if longRC, shortRC := chatREPL([]string{"--continue"}, "dev"), chatREPL([]string{"-c"}, "dev"); longRC != shortRC {
+		t.Fatalf("chatREPL --continue rc=%d -c rc=%d, want identical post-parse behavior", longRC, shortRC)
+	}
+	if longRC, shortRC := runAgent([]string{"--continue", "hello"}, "dev"), runAgent([]string{"-c", "hello"}, "dev"); longRC != shortRC {
+		t.Fatalf("runAgent --continue rc=%d -c rc=%d, want identical post-parse behavior", longRC, shortRC)
 	}
 }
 
