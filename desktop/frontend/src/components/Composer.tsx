@@ -21,6 +21,7 @@ import {
   type ComposerInvocation,
   type StructuredInvocationSubmit,
 } from "../lib/invocationDisplay";
+import { formatTokens } from "../lib/format";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
@@ -373,11 +374,6 @@ function composerAutoInputMaxHeight(extraReservedHeight = 0): number {
 
 function loadComposerHeight(): number | null {
   return loadOptionalLayoutSize("composerHeight", clampComposerHeight);
-}
-
-function fmtTokens(n: number): string {
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-  return String(n);
 }
 
 function fmtElapsed(ms: number): string {
@@ -3635,7 +3631,7 @@ export function Composer({
         const words = SPINNER_WORDS[locale];
         const word = words[Math.floor(elapsedMs / 3000) % words.length];
         const liveTokens = (turnTokens ?? 0) + Math.round((turnArgChars ?? 0) / 4);
-        const tok = liveTokens > 0 ? ` · ↓ ${fmtTokens(liveTokens)} ${t("status.tokens")}` : "";
+        const tok = liveTokens > 0 ? ` · ↓ ${formatTokens(liveTokens)} ${t("status.tokens")}` : "";
         return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
       })()
     : null;
