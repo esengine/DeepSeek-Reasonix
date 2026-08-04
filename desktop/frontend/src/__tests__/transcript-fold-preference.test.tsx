@@ -121,6 +121,65 @@ try {
     setProcessFoldPreference("auto");
   });
   ok(!container.querySelector(".turn-collapse--open"), "switching back to auto collapses completed folds again");
+
+  await act(async () => {
+    setProcessFoldPreference("collapsed");
+  });
+  ok(!container.querySelector(".turn-collapse--open"), "switching to always-collapsed keeps folds collapsed");
+
+  await act(async () => {
+    setProcessFoldPreference("expanded");
+  });
+  ok(container.querySelector(".turn-collapse--open"), "always-collapsed does not lock folds open; expanded still opens them");
+
+  await act(async () => {
+    setProcessFoldPreference("collapsed");
+  });
+  ok(!container.querySelector(".turn-collapse--open"), "switching back to always-collapsed closes folds again");
+
+  // A live, running turn must not auto-open its fold under "collapsed".
+  const live = { id: "a1", text: "answered", reasoning: "quick thought", reasoningComplete: false };
+  await act(async () => {
+    root.render(
+      React.createElement(
+        LocaleProvider,
+        null,
+        React.createElement(Transcript, {
+          items,
+          onPrompt: () => {},
+          questionNavigator: false,
+          running: true,
+          live,
+        }),
+      ),
+    );
+  });
+  ok(container.querySelector(".turn-collapse"), "running turn renders its work fold");
+  ok(!container.querySelector(".turn-collapse--open"), "always-collapsed keeps the fold collapsed while the turn is running");
+
+  // When the turn finishes, the fold must also stay collapsed.
+  await act(async () => {
+    root.render(
+      React.createElement(
+        LocaleProvider,
+        null,
+        React.createElement(Transcript, {
+          items,
+          onPrompt: () => {},
+          questionNavigator: false,
+          running: false,
+          live: { ...live, reasoningComplete: true },
+        }),
+      ),
+    );
+  });
+  ok(!container.querySelector(".turn-collapse--open"), "always-collapsed keeps the fold collapsed after the turn completes");
+
+  // auto must still auto-open the fold while the turn is running.
+  await act(async () => {
+    setProcessFoldPreference("auto");
+  });
+  ok(container.querySelector(".turn-collapse--open"), "auto re-opens the fold while the turn is running");
 } finally {
   await act(async () => {
     root.unmount();

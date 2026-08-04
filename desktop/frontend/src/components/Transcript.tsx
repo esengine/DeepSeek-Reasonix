@@ -1408,7 +1408,7 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
     prevRunningRef.current = hasRunningWork;
     if (hasRunningWork) {
       if (!wasRunning) userOverriddenOpen.current = false;
-      if (!userOverriddenOpen.current) setOpen(true);
+      if (!userOverriddenOpen.current && foldPreference !== "collapsed") setOpen(true);
     } else if (wasRunning && !userOverriddenOpen.current && hasOutsideContent && foldPreference !== "expanded") {
       setOpen(false);
     }
@@ -1423,10 +1423,18 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
     userOverriddenOpen.current = false;
     if (foldPreference === "expanded") {
       setOpen(true);
-    } else if (!hasRunningWork && hasOutsideContent) {
+    } else if ((foldPreference === "collapsed" || !hasRunningWork) && hasOutsideContent) {
       setOpen(false);
     }
   }, [foldPreference, hasRunningWork, hasOutsideContent]);
+
+  // "collapsed" must also keep an already-open fold closed while a turn is
+  // running — e.g. when the visible answer (outside content) appears mid-turn.
+  useEffect(() => {
+    if (foldPreference === "collapsed" && hasOutsideContent && !userOverriddenOpen.current) {
+      setOpen(false);
+    }
+  }, [foldPreference, hasOutsideContent]);
 
   if (displayItems.length === 0) return null;
 

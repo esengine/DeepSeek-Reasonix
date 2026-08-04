@@ -1818,7 +1818,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
       </SettingsField>
       <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")}>
         <div className="set-seg">
-          {(["auto", "expanded"] as const).map((pref) => (
+          {(["auto", "collapsed", "expanded"] as const).map((pref) => (
             <button
               key={pref}
               className={`set-seg__btn${processFold === pref ? " set-seg__btn--on" : ""}`}

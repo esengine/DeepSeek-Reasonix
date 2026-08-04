@@ -6,4 +6,12 @@
 import { en } from "./en";
 import type { DictKey } from "./en";
 
-export const ru: Record<DictKey, string> = { ...en };
+export const ru: Record<DictKey, string> = {
+  ...en,
+  // Настройки: сворачивание рабочего процесса
+  "settings.processFold": "Сворачивание рабочего процесса",
+  "settings.processFoldHint": "Остаётся ли блок рассуждений и вызовов инструментов свёрнутым, автоматически сворачивается после завершения хода или остаётся раскрытым",
+  "settings.processFold.auto": "Авто-сворачивание",
+  "settings.processFold.collapsed": "Всегда свёрнуто",
+  "settings.processFold.expanded": "Всегда раскрыто",
+};

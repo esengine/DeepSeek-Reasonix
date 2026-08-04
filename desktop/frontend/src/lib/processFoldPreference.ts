@@ -1,4 +1,4 @@
-export type ProcessFoldPreference = "auto" | "expanded";
+export type ProcessFoldPreference = "auto" | "collapsed" | "expanded";
 
 const PROCESS_FOLD_KEY = "reasonix-process-fold";
 const PROCESS_FOLD_EVENT = "reasonix:process-fold";
@@ -6,6 +6,7 @@ const PROCESS_FOLD_EVENT = "reasonix:process-fold";
 export function getProcessFoldPreference(): ProcessFoldPreference {
   if (typeof localStorage === "undefined") return "auto";
   const stored = localStorage.getItem(PROCESS_FOLD_KEY);
+  if (stored === "collapsed") return "collapsed";
   return stored === "expanded" ? "expanded" : "auto";
 }
 
