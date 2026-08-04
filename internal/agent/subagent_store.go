@@ -106,6 +106,15 @@ type SubagentStore struct {
 	dir       string
 	destroyed func(parentSession string) bool
 
+	// parentSessionProbe, when non-nil, reports whether a parent session path
+	// is actively owned by this process (an open tab, a detached runtime, or a
+	// controller build in flight). CleanupStaleRunning consults it BEFORE
+	// acquiring the parent session lease: a live parent's lease can be
+	// transiently free during a rebuild window, and probing it there would race
+	// the tab's own startup bind and could mislabel a running sub-agent of a
+	// live session as interrupted. Nil keeps the legacy lease-probe behavior.
+	parentSessionProbe func(sessionPath string) bool
+
 	mu     sync.Mutex
 	locked map[string]bool
 }
@@ -115,6 +124,16 @@ func NewSubagentStore(dir string) *SubagentStore {
 		return nil
 	}
 	return &SubagentStore{dir: dir, locked: map[string]bool{}}
+}
+
+// WithParentSessionProbe installs the parent-session liveness probe consulted
+// by CleanupStaleRunning (see SubagentStore.parentSessionProbe). Returns s for
+// chaining.
+func (s *SubagentStore) WithParentSessionProbe(probe func(sessionPath string) bool) *SubagentStore {
+	if s != nil {
+		s.parentSessionProbe = probe
+	}
+	return s
 }
 
 // WithDestroyedChecker makes saves for destroyed parent sessions no-op. This is
@@ -258,6 +277,15 @@ func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 	cleaned := 0
 	for _, parentID := range parentIDs {
 		parent := parents[parentID]
+		if s.parentSessionProbe != nil && s.parentSessionProbe(parent.sessionPath) {
+			// The parent is live in this process (open tab, detached runtime,
+			// or a controller build in flight). Its lease can be transiently
+			// free during a rebuild window; probing it now would race the
+			// tab's own startup bind and could mislabel a running sub-agent of
+			// a live session as interrupted. The sweep is only for crash
+			// leftovers, and a live parent is by definition not one.
+			continue
+		}
 		lease, err := TryAcquireSessionLease(parent.sessionPath)
 		if errors.Is(err, ErrSessionLeaseHeld) {
 			continue

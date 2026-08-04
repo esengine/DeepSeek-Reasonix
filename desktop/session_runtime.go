@@ -459,3 +459,39 @@ func sameCurrentProcessLease(err error) bool {
 	host, _ := os.Hostname()
 	return strings.TrimSpace(leaseErr.Info.Hostname) == strings.TrimSpace(host)
 }
+
+// sessionParentLive reports whether sessionPath is actively owned by this
+// process: a registered runtime (starting placeholder through ready), an open
+// tab whose persisted session path matches — which also covers the
+// controller-build window before claimSessionRuntime publishes the registry
+// entry — or a detached runtime. CleanupStaleRunning consults it through
+// boot.Options.SubagentParentLive, so the stale sub-agent sweep never races a
+// live tab's startup bind for the parent session lease and never mislabels a
+// live parent's running sub-agents as interrupted. It only needs a read view
+// of tab/runtime state and is safe to call from inside a controller build
+// (which holds runtimeAdmissionMu.RLock, always acquired before a.mu).
+func (a *App) sessionParentLive(sessionPath string) bool {
+	key := sessionRuntimeKey(sessionPath)
+	if key == "" {
+		return false
+	}
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if rt := a.runtimeBySessionKey[key]; rt != nil && a.runtimeOwnerLiveLocked(rt) {
+		return true
+	}
+	for _, tab := range a.runtimeTabsLocked() {
+		if tab == nil {
+			continue
+		}
+		if sessionRuntimeKey(tab.SessionPath) == key {
+			return true
+		}
+		if ctrl := tab.Ctrl; ctrl != nil {
+			if p := sessionRuntimeKey(ctrl.SessionPath()); p != "" && p == key {
+				return true
+			}
+		}
+	}
+	return false
+}

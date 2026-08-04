@@ -948,3 +948,88 @@ func prepareCompletedSubagentForLineageTest(t *testing.T, parentSession string) 
 	run.Release()
 	return sessionDir, store, run.Ref, spec
 }
+
+func TestCleanupStaleRunningSkipsLiveParentViaProbe(t *testing.T) {
+	newRunning := func(t *testing.T, dir string) string {
+		store := NewSubagentStore(filepath.Join(dir, "subagents"))
+		spec := testSubagentSpec(t, "review")
+		run, err := store.PrepareFresh(spec)
+		if err != nil {
+			t.Fatalf("PrepareFresh: %v", err)
+		}
+		if err := store.MarkRunning(run); err != nil {
+			t.Fatalf("MarkRunning: %v", err)
+		}
+		ref := run.Ref
+		run.Release()
+		return ref
+	}
+	parentPath := func(dir string) string {
+		return filepath.Join(filepath.Dir(filepath.Join(dir, "subagents")), "parent-session.jsonl")
+	}
+
+	t.Run("probe_hit_skips_sweep", func(t *testing.T) {
+		dir := t.TempDir()
+		ref := newRunning(t, dir)
+		store := NewSubagentStore(filepath.Join(dir, "subagents"))
+		store.WithParentSessionProbe(func(path string) bool { return path == parentPath(dir) })
+
+		cleaned, err := store.CleanupStaleRunning()
+		if err != nil {
+			t.Fatalf("CleanupStaleRunning: %v", err)
+		}
+		if cleaned != 0 {
+			t.Fatalf("cleaned = %d with live parent probe, want 0", cleaned)
+		}
+		meta, err := store.LoadMeta(ref)
+		if err != nil {
+			t.Fatalf("LoadMeta: %v", err)
+		}
+		if meta.Status != SubagentRunning {
+			t.Fatalf("status = %q, want running (live parent must not be mislabeled)", meta.Status)
+		}
+	})
+
+	t.Run("probe_miss_cleans", func(t *testing.T) {
+		dir := t.TempDir()
+		ref := newRunning(t, dir)
+		store := NewSubagentStore(filepath.Join(dir, "subagents"))
+		store.WithParentSessionProbe(func(path string) bool { return false })
+
+		cleaned, err := store.CleanupStaleRunning()
+		if err != nil {
+			t.Fatalf("CleanupStaleRunning: %v", err)
+		}
+		if cleaned != 1 {
+			t.Fatalf("cleaned = %d with dead parent probe, want 1", cleaned)
+		}
+		meta, err := store.LoadMeta(ref)
+		if err != nil {
+			t.Fatalf("LoadMeta: %v", err)
+		}
+		if meta.Status != SubagentInterrupted {
+			t.Fatalf("status = %q, want interrupted", meta.Status)
+		}
+	})
+
+	t.Run("nil_probe_keeps_legacy_behavior", func(t *testing.T) {
+		dir := t.TempDir()
+		ref := newRunning(t, dir)
+		store := NewSubagentStore(filepath.Join(dir, "subagents"))
+
+		cleaned, err := store.CleanupStaleRunning()
+		if err != nil {
+			t.Fatalf("CleanupStaleRunning: %v", err)
+		}
+		if cleaned != 1 {
+			t.Fatalf("cleaned = %d without probe, want 1", cleaned)
+		}
+		meta, err := store.LoadMeta(ref)
+		if err != nil {
+			t.Fatalf("LoadMeta: %v", err)
+		}
+		if meta.Status != SubagentInterrupted {
+			t.Fatalf("status = %q, want interrupted", meta.Status)
+		}
+	})
+}

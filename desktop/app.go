@@ -2476,6 +2476,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		SubagentParentLive:       a.sessionParentLive,
 	})
 	if err != nil {
 		if teardownTimedOut {
@@ -4815,6 +4816,7 @@ func (a *App) buildSessionRebindCandidate(
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		SubagentParentLive:       a.sessionParentLive,
 	})
 	if err != nil {
 		sink.clearContext()
@@ -10281,6 +10283,7 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		SubagentParentLive:       a.sessionParentLive,
 	})
 	if err != nil {
 		return err
@@ -10463,6 +10466,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		SubagentParentLive:       a.sessionParentLive,
 	})
 	if err != nil {
 		return err
@@ -10604,6 +10608,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		SubagentParentLive:       a.sessionParentLive,
 	})
 	if err != nil {
 		return err

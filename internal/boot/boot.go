@@ -156,6 +156,14 @@ type Options struct {
 	// local UI metadata to automatic transcript recovery branches.
 	SessionRecoveryMeta func(control.SessionRecoveryRequest) agent.BranchMeta
 	OnSessionRecovered  func(control.SessionRecoveryInfo) error
+	// SubagentParentLive lets a frontend report whether a session path is
+	// actively owned by this process (an open tab, a detached runtime, or a
+	// controller build in flight). CleanupStaleRunning consults it before
+	// acquiring a running sub-agent's parent session lease, so the stale
+	// sweep never races a live tab's startup bind nor mislabels an active
+	// parent's sub-agents as interrupted. Nil keeps the legacy lease-probe
+	// behavior (safe for single-controller frontends like the CLI).
+	SubagentParentLive func(sessionPath string) bool
 	// FileOverlay and TerminalRunner let a host transport (ACP) serve file
 	// content from editor buffers and run foreground bash in a host terminal.
 	// Both only change where tool I/O happens — tool names, descriptions, and
@@ -738,7 +746,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if opts.MaxSteps > 0 {
 		maxSteps = opts.MaxSteps
 	}
-	subagentStore, err := newSubagentStore(sessionDir)
+	subagentStore, err := newSubagentStore(sessionDir, opts.SubagentParentLive)
 	if err != nil {
 		return nil, err
 	}
@@ -2179,12 +2187,13 @@ func isGitMarker(path string) bool {
 // semantics are unchanged.
 var subagentCleanupSwept sync.Map // sessionDir -> struct{}
 
-func newSubagentStore(sessionDir string) (*agent.SubagentStore, error) {
+func newSubagentStore(sessionDir string, parentLive func(sessionPath string) bool) (*agent.SubagentStore, error) {
 	sessionDir = strings.TrimSpace(sessionDir)
 	if sessionDir == "" {
 		return nil, nil
 	}
 	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	store.WithParentSessionProbe(parentLive)
 	key := filepath.Clean(sessionDir)
 	if _, loaded := subagentCleanupSwept.LoadOrStore(key, struct{}{}); loaded {
 		return store, nil

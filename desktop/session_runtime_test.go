@@ -7,7 +7,11 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
+	"reasonix/internal/tool"
 )
 
 func TestMetaNeverReportsReadyWithoutController(t *testing.T) {
@@ -187,5 +191,133 @@ func TestBackendRejectsSubmitWhenRuntimeIsNotReady(t *testing.T) {
 	}
 	if status := ctrl.RuntimeStatus(); status != (control.RuntimeStatus{}) {
 		t.Fatalf("controller status changed after rejected submit: %+v", status)
+	}
+}
+
+func TestSessionParentLive(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "live-session.jsonl")
+	other := filepath.Join(dir, "other-session.jsonl")
+	app := NewApp()
+
+	// No tabs: nothing is live.
+	if app.sessionParentLive(path) {
+		t.Fatal("sessionParentLive(path) = true with no tabs, want false")
+	}
+
+	// A tab in the controller-build window (Ctrl nil, persisted SessionPath
+	// already pinned) is live: the stale sweep must not probe its lease.
+	tab := &WorkspaceTab{ID: "tab", Scope: "global", SessionPath: path, buildGeneration: 1}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	if !app.sessionParentLive(path) {
+		t.Fatal("sessionParentLive(path) = false for a building tab, want true")
+	}
+	if app.sessionParentLive(other) {
+		t.Fatal("sessionParentLive(other) = true, want false")
+	}
+
+	// A ready controller whose session path matches is live.
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "live", Sink: event.Discard})
+	defer ctrl.Close()
+	tab2 := &WorkspaceTab{ID: "tab2", Scope: "global", SessionPath: path, Ctrl: ctrl, Ready: true}
+	app.tabs[tab2.ID] = tab2
+	app.tabOrder = append(app.tabOrder, tab2.ID)
+	if !app.sessionParentLive(path) {
+		t.Fatal("sessionParentLive(path) = false for a ready controller, want true")
+	}
+
+	// A detached runtime (backgrounded tab) is live too.
+	detachedKey := sessionRuntimeKey(path)
+	app.ensureDetachedSessionsLocked()
+	app.detachedSessions[detachedKey] = &WorkspaceTab{ID: "detached", Scope: "global", SessionPath: path, Ctrl: ctrl, Ready: true}
+	if !app.sessionParentLive(path) {
+		t.Fatal("sessionParentLive(path) = false for a detached runtime, want true")
+	}
+}
+
+// TestCleanupStaleRunningWithDesktopProbe wires the desktop parent-liveness
+// probe into the stale sub-agent sweep end to end: a running sub-agent whose
+// parent session is open (or building) in the desktop must be left untouched
+// and its parent lease must not be probed, while an unowned parent is still
+// cleaned as a crash leftover.
+func TestCleanupStaleRunningWithDesktopProbe(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	sessionDir := t.TempDir()
+	parentID := "session-parent"
+	parentPath := filepath.Join(sessionDir, parentID+".jsonl")
+	newRunning := func() string {
+		store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+		spec := agent.SubagentSpec{
+			Kind:          "task",
+			Name:          "task",
+			WorkspaceRoot: t.TempDir(),
+			ParentSession: parentID,
+			SystemPrompt:  "sys",
+			Registry:      tool.NewRegistry(),
+			Model:         "base-model",
+		}
+		run, err := store.PrepareFresh(spec)
+		if err != nil {
+			t.Fatalf("PrepareFresh: %v", err)
+		}
+		if err := store.MarkRunning(run); err != nil {
+			t.Fatalf("MarkRunning: %v", err)
+		}
+		ref := run.Ref
+		run.Release()
+		return ref
+	}
+
+	app := NewApp()
+
+	// Parent live in desktop (tab building): sweep skips it.
+	liveRef := newRunning()
+	tab := &WorkspaceTab{ID: "tab", Scope: "global", SessionPath: parentPath, buildGeneration: 1}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	liveStore := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	liveStore.WithParentSessionProbe(app.sessionParentLive)
+	if cleaned, err := liveStore.CleanupStaleRunning(); err != nil {
+		t.Fatalf("CleanupStaleRunning: %v", err)
+	} else if cleaned != 0 {
+		t.Fatalf("cleaned = %d for a live parent, want 0", cleaned)
+	}
+	meta, err := liveStore.LoadMeta(liveRef)
+	if err != nil {
+		t.Fatalf("LoadMeta(live): %v", err)
+	}
+	if meta.Status != agent.SubagentRunning {
+		t.Fatalf("live parent sub-agent status = %q, want running", meta.Status)
+	}
+
+	// No live parent: sweep cleans the crash leftovers — the previously
+	// skipped run now has no owner either, so both are interrupted.
+	delete(app.tabs, tab.ID)
+	staleRef := newRunning()
+	staleStore := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	staleStore.WithParentSessionProbe(app.sessionParentLive)
+	if cleaned, err := staleStore.CleanupStaleRunning(); err != nil {
+		t.Fatalf("CleanupStaleRunning: %v", err)
+	} else if cleaned != 2 {
+		t.Fatalf("cleaned = %d for dead parents, want 2", cleaned)
+	}
+	meta, err = staleStore.LoadMeta(staleRef)
+	if err != nil {
+		t.Fatalf("LoadMeta(stale): %v", err)
+	}
+	if meta.Status != agent.SubagentInterrupted {
+		t.Fatalf("dead parent sub-agent status = %q, want interrupted", meta.Status)
+	}
+	meta, err = staleStore.LoadMeta(liveRef)
+	if err != nil {
+		t.Fatalf("LoadMeta(live, now dead): %v", err)
+	}
+	if meta.Status != agent.SubagentInterrupted {
+		t.Fatalf("previously-live parent sub-agent status = %q, want interrupted after parent closed", meta.Status)
 	}
 }
