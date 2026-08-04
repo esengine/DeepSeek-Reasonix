@@ -148,14 +148,11 @@ import {
   CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH,
   CREATION_RIGHT_DOCK_TREE_MIN_WIDTH,
   CREATION_SIDEBAR_MIN_WIDTH,
-  RIGHT_DOCK_MAX_WIDTH,
   RIGHT_DOCK_MIN_RENDER_WIDTH,
   RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH,
   RIGHT_DOCK_PREVIEW_MIN_WIDTH,
-  RIGHT_DOCK_TREE_MAX_WIDTH,
   RIGHT_DOCK_TREE_MIN_WIDTH,
   type RightDockMode,
-  SIDEBAR_MAX_WIDTH,
   SIDEBAR_MIN_WIDTH,
   TERMINAL_DEFAULT_HEIGHT,
   TERMINAL_MIN_HEIGHT,
@@ -170,6 +167,8 @@ import {
   defaultCreationSidebarWidth,
   defaultRightDockTreeWidth,
   defaultSidebarWidth,
+  rightDockMaxWidth,
+  rightDockTreeMaxWidth,
   saveRightDockPreviewWidth,
   saveRightDockTreeWidth,
   saveSidebarCollapsed,
@@ -178,6 +177,7 @@ import {
   saveTerminalPanelOpen,
   terminalMaxHeight,
   saveWorkspacePanelOpen,
+  sidebarMaxWidth,
   useLayoutStore,
 } from "./store/layout";
 import { useOverlayStore } from "./store/overlays";
@@ -290,8 +290,9 @@ const RemotePanel = lazy(() => import("./components/RemotePanel").then((module) 
 const TerminalPanel = lazy(() => import("./components/TerminalPanel").then((module) => ({ default: module.TerminalPanel })));
 const WorkspacePanel = lazy(() => import("./components/WorkspacePanel").then((module) => ({ default: module.WorkspacePanel })));
 
+// Hard floor for the chat column whether the dock is open or closed: the
+// user stretching a panel is an explicit choice to give the chat less room.
 const CHAT_MIN_WIDTH = 400;
-const CHAT_COMFORT_MIN_WIDTH = 560;
 const WORKSPACE_RESIZER_WIDTH = 8;
 
 function stripGoalResearchFlags(arg: string): string {
@@ -1611,17 +1612,20 @@ export default function App() {
   const rightDockDetailActive = rightDockMode !== "context" && workspacePreviewActive;
   const preferredWorkspacePanelWidth = rightDockDetailActive ? rightDockPreviewWidth : rightDockTreeWidth;
   const rightDockTreeMinWidth = desktopLayoutStyle === "creation" ? CREATION_RIGHT_DOCK_TREE_MIN_WIDTH : RIGHT_DOCK_TREE_MIN_WIDTH;
-  const rightDockTreeWidthClamp = desktopLayoutStyle === "creation" ? clampCreationRightDockTreeWidth : clampRightDockTreeWidth;
+  const rightDockTreeWidthClamp = useCallback(
+    (width: number) =>
+      (desktopLayoutStyle === "creation" ? clampCreationRightDockTreeWidth : clampRightDockTreeWidth)(width, viewportWidth),
+    [desktopLayoutStyle, viewportWidth],
+  );
   const rightDockMinRenderWidth = desktopLayoutStyle === "creation" && !rightDockDetailActive
     ? CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH
     : RIGHT_DOCK_MIN_RENDER_WIDTH;
   const workspacePanelMinWidth = rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : rightDockTreeMinWidth;
-  const chatReservedWidth = workspacePanelOpen && !workspacePanelMaximized ? CHAT_COMFORT_MIN_WIDTH : CHAT_MIN_WIDTH;
   const workspacePanelAvailableWidth = availableWorkspacePanelWidth({
     viewportWidth,
     sidebarCollapsed,
     sidebarWidth,
-    chatMinWidth: chatReservedWidth,
+    chatMinWidth: CHAT_MIN_WIDTH,
     resizerWidth: WORKSPACE_RESIZER_WIDTH,
   });
 
@@ -1649,14 +1653,14 @@ export default function App() {
         viewportWidth,
         sidebarCollapsed,
         sidebarWidth: nextSidebarWidth,
-        chatMinWidth: chatReservedWidth,
+        chatMinWidth: CHAT_MIN_WIDTH,
         resizerWidth: WORKSPACE_RESIZER_WIDTH,
         open: workspacePanelOpen,
         maximized: workspacePanelMaximized,
         preferredWidth,
         minWidth: workspacePanelMinWidth,
       }),
-    [chatReservedWidth, sidebarCollapsed, sidebarWidth, viewportWidth, workspacePanelMaximized, workspacePanelMinWidth, workspacePanelOpen],
+    [sidebarCollapsed, sidebarWidth, viewportWidth, workspacePanelMaximized, workspacePanelMinWidth, workspacePanelOpen],
   );
   const activeTab = useMemo(
     () => tabMetas.find((tab) => tab.id === activeTabId) ?? tabMetas.find((tab) => tab.active),
@@ -2636,7 +2640,11 @@ export default function App() {
     saveSidebarCollapsed(nextCollapsed);
   }, [anchorAppScrollToChat, closeTransientOverlays, pulseSidebarToggle, sidebarCollapsed]);
 
-  const sidebarWidthClamp = desktopLayoutStyle === "creation" ? clampCreationSidebarWidth : clampSidebarWidth;
+  const sidebarWidthClamp = useCallback(
+    (width: number) =>
+      (desktopLayoutStyle === "creation" ? clampCreationSidebarWidth : clampSidebarWidth)(width, viewportWidth),
+    [desktopLayoutStyle, viewportWidth],
+  );
   const sidebarRenderWidth = liveSidebarWidth ?? sidebarWidth;
   const sidebarResizeMinWidth = desktopLayoutStyle === "creation" ? CREATION_SIDEBAR_MIN_WIDTH : SIDEBAR_MIN_WIDTH;
 
@@ -2732,17 +2740,17 @@ export default function App() {
         setExpandedSidebarWidth(sidebarResizeMinWidth);
       } else if (event.key === "End") {
         event.preventDefault();
-        setExpandedSidebarWidth(SIDEBAR_MAX_WIDTH);
+        setExpandedSidebarWidth(sidebarMaxWidth(viewportWidth));
       }
     },
-    [setExpandedSidebarWidth, sidebarCollapsed, sidebarWidth, sidebarResizeMinWidth],
+    [setExpandedSidebarWidth, sidebarCollapsed, sidebarWidth, sidebarResizeMinWidth, viewportWidth],
   );
 
   const setSavedWorkspacePanelWidth = useCallback(
     (width: number) => {
       closeTransientOverlays();
       if (rightDockDetailActive) {
-        const next = clampRightDockPreviewWidth(width);
+        const next = clampRightDockPreviewWidth(width, viewportWidth);
         setRightDockPreviewWidth(next);
         saveRightDockPreviewWidth(next);
         return;
@@ -2751,18 +2759,18 @@ export default function App() {
       setRightDockTreeWidth(next);
       saveRightDockTreeWidth(next);
     },
-    [closeTransientOverlays, rightDockDetailActive, rightDockTreeWidthClamp],
+    [closeTransientOverlays, rightDockDetailActive, rightDockTreeWidthClamp, viewportWidth],
   );
 
   const ensureWorkspacePanelWidth = useCallback(
     (width: number) => {
       closeTransientOverlays();
       if (rightDockMode === "context") return;
-      const next = clampRightDockPreviewWidth(width);
+      const next = clampRightDockPreviewWidth(width, viewportWidth);
       setRightDockPreviewWidth(next);
       saveRightDockPreviewWidth(next);
     },
-    [closeTransientOverlays, rightDockMode],
+    [closeTransientOverlays, rightDockMode, viewportWidth],
   );
 
   const startWorkspacePanelResize = useCallback(
@@ -2786,7 +2794,7 @@ export default function App() {
         const delta = moveEvent.clientX - startX;
         nextDockWidth = startDockWidth - delta;
         if (rightDockDetailActive) {
-          nextDockWidth = clampRightDockPreviewWidth(nextDockWidth);
+          nextDockWidth = clampRightDockPreviewWidth(nextDockWidth, viewportWidth);
         } else {
           nextDockWidth = rightDockTreeWidthClamp(nextDockWidth);
         }
@@ -2809,7 +2817,7 @@ export default function App() {
       window.addEventListener("pointerup", onDone);
       window.addEventListener("pointercancel", onDone);
     },
-    [closeTransientOverlays, resolveLiveWorkspacePanelRenderWidth, rightDockDetailActive, rightDockTreeWidthClamp, setSavedWorkspacePanelWidth, workspacePanelOpen, workspacePanelRenderWidth],
+    [closeTransientOverlays, resolveLiveWorkspacePanelRenderWidth, rightDockDetailActive, rightDockTreeWidthClamp, setSavedWorkspacePanelWidth, viewportWidth, workspacePanelOpen, workspacePanelRenderWidth],
   );
 
   const resizeWorkspacePanelWithKeyboard = useCallback(
@@ -2822,10 +2830,10 @@ export default function App() {
         setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_PREVIEW_MIN_WIDTH : rightDockTreeMinWidth);
       } else if (event.key === "End") {
         event.preventDefault();
-        setSavedWorkspacePanelWidth(rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH);
+        setSavedWorkspacePanelWidth(rightDockDetailActive ? rightDockMaxWidth(viewportWidth) : rightDockTreeMaxWidth(viewportWidth));
       }
     },
-    [rightDockDetailActive, rightDockTreeMinWidth, setSavedWorkspacePanelWidth, workspacePanelRenderWidth],
+    [rightDockDetailActive, rightDockTreeMinWidth, setSavedWorkspacePanelWidth, viewportWidth, workspacePanelRenderWidth],
   );
 
   const terminalRenderHeight = clampTerminalHeight(terminalHeight, viewportHeight);
@@ -3095,12 +3103,12 @@ export default function App() {
     () =>
       ({
         "--sidebar-expanded-width": `${sidebarRenderWidth}px`,
-        "--chat-min-width": `${chatReservedWidth}px`,
+        "--chat-min-width": `${CHAT_MIN_WIDTH}px`,
         "--workspace-width": `${workspacePanelRenderWidth}px`,
         "--workspace-resizer-width": `${WORKSPACE_RESIZER_WIDTH}px`,
         "--terminal-height": `${liveTerminalHeight ?? (terminalPanelOpen ? terminalRenderHeight : 0)}px`,
       }) as CSSProperties,
-    [chatReservedWidth, liveTerminalHeight, sidebarRenderWidth, terminalPanelOpen, terminalRenderHeight, workspacePanelRenderWidth],
+    [liveTerminalHeight, sidebarRenderWidth, terminalPanelOpen, terminalRenderHeight, workspacePanelRenderWidth],
   );
 
   const setWorkspacePanel = useCallback((open: boolean) => {
@@ -4108,7 +4116,7 @@ export default function App() {
       ? defaultCreationRightDockTreeWidth()
       : defaultRightDockTreeWidth();
   const workspacePanelResizeMinWidth = workspacePanelAriaMinWidth(workspacePanelMinWidth, workspacePanelRenderWidth);
-  const workspacePanelMaxWidth = rightDockDetailActive ? RIGHT_DOCK_MAX_WIDTH : RIGHT_DOCK_TREE_MAX_WIDTH;
+  const workspacePanelMaxWidth = rightDockDetailActive ? rightDockMaxWidth(viewportWidth) : rightDockTreeMaxWidth(viewportWidth);
   const sidebarCreation = desktopLayoutStyle === "creation";
   const topicbarTitle = sidebarImDetailConnection ? t("botDetail.title", { name: sidebarImDetailConnection.title }) : topicDisplayTitle(activeTab);
   const topicbarWorkspaceLabel = sidebarImDetailConnection ? t("botDetail.subtitle") : activeTab ? tabWorkspaceTitle(activeTab) : "";
@@ -4437,7 +4445,7 @@ export default function App() {
           aria-orientation="vertical"
           aria-label={t("sidebar.resize")}
           aria-valuemin={sidebarResizeMinWidth}
-          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          aria-valuemax={sidebarMaxWidth(viewportWidth)}
           aria-valuenow={sidebarRenderWidth}
           onPointerDown={startSidebarResize}
           onKeyDown={resizeSidebarWithKeyboard}

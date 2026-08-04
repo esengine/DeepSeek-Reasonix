@@ -24,7 +24,12 @@ export const SIDEBAR_MIN_WIDTH = 264;
 export const CREATION_SIDEBAR_MIN_WIDTH = 236;
 // Creation keeps the expanded rail at the narrow floor by default.
 export const CREATION_SIDEBAR_DEFAULT_WIDTH = CREATION_SIDEBAR_MIN_WIDTH;
-export const SIDEBAR_MAX_WIDTH = 300;
+// Fixed cap for the first-launch default width. The manual resize limit is
+// viewport-proportional (sidebarMaxWidth) and never drops below this floor,
+// so defaults stay unchanged while manual resizing may go wider.
+const SIDEBAR_DEFAULT_MAX_WIDTH = 300;
+// Manual resize may grow the sidebar with the window, up to this hard ceiling.
+const SIDEBAR_HARD_MAX_WIDTH = 420;
 const SIDEBAR_VIEWPORT_RATIO = 0.18;
 
 const RIGHT_DOCK_TREE_DEFAULT_WIDTH = 300;
@@ -33,48 +38,84 @@ export const RIGHT_DOCK_TREE_MIN_WIDTH = 300;
 // narrower Windows caption strip (~108px), 252 is enough for icon+label tabs.
 export const CREATION_RIGHT_DOCK_TREE_MIN_WIDTH = 252;
 export const CREATION_RIGHT_DOCK_TREE_DEFAULT_WIDTH = CREATION_RIGHT_DOCK_TREE_MIN_WIDTH;
-export const RIGHT_DOCK_TREE_MAX_WIDTH = 560;
+// The old fixed caps become the floor of the viewport-proportional resize
+// limits (rightDockTreeMaxWidth / rightDockMaxWidth), so existing behavior is
+// unchanged until the window is wide enough for the proportional max to win.
+const RIGHT_DOCK_TREE_LEGACY_MAX_WIDTH = 560;
 export const RIGHT_DOCK_PREVIEW_DEFAULT_WIDTH = 660;
 export const RIGHT_DOCK_PREVIEW_MIN_WIDTH = 420;
 export const RIGHT_DOCK_MIN_RENDER_WIDTH = 280;
 // Creation tree mode may render below the classic 280 floor when the viewport squeezes.
 export const CREATION_RIGHT_DOCK_MIN_RENDER_WIDTH = 236;
-export const RIGHT_DOCK_MAX_WIDTH = 860;
+const RIGHT_DOCK_LEGACY_MAX_WIDTH = 860;
+// Every dock mode — tree, context, remote, preview — shares the same
+// viewport ratio with no hard cap: the dock is bounded only by the chat
+// minimum at render time, so all modes can reach the same maximum width.
+const RIGHT_DOCK_MAX_RATIO = 0.5;
+
+// Viewport used by the width clamps when callers do not pass one explicitly.
+// Falls back to a laptop-ish width outside the browser (unit tests / SSR).
+function currentViewportWidth(): number {
+  return typeof window === "undefined" ? 1280 : window.innerWidth;
+}
+
+// Manual-resize limits scale with the window: never below the legacy fixed
+// cap (non-regressive). The sidebar is proportional to the viewport and
+// hard-capped so a project tree cannot swallow the screen; the right dock has
+// no hard cap — it is bounded only by the chat minimum at render time.
+export function sidebarMaxWidth(viewportWidth: number = currentViewportWidth()): number {
+  return Math.max(SIDEBAR_DEFAULT_MAX_WIDTH, Math.min(Math.round(viewportWidth * SIDEBAR_VIEWPORT_RATIO), SIDEBAR_HARD_MAX_WIDTH));
+}
+
+export function rightDockTreeMaxWidth(viewportWidth: number = currentViewportWidth()): number {
+  return Math.max(RIGHT_DOCK_TREE_LEGACY_MAX_WIDTH, Math.round(viewportWidth * RIGHT_DOCK_MAX_RATIO));
+}
+
+export function rightDockMaxWidth(viewportWidth: number = currentViewportWidth()): number {
+  return Math.max(RIGHT_DOCK_LEGACY_MAX_WIDTH, Math.round(viewportWidth * RIGHT_DOCK_MAX_RATIO));
+}
+
 const WORKSPACE_PANEL_OPEN_KEY = "reasonix.workspacePanel.open";
 // First-launch default when no preference is stored (matches post-#6371 UX).
 const WORKSPACE_PANEL_DEFAULT_OPEN = true;
 
-export function clampSidebarWidth(width: number): number {
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
+export function clampSidebarWidth(width: number, viewportWidth: number = currentViewportWidth()): number {
+  return Math.min(sidebarMaxWidth(viewportWidth), Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
-export function clampCreationSidebarWidth(width: number): number {
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(CREATION_SIDEBAR_MIN_WIDTH, Math.round(width)));
+export function clampCreationSidebarWidth(width: number, viewportWidth: number = currentViewportWidth()): number {
+  return Math.min(sidebarMaxWidth(viewportWidth), Math.max(CREATION_SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
 function clampStoredSidebarWidth(width: number): number {
-  return Math.min(SIDEBAR_MAX_WIDTH, Math.max(CREATION_SIDEBAR_MIN_WIDTH, Math.round(width)));
+  return clampCreationSidebarWidth(width);
 }
 
-export function clampRightDockPreviewWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_MAX_WIDTH, Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width)));
+export function clampRightDockPreviewWidth(width: number, viewportWidth: number = currentViewportWidth()): number {
+  return Math.min(rightDockMaxWidth(viewportWidth), Math.max(RIGHT_DOCK_PREVIEW_MIN_WIDTH, Math.round(width)));
 }
 
-export function clampRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+export function clampRightDockTreeWidth(width: number, viewportWidth: number = currentViewportWidth()): number {
+  return Math.min(rightDockTreeMaxWidth(viewportWidth), Math.max(RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
 }
 
-export function clampCreationRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+export function clampCreationRightDockTreeWidth(width: number, viewportWidth: number = currentViewportWidth()): number {
+  return Math.min(rightDockTreeMaxWidth(viewportWidth), Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
 }
 
 function clampStoredRightDockTreeWidth(width: number): number {
-  return Math.min(RIGHT_DOCK_TREE_MAX_WIDTH, Math.max(CREATION_RIGHT_DOCK_TREE_MIN_WIDTH, Math.round(width)));
+  return clampCreationRightDockTreeWidth(width);
+}
+
+// First-launch default stays under the legacy fixed cap: responsive up to
+// SIDEBAR_DEFAULT_MAX_WIDTH, then frozen — only manual resize may go wider.
+function clampDefaultSidebarWidth(width: number): number {
+  return Math.min(SIDEBAR_DEFAULT_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, Math.round(width)));
 }
 
 export function defaultSidebarWidth(): number {
   if (typeof window !== "undefined") {
-    return clampSidebarWidth(window.innerWidth * SIDEBAR_VIEWPORT_RATIO);
+    return clampDefaultSidebarWidth(window.innerWidth * SIDEBAR_VIEWPORT_RATIO);
   }
   return SIDEBAR_DEFAULT_WIDTH;
 }

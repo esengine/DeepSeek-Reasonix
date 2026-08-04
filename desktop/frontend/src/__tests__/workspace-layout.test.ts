@@ -10,7 +10,16 @@ import {
   workspacePanelAriaMinWidth,
 } from "../lib/workspaceLayout";
 import {
+  clampCreationRightDockTreeWidth,
+  clampCreationSidebarWidth,
+  clampRightDockPreviewWidth,
+  clampRightDockTreeWidth,
+  clampSidebarWidth,
   clampTerminalHeight,
+  defaultSidebarWidth,
+  rightDockMaxWidth,
+  rightDockTreeMaxWidth,
+  sidebarMaxWidth,
   terminalMaxHeight,
 } from "../store/layout";
 
@@ -157,6 +166,72 @@ eq(terminalMaxHeight(480), 240, "terminal maximum follows half of the current vi
 eq(terminalMaxHeight(180), 120, "terminal maximum never falls below the accessible minimum");
 eq(clampTerminalHeight(680, 480), 240, "restored terminal height clamps after the window shrinks");
 eq(clampTerminalHeight(80, 720), 120, "terminal height clamps to its minimum");
+
+console.log("\nviewport-proportional panel maxima");
+
+// Manual-resize limits scale with the window but never drop below the
+// legacy fixed caps (300 sidebar / 560 tree / 860 preview).
+eq(sidebarMaxWidth(1280), 300, "sidebar max keeps the legacy cap on small viewports");
+eq(sidebarMaxWidth(1600), 300, "sidebar max stays at the legacy cap until the viewport ratio exceeds it");
+eq(sidebarMaxWidth(1920), 346, "sidebar max grows with the window");
+eq(sidebarMaxWidth(3440), 420, "sidebar max hard-caps on ultrawide");
+eq(rightDockTreeMaxWidth(1000), 560, "dock tree max keeps the legacy cap on small viewports");
+eq(rightDockTreeMaxWidth(1920), 960, "dock tree max grows with the window");
+eq(rightDockTreeMaxWidth(3440), 1720, "dock tree max follows the viewport ratio on ultrawide");
+eq(rightDockTreeMaxWidth(5120), 2560, "dock tree max keeps scaling past the former hard cap");
+eq(rightDockMaxWidth(1700), 860, "dock preview max keeps the legacy cap until the ratio exceeds it");
+eq(rightDockMaxWidth(2560), 1280, "dock preview max grows with the window");
+eq(rightDockMaxWidth(3440), 1720, "dock preview max follows the viewport ratio on ultrawide");
+eq(rightDockMaxWidth(5120), 2560, "dock preview max keeps scaling past the former hard cap");
+
+// Resize clamps stay inside [min, viewport-relative max].
+eq(clampSidebarWidth(100, 1920), 264, "sidebar clamp keeps the minimum floor");
+eq(clampSidebarWidth(500, 1920), 346, "sidebar clamp follows the viewport-relative max");
+eq(clampSidebarWidth(500, 1024), 300, "sidebar clamp falls back to the legacy cap on narrow windows");
+eq(clampCreationSidebarWidth(500, 3440), 420, "creation sidebar clamp follows the viewport-relative max");
+eq(clampRightDockTreeWidth(2000, 1920), 960, "dock tree clamp follows the viewport-relative max");
+eq(clampCreationRightDockTreeWidth(2000, 2560), 1280, "creation dock tree clamp follows the viewport-relative max");
+eq(clampRightDockPreviewWidth(2000, 2560), 1280, "dock preview clamp follows the viewport-relative max");
+eq(clampRightDockPreviewWidth(400, 1280), 420, "dock preview clamp keeps the preview minimum floor");
+eq(defaultSidebarWidth(), 264, "first-launch sidebar default falls back without a window");
+
+// App wires the resizers and ARIA bounds to the viewport-relative maxima.
+eq(
+  /aria-valuemax=\{sidebarMaxWidth\(viewportWidth\)\}/.test(appSource)
+    && /setExpandedSidebarWidth\(sidebarMaxWidth\(viewportWidth\)\)/.test(appSource),
+  true,
+  "sidebar resizer ARIA max and End shortcut use the viewport-relative max",
+);
+eq(
+  /aria-valuemax=\{Math\.max\(workspacePanelMaxWidth, workspacePanelRenderWidth\)\}/.test(appSource)
+    && /const workspacePanelMaxWidth = rightDockDetailActive \? rightDockMaxWidth\(viewportWidth\) : rightDockTreeMaxWidth\(viewportWidth\)/.test(appSource),
+  true,
+  "dock resizer ARIA max follows the viewport-relative dock maximum",
+);
+eq(
+  /setSavedWorkspacePanelWidth\(rightDockDetailActive \? rightDockMaxWidth\(viewportWidth\) : rightDockTreeMaxWidth\(viewportWidth\)\)/.test(appSource),
+  true,
+  "dock End shortcut uses the viewport-relative maximum",
+);
+eq(
+  /clampRightDockPreviewWidth\(width, viewportWidth\)/.test(appSource)
+    && /clampRightDockPreviewWidth\(nextDockWidth, viewportWidth\)/.test(appSource),
+  true,
+  "dock preview resize paths pass the current viewport width",
+);
+eq(
+  !/RIGHT_DOCK_MAX_WIDTH|RIGHT_DOCK_TREE_MAX_WIDTH|SIDEBAR_MAX_WIDTH/.test(appSource),
+  true,
+  "fixed panel max constants are gone from the app shell",
+);
+eq(
+  /const CHAT_MIN_WIDTH = 400/.test(appSource)
+    && !/CHAT_COMFORT_MIN_WIDTH/.test(appSource)
+    && /chatMinWidth: CHAT_MIN_WIDTH/.test(appSource)
+    && !/chatReservedWidth/.test(appSource),
+  true,
+  "chat floor is the shared 400px minimum whether the dock is open or closed",
+);
 eq(
   /const closeWorkspacePanel = useCallback\(\(\) => \{[\s\S]*?setLiveWorkspacePanelRenderWidth\(null\);[\s\S]*?setWorkspacePanelOpen\(false\);[\s\S]*?saveWorkspacePanelOpen\(false\);/.test(appSource),
   true,
