@@ -16,7 +16,7 @@ function splitPackageSpec(spec) {
   return [spec.slice(0, separator), spec.slice(separator + 1)];
 }
 
-function fixture(t, version = "1.5.0-canary.42") {
+function fixture(t, version = "1.5.0-canary.42", { forbidCleanup = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), "reasonix-npm-publish-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
 
@@ -76,6 +76,9 @@ function fixture(t, version = "1.5.0-canary.42") {
       return "";
     }
     if (args[0] === "dist-tag" && args[1] === "rm") {
+      if (forbidCleanup) {
+        throw new Error("npm dist-tag failed with exit code 1: npm error code E403");
+      }
       packageState(args[2]).tags.delete(args[3]);
       return "";
     }
@@ -190,6 +193,19 @@ test("accepts legacy packages whose gitHead proves the candidate", (t) => {
   }
 
   assert.doesNotThrow(() => fx.publish());
+});
+
+test("does not fail a completed publish when npm forbids staging cleanup", (t) => {
+  const fx = fixture(t, "1.5.0-canary.42", { forbidCleanup: true });
+
+  assert.doesNotThrow(() => fx.publish());
+  for (const { name } of fx.packages) {
+    assert.equal(fx.registry.get(name).tags.get("canary"), "1.5.0-canary.42");
+    assert.equal(
+      fx.registry.get(name).tags.get("canary-staging"),
+      "1.5.0-canary.42",
+    );
+  }
 });
 
 test("compares channel versions without integer truncation", () => {
