@@ -3993,7 +3993,7 @@ a[href] {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 450;
   line-height: 1.65;
   white-space: pre-wrap;
@@ -4015,7 +4015,7 @@ a[href] {
   background: var(--button-bg);
   color: var(--button-fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 650;
   line-height: 1;
   transition: color 0.12s, background 0.12s, border-color 0.12s, opacity 0.12s;
@@ -4262,7 +4262,7 @@ a[href] {
 }
 .msg__send-failed {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--danger);
 }
 .msg-attachments {
@@ -4344,13 +4344,13 @@ a[href] {
 }
 .msg-attachment__name {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   line-height: 1.25;
 }
 .msg-attachment__meta {
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.25;
 }
 
@@ -4374,7 +4374,7 @@ a[href] {
   min-height: 32px;
   padding: 5px 6px 5px 9px;
   color: var(--fg-dim);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .msg-pasted-head > svg {
   flex-shrink: 0;
@@ -4405,7 +4405,7 @@ a[href] {
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .msg-pasted-head button:hover {
@@ -4418,7 +4418,7 @@ a[href] {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.5;
 }
 .msg-pasted-expanded .md {
@@ -4493,7 +4493,7 @@ a[href] {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   color: var(--fg-faint);
   border-radius: 6px;
@@ -4536,7 +4536,7 @@ a[href] {
   background: transparent;
   color: var(--fg-faint);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   line-height: 1.4;
   text-align: left;
@@ -4561,7 +4561,7 @@ a[href] {
   gap: 6px;
   margin-top: 2px;
   color: var(--fg-faint);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .msg-memory-citations__toggle {
   display: inline-flex;
@@ -4606,7 +4606,7 @@ a[href] {
   flex-wrap: wrap;
   gap: 8px;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   line-height: 1.35;
 }
@@ -4616,7 +4616,7 @@ a[href] {
 }
 .msg-memory-citations__note {
   color: var(--fg-dim);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.45;
 }
 
@@ -4694,7 +4694,7 @@ a[href] {
   border: none;
   color: var(--fg-faint);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
   border-radius: 4px;
@@ -19934,7 +19934,7 @@ body > .mermaid-diagram--fullscreen {
 /* ── tool card extras: nested sub-agent, multi-edit labels ───── */
 .tool__difflabel {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--fg-faint);
   margin: 6px 0 2px;
 }
@@ -27307,7 +27307,7 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .process-card__kind {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
@@ -27321,7 +27321,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .msg--assistant > .process-card[data-tone="violet"] .process-card__name {
   color: var(--fg);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 700;
 }
 
@@ -27329,7 +27329,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .process-card__meta {
   color: var(--fg-faint);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 
