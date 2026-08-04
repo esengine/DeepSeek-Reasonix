@@ -5849,13 +5849,24 @@ func loadTopicCreatedAtsForUpdate(workspaceRoot string) (map[string]int64, error
 	return loadInt64MapForUpdate(topicCreatedAtsPath(workspaceRoot))
 }
 
+// ensureTopicStateDir prepares the directory holding a topic-state file. A
+// project file lives under the workspace root, so the directory is only created
+// while that root still exists — otherwise deleting the folder outside Reasonix
+// resurrects it on the next launch (#4566).
+func ensureTopicStateDir(workspaceRoot, path string) error {
+	if root := strings.TrimSpace(workspaceRoot); root != "" && !existingDirectory(root) {
+		return fmt.Errorf("workspace root %q no longer exists", root)
+	}
+	return os.MkdirAll(filepath.Dir(path), 0o755)
+}
+
 func saveTopicTitles(workspaceRoot string, m map[string]string) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
 	path := topicTitlesPath(workspaceRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
@@ -5871,7 +5882,7 @@ func saveTopicTitleSources(workspaceRoot string, m map[string]string) error {
 		return err
 	}
 	path := topicTitleSourcesPath(workspaceRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
@@ -5887,7 +5898,7 @@ func saveTopicCreatedAts(workspaceRoot string, m map[string]int64) error {
 		return err
 	}
 	path := topicCreatedAtsPath(workspaceRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
@@ -5903,7 +5914,7 @@ func saveTopicAutoTitleMeta(workspaceRoot string, m map[string]topicAutoTitleMet
 		return err
 	}
 	path := topicAutoTitleMetaPath(workspaceRoot)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensureTopicStateDir(workspaceRoot, path); err != nil {
 		return err
 	}
 	tmp := path + ".tmp"
