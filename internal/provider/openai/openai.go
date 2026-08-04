@@ -972,7 +972,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 		var sr streamResponse
 		if err := json.Unmarshal([]byte(data), &sr); err != nil {
-			return emitted, fmt.Errorf("%s: decode stream: %w", c.name, err)
+			return emitted, provider.StreamDecodeError(c.name, data, err)
 		}
 		if sr.Error != nil {
 			return emitted, fmt.Errorf("%s: %s", c.name, sr.Error.Message)

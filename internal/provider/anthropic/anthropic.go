@@ -555,7 +555,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 
 		var ev streamEvent
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
-			send(provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: decode stream: %w", c.name, err)})
+			send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamDecodeError(c.name, data, err)})
 			return
 		}
 
