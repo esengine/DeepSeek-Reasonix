@@ -154,22 +154,23 @@ not depend on homepage badge semantics. Self-update behavior by platform:
   in-place swap would be blocked by Gatekeeper; the banner links to the download
   page for a manual update instead.
 
-### Unsigned builds — first launch
+### Code signing — first launch
 
-There are no Apple/Windows code-signing certificates yet, so a downloaded build
-trips the OS gatekeepers on first run:
-
-- **macOS** — open `Reasonix-darwin-universal.dmg` and drag Reasonix into
-  Applications. Gatekeeper may then report the app "is damaged" or is from an
-  unidentified developer; clear the quarantine attribute and open it:
+- **Windows** — stable builds carry an Authenticode signature (SignPath, approved
+  per release; `release-desktop.yml` verifies every payload binary through
+  `scripts/verify-windows-authenticode.ps1` and fails the release otherwise). A
+  brand-new version can still show SmartScreen until the signature accumulates
+  reputation: *More info → Run anyway*.
+- **macOS** — still unsigned and un-notarized. Open
+  `Reasonix-darwin-universal.dmg`, drag Reasonix into Applications, then clear the
+  quarantine attribute when Gatekeeper reports the app "is damaged" or is from an
+  unidentified developer:
   ```sh
   xattr -dr com.apple.quarantine /Applications/Reasonix.app
   ```
-- **Windows** — SmartScreen shows "Windows protected your PC". Click *More info →
-  Run anyway*.
-
-When Developer ID / Authenticode certificates are added, the release workflow's
-`HAS_APPLE_CERT` gate flips to the signed path and these steps go away.
+  This is also why macOS has no in-place self-update: the swap would be blocked.
+  Adding a Developer ID certificate flips the release workflow's `HAS_APPLE_CERT`
+  gate to the signed path and removes both.
 
 ### Verifying a download
 
