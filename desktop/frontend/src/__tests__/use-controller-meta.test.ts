@@ -261,6 +261,21 @@ console.log("\nuse controller meta");
     "unapplied steer keeps the user's guidance while localizing the warning",
   );
   eq(
+    localizedNoticeText("reworded recovery copy", "session_recovery_forked"),
+    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "session recovery fork localization uses its stable notice code",
+  );
+  eq(
+    localizedNoticeText("reworded covered adoption", "session_recovery_adopted_covered"),
+    "The session changed on disk, so Reasonix adopted the newer transcript; the local changes were already covered.",
+    "covered session adoption localization uses its stable notice code",
+  );
+  eq(
+    localizedNoticeText("reworded depth cap", "session_recovery_depth_cap"),
+    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "session recovery depth-cap localization uses its stable notice code",
+  );
+  eq(
     localizedNoticeText("Tool round limit reached; asking the assistant to summarize progress.", "unknown_future_code"),
     "Tool round limit reached; asking the assistant to summarize progress.",
     "an unknown notice code falls back to exact-text matching",
@@ -275,7 +290,7 @@ console.log("\nuse controller meta");
 {
   let s = reducer(initialState, {
     type: "event",
-    e: { kind: "notice", level: "warn", text: "session conflicts kept recurring; kept the transcript on the current recovery branch" },
+    e: { kind: "notice", level: "warn", code: "session_recovery_depth_cap", text: "reworded recovery maintenance" },
   });
   s = reducer(s, {
     type: "event",

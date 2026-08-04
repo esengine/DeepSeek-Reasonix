@@ -19,6 +19,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
+	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -3259,6 +3260,53 @@ func TestUnknownSlashCommandDoesNotStartTurn(t *testing.T) {
 	}
 	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, "unknown command") {
 		t.Fatalf("unknown slash command should be reported in transcript, got:\n%s", got)
+	}
+}
+
+func TestSlashDocsShowsLocalOverviewWithoutStartingTurn(t *testing.T) {
+	r := &recordingTurnRunner{}
+	ctrl := control.New(control.Options{
+		Runner: r,
+		Sink:   event.FuncSink(func(event.Event) {}),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+
+	if cmd := m.runSlashCommand("/docs"); cmd != nil {
+		t.Fatal("bare /docs should complete locally")
+	}
+	if len(r.inputs) != 0 {
+		t.Fatalf("bare /docs should not start a model turn, inputs=%q", r.inputs)
+	}
+	transcript := strings.Join(m.transcript, "\n")
+	if !strings.Contains(transcript, "digest=sha256:") || !strings.Contains(transcript, "/docs") {
+		t.Fatalf("bare /docs transcript missing corpus identity or usage:\n%s", transcript)
+	}
+}
+
+func TestQualifiedSlashDocsBypassesConflictingCustomCommand(t *testing.T) {
+	r := &recordingTurnRunner{}
+	commands := []command.Command{
+		{Name: "docs", Body: "legacy docs"},
+	}
+	ctrl := control.New(control.Options{
+		Runner:   r,
+		Commands: commands,
+		Sink:     event.FuncSink(func(event.Event) {}),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.commands = commands
+
+	if cmd := m.runSlashCommand("/reasonix:docs"); cmd != nil {
+		t.Fatal("bare /reasonix:docs should complete locally")
+	}
+	if len(r.inputs) != 0 {
+		t.Fatalf("bare /reasonix:docs should not start a model turn, inputs=%q", r.inputs)
+	}
+	transcript := strings.Join(m.transcript, "\n")
+	if !strings.Contains(transcript, "digest=sha256:") || !strings.Contains(transcript, "Usage: /reasonix:docs <question>") || strings.Contains(transcript, "legacy docs") {
+		t.Fatalf("qualified built-in docs was shadowed:\n%s", transcript)
 	}
 }
 

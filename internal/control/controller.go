@@ -1329,8 +1329,28 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 		if c.managementNotice(trimmed) {
 			return
 		}
+		if IsBuiltinDocsSlash(fields[0], c.Commands(), c.SlashSkills()) {
+			query := strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))
+			if query == "" {
+				text, err := DocsCommandOverviewFor(fields[0])
+				if err != nil {
+					c.notice("docs: " + err.Error())
+				} else {
+					c.notice(text)
+				}
+				return
+			}
+			c.runGuarded(func(ctx context.Context) error {
+				sent, err := docsCommandPrompt(ctx, query)
+				if err != nil {
+					return fmt.Errorf("docs: %w", err)
+				}
+				return runGoalLoop(ctx, sent, sent, display)
+			})
+			return
+		}
 		// A custom command wins over a skill of the same name; both resolve to a
-		// turn. (Built-in slash verbs like /compact are handled above.)
+		// turn. Built-ins and their explicit Reasonix namespace are handled above.
 		if sent, ok := c.CustomCommand(trimmed); ok {
 			c.runGuarded(func(ctx context.Context) error {
 				return runGoalLoop(ctx, sent, sent, display)
@@ -3696,6 +3716,16 @@ const (
 
 const recoveryDepthCapNoticeText = "repeated save conflicts were detected; saved the current conflict copy in place"
 
+func sessionRecoveryNotice(code, text string) event.Event {
+	return event.Event{
+		Kind:     event.Notice,
+		Level:    event.LevelWarn,
+		Audience: event.NoticeAudienceOperator,
+		Code:     code,
+		Text:     text,
+	}
+}
+
 func (c *Controller) emitRecoveryDepthCapNotice(path string) {
 	key := filepath.Clean(strings.TrimSpace(path))
 	c.mu.Lock()
@@ -3708,7 +3738,7 @@ func (c *Controller) emitRecoveryDepthCapNotice(path string) {
 	}
 	c.recoveryDepthCapNotices[key] = true
 	c.mu.Unlock()
-	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: recoveryDepthCapNoticeText})
+	c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionRecoveryDepthCap, recoveryDepthCapNoticeText))
 }
 
 func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRewrite bool) (string, conflictOutcome, error) {
@@ -3724,8 +3754,8 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 		if c.adoptDiskSession(path) {
 			appendSnapshotConflictDiagnostic(path, mode, "adopted_newer_disk_transcript", saveErr, "", false)
 			slog.Warn("controller: snapshot conflict; adopted newer disk transcript", logAttrs...)
-			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
-				Text: "session changed on disk; adopted the newer transcript"})
+			c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionRecoveryAdopted,
+				"session changed on disk; adopted the newer transcript"))
 			return path, conflictAdoptedDisk, nil
 		}
 	}
@@ -3763,8 +3793,8 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 			if c.adoptDiskSession(path) {
 				appendSnapshotConflictDiagnostic(path, mode, "recovery_not_needed_adopted_disk_transcript", saveErr, "", false)
 				slog.Warn("controller: snapshot conflict; recovery not needed, adopted disk transcript", logAttrs...)
-				c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
-					Text: "session changed on disk; adopted the newer transcript (local changes already covered)"})
+				c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionRecoveryAdoptedCovered,
+					"session changed on disk; adopted the newer transcript (local changes already covered)"))
 				return path, conflictAdoptedDisk, nil
 			}
 			// Nothing was recovered AND the disk transcript could not be
@@ -3782,8 +3812,8 @@ func (c *Controller) recoverSnapshotConflict(path string, saveErr error, forceRe
 	appendSnapshotConflictDiagnostic(path, mode, "forked_recovery_branch", saveErr, info.Path, info.Existing)
 	slog.Warn("controller: snapshot conflict; forked recovery branch",
 		append(logAttrs, "recovery", info.Path, "existing", info.Existing)...)
-	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
-		Text: "session changed on disk; unsaved local transcript was saved as a conflict copy"})
+	c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionRecoveryForked,
+		"session changed on disk; unsaved local transcript was saved as a conflict copy"))
 	return info.Path, conflictForkedBranch, nil
 }
 
@@ -3811,8 +3841,8 @@ func (c *Controller) recoverShutdownSnapshot(path string, saveErr error) (string
 	appendSnapshotConflictDiagnostic(path, "shutdown", "forked_file_lock_recovery", saveErr, info.Path, info.Existing)
 	slog.Warn("controller: shutdown snapshot lock timed out; forked recovery branch",
 		"path", path, "recovery", info.Path, "existing", info.Existing)
-	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
-		Text: "session file stayed busy during shutdown; unsaved transcript was saved as a recovery copy"})
+	c.sink.Emit(sessionRecoveryNotice(event.NoticeCodeSessionShutdownRecoveryForked,
+		"session file stayed busy during shutdown; unsaved transcript was saved as a recovery copy"))
 	return info.Path, nil
 }
 

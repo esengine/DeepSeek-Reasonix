@@ -79,7 +79,7 @@ read/diff 证据。
 Executor 刻意保留直接 `mcp__*` 工具，因此安装、连接或刷新这些直接工具时，Executor 的整体 provider
 前缀仍可能变化。
 
-`ask`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
+`ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
@@ -98,7 +98,8 @@ token economy 模式只带 9 个初始工具：4 个直接编码工具、3 个�
 `ask`, `bash`, `bash_output`, `connect_tool_source`, `edit_file`, `kill_shell`,
 `read_file`, `wait`, `write_file`。
 
-其余能力都显式按需加载。`connect_tool_source` 支持 `search`（`code_index`、
+其余能力都显式按需加载。`connect_tool_source` 支持 `docs`（只读内置文档检索工具）、
+`search`（`code_index`、
 `glob`、`grep`、`ls`）、`files`（专用移动、多编辑、删除与 notebook 工具）、
 `workflow`（`todo_write`、`complete_step`）、`sessions`（`history`、
 `list_sessions`、`read_session`）、`memory`（`memory`、`remember`、`forget`）、

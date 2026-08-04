@@ -2474,6 +2474,7 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 		TokenMode:                snap.currentTokenMode(),
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})
@@ -4813,6 +4814,7 @@ func (a *App) buildSessionRebindCandidate(
 		TokenMode:                runtimeProfile.tokenMode,
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})
@@ -4848,18 +4850,24 @@ func (a *App) buildSessionRebindCandidate(
 }
 
 func (a *App) acquireCandidateSessionLease(tab *WorkspaceTab, path string) (*agent.SessionLease, error) {
-	lease, err := agent.TryAcquireSessionLease(path)
-	if err == nil {
-		return lease, nil
-	}
-	if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
-		if reclaimed, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
-			return reclaimed, nil
-		} else {
-			err = reclaimErr
+	lease, err := withSessionLeaseContentionRetry(func() (*agent.SessionLease, error) {
+		lease, err := agent.TryAcquireSessionLease(path)
+		if err == nil {
+			return lease, nil
 		}
+		if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
+			if reclaimed, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
+				return reclaimed, nil
+			} else {
+				err = reclaimErr
+			}
+		}
+		return nil, err
+	})
+	if err != nil {
+		return nil, userFacingSessionLeaseError("", err)
 	}
-	return nil, userFacingSessionLeaseError("", err)
+	return lease, nil
 }
 
 func loadResumableSession(sessionPath string) (*agent.Session, error) {
@@ -7596,29 +7604,22 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "reload-cmd", Description: i18n.M.CmdReloadCmd, Kind: "builtin", Group: "management"},
 	}
 	if catalog, ok := a.workbenchSessionCatalog(); ok {
-		for _, item := range catalog.Skills {
-			out = append(out, CommandInfo{Name: item.Name, Description: item.Description, Kind: "skill", Group: "skills"})
-		}
-		for _, item := range catalog.Commands {
-			kind, group := "custom", "skills"
-			if strings.HasPrefix(item.Name, "mcp__") {
-				kind, group = "mcp", "integrations"
-			}
-			out = append(out, CommandInfo{Name: item.Name, Description: item.Description, Kind: kind, Group: group})
-		}
-		return out
+		return appendRemoteSessionCommands(out, catalog)
 	}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
 	if ctrl == nil {
-		return out
+		return append(out, docsBuiltinCommand(control.DocsSlashName))
 	}
+	commands := ctrl.Commands()
+	slashSkills := ctrl.SlashSkills()
+	out = append(out, docsBuiltinCommand(control.ResolvedBuiltinSlashName(control.DocsSlashName, commands, slashSkills)))
 	// Skills are invocable as slash commands (the model runs inline ones; subagent ones
 	// run isolated). Listing them here is what surfaces /init, /explore, … in the
 	// composer's slash menu; selecting one submits its displayed slash name, which the controller
 	// resolves via RunSkill.
-	for _, s := range ctrl.SlashSkills() {
+	for _, s := range slashSkills {
 		kind := "skill"
 		if s.RunAs == skill.RunSubagent {
 			kind = "subagent"
@@ -7629,7 +7630,7 @@ func (a *App) Commands() []CommandInfo {
 		}
 		out = append(out, CommandInfo{Name: s.SlashName(), Description: s.Description, Kind: kind, Group: group, Plugin: s.Plugin, Color: s.Color})
 	}
-	for _, c := range ctrl.Commands() {
+	for _, c := range commands {
 		if c.Hidden {
 			continue
 		}
@@ -7638,6 +7639,61 @@ func (a *App) Commands() []CommandInfo {
 	if h := ctrl.Host(); h != nil {
 		for _, p := range h.Prompts() {
 			out = append(out, CommandInfo{Name: p.Name, Description: p.Description, Kind: "mcp", Group: "integrations"})
+		}
+	}
+	return resolveDocsCommand(out)
+}
+
+func docsBuiltinCommand(name string) CommandInfo {
+	return CommandInfo{Name: name, Description: i18n.M.CmdDocs, Hint: "<question>", Kind: "builtin", Group: "integrations"}
+}
+
+func appendRemoteSessionCommands(out []CommandInfo, catalog protocol.SessionCatalogResult) []CommandInfo {
+	for _, item := range catalog.BuiltinCommands {
+		out = append(out, CommandInfo{
+			Name: item.Name, Description: item.Description, Hint: item.Hint,
+			Kind: "builtin", Group: item.Group,
+		})
+	}
+	for _, item := range catalog.Skills {
+		out = append(out, CommandInfo{Name: item.Name, Description: item.Description, Kind: "skill", Group: "skills"})
+	}
+	for _, item := range catalog.Commands {
+		kind, group := "custom", "skills"
+		if strings.HasPrefix(item.Name, "mcp__") {
+			kind, group = "mcp", "integrations"
+		}
+		out = append(out, CommandInfo{Name: item.Name, Description: item.Description, Kind: kind, Group: group})
+	}
+	return resolveDocsCommand(out)
+}
+
+func resolveDocsCommand(commands []CommandInfo) []CommandInfo {
+	winner := -1
+	winnerRank := -1
+	for i, cmd := range commands {
+		if cmd.Name != "docs" {
+			continue
+		}
+		rank := 0
+		switch cmd.Kind {
+		case "custom":
+			rank = 2
+		case "skill", "subagent":
+			rank = 1
+		}
+		if rank > winnerRank {
+			winner = i
+			winnerRank = rank
+		}
+	}
+	if winner < 0 {
+		return commands
+	}
+	out := make([]CommandInfo, 0, len(commands))
+	for i, cmd := range commands {
+		if cmd.Name != "docs" || i == winner {
+			out = append(out, cmd)
 		}
 	}
 	return out
@@ -10009,21 +10065,59 @@ func sessionPathAfterSnapshot(ctrl control.SessionAPI, fallback string) string {
 	return fallback
 }
 
+var (
+	// sessionLeaseContentionRetryInterval and sessionLeaseContentionRetryAttempts
+	// bound the retry window for startup session-lease binds that hit a
+	// transient in-process holder. CleanupStaleRunning probes a running
+	// sub-agent's parent session lease inside every controller build, holding
+	// it only for the duration of a metadata rewrite (sub-millisecond); a
+	// concurrent tab build that races that probe must not surface a spurious
+	// "already open in another Reasonix window" error for a lease that is
+	// genuinely free once the probe releases it. A lease held by another
+	// window or process stays held for its whole lifetime, so the bounded
+	// retry still fails fast there.
+	sessionLeaseContentionRetryInterval = 50 * time.Millisecond
+	sessionLeaseContentionRetryAttempts = 2
+)
+
+// withSessionLeaseContentionRetry retries acquire while it fails with
+// agent.ErrSessionLeaseHeld, absorbing sub-second contention windows created
+// by transient in-process lease probes. Any other error is returned
+// immediately, and a lease that remains held after the bounded retries is
+// reported as-is.
+func withSessionLeaseContentionRetry[T any](acquire func() (T, error)) (T, error) {
+	var zero T
+	for attempt := 0; ; attempt++ {
+		got, err := acquire()
+		if err == nil {
+			return got, nil
+		}
+		if !errors.Is(err, agent.ErrSessionLeaseHeld) || attempt >= sessionLeaseContentionRetryAttempts {
+			return zero, err
+		}
+		time.Sleep(sessionLeaseContentionRetryInterval)
+	}
+}
+
 func (a *App) ensureTabSessionLeaseForRebuild(tab *WorkspaceTab, path, setting string) error {
 	transition, reserveErr := a.reserveSessionRuntimePath(tab, path)
 	if reserveErr != nil {
 		return userFacingSessionLeaseError(setting, reserveErr)
 	}
-	if err := tab.ensureSessionLease(path); err != nil {
-		if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
-			if lease, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
-				tab.adoptSessionLease(lease)
-				a.commitSessionRuntimePath(transition)
-				return nil
-			} else {
-				err = reclaimErr
+	if _, err := withSessionLeaseContentionRetry(func() (struct{}, error) {
+		if err := tab.ensureSessionLease(path); err != nil {
+			if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
+				if lease, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
+					tab.adoptSessionLease(lease)
+					return struct{}{}, nil
+				} else {
+					err = reclaimErr
+				}
 			}
+			return struct{}{}, err
 		}
+		return struct{}{}, nil
+	}); err != nil {
 		a.rollbackSessionRuntimePath(transition)
 		return userFacingSessionLeaseError(setting, err)
 	}
@@ -10235,6 +10329,7 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 		TokenMode:                runtime.tokenMode,
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})
@@ -10417,6 +10512,7 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		TokenMode:                runtime.tokenMode,
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})
@@ -10558,6 +10654,7 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		TokenMode:                mode,
 		SharedHost:               sharedHost,
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
+		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 	})

@@ -2189,6 +2189,7 @@ func defaultFullBootToolNames() []string {
 		"cron_list",
 		"delete_range",
 		"delete_symbol",
+		"docs",
 		"edit_file",
 		"explore",
 		"fleet",
@@ -2306,7 +2307,7 @@ command = "reasonix-missing-mockmcp"
 		"explore", "research", "review", "security_review",
 		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 		"code_index", "complete_step", "glob", "grep", "ls", "move_file", "multi_edit", "todo_write",
-		"history", "list_sessions", "read_session", "memory", "remember", "forget", "slash_command",
+		"docs", "history", "list_sessions", "read_session", "memory", "remember", "forget", "slash_command",
 	} {
 		if requestHasTool(req, forbidden) {
 			t.Fatalf("economy first request should hide %q; tools=%v", forbidden, toolSchemaNames(req.Tools))
@@ -2332,6 +2333,7 @@ func TestBuildTokenEconomyConnectsOptionalSourcesOnDemand(t *testing.T) {
 		{source: "search", tools: []string{"code_index", "glob", "grep", "ls"}},
 		{source: "files", tools: []string{"delete_range", "delete_symbol", "move_file", "multi_edit", "notebook_edit"}},
 		{source: "workflow", tools: []string{"complete_step", "todo_write"}},
+		{source: "docs", tools: []string{"docs"}},
 		{source: "sessions", tools: []string{"history", "list_sessions", "read_session"}},
 		{source: "memory", tools: []string{"forget", "memory", "remember"}},
 		{source: "commands", tools: []string{"slash_command"}},

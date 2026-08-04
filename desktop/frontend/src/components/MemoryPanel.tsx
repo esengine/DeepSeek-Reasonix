@@ -1238,18 +1238,20 @@ export function MemorySettingsPage() {
 					</button>
 				</div>
 				<div className="memory-tabs-row__spacer" />
-				{wsSelector}
-				<button
-					className={"memory-suggestion-tab" + (tab === "suggestions" ? " memory-suggestion-tab--active" : "")}
-					role="tab"
-					aria-selected={tab === "suggestions"}
-					type="button"
-					onClick={() => setTab("suggestions")}
-				>
-					<Sparkles size={14} aria-hidden="true" />
-					<span>{t("memory.suggestions")}</span>
-					{suggestionTotal(suggestions) > 0 && <span className="settings-subtab__count">{suggestionTotal(suggestions)}</span>}
-				</button>
+				<div className="memory-tabs-row__tail" role="presentation">
+					{wsSelector}
+					<button
+						className={"memory-suggestion-tab" + (tab === "suggestions" ? " memory-suggestion-tab--active" : "")}
+						role="tab"
+						aria-selected={tab === "suggestions"}
+						type="button"
+						onClick={() => setTab("suggestions")}
+					>
+						<Sparkles size={14} aria-hidden="true" />
+						<span>{t("memory.suggestions")}</span>
+						{suggestionTotal(suggestions) > 0 && <span className="settings-subtab__count">{suggestionTotal(suggestions)}</span>}
+					</button>
+				</div>
 			</div>
 
 			{tab === "saved" && <section className="mem-section">

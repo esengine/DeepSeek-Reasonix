@@ -169,6 +169,8 @@ func Run(args []string, version string) int {
 	case "version", "--version", "-v":
 		fmt.Println("reasonix", version)
 		return 0
+	case "docs-manifest":
+		return docsManifestCommand(rest, version)
 	case "help", "--help", "-h":
 		usage()
 		return 0
@@ -551,12 +553,14 @@ func runAgent(args []string, version string) int {
 	// --continue, matching the Resume call below.
 	resumePath := strings.TrimSpace(*resume)
 	if resumePath == "" && *cont {
-		sessions, err := agent.ListSessions(resolveCLISessionDir())
-		if err != nil || len(sessions) == 0 {
+		sessionDir := resolveCLISessionDir()
+		reclaimCLIRecoveryBranches(sessionDir)
+		session, ok := mostRecentSession(sessionDir)
+		if !ok {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
-		resumePath = sessions[0].Path
+		resumePath = session.Path
 	}
 	if *copySession && resumePath == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
@@ -694,6 +698,7 @@ func runAgent(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}
+	reclaimCLIRecoveryBranches(ctrl.SessionDir())
 
 	runErr := ctrl.Run(ctx, prompt)
 	reporter.RecordRecovery(ctrl.DrainRecoveryMetrics())
@@ -1047,12 +1052,14 @@ func chatREPL(args []string, version string) int {
 		}
 		resumePath = path
 	case *cont:
-		sessions, err := agent.ListSessions(resolveCLISessionDir())
-		if err != nil || len(sessions) == 0 {
+		sessionDir := resolveCLISessionDir()
+		reclaimCLIRecoveryBranches(sessionDir)
+		session, ok := mostRecentSession(sessionDir)
+		if !ok {
 			fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 			return 1
 		}
-		resumePath = sessions[0].Path
+		resumePath = session.Path
 	}
 	if *copySession && resumePath == "" {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--copy requires --resume or --continue")
@@ -1148,6 +1155,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
 		return 1
 	}
+	reclaimCLIRecoveryBranches(ctrl.SessionDir())
 
 	// Surface a missing-key warning inside the TUI banner so the first message
 	// failing is at least pre-announced; the user can still enter chat.
@@ -1489,8 +1497,10 @@ func interactiveSetup(configPath, envPath string) int {
 // message so the user can pick one. Returns the chosen path and a process
 // exit code (non-zero when there's nothing to pick or the user cancelled).
 func pickSessionToResume() (string, int) {
-	sessions, err := agent.ListSessions(resolveCLISessionDir())
-	if err != nil || len(sessions) == 0 {
+	sessionDir := resolveCLISessionDir()
+	reclaimCLIRecoveryBranches(sessionDir)
+	sessions := recentSessions(sessionDir)
+	if len(sessions) == 0 {
 		fmt.Fprintln(os.Stderr, i18n.M.NoSessionToResume)
 		return "", 1
 	}
@@ -1498,20 +1508,12 @@ func pickSessionToResume() (string, int) {
 		fmt.Fprintln(os.Stderr, i18n.M.ResumeRequiresTTY)
 		return "", 1
 	}
-	const cap = 10
-	if len(sessions) > cap {
-		sessions = sessions[:cap]
-	}
 	items := make([]menuItem, len(sessions))
 	for i, s := range sessions {
 		when := s.ModTime.Local().Format("01-02 15:04")
-		preview := s.Preview
-		if preview == "" {
-			preview = "(no user message yet)"
-		}
 		items[i] = menuItem{
 			name: when,
-			desc: fmt.Sprintf("%d turns · %s", s.Turns, preview),
+			desc: sessionSummary(s),
 		}
 	}
 	idx, err := selectOne(i18n.M.PickSessionLabel, items)

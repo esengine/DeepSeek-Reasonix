@@ -179,6 +179,16 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: ./scripts/cache-guard.sh
+      - name: Verify embedded documentation identity
+        env:
+          DOCS_BUILD_VERSION: ${{ needs.resolve.outputs.tag }}
+          DOCS_SOURCE_REVISION: ${{ needs.resolve.outputs.sha }}
+        run: |
+          if [ ! -f scripts/verify-embedded-docs.sh ]; then
+            echo "Legacy candidate predates the embedded docs contract; skipping."
+            exit 0
+          fi
+          bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION" "$DOCS_SOURCE_REVISION"
 
   goreleaser:
     name: archives + checksums + homebrew tap

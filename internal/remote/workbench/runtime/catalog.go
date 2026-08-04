@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/command"
 	"reasonix/internal/control"
+	"reasonix/internal/i18n"
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/remote/protocol"
@@ -39,8 +40,16 @@ func buildSessionCatalog(ctx context.Context, ctrl SessionController) protocol.S
 	if !ok {
 		return result
 	}
+	commands := capabilities.Commands()
+	slashSkills := capabilities.SlashSkills()
+	result.BuiltinCommands = []protocol.BuiltinCommandCatalogItem{{
+		Name:        control.ResolvedBuiltinSlashName(control.DocsSlashName, commands, slashSkills),
+		Description: i18n.M.CmdDocs,
+		Hint:        "<question>",
+		Group:       "integrations",
+	}}
 	plugins := map[string]struct{}{}
-	for _, command := range capabilities.Commands() {
+	for _, command := range commands {
 		if command.Hidden {
 			continue
 		}
@@ -49,7 +58,7 @@ func buildSessionCatalog(ctx context.Context, ctrl SessionController) protocol.S
 			plugins[name] = struct{}{}
 		}
 	}
-	for _, item := range capabilities.SlashSkills() {
+	for _, item := range slashSkills {
 		result.Skills = append(result.Skills, protocol.SkillCatalogItem{
 			ID:   protocol.SkillID("skill_" + stableCatalogID(item.SlashName())),
 			Name: item.SlashName(), Description: item.Description, Scope: string(item.Scope),
@@ -82,6 +91,7 @@ func buildSessionCatalog(ctx context.Context, ctrl SessionController) protocol.S
 	for name := range plugins {
 		result.Plugins = append(result.Plugins, protocol.PluginCatalogItem{ID: name, Name: name, Enabled: true})
 	}
+	sort.Slice(result.BuiltinCommands, func(i, j int) bool { return result.BuiltinCommands[i].Name < result.BuiltinCommands[j].Name })
 	sort.Slice(result.Commands, func(i, j int) bool { return result.Commands[i].Name < result.Commands[j].Name })
 	sort.Slice(result.Skills, func(i, j int) bool { return result.Skills[i].Name < result.Skills[j].Name })
 	sort.Slice(result.MCPServers, func(i, j int) bool { return result.MCPServers[i].Name < result.MCPServers[j].Name })

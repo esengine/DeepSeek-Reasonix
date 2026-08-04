@@ -414,7 +414,7 @@
       },
       "releaseId": "1.19.5",
       "baseVersion": "1.19.5",
-      "status": "reviewed",
+      "status": "published",
       "previousRelease": "1.19.4",
       "builds": {
         "cli": "v1.19.5",

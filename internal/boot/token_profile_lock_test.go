@@ -14,6 +14,7 @@ import (
 
 func TestConnectToolSourcePlanModeLoadsOptionalSources(t *testing.T) {
 	tsc := &toolSourceConnector{
+		docs:     func(context.Context) (string, error) { return "enabled docs.", nil },
 		sessions: func(context.Context) (string, error) { return "enabled sessions.", nil },
 		commands: func(context.Context) (string, error) { return "enabled commands.", nil },
 		search:   func(context.Context) (string, error) { return "enabled search.", nil },
@@ -21,7 +22,7 @@ func TestConnectToolSourcePlanModeLoadsOptionalSources(t *testing.T) {
 		memory:   func(context.Context) (string, error) { return "enabled memory.", nil },
 	}
 	ctx := agent.WithToolCallContext(context.Background(), "call", event.Discard, nil, true)
-	for _, source := range []string{"sessions", "commands", "search", "workflow", "memory"} {
+	for _, source := range []string{"docs", "sessions", "commands", "search", "workflow", "memory"} {
 		out, err := tsc.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"source":%q}`, source)))
 		if err != nil {
 			t.Fatalf("source %s: %v", source, err)

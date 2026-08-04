@@ -773,6 +773,7 @@ func pendingUpdateTargetPaths(tx *UpdateTransaction) []string {
 	add(tx.TargetPath)
 	if strings.EqualFold(strings.TrimSpace(tx.TargetKind), "app-bundle") {
 		add(tx.BackupPath)
+		add(tx.OrphanedBackupPath)
 	}
 	return paths
 }

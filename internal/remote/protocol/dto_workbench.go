@@ -7,6 +7,16 @@ type CommandCatalogItem struct {
 	Description string `json:"description,omitempty"`
 }
 
+// BuiltinCommandCatalogItem advertises host-owned slash commands whose
+// availability or effective name depends on the connected runtime. Older
+// clients safely ignore this additive capability list.
+type BuiltinCommandCatalogItem struct {
+	Name        string `json:"name" validate:"nonempty"`
+	Description string `json:"description,omitempty"`
+	Hint        string `json:"hint,omitempty"`
+	Group       string `json:"group,omitempty"`
+}
+
 type MCPServerCatalogItem struct {
 	Name      string `json:"name" validate:"nonempty"`
 	Available bool   `json:"available"`
@@ -27,11 +37,12 @@ type PluginCatalogItem struct {
 }
 
 type SessionCatalogResult struct {
-	Revision   CatalogRevision        `json:"revision"`
-	Commands   []CommandCatalogItem   `json:"commands"`
-	MCPServers []MCPServerCatalogItem `json:"mcpServers"`
-	Skills     []SkillCatalogItem     `json:"skills"`
-	Plugins    []PluginCatalogItem    `json:"plugins"`
+	Revision        CatalogRevision             `json:"revision"`
+	BuiltinCommands []BuiltinCommandCatalogItem `json:"builtinCommands,omitempty"`
+	Commands        []CommandCatalogItem        `json:"commands"`
+	MCPServers      []MCPServerCatalogItem      `json:"mcpServers"`
+	Skills          []SkillCatalogItem          `json:"skills"`
+	Plugins         []PluginCatalogItem         `json:"plugins"`
 }
 
 type ComposerSlashArgsParams struct {

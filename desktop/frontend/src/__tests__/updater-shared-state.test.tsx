@@ -69,6 +69,7 @@ await act(async () => {
 ok(document.getElementById("banner-status")?.textContent === "idle", "banner starts idle");
 ok(document.getElementById("settings-status")?.textContent === "idle", "settings starts idle");
 ok(classifyUpdateError("prepare update: a pending update already exists") === "recovery", "pending update errors require recovery fallback");
+ok(classifyUpdateError("prepare update: recover existing handoff backup: operation not permitted") === "recovery", "macOS backup permission errors require recovery fallback");
 ok(classifyUpdateError("update: manual update required") === "manual", "manual-only errors prefer the official download");
 ok(classifyUpdateError("connection reset by peer") === "retryable", "transient errors remain retryable");
 

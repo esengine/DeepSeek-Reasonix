@@ -349,6 +349,8 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/verbose` | 切换详细 reasoning 显示。 |
 | `/sandbox` | 查看沙盒状态。 |
 | `/goal` | 启动、查看或清除长周期 Goal。 |
+| `/docs [问题]` | 显示内置语料身份，或先本地检索，再让当前配置的 AI 根据版本匹配证据回答。 |
+| `/reasonix:docs [问题]` | 当已有自定义命令或兼容插件/Skill 别名占用 `/docs` 时优先使用的内置后备入口；若这个名称也已被占用，菜单会选择下一个空闲的 `reasonix:` 限定名，不覆盖原命令。 |
 | `/mcp`、`/skills`、`/hooks` | 查看和管理扩展。 |
 | `/remember <note>` | 把常驻 note 追加到项目指令文档；`# <note>` 是快捷方式。 |
 | `/memory [subcommand]` | 查看指令、记忆 provenance、召回、revision 与恢复。 |

@@ -113,6 +113,18 @@ const (
 	LevelWarn
 )
 
+// NoticeAudience separates a notice's recipient from its severity. The empty
+// default preserves the existing contract: ordinary notices are eligible for
+// every frontend. Operator notices describe local runtime maintenance and must
+// not be forwarded as end-user chat messages. Local frontends and diagnostics
+// remain free to surface or quietly record them under their own policy.
+type NoticeAudience string
+
+const (
+	NoticeAudienceDefault  NoticeAudience = ""
+	NoticeAudienceOperator NoticeAudience = "operator"
+)
+
 // Profile carries the subagent model/effort resolved for this call.
 type Profile struct {
 	Model  string
@@ -304,14 +316,19 @@ const (
 // wording edits in Go no longer silently break localization. Values are
 // wire-stable: never rename or reuse one once shipped.
 const (
-	NoticeCodeFinalReadiness  = "final_readiness"
-	NoticeCodeEmptyFinal      = "empty_final"
-	NoticeCodeExecutorHandoff = "executor_handoff"
-	NoticeCodeToolBudget      = "tool_budget"
-	NoticeCodeLoopGuard       = "loop_guard"
-	NoticeCodeWorkspaceLease  = "workspace_lease"
-	NoticeCodeCancelledTurn   = "cancelled_turn_display"
-	NoticeCodeUnappliedSteer  = "unapplied_steer"
+	NoticeCodeFinalReadiness                = "final_readiness"
+	NoticeCodeEmptyFinal                    = "empty_final"
+	NoticeCodeExecutorHandoff               = "executor_handoff"
+	NoticeCodeToolBudget                    = "tool_budget"
+	NoticeCodeLoopGuard                     = "loop_guard"
+	NoticeCodeWorkspaceLease                = "workspace_lease"
+	NoticeCodeCancelledTurn                 = "cancelled_turn_display"
+	NoticeCodeUnappliedSteer                = "unapplied_steer"
+	NoticeCodeSessionRecoveryForked         = "session_recovery_forked"
+	NoticeCodeSessionRecoveryAdopted        = "session_recovery_adopted"
+	NoticeCodeSessionRecoveryAdoptedCovered = "session_recovery_adopted_covered"
+	NoticeCodeSessionRecoveryDepthCap       = "session_recovery_depth_cap"
+	NoticeCodeSessionShutdownRecoveryForked = "session_shutdown_recovery_forked"
 )
 
 type Event struct {
@@ -335,6 +352,7 @@ type Event struct {
 	SessionHit   int             // Usage: cumulative cache-hit prompt tokens this session
 	SessionMiss  int             // Usage: cumulative cache-miss prompt tokens this session
 	Level        Level           // Notice
+	Audience     NoticeAudience  // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
 	Approval     Approval        // ApprovalRequest
 	Ask          Ask             // AskRequest
 	Err          error           // TurnDone: non-nil on failure

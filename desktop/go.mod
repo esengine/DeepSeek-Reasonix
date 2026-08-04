@@ -72,6 +72,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
+	github.com/yuin/goldmark v1.8.2 // indirect
 	github.com/zalando/go-keyring v0.2.8 // indirect
 	golang.org/x/net v0.56.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect

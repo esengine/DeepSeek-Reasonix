@@ -10,7 +10,7 @@
     "db:apply:remote": "wrangler d1 execute reasonix-forum --remote --file=schema.sql"
   },
   "dependencies": {
-    "hono": "^4.6.14",
+    "hono": "^4.12.34",
     "zod": "^3.25.0"
   },
   "devDependencies": {
@@ -20,5 +20,10 @@
   },
   "overrides": {
     "esbuild": "0.28.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "undici": "7.29.0"
+    }
   }
 }

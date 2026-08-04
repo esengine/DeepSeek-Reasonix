@@ -101,9 +101,28 @@ Reasonix 把互不相关的选择拆成独立控制轴，而不是混在一个 m
 | 工作模式 | `economy`、`balanced`、`delivery` | id 为 `work_mode` 的 `configOptions` |
 | 工具审批 | `ask`、`auto`、`yolo` | id 为 `tool_approval` 的 `configOptions` |
 
-模型、推理强度、工作模式和工具审批统一使用 `session/set_config_option`。切换模型、
-推理强度或工作模式时会重建会话 Controller，同时保留历史和其他控制轴；切换工具审批
-只更新 gate，不重建 Controller。
+模型、推理强度、工作模式和工具审批统一使用 `session/set_config_option`。它的参数是
+`sessionId`、`configId` 和 `value`，其中 `configId` 取 `configOptions` 中该选项的
+`id`：
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "session/set_config_option",
+  "params": {
+    "sessionId": "session-id",
+    "configId": "tool_approval",
+    "value": "yolo"
+  }
+}
+```
+
+注意字段名是 `configId`，不是 `optionId`。返回值是刷新后的完整 `configOptions`
+数组；id 未知时返回 `-32602 InvalidParams`。
+
+切换模型、推理强度或工作模式时会重建会话 Controller，同时保留历史和其他控制轴；
+切换工具审批只更新 gate，不重建 Controller。
 
 旧客户端仍可使用 `session/set_model`。`session/set_mode` 也继续接受 legacy 值
 `default` 和 `auto`，分别表示“常规 + 询问”和“常规 + Yolo”；新客户端应使用上面的

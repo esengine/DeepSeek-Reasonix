@@ -494,3 +494,32 @@ func TestRenderSinkSuppressesReasoning(t *testing.T) {
 		t.Fatalf("reasoning leaked into IM message: %q", sent[0].Text)
 	}
 }
+
+func TestRenderSinkSuppressesOperatorNoticesWithoutHidingUserWarnings(t *testing.T) {
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "please resend your message"})
+	for _, code := range []string{
+		event.NoticeCodeSessionRecoveryForked,
+		event.NoticeCodeSessionRecoveryAdopted,
+		event.NoticeCodeSessionRecoveryAdoptedCovered,
+		event.NoticeCodeSessionRecoveryDepthCap,
+		event.NoticeCodeSessionShutdownRecoveryForked,
+	} {
+		sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelWarn,
+			Audience: event.NoticeAudienceOperator,
+			Code:     code,
+			Text:     "local session maintenance",
+		})
+	}
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sent = %+v, want only the actionable user warning", sent)
+	}
+	if sent[0].Text != "⚠️ please resend your message" {
+		t.Fatalf("sent text = %q, want the ordinary user warning", sent[0].Text)
+	}
+}

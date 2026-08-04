@@ -14,7 +14,7 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{ .Tag }}
+      - -s -w -X main.version={{ .Tag }} -X reasonix/internal/productdocs.linkedVersion={{ .Tag }} -X reasonix/internal/productdocs.linkedRevision={{ .Commit }}
     goos: [darwin, linux, windows]
     goarch: [amd64, arm64]
 

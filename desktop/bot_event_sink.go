@@ -105,6 +105,10 @@ func (f *botEventForwarder) Emit(e event.Event) {
 		f.sendToAll(qb.String())
 
 	case event.Notice:
+		if e.Audience == event.NoticeAudienceOperator {
+			// Local runtime maintenance is not actionable in the remote IM chat.
+			break
+		}
 		if e.Level == event.LevelWarn {
 			f.sendToAll("⚠️ " + e.Text)
 		}

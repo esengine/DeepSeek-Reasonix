@@ -60,7 +60,9 @@ const (
 // slashItems is the full set of slash commands offered for completion: the
 // built-in verbs, custom commands, skills (each as "/<name>"), and MCP prompts.
 func (m *chatTUI) slashItems() []compItem {
-	items := builtinSlashItems()
+	docsOwner := control.ResolveSlashCommandOwner(control.DocsSlashName, m.commands, m.skills)
+	docsBuiltin := "/" + control.ResolvedBuiltinSlashName(control.DocsSlashName, m.commands, m.skills)
+	items := renameSlashItem(builtinSlashItems(), "/docs", docsBuiltin)
 	for _, c := range m.commands {
 		if c.Hidden {
 			continue
@@ -68,6 +70,9 @@ func (m *chatTUI) slashItems() []compItem {
 		items = append(items, compItem{label: "/" + c.Name, insert: "/" + c.Name + " ", hint: customCommandHint(c)})
 	}
 	for _, s := range m.skills {
+		if docsOwner == control.SlashOwnerCustom && s.SlashName() == control.DocsSlashName {
+			continue
+		}
 		hint := s.Description
 		if s.RunAs == skill.RunSubagent {
 			hint = "🧬 " + hint
@@ -78,6 +83,33 @@ func (m *chatTUI) slashItems() []compItem {
 		items = append(items, compItem{label: "/" + p.Name, insert: "/" + p.Name + " ", hint: p.Description})
 	}
 	return items
+}
+
+func renameSlashItem(items []compItem, oldLabel, newLabel string) []compItem {
+	if oldLabel == newLabel {
+		return items
+	}
+	for i := range items {
+		if items[i].label != oldLabel {
+			continue
+		}
+		items[i].label = newLabel
+		if strings.HasPrefix(items[i].insert, oldLabel) {
+			items[i].insert = newLabel + strings.TrimPrefix(items[i].insert, oldLabel)
+		}
+		break
+	}
+	return items
+}
+
+func removeSlashItems(items []compItem, label string) []compItem {
+	out := make([]compItem, 0, len(items))
+	for _, item := range items {
+		if item.label != label {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 // updateCompletion recomputes the menu from the current input: a slash menu

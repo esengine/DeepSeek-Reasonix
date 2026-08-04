@@ -37,7 +37,7 @@ function errMsg(e: unknown): string {
 
 export function classifyUpdateError(message: string): UpdateErrorDisposition {
   const low = message.toLowerCase();
-  if (/pending update already exists|could not safely finish the previous update/.test(low)) {
+  if (/pending update already exists|could not safely finish the previous update|handoff backup/.test(low)) {
     return "recovery";
   }
   if (/authorization failed|manual update required|pkexec|sudo apt install/.test(low)) {

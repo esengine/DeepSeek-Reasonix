@@ -476,8 +476,7 @@ export const zhTW: Record<DictKey, string> = {
   "welcome.ex1": "講講這個程式碼庫的架構",
   "welcome.ex2": "總結最近的 git 變更",
   "welcome.ex3": "智慧體的執行主循環在哪，它做了什麼？",
-  "welcome.creation.titlePrimary": "Hey，今天想創作什麼？",
-  "welcome.creation.titleSecondary": "從一個提問開始。",
+  "welcome.creation.title": "Hey，開始今天的創作吧！",
   "welcome.creation.explainTitle": "幫我構思策劃方案",
   "welcome.creation.explainBody": "梳理目標和路徑。",
   "welcome.creation.gitTitle": "修改HTML設計",
@@ -1802,6 +1801,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.currency": "計價幣別",
   "settings.currencyAuto": "自動（跟隨語言）",
   "settings.config": "設定檔：{path}",
+  "settings.configShadowed": "被工作區設定覆蓋：{path}（這裡的修改可能不會生效）",
 
   // 待辦欄
   "todo.title": "待辦",
@@ -1998,7 +1998,7 @@ export const zhTW: Record<DictKey, string> = {
   "updater.done": "更新完成，正在重新啟動…",
   "updater.failed": "更新失敗：{msg}",
   "updater.recoveryBlocked": "上次更新尚未完成。",
-  "updater.recoveryHint": "重新啟動 Reasonix 通常可以自動恢復；若仍然失敗，請從官網下載最新簽署安裝包，直接覆蓋安裝，無需先解除安裝。",
+  "updater.recoveryHint": "請重新啟動 Reasonix 後重試。macOS 使用者可在「系統設定 > 隱私權與安全性 > App 管理」中允許 Reasonix；若仍無法恢復，請從官網下載最新簽署安裝包直接覆蓋安裝，無需先解除安裝。",
   "updater.manualUpdateRequired": "目前環境無法自動安裝更新。",
   "updater.manualFallbackHint": "請從官網下載最新簽署安裝包，直接覆蓋安裝目前版本。",
   "updater.errorDetails": "詳細資訊：{msg}",

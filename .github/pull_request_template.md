@@ -15,6 +15,16 @@ release workflow then asks that reporter to verify once the fix ships.
 
 -
 
+## Documentation impact
+
+Documentation-impact: TODO
+
+For changes to user-visible CLI, Desktop, configuration, provider, permission,
+or tool behavior, use one of:
+
+- `Documentation-impact: updated - <what changed>` and update `docs/*.md`.
+- `Documentation-impact: none - <why the embedded documentation remains correct>`.
+
 ## Cache impact
 
 Cache-impact: TODO

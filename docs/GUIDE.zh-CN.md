@@ -25,6 +25,7 @@
 - [能力诊断](#能力诊断)
 - [插件（MCP）](#插件mcp)
 - [斜杠命令](#斜杠命令)
+- [内置文档检索](#内置文档检索)
 - [@ 引用](#-引用)
 - [双模型协同](#双模型协同)
 
@@ -776,6 +777,35 @@ Review the staged diff. Focus on $ARGUMENTS, list bugs with file:line.
 `$ARGUMENTS` 展开为全部空格分隔参数，`$1`…`$N` 为位置参数。MCP prompts 也以
 `/mcp__<server>__<prompt>` 形式出现在这里。
 
+## 内置文档检索
+
+Reasonix 会把 `docs/` 中的 Markdown 文档和已审查的 `release-notes/releases.json` 更新日志
+目录随 CLI 和桌面端一起编译发布。只读 `docs` 工具通过本地 BM25 检索这份与当前安装版本
+完全一致的离线语料，并可按命中的 `section_id` 读取完整章节及来源。每个版本都会生成
+`changelog/v1.19.5.md`、`changelog/v1.19.5.zh-CN.md` 这类中英文虚拟文档，因此可以离线
+查询指定版本的新增功能、升级说明、修复和已知风险。涉及 Reasonix 配置、CLI/桌面端行为、
+版本历史、权限、MCP、记忆、恢复、Provider 或维护流程的问题，Agent 应先查询这里，再考虑
+联网搜索或凭经验回答。
+
+普通路径不需要设置、联网、向量数据库或 embedding 服务。搜索会优先匹配提问语言，同时支持
+显式 `en`、`zh-CN`、受众和目录筛选。Balanced 与 Delivery 默认暴露该工具；Economy 会在需要时
+按需连接 `docs` 来源。每次返回都会给出产品版本、不可变源码 revision 与语料 SHA-256 digest。
+发布 CI 会实际编译 CLI；只有编译后的清单与候选提交的 `docs/*.md`、
+`release-notes/releases.json` 和构建身份完全一致时才允许发布。因此，更新较快的在线
+`main-v2` 页面不会静默覆盖与本地版本匹配的说明或更新历史。
+
+直接输入 `/docs` 会在本地显示内置语料的版本、revision、digest 和使用示例，不调用模型。
+输入 `/docs <问题>`（例如 `/docs 1.19.5 更新日志`）时，Reasonix 会先在本地完成检索，再把
+与当前版本匹配的证据交给当前配置的 AI 生成带来源的回答。这个命令路径不依赖模型是否主动
+选择 `docs` 工具；普通自然语言问题仍可由模型自动调用该工具。已有自定义命令以及兼容插件或
+Skill 别名会继续拥有 `/docs`；发生冲突时，CLI 与桌面端通常会改为通过 `/reasonix:docs` 暴露
+内置语料。如果这个限定名也已被占用，Reasonix 会选择下一个空闲的 `reasonix:` 限定后备名，
+不会覆盖原命令。远程桌面端使用主机解析后的命令目录，因此菜单显示的入口与主机实际执行目标
+保持一致。
+
+如果 Pull Request 修改了用户可见的 CLI、桌面端、配置、Provider、权限或工具行为，必须声明
+是否已同步更新内置文档；如果无需更新，则必须说明现有的版本匹配说明为何仍然正确。
+
 ## Goal 与 AutoResearch
 
 Goal 是长期目标的统一运行机制。普通 `/goal` 继续走轻量 Goal：Reasonix 会持续推进，直到
@@ -919,7 +949,8 @@ server 无法在这里提升权限。严格只读边界比独立 Planner 更窄�
 
 启动会话时可以用 `--profile economy|balanced|delivery` 选择运行模式，例如
 `reasonix run --profile delivery "修复并验证这个 bug"`。Economy（轻量）初始只带 9 个工具：
-直接读/bash/编辑/写入、后台 shell 生命周期控制、`ask` 和 `connect_tool_source`；专用搜索/文件/
+直接读/bash/编辑/写入、后台 shell 生命周期控制、`ask` 和 `connect_tool_source`；内置文档、
+专用搜索/文件/
 workflow 工具、session history、memory 写入、slash command、Skills、MCP、LSP、网络、安装与
 subagent 都在任务需要时才连接。
 Balanced（均衡）是提供完整工具面的默认档；配置独立 Planner 时，Planner 与 Executor 都会获得各自的

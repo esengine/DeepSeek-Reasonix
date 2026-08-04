@@ -412,7 +412,8 @@ jobs:
             .github/workflows/release.yml \
             .github/workflows/release-npm.yml \
             .github/workflows/release-desktop.yml \
-            .github/workflows/release-verify-issues.yml
+            .github/workflows/release-verify-issues.yml \
+            .github/workflows/docs-impact.yml
           bash scripts/release-workflows.test.sh
           node scripts/check-single-release-public-contract.mjs
 

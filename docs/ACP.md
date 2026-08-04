@@ -110,6 +110,25 @@ one mode selector:
 | Tool approval | `ask`, `auto`, `yolo` | `configOptions` with id `tool_approval` |
 
 Use `session/set_config_option` for model, effort, work mode, and tool approval.
+Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
+`id` of the option as advertised in `configOptions`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "session/set_config_option",
+  "params": {
+    "sessionId": "session-id",
+    "configId": "tool_approval",
+    "value": "yolo"
+  }
+}
+```
+
+Note that the field is `configId`, not `optionId`. The result is the full
+refreshed `configOptions` array. An unknown id returns `-32602 InvalidParams`.
+
 Model, effort, and work-mode changes rebuild the session controller while
 preserving its history and the other axes. Tool-approval changes update the
 gate without rebuilding the controller.

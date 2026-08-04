@@ -48,7 +48,7 @@ for (const t of TARGETS) {
       "build",
       "-trimpath",
       "-ldflags",
-      `-s -w -X main.version=${binaryVersion}`,
+      `-s -w -X main.version=${binaryVersion} -X reasonix/internal/productdocs.linkedVersion=${binaryVersion} -X reasonix/internal/productdocs.linkedRevision=${candidateSha}`,
       "-o",
       join(dir, "bin", exe),
       "./cmd/reasonix",

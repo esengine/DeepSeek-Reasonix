@@ -1559,5 +1559,18 @@ fi
 node --test "$repo_root/npm/publish.test.mjs"
 node --test "$repo_root/scripts/finalize-npm-official-release.test.mjs"
 bash "$repo_root/scripts/release-stable.test.sh"
+bash "$repo_root/scripts/check-docs-impact.test.sh"
+
+# Every current publisher must gate on the same compiled docs identity, and
+# each build path must stamp that identity into its shipped binary.
+for workflow in release.yml release-npm.yml release-desktop.yml; do
+	grep -Fq 'bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION"' \
+		"$repo_root/.github/workflows/$workflow"
+done
+grep -Fq 'reasonix/internal/productdocs.linkedVersion={{ .Tag }}' "$repo_root/.goreleaser.yaml"
+grep -Fq 'reasonix/internal/productdocs.linkedRevision={{ .Commit }}' "$repo_root/.goreleaser.yaml"
+grep -Fq 'reasonix/internal/productdocs.linkedVersion=${binaryVersion}' "$repo_root/npm/build.mjs"
+grep -Fq 'product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION' \
+	"$repo_root/scripts/desktop-build.sh"
 
 echo "release workflow contract tests: PASS"

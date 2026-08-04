@@ -24,6 +24,7 @@ import (
 	"reasonix/internal/billing"
 	"reasonix/internal/boot"
 	"reasonix/internal/bot"
+	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -35,6 +36,7 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
+	"reasonix/internal/remote/protocol"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
@@ -372,15 +374,165 @@ func (r *desktopAskRuntimeRunner) Run(ctx context.Context, _ string) error {
 	return r.ask(ctx)
 }
 
-func TestCommandsIncludesEffortNotThinking(t *testing.T) {
+func TestCommandsIncludesDocsAndEffortNotThinking(t *testing.T) {
 	app := NewApp()
 	cmds := app.Commands()
+	if !hasCommand(cmds, "docs") {
+		t.Fatalf("Commands() should include docs: %+v", cmds)
+	}
 	if !hasCommand(cmds, "effort") {
 		t.Fatalf("Commands() should include effort: %+v", cmds)
 	}
 	if hasCommand(cmds, "thinking") {
 		t.Fatalf("Commands() should not include thinking: %+v", cmds)
 	}
+}
+
+func TestCommandsDocsShowsOnlyRuntimeWinner(t *testing.T) {
+	tests := []struct {
+		name     string
+		commands []command.Command
+		skills   []skill.Skill
+		wantKind string
+	}{
+		{
+			name:     "custom command shadows builtin",
+			commands: []command.Command{{Name: "docs", Description: "custom docs"}},
+			wantKind: "custom",
+		},
+		{
+			name:     "skill shadows builtin",
+			skills:   []skill.Skill{{Name: "docs", Description: "docs skill"}},
+			wantKind: "skill",
+		},
+		{
+			name:     "custom command shadows skill and builtin",
+			commands: []command.Command{{Name: "docs", Description: "custom docs"}},
+			skills:   []skill.Skill{{Name: "docs", Description: "docs skill"}},
+			wantKind: "custom",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := control.New(control.Options{Commands: tt.commands, Skills: tt.skills})
+			defer ctrl.Close()
+			app := NewApp()
+			app.setTestCtrl(ctrl, "")
+
+			var docs []CommandInfo
+			for _, cmd := range app.Commands() {
+				if cmd.Name == "docs" {
+					docs = append(docs, cmd)
+				}
+			}
+			if len(docs) != 1 || docs[0].Kind != tt.wantKind {
+				t.Fatalf("docs commands = %+v, want one %s entry", docs, tt.wantKind)
+			}
+			if fallback, ok := commandInfoByName(app.Commands(), control.ReasonixDocsSlashName); !ok || fallback.Kind != "builtin" {
+				t.Fatalf("qualified docs fallback = %+v, %v; want built-in", fallback, ok)
+			}
+		})
+	}
+}
+
+func TestCommandsDocsAccountsForHiddenCompatibilityAliases(t *testing.T) {
+	tests := []struct {
+		name          string
+		commands      []command.Command
+		skills        []skill.Skill
+		wantCanonical string
+	}{
+		{
+			name: "hidden plugin command alias",
+			commands: []command.Command{
+				{Name: "docs", Plugin: "manuals", Hidden: true},
+				{Name: "manuals:docs", Plugin: "manuals"},
+			},
+			wantCanonical: "manuals:docs",
+		},
+		{
+			name:          "compatible plugin skill alias",
+			skills:        []skill.Skill{{Name: "docs", Plugin: "manuals"}},
+			wantCanonical: "manuals:docs",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := control.New(control.Options{Commands: tt.commands, Skills: tt.skills})
+			defer ctrl.Close()
+			app := NewApp()
+			app.setTestCtrl(ctrl, "")
+			commands := app.Commands()
+			if _, ok := commandInfoByName(commands, "docs"); ok {
+				t.Fatalf("hidden runtime owner left a misleading docs entry: %+v", commands)
+			}
+			for _, want := range []string{control.ReasonixDocsSlashName, tt.wantCanonical} {
+				if _, ok := commandInfoByName(commands, want); !ok {
+					t.Fatalf("commands missing %q: %+v", want, commands)
+				}
+			}
+		})
+	}
+}
+
+func TestCommandsDocsDoesNotDisplaceQualifiedCustomCommands(t *testing.T) {
+	ctrl := control.New(control.Options{Commands: []command.Command{
+		{Name: "docs", Description: "custom docs"},
+		{Name: "reasonix:docs", Description: "qualified custom docs"},
+		{Name: "reasonix:builtin:docs", Description: "second qualified custom docs"},
+	}})
+	defer ctrl.Close()
+	app := NewApp()
+	app.setTestCtrl(ctrl, "")
+	commands := app.Commands()
+	for _, want := range []struct {
+		name string
+		kind string
+	}{
+		{name: "docs", kind: "custom"},
+		{name: "reasonix:docs", kind: "custom"},
+		{name: "reasonix:builtin:docs", kind: "custom"},
+		{name: "reasonix:builtin:docs:2", kind: "builtin"},
+	} {
+		if command, ok := commandInfoByName(commands, want.name); !ok || command.Kind != want.kind {
+			t.Fatalf("command %q = %+v, %v; want kind %q", want.name, command, ok, want.kind)
+		}
+	}
+}
+
+func TestAppendRemoteSessionCommandsUsesHostResolvedDocsName(t *testing.T) {
+	base := []CommandInfo{{Name: "new", Kind: "builtin", Group: "actions"}}
+	legacy := appendRemoteSessionCommands(base, protocol.SessionCatalogResult{})
+	if _, ok := commandInfoByName(legacy, "docs"); ok {
+		t.Fatalf("new desktop invented /docs for an older host: %+v", legacy)
+	}
+	catalog := protocol.SessionCatalogResult{
+		BuiltinCommands: []protocol.BuiltinCommandCatalogItem{{
+			Name: control.ReasonixDocsSlashName, Description: "host docs", Hint: "<question>", Group: "integrations",
+		}},
+		Commands: []protocol.CommandCatalogItem{{Name: "manuals:docs", Description: "plugin docs"}},
+		Skills:   []protocol.SkillCatalogItem{},
+	}
+	commands := appendRemoteSessionCommands(base, catalog)
+	if _, ok := commandInfoByName(commands, "docs"); ok {
+		t.Fatalf("remote commands invented an unavailable short docs route: %+v", commands)
+	}
+	if fallback, ok := commandInfoByName(commands, control.ReasonixDocsSlashName); !ok || fallback.Kind != "builtin" || fallback.Hint != "<question>" {
+		t.Fatalf("remote qualified docs fallback = %+v, %v", fallback, ok)
+	}
+	if canonical, ok := commandInfoByName(commands, "manuals:docs"); !ok || canonical.Kind != "custom" {
+		t.Fatalf("remote canonical plugin docs = %+v, %v", canonical, ok)
+	}
+}
+
+func commandInfoByName(commands []CommandInfo, name string) (CommandInfo, bool) {
+	for _, command := range commands {
+		if command.Name == name {
+			return command, true
+		}
+	}
+	return CommandInfo{}, false
 }
 
 func TestCommandsClassifiesSubagentSkills(t *testing.T) {

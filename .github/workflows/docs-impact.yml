@@ -1,0 +1,39 @@
+name: Documentation impact guard
+
+on:
+  pull_request_target:
+    branches: [main-v2]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: docs-impact-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  docs-impact:
+    runs-on: ubuntu-latest
+    steps:
+      # Execute only the trusted base-branch checker; never run contributor code
+      # from a pull_request_target workflow.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Collect PR changed files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          gh api --paginate "repos/${REPOSITORY}/pulls/${PR_NUMBER}/files" \
+            --jq '.[].filename' > "$RUNNER_TEMP/docs-impact-files.txt"
+
+      - name: Check documentation impact declaration
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          DOCS_IMPACT_CHANGED_FILES_FILE: ${{ runner.temp }}/docs-impact-files.txt
+        run: bash scripts/check-docs-impact.sh

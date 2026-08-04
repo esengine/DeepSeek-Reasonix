@@ -9,7 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "hono": "^4.6.14",
+    "hono": "^4.12.34",
     "zod": "^3.25.0"
   },
   "devDependencies": {
@@ -19,6 +19,8 @@
     "wrangler": "^4.114.0"
   },
   "overrides": {
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "postcss": "8.5.23",
+    "undici": "7.29.0"
   }
 }

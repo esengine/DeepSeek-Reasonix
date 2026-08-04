@@ -464,6 +464,9 @@ func TestSessionCatalogAndSlashArgsUseHostControllerCapabilities(t *testing.T) {
 		memory: &memory.Set{Store: store},
 	}
 	catalog := buildSessionCatalog(context.Background(), ctrl)
+	if len(catalog.BuiltinCommands) != 1 || catalog.BuiltinCommands[0].Name != control.DocsSlashName {
+		t.Fatalf("built-in commands = %+v, want unshadowed docs", catalog.BuiltinCommands)
+	}
 	if len(catalog.Commands) != 1 || catalog.Commands[0].Name != "review" {
 		t.Fatalf("commands = %+v", catalog.Commands)
 	}
@@ -505,6 +508,40 @@ func TestSessionCatalogAndSlashArgsUseHostControllerCapabilities(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("remote /memory completion did not use the Host memory catalog: %+v", result.Items)
+	}
+}
+
+func TestSessionCatalogPublishesHostResolvedDocsFallback(t *testing.T) {
+	tests := []struct {
+		name     string
+		commands []command.Command
+		skills   []skill.Skill
+	}{
+		{
+			name: "hidden plugin command alias",
+			commands: []command.Command{
+				{Name: "docs", Plugin: "manuals", Hidden: true},
+				{Name: "manuals:docs", Plugin: "manuals"},
+			},
+		},
+		{
+			name:   "compatible plugin skill alias",
+			skills: []skill.Skill{{Name: "docs", Plugin: "manuals"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := &catalogController{
+				fakeController: &fakeController{model: "local/model"},
+				commands:       tt.commands,
+				skills:         tt.skills,
+			}
+			catalog := buildSessionCatalog(context.Background(), ctrl)
+			if len(catalog.BuiltinCommands) != 1 || catalog.BuiltinCommands[0].Name != control.ReasonixDocsSlashName {
+				t.Fatalf("built-in commands = %+v, want qualified docs fallback", catalog.BuiltinCommands)
+			}
+		})
 	}
 }
 

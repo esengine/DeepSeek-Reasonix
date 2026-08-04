@@ -910,11 +910,18 @@ func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
 		UserID:       "user",
 	}
 	key := BuildSessionKey(msg.Session())
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	sessionSink := &sessionEventSink{}
+	sessionSink.setTarget(newRenderSink(
+		context.Background(), adapter, msg.ConnectionID, msg.Domain, msg.ChatID,
+		msg.ChatType, msg.UserID, msg.MessageID, logger, nil, nil,
+	))
+	t.Cleanup(func() { sessionSink.setTarget(nil) })
 	leases := control.NewSessionLeaseKeeper()
 	if err := leases.Rebind(originalPath); err != nil {
 		t.Fatalf("bind original session lease: %v", err)
 	}
-	state := &sessionState{leases: leases, sessionPath: originalPath}
+	state := &sessionState{sink: sessionSink, leases: leases, sessionPath: originalPath}
 	gw.controllers[key] = state
 	gw.sessionOverrides[key] = sessionRuntimeOverride{sessionPath: originalPath, label: "session:original"}
 	ctrl := control.New(control.Options{
@@ -922,6 +929,7 @@ func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
 		SessionDir:         dir,
 		SessionPath:        originalPath,
 		Label:              "test",
+		Sink:               sessionSink,
 		OnSessionRecovered: gw.botSessionRecoveredHandler(key, msg, state),
 	})
 	state.ctrl = ctrl
@@ -972,6 +980,9 @@ func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
 	}
 	if len(transcripts) != 1 || transcripts[0] != recoveryPath {
 		t.Fatalf("recovery transcripts = %v, want only %q", transcripts, recoveryPath)
+	}
+	if sent := adapter.sentMessages(); len(sent) != 0 {
+		t.Fatalf("recovery maintenance leaked into IM messages: %+v", sent)
 	}
 }
 

@@ -32,3 +32,14 @@ test("the macOS quarantine comment and command remain separate source lines", as
     /# Quit Reasonix first, then run in Terminal\.<\/span>\nsudo xattr -rd com\.apple\.quarantine \/Applications\/Reasonix\.app/,
   );
 });
+
+test("website documents the version-matched built-in docs command", async () => {
+  const page = await docsSource();
+
+  assert.match(page, /id="embedded-docs"/);
+  assert.match(page, /\/docs 1\.19\.5 changelog/);
+  assert.match(page, /AI configured for the current session/);
+  assert.match(page, /normally <code>\/reasonix:docs<\/code>/);
+  assert.match(page, /Reasonix never overwrites the existing command/);
+  assert.match(page, /Release CI rejects a build when its embedded corpus does not match/);
+});

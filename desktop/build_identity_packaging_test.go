@@ -16,8 +16,9 @@ func TestDesktopBuildLinksSharedSourceRevision(t *testing.T) {
 		`SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"`,
 		`SOURCE_REVISION="$SOURCE_REVISION+dirty"`,
 		`source_revision_ldflag="-X reasonix/internal/remote/protocol.linkedSourceRevision=$SOURCE_REVISION"`,
-		`ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $source_revision_ldflag"`,
-		`-X main.version=$VERSION $source_revision_ldflag`,
+		`product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION -X reasonix/internal/productdocs.linkedRevision=$SOURCE_REVISION"`,
+		`ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $source_revision_ldflag $product_docs_ldflags"`,
+		`-X main.version=$VERSION $source_revision_ldflag $product_docs_ldflags`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop-build.sh does not preserve the shared build identity %q", want)

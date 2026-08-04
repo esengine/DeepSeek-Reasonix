@@ -459,3 +459,57 @@ func sameCurrentProcessLease(err error) bool {
 	host, _ := os.Hostname()
 	return strings.TrimSpace(leaseErr.Info.Hostname) == strings.TrimSpace(host)
 }
+
+// sessionParentLive reports whether a desktop tab or detached runtime in this
+// process currently owns, or is still building, the requested session. It is
+// intentionally checked before stale-subagent cleanup probes the durable lease:
+// a starting tab has published SessionPath but may not have bound that lease yet.
+func (a *App) sessionParentLive(sessionPath string) bool {
+	return a.sessionParentLiveForBuild(sessionPath, nil)
+}
+
+// subagentParentProbeForBuild excludes an initial build's own unbound tab: that
+// build can safely repair its crash leftovers before it binds the session lease.
+// Other live tabs remain protected from the sweep.
+func (a *App) subagentParentProbeForBuild(building *WorkspaceTab) func(string) bool {
+	return func(sessionPath string) bool {
+		return a.sessionParentLiveForBuild(sessionPath, building)
+	}
+}
+
+func (a *App) sessionParentLiveForBuild(sessionPath string, building *WorkspaceTab) bool {
+	key := sessionRuntimeKey(sessionPath)
+	if a == nil || key == "" {
+		return false
+	}
+
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if rt := a.runtimeBySessionKey[key]; rt != nil && a.runtimeOwnerLiveLocked(rt) &&
+		!(rt.Owner == building && building.Ctrl == nil) {
+		return true
+	}
+	liveTab := func(tab *WorkspaceTab) bool {
+		if tab == nil {
+			return false
+		}
+		if tab == building && tab.Ctrl == nil {
+			return false
+		}
+		if sessionRuntimeKey(tab.SessionPath) == key {
+			return true
+		}
+		return tab.Ctrl != nil && sessionRuntimeKey(tab.Ctrl.SessionPath()) == key
+	}
+	for _, tab := range a.tabs {
+		if liveTab(tab) {
+			return true
+		}
+	}
+	for _, tab := range a.detachedSessions {
+		if liveTab(tab) {
+			return true
+		}
+	}
+	return false
+}

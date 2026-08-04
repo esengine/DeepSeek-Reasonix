@@ -634,7 +634,9 @@ func writeCredentialsEnv(home string, lines []string) error {
 
 func migrateSupportData(legacyDir, newDir string) []string {
 	var warnings []string
-	items := []string{"sessions", "projects", "skills", "archive", "hooks.json"}
+	// settings.json carries the global hooks; leaving it out silently emptied
+	// them for anyone whose home moved (#4652).
+	items := []string{"sessions", "projects", "skills", "archive", "hooks.json", "settings.json"}
 	for _, item := range items {
 		src := filepath.Join(legacyDir, item)
 		fi, err := os.Stat(src)
@@ -653,6 +655,12 @@ func migrateSupportData(legacyDir, newDir string) []string {
 				warnings = append(warnings, fmt.Sprintf("successfully migrated directory %s", item))
 			}
 		} else {
+			if _, err := os.Stat(dst); err == nil {
+				// A file already written at the destination is newer than the
+				// legacy copy; never overwrite user state during migration.
+				warnings = append(warnings, fmt.Sprintf("kept existing file %s", item))
+				continue
+			}
 			if err := copyFile(src, dst); err != nil {
 				warnings = append(warnings, fmt.Sprintf("failed to migrate file %s: %v", item, err))
 			} else {

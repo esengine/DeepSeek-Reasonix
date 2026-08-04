@@ -400,6 +400,7 @@ export function SettingsPanel({
                   <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}>
                     <UpdatesSection
                       configPath={s.configPath}
+                      shadowedByPath={s.shadowedByPath}
                       checkUpdates={s.checkUpdates}
                       telemetry={s.telemetry !== false}
                       metrics={s.metrics !== false}
@@ -7005,6 +7006,7 @@ const mb = (n: number) => (n / MB).toFixed(1);
 // action with inline progress and errors.
 function UpdatesSection({
   configPath,
+  shadowedByPath,
   checkUpdates,
   telemetry,
   metrics,
@@ -7012,6 +7014,7 @@ function UpdatesSection({
   applySettings,
 }: {
   configPath: string;
+  shadowedByPath?: string;
   checkUpdates: boolean;
   telemetry: boolean;
   metrics: boolean;
@@ -7264,6 +7267,11 @@ function UpdatesSection({
           {configPath && (
             <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
               {t("settings.config", { path: configPath })}
+            </Tooltip>
+          )}
+          {shadowedByPath && (
+            <Tooltip label={shadowedByPath} fill block className="mem-hint settings-config-path settings-config-path--shadowed">
+              {t("settings.configShadowed", { path: shadowedByPath })}
             </Tooltip>
           )}
         </div>

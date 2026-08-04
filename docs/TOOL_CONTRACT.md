@@ -98,7 +98,7 @@ not change when MCP inventory changes. Balanced Executor deliberately retains
 its direct `mcp__*` tools, so its overall provider prefix may still change when
 those direct tools are installed, connected, or refreshed.
 
-`ask`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
+`ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
 `read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
@@ -122,7 +122,8 @@ enable optional sources on demand:
 `read_file`, `wait`, `write_file`.
 
 Everything else is explicit and on demand. `connect_tool_source` supports
-`search` (`code_index`, `glob`, `grep`, `ls`), `files` (specialized move,
+`docs` (the read-only embedded `docs` tool), `search` (`code_index`, `glob`,
+`grep`, `ls`), `files` (specialized move,
 multi-edit, delete, and notebook tools), `workflow` (`todo_write`,
 `complete_step`), `sessions` (`history`, `list_sessions`, `read_session`),
 `memory` (`memory`, `remember`, `forget`), `commands` (`slash_command`),

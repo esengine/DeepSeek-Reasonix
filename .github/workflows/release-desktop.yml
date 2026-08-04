@@ -261,6 +261,17 @@ jobs:
       - name: Cache hit guard
         run: ./scripts/cache-guard.sh
 
+      - name: Verify embedded documentation identity
+        env:
+          DOCS_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
+          DOCS_SOURCE_REVISION: ${{ needs.resolve.outputs.sha }}
+        run: |
+          if [ ! -f scripts/verify-embedded-docs.sh ]; then
+            echo "Legacy candidate predates the embedded docs contract; skipping."
+            exit 0
+          fi
+          bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION" "$DOCS_SOURCE_REVISION"
+
   build:
     name: build (${{ matrix.name }})
     needs: [resolve, cache-guard]

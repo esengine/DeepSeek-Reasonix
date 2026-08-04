@@ -125,6 +125,18 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: ./scripts/cache-guard.sh
+      - name: Verify embedded documentation identity
+        env:
+          DOCS_BUILD_VERSION: v${{ inputs.base_version }}
+          DOCS_SOURCE_REVISION: ${{ inputs.approved_sha }}
+        run: |
+          if [ ! -f scripts/verify-embedded-docs.sh ]; then
+            echo "Legacy candidate predates the embedded docs contract; skipping."
+            exit 0
+          fi
+          revision="$DOCS_SOURCE_REVISION"
+          if [ -z "$revision" ]; then revision="$(git rev-parse HEAD)"; fi
+          bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION" "$revision"
 
   npm:
     name: publish npm packages

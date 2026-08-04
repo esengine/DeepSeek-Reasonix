@@ -493,6 +493,33 @@ func pickCLIRelease(rels []ghRelease, channel cliReleaseChannel) *ghRelease {
 	return &rels[best]
 }
 
+// githubAPIToken returns the token to authenticate release lookups with.
+// Anonymous GitHub API requests share a 60/hour quota per IP, which a NAT or
+// office network exhausts long before one user's upgrades do (#4449).
+func githubAPIToken() string {
+	for _, name := range []string{"GITHUB_TOKEN", "GH_TOKEN"} {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// githubRateLimitHint names the fix when a refusal is the anonymous quota
+// rather than a broken request.
+func githubRateLimitHint(resp *http.Response) string {
+	if resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests {
+		return ""
+	}
+	if resp.Header.Get("X-RateLimit-Remaining") != "0" {
+		return ""
+	}
+	if githubAPIToken() != "" {
+		return " (rate limited; retry after the window resets)"
+	}
+	return " (rate limited; set GITHUB_TOKEN to raise the quota)"
+}
+
 // fetchLatestRelease queries the GitHub Releases API and returns the newest
 // strict CLI release in the selected public channel.
 func fetchLatestRelease(c *http.Client, channel cliReleaseChannel) (*ghRelease, error) {
@@ -508,6 +535,9 @@ func fetchLatestRelease(c *http.Client, channel cliReleaseChannel) (*ghRelease, 
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "reasonix-cli")
+	if token := githubAPIToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := c.Do(req)
 	if err != nil {
@@ -515,7 +545,7 @@ func fetchLatestRelease(c *http.Client, channel cliReleaseChannel) (*ghRelease, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("release gateway: %v; GitHub API: %s", pointerErr, resp.Status)
+		return nil, fmt.Errorf("release gateway: %v; GitHub API: %s%s", pointerErr, resp.Status, githubRateLimitHint(resp))
 	}
 
 	var rels []ghRelease

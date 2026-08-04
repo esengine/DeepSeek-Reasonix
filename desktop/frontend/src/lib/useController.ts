@@ -1561,6 +1561,11 @@ const noticeCodeKeys: Record<string, DictKey> = {
   loop_guard: "notice.loopGuard",
   workspace_lease: "notice.workspaceLease",
   cancelled_turn_display: "notice.cancelledTurnDisplay",
+  session_recovery_forked: "recovery.noticeSavedCopy",
+  session_recovery_adopted: "recovery.noticeAdopted",
+  session_recovery_adopted_covered: "recovery.noticeAdoptedCovered",
+  session_recovery_depth_cap: "recovery.noticeKeptCurrent",
+  session_shutdown_recovery_forked: "recovery.noticeSavedCopy",
 };
 
 // localizedNoticeText localizes a notice's main copy by its stable code first,
@@ -1693,7 +1698,18 @@ function backendNoticeKey(msg: string): DictKey | "" {
   }
 }
 
-function recoveryNoticeDedupeKey(text: string): string {
+function recoveryNoticeDedupeKey(text: string, code?: string): string {
+  switch (code) {
+    case "session_recovery_forked":
+    case "session_shutdown_recovery_forked":
+      return "recovery:saved-copy";
+    case "session_recovery_depth_cap":
+      return "recovery:kept-current";
+    case "session_recovery_adopted_covered":
+      return "recovery:adopted-covered";
+    case "session_recovery_adopted":
+      return "recovery:adopted";
+  }
   const msg = text.trim();
   if (
     /^session changed on disk; unsaved local transcript was saved as a conflict copy$/i.test(msg) ||
@@ -1724,8 +1740,8 @@ function recoveryNoticeDedupeKey(text: string): string {
   return "";
 }
 
-function quietTranscriptNoticeKey(text: string): string {
-  const recovery = recoveryNoticeDedupeKey(text);
+function quietTranscriptNoticeKey(text: string, code?: string): string {
+  const recovery = recoveryNoticeDedupeKey(text, code);
   if (recovery) return recovery;
 
   const msg = text.trim();
@@ -1752,11 +1768,11 @@ function quietTranscriptNoticeKey(text: string): string {
 }
 
 function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string, detail?: string, code?: string): { items: Item[]; seq: number } {
-  if (quietTranscriptNoticeKey(rawText)) {
+  if (quietTranscriptNoticeKey(rawText, code)) {
     return { items, seq };
   }
   const text = localizedNoticeText(rawText, code);
-  if (quietTranscriptNoticeKey(text)) {
+  if (quietTranscriptNoticeKey(text, code)) {
     return { items, seq };
   }
   const trimmedDetail = detail?.trim();

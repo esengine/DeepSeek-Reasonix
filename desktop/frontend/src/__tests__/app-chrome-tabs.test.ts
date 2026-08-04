@@ -507,6 +507,22 @@ ok(
 );
 
 ok(
+  /const creationEmptyHero =/.test(appSource) &&
+    /!sidebarImDetailConnection/.test(appSource) &&
+    /!transcriptHydrating/.test(appSource) &&
+    /!hydratePlaceholderActive/.test(appSource) &&
+    /chat-pane\$\{creationEmptyHero \? " chat-pane--creation-empty" : ""\}/.test(appSource) &&
+    /heroMode=\{creationEmptyHero\}/.test(appSource),
+  "Creation empty hero waits for hydration and skips IM/Bot detail panels",
+);
+
+ok(
+  /if \(heroMode\) \{[\s\S]*?const maxHeight = 96;[\s\S]*?setTextareaAutoHeight/.test(composerSource) &&
+    !/if \(heroMode\) \{\s*setTextareaAutoHeight\(20\);/.test(composerSource),
+  "Creation hero composer auto-grows multi-line drafts instead of clipping at 20px",
+);
+
+ok(
   /const \[workspaceControllerEpoch, setWorkspaceControllerEpoch\] = useState\(0\);/.test(appSource) &&
     /const workspaceScopeKey = \[/.test(appSource) &&
     /activeTab\?\.sessionPath/.test(appSource) &&

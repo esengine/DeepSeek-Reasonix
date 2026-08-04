@@ -34,6 +34,15 @@ func TestLevelConstants(t *testing.T) {
 	}
 }
 
+func TestNoticeAudienceConstants(t *testing.T) {
+	if NoticeAudienceDefault != "" {
+		t.Errorf("NoticeAudienceDefault = %q, want empty for backward-compatible delivery", NoticeAudienceDefault)
+	}
+	if NoticeAudienceOperator != "operator" {
+		t.Errorf("NoticeAudienceOperator = %q, want operator", NoticeAudienceOperator)
+	}
+}
+
 // --- FuncSink ---
 
 func TestFuncSinkEmit(t *testing.T) {
