@@ -22,14 +22,29 @@ jobs:
         with:
           script: |
             const body = context.payload.issue.body || '';
-            // Pull the "Version line" section out of the rendered issue form.
-            const section = body.split(/^###\s+/m).find(s => /^Version line/i.test(s)) || '';
-            const m = section.match(/\bv([12])\b/i);
+            const sectionOf = (name) =>
+              body.split(/^###\s+/m).find((s) => new RegExp(`^${name}`, 'i').test(s)) || '';
+
+            const m = sectionOf('Version line').match(/\bv([12])\b/i);
             if (!m) {
               core.info('No version line found; nothing to label.');
               return;
             }
-            const choice = 'v' + m[1];
+            let choice = 'v' + m[1];
+
+            // The dropdown is a choice, and v2 sits first, so it gets picked by
+            // reporters who are actually on 0.x. `Exact version` is pasted from
+            // `reasonix --version`, so when it parses it is the better evidence:
+            // 0.x is the TypeScript line, 1.x the Go rewrite. Anything that does
+            // not parse (a commit sha, "main-v2") leaves the dropdown to decide.
+            const exact = sectionOf('Exact version').match(/\b(\d+)\.(\d+)\.(\d+)/);
+            if (exact) {
+              const fromVersion = Number(exact[1]) === 0 ? 'v1' : 'v2';
+              if (fromVersion !== choice) {
+                core.info(`Version line says ${choice} but ${exact[0]} says ${fromVersion}; trusting the version.`);
+                choice = fromVersion;
+              }
+            }
             const other = choice === 'v2' ? 'v1' : 'v2';
             await github.rest.issues.addLabels({
               ...context.repo,

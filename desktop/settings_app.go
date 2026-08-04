@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -156,6 +157,10 @@ type AgentView struct {
 	SystemPrompt           string  `json:"systemPrompt"`
 	ColdResumePrune        bool    `json:"coldResumePrune"`
 	ReasoningLanguage      string  `json:"reasoningLanguage"`
+	CompactRatio           float64 `json:"compactRatio,omitempty"`
+	EffectiveCompactRatio  float64 `json:"effectiveCompactRatio,omitempty"`
+	CompactRatioOverridden bool    `json:"compactRatioOverridden,omitempty"`
+	CompactRatioRemote     bool    `json:"compactRatioRemote,omitempty"`
 }
 
 type BotAllowlistView struct {
@@ -288,6 +293,7 @@ type SettingsView struct {
 	DesktopLayoutStyle      string               `json:"desktopLayoutStyle"`
 	DesktopTheme            string               `json:"desktopTheme"`
 	DesktopThemeStyle       string               `json:"desktopThemeStyle"`
+	DesktopTerminalTheme    string               `json:"desktopTerminalTheme,omitempty"`
 	CloseBehavior           string               `json:"closeBehavior"`
 	DisplayMode             string               `json:"displayMode"`
 	StatusBarStyle          string               `json:"statusBarStyle"`
@@ -317,18 +323,22 @@ type SettingsView struct {
 // frontend startup. It deliberately excludes providers and credential state so
 // slow keychain/env resolution stays off the first-render path.
 type DesktopStartupSettingsView struct {
-	Bot                BotSettingsView `json:"bot"`
-	DesktopLanguage    string          `json:"desktopLanguage"`
-	DesktopLayoutStyle string          `json:"desktopLayoutStyle"`
-	DesktopTheme       string          `json:"desktopTheme"`
-	DesktopThemeStyle  string          `json:"desktopThemeStyle"`
-	DisplayMode        string          `json:"displayMode"`
-	StatusBarStyle     string          `json:"statusBarStyle"`
-	StatusBarItems     []string        `json:"statusBarItems"`
-	CheckUpdates       bool            `json:"checkUpdates"`
-	UpdateChannel      string          `json:"updateChannel"`
-	SafeMode           bool            `json:"safeMode,omitempty"`
-	ConversationWidth  string          `json:"conversationWidth,omitempty"`
+	Bot                  BotSettingsView `json:"bot"`
+	DesktopLanguage      string          `json:"desktopLanguage"`
+	DesktopLayoutStyle   string          `json:"desktopLayoutStyle"`
+	DesktopTheme         string          `json:"desktopTheme"`
+	DesktopThemeStyle    string          `json:"desktopThemeStyle"`
+	DesktopTerminalTheme string          `json:"desktopTerminalTheme,omitempty"`
+	DisplayMode          string          `json:"displayMode"`
+	StatusBarStyle       string          `json:"statusBarStyle"`
+	StatusBarItems       []string        `json:"statusBarItems"`
+	CheckUpdates         bool            `json:"checkUpdates"`
+	UpdateChannel        string          `json:"updateChannel"`
+	ConversationWidth    string          `json:"conversationWidth,omitempty"`
+	// ConfigWarnings are non-blocking notices when user/project config was
+	// recovered in memory (last-known-good or defaults) without rewriting files.
+	ConfigWarnings []string `json:"configWarnings,omitempty"`
+	ConfigPath     string   `json:"configPath,omitempty"`
 }
 
 func nonNil(s []string) []string {
@@ -852,31 +862,34 @@ func officialProviderAddedSet(cfg *config.Config) map[string]bool {
 func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettingsView {
 	if cfg == nil {
 		return DesktopStartupSettingsView{
-			Bot:                botSettingsView(config.BotConfig{}),
-			DesktopLayoutStyle: "workbench",
-			DesktopTheme:       "auto",
-			DesktopThemeStyle:  "graphite",
-			DisplayMode:        "standard",
-			StatusBarStyle:     "text",
-			StatusBarItems:     config.DefaultDesktopStatusBarItems(),
-			CheckUpdates:       true,
-			UpdateChannel:      "stable",
-			ConversationWidth:  "standard",
+			Bot:                  botSettingsView(config.BotConfig{}),
+			DesktopLayoutStyle:   "workbench",
+			DesktopTheme:         "auto",
+			DesktopThemeStyle:    "graphite",
+			DesktopTerminalTheme: "auto",
+			DisplayMode:          "standard",
+			StatusBarStyle:       "text",
+			StatusBarItems:       config.DefaultDesktopStatusBarItems(),
+			CheckUpdates:         true,
+			UpdateChannel:        "stable",
+			ConversationWidth:    "standard",
 		}
 	}
 	return DesktopStartupSettingsView{
-		Bot:                botSettingsView(cfg.Bot),
-		DesktopLanguage:    cfg.DesktopLanguage(),
-		DesktopLayoutStyle: cfg.DesktopLayoutStyle(),
-		DesktopTheme:       cfg.DesktopTheme(),
-		DesktopThemeStyle:  cfg.DesktopThemeStyle(),
-		DisplayMode:        cfg.DesktopDisplayMode(),
-		StatusBarStyle:     cfg.DesktopStatusBarStyle(),
-		StatusBarItems:     cfg.DesktopStatusBarItems(),
-		CheckUpdates:       cfg.DesktopCheckUpdates(),
-		UpdateChannel:      cfg.DesktopUpdateChannel(),
-		SafeMode:           cfg.SafeMode(),
-		ConversationWidth:  cfg.DesktopConversationWidth(),
+		Bot:                  botSettingsView(cfg.Bot),
+		DesktopLanguage:      cfg.DesktopLanguage(),
+		DesktopLayoutStyle:   cfg.DesktopLayoutStyle(),
+		DesktopTheme:         cfg.DesktopTheme(),
+		DesktopThemeStyle:    cfg.DesktopThemeStyle(),
+		DesktopTerminalTheme: cfg.DesktopTerminalTheme(),
+		DisplayMode:          cfg.DesktopDisplayMode(),
+		StatusBarStyle:       cfg.DesktopStatusBarStyle(),
+		StatusBarItems:       cfg.DesktopStatusBarItems(),
+		CheckUpdates:         cfg.DesktopCheckUpdates(),
+		UpdateChannel:        cfg.DesktopUpdateChannel(),
+		ConversationWidth:    cfg.DesktopConversationWidth(),
+		ConfigWarnings:       cfg.LoadWarnings(),
+		ConfigPath:           config.UserConfigPath(),
 	}
 }
 
@@ -884,15 +897,45 @@ func desktopStartupSettingsFromConfig(cfg *config.Config) DesktopStartupSettings
 // app startup. Keep provider/key status in Settings(), where the Settings panel
 // actually needs it.
 func (a *App) DesktopStartupSettings() DesktopStartupSettingsView {
-	cfg, _, err := a.loadDesktopUserConfigForView()
+	// Prefer the resilient workspace load so config warnings surface on first paint.
+	if cfg, err := config.LoadForRootReadOnly(a.activeWorkspaceRoot()); err == nil {
+		view := desktopStartupSettingsFromConfig(cfg)
+		view.ConfigWarnings = cfg.LoadWarnings()
+		view.ConfigPath = config.UserConfigPath()
+		return view
+	}
+	cfg, path, err := a.loadDesktopUserConfigForView()
 	if err != nil {
 		view := desktopStartupSettingsFromConfig(nil)
-		view.SafeMode = config.SafeModeRequested()
+		view.ConfigWarnings = []string{
+			"user configuration could not be loaded; using built-in defaults. Run: reasonix doctor repair",
+		}
+		view.ConfigPath = config.UserConfigPath()
 		return view
 	}
 	view := desktopStartupSettingsFromConfig(cfg)
-	view.SafeMode = config.SafeModeRequested()
+	view.ConfigPath = path
 	return view
+}
+
+// OpenUserConfigPath reveals the user config file in the system file manager.
+func (a *App) OpenUserConfigPath() error {
+	path := config.UserConfigPath()
+	if path == "" {
+		return fmt.Errorf("user config path is unavailable")
+	}
+	// Reveal the parent directory when the file does not exist yet so the user
+	// can still find where config.toml should live.
+	if _, err := os.Stat(path); err != nil {
+		return a.RevealPath(filepath.Dir(path))
+	}
+	return a.RevealPath(path)
+}
+
+// ReloadUserConfig reloads configuration for the active workspace after the
+// user fixes a broken file. Non-fatal load warnings remain visible when present.
+func (a *App) ReloadUserConfig() (DesktopStartupSettingsView, error) {
+	return a.DesktopStartupSettings(), nil
 }
 
 // Settings returns the current configuration for the Settings panel.
@@ -918,12 +961,15 @@ func (a *App) Settings() SettingsView {
 				MaxParallelWriters:     agent.DefaultMaxParallelWriters,
 				ColdResumePrune:        true,
 				ReasoningLanguage:      "auto",
+				CompactRatio:           config.Default().Agent.CompactRatio,
+				EffectiveCompactRatio:  config.Default().Agent.CompactRatio,
 			},
 			Bot:                     botSettingsView(config.BotConfig{}),
 			AutoPlan:                "off",
 			DesktopLayoutStyle:      "workbench",
 			DesktopTheme:            "auto",
 			DesktopThemeStyle:       "graphite",
+			DesktopTerminalTheme:    "auto",
 			CloseBehavior:           "background",
 			DisplayMode:             "standard",
 			StatusBarStyle:          "text",
@@ -993,6 +1039,8 @@ func (a *App) Settings() SettingsView {
 			SystemPrompt:           cfg.Agent.SystemPrompt,
 			ColdResumePrune:        cfg.ColdResumePruneEnabled(),
 			ReasoningLanguage:      cfg.ReasoningLanguage(),
+			CompactRatio:           cfg.Agent.CompactRatio,
+			EffectiveCompactRatio:  cfg.Agent.CompactRatio,
 		},
 		Bot:                     botSettingsView(cfg.Bot),
 		DesktopLanguage:         cfg.DesktopLanguage(),
@@ -1000,6 +1048,7 @@ func (a *App) Settings() SettingsView {
 		DesktopLayoutStyle:      cfg.DesktopLayoutStyle(),
 		DesktopTheme:            cfg.DesktopTheme(),
 		DesktopThemeStyle:       cfg.DesktopThemeStyle(),
+		DesktopTerminalTheme:    cfg.DesktopTerminalTheme(),
 		CloseBehavior:           cfg.DesktopCloseBehavior(),
 		DisplayMode:             cfg.DesktopDisplayMode(),
 		StatusBarStyle:          cfg.DesktopStatusBarStyle(),
@@ -1016,6 +1065,13 @@ func (a *App) Settings() SettingsView {
 		AutoApproveTools:        ctrl != nil && ctrl.AutoApproveTools(),
 		Bypass:                  ctrl != nil && ctrl.AutoApproveTools(),
 	}
+	if ctrl != nil {
+		if effective := ctrl.CompactRatio(); effective > 0 {
+			v.Agent.EffectiveCompactRatio = effective
+			v.Agent.CompactRatioOverridden = math.Abs(effective-v.Agent.CompactRatio) > 0.0001
+		}
+	}
+	v.Agent.CompactRatioRemote = a.activeWorkbenchTargetIsRemote()
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	resolver := config.NewCredentialResolverForRoot(root)
 	credentialsRevision := providerCredentialsRevision()
@@ -1273,8 +1329,8 @@ func (a *App) ensureActiveTabRebuildAllowed(setting string) error {
 		}
 		return fmt.Errorf("no active tab")
 	}
-	if controllerHasActiveRuntimeWork(a.controllerForTab(tab)) {
-		return rebuildControllerActiveWorkError(setting)
+	if err := rebuildControllerActiveWorkErrorFor(a.controllerForTab(tab), setting); err != nil {
+		return err
 	}
 	return nil
 }
@@ -1286,8 +1342,8 @@ func (a *App) ensureLiveControllersRuntimeMutationAllowed(setting string) error 
 		if tab == nil {
 			continue
 		}
-		if controllerHasActiveRuntimeWork(tab.Ctrl) {
-			return rebuildControllerActiveWorkError(setting)
+		if err := rebuildControllerActiveWorkErrorFor(tab.Ctrl, setting); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1693,8 +1749,8 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	if a.ctx == nil {
 		return nil
 	}
-	if controllerHasActiveRuntimeWork(a.controllerForTab(tab)) {
-		return rebuildControllerActiveWorkError(setting)
+	if err := rebuildControllerActiveWorkErrorFor(a.controllerForTab(tab), setting); err != nil {
+		return err
 	}
 	ensureWorkspace := a.ensureTabControllerWorkspace
 	if admissionHeld {
@@ -1713,8 +1769,8 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 			prevPath = a.currentSessionPathFor(tab)
 		}
 	}
-	if controllerHasActiveRuntimeWork(a.controllerForTab(tab)) {
-		return rebuildControllerActiveWorkError(setting)
+	if err := rebuildControllerActiveWorkErrorFor(a.controllerForTab(tab), setting); err != nil {
+		return err
 	}
 	if err := ensureWorkspace(tab); err != nil {
 		return err
@@ -1750,6 +1806,7 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
 		Model: model, RequireKey: false,
 		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
+		StatsSource:              "desktop",
 		Sink:                     snap.sink,
 		WorkspaceRoot:            snap.workspaceRoot,
 		SessionDir:               sessionDirForSnapshot(snap),
@@ -3417,6 +3474,12 @@ func (a *App) SetDesktopAppearance(theme, style string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAppearance(theme, style) })
 }
 
+// SetDesktopTerminalTheme updates only the integrated terminal colours. It is
+// applied live by the frontend and does not rebuild the active controller.
+func (a *App) SetDesktopTerminalTheme(theme string) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopTerminalTheme(theme) })
+}
+
 // SetDesktopLayoutStyle updates only the desktop layout style. It does not
 // rebuild the active controller and must stay out of provider-visible requests.
 func (a *App) SetDesktopLayoutStyle(style string) error {
@@ -3442,8 +3505,8 @@ func (a *App) SetDesktopCheckUpdates(enabled bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCheckUpdates(enabled) })
 }
 
-// SetDesktopUpdateChannel changes the rolling update pointer used by startup
-// and manual checks. Legacy canary values are normalized to preview.
+// SetDesktopUpdateChannel is retained for older Wails clients. The config layer
+// clears the retired preference and every updater request uses Stable.
 func (a *App) SetDesktopUpdateChannel(channel string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopUpdateChannel(channel) })
 }
@@ -3517,6 +3580,13 @@ func (a *App) SetAgentParams(temperature float64, maxSteps int, plannerMaxSteps 
 
 func (a *App) SetColdResumePrune(enabled bool) error {
 	return a.applyConfigChange(func(c *config.Config) error { return c.SetColdResumePrune(enabled) })
+}
+
+func (a *App) SetCompactRatio(ratio float64) error {
+	_, err := a.applyConfigChangeWithWarning("context compaction threshold", func(c *config.Config) error {
+		return c.SetCompactRatio(ratio)
+	})
+	return err
 }
 
 func (a *App) SetReasoningLanguage(lang string) error {

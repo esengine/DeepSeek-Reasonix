@@ -108,18 +108,6 @@ import "C"
 // the verified JavaScriptCore signal-handler race, but is not intended to cover
 // failures that occur earlier while WebKit constructs the window.
 
-// configureWebKitRendererRecovery applies WebKit's costly DMA-BUF fallback only
-// during Safe Mode on NVIDIA systems. Normal launches keep accelerated backing
-// store enabled; NVIDIA Wayland sessions continue to use the narrower explicit-
-// sync workaround in nvidia_wayland_linux.go. Call this before wails.Run so the
-// WebKit process inherits the environment.
-func configureWebKitRendererRecovery(safeMode bool) {
-	if !safeMode {
-		return
-	}
-	configureWebKitRendererRecoveryForGPU(safeMode, hasNVIDIAGPU())
-}
-
 // scheduleWebKitSignalHandlerRepair starts the bounded GLib timer immediately
 // before wails.Run. The callback begins executing when Wails enters GTK's main
 // loop, which anchors the five-second repair window to WebKit startup instead

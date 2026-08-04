@@ -234,7 +234,7 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 		Kind: event.Usage,
 		Usage: &provider.Usage{
 			PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200,
-			CacheHitTokens: 900, CacheMissTokens: 100, ReasoningTokens: 33,
+			CacheHitTokens: 900, CacheMissTokens: 100, ReasoningTokens: 33, Estimated: true,
 		},
 		Pricing:     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2},
 		UsageSource: event.UsageSourceTitle,
@@ -253,6 +253,7 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 	for _, want := range []string{
 		`"kind":"usage"`, `"promptTokens":1000`, `"completionTokens":200`, `"totalTokens":1200`,
 		`"cacheHitTokens":900`, `"cacheMissTokens":100`, `"reasoningTokens":33`,
+		`"estimated":true`,
 		`"source":"title"`, `"sessionCacheHitTokens":8000`, `"sessionCacheMissTokens":2000`,
 		`"currency":"¥"`, `"costUsd":`, `"cacheDiagnostics":`, `"prefixHash":"p"`,
 		`"prefixChanged":true`, `"prefixChangeReasons":["log_rewrite"]`, `"toolSchemaTokens":42`,

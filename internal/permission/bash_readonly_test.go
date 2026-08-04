@@ -28,6 +28,10 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"du -sh .", true},
 		{"diff a.go b.go", true},
 		{"printenv PATH", true},
+		{"Test-NetConnection -ComputerName localhost -Port 27017", false},
+		{"Get-Process -Name mongod", true},
+		{"Get-ChildItem -Path .", true},
+		{"Get-NetTCPConnection -LocalPort 6379", true},
 
 		// Git read-only
 		{"git log", true},
@@ -117,6 +121,9 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"curl https://example.com", false},
 		{"npm install", false},
 		{"chmod 777 file", false},
+		{"Start-Process mongod", false},
+		{"Stop-Process -Name mongod", false},
+		{"Set-Content style.css bad", false},
 		{"", false},
 	}
 

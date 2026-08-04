@@ -37,6 +37,23 @@ func TestIsDeepSeek(t *testing.T) {
 	}
 }
 
+func TestIsOpenAI(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://api.openai.com/v1", true},
+		{"https://API.OPENAI.COM/v1", true},
+		{"https://platform.openai.com/v1", false},
+		{"https://gateway.example/v1", false},
+		{"not-a-url", false},
+	} {
+		if got := IsOpenAI(tc.baseURL); got != tc.want {
+			t.Errorf("IsOpenAI(%q) = %v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+}
+
 func TestDeepSeekPrefixChatURL(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -178,6 +195,24 @@ func TestIsZhipu(t *testing.T) {
 	} {
 		if got := IsZhipu(tc.baseURL); got != tc.want {
 			t.Errorf("IsZhipu(%q) = %v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+}
+
+func TestIsTokenRhythm(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://tokenrhythm.studio/v1", true},
+		{"https://TOKENRHYTHM.STUDIO/v1", true},
+		{"https://api.tokenrhythm.studio/v1", false},
+		{"https://tokenrhythm.example.com/v1", false},
+		{"https://opencode.ai/zen/go/v1", false},
+		{"", false},
+	} {
+		if got := IsTokenRhythm(tc.baseURL); got != tc.want {
+			t.Errorf("IsTokenRhythm(%q) = %v, want %v", tc.baseURL, got, tc.want)
 		}
 	}
 }

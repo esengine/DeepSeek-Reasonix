@@ -36,7 +36,7 @@ func TestSemanticRouterRecordsPricedUsage(t *testing.T) {
 	audit := &Audit{}
 	sink := &captureSink{}
 	pricing := &provider.Pricing{Input: 1, Output: 2}
-	r := &SemanticRouter{Provider: prov, Sink: sink, Pricing: pricing, Audit: audit}
+	r := &SemanticRouter{Provider: prov, Sink: sink, Model: "deepseek/deepseek-v4-flash", Pricing: pricing, Audit: audit}
 	catalog := Catalog{Entries: []Entry{{
 		ID: "skill:review", Kind: KindSkill, Name: "review",
 		Description: "review code changes", Status: StatusReady,
@@ -56,13 +56,17 @@ func TestSemanticRouterRecordsPricedUsage(t *testing.T) {
 	if snap.RouterLatencyMs < 0 {
 		t.Fatalf("router latency negative: %v", snap.RouterLatencyMs)
 	}
-	var priced bool
+	var usageEvent *event.Event
 	for _, e := range sink.events {
 		if e.Kind == event.Usage && e.Pricing == pricing {
-			priced = true
+			copy := e
+			usageEvent = &copy
 		}
 	}
-	if !priced {
+	if usageEvent == nil {
 		t.Fatalf("usage event missing Pricing: %+v", sink.events)
+	}
+	if usageEvent.ModelRef != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("usage event model ref = %q", usageEvent.ModelRef)
 	}
 }

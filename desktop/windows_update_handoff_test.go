@@ -46,6 +46,34 @@ func TestWindowsUpdateHandoffArgsCarryParentInstallAndRelaunch(t *testing.T) {
 	}
 }
 
+func TestWindowsVersionedUpdateHandoffArgsDoNotRequireLegacyPendingIdentity(t *testing.T) {
+	got := windowsVersionedUpdateHandoffArgs(
+		4242,
+		`C:\Temp\Reasonix-installer.exe`,
+		strings.Repeat("b", 64),
+		`D:\Tools\Reasonix`,
+		`D:\Tools\Reasonix\reasonix-launcher.exe`,
+		"v1.20.0",
+	)
+	want := []string{
+		"--parent-pid", "4242",
+		"--installer", `C:\Temp\Reasonix-installer.exe`,
+		"--installer-sha256", strings.Repeat("b", 64),
+		"--to-version", "v1.20.0",
+		"--install-layout", "versioned-v1",
+		"--install-dir", `D:\Tools\Reasonix`,
+		"--relaunch", `D:\Tools\Reasonix\reasonix-launcher.exe`,
+	}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+	for _, legacy := range []string{"--created-at", "--transaction-id"} {
+		if strings.Contains(strings.Join(got, " "), legacy) {
+			t.Fatalf("versioned handoff must not carry legacy field %s", legacy)
+		}
+	}
+}
+
 func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	data, err := os.ReadFile("build/windows/installer/project.nsi")
 	if err != nil {
@@ -58,6 +86,7 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`!define REASONIX_LAUNCHER "reasonix-launcher.exe"`,
 		`!define REASONIX_CLI "reasonix-cli.exe"`,
 		`!define REASONIX_PORTABLE_ENTRY "Reasonix.exe"`,
+		`!define REASONIX_LAYOUT_INSTALLER "reasonix-layout-installer.exe"`,
 		`!define REASONIX_PAYLOAD_MANIFEST "reasonix-payload.json"`,
 		`!define REASONIX_PAYLOAD_SIGNATURE "reasonix-payload.json.minisig"`,
 		"Var ReasonixUpdateMode",
@@ -79,6 +108,7 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`LangString reasonixUpdateSubtitle ${LANG_TRADCHINESE} "正在安裝已驗證的更新，完成後 Reasonix 將自動重新啟動。"`,
 		"Function reasonix.waitForExecutableUnlock",
 		`FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a`,
+		`FileOpen $1 "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" a`,
 		`FileOpen $1 "$INSTDIR\${REASONIX_GUARD}" a`,
 		`FileOpen $1 "$INSTDIR\${REASONIX_LAUNCHER}" a`,
 		`FileOpen $1 "$INSTDIR\${REASONIX_CLI}" a`,
@@ -87,7 +117,8 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		"Call reasonix.waitForExecutableUnlock",
 		`File "/oname=${REASONIX_UPDATE_HELPER}" "${REASONIX_UPDATE_HELPER}"`,
 		`File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"`,
-		`File "/oname=${REASONIX_PORTABLE_ENTRY}" "${REASONIX_LAUNCHER}"`,
+		`File "/oname=${REASONIX_LAYOUT_INSTALLER}" "${REASONIX_GUARD}"`,
+		`--activate-staging "$R9" --no-relaunch`,
 		`File "/oname=${REASONIX_PAYLOAD_MANIFEST}" "${REASONIX_PAYLOAD_MANIFEST}"`,
 		`File "/oname=${REASONIX_PAYLOAD_SIGNATURE}" "${REASONIX_PAYLOAD_SIGNATURE}"`,
 		`Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"`,
@@ -107,16 +138,20 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	if wait < 0 || copyFiles < 0 || wait > copyFiles {
 		t.Fatalf("installer must wait for the running exe to unlock before wails.files (wait=%d copy=%d)", wait, copyFiles)
 	}
-	stageBranch := strings.Index(script, "StrCmp $ReasonixStageMode \"1\" reasonix_copy_payload")
+	stageBranch := strings.Index(script, "StrCmp $ReasonixStageMode \"1\" reasonix_stage_payload")
 	if stageBranch < 0 || stageBranch > copyFiles {
 		t.Fatalf("staging mode must bypass live executable unlock before payload extraction (branch=%d copy=%d)", stageBranch, copyFiles)
 	}
-	if !strings.Contains(script, "StrCmp $ReasonixStageMode \"1\" reasonix_section_done") {
+	if !strings.Contains(script, "Goto reasonix_section_done") {
 		t.Fatal("staging mode must skip registry, shortcuts, associations, and uninstaller")
 	}
-	metadataBranch := strings.Index(script, `StrCmp $ReasonixStageMode "1" 0 reasonix_payload_metadata_done`)
+	if strings.Contains(script, `FileOpen $0 "$INSTDIR\current.json" w`) {
+		t.Fatal("normal installer must delegate the current.json commit to the atomic Go activator")
+	}
+	metadataBranch := strings.Index(script, `reasonix_stage_payload:`)
 	metadataFile := strings.Index(script, `File "/oname=${REASONIX_PAYLOAD_MANIFEST}"`)
-	if metadataBranch < 0 || metadataFile < 0 || metadataBranch > metadataFile {
+	normalInstall := strings.Index(script, `reasonix_normal_install:`)
+	if metadataBranch < 0 || metadataFile < 0 || normalInstall < 0 || metadataBranch > metadataFile || metadataFile > normalInstall {
 		t.Fatalf("payload manifest must be extracted only in staging mode (branch=%d file=%d)", metadataBranch, metadataFile)
 	}
 }
@@ -148,7 +183,7 @@ func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) 
 	packager := string(packageData)
 	for _, want := range []string{
 		`cp "$PAYLOAD/$UPDATE_HELPER" "$INSTALLER_DIR/$UPDATE_HELPER"`,
-		`cp "$PAYLOAD/$UPDATE_HELPER" "$portable_staging/$UPDATE_HELPER"`,
+		`cp "$PAYLOAD/$UPDATE_HELPER" "$portable_staging/versions/$version_label/$UPDATE_HELPER"`,
 		`"$ROOT/scripts/verify-windows-portable.sh" "$portable_staging"`,
 	} {
 		if !strings.Contains(packager, want) {

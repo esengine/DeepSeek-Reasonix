@@ -9,12 +9,13 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 )
 
-func TestParseDesktopLaunchArgsSafeMode(t *testing.T) {
-	if !parseDesktopLaunchArgs([]string{"--safe-mode"}).SafeMode {
-		t.Fatal("--safe-mode was not recognized")
+func TestParseDesktopLaunchArgsStripsLegacySafeMode(t *testing.T) {
+	got := parseDesktopLaunchArgs([]string{"launch", "--detach", "--safe-mode", "--other"})
+	if !got.LegacySafeModeArg {
+		t.Fatal("--safe-mode should still be recognized for stripping")
 	}
-	if parseDesktopLaunchArgs([]string{"--other"}).SafeMode {
-		t.Fatal("unrelated argument enabled safe mode")
+	if parseDesktopLaunchArgs([]string{"--other"}).LegacySafeModeArg {
+		t.Fatal("unrelated argument must not set legacy safe-mode flag")
 	}
 }
 

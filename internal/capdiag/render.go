@@ -77,7 +77,7 @@ func RenderText(r Report) string {
 
 	fmt.Fprintf(&b, "MCP (%d)\n", len(r.MCP.Servers))
 	for _, s := range r.MCP.Servers {
-		fmt.Fprintf(&b, "  - %s transport=%s intent=%s source=%s", s.Name, s.Transport, s.StartIntent, s.Source)
+		fmt.Fprintf(&b, "  - %s transport=%s intent=%s source=%s effective=%v", s.Name, s.Transport, s.StartIntent, s.Source, s.Effective)
 		if s.RuntimeStatus != "" {
 			fmt.Fprintf(&b, " runtime=%s", s.RuntimeStatus)
 		}
@@ -85,8 +85,17 @@ func RenderText(r Report) string {
 			fmt.Fprintf(&b, " tools=%d", s.ToolCount)
 		}
 		b.WriteByte('\n')
+		if s.SourcePath != "" {
+			fmt.Fprintf(&b, "    source_path: %s\n", s.SourcePath)
+		}
+		if s.StartupStage != "" {
+			fmt.Fprintf(&b, "    startup: stage=%s elapsed_ms=%d\n", s.StartupStage, s.StartupElapsedMS)
+		}
 		if s.Error != "" {
 			fmt.Fprintf(&b, "    error: %s\n", s.Error)
+		}
+		if s.Stderr != "" {
+			fmt.Fprintf(&b, "    stderr: %s\n", s.Stderr)
 		}
 	}
 	if len(r.MCP.Servers) == 0 {

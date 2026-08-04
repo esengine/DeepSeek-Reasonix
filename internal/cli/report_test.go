@@ -104,28 +104,30 @@ func TestReportCommandFailedSendKeepsReport(t *testing.T) {
 	}
 }
 
-func TestReportCommandSafeModeBlocksSendButAllowsDelete(t *testing.T) {
+func TestLegacySafeModeEnvDoesNotBlockReportSendOrDelete(t *testing.T) {
 	home := isolateCLIReports(t)
 	pending := captureCLIReport(t, home)
 	t.Setenv("REASONIX_SAFE_MODE", "1")
 	previous := sendCLIReport
 	t.Cleanup(func() { sendCLIReport = previous })
+	calls := 0
 	sendCLIReport = func(context.Context, crashreport.Report, netclient.ProxySpec) error {
-		t.Fatal("Safe Mode attempted upload")
+		calls++
 		return nil
 	}
 
 	var out, errOut bytes.Buffer
-	if rc := reportCommandWithIO([]string{"send", pending.ID}, false, strings.NewReader(""), &out, &errOut); rc != 1 {
-		t.Fatalf("safe send rc=%d", rc)
+	if rc := reportCommandWithIO([]string{"send", pending.ID}, false, strings.NewReader(""), &out, &errOut); rc != 0 {
+		t.Fatalf("legacy-env send rc=%d stderr=%q", rc, errOut.String())
 	}
-	if !strings.Contains(errOut.String(), "Safe Mode") {
-		t.Fatalf("stderr=%q", errOut.String())
+	if calls != 1 {
+		t.Fatalf("report upload calls=%d, want 1", calls)
 	}
+	pending = captureCLIReport(t, home)
 	out.Reset()
 	errOut.Reset()
 	if rc := reportCommandWithIO([]string{"delete", pending.ID}, false, strings.NewReader(""), &out, &errOut); rc != 0 {
-		t.Fatalf("safe delete rc=%d stderr=%q", rc, errOut.String())
+		t.Fatalf("legacy-env delete rc=%d stderr=%q", rc, errOut.String())
 	}
 }
 

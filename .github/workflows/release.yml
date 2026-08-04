@@ -1,22 +1,20 @@
 name: Release
 
-# Native CLI binary line. Stable and Preview releases are called by their
-# approved all-surface orchestrators. Manual dispatch remains available only for
-# Stable/RC recovery; standalone prereleases remain internal stable-channel
-# checkpoints behind the `release` gate.
+# Native CLI binary line. Official releases are called by the protected Stable
+# orchestrator. Manual dispatch remains available only for official recovery;
+# historical Preview inputs below are workflow-call compatibility, not a public
+# publication entrypoint.
 on:
   workflow_dispatch:
     inputs:
       channel:
         description: "Standalone CLI recovery channel"
         required: true
-        # Public Preview recovery reruns release-preview.yml so every surface and
-        # its immutable release-event marker stay aligned.
         default: stable
         type: choice
         options: [stable]
       tag:
-        description: "Existing protected Stable/RC CLI tag (for example v1.18.0 or v1.18.0-rc.1)"
+        description: "Existing official CLI tag (for example v1.18.0)"
         required: true
         type: string
   workflow_call:
@@ -44,12 +42,12 @@ on:
         default: false
         type: boolean
       orchestrator:
-        description: "Trusted release orchestrator: stable or preview"
+        description: "Trusted release orchestrator (legacy Preview calls remain readable)"
         required: false
         default: stable
         type: string
       allow_preview_recovery:
-        description: "Allow an approved Preview tag from main-v2 history"
+        description: "Legacy compatibility for already-created Preview runs"
         required: false
         default: false
         type: boolean
@@ -187,9 +185,9 @@ jobs:
     needs: [resolve, cache-guard]
     if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
-    # The stable caller has already passed the single GitHub release approval.
-    # Standalone prereleases pass release-gate above. This job therefore must not
-    # add a second GitHub environment approval.
+    # The Stable caller has already passed the single GitHub release approval.
+    # Official standalone recovery passes release-gate above. This job therefore
+    # must not add a second GitHub environment approval.
     steps:
       - uses: actions/checkout@v7
         with:

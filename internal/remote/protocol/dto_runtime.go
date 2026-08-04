@@ -172,6 +172,7 @@ type UsageSourceView struct {
 	ReasoningTokens  int     `json:"reasoningTokens" validate:"min=0"`
 	CacheHitTokens   int     `json:"cacheHitTokens" validate:"min=0"`
 	CacheMissTokens  int     `json:"cacheMissTokens" validate:"min=0"`
+	Estimated        bool    `json:"estimated,omitempty"`
 	RequestCount     int     `json:"requestCount" validate:"min=0"`
 	SessionCost      float64 `json:"sessionCost,omitempty" validate:"min=0"`
 	SessionCurrency  string  `json:"sessionCurrency,omitempty"`
@@ -195,6 +196,7 @@ type ContextView struct {
 	ReasoningTokens         int               `json:"reasoningTokens" validate:"min=0"`
 	CacheHitTokens          int               `json:"cacheHitTokens" validate:"min=0"`
 	CacheMissTokens         int               `json:"cacheMissTokens" validate:"min=0"`
+	Estimated               bool              `json:"estimated,omitempty"`
 	SessionCacheHitTokens   int               `json:"sessionCacheHitTokens" validate:"min=0"`
 	SessionCacheMissTokens  int               `json:"sessionCacheMissTokens" validate:"min=0"`
 	SessionCompletionTokens int               `json:"sessionCompletionTokens" validate:"min=0"`

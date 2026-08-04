@@ -1,9 +1,9 @@
 ---
 import ChangelogPage from '../../components/ChangelogPage.astro';
-import { allReleases, releases } from '../../data/releases';
+import { allReleases, publishedReleases, releases } from '../../data/releases';
 
 export function getStaticPaths() {
-  const publishedVersions = new Set(releases.map((release) => release.version));
+  const publishedVersions = new Set(publishedReleases.map((release) => release.version));
   return allReleases.map((release) => ({
     params: { version: `v${release.version}` },
     props: { release, published: publishedVersions.has(release.version) },
@@ -12,8 +12,7 @@ export function getStaticPaths() {
 
 const { release, published } = Astro.props;
 if (!published) {
-  return Astro.redirect(release.channel === 'prerelease' ? '/changelog/preview/' : '/changelog/stable/');
+  return Astro.redirect('/changelog/');
 }
 ---
-
 <ChangelogPage release={release} releases={releases} />

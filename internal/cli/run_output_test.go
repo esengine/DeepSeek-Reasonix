@@ -33,7 +33,7 @@ func TestRunOutputJSONResult(t *testing.T) {
 	sink := newRunOutputSink(&out, runOutputJSON)
 	sink.Emit(event.Event{Kind: event.Message, Text: "done"})
 	sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{
-		PromptTokens: 12, CompletionTokens: 3, CacheHitTokens: 8, CacheMissTokens: 4,
+		PromptTokens: 12, CompletionTokens: 3, CacheHitTokens: 8, CacheMissTokens: 4, Estimated: true,
 	}})
 	sink.Emit(event.Event{Kind: event.TurnDone})
 	if err := sink.Finalize("abc", time.Now(), nil); err != nil {
@@ -48,6 +48,9 @@ func TestRunOutputJSONResult(t *testing.T) {
 	}
 	if result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 3 || result.Usage.CacheReadInputTokens != 8 || result.Usage.CacheCreationInputTokens != 4 {
 		t.Fatalf("usage = %+v", result.Usage)
+	}
+	if !result.Usage.Estimated {
+		t.Fatalf("usage lost estimated marker: %+v", result.Usage)
 	}
 }
 
@@ -147,7 +150,7 @@ func TestRunOutputEventsJSONLIsStructuredAndRedacted(t *testing.T) {
 		ID: "PRIVATE TOOL ID", Name: "PRIVATE TOOL NAME", Args: `{"command":"PRIVATE COMMAND"}`, Output: "PRIVATE OUTPUT", Err: "PRIVATE ERROR",
 	}})
 	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "PRIVATE TOOL ID", Name: "PRIVATE TOOL NAME"}})
-	sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 4, CompletionTokens: 2}})
+	sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{PromptTokens: 4, CompletionTokens: 2, Estimated: true}})
 	if err := sink.Finalize("session-1", time.Now(), nil); err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +162,7 @@ func TestRunOutputEventsJSONLIsStructuredAndRedacted(t *testing.T) {
 		ToolID   string `json:"tool_id"`
 		ToolName string `json:"tool_name"`
 	}
+	var sawEstimatedUsage bool
 	for i, line := range lines {
 		var payload map[string]any
 		if err := json.Unmarshal([]byte(line), &payload); err != nil {
@@ -177,12 +181,19 @@ func TestRunOutputEventsJSONLIsStructuredAndRedacted(t *testing.T) {
 			}
 			toolAliases = append(toolAliases, aliases)
 		}
+		if payload["kind"] == "usage" {
+			usage, ok := payload["usage"].(map[string]any)
+			sawEstimatedUsage = ok && usage["estimated"] == true
+		}
 	}
 	if strings.Contains(out.String(), "PRIVATE") || !strings.Contains(out.String(), `"kind":"run_done"`) {
 		t.Fatalf("event stream was not redacted or terminated: %s", out.String())
 	}
 	if len(toolAliases) != 2 || toolAliases[0].ToolID != "tool_1" || toolAliases[0].ToolName != "tool_name_1" || toolAliases[1] != toolAliases[0] {
 		t.Fatalf("tool aliases = %+v, want stable per-run opaque identities", toolAliases)
+	}
+	if !sawEstimatedUsage {
+		t.Fatalf("event stream lost estimated usage marker: %s", out.String())
 	}
 }
 

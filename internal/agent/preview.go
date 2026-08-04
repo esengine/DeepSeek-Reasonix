@@ -8,7 +8,36 @@ import (
 	"reasonix/internal/provider"
 )
 
-var reTransientUserBlock = regexp.MustCompile(`(?s)^\s*<(?:response-language|reasoning-language|memory-update|background-jobs|active-goal|hook-context|capability-route|interrupted-turn-recovery)(?:\s+[^>]*)?>.*?</(?:response-language|reasoning-language|memory-update|background-jobs|active-goal|hook-context|capability-route|interrupted-turn-recovery)>\s*\n?`)
+// TransientUserBlockTags names every block the host prepends to a user turn as
+// runtime context rather than something the user typed. Previews, titles, and
+// the rewind picker strip them; a tag missing from this list leaks raw markup
+// into the UI, which is how <autoresearch-runtime> surfaced in session titles.
+//
+// This is the single source of truth: the strip regex is built from it, and
+// hasLeadingInjectedBlock walks it. Anything that starts prepending a new block
+// to user turns belongs here.
+var TransientUserBlockTags = []string{
+	"response-language",
+	"reasoning-language",
+	"memory-update",
+	"background-jobs",
+	"active-goal",
+	"autoresearch-runtime",
+	"hook-context",
+	"capability-route",
+	"interrupted-turn-recovery",
+}
+
+var reTransientUserBlock = buildTransientUserBlockRE(TransientUserBlockTags)
+
+// buildTransientUserBlockRE matches one leading transient block: an open tag
+// (with optional attributes), its content, and its own closing tag. The
+// alternation is generated so the open and close lists cannot drift apart —
+// spelling them out twice by hand is what let tags go missing from one side.
+func buildTransientUserBlockRE(tags []string) *regexp.Regexp {
+	alt := strings.Join(tags, "|")
+	return regexp.MustCompile(`(?s)^\s*<(?:` + alt + `)(?:\s+[^>]*)?>.*?</(?:` + alt + `)>\s*\n?`)
+}
 
 // stripTrailingDeliveryRuntime removes the exact delivery-runtime marker the
 // agent appends to user turns in delivery mode (agent.go DeliveryRuntimeMarker).
@@ -149,6 +178,17 @@ func UserPreviewText(content string) string {
 	return strings.TrimSpace(s)
 }
 
+// pasteDisplayLabelPattern matches the standalone label desktop prepends to a
+// pasted-text turn. It is UI chrome rather than user intent, so title and
+// preview derivation may remove it without touching inline label mentions.
+var pasteDisplayLabelPattern = regexp.MustCompile(`^\[(?:已粘贴文本|已貼上文字|Pasted text) #[0-9]+ · [0-9]+ (?:行|lines)\][ \t]*(?:\r?\n)?`)
+
+// StripPasteDisplayLabel removes one leading desktop pasted-text label while
+// preserving the remainder byte-for-byte.
+func StripPasteDisplayLabel(content string) string {
+	return pasteDisplayLabelPattern.ReplaceAllString(content, "")
+}
+
 // UserMessageText returns the best user-authored view of a persisted user turn.
 // New sessions carry the exact raw text explicitly; older sessions fall back to
 // deterministic wrapper stripping.
@@ -212,6 +252,7 @@ func hasLegacyProviderWrapper(content string) bool {
 // sites in internal/agent/agent.go, internal/agent/compact.go, and
 // internal/control (plan approval, goal loop).
 var SyntheticUserPrefixes = []string{
+	"<reasoning-language>",
 	"Plan approved — plan mode is off",
 	"Host final-answer readiness check failed",
 	"You are already in the executor phase",
@@ -245,6 +286,9 @@ func IsSyntheticUserText(content string) bool {
 // steer. Preview/title/turn-count derivations share this so a delivery
 // readiness nudge can never become a session title or inflate turn counts.
 func IsUserAuthoredTurn(content string) bool {
+	if strings.TrimSpace(StripTransientUserBlocks(content)) == "" {
+		return false
+	}
 	if IsSyntheticUserText(content) {
 		return false
 	}

@@ -30,7 +30,6 @@ const experience: ThemeExperienceView = {
   baseStyle: "graphite",
   effectiveStyle: "graphite",
   activePack: null,
-  safeMode: false,
 };
 
 const savedPack: ThemePackView = {

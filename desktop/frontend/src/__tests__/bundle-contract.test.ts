@@ -20,6 +20,7 @@ function ok(cond: boolean, label: string) {
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
+const settingsEntrySource = readFileSync(resolve(here, "../components/SettingsPanelEntry.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
 const i18nSource = readFileSync(resolve(here, "../lib/i18n.tsx"), "utf8");
@@ -42,9 +43,15 @@ ok(
   "App keeps secondary drawers out of the initial chunk",
 );
 ok(
-  appSource.includes('import("./components/SettingsPanel")') &&
+  appSource.includes('import("./components/SettingsPanelEntry")') &&
     appSource.includes('import("./components/HistoryPanel")'),
   "App loads secondary drawers on demand",
+);
+ok(
+  settingsEntrySource.includes('import "./CompactRatioSettings.css"') &&
+    settingsEntrySource.includes('from "./SettingsPanel"') &&
+    !settingsSource.includes('import "./CompactRatioSettings.css"'),
+  "Settings CSS stays in the lazy production entry without breaking direct module tests",
 );
 ok(
   !appSource.includes("openAllHistory") &&

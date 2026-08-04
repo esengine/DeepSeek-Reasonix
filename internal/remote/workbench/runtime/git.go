@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -17,7 +16,7 @@ import (
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
 	fileencoding "reasonix/internal/fileutil/encoding"
-	"reasonix/internal/proc"
+	"reasonix/internal/gitcmd"
 	"reasonix/internal/remote/protocol"
 	"reasonix/internal/remote/workbench/files"
 )
@@ -391,9 +390,7 @@ func (s *Server) gitOutput(limit int64, args ...string) ([]byte, error) {
 func (s *Server) gitOutputBounded(limit int64, args ...string) ([]byte, bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	fullArgs := append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-c", "core.quotepath=false", "-C", s.opts.Workspace}, args...)
-	cmd := exec.CommandContext(ctx, "git", fullArgs...)
-	proc.HideWindow(cmd)
+	cmd := gitcmd.CommandWithConfig(ctx, s.opts.Workspace, []string{"core.quotepath=false"}, args...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, false, err

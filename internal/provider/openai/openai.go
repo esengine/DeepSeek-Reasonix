@@ -15,7 +15,8 @@
 //   - official Kimi API + kimi-k3 preserves complete assistant messages and
 //     uses K3's fixed-sampling/max_completion_tokens request shape.
 //   - everything else (MiMo and other OpenAI-compatible gateways) uses the
-//     vanilla reasoning_effort scale (low/medium/high).
+//     vanilla reasoning_effort scale (low/medium/high), unless its config
+//     declares a custom supported_efforts validation contract.
 //
 // See docs/REASONING_PROVIDERS.md for the per-backend protocol reference.
 package openai
@@ -76,8 +77,9 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		effort = ""
 	}
 	supportedEfforts, _ := cfg.Extra["supported_efforts"].([]string)
-	explicitLowEffort := supportsEffort(supportedEfforts, "low")
-	explicitMaxEffort := supportsEffort(supportedEfforts, "max")
+	// A meaningful explicit list is the endpoint's declared effort vocabulary;
+	// auto remains implicit and is therefore ignored here.
+	hasExplicitEfforts := hasExplicitSupportedEfforts(supportedEfforts)
 	protocol, _ := cfg.Extra["reasoning_protocol"].(string)
 	protocol = normalizeReasoningProtocol(protocol)
 	chatURL, _ := cfg.Extra["chat_url"].(string)
@@ -100,9 +102,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		visionDetail = "" // auto — omit the field
 	}
 	deepseek := protocol == "deepseek" || (protocol == "" && officialDeepSeek)
+	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
 	deepseekV4Flash := strings.EqualFold(strings.TrimSpace(cfg.Model), "deepseek-v4-flash")
 	minimax := protocol == "" && IsMiniMax(cfg.BaseURL)
-	zhipu := protocol == "" && IsZhipu(cfg.BaseURL)
+	zhipu := protocol == "glm" || (protocol == "" && IsZhipu(cfg.BaseURL))
 	longcat := protocol == "" && IsLongCat(cfg.BaseURL)
 	ollamaCloud := protocol == "" && IsOllamaCloud(cfg.BaseURL)
 	kimiK3 := IsKimiAPI(cfg.BaseURL) && strings.EqualFold(strings.TrimSpace(cfg.Model), "kimi-k3")
@@ -127,17 +130,32 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		case "", "off": // "off" is a retired level (disabled thinking); fall back to the default depth
 			effort = "high"
 		case "disabled":
+			if hasExplicitEfforts && !supportsEffort(supportedEfforts, effort) {
+				return nil, fmt.Errorf("openai: provider %q: effort %q is not listed in supported_efforts: %v", name, effort, supportedEfforts)
+			}
 			// DeepSeek can turn thinking off too; route through thinking.type and
 			// drop the depth hint so the wire carries thinking.type=disabled only.
 			effort = ""
 			thinkingType = "disabled"
-		case "low":
-			if !deepseekV4Flash && !explicitLowEffort {
-				return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort low requires deepseek-v4-flash or explicit supported_efforts", name)
-			}
-		case "high", "max":
 		default:
-			return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be low, high, max, or disabled", name)
+			if hasExplicitEfforts {
+				// A provider that declares supported_efforts defines the endpoint's
+				// complete effort vocabulary. Honor that list for compatible DeepSeek
+				// request shapes instead of applying the built-in official scale.
+				if !supportsEffort(supportedEfforts, effort) {
+					return nil, fmt.Errorf("openai: provider %q: effort %q is not listed in supported_efforts: %v", name, effort, supportedEfforts)
+				}
+				break
+			}
+			switch effort {
+			case "low":
+				if !deepseekV4Flash {
+					return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort low requires deepseek-v4-flash or explicit supported_efforts", name)
+				}
+			case "high", "max":
+			default:
+				return nil, fmt.Errorf("openai: provider %q uses DeepSeek thinking; effort must be low, high, max, or disabled", name)
+			}
 		}
 	case minimax:
 		// M3's knob is binary. The config effort layer normalises user input
@@ -186,47 +204,59 @@ func New(cfg provider.Config) (provider.Provider, error) {
 			return nil, fmt.Errorf("openai: provider %q uses Ollama Cloud thinking; effort must be none, low, medium, high, or max", name)
 		}
 	case effort != "":
+		if hasExplicitEfforts {
+			// Explicit endpoint metadata overrides the generic OpenAI enum and its
+			// legacy max-to-high compatibility clamp.
+			if !supportsEffort(supportedEfforts, effort) {
+				return nil, fmt.Errorf("openai: provider %q: effort %q is not listed in supported_efforts: %v", name, effort, supportedEfforts)
+			}
+			break
+		}
 		// Non-DeepSeek backends use OpenAI's reasoning_effort scale (low/medium/
-		// high) by default. Preserve max only when the resolved model explicitly
-		// advertises it (for example OpenCode Go's Kimi K3); otherwise max remains
+		// high) by default. Without an explicit provider vocabulary, max remains
 		// clamped to the OpenAI ceiling because MiMo and similar backends reject it.
 		switch effort {
 		case "max":
-			if !explicitMaxEffort {
-				effort = "high"
-			}
+			effort = "high"
 		case "low", "medium", "high":
 		default:
 			return nil, fmt.Errorf("openai: provider %q: effort must be low, medium, or high", name)
 		}
+	}
+	// The automatic cap protects DeepSeek reasoning, not ordinary long-form
+	// output. Preserve an explicit user budget in either mode, but leave a
+	// thinking-disabled request uncapped unless the user configured one.
+	if maxOutputTokens == 0 && officialDeepSeek && thinkingType != "disabled" {
+		maxOutputTokens = provider.DefaultReasoningOutputTokens
 	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("openai: network: %w", err)
 	}
 	return &client{
-		name:          name,
-		apiKey:        cfg.APIKey,
-		keyEnv:        keyEnv,
-		keySource:     keySource,
-		baseURL:       strings.TrimRight(cfg.BaseURL, "/"),
-		chatURL:       chatURL,
-		prefixChatURL: prefixChatURL,
-		headers:       cleanCustomHeaders(headers),
-		extraBody:     cleanExtraBody(extraBody),
-		model:         normalizeModelID(cfg.BaseURL, cfg.Model),
-		deepseek:      deepseek,
-		minimax:       minimax,
-		zhipu:         zhipu,
-		longcat:       longcat,
-		kimiK3:        kimiK3,
-		mimo:          IsMiMo(cfg.BaseURL),
-		thinkingType:  thinkingType,
-		vision:        vision,
-		visionDetail:  visionDetail,
-		effort:        effort,
-		http:          httpClient,
-		idleTimeout:   defaultStreamIdleTimeout,
+		name:            name,
+		apiKey:          cfg.APIKey,
+		keyEnv:          keyEnv,
+		keySource:       keySource,
+		baseURL:         strings.TrimRight(cfg.BaseURL, "/"),
+		chatURL:         chatURL,
+		prefixChatURL:   prefixChatURL,
+		headers:         cleanCustomHeaders(headers),
+		extraBody:       cleanExtraBody(extraBody),
+		model:           normalizeModelID(cfg.BaseURL, cfg.Model),
+		deepseek:        deepseek,
+		minimax:         minimax,
+		zhipu:           zhipu,
+		longcat:         longcat,
+		kimiK3:          kimiK3,
+		mimo:            IsMiMo(cfg.BaseURL),
+		thinkingType:    thinkingType,
+		vision:          vision,
+		visionDetail:    visionDetail,
+		maxOutputTokens: maxOutputTokens,
+		effort:          effort,
+		http:            httpClient,
+		idleTimeout:     defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -234,6 +264,16 @@ func supportsEffort(levels []string, want string) bool {
 	want = strings.ToLower(strings.TrimSpace(want))
 	for _, level := range levels {
 		if strings.ToLower(strings.TrimSpace(level)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExplicitSupportedEfforts(levels []string) bool {
+	for _, level := range levels {
+		level = strings.ToLower(strings.TrimSpace(level))
+		if level != "" && level != "auto" {
 			return true
 		}
 	}
@@ -251,29 +291,30 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name          string
-	apiKey        string
-	keyEnv        string // api_key_env name, surfaced in auth errors
-	keySource     string // source of keyEnv, surfaced in auth errors
-	baseURL       string
-	chatURL       string
-	prefixChatURL string // official DeepSeek Beta endpoint; empty for custom gateways
-	headers       map[string]string
-	extraBody     map[string]any
-	model         string
-	http          *http.Client
-	deepseek      bool
-	minimax       bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
-	zhipu         bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
-	longcat       bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
-	kimiK3        bool          // true only for kimi-k3 on Moonshot's official direct API hosts
-	mimo          bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
-	thinkingType  string        // explicit `thinking` config override (enabled|disabled); "" = no override
-	vision        bool          // model accepts image input — embed attached images as image_url parts
-	visionDetail  string        // image_url detail hint (low|high); "" = auto/omit
-	effort        string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
-	idleTimeout   time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
-	authed        atomic.Bool   // a request has succeeded — gate transient-401 retry
+	name            string
+	apiKey          string
+	keyEnv          string // api_key_env name, surfaced in auth errors
+	keySource       string // source of keyEnv, surfaced in auth errors
+	baseURL         string
+	chatURL         string
+	prefixChatURL   string // official DeepSeek Beta endpoint; empty for custom gateways
+	headers         map[string]string
+	extraBody       map[string]any
+	model           string
+	http            *http.Client
+	deepseek        bool
+	minimax         bool          // true for api.minimaxi.com — emits MiniMax-M3's thinking knob instead of reasoning_effort
+	zhipu           bool          // true for Zhipu GLM (bigmodel.cn / z.ai) — gates thinking via thinking.type, ignores reasoning_effort
+	longcat         bool          // true for LongCat — gates thinking via thinking.type, ignores reasoning_effort
+	kimiK3          bool          // true only for kimi-k3 on Moonshot's official direct API hosts
+	mimo            bool          // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
+	thinkingType    string        // explicit `thinking` config override (enabled|disabled); "" = no override
+	vision          bool          // model accepts image input — embed attached images as image_url parts
+	visionDetail    string        // image_url detail hint (low|high); "" = auto/omit
+	maxOutputTokens int           // configured/default total output budget; <=0 omits the optional field
+	effort          string        // reasoning_effort for OpenAI; thinking.type for MiniMax; "" = auto/provider default
+	idleTimeout     time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed          atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
 
 func (c *client) Name() string { return c.name }
@@ -283,25 +324,48 @@ func (c *client) RequiresToolCallReasoning() bool {
 }
 
 func (c *client) RequiresReasoningRoundTrip() bool {
-	return c != nil && c.kimiK3
+	return c != nil && (c.kimiK3 || c.glmThinkingEnabled())
 }
 
 func (c *client) WarnOnMissingToolCallReasoning() bool {
-	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model)
+	return c.RequiresToolCallReasoning() && expectsDeepSeekToolCallReasoning(c.model, c.thinkingType)
 }
 
-func expectsDeepSeekToolCallReasoning(model string) bool {
-	model = strings.ToLower(strings.TrimSpace(model))
-	if !strings.Contains(model, "deepseek") || strings.Contains(model, "flash") {
+func (c *client) glmThinkingEnabled() bool {
+	if c == nil || !c.zhipu {
 		return false
 	}
-	// "-pro" must end a name segment: a bare Contains would also match the
-	// deepseek-prover math models, which do not emit tool-call reasoning.
-	return strings.Contains(model, "reasoner") ||
-		strings.Contains(model, "deepseek-r1") ||
-		strings.HasSuffix(model, "-pro") ||
-		strings.Contains(model, "-pro-") ||
-		strings.Contains(model, "-pro.")
+	t := c.effort
+	if c.thinkingType != "" {
+		t = c.thinkingType
+	}
+	return t != "disabled"
+}
+
+func expectsDeepSeekToolCallReasoning(model, thinkingType string) bool {
+	if strings.EqualFold(strings.TrimSpace(thinkingType), "enabled") {
+		return true
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	return strings.Contains(model, "deepseek-v4-flash") ||
+		strings.Contains(model, "deepseek-v4-pro") ||
+		strings.Contains(model, "deepseek-v3.2") ||
+		strings.Contains(model, "deepseek-reasoner") ||
+		strings.Contains(model, "deepseek-r1")
+}
+
+func (c *client) MissingToolCallReasoningWarningIdentity() string {
+	if c == nil {
+		return ""
+	}
+	protocol := "openai"
+	if c.deepseek {
+		protocol = "deepseek"
+	}
+	return strings.Join([]string{
+		"openai", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinkingType), strings.TrimSpace(c.effort),
+	}, "\x00")
 }
 
 func (c *client) sendOpts() provider.SendOptions {
@@ -316,7 +380,7 @@ func (c *client) sendOpts() provider.SendOptions {
 
 func normalizeReasoningProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
-	case "deepseek", "openai", "none":
+	case "deepseek", "glm", "openai", "none":
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
@@ -387,7 +451,7 @@ func cleanExtraBody(in map[string]any) map[string]any {
 
 func reservedExtraBodyField(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "model", "messages", "tools", "stream", "stream_options", "temperature", "max_tokens", "reasoning_effort", "thinking":
+	case "model", "messages", "tools", "stream", "stream_options", "temperature", "max_tokens", "max_completion_tokens", "max_output_tokens", "reasoning_effort", "thinking":
 		return true
 	default:
 		return false
@@ -426,6 +490,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 }
 
 func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatRequest, tools []provider.ToolSchema) (<-chan provider.Chunk, error) {
+	requestCtx := provider.WithRequestAttemptCounter(ctx)
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	if err := json.NewEncoder(buf).Encode(wireReq); err != nil {
@@ -447,14 +512,14 @@ func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatR
 		applyCustomHeaders(httpReq.Header, c.headers)
 		return httpReq, nil
 	}
-	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
+	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
 	if err != nil {
 		return nil, provider.AnnotateToolSchemaError(err, tools)
 	}
 	c.authed.Store(true)
 
 	out := make(chan provider.Chunk)
-	go c.streamWithReconnect(ctx, resp, newReq, out)
+	go c.streamWithReconnect(requestCtx, resp, newReq, out)
 	return out, nil
 }
 
@@ -496,7 +561,7 @@ func (c *client) streamWithPrefixContinuation(ctx context.Context, req provider.
 					return
 				}
 			case provider.ChunkUsage:
-				currentUsage = mergeUsage(currentUsage, chunk.Usage)
+				currentUsage = mergeUsage(currentUsage, chunk.Usage, false)
 			case provider.ChunkDone:
 				// The wrapper emits one final Done after any continuation.
 			case provider.ChunkError:
@@ -516,7 +581,7 @@ func (c *client) streamWithPrefixContinuation(ctx context.Context, req provider.
 			}
 		}
 
-		totalUsage = mergeUsage(totalUsage, currentUsage)
+		totalUsage = mergeUsage(totalUsage, currentUsage, true)
 		if continuations >= maxPrefixContinuations ||
 			currentUsage == nil || currentUsage.FinishReason != "length" ||
 			currentHadTool ||
@@ -543,7 +608,10 @@ func emitUsageAndDone(ctx context.Context, out chan<- provider.Chunk, usage *pro
 	_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkDone})
 }
 
-func mergeUsage(total, next *provider.Usage) *provider.Usage {
+// mergeUsage folds token counters. countRequests is false for multiple usage
+// chunks from one HTTP stream (keep its request count), and true when combining
+// distinct prefix-continuation requests (sum their request counts).
+func mergeUsage(total, next *provider.Usage, countRequests bool) *provider.Usage {
 	if next == nil {
 		return total
 	}
@@ -551,14 +619,30 @@ func mergeUsage(total, next *provider.Usage) *provider.Usage {
 		clone := *next
 		return &clone
 	}
+	totalRequests := usageRequestCount(total)
+	nextRequests := usageRequestCount(next)
 	total.PromptTokens += next.PromptTokens
 	total.CompletionTokens += next.CompletionTokens
 	total.TotalTokens += next.TotalTokens
 	total.CacheHitTokens += next.CacheHitTokens
 	total.CacheMissTokens += next.CacheMissTokens
 	total.ReasoningTokens += next.ReasoningTokens
+	if countRequests {
+		total.RequestCount = totalRequests + nextRequests
+	} else if nextRequests > totalRequests {
+		total.RequestCount = nextRequests
+	} else {
+		total.RequestCount = totalRequests
+	}
 	total.FinishReason = next.FinishReason
 	return total
+}
+
+func usageRequestCount(usage *provider.Usage) int {
+	if usage != nil && usage.RequestCount > 0 {
+		return usage.RequestCount
+	}
+	return 1
 }
 
 // maxStreamReconnects bounds how many times a mid-stream connection drop is
@@ -664,6 +748,12 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 				if c.RequiresToolCallReasoning() || m.ReasoningContent != "" {
 					cm.ReasoningContent = &m.ReasoningContent
 				}
+			case c.zhipu && m.ReasoningContent != "":
+				// GLM interleaved and preserved thinking require provider-issued
+				// reasoning content to be returned unchanged in later history. Keep
+				// an existing value even after thinking is turned off so an
+				// enabled→disabled session retains its valid history bytes.
+				cm.ReasoningContent = &m.ReasoningContent
 			}
 		}
 		for _, tc := range m.ToolCalls {
@@ -709,6 +799,13 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		})
 	}
 
+	maxOutputTokens := req.MaxTokens
+	if maxOutputTokens == 0 {
+		maxOutputTokens = c.maxOutputTokens
+	}
+	if maxOutputTokens < 0 {
+		maxOutputTokens = 0
+	}
 	out := chatRequest{
 		Model:           c.model,
 		Messages:        msgs,
@@ -716,7 +813,7 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		Stream:          true,
 		StreamOptions:   &streamOptions{IncludeUsage: true},
 		Temperature:     req.Temperature,
-		MaxTokens:       req.MaxTokens,
+		MaxTokens:       maxOutputTokens,
 		ReasoningEffort: c.effort,
 		ExtraBody:       c.extraBody,
 	}
@@ -726,9 +823,15 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		// names the output budget max_completion_tokens rather than max_tokens.
 		out.Temperature = nil
 		out.MaxTokens = 0
-		out.MaxCompletionTokens = req.MaxTokens
+		out.MaxCompletionTokens = maxOutputTokens
 		out.ExtraBody = omitExtraBodyFields(out.ExtraBody,
 			"temperature", "top_p", "n", "presence_penalty", "frequency_penalty", "max_completion_tokens")
+	case IsOpenAI(c.baseURL):
+		// OpenAI's current Chat Completions contract replaces max_tokens with
+		// max_completion_tokens, which includes visible and reasoning tokens and
+		// is required by o-series models. Compatible gateways retain max_tokens.
+		out.MaxTokens = 0
+		out.MaxCompletionTokens = maxOutputTokens
 	case c.deepseek:
 		// DeepSeek's CoT is controlled by `thinking` plus `reasoning_effort` for
 		// depth. Thinking is on by default but can be turned off via
@@ -880,6 +983,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		if sr.Usage != nil {
 			u := normaliseUsage(sr.Usage)
 			u.FinishReason = lastFinishReason
+			provider.ApplyRequestAttemptCount(ctx, u)
 			emitted = true
 			if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkUsage, Usage: u}) {
 				return emitted, ctx.Err()

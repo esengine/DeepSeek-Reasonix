@@ -10,6 +10,7 @@ import (
 const (
 	ReasoningProtocolAuto     = "auto"
 	ReasoningProtocolDeepSeek = "deepseek"
+	ReasoningProtocolGLM      = "glm"
 	ReasoningProtocolOpenAI   = "openai"
 	ReasoningProtocolNone     = "none"
 )
@@ -63,6 +64,8 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 			return effortCapabilityFromModel(cap)
 		}
 		return deepSeekEffortCapability()
+	case ReasoningProtocolGLM:
+		return glmEffortCapability()
 	case ReasoningProtocolOpenAI:
 		return openAIEffortCapability()
 	}
@@ -72,6 +75,8 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	switch ReasoningProtocolForEntry(e) {
 	case ReasoningProtocolDeepSeek:
 		return deepSeekEffortCapability()
+	case ReasoningProtocolGLM:
+		return glmEffortCapability()
 	case ReasoningProtocolOpenAI:
 		return openAIEffortCapability()
 	}
@@ -89,7 +94,7 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		// mirrors that vocabulary. Default is "enabled" because GLM runs with
 		// thinking on out of the box; "auto" means "don't override the model
 		// default" (== enabled for GLM).
-		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
+		return glmEffortCapability()
 	case isLongCatEntry(e):
 		// LongCat exposes the same binary thinking vocabulary on its
 		// OpenAI-compatible endpoint and documents no reasoning_effort depth scale.
@@ -164,6 +169,8 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		default:
 			return "", fmt.Errorf("usage: /effort auto|low|medium|high")
 		}
+	case ReasoningProtocolGLM:
+		return normalizeGLMEffort(level)
 	}
 	switch {
 	case isMiniMaxEntry(e):
@@ -189,16 +196,7 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 		// depth levels onto the nearest valid value so a stale /effort high|low
 		// still works. "off" is a retired DeepSeek level meaning "no thinking",
 		// which maps to "disabled".
-		switch level {
-		case "enabled", "disabled":
-			return level, nil
-		case "off":
-			return "disabled", nil
-		case "low", "medium", "high", "xhigh", "max":
-			return "enabled", nil
-		default:
-			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
-		}
+		return normalizeGLMEffort(level)
 	case isLongCatEntry(e):
 		// LongCat's knob is binary (enabled|disabled); depth-like aliases mean
 		// thinking on, while the legacy off spellings disable it.
@@ -305,6 +303,9 @@ func ReasoningProtocolForEntry(e *ProviderEntry) string {
 	if cap, ok := resolvedModelReasoningCapability(e); ok {
 		return cap.Protocol
 	}
+	if isTokenRhythmGLMEntry(e) {
+		return ReasoningProtocolGLM
+	}
 	if isDeepSeekEntry(e) {
 		return ReasoningProtocolDeepSeek
 	}
@@ -326,7 +327,7 @@ func normalizeReasoningProtocol(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "", ReasoningProtocolAuto:
 		return ""
-	case ReasoningProtocolDeepSeek, ReasoningProtocolOpenAI, ReasoningProtocolNone:
+	case ReasoningProtocolDeepSeek, ReasoningProtocolGLM, ReasoningProtocolOpenAI, ReasoningProtocolNone:
 		return strings.ToLower(strings.TrimSpace(raw))
 	default:
 		return ""
@@ -352,6 +353,22 @@ func isMiniMaxEntry(e *ProviderEntry) bool {
 // entry-wrapper just gates on the openai kind.
 func isZhipuEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && openai.IsZhipu(e.BaseURL)
+}
+
+// isTokenRhythmGLMEntry upgrades older Token Rhythm configurations that predate
+// per-model protocol overrides. Keep the rule scoped to the gateway and exact
+// official model IDs so unrelated mixed-model providers retain their existing
+// request shape.
+func isTokenRhythmGLMEntry(e *ProviderEntry) bool {
+	if e == nil || e.Kind != "openai" || !openai.IsTokenRhythm(e.BaseURL) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(e.Model)) {
+	case "glm-5", "glm-5.1", "glm-5.2":
+		return true
+	default:
+		return false
+	}
 }
 
 // isLongCatEntry reports whether the entry points at LongCat's OpenAI-compatible
@@ -392,6 +409,23 @@ func deepSeekEffortCapability() EffortCapability {
 
 func openAIEffortCapability() EffortCapability {
 	return EffortCapability{Supported: true, Levels: []string{"auto", "low", "medium", "high"}, Default: "auto"}
+}
+
+func glmEffortCapability() EffortCapability {
+	return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
+}
+
+func normalizeGLMEffort(level string) (string, error) {
+	switch level {
+	case "enabled", "disabled":
+		return level, nil
+	case "off":
+		return "disabled", nil
+	case "low", "medium", "high", "xhigh", "max":
+		return "enabled", nil
+	default:
+		return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
+	}
 }
 
 func effortNotConfigurableError(e *ProviderEntry) error {

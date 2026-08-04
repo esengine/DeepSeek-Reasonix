@@ -5,7 +5,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { __emitMockUpdater, type AppBindings } from "../lib/bridge";
-import { switchUpdaterChannel, UpdaterProvider, useUpdater } from "../lib/useUpdater";
+import { classifyUpdateError, UpdaterProvider, useUpdater } from "../lib/useUpdater";
 
 let passed = 0;
 let failed = 0;
@@ -20,25 +20,24 @@ function ok(value: boolean, label: string) {
   }
 }
 
-function Consumer({ id, checking = false, channel = "" }: { id: string; checking?: boolean; channel?: string }) {
+function Consumer({ id, checking = false }: { id: string; checking?: boolean }) {
   const updater = useUpdater();
   return (
     <section>
       <output id={`${id}-status`}>{updater.status.kind}</output>
       <output id={`${id}-manual`}>
-        {updater.status.kind === "error" && updater.status.manualHint ? "manual" : ""}
+        {updater.status.kind === "error" ? updater.status.disposition : ""}
       </output>
       <output id={`${id}-received`}>
         {updater.status.kind === "downloading" ? updater.status.received : ""}
       </output>
-      {checking && <button id={`${id}-check-update`} type="button" onClick={() => void updater.check(channel)}>Check</button>}
-      <button id={`${id}-reset-stable`} type="button" onClick={() => updater.reset("stable")}>Reset stable</button>
-      <button id={`${id}-reset-preview`} type="button" onClick={() => updater.reset("preview")}>Reset preview</button>
+      {checking && <button id={`${id}-check-update`} type="button" onClick={() => void updater.check()}>Check</button>}
+      <button id={`${id}-reset`} type="button" onClick={() => updater.reset()}>Reset</button>
       {updater.status.kind === "available" && (
-        <button id={`${id}-download`} type="button" onClick={() => updater.download(updater.status.info)}>Download</button>
+        <button id={`${id}-apply`} type="button" onClick={() => updater.apply(updater.status.info)}>Apply</button>
       )}
-      {updater.status.kind === "downloaded" && (
-        <button id={`${id}-install`} type="button" onClick={updater.install}>Install</button>
+      {updater.status.kind === "error" && updater.status.info && (
+        <button id={`${id}-retry`} type="button" onClick={() => updater.apply(updater.status.info!)}>Retry</button>
       )}
     </section>
   );
@@ -62,13 +61,16 @@ await act(async () => {
   root.render(
     <UpdaterProvider>
       <Consumer id="banner" checking />
-      <Consumer id="settings" checking channel="preview" />
+      <Consumer id="settings" checking />
     </UpdaterProvider>,
   );
 });
 
 ok(document.getElementById("banner-status")?.textContent === "idle", "banner starts idle");
 ok(document.getElementById("settings-status")?.textContent === "idle", "settings starts idle");
+ok(classifyUpdateError("prepare update: a pending update already exists") === "recovery", "pending update errors require recovery fallback");
+ok(classifyUpdateError("update: manual update required") === "manual", "manual-only errors prefer the official download");
+ok(classifyUpdateError("connection reset by peer") === "retryable", "transient errors remain retryable");
 
 await act(async () => {
   (document.getElementById("banner-check-update") as HTMLButtonElement).click();
@@ -92,7 +94,7 @@ const debInfo = {
   downloadUrl: "https://example.invalid/download",
   assetSize: 42,
 };
-const installAttempts: Array<{
+const applyAttempts: Array<{
   requestId: string;
   version: string;
   channel: string;
@@ -105,20 +107,10 @@ window.go = {
     App: {
       async CheckUpdate(channel: string) {
         checkedChannels.push(channel);
-        return { ...debInfo, channel: channel === "preview" ? "preview" : "stable" };
+        return { ...debInfo, channel: "stable" };
       },
-      async DownloadUpdateRequest(channel: string, expectedVersion: string, requestId: string) {
-        return {
-          requestId,
-          version: expectedVersion,
-          channel: channel === "preview" ? "preview" : "stable",
-          path: "/tmp/update.deb",
-          size: 42,
-          sha256: "abc",
-        };
-      },
-      InstallUpdateRequest(channel: string, expectedVersion: string, requestId: string) {
-        return new Promise<void>((resolve, reject) => installAttempts.push({
+      ApplyUpdateRequest(channel: string, expectedVersion: string, requestId: string) {
+        return new Promise<void>((resolve, reject) => applyAttempts.push({
           requestId,
           version: expectedVersion,
           channel,
@@ -134,80 +126,89 @@ await act(async () => {
   (document.getElementById("settings-check-update") as HTMLButtonElement).click();
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-ok(checkedChannels[0] === "preview", "settings check forwards the selected Preview channel");
+ok(checkedChannels[0] === "stable", "settings check uses the official release channel");
 ok(document.getElementById("banner-status")?.textContent === "available", "deb update becomes available");
 ok(document.getElementById("settings-status")?.textContent === "available", "deb availability is shared");
 
 await act(async () => {
-  (document.getElementById("banner-download") as HTMLButtonElement).click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  (document.getElementById("banner-apply") as HTMLButtonElement).click();
 });
-ok(document.getElementById("banner-status")?.textContent === "downloaded", "deb download completes");
-
-await act(async () => {
-  (document.getElementById("banner-install") as HTMLButtonElement).click();
-});
-ok(document.getElementById("banner-status")?.textContent === "authorizing", "deb install starts authorizing");
+ok(document.getElementById("banner-status")?.textContent === "authorizing", "deb apply starts authorizing");
 ok(document.getElementById("settings-status")?.textContent === "authorizing", "authorizing state is shared");
 
 await act(async () => {
   __emitMockUpdater({
-    requestId: installAttempts[0].requestId,
-    version: installAttempts[0].version,
-    channel: "preview",
-    phase: "recovering",
+    requestId: applyAttempts[0].requestId,
+    version: applyAttempts[0].version,
+    channel: "stable",
+    phase: "downloading",
+    received: 10,
+    total: 42,
+  });
+});
+ok(document.getElementById("banner-status")?.textContent === "downloading", "download phase is shared");
+ok(document.getElementById("banner-received")?.textContent === "10", "download progress is shared");
+
+await act(async () => {
+  __emitMockUpdater({
+    requestId: applyAttempts[0].requestId,
+    version: applyAttempts[0].version,
+    channel: "stable",
+    phase: "verifying",
     received: 42,
     total: 42,
   });
 });
-ok(document.getElementById("banner-status")?.textContent === "recovering", "stale update recovery is shared");
-ok(document.getElementById("settings-status")?.textContent === "recovering", "settings observes stale update recovery");
+ok(document.getElementById("banner-status")?.textContent === "verifying", "verify phase is shared");
 
 await act(async () => {
   __emitMockUpdater({
-    requestId: installAttempts[0].requestId,
-    version: installAttempts[0].version,
-    channel: "preview",
+    requestId: applyAttempts[0].requestId,
+    version: applyAttempts[0].version,
+    channel: "stable",
     phase: "installing",
     received: 42,
     total: 42,
   });
 });
-ok(document.getElementById("banner-status")?.textContent === "installing", "helper phase advances to installing");
+ok(document.getElementById("banner-status")?.textContent === "installing", "install phase advances");
 
 await act(async () => {
-  __emitMockUpdater({
-    requestId: installAttempts[0].requestId,
-    version: installAttempts[0].version,
-    channel: "preview",
-    phase: "downloaded",
-    received: 42,
-    total: 42,
-  });
-  installAttempts[0]?.resolve();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-});
-ok(document.getElementById("banner-status")?.textContent === "downloaded", "authorization cancellation returns to downloaded");
-
-await act(async () => {
-  (document.getElementById("banner-install") as HTMLButtonElement).click();
-});
-ok(document.getElementById("banner-status")?.textContent === "authorizing", "retry re-enters authorizing");
-
-await act(async () => {
-  installAttempts[1]?.reject(new Error("update: manual update required: system update helper is unavailable"));
+  applyAttempts[0]?.reject(new Error("update: manual update required: system update helper is unavailable"));
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
 ok(document.getElementById("banner-status")?.textContent === "error", "manual reclassification leaves busy state");
 ok(document.getElementById("banner-manual")?.textContent === "manual", "manual reclassification offers download fallback");
 ok(document.getElementById("settings-status")?.textContent === "error", "manual fallback error is shared");
+ok(!!document.getElementById("banner-retry"), "error state exposes retry");
 
-let resolveSavedCheck!: (value: typeof debInfo) => void;
-let resolvePreviewCheck!: (value: typeof debInfo) => void;
-window.go.main.App.CheckUpdate = (selected: string) =>
+// Retry releases the mutex and can start a new apply immediately.
+await act(async () => {
+  (document.getElementById("banner-retry") as HTMLButtonElement).click();
+});
+ok(document.getElementById("banner-status")?.textContent === "authorizing", "retry re-enters applying");
+await act(async () => {
+  applyAttempts[1]?.resolve();
+  __emitMockUpdater({
+    requestId: applyAttempts[1].requestId,
+    version: applyAttempts[1].version,
+    channel: "stable",
+    phase: "relaunching",
+    received: 0,
+    total: 0,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+ok(document.getElementById("banner-status")?.textContent === "relaunching", "relaunching phase is shared");
+
+let resolveFirstCheck!: (value: typeof debInfo) => void;
+let resolveSecondCheck!: (value: typeof debInfo) => void;
+let checkCalls = 0;
+window.go.main.App.CheckUpdate = () =>
   new Promise<typeof debInfo>((resolve) => {
-    if (selected === "preview") resolvePreviewCheck = resolve;
-    else resolveSavedCheck = resolve;
+    checkCalls += 1;
+    if (checkCalls === 1) resolveFirstCheck = resolve;
+    else resolveSecondCheck = resolve;
   });
 
 await act(async () => {
@@ -215,141 +216,126 @@ await act(async () => {
   (document.getElementById("settings-check-update") as HTMLButtonElement).click();
 });
 await act(async () => {
-  resolvePreviewCheck({ ...debInfo, channel: "preview", latest: "v1.2.0" });
+  resolveSecondCheck({ ...debInfo, channel: "stable", latest: "v1.2.0" });
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-ok(document.getElementById("banner-status")?.textContent === "available", "newest channel check publishes its result");
+ok(document.getElementById("banner-status")?.textContent === "available", "newest official check publishes its result");
 await act(async () => {
-  resolveSavedCheck({ ...debInfo, available: false, channel: "stable", latest: "v1.0.0" });
+  resolveFirstCheck({ ...debInfo, available: false, channel: "stable", latest: "v1.0.0" });
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-ok(document.getElementById("banner-status")?.textContent === "available", "stale channel check cannot overwrite the newest result");
+ok(document.getElementById("banner-status")?.textContent === "available", "stale official check cannot overwrite the newest result");
 
-let oldDownloadRequestId = "";
-let oldDownloadVersion = "";
-let resolveOldDownload!: (value: { requestId: string; version: string; channel: string; path: string; size: number; sha256: string }) => void;
-window.go.main.App.DownloadUpdateRequest = (_channel: string, expectedVersion: string, requestId: string) =>
-  new Promise((resolve) => {
-    oldDownloadRequestId = requestId;
-    oldDownloadVersion = expectedVersion;
-    resolveOldDownload = resolve;
+let oldApplyRequestId = "";
+let oldApplyVersion = "";
+let resolveOldApply!: () => void;
+window.go.main.App.ApplyUpdateRequest = (_channel: string, expectedVersion: string, requestId: string) =>
+  new Promise<void>((resolve) => {
+    oldApplyRequestId = requestId;
+    oldApplyVersion = expectedVersion;
+    resolveOldApply = resolve;
   });
 await act(async () => {
-  (document.getElementById("banner-download") as HTMLButtonElement).click();
+  (document.getElementById("banner-apply") as HTMLButtonElement).click();
 });
-ok(document.getElementById("banner-status")?.textContent === "downloading", "Preview download starts");
+ok(document.getElementById("banner-status")?.textContent === "authorizing", "official apply starts");
 await act(async () => {
   __emitMockUpdater({
-    requestId: oldDownloadRequestId,
-    version: `${oldDownloadVersion}-wrong`,
-    channel: "preview",
-    phase: "downloaded",
+    requestId: oldApplyRequestId,
+    version: `${oldApplyVersion}-wrong`,
+    channel: "stable",
+    phase: "installing",
     received: 42,
     total: 42,
   });
 });
 ok(
-  document.getElementById("banner-status")?.textContent === "downloading",
-  "same-request wrong-version progress cannot complete the active Preview download",
+  document.getElementById("banner-status")?.textContent === "authorizing",
+  "same-request wrong-version progress cannot advance the active apply",
 );
 await act(async () => {
   __emitMockUpdater({
-    requestId: oldDownloadRequestId,
-    version: oldDownloadVersion,
-    channel: "stable",
+    requestId: oldApplyRequestId,
+    version: oldApplyVersion,
+    channel: "preview",
     phase: "downloading",
     received: 41,
     total: 42,
   });
 });
-ok(document.getElementById("banner-received")?.textContent === "0", "wrong-channel progress cannot update the active Preview download");
+ok(document.getElementById("banner-received")?.textContent === "", "retired-channel progress cannot update the active official apply");
 await act(async () => {
-  (document.getElementById("banner-reset-preview") as HTMLButtonElement).click();
+  (document.getElementById("banner-reset") as HTMLButtonElement).click();
   __emitMockUpdater({
-    requestId: oldDownloadRequestId,
-    version: oldDownloadVersion,
-    channel: "preview",
-    phase: "downloaded",
-    received: 42,
-    total: 42,
+    requestId: oldApplyRequestId,
+    version: oldApplyVersion,
+    channel: "stable",
+    phase: "error",
+    received: 0,
+    total: 0,
+    err: "old apply failed",
   });
-  resolveOldDownload({
-    requestId: oldDownloadRequestId,
-    version: oldDownloadVersion,
-    channel: "preview",
-    path: "/tmp/old.deb",
-    size: 42,
-    sha256: "abc",
-  });
+  resolveOldApply();
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
 ok(document.getElementById("banner-status")?.textContent === "idle", "same-channel superseded progress and Promise completion stay ignored");
 
-window.go.main.App.CheckUpdate = async (selected: string) => ({
+window.go.main.App.CheckUpdate = async () => ({
   ...debInfo,
-  channel: selected === "preview" ? "preview" : "stable",
-  latest: selected === "preview" ? "v1.2.0" : "v1.1.0",
+  channel: "stable",
+  latest: "v1.2.0",
 });
-window.go.main.App.DownloadUpdateRequest = async (selected: string, _expectedVersion: string, requestId: string) => ({
-  requestId,
-  version: "v1.2.0-preview.99",
-  channel: selected === "preview" ? "preview" : "stable",
-  path: "/tmp/new.deb",
-  size: 42,
-  sha256: "abc",
-});
+window.go.main.App.ApplyUpdateRequest = async () => {
+  throw new Error("should not reach when version mismatches from progress only");
+};
+
 await act(async () => {
   (document.getElementById("settings-check-update") as HTMLButtonElement).click();
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-await act(async () => {
-  (document.getElementById("banner-download") as HTMLButtonElement).click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-});
-ok(document.getElementById("banner-status")?.textContent === "available", "download result for a different version is rejected");
+ok(document.getElementById("banner-status")?.textContent === "available", "official update is available again");
 
-window.go.main.App.DownloadUpdateRequest = async (selected: string, expectedVersion: string, requestId: string) => ({
-  requestId,
-  version: expectedVersion,
-  channel: selected === "preview" ? "preview" : "stable",
-  path: "/tmp/new.deb",
-  size: 42,
-  sha256: "abc",
-});
+window.go.main.App.ApplyUpdateRequest = async (_channel: string, _expectedVersion: string, requestId: string) => {
+  // Hang until cancelled by reset so we can prove supersession.
+  return new Promise<void>((_resolve, reject) => {
+    applyAttempts.push({
+      requestId,
+      version: _expectedVersion,
+      channel: _channel,
+      resolve: () => {},
+      reject,
+    });
+  });
+};
 await act(async () => {
-  (document.getElementById("banner-download") as HTMLButtonElement).click();
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  (document.getElementById("banner-apply") as HTMLButtonElement).click();
 });
-ok(document.getElementById("banner-status")?.textContent === "downloaded", "Preview update is ready for install");
+const staleApply = applyAttempts[applyAttempts.length - 1];
+ok(document.getElementById("banner-status")?.textContent === "authorizing", "official apply starts");
 await act(async () => {
-  (document.getElementById("banner-install") as HTMLButtonElement).click();
-});
-const staleInstall = installAttempts[installAttempts.length - 1];
-ok(document.getElementById("banner-status")?.textContent === "authorizing", "Preview install starts");
-await act(async () => {
-  (document.getElementById("banner-reset-stable") as HTMLButtonElement).click();
+  (document.getElementById("banner-reset") as HTMLButtonElement).click();
   __emitMockUpdater({
-    requestId: staleInstall.requestId,
-    version: staleInstall.version,
-    channel: "preview",
+    requestId: staleApply.requestId,
+    version: staleApply.version,
+    channel: "stable",
     phase: "error",
     received: 0,
     total: 0,
     err: "old install failed",
   });
-  staleInstall.reject(new Error("old Preview install failed"));
+  staleApply.reject(new Error("old official apply failed"));
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
-ok(document.getElementById("banner-status")?.textContent === "idle", "superseded install progress and rejection stay ignored");
+ok(document.getElementById("banner-status")?.textContent === "idle", "superseded apply progress and rejection stay ignored");
 
-window.go.main.App.CheckUpdate = async () => ({ ...debInfo, channel: "stable" });
+window.go.main.App.CheckUpdate = async () => ({ ...debInfo, channel: "preview" });
 await act(async () => {
   (document.getElementById("settings-check-update") as HTMLButtonElement).click();
   await new Promise((resolve) => setTimeout(resolve, 0));
 });
 ok(document.getElementById("banner-status")?.textContent === "error", "wrong-channel check response leaves the checking state");
 
-window.go.main.App.CheckUpdate = async () => ({ ...debInfo, channel: "preview", latest: "v1.3.0" });
+window.go.main.App.CheckUpdate = async () => ({ ...debInfo, channel: "stable", latest: "v1.3.0" });
 await act(async () => {
   (document.getElementById("settings-check-update") as HTMLButtonElement).click();
   await new Promise((resolve) => setTimeout(resolve, 0));
@@ -358,43 +344,5 @@ ok(document.getElementById("banner-status")?.textContent === "available", "check
 
 delete window.go;
 
-const channelTransitions: string[] = [];
-let releaseSave!: (saved: boolean) => void;
-const pendingSwitch = switchUpdaterChannel(
-  "preview",
-  (channel) => {
-    channelTransitions.push(`invalidate:${channel}`);
-  },
-  (channel) =>
-    new Promise<boolean>((resolve) => {
-      channelTransitions.push(`save:${channel}`);
-      releaseSave = resolve;
-    }),
-  async (channel) => {
-    channelTransitions.push(`check:${channel}`);
-  },
-);
-ok(channelTransitions.join(",") === "invalidate:preview,save:preview", "channel switch invalidates old updater state before persistence resolves");
-releaseSave(true);
-await pendingSwitch;
-ok(channelTransitions.join(",") === "invalidate:preview,save:preview,check:preview", "successful channel persistence checks the target pointer");
-
-await switchUpdaterChannel(
-  "stable",
-  (channel) => {
-    channelTransitions.push(`invalidate:${channel}`);
-  },
-  async (channel) => {
-    channelTransitions.push(`failed:${channel}`);
-    return false;
-  },
-  async (channel) => {
-    channelTransitions.push(`unexpected:${channel}`);
-  },
-);
-ok(!channelTransitions.includes("unexpected:stable"), "failed channel persistence does not check an unselected channel");
-
-await act(async () => root.unmount());
-
-console.log(`\n${passed} passed, ${failed} failed`);
+process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

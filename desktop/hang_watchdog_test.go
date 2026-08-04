@@ -72,6 +72,32 @@ func TestMainThreadHeartbeatAgeIgnoresWallClockJump(t *testing.T) {
 	}
 }
 
+func TestWatchdogResetsHeartbeatAfterSleepGap(t *testing.T) {
+	oldBase := mainThreadClockBase
+	oldElapsed := mainThreadLastHeartbeatElapsed.Load()
+	oldWall := mainThreadLastHeartbeatWall.Load()
+	t.Cleanup(func() {
+		mainThreadClockBase = oldBase
+		mainThreadLastHeartbeatElapsed.Store(oldElapsed)
+		mainThreadLastHeartbeatWall.Store(oldWall)
+	})
+
+	base := time.Now()
+	mainThreadClockBase = base
+	recordMainThreadHeartbeat(base)
+	wake := base.Add(8 * time.Hour)
+	if !resetMainThreadHeartbeatAfterSleep(base, wake) {
+		t.Fatal("expected sleep gap to reset the heartbeat")
+	}
+	age, _, ok := mainThreadHeartbeatAge(wake.Add(mainThreadHangCheckInterval))
+	if !ok || age != mainThreadHangCheckInterval {
+		t.Fatalf("age after wake = %s, ok=%v; want %s", age, ok, mainThreadHangCheckInterval)
+	}
+	if resetMainThreadHeartbeatAfterSleep(wake, wake.Add(mainThreadHangCheckInterval)) {
+		t.Fatal("ordinary watchdog interval was treated as sleep")
+	}
+}
+
 func TestRecordMainThreadHangWritesPendingReportAndMetrics(t *testing.T) {
 	t.Cleanup(func() {
 		removeAllPendingCrashes()

@@ -186,8 +186,7 @@ func (s *MCPActivationStore) Lookup(scope MCPActivationScope, workspace, source,
 
 // IsEnabled resolves the product enable state for one plugin entry.
 // An explicit activation override wins; otherwise auto_start=false maps to
-// disabled and true/nil map to enabled. Safe Mode callers should skip plugins
-// entirely rather than consulting this helper.
+// disabled and true/nil map to enabled.
 func (s *MCPActivationStore) IsEnabled(entry PluginEntry, workspace string) (bool, error) {
 	scope, workspaceFP, source, owner := ActivationIdentity(entry, workspace)
 	if s != nil {

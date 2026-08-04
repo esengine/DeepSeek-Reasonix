@@ -94,6 +94,21 @@ console.log("\nuse controller meta");
 
 {
   eq(
+    modelSwitchNoticeText("active work is still running; running=false; pending_prompt=false; background_jobs=2; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
+    "The model cannot change while 2 background jobs are running. Open Background jobs in the status bar to stop them.",
+    "model busy guard names the background-job blocker",
+  );
+  eq(
+    effortSwitchNoticeText("active work is still running; running=true; pending_prompt=false; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing effort"),
+    "Reasoning effort cannot change while the current answer is running. Stop it first.",
+    "effort busy guard names the running-answer blocker",
+  );
+  eq(
+    tokenModeSwitchNoticeText("active work is still running; running=true; pending_prompt=true; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
+    "Work mode cannot change while a prompt is waiting for your response. Handle it first.",
+    "work mode busy guard prioritizes the pending prompt blocker",
+  );
+  eq(
     modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
     "The model cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
     "model busy guard is localized",

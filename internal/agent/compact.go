@@ -671,10 +671,18 @@ func charsOfMessages(msgs []provider.Message) int {
 func (a *Agent) summarize(ctx context.Context, region []provider.Message, instructions string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, summaryTimeout)
 	defer cancel()
+	ctx = provider.WithRequestAttemptCounter(ctx)
 	sys := summarySystemPrompt
 	if strings.TrimSpace(instructions) != "" {
 		sys += "\n\nAdditional focus for this compaction (prioritize keeping this):\n" + strings.TrimSpace(instructions)
 	}
+	var usage *provider.Usage
+	defer func() {
+		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
+		if usage != nil && (usage.TotalTokens > 0 || usage.RequestCount > 0) {
+			a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
+		}
+	}()
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: sys},
@@ -689,19 +697,12 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	// select on ctx.Done so a stalled stream (open but never delivering or closing)
 	// unblocks on timeout instead of pinning the "compacting…" placeholder forever.
 	var b strings.Builder
-	var usage *provider.Usage
-	emitUsage := func() {
-		if usage != nil && usage.TotalTokens > 0 {
-			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
-		}
-	}
 	for {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
 		case chunk, ok := <-ch:
 			if !ok {
-				emitUsage()
 				s := strings.TrimSpace(b.String())
 				if s == "" {
 					return "", fmt.Errorf("summarizer returned empty output")

@@ -1,19 +1,11 @@
-name: Prepare release notes
+name: Prepare release
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Exact release version without a tag prefix (for example 1.18.0 or 1.19.0-preview.3)"
+        description: "Official version without a tag prefix (for example 1.20.0)"
         required: true
-        type: string
-      from_tag:
-        description: "Previous release tag (defaults to the newest catalog entry)"
-        required: false
-        type: string
-      target_pr:
-        description: "Optional open same-repository PR into main-v2 to reuse instead of opening a release-only PR"
-        required: false
         type: string
 
 permissions:
@@ -36,51 +28,24 @@ jobs:
       - name: Select the review branch
         env:
           GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
-          TARGET_PR: ${{ inputs.target_pr }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin main-v2
 
-          if [ -n "$TARGET_PR" ]; then
-            if [[ ! "$TARGET_PR" =~ ^[1-9][0-9]*$ ]]; then
-              echo "::error::target_pr must be a positive pull request number"
-              exit 1
-            fi
-            mapfile -t pr_state < <(
-              gh pr view "$TARGET_PR" --repo "$REPOSITORY" \
-                --json state,baseRefName,headRefName,isCrossRepository \
-                --jq '[.state, .baseRefName, .headRefName, (.isCrossRepository | tostring)][]'
-            )
-            if [ "${pr_state[0]}" != "OPEN" ] || [ "${pr_state[1]}" != "main-v2" ]; then
-              echo "::error::target_pr must be an open pull request into main-v2"
-              exit 1
-            fi
-            if [ "${pr_state[3]}" != "false" ]; then
-              echo "::error::target_pr comes from a fork; the repository token cannot safely update that branch"
-              exit 1
-            fi
-            branch="${pr_state[2]}"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::version must be MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          branch="release-notes/v${VERSION}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
             git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
             git checkout -b "$branch" --track "origin/$branch"
-            if ! git merge-base --is-ancestor origin/main-v2 HEAD; then
-              echo "::error::target_pr must include the latest main-v2 before release notes are generated"
-              exit 1
-            fi
-            echo "RELEASE_NOTES_PR=$TARGET_PR" >> "$GITHUB_ENV"
+            git merge --no-edit origin/main-v2
           else
-            branch="release-notes/v${VERSION#v}"
-            if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
-              git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
-              git checkout -b "$branch" --track "origin/$branch"
-              git merge --no-edit origin/main-v2
-            else
-              git checkout -b "$branch"
-            fi
-            echo "RELEASE_NOTES_PR=" >> "$GITHUB_ENV"
+            git checkout -b "$branch"
           fi
           echo "RELEASE_NOTES_BRANCH=$branch" >> "$GITHUB_ENV"
 
@@ -90,12 +55,9 @@ jobs:
           DEEPSEEK_MODEL: deepseek-v4-pro
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
-          FROM_TAG: ${{ inputs.from_tag }}
         run: |
           set -euo pipefail
-          args=(--version "$VERSION")
-          if [ -n "$FROM_TAG" ]; then args+=(--from "$FROM_TAG"); fi
-          node scripts/generate-release-notes.mjs "${args[@]}"
+          node scripts/generate-release-notes.mjs --version "$VERSION"
           node scripts/release-notes.mjs validate
           node --test scripts/release-notes.test.mjs
           node scripts/release-notes.mjs render --version "$VERSION" --output /tmp/release-notes.md
@@ -121,12 +83,19 @@ jobs:
           Validate the catalog, citations, bilingual fields, and rendered GitHub release notes before committing."
           fi
           git push -u origin "$RELEASE_NOTES_BRANCH"
-          if [ -n "$RELEASE_NOTES_PR" ]; then
-            echo "Updated existing release-bound PR #$RELEASE_NOTES_PR"
-          elif ! gh pr list --head "$RELEASE_NOTES_BRANCH" --state open --json number --jq 'length > 0' | grep -q true; then
-            gh pr create \
+          if ! gh pr list --head "$RELEASE_NOTES_BRANCH" --state open --json number --jq 'length > 0' | grep -q true; then
+            if ! gh pr create \
               --base main-v2 \
               --head "$RELEASE_NOTES_BRANCH" \
               --title "docs(release): 准备 v${VERSION#v} 中英更新日志" \
-              --body-file /tmp/release-notes.md
+              --body-file /tmp/release-notes.md; then
+              echo "::warning::GitHub Actions could not open the PR; the reviewed branch is preserved."
+              {
+                echo "## Manual PR handoff"
+                echo
+                echo '```sh'
+                echo "gh pr create --repo ${{ github.repository }} --base main-v2 --head $RELEASE_NOTES_BRANCH --fill"
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+            fi
           fi

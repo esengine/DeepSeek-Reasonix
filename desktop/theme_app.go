@@ -68,16 +68,12 @@ func (a *App) ListThemePacks() ([]ThemePackView, error) {
 	activeID := resolveActiveThemeID(st)
 	baseStyle := a.desktopBaseStyleLocked()
 
-	safe := a.themeSafeMode()
 	var out []ThemePackView
 	for _, m := range builtinThemePacks() {
 		cp := m
 		// Base "active" = no pack applied and this is the configured base style.
-		baseActive := !safe && activeID == "" && baseStyle == m.ID
+		baseActive := activeID == "" && baseStyle == m.ID
 		out = append(out, manifestToView(&cp, themeKindBase, baseActive, "", ""))
-	}
-	if safe {
-		return out, nil
 	}
 	for _, ot := range officialThemes() {
 		m := ot.manifest
@@ -107,18 +103,13 @@ func (a *App) ListThemePacks() ([]ThemePackView, error) {
 	return out, nil
 }
 
-// GetActiveThemePack returns the currently enabled pack (nil pack when none / safe mode).
-// Safe mode suppresses pack application but does not delete the stored id.
+// GetActiveThemePack returns the currently enabled pack (nil pack when none).
 func (a *App) GetActiveThemePack() (ThemeActiveView, error) {
 	themeMu.Lock()
 	defer themeMu.Unlock()
 
-	view := ThemeActiveView{SafeMode: a.themeSafeMode()}
+	view := ThemeActiveView{}
 	st := a.migrateThemeDesktopStateLocked()
-	if view.SafeMode {
-		// Do not clear ActiveThemeID — safe mode only blocks loading.
-		return view, nil
-	}
 	activeID := resolveActiveThemeID(st)
 	if st.ActiveThemeID != "" && activeID == "" {
 		// Broken or migrated-away pointer: clear so the next launch is clean.
@@ -146,7 +137,6 @@ func (a *App) GetThemeExperience() (ThemeExperienceView, error) {
 	themeMu.Lock()
 	defer themeMu.Unlock()
 
-	safe := a.themeSafeMode()
 	// Migrate first so a v1 base-style activeThemeId lands in desktop.theme_style
 	// before we read appearance.
 	st := a.migrateThemeDesktopStateLocked()
@@ -155,10 +145,6 @@ func (a *App) GetThemeExperience() (ThemeExperienceView, error) {
 		ThemeMode:      themeMode,
 		BaseStyle:      baseStyle,
 		EffectiveStyle: baseStyle,
-		SafeMode:       safe,
-	}
-	if safe {
-		return view, nil
 	}
 	activeID := resolveActiveThemeID(st)
 	if st.ActiveThemeID != "" && activeID == "" {
@@ -219,9 +205,6 @@ func (a *App) ActivateThemePack(id string) error {
 	defer themeMu.Unlock()
 
 	id = strings.TrimSpace(id)
-	if a.themeSafeMode() && id != "" {
-		return fmt.Errorf("safe mode does not load external themes")
-	}
 	st := a.migrateThemeDesktopStateLocked()
 	if id == "" {
 		st.ActiveThemeID = ""
@@ -357,9 +340,6 @@ func (a *App) SaveThemePack(input ThemeSaveInput) (ThemePackView, error) {
 	themeMu.Lock()
 	defer themeMu.Unlock()
 
-	if a.themeSafeMode() {
-		return ThemePackView{}, fmt.Errorf("safe mode cannot save themes")
-	}
 	m := &ThemePackManifest{
 		SchemaVersion:  themePackSchemaVersion,
 		ID:             strings.TrimSpace(input.ID),
@@ -520,9 +500,6 @@ func (a *App) CopyThemePack(sourceID, newID, newName string) (ThemePackView, err
 	themeMu.Lock()
 	defer themeMu.Unlock()
 
-	if a.themeSafeMode() {
-		return ThemePackView{}, fmt.Errorf("safe mode cannot copy themes")
-	}
 	sourceID = strings.TrimSpace(sourceID)
 	newID = strings.TrimSpace(newID)
 	if !themePackIDRe.MatchString(newID) || isReservedThemeID(newID) {
@@ -606,10 +583,6 @@ func (a *App) CopyThemePack(sourceID, newID, newName string) (ThemePackView, err
 func (a *App) ImportThemePack(sourcePath string, replace bool) (ThemeImportResult, error) {
 	themeMu.Lock()
 	defer themeMu.Unlock()
-
-	if a.themeSafeMode() {
-		return ThemeImportResult{}, fmt.Errorf("safe mode cannot import themes")
-	}
 
 	// Confirm a previously staged conflict without re-picking a file.
 	path := strings.TrimSpace(sourcePath)

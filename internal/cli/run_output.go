@@ -44,10 +44,11 @@ func runOutputSessionID(format runOutputFormat, rawSessionID string, identityKey
 }
 
 type runResultUsage struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+	InputTokens              int  `json:"input_tokens"`
+	OutputTokens             int  `json:"output_tokens"`
+	CacheReadInputTokens     int  `json:"cache_read_input_tokens"`
+	CacheCreationInputTokens int  `json:"cache_creation_input_tokens"`
+	Estimated                bool `json:"estimated,omitempty"`
 }
 
 type runResult struct {
@@ -67,10 +68,11 @@ type runResult struct {
 }
 
 type machineEventUsage struct {
-	InputTokens     int `json:"input_tokens"`
-	OutputTokens    int `json:"output_tokens"`
-	CacheHitTokens  int `json:"cache_hit_tokens"`
-	CacheMissTokens int `json:"cache_miss_tokens"`
+	InputTokens     int  `json:"input_tokens"`
+	OutputTokens    int  `json:"output_tokens"`
+	CacheHitTokens  int  `json:"cache_hit_tokens"`
+	CacheMissTokens int  `json:"cache_miss_tokens"`
+	Estimated       bool `json:"estimated,omitempty"`
 }
 
 // machineEventRecord is deliberately content-free. The existing stream-json
@@ -154,6 +156,7 @@ func (s *runOutputSink) Emit(e event.Event) {
 		s.usage.OutputTokens += e.Usage.CompletionTokens
 		s.usage.CacheReadInputTokens += e.Usage.CacheHitTokens
 		s.usage.CacheCreationInputTokens += e.Usage.CacheMissTokens
+		s.usage.Estimated = s.usage.Estimated || e.Usage.Estimated
 		if e.Pricing != nil {
 			s.cost += e.Pricing.Cost(e.Usage)
 			currency := pricingCurrencyCode(e.Pricing.Currency)
@@ -271,7 +274,7 @@ func (s *runOutputSink) machineEventRecordFor(e event.Event, sequence uint64) ma
 		record.ToolDurationMS = e.Tool.DurationMs
 	case event.Usage:
 		if e.Usage != nil {
-			record.Usage = &machineEventUsage{InputTokens: e.Usage.PromptTokens, OutputTokens: e.Usage.CompletionTokens, CacheHitTokens: e.Usage.CacheHitTokens, CacheMissTokens: e.Usage.CacheMissTokens}
+			record.Usage = &machineEventUsage{InputTokens: e.Usage.PromptTokens, OutputTokens: e.Usage.CompletionTokens, CacheHitTokens: e.Usage.CacheHitTokens, CacheMissTokens: e.Usage.CacheMissTokens, Estimated: e.Usage.Estimated}
 		}
 	case event.ApprovalRequest:
 		record.ApprovalID = e.Approval.ID

@@ -103,6 +103,9 @@ func probeLiveMCP(rep *MCPReport, cfg *config.Config, root, home string, timeout
 		if i, ok := byName[f.Name]; ok {
 			rep.Servers[i].RuntimeStatus = "failed"
 			rep.Servers[i].Error = errText
+			rep.Servers[i].StartupStage = f.Stage
+			rep.Servers[i].StartupElapsedMS = f.Elapsed.Milliseconds()
+			rep.Servers[i].Stderr = sanitizeErrTextWithPaths(f.Stderr, root, home)
 		}
 		issues = append(issues, Issue{
 			Severity: "error", Code: "mcp.start_failed", Subsystem: "mcp",

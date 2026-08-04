@@ -49,7 +49,7 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	start := time.Now().Add(-2 * time.Second).UnixMilli()
 	tab.recordTurnStarted(start)
 	tab.recordUsage(event.Event{
-		Usage:       &provider.Usage{PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140, CacheHitTokens: 70, CacheMissTokens: 30, ReasoningTokens: 10},
+		Usage:       &provider.Usage{PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140, CacheHitTokens: 70, CacheMissTokens: 30, ReasoningTokens: 10, RequestCount: 3, Estimated: true},
 		UsageSource: event.UsageSourceSubagent,
 		SessionHit:  70,
 		SessionMiss: 30,
@@ -58,8 +58,11 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	tab.recordTurnDone(start + 1500)
 
 	got := tab.telemetrySnapshot().Usage
-	if got.RequestCount != 1 || got.PromptTokens != 100 || got.CompletionTokens != 40 || got.TotalTokens != 140 || got.ReasoningTokens != 10 {
+	if got.RequestCount != 3 || got.PromptTokens != 100 || got.CompletionTokens != 40 || got.TotalTokens != 140 || got.ReasoningTokens != 10 {
 		t.Fatalf("usage tokens = %+v", got)
+	}
+	if !got.Estimated || got.LastEstimated {
+		t.Fatalf("usage lost estimated marker: %+v", got)
 	}
 	if got.CacheHitTokens != 70 || got.CacheMissTokens != 30 {
 		t.Fatalf("cache tokens = hit %d miss %d", got.CacheHitTokens, got.CacheMissTokens)
@@ -70,8 +73,11 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	if got.SessionCost <= 0 || got.SessionCurrency != "¥" {
 		t.Fatalf("cost = %f %q, want positive ¥", got.SessionCost, got.SessionCurrency)
 	}
-	if got.Sources[event.UsageSourceSubagent].SessionCost <= 0 || got.Sources[event.UsageSourceSubagent].RequestCount != 1 {
-		t.Fatalf("subagent source stats = %+v, want one costed request", got.Sources[event.UsageSourceSubagent])
+	if got.Sources[event.UsageSourceSubagent].SessionCost <= 0 || got.Sources[event.UsageSourceSubagent].RequestCount != 3 {
+		t.Fatalf("subagent source stats = %+v, want three costed requests", got.Sources[event.UsageSourceSubagent])
+	}
+	if !got.Sources[event.UsageSourceSubagent].Estimated {
+		t.Fatalf("subagent source lost estimated marker: %+v", got.Sources[event.UsageSourceSubagent])
 	}
 
 	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
@@ -85,8 +91,28 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	if context.CacheHitTokens != 70 || context.CacheMissTokens != 30 {
 		t.Fatalf("context usage cache tokens = hit %d miss %d, want 70/30", context.CacheHitTokens, context.CacheMissTokens)
 	}
-	if panel := app.ContextPanel("tab"); panel.TotalTokens != 140 {
-		t.Fatalf("context panel total tokens = %d, want 140", panel.TotalTokens)
+	if !context.Estimated {
+		t.Fatalf("context usage lost estimated marker: %+v", context)
+	}
+	if panel := app.ContextPanel("tab"); panel.TotalTokens != 140 || panel.Estimated || !panel.SessionEstimated {
+		t.Fatalf("context panel usage = %+v, want exact executor turn and estimated session", panel)
+	}
+}
+
+func TestWorkspaceTabMarksEstimatedExecutorTurn(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		Usage:       &provider.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, Estimated: true},
+		UsageSource: event.UsageSourceExecutor,
+	})
+	got := tab.telemetrySnapshot().Usage
+	if !got.Estimated || !got.LastEstimated {
+		t.Fatalf("executor usage lost estimated marker: %+v", got)
+	}
+	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
+	panel := app.ContextPanel("tab")
+	if !panel.SessionEstimated {
+		t.Fatalf("executor panel session usage lost estimated marker: %+v", panel)
 	}
 }
 

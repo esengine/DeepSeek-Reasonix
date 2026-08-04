@@ -338,6 +338,10 @@ export default function LineNumberCode({
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ROW_HEIGHT_ESTIMATE,
     overscan: OVERSCAN,
+    // Syntax-highlighted rows can still require measurement when the user
+    // changes typography, but measurement/scroll updates should not feed a
+    // React render loop for a long code block.
+    directDomUpdates: true,
   });
 
   const scrollToLine = useCallback(
@@ -594,8 +598,9 @@ export default function LineNumberCode({
       >
         {isVirtual ? (
           <div
+            ref={virtualizer.containerRef}
             className="code-lines-wrap"
-            style={{ height: virtualizer.getTotalSize(), width: "100%", position: "relative" }}
+            style={{ width: "100%", position: "relative" }}
           >
             {virtualizer.getVirtualItems().map((row) => (
               <div
@@ -607,7 +612,6 @@ export default function LineNumberCode({
                   top: 0,
                   left: 0,
                   width: "100%",
-                  transform: `translateY(${row.start}px)`,
                 }}
               >
                 {renderRow(row.index)}

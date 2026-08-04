@@ -3,8 +3,8 @@
 # build, publish, and mirror jobs so they agree on a single value. Reads the run's
 # context from env and writes the four outputs to $GITHUB_OUTPUT.
 #
-#   stable: from a desktop-v* prerelease tag push, a manual dispatch with `tag`,
-#           or the stable release orchestrator's workflow_call input.
+#   stable: from a historical desktop-v* run, an official manual recovery with
+#           `tag`, or the stable release orchestrator's workflow_call input.
 #   preview: public publication requires the approved Preview orchestrator;
 #            standalone Preview is limited to non-publishing signing checks.
 #            Legacy canary input is accepted for those checks. The version uses
@@ -72,6 +72,11 @@ else
 		notes_version="$version"
 		;;
 	esac
+	if [ "${EVENT_NAME:-}" = "workflow_dispatch" ] && \
+		[ "${IN_ORCHESTRATED:-false}" != "true" ] && [ "$prerelease" = "true" ]; then
+		echo "::error::manual Desktop recovery accepts only desktop-vMAJOR.MINOR.PATCH" >&2
+		exit 1
+	fi
 fi
 
 {

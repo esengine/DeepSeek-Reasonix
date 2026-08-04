@@ -50,10 +50,9 @@ const (
 	// defaultBaseURL is the first-party endpoint; config may override it (e.g. a
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
-	// defaultMaxTokens is the output ceiling used when the request leaves MaxTokens
-	// unset. Anthropic *requires* max_tokens, and the agent currently doesn't set
-	// it, so this is the de-facto cap. Generous (you only pay for tokens actually
-	// produced) and within every catalog model's limit (Sonnet/Haiku 64K, Opus 128K).
+	// defaultMaxTokens is the output ceiling used when neither the provider config
+	// nor the request supplies one. Anthropic requires max_tokens, so unlike the
+	// optional OpenAI-compatible budget it cannot be omitted.
 	defaultMaxTokens = 32768
 )
 
@@ -81,8 +80,15 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	vision, _ := cfg.Extra["vision"].(bool)
+	webSearch, _ := cfg.Extra["web_search"].(bool)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	authHeader, _ := cfg.Extra["auth_header"].(bool)
+	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
+	if maxOutputTokens <= 0 {
+		// Messages requires max_tokens, so an optional-budget disable request
+		// falls back to the provider's stable mandatory default.
+		maxOutputTokens = defaultMaxTokens
+	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: network: %w", err)
@@ -103,21 +109,23 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		root = defaultBaseURL
 	}
 	return &client{
-		name:        name,
-		apiKey:      cfg.APIKey,
-		keyEnv:      keyEnv,
-		keySource:   keySource,
-		baseURL:     root,
-		model:       cfg.Model,
-		deepseek:    openai.IsDeepSeek(root),
-		thinking:    thinking,
-		effort:      effort,
-		vision:      vision,
-		mimo:        provider.IsMiMoEndpoint(root),
-		headers:     cleanCustomHeaders(headers),
-		authHeader:  authHeader,
-		http:        httpClient, // no overall timeout; lifecycle is ctx-driven
-		idleTimeout: defaultStreamIdleTimeout,
+		name:             name,
+		apiKey:           cfg.APIKey,
+		keyEnv:           keyEnv,
+		keySource:        keySource,
+		baseURL:          root,
+		model:            cfg.Model,
+		deepseek:         openai.IsDeepSeek(root),
+		thinking:         thinking,
+		effort:           effort,
+		vision:           vision,
+		mimo:             provider.IsMiMoEndpoint(root),
+		webSearch:        webSearch,
+		headers:          cleanCustomHeaders(headers),
+		authHeader:       authHeader,
+		defaultMaxTokens: maxOutputTokens,
+		http:             httpClient, // no overall timeout; lifecycle is ctx-driven
+		idleTimeout:      defaultStreamIdleTimeout,
 	}, nil
 }
 
@@ -127,22 +135,24 @@ func newHTTPClient(cfg provider.Config) (*http.Client, error) {
 }
 
 type client struct {
-	name        string
-	apiKey      string
-	keyEnv      string // api_key_env name, surfaced in auth errors
-	keySource   string // source of keyEnv, surfaced in auth errors
-	baseURL     string
-	model       string
-	deepseek    bool   // official DeepSeek Anthropic endpoint: unsigned reasoning replay + automatic cache
-	thinking    string // "adaptive" enables extended thinking; "" = off (config-driven)
-	effort      string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
-	vision      bool   // model accepts image input — embed attached images as base64 image blocks
-	mimo        bool   // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
-	headers     map[string]string
-	authHeader  bool // send Authorization: Bearer instead of Anthropic's x-api-key header
-	http        *http.Client
-	idleTimeout time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
-	authed      atomic.Bool   // a request has succeeded — gate transient-401 retry
+	name             string
+	apiKey           string
+	keyEnv           string // api_key_env name, surfaced in auth errors
+	keySource        string // source of keyEnv, surfaced in auth errors
+	baseURL          string
+	model            string
+	deepseek         bool   // official DeepSeek Anthropic endpoint: unsigned reasoning replay + automatic cache
+	thinking         string // "adaptive" enables extended thinking; "" = off (config-driven)
+	effort           string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
+	vision           bool   // model accepts image input — embed attached images as base64 image blocks
+	mimo             bool   // true for MiMo — upgrades legacy tuple schemas to Draft 2020-12
+	webSearch        bool   // enable server-side web_search tool (DeepSeek Anthropic API)
+	headers          map[string]string
+	authHeader       bool // send Authorization: Bearer instead of Anthropic's x-api-key header
+	defaultMaxTokens int
+	http             *http.Client
+	idleTimeout      time.Duration // SSE stall watchdog window; defaultStreamIdleTimeout unless a test overrides
+	authed           atomic.Bool   // a request has succeeded — gate transient-401 retry
 }
 
 func (c *client) Name() string { return c.name }
@@ -182,6 +192,20 @@ func normalizeDeepSeekAnthropicEffort(model, effort string) string {
 
 func (c *client) RequiresToolCallReasoning() bool {
 	return c.deepSeekThinkingEnabled()
+}
+
+func (c *client) MissingToolCallReasoningWarningIdentity() string {
+	if c == nil {
+		return ""
+	}
+	protocol := "anthropic"
+	if c.deepseek {
+		protocol = "deepseek-anthropic"
+	}
+	return strings.Join([]string{
+		"anthropic", strings.TrimSpace(c.name), strings.TrimSpace(c.baseURL),
+		strings.TrimSpace(c.model), protocol, strings.TrimSpace(c.thinking), strings.TrimSpace(c.effort),
+	}, "\x00")
 }
 
 func (c *client) sendOpts() provider.SendOptions {
@@ -234,6 +258,7 @@ var bufPool = sync.Pool{
 }
 
 func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	requestCtx := provider.WithRequestAttemptCounter(ctx)
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
 	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {
@@ -260,14 +285,14 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 		applyCustomHeaders(httpReq.Header, c.headers)
 		return httpReq, nil
 	}
-	resp, err := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
+	resp, err := provider.SendWithRetry(requestCtx, c.http, c.sendOpts(), newReq)
 	if err != nil {
 		return nil, provider.AnnotateToolSchemaError(err, req.Tools)
 	}
 	c.authed.Store(true)
 
 	out := make(chan provider.Chunk)
-	go c.readStream(ctx, resp, out)
+	go c.readStream(requestCtx, resp, out)
 	return out, nil
 }
 
@@ -349,6 +374,9 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 	}
 
 	var tools []anthTool
+	if c.webSearch {
+		tools = append(tools, anthTool{Type: "web_search_20250305", Name: "web_search"})
+	}
 	for _, t := range req.Tools {
 		schema := t.Parameters
 		if len(schema) == 0 {
@@ -382,7 +410,10 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 
 	maxTokens := req.MaxTokens
 	if maxTokens <= 0 {
-		maxTokens = defaultMaxTokens
+		maxTokens = c.defaultMaxTokens
+		if maxTokens <= 0 {
+			maxTokens = defaultMaxTokens
+		}
 	}
 	r := anthRequest{
 		Model:     c.model,
@@ -534,11 +565,27 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				mergeUsage(ev.Message.Usage)
 			}
 		case "content_block_start":
-			if ev.ContentBlock != nil && ev.ContentBlock.Type == "tool_use" {
-				tc := &provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}
-				tools[ev.Index] = tc
-				if !send(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}) {
-					return
+			if ev.ContentBlock != nil {
+				switch ev.ContentBlock.Type {
+				case "tool_use":
+					tc := &provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}
+					tools[ev.Index] = tc
+					if !send(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}) {
+						return
+					}
+				case "web_search_tool_result":
+					// Search results are delivered inline in content_block.content as a
+					// JSON array of result objects (title, url, encrypted_content).
+					// Only the model sees the plain text; we surface titles and URLs.
+					// server_tool_use blocks (the model initiating the search) are
+					// intentionally skipped — the API executes them server-side and
+					// the results appear here.
+					formatted := formatWebSearchResults(ev.ContentBlock.Content)
+					if formatted != "" {
+						if !send(provider.Chunk{Type: provider.ChunkText, Text: formatted}) {
+							return
+						}
+					}
 				}
 			}
 		case "content_block_delta":
@@ -614,14 +661,16 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}
 
 	if haveUsage {
-		if !send(provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{
+		usage := &provider.Usage{
 			PromptTokens:     inTok + cacheCreate + cacheRead,
 			CompletionTokens: outTok,
 			TotalTokens:      inTok + cacheCreate + cacheRead + outTok,
 			CacheHitTokens:   cacheRead,
 			CacheMissTokens:  inTok + cacheCreate, // uncached input + cache writes (billed ≥1×)
 			FinishReason:     mapStopReason(stopReason),
-		}}) {
+		}
+		provider.ApplyRequestAttemptCount(ctx, usage)
+		if !send(provider.Chunk{Type: provider.ChunkUsage, Usage: usage}) {
 			return
 		}
 	}
@@ -655,6 +704,42 @@ func mapStopReason(s string) string {
 	default:
 		return s // "refusal", "pause_turn", "" — pass through
 	}
+}
+
+// webSearchResult is a single result from a web_search_tool_result block.
+type webSearchResult struct {
+	URL      string `json:"url"`
+	Title    string `json:"title"`
+	Text     string `json:"text"`
+	SiteName string `json:"site_name"`
+}
+
+// formatWebSearchResults parses a web_search_tool_result content array
+// and formats titles and URLs as human-readable text. DeepSeek returns
+// encrypted_content rather than plain text at the transport layer; the
+// model still sees the original content.
+func formatWebSearchResults(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var results []webSearchResult
+	if err := json.Unmarshal(raw, &results); err != nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, r := range results {
+		if r.Title == "" && r.URL == "" {
+			continue
+		}
+		fmt.Fprintf(&b, "\n- **%s**", r.Title)
+		if r.URL != "" {
+			fmt.Fprintf(&b, "\n  <%s>", r.URL)
+		}
+	}
+	if b.Len() == 0 {
+		return ""
+	}
+	return "\n" + b.String() + "\n"
 }
 
 // --- Messages API wire protocol ---
@@ -738,9 +823,10 @@ func toolResultBlocks(text string, images []string) []contentBlock {
 }
 
 type anthTool struct {
-	Name         string          `json:"name"`
+	Type         string          `json:"type,omitempty"` // "web_search" for server-side search; empty for named tools
+	Name         string          `json:"name,omitempty"`
 	Description  string          `json:"description,omitempty"`
-	InputSchema  json.RawMessage `json:"input_schema"`
+	InputSchema  json.RawMessage `json:"input_schema,omitempty"`
 	CacheControl *cacheControl   `json:"cache_control,omitempty"`
 }
 
@@ -752,17 +838,20 @@ type streamEvent struct {
 		Usage *wireUsage `json:"usage"`
 	} `json:"message"`
 	ContentBlock *struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		Type      string          `json:"type"`
+		ID        string          `json:"id"`
+		Name      string          `json:"name"`
+		ToolUseID string          `json:"tool_use_id"` // web_search_tool_result
+		Content   json.RawMessage `json:"content"`     // web_search_tool_result: array of result objects
 	} `json:"content_block"`
 	Delta *struct {
-		Type        string `json:"type"`         // text_delta | thinking_delta | signature_delta | input_json_delta
-		Text        string `json:"text"`         // text_delta
-		Thinking    string `json:"thinking"`     // thinking_delta
-		Signature   string `json:"signature"`    // signature_delta
-		PartialJSON string `json:"partial_json"` // input_json_delta
-		StopReason  string `json:"stop_reason"`  // message_delta
+		Type             string          `json:"type"`         // text_delta | thinking_delta | signature_delta | input_json_delta | web_search_tool_result_delta
+		Text             string          `json:"text"`         // text_delta
+		Thinking         string          `json:"thinking"`     // thinking_delta
+		Signature        string          `json:"signature"`    // signature_delta
+		PartialJSON      string          `json:"partial_json"` // input_json_delta
+		StopReason       string          `json:"stop_reason"`  // message_delta
+		WebSearchResults json.RawMessage `json:"results"`      // web_search_tool_result_delta
 	} `json:"delta"`
 	Usage *wireUsage `json:"usage"` // message_delta (cumulative output_tokens)
 	Error *struct {

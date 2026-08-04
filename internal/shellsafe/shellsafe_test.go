@@ -18,6 +18,9 @@ func TestCommandIsReadOnly(t *testing.T) {
 		"npm view react version", "npm outdated", "cargo check",
 		"docker ps", "docker images", "kubectl get pods",
 		"node -v", "node --version", "python --version", "python3 --version",
+		// PowerShell permission-safe inspection commands.
+		`Get-Process -Name mongod`, `Get-ChildItem -Path .`,
+		`Get-NetTCPConnection -LocalPort 6379`, `Resolve-Path .`,
 	}
 	for _, c := range readOnly {
 		if _, _, ok := CommandIsReadOnly(c); !ok {
@@ -36,11 +39,37 @@ func TestCommandIsReadOnly(t *testing.T) {
 		"git status > out.txt", "ls; rm x", "git log `whoami`", "echo $HOME",
 		// unknown command.
 		"frobnicate --all",
+		// Network probes do not write the workspace, but they are not safe to
+		// auto-allow through the permission-layer read-only classifier.
+		`Test-NetConnection -ComputerName example.com -Port 443`,
+		// PowerShell mutators stay fail-closed.
+		`Start-Process mongod`, `Stop-Process -Name mongod`,
+		`Set-Content style.css bad`, `Remove-Item style.css`,
 	}
 	for _, c := range notReadOnly {
 		if _, _, ok := CommandIsReadOnly(c); ok {
 			t.Errorf("CommandIsReadOnly(%q) = true, want false", c)
 		}
+	}
+}
+
+func TestCommandIsWorkspaceNonMutatingKeepsNetworkProbeOutOfPermissionReaders(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: `Test-NetConnection -ComputerName example.com -Port 443`, want: true},
+		{command: `Get-Process -Name mongod`, want: true},
+		{command: `Test-NetConnection example.com; Set-Content out.txt bad`},
+		{command: `Set-Content out.txt bad`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.command, func(t *testing.T) {
+			_, _, got := CommandIsWorkspaceNonMutating(tt.command)
+			if got != tt.want {
+				t.Fatalf("CommandIsWorkspaceNonMutating(%q) = %t, want %t", tt.command, got, tt.want)
+			}
+		})
 	}
 }
 

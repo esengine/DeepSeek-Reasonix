@@ -70,6 +70,10 @@ type ProfileExecSpec struct {
 	ForkFrom     string
 	// RunInBackground starts a jobs.Manager background job.
 	RunInBackground bool
+	// BackgroundWriter marks work already hosted by a parent background job
+	// (for example fleet). It participates in checkpoint writer exclusion
+	// without spawning a second nested job.
+	BackgroundWriter bool
 	// Nested marks nested sub-agent acquires (fail-fast on concurrency limits).
 	Nested bool
 }

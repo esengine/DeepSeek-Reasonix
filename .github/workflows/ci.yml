@@ -137,7 +137,7 @@ jobs:
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/cli/... ./internal/control/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       - name: test (full)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name != 'pull_request'
@@ -151,6 +151,12 @@ jobs:
           # launch cannot pin the Actions step after Go's package timeout fires.
           WINDOWS_SANDBOX_WAIT_MS: "20000"
         run: go test -p 4 -timeout=3m ./...
+
+      - name: test (Scoop desktop launch)
+        if: env.RUN_STEPS == 'true' && runner.os == 'Windows'
+        timeout-minutes: 10
+        shell: powershell
+        run: .\scripts\test-scoop-desktop-launch.ps1
 
   race:
     needs: changes
@@ -258,6 +264,9 @@ jobs:
 
       - name: Test integrated terminal frontend
         run: pnpm --dir frontend test:terminal
+
+      - name: Test usage statistics frontend
+        run: pnpm --dir frontend test:usage-stats
 
       - name: vet
         run: go vet ./...
@@ -398,12 +407,14 @@ jobs:
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 \
             -ignore 'label "windows-11-arm" is unknown' \
             .github/workflows/release-stable.yml \
-            .github/workflows/release-preview.yml \
-            .github/workflows/release-cli-trigger.yml \
+            .github/workflows/prepare-release-notes.yml \
+            .github/workflows/release-stable-trigger.yml \
             .github/workflows/release.yml \
             .github/workflows/release-npm.yml \
-            .github/workflows/release-desktop.yml
+            .github/workflows/release-desktop.yml \
+            .github/workflows/release-verify-issues.yml
           bash scripts/release-workflows.test.sh
+          node scripts/check-single-release-public-contract.mjs
 
   # The site/ auth client has security-sensitive redirect-validation logic
   # (safeNext) covered by node:test unit tests. Those tests use only Node

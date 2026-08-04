@@ -64,8 +64,8 @@ func subagentCommand(args []string) int {
 func subagentListCommand(args []string) int {
 	fs := flag.NewFlagSet("subagent list", flag.ContinueOnError)
 	dir := fs.String("dir", "", "project root")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if len(fs.Args()) != 0 {
 		fmt.Fprint(os.Stderr, subagentUsageText)
@@ -143,7 +143,18 @@ func addSubagentProfileFlags(fs *flag.FlagSet, values *subagentProfileFlags) {
 	fs.StringVar(&values.dir, "dir", "", "project root")
 }
 
+func reportNamedSubagentHelp(args []string) bool {
+	if !commandHelpRequested(args, 1) {
+		return false
+	}
+	fmt.Fprint(os.Stdout, subagentUsageText)
+	return true
+}
+
 func subagentCreateCommand(args []string) int {
+	if reportNamedSubagentHelp(args) {
+		return 0
+	}
 	name, rest, ok := namedSubagentArgs(args)
 	if !ok {
 		fmt.Fprint(os.Stderr, subagentUsageText)
@@ -153,7 +164,10 @@ func subagentCreateCommand(args []string) int {
 	var values subagentProfileFlags
 	addSubagentProfileFlags(fs, &values)
 	scopeText := fs.String("scope", "", "project or global (default: project)")
-	if err := fs.Parse(rest); err != nil || len(fs.Args()) != 0 {
+	if code, ok := parseCommandFlags(fs, rest); !ok {
+		return code
+	}
+	if len(fs.Args()) != 0 {
 		return 2
 	}
 	if rc := chdirTo(values.dir); rc != 0 {
@@ -197,6 +211,9 @@ func subagentCreateCommand(args []string) int {
 }
 
 func subagentEditCommand(args []string) int {
+	if reportNamedSubagentHelp(args) {
+		return 0
+	}
 	name, rest, ok := namedSubagentArgs(args)
 	if !ok {
 		fmt.Fprint(os.Stderr, subagentUsageText)
@@ -205,7 +222,10 @@ func subagentEditCommand(args []string) int {
 	fs := flag.NewFlagSet("subagent edit", flag.ContinueOnError)
 	var values subagentProfileFlags
 	addSubagentProfileFlags(fs, &values)
-	if err := fs.Parse(rest); err != nil || len(fs.Args()) != 0 {
+	if code, ok := parseCommandFlags(fs, rest); !ok {
+		return code
+	}
+	if len(fs.Args()) != 0 {
 		return 2
 	}
 	if rc := chdirTo(values.dir); rc != 0 {
@@ -273,6 +293,9 @@ func subagentEditCommand(args []string) int {
 }
 
 func subagentDeleteCommand(args []string) int {
+	if reportNamedSubagentHelp(args) {
+		return 0
+	}
 	name, rest, ok := namedSubagentArgs(args)
 	if !ok {
 		fmt.Fprint(os.Stderr, subagentUsageText)
@@ -281,7 +304,10 @@ func subagentDeleteCommand(args []string) int {
 	fs := flag.NewFlagSet("subagent delete", flag.ContinueOnError)
 	yes := fs.Bool("yes", false, "confirm deletion")
 	dir := fs.String("dir", "", "project root")
-	if err := fs.Parse(rest); err != nil || len(fs.Args()) != 0 {
+	if code, ok := parseCommandFlags(fs, rest); !ok {
+		return code
+	}
+	if len(fs.Args()) != 0 {
 		return 2
 	}
 	if !*yes {
@@ -310,6 +336,9 @@ func subagentDeleteCommand(args []string) int {
 }
 
 func subagentRunCommand(args []string, readOnly bool) int {
+	if reportNamedSubagentHelp(args) {
+		return 0
+	}
 	name, rest, ok := namedSubagentArgs(args)
 	if !ok {
 		fmt.Fprint(os.Stderr, subagentUsageText)
@@ -323,8 +352,8 @@ func subagentRunCommand(args []string, readOnly bool) int {
 	model := fs.String("model", "", "default model reference")
 	maxSteps := fs.Int("max-steps", 0, "max tool-call rounds")
 	dir := fs.String("dir", "", "project root")
-	if err := fs.Parse(rest); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, rest); !ok {
+		return code
 	}
 	if rc := chdirTo(*dir); rc != 0 {
 		return rc

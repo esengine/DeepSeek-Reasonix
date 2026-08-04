@@ -120,7 +120,7 @@ export function ThemeLibrarySection() {
       const active = await app.GetActiveThemePack();
       if (active?.pack) {
         commitThemePreview(active.pack);
-      } else if (!active?.safeMode) {
+      } else {
         const still = (list || []).find((p) => p.active);
         if (!still) clearThemePack();
       }

@@ -17,3 +17,7 @@ func installerCommand(name, _ string) *exec.Cmd {
 func startWindowsUpdateHandoff(name, _, dir, _ string, _ *repair.UpdateTransaction) error {
 	return installerCommand(name, dir).Start()
 }
+
+func startWindowsVersionedUpdateHandoff(name, _, dir, _, _ string) error {
+	return installerCommand(name, dir).Start()
+}

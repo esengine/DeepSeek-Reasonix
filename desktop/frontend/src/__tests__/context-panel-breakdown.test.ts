@@ -241,6 +241,7 @@ const sourceRows = contextSourceRows({
       requestCount: 2,
       sessionCost: 0.42,
       sessionCurrency: "¥",
+      estimated: true,
     },
   },
 }, "¥");
@@ -258,6 +259,8 @@ eq(
   "executor source row exposes input, output, cache hit, cache miss, and request count",
 );
 eq(sourceRows[1].requests, 1, "planner source row remains visible without cache metadata");
+eq(sourceRows[0].estimated, true, "executor source row preserves estimated usage metadata");
+eq(sourceRows[1].estimated, false, "missing estimated metadata remains exact for backward compatibility");
 eq(sourceRows[1].cacheHitTokens + sourceRows[1].cacheMissTokens, 0, "planner source preserves absent cache metadata as empty");
 
 const executorOnlyRows = contextSourceRows({

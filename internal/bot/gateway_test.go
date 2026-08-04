@@ -877,6 +877,239 @@ func TestGatewayNewSessionRemembersRotatedSessionPath(t *testing.T) {
 	gw.closeSessions()
 }
 
+func TestGatewayRecoveryRebindsLeaseAndRemembersSessionPath(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dir := t.TempDir()
+	originalPath := filepath.Join(dir, "session.jsonl")
+
+	disk := agent.NewSession("sys")
+	disk.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	disk.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk"})
+	if err := disk.Save(originalPath); err != nil {
+		t.Fatalf("save disk session: %v", err)
+	}
+
+	local := agent.NewSession("sys")
+	local.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
+	local.Add(provider.Message{Role: provider.RoleAssistant, Content: "local"})
+	exec := agent.New(nil, nil, local, agent.Options{}, event.Discard)
+
+	var remembered []string
+	gw := NewGateway(GatewayConfig{
+		OnSessionReady: func(_ InboundMessage, sessionID string) error {
+			remembered = append(remembered, sessionID)
+			return nil
+		},
+	}, nil, logger)
+	msg := InboundMessage{
+		Platform:     PlatformWeixin,
+		ConnectionID: "weixin-main",
+		Domain:       "weixin",
+		ChatType:     ChatDM,
+		ChatID:       "chat",
+		UserID:       "user",
+	}
+	key := BuildSessionKey(msg.Session())
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(originalPath); err != nil {
+		t.Fatalf("bind original session lease: %v", err)
+	}
+	state := &sessionState{leases: leases, sessionPath: originalPath}
+	gw.controllers[key] = state
+	gw.sessionOverrides[key] = sessionRuntimeOverride{sessionPath: originalPath, label: "session:original"}
+	ctrl := control.New(control.Options{
+		Executor:           exec,
+		SessionDir:         dir,
+		SessionPath:        originalPath,
+		Label:              "test",
+		OnSessionRecovered: gw.botSessionRecoveredHandler(key, msg, state),
+	})
+	state.ctrl = ctrl
+	t.Cleanup(gw.closeSessions)
+
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatalf("snapshot diverged session: %v", err)
+	}
+	recoveryPath := ctrl.SessionPath()
+	if recoveryPath == "" || recoveryPath == originalPath {
+		t.Fatalf("controller path = %q, want recovery path", recoveryPath)
+	}
+	if got := leases.HeldPath(); got != agent.CanonicalSessionPath(recoveryPath) {
+		t.Fatalf("held lease = %q, want recovery path %q", got, agent.CanonicalSessionPath(recoveryPath))
+	}
+	oldLease, err := agent.TryAcquireSessionLease(originalPath)
+	if err != nil {
+		t.Fatalf("original session lease was not released: %v", err)
+	}
+	oldLease.Release()
+
+	gw.mu.Lock()
+	gotStatePath := state.sessionPath
+	gotOverridePath := gw.sessionOverrides[key].sessionPath
+	gw.mu.Unlock()
+	if canonicalBotPath(gotStatePath) != canonicalBotPath(recoveryPath) {
+		t.Fatalf("state path = %q, want recovery path %q", gotStatePath, recoveryPath)
+	}
+	if canonicalBotPath(gotOverridePath) != canonicalBotPath(recoveryPath) {
+		t.Fatalf("override path = %q, want recovery path %q", gotOverridePath, recoveryPath)
+	}
+	if len(remembered) != 1 || remembered[0] != botSessionTarget(recoveryPath) {
+		t.Fatalf("remembered sessions = %v, want [%q]", remembered, botSessionTarget(recoveryPath))
+	}
+
+	if err := ctrl.Snapshot(); err != nil {
+		t.Fatalf("snapshot recovered session: %v", err)
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
+	if err != nil {
+		t.Fatalf("glob recovery sessions: %v", err)
+	}
+	transcripts := matches[:0]
+	for _, path := range matches {
+		if !strings.HasSuffix(path, ".events.jsonl") && !strings.HasSuffix(path, ".conflicts.jsonl") {
+			transcripts = append(transcripts, path)
+		}
+	}
+	if len(transcripts) != 1 || transcripts[0] != recoveryPath {
+		t.Fatalf("recovery transcripts = %v, want only %q", transcripts, recoveryPath)
+	}
+}
+
+func TestGatewayRecoveryLeaseFailureKeepsOriginalGeneration(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dir := t.TempDir()
+	originalPath := filepath.Join(dir, "original.jsonl")
+	recoveryPath := filepath.Join(dir, "recovery.jsonl")
+	readyCalls := 0
+	gw := NewGateway(GatewayConfig{
+		OnSessionReady: func(InboundMessage, string) error {
+			readyCalls++
+			return nil
+		},
+	}, nil, logger)
+	msg := InboundMessage{Platform: PlatformWeixin, ChatType: ChatDM, ChatID: "chat", UserID: "user"}
+	key := BuildSessionKey(msg.Session())
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(originalPath); err != nil {
+		t.Fatalf("bind original session lease: %v", err)
+	}
+	defer leases.Release()
+	blocker, err := agent.TryAcquireSessionLease(recoveryPath)
+	if err != nil {
+		t.Fatalf("bind recovery blocker: %v", err)
+	}
+	defer blocker.Release()
+	state := &sessionState{leases: leases, sessionPath: originalPath}
+	gw.controllers[key] = state
+	gw.sessionOverrides[key] = sessionRuntimeOverride{sessionPath: originalPath}
+
+	err = gw.botSessionRecoveredHandler(key, msg, state)(control.SessionRecoveryInfo{
+		OriginalPath: originalPath,
+		RecoveryPath: recoveryPath,
+	})
+	if err == nil {
+		t.Fatal("recovery handoff succeeded while recovery lease was held")
+	}
+	if got := leases.HeldPath(); got != agent.CanonicalSessionPath(originalPath) {
+		t.Fatalf("held lease = %q, want original path %q", got, agent.CanonicalSessionPath(originalPath))
+	}
+	gw.mu.Lock()
+	gotStatePath := state.sessionPath
+	gotOverridePath := gw.sessionOverrides[key].sessionPath
+	gw.mu.Unlock()
+	if gotStatePath != originalPath || gotOverridePath != originalPath {
+		t.Fatalf("paths changed after failed handoff: state=%q override=%q", gotStatePath, gotOverridePath)
+	}
+	if readyCalls != 0 {
+		t.Fatalf("session-ready callback ran %d times after failed handoff", readyCalls)
+	}
+}
+
+func TestGatewayLateRecoveryCannotReplaceCurrentSessionMapping(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dir := t.TempDir()
+	oldPath := filepath.Join(dir, "old.jsonl")
+	oldRecoveryPath := filepath.Join(dir, "old-recovery.jsonl")
+	currentPath := filepath.Join(dir, "current.jsonl")
+	readyCalls := 0
+	gw := NewGateway(GatewayConfig{
+		OnSessionReady: func(InboundMessage, string) error {
+			readyCalls++
+			return nil
+		},
+	}, nil, logger)
+	msg := InboundMessage{Platform: PlatformWeixin, ChatType: ChatDM, ChatID: "chat", UserID: "user"}
+	key := BuildSessionKey(msg.Session())
+	oldLeases := control.NewSessionLeaseKeeper()
+	if err := oldLeases.Rebind(oldPath); err != nil {
+		t.Fatalf("bind old session lease: %v", err)
+	}
+	defer oldLeases.Release()
+	oldState := &sessionState{leases: oldLeases, sessionPath: oldPath}
+	currentState := &sessionState{sessionPath: currentPath}
+	gw.controllers[key] = currentState
+	gw.sessionOverrides[key] = sessionRuntimeOverride{sessionPath: currentPath}
+
+	if err := gw.botSessionRecoveredHandler(key, msg, oldState)(control.SessionRecoveryInfo{
+		OriginalPath: oldPath,
+		RecoveryPath: oldRecoveryPath,
+	}); err != nil {
+		t.Fatalf("late recovery handoff: %v", err)
+	}
+	if got := oldLeases.HeldPath(); got != agent.CanonicalSessionPath(oldRecoveryPath) {
+		t.Fatalf("old generation lease = %q, want recovery path %q", got, agent.CanonicalSessionPath(oldRecoveryPath))
+	}
+	gw.mu.Lock()
+	gotCurrentPath := currentState.sessionPath
+	gotOverridePath := gw.sessionOverrides[key].sessionPath
+	gw.mu.Unlock()
+	if gotCurrentPath != currentPath || gotOverridePath != currentPath {
+		t.Fatalf("current mapping overwritten by late recovery: state=%q override=%q", gotCurrentPath, gotOverridePath)
+	}
+	if readyCalls != 0 {
+		t.Fatalf("session-ready callback ran %d times for retired generation", readyCalls)
+	}
+}
+
+func TestGatewayLateRecoveryAfterRetirementDoesNotReacquireLease(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	dir := t.TempDir()
+	originalPath := filepath.Join(dir, "original.jsonl")
+	recoveryPath := filepath.Join(dir, "recovery.jsonl")
+	gw := NewGateway(GatewayConfig{}, nil, logger)
+	msg := InboundMessage{Platform: PlatformWeixin, ChatType: ChatDM, ChatID: "chat", UserID: "user"}
+	key := BuildSessionKey(msg.Session())
+	leases := control.NewSessionLeaseKeeper()
+	if err := leases.Rebind(originalPath); err != nil {
+		t.Fatalf("bind original session lease: %v", err)
+	}
+	state := &sessionState{leases: leases, sessionPath: originalPath}
+	gw.controllers[key] = state
+	handler := gw.botSessionRecoveredHandler(key, msg, state)
+
+	// Gateway shutdown retires and releases the state before waiting for every
+	// turn goroutine. A callback already captured by the controller must not
+	// reacquire a lease after that teardown.
+	gw.closeSessions()
+	if got := leases.HeldPath(); got != "" {
+		t.Fatalf("lease after retirement = %q, want empty", got)
+	}
+	if err := handler(control.SessionRecoveryInfo{
+		OriginalPath: originalPath,
+		RecoveryPath: recoveryPath,
+	}); !errors.Is(err, errBotSessionRetired) {
+		t.Fatalf("late recovery error = %v, want %v", err, errBotSessionRetired)
+	}
+	if got := leases.HeldPath(); got != "" {
+		t.Fatalf("late recovery reacquired lease after retirement: %q", got)
+	}
+	probe, err := agent.TryAcquireSessionLease(recoveryPath)
+	if err != nil {
+		t.Fatalf("recovery lease remained unavailable after late callback: %v", err)
+	}
+	probe.Release()
+}
+
 func TestGatewayNewSessionLeaseFailureRetiresSession(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	readyCalls := 0

@@ -49,6 +49,7 @@ type Client struct {
 
 	mu             sync.Mutex
 	subscribeMu    sync.Mutex
+	mutationMu     sync.Mutex
 	projectionMu   sync.Mutex
 	closed         bool
 	state          State
@@ -193,6 +194,8 @@ func (c *Client) SelectSession(target protocol.RuntimeTarget, runtimeEpoch proto
 	if err := target.Validate(); err != nil || runtimeEpoch == "" {
 		return fmt.Errorf("invalid Remote session selection")
 	}
+	c.mutationMu.Lock()
+	defer c.mutationMu.Unlock()
 	c.projectionMu.Lock()
 	defer c.projectionMu.Unlock()
 	c.mu.Lock()
@@ -224,6 +227,13 @@ func (c *Client) Request(ctx context.Context, method string, params any) (json.R
 		return nil, fmt.Errorf("client closed")
 	}
 	name := protocol.Method(method)
+	if requestIsMutation(name) {
+		// The Host serializes mutations, but normal JSON-RPC responses can still
+		// reach this client out of order after their handlers return. Keep one
+		// mutation in flight so an older response cannot restore stale authority.
+		c.mutationMu.Lock()
+		defer c.mutationMu.Unlock()
+	}
 	if name == protocol.MethodSessionSubscribe {
 		c.subscribeMu.Lock()
 		defer c.subscribeMu.Unlock()
@@ -486,7 +496,12 @@ func (c *Client) applyRequestResult(method protocol.Method, value any, authority
 		c.state.Target, c.state.RuntimeEpoch = result.Target, result.RuntimeEpoch
 		c.state.SnapshotID, c.state.CurrentTurnID = "", ""
 	case protocol.SessionProfileSetResult:
-		c.state.RuntimeEpoch, c.state.ResolvedProfile = result.RuntimeEpoch, result.ResolvedProfile
+		// An unchanged result describes the authority captured when its request
+		// started. A newer subscribe can commit while that request is in flight,
+		// so never copy a no-op response back over the current projection.
+		if result.Disposition != protocol.ProfileUnchanged {
+			c.state.RuntimeEpoch, c.state.ResolvedProfile = result.RuntimeEpoch, result.ResolvedProfile
+		}
 	case protocol.SessionCloseResult:
 		if result.Disposition != protocol.SessionRetainedActive {
 			c.state.Target, c.state.RuntimeEpoch, c.state.SubscriptionID, c.state.CurrentTurnID = protocol.RuntimeTarget{}, "", "", ""
@@ -496,15 +511,31 @@ func (c *Client) applyRequestResult(method protocol.Method, value any, authority
 }
 
 func requestInvalidatesSnapshot(method protocol.Method, value any) bool {
-	if spec, ok := protocol.LookupMethod(method); ok {
-		switch spec.Class {
-		case protocol.ClassHostMutation, protocol.ClassSessionMutation, protocol.ClassSessionRecordMutation:
-			return true
-		}
+	// An idempotent profile application does not advance server state. Keeping
+	// the current snapshot authoritative avoids turning a frontend dedupe hit
+	// into a needless subscribe/resync cycle.
+	if result, ok := value.(protocol.SessionProfileSetResult); ok && result.Disposition == protocol.ProfileUnchanged {
+		return false
+	}
+	if requestIsMutation(method) {
+		return true
 	}
 	switch value.(type) {
 	case protocol.SessionCreateResult, protocol.SessionSubmitResult, protocol.SessionNewResult,
 		protocol.SessionClearResult, protocol.SessionProfileSetResult, protocol.SessionCloseResult:
+		return true
+	default:
+		return false
+	}
+}
+
+func requestIsMutation(method protocol.Method) bool {
+	spec, ok := protocol.LookupMethod(method)
+	if !ok {
+		return false
+	}
+	switch spec.Class {
+	case protocol.ClassHostMutation, protocol.ClassSessionMutation, protocol.ClassSessionRecordMutation:
 		return true
 	default:
 		return false

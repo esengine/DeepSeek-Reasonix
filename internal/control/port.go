@@ -118,6 +118,11 @@ type SessionHistory interface {
 	CheckpointTurnsByMessageIndex() map[int]int
 	CheckpointHasBoundary(turn int) bool
 	Rewind(turn int, scope RewindScope) error
+	PrepareRewind(turn int, scope RewindScope) (checkpoint.RewindPlan, error)
+	CommitRewind(planID string) (checkpoint.RewindResult, error)
+	UndoRewind(transactionID string) (checkpoint.RewindResult, error)
+	PrepareFileRevert(path string) (checkpoint.RewindPlan, error)
+	CommitFileRevert(planID string, resolution checkpoint.ConflictResolution) (checkpoint.RewindResult, error)
 	Fork(turn int) (string, error)
 	ForkNamed(turn int, name string) (string, error)
 	ForkSession(turn int, name string) (string, error)

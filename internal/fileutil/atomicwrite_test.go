@@ -145,6 +145,33 @@ func TestReplaceFileCrossDeviceCopiesImmediately(t *testing.T) {
 	}
 }
 
+func TestAtomicWriteFileStrictCrossDeviceKeepsExistingDestination(t *testing.T) {
+	oldRename := renameFile
+	renameFile = func(oldpath, newpath string) error {
+		return &os.LinkError{Op: "rename", Old: oldpath, New: newpath, Err: syscall.EXDEV}
+	}
+	t.Cleanup(func() { renameFile = oldRename })
+
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "current.json")
+	if err := os.WriteFile(dest, []byte("old-pointer"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := AtomicWriteFileStrict(dest, []byte("new-pointer"), 0o644); err == nil {
+		t.Fatal("strict atomic write accepted a cross-device rename")
+	}
+	if got, err := os.ReadFile(dest); err != nil || string(got) != "old-pointer" {
+		t.Fatalf("destination changed after strict replace failure: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "current.json" {
+		t.Fatalf("strict write left temporary files: %v", entries)
+	}
+}
+
 func TestCopyOntoOverwritesAndPreservesMode(t *testing.T) {
 	dir := t.TempDir()
 	tmp := filepath.Join(dir, "x.tmp")

@@ -690,6 +690,8 @@ const __T = {
     'cancel_plain': 'Cancel',
     'delete': 'Delete',
     'delete_session': 'Delete Session',
+    'cannot_delete_active': 'Cannot delete the active session',
+    'delete_failed': 'Could not delete the session. Check your connection and try again.',
     'search_sessions': 'Search sessions',
     'active': 'Active',
     'use_model': 'Use',
@@ -825,6 +827,8 @@ const __T = {
     'cancel_plain': '取消',
     'delete': '删除',
     'delete_session': '删除会话',
+    'cannot_delete_active': '无法删除当前会话',
+    'delete_failed': '无法删除会话，请检查连接后重试',
     'search_sessions': '搜索会话',
     'active': '当前',
     'use_model': '使用',
@@ -1846,7 +1850,10 @@ document.addEventListener('click',e=>{
   const del=e.target.closest('.session-del');
   if(!del)return;
   e.stopPropagation();
-  openDeleteSession(del.dataset.name);
+  const name=del.dataset.name;
+  const target=sessionsCache.find(s=>s.name===name);
+  if(target&&target.current){showNotice(__('cannot_delete_active'),'warn');return;}
+  openDeleteSession(name);
 });
 $('#delete-modal-close').onclick=()=>closeDeleteSession();
 $('#delete-cancel').onclick=()=>closeDeleteSession();
@@ -1855,7 +1862,10 @@ $('#delete-confirm').onclick=()=>{
   const name=pendingDeleteSession;
   if(!name)return;
   closeDeleteSession();
-  post('/delete-session',{name}).then(()=>loadSessions());
+  post('/delete-session',{name}).then(async r=>{
+    if(!r.ok){showNotice((await r.text()).trim()||('HTTP '+r.status),'warn');}
+    loadSessions();
+  }).catch(()=>showNotice(__('delete_failed'),'warn'));
 };
 
 // welcome examples

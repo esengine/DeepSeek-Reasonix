@@ -11,6 +11,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/remote"
+	workbenchclient "reasonix/internal/remote/workbench/client"
 	"reasonix/internal/remote/workbench/target"
 )
 
@@ -509,13 +510,43 @@ func TestWorkbenchSwitchLocalAndHint(t *testing.T) {
 
 func TestWorkbenchSwitchLocalEmitsUnifiedTargetState(t *testing.T) {
 	events := make(chan WorkbenchTargetStateView, 1)
-	a := &App{ctx: context.Background()}
+	rebuilt := make(chan []interface{}, 1)
+	a := NewApp()
+	a.ctx = context.Background()
+	a.readyHook = func() {}
+	tab := &WorkspaceTab{ID: "tab-a", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}}
+	a.tabs[tab.ID] = tab
+	a.tabOrder = []string{tab.ID}
+	a.activeTabID = tab.ID
+	a.mu.Lock()
+	runtimeEpoch := a.newSessionRuntimeLocked(tab, "").Epoch
+	a.mu.Unlock()
+	k := a.workbench()
+	_, generation, err := k.targets.BeginRemoteConnect("remote-host", "/srv/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.targets.MarkRemoteConnected(generation); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := k.targets.ActivateRemote(generation); err != nil {
+		t.Fatal(err)
+	}
+	k.mu.Lock()
+	k.remote = &workbenchclient.Client{}
+	k.remoteGen = generation
+	k.remoteTabID = tab.ID
+	k.mu.Unlock()
 	a.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
-		if name != workbenchTargetEvent || len(payload) != 1 {
-			return
-		}
-		if view, ok := payload[0].(WorkbenchTargetStateView); ok {
-			events <- view
+		switch name {
+		case workbenchTargetEvent:
+			if len(payload) == 1 {
+				if view, ok := payload[0].(WorkbenchTargetStateView); ok {
+					events <- view
+				}
+			}
+		case "runtime:rebuilt":
+			rebuilt <- payload
 		}
 	}
 	result := a.WorkbenchSwitchLocal()
@@ -527,6 +558,22 @@ func TestWorkbenchSwitchLocalEmitsUnifiedTargetState(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for remote:workbench-target")
 	}
+	assertLocalRuntime := func(step string) {
+		t.Helper()
+		select {
+		case payload := <-rebuilt:
+			if len(payload) != 2 || payload[0] != tab.ID || payload[1] != runtimeEpoch {
+				t.Fatalf("%s runtime rebuild payload = %#v, want [%q %q]", step, payload, tab.ID, runtimeEpoch)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for Local runtime authority after %s", step)
+		}
+	}
+	assertLocalRuntime("switch")
+	if err := a.WorkbenchDisconnectRemote(); err != nil {
+		t.Fatal(err)
+	}
+	assertLocalRuntime("disconnect")
 }
 
 func TestWorkbenchConnectFailureKeepsEventsOnCommittedLocalTarget(t *testing.T) {

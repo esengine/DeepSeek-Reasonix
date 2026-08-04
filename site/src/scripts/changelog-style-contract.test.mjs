@@ -6,29 +6,21 @@ const css = await readFile(new URL("../styles/changelog.css", import.meta.url), 
 const component = await readFile(new URL("../components/ChangelogPage.astro", import.meta.url), "utf8");
 const versionPage = await readFile(new URL("../pages/changelog/[version].astro", import.meta.url), "utf8");
 
-test("changelog channel tabs use the shared accent hierarchy in both color schemes", () => {
+test("historical changelog styling remains readable", () => {
   assert.doesNotMatch(css, /var\(--(?:muted|paper)\)/);
-  assert.match(
-    css,
-    /\.release-channel-tabs a\.active\s*\{[^}]*background:\s*var\(--accent-soft\);[^}]*border-color:[^}]*var\(--accent\)[^}]*color:\s*var\(--accent-deep\);/s,
-  );
+  assert.match(css, /\.release-channel\s*\{/);
 });
 
-test("changelog channel navigation exposes current-page and keyboard-focus states", () => {
-  assert.equal((component.match(/aria-current=/g) ?? []).length, 2);
-  assert.match(component, /aria-current=\{!isPreview \? 'page' : undefined\}/);
-  assert.match(component, /aria-current=\{isPreview \? 'page' : undefined\}/);
-  assert.match(
-    css,
-    /\.release-channel-tabs a:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--accent\);[^}]*outline-offset:\s*2px;/s,
-  );
+test("changelog has one official navigation and marks archives noindex", () => {
+  assert.doesNotMatch(component, /release-channel-tabs/);
+  assert.match(component, /Historical archive/);
+  assert.match(component, /noindex=\{isPreview\}/);
 });
 
 test("reviewed exact-version routes redirect safely until their publication marker exists", () => {
-  assert.match(versionPage, /import \{ allReleases, releases \}/);
+  assert.match(versionPage, /publishedReleases/);
   assert.match(versionPage, /publishedVersions\.has\(release\.version\)/);
   assert.match(versionPage, /if \(!published\)/);
   assert.match(versionPage, /return Astro\.redirect/);
-  assert.match(versionPage, /'\/changelog\/preview\/'/);
-  assert.match(versionPage, /'\/changelog\/stable\/'/);
+  assert.match(versionPage, /Astro\.redirect\('\/changelog\/'\)/);
 });

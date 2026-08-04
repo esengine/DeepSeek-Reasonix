@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/xml"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -57,6 +58,7 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		"name: Submit installer for Authenticode signing",
 		"name: Approve and download signed Windows installer",
 		"name: Replace installer with signed build",
+		"name: Checkout protected release verifier",
 		"name: Verify Windows Authenticode release contract",
 		"name: Sign artifacts (minisign)",
 	}
@@ -91,6 +93,9 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		`go run ./cmd/sign sign ../signed-payload/reasonix-payload.json`,
 		`go run ./cmd/sign verify ../signed-payload/reasonix-payload.json`,
 		`REASONIX_REQUIRE_PAYLOAD_MANIFEST: "1"`,
+		`ref: ${{ github.sha }}`,
+		`path: release-control`,
+		`./release-control/scripts/verify-windows-authenticode.ps1`,
 	} {
 		if !strings.Contains(workflow, want) {
 			t.Errorf("desktop release workflow is missing signing contract %q", want)
@@ -109,7 +114,7 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 	packager := readTestFile(t, "../scripts/package-windows-desktop.sh")
 	copyMain := strings.Index(packager, `cp "$PAYLOAD/$BINNAME.exe" "$BIN_DIR/$BINNAME.exe"`)
 	makeNSIS := strings.Index(packager, "makensis \\\n")
-	portable := strings.Index(packager, `cp "$PAYLOAD/$BINNAME.exe" "$portable_staging/$BINNAME.exe"`)
+	portable := strings.Index(packager, `cp "$PAYLOAD/$BINNAME.exe" "$portable_staging/versions/$version_label/$BINNAME.exe"`)
 	bundle := strings.Index(packager, `installer_bundle="$DESKTOP/build/windows/installer-signing-bundle"`)
 	if copyMain < 0 || makeNSIS < 0 || portable < 0 || bundle < 0 {
 		t.Fatal("Windows packager is missing the signed-payload packaging stages")
@@ -141,6 +146,10 @@ func TestWindowsReleaseSignsPayloadBeforeRepackaging(t *testing.T) {
 		"$signature.SignerCertificate",
 		"$signature.Status -ne \"Valid\"",
 		"Expand-Archive",
+		`Get-ChildItem -LiteralPath $extractRoot -Recurse -File -Filter "*.exe"`,
+		`$activeDir.Replace("\", "/") -ne "versions/$activeVersion"`,
+		`Portable = (Join-Path $activeDir "reasonix-desktop.exe")`,
+		`Portable = "reasonix-desktop.exe"`,
 		"Portable archive must contain exactly 6 executables",
 		"Get-FileHash -Algorithm SHA256",
 	} {
@@ -235,7 +244,6 @@ func TestProductionSigningRunsOnlyFromProtectedControlPlane(t *testing.T) {
 
 	for _, path := range []string{
 		"../.github/workflows/release-stable-trigger.yml",
-		"../.github/workflows/release-desktop-trigger.yml",
 	} {
 		relay := readTestFile(t, path)
 		for _, want := range []string{
@@ -248,6 +256,16 @@ func TestProductionSigningRunsOnlyFromProtectedControlPlane(t *testing.T) {
 			if !strings.Contains(relay, want) {
 				t.Errorf("%s is missing protected control-plane contract %q", path, want)
 			}
+		}
+	}
+
+	for _, path := range []string{
+		"../.github/workflows/release-preview.yml",
+		"../.github/workflows/release-cli-trigger.yml",
+		"../.github/workflows/release-desktop-trigger.yml",
+	} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("retired public prerelease workflow %s still exists or cannot be checked: %v", path, err)
 		}
 	}
 }

@@ -62,6 +62,29 @@ func TestBrokerProviderChunkRoundTripPreservesGeminiThoughtSignature(t *testing.
 	}
 }
 
+func TestBrokerProviderChunkRoundTripPreservesEstimatedUsage(t *testing.T) {
+	want := provider.Chunk{
+		Type: provider.ChunkUsage,
+		Usage: &provider.Usage{
+			PromptTokens: 8, CompletionTokens: 4, TotalTokens: 12,
+			ReasoningTokens: 3, FinishReason: "client_reasoning_limit", Estimated: true,
+		},
+	}
+	wired := BrokerProviderChunkFromProvider(want)
+	raw, err := json.Marshal(BrokerStreamChunkParams{StreamID: "stream-1", Seq: 1, Chunk: wired})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeBrokerNotificationParams(MethodBrokerStreamChunk, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.(BrokerStreamChunkParams).Chunk.ProviderChunk()
+	if !reflect.DeepEqual(got.Usage, want.Usage) {
+		t.Fatalf("provider usage changed\n got: %#v\nwant: %#v", got.Usage, want.Usage)
+	}
+}
+
 func TestBrokerProviderDescriptorRoundTripPreservesRuntimeMetadata(t *testing.T) {
 	want := BrokerProviderDescriptor{
 		Ref: "local/model", DisplayName: "Local", Model: "model",

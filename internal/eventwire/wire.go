@@ -65,6 +65,7 @@ func ToWire(e event.Event) Event {
 				PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
 				TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
 				CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
+				Estimated:             u.Estimated,
 				Source:                e.UsageSource,
 				SessionCacheHitTokens: e.SessionHit, SessionCacheMissTokens: e.SessionMiss,
 			}
@@ -224,6 +225,7 @@ type Usage struct {
 	CacheHitTokens   int               `json:"cacheHitTokens"`
 	CacheMissTokens  int               `json:"cacheMissTokens"`
 	ReasoningTokens  int               `json:"reasoningTokens,omitempty"`
+	Estimated        bool              `json:"estimated,omitempty"`
 	Source           string            `json:"source,omitempty"`
 	CacheDiagnostics *CacheDiagnostics `json:"cacheDiagnostics,omitempty"`
 	// Session-cumulative cache tokens keep status displays steadier than one-turn values.
@@ -306,6 +308,7 @@ func ToWireGuardian(g event.GuardianResult) *Guardian {
 			PromptTokens: u.PromptTokens, CompletionTokens: u.CompletionTokens,
 			TotalTokens: u.TotalTokens, CacheHitTokens: u.CacheHitTokens,
 			CacheMissTokens: u.CacheMissTokens, ReasoningTokens: u.ReasoningTokens,
+			Estimated: u.Estimated,
 		}
 		if g.Pricing != nil {
 			cost := g.Pricing.Cost(u)

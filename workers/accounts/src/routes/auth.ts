@@ -37,8 +37,12 @@ async function uniqueHandle(users: UserRepo, base: string): Promise<string> {
   return `user${randomSuffix(8)}`;
 }
 
-function verifyLink(c: { req: { url: string } }, token: string): string {
-  return `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+// Built from the configured APP_ORIGIN, never the request origin: the Host
+// header is caller-controlled, so a request-derived origin would let emailed
+// verification links point at an attacker-chosen host (#5550).
+function verifyLink(c: { env: { APP_ORIGIN: string } }, token: string): string {
+  const base = c.env.APP_ORIGIN.replace(/\/+$/, "");
+  return `${base}/auth/verify?token=${encodeURIComponent(token)}`;
 }
 
 // Register is deliberately enumeration-safe: the response is identical whether or

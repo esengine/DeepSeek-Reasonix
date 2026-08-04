@@ -260,8 +260,8 @@ func assertUserConfigLockSerializesAcrossProcesses(t *testing.T, firstHome, seco
 	if len(final.Bot.Connections) != 1 || final.Bot.Connections[0].ID != "cross-process" {
 		t.Fatalf("bot update was lost: %+v", final.Bot.Connections)
 	}
-	if got := final.CLIUpdateChannel(); got != "preview" {
-		t.Fatalf("CLI channel update was lost: %q", got)
+	if got := final.CLIUpdateChannel(); got != "stable" {
+		t.Fatalf("CLI channel migration was lost: %q", got)
 	}
 }
 

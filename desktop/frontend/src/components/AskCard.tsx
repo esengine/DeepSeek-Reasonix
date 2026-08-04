@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import {
   DecisionConfirmBar,
   PromptAction,
+  PromptDescriptionToggle,
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
@@ -31,9 +32,12 @@ export function AskCard({
   // Extra decision rows after option labels: custom answer / skip chat.
   // selectedIndex indexes options, then custom, then skip.
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
+  const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
+  const instanceId = useId();
 
   const questions = ask.questions;
   const q = questions[Math.min(active, questions.length - 1)];
@@ -46,6 +50,13 @@ export function AskCard({
   const customRowIndex = optionCount;
   const skipRowIndex = optionCount + 1;
   const rowCount = optionCount + 2;
+  const selectedOption = selectedIndex >= 0 && selectedIndex < optionCount
+    ? q?.options[selectedIndex]
+    : undefined;
+  const selectedDescriptionId = selectedOption?.description
+    ? `${instanceId}-description-${selectedIndex}`
+    : undefined;
+  const descriptionExpanded = selectedDescriptionId !== undefined && expandedDescriptionId === selectedDescriptionId;
 
   useEffect(() => {
     shelfRef.current?.focus();
@@ -61,6 +72,10 @@ export function AskCard({
     setCustomOpen(false);
     setSelectedIndex(0);
   }, [active]);
+
+  useEffect(() => {
+    setExpandedDescriptionId(null);
+  }, [active, ask.id]);
 
   useEffect(() => {
     if (customOpen) customInputRef.current?.focus();
@@ -276,9 +291,14 @@ export function AskCard({
             return (
               <PromptAction
                 key={o.label}
+                actionId={`${instanceId}-row-${index}`}
                 keyLabel={q.options.length <= 9 ? String(index + 1) : ""}
                 label={o.label}
                 description={o.description}
+                descriptionId={`${instanceId}-description-${index}`}
+                descriptionDisclosure
+                descriptionExpanded={selectedIndex === index && descriptionExpanded}
+                onDescriptionOverflowChange={selectedIndex === index ? setDescriptionTruncated : undefined}
                 onClick={() => selectRow(index)}
                 // Single-select: cursor owns selection. Multi-select: selected
                 // means checked; active is the keyboard cursor only.
@@ -290,6 +310,7 @@ export function AskCard({
             );
           })}
           <PromptAction
+            actionId={`${instanceId}-row-${customRowIndex}`}
             keyLabel=""
             label={t("ask.customAnswer")}
             description={t("ask.customAnswerDesc")}
@@ -298,6 +319,7 @@ export function AskCard({
             disabled={submitting}
           />
           <PromptAction
+            actionId={`${instanceId}-row-${skipRowIndex}`}
             keyLabel=""
             label={t("ask.justChat")}
             description={t("ask.justChatDesc")}
@@ -323,6 +345,16 @@ export function AskCard({
             ))}
           </div>
         )
+      }
+      note={
+        selectedDescriptionId && descriptionTruncated ? (
+          <PromptDescriptionToggle
+            descriptionId={selectedDescriptionId}
+            expanded={descriptionExpanded}
+            onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
+            disabled={submitting}
+          />
+        ) : undefined
       }
       footer={
         <DecisionConfirmBar

@@ -69,7 +69,7 @@ const ld = {
           <span class="install-kicker"><span class="l-en">CLI / TUI</span><span class="l-zh">CLI / TUI</span></span>
           <strong><span class="l-en">Terminal-native agent with the same local Reasonix engine.</span><span class="l-zh">终端原生入口,使用同一套本地 Reasonix 引擎。</span></strong>
           <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
-          <a class="install-option__more" href="?download=cli#start" data-goto="cli"><span class="l-en">Native archives &amp; Preview →</span><span class="l-zh">原生安装包与预览版 →</span></a>
+          <a class="install-option__more" href="?download=cli#start" data-goto="cli"><span class="l-en">Native archives →</span><span class="l-zh">原生安装包 →</span></a>
         </div>
       </div>
       <nav class="also reveal" style="--d:0.22s" aria-label="More ways to use Reasonix / 更多使用方式">
@@ -278,13 +278,8 @@ const ld = {
       </div>
 
       <div class="dl-pane active" id="download-pane-desktop" data-pane="desktop" role="tabpanel" aria-labelledby="download-tab-desktop">
-        <div class="release-channel-switch" data-release-switch="desktop" role="group" aria-label="Desktop release channel / 桌面端发布渠道">
-          <button class="active" type="button" data-release-channel="stable" aria-pressed="true"><span class="l-en">Stable</span><span class="l-zh">正式版</span></button>
-          <button type="button" data-release-channel="preview" aria-pressed="false"><span class="l-en">Preview</span><span class="l-zh">预览版</span></button>
-        </div>
         <div class="release-channel-summary" data-release-summary="desktop" aria-live="polite">
-          <span data-channel-copy="stable"><span class="l-en">Recommended for everyday work · current version <span data-release-version="desktop">latest</span></span><span class="l-zh">推荐日常使用 · 当前版本 <span data-release-version="desktop">latest</span></span></span>
-          <span data-channel-copy="preview" hidden><span class="l-en">Official signed builds every 1–2 days · may be less stable · <span data-release-version="desktop">latest</span></span><span class="l-zh">每 1–2 天发布的官方签名构建 · 稳定性可能较低 · <span data-release-version="desktop">latest</span></span></span>
+          <span><span class="l-en">Current official version <span data-release-version="desktop">latest</span></span><span class="l-zh">当前正式版本 <span data-release-version="desktop">latest</span></span></span>
         </div>
         <div class="os-grid">
           <div class="os-card" data-os="mac">
@@ -315,7 +310,7 @@ const ld = {
             </div>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">Switch channels later in Settings → Updates · <a href={`${base}/changelog/stable/`} data-release-notes="desktop">release notes →</a> · <a href={`${repo}/releases`}>all releases →</a></span><span class="l-zh">安装后可在“设置 → 更新”中切换渠道 · <a href={`${base}/changelog/stable/`} data-release-notes="desktop">更新日志 →</a> · <a href={`${repo}/releases`}>全部版本 →</a></span></div>
+        <div class="dl-note"><span class="l-en">Reasonix checks official releases automatically · <a href={`${base}/changelog/`} data-release-notes="desktop">release notes →</a> · <a href={`${repo}/releases`}>all releases →</a></span><span class="l-zh">Reasonix 会自动检查正式版本 · <a href={`${base}/changelog/`} data-release-notes="desktop">更新日志 →</a> · <a href={`${repo}/releases`}>全部版本 →</a></span></div>
         <div class="dl-help">
           <strong><span class="l-en">macOS opens with a quarantine warning?</span><span class="l-zh">macOS 提示无法打开或已损坏?</span></strong>
           <span><span class="l-en">If the app was installed from the official download and placed in <code>/Applications</code>, quit Reasonix, then run:</span><span class="l-zh">如果来自官网下载并已放入 <code>/Applications</code>,先退出 Reasonix,再运行:</span></span>
@@ -326,15 +321,10 @@ const ld = {
       </div>
 
       <div class="dl-pane" id="download-pane-cli" data-pane="cli" role="tabpanel" aria-labelledby="download-tab-cli" hidden>
-        <div class="release-channel-switch" data-release-switch="cli" role="group" aria-label="CLI release channel / CLI 发布渠道">
-          <button class="active" type="button" data-release-channel="stable" aria-pressed="true"><span class="l-en">Stable</span><span class="l-zh">正式版</span></button>
-          <button type="button" data-release-channel="preview" aria-pressed="false"><span class="l-en">Preview</span><span class="l-zh">预览版</span></button>
-        </div>
         <div class="release-channel-summary" data-release-summary="cli" aria-live="polite">
-          <span data-channel-copy="stable"><span class="l-en">Switch to Stable and remember this choice · <span data-release-version="cli">latest</span></span><span class="l-zh">切换到正式版并记住此选择 · <span data-release-version="cli">latest</span></span></span>
-          <span data-channel-copy="preview" hidden><span class="l-en">Switch to protected Preview and remember this choice · <span data-release-version="cli">latest</span></span><span class="l-zh">切换到受保护的预览版并记住此选择 · <span data-release-version="cli">latest</span></span></span>
+          <span><span class="l-en">Current official version <span data-release-version="cli">latest</span></span><span class="l-zh">当前正式版本 <span data-release-version="cli">latest</span></span></span>
         </div>
-        <span class="install release-upgrade-command"><span class="ps1">$</span><span data-release-command="cli">reasonix upgrade stable</span><button data-copy="reasonix upgrade stable">Copy</button></span>
+        <span class="install release-upgrade-command"><span class="ps1">$</span><span data-release-command="cli">reasonix upgrade</span><button data-copy="reasonix upgrade">Copy</button></span>
         <div class="os-grid cli-os-grid">
           <div class="os-card" data-os="mac">
             <h4>macOS</h4>
@@ -355,7 +345,7 @@ const ld = {
             <div class="os-options"><a href={repoReleases} data-cli-asset="reasonix-linux-arm64.tar.gz">ARM64 tar.gz</a></div>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · <a href={`${base}/changelog/stable/`} data-release-notes="cli">release notes →</a> · npm and Homebrew continue to track Stable</span><span class="l-zh"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · <a href={`${base}/changelog/stable/`} data-release-notes="cli">更新日志 →</a> · npm 与 Homebrew 继续跟随正式版</span></div>
+        <div class="dl-note"><span class="l-en"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · <a href={`${base}/changelog/`} data-release-notes="cli">release notes →</a> · npm and Homebrew track the same official version</span><span class="l-zh"><a href={repoReleases} data-cli-asset="SHA256SUMS">SHA256SUMS →</a> · <a href={`${base}/changelog/`} data-release-notes="cli">更新日志 →</a> · npm 与 Homebrew 跟随同一正式版本</span></div>
       </div>
 
       <div class="dl-pane" id="download-pane-vscode" data-pane="vscode" role="tabpanel" aria-labelledby="download-tab-vscode" hidden>
@@ -380,7 +370,7 @@ const ld = {
         <div class="chan">
           <div class="chan-row rec">
             <code>npm i -g reasonix</code><span class="v"><span class="rxv">{goVer}</span></span>
-            <span class="s"><span class="l-en">Stable 1.x · one binary · no Node · actively developed</span><span class="l-zh">稳定 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
+            <span class="s"><span class="l-en">Reasonix 1.x · one binary · no Node · actively developed</span><span class="l-zh">Reasonix 1.x · 单二进制 · 无需 Node · 主力开发中</span></span>
             <span class="chan-badge"><span class="l-en">recommended</span><span class="l-zh">推荐</span></span>
           </div>
           <div class="chan-row">
@@ -389,7 +379,7 @@ const ld = {
             <span class="chan-badge pre"><span class="l-en">deprecated</span><span class="l-zh">已废弃</span></span>
           </div>
         </div>
-        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current 1.x stable · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前 1.x 稳定版 · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
+        <div class="dl-note"><span class="l-en">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> tracks the current official release · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> release notes →</a></span><span class="l-zh">macOS / Linux / Windows / WSL · npm <span class="mono">latest</span> 指向当前正式版 · <a class="rxnotes" href={`${base}/changelog/`}><span class="rxv">{goVer}</span> 更新说明 →</a></span></div>
       </div>
 
       <div class="dl-pane" id="download-pane-brew" data-pane="brew" role="tabpanel" aria-labelledby="download-tab-brew" hidden>
@@ -415,7 +405,7 @@ const ld = {
     </div>
     <div class="foot-sub">
       <span><span class="l-en">Engineered around DeepSeek's prefix cache.</span><span class="l-zh">围绕 DeepSeek 前缀缓存而设计。</span></span>
-      <span class="ver"><span class="rxv">{goVer}</span> · stable</span>
+      <span class="ver"><span class="rxv">{goVer}</span> · official</span>
     </div>
   </footer>
 </Base>

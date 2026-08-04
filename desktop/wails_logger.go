@@ -5,14 +5,40 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wailsapp/wails/v2/pkg/logger"
 )
 
 type crashCaptureLogger struct {
-	delegate logger.Logger
-	app      *App
+	delegate         logger.Logger
+	app              *App
+	webView2Failures webView2FailureTracker
+}
+
+const webView2FailureReportCooldown = 10 * time.Minute
+
+type webView2FailureTracker struct {
+	mu           sync.Mutex
+	counts       map[int]int
+	lastReported map[int]time.Time
+}
+
+func (t *webView2FailureTracker) observe(kind int, now time.Time) (occurrence int, shouldReport bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.counts == nil {
+		t.counts = make(map[int]int)
+		t.lastReported = make(map[int]time.Time)
+	}
+	t.counts[kind]++
+	last := t.lastReported[kind]
+	if last.IsZero() || now.Sub(last) >= webView2FailureReportCooldown {
+		t.lastReported[kind] = now
+		return t.counts[kind], true
+	}
+	return t.counts[kind], false
 }
 
 func newCrashCaptureLogger(app *App) logger.Logger {
@@ -41,11 +67,15 @@ func (l *crashCaptureLogger) captureWebView2Failure(message string) {
 	if !ok {
 		return
 	}
-	report := webView2ProcessFailureReport(kind)
-	_ = writePendingReport(report, true)
 	if l.app != nil {
 		l.app.recordDiagnosticMetric("desktop_webview2_failure", webView2ProcessKindBucket(kind))
 	}
+	occurrence, shouldReport := l.webView2Failures.observe(kind, time.Now())
+	if !shouldReport {
+		return
+	}
+	report := webView2ProcessFailureReportWithContext(kind, occurrence, webView2RuntimeVersion())
+	_ = writePendingReport(report, true)
 }
 
 func parseWebView2ProcessFailure(message string) (int, bool) {
@@ -78,7 +108,7 @@ func webView2ProcessKindBucket(kind int) string {
 	return names[kind]
 }
 
-func webView2ProcessFailureReport(kind int) crashReport {
+func webView2ProcessFailureReportWithContext(kind, occurrence int, runtimeVersion string) crashReport {
 	bucket := webView2ProcessKindBucket(kind)
 	report := baseCrashReport("crash")
 	report.SchemaVersion = 2
@@ -89,11 +119,19 @@ func webView2ProcessFailureReport(kind int) crashReport {
 	report.TopFrame = "webview2.process." + bucket
 	report.FingerprintHint = "windows.webview2." + bucket
 	report.OccurredAt = time.Now().UTC().Format(time.RFC3339)
+	runtimeVersion = sanitizeCrashField(runtimeVersion, 128)
+	if runtimeVersion == "" {
+		runtimeVersion = "unavailable"
+	}
 	report.Message = sanitizeCrashText(fmt.Sprintf(`[windows.webview2.process_failed]
 
 WebView2 reported a failed child process.
 
 process kind: %s
-kind code: %d`, bucket, kind), maxCrashDetailBytes)
+kind code: %d
+runtime version: %s
+same-process occurrence: %d
+exit code: unavailable from the current Wails ProcessFailed callback
+GPU/driver: unavailable from the current Wails ProcessFailed callback`, bucket, kind, runtimeVersion, occurrence), maxCrashDetailBytes)
 	return report
 }

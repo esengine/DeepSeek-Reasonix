@@ -931,6 +931,7 @@ func TestToolCallMutatesForDeliveryProfile(t *testing.T) {
 		{name: "node test rerun state stays opaque", toolName: "bash", args: `{"command":"node --test --test-rerun-failures=state.json"}`, want: true},
 		{name: "node test cpu profile stays opaque", toolName: "bash", args: `{"command":"node --test --cpu-prof"}`, want: true},
 		{name: "diff review", toolName: "bash", args: `{"command":"git diff --check"}`},
+		{name: "PowerShell network probe does not write workspace", toolName: "bash", args: `{"command":"Test-NetConnection -ComputerName example.com -Port 443"}`},
 		{name: "formatter write", toolName: "bash", args: `{"command":"gofmt -w internal/a.go"}`, want: true},
 		{name: "file redirect", toolName: "bash", args: `{"command":"printf x > generated.txt"}`, want: true},
 		{name: "compound verification", toolName: "bash", args: `{"command":"go test ./... 2>&1 | tail -20"}`},

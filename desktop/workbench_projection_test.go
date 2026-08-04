@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/eventwire"
 	"reasonix/internal/provider"
 	"reasonix/internal/remote/protocol"
+	workbenchclient "reasonix/internal/remote/workbench/client"
 )
 
 func strptr(value string) *string { return &value }
@@ -50,10 +51,105 @@ func TestWorkbenchSnapshotProjectionUsesRemoteWorkspaceAndProfile(t *testing.T) 
 			Model: "deepseek/deepseek-chat", Effort: "high", CollaborationMode: protocol.CollaborationNormal,
 			TokenMode: protocol.TokenFull, ToolApprovalMode: protocol.ToolApprovalAuto,
 		},
-	}}
+	}, RuntimeEpoch: "runtime-remote"}
 	meta := workbenchMeta(snapshot, "/srv/app")
 	if meta.WorkspaceRoot != "/srv/app" || meta.Label != "deepseek/deepseek-chat" || !meta.AutoApproveTools || meta.Bypass {
 		t.Fatalf("meta projection = %+v", meta)
+	}
+	if meta.Runtime.Phase != sessionRuntimeReady || meta.Runtime.Epoch != "runtime-remote" {
+		t.Fatalf("meta runtime projection = %+v, want ready runtime-remote", meta.Runtime)
+	}
+}
+
+func TestWorkbenchTabProjectionReplacesLocalRuntimeEpoch(t *testing.T) {
+	app := testAppWithOrderedTabs(t, "tab-a", "tab-a")
+	k := app.workbench()
+	_, generation, err := k.targets.BeginRemoteConnect("remote-host", "/srv/app")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := k.targets.MarkRemoteConnected(generation); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := k.targets.ActivateRemote(generation); err != nil {
+		t.Fatal(err)
+	}
+	k.mu.Lock()
+	k.remote = &workbenchclient.Client{}
+	k.remoteGen = generation
+	k.remoteTabID = "tab-a"
+	k.snapshot = protocol.SessionSnapshot{
+		Target:       protocol.RuntimeTarget{WorkspaceID: "workspace", SessionID: "session"},
+		RuntimeEpoch: "runtime-remote",
+		Meta: protocol.SessionMetaSnapshot{ResolvedProfile: protocol.ResolvedProfile{
+			Model: "remote/model", CollaborationMode: protocol.CollaborationNormal,
+			TokenMode: protocol.TokenFull, ToolApprovalMode: protocol.ToolApprovalAsk,
+		}},
+	}
+	k.mu.Unlock()
+
+	metas := app.ListTabs()
+	if len(metas) != 1 || metas[0].Runtime.Phase != sessionRuntimeReady || metas[0].Runtime.Epoch != "runtime-remote" {
+		t.Fatalf("Remote tab runtime projection = %+v", metas)
+	}
+}
+
+func TestWorkbenchEventProjectionPreservesRuntimeEpoch(t *testing.T) {
+	projected := workbenchWireEvent(protocol.SessionEvent{
+		RuntimeEpoch: "runtime-next",
+		Event:        eventwire.Event{Kind: "text", Text: "new runtime"},
+	}, "tab-remote")
+	if projected.TabID != "tab-remote" || projected.RuntimeEpoch != "runtime-next" || projected.Text != "new runtime" {
+		t.Fatalf("Remote event projection lost its runtime fence: %+v", projected)
+	}
+}
+
+func TestWorkbenchSnapshotRefreshOnlyRebuildsForRuntimeIdentityChange(t *testing.T) {
+	target := protocol.RuntimeTarget{WorkspaceID: "workspace", SessionID: "session"}
+	base := protocol.SessionSnapshot{Target: target, RuntimeEpoch: "runtime-1"}
+	if workbenchSnapshotRuntimeReplaced(base, protocol.SessionSnapshot{Target: target, RuntimeEpoch: "runtime-1"}) {
+		t.Fatal("ordinary state refresh was classified as a runtime rebuild")
+	}
+	if !workbenchSnapshotRuntimeReplaced(base, protocol.SessionSnapshot{Target: target, RuntimeEpoch: "runtime-2"}) {
+		t.Fatal("runtime epoch change was not classified as a rebuild")
+	}
+	if !workbenchSnapshotRuntimeReplaced(base, protocol.SessionSnapshot{
+		Target: protocol.RuntimeTarget{WorkspaceID: "workspace", SessionID: "session-2"}, RuntimeEpoch: "runtime-3",
+	}) {
+		t.Fatal("target replacement was not classified as a rebuild")
+	}
+	if workbenchSnapshotRuntimeReplaced(protocol.SessionSnapshot{}, base) {
+		t.Fatal("initial snapshot hydration was classified as an in-place rebuild")
+	}
+}
+
+func TestWorkbenchUnchangedProfileSkipsRefreshOnlyForCurrentProjection(t *testing.T) {
+	target := protocol.RuntimeTarget{WorkspaceID: "workspace", SessionID: "session"}
+	goal := "ship it"
+	profile := protocol.ResolvedProfile{
+		Model: "local/model", Effort: "high", CollaborationMode: protocol.CollaborationGoal,
+		TokenMode: protocol.TokenFull, ToolApprovalMode: protocol.ToolApprovalAuto,
+	}
+	snapshot := protocol.SessionSnapshot{
+		Target: target, RuntimeEpoch: "runtime-1",
+		Meta: protocol.SessionMetaSnapshot{ResolvedProfile: profile, Goal: &goal},
+	}
+	result := protocol.SessionProfileSetResult{
+		ResolvedProfile: profile, RuntimeEpoch: "runtime-1", Disposition: protocol.ProfileUnchanged,
+	}
+	patch := protocol.ProfilePatch{Goal: &goal}
+	if !workbenchSnapshotMatchesProfileResult(snapshot, target, patch, result) {
+		t.Fatal("current unchanged profile did not match the cached projection")
+	}
+	staleGoal := "older goal"
+	snapshot.Meta.Goal = &staleGoal
+	if workbenchSnapshotMatchesProfileResult(snapshot, target, patch, result) {
+		t.Fatal("stale goal projection was accepted as current")
+	}
+	snapshot.Meta.Goal = &goal
+	snapshot.RuntimeEpoch = "runtime-old"
+	if workbenchSnapshotMatchesProfileResult(snapshot, target, patch, result) {
+		t.Fatal("stale runtime projection was accepted as current")
 	}
 }
 
@@ -124,12 +220,15 @@ func TestWorkbenchLateCallbackUsesCurrentProjectionTab(t *testing.T) {
 	// Remote was rebound to tab B. It must route through the current binding.
 	callbacks := app.workbenchClientCallbacks(generation, "a")
 	callbacks.OnSessionEvent(protocol.SessionEvent{
-		Seq: 1, Event: eventwire.Event{Kind: "text", Text: "late"},
+		Seq: 1, RuntimeEpoch: "runtime-current", Event: eventwire.Event{Kind: "text", Text: "late"},
 	})
 	select {
 	case got := <-events:
 		if got.TabID != "b" {
 			t.Fatalf("late callback tab = %q, want current projection b", got.TabID)
+		}
+		if got.RuntimeEpoch != "runtime-current" {
+			t.Fatalf("late callback runtime epoch = %q, want runtime-current", got.RuntimeEpoch)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("late callback was not projected")

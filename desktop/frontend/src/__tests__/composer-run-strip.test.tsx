@@ -138,6 +138,43 @@ async function renderComposer(props: Partial<Parameters<typeof Composer>[0]> = {
   return { root, calls, rerender: paint };
 }
 
+function installWindowTimerQueue() {
+  let clock = 0;
+  let nextId = 1;
+  const tasks = new Map<number, { at: number; callback: () => void }>();
+  const originalSetTimeout = window.setTimeout;
+  const originalClearTimeout = window.clearTimeout;
+
+  window.setTimeout = ((handler: TimerHandler, delay = 0, ...args: unknown[]) => {
+    if (typeof handler !== "function") throw new Error("string timers are unsupported in tests");
+    const id = nextId++;
+    tasks.set(id, { at: clock + Number(delay), callback: () => handler(...args) });
+    return id;
+  }) as typeof window.setTimeout;
+  window.clearTimeout = ((id?: number) => {
+    if (id !== undefined) tasks.delete(id);
+  }) as typeof window.clearTimeout;
+
+  return {
+    advance(ms: number) {
+      clock += ms;
+      while (true) {
+        const next = [...tasks.entries()]
+          .filter(([, task]) => task.at <= clock)
+          .sort((a, b) => a[1].at - b[1].at || a[0] - b[0])[0];
+        if (!next) break;
+        tasks.delete(next[0]);
+        next[1].callback();
+      }
+    },
+    restore() {
+      tasks.clear();
+      window.setTimeout = originalSetTimeout;
+      window.clearTimeout = originalClearTimeout;
+    },
+  };
+}
+
 console.log("\ncomposer run strip");
 
 // Idle: no strip, no stop button, plain send arrow.
@@ -212,6 +249,48 @@ console.log("\ncomposer run strip");
   eq(document.querySelector(".composer-intent-menu")?.textContent?.includes("Work mode"), false, "task-intent menu no longer owns work mode");
   eq(document.querySelectorAll('.composer-intent-menu [role="menuitemradio"]').length, 3, "task method menu exposes direct, plan, and goal");
 
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+// A short Creation hover must stay a no-op. In particular, leaving before the
+// 120ms open delay must not manufacture a closing-only popover or flash the
+// trigger's open styling 140ms later.
+{
+  const dom = installDom();
+  const timers = installWindowTimerQueue();
+  const { root } = await renderComposer({ showContextWindowRing: true });
+
+  for (const selector of [".composer-task-mode-trigger", ".composer-profile-trigger"]) {
+    const trigger = document.querySelector(selector) as HTMLButtonElement | null;
+    if (!trigger) throw new Error(`missing Creation hover trigger: ${selector}`);
+
+    await act(async () => {
+      trigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+      timers.advance(119);
+      trigger.dispatchEvent(new MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }));
+      timers.advance(140);
+    });
+
+    ok(!trigger.classList.contains(`${selector.slice(1)}--open`), `${selector} stays visually closed after a short hover`);
+    ok(
+      document.querySelector(selector.includes("task") ? ".composer-intent-menu" : ".composer-profile-menu") === null,
+      `${selector} does not render a closing-only menu`,
+    );
+  }
+
+  const intentTrigger = document.querySelector(".composer-task-mode-trigger") as HTMLButtonElement | null;
+  if (!intentTrigger) throw new Error("missing Creation intent trigger");
+  await act(async () => {
+    intentTrigger.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: null }));
+    timers.advance(120);
+  });
+  ok(intentTrigger.classList.contains("composer-task-mode-trigger--open"), "a sustained Creation hover still opens the trigger");
+  ok(document.querySelector(".composer-intent-menu") !== null, "a sustained Creation hover still renders the menu");
+
+  timers.restore();
   await act(async () => {
     root.unmount();
   });

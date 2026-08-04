@@ -14,13 +14,17 @@ import (
 )
 
 type readinessSink struct {
-	events int
-	audits int
+	events   int
+	audits   int
+	recovery int
 }
 
 func (s *readinessSink) Emit(event.Event) { s.events++ }
 func (s *readinessSink) RecordReadinessAudit(evidence.ReadinessAudit) {
 	s.audits++
+}
+func (s *readinessSink) RecordProtocolRecovery(event.ProtocolRecoveryAudit) {
+	s.recovery++
 }
 
 func TestSinkWritesOnlyWhitelistedContentFreeCounters(t *testing.T) {
@@ -45,6 +49,7 @@ func TestSinkWritesOnlyWhitelistedContentFreeCounters(t *testing.T) {
 	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
 		Name: secret, Args: secret, Output: secret, Err: "permission denied: " + secret,
 	}})
+	event.RecordProtocolRecovery(sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
 	sink.Emit(event.Event{Kind: event.TurnDone, Err: &provider.APIError{
 		Provider: secret, Status: 429, Body: secret, TraceID: secret,
 	}})
@@ -70,21 +75,22 @@ func TestSinkWritesOnlyWhitelistedContentFreeCounters(t *testing.T) {
 		got[counter.Signal] = counter.Bucket
 	}
 	for signal, bucket := range map[string]string{
-		"client_surface": "cli",
-		"cli_mode":       "run",
-		"turns":          "count",
-		"finish_reason":  "stop",
-		"cache_hit":      "90_100",
-		"tool_error":     "permission",
-		"provider_error": "rate_limit",
-		"cli_exit":       "error",
+		"client_surface":               "cli",
+		"cli_mode":                     "run",
+		"turns":                        "count",
+		"finish_reason":                "stop",
+		"cache_hit":                    "90_100",
+		"tool_error":                   "permission",
+		"provider_error":               "rate_limit",
+		"cli_exit":                     "error",
+		"tool_call_reasoning_recovery": "missing_reasoning_retry_replaced_response",
 	} {
 		if got[signal] != bucket {
 			t.Errorf("%s bucket = %q, want %q", signal, got[signal], bucket)
 		}
 	}
-	if inner.events != 6 || inner.audits != 1 {
-		t.Fatalf("forwarding events=%d audits=%d", inner.events, inner.audits)
+	if inner.events != 6 || inner.audits != 1 || inner.recovery != 1 {
+		t.Fatalf("forwarding events=%d audits=%d recovery=%d", inner.events, inner.audits, inner.recovery)
 	}
 }
 
@@ -124,24 +130,5 @@ func TestEnvironmentOptOutRemovesPendingQueue(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, pendingDirName)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("environment opt-out did not remove pending queue: %v", err)
-	}
-}
-
-func TestSafeModeDoesNotDeletePendingQueue(t *testing.T) {
-	clearPolicyEnv(t)
-	home := t.TempDir()
-	if err := appendPending(home, pendingPayload{
-		Version: "v1.20.0", OS: "linux", Counters: []Counter{{Signal: "turns", Bucket: "count", Count: 1}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if reporter := Start(Options{
-		Mode: "off", Version: "v1.20.0", HomeDir: home, Interactive: true, SafeMode: true,
-	}); reporter != nil {
-		t.Fatal("Safe Mode unexpectedly started telemetry")
-	}
-	entries, err := os.ReadDir(filepath.Join(home, pendingDirName))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("Safe Mode changed pending queue: entries=%d err=%v", len(entries), err)
 	}
 }

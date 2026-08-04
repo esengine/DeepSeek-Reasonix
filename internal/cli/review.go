@@ -23,8 +23,8 @@ func reviewCommand(args []string) int {
 	commit := fs.String("commit", "", "review a specific commit (shows changes introduced by that commit)")
 	model := fs.String("model", "", "provider name override (default: config default_model)")
 	instructions := fs.String("instructions", "", "extra review instructions appended to the prompt")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 
 	// 1. Get the diff.

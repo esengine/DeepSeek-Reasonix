@@ -100,6 +100,7 @@ OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the inst
 !define REASONIX_LAUNCHER "reasonix-launcher.exe"
 !define REASONIX_CLI "reasonix-cli.exe"
 !define REASONIX_PORTABLE_ENTRY "Reasonix.exe"
+!define REASONIX_LAYOUT_INSTALLER "reasonix-layout-installer.exe"
 !define REASONIX_PAYLOAD_MANIFEST "reasonix-payload.json"
 !define REASONIX_PAYLOAD_SIGNATURE "reasonix-payload.json.minisig"
 !define REASONIX_UNLOCK_RETRIES 60
@@ -213,9 +214,18 @@ Function reasonix.waitForExecutableUnlock
    StrCpy $0 0
 
 retry:
-   IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 check_guard
+   IfFileExists "$INSTDIR\${PRODUCT_EXECUTABLE}" 0 check_versioned_target
    ClearErrors
    FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a
+   IfErrors locked
+   FileClose $1
+
+check_versioned_target:
+   ; A same-version recovery install replaces this directory transactionally.
+   ; Detect the running active binary before asking the Go activator to rename it.
+   IfFileExists "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" 0 check_guard
+   ClearErrors
+   FileOpen $1 "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" a
    IfErrors locked
    FileClose $1
 
@@ -273,72 +283,104 @@ FunctionEnd
 Section
     !insertmacro wails.setShellContext
 
-    ; Current auto-update helpers extract the signed installer payload into a
-    ; unique temporary directory, then compare-and-publish the exact claimed
-    ; release unit. Legacy helpers omit /REASONIXSTAGE and retain the historical
-    ; in-place update behavior required to upgrade into the hardened release.
-    StrCmp $ReasonixStageMode "1" reasonix_copy_payload
+    ; /REASONIXSTAGE=1: flat six-member payload for 1.18–1.19.1 helpers (and
+    ; the new helper's staging extract). Do not write shortcuts/uninstaller.
+    ; Normal install: versioned-v1 layout under versions/v${INFO_PRODUCTVERSION}/
+    ; with a permanent thin launcher at InstallRoot. Guard is only present in
+    ; STAGE payloads (as the one-shot legacy migrator) and is not persisted on
+    ; a normal install.
+    StrCmp $ReasonixStageMode "1" reasonix_stage_payload
     !insertmacro wails.webview2runtime
-
     Call reasonix.waitForExecutableUnlock
+    Goto reasonix_normal_install
 
-reasonix_copy_payload:
+reasonix_stage_payload:
     SetOutPath $INSTDIR
-
-    ; The release workflow embeds a minisign-authenticated manifest after
-    ; SignPath has signed the five executable members. Only the extraction
-    ; handoff needs these files; a normal installation does not persist them.
-    StrCmp $ReasonixStageMode "1" 0 reasonix_payload_metadata_done
     !if /FileExists "${REASONIX_PAYLOAD_MANIFEST}"
     File "/oname=${REASONIX_PAYLOAD_MANIFEST}" "${REASONIX_PAYLOAD_MANIFEST}"
     !endif
     !if /FileExists "${REASONIX_PAYLOAD_SIGNATURE}"
     File "/oname=${REASONIX_PAYLOAD_SIGNATURE}" "${REASONIX_PAYLOAD_SIGNATURE}"
     !endif
-reasonix_payload_metadata_done:
-
     !insertmacro wails.files
     !if /FileExists "${REASONIX_UPDATE_HELPER}"
     File "/oname=${REASONIX_UPDATE_HELPER}" "${REASONIX_UPDATE_HELPER}"
-    !else
-    !warning "${REASONIX_UPDATE_HELPER} was not found; Windows auto-update will fail safely until the helper is installed."
     !endif
     !if /FileExists "${REASONIX_GUARD}"
     File "/oname=${REASONIX_GUARD}" "${REASONIX_GUARD}"
     !endif
     !if /FileExists "${REASONIX_LAUNCHER}"
     File "/oname=${REASONIX_LAUNCHER}" "${REASONIX_LAUNCHER}"
-    StrCmp $ReasonixStageMode "1" reasonix_launcher_payload_done
-    ; Portable archives expose Reasonix.exe as a second copy of the Guard
-    ; launcher. Preserve that layout only when upgrading an existing portable
-    ; directory, and keep the alias in lockstep with the canonical launcher.
-    IfFileExists "$INSTDIR\${REASONIX_PORTABLE_ENTRY}" 0 reasonix_no_portable_entry
-    File "/oname=${REASONIX_PORTABLE_ENTRY}" "${REASONIX_LAUNCHER}"
-reasonix_no_portable_entry:
-    ; Keep the Guard launcher as the target while taking the visible shortcut
-    ; icon from the Wails application. The launcher embeds the same icon too,
-    ; but an explicit icon source prevents stale/generic taskbar pins after an
-    ; in-place upgrade from a launcher build that had no Windows resources.
-    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "launch --detach" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
-    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "launch --detach" "$INSTDIR\${PRODUCT_EXECUTABLE}" 0
-reasonix_launcher_payload_done:
+    !endif
+    !if /FileExists "${REASONIX_CLI}"
+    File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"
+    !endif
+    Goto reasonix_section_done
+
+reasonix_normal_install:
+    ; Extract into an install-local temporary directory, then let the signed Go
+    ; activator validate the complete release unit, transactionally publish the
+    ; version/root entries, and strictly atomically replace current.json last.
+    ; The normal/recovery installer therefore shares the same commit protocol as
+    ; automatic updates instead of writing live files or current.json in place.
+    System::Call 'kernel32::GetCurrentProcessId() i .R8'
+    CreateDirectory "$INSTDIR\versions"
+    StrCpy $R9 "$INSTDIR\versions\.installer-v${INFO_PRODUCTVERSION}-$R8"
+    RMDir /r "$R9"
+    CreateDirectory "$R9"
+    SetOutPath "$R9"
+    !insertmacro wails.files
+    !if /FileExists "${REASONIX_UPDATE_HELPER}"
+    File "/oname=${REASONIX_UPDATE_HELPER}" "${REASONIX_UPDATE_HELPER}"
     !else
-    StrCmp $ReasonixStageMode "1" reasonix_launcher_payload_done_no_launcher
-    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
-reasonix_launcher_payload_done_no_launcher:
+    !warning "${REASONIX_UPDATE_HELPER} was not found; Windows auto-update will fail safely until the helper is installed."
     !endif
     !if /FileExists "${REASONIX_CLI}"
     File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"
     !else
     !warning "${REASONIX_CLI} was not found; remote upload installation will be unavailable."
     !endif
+    !if /FileExists "${REASONIX_LAUNCHER}"
+    File "/oname=${REASONIX_LAUNCHER}" "${REASONIX_LAUNCHER}"
+    !endif
 
-    StrCmp $ReasonixStageMode "1" reasonix_section_done
+    SetOutPath "$PLUGINSDIR"
+    !if /FileExists "${REASONIX_GUARD}"
+    File "/oname=${REASONIX_LAYOUT_INSTALLER}" "${REASONIX_GUARD}"
+    !else
+    !error "${REASONIX_GUARD} was not found; normal installs require the signed layout activator."
+    !endif
+    ExecWait '"$PLUGINSDIR\${REASONIX_LAYOUT_INSTALLER}" --install-root "$INSTDIR" --version "v${INFO_PRODUCTVERSION}" --activate-staging "$R9" --no-relaunch' $0
+    StrCmp $0 "0" reasonix_layout_activated
+    DetailPrint "Reasonix layout activation failed with exit code $0; the previous version remains active."
+    RMDir /r "$R9"
+    SetErrorLevel 1
+    Abort "Reasonix could not activate the verified release. The previous version was left unchanged."
+
+reasonix_layout_activated:
+    RMDir /r "$R9"
+    SetOutPath "$INSTDIR"
+
+    ; Remove flat leftovers from prior 1.18–1.19 installs when overwriting.
+    Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    Delete "$INSTDIR\${REASONIX_GUARD}"
+    Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"
+
+    !if /FileExists "${REASONIX_LAUNCHER}"
+    ; Keep both target and icon on the stable launcher. Pointing IconLocation at
+    ; versions\vX\reasonix-desktop.exe leaves a blank shortcut as soon as version
+    ; retention removes that directory after a later update.
+    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "" "$INSTDIR\${REASONIX_LAUNCHER}" 0
+    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${REASONIX_LAUNCHER}" "" "$INSTDIR\${REASONIX_LAUNCHER}" 0
+    !else
+    CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}"
+    CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}"
+    !endif
+
     !insertmacro wails.associateFiles
     !insertmacro wails.associateCustomProtocols
-
     !insertmacro reasonix.writeUninstaller
+
 reasonix_section_done:
 SectionEnd
 
@@ -347,13 +389,15 @@ Section "uninstall"
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 
-    ; Precision uninstall: delete main application files
+    ; Precision uninstall: flat leftovers, thin entry points, and version trees.
     Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
     Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"
     Delete "$INSTDIR\${REASONIX_GUARD}"
     Delete "$INSTDIR\${REASONIX_LAUNCHER}"
     Delete "$INSTDIR\${REASONIX_CLI}"
     Delete "$INSTDIR\${REASONIX_PORTABLE_ENTRY}"
+    Delete "$INSTDIR\current.json"
+    RMDir /r "$INSTDIR\versions"
 
     Delete "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk"
     Delete "$DESKTOP\${INFO_PRODUCTNAME}.lnk"

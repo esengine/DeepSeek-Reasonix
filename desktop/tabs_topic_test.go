@@ -1840,7 +1840,10 @@ func TestLoadPinnedTabSessionFallsBackToMigratedBasename(t *testing.T) {
 	path := writeLegacySession(t, dir, "migrated-tab.jsonl", "resume after path migration", time.Now())
 	oldPath := filepath.Join(t.TempDir(), "old-reasonix", "projects", "slug", "sessions", filepath.Base(path))
 
-	loaded, pinnedPath, ok := loadPinnedTabSession(dir, oldPath)
+	loaded, pinnedPath, ok, err := loadPinnedTabSession(dir, oldPath)
+	if err != nil {
+		t.Fatalf("loadPinnedTabSession: %v", err)
+	}
 	if !ok || loaded == nil {
 		t.Fatalf("loadPinnedTabSession did not recover migrated basename: ok=%v loaded=%v path=%q", ok, loaded, pinnedPath)
 	}
@@ -1874,8 +1877,101 @@ func TestLoadPinnedTabSessionSkipsCleanupPending(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if loaded, pinnedPath, ok := loadPinnedTabSession(dir, path); ok || loaded != nil || pinnedPath != "" {
+	if loaded, pinnedPath, ok, err := loadPinnedTabSession(dir, path); err != nil || ok || loaded != nil || pinnedPath != "" {
 		t.Fatalf("loadPinnedTabSession cleanup-pending = loaded:%v path:%q ok:%v, want skipped", loaded, pinnedPath, ok)
+	}
+}
+
+func TestLoadPinnedTabSessionPreservesLoadError(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := writeLegacySession(t, dir, "unsafe-pinned.jsonl", "checkpoint", time.Now())
+	events := `{"schema_version":99,"type":"replace","messages":[{"role":"user","content":"newer"}]}` + "\n"
+	if err := os.WriteFile(agent.SessionEventLogPath(path), []byte(events), 0o600); err != nil {
+		t.Fatalf("write future event log: %v", err)
+	}
+
+	loaded, pinnedPath, ok, err := loadPinnedTabSession(dir, path)
+	if err == nil || !strings.Contains(err.Error(), "uses schema 99") {
+		t.Fatalf("loadPinnedTabSession error = %v, want future-schema refusal", err)
+	}
+	if loaded != nil || !ok || filepath.Clean(pinnedPath) != filepath.Clean(path) {
+		t.Fatalf("load result = loaded:%v path:%q ok:%v, want pinned path retained with hard error", loaded, pinnedPath, ok)
+	}
+	if got, readErr := os.ReadFile(agent.SessionEventLogPath(path)); readErr != nil || string(got) != events {
+		t.Fatalf("event log changed after refusal: bytes=%q err=%v", got, readErr)
+	}
+}
+
+func TestBuildTabControllerSurfacesPinnedSessionLoadError(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "test-provider/test-model"
+
+[[providers]]
+name = "test-provider"
+kind = "openai"
+base_url = "https://test.invalid/v1"
+model = "test-model"
+api_key_env = "REASONIX_TEST_KEY"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	dir := desktopSessionDir(globalWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := writeLegacySession(t, dir, "unsafe-startup.jsonl", "checkpoint", time.Now())
+	events := `{"schema_version":1,"type":"replace","messages":[{"role":"user","content":"newer"}]}` + "\n"
+	logPath := agent.SessionEventLogPath(path)
+	if err := os.WriteFile(logPath, []byte(events), 0o600); err != nil {
+		t.Fatalf("write native event log: %v", err)
+	}
+	const oversizedSparseLog = int64(1 << 30)
+	if err := os.Truncate(logPath, oversizedSparseLog); err != nil {
+		t.Fatalf("make sparse oversized event log: %v", err)
+	}
+
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "tab_unsafe_startup")
+	tab.SessionPath = path
+	tab.model = "test-provider/test-model"
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl != nil || tab.Ready {
+		t.Fatalf("unsafe session runtime = hasCtrl:%v ready:%v, want failed startup", tab.Ctrl != nil, tab.Ready)
+	}
+	if !strings.Contains(tab.StartupErr, agent.ErrSessionReplayLimitExceeded.Error()) || strings.Contains(tab.StartupErr, path) {
+		t.Fatalf("startup error = %q, want path-free replay-budget error", tab.StartupErr)
+	}
+	if filepath.Clean(tab.SessionPath) != filepath.Clean(path) {
+		t.Fatalf("session path = %q, want original %q", tab.SessionPath, path)
+	}
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat event log after startup refusal: %v", err)
+	}
+	if info.Size() != oversizedSparseLog {
+		t.Fatalf("event log size after startup refusal = %d, want %d", info.Size(), oversizedSparseLog)
+	}
+	app.sharedHostsMu.Lock()
+	sharedHosts := len(app.sharedHosts)
+	app.sharedHostsMu.Unlock()
+	if sharedHosts != 0 {
+		t.Fatalf("shared hosts after failed startup = %d, want 0", sharedHosts)
 	}
 }
 

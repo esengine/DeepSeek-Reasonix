@@ -191,7 +191,7 @@ Legacy installs without theme state keep the previous appearance. Old app versio
 List / activate / reset / save / delete / copy / import / export / pick background.
 The UI only receives temporary asset URLs (`/__reasonix_theme_asset/...`) or data URLs — never absolute host paths.
 
-Import: same id is rejected until the user confirms atomic replace. Built-ins cannot be overwritten or deleted. Corrupt / missing packs fall back to the Graphite path. Safe mode does not load external themes. `/theme reset` and the command palette restore entry clear the pack.
+Import: same id is rejected until the user confirms atomic replace. Built-ins cannot be overwritten or deleted. Corrupt / missing packs fall back to the Graphite path. `/theme reset` and the command palette restore entry clear the pack.
 
 ## Authoring tips
 

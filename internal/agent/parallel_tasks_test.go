@@ -415,7 +415,7 @@ func TestChildMaxStepsSharedDefault(t *testing.T) {
 
 func TestTaskToolPropagatesDeliveryProfileToSubagents(t *testing.T) {
 	task := (&TaskTool{}).WithDeliveryProfile(true)
-	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "")
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
 	if !opts.DeliveryProfile {
 		t.Fatal("sub-agent options did not inherit delivery profile")
 	}
@@ -427,7 +427,7 @@ func TestTaskToolSharesWorkspaceLeaseWithSubagents(t *testing.T) {
 		t.Fatalf("New workspace lease: %v", err)
 	}
 	task := (&TaskTool{}).WithWorkspaceLease(owner)
-	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "")
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
 	if opts.WorkspaceLease != owner {
 		t.Fatal("sub-agent options did not share the parent's workspace lease owner")
 	}

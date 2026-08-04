@@ -245,6 +245,14 @@ func (s *Server) finishOperation(sessionID protocol.SessionID, operationID proto
 }
 
 func (s *Server) notifyStateChanged(sessionID protocol.SessionID) {
+	s.notifySessionResync(sessionID, protocol.ResyncStateChanged, "")
+}
+
+func (s *Server) notifyRuntimeReplaced(sessionID protocol.SessionID, replacement protocol.RuntimeEpoch) {
+	s.notifySessionResync(sessionID, protocol.ResyncRuntimeReplaced, replacement)
+}
+
+func (s *Server) notifySessionResync(sessionID protocol.SessionID, reason protocol.ResyncReason, replacement protocol.RuntimeEpoch) {
 	type targetNotification struct {
 		conn  *rpcwire.Conn
 		value protocol.SessionResyncRequired
@@ -260,10 +268,14 @@ func (s *Server) notifyStateChanged(sessionID protocol.SessionID) {
 		if sub.sessionID != sessionID || !sub.active {
 			continue
 		}
-		notifications = append(notifications, targetNotification{conn: sub.conn, value: protocol.SessionResyncRequired{
+		value := protocol.SessionResyncRequired{
 			SubscriptionID: sub.id, HostEpoch: s.hostEpoch, Target: s.target(sessionID),
-			RuntimeEpoch: sess.runtimeEpoch, LastSeq: sub.seq, Reason: protocol.ResyncStateChanged,
-		}})
+			RuntimeEpoch: sub.runtimeEpoch, LastSeq: sub.seq, Reason: reason,
+		}
+		if reason == protocol.ResyncRuntimeReplaced {
+			value.ReplacementRuntimeEpoch = replacement
+		}
+		notifications = append(notifications, targetNotification{conn: sub.conn, value: value})
 	}
 	s.mu.Unlock()
 	for _, notification := range notifications {
@@ -299,6 +311,9 @@ func protocolGoal(ctrl goalController) (string, protocol.GoalStatus) {
 }
 
 func (s *Server) setGoal(p protocol.SessionGoalSetParams) (protocol.SessionGoalSetResult, error) {
+	s.profileMu.Lock()
+	defer s.profileMu.Unlock()
+
 	sess, err := s.sessionForMutation(p.ExpectedHostEpoch, p.Target, p.ExpectedRuntimeEpoch)
 	if err != nil {
 		return protocol.SessionGoalSetResult{}, err
@@ -307,13 +322,19 @@ func (s *Server) setGoal(p protocol.SessionGoalSetParams) (protocol.SessionGoalS
 	if !ok {
 		return protocol.SessionGoalSetResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
 	}
+	beforeGoal, beforeStatus := protocolGoal(controller)
 	controller.SetGoal(p.Goal)
 	goal, status := protocolGoal(controller)
-	s.notifyStateChanged(sess.id)
+	if goal != beforeGoal || status != beforeStatus {
+		s.notifyStateChanged(sess.id)
+	}
 	return protocol.SessionGoalSetResult{Goal: goal, Status: status}, nil
 }
 
 func (s *Server) resumeGoal(p protocol.SessionGoalResumeParams) (protocol.SessionGoalResumeResult, error) {
+	s.profileMu.Lock()
+	defer s.profileMu.Unlock()
+
 	sess, err := s.sessionForMutation(p.ExpectedHostEpoch, p.Target, p.ExpectedRuntimeEpoch)
 	if err != nil {
 		return protocol.SessionGoalResumeResult{}, err
@@ -324,11 +345,16 @@ func (s *Server) resumeGoal(p protocol.SessionGoalResumeParams) (protocol.Sessio
 	}
 	resumed := controller.ResumeGoal()
 	goal, status := protocolGoal(controller)
-	s.notifyStateChanged(sess.id)
+	if resumed {
+		s.notifyStateChanged(sess.id)
+	}
 	return protocol.SessionGoalResumeResult{Resumed: resumed, Goal: goal, Status: status}, nil
 }
 
 func (s *Server) clearGoal(p protocol.SessionGoalClearParams) (protocol.SessionGoalClearResult, error) {
+	s.profileMu.Lock()
+	defer s.profileMu.Unlock()
+
 	sess, err := s.sessionForMutation(p.ExpectedHostEpoch, p.Target, p.ExpectedRuntimeEpoch)
 	if err != nil {
 		return protocol.SessionGoalClearResult{}, err
@@ -337,7 +363,11 @@ func (s *Server) clearGoal(p protocol.SessionGoalClearParams) (protocol.SessionG
 	if !ok {
 		return protocol.SessionGoalClearResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
 	}
+	beforeGoal, beforeStatus := protocolGoal(controller)
 	controller.SetGoal("")
-	s.notifyStateChanged(sess.id)
+	goal, status := protocolGoal(controller)
+	if goal != beforeGoal || status != beforeStatus {
+		s.notifyStateChanged(sess.id)
+	}
 	return protocol.SessionGoalClearResult{Cleared: true}, nil
 }

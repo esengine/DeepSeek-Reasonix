@@ -337,6 +337,10 @@ var ChineseTraditional = Messages{
 	RewindPickHint:            "↑/↓ 移動 · Enter 選擇 · Esc 關閉",
 	RewindRestoreTitleFmt:     "⟲ 恢復到第 %d 輪 ",
 	RewindApplyHint:           "↑/↓ · Enter 套用 · Esc 返回",
+	RewindCoverageTitle:       "⚠ 檔案覆蓋不完整",
+	RewindCoverageWarningFmt:  "偵測到 %d 個覆蓋缺口，部分檔案修改可能無法恢復。",
+	RewindConfirmHint:         "Enter/y 確認 · Esc 返回",
+	RewindUnavailableFmt:      "無法回滾：%s",
 	RewindEmpty:               "(空)",
 
 	SelectProvidersLabel:     "選擇要啟用的 provider",
@@ -468,7 +472,6 @@ var ChineseTraditional = Messages{
 	ReportKept:                "報告已保留在本機。",
 	ReportDeletedFmt:          "已刪除 CLI 當機報告 %s。",
 	ReportSentFmt:             "已傳送 CLI 當機報告 %s。",
-	ReportSafeModeBlocked:     "Safe Mode 下不能傳送當機報告；本機報告已保留",
 	ReportConfigFailedFmt:     "無法載入網路設定：%v",
 	ReportUploadFailedFmt:     "報告上傳失敗；本機報告已保留：%v",
 	ReportSentDeleteFailedFmt: "報告已傳送，但無法刪除本機副本：%v",
@@ -497,6 +500,7 @@ var ChineseTraditional = Messages{
   reasonix acp [--model NAME]                           透過 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 互動式設定精靈；生成 reasonix.toml（及 .env）
   reasonix config reasoning-language [auto|zh|en]        設定可見思考語言
+  reasonix config compact-ratio [--local] [65..85]       設定自動壓縮閾值
   reasonix config telemetry [auto|on|off]                設定不含內容的 CLI 使用統計
   reasonix report [list|show|send|delete] [ID]           審閱並明確傳送本機 CLI 當機報告
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 裡的 MCP 伺服器
@@ -510,7 +514,7 @@ var ChineseTraditional = Messages{
   reasonix hook list|status --json [--dir PATH]         檢視脫敏 Hook 狀態
   reasonix task list|show --json [--dir PATH]           檢視脫敏 Task 狀態
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
-  reasonix upgrade [stable|preview] [--check] [--force]  按已儲存渠道自更新（進階用法：--channel；別名：reasonix update）
+  reasonix upgrade [--check] [--force]                   更新到最新正式版（別名：reasonix update）
   reasonix version
   reasonix help
 
@@ -559,6 +563,7 @@ var ChineseTraditional = Messages{
 	ProviderPickLabel:          "選擇 %s 的一個模型",
 	ProviderNoModelsFmt:        "供應商 %s 沒有已配置的模型",
 	UpgradeChecking:            "正在檢查更新…",
+	UpgradeChannelDeprecated:   "發布渠道已停用；將使用最新正式版。",
 	UpgradeDevBuild:            "開發版本無法自更新",
 	UpgradeFetchFailed:         "檢查更新失敗：%v",
 	UpgradeInvalidVersion:      "遠端版本不是有效的 semver",

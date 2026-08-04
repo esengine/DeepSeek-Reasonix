@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import {
   DecisionConfirmBar,
   PromptAction,
   PromptBadge,
+  PromptDescriptionToggle,
   PromptShelf,
 } from "./PromptShelf";
 
@@ -18,7 +19,10 @@ export function ClearContextCard({
   const shelfRef = useRef<HTMLDivElement | null>(null);
   // Default safe choice: cancel.
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
+  const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const instanceId = useId();
   const selectedIndexRef = useRef(0);
   selectedIndexRef.current = selectedIndex;
   const submittingRef = useRef(false);
@@ -42,6 +46,8 @@ export function ClearContextCard({
       tone: "danger" as const,
     },
   ];
+  const selectedDescriptionId = `${instanceId}-description-${selectedIndex}`;
+  const descriptionExpanded = expandedDescriptionId === selectedDescriptionId;
 
   useEffect(() => {
     shelfRef.current?.focus();
@@ -111,6 +117,10 @@ export function ClearContextCard({
               keyLabel={action.key}
               label={action.label}
               description={action.desc}
+              descriptionId={`${instanceId}-description-${index}`}
+              descriptionDisclosure
+              descriptionExpanded={selectedIndex === index && descriptionExpanded}
+              onDescriptionOverflowChange={selectedIndex === index ? setDescriptionTruncated : undefined}
               onClick={() => {
                 if (submitting) return;
                 setSelectedIndex(index);
@@ -121,6 +131,16 @@ export function ClearContextCard({
             />
           ))}
         </>
+      }
+      note={
+        descriptionTruncated ? (
+          <PromptDescriptionToggle
+            descriptionId={selectedDescriptionId}
+            expanded={descriptionExpanded}
+            onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
+            disabled={submitting}
+          />
+        ) : undefined
       }
       footer={
         <DecisionConfirmBar

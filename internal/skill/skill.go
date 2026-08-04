@@ -144,8 +144,7 @@ type Options struct {
 	MaxDepth         int
 	DisableBuiltins  bool // suppress shipped built-ins (test-only knob)
 	// DisableDiscovery returns an empty store without probing project, custom,
-	// global, plugin, or built-in skill sources. Recovery safe mode uses this so
-	// a broken or unreadable skill tree cannot interfere with startup.
+	// global, plugin, or built-in skill sources. It is a test-only isolation knob.
 	DisableDiscovery bool
 	// Stderr is the writer for diagnostic warnings. When nil, defaults to
 	// os.Stderr. Set to io.Discard to suppress output (e.g. during model

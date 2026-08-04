@@ -29,6 +29,11 @@ type Asset struct {
 	Sig    string `json:"sig"`    // URL of the detached minisign (.minisig) signature
 	Size   int64  `json:"size"`   // artifact size in bytes (download-progress denominator)
 	SHA256 string `json:"sha256"` // lowercase hex digest, for a second integrity check after verify
+	// InstallLayout identifies the on-disk layout the artifact expects after
+	// install. Empty means the pre-v1.20 flat layout (ignored by old clients).
+	// New clients require "versioned-v1" for self-update and reject unknown
+	// values without changing the active install.
+	InstallLayout string `json:"install_layout,omitempty"`
 }
 
 // PlatformKey is the map key used in Manifest.Platforms for the given OS/arch.

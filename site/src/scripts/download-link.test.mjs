@@ -21,24 +21,22 @@ test("recognized download panes are strict", () => {
   assert.equal(downloadPaneFromURL("not a url", "not a base"), "");
 });
 
-test("release channel deep links apply only to Desktop and native CLI", () => {
-  assert.equal(releaseChannelFromURL("/?download=desktop&channel=preview#start"), "preview");
-  assert.equal(releaseChannelFromURL("/?download=cli&channel=stable#start"), "stable");
-  assert.equal(releaseChannelFromURL("/?download=npm&channel=preview#start"), "");
+test("legacy release channel deep links never select a public channel", () => {
+  assert.equal(releaseChannelFromURL("/?download=desktop&channel=preview#start"), "");
+  assert.equal(releaseChannelFromURL("/?download=cli&channel=stable#start"), "");
   assert.equal(releaseChannelFromURL("/?download=desktop&channel=canary#start"), "");
-  assert.equal(releaseChannelFromURL("/?download=desktop&channel=preview"), "");
 });
 
-test("download tab navigation keeps the visible pane and channel in the URL", () => {
+test("download tab navigation keeps the pane and removes legacy channels", () => {
   assert.equal(
     downloadURLForPane("https://reasonix.io/?download=desktop&channel=preview#start", "cli", "stable"),
-    "https://reasonix.io/?download=cli&channel=stable#start",
+    "https://reasonix.io/?download=cli#start",
   );
   assert.equal(
     downloadURLForPane("https://reasonix.io/?download=desktop&channel=preview#start", "npm", "preview"),
     "https://reasonix.io/?download=npm#start",
   );
   assert.equal(downloadURLForPane("https://reasonix.io/", "desktop", "preview"),
-    "https://reasonix.io/?download=desktop&channel=preview#start");
+    "https://reasonix.io/?download=desktop#start");
   assert.equal(downloadURLForPane("https://reasonix.io/", "unknown", "stable"), "");
 });

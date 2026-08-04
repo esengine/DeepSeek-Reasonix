@@ -131,6 +131,26 @@ CREATE TABLE IF NOT EXISTS cli_metric_users (
   PRIMARY KEY (date, signal, bucket, install_id)
 );
 
+-- Cron-built answer to the preferences module's 30-day deduplication, which
+-- spans ~28M rows of metric_users: too many to count per request, and not
+-- summable from daily totals. refreshMetricUserRollup fills it one signal at a
+-- time. The worker creates both tables at runtime, so existing databases need
+-- no manual migration.
+CREATE TABLE IF NOT EXISTS metric_user_rollup (
+  window_days INTEGER NOT NULL,
+  signal TEXT NOT NULL,
+  bucket TEXT NOT NULL,
+  total INTEGER NOT NULL,
+  computed_at TEXT NOT NULL,
+  PRIMARY KEY (window_days, signal, bucket)
+);
+
+CREATE TABLE IF NOT EXISTS metric_user_rollup_state (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  next_signal INTEGER NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- Legacy local auth — superseded by id.reasonix.io identity + the `access`
 -- table below. Kept during the transition; migrate-access.sql copies roles over.
 CREATE TABLE IF NOT EXISTS users (

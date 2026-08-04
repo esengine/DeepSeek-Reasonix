@@ -640,6 +640,10 @@ func configureChatTextarea(ti *textarea.Model) {
 	// Plain Enter submits (the chatTUI handler intercepts it), so the textarea's
 	// own InsertNewline binding moves to Alt+Enter / Ctrl+J / Shift+Enter.
 	ti.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "shift+enter"))
+	// bubbles binds word motion to Alt+arrows (the macOS convention); Windows and
+	// Linux terminals send Ctrl+arrows for the same intent.
+	ti.KeyMap.WordForward = key.NewBinding(key.WithKeys("alt+right", "alt+f", "ctrl+right"))
+	ti.KeyMap.WordBackward = key.NewBinding(key.WithKeys("alt+left", "alt+b", "ctrl+left"))
 	ti.Focus()
 }
 
@@ -4186,7 +4190,23 @@ func (m *chatTUI) showStatusDetails() {
 	if tag := m.mouseTag(); tag != "" {
 		lines = append(lines, "  mouse      "+tag)
 	}
+	lines = append(lines, "  config     "+activeConfigTag())
 	m.commitLine(strings.Join(lines, "\n"))
+}
+
+// activeConfigTag names the config file actually in effect. A ./reasonix.toml
+// outranks the user-global file, so a session started in a directory holding
+// one silently ignores global edits unless the source is visible (#3317).
+func activeConfigTag() string {
+	path := config.SourcePath()
+	if path == "" {
+		return "(defaults — no config file)"
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return displayPath(path)
+	}
+	return displayPath(abs)
 }
 
 func (m *chatTUI) runGoalSubcommand(input string) tea.Cmd {

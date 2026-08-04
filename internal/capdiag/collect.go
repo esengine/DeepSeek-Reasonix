@@ -477,6 +477,7 @@ func collectMCP(cfg *config.Config, root, home string, disp func(string) string)
 	for _, p := range entries {
 		info := MCPServerInfo{
 			Name:        p.Name,
+			Effective:   true,
 			Transport:   transportOf(p.Type),
 			StartIntent: "automatic",
 			EnvKeys:     sortedKeys(p.Env),
@@ -489,7 +490,13 @@ func collectMCP(cfg *config.Config, root, home string, disp func(string) string)
 			info.PackageOwner = owner
 			info.Source = "plugin_package"
 		} else {
-			info.Source = guessMCPSource(root, p.Name)
+			info.Source = strings.TrimSpace(string(p.Source))
+			if info.Source == "" {
+				info.Source = guessMCPSource(root, p.Name)
+			}
+			if sourcePath := config.MCPConfigPathForEntry(root, p); strings.TrimSpace(sourcePath) != "" {
+				info.SourcePath = disp(sourcePath)
+			}
 		}
 		if info.Transport == "stdio" {
 			info.Command = redactCommandDisplay(p.Command, root, home)
@@ -610,6 +617,9 @@ func mergeRuntimeHost(rep *MCPReport, host *plugin.Host, root, home string, issu
 		if i, ok := byName[f.Name]; ok {
 			rep.Servers[i].RuntimeStatus = "failed"
 			rep.Servers[i].Error = errText
+			rep.Servers[i].StartupStage = f.Stage
+			rep.Servers[i].StartupElapsedMS = f.Elapsed.Milliseconds()
+			rep.Servers[i].Stderr = sanitizeErrTextWithPaths(f.Stderr, root, home)
 		}
 		*issues = append(*issues, Issue{
 			Severity: "error", Code: "mcp.start_failed", Subsystem: "mcp",

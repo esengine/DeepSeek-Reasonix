@@ -138,6 +138,7 @@ func containsHan(text string) bool {
 func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates []Entry) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, semanticTimeout)
 	defer cancel()
+	ctx = provider.WithRequestAttemptCounter(ctx)
 
 	var b strings.Builder
 	b.WriteString("Select up to 3 capability IDs relevant to the user task. ")
@@ -164,12 +165,30 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 	}
 
 	start := time.Now()
+	var usage *provider.Usage
+	defer func() {
+		usage = provider.UsageWithRequestAttemptCount(ctx, usage)
+		if usage == nil {
+			return
+		}
+		if (usage.PromptTokens > 0 || usage.CompletionTokens > 0) && r.Audit != nil {
+			r.Audit.RecordRouterUsage(usage.PromptTokens, usage.CompletionTokens, r.Pricing.Cost(usage), time.Since(start).Milliseconds())
+		}
+		if r.Sink != nil {
+			r.Sink.Emit(event.Event{
+				Kind:        event.Usage,
+				ModelRef:    strings.TrimSpace(r.Model),
+				Usage:       usage,
+				Pricing:     r.Pricing,
+				UsageSource: event.UsageSourceCapabilityRouter,
+			})
+		}
+	}()
 	ch, err := r.Provider.Stream(ctx, req)
 	if err != nil {
 		return nil, err
 	}
 	var text strings.Builder
-	var usage *provider.Usage
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkText:
@@ -183,19 +202,6 @@ func (r *SemanticRouter) callModel(ctx context.Context, input string, candidates
 			if chunk.Err != nil {
 				return nil, chunk.Err
 			}
-		}
-	}
-	if usage != nil {
-		if r.Audit != nil {
-			r.Audit.RecordRouterUsage(usage.PromptTokens, usage.CompletionTokens, r.Pricing.Cost(usage), time.Since(start).Milliseconds())
-		}
-		if r.Sink != nil {
-			r.Sink.Emit(event.Event{
-				Kind:        event.Usage,
-				Usage:       usage,
-				Pricing:     r.Pricing,
-				UsageSource: event.UsageSourceCapabilityRouter,
-			})
 		}
 	}
 	return parseSemanticIDs(text.String())

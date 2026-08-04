@@ -54,6 +54,25 @@ function installDom() {
   globalThis.localStorage = dom.window.localStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  Object.defineProperty(dom.window.HTMLElement.prototype, "clientHeight", {
+    configurable: true,
+    get() {
+      return this.classList.contains("prompt-action__desc") ? 42 : 0;
+    },
+  });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      if (!this.classList.contains("prompt-action__desc")) return 0;
+      return this.textContent?.includes("Reuse the archive flow") ? 84 : 42;
+    },
+  });
+  Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", {
+    configurable: true,
+    value() {
+      this.setAttribute("data-scrolled-into-view", "true");
+    },
+  });
 
   const style = document.createElement("style");
   style.textContent = styles;
@@ -77,7 +96,10 @@ console.log("\nask card layout");
         header: "Review",
         prompt: "baoguanPutArchive needs a user-owned decision: fully align archive logic, or only repair the current compiler error?",
         options: [
-          { label: "Full alignment", description: "Reuse the archive flow and keep behavior consistent." },
+          {
+            label: "Full alignment",
+            description: "Reuse the archive flow and keep behavior consistent across every constructor, dynamically computed path, runtime boundary, and release validation step.",
+          },
           { label: "Minimal repair", description: "Touch only the failing path and keep the patch smaller." },
         ],
       },
@@ -99,8 +121,10 @@ console.log("\nask card layout");
   });
 
   const card = document.querySelector(".prompt-shelf__card") as HTMLElement | null;
+  const content = document.querySelector(".prompt-shelf__content") as HTMLElement | null;
   const meta = document.querySelector(".prompt-shelf__meta") as HTMLElement | null;
-  if (!card || !meta) throw new Error("ask prompt shelf did not render");
+  const footer = document.querySelector(".prompt-shelf__footer") as HTMLElement | null;
+  if (!card || !content || !meta || !footer) throw new Error("ask prompt shelf did not render");
 
   eq(meta.textContent, ask.questions[0].prompt, "ask question text remains complete in the prompt shelf");
 
@@ -111,6 +135,10 @@ console.log("\nask card layout");
   eq(computed.overflowWrap, "anywhere", "long unspaced ask questions can break within the shelf");
   ok(card.getAttribute("role") === "dialog", "ask prompt shelf keeps dialog semantics");
   ok(document.querySelector(".prompt-shelf--decision") != null, "ask uses the unified decision surface layout");
+  eq(window.getComputedStyle(card).maxHeight, "min(82vh, 720px)", "Ask card stays bounded by the viewport");
+  eq(window.getComputedStyle(card).overflow, "hidden", "Ask card delegates overflow to one content scroller");
+  eq(window.getComputedStyle(content).overflow, "auto", "Ask title, question, and options share one scroll region");
+  eq(content.contains(footer), false, "Ask confirmation footer stays outside the scrolling content");
 
   const optionButtons = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
   // options + custom + skip
@@ -119,11 +147,80 @@ console.log("\nask card layout");
     optionButtons[0]?.textContent?.includes("Reuse the archive flow") === true,
     "option descriptions render inline on each decision row",
   );
+  const actions = document.querySelector(".prompt-shelf__actions") as HTMLElement | null;
+  const firstOption = optionButtons[0];
+  const firstDescription = firstOption?.querySelector(".prompt-action__desc") as HTMLElement | null;
+  if (!actions || !firstOption || !firstDescription) throw new Error("ask option layout did not render");
+
+  const actionsStyle = window.getComputedStyle(actions);
+  eq(actionsStyle.gridAutoRows, "max-content", "decision rows use their full content height before scrolling");
+  eq(actionsStyle.alignContent, "start", "decision rows stay content-sized at the top of the scroll region");
+  eq(actionsStyle.maxHeight, "none", "Ask options do not create a nested scroll region");
+  eq(actionsStyle.overflow, "visible", "Ask option overflow belongs to the shared content scroller");
+
+  const optionStyle = window.getComputedStyle(firstOption);
+  eq(optionStyle.height, "auto", "long decision rows are not fixed-height");
+  eq(optionStyle.minHeight, "40px", "short decision rows retain the compact minimum height");
+  eq(optionStyle.alignItems, "flex-start", "multi-line decision copy aligns with the option key");
+
+  const descriptionStyle = window.getComputedStyle(firstDescription);
+  eq(descriptionStyle.whiteSpace, "normal", "long option descriptions can wrap");
+  eq(descriptionStyle.display, "-webkit-box", "long Ask descriptions use a multi-line clamp box");
+  eq(descriptionStyle.overflow, "hidden", "collapsed Ask descriptions stay within three lines");
+  eq(descriptionStyle.getPropertyValue("-webkit-line-clamp"), "3", "collapsed Ask descriptions show three summary lines");
+  eq(descriptionStyle.textOverflow, "clip", "wrapped descriptions do not use a single-line ellipsis");
+  eq(descriptionStyle.overflowWrap, "anywhere", "unspaced option descriptions can wrap without overflowing");
+  eq(firstOption.getAttribute("title"), ask.questions[0].options[0].description, "collapsed descriptions keep the full native tooltip");
+
+  const descriptionToggle = document.querySelector(".prompt-action__description-toggle") as HTMLButtonElement | null;
+  if (!descriptionToggle) throw new Error("long Ask description disclosure did not render");
+  eq(descriptionToggle.textContent?.trim(), "View full description", "truncated descriptions expose an explicit full-text action");
+  eq(descriptionToggle.getAttribute("aria-expanded"), "false", "full description starts collapsed");
+  eq(descriptionToggle.getAttribute("aria-controls"), firstDescription.id, "disclosure identifies the controlled description");
+
+  let disclosureEnterDefaultPrevented = true;
+  await act(async () => {
+    const event = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    descriptionToggle.dispatchEvent(event);
+    disclosureEnterDefaultPrevented = event.defaultPrevented;
+    await flushTimers();
+  });
+  eq(answers.length, 0, "Enter on Ask disclosure never confirms the selected answer");
+  eq(disclosureEnterDefaultPrevented, true, "Ask disclosure owns keyboard activation before global shortcuts");
+  eq(descriptionToggle.getAttribute("aria-expanded"), "true", "Enter expands the Ask description");
+
+  await act(async () => {
+    descriptionToggle.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "Enter",
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+  eq(descriptionToggle.getAttribute("aria-expanded"), "false", "Enter collapses the Ask description again");
+
+  await act(async () => {
+    descriptionToggle.click();
+    await flushTimers();
+  });
+  eq(firstOption.classList.contains("prompt-action--description-expanded"), true, "full-text action expands the selected card");
+  eq(descriptionToggle.getAttribute("aria-expanded"), "true", "expanded state is announced");
+  const expandedDescriptionStyle = window.getComputedStyle(firstDescription);
+  eq(expandedDescriptionStyle.display, "block", "expanded description restores normal block flow");
+  eq(expandedDescriptionStyle.overflow, "visible", "expanded description reveals the complete text");
+
+  await act(async () => {
+    descriptionToggle.click();
+    await flushTimers();
+  });
+  eq(firstOption.classList.contains("prompt-action--description-expanded"), false, "full description can be collapsed again");
+  eq(descriptionToggle.getAttribute("aria-expanded"), "false", "collapsed state is announced");
 
   await act(async () => {
     optionButtons[1].click();
     await flushTimers(200);
   });
+  eq(document.querySelector(".prompt-action__description-toggle"), null, "short selected descriptions do not show a redundant disclosure");
   eq(answers.length, 0, "single-select click only selects and does not auto-advance/submit");
 
   await act(async () => {
@@ -245,6 +342,7 @@ console.log("\nask card layout");
   });
   eq(optionButtons[0]?.getAttribute("aria-selected"), "false", "ArrowDown moves the single-select cursor off the first row");
   eq(optionButtons[1]?.getAttribute("aria-selected"), "true", "ArrowDown selects the second option visually");
+  eq(optionButtons[1]?.getAttribute("data-scrolled-into-view"), "true", "keyboard selection stays inside the visible option viewport");
   eq(confirm.disabled, false, "ArrowDown keeps confirm enabled for the highlighted option");
 
   await act(async () => {

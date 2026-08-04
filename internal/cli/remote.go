@@ -93,11 +93,17 @@ func editUserConfig(mutate func(*config.Config) error) error {
 	return cfg.SaveTo(path)
 }
 
+const remoteAddUsage = "usage: reasonix remote add <name> [user@]host[:port] [flags]"
+
 func remoteAddCLI(args []string) int {
 	// Positionals come first (name, target); Go's flag package stops at the
 	// first non-flag argument, so the flags are parsed from what follows.
+	if commandHelpRequested(args, 2) {
+		fmt.Fprintln(os.Stdout, remoteAddUsage)
+		return 0
+	}
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix remote add <name> [user@]host[:port] [flags]")
+		fmt.Fprintln(os.Stderr, remoteAddUsage)
 		return 2
 	}
 	name, target := args[0], args[1]
@@ -109,8 +115,8 @@ func remoteAddCLI(args []string) int {
 	serveInstall := fs.String("serve-install", "auto", "remote CLI install strategy: auto|npm|upload|never")
 	passphraseEnv := fs.String("passphrase-env", "", "env var name holding the key passphrase")
 	passwordEnv := fs.String("password-env", "", "env var name holding the login password")
-	if err := fs.Parse(args[2:]); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args[2:]); !ok {
+		return code
 	}
 	user, host, port, err := remote.ParseTarget(target)
 	if err != nil {
@@ -214,8 +220,8 @@ func remoteRemoveCLI(args []string) int {
 func remoteImportCLI(args []string) int {
 	fs := newFlagSet("remote import")
 	all := fs.Bool("all", false, "import every concrete ~/.ssh/config alias")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	src, err := remote.LoadUserSSHConfig()
 	if err != nil {

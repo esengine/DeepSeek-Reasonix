@@ -162,6 +162,64 @@ func TestEffortCapabilityZhipu(t *testing.T) {
 	}
 }
 
+func TestEffortCapabilityExplicitGLMProtocolOnGateway(t *testing.T) {
+	e := &ProviderEntry{
+		Name:              "glm-gateway",
+		Kind:              "openai",
+		BaseURL:           "https://gateway.example.com/v1",
+		Model:             "glm-5.2",
+		ReasoningProtocol: ReasoningProtocolGLM,
+	}
+	cap := EffortCapabilityForEntry(e)
+	want := []string{"auto", "enabled", "disabled"}
+	if !cap.Supported || cap.Default != "enabled" || len(cap.Levels) != len(want) {
+		t.Fatalf("explicit GLM capability = %+v, want levels %v default enabled", cap, want)
+	}
+	for i := range want {
+		if cap.Levels[i] != want[i] {
+			t.Fatalf("explicit GLM levels[%d] = %q, want %q", i, cap.Levels[i], want[i])
+		}
+	}
+	if got, err := NormalizeEffort(e, "disabled"); err != nil || got != "disabled" {
+		t.Fatalf("explicit GLM disabled = %q/%v, want disabled/nil", got, err)
+	}
+	if got, err := NormalizeEffort(e, "high"); err != nil || got != "enabled" {
+		t.Fatalf("explicit GLM legacy high = %q/%v, want enabled/nil", got, err)
+	}
+}
+
+func TestGLMModelRegistryUpgradesLegacyGatewayConfig(t *testing.T) {
+	for _, model := range []string{"glm-5", "glm-5.1", "glm-5.2"} {
+		t.Run(model, func(t *testing.T) {
+			// This is the shape persisted by an older Token Rhythm installation:
+			// no reasoning_protocol and no model_overrides metadata.
+			e := &ProviderEntry{
+				Name:    "token-rhythm",
+				Kind:    "openai",
+				BaseURL: "https://tokenrhythm.studio/v1",
+				Model:   model,
+			}
+			if got := ReasoningProtocolForEntry(e); got != ReasoningProtocolGLM {
+				t.Fatalf("ReasoningProtocolForEntry() = %q, want %q", got, ReasoningProtocolGLM)
+			}
+			cap := EffortCapabilityForEntry(e)
+			want := []string{"auto", "enabled", "disabled"}
+			if !cap.Supported || cap.Default != "enabled" || !stringSlicesEqual(cap.Levels, want) {
+				t.Fatalf("legacy gateway GLM capability = %+v, want levels %v default enabled", cap, want)
+			}
+		})
+	}
+
+	nonGLM := &ProviderEntry{Kind: "openai", BaseURL: "https://tokenrhythm.studio/v1", Model: "my-glm-5.2-alias"}
+	if got := ReasoningProtocolForEntry(nonGLM); got != "" {
+		t.Fatalf("non-exact GLM alias protocol = %q, want empty without explicit override", got)
+	}
+	otherGateway := &ProviderEntry{Kind: "openai", BaseURL: "https://opencode.ai/zen/go/v1", Model: "glm-5.2"}
+	if got := ReasoningProtocolForEntry(otherGateway); got != "" {
+		t.Fatalf("unrelated gateway GLM protocol = %q, want empty without explicit override", got)
+	}
+}
+
 func TestEffortCapabilityLongCat(t *testing.T) {
 	e := &ProviderEntry{Kind: "openai", BaseURL: "https://api.longcat.chat/openai/v1", Model: "LongCat-2.0"}
 	cap := EffortCapabilityForEntry(e)

@@ -130,6 +130,7 @@ func TestResolveImportsAreProvenancedDeduplicatedAndConfined(t *testing.T) {
 func TestResolveUserInstructionsImportTrustedConventionRoots(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows.
 	userDir := filepath.Join(home, ".reasonix")
 	agentsDir := filepath.Join(home, ".agents")
 	root := filepath.Join(home, "repo")
@@ -153,6 +154,7 @@ func TestResolveUserInstructionsImportTrustedConventionRoots(t *testing.T) {
 func TestResolveProjectInstructionsCannotImportUserConventionRoots(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows.
 	root := filepath.Join(home, "repo")
 	mustWriteInstruction(t, filepath.Join(home, ".agents", "AGENTS.md"), "PRIVATE USER RULE")
 	mustWriteInstruction(t, filepath.Join(root, "AGENTS.md"), "@~/.agents/AGENTS.md")
@@ -169,6 +171,7 @@ func TestResolveProjectInstructionsCannotImportUserConventionRoots(t *testing.T)
 func TestResolveUserInstructionsRejectArbitraryHomeAndConventionSymlinkEscape(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads HOME on Unix and USERPROFILE on Windows.
 	userDir := filepath.Join(home, ".reasonix")
 	agentsDir := filepath.Join(home, ".agents")
 	mustWriteInstruction(t, filepath.Join(home, "secret.md"), "HOME SECRET")

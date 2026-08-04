@@ -19,6 +19,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"reasonix/internal/installlayout"
 	"reasonix/internal/repair"
 )
 
@@ -42,7 +43,7 @@ func main() {
 
 func run(args []string) int {
 	var parentPID uint
-	var installer, installerSHA256, installDir, relaunch, toVersion, createdAt, transactionID string
+	var installer, installerSHA256, installDir, relaunch, toVersion, createdAt, transactionID, installLayout string
 	fs := flag.NewFlagSet("reasonix-update-helper", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.UintVar(&parentPID, "parent-pid", 0, "Reasonix process id to wait for before installing")
@@ -53,6 +54,7 @@ func run(args []string) int {
 	fs.StringVar(&toVersion, "to-version", "", "Reasonix version being installed")
 	fs.StringVar(&createdAt, "created-at", "", "pending update creation timestamp")
 	fs.StringVar(&transactionID, "transaction-id", "", "complete pending update identity")
+	fs.StringVar(&installLayout, "install-layout", "", "installation layout contract")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -69,11 +71,15 @@ func run(args []string) int {
 		logger.Print("missing --to-version")
 		return 2
 	}
-	if createdAt == "" {
+	if installLayout != "" && installLayout != installlayout.InstallLayoutVersionedV1 {
+		logger.Printf("unsupported --install-layout %q", installLayout)
+		return 2
+	}
+	if installLayout != installlayout.InstallLayoutVersionedV1 && createdAt == "" {
 		logger.Print("missing --created-at")
 		return 2
 	}
-	if transactionID == "" {
+	if installLayout != installlayout.InstallLayoutVersionedV1 && transactionID == "" {
 		logger.Print("missing --transaction-id")
 		return 2
 	}
@@ -87,6 +93,25 @@ func run(args []string) int {
 			return 1
 		}
 	}
+	if installLayout == installlayout.InstallLayoutVersionedV1 {
+		return runVersionedWindowsUpdate(logger, installer, installerSHA256, installDir, relaunch, toVersion)
+	}
+	recoverExisting := func(reason string) int {
+		if relaunch != "" {
+			if relaunchErr := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); relaunchErr != nil {
+				logger.Printf("relaunch after %s: %v", reason, relaunchErr)
+			}
+		}
+		return 1
+	}
+	// The detached helper runs from the update cache, so a plain
+	// repair.ReadPendingUpdate would validate the transaction against the cache
+	// directory and reject every legitimate flat install. Claim through the
+	// explicit install-local launcher path instead; the repair package validates
+	// the complete transaction identity and exact release-unit path set while it
+	// acquires the pending + target locks.
+	claimTargets := windowsReleaseUnitPaths(installDir)
+	claimLauncher := filepath.Join(installDir, "reasonix-desktop.exe")
 	// The old desktop may acquire the pending lock during its normal shutdown.
 	// Wait for that exact process first, then claim the transaction and hold both
 	// pending and target locks across the installer replacement window.
@@ -94,13 +119,13 @@ func run(args []string) int {
 		toVersion,
 		createdAt,
 		transactionID,
-		filepath.Join(installDir, "reasonix-desktop.exe"),
-		windowsReleaseUnitPaths(installDir),
+		claimLauncher,
+		claimTargets,
 		parentExitTimeout,
 	)
 	if err != nil {
 		logger.Printf("claim pending update: %v", err)
-		return 1
+		return recoverExisting("pending update claim failure")
 	}
 	defer releaseClaim()
 	recoverUnstarted := func() int {
@@ -161,34 +186,126 @@ func run(args []string) int {
 			}
 		}
 		if relaunch != "" {
-			if relaunchErr := startRelaunchFn(relaunch, installDir); relaunchErr != nil {
+			if relaunchErr := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); relaunchErr != nil {
 				logger.Printf("relaunch after publish failure: %v", relaunchErr)
 			}
 		}
 		return 1
 	}
-	if _, err := recordInstalledUpdateFn(claimed, receipts...); err != nil {
-		logger.Printf("record installed release unit: %v", err)
-		if markErr := repair.MarkUpdateApplyFailedExact(claimed, err.Error()); markErr != nil {
-			logger.Printf("record install failure: %v", markErr)
+	if receipts == nil {
+		// Versioned-v1 activation: no flat publish receipts and no health
+		// probation. Clear the pending transaction and relaunch the launcher.
+		releaseClaim()
+		if cancelErr := repair.CancelPendingUpdateExact(claimed); cancelErr != nil {
+			logger.Printf("clear pending after versioned activate: %v", cancelErr)
 		}
-		if relaunch != "" {
-			if relaunchErr := startRelaunchFn(relaunch, installDir); relaunchErr != nil {
-				logger.Printf("relaunch after failed install verification: %v", relaunchErr)
+		if clearErr := repair.ClearUpdateApplyFailureExact(claimed); clearErr != nil {
+			logger.Printf("clear apply failure after versioned activate: %v", clearErr)
+		}
+	} else {
+		if _, err := recordInstalledUpdateFn(claimed, receipts...); err != nil {
+			logger.Printf("record installed release unit: %v", err)
+			if markErr := repair.MarkUpdateApplyFailedExact(claimed, err.Error()); markErr != nil {
+				logger.Printf("record install failure: %v", markErr)
 			}
+			if relaunch != "" {
+				if relaunchErr := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); relaunchErr != nil {
+					logger.Printf("relaunch after failed install verification: %v", relaunchErr)
+				}
+			}
+			return 1
 		}
-		return 1
-	}
-	if err := repair.ClearUpdateApplyFailureExact(claimed); err != nil {
-		logger.Printf("clear completed update marker: %v", err)
+		if err := repair.ClearUpdateApplyFailureExact(claimed); err != nil {
+			logger.Printf("clear completed update marker: %v", err)
+		}
 	}
 	if relaunch != "" {
-		if err := startRelaunchFn(relaunch, installDir); err != nil {
+		if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
 			logger.Printf("relaunch: %v", err)
 			return 1
 		}
 	}
 	return 0
+}
+
+func runVersionedWindowsUpdate(logger *log.Logger, installer, installerSHA256, installDir, relaunch, toVersion string) int {
+	recoverExisting := func() int {
+		if relaunch != "" {
+			if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
+				logger.Printf("relaunch after versioned update failure: %v", err)
+			}
+		}
+		return 1
+	}
+	if _, err := installlayout.ReadCurrent(installDir); err != nil {
+		logger.Printf("read versioned install pointer: %v", err)
+		return recoverExisting()
+	}
+	claimedInstaller, cleanupInstaller, err := stageInstallerFn(installer, installerSHA256)
+	if err != nil {
+		logger.Printf("bind versioned update installer: %v", err)
+		return recoverExisting()
+	}
+	defer func() {
+		if cleanupErr := cleanupInstaller(); cleanupErr != nil {
+			logger.Printf("preserving update installer staging: %v", cleanupErr)
+		}
+	}()
+	stagingDir, err := os.MkdirTemp("", "reasonix-update-stage-*")
+	if err != nil {
+		logger.Printf("create versioned update staging: %v", err)
+		return recoverExisting()
+	}
+	stagingOwner, err := lstatUpdateStagingFn(stagingDir)
+	if err != nil {
+		logger.Printf("bind versioned update staging: %v", err)
+		return recoverExisting()
+	}
+	defer func() {
+		if cleanupErr := cleanupOwnedWindowsUpdateDirectory(stagingDir, stagingOwner); cleanupErr != nil {
+			logger.Printf("preserving update staging: %v", cleanupErr)
+		}
+	}()
+	releaseInstallerExecution, err := claimInstallerExecutionFn(claimedInstaller, installerSHA256)
+	if err != nil {
+		logger.Printf("recheck staged versioned installer: %v", err)
+		return recoverExisting()
+	}
+	installerErr := runInstallerFn(claimedInstaller, stagingDir)
+	releaseInstallerExecution()
+	if installerErr != nil {
+		logger.Printf("extract versioned installer payload: %v", installerErr)
+		return recoverExisting()
+	}
+	claimed := &repair.UpdateTransaction{
+		SchemaVersion: 1,
+		ToVersion:     toVersion,
+		TargetKind:    "file",
+		TargetPath:    filepath.Join(installDir, "reasonix-desktop.exe"),
+	}
+	if err := activateVersionedWindowsFromStaging(claimed, stagingDir); err != nil {
+		logger.Printf("activate versioned release: %v", err)
+		return recoverExisting()
+	}
+	if relaunch != "" {
+		if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
+			logger.Printf("relaunch versioned release: %v", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+// preferRelaunchPath chooses the thin launcher when present so post-update
+// restarts use the permanent entry point, not a flat desktop binary.
+func preferRelaunchPath(relaunch, installDir string) string {
+	for _, name := range []string{"reasonix-launcher.exe", "Reasonix.exe"} {
+		path := filepath.Join(installDir, name)
+		if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+			return path
+		}
+	}
+	return relaunch
 }
 
 func validSHA256(value string) bool {
@@ -328,21 +445,15 @@ func installStagedWindowsReleaseUnit(
 	claimed *repair.UpdateTransaction,
 	stagingDir string,
 ) (bool, []repair.FileUpdateInstallReceipt, error) {
-	members, err := loadWindowsStagedReleaseUnit(claimed, stagingDir)
-	if err != nil {
-		return false, nil, err
+	// v1.20+: versioned-v1 is the only publish path. Incomplete staged payloads
+	// fail closed without mutating the live install or leaving flat pending state.
+	if !preferVersionedWindowsActivation(stagingDir) {
+		return false, nil, fmt.Errorf("staged payload is incomplete for versioned-v1 activation")
 	}
-	// Persist recovery intent before the first live rename. If the helper exits
-	// between release-unit members, Guard rolls the exact pending transaction
-	// back instead of launching a mixed install.
-	if err := repair.MarkUpdateApplyFailedExact(claimed, "Windows update publish did not complete"); err != nil {
-		return false, nil, fmt.Errorf("record update recovery intent: %w", err)
+	if err := activateVersionedWindowsFromStaging(claimed, stagingDir); err != nil {
+		return false, nil, fmt.Errorf("versioned activate: %w", err)
 	}
-	receipts, err := publishLoadedFileUpdateReleaseUnit(claimed, members, repair.PublishClaimedFileUpdateMemberExact)
-	if err != nil {
-		return true, receipts, err
-	}
-	return true, receipts, nil
+	return true, nil, nil
 }
 
 func windowsReleaseUnitPaths(installDir string) []string {

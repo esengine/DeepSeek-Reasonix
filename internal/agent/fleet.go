@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -156,6 +157,9 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	}
 
 	if params.RunInBackground {
+		for i := range specs {
+			specs[i].BackgroundWriter = !specs[i].ReadOnly
+		}
 		jm, ok := jobs.FromContext(ctx)
 		if !ok {
 			return "", fmt.Errorf("background execution is not available in this context")
@@ -165,7 +169,28 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		parentSession := ParentSession(ctx)
 		label := fmt.Sprintf("fleet(%d)", len(specs))
 		backgroundEvidence := evidence.NewLedger()
+		writerID := fmt.Sprintf("background-fleet:%s:%d", parentID, time.Now().UnixNano())
+		writerRegistered := false
+		observer := f.taskTool.mutationObserver
+		if observer != nil {
+			hasWriter := false
+			for i := range specs {
+				if specs[i].BackgroundWriter {
+					hasWriter = true
+					break
+				}
+			}
+			if hasWriter {
+				if err := observer.RegisterWriter(writerID, "background_fleet", observer.OwnershipTurn()); err != nil {
+					return "", err
+				}
+				writerRegistered = true
+			}
+		}
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "fleet", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
+			if writerRegistered {
+				defer observer.UnregisterWriter(writerID)
+			}
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
 			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()

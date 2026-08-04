@@ -274,6 +274,7 @@ export interface ContextSourceRow {
   cost: number;
   currency?: string;
   requests: number;
+  estimated: boolean;
 }
 
 export function contextSourceRows(info: ContextPanelInfo | null, sessionCurrency?: string): ContextSourceRow[] {
@@ -305,6 +306,7 @@ export function contextSourceRows(info: ContextPanelInfo | null, sessionCurrency
       cost: sourceCost(stats),
       currency: stats.sessionCurrency || sessionCurrency || info?.sessionCurrency,
       requests: stats.requestCount ?? 0,
+      estimated: stats.estimated === true,
     }));
 }
 
@@ -411,8 +413,11 @@ export function ContextPanel({
   const requestCount = info?.requestCount && info.requestCount > 0 ? info.requestCount : derivedRequestCount;
   const windowStatus = contextWindowStatus(usagePct, compactPct);
   const balanceLabel = balance?.available && balance.display ? balance.display : "-";
-  const turnCostLabel = formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" });
-  const sessionCostLabel = formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" });
+  const turnEstimated = usage?.estimated === true || info?.estimated === true;
+  const sessionEstimated = info?.sessionEstimated === true || context?.estimated === true;
+  const markEstimated = (value: string, estimated: boolean) => estimated && value !== "-" ? `≈${value}` : value;
+  const turnCostLabel = markEstimated(formatMoneyLocalized(turnCost, sessionCurrency, { locale, empty: "dash" }), turnEstimated);
+  const sessionCostLabel = markEstimated(formatMoneyLocalized(cost.amount, cost.currency, { locale, empty: "dash" }), sessionEstimated);
   const totalTokensTitle = totalTokensMetric.exact === "-" ? "-" : t("context.tokensValue", { value: totalTokensMetric.exact });
   const usedLabel = fmtFullTokens(usedTokens);
   const windowLabel = fmtFullTokens(windowTokens);
@@ -438,7 +443,7 @@ export function ContextPanel({
     const totalMetric = formatMetricTokens(sourceTokenTotal(row), locale);
     const cacheReported = row.cacheHitTokens + row.cacheMissTokens > 0;
     const cacheRate = cacheReported ? formatCacheHitRate(row.cacheHitTokens, row.cacheMissTokens) : t("context.cacheNotReported");
-    const costLabel = formatMoneyLocalized(row.cost, row.currency, { locale, empty: "dash" });
+    const costLabel = markEstimated(formatMoneyLocalized(row.cost, row.currency, { locale, empty: "dash" }), row.estimated);
     return (
       <div className="context-panel__source-row" key={row.source}>
         <div className="context-panel__source-head">
@@ -528,7 +533,7 @@ export function ContextPanel({
                 <MiniStat label={t("context.sessionCost")} value={sessionCostLabel} />
                 <MiniStat label={t("context.time")} value={fmtDuration(elapsed, t)} />
                 <MiniStat label={t("context.requests")} value={requestCount > 0 ? String(requestCount) : "-"} />
-                <MiniStat label={t("context.sessionTokensShort")} value={totalTokensMetric.display} title={totalTokensTitle} wide />
+                <MiniStat label={t("context.sessionTokensShort")} value={markEstimated(totalTokensMetric.display, sessionEstimated)} title={totalTokensTitle} wide />
               </div>
             </div>
           </section>

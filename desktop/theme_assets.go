@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"reasonix/internal/config"
 )
 
 const themeAssetURLPrefix = "/__reasonix_theme_asset/"
@@ -29,11 +27,6 @@ func (a *App) themeAssetMiddleware() func(http.Handler) http.Handler {
 			}
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				w.WriteHeader(http.StatusMethodNotAllowed)
-				return
-			}
-			// Safe mode never serves external theme assets.
-			if a.themeSafeMode() {
-				http.NotFound(w, r)
 				return
 			}
 			rest := strings.TrimPrefix(r.URL.Path, themeAssetURLPrefix)
@@ -143,12 +136,6 @@ func serveOfficialThemeAsset(w http.ResponseWriter, r *http.Request, themeID, di
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(data))
-}
-
-func (a *App) themeSafeMode() bool {
-	// DesktopStartupSettings exposes SafeMode; keep a local helper so asset
-	// middleware and list/load paths share the same gate.
-	return config.SafeModeRequested()
 }
 
 func themeBackgroundURL(themeID, imageName string) string {

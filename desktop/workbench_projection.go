@@ -75,6 +75,7 @@ func workbenchContextInfo(view protocol.ContextView) ContextInfo {
 			PromptTokens: source.PromptTokens, CompletionTokens: source.CompletionTokens,
 			TotalTokens: source.TotalTokens, ReasoningTokens: source.ReasoningTokens,
 			CacheHitTokens: source.CacheHitTokens, CacheMissTokens: source.CacheMissTokens,
+			Estimated:    source.Estimated,
 			RequestCount: source.RequestCount, SessionCost: source.SessionCost,
 			SessionCurrency: source.SessionCurrency,
 		}
@@ -83,7 +84,8 @@ func workbenchContextInfo(view protocol.ContextView) ContextInfo {
 		Used: view.UsedTokens, Window: view.WindowTokens, SessionTokens: view.TotalTokens,
 		SessionCost: view.SessionCost, SessionCurrency: view.SessionCurrency,
 		CacheHitTokens: view.SessionCacheHitTokens, CacheMissTokens: view.SessionCacheMissTokens,
-		Sources: sources,
+		Estimated: view.Estimated,
+		Sources:   sources,
 	}
 }
 
@@ -134,6 +136,7 @@ func workbenchMeta(snapshot protocol.SessionSnapshot, workspace string) Meta {
 	label := profile.Model
 	return Meta{
 		Label: label, Ready: true, EventChannel: "agent:event", Cwd: workspace,
+		Runtime:       workbenchRuntimeView(snapshot),
 		WorkspaceRoot: workspace, WorkspaceName: filepath.Base(filepath.Clean(workspace)), WorkspacePath: workspace,
 		AutoApproveTools:  profile.ToolApprovalMode == protocol.ToolApprovalAuto || profile.ToolApprovalMode == protocol.ToolApprovalYOLO,
 		Bypass:            profile.ToolApprovalMode == protocol.ToolApprovalYOLO,
