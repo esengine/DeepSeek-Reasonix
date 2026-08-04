@@ -4673,7 +4673,11 @@ func topicTitleUserTurnsFromSession(path string) []string {
 		if !agent.IsUserAuthoredTurn(msg.Text) {
 			continue
 		}
-		content := control.StripComposePrefixes(agent.HandoffTask(msg.Text))
+		// UserPreviewText is the canonical user-authored view: it unwraps
+		// memory-compiler execution contracts and strips transient blocks
+		// (and runs HandoffTask), so internal wrappers can never become a
+		// title basis (#5666).
+		content := control.StripComposePrefixes(agent.UserPreviewText(msg.Text))
 		content = control.StripReferencedContextPrefix(content)
 		if strings.TrimSpace(content) != "" {
 			users = append(users, content)
@@ -5752,6 +5756,11 @@ func loadTopicTitles(workspaceRoot string) map[string]string {
 		return m
 	}
 	_ = json.Unmarshal(b, &m)
+	// Same read-boundary cleaning as loadSessionTitles: older builds could
+	// persist titles carrying internal wrappers (#5666).
+	for key, title := range m {
+		m[key] = agent.UserPreviewText(title)
+	}
 	return m
 }
 

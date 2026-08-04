@@ -135,7 +135,27 @@ func LoadBranchMeta(sessionPath string) (BranchMeta, bool, error) {
 	if m.ID == "" {
 		m.ID = BranchID(sessionPath)
 	}
+	m.sanitizeDisplayFields()
 	return m, true, nil
+}
+
+// sanitizeDisplayFields cleans persisted display strings that older builds
+// polluted with internal wrappers (memory-compiler execution contracts,
+// transient blocks) — #5666. Every reader goes through LoadBranchMeta, so this
+// is the single boundary; UserPreviewText is a no-op on clean text, and a
+// field that was pure wrapper falls back to empty so callers use their normal
+// fallbacks (preview, default title).
+func (m *BranchMeta) sanitizeDisplayFields() {
+	m.TopicTitle = sanitizeStoredDisplayText(m.TopicTitle)
+	m.CustomTitle = sanitizeStoredDisplayText(m.CustomTitle)
+	m.Preview = sanitizeStoredDisplayText(m.Preview)
+}
+
+func sanitizeStoredDisplayText(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return strings.TrimSpace(s)
+	}
+	return UserPreviewText(s)
 }
 
 // branchMetaReadBackoffs paces the re-reads of a branch-meta sidecar that
