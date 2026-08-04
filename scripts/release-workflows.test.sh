@@ -156,6 +156,13 @@ if sed -n '/^  workflow_dispatch:/,/^  workflow_call:/p' "$repo_root/.github/wor
 fi
 grep -Fq 'if: ${{ !inputs.orchestrated }}' "$repo_root/.github/workflows/release-npm.yml"
 grep -Fq 'Publish or recover immutable npm packages' "$repo_root/.github/workflows/release-npm.yml"
+grep -Fq 'RECOVERY_CONTROL_SHA: ${{ github.workflow_sha }}' \
+	"$repo_root/.github/workflows/release-npm.yml"
+grep -Fq 'git restore --source="$RECOVERY_CONTROL_SHA"' \
+	"$repo_root/.github/workflows/release-npm.yml"
+for recovery_script in npm/publish.mjs scripts/finalize-npm-official-release.mjs; do
+	grep -Fq "$recovery_script" "$repo_root/.github/workflows/release-npm.yml"
+done
 grep -Fq 'publishPackages' "$repo_root/npm/build.mjs"
 grep -Eq 'signing-policy-slug: release-signing' "$repo_root/.github/workflows/release-desktop.yml"
 if grep -Eq 'signing-policy-slug:.*test-signing' "$repo_root/.github/workflows/release-desktop.yml"; then
