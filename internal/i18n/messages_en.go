@@ -567,6 +567,7 @@ Usage:
   reasonix hook list|status --json [--dir PATH]         inspect redacted hook state
   reasonix task list|show --json [--dir PATH]           inspect redacted task state
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
+  reasonix completion bash|zsh|fish                     print a shell completion script
   reasonix upgrade [--check] [--force]                   update to the latest official release (also: reasonix update)
   reasonix version
   reasonix help

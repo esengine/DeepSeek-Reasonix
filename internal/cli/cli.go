@@ -163,6 +163,8 @@ func Run(args []string, version string) int {
 	case "bot":
 		configureCLIThemeFromConfig()
 		return botCommand(rest, version)
+	case "completion":
+		return completionCommand(rest)
 	case "upgrade", "update":
 		configureCLIThemeFromConfig()
 		return upgradeCommand(rest, version)

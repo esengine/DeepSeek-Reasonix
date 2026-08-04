@@ -515,6 +515,7 @@ var ChineseTraditional = Messages{
   reasonix hook list|status --json [--dir PATH]         檢視脫敏 Hook 狀態
   reasonix task list|show --json [--dir PATH]           檢視脫敏 Task 狀態
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
+  reasonix completion bash|zsh|fish                     輸出 shell 自動補全腳本
   reasonix upgrade [--check] [--force]                   更新到最新正式版（別名：reasonix update）
   reasonix version
   reasonix help
