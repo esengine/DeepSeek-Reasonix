@@ -4539,24 +4539,6 @@ export default function App() {
             </div>
             <div className="topicbar__spacer" />
             <div className="topicbar__actions">
-              {workbenchChromeHidden && (
-                <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
-                  <button
-                    className={[
-                      "topicbar__chrome-btn",
-                      "topicbar__chrome-btn--workspace",
-                      workspacePanelRenderable ? "topicbar__chrome-btn--active" : "",
-                      workspaceTogglePressed ? "topicbar__chrome-btn--pressed" : "",
-                    ].filter(Boolean).join(" ")}
-                    type="button"
-                    onClick={toggleWorkspacePanel}
-                    aria-label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}
-                    aria-pressed={workspacePanelRenderable}
-                  >
-                    <PanelRight size={15} />
-                  </button>
-                </Tooltip>
-              )}
               {sidebarCreation && !sidebarImDetailConnection && activeTab?.scope === "project" && (
                 <ExternalOpener tabId={activeTab.id} dismissSignal={transientOverlayDismissSignal} />
               )}
@@ -4666,7 +4648,7 @@ export default function App() {
                   {!sidebarCreation && <span>{t("topicBar.command")}</span>}
                 </button>
               </Tooltip>
-              {sidebarCreation && (
+              {(sidebarCreation || workbenchChromeHidden) && (
                 <Tooltip label={workspacePanelRenderable ? t("rightDock.collapse") : t("rightDock.expand")}>
                   <button
                     className={[
