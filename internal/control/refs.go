@@ -1254,9 +1254,13 @@ func findPython() (string, error) {
 }
 
 func runPDFTextCommand(name string, args []string) (string, bool, error) {
+	resolved, err := exec.LookPath(name)
+	if err != nil {
+		return "", false, fmt.Errorf("command not found: %q: %w", name, err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), pdfExtractTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := exec.CommandContext(ctx, resolved, args...)
 	cmd.Env = secrets.ProcessEnv()
 	setShellKillTree(cmd)
 	cmd.WaitDelay = pdfExtractWaitDelay
