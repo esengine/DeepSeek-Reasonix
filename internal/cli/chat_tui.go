@@ -640,6 +640,10 @@ func configureChatTextarea(ti *textarea.Model) {
 	// Plain Enter submits (the chatTUI handler intercepts it), so the textarea's
 	// own InsertNewline binding moves to Alt+Enter / Ctrl+J / Shift+Enter.
 	ti.KeyMap.InsertNewline = key.NewBinding(key.WithKeys("alt+enter", "ctrl+j", "shift+enter"))
+	// bubbles binds word motion to Alt+arrows (the macOS convention); Windows and
+	// Linux terminals send Ctrl+arrows for the same intent.
+	ti.KeyMap.WordForward = key.NewBinding(key.WithKeys("alt+right", "alt+f", "ctrl+right"))
+	ti.KeyMap.WordBackward = key.NewBinding(key.WithKeys("alt+left", "alt+b", "ctrl+left"))
 	ti.Focus()
 }
 
