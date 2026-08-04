@@ -166,6 +166,7 @@ func TestSwiftTestRecognizedAsVerification(t *testing.T) {
 		"swift test --xunit-output=report.xml",
 		"swift test --scratch-path /tmp/out",
 		"swift test --build-path /tmp/out",
+		"swift test --build-path=/tmp/out",
 	} {
 		if IsDeliveryVerificationCommand(command) {
 			t.Errorf("%q can build, run, or mutate the package and must not count as verification", command)
