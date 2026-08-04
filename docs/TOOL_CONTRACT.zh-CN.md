@@ -9,7 +9,7 @@
 | `bash` | false | 执行 shell 命令并返回 stdout/stderr。构建、测试、git、包管理器等使用它；读写查找文件优先使用专用工具。 |
 | `bash_output` | true | 读取后台 `bash` 或 `task` job 自上次读取后的新增输出和状态。 |
 | `code_index` | true | 轻量内置代码符号索引；优先使用 `lsp_*` 或代码图 MCP，缺失时用它兜底。 |
-| `cron_create` | false | 创建排定任务。`cron` 接受 5 段 cron 表达式（如 `*/5 * * * *`）或间隔写法（如 `5m`、`2h`、`1d`，取最近的干净步长），`prompt` 为触发时运行的提示词。设 `one_shot: true` 表示只触发一次后自动删除（提醒）。任务在会话打开期间于回合间隙触发；用 cron_list 查看、cron_delete 取消。会话最多容纳 50 个任务。 |
+| `cron_create` | false | 创建排定任务。`cron` 接受 5 段 cron 表达式（如 `*/5 * * * *`）或间隔写法（如 `5m`、`2h`、`1d`，取最近的干净步长），`prompt` 为触发时运行的提示词。设 `one_shot: true` 表示只触发一次后自动删除（提醒）。设 `no_expire: true` 表示永不过期的循环（默认任务 7 天后过期）。任务在会话打开期间于下一次匹配时间在回合间隙触发；用 cron_list 查看、cron_delete 取消。会话最多容纳 50 个任务。 |
 | `cron_delete` | false | 按 ID 取消已排定的任务（见 cron_list）。任务立即停止触发。当被要求取消循环或提醒，或某个循环任务已无用时使用。 |
 | `cron_list` | true | 列出会话中所有已排定的任务：ID、调度（cron 表达式或动态）、下次触发时间和提示词。当被问到存在哪些排定任务，或取消前查看时使用。 |
 | `complete_step` | true | 用证据记录已批准计划中一个步骤的完成情况。 |

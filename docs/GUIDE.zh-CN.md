@@ -490,7 +490,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `Ctrl+O` | 切换详细 reasoning 显示 | 也可通过 `/verbose` 使用。 |
 | `Ctrl+B` | 展开或收起较长 shell 输出 | 较长 shell 输出的提示行也可点击；全屏 TUI 开启鼠标接管时，文本选区由应用内处理。 |
 | `/goal <目标>`、`/goal --research <目标>`、`/goal --simple <目标>`、`/goal status`、`/goal clear` | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环；显式启动 Goal 后，明显长周期目标会自动启用 AutoResearch。 |
-| `/loop [间隔] [提示词]` | 按计划重复运行提示词，或管理已安排的循环 | `/loop 5m 检查部署` 每 5 分钟运行一次提示词；`/loop <提示词>` 运行动态循环，由模型通过 `schedule_wakeup` 决定每次延迟；裸 `/loop` 使用 `loop.md` 或内置维护提示词。前缀 `--forever`（如 `/loop --forever 5m 检查部署`）可创建永不过期的循环（默认任务 7 天后过期）。固定循环可让模型取消（`cron_delete`）；动态循环按 `Esc` 暂停，再按一次 `Esc` 全部取消。状态栏以 `NEXT JOB <id> <时间>` 显示下次触发时间。 |
+| `/loop [间隔] [提示词]` | 按计划重复运行提示词，或管理已安排的循环 | `/loop 5m 检查部署` 每 5 分钟运行一次提示词；`/loop <提示词>` 运行动态循环，由模型通过 `schedule_wakeup` 决定每次延迟；裸 `/loop` 使用 `loop.md` 或内置维护提示词。前缀 `--forever`（如 `/loop --forever 5m 检查部署`）可创建永不过期的循环（默认任务 7 天后过期）。回合进行中触发的任务会把提示词以带标记的转向消息（`⏰ scheduled task <id>:`）注入当前回合，而非打断它；空闲时触发则作为完整回合运行。任务按工作目录持久化在 `<workspace>/.reasonix/scheduled-tasks.json` - 该文件夹下启动的所有会话共享同一份文件，`/new` 和 `/clear` 不会删除。固定循环可让模型取消（`cron_delete`）；动态循环按 `Esc` 暂停，再按一次 `Esc` 全部取消。状态栏以 `NEXT JOB <id> <时间>` 显示下次触发时间。 |
 | `/loopstatus [on|off|auto]` | 切换 `NEXT JOB` 状态栏指示器 | 默认 `auto`：仅在有待触发的排定任务时显示。`on` 始终显示（无任务时显示 `none`）；`off` 即使有任务也隐藏。裸 `/loopstatus` 显示当前模式。 |
 | `/looplist` | 本地列出当前工作目录的排定任务（不消耗模型调用） | 显示每个任务的 ID、计划（cron 或动态）、下次触发时间，以及一次性/永不过期标记。 |
 | `/loopdel <id>` | 按 ID 本地删除排定任务（不消耗模型调用） | `/loopdel 3f9a2c11` 取消该任务；会提示删除成功或不存在该任务。 |
