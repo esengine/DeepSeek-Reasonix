@@ -1617,11 +1617,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Coordinator with its own session, kept separate for cache stability. The
 	// planner gets the same standing memory context and a filtered read-only
 	// research tool set, so it can inspect rules/code without side effects.
-	if pm := effectivePlannerModel(cfg, opts, tokenEconomy); pm != "" {
-		pe, ok := resolveOptionalEntry(opts, cfg, pm)
-		if !ok {
-			return nil, fmt.Errorf("planner_model %q is not a configured provider", pm)
-		}
+	pm := effectivePlannerModel(cfg, opts, tokenEconomy)
+	pe, plannerResolved := resolveOptionalEntry(opts, cfg, pm)
+	if pm != "" && !plannerResolved {
+		// An unusable optional planner must not take the session down with it —
+		// the executor is what the user talks to. Degrades like the guardian
+		// model below (#4615).
+		slog.Warn("planner model is not a configured provider — planning disabled", "model", pm)
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn,
+			Text: fmt.Sprintf("planner_model %q is not a configured provider — continuing with the executor alone", pm)})
+	}
+	if pm != "" && plannerResolved {
 		if pe.Model != entry.Model {
 			plannerProv, err := resolveProvider(opts, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(pe)})
 			if err != nil {
