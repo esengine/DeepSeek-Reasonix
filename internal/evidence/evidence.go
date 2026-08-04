@@ -1807,8 +1807,10 @@ func bashSegmentIsVerification(fields []string) bool {
 		// the package's own .build directory (including --enable-code-coverage
 		// reports). Other swift subcommands (build/run/package) can write
 		// binaries or mutate the package, so only the test form is a
-		// recognized verifier. Explicit report destinations and scratch-dir
-		// redirects are rejected by writeOutputFlags.
+		// recognized verifier. Explicit report destinations, attachment dirs,
+		// and scratch-dir redirects are rejected by writeOutputFlags. Note
+		// that swift test may run Package.swift build plugins (arbitrary
+		// code) — the same trust boundary as go test / cargo test.
 		return len(args) > 0 && args[0] == "test"
 	case "mvn", "mvnw", "gradle", "gradlew":
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
@@ -2059,6 +2061,10 @@ var writeOutputFlags = map[string]bool{
 	"xunit-output":    true, // swift test --xunit-output writes a JUnit XML report
 	"scratch-path":    true, // swift test --scratch-path redirects the build dir
 	"build-path":      true, // swift test --build-path: legacy alias of --scratch-path
+	"event-stream-output-path":           true, // swift test (Swift 6.x): swift-testing JSON output
+	"experimental-event-stream-output":   true, // swift test (Swift 6.x): experimental event-stream output
+	"attachments-path":                   true, // swift test (Swift 6.x): Swift Testing attachments dir
+	"experimental-attachments-path":      true, // swift test (Swift 6.x): experimental attachments dir
 }
 
 func hasWriteOutputFlag(args []string) bool {
