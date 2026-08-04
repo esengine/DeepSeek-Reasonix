@@ -132,6 +132,12 @@ audio are not advertised. During a turn, Reasonix may send:
 - `session/request_permission` requests for permission-gated tools and user
   questions.
 
+Consecutive `agent_message_chunk` / `agent_thought_chunk` notifications are
+coalesced (up to a small byte budget) so hosts that rebuild their UI on every
+`session/update` are less likely to freeze under token-stream load.
+`session/load` also applies a tighter display clip to replayed tool results;
+prefer `session/resume` when the host already has a transcript view.
+
 Hosts should keep the `session/prompt` request open until Reasonix returns its
 stop reason, while continuing to process requests and notifications in both
 directions.

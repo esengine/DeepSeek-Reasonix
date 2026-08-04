@@ -31,6 +31,20 @@ type notifier interface {
 // dispatch.ts (the full result still goes to the model; this is display only).
 const maxResultChars = 8000
 
+// maxReplayResultChars is a tighter display clip used when session/load replays
+// history. Hosts that rebuild their full UI on every session/update (notably the
+// VS Code webview) can freeze or blank a workspace when a long git-review
+// transcript is replayed at the live 8 KiB clip; the model still sees the full
+// on-disk tool output on subsequent turns.
+const maxReplayResultChars = 2000
+
+// chunkCoalesceMaxBytes merges consecutive agent_message_chunk /
+// agent_thought_chunk notifications until this many bytes are buffered, a
+// different update kind arrives, or the turn ends. Provider streams often emit
+// one token per event; without coalescing, ACP hosts that full-rerender on each
+// session/update can busy-loop the UI thread (see #7193).
+const chunkCoalesceMaxBytes = 512
+
 // updateSink is an event.Sink bound to one session that maps the agent's typed
 // event stream onto ACP session/update notifications. It is the v2 counterpart of
 // main's dispatchKernelEvent: where main translated kernel events, we translate
@@ -58,6 +72,11 @@ type updateSink struct {
 	status  func(event.Event)
 	mu      sync.Mutex
 	turnCtx context.Context
+	// pendingKind / pendingText coalesce consecutive Text/Reasoning chunks.
+	// Only Emit and flushPending touch these; the agent calls Emit serially and
+	// flushPending runs after the turn (or before a non-chunk update).
+	pendingKind string
+	pendingText strings.Builder
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
@@ -94,6 +113,9 @@ func (s *updateSink) setTurnContext(ctx context.Context) {
 }
 
 func (s *updateSink) clearTurnContext() {
+	// Flush any coalesced text/thought before dropping the turn context so the
+	// host sees the final tokens before session/prompt's stopReason.
+	s.flushPending()
 	s.mu.Lock()
 	s.turnCtx = nil
 	s.mu.Unlock()
@@ -110,23 +132,17 @@ func (s *updateSink) currentTurnContext() context.Context {
 }
 
 // Emit implements event.Sink. The agent calls it serially (see event.Sink), so no
-// locking is needed; write serialization lives in Conn.
+// locking is needed for the coalesce buffer; write serialization lives in Conn.
 func (s *updateSink) Emit(e event.Event) {
 	if s.status != nil {
 		s.status(e)
 	}
 	switch e.Kind {
 	case event.Reasoning:
-		if e.Text == "" {
-			return
-		}
-		s.send(messageChunk{SessionUpdate: "agent_thought_chunk", Content: textBlock(e.Text)})
+		s.queueChunk("agent_thought_chunk", e.Text)
 
 	case event.Text:
-		if e.Text == "" {
-			return
-		}
-		s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(e.Text)})
+		s.queueChunk("agent_message_chunk", e.Text)
 
 	case event.ToolDispatch:
 		// Skip the early (Partial) dispatch and later same-ID preview refresh: ACP
@@ -134,6 +150,7 @@ func (s *updateSink) Emit(e event.Event) {
 		if e.Tool.Partial || e.Tool.Refreshed {
 			return
 		}
+		s.flushPending()
 		// todo_write is the agent's task list; mirror it as an ACP plan update so
 		// the client renders structured progress alongside the tool_call.
 		if e.Tool.Name == "todo_write" {
@@ -152,6 +169,7 @@ func (s *updateSink) Emit(e event.Event) {
 		})
 
 	case event.ToolResult:
+		s.flushPending()
 		status := "completed"
 		text := e.Tool.Output
 		if e.Tool.Err != "" {
@@ -169,6 +187,7 @@ func (s *updateSink) Emit(e event.Event) {
 		// Surface warnings to the host as a message chunk so they're not lost;
 		// info-level notices stay out of band.
 		if e.Level == event.LevelWarn && e.Text != "" {
+			s.flushPending()
 			s.send(messageChunk{
 				SessionUpdate: "agent_message_chunk",
 				Content:       textBlock("\n\n[warning] " + e.Text),
@@ -179,6 +198,7 @@ func (s *updateSink) Emit(e event.Event) {
 		// ACP has no compaction-card concept; surface a one-line note so the host
 		// knows the context was summarized (an aborted pass has no summary).
 		if e.Compaction.Summary != "" {
+			s.flushPending()
 			s.send(messageChunk{
 				SessionUpdate: "agent_message_chunk",
 				Content:       textBlock(fmt.Sprintf("\n\n[compacted %d earlier messages to save context]", e.Compaction.Messages)),
@@ -189,6 +209,7 @@ func (s *updateSink) Emit(e event.Event) {
 		// The run loop is now blocked awaiting Approve(id, …). Do the
 		// client round-trip off the emit goroutine so Emit returns at once
 		// (the agent emits serially); the answer unblocks the loop.
+		s.flushPending()
 		turnCtx := s.currentTurnContext()
 		go s.requestPermission(turnCtx, e.Approval)
 
@@ -196,9 +217,38 @@ func (s *updateSink) Emit(e event.Event) {
 		// ACP has no separate "ask the user a business question" method. Reuse
 		// the standard permission round-trip with the question options as choices;
 		// clients such as Zed already know how to render this interaction.
+		s.flushPending()
 		turnCtx := s.currentTurnContext()
 		go s.requestAsk(turnCtx, e.Ask)
 	}
+}
+
+// queueChunk appends a text/thought delta into the coalesce buffer, flushing when
+// the kind changes or the byte budget is reached.
+func (s *updateSink) queueChunk(kind, text string) {
+	if text == "" {
+		return
+	}
+	if s.pendingKind != "" && s.pendingKind != kind {
+		s.flushPending()
+	}
+	s.pendingKind = kind
+	s.pendingText.WriteString(text)
+	if s.pendingText.Len() >= chunkCoalesceMaxBytes {
+		s.flushPending()
+	}
+}
+
+// flushPending sends any buffered agent_message_chunk / agent_thought_chunk.
+func (s *updateSink) flushPending() {
+	if s.pendingKind == "" || s.pendingText.Len() == 0 {
+		s.pendingKind = ""
+		s.pendingText.Reset()
+		return
+	}
+	s.send(messageChunk{SessionUpdate: s.pendingKind, Content: textBlock(s.pendingText.String())})
+	s.pendingKind = ""
+	s.pendingText.Reset()
 }
 
 func (s *updateSink) send(update any) {
@@ -250,7 +300,7 @@ func (s *updateSink) replay(msgs []provider.Message) {
 				SessionUpdate: "tool_call_update",
 				ToolCallID:    m.ToolCallID,
 				Status:        "completed",
-				Content:       []toolContent{{Type: "content", Content: textBlock(clip(m.Content))}},
+				Content:       []toolContent{{Type: "content", Content: textBlock(clipN(m.Content, maxReplayResultChars))}},
 			})
 		}
 	}
@@ -460,10 +510,15 @@ func rawJSON(args string) json.RawMessage {
 
 // clip truncates text to maxResultChars, appending a note, matching dispatch.ts.
 func clip(text string) string {
-	if len(text) <= maxResultChars {
+	return clipN(text, maxResultChars)
+}
+
+// clipN truncates text to limit bytes (UTF-8 safe), appending a note.
+func clipN(text string, limit int) string {
+	if limit <= 0 || len(text) <= limit {
 		return text
 	}
-	end := maxResultChars
+	end := limit
 	for end > 0 && !utf8.ValidString(text[:end]) {
 		end--
 	}
