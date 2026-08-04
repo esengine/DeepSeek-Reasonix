@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Archive, Pencil, Search, Trash2, RotateCcw } from "lucide-react";
+import { Archive, Pencil, Pin, PinOff, Search, Trash2, RotateCcw } from "lucide-react";
 import { t, useT } from "../lib/i18n";
+import { ordered as pinnedOrdered, toggle as togglePin } from "../lib/pinnedSessions";
 import { historySessionDisplayTitle, sessionActivityTime } from "../lib/session";
 import type { HistoryMessage, SessionMeta } from "../lib/types";
 import { historyMessagesToItems, type Item } from "../lib/useController";
@@ -70,6 +71,16 @@ export function HistoryPanel({
     loading: boolean;
   } | null>(null);
   const previewSeq = useRef(0);
+  const [pinVersion, setPinVersion] = useState(0);
+  const pinnedPaths = useMemo(() => {
+    void pinVersion;
+    return pinnedOrdered(sessions);
+  }, [pinVersion, sessions]);
+  const pinnedSet = useMemo(() => new Set(pinnedPaths), [pinnedPaths]);
+  const onTogglePin = useCallback((path: string) => {
+    togglePin(path);
+    setPinVersion((v) => v + 1);
+  }, []);
 
   const startRename = (s: SessionMeta) => {
     if (running) return;
@@ -162,8 +173,11 @@ export function HistoryPanel({
     () =>
       isTrash
         ? filteredSessions
-        : [...filteredSessions.filter((s) => !s.recoveryCopy), ...filteredSessions.filter((s) => s.recoveryCopy)],
-    [filteredSessions, isTrash],
+        : [
+            ...filteredSessions.filter((s) => !s.recoveryCopy && !pinnedSet.has(s.path)),
+            ...filteredSessions.filter((s) => s.recoveryCopy && !pinnedSet.has(s.path)),
+          ],
+    [filteredSessions, isTrash, pinnedSet],
   );
 
   // Sessions arrive newest-first; bucket consecutive ones under a day heading
@@ -301,6 +315,16 @@ export function HistoryPanel({
               const target = menuSession;
               closeHistoryMenus();
               startRename(target);
+            },
+          },
+          {
+            key: "pin",
+            icon: pinnedSet.has(menuSession.path) ? <PinOff size={13} /> : <Pin size={13} />,
+            label: pinnedSet.has(menuSession.path) ? tr("history.unpin") : tr("history.pin"),
+            disabled: running,
+            onSelect: () => {
+              onTogglePin(menuSession.path);
+              closeHistoryMenus();
             },
           },
           ...(menuSession.current
@@ -486,6 +510,58 @@ export function HistoryPanel({
 
         <div className="history-content">
           <div className={`history-list${isTrash ? " history-list--trash" : ""}`}>
+            {!isTrash && pinnedPaths.length > 0 && (
+              <section className="mem-section hist-pinned">
+                <div className="mem-section__title hist-group__title">
+                  <span>{tr("history.pinned")}</span>
+                  <span className="hist-group__count">{pinnedPaths.length}</span>
+                </div>
+                {pinnedPaths.map((path) => {
+                  const s = sessions.find((x) => x.path === path);
+                  if (!s) return null;
+                  const selected = preview?.path === s.path;
+                  return (
+                    <div
+                      className={`hist-item${s.current ? " hist-item--current" : ""}${selected ? " hist-item--selected" : ""}`}
+                      key={s.path}
+                      onContextMenu={(event) => openSessionMenu(event, s)}
+                    >
+                      <button
+                        className="hist-item__main"
+                        onClick={() => {
+                          setMenuConfirmTarget(null);
+                          void loadPreview(s);
+                        }}
+                        onDoubleClick={() => {
+                          if (!isTrash && !running) onResume(s);
+                        }}
+                      >
+                        <div className="hist-item__preview">{historySessionDisplayTitle(s, tr("history.emptySession"))}</div>
+                        <div className="hist-item__meta">
+                          {isChannelSession(s) && <span className="hist-item__badge hist-item__badge--open">{tr("history.channel")}</span>}
+                          {s.current && <span className="hist-item__badge hist-item__badge--current">{tr("history.current")}</span>}
+                          {!s.current && s.open && <span className="hist-item__badge hist-item__badge--open">{tr("history.open")}</span>}
+                          {s.recovered && <span className="hist-item__badge">{tr("recovery.badge")}</span>}
+                          {sessionLocation(s, tr) && <span className="hist-item__scope">{sessionLocation(s, tr)}</span>}
+                          <span className="hist-item__metaspacer" />
+                          <span className="hist-item__stat">{tr(s.turns === 1 ? "history.turnOne" : "history.turnOther", { n: s.turns })}</span>
+                          <span className="hist-item__dot">·</span>
+                          <span className="hist-item__stat">{timeLabel(sessionActivityTime(s))}</span>
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="hist-item__unpin"
+                        title={tr("history.unpin")}
+                        onClick={() => onTogglePin(s.path)}
+                      >
+                        <PinOff size={13} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </section>
+            )}
             {sessions.length === 0 ? (
               <div className={`mem-empty${isTrash ? " mem-empty--trash" : ""}`}>
                 {isTrash && <Trash2 size={22} />}
