@@ -69,11 +69,11 @@ jobs:
           # A recovery dispatch uses the fixed workflow/scripts from protected
           # main-v2. Publishers still check out the immutable approved tag SHA.
           ref: ${{ github.sha }}
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Resolve stable release
@@ -232,7 +232,7 @@ jobs:
           # Postflight belongs to the trusted control plane, not the old build
           # candidate, which may predate this verifier.
           ref: ${{ github.sha }}
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Verify public artifacts and npm latest
