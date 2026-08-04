@@ -140,3 +140,35 @@ func TestHookMachineStatusHasStableRedactedSources(t *testing.T) {
 		t.Fatalf("sources are not stable: %+v", response.Sources)
 	}
 }
+
+// TestHookMachineListFindsGlobalHooksWithoutHomeDir: with no --home-dir, the
+// hook machine resolves global hooks from the platform Reasonix home
+// (config.ReasonixHomeDir → settings.json), not a doubled .reasonix segment
+// (#7420). REASONIX_HOME is set explicitly so the resolved path is
+// deterministic regardless of the OS user-config lookup.
+func TestHookMachineListFindsGlobalHooksWithoutHomeDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	settingsPath := filepath.Join(home, "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{"Stop":[{"command":"PRIVATE_GLOBAL"}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if code := runHookCommand([]string{"list", "--json", "--project-root", t.TempDir()}, &out); code != 0 {
+		t.Fatalf("hook list exit code = %d, output = %s", code, out.String())
+	}
+	var response machineHookList
+	if err := json.Unmarshal(out.Bytes(), &response); err != nil {
+		t.Fatalf("decode hook list: %v", err)
+	}
+	for _, h := range response.Hooks {
+		if h.Event == "Stop" && h.Status == "active" {
+			return
+		}
+	}
+	t.Fatalf("global Stop hook not found active: %+v", response.Hooks)
+}
