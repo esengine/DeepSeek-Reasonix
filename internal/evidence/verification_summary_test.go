@@ -171,6 +171,9 @@ func TestSwiftTestRecognizedAsVerification(t *testing.T) {
 		"swift test --experimental-event-stream-output /tmp/events.json",
 		"swift test --attachments-path /tmp/attachments",
 		"swift test --experimental-attachments-path /tmp/attachments",
+		"swift test --cache-path /tmp/cache",
+		"swift test --help",
+		"swift test --list-tests",
 	} {
 		if IsDeliveryVerificationCommand(command) {
 			t.Errorf("%q can build, run, or mutate the package and must not count as verification", command)
