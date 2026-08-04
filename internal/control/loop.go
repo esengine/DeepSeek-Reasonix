@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/scheduler"
 )
@@ -128,12 +129,13 @@ func (c *Controller) loadLoopMD() string {
 	return ""
 }
 
-// runScheduledTurn fires a scheduled task as a turn between foreground turns.
-// It is invoked from the scheduler's ticker goroutine; the work itself runs on
-// the controller's turn machinery, parking while a foreground turn is active
-// so a due task never interrupts mid-response. MarkStarted runs inside the
-// admitted body so a parked fire keeps its firing flag (no duplicate queued
-// turns) until the turn genuinely begins.
+// runScheduledTurn fires a scheduled task, either by steering the prompt into
+// the active turn's message queue (mid-turn fire — the agent picks it up at
+// its next natural step) or, when no active turn can accept it, as a turn
+// between foreground turns. It is invoked from the scheduler's ticker
+// goroutine. MarkStarted runs on the accepted delivery path (injectScheduledTask)
+// or inside the admitted body so a parked fire keeps its firing flag (no
+// duplicate queued turns) until the turn genuinely begins.
 func (c *Controller) runScheduledTurn(task scheduler.Task) {
 	c.mu.Lock()
 	closed := c.closed
@@ -144,6 +146,13 @@ func (c *Controller) runScheduledTurn(task scheduler.Task) {
 		// down — release it so any survivor path (or a rebind that skips
 		// Load) cannot wedge the task.
 		c.scheduler.ReleaseFiring(task.ID)
+		return
+	}
+	if c.injectScheduledTask(task) {
+		// The fire was delivered into the running turn's message queue:
+		// MarkStarted consumed the firing flag and re-armed the cron
+		// schedule from now, so cycles that passed while the turn ran are
+		// skipped instead of catching up.
 		return
 	}
 	result := c.runGuardedOrPark(func(ctx context.Context) error {
@@ -160,6 +169,48 @@ func (c *Controller) runScheduledTurn(task scheduler.Task) {
 		// task re-fires on the next tick, a dynamic task stays paused instead
 		// of silently dying with its wakeup consumed.
 		c.scheduler.ReleaseFiring(task.ID)
+	}
+}
+
+// injectScheduledTask delivers a due scheduled task into the active turn's
+// message queue as a labeled steering message. It reports whether the fire
+// was accepted: true means the running agent will see the prompt at its next
+// natural step (between tool rounds, never mid-tool); false means the caller
+// falls back to the parked-turn path (turn in its finishing window, steer
+// intake already closed, or no executor bound).
+//
+// Consent posture: steering runs inside the CURRENT turn's approval context —
+// any tool calls the model makes in response pass the same approval gates as
+// the running turn's own calls, so a scheduled fire opens no new consent
+// surface. The injected message is explicitly labeled as a scheduled task
+// (never as the user) and the notice shows a promptPreview, so a poisoned
+// prompt is visible in the transcript and UI rather than silently executed.
+func (c *Controller) injectScheduledTask(task scheduler.Task) bool {
+	if !c.TrySteer(agent.MidTurnScheduledMessage(task.ID, task.Prompt)) {
+		return false
+	}
+	c.scheduler.MarkStarted(task.ID)
+	c.notice(fmt.Sprintf("⏰ scheduled task %s injected into the running turn — %s", task.ID, promptPreview(task.Prompt)))
+	return true
+}
+
+// rearmUnappliedScheduledTask retries a scheduled fire whose injection was
+// accepted into the steer queue but never reached the model: the turn ended
+// abnormally (cancel, provider error, rotation) and the steer was flushed
+// unapplied. Rearming makes the task due again on the next tick — matching
+// the parked path's ReleaseFiring semantics for dropped turns, so a fire is
+// never silently spent. User steers and plain text carry no scheduled-task
+// label and are ignored.
+func (c *Controller) rearmUnappliedScheduledTask(text string) {
+	id, ok := agent.ScheduledTaskID(text)
+	if !ok {
+		return
+	}
+	c.mu.Lock()
+	sched := c.scheduler
+	c.mu.Unlock()
+	if sched != nil {
+		sched.Rearm(id)
 	}
 }
 

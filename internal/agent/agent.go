@@ -429,6 +429,11 @@ type Agent struct {
 	steerMu       sync.Mutex
 	steerQueue    []string
 	steerConsumed bool
+	// unappliedSteerHook, when set, is invoked with the steer text whenever a
+	// queued steer is flushed unapplied (abnormal turn exit). The controller
+	// uses it to re-arm scheduled-task injections that never reached the
+	// model. Guarded by steerMu.
+	unappliedSteerHook func(text string)
 	// steerRunActive is true while Run is executing. Steer only queues while
 	// it is set; once the turn's exit flush has drained the queue, later
 	// steers are rejected so the caller can deliver them as a regular turn
@@ -815,6 +820,45 @@ func (a *Agent) ContextWindow() int { return a.contextWindow }
 // display them as a notice, not a regular user bubble.
 const MidTurnSteerPrefix = "[Mid-turn steer queued by the user. Do not treat this as a new task; use it only as additional guidance for the current task after completing the current step.]"
 
+// MidTurnScheduledPrefix marks messages injected mid-turn by a due scheduled
+// task (the scheduler's steering path). Unlike a user steer, the model is
+// told to act on the instruction; the label also makes replay and display
+// sites (SteerText) treat the message as machine-injected, so a poisoned
+// prompt can never masquerade as the user.
+const MidTurnScheduledPrefix = "[Mid-turn scheduled task fired. Act on this instruction after completing the current step.]"
+
+// MidTurnScheduledMessage wraps a scheduled task's prompt for mid-turn
+// injection: the fixed machine label, then the task id and prompt. SteerText
+// strips the label and returns the id+prompt text, so live notices and
+// history replay match character-for-character.
+func MidTurnScheduledMessage(id, prompt string) string {
+	return MidTurnScheduledPrefix + "\n⏰ scheduled task " + id + ":\n" + prompt
+}
+
+// scheduledTaskLabel prefixes the task id inside a scheduled steer message
+// (wrapped or unwrapped). ScheduledTaskID parses it.
+const scheduledTaskLabel = "⏰ scheduled task "
+
+// ScheduledTaskID extracts the task id from a scheduled-task steer message
+// (MidTurnScheduledMessage output, or its SteerText-unwrapped form). ok is
+// false for user steers and ordinary text, so callers can safely re-arm only
+// machine-injected fires.
+func ScheduledTaskID(text string) (string, bool) {
+	if after, ok := SteerText(text); ok {
+		text = after
+	}
+	text = strings.TrimPrefix(text, "\n")
+	if !strings.HasPrefix(text, scheduledTaskLabel) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(text, scheduledTaskLabel)
+	id, _, found := strings.Cut(rest, ":")
+	if !found || id == "" {
+		return "", false
+	}
+	return id, true
+}
+
 func midTurnSteerMessage(text string) string {
 	return MidTurnSteerPrefix + "\n" + text
 }
@@ -824,7 +868,9 @@ func midTurnSteerMessage(text string) string {
 // text preserves the user's exact input — it only strips the prefix and the
 // "\n" separator that midTurnSteerMessage inserts between the prefix and the
 // user text; it does not trim spaces so the history replay matches the live
-// Steer event rendering character-for-character.
+// Steer event rendering character-for-character. Scheduled-task injections
+// (MidTurnScheduledMessage) are recognized too and return their id+prompt
+// text, so every replay/display site treats them like user steers.
 //
 // Steers are persisted through withTurnPreferences, which can prepend
 // transient language blocks (for Chinese text even in auto mode) and append
@@ -835,8 +881,8 @@ func midTurnSteerMessage(text string) string {
 func SteerText(content string) (string, bool) {
 	s := content
 	for {
-		if after, found := strings.CutPrefix(s, MidTurnSteerPrefix); found {
-			// Strip only the "\n" separator, preserving the user's original text.
+		if after, found := stripSteerPrefix(s); found {
+			// Strip only the "\n" separator, preserving the original text.
 			after = strings.TrimPrefix(after, "\n")
 			if trimmed, cut := strings.CutSuffix(after, "\n\n"+DeliveryRuntimeMarker); cut {
 				after = trimmed
@@ -849,6 +895,18 @@ func SteerText(content string) (string, bool) {
 		}
 		s = next
 	}
+}
+
+// stripSteerPrefix removes the user-steer or scheduled-task wrapper from
+// content. Scheduled-task messages are checked first so their label wins even
+// if a later wrapper were ever nested; the two prefixes never overlap.
+func stripSteerPrefix(s string) (string, bool) {
+	for _, prefix := range []string{MidTurnScheduledPrefix, MidTurnSteerPrefix} {
+		if after, found := strings.CutPrefix(s, prefix); found {
+			return after, true
+		}
+	}
+	return "", false
 }
 
 // trimLeadingSteerWrapper removes one leading transient preference block that
@@ -942,21 +1000,43 @@ func UnappliedSteerNotice(text string) string {
 	return "Guidance was not applied because the turn ended before it could be processed. Send it again if it is still needed:\n" + text
 }
 
+// SetUnappliedSteerHook installs a callback invoked with the steer text
+// whenever queued guidance is flushed unapplied (turn ended abnormally before
+// the message reached the model). The controller uses it to re-arm a
+// scheduled task whose injection was never consumed. The hook runs
+// synchronously on the turn's exit path; it must not block.
+func (a *Agent) SetUnappliedSteerHook(fn func(text string)) {
+	a.steerMu.Lock()
+	a.unappliedSteerHook = fn
+	a.steerMu.Unlock()
+}
+
 // RecordUnappliedSteer stores guidance that could not affect its intended
 // in-flight turn. The orphan-tool sentinel makes older readers drop the record
 // during wire normalization, while current readers use LocalOnly to exclude it
-// before every provider request.
+// before every provider request. Pre-wrapped content (a scheduled-task
+// injection) keeps its own label instead of being re-wrapped as a user steer.
 func (a *Agent) RecordUnappliedSteer(text string) {
 	if a == nil || a.session == nil {
 		return
 	}
+	content := midTurnSteerMessage(text)
+	if _, wrapped := SteerText(text); wrapped {
+		content = text
+	}
 	a.session.Add(provider.Message{
 		Role:       provider.RoleTool,
-		Content:    a.withTurnPreferences(midTurnSteerMessage(text)),
+		Content:    a.withTurnPreferences(content),
 		ToolCallID: provider.LocalOnlyToolID,
 		Name:       provider.LocalOnlyToolName,
 		LocalOnly:  true,
 	})
+	a.steerMu.Lock()
+	hook := a.unappliedSteerHook
+	a.steerMu.Unlock()
+	if hook != nil {
+		hook(text)
+	}
 	a.sink.Emit(event.Event{
 		Kind:  event.Notice,
 		Level: event.LevelWarn,

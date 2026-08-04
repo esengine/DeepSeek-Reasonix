@@ -78,6 +78,24 @@ func TestSteerText(t *testing.T) {
 			want:    "line one\nline two",
 			wantOK:  true,
 		},
+		{
+			name:    "scheduled task wrapper recognized, label preserved",
+			content: MidTurnScheduledMessage("ab12cd34", "check the deploy"),
+			want:    "⏰ scheduled task ab12cd34:\ncheck the deploy",
+			wantOK:  true,
+		},
+		{
+			name:    "scheduled task wrapper survives delivery-runtime marker",
+			content: MidTurnScheduledMessage("ab12cd34", "check the deploy") + "\n\n" + DeliveryRuntimeMarker,
+			want:    "⏰ scheduled task ab12cd34:\ncheck the deploy",
+			wantOK:  true,
+		},
+		{
+			name:    "multiline scheduled prompt preserved",
+			content: MidTurnScheduledMessage("ef01", "line one\nline two"),
+			want:    "⏰ scheduled task ef01:\nline one\nline two",
+			wantOK:  true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,5 +131,63 @@ func TestMidTurnSteerMessageRoundTrip(t *testing.T) {
 		if got != in {
 			t.Errorf("SteerText(midTurnSteerMessage(%q)) = %q, want %q", in, got, in)
 		}
+	}
+}
+
+// TestMidTurnScheduledMessage verifies the consent/anti-spoofing contract of
+// scheduled-task injections: the message is explicitly labeled as a scheduled
+// task (never as the user), the label+prompt round-trips through SteerText so
+// live notices and history replay match, and every synthetic-message site
+// (turn counts, titles, previews via IsUserAuthoredTurn) excludes it — a
+// poisoned prompt can be seen but can never masquerade as user guidance.
+func TestMidTurnScheduledMessage(t *testing.T) {
+	const (
+		id     = "ab12cd34"
+		prompt = "check the deploy"
+	)
+	msg := MidTurnScheduledMessage(id, prompt)
+
+	if strings.Contains(msg, MidTurnSteerPrefix) {
+		t.Errorf("scheduled message must not carry the user-steer prefix:\n%s", msg)
+	}
+	if !strings.HasPrefix(msg, MidTurnScheduledPrefix) {
+		t.Errorf("scheduled message missing its label prefix: %q", msg)
+	}
+
+	wantLabel := "⏰ scheduled task " + id + ":\n" + prompt
+	got, ok := SteerText(msg)
+	if !ok || got != wantLabel {
+		t.Errorf("SteerText(scheduled) = %q, %v; want %q, true", got, ok, wantLabel)
+	}
+	if IsUserAuthoredTurn(msg) {
+		t.Error("scheduled injection must not count as a user-authored turn")
+	}
+
+	// The id must survive the round trip so a user can cross-reference the
+	// notice with /looplist.
+	replay, _ := SteerText(msg)
+	if !strings.Contains(replay, id) {
+		t.Errorf("replay text %q lost the task id", replay)
+	}
+}
+
+// TestScheduledTaskID: the id parses out of both the wrapped message and its
+// SteerText-unwrapped form, and never out of user steers or plain text — so
+// the unapplied-rearm hook can only ever re-arm machine-injected fires.
+func TestScheduledTaskID(t *testing.T) {
+	const id = "ab12cd34"
+	wrapped := MidTurnScheduledMessage(id, "check the deploy")
+	if got, ok := ScheduledTaskID(wrapped); !ok || got != id {
+		t.Errorf("ScheduledTaskID(wrapped) = %q, %v; want %q, true", got, ok, id)
+	}
+	unwrapped, _ := SteerText(wrapped)
+	if got, ok := ScheduledTaskID(unwrapped); !ok || got != id {
+		t.Errorf("ScheduledTaskID(unwrapped) = %q, %v; want %q, true", got, ok, id)
+	}
+	if _, ok := ScheduledTaskID(midTurnSteerMessage("please go on")); ok {
+		t.Error("user steer parsed as a scheduled task")
+	}
+	if _, ok := ScheduledTaskID("please go on"); ok {
+		t.Error("plain text parsed as a scheduled task")
 	}
 }

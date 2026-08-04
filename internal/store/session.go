@@ -86,9 +86,12 @@ func SessionScheduledTasks(workspaceRoot, sessionPath string) string {
 
 // LegacyScheduledTasks is the historical per-session sidecar layout
 // (<id>.scheduled-tasks.json, beside the transcript) used before the
-// per-directory store. It exists only for one-time migration.
+// per-directory store. It exists only for one-time migration. It is derived
+// only for well-formed transcript paths (ending in .jsonl): appending to an
+// arbitrary string would hand the migration's os.Remove an arbitrary file to
+// delete if a user-supplied session path ever reached this code.
 func LegacyScheduledTasks(sessionPath string) string {
-	if sessionPath == "" {
+	if sessionPath == "" || !strings.HasSuffix(sessionPath, ".jsonl") {
 		return ""
 	}
 	return sessionStem(sessionPath) + ".scheduled-tasks.json"
@@ -116,15 +119,25 @@ func MigrateScheduledTasks(workspaceRoot, sessionPath string) bool {
 	if err := os.MkdirAll(filepath.Dir(newPath), 0o755); err != nil {
 		return false
 	}
-	// Atomic temp+rename, matching the scheduler's own persistence: a crash
-	// mid-write leaves no partial file at newPath, so the next session retries
-	// the migration instead of treating a corrupt store as already migrated.
-	tmp := newPath + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	// Atomic temp+rename with a unique temp name (matching the scheduler's own
+	// persistence): a crash mid-write leaves no partial file at newPath, so
+	// the next session retries the migration instead of treating a corrupt
+	// store as already migrated, and a concurrent scheduler save from another
+	// chat can never collide on the same .tmp file.
+	tmp, err := os.CreateTemp(filepath.Dir(newPath), filepath.Base(newPath)+".tmp-*")
+	if err != nil {
 		return false
 	}
-	if err := os.Rename(tmp, newPath); err != nil {
-		_ = os.Remove(tmp)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return false
+	}
+	if err := tmp.Close(); err != nil {
+		return false
+	}
+	if err := os.Rename(tmpName, newPath); err != nil {
 		return false
 	}
 	if err := os.Remove(legacy); err != nil {

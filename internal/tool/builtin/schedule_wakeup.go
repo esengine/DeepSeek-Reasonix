@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"time"
 
 	"reasonix/internal/scheduler"
@@ -56,6 +57,12 @@ func (scheduleWakeup) Execute(ctx context.Context, args json.RawMessage) (string
 			return "no active dynamic loop to stop", nil
 		}
 		return fmt.Sprintf("loop stopped (%d pending wakeup(s) cleared)", n), nil
+	}
+	// NaN/Inf slip past ordinary comparisons (every comparison with NaN is
+	// false, and 1e999 unmarshals to +Inf), so reject them explicitly before
+	// the bounds check — a non-finite delay must not reach time.Duration.
+	if math.IsNaN(in.DelayMinutes) || math.IsInf(in.DelayMinutes, 0) {
+		return "", fmt.Errorf("schedule_wakeup: delay_minutes must be a finite number between 1 and 60")
 	}
 	if in.DelayMinutes < 1 || in.DelayMinutes > 60 {
 		return "", fmt.Errorf("schedule_wakeup: delay_minutes must be between 1 and 60, got %v", in.DelayMinutes)

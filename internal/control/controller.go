@@ -417,7 +417,9 @@ type Options struct {
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
 	// Scheduler is the session-scoped scheduled-task manager for /loop and
-	// the cron tools (nil creates one internally).
+	// the cron tools (nil creates one internally; the ticker only starts when
+	// one is supplied — production hosts always supply one, tests that drive
+	// fires directly leave it inert).
 	Scheduler *scheduler.Scheduler
 	// WorkspaceLease is the Delivery writer owner shared with the executor.
 	WorkspaceLease *workspacelease.Owner
@@ -545,7 +547,10 @@ func New(opts Options) *Controller {
 	// ticker. onFire launches a goroutine per due task (runScheduledTurn),
 	// which parks while a foreground turn is running. The scheduler must exist
 	// before rebindCheckpoints so its sidecar binding participates in every
-	// session-path change.
+	// session-path change. The ticker only starts when the host supplied a
+	// scheduler (production always does, via boot); the internally-created
+	// fallback keeps scheduling APIs callable in tests without leaking a
+	// ticker goroutine through every controller that omits Close.
 	c.scheduler = opts.Scheduler
 	if c.scheduler == nil {
 		c.scheduler = scheduler.New()
@@ -556,12 +561,19 @@ func New(opts Options) *Controller {
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
 	c.setActiveJobSession(opts.SessionPath)
-	c.scheduler.Start()
+	if opts.Scheduler != nil {
+		c.scheduler.Start()
+	}
 	cmdsInit := opts.Commands
 	c.commands.Store(&cmdsInit)
 	if c.executor != nil {
 		c.wireMutationObserver()
 		c.executor.SetMemoryQueue(c)
+		// Re-arm a scheduled task whose mid-turn injection never reached the
+		// model (the turn ended abnormally and the steer was flushed
+		// unapplied): the fire is retried on the next tick instead of being
+		// silently spent.
+		c.executor.SetUnappliedSteerHook(c.rearmUnappliedScheduledTask)
 	}
 	// Auto Guard is built into Auto. Ask and YOLO bypass it through the mode
 	// provider, so no separate enablement state is needed.

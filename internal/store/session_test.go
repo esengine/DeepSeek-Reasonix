@@ -74,6 +74,14 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 	if LegacyScheduledTasks("") != "" {
 		t.Error("LegacyScheduledTasks(\"\") should be empty")
 	}
+	// Security follow-up: only well-formed transcript paths may derive a
+	// legacy sidecar — MigrateScheduledTasks os.Removes it, so an arbitrary
+	// user-supplied path must never name a removal target.
+	for _, bogus := range []string{"/etc/cron.d/foo", "foo", "a.jsonl.bak", "/x/notes.txt"} {
+		if got := LegacyScheduledTasks(bogus); got != "" {
+			t.Errorf("LegacyScheduledTasks(%q) = %q, want empty (removal-target guard)", bogus, got)
+		}
+	}
 }
 
 func TestIsSessionTranscriptName(t *testing.T) {

@@ -2,9 +2,11 @@ package scheduler
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -419,6 +421,189 @@ func TestPersistRoundTrip(t *testing.T) {
 	nf, _ := time.Parse(time.RFC3339, views[0].NextFire)
 	if !nf.After(time.Now()) {
 		t.Errorf("loaded NextFire %v not in the future", nf)
+	}
+}
+
+// TestSaveMergesForeignTasks simulates two chats sharing one per-directory
+// sidecar: each session saves its own snapshot, and neither save may drop the
+// other session's tasks (the cross-session clobbering race).
+func TestSaveMergesForeignTasks(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+
+	a := New()
+	a.SetPersistPath(path)
+	aID, err := a.Add("*/5 * * * *", "chat A task", time.Time{}, false, false)
+	if err != nil {
+		t.Fatalf("A Add: %v", err)
+	}
+	a.Flush()
+
+	// Chat B starts later, loads the sidecar, adds its own task, and saves.
+	b := New()
+	b.SetPersistPath(path)
+	b.Load(path)
+	bID, err := b.Add("*/10 * * * *", "chat B task", time.Time{}, false, false)
+	if err != nil {
+		t.Fatalf("B Add: %v", err)
+	}
+	b.Flush()
+
+	// Chat A saves again (e.g. a /loopdel in A) — B's task must survive.
+	a.Delete(aID)
+	a.Flush()
+
+	onDisk := loadTasks(path)
+	ids := map[string]bool{}
+	for _, t := range onDisk {
+		ids[t.ID] = true
+	}
+	if !ids[bID] {
+		t.Fatalf("chat B's task %s was clobbered by chat A's save; disk has %v", bID, ids)
+	}
+	if ids[aID] {
+		t.Errorf("chat A's deleted task %s was resurrected", aID)
+	}
+}
+
+// TestDeleteTombstoneSurvivesStaleSnapshot: a task deleted in this session
+// must not come back on the next save just because an older snapshot on disk
+// (from before the delete propagated) still lists it.
+func TestDeleteTombstoneSurvivesStaleSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+
+	// Disk still holds the task (another chat's stale snapshot).
+	disk := []Task{
+		{ID: "aaaa1111", CronExpr: "*/5 * * * *", Prompt: "old copy", Created: time.Now(), NextFire: time.Now()},
+	}
+	data, _ := json.Marshal(disk)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New()
+	s.SetPersistPath(path)
+	s.Delete("aaaa1111") // deletes nothing in memory but tombstones the id
+	s.Flush()
+
+	onDisk := loadTasks(path)
+	if len(onDisk) != 0 {
+		t.Fatalf("tombstoned task resurrected by merge-on-save: %+v", onDisk)
+	}
+}
+
+// TestLoadCapsAtTaskLimit: the shared per-directory store can legitimately
+// exceed DefaultTaskLimit (several sessions each added up to the cap), but a
+// load must trim to the limit — newest first — so a hostile or runaway store
+// cannot flood a session with tasks.
+func TestLoadCapsAtTaskLimit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+	now := time.Now()
+	tasks := make([]Task, 0, DefaultTaskLimit+10)
+	for i := 0; i < DefaultTaskLimit+10; i++ {
+		tasks = append(tasks, Task{
+			ID:       fmt.Sprintf("id%04d", i),
+			CronExpr: "*/5 * * * *",
+			Prompt:   fmt.Sprintf("task %d", i),
+			Created:  now.Add(time.Duration(i) * time.Second), // i=0 is oldest
+			NextFire: now,
+		})
+	}
+	data, _ := json.Marshal(tasks)
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New()
+	s.Load(path)
+	if s.Count() != DefaultTaskLimit {
+		t.Fatalf("Count = %d, want %d", s.Count(), DefaultTaskLimit)
+	}
+	ids := map[string]bool{}
+	for _, v := range s.Tasks() {
+		ids[v.ID] = true
+	}
+	for i := DefaultTaskLimit; i < DefaultTaskLimit+10; i++ {
+		if !ids[fmt.Sprintf("id%04d", i)] {
+			t.Errorf("newest task id%04d dropped by the cap", i)
+		}
+	}
+	if ids["id0000"] {
+		t.Error("oldest task survived the cap trim")
+	}
+}
+
+// TestRearmMakesTaskDueAgain: an injected fire that never reached the model
+// (unapplied steer) is re-armed so the next tick retries the delivery.
+func TestRearmMakesTaskDueAgain(t *testing.T) {
+	s := New()
+	id, err := s.Add("", "loop", time.Now().Add(time.Hour), false, false)
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if !s.Rearm(id) {
+		t.Fatalf("Rearm = false for a known task")
+	}
+	if _, at, ok := s.NextDue(); !ok || at.After(time.Now().Add(2*time.Second)) {
+		t.Fatalf("task not due after Rearm: at=%v ok=%v", at, ok)
+	}
+	if s.Rearm("nope") {
+		t.Error("Rearm on an unknown id must be a no-op returning false")
+	}
+}
+
+// TestDeleteBypassesRateLimiter: a Delete landing inside the 250ms save
+// coalescing window must still hit disk immediately — a tombstone suppressed
+// by the limiter would let a rebind (Load resets tombstones) or crash right
+// after the delete resurrect the task from the stale snapshot.
+func TestDeleteBypassesRateLimiter(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+	s := New()
+	s.SetPersistPath(path)
+	id, err := s.Add("*/5 * * * *", "task", time.Time{}, false, false)
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	// Add's save armed the rate limiter; the delete must ignore it.
+	if !s.Delete(id) {
+		t.Fatalf("Delete = false")
+	}
+	if onDisk := loadTasks(path); len(onDisk) != 0 {
+		t.Fatalf("deleted task survived on disk after immediate Delete: %+v", onDisk)
+	}
+}
+
+// TestAtomicWriteUniqueTmp: concurrent saves to one sidecar must never collide
+// on a shared .tmp name, and must leave a valid file with no leftover temp
+// litter.
+func TestAtomicWriteUniqueTmp(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tasks.json")
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			views := []View{{ID: "x", Prompt: string(rune('a' + n)), Created: time.Now().Format(time.RFC3339)}}
+			if err := saveTasks(path, views); err != nil {
+				t.Errorf("saveTasks: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("sidecar missing after concurrent saves: %v", err)
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "*.tmp-*"))
+	if len(matches) != 0 {
+		t.Errorf("leftover temp files: %v", matches)
+	}
+	if got := loadTasks(path); len(got) != 1 {
+		t.Errorf("sidecar corrupted by concurrent saves: %+v", got)
 	}
 }
 

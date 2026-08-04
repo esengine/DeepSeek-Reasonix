@@ -12,6 +12,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 )
@@ -59,8 +60,13 @@ type View struct {
 
 // Scheduler owns the session's scheduled-task set and the ticker goroutine.
 type Scheduler struct {
-	mu       sync.Mutex
-	tasks    map[string]*Task
+	mu    sync.Mutex
+	tasks map[string]*Task
+	// deleted remembers task IDs removed by this session so merge-on-save
+	// (saveLocked) does not resurrect them from another session's snapshot of
+	// the shared per-directory sidecar. In-memory only: Load resets it because
+	// a fresh session's source of truth is the file itself.
+	deleted  map[string]bool
 	started  bool
 	stopCh   chan struct{}
 	done     chan struct{}
@@ -73,9 +79,10 @@ type Scheduler struct {
 // New returns an idle Scheduler. Call Start to begin firing tasks.
 func New() *Scheduler {
 	return &Scheduler{
-		tasks:  map[string]*Task{},
-		stopCh: make(chan struct{}),
-		done:   make(chan struct{}),
+		tasks:   map[string]*Task{},
+		deleted: map[string]bool{},
+		stopCh:  make(chan struct{}),
+		done:    make(chan struct{}),
 	}
 }
 
@@ -178,6 +185,7 @@ func (s *Scheduler) fireDue() {
 		// far-future slot — risks a stale fire long after the user asked.
 		if task, ok := s.tasks[id]; ok && task.OneShot {
 			delete(s.tasks, id)
+			s.deleted[id] = true
 		}
 	}
 	s.mu.Unlock()
@@ -247,28 +255,35 @@ func (s *Scheduler) Add(cronExpr, prompt string, nextFire time.Time, oneShot, no
 	return id, nil
 }
 
-// Delete removes a task by ID. ok reports whether it existed.
+// Delete removes a task by ID. ok reports whether it existed. The ID is
+// tombstoned even when this session no longer holds it, so a later
+// merge-on-save cannot resurrect it from another session's stale snapshot of
+// the shared sidecar. Deletes persist immediately (saveNow) so a tombstone
+// can never be dropped inside the rate-limiter window.
 func (s *Scheduler) Delete(id string) bool {
 	s.mu.Lock()
 	_, ok := s.tasks[id]
 	if ok {
 		delete(s.tasks, id)
 	}
+	s.deleted[id] = true
 	s.mu.Unlock()
-	if ok {
-		s.saveLocked()
-	}
+	s.saveNow()
 	return ok
 }
 
-// CancelAll removes every task.
+// CancelAll removes every task. Deletes persist immediately (saveNow) so the
+// tombstones cannot be dropped inside the rate-limiter window.
 func (s *Scheduler) CancelAll() {
 	s.mu.Lock()
 	had := len(s.tasks) > 0
+	for id := range s.tasks {
+		s.deleted[id] = true
+	}
 	s.tasks = map[string]*Task{}
 	s.mu.Unlock()
 	if had {
-		s.saveLocked()
+		s.saveNow()
 	}
 }
 
@@ -282,12 +297,13 @@ func (s *Scheduler) CancelDynamic() int {
 	for id, t := range s.tasks {
 		if t.CronExpr == "" {
 			delete(s.tasks, id)
+			s.deleted[id] = true
 			n++
 		}
 	}
 	s.mu.Unlock()
 	if n > 0 {
-		s.saveLocked()
+		s.saveNow() // tombstones must not be dropped inside the rate-limiter window
 	}
 	return n
 }
@@ -307,12 +323,30 @@ func (s *Scheduler) ScheduleWakeup(delay time.Duration) int {
 	}
 	s.mu.Unlock()
 	if n > 0 {
-		s.saveLocked()
+		s.saveNow() // tombstones must not be dropped inside the rate-limiter window
 	}
 	return n
 }
 
-// StopWakeup clears the pending wakeup of every dynamic task (pauses them).
+// Rearm makes a task due again on the next tick. It is used when an injected
+// fire was never consumed — the turn ended abnormally and the steer queue was
+// flushed unapplied — so the delivery is retried instead of silently spent
+// (matching the parked path's ReleaseFiring semantics for dropped turns).
+// The guarantee covers cron and dynamic tasks; one-shot tasks are already
+// deleted at delivery, so their fire is intentionally spent. A no-op for
+// unknown IDs.
+func (s *Scheduler) Rearm(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	t, ok := s.tasks[id]
+	if !ok {
+		return false
+	}
+	t.firing = false
+	t.NextFire = time.Now()
+	return true
+}
+
 // Returns the number of tasks paused.
 func (s *Scheduler) StopWakeup() int {
 	s.mu.Lock()
@@ -336,19 +370,7 @@ func (s *Scheduler) Tasks() []View {
 	defer s.mu.Unlock()
 	out := make([]View, 0, len(s.tasks))
 	for _, t := range s.tasks {
-		v := View{
-			ID:       t.ID,
-			CronExpr: t.CronExpr,
-			Prompt:   t.Prompt,
-			OneShot:  t.OneShot,
-			NoExpire: t.NoExpire,
-			Created:  t.Created.Format(time.RFC3339),
-			Fires:    t.Fires,
-		}
-		if !t.NextFire.IsZero() {
-			v.NextFire = t.NextFire.Format(time.RFC3339)
-		}
-		out = append(out, v)
+		out = append(out, taskView(t))
 	}
 	// newest first (by Created), then stable by ID
 	for i := 1; i < len(out); i++ {
@@ -357,6 +379,57 @@ func (s *Scheduler) Tasks() []View {
 		}
 	}
 	return out
+}
+
+func taskView(t *Task) View {
+	v := View{
+		ID:       t.ID,
+		CronExpr: t.CronExpr,
+		Prompt:   t.Prompt,
+		OneShot:  t.OneShot,
+		NoExpire: t.NoExpire,
+		Created:  t.Created.Format(time.RFC3339),
+		Fires:    t.Fires,
+	}
+	if !t.NextFire.IsZero() {
+		v.NextFire = t.NextFire.Format(time.RFC3339)
+	}
+	return v
+}
+
+// mergeForSave builds the view list to persist: this session's tasks plus any
+// on-disk tasks this session has never seen or deleted. The per-directory
+// sidecar is shared by every chat in the folder, so a plain snapshot save
+// would silently drop another session's tasks (last-writer-wins clobbering).
+// Merge-on-save bounds the loss to genuinely conflicting edits of the same
+// task ID; tombstones (s.deleted) stop a Delete in this session from being
+// undone by a stale snapshot that still contains the task. Cross-process
+// staleness remains for tasks another session holds in memory after this
+// session deleted them — unavoidable without a shared live store.
+func (s *Scheduler) mergeForSave() []View {
+	live := s.Tasks()
+	s.mu.Lock()
+	deleted := make(map[string]bool, len(s.deleted))
+	for id := range s.deleted {
+		deleted[id] = true
+	}
+	path := s.persist
+	s.mu.Unlock()
+	if path == "" {
+		return live
+	}
+	liveIDs := make(map[string]bool, len(live))
+	for _, v := range live {
+		liveIDs[v.ID] = true
+	}
+	var foreign []View
+	for _, t := range loadTasks(path) {
+		if t.ID == "" || liveIDs[t.ID] || deleted[t.ID] {
+			continue
+		}
+		foreign = append(foreign, taskView(&t))
+	}
+	return append(live, foreign...)
 }
 
 // Count returns the number of active tasks.
@@ -437,13 +510,15 @@ func (s *Scheduler) Flush() {
 	}
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if err := saveTasks(path, s.Tasks()); err != nil {
+	if err := saveTasks(path, s.mergeForSave()); err != nil {
 		_ = err
 	}
 }
 
 // saveLocked persists the task list to the configured sidecar (best-effort,
-// rate-limited to one write per 250ms to keep bursty mutations cheap).
+// rate-limited to one write per 250ms to keep bursty mutations cheap). The
+// written set is merged with the on-disk snapshot so one session's save never
+// drops another session's tasks (see mergeForSave).
 func (s *Scheduler) saveLocked() {
 	s.mu.Lock()
 	path := s.persist
@@ -459,21 +534,40 @@ func (s *Scheduler) saveLocked() {
 	s.mu.Unlock()
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
-	if err := saveTasks(path, s.Tasks()); err != nil {
+	if err := saveTasks(path, s.mergeForSave()); err != nil {
 		// Persistence is best-effort; a failed sidecar write must not break
 		// the loop machinery. The controller surfaces load errors separately.
 		_ = err
 	}
 }
 
+// saveNow persists immediately, bypassing the rate limiter. Deletion paths
+// use it: a tombstone suppressed by the 250ms coalescing window would let a
+// rebind (Load resets s.deleted) or crash right after a Delete resurrect the
+// task from the stale disk snapshot.
+func (s *Scheduler) saveNow() {
+	s.mu.Lock()
+	path := s.persist
+	s.mu.Unlock()
+	if path == "" {
+		return
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	if err := saveTasks(path, s.mergeForSave()); err != nil {
+		_ = err
+	}
+}
+
 // Load hydrates tasks from the per-directory store file, pruning expired,
-// malformed, and missed one-shot entries. It replaces any in-memory tasks
-// first, so a rebind to a new session picks up whatever the working directory
-// currently schedules (per-directory semantics: every chat in the folder
-// shares one cron system). Recurring tasks roll their schedule
-// forward so a fire missed during downtime does not fire immediately on
-// resume; dynamic tasks keep their wakeup (a stale one simply fires, resuming
-// the loop). It must be called before Start on the construction path.
+// malformed, and missed one-shot entries, and capping the set at
+// DefaultTaskLimit (newest first). It replaces any in-memory tasks first, so
+// a rebind to a new session picks up whatever the working directory currently
+// schedules (per-directory semantics: every chat in the folder shares one
+// cron system). Recurring tasks roll their schedule forward so a fire missed
+// during downtime does not fire immediately on resume; dynamic tasks keep
+// their wakeup (a stale one simply fires, resuming the loop). It must be
+// called before Start on the construction path.
 func (s *Scheduler) Load(path string) {
 	tasks := loadTasks(path)
 	now := time.Now()
@@ -497,8 +591,42 @@ func (s *Scheduler) Load(path string) {
 		t.firing = false // a resumed task must be able to fire again
 		kept[t.ID] = t
 	}
+	if len(kept) > DefaultTaskLimit {
+		// The file is shared across sessions and Add already enforces the
+		// limit per session, so a file can legitimately exceed it (several
+		// chats each added up to the cap). Trim to the newest tasks so a
+		// hostile or runaway store cannot flood the session.
+		kept = newestTasks(kept, DefaultTaskLimit)
+	}
 	s.tasks = kept
+	// A fresh session's source of truth is the file itself: forget every
+	// tombstone the previous binding accumulated so the merged view matches
+	// what is actually on disk.
+	s.deleted = map[string]bool{}
 	s.lastSave = time.Time{} // a rebind must not suppress the new session's first write
+}
+
+// newestTasks returns up to limit tasks from set, newest by Created first
+// (ties broken by ID for determinism).
+func newestTasks(set map[string]*Task, limit int) map[string]*Task {
+	if len(set) <= limit {
+		return set
+	}
+	all := make([]*Task, 0, len(set))
+	for _, t := range set {
+		all = append(all, t)
+	}
+	sort.Slice(all, func(i, j int) bool {
+		if !all[i].Created.Equal(all[j].Created) {
+			return all[i].Created.After(all[j].Created)
+		}
+		return all[i].ID < all[j].ID
+	})
+	out := make(map[string]*Task, limit)
+	for _, t := range all[:limit] {
+		out[t.ID] = t
+	}
+	return out
 }
 
 // newTaskID returns an 8-char hex task id.

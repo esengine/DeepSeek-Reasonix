@@ -37,15 +37,31 @@ func loadTasks(path string) []Task {
 	return tasks
 }
 
-// atomicWrite writes data to path atomically via a temp file + rename. It is
-// the same pattern goal state and other session sidecars use.
+// atomicWrite writes data to path atomically via a unique temp file + rename.
+// The temp name is unique (os.CreateTemp) so two sessions saving the same
+// sidecar concurrently can never collide on one .tmp file, and the rename is
+// atomic so readers never observe a partial file. It is the same pattern goal
+// state and other session sidecars use.
 func atomicWrite(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, path)
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // no-op after a successful rename
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
