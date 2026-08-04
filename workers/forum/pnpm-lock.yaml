@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       hono:
-        specifier: ^4.6.14
-        version: 4.12.27
+        specifier: ^4.12.34
+        version: 4.12.34
       zod:
         specifier: ^3.25.0
         version: 3.25.76
@@ -448,8 +448,8 @@ packages:
     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
     os: [darwin]
 
-  hono@4.12.27:
-    resolution: {integrity: sha512-1yrb/+w6HWQJrUCLkJ2IF5jNIPvvFkblV5RNOYl6bV+OA6p9GLcMpHFFGTosSvHvcAUibuUukRqhlYI4z32C7Q==}
+  hono@4.12.34:
+    resolution: {integrity: sha512-GqXJqY/xJkJmuloTrnV1ZEXG3fqte+VjkUqoRNZXcrUidiUOP4fMSIHHY4tsqZBK++kVyWmt/AAfSUuy57/eSA==}
     engines: {node: '>=16.9.0'}
 
   kleur@4.1.5:
@@ -816,7 +816,7 @@ snapshots:
   fsevents@2.3.3:
     optional: true
 
-  hono@4.12.27: {}
+  hono@4.12.34: {}
 
   kleur@4.1.5: {}
 
