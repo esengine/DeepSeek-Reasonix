@@ -3455,8 +3455,9 @@ func TestFreshApprovalSessionChoiceIsLimitedToSandboxEscape(t *testing.T) {
 	}
 }
 
-// TestSlashQuitExit verifies that /quit and /exit slash commands return tea.Quit,
-// providing an alternative to Ctrl+D and the bare "quit"/"exit" text commands.
+// TestSlashQuitExit verifies that /quit and /exit slash commands quit through
+// the shutdown path (tuiShutdownMsg → snapshot → tea.Quit, #5879), providing an
+// alternative to Ctrl+D and the bare "quit"/"exit" text commands.
 func TestSlashQuitExit(t *testing.T) {
 	m := newTestChatTUI()
 	for _, cmd := range []string{"/quit", "/exit"} {
@@ -3466,8 +3467,8 @@ func TestSlashQuitExit(t *testing.T) {
 			continue
 		}
 		msg := got()
-		if _, ok := msg.(tea.QuitMsg); !ok {
-			t.Errorf("%s cmd should produce QuitMsg, got %T", cmd, msg)
+		if _, ok := msg.(tuiShutdownMsg); !ok {
+			t.Errorf("%s cmd should produce tuiShutdownMsg, got %T", cmd, msg)
 		}
 	}
 }
@@ -3607,8 +3608,8 @@ func TestSecondCtrlCQuitsAfterCancelIsAlreadyRequested(t *testing.T) {
 	if secondCmd == nil {
 		t.Fatal("second Ctrl+C after cancel request should quit")
 	}
-	if msg := secondCmd(); msg != (tea.QuitMsg{}) {
-		t.Fatalf("second Ctrl+C command = %T, want tea.QuitMsg", msg)
+	if msg := secondCmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("second Ctrl+C command = %T, want tuiShutdownMsg (snapshot-before-quit, #5879)", msg)
 	}
 }
 
@@ -4088,5 +4089,39 @@ func TestShiftTabLeavesDontAskForAskMode(t *testing.T) {
 	m.cycleMode()
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
 		t.Fatalf("Shift+Tab from dontAsk = %q, want ask", got)
+	}
+}
+
+// TestQuitGesturesRouteThroughShutdown guards #5879: every in-TUI quit gesture
+// must emit tuiShutdownMsg (whose handler snapshots the session) rather than
+// tea.Quit directly, which would drop everything past the last snapshot.
+func TestQuitGesturesRouteThroughShutdown(t *testing.T) {
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+
+	// Double Ctrl+C on an idle, empty composer.
+	m := newTestChatTUI()
+	model, cmd := m.Update(ctrlC)
+	m = model.(chatTUI)
+	if cmd != nil {
+		if msg := cmd(); msg == (tea.QuitMsg{}) {
+			t.Fatal("first Ctrl+C must not quit")
+		}
+	}
+	_, cmd = m.Update(ctrlC)
+	if cmd == nil {
+		t.Fatal("second Ctrl+C should return a command")
+	}
+	if msg := cmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("double Ctrl+C emitted %T, want tuiShutdownMsg", msg)
+	}
+
+	// Ctrl+D.
+	m = newTestChatTUI()
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("Ctrl+D should return a command")
+	}
+	if msg := cmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("Ctrl+D emitted %T, want tuiShutdownMsg", msg)
 	}
 }
