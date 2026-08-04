@@ -352,6 +352,7 @@ export interface AppBindings {
   RevealWorkspacePath(rel: string): Promise<void>;
   RevealWorkspacePathForTab(tabID: string, rel: string): Promise<void>;
   RevealPath(path: string): Promise<void>;
+  OpenLocalPath(path: string): Promise<void>;
   SavePastedImage(dataUrl: string): Promise<string>;
   SaveClipboardImage(): Promise<string>;
   SavePastedFile(name: string, dataUrl: string): Promise<string>;
@@ -3689,6 +3690,9 @@ function makeMockApp(): AppBindings {
     },
     async OpenWorkspacePath(rel: string) {
       console.info("mock OpenWorkspacePath", rel);
+    },
+    async OpenLocalPath(path: string) {
+      console.info("mock OpenLocalPath", path);
     },
     async OpenWorkspacePathForTab(_tabID: string, rel: string) {
       await this.OpenWorkspacePath(rel);

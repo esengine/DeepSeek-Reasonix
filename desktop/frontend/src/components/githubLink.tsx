@@ -1,6 +1,6 @@
 import type { MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { ExternalLink, Mail } from "lucide-react";
-import { openExternal } from "../lib/bridge";
+import { app, openExternal } from "../lib/bridge";
 
 export interface GitHubLinkInfo {
   kind: "issue" | "pull" | "commit";
@@ -102,7 +102,25 @@ function LinkMark({ kind }: { kind: LinkIconKind }) {
 }
 
 function openLink(href: string | undefined) {
+  const local = localPathFromHref(href);
+  if (local !== null) {
+    // Local paths (linkified plain text or explicit file:/// links) open in
+    // the OS default app via the native binding, never in the system browser.
+    void app.OpenLocalPath(local).catch(() => {});
+    return;
+  }
   if (href) openExternal(href);
+}
+
+// localPathFromHref returns the decoded local filesystem path when href is a
+// file:/// URL (the form remarkLocalPathLinks emits), or null otherwise.
+export function localPathFromHref(href?: string): string | null {
+  if (!href || !href.startsWith("file:///")) return null;
+  try {
+    return decodeURIComponent(href.slice("file:///".length));
+  } catch {
+    return null;
+  }
 }
 
 export function RichMarkdownLink({
