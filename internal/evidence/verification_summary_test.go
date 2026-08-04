@@ -141,6 +141,7 @@ func TestSwiftTestRecognizedAsVerification(t *testing.T) {
 		"swift test",
 		"swift test --parallel",
 		"swift test --filter SomeTests",
+		"swift test --enable-code-coverage",
 	} {
 		if !IsDeliveryVerificationCommand(command) {
 			t.Errorf("%q should be recognized as a read-only Swift test verifier", command)
@@ -162,6 +163,8 @@ func TestSwiftTestRecognizedAsVerification(t *testing.T) {
 		"swift package resolve",
 		"swift package update",
 		"swift test --xunit-output report.xml",
+		"swift test --xunit-output=report.xml",
+		"swift test --scratch-path /tmp/out",
 	} {
 		if IsDeliveryVerificationCommand(command) {
 			t.Errorf("%q can build, run, or mutate the package and must not count as verification", command)

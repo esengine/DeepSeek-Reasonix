@@ -1803,12 +1803,12 @@ func bashSegmentIsVerification(fields []string) bool {
 	case "dotnet":
 		return len(args) > 0 && args[0] == "test"
 	case "swift":
-		// swift test runs the SwiftPM test suite without emitting build
-		// artifacts beyond the package's own .build directory (including
-		// --enable-code-coverage coverage reports, which stay under .build);
-		// other swift subcommands (build/run/package) can write binaries or
-		// mutate the package, so only the test form is a recognized verifier.
-		// Explicit report destinations are rejected by writeOutputFlags.
+		// swift test runs the SwiftPM test suite; build artifacts stay under
+		// the package's own .build directory (including --enable-code-coverage
+		// reports). Other swift subcommands (build/run/package) can write
+		// binaries or mutate the package, so only the test form is a
+		// recognized verifier. Explicit report destinations and scratch-dir
+		// redirects are rejected by writeOutputFlags.
 		return len(args) > 0 && args[0] == "test"
 	case "mvn", "mvnw", "gradle", "gradlew":
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
@@ -2057,6 +2057,7 @@ var writeOutputFlags = map[string]bool{
 	"outputfile":      true, // jest/vitest --outputFile (with --json)
 	"report-log":      true, // pytest-reportlog
 	"xunit-output":    true, // swift test --xunit-output writes a JUnit XML report
+	"scratch-path":    true, // swift test --scratch-path redirects the build dir (--build-path is its legacy alias)
 }
 
 func hasWriteOutputFlag(args []string) bool {
