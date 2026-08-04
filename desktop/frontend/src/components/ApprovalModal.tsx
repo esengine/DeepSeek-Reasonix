@@ -281,9 +281,17 @@ export function ApprovalModal({
   const subject = localizeApprovalSubject(approval.tool, approval.subject, t);
   const reason = localizePlanModeApprovalReason(approval.tool, localizeApprovalReason(approval.tool, approval.reason, t), t);
   const subjectSummary = subject.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
+  // A single-line subject is shown in full in the modal body, so repeating it
+  // in the shelf header meta renders the same text twice (small + large).
+  const hasMultiLineSubject = subject.split(/\r?\n/).filter((line) => line.trim()).length > 1;
   // Plan approvals already show the plan above; keep a short hint. Tool
-  // approvals surface the command/subject by default (reason is secondary).
-  const toolMeta = isPlanApproval ? t("approval.planReadyHint") : (subjectSummary || reason || approval.tool);
+  // approvals surface the command/subject by default (reason is secondary);
+  // a single-line subject stays out of the header meta to avoid duplication.
+  const toolMeta = isPlanApproval
+    ? t("approval.planReadyHint")
+    : hasMultiLineSubject
+      ? (subjectSummary || reason || approval.tool)
+      : (reason || undefined);
   const hasToolDetails = Boolean(reason || subject);
   // Subject (command) is visible by default; long reason can collapse.
   const [reasonOpen, setReasonOpen] = useState(() => {
