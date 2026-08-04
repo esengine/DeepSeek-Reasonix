@@ -2033,7 +2033,7 @@ func SessionPreviewFromMessages(msgs []provider.Message) (string, int) {
 		if m.Role == provider.RoleUser && IsUserAuthoredTurn(UserMessageText(m)) {
 			turns++
 			if first == "" {
-				first = truncatePreview(UserMessageText(m))
+				first = truncatePreview(previewProse(UserMessageText(m)))
 			}
 		}
 	}
@@ -2054,11 +2054,33 @@ func previewSession(path string) (string, int) {
 		if m.Role == provider.RoleUser && IsUserAuthoredTurn(UserMessageText(m)) {
 			turns++
 			if first == "" {
-				first = truncatePreview(UserMessageText(m))
+				first = truncatePreview(previewProse(UserMessageText(m)))
 			}
 		}
 	}
 	return first, turns
+}
+
+// previewProse drops the leading @file references a prompt opens with so the
+// preview shows what was asked rather than a row of paths. A prompt that is
+// nothing but references keeps them — there is nothing else to show.
+func previewProse(s string) string {
+	rest := strings.TrimLeft(s, " \t")
+	for strings.HasPrefix(rest, "@") {
+		end := strings.IndexAny(rest, " \t\r\n")
+		if end < 0 {
+			return s
+		}
+		next := strings.TrimLeft(rest[end:], " \t")
+		if strings.TrimSpace(next) == "" {
+			return s
+		}
+		rest = next
+	}
+	if rest == "" {
+		return s
+	}
+	return rest
 }
 
 // truncatePreview clamps a preview line to 80 runes with an ellipsis, matching
