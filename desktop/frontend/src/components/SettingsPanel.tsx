@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, startTransition, useCallback, useDeferredValue, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent, type ReactNode } from "react";
-import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Send } from "lucide-react";
+import { Bot as BotIcon, Check, CheckCircle2, ChevronDown, ChevronUp, Clipboard, ExternalLink, GripVertical, KeyRound, Loader2, MessageCircle, Play, QrCode, RefreshCw, Search, Send } from "lucide-react";
 import { asArray } from "../lib/array";
 import { useDeferredClose } from "../lib/useMountTransition";
 import { app, openExternal } from "../lib/bridge";
@@ -126,6 +126,7 @@ export function SettingsPanel({
   const [customFontName, setCustomFontNameState] = useState<string>(getCustomFontName());
   const [customMonoFontName, setCustomMonoFontNameState] = useState<string>(getCustomMonoFontName());
   const [tab, setTab] = useState<SettingsTab>(initialTab === "providers" ? "models" : initialTab ?? "general");
+  const [sectionQuery, setSectionQuery] = useState("");
   const pendingSubagentCommandRef = useRef<string | null>(null);
   // Play the modal exit animation, then let the parent unmount us and focus
   // the composer with the selected slash command.
@@ -285,6 +286,14 @@ export function SettingsPanel({
   // load their own data and render regardless.
   const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
   const lazySettingsPageFallback = <div className="empty">{t("settings.loading")}</div>;
+  const normalizedSectionQuery = sectionQuery.trim().toLowerCase();
+  const filteredTabs = useMemo(
+    () =>
+      normalizedSectionQuery
+        ? SETTINGS_TABS.filter((id) => settingsTabLabel(id, t).toLowerCase().includes(normalizedSectionQuery))
+        : SETTINGS_TABS,
+    [normalizedSectionQuery, t],
+  );
 
   return (
     <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
@@ -296,16 +305,29 @@ export function SettingsPanel({
 
         <div className="settings-center">
           <nav className="settings-center__nav" aria-label={t("settings.title")}>
-            {SETTINGS_TABS.map((id) => (
-              <button
-                key={id}
-                className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
-                onClick={() => setTab(id)}
-              >
-                <span>{settingsTabLabel(id, t)}</span>
-                {s && <small>{settingsTabMeta(id, s, t)}</small>}
-              </button>
-            ))}
+            <label className="mem-search settings-nav-search">
+              <Search size={13} />
+              <input
+                value={sectionQuery}
+                onChange={(event) => setSectionQuery(event.target.value)}
+                placeholder={t("settings.searchPlaceholder")}
+                aria-label={t("settings.searchPlaceholder")}
+              />
+            </label>
+            {filteredTabs.length === 0 ? (
+              <div className="settings-nav-empty">{t("settings.noSectionMatch", { q: sectionQuery.trim() })}</div>
+            ) : (
+              filteredTabs.map((id) => (
+                <button
+                  key={id}
+                  className={`settings-center__navitem${tab === id ? " settings-center__navitem--active" : ""}`}
+                  onClick={() => setTab(id)}
+                >
+                  <span>{settingsTabLabel(id, t)}</span>
+                  {s && <small>{settingsTabMeta(id, s, t)}</small>}
+                </button>
+              ))
+            )}
           </nav>
           <main className="settings-center__content">
             {needsSettings && settingsLoadFailed && (
