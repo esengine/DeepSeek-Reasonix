@@ -260,6 +260,33 @@ var ChineseTraditional = Messages{
 	CmdQuit:             "退出會話",
 	CmdCopy:             "選擇回覆複製到剪貼簿",
 	CmdExport:           "將會話匯出為 Markdown",
+	CmdVoice:            "用語音轉文字輸入到輸入框",
+	VoiceListening:      "正在聆聽 — 請說話，Enter 採用，Esc 放棄",
+	VoiceTranscribing:   "正在轉寫……",
+	VoiceDone:           "轉寫結果已填入輸入框",
+	VoiceCancelled:      "已放棄本次語音輸入",
+	VoiceNoAudio:        "未擷取到語音",
+	VoiceDisabled:       "語音功能未開啟 — 請在 reasonix.toml 的 [voice] 中設定 enabled = true（參見 docs/VOICE.zh-CN.md）",
+	VoiceMaxReached:     "已達到 voice.max_seconds 上限 — 停止錄音",
+	VoicePTTReady:       "按住空白鍵說話 · Enter 發送 · Esc 退出語音",
+	VoicePTTDone:        "語音已關閉",
+	VoicePTTUnavailable: "按住說話需要按鍵釋放事件，但目前終端不回報 — 改用切換模式：說話後 Enter 採用，Esc 放棄",
+	VoicePTTStuck:       "未收到按鍵釋放事件 — 目前終端聲稱支援卻從未送出；轉寫結果已保留，回退到切換模式。可設定 no_push_to_talk = true 關閉此提示。",
+	VoiceSetupHint: `語音功能需要一個語音轉文字接口。請在 reasonix.toml 中加入：
+
+  [voice]
+  enabled     = true
+  url         = "https://api.openai.com/v1/audio/transcriptions"
+  model       = "whisper-1"
+  api_key_env = "OPENAI_API_KEY"
+
+或使用本地服務，無需金鑰：
+
+  url   = "http://127.0.0.1:8000/v1/audio/transcriptions"
+  model = "Systran/faster-whisper-large-v3"
+
+任何相容 OpenAI 的接口皆可。完整說明：docs/VOICE.zh-CN.md`,
+	VoiceFailed:         "語音失敗",
 	SlashCopyDone:       "已複製到剪貼簿",
 	SlashCopyEmpty:      "沒有可複製的助手回覆",
 	SlashCopyListHeader: "選擇要複製的回覆：",

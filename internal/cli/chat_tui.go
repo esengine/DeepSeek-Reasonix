@@ -75,6 +75,47 @@ type chatTUI struct {
 	composerScrollDetached bool
 	spinner                spinner.Model
 
+	// voice holds the in-progress "/voice" dictation, nil when not recording.
+	// It is a pointer because this model is copied by value on every update and
+	// the capture goroutine writes into the buffer it owns.
+	voice *voiceSession
+	// voiceSeq scopes ticks and responses to one recording so a late reply from
+	// a previous session cannot write into the composer.
+	voiceSeq int
+	// voiceRendered is the buffer length behind the partial currently shown,
+	// used to drop a response that lost a race with a newer one.
+	voiceRendered int
+	// voicePrefix retains the pre-recording composer text across the final pass,
+	// which resolves after m.voice has already been cleared.
+	voicePrefix string
+	// voicePTT reports that push-to-talk mode is armed: SPACE is the talk key
+	// until the user leaves with Enter or Esc.
+	voicePTT bool
+	// voiceSawKeyRelease records that a key release actually arrived. Some
+	// terminals answer the enhancement query claiming release reporting and then
+	// never send one, which would arm push-to-talk with no way to end a hold, so
+	// arming is gated on observed evidence rather than the terminal's claim.
+	voiceSawKeyRelease bool
+	// voiceSawTalkRelease records a release of the talk key specifically. Once
+	// one arrives the stuck-hold watchdog is unnecessary and stays out of the way
+	// of a genuinely long hold.
+	voiceSawTalkRelease bool
+	// voicePTTHolding is true between a talk-key press and its release, before
+	// the hold threshold has promoted it to a recording.
+	voicePTTHolding bool
+	// voiceHoldSeq scopes each hold's threshold timer, so a stale one from an
+	// earlier tap cannot open the mic.
+	voiceHoldSeq int
+	// voicePTTBroken latches when the watchdog caught a hold that never ended, so
+	// /voice does not re-arm into the same trap for the rest of the session.
+	voicePTTBroken bool
+	// voicePTTSupported is set from KeyboardEnhancementsMsg. Without key release
+	// events a hold has no end, so /voice falls back to a toggle.
+	voicePTTSupported bool
+	// voicePTTCfg is resolved once when the mode is armed, so each hold does not
+	// re-read config from disk.
+	voicePTTCfg config.VoiceConfig
+
 	submittedInputs      []string
 	submittedInputCursor int
 	submittedInputDraft  string
@@ -869,6 +910,29 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var inputBeforeSelection string
 
+	// The terminal reports which keyboard enhancements it honours. Key release
+	// events are what make /voice push-to-talk possible; without them a hold has
+	// no end and /voice stays a toggle.
+	if ke, ok := msg.(tea.KeyboardEnhancementsMsg); ok {
+		m.voicePTTSupported = ke.SupportsEventTypes()
+	}
+	// The enhancement reply is a claim; this is the evidence. Recorded for every
+	// key, not just the talk key, so /voice knows before it arms whether releases
+	// are real here — typing "/voice" alone produces several.
+	if _, ok := msg.(tea.KeyReleaseMsg); ok {
+		m.voiceSawKeyRelease = true
+	}
+
+	// Voice dictation owns its own message types; handle them ahead of the main
+	// switch so composer/transcript handling can't shadow them. Still returns
+	// through finalize() so notices reach native scrollback.
+	if cmd, ok := m.handleVoiceMsg(msg); ok {
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		return m, finalize(m, cmds)
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.followComposerCursor()
@@ -1091,7 +1155,24 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, finalize(m, cmds)
 		}
 
+	case tea.KeyReleaseMsg:
+		// Releasing SPACE ends a push-to-talk hold.
+		if cmd, handled := m.voiceKeyRelease(msg); handled {
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, finalize(m, cmds)
+		}
+
 	case tea.KeyPressMsg:
+		// While dictating, SPACE talks (push-to-talk), Enter accepts, and
+		// Esc/Ctrl+C discards — before the keystroke reaches the composer.
+		if cmd, handled := m.voiceKeyIntercept(msg); handled {
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, finalize(m, cmds)
+		}
 		// Any keystroke dismisses a finished selection (copy is a right-click),
 		// with a few exceptions: Ctrl/Super/Meta+C copies the selection, the
 		// paste shortcuts keep it so the async clipboard result can replace
@@ -2826,6 +2907,7 @@ func (m chatTUI) runningWorkingLine(cancelRequested, styled bool) string {
 func (m chatTUI) View() tea.View {
 	if m.themeSweep != nil {
 		v := tea.NewView(m.themeSweep.render())
+		v.KeyboardEnhancements.ReportEventTypes = true
 		if !m.nativeScrollback {
 			v.AltScreen = true
 			if m.mouseCaptureOff {
@@ -2947,6 +3029,7 @@ func (m chatTUI) View() tea.View {
 
 	if m.nativeScrollback {
 		v := tea.NewView(strings.Join(parts, "\n"))
+		v.KeyboardEnhancements.ReportEventTypes = true
 		if !hideComposer {
 			if cur := m.composerCursor(); cur != nil {
 				cur.X += 1
@@ -2965,6 +3048,9 @@ func (m chatTUI) View() tea.View {
 		mainArea = m.renderTranscriptWithMainManager(card)
 	}
 	v := tea.NewView(mainArea + "\n" + strings.Join(parts, "\n"))
+	// Ask for key release events so /voice can offer push-to-talk. Terminals
+	// without the enhancement never reply, and /voice stays a toggle there.
+	v.KeyboardEnhancements.ReportEventTypes = true
 	v.AltScreen = true
 	if m.mouseCaptureOff {
 		// Release the mouse to the terminal: native click-drag selection and
@@ -4014,6 +4100,9 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(i18n.M.SlashTodoCleared)
 	case "/verbose":
 		m.toggleVerboseReasoning(true)
+	case "/voice", "/dictate":
+		m.echoLocalCommand(input)
+		return m.startVoice()
 	case "/mouse":
 		m.toggleMouseCapture()
 	case "/sandbox":

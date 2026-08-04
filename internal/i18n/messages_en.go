@@ -273,6 +273,33 @@ var English = Messages{
 	CmdQuit:             "exit the session",
 	CmdCopy:             "pick a response to copy to clipboard",
 	CmdExport:           "export session as markdown",
+	CmdVoice:            "dictate into the composer with speech-to-text",
+	VoiceListening:      "listening — speak, then Enter to accept or Esc to discard",
+	VoiceTranscribing:   "transcribing...",
+	VoiceDone:           "transcript ready in the composer",
+	VoiceCancelled:      "dictation discarded",
+	VoiceNoAudio:        "no speech captured",
+	VoiceDisabled:       "voice is off — set enabled = true under [voice] in reasonix.toml (see docs/VOICE.md)",
+	VoiceMaxReached:     "reached voice.max_seconds — stopping",
+	VoicePTTReady:       "hold SPACE to talk · Enter to send · Esc to leave voice",
+	VoicePTTDone:        "voice off",
+	VoicePTTUnavailable: "push-to-talk needs key-release events, which this terminal does not report — using toggle: speak, then Enter to accept or Esc to discard",
+	VoicePTTStuck:       "no key-release arrived — this terminal reports releases but never sent one; transcript kept, falling back to toggle. Set no_push_to_talk = true to silence this.",
+	VoiceSetupHint: `voice needs a speech-to-text endpoint. Add to reasonix.toml:
+
+  [voice]
+  enabled     = true
+  url         = "https://api.openai.com/v1/audio/transcriptions"
+  model       = "whisper-1"
+  api_key_env = "OPENAI_API_KEY"
+
+Or a local server, no key needed:
+
+  url   = "http://127.0.0.1:8000/v1/audio/transcriptions"
+  model = "Systran/faster-whisper-large-v3"
+
+Any OpenAI-compatible endpoint works. Full guide: docs/VOICE.md`,
+	VoiceFailed:         "voice failed",
 	SlashCopyDone:       "copied response to clipboard",
 	SlashCopyEmpty:      "no assistant response to copy",
 	SlashCopyListHeader: "pick a response to copy:",

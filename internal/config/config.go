@@ -65,6 +65,7 @@ type Config struct {
 	Serve            ServeConfig         `toml:"serve"`
 	Secrets          SecretsConfig       `toml:"secrets"`
 	Remote           RemoteConfig        `toml:"remote"`
+	Voice            VoiceConfig         `toml:"voice"`
 
 	systemPromptFileSource     promptFileSource
 	providerSources            map[string]providerSourceScope

@@ -262,6 +262,20 @@ type Messages struct {
 	CmdQuit             string // /quit (also accepts /exit as hidden alias)
 	CmdCopy             string // /copy
 	CmdExport           string // /export
+	CmdVoice            string // /voice
+	VoiceListening      string // dictation started
+	VoiceTranscribing   string // final pass running after stop
+	VoiceDone           string // transcript placed in the composer
+	VoiceCancelled      string // dictation discarded
+	VoiceNoAudio        string // nothing was captured
+	VoiceDisabled       string // [voice] not enabled in config
+	VoiceMaxReached     string // hit voice.max_seconds, auto-stopped
+	VoicePTTReady       string // push-to-talk armed; SPACE is the talk key
+	VoicePTTDone        string // left push-to-talk mode
+	VoicePTTUnavailable string // terminal cannot report key releases; using toggle
+	VoicePTTStuck       string // a hold never ended; terminal lied about releases
+	VoiceSetupHint      string // no endpoint configured: how to set one up
+	VoiceFailed         string // recorder or ASR error
 	SlashCopyDone       string // "/copy" succeeded
 	SlashCopyEmpty      string // no assistant response to copy
 	SlashCopyListHeader string // header shown before the numbered list

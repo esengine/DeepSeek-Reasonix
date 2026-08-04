@@ -257,3 +257,24 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # token      = ""          # pre-shared token for auth_mode = "token" (auto-generated if empty)
 # password_hash = ""       # bcrypt hash for auth_mode = "password". Generate with: reasonix serve --hash-password <password>
 # behind_proxy = false      # set true when behind a trusted reverse proxy (nginx, Caddy, etc.) that sets X-Forwarded-* headers
+
+# [voice]
+# /voice dictates into the composer via an OpenAI-compatible
+# /v1/audio/transcriptions endpoint (local or hosted). See docs/VOICE.md.
+# There is no default url — set one to enable.
+#
+# enabled     = false
+# url         = "https://api.openai.com/v1/audio/transcriptions"
+# model       = "whisper-1"
+# api_key_env = "OPENAI_API_KEY"   # omit for an unauthenticated local server
+# language    = "en"               # omit to auto-detect
+# prompt      = ""                 # bias spelling of names the model won't know
+# poll_ms     = 500                # how often the growing buffer is re-sent (min 200)
+# max_seconds = 300
+# How long SPACE must be held before it counts as talking; shorter taps
+# type an ordinary space, so you can still type while voice mode is armed.
+# ptt_hold_ms = 1000
+
+# no_push_to_talk = false  # true = always toggle; default holds SPACE to talk where supported
+# device      = ""                 # ALSA capture device, e.g. "hw:1,0"
+# record_cmd  = []                 # override capture; must emit raw s16le 16k mono on stdout
