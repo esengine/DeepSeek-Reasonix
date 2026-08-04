@@ -2641,6 +2641,7 @@ export const zh: Record<DictKey, string> = {
   "settings.currency": "计价币种",
   "settings.currencyAuto": "自动（跟随语言）",
   "settings.config": "配置文件：{path}",
+  "settings.configShadowed": "被工作区配置覆盖：{path}（这里的修改可能不生效）",
   "settings.generativeMusic": "生成式背景音乐",
   "settings.generativeMusicHint": "对话生成过程中播放背景音乐",
   "settings.generativeMusicPreset": "音乐预设",

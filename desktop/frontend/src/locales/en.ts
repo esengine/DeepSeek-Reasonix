@@ -2638,6 +2638,7 @@ export const en = {
   "settings.currency": "Pricing currency",
   "settings.currencyAuto": "Auto (language)",
   "settings.config": "config: {path}",
+  "settings.configShadowed": "overridden by workspace config: {path} (changes here may not take effect)",
   "settings.generativeMusic": "Generative background music",
   "settings.generativeMusicHint": "Ambient music that loops during AI generation",
   "settings.generativeMusicPreset": "Sound preset",

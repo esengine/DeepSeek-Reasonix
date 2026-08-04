@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -307,6 +308,10 @@ type SettingsView struct {
 	ExpandThinking    bool   `json:"expandThinking"`
 	ConversationWidth string `json:"conversationWidth,omitempty"`
 	ConfigPath        string `json:"configPath"`
+	// ShadowedByPath is the workspace reasonix.toml that outranks the file this
+	// panel writes, so an edit here can be overridden with nothing on screen to
+	// explain it (#4333). Empty when the panel's file is the one in effect.
+	ShadowedByPath string `json:"shadowedByPath,omitempty"`
 	// ProviderKinds lists the provider implementations the kernel actually
 	// registered (provider.Kinds()), so the editor's "kind" picker offers only
 	// kinds that resolve — selecting an unregistered one would fail the rebuild.
@@ -339,6 +344,33 @@ type DesktopStartupSettingsView struct {
 	// recovered in memory (last-known-good or defaults) without rewriting files.
 	ConfigWarnings []string `json:"configWarnings,omitempty"`
 	ConfigPath     string   `json:"configPath,omitempty"`
+}
+
+// shadowingConfigPath returns the config file that outranks writePath for the
+// workspace at root, or "" when writePath is the one in effect. A project
+// reasonix.toml beats the user config, so settings written here would otherwise
+// look ignored (#4333).
+func shadowingConfigPath(writePath, root string) string {
+	effective := config.SourcePathForRoot(root)
+	if effective == "" || samePath(effective, writePath) {
+		return ""
+	}
+	if abs, err := filepath.Abs(effective); err == nil {
+		return abs
+	}
+	return effective
+}
+
+func samePath(a, b string) bool {
+	absA, errA := filepath.Abs(a)
+	absB, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return a == b
+	}
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(filepath.Clean(absA), filepath.Clean(absB))
+	}
+	return filepath.Clean(absA) == filepath.Clean(absB)
 }
 
 func nonNil(s []string) []string {
@@ -1061,6 +1093,7 @@ func (a *App) Settings() SettingsView {
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
 		ConversationWidth:       cfg.DesktopConversationWidth(),
 		ConfigPath:              cfgPath,
+		ShadowedByPath:          shadowingConfigPath(cfgPath, root),
 		ProviderKinds:           nonNil(provider.Kinds()),
 		AutoApproveTools:        ctrl != nil && ctrl.AutoApproveTools(),
 		Bypass:                  ctrl != nil && ctrl.AutoApproveTools(),
