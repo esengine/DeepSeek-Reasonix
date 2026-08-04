@@ -3178,10 +3178,16 @@ func (m chatTUI) renderApprovalBanner() string {
 	} else {
 		name, detail := approvalToolDetails(m.pendingApproval.Tool)
 		subj := strings.TrimSpace(m.pendingApproval.Subject)
+		full := subj
 		if subj != "" {
 			subj = " " + truncateSubject(subj, w)
 		}
 		text = strings.TrimSpace(fmt.Sprintf(i18n.M.ToolApprovalPromptFmt, name, subj, detail, ""))
+		// A command clipped to one line can hide the part that matters — the
+		// path being written, the flag that makes it destructive (#4682).
+		if body := approvalSubjectBody(full, strings.TrimSpace(subj), w); body != "" {
+			planDetails = append(planDetails, body)
+		}
 	}
 	if reason := strings.TrimSpace(m.pendingApproval.Reason); reason != "" {
 		text += " · " + truncateSubject(reason, w)
@@ -3196,6 +3202,30 @@ func (m chatTUI) renderApprovalBanner() string {
 	}
 	b.WriteString(dim("↑/↓ navigate · Enter select · y/a/p/n shortcuts"))
 	return choicePanelStyle.Width(w).Render(b.String())
+}
+
+// maxApprovalSubjectLines bounds the expanded command so a heredoc cannot push
+// the composer off screen.
+const maxApprovalSubjectLines = 8
+
+// approvalSubjectBody returns the full command wrapped over several lines when
+// the banner's one-line preview had to clip it, or "" when the preview already
+// showed everything.
+func approvalSubjectBody(full, preview string, width int) string {
+	full = strings.TrimSpace(full)
+	if full == "" || full == preview {
+		return ""
+	}
+	wrapWidth := width - 4
+	if wrapWidth < 20 {
+		wrapWidth = 20
+	}
+	lines := strings.Split(wrapStatusLine(full, wrapWidth), "\n")
+	if len(lines) > maxApprovalSubjectLines {
+		lines = lines[:maxApprovalSubjectLines]
+		lines[maxApprovalSubjectLines-1] = ansi.Truncate(lines[maxApprovalSubjectLines-1], wrapWidth-1, "") + "…"
+	}
+	return strings.Join(lines, "\n")
 }
 
 func compactApprovalPlan(plan string) string {
