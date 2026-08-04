@@ -31,8 +31,7 @@ func (scheduleWakeup) Schema() json.RawMessage {
   "stop":{"type":"boolean","description":"Set true to cancel the pending wakeup and end the loop."},
   "delay_minutes":{"type":"number","description":"Minutes until the next wakeup (1-60). Required unless stop is true."},
   "reason":{"type":"string","description":"Brief reason for the chosen delay, e.g. \"CI still running, recheck shortly\"."}
-},
-"required":["stop"]
+}
 }`)
 }
 

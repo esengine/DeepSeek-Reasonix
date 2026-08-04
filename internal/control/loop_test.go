@@ -172,6 +172,44 @@ func TestRunScheduledTurnNoticePerStartedTurn(t *testing.T) {
 	}
 }
 
+func TestRunScheduledTurnClosedReleasesFiring(t *testing.T) {
+	sched := scheduler.New()
+	delivered := make(chan string, 8)
+	sched.OnFire(func(t scheduler.Task) { delivered <- t.ID })
+	sched.Start()
+	defer sched.Stop()
+	id, err := sched.Add("", "watch", time.Now(), false)
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	select {
+	case got := <-delivered:
+		if got != id {
+			t.Fatalf("first delivery = %q, want %q", got, id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first delivery never fired")
+	}
+	// At this point the task is firing (delivered, body not started). Run the
+	// closed-controller path: it must release the flag so a later wakeup can
+	// deliver again.
+	ctrl := &Controller{scheduler: sched, sink: event.Discard}
+	ctrl.mu.Lock()
+	ctrl.closed = true
+	ctrl.mu.Unlock()
+	ctrl.runScheduledTurn(scheduler.Task{ID: id, Prompt: "watch"})
+
+	sched.ScheduleWakeup(time.Millisecond)
+	select {
+	case got := <-delivered:
+		if got != id {
+			t.Fatalf("re-delivery = %q, want %q", got, id)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("firing flag not released: no re-delivery after wakeup")
+	}
+}
+
 func TestStartLoopErrors(t *testing.T) {
 	ctrl := &Controller{scheduler: nil}
 	if _, err := ctrl.StartLoop("5m x"); err == nil {
