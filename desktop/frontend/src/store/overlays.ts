@@ -9,6 +9,10 @@
 // App-local useState used, and setters mirror Dispatch<SetStateAction<T>>, so
 // the migrated call sites — including functional toggles/bumps — are drop-in and
 // behavior is unchanged.
+//
+// settingsDrafts holds in-progress provider forms so that accidental backdrop
+// clicks or Esc presses don't destroy unsaved work. Drafts survive the panel's
+// unmount and are only cleared on successful save or explicit discard.
 
 import type { Dispatch, SetStateAction } from "react";
 import { create } from "zustand";
@@ -18,6 +22,83 @@ import { shouldShowStartupSplash } from "../components/StartupSplash";
 import type { ExtensionActionView, SessionMeta, SettingsTab } from "../lib/types";
 
 import { applySetState } from "./setState";
+
+// ProviderModelDraft is the curated model list produced after fetching models
+// from a provider's API. It lives alongside the provider form draft.
+export type ProviderModelDraft = {
+  providerName: string;
+  candidates: string[];
+  selected: string[];
+  visionModels: string[];
+  visionCapability: "configurable" | "unsupported";
+};
+
+// SettingsProviderDraft holds every field of the ProviderEditor form so it can
+// survive the panel unmounting. Matches the useState fields in ProviderEditor.
+// keyDraft is the in-memory API key the user typed; it is cleared on save/discard.
+export type SettingsProviderDraft = {
+  name: string;
+  kind: string;
+  baseUrl: string;
+  chatUrl: string;
+  fullChatUrl: boolean;
+  models: string;            // comma-separated text
+  modelCandidates: string[]; // from fetch, kept for the model picker
+  visionModels: string;      // comma-separated text
+  visionModelsConfigured: boolean;
+  modelsUrl: string;
+  apiKeyEnv: string;
+  keyDraft: string;
+  balanceUrl: string;
+  contextWindow: string;     // empty = unset; stored as string to match the UI
+  headersDraft: string;      // textarea content
+  extraBodyDraft: string;    // textarea content
+  authHeader: boolean;
+  modelContextWindows: Record<string, string>; // per-model context overrides
+  reasoningProtocol: string;
+  thinking: string;
+  webSearch: boolean;
+  editingProviderName: string | null; // null = new provider; non-null = editing existing
+};
+
+export type SettingsDrafts = {
+  provider: SettingsProviderDraft | null;
+  // providerModelDrafts holds per-provider-group curated model lists
+  providerModelDrafts: Record<string, ProviderModelDraft>;
+  // addProviderMode tracks whether the add-provider panel is in "official" or "custom" mode
+  addProviderMode: "official" | "custom" | null;
+};
+
+export const EMPTY_PROVIDER_DRAFT: SettingsProviderDraft = {
+  name: "",
+  kind: "openai",
+  baseUrl: "",
+  chatUrl: "",
+  fullChatUrl: false,
+  models: "",
+  modelCandidates: [],
+  visionModels: "",
+  visionModelsConfigured: false,
+  modelsUrl: "",
+  apiKeyEnv: "",
+  keyDraft: "",
+  balanceUrl: "",
+  contextWindow: "",
+  headersDraft: "",
+  extraBodyDraft: "",
+  authHeader: false,
+  modelContextWindows: {},
+  reasoningProtocol: "",
+  thinking: "",
+  webSearch: false,
+  editingProviderName: null,
+};
+
+const EMPTY_SETTINGS_DRAFTS: SettingsDrafts = {
+  provider: null,
+  providerModelDrafts: {},
+  addProviderMode: null,
+};
 
 export type OverlayState = {
   settingsTarget: SettingsTab | null;
@@ -35,6 +116,7 @@ export type OverlayState = {
   transientOverlayDismissSignal: number;
   startupSplashVisible: boolean;
   needsOnboarding: boolean | null;
+  settingsDrafts: SettingsDrafts;
   setSettingsTarget: Dispatch<SetStateAction<SettingsTab | null>>;
   setSettingsFocus: Dispatch<SetStateAction<SettingsInitialFocus | null>>;
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
@@ -48,6 +130,7 @@ export type OverlayState = {
   setTransientOverlayDismissSignal: Dispatch<SetStateAction<number>>;
   setStartupSplashVisible: Dispatch<SetStateAction<boolean>>;
   setNeedsOnboarding: Dispatch<SetStateAction<boolean | null>>;
+  setSettingsDrafts: Dispatch<SetStateAction<SettingsDrafts>>;
 };
 
 export const useOverlayStore = create<OverlayState>((set) => ({
@@ -64,6 +147,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   transientOverlayDismissSignal: 0,
   startupSplashVisible: shouldShowStartupSplash(),
   needsOnboarding: null,
+  settingsDrafts: { ...EMPTY_SETTINGS_DRAFTS },
   setSettingsTarget: (update) => set((s) => ({ settingsTarget: applySetState(s.settingsTarget, update) })),
   setSettingsFocus: (update) => set((s) => ({ settingsFocus: applySetState(s.settingsFocus, update) })),
   setPaletteOpen: (update) => set((s) => ({ paletteOpen: applySetState(s.paletteOpen, update) })),
@@ -77,4 +161,5 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   setTransientOverlayDismissSignal: (update) => set((s) => ({ transientOverlayDismissSignal: applySetState(s.transientOverlayDismissSignal, update) })),
   setStartupSplashVisible: (update) => set((s) => ({ startupSplashVisible: applySetState(s.startupSplashVisible, update) })),
   setNeedsOnboarding: (update) => set((s) => ({ needsOnboarding: applySetState(s.needsOnboarding, update) })),
+  setSettingsDrafts: (update) => set((s) => ({ settingsDrafts: applySetState(s.settingsDrafts, update) })),
 }));
