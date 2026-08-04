@@ -10701,31 +10701,6 @@ type WorkspaceChangeDetailView struct {
 	Truncated bool    `json:"truncated,omitempty"`
 }
 
-// workspaceNoiseNames are local cache/vendor entries hidden from the file tree
-// and "@" menu regardless of where they appear.
-var workspaceNoiseNames = map[string]bool{
-	".codex":       true,
-	".DS_Store":    true,
-	".git":         true,
-	".npm":         true,
-	".pnpm-store":  true,
-	"node_modules": true,
-	"Thumbs.db":    true,
-}
-
-var workspaceNoiseDirs = map[string]bool{
-	"bin":                      true,
-	"desktop/build":            true,
-	"desktop/frontend/dist":    true,
-	"desktop/frontend/wailsjs": true,
-	"dist":                     true,
-	"npm/.stage":               true,
-	"site/.astro":              true,
-	"site/dist":                true,
-	"stage":                    true,
-	"tmp":                      true,
-}
-
 const filePreviewLimit = 2 * 1024 * 1024 // 2 MiB — full file preview for the workspace panel
 const fileRefSearchLimit = 20
 
@@ -10779,10 +10754,7 @@ func workspaceEntryRel(rel, name string) string {
 }
 
 func skipWorkspaceEntry(rel, name string, isDir bool) bool {
-	if workspaceNoiseNames[name] {
-		return true
-	}
-	return isDir && workspaceNoiseDirs[workspaceEntryRel(rel, name)]
+	return fileref.SkipEntry(workspaceEntryRel(rel, name), name, isDir)
 }
 
 func (a *App) activeWorkspaceBase() (string, error) {
