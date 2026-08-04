@@ -61,6 +61,7 @@ type ProviderView struct {
 	KeySourcePath     string                      `json:"keySourcePath,omitempty"`
 	BalanceURL        string                      `json:"balanceUrl"`
 	ContextWindow     int                         `json:"contextWindow"`
+	Effort            string                      `json:"effort"`
 	ReasoningProtocol string                      `json:"reasoningProtocol"`
 	Thinking          string                      `json:"thinking"`
 	SupportedEfforts  []string                    `json:"supportedEfforts"`
@@ -2250,6 +2251,7 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 	e.Thinking = providerThinkingForSettings(p.Thinking)
 	e.SupportedEfforts = p.SupportedEfforts
 	e.DefaultEffort = p.DefaultEffort
+	e.Effort = p.Effort
 	e.Model = ""
 	e.Models = nil
 	e.Default = ""
