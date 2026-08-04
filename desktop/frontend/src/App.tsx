@@ -4123,16 +4123,28 @@ export default function App() {
   const topicbarCanRename = !sidebarImDetailConnection && Boolean(activeTab?.topicId);
   const topicbarTitleEditSize = Math.min(56, Math.max(4, topicTitleDraft.length || topicbarTitle.length || 1));
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
-  const handleWindowsTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!windowsFramelessChrome) return;
+  const handleTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    // Windows: the frameless chrome replaces the native titlebar, so the
+    // double-click zoom gesture has to be re-implemented in JS.
+    // macOS: TitleBarHiddenInset keeps only the traffic lights; the webview
+    // covers the title region and WKWebView does not turn a double-click on
+    // the CSS drag region into the native zoom gesture, so handle it here too
+    // (runtime.WindowToggleMaximise maps to the native zoom on macOS).
+    if (!windowsFramelessChrome && desktopPlatform !== "darwin") return;
+    // macOS keeps the sidebar itself draggable (it extends the title region
+    // up to the traffic lights), so its blank areas join the zoom zones;
+    // the Windows sidebar is explicitly no-drag and stays out.
+    const zoomZones = desktopPlatform === "darwin"
+      ? ".app-chrome, .topicbar, .workbench-dock__tools, .sidebar"
+      : ".app-chrome, .topicbar, .workbench-dock__tools";
     const target = event.target as HTMLElement | null;
-    if (!target?.closest(".app-chrome, .topicbar, .workbench-dock__tools")) return;
+    if (!target?.closest(zoomZones)) return;
     if (target.closest("button, input, textarea, select, a, [role='button'], [role='tab'], .windows-window-controls")) return;
     event.preventDefault();
     void app.ToggleMaximiseMainWindow()
       .then(() => window.setTimeout(syncMainWindowMaximised, 80))
       .catch(() => undefined);
-  }, [syncMainWindowMaximised, windowsFramelessChrome]);
+  }, [desktopPlatform, syncMainWindowMaximised, windowsFramelessChrome]);
   // Creation keeps the classic sidebar/chat structure while gating chrome tweaks
   // behind its own style flag so classic/workbench remain unchanged.
   const appChromeHidden = sidebarWorkbench || sidebarCreation;
@@ -4150,7 +4162,7 @@ export default function App() {
     <TextSizeHotkeys />
       <div
         ref={appRef}
-        onDoubleClickCapture={handleWindowsTitlebarDoubleClick}
+        onDoubleClickCapture={handleTitlebarDoubleClick}
         className={[
         "app",
         `app--${desktopPlatform}`,

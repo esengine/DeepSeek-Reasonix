@@ -795,5 +795,21 @@ ok(
   "offscreen skip link does not leak its focus shadow into the workbench title area",
 );
 
+ok(
+  // The double-click zoom gesture is re-implemented for both frameless
+  // Windows chrome and macOS TitleBarHiddenInset (WKWebView does not turn a
+  // double-click on the CSS drag region into the native zoom). macOS also
+  // includes the draggable sidebar (it reaches the traffic lights), while the
+  // Windows sidebar is no-drag and must stay out of the zoom zones.
+  appSource.includes('onDoubleClickCapture={handleTitlebarDoubleClick}') &&
+    /const handleTitlebarDoubleClick = useCallback\(/.test(appSource) &&
+    /if \(!windowsFramelessChrome && desktopPlatform !== "darwin"\) return;/.test(appSource) &&
+    /const zoomZones = desktopPlatform === "darwin"\s*\n\s*\? "\.app-chrome, \.topicbar, \.workbench-dock__tools, \.sidebar"\s*\n\s*: "\.app-chrome, \.topicbar, \.workbench-dock__tools";/.test(appSource) &&
+    /target\?\.closest\(zoomZones\)/.test(appSource) &&
+    /target\.closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource) &&
+    /void app\.ToggleMaximiseMainWindow\(\)/.test(appSource),
+  "titlebar double-click zoom is wired for Windows frameless chrome and macOS inset titlebar (sidebar included on macOS)",
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
