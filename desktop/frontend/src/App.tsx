@@ -3972,6 +3972,17 @@ export default function App() {
     },
     [state.running, refreshHistoryView],
   );
+  const onTrashManySessions = useCallback(
+    async (paths: string[]) => {
+      if (state.running) return;
+      const uniquePaths = Array.from(new Set(paths));
+      for (const path of uniquePaths) {
+        await deleteSession(path).catch(() => undefined);
+      }
+      await refreshHistoryView();
+    },
+    [state.running, deleteSession, refreshHistoryView],
+  );
   const onRenameSession = useCallback(
     async (path: string, title: string) => {
       if (state.running) return;
@@ -5238,6 +5249,7 @@ export default function App() {
             onPurgeAll={onPurgeAllTrashedSessions}
             onPurgeRecoveryCopies={onPurgeRecoveryCopies}
             onDeleteMany={onDeleteManySessions}
+            onTrashMany={onTrashManySessions}
             onClose={closeHistory}
           />
         </Suspense>
