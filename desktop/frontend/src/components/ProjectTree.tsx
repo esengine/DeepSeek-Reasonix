@@ -261,7 +261,7 @@ function topicActivityLabel(ms: number, t: Translator, compact = false): string 
   const year = 365 * day;
   if (delta < minute) return t("projectTree.justNow");
   if (!compact) {
-    const rtfLocale = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : "en";
+    const rtfLocale = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : locale === "ru" ? "ru" : "en";
     const rtf = new Intl.RelativeTimeFormat(rtfLocale, { numeric: "auto" });
     if (delta < hour) return rtf.format(-Math.max(1, Math.round(delta / minute)), "minute");
     if (delta < day) return rtf.format(-Math.round(delta / hour), "hour");
@@ -270,32 +270,32 @@ function topicActivityLabel(ms: number, t: Translator, compact = false): string 
   }
   if (delta < hour) {
     const value = Math.max(1, Math.round(delta / minute));
-    return locale === "zh" || locale === "zh-TW" ? `${value} 分钟` : `${value}m`;
+    return locale === "zh" || locale === "zh-TW" ? `${value} 分钟` : locale === "ru" ? `${value} мин` : `${value}m`;
   }
   if (delta < day) {
     const value = Math.round(delta / hour);
-    return locale === "zh" || locale === "zh-TW" ? `${value} 小时` : `${value}h`;
+    return locale === "zh" || locale === "zh-TW" ? `${value} 小时` : locale === "ru" ? `${value} ч` : `${value}h`;
   }
   if (delta < 7 * day) {
     const value = Math.round(delta / day);
-    return locale === "zh" || locale === "zh-TW" ? `${value} 天` : `${value}d`;
+    return locale === "zh" || locale === "zh-TW" ? `${value} 天` : locale === "ru" ? `${value} дн` : `${value}d`;
   }
   if (delta < month) {
     const value = Math.round(delta / day);
-    return locale === "zh" || locale === "zh-TW" ? `${value} 天` : `${value}d`;
+    return locale === "zh" || locale === "zh-TW" ? `${value} 天` : locale === "ru" ? `${value} дн` : `${value}d`;
   }
   if (delta < year) {
     const value = Math.max(1, Math.round(delta / month));
-    return locale === "zh" || locale === "zh-TW" ? `${value} 个月` : `${value}mo`;
+    return locale === "zh" || locale === "zh-TW" ? `${value} 个月` : locale === "ru" ? `${value} мес` : `${value}mo`;
   }
   const value = Math.max(1, Math.round(delta / year));
-  return locale === "zh" || locale === "zh-TW" ? `${value} 年` : `${value}y`;
+  return locale === "zh" || locale === "zh-TW" ? `${value} 年` : locale === "ru" ? `${value} г` : `${value}y`;
 }
 
 function topicActivityDateLabel(ms: number): string {
   if (ms <= 0) return "";
   const locale = getLocale();
-  const dateLocale = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : "en";
+  const dateLocale = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : locale === "ru" ? "ru" : "en";
   return new Date(ms).toLocaleDateString(dateLocale);
 }
 

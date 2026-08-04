@@ -13,7 +13,7 @@ import (
 func TestCatalogsComplete(t *testing.T) {
 	en := reflect.ValueOf(English)
 	typ := en.Type()
-	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese), "zh-TW": reflect.ValueOf(ChineseTraditional)}
+	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese), "zh-TW": reflect.ValueOf(ChineseTraditional), "ru": reflect.ValueOf(Russian)}
 	for tag, cat := range catalogs {
 		for i := 0; i < typ.NumField(); i++ {
 			name := typ.Field(i).Name
@@ -45,6 +45,10 @@ func TestCatalogsAgreeOnPlaceholders(t *testing.T) {
 		if want != gotTW {
 			t.Errorf("%s: en has %d verbs, zh-TW has %d", name, want, gotTW)
 		}
+		gotRU := countVerbs(reflect.ValueOf(Russian).Field(i).String())
+		if want != gotRU {
+			t.Errorf("%s: en has %d verbs, ru has %d", name, want, gotRU)
+		}
 	}
 }
 
@@ -57,6 +61,7 @@ func TestPlanApprovalChoicesExposeThreeExplicitActions(t *testing.T) {
 		{tag: "en", value: English.PlanApprovalChoices, want: []string{"Start execution", "Revise plan", "Exit without executing"}},
 		{tag: "zh", value: Chinese.PlanApprovalChoices, want: []string{"开始执行", "修改计划", "暂不执行，退出计划模式"}},
 		{tag: "zh-TW", value: ChineseTraditional.PlanApprovalChoices, want: []string{"開始執行", "修改計畫", "暫不執行，退出計畫模式"}},
+		{tag: "ru", value: Russian.PlanApprovalChoices, want: []string{"Начать выполнение", "Изменить план", "Выйти без выполнения"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.tag, func(t *testing.T) {
@@ -115,6 +120,12 @@ func TestNormalize(t *testing.T) {
 		"zh-Hant":             "zh-TW",
 		"Chinese Traditional": "zh-TW",
 		"繁體":                  "zh-TW",
+		"ru":                  "ru",
+		"ru_RU.UTF-8":         "ru",
+		"ru-RU":               "ru",
+		"Russian":             "ru",
+		"русский":             "ru",
+		"Россия":              "ru",
 		"fr_FR.UTF-8":         "",
 		"  ZH_TW  ":           "zh-TW",
 	}
@@ -156,5 +167,9 @@ func TestDetectLanguagePriority(t *testing.T) {
 	}
 	if got := DetectLanguage("zh-TW"); got != "zh-TW" || CurrentLanguage() != "zh-TW" {
 		t.Errorf("traditional Chinese current language = %q/%q, want zh-TW", got, CurrentLanguage())
+	}
+
+	if got := DetectLanguage("ru"); got != "ru" || CurrentLanguage() != "ru" {
+		t.Errorf("Russian current language = %q/%q, want ru", got, CurrentLanguage())
 	}
 }

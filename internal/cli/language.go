@@ -139,8 +139,10 @@ func normalizeLanguageArg(s string) (string, error) {
 		return "en", nil
 	case "zh", "cn", "chinese", "中文":
 		return "zh", nil
+	case "ru", "russian", "русский":
+		return "ru", nil
 	default:
-		return "", fmt.Errorf("usage: /language auto|en|zh")
+		return "", fmt.Errorf("usage: /language auto|en|zh|ru")
 	}
 }
 
@@ -159,6 +161,7 @@ func describeLanguages(current, resolved string) string {
 		{"auto", i18n.M.ArgLanguageAuto},
 		{"en", i18n.M.ArgLanguageEn},
 		{"zh", i18n.M.ArgLanguageZh},
+		{"ru", i18n.M.ArgLanguageRu},
 	}
 	var b strings.Builder
 	for _, it := range items {

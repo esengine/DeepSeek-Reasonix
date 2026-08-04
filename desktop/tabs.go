@@ -5631,6 +5631,7 @@ const (
 	desktopLocaleEn
 	desktopLocaleZh
 	desktopLocaleZhTW
+	desktopLocaleRu
 )
 
 func (a *App) setDesktopLocale(locale string) {
@@ -5640,6 +5641,8 @@ func (a *App) setDesktopLocale(locale string) {
 		a.desktopLocale.Store(desktopLocaleZhTW)
 	case strings.HasPrefix(normalized, "zh"):
 		a.desktopLocale.Store(desktopLocaleZh)
+	case strings.HasPrefix(normalized, "ru"):
+		a.desktopLocale.Store(desktopLocaleRu)
 	default:
 		a.desktopLocale.Store(desktopLocaleEn)
 	}
@@ -5661,7 +5664,7 @@ func (a *App) localizedDefaultTopicTitle() string {
 		return defaultTopicTitle
 	case desktopLocaleZhTW:
 		return defaultTopicTitleZhTW
-	case desktopLocaleEn:
+	case desktopLocaleEn, desktopLocaleRu:
 		return defaultTopicTitleEn
 	default:
 		return defaultTopicTitle
@@ -5986,7 +5989,7 @@ func (a *App) forkTopicTitle(title string) string {
 	base := strings.TrimSpace(title)
 	if base == "" || isDefaultTopicTitle(base) || base == "Global" {
 		switch a.desktopLocale.Load() {
-		case desktopLocaleEn:
+		case desktopLocaleEn, desktopLocaleRu:
 			return "Forked session"
 		case desktopLocaleZhTW:
 			return "分叉會話"
@@ -5997,7 +6000,7 @@ func (a *App) forkTopicTitle(title string) string {
 	if strings.HasSuffix(base, " · 分叉") || strings.HasSuffix(base, " · fork") {
 		return base
 	}
-	if a.desktopLocale.Load() == desktopLocaleEn {
+	if a.desktopLocale.Load() == desktopLocaleEn || a.desktopLocale.Load() == desktopLocaleRu {
 		return base + " · fork"
 	}
 	return base + " · 分叉"

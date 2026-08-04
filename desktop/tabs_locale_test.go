@@ -16,6 +16,7 @@ func TestDefaultTopicTitleLocalizesAtAPIBoundary(t *testing.T) {
 		{locale: "en-US", want: defaultTopicTitleEn},
 		{locale: "zh-CN", want: defaultTopicTitle},
 		{locale: "zh-TW", want: defaultTopicTitleZhTW},
+		{locale: "ru-RU", want: defaultTopicTitleEn},
 	} {
 		app.setDesktopLocale(tt.locale)
 		if got := app.localizedTopicTitle(defaultTopicTitle, topicTitleSourceAuto); got != tt.want {

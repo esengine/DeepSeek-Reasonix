@@ -473,7 +473,7 @@ export interface AppBindings {
   SetColdResumePrune(enabled: boolean): Promise<void>;
   SetCompactRatio(ratio: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
-  SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
+  SetTrayLocale(locale: "en" | "zh" | "zh-TW" | "ru"): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
   // Runtime-only.
@@ -4315,7 +4315,7 @@ function makeMockApp(): AppBindings {
           settings.statusBarItems = normalizeStatusBarItems(items);
         },
         async SetDesktopLanguage(lang: string) {
-          settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
+          settings.desktopLanguage = lang === "en" || lang === "zh" || lang === "ru" ? lang : "";
         },
         async SetDesktopCurrency(currency: string) {
           settings.desktopCurrency = currency === "CNY" || currency === "USD" ? currency : "";
@@ -4502,7 +4502,7 @@ function makeMockApp(): AppBindings {
     async HeartbeatSaveTasks(_tasks: unknown) {},
     async HeartbeatTriggerNow(_id: string) {},
     async HeartbeatGenerateID() { return "mock-" + Date.now().toString(36); },
-    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW") {},
+    async SetTrayLocale(_locale: "en" | "zh" | "zh-TW" | "ru") {},
     async SetAutoApproveTools(on: boolean) {
       await this.SetToolApprovalMode(on ? "yolo" : "ask");
     },

@@ -287,6 +287,7 @@ type Messages struct {
 	ArgLanguageAuto     string // /language auto
 	ArgLanguageEn       string // /language en
 	ArgLanguageZh       string // /language zh
+	ArgLanguageRu       string // /language ru
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
@@ -622,8 +623,8 @@ func CurrentLanguage() string {
 }
 
 // DetectLanguage selects a catalogue from override (e.g. cfg.Language) or the
-// environment and installs it as M. Returns the resolved tag ("en", "zh") so
-// callers can log or expose it.
+// environment and installs it as M. Returns the resolved tag ("en", "zh",
+// "ru") so callers can log or expose it.
 //
 // Priority: override > REASONIX_LANG > LC_ALL > LC_MESSAGES > LANG > "en".
 func DetectLanguage(override string) string {
@@ -652,6 +653,9 @@ func setLanguage(tag string) string {
 	case "zh":
 		M = Chinese
 		currentLanguage = "zh"
+	case "ru":
+		M = Russian
+		currentLanguage = "ru"
 	default:
 		M = English
 		currentLanguage = "en"
@@ -673,6 +677,9 @@ func normalize(s string) string {
 	}
 	if strings.HasPrefix(s, "zh") || strings.Contains(s, "chinese") || strings.Contains(s, "中文") {
 		return "zh"
+	}
+	if strings.HasPrefix(s, "ru") || strings.Contains(s, "russian") || strings.Contains(s, "русск") || strings.Contains(s, "росси") {
+		return "ru"
 	}
 	if strings.HasPrefix(s, "en") || strings.Contains(s, "english") {
 		return "en"

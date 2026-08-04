@@ -1523,17 +1523,30 @@ func pickSessionToResume() (string, int) {
 	return sessions[idx].Path, 0
 }
 
-// selectLanguage is the wizard's first prompt: it shows the two UI languages
-// in their native form and pre-selects the env-detected one (so a single Enter
-// confirms the auto-detection, a single arrow + Enter picks the other). The
-// label is bilingual because we don't yet know which catalogue to trust.
+// selectLanguage is the wizard's first prompt: it shows the available UI
+// languages in their native form and pre-selects the env-detected one (so a
+// single Enter confirms the auto-detection). The label is bilingual because we
+// don't yet know which catalogue to trust.
 func selectLanguage() (string, error) {
 	detected := i18n.DetectLanguage("")
-	items := []menuItem{{name: "English"}, {name: "中文 (简体)"}}
-	tags := []string{"en", "zh"}
-	if detected == "zh" {
-		items[0], items[1] = items[1], items[0]
-		tags[0], tags[1] = tags[1], tags[0]
+	type langEntry struct{ name, tag string }
+	langs := []langEntry{
+		{name: "English", tag: "en"},
+		{name: "中文 (简体)", tag: "zh"},
+		{name: "Русский", tag: "ru"},
+	}
+	// Move the detected language first so a single Enter confirms it.
+	for i, l := range langs {
+		if l.tag == detected {
+			langs[0], langs[i] = langs[i], langs[0]
+			break
+		}
+	}
+	items := make([]menuItem, 0, len(langs))
+	tags := make([]string, 0, len(langs))
+	for _, l := range langs {
+		items = append(items, menuItem{name: l.name})
+		tags = append(tags, l.tag)
 	}
 	idx, err := selectOne("Language · 语言", items)
 	if err != nil {
