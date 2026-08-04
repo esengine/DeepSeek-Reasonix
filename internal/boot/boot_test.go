@@ -2184,6 +2184,7 @@ func defaultFullBootToolNames() []string {
 		"bash_output",
 		"code_index",
 		"complete_step",
+		"cron_create",
 		"cron_delete",
 		"cron_list",
 		"delete_range",

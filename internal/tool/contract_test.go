@@ -60,6 +60,7 @@ var acceptsDefaultSnip = map[string]bool{
 	"bash_output":     true, // streamed job output; tailing handled by the job, not the snip pass
 	"code_index":      true,
 	"complete_step":   true,
+	"cron_create":     true, // short confirmation text
 	"cron_delete":     true, // short confirmation text
 	"cron_list":       true, // short formatted table
 	"delete_range":    true,
