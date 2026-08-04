@@ -77,6 +77,27 @@ func TestCronCreateOneShotReminder(t *testing.T) {
 	}
 }
 
+func TestCronCreateNoExpire(t *testing.T) {
+	ctx := cronCreateCtx()
+	args, _ := json.Marshal(map[string]any{
+		"cron":      "*/5 * * * *",
+		"prompt":    "endless deploy watch",
+		"no_expire": true,
+	})
+	out, err := cronCreateCall(ctx, args)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(out, "no expiry") {
+		t.Errorf("confirmation missing no-expiry note: %q", out)
+	}
+	sched, _ := scheduler.FromContext(ctx)
+	views := sched.Tasks()
+	if len(views) != 1 || !views[0].NoExpire {
+		t.Fatalf("task not marked NoExpire: %+v", views)
+	}
+}
+
 func TestCronCreateErrors(t *testing.T) {
 	ctx := cronCreateCtx()
 	for _, tc := range []struct {

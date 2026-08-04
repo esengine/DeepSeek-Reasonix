@@ -57,7 +57,11 @@ func (cronList) Execute(ctx context.Context, args json.RawMessage) (string, erro
 		if v.OneShot {
 			oneShot = " (one-shot)"
 		}
-		fmt.Fprintf(&b, "  %s  %-14s  next %s%s  %q\n", v.ID, schedule, next, oneShot, prompt)
+		noExpire := ""
+		if v.NoExpire {
+			noExpire = " (no expiry)"
+		}
+		fmt.Fprintf(&b, "  %s  %-14s  next %s%s%s  %q\n", v.ID, schedule, next, oneShot, noExpire, prompt)
 	}
 	return strings.TrimRight(b.String(), "\n"), nil
 }

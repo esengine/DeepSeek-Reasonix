@@ -20,21 +20,49 @@ func TestParseLoopArgs(t *testing.T) {
 		in           string
 		wantInterval string
 		wantPrompt   string
+		wantNoExpire bool
 	}{
-		{"5m check the deploy", "5m", "check the deploy"},
-		{"30s poll ci", "30s", "poll ci"},
-		{"2h tend the pr", "2h", "tend the pr"},
-		{"check the deploy", "", "check the deploy"},
-		{"", "", ""},
-		{"   ", "", ""},
-		{"5m", "5m", ""},
-		{"5x check", "", "5x check"}, // not a parseable interval -> whole thing is the prompt
+		{"5m check the deploy", "5m", "check the deploy", false},
+		{"30s poll ci", "30s", "poll ci", false},
+		{"2h tend the pr", "2h", "tend the pr", false},
+		{"check the deploy", "", "check the deploy", false},
+		{"", "", "", false},
+		{"   ", "", "", false},
+		{"5m", "5m", "", false},
+		{"5x check", "", "5x check", false}, // not a parseable interval -> whole thing is the prompt
+		{"--forever 5m check deploy", "5m", "check deploy", true},
+		{"--forever check deploy", "", "check deploy", true},
+		{"--forever 5m", "5m", "", true},
+		{"--forever", "", "", true},
+		{"--forever   ", "", "", true},
 	}
 	for _, c := range cases {
-		interval, prompt := parseLoopArgs(c.in)
-		if interval != c.wantInterval || prompt != c.wantPrompt {
-			t.Errorf("parseLoopArgs(%q) = (%q, %q), want (%q, %q)", c.in, interval, prompt, c.wantInterval, c.wantPrompt)
+		interval, prompt, noExpire := parseLoopArgs(c.in)
+		if interval != c.wantInterval || prompt != c.wantPrompt || noExpire != c.wantNoExpire {
+			t.Errorf("parseLoopArgs(%q) = (%q, %q, %v), want (%q, %q, %v)", c.in, interval, prompt, noExpire, c.wantInterval, c.wantPrompt, c.wantNoExpire)
 		}
+	}
+}
+
+func TestStartLoopForever(t *testing.T) {
+	ctrl := &Controller{scheduler: scheduler.New()}
+	defer ctrl.scheduler.Stop()
+	text, err := ctrl.StartLoop("--forever 5m check deploy")
+	if err != nil {
+		t.Fatalf("StartLoop: %v", err)
+	}
+	if !strings.Contains(text, "no expiry") {
+		t.Errorf("confirmation missing no-expiry note: %q", text)
+	}
+	views := ctrl.scheduler.Tasks()
+	if len(views) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(views))
+	}
+	if !views[0].NoExpire {
+		t.Errorf("task not marked NoExpire: %+v", views[0])
+	}
+	if views[0].CronExpr != "*/5 * * * *" {
+		t.Errorf("cron = %q, want */5 * * * *", views[0].CronExpr)
 	}
 }
 
@@ -147,7 +175,7 @@ func TestRunScheduledTurnNoticePerStartedTurn(t *testing.T) {
 	got := append([]string(nil), notices...)
 	mu.Unlock()
 	if len(got) != 1 || !strings.Contains(got[0], "abcd1234") || !strings.Contains(got[0], "running") {
-		t.Fatalf("notices = %v, want exactly one '⏰ scheduled task abcd1234 running'", got)
+		t.Fatalf("notices = %v, want exactly one 'â° scheduled task abcd1234 running'", got)
 	}
 
 	// dropped turn (controller rotating): no notice for it, and the firing
@@ -178,7 +206,7 @@ func TestRunScheduledTurnClosedReleasesFiring(t *testing.T) {
 	sched.OnFire(func(t scheduler.Task) { delivered <- t.ID })
 	sched.Start()
 	defer sched.Stop()
-	id, err := sched.Add("", "watch", time.Now(), false)
+	id, err := sched.Add("", "watch", time.Now(), false, false)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}

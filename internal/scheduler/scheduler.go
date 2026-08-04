@@ -19,6 +19,8 @@ const DefaultTaskLimit = 50
 
 // taskExpiry bounds how long a task survives after creation; the scheduler
 // prunes expired tasks on load so a forgotten loop cannot run forever.
+// Tasks created with NoExpire (via /loop --forever or cron_create
+// no_expire) are exempt and run until explicitly cancelled.
 const taskExpiry = 7 * 24 * time.Hour
 
 // ErrTaskLimit reports that the session already holds DefaultTaskLimit tasks.
@@ -29,7 +31,8 @@ type Task struct {
 	ID       string    `json:"id"`
 	CronExpr string    `json:"cron,omitempty"` // 5-field cron; empty = dynamic (agent-controlled)
 	Prompt   string    `json:"prompt"`
-	OneShot  bool      `json:"oneShot"` // auto-delete after firing
+	OneShot  bool      `json:"oneShot"`            // auto-delete after firing
+	NoExpire bool      `json:"noExpire,omitempty"` // exempt from the 7-day expiry on load
 	Created  time.Time `json:"created"`
 	NextFire time.Time `json:"nextFire"` // zero = paused / no pending wakeup
 	Fires    int       `json:"fires"`    // iterations completed (informational)
@@ -46,6 +49,7 @@ type View struct {
 	CronExpr string `json:"cron,omitempty"`
 	Prompt   string `json:"prompt"`
 	OneShot  bool   `json:"oneShot"`
+	NoExpire bool   `json:"noExpire,omitempty"`
 	Created  string `json:"created,omitempty"`  // RFC3339
 	NextFire string `json:"nextFire,omitempty"` // RFC3339, empty when paused
 	Fires    int    `json:"fires"`
@@ -212,8 +216,9 @@ func (s *Scheduler) ReleaseFiring(id string) {
 // cronExpr creates a dynamic task that fires once at nextFire (pass
 // time.Now() for an immediate first iteration) and then waits for
 // schedule_wakeup to set the next wakeup. oneShot tasks delete themselves
-// after their first fire regardless of cronExpr.
-func (s *Scheduler) Add(cronExpr, prompt string, nextFire time.Time, oneShot bool) (string, error) {
+// after their first fire regardless of cronExpr. noExpire tasks are exempt
+// from the 7-day load expiry (endless loops).
+func (s *Scheduler) Add(cronExpr, prompt string, nextFire time.Time, oneShot, noExpire bool) (string, error) {
 	id, err := newTaskID()
 	if err != nil {
 		return "", err
@@ -231,6 +236,7 @@ func (s *Scheduler) Add(cronExpr, prompt string, nextFire time.Time, oneShot boo
 		CronExpr: cronExpr,
 		Prompt:   prompt,
 		OneShot:  oneShot,
+		NoExpire: noExpire,
 		Created:  time.Now(),
 		NextFire: nextFire,
 	}
@@ -333,6 +339,7 @@ func (s *Scheduler) Tasks() []View {
 			CronExpr: t.CronExpr,
 			Prompt:   t.Prompt,
 			OneShot:  t.OneShot,
+			NoExpire: t.NoExpire,
 			Created:  t.Created.Format(time.RFC3339),
 			Fires:    t.Fires,
 		}
@@ -475,8 +482,8 @@ func (s *Scheduler) Load(path string) {
 		if t.ID == "" || t.Prompt == "" {
 			continue // malformed entry
 		}
-		if now.Sub(t.Created) > taskExpiry {
-			continue // seven-day expiry
+		if !t.NoExpire && now.Sub(t.Created) > taskExpiry {
+			continue // seven-day expiry (exempted by NoExpire)
 		}
 		if t.OneShot && !t.NextFire.After(now) {
 			continue // missed one-shot: it already ran or is moot

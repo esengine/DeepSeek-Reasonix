@@ -23,7 +23,7 @@ type cronCreate struct{}
 func (cronCreate) Name() string { return "cron_create" }
 
 func (cronCreate) Description() string {
-	return "Create a scheduled task. Accepts `cron` — a 5-field cron expression like \"*/5 * * * *\" (or an interval token like \"5m\", \"2h\", \"1d\", rounded to the nearest clean step) — and `prompt`, the text to run when it fires. Set `one_shot: true` for a single fire that deletes itself (reminders). The task fires between turns while this session is open, at the next matching time; list tasks with cron_list, cancel with cron_delete. The session holds at most 50 tasks."
+	return "Create a scheduled task. Accepts `cron` — a 5-field cron expression like \"*/5 * * * *\" (or an interval token like \"5m\", \"2h\", \"1d\", rounded to the nearest clean step) — and `prompt`, the text to run when it fires. Set `one_shot: true` for a single fire that deletes itself (reminders). Set `no_expire: true` for an endless loop that never expires (default: tasks expire after 7 days). The task fires between turns while this session is open, at the next matching time; list tasks with cron_list, cancel with cron_delete. The session holds at most 50 tasks."
 }
 
 func (cronCreate) Schema() json.RawMessage {
@@ -32,7 +32,8 @@ func (cronCreate) Schema() json.RawMessage {
 "properties":{
   "cron":{"type":"string","description":"5-field cron expression (minute hour dom month dow), e.g. \"*/5 * * * *\", or an interval token like \"5m\"/\"2h\"/\"1d\"."},
   "prompt":{"type":"string","description":"The prompt to run when the task fires."},
-  "one_shot":{"type":"boolean","description":"Set true for a reminder that fires once and deletes itself."}
+  "one_shot":{"type":"boolean","description":"Set true for a reminder that fires once and deletes itself."},
+  "no_expire":{"type":"boolean","description":"Set true for an endless loop that never expires (default: tasks expire after 7 days)."}
 },
 "required":["cron","prompt"]
 }`)
@@ -46,9 +47,10 @@ func (cronCreate) Execute(ctx context.Context, args json.RawMessage) (string, er
 		return "", fmt.Errorf("cron_create: no scheduler in this context")
 	}
 	var in struct {
-		Cron    string `json:"cron"`
-		Prompt  string `json:"prompt"`
-		OneShot bool   `json:"one_shot"`
+		Cron     string `json:"cron"`
+		Prompt   string `json:"prompt"`
+		OneShot  bool   `json:"one_shot"`
+		NoExpire bool   `json:"no_expire"`
 	}
 	if err := json.Unmarshal(args, &in); err != nil {
 		return "", fmt.Errorf("cron_create: %v", err)
@@ -63,13 +65,17 @@ func (cronCreate) Execute(ctx context.Context, args json.RawMessage) (string, er
 	} else if !scheduler.Valid(cron) {
 		return "", fmt.Errorf("cron_create: %q is neither a 5-field cron expression nor a valid interval token (s/m/h/d)", in.Cron)
 	}
-	id, err := sched.Add(cron, prompt, time.Now(), in.OneShot)
+	id, err := sched.Add(cron, prompt, time.Now(), in.OneShot, in.NoExpire)
 	if err != nil {
 		return "", fmt.Errorf("cron_create: %v", err)
 	}
 	kind := "recurring"
 	if in.OneShot {
 		kind = "one-shot"
+	}
+	expiryNote := ""
+	if in.NoExpire {
+		expiryNote = " (no expiry)"
 	}
 	views := sched.Tasks()
 	next := ""
@@ -82,7 +88,7 @@ func (cronCreate) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if next == "" {
 		next = "as soon as the session is idle"
 	}
-	return fmt.Sprintf("created %s task %s — schedule %s, next fire %s\nprompt: %s", kind, id, cron, next, promptPreviewForTool(prompt)), nil
+	return fmt.Sprintf("created %s task %s%s — schedule %s, next fire %s\nprompt: %s", kind, id, expiryNote, cron, next, promptPreviewForTool(prompt)), nil
 }
 
 // promptPreviewForTool shortens a prompt for confirmation text.

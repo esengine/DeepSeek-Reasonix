@@ -31,20 +31,23 @@ const maxLoopMDBytes = 25_000
 // returns a human-readable confirmation. Interval and prompt are both
 // optional:
 //
-//	"/loop 5m check the deploy" — fixed cron schedule
-//	"/loop check the deploy"    — dynamic: agent picks each delay via schedule_wakeup
-//	"/loop 5m" / "/loop"        — loop.md (or the built-in maintenance prompt)
+//	"/loop 5m check the deploy"      — fixed cron schedule
+//	"/loop check the deploy"         — dynamic: agent picks each delay via schedule_wakeup
+//	"/loop --forever 5m check deploy" — endless: exempt from the 7-day expiry
+//	"/loop 5m" / "/loop"             — loop.md (or the built-in maintenance prompt)
 //
 // A fixed interval is a leading token parseable by scheduler.ParseInterval;
 // anything else is the prompt. A prompt-only loop is dynamic. No prompt at
 // all falls back to loop.md then the maintenance prompt; with an interval it
-// runs on the fixed schedule, without one it is dynamic.
+// runs on the fixed schedule, without one it is dynamic. A leading
+// "--forever" marks the task NoExpire so it survives session resume past the
+// 7-day prune (endless cron jobs).
 func (c *Controller) StartLoop(input string) (string, error) {
 	sched := c.scheduler
 	if sched == nil {
 		return "", fmt.Errorf("scheduler is unavailable in this session")
 	}
-	interval, prompt := parseLoopArgs(input)
+	interval, prompt, noExpire := parseLoopArgs(input)
 	if strings.TrimSpace(prompt) == "" {
 		prompt = c.loadLoopMD()
 	}
@@ -55,27 +58,40 @@ func (c *Controller) StartLoop(input string) (string, error) {
 	if interval != "" {
 		cronExpr, _ = scheduler.ParseInterval(interval)
 	}
-	id, err := sched.Add(cronExpr, strings.TrimSpace(prompt), time.Now(), false)
+	id, err := sched.Add(cronExpr, strings.TrimSpace(prompt), time.Now(), false, noExpire)
 	if err != nil {
 		return "", err
 	}
-	if cronExpr != "" {
-		return fmt.Sprintf("loop started — task %s: every %s\n%s", id, interval, promptPreview(prompt)), nil
+	note := ""
+	if noExpire {
+		note = " (no expiry)"
 	}
-	return fmt.Sprintf("loop started — task %s: dynamic schedule, first fire now\n%s", id, promptPreview(prompt)), nil
+	if cronExpr != "" {
+		return fmt.Sprintf("loop started — task %s: every %s%s\n%s", id, interval, note, promptPreview(prompt)), nil
+	}
+	return fmt.Sprintf("loop started — task %s: dynamic schedule, first fire now%s\n%s", id, note, promptPreview(prompt)), nil
 }
 
-// parseLoopArgs splits /loop arguments into an optional leading interval token
-// and the remaining prompt.
-func parseLoopArgs(input string) (interval, prompt string) {
+// parseLoopArgs splits /loop arguments into an optional leading --forever
+// flag, an optional interval token, and the remaining prompt.
+func parseLoopArgs(input string) (interval, prompt string, noExpire bool) {
 	fields := strings.Fields(input)
 	if len(fields) == 0 {
-		return "", ""
+		return "", "", false
+	}
+	rest := input
+	if fields[0] == "--forever" {
+		noExpire = true
+		rest = strings.TrimSpace(strings.TrimPrefix(rest, fields[0]))
+		fields = strings.Fields(rest)
+		if len(fields) == 0 {
+			return "", "", true
+		}
 	}
 	if _, ok := scheduler.ParseInterval(fields[0]); ok {
-		return fields[0], strings.TrimSpace(strings.TrimPrefix(input, fields[0]))
+		return fields[0], strings.TrimSpace(strings.TrimPrefix(rest, fields[0])), noExpire
 	}
-	return "", input
+	return "", rest, noExpire
 }
 
 // promptPreview shortens a loop prompt for confirmation/notice text.
