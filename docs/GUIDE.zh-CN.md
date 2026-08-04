@@ -491,6 +491,8 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `/goal <目标>`、`/goal --research <目标>`、`/goal --simple <目标>`、`/goal status`、`/goal clear` | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环；显式启动 Goal 后，明显长周期目标会自动启用 AutoResearch。 |
 | `/loop [间隔] [提示词]` | 按计划重复运行提示词，或管理已安排的循环 | `/loop 5m 检查部署` 每 5 分钟运行一次提示词；`/loop <提示词>` 运行动态循环，由模型通过 `schedule_wakeup` 决定每次延迟；裸 `/loop` 使用 `loop.md` 或内置维护提示词。前缀 `--forever`（如 `/loop --forever 5m 检查部署`）可创建永不过期的循环（默认任务 7 天后过期）。固定循环可让模型取消（`cron_delete`）；动态循环按 `Esc` 暂停，再按一次 `Esc` 全部取消。状态栏以 `NEXT JOB <id> <时间>` 显示下次触发时间。 |
 | `/loopstatus [on|off|auto]` | 切换 `NEXT JOB` 状态栏指示器 | 默认 `auto`：仅在有待触发的排定任务时显示。`on` 始终显示（无任务时显示 `none`）；`off` 即使有任务也隐藏。裸 `/loopstatus` 显示当前模式。 |
+| `/looplist` | 本地列出当前工作目录的排定任务（不消耗模型调用） | 显示每个任务的 ID、计划（cron 或动态）、下次触发时间，以及一次性/永不过期标记。 |
+| `/loopdel <id>` | 按 ID 本地删除排定任务（不消耗模型调用） | `/loopdel 3f9a2c11` 取消该任务；会提示删除成功或不存在该任务。 |
 | `/migrate`、`/migrate --from <旧目录>` | 重试旧数据迁移，或从指定 v0.x 来源导入 sessions | Windows v0.52 自定义安装/数据目录用 `--from`；该形式只导入 sessions。详见[配置路径](./CONFIG_PATHS.zh-CN.md)。 |
 
 选择器与审批：

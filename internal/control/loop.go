@@ -168,3 +168,53 @@ func (c *Controller) runScheduledTurn(task scheduler.Task) {
 func (c *Controller) Scheduler() *scheduler.Scheduler {
 	return c.scheduler
 }
+
+// LoopListText renders the session's scheduled tasks for a local slash command
+// (/looplist) — no model call, no tokens spent.
+func (c *Controller) LoopListText() string {
+	if c.scheduler == nil {
+		return "scheduled tasks are unavailable in this session"
+	}
+	views := c.scheduler.Tasks()
+	if len(views) == 0 {
+		return "no scheduled tasks"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d scheduled task(s):\n", len(views))
+	for _, v := range views {
+		schedule := "dynamic"
+		if v.CronExpr != "" {
+			schedule = v.CronExpr
+		}
+		next := v.NextFire
+		if next == "" {
+			next = "paused"
+		}
+		oneShot := ""
+		if v.OneShot {
+			oneShot = " (one-shot)"
+		}
+		noExpire := ""
+		if v.NoExpire {
+			noExpire = " (no expiry)"
+		}
+		fmt.Fprintf(&b, "  %s  %-14s  next %s%s%s\n", v.ID, schedule, next, oneShot, noExpire)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// LoopDeleteText cancels a scheduled task by ID for a local slash command
+// (/loopdel <id>) — no model call. Returns the confirmation text.
+func (c *Controller) LoopDeleteText(id string) string {
+	if c.scheduler == nil {
+		return "scheduled tasks are unavailable in this session"
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "usage: /loopdel <task-id>"
+	}
+	if c.scheduler.Delete(id) {
+		return "deleted scheduled task " + id
+	}
+	return "no scheduled task " + id
+}

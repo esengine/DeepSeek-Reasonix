@@ -257,6 +257,8 @@ var Chinese = Messages{
 	CmdGoal:             "设置或清除当前目标",
 	CmdLoop:             "按计划重复运行提示词，或管理已安排的循环",
 	CmdLoopStatus:       "切换 NEXT JOB 状态栏指示器（on、off 或 auto）",
+	CmdLoopList:         "本地列出已排定的任务（不消耗模型调用）",
+	CmdLoopDel:          "按 ID 删除已排定的任务（不消耗模型调用）",
 	CmdRemember:         "保存一条记忆",
 	CmdForget:           "归档一条已存记忆",
 	CmdMcp:              "MCP 服务器",

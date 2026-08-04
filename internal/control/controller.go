@@ -694,11 +694,15 @@ func (c *Controller) rebindScheduler(sessionPath string) {
 	if c.scheduler == nil {
 		return
 	}
-	path := store.SessionScheduledTasks(sessionPath)
+	path := store.SessionScheduledTasks(c.workspaceRoot, sessionPath)
 	if path == "" {
 		c.scheduler.SetPersistPath("")
 		return
 	}
+	// One-time upgrade from the historical beside-session sidecar (pre
+	// per-directory builds): import any existing tasks before Load so no
+	// previously scheduled loop silently vanishes.
+	store.MigrateScheduledTasks(c.workspaceRoot, sessionPath)
 	c.scheduler.SetPersistPath(path)
 	c.scheduler.Load(path)
 }

@@ -534,6 +534,10 @@ func (c *Controller) managementNotice(trimmed string) bool {
 		} else {
 			c.notice(text)
 		}
+	case "/looplist":
+		c.notice(c.LoopListText())
+	case "/loopdel":
+		c.notice(c.LoopDeleteText(strings.TrimSpace(strings.TrimPrefix(trimmed, fields[0]))))
 	default:
 		return false
 	}

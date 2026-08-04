@@ -1,6 +1,11 @@
 package store
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestSessionSidecarLayout(t *testing.T) {
 	const p = "/home/u/.reasonix/sessions/abc.jsonl"
@@ -12,7 +17,9 @@ func TestSessionSidecarLayout(t *testing.T) {
 		// .meta appends to the full path (historical layout); the rest replace .jsonl.
 		{"meta", SessionMeta(p), p + ".meta"},
 		{"goal-state", SessionGoalState(p), "/home/u/.reasonix/sessions/abc.goal-state.json"},
-		{"scheduled-tasks", SessionScheduledTasks(p), "/home/u/.reasonix/sessions/abc.scheduled-tasks.json"},
+		// scheduled-tasks lives in the project's .reasonix (per working directory),
+		// one file shared by every session launched there.
+		{"scheduled-tasks", SessionScheduledTasks("/home/u/proj", p), filepath.Join("/home/u/proj", ".reasonix", "scheduled-tasks.json")},
 		{"event-log", SessionEventLog(p), "/home/u/.reasonix/sessions/abc.events.jsonl"},
 		{"event-log-damaged", SessionEventLogDamaged(p), "/home/u/.reasonix/sessions/abc.events.jsonl.damaged"},
 		{"event-index", SessionEventIndex(p), "/home/u/.reasonix/sessions/abc.event-index.json"},
@@ -38,7 +45,6 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 	}{
 		{"meta", SessionMeta},
 		{"goal-state", SessionGoalState},
-		{"scheduled-tasks", SessionScheduledTasks},
 		{"event-log", SessionEventLog},
 		{"event-log-damaged", SessionEventLogDamaged},
 		{"event-index", SessionEventIndex},
@@ -53,6 +59,20 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 		if got := fn.f(""); got != "" {
 			t.Errorf("%s(\"\") = %q, want empty", fn.name, got)
 		}
+	}
+	// scheduled-tasks takes (workspaceRoot, sessionPath). Without a root there
+	// is no per-directory anchor: persistence is disabled ("") rather than
+	// leaking a beside-session file that session deletion no longer sweeps.
+	for _, args := range [][2]string{{"", ""}, {"", "/x/a.jsonl"}, {"/proj", ""}} {
+		if got := SessionScheduledTasks(args[0], args[1]); got != "" {
+			t.Errorf("SessionScheduledTasks(%q, %q) = %q, want empty", args[0], args[1], got)
+		}
+	}
+	if got := LegacyScheduledTasks("/x/a.jsonl"); got != "/x/a.scheduled-tasks.json" {
+		t.Errorf("LegacyScheduledTasks = %q, want the historical beside-session path", got)
+	}
+	if LegacyScheduledTasks("") != "" {
+		t.Error("LegacyScheduledTasks(\"\") should be empty")
 	}
 }
 
@@ -78,18 +98,69 @@ func TestIsSessionTranscriptName(t *testing.T) {
 	}
 }
 
+func TestMigrateScheduledTasks(t *testing.T) {
+	dir := t.TempDir()
+	sessionPath := filepath.Join(dir, "sessions", "abc.jsonl")
+	legacy := LegacyScheduledTasks(sessionPath)
+	root := filepath.Join(dir, "proj")
+	newPath := SessionScheduledTasks(root, sessionPath)
+	payload := []byte(`[{"id":"aa11","cron":"*/5 * * * *","prompt":"old loop"}]`)
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if !MigrateScheduledTasks(root, sessionPath) {
+		t.Fatal("migration should import the legacy sidecar")
+	}
+	data, err := os.ReadFile(newPath)
+	if err != nil {
+		t.Fatalf("new store missing after migration: %v", err)
+	}
+	if string(data) != string(payload) {
+		t.Errorf("new store = %q, want %q", data, payload)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Errorf("legacy sidecar should be removed, stat err = %v", err)
+	}
+
+	// Second call: no legacy file left, no import.
+	if MigrateScheduledTasks(root, sessionPath) {
+		t.Error("second migration should be a no-op")
+	}
+	// New store exists: no import even if a legacy file reappears.
+	if err := os.WriteFile(legacy, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if MigrateScheduledTasks(root, sessionPath) {
+		t.Error("migration with an existing new store should be a no-op")
+	}
+	// No root: no per-directory anchor, no migration.
+	if MigrateScheduledTasks("", sessionPath) {
+		t.Error("migration without a root should be a no-op")
+	}
+}
+
 func TestSessionSidecarFiles(t *testing.T) {
 	const p = "/home/u/.reasonix/sessions/abc.jsonl"
 	got := SessionSidecarFiles(p)
 	want := []string{
 		p + ".meta",
 		"/home/u/.reasonix/sessions/abc.goal-state.json",
-		"/home/u/.reasonix/sessions/abc.scheduled-tasks.json",
 		"/home/u/.reasonix/sessions/abc.events.jsonl",
 		"/home/u/.reasonix/sessions/abc.events.jsonl.damaged",
 		"/home/u/.reasonix/sessions/abc.event-index.json",
 		"/home/u/.reasonix/sessions/abc.conflicts.jsonl",
 		"/home/u/.reasonix/sessions/abc.recovery.json",
+	}
+	// The /loop scheduled-task file must NOT be session-owned: crons belong to
+	// the working directory and survive /new, /clear, and session deletion.
+	for _, s := range got {
+		if strings.Contains(s, "scheduled-tasks") {
+			t.Errorf("SessionSidecarFiles must not include the cron file, got %q", s)
+		}
 	}
 	if len(got) != len(want) {
 		t.Fatalf("SessionSidecarFiles = %v, want %v", got, want)
@@ -101,5 +172,23 @@ func TestSessionSidecarFiles(t *testing.T) {
 	}
 	if SessionSidecarFiles("") != nil {
 		t.Error("SessionSidecarFiles(\"\") should be nil")
+	}
+}
+
+func TestSessionScheduledTasksPath(t *testing.T) {
+	const p = "/home/u/.reasonix/sessions/abc.jsonl"
+	want := filepath.Join("/home/u/proj", ".reasonix", "scheduled-tasks.json")
+	if got := SessionScheduledTasks("/home/u/proj", p); got != want {
+		t.Errorf("with root = %q, want the per-directory .reasonix path (no session stem)", got)
+	}
+	// Same directory must yield the same file regardless of the session.
+	if got := SessionScheduledTasks("/home/u/proj", "/home/u/.reasonix/sessions/xyz.jsonl"); got != want {
+		t.Errorf("another session in the same dir = %q, want the same per-directory file", got)
+	}
+	if got := SessionScheduledTasks("", p); got != "" {
+		t.Errorf("without root = %q, want \"\" (no persistence anchor, no leak)", got)
+	}
+	if SessionScheduledTasks("/home/u/proj", "") != "" {
+		t.Error("SessionScheduledTasks with empty session path should be \"\"")
 	}
 }

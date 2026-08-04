@@ -226,6 +226,8 @@ type Settings interface {
 type Scheduling interface {
 	StartLoop(input string) (string, error)
 	Scheduler() *scheduler.Scheduler
+	LoopListText() string
+	LoopDeleteText(id string) string
 }
 
 // SessionAPI is the full driving port — the composition of every sub-port. A

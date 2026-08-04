@@ -2,8 +2,10 @@
 // cron_* / schedule_wakeup tools. A Scheduler owns the task set and a
 // background ticker; when a task comes due it invokes an injected onFire
 // callback (the Controller's runScheduledTurn), which fires a turn between
-// foreground turns. The task list persists to a JSON sidecar beside the
-// session so --resume restores unexpired tasks.
+// foreground turns. The task list persists to <workspace>/.reasonix/
+// scheduled-tasks.json — one file per working directory, shared by every chat
+// launched there and surviving /new, /clear, and session deletion — so
+// --resume and new sessions restore unexpired tasks for that directory.
 package scheduler
 
 import (
@@ -464,10 +466,11 @@ func (s *Scheduler) saveLocked() {
 	}
 }
 
-// Load hydrates tasks from a sidecar file, pruning expired, malformed, and
-// missed one-shot entries. It replaces any in-memory tasks first, so a rebind
-// to a new session starts fresh (session-scoped semantics: a new conversation
-// clears the previous one's loops). Recurring tasks roll their schedule
+// Load hydrates tasks from the per-directory store file, pruning expired,
+// malformed, and missed one-shot entries. It replaces any in-memory tasks
+// first, so a rebind to a new session picks up whatever the working directory
+// currently schedules (per-directory semantics: every chat in the folder
+// shares one cron system). Recurring tasks roll their schedule
 // forward so a fire missed during downtime does not fire immediately on
 // resume; dynamic tasks keep their wakeup (a stale one simply fires, resuming
 // the loop). It must be called before Start on the construction path.

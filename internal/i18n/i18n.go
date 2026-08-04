@@ -245,6 +245,8 @@ type Messages struct {
 	CmdGoal             string // /goal
 	CmdLoop             string // /loop
 	CmdLoopStatus       string // /loopstatus
+	CmdLoopList         string // /looplist
+	CmdLoopDel          string // /loopdel
 	CmdRemember         string // /remember
 	CmdForget           string // /forget
 	CmdMcp              string // /mcp

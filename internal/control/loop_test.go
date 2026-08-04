@@ -44,6 +44,44 @@ func TestParseLoopArgs(t *testing.T) {
 	}
 }
 
+func TestLoopListAndDeleteText(t *testing.T) {
+	ctrl := &Controller{scheduler: scheduler.New()}
+	defer ctrl.scheduler.Stop()
+	if got := ctrl.LoopListText(); got != "no scheduled tasks" {
+		t.Errorf("empty list = %q, want no scheduled tasks", got)
+	}
+	if got := ctrl.LoopDeleteText(""); got != "usage: /loopdel <task-id>" {
+		t.Errorf("empty id = %q, want usage", got)
+	}
+	if got := ctrl.LoopDeleteText("deadbeef"); got != "no scheduled task deadbeef" {
+		t.Errorf("unknown id = %q", got)
+	}
+	if _, err := ctrl.StartLoop("5m check deploy"); err != nil {
+		t.Fatalf("StartLoop: %v", err)
+	}
+	if _, err := ctrl.StartLoop("watch pr"); err != nil {
+		t.Fatalf("StartLoop: %v", err)
+	}
+	list := ctrl.LoopListText()
+	if !strings.Contains(list, "2 scheduled task(s)") {
+		t.Errorf("list missing count: %q", list)
+	}
+	for _, v := range ctrl.scheduler.Tasks() {
+		if !strings.Contains(list, v.ID) {
+			t.Errorf("list missing task %s: %q", v.ID, list)
+		}
+		if v.CronExpr == "" && !strings.Contains(list, "dynamic") {
+			t.Errorf("list missing dynamic marker: %q", list)
+		}
+		if got := ctrl.LoopDeleteText(v.ID); got != "deleted scheduled task "+v.ID {
+			t.Errorf("delete = %q", got)
+		}
+	}
+	if got := ctrl.LoopListText(); got != "no scheduled tasks" {
+		t.Errorf("after deletes = %q, want no scheduled tasks", got)
+	}
+}
+
 func TestStartLoopForever(t *testing.T) {
 	ctrl := &Controller{scheduler: scheduler.New()}
 	defer ctrl.scheduler.Stop()

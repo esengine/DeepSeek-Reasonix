@@ -4149,6 +4149,20 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 	case "/loopstatus":
 		m.echoLocalCommand(input)
 		m.runLoopStatusCommand(strings.TrimSpace(strings.TrimPrefix(input, "/loopstatus")))
+	case "/looplist":
+		m.echoLocalCommand(input)
+		if m.ctrl == nil {
+			m.notice("controller not ready")
+		} else {
+			m.notice(m.ctrl.LoopListText())
+		}
+	case "/loopdel":
+		m.echoLocalCommand(input)
+		if m.ctrl == nil {
+			m.notice("controller not ready")
+		} else {
+			m.notice(m.ctrl.LoopDeleteText(strings.TrimSpace(strings.TrimPrefix(input, "/loopdel"))))
+		}
 	case "/remember":
 		note := strings.TrimSpace(strings.TrimPrefix(input, typedCmd))
 		if note == "" {

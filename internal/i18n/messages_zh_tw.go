@@ -554,6 +554,8 @@ var ChineseTraditional = Messages{
 	CmdGoal:                    "設定或清除當前目標",
 	CmdLoop:                    "按計劃重複執行提示詞，或管理已安排的循環",
 	CmdLoopStatus:              "切換 NEXT JOB 狀態列指示器（on、off 或 auto）",
+	CmdLoopList:                "在本機列出已排定的任務（不消耗模型呼叫）",
+	CmdLoopDel:                 "依 ID 刪除已排定的任務（不消耗模型呼叫）",
 	CmdDiffFold:                "切換 diff 摺疊/展開",
 	ListMemorySaved:            "儲存的記憶",
 	ListMemoryArchived:         "歸檔的記憶",
