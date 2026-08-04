@@ -242,8 +242,13 @@ func (s *SubagentStore) CleanupStaleRunning() (int, error) {
 	}
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
+		// Windows reports a non-directory at this path as ENOENT, so a plain
+		// IsNotExist check would silently accept a corrupt store instead of
+		// surfacing it. Only treat it as "no store yet" when nothing is there.
 		if os.IsNotExist(err) {
-			return 0, nil
+			if _, statErr := os.Lstat(s.dir); statErr != nil {
+				return 0, nil
+			}
 		}
 		return 0, err
 	}
