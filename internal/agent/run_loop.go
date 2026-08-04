@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -52,6 +53,7 @@ type streamedTurn struct {
 	reasoning          string
 	signature          string
 	calls              []provider.ToolCall
+	responsesItems     []json.RawMessage
 	usage              *provider.Usage
 	interrupted        bool
 	partialToolStarted bool
@@ -281,7 +283,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		}
 
 		streamed := a.streamWithMissingReasoningRecovery(ctx, step+1)
-		text, reasoning, signature, calls, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.usage
+		text, reasoning, signature, calls, responsesItems, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.responsesItems, streamed.usage
 		interrupted, partialToolStarted, partialCalls, err := streamed.interrupted, streamed.partialToolStarted, streamed.partialCalls, streamed.err
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
 		if err != nil {
@@ -321,6 +323,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 			ReasoningContent:   reasoning,
 			ReasoningSignature: signature,
 			ToolCalls:          calls,
+			ResponsesItems:     responsesItems,
 			WorkDurationMs:     state.workDurationMs(),
 		})
 
@@ -422,9 +425,9 @@ func (a *Agent) streamWithMissingReasoningRecovery(ctx context.Context, turn int
 }
 
 func (a *Agent) streamTurn(ctx context.Context, turn int, sink event.Sink) streamedTurn {
-	text, reasoning, signature, calls, usage, interrupted, partialToolStarted, partialCalls, err := a.stream(ctx, turn, sink)
+	text, reasoning, signature, calls, responsesItems, usage, interrupted, partialToolStarted, partialCalls, err := a.stream(ctx, turn, sink)
 	return streamedTurn{
-		text: text, reasoning: reasoning, signature: signature, calls: calls, usage: usage,
+		text: text, reasoning: reasoning, signature: signature, calls: calls, responsesItems: responsesItems, usage: usage,
 		interrupted: interrupted, partialToolStarted: partialToolStarted, partialCalls: partialCalls, err: err,
 	}
 }

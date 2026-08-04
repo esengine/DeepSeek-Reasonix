@@ -122,6 +122,37 @@ func TestProviderViewFromEntryIncludesThinking(t *testing.T) {
 	}
 }
 
+func TestProviderViewFromEntryUsesEffectiveWebSearch(t *testing.T) {
+	view := providerViewFromEntry(config.ProviderEntry{
+		Name:    "deepseek-responses",
+		Kind:    "responses",
+		BaseURL: "https://api.deepseek.com",
+	}, false, true)
+	if !view.WebSearch {
+		t.Fatal("official DeepSeek Responses omission did not default web search on")
+	}
+
+	disabled := false
+	explicitOff := providerViewFromEntry(config.ProviderEntry{
+		Name:      "deepseek-responses",
+		Kind:      "responses",
+		BaseURL:   "https://api.deepseek.com",
+		WebSearch: &disabled,
+	}, false, true)
+	if explicitOff.WebSearch {
+		t.Fatal("explicit web_search=false was not preserved")
+	}
+
+	custom := providerViewFromEntry(config.ProviderEntry{
+		Name:    "custom-responses",
+		Kind:    "responses",
+		BaseURL: "https://gateway.example/v1",
+	}, false, true)
+	if custom.WebSearch {
+		t.Fatal("custom provider unexpectedly enabled web search")
+	}
+}
+
 func TestProviderViewFromEntryShowsKeySource(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	t.Setenv("TEST_PROVIDER_KEY_SOURCE", "")
@@ -955,6 +986,62 @@ func TestSaveProviderPreservesExplicitEmptyVisionModels(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `vision_models = []`) {
 		t.Fatalf("saved config did not persist explicit empty vision_models:\n%s", raw)
+	}
+}
+
+func TestSaveProviderPersistsWebSearchOn(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	if err := NewApp().SaveProvider(ProviderView{
+		Name:      "deepseek-responses",
+		Kind:      "responses",
+		BaseURL:   "https://api.deepseek.com",
+		Models:    []string{"deepseek-v4-flash"},
+		Default:   "deepseek-v4-flash",
+		WebSearch: true,
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("deepseek-responses")
+	if !ok || got.WebSearch == nil || !*got.WebSearch {
+		t.Fatalf("saved provider = %+v, found=%v; want web_search=true", got, ok)
+	}
+	raw, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(raw), "web_search  = true") {
+		t.Fatalf("saved config did not persist web_search:\n%s", raw)
+	}
+}
+
+func TestSaveProviderPersistsExplicitWebSearchOff(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	if err := NewApp().SaveProvider(ProviderView{
+		Name:      "deepseek-responses",
+		Kind:      "responses",
+		BaseURL:   "https://api.deepseek.com",
+		Models:    []string{"deepseek-v4-flash"},
+		Default:   "deepseek-v4-flash",
+		WebSearch: false,
+	}); err != nil {
+		t.Fatalf("SaveProvider: %v", err)
+	}
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	got, ok := cfg.Provider("deepseek-responses")
+	if !ok || got.WebSearch == nil || *got.WebSearch || config.EffectiveWebSearch(got) {
+		t.Fatalf("saved provider = %+v, found=%v; want explicit web_search=false", got, ok)
+	}
+	raw, err := os.ReadFile(config.UserConfigPath())
+	if err != nil {
+		t.Fatalf("read saved config: %v", err)
+	}
+	if !strings.Contains(string(raw), "web_search  = false") {
+		t.Fatalf("saved config did not persist web_search=false:\n%s", raw)
 	}
 }
 

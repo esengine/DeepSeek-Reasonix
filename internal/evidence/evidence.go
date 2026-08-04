@@ -1719,6 +1719,7 @@ func verificationCommandRecommendations() []verificationCommandRecommendation {
 		{label: "make|just test|check|lint|verify|ci", examples: []string{"make test", "just verify"}},
 		{label: "python -m pytest|unittest", examples: []string{"python -m pytest", "python -m unittest"}},
 		{label: "dotnet test", examples: []string{"dotnet test"}},
+		{label: "swift test", examples: []string{"swift test"}},
 		{label: "mvn|gradle test|check|verify", examples: []string{"mvn test", "gradle check"}},
 	}
 }
@@ -1801,6 +1802,31 @@ func bashSegmentIsVerification(fields []string) bool {
 		return len(args) > 1 && args[0] == "-m" && hasCommandArg(args[1:2], "pytest", "unittest")
 	case "dotnet":
 		return len(args) > 0 && args[0] == "test"
+	case "swift":
+		// swift test runs the SwiftPM test suite; build artifacts stay under
+		// the package's own .build directory (including --enable-code-coverage
+		// reports). Other swift subcommands (build/run/package) can write
+		// binaries or mutate the package, so only the test form is a
+		// recognized verifier. Explicit report destinations, attachment dirs,
+		// and scratch-dir redirects are rejected by writeOutputFlags. Note
+		// that swift test may run Package.swift build plugins (arbitrary
+		// code) — the same trust boundary as go test / cargo test.
+		if len(args) == 0 || args[0] != "test" {
+			return false
+		}
+		// Control modes that do not run the test suite (help, listing) must
+		// not count as verification; mirror the tsc treatment of --help.
+		for _, arg := range args[1:] {
+			name := strings.TrimLeft(strings.ToLower(arg), "-")
+			if i := strings.IndexByte(name, '='); i >= 0 {
+				name = name[:i]
+			}
+			switch name {
+			case "help", "h", "version", "list-tests", "l":
+				return false
+			}
+		}
+		return true
 	case "mvn", "mvnw", "gradle", "gradlew":
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
 	}
@@ -2032,21 +2058,29 @@ func hasCommandArg(args []string, candidates ...string) bool {
 // A runner invoked with one of them changes workspace state, so the segment
 // must not count as read-only verification.
 var writeOutputFlags = map[string]bool{
-	"snapshot-update": true, // pytest-snapshot / syrupy
-	"updatesnapshot":  true, // jest --updateSnapshot via npm/yarn wrappers
-	"junitxml":        true, // pytest
-	"junit-xml":       true, // pytest / mypy
-	"junitfile":       true, // gotestsum
-	"jsonfile":        true, // gotestsum
-	"coverprofile":    true, // go test
-	"cpuprofile":      true, // go test
-	"memprofile":      true, // go test
-	"blockprofile":    true, // go test
-	"mutexprofile":    true, // go test
-	"testlogfile":     true, // go test binary
-	"gocoverdir":      true, // go test binary
-	"outputfile":      true, // jest/vitest --outputFile (with --json)
-	"report-log":      true, // pytest-reportlog
+	"snapshot-update":                  true, // pytest-snapshot / syrupy
+	"updatesnapshot":                   true, // jest --updateSnapshot via npm/yarn wrappers
+	"junitxml":                         true, // pytest
+	"junit-xml":                        true, // pytest / mypy
+	"junitfile":                        true, // gotestsum
+	"jsonfile":                         true, // gotestsum
+	"coverprofile":                     true, // go test
+	"cpuprofile":                       true, // go test
+	"memprofile":                       true, // go test
+	"blockprofile":                     true, // go test
+	"mutexprofile":                     true, // go test
+	"testlogfile":                      true, // go test binary
+	"gocoverdir":                       true, // go test binary
+	"outputfile":                       true, // jest/vitest --outputFile (with --json)
+	"report-log":                       true, // pytest-reportlog
+	"xunit-output":                     true, // swift test --xunit-output writes a JUnit XML report
+	"scratch-path":                     true, // swift test --scratch-path redirects the build dir
+	"build-path":                       true, // swift test --build-path: legacy alias of --scratch-path
+	"cache-path":                       true, // swift test --cache-path redirects the shared cache dir
+	"event-stream-output-path":         true, // swift test (Swift 6.x): swift-testing JSON output
+	"experimental-event-stream-output": true, // swift test (Swift 6.x): experimental event-stream output
+	"attachments-path":                 true, // swift test (Swift 6.x): Swift Testing attachments dir
+	"experimental-attachments-path":    true, // swift test (Swift 6.x): experimental attachments dir
 }
 
 func hasWriteOutputFlag(args []string) bool {

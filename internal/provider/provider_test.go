@@ -536,10 +536,41 @@ func TestRoleConstants(t *testing.T) {
 	}
 }
 
+func TestMessageResponsesItemsRemainBackwardCompatible(t *testing.T) {
+	var legacy Message
+	if err := json.Unmarshal([]byte(`{"role":"assistant","content":"answer"}`), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy message: %v", err)
+	}
+	if len(legacy.ResponsesItems) != 0 {
+		t.Fatalf("legacy ResponsesItems = %#v, want empty", legacy.ResponsesItems)
+	}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy message: %v", err)
+	}
+	if strings.Contains(string(legacyJSON), "responses_items") {
+		t.Fatalf("legacy message gained responses_items: %s", legacyJSON)
+	}
+
+	raw := json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed"}`)
+	current := Message{Role: RoleAssistant, Content: "answer", ResponsesItems: []json.RawMessage{raw}}
+	encoded, err := json.Marshal(current)
+	if err != nil {
+		t.Fatalf("marshal current message: %v", err)
+	}
+	var roundTrip Message
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal current message: %v", err)
+	}
+	if len(roundTrip.ResponsesItems) != 1 || string(roundTrip.ResponsesItems[0]) != string(raw) {
+		t.Fatalf("round-tripped ResponsesItems = %#v", roundTrip.ResponsesItems)
+	}
+}
+
 // --- ChunkType constants ---
 
 func TestChunkTypeConstants(t *testing.T) {
-	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError}
+	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem}
 	for i, ct := range types {
 		if int(ct) != i {
 			t.Errorf("ChunkType %d: got %d", i, int(ct))

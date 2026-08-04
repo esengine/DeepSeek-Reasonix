@@ -2692,12 +2692,68 @@ func TestQueueNavigationResetOnNonUpDownKey(t *testing.T) {
 		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
 	}
 
-	// A regular key should reset the queue navigation cursor.
+	// A regular key while editing a queued item should preserve the cursor
+	// so the user can type replacement text. (#4877)
 	letter := tea.KeyPressMsg{Code: 'a'}
 	model, _ = m.Update(letter)
 	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should stay at 0 while editing queued item, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueEditTypingDoesNotResetCursor(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"first", "second"}
+
+	// Navigate up to select the last item.
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should be 1 after up, got %d", m.queueEditCursor)
+	}
+
+	// Type several characters — cursor must survive each keystroke.
+	for _, c := range "hello" {
+		letter := tea.KeyPressMsg{Code: c}
+		model, _ = m.Update(letter)
+		m = model.(chatTUI)
+	}
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should stay at 1 after typing, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueEditReplaceOnEnter(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"hello"}
+
+	// Navigate up to select the item.
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
+	}
+
+	// Simulate real typing: clear input, send key presses through Update.
+	m.input.SetValue("")
+	m.input.SetValue("world")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	model, _ = m.Update(enter)
+	m = model.(chatTUI)
+
+	if len(m.pendingInterject) != 1 {
+		t.Fatalf("queue should still have 1 item, got %d", len(m.pendingInterject))
+	}
+	if m.pendingInterject[0] != "world" {
+		t.Fatalf("queue[0] should be %q, got %q", "world", m.pendingInterject[0])
+	}
 	if m.queueEditCursor != -1 {
-		t.Fatalf("cursor should reset on non-up/down key, got %d", m.queueEditCursor)
+		t.Fatalf("cursor should reset after enter, got %d", m.queueEditCursor)
 	}
 }
 
@@ -3242,21 +3298,24 @@ func TestSlashCodeCommentSubmitStartsTurn(t *testing.T) {
 	}
 }
 
-func TestUnknownSlashCommandDoesNotStartTurn(t *testing.T) {
+func TestUnknownSlashCommandStartsOrdinaryTurnWithNotice(t *testing.T) {
 	r := &recordingTurnRunner{}
+	events := make(chan event.Event, 8)
 	ctrl := control.New(control.Options{
 		Runner: r,
-		Sink:   event.FuncSink(func(event.Event) {}),
+		Sink:   event.FuncSink(func(e event.Event) { events <- e }),
 	})
 	m := newTestChatTUI()
 	m.ctrl = ctrl
-	m.input.SetValue("/definitely-not-a-command")
+	input := "/definitely-not-a-command"
+	m.input.SetValue(input)
 
 	model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = model.(chatTUI)
+	waitForCLIEvent(t, events, event.TurnDone)
 
-	if len(r.inputs) != 0 {
-		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", r.inputs)
+	if len(r.inputs) != 1 || r.inputs[0] != input {
+		t.Fatalf("unknown slash command should start one ordinary turn, inputs=%q", r.inputs)
 	}
 	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, "unknown command") {
 		t.Fatalf("unknown slash command should be reported in transcript, got:\n%s", got)
@@ -3455,8 +3514,9 @@ func TestFreshApprovalSessionChoiceIsLimitedToSandboxEscape(t *testing.T) {
 	}
 }
 
-// TestSlashQuitExit verifies that /quit and /exit slash commands return tea.Quit,
-// providing an alternative to Ctrl+D and the bare "quit"/"exit" text commands.
+// TestSlashQuitExit verifies that /quit and /exit slash commands quit through
+// the shutdown path (tuiShutdownMsg → snapshot → tea.Quit, #5879), providing an
+// alternative to Ctrl+D and the bare "quit"/"exit" text commands.
 func TestSlashQuitExit(t *testing.T) {
 	m := newTestChatTUI()
 	for _, cmd := range []string{"/quit", "/exit"} {
@@ -3466,8 +3526,8 @@ func TestSlashQuitExit(t *testing.T) {
 			continue
 		}
 		msg := got()
-		if _, ok := msg.(tea.QuitMsg); !ok {
-			t.Errorf("%s cmd should produce QuitMsg, got %T", cmd, msg)
+		if _, ok := msg.(tuiShutdownMsg); !ok {
+			t.Errorf("%s cmd should produce tuiShutdownMsg, got %T", cmd, msg)
 		}
 	}
 }
@@ -3607,8 +3667,8 @@ func TestSecondCtrlCQuitsAfterCancelIsAlreadyRequested(t *testing.T) {
 	if secondCmd == nil {
 		t.Fatal("second Ctrl+C after cancel request should quit")
 	}
-	if msg := secondCmd(); msg != (tea.QuitMsg{}) {
-		t.Fatalf("second Ctrl+C command = %T, want tea.QuitMsg", msg)
+	if msg := secondCmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("second Ctrl+C command = %T, want tuiShutdownMsg (snapshot-before-quit, #5879)", msg)
 	}
 }
 
@@ -4088,5 +4148,56 @@ func TestShiftTabLeavesDontAskForAskMode(t *testing.T) {
 	m.cycleMode()
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
 		t.Fatalf("Shift+Tab from dontAsk = %q, want ask", got)
+	}
+}
+
+// TestQuitGesturesRouteThroughShutdown guards #5879: every in-TUI quit gesture
+// must emit tuiShutdownMsg (whose handler snapshots the session) rather than
+// tea.Quit directly, which would drop everything past the last snapshot.
+func TestQuitGesturesRouteThroughShutdown(t *testing.T) {
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+
+	// Double Ctrl+C on an idle, empty composer.
+	m := newTestChatTUI()
+	model, cmd := m.Update(ctrlC)
+	m = model.(chatTUI)
+	if cmd != nil {
+		if msg := cmd(); msg == (tea.QuitMsg{}) {
+			t.Fatal("first Ctrl+C must not quit")
+		}
+	}
+	_, cmd = m.Update(ctrlC)
+	if cmd == nil {
+		t.Fatal("second Ctrl+C should return a command")
+	}
+	if msg := cmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("double Ctrl+C emitted %T, want tuiShutdownMsg", msg)
+	}
+
+	// Ctrl+D.
+	m = newTestChatTUI()
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("Ctrl+D should return a command")
+	}
+	if msg := cmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("Ctrl+D emitted %T, want tuiShutdownMsg", msg)
+	}
+}
+
+// TestMessageEventReplacesStreamedAnswer guards #6665 on the TUI side: the
+// final Message event carries the canonical display text (protocol blocks
+// stripped at emission), and it must replace the raw streamed accumulation.
+func TestMessageEventReplacesStreamedAnswer(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "answer <autoresearch-evidence>{\"id\":\"e1\"}</autoresearch-evidence> tail"})
+	m.ingestEvent(event.Event{Kind: event.Message, Text: "answer  tail"})
+
+	joined := strings.Join(m.transcript, "\n")
+	if strings.Contains(joined, "autoresearch-evidence") {
+		t.Fatalf("committed transcript still contains evidence block:\n%s", joined)
+	}
+	if !strings.Contains(joined, "answer") {
+		t.Fatalf("committed transcript lost the answer text:\n%s", joined)
 	}
 }

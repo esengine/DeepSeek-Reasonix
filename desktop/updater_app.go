@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"runtime"
@@ -28,8 +29,9 @@ var errUpdateInProgress = errors.New("update: another download or install is alr
 var updaterRequestIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 var (
-	pendingUpdateExistsForInstall    = repair.PendingUpdateExists
-	reconcilePendingUpdateForInstall = repair.ReconcilePendingUpdate
+	pendingUpdateExistsForInstall            = repair.PendingUpdateExists
+	archiveSupersededPendingUpdateForInstall = archiveSupersededLegacyUpdateAfterReady
+	reconcilePendingUpdateForInstall         = repair.ReconcilePendingUpdate
 )
 
 func validateUpdaterRequest(requestID, selectedChannel, expectedVersion string) (string, string, string, error) {
@@ -246,7 +248,7 @@ func (a *App) installUpdateRequest(selectedChannel, expectedVersion, requestID s
 	if artifactKindFromMeta(meta.ArtifactKind) != artifactKindFromMeta(wantKind) {
 		return a.failUpdate(requestID, selectedChannel, expectedVersion, errUpdateCacheMismatch)
 	}
-	if err := a.reconcilePendingUpdateBeforeInstall(requestID, meta); err != nil {
+	if err := a.reconcilePendingUpdateForRequest(requestID, meta); err != nil {
 		return err
 	}
 
@@ -258,12 +260,22 @@ func (a *App) installUpdateRequest(selectedChannel, expectedVersion, requestID s
 	}
 }
 
-// reconcilePendingUpdateBeforeInstall runs before install-mode dispatch so a
-// profile change cannot let the deb or portable path bypass an unfinished
-// release-unit transaction from the previous attempt.
-func (a *App) reconcilePendingUpdateBeforeInstall(requestID string, meta *cachedUpdate) error {
+// reconcilePendingUpdateForRequest runs before download and again before
+// install-mode dispatch. The early pass avoids paying download and verification
+// costs for a blocked update; the second pass prevents a profile change or a
+// concurrent process from bypassing an unfinished release-unit transaction.
+func (a *App) reconcilePendingUpdateForRequest(requestID string, meta *cachedUpdate) error {
 	if pendingUpdateExistsForInstall() {
 		a.emitProgress(requestID, meta.Channel, meta.Version, "recovering", meta.Size, meta.Size, "")
+		// A user-initiated update proves the versioned desktop reached a usable
+		// UI. Retire a superseded flat-layout transaction here as well as in the
+		// delayed post-DOM health task, so an immediate click never has to fail
+		// once and ask the user to retry.
+		if archived, archiveErr := archiveSupersededPendingUpdateForInstall(); archiveErr != nil {
+			slog.Debug("desktop: superseded update was not eligible for automatic archival", "err", archiveErr)
+		} else if archived {
+			slog.Info("desktop: archived superseded update before install")
+		}
 	}
 	if _, err := reconcilePendingUpdateForInstall(version); err != nil {
 		if errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
@@ -400,6 +412,12 @@ func (a *App) ApplyUpdateRequest(selectedChannel, expectedVersion, requestID str
 	// sequence, so another request cannot slip into the former phase gap.
 	defer finish()
 
+	if err := a.reconcilePendingUpdateForRequest(requestID, &cachedUpdate{
+		Channel: selectedChannel,
+		Version: expectedVersion,
+	}); err != nil {
+		return err
+	}
 	if _, err := a.downloadUpdateRequest(selectedChannel, expectedVersion, requestID); err != nil {
 		return err
 	}

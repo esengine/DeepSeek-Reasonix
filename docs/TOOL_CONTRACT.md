@@ -98,8 +98,15 @@ those direct tools are installed, connected, or refreshed.
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
-`read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
+`read_only_task`, `read_session`, `read_skill`, `read_subagent_result`, `remember`, `research`,
 `review`, `run_skill`, `security_review`, `slash_command`, `task`.
+
+`parallel_tasks` and `fleet` keep their combined result below the single-tool
+output limit by returning a fair preview and a stable `Subagent reference` for
+every persisted child. `read_subagent_result` pages through one referenced
+final answer by UTF-8 byte offset, so long parallel research remains lossless
+without injecting every report into the parent context at once. References are
+restricted to the current conversation lineage and workspace.
 
 `use_capability` (`action` = `list` | `inspect` | `call` | `decline`): Delivery
 Executor, plus both Planner and Executor in Balanced dual-model sessions; not

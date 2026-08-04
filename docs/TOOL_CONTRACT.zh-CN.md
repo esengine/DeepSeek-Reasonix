@@ -78,8 +78,13 @@ Executor 刻意保留直接 `mcp__*` 工具，因此安装、连接或刷新这�
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
-`read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
+`read_only_task`, `read_session`, `read_skill`, `read_subagent_result`, `remember`, `research`,
 `review`, `run_skill`, `security_review`, `slash_command`, `task`.
+
+`parallel_tasks` 与 `fleet` 会为每个已持久化子 Agent 返回公平分配的预览和稳定的
+`Subagent reference`，使合并结果始终低于单工具输出上限。`read_subagent_result`
+按 UTF-8 字节偏移分页读取某个引用对应的完整最终答案，因此长篇并行调研无需一次性全部
+注入父会话也不会丢失。引用只允许在当前会话 lineage 和工作区内读取。
 
 `use_capability`（`action` = `list` | `inspect` | `call` | `decline`）：Delivery Executor，
 以及 Balanced 双模型会话中的 Planner 和 Executor；Economy 不启用。

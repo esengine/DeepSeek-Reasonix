@@ -1178,6 +1178,14 @@ the strict read-only entrances:
 | `reasonix review` (CLI) | Read-only review of a diff or branch |
 | Desktop preview/review subagents | Read-only desktop analysis surfaces |
 
+In persisted sessions, `parallel_tasks` and `fleet` return a bounded preview
+plus one `Subagent reference` per completed child instead of concatenating every
+full answer into a truncation-prone tool result. The parent can call
+`read_subagent_result` with that reference and page by `offset_bytes`; results
+are scoped to the current conversation lineage and workspace. Headless runs
+without a persisted parent session remain ephemeral and receive fair bounded
+previews, but cannot mint durable references.
+
 The interactive two-model Planner uses a dedicated construction path
 (`NewPlannerAgent`): it still blocks bash, file writers, and ordinary writers,
 but may call authorized, non-destructive MCP through the fixed

@@ -69,6 +69,11 @@ branch.
 
 ### Fixed
 
+- Fixed long parallel sub-agent research being silently lost when combined
+  `parallel_tasks` or `fleet` answers exceeded the single-tool output limit.
+  Persisted sessions now keep each child transcript independently, return a
+  bounded fair preview plus stable reference for every result, and page full
+  answers through the conversation-scoped `read_subagent_result` tool.
 - Fixed Remote Workbench failing with only `initialize: workbench-desktop:
   connection closed` on fresh or cross-platform SSH hosts. Desktop now proves
   the exact Host CLI Build ID, provisions the matching verified release without

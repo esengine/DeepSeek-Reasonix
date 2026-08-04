@@ -91,7 +91,7 @@ var enumTypes = map[reflect.Type][]string{
 	reflect.TypeOf(SessionClearDisposition("")):    values(SessionCleared, SessionCleanupPending),
 	reflect.TypeOf(ProfileSetDisposition("")):      values(ProfileUnchanged, ProfileUpdated, ProfileRebuilt),
 	reflect.TypeOf(provider.Role("")):              values(provider.RoleSystem, provider.RoleUser, provider.RoleAssistant, provider.RoleTool),
-	reflect.TypeOf(BrokerChunkType("")):            values(BrokerChunkText, BrokerChunkReasoning, BrokerChunkToolCallStart, BrokerChunkToolCallDelta, BrokerChunkToolCall, BrokerChunkUsage, BrokerChunkDone, BrokerChunkError),
+	reflect.TypeOf(BrokerChunkType("")):            values(BrokerChunkText, BrokerChunkReasoning, BrokerChunkToolCallStart, BrokerChunkToolCallDelta, BrokerChunkToolCall, BrokerChunkUsage, BrokerChunkDone, BrokerChunkError, BrokerChunkResponsesItem),
 	reflect.TypeOf(BrokerProviderErrorCode("")):    values(BrokerProviderFailed, BrokerProviderInterrupted),
 }
 

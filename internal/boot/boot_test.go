@@ -2213,6 +2213,7 @@ func defaultFullBootToolNames() []string {
 		"read_only_task",
 		"read_session",
 		"read_skill",
+		"read_subagent_result",
 		"remember",
 		"research",
 		"review",

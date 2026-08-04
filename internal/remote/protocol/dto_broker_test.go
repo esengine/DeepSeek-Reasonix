@@ -85,6 +85,45 @@ func TestBrokerProviderChunkRoundTripPreservesEstimatedUsage(t *testing.T) {
 	}
 }
 
+func TestBrokerProviderChunkRoundTripPreservesResponsesItem(t *testing.T) {
+	want := provider.Chunk{
+		Type:          provider.ChunkResponsesItem,
+		ResponsesItem: json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed","action":{"query":"latest"}}`),
+	}
+	wired := BrokerProviderChunkFromProvider(want)
+	raw, err := json.Marshal(BrokerStreamChunkParams{StreamID: "stream-1", Seq: 1, Chunk: wired})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeBrokerNotificationParams(MethodBrokerStreamChunk, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := decoded.(BrokerStreamChunkParams).Chunk.ProviderChunk()
+	if got.Type != want.Type || string(got.ResponsesItem) != string(want.ResponsesItem) {
+		t.Fatalf("provider responses item changed\n got: %#v\nwant: %#v", got, want)
+	}
+}
+
+func TestBrokerProviderChunkRejectsInvalidResponsesItem(t *testing.T) {
+	empty := json.RawMessage(nil)
+	array := json.RawMessage(`[]`)
+	malformed := json.RawMessage(`{"id":`)
+	valid := json.RawMessage(`{"id":"ws_1"}`)
+	tests := []BrokerProviderChunk{
+		{Type: BrokerChunkResponsesItem},
+		{Type: BrokerChunkResponsesItem, ResponsesItem: &empty},
+		{Type: BrokerChunkResponsesItem, ResponsesItem: &array},
+		{Type: BrokerChunkResponsesItem, ResponsesItem: &malformed},
+		{Type: BrokerChunkText, ResponsesItem: &valid},
+	}
+	for i, chunk := range tests {
+		if err := chunk.Validate(); err == nil {
+			t.Fatalf("case %d accepted invalid responses item chunk: %#v", i, chunk)
+		}
+	}
+}
+
 func TestBrokerProviderDescriptorRoundTripPreservesRuntimeMetadata(t *testing.T) {
 	want := BrokerProviderDescriptor{
 		Ref: "local/model", DisplayName: "Local", Model: "model",
@@ -156,7 +195,8 @@ func TestBrokerSchemaUsesTypedRequestChunkAndJSONValue(t *testing.T) {
 	}
 	chunkMethod := findSchemaMethod(t, document, MethodBrokerStreamChunk)
 	chunk := findProperty(t, chunkMethod.Params, "chunk").Schema
-	if chunk.Type != "object" || len(findProperty(t, chunk, "type").Schema.Enum) != 8 {
+	responsesItem := findProperty(t, chunk, "responsesItem")
+	if chunk.Type != "object" || len(findProperty(t, chunk, "type").Schema.Enum) != 9 || responsesItem.Required || responsesItem.Schema.Type != "json" {
 		t.Fatalf("chunk schema is not a typed enum object: %#v", chunk)
 	}
 }

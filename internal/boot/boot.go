@@ -909,11 +909,13 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if taskTool == nil {
 			taskTool = newTaskTool()
 		}
-		// Fixed registration order for prompt-cache stability: task →
-		// parallel_tasks → fleet. Profile names never enter tool schemas.
+		// The registry exports schemas in stable name order. Keep this surface
+		// static: profile names and result refs never enter provider-visible
+		// schemas, and the result reader does not change between turns.
 		reg.Add(taskTool)
 		reg.Add(agent.NewParallelTasksTool(taskTool, reg))
 		reg.Add(agent.NewFleetTool(taskTool))
+		reg.Add(agent.NewSubagentResultTool(taskTool))
 		return "enabled task."
 	}
 	addReadOnlyTaskTool := func() string {
@@ -2290,7 +2292,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"vision":                config.EffectiveVision(e),
 			"vision_model_explicit": config.ExplicitModelVision(e),
 			"vision_detail":         e.VisionDetail,
-			"web_search":            e.WebSearch,
+			"web_search":            config.EffectiveWebSearch(e),
 			"mode":                  e.ResponsesMode,
 			// Keep nil as nil so the responses provider can vendor-detect its
 			// default instead of accidentally treating every endpoint as stateful.

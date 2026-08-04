@@ -72,7 +72,7 @@ func TestStreamReturnsRequestOnlyUsageOnProviderFailure(t *testing.T) {
 	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
 	a := New(failedRequestProvider{}, tool.NewRegistry(), NewSession(""), Options{ModelRef: "failed/model"}, sink)
 
-	_, _, _, _, usage, _, _, _, err := a.stream(context.Background(), 1, sink)
+	_, _, _, _, _, usage, _, _, _, err := a.stream(context.Background(), 1, sink)
 	if err == nil {
 		t.Fatal("expected provider failure")
 	}

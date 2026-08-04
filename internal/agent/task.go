@@ -66,6 +66,7 @@ var subagentRecursiveTools = []string{
 var subagentAlwaysHiddenTools = []string{
 	"parallel_tasks",
 	"fleet",
+	"read_subagent_result",
 	"install_skill",
 	"install_source",
 }
@@ -800,7 +801,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (st
 	var subReg *tool.Registry
 	if spec.ReadOnly {
 		subReg = ReadOnlySubagentToolRegistryForDepthWithRuntime(t.parentReg, toolNames, childDepth, t.maxDepth(), t.capabilityRuntime)
-		if subReg.Len() == 0 {
+		if subReg.Len() == 0 && !spec.AllowNoTools {
 			return "", fmt.Errorf("no read-only tools available for this sub-agent")
 		}
 	} else {

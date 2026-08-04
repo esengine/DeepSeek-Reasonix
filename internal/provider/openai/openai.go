@@ -969,6 +969,9 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			sawDone = true
 			break
 		}
+		if data == "" {
+			continue
+		}
 
 		var sr streamResponse
 		if err := json.Unmarshal([]byte(data), &sr); err != nil {
@@ -1075,7 +1078,13 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return emitted, err
 	}
 	if stalled.Load() {
-		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
+		// Wrap io.ErrUnexpectedEOF so streamWithReconnect treats a half-open
+		// stall — a proxy that drops silently mid-stream with no FIN/RST, the
+		// watchdog's primary target — as recoverable, identical to the clean-FIN
+		// idle-close just below. Without it the stall bypasses reconnect and
+		// hard-fails the turn instead of replaying (pre-output) or surfacing a
+		// retryable StreamInterruptedError (post-output).
+		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped: %w", c.name, idleTimeout, io.ErrUnexpectedEOF)
 	}
 	if err := scanner.Err(); err != nil {
 		return emitted, fmt.Errorf("%s: read stream: %w", c.name, err)

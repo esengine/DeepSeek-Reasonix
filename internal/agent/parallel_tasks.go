@@ -9,9 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
-	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
 
@@ -21,19 +19,19 @@ import (
 // cards for each sub-task.
 type ParallelTasksTool struct {
 	taskTool *TaskTool
-	reg      *tool.Registry
 }
 
 // NewParallelTasksTool creates a parallel dispatch tool that reuses the given
 // TaskTool's sub-agent infrastructure.
 func NewParallelTasksTool(taskTool *TaskTool, reg *tool.Registry) *ParallelTasksTool {
-	return &ParallelTasksTool{taskTool: taskTool, reg: reg}
+	_ = reg // retained for source compatibility with existing constructors
+	return &ParallelTasksTool{taskTool: taskTool}
 }
 
 func (p *ParallelTasksTool) Name() string { return "parallel_tasks" }
 
 func (p *ParallelTasksTool) Description() string {
-	return "Dispatch multiple read-only sub-agent tasks concurrently and collect their results. Each task runs in its own read-only sub-agent in parallel. Blocks until all complete."
+	return "Dispatch multiple read-only sub-agent tasks concurrently. Blocks until all complete, then returns a bounded preview and a stable Subagent reference for every completed persisted child; use read_subagent_result to page through any full answer without combined-result truncation."
 }
 
 func (p *ParallelTasksTool) Schema() json.RawMessage {
@@ -124,6 +122,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	type subResult struct {
 		index  int
 		output string
+		ref    string
 		err    error
 	}
 
@@ -132,6 +131,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	running := make([]bool, n)
 	done := make([]bool, n)
 	outputs := make([]string, n)
+	refs := make([]string, n)
 	taskErrs := make([]error, n)
 	statuses := make([]parallelTaskStatus, n)
 	for i := range params.Tasks {
@@ -164,65 +164,25 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			nested := subSinkFor(subID, sink)
-			// Session scheduler bounds total concurrency for parallel_tasks the
-			// same way as fleet (read-only slots; no write claims).
-			releaseSlot, slotErr := p.taskTool.acquireSlot(ctx, AcquireRequest{
-				Writer: false,
-				Nested: SubagentDepth(ctx) > 0,
-				Label:  label,
-			})
-			if slotErr != nil {
-				sink.Emit(event.Event{
-					Kind: event.ToolResult,
-					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: slotErr.Error()},
-				})
-				doneCh <- subResult{index: idx, err: slotErr}
-				return
-			}
-			defer releaseSlot()
-
 			modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
-			usageModelRef := p.taskTool.usageModelRef(modelRef, effortRef)
-			childDepth, depthErr := p.taskTool.nextSubagentDepth(ctx)
-			if depthErr != nil {
-				sink.Emit(event.Event{
-					Kind: event.ToolResult,
-					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: depthErr.Error()},
-				})
-				doneCh <- subResult{index: idx, err: depthErr}
-				return
-			}
-			subReg := ReadOnlySubagentToolRegistryForDepthWithRuntime(p.taskTool.parentReg, t.Tools, childDepth, p.taskTool.maxDepth(), p.taskTool.capabilityRuntime)
-
-			max := p.taskTool.childMaxSteps(t.MaxSteps)
-
-			prov, pricing, ctxWin, err := resolveSubagentProvider(p.taskTool, modelRef, effortRef)
-			if err != nil {
-				sink.Emit(event.Event{
-					Kind: event.ToolResult,
-					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Err: err.Error()},
-				})
-				doneCh <- subResult{index: idx, err: err}
-				return
-			}
-
-			// Ordinary parallel_tasks (no profile) keep the concise read-only
-			// default system prompt — profile-aware batches use fleet instead.
-			sess := NewSession(DefaultReadOnlyTaskSystemPrompt)
-			recoveryTaskID := "subagent:" + subID
-			var mutationObserver *checkpoint.MutationObserver
-			if p.taskTool.mutationObserver != nil {
-				mutationObserver = p.taskTool.mutationObserver.CloneForSubagent(recoveryTaskID, p.taskTool.mutationObserver.OwnershipTurn(), false)
-			}
-			opts := p.taskTool.subagentOptions(ctx, max, pricing, ctxWin, childDepth, recoveryTaskID, mutationObserver)
-			opts.ModelRef = usageModelRef
-			// Same contract as runSubSession: capture the pristine task before
-			// host framing is prepended so delivery intent classification judges
-			// the task, not the wrapper.
-			opts.ClassifierTaskText = t.Prompt
-			output, runErr := RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, p.taskTool.withWorkspaceContext(t.Prompt),
-				opts, nested)
+			itemCtx := withCallContext(ctx, subID, subSinkFor(subID, sink), nil, PlanModeFromContext(ctx))
+			// Route through TaskTool's unified runner so persisted parent sessions
+			// retain one independently readable transcript per child. Headless runs
+			// remain ephemeral and still receive fair bounded previews.
+			output, runErr := p.taskTool.RunProfileSpec(itemCtx, ProfileExecSpec{
+				Kind:         "task",
+				Name:         "task",
+				Prompt:       t.Prompt,
+				Description:  label,
+				CallTools:    t.Tools,
+				MaxSteps:     t.MaxSteps,
+				Model:        modelRef,
+				Effort:       effortRef,
+				ReadOnly:     true,
+				AllowNoTools: true,
+				Nested:       SubagentDepth(ctx) > 0,
+				SystemPrompt: DefaultReadOnlyTaskSystemPrompt,
+			})
 
 			if ctx.Err() != nil && runErr == nil {
 				runErr = ctx.Err()
@@ -243,7 +203,8 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 				Kind: event.ToolResult,
 				Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Output: output},
 			})
-			doneCh <- subResult{index: idx, output: output}
+			answer, ref := splitSubagentRunResult(output)
+			doneCh <- subResult{index: idx, output: answer, ref: ref}
 		}()
 	}
 
@@ -274,6 +235,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		completed++
 		done[r.index] = true
 		outputs[r.index] = r.output
+		refs[r.index] = r.ref
 		taskErrs[r.index] = r.err
 		switch {
 		case r.err == nil:
@@ -301,7 +263,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			}
 			markCancelled(err)
 			wg.Wait()
-			return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
+			return formatParallelTasksAggregate(outputs, refs, taskErrs, statuses, true), err
 		}
 	}
 	wg.Wait()
@@ -310,9 +272,9 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		if err == nil {
 			err = context.Canceled
 		}
-		return formatParallelTasksAggregate(outputs, taskErrs, statuses, true), err
+		return formatParallelTasksAggregate(outputs, refs, taskErrs, statuses, true), err
 	}
-	return formatParallelTasksAggregate(outputs, taskErrs, statuses, false), nil
+	return formatParallelTasksAggregate(outputs, refs, taskErrs, statuses, false), nil
 }
 
 func parallelTasksWereCancelled(statuses []parallelTaskStatus) bool {
@@ -324,9 +286,9 @@ func parallelTasksWereCancelled(statuses []parallelTaskStatus) bool {
 	return false
 }
 
-func formatParallelTasksAggregate(outputs []string, errs []error, statuses []parallelTaskStatus, cancelled bool) string {
+func formatParallelTasksAggregate(outputs, refs []string, errs []error, statuses []parallelTaskStatus, cancelled bool) string {
 	n := len(statuses)
-	var b strings.Builder
+	var prefix string
 	if cancelled {
 		completed := 0
 		for _, st := range statuses {
@@ -334,34 +296,47 @@ func formatParallelTasksAggregate(outputs []string, errs []error, statuses []par
 				completed++
 			}
 		}
-		fmt.Fprintf(&b, "Cancelled parallel tasks after completing %d of %d tasks:\n", completed, n)
+		prefix = fmt.Sprintf("Cancelled parallel tasks after completing %d of %d tasks:\n", completed, n)
 	} else {
-		fmt.Fprintf(&b, "Completed %d parallel tasks:\n", n)
+		prefix = fmt.Sprintf("Completed %d parallel tasks:\n", n)
 	}
+	items := make([]subagentAggregateItem, 0, n)
 	for i, st := range statuses {
-		fmt.Fprintf(&b, "── task-%d ──\n", i+1)
+		item := subagentAggregateItem{header: fmt.Sprintf("── task-%d ──\n", i+1)}
 		switch st {
 		case parallelTaskCompleted:
-			fmt.Fprintf(&b, "%s\n", strings.TrimSpace(outputs[i]))
+			item.status = "status: completed\n"
+			item.answer = strings.TrimSpace(outputs[i])
+			if i < len(refs) {
+				item.ref = refs[i]
+			}
 		case parallelTaskCancelled:
+			item.status = "status: cancelled\n"
 			if errs[i] != nil {
-				fmt.Fprintf(&b, "[CANCELLED] %s\n", errs[i])
+				item.detail = fmt.Sprintf("[CANCELLED] %s\n", boundedInline(errs[i].Error(), 256))
 			} else {
-				b.WriteString("[CANCELLED]\n")
+				item.detail = "[CANCELLED]\n"
 			}
 		case parallelTaskSkipped:
+			item.status = "status: skipped\n"
 			if errs[i] != nil {
-				fmt.Fprintf(&b, "[SKIPPED] cancelled before start: %s\n", errs[i])
+				item.detail = fmt.Sprintf("[SKIPPED] cancelled before start: %s\n", boundedInline(errs[i].Error(), 256))
 			} else {
-				b.WriteString("[SKIPPED] cancelled before start\n")
+				item.detail = "[SKIPPED] cancelled before start\n"
 			}
 		case parallelTaskFailed:
-			fmt.Fprintf(&b, "[FAILED] %s\n", errs[i])
+			item.status = "status: failed\n"
+			if errs[i] != nil {
+				item.detail = fmt.Sprintf("[FAILED] %s\n", boundedInline(errs[i].Error(), 256))
+			} else {
+				item.detail = "[FAILED]\n"
+			}
 		default:
-			b.WriteString("[PENDING]\n")
+			item.status = "status: pending\n"
 		}
+		items = append(items, item)
 	}
-	return b.String()
+	return formatBoundedSubagentAggregate(prefix, items)
 }
 
 func validateParallelTaskItems(tasks []parallelTaskItem) error {
@@ -371,14 +346,4 @@ func validateParallelTaskItems(tasks []parallelTaskItem) error {
 		}
 	}
 	return nil
-}
-
-// resolveSubagentProvider resolves a provider for a sub-agent, using the
-// TaskTool's resolver or falling back to the task tool's own provider.
-func resolveSubagentProvider(tt *TaskTool, modelRef, effortRef string) (provider.Provider, *provider.Pricing, int, error) {
-	if tt.resolveProvider != nil && (modelRef != "" || effortRef != "") {
-		return tt.resolveProvider(modelRef, effortRef)
-	}
-	// Use the task tool's own defaults.
-	return tt.prov, tt.pricing, tt.contextWindow, nil
 }

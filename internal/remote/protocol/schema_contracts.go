@@ -82,7 +82,7 @@ func buildCustomSchemaContracts() map[reflect.Type]SchemaValidation {
 		typeOf[Capabilities]():            {Invariants: rules("features.coreSession=true", "features.primaryFileQueries=true", "features.userShell=true", "features.jobCancel=true", "features.memory:dynamic", "features.research:dynamic", "deferred_features=false", "limits=frozen_remote_v1")},
 		typeOf[RemoteErrorData]():         {Invariants: rules("reasonixCode:selects_frozen_retryable_action_command", "expected:paired_with(actual)", "expected_actual:bounded_path_free_tokens", "HOST_BUSY:requires_nonnegative(retryAfterMs)", "other_errors:forbid(retryAfterMs)", "REWIND_PARTIAL:requires(snapshotRequired=true,at_least_one_change_flag=true)", "other_errors:forbid(change_flags,snapshotRequired)")},
 		typeOf[BrokerProviderRequest]():   {Invariants: rules("messages:non_null_array", "tools:non_null_array", "tools.parameters:valid_json_object", "maxTokens>=0")},
-		typeOf[BrokerProviderChunk]():     {Invariants: rules("argChars>=0", "type=error:requires(error)", "type!=error:forbids(error)", "type=usage:requires(usage)")},
+		typeOf[BrokerProviderChunk]():     {Invariants: rules("argChars>=0", "type=error:requires(error)", "type!=error:forbids(error)", "type=usage:requires(usage)", "type=responses_item:requires_bounded_json_object(responsesItem)", "type!=responses_item:forbids(responsesItem)")},
 		typeOf[BrokerStreamOpenParams]():  {Invariants: rules("streamId:trimmed_nonempty", "providerRef:trimmed_nonempty", "request:typed_provider_request")},
 		typeOf[BrokerStreamChunkParams](): {Invariants: rules("streamId:trimmed_nonempty", "seq>=1", "chunk:typed_provider_chunk")},
 	}

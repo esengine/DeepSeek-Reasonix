@@ -365,8 +365,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.VisionDetail != "" {
 				fmt.Fprintf(&b, "vision_detail = %q   # openai image detail hint: low|high; empty = auto\n", p.VisionDetail)
 			}
-			if p.WebSearch {
-				b.WriteString("web_search  = true   # enable server-side web_search tool (Anthropic/DeepSeek API)\n")
+			if p.WebSearch != nil {
+				fmt.Fprintf(&b, "web_search  = %t   # provider-executed web_search tool; omitted defaults on for supported official DeepSeek APIs\n", *p.WebSearch)
 			}
 			if p.ReasoningProtocol != "" {
 				fmt.Fprintf(&b, "reasoning_protocol = %q   # auto|deepseek|glm|openai|none; overrides model/endpoint reasoning detection\n", p.ReasoningProtocol)
@@ -1059,8 +1059,8 @@ func RenderTOMLProjectDelta(c *Config) string {
 			if p.VisionDetail != "" {
 				fmt.Fprintf(&b, "vision_detail = %q\n", p.VisionDetail)
 			}
-			if p.WebSearch {
-				b.WriteString("web_search  = true\n")
+			if p.WebSearch != nil {
+				fmt.Fprintf(&b, "web_search  = %t\n", *p.WebSearch)
 			}
 			if p.ReasoningProtocol != "" {
 				fmt.Fprintf(&b, "reasoning_protocol = %q\n", p.ReasoningProtocol)

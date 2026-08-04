@@ -10,7 +10,12 @@ const candidate = "c46e3af1c2732fe2b3dedb0bd47eb39a629357d2";
 // The fake npm records every dist-tag mutation so a test can assert not just
 // the outcome but how many registry writes it took to get there — the whole
 // point of the idempotent path is that a rerun performs none.
-function run(expectedSha = candidate, publishedSha = candidate, staleReads = 0, { staging = false } = {}) {
+function run(
+  expectedSha = candidate,
+  publishedSha = candidate,
+  staleReads = 0,
+  { staging = false, forbidRemoval = false } = {},
+) {
   const directory = mkdtempSync(join(tmpdir(), "reasonix-npm-alias-test-"));
   const npm = join(directory, "npm");
   const state = join(directory, "state");
@@ -33,6 +38,11 @@ if (args[0] === "view" && args[1].includes("@1.19.2") && args.at(-1) === "--json
   console.log(JSON.stringify(tags));
 } else if (args[0] === "dist-tag" && (args[1] === "add" || args[1] === "rm")) {
   fs.appendFileSync(process.env.NPM_FAKE_WRITES, JSON.stringify(args) + "\\n");
+  if (args[1] === "rm" && process.env.NPM_FAKE_FORBID_REMOVAL === "1") {
+    console.error("npm error code E403");
+    console.error("npm error 403 Forbidden");
+    process.exit(1);
+  }
   process.exit(0);
 } else {
   console.error("unexpected npm arguments", JSON.stringify(args));
@@ -49,6 +59,7 @@ if (args[0] === "view" && args[1].includes("@1.19.2") && args.at(-1) === "--json
       NPM_FAKE_STATE: state,
       NPM_FAKE_STALE_READS: String(staleReads),
       NPM_FAKE_STAGING: staging ? "1" : "0",
+      NPM_FAKE_FORBID_REMOVAL: forbidRemoval ? "1" : "0",
       NPM_FAKE_WRITES: writes,
       NPM_TAG_VERIFY_DELAY_MS: "1",
       PATH: `${directory}:${process.env.PATH}`,
@@ -108,4 +119,15 @@ test("removes the staging alias the publisher actually creates", () => {
   for (const args of removed) {
     assert.equal(args.at(-1), "latest-staging");
   }
+});
+
+test("completes when npm forbids removal after official aliases converge", () => {
+  const result = run(candidate, candidate, 0, {
+    staging: true,
+    forbidRemoval: true,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /official aliases are already verified/);
+  const removals = result.writes.filter((args) => args[1] === "rm");
+  assert.equal(removals.length, 7);
 });

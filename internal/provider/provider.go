@@ -66,15 +66,21 @@ type Message struct {
 	// replayed on the next turn when a tool call followed thinking; providers
 	// without signed reasoning (e.g. the openai-compatible ones) leave it empty.
 	// Round-tripped alongside ReasoningContent.
-	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
-	ToolCalls          []ToolCall       `json:"tool_calls,omitempty"`      // set by assistant
-	ToolCallID         string           `json:"tool_call_id,omitempty"`    // links a tool result to its call
-	Name               string           `json:"name,omitempty"`            // tool message: tool name
-	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
-	WorkDurationMs     int64            `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
-	CreatedAt          int64            `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
-	Edited             bool             `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
-	Original           string           `json:"original,omitempty"`        // user prompt before inline edit
+	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
+	ToolCalls          []ToolCall `json:"tool_calls,omitempty"` // set by assistant
+	// ResponsesItems preserves provider-issued Responses API output items that
+	// must be replayed on a stateless follow-up. Today only DeepSeek
+	// web_search_call items use this path; other providers ignore the field.
+	// Keeping the opaque JSON on the assistant turn makes resume/restart safe,
+	// while omitempty keeps old session files byte-compatible when unused.
+	ResponsesItems  []json.RawMessage `json:"responses_items,omitempty"`
+	ToolCallID      string            `json:"tool_call_id,omitempty"`    // links a tool result to its call
+	Name            string            `json:"name,omitempty"`            // tool message: tool name
+	MemoryCitations []MemoryCitation  `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+	WorkDurationMs  int64             `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
+	CreatedAt       int64             `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
+	Edited          bool              `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
+	Original        string            `json:"original,omitempty"`        // user prompt before inline edit
 	// LocalOnly marks durable transcript content that must never be sent to a
 	// model provider. Interrupted streaming output uses it so every frontend can
 	// replay what the user saw without feeding partial reasoning or tool-call
@@ -652,6 +658,7 @@ const (
 	ChunkUsage                              // token usage for the completion
 	ChunkDone                               // completion finished normally
 	ChunkError                              // an error occurred
+	ChunkResponsesItem                      // a complete provider-issued Responses API output item for stateless replay
 )
 
 // Usage reports token accounting for a completion. Cache hit/miss come from
@@ -793,12 +800,13 @@ type Chunk struct {
 	// from the SSE stream, so the Agent can persist them into the session
 	// and the next turn's input reasoning item round-trips them (OpenAI
 	// Responses schema marks Reasoning.id required).
-	ReasoningID     string    // ChunkReasoning: provider-issued reasoning item id
-	ReasoningStatus string    // ChunkReasoning: final reasoning item status ("completed")
-	ToolCall        *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
-	ArgChars        int       // ChunkToolCallArgsDelta: cumulative argument characters received for this call
-	Usage           *Usage    // ChunkUsage
-	Err             error     // ChunkError
+	ReasoningID     string          // ChunkReasoning: provider-issued reasoning item id
+	ReasoningStatus string          // ChunkReasoning: final reasoning item status ("completed")
+	ToolCall        *ToolCall       // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
+	ArgChars        int             // ChunkToolCallArgsDelta: cumulative argument characters received for this call
+	ResponsesItem   json.RawMessage // ChunkResponsesItem: opaque validated Responses API output item
+	Usage           *Usage          // ChunkUsage
+	Err             error           // ChunkError
 }
 
 // StreamInterruptedError marks a recoverable transport cut that happened after

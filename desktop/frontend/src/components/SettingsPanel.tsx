@@ -1327,6 +1327,7 @@ export function normalizeProviderView(p: ProviderView): ProviderView {
     authHeader: Boolean(p.authHeader),
     reasoningProtocol: normalizeReasoningProtocol(p.reasoningProtocol),
     thinking: normalizeThinkingMode(p.thinking),
+    webSearch: Boolean(p.webSearch),
     supportedEfforts: asArray(p.supportedEfforts),
     modelOverrides: asArray(p.modelOverrides),
     requiresKey,
@@ -1743,6 +1744,20 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
   };
   return (
     <SettingsSection>
+      <SettingsField label={t("settings.desktopLayoutStyle")}>
+        <div className="set-seg">
+          {(["classic", "workbench", "creation"] as const).map((style) => (
+            <button
+              key={style}
+              className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
+              disabled={busy}
+              onClick={() => void apply(() => app.SetDesktopLayoutStyle(style))}
+            >
+              {desktopLayoutStyleLabel(style, t)}
+            </button>
+          ))}
+        </div>
+      </SettingsField>
       <SettingsField label={t("settings.language")}>
         <div className="set-seg">
           {LANGUAGE_PREFS.map((pref) => (
@@ -1767,20 +1782,6 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               onClick={() => void apply(() => app.SetDesktopCurrency(currency))}
             >
               {currency === "" ? t("settings.currencyAuto") : currency}
-            </button>
-          ))}
-        </div>
-      </SettingsField>
-      <SettingsField label={t("settings.desktopLayoutStyle")}>
-        <div className="set-seg">
-          {(["classic", "workbench", "creation"] as const).map((style) => (
-            <button
-              key={style}
-              className={`set-seg__btn${desktopLayoutStyle === style ? " set-seg__btn--on" : ""}`}
-              disabled={busy}
-              onClick={() => void apply(() => app.SetDesktopLayoutStyle(style))}
-            >
-              {desktopLayoutStyleLabel(style, t)}
             </button>
           ))}
         </div>
@@ -4791,12 +4792,16 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const modelDraftForFetch = (p: ProviderView, fetched: string[]): ProviderModelDraft => {
     const candidates = providerModelCandidates(p.models, fetched);
     const selected = mergedFetchedProviderModels(p.models, fetched, { preserveCurated: true });
-    const visionSource = p.visionModelsConfigured ? p.visionModels : inferredVisionModels(candidates);
+    const visionCapability = providerVisionCapability(p.kind, p.baseUrl);
+    const visionSource = visionCapability === "unsupported"
+      ? []
+      : (p.visionModelsConfigured ? p.visionModels : inferredVisionModels(candidates));
     return {
       providerName: p.name,
       candidates,
       selected: candidates.filter((model) => selected.includes(model)),
       visionModels: candidates.filter((model) => visionSource.includes(model)),
+      visionCapability,
     };
   };
 
@@ -4948,7 +4953,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       await app.SaveProvider({
         ...provider,
         models,
-        visionModels,
+        visionModels: draft.visionCapability === "unsupported" ? [] : visionModels,
         visionModelsConfigured: true,
         default: providerDefaultModel(provider.default, models),
       });
@@ -5034,6 +5039,11 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             onClearDraftModels={() => updateModelDraftSelection(group.id, () => [])}
             onCancelDraftModels={() => setGroupModelDraft(group.id, null)}
             onSaveDraftModels={() => void saveModelDraft(group)}
+            onToggleWebSearch={(enabled) => {
+              const provider = group.providers[0];
+              if (!provider) return;
+              void apply(() => app.SaveProvider({ ...provider, webSearch: enabled }));
+            }}
             onSaveEditorKey={(env, value) => group.builtIn ? saveProviderKey(group, env, value) : saveKeyEnvAndAutoRefresh(group, env, value)}
             onClearEditorKey={clearProviderKey}
             onDelete={(p) => apply(() => app.RemoveProviderAccess(p.name)).then(() => {
@@ -5076,6 +5086,7 @@ type ProviderModelDraft = {
   candidates: string[];
   selected: string[];
   visionModels: string[];
+  visionCapability: ProviderVisionCapability;
 };
 
 type AddProviderMode = null | "official" | "custom";
@@ -5445,6 +5456,7 @@ function ProviderAccessCard({
   onClearDraftModels,
   onCancelDraftModels,
   onSaveDraftModels,
+  onToggleWebSearch,
   onSaveEditorKey,
   onClearEditorKey,
   onDelete,
@@ -5467,6 +5479,7 @@ function ProviderAccessCard({
   onClearDraftModels: () => void;
   onCancelDraftModels: () => void;
   onSaveDraftModels: () => void;
+  onToggleWebSearch: (enabled: boolean) => void;
   onSaveEditorKey: (apiKeyEnv: string, value: string) => Promise<void>;
   onClearEditorKey?: (apiKeyEnv: string) => Promise<void>;
   onDelete?: (p: ProviderView) => Promise<void>;
@@ -5577,6 +5590,17 @@ function ProviderAccessCard({
         />
       )}
 
+      {editableProvider && (
+        <ProviderServiceCapabilities
+          kind={editableProvider.kind}
+          baseUrl={editableProvider.baseUrl}
+          models={editableProvider.models}
+          enabled={Boolean(editableProvider.webSearch)}
+          disabled={busy}
+          onChange={onToggleWebSearch}
+        />
+      )}
+
       {group.providers.length > 1 && (
         <div className="provider-profiles">
           {group.providers.map((p) => {
@@ -5680,7 +5704,7 @@ function ProviderModelDraftPicker({
         {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
           const enabled = selected.has(model);
           return (
-            <div className="provider-model-draft__option" key={model} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
+            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -5690,15 +5714,23 @@ function ProviderModelDraftPicker({
                 />
                 <span>{model}</span>
               </label>
-              <label className="provider-model-draft__vision">
-                <input
-                  type="checkbox"
-                  checked={enabled && vision.has(model)}
-                  disabled={disabled || !enabled}
-                  onChange={() => onToggleVision(model)}
-                />
-                <span>{t("settings.visionModel")}</span>
-              </label>
+              {draft.visionCapability === "configurable" ? (
+                <label className="provider-model-draft__vision">
+                  <input
+                    type="checkbox"
+                    checked={enabled && vision.has(model)}
+                    disabled={disabled || !enabled}
+                    aria-label={t("settings.visionModelAria", { model })}
+                    onChange={() => onToggleVision(model)}
+                  />
+                  <span>{t("settings.visionModel")}</span>
+                </label>
+              ) : (
+                <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
+                  <span>{t("settings.textInput")}</span>
+                  <span>{t("settings.imageInputUnsupported")}</span>
+                </div>
+              )}
             </div>
           );
         }) : (
@@ -5714,6 +5746,61 @@ function ProviderModelDraftPicker({
         </button>
       </div>
     </div>
+  );
+}
+
+function ProviderServiceCapabilities({
+  kind,
+  baseUrl,
+  models,
+  enabled,
+  disabled,
+  onChange,
+}: {
+  kind: string;
+  baseUrl: string;
+  models: string[];
+  enabled: boolean;
+  disabled: boolean;
+  onChange: (enabled: boolean) => void;
+}) {
+  const t = useT();
+  const capabilityID = useId();
+  const costID = `${capabilityID}-cost`;
+  if (!providerSupportsServerWebSearch(kind, baseUrl)) return null;
+  const normalizedKind = kind.trim().toLowerCase();
+  return (
+    <section className="provider-capabilities" aria-labelledby={capabilityID}>
+      <div className="provider-card-block__label" id={capabilityID}>
+        {t("settings.providerCapabilities")}
+      </div>
+      <label className="provider-capability-row">
+        <span className="provider-capability-row__copy">
+          <span className="provider-capability-row__title">
+            {t("settings.serverWebSearch")}
+            <span className="badge badge--project">{t("settings.recommended")}</span>
+          </span>
+          <span>{t("settings.serverWebSearchHint")}</span>
+        </span>
+        <input
+          className="provider-capability-row__switch"
+          type="checkbox"
+          role="switch"
+          checked={enabled}
+          disabled={disabled}
+          aria-describedby={costID}
+          onChange={(event) => onChange(event.target.checked)}
+        />
+      </label>
+      <div className="provider-capability-row__cost" id={costID}>
+        {t("settings.serverWebSearchCostHint")}
+      </div>
+      <div className="provider-capability-badges" aria-label={t("settings.providerCompatibility")}>
+        <span>{normalizedKind === "responses" ? t("settings.responsesStateless") : t("settings.anthropicCompatible")}</span>
+        <span>{t("settings.imageInputUnsupported")}</span>
+        {models.length > 0 && <span>{t("settings.serverWebSearchApplies", { models: models.join(", ") })}</span>}
+      </div>
+    </section>
   );
 }
 
@@ -5758,6 +5845,50 @@ function providerBaseHost(baseUrl: string): string {
     return new URL(baseUrl).hostname.toLowerCase();
   } catch {
     return "";
+  }
+}
+
+type ProviderVisionCapability = "configurable" | "unsupported";
+
+function isDeepSeekOfficialEndpoint(baseUrl: string): boolean {
+  return providerBaseHost(baseUrl) === "api.deepseek.com";
+}
+
+export function providerSupportsServerWebSearch(kind: string, baseUrl: string): boolean {
+  try {
+    const endpoint = new URL(baseUrl.trim());
+    if (
+      endpoint.protocol !== "https:" ||
+      endpoint.hostname.toLowerCase() !== "api.deepseek.com" ||
+      endpoint.port ||
+      endpoint.username ||
+      endpoint.password ||
+      endpoint.search ||
+      endpoint.hash
+    ) return false;
+    const path = endpoint.pathname.replace(/\/+$/, "");
+    switch (kind.trim().toLowerCase()) {
+      case "responses":
+        return path === "";
+      case "anthropic":
+        return path === "/anthropic";
+      default:
+        return false;
+    }
+  } catch {
+    return false;
+  }
+}
+
+function providerVisionCapability(kind: string, baseUrl: string): ProviderVisionCapability {
+  if (!isDeepSeekOfficialEndpoint(baseUrl)) return "configurable";
+  switch (kind.trim().toLowerCase()) {
+    case "openai":
+    case "responses":
+    case "anthropic":
+      return "unsupported";
+    default:
+      return "configurable";
   }
 }
 
@@ -5852,6 +5983,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
   candidates,
   selectedModels,
   visionModels,
+  visionCapability = "configurable",
   contextWindows,
   disabled,
   onToggleModel,
@@ -5863,6 +5995,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
   candidates: string[];
   selectedModels: string[];
   visionModels: string[];
+  visionCapability?: ProviderVisionCapability;
   contextWindows: Record<string, string>;
   disabled: boolean;
   onToggleModel: (model: string) => void;
@@ -5916,7 +6049,7 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
         {deferredCandidates.length > 0 ? deferredCandidates.map((model) => {
           const enabled = selected.has(model);
           return (
-            <div className="provider-model-draft__option" key={model} style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
+            <div className="provider-model-draft__option" key={model} role="listitem" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 48px" }}>
               <label className="provider-model-draft__model">
                 <input
                   type="checkbox"
@@ -5926,15 +6059,23 @@ export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker
                 />
                 <span>{model}</span>
               </label>
-              <label className="provider-model-draft__vision">
-                <input
-                  type="checkbox"
-                  checked={enabled && vision.has(model)}
-                  disabled={disabled || !enabled}
-                  onChange={() => onToggleVision(model)}
-                />
-                <span>{t("settings.visionModel")}</span>
-              </label>
+              {visionCapability === "configurable" ? (
+                <label className="provider-model-draft__vision">
+                  <input
+                    type="checkbox"
+                    checked={enabled && vision.has(model)}
+                    disabled={disabled || !enabled}
+                    aria-label={t("settings.visionModelAria", { model })}
+                    onChange={() => onToggleVision(model)}
+                  />
+                  <span>{t("settings.visionModel")}</span>
+                </label>
+              ) : (
+                <div className="provider-model-draft__capabilities" aria-label={t("settings.modelCapabilitiesAria", { model })}>
+                  <span>{t("settings.textInput")}</span>
+                  <span>{t("settings.imageInputUnsupported")}</span>
+                </div>
+              )}
               <div className="provider-model-draft__context-field">
                 <label className="provider-model-draft__context">
                   <span>{t("settings.modelContextWindow")}</span>
@@ -6011,6 +6152,7 @@ export function ProviderEditor({
   );
   const [reasoningProtocol, setReasoningProtocol] = useState(normalizeReasoningProtocol(initial?.reasoningProtocol));
   const [thinking, setThinking] = useState(normalizeThinkingMode(initial?.thinking));
+  const [webSearch, setWebSearch] = useState(Boolean(initial?.webSearch));
   const [supportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
   const [defaultEffort] = useState(initial?.defaultEffort ?? "");
   const [fetchingModels, setFetchingModels] = useState(false);
@@ -6027,6 +6169,7 @@ export function ProviderEditor({
   const effectiveBaseUrl = fullChatUrl ? providerBaseURLFromChatURL(chatUrl) : baseUrl.trim();
   const effectiveChatUrl = fullChatUrl ? trimmedURL(chatUrl) : "";
   const effectiveModelsUrl = modelsUrl.trim();
+  const effectiveVisionCapability = providerVisionCapability(effectiveKind, effectiveBaseUrl);
   const effectiveHeaders = parseProviderHeaders(headersDraft);
   const extraBodyParse = useMemo(() => {
     try {
@@ -6097,6 +6240,7 @@ export function ProviderEditor({
         contextWindow: Number(ctx) || 0,
         reasoningProtocol,
         thinking,
+        webSearch: providerSupportsServerWebSearch(effectiveKind, effectiveBaseUrl) && webSearch,
         supportedEfforts: cleanedSupportedEfforts,
         defaultEffort: cleanDefaultEffort,
         modelOverrides: mergeProviderModelContextWindows(initial?.modelOverrides, parseProviderListInput(models), modelContextWindows),
@@ -6126,7 +6270,9 @@ export function ProviderEditor({
     setFetchStatus(null);
     setFetchFallback(null);
     const ms = parseProviderListInput(models);
-    const vms = parseProviderListInput(visionModels).filter((model) => ms.includes(model));
+    const vms = effectiveVisionCapability === "unsupported"
+      ? []
+      : parseProviderListInput(visionModels).filter((model) => ms.includes(model));
     const effectiveApiKeyEnv = providerApiKeyEnvForSave(name, apiKeyEnv, keyDraft);
     const provider: ProviderView = {
       name: name.trim(),
@@ -6149,6 +6295,7 @@ export function ProviderEditor({
       contextWindow: Number(ctx) || 0,
       reasoningProtocol,
       thinking,
+      webSearch: providerSupportsServerWebSearch(effectiveKind, effectiveBaseUrl) && webSearch,
       supportedEfforts: cleanedSupportedEfforts,
       // Clear the stored default if no levels are selected; the backend's
       // NormalizeEffort would otherwise silently ignore an unsupported value.
@@ -6444,6 +6591,7 @@ export function ProviderEditor({
         candidates={modelCandidateNames}
         selectedModels={modelNames}
         visionModels={visionModelNames}
+        visionCapability={effectiveVisionCapability}
         contextWindows={modelContextWindows}
         disabled={busy || fetchingModels}
         onToggleModel={toggleEditorModel}
@@ -6451,6 +6599,14 @@ export function ProviderEditor({
         onContextWindowChange={updateEditorModelContextWindow}
         onSelectAll={selectAllEditorModels}
         onClear={clearEditorModels}
+      />
+      <ProviderServiceCapabilities
+        kind={effectiveKind}
+        baseUrl={effectiveBaseUrl}
+        models={modelNames}
+        enabled={webSearch}
+        disabled={busy || fetchingModels}
+        onChange={setWebSearch}
       />
       {advancedFields}
       <div className="prov-card__actions">

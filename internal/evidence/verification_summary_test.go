@@ -132,6 +132,66 @@ func TestTSCVerificationRequiresExplicitNoEmit(t *testing.T) {
 	}
 }
 
+func TestSwiftTestRecognizedAsVerification(t *testing.T) {
+	// swift test runs the SwiftPM test suite; the build cache lands in the
+	// package's own .build directory, mirroring cargo test acceptance. Other
+	// swift subcommands emit binaries, run arbitrary code, or mutate the
+	// package graph and must fail closed as mutations.
+	for _, command := range []string{
+		"swift test",
+		"swift test --parallel",
+		"swift test --filter SomeTests",
+		"swift test --enable-code-coverage",
+	} {
+		if !IsDeliveryVerificationCommand(command) {
+			t.Errorf("%q should be recognized as a read-only Swift test verifier", command)
+		}
+		args, err := json.Marshal(map[string]string{"command": command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ToolCallMutates("bash", args, false) {
+			t.Errorf("%q should remain a non-mutating verification", command)
+		}
+	}
+
+	for _, command := range []string{
+		"swift",
+		"swift build",
+		"swift build -c release",
+		"swift run",
+		"swift package resolve",
+		"swift package update",
+		"swift test --xunit-output report.xml",
+		"swift test --xunit-output=report.xml",
+		"swift test --scratch-path /tmp/out",
+		"swift test --build-path /tmp/out",
+		"swift test --build-path=/tmp/out",
+		"swift test --event-stream-output-path /tmp/events.json",
+		"swift test --experimental-event-stream-output /tmp/events.json",
+		"swift test --attachments-path /tmp/attachments",
+		"swift test --experimental-attachments-path /tmp/attachments",
+		"swift test --cache-path /tmp/cache",
+		"swift test --help",
+		"swift test --list-tests",
+	} {
+		if IsDeliveryVerificationCommand(command) {
+			t.Errorf("%q can build, run, or mutate the package and must not count as verification", command)
+		}
+		args, err := json.Marshal(map[string]string{"command": command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !ToolCallMutates("bash", args, false) {
+			t.Errorf("%q must fail closed as a mutation", command)
+		}
+	}
+
+	if !strings.Contains(VerificationCommandSummary(), "swift test") {
+		t.Fatal("recovery summary must render the concrete Swift test command")
+	}
+}
+
 func TestPythonCompileallAlwaysCountsAsMutation(t *testing.T) {
 	for _, command := range []string{
 		"python -m compileall .",

@@ -4181,3 +4181,45 @@ func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) 
 		}
 	}
 }
+
+// A freshly created empty session must not hijack the topic from the
+// conversation the user actually had: content-bearing sessions outrank
+// content-free ones regardless of updatedAt (#7305).
+func TestFindTopicSessionPrefersContentOverNewerEmpty(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := robustTempDir(t)
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+
+	contentPath := writeTopicSessionWithPrompt(t, dir, "content.jsonl", topic.ID, defaultTopicTitle, projectRoot, "real conversation", time.Now().Add(-time.Hour))
+
+	emptyPath := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatalf("write empty session: %v", err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(emptyPath, agent.BranchMeta{
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topic.ID,
+		TopicTitle:    defaultTopicTitle,
+	}); err != nil {
+		t.Fatalf("save empty branch meta: %v", err)
+	}
+
+	if got, _ := app.findTopicSessionForTarget("project", projectRoot, topic.ID); got != contentPath {
+		t.Fatalf("topic session = %q, want content-bearing %q to outrank newer empty %q", got, contentPath, emptyPath)
+	}
+	if got, _ := app.findTopicContentSessionForTarget("project", projectRoot, topic.ID); got != contentPath {
+		t.Fatalf("content topic session = %q, want %q", got, contentPath)
+	}
+}

@@ -36,7 +36,7 @@ func NewFleetTool(taskTool *TaskTool) *FleetTool {
 func (*FleetTool) Name() string { return "fleet" }
 
 func (*FleetTool) Description() string {
-	return "Dispatch 2–64 sub-agent tasks in parallel and aggregate results. Each item may select a profile, model, effort, tools, write_paths, or read_only. Multiple writers must declare non-overlapping write_paths; omitted write_paths claim the whole workspace, so two or more writers without paths fail preflight before any task starts. Independent failure is the default: one failure does not cancel others. Background mode returns a fleet job id collectable with wait."
+	return "Dispatch 2–64 sub-agent tasks in parallel and return bounded previews plus stable Subagent references for full-result retrieval from completed persisted children with read_subagent_result. Each item may select a profile, model, effort, tools, write_paths, or read_only. Multiple writers must declare non-overlapping write_paths; omitted write_paths claim the whole workspace, so two or more writers without paths fail preflight before any task starts. Independent failure is the default: one failure does not cancel others. Background mode returns a fleet job id collectable with wait."
 }
 
 func (*FleetTool) Schema() json.RawMessage {
@@ -244,10 +244,10 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 			// transcripts, evidence, and scheduler claims stay independent.
 			itemCtx := withCallContext(ctx, subID, subSinkFor(subID, sink), nil, false)
 			out, err := f.taskTool.RunProfileSpec(itemCtx, spec)
-			res := fleetItemResult{index: idx, profile: spec.Profile, output: out, err: err}
+			answer, ref := splitSubagentRunResult(out)
+			res := fleetItemResult{index: idx, profile: spec.Profile, output: answer, ref: ref, err: err}
 			if err == nil {
 				res.status = fleetItemCompleted
-				res.ref = extractSubagentRef(out)
 				sink.Emit(event.Event{
 					Kind: event.ToolResult,
 					Tool: event.Tool{ID: subID, ParentID: parentID, Name: "task", Output: out},
@@ -322,7 +322,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 
 func formatFleetAggregate(results []fleetItemResult, cancelled bool) string {
 	n := len(results)
-	var b strings.Builder
+	var prefix string
 	if cancelled {
 		completed := 0
 		for _, r := range results {
@@ -330,41 +330,41 @@ func formatFleetAggregate(results []fleetItemResult, cancelled bool) string {
 				completed++
 			}
 		}
-		fmt.Fprintf(&b, "Cancelled fleet after completing %d of %d tasks:\n", completed, n)
+		prefix = fmt.Sprintf("Cancelled fleet after completing %d of %d tasks:\n", completed, n)
 	} else {
-		fmt.Fprintf(&b, "Completed fleet of %d tasks:\n", n)
+		prefix = fmt.Sprintf("Completed fleet of %d tasks:\n", n)
 	}
+	items := make([]subagentAggregateItem, 0, n)
 	for i, r := range results {
-		fmt.Fprintf(&b, "── task-%d", i+1)
+		header := fmt.Sprintf("── task-%d", i+1)
 		if r.profile != "" {
-			fmt.Fprintf(&b, " profile=%s", r.profile)
+			header += " profile=" + boundedInline(r.profile, 80)
 		}
-		b.WriteString(" ──\n")
+		header += " ──\n"
+		item := subagentAggregateItem{header: header, ref: r.ref}
 		switch r.status {
 		case fleetItemCompleted:
-			fmt.Fprintf(&b, "status: completed\n%s\n", strings.TrimSpace(r.output))
-			if r.ref != "" {
-				fmt.Fprintf(&b, "Subagent reference: %s\n", r.ref)
-			}
+			item.status = "status: completed\n"
+			item.answer = strings.TrimSpace(r.output)
 		case fleetItemFailed:
-			fmt.Fprintf(&b, "status: failed\n[FAILED] %v\n", r.err)
+			item.status = "status: failed\n"
+			if r.err != nil {
+				item.detail = fmt.Sprintf("[FAILED] %s\n", boundedInline(r.err.Error(), 256))
+			}
 		case fleetItemCancelled:
-			fmt.Fprintf(&b, "status: cancelled\n[CANCELLED] %v\n", r.err)
+			item.status = "status: cancelled\n"
+			if r.err != nil {
+				item.detail = fmt.Sprintf("[CANCELLED] %s\n", boundedInline(r.err.Error(), 256))
+			}
 		case fleetItemSkipped:
-			fmt.Fprintf(&b, "status: skipped\n[SKIPPED] %v\n", r.err)
+			item.status = "status: skipped\n"
+			if r.err != nil {
+				item.detail = fmt.Sprintf("[SKIPPED] %s\n", boundedInline(r.err.Error(), 256))
+			}
 		default:
-			fmt.Fprintf(&b, "status: pending\n")
+			item.status = "status: pending\n"
 		}
+		items = append(items, item)
 	}
-	return b.String()
-}
-
-func extractSubagentRef(output string) string {
-	const prefix = "Subagent reference: "
-	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(line, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		}
-	}
-	return ""
+	return formatBoundedSubagentAggregate(prefix, items)
 }

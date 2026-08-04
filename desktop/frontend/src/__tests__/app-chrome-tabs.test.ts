@@ -796,5 +796,17 @@ ok(
   "offscreen skip link does not leak its focus shadow into the workbench title area",
 );
 
+// The Wails drag runtime drops any mousedown with detail !== 1, so a double
+// click on a drag region never reaches the OS: both title-bar-hiding platforms
+// have to zoom from here or not at all.
+ok(
+  /chromeDoubleClickZooms\s*=\s*windowsFramelessChrome\s*\|\|\s*desktopPlatform === "darwin"/.test(appSource),
+  "title-bar double click zooms on macOS as well as frameless Windows",
+);
+ok(
+  /handleChromeTitlebarDoubleClick[\s\S]{0,400}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
+  "title-bar double click still ignores interactive controls",
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
