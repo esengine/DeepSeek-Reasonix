@@ -84,7 +84,18 @@ func ssrfGuardedTransport(proxyURL string) *http.Transport {
 				return nil, fmt.Errorf("refusing to fetch internal address %s (resolves to %s)", host, ip.IP)
 			}
 		}
-		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].IP.String(), port))
+		// 遍历所有解析 IP 逐个尝试（IPv6 不可达时 fallback IPv4）——
+		// 只试 ips[0] 会让 IPv6 优先的 DNS 在 IPv6 被重置时直接失败
+		// （2026-08-03 duel 冒烟实测：wiki/bbc 全部 connection reset）。
+		var lastErr error
+		for _, ip := range ips {
+			conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.IP.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			lastErr = err
+		}
+		return nil, lastErr
 	}
 
 	tr := &http.Transport{

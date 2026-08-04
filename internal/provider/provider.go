@@ -52,6 +52,15 @@ type Message struct {
 	ProviderContent  string   `json:"provider_content,omitempty"`
 	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…) on user (attachments) and tool (MCP image results) messages; embedded only for vision-capable models
 	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	// ReasoningID is the provider-issued identifier of the reasoning item
+	// (OpenAI Responses schema: Reasoning.id is required on input items).
+	// Captured from the streamed output item and round-tripped back into
+	// the input on subsequent turns, matching the wire schema.
+	ReasoningID string `json:"reasoning_id,omitempty"`
+	// ReasoningStatus is the final status of the reasoning item
+	// ("in_progress" | "completed") as issued by the server's done event,
+	// round-tripped back into the input alongside ReasoningID.
+	ReasoningStatus string `json:"reasoning_status,omitempty"`
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
 	// replayed on the next turn when a tool call followed thinking; providers
@@ -149,17 +158,79 @@ type ToolCall struct {
 
 // ToolSchema is a tool definition exposed to the model. Parameters is JSON Schema.
 type ToolSchema struct {
+	// Type selects the tool kind on the wire. Empty or "function" declares a
+	// normal function tool; "web_search" (or a versioned variant such as
+	// "web_search_2025_08_26") declares a server-side built-in search tool
+	// that is only honored by Responses endpoints (OpenAI Chat Completions
+	// and Anthropic skip these entries). Function fields are ignored for
+	// built-in types.
+	Type        string          `json:"type,omitempty"`
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Parameters  json.RawMessage `json:"parameters"`
+}
+
+// ToolChoice controls how the model picks tools. The zero value (nil
+// pointer) omits the field entirely, which preserves the byte-stable
+// prompt-cache prefix. Only Responses endpoints support the web_search
+// forced choice today.
+type ToolChoice struct {
+	// Type is "web_search" (or a versioned variant) to force a server-side
+	// search, or "auto"/"none"/"required"/a function name for standard modes.
+	Type string
+	// Name is the function name when Type selects a specific function.
+	Name string
+}
+
+// WebSearchTool returns a server-side built-in web search tool declaration
+// (Responses endpoints only: DeepSeek web_search). It is intentionally NOT
+// injected into the default tool list — adding it would change the
+// prompt-cache prefix for every request, so callers opt in explicitly.
+func WebSearchTool(versioned bool) ToolSchema {
+	t := "web_search"
+	if versioned {
+		t = "web_search_2025_08_26"
+	}
+	return ToolSchema{Type: t}
 }
 
 // Request is a single completion request.
 type Request struct {
 	Messages    []Message
 	Tools       []ToolSchema
-	Temperature *float64 // nil = omit; non-nil = send the value, including 0
+	ToolChoice  *ToolChoice // nil = omit (byte-stable default); Responses web_search only
+	Temperature *float64    // nil = omit; non-nil = send the value, including 0
 	MaxTokens   int
+	// ResponseFormat, when non-nil, asks the endpoint for structured JSON
+	// output (Responses: text.format.type=json_object). Nil omits the field
+	// entirely — the common path must stay byte-stable for prompt caching.
+	ResponseFormat *ResponseFormat
+}
+
+// ResponseFormat asks a provider to constrain its output shape.
+type ResponseFormat struct {
+	// Type is the structured format: "json_object" constrains the reply to
+	// JSON; "json_schema" additionally carries Name/Schema so the model
+	// emits a schema-conforming object (DeepSeek Responses web_search
+	// knowledge-extraction uses this). Empty Type means unset.
+	Type string `json:"type"`
+	// Name is required for json_schema ("knowledge_extract" etc.).
+	Name string `json:"name,omitempty"`
+	// Schema is the JSON Schema object for json_schema output. The model is
+	// guided (not strictly guaranteed) to comply, so callers must tolerate
+	// markdown-wrapped JSON. RawMessage keeps the remote-protocol generator
+	// happy (map[string]any would hit "unsupported wire type interface {}").
+	Schema json.RawMessage `json:"schema,omitempty"`
+}
+
+// JSONSchemaFormat returns a json_schema ResponseFormat that asks the model
+// to emit an object matching schema under the given name.
+func JSONSchemaFormat(name string, schema map[string]any) *ResponseFormat {
+	raw, err := json.Marshal(schema)
+	if err != nil {
+		raw = nil
+	}
+	return &ResponseFormat{Type: "json_schema", Name: name, Schema: raw}
 }
 
 // DefaultReasoningOutputTokens is the conservative provider-side budget used
@@ -607,6 +678,30 @@ type Usage struct {
 	RequestCount int
 }
 
+// ResponsesUsage normalises a Responses API usage block (OpenAI Responses
+// format: input_tokens / output_tokens / input_tokens_details.cached_tokens /
+// output_tokens_details.reasoning_tokens) into the shared Usage shape, deriving
+// cache-miss as input − cached when the server omits it.
+func ResponsesUsage(input, output, total, cached, reasoning int) *Usage {
+	if total == 0 && (input != 0 || output != 0) {
+		total = input + output
+	}
+	miss := 0
+	if cached > 0 && input > cached {
+		miss = input - cached
+	} else if cached == 0 {
+		miss = input
+	}
+	return &Usage{
+		PromptTokens:     input,
+		CompletionTokens: output,
+		TotalTokens:      total,
+		CacheHitTokens:   cached,
+		CacheMissTokens:  miss,
+		ReasoningTokens:  reasoning,
+	}
+}
+
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
 // is a display symbol or ISO-like code (default "¥"). toml tags let config decode it.
 type Pricing struct {
@@ -691,12 +786,19 @@ func isThreeLetterCurrencyCode(value string) bool {
 // Chunk is a single streamed event. Read the field matching Type.
 type Chunk struct {
 	Type      ChunkType
-	Text      string    // ChunkText, ChunkReasoning
-	Signature string    // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
-	ToolCall  *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
-	ArgChars  int       // ChunkToolCallArgsDelta: cumulative argument characters received for this call
-	Usage     *Usage    // ChunkUsage
-	Err       error     // ChunkError
+	Text      string // ChunkText, ChunkReasoning
+	Signature string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
+	// ReasoningID/ReasoningStatus ride the final ChunkReasoning of a turn
+	// (empty Text): the provider-issued reasoning item id/status captured
+	// from the SSE stream, so the Agent can persist them into the session
+	// and the next turn's input reasoning item round-trips them (OpenAI
+	// Responses schema marks Reasoning.id required).
+	ReasoningID     string    // ChunkReasoning: provider-issued reasoning item id
+	ReasoningStatus string    // ChunkReasoning: final reasoning item status ("completed")
+	ToolCall        *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
+	ArgChars        int       // ChunkToolCallArgsDelta: cumulative argument characters received for this call
+	Usage           *Usage    // ChunkUsage
+	Err             error     // ChunkError
 }
 
 // StreamInterruptedError marks a recoverable transport cut that happened after
