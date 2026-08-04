@@ -219,6 +219,9 @@ func (a *adapter) sdkFetchResource(ctx context.Context, messageID, key, typ stri
 		if !resp.Success() {
 			return fmt.Errorf("feishu resource error: %s", feishuCodeError(resp.Code, resp.Msg))
 		}
+		if closer, ok := resp.File.(io.ReadCloser); ok {
+			defer closer.Close()
+		}
 		raw, err := io.ReadAll(io.LimitReader(resp.File, maxFeishuMediaBytes+1))
 		if err != nil {
 			return err
