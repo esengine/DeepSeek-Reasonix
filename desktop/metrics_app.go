@@ -347,12 +347,37 @@ func cacheBucket(hit, miss int) string {
 	}
 }
 
+// badRequestReason separates the 400s that need different fixes. Every arm
+// returns a fixed label matched against a fixed substring, so nothing the
+// provider echoed back can reach the bucket — the same constraint errorClass
+// works under. Unrecognized shapes stay plain http_400 rather than guessing.
+func badRequestReason(low string) string {
+	switch {
+	case strings.Contains(low, "image_url"), strings.Contains(low, "unknown variant"):
+		return "content"
+	case strings.Contains(low, "is not of type"), strings.Contains(low, "invalid schema for function"):
+		return "schema"
+	case strings.Contains(low, "thinking") && strings.Contains(low, "passed back"):
+		return "reasoning_replay"
+	case strings.Contains(low, "thinking") && (strings.Contains(low, "expected a boolean") || strings.Contains(low, "invalid type")):
+		return "thinking_shape"
+	case strings.Contains(low, "context length"), strings.Contains(low, "maximum context"), strings.Contains(low, "too long"):
+		return "context_length"
+	case strings.Contains(low, "tool_calls"), strings.Contains(low, "missing field name"):
+		return "tool_calls"
+	}
+	return ""
+}
+
 // errorClass extracts only the failure category — never the message itself, which
 // can echo request content back from a provider.
 func errorClass(msg string) string {
 	if mm := statusCodePattern.FindStringSubmatch(msg); mm != nil {
 		switch code := mm[1]; {
 		case code == "400":
+			if reason := badRequestReason(strings.ToLower(msg)); reason != "" {
+				return "http_400_" + reason
+			}
 			return "http_400"
 		case code == "401" || code == "403":
 			return "http_401"

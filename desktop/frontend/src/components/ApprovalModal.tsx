@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import gsap from "gsap";
 import { useT, type Translator } from "../lib/i18n";
@@ -7,6 +7,7 @@ import {
   DecisionConfirmBar,
   PromptAction,
   PromptBadge,
+  PromptDescriptionToggle,
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
@@ -292,12 +293,15 @@ export function ApprovalModal({
   // Immediate Plan/Auto decisions have no hidden selection. Ordinary tool
   // approvals retain select-then-confirm and default to Allow once.
   const [selectedIndex, setSelectedIndex] = useState(() => (isPlanApproval || isRecoveryApproval ? -1 : 0));
+  const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
+  const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [revisionOpen, setRevisionOpen] = useState(false);
   const [revisionText, setRevisionText] = useState("");
   const [recoveryGuidanceOpen, setRecoveryGuidanceOpen] = useState(false);
   const [recoveryGuidanceText, setRecoveryGuidanceText] = useState("");
   const [grantSimilarForTask, setGrantSimilarForTask] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const instanceId = useId();
   const cardRef = useRef<HTMLDivElement | null>(null);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -475,6 +479,10 @@ export function ApprovalModal({
   const selectedIndexRef = useRef(selectedIndex);
   selectedIndexRef.current = selectedIndex;
   const selectedAction = toolActions[Math.min(selectedIndex, actionCount - 1)] ?? toolActions[0];
+  const selectedDescriptionId = !isPlanApproval && !isRecoveryApproval && selectedIndex >= 0
+    ? `${instanceId}-description-${selectedIndex}`
+    : undefined;
+  const descriptionExpanded = selectedDescriptionId !== undefined && expandedDescriptionId === selectedDescriptionId;
 
   useEffect(() => {
     cardRef.current?.focus();
@@ -488,6 +496,10 @@ export function ApprovalModal({
     setSubmitting(false);
     closingRef.current = false;
   }, [approval.id, isPlanApproval, isRecoveryApproval, reason]);
+
+  useEffect(() => {
+    setExpandedDescriptionId(null);
+  }, [approval.id]);
 
   const confirmSelected = useCallback(() => {
     if (submitting || closingRef.current) return;
@@ -798,6 +810,14 @@ export function ApprovalModal({
                   keyLabel={action.key}
                   label={action.label}
                   description={action.desc}
+                  descriptionId={`${instanceId}-description-${index}`}
+                  descriptionDisclosure
+                  descriptionExpanded={!isPlanApproval && !isRecoveryApproval && selectedIndex === index
+                    ? descriptionExpanded
+                    : undefined}
+                  onDescriptionOverflowChange={!isPlanApproval && !isRecoveryApproval && selectedIndex === index
+                    ? setDescriptionTruncated
+                    : undefined}
                   onClick={() => {
                     activateAction(action, index);
                   }}
@@ -847,7 +867,14 @@ export function ApprovalModal({
           </>
         }
         note={
-          isRecoveryApproval ? (
+          !isPlanApproval && !isRecoveryApproval && selectedDescriptionId && descriptionTruncated ? (
+            <PromptDescriptionToggle
+              descriptionId={selectedDescriptionId}
+              expanded={descriptionExpanded}
+              onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
+              disabled={submitting}
+            />
+          ) : isRecoveryApproval ? (
             recoveryGuidanceOpen ? (
               <div className="recovery-guidance">
                 <textarea

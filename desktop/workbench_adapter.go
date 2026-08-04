@@ -106,7 +106,7 @@ func (a *App) withWorkbenchLocalNavigation(run func() (TabMeta, error)) (meta Ta
 			}
 			a.emitWorkbenchTarget("disconnected", id, gen, seq, "")
 			a.emitReady(a.ctx, tabID)
-			a.emitRuntimeEvent("runtime:rebuilt", tabID)
+			a.emitWorkbenchLocalRuntimeRebuilt(tabID)
 		}
 		k.transitionMu.Unlock()
 	}()
@@ -186,7 +186,7 @@ func (a *App) WorkbenchSwitchLocal() map[string]any {
 	a.emitWorkbenchTarget("disconnected", id, gen, seq, "")
 	tabID := a.workbenchProjectionTabID()
 	a.emitReady(a.ctx, tabID)
-	a.emitRuntimeEvent("runtime:rebuilt", tabID)
+	a.emitWorkbenchLocalRuntimeRebuilt(tabID)
 	return map[string]any{"kind": string(id.Kind), "identityGen": gen, "requestSeq": seq}
 }
 
@@ -229,7 +229,7 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 		go a.workbenchRefreshCatalog(remote.Generation)
 		a.emitWorkbenchTarget("connected", activeID, activeGen, requestSeq, "")
 		a.emitReady(a.ctx, tabID)
-		a.emitRuntimeEvent("runtime:rebuilt", tabID)
+		a.emitWorkbenchRuntimeRebuilt(tabID, string(cli.State().RuntimeEpoch))
 		return nil
 	}
 	_, gen, err := k.targets.BeginRemoteConnect(hostID, workspace)
@@ -333,7 +333,13 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 			if err != nil {
 				return nil, err
 			}
-			return openLocalProviderStream(ctx, current, ref, effort, req)
+			requestCtx := provider.WithRequestAttemptCounter(ctx)
+			stream, err := openLocalProviderStream(requestCtx, current, ref, effort, req)
+			if err != nil {
+				recordRemoteProviderUsage(requestCtx, remoteStatsRecorder(), ref, nil)
+				return nil, err
+			}
+			return recordRemoteProviderStream(requestCtx, ref, stream), nil
 		},
 	}
 	buildID := map[string]any{
@@ -417,6 +423,10 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 		k.sessionCatalog = sessionCatalog
 		k.mu.Unlock()
 		k.targets.SetRemoteBusy(result.Snapshot.Runtime.Running || result.Snapshot.Runtime.CurrentOperation != nil)
+		// Publish the Remote authority while SubscribeCommitted still holds the
+		// client projection fence. Pending-prompt replay and live events cannot
+		// overtake this epoch transition and be rejected as Local events.
+		a.emitWorkbenchRuntimeRebuilt(tabID, string(result.Snapshot.RuntimeEpoch))
 		return nil
 	})
 	if err != nil {
@@ -432,7 +442,6 @@ func (a *App) WorkbenchConnectRemote(hostID, workspace string) error {
 	committed = true
 	a.emitWorkbenchTarget("connected", activeID, activeGen, requestSeq, "")
 	a.emitReady(a.ctx, tabID)
-	a.emitRuntimeEvent("runtime:rebuilt", tabID)
 	return nil
 }
 
@@ -487,6 +496,9 @@ func (a *App) WorkbenchDisconnectRemote() error {
 	k.mu.Unlock()
 	id, gen, seq := k.targets.Active()
 	a.emitWorkbenchTarget("disconnected", id, gen, seq, "")
+	tabID := a.workbenchProjectionTabID()
+	a.emitReady(a.ctx, tabID)
+	a.emitWorkbenchLocalRuntimeRebuilt(tabID)
 	return nil
 }
 

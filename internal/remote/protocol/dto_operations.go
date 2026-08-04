@@ -218,8 +218,9 @@ type SessionProfileSetParams struct {
 type ProfileSetDisposition string
 
 const (
-	ProfileUpdated ProfileSetDisposition = "updated"
-	ProfileRebuilt ProfileSetDisposition = "rebuilt"
+	ProfileUnchanged ProfileSetDisposition = "unchanged"
+	ProfileUpdated   ProfileSetDisposition = "updated"
+	ProfileRebuilt   ProfileSetDisposition = "rebuilt"
 )
 
 type SessionProfileSetResult struct {

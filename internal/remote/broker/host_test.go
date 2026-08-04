@@ -19,6 +19,21 @@ const (
 	translatedDisplayReasoning = "translated display reasoning"
 )
 
+func TestHostProviderMissingReasoningFingerprintTracksRemoteSelection(t *testing.T) {
+	high := "high"
+	max := "max"
+	first := &hostProvider{ref: "deepseek/deepseek-v4-pro", effort: &high, descriptor: provider.Descriptor{Model: "deepseek-v4-pro"}}
+	same := &hostProvider{ref: "deepseek/deepseek-v4-pro", effort: &high, descriptor: provider.Descriptor{Model: "deepseek-v4-pro"}}
+	changed := &hostProvider{ref: "deepseek/deepseek-v4-pro", effort: &max, descriptor: provider.Descriptor{Model: "deepseek-v4-pro"}}
+	got := provider.MissingToolCallReasoningWarningFingerprint(first)
+	if got != provider.MissingToolCallReasoningWarningFingerprint(same) {
+		t.Fatal("equivalent remote selections produced different fingerprints")
+	}
+	if got == provider.MissingToolCallReasoningWarningFingerprint(changed) {
+		t.Fatal("remote effort change did not re-key the warning fingerprint")
+	}
+}
+
 type reasoningRoundTripProvider struct {
 	requests chan provider.Request
 	calls    int

@@ -136,10 +136,6 @@ func printCLIReport(pending crashreport.Pending, out, errOut io.Writer) int {
 }
 
 func sendPendingCLIReport(home string, pending crashreport.Pending, out, errOut io.Writer) int {
-	if config.SafeModeRequested() {
-		fmt.Fprintln(errOut, i18n.M.ErrorPrefix, i18n.M.ReportSafeModeBlocked)
-		return 1
-	}
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(errOut, i18n.M.ErrorPrefix, fmt.Sprintf(i18n.M.ReportConfigFailedFmt, err))

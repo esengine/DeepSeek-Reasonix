@@ -111,6 +111,15 @@ body[data-lang="zh"] .hero h1 { font-size: clamp(42px, 5.6vw, 72px); line-height
 }
 .nav-links a:hover { color: var(--ink); background: var(--bg-soft); }
 .nav-links a.here { color: var(--accent); background: var(--accent-soft); }
+.nav-github {
+  display: inline-flex; flex: none; align-items: center; gap: 8px;
+  color: var(--ink-2); text-decoration: none; font-size: 14px; font-weight: 500;
+  padding: 8px 10px; border-radius: 999px;
+  transition: color 0.2s, background 0.2s;
+}
+.nav-github svg { width: 18px; height: 18px; display: block; }
+.nav-github:hover { color: var(--ink); background: var(--bg-soft); }
+.nav-github:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
@@ -127,6 +136,12 @@ body[data-lang="zh"] .hero h1 { font-size: clamp(42px, 5.6vw, 72px); line-height
 
 @media (max-width: 1260px) {
   .nav-link--secondary { display: none; }
+}
+
+@media (max-width: 1100px) {
+  .nav-links { display: none; }
+  .nav-github { margin-left: auto; padding-inline: 8px; }
+  .nav-github-label { display: none; }
 }
 
 /* hero */
@@ -813,6 +828,7 @@ body.how-flat .how-stage { position: static; min-height: 0; display: block; }
   font-family: var(--font-mono); font-size: 13.5px; line-height: 1.85;
   color: oklch(0.9 0.004 260); overflow-x: auto; white-space: pre;
 }
+.codeblock--copy { padding-top: 52px; }
 .codeblock .c { color: oklch(0.58 0.008 260); }
 .codeblock .a { color: var(--acc-1); }
 .codeblock button {
@@ -957,7 +973,7 @@ footer { background: var(--bg); border-top: 1px solid var(--line); margin-top: 0
 
 @media (max-width: 900px) {
   .wrap { padding: 0 24px; }
-  .nav-links { display: none; }
+  .nav-github { display: none; }
   .lang-switch { margin-left: auto; }
   .docs-layout { grid-template-columns: 1fr; gap: 36px; padding: 110px 24px 80px; }
   .docs-side { position: static; max-height: none; overflow: visible; padding-right: 0; }

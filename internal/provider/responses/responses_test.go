@@ -44,8 +44,11 @@ func writeEvents(w http.ResponseWriter, events ...string) {
 func TestDetectVendorAndModeDefaults(t *testing.T) {
 	tests := []struct{ url, vendor, mode string }{
 		{"https://api.deepseek.com", "deepseek", "stateless"},
+		{"https://eu.deepseek.com/v1", "deepseek", "stateless"},
 		{"https://dashscope.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
 		{"https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1", "dashscope", "stateful"},
+		{"https://api.deepseek.com.attacker.example/v1", "", "stateful"},
+		{"https://example.com/api.deepseek.com/v1", "", "stateful"},
 		{"https://example.com/v1", "", "stateful"},
 	}
 	for _, test := range tests {
@@ -79,6 +82,53 @@ func TestDeepSeekEffortUsesResponsesReasoningShape(t *testing.T) {
 		if got != test.want {
 			t.Errorf("effort %q serialized as %q, want %q", test.effort, got, test.want)
 		}
+	}
+}
+
+func TestRequestSerializesExplicitMaxOutputTokens(t *testing.T) {
+	client := New(Config{Name: "responses", BaseURL: "https://example.com", Model: "model"}).(*client)
+	body, _, _ := client.buildRequestBody(provider.Request{
+		Messages:  []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		MaxTokens: 32 * 1024,
+	})
+	if got := body["max_output_tokens"]; got != 32*1024 {
+		t.Fatalf("max_output_tokens = %#v, want 32768", got)
+	}
+}
+
+func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
+	message := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
+
+	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
+	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
+	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultReasoningOutputTokens {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want %d", got, provider.DefaultReasoningOutputTokens)
+	}
+
+	for _, effort := range []string{"none", "disabled", "off", " NONE "} {
+		thinkingDisabled := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: effort}).(*client)
+		thinkingDisabledBody, _, _ := thinkingDisabled.buildRequestBody(provider.Request{Messages: message})
+		if _, exists := thinkingDisabledBody["max_output_tokens"]; exists {
+			t.Fatalf("thinking-disabled DeepSeek effort %q received an automatic output budget: %#v", effort, thinkingDisabledBody)
+		}
+	}
+
+	explicitThinkingDisabled := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: "none", MaxOutputTokens: 8192}).(*client)
+	explicitThinkingDisabledBody, _, _ := explicitThinkingDisabled.buildRequestBody(provider.Request{Messages: message})
+	if got := explicitThinkingDisabledBody["max_output_tokens"]; got != 8192 {
+		t.Fatalf("explicit thinking-disabled DeepSeek budget = %#v, want 8192", got)
+	}
+
+	unknown := New(Config{Name: "responses", BaseURL: "https://example.com", Model: "model"}).(*client)
+	unknownBody, _, _ := unknown.buildRequestBody(provider.Request{Messages: message})
+	if _, exists := unknownBody["max_output_tokens"]; exists {
+		t.Fatalf("unknown Responses endpoint received an inferred output budget: %#v", unknownBody)
+	}
+
+	disabled := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", MaxOutputTokens: -1}).(*client)
+	disabledBody, _, _ := disabled.buildRequestBody(provider.Request{Messages: message})
+	if _, exists := disabledBody["max_output_tokens"]; exists {
+		t.Fatalf("disabled DeepSeek Responses budget remained present: %#v", disabledBody)
 	}
 }
 
@@ -177,7 +227,7 @@ func TestStreamDoesNotDuplicateDoneText(t *testing.T) {
 	if text != "hello" {
 		t.Fatalf("streamed text = %q, want one copy", text)
 	}
-	if usage == nil || usage.CacheHitTokens != 2 || usage.CacheMissTokens != 1 || usage.ReasoningTokens != 1 {
+	if usage == nil || usage.CacheHitTokens != 2 || usage.CacheMissTokens != 1 || usage.ReasoningTokens != 1 || usage.RequestCount != 1 {
 		t.Fatalf("usage = %+v", usage)
 	}
 	if chunks[len(chunks)-1].Type != provider.ChunkDone {
@@ -313,7 +363,7 @@ func TestExpiredPreviousResponseRetriesOnceWithFullHistory(t *testing.T) {
 	defer server.Close()
 	p := New(Config{Name: "stateful", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateful"})
 	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "one"}}})
-	collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "one"}, {Role: provider.RoleAssistant, Content: "answer"}, {Role: provider.RoleUser, Content: "two"}}})
+	chunks := collect(t, p, provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "one"}, {Role: provider.RoleAssistant, Content: "answer"}, {Role: provider.RoleUser, Content: "two"}}})
 	if len(bodies) != 3 {
 		t.Fatalf("request count = %d, want initial + stale + retry", len(bodies))
 	}
@@ -325,6 +375,15 @@ func TestExpiredPreviousResponseRetriesOnceWithFullHistory(t *testing.T) {
 	}
 	if _, ok := bodies[2]["input"].([]any); !ok {
 		t.Fatalf("retry input = %#v, want full array", bodies[2]["input"])
+	}
+	var usage *provider.Usage
+	for _, chunk := range chunks {
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
+	}
+	if usage == nil || usage.RequestCount != 2 {
+		t.Fatalf("retry usage = %+v, want request count 2", usage)
 	}
 }
 
@@ -356,6 +415,19 @@ func TestRequiresToolCallReasoningOnlyForDeepSeek(t *testing.T) {
 	other := New(Config{Name: "other", BaseURL: "https://example.com", Model: "m"})
 	if provider.RequiresToolCallReasoning(other) {
 		t.Fatal("unknown Responses endpoint unexpectedly requires DeepSeek reasoning")
+	}
+}
+
+func TestMissingToolCallReasoningWarningFingerprintTracksResponsesConfiguration(t *testing.T) {
+	first := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: "high"})
+	same := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com/", Model: "deepseek-v4-flash", Effort: "high"})
+	changedEffort := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Effort: "max"})
+	got := provider.MissingToolCallReasoningWarningFingerprint(first)
+	if got != provider.MissingToolCallReasoningWarningFingerprint(same) {
+		t.Fatal("equivalent Responses configurations produced different fingerprints")
+	}
+	if got == provider.MissingToolCallReasoningWarningFingerprint(changedEffort) {
+		t.Fatal("Responses effort change did not re-key the warning fingerprint")
 	}
 }
 

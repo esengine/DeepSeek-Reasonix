@@ -22,12 +22,34 @@ func TestParseWebView2ProcessFailure(t *testing.T) {
 }
 
 func TestWebView2ProcessFailureReportIsStructured(t *testing.T) {
-	report := webView2ProcessFailureReport(2)
+	report := webView2ProcessFailureReportWithContext(2, 3, "132.0.2957.140")
 	if report.Source != "webview2.process" || report.Label != "windows.webview2.process_failed" {
 		t.Fatalf("report = %+v", report)
 	}
 	if report.FingerprintHint != "windows.webview2.render_process_unresponsive" {
 		t.Fatalf("fingerprint hint = %q", report.FingerprintHint)
+	}
+	for _, want := range []string{"runtime version: 132.0.2957.140", "same-process occurrence: 3", "exit code: unavailable"} {
+		if !strings.Contains(report.Message, want) {
+			t.Fatalf("report message missing %q: %s", want, report.Message)
+		}
+	}
+}
+
+func TestWebView2FailureTrackerDeduplicatesSessionBursts(t *testing.T) {
+	var tracker webView2FailureTracker
+	base := time.Date(2026, 8, 3, 10, 0, 0, 0, time.UTC)
+	if occurrence, report := tracker.observe(2, base); occurrence != 1 || !report {
+		t.Fatalf("first observation = (%d, %v)", occurrence, report)
+	}
+	if occurrence, report := tracker.observe(2, base.Add(time.Minute)); occurrence != 2 || report {
+		t.Fatalf("burst observation = (%d, %v)", occurrence, report)
+	}
+	if occurrence, report := tracker.observe(2, base.Add(webView2FailureReportCooldown)); occurrence != 3 || !report {
+		t.Fatalf("post-cooldown observation = (%d, %v)", occurrence, report)
+	}
+	if occurrence, report := tracker.observe(6, base.Add(time.Minute)); occurrence != 1 || !report {
+		t.Fatalf("different kind observation = (%d, %v)", occurrence, report)
 	}
 }
 

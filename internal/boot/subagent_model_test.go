@@ -6,9 +6,19 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/provider"
 	"reasonix/internal/skill"
 	"reasonix/internal/tool"
 )
+
+type staticResolver struct {
+	catalog []provider.Descriptor
+}
+
+func (r *staticResolver) Catalog() []provider.Descriptor { return r.catalog }
+func (r *staticResolver) Resolve(provider.Selection) (provider.Provider, error) {
+	return nil, nil
+}
 
 func TestSubagentModelRefUsesConfiguredDefault(t *testing.T) {
 	cfg := config.Default()
@@ -108,14 +118,28 @@ func TestSubagentEffectiveIdentityUsesResolvedModelAndEffort(t *testing.T) {
 		t.Fatal("custom provider should resolve")
 	}
 
-	model, effort := subagentEffectiveIdentity(cfg, "custom", base, "", "")
+	model, effort := subagentEffectiveIdentity(cfg, nil, "custom", base, "", "")
 	if model != "custom/beta" || effort != "high" {
 		t.Fatalf("identity = %q/%q, want custom/beta/high", model, effort)
 	}
 
-	model, effort = subagentEffectiveIdentity(cfg, "custom", base, "alpha", "low")
+	model, effort = subagentEffectiveIdentity(cfg, nil, "custom", base, "alpha", "low")
 	if model != "custom/alpha" || effort != "low" {
 		t.Fatalf("override identity = %q/%q, want custom/alpha/low", model, effort)
+	}
+}
+
+func TestSubagentEffectiveIdentityUsesAuthoritativeExternalResolver(t *testing.T) {
+	cfg := config.Default()
+	base := &config.ProviderEntry{Name: "openai", Model: "gpt"}
+	resolver := &staticResolver{catalog: []provider.Descriptor{{
+		Ref: "anthropic/claude-sonnet", DisplayName: "anthropic", Model: "claude-sonnet",
+		Efforts: []string{"low", "high"}, DefaultEffort: "high",
+	}}}
+
+	model, effort := subagentEffectiveIdentity(cfg, resolver, "openai/gpt", base, "anthropic/claude-sonnet", "high")
+	if model != "anthropic/claude-sonnet" || effort != "high" {
+		t.Fatalf("identity = %q/%q, want anthropic/claude-sonnet/high", model, effort)
 	}
 }
 

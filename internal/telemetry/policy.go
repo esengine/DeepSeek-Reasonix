@@ -10,11 +10,11 @@ import (
 var releaseVersionPattern = regexp.MustCompile(`^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z._-]+)?$`)
 
 // Enabled applies the fail-closed CLI telemetry policy. Explicit "on" permits
-// local headless runs, but never overrides CI, Safe Mode, development builds,
-// or environment opt-outs.
-func Enabled(mode, version string, interactive, safeMode bool) bool {
+// local headless runs, but never overrides CI, development builds, or
+// environment opt-outs.
+func Enabled(mode, version string, interactive bool) bool {
 	mode = strings.ToLower(strings.TrimSpace(mode))
-	if mode == "off" || safeMode || !releaseVersionPattern.MatchString(strings.TrimSpace(version)) {
+	if mode == "off" || !releaseVersionPattern.MatchString(strings.TrimSpace(version)) {
 		return false
 	}
 	if envOptOut() || inCI() {

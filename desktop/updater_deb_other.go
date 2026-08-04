@@ -5,11 +5,7 @@ package main
 import "fmt"
 
 var (
-	errUpdateAuthCancelled = fmt.Errorf("update: authorization cancelled")
 	errUpdateAuthFailed    = fmt.Errorf("update: authorization failed")
-	errUpdatePkgBusy       = fmt.Errorf("update: package manager busy")
-	errUpdatePkgInstall    = fmt.Errorf("update: package install failed")
-	errUpdatePkgVerify     = fmt.Errorf("update: package verify failed")
 	errUpdateCacheMismatch = fmt.Errorf("update: cached artifact does not match current install mode")
 )
 

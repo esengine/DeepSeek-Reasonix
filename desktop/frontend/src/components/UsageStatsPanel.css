@@ -1,0 +1,492 @@
+/* ── Usage statistics panel (UsageStatsPanel.tsx) ─────────────────────────
+   Charts are hand-drawn SVG driven entirely by theme variables, so both stock
+   themes and theme packs adapt automatically. The heatmap's 5 levels and the
+   per-model palette derive from --accent / --fg via color-mix. */
+
+.usage-stats {
+  --stats-hue-l: 66%;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .usage-stats {
+    --stats-hue-l: 46%;
+  }
+}
+
+:root[data-theme="light"] .usage-stats {
+  --stats-hue-l: 42%;
+}
+
+.usage-stats__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Each picker (time range / source) lives in its own framed group, matching
+   the .settings-subtabs pattern used for the model subtab tabs, with a
+   slightly elevated background so the group reads against the panel. */
+.usage-stats__group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+
+.usage-stats__group .provider-add-segmented__item {
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+}
+
+.usage-stats__custom {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-stats__custom .mem-input {
+  width: 150px;
+  flex: 0 0 auto;
+}
+
+.usage-stats__custom-sep {
+  color: var(--fg-faint);
+}
+
+.usage-stats__refresh {
+  margin-left: auto;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--font-control-small);
+  cursor: pointer;
+}
+
+.usage-stats__refresh:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.usage-stats__loading {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-faint);
+  font-size: var(--font-control);
+}
+
+.usage-stats__empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--fg-faint);
+  font-size: var(--font-control);
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+}
+
+/* numeric cards (sections 2–3): the two long-valued cards (tokens, top model)
+   stretch wider than the four short numeric ones, which stay equal-width. On
+   narrow windows the grid drops to two rows of three so cards keep room. */
+.usage-stats__cards {
+  display: grid;
+  grid-template-columns: 1.3fr repeat(4, 1fr) 1.3fr;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .usage-stats__cards {
+    grid-template-columns: 1.3fr 1fr 1.3fr;
+  }
+}
+
+.usage-stats__card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--bg-elev);
+  min-width: 0;
+}
+
+.usage-stats__card-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.usage-stats__card-icon {
+  color: var(--accent);
+  flex: 0 0 auto;
+}
+
+.usage-stats__card-label {
+  font-size: var(--font-caption);
+  color: var(--fg-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-stats__card-value {
+  font-size: 22px;
+  line-height: 1.1;
+  font-weight: 600;
+  color: var(--fg);
+  white-space: nowrap; /* FitText keeps long values on one line */
+  overflow: hidden;
+  text-overflow: clip;
+}
+
+/* The "most used model" card holds a long model name, so it uses a smaller
+   value font and is allowed to wrap to a second line on narrow windows. */
+.usage-stats__card-value--sm {
+  font-size: 14px;
+  line-height: 1.35;
+  padding-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-stats__card-value--wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow: visible;
+}
+
+/* sections + charts */
+.usage-stats__section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.usage-stats__section-title {
+  margin: 0;
+  font-size: var(--font-control);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* Title row: heatmap keeps its level legend on the right of the heading. */
+.usage-stats__section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.usage-stats__section-note {
+  color: var(--muted);
+  font-size: var(--font-caption);
+}
+
+.usage-stats__heatmap-wrap,
+.usage-stats__chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 4px;
+  position: relative; /* anchors the absolutely-positioned chart tooltip */
+}
+
+.usage-stats__heatmap {
+  display: block;
+}
+
+/* 5 heat levels: progressively stronger accent on the elevated background.
+   Levels apply to both SVG rects and the legend swatches. */
+.usage-stats__heat-cell {
+  fill: color-mix(in srgb, var(--accent) 8%, var(--bg-elev));
+}
+.usage-stats__heat-cell--1 {
+  fill: color-mix(in srgb, var(--accent) 16%, var(--bg-elev));
+}
+.usage-stats__heat-cell--2 {
+  fill: color-mix(in srgb, var(--accent) 32%, var(--bg-elev));
+}
+.usage-stats__heat-cell--3 {
+  fill: color-mix(in srgb, var(--accent) 52%, var(--bg-elev));
+}
+.usage-stats__heat-cell--4 {
+  fill: color-mix(in srgb, var(--accent) 72%, var(--bg-elev));
+}
+.usage-stats__heat-cell--5 {
+  fill: var(--accent);
+}
+
+/* Legend swatches are HTML elements, where SVG `fill` has no effect — give
+   them the same 5-level accent backgrounds the svg cells use. Their size
+   follows the live cell size (inline style from the component). */
+.usage-stats__heatmap-legend i.usage-stats__heat-cell--1 { background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev)); }
+.usage-stats__heatmap-legend i.usage-stats__heat-cell--2 { background: color-mix(in srgb, var(--accent) 32%, var(--bg-elev)); }
+.usage-stats__heatmap-legend i.usage-stats__heat-cell--3 { background: color-mix(in srgb, var(--accent) 52%, var(--bg-elev)); }
+.usage-stats__heatmap-legend i.usage-stats__heat-cell--4 { background: color-mix(in srgb, var(--accent) 72%, var(--bg-elev)); }
+.usage-stats__heatmap-legend i.usage-stats__heat-cell--5 { background: var(--accent); }
+
+.usage-stats__heatmap-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--font-caption);
+  color: var(--fg-faint);
+}
+
+.usage-stats__heatmap-legend i {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.usage-stats__chart {
+  display: block;
+  width: 100%;
+}
+
+.usage-stats__grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.usage-stats__axis {
+  fill: var(--fg-faint);
+  font-size: 10px;
+}
+
+/* Invisible whole-column hover target — hovering anywhere on a bar shows the
+   day's full per-model breakdown, not just the segment under the cursor. */
+.usage-stats__bar-hit {
+  fill: transparent;
+  cursor: default;
+}
+
+.usage-stats__bar--dim,
+.usage-stats__donut-seg--dim {
+  opacity: 0.35;
+}
+
+.usage-stats__legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px 16px;
+  font-size: var(--font-caption);
+  color: var(--fg-dim);
+}
+
+.usage-stats__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: default;
+}
+
+.usage-stats__legend-swatch {
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+
+/* cache hit-rate trend legend swatch: a small line, distinct from the model
+   colour blocks above (the line itself uses var(--fg) so it reads on both
+   themes; the dot's fill comes from var(--accent)). */
+.usage-stats__legend-swatch--trend {
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+/* per-model donut + list */
+.usage-stats__models {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 44px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.usage-stats__donut-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.usage-stats__donut {
+  display: block;
+}
+
+.usage-stats__donut-track {
+  stroke: var(--bg-elev-2, var(--bg-elev));
+}
+
+.usage-stats__donut-seg {
+  transition: opacity 0.12s ease;
+}
+
+.usage-stats__donut-center {
+  fill: var(--fg);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.usage-stats__donut-label {
+  fill: var(--fg-faint);
+  font-size: 12px;
+}
+
+.usage-stats__model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1 1 280px;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* thin divider between rows so the detail list reads as separate entries */
+.usage-stats__model-row + .usage-stats__model-row {
+  border-top: 1px solid var(--border-soft);
+}
+
+.usage-stats__model-row {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  font-size: var(--font-control);
+}
+
+.usage-stats__model-row:hover {
+  background: var(--bg-elev);
+}
+
+.usage-stats__model-name {
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-stats__model-provider {
+  color: var(--fg-faint);
+  font-size: var(--font-caption);
+}
+
+.usage-stats__model-tokens {
+  color: var(--fg);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.usage-stats__model-pct {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+  min-width: 48px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* hover tooltip — anchored inside its chart container (position: relative on
+   the wrap) and positioned via transform so it can slide between columns. */
+.usage-stats__tip {
+  position: absolute;
+  z-index: var(--z-popover);
+  left: 0;
+  top: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev-2, var(--bg));
+  color: var(--fg);
+  font-size: var(--font-caption);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage-stats__tip--chart {
+  transition: transform 0.15s ease, opacity 0.12s ease;
+}
+
+/* Viewport-fixed tooltip (daily trend): coordinates are screen-space, clamped
+   to the settings content pane by the component. */
+.usage-stats__tip--screen {
+  position: fixed;
+}
+
+.usage-stats__tip-title {
+  font-weight: 600;
+  color: var(--fg);
+}
+
+.usage-stats__tip-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.usage-stats__foot {
+  font-size: var(--font-caption);
+  color: var(--fg-faint);
+}
+
+/* cache hit-rate trend curve: theme accent (like the heatmap), drawn above
+   the token bars. No point markers — the line alone reads the trend. */
+.usage-stats__trend {
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+/* Right-hand axis labels for the hit-rate scale. */
+.usage-stats__axis--rate {
+  font-size: 9px;
+  fill: var(--fg-faint);
+}
+
+/* Hovered column bars widen horizontally via scaleX around the bar's own
+   centre (transform-box: fill-box), so both edges grow symmetrically; height
+   never changes and the token value stays readable. */
+.usage-stats__bar {
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+/* Marker that lights up on the hit-rate curve for the hovered day. */
+.usage-stats__trend-dot {
+  fill: var(--accent);
+  stroke: var(--bg-elev);
+  stroke-width: 2;
+  pointer-events: none;
+}

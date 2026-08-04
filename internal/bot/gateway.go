@@ -55,15 +55,17 @@ type GatewayConfig struct {
 	//
 	// Reentrancy contract for all GatewayConfig callbacks (OnInbound,
 	// OnSessionReady, OnToolApprovalModeChange): they run synchronously on
-	// gateway-owned dispatch/turn goroutines that Stop drains before returning.
-	// A callback must therefore never call Stop, nor block until a goroutine
-	// that does so completes — Stop would wait on the very goroutine running
-	// the callback, a guaranteed deadlock. Hosts that want to shut the gateway
-	// down in reaction to a callback must trigger the shutdown asynchronously.
+	// gateway-owned dispatch/turn goroutines; OnSessionReady can also run on a
+	// controller recovery/autosave goroutine. Stop drains all of those paths
+	// before returning. A callback must therefore never call Stop, nor block
+	// until a goroutine that does so completes — Stop would wait on the very
+	// goroutine running the callback, a guaranteed deadlock. Hosts that want to
+	// shut the gateway down in reaction to a callback must trigger the shutdown
+	// asynchronously.
 	OnInbound func(InboundMessage)
-	// OnSessionReady notifies the host after the bot has created or reused the
-	// controller for an inbound remote. Hosts may persist the concrete session ID
-	// or keep the remote as a read-only channel.
+	// OnSessionReady notifies the host after the bot has created, reused, or
+	// recovered the controller for an inbound remote. Hosts may persist the
+	// concrete session ID or keep the remote as a read-only channel.
 	OnSessionReady func(InboundMessage, string) error
 	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
 	// The gateway updates the live session and in-memory defaults first; this
@@ -201,6 +203,8 @@ type botController interface {
 }
 
 type sessionState struct {
+	lifecycleMu      sync.Mutex
+	retired          bool
 	ctrl             botController
 	sink             *sessionEventSink
 	leases           *control.SessionLeaseKeeper
@@ -218,6 +222,8 @@ type sessionState struct {
 	createdAt        time.Time
 	lastActive       time.Time
 }
+
+var errBotSessionRetired = errors.New("bot session retired during recovery")
 
 type sessionRuntimeProfile struct {
 	model            string
@@ -635,6 +641,19 @@ func (gw *BotGateway) closeSessionState(state *sessionState) {
 	if state == nil {
 		return
 	}
+	// Serialize retirement with recovery ownership handoffs. Stop unlinks
+	// sessions before turn goroutines drain, so a recovery callback captured by
+	// the controller can still arrive here. Marking the state retired under the
+	// same lock prevents that callback from reacquiring a lease after teardown;
+	// an already-running handoff completes before the lease is released below.
+	state.lifecycleMu.Lock()
+	if state.retired {
+		state.lifecycleMu.Unlock()
+		return
+	}
+	state.retired = true
+	state.lifecycleMu.Unlock()
+
 	gw.mu.Lock()
 	cancel := state.cancel
 	state.cancel = nil
@@ -2195,24 +2214,44 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		gw.mu.Unlock()
 	}
 
-	// 创建新 Controller
+	// Create the lease owner before the controller so automatic conflict
+	// recovery can move ownership to the recovery branch before the controller
+	// commits to writing it. Without this callback the bot kept guarding the
+	// original path while continuing on an unleased recovery path.
 	sessionSink := &sessionEventSink{}
+	leases := control.NewSessionLeaseKeeper()
+	state := &sessionState{
+		sink:             sessionSink,
+		leases:           leases,
+		platform:         msg.Platform,
+		connectionID:     strings.TrimSpace(msg.ConnectionID),
+		model:            profile.model,
+		workspaceRoot:    profile.workspaceRoot,
+		toolApprovalMode: profile.toolApprovalMode,
+		sessionPath:      profile.sessionPath,
+		pendingAsks:      make(map[string][]event.AskQuestion),
+		createdAt:        time.Now(),
+		lastActive:       time.Now(),
+	}
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", profile.model, "workspace_set", profile.workspaceRoot != "", "tool_approval_mode", profile.toolApprovalMode)
 	ctrl, err := boot.Build(ctx, boot.Options{
-		Model:           profile.model,
-		MaxSteps:        gw.cfg.MaxSteps,
-		MaxStepsKey:     "bot.max_steps",
-		RequireKey:      true,
-		Sink:            sessionSink,
-		WorkspaceRoot:   profile.workspaceRoot,
-		SessionDir:      botSessionDir(profile.workspaceRoot),
-		ApprovalTimeout: gw.approvalTimeout(),
+		Model:              profile.model,
+		MaxSteps:           gw.cfg.MaxSteps,
+		MaxStepsKey:        "bot.max_steps",
+		RequireKey:         true,
+		Sink:               sessionSink,
+		StatsSource:        "bot",
+		WorkspaceRoot:      profile.workspaceRoot,
+		SessionDir:         botSessionDir(profile.workspaceRoot),
+		ApprovalTimeout:    gw.approvalTimeout(),
+		OnSessionRecovered: gw.botSessionRecoveredHandler(key, msg, state),
 	})
 	if err != nil {
+		leases.Release()
 		gw.logger.Error("build controller failed", "err", secrets.RedactError(err))
 		return nil
 	}
-	leases := control.NewSessionLeaseKeeper()
+	state.ctrl = ctrl
 	if profile.sessionPath != "" {
 		if err := leases.Rebind(profile.sessionPath); err != nil {
 			ctrl.Close()
@@ -2260,20 +2299,6 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		}
 		delete(gw.controllers, key)
 		replace = existing
-	}
-	state := &sessionState{
-		ctrl:             ctrl,
-		sink:             sessionSink,
-		leases:           leases,
-		platform:         msg.Platform,
-		connectionID:     strings.TrimSpace(msg.ConnectionID),
-		model:            profile.model,
-		workspaceRoot:    profile.workspaceRoot,
-		toolApprovalMode: profile.toolApprovalMode,
-		sessionPath:      profile.sessionPath,
-		pendingAsks:      make(map[string][]event.AskQuestion),
-		createdAt:        time.Now(),
-		lastActive:       time.Now(),
 	}
 	gw.controllers[key] = state
 	gw.mu.Unlock()
@@ -2399,12 +2424,65 @@ func (gw *BotGateway) rememberSessionReady(msg InboundMessage, ctrl botControlle
 	if gw.cfg.OnSessionReady == nil || ctrl == nil {
 		return
 	}
-	sessionID := botSessionTarget(ctrl.SessionPath())
+	gw.rememberSessionPath(msg, ctrl.SessionPath())
+}
+
+func (gw *BotGateway) rememberSessionPath(msg InboundMessage, sessionPath string) {
+	if gw.cfg.OnSessionReady == nil {
+		return
+	}
+	sessionID := botSessionTarget(sessionPath)
 	if sessionID == "" {
 		return
 	}
 	if err := gw.cfg.OnSessionReady(msg, sessionID); err != nil {
 		gw.logger.Warn("remember bot session failed", "platform", msg.Platform, "connection", msg.ConnectionID, "err", err)
+	}
+}
+
+// botSessionRecoveredHandler keeps the controller path, its writer lease, and
+// the remote-to-session mapping on the same recovery generation. The lease
+// handoff runs first and is failure-atomic: if the recovery path is already
+// owned, the controller stays on the original path and the old lease remains
+// held. Mapping updates are limited to this exact sessionState so a late
+// callback from a retired controller cannot overwrite its replacement.
+func (gw *BotGateway) botSessionRecoveredHandler(key string, msg InboundMessage, state *sessionState) func(control.SessionRecoveryInfo) error {
+	return func(info control.SessionRecoveryInfo) error {
+		if state == nil || state.leases == nil {
+			return nil
+		}
+		// Keep the lease handoff and mapping publication atomic with respect to
+		// state retirement. In particular, never let a callback that outlives
+		// Stop reacquire a lease after closeSessionState has released it.
+		state.lifecycleMu.Lock()
+		defer state.lifecycleMu.Unlock()
+		if state.retired {
+			return errBotSessionRetired
+		}
+		if err := state.leases.HandleSessionRecovered(info); err != nil {
+			return err
+		}
+
+		originalPath := canonicalBotPath(info.OriginalPath)
+		recoveryPath := canonicalBotPath(info.RecoveryPath)
+		live := false
+		gw.mu.Lock()
+		if gw.controllers[key] == state {
+			live = true
+			if canonicalBotPath(state.sessionPath) == originalPath {
+				state.sessionPath = recoveryPath
+			}
+			if override, ok := gw.sessionOverrides[key]; ok && canonicalBotPath(override.sessionPath) == originalPath {
+				override.sessionPath = recoveryPath
+				gw.sessionOverrides[key] = override
+			}
+		}
+		gw.mu.Unlock()
+
+		if live {
+			gw.rememberSessionPath(msg, recoveryPath)
+		}
+		return nil
 	}
 }
 

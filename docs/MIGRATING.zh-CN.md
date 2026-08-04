@@ -20,11 +20,10 @@ Reasonix 1.0 是一次从零开始的 **Go 重写**。它使用全新的代码�
 
 `npm` 仍是主要安装渠道。npm 包会下载预编译的 Go 二进制文件，方式与 esbuild/biome 类似；二进制本身是独立的 Go 可执行文件，npm 不是运行时依赖。
 
-**`npm i -g reasonix` 会安装当前稳定的 `1.x` 版本。** npm 的 `latest` 标签已从 `1.17.5` 起切换到 Go 版本。候选版本继续使用 `next` 标签；旧版 `0.x` 仍可通过固定版本安装：
+**`npm i -g reasonix` 会安装当前正式的 `1.x` 版本。** npm 的 `latest` 标签已从 `1.17.5` 起切换到 Go 版本。以后不再公开发布候选版本；旧 `next` 与 `canary` 标签仅作为兼容别名，始终指向同一个正式版本。旧版 `0.x` 仍可通过固定版本安装：
 
 ```sh
-npm i -g reasonix          # 当前稳定的 1.x
-npm i -g reasonix@next     # 候选版本（当其领先于稳定版时）
+npm i -g reasonix          # 当前正式的 1.x
 npm i -g reasonix@0.53.2   # 固定到旧版 TypeScript 构建
 ```
 

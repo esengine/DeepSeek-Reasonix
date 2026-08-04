@@ -12,14 +12,14 @@ func TestCLIUpdateChannelDefaultsAndValidation(t *testing.T) {
 	if got := cfg.CLIUpdateChannel(); got != "stable" {
 		t.Fatalf("default CLI channel = %q, want stable", got)
 	}
-	if err := cfg.SetCLIUpdateChannel("preview"); err != nil || cfg.CLIUpdateChannel() != "preview" {
+	if err := cfg.SetCLIUpdateChannel("preview"); err != nil || cfg.CLIUpdateChannel() != "stable" {
 		t.Fatalf("SetCLIUpdateChannel(preview) = %q, %v", cfg.CLIUpdateChannel(), err)
 	}
 	if err := cfg.SetCLIUpdateChannel("stable"); err != nil || cfg.CLIUpdateChannel() != "stable" {
 		t.Fatalf("SetCLIUpdateChannel(stable) = %q, %v", cfg.CLIUpdateChannel(), err)
 	}
-	if err := cfg.SetCLIUpdateChannel("canary"); err == nil {
-		t.Fatal("legacy/internal channel unexpectedly accepted for the public CLI")
+	if err := cfg.SetCLIUpdateChannel("canary"); err != nil || cfg.CLIUpdateChannel() != "stable" {
+		t.Fatalf("legacy canary did not migrate to stable: %q, %v", cfg.CLIUpdateChannel(), err)
 	}
 	cfg.CLI.UpdateChannel = "unknown-from-newer-version"
 	if got := cfg.CLIUpdateChannel(); got != "stable" {
@@ -41,8 +41,8 @@ func TestCLIUpdateChannelIsUserGlobal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.CLIUpdateChannel(); got != "preview" {
-		t.Fatalf("project overrode user-global CLI channel: %q", got)
+	if got := cfg.CLIUpdateChannel(); got != "stable" {
+		t.Fatalf("legacy user channel did not migrate to stable: %q", got)
 	}
 }
 
@@ -65,15 +65,15 @@ func TestProjectCannotOptOldConfigIntoCLIPreview(t *testing.T) {
 	}
 }
 
-func TestCLIUpdateChannelRenderingIsUserOnly(t *testing.T) {
+func TestCLIUpdateChannelIsOmittedFromCanonicalRendering(t *testing.T) {
 	cfg := Default()
 	if err := cfg.SetCLIUpdateChannel("preview"); err != nil {
 		t.Fatal(err)
 	}
 	user := RenderTOMLForScope(cfg, RenderScopeUser)
 	project := RenderTOMLForScope(cfg, RenderScopeProject)
-	if !strings.Contains(user, "[cli]") || !strings.Contains(user, `update_channel = "preview"`) {
-		t.Fatalf("user render missing CLI update channel:\n%s", user)
+	if strings.Contains(user, "[cli]") || strings.Contains(user, "update_channel") {
+		t.Fatalf("user render retained retired CLI update channel:\n%s", user)
 	}
 	if strings.Contains(project, "[cli]") {
 		t.Fatalf("project render contains user-global CLI config:\n%s", project)

@@ -224,3 +224,123 @@ func TestSplitHostPath(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRemoteConnectSyntaxFlagOrder(t *testing.T) {
+	tests := []struct {
+		name      string
+		args      []string
+		openAlias bool
+		wantName  string
+		wantOpen  bool
+		wantWS    string
+		wantPort  int
+		wantErr   bool
+	}{
+		{
+			name:     "name then flags (documented / GUIDE order)",
+			args:     []string{"gpu-box", "--open", "--workspace", "/tmp/ws", "--local-port", "8080"},
+			wantName: "gpu-box",
+			wantOpen: true,
+			wantWS:   "/tmp/ws",
+			wantPort: 8080,
+		},
+		{
+			name:     "flags then name",
+			args:     []string{"--open", "--workspace", "/tmp/ws", "gpu-box"},
+			wantName: "gpu-box",
+			wantOpen: true,
+			wantWS:   "/tmp/ws",
+		},
+		{
+			name:     "single-dash open before name",
+			args:     []string{"-open", "gpu-box"},
+			wantName: "gpu-box",
+			wantOpen: true,
+		},
+		{
+			name:     "name only",
+			args:     []string{"gpu-box"},
+			wantName: "gpu-box",
+		},
+		{
+			name:      "open alias sets open without flag",
+			args:      []string{"gpu-box"},
+			openAlias: true,
+			wantName:  "gpu-box",
+			wantOpen:  true,
+		},
+		{
+			name:    "missing name",
+			args:    []string{"--open"},
+			wantErr: true,
+		},
+		{
+			name:    "extra positional after name-first flags",
+			args:    []string{"gpu-box", "extra"},
+			wantErr: true,
+		},
+		{
+			name:    "two names after flags",
+			args:    []string{"--open", "a", "b"},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseRemoteConnectSyntax(tt.args, tt.openAlias)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %+v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got.name != tt.wantName || got.open != tt.wantOpen || got.workspace != tt.wantWS || got.localPort != tt.wantPort {
+				t.Fatalf("got %+v, want name=%q open=%v workspace=%q localPort=%d", got, tt.wantName, tt.wantOpen, tt.wantWS, tt.wantPort)
+			}
+		})
+	}
+}
+
+func TestRemoteConnectSyntaxUsesSharedFlagContract(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantCode int
+		want     string
+		noUsage  bool
+	}{
+		{name: "help before name", args: []string{"connect", "--help"}, wantCode: 0, want: "Usage of remote connect:"},
+		{name: "help after name", args: []string{"connect", "gpu-box", "--help"}, wantCode: 0, want: "Usage of remote connect:"},
+		{name: "unknown flag before name", args: []string{"connect", "--unknown", "gpu-box"}, wantCode: 2, want: "flag provided but not defined: -unknown", noUsage: true},
+		{name: "unknown flag after name", args: []string{"connect", "gpu-box", "--unknown"}, wantCode: 2, want: "flag provided but not defined: -unknown", noUsage: true},
+		{name: "missing name", args: []string{"connect", "--open"}, wantCode: 2, want: remoteConnectUsage},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr := captureCLIOutput(t, func() {
+				if code := remoteConnectCLI(tt.args, "test-version"); code != tt.wantCode {
+					t.Fatalf("remoteConnectCLI(%q) = %d, want %d", tt.args, code, tt.wantCode)
+				}
+			})
+			output := stderr
+			if tt.wantCode == 0 {
+				output = stdout
+				if stderr != "" {
+					t.Fatalf("help wrote stderr: %q", stderr)
+				}
+			} else if stdout != "" {
+				t.Fatalf("error wrote stdout: %q", stdout)
+			}
+			if !strings.Contains(output, tt.want) {
+				t.Fatalf("output = %q, want %q", output, tt.want)
+			}
+			if tt.noUsage && strings.Contains(output, "Usage of") {
+				t.Fatalf("parse error should be concise, got usage:\n%s", output)
+			}
+		})
+	}
+}

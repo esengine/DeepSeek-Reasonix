@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1555,16 +1556,138 @@ func removePendingUpdateExactVerified(expected *UpdateTransaction, verify func()
 // the new transaction is durable, destroying the previous rollback material if
 // preparation later fails.
 func ensureNoPendingUpdate() error {
-	path := PendingUpdatePath()
-	if path == "" {
-		return fmt.Errorf("prepare update: Reasonix state directory is unavailable")
+	disposition, _, err := classifyPendingUpdate()
+	if err != nil {
+		return fmt.Errorf("prepare update: %w", err)
 	}
-	if _, err := os.Lstat(path); err == nil {
+	switch disposition {
+	case pendingUpdateActionable:
 		return fmt.Errorf("prepare update: a pending update already exists")
-	} else if !os.IsNotExist(err) {
-		return fmt.Errorf("prepare update: inspect pending transaction: %w", err)
+	case pendingUpdateDebris:
+		// Refusing here would be refusing forever: debris cannot be resumed,
+		// rolled back, or cleared by reconciliation, so every future update
+		// would fail on a transaction nothing can act on.
+		if _, err := quarantinePendingUpdate("blocked a new update"); err != nil {
+			return fmt.Errorf("prepare update: quarantine unusable transaction: %w", err)
+		}
 	}
 	return nil
+}
+
+// pendingUpdateDisposition is what the pending-update marker on disk currently
+// means. Preparation and reconciliation both classify through it so they cannot
+// disagree about whether a transaction exists — when they did, a marker that
+// reconciliation could not act on still made preparation refuse, and updates
+// stayed blocked permanently (#7342).
+type pendingUpdateDisposition int
+
+const (
+	// pendingUpdateNone: no marker on disk.
+	pendingUpdateNone pendingUpdateDisposition = iota
+	// pendingUpdateActionable: a transaction that can still be resumed or
+	// rolled back. Preparation must refuse over one of these — writing a new
+	// transaction would overwrite fixed backup paths and destroy the rollback
+	// material this one still owns.
+	pendingUpdateActionable
+	// pendingUpdateDebris: a marker that cannot describe a recoverable
+	// transaction, so it owns no rollback material worth protecting.
+	pendingUpdateDebris
+)
+
+// classifyPendingUpdate reads the marker and decides what can be done with it.
+//
+// The line between debris and an actionable transaction is deliberately drawn
+// at self-description. A transaction that cannot be parsed, or that does not
+// say which release it targets, for which platform, and when it was opened,
+// names nothing to roll back to — discarding it loses nothing. Every other
+// validation failure is environment-relative (the launcher path, whether the
+// target sits inside this Guard installation, where the backup lives) and can
+// fail for a perfectly good transaction observed from the wrong install, so
+// those keep the old refusal rather than risking real rollback material.
+//
+// IO failures are errors, never debris: an unreadable marker is not an absent
+// one, and quarantining on a transient permission error would throw away a
+// recoverable transaction.
+func classifyPendingUpdate() (pendingUpdateDisposition, *UpdateTransaction, error) {
+	path := PendingUpdatePath()
+	if path == "" {
+		return pendingUpdateNone, nil, fmt.Errorf("Reasonix state directory is unavailable")
+	}
+	if _, err := os.Lstat(path); err != nil {
+		if os.IsNotExist(err) {
+			return pendingUpdateNone, nil, nil
+		}
+		return pendingUpdateNone, nil, fmt.Errorf("inspect pending transaction: %w", err)
+	}
+	tx, err := readPendingUpdateUnchecked()
+	if err != nil {
+		switch {
+		case os.IsNotExist(err):
+			return pendingUpdateNone, nil, nil
+		case isPendingUpdateContentError(err):
+			return pendingUpdateDebris, nil, nil
+		default:
+			return pendingUpdateNone, nil, fmt.Errorf("read pending transaction: %w", err)
+		}
+	}
+	if !pendingUpdateSelfDescribing(tx) {
+		return pendingUpdateDebris, nil, nil
+	}
+	if err := validateUpdateTransaction(tx); err != nil {
+		return pendingUpdateActionable, nil, nil
+	}
+	return pendingUpdateActionable, tx, nil
+}
+
+// isPendingUpdateContentError reports whether err means the bytes on disk are
+// not a transaction, as opposed to the file being unreadable. A prepare
+// interrupted mid-write leaves a truncated object, which decodes to a syntax
+// error rather than an IO error.
+func isPendingUpdateContentError(err error) bool {
+	var syntax *json.SyntaxError
+	var unmarshalType *json.UnmarshalTypeError
+	return errors.As(err, &syntax) || errors.As(err, &unmarshalType) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
+// pendingUpdateSelfDescribing reports whether tx carries the identity any
+// recovery needs regardless of where Reasonix is installed: which release it
+// targets, for which platform, and when it was opened.
+func pendingUpdateSelfDescribing(tx *UpdateTransaction) bool {
+	if tx == nil || tx.SchemaVersion != updateTransactionVersion || strings.TrimSpace(tx.ToVersion) == "" {
+		return false
+	}
+	if strings.TrimSpace(tx.Platform) == "" || strings.TrimSpace(tx.CreatedAt) == "" {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(tx.CreatedAt))
+	return err == nil
+}
+
+// quarantinePendingUpdate moves an unusable marker aside and returns where it
+// went. It is deliberately not a delete: the marker is the only evidence of
+// what went wrong, and a user who reports a stuck updater should still have it.
+// Callers hold the pending-update lock.
+func quarantinePendingUpdate(reason string) (string, error) {
+	path := PendingUpdatePath()
+	if path == "" {
+		return "", fmt.Errorf("Reasonix state directory is unavailable")
+	}
+	base := path + ".unusable-" + time.Now().UTC().Format("20060102T150405Z")
+	aside := base
+	for i := 1; ; i++ {
+		if _, err := os.Lstat(aside); os.IsNotExist(err) {
+			break
+		} else if err != nil {
+			return "", err
+		}
+		aside = fmt.Sprintf("%s-%d", base, i)
+	}
+	if err := os.Rename(path, aside); err != nil {
+		return "", err
+	}
+	slog.Warn("repair: quarantined an unusable pending update transaction",
+		"path", aside, "reason", reason)
+	return aside, nil
 }
 
 func ReadPendingUpdate() (*UpdateTransaction, error) {
@@ -1634,10 +1757,27 @@ func PendingUpdateExists() bool {
 // its rollback state is intact. Version equality alone is not installation
 // evidence: a same-version/manual launch may observe an abandoned prepare.
 func ReconcilePendingUpdate(runningVersion string) (PendingUpdateReconcileResult, error) {
-	tx, err := ReadPendingUpdate()
-	if err != nil {
-		if os.IsNotExist(err) {
-			return PendingUpdateReconcileResult{}, nil
+	disposition, tx, classifyErr := classifyPendingUpdate()
+	if classifyErr != nil {
+		return PendingUpdateReconcileResult{Pending: true}, fmt.Errorf("reconcile pending update: %w", classifyErr)
+	}
+	switch {
+	case disposition == pendingUpdateNone:
+		return PendingUpdateReconcileResult{}, nil
+	case disposition == pendingUpdateDebris:
+		// Nothing here can be resumed or rolled back. Leaving it in place is
+		// what stranded users: startup kept failing to recover it while
+		// preparation kept refusing to write over it.
+		if _, err := quarantinePendingUpdate("no recoverable transaction to reconcile"); err != nil {
+			return PendingUpdateReconcileResult{Pending: true}, fmt.Errorf("reconcile pending update: quarantine unusable transaction: %w", err)
+		}
+		return PendingUpdateReconcileResult{Pending: true, Cleared: true}, nil
+	case tx == nil:
+		// Self-describing but not valid for this installation. Recovery needs
+		// the full transaction, so surface the reason instead of guessing.
+		_, err := ReadPendingUpdate()
+		if err == nil {
+			err = fmt.Errorf("pending update is not valid for this installation")
 		}
 		return PendingUpdateReconcileResult{Pending: true}, fmt.Errorf("reconcile pending update: %w", err)
 	}

@@ -59,6 +59,8 @@ func providerPresetDisplayRank(id string) int {
 		return 0
 	case strings.HasPrefix(id, "longcat-"):
 		return 1
+	case id == "token-rhythm":
+		return 1
 	case strings.HasPrefix(id, "kimi-"):
 		return 2
 	case strings.HasPrefix(id, "minimax-"):
@@ -74,8 +76,15 @@ var (
 	kimiAPIVisionModels = []string{"kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5"}
 	kimiCodingModels    = []string{"kimi-for-coding"}
 
-	longCat20Models  = []string{"LongCat-2.0"}
-	deepSeekV4Models = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+	longCat20Models   = []string{"LongCat-2.0"}
+	deepSeekV4Models  = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
+	tokenRhythmModels = []string{
+		"deepseek-v4-flash", "deepseek-v4-pro", "glm-5", "glm-5.1",
+		"minimax-m2.7", "kimi-k2.5", "kimi-k2.6", "minimax-m2.5",
+		"mimo-v2.5-pro", "qwen3.7-max", "kimi-k2.7-code", "glm-5.2",
+		"qwen3.8-max", "deepseek-v4-flash-0731",
+	}
+	tokenRhythmVisionModels = []string{"kimi-k2.5", "kimi-k2.6", "kimi-k2.7-code"}
 
 	mimoV25Models       = []string{"mimo-v2.5-pro", "mimo-v2.5"}
 	mimoV25VisionModels = []string{"mimo-v2.5"}
@@ -119,6 +128,48 @@ func qwenModelContextOverrides() map[string]ProviderModelOverride {
 		"glm-5":                {ContextWindow: 202_752},
 		"glm-4.7":              {ContextWindow: 202_752},
 		"kimi-k2.5":            {ContextWindow: 262_144},
+	}
+}
+
+func tokenRhythmModelOverrides() map[string]ProviderModelOverride {
+	return map[string]ProviderModelOverride{
+		"deepseek-v4-flash": {
+			ReasoningProtocol: ReasoningProtocolDeepSeek,
+			SupportedEfforts:  []string{"disabled", "low", "high", "max"},
+			DefaultEffort:     "high",
+		},
+		"deepseek-v4-pro": {
+			ReasoningProtocol: ReasoningProtocolDeepSeek,
+			SupportedEfforts:  []string{"disabled", "high", "max"},
+			DefaultEffort:     "high",
+		},
+		"deepseek-v4-flash-0731": {
+			ReasoningProtocol: ReasoningProtocolDeepSeek,
+			SupportedEfforts:  []string{"disabled", "low", "high", "max"},
+			DefaultEffort:     "high",
+		},
+		"glm-5": {
+			ReasoningProtocol: ReasoningProtocolGLM,
+			SupportedEfforts:  []string{"enabled", "disabled"},
+			DefaultEffort:     "enabled",
+		},
+		"glm-5.1": {
+			ReasoningProtocol: ReasoningProtocolGLM,
+			SupportedEfforts:  []string{"enabled", "disabled"},
+			DefaultEffort:     "enabled",
+			ContextWindow:     200_000,
+		},
+		"glm-5.2": {
+			ReasoningProtocol: ReasoningProtocolGLM,
+			SupportedEfforts:  []string{"enabled", "disabled"},
+			DefaultEffort:     "enabled",
+		},
+		"minimax-m2.7":   {ContextWindow: 200_000},
+		"kimi-k2.5":      {ContextWindow: 256_000},
+		"kimi-k2.6":      {ContextWindow: 256_000},
+		"minimax-m2.5":   {ContextWindow: 200_000},
+		"mimo-v2.5-pro":  {ContextWindow: 256_000},
+		"kimi-k2.7-code": {ContextWindow: 256_000},
 	}
 }
 
@@ -193,6 +244,24 @@ var curatedProviderPresets = []ProviderPreset{
 			DefaultEffort:    "enabled",
 			ContextWindow:    longCat20ContextWindow,
 			Prices:           longCat20Prices(longCat20Models),
+		}},
+	},
+	{
+		ID:          "token-rhythm",
+		Label:       "Token Rhythm",
+		Description: "Token Rhythm (基元律动) multi-model OpenAI-compatible gateway.",
+		KeyEnv:      "TOKEN_RHYTHM_API_KEY",
+		Entries: []ProviderEntry{{
+			Name:           "token-rhythm",
+			Kind:           "openai",
+			BaseURL:        "https://tokenrhythm.studio/v1",
+			ModelsURL:      "https://tokenrhythm.studio/v1/models",
+			Models:         tokenRhythmModels,
+			VisionModels:   tokenRhythmVisionModels,
+			Default:        "deepseek-v4-flash",
+			APIKeyEnv:      "TOKEN_RHYTHM_API_KEY",
+			ContextWindow:  1_000_000,
+			ModelOverrides: tokenRhythmModelOverrides(),
 		}},
 	},
 	{

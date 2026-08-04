@@ -52,17 +52,20 @@ trap cleanup EXIT
 
 cd "$ROOT/desktop"
 
+# build_guard produces the one-shot legacy migrator still named reasonix-guard
+# in compatibility payloads for 1.18–1.19.1 updaters. Source is intentionally
+# separate from the removed Guard recovery product.
 build_guard() {
-	echo "==> go build Reasonix Guard"
+	echo "==> go build Reasonix legacy migrator (compat name reasonix-guard)"
 	mkdir -p "$(dirname "$guard_out")"
 	if [ "$arch" = universal ]; then
 		guard_tmp=$(mktemp -d)
-		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_tmp/amd64" ./cmd/reasonix-guard)
-		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_tmp/arm64" ./cmd/reasonix-guard)
+		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_tmp/amd64" ./cmd/reasonix-legacy-migrator)
+		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_tmp/arm64" ./cmd/reasonix-legacy-migrator)
 		lipo -create "$guard_tmp/amd64" "$guard_tmp/arm64" -output "$guard_out"
 		rm -rf "$guard_tmp"
 	else
-		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_out" ./cmd/reasonix-guard)
+		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION" -o "$guard_out" ./cmd/reasonix-legacy-migrator)
 	fi
 }
 
@@ -113,11 +116,11 @@ if [ "$os" = windows ]; then
 	go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource
 	guard_out="$ROOT/desktop/build/windows/installer/$GUARDNAME.exe"
 	build_guard
-	stamp_windows_executable "$guard_out" "Reasonix Guard" "$GUARDNAME" "$GUARDNAME.exe"
+	stamp_windows_executable "$guard_out" "Reasonix Legacy Migrator" "$GUARDNAME" "$GUARDNAME.exe"
 	launcher_out="$ROOT/desktop/build/windows/installer/$LAUNCHERNAME.exe"
-	echo "==> go build Windows GUI launcher"
+	echo "==> go build Windows GUI thin launcher"
 	(cd "$ROOT" && GOOS=windows GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
-		-ldflags="-s -w -H windowsgui -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-guard)
+		-ldflags="-s -w -H windowsgui -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-launcher)
 	stamp_windows_executable "$launcher_out" "Reasonix Launcher" "$LAUNCHERNAME" "$LAUNCHERNAME.exe"
 	echo "==> go build Windows update helper"
 	GOOS=windows GOARCH="$arch" go build -trimpath -ldflags="-s -w" \
@@ -141,8 +144,16 @@ build_args+=(-platform "$PLATFORM" -ldflags "$ldflags")
 echo "==> wails build ${build_args[*]}"
 wails build "${build_args[@]}"
 if [ "$os" != windows ]; then
-	guard_out="$ROOT/desktop/build/bin/$GUARDNAME"
-	build_guard
+	# Linux still ships a one-shot migrator named reasonix-guard in the portable
+	# tarball so 1.18–1.19.1 updaters can hand off. macOS does not bundle Guard.
+	if [ "$os" = linux ]; then
+		guard_out="$ROOT/desktop/build/bin/$GUARDNAME"
+		build_guard
+		launcher_out="$ROOT/desktop/build/bin/$LAUNCHERNAME"
+		echo "==> go build Linux thin launcher"
+		(cd "$ROOT" && GOOS=linux GOARCH="$arch" CGO_ENABLED=0 go build -trimpath \
+			-ldflags="-s -w -X main.version=$VERSION" -o "$launcher_out" ./cmd/reasonix-launcher)
+	fi
 	cli_out="$ROOT/desktop/build/bin/$CLINAME"
 	build_cli
 fi
@@ -156,14 +167,15 @@ darwin)
 	staging=$(mktemp -d)
 	app="$staging/${APPNAME}.app"
 	cp -R "build/bin/reasonix-desktop.app" "$app"
-	cp "$guard_out" "$app/Contents/MacOS/$GUARDNAME"
+	# v1.20+: no Guard in the App bundle. CLI remains a sibling helper for
+	# terminal workflows; LaunchServices must own the Wails process directly.
 	cp "$cli_out" "$app/Contents/MacOS/$CLINAME"
 	bundle_executable=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$app/Contents/Info.plist")
-	# LaunchServices must own the Wails/AppKit process directly. Making Guard the
-	# bundle executable leaves the Dock attached to a non-UI parent process, so
-	# clicking the icon cannot reliably reactivate the desktop window. Guard and
-	# the CLI remain bundled as independent recovery sidecars.
 	[ "$bundle_executable" = "$BINNAME" ] || { echo "macOS bundle executable is $bundle_executable, want $BINNAME" >&2; exit 1; }
+	if [ -e "$app/Contents/MacOS/$GUARDNAME" ]; then
+		echo "macOS bundle must not include $GUARDNAME" >&2
+		exit 1
+	fi
 	bundle_icon=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$app/Contents/Info.plist")
 	case "$bundle_icon" in
 	*.icns) ;;
@@ -264,12 +276,15 @@ windows)
 	;;
 linux)
 	for desktop_contract in \
-		'Exec=reasonix-guard launch --detach' \
+		'Exec=reasonix-launcher' \
 		'Icon=reasonix-desktop' \
 		'StartupWMClass=reasonix-desktop'; do
 		grep -F -x -q "$desktop_contract" build/linux/reasonix.desktop || { echo "Linux desktop entry missing: $desktop_contract" >&2; exit 1; }
 	done
-	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin "$BINNAME" "$GUARDNAME" "$CLINAME"
+	# Portable Linux tarball: desktop + thin launcher + one-shot migrator
+	# (compat name reasonix-guard) + CLI. After migrator runs, Guard self-deletes.
+	tar -czf "$ROOT/dist/${APPNAME}-linux-${arch}.tar.gz" -C build/bin \
+		"$BINNAME" "$LAUNCHERNAME" "$GUARDNAME" "$CLINAME"
 	# Build the privileged update helper shipped inside the .deb. Portable tarball
 	# installs do not need it; only the dpkg package installs helper + Polkit policy.
 	echo "==> go build reasonix-update-helper"

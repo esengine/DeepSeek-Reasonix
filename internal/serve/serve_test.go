@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
@@ -23,6 +24,37 @@ import (
 func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
 	if !strings.Contains(titlePrompt, "same language as the user's message") {
 		t.Fatalf("title prompt does not preserve the user's language: %q", titlePrompt)
+	}
+}
+
+type titleUsageProvider struct{}
+
+func (titleUsageProvider) Name() string { return "title" }
+func (titleUsageProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk, 3)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "Short title"}
+	ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+type titleUsageSink struct{ events []event.Event }
+
+func (s *titleUsageSink) Emit(e event.Event) { s.events = append(s.events, e) }
+
+func TestGenerateTitleRecordsUsageWithModelIdentity(t *testing.T) {
+	sink := &titleUsageSink{}
+	s := &Server{
+		titleProv:      titleUsageProvider{},
+		titleModelRef:  "deepseek/deepseek-v4-flash",
+		titleUsageSink: sink,
+	}
+	if got := s.generateTitle(context.Background(), "hello"); got != "Short title" {
+		t.Fatalf("title = %q", got)
+	}
+	if len(sink.events) != 1 || sink.events[0].Kind != event.Usage || sink.events[0].ModelRef != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("title usage event = %+v", sink.events)
 	}
 }
 
@@ -309,6 +341,23 @@ func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	} {
 		if !strings.Contains(html, want) {
 			t.Fatalf("serve index missing query helper %q", want)
+		}
+	}
+}
+
+func TestServeIndexReportsSessionDeleteFailures(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"'cannot_delete_active': 'Cannot delete the active session'",
+		"'cannot_delete_active': '无法删除当前会话'",
+		"'delete_failed': 'Could not delete the session. Check your connection and try again.'",
+		"'delete_failed': '无法删除会话，请检查连接后重试'",
+		"if(target&&target.current){showNotice(__('cannot_delete_active'),'warn');return;}",
+		"if(!r.ok){showNotice((await r.text()).trim()||('HTTP '+r.status),'warn');}",
+		"}).catch(()=>showNotice(__('delete_failed'),'warn'));",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing session delete failure handling %q", want)
 		}
 	}
 }

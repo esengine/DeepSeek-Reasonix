@@ -11,15 +11,33 @@ import (
 	"time"
 )
 
+// The probe must not spawn a background daemon that opens a console of its own
+// (#3906). Asserted as properties rather than a byte-exact argument list: the
+// full invocation baseline is owned and pinned by internal/gitcmd, and pinning
+// it a second time here only guaranteed this test would break whenever the
+// baseline gained an entry.
 func TestWorkspaceGitDisablesDaemonSpawns(t *testing.T) {
 	cmd := workspaceGit("-C", "repo", "status", "--porcelain=v1")
-	want := []string{"git", "-c", "core.fsmonitor=false", "-c", "maintenance.auto=false", "-C", "repo", "status", "--porcelain=v1"}
-	if !slices.Equal(cmd.Args, want) {
-		t.Fatalf("args = %v, want %v", cmd.Args, want)
+	for _, want := range []string{"core.fsmonitor=false", "maintenance.auto=false"} {
+		if !hasGitConfigArg(cmd.Args, want) {
+			t.Fatalf("args = %v, want -c %s", cmd.Args, want)
+		}
+	}
+	if tail := cmd.Args[len(cmd.Args)-4:]; !slices.Equal(tail, []string{"-C", "repo", "status", "--porcelain=v1"}) {
+		t.Fatalf("args = %v, want the caller's arguments last", cmd.Args)
 	}
 	if runtime.GOOS == "windows" && cmd.SysProcAttr == nil {
 		t.Fatal("workspaceGit must hide the console window on Windows")
 	}
+}
+
+func hasGitConfigArg(args []string, want string) bool {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == "-c" && args[i+1] == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestWorkspaceGitBranch(t *testing.T) {

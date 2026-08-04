@@ -14,43 +14,35 @@ trap cleanup EXIT
 # Stable tags have one entrypoint and one protected environment. Reusable
 # publishers must verify that only that entrypoint can claim prior approval.
 [ "$(grep -Ec '^    environment: release$' "$repo_root/.github/workflows/release-stable.yml")" = "1" ]
-for relay in release-stable-trigger.yml release-cli-trigger.yml release-desktop-trigger.yml; do
-	grep -Eq 'actions: write' "$repo_root/.github/workflows/$relay"
-	grep -Eq "CONTROL_PLANE_REF.*default_branch" "$repo_root/.github/workflows/$relay"
-	grep -Eq "CONTROL_PLANE_REF !== 'main-v2'" "$repo_root/.github/workflows/$relay"
-	grep -Eq 'createWorkflowDispatch' "$repo_root/.github/workflows/$relay"
-	grep -Eq 'ref: process\.env\.CONTROL_PLANE_REF' "$repo_root/.github/workflows/$relay"
-done
+relay="$repo_root/.github/workflows/release-stable-trigger.yml"
+grep -Eq 'actions: write' "$relay"
+grep -Eq "CONTROL_PLANE_REF.*default_branch" "$relay"
+grep -Eq "CONTROL_PLANE_REF !== 'main-v2'" "$relay"
+grep -Eq 'createWorkflowDispatch' "$relay"
+grep -Eq 'ref: process\.env\.CONTROL_PLANE_REF' "$relay"
 grep -Eq "workflow_id: 'release-stable\.yml'" \
 	"$repo_root/.github/workflows/release-stable-trigger.yml"
 grep -Eq "allow_recovery: 'false'" \
 	"$repo_root/.github/workflows/release-stable-trigger.yml"
 grep -Eq 'ALLOW_STABLE_RECOVERY:.*inputs\.allow_recovery' \
 	"$repo_root/.github/workflows/release-stable.yml"
-grep -Eq "workflow_id: 'release-desktop\.yml'" \
-	"$repo_root/.github/workflows/release-desktop-trigger.yml"
-grep -Fq 'Desktop Preview must be dispatched without a Git tag' \
-	"$repo_root/.github/workflows/release-desktop-trigger.yml"
-grep -Fq "workflow_id: preview ? 'release-preview.yml' : 'release.yml'" \
-	"$repo_root/.github/workflows/release-cli-trigger.yml"
-grep -Eq "preview\\\\\." "$repo_root/.github/workflows/release-cli-trigger.yml"
-grep -Eq '^name: Release preview$' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq '^  group: preview-release$' "$repo_root/.github/workflows/release-preview.yml"
-if grep -Fq 'group: preview-release-${{ inputs.tag }}' "$repo_root/.github/workflows/release-preview.yml"; then
-	echo "Preview releases must serialize across versions" >&2
-	exit 1
-fi
-grep -Eq '^    environment: canary$' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq '^      recovery:$' "$repo_root/.github/workflows/release-preview.yml"
-grep -Fq 'ALLOW_PREVIEW_RECOVERY: ${{ inputs.recovery }}' "$repo_root/.github/workflows/release-preview.yml"
-grep -Fq 'allow_preview_recovery: ${{ inputs.recovery }}' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq '^  signpath-preflight:$' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq 'signing_preflight: true' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq 'signing_preflight_verified: true' "$repo_root/.github/workflows/release-preview.yml"
-[ "$(grep -Ec 'needs: \[authorize, signpath-preflight\]' "$repo_root/.github/workflows/release-preview.yml")" = "3" ]
-grep -Eq 'release-event\.mjs generate' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq 'gh workflow run pages\.yml' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq 'release-cli-trigger\.yml' "$repo_root/.github/workflows/ci.yml"
+grep -Fq 'bash scripts/validate-stable-candidate.sh "$RELEASE_VERSION" "$RELEASE_SHA"' \
+	"$repo_root/.github/workflows/release-stable.yml"
+grep -Fq 'bash scripts/verify-release-push-ci.sh "$RELEASE_SHA"' \
+	"$repo_root/.github/workflows/release-stable.yml"
+grep -Fq 'if: ${{ !inputs.allow_recovery }}' \
+	"$repo_root/.github/workflows/release-stable.yml"
+test -x "$repo_root/scripts/validate-stable-candidate.sh"
+test -x "$repo_root/scripts/verify-release-push-ci.sh"
+for retired in release-preview.yml release-cli-trigger.yml release-desktop-trigger.yml; do
+	test ! -e "$repo_root/.github/workflows/$retired"
+done
+! sed -n '/^on:/,/^permissions:/p' "$repo_root/.github/workflows/release-npm.yml" |
+	grep -Eq 'push:|npm-v\*-\*'
+grep -Eq '^name: Prepare release$' "$repo_root/.github/workflows/prepare-release-notes.yml"
+[ "$(sed -n '/workflow_dispatch:/,/permissions:/p' "$repo_root/.github/workflows/prepare-release-notes.yml" | grep -Ec '^      [a-z_]+:$')" = "1" ]
+grep -Fq 'GitHub Actions could not open the PR; the reviewed branch is preserved.' \
+	"$repo_root/.github/workflows/prepare-release-notes.yml"
 if grep -Eq '^  push:$' "$repo_root/.github/workflows/release-stable.yml" ||
 	grep -Eq '^  push:$' "$repo_root/.github/workflows/release.yml" ||
 	grep -Eq '^  push:$' "$repo_root/.github/workflows/release-desktop.yml"; then
@@ -107,14 +99,21 @@ git -C "$test_root/product-checkout" check-ignore -q release-control/
 [ -z "$(git -C "$test_root/product-checkout" status --porcelain --untracked-files=all)" ]
 grep -Eq "needs\.build\.result == 'success'" "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq "needs\.publish\.result == 'success'" "$repo_root/.github/workflows/release-desktop.yml"
-grep -Eq 'options: \[stable, preview\]' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Eq 'options: \[stable\]' "$repo_root/.github/workflows/release-desktop.yml"
+if sed -n '/^  workflow_dispatch:/,/^  workflow_call:/p' "$repo_root/.github/workflows/release-desktop.yml" |
+	grep -Eqi 'preview|canary'; then
+	echo "Standalone Desktop dispatch must not expose a Preview or Canary choice" >&2
+	exit 1
+fi
 grep -Eq '^  resolve:$' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Eq 'sha:.*steps\.candidate\.outputs\.sha' "$repo_root/.github/workflows/release-desktop.yml"
 grep -Fq 'bash scripts/resolve-desktop-candidate.sh' "$repo_root/.github/workflows/release-desktop.yml"
 [ "$(grep -Fc 'IN_ORCHESTRATOR: ${{ inputs.orchestrator }}' "$repo_root/.github/workflows/release-desktop.yml")" = "3" ]
 [ "$(grep -Fc 'name: Revalidate immutable Desktop candidate' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
 [ "$(grep -Fc 'ref: ${{ needs.resolve.outputs.sha }}' "$repo_root/.github/workflows/release-desktop.yml")" -ge 4 ]
-[ "$(grep -Ec '^          path: release-control$' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
+[ "$(grep -Ec '^          path: release-control$' "$repo_root/.github/workflows/release-desktop.yml")" = "3" ]
+grep -Fq 'name: Checkout protected release verifier' "$repo_root/.github/workflows/release-desktop.yml"
+grep -Fq './release-control/scripts/verify-windows-authenticode.ps1' "$repo_root/.github/workflows/release-desktop.yml"
 [ "$(grep -Fc 'ref: ${{ github.workflow_sha }}' "$repo_root/.github/workflows/release-desktop.yml")" -ge 2 ]
 [ "$(grep -Fc 'bash release-control/scripts/resolve-desktop-candidate.sh' "$repo_root/.github/workflows/release-desktop.yml")" = "2" ]
 [ "$(grep -Fc 'RELEASE_TAG: ${{ inputs.approved_cli_tag }}' "$repo_root/.github/workflows/release-desktop.yml")" = "3" ]
@@ -258,8 +257,6 @@ grep -Eq '^  postflight:$' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'verify-stable-release-artifacts\.sh' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'name: Upload reviewed release notes' "$repo_root/.github/workflows/release-stable.yml"
 grep -Eq 'name: orchestrator-reviewed-release-notes' "$repo_root/.github/workflows/release-stable.yml"
-grep -Eq 'name: Upload reviewed release notes' "$repo_root/.github/workflows/release-preview.yml"
-grep -Eq 'name: orchestrator-reviewed-release-notes' "$repo_root/.github/workflows/release-preview.yml"
 for channel in cli npm desktop; do
 	grep -Eq '^      publish_'"$channel"':' "$repo_root/.github/workflows/release-stable.yml"
 	grep -Eq "inputs\.publish_$channel" "$repo_root/.github/workflows/release-stable.yml"
@@ -1131,17 +1128,16 @@ expect_invalid_desktop_manifest "a Preview manifest as Stable" stable "$desktop_
 expect_invalid_desktop_manifest "a non-official asset base" preview "$desktop_preview_version" \
 	"https://cdn.invalid/desktop-${desktop_preview_version}/" "$desktop_preview_manifest"
 
-# Release notes should normally reuse an existing release-bound PR instead of
-# opening one PR per version. Fork PRs and stale branches must fail closed, and
-# the dedicated release-notes PR remains the explicit fallback.
+# Release notes use one deterministic branch per official version. Failure to
+# open the PR must preserve that branch and print an exact manual handoff.
 prepare_notes="$repo_root/.github/workflows/prepare-release-notes.yml"
-grep -Eq '^      target_pr:$' "$prepare_notes"
-grep -Eq 'isCrossRepository' "$prepare_notes"
-grep -Eq 'target_pr comes from a fork' "$prepare_notes"
-grep -Eq 'git merge-base --is-ancestor origin/main-v2 HEAD' "$prepare_notes"
-grep -Eq 'RELEASE_NOTES_PR=\$TARGET_PR' "$prepare_notes"
-grep -Eq 'Updated existing release-bound PR' "$prepare_notes"
-grep -Eq 'release-notes/v\$\{VERSION#v\}' "$prepare_notes"
+if grep -Eq '^      (target_pr|from_tag):$' "$prepare_notes"; then
+	echo "Prepare release must expose only the official version input" >&2
+	exit 1
+fi
+grep -Fq 'branch="release-notes/v${VERSION}"' "$prepare_notes"
+grep -Fq 'GitHub Actions could not open the PR; the reviewed branch is preserved.' "$prepare_notes"
+grep -Fq 'gh pr create --repo ${{ github.repository }} --base main-v2 --head $RELEASE_NOTES_BRANCH --fill' "$prepare_notes"
 grep -Eq 'GITHUB_STEP_SUMMARY' "$prepare_notes"
 
 desktop_candidate_resolver="$repo_root/scripts/resolve-desktop-candidate.sh"
@@ -1282,14 +1278,9 @@ git clone -q "$test_root/remote.git" "$test_root/repo"
 		CALLER_SHA="$recovery_workflow_sha" CALLER_WORKFLOW_SHA="$recovery_workflow_sha" \
 		"$desktop_candidate_resolver"
 	grep -Eq '^sha='"$approved_sha"'$' "$test_root/desktop-stable-recovery-candidate.out"
-	if RELEASE_TAG=v1.2.3 "$repo_root/scripts/resolve-stable-release.sh" >"$test_root/stale-main.log" 2>&1; then
-		echo "old stable tag unexpectedly passed normal release resolution" >&2
-		exit 1
-	fi
-	if ! grep -Eq 'points to .*expected' "$test_root/stale-main.log"; then
-		sed -n '1,20p' "$test_root/stale-main.log" >&2
-		exit 1
-	fi
+	GITHUB_OUTPUT="$test_root/stale-main.out" RELEASE_TAG=v1.2.3 \
+		"$repo_root/scripts/resolve-stable-release.sh"
+	grep -Eq '^sha='"$approved_sha"'$' "$test_root/stale-main.out"
 	GITHUB_OUTPUT="$test_root/recovery.out" ALLOW_STABLE_RECOVERY=true RELEASE_TAG=v1.2.3 \
 		"$repo_root/scripts/resolve-stable-release.sh"
 	grep -Eq '^sha='"$approved_sha"'$' "$test_root/recovery.out"
@@ -1428,6 +1419,17 @@ EVENT_NAME=push IN_CHANNEL='' IN_TAG='' REF_NAME=desktop-v1.4.0-rc.1 RUN_NUMBER=
 grep -Eq '^prerelease=true$' "$test_root/desktop-rc.out"
 grep -Eq '^notes_version=v1\.4\.0$' "$test_root/desktop-rc.out"
 
+if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable \
+	IN_TAG=desktop-v1.4.0-rc.1 REF_NAME=main-v2 RUN_NUMBER=50 \
+	GITHUB_OUTPUT="$test_root/desktop-rc-dispatch.out" \
+	bash "$repo_root/scripts/resolve-desktop-release.sh" \
+	>"$test_root/desktop-rc-dispatch.log" 2>&1; then
+	echo "manual Desktop RC recovery unexpectedly passed" >&2
+	exit 1
+fi
+grep -Eq 'manual Desktop recovery accepts only desktop-vMAJOR.MINOR.PATCH' \
+	"$test_root/desktop-rc-dispatch.log"
+
 if EVENT_NAME=workflow_dispatch IN_CHANNEL=stable IN_TAG=desktop-v1.4.0-preview.1 \
 	REF_NAME=main-v2 RUN_NUMBER=50 GITHUB_OUTPUT="$test_root/desktop-preview-as-stable.out" \
 	bash "$repo_root/scripts/resolve-desktop-release.sh" \
@@ -1464,7 +1466,7 @@ if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=preview \
 	echo "standalone public CLI Preview unexpectedly passed" >&2
 	exit 1
 fi
-grep -Eq 'public CLI Preview releases must be dispatched by release-preview.yml' \
+grep -Eq 'manual CLI recovery accepts only vMAJOR.MINOR.PATCH' \
 	"$test_root/cli-preview-dispatch.log"
 
 EVENT_NAME=push IN_CHANNEL='' IN_TAG='' REF_NAME=v1.3.0-rc.1 \
@@ -1474,13 +1476,24 @@ grep -Eq '^prerelease=true$' "$test_root/cli-rc.out"
 grep -Eq '^notes_version=v1\.3\.0$' "$test_root/cli-rc.out"
 
 if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable \
+	IN_TAG=v1.3.0-rc.1 REF_NAME=main-v2 CALLER_REF=refs/heads/main-v2 \
+	CALLER_REF_PROTECTED=true GITHUB_OUTPUT="$test_root/cli-rc-dispatch.out" \
+	bash "$repo_root/scripts/resolve-cli-release.sh" \
+	>"$test_root/cli-rc-dispatch.log" 2>&1; then
+	echo "manual CLI RC recovery unexpectedly passed" >&2
+	exit 1
+fi
+grep -Eq 'manual CLI recovery accepts only vMAJOR.MINOR.PATCH' \
+	"$test_root/cli-rc-dispatch.log"
+
+if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable \
 	IN_TAG=v1.3.0-preview.42 REF_NAME=main-v2 CALLER_REF=refs/heads/main-v2 \
 	CALLER_REF_PROTECTED=true GITHUB_OUTPUT="$test_root/cli-channel-mismatch.out" \
 	bash "$repo_root/scripts/resolve-cli-release.sh" >"$test_root/cli-channel-mismatch.log" 2>&1; then
 	echo "CLI Preview tag unexpectedly passed as Stable" >&2
 	exit 1
 fi
-grep -Eq 'belongs to preview, not requested channel stable' "$test_root/cli-channel-mismatch.log"
+grep -Eq 'manual CLI recovery accepts only vMAJOR.MINOR.PATCH' "$test_root/cli-channel-mismatch.log"
 
 if EVENT_NAME=push IN_CHANNEL='' IN_TAG='' REF_NAME=v1.3.0-preview.latest \
 	GITHUB_OUTPUT="$test_root/cli-invalid-preview.out" bash "$repo_root/scripts/resolve-cli-release.sh" \
@@ -1532,6 +1545,19 @@ if EVENT_NAME=workflow_dispatch IN_ORCHESTRATED=false IN_CHANNEL=stable IN_BASE_
 fi
 grep -Eq 'does not match requested version' "$test_root/npm-mismatch.log"
 
+e2e_workflow="$repo_root/.github/workflows/e2e-bot.yml"
+grep -Fq 'REASONIX_HOME: ${{ runner.temp }}/reasonix-e2e-home' "$e2e_workflow"
+grep -Fq 'cp /tmp/reasonix-e2e.toml "$REASONIX_HOME/config.toml"' "$e2e_workflow"
+grep -Fq "printf 'DEEPSEEK_API_KEY=%s\\n' \"\$DEEPSEEK_API_KEY\" > \"\$REASONIX_HOME/.env\"" "$e2e_workflow"
+grep -Fq 'const unsuccessful = results.filter((result) => !result.Passed || result.Skipped);' "$e2e_workflow"
+grep -Fq "if: always() && hashFiles('report.md') != ''" "$e2e_workflow"
+if grep -A2 -F 'missing DEEPSEEK_API_KEY secret' "$e2e_workflow" | grep -Fq 'exit 0'; then
+	echo "e2e bot still treats a missing provider secret as success" >&2
+	exit 1
+fi
+
 node --test "$repo_root/npm/publish.test.mjs"
+node --test "$repo_root/scripts/finalize-npm-official-release.test.mjs"
+bash "$repo_root/scripts/release-stable.test.sh"
 
 echo "release workflow contract tests: PASS"

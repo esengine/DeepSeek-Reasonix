@@ -17,17 +17,30 @@ var (
 	renameFile = os.Rename
 )
 
-// AtomicWriteFile writes data to path crash-safely: it writes to a sibling tmp
-// file, fsyncs it so the bytes reach disk (guarding against power loss, not just
-// process crash — see #4615), then atomically renames it onto path via
-// ReplaceFile. A crash or power cut at any point leaves either the old file or
-// the complete new file, never a truncated one. perm applies to the final file.
+// AtomicWriteFile writes data to a sibling temporary file, fsyncs it, then
+// publishes it via ReplaceFile. On filesystems that support replacement rename,
+// readers see either the old file or the complete new file. ReplaceFile retains
+// its compatibility copy fallback for Windows filter drivers that reject a
+// same-directory rename as cross-device; callers that cannot tolerate that
+// non-atomic fallback must use AtomicWriteFileStrict.
 func AtomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFile(path, data, perm, true)
+}
+
+// AtomicWriteFileStrict publishes data only through an atomic rename. Unlike
+// AtomicWriteFile, a cross-device/filter-driver error is returned without ever
+// truncating path. Use it for commit pointers whose corruption would make the
+// surrounding state impossible to recover automatically.
+func AtomicWriteFileStrict(path string, data []byte, perm os.FileMode) error {
+	return atomicWriteFile(path, data, perm, false)
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool) error {
 	tmpPath, err := writeAtomicTemp(path, data, perm)
 	if err != nil {
 		return err
 	}
-	if err := ReplaceFile(tmpPath, path); err != nil {
+	if err := replaceFile(tmpPath, path, allowCrossDeviceCopy); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}
@@ -111,12 +124,19 @@ func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error)
 //
 // A missing tmp means the write itself failed and no retry can help.
 func ReplaceFile(tmp, dest string) error {
+	return replaceFile(tmp, dest, true)
+}
+
+func replaceFile(tmp, dest string, allowCrossDeviceCopy bool) error {
 	var err error
 	for attempt := 0; ; attempt++ {
 		if err = renameFile(tmp, dest); err == nil {
 			return nil
 		}
 		if renameCrossesDevice(err) {
+			if !allowCrossDeviceCopy {
+				return err
+			}
 			if copyOnto(tmp, dest) == nil {
 				return nil
 			}

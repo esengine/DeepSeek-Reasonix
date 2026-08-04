@@ -16,8 +16,10 @@ require (
 	fyne.io/systray v1.12.2
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/creack/pty v1.1.24
+	github.com/go-ole/go-ole v1.3.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/tc-hib/winres v0.3.1
+	github.com/wailsapp/go-webview2 v1.0.23
 	github.com/wailsapp/wails/v2 v2.12.0
 	golang.org/x/crypto v0.53.0
 	golang.org/x/image v0.43.0
@@ -35,7 +37,6 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/danieljoos/wincred v1.2.3 // indirect
-	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
@@ -70,7 +71,6 @@ require (
 	github.com/tree-sitter/tree-sitter-typescript v0.23.2 // indirect
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasttemplate v1.2.2 // indirect
-	github.com/wailsapp/go-webview2 v1.0.23 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	github.com/zalando/go-keyring v0.2.8 // indirect
 	golang.org/x/net v0.56.0 // indirect

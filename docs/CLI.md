@@ -42,33 +42,16 @@ Flags may appear before or after the prompt where applicable.
 ## Update the native CLI
 
 ```sh
-reasonix upgrade                  # update on the saved channel (Stable initially)
-reasonix upgrade preview          # switch to Preview, remember it, and update
-reasonix upgrade stable           # switch back to Stable, remember it, and update
+reasonix upgrade                  # install the latest official release
+reasonix upgrade --check          # report the target without installing
+reasonix upgrade --force          # reinstall the current official release
 ```
 
-The selected channel is user-global and is stored as
-`[cli].update_channel` in the Reasonix user config. A fresh or older config
-defaults to Stable, and a project's `reasonix.toml` cannot override this choice.
-Stable and Preview replace the same native CLI binary; they are not installed
-side by side.
-
-Preview accepts only protected `vX.Y.Z-preview.N` releases; internal RCs are
-excluded from both public channels. Switching channels may install a
-numerically older target, which is required when returning from a newer Preview
-to the current Stable release.
-
-For automation, `--channel stable|preview` remains a one-off override and does
-not change the saved channel:
-
-```sh
-reasonix upgrade preview --check          # save Preview, only check its target
-reasonix upgrade --channel preview        # one-off Preview update for a script
-reasonix upgrade --channel stable --force # one-off Stable reinstall
-```
-
-`--check` reports the target without installing it, while `--force` reinstalls
-the target channel's current release. The `reasonix update` alias behaves the
+The updater selects only strict `vX.Y.Z` non-prerelease GitHub Releases. During
+the 1.x compatibility period, old channel arguments and `--channel` are still
+accepted, but resolve to the same official release and print a deprecation
+notice. Legacy `[cli].update_channel` values are ignored and removed the next
+time Reasonix saves the configuration. The `reasonix update` alias behaves the
 same way.
 
 ## Configure providers
@@ -122,6 +105,24 @@ Custom provider prices are preserved.
 In an interactive session, `/currency` shows the saved and resolved values, and
 `/currency auto|CNY|USD` changes the preference and refreshes the current
 runtime without discarding the conversation.
+
+### Configure automatic compaction
+
+The desktop app and CLI share the user-global automatic compaction threshold.
+Inspect the effective percentage and its source, set the global default, or add
+a project override:
+
+```sh
+reasonix config compact-ratio              # show effective value and source
+reasonix config compact-ratio 75           # set the user-global default
+reasonix config compact-ratio --local 75   # override in ./reasonix.toml
+```
+
+The editable range is 65–85%, with 80% as the built-in default. Lower values
+compact earlier and may reduce prompt-prefix cache reuse; higher values retain
+more context before compaction. Project `reasonix.toml` takes precedence over
+the user config. Changes apply to new CLI sessions; an already-running session
+keeps the threshold it loaded at startup.
 
 ## One-shot and automation
 

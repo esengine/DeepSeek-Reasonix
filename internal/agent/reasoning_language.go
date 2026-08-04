@@ -204,46 +204,40 @@ func WithReasoningLanguageForSource(content, lang, source string) string {
 	return block + "\n\n" + content
 }
 
+// hasLeadingInjectedBlock reports whether target is already among the transient
+// blocks leading content, skipping past any other injected block on the way.
+// It walks TransientUserBlockTags rather than a list of its own: when the two
+// disagreed, a block the host had started injecting was treated as user prose
+// and stopped the walk early, so an already-present target went undetected and
+// was injected a second time.
 func hasLeadingInjectedBlock(content, target string) bool {
 	s := strings.TrimLeft(content, " \t\r\n")
 	for {
-		switch {
-		case strings.HasPrefix(s, "<"+target+">"):
+		if hasOpenTag(s, target) {
 			return strings.Contains(s, "</"+target+">")
-		case target != "response-language" && strings.HasPrefix(s, "<response-language>"):
-			var ok bool
-			s, ok = trimLeadingTransientBlock(s, "response-language")
+		}
+		skipped := false
+		for _, tag := range TransientUserBlockTags {
+			if tag == target || !hasOpenTag(s, tag) {
+				continue
+			}
+			rest, ok := trimLeadingTransientBlock(s, tag)
 			if !ok {
 				return false
 			}
-		case target != "reasoning-language" && strings.HasPrefix(s, "<reasoning-language>"):
-			var ok bool
-			s, ok = trimLeadingTransientBlock(s, "reasoning-language")
-			if !ok {
-				return false
-			}
-		case strings.HasPrefix(s, "<memory-update>"):
-			var ok bool
-			s, ok = trimLeadingTransientBlock(s, "memory-update")
-			if !ok {
-				return false
-			}
-		case strings.HasPrefix(s, "<background-jobs>"):
-			var ok bool
-			s, ok = trimLeadingTransientBlock(s, "background-jobs")
-			if !ok {
-				return false
-			}
-		case strings.HasPrefix(s, "<hook-context"):
-			var ok bool
-			s, ok = trimLeadingTransientBlock(s, "hook-context")
-			if !ok {
-				return false
-			}
-		default:
+			s, skipped = rest, true
+			break
+		}
+		if !skipped {
 			return false
 		}
 	}
+}
+
+// hasOpenTag reports whether s opens with tag, with or without attributes
+// (hook-context and capability-route carry them).
+func hasOpenTag(s, tag string) bool {
+	return strings.HasPrefix(s, "<"+tag+">") || strings.HasPrefix(s, "<"+tag+" ")
 }
 
 func trimLeadingTransientBlock(content, tag string) (string, bool) {

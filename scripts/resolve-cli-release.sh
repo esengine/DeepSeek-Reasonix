@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Resolve and validate one native CLI release tag. Stable releases and internal
-# RCs stay on the stable control plane; public Preview archives use the explicit
-# vX.Y.Z-preview.N contract and the Preview deployment gate.
+# Resolve and validate one native CLI release tag. Manual recovery exposes only
+# official versions; prerelease parsing remains for historical workflow calls.
 set -euo pipefail
 
 stable_semver_re='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
@@ -33,6 +32,12 @@ case "$version" in
 *-*) prerelease="true" ;;
 *) prerelease="false" ;;
 esac
+
+if [ "${EVENT_NAME:-}" = "workflow_dispatch" ] && \
+	[ "${IN_ORCHESTRATED:-false}" != "true" ] && [ "$prerelease" = "true" ]; then
+	echo "::error::manual CLI recovery accepts only vMAJOR.MINOR.PATCH" >&2
+	exit 1
+fi
 
 if [[ "$tag" =~ $preview_semver_re ]]; then
 	channel="preview"

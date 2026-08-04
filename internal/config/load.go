@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
@@ -28,7 +30,7 @@ func Load() (*Config, error) {
 // changing the process cwd, while provider keys stay rooted in Reasonix home.
 //
 // Note: LoadForRoot may rewrite legacy MCP `tier` lines on disk (see
-// mergeRuntimeTOMLFile). Callers that must not mutate config files should use
+// mergeRuntimeTOMLFileSnapshot). Callers that must not mutate config files should use
 // LoadForRootReadOnly instead.
 func LoadForRoot(root string) (*Config, error) {
 	return loadForRoot(root, true)
@@ -46,13 +48,14 @@ func LoadForRootReadOnly(root string) (*Config, error) {
 // Host-owned features that may execute a configured binary should use this
 // instead of LoadForRoot so an untrusted checkout cannot choose the process.
 func LoadUserConfigReadOnly() (*Config, error) {
-	if SafeModeRequested() {
-		return loadSafeModeForRoot("."), nil
-	}
 	cfg := Default()
 	if path := userConfigLoadPath(); path != "" {
-		if err := mergeFile(cfg, path); err != nil {
+		meta, err := mergeFileSnapshot(cfg, path)
+		if err != nil {
 			return nil, err
+		}
+		if meta.IsDefined("agent", "system_prompt_file") {
+			cfg.systemPromptFileSource = promptFileSourceUser
 		}
 	}
 	normalizeConfigForEdit(cfg)
@@ -61,9 +64,6 @@ func LoadUserConfigReadOnly() (*Config, error) {
 
 func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	root = resolveRoot(root)
-	if SafeModeRequested() {
-		return loadSafeModeForRoot(root), nil
-	}
 	expansionEnv := loadDotEnvForRoot(root)
 	cfg := Default()
 	cfg.setExpansionEnv(expansionEnv)
@@ -82,19 +82,46 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 		return nil, err
 	}
 
-	mergeTOML := mergeFile
+	mergeTOML := mergeFileSnapshot
 	if migrateOnDisk {
-		mergeTOML = mergeRuntimeTOMLFile
+		mergeTOML = mergeRuntimeTOMLFileSnapshot
 	}
 
 	var tomlSources []string
 	userDefaultModelExplicit := false
 	if uc := userConfigLoadPath(); uc != "" {
 		tomlSources = append(tomlSources, uc)
-		if err := mergeTOML(cfg, uc); err != nil {
-			return nil, err
+		meta, err := mergeTOML(cfg, uc)
+		if err != nil {
+			// Never rewrite the broken original file. Prefer the last verified
+			// snapshot in memory, then built-in defaults, and keep loading so
+			// the rest of the app stays usable.
+			lkgCfg := Default()
+			lkgCfg.setExpansionEnv(expansionEnv)
+			lkgCfg.CredentialsStore = credentialsStoreMode()
+			if lkgErr := loadLastKnownGoodUserConfig(lkgCfg); lkgErr == nil {
+				*cfg = *lkgCfg
+				cfg.addLoadWarning(fmt.Sprintf(
+					"user config %s is invalid (%v); using last-known-good snapshot in memory without modifying the original file",
+					uc, err,
+				))
+			} else {
+				cfg.addLoadWarning(fmt.Sprintf(
+					"user config %s is invalid (%v); using built-in defaults in memory without modifying the original file",
+					uc, err,
+				))
+			}
+		} else {
+			userDefaultModelExplicit = meta.IsDefined("default_model")
+			if meta.IsDefined("agent", "system_prompt_file") {
+				cfg.systemPromptFileSource = promptFileSourceUser
+			}
 		}
-		userDefaultModelExplicit = tomlFileDefinesKey(uc, "default_model")
+	}
+	// A last-known-good recovery is still trusted user configuration even though
+	// the broken source file cannot provide usable TOML metadata.
+	if cfg.systemPromptFileSource == promptFileSourceUnknown && cfg.Agent.SystemPromptFile != "" {
+		cfg.systemPromptFileSource = promptFileSourceUser
 	}
 	userDefaultModel := cfg.DefaultModel
 	globalCLI := cfg.CLI
@@ -105,8 +132,19 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	globalTelemetry := cfg.Telemetry
 
 	tomlSources = append(tomlSources, projectTOML)
-	if err := mergeTOML(cfg, projectTOML); err != nil {
-		return nil, err
+	projectMeta, err := mergeTOML(cfg, projectTOML)
+	if err != nil {
+		// Project config damage is isolated to this workspace: continue with
+		// user/global config so other tabs stay available.
+		cfg.addLoadWarning(fmt.Sprintf(
+			"project config %s is invalid (%v); ignored for this workspace",
+			projectTOML, err,
+		))
+		// Drop the project path from later multi-file merges so a broken TOML
+		// cannot fail plugin/provider re-merges.
+		tomlSources = tomlSources[:len(tomlSources)-1]
+	} else if projectMeta.IsDefined("agent", "system_prompt_file") {
+		cfg.systemPromptFileSource = promptFileSourceProject
 	}
 	// The native CLI update channel controls the one user-installed binary.
 	// A repository-local reasonix.toml must never switch that global choice.
@@ -132,18 +170,19 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	// mergeTOMLPlugins only reads files; it does not run on-disk migrations.
 	plugins, err := mergeTOMLPlugins(tomlSources)
 	if err != nil {
-		return nil, err
+		cfg.addLoadWarning(fmt.Sprintf("plugin configuration could not be merged (%v); continuing without those entries", err))
+	} else {
+		cfg.Plugins = plugins
 	}
-	cfg.Plugins = plugins
 	if providers, providerSources, shadowedProjectProviders, ok, err := mergeTOMLProviders(tomlSources); err != nil {
-		return nil, err
+		cfg.addLoadWarning(fmt.Sprintf("provider configuration could not be merged (%v); keeping providers already loaded", err))
 	} else if ok {
 		cfg.Providers = providers
 		cfg.providerSources = providerSources
 		cfg.shadowedProjectProviders = shadowedProjectProviders
 	}
 	if access, ok, err := mergeTOMLProviderAccess(tomlSources); err != nil {
-		return nil, err
+		cfg.addLoadWarning(fmt.Sprintf("provider access configuration could not be merged (%v)", err))
 	} else if ok {
 		cfg.Desktop.ProviderAccess = access
 	}
@@ -158,9 +197,10 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	}
 	entries, err := loadMCPJSON(mcpFile)
 	if err != nil {
-		return nil, err
+		cfg.addLoadWarning(fmt.Sprintf("project .mcp.json is invalid (%v); MCP servers from that file are ignored", err))
+	} else {
+		cfg.mergeMCPJSON(entries)
 	}
-	cfg.mergeMCPJSON(entries)
 
 	// Lowest priority before the one-time v1.9.1 MCP migration: the v0.x
 	// ~/.reasonix/config.json's mcpServers. Once the migration marker exists, the
@@ -197,21 +237,13 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	return cfg, nil
 }
 
-// SafeModeRequested reports whether this process should ignore user/project
-// runtime extensions and boot from built-in defaults. The environment switch is
-// intentionally process-local; it never rewrites user configuration.
-func SafeModeRequested() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_SAFE_MODE"))) {
-	case "1", "true", "yes", "on":
-		return true
-	default:
-		return false
-	}
-}
-
-func loadSafeModeForRoot(root string) *Config {
+// LoadBuiltinDefaultsForRoot returns a read-only built-in-only configuration
+// without reading or migrating user/project TOML. Diagnostic and recovery tools
+// use it when configuration is malformed; it does not put the process into any
+// degraded product "mode". Provider credentials still resolve only from
+// Reasonix's global credential store.
+func LoadBuiltinDefaultsForRoot(root string) *Config {
 	cfg := Default()
-	cfg.safeMode = true
 	cfg.Plugins = nil
 	cfg.Skills = SkillsConfig{}
 	cfg.Bot.Enabled = false
@@ -219,29 +251,17 @@ func loadSafeModeForRoot(root string) *Config {
 	cfg.Bot.Routes = nil
 	cfg.Statusline.Command = ""
 	cfg.LSP.Enabled = false
-	cfg.Desktop.CheckUpdates = safeModeBoolPtr(false)
-	// A Safe Mode boot never reads the user's config, so it cannot see (and
-	// must not override) a telemetry/metrics opt-out recorded there. Force
-	// every reporting path off instead of inheriting the enabled defaults.
-	cfg.Desktop.Telemetry = safeModeBoolPtr(false)
-	cfg.Desktop.Metrics = safeModeBoolPtr(false)
-	cfg.Telemetry.CLIMetrics = "off"
 	cfg.setExpansionEnv(nil)
 	cfg.CredentialsStore = credentialsStoreMode()
 	resolveProviderCredentialsForRoot(root, cfg)
 	return cfg
 }
 
-// LoadRecoveryDefaultsForRoot returns the same built-in-only configuration used
-// by Safe Mode without reading or migrating user/project TOML. Recovery tools use
-// it to reach an explicitly selected built-in provider when configuration is
-// malformed; provider credentials still resolve only from Reasonix's global
-// credential store.
+// LoadRecoveryDefaultsForRoot is retained as an alias of LoadBuiltinDefaultsForRoot
+// for older recovery call sites.
 func LoadRecoveryDefaultsForRoot(root string) *Config {
-	return loadSafeModeForRoot(root)
+	return LoadBuiltinDefaultsForRoot(root)
 }
-
-func safeModeBoolPtr(v bool) *bool { return &v }
 
 func (c *Config) setExpansionEnv(env map[string]string) {
 	if c == nil {
@@ -304,6 +324,14 @@ func tomlFileDefinesKey(path string, key ...string) bool {
 		return false
 	}
 	return meta.IsDefined(key...)
+}
+
+// ConfigFileDefinesCompactRatio reports whether path explicitly overrides the
+// automatic compaction threshold. It is used by config surfaces that need to
+// explain whether the effective value came from defaults, user config, or the
+// current project.
+func ConfigFileDefinesCompactRatio(path string) bool {
+	return tomlFileDefinesKey(path, "agent", "compact_ratio")
 }
 
 // backfillDeepSeekPro restores deepseek-pro for configs the pre-fix setup wizard
@@ -737,21 +765,47 @@ func loadDotEnvForEditPath(path string) {
 
 // mergeFile decodes a TOML file onto cfg if it exists. An absent file is not an error.
 func mergeFile(cfg *Config, path string) error {
+	_, err := mergeFileSnapshot(cfg, path)
+	return err
+}
+
+// mergeFileSnapshot decodes one immutable read of a TOML file onto cfg and
+// returns metadata from those exact bytes. Callers that derive source or
+// precedence decisions from metadata must use this result instead of reading
+// the path again: a config file may be atomically replaced between reads.
+func mergeFileSnapshot(cfg *Config, path string) (toml.MetaData, error) {
+	return mergeFileSnapshotWithRead(cfg, path, fileencoding.ReadFileUTF8)
+}
+
+func mergeFileSnapshotWithRead(cfg *Config, path string, readFile func(string) ([]byte, error)) (toml.MetaData, error) {
 	resolved, exists, err := statConfigPath(path)
 	if err != nil {
-		return err
+		return toml.MetaData{}, err
 	}
 	if !exists {
-		return nil
+		return toml.MetaData{}, nil
 	}
-	meta, err := decodeTOMLFileResolved(resolved, cfg)
+	data, err := readFile(resolved)
 	if err != nil {
-		return fmt.Errorf("config %s: %w", path, err)
+		return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
+	}
+	// BurntSushi/toml decodes struct fields incrementally and can leave earlier
+	// fields mutated when a later value has the wrong type. Validate the complete
+	// snapshot against a disposable Config before merging those same bytes into
+	// the active object. This makes user LKG fallback, project-level isolation,
+	// and metadata-derived provenance transactional with respect to file changes.
+	var validated Config
+	if _, err := decodeTOMLBytes(data, &validated); err != nil {
+		return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
+	}
+	meta, err := decodeTOMLBytes(data, cfg)
+	if err != nil {
+		return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
 	}
 	if meta.IsDefined("providers") {
 		var persisted Config
-		if _, err := decodeTOMLFileResolved(resolved, &persisted); err != nil {
-			return fmt.Errorf("config %s: %w", path, err)
+		if _, err := decodeTOMLBytes(data, &persisted); err != nil {
+			return toml.MetaData{}, fmt.Errorf("config %s: %w", path, err)
 		}
 		markPersistedDeepSeekOfficialPricing(&persisted)
 		markers := map[string]string{}
@@ -762,16 +816,16 @@ func mergeFile(cfg *Config, path string) error {
 			cfg.Providers[i].persistedOfficialCurrency = markers[providerMergeKey(cfg.Providers[i])]
 		}
 	}
-	return nil
+	return meta, nil
 }
 
-func mergeRuntimeTOMLFile(cfg *Config, path string) error {
+func mergeRuntimeTOMLFileSnapshot(cfg *Config, path string) (toml.MetaData, error) {
 	if _, err := os.Stat(path); err == nil {
 		if err := migrateLegacyMCPTiersFile(path); err != nil {
 			slog.Warn("config: legacy mcp tier migration failed", "path", path, "err", err)
 		}
 	}
-	return mergeFile(cfg, path)
+	return mergeFileSnapshot(cfg, path)
 }
 
 // normalizeLegacyMCPTiers keeps loaded legacy config files on the new product

@@ -89,6 +89,7 @@ type ReasonixUsage struct {
 	ReasoningTokens  int      `json:"reasoningTokens"`
 	CacheHitTokens   int      `json:"cacheHitTokens"`
 	CacheMissTokens  int      `json:"cacheMissTokens"`
+	Estimated        bool     `json:"estimated,omitempty"`
 	CacheHitRatio    *float64 `json:"cacheHitRatio"`
 	EstimatedCost    *float64 `json:"estimatedCost"`
 	Currency         *string  `json:"currency"`
@@ -134,6 +135,7 @@ type usageAccumulator struct {
 	reasoningTokens  int
 	cacheHitTokens   int
 	cacheMissTokens  int
+	estimated        bool
 	events           int
 	pricedEvents     int
 	estimatedCost    float64
@@ -150,6 +152,7 @@ func (a *usageAccumulator) add(u *provider.Usage, pricing *provider.Pricing, sou
 	a.reasoningTokens += u.ReasoningTokens
 	a.cacheHitTokens += u.CacheHitTokens
 	a.cacheMissTokens += u.CacheMissTokens
+	a.estimated = a.estimated || u.Estimated
 	a.events++
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -182,6 +185,7 @@ func (a usageAccumulator) wire() ReasonixUsage {
 		ReasoningTokens:  a.reasoningTokens,
 		CacheHitTokens:   a.cacheHitTokens,
 		CacheMissTokens:  a.cacheMissTokens,
+		Estimated:        a.estimated,
 		UsageSource:      a.source,
 	}
 	if usage.UsageSource == "" {
@@ -342,6 +346,7 @@ type persistedUsageAccumulator struct {
 	ReasoningTokens  int     `json:"reasoningTokens"`
 	CacheHitTokens   int     `json:"cacheHitTokens"`
 	CacheMissTokens  int     `json:"cacheMissTokens"`
+	Estimated        bool    `json:"estimated,omitempty"`
 	Events           int     `json:"events"`
 	PricedEvents     int     `json:"pricedEvents"`
 	EstimatedCost    float64 `json:"estimatedCost"`
@@ -364,7 +369,7 @@ func persistUsage(a usageAccumulator) persistedUsageAccumulator {
 	return persistedUsageAccumulator{
 		PromptTokens: a.promptTokens, CompletionTokens: a.completionTokens,
 		ReasoningTokens: a.reasoningTokens, CacheHitTokens: a.cacheHitTokens,
-		CacheMissTokens: a.cacheMissTokens, Events: a.events,
+		CacheMissTokens: a.cacheMissTokens, Estimated: a.estimated, Events: a.events,
 		PricedEvents: a.pricedEvents, EstimatedCost: a.estimatedCost,
 		Currency: a.currency, Source: a.source,
 	}
@@ -374,7 +379,7 @@ func restoreUsage(a persistedUsageAccumulator) usageAccumulator {
 	return usageAccumulator{
 		promptTokens: a.PromptTokens, completionTokens: a.CompletionTokens,
 		reasoningTokens: a.ReasoningTokens, cacheHitTokens: a.CacheHitTokens,
-		cacheMissTokens: a.CacheMissTokens, events: a.Events,
+		cacheMissTokens: a.CacheMissTokens, estimated: a.Estimated, events: a.Events,
 		pricedEvents: a.PricedEvents, estimatedCost: a.EstimatedCost,
 		currency: a.Currency, source: a.Source,
 	}

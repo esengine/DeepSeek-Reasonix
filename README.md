@@ -30,6 +30,11 @@
   <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
 </p>
 
+<p align="center">
+  <a href="https://trendshift.io/repositories/27020?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-27020" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/27020/monthly?language=Go" alt="esengine/DeepSeek-Reasonix | Trendshift" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/27020?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-27020" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/27020" alt="esengine/DeepSeek-Reasonix | Trendshift" width="250" height="55"/></a>
+</p>
+
 <br/>
 
 <h3 align="center">A DeepSeek-native AI coding agent for your terminal.</h3>
@@ -141,7 +146,7 @@ For advanced CLI usage and configuration, see the **[CLI reference](./docs/CLI.m
 - **Features & troubleshooting:** [Subagent profiles](./docs/SUBAGENT_PROFILES.md) ·
   [Context Engine v2](./docs/SESSION_MEMORY_RETRIEVAL.md) ·
   [Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md) ·
-  [Recovery and Safe Mode](./docs/RECOVERY.md) · [Bot guide](./docs/BOT_GUIDE.md) ·
+  [Recovery and updates](./docs/RECOVERY.md) · [Bot guide](./docs/BOT_GUIDE.md) ·
   [Checkpoints & rewind](./docs/CHECKPOINTS.md)
 - **Engineering & migration:** [Spec](./docs/SPEC.md) ·
   [Task contracts & pause policy](./docs/TASK_CONTRACT.md) ·

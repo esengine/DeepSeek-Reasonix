@@ -243,23 +243,8 @@ func TestSafePathComponentHandlesWindowsNames(t *testing.T) {
 	}
 }
 
-func TestGitCommandArgsEnableLongPathsOnlyOnWindows(t *testing.T) {
-	hasLongPaths := func(args []string) bool {
-		for i := 0; i+1 < len(args); i++ {
-			if args[i] == "-c" && args[i+1] == "core.longpaths=true" {
-				return true
-			}
-		}
-		return false
-	}
-
-	if args := gitCommandArgs("windows", `C:\Users\test\repo`, "status"); !hasLongPaths(args) {
-		t.Fatalf("Windows Git args = %v, want core.longpaths=true", args)
-	}
-	if args := gitCommandArgs("linux", "/tmp/repo", "status"); hasLongPaths(args) {
-		t.Fatalf("non-Windows Git args = %v, must not override core.longpaths", args)
-	}
-}
+// Argument construction — including the Windows-only core.longpaths override —
+// now lives in internal/gitcmd and is covered by that package's tests.
 
 func TestGitWorktreeAddUsesExtendedTimeout(t *testing.T) {
 	if got := gitTimeout([]string{"status", "--porcelain=v1"}); got != gitProbeTimeout {

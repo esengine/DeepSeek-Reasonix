@@ -10,6 +10,37 @@ import (
 	"strings"
 )
 
+// dirIsWritable reports whether the process can create a temporary file in dir.
+func dirIsWritable(dir string) bool {
+	if dir == "" {
+		return false
+	}
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
+	f, err := os.CreateTemp(dir, ".reasonix-write-test-*")
+	if err != nil {
+		return false
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return true
+}
+
+// resolveExecutablePath returns the real path of the running binary.
+func resolveExecutablePath() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		exe = resolved
+	}
+	return exe
+}
+
 // detectLinuxInstallProfile classifies the running Linux install.
 //
 //	deb      — dpkg owns the absolute executable path as reasonix-desktop, and the

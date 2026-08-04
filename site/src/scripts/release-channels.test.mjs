@@ -78,10 +78,10 @@ function copy(value) {
   return structuredClone(value);
 }
 
-test("CLI channel selector emits the saved-channel upgrade syntax", () => {
-  assert.equal(cliUpgradeCommand("stable"), "reasonix upgrade stable");
-  assert.equal(cliUpgradeCommand("preview"), "reasonix upgrade preview");
-  assert.equal(cliUpgradeCommand("canary"), "reasonix upgrade stable");
+test("CLI always emits the official upgrade command", () => {
+  assert.equal(cliUpgradeCommand("stable"), "reasonix upgrade");
+  assert.equal(cliUpgradeCommand("preview"), "reasonix upgrade");
+  assert.equal(cliUpgradeCommand("canary"), "reasonix upgrade");
 });
 
 test("release labels use a complete version or a readable fallback", () => {
@@ -106,7 +106,7 @@ test("site placeholders do not render the synthetic version vlatest", async () =
   assert.doesNotMatch(siteScript, /desktopPreviewBase/);
 });
 
-test("CLI channels strictly exclude foreign and internal prereleases", () => {
+test("CLI strictly excludes foreign and all prereleases", () => {
   const releases = [
     { tag_name: "v1.19.0-rc.1", prerelease: true, assets: cliAssets("v1.19.0-rc.1") },
     { tag_name: "v1.18.0-preview.2", prerelease: true, assets: cliAssets("v1.18.0-preview.2") },
@@ -116,9 +116,7 @@ test("CLI channels strictly exclude foreign and internal prereleases", () => {
     { tag_name: "v1.18.0-preview.13", prerelease: false, assets: cliAssets("v1.18.0-preview.13") },
   ];
   assert.equal(selectCLIRelease(releases, "stable")?.tag_name, "v1.17.21");
-  assert.equal(selectCLIRelease(releases, "preview")?.tag_name, "v1.18.0-preview.12");
-  assert.equal(cliReleaseModel(releases, "preview")?.assets.SHA256SUMS,
-    "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v1.18.0-preview.12/SHA256SUMS");
+  assert.equal(selectCLIRelease(releases, "preview")?.tag_name, "v1.17.21");
 });
 
 test("CLI selection rejects incomplete releases instead of synthesizing asset URLs", () => {
@@ -174,7 +172,7 @@ test("CLI release links are derived from the validated canonical tag", () => {
   );
   assert.equal(
     cliReleaseModel([release], "stable")?.changelogURL,
-    "https://reasonix.io/changelog/stable/",
+    "https://reasonix.io/changelog/",
   );
   release.release_notes_url = "https://reasonix.io/changelog/v1.18.0/";
   assert.equal(cliReleaseModel([release], "stable")?.changelogURL, release.release_notes_url);
@@ -227,18 +225,10 @@ test("CLI releases reject duplicate required asset names", () => {
   assert.equal(releaseAssetMap(release), null);
 });
 
-test("Desktop manifests accept only the exact official Stable and Preview bases", () => {
+test("Desktop manifests accept only official versions and old or unified asset bases", () => {
   const preview = desktopManifest("v1.18.0-preview.62");
   assert.equal(desktopReleaseModel(preview, "stable"), null);
-  const model = desktopReleaseModel(preview, "preview");
-  assert.equal(model?.displayVersion, "1.18.0-preview.62");
-  assert.equal(model?.changelogURL, "https://reasonix.io/changelog/preview/");
-  preview.release_notes_url = "https://reasonix.io/changelog/v1.18.0-preview.62/";
-  assert.equal(desktopReleaseModel(preview, "preview")?.changelogURL, preview.release_notes_url);
-  assert.equal(model?.assets["Reasonix-darwin-universal.dmg"],
-    "https://dl.reasonix.io/desktop-v1.18.0-preview.62/Reasonix-darwin-universal.dmg");
-  assert.equal(model?.assets["Reasonix-windows-amd64.zip"],
-    "https://dl.reasonix.io/desktop-v1.18.0-preview.62/Reasonix-windows-amd64.zip");
+  assert.equal(desktopReleaseModel(preview, "preview"), null);
 
   const stableR2 = desktopManifest("v1.18.0");
   assert.equal(desktopReleaseModel(stableR2, "stable")?.version, "v1.18.0");
@@ -249,6 +239,8 @@ test("Desktop manifests accept only the exact official Stable and Preview bases"
     desktopReleaseModel(stableGitHub, "stable")?.assets["Reasonix-linux-amd64.deb"],
     `${githubBase}Reasonix-linux-amd64.deb`,
   );
+  const unifiedBase = "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v1.18.0/";
+  assert.equal(desktopReleaseModel(desktopManifest("v1.18.0", unifiedBase))?.assets["Reasonix-linux-amd64.deb"], `${unifiedBase}Reasonix-linux-amd64.deb`);
 });
 
 test("Desktop manifests reject hostile URLs and incomplete integrity metadata", () => {
@@ -369,9 +361,9 @@ test("release JSON fetch skips a successful response that fails channel validati
 });
 
 test("Desktop JSON fetch continues after an invalid 200 response", async () => {
-  const invalid = desktopManifest("v1.18.0-preview.62");
+  const invalid = desktopManifest("v1.18.0");
   invalid.platforms["darwin-arm64"].size = 0;
-  const valid = desktopManifest("v1.18.0-preview.61");
+  const valid = desktopManifest("v1.17.21");
   const calls = [];
   const result = await fetchFirstJSON(
     ["https://one.invalid", "https://two.invalid"],
@@ -379,8 +371,8 @@ test("Desktop JSON fetch continues after an invalid 200 response", async () => {
       calls.push(url);
       return { ok: true, json: async () => url.includes("one") ? invalid : valid };
     },
-    (payload) => Boolean(desktopReleaseModel(payload, "preview")),
+    (payload) => Boolean(desktopReleaseModel(payload)),
   );
   assert.deepEqual(calls, ["https://one.invalid", "https://two.invalid"]);
-  assert.equal(result.version, "v1.18.0-preview.61");
+  assert.equal(result.version, "v1.17.21");
 });

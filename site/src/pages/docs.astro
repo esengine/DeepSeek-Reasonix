@@ -78,7 +78,7 @@ const goVer = 'latest';
 
       <h2 id="install"><span class="l-en">CLI / TUI</span><span class="l-zh">CLI / TUI</span></h2>
       <p><span class="l-en">Install the terminal app with one command on macOS, Linux, Windows, or WSL. <code>reasonix</code> opens the interactive TUI; <code>reasonix run</code> is the headless automation entry.</span><span class="l-zh">一条命令安装终端应用,支持 macOS、Linux、Windows 或 WSL。<code>reasonix</code> 打开交互式 TUI；<code>reasonix run</code> 用于无界面自动执行。</span></p>
-      <div class="codeblock"><button data-copy="npm i -g reasonix">Copy</button><span class="c"># npm (recommended · 推荐)</span>
+      <div class="codeblock codeblock--copy"><button data-copy="npm i -g reasonix">Copy</button><span class="c"># npm (recommended · 推荐)</span>
 npm i -g reasonix
 
 <span class="c"># Homebrew</span>
@@ -147,13 +147,13 @@ brew install esengine/reasonix/reasonix</div>
       </div>
       <h3 id="macos-quarantine"><span class="l-en">macOS quarantine warning</span><span class="l-zh">macOS 隔离属性提示</span></h3>
       <p><span class="l-en">Use this only when Reasonix was downloaded from the official site or GitHub release, moved to <code>/Applications</code>, and macOS still says the app cannot be opened, cannot be verified, or is damaged. This removes the quarantine flag that macOS attaches to downloaded apps.</span><span class="l-zh">仅在 Reasonix 来自官网或 GitHub Release、已经放入 <code>/Applications</code>,但 macOS 仍提示“无法打开”“无法验证开发者”或“应用已损坏”时使用。它会移除 macOS 给下载应用附加的隔离属性。</span></p>
-      <div class="codeblock"><button data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button><span class="c"># Quit Reasonix first, then run in Terminal.</span>
+      <div class="codeblock codeblock--copy"><button data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button><span class="c"># Quit Reasonix first, then run in Terminal.</span>
 sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app</div>
       <div class="callout"><span class="ico">!</span><span><span class="l-en">Only run this for an official Reasonix app you trust. If the app is installed somewhere else, replace <code>/Applications/Reasonix.app</code> with that exact app path, then reopen Reasonix.</span><span class="l-zh">只对可信的官方 Reasonix 应用执行这条命令。如果安装在其他位置,请把 <code>/Applications/Reasonix.app</code> 替换为实际 app 路径,然后重新打开 Reasonix。</span></span></div>
 
       <h2 id="quickstart"><span class="l-en">Quick start</span><span class="l-zh">快速上手</span></h2>
       <p><span class="l-en">First run is minimal — <code>reasonix setup</code> walks you through picking a provider and key, then saves it under Reasonix home. Then point Reasonix at a repo and start a session:</span><span class="l-zh">首次运行很简单——<code>reasonix setup</code> 引导你选择 provider 并填写密钥,然后保存到 Reasonix home。接着指向仓库、开始会话:</span></p>
-      <div class="codeblock"><button data-copy="cd your-project && reasonix">Copy</button>cd your-project
+      <div class="codeblock codeblock--copy"><button data-copy="cd your-project && reasonix">Copy</button>cd your-project
 reasonix</div>
       <p><span class="l-en">Then just describe the task:</span><span class="l-zh">然后直接描述任务:</span></p>
       <div class="codeblock"><span class="a">›</span> add retry with backoff to the http client
@@ -163,7 +163,7 @@ reasonix</div>
 
       <h2 id="serve"><span class="l-en">Web frontend</span><span class="l-zh">Web 前端</span></h2>
       <p><span class="l-en"><code>reasonix serve</code> starts the same local Reasonix engine behind a browser UI. Use it when you want a desktop-style surface without installing the desktop app, when running Reasonix on a remote development box through a tunnel, or when you want a shareable view of a live session.</span><span class="l-zh"><code>reasonix serve</code> 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、在远程开发机上通过 tunnel 使用,或把当前会话临时共享给浏览器查看。</span></p>
-      <div class="codeblock"><button data-copy="cd your-project && reasonix serve">Copy</button>cd your-project
+      <div class="codeblock codeblock--copy"><button data-copy="cd your-project && reasonix serve">Copy</button>cd your-project
 reasonix serve
 <span class="c"># open http://127.0.0.1:8787</span></div>
       <div class="web-panel">
@@ -176,7 +176,7 @@ reasonix serve
         </ul>
       </div>
       <p><span class="l-en">The default listen address is <code>127.0.0.1:8787</code> with <code>auth_mode = "none"</code>. Keep that for local-only use. If the server is reachable from another machine, enable auth before sharing the URL.</span><span class="l-zh">默认监听 <code>127.0.0.1:8787</code>,认证模式是 <code>auth_mode = "none"</code>。这个默认值只适合本机使用；如果其他机器能访问,请先开启认证再分享 URL。</span></p>
-      <div class="codeblock"><button data-copy="reasonix serve --auth token">Copy</button><span class="c"># token auth prints a share URL with ?token=...</span>
+      <div class="codeblock codeblock--copy"><button data-copy="reasonix serve --auth token">Copy</button><span class="c"># token auth prints a share URL with ?token=...</span>
 reasonix serve --auth token
 reasonix serve --addr 0.0.0.0:8787 --auth token
 
@@ -191,7 +191,7 @@ behind_proxy = true    <span class="c"># only behind a trusted reverse proxy</sp
 
       <h2 id="config"><span class="l-en">Configuration</span><span class="l-zh">配置</span></h2>
       <p><span class="l-en">Reasonix talks directly to configured OpenAI-compatible providers such as DeepSeek or MiMo with your own API keys. Provider config stores only the key name in <code>api_key_env</code>; the actual secret saved by <code>reasonix setup</code> or desktop Settings lives in the global <code>&lt;Reasonix home&gt;/.env</code>.</span><span class="l-zh">Reasonix 使用你自己的 API Key 直连配置好的 OpenAI-compatible provider,例如 DeepSeek 或 MiMo。Provider 配置只在 <code>api_key_env</code> 里记录密钥名称；通过 <code>reasonix setup</code> 或桌面端设置保存的真实密钥会写入全局 <code>&lt;Reasonix home&gt;/.env</code>。</span></p>
-      <div class="codeblock"><button data-copy="reasonix setup">Copy</button>reasonix setup
+      <div class="codeblock codeblock--copy"><button data-copy="reasonix setup">Copy</button>reasonix setup
 <span class="c"># saves provider keys to &lt;Reasonix home&gt;/.env, for example:</span>
 DEEPSEEK_API_KEY=sk-...</div>
       <p><span class="l-en">Project <code>.env</code> files are not provider-key fallbacks. They are only used for workspace-scoped variable expansion in MCP/plugin settings. Persistent options live in the <a href="#configfile">config file</a>.</span><span class="l-zh">项目 <code>.env</code> 不是 provider key 的 fallback。它只用于 MCP/plugin 配置里的工作区级变量展开。持久化选项见<a href="#configfile">配置文件</a>。</span></p>
@@ -204,6 +204,7 @@ DEEPSEEK_API_KEY=sk-...</div>
       <h2 id="cache"><span class="l-en">Prefix cache</span><span class="l-zh">前缀缓存</span></h2>
       <p><span class="l-en">DeepSeek bills cached prefix tokens at a fraction of fresh computation. Most agents waste this: they reorder messages, rewrite summaries mid-session, or inject volatile timestamps — every change invalidates the cache from that point on.</span><span class="l-zh">DeepSeek 对缓存前缀 token 的计费远低于新计算。多数智能体浪费了这一点:重排消息、会话中改写摘要、注入易变的时间戳——任何改动都会让其后的缓存全部失效。</span></p>
       <p><span class="l-en">Reasonix serializes context deterministically and only ever appends. The practical effect: hours-long sessions where 90%+ of every request replays from cache, and input-token cost collapses to ~1/5. See the <a href={`${base}/#how`}>animated walkthrough</a> on the home page.</span><span class="l-zh">Reasonix 以确定性方式序列化上下文,并且永远只追加。实际效果:数小时的会话中每次请求 90% 以上从缓存重放,输入 token 成本降到约 1/5。可在首页查看<a href={`${base}/#how`}>动态演示</a>。</span></p>
+      <p><span class="l-en">Automatic compaction starts at 80% of the model context by default. Desktop Settings and <code>reasonix config compact-ratio</code> share the user-level value; choose 65–85%, or use <code>--local</code> for a project override. Lower values compact earlier and can reduce prefix-cache reuse.</span><span class="l-zh">自动压缩默认在模型上下文达到 80% 时启动。桌面端设置与 <code>reasonix config compact-ratio</code> 共用用户级设置；可在 65–85% 之间选择，也可用 <code>--local</code> 添加项目覆盖。阈值越低越早压缩，也可能降低前缀缓存复用率。</span></p>
 
       <h2 id="permissions"><span class="l-en">Permissions &amp; sandbox</span><span class="l-zh">权限与沙箱</span></h2>
       <p><span class="l-en">Permissions gate each tool call: <code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; fallback. Read-only tools generally pass; writers fall back to <code>[permissions] mode</code>. Ask is not read-only: an approved writer can still run. The sandbox is the enforced capability boundary. Headless <code>reasonix run</code> defaults to Ask and fails closed when a writer needs approval; use <code>-y</code>, <code>--auto</code>, or <code>--permission-mode auto</code> for intentional unattended writes. <code>[permissions] allow_dynamic_bash = true</code> is an advanced opt-in that lets an Allow fallback cover nested or indirect Bash. Explicit ask and deny rules still apply.</span><span class="l-zh">权限逐个把关工具调用:<code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; 兜底。只读工具通常放行；写工具回退到 <code>[permissions] mode</code>。Ask 不是只读：writer 获得批准后仍会执行；沙箱才是强制能力边界。无界面的 <code>reasonix run</code> 默认使用 Ask，写操作需要审批时会安全拒绝；要显式启用无人值守写入，请使用 <code>-y</code>、<code>--auto</code> 或 <code>--permission-mode auto</code>。高级用户可设置 <code>[permissions] allow_dynamic_bash = true</code>，让 Allow fallback 覆盖嵌套或间接 Bash。显式 ask 与 deny 规则仍然生效。</span></p>
@@ -226,7 +227,7 @@ headers = &#123; Authorization = "Bearer $&#123;STRIPE_KEY&#125;" &#125;</div>
 
       <h2 id="acp"><span class="l-en">Editor integration (ACP)</span><span class="l-zh">编辑器接入（ACP）</span></h2>
       <p><span class="l-en">Reasonix implements Agent Client Protocol (ACP) v1 as an NDJSON JSON-RPC 2.0 agent over stdio. An ACP-compatible editor or host starts <code>reasonix acp</code>, opens workspace-scoped sessions, and receives streamed messages, tool activity, plans, permission requests, and configuration updates.</span><span class="l-zh">Reasonix 实现了 Agent Client Protocol（ACP）v1，通过 stdio 提供 NDJSON JSON-RPC 2.0 agent。兼容 ACP 的编辑器或 host 启动 <code>reasonix acp</code>、打开工作区会话，并接收流式消息、工具活动、计划、权限请求和配置更新。</span></p>
-      <div class="codeblock"><button data-copy="reasonix acp">Copy</button>reasonix acp                    <span class="c"># use the configured default model</span>
+      <div class="codeblock codeblock--copy"><button data-copy="reasonix acp">Copy</button>reasonix acp                    <span class="c"># use the configured default model</span>
 reasonix acp --model &lt;name&gt;     <span class="c"># choose the startup model</span>
 reasonix acp --profile delivery <span class="c"># economy | balanced | delivery</span></div>
       <div class="doc-choice-grid">
@@ -254,10 +255,12 @@ reasonix run "&lt;task&gt;"     <span class="c"># headless Ask; writers fail clo
 reasonix run -y "&lt;task&gt;"  <span class="c"># opt into unattended ordinary writes</span>
 reasonix serve            <span class="c"># browser UI at 127.0.0.1:8787</span>
 reasonix bot doctor       <span class="c"># check saved IM bot connections</span></div>
-      <p><span class="l-en">Run <code>reasonix upgrade</code> to update on the saved channel. Use <code>reasonix upgrade preview</code> or <code>reasonix upgrade stable</code> to switch channels, remember the choice globally, and update the same native CLI binary. Fresh and older configs start on Stable; project config cannot change the channel.</span><span class="l-zh">运行 <code>reasonix upgrade</code> 会按已保存渠道更新。使用 <code>reasonix upgrade preview</code> 或 <code>reasonix upgrade stable</code> 可切换渠道、全局记住选择，并更新同一个原生 CLI 二进制文件。全新和旧版配置默认使用正式版，项目配置不能更改此渠道。</span></p>
+      <div class="codeblock">reasonix config compact-ratio              <span class="c"># effective value + source</span>
+reasonix config compact-ratio 75           <span class="c"># user-global default</span>
+reasonix config compact-ratio --local 75   <span class="c"># project override</span></div>
+      <p><span class="l-en">Run <code>reasonix upgrade</code> to install the latest official release. Legacy channel arguments and saved channel settings remain accepted during the 1.x compatibility period, but they resolve to the same official release and are removed when configuration is saved.</span><span class="l-zh">运行 <code>reasonix upgrade</code> 安装最新正式版。1.x 兼容期内仍接受旧渠道参数与已保存设置，但它们都会解析为同一正式版，并在下次保存配置时移除。</span></p>
       <div class="codeblock">reasonix upgrade
-reasonix upgrade preview
-reasonix upgrade stable</div>
+reasonix upgrade</div>
       <p><span class="l-en">Inside a session, slash commands run locally — <code>/help</code> lists them all:</span><span class="l-zh">会话中,斜杠命令在本地运行——<code>/help</code> 列出全部:</span></p>
       <div class="codeblock">/compact   /new      /clear    /rewind   /tree
 /branch    /switch   /todo     /model    /mouse   /mcp
@@ -280,11 +283,9 @@ default_model = "deepseek-flash"
 [ui]
 shortcut_layout = "desktop"        <span class="c"># optional compatibility setting</span>
 
-[cli]
-update_channel = "stable"          <span class="c"># user-global native CLI channel</span>
-
 [agent]
 reasoning_language = "auto"        <span class="c"># auto|zh|en</span>
+compact_ratio = 0.8                <span class="c"># editable as 65–85% in Settings or CLI</span>
 planner_model = "deepseek-pro"     <span class="c"># optional read-only planner</span>
 
 [[providers]]

@@ -71,9 +71,10 @@ func TestFinishReasonMessage(t *testing.T) {
 		}
 	}
 	loud := map[string]string{
-		"length":                "max output",
-		"content_filter":        "content filter",
-		"repetition_truncation": "repetition",
+		"length":                 "max output",
+		"client_reasoning_limit": "client reasoning safety limit",
+		"content_filter":         "content filter",
+		"repetition_truncation":  "repetition",
 	}
 	for reason, fragment := range loud {
 		msg, ok := finishReasonMessage(&provider.Usage{FinishReason: reason})

@@ -29,6 +29,35 @@ func (a *App) workbenchProjectionTabID() string {
 	return a.activeTabID
 }
 
+func (a *App) emitWorkbenchRuntimeRebuilt(tabID, runtimeEpoch string) {
+	if strings.TrimSpace(runtimeEpoch) == "" {
+		a.emitRuntimeEvent("runtime:rebuilt", tabID)
+		return
+	}
+	a.emitRuntimeEvent("runtime:rebuilt", tabID, runtimeEpoch)
+}
+
+func (a *App) emitWorkbenchLocalRuntimeRebuilt(tabID string) {
+	a.mu.RLock()
+	tab := a.tabByIDLocked(tabID)
+	runtimeEpoch := a.sessionRuntimeViewLocked(tab).Epoch
+	a.mu.RUnlock()
+	if tab == nil || strings.TrimSpace(runtimeEpoch) == "" {
+		a.emitWorkbenchRuntimeRebuilt(tabID, runtimeEpoch)
+		return
+	}
+	// Use the tab event lane so the Local authority transition stays ordered
+	// with Local agent events. If a concurrent controller rebuild advanced the
+	// epoch after our snapshot, publish the newer authority once more.
+	a.notifyTabRuntimeRebuiltAtEpoch(tab, runtimeEpoch)
+	a.mu.RLock()
+	currentEpoch := a.sessionRuntimeViewLocked(tab).Epoch
+	a.mu.RUnlock()
+	if currentEpoch != "" && currentEpoch != runtimeEpoch {
+		a.notifyTabRuntimeRebuiltAtEpoch(tab, currentEpoch)
+	}
+}
+
 func (a *App) workbenchClientCallbacks(generation uint64, tabID string) client.Callbacks {
 	return client.Callbacks{
 		OnSessionEvent: func(notification protocol.SessionEvent) {
@@ -68,6 +97,9 @@ func (a *App) workbenchClientCallbacks(generation uint64, tabID string) client.C
 				}
 			}
 			k.mu.Unlock()
+			if notification.Event.Kind == "turn_done" {
+				recordRemoteTurnCompletion()
+			}
 			if busyChanged {
 				k.targets.SetRemoteBusy(busy)
 			}
@@ -94,7 +126,7 @@ func (a *App) workbenchClientCallbacks(generation uint64, tabID string) client.C
 				projectionTabID = tabID
 			}
 			if a.ctx != nil {
-				a.runtimeEvents.Emit(a.ctx, "agent:event", wireEventTab{Event: notification.Event, TabID: projectionTabID})
+				a.runtimeEvents.Emit(a.ctx, "agent:event", workbenchWireEvent(notification, projectionTabID))
 			}
 			k.transitionMu.Unlock()
 			if notification.Event.Kind == "turn_done" {
@@ -133,8 +165,15 @@ func (a *App) workbenchClientCallbacks(generation uint64, tabID string) client.C
 			k.mu.Unlock()
 			a.emitWorkbenchTarget("disconnected", id, identityGen, requestSeq, "Remote transport closed; reconnect to resume the Host session.")
 			a.emitReady(a.ctx, projectionTabID)
-			a.emitRuntimeEvent("runtime:rebuilt", projectionTabID)
+			a.emitWorkbenchLocalRuntimeRebuilt(projectionTabID)
 		},
+	}
+}
+
+func workbenchWireEvent(notification protocol.SessionEvent, tabID string) wireEventTab {
+	return wireEventTab{
+		Event: notification.Event, TabID: tabID,
+		RuntimeEpoch: string(notification.RuntimeEpoch),
 	}
 }
 
@@ -193,6 +232,7 @@ func (a *App) workbenchProjectTabMetas(metas []TabMeta) []TabMeta {
 		metas[i].TopicTitle = snapshot.Meta.Title
 		metas[i].Label = snapshot.Meta.ResolvedProfile.Model
 		metas[i].Ready = true
+		metas[i].Runtime = workbenchRuntimeView(snapshot)
 		metas[i].Running = snapshot.Runtime.Running
 		metas[i].PendingPrompt = snapshot.PendingPrompt != nil
 		metas[i].BackgroundJobs = len(snapshot.Jobs)
@@ -206,6 +246,10 @@ func (a *App) workbenchProjectTabMetas(metas []TabMeta) []TabMeta {
 		metas[i].GoalStatus = string(snapshot.Meta.GoalStatus)
 	}
 	return metas
+}
+
+func workbenchRuntimeView(snapshot protocol.SessionSnapshot) SessionRuntimeView {
+	return SessionRuntimeView{Phase: sessionRuntimeReady, Epoch: string(snapshot.RuntimeEpoch)}
 }
 
 func workbenchBaseName(path string) string {
@@ -295,6 +339,7 @@ func (a *App) workbenchRefreshSnapshot(generation uint64, tabID string) {
 			return nil
 		}
 		k.mu.Lock()
+		previous := k.snapshot
 		if k.remote == cli && k.remoteGen == generation {
 			k.snapshot = result.Snapshot
 			if k.remoteTabID != "" {
@@ -307,12 +352,40 @@ func (a *App) workbenchRefreshSnapshot(generation uint64, tabID string) {
 		k.mu.Unlock()
 		go a.workbenchMirrorSnapshot(cli, result.Snapshot)
 		a.emitReady(a.ctx, tabID)
-		a.emitRuntimeEvent("runtime:rebuilt", tabID)
+		if workbenchSnapshotRuntimeReplaced(previous, result.Snapshot) {
+			a.emitWorkbenchRuntimeRebuilt(tabID, string(result.Snapshot.RuntimeEpoch))
+		}
 		return nil
 	})
 	if err != nil {
 		return
 	}
+}
+
+// workbenchSnapshotRuntimeReplaced distinguishes an actual Remote controller
+// replacement from an ordinary state refresh. Treating every subscribe as a
+// rebuild invalidates frontend generations and can feed profile synchronization
+// back into session/profile/set indefinitely.
+func workbenchSnapshotRuntimeReplaced(previous, next protocol.SessionSnapshot) bool {
+	if previous.Target.SessionID == "" || previous.RuntimeEpoch == "" {
+		return false
+	}
+	return previous.Target != next.Target || previous.RuntimeEpoch != next.RuntimeEpoch
+}
+
+func workbenchSnapshotMatchesProfileResult(snapshot protocol.SessionSnapshot, target protocol.RuntimeTarget, patch protocol.ProfilePatch, result protocol.SessionProfileSetResult) bool {
+	if snapshot.Target != target || snapshot.RuntimeEpoch != result.RuntimeEpoch || snapshot.Meta.ResolvedProfile != result.ResolvedProfile {
+		return false
+	}
+	if patch.Goal == nil {
+		return true
+	}
+	wantGoal := strings.TrimSpace(*patch.Goal)
+	gotGoal := ""
+	if snapshot.Meta.Goal != nil {
+		gotGoal = strings.TrimSpace(*snapshot.Meta.Goal)
+	}
+	return gotGoal == wantGoal
 }
 
 func (a *App) workbenchMirrorSnapshot(cli *client.Client, snapshot protocol.SessionSnapshot) {
@@ -411,14 +484,18 @@ func (a *App) workbenchSubmit(input, display, editedOriginal string, invocations
 }
 
 func (a *App) workbenchSetProfile(patch protocol.ProfilePatch) (bool, error) {
-	cli, _, _, tabID, ok := a.activeRemoteWorkbench()
+	cli, snapshot, _, tabID, ok := a.activeRemoteWorkbench()
 	if !ok {
 		return false, nil
 	}
 	ctx, cancel := context.WithTimeout(a.bootContext(), 30*time.Second)
 	defer cancel()
-	if _, err := cli.SetProfile(ctx, patch); err != nil {
+	result, err := cli.SetProfile(ctx, patch)
+	if err != nil {
 		return true, err
+	}
+	if result.Disposition == protocol.ProfileUnchanged && workbenchSnapshotMatchesProfileResult(snapshot, cli.State().Target, patch, result) {
+		return true, nil
 	}
 	a.workbenchRefreshSnapshot(cli.Generation(), tabID)
 	return true, nil

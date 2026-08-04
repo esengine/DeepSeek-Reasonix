@@ -6,10 +6,9 @@ Reasonix Windows Authenticode 两阶段签名链路。
 关联变更：
 
 - PR：[esengine/DeepSeek-Reasonix#6904](https://github.com/esengine/DeepSeek-Reasonix/pull/6904)
-- Preview 渠道改造：[esengine/DeepSeek-Reasonix#6155](https://github.com/esengine/DeepSeek-Reasonix/pull/6155)
+- 历史 Preview 渠道改造（仅供兼容背景）：[esengine/DeepSeek-Reasonix#6155](https://github.com/esengine/DeepSeek-Reasonix/pull/6155)
 - 本 SOP 的验收对象：每次执行前通过 PR API 读回的当前 PR Head
 - 签名工作流：`.github/workflows/release-stable.yml`、
-  `.github/workflows/release-preview.yml`、
   `.github/workflows/release-desktop.yml`
 - 机器契约：`.signpath/contracts/release-signing.yml`
 - Authenticode 验证脚本：`scripts/verify-windows-authenticode.ps1`
@@ -38,7 +37,7 @@ Reasonix Windows Authenticode 两阶段签名链路。
 - `test-signing-ci-approval` 和 `windows-installer-test-v2` 仅保留给内部签名
   验证，不得被公共 Desktop 发布工作流引用。
 - AMD64 和 ARM64 均完成正式证书的零发布预检。
-- 正式证书 RC 中，所有 Authenticode 签名均为 `Status = Valid`。
+- 首次单渠道正式版中，所有 Authenticode 签名均为 `Status = Valid`。
 - Windows Defender 环境下安装、启动、更新和卸载均通过。
 
 ## 2. 管理员分工
@@ -47,7 +46,7 @@ Reasonix Windows Authenticode 两阶段签名链路。
 | --- | --- |
 | SignPath 组织管理员 / 项目 Configurator | 导入 Artifact Configuration，维护签名策略和 CI User 权限 |
 | GitHub 仓库管理员 | 维护 Actions Secrets/Variables，必要时建立官方临时验证分支 |
-| Release Maintainer | 批准 GitHub `release` / `canary` environment，发布并验收正式证书 RC |
+| Release Maintainer | 批准一次 GitHub `release` environment，发布并验收正式版 |
 
 如果现有维护者没有 SignPath 项目配置权限，组织管理员可以直接执行导入，
 或者在项目设置中将维护者或维护者组添加到 `Configurators`。
@@ -74,10 +73,9 @@ SignPath 权限说明：
 - `release-signing` 开启 `Use approval process`，Required approvals 为 `1`。
 - `release-signing` 的 Allowed build definitions 精确允许：
   - `.github/workflows/release-stable.yml`
-  - `.github/workflows/release-preview.yml`
   - `.github/workflows/release-desktop.yml`
-- `release-signing` 的 Allowed branches 必须精确为 `main-v2`；稳定版和 RC
-  标签由最小 relay workflow 转发到该受保护控制面。
+- `release-signing` 的 Allowed branches 必须精确为 `main-v2`；正式版标签由
+  最小 relay workflow 转发到该受保护控制面。
 - `test-signing-ci-approval` 使用测试证书，只允许 `CI builds` 提交和审批，
   Required approvals 为 `1`，并启用相同的 Trusted Build、Origin 和 Build
   Definition 限制。
@@ -252,11 +250,10 @@ GitHub `upload-artifact` 提交给 SignPath 的产物是 ZIP，因此配置根�
   ```
 
 - Allowed branches：**只能填写 `main-v2`**
-- Allowed build definitions：**只能逐行填写以下三个精确路径**：
+- Allowed build definitions：**只能逐行填写以下两个精确路径**：
 
   ```text
   .github/workflows/release-stable.yml
-  .github/workflows/release-preview.yml
   .github/workflows/release-desktop.yml
   ```
 
@@ -277,11 +274,11 @@ GitHub `upload-artifact` 提交给 SignPath 的产物是 ZIP，因此配置根�
   `desktop-v*` 或临时测试分支。
 - Allowed build definitions 与仓库机器契约逐项相同，没有通配符。
 
-Stable、Preview 和 RC 的标签事件由 `release-stable-trigger.yml`、
-`release-cli-trigger.yml` / `release-desktop-trigger.yml` 转发：relay
-只携带候选 tag，实际顶层发布 workflow 固定运行在受保护的 `main-v2`，
-再签署该 tag 指向的不可变候选 SHA。不能把 Allowed branches 改成标签通配符，
-因为普通分支也可以取形如 `v-malicious` 的名字。
+正式版的 `vX.Y.Z` 标签事件由 `release-stable-trigger.yml` 转发：relay
+只携带候选 tag，实际顶层发布 workflow 固定运行在受保护的 `main-v2`，再签署
+`vX.Y.Z`、`npm-vX.Y.Z` 和 `desktop-vX.Y.Z` 共同指向的不可变候选 SHA。
+不能把 Allowed branches 改成标签通配符，因为普通分支也可以取形如
+`v-malicious` 的名字。
 
 `Release certificate 2026` 的 Restrictions 明确要求所有使用该证书的策略启用
 审批流程。尝试关闭时，SignPath 会拒绝保存并提示：
@@ -293,9 +290,8 @@ You can either enable the approval process or use another certificate.
 
 因此不得关闭正式签名策略的审批。工作流先以
 `wait-for-completion: false` 提交请求，取得 Signing Request ID，再由专用
-`CI builds` 账号调用 SignPath `Approve` API，并轮询、下载签名产物。公共
-Preview 和 Stable 都使用 `release-signing`；测试证书仅用于不发布产物的独立
-内部验证。
+`CI builds` 账号调用 SignPath `Approve` API，并轮询、下载签名产物。正式版
+使用 `release-signing`；测试证书仅用于不发布产物的独立内部验证。
 
 ## 9. 检查 GitHub Actions 配置
 
@@ -328,9 +324,9 @@ gh variable set SIGNPATH_RELEASE_SIGNING_ATTESTATION \
   --body unverified
 ```
 
-这会使 standalone Preview 和 RC 在当前 SignPath 契约未完成验收时失败关闭。
-Stable 不读取旧 attestation 放行，而是在同一次获批运行中先完成真实签名预检，
-成功后才启动 CLI、npm 和 Desktop 发布。
+这会使任何依赖旧 attestation 的 standalone 历史路径失败关闭。正式版不读取
+旧 attestation 放行，而是在同一次获批运行中先完成真实签名预检，成功后才
+启动 CLI、npm 和 Desktop 发布。
 
 ## 10. 运行 AMD64/ARM64 正式证书零发布预检
 
@@ -339,36 +335,27 @@ Fork PR 工作流拿不到官方仓库的 SignPath Secrets，因此不能直接�
 `main-v2` 分支限制。代码、workflow 契约和无 Secrets 的打包测试在 PR 中
 通过后，合并到受保护的 `main-v2`，再执行正式证书预检。
 
-`signing_preflight` 会经过 Preview 对应的 GitHub `canary` environment
-审批，使用 `release-signing` 和正式证书验证 AMD64/ARM64。它由 `CI builds`
-自动批准 SignPath 请求，跳过 publish job，并在四个请求全部完成后自动把当前
-契约指纹写入 `SIGNPATH_RELEASE_SIGNING_ATTESTATION`：
+零发布预检由 `.github/workflows/release-stable.yml` 在唯一的 `release`
+environment 获批后自动调用。它使用 `release-signing` 和正式证书验证
+AMD64/ARM64，由 `CI builds` 自动批准 SignPath 请求，并跳过 publish job。
+四个请求全部成功后，当前契约指纹会写入
+`SIGNPATH_RELEASE_SIGNING_ATTESTATION`。
 
 ```bash
-gh workflow run release-desktop.yml \
-  --repo esengine/DeepSeek-Reasonix \
-  --ref main-v2 \
-  -f channel=preview \
-  -f base_version=X.Y.Z \
-  -f signing_preflight=true
+./scripts/release-stable.sh X.Y.Z
 ```
 
-将 `X.Y.Z` 替换为计划中的下一版本号。需要人工逐项检查请求再批准时，改用
-`production_signing_smoke=true`；该人工烟测不会写入 attestation，不能代替
-自动闭环预检。
-
-Stable 发布由 `.github/workflows/release-stable.yml` 在唯一的 `release`
-environment 审批之后自动调用相同预检。该预检完成前，CLI、npm 和 Desktop
-三个公开 publisher 均不会启动，因此 SignPath 策略漂移不会再形成半发布。
-统一 Preview 发布由 `.github/workflows/release-preview.yml` 在唯一的
-`canary` environment 审批之后执行同样的预检，并具有相同的失败关闭语义。
+该命令先验证远端 `main-v2` 的 reviewed Notes 和精确 SHA CI，再原子创建三个
+正式版标签；随后 relay 启动受保护控制面。预检完成前，CLI、npm 和 Desktop
+三个公开 publisher 均不会启动，因此 SignPath 策略漂移不会形成半发布。
+不要为了预检重新引入 Preview/RC 标签或 `canary` environment。
 
 ### 10.1 监控运行
 
 ```bash
 RUN_ID="$(gh run list \
   --repo esengine/DeepSeek-Reasonix \
-  --workflow release-desktop.yml \
+  --workflow release-stable.yml \
   --branch main-v2 \
   --event workflow_dispatch \
   --limit 1 \
@@ -425,7 +412,6 @@ SignPath Signing Requests 中应出现 4 个成功请求：
 - `release-signing` 的证书级审批保持开启，正式审批人可用。
 - `release-signing` 的 Build Definitions 精确允许
   `.github/workflows/release-stable.yml`、
-  `.github/workflows/release-preview.yml` 和
   `.github/workflows/release-desktop.yml`。
 - `release-signing` 的 Allowed branches 精确为 `main-v2`。
 - `CI builds` 是 `release-signing` 的 Submitter 和 Approver，GitHub Secret 使用其专用
@@ -444,39 +430,16 @@ gh variable get SIGNPATH_RELEASE_SIGNING_ATTESTATION \
 Artifact Configuration 或机器契约改变，CI 计算出的新指纹就不再匹配，必须
 重新运行零发布预检。
 
-## 13. 合并后运行正式证书 RC
+## 13. 首次单渠道正式版验收
 
-`signing_preflight=true` 证明正式证书、双阶段产物链和自动审批闭环正确，但
-不会发布。attestation 有效后，RC 用于验证真实公开 prerelease 发布；如果
-零发布预检未完成，不得用 RC 代替它，更不得直接发布稳定版。
-
-首先核对目标 commit：
-
-```bash
-git fetch origin main-v2 --tags
-RC_SHA="$(git rev-parse origin/main-v2)"
-git show --no-patch --format='%H %s' "$RC_SHA"
-```
-
-在得到 Release Maintainer 明确授权后创建并推送 RC tag：
-
-```bash
-git tag "desktop-vX.Y.Z-rc.1" "$RC_SHA"
-git push origin "desktop-vX.Y.Z-rc.1"
-```
-
-该操作会：
-
-- 触发一次 GitHub `release` environment 审批。
-- 使用 `release-signing` 和正式证书。
-- 创建公开的 GitHub prerelease。
-- 不移动 R2 稳定版 `latest/`。
-
-RC tag 是外部发布动作，不得在未获得发布授权时执行。
+单渠道发布不再创建公开 RC。`signing_preflight=true` 在唯一的正式版 run 内
+证明正式证书、双阶段产物链和自动审批闭环正确，成功后才允许同一 run 的公开
+publisher 启动。首次切换后的版本必须完整执行本文第 11、12、14 节以及仓库
+`docs/RELEASING.md` 的跨表面 postflight；不得用额外 prerelease 替代。
 
 ## 14. 正式证书与 Defender 验收
 
-RC 的 Windows 验证会启用 `RequireTrusted=true`。所有 Authenticode 签名必须
+正式版 Windows 验证会启用 `RequireTrusted=true`。所有 Authenticode 签名必须
 返回：
 
 ```text
@@ -507,7 +470,7 @@ Get-ChildItem "<Reasonix安装目录>" -Recurse -Filter *.exe |
 - 实际完成安装、首次启动、CLI 调用、更新和卸载。
 - Windows Security → Protection History 中没有新隔离或拦截。
 
-只有 AMD64 和 ARM64 都通过，才可以继续正式稳定版发布。
+只有 AMD64 和 ARM64 都通过，首次单渠道正式版才算完成验收。
 
 ## 15. 失败处理与回滚
 
@@ -521,7 +484,7 @@ Get-ChildItem "<Reasonix安装目录>" -Recurse -Filter *.exe |
 | 提示文件缺失或存在额外文件 | 检查 signing bundle 与 XML 文件清单是否一致 |
 | `authenticode-verify` 失败 | 检查内层文件是否未签名，或签名后被重新编译/修改 |
 | 只有 AMD64 成功 | 不放行，ARM64 也是硬门槛 |
-| RC 签名不是 `Status = Valid` | 将 attestation 设为 `unverified`，禁止 standalone 发布 |
+| 正式版签名不是 `Status = Valid` | 将 attestation 设为 `unverified`，停止后续发布并按不可变标签恢复缺失表面 |
 | 自动预检请求等待人工审批 | 将 attestation 设为 `unverified`，检查 `CI builds` Approver 权限、API Token 和自动审批步骤；不得关闭证书强制审批 |
 
 发生正式签名故障时，立即恢复失败关闭：
@@ -544,7 +507,7 @@ gh variable set SIGNPATH_RELEASE_SIGNING_ATTESTATION \
 - [ ] `SIGNPATH_API_TOKEN` 对应专用 `CI builds`，不是个人账号
 - [ ] `release-signing` 已开启 Trusted Build System
 - [ ] `release-signing` 已开启 Origin Verification
-- [ ] `release-signing` 的 Allowed build definitions 精确为 `.github/workflows/release-stable.yml`、`.github/workflows/release-preview.yml` 和 `.github/workflows/release-desktop.yml`
+- [ ] `release-signing` 的 Allowed build definitions 精确为 `.github/workflows/release-stable.yml` 和 `.github/workflows/release-desktop.yml`
 - [ ] `release-signing` 的 Allowed branches 精确为 `main-v2`
 - [ ] `release-signing` 的 SignPath 审批已开启，Required approvals 为 `1`
 - [ ] GitHub `release` environment 的正式发布审批人和响应流程已经明确
@@ -552,8 +515,8 @@ gh variable set SIGNPATH_RELEASE_SIGNING_ATTESTATION \
 - [ ] ARM64 正式证书零发布预检两阶段签名成功
 - [ ] 4 个 SignPath Signing Request 均为 `Completed`
 - [ ] `SIGNPATH_RELEASE_SIGNING_ATTESTATION` 与当前机器契约指纹一致
-- [ ] 正式证书 RC 的 AMD64 签名均为 `Valid`
-- [ ] 正式证书 RC 的 ARM64 签名均为 `Valid`
+- [ ] 首次单渠道正式版的 AMD64 签名均为 `Valid`
+- [ ] 首次单渠道正式版的 ARM64 签名均为 `Valid`
 - [ ] Defender 安装、启动、更新和卸载验证通过
 - [ ] 签名稳定版已真实可下载后，再关闭对应问题单
 

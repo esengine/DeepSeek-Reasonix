@@ -88,15 +88,15 @@ func sessionContains(a *Agent, sub string) bool {
 func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	mp := testutil.NewMock("m",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "t0", Name: "todo_write",
-			Arguments: `{"todos":[{"content":"build","status":"in_progress"},{"content":"test","status":"pending"}]}`}}},
+			Arguments: `{"todos":[{"content":"test","status":"in_progress"},{"content":"vet","status":"pending"}]}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "b1", Name: "bash",
-			Arguments: `{"command":"cd /repo && go build ./..."}`}}},
+			Arguments: `{"command":"cd /repo && go test ./..."}`}}},
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c1", Name: "complete_step",
-			Arguments: `{"step":"build","result":"builds","evidence":[{"kind":"verification","summary":"build ok","command":"go build ./..."}]}`}}},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "b2", Name: "bash",
-			Arguments: `{"command":"go test ./..."}`}}},
-		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "complete_step",
 			Arguments: `{"step":"test","result":"tests pass","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "b2", Name: "bash",
+			Arguments: `{"command":"go vet ./..."}`}}},
+		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "c2", Name: "complete_step",
+			Arguments: `{"step":"vet","result":"vet passes","evidence":[{"kind":"verification","summary":"vet passes","command":"go vet ./..."}]}`}}},
 		testutil.Turn{Text: "all done"},
 	)
 	sink := &recordSink{}

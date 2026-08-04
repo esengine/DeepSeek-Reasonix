@@ -36,6 +36,10 @@ func (s *Sink) Emit(e event.Event) {
 	SendEvent(s.sender, s.cfg, e)
 }
 
+func (s *Sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
+	event.RecordProtocolRecovery(s.inner, a)
+}
+
 // SendEvent applies the same notification rules for paths that do not emit through Sink.
 func SendEvent(sender Sender, cfg config.NotificationsConfig, e event.Event) {
 	if !cfg.Enabled || sender == nil {

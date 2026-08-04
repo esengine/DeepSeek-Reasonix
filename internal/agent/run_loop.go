@@ -42,6 +42,89 @@ type runLoopState struct {
 	workDurationMs func() int64
 }
 
+// streamedTurn is one provider completion collected by stream. Keeping the
+// result together makes the missing-reasoning recovery path explicit: the
+// first, malformed completion is never committed before a safe replacement is
+// available, and a failed recovery can still fall back to the complete first
+// response without re-running any tool.
+type streamedTurn struct {
+	text               string
+	reasoning          string
+	signature          string
+	calls              []provider.ToolCall
+	usage              *provider.Usage
+	interrupted        bool
+	partialToolStarted bool
+	partialCalls       []provider.ToolCall
+	err                error
+}
+
+// deferredStreamSink keeps selected stream events local until the caller
+// chooses which provider response to adopt. On an ordinary healthy DeepSeek
+// turn, reasoning arrives before tool calls and unlocks live tool-card events.
+// On the rare malformed turn with no reasoning, only the speculative partial
+// tool cards remain buffered, so retrying does not flash duplicate cards in the
+// UI. A recovery attempt buffers everything because it may be discarded.
+type deferredStreamSink struct {
+	inner               event.Sink
+	deferAll            bool
+	waitingForReasoning bool
+	sawReasoning        bool
+	events              []event.Event
+}
+
+func newReasoningAwareStreamSink(inner event.Sink) *deferredStreamSink {
+	return &deferredStreamSink{inner: inner, waitingForReasoning: true}
+}
+
+func newDeferredStreamSink(inner event.Sink) *deferredStreamSink {
+	return &deferredStreamSink{inner: inner, deferAll: true}
+}
+
+func (s *deferredStreamSink) Emit(e event.Event) {
+	if s == nil {
+		return
+	}
+	if s.deferAll {
+		s.events = append(s.events, e)
+		return
+	}
+	if s.waitingForReasoning && e.Kind == event.Reasoning && strings.TrimSpace(e.Text) != "" {
+		s.sawReasoning = true
+		s.inner.Emit(e)
+		s.flushBuffered()
+		return
+	}
+	if s.waitingForReasoning && !s.sawReasoning && e.Kind == event.ToolDispatch {
+		s.events = append(s.events, e)
+		return
+	}
+	s.inner.Emit(e)
+}
+
+func (s *deferredStreamSink) flushBuffered() {
+	if s == nil {
+		return
+	}
+	for _, e := range s.events {
+		s.inner.Emit(e)
+	}
+	s.events = nil
+}
+
+func (s *deferredStreamSink) Flush() {
+	if s == nil {
+		return
+	}
+	s.flushBuffered()
+}
+
+func (s *deferredStreamSink) Discard() {
+	if s != nil {
+		s.events = nil
+	}
+}
+
 // beginRunTurn handles evidence scope, delivery classification, background-job
 // evidence re-lease, and the initial user-turn persistence. Callers still own
 // all Run-level defers (workspace lease, evidence commit, delivery checkpoint,
@@ -197,8 +280,15 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 			prevPrefixShape = prefixShape
 		}
 
-		text, reasoning, signature, calls, usage, interrupted, partialToolStarted, partialCalls, err := a.stream(ctx, step+1)
+		streamed := a.streamWithMissingReasoningRecovery(ctx, step+1)
+		text, reasoning, signature, calls, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.usage
+		interrupted, partialToolStarted, partialCalls, err := streamed.interrupted, streamed.partialToolStarted, streamed.partialCalls, streamed.err
+		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
 		if err != nil {
+			a.emitTurnUsage(usage, &cacheDiagnostics)
+			if msg, ok := finishReasonMessage(usage); ok {
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
+			}
 			if interrupted && state.streamRecoveries < maxStreamRecoveries {
 				state.streamRecoveries++
 				a.recordInterruptedDisplay(text, reasoning, partialCalls, false, state.workDurationMs())
@@ -214,15 +304,9 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 			return err
 		}
 		state.streamRecoveries = 0
-		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage)
 		a.lastPrefixShape = prefixShape
 		a.haveLastPrefixShape = true
-		if usage != nil && usage.TotalTokens > 0 {
-			a.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: a.pricing,
-				UsageSource:      a.usageSource,
-				CacheDiagnostics: &cacheDiagnostics,
-				SessionHit:       int(a.sessCacheHit.Load()), SessionMiss: int(a.sessCacheMiss.Load())})
-		}
+		a.emitTurnUsage(usage, &cacheDiagnostics)
 		if msg, ok := finishReasonMessage(usage); ok {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: msg})
 		}
@@ -231,7 +315,6 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// archive. Most OpenAI-compatible backends do not replay it; providers
 		// with an explicit round-trip contract retain the raw provider text.
 		calls = a.withPreviewFileDiffs(calls)
-		a.warnMissingToolCallReasoning(calls, reasoning)
 		a.session.Add(provider.Message{
 			Role:               provider.RoleAssistant,
 			Content:            text,
@@ -258,6 +341,143 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 	// is already in the session, so the user can just send another message to pick
 	// up where it left off.
 	return &maxStepsPause{steps: state.runMaxSteps, key: state.runMaxStepsKey}
+}
+
+// streamWithMissingReasoningRecovery silently repairs an isolated DeepSeek
+// thinking-mode tool-call response that omitted reasoning_content. It replays
+// the exact same provider request at most once, before any tool is executed and
+// without injecting a synthetic prompt. A configuration-scoped cooldown keeps
+// a gateway that persistently strips reasoning from doubling every request; the
+// existing explicit-empty reasoning_content wire fallback remains the final
+// compatibility path.
+func (a *Agent) streamWithMissingReasoningRecovery(ctx context.Context, turn int) streamedTurn {
+	var streamSink *deferredStreamSink
+	attemptSink := a.sink
+	if provider.WarnOnMissingToolCallReasoning(a.prov) {
+		streamSink = newReasoningAwareStreamSink(a.sink)
+		attemptSink = streamSink
+	}
+	first := a.streamTurn(ctx, turn, attemptSink)
+	if first.err != nil {
+		streamSink.Flush()
+		return first
+	}
+
+	missing, shouldRetry := a.observeMissingToolCallReasoning(first.calls, first.reasoning)
+	if !missing {
+		streamSink.Flush()
+		return first
+	}
+	event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+
+	// Non-empty visible output was already streamed from the first response.
+	// Replaying it would duplicate user-visible text, so keep the structurally
+	// valid empty-key fallback and let the cooldown suppress repeated attempts.
+	if !shouldRetry || strings.TrimSpace(first.text) != "" {
+		streamSink.Flush()
+		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
+		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+		return first
+	}
+
+	event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
+	retrySink := newDeferredStreamSink(a.sink)
+	retry := a.streamTurn(ctx, turn, retrySink)
+	if retry.err != nil {
+		retrySink.Discard()
+		if ctx.Err() != nil {
+			streamSink.Discard()
+			// The recovery stream was intentionally invisible, so do not persist
+			// partial retry text/reasoning as though the user had already seen it.
+			return streamedTurn{usage: mergeStreamUsage(first.usage, retry.usage), err: retry.err}
+		}
+		streamSink.Flush()
+		first.usage = mergeStreamUsage(first.usage, retry.usage)
+		if first.usage != nil {
+			a.lastUsage.Store(first.usage)
+		}
+		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+		return first
+	}
+
+	streamSink.Discard()
+	retrySink.Flush()
+	retry.usage = mergeStreamUsage(first.usage, retry.usage)
+	if retry.usage != nil {
+		a.lastUsage.Store(retry.usage)
+	}
+	retryMissing, _ := a.observeMissingToolCallReasoning(retry.calls, retry.reasoning)
+	if retryMissing {
+		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+	} else if len(retry.calls) == 0 {
+		// An exact replay can legitimately choose a different completion shape.
+		// Adopt it wholesale because no tool from the discarded response ran, but
+		// do not misreport the disappearance of tool calls as recovered reasoning.
+		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
+	} else {
+		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
+	}
+	return retry
+}
+
+func (a *Agent) streamTurn(ctx context.Context, turn int, sink event.Sink) streamedTurn {
+	text, reasoning, signature, calls, usage, interrupted, partialToolStarted, partialCalls, err := a.stream(ctx, turn, sink)
+	return streamedTurn{
+		text: text, reasoning: reasoning, signature: signature, calls: calls, usage: usage,
+		interrupted: interrupted, partialToolStarted: partialToolStarted, partialCalls: partialCalls, err: err,
+	}
+}
+
+func mergeStreamUsage(first, retry *provider.Usage) *provider.Usage {
+	if first == nil && retry == nil {
+		return nil
+	}
+	if first == nil {
+		merged := *retry
+		// The first provider request still happened even if its terminal usage
+		// chunk was lost. Preserve the retry's known tokens and count both calls.
+		merged.RequestCount = 1 + usageRequestCount(retry)
+		return &merged
+	}
+	if retry == nil {
+		merged := *first
+		// Likewise, a failed recovery request without usage is still an API call.
+		merged.RequestCount = usageRequestCount(first) + 1
+		return &merged
+	}
+	merged := *retry
+	merged.PromptTokens += first.PromptTokens
+	merged.CompletionTokens += first.CompletionTokens
+	merged.TotalTokens += first.TotalTokens
+	merged.CacheHitTokens += first.CacheHitTokens
+	merged.CacheMissTokens += first.CacheMissTokens
+	merged.ReasoningTokens += first.ReasoningTokens
+	merged.RequestCount = usageRequestCount(first) + usageRequestCount(retry)
+	return &merged
+}
+
+func usageRequestCount(usage *provider.Usage) int {
+	if usage == nil {
+		return 0
+	}
+	if usage.RequestCount > 0 {
+		return usage.RequestCount
+	}
+	return 1
+}
+
+func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiagnostics) {
+	if usage == nil || (usage.TotalTokens <= 0 && usage.RequestCount <= 0) {
+		return
+	}
+	if usage.TotalTokens > 0 {
+		a.lastUsage.Store(usage)
+	}
+	a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing,
+		UsageSource:      a.usageSource,
+		CacheDiagnostics: cacheDiagnostics,
+		SessionHit:       int(a.sessCacheHit.Load()), SessionMiss: int(a.sessCacheMiss.Load())})
 }
 
 // handleFinalResponse processes a no-tool assistant turn: recovery pause,
@@ -306,7 +526,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		}
 		event.RecordReadinessAudit(a.sink, readiness.audit(result, false))
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeFinalReadiness, Text: finalReadinessNoticeText(), Detail: readiness.reason})
-		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(finalReadinessRetryMessage(readiness.reason))})
+		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(finalReadinessRetryMessageFor(readiness))})
 		a.maybeCompact(ctx, usage)
 		return true, nil
 	}

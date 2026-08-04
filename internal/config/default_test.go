@@ -22,6 +22,9 @@ func TestDefaultDesktopAppearanceAutoGraphite(t *testing.T) {
 	if got := cfg.DesktopThemeStyle(); got != "" {
 		t.Fatalf("default desktop theme style = %q, want empty so frontend resolves graphite", got)
 	}
+	if got := cfg.DesktopTerminalTheme(); got != "auto" {
+		t.Fatalf("default desktop terminal theme = %q, want auto", got)
+	}
 }
 
 func TestDefaultDesktopMetricsOn(t *testing.T) {

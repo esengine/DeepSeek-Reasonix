@@ -76,6 +76,7 @@ export interface WireUsage {
   cacheHitTokens: number;
   cacheMissTokens: number;
   reasoningTokens?: number;
+  estimated?: boolean;
   source?: string;
   cacheDiagnostics?: WireCacheDiagnostics;
   // Session-cumulative cache tokens — the status bar shows the aggregate
@@ -350,9 +351,11 @@ export interface ContextPanelInfo {
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  estimated?: boolean;
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
   sessionCompletionTokens: number;
+  sessionEstimated?: boolean;
   requestCount?: number;
   elapsedMs?: number;
   sessionCost?: number;
@@ -372,6 +375,7 @@ export interface UsageSourceStats {
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  estimated?: boolean;
   requestCount: number;
   sessionCost?: number;
   sessionCurrency?: string;
@@ -470,6 +474,45 @@ export interface CheckpointMeta {
   time: number; // unix ms
   canCode?: boolean;
   canConversation?: boolean;
+  coverage?: string;
+  coverageGaps?: string[];
+  expiredFilePayload?: boolean;
+  activeWriters?: number;
+  legacy?: boolean;
+  canUndoFiles?: boolean;
+  disabledReason?: string;
+}
+
+export interface RewindPlanView {
+  planId?: string;
+  turn?: number;
+  scope?: string;
+  coverage?: string;
+  coverageGaps?: string[];
+  legacy?: boolean;
+  expiredFilePayload?: boolean;
+  canFiles?: boolean;
+  canConversation?: boolean;
+  disabledReason?: string;
+  conflicts?: string[];
+  files?: string[];
+  fileCount?: number;
+  activeWriters?: number;
+  path?: string;
+  ok?: boolean;
+  error?: string;
+}
+
+export interface RewindResultView {
+  ok?: boolean;
+  transactionId?: string;
+  undoAvailable?: boolean;
+  written?: string[];
+  deleted?: string[];
+  conversationOk?: boolean;
+  error?: string;
+  conflicts?: string[];
+  coverage?: string;
 }
 
 // SessionMeta is one saved session for the history panel.
@@ -525,6 +568,7 @@ export interface ContextInfo {
   sessionCurrency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
+  estimated?: boolean;
   sources?: Record<string, UsageSourceStats>;
 }
 
@@ -713,6 +757,7 @@ export interface WorkspaceChangeView {
   turns?: number[];
   latestPrompt?: string;
   latestTime?: number;
+  canSessionRevert?: boolean;
 }
 
 export interface WorkspaceChangesView {
@@ -1396,7 +1441,7 @@ export interface ProviderView {
   keySourcePath?: string;
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
-  reasoningProtocol: string; // auto|deepseek|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|deepseek|glm|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
@@ -1447,6 +1492,65 @@ export interface BalanceInfo {
   err?: string;
 }
 
+// ── Usage statistics (desktop/stats_app.go) ────────────────────────────────
+
+// UsageStatsRequest selects the aggregation range and optional entry-point
+// filter for the usage statistics panel. Range is "7" | "14" | "30" | "90" |
+// "custom"; custom requires from/to as "2006-01-02" (inclusive, local dates).
+// Source "" or "all" aggregates every entry point; "desktop" | "cli" | "serve"
+// | "bot" | "remote" filters to that source's records.
+export interface UsageStatsRequest {
+  range: string;
+  from?: string;
+  to?: string;
+  source?: string;
+}
+
+// DailyTokenUsage is one day's token total, per-model split and turn count in
+// the daily trend series.
+export interface DailyTokenUsage {
+  day: string; // "2006-01-02"
+  total: number;
+  byModel: Record<string, number>; // model ref -> tokens
+  byProvider: Record<string, number>; // provider name -> tokens
+  requests: number; // API calls that day
+  turns: number;
+  cacheHit: number; // cached input tokens that day
+  cacheMiss: number; // uncached input tokens that day
+}
+
+// ModelTokenUsage is one model's aggregate within the range.
+export interface ModelTokenUsage {
+  model: string; // canonical "provider/model"
+  provider: string;
+  tokens: number;
+  percent: number; // 0..100
+}
+
+// ProviderTokenUsage is one provider's aggregate within the range.
+export interface ProviderTokenUsage {
+  provider: string;
+  tokens: number;
+  percent: number;
+}
+
+// UsageStatsRange is the full aggregate the settings panel renders.
+export interface UsageStatsRange {
+  from: string;
+  to: string;
+  tokens: number;
+  requests: number; // API calls
+  turns: number; // completed turns
+  cacheHit: number;
+  cacheMiss: number;
+  activeDays: number;
+  topModel: string;
+  topProvider: string;
+  daily: DailyTokenUsage[];
+  models: ModelTokenUsage[];
+  providers: ProviderTokenUsage[];
+}
+
 // JobView is one running background job (desktop/app.go Jobs) for the status bar.
 export interface JobView {
   id: string;
@@ -1454,6 +1558,36 @@ export interface JobView {
   label: string;
   status: string; // "running"
   startedAt: number; // unix milliseconds
+}
+
+export interface ActiveWorkView {
+  running: boolean;
+  pendingPrompt: boolean;
+  cancellable: boolean;
+  jobs: JobView[];
+}
+
+export interface JobCancelBatchView {
+  cancelled: string[];
+  notRunning: string[];
+}
+
+export interface BackgroundRuntimeView {
+  tabId: string;
+  title: string;
+  detached: boolean;
+  running: boolean;
+  pendingPrompt: boolean;
+  jobs: JobView[];
+}
+
+export interface WorkspaceConflictView {
+  state: "none" | "local" | "external";
+  ownerTabId?: string;
+  ownerTitle?: string;
+  ownerWork: ActiveWorkView;
+  canReveal: boolean;
+  canCreateWorktree: boolean;
 }
 
 export interface PermissionsView {
@@ -1499,6 +1633,10 @@ export interface AgentView {
   systemPrompt: string;
   coldResumePrune: boolean;
   reasoningLanguage: string; // "auto" | "zh" | "en"
+  compactRatio?: number; // Advanced global default; older backends omit it.
+  effectiveCompactRatio?: number; // Active local session after project overrides.
+  compactRatioOverridden?: boolean;
+  compactRatioRemote?: boolean; // Active session is owned by the remote host.
 }
 
 export interface BotAllowlistView {
@@ -1728,13 +1866,14 @@ export interface SettingsView {
   desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
+  desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
   closeBehavior: string; // "background" | "quit"
   displayMode: string;   // "standard" | "compact"
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
   checkUpdates: boolean; // check for new versions on startup
-  updateChannel: string; // "stable" | "preview"
+  updateChannel: string; // compatibility field; always "stable"
   telemetry: boolean; // anonymous launch ping + scrubbed next-launch native crash diagnostics
   metrics: boolean; // aggregate quality/lifecycle metrics (anonymous signal/bucket counts)
   configPath: string;
@@ -1750,13 +1889,15 @@ export interface DesktopStartupSettingsView {
   desktopLayoutStyle: string; // "classic" | "workbench"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
+  desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
   displayMode: string;   // "standard" | "compact"
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup
-  updateChannel: string; // "stable" | "preview"
-  safeMode?: boolean; // recovery startup with external integrations disabled
+  updateChannel: string; // compatibility field; always "stable"
   conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
+  configWarnings?: string[]; // non-blocking load recovery notices
+  configPath?: string;
 }
 
 export type ExternalOpenerKind = "file-manager" | "editor" | "terminal";
@@ -1805,7 +1946,7 @@ export interface UpdateProgress {
   requestId: string;
   version: string;
   channel: "stable" | "preview" | string;
-  phase: "downloading" | "verifying" | "downloaded" | "authorizing" | "recovering" | "installing" | "done" | "error";
+  phase: "downloading" | "verifying" | "downloaded" | "authorizing" | "recovering" | "installing" | "relaunching" | "done" | "error";
   received: number;
   total: number;
   err?: string;

@@ -24,6 +24,17 @@ get a tailored request shape automatically — no extra config needed.
 |----------------|----------|-------------------|------------------|-------|
 | Kimi CN/Global `kimi-k3` | `api.moonshot.cn/v1`, `api.moonshot.ai/v1` | `reasoning_effort` | `low`, `high`, `max` | Always thinks; defaults to `max`. Reasonix replays the complete assistant message, uses `max_completion_tokens`, and omits K3's fixed sampling fields. |
 | OpenCode Go `kimi-k3` | `opencode.ai/zen/go/v1` | `reasoning_effort` | `high`, `max` | Relay-specific scale; defaults to `max` and keeps the relay's standard OpenAI-compatible request shape. |
+| Token Rhythm DeepSeek V4 | `tokenrhythm.studio/v1` | DeepSeek `thinking.type` + `reasoning_effort` | Model-specific DeepSeek scale | Selected through the preset's model override, independent of the gateway host. |
+| Token Rhythm GLM 5/5.1/5.2 | `tokenrhythm.studio/v1` | GLM `thinking.type` (`enabled`\|`disabled`) | `auto`, `enabled`, `disabled` | Selected through the preset's model override; `reasoning_effort` is omitted. |
+
+On the Token Rhythm endpoint, exact GLM model IDs (`glm-5`, `glm-5.1`, and
+`glm-5.2`) automatically select the official GLM request shape even when an
+existing configuration has no `reasoning_protocol` field. The endpoint check
+keeps unrelated mixed-model gateways backward-compatible. A `model_overrides`
+entry with explicit `reasoning_protocol = "glm"` remains available for aliases
+and custom model IDs. While GLM thinking is enabled, Reasonix retains and
+returns the original `reasoning_content` unchanged in later history, as required
+by GLM interleaved and preserved thinking.
 
 ## DeepSeek Anthropic-compatible endpoint
 

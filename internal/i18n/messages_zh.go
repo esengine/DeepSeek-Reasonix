@@ -357,6 +357,10 @@ var Chinese = Messages{
 	RewindPickHint:            "↑/↓ 移动 · Enter 选择 · Esc 关闭",
 	RewindRestoreTitleFmt:     "⟲ 恢复到第 %d 轮 ",
 	RewindApplyHint:           "↑/↓ · Enter 应用 · Esc 返回",
+	RewindCoverageTitle:       "⚠ 文件覆盖不完整",
+	RewindCoverageWarningFmt:  "检测到 %d 个覆盖缺口，部分文件修改可能无法恢复。",
+	RewindConfirmHint:         "Enter/y 确认 · Esc 返回",
+	RewindUnavailableFmt:      "无法回滚：%s",
 	RewindEmpty:               "(空)",
 
 	SelectProvidersLabel:     "选择要启用的 provider",
@@ -494,6 +498,7 @@ var Chinese = Messages{
 
 	// 自更新
 	UpgradeChecking:            "正在检查更新…",
+	UpgradeChannelDeprecated:   "发布渠道已停用；将使用最新正式版。",
 	UpgradeDevBuild:            "开发版本无法自更新",
 	UpgradeFetchFailed:         "检查更新失败：%v",
 	UpgradeInvalidVersion:      "远程版本不是有效的 semver",
@@ -520,7 +525,6 @@ var Chinese = Messages{
 	ReportKept:                "报告已保留在本地。",
 	ReportDeletedFmt:          "已删除 CLI 崩溃报告 %s。",
 	ReportSentFmt:             "已发送 CLI 崩溃报告 %s。",
-	ReportSafeModeBlocked:     "Safe Mode 下不能发送崩溃报告；本地报告已保留",
 	ReportConfigFailedFmt:     "无法加载网络配置：%v",
 	ReportUploadFailedFmt:     "报告上传失败；本地报告已保留：%v",
 	ReportSentDeleteFailedFmt: "报告已发送，但无法删除本地副本：%v",
@@ -549,6 +553,7 @@ var Chinese = Messages{
   reasonix acp [--model NAME]                           通过 stdio 提供 Agent Client Protocol（也可用：reasonix --acp）
   reasonix setup [path]                                 交互式配置向导；生成 reasonix.toml（及 .env）
   reasonix config reasoning-language [auto|zh|en]        配置可见思考语言
+  reasonix config compact-ratio [--local] [65..85]       配置自动压缩阈值
   reasonix config telemetry [auto|on|off]                配置不含内容的 CLI 使用统计
   reasonix report [list|show|send|delete] [ID]           审阅并明确发送本地 CLI 崩溃报告
   reasonix mcp <add|remove|list|import>                 管理 reasonix.toml 里的 MCP 服务器
@@ -562,7 +567,7 @@ var Chinese = Messages{
   reasonix hook list|status --json [--dir PATH]         查看脱敏 Hook 状态
   reasonix task list|show --json [--dir PATH]           查看脱敏 Task 状态
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
-  reasonix upgrade [stable|preview] [--check] [--force]  按已保存渠道自更新（高级用法：--channel；别名：reasonix update）
+  reasonix upgrade [--check] [--force]                   更新到最新正式版（别名：reasonix update）
   reasonix version
   reasonix help
 

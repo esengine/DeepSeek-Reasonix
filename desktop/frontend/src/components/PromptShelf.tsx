@@ -1,5 +1,7 @@
 import type { ReactNode, RefObject } from "react";
 
+export { PromptAction, PromptDescriptionToggle } from "./PromptAction";
+
 export function PromptShelf({
   className,
   cardClassName,
@@ -38,7 +40,7 @@ export function PromptShelf({
   barRef?: RefObject<HTMLDivElement | null>;
   role?: "dialog" | "region";
   // Decision surfaces keep a vertical full-width option list and a fixed
-  // confirm footer; content scrolls within 55vh.
+  // confirm footer; all preceding content shares one viewport-bounded scroll.
   decision?: boolean;
   // Select-then-confirm surfaces use listbox. Immediate actions are a group of
   // buttons so assistive technology does not announce them as pending choices.
@@ -63,21 +65,23 @@ export function PromptShelf({
         aria-labelledby={titleId}
         tabIndex={-1}
       >
-        <div className="prompt-shelf__header">
-          <div className="prompt-shelf__copy">
-            <div id={titleId} className="prompt-shelf__title">
-              <span className="prompt-shelf__heading">{title}</span>
-              {badges && <span className="prompt-shelf__badges">{badges}</span>}
+        <div className="prompt-shelf__content">
+          <div className="prompt-shelf__header">
+            <div className="prompt-shelf__copy">
+              <div id={titleId} className="prompt-shelf__title">
+                <span className="prompt-shelf__heading">{title}</span>
+                {badges && <span className="prompt-shelf__badges">{badges}</span>}
+              </div>
+              {meta && <div className="prompt-shelf__meta">{meta}</div>}
             </div>
-            {meta && <div className="prompt-shelf__meta">{meta}</div>}
+            {headerActions && <div className="prompt-shelf__header-actions">{headerActions}</div>}
           </div>
-          {headerActions && <div className="prompt-shelf__header-actions">{headerActions}</div>}
+          {crumbs}
+          {children && <div className="prompt-shelf__body">{children}</div>}
+          {actions && <div className="prompt-shelf__actions" role={actionsRole}>{actions}</div>}
+          {note && <div className="prompt-shelf__footnote">{note}</div>}
+          {quickActions && <div className="prompt-shelf__quick-actions">{quickActions}</div>}
         </div>
-        {crumbs}
-        {children && <div className="prompt-shelf__body">{children}</div>}
-        {actions && <div className="prompt-shelf__actions" role={actionsRole}>{actions}</div>}
-        {note && <div className="prompt-shelf__footnote">{note}</div>}
-        {quickActions && <div className="prompt-shelf__quick-actions">{quickActions}</div>}
         {footer && <div className="prompt-shelf__footer">{footer}</div>}
       </div>
     </div>
@@ -118,78 +122,6 @@ export function PromptHeaderAction({
       disabled={disabled}
     >
       {children}
-    </button>
-  );
-}
-
-export function PromptAction({
-  keyLabel,
-  label,
-  description,
-  onClick,
-  ariaLabel,
-  title,
-  onHoverChange,
-  primary = false,
-  selected = false,
-  // Keyboard cursor without implying a committed answer (multi-select).
-  active = false,
-  quiet = false,
-  disabled = false,
-  tone = "default",
-  role = "option",
-}: {
-  keyLabel: string;
-  label?: ReactNode;
-  description?: ReactNode;
-  onClick: () => void;
-  ariaLabel?: string;
-  // Native tooltip fallback for truncated descriptions.
-  title?: string;
-  // Fires on mouse enter/focus (true) and mouse leave/blur (false) so the
-  // parent can drive a focus-following detail preview.
-  onHoverChange?: (hovering: boolean) => void;
-  primary?: boolean;
-  selected?: boolean;
-  active?: boolean;
-  quiet?: boolean;
-  disabled?: boolean;
-  // Danger options (deny / clear) use semantic color but are never default-selected.
-  tone?: "default" | "danger";
-  role?: "option" | "button";
-}) {
-  const hasCopy = description != null || (label != null && label !== "");
-  return (
-    <button
-      type="button"
-      role={role}
-      aria-selected={role === "option" ? selected : undefined}
-      data-active={active ? "true" : undefined}
-      className={[
-        "prompt-action",
-        primary || selected ? " prompt-action--selected" : "",
-        active ? " prompt-action--active" : "",
-        quiet ? " prompt-action--quiet" : "",
-        description ? " prompt-action--descriptive" : "",
-        !hasCopy ? " prompt-action--key-only" : "",
-        tone === "danger" ? " prompt-action--danger" : "",
-      ].join("")}
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      title={title}
-      onMouseEnter={onHoverChange ? () => onHoverChange(true) : undefined}
-      onMouseLeave={onHoverChange ? () => onHoverChange(false) : undefined}
-      onFocus={onHoverChange ? () => onHoverChange(true) : undefined}
-      onBlur={onHoverChange ? () => onHoverChange(false) : undefined}
-    >
-      {keyLabel && <span className="prompt-action__key">{keyLabel}</span>}
-      {hasCopy && (
-        <span className="prompt-action__copy">
-          {label != null && label !== "" && <span className="prompt-action__label">{label}</span>}
-          {description && <span className="prompt-action__desc">{description}</span>}
-        </span>
-      )}
     </button>
   );
 }

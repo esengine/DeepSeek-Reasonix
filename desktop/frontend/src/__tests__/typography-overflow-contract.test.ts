@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { TEXT_SIZES } from "../lib/textSize";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
-const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const styles = [
+  readFileSync(resolve(testDir, "../styles.css"), "utf8"),
+  readFileSync(resolve(testDir, "../components/CompactRatioSettings.css"), "utf8"),
+].join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
 let passed = 0;
 let failed = 0;
@@ -120,6 +123,11 @@ eq(finalDeclaration(".provider-template-card span", "-webkit-line-clamp"), "2", 
 eq(finalDeclaration(".provider-model-draft__list", "grid-auto-rows"), "min-content", "provider model rows grow with their content");
 eq(finalDeclaration(".provider-model-draft__option", "min-height"), undefined, "provider model cards do not force undersized rows");
 eq(finalDeclaration(".provider-model-draft__option", "overflow"), "hidden", "provider model cards contain overflowing controls");
+eq(finalDeclaration(".compact-ratio-presets", "width"), "100%", "compaction presets use the full settings control width");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "flex"), "1 1 0", "three compaction presets share the available width equally");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "flex-direction"), "column", "compaction presets place percentage and strategy on separate lines");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "min-height"), "44px", "two-line compaction presets keep a stable target height");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "white-space"), "normal", "compaction labels do not depend on ellipsis for their meaning");
 
 eq(finalDeclaration(".statusbar", "white-space"), "nowrap", "status bar keeps metrics on one row");
 eq(finalDeclaration(".statusbar", "overflow"), "hidden", "status bar clips instead of overflowing");

@@ -347,6 +347,10 @@ type Messages struct {
 	RewindPickHint            string
 	RewindRestoreTitleFmt     string
 	RewindApplyHint           string
+	RewindCoverageTitle       string
+	RewindCoverageWarningFmt  string
+	RewindConfirmHint         string
+	RewindUnavailableFmt      string
 	RewindEmpty               string
 
 	// skill picker overlay (/skills interactive panel in CLI TUI)
@@ -535,6 +539,7 @@ type Messages struct {
 
 	// `reasonix upgrade` / `reasonix update` — self-update
 	UpgradeChecking            string // "Checking for updates…"
+	UpgradeChannelDeprecated   string // legacy channel selection is ignored
 	UpgradeDevBuild            string // dev builds cannot self-update
 	UpgradeFetchFailed         string // "failed to check for updates: %v"
 	UpgradeInvalidVersion      string // remote version not valid semver
@@ -562,7 +567,6 @@ type Messages struct {
 	ReportKept                string
 	ReportDeletedFmt          string
 	ReportSentFmt             string
-	ReportSafeModeBlocked     string
 	ReportConfigFailedFmt     string
 	ReportUploadFailedFmt     string
 	ReportSentDeleteFailedFmt string

@@ -66,6 +66,23 @@ func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 	}
 }
 
+func TestMetricsSinkAccumulatesSilentReasoningRecovery(t *testing.T) {
+	s := &metricsSink{inner: event.Discard}
+	s.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+	s.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryAttempted})
+	s.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryRecovered})
+	s.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetryReplaced})
+	s.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningRetrySuppressed})
+	s.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+
+	if s.m.MissingReasoningDetected != 1 || s.m.MissingReasoningRetries != 1 || s.m.MissingReasoningRecovered != 1 || s.m.MissingReasoningReplaced != 1 || s.m.MissingReasoningSuppressed != 1 || s.m.MissingReasoningFallbacks != 1 {
+		t.Fatalf("reasoning recovery metrics = %+v", s.m)
+	}
+	if s.m.Steps != 1 {
+		t.Fatalf("retry model-call step = %d, want 1", s.m.Steps)
+	}
+}
+
 func TestWriteMetricsIncludesReadinessFields(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "metrics.json")
 	if err := writeMetrics(path, RunMetrics{

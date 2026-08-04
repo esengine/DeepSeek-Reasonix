@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"reasonix/desktop/internal/update"
+	"reasonix/internal/installlayout"
 	"reasonix/internal/repair"
 )
 
@@ -57,8 +58,8 @@ func TestValidateUpdaterRequestBindsChannelVersionAndID(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "stable", request: "web-stable-1", channel: "stable", version: "v1.18.0"},
-		{name: "preview", request: "web-preview-1", channel: "preview", version: "v1.18.0-preview.1"},
-		{name: "preview rejects stable version", request: "web-preview-2", channel: "preview", version: "v1.18.0", wantErr: true},
+		{name: "legacy preview selects official", request: "web-preview-1", channel: "preview", version: "v1.18.0"},
+		{name: "legacy preview rejects prerelease", request: "web-preview-2", channel: "preview", version: "v1.18.0-preview.1", wantErr: true},
 		{name: "stable rejects preview version", request: "web-stable-2", channel: "stable", version: "v1.18.0-preview.1", wantErr: true},
 		{name: "empty request", channel: "stable", version: "v1.18.0", wantErr: true},
 		{name: "unsafe request", request: "web request", channel: "stable", version: "v1.18.0", wantErr: true},
@@ -72,10 +73,22 @@ func TestValidateUpdaterRequestBindsChannelVersionAndID(t *testing.T) {
 			if tt.wantErr {
 				return
 			}
-			if request != tt.request || selected != tt.channel || version != tt.version {
+			if request != tt.request || selected != "stable" || version != tt.version {
 				t.Fatalf("validateUpdaterRequest() = (%q, %q, %q)", request, selected, version)
 			}
 		})
+	}
+}
+
+func TestValidateAssetInstallLayout(t *testing.T) {
+	if err := validateAssetInstallLayout(""); err != nil {
+		t.Fatalf("empty layout must remain accepted for legacy assets: %v", err)
+	}
+	if err := validateAssetInstallLayout("versioned-v1"); err != nil {
+		t.Fatalf("versioned-v1 must be accepted: %v", err)
+	}
+	if err := validateAssetInstallLayout("unknown-layout"); err == nil {
+		t.Fatal("unknown install_layout must be rejected")
 	}
 }
 
@@ -86,10 +99,15 @@ func TestUpdaterWailsMethodContracts(t *testing.T) {
 		numIn  int
 		numOut int
 	}{
-		{name: "DownloadUpdate", numIn: 2, numOut: 2},
-		{name: "InstallUpdate", numIn: 2, numOut: 1},
-		{name: "DownloadUpdateRequest", numIn: 4, numOut: 2},
-		{name: "InstallUpdateRequest", numIn: 4, numOut: 1},
+		{name: "ApplyUpdateRequest", numIn: 4, numOut: 1},
+		{name: "CheckUpdate", numIn: 2, numOut: 2},
+		{name: "OpenDownloadPage", numIn: 1, numOut: 0},
+	}
+	// Legacy Download/Install split bindings must stay deleted (v1.20+).
+	for _, removed := range []string{"DownloadUpdate", "InstallUpdate", "DownloadUpdateRequest", "InstallUpdateRequest", "ApplyUpdate"} {
+		if _, ok := appType.MethodByName(removed); ok {
+			t.Fatalf("App.%s must be removed from the Wails surface", removed)
+		}
 	}
 	for _, tt := range tests {
 		method, ok := appType.MethodByName(tt.name)
@@ -297,61 +315,22 @@ func TestManualUpdateRequiredErrorPreservesReason(t *testing.T) {
 	}
 }
 
-func TestChannelSelectsDistinctPointers(t *testing.T) {
+func TestLegacyChannelsSelectOfficialPointers(t *testing.T) {
 	stable := manifestEndpoints("stable")
 	preview := manifestEndpoints("preview")
-
-	for _, u := range stable {
-		if strings.Contains(u, "preview") || strings.Contains(u, "canary") {
-			t.Errorf("stable endpoint leaks into preview: %q", u)
-		}
+	want := []string{
+		r2Base + "/latest/latest.json",
+		releaseGatewayBase + "/stable/latest.json",
+		githubManifestFallback,
 	}
-	if !strings.Contains(stable[0], "/latest/latest.json") {
-		t.Errorf("stable primary = %q, want the latest/ pointer", stable[0])
+	if !reflect.DeepEqual(stable, want) || !reflect.DeepEqual(preview, want) {
+		t.Fatalf("manifest endpoints: stable=%q preview=%q want=%q", stable, preview, want)
 	}
-	if stable[1] != releaseGatewayBase+"/stable/latest.json" {
-		t.Errorf("stable fallback = %q, want the release gateway", stable[1])
+	if got := downloadPage("preview"); got != "https://reasonix.io/?download=desktop#start" {
+		t.Errorf("legacy preview download page = %q", got)
 	}
-	// GitHub is stable's explicit last resort only (#6005: both first-party
-	// endpoints share one Cloudflare zone). Stable desktop releases own the
-	// repo-wide latest release and carry latest.json directly; no other slot may
-	// lean on repository-wide latest.
-	if len(stable) != 3 || stable[2] != githubManifestFallback {
-		t.Errorf("stable endpoints = %q, want the GitHub compatibility manifest last", stable)
-	}
-	for _, u := range append(stable[:2:2], preview...) {
-		if strings.Contains(u, "/releases/latest") {
-			t.Errorf("manifest endpoint uses GitHub's repository-wide latest release: %q", u)
-		}
-	}
-	for _, u := range preview {
-		if strings.Contains(u, "/latest/") {
-			t.Errorf("preview endpoint hits the stable latest/ pointer: %q", u)
-		}
-	}
-	if preview[0] != r2Base+"/preview/latest.json" {
-		t.Errorf("preview primary = %q, want the preview/ pointer", preview[0])
-	}
-	if preview[1] != r2Base+"/canary/latest.json" {
-		t.Errorf("preview compatibility fallback = %q, want the legacy canary/ pointer", preview[1])
-	}
-	if preview[2] != releaseGatewayBase+"/preview/latest.json" {
-		t.Errorf("preview gateway = %q, want the preview release gateway", preview[2])
-	}
-	if preview[3] != releaseGatewayBase+"/canary/latest.json" {
-		t.Errorf("preview gateway compatibility fallback = %q, want the legacy canary gateway", preview[3])
-	}
-	if strings.Contains(downloadPage("stable"), "/releases/latest") {
-		t.Errorf("download page should not use GitHub's repository-wide latest release: %q", downloadPage("stable"))
-	}
-	if downloadPage("stable") != "https://reasonix.io/?channel=stable&download=desktop#start" {
-		t.Errorf("stable download page = %q, want the Stable desktop install deep link", downloadPage("stable"))
-	}
-	if downloadPage("preview") != "https://reasonix.io/?channel=preview&download=desktop#start" {
-		t.Errorf("preview download page = %q, want the Preview desktop install deep link", downloadPage("preview"))
-	}
-	if got := manifestDownloadPage("preview", "https://reasonix.io/?download=desktop#start"); got != "https://reasonix.io/?channel=preview&download=desktop#start" {
-		t.Errorf("manifest Preview page = %q", got)
+	if got := manifestDownloadPage("preview", "https://reasonix.io/?channel=preview&download=desktop#start"); got != "https://reasonix.io/?download=desktop#start" {
+		t.Errorf("manifest official page = %q", got)
 	}
 	if got := manifestDownloadPage("preview", "https://example.com/releases"); got != "https://example.com/releases" {
 		t.Errorf("external manifest download page = %q, want unchanged", got)
@@ -361,8 +340,8 @@ func TestChannelSelectsDistinctPointers(t *testing.T) {
 		"http://reasonix.io/#start",
 		"https://user@reasonix.io/#start",
 	} {
-		if got := manifestDownloadPage("preview", unsafe); got != downloadPage("preview") {
-			t.Errorf("unsafe manifest page %q = %q, want official Preview fallback", unsafe, got)
+		if got := manifestDownloadPage("preview", unsafe); got != downloadPage("stable") {
+			t.Errorf("unsafe manifest page %q = %q, want official fallback", unsafe, got)
 		}
 	}
 }
@@ -375,17 +354,14 @@ func TestManifestChannelValidation(t *testing.T) {
 		wantError bool
 	}{
 		{name: "stable release", channel: "stable", version: "v1.17.21"},
-		{name: "preview release", channel: "preview", version: "v1.18.0-preview.7"},
-		{name: "legacy alias selects Preview", channel: "canary", version: "v1.18.0-preview.7"},
-		{name: "Preview rejects legacy Canary", channel: "preview", version: "v1.17.21-canary.56", wantError: true},
-		{name: "Preview rejects Stable", channel: "preview", version: "v1.17.21", wantError: true},
+		{name: "legacy preview selects official", channel: "preview", version: "v1.17.21"},
+		{name: "legacy canary selects official", channel: "canary", version: "v1.17.21"},
+		{name: "legacy preview rejects prerelease", channel: "preview", version: "v1.18.0-preview.7", wantError: true},
+		{name: "legacy canary rejects prerelease", channel: "canary", version: "v1.17.21-canary.56", wantError: true},
 		{name: "Stable rejects Preview", channel: "stable", version: "v1.18.0-preview.7", wantError: true},
 		{name: "Stable requires v prefix", channel: "stable", version: "1.17.21", wantError: true},
 		{name: "Stable rejects build metadata", channel: "stable", version: "v1.17.21+build.1", wantError: true},
 		{name: "Stable rejects prerelease", channel: "stable", version: "v1.17.21-rc.1", wantError: true},
-		{name: "Preview requires numeric build", channel: "preview", version: "v1.18.0-preview.foo", wantError: true},
-		{name: "Preview rejects extra suffix", channel: "preview", version: "v1.18.0-preview.1.extra", wantError: true},
-		{name: "Preview rejects leading zero build", channel: "preview", version: "v1.18.0-preview.01", wantError: true},
 		{name: "invalid version", channel: "preview", version: "dev", wantError: true},
 	}
 	for _, tt := range tests {
@@ -559,32 +535,14 @@ func TestDesktopManifestValidation(t *testing.T) {
 	if err := validateDesktopManifest("stable", ptr(validDesktopManifest(t, "stable", "v1.18.0"))); err != nil {
 		t.Fatalf("valid Stable manifest: %v", err)
 	}
-	if err := validateDesktopManifest("preview", ptr(validDesktopManifest(t, "preview", "v1.19.0-preview.7"))); err != nil {
-		t.Fatalf("valid Preview manifest: %v", err)
+	if err := validateDesktopManifest("preview", ptr(validDesktopManifest(t, "stable", "v1.19.0"))); err != nil {
+		t.Fatalf("legacy Preview selection did not accept official manifest: %v", err)
 	}
 	t.Run("legacy manifests remain upgradeable", func(t *testing.T) {
 		stable := validDesktopManifest(t, "stable", "v1.17.21")
 		stable.Downloads = nil
 		if err := validateDesktopManifest("stable", &stable); err != nil {
 			t.Fatalf("legacy Stable manifest: %v", err)
-		}
-
-		preview := validDesktopManifest(t, "preview", "v1.18.0-preview.62")
-		immutableBase := r2Base + "/desktop-v1.18.0-preview.62/"
-		rollingBase := r2Base + "/desktop-preview/"
-		for key, asset := range preview.Platforms {
-			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
-			asset.Sig = asset.URL + ".minisig"
-			preview.Platforms[key] = asset
-		}
-		for key, asset := range preview.NativePackages {
-			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
-			asset.Sig = asset.URL + ".minisig"
-			preview.NativePackages[key] = asset
-		}
-		preview.Downloads = nil
-		if err := validateDesktopManifest("preview", &preview); err != nil {
-			t.Fatalf("legacy Preview manifest: %v", err)
 		}
 	})
 	t.Run("empty downloads is not a legacy manifest", func(t *testing.T) {
@@ -594,9 +552,9 @@ func TestDesktopManifestValidation(t *testing.T) {
 			t.Fatal("manifest with empty downloads bypassed the new-format asset requirements")
 		}
 	})
-	t.Run("new Preview manifest rejects rolling asset base", func(t *testing.T) {
-		manifest := validDesktopManifest(t, "preview", "v1.19.0-preview.7")
-		immutableBase := r2Base + "/desktop-v1.19.0-preview.7/"
+	t.Run("official manifest rejects legacy rolling asset base", func(t *testing.T) {
+		manifest := validDesktopManifest(t, "stable", "v1.19.0")
+		immutableBase := r2Base + "/desktop-v1.19.0/"
 		rollingBase := r2Base + "/desktop-preview/"
 		for key, asset := range manifest.Platforms {
 			asset.URL = strings.Replace(asset.URL, immutableBase, rollingBase, 1)
@@ -613,8 +571,31 @@ func TestDesktopManifestValidation(t *testing.T) {
 			asset.Sig = asset.URL + ".minisig"
 			manifest.Downloads[key] = asset
 		}
-		if err := validateDesktopManifest("preview", &manifest); err == nil {
-			t.Fatal("new Preview manifest accepted mutable rolling assets")
+		if err := validateDesktopManifest("stable", &manifest); err == nil {
+			t.Fatal("official manifest accepted mutable rolling assets")
+		}
+	})
+	t.Run("unified GitHub release base", func(t *testing.T) {
+		manifest := validDesktopManifest(t, "stable", "v1.19.0")
+		oldBase := r2Base + "/desktop-v1.19.0/"
+		newBase := "https://github.com/esengine/DeepSeek-Reasonix/releases/download/v1.19.0/"
+		for key, asset := range manifest.Platforms {
+			asset.URL = strings.Replace(asset.URL, oldBase, newBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			manifest.Platforms[key] = asset
+		}
+		for key, asset := range manifest.NativePackages {
+			asset.URL = strings.Replace(asset.URL, oldBase, newBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			manifest.NativePackages[key] = asset
+		}
+		for key, asset := range manifest.Downloads {
+			asset.URL = strings.Replace(asset.URL, oldBase, newBase, 1)
+			asset.Sig = asset.URL + ".minisig"
+			manifest.Downloads[key] = asset
+		}
+		if err := validateDesktopManifest("stable", &manifest); err != nil {
+			t.Fatalf("unified GitHub release manifest: %v", err)
 		}
 	})
 	for _, tt := range tests {
@@ -658,15 +639,15 @@ func ptr[T any](value T) *T {
 	return &value
 }
 
-func TestFetchManifestSkipsLegacyCanaryBuildForPreview(t *testing.T) {
+func TestFetchManifestSkipsPrereleaseForLegacyPreviewSelection(t *testing.T) {
 	var calls []string
 	client := &http.Client{Transport: rtFunc(func(req *http.Request) (*http.Response, error) {
 		calls = append(calls, req.URL.String())
-		version := "v1.17.21-canary.56"
-		if strings.Contains(req.URL.Path, "/canary/") {
-			version = "v1.18.0-preview.7"
+		version := "v1.18.0-preview.7"
+		if strings.Contains(req.URL.Path, "/stable/") {
+			version = "v1.18.0"
 		}
-		manifest := validDesktopManifest(t, "preview", version)
+		manifest := validDesktopManifest(t, "stable", version)
 		body, err := json.Marshal(manifest)
 		if err != nil {
 			t.Fatal(err)
@@ -683,11 +664,11 @@ func TestFetchManifestSkipsLegacyCanaryBuildForPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchManifest: %v", err)
 	}
-	if manifest.Version != "v1.18.0-preview.7" {
-		t.Fatalf("version = %q, want Preview compatibility manifest", manifest.Version)
+	if manifest.Version != "v1.18.0" {
+		t.Fatalf("version = %q, want official fallback manifest", manifest.Version)
 	}
-	if len(calls) != 2 || !strings.Contains(calls[0], "/preview/") || !strings.Contains(calls[1], "/canary/") {
-		t.Fatalf("endpoint calls = %q, want Preview first and legacy Canary fallback second", calls)
+	if len(calls) != 2 || !strings.Contains(calls[0], "/latest/") || !strings.Contains(calls[1], "/stable/") {
+		t.Fatalf("endpoint calls = %q, want official latest then gateway fallback", calls)
 	}
 }
 
@@ -695,8 +676,8 @@ func TestFetchManifestSkipsMalformedSuccessfulResponse(t *testing.T) {
 	var calls []string
 	client := &http.Client{Transport: rtFunc(func(req *http.Request) (*http.Response, error) {
 		calls = append(calls, req.URL.String())
-		manifest := validDesktopManifest(t, "preview", "v1.18.0-preview.7")
-		if strings.Contains(req.URL.Path, "/preview/") {
+		manifest := validDesktopManifest(t, "stable", "v1.18.0")
+		if strings.Contains(req.URL.Path, "/latest/") {
 			delete(manifest.Platforms, update.CurrentPlatform())
 		}
 		body, err := json.Marshal(manifest)
@@ -715,10 +696,10 @@ func TestFetchManifestSkipsMalformedSuccessfulResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("fetchManifest: %v", err)
 	}
-	if manifest.Version != "v1.18.0-preview.7" {
+	if manifest.Version != "v1.18.0" {
 		t.Fatalf("version = %q, want valid fallback manifest", manifest.Version)
 	}
-	if len(calls) != 2 || !strings.Contains(calls[0], "/preview/") || !strings.Contains(calls[1], "/canary/") {
+	if len(calls) != 2 || !strings.Contains(calls[0], "/latest/") || !strings.Contains(calls[1], "/stable/") {
 		t.Fatalf("endpoint calls = %q, want malformed 200 to fall through", calls)
 	}
 }
@@ -837,7 +818,7 @@ func TestCachedUpdateRejectsTamperedArtifact(t *testing.T) {
 	}
 }
 
-func TestCachedUpdateRejectsDifferentChannel(t *testing.T) {
+func TestCachedUpdateAcceptsLegacyChannelAlias(t *testing.T) {
 	withUpdateCacheDir(t)
 
 	data := []byte("verified artifact")
@@ -849,12 +830,12 @@ func TestCachedUpdateRejectsDifferentChannel(t *testing.T) {
 	if _, err := saveCachedUpdateForChannel("stable", "v9.9.9", asset, data, artifactKindTarball, nil); err != nil {
 		t.Fatalf("saveCachedUpdateForChannel: %v", err)
 	}
-	if _, _, err := readVerifiedCachedUpdateForChannel("preview"); err == nil {
-		t.Fatal("readVerifiedCachedUpdate should reject a cache from another channel")
+	if _, _, err := readVerifiedCachedUpdateForChannel("preview"); err != nil {
+		t.Fatalf("legacy Preview alias did not read official cache: %v", err)
 	}
 }
 
-func TestExplicitChannelSwitchAllowsOlderStable(t *testing.T) {
+func TestLegacyChannelAliasDoesNotPermitDowngrade(t *testing.T) {
 	oldChannel := channel
 	channel = "preview"
 	t.Cleanup(func() { channel = oldChannel })
@@ -871,8 +852,8 @@ func TestExplicitChannelSwitchAllowsOlderStable(t *testing.T) {
 		m,
 		installProfile{Mode: installModePortable, CanSelfUpdate: true},
 	)
-	if !got.Available {
-		t.Fatalf("explicit preview-to-stable switch should be available: %+v", got)
+	if got.Available {
+		t.Fatalf("legacy Preview alias permitted an official downgrade: %+v", got)
 	}
 	if got.Channel != "stable" {
 		t.Fatalf("channel = %q, want stable", got.Channel)
@@ -1050,6 +1031,75 @@ func TestExtractLinuxReleaseUnitRejectsAmbiguousMembers(t *testing.T) {
 	if _, err := extractLinuxReleaseUnit(makeArchive(t, nonRegular, nonRegularBodies)); err == nil ||
 		!strings.Contains(err.Error(), "not a regular file") {
 		t.Fatalf("non-regular release member error = %v", err)
+	}
+}
+
+func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
+	root := t.TempDir()
+	source := t.TempDir()
+	for _, name := range []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()} {
+		if err := os.WriteFile(filepath.Join(source, name), []byte("old-"+name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := installlayout.ActivateVersion(installlayout.ActivationRequest{
+		InstallRoot: root,
+		Version:     "v1.20.0",
+		RequestID:   "seed-linux",
+		Members: []installlayout.Member{
+			{Name: installlayout.DesktopBinaryName(), Path: filepath.Join(source, installlayout.DesktopBinaryName())},
+			{Name: installlayout.CLIBinaryName(), Path: filepath.Join(source, installlayout.CLIBinaryName())},
+		},
+		RequiredNames: []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	originalRoot := currentInstallDirForLinuxUpdate
+	currentInstallDirForLinuxUpdate = func() string { return root }
+	t.Cleanup(func() { currentInstallDirForLinuxUpdate = originalRoot })
+
+	var archive bytes.Buffer
+	gz := gzip.NewWriter(&archive)
+	tw := tar.NewWriter(gz)
+	for _, name := range []string{"reasonix-desktop", "reasonix-guard", "reasonix"} {
+		body := []byte("new-" + name)
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o755, Size: int64(len(body)), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write(body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := applyLinuxVersioned(archive.Bytes(), "1.20.1"); err != nil {
+		t.Fatal(err)
+	}
+	ptr, err := installlayout.ReadCurrent(root)
+	if err != nil || ptr.ActiveVersion != "v1.20.1" {
+		t.Fatalf("pointer=%+v err=%v", ptr, err)
+	}
+	activeDesktop, err := installlayout.ActiveDesktopPath(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(activeDesktop)
+	if err != nil || string(data) != "new-reasonix-desktop" {
+		t.Fatalf("active desktop=%q err=%v", data, err)
+	}
+	for _, guardPath := range []string{
+		filepath.Join(root, "reasonix-guard"),
+		filepath.Join(root, "versions", "v1.20.1", "reasonix-guard"),
+	} {
+		if _, err := os.Lstat(guardPath); !os.IsNotExist(err) {
+			t.Fatalf("Guard persisted at %s: %v", guardPath, err)
+		}
 	}
 }
 

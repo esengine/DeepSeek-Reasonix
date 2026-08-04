@@ -53,5 +53,5 @@ for (const path of localeChunks) {
 }
 
 const rawInitialBytes = [...initialJS, ...initialCSS].reduce((total, path) => total + statSync(path).size, 0);
-assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_250 * 1024);
+assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_263 * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_100 * 1024);

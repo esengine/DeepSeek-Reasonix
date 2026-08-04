@@ -1,10 +1,8 @@
 name: Release desktop
 
-# Desktop (Wails) release line. Stable releases are called by
-# release-stable.yml after its single GitHub environment approval. Desktop
-# prerelease tags are relayed by release-desktop-trigger.yml to this workflow on
-# protected main-v2. Production SignPath requests therefore always have the
-# exact main-v2 origin; both public channels use the production policy.
+# Desktop (Wails) release line. Official releases are called by
+# release-stable.yml after its single GitHub environment approval. Production
+# SignPath requests therefore have the exact protected main-v2 origin.
 #
 # Wails cannot cross-compile a CGO/WebKit binary, so build/ fans out to one native
 # runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
@@ -12,25 +10,19 @@ name: Release desktop
 # release and mirrored to R2 (the updater reads R2 first, then the crash worker
 # release gateway; stable desktop releases own GitHub's repository-wide "latest").
 #
-# The same build/sign/manifest pipeline serves two channels. Approved
-# orchestrators publish Stable or Preview, while manual dispatch supports
-# Stable/RC recovery and non-publishing Preview signing checks. Preview advances
-# only R2's preview/ pointer and never appears on the GitHub releases page. The
-# legacy canary/ pointer is mirrored for clients released before the rename.
+# Historical workflow-call inputs still understand Preview artifacts so old
+# runs remain diagnosable. They are not exposed by manual dispatch and cannot
+# create a new public Preview release.
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Release channel"
+        description: "Recovery channel"
         type: choice
-        options: [stable, preview]
+        options: [stable]
         default: stable
       tag:
         description: "stable: tag to publish (e.g. desktop-v1.1.0)"
-        required: false
-        type: string
-      base_version:
-        description: "Preview signing checks: intended next stable version, e.g. 1.5.0"
         required: false
         type: string
       production_signing_smoke:
@@ -73,12 +65,12 @@ on:
         default: false
         type: boolean
       orchestrator:
-        description: "Trusted release orchestrator: stable or preview"
+        description: "Trusted release orchestrator (legacy Preview calls remain readable)"
         required: false
         default: stable
         type: string
       preview_number:
-        description: "Canonical Preview ordinal supplied by release-preview.yml"
+        description: "Legacy Preview ordinal for old workflow-call compatibility"
         required: false
         default: ""
         type: string
@@ -501,12 +493,26 @@ jobs:
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         run: cp signed-installer/*installer*.exe dist/
 
+      # Recovery builds intentionally check out the immutable product SHA,
+      # which can predate a verifier repair. Fetch only the verifier from the
+      # protected workflow commit so recovery can validate old immutable
+      # artifacts without rebuilding them from a moving product branch.
+      - name: Checkout protected release verifier
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: release-control
+          sparse-checkout: scripts/verify-windows-authenticode.ps1
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Verify Windows Authenticode release contract
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         run: |
           $arch = if ("${{ matrix.platform }}" -eq "windows/arm64") { "arm64" } else { "amd64" }
-          ./scripts/verify-windows-authenticode.ps1 `
+          ./release-control/scripts/verify-windows-authenticode.ps1 `
             -PayloadDirectory signed-payload `
             -InstallerPath "dist/Reasonix-windows-$arch-installer.exe" `
             -PortableArchivePath "dist/Reasonix-windows-$arch.zip" `

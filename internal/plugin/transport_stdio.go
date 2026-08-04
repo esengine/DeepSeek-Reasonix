@@ -709,11 +709,21 @@ func (t *stdioTransport) withStderr(err error) error {
 	// close), and this path runs with callMu held — an unbounded wait here
 	// would wedge every future call on this transport.
 	waitWithBudget(t.wait, closeWaitBudget)
-	msg := t.stderr.String()
+	// This error is returned directly to callers outside startup as well as
+	// copied into diagnostics. Redact at the transport boundary so an early
+	// child exit cannot bypass the startup-specific redaction layer.
+	msg := secrets.RedactCredentials(t.stderr.String())
 	if msg == "" {
 		return err
 	}
 	return fmt.Errorf("%w: stderr: %s", err, msg)
+}
+
+func (t *stdioTransport) startupStderr() string {
+	if t == nil || t.stderr == nil {
+		return ""
+	}
+	return secrets.RedactCredentials(t.stderr.String())
 }
 
 // wait reaps the child exactly once; cmd.Wait blocks until the stderr-copy

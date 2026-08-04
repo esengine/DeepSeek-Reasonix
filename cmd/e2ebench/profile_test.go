@@ -21,6 +21,27 @@ func TestAppendBenchmarkProfileArgsDeliveryUsesRealRuntimeProfile(t *testing.T) 
 	}
 }
 
+func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
+	got := buildRunTaskArgs("metrics.json", "e2e", benchmarkProfileDelivery, 12, "fix it")
+	want := []string{
+		"run", "--auto", "--metrics", "metrics.json",
+		"--model", "e2e", "--max-steps", "12",
+		"--profile", "delivery", "fix it",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("run task args = %v, want %v", got, want)
+	}
+}
+
+func TestDefaultSuiteBudgetCoversCurrentFiveTaskBaseline(t *testing.T) {
+	// The real-provider baseline exceeded 400k after only three successful
+	// tasks. Keep enough headroom to grade all five instead of silently skipping
+	// the final scenarios as normal model and cache usage varies.
+	if defaultSuiteTokenBudget < 800_000 {
+		t.Fatalf("default suite token budget = %d, want at least 800000", defaultSuiteTokenBudget)
+	}
+}
+
 func TestNormalizeBenchmarkProfile(t *testing.T) {
 	for _, input := range []string{"", "baseline", " BASELINE "} {
 		if got, err := normalizeBenchmarkProfile(input); err != nil || got != benchmarkProfileBaseline {

@@ -253,9 +253,18 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   pruning still leaves the prompt above the threshold does summary compaction
   run. At `agent.compact_force_ratio` (default `0.9`), the existing forced fold
   may proceed even when the fold economics would normally skip it.
+- Users can inspect or change the 65–85% automatic threshold with
+  `reasonix config compact-ratio [--local] [VALUE]`. The default is 80%; the
+  project-local value overrides the shared user config used by desktop and new
+  CLI sessions.
 - A positive `model_overrides.<model>.context_window` replaces the provider-wide
   value after model resolution. Missing or zero model overrides inherit the
   provider value; provider-level `context_window = 0` disables compaction.
+- `max_output_tokens` is a separate total-output budget, not a conversion from
+  the client reasoning byte guard. Zero selects the provider's safe default,
+  positive values set an explicit cap, and negative values omit optional wire
+  limits. `model_overrides.<model>.max_output_tokens` can specialize mixed
+  gateways; Anthropic still supplies a mandatory `max_tokens` fallback.
 - Tool-result snip/prune never removes messages, so assistant `tool_calls` and
   tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
   and the recent tail is not rewritten. Snipped results can later be upgraded to
@@ -664,9 +673,6 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 # shortcut_layout = "desktop"       # classic|desktop; compatibility setting
 # cursor_shape = "bar"              # CLI/TUI textarea cursor: underline|block|bar
 
-[cli]                               # user/global only; project reasonix.toml cannot override
-update_channel = "stable"           # stable|preview; missing/unknown values resolve to stable
-
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."
 temperature       = 0.0
@@ -689,7 +695,8 @@ models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
-# model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
+max_output_tokens = 32768  # total visible + reasoning + tool-call output; 0 = provider default
+# model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
 
 # A single-model entry still works for custom OpenAI-compatible endpoints.
 
@@ -704,6 +711,7 @@ enabled = true   # inject a stable startup summary of OS, shell, and common tool
 [tools]
 enabled = []   # omit/empty = all built-ins
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; plugin/tool overrides may raise it
 
 [tools.shell]
@@ -737,6 +745,7 @@ name    = "example"            # type defaults to "stdio"
 command = "reasonix-plugin-example"
 args    = []
 # env   = { FOO = "bar" }
+# startup_timeout_seconds = 60         # initialize + tools/list cap; 0 = global/default cap
 # call_timeout_seconds = 600            # per-server MCP call timeout; 0 = global/default cap
 # tool_timeout_seconds = { "generate_video" = 1800 }   # raw MCP tool names
 # [[plugins]]                   # a remote MCP server over Streamable HTTP
@@ -746,10 +755,9 @@ args    = []
 # headers = { Authorization = "Bearer ${STRIPE_KEY}" }   # ${VAR} / ${VAR:-default} expanded
 ```
 
-The native CLI update channel is persisted in the user config. `reasonix
-upgrade` follows it, while `reasonix upgrade stable|preview` changes it and
-updates the same installed binary. The advanced `--channel` flag is a one-off
-override for automation and does not change the saved value.
+The native CLI updater always installs the latest strict `vX.Y.Z` official
+release. Legacy channel configuration and arguments remain parseable during
+1.x, resolve to the official release, and are omitted on subsequent writes.
 
 The executor tracks an adaptive progress lease while a todo is active. A new
 completion, unique successful read, command, or mutation renews the lease;
@@ -786,6 +794,13 @@ Code's exact `mcpServers` schema (`command`/`args`/`env`, `type`/`url`/`headers`
 `[[plugins]]`; on a name collision `reasonix.toml` wins (it is the more explicit,
 Reasonix-specific source). This lets a server already configured for Claude work in
 Reasonix unchanged.
+
+MCP startup has a separate lifecycle from an individual tool call. A caller
+waits briefly for cold startup, while the shared launch/authorization/
+`initialize`/`tools/list` sequence may continue in the background up to
+`mcp_startup_timeout_seconds` (default `30`). A per-server
+`startup_timeout_seconds` overrides that cap. MCP call timeouts begin only after
+the connection is ready.
 
 ```json
 { "mcpServers": {

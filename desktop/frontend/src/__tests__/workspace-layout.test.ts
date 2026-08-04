@@ -228,10 +228,13 @@ eq(
   true,
   "workbench sidebar does not reserve the docked status bar twice",
 );
+const workspaceDockTabsSource = appSource.match(/<div className="workbench-dock__tabs"[\s\S]*?<div className="workbench-dock__body">/)?.[0] ?? "";
 eq(
-  /workbench-dock__tab[\s\S]*?terminalPanelOpen/.test(appSource),
+  workspaceDockTabsSource.length > 0
+    && !/rightDock\.terminal|terminalPanelOpen|toggleTerminalPanel/.test(workspaceDockTabsSource)
+    && /className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"[\s\S]*?aria-label=\{t\("rightDock\.terminal"\)\}[\s\S]*?onClick=\{toggleTerminalPanel\}/.test(appSource),
   true,
-  "terminal tab in workspace dock toggles the independent terminal panel, not rightDockMode",
+  "workspace dock omits the terminal view while the topic bar keeps the terminal drawer action",
 );
 eq(
   /\.topicbar \{\s*position: relative;\s*z-index: var\(--z-inline-sticky\);/.test(stylesSource)

@@ -6,7 +6,7 @@ import { app, openExternal } from "../lib/bridge";
 import { normalizeLangPref, useI18n, useT, type DictKey, type LangPref } from "../lib/i18n";
 import { apiKeyEnvFromProviderName, inferredVisionModels, mergedFetchedProviderModels, mergeProviderModelContextWindows, providerApiKeyEnvForSave, providerDefaultModel, providerIsConfigured, providerModelCandidates, providerModelContextWindowDrafts, providerModelContextWindowIsSmall, providerRequiresKey } from "../lib/providerModels";
 import { cachedFetchProviderModels, invalidateProviderCacheByAPIKeyEnv, shouldSkipAutoRefresh } from "../lib/providerModelCache";
-import { switchUpdaterChannel, useUpdater } from "../lib/useUpdater";
+import { useUpdater } from "../lib/useUpdater";
 import {
   applyTheme,
   getTheme,
@@ -16,6 +16,13 @@ import {
   type Theme,
   type ThemeStyle,
 } from "../lib/theme";
+import {
+  applyTerminalThemePreference,
+  createTerminalThemeSaveQueue,
+  getTerminalThemePreference,
+  normalizeTerminalThemePreference,
+  type TerminalThemePreference,
+} from "../lib/terminalTheme";
 import {
   applyConversationWidth,
   getCachedConversationWidth,
@@ -78,6 +85,7 @@ const PluginsSettingsPage = lazy(() => import("./CapabilitiesPanel").then((modul
 const MemorySettingsPage = lazy(() => import("./MemoryPanel").then((module) => ({ default: module.MemorySettingsPage })));
 const SubagentsSettingsPage = lazy(() => import("./SubagentsPanel").then((module) => ({ default: module.SubagentsSettingsPage })));
 const DiagnosticsSettingsPage = lazy(() => import("./DiagnosticsSettingsPage").then((module) => ({ default: module.DiagnosticsSettingsPage })));
+const UsageStatsPanel = lazy(() => import("./UsageStatsPanel").then((module) => ({ default: module.UsageStatsPanel })));
 const QRCodeSVG = lazy(() => import("qrcode.react").then((module) => ({ default: module.QRCodeSVG })));
 
 // SettingsPanel is the desktop settings centre — a centred modal with left
@@ -109,6 +117,7 @@ export function SettingsPanel({
   const [warning, setWarning] = useState<string | null>(null);
   const [theme, setThemeState] = useState<Theme>(getTheme());
   const [themeStyle, setThemeStyleState] = useState<ThemeStyle>(() => getThemeStyle(getTheme()));
+  const [terminalTheme, setTerminalThemeState] = useState<TerminalThemePreference>(getTerminalThemePreference());
   const [conversationWidth, setConversationWidth] = useState<ConversationWidth>(() => getCachedConversationWidth());
   const [textSize, setTextSizeState] = useState<TextSize>(getTextSize());
   const [zoomPct, setZoomPct] = useState<number>(zoomToPercent(getRestartZoom()));
@@ -127,6 +136,12 @@ export function SettingsPanel({
     if (command) onUseSubagent(command);
   }, 240);
   const zoomSaveSeq = useRef(0);
+  const terminalThemeSaveSeq = useRef(0);
+  const terminalThemeSavePending = useRef(false);
+  const terminalThemeSaveQueue = useRef<ReturnType<typeof createTerminalThemeSaveQueue> | null>(null);
+  if (!terminalThemeSaveQueue.current) {
+    terminalThemeSaveQueue.current = createTerminalThemeSaveQueue((next) => app.SetDesktopTerminalTheme(next));
+  }
 
   const reload = useCallback(async () => {
     setLoadingSettings(true);
@@ -153,8 +168,11 @@ export function SettingsPanel({
     const nextStyle = normalizeThemeStyleForTheme(s.desktopThemeStyle, nextTheme);
     setThemeState(nextTheme);
     setThemeStyleState(nextStyle);
+    if (!terminalThemeSavePending.current) {
+      setTerminalThemeState(applyTerminalThemePreference(s.desktopTerminalTheme));
+    }
     setConversationWidth(applyConversationWidth(s.conversationWidth));
-  }, [s?.conversationWidth, s?.desktopTheme, s?.desktopThemeStyle]);
+  }, [s?.conversationWidth, s?.desktopTheme, s?.desktopThemeStyle, s?.desktopTerminalTheme]);
   useEffect(() => {
     if (desktopPlatform !== "windows") return;
     let cancelled = false;
@@ -207,6 +225,35 @@ export function SettingsPanel({
       setErr(formatSettingsError(e, t));
     }
   }, [reload, onChanged, t]);
+  const setTerminalThemePreference = useCallback((next: TerminalThemePreference) => {
+    const seq = ++terminalThemeSaveSeq.current;
+    const previous = getTerminalThemePreference();
+    terminalThemeSavePending.current = true;
+    setErr(null);
+    setWarning(null);
+    applyTerminalThemePreference(next);
+    setTerminalThemeState(next);
+
+    void terminalThemeSaveQueue.current!(next)
+      .then(async () => {
+        if (seq !== terminalThemeSaveSeq.current) return;
+        const refreshed = await reload();
+        if (seq !== terminalThemeSaveSeq.current) return;
+        terminalThemeSavePending.current = false;
+        onChanged(refreshed);
+      })
+      .catch(async (error) => {
+        if (seq !== terminalThemeSaveSeq.current) return;
+        const refreshed = await reload();
+        if (seq !== terminalThemeSaveSeq.current) return;
+        const restored = normalizeTerminalThemePreference(refreshed?.desktopTerminalTheme ?? previous);
+        applyTerminalThemePreference(restored);
+        setTerminalThemeState(restored);
+        terminalThemeSavePending.current = false;
+        setErr(formatSettingsError(error, t));
+        onChanged(refreshed);
+      });
+  }, [onChanged, reload, t]);
   const setRestartZoom = useCallback(async (zoom: ZoomLevel) => {
     const snapped = snapZoom(zoom);
     const seq = ++zoomSaveSeq.current;
@@ -296,6 +343,7 @@ export function SettingsPanel({
                     <AppearanceOverview
                       theme={theme}
                       themeStyle={themeStyle}
+                      terminalTheme={terminalTheme}
                       conversationWidth={conversationWidth}
                       textSize={textSize}
                       showDisplayZoom={desktopPlatform === "windows"}
@@ -321,6 +369,7 @@ export function SettingsPanel({
                         setThemeStyleState(style);
                         setBaseAppearance(getTheme(), style);
                       }}
+                      onTerminalTheme={setTerminalThemePreference}
                       onTextSize={(size) => {
                         applyTextSize(size);
                         setTextSizeState(size);
@@ -352,7 +401,6 @@ export function SettingsPanel({
                     <UpdatesSection
                       configPath={s.configPath}
                       checkUpdates={s.checkUpdates}
-                      updateChannel={s.updateChannel}
                       telemetry={s.telemetry !== false}
                       metrics={s.metrics !== false}
                       settingsBusy={busy}
@@ -781,7 +829,12 @@ const PROXY_MODES = ["auto", "custom", "off"] as const;
 // The settings UI uses it for subagent defaults; provider-specific levels are
 // inferred by the backend or edited in TOML for rare gateways.
 export const EFFORT_PRESETS: readonly string[] = ["low", "medium", "high", "xhigh", "max"];
-const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "openai", "none"];
+const COMPACT_RATIO_PRESETS = [
+  [0.7, "settings.compactRatioPreset.70"],
+  [0.8, "settings.compactRatioPreset.80"],
+  [0.85, "settings.compactRatioPreset.85"],
+] as const;
+const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "openai", "none"];
 const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
@@ -1254,11 +1307,13 @@ function normalizeExtraBodyMap(value: unknown): Record<string, unknown> {
   return out;
 }
 
-function normalizeProviderView(p: ProviderView): ProviderView {
+export function normalizeProviderView(p: ProviderView): ProviderView {
   const visionModels = asArray(p.visionModels);
   const requiresKey = providerRequiresKey(p);
   return {
     ...p,
+    name: String(p.name ?? ""),
+    baseUrl: String(p.baseUrl ?? ""),
     builtIn: Boolean(p.builtIn),
     added: Boolean(p.added),
     chatUrl: p.chatUrl ?? "",
@@ -1321,11 +1376,17 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     noProxy: "",
     proxy: { type: "socks5", server: "", port: 0, username: "", password: "" },
   };
-  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
+  const agent = view.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 };
   agent.plannerMaxSteps = Number.isFinite(agent.plannerMaxSteps) ? Math.max(0, Math.trunc(agent.plannerMaxSteps)) : 0;
   agent.maxSteps = Number.isFinite(agent.maxSteps) ? Math.max(0, Math.trunc(agent.maxSteps)) : 0;
   agent.maxSubagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
   agent.reasoningLanguage = normalizeReasoningLanguage(agent.reasoningLanguage);
+  agent.compactRatio = Number.isFinite(agent.compactRatio) && Number(agent.compactRatio) > 0 ? Number(agent.compactRatio) : 0.8;
+  agent.effectiveCompactRatio = Number.isFinite(agent.effectiveCompactRatio) && Number(agent.effectiveCompactRatio) > 0
+    ? Number(agent.effectiveCompactRatio)
+    : agent.compactRatio;
+  agent.compactRatioOverridden = Boolean(agent.compactRatioOverridden);
+  agent.compactRatioRemote = Boolean(agent.compactRatioRemote);
   return {
     ...view,
     providers: asArray(view.providers).map(normalizeProviderView),
@@ -1360,13 +1421,14 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopLayoutStyle: normalizeDesktopLayoutStyle(view.desktopLayoutStyle),
     desktopTheme: normalizeThemePreference(view.desktopTheme),
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
+    desktopTerminalTheme: normalizeTerminalThemePreference(view.desktopTerminalTheme),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
     displayMode: normalizeDisplayMode(view.displayMode),
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),
     conversationWidth: normalizeConversationWidth(view.conversationWidth),
     checkUpdates: view.checkUpdates !== false,
-    updateChannel: view.updateChannel === "preview" ? "preview" : "stable",
+    updateChannel: "stable",
   };
 }
 
@@ -1480,6 +1542,8 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   switch (protocol) {
     case "deepseek":
       return t("settings.reasoningProtocol.deepseek");
+    case "glm":
+      return t("settings.reasoningProtocol.glm");
     case "openai":
       return t("settings.reasoningProtocol.openai");
     case "none":
@@ -4020,7 +4084,7 @@ function botDraftWithDerivedGatewayState(draft: BotSettingsView): BotSettingsVie
 
 function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: ModelsSectionProps) {
   const t = useT();
-  const [subtab, setSubtab] = useState<"usage" | "access">(
+  const [subtab, setSubtab] = useState<"usage" | "access" | "stats">(
     initialFocus?.target === "model-access" ? "access" : "usage",
   );
   const autoRefreshKeyRef = useRef("");
@@ -4037,7 +4101,33 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
     : !providerIsConfigured(defaultProviderView)
       ? t("settings.modelNeedsKey", { provider: modelProviderLabel(defaultProvider, defaultProviderView, t) })
       : "";
-  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" };
+  const agent = s.agent ?? { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 };
+  const compactRatio = agent.compactRatio ?? 0.8;
+  const compactRatioPercent = Math.round(compactRatio * 1000) / 10;
+  const [compactRatioDraft, setCompactRatioDraft] = useState(() => String(compactRatioPercent));
+  const [compactRatioCustomOpen, setCompactRatioCustomOpen] = useState(false);
+  const compactRatioCustomInputRef = useRef<HTMLInputElement>(null);
+  const compactRatioPreset = COMPACT_RATIO_PRESETS.find(([ratio]) => Math.abs(compactRatio - ratio) < 0.0001);
+  const compactRatioDraftPercent = Number(compactRatioDraft);
+  const compactRatioDraftValid = compactRatioDraft !== ""
+    && Number.isFinite(compactRatioDraftPercent)
+    && compactRatioDraftPercent >= 65
+    && compactRatioDraftPercent <= 85;
+  const compactRatioDraftDirty = compactRatioDraftValid
+    && Math.abs(compactRatioDraftPercent / 100 - compactRatio) > 0.0001;
+  const defaultModel = defaultRef.startsWith(`${defaultProvider}/`) ? defaultRef.slice(defaultProvider.length + 1) : "";
+  const modelContextWindow = defaultProviderView?.modelOverrides?.find((override) => override.model === defaultModel)?.contextWindow ?? 0;
+  const effectiveContextWindow = modelContextWindow > 0 ? modelContextWindow : (defaultProviderView?.contextWindow ?? 0);
+  const compactTokens = effectiveContextWindow > 0 ? Math.round(effectiveContextWindow * compactRatio) : 0;
+  const compactRatioImpact = compactTokens > 0
+    ? t("settings.compactRatioImpactWithTokens", { percent: compactRatioPercent, tokens: compactTokens.toLocaleString() })
+    : t("settings.compactRatioImpact", { percent: compactRatioPercent });
+  const compactRatioSelection = compactRatioPreset
+    ? t(compactRatioPreset[1])
+    : t("settings.compactRatioCustomValue", { percent: compactRatioPercent });
+  const compactRatioOverrideHint = agent.compactRatioOverridden
+    ? t("settings.compactRatioProjectOverride", { percent: Math.round((agent.effectiveCompactRatio ?? compactRatio) * 100) })
+    : "";
   const subagentDepth = Number.isFinite(agent.maxSubagentDepth) && agent.maxSubagentDepth <= 1 ? 1 : 2;
   const subagentConcurrency = Number.isFinite(agent.maxSubagentConcurrency) && agent.maxSubagentConcurrency > 0
     ? Math.max(1, Math.min(32, Math.floor(agent.maxSubagentConcurrency)))
@@ -4045,6 +4135,41 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const parallelWriters = Number.isFinite(agent.maxParallelWriters) && agent.maxParallelWriters > 0
     ? Math.max(1, Math.min(subagentConcurrency, Math.floor(agent.maxParallelWriters)))
     : Math.min(3, subagentConcurrency);
+
+  useEffect(() => {
+    setCompactRatioDraft(String(compactRatioPercent));
+  }, [compactRatioPercent]);
+
+  useEffect(() => {
+    if (compactRatioCustomOpen) compactRatioCustomInputRef.current?.focus();
+  }, [compactRatioCustomOpen]);
+
+  const persistCompactRatio = async (ratio: number) => {
+    if (await apply(() => app.SetCompactRatio(ratio))) setCompactRatioCustomOpen(false);
+  };
+
+  const openCompactRatioCustom = () => {
+    setCompactRatioDraft(String(compactRatioPercent));
+    setCompactRatioCustomOpen(true);
+  };
+
+  const closeCompactRatioCustom = () => {
+    setCompactRatioDraft(String(compactRatioPercent));
+    setCompactRatioCustomOpen(false);
+  };
+
+  const selectCompactRatioPreset = async (ratio: number) => {
+    if (Math.abs(compactRatio - ratio) < 0.0001) {
+      closeCompactRatioCustom();
+      return;
+    }
+    await persistCompactRatio(ratio);
+  };
+
+  const saveCompactRatioDraft = async () => {
+    if (!compactRatioDraftValid || !compactRatioDraftDirty || busy) return;
+    await persistCompactRatio(compactRatioDraftPercent / 100);
+  };
 
   useEffect(() => {
     const generation = ++autoRefreshGenerationRef.current;
@@ -4146,6 +4271,14 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
           onClick={() => setSubtab("access")}
         >
           {t("settings.modelTab.access")}
+        </button>
+        <button
+          type="button"
+          className={`settings-subtab${subtab === "stats" ? " settings-subtab--active" : ""}`}
+          aria-selected={subtab === "stats"}
+          onClick={() => setSubtab("stats")}
+        >
+          {t("settings.modelTab.stats")}
         </button>
       </div>
 
@@ -4281,10 +4414,101 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
                 ))}
               </div>
             </SettingsField>
+            <SettingsField label={t("settings.compactRatio")} hint={t("settings.compactRatioHint")} stacked>
+              <div className="compact-ratio-controls">
+                <div className="set-seg compact-ratio-presets" role="group" aria-label={t("settings.compactRatio")}>
+                  {COMPACT_RATIO_PRESETS.map(([ratio, labelKey]) => (
+                    <button
+                      key={ratio}
+                      type="button"
+                      className={`set-seg__btn${Math.abs(compactRatio - ratio) < 0.0001 ? " set-seg__btn--on" : ""}`}
+                      disabled={busy}
+                      aria-label={t(labelKey)}
+                      aria-pressed={Math.abs(compactRatio - ratio) < 0.0001}
+                      onClick={() => void selectCompactRatioPreset(ratio)}
+                    >
+                      <span className="compact-ratio-preset__percent" aria-hidden="true">{Math.round(ratio * 100)}%</span>
+                      <span className="compact-ratio-preset__caption" aria-hidden="true">{t(labelKey).split(" · ")[1]}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="compact-ratio-summary">
+                  <div className="compact-ratio-current">{t("settings.compactRatioCurrent", { value: compactRatioSelection })}</div>
+                  <button
+                    type="button"
+                    className="btn btn--small compact-ratio-custom-toggle"
+                    disabled={busy}
+                    aria-expanded={compactRatioCustomOpen}
+                    aria-controls="settings-compact-ratio-custom-panel"
+                    onClick={compactRatioCustomOpen ? closeCompactRatioCustom : openCompactRatioCustom}
+                  >
+                    {t("settings.compactRatioCustomOption")}
+                  </button>
+                </div>
+                <div className="compact-ratio-impact">{compactRatioImpact}</div>
+                {compactRatioCustomOpen && (
+                  <div id="settings-compact-ratio-custom-panel" className="compact-ratio-custom-panel">
+                    <div className="settings-inline-controls compact-ratio-custom">
+                      <label className="set-label" htmlFor="settings-compact-ratio-custom">{t("settings.compactRatioCustom")}</label>
+                      <input
+                        ref={compactRatioCustomInputRef}
+                        id="settings-compact-ratio-custom"
+                        className="mem-input set-narrow"
+                        type="number"
+                        min={65}
+                        max={85}
+                        step={0.1}
+                        inputMode="decimal"
+                        value={compactRatioDraft}
+                        disabled={busy}
+                        aria-label={t("settings.compactRatioCustomAria")}
+                        aria-describedby="settings-compact-ratio-custom-hint"
+                        aria-invalid={!compactRatioDraftValid}
+                        onInput={(event) => setCompactRatioDraft(event.currentTarget.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void saveCompactRatioDraft();
+                          }
+                          if (event.key === "Escape") {
+                            event.preventDefault();
+                            closeCompactRatioCustom();
+                          }
+                        }}
+                      />
+                      <span className="compact-ratio-custom__suffix" aria-hidden="true">%</span>
+                      <button
+                        type="button"
+                        className="btn btn--small"
+                        disabled={busy || !compactRatioDraftValid || !compactRatioDraftDirty}
+                        onClick={() => void saveCompactRatioDraft()}
+                      >
+                        {t("settings.compactRatioApply")}
+                      </button>
+                      <button type="button" className="btn btn--small" disabled={busy} onClick={closeCompactRatioCustom}>
+                        {t("common.cancel")}
+                      </button>
+                    </div>
+                    <div
+                      id="settings-compact-ratio-custom-hint"
+                      className={`compact-ratio-custom__hint${compactRatioDraftValid ? "" : " compact-ratio-custom__hint--invalid"}`}
+                    >
+                      {t("settings.compactRatioCustomHint")}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </SettingsField>
+            {compactRatioOverrideHint && <div className="provider-fetch-banner provider-fetch-banner--warn">{compactRatioOverrideHint}</div>}
+            {agent.compactRatioRemote && <div className="provider-fetch-banner provider-fetch-banner--warn">{t("settings.compactRatioRemote")}</div>}
           </SettingsSection>
         </>
-      ) : (
+      ) : subtab === "access" ? (
         <ProvidersSection s={s} busy={busy} apply={apply} />
+      ) : (
+        <Suspense fallback={<div className="empty">{t("settings.loading")}</div>}>
+          <UsageStatsPanel />
+        </Suspense>
       )}
     </>
   );
@@ -4906,6 +5130,8 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
       return t("settings.addProvider.preset.longcatOpenAIDesc");
     case "longcat-anthropic":
       return t("settings.addProvider.preset.longcatAnthropicDesc");
+    case "token-rhythm":
+      return t("settings.addProvider.preset.tokenRhythmDesc");
     case "kimi-cn":
       return t("settings.addProvider.preset.kimiCnDesc");
     case "kimi-global":
@@ -4989,6 +5215,11 @@ function providerPresetDescription(preset: ProviderPresetView, t: ReturnType<typ
   }
 }
 
+function providerPresetLabel(preset: ProviderPresetView, t: ReturnType<typeof useT>): string {
+  if (preset.id === "token-rhythm") return t("settings.addProvider.preset.tokenRhythmLabel");
+  return preset.label;
+}
+
 function AddProviderPanel({
   mode,
   kinds,
@@ -5030,7 +5261,7 @@ function AddProviderPanel({
       id: `preset:${preset.id}`,
       source: "preset" as const,
       presetID: preset.id,
-      label: preset.label,
+      label: providerPresetLabel(preset, t),
       description: providerPresetDescription(preset, t),
       keyEnv: preset.keyEnv,
       added: preset.added,
@@ -5616,7 +5847,7 @@ function parseBotListInput(value: string): string[] {
     .filter(Boolean));
 }
 
-const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
+export const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   candidates,
   selectedModels,
   visionModels,
@@ -5646,14 +5877,14 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
     const timer = setTimeout(() => setDebouncedQuery(query), 150);
     return () => clearTimeout(timer);
   }, [query]);
-  if (candidates.length === 0) return null;
-  const selected = new Set(selectedModels);
-  const vision = new Set(visionModels);
   const q = debouncedQuery.trim().toLowerCase();
   const visibleCandidates = q
     ? candidates.filter((model) => model.toLowerCase().includes(q))
     : candidates;
   const deferredCandidates = useDeferredValue(visibleCandidates);
+  if (candidates.length === 0) return null;
+  const selected = new Set(selectedModels);
+  const vision = new Set(visionModels);
   return (
     <div className="provider-model-draft provider-model-draft--inline">
       <div className="provider-model-draft__head">
@@ -5735,7 +5966,7 @@ const ProviderEditorModelPicker = memo(function ProviderEditorModelPicker({
   );
 });
 
-function ProviderEditor({
+export function ProviderEditor({
   initial,
   kinds,
   busy,
@@ -5806,6 +6037,18 @@ function ProviderEditor({
   const effectiveExtraBody = extraBodyParse.value;
   const extraBodyInvalid = Boolean(extraBodyDraft.trim() && extraBodyParse.error);
   const previewChatUrl = providerChatURLPreview(baseUrl, chatUrl, fullChatUrl);
+  const modelNames = useMemo(
+    () => parseProviderListInput(models),
+    [models],
+  );
+  const modelCandidateNames = useMemo(
+    () => uniqueStrings([...modelCandidates, ...modelNames]),
+    [modelCandidates, modelNames],
+  );
+  const visionModelNames = useMemo(
+    () => parseProviderListInput(visionModels).filter((model) => modelNames.includes(model)),
+    [modelNames, visionModels],
+  );
 
   // Empty supportedEfforts means "use protocol defaults". The simplified
   // provider flow no longer edits these levels directly, but it preserves
@@ -5952,18 +6195,6 @@ function ProviderEditor({
     );
   }
 
-  const modelNames = useMemo(
-    () => parseProviderListInput(models),
-    [models],
-  );
-  const modelCandidateNames = useMemo(
-    () => uniqueStrings([...modelCandidates, ...modelNames]),
-    [modelCandidates, modelNames],
-  );
-  const visionModelNames = useMemo(
-    () => parseProviderListInput(visionModels).filter((model) => modelNames.includes(model)),
-    [modelNames, visionModels],
-  );
   const canFetch = Boolean(name.trim() && effectiveBaseUrl);
 
   const setModelsFromList = (nextModels: string[]) => {
@@ -6338,7 +6569,7 @@ function RuleList({
         {rules.length === 0 && <span className="mem-empty">{t("common.none")}</span>}
         {rules.map((r) => (
           <span className="set-rule" key={r}>
-            {r}
+            <span className="set-rule__text" title={r}>{r}</span>
             <Tooltip label={t("common.delete")}>
               <button className="set-rule__x" disabled={busy} onClick={() => void onRemove(r)}>
                 ✕
@@ -6770,12 +7001,11 @@ const mb = (n: number) => (n / MB).toFixed(1);
 
 // UpdatesSection is the manual side of the auto-updater: it shows the startup
 // check preference, running version, and a Check button, then the same state
-// machine the top banner uses (useUpdater) — available → download → install, with
-// progress and errors inline.
+// machine the top banner uses (useUpdater) — a single "update and restart"
+// action with inline progress and errors.
 function UpdatesSection({
   configPath,
   checkUpdates,
-  updateChannel,
   telemetry,
   metrics,
   settingsBusy,
@@ -6783,15 +7013,13 @@ function UpdatesSection({
 }: {
   configPath: string;
   checkUpdates: boolean;
-  updateChannel: string;
   telemetry: boolean;
   metrics: boolean;
   settingsBusy: boolean;
   applySettings: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useT();
-  const { status, check, download: downloadUpdate, install: installUpdate, openDownload, reset: resetUpdater } = useUpdater();
-  const selectedChannel = updateChannel === "preview" ? "preview" : "stable";
+  const { status, check, apply: applyUpdate, openDownload } = useUpdater();
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
@@ -6802,8 +7030,8 @@ function UpdatesSection({
     status.kind === "downloading" ||
     status.kind === "verifying" ||
     status.kind === "authorizing" ||
-    status.kind === "recovering" ||
-    status.kind === "installing";
+    status.kind === "installing" ||
+    status.kind === "relaunching";
   const updateStatus =
     status.kind === "checking" ? t("updater.checking") :
     status.kind === "upToDate" ? t("updater.upToDate") :
@@ -6814,26 +7042,39 @@ function UpdatesSection({
       pct: status.total > 0 ? Math.round((status.received / status.total) * 100) : 0,
     }) :
     status.kind === "verifying" ? t("updater.verifying") :
-    status.kind === "downloaded" ? t("updater.downloaded", { v: status.info.latest }) :
     status.kind === "authorizing" ? t("updater.authorizing") :
-    status.kind === "recovering" ? t("updater.recovering") :
     status.kind === "installing" ? (
       status.info?.requiresElevation || status.info?.installMode === "deb"
         ? t("updater.installingPackage")
         : t("updater.installing")
     ) :
-    status.kind === "done" ? t("updater.done") :
-    status.kind === "error" ? t("updater.failed", { msg: status.message }) :
+    status.kind === "relaunching" || status.kind === "done" ? t("updater.done") :
+    status.kind === "error" ? "" :
     "";
   const updateStatusTone =
     status.kind === "error" ? "error" :
     status.kind === "available" ? "available" :
+    status.kind === "upToDate" || status.kind === "done" || status.kind === "relaunching" ? "success" :
     status.kind === "checking" || updaterBusy ? "busy" :
-    status.kind === "upToDate" || status.kind === "done" ? "success" :
     "neutral";
+  const updateErrorTitle = status.kind === "error"
+    ? status.disposition === "recovery"
+      ? t("updater.recoveryBlocked")
+      : status.disposition === "manual"
+        ? t("updater.manualUpdateRequired")
+        : t("updater.failed", { msg: status.message })
+    : "";
+  const updateErrorHint = status.kind === "error"
+    ? status.disposition === "recovery"
+      ? t("updater.recoveryHint")
+      : status.disposition === "manual"
+        ? t("updater.manualFallbackHint")
+        : ""
+    : "";
+  const downloadIsPrimary = status.kind === "error" && status.disposition !== "retryable";
 
   return (
-    <SettingsSection title={t("updater.title")}>
+    <SettingsSection>
       <SettingsField
         className="settings-field--wide-copy updates-control"
         label={
@@ -6854,128 +7095,88 @@ function UpdatesSection({
         }
       >
         <div className="updates-control__controls">
-          <div className="provider-add-segmented" role="group" aria-label={t("updater.channelSettingLabel")}>
-            {(["stable", "preview"] as const).map((nextChannel) => (
-              <button
-                key={nextChannel}
-                type="button"
-                disabled={settingsBusy || updaterBusy}
-                className={selectedChannel === nextChannel ? "provider-add-segmented__item provider-add-segmented__item--active" : "provider-add-segmented__item"}
-                aria-pressed={selectedChannel === nextChannel}
-                onClick={() => {
-                  if (nextChannel === selectedChannel) return;
-                  void switchUpdaterChannel(
-                    nextChannel,
-                    resetUpdater,
-                    () => applySettings(() => app.SetDesktopUpdateChannel(nextChannel)),
-                    check,
-                  );
-                }}
-              >
-                {nextChannel === "stable" ? t("updater.channelStable") : t("updater.channelPreview")}
-              </button>
-            ))}
-          </div>
           <Tooltip label={t("updater.checkButton")}>
             <button
               className="chip chip--icon"
               type="button"
               disabled={settingsBusy || updaterBusy}
               aria-label={t("updater.checkButton")}
-              onClick={() => void check(selectedChannel)}
+              onClick={() => void check()}
             >
               <RefreshCw className={status.kind === "checking" ? "updates-control__spinner" : undefined} size={14} aria-hidden="true" />
             </button>
           </Tooltip>
         </div>
       </SettingsField>
-      <div className="updates-control__hint">
-        <div>{t("updater.channelSettingHint")}</div>
-        <div>{t("updater.channelAutoCheckHint")}</div>
+      <div
+        className="updates-control__hint"
+        style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px 8px" }}
+      >
+        <span>{t("updater.officialReleaseHint")}</span>
+        <button
+          className="btn btn--small"
+          type="button"
+          onClick={openDownload}
+          style={{
+            height: "auto",
+            minHeight: 0,
+            padding: 0,
+            borderColor: "transparent",
+            background: "transparent",
+            color: "var(--fg-dim)",
+            textDecoration: "underline",
+            textUnderlineOffset: 2,
+          }}
+        >
+          {t("updater.officialDownload")}
+          <ExternalLink size={13} aria-hidden="true" />
+        </button>
       </div>
-      {(status.kind === "available" || status.kind === "downloaded") && (
+      {status.kind === "available" && (
         <div className="updates-control__action">
           <div className="updates-control__action-copy">
-            {status.kind === "available" && (
-              <div>
-                {t("updater.channelLabel", {
-                  channel: status.info.channel === "preview" ? t("updater.channelPreview") : t("updater.channelStable"),
-                })}
+            {!status.info.canSelfUpdate && <div>{status.info.manualReason || t("updater.macHint")}</div>}
+          </div>
+          <button
+            className="btn btn--primary btn--small"
+            disabled={settingsBusy || updaterBusy}
+            onClick={() => applyUpdate(status.info)}
+          >
+            {status.info.canSelfUpdate ? t("updater.updateAndRestart") : t("updater.goToDownload")}
+          </button>
+        </div>
+      )}
+      {status.kind === "error" && (
+        <div
+          className="banner banner--update banner--error"
+          role="alert"
+          style={{ alignItems: "flex-start", flexWrap: "wrap", marginBottom: 12 }}
+        >
+          <div style={{ flex: "1 1 360px", minWidth: 0 }}>
+            <div>{updateErrorTitle}</div>
+            {updateErrorHint && <div className="banner__hint">{updateErrorHint}</div>}
+            {status.disposition !== "retryable" && (
+              <div className="banner__hint" style={{ overflowWrap: "anywhere" }}>
+                {t("updater.errorDetails", { msg: status.message })}
               </div>
             )}
-            {status.kind === "available" && !status.info.canSelfUpdate && <div>{status.info.manualReason || t("updater.macHint")}</div>}
           </div>
-          {status.kind === "available" && (
-            <button
-              className="btn btn--primary btn--small"
-              disabled={settingsBusy || updaterBusy}
-              onClick={() => downloadUpdate(status.info)}
-            >
-              {status.info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
+          <span className="banner__spacer" />
+          {downloadIsPrimary && (
+            <button className="btn btn--primary btn--small" type="button" onClick={openDownload}>
+              {t("updater.officialDownload")}
+              <ExternalLink size={14} aria-hidden="true" />
             </button>
           )}
-          {status.kind === "downloaded" && (
-            <button
-              className="btn btn--primary btn--small"
-              disabled={settingsBusy || updaterBusy}
-              onClick={installUpdate}
-            >
-              {status.info.requiresElevation || status.info.installMode === "deb"
-                ? t("updater.authorizeInstall")
-                : t("updater.restartInstall")}
-            </button>
-          )}
+          <button
+            className={`btn btn--small${downloadIsPrimary ? "" : " btn--primary"}`}
+            type="button"
+            disabled={settingsBusy || updaterBusy}
+            onClick={() => status.info ? applyUpdate(status.info) : void check()}
+          >
+            {t("updater.retry")}
+          </button>
         </div>
-      )}
-      <SettingsField
-        className="settings-field--wide-copy"
-        label={t("updater.autoCheckLabel")}
-        hint={t("updater.autoCheckHint")}
-      >
-        <ToggleSegment
-          value={checkUpdates}
-          disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopCheckUpdates(enabled))}
-        />
-      </SettingsField>
-      <SettingsField
-        className="settings-field--wide-copy"
-        label={t("settings.telemetryLabel")}
-        hint={t("settings.telemetryHint")}
-      >
-        <ToggleSegment
-          value={telemetry}
-          disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopTelemetry(enabled))}
-        />
-      </SettingsField>
-      <SettingsField
-        className="settings-field--wide-copy"
-        label={t("settings.metricsLabel")}
-        hint={t("settings.metricsHint")}
-      >
-        <ToggleSegment
-          value={metrics}
-          disabled={settingsBusy}
-          onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
-        />
-      </SettingsField>
-      {status.kind === "error" && (
-        <div className="banner banner--error">
-          {updateStatus}
-          {status.manualHint && (
-            <div className="mem-hint">
-              <button className="btn btn--small" onClick={openDownload}>
-                {t("updater.goToDownload")}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-      {configPath && (
-        <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
-          {t("settings.config", { path: configPath })}
-        </Tooltip>
       )}
       <SettingsField
         className="settings-field--wide-copy"
@@ -6987,6 +7188,86 @@ function UpdatesSection({
           <ExternalLink size={14} aria-hidden="true" />
         </button>
       </SettingsField>
+      <SettingsField
+        className="settings-field--wide-copy"
+        label={t("feedback.title")}
+        hint={t("feedback.subtitle")}
+      >
+        <div className="settings-inline-controls">
+          <button
+            className="btn btn--small"
+            onClick={() => void openExternal("https://github.com/esengine/DeepSeek-Reasonix/issues/new/choose")}
+          >
+            {t("feedback.submitIssue")}
+            <ExternalLink size={14} aria-hidden="true" />
+          </button>
+          <button
+            className="btn btn--small"
+            onClick={() => void openExternal("https://github.com/esengine/DeepSeek-Reasonix/issues")}
+          >
+            {t("feedback.viewIssues")}
+            <ExternalLink size={14} aria-hidden="true" />
+          </button>
+        </div>
+      </SettingsField>
+      <details
+        className="provider-editor-advanced"
+        style={{
+          marginTop: 0,
+          borderRight: 0,
+          borderBottom: 0,
+          borderLeft: 0,
+          borderRadius: 0,
+          background: "transparent",
+        }}
+      >
+        <summary style={{ padding: "0 2px" }}>
+          <span className="provider-editor-advanced__title">
+            <ChevronDown className="provider-editor-advanced__icon" size={16} aria-hidden="true" />
+            {t("updater.privacyAndUpdatePreferences")}
+          </span>
+        </summary>
+        <div className="provider-editor-advanced__body">
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("updater.autoCheckLabel")}
+            hint={t("updater.autoCheckHint")}
+          >
+            <ToggleSegment
+              value={checkUpdates}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetDesktopCheckUpdates(enabled))}
+            />
+          </SettingsField>
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("settings.telemetryLabel")}
+            hint={t("settings.telemetryHint")}
+          >
+            <ToggleSegment
+              value={telemetry}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetDesktopTelemetry(enabled))}
+            />
+          </SettingsField>
+          <SettingsField
+            className="settings-field--wide-copy"
+            label={t("settings.metricsLabel")}
+            hint={t("settings.metricsHint")}
+          >
+            <ToggleSegment
+              value={metrics}
+              disabled={settingsBusy}
+              onChange={(enabled) => void applySettings(() => app.SetDesktopMetrics(enabled))}
+            />
+          </SettingsField>
+          {configPath && (
+            <Tooltip label={configPath} fill block className="mem-hint settings-config-path">
+              {t("settings.config", { path: configPath })}
+            </Tooltip>
+          )}
+        </div>
+      </details>
     </SettingsSection>
   );
 }

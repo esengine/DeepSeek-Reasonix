@@ -438,6 +438,17 @@ export function performanceLabelForReason(reason: string): string {
   return "performance.pressure";
 }
 
+export function performanceFingerprintHintForReason(reason: string): string | undefined {
+  const normalized = reason.trim().toLowerCase();
+  if (!normalized.startsWith("js heap")) return undefined;
+  const match = normalized.match(/(\d+(?:\.\d+)?)%/);
+  const percent = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isFinite(percent)) return "frontend.performance.heap.unknown";
+  return percent >= 95
+    ? "frontend.performance.heap.critical"
+    : "frontend.performance.heap.high";
+}
+
 export function shouldRecordLongTaskSample(
   startMs: number,
   durationMs: number,
@@ -561,6 +572,7 @@ export function buildPerformancePayload(snapshot: PerformanceSnapshot): CrashPay
     errorType: "PerformancePressure",
     errorMessage,
     topFrame: "frontend.performance",
+    fingerprintHint: performanceFingerprintHintForReason(snapshot.reason),
     buildCommit,
     channel: typeof __BUILD_CHANNEL__ === "string" ? __BUILD_CHANNEL__ : "",
     language: typeof navigator !== "undefined" ? navigator.language || "" : "",

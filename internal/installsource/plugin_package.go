@@ -13,9 +13,8 @@ import (
 	"sort"
 	"strings"
 
+	"reasonix/internal/gitcmd"
 	"reasonix/internal/pluginpkg"
-	"reasonix/internal/proc"
-	"reasonix/internal/secrets"
 )
 
 const (
@@ -587,11 +586,7 @@ func pluginGitCommand(ctx context.Context, args ...string) *exec.Cmd {
 	// Preserve repository bytes across platforms. A user's global autocrlf
 	// setting must not rewrite JSON/scripts on Windows after the user approved
 	// the exact source commit.
-	gitArgs := append([]string{"-c", "core.autocrlf=false"}, args...)
-	cmd := exec.CommandContext(ctx, "git", gitArgs...)
-	cmd.Env = secrets.ProcessEnv()
-	proc.HideWindow(cmd)
-	return cmd
+	return gitcmd.CommandWithConfig(ctx, "", []string{"core.autocrlf=false"}, args...)
 }
 
 // installCopiedPlugin copies sourceRoot into a staging directory next to

@@ -158,6 +158,65 @@ func TestLateSubscribeResultCannotUndoSessionMutation(t *testing.T) {
 	}
 }
 
+func TestLateUnchangedProfileCannotUndoNewerProfile(t *testing.T) {
+	target := protocol.RuntimeTarget{WorkspaceID: "workspace-live", SessionID: "session-live"}
+	oldProfile := protocol.ResolvedProfile{
+		Model: "local/old", Effort: "high", CollaborationMode: protocol.CollaborationNormal,
+		TokenMode: protocol.TokenFull, ToolApprovalMode: protocol.ToolApprovalAsk,
+	}
+	newProfile := oldProfile
+	newProfile.Model = "local/new"
+	c := &Client{state: State{
+		Initialized: true, HostEpoch: "host-live", WorkspaceID: target.WorkspaceID,
+		Target: target, RuntimeEpoch: "runtime-old", ResolvedProfile: oldProfile,
+	}}
+	_, authority, err := c.authorizeRequest(protocol.MethodSessionProfileSet, protocol.SessionProfileSetParams{
+		Patch: protocol.ProfilePatch{Model: stringPtr(oldProfile.Model)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.applyResult(protocol.MethodSessionProfileSet, protocol.SessionProfileSetResult{
+		ResolvedProfile: newProfile, RuntimeEpoch: "runtime-new", Disposition: protocol.ProfileRebuilt,
+		AutoResolvedPromptIDs: []protocol.PromptID{},
+	})
+	late := protocol.SessionProfileSetResult{
+		ResolvedProfile: oldProfile, RuntimeEpoch: "runtime-old", Disposition: protocol.ProfileUnchanged,
+		AutoResolvedPromptIDs: []protocol.PromptID{},
+	}
+	if !c.applyRequestResult(protocol.MethodSessionProfileSet, late, authority) {
+		t.Fatal("late unchanged result should remain a successful no-op")
+	}
+	if c.state.RuntimeEpoch != "runtime-new" || c.state.ResolvedProfile != newProfile {
+		t.Fatalf("late unchanged profile restored stale authority: %+v", c.state)
+	}
+}
+
+func TestMutationRequestClassification(t *testing.T) {
+	for _, method := range []protocol.Method{
+		protocol.MethodTopicCreate,
+		protocol.MethodSessionRename,
+		protocol.MethodSessionProfileSet,
+		protocol.MethodSessionNew,
+		protocol.MethodSessionClear,
+		protocol.MethodSessionGoalSet,
+	} {
+		if !requestIsMutation(method) {
+			t.Fatalf("%s was not classified as a serialized mutation", method)
+		}
+	}
+	for _, method := range []protocol.Method{
+		protocol.MethodRemotePing,
+		protocol.MethodSessionSubscribe,
+		protocol.MethodSessionHistory,
+		protocol.MethodCatalogSession,
+	} {
+		if requestIsMutation(method) {
+			t.Fatalf("%s was incorrectly classified as a mutation", method)
+		}
+	}
+}
+
 func TestCurrentSnapshotRejectsStateChangedAfterSubscribe(t *testing.T) {
 	target := protocol.RuntimeTarget{WorkspaceID: "workspace-live", SessionID: "session-live"}
 	profile := protocol.ResolvedProfile{
@@ -211,6 +270,33 @@ func TestCurrentSnapshotRejectsAuthorityOnlyMutation(t *testing.T) {
 	c.applyResult(protocol.MethodSessionGoalSet, protocol.SessionGoalSetResult{Goal: "ship", Status: protocol.GoalRunning})
 	if c.IsCurrentSnapshot(result) {
 		t.Fatal("snapshot remained current after an authority-only mutation")
+	}
+}
+
+func TestUnchangedProfileKeepsCurrentSnapshotAuthoritative(t *testing.T) {
+	target := protocol.RuntimeTarget{WorkspaceID: "workspace-live", SessionID: "session-live"}
+	profile := protocol.ResolvedProfile{
+		Model: "local/model", Effort: "high", CollaborationMode: protocol.CollaborationNormal,
+		TokenMode: protocol.TokenFull, ToolApprovalMode: protocol.ToolApprovalAsk,
+	}
+	result := protocol.SessionSubscribeResult{
+		SubscriptionID: "subscription-live",
+		Snapshot: protocol.SessionSnapshot{
+			SnapshotID: "snapshot-live", HostEpoch: "host-live", Target: target,
+			RuntimeEpoch: "runtime-live", Meta: protocol.SessionMetaSnapshot{ResolvedProfile: profile},
+		},
+	}
+	c := &Client{state: State{
+		Initialized: true, HostEpoch: "host-live", WorkspaceID: target.WorkspaceID,
+		Target: target, RuntimeEpoch: "runtime-live", ResolvedProfile: profile,
+	}, completedTurns: map[protocol.TurnID]struct{}{}}
+	c.applyResult(protocol.MethodSessionSubscribe, result)
+	c.applyResult(protocol.MethodSessionProfileSet, protocol.SessionProfileSetResult{
+		ResolvedProfile: profile, RuntimeEpoch: "runtime-live", Disposition: protocol.ProfileUnchanged,
+		AutoResolvedPromptIDs: []protocol.PromptID{},
+	})
+	if !c.IsCurrentSnapshot(result) {
+		t.Fatal("idempotent profile application invalidated an unchanged snapshot")
 	}
 }
 

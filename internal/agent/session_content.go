@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"time"
 
@@ -46,9 +47,23 @@ type SessionUserMessage struct {
 // after the first save once an event log exists, so surfaces like prompt
 // history must use this instead.
 func LoadSessionUserMessages(path string) ([]SessionUserMessage, error) {
-	if probe, err := probeSessionEventLog(path); err == nil && probe.native && probe.size > 0 {
-		replay, err := replaySessionEventLog(store.SessionEventLog(path))
-		if err == nil && replay.records > 0 {
+	return loadSessionUserMessagesWithLimits(path, defaultSessionReplayLimits)
+}
+
+func loadSessionUserMessagesWithLimits(path string, limits sessionReplayLimits) ([]SessionUserMessage, error) {
+	probe, err := probeSessionEventLogWithLimits(path, limits)
+	if err != nil {
+		return nil, err
+	}
+	if probe.futureSchema {
+		return nil, fmt.Errorf("session event log for %s uses schema %d; this build supports up to %d", path, probe.schemaVersion, sessionEventSchemaVersion)
+	}
+	if probe.native && probe.size > 0 {
+		replay, err := replaySessionEventLogWithLimits(store.SessionEventLog(path), limits)
+		if err != nil {
+			return nil, err
+		}
+		if replay.records > 0 {
 			out := make([]SessionUserMessage, 0, len(replay.msgs))
 			for i, m := range replay.msgs {
 				if m.Role != provider.RoleUser {

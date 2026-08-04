@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 )
@@ -30,6 +31,43 @@ func TestSplitAllowedToolRulesRejectsUnbalancedParentheses(t *testing.T) {
 		if _, err := splitAllowedToolRules([]string{input}); err == nil {
 			t.Fatalf("splitAllowedToolRules(%q) unexpectedly succeeded", input)
 		}
+	}
+}
+
+func TestRegisterContinueFlagShorthandParses(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"-c"}, true},
+		{[]string{"-c=true"}, true},
+		{[]string{"--continue"}, true},
+		{[]string{"--continue=true"}, true},
+		{[]string{}, false},
+	}
+	for _, tc := range cases {
+		fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
+		cont := registerContinueFlag(fs)
+		if err := fs.Parse(tc.args); err != nil {
+			t.Fatalf("Parse(%#v): %v", tc.args, err)
+		}
+		if *cont != tc.want {
+			t.Fatalf("Parse(%#v) continue = %v, want %v", tc.args, *cont, tc.want)
+		}
+	}
+}
+
+// Regression guard: registering the shorthand with BoolVar instead of BoolP
+// leaves "-c" unparseable ("unknown shorthand flag") while accidentally
+// accepting "--c" as a long flag name (the pre-fix bug, #7156/#7171).
+func TestRegisterContinueFlagRejectsAccidentalLongC(t *testing.T) {
+	fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
+	cont := registerContinueFlag(fs)
+	if err := fs.Parse([]string{"--c"}); err == nil {
+		t.Fatalf("Parse(--c) should fail: --c must not exist as a long flag name")
+	}
+	if *cont {
+		t.Fatalf("--c unexpectedly set the continue flag")
 	}
 }
 

@@ -4,9 +4,9 @@ run-name: Release stable ${{ inputs.tag || github.ref_name }}
 # Stable publication has exactly one GitHub environment gate. Push the CLI,
 # npm, and desktop tags atomically; release-stable-trigger.yml relays the vX.Y.Z
 # tag to this workflow on protected main-v2. Preflight verifies that all three
-# tags point to the current main-v2 commit, and one GitHub approval releases
-# every channel. After approval, a zero-publication Windows preflight verifies
-# both architectures and signing stages before any public channel starts.
+# tags point to the reviewed Notes candidate on main-v2 history, and one GitHub
+# approval releases every surface. After approval, a zero-publication Windows
+# preflight verifies both architectures and signing stages before publication.
 # Keeping the control-plane ref on main-v2 lets SignPath restrict
 # production signing to that one protected origin instead of trusting wildcard
 # tag-like branch names. Manual recovery uses the same fixed control plane while
@@ -54,6 +54,7 @@ jobs:
     name: validate stable release set
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     outputs:
       version: ${{ steps.release.outputs.version }}
@@ -81,6 +82,17 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
           ALLOW_STABLE_RECOVERY: ${{ inputs.allow_recovery }}
         run: bash scripts/resolve-stable-release.sh
+      - name: Revalidate normal release candidate and exact push CI
+        if: ${{ !inputs.allow_recovery }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_CI_WAIT_SECONDS: 60
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          bash scripts/validate-stable-candidate.sh "$RELEASE_VERSION" "$RELEASE_SHA"
+          bash scripts/verify-release-push-ci.sh "$RELEASE_SHA"
       - name: Validate reviewed release notes
         run: node scripts/release-notes.mjs render --version "${{ steps.release.outputs.cli_tag }}" --output /tmp/release-notes.md
       # Recovery builds deliberately check out the immutable tagged candidate,

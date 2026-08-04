@@ -1,23 +1,11 @@
 name: Release npm
 
 # npm line. Stable releases are called by release-stable.yml after its single
-# GitHub environment approval. Direct tag pushes are retained only for
-# prereleases so npm `next` can still ship independently without touching the
-# stable Homebrew cask. Bump a prerelease with:
-#   git tag npm-vX.Y.Z-rc.N     # prerelease -> publishes under `next`
-#   git push origin <tag>
-#
-# Manual workflow_dispatch recovers only an approved Stable version from an
-# existing tag. Public canary publication is owned by release-preview.yml so its
-# version remains aligned with CLI, Desktop, and the immutable release marker.
-# build.mjs decides the dist-tag: a `-canary.` build is `canary`, any other
-# prerelease is `next`, and a stable version is `latest` (#5822 — the old
-# "promote latest by hand" rule left it pinned at 0.53.2 and downgraded
-# `npm update -g` users). The publisher verifies every immutable package and
-# advances each public dist-tag only when the candidate is newer.
+# GitHub environment approval. Direct prerelease tag publication is disabled;
+# manual workflow_dispatch recovers only an approved Stable version from an
+# existing tag. Historical canary and next package identities remain readable,
+# but normal publication advances only the official release.
 on:
-  push:
-    tags: ['npm-v*-*']
   workflow_dispatch:
     inputs:
       channel:
@@ -64,12 +52,12 @@ on:
         default: false
         type: boolean
       orchestrator:
-        description: "Trusted release orchestrator: stable or preview"
+        description: "Trusted release orchestrator (legacy Preview calls remain readable)"
         required: false
         default: stable
         type: string
       preview_number:
-        description: "Canonical Preview ordinal supplied by release-preview.yml"
+        description: "Legacy Preview ordinal for old workflow-call compatibility"
         required: false
         default: ""
         type: string
@@ -78,8 +66,8 @@ permissions:
   contents: read
 
 concurrency:
-  # Serialize every publisher for one npm dist-tag. In particular, canary
-  # remains ordered even if another approved orchestrator is added later.
+  # Serialize every publisher for one npm dist-tag. Historical canary calls
+  # remain ordered even though normal publication now uses Stable only.
   group: release-npm-${{ inputs.channel || 'next' }}
   cancel-in-progress: false
 
@@ -157,9 +145,9 @@ jobs:
         with:
           node-version: '22'
           registry-url: 'https://registry.npmjs.org'
-      # Tag push uses the npm-v* tag. The Preview orchestrator synthesizes a
-      # <base>-canary.<preview_number> version; a manual Stable dispatch publishes
-      # the requested semver exactly. build.mjs strips the leading `npm-`/`v`.
+      # Stable publication uses the exact npm-v* tag. build.mjs strips the
+      # leading `npm-`/`v`; historical Preview inputs remain only for old
+      # workflow-call compatibility and are not reachable from a public entry.
       - name: Resolve version
         id: ver
         env:
@@ -183,3 +171,14 @@ jobs:
           VERSION_ARG: ${{ steps.ver.outputs.arg }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: node npm/build.mjs "$VERSION_ARG" --publish
+      - name: Align legacy aliases with the official release
+        if: ${{ inputs.channel == 'stable' }}
+        env:
+          VERSION: ${{ inputs.base_version }}
+          APPROVED_SHA: ${{ inputs.approved_sha }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          candidate="$APPROVED_SHA"
+          if [ -z "$candidate" ]; then candidate="$(git rev-parse HEAD)"; fi
+          EXPECTED_SHA="$candidate" node scripts/finalize-npm-official-release.mjs "$VERSION"

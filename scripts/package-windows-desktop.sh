@@ -127,12 +127,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-cp "$PAYLOAD/$BINNAME.exe" "$portable_staging/$BINNAME.exe"
-cp "$PAYLOAD/$GUARDNAME.exe" "$portable_staging/$GUARDNAME.exe"
+# versioned-v1 portable layout (no Guard, no flat desktop at InstallRoot).
+version_label="${VERSION:-}"
+if [ -z "$version_label" ] && [ -f "$DESKTOP/wails.json" ]; then
+	version_label=$(node -e 'const j=require(process.argv[1]); process.stdout.write(j.info&&j.info.productVersion||"")' "$DESKTOP/wails.json" 2>/dev/null || true)
+fi
+version_label="${version_label:-0.0.0}"
+case "$version_label" in
+v*) ;;
+*) version_label="v${version_label}" ;;
+esac
+mkdir -p "$portable_staging/versions/$version_label"
+cp "$PAYLOAD/$BINNAME.exe" "$portable_staging/versions/$version_label/$BINNAME.exe"
+cp "$PAYLOAD/$UPDATE_HELPER" "$portable_staging/versions/$version_label/$UPDATE_HELPER"
+cp "$PAYLOAD/$WINDOWS_CLINAME.exe" "$portable_staging/versions/$version_label/$WINDOWS_CLINAME.exe"
 cp "$PAYLOAD/$LAUNCHERNAME.exe" "$portable_staging/$LAUNCHERNAME.exe"
 cp "$PAYLOAD/$LAUNCHERNAME.exe" "$portable_staging/$APPNAME.exe"
-cp "$PAYLOAD/$UPDATE_HELPER" "$portable_staging/$UPDATE_HELPER"
 cp "$PAYLOAD/$WINDOWS_CLINAME.exe" "$portable_staging/$WINDOWS_CLINAME.exe"
+cat >"$portable_staging/current.json" <<EOF
+{
+  "schemaVersion": 1,
+  "activeVersion": "$version_label",
+  "activeDir": "versions/$version_label"
+}
+EOF
 "$ROOT/scripts/verify-windows-portable.sh" "$portable_staging"
 
 portable_staging_win="$portable_staging"

@@ -18,6 +18,7 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # currency = "auto"   # auto|CNY|USD; explicitly set it independently from language
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
 # theme = "auto"   # desktop only: auto|dark|light
+# terminal_theme = "auto"   # integrated terminal: auto|dark|light; auto follows the desktop app
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 
 [notifications]
@@ -28,7 +29,7 @@ ask_request = true   # notify when a question is waiting
 
 [agent]
 # system_prompt = "You are ..."   # custom persona/prompt; unset or empty = built-in default
-# system_prompt_file = "prompts/system.md"   # overrides system_prompt when set
+# system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>
 temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
@@ -52,8 +53,8 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # recommended editable presets for Kimi CN/Global, Kimi Coding Plan, MiMo API
 # and Anthropic/token-plan regions, MiniMax CN/Global API and Anthropic routes,
 # GLM/Z.AI CN/Global API and coding-plan routes, OpenCode Go/Zen, Qwen/DashScope
-# CN/Global API and coding-plan routes, StepFun, NovitaAI, GMI, Vercel AI
-# Gateway, HuggingFace, NVIDIA, KiloCode, and Ollama Cloud.
+# CN/Global API and coding-plan routes, Token Rhythm (基元律动), StepFun,
+# NovitaAI, GMI, Vercel AI Gateway, HuggingFace, NVIDIA, KiloCode, and Ollama Cloud.
 [[providers]]
 name        = "deepseek"
 kind        = "openai"
@@ -119,6 +120,7 @@ enabled = true   # inject a stable startup summary of OS, shell, and common tool
 [tools]
 enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap; per-server overrides may raise it
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [tools.background_jobs]
@@ -167,6 +169,8 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
+# # Startup may continue in the background after the first caller stops waiting.
+# # startup_timeout_seconds = 60
 # # Per-server MCP call timeout; 0 keeps the global/default cap.
 # # call_timeout_seconds = 600
 # # Raw MCP tool names with per-tool call timeouts.

@@ -1,6 +1,9 @@
 // Run: tsx src/__tests__/statusbar-workspace.test.tsx
 
+import { JSDOM } from "jsdom";
 import React from "react";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StatusBar } from "../components/StatusBar";
 import { LocaleProvider } from "../lib/i18n";
@@ -121,12 +124,198 @@ console.log("\nstatus bar workspace");
 {
   const html = renderStatusBar({ items: ["model"] });
   ok(!html.includes("YOLO"), "status bar renders only configured status items, not mode indicators");
-  ok(!html.includes("后台作业") && !html.includes("Background jobs"), "status bar omits non-configurable job indicators");
+  ok(!html.includes("后台作业") && !html.includes("Background jobs"), "status bar hides the operational jobs entry while idle");
+}
+
+{
+  const html = renderStatusBar({
+    items: ["model"],
+    jobs: [{ id: "bash-1", kind: "bash", label: "run tests", status: "running", startedAt: 1 }],
+  });
+  ok(html.includes("Background jobs"), "running background jobs remain visible outside configurable metrics");
+  ok(html.includes("1"), "background jobs entry exposes the running count");
+}
+
+{
+  const html = renderStatusBar({
+    items: ["model"],
+    backgroundRuntimes: [{
+      tabId: "running-1", title: "Detached delivery", detached: true,
+      running: true, pendingPrompt: false, jobs: [],
+    }],
+  });
+  ok(html.includes("Background jobs"), "a running detached task remains visible without child jobs");
+  ok(html.includes("<b>1</b>"), "a jobless active runtime contributes to the recovery count");
 }
 
 {
   const defaultItems = DEFAULT_STATUS_BAR_ITEMS as readonly string[];
   ok(!defaultItems.includes("autoresearch"), "autoresearch is not a configurable status bar UI item");
+}
+
+{
+  const estimated = renderStatusBar({
+    items: ["session_tokens", "turn_tokens", "turn_cost", "cost"],
+    context: { used: 0, window: 0, sessionTokens: 1_200, estimated: true },
+    usage: {
+      promptTokens: 800,
+      completionTokens: 200,
+      totalTokens: 1_000,
+      cacheHitTokens: 0,
+      cacheMissTokens: 800,
+      estimated: true,
+    },
+    sessionTokens: 1_200,
+    turnTokens: 1_000,
+    turnCost: 0.2,
+    cost: 0.3,
+    currency: "USD",
+  });
+  ok((estimated.match(/≈/g) ?? []).length === 4, "estimated token and cost metrics use an approximation marker");
+
+  const empty = renderStatusBar({
+    items: ["session_tokens", "turn_tokens", "turn_cost", "cost"],
+    context: { used: 0, window: 0, sessionTokens: 0, estimated: true },
+    usage: {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      estimated: true,
+    },
+    currency: "USD",
+  });
+  ok(!empty.includes("≈-"), "empty estimated metrics remain a plain dash");
+}
+
+{
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.window = dom.window as unknown as Window & typeof globalThis;
+  globalThis.document = dom.window.document;
+  globalThis.Node = dom.window.Node;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.HTMLButtonElement = dom.window.HTMLButtonElement;
+  globalThis.Event = dom.window.Event;
+  globalThis.MouseEvent = dom.window.MouseEvent;
+  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+  globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
+  });
+
+  let stopped = "";
+  const rootEl = document.getElementById("root")!;
+  const root = createRoot(rootEl);
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <StatusBar
+          context={{ used: 0, window: 0, sessionTokens: 0 }}
+          running={false}
+          jobs={[{ id: "bash-1", kind: "bash", label: "run tests", status: "running", startedAt: 1 }]}
+          onCancelJob={async (jobID) => { stopped = jobID; return true; }}
+        />
+      </LocaleProvider>,
+    );
+  });
+  const jobsButton = rootEl.querySelector<HTMLButtonElement>(".statusbar__jobs-trigger");
+  await act(async () => { jobsButton?.click(); });
+  const stopButton = document.body.querySelector<HTMLButtonElement>(".jobs-popover__stop");
+  await act(async () => { stopButton?.click(); await Promise.resolve(); });
+  ok(stopped === "bash-1", "background jobs popover routes Stop to the selected job");
+
+  let routed = "";
+  let revealed = "";
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <StatusBar
+          context={{ used: 0, window: 0, sessionTokens: 0 }}
+          running={false}
+          backgroundRuntimes={[
+            {
+              tabId: "detached-1", title: "Detached delivery", detached: true,
+              running: false, pendingPrompt: false,
+              jobs: [{ id: "go-1", kind: "go", label: "go test", status: "running", startedAt: 1 }],
+            },
+          ]}
+          onCancelRuntimeJob={async (tabID, jobID) => { routed = `${tabID}:${jobID}`; return true; }}
+          onRevealRuntime={async (tabID) => { revealed = tabID; }}
+        />
+      </LocaleProvider>,
+    );
+  });
+  const globalJobsButton = rootEl.querySelector<HTMLButtonElement>(".statusbar__jobs-trigger");
+  if (globalJobsButton?.getAttribute("aria-expanded") !== "true") {
+    await act(async () => { globalJobsButton?.click(); });
+  }
+  const globalStop = document.body.querySelector<HTMLButtonElement>(".jobs-popover__stop");
+  const openTask = Array.from(document.body.querySelectorAll<HTMLButtonElement>(".jobs-popover__runtime-header button"))[0];
+  await act(async () => { globalStop?.click(); openTask?.click(); await Promise.resolve(); });
+  ok(routed === "detached-1:go-1", "global jobs route Stop to the owning detached task");
+  ok(revealed === "detached-1", "global jobs can reopen the exact detached task");
+
+  revealed = "";
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <StatusBar
+          context={{ used: 0, window: 0, sessionTokens: 0 }}
+          running={false}
+          backgroundRuntimes={[
+            {
+              tabId: "prompt-1", title: "Waiting delivery", detached: true,
+              running: false, pendingPrompt: true, jobs: [],
+            },
+          ]}
+          onRevealRuntime={async (tabID) => { revealed = tabID; }}
+        />
+      </LocaleProvider>,
+    );
+  });
+  const promptJobsButton = rootEl.querySelector<HTMLButtonElement>(".statusbar__jobs-trigger");
+  if (promptJobsButton?.getAttribute("aria-expanded") !== "true") {
+    await act(async () => { promptJobsButton?.click(); });
+  }
+  ok(document.body.textContent?.includes("Waiting for input") === true, "pending-prompt runtime explains why it remains active");
+  const promptOpenTask = document.body.querySelector<HTMLButtonElement>(".jobs-popover__runtime-header button");
+  await act(async () => { promptOpenTask?.click(); await Promise.resolve(); });
+  ok(revealed === "prompt-1", "a pending-prompt runtime can be reopened without child jobs");
+
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <StatusBar
+          context={{ used: 0, window: 0, sessionTokens: 0 }}
+          running={false}
+          workbenchTarget={{ kind: "ssh", hostId: "remote-1" }}
+          jobs={[{ id: "remote-job", kind: "bash", label: "remote build", status: "running", startedAt: 1 }]}
+          backgroundRuntimes={[
+            {
+              tabId: "local-1", title: "Local delivery", detached: true,
+              running: false, pendingPrompt: false,
+              jobs: [{ id: "local-job", kind: "go", label: "local test", status: "running", startedAt: 1 }],
+            },
+          ]}
+        />
+      </LocaleProvider>,
+    );
+  });
+  const mixedJobsButton = rootEl.querySelector<HTMLButtonElement>(".statusbar__jobs-trigger");
+  ok(mixedJobsButton?.textContent?.includes("2") === true, "local and active Remote Workbench jobs share the total count");
+  if (mixedJobsButton?.getAttribute("aria-expanded") !== "true") {
+    await act(async () => { mixedJobsButton?.click(); });
+  }
+  ok(document.body.textContent?.includes("local test") === true, "local background jobs remain visible in Remote Workbench");
+  ok(document.body.textContent?.includes("remote build") === true, "active Remote Workbench jobs remain visible beside local jobs");
+  await act(async () => { root.unmount(); });
+  dom.window.close();
 }
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);

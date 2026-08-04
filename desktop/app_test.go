@@ -996,6 +996,9 @@ status_bar_items = ["cost", "balance"]
 	if err := userCfg.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("set desktop appearance: %v", err)
 	}
+	if err := userCfg.SetDesktopTerminalTheme("light"); err != nil {
+		t.Fatalf("set desktop terminal theme: %v", err)
+	}
 	if err := userCfg.SetDesktopCloseBehavior("background"); err != nil {
 		t.Fatalf("set desktop close behavior: %v", err)
 	}
@@ -1016,7 +1019,7 @@ status_bar_items = ["cost", "balance"]
 	}
 
 	got := NewApp().Settings()
-	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
+	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DesktopTerminalTheme != "light" || got.CloseBehavior != "background" || got.StatusBarStyle != "text" {
 		t.Fatalf("desktop settings = lang:%q layout:%q theme:%q style:%q close:%q status:%q, want user-level desktop prefs", got.DesktopLanguage, got.DesktopLayoutStyle, got.DesktopTheme, got.DesktopThemeStyle, got.CloseBehavior, got.StatusBarStyle)
 	}
 	if want := []string{"model", "balance", "cache"}; !reflect.DeepEqual(got.StatusBarItems, want) {
@@ -1036,6 +1039,9 @@ func TestDesktopStartupSettingsUsesUserDesktopPreferencesWithoutFullSettingsPayl
 	}
 	if err := userCfg.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("set desktop appearance: %v", err)
+	}
+	if err := userCfg.SetDesktopTerminalTheme("light"); err != nil {
+		t.Fatalf("set desktop terminal theme: %v", err)
 	}
 	if err := userCfg.SetDesktopStatusBarStyle("icon"); err != nil {
 		t.Fatalf("set desktop status bar style: %v", err)
@@ -1057,7 +1063,7 @@ func TestDesktopStartupSettingsUsesUserDesktopPreferencesWithoutFullSettingsPayl
 	}
 
 	got := NewApp().DesktopStartupSettings()
-	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DisplayMode != "standard" || got.StatusBarStyle != "icon" || got.CheckUpdates || got.UpdateChannel != "preview" {
+	if got.DesktopLanguage != "en" || got.DesktopLayoutStyle != "classic" || got.DesktopTheme != "dark" || got.DesktopThemeStyle != "graphite" || got.DesktopTerminalTheme != "light" || got.DisplayMode != "standard" || got.StatusBarStyle != "icon" || got.CheckUpdates || got.UpdateChannel != "stable" {
 		t.Fatalf("DesktopStartupSettings desktop prefs = %+v, want user-level startup prefs", got)
 	}
 	if want := []string{"workspace", "git_branch", "model"}; !reflect.DeepEqual(got.StatusBarItems, want) {
@@ -5622,6 +5628,17 @@ func TestSetTokenModeRejectsRunningTurn(t *testing.T) {
 
 func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "OLD_MODEL_KEY", "sk-test")
+
+	cfg := config.Default()
+	cfg.DefaultModel = "old/old-model"
+	cfg.Desktop.ProviderAccess = []string{"old"}
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "old", Kind: "openai", BaseURL: "https://example.invalid/v1", Model: "old-model", APIKeyEnv: "OLD_MODEL_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
 
 	dir := config.SessionDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -5630,12 +5647,17 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 	path := filepath.Join(dir, "jobs.jsonl")
 	jm := jobs.NewManager(event.Discard)
 	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: path, Label: "test", Jobs: jm})
-	defer ctrl.Close()
 	app := NewApp()
-	app.setTestCtrl(ctrl, "")
+	app.ctx = context.Background()
+	app.setTestCtrl(ctrl, "old/old-model")
+	t.Cleanup(func() {
+		if current := app.activeCtrl(); current != nil {
+			current.Close()
+		}
+	})
 
 	release := make(chan struct{})
-	jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
+	job := jm.StartForSession(agent.BranchID(path), "bash", "long job", func(ctx context.Context, _ io.Writer) (string, error) {
 		select {
 		case <-ctx.Done():
 			return "", ctx.Err()
@@ -5643,11 +5665,21 @@ func TestSetTokenModeRejectsBackgroundJobs(t *testing.T) {
 			return "", nil
 		}
 	})
-	defer close(release)
+	t.Cleanup(func() { close(release) })
 
 	err := app.SetTokenMode("economy")
-	if err == nil || !strings.Contains(err.Error(), "stop background jobs") {
-		t.Fatalf("SetTokenMode with background job error = %v, want background-job guard", err)
+	if err == nil || !strings.Contains(err.Error(), "background_jobs=1") {
+		t.Fatalf("SetTokenMode with background job error = %v, want exact background-job guard", err)
+	}
+	cancelled, err := app.CancelJobForTab("", job.ID)
+	if err != nil || !cancelled {
+		t.Fatalf("CancelJobForTab = %v, %v, want true, nil", cancelled, err)
+	}
+	if result := jm.WaitForSession(context.Background(), agent.BranchID(path), []string{job.ID}, 5); len(result) != 1 || result[0].Status != jobs.Killed {
+		t.Fatalf("stopped background job = %+v, want one killed result", result)
+	}
+	if err := app.SetTokenMode("economy"); err != nil {
+		t.Fatalf("SetTokenMode after stopping background job: %v", err)
 	}
 }
 

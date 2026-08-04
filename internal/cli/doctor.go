@@ -29,8 +29,8 @@ func doctorCommand(args []string, version string) int {
 	}
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "print diagnostics as JSON")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 
 	report := doctor.Collect(doctor.Options{Version: version})
@@ -53,8 +53,8 @@ func doctorRepairCommand(args []string) int {
 	apply := fs.Bool("apply", false, "quarantine invalid config and restore the last-known-good global snapshot")
 	includeProject := fs.Bool("project", false, "allow --apply to quarantine an invalid project reasonix.toml")
 	jsonOut := fs.Bool("json", false, "print result as JSON")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: reasonix doctor repair [--root PATH] [--apply] [--project] [--json]")
@@ -167,8 +167,8 @@ func doctorRedactSessionsCommand(args []string) int {
 	dryRun := fs.Bool("dry-run", false, "show how many session files would be redacted without writing")
 	jsonOut := fs.Bool("json", false, "print result as JSON")
 	fs.Var(&dirs, "dir", "session directory to scan; repeat to scan multiple directories")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: reasonix doctor redact-sessions [--dry-run] [--json] [--dir PATH]")

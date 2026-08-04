@@ -10,10 +10,108 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
+	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+func TestBackgroundFleetRegistersEveryWriterUntilCompletion(t *testing.T) {
+	root := t.TempDir()
+	prov := &fleetHoldProvider{started: make(chan struct{}, 2), release: make(chan struct{})}
+	store := checkpoint.New("", root)
+	observer := checkpoint.NewMutationObserver(checkpoint.ObserverOptions{Store: store})
+	task := NewTaskTool(prov, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(mustSubagentStore(t), root, "base", "high").
+		WithScheduler(NewSubagentScheduler(2, 2)).
+		WithMutationObserver(observer)
+	fleet := NewFleetTool(task)
+	manager := jobs.NewManager(event.Discard)
+	defer manager.Close()
+	ctx := withCallContext(context.Background(), "fleet-call", event.Discard, nil, false)
+	ctx = jobs.WithManager(ctx, manager)
+	ctx = jobs.WithSession(ctx, "parent-session")
+	args := json.RawMessage(`{
+		"run_in_background":true,
+		"tasks":[
+			{"prompt":"first","write_paths":["first.md"]},
+			{"prompt":"second","write_paths":["second.md"]}
+		]
+	}`)
+	if _, err := fleet.Execute(ctx, args); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case <-prov.started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for background fleet writer")
+		}
+	}
+	if writers := observer.ActiveWriters(); len(writers) != 3 {
+		t.Fatalf("active fleet writers = %+v, want two item writers plus one fleet reservation", writers)
+	}
+	running := manager.RunningForSession("parent-session")
+	if len(running) != 1 {
+		t.Fatalf("running fleet jobs = %+v, want 1", running)
+	}
+	close(prov.release)
+	result := manager.WaitForSession(context.Background(), "parent-session", []string{running[0].ID}, 5)
+	if len(result) != 1 || result[0].Status != jobs.Done {
+		t.Fatalf("background fleet result = %+v", result)
+	}
+	if writers := observer.ActiveWriters(); len(writers) != 0 {
+		t.Fatalf("fleet writers still registered after completion: %+v", writers)
+	}
+}
+
+func TestBackgroundFleetRegistersReservationWhileItemsAreQueued(t *testing.T) {
+	root := t.TempDir()
+	store := checkpoint.New("", root)
+	observer := checkpoint.NewMutationObserver(checkpoint.ObserverOptions{Store: store})
+	scheduler := NewSubagentScheduler(1, 1)
+	releaseSlot, err := scheduler.Acquire(context.Background(), AcquireRequest{Writer: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task := NewTaskTool(&mockProvider{name: "sub"}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(mustSubagentStore(t), root, "base", "high").
+		WithScheduler(scheduler).
+		WithMutationObserver(observer)
+	fleet := NewFleetTool(task)
+	manager := jobs.NewManager(event.Discard)
+	defer manager.Close()
+	ctx := withCallContext(context.Background(), "queued-fleet", event.Discard, nil, false)
+	ctx = jobs.WithManager(ctx, manager)
+	ctx = jobs.WithSession(ctx, "queued-session")
+	args := json.RawMessage(`{
+		"run_in_background":true,
+		"tasks":[
+			{"prompt":"first","write_paths":["first.md"]},
+			{"prompt":"second","write_paths":["second.md"]}
+		]
+	}`)
+	if _, err := fleet.Execute(ctx, args); err != nil {
+		t.Fatal(err)
+	}
+	writers := observer.ActiveWriters()
+	if len(writers) != 1 || writers[0].Kind != "background_fleet" {
+		t.Fatalf("queued fleet reservation = %+v, want one rewind exclusion", writers)
+	}
+	releaseSlot()
+	running := manager.RunningForSession("queued-session")
+	if len(running) != 1 {
+		t.Fatalf("running fleet jobs = %+v, want 1", running)
+	}
+	result := manager.WaitForSession(context.Background(), "queued-session", []string{running[0].ID}, 5)
+	if len(result) != 1 || result[0].Status != jobs.Done {
+		t.Fatalf("background fleet result = %+v, want one completed job", result)
+	}
+	if writers := observer.ActiveWriters(); len(writers) != 0 {
+		t.Fatalf("completed background fleet still registered: %+v", writers)
+	}
+}
 
 func TestFleetSchemaStableAndBounds(t *testing.T) {
 	f := NewFleetTool(&TaskTool{})
@@ -195,6 +293,22 @@ type fleetCancelProvider struct {
 	started  chan struct{}
 	observed chan struct{}
 	release  chan struct{}
+}
+
+type fleetHoldProvider struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (p *fleetHoldProvider) Name() string { return "fleet-hold" }
+
+func (p *fleetHoldProvider) Stream(_ context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	p.started <- struct{}{}
+	<-p.release
+	ch := make(chan provider.Chunk, 1)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
+	close(ch)
+	return ch, nil
 }
 
 func (p *fleetCancelProvider) Name() string { return "fleet-cancel" }

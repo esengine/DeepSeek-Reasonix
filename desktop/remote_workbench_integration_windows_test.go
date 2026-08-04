@@ -108,11 +108,15 @@ func TestRemoteWorkbenchWindowsToLinuxPhysicalAcceptance(t *testing.T) {
 
 	newClient := func(generation uint64) (*workbenchclient.Client, *windowsWorkbenchSSHFactory) {
 		t.Helper()
-		factory, factoryErr := newWindowsWorkbenchSSHFactoryForBinary(entry, "reasonix", func(context.Context, RemoteAskPassPrompt) (RemoteAskPassAnswer, error) {
+		genericFactory, factoryErr := newWindowsWorkbenchSSHFactoryForBinary(entry, "reasonix", func(context.Context, RemoteAskPassPrompt) (RemoteAskPassAnswer, error) {
 			return RemoteAskPassAnswer{}, fmt.Errorf("unexpected SSH prompt; acceptance fixture must provide a trusted host key and non-interactive identity")
 		})
 		if factoryErr != nil {
 			t.Fatal(factoryErr)
+		}
+		factory, ok := genericFactory.(*windowsWorkbenchSSHFactory)
+		if !ok {
+			t.Fatalf("Windows Workbench factory = %T, want *windowsWorkbenchSSHFactory", genericFactory)
 		}
 		brokerOpts := remotebroker.Options{
 			Catalog: func(context.Context, map[string]struct{}) ([]protocol.BrokerProviderDescriptor, error) {
@@ -153,12 +157,31 @@ func TestRemoteWorkbenchWindowsToLinuxPhysicalAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	profile := subscribed.Snapshot.Meta.ResolvedProfile
+	emptyGoal := ""
+	for attempt := 0; attempt < 2; attempt++ {
+		result, setErr := client.SetProfile(ctx, protocol.ProfilePatch{
+			CollaborationMode: &profile.CollaborationMode,
+			ToolApprovalMode:  &profile.ToolApprovalMode,
+			Goal:              &emptyGoal,
+		})
+		if setErr != nil {
+			t.Fatal(setErr)
+		}
+		if result.Disposition != protocol.ProfileUnchanged || result.RuntimeEpoch != subscribed.Snapshot.RuntimeEpoch {
+			t.Fatalf("idempotent profile attempt %d = disposition %q epoch %q, want unchanged/%q", attempt+1, result.Disposition, result.RuntimeEpoch, subscribed.Snapshot.RuntimeEpoch)
+		}
+		if !client.IsCurrentSnapshot(subscribed) {
+			t.Fatalf("idempotent profile attempt %d invalidated the current snapshot", attempt+1)
+		}
+	}
 	if _, err := client.Submit(ctx, "read the physical acceptance marker"); err != nil {
 		t.Fatal(err)
 	}
 
 	firstRequest := receiveRemoteWorkbenchAcceptanceRequest(t, ctx, providerStub.requests)
-	if len(firstRequest.Messages) == 0 || firstRequest.Messages[len(firstRequest.Messages)-1].Content != "read the physical acceptance marker" {
+	if len(firstRequest.Messages) == 0 || firstRequest.Messages[len(firstRequest.Messages)-1].Role != provider.RoleUser ||
+		!strings.Contains(firstRequest.Messages[len(firstRequest.Messages)-1].Content, "read the physical acceptance marker") {
 		t.Fatalf("initial Broker request lost the user prompt: %+v", firstRequest.Messages)
 	}
 	secondRequest := receiveRemoteWorkbenchAcceptanceRequest(t, ctx, providerStub.requests)

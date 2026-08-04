@@ -83,6 +83,11 @@ reasonix doctor capabilities | sed -n '/Hooks/,/Plugins/p'
 `mcp.start_failed`、`mcp.no_tools`。桌面端更推荐 **设置 → 诊断** 打开
 「包含当前会话运行状态」——只读取**活动标签 Host**，不会再起第二个 Host。
 
+每个 MCP 条目通过 `source`、`source_path` 和 `effective` 标明真正生效的配置及其来源。
+启动失败还会报告 `startup_stage`（`launch`、`authorization`、`initialize` 或
+`tools/list`）、`startup_elapsed_ms`，以及有长度上限且已做凭据脱敏的 `stderr` 尾部。
+这可以区分重复/被覆盖的注册与真正缓慢或失败的握手，同时不会暴露完整进程输出。
+
 ### 4. 让 Agent 按手册排查（`reasonix-guide`）
 
 交互式会话中：

@@ -51,6 +51,7 @@ func TestStreamReconnectsOnEarlyConnReset(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"recovered\"}}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n")
 		_, _ = io.WriteString(w, "data: [DONE]\n\n")
 	}))
 	defer srv.Close()
@@ -65,6 +66,7 @@ func TestStreamReconnectsOnEarlyConnReset(t *testing.T) {
 	}
 
 	var text strings.Builder
+	var usage *provider.Usage
 	for chunk := range ch {
 		if chunk.Type == provider.ChunkError {
 			t.Fatalf("early conn reset should be replayed, not surfaced: %v", chunk.Err)
@@ -72,12 +74,18 @@ func TestStreamReconnectsOnEarlyConnReset(t *testing.T) {
 		if chunk.Type == provider.ChunkText {
 			text.WriteString(chunk.Text)
 		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
 	}
 	if text.String() != "recovered" {
 		t.Errorf("text = %q, want %q", text.String(), "recovered")
 	}
 	if reqs != 2 {
 		t.Errorf("server saw %d requests, want 2 (one reset + one replay)", reqs)
+	}
+	if usage == nil || usage.RequestCount != 2 {
+		t.Errorf("usage request count = %+v, want 2", usage)
 	}
 }
 

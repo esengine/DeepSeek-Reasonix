@@ -66,15 +66,38 @@ ok(
   "DeepSeek Anthropic preset uses a localized description",
 );
 ok(
+  /case "token-rhythm":\s*return t\("settings\.addProvider\.preset\.tokenRhythmDesc"\)/.test(settingsSource) &&
+    /preset\.id === "token-rhythm"\) return t\("settings\.addProvider\.preset\.tokenRhythmLabel"\)/.test(settingsSource),
+  "Token Rhythm preset localizes the English and Chinese brand names",
+);
+ok(
   [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
     source.includes('"settings.addProvider.preset.deepseekResponsesDesc"') &&
-    source.includes('"settings.addProvider.preset.deepseekAnthropicDesc"'),
+    source.includes('"settings.addProvider.preset.deepseekAnthropicDesc"') &&
+    source.includes('"settings.addProvider.preset.tokenRhythmLabel"') &&
+    source.includes('"settings.addProvider.preset.tokenRhythmDesc"'),
   ),
-  "DeepSeek protocol preset descriptions are present in every supported locale",
+  "provider preset localization is present in every supported locale",
+);
+ok(
+  enLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "Token Rhythm"') &&
+    zhLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "基元律动"') &&
+    zhTWLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "基元律动"'),
+  "Token Rhythm preset uses the official English and Chinese brand names",
+);
+ok(
+  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+    source.includes('"settings.reasoningProtocol.glm"'),
+  ),
+  "GLM reasoning protocol is localized in every supported locale",
 );
 ok(
   /mockPreset\("deepseek-anthropic",\s*"DeepSeek Anthropic"/.test(bridgeSource),
   "browser mock exposes the DeepSeek Anthropic preset",
+);
+ok(
+  /mockPreset\("token-rhythm",\s*"Token Rhythm"/.test(bridgeSource),
+  "browser mock exposes the Token Rhythm preset",
 );
 ok(
   /function mockProviderPresetDisplayRank\(id: string\): number \{\s*if \(id === "deepseek-responses"\) return -1;\s*if \(id === "deepseek-anthropic"\) return 0;/.test(bridgeSource),

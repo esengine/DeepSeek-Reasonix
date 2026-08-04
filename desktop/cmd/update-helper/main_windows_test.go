@@ -12,10 +12,26 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/installlayout"
 	"reasonix/internal/repair"
 )
 
 const testInstallerSHA256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+func prepareLegacyWindowsUpdate(t *testing.T, installDir, toVersion string) *repair.UpdateTransaction {
+	t.Helper()
+	paths := windowsReleaseUnitPaths(installDir)
+	for _, path := range paths {
+		if err := os.WriteFile(path, []byte("old-"+filepath.Base(path)), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := repair.PrepareFileUpdate("v1", toVersion, paths[0], paths[1:]...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tx
+}
 
 func TestStageVerifiedInstallerFreezesExpectedBytes(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "installer.exe")
@@ -72,8 +88,86 @@ func TestRunRequiresTargetVersionBeforeStartingInstaller(t *testing.T) {
 	}
 }
 
-func TestRunHoldsReleaseUnitLockAcrossInstallerHandoff(t *testing.T) {
+func TestRunVersionedLayoutDoesNotReadOrClaimLegacyPending(t *testing.T) {
 	installDir := t.TempDir()
+	seed := t.TempDir()
+	for _, name := range []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe"} {
+		if err := os.WriteFile(filepath.Join(seed, name), []byte("old-"+name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := installlayout.ActivateVersion(installlayout.ActivationRequest{
+		InstallRoot: installDir,
+		Version:     "v1.20.0",
+		RequestID:   "seed-windows-helper",
+		Members: []installlayout.Member{
+			{Name: "reasonix-desktop.exe", Path: filepath.Join(seed, "reasonix-desktop.exe")},
+			{Name: "reasonix-cli.exe", Path: filepath.Join(seed, "reasonix-cli.exe")},
+			{Name: "reasonix-update-helper.exe", Path: filepath.Join(seed, "reasonix-update-helper.exe")},
+		},
+		RequiredNames: []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	originalInstaller := runInstallerFn
+	originalRelaunch := startRelaunchFn
+	originalClaim := claimPendingFileUpdateFn
+	originalStageInstaller := stageInstallerFn
+	originalClaimInstallerExecution := claimInstallerExecutionFn
+	t.Cleanup(func() {
+		runInstallerFn = originalInstaller
+		startRelaunchFn = originalRelaunch
+		claimPendingFileUpdateFn = originalClaim
+		stageInstallerFn = originalStageInstaller
+		claimInstallerExecutionFn = originalClaimInstallerExecution
+	})
+	legacyClaimed := false
+	claimPendingFileUpdateFn = func(string, string, string, string, []string, time.Duration) (*repair.UpdateTransaction, func(), error) {
+		legacyClaimed = true
+		return nil, func() {}, errors.New("legacy claim must not run")
+	}
+	stageInstallerFn = func(path, _ string) (string, func() error, error) {
+		return path, func() error { return nil }, nil
+	}
+	claimInstallerExecutionFn = func(string, string) (func(), error) { return func() {}, nil }
+	runInstallerFn = func(_ string, staging string) error {
+		for _, name := range []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe", "reasonix-launcher.exe"} {
+			if err := os.WriteFile(filepath.Join(staging, name), []byte("new-"+name), 0o700); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	relaunched := false
+	startRelaunchFn = func(string, string) error { relaunched = true; return nil }
+
+	if code := run([]string{
+		"--installer", filepath.Join(installDir, "installer.exe"),
+		"--installer-sha256", testInstallerSHA256,
+		"--install-dir", installDir,
+		"--relaunch", filepath.Join(installDir, "reasonix-launcher.exe"),
+		"--to-version", "v1.20.1",
+		"--install-layout", "versioned-v1",
+	}); code != 0 {
+		t.Fatalf("run exit code = %d", code)
+	}
+	if legacyClaimed {
+		t.Fatal("versioned update claimed legacy pending transaction")
+	}
+	if !relaunched {
+		t.Fatal("versioned update did not relaunch")
+	}
+	ptr, err := installlayout.ReadCurrent(installDir)
+	if err != nil || ptr.ActiveVersion != "v1.20.1" {
+		t.Fatalf("pointer=%+v err=%v", ptr, err)
+	}
+}
+
+func TestRunHoldsReleaseUnitLockAcrossInstallerHandoff(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	installDir := t.TempDir()
+	pending := prepareLegacyWindowsUpdate(t, installDir, "v2")
 	var events []string
 	originalWait := waitForProcessExitFn
 	originalInstaller := runInstallerFn
@@ -107,11 +201,11 @@ func TestRunHoldsReleaseUnitLockAcrossInstallerHandoff(t *testing.T) {
 	}
 	claimPendingFileUpdateFn = func(toVersion, createdAt, transactionID, launcherPath string, paths []string, _ time.Duration) (*repair.UpdateTransaction, func(), error) {
 		events = append(events, "claim:"+strings.Join([]string{toVersion, createdAt, transactionID, launcherPath, strings.Join(paths, "\x00")}, "\x01"))
-		return &repair.UpdateTransaction{}, func() { events = append(events, "release") }, nil
+		return pending, func() { events = append(events, "release") }, nil
 	}
 	installStagedReleaseUnitFn = func(*repair.UpdateTransaction, string) (bool, []repair.FileUpdateInstallReceipt, error) {
 		events = append(events, "publish")
-		return true, nil, nil
+		return true, []repair.FileUpdateInstallReceipt{}, nil
 	}
 	recordInstalledUpdateFn = func(tx *repair.UpdateTransaction, _ ...repair.FileUpdateInstallReceipt) (*repair.UpdateTransaction, error) {
 		events = append(events, "record-installed")
@@ -132,16 +226,16 @@ func TestRunHoldsReleaseUnitLockAcrossInstallerHandoff(t *testing.T) {
 		"--installer-sha256", testInstallerSHA256,
 		"--install-dir", installDir,
 		"--relaunch", filepath.Join(installDir, "reasonix-desktop.exe"),
-		"--to-version", "v2",
-		"--created-at", "2026-07-29T00:00:00Z",
-		"--transaction-id", "transaction-1",
+		"--to-version", pending.ToVersion,
+		"--created-at", pending.CreatedAt,
+		"--transaction-id", repair.UpdateTransactionID(pending),
 	}); code != 0 {
 		t.Fatalf("run exit code = %d", code)
 	}
 	wantClaim := "claim:" + strings.Join([]string{
-		"v2",
-		"2026-07-29T00:00:00Z",
-		"transaction-1",
+		pending.ToVersion,
+		pending.CreatedAt,
+		repair.UpdateTransactionID(pending),
 		filepath.Join(installDir, "reasonix-desktop.exe"),
 		strings.Join(windowsReleaseUnitPaths(installDir), "\x00"),
 	}, "\x01")
@@ -197,6 +291,44 @@ func TestRunDoesNotClaimUpdateBeforeParentExits(t *testing.T) {
 	}
 }
 
+func TestRunRelaunchesWhenLegacyPendingCannotBeClaimed(t *testing.T) {
+	installDir := t.TempDir()
+	originalWait := waitForProcessExitFn
+	originalRelaunch := startRelaunchFn
+	originalClaim := claimPendingFileUpdateFn
+	t.Cleanup(func() {
+		waitForProcessExitFn = originalWait
+		startRelaunchFn = originalRelaunch
+		claimPendingFileUpdateFn = originalClaim
+	})
+
+	waitForProcessExitFn = func(uint32, time.Duration) error { return nil }
+	relaunched := false
+	startRelaunchFn = func(path, dir string) error {
+		relaunched = path == filepath.Join(installDir, "reasonix-desktop.exe") && dir == installDir
+		return nil
+	}
+	claimPendingFileUpdateFn = func(string, string, string, string, []string, time.Duration) (*repair.UpdateTransaction, func(), error) {
+		return nil, nil, errors.New("pending lock unavailable")
+	}
+
+	if code := run([]string{
+		"--parent-pid", "1234",
+		"--installer", filepath.Join(installDir, "installer.exe"),
+		"--installer-sha256", testInstallerSHA256,
+		"--install-dir", installDir,
+		"--relaunch", filepath.Join(installDir, "reasonix-desktop.exe"),
+		"--to-version", "v2",
+		"--created-at", "2026-08-02T00:00:00Z",
+		"--transaction-id", strings.Repeat("a", 64),
+	}); code != 1 {
+		t.Fatalf("run exit code = %d, want 1", code)
+	}
+	if !relaunched {
+		t.Fatal("helper did not relaunch the existing desktop")
+	}
+}
+
 func TestRunCancelsTransactionWhenStagedExtractionFails(t *testing.T) {
 	t.Setenv("REASONIX_HOME", t.TempDir())
 	installDir := t.TempDir()
@@ -221,12 +353,7 @@ func TestRunCancelsTransactionWhenStagedExtractionFails(t *testing.T) {
 	waitForProcessExitFn = func(uint32, time.Duration) error { return nil }
 	runInstallerFn = func(string, string) error { return errors.New("installer failed") }
 	startRelaunchFn = func(string, string) error { return nil }
-	claimed := &repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v2",
-		CreatedAt:     "2026-07-29T00:00:00Z",
-		TargetKind:    "file",
-	}
+	claimed := prepareLegacyWindowsUpdate(t, installDir, "v2")
 	claimPendingFileUpdateFn = func(string, string, string, string, []string, time.Duration) (*repair.UpdateTransaction, func(), error) {
 		return claimed, func() {}, nil
 	}
@@ -236,7 +363,6 @@ func TestRunCancelsTransactionWhenStagedExtractionFails(t *testing.T) {
 	claimInstallerExecutionFn = func(string, string) (func(), error) {
 		return func() {}, nil
 	}
-	const createdAt = "2026-07-29T00:00:00Z"
 	transactionID := repair.UpdateTransactionID(claimed)
 	if code := run([]string{
 		"--installer", filepath.Join(installDir, "installer.exe"),
@@ -244,7 +370,7 @@ func TestRunCancelsTransactionWhenStagedExtractionFails(t *testing.T) {
 		"--install-dir", installDir,
 		"--relaunch", filepath.Join(installDir, "reasonix-desktop.exe"),
 		"--to-version", "v2",
-		"--created-at", createdAt,
+		"--created-at", claimed.CreatedAt,
 		"--transaction-id", transactionID,
 	}); code != 1 {
 		t.Fatalf("run exit code = %d, want 1", code)
@@ -280,12 +406,7 @@ func TestRunTreatsInstalledReleaseUnitRecordingFailureAsApplyFailure(t *testing.
 		relaunched = true
 		return nil
 	}
-	claimed := &repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v2",
-		CreatedAt:     "2026-07-29T00:00:00Z",
-		TargetKind:    "file",
-	}
+	claimed := prepareLegacyWindowsUpdate(t, installDir, "v2")
 	claimPendingFileUpdateFn = func(string, string, string, string, []string, time.Duration) (*repair.UpdateTransaction, func(), error) {
 		return claimed, func() {}, nil
 	}
@@ -296,7 +417,11 @@ func TestRunTreatsInstalledReleaseUnitRecordingFailureAsApplyFailure(t *testing.
 		return func() {}, nil
 	}
 	installStagedReleaseUnitFn = func(*repair.UpdateTransaction, string) (bool, []repair.FileUpdateInstallReceipt, error) {
-		return true, nil, nil
+		return true, []repair.FileUpdateInstallReceipt{{
+			UpdateTransactionID: repair.UpdateTransactionID(claimed),
+			TargetPath:          claimed.TargetPath,
+			InstalledStateID:    "installed",
+		}}, nil
 	}
 	recordInstalledUpdateFn = func(*repair.UpdateTransaction, ...repair.FileUpdateInstallReceipt) (*repair.UpdateTransaction, error) {
 		return nil, errors.New("release unit drifted")
@@ -351,12 +476,7 @@ func TestRunRelaunchesWhenStagingIdentityCannotBeBound(t *testing.T) {
 		relaunched = true
 		return nil
 	}
-	claimed := &repair.UpdateTransaction{
-		SchemaVersion: 1,
-		ToVersion:     "v2",
-		CreatedAt:     "2026-07-29T00:00:00Z",
-		TargetKind:    "file",
-	}
+	claimed := prepareLegacyWindowsUpdate(t, installDir, "v2")
 	releases := 0
 	claimPendingFileUpdateFn = func(string, string, string, string, []string, time.Duration) (*repair.UpdateTransaction, func(), error) {
 		return claimed, func() { releases++ }, nil

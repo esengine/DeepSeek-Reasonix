@@ -28,6 +28,23 @@ var ReadOnlyCommands = map[string]bool{
 	"man": true, "info": true, "help": true,
 	"true": true, "false": true, "test": true, "[": true,
 	"basename": true, "dirname": true, "realpath": true, "readlink": true,
+	// PowerShell inspection cmdlets. Keep this list intentionally narrow: only
+	// cmdlets whose verb is intrinsically observational belong here. The parser
+	// still rejects pipelines, substitutions, redirections, and command chains.
+	"get-childitem": true, "get-content": true, "get-item": true,
+	"get-location": true, "get-process": true, "get-command": true,
+	"get-nettcpconnection": true,
+	"resolve-path":         true, "select-string": true, "measure-object": true,
+	"compare-object": true,
+}
+
+// workspaceNonMutatingCommands holds commands that do not write workspace
+// state but are not safe to auto-allow as permission-layer readers. Keep this
+// separate from ReadOnlyCommands: Test-NetConnection performs network I/O and
+// must still pass through the user's permission policy even though Delivery
+// does not need to serialize it behind the workspace writer.
+var workspaceNonMutatingCommands = map[string]bool{
+	"test-netconnection": true,
 }
 
 // ReadOnlyPrefixes maps a base command to the set of subcommands (the second
@@ -96,6 +113,25 @@ func CommandIsReadOnly(command string) (base, sub string, ok bool) {
 				return base, sub, true
 			}
 		}
+	}
+	return "", "", false
+}
+
+// CommandIsWorkspaceNonMutating reports commands that Delivery can execute
+// without acquiring the workspace writer. Permission-safe readers are a
+// subset; network probes live only in workspaceNonMutatingCommands so this
+// classification cannot silently widen approval or read-only subagent access.
+func CommandIsWorkspaceNonMutating(command string) (base, sub string, ok bool) {
+	if base, sub, ok = CommandIsReadOnly(command); ok {
+		return base, sub, true
+	}
+	fields, malformed := shellparse.StaticFields(command)
+	if malformed != "" || len(fields) == 0 {
+		return "", "", false
+	}
+	base = strings.ToLower(fields[0])
+	if workspaceNonMutatingCommands[base] {
+		return base, "", true
 	}
 	return "", "", false
 }

@@ -12,10 +12,11 @@ import {
   providerBaseURLFromChatURL,
   providerChatURLPreview,
   providerEditorEffectiveKind,
+  normalizeProviderView,
 } from "../components/SettingsPanel";
 import { LocaleProvider } from "../lib/i18n";
 import type { AppBindings } from "../lib/bridge";
-import type { SettingsView } from "../lib/types";
+import type { ProviderView, SettingsView } from "../lib/types";
 import {
   applyTypographyPreferences,
   createDefaultTypographyPreferences,
@@ -83,7 +84,7 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     permissions: { mode: "ask", allow: [], ask: [], deny: [] },
     sandbox: { bash: "enforce", network: false, workspaceRoot: "", allowWrite: [], effectiveWorkspaceRoot: "/work", effectiveWriteRoots: ["/work"], shell: "auto" },
     network: { proxyMode: "auto", proxyUrl: "", noProxy: "", proxy: { type: "socks5", server: "", port: 0, username: "", password: "" } },
-    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto" },
+    agent: { temperature: 0, maxSteps: 0, plannerMaxSteps: 0, maxSubagentDepth: 2, maxSubagentConcurrency: 6, maxParallelWriters: 3, systemPrompt: "", coldResumePrune: true, reasoningLanguage: "auto", compactRatio: 0.8 },
     bot: {
       enabled: false,
       model: "",
@@ -133,6 +134,7 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
     desktopLayoutStyle: "workbench",
     desktopTheme: "auto",
     desktopThemeStyle: "graphite",
+    desktopTerminalTheme: "auto",
     closeBehavior: "background",
     displayMode,
     statusBarStyle: "text",
@@ -150,6 +152,20 @@ function baseSettings(displayMode: "standard" | "compact" = "standard"): Setting
 }
 
 console.log("\nsettings refresh snapshot");
+
+const nullableProvider = normalizeProviderView({
+  name: null,
+  baseUrl: null,
+} as unknown as ProviderView);
+eq(nullableProvider.name, "", "provider snapshots normalize a null name at the settings boundary");
+eq(nullableProvider.baseUrl, "", "provider snapshots normalize a null base URL at the settings boundary");
+
+const glmProvider = normalizeProviderView({
+  name: "custom-glm",
+  baseUrl: "https://gateway.example.com/v1",
+  reasoningProtocol: "glm",
+} as ProviderView);
+eq(glmProvider.reasoningProtocol, "glm", "provider snapshots preserve the explicit GLM reasoning protocol");
 
 eq(providerEditorEffectiveKind(true, "anthropic", ["anthropic", "openai"]), "anthropic", "new custom providers keep the selected Anthropic-compatible kind");
 eq(providerEditorEffectiveKind(false, "anthropic", ["anthropic", "openai"]), "anthropic", "existing providers preserve their stored kind");
@@ -190,6 +206,11 @@ const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body>
   pretendToBeVisual: true,
   url: "http://localhost/",
 });
+// React's legacy input-event fallback expects these IE hooks when JSDOM does
+// not expose native input event support. The custom threshold editor focuses
+// its input on open, so keep that production behavior testable without noise.
+Object.defineProperty(dom.window.HTMLElement.prototype, "attachEvent", { configurable: true, value: () => {} });
+Object.defineProperty(dom.window.HTMLElement.prototype, "detachEvent", { configurable: true, value: () => {} });
 installCanvasMock(dom.window as unknown as Window);
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
@@ -272,6 +293,160 @@ ok(onChangedSettings?.displayMode === "compact", "onChanged receives the post-sa
 
 await act(async () => {
   root.unmount();
+});
+
+// Models > Agent runtime: the compaction preference is directly visible, shows
+// the effective token threshold, and reloads the persisted Settings snapshot.
+const compactRootEl = document.createElement("div");
+document.body.appendChild(compactRootEl);
+const compactRoot = createRoot(compactRootEl);
+let compactSettings = baseSettings("standard");
+delete compactSettings.agent.compactRatio; // Old backends omit the additive field.
+compactSettings.agent.effectiveCompactRatio = 0.75;
+compactSettings.agent.compactRatioOverridden = true;
+compactSettings.agent.compactRatioRemote = true;
+compactSettings.defaultModel = "context-provider/context-model";
+compactSettings.providers = [{
+  name: "context-provider",
+  builtIn: false,
+  added: true,
+  kind: "openai",
+  baseUrl: "https://context.example.com/v1",
+  chatUrl: "",
+  models: ["context-model"],
+  visionModels: [],
+  visionModelsConfigured: false,
+  modelsUrl: "",
+  default: "context-model",
+  apiKeyEnv: "",
+  keySet: false,
+  requiresKey: false,
+  configured: true,
+  balanceUrl: "",
+  contextWindow: 100_000,
+  reasoningProtocol: "",
+  thinking: "",
+  supportedEfforts: [],
+  defaultEffort: "",
+  modelOverrides: [],
+}];
+let compactRatioCalls: number[] = [];
+window.go = {
+  main: {
+    App: {
+      Settings: async () => compactSettings,
+      FetchAllProviderModels: async () => ({}),
+      SetCompactRatio: async (ratio: number) => {
+        compactRatioCalls.push(ratio);
+        compactSettings = { ...compactSettings, agent: { ...compactSettings.agent, compactRatio: ratio } };
+      },
+    } as Partial<AppBindings> as AppBindings,
+  },
+};
+
+await act(async () => {
+  compactRoot.render(
+    <LocaleProvider>
+      <SettingsPanel initialTab="models" desktopPlatform="linux" onClose={() => {}} onChanged={() => {}} />
+    </LocaleProvider>,
+  );
+  await flushPromises();
+});
+ok(compactRootEl.textContent?.includes("Advanced context management") === false, "compaction preference has no redundant advanced disclosure");
+ok(compactRootEl.textContent?.includes("Automatic compaction threshold") === true, "compaction preference is visible without expanding a disclosure");
+ok(compactRootEl.textContent?.includes("80,000 tokens") === true, "compact ratio shows the default model token threshold");
+ok(compactRootEl.textContent?.includes("Current threshold: 80% · Balanced") === true, "compact ratio summarizes the saved preset separately");
+ok(compactRootEl.textContent?.includes("effective threshold is 75%") === true, "project override shows the active effective threshold");
+ok(compactRootEl.textContent?.includes("changes only the local default") === true, "remote workbench scope is explicit");
+ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "custom compact ratio editor stays hidden on the default path");
+const balancedCompactButton = compactRootEl.querySelector('button[aria-label="80% · Balanced"]') as HTMLButtonElement | null;
+if (!balancedCompactButton) throw new Error("balanced compaction preset did not render");
+ok(balancedCompactButton.getAttribute("aria-pressed") === "true", "saved compact ratio starts selected");
+const customCompactButton = Array.from(compactRootEl.querySelectorAll("button")).find((button) => button.textContent?.includes("Custom threshold…")) as HTMLButtonElement | undefined;
+if (!customCompactButton) throw new Error("custom compaction threshold option did not render");
+ok(customCompactButton.closest(".compact-ratio-presets") === null, "custom compaction is a separate disclosure rather than a preset value");
+ok(customCompactButton.hasAttribute("aria-pressed") === false, "custom disclosure does not announce a saved selection state");
+await act(async () => {
+  customCompactButton.click();
+  await flushPromises();
+});
+let customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
+if (!customCompactInput) throw new Error("custom compaction threshold input did not open");
+eq(customCompactInput.value, "80", "custom compaction threshold defaults older backends to 80 percent");
+ok(compactRootEl.textContent?.includes("Tool output is trimmed at 60%") === true, "custom compact ratio explains the lower guard rail");
+ok(compactRootEl.textContent?.includes("90% forces compaction") === true, "custom compact ratio explains the upper guard rail");
+ok(document.activeElement === customCompactInput, "opening the custom compact ratio moves focus to its input");
+ok(customCompactButton.getAttribute("aria-expanded") === "true", "custom compact ratio exposes its expanded state");
+ok(balancedCompactButton.getAttribute("aria-pressed") === "true", "opening custom editing preserves the saved preset selection");
+const customCompactApply = Array.from(customCompactInput.closest(".compact-ratio-custom")?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Apply") as HTMLButtonElement | undefined;
+if (!customCompactApply) throw new Error("custom compaction threshold apply action did not render");
+const inputValueSetter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")?.set;
+const setCustomCompactInput = (input: HTMLInputElement, value: string) => {
+  const previous = input.value;
+  inputValueSetter?.call(input, value);
+  (input as HTMLInputElement & { _valueTracker?: { setValue: (next: string) => void } })._valueTracker?.setValue(previous);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+};
+await act(async () => {
+  setCustomCompactInput(customCompactInput, "64");
+  await flushPromises();
+});
+ok(customCompactApply.disabled, "out-of-range custom compact ratio cannot be applied");
+eq(compactRatioCalls.length, 0, "editing a custom compact ratio does not save eagerly");
+await act(async () => {
+  setCustomCompactInput(customCompactInput, "75");
+  await flushPromises();
+});
+ok(!customCompactApply.disabled, "valid custom compact ratio enables explicit apply");
+await act(async () => {
+  customCompactApply.click();
+  await flushPromises();
+});
+eq(compactRatioCalls.length, 1, "custom compact ratio mutation is invoked once after apply");
+eq(compactRatioCalls[0], 0.75, "custom compact ratio converts percentage to fraction");
+ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "successful custom compact ratio apply collapses the editor");
+ok(compactRootEl.textContent?.includes("Current threshold: 75% · Custom") === true, "saved custom compact ratio is summarized independently from the disclosure");
+ok(customCompactButton.textContent?.includes("Custom threshold…") === true, "custom disclosure keeps an action label after saving");
+await act(async () => {
+  customCompactButton.click();
+  await flushPromises();
+});
+customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
+if (!customCompactInput) throw new Error("saved custom compaction threshold did not reopen");
+await act(async () => {
+  setCustomCompactInput(customCompactInput, "74");
+  customCompactInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await flushPromises();
+});
+eq(compactRatioCalls.length, 1, "Escape cancels a custom compact ratio without saving");
+ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "Escape collapses the custom compact ratio editor");
+await act(async () => {
+  customCompactButton.click();
+  await flushPromises();
+});
+customCompactInput = compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') as HTMLInputElement | null;
+if (!customCompactInput) throw new Error("custom compaction threshold did not reopen for cancel");
+const customCompactCancel = Array.from(customCompactInput.closest(".compact-ratio-custom")?.querySelectorAll("button") ?? []).find((button) => button.textContent === "Cancel") as HTMLButtonElement | undefined;
+if (!customCompactCancel) throw new Error("custom compaction threshold cancel action did not render");
+await act(async () => {
+  customCompactCancel.click();
+  await flushPromises();
+});
+eq(compactRatioCalls.length, 1, "Cancel closes a custom compact ratio without saving");
+ok(compactRootEl.querySelector('input[aria-label="Custom compaction threshold percentage"]') === null, "Cancel collapses the custom compact ratio editor");
+const earlierCompactButton = compactRootEl.querySelector('button[aria-label="70% · Earlier"]') as HTMLButtonElement | null;
+if (!earlierCompactButton) throw new Error("earlier compaction preset did not render");
+await act(async () => {
+  earlierCompactButton.click();
+  await flushPromises();
+});
+eq(compactRatioCalls.length, 2, "compact ratio preset adds one mutation");
+eq(compactRatioCalls[1], 0.7, "compact ratio preset sends the expected fraction");
+ok(earlierCompactButton.getAttribute("aria-pressed") === "true", "saved compact ratio is selected after Settings reload");
+
+await act(async () => {
+  compactRoot.unmount();
 });
 
 const retryRootEl = document.createElement("div");

@@ -15,13 +15,15 @@ import (
 
 // rewindPicker is the in-chat overlay for Esc-Esc / "/rewind". Stage 0 lists the
 // session's turns (one checkpoint each); stage 1 picks what to restore for the
-// chosen turn. It mirrors the chooser overlay: keys route through handleRewindKey
+// chosen turn; stage 2 explicitly confirms file restore when checkpoint coverage
+// is partial. It mirrors the chooser overlay: keys route through handleRewindKey
 // and it renders via renderRewind while m.rewind is set.
 type rewindPicker struct {
-	metas []checkpoint.Meta
-	sel   int // selected turn (index into metas)
-	stage int // 0 = pick turn, 1 = pick scope
-	scope int // index into rewindScopes (stage 1)
+	metas       []checkpoint.Meta
+	sel         int // selected turn (index into metas)
+	stage       int // 0 = pick turn, 1 = pick scope, 2 = confirm partial coverage
+	scope       int // index into rewindActions (stage 1)
+	pendingPlan checkpoint.RewindPlan
 }
 
 var rewindActions = []struct {
@@ -51,9 +53,13 @@ func (m chatTUI) handleRewindKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	r := m.rewind
 	switch msg.String() {
 	case "esc":
-		if r.stage == 1 {
+		switch r.stage {
+		case 2:
+			r.stage = 1
+			r.pendingPlan = checkpoint.RewindPlan{}
+		case 1:
 			r.stage = 0
-		} else {
+		default:
 			m.rewind = nil
 		}
 	case "up", "k":
@@ -73,10 +79,17 @@ func (m chatTUI) handleRewindKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			r.scope++
 		}
 	case "enter":
-		if r.stage == 0 {
+		switch r.stage {
+		case 0:
 			r.stage = 1
-		} else {
+		case 1:
 			return m.applyRewind()
+		default:
+			return m.commitPreparedRewind()
+		}
+	case "y":
+		if r.stage == 2 {
+			return m.commitPreparedRewind()
 		}
 	case "b":
 		if r.stage == 1 {
@@ -116,24 +129,73 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 	r := m.rewind
 	meta := r.metas[r.sel]
 	act := rewindActions[r.scope]
-	m.rewind = nil
-	// The controller emits a notice for the outcome (success or failure) of each of
-	// these, so the picker doesn't add its own — it would double on the CLI.
+	// The controller emits notices for operation errors and committed rewinds.
+	// A prepared-but-disabled plan has no controller error, so this picker reports
+	// that precheck result itself below.
 	switch act.kind {
 	case "fork":
+		m.rewind = nil
 		if _, err := m.ctrl.Fork(meta.Turn); err == nil {
 			m.followSessionLease()
 			m.replayActiveBranch(fmt.Sprintf("branched from turn %d", meta.Turn+1))
 		}
 		return m, nil // the branch is a new session
 	case "summ-from":
+		m.rewind = nil
 		_ = m.ctrl.SummarizeFrom(context.Background(), meta.Turn)
 		return m, nil
 	case "summ-upto":
+		m.rewind = nil
 		_ = m.ctrl.SummarizeUpTo(context.Background(), meta.Turn)
 		return m, nil
 	}
-	if err := m.ctrl.Rewind(meta.Turn, act.scope); err != nil {
+	plan, err := m.ctrl.PrepareRewind(meta.Turn, act.scope)
+	if err != nil {
+		m.rewind = nil
+		return m, nil
+	}
+	if !rewindPlanCanApply(plan) {
+		reason := strings.TrimSpace(plan.DisabledReason)
+		if reason == "" {
+			reason = "precheck failed"
+		}
+		m.notice(fmt.Sprintf(i18n.M.RewindUnavailableFmt, reason))
+		m.rewind = nil
+		return m, nil
+	}
+	if control.RewindPlanRequiresConfirmation(plan) {
+		r.pendingPlan = plan
+		r.stage = 2
+		return m, nil
+	}
+	r.pendingPlan = plan
+	return m.commitPreparedRewind()
+}
+
+func rewindPlanCanApply(plan checkpoint.RewindPlan) bool {
+	switch plan.Scope {
+	case checkpoint.RewindCode:
+		return plan.CanFiles
+	case checkpoint.RewindConversation:
+		return plan.CanConversation
+	case checkpoint.RewindBoth:
+		return plan.CanFiles && plan.CanConversation
+	default:
+		return false
+	}
+}
+
+func (m chatTUI) commitPreparedRewind() (tea.Model, tea.Cmd) {
+	r := m.rewind
+	if r == nil || r.pendingPlan.PlanID == "" {
+		return m, nil
+	}
+	meta := r.metas[r.sel]
+	scope := control.RewindScope(r.pendingPlan.Scope)
+	planID := r.pendingPlan.PlanID
+	m.rewind = nil
+	result, err := m.ctrl.CommitRewind(planID)
+	if err != nil || !result.OK {
 		return m, nil
 	}
 	// The controller emits a notice marking the rewind point; the committed
@@ -141,7 +203,7 @@ func (m chatTUI) applyRewind() (tea.Model, tea.Cmd) {
 	// conversation/both rewind we prefill the composer with that turn's prompt to
 	// re-send or edit — Claude Code's behavior — while the model's context is
 	// truncated underneath.
-	if act.scope != control.RewindCode && strings.TrimSpace(meta.Prompt) != "" {
+	if scope != control.RewindCode && strings.TrimSpace(meta.Prompt) != "" {
 		m.input.SetValue(meta.Prompt)
 		m.growInputToFit()
 	}
@@ -164,6 +226,13 @@ func (m chatTUI) renderRewind() string {
 		return choicePanelStyle.Width(w).Render(b.String())
 	}
 	meta := r.metas[r.sel]
+	if r.stage == 2 {
+		b.WriteString(accent(i18n.M.RewindCoverageTitle) + "\n")
+		b.WriteString(fmt.Sprintf(i18n.M.RewindCoverageWarningFmt, len(r.pendingPlan.CoverageGaps)) + "\n")
+		b.WriteString(dim(fmt.Sprintf(i18n.M.RewindRestoreTitleFmt, meta.Turn+1)+oneLine(meta.Prompt, 48)) + "\n")
+		b.WriteString(dim(i18n.M.RewindConfirmHint))
+		return choicePanelStyle.Width(w).Render(b.String())
+	}
 	b.WriteString(accent(fmt.Sprintf(i18n.M.RewindRestoreTitleFmt, meta.Turn+1)) + dim(oneLine(meta.Prompt, 48)) + "\n")
 	for i := range rewindActions {
 		b.WriteString(rowLine(i == r.scope, i+1, "", rewindActionLabel(i), false) + "\n")

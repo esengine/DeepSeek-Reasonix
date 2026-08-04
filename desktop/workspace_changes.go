@@ -15,7 +15,7 @@ import (
 
 	"reasonix/internal/control"
 	"reasonix/internal/diff"
-	"reasonix/internal/proc"
+	"reasonix/internal/gitcmd"
 	"reasonix/internal/remote/protocol"
 )
 
@@ -145,6 +145,13 @@ func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
 	for _, acc := range changes {
 		if acc.hasSession {
 			acc.view.Sources = append(acc.view.Sources, "session")
+			// Session-owned files with a recorded preimage can one-click revert
+			// to the first Reasonix touch (not Git HEAD).
+			if ctrl != nil {
+				if state, ok := ctrl.CheckpointFileState(acc.view.Path); ok && state.Owned {
+					acc.view.CanSessionRevert = true
+				}
+			}
 		}
 		if acc.hasGit {
 			acc.view.Sources = append(acc.view.Sources, "git")
@@ -403,17 +410,16 @@ func tallyUnifiedPatch(patch string) (added, removed int) {
 	return added, removed
 }
 
-// workspaceGit builds a console-hidden git probe: CREATE_NO_WINDOW so git's own
-// children inherit the invisible console, fsmonitor/auto-maintenance off so a
-// probe never spawns a background daemon that opens a console of its own (#3906).
+// workspaceGit builds a console-hidden git probe. gitcmd supplies the shared
+// invocation baseline: CREATE_NO_WINDOW so git's own children inherit the
+// invisible console, and the config overrides that keep a probe from spawning a
+// background daemon that opens a console of its own (#3906).
 func workspaceGit(args ...string) *exec.Cmd {
 	return workspaceGitCommand(context.Background(), args...)
 }
 
 func workspaceGitCommand(ctx context.Context, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}, args...)...)
-	proc.HideWindow(cmd)
-	return cmd
+	return gitcmd.Command(ctx, "", args...)
 }
 
 func workspaceGitOutputWithTimeout(timeout time.Duration, args ...string) ([]byte, error) {

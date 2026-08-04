@@ -53,14 +53,17 @@ try {
   // releases that require a successful all-surface publication marker.
 }
 
-export const releases = allReleases.filter(
+export const publishedReleases = allReleases.filter(
   (release) => !release.status || release.status === 'published' || publishedIds.has(release.version),
 );
-export const stableReleases = releases.filter((release) => release.channel === 'stable');
-export const previewReleases = releases.filter((release) => release.channel === 'prerelease');
+// Public navigation contains official releases only. Historical prereleases
+// remain addressable by their exact version URL for compatibility.
+export const releases = publishedReleases.filter((release) => release.channel === 'stable');
+export const stableReleases = releases;
+export const previewReleases = publishedReleases.filter((release) => release.channel === 'prerelease');
 export const latestStableRelease = stableReleases[0];
 export const latestPreviewRelease = previewReleases[0];
-export const latestRelease = latestStableRelease ?? latestPreviewRelease;
+export const latestRelease = latestStableRelease;
 
 export function releasePath(version: string): string {
   return `/changelog/v${version}/`;

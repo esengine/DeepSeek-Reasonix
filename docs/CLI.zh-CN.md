@@ -41,27 +41,14 @@ reasonix --dir /path/to/project
 ## 更新原生 CLI
 
 ```sh
-reasonix upgrade                  # 按已保存渠道更新（初始为正式版）
-reasonix upgrade preview          # 切换到预览版、记住选择并更新
-reasonix upgrade stable           # 切回正式版、记住选择并更新
+reasonix upgrade                  # 安装最新正式版
+reasonix upgrade --check          # 只报告目标版本
+reasonix upgrade --force          # 重新安装当前正式版
 ```
 
-所选渠道是用户全局设置，保存在 Reasonix 用户配置的 `[cli].update_channel` 中。全新
-或旧版配置默认使用 Stable，项目内的 `reasonix.toml` 不能覆盖这个选择。Stable 与
-Preview 会替换同一个原生 CLI 二进制文件，不会并行安装。
-
-Preview 只接受受保护的 `vX.Y.Z-preview.N` 发布；内部 RC 不属于任何公开渠道。
-切换渠道时允许安装版本号更低的目标，这样较新的 Preview 才能返回当前 Stable。
-
-自动化脚本仍可使用 `--channel stable|preview` 做一次性覆盖，不改变已保存渠道：
-
-```sh
-reasonix upgrade preview --check          # 保存 Preview，只检查目标版本
-reasonix upgrade --channel preview        # 脚本单次升级到 Preview
-reasonix upgrade --channel stable --force # 单次重装 Stable
-```
-
-`--check` 只报告目标而不安装，`--force` 重新安装目标渠道的当前版本。别名
+更新器只选择严格的 `vX.Y.Z` 非 prerelease GitHub Release。1.x 兼容期内，旧渠道
+位置参数与 `--channel` 仍可使用，但都会解析到同一正式版并打印废弃提示。历史
+`[cli].update_channel` 值不再影响更新，并会在 Reasonix 下次保存配置时移除。别名
 `reasonix update` 的行为完全相同。
 
 ## 配置供应商
@@ -108,6 +95,21 @@ reasonix config currency USD
 
 在交互式会话中，`/currency` 显示已保存值和最终解析结果；
 `/currency auto|CNY|USD` 会修改偏好并刷新当前运行时，同时保留当前对话。
+
+### 配置自动压缩阈值
+
+桌面端与 CLI 共用用户全局的自动压缩阈值。可以查看当前生效值及来源、修改全局默认值，
+或为当前项目添加覆盖：
+
+```sh
+reasonix config compact-ratio              # 查看生效值及来源
+reasonix config compact-ratio 75           # 设置用户全局默认值
+reasonix config compact-ratio --local 75   # 写入 ./reasonix.toml 项目覆盖
+```
+
+可设置范围为 65–85%，内置默认值为 80%。数值越低越早压缩，可能降低 prompt prefix
+缓存复用率；数值越高则会在压缩前保留更多上下文。项目 `reasonix.toml` 的优先级高于
+用户全局配置。修改会应用于新启动的 CLI 会话；已经运行的会话继续使用启动时加载的阈值。
 
 ## 一次性运行与自动化
 
