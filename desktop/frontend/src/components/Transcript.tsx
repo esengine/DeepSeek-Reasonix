@@ -1354,11 +1354,15 @@ type TurnCollapseProps = {
   hasOutsideContent?: boolean;
 };
 
+function shouldOpenProcessFold(preference: ProcessFoldPreference, hasRunningWork: boolean, hasOutsideContent: boolean): boolean {
+  if (!hasRunningWork && !hasOutsideContent) return true;
+  return preference === "expanded" || (preference === "auto" && hasRunningWork);
+}
+
 function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode = false, turnStartAt, turnActive = false, preferredKind, labelStyle = "full", hasOutsideContent = true }: TurnCollapseProps) {
   const t = useT();
   const live = useContext(LiveStreamContext);
   const [foldPreference, setFoldPreference] = useState<ProcessFoldPreference>(getProcessFoldPreference);
-  const [open, setOpen] = useState(() => getProcessFoldPreference() === "expanded" || !hasOutsideContent);
   const userOverriddenOpen = useRef(false);
   const prevRunningRef = useRef(false);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -1392,6 +1396,8 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
   });
   const hasLiveAssistant = displayItems.some((it) => it.kind === "assistant" && live?.id === it.id);
   const hasRunningWork = turnActive || hasRunningProcess || hasLiveAssistant;
+  const shouldOpenByPreference = shouldOpenProcessFold(foldPreference, hasRunningWork, hasOutsideContent);
+  const [open, setOpen] = useState(() => shouldOpenByPreference);
   const now = useTick(hasRunningWork);
   const runningDurationMs = hasRunningWork
     ? turnStartAt
@@ -1408,11 +1414,14 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
     prevRunningRef.current = hasRunningWork;
     if (hasRunningWork) {
       if (!wasRunning) userOverriddenOpen.current = false;
-      if (!userOverriddenOpen.current) setOpen(true);
-    } else if (wasRunning && !userOverriddenOpen.current && hasOutsideContent && foldPreference !== "expanded") {
-      setOpen(false);
+      if (!userOverriddenOpen.current) setOpen(shouldOpenByPreference);
+    } else if (!hasOutsideContent) {
+      // Never leave a completed turn looking empty when this fold is its only content.
+      setOpen(true);
+    } else if (wasRunning && !userOverriddenOpen.current) {
+      setOpen(shouldOpenByPreference);
     }
-  }, [hasRunningWork, hasOutsideContent, foldPreference]);
+  }, [hasRunningWork, hasOutsideContent, shouldOpenByPreference]);
   // Switching the preference is an explicit act that also applies to folds
   // already on screen, not only future ones; it clears per-fold manual
   // overrides so the whole transcript lands in one consistent state.
@@ -1421,12 +1430,8 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
     if (prevFoldPreference.current === foldPreference) return;
     prevFoldPreference.current = foldPreference;
     userOverriddenOpen.current = false;
-    if (foldPreference === "expanded") {
-      setOpen(true);
-    } else if (!hasRunningWork && hasOutsideContent) {
-      setOpen(false);
-    }
-  }, [foldPreference, hasRunningWork, hasOutsideContent]);
+    setOpen(shouldOpenByPreference);
+  }, [foldPreference, shouldOpenByPreference]);
 
   if (displayItems.length === 0) return null;
 
@@ -1522,13 +1527,17 @@ function TurnCollapse({ items, durationMs, mode, subcalls, tabId, creationMode =
         type="button"
         className="reasoning__head"
         onClick={() => {
+          if (!hasRunningWork && !hasOutsideContent) {
+            setOpen(true);
+            return;
+          }
           userOverriddenOpen.current = true;
           setOpen((v) => !v);
         }}
         aria-expanded={open}
       >
         <span className="turn-collapse__label" data-creation-label={creationLabel}>{label}</span>
-        {!hasRunningWork && <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />}
+        {(!hasRunningWork || foldPreference === "collapsed") && <ChevronRight className={`reasoning__chevron${open ? " reasoning__chevron--open" : ""}`} size={12} />}
       </button>
       <div ref={bodyRef} className="turn-collapse__body">{body}</div>
     </div>

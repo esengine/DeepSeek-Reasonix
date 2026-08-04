@@ -49,7 +49,7 @@ try {
   const { Transcript } = await server.ssrLoadModule("/src/components/Transcript.tsx");
   const { LocaleProvider } = await server.ssrLoadModule("/src/lib/i18n.tsx");
 
-  function render(items: Item[], options: { mode?: "standard" | "compact"; running?: boolean; turnStartAt?: number; foldPref?: "auto" | "expanded" } = {}) {
+  function render(items: Item[], options: { mode?: "standard" | "compact"; running?: boolean; turnStartAt?: number; foldPref?: "auto" | "collapsed" | "expanded" } = {}) {
     displayMode = options.mode ?? "standard";
     processFoldPref = options.foldPref ?? "auto";
     const markup = renderToStaticMarkup(
@@ -193,6 +193,19 @@ try {
   ]);
   ok(completedDoc.querySelector(".turn-collapse__label")?.textContent === "Worked 24s · 1 thoughts", "completed turn keeps the persisted wall-clock duration and counts");
 
+  const streamingTurn: Item[] = [
+    { kind: "user", id: "u-stream", text: "stream" },
+    { kind: "assistant", id: "a-stream", text: "partial answer", reasoning: "working", streaming: true, reasoningComplete: false },
+  ];
+  const completedStreamingTurn: Item[] = [
+    { kind: "user", id: "u-stream-done", text: "stream" },
+    { kind: "assistant", id: "a-stream-done", text: "final answer", reasoning: "worked", streaming: false, reasoningComplete: true },
+  ];
+  ok(render(streamingTurn, { running: true, foldPref: "auto" }).querySelector(".turn-collapse--open"), "auto preference opens the process fold while work is active");
+  ok(!render(streamingTurn, { running: true, foldPref: "collapsed" }).querySelector(".turn-collapse--open"), "collapsed preference keeps the process fold closed while streaming");
+  ok(render(streamingTurn, { running: true, foldPref: "expanded" }).querySelector(".turn-collapse--open"), "expanded preference opens the process fold while streaming");
+  ok(!render(completedStreamingTurn, { foldPref: "collapsed" }).querySelector(".turn-collapse--open"), "collapsed preference keeps the completed answered fold closed");
+
   const countsDoc = render(warningTurn);
   const countsLabel = countsDoc.querySelector(".turn-collapse__label")?.textContent ?? "";
   ok(countsLabel.includes("2 tools") && countsLabel.includes("3 thoughts"), "fold label surfaces tool and thought counts");
@@ -204,6 +217,11 @@ try {
     { kind: "assistant", id: "a8", text: "", reasoning: "got cut off", streaming: false, workDurationMs: 3_000 },
   ]);
   ok(aloneDoc.querySelector(".turn-collapse--open"), "fold with nothing outside stays expanded");
+  const collapsedAloneDoc = render([
+    { kind: "user", id: "u5-collapsed", text: "cancelled" },
+    { kind: "assistant", id: "a8-collapsed", text: "", reasoning: "got cut off", streaming: false, workDurationMs: 3_000 },
+  ], { foldPref: "collapsed" });
+  ok(collapsedAloneDoc.querySelector(".turn-collapse--open"), "completed fold without outside content stays visible even when collapsed is preferred");
   const answeredDoc = render([
     { kind: "user", id: "u6", text: "ask" },
     { kind: "assistant", id: "a9", text: "answered", reasoning: "quick", streaming: false, workDurationMs: 3_000 },

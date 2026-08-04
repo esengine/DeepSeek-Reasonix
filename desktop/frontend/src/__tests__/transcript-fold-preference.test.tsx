@@ -95,6 +95,17 @@ const items = [
   { kind: "user", id: "u1", text: "ask" },
   { kind: "assistant", id: "a1", text: "answered", reasoning: "quick thought", streaming: false, workDurationMs: 3_000 },
 ];
+const streamingItems = [
+  { kind: "user", id: "u1", text: "stream" },
+  { kind: "assistant", id: "a1", text: "partial answer", reasoning: "working", streaming: true, reasoningComplete: false },
+];
+const processOnlyItems = [
+  { kind: "user", id: "u-only", text: "cancelled" },
+  { kind: "assistant", id: "a-only", text: "", reasoning: "got cut off", streaming: false, reasoningComplete: true },
+];
+const processOnlyStreamingItems = processOnlyItems.map((item) => item.id === "a-only"
+  ? { ...item, streaming: true, reasoningComplete: false }
+  : item);
 
 const container = dom.window.document.getElementById("root")!;
 const root = createRoot(container);
@@ -104,13 +115,77 @@ try {
       React.createElement(
         LocaleProvider,
         null,
+        React.createElement(Transcript, { items: streamingItems, onPrompt: () => {}, questionNavigator: false, running: true }),
+      ),
+    );
+  });
+  ok(container.querySelector(".turn-collapse--open"), "auto preference opens a fold while the turn is streaming");
+
+  await act(async () => {
+    setProcessFoldPreference("collapsed");
+  });
+  ok(!container.querySelector(".turn-collapse--open"), "live collapsed preference closes an active fold");
+
+  await act(async () => {
+    setProcessFoldPreference("expanded");
+  });
+  ok(container.querySelector(".turn-collapse--open"), "live expanded preference opens an active fold");
+
+  await act(async () => {
+    setProcessFoldPreference("auto");
+  });
+  ok(container.querySelector(".turn-collapse--open"), "auto preference keeps an active fold open");
+
+  await act(async () => {
+    root.render(
+      React.createElement(
+        LocaleProvider,
+        null,
         React.createElement(Transcript, { items, onPrompt: () => {}, questionNavigator: false, running: false }),
       ),
     );
   });
-
   ok(container.querySelector(".turn-collapse"), "completed turn renders its work fold");
-  ok(!container.querySelector(".turn-collapse--open"), "auto preference keeps the completed fold collapsed");
+  ok(!container.querySelector(".turn-collapse--open"), "auto preference collapses the completed fold with an answer outside");
+
+  await act(async () => {
+    setProcessFoldPreference("expanded");
+  });
+  ok(container.querySelector(".turn-collapse--open"), "live expanded preference reopens the completed fold");
+
+  await act(async () => {
+    setProcessFoldPreference("auto");
+  });
+  ok(!container.querySelector(".turn-collapse--open"), "live auto preference collapses the completed answered fold");
+
+  await act(async () => {
+    setProcessFoldPreference("collapsed");
+    root.render(
+      React.createElement(
+        LocaleProvider,
+        null,
+        React.createElement(Transcript, { items: processOnlyStreamingItems, onPrompt: () => {}, questionNavigator: false, running: true }),
+      ),
+    );
+  });
+  ok(!container.querySelector(".turn-collapse--open"), "collapsed preference keeps a process-only streaming fold closed");
+
+  await act(async () => {
+    root.render(
+      React.createElement(
+        LocaleProvider,
+        null,
+        React.createElement(Transcript, { items: processOnlyItems, onPrompt: () => {}, questionNavigator: false, running: false }),
+      ),
+    );
+  });
+  ok(container.querySelector(".turn-collapse--open"), "completed process-only fold reopens so the response is not apparently empty");
+
+  const processOnlyHead = container.querySelector<HTMLButtonElement>(".turn-collapse > .reasoning__head");
+  await act(async () => {
+    processOnlyHead?.click();
+  });
+  ok(container.querySelector(".turn-collapse--open"), "content-only completed fold cannot be manually hidden");
 
   await act(async () => {
     setProcessFoldPreference("expanded");
@@ -120,7 +195,7 @@ try {
   await act(async () => {
     setProcessFoldPreference("auto");
   });
-  ok(!container.querySelector(".turn-collapse--open"), "switching back to auto collapses completed folds again");
+  ok(container.querySelector(".turn-collapse--open"), "auto preference still keeps a content-only completed fold visible");
 } finally {
   await act(async () => {
     root.unmount();
