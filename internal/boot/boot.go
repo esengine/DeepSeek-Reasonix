@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"reasonix/internal/agent"
@@ -2167,13 +2168,31 @@ func isGitMarker(path string) bool {
 	return err == nil && (fi.IsDir() || fi.Mode().IsRegular())
 }
 
+// subagentCleanupSwept tracks session dirs whose stale-running sub-agent
+// sweep has already run in this process. Desktop tabs share one global
+// session dir, so without this every controller build (startup, model/effort
+// switch, provider retarget, deferred rebuild) re-swept the shared subagents
+// directory. Each sweep transiently acquires the running sub-agent's parent
+// session lease, so concurrent tab builds raced the probe against their own
+// startup bind and surfaced spurious "already open in another Reasonix
+// window" errors. CLI/serve runs are fresh processes, so their sweep-once
+// semantics are unchanged.
+var subagentCleanupSwept sync.Map // sessionDir -> struct{}
+
 func newSubagentStore(sessionDir string) (*agent.SubagentStore, error) {
 	sessionDir = strings.TrimSpace(sessionDir)
 	if sessionDir == "" {
 		return nil, nil
 	}
 	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	key := filepath.Clean(sessionDir)
+	if _, loaded := subagentCleanupSwept.LoadOrStore(key, struct{}{}); loaded {
+		return store, nil
+	}
 	if _, err := store.CleanupStaleRunning(); err != nil {
+		// A failed sweep must not wedge the session dir as "already swept":
+		// drop the marker so a later build retries the cleanup.
+		subagentCleanupSwept.Delete(key)
 		return nil, fmt.Errorf("cleanup stale subagents: %w", err)
 	}
 	return store, nil

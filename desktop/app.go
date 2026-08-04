@@ -4848,18 +4848,24 @@ func (a *App) buildSessionRebindCandidate(
 }
 
 func (a *App) acquireCandidateSessionLease(tab *WorkspaceTab, path string) (*agent.SessionLease, error) {
-	lease, err := agent.TryAcquireSessionLease(path)
-	if err == nil {
-		return lease, nil
-	}
-	if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
-		if reclaimed, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
-			return reclaimed, nil
-		} else {
-			err = reclaimErr
+	lease, err := withSessionLeaseContentionRetry(func() (*agent.SessionLease, error) {
+		lease, err := agent.TryAcquireSessionLease(path)
+		if err == nil {
+			return lease, nil
 		}
+		if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
+			if reclaimed, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
+				return reclaimed, nil
+			} else {
+				err = reclaimErr
+			}
+		}
+		return nil, err
+	})
+	if err != nil {
+		return nil, userFacingSessionLeaseError("", err)
 	}
-	return nil, userFacingSessionLeaseError("", err)
+	return lease, nil
 }
 
 func loadResumableSession(sessionPath string) (*agent.Session, error) {
@@ -10009,21 +10015,59 @@ func sessionPathAfterSnapshot(ctrl control.SessionAPI, fallback string) string {
 	return fallback
 }
 
+var (
+	// sessionLeaseContentionRetryInterval and sessionLeaseContentionRetryAttempts
+	// bound the retry window for startup session-lease binds that hit a
+	// transient in-process holder. CleanupStaleRunning probes a running
+	// sub-agent's parent session lease inside every controller build, holding
+	// it only for the duration of a metadata rewrite (sub-millisecond); a
+	// concurrent tab build that races that probe must not surface a spurious
+	// "already open in another Reasonix window" error for a lease that is
+	// genuinely free once the probe releases it. A lease held by another
+	// window or process stays held for its whole lifetime, so the bounded
+	// retry still fails fast there.
+	sessionLeaseContentionRetryInterval = 50 * time.Millisecond
+	sessionLeaseContentionRetryAttempts = 2
+)
+
+// withSessionLeaseContentionRetry retries acquire while it fails with
+// agent.ErrSessionLeaseHeld, absorbing sub-second contention windows created
+// by transient in-process lease probes. Any other error is returned
+// immediately, and a lease that remains held after the bounded retries is
+// reported as-is.
+func withSessionLeaseContentionRetry[T any](acquire func() (T, error)) (T, error) {
+	var zero T
+	for attempt := 0; ; attempt++ {
+		got, err := acquire()
+		if err == nil {
+			return got, nil
+		}
+		if !errors.Is(err, agent.ErrSessionLeaseHeld) || attempt >= sessionLeaseContentionRetryAttempts {
+			return zero, err
+		}
+		time.Sleep(sessionLeaseContentionRetryInterval)
+	}
+}
+
 func (a *App) ensureTabSessionLeaseForRebuild(tab *WorkspaceTab, path, setting string) error {
 	transition, reserveErr := a.reserveSessionRuntimePath(tab, path)
 	if reserveErr != nil {
 		return userFacingSessionLeaseError(setting, reserveErr)
 	}
-	if err := tab.ensureSessionLease(path); err != nil {
-		if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
-			if lease, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
-				tab.adoptSessionLease(lease)
-				a.commitSessionRuntimePath(transition)
-				return nil
-			} else {
-				err = reclaimErr
+	if _, err := withSessionLeaseContentionRetry(func() (struct{}, error) {
+		if err := tab.ensureSessionLease(path); err != nil {
+			if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
+				if lease, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
+					tab.adoptSessionLease(lease)
+					return struct{}{}, nil
+				} else {
+					err = reclaimErr
+				}
 			}
+			return struct{}{}, err
 		}
+		return struct{}{}, nil
+	}); err != nil {
 		a.rollbackSessionRuntimePath(transition)
 		return userFacingSessionLeaseError(setting, err)
 	}
