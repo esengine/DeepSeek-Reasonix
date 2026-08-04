@@ -182,18 +182,22 @@ func retrievePolicy() *responses.RetrievalPolicy {
 	return &retrievePol
 }
 
-// budgetPolicy returns a policy honoring a per-call budget override: the
-// shared process policy with a one-shot HourlyBudget adjustment (bounded to
-// [1, 1000] to stay a fuse, not a valve).
+// budgetPolicy returns a policy honoring a per-call budget override: a COPY
+// of the shared process policy with an adjusted HourlyBudget (bounded to
+// [1, 1000] to stay a fuse, not a valve). Copying — never mutating the shared
+// policy — keeps per-call overrides non-sticky and avoids a data race when
+// retrieve_info runs concurrently (review finding).
 func budgetPolicy(override int) *responses.RetrievalPolicy {
-	pol := retrievePolicy()
-	if override > 0 {
-		pol.HourlyBudget = override
-		if pol.HourlyBudget > 1000 {
-			pol.HourlyBudget = 1000
-		}
+	base := retrievePolicy()
+	if override <= 0 {
+		return base // 无覆盖：共享策略本身只读使用
 	}
-	return pol
+	cp := *base
+	if override > 1000 {
+		override = 1000
+	}
+	cp.HourlyBudget = override
+	return &cp
 }
 
 // systemFetchTestHook lets tests replace the real network pipeline. The zero
@@ -246,6 +250,13 @@ func systemFetch(ctx context.Context, query string, tier responses.RetrievalTier
 		case provider.ChunkUsage:
 			if c.Usage != nil {
 				tokens = c.Usage.TotalTokens
+			}
+		case provider.ChunkError:
+			// 流中途失败：返回真实错误（不得把部分/无效文本当结果蒸馏
+			// 落盘——review 发现：忽略 ChunkError 会让调用方拿到
+			// "no text" 并可能缓存无效蒸馏）。
+			if err := c.Err; err != nil {
+				return nil, fmt.Errorf("retrieve_info: web_search stream failed: %w", err)
 			}
 		}
 	}

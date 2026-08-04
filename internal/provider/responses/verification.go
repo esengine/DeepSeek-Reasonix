@@ -76,7 +76,10 @@ func CrossCheck(facts []string, entries []*KnowledgeEntry) VerificationReport {
 			factNumbers[f][n] = true
 		}
 	}
-	// 从每个 entry 里找与该事实数字重叠的陈述，记录来源域
+	// 从每个 entry 里找与该事实数字重叠的陈述，记录来源域 + 出现数字
+	// （跨 entry 数字不一致 → 矛盾 → FactDisputed；review 发现原逻辑
+	// 从未赋值 disputed，报告对冲突数值永远报 0 矛盾）。
+	factSeenNums := make(map[string][]string, len(facts))
 	for _, e := range entries {
 		if e == nil {
 			continue
@@ -90,6 +93,7 @@ func CrossCheck(facts []string, entries []*KnowledgeEntry) VerificationReport {
 			for num := range factNumbers[f] {
 				if strings.Contains(body, num) && len(factSources[f]) < 5 {
 					factSources[f] = append(factSources[f], srcType)
+					factSeenNums[f] = append(factSeenNums[f], num)
 					break
 				}
 			}
@@ -107,7 +111,17 @@ func CrossCheck(facts []string, entries []*KnowledgeEntry) VerificationReport {
 		}
 		status := FactUnverified
 		if len(uniq) >= 2 {
-			status = FactVerified
+			// 多源：数字一致 → verified；同一事实出现不同数值 → disputed
+			// （来源间矛盾——报告必须如实呈现，不能只报"多源核实"）。
+			distinctNums := map[string]bool{}
+			for _, n := range factSeenNums[f] {
+				distinctNums[n] = true
+			}
+			if len(distinctNums) >= 2 {
+				status = FactDisputed
+			} else {
+				status = FactVerified
+			}
 		} else if len(uniq) == 1 {
 			status = FactSingleSrc
 		}

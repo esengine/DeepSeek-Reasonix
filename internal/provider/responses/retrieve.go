@@ -188,6 +188,9 @@ func Retrieve(ctx context.Context, query string, opts RetrieveOptions, fetch Fet
 						if opts.Policy != nil {
 							opts.Policy.MarkWebUsed(now)
 						}
+						if opts.Policy != nil {
+							opts.Policy.MarkWebUsed(now)
+						}
 					}
 				} else {
 					res.WebBlocked = true
@@ -241,6 +244,9 @@ func Retrieve(ctx context.Context, query string, opts RetrieveOptions, fetch Fet
 				if applyFresh(e, fresh, now, opts.MinCredibility) {
 					res.Refreshed = true
 					res.APIUsed = true
+					if opts.Policy != nil {
+						opts.Policy.MarkWebUsed(now)
+					}
 				}
 			}
 			return res, nil
@@ -290,9 +296,13 @@ func Retrieve(ctx context.Context, query string, opts RetrieveOptions, fetch Fet
 	}
 	if manip > 0 {
 		// Do not cache manipulated content; the caller still receives the
-		// live answer, it just never poisons the cache.
+		// live answer, it just never poisons the cache. 检索已发生——
+		// 预算照计（防操纵内容绕过配额）。
 		res.Entry = fresh
 		res.APIUsed = true
+		if opts.Policy != nil {
+			opts.Policy.MarkWebUsed(now)
+		}
 		return res, nil
 	}
 	// 破壁引导 (#13): 显式开启时，对灾难+时间紧迫查询追加权威核实安抚行。
