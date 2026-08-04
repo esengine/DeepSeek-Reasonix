@@ -213,9 +213,15 @@ func (s *updateSink) replay(msgs []provider.Message) {
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleUser:
+			// Replay the user-authored view, not the persisted wire form:
+			// UserMessageText strips injected transient blocks (<response-language>
+			// etc.) and unwraps memory-compiler contracts, same as every other
+			// surface (#6882). A turn that was pure injection replays as nothing.
 			text := m.Content
 			if steer, ok := agent.SteerText(text); ok {
 				text = steer
+			} else {
+				text = agent.UserMessageText(m)
 			}
 			if text != "" {
 				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})
@@ -224,8 +230,10 @@ func (s *updateSink) replay(msgs []provider.Message) {
 			if m.ReasoningContent != "" {
 				s.send(messageChunk{SessionUpdate: "agent_thought_chunk", Content: textBlock(m.ReasoningContent)})
 			}
-			if m.Content != "" {
-				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(m.Content)})
+			// Same display filter as live emission: goal markers and evidence
+			// blocks stay in history for parsing but never reach the client.
+			if display := agent.DisplayAssistantText(m.Content); display != "" {
+				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(display)})
 			}
 			for _, tc := range m.ToolCalls {
 				s.send(toolCall{
