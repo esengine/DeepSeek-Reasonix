@@ -545,6 +545,7 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 	var merged []string
 	seen := map[string]bool{}
 	saw := false
+	userDeclared := false
 	for _, path := range paths {
 		_, exists, err := statConfigPath(path)
 		if err != nil {
@@ -568,6 +569,9 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 			merged = []string{}
 		}
 		saw = true
+		if isUserConfigPath(path) {
+			userDeclared = true
+		}
 		for _, name := range f.Desktop.ProviderAccess {
 			name = strings.TrimSpace(name)
 			if name == "" || seen[name] {
@@ -576,6 +580,11 @@ func mergeTOMLProviderAccess(paths []string) ([]string, bool, error) {
 			seen[name] = true
 			merged = append(merged, name)
 		}
+	}
+	// An undeclared user list means "allow all"; a union with a project-only
+	// list would silently narrow that to whatever the project happens to name.
+	if saw && !userDeclared {
+		return nil, false, nil
 	}
 	return merged, saw, nil
 }
