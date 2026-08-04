@@ -120,16 +120,6 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
-      - name: Load approved standalone recovery control plane
-        if: ${{ !inputs.orchestrated }}
-        env:
-          RECOVERY_CONTROL_SHA: ${{ github.workflow_sha }}
-        run: |
-          set -euo pipefail
-          git fetch --no-tags --depth=1 origin "$RECOVERY_CONTROL_SHA"
-          git restore --source="$RECOVERY_CONTROL_SHA" -- \
-            npm/publish.mjs \
-            scripts/finalize-npm-official-release.mjs
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -159,6 +149,16 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.approved_sha || inputs.tag || github.ref }}
+      - name: Load approved standalone recovery control plane
+        if: ${{ !inputs.orchestrated }}
+        env:
+          RECOVERY_CONTROL_SHA: ${{ github.workflow_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$RECOVERY_CONTROL_SHA"
+          git restore --source="$RECOVERY_CONTROL_SHA" -- \
+            npm/publish.mjs \
+            scripts/finalize-npm-official-release.mjs
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
