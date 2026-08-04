@@ -123,6 +123,11 @@ func (c *Controller) runScheduledTurn(task scheduler.Task) {
 	closed := c.closed
 	c.mu.Unlock()
 	if closed {
+		// Contract: a delivered-but-unstarted fire must never leave the
+		// task's firing flag set, even when the controller is already torn
+		// down — release it so any survivor path (or a rebind that skips
+		// Load) cannot wedge the task.
+		c.scheduler.ReleaseFiring(task.ID)
 		return
 	}
 	result := c.runGuardedOrPark(func(ctx context.Context) error {

@@ -4216,10 +4216,12 @@ func (m *chatTUI) runLoopStatusCommand(arg string) {
 	}
 }
 
-// loopEscIntercept routes an idle Esc to the session's loops when any exist:// a dynamic loop with a pending wakeup pauses it; a paused loop cancels all
-// loops. It reports whether it consumed the Esc (false keeps the ordinary
-// double-Esc rewind gesture). Fixed-interval loops are not touched — they are
-// managed via cron_list/cron_delete.
+// loopEscIntercept routes an idle Esc to the session's loops when any exist:
+// a dynamic loop with a pending wakeup pauses it; a paused dynamic loop
+// cancels (only the dynamic loops — fixed-interval cron loops and one-shot
+// reminders are managed via cron_list/cron_delete, never by Esc). It reports
+// whether it consumed the Esc (false keeps the ordinary double-Esc rewind
+// gesture).
 func (m *chatTUI) loopEscIntercept() bool {
 	if m.ctrl == nil {
 		return false
@@ -4230,12 +4232,12 @@ func (m *chatTUI) loopEscIntercept() bool {
 	}
 	if sched.HasPendingDynamic() {
 		n := sched.StopWakeup()
-		m.notice(fmt.Sprintf("loop paused — %d pending wakeup(s) cleared; press Esc again to cancel all loops", n))
+		m.notice(fmt.Sprintf("loop paused — %d pending wakeup(s) cleared; press Esc again to cancel loops", n))
 		return true
 	}
 	if sched.HasDynamic() {
-		sched.CancelAll()
-		m.notice("all scheduled loops cancelled")
+		n := sched.CancelDynamic()
+		m.notice(fmt.Sprintf("%d dynamic loop(s) cancelled — fixed-interval loops are managed via cron_list/cron_delete", n))
 		return true
 	}
 	return false

@@ -264,6 +264,26 @@ func (s *Scheduler) CancelAll() {
 	}
 }
 
+// CancelDynamic removes only the dynamic (agent-scheduled, cron-less) tasks.
+// The TUI's Esc path uses this so a stray Esc can never wipe fixed-interval
+// cron loops or one-shot reminders, which are managed explicitly via
+// cron_list/cron_delete. It returns the number of tasks removed.
+func (s *Scheduler) CancelDynamic() int {
+	s.mu.Lock()
+	n := 0
+	for id, t := range s.tasks {
+		if t.CronExpr == "" {
+			delete(s.tasks, id)
+			n++
+		}
+	}
+	s.mu.Unlock()
+	if n > 0 {
+		s.saveLocked()
+	}
+	return n
+}
+
 // ScheduleWakeup sets the pending wakeup of every dynamic (agent-scheduled)
 // task to now+delay — loops share the agent's scheduling intent. It returns
 // the number of tasks woken.

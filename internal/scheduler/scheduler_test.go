@@ -318,6 +318,29 @@ func TestReleaseFiringAllowsRefire(t *testing.T) {
 	}
 }
 
+func TestCancelDynamicKeepsCronTasks(t *testing.T) {
+	s := New()
+	if _, err := s.Add("*/5 * * * *", "cron loop", time.Time{}, false); err != nil {
+		t.Fatalf("Add cron: %v", err)
+	}
+	if _, err := s.Add("", "dynamic loop", time.Now(), false); err != nil {
+		t.Fatalf("Add dynamic: %v", err)
+	}
+	if _, err := s.Add("", "one-shot reminder", time.Now(), true); err != nil {
+		t.Fatalf("Add one-shot: %v", err)
+	}
+	if n := s.CancelDynamic(); n != 2 {
+		t.Fatalf("CancelDynamic = %d, want 2 (dynamic + one-shot, both cron-less)", n)
+	}
+	views := s.Tasks()
+	if len(views) != 1 || views[0].CronExpr == "" {
+		t.Fatalf("remaining tasks = %+v, want only the cron loop", views)
+	}
+	if views[0].Prompt != "cron loop" {
+		t.Errorf("remaining task = %q, want the fixed-interval loop", views[0].Prompt)
+	}
+}
+
 func TestStopFlushes(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "tasks.json")
