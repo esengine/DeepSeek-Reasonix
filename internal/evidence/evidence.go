@@ -1719,6 +1719,7 @@ func verificationCommandRecommendations() []verificationCommandRecommendation {
 		{label: "make|just test|check|lint|verify|ci", examples: []string{"make test", "just verify"}},
 		{label: "python -m pytest|unittest", examples: []string{"python -m pytest", "python -m unittest"}},
 		{label: "dotnet test", examples: []string{"dotnet test"}},
+		{label: "swift test", examples: []string{"swift test"}},
 		{label: "mvn|gradle test|check|verify", examples: []string{"mvn test", "gradle check"}},
 	}
 }
@@ -1800,6 +1801,12 @@ func bashSegmentIsVerification(fields []string) bool {
 	case "python", "python3":
 		return len(args) > 1 && args[0] == "-m" && hasCommandArg(args[1:2], "pytest", "unittest")
 	case "dotnet":
+		return len(args) > 0 && args[0] == "test"
+	case "swift":
+		// swift test runs the SwiftPM test suite without emitting build
+		// artifacts beyond the package's own .build directory; other swift
+		// subcommands (build/run/package) can write binaries or mutate the
+		// package, so only the test form is a recognized verifier.
 		return len(args) > 0 && args[0] == "test"
 	case "mvn", "mvnw", "gradle", "gradlew":
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
