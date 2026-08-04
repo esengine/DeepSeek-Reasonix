@@ -4192,7 +4192,11 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			}
 			return m.startControllerTurn(input, input, func() { m.ctrl.SubmitDisplay(input, input) })
 		}
-		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
+		// Unknown slash input is prose more often than a typo — send it as a
+		// regular message (matching the controller's behavior for the other
+		// surfaces), with a notice so real typos stay visible (#5756).
+		m.notice(fmt.Sprintf("%s: %s — %s", i18n.M.SlashUnknown, cmd, i18n.M.SlashUnknownSentAsMessage))
+		return m.startTurn(input, input, input)
 	}
 	return nil
 }

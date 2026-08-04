@@ -1153,16 +1153,26 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 
 	c.Submit("/definitely-not-a-command")
 
-	if len(runner.inputs) != 0 {
-		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", runner.inputs)
-	}
-	select {
-	case e := <-events:
-		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
-			t.Fatalf("event = %+v, want unknown-command notice", e)
+	// Unknown slash input is sent as a regular message (#5756); the notice
+	// still fires so genuine typos stay visible.
+	var noticeText string
+	deadline := time.After(30 * time.Second)
+	for noticeText == "" {
+		select {
+		case e := <-events:
+			if e.Kind == event.Notice && strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
+				noticeText = e.Text
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for unknown-command notice")
 		}
-	case <-time.After(30 * time.Second):
-		t.Fatal("timed out waiting for unknown-command notice")
+	}
+	if !strings.Contains(noticeText, "sent as a regular message") {
+		t.Fatalf("notice = %q, want the sent-as-message suffix", noticeText)
+	}
+	waitForTurnDone(t, events)
+	if len(runner.inputs) != 1 || !strings.Contains(runner.inputs[0], "/definitely-not-a-command") {
+		t.Fatalf("unknown slash command should start a model turn with the raw line, inputs=%q", runner.inputs)
 	}
 }
 

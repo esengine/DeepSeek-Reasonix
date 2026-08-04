@@ -1315,7 +1315,12 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			})
 			return
 		}
-		c.notice("unknown command: " + trimmed)
+		// Unknown slash input is prose more often than a typo ("/etc/hosts
+		// looks wrong", pasted paths, half-remembered commands) — send it as a
+		// regular message instead of dead-ending the submission, with a notice
+		// so real typos are still visible (#5756).
+		c.notice("unknown command: " + trimmed + " — sent as a regular message")
+		runRefTurn(input, display)
 	default:
 		runRefTurn(input, display)
 	}
