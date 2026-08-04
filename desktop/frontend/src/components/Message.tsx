@@ -116,6 +116,7 @@ export type SelectedTextBlockInfo = {
   label: string;
   content: string;
   path?: string;
+  comment?: string;
   start: number;
   end: number;
   kind: "chat" | "code";
@@ -137,6 +138,7 @@ export function parseSelectedTextBlocks(text: string, submitText?: string): Sele
       label,
       content: entry.text,
       path: entry.path,
+      comment: entry.comment,
       start,
       end: start + label.length,
       kind,
@@ -182,6 +184,18 @@ function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+// The user's comment attached to a code/text selection, shown under the
+// expanded content of a selection card in the transcript.
+function CommentNote({ text }: { text: string }) {
+  const t = useT();
+  return (
+    <div className="msg-pasted-comment">
+      <span className="msg-pasted-comment__label">{t("composer.selectionComment")}</span>
+      <span className="msg-pasted-comment__text">{text}</span>
     </div>
   );
 }
@@ -534,11 +548,17 @@ export function UserMessage({
                     </div>
                     {expanded && (
                       <div className="msg-pasted-expanded">
-                        {seg.kind === "chat"
-                          ? <Markdown text={seg.block.content} />
-                          : seg.kind === "code"
-                            ? <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
-                            : seg.block.content}
+                        {seg.kind === "chat" ? (
+                          <>
+                            <Markdown text={seg.block.content} />
+                            {seg.block.comment && <CommentNote text={seg.block.comment} />}
+                          </>
+                        ) : seg.kind === "code" ? (
+                          <>
+                            <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
+                            {seg.block.comment && <CommentNote text={seg.block.comment} />}
+                          </>
+                        ) : seg.block.content}
                       </div>
                     )}
                   </div>

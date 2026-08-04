@@ -58,6 +58,18 @@ eq(
   "selection cards recover duplicate snippets and bracketed file names from the existing JSON context",
 );
 eq(selectedBlocks[0]?.start, display.indexOf(labels[0], display.indexOf("\n") + 1), "label-shaped authored prose is not consumed as a selection card");
+
+const commentedSelection: SelectedTextReference = { id: "code-2", path: "src/util.ts", text: "const x = 1;", comment: "is error handling right?" };
+const commentedLabel = formatSelectionLabel(commentedSelection);
+const commentedBlocks = parseSelectedTextBlocks(
+  `explain ${commentedLabel}`,
+  formatSelectedTextContext([commentedSelection]),
+);
+eq(
+  JSON.stringify(commentedBlocks.map(({ label, content, path, comment, kind }) => ({ label, content, path, comment, kind }))),
+  JSON.stringify([{ label: commentedLabel, content: "const x = 1;", path: "src/util.ts", comment: "is error handling right?", kind: "code" }]),
+  "selection cards carry the user comment for the expanded transcript view",
+);
 const unterminatedDisplay = `explain literal [Chat: ${labels.join(" ")}`;
 let expectedLabelStart = unterminatedDisplay.length - labels.join(" ").length;
 const expectedTrailingLabels = labels.map((label) => {

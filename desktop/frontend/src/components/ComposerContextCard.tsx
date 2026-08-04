@@ -17,6 +17,7 @@ export function ComposerContextCard({
   folder = false,
   name,
   meta,
+  note,
   label,
   icon,
 }: {
@@ -33,6 +34,8 @@ export function ComposerContextCard({
   folder?: boolean;
   name?: string;
   meta?: string;
+  /** optional one-line note (e.g. the user's comment on a selection) shown under meta */
+  note?: string;
   label?: ReactNode;
   icon?: ReactNode;
 }) {
@@ -68,6 +71,7 @@ export function ComposerContextCard({
               <span className="composer-context__main">
                 <span className="composer-context__name">{name}</span>
                 {meta && <span className="composer-context__meta">{meta}</span>}
+                {note && <span className="composer-context__note">{note}</span>}
               </span>
             </>
           ) : (
