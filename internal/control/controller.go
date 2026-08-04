@@ -2514,7 +2514,7 @@ func parseAutoResearchEvidenceBlocks(text string) []autoResearchEvidenceBlock {
 }
 
 func autoResearchDirectionSummary(text string) string {
-	text = stripAutoResearchEvidenceBlocks(text)
+	text = agent.StripAutoResearchEvidenceBlocks(text)
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		lower := strings.ToLower(line)
@@ -2527,25 +2527,6 @@ func autoResearchDirectionSummary(text string) string {
 		return line
 	}
 	return "turn completed"
-}
-
-func stripAutoResearchEvidenceBlocks(text string) string {
-	var b strings.Builder
-	rest := text
-	for {
-		start := strings.Index(rest, autoResearchEvidenceOpen)
-		if start < 0 {
-			b.WriteString(rest)
-			return b.String()
-		}
-		b.WriteString(rest[:start])
-		afterOpen := rest[start+len(autoResearchEvidenceOpen):]
-		end := strings.Index(afterOpen, autoResearchEvidenceClose)
-		if end < 0 {
-			return b.String()
-		}
-		rest = afterOpen[end+len(autoResearchEvidenceClose):]
-	}
 }
 
 func (c *Controller) autoResearchReadinessFailure() string {

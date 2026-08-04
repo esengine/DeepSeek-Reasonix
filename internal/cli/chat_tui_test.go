@@ -4181,3 +4181,20 @@ func TestQuitGesturesRouteThroughShutdown(t *testing.T) {
 		t.Fatalf("Ctrl+D emitted %T, want tuiShutdownMsg", msg)
 	}
 }
+
+// TestMessageEventReplacesStreamedAnswer guards #6665 on the TUI side: the
+// final Message event carries the canonical display text (protocol blocks
+// stripped at emission), and it must replace the raw streamed accumulation.
+func TestMessageEventReplacesStreamedAnswer(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "answer <autoresearch-evidence>{\"id\":\"e1\"}</autoresearch-evidence> tail"})
+	m.ingestEvent(event.Event{Kind: event.Message, Text: "answer  tail"})
+
+	joined := strings.Join(m.transcript, "\n")
+	if strings.Contains(joined, "autoresearch-evidence") {
+		t.Fatalf("committed transcript still contains evidence block:\n%s", joined)
+	}
+	if !strings.Contains(joined, "answer") {
+		t.Fatalf("committed transcript lost the answer text:\n%s", joined)
+	}
+}

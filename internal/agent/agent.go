@@ -2802,7 +2802,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				if text.Len() > 0 || display != "" {
 					sink.Emit(event.Event{
 						Kind:      event.Message,
-						Text:      StripGoalMarkers(text.String()),
+						Text:      DisplayAssistantText(text.String()),
 						Reasoning: display,
 					})
 				}

@@ -166,8 +166,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		toolEvent.Output = answer
 		c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: toolEvent})
 		c.executor.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: answer})
-		c.sink.Emit(event.Event{Kind: event.Text, Text: answer})
-		c.sink.Emit(event.Event{Kind: event.Message, Text: answer})
+		display := agent.DisplayAssistantText(answer)
+		c.sink.Emit(event.Event{Kind: event.Text, Text: display})
+		c.sink.Emit(event.Event{Kind: event.Message, Text: display})
 	}
 
 	c.clearInFlightTurn()
