@@ -86,8 +86,24 @@ func TestBackoffDelay(t *testing.T) {
 	if d := backoffDelay(5, 3*time.Second); d != 3*time.Second {
 		t.Errorf("Retry-After should win: %v", d)
 	}
-	if d := backoffDelay(1, time.Hour); d != maxBackoff {
-		t.Errorf("Retry-After should be capped to %v, got %v", maxBackoff, d)
+	if d := backoffDelay(1, 45*time.Second); d != 45*time.Second {
+		t.Errorf("Retry-After beyond the backoff cap should still be honored: %v", d)
+	}
+	if d := backoffDelay(1, time.Hour); d != maxRetryAfter {
+		t.Errorf("Retry-After should be capped to %v, got %v", maxRetryAfter, d)
+	}
+}
+
+func TestParseRetryAfterAcceptsHTTPDate(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", time.Now().Add(30*time.Second).UTC().Format(http.TimeFormat))
+	if d := parseRetryAfter(resp); d < 25*time.Second || d > 31*time.Second {
+		t.Errorf("http-date Retry-After = %v, want ~30s", d)
+	}
+
+	resp.Header.Set("Retry-After", time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat))
+	if d := parseRetryAfter(resp); d != 0 {
+		t.Errorf("elapsed http-date Retry-After = %v, want 0", d)
 	}
 }
 
