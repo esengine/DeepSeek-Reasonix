@@ -4190,7 +4190,23 @@ func (m *chatTUI) showStatusDetails() {
 	if tag := m.mouseTag(); tag != "" {
 		lines = append(lines, "  mouse      "+tag)
 	}
+	lines = append(lines, "  config     "+activeConfigTag())
 	m.commitLine(strings.Join(lines, "\n"))
+}
+
+// activeConfigTag names the config file actually in effect. A ./reasonix.toml
+// outranks the user-global file, so a session started in a directory holding
+// one silently ignores global edits unless the source is visible (#3317).
+func activeConfigTag() string {
+	path := config.SourcePath()
+	if path == "" {
+		return "(defaults — no config file)"
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return displayPath(path)
+	}
+	return displayPath(abs)
 }
 
 func (m *chatTUI) runGoalSubcommand(input string) tea.Cmd {
