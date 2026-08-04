@@ -1804,9 +1804,11 @@ func bashSegmentIsVerification(fields []string) bool {
 		return len(args) > 0 && args[0] == "test"
 	case "swift":
 		// swift test runs the SwiftPM test suite without emitting build
-		// artifacts beyond the package's own .build directory; other swift
-		// subcommands (build/run/package) can write binaries or mutate the
-		// package, so only the test form is a recognized verifier.
+		// artifacts beyond the package's own .build directory (including
+		// --enable-code-coverage coverage reports, which stay under .build);
+		// other swift subcommands (build/run/package) can write binaries or
+		// mutate the package, so only the test form is a recognized verifier.
+		// Explicit report destinations are rejected by writeOutputFlags.
 		return len(args) > 0 && args[0] == "test"
 	case "mvn", "mvnw", "gradle", "gradlew":
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
@@ -2054,6 +2056,7 @@ var writeOutputFlags = map[string]bool{
 	"gocoverdir":      true, // go test binary
 	"outputfile":      true, // jest/vitest --outputFile (with --json)
 	"report-log":      true, // pytest-reportlog
+	"xunit-output":    true, // swift test --xunit-output writes a JUnit XML report
 }
 
 func hasWriteOutputFlag(args []string) bool {

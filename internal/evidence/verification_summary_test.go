@@ -161,6 +161,7 @@ func TestSwiftTestRecognizedAsVerification(t *testing.T) {
 		"swift run",
 		"swift package resolve",
 		"swift package update",
+		"swift test --xunit-output report.xml",
 	} {
 		if IsDeliveryVerificationCommand(command) {
 			t.Errorf("%q can build, run, or mutate the package and must not count as verification", command)
