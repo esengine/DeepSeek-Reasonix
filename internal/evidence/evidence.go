@@ -2057,7 +2057,8 @@ var writeOutputFlags = map[string]bool{
 	"outputfile":      true, // jest/vitest --outputFile (with --json)
 	"report-log":      true, // pytest-reportlog
 	"xunit-output":    true, // swift test --xunit-output writes a JUnit XML report
-	"scratch-path":    true, // swift test --scratch-path redirects the build dir (--build-path is its legacy alias)
+	"scratch-path":    true, // swift test --scratch-path redirects the build dir
+	"build-path":      true, // swift test --build-path: legacy alias of --scratch-path
 }
 
 func hasWriteOutputFlag(args []string) bool {
