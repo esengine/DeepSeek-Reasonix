@@ -6,12 +6,95 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
+
+type switchAskProvider struct {
+	turn int
+}
+
+func (*switchAskProvider) Name() string { return "switch-ask" }
+
+func (p *switchAskProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk, 2)
+	if p.turn == 0 {
+		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+			ID:        "ask-after-switch",
+			Name:      "ask",
+			Arguments: `{"questions":[{"header":"Direction","question":"Which path?","options":[{"label":"A"},{"label":"B"}]}]}`,
+		}}
+	} else {
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
+	}
+	p.turn++
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+func TestSwitchModelKeepsAskInteractive(t *testing.T) {
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	dir := t.TempDir()
+
+	bc := NewBroadcaster()
+	old := control.New(control.Options{
+		Executor:   agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard),
+		SessionDir: dir,
+		Label:      "old",
+		Sink:       bc,
+	})
+	old.EnableInteractiveApproval()
+
+	askCh := make(chan event.Ask, 1)
+	s := &Server{ctrl: old, bc: bc}
+	s.buildController = func(_ context.Context, _ string) (*control.Controller, error) {
+		reg := tool.NewRegistry()
+		reg.Add(agent.NewAskTool())
+		exec := agent.New(&switchAskProvider{}, reg, agent.NewSession("sys"), agent.Options{}, event.Discard)
+		return control.New(control.Options{
+			Executor:   exec,
+			SessionDir: dir,
+			Label:      "new",
+			Sink: event.FuncSink(func(e event.Event) {
+				if e.Kind == event.AskRequest {
+					askCh <- e.Ask
+				}
+			}),
+		}), nil
+	}
+
+	if err := s.switchModel(context.Background(), "next-model"); err != nil {
+		t.Fatalf("switchModel: %v", err)
+	}
+
+	newCtrl := s.ctl().(*control.Controller)
+	runDone := make(chan error, 1)
+	go func() { runDone <- newCtrl.Executor().Run(context.Background(), "ask the user") }()
+
+	select {
+	case ask := <-askCh:
+		newCtrl.AnswerQuestion(ask.ID, []event.AskAnswer{{QuestionID: "q1", Selected: []string{"A"}}})
+	case err := <-runDone:
+		t.Fatalf("ask tool returned without an ask_request after model switch: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("ask tool did not emit ask_request after model switch")
+	}
+
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("run after answering ask_request: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run stayed blocked after answering ask_request")
+	}
+}
 
 // primarySessionFiles filters a recovery-branch glob down to primary session
 // transcripts, dropping the .events.jsonl / .guardian.jsonl sidecars that the
