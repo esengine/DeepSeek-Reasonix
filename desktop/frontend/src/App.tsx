@@ -4125,8 +4125,12 @@ export default function App() {
   const topicbarCanRename = !sidebarImDetailConnection && Boolean(activeTab?.topicId);
   const topicbarTitleEditSize = Math.min(56, Math.max(4, topicTitleDraft.length || topicbarTitle.length || 1));
   const sidebarWorkbench = desktopLayoutStyle === "workbench";
-  const handleWindowsTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    if (!windowsFramelessChrome) return;
+  // The Wails drag runtime ignores anything with detail !== 1, so a double click
+  // on a --wails-draggable region never reaches the OS. Both platforms that hide
+  // their native title bar need this handled here.
+  const chromeDoubleClickZooms = windowsFramelessChrome || desktopPlatform === "darwin";
+  const handleChromeTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!chromeDoubleClickZooms) return;
     const target = event.target as HTMLElement | null;
     if (!target?.closest(".app-chrome, .topicbar, .workbench-dock__tools")) return;
     if (target.closest("button, input, textarea, select, a, [role='button'], [role='tab'], .windows-window-controls")) return;
@@ -4134,7 +4138,7 @@ export default function App() {
     void app.ToggleMaximiseMainWindow()
       .then(() => window.setTimeout(syncMainWindowMaximised, 80))
       .catch(() => undefined);
-  }, [syncMainWindowMaximised, windowsFramelessChrome]);
+  }, [chromeDoubleClickZooms, syncMainWindowMaximised]);
   // Creation keeps the classic sidebar/chat structure while gating chrome tweaks
   // behind its own style flag so classic/workbench remain unchanged.
   const appChromeHidden = sidebarWorkbench || sidebarCreation;
@@ -4152,7 +4156,7 @@ export default function App() {
     <TextSizeHotkeys />
       <div
         ref={appRef}
-        onDoubleClickCapture={handleWindowsTitlebarDoubleClick}
+        onDoubleClickCapture={handleChromeTitlebarDoubleClick}
         className={[
         "app",
         `app--${desktopPlatform}`,
