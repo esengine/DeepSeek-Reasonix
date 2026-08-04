@@ -526,6 +526,14 @@ func (c *Controller) managementNotice(trimmed string) bool {
 			return true
 		}
 		c.notice(c.mcpListText())
+	case "/loop":
+		args := strings.TrimSpace(strings.TrimPrefix(trimmed, "/loop"))
+		text, err := c.StartLoop(args)
+		if err != nil {
+			c.notice("loop: " + err.Error())
+		} else {
+			c.notice(text)
+		}
 	default:
 		return false
 	}

@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -245,6 +246,32 @@ func renderContextStatusGroups(used, window int, ratio float64) []string {
 	}
 }
 
+// loopStatusMode controls the NEXT JOB footer indicator.
+type loopStatusMode int
+
+const (
+	// loopStatusAuto (default) shows the indicator only while a scheduled
+	// task has a pending fire.
+	loopStatusAuto loopStatusMode = iota
+	// loopStatusOn always shows the indicator ("none" when nothing pending).
+	loopStatusOn
+	// loopStatusOff hides the indicator even while tasks are pending.
+	loopStatusOff
+)
+
+// parseLoopStatusMode maps a /loopstatus argument to a mode.
+func parseLoopStatusMode(arg string) (loopStatusMode, bool) {
+	switch arg {
+	case "auto":
+		return loopStatusAuto, true
+	case "on":
+		return loopStatusOn, true
+	case "off":
+		return loopStatusOff, true
+	}
+	return loopStatusAuto, false
+}
+
 // statusTelemetryGroups returns independently placeable session metrics. Git is
 // intentionally excluded because it owns the flexible identity slot; keeping
 // metrics separate lets narrow layouts wrap only between semantic groups.
@@ -262,11 +289,47 @@ func (m chatTUI) statusTelemetryGroups() []string {
 		if jt := m.jobsTag(); jt != "" {
 			data = append(data, footerMetric(i18n.M.ChatStatusJobsLabel, footerInfo(ansi.Strip(jt))))
 		}
+		if value, show := m.nextJobStatus(); show {
+			data = append(data, footerMetric(i18n.M.ChatStatusNextJobLabel, footerInfo(value)))
+		}
 	}
 	if m.balance != "" {
 		data = append(data, footerMetric(i18n.M.ChatStatusBalanceLabel, footerValue(m.balance)))
 	}
 	return data
+}
+
+// nextJobDue returns the earliest pending scheduled task (id, fire time). It
+// drives both the footer indicator and the idle refresh tick.
+func (m chatTUI) nextJobDue() (string, time.Time, bool) {
+	if m.ctrl == nil {
+		return "", time.Time{}, false
+	}
+	sched := m.ctrl.Scheduler()
+	if sched == nil {
+		return "", time.Time{}, false
+	}
+	return sched.NextDue()
+}
+
+// nextJobStatus renders the NEXT JOB footer value under the active
+// /loopstatus mode. show=false hides the indicator entirely.
+func (m chatTUI) nextJobStatus() (value string, show bool) {
+	id, at, ok := m.nextJobDue()
+	switch m.loopStatusMode {
+	case loopStatusOff:
+		return "", false
+	case loopStatusOn:
+		if !ok {
+			return i18n.M.LoopStatusNone, true
+		}
+		return id + " " + at.Format("15:04:05"), true
+	default: // loopStatusAuto
+		if !ok {
+			return "", false
+		}
+		return id + " " + at.Format("15:04:05"), true
+	}
 }
 
 // renderStatusBlock owns the complete persistent footer layout. The optional

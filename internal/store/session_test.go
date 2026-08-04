@@ -12,6 +12,7 @@ func TestSessionSidecarLayout(t *testing.T) {
 		// .meta appends to the full path (historical layout); the rest replace .jsonl.
 		{"meta", SessionMeta(p), p + ".meta"},
 		{"goal-state", SessionGoalState(p), "/home/u/.reasonix/sessions/abc.goal-state.json"},
+		{"scheduled-tasks", SessionScheduledTasks(p), "/home/u/.reasonix/sessions/abc.scheduled-tasks.json"},
 		{"event-log", SessionEventLog(p), "/home/u/.reasonix/sessions/abc.events.jsonl"},
 		{"event-log-damaged", SessionEventLogDamaged(p), "/home/u/.reasonix/sessions/abc.events.jsonl.damaged"},
 		{"event-index", SessionEventIndex(p), "/home/u/.reasonix/sessions/abc.event-index.json"},
@@ -37,6 +38,7 @@ func TestSessionSidecarEmptyPath(t *testing.T) {
 	}{
 		{"meta", SessionMeta},
 		{"goal-state", SessionGoalState},
+		{"scheduled-tasks", SessionScheduledTasks},
 		{"event-log", SessionEventLog},
 		{"event-log-damaged", SessionEventLogDamaged},
 		{"event-index", SessionEventIndex},
@@ -82,6 +84,7 @@ func TestSessionSidecarFiles(t *testing.T) {
 	want := []string{
 		p + ".meta",
 		"/home/u/.reasonix/sessions/abc.goal-state.json",
+		"/home/u/.reasonix/sessions/abc.scheduled-tasks.json",
 		"/home/u/.reasonix/sessions/abc.events.jsonl",
 		"/home/u/.reasonix/sessions/abc.events.jsonl.damaged",
 		"/home/u/.reasonix/sessions/abc.event-index.json",

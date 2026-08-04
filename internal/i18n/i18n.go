@@ -88,6 +88,13 @@ type Messages struct {
 	ChatStatusContextLabel                 string
 	ChatStatusCompactLabel                 string
 	ChatStatusJobsLabel                    string
+	ChatStatusNextJobLabel                 string
+	LoopStatusNone                         string // NEXT JOB value when /loopstatus on and nothing pending
+	LoopStatusCurrentFmt                   string // /loopstatus status line, "%s" = mode name
+	LoopStatusSetOn                        string // /loopstatus on confirmation
+	LoopStatusSetOff                       string // /loopstatus off confirmation
+	LoopStatusSetAuto                      string // /loopstatus auto confirmation
+	LoopStatusUnknownFmt                   string // bad /loopstatus argument, "%s" = argument
 	ChatStatusBalanceLabel                 string
 	ChatStatusCacheNowFmt                  string // cache status tag, "%s" = latest-turn hit rate with percent sign
 	ChatStatusCacheAvgFmt                  string // cache status tag, "%s" = session-average hit rate with percent sign
@@ -236,6 +243,8 @@ type Messages struct {
 	CmdMemory           string // /memory
 	CmdMigrate          string // /migrate
 	CmdGoal             string // /goal
+	CmdLoop             string // /loop
+	CmdLoopStatus       string // /loopstatus
 	CmdRemember         string // /remember
 	CmdForget           string // /forget
 	CmdMcp              string // /mcp

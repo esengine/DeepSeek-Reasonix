@@ -50,6 +50,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/scheduler"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
 	"reasonix/internal/tool"
@@ -137,6 +138,10 @@ type Controller struct {
 	// tools spawn into it; Compose drains its completion notes into the next turn;
 	// Close cancels its still-running jobs.
 	jobs *jobs.Manager
+	// scheduler owns the session's scheduled tasks (/loop, cron tools). Its
+	// onFire callback launches scheduled turns via runScheduledTurn; Close
+	// stops its ticker. See scheduler.go in this package for the wiring.
+	scheduler *scheduler.Scheduler
 	// workspaceLease is the Delivery writer owner shared with the executor.
 	// It is exposed only through a sanitized state snapshot for Desktop recovery.
 	workspaceLease *workspacelease.Owner
@@ -411,6 +416,9 @@ type Options struct {
 	BalanceClient *http.Client
 	// Jobs is the session-scoped background-job manager (nil disables background jobs).
 	Jobs *jobs.Manager
+	// Scheduler is the session-scoped scheduled-task manager for /loop and
+	// the cron tools (nil creates one internally).
+	Scheduler *scheduler.Scheduler
 	// WorkspaceLease is the Delivery writer owner shared with the executor.
 	WorkspaceLease *workspacelease.Owner
 	// Registry is the executor's live tool set, and PluginCtx the session-scoped
@@ -533,9 +541,22 @@ func New(opts Options) *Controller {
 	if strings.TrimSpace(opts.WorkspaceRoot) != "" {
 		c.autoResearch = autoresearch.NewStore(opts.WorkspaceRoot)
 	}
+	// Scheduler: bind the session's scheduled-task sidecar, then start the
+	// ticker. onFire launches a goroutine per due task (runScheduledTurn),
+	// which parks while a foreground turn is running. The scheduler must exist
+	// before rebindCheckpoints so its sidecar binding participates in every
+	// session-path change.
+	c.scheduler = opts.Scheduler
+	if c.scheduler == nil {
+		c.scheduler = scheduler.New()
+	}
+	c.scheduler.OnFire(func(t scheduler.Task) {
+		c.runScheduledTurn(t)
+	})
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
 	c.setActiveJobSession(opts.SessionPath)
+	c.scheduler.Start()
 	cmdsInit := opts.Commands
 	c.commands.Store(&cmdsInit)
 	if c.executor != nil {
@@ -660,6 +681,26 @@ func (c *Controller) rebindCheckpoints(sessionPath string) {
 	if c.executor != nil {
 		c.wireMutationObserver()
 	}
+	c.rebindScheduler(sessionPath)
+}
+
+// rebindScheduler points the scheduler's persistence at the (possibly new)
+// session and loads any tasks already on disk, so unexpired /loop tasks
+// survive --resume and move with NewSession/Resume/SetSessionPath. Called on
+// construction and wherever rebindCheckpoints is. It must run before Start on
+// the construction path; on later rebinds the scheduler is already running
+// and simply points its next save at the new sidecar.
+func (c *Controller) rebindScheduler(sessionPath string) {
+	if c.scheduler == nil {
+		return
+	}
+	path := store.SessionScheduledTasks(sessionPath)
+	if path == "" {
+		c.scheduler.SetPersistPath("")
+		return
+	}
+	c.scheduler.SetPersistPath(path)
+	c.scheduler.Load(path)
 }
 
 // beginCheckpoint opens a checkpoint for the turn about to run, recording the
@@ -5143,6 +5184,9 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 			default:
 				c.jobs.Close() // cancel any still-running background jobs
 			}
+		}
+		if c.scheduler != nil {
+			c.scheduler.Stop() // drain the ticker goroutine
 		}
 		if c.cleanup != nil {
 			c.cleanup()

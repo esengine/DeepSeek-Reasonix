@@ -341,6 +341,14 @@ type chatTUI struct {
 	statuslineOut string
 	gitStatus     gitStatus
 
+	// cronTickArmed tracks whether the idle one-second tick chain is running to
+	// keep the footer's next-scheduled-task clock fresh.
+	cronTickArmed bool
+	// loopStatusMode controls the NEXT JOB footer indicator: auto (default,
+	// shown only while a scheduled task is pending), on (always shown), or
+	// off (never shown). Set via /loopstatus.
+	loopStatusMode loopStatusMode
+
 	// statusLineCount is the number of terminal rows the status block occupies
 	// (wrapped working line + wrapped status line + wrapped data line). Updated
 	// each frame via computeStatusLineCount so bottomRows can reserve the correct
@@ -1316,11 +1324,15 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.confirmBubbleSent()
 				}
 			default:
-				// Idle (any mode): a double-Esc on an empty composer opens the
+				// Idle (any mode): Esc interacts with loops when any exist —
+				// a pending dynamic wakeup pauses, a paused loop cancels all
+				// loops. Otherwise a double-Esc on an empty composer opens the
 				// rewind picker (Claude Code's gesture); a first Esc just arms
 				// it. Non-empty input clears as before.
 				if strings.TrimSpace(m.input.Value()) == "" {
-					if !m.lastEsc.IsZero() && time.Since(m.lastEsc) < 600*time.Millisecond {
+					if m.loopEscIntercept() {
+						m.lastEsc = time.Time{}
+					} else if !m.lastEsc.IsZero() && time.Since(m.lastEsc) < 600*time.Millisecond {
 						m.lastEsc = time.Time{}
 						m.openRewind()
 					} else {
@@ -1746,6 +1758,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.elapsed = int(time.Since(m.runStart).Seconds())
 			m.tickToolRunning()
 			cmds = append(cmds, elapsedTick())
+		} else if _, _, ok := m.nextJobDue(); ok {
+			// Idle with a scheduled task pending: keep the footer's next-job
+			// clock fresh even between keystrokes and turn events.
+			cmds = append(cmds, elapsedTick())
 		}
 
 	case spinner.TickMsg:
@@ -1770,6 +1786,21 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	if shouldClearWideInputChange(beforeInput, m.input.Value()) {
 		cmds = append(cmds, tea.ClearScreen)
+	}
+
+	// While idle with a scheduled task pending, keep a one-second tick armed so
+	// the footer's next-job clock stays fresh without input or turn events.
+	// The chain sustains itself in the elapsedTickMsg handler and dies when no
+	// task is pending anymore.
+	if m.state == tuiIdle {
+		if _, _, ok := m.nextJobDue(); ok {
+			if !m.cronTickArmed {
+				m.cronTickArmed = true
+				cmds = append(cmds, elapsedTick())
+			}
+		} else {
+			m.cronTickArmed = false
+		}
 	}
 
 	return m, finalize(m, cmds)
@@ -4102,6 +4133,22 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		}))
 	case "/goal":
 		return m.runGoalSubcommand(input)
+	case "/loop":
+		m.echoLocalCommand(input)
+		if m.ctrl == nil {
+			m.notice("controller not ready")
+			return nil
+		}
+		args := strings.TrimSpace(strings.TrimPrefix(input, "/loop"))
+		text, err := m.ctrl.StartLoop(args)
+		if err != nil {
+			m.notice("loop: " + err.Error())
+		} else {
+			m.notice(text)
+		}
+	case "/loopstatus":
+		m.echoLocalCommand(input)
+		m.runLoopStatusCommand(strings.TrimSpace(strings.TrimPrefix(input, "/loopstatus")))
 	case "/remember":
 		note := strings.TrimSpace(strings.TrimPrefix(input, typedCmd))
 		if note == "" {
@@ -4139,6 +4186,59 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
 	}
 	return nil
+}
+
+// runLoopStatusCommand handles "/loopstatus [on|off|auto]": a bare call
+// reports the current mode; with an argument it switches the NEXT JOB footer
+// indicator. Default is auto — shown only while a scheduled task is pending.
+func (m *chatTUI) runLoopStatusCommand(arg string) {
+	switch {
+	case arg == "" || arg == "status":
+		name := "auto"
+		switch m.loopStatusMode {
+		case loopStatusOn:
+			name = "on"
+		case loopStatusOff:
+			name = "off"
+		}
+		m.notice(fmt.Sprintf(i18n.M.LoopStatusCurrentFmt, name))
+	case arg == "on":
+		m.loopStatusMode = loopStatusOn
+		m.notice(i18n.M.LoopStatusSetOn)
+	case arg == "off":
+		m.loopStatusMode = loopStatusOff
+		m.notice(i18n.M.LoopStatusSetOff)
+	case arg == "auto":
+		m.loopStatusMode = loopStatusAuto
+		m.notice(i18n.M.LoopStatusSetAuto)
+	default:
+		m.notice(fmt.Sprintf(i18n.M.LoopStatusUnknownFmt, arg))
+	}
+}
+
+// loopEscIntercept routes an idle Esc to the session's loops when any exist:// a dynamic loop with a pending wakeup pauses it; a paused loop cancels all
+// loops. It reports whether it consumed the Esc (false keeps the ordinary
+// double-Esc rewind gesture). Fixed-interval loops are not touched — they are
+// managed via cron_list/cron_delete.
+func (m *chatTUI) loopEscIntercept() bool {
+	if m.ctrl == nil {
+		return false
+	}
+	sched := m.ctrl.Scheduler()
+	if sched == nil {
+		return false
+	}
+	if sched.HasPendingDynamic() {
+		n := sched.StopWakeup()
+		m.notice(fmt.Sprintf("loop paused — %d pending wakeup(s) cleared; press Esc again to cancel all loops", n))
+		return true
+	}
+	if sched.HasDynamic() {
+		sched.CancelAll()
+		m.notice("all scheduled loops cancelled")
+		return true
+	}
+	return false
 }
 
 // showStatusDetails keeps diagnostics available without permanently crowding

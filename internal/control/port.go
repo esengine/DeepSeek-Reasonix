@@ -16,6 +16,7 @@ import (
 	"reasonix/internal/memory"
 	"reasonix/internal/plugin"
 	"reasonix/internal/provider"
+	"reasonix/internal/scheduler"
 	"reasonix/internal/skill"
 )
 
@@ -221,6 +222,12 @@ type Settings interface {
 	SetDisplayRecorder(fn func(content, display string))
 }
 
+// Scheduling covers session-scoped scheduled tasks (/loop and the cron tools).
+type Scheduling interface {
+	StartLoop(input string) (string, error)
+	Scheduler() *scheduler.Scheduler
+}
+
 // SessionAPI is the full driving port — the composition of every sub-port. A
 // rich frontend (the HTTP server, the desktop app, the TUI) depends on this;
 // leaner frontends (bot, acp) depend on just the sub-ports they use.
@@ -236,6 +243,7 @@ type SessionAPI interface {
 	SessionPersistence
 	Input
 	Settings
+	Scheduling
 }
 
 // Compile-time proof that the concrete controller satisfies each sub-port and
@@ -253,5 +261,6 @@ var (
 	_ SessionPersistence = (*Controller)(nil)
 	_ Input              = (*Controller)(nil)
 	_ Settings           = (*Controller)(nil)
+	_ Scheduling         = (*Controller)(nil)
 	_ SessionAPI         = (*Controller)(nil)
 )

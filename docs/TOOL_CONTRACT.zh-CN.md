@@ -9,6 +9,8 @@
 | `bash` | false | 执行 shell 命令并返回 stdout/stderr。构建、测试、git、包管理器等使用它；读写查找文件优先使用专用工具。 |
 | `bash_output` | true | 读取后台 `bash` 或 `task` job 自上次读取后的新增输出和状态。 |
 | `code_index` | true | 轻量内置代码符号索引；优先使用 `lsp_*` 或代码图 MCP，缺失时用它兜底。 |
+| `cron_delete` | false | 按 ID 取消已排定的任务（见 cron_list）。任务立即停止触发。当被要求取消循环或提醒，或某个循环任务已无用时使用。 |
+| `cron_list` | true | 列出会话中所有已排定的任务：ID、调度（cron 表达式或动态）、下次触发时间和提示词。当被问到存在哪些排定任务，或取消前查看时使用。 |
 | `complete_step` | true | 用证据记录已批准计划中一个步骤的完成情况。 |
 | `delete_range` | false | 用精确 start/end 文本锚点删除文件中的连续范围。 |
 | `delete_symbol` | false | 用 Go AST 删除 Go 源文件中的命名符号。 |
@@ -21,6 +23,7 @@
 | `multi_edit` | false | 对单个文件原子应用多个编辑。 |
 | `notebook_edit` | false | 编辑 Jupyter notebook 的单个 cell。 |
 | `read_file` | true | 按可分页的行号格式读取文本文件。 |
+| `schedule_wakeup` | false | 为动态 /loop 排定下次唤醒。每次循环迭代后调用：传入 `delay_minutes`（1-60）和 `reason` 稍后再查，或 `stop: true` 在目标完成时结束循环。不调用时，动态循环在当前迭代后保持暂停。 |
 | `todo_write` | true | 记录并替换当前工作的结构化任务列表。 |
 | `wait` | true | 等待后台 job 完成并返回最终输出。 |
 | `web_fetch` | true | 通过 HTTP/HTTPS 获取 URL 文本内容。 |

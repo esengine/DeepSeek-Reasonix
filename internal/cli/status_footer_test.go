@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -516,6 +517,134 @@ func TestStatusFooterNarrowLayoutBreaksBetweenGroups(t *testing.T) {
 	}
 	if !strings.Contains(block, "@") || !strings.Contains(block, "+20 -4") || !strings.Contains(block, "¥123.45") {
 		t.Fatalf("narrow layout dropped required information:\n%s", block)
+	}
+}
+
+func TestStatusFooterShowsNextScheduledTask(t *testing.T) {
+	i18n.DetectLanguage("en")
+
+	ctrl := control.New(control.Options{})
+	defer ctrl.Close()
+	if _, err := ctrl.StartLoop("5m check deploy"); err != nil {
+		t.Fatalf("StartLoop: %v", err)
+	}
+	views := ctrl.Scheduler().Tasks()
+	if len(views) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(views))
+	}
+	id := views[0].ID
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	primary := m.primaryStatusLine(" Auto ", false, false)
+	block := ansi.Strip(m.renderStatusBlock(primary, 120))
+	if !strings.Contains(block, "NEXT JOB") || !strings.Contains(block, id) {
+		t.Fatalf("footer missing next-job indicator:\n%s", block)
+	}
+	// the fire time renders as an HH:MM:SS wall clock
+	if !regexp.MustCompile(`\d{2}:\d{2}:\d{2}`).MatchString(block) {
+		t.Fatalf("footer missing next-job fire time:\n%s", block)
+	}
+}
+
+func TestStatusFooterHidesNextJobWithoutTasks(t *testing.T) {
+	i18n.DetectLanguage("en")
+
+	ctrl := control.New(control.Options{})
+	defer ctrl.Close()
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	primary := m.primaryStatusLine(" Auto ", false, false)
+	block := ansi.Strip(m.renderStatusBlock(primary, 120))
+	if strings.Contains(block, "NEXT JOB") {
+		t.Fatalf("footer shows NEXT JOB with no scheduled tasks:\n%s", block)
+	}
+}
+
+func TestParseLoopStatusMode(t *testing.T) {
+	cases := []struct {
+		arg  string
+		want loopStatusMode
+		ok   bool
+	}{
+		{"auto", loopStatusAuto, true},
+		{"on", loopStatusOn, true},
+		{"off", loopStatusOff, true},
+		{"", loopStatusAuto, false},
+		{"always", loopStatusAuto, false},
+	}
+	for _, c := range cases {
+		got, ok := parseLoopStatusMode(c.arg)
+		if got != c.want || ok != c.ok {
+			t.Errorf("parseLoopStatusMode(%q) = (%v, %v), want (%v, %v)", c.arg, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+func TestNextJobStatusModes(t *testing.T) {
+	i18n.DetectLanguage("en")
+
+	ctrl := control.New(control.Options{})
+	defer ctrl.Close()
+	_, err := ctrl.StartLoop("5m check deploy")
+	if err != nil {
+		t.Fatalf("StartLoop: %v", err)
+	}
+
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+
+	// auto: shown while a task is pending, hidden without one
+	m.loopStatusMode = loopStatusAuto
+	if value, show := m.nextJobStatus(); !show || !strings.Contains(value, ctrl.Scheduler().Tasks()[0].ID) {
+		t.Errorf("auto mode with task: (%q, %v), want id shown", value, show)
+	}
+	m.loopStatusMode = loopStatusAuto
+	ctrl.Scheduler().CancelAll()
+	if _, show := m.nextJobStatus(); show {
+		t.Error("auto mode without task: indicator should be hidden")
+	}
+
+	// on: always shown, "none" when nothing pending
+	m.loopStatusMode = loopStatusOn
+	if value, show := m.nextJobStatus(); !show || !strings.Contains(value, "none") {
+		t.Errorf("on mode without task: (%q, %v), want 'none'", value, show)
+	}
+
+	// off: never shown, even with a task pending
+	if _, err := ctrl.StartLoop("5m check deploy"); err != nil {
+		t.Fatalf("StartLoop: %v", err)
+	}
+	m.loopStatusMode = loopStatusOff
+	if _, show := m.nextJobStatus(); show {
+		t.Error("off mode with task: indicator should be hidden")
+	}
+}
+
+func TestRunLoopStatusCommand(t *testing.T) {
+	i18n.DetectLanguage("en")
+	m := newTestChatTUI()
+
+	m.runLoopStatusCommand("on")
+	if m.loopStatusMode != loopStatusOn {
+		t.Errorf("mode after 'on' = %v, want on", m.loopStatusMode)
+	}
+	m.runLoopStatusCommand("off")
+	if m.loopStatusMode != loopStatusOff {
+		t.Errorf("mode after 'off' = %v, want off", m.loopStatusMode)
+	}
+	m.runLoopStatusCommand("auto")
+	if m.loopStatusMode != loopStatusAuto {
+		t.Errorf("mode after 'auto' = %v, want auto", m.loopStatusMode)
+	}
+	m.runLoopStatusCommand("bogus") // unknown arg must not change the mode
+	if m.loopStatusMode != loopStatusAuto {
+		t.Errorf("mode after unknown arg = %v, want unchanged auto", m.loopStatusMode)
+	}
+	m.runLoopStatusCommand("") // bare call reports, does not change
+	if m.loopStatusMode != loopStatusAuto {
+		t.Errorf("mode after bare call = %v, want unchanged auto", m.loopStatusMode)
 	}
 }
 

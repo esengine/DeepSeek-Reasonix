@@ -43,7 +43,7 @@ func runTool(t *testing.T, tl tool.Tool, m map[string]any) string {
 }
 
 func TestBuiltinsRegistered(t *testing.T) {
-	want := []string{"bash", "code_index", "edit_file", "glob", "grep", "ls", "move_file", "multi_edit", "read_file", "web_fetch", "write_file"}
+	want := []string{"bash", "code_index", "cron_delete", "cron_list", "edit_file", "glob", "grep", "ls", "move_file", "multi_edit", "read_file", "schedule_wakeup", "web_fetch", "write_file"}
 	for _, name := range want {
 		if _, ok := tool.LookupBuiltin(name); !ok {
 			t.Errorf("built-in %q not registered", name)

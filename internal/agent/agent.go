@@ -26,6 +26,7 @@ import (
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/scheduler"
 	"reasonix/internal/shellparse"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
@@ -402,6 +403,9 @@ type Agent struct {
 	// run_in_background, task run_in_background, bash_output/kill_shell/wait) can
 	// reach it. nil leaves those tools to degrade gracefully.
 	jobs *jobs.Manager
+	// scheduler is the session's scheduled-task manager; nil disables the
+	// cron_* / schedule_wakeup tools' effect (they report unavailability).
+	scheduler *scheduler.Scheduler
 
 	// writeScheduler coordinates parent-agent writes against background
 	// subagent write claims. Set on the parent executor only (subagentDepth 0);
@@ -1051,6 +1055,11 @@ type Options struct {
 	// Jobs is the session's background-job manager (nil disables background tools).
 	Jobs *jobs.Manager
 
+	// Scheduler is the session's scheduled-task manager for /loop and the
+	// cron_* / schedule_wakeup tools. Nil leaves the tools present but inert
+	// (they report that no scheduler is available).
+	Scheduler *scheduler.Scheduler
+
 	// WriteScheduler is the session-scoped subagent concurrency/write-claim
 	// controller. When set on the parent executor, write-capable tools reserve
 	// paths for the duration of Execute so background writers cannot TOCTOU
@@ -1210,6 +1219,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		configWriteApprover:       configWriteApprover,
 		hooks:                     hooks,
 		jobs:                      opts.Jobs,
+		scheduler:                 opts.Scheduler,
 		writeScheduler:            opts.WriteScheduler,
 		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),
 		workspaceLease:            opts.WorkspaceLease,

@@ -597,6 +597,8 @@ Mode and display shortcuts:
 | `Ctrl+O` | Toggles verbose reasoning display | Also available through `/verbose`. |
 | `Ctrl+B` | Expands or collapses long shell output | Long shell-output hint lines can also be clicked in the transcript; text selection is handled in-app while the full-screen TUI has mouse reporting enabled. |
 | `/goal <objective>`, `/goal --research <objective>`, `/goal --simple <objective>`, `/goal status`, `/goal clear` | Starts, checks, or clears Goal | Goal is not in any keyboard cycle; clearly long-horizon goals automatically enable AutoResearch after Goal is explicitly started. |
+| `/loop [interval] [prompt]` | Runs a prompt repeatedly on a schedule, or manages scheduled loops | `/loop 5m check the deploy` runs the prompt every 5 minutes; `/loop <prompt>` runs a dynamic loop where the agent picks each delay via `schedule_wakeup`; a bare `/loop` uses `loop.md` or a built-in maintenance prompt. Fixed loops are cancelled by asking the agent (`cron_delete`); dynamic loops pause on `Esc` and cancel on a second `Esc`. The status bar shows the next scheduled fire as `NEXT JOB <id> <time>`. |
+| `/loopstatus [on|off|auto]` | Toggles the `NEXT JOB` status-bar indicator | Default `auto`: shown only while a scheduled task is pending. `on` always shows it (`none` when nothing pending); `off` hides it even while tasks run. A bare `/loopstatus` reports the current mode. |
 | `/migrate`, `/migrate --from <legacy-dir>` | Retries legacy migration or imports sessions from a chosen v0.x source | Use `--from` for custom Windows v0.52 install/data directories; it imports sessions only. See [Configuration paths](./CONFIG_PATHS.md). |
 
 Picker and approval shortcuts:
@@ -852,7 +854,7 @@ convenient.
 
 In an interactive `reasonix` session, built-in commands (`/compact`, `/new`, `/clear`, `/rewind`,
 `/tree`, `/branch`, `/switch`, `/todo`, `/model`, `/work-mode`, `/mcp`, `/skills`, `/hooks`,
-`/memory`, `/goal`, `/output-style`, `/sandbox`, `/language`,
+`/memory`, `/goal`, `/loop`, `/loopstatus`, `/output-style`, `/sandbox`, `/language`,
 `/reasoning-language`, `/help`) run
 locally — `/help` lists them all. Built-in **skills** such as `/init`,
 `/explore`, `/test`, and `/reasonix-guide` also appear in the slash menu and via

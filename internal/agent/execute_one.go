@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/scheduler"
 	"reasonix/internal/tool"
 )
 
@@ -544,6 +545,9 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	}
 	if a.jobs != nil {
 		cctx = jobs.WithManager(cctx, a.jobs)
+	}
+	if a.scheduler != nil {
+		cctx = scheduler.NewContext(cctx, a.scheduler)
 	}
 	if a.sandboxEscapeApprover != nil {
 		cctx = sandbox.WithEscapeApprover(cctx, a.sandboxEscapeApprover)

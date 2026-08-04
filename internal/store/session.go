@@ -62,6 +62,16 @@ func SessionGoalState(sessionPath string) string {
 	return sessionStem(sessionPath) + ".goal-state.json"
 }
 
+// SessionScheduledTasks is the persisted scheduled-task sidecar for /loop
+// (<id>.scheduled-tasks.json). Like the goal sidecar it survives session
+// teardown so --resume restores unexpired tasks.
+func SessionScheduledTasks(sessionPath string) string {
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".scheduled-tasks.json"
+}
+
 // SessionEventLog is the append-only transcript event log (<id>.events.jsonl).
 func SessionEventLog(sessionPath string) string {
 	if sessionPath == "" {
@@ -168,6 +178,7 @@ func SessionSidecarFiles(sessionPath string) []string {
 	return []string{
 		SessionMeta(sessionPath),
 		SessionGoalState(sessionPath),
+		SessionScheduledTasks(sessionPath),
 		SessionEventLog(sessionPath),
 		SessionEventLogDamaged(sessionPath),
 		SessionEventIndex(sessionPath),

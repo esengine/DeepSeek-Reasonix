@@ -45,6 +45,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/recovery"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/scheduler"
 	"reasonix/internal/secrets"
 	"reasonix/internal/skill"
 	"reasonix/internal/stats"
@@ -1563,6 +1564,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	})
 
 	execSess := agent.NewSession(sysPrompt)
+	// The session scheduler backs /loop and the cron_* / schedule_wakeup
+	// tools. It is shared by the executor (for tool-context injection) and the
+	// controller (for firing scheduled turns); the controller wires the fire
+	// callback, persistence, and Start.
+	sched := scheduler.New()
 	executor := agent.New(execProv, reg, execSess, agent.Options{
 		MaxSteps:    maxSteps,
 		MaxStepsKey: opts.MaxStepsKey,
@@ -1572,6 +1578,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Gate:        headlessGate,
 		Hooks:       hookRunner,
 		Jobs:        jm,
+		Scheduler:   sched,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,
@@ -1675,6 +1682,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		BalanceKey:            entry.APIKey(),
 		BalanceClient:         balanceClient,
 		Jobs:                  jm,
+		Scheduler:             sched,
 		WorkspaceLease:        workspaceLease,
 		Registry:              reg,
 		PluginCtx:             ctx,
