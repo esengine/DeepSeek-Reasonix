@@ -23,6 +23,10 @@ import { useT } from "../lib/i18n";
 type SelectionAction = {
   text: string;
   point: ContextMenuPoint;
+  // Bounding rect of the selected range. The floating action centers itself
+  // horizontally over this rect and prefers the space above it, flipping below
+  // when the top edge would collide with the window.
+  anchor?: { left: number; top: number; width: number; height: number };
 };
 
 const ACTION_EDGE_GAP = 8;
@@ -106,16 +110,32 @@ export function TranscriptSelectionMenu({
       setActionPoint(action.point);
       return;
     }
-    setActionPoint({
-      left: Math.min(
-        Math.max(ACTION_EDGE_GAP, action.point.left),
-        Math.max(ACTION_EDGE_GAP, window.innerWidth - rect.width - ACTION_EDGE_GAP),
-      ),
-      top: Math.min(
-        Math.max(ACTION_EDGE_GAP, action.point.top),
-        Math.max(ACTION_EDGE_GAP, window.innerHeight - rect.height - ACTION_EDGE_GAP),
-      ),
-    });
+    if (!action.anchor) {
+      // No measurable selection rect (e.g. synthetic ranges): keep the raw
+      // point, only clamped to the window edges.
+      setActionPoint({
+        left: Math.min(
+          Math.max(ACTION_EDGE_GAP, action.point.left),
+          Math.max(ACTION_EDGE_GAP, window.innerWidth - rect.width - ACTION_EDGE_GAP),
+        ),
+        top: Math.min(
+          Math.max(ACTION_EDGE_GAP, action.point.top),
+          Math.max(ACTION_EDGE_GAP, window.innerHeight - rect.height - ACTION_EDGE_GAP),
+        ),
+      });
+      return;
+    }
+    const { left: anchorLeft, top: anchorTop, width: anchorWidth, height: anchorHeight } = action.anchor;
+    const centeredLeft = anchorLeft + anchorWidth / 2 - rect.width / 2;
+    const left = Math.min(
+      Math.max(ACTION_EDGE_GAP, centeredLeft),
+      Math.max(ACTION_EDGE_GAP, window.innerWidth - rect.width - ACTION_EDGE_GAP),
+    );
+    // Prefer the space above the selection; flip below when the top edge
+    // would collide with the window.
+    const above = anchorTop - rect.height - ACTION_EDGE_GAP;
+    const top = above >= ACTION_EDGE_GAP ? above : anchorTop + anchorHeight + ACTION_EDGE_GAP;
+    setActionPoint({ left, top });
   }, [action]);
 
   useEffect(() => {
@@ -150,12 +170,15 @@ export function TranscriptSelectionMenu({
       if (dismissedRef.current === selected) return;
       dismissedRef.current = null;
       const rect = typeof range.getBoundingClientRect === "function" ? range.getBoundingClientRect() : null;
-      setAction({
-        text: selected,
-        point: rect && (rect.width > 0 || rect.height > 0)
-          ? { left: rect.right, top: rect.bottom + 8 }
-          : { left: 12, top: 12 },
-      });
+      setAction(
+        rect && (rect.width > 0 || rect.height > 0)
+          ? {
+              text: selected,
+              point: { left: rect.left + rect.width / 2, top: rect.top - ACTION_EDGE_GAP },
+              anchor: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+            }
+          : { text: selected, point: { left: 12, top: 12 } },
+      );
     };
     const scheduleShow = (target: EventTarget | null) => {
       if (frame !== null) cancelAnimationFrame(frame);
