@@ -9055,26 +9055,42 @@ func (a *App) findTopicSessionForTargetByContent(scope, workspaceRoot, topicID s
 	if topicID == "" {
 		return "", ""
 	}
-	var bestPath string
-	var bestDir string
-	var bestTime time.Time
+	var bestContentPath string
+	var bestContentDir string
+	var bestContentTime time.Time
+	var bestBlankPath string
+	var bestBlankDir string
+	var bestBlankTime time.Time
 	for _, dir := range a.knownSessionDirs() {
 		for _, match := range topicSessionMatches(dir, topicID) {
-			if requireContent && !sessionFileHasConversationContent(match.path) {
-				continue
-			}
 			if !topicSessionMatchMatchesTarget(match, scope, workspaceRoot) {
 				continue
 			}
-			if bestPath == "" || match.updatedAt.After(bestTime) ||
-				(match.updatedAt.Equal(bestTime) && match.path < bestPath) {
-				bestPath = match.path
-				bestDir = dir
-				bestTime = match.updatedAt
+			hasContent := sessionFileHasConversationContent(match.path)
+			if requireContent && !hasContent {
+				continue
+			}
+			if hasContent {
+				if bestContentPath == "" || match.updatedAt.After(bestContentTime) ||
+					(match.updatedAt.Equal(bestContentTime) && match.path < bestContentPath) {
+					bestContentPath = match.path
+					bestContentDir = dir
+					bestContentTime = match.updatedAt
+				}
+				continue
+			}
+			if bestBlankPath == "" || match.updatedAt.After(bestBlankTime) ||
+				(match.updatedAt.Equal(bestBlankTime) && match.path < bestBlankPath) {
+				bestBlankPath = match.path
+				bestBlankDir = dir
+				bestBlankTime = match.updatedAt
 			}
 		}
 	}
-	return bestPath, bestDir
+	if bestContentPath != "" {
+		return bestContentPath, bestContentDir
+	}
+	return bestBlankPath, bestBlankDir
 }
 
 type topicSessionFileSignature struct {

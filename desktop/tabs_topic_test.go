@@ -14,6 +14,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/provider"
 )
 
 type runtimeStatusSessionController struct {
@@ -79,6 +80,34 @@ func writeTopicSessionWithPrompt(t *testing.T, dir, name, topicID, topicTitle, w
 	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, []byte(`{"role":"user","content":`+strconv.Quote(prompt)+`}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write session: %v", err)
+	}
+	scope := "global"
+	if strings.TrimSpace(workspaceRoot) != "" {
+		scope = "project"
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(path, agent.BranchMeta{
+		CreatedAt:     updatedAt.Add(-time.Minute),
+		UpdatedAt:     updatedAt,
+		Scope:         scope,
+		WorkspaceRoot: workspaceRoot,
+		TopicID:       topicID,
+		TopicTitle:    topicTitle,
+	}); err != nil {
+		t.Fatalf("save branch meta: %v", err)
+	}
+	return path
+}
+
+func writeTopicEventSessionWithPrompt(t *testing.T, dir, name, topicID, topicTitle, workspaceRoot, prompt string, updatedAt time.Time) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	s := agent.NewSession("system")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: prompt})
+	if err := s.SaveSnapshot(path); err != nil {
+		t.Fatalf("save event session: %v", err)
+	}
+	if err := os.Truncate(path, 0); err != nil {
+		t.Fatalf("truncate checkpoint: %v", err)
 	}
 	scope := "global"
 	if strings.TrimSpace(workspaceRoot) != "" {
@@ -4102,6 +4131,55 @@ func TestOpenProjectTabSkipsCleanupPendingTopicSession(t *testing.T) {
 		if msg.Content == "pending topic prompt" {
 			t.Fatalf("opened cleanup-pending topic history at path %q: %+v", tab.Ctrl.SessionPath(), tab.Ctrl.History())
 		}
+	}
+}
+
+func TestFindTopicSessionForTargetPrefersContentOverNewerBlankTopicSession(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := t.TempDir()
+	movedRoot := filepath.Join(t.TempDir(), "moved-project")
+	app := NewApp()
+	installNoopRuntimeEvents(app)
+	topic, err := app.CreateTopic("project", projectRoot, "Recovered topic")
+	if err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	realPath := writeTopicEventSessionWithPrompt(t, dir, "real-topic.jsonl", topic.ID, "Recovered topic", movedRoot, "real history", time.Now().Add(-time.Hour))
+
+	if got, _ := app.findTopicSessionForTarget("project", projectRoot, topic.ID); got != "" {
+		t.Fatalf("precondition topic lookup = %q, want no match while workspace root differs", got)
+	}
+	blankPath, err := createEmptySessionFile(dir, "")
+	if err != nil {
+		t.Fatalf("create blank topic session: %v", err)
+	}
+	if err := pinNewEmptySessionBranchMeta(blankPath, "project", projectRoot, topic.ID, "Recovered topic"); err != nil {
+		t.Fatalf("pin blank topic session: %v", err)
+	}
+	if blankPath == realPath {
+		t.Fatalf("blank session path unexpectedly matches real session %q", realPath)
+	}
+	if sessionFileHasConversationContent(blankPath) {
+		t.Fatalf("created fallback session %q should be blank", blankPath)
+	}
+
+	realMeta, ok, err := agent.LoadBranchMeta(realPath)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta(%q): ok=%v err=%v", realPath, ok, err)
+	}
+	realMeta.WorkspaceRoot = projectRoot
+	if err := agent.SaveBranchMetaPreserveUpdated(realPath, realMeta); err != nil {
+		t.Fatalf("restore real session workspace root: %v", err)
+	}
+	invalidateTopicSessionIndex(dir)
+
+	if got, _ := app.findTopicSessionForTarget("project", projectRoot, topic.ID); got != realPath {
+		t.Fatalf("topic lookup = %q, want content-bearing real session %q instead of newer blank %q", got, realPath, blankPath)
 	}
 }
 

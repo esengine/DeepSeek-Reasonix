@@ -426,7 +426,7 @@ func sessionFileHasConversationContent(sessionPath string) bool {
 		return false
 	}
 	info, err := os.Stat(sessionPath)
-	if err != nil || info.IsDir() || info.Size() == 0 {
+	if err != nil || info.IsDir() {
 		return false
 	}
 	session, err := agent.LoadSession(sessionPath)
