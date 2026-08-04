@@ -153,7 +153,7 @@ func New(cfg Config) provider.Provider {
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"), model: cfg.Model, effort: cfg.Effort,
 		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
 		vision: vision,
-		http: httpClient, idleTimeout: defaultStreamIdleTimeout,
+		http:   httpClient, idleTimeout: defaultStreamIdleTimeout,
 	}
 }
 
@@ -866,7 +866,7 @@ type sseEvent struct {
 
 type sseItem struct {
 	ID, Type, CallID, Name, Arguments, Status string
-	Raw                               json.RawMessage
+	Raw                                       json.RawMessage
 }
 
 func (i *sseItem) UnmarshalJSON(data []byte) error {
