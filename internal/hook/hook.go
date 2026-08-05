@@ -215,6 +215,11 @@ func ContextFileUsable(path string) bool {
 type LoadOptions struct {
 	ProjectRoot string
 	HomeDir     string
+	// ReasonixHome is an absolute Reasonix home directory (settings.json lives
+	// directly under it). When set, it wins over HomeDir and
+	// config.ReasonixHomeDir(). HomeDir remains an OS-home override that
+	// resolves to <home>/.reasonix for legacy tests.
+	ReasonixHome string
 	// Trusted is retained for source compatibility. Project hooks are enabled
 	// automatically now, so callers no longer need to set it.
 	Trusted bool
@@ -225,14 +230,18 @@ type LoadOptions struct {
 // — a typo shouldn't take down the CLI).
 func Load(opts LoadOptions) []ResolvedHook {
 	var out []ResolvedHook
+	home := resolveReasonixHome(opts)
 	if opts.ProjectRoot != "" {
 		p := ProjectSettingsPath(opts.ProjectRoot)
 		if s := readSettings(p); s != nil {
 			appendResolved(&out, s, ScopeProject, p)
 		}
 	}
-	appendPluginHooks(&out, reasonixHome(opts.HomeDir), opts.ProjectRoot)
-	g := GlobalSettingsPath(opts.HomeDir)
+	appendPluginHooks(&out, home, opts.ProjectRoot)
+	g := filepath.Join(home, SettingsFilename)
+	if home == "" {
+		g = GlobalSettingsPath(opts.HomeDir)
+	}
 	if s := readSettings(g); s != nil {
 		appendResolved(&out, s, ScopeGlobal, g)
 	} else if !pathExists(g) {
@@ -1578,6 +1587,13 @@ func reasonixHome(override string) string {
 		return filepath.Join(h, SettingsDirname)
 	}
 	return ""
+}
+
+func resolveReasonixHome(opts LoadOptions) string {
+	if home := strings.TrimSpace(opts.ReasonixHome); home != "" {
+		return filepath.Clean(home)
+	}
+	return reasonixHome(opts.HomeDir)
 }
 
 func legacyGlobalSettingsPath(homeDir string) string {

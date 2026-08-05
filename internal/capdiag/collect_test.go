@@ -255,6 +255,56 @@ func TestCollectIgnoresMatchersOnNonToolHookEvents(t *testing.T) {
 	}
 }
 
+// Regression for #7411: doctor must load global hooks from Reasonix home
+// (e.g. %APPDATA%/reasonix), not from <OS home>/.reasonix.
+func TestCollectHooksFromReasonixHomeNotOSHomeDotReasonix(t *testing.T) {
+	root := t.TempDir()
+	osHome := t.TempDir()
+	reasonixHome := filepath.Join(t.TempDir(), "AppData", "Roaming", "reasonix")
+	t.Setenv("HOME", osHome)
+	t.Setenv("USERPROFILE", osHome)
+	t.Setenv("REASONIX_HOME", reasonixHome)
+
+	write(t, filepath.Join(osHome, ".reasonix", "settings.json"), `{
+  "hooks": {
+    "SessionStart": [{"command": "echo legacy-home"}]
+  }
+}`)
+	write(t, filepath.Join(reasonixHome, "settings.json"), `{
+  "hooks": {
+    "SessionStart": [{"command": "echo reasonix-home"}]
+  }
+}`)
+
+	r := capdiag.Collect(capdiag.Options{
+		Root: root, HomeDir: osHome, ReasonixHomeDir: reasonixHome,
+	})
+	if len(r.Hooks.Entries) != 1 {
+		t.Fatalf("hook entries = %+v, want one SessionStart from Reasonix home", r.Hooks.Entries)
+	}
+	if got := r.Hooks.Entries[0].Source; !strings.Contains(got, "<reasonix-home>") {
+		t.Fatalf("hook source = %q, want <reasonix-home>/... (not ~/.reasonix)", got)
+	}
+	if strings.Contains(r.Hooks.Entries[0].Source, ".reasonix") {
+		t.Fatalf("hook source still points at legacy ~/.reasonix: %q", r.Hooks.Entries[0].Source)
+	}
+	found := false
+	for _, s := range r.Hooks.Sources {
+		if s.Scope == "global" {
+			found = true
+			if !strings.Contains(s.Path, "<reasonix-home>") {
+				t.Fatalf("global hook source path = %q, want <reasonix-home>/...", s.Path)
+			}
+			if strings.Contains(s.Path, ".reasonix") {
+				t.Fatalf("global hook source still points at legacy ~/.reasonix: %q", s.Path)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected a global hook source, got %+v", r.Hooks.Sources)
+	}
+}
+
 func TestCollectRejectsNonRegularPluginContextFile(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()

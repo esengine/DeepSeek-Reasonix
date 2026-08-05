@@ -62,7 +62,7 @@ func Collect(opts Options) Report {
 		})
 	}
 
-	disp := func(p string) string { return displayPath(p, root, home) }
+	disp := func(p string) string { return displayPath(p, root, home, reasonixHome) }
 
 	instr, instructionIssues := collectInstructions(root, home, disp)
 	skillsR, skillIssues := collectSkills(root, home, reasonixHome, cfg, disp)
@@ -287,14 +287,12 @@ func collectCommands(root string, disp func(string) string) (AssetReport, []Issu
 
 func collectHooks(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (HookReport, []Issue) {
 	var issues []Issue
-	// Prefer explicit home for settings when tests isolate HOME.
-	homeDir := home
-	if reasonixHome != "" && home == "" {
-		homeDir = filepath.Dir(reasonixHome)
-	}
+	// Prefer the Collect-resolved Reasonix home. Passing the OS user home as
+	// hook.LoadOptions.HomeDir incorrectly resolves global settings to
+	// <home>/.reasonix and skips %APPDATA%/reasonix on Windows (#7411).
 	insp := hook.Inspect(hook.LoadOptions{
-		ProjectRoot: root,
-		HomeDir:     homeDir,
+		ProjectRoot:  root,
+		ReasonixHome: reasonixHome,
 	})
 	runtimeOptions := hook.RuntimeOptions{}
 	if cfg != nil {
@@ -783,7 +781,7 @@ func redactAbsolutePaths(s, workspace, home string) string {
 		token := s[start:j]
 		// Only rewrite if it looks like a path with a directory separator beyond root.
 		if strings.ContainsAny(token, `/\`) && len(token) > 1 {
-			b.WriteString(displayPath(token, workspace, home))
+			b.WriteString(displayPath(token, workspace, home, ""))
 		} else {
 			b.WriteString(token)
 		}
@@ -802,7 +800,7 @@ func redactCommandDisplay(cmd, root, home string) string {
 	if len(fields) == 0 {
 		return ""
 	}
-	return displayPath(fields[0], root, home)
+	return displayPath(fields[0], root, home, "")
 }
 
 // ioDiscard avoids importing io in every call site for skill.Options.Stderr.
