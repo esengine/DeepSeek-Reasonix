@@ -30,8 +30,10 @@ var updaterRequestIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$
 
 var (
 	pendingUpdateExistsForInstall            = repair.PendingUpdateExists
-	archiveSupersededPendingUpdateForInstall = archiveSupersededLegacyUpdateAfterReady
+	archiveSupersededPendingUpdateForInstall = archiveSupersededPendingUpdateAfterReady
 	reconcilePendingUpdateForInstall         = repair.ReconcilePendingUpdate
+	readPendingUpdateForHealth               = repair.ReadPendingUpdate
+	markPendingUpdateHealthyAfterReady       = repair.MarkUpdateHealthyExact
 )
 
 func validateUpdaterRequest(requestID, selectedChannel, expectedVersion string) (string, string, string, error) {
@@ -267,10 +269,10 @@ func (a *App) installUpdateRequest(selectedChannel, expectedVersion, requestID s
 func (a *App) reconcilePendingUpdateForRequest(requestID string, meta *cachedUpdate) error {
 	if pendingUpdateExistsForInstall() {
 		a.emitProgress(requestID, meta.Channel, meta.Version, "recovering", meta.Size, meta.Size, "")
-		// A user-initiated update proves the versioned desktop reached a usable
-		// UI. Retire a superseded flat-layout transaction here as well as in the
-		// delayed post-DOM health task, so an immediate click never has to fail
-		// once and ask the user to retry.
+		// A user-initiated update proves the desktop reached a usable UI. Retire
+		// an eligible superseded app-bundle or flat-layout transaction here as
+		// well as in the delayed post-DOM health task, so an immediate click never
+		// has to fail once and ask the user to retry.
 		if archived, archiveErr := archiveSupersededPendingUpdateForInstall(); archiveErr != nil {
 			slog.Debug("desktop: superseded update was not eligible for automatic archival", "err", archiveErr)
 		} else if archived {

@@ -103,10 +103,58 @@ type fleetItemResult struct {
 	ref     string
 }
 
-func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+// fleetGroupTerminalPhase classifies a fleet group's single terminal status:
+// cancellation/deadline wins, then any failed child, then any error
+// (including validation failures), then completed.
+func fleetGroupTerminalPhase(ctx context.Context, err error, results []fleetItemResult) subagentProgressPhase {
+	if ctx.Err() != nil {
+		return subagentPhaseCancelled
+	}
+	for _, r := range results {
+		if r.status == fleetItemFailed {
+			return subagentPhaseFailed
+		}
+	}
+	if err != nil {
+		return subagentPhaseFailed
+	}
+	return subagentPhaseCompleted
+}
+
+func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (result string, err error) {
 	if f == nil || f.taskTool == nil {
 		return "", fmt.Errorf("fleet is not configured")
 	}
+	// Group lifecycle: the group card's terminal is an explicit event from
+	// the tool (running once children start, exactly one terminal at the
+	// end) so frontends never infer group completion from the children they
+	// happen to have observed. Validation failures emit a failed terminal;
+	// once runFleet starts it owns the lifecycle (the background job runs
+	// runFleet inside the job, after this function has returned).
+	groupParentID, groupSink, _, ok := CallContext(ctx)
+	if !ok || groupSink == nil {
+		groupParentID = "fleet"
+		groupSink = event.Discard
+	}
+	// The merger emits already-namespaced group/child IDs, so it must use the
+	// raw call sink. A nested subSink would prefix the group ID a second time
+	// (group/group), leaving the frontend unable to match its lifecycle card.
+	merger := newSubagentProgressMerger(realProgressClock{}, groupSink, groupParentID)
+	lifecycleHandoff := false
+	mergerCloseHandoff := false
+	defer func() {
+		if !mergerCloseHandoff {
+			merger.Close()
+		}
+	}()
+	defer func() {
+		if lifecycleHandoff {
+			return
+		}
+		merger.directStatus(groupParentID, fleetGroupTerminalPhase(ctx, err, nil))
+	}()
+	ctx = withSubagentProgressMerger(ctx, merger)
+
 	var params struct {
 		Tasks           []fleetTaskItem `json:"tasks"`
 		RunInBackground bool            `json:"run_in_background"`
@@ -164,8 +212,7 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 		if !ok {
 			return "", fmt.Errorf("background execution is not available in this context")
 		}
-		parentID, parent, _, _ := CallContext(ctx)
-		nested := subSinkFor(parentID, parent)
+		parentID := groupParentID
 		parentSession := ParentSession(ctx)
 		label := fmt.Sprintf("fleet(%d)", len(specs))
 		backgroundEvidence := evidence.NewLedger()
@@ -188,31 +235,70 @@ func (f *FleetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 			}
 		}
 		job := jm.StartForSession(jobs.SessionFromContext(ctx), "fleet", label, func(jobCtx context.Context, _ io.Writer) (string, error) {
+			// Execute returns as soon as the job is registered, so the job owns
+			// the handed-off merger until every child preview and terminal has
+			// flushed. Closing it in Execute would strand child cards at running.
+			defer merger.Close()
 			if writerRegistered {
 				defer observer.UnregisterWriter(writerID)
 			}
 			jobCtx = WithParentSession(jobCtx, parentSession)
 			jobCtx = evidence.WithLedger(jobCtx, backgroundEvidence)
 			defer func() { jobs.PublishEvidence(jobCtx, backgroundEvidence.Summary()) }()
-			return f.runFleet(jobCtx, nested, specs)
+			// The job shares the Execute-level merger so the group lifecycle
+			// events and the child previews ride the same pacing budget.
+			jobCtx = withSubagentProgressMerger(jobCtx, merger)
+			return f.runFleet(jobCtx, groupSink, specs, parentID)
 		})
+		// runFleet (inside the job) owns the terminal and merger close from
+		// here on. Foreground runFleet hands off only the terminal; Execute
+		// still closes the merger after the synchronous call returns.
+		lifecycleHandoff = true
+		mergerCloseHandoff = true
 		return fmt.Sprintf("Started background fleet %q (%s). Collect results with wait; you will be notified when it finishes.", job.ID, label), nil
 	}
 
-	return f.runFleet(ctx, subSink(ctx), specs)
+	lifecycleHandoff = true
+	return f.runFleet(ctx, groupSink, specs, groupParentID)
 }
 
-func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []ProfileExecSpec) (string, error) {
+func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []ProfileExecSpec, groupParentID string) (result string, err error) {
 	if sink == nil {
 		sink = event.Discard
 	}
-	parentID, _, _, ok := CallContext(ctx)
-	if !ok {
-		parentID = "fleet"
+	// Child IDs are namespaced exactly once under the group call. Background
+	// jobs no longer carry the original call context, so groupParentID is the
+	// authoritative identity there; direct callers fall back to CallContext.
+	parentID := strings.TrimSpace(groupParentID)
+	if parentID == "" {
+		var ok bool
+		parentID, _, _, ok = CallContext(ctx)
+		if !ok || parentID == "" {
+			parentID = "fleet"
+		}
 	}
+	groupParentID = parentID
+	// The Execute-level merger (or a fallback for direct callers) paces the
+	// group; runFleet owns the lifecycle once it starts: running up front
+	// and exactly one terminal after every child settles.
+	merger := subagentProgressMergerFromContext(ctx)
+	ownsMerger := false
+	if merger == nil {
+		merger = newSubagentProgressMerger(realProgressClock{}, sink, groupParentID)
+		ownsMerger = true
+		ctx = withSubagentProgressMerger(ctx, merger)
+	}
+	if ownsMerger {
+		defer merger.Close()
+	}
+	merger.directStatus(groupParentID, subagentPhaseRunning)
+	var results []fleetItemResult
+	defer func() {
+		merger.directStatus(groupParentID, fleetGroupTerminalPhase(ctx, err, results))
+	}()
 
 	n := len(specs)
-	results := make([]fleetItemResult, n)
+	results = make([]fleetItemResult, n)
 	for i := range results {
 		results[i] = fleetItemResult{index: i, status: fleetItemPending, profile: specs[i].Profile}
 	}

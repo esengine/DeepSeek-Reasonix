@@ -48,6 +48,33 @@ func TestSessionAdd(t *testing.T) {
 	}
 }
 
+func TestSessionAddDecisionReceiptKeepsToolResultsAdjacent(t *testing.T) {
+	s := NewSession("")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "run the check"})
+	s.Add(provider.Message{
+		Role:      provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "bash", Arguments: `{}`}},
+	})
+	receipt := &provider.DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+
+	s.AddDecisionReceipt(receipt)
+	s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "call-1", Name: "bash", Content: "ok"})
+
+	got := s.Snapshot()
+	if len(got) != 3 {
+		t.Fatalf("messages = %d, want the original three-message tool turn", len(got))
+	}
+	if len(got[1].DecisionReceipts) != 1 || got[1].DecisionReceipts[0] != receipt {
+		t.Fatalf("assistant receipts = %+v, want approval receipt", got[1].DecisionReceipts)
+	}
+	if got[2].Role != provider.RoleTool || got[2].ToolCallID != "call-1" {
+		t.Fatalf("tool result no longer follows assistant directly: %+v", got)
+	}
+	if !s.NeedsRewriteSave() {
+		t.Fatal("attaching receipt to an existing message must require a rewrite save")
+	}
+}
+
 // --- Session.HasContent ---
 
 func TestHasContentEmpty(t *testing.T) {

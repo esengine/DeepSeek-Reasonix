@@ -70,7 +70,10 @@ eq(pathCount("C: drive"), 0, "bare drive letter is not a path");
 eq(pathCount("at 10:30 now"), 0, "clock time is not a path");
 eq(pathCount("version 1.2.3 released"), 0, "version string is not a path");
 eq(pathCount("http://example.com 正常"), 0, "http URL untouched (GFM handles it)");
+eq(pathCount("prefixD:\\x\\y.md"), 0, "drive path after a letter is rejected without lookbehind");
+eq(pathCount("file:///D:/x/y.md"), 1, "file URL drive segment is not double-matched");
 eq(pathCount("a\\b\\c.md 讨论"), 0, "share-less backslash path in prose is not a UNC path");
+eq(pathCount("C:\\nas\\share\\x.md"), 1, "drive path does not also become a UNC match");
 eq(firstPath("见 \\nas\\share\\x.md"), "\\\\nas\\share\\x.md", "real UNC path still matches");
 eq(firstPath("见 C:\\Program\\ Files\\ (x86) 完成"), "C:\\Program Files (x86)", "escaped-space path with (x86) keeps its closing paren");
 

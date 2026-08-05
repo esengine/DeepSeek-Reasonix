@@ -273,6 +273,10 @@ func StoreCredentialLines(lines []string) (string, error) {
 		return "", err
 	}
 	defer unlock()
+	return storeCredentialAssignmentsLocked(assignments)
+}
+
+func storeCredentialAssignmentsLocked(assignments map[string]string) (string, error) {
 	if err := storeCredentialsInFile(UserCredentialsPath(), assignments); err != nil {
 		return "", err
 	}
@@ -289,6 +293,38 @@ func SetCredential(key, value string) (string, error) {
 		return "", fmt.Errorf("credential value for %s contains a newline", key)
 	}
 	return StoreCredentialLines([]string{key + "=" + value})
+}
+
+// SetCredentialIfRevision stores one credential only when the global
+// credential file still has expectedRevision. The comparison and write share
+// the same process and advisory file lock, preventing a stale setup page in one
+// Reasonix process from overwriting a credential saved by another process.
+func SetCredentialIfRevision(key, value, expectedRevision string) (string, bool, error) {
+	key = strings.TrimSpace(key)
+	if !isCredentialKey(key) {
+		return "", false, fmt.Errorf("invalid credential key %q", key)
+	}
+	if strings.ContainsAny(value, "\r\n") {
+		return "", false, fmt.Errorf("credential value for %s contains a newline", key)
+	}
+	assignments := parseCredentialLines([]string{key + "=" + value})
+	if len(assignments) != 1 {
+		return "", false, fmt.Errorf("invalid credential assignment for %s", key)
+	}
+
+	unlock, err := LockUserCredentialEdits()
+	if err != nil {
+		return "", false, err
+	}
+	defer unlock()
+	if expectedRevision == "" || CredentialStoreRevision() != expectedRevision {
+		return CredentialsTargetDescription(), false, nil
+	}
+	path, err := storeCredentialAssignmentsLocked(assignments)
+	if err != nil {
+		return "", false, err
+	}
+	return path, true, nil
 }
 
 // IsValidCredentialKey reports whether key can be stored in Reasonix's dotenv

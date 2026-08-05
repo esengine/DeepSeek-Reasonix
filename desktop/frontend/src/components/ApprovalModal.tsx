@@ -7,7 +7,7 @@ import {
   DecisionConfirmBar,
   PromptAction,
   PromptBadge,
-  PromptDescriptionToggle,
+  PromptDescriptionDisclosure,
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
@@ -81,8 +81,12 @@ function localizeApprovalSubject(tool: string, subject: string, t: Translator): 
   const trimmed = subject.trim();
   if (tool === "sandbox_escape") {
     if (!trimmed || trimmed === sandboxEscapeEnglishSubjectFallback) return t("approval.sandboxEscapeSubjectFallback");
+    const localizedPrefix = t("approval.sandboxEscapeSubjectPrefix");
     if (trimmed.startsWith(sandboxEscapeEnglishSubjectPrefix)) {
-      return `${t("approval.sandboxEscapeSubjectPrefix")}${trimmed.slice(sandboxEscapeEnglishSubjectPrefix.length)}`;
+      return trimmed.slice(sandboxEscapeEnglishSubjectPrefix.length).trim() || t("approval.sandboxEscapeSubjectFallback");
+    }
+    if (localizedPrefix !== sandboxEscapeEnglishSubjectPrefix && trimmed.startsWith(localizedPrefix)) {
+      return trimmed.slice(localizedPrefix.length).trim() || t("approval.sandboxEscapeSubjectFallback");
     }
     return trimmed;
   }
@@ -282,8 +286,9 @@ export function ApprovalModal({
   const reason = localizePlanModeApprovalReason(approval.tool, localizeApprovalReason(approval.tool, approval.reason, t), t);
   const subjectSummary = subject.split(/\r?\n/).find((line) => line.trim())?.trim() ?? "";
   // Plan approvals already show the plan above; keep a short hint. Tool
-  // approvals surface the command/subject by default (reason is secondary).
-  const toolMeta = isPlanApproval ? t("approval.planReadyHint") : (subjectSummary || reason || approval.tool);
+  // approvals render their command/subject in the details block, so header
+  // metadata is only a fallback when there is no subject to show there.
+  const toolMeta = isPlanApproval ? t("approval.planReadyHint") : (!subject ? (reason || approval.tool) : undefined);
   const hasToolDetails = Boolean(reason || subject);
   // Subject (command) is visible by default; long reason can collapse.
   const [reasonOpen, setReasonOpen] = useState(() => {
@@ -812,9 +817,6 @@ export function ApprovalModal({
                   description={action.desc}
                   descriptionId={`${instanceId}-description-${index}`}
                   descriptionDisclosure
-                  descriptionExpanded={!isPlanApproval && !isRecoveryApproval && selectedIndex === index
-                    ? descriptionExpanded
-                    : undefined}
                   onDescriptionOverflowChange={!isPlanApproval && !isRecoveryApproval && selectedIndex === index
                     ? setDescriptionTruncated
                     : undefined}
@@ -826,7 +828,6 @@ export function ApprovalModal({
                   tone={action.tone}
                   role={isPlanApproval || isRecoveryApproval ? "button" : "option"}
                   disabled={submitting}
-                  title={action.desc}
                 />
               );
               if (isRecoveryApproval && !isRecoveryPlanChange && index === 1 && recovery?.can_grant_task) {
@@ -868,8 +869,10 @@ export function ApprovalModal({
         }
         note={
           !isPlanApproval && !isRecoveryApproval && selectedDescriptionId && descriptionTruncated ? (
-            <PromptDescriptionToggle
-              descriptionId={selectedDescriptionId}
+            <PromptDescriptionDisclosure
+              descriptionId={`${selectedDescriptionId}-detail`}
+              label={selectedAction?.label}
+              description={selectedAction?.desc ?? ""}
               expanded={descriptionExpanded}
               onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
               disabled={submitting}

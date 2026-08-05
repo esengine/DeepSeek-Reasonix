@@ -67,6 +67,13 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	case ReasoningProtocolGLM:
 		return glmEffortCapability()
 	case ReasoningProtocolOpenAI:
+		if isMimoEntry(e) {
+			// MiMo's Responses API documents a binary thinking knob: "none"
+			// disables reasoning; every other legal value enables it. The
+			// vendor accepts the OpenAI depth vocabulary but exposes no real
+			// low/medium/high difference, so mirror the documented contract.
+			return mimoEffortCapability()
+		}
 		return openAIEffortCapability()
 	}
 	if cap, ok := resolvedModelReasoningCapability(e); ok {
@@ -163,6 +170,14 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 			return "", fmt.Errorf("usage: /effort auto|disabled|high|max")
 		}
 	case ReasoningProtocolOpenAI:
+		if isMimoEntry(e) {
+			switch level {
+			case "none", "low", "medium", "high":
+				return level, nil
+			default:
+				return "", fmt.Errorf("usage: /effort auto|none|low|medium|high")
+			}
+		}
 		switch level {
 		case "low", "medium", "high":
 			return level, nil
@@ -382,6 +397,28 @@ func isLongCatEntry(e *ProviderEntry) bool {
 // endpoints intentionally do not match.
 func isOllamaCloudEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && openai.IsOllamaCloud(e.BaseURL)
+}
+
+// isMimoEntry reports whether the entry points at Xiaomi MiMo's Responses API
+// (api.xiaomimimo.com). Host matching mirrors provider/responses.DetectVendor
+// but lives in the config layer to avoid an import cycle (control → config,
+// not control → provider). Host-based exact/suffix matching (not full-URL
+// substring) so unrelated or attacker-controlled URLs can't enable MiMo
+// effort. The kind check is intentionally absent: MiMo is served through both
+// kind="responses" and kind="openai" presets.
+func isMimoEntry(e *ProviderEntry) bool {
+	if e == nil {
+		return false
+	}
+	host := officialProviderHost(e.BaseURL)
+	return host == "api.xiaomimimo.com" || strings.HasSuffix(host, ".xiaomimimo.com")
+}
+
+// mimoEffortCapability mirrors MiMo's documented binary thinking knob: "none"
+// disables reasoning, every other legal value enables it (no real depth
+// difference server-side). The vendor accepts the OpenAI depth vocabulary.
+func mimoEffortCapability() EffortCapability {
+	return EffortCapability{Supported: true, Levels: []string{"auto", "none", "low", "medium", "high"}, Default: "auto"}
 }
 
 func resolvedModelReasoningCapability(e *ProviderEntry) (modelReasoningCapability, bool) {

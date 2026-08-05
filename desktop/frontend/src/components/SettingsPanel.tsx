@@ -1389,7 +1389,6 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     ? Number(agent.effectiveCompactRatio)
     : agent.compactRatio;
   agent.compactRatioOverridden = Boolean(agent.compactRatioOverridden);
-  agent.compactRatioRemote = Boolean(agent.compactRatioRemote);
   return {
     ...view,
     providers: asArray(view.providers).map(normalizeProviderView),
@@ -4515,7 +4514,6 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
               </div>
             </SettingsField>
             {compactRatioOverrideHint && <div className="provider-fetch-banner provider-fetch-banner--warn">{compactRatioOverrideHint}</div>}
-            {agent.compactRatioRemote && <div className="provider-fetch-banner provider-fetch-banner--warn">{t("settings.compactRatioRemote")}</div>}
           </SettingsSection>
         </>
       ) : subtab === "access" ? (

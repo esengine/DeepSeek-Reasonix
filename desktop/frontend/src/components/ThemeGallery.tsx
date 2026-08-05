@@ -86,6 +86,18 @@ function packDescription(pack: ThemePackView, t: (key: never, vars?: Record<stri
   return pack.description || "";
 }
 
+function packKindBadge(pack: ThemePackView, t: ReturnType<typeof useT>): string {
+  const kind = themePackKind(pack);
+  if (kind === "official") return t("settings.themeGallery.kindOfficial");
+  if (kind === "base") return t("settings.themeGallery.kindBase");
+  if (kind === "plugin") {
+    return pack.pluginName
+      ? t("settings.themeGallery.kindPlugin", { name: pack.pluginName })
+      : t("settings.themeGallery.kindPluginUnknown");
+  }
+  return t("settings.themeGallery.kindUser");
+}
+
 function createEditorState(baseStyle: ThemeStyle): EditorState {
   return {
     mode: "create",
@@ -265,14 +277,15 @@ export function ThemeGallery({
   }, [reload]);
 
   const groups = useMemo(() => groupThemePacks(packs), [packs]);
-  const catalogPacks = useMemo(() => [...groups.official, ...groups.base], [groups.official, groups.base]);
+  const catalogPacks = useMemo(() => [...groups.official, ...groups.plugin, ...groups.base], [groups.official, groups.plugin, groups.base]);
   const visible = tab === "catalog" ? catalogPacks : groups.user;
   const visibleSections =
     tab === "catalog"
       ? [
           { id: "official", label: t("settings.themeGallery.sectionFlagship"), packs: groups.official },
+          { id: "plugin", label: t("settings.themeLibrary.groupPlugin"), packs: groups.plugin },
           { id: "base", label: t("settings.themeGallery.tabBase"), packs: groups.base },
-        ]
+        ].filter((section) => section.packs.length > 0)
       : [{ id: "user", label: "", packs: groups.user }];
 
   const changeTab = (nextTab: GalleryTab) => {
@@ -593,11 +606,7 @@ export function ThemeGallery({
                 ) : null}
               </div>
               <span className="theme-gallery__badge">
-                {themePackKind(selectedPack) === "official"
-                  ? t("settings.themeGallery.kindOfficial")
-                  : themePackKind(selectedPack) === "base"
-                    ? t("settings.themeGallery.kindBase")
-                    : t("settings.themeGallery.kindUser")}
+                {packKindBadge(selectedPack, t)}
               </span>
             </div>
             <p className="theme-gallery__detail-desc">{packDescription(selectedPack, t)}</p>
@@ -610,6 +619,7 @@ export function ThemeGallery({
               {[
                 { id: "official", label: t("settings.themeLibrary.groupOfficial"), packs: groups.official },
                 { id: "user", label: t("settings.themeLibrary.groupUser"), packs: groups.user },
+                { id: "plugin", label: t("settings.themeLibrary.groupPlugin"), packs: groups.plugin },
                 { id: "base", label: t("settings.themeGallery.tabBase"), packs: groups.base },
               ]
                 .filter((section) => section.packs.length > 0)
@@ -777,11 +787,7 @@ export function ThemeGallery({
                 </div>
                 <div className="theme-gallery__detail-tags">
                   <span className="theme-gallery__badge">
-                    {themePackKind(selectedPack) === "official"
-                      ? t("settings.themeGallery.kindOfficial")
-                      : themePackKind(selectedPack) === "base"
-                        ? t("settings.themeGallery.kindBase")
-                        : t("settings.themeGallery.kindUser")}
+                    {packKindBadge(selectedPack, t)}
                   </span>
                   {selectedPack.license ? <span className="theme-gallery__badge theme-gallery__badge--muted">{selectedPack.license}</span> : null}
                 </div>
@@ -819,9 +825,11 @@ export function ThemeGallery({
                       </button>
                     </div>
                   ) : null}
-                  <button type="button" className="btn btn--small theme-gallery__detail-copy" disabled={busy} onClick={() => void copySelected()}>
-                    <Copy size={12} /> {t("settings.themeLibrary.copyFrom")}
-                  </button>
+                  {themePackKind(selectedPack) !== "plugin" ? (
+                    <button type="button" className="btn btn--small theme-gallery__detail-copy" disabled={busy} onClick={() => void copySelected()}>
+                      <Copy size={12} /> {t("settings.themeLibrary.copyFrom")}
+                    </button>
+                  ) : null}
                   {themePackKind(selectedPack) === "user" ? (
                     <div className="theme-gallery__more theme-gallery__detail-more">
                       <button ref={moreActionsRef} type="button" className="btn btn--small" onClick={() => setMenuOpen((v) => !v)} aria-expanded={menuOpen}>

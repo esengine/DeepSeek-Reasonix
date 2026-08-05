@@ -7,11 +7,11 @@
 package main
 
 import (
-	"context"
 	"embed"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 
 	"github.com/wailsapp/wails/v2"
@@ -94,12 +94,6 @@ func linuxWebviewGpuPolicy(pattern string) linux.WebviewGpuPolicy {
 }
 
 func main() {
-	// OpenSSH launches the Desktop executable itself as the short-lived
-	// SSH_ASKPASS helper. Handle that one-time capability before configuration,
-	// startup tracking, single-instance setup, Wails, or any logging/persistence.
-	if handled, exitCode := RunRemoteAskPassHelper(context.Background(), os.Args[1:], os.Getenv, os.Stdout); handled {
-		os.Exit(exitCode)
-	}
 	// Detached macOS self-update child: wait for the old PID, hold the shared
 	// repair mutation lock, then swap the .app bundle. Must run before Wails.
 	if handled, exitCode := maybeRunMacUpdateHandoff(os.Args[1:]); handled {
@@ -108,21 +102,41 @@ func main() {
 	capturePreviousFatalCrash()
 	installFatalCrashOutput()
 
-	// Accept and strip legacy launch tokens from old shortcuts
-	// (launch --detach --safe-mode). They produce no product behavior.
-	_ = parseDesktopLaunchArgs(os.Args[1:])
-
-	// Observe previous run for crash diagnostics only. Startup tracking must
-	// never force Safe Mode, disable plugins, or select a previous binary.
-	previousRun := repair.NewStartupTracker("").ObservePreviousRun()
+	launch := parseDesktopLaunchArgs(os.Args[1:])
 
 	app := NewApp()
-	app.previousRun = previousRun
 	title := "Reasonix"
 	singleInstance := singleInstanceLock(app)
 	appMenu := app.createAppMenu()
 	dragAndDrop := &options.DragAndDrop{EnableFileDrop: true}
 	bindings := []any{app}
+
+	if launch.RemoteWindowTicket != "" {
+		// A remote web child window: a second Reasonix process that hosts the
+		// SSH Serve page for one remote host. It deliberately skips local
+		// runtimes (tabs, tray, heartbeat, providers) and exposes no Wails
+		// bindings, local menus, or file drops, so it can never act as a second
+		// local app. Its single-instance identity is per owner and host, so one
+		// Desktop reuses its window while a restarted Desktop cannot adopt an
+		// unregistered survivor from the prior process.
+		if launch.RemoteWindowHostKey == "" || !isRemoteWindowOwnerID(launch.RemoteWindowOwnerID) || launch.RemoteWindowParentPID <= 0 {
+			println("Error: remote window ticket requires valid host and owner identities")
+			return
+		}
+		app.remoteWindowTicket = launch.RemoteWindowTicket
+		app.remoteWindowHostKey = launch.RemoteWindowHostKey
+		app.remoteWindowOwnerID = launch.RemoteWindowOwnerID
+		app.remoteWindowParentPID = launch.RemoteWindowParentPID
+		singleInstance = remoteWindowSingleInstanceLock(app)
+		appMenu = nil
+		dragAndDrop = &options.DragAndDrop{DisableWebViewDrop: true}
+		bindings = nil
+	} else {
+		// Observe previous run for crash diagnostics only. Startup tracking must
+		// never force Safe Mode, disable plugins, or select a previous binary.
+		app.previousRun = repair.NewStartupTracker("").ObservePreviousRun()
+		capturePendingUpdateHealthIdentity(app)
+	}
 
 	// Restore saved window size, or fall back to the default.
 	width, height := 1240, 720
@@ -159,6 +173,7 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 			Middleware: assetserver.ChainMiddleware(
+				app.remoteWindowAssetMiddleware(),
 				app.jsProfilingMiddleware(),
 				app.remoteMarkdownImageMiddleware(),
 				app.workspaceMediaMiddleware(),
@@ -222,16 +237,35 @@ func main() {
 type desktopLaunchOptions struct {
 	// LegacySafeModeArg is true when --safe-mode was present. v1.20+ ignores it.
 	LegacySafeModeArg bool
+	// RemoteWindowTicket is the one-shot ticket name for an SSH remote web
+	// window child process. The URL and Serve token never appear in argv.
+	RemoteWindowTicket string
+	// RemoteWindowHostKey is the non-secret per-host digest that derives the
+	// child window's single-instance identity and validates the ticket.
+	RemoteWindowHostKey string
+	// RemoteWindowOwnerID scopes same-host reuse to the primary Desktop process
+	// that spawned the child. RemoteWindowParentPID lets the child close when
+	// that owner and its loopback SSH tunnel disappear.
+	RemoteWindowOwnerID   string
+	RemoteWindowParentPID int
 }
 
 func parseDesktopLaunchArgs(args []string) desktopLaunchOptions {
 	var out desktopLaunchOptions
 	for _, arg := range args {
-		switch arg {
-		case "--safe-mode", "-safe-mode", "launch", "--detach":
-			if arg == "--safe-mode" || arg == "-safe-mode" {
-				out.LegacySafeModeArg = true
-			}
+		switch {
+		case arg == "--safe-mode" || arg == "-safe-mode":
+			out.LegacySafeModeArg = true
+		case arg == "launch" || arg == "--detach":
+			// Legacy launch tokens from old shortcuts. They produce no behavior.
+		case strings.HasPrefix(arg, remoteWindowTicketArgPrefix):
+			out.RemoteWindowTicket = strings.TrimPrefix(arg, remoteWindowTicketArgPrefix)
+		case strings.HasPrefix(arg, remoteWindowHostArgPrefix):
+			out.RemoteWindowHostKey = strings.TrimPrefix(arg, remoteWindowHostArgPrefix)
+		case strings.HasPrefix(arg, remoteWindowOwnerArgPrefix):
+			out.RemoteWindowOwnerID = strings.TrimPrefix(arg, remoteWindowOwnerArgPrefix)
+		case strings.HasPrefix(arg, remoteWindowParentArgPrefix):
+			out.RemoteWindowParentPID, _ = strconv.Atoi(strings.TrimPrefix(arg, remoteWindowParentArgPrefix))
 		}
 	}
 	return out

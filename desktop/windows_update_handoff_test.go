@@ -118,6 +118,8 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`File "/oname=${REASONIX_UPDATE_HELPER}" "${REASONIX_UPDATE_HELPER}"`,
 		`File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"`,
 		`File "/oname=${REASONIX_LAYOUT_INSTALLER}" "${REASONIX_GUARD}"`,
+		`nsExec::ExecToLog /OEM`,
+		`Reasonix layout activator output:`,
 		`--activate-staging "$R9" --no-relaunch`,
 		`File "/oname=${REASONIX_PAYLOAD_MANIFEST}" "${REASONIX_PAYLOAD_MANIFEST}"`,
 		`File "/oname=${REASONIX_PAYLOAD_SIGNATURE}" "${REASONIX_PAYLOAD_SIGNATURE}"`,

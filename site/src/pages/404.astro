@@ -11,6 +11,15 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 
   <Fragment slot="head"><meta name="robots" content="noindex" /></Fragment>
 
+  <script is:inline>
+    // Preserve the documented /u/<handle> shape on static hosting by moving it
+    // to the client-rendered public profile page.
+    try {
+      const match = location.pathname.match(/^\/u\/([^/]+)\/?$/);
+      if (match) location.replace(`/u/?handle=${encodeURIComponent(decodeURIComponent(match[1]))}`);
+    } catch {}
+  </script>
+
   <SiteHeader scrolled />
 
   <main class="hero" style="padding-bottom:150px">

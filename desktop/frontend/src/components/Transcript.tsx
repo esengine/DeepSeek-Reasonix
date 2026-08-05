@@ -1,11 +1,12 @@
 import { createContext, memo, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { ControllerLiveStore, Item, LiveStream } from "../lib/useController";
+import type { ControllerLiveStore, ExtensionItem, Item, LiveStream } from "../lib/useController";
 import type { CheckpointMeta } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
 import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
 import { ProcessBrainIcon, ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
+import { ExtensionCard } from "./ExtensionCard";
 import { ArrowDown, ChevronRight, CirclePlay, Info, TriangleAlert } from "lucide-react";
 import { Welcome } from "./Welcome";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
@@ -193,7 +194,7 @@ function assistantHasVisibleAnswer(item: AssistantItem, liveId: string | undefin
 
 type TurnDisplayParts = {
   processItems: Item[];
-  outsideItems: Array<NoticeItem | AssistantItem>;
+  outsideItems: Array<NoticeItem | AssistantItem | ExtensionItem>;
 };
 
 // Splits a turn by channel, not by position: reasoning, tools, phases, info
@@ -239,6 +240,13 @@ function partitionTurnItems(
       } else {
         pushProcess(item);
       }
+      continue;
+    }
+    if (item.kind === "extension") {
+      // Extension cards carry their own actions and progress — keep them
+      // visible like warnings instead of folding them into the process
+      // collapse, but never treat them as a conversational boundary.
+      current.outsideItems.push(item);
       continue;
     }
     if (item.kind !== "assistant") {
@@ -820,6 +828,10 @@ export function Transcript({
           );
         }
         for (const item of segment.outsideItems) {
+          if (item.kind === "extension") {
+            out.push(<ExtensionCard key={item.id} item={item} tabId={tabId} />);
+            continue;
+          }
           if (item.kind === "notice") {
             if (isSteerNoticeText(item.text)) {
               out.push(<SteerCard key={item.id} text={item.text} />);
@@ -1219,6 +1231,10 @@ function WarmTurnItems({
       );
     }
     for (const item of segment.outsideItems) {
+      if (item.kind === "extension") {
+        nodes.push(<ExtensionCard key={item.id} item={item} tabId={tabId} />);
+        continue;
+      }
       if (item.kind === "notice") {
         if (isSteerNoticeText(item.text)) {
           nodes.push(<SteerCard key={item.id} text={item.text} />);
@@ -1686,6 +1702,42 @@ function SteerCard({ text }: { text: string }) {
   );
 }
 
+function DecisionReceiptLine({ receipt }: { receipt: NonNullable<NoticeItem["decisionReceipt"]> }) {
+  const t = useT();
+  const titleKey = receipt.kind === "ask"
+    ? "notice.decisionReceiptAsk"
+    : receipt.kind === "plan"
+    ? "notice.decisionReceiptPlan"
+    : receipt.kind === "recovery"
+      ? "notice.decisionReceiptRecovery"
+      : "notice.decisionReceiptTool";
+  const outcomeKeys: Record<string, string> = {
+    allow_once: "notice.decisionAllowOnce",
+    allow_session: "notice.decisionAllowSession",
+    allow_persistent: "notice.decisionAllowPersistent",
+    deny: "notice.decisionDeny",
+    start_execution: "notice.decisionStartExecution",
+    revise_plan: "notice.decisionRevisePlan",
+    exit_plan: "notice.decisionExitPlan",
+    recovery_continue: "notice.decisionRecoveryContinue",
+    recovery_continue_task: "notice.decisionRecoveryContinueTask",
+    recovery_revise: "notice.decisionRecoveryRevise",
+    answered: "notice.decisionAnswered",
+  };
+  const outcome = outcomeKeys[receipt.outcome]
+    ? t(outcomeKeys[receipt.outcome] as never)
+    : receipt.outcome || t("notice.decisionReceiptTitle");
+  const showOutcome = receipt.kind !== "ask" || receipt.outcome !== "answered";
+  return (
+    <div className="notice-line__decision-receipt">
+      <span className="notice-line__decision-title">{t(titleKey as never)}</span>
+      {showOutcome && <span className="notice-line__decision-outcome">{outcome}</span>}
+      {receipt.tool && <code>{receipt.tool}</code>}
+      {receipt.subject && <span className="notice-line__decision-subject">{receipt.subject}</span>}
+    </div>
+  );
+}
+
 export function NoticeCard({ item, onAction, actionDisabled = false }: { item: NoticeItem; onAction?: () => void; actionDisabled?: boolean }) {
   const t = useT();
   const StatusIcon = item.level === "warn" ? TriangleAlert : Info;
@@ -1693,8 +1745,14 @@ export function NoticeCard({ item, onAction, actionDisabled = false }: { item: N
     <div className={`notice-line notice-line--${item.level}${item.variant ? ` notice-line--${item.variant}` : ""}`} data-entrance="true">
       <StatusIcon className="notice-line__icon" size={14} aria-hidden="true" />
       <div className="notice-line__text">
-        {item.title ? <div className="notice-line__title">{item.title}</div> : null}
-        <div className="notice-line__body">{item.text}</div>
+        {item.decisionReceipt ? (
+          <DecisionReceiptLine receipt={item.decisionReceipt} />
+        ) : (
+          <>
+            {item.title ? <div className="notice-line__title">{item.title}</div> : null}
+            <div className="notice-line__body">{item.text}</div>
+          </>
+        )}
         {item.action && onAction ? (
           <div className="notice-line__actions">
             <button className="btn btn--small" type="button" onClick={onAction} disabled={actionDisabled}>

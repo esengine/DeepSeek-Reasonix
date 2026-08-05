@@ -5,9 +5,9 @@ import (
 	"strings"
 )
 
-// Descriptor is the non-sensitive provider/model metadata that may cross a
-// Remote Workbench connection. It intentionally contains no endpoint,
-// credential, header, proxy, or environment-variable information.
+// Descriptor is the non-sensitive provider/model metadata shared across
+// process boundaries. It intentionally contains no endpoint, credential,
+// header, proxy, or environment-variable information.
 type Descriptor struct {
 	Ref                            string   `json:"ref"`
 	DisplayName                    string   `json:"displayName,omitempty"`

@@ -1,0 +1,201 @@
+// Run: tsx src/__tests__/subagent-progress-card.test.tsx
+//
+// Verifies the ToolCard rendering of the sub-agent progress chip (phase +
+// elapsed + recent activity) and the expanded preview body (reasoning /
+// response preview / notices), including the terminal phase visuals.
+
+import { JSDOM } from "jsdom";
+import React from "react";
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import gsap from "gsap";
+import { ToolCard } from "../components/ToolCard";
+import { LocaleProvider } from "../lib/i18n";
+import type { Item, SubagentProgress } from "../lib/useController";
+
+type ToolItem = Extract<Item, { kind: "tool" }>;
+
+// jsdom has no layout engine: stub the GSAP tween surface the collapse hook
+// touches so layout effects complete synchronously. Under tsx the imported
+// binding is a CJS interop object, so the stubs must go onto that object
+// itself (the hook imports the same binding).
+type GsapToOptions = { onComplete?: () => void };
+const gsapForTests = gsap as unknown as {
+  to: (target: unknown, vars: GsapToOptions) => unknown;
+  fromTo: (target: unknown, from: unknown, vars: GsapToOptions) => unknown;
+  set: (target: unknown, vars: unknown) => unknown;
+  killTweensOf: (target: unknown) => void;
+};
+gsapForTests.to = (_target: unknown, vars: GsapToOptions) => {
+  vars.onComplete?.();
+  return {};
+};
+gsapForTests.fromTo = (_target: unknown, _from: unknown, vars: GsapToOptions) => {
+  vars.onComplete?.();
+  return {};
+};
+gsapForTests.set = () => ({});
+gsapForTests.killTweensOf = () => {};
+
+let passed = 0;
+let failed = 0;
+
+function ok(value: unknown, label: string) {
+  if (value) {
+    process.stdout.write(`  PASS  ${label}\n`);
+    passed += 1;
+  } else {
+    process.stdout.write(`  FAIL  ${label}\n`);
+    failed += 1;
+  }
+}
+
+function flushTimers(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function installDom() {
+  const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.window = dom.window as unknown as Window & typeof globalThis;
+  globalThis.document = dom.window.document;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
+  globalThis.Node = dom.window.Node;
+  globalThis.Element = dom.window.Element;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  globalThis.Event = dom.window.Event;
+  globalThis.MouseEvent = dom.window.MouseEvent;
+  globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
+  globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  dom.window.matchMedia = () => ({
+    matches: true,
+    media: "(prefers-reduced-motion: reduce)",
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  });
+  return dom;
+}
+
+function makeItem(phase: SubagentProgress["phase"], over: Partial<SubagentProgress> = {}): ToolItem {
+  const now = Date.now();
+  return {
+    kind: "tool",
+    id: `task-${phase}`,
+    name: "task",
+    args: "{}",
+    readOnly: true,
+    status: phase === "completed" || phase === "failed" ? "done" : phase === "cancelled" ? "stopped" : "running",
+    subagentProgress: {
+      phase,
+      reasoning: "thinking step by step",
+      text: "draft answer preview",
+      notice: "heads up",
+      lastActivityAt: now - 3_000,
+      startedAt: now - 12_000,
+      truncated: false,
+      ...over,
+    },
+  };
+}
+
+console.log("\nsubagent progress card");
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+
+  // Running card: chip shows phase, live elapsed and recent activity.
+  const running = makeItem("reasoning");
+  await act(async () => {
+    root.render(
+      React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: running })),
+    );
+    await flushTimers();
+  });
+  const chip = document.querySelector(".tool__subagent-chip");
+  ok(!!chip, "running card renders the progress chip");
+  ok(chip?.textContent?.includes("reasoning"), "chip shows the phase label");
+  ok(chip?.textContent?.includes("12s"), "chip shows the running elapsed");
+  ok(chip?.textContent?.includes("3s ago"), "chip shows recent activity");
+  ok(chip?.getAttribute("data-phase") === "reasoning", "chip carries the phase attribute");
+
+  // Expanded body shows reasoning / response / notices without ordinary output.
+  const head = document.querySelector(".tool__head") as HTMLButtonElement | null;
+  ok(!!head, "card head renders");
+  await act(async () => {
+    head?.click();
+    await flushTimers();
+  });
+  ok(!!document.querySelector(".tool__subagent-preview"), "expanded body renders the preview block");
+  ok(document.querySelector(".tool__subagent-preview-label")?.textContent === "Reasoning", "reasoning section label");
+  ok(document.body.textContent?.includes("thinking step by step"), "reasoning preview text visible");
+  ok(document.body.textContent?.includes("draft answer preview"), "response preview text visible");
+  ok(document.body.textContent?.includes("heads up"), "notice preview text visible");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+
+  // Terminal chips: completed/failed/cancelled show the final duration, no
+  // recent-activity suffix, and the existing status visuals.
+  const completed = makeItem("completed", { durationMs: 42_000 });
+  await act(async () => {
+    root.render(
+      React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: completed })),
+    );
+    await flushTimers();
+  });
+  const chip = document.querySelector(".tool__subagent-chip");
+  ok(chip?.textContent?.includes("completed"), "completed chip label");
+  ok(chip?.textContent?.includes("42s"), "completed chip shows the terminal duration");
+  ok(!chip?.textContent?.includes("ago"), "terminal chip drops the recent-activity suffix");
+  ok(!!document.querySelector(".tool__status-icon--ok"), "completed card shows the done icon");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const rootEl = document.getElementById("root");
+  if (!rootEl) throw new Error("missing root");
+  const root = createRoot(rootEl);
+
+  const cancelled = makeItem("cancelled", { durationMs: 500 });
+  await act(async () => {
+    root.render(
+      React.createElement(LocaleProvider, null, React.createElement(ToolCard, { item: cancelled })),
+    );
+    await flushTimers();
+  });
+  ok(document.querySelector(".tool__subagent-chip")?.textContent?.includes("cancelled"), "cancelled chip label");
+  ok(!!document.querySelector(".tool__status-icon--stopped"), "cancelled card shows the stopped icon");
+  ok(document.querySelector(".tool__subagent-chip")?.classList.contains("tool__subagent-chip--cancelled"), "chip carries the cancelled modifier class");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+console.log(`\nsubagent progress card: ${passed} passed, ${failed} failed`);
+if (failed > 0) process.exit(1);

@@ -2,6 +2,447 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.20.0",
+      "date": "2026-08-05",
+      "channel": "stable",
+      "title": {
+        "en": "Extension kernel, Task Monitor, and safer Goal completion",
+        "zh": "扩展内核、任务监视器与更安全的 Goal 完成"
+      },
+      "summary": {
+        "en": "Compact decision surfaces, local decision receipts, unified extension kernel, native Task Monitor, bounded sub-agent progress, Goal fail-closed completion, MiMo and DashScope Responses fixes, SSH remote access simplification, and multiple Desktop stability improvements.",
+        "zh": "压缩决策弹窗、本地决策回执、统一扩展内核、原生任务监视器、有界子代理进度、Goal 安全完成、MiMo 与 DashScope Responses 修复、SSH 远程访问简化，以及多项桌面稳定性改进。"
+      },
+      "surfaces": [
+        "agent",
+        "cli",
+        "config",
+        "desktop",
+        "plugin",
+        "provider",
+        "recovery",
+        "remote",
+        "serve",
+        "site",
+        "updates"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Extension Protocol v1",
+            "zh": "Extension Protocol v1"
+          },
+          "body": {
+            "en": "Learn about the stable JSON-RPC sidecar protocol, Plugin Manifest v1, and the Go SDK.",
+            "zh": "了解稳定的 JSON-RPC 边车协议、Plugin Manifest v1 和 Go SDK。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/73bc4e0c1a8fd859b2b1c648d1f2c019e4a5c448/docs/EXTENSION_PROTOCOL.md"
+        },
+        {
+          "title": {
+            "en": "Goal Enforcement (Chinese)",
+            "zh": "Goal 强制执行"
+          },
+          "body": {
+            "en": "Read the Chinese guide to the new update_goal tool and fail-closed completion flow.",
+            "zh": "新的 update_goal 工具与安全停止完成机制如何工作。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/73bc4e0c1a8fd859b2b1c648d1f2c019e4a5c448/docs/GOAL_ENFORCEMENT.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Sub-agent Progress",
+            "zh": "子代理进度"
+          },
+          "body": {
+            "en": "Bounded progress forwarding for task, parallel_tasks, and fleet.",
+            "zh": "task、parallel_tasks 和 fleet 的有界进度转发。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/73bc4e0c1a8fd859b2b1c648d1f2c019e4a5c448/docs/SUBAGENT_PROGRESS.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Unified Extension Kernel and Extension Protocol v1",
+            "zh": "统一扩展内核与 Extension Protocol v1"
+          },
+          "body": {
+            "en": "Immutable runtime snapshots, fail-atomic reload, Plugin Manifest v1 (prompts, themes, full-trust code runtimes), stable JSON-RPC sidecar protocol, interceptor dispatch, streaming provider adapter, structured UI, and Go SDK.",
+            "zh": "不可变运行时快照、故障原子重载、Plugin Manifest v1（提示词、主题、完全信任代码运行时）、稳定的 JSON-RPC 边车协议、拦截器调度、流式提供者适配器、结构化 UI 和 Go SDK。"
+          },
+          "refs": [
+            7373
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Native Task Monitor",
+            "zh": "原生任务监视器"
+          },
+          "body": {
+            "en": "Monitor agent tasks natively in CLI and Desktop with lifecycle semantics and session-scoped summary view.",
+            "zh": "在 CLI 和桌面端原生监控代理任务，提供生命周期语义和会话范围摘要视图。"
+          },
+          "refs": [
+            6998
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Bounded Sub-agent Progress Forwarding",
+            "zh": "有界子代理进度转发"
+          },
+          "body": {
+            "en": "Forward structured progress for task, parallel_tasks, and fleet without flooding the parent stream. Renders nested lifecycle cards in Desktop and stable per-child transcript slots in CLI.",
+            "zh": "转发 task、parallel_tasks 和 fleet 的结构化进度，不淹没父流。在桌面端渲染嵌套生命周期卡片，在 CLI 中提供稳定的子进程记录槽。"
+          },
+          "refs": [
+            7372
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Goal Completion Fail-Closed",
+            "zh": "Goal 完成安全停止"
+          },
+          "body": {
+            "en": "Replace free-form Goal footer markers with a stable update_goal tool and epoch-scoped per-turn reports. Centralized completion logic with bounded evaluator, progress-aware budgets, and pause/resume controls.",
+            "zh": "用稳定的 update_goal 工具和纪元范围的每轮报告替换自由格式的 Goal 页脚标记。集中完成逻辑，带有界评估器、进度感知预算和暂停/恢复控制。"
+          },
+          "refs": [
+            7519
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Compact Decision Surfaces and Local Receipts",
+            "zh": "压缩决策弹窗与本地回执"
+          },
+          "body": {
+            "en": "Compact footer decision-card layout with bounded scroll, dense action rows, and overflow disclosure. Record bounded Ask, approval, and recovery decisions as local transcript receipts.",
+            "zh": "压缩页脚决策卡片布局，带有界滚动、密集操作行和溢出展示。将有界的 Ask、批准和恢复决策记录为本地记录回执。"
+          },
+          "refs": [
+            7576
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Simplified SSH Remote Access",
+            "zh": "简化 SSH 远程访问"
+          },
+          "body": {
+            "en": "Remove Remote Workbench protocol and stacks; reuse CLI/Serve remote model. Desktop opens per-host native web child windows via SSH. Keyless remote Serve setup with loopback-only page.",
+            "zh": "移除 Remote Workbench 协议和堆栈；重用 CLI/Serve 远程模型。桌面端通过 SSH 打开每主机原生 Web 子窗口。无密钥远程 Serve 设置，提供仅回环页面。"
+          },
+          "refs": [
+            7528
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Model Usage Charts with Primer Palette",
+            "zh": "使用 Primer 配色的模型用量图表"
+          },
+          "body": {
+            "en": "Replace monochrome accent ramp with GitHub Primer data-viz two-set categorical palette. Fix donut overflow on hover and keyboard accessibility.",
+            "zh": "用 GitHub Primer 数据可视化双套分类调色板替换单色渐变。修复悬停时环形图溢出和键盘可访问性。"
+          },
+          "refs": [
+            7503
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Cross-platform Extension and Task Monitor Reliability",
+            "zh": "Extension 与任务监视器跨平台可靠性"
+          },
+          "body": {
+            "en": "Make content-reference eviction deterministic, reject Unix and Windows absolute plugin paths consistently, stabilize parallel-task cancellation, and restore reliable Windows validation for Task Monitor and remote provider setup.",
+            "zh": "让内容引用淘汰顺序保持确定，一致拒绝 Unix 与 Windows 绝对插件路径，稳定并行任务取消流程，并恢复任务监视器与远程提供者设置的可靠 Windows 验证。"
+          },
+          "refs": [
+            7625
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "MiMo and DashScope Responses Wire Alignment",
+            "zh": "MiMo 与 DashScope Responses 协议对齐"
+          },
+          "body": {
+            "en": "Fix multi-turn tool loops, reasoning round-trip, JSON output for MiMo; fix DashScope second-turn 400 error, all-zero usage suppression, and vendor-aware cache TTL.",
+            "zh": "修复 MiMo 的多轮工具循环、推理往返、JSON 输出；修复 DashScope 第二轮 400 错误、全零用量抑制和供应商感知缓存 TTL。"
+          },
+          "refs": [
+            7566,
+            7234,
+            7168
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop Stability Fixes",
+            "zh": "桌面稳定性修复"
+          },
+          "body": {
+            "en": "Recover stuck updates and legacy WebKit, contain macOS alias repair startup crashes, keep composer overflow stacks readable, and harden account verification and community flows.",
+            "zh": "修复更新卡死与旧版 WebKit、遏制 macOS 别名修复启动崩溃、保持输入区溢出列表可读，并加固账号验证与社区流程。"
+          },
+          "refs": [
+            7615,
+            7610,
+            7590,
+            7589
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Remote Web Recovery After SSH Drops",
+            "zh": "SSH 断开后远程 Web 恢复"
+          },
+          "body": {
+            "en": "Add integration regression test for SSH drop, forward recovery, and window reload. Document transient outage behavior.",
+            "zh": "添加 SSH 断开、转发恢复和窗口重载的集成回归测试。记录瞬态中断行为。"
+          },
+          "refs": [
+            7368
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Unified Extension Kernel and Extension Protocol v1",
+              "zh": "统一扩展内核与 Extension Protocol v1"
+            },
+            "body": {
+              "en": "Immutable runtime snapshots, fail-atomic reload, Plugin Manifest v1, stable JSON-RPC sidecar protocol, interceptor dispatch, streaming provider adapter, structured UI, and Go SDK.",
+              "zh": "不可变运行时快照、故障原子重载、Plugin Manifest v1、稳定的 JSON-RPC 边车协议、拦截器调度、流式提供者适配器、结构化 UI 和 Go SDK。"
+            },
+            "refs": [
+              7373
+            ]
+          },
+          {
+            "title": {
+              "en": "Native Task Monitor",
+              "zh": "原生任务监视器"
+            },
+            "body": {
+              "en": "Monitor agent tasks natively in CLI and Desktop with lifecycle semantics and session-scoped summary view.",
+              "zh": "在 CLI 和桌面端原生监控代理任务，提供生命周期语义和会话范围摘要视图。"
+            },
+            "refs": [
+              6998
+            ]
+          },
+          {
+            "title": {
+              "en": "Bounded Sub-agent Progress Forwarding",
+              "zh": "有界子代理进度转发"
+            },
+            "body": {
+              "en": "Forward structured progress for task, parallel_tasks, and fleet without flooding the parent stream. Renders nested lifecycle cards in Desktop and stable per-child transcript slots in CLI.",
+              "zh": "转发 task、parallel_tasks 和 fleet 的结构化进度，不淹没父流。在桌面端渲染嵌套生命周期卡片，在 CLI 中提供稳定的子进程记录槽。"
+            },
+            "refs": [
+              7372
+            ]
+          },
+          {
+            "title": {
+              "en": "Goal Completion Fail-Closed",
+              "zh": "Goal 完成安全停止"
+            },
+            "body": {
+              "en": "Replace free-form Goal footer markers with a stable update_goal tool and epoch-scoped per-turn reports. Centralized completion logic with bounded evaluator, progress-aware budgets, and pause/resume controls.",
+              "zh": "用稳定的 update_goal 工具和纪元范围的每轮报告替换自由格式的 Goal 页脚标记。集中完成逻辑，带有界评估器、进度感知预算和暂停/恢复控制。"
+            },
+            "refs": [
+              7519
+            ]
+          },
+          {
+            "title": {
+              "en": "Ablation Subsystem Switches",
+              "zh": "消融子系统开关"
+            },
+            "body": {
+              "en": "Switch subsystems off behind one shared vocabulary for controlled experiments. Includes planner, subagent, retrieval, evidence, and compaction.",
+              "zh": "通过共享词汇关闭子系统以进行受控实验。包括规划器、子代理、检索、证据和压缩。"
+            },
+            "refs": [
+              7550
+            ]
+          },
+          {
+            "title": {
+              "en": "Benchmark Cost per Solved Task",
+              "zh": "基准测试每个已解决任务的成本"
+            },
+            "body": {
+              "en": "Report cost per solved task, tokens per solved, median wall time, and failure-class breakdown in e2e reports.",
+              "zh": "在端到端报告中报告每个已解决任务的成本、每个已解决任务的令牌数、中位墙钟时间和失败类别细分。"
+            },
+            "refs": [
+              7546
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Compact Decision Surfaces and Local Receipts",
+              "zh": "压缩决策弹窗与本地回执"
+            },
+            "body": {
+              "en": "Compact footer decision-card layout with bounded scroll, dense action rows, and overflow disclosure. Record bounded Ask, approval, and recovery decisions as local transcript receipts.",
+              "zh": "压缩页脚决策卡片布局，带有界滚动、密集操作行和溢出展示。将有界的 Ask、批准和恢复决策记录为本地记录回执。"
+            },
+            "refs": [
+              7576
+            ]
+          },
+          {
+            "title": {
+              "en": "Simplified SSH Remote Access",
+              "zh": "简化 SSH 远程访问"
+            },
+            "body": {
+              "en": "Remove Remote Workbench protocol and stacks; reuse CLI/Serve remote model. Desktop opens per-host native web child windows via SSH. Keyless remote Serve setup with loopback-only page.",
+              "zh": "移除 Remote Workbench 协议和堆栈；重用 CLI/Serve 远程模型。桌面端通过 SSH 打开每主机原生 Web 子窗口。无密钥远程 Serve 设置，提供仅回环页面。"
+            },
+            "refs": [
+              7528
+            ]
+          },
+          {
+            "title": {
+              "en": "Model Usage Charts with Primer Palette",
+              "zh": "使用 Primer 配色的模型用量图表"
+            },
+            "body": {
+              "en": "Replace monochrome accent ramp with GitHub Primer data-viz two-set categorical palette. Fix donut overflow on hover and keyboard accessibility.",
+              "zh": "用 GitHub Primer 数据可视化双套分类调色板替换单色渐变。修复悬停时环形图溢出和键盘可访问性。"
+            },
+            "refs": [
+              7503
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Cross-platform Extension and Task Monitor Reliability",
+              "zh": "Extension 与任务监视器跨平台可靠性"
+            },
+            "body": {
+              "en": "Make content-reference eviction deterministic, reject Unix and Windows absolute plugin paths consistently, stabilize parallel-task cancellation, and restore reliable Windows validation for Task Monitor and remote provider setup.",
+              "zh": "让内容引用淘汰顺序保持确定，一致拒绝 Unix 与 Windows 绝对插件路径，稳定并行任务取消流程，并恢复任务监视器与远程提供者设置的可靠 Windows 验证。"
+            },
+            "refs": [
+              7625
+            ]
+          },
+          {
+            "title": {
+              "en": "MiMo and DashScope Responses Wire Alignment",
+              "zh": "MiMo 与 DashScope Responses 协议对齐"
+            },
+            "body": {
+              "en": "Fix multi-turn tool loops, reasoning round-trip, JSON output for MiMo; fix DashScope second-turn 400 error, all-zero usage suppression, and vendor-aware cache TTL.",
+              "zh": "修复 MiMo 的多轮工具循环、推理往返、JSON 输出；修复 DashScope 第二轮 400 错误、全零用量抑制和供应商感知缓存 TTL。"
+            },
+            "refs": [
+              7566,
+              7234,
+              7168
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop Stability Fixes",
+              "zh": "桌面稳定性修复"
+            },
+            "body": {
+              "en": "Recover stuck updates and legacy WebKit, contain macOS alias repair startup crashes, keep composer overflow stacks readable, and harden account verification and community flows.",
+              "zh": "修复更新卡死与旧版 WebKit、遏制 macOS 别名修复启动崩溃、保持输入区溢出列表可读，并加固账号验证与社区流程。"
+            },
+            "refs": [
+              7615,
+              7610,
+              7590,
+              7589
+            ]
+          },
+          {
+            "title": {
+              "en": "Remote Web Recovery After SSH Drops",
+              "zh": "SSH 断开后远程 Web 恢复"
+            },
+            "body": {
+              "en": "Add integration regression test for SSH drop, forward recovery, and window reload. Document transient outage behavior.",
+              "zh": "添加 SSH 断开、转发恢复和窗口重载的集成回归测试。记录瞬态中断行为。"
+            },
+            "refs": [
+              7368
+            ]
+          },
+          {
+            "title": {
+              "en": "CI: Auto-minimize Activity-Farming Spam Comments",
+              "zh": "CI：自动最小化活动农场垃圾评论"
+            },
+            "body": {
+              "en": "Detect and minimize template spam comments from non-contributor accounts based on structural signals.",
+              "zh": "根据结构信号检测并最小化非贡献者账户的模板垃圾评论。"
+            },
+            "refs": [
+              7560
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "mchenziyi",
+        "clearnature",
+        "Akashmdshetty",
+        "esengine",
+        "HaoyueQin"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.20.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.19.7...desktop-v1.20.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.20.0",
+      "baseVersion": "1.20.0",
+      "status": "reviewed",
+      "previousRelease": "1.19.7",
+      "builds": {
+        "cli": "v1.20.0",
+        "desktop": "v1.20.0",
+        "npm": "1.20.0"
+      }
+    },
+    {
       "version": "1.19.7",
       "date": "2026-08-05",
       "channel": "stable",

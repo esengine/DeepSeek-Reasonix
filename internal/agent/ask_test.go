@@ -2,10 +2,13 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"strings"
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/provider"
 )
 
 type recordingAsker struct {
@@ -109,6 +112,16 @@ type fixedAsker struct{ answers []event.AskAnswer }
 
 func (f fixedAsker) Ask(_ context.Context, _ []event.AskQuestion) ([]event.AskAnswer, error) {
 	return f.answers, nil
+}
+
+func TestAskToolProviderContractStable(t *testing.T) {
+	tool := NewAskTool()
+	contract := tool.Description() + "\n" + string(provider.CanonicalizeSchema(tool.Schema()))
+	got := fmt.Sprintf("%x", sha256.Sum256([]byte(contract)))
+	const want = "f4c6efe84da2e964b3f8566b1f0921ca88812ae3ecfba46185d0439ae4f4c2a5"
+	if got != want {
+		t.Fatalf("ask provider contract hash = %s, want %s; tool description or canonical schema changed", got, want)
+	}
 }
 
 func TestAskToolDismissTellsModelToStopNotProceed(t *testing.T) {

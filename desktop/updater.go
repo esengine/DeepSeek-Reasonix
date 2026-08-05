@@ -1250,13 +1250,19 @@ func currentInstallDir() string {
 	return filepath.Dir(exe)
 }
 
-// archiveSupersededLegacyUpdateAfterReady retires a valid older flat-layout
-// transaction only after the newer versioned desktop has shown its UI. This
-// lets a signed recovery installer heal users already blocked by a v1.18-v1.19
-// health marker without deleting repair state or trusting a foreign install.
-func archiveSupersededLegacyUpdateAfterReady() (bool, error) {
+// archiveSupersededPendingUpdateAfterReady retires a transaction only after the
+// current desktop has shown a usable UI. App-bundle recovery handles interrupted
+// macOS generations; the versioned-layout branch handles older flat Windows and
+// Linux transactions.
+func archiveSupersededPendingUpdateAfterReady() (bool, error) {
 	exe := currentExecutablePath()
 	if exe == "" || version == "" || version == "dev" {
+		return false, nil
+	}
+	if archived, err := repair.ArchiveSupersededPendingAppBundleUpdate(version); err != nil || archived {
+		return archived, err
+	}
+	if runtime.GOOS == "darwin" {
 		return false, nil
 	}
 	root, err := installlayout.ResolveInstallRoot(exe)
@@ -1280,6 +1286,18 @@ func archiveSupersededLegacyUpdateAfterReady() (bool, error) {
 		return false, fmt.Errorf("active install version %s does not match running version %s", ptr.ActiveVersion, running)
 	}
 	return repair.ArchiveSupersededPendingFileUpdate(running, root)
+}
+
+func capturePendingUpdateHealthIdentity(app *App) {
+	if app == nil {
+		return
+	}
+	tx, err := readPendingUpdateForHealth()
+	if err != nil || tx == nil || strings.TrimSpace(tx.ToVersion) != strings.TrimSpace(version) {
+		return
+	}
+	app.healthyUpdateCreatedAt = tx.CreatedAt
+	app.healthyUpdateTransactionID = repair.UpdateTransactionID(tx)
 }
 
 // updateSiblingArtifacts lists the packaged binaries an update replaces beside

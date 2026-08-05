@@ -1,7 +1,7 @@
 # Reasonix Plugin Packages
 
-Reasonix plugin packages bundle skills, hooks, and MCP servers behind one
-installable unit.
+Reasonix plugin packages bundle skills, hooks, MCP servers, prompts, themes,
+and code extensions behind one installable unit.
 
 ## CLI Mode
 
@@ -255,6 +255,101 @@ Plugin hook execution is explicit:
 - Existing native hooks that declare neither field keep the historical
   Reasonix shell-command behavior. `shellCommand: true` remains supported as
   the legacy spelling of shell form.
+
+## Manifest v1 (Extensions)
+
+A plugin can opt into the v1 manifest by declaring an `apiVersion`:
+
+```json
+{
+  "apiVersion": "reasonix.io/plugin/v1",
+  "name": "example",
+  "version": "1.0.0",
+  "description": "Example extension",
+  "contributes": {
+    "skills": ["skills"],
+    "agents": ["agents"],
+    "commands": ["commands"],
+    "prompts": ["prompts"],
+    "hooks": {},
+    "mcpServers": {},
+    "themes": ["themes/*.reasonix-theme"]
+  },
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/example",
+    "args": [],
+    "env": {},
+    "required": true,
+    "priority": 0,
+    "intercepts": ["input.receive", "tool.before"],
+    "replaces": ["system_prompt"],
+    "capabilities": ["interceptors", "strategies", "providers", "ui"]
+  }
+}
+```
+
+Parsing rules:
+
+- Manifests **without** `apiVersion` parse exactly as before (legacy format,
+  unknown fields ignored).
+- v1 is strict: any unknown field — at the root or nested under
+  `contributes`/`runtime` — is an error naming the field path, so typos fail
+  loudly instead of silently disabling a capability.
+- Unknown major versions (`reasonix.io/plugin/v2`, …) are rejected.
+- v1 may mix legacy top-level fields (`skills`, `hooks`, `mcpServers`, …)
+  with `contributes`: identical paths are deduplicated; the same key with two
+  different definitions is a manifest error naming the key.
+- All relative paths and globs must stay inside the plugin root: traversal,
+  absolute paths, escaping symlinks, and non-regular theme files are
+  rejected.
+
+New resource types:
+
+- `prompts` are prompt templates using the same semantics and argument
+  substitution as commands, invoked as `/<plugin>:<name>`. `commands` remains
+  a compatible alias.
+- `themes` are `.reasonix-theme` files shown read-only in Desktop Settings as
+  plugin themes (IDs `plugin:<plugin>:<theme>`); they are never copied into
+  the user theme library. If the plugin is disabled or uninstalled while its
+  theme is active, the desktop falls back to the base style but keeps the
+  ID, so reinstalling the same plugin restores the theme.
+
+The `runtime` block declares a code extension — a sidecar process Reasonix
+launches and talks to over the Extension Protocol (JSON-RPC 2.0 over stdio;
+see `docs/EXTENSION_PROTOCOL.generated.md` for the method index and
+`sdk/go/README.md` for the Go SDK):
+
+- `command`/`args`/`env` are **exec form only** — the command is the
+  executable (never shell-interpreted); `${REASONIX_PLUGIN_ROOT}` expands to
+  the installed plugin root.
+- `intercepts` lists the events the extension wants to intercept (for example
+  `input.receive`, `tool.before`, `permission.decision`); `replaces` declares
+  the replacement slots it may own (`system_prompt`, `context`,
+  `provider_request`, `provider_response`, `compaction`, `session_policy`,
+  `permission`, `frontend_events`, `tool:<name>`, `provider:<ref>`). Each
+  slot has exactly one owner across all installed plugins; a collision fails
+  the build with both sources named.
+- `capabilities` gates whole feature families: `interceptors`, `strategies`,
+  `providers`, `ui`. Anything the sidecar announces beyond the manifest is
+  rejected during the handshake.
+- Provider models contributed by an extension appear as
+  `plugin/<plugin>/<provider>/<model>` in the model picker; the ref also
+  works as `default_model` (including on first boot) and in `/model`,
+  Desktop, and ACP model switches.
+
+**Full trust.** A code extension runs outside the sandbox with the
+unfiltered inherited environment. It can read the full session and
+environment, bypass permissions, and operate the machine directly; a
+`permission.decision` "allow" from an extension overrides a host deny.
+Installing, updating, replacing, or `--link`ing a plugin with a `runtime`
+block *is* the authorization — there is no second confirmation prompt, and
+`--link` keeps trusting changed content automatically. The install preview,
+`reasonix plugin show`, capability diagnostics, and the Desktop installer
+therefore display a prominent `FULL TRUST` block with the runtime command,
+interceptors, replacement slots, and provider/UI capabilities. Review that
+block before installing, and only install runtimes you trust completely.
+Only plugins installed through the plugin flow can start a runtime; project
+configuration can never declare one.
 
 ## Codex & Claude Compatibility
 

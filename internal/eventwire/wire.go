@@ -2,6 +2,8 @@
 package eventwire
 
 import (
+	"encoding/json"
+
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -10,24 +12,26 @@ import (
 // externalizable:"true" marks large string payloads the Remote protocol may
 // offload via content refs without changing provider-visible semantics.
 type Event struct {
-	Kind            string           `json:"kind"`
-	Text            string           `json:"text,omitempty" externalizable:"true"`
-	Detail          string           `json:"detail,omitempty" externalizable:"true"`
-	Code            string           `json:"code,omitempty"`
-	Reasoning       string           `json:"reasoning,omitempty" externalizable:"true"`
-	MemoryCitations []MemoryCitation `json:"memoryCitations,omitempty"`
-	Level           string           `json:"level,omitempty"`
-	Tool            *Tool            `json:"tool,omitempty"`
-	Usage           *Usage           `json:"usage,omitempty"`
-	Approval        *Approval        `json:"approval,omitempty"`
-	Ask             *Ask             `json:"ask,omitempty"`
-	Compaction      *Compaction      `json:"compaction,omitempty"`
-	Guardian        *Guardian        `json:"guardian,omitempty"`
-	Err             string           `json:"err,omitempty" externalizable:"true"`
-	Outcome         string           `json:"outcome,omitempty"`
-	Readiness       *FinalReadiness  `json:"readiness,omitempty"`
-	RetryAttempt    int              `json:"retryAttempt,omitempty"`
-	RetryMax        int              `json:"retryMax,omitempty"`
+	Kind            string            `json:"kind"`
+	Text            string            `json:"text,omitempty" externalizable:"true"`
+	Detail          string            `json:"detail,omitempty" externalizable:"true"`
+	Code            string            `json:"code,omitempty"`
+	Reasoning       string            `json:"reasoning,omitempty" externalizable:"true"`
+	MemoryCitations []MemoryCitation  `json:"memoryCitations,omitempty"`
+	Level           string            `json:"level,omitempty"`
+	Tool            *Tool             `json:"tool,omitempty"`
+	Usage           *Usage            `json:"usage,omitempty"`
+	Approval        *Approval         `json:"approval,omitempty"`
+	Ask             *Ask              `json:"ask,omitempty"`
+	Compaction      *Compaction       `json:"compaction,omitempty"`
+	Guardian        *Guardian         `json:"guardian,omitempty"`
+	DecisionReceipt *DecisionReceipt  `json:"decisionReceipt,omitempty"`
+	Extension       *ExtensionSurface `json:"extension,omitempty"`
+	Err             string            `json:"err,omitempty" externalizable:"true"`
+	Outcome         string            `json:"outcome,omitempty"`
+	Readiness       *FinalReadiness   `json:"readiness,omitempty"`
+	RetryAttempt    int               `json:"retryAttempt,omitempty"`
+	RetryMax        int               `json:"retryMax,omitempty"`
 }
 
 // ToWire converts a typed runtime event into the shared frontend JSON contract.
@@ -39,6 +43,9 @@ func ToWire(e event.Event) Event {
 	switch e.Kind {
 	case event.Notice:
 		w.Code = e.Code
+		if e.DecisionReceipt != nil {
+			w.DecisionReceipt = ToWireDecisionReceipt(e.DecisionReceipt)
+		}
 		if e.Level == event.LevelWarn {
 			w.Level = "warn"
 		} else {
@@ -111,6 +118,8 @@ func ToWire(e event.Event) Event {
 		}
 	case event.GuardianAssessment:
 		w.Guardian = ToWireGuardian(e.Guardian)
+	case event.ExtensionSurface, event.ExtensionStatus:
+		w.Extension = ToWireExtensionSurface(e.Extension)
 	case event.TurnDone:
 		w.Outcome = e.Outcome
 		if e.Readiness != nil {
@@ -124,6 +133,22 @@ func ToWire(e event.Event) Event {
 		w.RetryMax = e.RetryMax
 	}
 	return w
+}
+
+// DecisionReceipt is the JSON form of a provider-excluded user decision.
+type DecisionReceipt struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Tool    string `json:"tool,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Outcome string `json:"outcome"`
+}
+
+func ToWireDecisionReceipt(in *provider.DecisionReceipt) *DecisionReceipt {
+	if in == nil {
+		return nil
+	}
+	return &DecisionReceipt{ID: in.ID, Kind: in.Kind, Tool: in.Tool, Subject: in.Subject, Outcome: in.Outcome}
 }
 
 type FinalReadiness struct {
@@ -361,6 +386,13 @@ func KindNames() []string {
 	return names
 }
 
+// KindName returns the stable wire name of one event kind, or false for a
+// kind outside the known set.
+func KindName(kind event.Kind) (string, bool) {
+	name, ok := kindNames[kind]
+	return name, ok
+}
+
 var kindNames = map[event.Kind]string{
 	event.TurnStarted:        "turn_started",
 	event.Reasoning:          "reasoning",
@@ -381,4 +413,136 @@ var kindNames = map[event.Kind]string{
 	event.Retrying:           "retrying",
 	event.Steer:              "steer",
 	event.GuardianAssessment: "guardian_assessment",
+	event.ExtensionSurface:   "extension_surface",
+	event.ExtensionStatus:    "extension_status",
+}
+
+// ExtensionSurface is the JSON form of an event.ExtensionSurfacePayload.
+type ExtensionSurface struct {
+	PluginID     string                 `json:"pluginId"`
+	SurfaceID    string                 `json:"surfaceId"`
+	SessionID    string                 `json:"sessionId,omitempty"`
+	Generation   uint64                 `json:"generation,omitempty"`
+	Kind         string                 `json:"kind"`
+	Status       *ExtensionStatus       `json:"status,omitempty"`
+	Card         *ExtensionCard         `json:"card,omitempty"`
+	Form         *ExtensionForm         `json:"form,omitempty"`
+	Notification *ExtensionNotification `json:"notification,omitempty"`
+}
+
+// ExtensionStatus is the JSON form of an event.ExtensionStatusView.
+type ExtensionStatus struct {
+	Label    string   `json:"label"`
+	Detail   string   `json:"detail,omitempty"`
+	Severity string   `json:"severity,omitempty"`
+	Progress *float64 `json:"progress,omitempty"`
+}
+
+// ExtensionKeyValue is the JSON form of an event.ExtensionKeyValue.
+type ExtensionKeyValue struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// ExtensionActionRef is the JSON form of an event.ExtensionActionRef.
+type ExtensionActionRef struct {
+	ActionID string `json:"actionId"`
+	Label    string `json:"label"`
+}
+
+// ExtensionCard is the JSON form of an event.ExtensionCardView.
+type ExtensionCard struct {
+	Title    string               `json:"title,omitempty"`
+	Markdown string               `json:"markdown,omitempty" externalizable:"true"`
+	Text     string               `json:"text,omitempty" externalizable:"true"`
+	Fields   []ExtensionKeyValue  `json:"fields,omitempty"`
+	Progress *float64             `json:"progress,omitempty"`
+	Actions  []ExtensionActionRef `json:"actions,omitempty"`
+}
+
+// ExtensionFormField is the JSON form of an event.ExtensionFormField. Default
+// travels as raw JSON: the remote schema has no "any" type, and the field is
+// already protocol-validated JSON on arrival.
+type ExtensionFormField struct {
+	Key      string          `json:"key"`
+	Label    string          `json:"label,omitempty"`
+	Kind     string          `json:"kind,omitempty"`
+	Options  []string        `json:"options,omitempty"`
+	Default  json.RawMessage `json:"default,omitempty"`
+	Required bool            `json:"required,omitempty"`
+}
+
+// ExtensionForm is the JSON form of an event.ExtensionFormView.
+type ExtensionForm struct {
+	Title   string               `json:"title,omitempty"`
+	Message string               `json:"message,omitempty" externalizable:"true"`
+	Fields  []ExtensionFormField `json:"fields"`
+}
+
+// ExtensionNotification is the JSON form of an event.ExtensionNotificationView.
+type ExtensionNotification struct {
+	Title    string `json:"title"`
+	Body     string `json:"body,omitempty" externalizable:"true"`
+	Severity string `json:"severity,omitempty"`
+}
+
+// ToWireExtensionSurface converts an event.ExtensionSurfacePayload into its
+// JSON wire form. A nil payload yields nil so a malformed event never
+// marshals a half-filled extension object.
+func ToWireExtensionSurface(p *event.ExtensionSurfacePayload) *ExtensionSurface {
+	if p == nil {
+		return nil
+	}
+	out := &ExtensionSurface{
+		PluginID: p.PluginID, SurfaceID: p.SurfaceID, SessionID: p.SessionID,
+		Generation: p.Generation, Kind: p.Kind,
+	}
+	if s := p.Status; s != nil {
+		out.Status = &ExtensionStatus{Label: s.Label, Detail: s.Detail, Severity: s.Severity, Progress: s.Progress}
+	}
+	if c := p.Card; c != nil {
+		card := &ExtensionCard{
+			Title: c.Title, Markdown: c.Markdown, Text: c.Text, Progress: c.Progress,
+		}
+		if len(c.Fields) > 0 {
+			card.Fields = make([]ExtensionKeyValue, len(c.Fields))
+			for i, f := range c.Fields {
+				card.Fields[i] = ExtensionKeyValue{Key: f.Key, Value: f.Value}
+			}
+		}
+		if len(c.Actions) > 0 {
+			card.Actions = make([]ExtensionActionRef, len(c.Actions))
+			for i, a := range c.Actions {
+				card.Actions[i] = ExtensionActionRef{ActionID: a.ActionID, Label: a.Label}
+			}
+		}
+		out.Card = card
+	}
+	if f := p.Form; f != nil {
+		form := &ExtensionForm{Title: f.Title, Message: f.Message}
+		if len(f.Fields) > 0 {
+			form.Fields = make([]ExtensionFormField, len(f.Fields))
+			for i, field := range f.Fields {
+				wireField := ExtensionFormField{
+					Key: field.Key, Label: field.Label, Kind: field.Kind,
+					Options:  append([]string(nil), field.Options...),
+					Required: field.Required,
+				}
+				if field.Default != nil {
+					// The value arrived as protocol-validated JSON, so a
+					// marshal failure here is unreachable in practice; a
+					// pathological in-memory value simply drops the default.
+					if raw, err := json.Marshal(field.Default); err == nil {
+						wireField.Default = raw
+					}
+				}
+				form.Fields[i] = wireField
+			}
+		}
+		out.Form = form
+	}
+	if n := p.Notification; n != nil {
+		out.Notification = &ExtensionNotification{Title: n.Title, Body: n.Body, Severity: n.Severity}
+	}
+	return out
 }

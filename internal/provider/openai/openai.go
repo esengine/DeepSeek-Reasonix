@@ -725,7 +725,12 @@ func (c *client) buildRequest(req provider.Request) chatRequest {
 		cm := chatMessage{
 			Role:       string(m.Role),
 			ToolCallID: m.ToolCallID,
-			Name:       m.Name,
+		}
+		if m.Role == provider.RoleTool {
+			// Always send the tool message's name, even when empty: strict
+			// backends (MiMo) 400 a tool result without the key (#4711).
+			name := m.Name
+			cm.Name = &name
 		}
 		// DeepSeek thinking mode 400s an assistant tool_calls turn whose
 		// reasoning_content KEY is absent from the request JSON ("reasoning_content
@@ -1266,7 +1271,12 @@ type chatMessage struct {
 	ReasoningContent *string        `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
-	Name             string         `json:"name,omitempty"`
+	// Name is the role=tool message's function name. A pointer so ordinary
+	// messages omit the key (byte-stable prefix), while tool messages always
+	// serialize it — even empty: strict OpenAI-compatible backends (MiMo, per
+	// its error table) reject a tool message whose `name` key is absent
+	// ("name is not set"), and OpenAI's spec requires the field on role=tool.
+	Name *string `json:"name,omitempty"`
 }
 
 type chatContentPart struct {

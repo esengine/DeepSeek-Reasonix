@@ -1633,6 +1633,15 @@ export function parseMCPQuickDefinition(raw: string): MCPServerInput {
   return { name: quickMCPName(definition), transport: "stdio", command: definition, args: [], url: "", env: null, headers: null };
 }
 
+type PluginRuntimePlan = {
+  command?: string;
+  args?: string[];
+  intercepts?: string[];
+  replaces?: string[];
+  capabilities?: string[];
+  fullTrust?: boolean;
+};
+
 type PluginInstallPlanAction = {
   action?: string;
   kind?: string;
@@ -1644,6 +1653,7 @@ type PluginInstallPlanAction = {
   compatibility?: string;
   mappedCapabilities?: string[];
   skippedCapabilities?: PluginCompatibilityIssue[];
+  runtime?: PluginRuntimePlan;
   agentCount?: number;
   skillCount?: number;
   commandCount?: number;
@@ -1943,12 +1953,46 @@ function PluginPlanPreview({ plan }: { plan: PluginInstallPlanView }) {
 							{asArray(action.skippedCapabilities).map((issue, issueIndex) => <span className="cap-plugin-plan__warning" key={`${issue.capability}-${issue.path || ""}-${issueIndex}`}>{issue.capability}: {issue.reason}</span>)}
 							{action.message && <span className="cap-plugin-action__source">{action.message}</span>}
 							{action.error && <span className="cap-plugin-plan__warning">{action.error}</span>}
+							{action.runtime ? <PluginRuntimeTrustBlock runtime={action.runtime} /> : null}
 						</div>
 					))}
 				</div>
 			) : (
 				<pre className="cap-plugin-plan__raw">{plan.raw}</pre>
 			)}
+		</div>
+	);
+}
+
+// PluginRuntimeTrustBlock renders the prominent FULL TRUST warning for a
+// plugin that declares a runtime process. Install/update/replace/--link
+// already imply full trust, so this is disclosure, not a second confirmation.
+function PluginRuntimeTrustBlock({ runtime }: { runtime: PluginRuntimePlan }) {
+	const t = useT();
+	const commandLine = [runtime.command, ...asArray(runtime.args)].filter(Boolean).join(" ");
+	const groups: { label: string; values: string[] }[] = [
+		{ label: t("caps.pluginRuntimeIntercepts"), values: asArray(runtime.intercepts) },
+		{ label: t("caps.pluginRuntimeReplaces"), values: asArray(runtime.replaces) },
+		{ label: t("caps.pluginRuntimeCapabilities"), values: asArray(runtime.capabilities) },
+	];
+	return (
+		<div className="cap-plugin-runtime" role="alert">
+			<div className="cap-plugin-runtime__title">{t("caps.pluginRuntimeFullTrust")}</div>
+			{commandLine ? (
+				<div className="cap-plugin-runtime__row">
+					<span className="cap-plugin-runtime__label">{t("caps.pluginRuntimeCommand")}</span>
+					<code className="cap-plugin-runtime__cmd">{commandLine}</code>
+				</div>
+			) : null}
+			{groups
+				.filter((group) => group.values.length > 0)
+				.map((group) => (
+					<div className="cap-plugin-runtime__row" key={group.label}>
+						<span className="cap-plugin-runtime__label">{group.label}</span>
+						<span>{group.values.join(", ")}</span>
+					</div>
+				))}
+			<div className="cap-plugin-runtime__risk">{t("caps.pluginRuntimeRisk")}</div>
 		</div>
 	);
 }
@@ -2300,6 +2344,7 @@ function parsePluginInstallPlan(raw: string): PluginInstallPlanView {
 				compatibility: stringValue(item.compatibility),
 				mappedCapabilities: (Array.isArray(item.mappedCapabilities) ? item.mappedCapabilities : []).filter((value): value is string => typeof value === "string"),
 				skippedCapabilities: (Array.isArray(item.skippedCapabilities) ? item.skippedCapabilities : []) as PluginCompatibilityIssue[],
+				runtime: parsePluginRuntimePlan(item.runtime),
 				agentCount: numericValue(item.agentCount), skillCount: numericValue(item.skillCount), commandCount: numericValue(item.commandCount), hookCount: numericValue(item.hookCount), toolCount: numericValue(item.toolCount),
 			}];
 		});
@@ -2323,6 +2368,25 @@ function numericValue(value: unknown): number | undefined {
 
 function stringValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+// parsePluginRuntimePlan extracts the FULL TRUST runtime block a plugin
+// install plan carries (installsource.RuntimePlanInfo). Anything malformed
+// simply drops out — the risk UI is additive and must never break planning.
+function parsePluginRuntimePlan(value: unknown): PluginRuntimePlan | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const item = value as Record<string, unknown>;
+	const command = stringValue(item.command);
+	if (!command) return undefined;
+	const list = (v: unknown): string[] => (Array.isArray(v) ? v : []).filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+	return {
+		command,
+		args: list(item.args),
+		intercepts: list(item.intercepts),
+		replaces: list(item.replaces),
+		capabilities: list(item.capabilities),
+		fullTrust: item.fullTrust === true,
+	};
 }
 
 function pluginPlanActionLabel(action: PluginInstallPlanAction, t: ReturnType<typeof useT>): string {

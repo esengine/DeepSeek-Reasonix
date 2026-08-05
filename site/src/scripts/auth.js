@@ -156,10 +156,14 @@ if (resetForm) {
 const accountView = $("account-view");
 if (accountView) {
   const gate = $("account-gate");
+  let accountUser = null;
   const fill = (user) => {
+    accountUser = user;
     $("acct-handle").textContent = "@" + user.handle;
     $("acct-email").textContent = user.email + (user.emailVerified ? "" : " · unconfirmed");
     $("acct-role").textContent = user.role;
+    $("acct-profile-link").href = withBase("/u/?handle=" + encodeURIComponent(user.handle));
+    $("verification-wrap").hidden = user.emailVerified;
     $("f-displayName").value = user.displayName || "";
     $("f-handle").value = user.handle || "";
     $("f-bio").value = user.bio || "";
@@ -227,6 +231,22 @@ if (accountView) {
     location.href = withBase("/login/");
   });
 
+  $("resend-verification-btn")?.addEventListener("click", async () => {
+    if (!accountUser || accountUser.emailVerified) return;
+    const btn = $("resend-verification-btn");
+    const box = $("verification-msg");
+    clearMsg(box);
+    busy(btn, true);
+    try {
+      await api("/auth/resend-verification", { method: "POST", body: { email: accountUser.email } });
+      msg(box, "ok", "A new verification email is on its way.");
+    } catch (err) {
+      msg(box, "error", err.message);
+    } finally {
+      busy(btn, false);
+    }
+  });
+
   $("delete-btn")?.addEventListener("click", async () => {
     if (!confirm("Delete your account? This cannot be undone.")) return;
     try {
@@ -236,6 +256,38 @@ if (accountView) {
       msg(pBox, "error", err.message);
     }
   });
+}
+
+// public profile — the static site uses a query parameter while the accounts
+// API keeps its canonical /u/:handle endpoint.
+const publicProfile = $("public-profile");
+if (publicProfile) {
+  const gate = $("public-profile-gate");
+  const handle = (qp.get("handle") || "").trim().toLowerCase();
+  if (!/^[a-z0-9](?:[a-z0-9_]*[a-z0-9])?$/.test(handle) || handle.length < 3 || handle.length > 30) {
+    msg(gate, "error", "That public profile address is invalid.");
+  } else {
+    api("/u/" + encodeURIComponent(handle))
+      .then(({ user }) => {
+        $("public-profile-handle").textContent = "@" + user.handle;
+        $("public-profile-name").textContent = user.displayName || user.handle;
+        $("public-profile-bio").textContent = user.bio || "No bio yet.";
+        $("public-profile-joined").textContent = new Date(user.joinedAt).toLocaleDateString();
+        const avatar = $("public-profile-avatar");
+        if (user.avatarUrl) {
+          try {
+            const url = new URL(user.avatarUrl);
+            if (url.protocol === "https:" || url.protocol === "http:") {
+              avatar.src = url.href;
+              avatar.hidden = false;
+            }
+          } catch {}
+        }
+        gate.hidden = true;
+        publicProfile.hidden = false;
+      })
+      .catch((err) => msg(gate, "error", err.status === 404 ? "That profile doesn't exist." : err.message));
+  }
 }
 
 // device — the human-facing half of the CLI/desktop device-authorization flow.
