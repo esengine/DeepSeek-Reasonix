@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -525,5 +526,161 @@ func TestHeartbeatTickAdoptsExternalFileEdits(t *testing.T) {
 	tasks := engine.ListTasks()
 	if len(tasks) != 2 || tasks[1].ID != "b" {
 		t.Fatalf("tick did not adopt the external edit: %+v", tasks)
+	}
+}
+
+func TestOpenGlobalTabInactiveSeedsDefaultModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	seedUserCredentials(t, "REASONIX_TEST_HEARTBEAT_KEY=test-key\n")
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name:      "custom-flash",
+		Kind:      "openai",
+		BaseURL:   "https://example.com/v1",
+		Model:     "deepseek-v4-flash",
+		APIKeyEnv: "REASONIX_TEST_HEARTBEAT_KEY",
+	})
+	if err := cfg.SetDefaultModel("custom-flash/deepseek-v4-flash"); err != nil {
+		t.Fatalf("SetDefaultModel: %v", err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+
+	topic, err := app.CreateTopic("global", "", "Heartbeat seed")
+	if err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+	meta, err := app.openGlobalTabInactive(topic.ID)
+	if err != nil {
+		t.Fatalf("openGlobalTabInactive: %v", err)
+	}
+	tab := app.tabByID(meta.ID)
+	if tab == nil {
+		t.Fatal("expected tab for inactive global open")
+	}
+	// Cancel the async build so the test does not leak a live controller boot.
+	app.mu.Lock()
+	cancel := tab.buildCancel
+	tab.removed = true
+	app.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if got := strings.TrimSpace(tab.model); got != "custom-flash/deepseek-v4-flash" {
+		t.Fatalf("inactive open tab model = %q, want configured default_model", got)
+	}
+}
+
+func TestHeartbeatExecuteTaskAppliesConfiguredDefaultModel(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	seedUserCredentials(t, "REASONIX_TEST_HEARTBEAT_KEY=test-key\n")
+
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name:      "custom-flash",
+		Kind:      "openai",
+		BaseURL:   "https://example.com/v1",
+		Model:     "deepseek-v4-flash",
+		APIKeyEnv: "REASONIX_TEST_HEARTBEAT_KEY",
+	})
+	if err := cfg.SetDefaultModel("custom-flash/deepseek-v4-flash"); err != nil {
+		t.Fatalf("SetDefaultModel: %v", err)
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	engine := &HeartbeatEngine{
+		app:           app,
+		pendingTopics: map[string]heartbeatPendingTopic{},
+	}
+	ctrl := &heartbeatExecuteTaskCtrlStub{}
+	injected := make(chan struct{})
+
+	go func() {
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-injected:
+				return
+			case <-ticker.C:
+				var cancel context.CancelFunc
+				var tabToInject *WorkspaceTab
+				app.mu.Lock()
+				for _, tab := range app.tabs {
+					if tab == nil {
+						continue
+					}
+					// Simulate a reused topic that still carries the official
+					// DeepSeek flash ref from an earlier controller build.
+					tab.model = "deepseek-flash/deepseek-v4-flash"
+					tab.Label = tab.model
+					tab.removed = true
+					cancel = tab.buildCancel
+					tabToInject = tab
+					break
+				}
+				app.mu.Unlock()
+				if tabToInject == nil {
+					continue
+				}
+				if cancel != nil {
+					cancel()
+				}
+				app.mu.Lock()
+				if tabToInject.Ctrl == nil {
+					tabToInject.Ctrl = ctrl
+					tabToInject.Ready = true
+					tabToInject.StartupErr = ""
+					app.advanceSessionRuntimeEpochLocked(tabToInject)
+					app.mu.Unlock()
+					close(injected)
+					return
+				}
+				app.mu.Unlock()
+			}
+		}
+	}()
+
+	got := engine.executeTask(HeartbeatTask{
+		ID:                     "model-fix",
+		Title:                  "Model fix",
+		Prompt:                 "ping",
+		NewConversationEachRun: true,
+		ApprovalMode:           "auto",
+	})
+	if got.LastRunAt == 0 {
+		t.Fatal("heartbeat run should complete after submit")
+	}
+
+	tab := app.tabByID(got.TopicID)
+	if tab == nil {
+		// TopicID is the topic id, not tab id — find the only tab.
+		app.mu.RLock()
+		for _, candidate := range app.tabs {
+			if candidate != nil {
+				tab = candidate
+				break
+			}
+		}
+		app.mu.RUnlock()
+	}
+	if tab == nil {
+		t.Fatal("expected heartbeat tab")
+	}
+	if got := strings.TrimSpace(tab.model); got != "custom-flash/deepseek-v4-flash" {
+		t.Fatalf("heartbeat tab model = %q, want configured default_model", got)
 	}
 }
