@@ -61,6 +61,7 @@ import {
   formatSelectionLabel,
   languageFor,
   normalizeSelectedText,
+  normalizeSelectionComment,
   selectedTextSnippet,
   type SelectedTextInsertRequest,
   type SelectedTextReference,
@@ -1733,8 +1734,12 @@ export function Composer({
     if (!normalized.text) return;
     if (normalized.truncated) showToast(t("composer.selectedTextTruncated"), "warn");
     const path = selectedTextRequest.path;
+    const comment = normalizeSelectionComment(selectedTextRequest.comment).text || undefined;
     const duplicate = selectedTextRefsRef.current.some(
-      (reference) => reference.text === normalized.text && (reference.path ?? "") === (path ?? ""),
+      (reference) =>
+        reference.text === normalized.text &&
+        (reference.path ?? "") === (path ?? "") &&
+        (reference.comment ?? "") === (comment ?? ""),
     );
     if (!duplicate) {
       const next = [
@@ -1743,6 +1748,7 @@ export function Composer({
           id: `${path ? "code" : "chat"}-selection-${selectedTextRequest.id}`,
           text: normalized.text,
           ...(path ? { path } : {}),
+          ...(comment ? { comment } : {}),
         },
       ];
       selectedTextRefsRef.current = next;
@@ -2063,7 +2069,8 @@ export function Composer({
       requestActiveDraftFrame(focusComposerInput);
       return;
     }
-    if (!trimmedText && currentAttachments.length === 0 && currentWorkspaceRefs.length === 0 && inlineInvocationCount === 0) {
+    if (!trimmedText && currentAttachments.length === 0 && currentWorkspaceRefs.length === 0 && inlineInvocationCount === 0 &&
+      !selectedTextRefsRef.current.some((reference) => Boolean(reference.comment))) {
       if (goalModeOn && !activeGoal) {
         setComposerPrompt(t("composer.goalInputRequired"));
         requestActiveDraftFrame(focusComposerInput);
@@ -3671,7 +3678,8 @@ export function Composer({
       })()
     : null;
   const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0 &&
-    !invocations.some((invocation) => invocation.command.kind === "skill");
+    !invocations.some((invocation) => invocation.command.kind === "skill") &&
+    !selectedTextRefs.some((reference) => Boolean(reference.comment));
   const submitBlocked = submitting || pendingPaste > 0 || (submitEmpty && !(goalModeOn && !activeGoal)) || disabled || (!running && submitDisabled) || readOnly;
   const submitTooltip = running
     ? t("composer.queueGuidance", { combo: sendComboLabel })
@@ -4290,9 +4298,25 @@ export function Composer({
             <ComposerContextCard
               key={reference.id}
               variant="selection"
-              tooltipLabel={reference.path
-                ? <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
-                : <Markdown text={reference.text} />}
+              tooltipLabel={reference.path ? (
+                <>
+                  <CodeViewer value={reference.text} language={languageFor(reference.path)} maxHeight={240} />
+                  {reference.comment && (
+                    <div className="composer-context__tooltip-comment">
+                      {t("composer.selectionComment")}: {reference.comment}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <Markdown text={reference.text} />
+                  {reference.comment && (
+                    <div className="composer-context__tooltip-comment">
+                      {t("composer.selectionComment")}: {reference.comment}
+                    </div>
+                  )}
+                </>
+              )}
               removeLabel={t("composer.removeSelectedText")}
               onRemove={() => {
                 const next = selectedTextRefsRef.current.filter((item) => item.id !== reference.id);
@@ -4302,6 +4326,7 @@ export function Composer({
               }}
               name={reference.path ? reference.path.split("/").filter(Boolean).pop() ?? reference.path : selectedTextSnippet(reference.text)}
               meta={reference.path ? t("composer.selectedCode") : t("composer.selectedText")}
+              note={reference.comment}
               icon={reference.path ? <FileText size={20} /> : <MessageSquare size={20} />}
             />
           ))}

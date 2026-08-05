@@ -3167,22 +3167,28 @@ export default function App() {
     }));
   }, [activeTabId]);
 
-  const addWorkspaceCodeToComposer = useCallback((path: string, code: string) => {
+  const addWorkspaceCodeToComposer = useCallback((path: string, code: string, comment?: string) => {
     if (!activeTabId || !code.trim()) return;
     if (workspaceInsertTarget === "planRevision" && state.approval?.tool === "exit_plan_mode") {
       // The plan-revision input is plain text and only consumes request.text,
       // so hand it the fenced rendering instead of a structured reference.
+      const reference = formatSelectionReference(path, code);
       setPlanRevisionInsertRequest({
         tabId: activeTabId,
         approvalId: state.approval.id,
-        request: { id: Date.now(), text: formatSelectionReference(path, code) },
+        request: { id: Date.now(), text: comment?.trim() ? `${reference}\n\n${comment.trim()}` : reference },
       });
       return;
     }
     selectedTextRequestIdRef.current += 1;
     setSelectedTextRequestsByTab((current) => ({
       ...current,
-      [activeTabId]: { id: selectedTextRequestIdRef.current, text: code, path },
+      [activeTabId]: {
+        id: selectedTextRequestIdRef.current,
+        text: code,
+        path,
+        ...(comment?.trim() ? { comment: comment.trim() } : {}),
+      },
     }));
   }, [activeTabId, state.approval, workspaceInsertTarget]);
 

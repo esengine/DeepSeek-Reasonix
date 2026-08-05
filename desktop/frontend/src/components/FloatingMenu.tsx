@@ -11,7 +11,7 @@ export interface FloatingMenuItem {
   disabled?: boolean;
 }
 
-function clampFloatingMenuPosition(x: number, y: number, width: number, height: number): { left: number; top: number } {
+export function clampFloatingMenuPosition(x: number, y: number, width: number, height: number): { left: number; top: number } {
   if (typeof window === "undefined") return { left: x, top: y };
   const maxLeft = Math.max(FLOATING_MENU_MARGIN, window.innerWidth - width - FLOATING_MENU_MARGIN);
   const maxTop = Math.max(FLOATING_MENU_MARGIN, window.innerHeight - height - FLOATING_MENU_MARGIN);

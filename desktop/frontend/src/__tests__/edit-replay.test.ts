@@ -54,6 +54,27 @@ eq(
   "editing a selected-context message preserves the quoted context suffix without submitting its display label",
 );
 
+const commentedReferences = [{ id: "code-1", text: "const x = 1;", path: "src/lib/a.ts", comment: "check the catch block" }];
+const commentedLabel = formatSelectionLabel(commentedReferences[0]);
+eq(commentedLabel, "[Code: a.ts → const x = 1; — check the catch block]", "commented selection labels carry the user comment");
+const commentedContext = formatSelectedTextContext(commentedReferences);
+const commentedDisplay = `visible prompt ${commentedLabel}`;
+eq(
+  stripSelectionLabels(commentedDisplay, commentedReferences),
+  "visible prompt",
+  "stripSelectionLabels removes commented selection labels as a trailing suffix",
+);
+eq(
+  replaySubmitTextPreservingSelectedContext(
+    `visible prompt\n\n${commentedContext}`,
+    stripSelectionLabels(commentedDisplay, commentedReferences),
+    "updated prompt",
+    "updated prompt",
+  ),
+  `updated prompt\n\n${commentedContext}`,
+  "editing a commented selected-context message preserves the comment-bearing quoted context suffix",
+);
+
 eq(
   replaySubmitText("/reasonix-develop review this change", "review this change", "review the updated change", "review the updated change"),
   "/reasonix-develop review the updated change",

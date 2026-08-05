@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   CSSProperties,
@@ -58,12 +59,12 @@ import type {
 } from "../lib/types";
 import { workspaceGitStatusLabel } from "../lib/workspaceChanges";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
-import { formatSelectionReference, languageFor } from "../lib/selectedTextContext";
+import { formatSelectionReference, languageFor, normalizeSelectionComment } from "../lib/selectedTextContext";
 import { cleanGitDiff } from "../lib/diff";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
-import { FloatingMenu, FloatingMenuItems } from "./FloatingMenu";
+import { FloatingMenu, FloatingMenuItems, clampFloatingMenuPosition } from "./FloatingMenu";
 import { Markdown } from "./Markdown";
 import { Tooltip } from "./Tooltip";
 import { AnchoredPopover } from "./AnchoredPopover";
@@ -78,6 +79,8 @@ const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPA
 const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
 const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
+const WORKSPACE_COMMENT_POPOVER_WIDTH = 340;
+const WORKSPACE_COMMENT_POPOVER_HEIGHT = 180;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
 type WorkspaceRevealRequest = { id: number; path: string };
@@ -184,6 +187,75 @@ interface TreeRow {
   displayName?: string;
 }
 
+// Floating "Add to Chat" comment prompt: a small non-intrusive input next to
+// the selection that asks why the code is shared. Portaled like FloatingMenu
+// (position:fixed at body root, viewport-clamped), but without its
+// preventDefault on mousedown so the textarea can take focus and place the
+// caret. Escape closes, Cmd/Ctrl+Enter confirms, empty comment sends with no
+// comment — exactly today's behavior.
+function SelectionCommentPopover({
+  x,
+  y,
+  onConfirm,
+  onClose,
+}: {
+  x: number;
+  y: number;
+  onConfirm: (comment: string) => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const [comment, setComment] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+  const position = useMemo(
+    () => clampFloatingMenuPosition(x, y, WORKSPACE_COMMENT_POPOVER_WIDTH, WORKSPACE_COMMENT_POPOVER_HEIGHT),
+    [x, y],
+  );
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div
+      className="floating-menu workspace-comment-popover"
+      style={{ left: position.left, top: position.top }}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <textarea
+        ref={textareaRef}
+        className="workspace-comment-popover__input"
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+        placeholder={t("workspace.selectionCommentPlaceholder")}
+        rows={3}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") {
+            event.stopPropagation();
+            onClose();
+          } else if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+            event.preventDefault();
+            onConfirm(comment);
+          }
+        }}
+      />
+      <div className="workspace-comment-popover__actions">
+        <button type="button" className="workspace-comment-popover__cancel" onClick={onClose}>
+          {t("common.cancel")}
+        </button>
+        <button
+          type="button"
+          className="workspace-comment-popover__confirm"
+          onClick={() => onConfirm(comment)}
+        >
+          {t("workspace.addSelectionToChat")}
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 export function WorkspacePanel({
   open,
   tabId,
@@ -220,7 +292,7 @@ export function WorkspacePanel({
   onToggleMaximized: () => void;
   onPreviewModeChange?: (active: boolean) => void;
   onAddToChat?: (text: string) => void;
-  onAddCodeToChat?: (path: string, code: string) => void;
+  onAddCodeToChat?: (path: string, code: string, comment?: string) => void;
   onOpenInTerminal?: (path: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
@@ -269,6 +341,7 @@ export function WorkspacePanel({
   const [commitDetail, setCommitDetail] = useState<GitCommitDetailView | null>(null);
   const [loadingCommit, setLoadingCommit] = useState(false);
   const [selectionMenu, setSelectionMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
+  const [selectionCommentMenu, setSelectionCommentMenu] = useState<{ x: number; y: number; text: string; path: string } | null>(null);
   const [treeMenu, setTreeMenu] = useState<{ x: number; y: number; path: string; isDir: boolean } | null>(null);
   const [treeBlankMenuPoint, setTreeBlankMenuPoint] = useState<ContextMenuPoint | null>(null);
   const [filter, setFilter] = useState("");
@@ -743,33 +816,42 @@ export function WorkspacePanel({
   }, [loadChangeDetail, loadGitHistory, loadWorkspaceChanges, loadDir, open, refreshKey, selectedPath, viewMode]);
 
   useEffect(() => {
-    if (!selectionMenu && !treeMenu) return;
+    if (!selectionMenu && !treeMenu && !selectionCommentMenu) return;
     const close = () => {
       setSelectionMenu(null);
       setTreeMenu(null);
+      setSelectionCommentMenu(null);
     };
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") close();
+    };
+    // The comment textarea scrolls its own overflow while a long comment is
+    // typed, so capture-phase scroll must ignore scrolls that originate
+    // inside the comment popover instead of dismissing it.
+    const onScroll = (event: globalThis.Event) => {
+      if (event.target instanceof Element && event.target.closest(".workspace-comment-popover")) return;
+      close();
     };
     // Dismiss on mousedown rather than click: the trailing click a drag-selection
     // emits would otherwise close the toolbar the instant mouseup opens it. A fresh
     // mousedown only fires when the user starts another interaction, and FloatingMenu
     // stops propagation so pressing its buttons never counts as an outside press.
     window.addEventListener("mousedown", close);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", close);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("mousedown", close);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", close);
       window.removeEventListener("keydown", onKey);
     };
-  }, [selectionMenu, treeMenu]);
+  }, [selectionMenu, treeMenu, selectionCommentMenu]);
 
   const refreshWorkspaceList = useCallback(() => {
     setTreeBlankMenuPoint(null);
     setSelectionMenu(null);
+    setSelectionCommentMenu(null);
     setTreeMenu(null);
     if (viewMode === "changed") {
       void loadGitHistory();
@@ -1303,11 +1385,29 @@ export function WorkspacePanel({
     setSelectionMenu({ x: event.clientX, y: event.clientY + 8, text, path: selectedPath });
   };
 
+  // "Add to Chat" first asks for an optional comment explaining why the code
+  // is shared, then hands both to the composer. Empty comment keeps today's
+  // behavior: the selection is attached without any extra text.
   const addSelectionToChat = () => {
     if (!selectionMenu) return;
-    if (onAddCodeToChat) onAddCodeToChat(selectionMenu.path, selectionMenu.text);
-    else onAddToChat?.(formatSelectionReference(selectionMenu.path, selectionMenu.text));
+    setSelectionCommentMenu({
+      x: selectionMenu.x,
+      y: selectionMenu.y,
+      path: selectionMenu.path,
+      text: selectionMenu.text,
+    });
     setSelectionMenu(null);
+  };
+
+  // Normalize once here so the composer path, the plan-revision branch, and
+  // the plain-text fallback all carry the same bounded comment (2 000 chars).
+  const confirmSelectionComment = (comment: string) => {
+    if (!selectionCommentMenu) return;
+    const normalized = normalizeSelectionComment(comment).text;
+    const { path, text } = selectionCommentMenu;
+    if (onAddCodeToChat) onAddCodeToChat(path, text, normalized || undefined);
+    else onAddToChat?.(normalized ? `${formatSelectionReference(path, text)}\n\n${normalized}` : formatSelectionReference(path, text));
+    setSelectionCommentMenu(null);
   };
 
   const openTreeMenu = (event: ReactMouseEvent<HTMLElement>, path: string, isDir: boolean) => {
@@ -1954,6 +2054,14 @@ export function WorkspacePanel({
                 ]}
               />
             </FloatingMenu>
+          )}
+          {selectionCommentMenu && (
+            <SelectionCommentPopover
+              x={selectionCommentMenu.x}
+              y={selectionCommentMenu.y}
+              onConfirm={confirmSelectionComment}
+              onClose={() => setSelectionCommentMenu(null)}
+            />
           )}
         </div>
       </section>}
