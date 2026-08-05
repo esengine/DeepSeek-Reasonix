@@ -196,7 +196,14 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 // tool-call thinking is a single optional segment. Only multi-segment
 // thinking vendors that require replay (DeepSeek) warn, scoped to non-flash.
 func (c *client) WarnOnMissingToolCallReasoning() bool {
-	if !c.caps.toolCallReasoning || c.caps.singleSegmentReasoning {
+	if !c.caps.toolCallReasoning {
+		return false
+	}
+	// MiMo: preserves reasoning on replay but does not guarantee it every
+	// round — a missing chain-of-thought is endpoint-conditional, not a
+	// degradation worth a warning (observed: mimo-v2.5-pro tool-call turn
+	// with empty reasoning).
+	if c.vendor == "mimo" {
 		return false
 	}
 	model := strings.ToLower(strings.TrimSpace(c.model))
@@ -281,7 +288,11 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 		effort = "none"
 	}
 	if effort != "" {
-		body["reasoning"] = map[string]any{"effort": effort}
+		reasoning := map[string]any{"effort": effort}
+		if c.caps.summaryMode != "" {
+			reasoning["summary"] = c.caps.summaryMode
+		}
+		body["reasoning"] = reasoning
 	}
 	maxOutputTokens := req.MaxTokens
 	if maxOutputTokens == 0 {
