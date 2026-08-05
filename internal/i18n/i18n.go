@@ -288,6 +288,7 @@ type Messages struct {
 	ArgLanguageAuto     string // /language auto
 	ArgLanguageEn       string // /language en
 	ArgLanguageZh       string // /language zh
+	ArgLanguageRu       string // /language ru
 
 	// management listing notices (the Submit path: desktop / HTTP frontends)
 	ListModelsHeaderFmt string // "models (active: %s)"
@@ -661,6 +662,9 @@ func setLanguage(tag string) string {
 	case "zh":
 		M = Chinese
 		currentLanguage = "zh"
+	case "ru":
+		M = Russian
+		currentLanguage = "ru"
 	default:
 		M = English
 		currentLanguage = "en"

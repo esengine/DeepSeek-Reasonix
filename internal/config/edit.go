@@ -186,8 +186,10 @@ func (c *Config) SetLanguage(lang string) error {
 		c.Language = "en"
 	case "zh":
 		c.Language = "zh"
+	case "ru":
+		c.Language = "ru"
 	default:
-		return fmt.Errorf("language %q: must be auto|en|zh", lang)
+		return fmt.Errorf("language %q: must be auto|en|zh|ru", lang)
 	}
 	c.ApplyDeepSeekOfficialDefaultPricing()
 	return nil
@@ -203,8 +205,10 @@ func (c *Config) SetReasoningLanguage(lang string) error {
 		c.Agent.ReasoningLanguage = "zh"
 	case "en", "english":
 		c.Agent.ReasoningLanguage = "en"
+	case "ru", "russian", "русский":
+		c.Agent.ReasoningLanguage = "ru"
 	default:
-		return fmt.Errorf("reasoning language %q: must be auto|zh|en", lang)
+		return fmt.Errorf("reasoning language %q: must be auto|zh|en|ru", lang)
 	}
 	return nil
 }
@@ -219,8 +223,10 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 		c.Desktop.Language = "en"
 	case "zh":
 		c.Desktop.Language = "zh"
+	case "ru":
+		c.Desktop.Language = "ru"
 	default:
-		return fmt.Errorf("desktop language %q: must be auto|en|zh", lang)
+		return fmt.Errorf("desktop language %q: must be auto|en|zh|ru", lang)
 	}
 	c.ApplyDeepSeekOfficialDefaultPricing()
 	return nil

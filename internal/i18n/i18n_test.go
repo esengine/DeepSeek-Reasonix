@@ -13,7 +13,7 @@ import (
 func TestCatalogsComplete(t *testing.T) {
 	en := reflect.ValueOf(English)
 	typ := en.Type()
-	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese), "zh-TW": reflect.ValueOf(ChineseTraditional)}
+	catalogs := map[string]reflect.Value{"zh": reflect.ValueOf(Chinese), "zh-TW": reflect.ValueOf(ChineseTraditional), "ru": reflect.ValueOf(Russian)}
 	for tag, cat := range catalogs {
 		for i := 0; i < typ.NumField(); i++ {
 			name := typ.Field(i).Name

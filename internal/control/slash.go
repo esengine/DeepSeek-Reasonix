@@ -159,6 +159,7 @@ func languageArgItems(prior []string) []SlashItem {
 		{Label: "auto", Insert: "auto", Hint: i18n.M.ArgLanguageAuto},
 		{Label: "en", Insert: "en", Hint: i18n.M.ArgLanguageEn},
 		{Label: "zh", Insert: "zh", Hint: i18n.M.ArgLanguageZh},
+		{Label: "ru", Insert: "ru", Hint: i18n.M.ArgLanguageRu},
 	}
 }
 

@@ -390,6 +390,8 @@ func (c *Config) DesktopLanguage() string {
 		return "en"
 	case "zh":
 		return "zh"
+	case "ru":
+		return "ru"
 	default:
 		return ""
 	}
@@ -652,6 +654,8 @@ func NormalizeLanguage(lang string) string {
 		return "zh"
 	case "en", "english":
 		return "en"
+	case "ru", "russian", "русский", "рус":
+		return "ru"
 	default:
 		return "auto"
 	}
@@ -676,6 +680,8 @@ func NormalizeReasoningLanguage(lang string) string {
 		return "zh"
 	case "en", "english":
 		return "en"
+	case "ru", "russian", "русский":
+		return "ru"
 	default:
 		return "auto"
 	}

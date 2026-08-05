@@ -1542,8 +1542,8 @@ func pickSessionToResume() (string, int) {
 // label is bilingual because we don't yet know which catalogue to trust.
 func selectLanguage() (string, error) {
 	detected := i18n.DetectLanguage("")
-	items := []menuItem{{name: "English"}, {name: "中文 (简体)"}}
-	tags := []string{"en", "zh"}
+	items := []menuItem{{name: "English"}, {name: "中文 (简体)"}, {name: "Русский"}}
+	tags := []string{"en", "zh", "ru"}
 	if detected == "zh" {
 		items[0], items[1] = items[1], items[0]
 		tags[0], tags[1] = tags[1], tags[0]

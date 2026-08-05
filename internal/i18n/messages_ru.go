@@ -2,14 +2,14 @@ package i18n
 
 // English is the baseline catalogue. The drift-guard test reflects over its
 // fields, so every other catalogue must populate the same set.
-var English = Messages{
+var Russian = Messages{
 	Subtitle:        "config + plugin driven coding agent",
 	WelcomeTitleFmt: "Welcome to %s",
 	NoConfigYet:     "No configuration found yet — let's set it up.",
 	StartingChatFmt: "Starting %s…",
 	SetKeyHint:      "Set your API key, then run `reasonix`.",
-	ConfigLabel:     "config",
-	ModelsLabel:     "models",
+	ConfigLabel:     "конфиг",
+	ModelsLabel:     "модели",
 	ConfigNotFound:  "not found — using built-in defaults",
 	ConfigErrorFmt:  "%s — error: %v",
 	NoKey:           "no key",

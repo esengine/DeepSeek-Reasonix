@@ -14,10 +14,10 @@ import { createContext, useCallback, useContext, useEffect, useState } from "rea
 import type { ReactNode } from "react";
 import { en, type DictKey } from "../locales/en";
 
-export type Locale = "en" | "zh" | "zh-TW";
+export type Locale = "en" | "zh" | "zh-TW" | "ru";
 export type { DictKey };
 // LangPref is the stored preference: "" means auto-detect from the OS.
-export type LangPref = "" | "en" | "zh" | "zh-TW";
+export type LangPref = "" | "en" | "zh" | "zh-TW" | "ru";
 
 type Dict = Record<DictKey, string>;
 
@@ -43,6 +43,9 @@ export const SPINNER_WORDS: Record<Locale, string[]> = {
     "腌制入味", "嘎吱运算", "孵化中", "盘算中", "嗡嗡运转", "锻造中",
     "探洞中", "摆弄中", "来感觉了",
   ],
+  ru: [
+    "Размышляю", "Копаюсь", "Варю", "Колдую", "Думаю", "Синтезирую", "Чищу", "Мариную", "Кую", "Исследую", "Вайбую",
+  ],
   "zh-TW": [
     "嬉遊中", "沉思中", "鼓搗中", "醞釀中", "施法中", "苦思中",
     "滲濾中", "反芻中", "文火慢燉", "合成中", "修補中",
@@ -52,9 +55,10 @@ export const SPINNER_WORDS: Record<Locale, string[]> = {
 };
 
 export function detectLocale(pref: LangPref): Locale {
-  if (pref === "en" || pref === "zh" || pref === "zh-TW") return pref;
+  if (pref === "en" || pref === "zh" || pref === "zh-TW" || pref === "ru") return pref;
   const nav = typeof navigator !== "undefined" ? navigator.language.toLowerCase() : "en";
   if (nav.startsWith("zh-tw") || nav.startsWith("zh-hant") || nav === "zh-hk" || nav === "zh-mo") return "zh-TW";
+  if (nav.startsWith("ru")) return "ru";
   return nav.startsWith("zh") ? "zh" : "en";
 }
 
@@ -62,9 +66,16 @@ export function preloadLocale(locale: Locale): Promise<void> {
   if (DICTS[locale]) return Promise.resolve();
   const pending = localeLoads.get(locale);
   if (pending) return pending;
-  const load = locale === "zh"
-    ? import("../locales/zh").then(({ zh }) => { DICTS.zh = zh; })
-    : import("../locales/zh-TW").then(({ zhTW }) => { DICTS["zh-TW"] = zhTW; });
+  let load: Promise<void>;
+  if (locale === "zh") {
+    load = import("../locales/zh").then(({ zh }) => { DICTS.zh = zh; });
+  } else if (locale === "ru") {
+    load = import("../locales/ru").then(({ ru }) => { DICTS.ru = ru; });
+  } else if (locale === "zh-TW") {
+    load = import("../locales/zh-TW").then(({ zhTW }) => { DICTS["zh-TW"] = zhTW; });
+  } else {
+    return Promise.resolve();
+  }
   localeLoads.set(locale, load);
   void load.catch(() => localeLoads.delete(locale));
   return load;
@@ -79,7 +90,7 @@ function readPref(): LangPref {
 }
 
 export function normalizeLangPref(v: unknown): LangPref {
-  return v === "en" || v === "zh" || v === "zh-TW" ? v : "";
+  return v === "en" || v === "zh" || v === "zh-TW" || v === "ru" ? v : "";
 }
 
 export function readLegacyLangPref(): LangPref {
@@ -132,7 +143,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (typeof document === "undefined") return;
-    document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : "en";
+    document.documentElement.lang = locale === "zh" ? "zh-CN" : locale === "zh-TW" ? "zh-TW" : locale === "ru" ? "ru" : "en";
   }, [locale]);
 
   useEffect(() => {
