@@ -142,6 +142,21 @@ structured output format is selected. It also accepts `--model`, `--profile`,
 `--copy`, `--allowed-tools`, `--permission-mode`, and `--auto` / `-y` (an alias
 for `--permission-mode auto`).
 
+### Benchmark arms
+
+`--ablate` switches whole subsystems off so a benchmark can attribute a change
+in success rate to one of them. It accepts a comma-separated list of `evidence`,
+`planner`, `subagent`, `retrieval` and `compaction`, plus `none` (the default,
+everything on) and `all`. Sub-agents inherit the parent's arm, and the arm name
+is written to the `--metrics` file so a recorded run is self-describing.
+
+```sh
+reasonix run --ablate evidence,planner --metrics run.json "fix the failing test"
+```
+
+This is a measurement tool, not a tuning knob: switching a subsystem off makes
+Reasonix worse at the work it was added for.
+
 ### Output formats
 
 | Format | Behavior |
