@@ -40,6 +40,7 @@ import (
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/memory"
 	"reasonix/internal/migration"
+	"reasonix/internal/navigator"
 	"reasonix/internal/netclient"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
@@ -677,6 +678,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Configured enabled MCP: cache-hit placeholders without starting processes;
 	// cache-miss servers get one background catalog discovery.
 	registerEnabledMCP := func(specs []plugin.Spec) {
+		// Meta-tool mode: hide the per-tool mcp__<server>__<tool> surface and
+		// let use_capability be the single MCP entry point. use_capability
+		// already provides list/inspect/call with spec-based identity,
+		// CallResolver security flow, lazy startup, and stable schema — no
+		// second dispatcher needed. capProxy is registered later (after
+		// capRuntime construction) when cfg.MCPMetaToolEnabled() is true.
+		// Enabled by [tools] meta_tool = true in config, or
+		// REASONIX_MCP_META_TOOL=1 env override.
+		if cfg.MCPMetaToolEnabled() {
+			return
+		}
 		for _, s := range specs {
 			if pluginHost.HasClient(s.Name) {
 				tools, err := pluginHost.ToolsFor(ctx, s.Name)
@@ -715,6 +727,32 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	registerEnabledMCP(configSpecs)
 
+	// Long-horizon mode diagnostic: show compaction tuning and implicit-state
+	// preservation sections so the user can verify the OSWorld 2.0 adjustments
+	// are active. Fires when long_horizon is enabled or when the diagnostic env
+	// is set (same trigger as the tool-surface dump above).
+	if cfg.LongHorizonEnabled() || os.Getenv("REASONIX_DUMP_TOOL_SURFACE") != "" {
+		lhMode := "standard"
+		sections := "7 sections (no implicit-state capture)"
+		if cfg.LongHorizonEnabled() {
+			lhMode = "long-horizon"
+			sections = "10 sections (includes Hidden state, Sources consulted, Open questions)"
+		}
+		sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelInfo,
+			Text: fmt.Sprintf("compaction mode [%s]: soft=%.0f%% snip=%.0f%% compact=%.0f%% force=%.0f%% | summary %s | verification_interval=%d",
+				lhMode,
+				cfg.Agent.SoftCompactRatio*100,
+				cfg.Agent.ToolResultSnipRatio*100,
+				cfg.Agent.CompactRatio*100,
+				cfg.Agent.CompactForceRatio*100,
+				sections,
+				cfg.Agent.VerificationInterval),
+			Detail: fmt.Sprintf("long_horizon=%v. Long-horizon mode lowers soft/snip ratios so implicit state is captured into the summary earlier. The 3 new summary sections (Hidden state & recovered facts, Sources consulted, Open questions & uncertainties) directly address OSWorld 2.0's top failure modes: implicit state loss, cross-source reasoning gaps, and guess-instead-of-ask behavior.",
+				cfg.LongHorizonEnabled()),
+		})
+	}
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
 	}
@@ -1574,17 +1612,44 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	// Always build the runtime when a plugin host exists so task/fleet children
 	// can use the stable proxy even in Balanced/Economy without Delivery.
-	if pluginHost != nil || len(capSpecs) > 0 || tokenDelivery || dualModelPlanner {
+	// Meta-tool mode also needs the runtime so use_capability can proxy MCP.
+	if pluginHost != nil || len(capSpecs) > 0 || tokenDelivery || dualModelPlanner || cfg.MCPMetaToolEnabled() {
 		capRuntime = agent.NewMCPCapabilityRuntime(ctx, pluginHost, capSpecs, reg, catalogFn)
 		capRuntime.ConfigureServers(cfg.Plugins, capSpecs, enabledMCPNames)
 	}
-	if tokenDelivery || dualModelPlanner {
+	if tokenDelivery || dualModelPlanner || cfg.MCPMetaToolEnabled() {
 		capLedger = capability.NewLedger()
 		capAudit = &capability.Audit{}
 		if capRuntime != nil {
 			capProxy = capRuntime.NewFrontend(capLedger, capAudit)
 			reg.Add(capProxy)
 		}
+	}
+
+	// Tool-surface diagnostic: emit the provider-visible capacity so the
+	// meta-tool mode's effect is observable in a real run. Gated by the
+	// meta-tool being enabled (config or env) or REASONIX_DUMP_TOOL_SURFACE
+	// so normal startup stays quiet. This fires after capProxy registration
+	// so use_capability is visible in the count when meta-tool mode is on.
+	if cfg.MCPMetaToolEnabled() || os.Getenv("REASONIX_DUMP_TOOL_SURFACE") != "" {
+		names := reg.Names()
+		mcpTop := 0
+		for _, n := range names {
+			if strings.HasPrefix(n, tool.MCPNamePrefix) {
+				mcpTop++
+			}
+		}
+		_, hasCapProxy := reg.Get("use_capability")
+		mode := "per-tool mcp__ (default)"
+		if cfg.MCPMetaToolEnabled() {
+			mode = "use_capability meta-tool"
+		}
+		sink.Emit(event.Event{
+			Kind:   event.Notice,
+			Level:  event.LevelInfo,
+			Text:   fmt.Sprintf("tool surface [%s]: %d tools (%d mcp__ top-level, use_capability registered=%v)", mode, len(names), mcpTop, hasCapProxy),
+			Detail: fmt.Sprintf("provider tools array capacity = %d entries. Meta-tool mode hides every mcp__<server>__<tool> behind use_capability (list/inspect/call with spec-based identity, CallResolver security, lazy startup); see internal/agent/usecapability.go.", len(names)),
+		})
 	}
 	skillStore.ConfigureInvocationPolicy(string(runtimeProfile), func(requires []string) []string {
 		connected := map[string]bool{}
@@ -1616,15 +1681,36 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	})
 
 	execSess := agent.NewSession(sysPrompt)
+	// OSWorld 2.0 continuous-state core: tracks implicit state (recovered file
+	// paths, inferred IDs, unexplored sources) across tool calls so compaction
+	// does not lose it. The default in-memory implementation is host-agnostic;
+	// HERMES can substitute its own backend via the StateTracker interface.
+	stateTracker := agent.NewDefaultStateTracker(0, sink) // 0 = default 20-entry episodic window
+
+	// OSWorld 2.0 Navigator Kernel: the "state-based navigator" paradigm.
+	// Wraps every tool call in a continuous-state, closed-loop cycle and
+	// maintains implicit state in its own state graph (survives compaction
+	// and crashes). The ReasonixAdapter bridges to the tool registry + event
+	// sink; a FilesystemSensor monitors the workspace root for env drift.
+	// The Navigator is a superset of StateTracker — both are wired so the
+	// agent gets the Navigator's closed-loop correction + env sensing while
+	// the StateTracker continues its per-call implicit-state capture.
+	navAdapter := navigator.NewReasonixAdapter(reg, sink, navigator.ReasonixAdapterOptions{})
+	navKernel := navigator.New(navAdapter, navigator.Options{HistoryWindow: 50})
+	navKernel.AddSensor(navigator.NewFilesystemSensor(root, 3))
+	navKernel.AddSensor(navigator.NewProcessSensor(""))
+
 	executor := agent.New(execProv, reg, execSess, agent.Options{
-		MaxSteps:    maxSteps,
-		MaxStepsKey: opts.MaxStepsKey,
-		Temperature: cfg.Agent.Temperature,
-		Pricing:     entry.Price,
-		ModelRef:    modelRef,
-		Gate:        headlessGate,
-		Hooks:       hookRunner,
-		Jobs:        jm,
+		MaxSteps:     maxSteps,
+		MaxStepsKey:  opts.MaxStepsKey,
+		Temperature:  cfg.Agent.Temperature,
+		Pricing:      entry.Price,
+		ModelRef:     modelRef,
+		Gate:         headlessGate,
+		Hooks:        hookRunner,
+		StateTracker: stateTracker,
+		Navigator:    navKernel,
+		Jobs:         jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,

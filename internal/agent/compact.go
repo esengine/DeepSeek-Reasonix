@@ -75,6 +75,15 @@ Commands run (builds, tests, git) and their relevant results — what passed, wh
 ## Errors & fixes
 Problems hit and how they were resolved (or not), so the same dead ends are not repeated.
 
+## Hidden state & recovered facts
+Information that was not directly stated but inferred, discovered, or recovered from indirect sources — hidden file paths, implicit configurations, values extracted from noisy data, state reconstructed from logs or error messages. This is the implicit state most easily lost across long sessions; preserve it exhaustively.
+
+## Sources consulted
+Which data sources, files, APIs, services, and tools have been checked, and which were identified but not yet queried. Flag unexplored sources that may contain needed information.
+
+## Open questions & uncertainties
+Unresolved questions, missing information, and assumptions that need user confirmation. Surface these rather than guessing — the agent should ask when uncertain, not assume.
+
 ## Pending & next step
 What is still in progress or unstarted, and the single most concrete next action to take.
 
@@ -256,7 +265,13 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		return nil
 	}
 
-	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+	// Implicit-state-aware compaction detail: log what's being preserved vs
+	// folded so the user can observe whether hidden state survives compaction.
+	// The 10-section summary prompt (with Hidden state, Sources consulted, and
+	// Open questions sections) captures implicit state from the fold region.
+	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger},
+		Detail: fmt.Sprintf("folding %d messages into summary (kept verbatim: %d user turns + %d prior digests + %d error/marked); summary prompt has 10 sections including Hidden state & Sources consulted",
+			len(fold), countUserTurns(kept), countPriorDigests(kept), countKeptErrors(kept))})
 
 	// A PreCompact hook can steer what the summary keeps; its stdout joins any
 	// explicit /compact <focus> text.
@@ -284,6 +299,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// re-summarized away and the user's own words are never touched. Digests
 	// accumulate (small) rather than collapsing into one lossy rolling summary.
 	summary, err := a.summarizeWithRetry(ctx, fold, instructions)
+	mechanical := false
 	if err != nil {
 		// Mechanical fold: the foldable region is already archived, so stand in a
 		// deterministic marker rather than aborting. /compact then always frees
@@ -291,6 +307,43 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		// verbatim user turns kept above are untouched.
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context was compacted without a generated summary.", Detail: "compaction summary unavailable (" + err.Error() + "); folded mechanically"})
 		summary = mechanicalFoldDigest(len(fold), archived)
+		mechanical = true
+	}
+
+	// OSWorld 2.0 implicit-state injection: if the StateTracker has accumulated
+	// implicit facts (recovered file paths, inferred IDs, unexplored sources)
+	// and the model-generated summary lacks the "Hidden state" section, append
+	// the tracker's snapshot so compaction does not lose recovered context.
+	// This is the runtime defense that pairs with implicitStateLossWarning:
+	// instead of only warning when state is lost, we proactively inject it.
+	if !mechanical && a.stateTracker != nil {
+		if snapshot := a.stateTracker.SnapshotImplicitState(); snapshot != "" {
+			if sectionContentChars(summary, "Hidden state & recovered facts") <= 0 {
+				summary += "\n\n## Hidden state & recovered facts (injected by StateTracker)\n" + snapshot
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Implicit state injected into compaction summary.", Detail: fmt.Sprintf("StateTracker provided %d bytes of recovered facts that the model-generated summary omitted.", len(snapshot))})
+			}
+		}
+	}
+
+	// OSWorld 2.0 Navigator kernel: when the navigator is wired, its
+	// implicit-state digest is also injected. The navigator maintains state
+	// independently of the prompt (in its own state graph), so its facts
+	// survive even a mid-task crash. This is a superset of StateTracker —
+	// when both are present, both digests are merged so no recovered fact is
+	// lost. If the section already exists (from StateTracker above), the
+	// navigator's facts are appended to it rather than creating a duplicate.
+	if !mechanical && a.navigator != nil {
+		if navDigest := a.navigator.ImplicitStateDigest(); navDigest != "" {
+			chars := sectionContentChars(summary, "Hidden state & recovered facts")
+			if chars <= 0 {
+				summary += "\n\n## Hidden state & recovered facts (injected by Navigator)\n" + navDigest
+			} else {
+				// Section already exists (from StateTracker); append the
+				// navigator's facts to it so both sources are preserved.
+				summary += "\n\n" + navDigest
+			}
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Navigator implicit state injected into compaction summary.", Detail: fmt.Sprintf("Navigator provided %d bytes of recovered facts (merged with existing section: %d chars).", len(navDigest), chars)})
+		}
 	}
 
 	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)
@@ -308,7 +361,18 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
-	}})
+	}, Detail: compactionDoneDetail(summary)})
+
+	// Implicit-state loss detector: for model-generated summaries (not mechanical
+	// folds), check that the 3 OSWorld 2.0-informed sections are present with real
+	// content. A missing or empty-header section means the summarizer skipped it —
+	// implicit state was likely lost to the fold. Emit a LevelWarn so the user can
+	// see at runtime when compaction dropped recoverable state, and re-state it.
+	if !mechanical {
+		if warning := implicitStateLossWarning(summary); warning != "" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: warning})
+		}
+	}
 	return nil
 }
 
@@ -422,6 +486,153 @@ func splitLocalOnlyMessages(msgs []provider.Message) (model, localOnly []provide
 		model = append(model, m)
 	}
 	return model, localOnly
+}
+
+// countUserTurns counts verbatim-preserved user messages in the kept set.
+// These are facts the user stated directly — the durable contract that
+// survives compaction without being summarized.
+func countUserTurns(kept []provider.Message) int {
+	n := 0
+	for _, m := range kept {
+		if m.Role == provider.RoleUser && !m.LocalOnly {
+			n++
+		}
+	}
+	return n
+}
+
+// countPriorDigests counts previously-generated compaction summaries in the
+// kept set. Prior digests accumulate verbatim — a fact that reached a digest
+// once is never re-summarized away.
+func countPriorDigests(kept []provider.Message) int {
+	n := 0
+	for _, m := range kept {
+		if strings.Contains(m.Content, summaryTagOpen) {
+			n++
+		}
+	}
+	return n
+}
+
+// countKeptErrors counts error/blocked tool results preserved by KeepPolicy.
+// These survive compaction so the agent doesn't repeat failed approaches.
+func countKeptErrors(kept []provider.Message) int {
+	n := 0
+	for _, m := range kept {
+		if m.Role == provider.RoleTool && (strings.HasPrefix(strings.TrimSpace(m.Content), "error:") || strings.HasPrefix(strings.TrimSpace(m.Content), "blocked:")) {
+			n++
+		}
+	}
+	return n
+}
+
+// compactionDoneDetail produces a human-readable diagnostic of which implicit-
+// state sections the summary actually contains, including the content length of
+// each section so the user can verify that hidden state, sources, and open
+// questions were captured with real content — not just empty headers — and not
+// lost to the fold.
+func compactionDoneDetail(summary string) string {
+	sections := []string{
+		"Standing facts & constraints",
+		"Hidden state & recovered facts",
+		"Sources consulted",
+		"Open questions & uncertainties",
+		"Pending & next step",
+	}
+	type sectionStat struct {
+		name    string
+		present bool
+		chars   int
+	}
+	stats := make([]sectionStat, 0, len(sections))
+	for _, s := range sections {
+		chars := sectionContentChars(summary, s)
+		stats = append(stats, sectionStat{name: s, present: chars >= 0, chars: chars})
+	}
+	present := 0
+	for _, st := range stats {
+		if st.present {
+			present++
+		}
+	}
+	if present == 0 {
+		return "summary has no recognized implicit-state sections (may be a mechanical fold)"
+	}
+	// Build a per-section breakdown so the user can see not just presence but
+	// content richness — an empty header (0 chars) is a warning sign that the
+	// summarizer skipped a section even though it was requested.
+	parts := make([]string, 0, len(stats))
+	for _, st := range stats {
+		if !st.present {
+			parts = append(parts, st.name+": MISSING")
+		} else if st.chars == 0 {
+			parts = append(parts, st.name+": empty-header")
+		} else {
+			parts = append(parts, fmt.Sprintf("%s: %d chars", st.name, st.chars))
+		}
+	}
+	return fmt.Sprintf("summary contains %d/%d key sections — %s", present, len(sections), strings.Join(parts, "; "))
+}
+
+// sectionContentChars returns the character count of the content under the named
+// section header (the text between this header and the next "## " header or end
+// of summary). Returns -1 if the section header is absent. A return of 0 means
+// the header exists but has no body — a signal that the summarizer acknowledged
+// the section without actually capturing any state.
+func sectionContentChars(summary, header string) int {
+	idx := strings.Index(summary, header)
+	if idx < 0 {
+		return -1
+	}
+	rest := summary[idx+len(header):]
+	// Find the next section header ("## " at the start of a line). We search in
+	// the untrimmed rest so the leading newline that separates an empty body
+	// from the next header is preserved — trimming first would make the next
+	// "## " appear at position 0 (without a preceding "\n"), causing the search
+	// to skip it and incorrectly fold the next section's content into this one.
+	nextIdx := strings.Index(rest, "\n## ")
+	var body string
+	if nextIdx < 0 {
+		body = rest
+	} else {
+		body = rest[:nextIdx]
+	}
+	body = strings.TrimSpace(body)
+	return len(body)
+}
+
+// implicitStateLossWarning inspects the compaction summary for the 3
+// OSWorld 2.0-informed implicit-state sections. It returns a non-empty message
+// when any of them is missing or has an empty body — the signal that implicit
+// state was likely lost to the fold. The caller emits this as a LevelWarn so
+// the user can see, at runtime, when compaction dropped recoverable state.
+func implicitStateLossWarning(summary string) string {
+	critical := []string{
+		"Hidden state & recovered facts",
+		"Sources consulted",
+		"Open questions & uncertainties",
+	}
+	var missing []string
+	var empty []string
+	for _, section := range critical {
+		chars := sectionContentChars(summary, section)
+		if chars < 0 {
+			missing = append(missing, section)
+		} else if chars == 0 {
+			empty = append(empty, section)
+		}
+	}
+	if len(missing) == 0 && len(empty) == 0 {
+		return ""
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(empty) > 0 {
+		parts = append(parts, fmt.Sprintf("empty-header: %s", strings.Join(empty, ", ")))
+	}
+	return fmt.Sprintf("Compaction may have lost implicit state — %s. Review the summary and consider re-stating critical hidden facts in the next turn.", strings.Join(parts, "; "))
 }
 
 // isCompactionSummary reports whether m is a rolling summary from a prior fold.

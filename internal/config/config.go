@@ -1286,6 +1286,17 @@ type AgentConfig struct {
 	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
 	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
+	// LongHorizon tunes the agent for long-running tasks (300+ tool calls,
+	// 1+ hour workflows). When enabled, compaction triggers earlier (lower
+	// soft/snip ratios) and preserves a larger recent tail, reducing implicit
+	// state loss across extended sessions. Designed for OSWorld 2.0-class tasks.
+	// nil = off (default); preserves existing behavior.
+	LongHorizon *bool `toml:"long_horizon"`
+	// VerificationInterval is the step count between verification nudges —
+	// reminders that prompt the agent to check its progress against the goal
+	// and surface unresolved questions. 0 disables nudges. Only effective when
+	// LongHorizon is enabled. Default 50 when LongHorizon is on.
+	VerificationInterval int `toml:"verification_interval"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -1574,13 +1585,26 @@ func clonePricing(p *provider.Pricing) *provider.Pricing {
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
 type ToolsConfig struct {
-	Enabled                  []string             `toml:"enabled"`
-	BashTimeoutSeconds       *int                 `toml:"bash_timeout_seconds"`
-	MCPStartupTimeoutSeconds *int                 `toml:"mcp_startup_timeout_seconds"`
-	MCPCallTimeoutSeconds    *int                 `toml:"mcp_call_timeout_seconds"`
-	BackgroundJobs           BackgroundJobsConfig `toml:"background_jobs"`
-	Search                   SearchConfig         `toml:"search"`
-	Shell                    ShellConfig          `toml:"shell"`
+	Enabled                  []string `toml:"enabled"`
+	BashTimeoutSeconds       *int     `toml:"bash_timeout_seconds"`
+	MCPStartupTimeoutSeconds *int     `toml:"mcp_startup_timeout_seconds"`
+	MCPCallTimeoutSeconds    *int     `toml:"mcp_call_timeout_seconds"`
+	// MetaTool collapses every per-tool mcp__<server>__<tool> top-level entry
+	// behind a single use_capability proxy, shrinking the provider's tools array
+	// from builtins + (servers × tools/server) down to builtins + 1. This
+	// directly reduces model attention dilution across dozens of MCP schemas.
+	// use_capability provides list/inspect/call with spec-based identity,
+	// CallResolver security flow (permission/hooks/evidence), lazy startup,
+	// and a fixed schema that stays stable across connection drift.
+	// Nil (unset, the default) keeps the legacy per-tool surface so existing
+	// behavior is unchanged; set [tools] meta_tool = true to opt in. The env
+	// var REASONIX_MCP_META_TOOL overrides this value when set, for ad-hoc
+	// testing, CI, and mcp-surface-dump without editing config. See
+	// internal/agent/usecapability.go and MCPMetaToolEnabled.
+	MetaTool       *bool                `toml:"meta_tool"`
+	BackgroundJobs BackgroundJobsConfig `toml:"background_jobs"`
+	Search         SearchConfig         `toml:"search"`
+	Shell          ShellConfig          `toml:"shell"`
 }
 
 const (
@@ -1621,6 +1645,70 @@ func (c *Config) MCPStartupTimeoutSeconds() int {
 		return defaultMCPStartupTimeoutSeconds
 	}
 	return *c.Tools.MCPStartupTimeoutSeconds
+}
+
+// MCPMetaToolEnabled reports whether the use_capability proxy should replace
+// the per-tool mcp__<server>__<tool> surface. Resolution order:
+//
+//  1. REASONIX_MCP_META_TOOL env var — when set to a recognized boolean
+//     spelling (1/true/yes/on enables, 0/false/no/off disables) it overrides
+//     everything, so CI, mcp-surface-dump, and ad-hoc testing can flip the
+//     mode without editing config.
+//  2. [tools] meta_tool config value — the persistent, per-project setting.
+//  3. Default off (nil) — preserves the legacy per-tool surface exactly.
+//
+// boot.go calls this instead of plugin.MetaToolEnabled (which is env-only)
+// so the config file is the primary control and the env var is the override.
+// When enabled, boot hides mcp__ tools and registers use_capability, which
+// provides list/inspect/call with spec-based identity, CallResolver security,
+// lazy startup, and a fixed schema (see internal/agent/usecapability.go).
+func (c *Config) MCPMetaToolEnabled() bool {
+	if v, ok := mcpMetaToolEnvOverride(); ok {
+		return v
+	}
+	if c == nil || c.Tools.MetaTool == nil {
+		return false
+	}
+	return *c.Tools.MetaTool
+}
+
+// mcpMetaToolEnvOverride parses REASONIX_MCP_META_TOOL. It returns
+// (value, true) when the env var is explicitly set to a recognized boolean
+// spelling, and (false, false) when unset or unrecognized so the caller falls
+// back to the config value.
+func mcpMetaToolEnvOverride() (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_MCP_META_TOOL"))) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	}
+	return false, false
+}
+
+// LongHorizonEnabled reports whether long-horizon mode is active. The env var
+// REASONIX_LONG_HORIZON overrides the config value when set to a recognized
+// boolean spelling, so the config file is the primary control and the env var
+// is the override — same pattern as MCPMetaToolEnabled.
+func (c *Config) LongHorizonEnabled() bool {
+	if v, ok := longHorizonEnvOverride(); ok {
+		return v
+	}
+	if c == nil || c.Agent.LongHorizon == nil {
+		return false
+	}
+	return *c.Agent.LongHorizon
+}
+
+// longHorizonEnvOverride parses REASONIX_LONG_HORIZON.
+func longHorizonEnvOverride() (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_LONG_HORIZON"))) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	}
+	return false, false
 }
 
 // BackgroundJobsConfig tunes parent-created background jobs.
