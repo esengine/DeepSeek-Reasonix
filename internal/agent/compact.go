@@ -75,6 +75,15 @@ Commands run (builds, tests, git) and their relevant results — what passed, wh
 ## Errors & fixes
 Problems hit and how they were resolved (or not), so the same dead ends are not repeated.
 
+## Hidden state & recovered facts
+Information that was not directly stated but inferred, discovered, or recovered from indirect sources — hidden file paths, implicit configurations, values extracted from noisy data, state reconstructed from logs or error messages. This is the implicit state most easily lost across long sessions; preserve it exhaustively.
+
+## Sources consulted
+Which data sources, files, APIs, services, and tools have been checked, and which were identified but not yet queried. Flag unexplored sources that may contain needed information.
+
+## Open questions & uncertainties
+Unresolved questions, missing information, and assumptions that need user confirmation. Surface these rather than guessing — the agent should ask when uncertain, not assume.
+
 ## Pending & next step
 What is still in progress or unstarted, and the single most concrete next action to take.
 
@@ -263,7 +272,13 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		return nil
 	}
 
-	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger}})
+	// Implicit-state-aware compaction detail: log what's being preserved vs
+	// folded so the user can observe whether hidden state survives compaction.
+	// The 10-section summary prompt (with Hidden state, Sources consulted, and
+	// Open questions sections) captures implicit state from the fold region.
+	a.sink.Emit(event.Event{Kind: event.CompactionStarted, Compaction: event.Compaction{Trigger: trigger},
+		Detail: fmt.Sprintf("folding %d messages into summary (kept verbatim: %d user turns + %d prior digests + %d error/marked); summary prompt has 10 sections including Hidden state & Sources consulted",
+			len(fold), countUserTurns(kept), countPriorDigests(kept), countKeptErrors(kept))})
 
 	// A PreCompact hook can steer what the summary keeps; its stdout joins any
 	// explicit /compact <focus> text.
@@ -337,7 +352,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
-	}})
+	}, Detail: compactionDoneDetail(summary)})
 	return nil
 }
 
@@ -451,6 +466,67 @@ func splitLocalOnlyMessages(msgs []provider.Message) (model, localOnly []provide
 		model = append(model, m)
 	}
 	return model, localOnly
+}
+
+// countUserTurns counts verbatim-preserved user messages in the kept set.
+// These are facts the user stated directly — the durable contract that
+// survives compaction without being summarized.
+func countUserTurns(kept []provider.Message) int {
+	n := 0
+	for _, m := range kept {
+		if m.Role == provider.RoleUser && !m.LocalOnly {
+			n++
+		}
+	}
+	return n
+}
+
+// countPriorDigests counts previously-generated compaction summaries in the
+// kept set. Prior digests accumulate verbatim — a fact that reached a digest
+// once is never re-summarized away.
+func countPriorDigests(kept []provider.Message) int {
+	n := 0
+	for _, m := range kept {
+		if strings.Contains(m.Content, summaryTagOpen) {
+			n++
+		}
+	}
+	return n
+}
+
+// countKeptErrors counts error/blocked tool results preserved by KeepPolicy.
+// These survive compaction so the agent doesn't repeat failed approaches.
+func countKeptErrors(kept []provider.Message) int {
+	n := 0
+	for _, m := range kept {
+		if m.Role == provider.RoleTool && (strings.HasPrefix(strings.TrimSpace(m.Content), "error:") || strings.HasPrefix(strings.TrimSpace(m.Content), "blocked:")) {
+			n++
+		}
+	}
+	return n
+}
+
+// compactionDoneDetail produces a human-readable diagnostic of which implicit-
+// state sections the summary actually contains. This lets the user verify that
+// hidden state, sources, and open questions were captured — not lost to the fold.
+func compactionDoneDetail(summary string) string {
+	sections := []string{
+		"Standing facts & constraints",
+		"Hidden state & recovered facts",
+		"Sources consulted",
+		"Open questions & uncertainties",
+		"Pending & next step",
+	}
+	var present []string
+	for _, s := range sections {
+		if strings.Contains(summary, s) {
+			present = append(present, s)
+		}
+	}
+	if len(present) == 0 {
+		return "summary has no recognized implicit-state sections (may be a mechanical fold)"
+	}
+	return fmt.Sprintf("summary contains %d/%d key sections: %s", len(present), len(sections), strings.Join(present, ", "))
 }
 
 // isCompactionSummary reports whether m is a rolling summary from a prior fold.

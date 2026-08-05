@@ -1287,6 +1287,17 @@ type AgentConfig struct {
 	// PlanModeReadOnlyCommands is retained for old config/session round trips. Main
 	// Plan bash calls now use the ordinary Permissions classifier and Sandbox.
 	PlanModeReadOnlyCommands []string `toml:"plan_mode_read_only_commands"`
+	// LongHorizon tunes the agent for long-running tasks (300+ tool calls,
+	// 1+ hour workflows). When enabled, compaction triggers earlier (lower
+	// soft/snip ratios) and preserves a larger recent tail, reducing implicit
+	// state loss across extended sessions. Designed for OSWorld 2.0-class tasks.
+	// nil = off (default); preserves existing behavior.
+	LongHorizon *bool `toml:"long_horizon"`
+	// VerificationInterval is the step count between verification nudges —
+	// reminders that prompt the agent to check its progress against the goal
+	// and surface unresolved questions. 0 disables nudges. Only effective when
+	// LongHorizon is enabled. Default 50 when LongHorizon is on.
+	VerificationInterval int `toml:"verification_interval"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's
@@ -1662,6 +1673,31 @@ func (c *Config) MCPMetaToolEnabled() bool {
 // back to the config value.
 func mcpMetaToolEnvOverride() (bool, bool) {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_MCP_META_TOOL"))) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	}
+	return false, false
+}
+
+// LongHorizonEnabled reports whether long-horizon mode is active. The env var
+// REASONIX_LONG_HORIZON overrides the config value when set to a recognized
+// boolean spelling, so the config file is the primary control and the env var
+// is the override — same pattern as MCPMetaToolEnabled.
+func (c *Config) LongHorizonEnabled() bool {
+	if v, ok := longHorizonEnvOverride(); ok {
+		return v
+	}
+	if c == nil || c.Agent.LongHorizon == nil {
+		return false
+	}
+	return *c.Agent.LongHorizon
+}
+
+// longHorizonEnvOverride parses REASONIX_LONG_HORIZON.
+func longHorizonEnvOverride() (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_LONG_HORIZON"))) {
 	case "1", "true", "yes", "on":
 		return true, true
 	case "0", "false", "no", "off":
