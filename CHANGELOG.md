@@ -8,6 +8,12 @@ branch.
 
 ### Added
 
+- Added Extension Protocol v1 and the unified extension kernel: installed or
+  linked sidecars can contribute tools, skills, commands, hooks, MCP servers,
+  providers, interceptors, and structured UI surfaces through a versioned
+  NDJSON contract and the public Go SDK. CLI, Desktop, ACP, and Serve support
+  fail-atomic runtime reloads; Serve also renders extension surfaces and lists
+  extension-hosted providers without exposing credentials.
 - Added the structured Goal completion protocol: the always-registered
   `update_goal` tool (continue/complete/blocked with reason and next_action)
   replaces the `[goal:*]` footer markers. The Goal FSM is now the exclusive

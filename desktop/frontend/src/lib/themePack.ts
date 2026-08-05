@@ -44,7 +44,7 @@ export type ThemeContrastWarning = {
   suggest?: string;
 };
 
-export type ThemePackKind = "base" | "official" | "user";
+export type ThemePackKind = "base" | "official" | "user" | "plugin";
 
 export type ThemePackView = {
   id: string;
@@ -63,6 +63,10 @@ export type ThemePackView = {
   previewUrl?: string;
   nameKey?: string;
   descriptionKey?: string;
+  /** Set when kind === "plugin": the contributing plugin's name (read-only badge). */
+  pluginName?: string;
+  /** Non-fatal plugin theme discovery issues (invalid files skipped). */
+  warnings?: string[];
   tokens: ThemePackTokens;
   recipes: ThemePackRecipes;
   background?: ThemePackBackground | null;
@@ -75,7 +79,7 @@ export type ThemePackView = {
  * the historical builtin flag: builtin ? "base" : "user".
  */
 export function themePackKind(pack: Pick<ThemePackView, "kind" | "builtin">): ThemePackKind {
-  if (pack.kind === "base" || pack.kind === "official" || pack.kind === "user") return pack.kind;
+  if (pack.kind === "base" || pack.kind === "official" || pack.kind === "user" || pack.kind === "plugin") return pack.kind;
   return pack.builtin ? "base" : "user";
 }
 
@@ -561,7 +565,10 @@ function clamp01(v: number): number {
 }
 
 function cssEscape(value: string): string {
-  return value.replace(/[^a-zA-Z0-9_-]/g, "");
+  // Keep ":" so plugin theme ids (plugin:<plugin>:<theme>) still match the
+  // quoted data-theme-pack attribute selector — a colon is legal inside a
+  // quoted attribute value and cannot break out of it.
+  return value.replace(/[^a-zA-Z0-9_:-]/g, "");
 }
 
 function cssUrlEscape(url: string): string {

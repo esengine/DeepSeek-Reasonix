@@ -40,6 +40,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/extension/providerext"
 	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
@@ -56,6 +57,7 @@ import (
 	"reasonix/internal/skill"
 	"reasonix/internal/stats"
 	"reasonix/internal/store"
+	"reasonix/internal/taskmonitor"
 	"reasonix/internal/tool"
 )
 
@@ -113,6 +115,11 @@ type PromptHistoryResult struct {
 // forwards events tagged with tabId to the webview via runtime.EventsEmit.
 type App struct {
 	ctx context.Context
+
+	// taskCtrl is the process-wide task-monitor control service (lazy; see
+	// taskControl). One instance serializes control operations in-process.
+	taskCtrl     *taskmonitor.ControlService
+	taskCtrlOnce sync.Once
 
 	// mu protects the tab map, tabOrder, activeTabID, and per-tab fields that are read
 	// from bound methods. All bound methods that touch a controller use activeCtrl().
@@ -286,8 +293,13 @@ type App struct {
 	heartbeat *HeartbeatEngine // scheduled heartbeat tasks; nil until startup
 
 	previousRun repair.PreviousRunObservation
+	// Healthy-update identity is captured before Wails starts. A process may
+	// commit only the complete probationary transaction it actually booted from,
+	// never a rewritten or later same-version retry.
+	healthyUpdateCreatedAt     string
+	healthyUpdateTransactionID string
 	// startupReady records that the window reached domReady so LKG config
-	// snapshots are only written after a real UI boot.
+	// snapshots and update health are only committed after a real UI boot.
 	startupReady atomic.Bool
 }
 
@@ -963,8 +975,17 @@ func (a *App) shutdown(context.Context) {
 		a.mu.Unlock()
 	}
 	if a.startupReady.Load() {
-		// Independent last-known-good config snapshot after a successful UI
-		// session. Does not participate in startup decisions.
+		// A visible UI is sufficient health evidence even if the user closes the
+		// window before the delayed post-DOM task runs.
+		if err := a.commitPendingUpdateHealth(); err != nil {
+			slog.Warn("desktop: commit healthy update during shutdown", "err", err)
+		}
+		if archived, err := archiveSupersededPendingUpdateAfterReady(); err != nil {
+			slog.Warn("desktop: retire superseded update during shutdown", "err", err)
+		} else if archived {
+			slog.Info("desktop: archived superseded update transaction during shutdown")
+		}
+		// Independent last-known-good config snapshot after a successful UI session.
 		_ = repair.RecordHealthyConfig(version)
 	}
 }
@@ -1027,15 +1048,30 @@ func (a *App) domReady(_ context.Context) {
 		case <-ctx.Done():
 			return
 		}
+		if err := a.commitPendingUpdateHealth(); err != nil {
+			slog.Warn("desktop: commit healthy update", "err", err)
+		}
 		if err := repair.RecordHealthyConfig(version); err != nil {
 			slog.Debug("desktop: record last-known-good config", "err", err)
 		}
-		if archived, err := archiveSupersededLegacyUpdateAfterReady(); err != nil {
-			slog.Warn("desktop: retire superseded legacy update", "err", err)
+		if archived, err := archiveSupersededPendingUpdateAfterReady(); err != nil {
+			slog.Warn("desktop: retire superseded update", "err", err)
 		} else if archived {
-			slog.Info("desktop: archived superseded legacy update transaction")
+			slog.Info("desktop: archived superseded update transaction")
 		}
 	})
+}
+
+func (a *App) commitPendingUpdateHealth() error {
+	if a == nil || strings.TrimSpace(a.healthyUpdateCreatedAt) == "" ||
+		strings.TrimSpace(a.healthyUpdateTransactionID) == "" {
+		return nil
+	}
+	return markPendingUpdateHealthyAfterReady(
+		version,
+		a.healthyUpdateCreatedAt,
+		a.healthyUpdateTransactionID,
+	)
 }
 
 // --- bound command surface (frontend → controller) ---
@@ -1729,6 +1765,26 @@ func (a *App) ApproveTab(tabID, id string, allow, session, persist bool) {
 	if ctrl != nil {
 		ctrl.Approve(id, allow, session, persist)
 	}
+}
+
+// ResolvePlanDecision answers a Plan card while preserving whether the user
+// chose to start execution, revise the plan, or exit without executing.
+func (a *App) ResolvePlanDecision(id, action string) error {
+	ctrl := a.ctrlByTabID("")
+	if ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	return ctrl.ResolvePlanDecision(id, control.PlanDecisionAction(action))
+}
+
+// ResolvePlanDecisionTab is like ResolvePlanDecision but scoped to a runtime
+// tab so a delayed bridge call cannot answer a prompt in another tab.
+func (a *App) ResolvePlanDecisionTab(tabID, id, action string) error {
+	ctrl := a.ctrlForRuntimeTabID(tabID)
+	if ctrl == nil {
+		return fmt.Errorf("no active session")
+	}
+	return ctrl.ResolvePlanDecision(id, control.PlanDecisionAction(action))
 }
 
 // ResolveRecovery answers an Auto Guard card. action is continue|revise. For
@@ -3083,6 +3139,21 @@ func (a *App) activeSessionDir() string {
 // user-chosen titles.
 func (a *App) ListSessions() []SessionMeta {
 	dir := a.activeSessionDir()
+	return a.listSessionsFromDir(dir, a.activeSessionPath(dir))
+}
+
+// ListSessionsForTab returns sessions from the directory owned by tabID. Task
+// Monitor uses this stable target after asynchronous control lookups so a tab
+// switch cannot redirect the eventual session lookup to another workspace.
+func (a *App) ListSessionsForTab(tabID string) []SessionMeta {
+	target, err := a.taskMonitorTargetForTab(tabID)
+	if err != nil {
+		return []SessionMeta{}
+	}
+	return a.listSessionsFromDir(target.sessionDir, target.sessionPath)
+}
+
+func (a *App) listSessionsFromDir(dir, active string) []SessionMeta {
 	infos, err := agent.ListSessions(dir)
 	if err != nil {
 		return []SessionMeta{}
@@ -3098,7 +3169,6 @@ func (a *App) ListSessions() []SessionMeta {
 	_ = pruneSessionPlannerDisplays(dir, protectedDisplays)
 	titles := loadSessionTitles(dir)
 	channelRoutes := channelSessionRoutesForDir(dir)
-	active := a.activeSessionPath(dir)
 	out := make([]SessionMeta, 0, len(infos))
 	for _, s := range infos {
 		_, isOpen := open[s.Path]
@@ -5454,6 +5524,7 @@ type HistoryMessage struct {
 	Messages           int                       `json:"messages,omitempty"`
 	Summary            string                    `json:"summary,omitempty"`
 	Archive            string                    `json:"archive,omitempty"`
+	DecisionReceipt    *provider.DecisionReceipt `json:"decisionReceipt,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -5787,6 +5858,15 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 	plannerByUserHash := plannerTurnsByUserHash(plannerTurns)
 	suppressCanonicalTurn := false
 	for index, m := range msgs {
+		if m.DecisionReceipt != nil {
+			out = append(out, HistoryMessage{
+				Role:            "notice",
+				Code:            event.NoticeCodeDecisionReceipt,
+				Level:           "info",
+				DecisionReceipt: cloneDecisionReceipt(m.DecisionReceipt),
+			})
+			continue
+		}
 		if m.LocalOnly {
 			if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
 				out = append(out, HistoryMessage{
@@ -5872,6 +5952,17 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 		if !m.LocalOnly || hasVisibleLocalContent {
 			out = append(out, hm)
 		}
+		for _, receipt := range m.DecisionReceipts {
+			if receipt == nil {
+				continue
+			}
+			out = append(out, HistoryMessage{
+				Role:            "notice",
+				Code:            event.NoticeCodeDecisionReceipt,
+				Level:           "info",
+				DecisionReceipt: cloneDecisionReceipt(receipt),
+			})
+		}
 		if m.LocalOnly && m.InterruptedTurn != nil {
 			out = append(out, HistoryMessage{
 				Role: "notice", Level: "info", Code: event.NoticeCodeCancelledTurn,
@@ -5888,6 +5979,14 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 		}
 	}
 	return out
+}
+
+func cloneDecisionReceipt(in *provider.DecisionReceipt) *provider.DecisionReceipt {
+	if in == nil {
+		return nil
+	}
+	copy := *in
+	return &copy
 }
 
 func plannerDisplaySuppressesCanonical(turn plannerDisplayTurn) bool {
@@ -9506,11 +9605,20 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 	a.mu.RLock()
 	curModel := ""
 	workspaceRoot := ""
+	var ctrl control.SessionAPI
 	if tab := a.tabByIDLocked(tabID); tab != nil {
 		curModel = tab.model
 		workspaceRoot = tab.WorkspaceRoot
+		ctrl = tab.Ctrl
 	}
 	a.mu.RUnlock()
+	// The tab controller's merged catalog carries extension sidecar providers
+	// (plugin/... refs). Read it off-lock: a cold catalog fetch can block on a
+	// sidecar RPC and must never park a.mu.
+	var extensionCatalog []provider.Descriptor
+	if ctrl != nil {
+		extensionCatalog = ctrl.ProviderCatalog()
+	}
 	cfg, err := config.LoadForRoot(workspaceRoot)
 	if err != nil {
 		return []ModelInfo{}
@@ -9529,7 +9637,53 @@ func (a *App) ModelsForTab(tabID string) []ModelInfo {
 			out = append(out, ModelInfo{Ref: ref, Provider: p.Name, Model: m, Current: ref == curModel})
 		}
 	}
+	return mergeExtensionModelInfos(out, extensionCatalog, curModel)
+}
+
+// mergeExtensionModelInfos folds the tab controller's extension provider
+// catalog into the config-backed switcher list. Extension refs arrive fully
+// namespaced (plugin/<plugin>/<provider>/<model>) and need no provider-access
+// gate: installing/enabling the plugin package is the host-level grant. A nil
+// catalog (no provider-declaring sidecar) leaves the list untouched.
+func mergeExtensionModelInfos(out []ModelInfo, catalog []provider.Descriptor, curModel string) []ModelInfo {
+	if len(catalog) == 0 {
+		return out
+	}
+	seen := make(map[string]bool, len(out)+len(catalog))
+	for _, info := range out {
+		seen[info.Ref] = true
+	}
+	for _, d := range catalog {
+		ref := strings.TrimSpace(d.Ref)
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		providerName, model := "plugin", ref
+		if owner := providerext.PluginRefOwner(ref); owner != "" {
+			providerName = "plugin/" + owner
+			model = strings.TrimPrefix(ref, "plugin/"+owner+"/")
+		}
+		out = append(out, ModelInfo{Ref: ref, Provider: providerName, Model: model, Current: ref == curModel})
+	}
 	return out
+}
+
+// extensionModelDescriptor finds a plugin-namespaced ref in a controller's
+// merged catalog: an exact match, or the prefix form where ref names the
+// provider and the descriptor adds the model segment. Non-plugin refs never
+// match — they belong to the config catalog.
+func extensionModelDescriptor(catalog []provider.Descriptor, ref string) (provider.Descriptor, bool) {
+	ref = strings.TrimSpace(ref)
+	if providerext.PluginRefOwner(ref) == "" {
+		return provider.Descriptor{}, false
+	}
+	for _, d := range catalog {
+		if d.Ref == ref || strings.HasPrefix(d.Ref, ref+"/") {
+			return d, true
+		}
+	}
+	return provider.Descriptor{}, false
 }
 
 func modelProviderAccessAllowed(access []string, name string) bool {
@@ -9543,6 +9697,19 @@ func modelProviderAccessAllowed(access []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// providerCatalogForTab returns the tab controller's merged provider catalog
+// (extension sidecar providers over the config base), or nil when the tab has
+// no live controller or no sidecar declared providers.
+func (a *App) providerCatalogForTab(tab *WorkspaceTab) []provider.Descriptor {
+	if tab == nil {
+		return nil
+	}
+	if ctrl := a.controllerForTab(tab); ctrl != nil {
+		return ctrl.ProviderCatalog()
+	}
+	return nil
 }
 
 type activeRuntimeWork struct {
@@ -9856,15 +10023,27 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 		return err
 	}
 	entry, ok := cfg.ResolveModel(name)
+	pluginRef := false
+	if !ok {
+		// Plugin-namespaced refs belong to extension sidecars: validate them
+		// against the tab controller's merged catalog instead of the config.
+		if d, found := extensionModelDescriptor(a.providerCatalogForTab(tab), name); found {
+			pluginRef = true
+			ok = true
+			name = d.Ref
+		}
+	}
 	if !ok {
 		return fmt.Errorf("unknown model %q", name)
 	}
-	if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, entry.Name) {
-		return fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
+	if !pluginRef {
+		if !modelProviderAccessAllowed(cfg.Desktop.ProviderAccess, entry.Name) {
+			return fmt.Errorf("model %q is not available because provider %q is not added", name, entry.Name)
+		}
+		name = entry.Name + "/" + entry.Model
 	}
-	name = entry.Name + "/" + entry.Model
 	effortOverride := cloneStringPtr(snap.effort)
-	if effortOverride != nil {
+	if effortOverride != nil && !pluginRef {
 		normalized, err := config.NormalizeEffort(entry, config.EffortDisplay(&config.ProviderEntry{Effort: *effortOverride}))
 		if err != nil {
 			effortOverride = nil
@@ -11722,6 +11901,249 @@ func parseScope(s string) memory.Scope {
 	default:
 		return memory.ScopeProject
 	}
+}
+
+// taskStore is the Store backing the task monitor panel.
+func (a *App) taskStore() taskmonitor.WriteStore {
+	return taskmonitor.NewFileStore(filepath.Join(".reasonix", "tasks"))
+}
+
+// taskControl returns the process-wide ControlService backing the task
+// monitor panel. A single instance keeps control operations serialized within
+// this process (across processes the FileStore's per-task lock still
+// arbitrates), and avoids re-creating the service on every Wails call.
+func (a *App) taskControl() *taskmonitor.ControlService {
+	a.taskCtrlOnce.Do(func() {
+		a.taskCtrl = taskmonitor.NewControlService(a.taskStore())
+	})
+	return a.taskCtrl
+}
+
+func (a *App) projectDir() string {
+	return a.activeWorkspaceRoot()
+}
+
+type taskMonitorTabTarget struct {
+	projectDir  string
+	sessionDir  string
+	sessionPath string
+	sessionID   string
+}
+
+// taskMonitorTargetForTab snapshots the workspace and session identity owned by
+// tabID. Wails dispatches bound calls concurrently, so resolving the active tab
+// inside a task operation would allow a later tab switch to retarget it.
+func (a *App) taskMonitorTargetForTab(tabID string) (taskMonitorTabTarget, error) {
+	tabID = strings.TrimSpace(tabID)
+	if tabID == "" {
+		return taskMonitorTabTarget{}, fmt.Errorf("task monitor tab id is required")
+	}
+
+	a.mu.RLock()
+	tab := a.tabByIDLocked(tabID)
+	if tab == nil {
+		a.mu.RUnlock()
+		return taskMonitorTabTarget{}, fmt.Errorf("task monitor tab %q is unavailable", tabID)
+	}
+	workspaceRoot := strings.TrimSpace(tab.WorkspaceRoot)
+	tabSessionPath := strings.TrimSpace(tab.SessionPath)
+	ctrl := tab.Ctrl
+	leaseKey := tab.sessionLeaseRuntimeKey()
+	a.mu.RUnlock()
+
+	projectDir := workspaceRoot
+	if projectDir == "" {
+		projectDir = "."
+	}
+	sessionDir := desktopSessionDir(workspaceRoot)
+	sessionPath := tabSessionPath
+	if ctrl != nil {
+		if dir := strings.TrimSpace(ctrl.SessionDir()); dir != "" {
+			sessionDir = dir
+		}
+		if path := strings.TrimSpace(ctrl.SessionPath()); path != "" {
+			sessionPath = path
+		}
+	}
+	// During a recovery handoff the lease-backed tab path is newer than the
+	// controller path until the controller commits the handoff.
+	if tabSessionPath != "" && sessionRuntimeKey(tabSessionPath) == leaseKey {
+		sessionPath = tabSessionPath
+		sessionDir = filepath.Dir(tabSessionPath)
+	} else if ctrl == nil && tabSessionPath != "" {
+		sessionDir = filepath.Dir(tabSessionPath)
+	}
+
+	target := taskMonitorTabTarget{
+		projectDir:  projectDir,
+		sessionDir:  sessionDir,
+		sessionPath: sessionPath,
+	}
+	if sessionPath != "" {
+		target.sessionID = agent.BranchID(sessionPath)
+	}
+	return target, nil
+}
+
+func (a *App) ListTasks() ([]taskmonitor.TaskSnapshot, error) {
+	return a.taskStore().ListTasks(a.ctx, a.projectDir())
+}
+
+// CurrentTaskSessionID returns the stable branch ID for the active desktop
+// session. Task Monitor uses this as an optional view filter; an empty value
+// means that the active tab has no session controller yet.
+func (a *App) CurrentTaskSessionID() string {
+	_, ctrl := a.activeTabAndCtrl()
+	if ctrl == nil {
+		return ""
+	}
+	return agent.BranchID(ctrl.SessionPath())
+}
+
+// ListTasksForSession limits the project task view to one desktop session.
+// The unfiltered ListTasks method remains for compatibility with existing
+// callers and project-wide diagnostics.
+func (a *App) ListTasksForSession(sessionID string) ([]taskmonitor.TaskSnapshot, error) {
+	tasks, err := a.ListTasks()
+	if err != nil || strings.TrimSpace(sessionID) == "" {
+		return tasks, err
+	}
+	return filterTasksBySession(tasks, sessionID), nil
+}
+
+// ListTasksForTab returns the task view owned by tabID and filters it to that
+// tab's session when one is available. It deliberately avoids active-tab state.
+func (a *App) ListTasksForTab(tabID string) ([]taskmonitor.TaskSnapshot, error) {
+	target, err := a.taskMonitorTargetForTab(tabID)
+	if err != nil {
+		return nil, err
+	}
+	tasks, err := a.taskStore().ListTasks(a.ctx, target.projectDir)
+	if err != nil || target.sessionID == "" {
+		return tasks, err
+	}
+	return filterTasksBySession(tasks, target.sessionID), nil
+}
+
+func filterTasksBySession(tasks []taskmonitor.TaskSnapshot, sessionID string) []taskmonitor.TaskSnapshot {
+	filtered := make([]taskmonitor.TaskSnapshot, 0, len(tasks))
+	for _, task := range tasks {
+		if task.SessionID == sessionID {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
+}
+
+func (a *App) GetTask(taskID string) (*taskmonitor.TaskSnapshot, error) {
+	return a.taskStore().GetTask(a.ctx, a.projectDir(), taskID)
+}
+
+func (a *App) ListTaskEvents(taskID string, afterSequence int) ([]taskmonitor.TaskEvent, error) {
+	return a.taskStore().ListEvents(a.ctx, a.projectDir(), taskID, afterSequence)
+}
+
+func (a *App) ListTaskEventsForTab(tabID, taskID string, afterSequence int) ([]taskmonitor.TaskEvent, error) {
+	target, err := a.taskMonitorTargetForTab(tabID)
+	if err != nil {
+		return nil, err
+	}
+	return a.taskStore().ListEvents(a.ctx, target.projectDir, taskID, afterSequence)
+}
+
+func (a *App) StopTask(taskID string, expectedVersion uint64, reason, idemKey string) (taskmonitor.ControlResult, error) {
+	projectDir := a.projectDir()
+	return a.taskControl().StopTaskWithKiller(
+		a.ctx, projectDir, taskID, expectedVersion, reason, idemKey,
+		desktopTaskJobKiller{app: a, projectDir: projectDir},
+	)
+}
+
+func (a *App) StopTaskForTab(tabID, taskID string, expectedVersion uint64, reason, idemKey string) (taskmonitor.ControlResult, error) {
+	target, err := a.taskMonitorTargetForTab(tabID)
+	if err != nil {
+		return taskmonitor.ControlResult{}, err
+	}
+	return a.taskControl().StopTaskWithKiller(
+		a.ctx, target.projectDir, taskID, expectedVersion, reason, idemKey,
+		desktopTaskJobKiller{app: a, projectDir: target.projectDir},
+	)
+}
+
+func (a *App) CancelTask(taskID string, expectedVersion uint64, reason, idemKey string) (taskmonitor.ControlResult, error) {
+	projectDir := a.projectDir()
+	return a.taskControl().CancelTaskWithKiller(
+		a.ctx, projectDir, taskID, expectedVersion, reason, idemKey,
+		desktopTaskJobKiller{app: a, projectDir: projectDir},
+	)
+}
+
+func (a *App) CancelTaskForTab(tabID, taskID string, expectedVersion uint64, reason, idemKey string) (taskmonitor.ControlResult, error) {
+	target, err := a.taskMonitorTargetForTab(tabID)
+	if err != nil {
+		return taskmonitor.ControlResult{}, err
+	}
+	return a.taskControl().CancelTaskWithKiller(
+		a.ctx, target.projectDir, taskID, expectedVersion, reason, idemKey,
+		desktopTaskJobKiller{app: a, projectDir: target.projectDir},
+	)
+}
+
+func (a *App) RequeueTask(taskID string, expectedVersion uint64, idemKey string) (taskmonitor.ControlResult, error) {
+	return a.taskControl().RequeueTask(a.ctx, a.projectDir(), taskID, expectedVersion, idemKey)
+}
+
+func (a *App) RequeueTaskForTab(tabID, taskID string, expectedVersion uint64, idemKey string) (taskmonitor.ControlResult, error) {
+	target, err := a.taskMonitorTargetForTab(tabID)
+	if err != nil {
+		return taskmonitor.ControlResult{}, err
+	}
+	return a.taskControl().RequeueTask(a.ctx, target.projectDir, taskID, expectedVersion, idemKey)
+}
+
+func (a *App) OpenTaskSession(taskID string) (taskmonitor.ControlResult, error) {
+	return a.taskControl().OpenTaskSession(a.ctx, a.projectDir(), taskID)
+}
+
+func (a *App) OpenTaskSessionForTab(tabID, taskID string) (taskmonitor.ControlResult, error) {
+	target, err := a.taskMonitorTargetForTab(tabID)
+	if err != nil {
+		return taskmonitor.ControlResult{}, err
+	}
+	return a.taskControl().OpenTaskSession(a.ctx, target.projectDir, taskID)
+}
+
+type desktopTaskJobKiller struct {
+	app        *App
+	projectDir string
+}
+
+func (k desktopTaskJobKiller) Kill(sessionID, taskID string) bool {
+	// Legacy task records without a session ID cannot be routed safely because
+	// jobs.Manager IDs restart at task-1 for each controller.
+	if k.app == nil || sessionID == "" || strings.TrimSpace(k.projectDir) == "" {
+		return false
+	}
+
+	k.app.mu.RLock()
+	tabs := k.app.runtimeTabsLocked()
+	controllers := make([]control.SessionAPI, 0, len(tabs))
+	for _, tab := range tabs {
+		if tab != nil && tab.Ctrl != nil && sameProjectRoot(tab.WorkspaceRoot, k.projectDir) {
+			controllers = append(controllers, tab.Ctrl)
+		}
+	}
+	k.app.mu.RUnlock()
+
+	for _, ctrl := range controllers {
+		if agent.BranchID(ctrl.SessionPath()) != sessionID {
+			continue
+		}
+		if killer, ok := ctrl.(interface{ CancelJob(string) bool }); ok && killer.CancelJob(taskID) {
+			return true
+		}
+	}
+	return false
 }
 
 // onboardingKeyEnv is the default provider (deepseek) key from config.Default().

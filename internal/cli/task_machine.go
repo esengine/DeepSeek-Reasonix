@@ -41,10 +41,6 @@ type taskMachineOptions struct {
 	json        bool
 }
 
-func taskCommand(args []string) int {
-	return runTaskCommand(args, os.Stdout)
-}
-
 func runTaskCommand(args []string, out io.Writer) int {
 	command := "task"
 	if len(args) == 0 {

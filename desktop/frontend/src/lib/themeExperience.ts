@@ -22,13 +22,15 @@ export type ThemeExperienceView = {
   effectiveStyle: ThemeStyle | string;
   activeThemeId?: string;
   activePack?: ThemePackView | null;
+  /** Non-fatal plugin theme discovery issues (invalid files skipped). */
+  warnings?: string[];
 };
 
 export type GalleryTab = "catalog" | "user";
 
 export type ThemeSelection =
   | { kind: "base"; id: ThemeStyle; pack?: ThemePackView }
-  | { kind: "official" | "user"; id: string; pack: ThemePackView };
+  | { kind: "official" | "user" | "plugin"; id: string; pack: ThemePackView };
 
 let experienceCache: ThemeExperienceView | null = null;
 let previewDepth = 0;
@@ -120,6 +122,7 @@ function normalizeExperience(view: ThemeExperienceView): ThemeExperienceView {
     effectiveStyle,
     activeThemeId: view.activeThemeId || undefined,
     activePack: view.activePack ?? null,
+    warnings: Array.isArray(view.warnings) ? view.warnings.filter((w): w is string => typeof w === "string" && w.trim().length > 0) : undefined,
   };
 }
 
@@ -234,17 +237,20 @@ export function groupThemePacks(packs: ThemePackView[]): {
   official: ThemePackView[];
   user: ThemePackView[];
   base: ThemePackView[];
+  plugin: ThemePackView[];
 } {
   const official: ThemePackView[] = [];
   const user: ThemePackView[] = [];
   const base: ThemePackView[] = [];
+  const plugin: ThemePackView[] = [];
   for (const p of packs) {
     const k = themePackKind(p);
     if (k === "official") official.push(p);
     else if (k === "base") base.push(p);
+    else if (k === "plugin") plugin.push(p);
     else user.push(p);
   }
-  return { official, user, base };
+  return { official, user, base, plugin };
 }
 
 export function selectionFromPack(pack: ThemePackView): ThemeSelection {

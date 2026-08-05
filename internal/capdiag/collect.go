@@ -442,6 +442,8 @@ func collectPlugins(reasonixHome string, disp func(string) string) (PluginPackag
 		}
 		sk, commands, hk, mcp := pkg.CapabilityCounts()
 		info.Skills, info.Commands, info.Hooks, info.MCPServers = sk, commands, hk, mcp
+		info.Prompts, info.Themes = pkg.PromptCount(), pkg.ThemeCount()
+		info.Runtime = pkg.Manifest.Runtime != nil
 		if p.ManifestKind == "" {
 			info.ManifestKind = pkg.ManifestKind
 		}

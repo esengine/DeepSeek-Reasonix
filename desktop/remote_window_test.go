@@ -14,7 +14,29 @@ import (
 	"time"
 
 	"reasonix/internal/config"
+	"reasonix/internal/remote"
+	"reasonix/internal/remote/bootstrap"
+	"reasonix/internal/remote/sshtest"
 )
+
+type reconnectWindowSink struct {
+	app      *App
+	statuses chan RemoteConnectionStatusView
+}
+
+func (s *reconnectWindowSink) onStatus(v RemoteConnectionStatusView) {
+	s.app.onStatus(v)
+	select {
+	case s.statuses <- v:
+	default:
+	}
+}
+
+func (s *reconnectWindowSink) onForwards(hostID string, forwards []RemoteForwardView) {
+	s.app.onForwards(hostID, forwards)
+}
+
+func (s *reconnectWindowSink) onServer(v RemoteServerView) { s.app.onServer(v) }
 
 // TestRemoteWindowHelperProcess is the target of registry tests that need a
 // real live child process: it is spawned via os.Args[0] with a marker env and
@@ -615,6 +637,125 @@ func TestRemoteWindowReconnectRepointsWindow(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("window not re-pointed after reconnect")
+	}
+}
+
+func TestRemoteWindowRecoversAcrossRealSSHDrop(t *testing.T) {
+	const hostID = "box"
+	sshServer := sshtest.Start(t, sshtest.Options{Password: "test-password"})
+	serve := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("remote-serve-ok"))
+	}))
+	defer serve.Close()
+
+	host, err := remote.ResolveHost(nil, "test@"+sshServer.Addr, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHostsDir := t.TempDir()
+	policy := &remote.HostKeyPolicy{
+		SystemKnownHosts: []string{filepath.Join(knownHostsDir, "none")},
+		ManagedPath:      filepath.Join(knownHostsDir, "known_hosts"),
+		Prompt: func(context.Context, remote.HostKeyQuestion) (bool, error) {
+			return true, nil
+		},
+	}
+
+	seedLifecycleHost(t, hostID)
+	a := NewApp()
+	sink := &reconnectWindowSink{app: a, statuses: make(chan RemoteConnectionStatusView, 32)}
+	mgr := newDesktopRemoteManager(sink)
+	a.remoteRuntime = mgr
+	mgr.newClient = func(opts remote.Options) (desktopSSHClient, error) {
+		opts.Host = host
+		opts.HostKeys = policy
+		opts.Auth = remote.AuthOptions{
+			DisableAgent: true,
+			Password:     func() (string, error) { return "test-password", nil },
+		}
+		opts.Keepalive = remote.KeepalivePolicy{Interval: 25 * time.Millisecond, MaxMisses: 1, Timeout: 200 * time.Millisecond}
+		opts.Backoff = remote.BackoffPolicy{Initial: time.Millisecond, Max: 10 * time.Millisecond}
+		return remote.New(opts)
+	}
+	serveAddr := strings.TrimPrefix(serve.URL, "http://")
+	mgr.ensureServe = func(_ context.Context, _ bootstrap.Conn, opts bootstrap.Options) (bootstrap.Result, error) {
+		return bootstrap.Result{
+			State:  bootstrap.ServeState{Addr: serveAddr, Workspace: opts.Workspace},
+			Token:  "reconnect-token",
+			Reused: true,
+		}, nil
+	}
+
+	launches := make(chan remoteWindowLaunch, 4)
+	a.remoteWindowOpener = func(launch remoteWindowLaunch) error {
+		launches <- launch
+		return nil
+	}
+	window := spawnRemoteWindowHelper(t)
+	t.Cleanup(func() {
+		_ = mgr.Disconnect(hostID)
+		_ = window.Kill()
+		waitRemoteWindowHelperExit(t, window)
+	})
+
+	if err := mgr.Connect(hostID); err != nil {
+		t.Fatal(err)
+	}
+	waitForRemoteWindowStatus(t, sink.statuses, "connected", 0)
+	a.remoteWindows.record(remoteWindowHostKey(hostID), window)
+	if err := a.OpenRemoteWorkspace(hostID, "/srv/project"); err != nil {
+		t.Fatal(err)
+	}
+	first := waitForRemoteWindowLaunch(t, launches)
+	assertRemoteServeReachable(t, first.URL)
+
+	sshServer.DropConnections()
+	waitForRemoteWindowStatus(t, sink.statuses, "reconnecting", 1)
+	waitForRemoteWindowStatus(t, sink.statuses, "connected", 1)
+	refreshed := waitForRemoteWindowLaunch(t, launches)
+	if refreshed.URL != first.URL {
+		t.Fatalf("reconnected window URL = %q, want persistent forward URL %q", refreshed.URL, first.URL)
+	}
+	assertRemoteServeReachable(t, refreshed.URL)
+}
+
+func waitForRemoteWindowStatus(t *testing.T, statuses <-chan RemoteConnectionStatusView, state string, minAttempt int) {
+	t.Helper()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case status := <-statuses:
+			if status.State == state && status.Attempt >= minAttempt {
+				return
+			}
+		case <-timer.C:
+			t.Fatalf("remote status did not reach %s at attempt >= %d", state, minAttempt)
+		}
+	}
+}
+
+func waitForRemoteWindowLaunch(t *testing.T, launches <-chan remoteWindowLaunch) remoteWindowLaunch {
+	t.Helper()
+	select {
+	case launch := <-launches:
+		return launch
+	case <-time.After(10 * time.Second):
+		t.Fatal("remote window was not opened")
+		return remoteWindowLaunch{}
+	}
+}
+
+func assertRemoteServeReachable(t *testing.T, rawURL string) {
+	t.Helper()
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(rawURL)
+	if err != nil {
+		t.Fatalf("GET remote Serve through SSH forward: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("remote Serve status = %d, want 200", resp.StatusCode)
 	}
 }
 

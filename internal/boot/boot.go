@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"reasonix/internal/ablation"
@@ -29,6 +30,12 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/environment"
 	"reasonix/internal/event"
+	"reasonix/internal/extension"
+	"reasonix/internal/extension/dispatch"
+	"reasonix/internal/extension/protocol"
+	"reasonix/internal/extension/providerext"
+	"reasonix/internal/extension/sidecar"
+	"reasonix/internal/extension/uihub"
 	"reasonix/internal/goaleval"
 	"reasonix/internal/guardian"
 	"reasonix/internal/history"
@@ -188,11 +195,12 @@ func recoveryHeadlessMode(opts Options) bool {
 	return strings.TrimSpace(opts.HeadlessApprovalMode) != ""
 }
 
-// Build loads config, resolves the model(s), and returns a Controller wrapping a
-// single Agent, or a two-model Coordinator when agent.planner_model is set. The
-// returned controller owns plugin subprocesses; call Close (via Controller.Close)
-// to release them.
-func Build(ctx context.Context, opts Options) (*control.Controller, error) {
+// build is the assembly body behind BuildRuntime (and the Build compat
+// wrapper): it loads config, resolves the model(s), wires the full runtime,
+// and freezes the extension kernel snapshot from the objects it just
+// assembled. The returned controller owns plugin subprocesses; call Close
+// (via Controller.Close) to release them.
+func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	stderr := opts.Stderr
 	if stderr == nil {
 		stderr = os.Stderr
@@ -221,6 +229,140 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	secrets.SetFilterSubprocessEnv(cfg.Secrets.FilterSubprocessEnv)
 	secrets.SetProtectSensitiveFiles(cfg.Secrets.ProtectSensitiveFiles)
 	secrets.RegisterCredentialEnvKeys(cfg.CredentialEnvNames())
+
+	// Serialize the frontend's sink once: background jobs (below) emit from their
+	// own goroutines, which can overlap a running turn's emission, so every emitter
+	// shares this synchronized sink. It is created before extension preflight so
+	// sidecar warnings and host/ui/* publishes land on the same channel as every
+	// later notice. The job manager is session-scoped — its jobs outlive a turn
+	// and are cancelled by Controller.Close.
+	sink := event.Sync(opts.Sink)
+
+	// Both sink wraps must complete BEFORE the extension UI hub closes over the
+	// sink variable: a sidecar publish during preflight lands on this closure
+	// from a wire-handler goroutine, and any later reassignment races it.
+	// Record billable usage for the "usage statistics" panel. Wrapping here —
+	// outside the per-agent sinks — covers every agent (executor, planner,
+	// sub-agents, guardian) with one recorder, and each record is labelled with
+	// this frontend's StatsSource so the panel can split totals by entry point.
+	if source := strings.TrimSpace(opts.StatsSource); source != "" {
+		sink = stats.NewRecorder(sink, config.StatsDir(), source)
+	}
+	// Goal token-budget accounting: the controller detects this tee and
+	// attributes billable usage events to the active goal turn's recorder, so
+	// executor/planner/subagent/compaction/classifier/router/reviewer/evaluator
+	// calls under one Goal scope count against its token budget. The tee must
+	// sit on the shared sink the agents emit into.
+	sink = control.NewGoalUsageTee(sink)
+
+	// Extension preflight (stages 5b/7): start the installed, enabled v1 runtime
+	// packages ONCE, here, before model resolution, so plugin-namespaced refs
+	// (plugin/<plugin>/<provider>/<model>) resolve on the very first boot and the
+	// same sidecar generation feeds the executor, planner, guardian, sub-agents,
+	// the snapshot assembly, and the frontend catalog. With no runtime package
+	// installed preflight is a no-op and the whole build below takes the
+	// untouched pre-sidecar path. The generation moves up with it: the sidecar
+	// handshake's session context carries this build's generation, and a fresh
+	// controller has no session path yet, so the session ID is generation-scoped
+	// (the handshake only requires a stable, non-empty identity).
+	generation := nextRuntimeGeneration()
+	sessionID := fmt.Sprintf("boot-%d", generation)
+	proxySpec := cfg.NetworkProxySpec()
+	extWarn := func(msg string) {
+		redacted := secrets.RedactCredentials(msg)
+		slog.Warn("boot: extension runtime: "+redacted, "root", root)
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: redacted})
+	}
+	// Stage 8a: the host extension UI hub serves every sidecar's host/ui/* calls
+	// for this generation — publications become frontend events through the
+	// controller sink, blocking prompts ride the controller's Ask channel. The
+	// controller only exists after control.New below, so both seams indirect
+	// through ctrlRef; traffic before that (a sidecar publishing during its
+	// handshake) falls back to the same sink directly, matching the emission the
+	// controller would have made.
+	var ctrlRef atomic.Pointer[control.Controller]
+	// Readiness signals for gateExtensionUIRequest: a sidecar may legally
+	// issue host/ui/request right after extension/initialized, before the
+	// controller exists. ready closes at ctrlRef.Store; failed closes on any
+	// build error before the RuntimeSet takes ownership (the pendingMgr defer
+	// below), so a startup request never hangs a dying build.
+	controllerReady := make(chan struct{})
+	controllerBuildFailed := make(chan struct{})
+	extUIHub := uihub.New(uihub.Options{
+		SessionID:  sessionID,
+		Generation: generation,
+		Emit: func(ev event.Event) {
+			if c := ctrlRef.Load(); c != nil {
+				c.EmitExtensionEvent(ev)
+				return
+			}
+			sink.Emit(ev)
+		},
+		Request: func(reqCtx context.Context, req uihub.HubRequest) (map[string]any, bool, error) {
+			return gateExtensionUIRequest(reqCtx, ctrlRef.Load, controllerReady, controllerBuildFailed,
+				func(c *control.Controller) (map[string]any, bool, error) {
+					return uihub.AskRequestFunc(c.Ask)(reqCtx, req)
+				})
+		},
+		Warn: func(msg string) {
+			slog.Warn("boot: extension UI hub: "+msg, "root", root)
+		},
+	})
+	extensionMgr, err := preflightExtensionRuntimes(ctx, config.ReasonixHomeDir(), extensionBoot{
+		session:   protocol.SessionContext{SessionID: sessionID, WorkspaceRoot: root, Generation: generation},
+		ui:        extUIHub,
+		onWarning: extWarn,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("boot: %w", err)
+	}
+	// Until the RuntimeSet takes ownership at snapshot assembly, every error
+	// path between here and there must retire the preflighted sidecars — no
+	// process may outlive a failed build.
+	pendingMgr := extensionMgr
+	defer func() {
+		if pendingMgr != nil {
+			close(controllerBuildFailed)
+			_ = pendingMgr.Close()
+		}
+	}()
+
+	// The build's provider resolution base: the caller-owned broker when
+	// injected, the local config-backed resolver otherwise. When a started
+	// sidecar declares providers, fold them in NOW (stage 7) with the
+	// provider:<ref> slot claims from the same manifest data the kernel's
+	// ReplaceClaims pass uses, so first-boot model resolution sees them. A
+	// conflict with the base catalog that lacks the plugin's claim is fatal,
+	// the same class as a required runtime that cannot start: booting without
+	// the declared provider would silently change what the session is.
+	baseResolver := opts.ProviderResolver
+	if baseResolver == nil {
+		baseResolver = NewLocalProviderResolver(cfg, proxySpec)
+	}
+	effectiveResolver := opts.ProviderResolver
+	var extensionResolver provider.Resolver
+	if extensionMgr != nil {
+		declares := false
+		for _, client := range extensionMgr.Clients() {
+			if len(client.Handshake().Providers) > 0 {
+				declares = true
+				break
+			}
+		}
+		if declares {
+			claims, claimsErr := resolveReplacementClaims(extensionMgr.Contributions())
+			if claimsErr != nil {
+				return nil, fmt.Errorf("boot: %w", claimsErr)
+			}
+			merged, mergeErr := mergeSidecarProviders(baseResolver, extensionMgr, claims)
+			if mergeErr != nil {
+				return nil, fmt.Errorf("boot: %w", mergeErr)
+			}
+			effectiveResolver = merged
+			extensionResolver = merged
+		}
+	}
+
 	// Fall through a keyless default_model to the next configured chat model
 	// instead of hard-failing every command on "missing env X_API_KEY" (issue
 	// #6996). The fallback only kicks in when the caller did not pass an
@@ -242,7 +384,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		runtimeProfile = capability.ProfileDelivery
 	}
 	keepPolicy := agentKeepPolicy(cfg.Agent.Keep)
-	entry, modelRef, err := resolveModelEntry(opts, cfg, modelName)
+	// Entry resolution: the caller-owned broker is authoritative for every
+	// ref; the extension-merged resolver only owns plugin refs — a config ref
+	// keeps the full config entry (kind, endpoint, credentials, balance URL,
+	// missing-key notice), exactly as without extensions installed.
+	entryResolver := opts.ProviderResolver
+	if entryResolver == nil && extensionResolver != nil && providerext.PluginRefOwner(modelName) != "" {
+		entryResolver = extensionResolver
+	}
+	entry, modelRef, err := resolveModelEntry(entryResolver, cfg, modelName)
 	if err != nil {
 		return nil, err
 	}
@@ -252,33 +402,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			entry.Thinking = "adaptive"
 		}
 	}
-	if opts.RequireKey && opts.ProviderResolver == nil {
+	// RequireKey fails fast on a missing credential (run/serve); plugin-
+	// namespaced refs carry no config credential — the extension provider holds
+	// its own keys — so the merged resolver's resolution is their only gate.
+	if opts.RequireKey && opts.ProviderResolver == nil && providerext.PluginRefOwner(modelName) == "" {
 		if err := cfg.Validate(modelName); err != nil {
 			return nil, err
 		}
 	}
-
-	// Serialize the frontend's sink once: background jobs (below) emit from their
-	// own goroutines, which can overlap a running turn's emission, so every emitter
-	// shares this synchronized sink. The job manager is session-scoped — its jobs
-	// outlive a turn and are cancelled by Controller.Close.
-	sink := event.Sync(opts.Sink)
-
-	// Record billable usage for the "usage statistics" panel. Wrapping here —
-	// outside the per-agent sinks — covers every agent (executor, planner,
-	// sub-agents, guardian) with one recorder, and each record is labelled with
-	// this frontend's StatsSource so the panel can split totals by entry point.
-	if source := strings.TrimSpace(opts.StatsSource); source != "" {
-		sink = stats.NewRecorder(sink, config.StatsDir(), source)
-	}
-
-	// Goal token-budget accounting: the controller detects this tee and
-	// attributes billable usage events to the active goal turn's recorder, so
-	// executor/planner/subagent/compaction/classifier/router/reviewer/evaluator
-	// calls under one Goal scope count against its token budget. The tee must
-	// sit on the shared sink the agents emit into — hence the wrap here rather
-	// than inside the controller.
-	sink = control.NewGoalUsageTee(sink)
 
 	if migErr != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Config migration did not complete.", Detail: "config migration from ~/.reasonix failed: " + migErr.Error()})
@@ -371,7 +502,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "cleanup-pending reconciliation failed: " + err.Error()})
 	}
 
-	proxySpec := cfg.NetworkProxySpec()
+	// proxySpec was computed during extension preflight (the merged resolver's
+	// local base needs it); validate it before any provider construction.
 	if err := netclient.Validate(proxySpec); err != nil {
 		return nil, err
 	}
@@ -380,7 +512,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		return nil, err
 	}
 
-	execProv, err := resolveProvider(opts, cfg, proxySpec, provider.Selection{Ref: modelRef, Effort: opts.EffortOverride})
+	execProv, err := resolveProvider(effectiveResolver, cfg, proxySpec, provider.Selection{Ref: modelRef, Effort: opts.EffortOverride})
 	if err != nil {
 		return nil, err
 	}
@@ -800,8 +932,8 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			if resolved, ok := cfg.ResolveModel(modelRef); ok {
 				me = *resolved
 				selectedRef = modelRefFromEntry(resolved)
-			} else if opts.ProviderResolver != nil {
-				me = *syntheticEntryFromResolver(opts.ProviderResolver, modelRef)
+			} else if effectiveResolver != nil {
+				me = *syntheticEntryFromResolver(effectiveResolver, modelRef)
 				selectedRef = modelRef
 			} else {
 				return nil, nil, 0, fmt.Errorf("unknown model %q", modelRef)
@@ -811,7 +943,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if strings.TrimSpace(effort) != "" {
 			normalized, err := config.NormalizeEffort(&me, effort)
 			if err != nil {
-				if opts.ProviderResolver == nil {
+				if effectiveResolver == nil {
 					return nil, nil, 0, err
 				}
 				normalized = effort
@@ -822,7 +954,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 				me.Thinking = "adaptive"
 			}
 		}
-		p, err := resolveProvider(opts, cfg, proxySpec, provider.Selection{Ref: selectedRef, Effort: effortOverride})
+		p, err := resolveProvider(effectiveResolver, cfg, proxySpec, provider.Selection{Ref: selectedRef, Effort: effortOverride})
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -1534,7 +1666,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// independent ledgers/audits while sharing the session MCP runtime.
 	dualModelPlanner := false
 	if pm := effectivePlannerModel(cfg, opts, tokenEconomy); pm != "" {
-		if pe, ok := resolveOptionalEntry(opts, cfg, pm); ok && pe.Model != entry.Model {
+		if pe, ok := resolveOptionalEntry(effectiveResolver, cfg, pm); ok && pe.Model != entry.Model {
 			dualModelPlanner = true
 		}
 	}
@@ -1657,7 +1789,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// planner gets the same standing memory context and a filtered read-only
 	// research tool set, so it can inspect rules/code without side effects.
 	pm := effectivePlannerModel(cfg, opts, tokenEconomy)
-	pe, plannerResolved := resolveOptionalEntry(opts, cfg, pm)
+	pe, plannerResolved := resolveOptionalEntry(effectiveResolver, cfg, pm)
 	if pm != "" && !plannerResolved {
 		// An unusable optional planner must not take the session down with it —
 		// the executor is what the user talks to. Degrades like the guardian
@@ -1668,7 +1800,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	if pm != "" && plannerResolved {
 		if pe.Model != entry.Model {
-			plannerProv, err := resolveProvider(opts, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(pe)})
+			plannerProv, err := resolveProvider(effectiveResolver, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(pe)})
 			if err != nil {
 				return nil, fmt.Errorf("planner %q: %w", pm, err)
 			}
@@ -1710,27 +1842,30 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 
 	ctrlOpts := control.Options{
-		Runner:                runner,
-		Executor:              executor,
-		Sink:                  sink,
-		Policy:                policy,
-		SubagentGate:          headlessGate,
-		Label:                 label,
-		ModelRef:              modelRef,
-		SystemPrompt:          sysPrompt,
-		SessionDir:            sessionDir,
-		Host:                  pluginHost,
-		Commands:              cmds,
-		Skills:                skills,
-		AllSkills:             allSkills,
-		SkillStore:            skillStore,
-		AllSkillStore:         allSkillStore,
-		SkillRunner:           skillRunner,
-		ReadOnlySkillRunner:   readOnlySkillRunner,
-		SkillProfile:          skillProfile,
-		Hooks:                 hookRunner,
-		Memory:                mem,
-		Cleanup:               cleanup,
+		Runner:              runner,
+		Executor:            executor,
+		Sink:                sink,
+		Policy:              policy,
+		SubagentGate:        headlessGate,
+		Label:               label,
+		ModelRef:            modelRef,
+		SystemPrompt:        sysPrompt,
+		SessionDir:          sessionDir,
+		Host:                pluginHost,
+		Commands:            cmds,
+		Skills:              skills,
+		AllSkills:           allSkills,
+		SkillStore:          skillStore,
+		AllSkillStore:       allSkillStore,
+		SkillRunner:         skillRunner,
+		ReadOnlySkillRunner: readOnlySkillRunner,
+		SkillProfile:        skillProfile,
+		Hooks:               hookRunner,
+		Memory:              mem,
+		// Indirection: the cleanup variable gains the extension runtime set at
+		// the end of build (snapshot assembly runs after control.New), and the
+		// controller must observe the final chain at Close time.
+		Cleanup:               func() { cleanup() },
 		BalanceURL:            entry.BalanceURL,
 		BalanceKey:            entry.APIKey(),
 		BalanceClient:         balanceClient,
@@ -1770,17 +1905,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		},
 		SessionRecoveryMeta: opts.SessionRecoveryMeta,
 		OnSessionRecovered:  opts.OnSessionRecovered,
+		// The merged catalog (nil without provider-declaring sidecars) lets
+		// frontends enumerate plugin/... models through ProviderCatalog.
+		ProviderResolver: extensionResolver,
 	}
 	// Guardian: when guardian_model is configured, spawn an LLM safety reviewer
 	// that can auto-allow safe Ask decisions and annotate risky ones before
 	// escalating to the human approval prompt.
 	if guardianModel := cfg.Agent.GuardianModel; guardianModel != "" {
-		ge, ok := resolveOptionalEntry(opts, cfg, guardianModel)
+		ge, ok := resolveOptionalEntry(effectiveResolver, cfg, guardianModel)
 		if !ok {
 			slog.Warn("guardian model is not a configured provider — guardian disabled", "model", guardianModel)
 			sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Guardian was disabled because its model was not found.", Detail: fmt.Sprintf("guardian_model %q not found — guardian disabled", guardianModel)})
 		} else {
-			pProv, err := resolveProvider(opts, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(ge)})
+			pProv, err := resolveProvider(effectiveResolver, cfg, proxySpec, provider.Selection{Ref: modelRefFromEntry(ge)})
 			if err != nil {
 				slog.Warn("guardian provider construction failed — guardian disabled", "model", guardianModel, "err", err)
 				sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Guardian was disabled because it could not start.", Detail: fmt.Sprintf("guardian construction failed: %v — guardian disabled", err)})
@@ -1802,7 +1940,17 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			recoveryModel = modelRef
 		}
 		if recoveryModel != "" {
-			if re, ok := cfg.ResolveModel(recoveryModel); ok {
+			if extensionResolver != nil && providerext.PluginRefOwner(recoveryModel) != "" {
+				// A plugin-namespaced recovery reviewer resolves through the
+				// merged resolver; the config path cannot see extension refs.
+				if re, ok := resolveOptionalEntry(extensionResolver, cfg, recoveryModel); ok {
+					if rProv, err := extensionResolver.Resolve(provider.Selection{Ref: modelRefFromEntry(re)}); err == nil {
+						ctrlOpts.RecoveryReviewer = recovery.NewSessionWithSink(rProv, re.Price, modelRefFromEntry(re), sink)
+					} else {
+						slog.Warn("recovery reviewer provider construction failed — rule-only recovery", "model", recoveryModel, "err", err)
+					}
+				}
+			} else if re, ok := cfg.ResolveModel(recoveryModel); ok {
 				if rProv, err := NewProviderWithProxy(re, proxySpec); err == nil {
 					ctrlOpts.RecoveryReviewer = recovery.NewSessionWithSink(rProv, re.Price, modelRefFromEntry(re), sink)
 				} else {
@@ -1838,6 +1986,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		}
 	}
 	ctrl := control.New(ctrlOpts)
+	// Publish the controller to the extension UI hub's indirection: from here
+	// on, host/ui/* publishes ride ctrl.EmitExtensionEvent and blocking prompts
+	// ride ctrl.Ask, exactly as if the hub had been built after control.New.
+	ctrlRef.Store(ctrl)
+	close(controllerReady)
 	// Share the recovery checkpoint with task/fleet sub-agents so background
 	// writers observe the same failure state as the root agent.
 	if taskTool != nil {
@@ -1879,7 +2032,98 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		ctrl.WireCapabilityRouting(cfg.Plugins, capSpecs, nil, capAudit)
 		ctrl.SetCapabilityProxyRouting(true)
 	}
-	return ctrl, nil
+
+	// Freeze the extension kernel's snapshot of exactly what this build wired.
+	// The snapshot is assembled from the in-hand objects above — discovery
+	// never re-runs — and assembly must never fail the boot: a kernel error
+	// degrades to a nil snapshot (logged) while the controller behaves exactly
+	// as before. The sidecar Manager comes from preflight (started once,
+	// before model resolution); assembly takes over its ownership and freezes
+	// the same generation the sidecars were handshaken with. The frozen
+	// provider catalog is the BASE catalog, exactly as before the preflight
+	// refactor: sidecar providers enter the snapshot through the Manager's own
+	// contributions, not through the legacy provider list.
+	mcpSpecs := enabledMCPSpecs(configSpecs, extraSpecs, onDemandMCPNames, onDemandMCPSpecs, tokenEconomy)
+	snap, runtimeSet, extensionDispatcher, snapErr := assembleLegacySnapshot(ctx, legacyAssembly{
+		systemPrompt: sysPrompt,
+		registry:     reg,
+		skills:       skills,
+		commands:     cmds,
+		hooks:        resolvedHooks,
+		mcpSpecs:     mcpSpecs,
+		providers:    baseResolver.Catalog(),
+	}, generation, extensionBoot{
+		session:   protocol.SessionContext{SessionID: sessionID, WorkspaceRoot: root, Generation: generation},
+		ui:        extUIHub,
+		onWarning: extWarn,
+	}, extensionMgr)
+	// Ownership of the preflighted Manager transferred to assembly on every
+	// path: it was either closed inside or registered into the RuntimeSet.
+	pendingMgr = nil
+	if snapErr != nil {
+		// These assembly failures are fatal rather than degradable: two
+		// runtimes claiming the same replacement slot (the kernel's
+		// ReplaceClaims verdict) and a failed system_prompt.build strategy
+		// ruling (the slot owner is required-class, so dispatch surfaces its
+		// failure as one of these types) mean the extension contract the user
+		// installed cannot be honored; booting without it would silently
+		// change what the session is. (A required runtime that cannot start
+		// fails earlier, in preflight, with the same fatality.)
+		var requiredErr *sidecar.RequiredStartError
+		var slotErr *extension.SlotConflictError
+		var blockErr *dispatch.BlockError
+		var failureErr *dispatch.FailureError
+		var violationErr *dispatch.ViolationError
+		if errors.As(snapErr, &requiredErr) || errors.As(snapErr, &slotErr) ||
+			errors.As(snapErr, &blockErr) || errors.As(snapErr, &failureErr) || errors.As(snapErr, &violationErr) {
+			ctrl.ReleaseResources()
+			return nil, fmt.Errorf("boot: %w", snapErr)
+		}
+		slog.Warn("boot: extension snapshot assembly failed; continuing without a runtime snapshot", "err", snapErr)
+		runtimeSet = extension.NewRuntimeSet(generation)
+		// Assembly retired the preflighted Manager on the error path; the
+		// controller must not bind a hub or expose a manager whose sidecars
+		// are already shut down.
+		extensionMgr = nil
+	}
+	// The stage-7 provider merge happened at preflight, before model
+	// resolution; BuildResult.ProviderResolver exposes that same merged
+	// resolver (the base when no sidecar declared providers).
+	providerResolver := baseResolver
+	if extensionResolver != nil {
+		providerResolver = extensionResolver
+	}
+	// The runtime set (extension sidecar Manager, when any) is owned by the
+	// controller: chain its close into the controller cleanup the way LSP
+	// cleanup is chained, so sidecars live exactly as long as their
+	// controller. RuntimeSet.Close is idempotent, so double-close paths
+	// (Rebuild's fail-atomic cleanup) stay safe.
+	prevCleanup := cleanup
+	cleanup = func() { prevCleanup(); _ = runtimeSet.Close() }
+	// The dispatcher only exists once sidecars started and the snapshot froze,
+	// both of which happen after control.New — hand it to the already-built
+	// controller before the build returns. Nil (no sidecars, or a degraded
+	// snapshot) leaves the controller byte-identical to the pre-dispatch path.
+	ctrl.SetExtensions(extensionDispatcher)
+	// Stage 8a: the UI hub only earns its place on the controller when
+	// sidecars actually started — with none, the hub is dropped here and the
+	// session behaves exactly as if it never existed.
+	if extensionMgr == nil {
+		extUIHub = nil
+	} else {
+		ctrl.SetExtensionUI(extUIHub)
+	}
+	// Stage 6b2 system-prompt handoff: the 6b1 strategy pass may have replaced
+	// the prompt while the snapshot was freezing, but the executor session was
+	// built earlier with the host-composed prompt. Swap in a fresh session
+	// carrying the final prompt now — before any turn or history resume, so
+	// the live session and the frozen snapshot describe the same session.
+	if snap != nil {
+		if final := snap.SystemPrompt(); final != sysPrompt {
+			ctrl.ApplyExtensionSystemPrompt(final)
+		}
+	}
+	return &BuildResult{Controller: ctrl, Snapshot: snap, Runtime: runtimeSet, Extensions: extensionMgr, Dispatcher: extensionDispatcher, ExtensionUI: extUIHub, ProviderResolver: providerResolver}, nil
 }
 
 // effectivePlannerModel centralizes planner precedence. The explicit ACP hard

@@ -135,6 +135,7 @@ func main() {
 		// Observe previous run for crash diagnostics only. Startup tracking must
 		// never force Safe Mode, disable plugins, or select a previous binary.
 		app.previousRun = repair.NewStartupTracker("").ObservePreviousRun()
+		capturePendingUpdateHealthIdentity(app)
 	}
 
 	// Restore saved window size, or fall back to the default.

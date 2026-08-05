@@ -77,6 +77,29 @@ func TestHistoryMessagesIncludeAssistantReasoning(t *testing.T) {
 	}
 }
 
+func TestHistoryMessagesReplayAttachedDecisionReceiptAfterAssistant(t *testing.T) {
+	receipt := &provider.DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+	got := historyMessages([]provider.Message{
+		{Role: provider.RoleUser, Content: "run it"},
+		{
+			Role:             provider.RoleAssistant,
+			ToolCalls:        []provider.ToolCall{{ID: "call-1", Name: "bash", Arguments: `{}`}},
+			DecisionReceipts: []*provider.DecisionReceipt{receipt},
+		},
+		{Role: provider.RoleTool, ToolCallID: "call-1", Name: "bash", Content: "ok"},
+	}, func(content string) string { return content })
+
+	if len(got) != 4 {
+		t.Fatalf("history messages = %d, want user, assistant, receipt, tool: %+v", len(got), got)
+	}
+	if len(got[1].ToolCalls) != 1 || got[2].Code != event.NoticeCodeDecisionReceipt || got[2].DecisionReceipt == nil {
+		t.Fatalf("history did not replay the decision after its assistant call: %+v", got)
+	}
+	if got[3].Role != "tool" || got[3].ToolCallID != "call-1" || !got[3].ToolResultArchived {
+		t.Fatalf("history lost the actual tool result: %+v", got[3])
+	}
+}
+
 func TestHistoryMessagesPreferPersistedRawUserContent(t *testing.T) {
 	const raw = "fix the bug"
 	const rendered = "<capability-route version=\"1\">\nuse review\n</capability-route>\n\nfix the bug"

@@ -39,6 +39,47 @@ type typedNilControllerSink struct{}
 
 func (*typedNilControllerSink) Emit(event.Event) {}
 
+func TestResolvePlanDecisionRecordsDistinctOutcomes(t *testing.T) {
+	tests := []struct {
+		action PlanDecisionAction
+		allow  bool
+	}{
+		{action: PlanDecisionStartExecution, allow: true},
+		{action: PlanDecisionRevisePlan, allow: false},
+		{action: PlanDecisionExitPlan, allow: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.action), func(t *testing.T) {
+			session := agent.NewSession("sys")
+			session.Add(provider.Message{Role: provider.RoleAssistant, Content: "proposed plan"})
+			exec := agent.New(nil, nil, session, agent.Options{}, event.Discard)
+			c := New(Options{Executor: exec})
+			id, reply := c.approval.registerDecisionKind(planApprovalTool, "", "", true, false, "plan", nil)
+
+			if err := c.ResolvePlanDecision(id, tt.action); err != nil {
+				t.Fatalf("ResolvePlanDecision: %v", err)
+			}
+			select {
+			case got := <-reply:
+				if got.allow != tt.allow {
+					t.Fatalf("reply allow = %v, want %v", got.allow, tt.allow)
+				}
+			default:
+				t.Fatal("plan decision did not unblock the approval waiter")
+			}
+
+			messages := session.Snapshot()
+			if len(messages) != 2 || len(messages[1].DecisionReceipts) != 1 {
+				t.Fatalf("persisted messages = %+v, want receipt attached to plan answer", messages)
+			}
+			receipt := messages[1].DecisionReceipts[0]
+			if receipt.Kind != "plan" || receipt.Outcome != string(tt.action) {
+				t.Fatalf("receipt = %+v, want plan/%s", receipt, tt.action)
+			}
+		})
+	}
+}
+
 func isolateControlConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()

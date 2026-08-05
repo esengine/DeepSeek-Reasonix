@@ -13,6 +13,11 @@ if [ "$status" -ne 0 ]; then
   exit "$status"
 fi
 
+# A deterministic enabled extension may intentionally establish a different
+# prefix once, but independent reload generations must reproduce identical
+# provider-visible prompt and tool-schema bytes.
+go test ./internal/boot -run '^TestBootStableExtensionCacheGuard$' -v -count=1
+
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     echo "### Cache guard"

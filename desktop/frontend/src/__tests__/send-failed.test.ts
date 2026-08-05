@@ -254,14 +254,19 @@ const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), 
 eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
 eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
 eq(
-  /state\.approval!\.tool === "exit_plan_mode" && allow\) await applyCollaborationMode\("normal"\);/.test(appSource),
+  /if \(allow\) \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "start_execution"\);/.test(appSource),
   true,
-  "plan approval clears the remembered plan restore intent before execution",
+  "plan approval clears the remembered plan restore intent and records start execution explicitly",
 );
 eq(
-  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*approve\(state\.approval!\.id, false, false, false\);\s*\}\}/.test(appSource),
+  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "exit_plan"\);\s*\}\}/.test(appSource),
   true,
-  "exit-without-executing switches to Normal before rejecting the pending plan",
+  "exit-without-executing switches to Normal before recording the explicit plan exit",
+);
+eq(
+  /onRevisePlan=\{\(text\) => \{[\s\S]{0,260}resolvePlanDecision\(state\.approval!\.id, "revise_plan"\);/.test(appSource),
+  true,
+  "plan revision records a distinct revise decision",
 );
 eq(
   !/exit_plan_mode[\s\S]{0,240}rememberUserIntent:\s*false/.test(appSource),

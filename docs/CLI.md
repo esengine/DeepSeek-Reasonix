@@ -233,6 +233,9 @@ reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --proje
 reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
 reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task monitor list --json [--dir PROJECT_DIR]
+reasonix task monitor status <task-id> --json [--dir PROJECT_DIR]
+reasonix task monitor events <task-id> --json|--jsonl [--dir PROJECT_DIR] [--after N] [--follow]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
@@ -426,10 +429,11 @@ the displayed list matches the commands the TUI accepts.
 | `/memory [subcommand]` | Inspect instructions, memory provenance, recall, revisions, and recovery. |
 | `/rewind` | Restore conversation and/or code to an earlier turn. |
 | `/tree`, `/branch`, `/switch` | Inspect or navigate conversation branches. |
+| `/reload` | Reload the agent runtime (extensions, tools, skills, commands, hooks, providers) while keeping the session. Queued once while a turn runs, then fail-atomic: a failed rebuild keeps the current runtime. |
 
 Switching model, effort, or work mode rebuilds the runtime while preserving the
 active conversation, session-scoped permission overrides, additional directory
-access, and session ownership.
+access, and session ownership. `/reload` uses the same fail-atomic rebuild.
 
 ### Memory diagnostics and recovery
 

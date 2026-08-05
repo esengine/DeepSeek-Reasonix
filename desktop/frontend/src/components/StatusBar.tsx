@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
+import { Activity, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, Puzzle, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
 import { Tooltip } from "./Tooltip";
@@ -7,6 +7,7 @@ import { useI18n, type Translator } from "../lib/i18n";
 import { formatMoneyLocalized } from "../lib/money";
 import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarItems";
 import { isRemoteDegradedWarning, isRemoteHostKeyMismatch, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
+import type { ExtensionStatusEntry } from "../lib/useController";
 import { type BackgroundRuntimeView, type BalanceInfo, type ContextInfo, type JobView, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
 import { useRemoteStore } from "../store/remote";
 
@@ -181,6 +182,7 @@ export function StatusBar({
   backgroundRuntimes = [],
   onCancelRuntimeJob,
   onRevealRuntime,
+  extensionStatuses = [],
 }: {
   context: ContextInfo;
   usage?: WireUsage;
@@ -210,6 +212,8 @@ export function StatusBar({
   backgroundRuntimes?: BackgroundRuntimeView[];
   onCancelRuntimeJob?: (tabID: string, jobID: string) => Promise<boolean>;
   onRevealRuntime?: (tabID: string) => Promise<void>;
+  // Extension-published status surfaces (stage 8b2), one per surface key.
+  extensionStatuses?: ExtensionStatusEntry[];
 }) {
   const { locale, t } = useI18n();
   const pct = context.window ? Math.min(100, Math.round((context.used / context.window) * 100)) : null;
@@ -373,6 +377,7 @@ export function StatusBar({
           onCancelRuntimeJob={onCancelRuntimeJob}
           onRevealRuntime={onRevealRuntime}
         />
+        <ExtensionStatusBarChips statuses={extensionStatuses} />
         {renderedItems.map(({ id, node }) => (
           <span className="statusbar__item" data-statusbar-item={id} key={id}>
             {node}
@@ -380,6 +385,41 @@ export function StatusBar({
         ))}
       </div>
     </div>
+  );
+}
+
+// ExtensionStatusBarChips renders extension-published status surfaces next to
+// the built-in chips. A surface persists until the owning sidecar replaces it
+// (same surface key) or the runtime rebuilds; severity drives the accent color.
+function ExtensionStatusBarChips({ statuses }: { statuses: ExtensionStatusEntry[] }) {
+  const { t } = useI18n();
+  if (statuses.length === 0) return null;
+  return (
+    <>
+      {statuses.map((status) => {
+        const severity = status.severity === "error" ? "error" : status.severity === "warn" ? "warn" : "info";
+        const pct = typeof status.progress === "number" ? Math.round(Math.max(0, Math.min(1, status.progress)) * 100) : undefined;
+        return (
+          <span className="statusbar__item" data-statusbar-item="extension" key={`${status.pluginId}:${status.surfaceId}`}>
+            <Tooltip
+              label={
+                <span className="statusbar__tooltip-stack">
+                  <span>{t("status.extensionTitle")}: {status.pluginId}</span>
+                  {status.detail ? <span>{status.detail}</span> : null}
+                  {pct !== undefined ? <span>{t("ext.card.progress")}: {pct}%</span> : null}
+                </span>
+              }
+            >
+              <span className={`stat statusbar__extension statusbar__extension--${severity}`}>
+                <Puzzle size={12} aria-hidden="true" />
+                <span className="statusbar__extension-label">{status.label}</span>
+                {pct !== undefined ? <b>{pct}%</b> : null}
+              </span>
+            </Tooltip>
+          </span>
+        );
+      })}
+    </>
   );
 }
 

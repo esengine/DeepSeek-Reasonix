@@ -321,9 +321,19 @@ type chatTUI struct {
 	// same-session tool grants and Plan-mode read-only command trust that
 	// don't travel through carry/resumePath (see Controller.RestoreSessionAuthorizations).
 	buildController func(spec controllerBuildSpec, carry []provider.Message, resumePath string, oldCtrl control.SessionAPI) (*control.Controller, error)
-	modelRef        string
-	runtimeProfile  string
-	effortLevel     string // "" when the current provider/model has no configurable effort
+	// rebuildRuntime builds the /reload replacement through boot.Rebuild:
+	// same model/profile/effort, but tools, skills, commands, hooks, MCP
+	// servers, and providers are discovered fresh and the session state
+	// migrates inside the boot layer. Set by chatREPL (it must NOT touch
+	// this model — the swap happens on the running copy); nil disables
+	// /reload.
+	rebuildRuntime runtimeRebuilder
+	// pendingReload coalesces /reload requests made while a turn or a runtime
+	// switch is in flight; the TurnDone drain runs it once the TUI is idle.
+	pendingReload  bool
+	modelRef       string
+	runtimeProfile string
+	effortLevel    string // "" when the current provider/model has no configurable effort
 
 	// leases owns the session lease guarding the TUI's active session file (set
 	// by chatREPL; nil in tests and when persistence is disabled). Every in-TUI
@@ -534,6 +544,14 @@ func fetchBalance(ctrl control.Status) tea.Cmd {
 type promptResolvedMsg struct {
 	display string
 	sent    string
+	err     error
+}
+
+// extensionActionMsg carries the result of invoking one extension UI action
+// (an async extension/ui/action round-trip to the sidecar). The extension's
+// (already redacted) message surfaces as a transcript notice.
+type extensionActionMsg struct {
+	message string
 	err     error
 }
 
@@ -1583,6 +1601,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.queueEditDraft = ""
 				cmds = append(cmds, m.startTurn(interject, interject, interject))
 			}
+			// A /reload typed while the turn ran fires now that the TUI may be
+			// idle; the drain re-checks busy state (an interject above or a
+			// background job keeps it queued).
+			if c := m.drainQueuedRuntimeReload(); c != nil {
+				cmds = append(cmds, c)
+			}
 		}
 		if turnDone || gitMaybeChanged {
 			if c := m.refreshGitStatus(); c != nil {
@@ -1665,6 +1689,12 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// p.Send (unbuffered), and the receiver may read them out of order,
 			// garbling the streamed text (words appear reordered).
 		}
+		// A /reload queued behind this switch runs now that it settled. On a
+		// failed switch the old controller still serves, so the reload simply
+		// retries against it.
+		if c := m.drainQueuedRuntimeReload(); c != nil {
+			cmds = append(cmds, c)
+		}
 
 	case promptResolvedMsg:
 		switch {
@@ -1674,6 +1704,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice(i18n.M.SlashPromptEmpty)
 		default:
 			cmds = append(cmds, m.startTurn(msg.sent, msg.display, msg.display))
+		}
+
+	case extensionActionMsg:
+		switch {
+		case msg.err != nil:
+			m.commitLine(wrapForViewport(i18n.M.ErrorPrefix+" "+msg.err.Error(), m.width, activeCLITheme.warn))
+		case strings.TrimSpace(msg.message) != "":
+			m.notice(msg.message)
 		}
 
 	case mcpExternalDoneMsg:
@@ -4174,6 +4212,29 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.commitLine("  · " + line)
 		}
 
+	case event.ExtensionStatus:
+		// One-line status contribution from an extension sidecar — a
+		// severity-aware notice line, like event.Notice.
+		if line := extensionStatusLine(e.Extension); line != "" {
+			m.finalizeStreamed()
+			m.commitLine(line)
+		}
+
+	case event.ExtensionSurface:
+		// A published card/form renders as a transcript card; a notification
+		// renders as a notice line. Form fields themselves arrive through the
+		// Ask machinery (the hub translates them), so no dialog work here.
+		m.finalizeStreamed()
+		if e.Extension != nil && e.Extension.Notification != nil {
+			if line := extensionNotificationLine(e.Extension); line != "" {
+				m.commitLine(line)
+			}
+			break
+		}
+		for _, ln := range extensionSurfaceLines(e.Extension, m.width) {
+			m.commitLine(ln)
+		}
+
 	case event.CompactionStarted:
 		m.finalizeStreamed()
 		m.commitLine(dim("  ⋯ " + i18n.M.CompactionWorking))
@@ -4392,6 +4453,10 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		}
 		m.notice(fmt.Sprintf("commands reloaded: %d → %d commands", prev, len(m.commands)))
 
+	case "/reload":
+		m.echoLocalCommand(input)
+		return m.runReloadCommand()
+
 	case "/paste-image":
 		return m.beginClipboardImagePaste()
 	case "/output-style", "/output-styles":
@@ -4482,6 +4547,13 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 				}
 			}
 			return m.startControllerTurn(input, input, func() { m.ctrl.SubmitDisplay(input, input) })
+		}
+		// An extension action (/<plugin>:<action>) resolves last, before the
+		// unknown-command fallback; the invocation is a sidecar round-trip, so it
+		// runs off the event loop and its result lands as a notice.
+		if action, ok := matchExtensionAction(m.ctrl, typedCmd); ok {
+			m.echoLocalCommand(input)
+			return m.runExtensionAction(action.Slash, parseExtensionActionArgs(strings.Fields(input)[1:]))
 		}
 		// Unknown slash input is prose more often than a typo — send it as a
 		// regular message (matching the controller's behavior for the other
@@ -4955,6 +5027,16 @@ func (m *chatTUI) runMCPPrompt(input string) tea.Cmd {
 			return promptResolvedMsg{display: input, err: fmt.Errorf("%s: /%s", i18n.M.SlashUnknown, name)}
 		}
 		return promptResolvedMsg{display: input, sent: sent, err: err}
+	}
+}
+
+// runExtensionAction invokes one extension UI action off the event loop (the
+// call is a blocking sidecar round-trip), delivering an extensionActionMsg
+// whose message surfaces as a transcript notice.
+func (m *chatTUI) runExtensionAction(name string, args map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		message, err := m.ctrl.InvokeExtensionAction(context.Background(), name, args)
+		return extensionActionMsg{message: message, err: err}
 	}
 }
 

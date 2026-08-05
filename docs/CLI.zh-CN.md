@@ -212,6 +212,9 @@ reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --proje
 reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
 reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task monitor list --json [--dir PROJECT_DIR]
+reasonix task monitor status <task-id> --json [--dir PROJECT_DIR]
+reasonix task monitor events <task-id> --json|--jsonl [--dir PROJECT_DIR] [--after N] [--follow]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
@@ -369,9 +372,10 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/memory [subcommand]` | 查看指令、记忆 provenance、召回、revision 与恢复。 |
 | `/rewind` | 把对话和/或代码恢复到更早的 turn。 |
 | `/tree`、`/branch`、`/switch` | 查看或切换会话分支。 |
+| `/reload` | 重载 agent 运行时（扩展、工具、skills、commands、hooks、providers），保留当前会话。回合运行中只排队一次；失败原子——重建失败时当前运行时不受影响。 |
 
 切换模型、effort 或工作模式会重建运行时，同时保留当前对话、会话级权限覆盖、附加目录
-访问权限和 session ownership。
+访问权限和 session ownership。`/reload` 使用同一套失败原子重建语义。
 
 ### 记忆诊断与恢复
 

@@ -39,6 +39,9 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/extension"
+	"reasonix/internal/extension/dispatch"
+	"reasonix/internal/extension/uihub"
 	"reasonix/internal/goaleval"
 	"reasonix/internal/guardian"
 	"reasonix/internal/hook"
@@ -54,6 +57,7 @@ import (
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
+	"reasonix/internal/taskmonitor"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
@@ -164,6 +168,21 @@ type Controller struct {
 	mcpDefaultCallTimeout time.Duration
 	mcpConfigureSpec      func(*plugin.Spec)
 	capabilityRuntime     *agent.MCPCapabilityRuntime
+
+	// extensions is the frozen extension dispatcher for this controller
+	// generation, or nil when no v1 runtime packages are installed (the
+	// universal pre-dispatch fast path). It is installed before the controller
+	// starts serving (Options.Extensions or SetExtensions) and never swapped
+	// afterwards, so wiring points read it without locking.
+	extensions *dispatch.Dispatcher
+	// extensionUI is the host extension UI hub for this controller generation
+	// (stage 8a), or nil when no v1 runtime packages started. Installed via
+	// SetExtensionUI before serving and never swapped; readers take c.mu.
+	extensionUI *uihub.Hub
+	// providerResolver is the build's merged provider catalog (extension
+	// sidecar providers over the config/broker base), or nil when no sidecar
+	// declared providers. Immutable after New; ProviderCatalog reads it.
+	providerResolver provider.Resolver
 
 	// Capability routing (Delivery hybrid route + dual-model Planner proxy).
 	// Not part of the provider-visible prefix; only seeds the turn-scoped ledger
@@ -279,6 +298,7 @@ type approvalReply struct {
 }
 
 type pendingApproval struct {
+	id           string
 	tool         string
 	subject      string
 	reason       string
@@ -486,6 +506,18 @@ type Options struct {
 	// RuntimeProfile selects capability routing/filtering behavior. Empty keeps
 	// the backward-compatible Balanced profile.
 	RuntimeProfile capability.Profile
+	// Extensions is the frozen extension dispatcher for this controller
+	// generation (Extension Protocol v1, stage 6b1). Nil means no v1 runtime
+	// packages are installed: every extension wiring point takes an untouched
+	// fast path. Boot installs it through SetExtensions because sidecars (and
+	// therefore the dispatcher) only exist after snapshot assembly, which runs
+	// after New.
+	Extensions *dispatch.Dispatcher
+	// ProviderResolver is the build's merged provider catalog — extension
+	// sidecar providers folded over the config/broker base (stage 7). Nil when
+	// no v1 runtime sidecar declared providers; ProviderCatalog then returns
+	// nil and frontends enumerate providers from config alone, as before.
+	ProviderResolver provider.Resolver
 	// Ablation switches subsystems off for a benchmark arm. The zero value runs
 	// everything.
 	Ablation ablation.Set
@@ -560,10 +592,18 @@ func New(opts Options) *Controller {
 		ablation:                          opts.Ablation,
 		workspaceRoot:                     opts.WorkspaceRoot,
 		externalFolderToolRefs:            opts.ExternalFolderToolRefs,
+		providerResolver:                  opts.ProviderResolver,
 		approval:                          newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
 	}
 	if strings.TrimSpace(opts.WorkspaceRoot) != "" {
 		c.autoResearch = autoresearch.NewStore(opts.WorkspaceRoot)
+	}
+	if opts.Extensions != nil {
+		c.extensions = opts.Extensions
+		c.sink = newFrontendEventSink(c.sink, opts.Extensions)
+		if c.executor != nil {
+			c.executor.SetExtensions(opts.Extensions)
+		}
 	}
 	// Checkpoints: bind a store to the session and route writer pre-edits into it.
 	c.rebindCheckpoints(opts.SessionPath)
@@ -577,6 +617,19 @@ func New(opts Options) *Controller {
 	// Auto Guard is built into Auto. Ask and YOLO bypass it through the mode
 	// provider, so no separate enablement state is needed.
 	c.initRecoveryGate(opts.RecoveryReviewer, opts.RecoveryHeadless)
+
+	// Task monitoring: record background-job lifecycle into the project-local
+	// task store so CLI, Desktop, scripts, and future clients observe the same
+	// state/event evidence. The recorder swallows its own failures — monitoring
+	// must never affect the agent pipeline. The session id is resolved lazily
+	// because the session path is only fixed once the first turn begins.
+	if c.jobs != nil && c.workspaceRoot != "" {
+		c.jobs.SetTaskRecorder(taskmonitor.NewTaskRecorder(
+			taskmonitor.NewFileStore(filepath.Join(".reasonix", "tasks")),
+			c.workspaceRoot,
+			func() string { return c.parentSessionID() },
+		))
+	}
 	return c
 }
 
@@ -586,6 +639,47 @@ func (c *Controller) SetDisplayRecorder(fn func(content, display string)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.displayRecorder = fn
+}
+
+// SetExtensions installs the extension dispatcher after construction. Boot
+// uses it because sidecars — and therefore the dispatcher — only exist after
+// snapshot assembly, which runs after New. It must be called before the
+// controller starts serving turns: c.sink is swapped here and emission call
+// sites read it without locking. The first non-nil install wins; a controller
+// generation never swaps dispatchers. Nil is a no-op (the pre-dispatch path).
+// The executor agent receives the same dispatcher so the run loop consults
+// the agent-side intercept points (stage 6b2).
+func (c *Controller) SetExtensions(d *dispatch.Dispatcher) {
+	if d == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.extensions != nil {
+		return
+	}
+	c.extensions = d
+	c.sink = newFrontendEventSink(c.sink, d)
+	if c.executor != nil {
+		c.executor.SetExtensions(d)
+	}
+}
+
+// ApplyExtensionSystemPrompt swaps the executor to a fresh session carrying
+// the extension strategy's final system prompt and makes it the controller's
+// rotation prompt, so /new and /clear keep the strategy-composed prompt too.
+// Boot calls it when a system_prompt.build replacement changed the prompt
+// after the controller (and its session) was built with the host-composed
+// one. It must run before any turn or history resume: the fresh session holds
+// only the system message, so a later resume cleanly layers history on top.
+func (c *Controller) ApplyExtensionSystemPrompt(prompt string) {
+	if c == nil || c.executor == nil {
+		return
+	}
+	c.mu.Lock()
+	c.systemPrompt = prompt
+	c.mu.Unlock()
+	c.executor.SetSession(agent.NewSession(prompt))
 }
 
 // SetOnSessionRecovered installs the ownership handoff invoked before the
@@ -631,6 +725,18 @@ func (c *Controller) ToolContractEntries() []tool.ContractEntry {
 		return nil
 	}
 	return reg.ContractEntries()
+}
+
+// ProviderCatalog returns the session's merged provider catalog: the config
+// (or broker) base plus every provider a live extension sidecar declared,
+// keyed by ref — extension refs carry their plugin/<plugin>/<provider>/<model>
+// namespace. Nil when no sidecar declared providers, so frontends can tell
+// "enumerate config only" apart from "the extension catalog is empty".
+func (c *Controller) ProviderCatalog() []provider.Descriptor {
+	if c == nil || c.providerResolver == nil {
+		return nil
+	}
+	return c.providerResolver.Catalog()
 }
 
 func (c *Controller) recordDisplayForNewUser(startMessages int, display string) {
@@ -892,6 +998,17 @@ func (c *Controller) SendWithRaw(input, raw string) {
 // to gate a proposed plan. Frontends key their plan-approval UI on it (the
 // desktop renders a plan card; the chat TUI a plan banner).
 const planApprovalTool = "exit_plan_mode"
+
+// PlanDecisionAction preserves the three user-owned meanings of the Plan card.
+// Revise and exit both deny execution at the approval gate, but they are not the
+// same product decision and must remain distinguishable in durable receipts.
+type PlanDecisionAction string
+
+const (
+	PlanDecisionStartExecution PlanDecisionAction = "start_execution"
+	PlanDecisionRevisePlan     PlanDecisionAction = "revise_plan"
+	PlanDecisionExitPlan       PlanDecisionAction = "exit_plan"
+)
 
 // SandboxEscapeApprovalTool is the internal Tool name used for one-shot approval
 // to rerun a shell command without the OS sandbox after the sandbox failed.
@@ -1799,6 +1916,16 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 	rawInput := input
 	ctx = agent.WithRawUserInput(ctx, rawInput)
 	input = c.Compose(input)
+	// input.receive: same interception seam as the orchestrated turn — the
+	// composed headless input crosses the extension chain before it enters
+	// the session.
+	input, blocked, interceptErr := c.interceptInputReceive(ctx, input)
+	if interceptErr != nil {
+		return interceptErr
+	}
+	if blocked {
+		return nil
+	}
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	c.beginCheckpoint(input)
@@ -1980,9 +2107,82 @@ func (c *Controller) Approve(id string, allow, session, persist bool) {
 		return
 	}
 	pending := c.approval.resolve(id)
-	if pending.reply != nil {
-		pending.reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
+	if pending.reply == nil {
+		return
 	}
+	outcome := "deny"
+	if pending.tool == planApprovalTool {
+		outcome = string(PlanDecisionRevisePlan)
+		if allow {
+			outcome = string(PlanDecisionStartExecution)
+		}
+	} else if allow {
+		switch {
+		case persist:
+			outcome = "allow_persistent"
+		case session:
+			outcome = "allow_session"
+		default:
+			outcome = "allow_once"
+		}
+	}
+	c.recordDecisionReceipt(pending, outcome)
+	pending.reply <- approvalReply{allow: allow, session: session, persist: persist} // buffered, never blocks
+}
+
+// ResolvePlanDecision answers the Plan card without collapsing revise and exit
+// into the generic approval boolean used by older clients.
+func (c *Controller) ResolvePlanDecision(id string, action PlanDecisionAction) error {
+	if c == nil {
+		return fmt.Errorf("controller is nil")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("empty plan approval id")
+	}
+	switch action {
+	case PlanDecisionStartExecution, PlanDecisionRevisePlan, PlanDecisionExitPlan:
+	default:
+		return fmt.Errorf("unknown plan decision %q", action)
+	}
+	pending, ok := c.approval.resolveTool(id, planApprovalTool)
+	if !ok || pending.reply == nil {
+		return fmt.Errorf("plan approval %q is no longer pending", id)
+	}
+	pending.kind = "plan"
+	c.recordDecisionReceipt(pending, string(action))
+	pending.reply <- approvalReply{allow: action == PlanDecisionStartExecution}
+	return nil
+}
+
+func (c *Controller) recordDecisionReceipt(pending pendingApproval, outcome string) {
+	if c == nil || c.executor == nil || pending.reply == nil {
+		return
+	}
+	kind := pending.kind
+	if kind == "" {
+		kind = "tool"
+		if pending.tool == planApprovalTool {
+			kind = "plan"
+		}
+	}
+	receipt := &provider.DecisionReceipt{
+		ID:      pending.id,
+		Kind:    kind,
+		Tool:    strings.TrimSpace(pending.tool),
+		Subject: clipUTF8(strings.TrimSpace(pending.subject), 240),
+		Outcome: strings.TrimSpace(outcome),
+	}
+	// Keep the receipt bounded and provider-excluded even when an older caller
+	// omits optional approval metadata.
+	c.executor.Session().AddDecisionReceipt(receipt)
+	c.sink.Emit(event.Event{
+		Kind:            event.Notice,
+		Code:            event.NoticeCodeDecisionReceipt,
+		Level:           event.LevelInfo,
+		Text:            "Decision recorded: " + receipt.Outcome,
+		DecisionReceipt: receipt,
+	})
 }
 
 // EnableInteractiveApproval swaps the executor's gate for one that routes
@@ -2288,8 +2488,48 @@ func (c *Controller) AnswerQuestion(id string, answers []event.AskAnswer) {
 				return
 			}
 		}
+		c.recordAskDecisionReceipt(id, pending, answers)
 		pending.reply <- answers // buffered, never blocks
 	}
+}
+
+func (c *Controller) recordAskDecisionReceipt(id string, pending pendingAsk, answers []event.AskAnswer) {
+	if c == nil || c.executor == nil {
+		return
+	}
+	selected := make(map[string][]string, len(answers))
+	for _, answer := range answers {
+		selected[answer.QuestionID] = append([]string(nil), answer.Selected...)
+	}
+	parts := make([]string, 0, len(pending.questions))
+	for _, question := range pending.questions {
+		answer := strings.TrimSpace(strings.Join(selected[question.ID], ", "))
+		if answer == "" {
+			answer = "—"
+		}
+		prompt := strings.TrimSpace(question.Prompt)
+		if prompt == "" {
+			prompt = strings.TrimSpace(question.Header)
+		}
+		if prompt == "" {
+			prompt = question.ID
+		}
+		parts = append(parts, prompt+": "+answer)
+	}
+	receipt := &provider.DecisionReceipt{
+		ID:      id,
+		Kind:    "ask",
+		Subject: clipUTF8(strings.Join(parts, " · "), 240),
+		Outcome: "answered",
+	}
+	c.executor.Session().AddDecisionReceipt(receipt)
+	c.sink.Emit(event.Event{
+		Kind:            event.Notice,
+		Code:            event.NoticeCodeDecisionReceipt,
+		Level:           event.LevelInfo,
+		Text:            "Decision recorded: answered",
+		DecisionReceipt: receipt,
+	})
 }
 
 func askAnswersHaveSelection(answers []event.AskAnswer) bool {
@@ -2897,6 +3137,7 @@ func (c *Controller) maybeSessionStart(ctx context.Context) {
 	c.startedOnce = true
 	c.mu.Unlock()
 	c.enqueueHookContexts(c.hooks.SessionStart(ctx))
+	c.extensionSessionEvent(extension.PointSessionStart, dispatch.PhaseStart, c.SessionPath())
 }
 
 // NewSession snapshots the current conversation, rotates to a fresh file, and
@@ -2923,7 +3164,15 @@ func (c *Controller) NewSession() error {
 	if err := c.Snapshot(); err != nil {
 		return err
 	}
+	// session.rotate: the session_policy owner rules on the rotation before
+	// anything is torn down, so its failure (required-class) aborts the
+	// rotation cleanly. SessionPath is the file being rotated away from; the
+	// fresh path arrives with the session.start event below.
+	if err := c.extensionSessionPhase(context.Background(), extension.PointSessionRotate, dispatch.PhaseRotate, oldPath); err != nil {
+		return err
+	}
 	c.hooks.SessionEnd(context.Background(), "clear")
+	c.extensionSessionEvent(extension.PointSessionEnd, dispatch.PhaseEnd, oldPath)
 	// Hold snapshotMu across the swap so an in-flight save cannot pair the old
 	// path with the fresh session (or the fresh path with the old session).
 	c.snapshotMu.Lock()
@@ -2954,6 +3203,7 @@ func (c *Controller) NewSession() error {
 	c.mu.Unlock()
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.enqueueHookContexts(c.hooks.SessionStart(context.Background(), "clear"))
+	c.extensionSessionEvent(extension.PointSessionStart, dispatch.PhaseStart, c.SessionPath())
 	return nil
 }
 
@@ -2987,6 +3237,13 @@ func (c *Controller) ClearSession() error {
 	// write; otherwise one can recreate the sidecar after removeSessionArtifacts.
 	c.loadRecoveryState("")
 	c.flushRecoveryPersistence(oldPath)
+	// session.rotate: the session_policy owner rules on the rotation before any
+	// artifact is destroyed, so its failure (required-class) aborts the clear
+	// with the old session fully intact. SessionPath is the file being rotated
+	// away from; the fresh path arrives with the session.start event below.
+	if err := c.extensionSessionPhase(context.Background(), extension.PointSessionRotate, dispatch.PhaseRotate, oldPath); err != nil {
+		return err
+	}
 	// Hold snapshotMu from artifact removal through the swap: a save slipping
 	// in between would resurrect the just-removed transcript, and one that
 	// overlapped the swap could pair the old path with the fresh session.
@@ -3001,6 +3258,7 @@ func (c *Controller) ClearSession() error {
 		destroy.Finish()
 	}
 	c.hooks.SessionEnd(context.Background(), "clear")
+	c.extensionSessionEvent(extension.PointSessionEnd, dispatch.PhaseEnd, oldPath)
 	if c.sessionDir != "" {
 		c.mu.Lock()
 		c.sessionPath = agent.NewSessionPath(c.sessionDir, c.label)
@@ -3024,6 +3282,7 @@ func (c *Controller) ClearSession() error {
 	c.mu.Unlock()
 	c.hooks.SetSessionID(c.parentSessionID())
 	c.enqueueHookContexts(c.hooks.SessionStart(context.Background(), "clear"))
+	c.extensionSessionEvent(extension.PointSessionStart, dispatch.PhaseStart, c.SessionPath())
 	if destroy.Async {
 		go func() {
 			result := destroy.Wait()
@@ -3505,6 +3764,13 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.recoverCheckpointTransactions()
 	c.recoverInterruptedTurn(path)
 	c.maybeColdResumePrune(path)
+	// session.load: Resume has no failure channel, so the session_policy
+	// strategy is advisory this stage — a required-class failure is surfaced
+	// as a warning and the load stands. The event still carries the final
+	// (possibly owner-adjusted) phase payload.
+	if err := c.extensionSessionPhase(context.Background(), extension.PointSessionLoad, dispatch.PhaseLoad, path); err != nil {
+		c.extensionWarn("session policy failed at session.load", err)
+	}
 }
 
 func (c *Controller) loadGuardianSession() {
@@ -3689,6 +3955,16 @@ func (c *Controller) snapshot(markActivity, forceRewrite, shutdownRecovery bool)
 			"label", c.Label(), "session_dir", c.SessionDir())
 		return errNoSessionPath
 	}
+	// session.save: the session_policy owner rules on the impending save; a
+	// failure (required-class) vetoes the write. The event goes out after a
+	// successful save carrying the final payload. The early no-content and
+	// no-path returns above are not saves and stay unobserved. Conflict
+	// recovery below may rewrite the path; the phase payload reports the path
+	// the save targeted.
+	savePayload, strategyErr := c.extensionSessionStrategy(context.Background(), extension.PointSessionSave, dispatch.PhaseSave, path)
+	if strategyErr != nil {
+		return strategyErr
+	}
 	forceRewrite = forceRewrite || s.NeedsRewriteSave()
 	var err error
 	if forceRewrite {
@@ -3766,6 +4042,7 @@ func (c *Controller) snapshot(markActivity, forceRewrite, shutdownRecovery bool)
 	if err := agent.UpdateSessionMeta(path, modelRef, preview, turns, markActivity); err != nil {
 		return err
 	}
+	c.extensionSessionPayloadEvent(extension.PointSessionSave, savePayload)
 	return nil
 }
 
@@ -5371,6 +5648,7 @@ func (c *Controller) close(fireSessionEnd bool, jobsMode closeJobsMode) {
 		}
 		if fireSessionEnd && started {
 			c.hooks.SessionEnd(context.Background(), "other")
+			c.extensionSessionEvent(extension.PointSessionEnd, dispatch.PhaseEnd, c.SessionPath())
 		}
 		if c.jobs != nil {
 			switch jobsMode {
@@ -5393,6 +5671,14 @@ func (c *Controller) Jobs() []jobs.View {
 		return nil
 	}
 	return c.jobs.RunningForSession(c.parentSessionID())
+}
+
+// KillJob cancels a running background job by ID.
+func (c *Controller) KillJob(id string) bool {
+	if c.jobs == nil {
+		return false
+	}
+	return c.jobs.Kill(id)
 }
 
 // CancelJob stops one background job owned by this controller's session.
@@ -6263,8 +6549,12 @@ func (c *Controller) requestApprovalDecisionWithOptions(ctx context.Context, too
 
 	var id string
 	var reply chan approvalReply
-	if opts.fresh || opts.requireHuman {
-		id, reply = c.approval.registerDecisionWithInput(tool, subject, reason, args, opts.fresh, opts.requireHuman)
+	if opts.fresh || opts.requireHuman || tool == planApprovalTool {
+		kind := ""
+		if tool == planApprovalTool {
+			kind = "plan"
+		}
+		id, reply = c.approval.registerDecisionKindWithInput(tool, subject, reason, args, opts.fresh, opts.requireHuman, kind, nil)
 	} else {
 		id, reply = c.approval.registerWithInput(tool, subject, reason, args)
 	}

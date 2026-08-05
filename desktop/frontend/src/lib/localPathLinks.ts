@@ -28,21 +28,31 @@ const SENT_PUNCT = "，。；、！？,;!?（）";
 const PATH_CHAR = String.raw`(?:\\[ \t]|[^\s<>"|?*：${SENT_PUNCT}])`;
 
 // file:/// URLs are matched whole (their `:` and `.` are legal there). Drive
-// paths require a `(?<![:/A-Za-z])` prefix so `file:///D:` cannot re-match the
-// `e:` inside `file` or the `D:` after a slash.
+// and UNC prefix boundaries are checked in JavaScript rather than with regular
+// expression lookbehind: macOS 12's WebKit rejects `(?<!...)` while loading the
+// whole lazy Markdown chunk, before any message is rendered.
 const FILE_RE = new RegExp(String.raw`file:///[^\s<>"|?*${SENT_PUNCT}]+`, "g");
-const DRIVE_RE = new RegExp(String.raw`(?<![:/A-Za-z])[A-Za-z]:[\\/]${PATH_CHAR}+`, "g");
+const DRIVE_RE = new RegExp(String.raw`[A-Za-z]:[\\/]${PATH_CHAR}+`, "g");
 // UNC share paths: the plugin runs on parsed markdown text nodes, where
 // CommonMark backslash escaping has already folded `\\` into `\`. A share
 // therefore arrives as `\nas\share\docs\report.md` (single leading
 // backslash); linkify restores the `\\` prefix so the native opener receives
 // the real UNC form. The leading `\` is mandatory (the fold always leaves
-// one) and the `(?<![\\/\w:；：，。、！？（）])` guard keeps `C:\nas` or a
-// plain `a\b` from being mistaken for a share start.
+// one). The JavaScript prefix guard keeps `C:\nas` or a plain `a\b` from being
+// mistaken for a share start without requiring WebKit lookbehind support.
 const UNC_RE = new RegExp(
-  String.raw`(?<![\\/\w:；：，。、！？（）])\\(?!\\)[^\s\\<>"|?*：${SENT_PUNCT}]+\\${PATH_CHAR}+`,
+  String.raw`\\(?!\\)[^\s\\<>"|?*：${SENT_PUNCT}]+\\${PATH_CHAR}+`,
   "g",
 );
+
+const DRIVE_PREFIX_RE = /[:/A-Za-z]/;
+const UNC_PREFIX_RE = /[\\/\w:；：，。、！？（）]/;
+
+function hasValidPrefixBoundary(text: string, start: number, kind: "file" | "drive" | "unc"): boolean {
+  if (kind === "file" || start === 0) return true;
+  const previous = text[start - 1];
+  return kind === "drive" ? !DRIVE_PREFIX_RE.test(previous) : !UNC_PREFIX_RE.test(previous);
+}
 
 // Trailing closers that are more likely sentence punctuation than file name
 // characters. A trailing `)` is only stripped when parens are unbalanced —
@@ -87,6 +97,9 @@ export function linkifyLocalPaths(text: string): LocalPathSegment[] {
     while ((m = re.exec(text)) !== null) {
       const match = m;
       const matchEnd = match.index + match[0].length;
+      if (!hasValidPrefixBoundary(text, match.index, kind)) {
+        continue;
+      }
       // RegExpExecArray has no start/end — compare via index/length.
       const overlapped = matches.some((p) => !(matchEnd <= p.start || match.index >= p.end));
       if (!overlapped) {

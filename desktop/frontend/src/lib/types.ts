@@ -22,7 +22,9 @@ export type EventKind =
   | "mcp_surface_ready"
   | "retrying"
   | "steer"
-  | "guardian_assessment";
+  | "guardian_assessment"
+  | "extension_surface"
+  | "extension_status";
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -127,6 +129,14 @@ export interface WireGuardian {
   usage?: WireUsage;
 }
 
+export interface WireDecisionReceipt {
+  id: string;
+  kind: string;
+  tool?: string;
+  subject?: string;
+  outcome: string;
+}
+
 export interface WireAskOption {
   label: string;
   description?: string;
@@ -143,6 +153,78 @@ export interface WireAskQuestion {
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
+}
+
+// Extension UI surfaces (stage 8a) — structured-only documents published by
+// extension sidecars through the host UI hub. Exactly one sub-struct is set,
+// selected by `kind`.
+export interface WireExtensionStatus {
+  label: string;
+  detail?: string;
+  severity?: string; // "info" | "warn" | "error"
+  progress?: number;
+}
+
+export interface WireExtensionKeyValue {
+  key: string;
+  value: string;
+}
+
+export interface WireExtensionActionRef {
+  actionId: string;
+  label: string;
+}
+
+export interface WireExtensionCard {
+  title?: string;
+  markdown?: string;
+  text?: string;
+  fields?: WireExtensionKeyValue[];
+  progress?: number;
+  actions?: WireExtensionActionRef[];
+}
+
+export interface WireExtensionFormField {
+  key: string;
+  label?: string;
+  kind?: string; // "confirm" | "input" | "select" | "multiselect"
+  options?: string[];
+  default?: unknown;
+  required?: boolean;
+}
+
+export interface WireExtensionForm {
+  title?: string;
+  message?: string;
+  fields: WireExtensionFormField[];
+}
+
+export interface WireExtensionNotification {
+  title: string;
+  body?: string;
+  severity?: string; // "info" | "warn" | "error"
+}
+
+export interface WireExtensionSurface {
+  pluginId: string;
+  surfaceId: string;
+  sessionId?: string;
+  generation?: number;
+  kind: string; // "status" | "card" | "form" | "notification"
+  status?: WireExtensionStatus;
+  card?: WireExtensionCard;
+  form?: WireExtensionForm;
+  notification?: WireExtensionNotification;
+}
+
+// ExtensionActionView is one handshake-declared extension UI action, the JSON
+// twin of desktop's ExtensionActionView (stage 8b2). Slash is the public
+// invocation name, "/<plugin>:<action>".
+export interface ExtensionActionView {
+  plugin: string;
+  action: string;
+  slash: string;
+  description?: string;
 }
 
 // QuestionAnswer is the reply for one question, sent back via AnswerQuestion.
@@ -175,6 +257,8 @@ export interface WireEvent {
   ask?: WireAsk;
   compaction?: WireCompaction;
   guardian?: WireGuardian;
+  decisionReceipt?: WireDecisionReceipt;
+  extension?: WireExtensionSurface;
   err?: string;
   outcome?: "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
@@ -424,6 +508,7 @@ export interface HistoryMessage {
   messages?: number;
   summary?: string;
   archive?: string;
+  decisionReceipt?: WireDecisionReceipt;
 }
 
 export interface HistoryToolCall {
@@ -1973,4 +2058,57 @@ export interface UpdateProgress {
   received: number;
   total: number;
   err?: string;
+}
+
+// Task Monitor panel types (internal/taskmonitor).
+
+export type TaskState =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "stale"
+  | string; // forward-compat
+
+export type RuntimeState = "unknown" | "alive" | "exited" | string;
+
+export interface TaskSnapshot {
+  schema_version: number;
+  task_id: string;
+  job_id?: string; // jobs.Manager-local runtime identifier
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState; // absent in snapshots written before this field existed
+  version: number;
+  created_at: string; // ISO 8601
+  updated_at: string; // ISO 8601
+  error_code?: string;
+  error_summary?: string;
+}
+
+export interface ControlResult {
+  schema_version: number;
+  command: string;
+  task_id: string;
+  session_id?: string;
+  state?: TaskState;
+  runtime_state?: RuntimeState;
+  version?: number;
+  accepted: boolean;
+  idempotent: boolean;
+  error?: { code: string; message: string };
+}
+
+export interface TaskEvent {
+  sequence: number;
+  timestamp: string; // ISO 8601
+  event_type: string;
+  task_id: string;
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState;
+  error_code?: string;
+  error_summary?: string;
 }

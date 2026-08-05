@@ -85,8 +85,25 @@ type Message struct {
 	// model provider. Interrupted streaming output uses it so every frontend can
 	// replay what the user saw without feeding partial reasoning or tool-call
 	// arguments back into the next request.
-	LocalOnly       bool                     `json:"local_only,omitempty"`
-	InterruptedTurn *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+	LocalOnly       bool             `json:"local_only,omitempty"`
+	DecisionReceipt *DecisionReceipt `json:"decision_receipt,omitempty"`
+	// DecisionReceipts are local-only metadata attached to a provider-visible
+	// message. Keeping them on the existing assistant record preserves the
+	// assistant/tool-result adjacency required by current and older readers.
+	// ModelMessages strips the field before handing requests to providers.
+	DecisionReceipts []*DecisionReceipt       `json:"decision_receipts,omitempty"`
+	InterruptedTurn  *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+}
+
+// DecisionReceipt is durable, provider-excluded evidence of a user-owned
+// approval decision. It intentionally contains only bounded labels and the
+// outcome, never free-form guidance or provider-visible content.
+type DecisionReceipt struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Tool    string `json:"tool,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Outcome string `json:"outcome"`
 }
 
 // InterruptedTurnRecovery is the durable, provider-excluded handoff for a turn
@@ -210,7 +227,7 @@ type Request struct {
 	// ResponseFormat, when non-nil, asks the endpoint for structured JSON
 	// output (Responses: text.format.type=json_object). Nil omits the field
 	// entirely — the common path must stay byte-stable for prompt caching.
-	ResponseFormat *ResponseFormat
+	ResponseFormat *ResponseFormat `json:"ResponseFormat,omitempty"`
 }
 
 // ResponseFormat asks a provider to constrain its output shape.
@@ -280,7 +297,7 @@ func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(ms
 func ModelMessages(msgs []Message) []Message {
 	needsCopy := false
 	for _, m := range msgs {
-		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" {
+		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 {
 			needsCopy = true
 			break
 		}
@@ -298,6 +315,8 @@ func ModelMessages(msgs []Message) []Message {
 			candidate.ProviderContent = ""
 		}
 		candidate.RawContent = ""
+		candidate.DecisionReceipt = nil
+		candidate.DecisionReceipts = nil
 		out = append(out, candidate)
 	}
 	return out
@@ -331,7 +350,52 @@ func NormalizeMessages(msgs []Message) []Message {
 // Save/LoadSession remains a byte-for-byte conversation round trip for histories
 // that were already on disk.
 func NormalizeSessionMessages(msgs []Message) []Message {
-	return normalizeMessages(msgs, false)
+	return normalizeMessages(attachStandaloneDecisionReceipts(msgs), false)
+}
+
+// attachStandaloneDecisionReceipts migrates the short-lived receipt encoding
+// that stored a LocalOnly assistant message between an assistant tool call and
+// its result. Folding that metadata into the latest assistant message repairs
+// already-written sessions before tool-pair normalization can fabricate a
+// placeholder. Healthy histories return the original slice unchanged.
+func attachStandaloneDecisionReceipts(msgs []Message) []Message {
+	target := -1
+	needsMigration := false
+	for i, m := range msgs {
+		switch {
+		case m.Role == RoleUser && !m.LocalOnly:
+			target = -1
+		case m.Role == RoleAssistant && !m.LocalOnly:
+			target = i
+		case target >= 0 && m.LocalOnly && m.DecisionReceipt != nil:
+			needsMigration = true
+		}
+		if needsMigration {
+			break
+		}
+	}
+	if !needsMigration {
+		return msgs
+	}
+
+	out := make([]Message, 0, len(msgs))
+	target = -1
+	for _, m := range msgs {
+		switch {
+		case m.Role == RoleUser && !m.LocalOnly:
+			target = -1
+		case m.Role == RoleAssistant && !m.LocalOnly:
+			out = append(out, m)
+			target = len(out) - 1
+			continue
+		case target >= 0 && m.LocalOnly && m.DecisionReceipt != nil:
+			receipts := append([]*DecisionReceipt(nil), out[target].DecisionReceipts...)
+			out[target].DecisionReceipts = append(receipts, m.DecisionReceipt)
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func normalizeMessages(msgs []Message, dropOrphanTools bool) []Message {

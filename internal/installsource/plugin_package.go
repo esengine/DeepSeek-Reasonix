@@ -369,6 +369,9 @@ func (t *installSourceTool) pluginPackageAction(req request, pkg pluginpkg.Packa
 		MappedCapabilities:  append([]string(nil), pkg.Compatibility.Mapped...),
 		SkippedCapabilities: append([]pluginpkg.CompatibilityIssue(nil), pkg.Compatibility.Skipped...),
 		Version:             pkg.Manifest.Version,
+		PromptCount:         pkg.PromptCount(),
+		ThemeCount:          pkg.ThemeCount(),
+		Runtime:             runtimePlanInfo(pkg.Manifest.Runtime),
 		RiskLevel:           RiskMedium,
 		RiskReasons:         []string{"installs a plugin package that can add skills, commands, hooks, and MCP servers"},
 	}
@@ -383,9 +386,29 @@ func (t *installSourceTool) pluginPackageAction(req request, pkg pluginpkg.Packa
 		a.RiskLevel = RiskHigh
 		a.RiskReasons = append(a.RiskReasons, "adds MCP servers that can change provider-visible tool schemas")
 	}
+	if a.Runtime != nil {
+		a.RiskLevel = RiskHigh
+		a.RiskReasons = append(a.RiskReasons, "FULL TRUST: declares a runtime process ("+pluginpkg.RuntimeCommandLine(pkg.Manifest.Runtime)+") that runs inside Reasonix — it can read the full session and environment, bypass permissions, and operate this machine directly")
+	}
 	sort.Strings(a.Skills)
 	sort.Strings(a.Agents)
 	return a, nil
+}
+
+// runtimePlanInfo converts a manifest runtime declaration into its plan
+// form. nil in, nil out: legacy packages carry no runtime field at all.
+func runtimePlanInfo(rt *pluginpkg.RuntimeSpec) *RuntimePlanInfo {
+	if rt == nil {
+		return nil
+	}
+	return &RuntimePlanInfo{
+		Command:      rt.Command,
+		Args:         append([]string(nil), rt.Args...),
+		Intercepts:   append([]string(nil), rt.Intercepts...),
+		Replaces:     append([]string(nil), rt.Replaces...),
+		Capabilities: append([]string(nil), rt.Capabilities...),
+		FullTrust:    true,
+	}
 }
 
 func modeForPlugin(mode string) string {
@@ -467,6 +490,8 @@ func (t *installSourceTool) applyInstallPluginPackage(ctx context.Context, req r
 	act.Version = pkg.Manifest.Version
 	act.SkillCount, act.CommandCount, act.HookCount, act.ToolCount = pkg.CapabilityCounts()
 	act.AgentCount = pkg.AgentCount()
+	act.PromptCount, act.ThemeCount = pkg.PromptCount(), pkg.ThemeCount()
+	act.Runtime = runtimePlanInfo(pkg.Manifest.Runtime)
 	act.Compatibility = pkg.Compatibility.Status
 	act.MappedCapabilities = append([]string(nil), pkg.Compatibility.Mapped...)
 	act.SkippedCapabilities = append([]pluginpkg.CompatibilityIssue(nil), pkg.Compatibility.Skipped...)

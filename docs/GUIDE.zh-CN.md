@@ -215,7 +215,9 @@ behind_proxy = true    # 仅可信反向代理后方使用
 ```
 
 Web UI 提供聊天、工具审批、会话历史、rewind/fork/summarize、模型与 reasoning effort 控件、
-Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 provider 的余额显示。临时启动可用
+Goal、由 `todo_write` 工具驱动的实时 Todo 面板、扩展发布的 status/card/form/notification
+界面，以及已配置 provider 的余额显示。扩展提供的模型也会进入模型选择器。空闲时运行
+`/reload` 可在不重启 Serve 的情况下，以失败原子方式重载扩展 Sidecar 和运行时 generation。临时启动可用
 `--model`、`--max-steps` 或 `--resume`；不传 `--model` 时，`serve` 使用用户全局
 `default_model`。
 
@@ -293,6 +295,8 @@ Remote SSH 的独立 Reasonix 原生窗口。主窗口持有 SSH 隧道；远程
 或抢占本地对话会话。远程网页使用**远端**主机上的 Provider 配置与 API Key —— 桌面端绝不会把
 本机 Provider 暴露给远端主机。如果远端缺少当前 Provider 的 API Key，窗口会先显示经过认证的
 配置页，只把 Key 保存到远端 Reasonix 凭据文件，并在不重启远端 Serve 的情况下激活 Provider。
+短暂的 SSH 中断不会关闭远程窗口；桌面端会在后台重连、重新挂载回环转发，并让窗口重新加载已恢复的
+Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭已经不可用的远程窗口。
 
 ## 自定义 OpenAI-compatible provider
 

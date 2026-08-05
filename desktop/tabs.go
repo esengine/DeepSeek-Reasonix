@@ -26,6 +26,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
+	"reasonix/internal/extension/providerext"
 	"reasonix/internal/fileutil"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
@@ -1335,7 +1336,14 @@ func recordHistoryDisplayEvent(buffer *displayTurnBuffer, e event.Event) {
 			if e.Level == event.LevelWarn {
 				level = "warn"
 			}
-			buffer.messages = append(buffer.messages, &bufferedHistoryMessage{message: HistoryMessage{Role: "notice", Level: level, Content: e.Text, Detail: e.Detail, Code: e.Code}})
+			buffer.messages = append(buffer.messages, &bufferedHistoryMessage{message: HistoryMessage{
+				Role:            "notice",
+				Level:           level,
+				Content:         e.Text,
+				Detail:          e.Detail,
+				Code:            e.Code,
+				DecisionReceipt: cloneDecisionReceipt(e.DecisionReceipt),
+			}})
 		}
 	}
 }
@@ -3661,20 +3669,32 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 		}
 	}
 	if model == "" {
-		resolved, _, ok := cfg.ResolveDesktopNewSessionModel()
-		if !ok {
-			a.recordTabStartupFailure(tab, buildGeneration, wailsCtx, errNoDesktopChatModel)
-			return
+		if def := strings.TrimSpace(cfg.DefaultModel); providerext.PluginRefOwner(def) != "" {
+			// A plugin-namespaced default_model belongs to an extension
+			// sidecar: the config catalog can never resolve it, but boot's
+			// merged resolver can. Pass it through untouched.
+			model = def
+		} else {
+			resolved, _, ok := cfg.ResolveDesktopNewSessionModel()
+			if !ok {
+				a.recordTabStartupFailure(tab, buildGeneration, wailsCtx, errNoDesktopChatModel)
+				return
+			}
+			model = resolved
 		}
-		model = resolved
 	}
 	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, model)
 	requestedModel := model
-	if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
-		if fallback && strings.TrimSpace(tabModel) != "" {
-			a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", requestedModel, resolved))
+	if providerext.PluginRefOwner(model) == "" {
+		// Plugin refs skip the config fallback: rerouting an unavailable
+		// extension model onto a config provider would silently change the
+		// session; boot's unknown-model error is the honest failure.
+		if resolved, fallback, ok := cfg.ResolveModelWithFallback(model); ok {
+			if fallback && strings.TrimSpace(tabModel) != "" {
+				a.noticeForTab(tab.ID, fmt.Sprintf("model %q is no longer available; switched to %s", requestedModel, resolved))
+			}
+			model = resolved
 		}
-		model = resolved
 	}
 
 	// Acquire a shared plugin host for this workspace root so MCP processes

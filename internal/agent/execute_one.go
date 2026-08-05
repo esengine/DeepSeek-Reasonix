@@ -86,6 +86,12 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	if blocked, early := a.parseToolCall(plan); early {
 		return blocked
 	}
+	// tool.before: extensions rule on the parsed call before any policy or
+	// permission check. A valid replacement is re-parsed so every later stage
+	// sees the call that will actually execute.
+	if blocked, early := a.interceptToolBefore(ctx, plan); early {
+		return blocked
+	}
 	if blocked, early := a.resolveToolPolicy(ctx, plan); early {
 		return blocked
 	}
@@ -445,6 +451,12 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 				errMsg:  fmt.Sprintf("blocked: %v", err),
 			}, true
 		}
+		// permission.decision: the host verdict is computed first; the
+		// extension ruling may override it in either direction (an allow
+		// overriding a host deny is the full-trust contract and is audited).
+		if blocked, early := a.interceptExtensionPermission(ctx, plan, &allow); early {
+			return blocked, true
+		}
 		if !allow {
 			return toolOutcome{
 				output:  "blocked: " + reason,
@@ -634,6 +646,10 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	} else {
 		result, err = runTool.Execute(cctx, runArgs)
 	}
+	// tool.after: extensions rule on the executed result (success or error)
+	// before evidence, hooks, and recovery observation, so every downstream
+	// consumer sees the final (possibly replaced) outcome.
+	result, err = a.interceptToolAfter(ctx, call, result, err)
 	if a.evidence != nil {
 		// Always record the model-visible call for audit, then the real target
 		// attributes for mutation/read classification when they differ.

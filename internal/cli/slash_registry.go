@@ -40,6 +40,7 @@ func builtinSlashSpecs() []builtinSlashSpec {
 		{name: "/provider", insert: "/provider", hint: i18n.M.CmdProvider, descend: true, showInHelp: true},
 		{name: "/skills", aliases: []string{"/skill"}, insert: "/skills", hint: i18n.M.CmdSkill, showInHelp: true},
 		{name: "/reload-cmd", insert: "/reload-cmd", hint: i18n.M.CmdReloadCmd, showInHelp: true},
+		{name: "/reload", insert: "/reload", hint: i18n.M.CmdReload, showInHelp: true},
 		{name: "/hooks", insert: "/hooks ", hint: i18n.M.CmdHooks, descend: true, showInHelp: true},
 		{name: "/paste-image", insert: "/paste-image", hint: i18n.M.CmdPasteImage},
 		{name: "/output-style", aliases: []string{"/output-styles"}, insert: "/output-style", hint: i18n.M.CmdOutputStyle, showInHelp: true},
