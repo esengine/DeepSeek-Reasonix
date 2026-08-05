@@ -53,15 +53,15 @@ func resolveConfigAccessPathUnpinned(path string, userConfig bool) (string, erro
 
 // evalSymlinksAllowMissing canonicalizes every existing path component while
 // allowing a new file (and missing parent directories) to be created later.
-// A broken final symlink is not "missing": EvalSymlinks sees the link and
-// returns an error, which prevents a write from replacing it.
+// A broken final symlink is not "missing": Lstat sees the link and the
+// platform resolver returns an error, which prevents a write from replacing it.
 func evalSymlinksAllowMissing(path string) (string, error) {
 	path = filepath.Clean(path)
 	current := path
 	var suffix []string
 	for {
 		if _, err := os.Lstat(current); err == nil {
-			resolved, err := filepath.EvalSymlinks(current)
+			resolved, err := resolveExistingConfigPath(current)
 			if err != nil {
 				return "", err
 			}

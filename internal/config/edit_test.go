@@ -2773,8 +2773,16 @@ func TestSaveToPreservesMultiLevelSymlinkChain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveConfigAccessPath(second): %v", err)
 	}
-	if got != resolvedTarget {
-		t.Fatalf("resolveConfigAccessPath(second) = %q, want %q", got, resolvedTarget)
+	gotInfo, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantInfo, err := os.Stat(resolvedTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Fatalf("resolveConfigAccessPath(second) = %q, want same file as %q", got, resolvedTarget)
 	}
 
 	cfg := Default()
