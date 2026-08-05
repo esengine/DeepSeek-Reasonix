@@ -58,6 +58,19 @@ type StateTracker interface {
 	Reset()
 }
 
+// NavigatorKernel is the minimal agent-facing interface for the OSWorld 2.0
+// "state-based navigator" kernel (full implementation in internal/navigator).
+// The agent only needs the implicit-state digest for compaction injection;
+// the navigator's closed-loop correction and env sensing run through its own
+// HostAdapter at the boot layer. This interface keeps the agent decoupled from
+// the navigator package — the concrete *navigator.Navigator satisfies it.
+type NavigatorKernel interface {
+	// ImplicitStateDigest returns the navigator's accumulated recovered facts
+	// as text, for injection into a compaction summary's "Hidden state &
+	// recovered facts" section. Empty when no facts have been recovered.
+	ImplicitStateDigest() string
+}
+
 // ToolCallToken pairs a BeforeToolCall snapshot with its AfterToolCall delta.
 // It is opaque to callers; the default implementation uses an incrementing
 // counter to index into an internal slice.

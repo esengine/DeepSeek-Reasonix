@@ -354,6 +354,27 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	}
 	}
 
+	// OSWorld 2.0 Navigator kernel: when the navigator is wired, its
+	// implicit-state digest is also injected. The navigator maintains state
+	// independently of the prompt (in its own state graph), so its facts
+	// survive even a mid-task crash. This is a superset of StateTracker —
+	// when both are present, both digests are merged so no recovered fact is
+	// lost. If the section already exists (from StateTracker above), the
+	// navigator's facts are appended to it rather than creating a duplicate.
+	if !mechanical && a.navigator != nil {
+		if navDigest := a.navigator.ImplicitStateDigest(); navDigest != "" {
+			chars := sectionContentChars(summary, "Hidden state & recovered facts")
+			if chars <= 0 {
+				summary += "\n\n## Hidden state & recovered facts (injected by Navigator)\n" + navDigest
+			} else {
+				// Section already exists (from StateTracker); append the
+				// navigator's facts to it so both sources are preserved.
+				summary += "\n\n" + navDigest
+			}
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Navigator implicit state injected into compaction summary.", Detail: fmt.Sprintf("Navigator provided %d bytes of recovered facts (merged with existing section: %d chars).", len(navDigest), chars)})
+		}
+	}
+
 	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)
 	compacted = append(compacted, msgs[:head]...)
 	compacted = append(compacted, kept...)
