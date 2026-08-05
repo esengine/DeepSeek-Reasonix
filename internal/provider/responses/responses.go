@@ -24,7 +24,10 @@ import (
 	"reasonix/internal/provider"
 )
 
-const defaultStreamIdleTimeout = 120 * time.Second
+const (
+	defaultStreamIdleTimeout     = 120 * time.Second
+	maxReplayableSearchItemBytes = 512 * 1024
+)
 
 func init() {
 	provider.Register("responses", newFromConfig)
@@ -34,6 +37,7 @@ func init() {
 func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 	effort, _ := cfg.Extra["effort"].(string)
 	mode, _ := cfg.Extra["mode"].(string)
+	webSearch, _ := cfg.Extra["web_search"].(bool)
 	var stateful *bool
 	switch value := cfg.Extra["stateful"].(type) {
 	case bool:
@@ -47,7 +51,7 @@ func newFromConfig(cfg provider.Config) (provider.Provider, error) {
 	maxOutputTokens, _ := cfg.Extra["max_output_tokens"].(int)
 	return New(Config{
 		Name: cfg.Name, APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Model: cfg.Model,
-		Effort: effort, Mode: mode, Stateful: stateful, Proxy: proxy,
+		Effort: effort, Mode: mode, Stateful: stateful, WebSearch: webSearch, Proxy: proxy,
 		KeyEnv: keyEnv, KeySource: keySource, MaxOutputTokens: maxOutputTokens,
 	}), nil
 }
@@ -61,6 +65,7 @@ type Config struct {
 	Effort    string
 	Mode      string // stateful | stateless; empty uses vendor detection.
 	Stateful  *bool  // legacy form of Mode; nil preserves vendor detection.
+	WebSearch bool   // expose the provider-executed web_search tool.
 	Proxy     netclient.ProxySpec
 	KeyEnv    string
 	KeySource string
@@ -112,6 +117,7 @@ type client struct {
 	baseURL, model, effort          string
 	vendor, mode                    string
 	sessionCache                    bool
+	webSearch                       bool
 	maxOutputTokens                 int
 	http                            *http.Client
 	idleTimeout                     time.Duration
@@ -143,7 +149,7 @@ func New(cfg Config) provider.Provider {
 	return &client{
 		name: cfg.Name, apiKey: cfg.APIKey, keyEnv: cfg.KeyEnv, keySource: cfg.KeySource,
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"), model: cfg.Model, effort: cfg.Effort,
-		vendor: vendor, mode: cfg.mode(), sessionCache: sessionCache, maxOutputTokens: maxOutputTokens,
+		vendor: vendor, mode: cfg.mode(), sessionCache: sessionCache, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
 		http: httpClient, idleTimeout: defaultStreamIdleTimeout,
 	}
 }
@@ -261,8 +267,13 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	if req.Temperature != nil {
 		body["temperature"] = *req.Temperature
 	}
-	if len(req.Tools) > 0 {
-		tools := make([]map[string]any, 0, len(req.Tools))
+	if c.webSearch || len(req.Tools) > 0 {
+		tools := make([]map[string]any, 0, len(req.Tools)+1)
+		// Keep the server tool first and stable across turns. DeepSeek executes
+		// this tool itself; ordinary Reasonix tools remain function entries.
+		if c.webSearch {
+			tools = append(tools, map[string]any{"type": "web_search"})
+		}
 		for _, tool := range req.Tools {
 			parameters := tool.Parameters
 			if len(parameters) == 0 {
@@ -285,13 +296,13 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	c.mu.Unlock()
 	if c.mode == "stateful" && previousID != "" && len(messages) > 0 &&
 		messages[len(messages)-1].Role == provider.RoleUser &&
-		conversationDigest(messages[:len(messages)-1]) == expectedDigest {
+		conversationDigest(messages[:len(messages)-1], c.vendor == "deepseek") == expectedDigest {
 		body["input"] = messages[len(messages)-1].Content
 		body["previous_response_id"] = previousID
 		return body, true, messages
 	}
 
-	body["input"] = messagesToInput(rest)
+	body["input"] = messagesToInput(rest, c.vendor == "deepseek")
 	return body, false, messages
 }
 
@@ -302,7 +313,7 @@ func splitInstructions(messages []provider.Message) (string, []provider.Message)
 	return messages[0].Content, messages[1:]
 }
 
-func messagesToInput(messages []provider.Message) []map[string]any {
+func messagesToInput(messages []provider.Message, replayDeepSeekItems bool) []map[string]any {
 	input := make([]map[string]any, 0, len(messages)*2)
 	for _, message := range messages {
 		switch message.Role {
@@ -314,6 +325,13 @@ func messagesToInput(messages []provider.Message) []map[string]any {
 					"type":    "reasoning",
 					"content": []map[string]string{{"type": "reasoning_text", "text": message.ReasoningContent}},
 				})
+			}
+			if replayDeepSeekItems {
+				for _, raw := range message.ResponsesItems {
+					if item, ok := decodeReplayableWebSearchItem(raw); ok {
+						input = append(input, item)
+					}
+				}
 			}
 			if message.Content != "" || len(message.ToolCalls) == 0 {
 				input = append(input, map[string]any{"role": "assistant", "content": message.Content})
@@ -333,12 +351,28 @@ func messagesToInput(messages []provider.Message) []map[string]any {
 	return input
 }
 
-func conversationDigest(messages []provider.Message) string {
+func decodeReplayableWebSearchItem(raw json.RawMessage) (map[string]any, bool) {
+	if len(raw) == 0 || len(raw) > maxReplayableSearchItemBytes || !json.Valid(raw) {
+		return nil, false
+	}
+	var item map[string]any
+	if err := json.Unmarshal(raw, &item); err != nil || item["type"] != "web_search_call" {
+		return nil, false
+	}
+	id, _ := item["id"].(string)
+	status, _ := item["status"].(string)
+	if strings.TrimSpace(id) == "" || status != "completed" {
+		return nil, false
+	}
+	return item, true
+}
+
+func conversationDigest(messages []provider.Message, replayDeepSeekItems bool) string {
 	instructions, rest := splitInstructions(messages)
 	payload, _ := json.Marshal(struct {
 		Instructions string           `json:"instructions,omitempty"`
 		Input        []map[string]any `json:"input"`
-	}{Instructions: instructions, Input: messagesToInput(rest)})
+	}{Instructions: instructions, Input: messagesToInput(rest, replayDeepSeekItems)})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
@@ -402,6 +436,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}
 	textDeltas := make(map[string]bool)
 	reasoningDeltas := make(map[string]bool)
+	seenSearchItems := make(map[string]struct{})
+	var responsesItems []json.RawMessage
 	var text, reasoning strings.Builder
 	terminal := false
 	failed := false
@@ -481,6 +517,22 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				}
 			}
 		case "response.output_item.done":
+			if event.Item != nil && event.Item.Type == "web_search_call" && c.vendor == "deepseek" {
+				if _, ok := decodeReplayableWebSearchItem(event.Item.Raw); ok {
+					key := event.Item.ID
+					if key == "" {
+						key = string(event.Item.Raw)
+					}
+					if _, seen := seenSearchItems[key]; !seen {
+						seenSearchItems[key] = struct{}{}
+						raw := append(json.RawMessage(nil), event.Item.Raw...)
+						responsesItems = append(responsesItems, raw)
+						if !sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkResponsesItem, ResponsesItem: raw}) {
+							return
+						}
+					}
+				}
+			}
 			if event.Item != nil && event.Item.Type == "function_call" {
 				call := callForItem(event.Item.ID)
 				if event.Item.CallID != "" {
@@ -558,7 +610,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return
 	}
 	if completedResponseID != "" {
-		assistant := provider.Message{Role: provider.RoleAssistant, Content: text.String(), ReasoningContent: reasoning.String()}
+		assistant := provider.Message{Role: provider.RoleAssistant, Content: text.String(), ReasoningContent: reasoning.String(), ResponsesItems: responsesItems}
 		for _, itemID := range callOrder {
 			call := calls[itemID]
 			if call.completed {
@@ -568,7 +620,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		expected := append(append([]provider.Message(nil), requestMessages...), assistant)
 		c.mu.Lock()
 		c.lastResponseID = completedResponseID
-		c.expectedPrefixDigest = conversationDigest(expected)
+		c.expectedPrefixDigest = conversationDigest(expected, c.vendor == "deepseek")
 		c.mu.Unlock()
 	} else {
 		c.ResetContext()
@@ -644,6 +696,7 @@ type sseEvent struct {
 
 type sseItem struct {
 	ID, Type, CallID, Name, Arguments string
+	Raw                               json.RawMessage
 }
 
 func (i *sseItem) UnmarshalJSON(data []byte) error {
@@ -657,7 +710,7 @@ func (i *sseItem) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	*i = sseItem{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Arguments: wire.Arguments}
+	*i = sseItem{ID: wire.ID, Type: wire.Type, CallID: wire.CallID, Name: wire.Name, Arguments: wire.Arguments, Raw: append(json.RawMessage(nil), data...)}
 	return nil
 }
 

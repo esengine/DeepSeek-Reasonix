@@ -809,10 +809,18 @@ Skill 别名会继续拥有 `/docs`；发生冲突时，CLI 与桌面端通常�
 ## Goal 与 AutoResearch
 
 Goal 是长期目标的统一运行机制。普通 `/goal` 继续走轻量 Goal：Reasonix 会持续推进，直到
-完成、阻塞或被清除。对于明显长周期的目标，Goal 会自动进入 AutoResearch 策略，而不是
+完成、阻塞、暂停或被清除。对于明显长周期的目标，Goal 会自动进入 AutoResearch 策略，而不是
 要求用户单独运行 `/auto-research` skill；`auto-research` 也不会作为独立 builtin skill 出现在
 Settings -> Skills 或斜杠菜单里。普通聊天不会隐式改变协作模式；需要长目标时，请在输入框中
 明确选择 Goal，或使用 `/goal` 启动。
+
+Goal 按类别运行在预算内：简单目标 10 轮 / 20 万 token，写入型 20 轮 / 40 万 token，
+AutoResearch 目标 40 轮 / 80 万 token；连续 4 轮没有宿主可验证进展会暂停。暂停会保留
+Goal、todo、Delivery checkpoint 与预算历史——用 `/goal resume` 继续（预算型暂停会追加一档
+同类别额度），`/goal pause` 可手动暂停运行中的目标，`/goal status` 显示完整的轮次/token/
+无进展运行摘要。每个目标 turn 结束时，模型通过结构化的 `update_goal` 工具报告
+continue/complete/blocked；没有报告时由独立的有界 evaluator 判定一次，任何 evaluator
+故障都会安全暂停目标而不是静默继续。
 
 复杂任务建议把目标写成[任务合约](./TASK_CONTRACT.zh-CN.md)：Context、Request、
 Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当作自主执行的边界；
@@ -923,6 +931,12 @@ destructive MCP 目标、来自未授权 server 的 reader，以及一切会改�
 | `read_only_skill` | 以既有 skill 驱动的同等隔离 |
 | `reasonix review`（CLI） | 只读评审 diff 或分支 |
 | 桌面端 preview/review 子代理 | 桌面端只读分析面 |
+
+在持久化会话中，`parallel_tasks` 与 `fleet` 不再把所有完整答案拼成一个容易被截断的
+工具结果，而是为每个已完成子 Agent 返回有界预览和独立的 `Subagent reference`。父 Agent
+可用 `read_subagent_result` 按 `offset_bytes` 分页读取该引用对应的完整答案；读取范围受当前
+会话 lineage 与工作区约束。没有持久化父会话的 headless 运行仍保持 ephemeral，只返回公平
+分配的有界预览，不能生成持久引用。
 
 交互式双模型 Planner 使用专用构造路径（`NewPlannerAgent`）：仍阻止 bash、文件写入与普通
 writer，但可通过固定的 `use_capability` 代理调用已授权、非 destructive 的 MCP，不再要求

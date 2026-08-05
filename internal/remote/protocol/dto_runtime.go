@@ -76,7 +76,25 @@ type SessionMetaSnapshot struct {
 	ResolvedProfile ResolvedProfile `json:"resolvedProfile"`
 	Goal            *string         `json:"goal" externalizable:"true"`
 	GoalStatus      GoalStatus      `json:"goalStatus,omitempty"`
-	Capabilities    Capabilities    `json:"capabilities"`
+	// GoalRuntime is the optional budget/runtime summary of the active Goal.
+	// Old clients ignore it; new clients read it to render turn/token
+	// consumption, no-progress state, the last continuation/evaluator reason,
+	// and the pause stop-cause (safe pause vs genuine task block).
+	GoalRuntime  *GoalRuntimeView `json:"goalRuntime,omitempty"`
+	Capabilities Capabilities     `json:"capabilities"`
+}
+
+// GoalRuntimeView is the optional nested Goal budget/runtime view.
+type GoalRuntimeView struct {
+	TurnsUsed        int    `json:"turnsUsed" validate:"min=0"`
+	TurnsLimit       int    `json:"turnsLimit" validate:"min=0"`
+	TokensUsed       int    `json:"tokensUsed" validate:"min=0"`
+	TokensLimit      int    `json:"tokensLimit" validate:"min=0"`
+	NoProgressTurns  int    `json:"noProgressTurns" validate:"min=0"`
+	NoProgressLimit  int    `json:"noProgressLimit" validate:"min=0"`
+	LastReason       string `json:"lastReason,omitempty"`
+	StopCause        string `json:"stopCause,omitempty"`
+	BudgetExtensions int    `json:"budgetExtensions" validate:"min=0"`
 }
 
 type TurnState struct {

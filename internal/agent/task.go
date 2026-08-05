@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -66,6 +67,7 @@ var subagentRecursiveTools = []string{
 var subagentAlwaysHiddenTools = []string{
 	"parallel_tasks",
 	"fleet",
+	"read_subagent_result",
 	"install_skill",
 	"install_source",
 }
@@ -252,6 +254,7 @@ type TaskTool struct {
 	identityProfile     func(modelRef, effort string) (string, string)
 	maxSubagentDepth    int
 	deliveryProfile     bool
+	ablation            ablation.Set
 	workspaceLease      *workspacelease.Owner
 	// scheduler is the session-scoped concurrency + write-claim controller.
 	// nil falls back to the legacy jobs.ReserveStart cap for background tasks.
@@ -393,6 +396,13 @@ func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
 // the mutation gate remains dormant for them.
 func (t *TaskTool) WithDeliveryProfile(enabled bool) *TaskTool {
 	t.deliveryProfile = enabled
+	return t
+}
+
+// WithAblation propagates the parent's benchmark arm so a sub-agent runs with
+// the same subsystems switched off.
+func (t *TaskTool) WithAblation(set ablation.Set) *TaskTool {
+	t.ablation = set
 	return t
 }
 
@@ -800,7 +810,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (st
 	var subReg *tool.Registry
 	if spec.ReadOnly {
 		subReg = ReadOnlySubagentToolRegistryForDepthWithRuntime(t.parentReg, toolNames, childDepth, t.maxDepth(), t.capabilityRuntime)
-		if subReg.Len() == 0 {
+		if subReg.Len() == 0 && !spec.AllowNoTools {
 			return "", fmt.Errorf("no read-only tools available for this sub-agent")
 		}
 	} else {
@@ -1675,6 +1685,7 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		SubagentDepth:       childDepth,
 		MaxSubagentDepth:    t.maxDepth(),
 		DeliveryProfile:     t.deliveryProfile,
+		Ablation:            t.ablation,
 		WorkspaceLease:      t.workspaceLease,
 		RecoveryGate:        t.recoveryGate,
 		RecoveryAgentID:     "subagent",

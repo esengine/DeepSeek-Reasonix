@@ -59,6 +59,7 @@ const (
 	MethodSessionProfileSet      Method = "session/profile/set"
 	MethodSessionGoalSet         Method = "session/goal/set"
 	MethodSessionGoalResume      Method = "session/goal/resume"
+	MethodSessionGoalPause       Method = "session/goal/pause"
 	MethodSessionGoalClear       Method = "session/goal/clear"
 	MethodSessionContext         Method = "session/context"
 	MethodSessionBalance         Method = "session/balance"
@@ -168,6 +169,7 @@ var frozenRegistry = []MethodSpec{
 	request[SessionProfileSetParams, SessionProfileSetResult](MethodSessionProfileSet, ClassSessionMutation),
 	request[SessionGoalSetParams, SessionGoalSetResult](MethodSessionGoalSet, ClassSessionMutation),
 	request[SessionGoalResumeParams, SessionGoalResumeResult](MethodSessionGoalResume, ClassSessionMutation),
+	request[SessionGoalPauseParams, SessionGoalPauseResult](MethodSessionGoalPause, ClassSessionMutation),
 	request[SessionGoalClearParams, SessionGoalClearResult](MethodSessionGoalClear, ClassSessionMutation),
 	request[SessionContextParams, SessionContextResult](MethodSessionContext, ClassSessionQuery),
 	request[SessionBalanceParams, SessionBalanceResult](MethodSessionBalance, ClassSessionQuery),
@@ -326,9 +328,10 @@ func ValidateRegistry() error {
 			return fmt.Errorf("method %s has invalid direction %q", spec.Name, spec.Direction)
 		}
 	}
-	// Workbench RuntimeAPI (71 methods from Remote V1 surface) + 6 Provider Broker methods.
-	if len(frozenRegistry) != 78 || clientReq != 69 || hostNotif != 3 || hostReq != 3 || clientNotif != 3 {
-		return fmt.Errorf("registry count = total=%d clientReq=%d hostNotif=%d hostReq=%d clientNotif=%d, want 78/69/3/3/3",
+	// Workbench RuntimeAPI (72 methods from Remote V1 surface, incl. the Goal
+	// pause op) + 6 Provider Broker methods.
+	if len(frozenRegistry) != 79 || clientReq != 70 || hostNotif != 3 || hostReq != 3 || clientNotif != 3 {
+		return fmt.Errorf("registry count = total=%d clientReq=%d hostNotif=%d hostReq=%d clientNotif=%d, want 79/70/3/3/3",
 			len(frozenRegistry), clientReq, hostNotif, hostReq, clientNotif)
 	}
 	return nil

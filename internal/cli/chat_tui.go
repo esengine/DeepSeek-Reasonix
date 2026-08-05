@@ -425,6 +425,12 @@ type compactDoneMsg struct{ err error }
 // stale controller captured before an in-TUI rebuild.
 type tuiShutdownMsg struct{}
 
+// shutdownNow is the tea.Cmd every in-TUI quit gesture returns instead of
+// tea.Quit. Routing through tuiShutdownMsg gives all exits the same
+// finalization (Snapshot + lease follow); quitting directly would drop
+// whatever the controller holds beyond the last snapshot (#5879).
+func shutdownNow() tea.Msg { return tuiShutdownMsg{} }
+
 // elapsedTickMsg fires once a second while a turn runs, driving the "thinking
 // Ns" counter in the status line.
 type elapsedTickMsg struct{}
@@ -1290,7 +1296,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// queueEditCursor to decide whether to save an edit or enqueue.
 		default:
 			m.resetSubmittedInputRecall()
-			m.resetQueueNavigation()
+			// Preserve queue navigation while the user is editing a queued
+			// item — only reset when they're not browsing the queue, so that
+			// typing replacement text keeps queueEditCursor alive for the
+			// Enter handler to save the edit in-place. (#4877)
+			if m.queueEditCursor < 0 {
+				m.resetQueueNavigation()
+			}
 		}
 		if imagePasteShortcut(msg.String(), runtime.GOOS) {
 			if m.state == tuiRunning {
@@ -1358,7 +1370,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.unsendPending() // server not yet replied — restore text, leave no trace
 				} else if m.cancelRequested() {
 					m.ctrl.Cancel()
-					return m, tea.Quit
+					return m, shutdownNow
 				} else {
 					m.ctrl.Cancel()
 				}
@@ -1388,13 +1400,13 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if !m.lastCtrlCAt.IsZero() && time.Since(m.lastCtrlCAt) < 1500*time.Millisecond {
-				return m, tea.Quit
+				return m, shutdownNow
 			}
 			m.lastCtrlCAt = time.Now()
 			m.notice(i18n.M.CtrlCQuitHint)
 			return m, finalize(m, nil)
 		case "ctrl+d":
-			return m, tea.Quit
+			return m, shutdownNow
 		case "ctrl+l":
 			if m.state != tuiRunning {
 				m.finalizeStreamed()
@@ -1452,7 +1464,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if line == "exit" || line == "quit" || line == ":q" {
-				return m, tea.Quit
+				return m, shutdownNow
 			}
 			m.rememberSubmittedInput(line)
 
@@ -3813,6 +3825,12 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 
 	case event.Message:
 		// The answer stream is complete — freeze reasoning + the markdown answer.
+		// Message.Text is the canonical display text (protocol markers already
+		// stripped at emission), so it replaces the raw streamed accumulation.
+		if e.Text != "" && m.pending.Len() > 0 {
+			m.pending.Reset()
+			m.pending.WriteString(e.Text)
+		}
 		m.commitReasoning()
 		m.commitPending()
 
@@ -4203,7 +4221,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			m.notice("remembered → " + path)
 		}
 	case "/quit", "/exit":
-		return tea.Quit
+		return shutdownNow
 	case "/copy":
 		return m.runCopyCommand(input)
 	case "/export":
@@ -4241,7 +4259,11 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 			}
 			return m.startControllerTurn(input, input, func() { m.ctrl.SubmitDisplay(input, input) })
 		}
-		m.notice(fmt.Sprintf("%s: %s", i18n.M.SlashUnknown, cmd))
+		// Unknown slash input is prose more often than a typo — send it as a
+		// regular message (matching the controller's behavior for the other
+		// surfaces), with a notice so real typos stay visible (#5756).
+		m.notice(fmt.Sprintf("%s: %s — %s", i18n.M.SlashUnknown, cmd, i18n.M.SlashUnknownSentAsMessage))
+		return m.startTurn(input, input, input)
 	}
 	return nil
 }
@@ -4388,13 +4410,33 @@ func (m *chatTUI) runGoalSubcommand(input string) tea.Cmd {
 		m.echoLocalCommand(input)
 		m.ctrl.ClearGoal()
 		m.notice(i18n.M.GoalCleared)
+	case control.GoalCommandPause:
+		m.echoLocalCommand(input)
+		if !m.ctrl.PauseGoal() {
+			m.notice(i18n.M.GoalNotRunning)
+		}
+	case control.GoalCommandResume:
+		m.echoLocalCommand(input)
+		if !m.ctrl.ResumeGoal() {
+			m.notice(i18n.M.GoalNotPaused)
+		}
 	default:
 		m.echoLocalCommand(input)
 		goal := m.ctrl.Goal()
 		if strings.TrimSpace(goal) == "" {
 			m.notice(i18n.M.GoalEmpty)
-		} else {
-			m.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
+			break
+		}
+		m.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
+		rt := m.ctrl.GoalRuntime()
+		m.notice(fmt.Sprintf(i18n.M.GoalRuntimeFmt,
+			rt.TurnsUsed, rt.TurnsLimit, rt.TokensUsed, rt.TokensLimit,
+			rt.NoProgressTurns, rt.NoProgressLimit, rt.BudgetExtensions))
+		if rt.LastReason != "" {
+			m.notice(fmt.Sprintf("%s: %s", i18n.M.GoalRuntimeLastReason, rt.LastReason))
+		}
+		if rt.StopCause != "" {
+			m.notice(fmt.Sprintf(i18n.M.GoalPausedFmt, rt.StopCause))
 		}
 	}
 	return nil

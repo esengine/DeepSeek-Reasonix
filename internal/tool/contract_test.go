@@ -72,6 +72,7 @@ var acceptsDefaultSnip = map[string]bool{
 	"notebook_edit":   true,
 	"schedule_wakeup": true, // short confirmation text
 	"todo_write":      true,
+	"update_goal":     true,
 	"wait":            true,
 	"write_file":      true,
 }

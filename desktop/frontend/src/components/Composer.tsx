@@ -26,7 +26,7 @@ import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
 import { useToast } from "../lib/toast";
-import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
+import { type CollaborationMode, type CommandInfo, type ComposerInsertRequest, type ContextInfo, type DirEntry, type EffortInfo, type GoalRuntime, type HistoryMessage, type Mode, type PromptHistoryEntry, type SessionMeta, type SessionReference, type SlashArgItem, type SlashArgsResult, type TokenMode, type ToolApprovalMode, type BalanceInfo } from "../lib/types";
 import {
   formatWorkspaceReference,
   parseWorkspaceReference,
@@ -527,6 +527,8 @@ export function Composer({
   toolApprovalMode,
   tokenMode,
   goal,
+  goalStatus,
+  goalRuntime,
   cwd,
   modelLabel,
   imageInputEnabled = true,
@@ -541,6 +543,8 @@ export function Composer({
   onSetToolApprovalMode,
   onToggleYoloApprovalMode,
   onClearGoal,
+  onPauseGoal,
+  onResumeGoal,
   onSwitchModel,
   onSetEffort,
   onSetTokenMode,
@@ -582,6 +586,8 @@ export function Composer({
   toolApprovalMode: ToolApprovalMode;
   tokenMode: TokenMode;
   goal?: string;
+  goalStatus?: string;
+  goalRuntime?: GoalRuntime;
   cwd?: string;
   modelLabel: string;
   imageInputEnabled?: boolean;
@@ -599,6 +605,8 @@ export function Composer({
   onSetToolApprovalMode: (mode: ToolApprovalMode) => void;
   onToggleYoloApprovalMode: () => void;
   onClearGoal: () => void;
+  onPauseGoal: () => void;
+  onResumeGoal: () => void;
   onSwitchModel: (name: string) => boolean | Promise<boolean>;
   onSetEffort: (level: string) => void;
   onSetTokenMode: (mode: TokenMode) => void;
@@ -3882,14 +3890,61 @@ export function Composer({
             {goalModeOn && <Check className="composer-intent-menu__check" size={16} aria-hidden="true" />}
           </button>
             {goalModeOn && activeGoal && (
-            <button
-              type="button"
-              className="composer-intent-menu__stop"
-              onClick={stopGoalMode}
-              disabled={disabled || running}
-            >
-              {t("composer.taskModeStopGoal")}
-            </button>
+            <div className="composer-intent-menu__goal-actions">
+              <div className="composer-intent-menu__goal-runtime">
+                {goalRuntime && (
+                  <span className="composer-intent-menu__goal-runtime-line">
+                    {t("composer.goalRuntimeLine", {
+                      turnsUsed: goalRuntime.turnsUsed,
+                      turnsLimit: goalRuntime.turnsLimit,
+                      tokensUsed: formatTokens(goalRuntime.tokensUsed),
+                      tokensLimit: formatTokens(goalRuntime.tokensLimit),
+                      noProgressTurns: goalRuntime.noProgressTurns,
+                      noProgressLimit: goalRuntime.noProgressLimit,
+                      extensions: goalRuntime.budgetExtensions,
+                    })}
+                  </span>
+                )}
+                {goalStatus === "blocked" && !goalRuntime?.stopCause && (
+                  <span className="composer-intent-menu__goal-runtime-line composer-intent-menu__goal-runtime-line--blocked">
+                    {t("composer.goalBlocked")}
+                  </span>
+                )}
+                {goalStatus === "blocked" && goalRuntime?.stopCause && (
+                  <span className="composer-intent-menu__goal-runtime-line composer-intent-menu__goal-runtime-line--paused">
+                    {t("composer.goalPaused")}
+                    {goalRuntime.lastReason ? ` — ${goalRuntime.lastReason}` : ""}
+                  </span>
+                )}
+              </div>
+              {goalStatus === "blocked" ? (
+                <button
+                  type="button"
+                  className="composer-intent-menu__stop"
+                  onClick={onResumeGoal}
+                  disabled={disabled}
+                >
+                  {t("composer.taskModeResumeGoal")}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="composer-intent-menu__stop"
+                  onClick={onPauseGoal}
+                  disabled={disabled || running}
+                >
+                  {t("composer.taskModePauseGoal")}
+                </button>
+              )}
+              <button
+                type="button"
+                className="composer-intent-menu__stop"
+                onClick={stopGoalMode}
+                disabled={disabled || running}
+              >
+                {t("composer.taskModeStopGoal")}
+              </button>
+            </div>
           )}
         </div>
       </AnchoredPopover>}

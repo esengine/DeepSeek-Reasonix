@@ -3,6 +3,8 @@ package main
 import (
 	"reflect"
 	"testing"
+
+	"reasonix/internal/ablation"
 )
 
 func TestAppendBenchmarkProfileArgsBaselineIsByteIdentical(t *testing.T) {
@@ -22,7 +24,7 @@ func TestAppendBenchmarkProfileArgsDeliveryUsesRealRuntimeProfile(t *testing.T) 
 }
 
 func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
-	got := buildRunTaskArgs("metrics.json", "e2e", benchmarkProfileDelivery, 12, "fix it")
+	got := buildRunTaskArgs("metrics.json", "e2e", benchmarkProfileDelivery, ablation.Set{}, 12, "fix it")
 	want := []string{
 		"run", "--auto", "--metrics", "metrics.json",
 		"--model", "e2e", "--max-steps", "12",
@@ -30,6 +32,14 @@ func TestBuildRunTaskArgsEnablesUnattendedWorkspaceWrites(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("run task args = %v, want %v", got, want)
+	}
+}
+
+func TestBuildRunTaskArgsPassesTheAblationArmThrough(t *testing.T) {
+	got := buildRunTaskArgs("m.json", "", benchmarkProfileBaseline, ablation.New(ablation.Evidence, ablation.Planner), 0, "fix it")
+	want := []string{"run", "--auto", "--metrics", "m.json", "--ablate", "evidence,planner", "fix it"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ablated args = %v, want %v", got, want)
 	}
 }
 

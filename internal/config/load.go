@@ -390,6 +390,7 @@ func backfillDeepSeekOfficialPrices(c *Config) {
 		if officialProviderKind(p) != "deepseek" {
 			continue
 		}
+		backfillDeepSeekOfficialEndpointDefaults(p)
 		currency := c.DeepSeekOfficialPricingCurrency()
 		if c.DesktopCurrency() == "" && p.persistedOfficialCurrency != "" {
 			currency = p.persistedOfficialCurrency
@@ -407,6 +408,25 @@ func backfillDeepSeekOfficialPrices(c *Config) {
 			}
 		}
 	}
+}
+
+// backfillDeepSeekOfficialEndpointDefaults restores the two official-endpoint
+// fields a config may legitimately omit. Both are safe to infer here precisely
+// because the caller already matched api.deepseek.com: the wallet endpoint is
+// the vendor's own, and 1M is that vendor's real window. Values the file
+// declares are never overwritten.
+//
+// This is keyed on the endpoint rather than on list position, so it cannot leak
+// onto a custom provider the way the previous positional decode overlay did
+// (#7357, #7358).
+func backfillDeepSeekOfficialEndpointDefaults(p *ProviderEntry) {
+	if p == nil {
+		return
+	}
+	if strings.TrimSpace(p.BalanceURL) == "" {
+		p.BalanceURL = "https://api.deepseek.com/user/balance"
+	}
+	backfillOfficialContextWindow(p, 1_000_000)
 }
 
 func officialProviderKind(p *ProviderEntry) string {

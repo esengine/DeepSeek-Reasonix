@@ -219,6 +219,9 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	if err != nil {
 		return fmt.Errorf("switch model: %w", err)
 	}
+	// Run/RunGraceful only wire the initial controller. Every replacement must
+	// receive the same frontend hooks or the ask tool falls back to headless mode.
+	newCtrl.EnableInteractiveApproval()
 	// Keep the carried conversation in its existing file so the switch doesn't
 	// orphan a duplicate (#2807).
 	newPath := agent.ContinueSessionPath(prevPath, newCtrl.SessionDir(), newCtrl.Label())

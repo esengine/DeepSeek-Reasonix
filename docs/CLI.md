@@ -142,6 +142,21 @@ structured output format is selected. It also accepts `--model`, `--profile`,
 `--copy`, `--allowed-tools`, `--permission-mode`, and `--auto` / `-y` (an alias
 for `--permission-mode auto`).
 
+### Benchmark arms
+
+`--ablate` switches whole subsystems off so a benchmark can attribute a change
+in success rate to one of them. It accepts a comma-separated list of `evidence`,
+`planner`, `subagent`, `retrieval` and `compaction`, plus `none` (the default,
+everything on) and `all`. Sub-agents inherit the parent's arm, and the arm name
+is written to the `--metrics` file so a recorded run is self-describing.
+
+```sh
+reasonix run --ablate evidence,planner --metrics run.json "fix the failing test"
+```
+
+This is a measurement tool, not a tuning knob: switching a subsystem off makes
+Reasonix worse at the work it was added for.
+
 ### Output formats
 
 | Format | Behavior |
@@ -399,7 +414,11 @@ the displayed list matches the commands the TUI accepts.
 | `/output-style` | Select an answer style. |
 | `/verbose` | Toggle expanded reasoning display. |
 | `/sandbox` | Inspect sandbox status. |
-| `/goal` | Start, inspect, or clear a long-running goal. |
+| `/goal [objective]` | Start a long-running goal, or inspect the current goal and its budget runtime. |
+| `/goal status` | Show the active goal plus the turn/token/no-progress budget summary and the last continuation/evaluator reason. |
+| `/goal pause` | Pause the running goal (keeps todos, Delivery checkpoint, and budget). |
+| `/goal resume` | Resume a paused or blocked goal (budget pauses add one more budget slice). |
+| `/goal clear` | End goal mode permanently. |
 | `/docs [question]` | Show the embedded corpus identity, or search it locally and ask the configured AI to answer from version-matched evidence. |
 | `/reasonix:docs [question]` | Preferred built-in fallback when an existing custom command or compatible plugin/skill alias owns `/docs`; if this spelling is also owned, the menu selects the next free `reasonix:`-qualified name without displacing it. |
 | `/mcp`, `/skills`, `/hooks` | Inspect and manage extensions. |

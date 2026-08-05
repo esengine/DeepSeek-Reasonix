@@ -527,8 +527,23 @@ func TestUndoRejectsPermissionOnlyChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	before, err := os.Stat(path)
+	if err != nil {
 		t.Fatal(err)
+	}
+	wantMode := os.FileMode(0o600)
+	if before.Mode().Perm() == wantMode {
+		wantMode = 0o644
+	}
+	if err := os.Chmod(path, wantMode); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed.Mode().Perm() == before.Mode().Perm() {
+		t.Skip("filesystem does not expose permission-only changes")
 	}
 	if _, err := store.UndoRewind(result.TransactionID, nil); err == nil {
 		t.Fatal("undo overwrote a permission-only user change")
@@ -537,8 +552,8 @@ func TestUndoRejectsPermissionOnlyChange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("mode after refused undo = %o, want 600", got)
+	if got := info.Mode().Perm(); got != wantMode {
+		t.Fatalf("mode after refused undo = %o, want %o", got, wantMode)
 	}
 }
 

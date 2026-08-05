@@ -8,6 +8,33 @@ branch.
 
 ### Added
 
+- Added the structured Goal completion protocol: the always-registered
+  `update_goal` tool (continue/complete/blocked with reason and next_action)
+  replaces the `[goal:*]` footer markers. The Goal FSM is now the exclusive
+  cross-turn decision point and validates every complete claim against Delivery
+  readiness; when the model submits no report, an independent bounded evaluator
+  (recovery_model → guardian_model → main model, no tools/history, usage
+  attributed to `goal-evaluator`) judges the turn once, and any evaluator
+  failure pauses the goal instead of continuing silently.
+- Added Goal budget classes with safe pauses: simple 10 turns / 200k tokens,
+  write 20 turns / 400k tokens, AutoResearch 40 turns / 800k tokens, and a
+  4-turn no-host-verifiable-progress gate. Pauses keep all Goal state; `/goal
+  resume` continues and adds one slice of the current class when the pause was
+  budget-related. `/goal status` shows the full turn/token/no-progress runtime,
+  and `/goal pause` manually suspends a running Goal.
+- Added the `goalRuntime` nested view to the desktop Meta, the remote protocol
+  (`session/goal/pause` operation, `goalRuntime` DTO on session meta), and the
+  ACP status payload; the desktop Composer goal menu shows the runtime summary
+  with distinct pause/end/resume actions.
+
+### Changed
+
+- Delivery no longer retries final-answer readiness with hidden model messages:
+  a plain Delivery run ends on the first unsatisfied final answer and surfaces
+  the recovery card, while a Goal + Delivery run has the Goal FSM absorb the
+  failure and continue under budget with the missing requirements as the next
+  turn's prompt. Historical `[goal:*]` footers are stripped from old transcripts
+  for display only and never participate in state decisions.
 - Added a **Remote SSH** module (VS Code Remote-SSH style): a user-global
   `[remote]` host config, `reasonix remote` CLI (add/list/remove/import/test/
   connect/status/forward/serve/fs) and `/remote` slash command, an SSH transport
@@ -69,6 +96,11 @@ branch.
 
 ### Fixed
 
+- Fixed long parallel sub-agent research being silently lost when combined
+  `parallel_tasks` or `fleet` answers exceeded the single-tool output limit.
+  Persisted sessions now keep each child transcript independently, return a
+  bounded fair preview plus stable reference for every result, and page full
+  answers through the conversation-scoped `read_subagent_result` tool.
 - Fixed Remote Workbench failing with only `initialize: workbench-desktop:
   connection closed` on fresh or cross-platform SSH hosts. Desktop now proves
   the exact Host CLI Build ID, provisions the matching verified release without

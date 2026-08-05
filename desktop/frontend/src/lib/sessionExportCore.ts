@@ -76,6 +76,10 @@ export function transformExportMarkdownUrl(
 ): string {
   const trimmed = value.trim();
   if (key === "src" && isSafeInlineExportImage(trimmed)) return trimmed;
+  // Local-path anchors (file:/// from remarkLocalPathLinks) are kept so an
+  // exported document stays clickable; everything else goes through the
+  // default transform which blanks javascript: etc.
+  if (key === "href" && trimmed.startsWith("file:///")) return trimmed;
   return fallback(value);
 }
 

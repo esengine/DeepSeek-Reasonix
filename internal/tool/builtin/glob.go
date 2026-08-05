@@ -3,11 +3,13 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bmatcuk/doublestar/v4"
 
@@ -35,7 +37,7 @@ func (globTool) Description() string {
 }
 
 func (globTool) Schema() json.RawMessage {
-	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern (supports ** for recursive matching)"}},"required":["pattern"]}`)
+	return json.RawMessage(`{"type":"object","properties":{"pattern":{"type":"string","description":"Glob pattern (supports ** for recursive matching)"},"timeout_seconds":{"type":"integer","description":"Walk timeout in seconds (default 30, max 300); partial results are returned when it expires"}},"required":["pattern"]}`)
 }
 
 func (globTool) ReadOnly() bool { return true }
@@ -46,11 +48,29 @@ func (globTool) SnipHint() tool.SnipHint {
 	return tool.SnipHint{Head: 80, Tail: 8, HeadChars: 10000, TailChars: 1000}
 }
 
-const globMaxResults = 1000
+const (
+	globMaxResults     = 1000
+	globDefaultTimeout = 30 * time.Second
+	globMaxTimeout     = 300 * time.Second
+)
+
+// globTimeout clamps a caller-supplied second count to a sane bound; 0 (omitted)
+// falls back to the default so a deep tree can't hold a turn open for minutes.
+func globTimeout(sec int) time.Duration {
+	switch {
+	case sec <= 0:
+		return globDefaultTimeout
+	case time.Duration(sec)*time.Second > globMaxTimeout:
+		return globMaxTimeout
+	default:
+		return time.Duration(sec) * time.Second
+	}
+}
 
 func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
-		Pattern string `json:"pattern"`
+		Pattern        string `json:"pattern"`
+		TimeoutSeconds int    `json:"timeout_seconds"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
 		return "", fmt.Errorf("invalid args: %w", err)
@@ -58,6 +78,9 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	if p.Pattern == "" {
 		return "", fmt.Errorf("pattern is required")
 	}
+	to := globTimeout(p.TimeoutSeconds)
+	ctx, cancel := context.WithTimeout(ctx, to)
+	defer cancel()
 	// Save the original pattern before resolveIn prepends workDir, so the
 	// simple-filename recursive-fallback check below works on the raw input
 	// — not the already-joined absolute path that always contains separators.
@@ -70,7 +93,7 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	// If the pattern contains **, use recursive matching via doublestar semantics
 	// while retaining Reasonix's cancellation and read-forbid pruning.
 	if strings.Contains(p.Pattern, "**") {
-		return g.globRecursive(ctx, p.Pattern, displayPattern, rp)
+		return g.globRecursive(ctx, p.Pattern, displayPattern, rp, to)
 	}
 
 	// For patterns without **, try filepath.Glob first. If no matches are
@@ -89,7 +112,7 @@ func (g globTool) Execute(ctx context.Context, args json.RawMessage) (string, er
 	matches = filterForbidMatches(matches, g.forbidRoots)
 	if len(matches) == 0 && !strings.ContainsAny(rawPattern, "/\\") {
 		fallback := filepath.Join(g.workDir, "**", rawPattern)
-		return g.globRecursive(ctx, fallback, fallback, ResolvedPath{})
+		return g.globRecursive(ctx, fallback, fallback, ResolvedPath{}, to)
 	}
 	if len(matches) == 0 {
 		return "(no matches)", nil
@@ -117,8 +140,9 @@ func filterForbidMatches(matches, forbidRoots []string) []string {
 
 // globRecursive handles patterns containing ** by walking the stable non-meta
 // prefix and matching relative paths with doublestar. Accepts a context so the
-// walk can be interrupted on cancellation.
-func (g globTool) globRecursive(ctx context.Context, pattern, displayPattern string, rp ResolvedPath) (string, error) {
+// walk can be interrupted on cancellation, and to so an expired deadline can be
+// reported as incomplete results rather than as a failure.
+func (g globTool) globRecursive(ctx context.Context, pattern, displayPattern string, rp ResolvedPath, to time.Duration) (string, error) {
 	rootSlash, relPattern := doublestar.SplitPattern(filepath.ToSlash(filepath.Clean(pattern)))
 	root := filepath.FromSlash(rootSlash)
 	if relPattern == "" {
@@ -140,7 +164,7 @@ func (g globTool) globRecursive(ctx context.Context, pattern, displayPattern str
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if ctx.Err() != nil {
-			return ctx.Err() // abort promptly on cancel — a huge tree is interruptible
+			return ctx.Err() // abort promptly on cancel/deadline — a huge tree is interruptible
 		}
 		if err != nil {
 			return nil // skip unreadable entries
@@ -167,7 +191,8 @@ func (g globTool) globRecursive(ctx context.Context, pattern, displayPattern str
 		}
 		return nil
 	})
-	if err != nil {
+	timedOut := errors.Is(err, context.DeadlineExceeded)
+	if err != nil && !timedOut {
 		if rp.External {
 			return "", fmt.Errorf("glob %q: %s", displayPattern, rp.ErrorText(err))
 		}
@@ -175,13 +200,19 @@ func (g globTool) globRecursive(ctx context.Context, pattern, displayPattern str
 	}
 
 	if len(matches) == 0 {
+		if timedOut {
+			return fmt.Sprintf("(no matches; timed out after %s — narrow the pattern or raise timeout_seconds)", to), nil
+		}
 		return "(no matches)", nil
 	}
 	sort.Strings(matches)
 	matches = displayGlobMatches(matches, rp)
 	result := strings.Join(matches, "\n")
-	if truncated {
+	switch {
+	case truncated:
 		result += fmt.Sprintf("\n... (truncated at %d results)", globMaxResults)
+	case timedOut:
+		result += fmt.Sprintf("\n... (timed out after %s; results incomplete — narrow the pattern or raise timeout_seconds)", to)
 	}
 	return result, nil
 }

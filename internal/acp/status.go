@@ -70,6 +70,21 @@ type SessionRuntimeStateProvider interface {
 type ReasonixStatusGoal struct {
 	Status    string `json:"status"`
 	Objective string `json:"objective,omitempty"`
+	// Runtime is the optional Goal budget/runtime summary; absent for old
+	// hosts or when no goal is active.
+	Runtime *ReasonixGoalRuntime `json:"runtime,omitempty"`
+}
+
+type ReasonixGoalRuntime struct {
+	TurnsUsed        int    `json:"turnsUsed"`
+	TurnsLimit       int    `json:"turnsLimit"`
+	TokensUsed       int    `json:"tokensUsed"`
+	TokensLimit      int    `json:"tokensLimit"`
+	NoProgressTurns  int    `json:"noProgressTurns"`
+	NoProgressLimit  int    `json:"noProgressLimit"`
+	LastReason       string `json:"lastReason,omitempty"`
+	StopCause        string `json:"stopCause,omitempty"`
+	BudgetExtensions int    `json:"budgetExtensions"`
 }
 
 type ReasonixTurnOutcome struct {
@@ -621,9 +636,24 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 	t := telemetry.snapshot()
 	goalStatus := "none"
 	goalObjective := ""
+	var goalRuntime *ReasonixGoalRuntime
 	if ctrl != nil {
 		goalStatus = normalizeGoalStatus(ctrl.GoalStatus())
 		goalObjective = clipStatusText(ctrl.Goal(), 16_384)
+		if strings.TrimSpace(goalObjective) != "" {
+			rt := ctrl.GoalRuntime()
+			goalRuntime = &ReasonixGoalRuntime{
+				TurnsUsed:        rt.TurnsUsed,
+				TurnsLimit:       rt.TurnsLimit,
+				TokensUsed:       rt.TokensUsed,
+				TokensLimit:      rt.TokensLimit,
+				NoProgressTurns:  rt.NoProgressTurns,
+				NoProgressLimit:  rt.NoProgressLimit,
+				LastReason:       rt.LastReason,
+				StopCause:        rt.StopCause,
+				BudgetExtensions: rt.BudgetExtensions,
+			}
+		}
 	}
 	if t.goalOverride != "" {
 		goalStatus = t.goalOverride
@@ -662,6 +692,7 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 		Goal: ReasonixStatusGoal{
 			Status:    goalStatus,
 			Objective: goalObjective,
+			Runtime:   goalRuntime,
 		},
 		Phase:          phase,
 		TurnOutcome:    t.turnOutcome,

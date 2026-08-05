@@ -48,6 +48,20 @@ function distTags(name) {
   return JSON.parse(execFileSync("npm", ["view", name, "dist-tags", "--json"], { encoding: "utf8" }));
 }
 
+function removeStagingTag(name) {
+  try {
+    execFileSync("npm", ["dist-tag", "rm", name, stagingTag], { encoding: "utf8" });
+  } catch (error) {
+    const detail = [error?.message, error?.stdout, error?.stderr]
+      .filter(Boolean)
+      .join("\n");
+    if (!/\bE403\b|\b403 Forbidden\b/.test(detail)) throw error;
+    console.warn(
+      `npm refused cleanup of ${name} dist-tag ${stagingTag} with E403; official aliases are already verified`,
+    );
+  }
+}
+
 async function waitForOfficialAliases(name) {
   let tags = {};
   for (let attempt = 1; attempt <= verifyAttempts; attempt += 1) {
@@ -88,6 +102,6 @@ for (const name of packages) {
   }
   const tags = await waitForOfficialAliases(name);
   if (tags[stagingTag] === version) {
-    execFileSync("npm", ["dist-tag", "rm", name, stagingTag], { stdio: "inherit" });
+    removeStagingTag(name);
   }
 }

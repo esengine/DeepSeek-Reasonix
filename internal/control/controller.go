@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
 	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
@@ -38,6 +39,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/goaleval"
 	"reasonix/internal/guardian"
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
@@ -85,6 +87,13 @@ type Controller struct {
 	// recoveryGate is the shared Auto Guard state for this controller.
 	// nil when the feature is not wired for this controller.
 	recoveryGate *recovery.Gate
+	// evaluator is the bounded Goal completion evaluator consulted when the
+	// working model submits no update_goal report. nil fails closed: the goal
+	// pauses instead of defaulting to continue.
+	evaluator goaleval.Evaluator
+	// goalUsageTee accounts billable usage events into the active goal turn's
+	// token budget. It wraps the public sink when the caller didn't provide one.
+	goalUsageTee *goalUsageTee
 	sink         event.Sink
 	policy       permission.Policy
 	// subagentGate is the shared gate every headless-only sub-agent surface
@@ -172,6 +181,7 @@ type Controller struct {
 	// entering the provider-visible registry (Balanced dual-model Planner).
 	proxyToolsFn   func() map[string][]plugin.CachedTool
 	runtimeProfile capability.Profile
+	ablation       ablation.Set
 
 	// goals owns the active goal's FSM (status, intercepts, idle/turn counters)
 	// and its persistence, behind its own mutex so a per-turn goal save never
@@ -378,8 +388,12 @@ type Options struct {
 	// RecoveryHeadless blocks mutations that need confirmation instead of
 	// waiting forever when no human decision channel exists.
 	RecoveryHeadless bool
-	Sink             event.Sink
-	Policy           permission.Policy
+	// GoalEvaluator is the optional bounded Goal completion evaluator consulted
+	// when the working model submits no update_goal report. nil fails closed:
+	// the goal pauses instead of defaulting to continue.
+	GoalEvaluator goaleval.Evaluator
+	Sink          event.Sink
+	Policy        permission.Policy
 	// SubagentGate is the shared, mutable gate every headless-only sub-agent
 	// surface (task, writer-capable skill sub-agents, planner) reads from. Nil
 	// disables gating for those surfaces same as before this field existed.
@@ -478,13 +492,24 @@ type Options struct {
 	// RuntimeProfile selects capability routing/filtering behavior. Empty keeps
 	// the backward-compatible Balanced profile.
 	RuntimeProfile capability.Profile
+	// Ablation switches subsystems off for a benchmark arm. The zero value runs
+	// everything.
+	Ablation ablation.Set
 }
 
-// New builds a Controller. A nil Sink is replaced with event.Discard.
+// New builds a Controller. A nil Sink is replaced with event.Discard. When the
+// caller did not already provide a goalUsageTee (see NewGoalUsageTee), the
+// public sink is wrapped in one so billable usage can be accounted to Goal
+// budgets; frontends observe the same forwarded stream either way.
 func New(opts Options) *Controller {
 	sink := opts.Sink
 	if nilutil.IsNil(sink) {
 		sink = event.Discard
+	}
+	usageTee, ok := sink.(*goalUsageTee)
+	if !ok {
+		usageTee = NewGoalUsageTee(sink).(*goalUsageTee)
+		sink = usageTee
 	}
 	pluginCtx := opts.PluginCtx
 	if pluginCtx == nil {
@@ -502,6 +527,8 @@ func New(opts Options) *Controller {
 		executor:                          opts.Executor,
 		guardianSess:                      opts.Guardian,
 		guardianPath:                      guardian.PathFor(opts.SessionPath),
+		evaluator:                         opts.GoalEvaluator,
+		goalUsageTee:                      usageTee,
 		sink:                              sink,
 		policy:                            opts.Policy,
 		subagentGate:                      opts.SubagentGate,
@@ -536,6 +563,7 @@ func New(opts Options) *Controller {
 		mcpConfigureSpec:                  opts.MCPConfigureSpec,
 		capabilityRuntime:                 opts.CapabilityRuntime,
 		runtimeProfile:                    runtimeProfile,
+		ablation:                          opts.Ablation,
 		workspaceRoot:                     opts.WorkspaceRoot,
 		externalFolderToolRefs:            opts.ExternalFolderToolRefs,
 		approval:                          newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),
@@ -1014,22 +1042,6 @@ func (c *Controller) runSubagentSkillSlash(sk skill.Skill, task, raw, display st
 	})
 }
 
-// toolWasCalledLastTurn reports whether the most recent assistant message
-// contained any tool calls, indicating the agent made observable progress.
-func (c *Controller) toolWasCalledLastTurn() bool {
-	msgs := c.History()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
-		if m.Role == provider.RoleAssistant {
-			return len(m.ToolCalls) > 0
-		}
-		if m.Role == provider.RoleUser {
-			return false
-		}
-	}
-	return false
-}
-
 func (c *Controller) stopGoal(status string) {
 	path, data, ok := c.goals.stop(status, c.goalTodos())
 	c.persistGoalState(path, data, ok)
@@ -1372,7 +1384,12 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			})
 			return
 		}
-		c.notice("unknown command: " + trimmed)
+		// Unknown slash input is prose more often than a typo ("/etc/hosts
+		// looks wrong", pasted paths, half-remembered commands) — send it as a
+		// regular message instead of dead-ending the submission, with a notice
+		// so real typos are still visible (#5756).
+		c.notice("unknown command: " + trimmed + " — sent as a regular message")
+		runRefTurn(input, display)
 	default:
 		runRefTurn(input, display)
 	}
@@ -1409,12 +1426,30 @@ func (c *Controller) applyGoalCommand(input, display string) bool {
 	case GoalCommandClear:
 		c.ClearGoal()
 		c.notice(i18n.M.GoalCleared)
+	case GoalCommandPause:
+		if !c.PauseGoal() {
+			c.notice(i18n.M.GoalNotRunning)
+		}
+	case GoalCommandResume:
+		if !c.ResumeGoal() {
+			c.notice(i18n.M.GoalNotPaused)
+		}
 	default:
 		goal := c.Goal()
 		if strings.TrimSpace(goal) == "" {
 			c.notice(i18n.M.GoalEmpty)
-		} else {
-			c.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
+			break
+		}
+		rt := c.GoalRuntime()
+		c.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
+		c.notice(fmt.Sprintf(i18n.M.GoalRuntimeFmt,
+			rt.TurnsUsed, rt.TurnsLimit, rt.TokensUsed, rt.TokensLimit,
+			rt.NoProgressTurns, rt.NoProgressLimit, rt.BudgetExtensions))
+		if rt.LastReason != "" {
+			c.noticeDetail(i18n.M.GoalRuntimeLastReason, rt.LastReason)
+		}
+		if rt.StopCause != "" {
+			c.notice(fmt.Sprintf(i18n.M.GoalPausedFmt, rt.StopCause))
 		}
 	}
 	return true
@@ -1503,7 +1538,7 @@ func (c *Controller) applyPlanExec(input, display string) {
 }
 
 // prometheusPrompt is the strategic planner system prompt.
-const prometheusPrompt = "You are Prometheus, a strategic planner. Interview the user one question at a time. Cover: scope, modules, files, constraints, tests. When ready, output a numbered plan with each step tagged by module. End with [goal:complete]. Do not implement.\n\nFor independent research directions, use parallel_tasks before planning."
+const prometheusPrompt = "You are Prometheus, a strategic planner. Interview the user one question at a time. Cover: scope, modules, files, constraints, tests. When ready, output a numbered plan with each step tagged by module. End by calling update_goal with status complete. Do not implement.\n\nFor independent research directions, use parallel_tasks before planning."
 
 // applyPrometheus starts an interactive planning interview, inspired by OMO's
 // Prometheus agent. It enters goal mode with a structured interview prompt.
@@ -1744,7 +1779,7 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 	c.markInFlightTurn(startMessages, true)
 	defer c.clearInFlightTurn()
 	ctx = c.withPlannerTurnMetadata(ctx, rawInput, false, startMessages)
-	err = c.runner.Run(ctx, c.withCapabilityRoute(input, rawInput))
+	err = c.runner.Run(ctx, c.withCapabilityRoute(ctx, input, rawInput))
 	return err
 }
 
@@ -2304,9 +2339,10 @@ func (c *Controller) PlanMode() bool {
 	return c.planMode
 }
 
-// GoalStrict enables or disables strict goal mode. In strict mode the agent
-// cannot override an incomplete-todo intercept — it must actually finish or
-// update all items before [goal:complete] is accepted.
+// GoalStrict enables or disables strict goal mode. Since the structured
+// protocol, every complete claim is validated against host readiness and an
+// incomplete-todo intercept can never be overridden, so the flag is persisted
+// for compatibility with older frontends but no longer changes FSM behavior.
 func (c *Controller) GoalStrict(strict bool) {
 	path, data, ok := c.goals.setStrict(strict, c.goalTodos())
 	c.persistGoalState(path, data, ok)
@@ -2364,17 +2400,86 @@ func (c *Controller) SetGoalWithResearchMode(goal string, researchMode GoalResea
 }
 
 // ResumeGoal re-enters a recoverable blocked/stopped Goal without resetting its
-// delivery evidence scope or AutoResearch identity.
+// delivery evidence scope or AutoResearch identity. A budget-paused Goal gets
+// one extra slice of its budget class; accumulated consumption is preserved.
 func (c *Controller) ResumeGoal() bool {
-	path, data, persist, resumed := c.goals.resume(c.goalTodos())
+	path, data, persist, resumed, extended := c.goals.resume(c.goalTodos())
 	if !resumed {
 		return false
 	}
 	c.persistGoalState(path, data, persist)
+	if extended {
+		c.notice(i18n.M.GoalBudgetExtended)
+	}
 	if c.executor != nil {
 		c.executor.RestoreDeliveryCheckpoint(c.goals.deliveryState())
 	}
 	return true
+}
+
+// PauseGoal suspends a running Goal without losing its todo list, Delivery
+// checkpoint, or budget history; ResumeGoal restores it. Returns false when no
+// running Goal exists.
+func (c *Controller) PauseGoal() bool {
+	if !c.goals.active() {
+		return false
+	}
+	path, data, ok := c.goals.pauseFor(stopCauseManual, i18n.M.GoalPausedReason, c.goalTodos())
+	c.persistGoalState(path, data, ok)
+	c.notice(i18n.M.GoalPaused)
+	return true
+}
+
+// GoalRuntime returns the active Goal's budget/runtime summary for frontends.
+func (c *Controller) GoalRuntime() GoalRuntimeView {
+	return c.goals.runtimeView()
+}
+
+// goalEvaluatorEvidence assembles the bounded evaluator's evidence: the goal
+// contract, the current assistant final, a todo/readiness summary, the
+// AutoResearch success-criteria summary, turn/budget state, and the last
+// continuation reason. Every field is treated as untrusted by the evaluator.
+func (c *Controller) goalEvaluatorEvidence() goaleval.GoalEvidence {
+	goal, _, mode, taskID := c.goals.snapshot()
+	ev := goaleval.GoalEvidence{
+		GoalContract:           goal,
+		LastContinuationReason: c.goals.lastContinuationReasonText(),
+	}
+	if c.executor != nil {
+		ev.AssistantFinal = lastAssistantText(c.History())
+		todos := c.goalTodos()
+		incomplete := 0
+		for _, t := range todos {
+			if t.Status != "completed" {
+				incomplete++
+			}
+		}
+		rr := c.executor.ReadinessResult()
+		readinessText := "ready"
+		if rr.Reason != "" {
+			readinessText = rr.Reason
+		}
+		ev.TodoSummary = fmt.Sprintf("todos: %d total, %d incomplete; delivery readiness: %s", len(todos), incomplete, readinessText)
+	}
+	if c.autoResearch != nil && strings.TrimSpace(taskID) != "" {
+		if summary, err := c.autoResearch.Summary(taskID); err == nil {
+			ev.AutoResearchSummary = fmt.Sprintf("task %s: iteration %d, %d open success criteria, next required action: %s",
+				summary.TaskID, summary.Iteration, len(summary.OpenCriteria), summary.NextRequiredAction)
+		}
+	}
+	ev.TurnStatus = c.goals.budgetStatusText() + "; research mode: " + goalResearchModeText(mode)
+	return ev
+}
+
+func goalResearchModeText(mode GoalResearchMode) string {
+	switch mode {
+	case GoalResearchOn:
+		return "on"
+	case GoalResearchOff:
+		return "off"
+	default:
+		return "auto"
+	}
 }
 
 func (c *Controller) persistGoalDeliveryCheckpoint() {
@@ -2571,7 +2676,7 @@ func parseAutoResearchEvidenceBlocks(text string) []autoResearchEvidenceBlock {
 }
 
 func autoResearchDirectionSummary(text string) string {
-	text = stripAutoResearchEvidenceBlocks(text)
+	text = agent.StripAutoResearchEvidenceBlocks(text)
 	for _, line := range strings.Split(text, "\n") {
 		line = strings.TrimSpace(line)
 		lower := strings.ToLower(line)
@@ -2584,25 +2689,6 @@ func autoResearchDirectionSummary(text string) string {
 		return line
 	}
 	return "turn completed"
-}
-
-func stripAutoResearchEvidenceBlocks(text string) string {
-	var b strings.Builder
-	rest := text
-	for {
-		start := strings.Index(rest, autoResearchEvidenceOpen)
-		if start < 0 {
-			b.WriteString(rest)
-			return b.String()
-		}
-		b.WriteString(rest[:start])
-		afterOpen := rest[start+len(autoResearchEvidenceOpen):]
-		end := strings.Index(afterOpen, autoResearchEvidenceClose)
-		if end < 0 {
-			return b.String()
-		}
-		rest = afterOpen[end+len(autoResearchEvidenceClose):]
-	}
 }
 
 func (c *Controller) autoResearchReadinessFailure() string {

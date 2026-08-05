@@ -118,6 +118,10 @@ async function askDeepSeek(payload, retry = true) {
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model,
+      // Release notes need deterministic structured output, not hidden chain of
+      // thought. Thinking tokens share the generation budget with content and
+      // can otherwise leave response_format JSON empty or truncated.
+      thinking: { type: "disabled" },
       temperature: 0,
       max_tokens: 8000,
       response_format: { type: "json_object" },
@@ -144,10 +148,13 @@ Return guides only for supplied documentation URLs. Mention upgrade action or ri
   });
   if (!response.ok) throw new Error(`DeepSeek API failed: ${response.status} ${await response.text()}`);
   const data = await response.json();
+  const choice = data.choices?.[0];
   try {
-    return extractJson(data.choices?.[0]?.message?.content);
+    return extractJson(choice?.message?.content);
   } catch (error) {
-    if (!retry) throw error;
+    if (!retry) {
+      throw new Error(`${error.message} (finish_reason=${choice?.finish_reason || "unknown"})`);
+    }
     return askDeepSeek(payload, false);
   }
 }

@@ -2430,3 +2430,71 @@ func TestBotSessionDirUsesProjectWorkspaceRoot(t *testing.T) {
 		t.Fatalf("project session dir = %q, want project-specific dir", got)
 	}
 }
+
+// A persisted session_mappings binding must resolve to the mapped session file
+// at session-profile time — before this, the binding was display-only and every
+// gateway restart opened a fresh session for the chat (#6917, #6934).
+func TestSessionProfileConsumesPersistedMapping(t *testing.T) {
+	dir := t.TempDir()
+	mapped := filepath.Join(dir, "chat.jsonl")
+	if err := os.WriteFile(mapped, []byte(`{"role":"user","content":"hi"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gw := &BotGateway{
+		cfg: GatewayConfig{
+			ConnectionChannels: map[string]ChannelConfig{
+				"conn-1": {SessionMappings: []SessionMapping{{
+					RemoteID:  "chat-42",
+					SessionID: "path:" + mapped,
+				}}},
+			},
+		},
+		logger:           slog.New(slog.NewTextHandler(io.Discard, nil)),
+		sessionOverrides: map[string]sessionRuntimeOverride{},
+	}
+	msg := InboundMessage{ConnectionID: "conn-1", ChatID: "chat-42", ChatType: ChatDM}
+
+	profile := gw.sessionProfileForMessage(msg)
+	if canonicalBotPath(profile.sessionPath) != canonicalBotPath(mapped) {
+		t.Fatalf("profile.sessionPath = %q, want mapped %q", profile.sessionPath, mapped)
+	}
+	if !profile.sessionPathOptional {
+		t.Fatal("mapping-derived path must be optional (degradable), not an attach-style hard binding")
+	}
+
+	// A missing target quietly degrades to normal creation.
+	if err := os.Remove(mapped); err != nil {
+		t.Fatal(err)
+	}
+	profile = gw.sessionProfileForMessage(msg)
+	if profile.sessionPath != "" {
+		t.Fatalf("missing mapped file should resolve to empty path, got %q", profile.sessionPath)
+	}
+
+	// An /attach override outranks the mapping.
+	gw.sessionOverrides[BuildSessionKey(msg.Session())] = sessionRuntimeOverride{sessionPath: filepath.Join(dir, "attached.jsonl")}
+	profile = gw.sessionProfileForMessage(msg)
+	if profile.sessionPathOptional {
+		t.Fatal("attach override must stay a hard binding")
+	}
+}
+
+// A state that degraded off its unavailable mapped session must not be torn
+// down by the next message re-resolving the mapping — that would spawn a new
+// session file per message.
+func TestDegradedMappingStateStaysStable(t *testing.T) {
+	s := &sessionState{mappingDegraded: true, sessionPath: "", ctrl: stubPathController{}}
+	profile := sessionRuntimeProfile{sessionPath: "/some/mapped.jsonl", sessionPathOptional: true}
+	if !sessionStateMatchesRuntime(s, profile) {
+		t.Fatal("degraded state must keep matching an optional mapped profile")
+	}
+	hard := sessionRuntimeProfile{sessionPath: "/some/mapped.jsonl"}
+	if sessionStateMatchesRuntime(s, hard) {
+		t.Fatal("an explicit attach must still force a rebuild")
+	}
+}
+
+type stubPathController struct{ botController }
+
+func (stubPathController) SessionPath() string   { return "" }
+func (stubPathController) WorkspaceRoot() string { return "" }

@@ -48,7 +48,7 @@ func TestSchemaContainsRegistryErrorsEventsAndFrozenLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(document.Methods) != 78 || len(document.Errors) != 51 {
+	if len(document.Methods) != 79 || len(document.Errors) != 51 {
 		t.Fatalf("schema contains %d methods/%d errors", len(document.Methods), len(document.Errors))
 	}
 	for i := 1; i < len(document.Methods); i++ {

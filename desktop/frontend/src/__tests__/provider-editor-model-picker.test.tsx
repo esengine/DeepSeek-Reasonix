@@ -5,7 +5,7 @@ import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { LocaleProvider } from "../lib/i18n";
-import { ProviderEditor, ProviderEditorModelPicker } from "../components/SettingsPanel";
+import { ProviderEditor, ProviderEditorModelPicker, providerSupportsServerWebSearch } from "../components/SettingsPanel";
 import type { ProviderView } from "../lib/types";
 
 let passed = 0;
@@ -45,13 +45,14 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 window.scrollTo = () => {};
 
-function renderPicker(candidates: string[]) {
+function renderPicker(candidates: string[], visionCapability: "configurable" | "unsupported" = "configurable") {
   return (
     <LocaleProvider>
       <ProviderEditorModelPicker
         candidates={candidates}
         selectedModels={[]}
         visionModels={[]}
+        visionCapability={visionCapability}
         contextWindows={{}}
         disabled={false}
         onToggleModel={() => undefined}
@@ -88,6 +89,20 @@ try {
 ok(!threw, "model picker can render after async model fetch returns candidates");
 ok(rootEl.textContent?.includes("zen-v1") === true, "model picker shows fetched custom provider models");
 
+await act(async () => {
+  root.render(renderPicker(["deepseek-v4-flash"], "unsupported"));
+  await flushPromises();
+});
+ok(rootEl.textContent?.includes("No image input") === true, "known text-only DeepSeek models show a read-only image capability");
+ok(rootEl.querySelectorAll('input[type="checkbox"]').length === 1, "text-only model card does not render a second image checkbox");
+ok(providerSupportsServerWebSearch("responses", "https://api.deepseek.com"), "DeepSeek Responses exposes server-side web search");
+ok(providerSupportsServerWebSearch("anthropic", "https://api.deepseek.com/anthropic"), "DeepSeek Anthropic exposes server-side web search");
+ok(!providerSupportsServerWebSearch("openai", "https://api.deepseek.com"), "DeepSeek Chat Completions does not expose server-side web search");
+ok(!providerSupportsServerWebSearch("responses", "https://relay.deepseek.com"), "DeepSeek-like subdomains do not inherit official defaults");
+ok(!providerSupportsServerWebSearch("responses", "https://api.deepseek.com/anthropic"), "Responses rejects the Anthropic base path");
+ok(!providerSupportsServerWebSearch("anthropic", "https://api.deepseek.com"), "Anthropic requires its documented base path");
+ok(!providerSupportsServerWebSearch("responses", "http://api.deepseek.com"), "insecure DeepSeek URLs do not inherit official defaults");
+
 const builtInProvider: ProviderView = {
   name: "deepseek",
   builtIn: true,
@@ -107,6 +122,16 @@ const builtInProvider: ProviderView = {
   thinking: "",
   supportedEfforts: [],
   defaultEffort: "",
+};
+
+const deepSeekResponsesProvider: ProviderView = {
+  ...builtInProvider,
+  name: "deepseek-responses",
+  builtIn: false,
+  kind: "responses",
+  models: ["deepseek-v4-flash"],
+  default: "deepseek-v4-flash",
+  webSearch: true,
 };
 
 function renderProviderEditor(initial?: ProviderView) {
@@ -140,6 +165,19 @@ try {
 
 ok(!editorThrew, "provider editor can switch from built-in to custom without changing hook order");
 ok(rootEl.textContent?.includes("OpenAI-compatible") === true, "provider editor renders the custom provider fields after the switch");
+
+await act(async () => {
+  root.render(<div />);
+  await flushPromises();
+});
+await act(async () => {
+  root.render(renderProviderEditor(deepSeekResponsesProvider));
+  await flushPromises();
+});
+const webSearchSwitch = rootEl.querySelector<HTMLInputElement>('input[role="switch"]');
+ok(rootEl.textContent?.includes("Server-side web search") === true, "DeepSeek Responses editor separates service capabilities from model selection");
+ok(webSearchSwitch?.checked === true, "curated DeepSeek Responses capability is enabled in the editor");
+ok(rootEl.textContent?.includes("No image input") === true, "DeepSeek Responses editor labels image input as unsupported");
 
 await act(async () => {
   root.unmount();

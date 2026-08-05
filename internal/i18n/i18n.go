@@ -203,6 +203,7 @@ type Messages struct {
 	SlashTodoCleared             string // "/todo" dismissed the pinned task list
 	SlashUnavailable             string // the command is configured off (no callback wired)
 	SlashUnknown                 string // shown when the user types an unrecognised "/cmd"
+	SlashUnknownSentAsMessage    string // suffix: the unrecognised "/cmd" line was sent as a regular message
 	SlashHelp                    string // listed commands
 	SlashPromptEmpty             string // an MCP prompt returned no text to send
 	SlashMCPNone                 string // /mcp when no MCP servers are connected
@@ -327,6 +328,14 @@ type Messages struct {
 	GoalCurrentFmt            string
 	GoalSetFmt                string
 	GoalCleared               string
+	GoalNotRunning            string
+	GoalNotPaused             string
+	GoalPaused                string
+	GoalPausedReason          string
+	GoalPausedFmt             string // %s = stop cause
+	GoalBudgetExtended        string
+	GoalRuntimeFmt            string // turns, limits, no-progress, extensions
+	GoalRuntimeLastReason     string
 	ModelSwitchUnavailable    string
 	ModelSwitchBusy           string
 	ModelAlreadyOnFmt         string

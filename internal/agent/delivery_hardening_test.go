@@ -120,6 +120,131 @@ func TestReadOnlyRegistryDisarmsMutationExpectation(t *testing.T) {
 	}
 }
 
+func TestDeliveryResolvedReadOnlyBashDoesNotArmMutationReadiness(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(stubBash{})
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{toolCallChunk("pwd-base", "bash", `{"command":"basename \"$(pwd)\""}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "workspace basename inspected"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	if err := a.Run(context.Background(), "inspect and report the current workspace basename"); err != nil {
+		t.Fatalf("resolved read-only delivery command: %v", err)
+	}
+	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+		t.Fatal("resolved read-only bash was recorded as a mutation")
+	}
+	msgs := a.session.Snapshot()
+	var resolved bool
+	for _, msg := range msgs {
+		for _, call := range msg.ToolCalls {
+			if call.ID == "pwd-base" && call.ResolvedReadOnly != nil && *call.ResolvedReadOnly {
+				resolved = true
+			}
+		}
+	}
+	if !resolved {
+		t.Fatal("session receipt did not preserve resolved_read_only=true")
+	}
+}
+
+func TestDeliveryConversationTokenSurvivesToNextTurnWithoutActionEvidence(t *testing.T) {
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{{Type: provider.ChunkText, Text: "Understood."}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "ORBIT-42"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	if err := a.Run(context.Background(), "Remember ORBIT-42 and answer on the next turn."); err != nil {
+		t.Fatalf("deferred conversation turn was blocked: %v", err)
+	}
+	if err := a.Run(context.Background(), "What was the code?"); err != nil {
+		t.Fatalf("answer turn was blocked: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want exactly two conversational turns", prov.call)
+	}
+	if got := lastAssistantContent(a.Session()); got != "ORBIT-42" {
+		t.Fatalf("last assistant text = %q, want ORBIT-42", got)
+	}
+}
+
+func TestDeliveryDurableMemoryRequiresRememberWithoutCodeCeremony(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "remember", readOnly: false})
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{toolCallChunk("remember", "remember", `{"description":"ORBIT code","body":"ORBIT-42"}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Saved for future sessions."}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	if err := a.Run(context.Background(), "Remember ORBIT-42 permanently across sessions"); err != nil {
+		t.Fatalf("durable-memory workflow inherited code-delivery ceremony: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want remember plus final answer", prov.call)
+	}
+	if a.deliveryCriteriaEstablished {
+		t.Fatal("durable-memory-only workflow should not manufacture code acceptance criteria")
+	}
+
+	missing := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{{Type: provider.ChunkText, Text: "I'll remember it."}, {Type: provider.ChunkDone}},
+	}}
+	b := New(missing, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	err := b.Run(context.Background(), "Remember ORBIT-42 permanently across sessions")
+	var readiness *FinalReadinessError
+	if !errors.As(err, &readiness) || !strings.Contains(readiness.Reason, "remember tool") {
+		t.Fatalf("text-only durable-memory claim err = %v", err)
+	}
+}
+
+func TestNonGoalUpdateGoalWithVisibleTextDoesNotSpendRepairRound(t *testing.T) {
+	goalTool, ok := tool.LookupBuiltin("update_goal")
+	if !ok {
+		t.Fatal("update_goal builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(goalTool)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{{Type: provider.ChunkText, Text: "Here is the answer."}, toolCallChunk("goal", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "unexpected repair"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "answer normally"); err != nil {
+		t.Fatalf("non-Goal update_goal with text: %v", err)
+	}
+	if prov.call != 1 {
+		t.Fatalf("provider calls = %d, want no repair round", prov.call)
+	}
+	if got := lastAssistantContent(a.Session()); got != "Here is the answer." {
+		t.Fatalf("last assistant text = %q", got)
+	}
+	if got := lastToolResult(a.Session(), "update_goal"); !strings.Contains(got, "only available while an active goal turn") {
+		t.Fatalf("paired update_goal result = %q", got)
+	}
+}
+
+func TestNonGoalToolOnlyUpdateGoalGetsAtMostOneRepairRound(t *testing.T) {
+	goalTool, ok := tool.LookupBuiltin("update_goal")
+	if !ok {
+		t.Fatal("update_goal builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(goalTool)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("goal-1", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("goal-2", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "unexpected third round"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+	err := a.Run(context.Background(), "answer normally")
+	if err == nil || !strings.Contains(err.Error(), "repeatedly called update_goal outside Goal mode") {
+		t.Fatalf("repeated tool-only misuse error = %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want one repair round", prov.call)
+	}
+}
+
 func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
@@ -144,8 +269,8 @@ func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	// Approval disables plan mode before the controller starts execution. The
 	// same delivery expectations must become enforceable again at that boundary.
 	a.SetPlanMode(false)
-	if got := a.finalReadinessFailure(); !strings.Contains(got, "state change") {
-		t.Fatalf("execution readiness did not resume after plan mode: %q", got)
+	if got := a.ReadinessResult(); !strings.Contains(got.Reason, "state change") {
+		t.Fatalf("execution readiness did not resume after plan mode: %q", got.Reason)
 	}
 }
 
@@ -161,12 +286,12 @@ func TestPlanModeDefersCapabilityRequirementsUntilExecution(t *testing.T) {
 		{Entry: capability.Entry{ID: "skill:deploy"}, Policy: capability.AutoUseRequire},
 	}})
 
-	if got := a.finalReadinessCheck(); got.applies || got.reason != "" {
+	if got := a.finalReadinessCheckFor(); got.applies || got.reason != "" {
 		t.Fatalf("Plan proposal was forced through delivery capability gates: %+v", got)
 	}
 
 	a.SetPlanMode(false)
-	got := a.finalReadinessCheck()
+	got := a.finalReadinessCheckFor()
 	if !got.applies || !strings.Contains(got.reason, "required capabilities") {
 		t.Fatalf("execution did not restore required capability gate: %+v", got)
 	}
@@ -281,7 +406,11 @@ func TestRunSubAgentReadinessFailureWithoutMutationStillFails(t *testing.T) {
 	}
 }
 
-func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
+func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
+	// Delivery no longer retries readiness with hidden model messages: the run
+	// ends on the FIRST unsatisfied final answer, and the host decides what
+	// happens next (Goal FSM auto-continues; plain turns surface the recovery
+	// card). Repeated reads must not buy extra provider calls.
 	newReg := func() *tool.Registry {
 		reg := tool.NewRegistry()
 		reg.Add(fakeReadFileTool{})
@@ -293,8 +422,6 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 		return []provider.Chunk{toolCallChunk(id, "read_file", `{"path":"a.go"}`), {Type: provider.ChunkDone}}
 	}
 
-	// Stalled: the model answers text-only every round — no new receipts, so
-	// the base budget (3) applies unchanged.
 	stalled := &scriptedProvider{name: "p", turns: [][]provider.Chunk{finalText}}
 	a := New(stalled, newReg(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
 	err := a.Run(context.Background(), "fix the crash in a.go")
@@ -302,16 +429,20 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 	if !errors.As(err, &readinessErr) {
 		t.Fatalf("expected FinalReadinessError, got %v", err)
 	}
-	if readinessErr.Attempts != maxFinalReadinessBlocks {
-		t.Fatalf("stalled attempts = %d, want %d", readinessErr.Attempts, maxFinalReadinessBlocks)
+	if readinessErr.Attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (no readiness retries)", readinessErr.Attempts)
+	}
+	if stalled.call != 1 {
+		t.Fatalf("provider calls = %d, want 1 (no hidden retry messages)", stalled.call)
+	}
+	if !a.deliveryRecoveryPending {
+		t.Fatal("delivery recovery must be pending for an explicit continuation")
 	}
 
-	// Repeating the same read does not change any missing requirement. Different
-	// call IDs must not turn that duplicate receipt into six paid retries.
+	// A read that changed nothing still ends the run at the first final answer.
 	converging := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		finalText,                // block 1
-		readCall("1"), finalText, // progress → block 2
-		readCall("2"), finalText, // duplicate → block 3 → base cap
+		readCall("1"), finalText,
+		readCall("2"), finalText,
 	}}
 	a2 := New(converging, newReg(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
 	err2 := a2.Run(context.Background(), "fix the crash in a.go")
@@ -319,8 +450,8 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 	if !errors.As(err2, &readinessErr2) {
 		t.Fatalf("expected FinalReadinessError, got %v", err2)
 	}
-	if readinessErr2.Attempts != maxFinalReadinessBlocks {
-		t.Fatalf("duplicate-receipt attempts = %d, want %d", readinessErr2.Attempts, maxFinalReadinessBlocks)
+	if converging.call != 2 {
+		t.Fatalf("provider calls = %d, want 2 (work turn + one final answer)", converging.call)
 	}
 }
 
@@ -331,8 +462,6 @@ func TestExplicitDeliveryRecoveryPreservesEvidenceOnce(t *testing.T) {
 	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
 		{toolCallChunk("todo", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-		finalText,
-		finalText,
 		finalText,
 		{toolCallChunk("review", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("verify", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
@@ -364,6 +493,7 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
 		{toolCallChunk("todo", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
+		finalText,
 		finalText,
 		finalText,
 		finalText,
@@ -402,7 +532,6 @@ func TestPreviewStripsDeliveryMarkerAndSyntheticTurns(t *testing.T) {
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: first},
 		{Role: provider.RoleAssistant, Content: "hi"},
-		{Role: provider.RoleUser, Content: finalReadinessRetryMessage("missing receipts") + "\n\n" + DeliveryRuntimeMarker},
 		{Role: provider.RoleUser, Content: MidTurnSteerPrefix + "\nslow down"},
 		{Role: provider.RoleUser, Content: "帮我写一个魂斗罗游戏\n\n" + DeliveryRuntimeMarker},
 	}
@@ -411,10 +540,7 @@ func TestPreviewStripsDeliveryMarkerAndSyntheticTurns(t *testing.T) {
 		t.Fatalf("preview = %q", preview)
 	}
 	if turns != 2 {
-		t.Fatalf("turns = %d, want 2 (synthetic + steer excluded)", turns)
-	}
-	if !IsSyntheticUserText(finalReadinessRetryMessage("x")) {
-		t.Fatal("readiness retry not detected as synthetic")
+		t.Fatalf("turns = %d, want 2 (steer excluded)", turns)
 	}
 }
 

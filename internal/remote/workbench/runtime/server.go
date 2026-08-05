@@ -495,6 +495,9 @@ func (s *Server) handlers(gen uint64, conn net.Conn, gate *connectionGate) proto
 		protocol.MethodSessionGoalResume: func(ctx context.Context, value any) (any, error) {
 			return s.resumeGoal(value.(protocol.SessionGoalResumeParams))
 		},
+		protocol.MethodSessionGoalPause: func(ctx context.Context, value any) (any, error) {
+			return s.pauseGoal(value.(protocol.SessionGoalPauseParams))
+		},
 		protocol.MethodSessionGoalClear: func(ctx context.Context, value any) (any, error) {
 			return s.clearGoal(value.(protocol.SessionGoalClearParams))
 		},
@@ -1753,19 +1756,22 @@ func (s *Server) snapshotLocked(sess *session, pageTurns int) protocol.SessionSn
 	mirror, externalized := s.sessionMirrorArtifactLocked(sess)
 	var goal *string
 	var goalStatus protocol.GoalStatus
+	var goalRuntime *protocol.GoalRuntimeView
 	if controller, ok := sess.ctrl.(goalController); ok {
 		value, status := protocolGoal(controller)
 		if value != "" {
 			goal = &value
 		}
 		goalStatus = status
+		goalRuntime = protocolGoalRuntime(controller)
 	}
 	return protocol.SessionSnapshot{
 		SnapshotID: snapshotID, HostEpoch: s.hostEpoch, Target: s.target(sess.id),
 		RuntimeEpoch: sess.runtimeEpoch, BoundarySeq: 0,
 		Meta: protocol.SessionMetaSnapshot{
 			TopicID: sess.topicID, Title: sess.title, ResolvedProfile: resolvedProfile(sess),
-			Goal: goal, GoalStatus: goalStatus, Capabilities: protocol.FrozenCapabilities(false, false),
+			Goal: goal, GoalStatus: goalStatus, GoalRuntime: goalRuntime,
+			Capabilities: protocol.FrozenCapabilities(false, false),
 		},
 		Runtime: protocol.SessionRuntimeState{
 			Running: sess.ctrl.Running() || currentOperation != nil, CurrentTurn: current, CurrentOperation: currentOperation,

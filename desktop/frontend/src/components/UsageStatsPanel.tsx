@@ -2,15 +2,20 @@
 // settings page. It reads aggregated stats from the Go backend (App.UsageStats)
 // and draws three charts by hand in SVG — a GitHub-style activity heatmap, a
 // stacked per-day token trend, and a per-model donut — so no chart library is
-// needed and theme variables (--accent, --fg, --bg-elev-*, --stats-hue-l) drive
-// the palette for both stock themes and theme packs.
+// needed and theme variables (--accent, --fg, --bg-elev-*) drive
+// the palette for both stock themes and theme packs. Model colours come from
+// a fixed two-set categorical palette (--chart-1..5 plus the gray
+// --chart-other, light/dark variants defined in styles.css from GitHub
+// Primer's data-viz tokens): a model's colour is its rank among the top five
+// by token volume, and everything beyond the top five collapses into one gray
+// "Other" step.
 // The component's styles live in UsageStatsPanel.css (loaded on demand with
 // this chunk), so the ~7 KB rule block never inflates the settings bundle.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Activity, CalendarDays, Coins, Cpu, MessageSquare, MessagesSquare } from "lucide-react";
+import { Activity, CalendarDays, ChevronDown, ChevronRight, Coins, Cpu, MessageSquare, MessagesSquare } from "lucide-react";
 import { useI18n } from "../lib/i18n";
 import { app } from "../lib/bridge";
-import type { DailyTokenUsage, UsageStatsRange, UsageStatsRequest } from "../lib/types";
+import type { DailyTokenUsage, ModelTokenUsage, UsageStatsRange, UsageStatsRequest } from "../lib/types";
 import { formatUsageTokens as formatTokens } from "../lib/usageStatsFormat";
 import "./UsageStatsPanel.css";
 
@@ -65,6 +70,8 @@ const USAGE_STATS_TRANSLATIONS = {
     "settings.stats.dailyTrend": "Daily token trend",
     "settings.stats.trendLimited": "Showing the latest 180 days",
     "settings.stats.modelUsage": "Model usage",
+    "settings.stats.other": "Other",
+    "settings.stats.moreModels": "more models",
     "settings.stats.total": "Total",
     "settings.stats.percent": "Share",
     "settings.stats.asOf": "As of",
@@ -105,6 +112,8 @@ const USAGE_STATS_TRANSLATIONS = {
     "settings.stats.dailyTrend": "按天 Token 趋势",
     "settings.stats.trendLimited": "仅显示最近 180 天",
     "settings.stats.modelUsage": "模型用量",
+    "settings.stats.other": "其他",
+    "settings.stats.moreModels": "个其他模型",
     "settings.stats.total": "总用量",
     "settings.stats.percent": "占比",
     "settings.stats.asOf": "统计截至",
@@ -145,6 +154,8 @@ const USAGE_STATS_TRANSLATIONS = {
     "settings.stats.dailyTrend": "按天 Token 趨勢",
     "settings.stats.trendLimited": "僅顯示最近 180 天",
     "settings.stats.modelUsage": "模型用量",
+    "settings.stats.other": "其他",
+    "settings.stats.moreModels": "個其他模型",
     "settings.stats.total": "總用量",
     "settings.stats.percent": "佔比",
     "settings.stats.asOf": "統計截至",
@@ -155,56 +166,26 @@ const USAGE_STATS_TRANSLATIONS = {
 type UsageStatsKey = keyof typeof USAGE_STATS_TRANSLATIONS.en;
 type UsageStatsTranslator = (key: UsageStatsKey) => string;
 
-// Seed hues keep neighbouring models distinguishable. The final CSS colour
-// expression blends each seed with the live theme's accent and foreground, so
-// base-colour and light/dark changes need no React rerender.
-const PALETTE_SEEDS = [
-  "#0087be", "#78dcfa", "#00aadc", "#87a6bc", "#d54e21", "#f0821e",
-  "#4ab866", "#f0b849", "#d94f4f", "#e66760", "#8c88cd", "#69c5e4",
-  "#ffdf8b", "#61e064", "#bbd634", "#fdd666", "#a4dbdb", "#b51f29",
-  "#f58268", "#f4979c",
-];
-const themedModelColor = (seed: string): string =>
-  `color-mix(in srgb, color-mix(in srgb, var(--accent) 24%, ${seed}) 60%, var(--fg) 40%)`;
-const PALETTE = PALETTE_SEEDS.map(themedModelColor);
-// LCG-seeded Fisher–Yates: a fixed seed keeps the shuffle stable across
-// renders and ranges while still picking palette colours "at random".
-const PALETTE_ORDER = (() => {
-  const a = [...PALETTE];
-  let s = 42;
-  const rnd = () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(rnd() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-})();
-function assignModelColors(ordered: string[]): Map<string, string> {
-  const map = new Map<string, string>();
-  let slot = 0;
-  for (const m of ordered) {
-    if (map.has(m)) continue;
-    if (slot < PALETTE_ORDER.length) {
-      map.set(m, PALETTE_ORDER[slot]);
-    } else {
-      // Beyond the curated palette: retain a stable hue, then blend it with
-      // the active accent and foreground for the same theme adaptation.
-      map.set(m, overflowModelColor(m));
-    }
-    slot++;
-  }
-  return map;
-}
-const hashHue = (key: string): number => {
-  let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
-  return h % 360;
-};
-const overflowModelColor = (model: string): string =>
-  `color-mix(in srgb, color-mix(in srgb, hsl(${hashHue(model)} 52% var(--stats-hue-l)) 76%, var(--accent) 24%) 60%, var(--fg) 40%)`;
+// Model colour palette: a fixed two-set categorical series (--chart-1..5 with
+// light/dark variants defined in styles.css, from GitHub Primer's data-viz
+// tokens). A model's colour is its rank among the top five; models beyond the
+// top five share one gray "Other" step (--chart-other). The palette is
+// deliberately independent of --accent so charts stay readable in every theme
+// style and theme pack, whose tokens only cover the app chrome.
+// Each series colour is mixed toward --bg-elev like the heatmap levels
+// (MODEL_COLOR_MIX% colour + the rest background), so the pure hexes sit
+// softly on the card instead of glaring; the two themes still get the same
+// hues, only the background differs.
+const TOP_MODELS = 5;
+const OTHER_MODEL = "\u0000other"; // sentinel; cannot collide with a real model ref
+const OTHER_COLOR = "var(--chart-other)";
+const MODEL_COLOR_MIX = 72; // percent of the series colour in the --bg-elev mix
+const MAX_TOOLTIP_OTHER_DETAILS = 5;
+// A grouped day carries the raw tail split so hover tooltips can expand the
+// "Other" step into its per-model detail without extra queries.
+type GroupedDaily = DailyTokenUsage & { otherByModel: Record<string, number> };
+// A grouped model may carry the tail list that "Other" aggregates.
+type GroupedModel = ModelTokenUsage & { items?: ModelTokenUsage[] };
 
 // localDay returns today's date (plus/minus offsetDays) in the local calendar,
 // matching the backend's "2006-01-02" day keys.
@@ -291,25 +272,48 @@ export function UsageStatsPanel() {
     void load();
   }, [load]);
 
-  // Colours follow the order models were first used (walking the daily series
-  // chronologically); the hash hue is only a fallback for models that somehow
-  // escape the aggregate.
-  const modelOrder = useMemo(() => {
-    const seen: string[] = [];
-    for (const d of stats?.daily ?? []) {
-      for (const m of Object.keys(d.byModel).sort()) {
-        if (!seen.includes(m)) seen.push(m);
-      }
-    }
-    for (const m of stats?.models ?? []) {
-      if (!seen.includes(m.model)) seen.push(m.model);
-    }
-    return seen;
+  // Models rank by token volume (stats.models is already descending): the top
+  // five keep their own series colour and everything else aggregates into a
+  // single gray "Other" entry (carrying its tail list for expandable detail),
+  // so the palette stays distinguishable.
+  const groupedModels = useMemo<GroupedModel[]>(() => {
+    const list = stats?.models ?? [];
+    if (list.length <= TOP_MODELS) return list;
+    const top = list.slice(0, TOP_MODELS);
+    const rest = list.slice(TOP_MODELS);
+    return [
+      ...top,
+      {
+        model: OTHER_MODEL,
+        provider: "",
+        tokens: rest.reduce((sum, m) => sum + m.tokens, 0),
+        percent: rest.reduce((sum, m) => sum + m.percent, 0),
+        items: rest,
+      },
+    ];
   }, [stats]);
-  const palette = useMemo(() => assignModelColors(modelOrder), [modelOrder]);
+  const dailyGrouped = useMemo<GroupedDaily[]>(() => {
+    const topSet = new Set((stats?.models ?? []).slice(0, TOP_MODELS).map((m) => m.model));
+    return (stats?.daily ?? []).map((d) => {
+      const byModel: Record<string, number> = {};
+      const otherByModel: Record<string, number> = {};
+      for (const [model, tokens] of Object.entries(d.byModel)) {
+        if (topSet.has(model)) byModel[model] = (byModel[model] ?? 0) + tokens;
+        else otherByModel[model] = (otherByModel[model] ?? 0) + tokens;
+      }
+      const other = Object.values(otherByModel).reduce((sum, v) => sum + v, 0);
+      if (other > 0) byModel[OTHER_MODEL] = other;
+      return { ...d, byModel, otherByModel };
+    });
+  }, [stats]);
   const colorForModel = useCallback(
-    (model: string) => palette.get(model) ?? overflowModelColor(model || "unknown"),
-    [palette],
+    (model: string) => {
+      if (model === OTHER_MODEL) return OTHER_COLOR;
+      const slot = (stats?.models ?? []).findIndex((m) => m.model === model);
+      const rank = Math.min(slot < 0 ? 0 : slot, TOP_MODELS - 1) + 1;
+      return `color-mix(in srgb, var(--chart-${rank}) ${MODEL_COLOR_MIX}%, var(--bg-elev))`;
+    },
+    [stats],
   );
 
   return (
@@ -383,8 +387,8 @@ export function UsageStatsPanel() {
         <>
           <StatCards stats={stats} t={t} />
           <Heatmap daily={heatDaily} from={heatWindow.from} to={heatWindow.to} t={t} />
-          <DailyTrend stats={stats} t={t} colorForModel={colorForModel} />
-          <ModelUsage stats={stats} t={t} colorForModel={colorForModel} />
+          <DailyTrend daily={dailyGrouped} modelOrder={groupedModels.map((m) => m.model)} t={t} colorForModel={colorForModel} />
+          <ModelUsage models={groupedModels} t={t} colorForModel={colorForModel} />
           {stats.to && (
             <div className="usage-stats__foot">
               {t("settings.stats.asOf")} {stats.to}
@@ -594,11 +598,10 @@ function Heatmap({ daily, from, to, t }: { daily: DailyTokenUsage[]; from: strin
 
 // ── Section 5: stacked daily token trend ──────────────────────────────────
 
-function DailyTrend({ stats, t, colorForModel }: { stats: UsageStatsRange; t: UsageStatsTranslator; colorForModel: (m: string) => string }) {
-  const daily = stats.daily;
+function DailyTrend({ daily, modelOrder, t, colorForModel }: { daily: GroupedDaily[]; modelOrder: string[]; t: UsageStatsTranslator; colorForModel: (m: string) => string }) {
   const trendDaily = daily.length > MAX_TREND_DAYS ? daily.slice(-MAX_TREND_DAYS) : daily;
   const trendLimited = trendDaily.length !== daily.length;
-  const [tip, setTip] = useState<{ day: string; total: number; byModel: Record<string, number>; cacheHit: number; cacheMiss: number; cx: number; top: number; bottom: number } | null>(null);
+  const [tip, setTip] = useState<{ day: string; total: number; byModel: Record<string, number>; otherByModel?: Record<string, number>; cacheHit: number; cacheMiss: number; cx: number; top: number; bottom: number } | null>(null);
   const [hover, setHover] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -674,6 +677,11 @@ function DailyTrend({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
   const trendPath = smoothPath(trendPoints);
   const trendTipPt = tip ? trendPointByDay.get(tip.day) : undefined;
   const rateTicks = [0, 25, 50, 75, 100];
+  // Legend and bar stacks follow the overall usage ranking (not the per-day
+  // leader), so a model's colour stays in the same position every day and the
+  // aggregated "Other" step always sits on top.
+  const legendAgg = aggregateByModel(trendDaily);
+  const legendModels = modelOrder.filter((m) => legendAgg[m] !== undefined);
 
   // Tooltip is viewport-fixed and only clamped to the settings content pane
   // (left/right/top/bottom), so it may float over the chart freely but never
@@ -686,7 +694,12 @@ function DailyTrend({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
   const cBottom = contentRect?.bottom ?? window.innerHeight;
   const TIP_W = 260;
   const tipX = tip ? Math.max(cLeft + TIP_W / 2 + 8, Math.min(tip.cx, cRight - TIP_W / 2 - 8)) : 0;
-  const tipRows = tip ? Object.keys(tip.byModel).length + 1 : 0; // +1 for the cache ratio row
+  const tipOtherEntries = tip?.otherByModel
+    ? Object.entries(tip.otherByModel).sort((a, b) => b[1] - a[1])
+    : [];
+  const tipOtherVisible = tipOtherEntries.slice(0, MAX_TOOLTIP_OTHER_DETAILS);
+  const tipOtherRemaining = Math.max(0, tipOtherEntries.length - tipOtherVisible.length);
+  const tipRows = tip ? Object.keys(tip.byModel).length + 1 + tipOtherVisible.length + (tipOtherRemaining > 0 ? 1 : 0) : 0; // +1 cache ratio row; + the bounded Other breakdown
   const tipH = 46 + 18 * tipRows;
   const tipAbove = tip ? tip.top - cTop >= tipH + 10 : true;
   let tipY = tip ? (tipAbove ? tip.top - 10 : tip.bottom + 10) : 0;
@@ -712,9 +725,10 @@ function DailyTrend({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
           })}
           {visible.map((d, i) => {
             const x = padL + barHalf + i * step - barW / 2;
-            const modelOrder = Object.entries(d.byModel).sort((a, b) => b[1] - a[1]);
+            const dayOrder = modelOrder.filter((m) => d.byModel[m] !== undefined);
             let yBottom = padT + plotH;
-            const bars = modelOrder.map(([model, tokens]) => {
+            const bars = dayOrder.map((model) => {
+              const tokens = d.byModel[model];
               const h = (tokens / maxTotal) * plotH;
               const y = yBottom - h;
               yBottom = y;
@@ -754,7 +768,7 @@ function DailyTrend({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
                   height={plotH}
                   onMouseEnter={(e) => {
                     const r = e.currentTarget.getBoundingClientRect();
-                    setTip({ day: d.day, total: d.total, byModel: d.byModel, cacheHit: d.cacheHit, cacheMiss: d.cacheMiss, cx: r.left + r.width / 2, top: r.top, bottom: r.bottom });
+                    setTip({ day: d.day, total: d.total, byModel: d.byModel, otherByModel: d.otherByModel, cacheHit: d.cacheHit, cacheMiss: d.cacheMiss, cx: r.left + r.width / 2, top: r.top, bottom: r.bottom });
                   }}
                   onMouseLeave={() => setTip(null)}
                 />
@@ -785,17 +799,21 @@ function DailyTrend({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
           <div className="usage-stats__tip usage-stats__tip--chart usage-stats__tip--screen" style={{ transform: `translate(${tipX}px, ${tipY}px) translate(-50%, ${tipAbove ? "-100%" : "0"})` }}>
             <div className="usage-stats__tip-title">{tip.day}</div>
             <div>{t("settings.stats.total")}: {formatTokens(tip.total)}</div>
-            {Object.entries(tip.byModel).sort((a, b) => b[1] - a[1]).map(([m, v]) => (
-              <div key={m} className="usage-stats__tip-row"><i className="usage-stats__legend-swatch" style={{ background: colorForModel(m) }} />{m}: {formatTokens(v)}</div>
+            {modelOrder.filter((m) => tip.byModel[m] !== undefined).map((m) => (
+              <div key={m} className="usage-stats__tip-row"><i className="usage-stats__legend-swatch" style={{ background: colorForModel(m) }} />{m === OTHER_MODEL ? t("settings.stats.other") : m}: {formatTokens(tip.byModel[m])}</div>
             ))}
+            {tipOtherVisible.map(([m, v]) => (
+              <div key={m} className="usage-stats__tip-row usage-stats__tip-row--other"><i className="usage-stats__legend-swatch" style={{ background: OTHER_COLOR }} />{m}: {formatTokens(v)}</div>
+            ))}
+            {tipOtherRemaining > 0 && <div className="usage-stats__tip-more">+{tipOtherRemaining} {t("settings.stats.moreModels")}</div>}
             <div>{t("settings.stats.cacheHitRate")}: {cacheRateText(tip.cacheHit, tip.cacheMiss)}</div>
           </div>
         )}
         <div className="usage-stats__legend">
-          {Object.keys(aggregateByModel(trendDaily)).map((model) => (
+          {legendModels.map((model) => (
             <span key={model} className="usage-stats__legend-item" onMouseEnter={() => setHover(model)} onMouseLeave={() => setHover(null)}>
               <i className="usage-stats__legend-swatch" style={{ background: colorForModel(model) }} />
-              {model}
+              {model === OTHER_MODEL ? t("settings.stats.other") : model}
             </span>
           ))}
           <span className="usage-stats__legend-item" aria-hidden="true">
@@ -810,23 +828,27 @@ function DailyTrend({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
 
 // ── Section 6: per-model donut + list ─────────────────────────────────────
 
-function ModelUsage({ stats, t, colorForModel }: { stats: UsageStatsRange; t: UsageStatsTranslator; colorForModel: (m: string) => string }) {
-  const models = stats.models;
-  const [tip, setTip] = useState<{ model: string; tokens: number; percent: number; x: number; y: number } | null>(null);
+function ModelUsage({ models, t, colorForModel }: { models: GroupedModel[]; t: UsageStatsTranslator; colorForModel: (m: string) => string }) {
+  const [tip, setTip] = useState<{ model: string; tokens: number; percent: number; x: number; y: number; items?: ModelTokenUsage[] } | null>(null);
   const [hover, setHover] = useState<string | null>(null);
+  const [expandedOther, setExpandedOther] = useState(false);
   const donutRef = useRef<HTMLDivElement>(null);
 
   if (models.length === 0) return null;
+  const other = models.find((m) => m.model === OTHER_MODEL);
+  const tipItems = tip?.items ?? [];
+  const tipItemsVisible = tipItems.slice(0, MAX_TOOLTIP_OTHER_DETAILS);
+  const tipItemsRemaining = Math.max(0, tipItems.length - tipItemsVisible.length);
 
-  // The ring's outer edge stays fixed; thickening the stroke only grows it
-  // inward (shrinking the hole), so the donut never overflows the svg viewport
-  // and gets clipped into a square.
-  const OUTER = 118; // ring outer radius
+  // The ring leaves a 6px margin inside the 240px viewBox at rest, so the
+  // hover-grow of the stroke (+5px, half of it outward) keeps a 3.5px margin
+  // and never overflows into a clipped square.
+  const OUTER = 114; // ring outer radius
   const SW = 36; // ring thickness
   const R = OUTER - SW / 2; // circle path radius
-  const CX = OUTER + 2; // svg centre (240x240 viewBox)
+  const CX = 120; // svg centre; the 240x240 viewBox stays fixed while the ring shrinks
   const CIRC = 2 * Math.PI * R;
-  const total = Math.max(1, stats.tokens);
+  const total = Math.max(1, models.reduce((sum, m) => sum + m.tokens, 0));
   let offset = 0;
 
   const tipX = tip ? Math.max(110, Math.min(tip.x, (donutRef.current?.clientWidth ?? 240) - 110)) : 0;
@@ -862,7 +884,7 @@ function ModelUsage({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
                     setHover(m.model);
                     if (!dw) return;
                     const dr = dw.getBoundingClientRect();
-                    setTip({ model: m.model, tokens: m.tokens, percent: m.percent, x: e.clientX - dr.left, y: e.clientY - dr.top });
+                    setTip({ model: m.model, tokens: m.tokens, percent: m.percent, x: e.clientX - dr.left, y: e.clientY - dr.top, items: m.items });
                   }}
                   onMouseLeave={() => { setHover(null); setTip(null); }}
                 />
@@ -870,32 +892,86 @@ function ModelUsage({ stats, t, colorForModel }: { stats: UsageStatsRange; t: Us
               offset += dash;
               return el;
             })}
-            <text className="usage-stats__donut-center" x={CX} y={CX + 8} textAnchor="middle">{formatCompact(stats.tokens)}</text>
+            <text className="usage-stats__donut-center" x={CX} y={CX + 8} textAnchor="middle">{formatCompact(total)}</text>
             <text className="usage-stats__donut-label" x={CX} y={CX + 26} textAnchor="middle">{t("settings.stats.tokens")}</text>
           </svg>
           {tip && (
             <div className="usage-stats__tip usage-stats__tip--chart" style={{ transform: `translate(${tipX}px, ${tipY}px) translate(-50%, ${tipAbove ? "-100%" : "0"})` }}>
-              <div className="usage-stats__tip-title">{tip.model}</div>
+              <div className="usage-stats__tip-title">{tip.model === OTHER_MODEL ? t("settings.stats.other") : tip.model}</div>
               <div>{t("settings.stats.total")}: {formatTokens(tip.tokens)}</div>
               <div>{t("settings.stats.percent")}: {formatPercent(tip.percent)}</div>
+              {tipItems.length > 0 && (
+                <div className="usage-stats__tip-breakdown">
+                  {tipItemsVisible.map((it) => (
+                    <div key={it.model} className="usage-stats__tip-row usage-stats__tip-row--other"><i className="usage-stats__legend-swatch" style={{ background: OTHER_COLOR }} />{it.model}: {formatTokens(it.tokens)}</div>
+                  ))}
+                  {tipItemsRemaining > 0 && <div className="usage-stats__tip-more">+{tipItemsRemaining} {t("settings.stats.moreModels")}</div>}
+                </div>
+              )}
             </div>
           )}
         </div>
         <ul className="usage-stats__model-list">
-          {models.map((m) => (
-            <li
-              key={m.model}
-              className="usage-stats__model-row"
-              onMouseEnter={() => setHover(m.model)}
-              onMouseLeave={() => setHover(null)}
-            >
-              <i className="usage-stats__legend-swatch" style={{ background: colorForModel(m.model) }} />
-              <span className="usage-stats__model-name">{m.model}</span>
-              <span className="usage-stats__model-provider">{providerOf(m.model)}</span>
-              <span className="usage-stats__model-tokens">{formatTokens(m.tokens)}</span>
-              <span className="usage-stats__model-pct">{formatPercent(m.percent)}</span>
+          {models.map((m) => {
+            const isOther = m.model === OTHER_MODEL;
+            const rowContent = (
+              <>
+                <i className="usage-stats__legend-swatch" style={{ background: colorForModel(m.model) }} />
+                <span className="usage-stats__model-name">
+                  {isOther && (
+                    <span className="usage-stats__model-toggle" aria-hidden="true">
+                      {expandedOther ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                    </span>
+                  )}
+                  {isOther ? t("settings.stats.other") : m.model}
+                </span>
+                <span className="usage-stats__model-provider">{isOther ? "" : providerOf(m.model)}</span>
+                <span className="usage-stats__model-tokens">{formatTokens(m.tokens)}</span>
+                <span className="usage-stats__model-pct">{formatPercent(m.percent)}</span>
+              </>
+            );
+            if (isOther) {
+              return (
+                <li key={m.model} className="usage-stats__model-item">
+                  <button
+                    type="button"
+                    className="usage-stats__model-row usage-stats__model-row--expandable"
+                    onMouseEnter={() => setHover(m.model)}
+                    onMouseLeave={() => setHover(null)}
+                    onClick={() => setExpandedOther((open) => !open)}
+                    aria-expanded={expandedOther}
+                  >
+                    {rowContent}
+                  </button>
+                </li>
+              );
+            }
+            return (
+              <li
+                key={m.model}
+                className="usage-stats__model-row"
+                onMouseEnter={() => setHover(m.model)}
+                onMouseLeave={() => setHover(null)}
+              >
+                {rowContent}
+              </li>
+            );
+          })}
+          {other?.items && other.items.length > 0 && (
+            <li className={`usage-stats__model-other-wrap${expandedOther ? " usage-stats__model-other-wrap--open" : ""}`}>
+              <ul className="usage-stats__model-other-list">
+                {other.items.map((it) => (
+                  <li key={it.model} className="usage-stats__model-row usage-stats__model-row--sub">
+                    <i className="usage-stats__legend-swatch" style={{ background: OTHER_COLOR }} />
+                    <span className="usage-stats__model-name">{it.model}</span>
+                    <span className="usage-stats__model-provider">{providerOf(it.model)}</span>
+                    <span className="usage-stats__model-tokens">{formatTokens(it.tokens)}</span>
+                    <span className="usage-stats__model-pct">{formatPercent(it.percent)}</span>
+                  </li>
+                ))}
+              </ul>
             </li>
-          ))}
+          )}
         </ul>
       </div>
     </section>

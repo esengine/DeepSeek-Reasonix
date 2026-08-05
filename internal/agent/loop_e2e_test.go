@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -109,6 +110,39 @@ func TestRunPersistsUserCreatedAtWithoutSendingItToProvider(t *testing.T) {
 	}
 	if messages[2].Role != provider.RoleUser || messages[2].CreatedAt <= 0 {
 		t.Fatalf("new user timestamp was not persisted: %+v", messages[2])
+	}
+}
+
+func TestRunPersistsResponsesItemsAcrossSessionReload(t *testing.T) {
+	raw := json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed","action":{"type":"search","query":"latest"}}`)
+	prov := testutil.NewMock("deepseek-responses", testutil.Turn{Chunks: []provider.Chunk{
+		{Type: provider.ChunkResponsesItem, ResponsesItem: raw},
+		{Type: provider.ChunkText, Text: "answer"},
+		{Type: provider.ChunkDone},
+	}})
+	session := NewSession("system")
+	agent := New(prov, tool.NewRegistry(), session, Options{}, event.Discard)
+	if err := agent.Run(context.Background(), "search"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	messages := session.Snapshot()
+	assistant := messages[len(messages)-1]
+	if assistant.Role != provider.RoleAssistant || len(assistant.ResponsesItems) != 1 || string(assistant.ResponsesItems[0]) != string(raw) {
+		t.Fatalf("assistant Responses items = %#v, want persisted search item", assistant.ResponsesItems)
+	}
+
+	path := filepath.Join(t.TempDir(), "responses-items.jsonl")
+	if err := session.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	loaded, err := LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	loadedAssistant := loaded.Messages[len(loaded.Messages)-1]
+	if len(loadedAssistant.ResponsesItems) != 1 || string(loadedAssistant.ResponsesItems[0]) != string(raw) {
+		t.Fatalf("reloaded Responses items = %#v, want original item", loadedAssistant.ResponsesItems)
 	}
 }
 

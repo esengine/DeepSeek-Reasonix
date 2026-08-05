@@ -7087,10 +7087,42 @@ type Meta struct {
 	TokenMode         string                   `json:"tokenMode"`
 	Goal              string                   `json:"goal,omitempty"`
 	GoalStatus        string                   `json:"goalStatus,omitempty"`
+	GoalRuntime       *GoalRuntimeView         `json:"goalRuntime,omitempty"`
 	AutoResearch      *AutoResearchCompactView `json:"autoResearch,omitempty"`
 	// A nil pointer means the controller cannot provide an authoritative snapshot;
 	// a non-nil pointer preserves an empty list as an explicit panel clear.
 	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
+}
+
+// GoalRuntimeView is the desktop-facing Goal budget/runtime summary.
+type GoalRuntimeView struct {
+	TurnsUsed        int    `json:"turnsUsed"`
+	TurnsLimit       int    `json:"turnsLimit"`
+	TokensUsed       int    `json:"tokensUsed"`
+	TokensLimit      int    `json:"tokensLimit"`
+	NoProgressTurns  int    `json:"noProgressTurns"`
+	NoProgressLimit  int    `json:"noProgressLimit"`
+	LastReason       string `json:"lastReason,omitempty"`
+	StopCause        string `json:"stopCause,omitempty"`
+	BudgetExtensions int    `json:"budgetExtensions"`
+}
+
+func goalRuntimeViewFromController(ctrl control.SessionAPI) *GoalRuntimeView {
+	if ctrl == nil {
+		return nil
+	}
+	rt := ctrl.GoalRuntime()
+	return &GoalRuntimeView{
+		TurnsUsed:        rt.TurnsUsed,
+		TurnsLimit:       rt.TurnsLimit,
+		TokensUsed:       rt.TokensUsed,
+		TokensLimit:      rt.TokensLimit,
+		NoProgressTurns:  rt.NoProgressTurns,
+		NoProgressLimit:  rt.NoProgressLimit,
+		LastReason:       rt.LastReason,
+		StopCause:        rt.StopCause,
+		BudgetExtensions: rt.BudgetExtensions,
+	}
 }
 
 type AutoResearchCompactView struct {
@@ -7219,6 +7251,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 		TokenMode:         tokenMode,
 		Goal:              goal,
 		GoalStatus:        goalStatus,
+		GoalRuntime:       goalRuntimeViewFromController(snap.ctrl),
 		AutoResearch:      compactAutoResearchFromController(snap.ctrl),
 		CanonicalTodos:    ctrlTodos(snap.ctrl),
 	}
@@ -7482,7 +7515,7 @@ func (a *App) ClearGoalForTab(tabID string) error {
 }
 
 // ResumeGoalForTab re-enters a blocked or stopped Goal while preserving its
-// delivery scope and persisted verification checkpoint.
+// delivery scope, budget history, and persisted verification checkpoint.
 func (a *App) ResumeGoalForTab(tabID string) bool {
 	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
 		raw, err := a.workbenchRequest(protocol.MethodSessionGoalResume, protocol.SessionGoalResumeParams{})
@@ -7513,6 +7546,31 @@ func (a *App) ResumeGoalForTab(tabID string) bool {
 	}
 	a.mu.Unlock()
 	return true
+}
+
+// PauseGoalForTab suspends a running Goal without clearing it; ResumeGoalForTab
+// restores it (with one extra budget slice when it was budget-paused).
+func (a *App) PauseGoalForTab(tabID string) bool {
+	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
+		raw, err := a.workbenchRequest(protocol.MethodSessionGoalPause, protocol.SessionGoalPauseParams{})
+		if err != nil {
+			return false
+		}
+		decoded, err := protocol.DecodeResult(protocol.MethodSessionGoalPause, raw)
+		if err != nil {
+			return false
+		}
+		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
+		return decoded.(protocol.SessionGoalPauseResult).Paused
+	}
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return false
+	}
+	tab.turnStartMu.Lock()
+	defer tab.turnStartMu.Unlock()
+	ctrl := a.controllerForTab(tab)
+	return ctrl != nil && ctrl.PauseGoal()
 }
 
 // SetAutoApproveTools toggles YOLO/full-access tool auto-approval:

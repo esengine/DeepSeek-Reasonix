@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
 	"reasonix/internal/capability"
 	"reasonix/internal/command"
@@ -28,6 +29,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/environment"
 	"reasonix/internal/event"
+	"reasonix/internal/goaleval"
 	"reasonix/internal/guardian"
 	"reasonix/internal/history"
 	"reasonix/internal/hook"
@@ -171,10 +173,12 @@ type Options struct {
 	// catalog. Remote Workbench injects a Broker resolver so no credential or
 	// provider endpoint has to exist on the Host. Nil preserves local behavior.
 	ProviderResolver provider.Resolver
-	// DisablePlanner is a process-local hard override used by supervised ACP
-	// workers. It wins over user/project planner_model configuration without
-	// mutating config or changing the provider-visible prompt/tool surface.
-	DisablePlanner bool
+	// Ablation switches subsystems off for a benchmark arm, and is also the
+	// process-local hard override supervised ACP workers use to force the planner
+	// off. It wins over user/project configuration without mutating config or
+	// changing the provider-visible prompt/tool surface. The zero value runs
+	// everything.
+	Ablation ablation.Set
 	// SandboxNetworkOverride and WorkspaceOnly are process-local hard bounds for
 	// supervised ACP workers. Nil/false preserve normal Reasonix config.
 	SandboxNetworkOverride *bool
@@ -269,6 +273,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	if source := strings.TrimSpace(opts.StatsSource); source != "" {
 		sink = stats.NewRecorder(sink, config.StatsDir(), source)
 	}
+
+	// Goal token-budget accounting: the controller detects this tee and
+	// attributes billable usage events to the active goal turn's recorder, so
+	// executor/planner/subagent/compaction/classifier/router/reviewer/evaluator
+	// calls under one Goal scope count against its token budget. The tee must
+	// sit on the shared sink the agents emit into — hence the wrap here rather
+	// than inside the controller.
+	sink = control.NewGoalUsageTee(sink)
 
 	if migErr != nil {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Config migration did not complete.", Detail: "config migration from ~/.reasonix failed: " + migErr.Error()})
@@ -895,6 +907,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			WithTranscriptIdentityResolver(subagentIdentity).
 			WithMaxSubagentDepth(maxSubagentDepth).
 			WithDeliveryProfile(tokenDelivery).
+			WithAblation(opts.Ablation).
 			WithWorkspaceLease(workspaceLease).
 			WithScheduler(subagentScheduler).
 			WithProfileLookup(profileLookup).
@@ -903,6 +916,9 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			WithCapabilityRuntime(capRuntime)
 	}
 	addTaskTool := func() string {
+		if opts.Ablation.Off(ablation.Subagent) {
+			return "task tool is disabled for this run."
+		}
 		if taskToolAdded {
 			return "task tool is already enabled."
 		}
@@ -910,14 +926,19 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		if taskTool == nil {
 			taskTool = newTaskTool()
 		}
-		// Fixed registration order for prompt-cache stability: task →
-		// parallel_tasks → fleet. Profile names never enter tool schemas.
+		// The registry exports schemas in stable name order. Keep this surface
+		// static: profile names and result refs never enter provider-visible
+		// schemas, and the result reader does not change between turns.
 		reg.Add(taskTool)
 		reg.Add(agent.NewParallelTasksTool(taskTool, reg))
 		reg.Add(agent.NewFleetTool(taskTool))
+		reg.Add(agent.NewSubagentResultTool(taskTool))
 		return "enabled task."
 	}
 	addReadOnlyTaskTool := func() string {
+		if opts.Ablation.Off(ablation.Subagent) {
+			return "read_only_task tool is disabled for this run."
+		}
 		if readOnlyTaskToolAdded {
 			return "read_only_task tool is already enabled."
 		}
@@ -952,6 +973,14 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return "sessions are already enabled."
 		}
 		sessionToolsAdded = true
+		// history and memory are the BM25-backed surfaces; the ablation arm drops
+		// only those two and leaves the direct-access tools alone, so a lost solve
+		// is attributable to retrieval and not to a missing session reader.
+		if opts.Ablation.Off(ablation.Retrieval) {
+			reg.Add(sessiontool.NewListSessionsTool(sessionDir))
+			reg.Add(sessiontool.NewReadSessionTool(sessionDir))
+			return "enabled list_sessions, read_session."
+		}
 		reg.Add(history.NewTool(history.Options{SessionDir: sessionDir, GlobalSessionDir: config.SessionDir(), ArchiveDir: config.ArchiveDir()}))
 		reg.Add(sessiontool.NewListSessionsTool(sessionDir))
 		reg.Add(sessiontool.NewReadSessionTool(sessionDir))
@@ -963,6 +992,11 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			return "memory tools are already enabled."
 		}
 		memoryToolsAdded = true
+		if opts.Ablation.Off(ablation.Retrieval) {
+			reg.Add(memory.NewRememberTool(mem.Store))
+			reg.Add(memory.NewForgetTool(mem.Store))
+			return "enabled remember, forget."
+		}
 		reg.Add(memory.NewRecallTool(mem.Store))
 		reg.Add(memory.NewRememberTool(mem.Store))
 		reg.Add(memory.NewForgetTool(mem.Store))
@@ -1010,6 +1044,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			SubagentDepth:       childDepth,
 			MaxSubagentDepth:    maxSubagentDepth,
 			DeliveryProfile:     tokenDelivery,
+			Ablation:            opts.Ablation,
 			WorkspaceLease:      workspaceLease,
 		}
 	}
@@ -1604,6 +1639,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		WriteWorkspaceRoot:           root,
 		ProjectChecks:                projectChecks,
 		DeliveryProfile:              tokenDelivery,
+		Ablation:                     opts.Ablation,
 		WorkspaceLease:               workspaceLease,
 		CapabilityLedger:             capLedger,
 		CapabilityAudit:              capAudit,
@@ -1734,6 +1770,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Shell:                  shell,
 		ApprovalTimeout:        opts.ApprovalTimeout,
 		RuntimeProfile:         runtimeProfile,
+		Ablation:               opts.Ablation,
 		OnRemember: func(rule string) control.RememberResult {
 			return rememberPermissionRule(root, rule)
 		},
@@ -1787,6 +1824,28 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		// that capability: bots have a bounded timeout and can still answer cards.
 		ctrlOpts.RecoveryHeadless = recoveryHeadlessMode(opts)
 	}
+	// Goal evaluator: the same zero-config model fallback as the recovery
+	// reviewer (recovery_model → guardian_model → main model), isolated session
+	// and policy. When unavailable, Goal turns without an update_goal report
+	// fail closed and pause instead of defaulting to continue.
+	{
+		evalModel := strings.TrimSpace(cfg.Agent.RecoveryModel)
+		if evalModel == "" {
+			evalModel = strings.TrimSpace(cfg.Agent.GuardianModel)
+		}
+		if evalModel == "" {
+			evalModel = modelRef
+		}
+		if evalModel != "" {
+			if re, ok := cfg.ResolveModel(evalModel); ok {
+				if eProv, err := NewProviderWithProxy(re, proxySpec); err == nil {
+					ctrlOpts.GoalEvaluator = goaleval.NewSessionWithSink(eProv, re.Price, modelRefFromEntry(re), sink)
+				} else {
+					slog.Warn("goal evaluator provider construction failed — goals without an update_goal report will pause", "model", evalModel, "err", err)
+				}
+			}
+		}
+	}
 	ctrl := control.New(ctrlOpts)
 	// Share the recovery checkpoint with task/fleet sub-agents so background
 	// writers observe the same failure state as the root agent.
@@ -1836,7 +1895,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 // override is checked before user/project config and cannot be reversed by a
 // later assembly branch.
 func effectivePlannerModel(cfg *config.Config, opts Options, tokenEconomy bool) string {
-	if cfg == nil || opts.DisablePlanner || tokenEconomy {
+	if cfg == nil || opts.Ablation.Off(ablation.Planner) || tokenEconomy {
 		return ""
 	}
 	return strings.TrimSpace(cfg.Agent.PlannerModel)
@@ -2298,7 +2357,7 @@ func NewProviderWithProxy(e *config.ProviderEntry, proxy netclient.ProxySpec) (p
 			"vision":                config.EffectiveVision(e),
 			"vision_model_explicit": config.ExplicitModelVision(e),
 			"vision_detail":         e.VisionDetail,
-			"web_search":            e.WebSearch,
+			"web_search":            config.EffectiveWebSearch(e),
 			"mode":                  e.ResponsesMode,
 			// Keep nil as nil so the responses provider can vendor-detect its
 			// default instead of accidentally treating every endpoint as stateful.

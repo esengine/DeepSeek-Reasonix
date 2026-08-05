@@ -75,10 +75,14 @@ servers, then inspect or call a non-destructive capability. If a capability is
 destructive, do not treat that as missing configuration or an unavailable MCP:
 write the operation into the plan for the executor instead.
 
-If your research shows the task needs no changes and no actions at all (already
-implemented, already resolved), explain that briefly and end your reply with a
-final line containing exactly [no_changes]. Never emit that marker when any
-work, verification, or follow-up remains.`
+If the task needs no executor actions at all, end your reply with a final line
+containing exactly [no_changes]. That covers two cases: your research shows the
+work is already done (already implemented, already resolved — explain that
+briefly), and the task is a question, comparison, analysis, or explanation that
+your reply itself fully answers — write the complete answer, then the marker.
+The host then delivers your reply directly instead of starting the executor.
+Never emit that marker when any workspace change, command, verification, or
+follow-up action remains.`
 
 const executorHandoffMarker = "Reasonix executor handoff"
 
@@ -402,8 +406,9 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	if isNoOpPlan(plan) {
 		c.persistExecutorNoOp(ctx, input, plan)
 		// The relayed conclusion is planner text; keep its source so sinks
-		// attribute it like every other planner emission.
-		c.sink.Emit(event.Event{Kind: event.Text, Text: plan, Source: event.UsageSourcePlanner})
+		// attribute it like every other planner emission. Display goes through
+		// the standard filter so the [no_changes] contract line stays internal.
+		c.sink.Emit(event.Event{Kind: event.Text, Text: DisplayAssistantText(plan), Source: event.UsageSourcePlanner})
 		return nil
 	}
 	runExecutorWithPlan := func(ctx context.Context, planText string) error {
@@ -827,7 +832,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		}
 	}()
 
-	ch, err := c.planner.Stream(ctx, provider.Request{
+	ch, err := provider.StreamWithRequestBudget(ctx, c.planner, provider.Request{
 		Messages:    provider.ModelMessages(c.plannerSess.Messages),
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})

@@ -63,6 +63,7 @@ type ProviderView struct {
 	ContextWindow     int                         `json:"contextWindow"`
 	ReasoningProtocol string                      `json:"reasoningProtocol"`
 	Thinking          string                      `json:"thinking"`
+	WebSearch         bool                        `json:"webSearch"`
 	SupportedEfforts  []string                    `json:"supportedEfforts"`
 	DefaultEffort     string                      `json:"defaultEffort"`
 	ModelOverrides    []ProviderModelOverrideView `json:"modelOverrides"`
@@ -651,6 +652,7 @@ func providerViewFromEntryForRootWithResolverAndCredentials(p config.ProviderEnt
 		ContextWindow:           p.ContextWindow,
 		ReasoningProtocol:       p.ReasoningProtocol,
 		Thinking:                providerThinkingForSettings(p.Thinking),
+		WebSearch:               config.EffectiveWebSearch(&p),
 		SupportedEfforts:        nonNil(p.SupportedEfforts),
 		DefaultEffort:           p.DefaultEffort,
 		ModelOverrides:          providerModelOverridesForView(p.ModelOverrides, models),
@@ -2248,6 +2250,12 @@ func saveProviderConfig(c *config.Config, p ProviderView) error {
 	e.ContextWindow = p.ContextWindow
 	e.ReasoningProtocol = p.ReasoningProtocol
 	e.Thinking = providerThinkingForSettings(p.Thinking)
+	if config.SupportsServerWebSearch(&e) {
+		enabled := p.WebSearch
+		e.WebSearch = &enabled
+	} else {
+		e.WebSearch = nil
+	}
 	e.SupportedEfforts = p.SupportedEfforts
 	e.DefaultEffort = p.DefaultEffort
 	e.Model = ""

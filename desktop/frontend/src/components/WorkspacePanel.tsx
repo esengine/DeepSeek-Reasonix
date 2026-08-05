@@ -56,6 +56,7 @@ import type {
   WorkspaceChangeDetailView,
   WorkspaceChangesView,
 } from "../lib/types";
+import { workspaceGitStatusLabel } from "../lib/workspaceChanges";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { formatSelectionReference, languageFor } from "../lib/selectedTextContext";
 import { cleanGitDiff } from "../lib/diff";
@@ -891,7 +892,7 @@ export function WorkspacePanel({
                   {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
                 </span>
                 <span className="workspace-change__meta">
-                  {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{change.gitStatus}</span>}
+                  {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{workspaceGitStatusLabel(change.gitStatus, t)}</span>}
                 </span>
               </button>
               {change.canSessionRevert && change.sources.includes("session") && (

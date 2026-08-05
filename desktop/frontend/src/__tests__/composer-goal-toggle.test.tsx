@@ -710,9 +710,10 @@ console.log("\ncomposer goal toggle");
     await flushTimers();
   });
 
-  const stopGoal = document.querySelector(".composer-intent-menu__stop") as HTMLButtonElement | null;
-  if (!stopGoal) throw new Error("explicit stop goal action did not render");
-  eq(stopGoal.textContent, "Stop goal", "active goal uses an explicit stop action");
+  const goalActions = Array.from(document.querySelectorAll(".composer-intent-menu__stop")) as HTMLButtonElement[];
+  const stopGoal = goalActions.find((b) => b.textContent === "End goal");
+  if (!stopGoal) throw new Error("explicit end-goal action did not render");
+  ok(goalActions.some((b) => b.textContent === "Pause goal"), "running goal offers a pause action");
   await act(async () => {
     stopGoal.click();
     await flushTimers();

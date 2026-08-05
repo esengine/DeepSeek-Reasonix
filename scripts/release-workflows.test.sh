@@ -156,6 +156,20 @@ if sed -n '/^  workflow_dispatch:/,/^  workflow_call:/p' "$repo_root/.github/wor
 fi
 grep -Fq 'if: ${{ !inputs.orchestrated }}' "$repo_root/.github/workflows/release-npm.yml"
 grep -Fq 'Publish or recover immutable npm packages' "$repo_root/.github/workflows/release-npm.yml"
+if sed -n '/^  cache-guard:/,/^  npm:/p' \
+	"$repo_root/.github/workflows/release-npm.yml" |
+	grep -Fq 'RECOVERY_CONTROL_SHA'; then
+	echo "npm recovery control plane must load in the publisher job after candidate checkout" >&2
+	exit 1
+fi
+sed -n '/^  npm:/,$p' "$repo_root/.github/workflows/release-npm.yml" |
+	grep -Fq 'RECOVERY_CONTROL_SHA: ${{ github.workflow_sha }}'
+sed -n '/^  npm:/,$p' "$repo_root/.github/workflows/release-npm.yml" |
+	grep -Fq 'git restore --source="$RECOVERY_CONTROL_SHA"'
+for recovery_script in npm/publish.mjs scripts/finalize-npm-official-release.mjs; do
+	sed -n '/^  npm:/,$p' "$repo_root/.github/workflows/release-npm.yml" |
+		grep -Fq "$recovery_script"
+done
 grep -Fq 'publishPackages' "$repo_root/npm/build.mjs"
 grep -Eq 'signing-policy-slug: release-signing' "$repo_root/.github/workflows/release-desktop.yml"
 if grep -Eq 'signing-policy-slug:.*test-signing' "$repo_root/.github/workflows/release-desktop.yml"; then
@@ -1131,6 +1145,7 @@ expect_invalid_desktop_manifest "a non-official asset base" preview "$desktop_pr
 # Release notes use one deterministic branch per official version. Failure to
 # open the PR must preserve that branch and print an exact manual handoff.
 prepare_notes="$repo_root/.github/workflows/prepare-release-notes.yml"
+generate_notes="$repo_root/scripts/generate-release-notes.mjs"
 if grep -Eq '^      (target_pr|from_tag):$' "$prepare_notes"; then
 	echo "Prepare release must expose only the official version input" >&2
 	exit 1
@@ -1139,6 +1154,7 @@ grep -Fq 'branch="release-notes/v${VERSION}"' "$prepare_notes"
 grep -Fq 'GitHub Actions could not open the PR; the reviewed branch is preserved.' "$prepare_notes"
 grep -Fq 'gh pr create --repo ${{ github.repository }} --base main-v2 --head $RELEASE_NOTES_BRANCH --fill' "$prepare_notes"
 grep -Eq 'GITHUB_STEP_SUMMARY' "$prepare_notes"
+grep -Fq 'thinking: { type: "disabled" }' "$generate_notes"
 
 desktop_candidate_resolver="$repo_root/scripts/resolve-desktop-candidate.sh"
 test -x "$desktop_candidate_resolver"

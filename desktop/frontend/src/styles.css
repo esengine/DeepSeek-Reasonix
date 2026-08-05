@@ -85,6 +85,20 @@
   --accent-soft: rgba(217, 119, 87, 0.14);
   --accent-strong: #e58a6b;
   --grad: linear-gradient(120deg, var(--accent), var(--accent-strong));
+  /* Chart series colours for the usage-stats model charts (donut + stacked
+     trend). A fixed two-set palette taken from GitHub Primer's data-viz
+     tokens (data-blue/green/orange/purple/pink/gray emphasis, light + dark
+     variants; dark orange uses the palette's brighter .5 step #c46212
+     instead of the official #984b10 emphasis, which reads brownish on this
+     dark background); theme styles and theme packs deliberately do not
+     override these so charts keep the same readable sets in both
+     directions. */
+  --chart-1: #0576ff;
+  --chart-2: #2f6f37;
+  --chart-3: #c46212;
+  --chart-4: #975bf1;
+  --chart-5: #d34591;
+  --chart-other: #576270;
   --chat-user-bg: color-mix(in srgb, var(--accent) 16%, var(--bg-elev-2));
   --chat-user-border: color-mix(in srgb, var(--accent) 28%, var(--border-soft));
   --chat-user-fg: var(--fg);
@@ -335,6 +349,12 @@
     --accent-fg: #fff;
     --accent-soft: rgba(47, 95, 168, 0.12);
     --accent-strong: #244f91;
+    --chart-1: #006edb;
+    --chart-2: #30a147;
+    --chart-3: #eb670f;
+    --chart-4: #894ceb;
+    --chart-5: #ce2c85;
+    --chart-other: #808fa3;
     --chat-user-bg: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
     --chat-user-border: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
     --chat-user-fg: var(--fg);
@@ -404,6 +424,12 @@
   --accent-fg: #fff;
   --accent-soft: rgba(47, 95, 168, 0.12);
   --accent-strong: #244f91;
+  --chart-1: #006edb;
+  --chart-2: #30a147;
+  --chart-3: #eb670f;
+  --chart-4: #894ceb;
+  --chart-5: #ce2c85;
+  --chart-other: #808fa3;
   --chat-user-bg: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
   --chat-user-border: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
   --chat-user-fg: var(--fg);
@@ -3993,7 +4019,7 @@ a[href] {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 450;
   line-height: 1.65;
   white-space: pre-wrap;
@@ -4015,7 +4041,7 @@ a[href] {
   background: var(--button-bg);
   color: var(--button-fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 650;
   line-height: 1;
   transition: color 0.12s, background 0.12s, border-color 0.12s, opacity 0.12s;
@@ -4262,7 +4288,7 @@ a[href] {
 }
 .msg__send-failed {
   margin-top: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--danger);
 }
 .msg-attachments {
@@ -4344,13 +4370,13 @@ a[href] {
 }
 .msg-attachment__name {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   line-height: 1.25;
 }
 .msg-attachment__meta {
   color: var(--fg-faint);
-  font-size: 11px;
+  font-size: var(--text-xs);
   line-height: 1.25;
 }
 
@@ -4374,7 +4400,7 @@ a[href] {
   min-height: 32px;
   padding: 5px 6px 5px 9px;
   color: var(--fg-dim);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .msg-pasted-head > svg {
   flex-shrink: 0;
@@ -4405,7 +4431,7 @@ a[href] {
   background: transparent;
   color: var(--fg-faint);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 .msg-pasted-head button:hover {
@@ -4418,7 +4444,7 @@ a[href] {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.5;
 }
 .msg-pasted-expanded .md {
@@ -4493,7 +4519,7 @@ a[href] {
   border: none;
   background: none;
   cursor: pointer;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   color: var(--fg-faint);
   border-radius: 6px;
@@ -4536,7 +4562,7 @@ a[href] {
   background: transparent;
   color: var(--fg-faint);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   line-height: 1.4;
   text-align: left;
@@ -4561,7 +4587,7 @@ a[href] {
   gap: 6px;
   margin-top: 2px;
   color: var(--fg-faint);
-  font-size: 13px;
+  font-size: var(--text-md);
 }
 .msg-memory-citations__toggle {
   display: inline-flex;
@@ -4606,7 +4632,7 @@ a[href] {
   flex-wrap: wrap;
   gap: 8px;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 560;
   line-height: 1.35;
 }
@@ -4616,7 +4642,7 @@ a[href] {
 }
 .msg-memory-citations__note {
   color: var(--fg-dim);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.45;
 }
 
@@ -4694,7 +4720,7 @@ a[href] {
   border: none;
   color: var(--fg-faint);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
   border-radius: 4px;
@@ -7464,6 +7490,35 @@ body > .mermaid-diagram--fullscreen {
 .composer-intent-menu__stop:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.composer-intent-menu__goal-actions {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+}
+
+.composer-intent-menu__goal-actions .composer-intent-menu__stop {
+  justify-self: end;
+}
+
+.composer-intent-menu__goal-runtime {
+  padding: 0 6px 4px;
+}
+
+.composer-intent-menu__goal-runtime-line {
+  display: block;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.composer-intent-menu__goal-runtime-line--blocked {
+  color: var(--err);
+}
+
+.composer-intent-menu__goal-runtime-line--paused {
+  color: var(--warn);
 }
 
 .composer-more-menu {
@@ -16556,6 +16611,21 @@ body > .mermaid-diagram--fullscreen {
   font-family: var(--font-sans);
   font-size: var(--font-control-small);
 }
+.provider-model-draft__capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  color: var(--fg-muted);
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+}
+.provider-model-draft__capabilities span {
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--bg-elev-1);
+  line-height: 1.35;
+}
 .provider-model-draft__option input {
   margin: 0;
 }
@@ -16566,6 +16636,101 @@ body > .mermaid-diagram--fullscreen {
 .provider-model-draft__empty {
   color: var(--fg-muted);
   font-size: var(--font-control-small);
+}
+.provider-capabilities {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-soft);
+}
+.provider-capability-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-elev-1) 72%, transparent);
+  cursor: pointer;
+}
+.provider-capability-row__copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--fg-muted);
+  font-size: var(--font-control-small);
+  line-height: 1.4;
+}
+.provider-capability-row__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg);
+  font-size: var(--font-control);
+  font-weight: 650;
+}
+.provider-capability-row__switch {
+  width: 36px;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+.provider-capability-row__switch::before {
+  content: "";
+  display: block;
+  width: 14px;
+  height: 14px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  transition: transform 140ms ease, background 140ms ease;
+}
+.provider-capability-row__switch:checked {
+  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+  background: var(--accent);
+}
+.provider-capability-row__switch:checked::before {
+  background: var(--bg);
+  transform: translateX(16px);
+}
+.provider-capability-row__switch:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  outline-offset: 2px;
+}
+.provider-capability-row__switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.provider-capability-row:has(.provider-capability-row__switch:disabled) {
+  cursor: not-allowed;
+}
+.provider-capability-row__cost {
+  color: var(--fg-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.4;
+}
+.provider-capability-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.provider-capability-badges span {
+  padding: 3px 7px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 .provider-key-status {
   display: flex;
@@ -19934,7 +20099,7 @@ body > .mermaid-diagram--fullscreen {
 /* ── tool card extras: nested sub-agent, multi-edit labels ───── */
 .tool__difflabel {
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--fg-faint);
   margin: 6px 0 2px;
 }
@@ -27307,7 +27472,7 @@ body > .mermaid-diagram--fullscreen {
 
 :root[data-theme-style] .process-card__kind {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 700;
   letter-spacing: 0;
   text-transform: none;
@@ -27321,7 +27486,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .msg--assistant > .process-card[data-tone="violet"] .process-card__name {
   color: var(--fg);
   font-family: inherit;
-  font-size: 13px;
+  font-size: var(--text-md);
   font-weight: 700;
 }
 
@@ -27329,7 +27494,7 @@ body > .mermaid-diagram--fullscreen {
 :root[data-theme-style] .process-card__meta {
   color: var(--fg-faint);
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 

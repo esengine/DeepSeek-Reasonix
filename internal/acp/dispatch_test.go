@@ -675,3 +675,33 @@ func TestClip(t *testing.T) {
 		t.Errorf("clip note missing: %q", got[len(got)-40:])
 	}
 }
+
+// Replay must show the user-authored view, not the persisted wire form:
+// injected transient blocks and protocol markers stay in history for parsing
+// but never reach the client (#6882).
+func TestUpdateSinkReplayStripsInjectedWrappers(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	sink.replay([]provider.Message{
+		{
+			Role: provider.RoleUser,
+			Content: "<response-language>\nFinal answer language preference: use Simplified Chinese.\n</response-language>\n" +
+				"Introduce yourself",
+		},
+		{
+			Role:    provider.RoleAssistant,
+			Content: "Here you go.\n[goal:continue]",
+		},
+	})
+
+	u := fn.updateMap(t, 0)
+	content, _ := u["content"].(map[string]any)
+	if content["text"] != "Introduce yourself" {
+		t.Fatalf("replayed user text = %v, want the authored text only", content["text"])
+	}
+	u = fn.updateMap(t, 1)
+	content, _ = u["content"].(map[string]any)
+	if content["text"] != "Here you go." {
+		t.Fatalf("replayed assistant text = %v, want goal marker stripped", content["text"])
+	}
+}

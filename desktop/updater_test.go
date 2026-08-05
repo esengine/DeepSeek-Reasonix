@@ -146,14 +146,17 @@ func TestUpdaterNativeOperationsFailFastWhileBusy(t *testing.T) {
 
 func TestUpdaterReconcilesPendingUpdateBeforeInstallModeDispatch(t *testing.T) {
 	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
 	originalReconcile := reconcilePendingUpdateForInstall
 	t.Cleanup(func() {
 		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
 		reconcilePendingUpdateForInstall = originalReconcile
 	})
 
 	called := false
 	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) { return false, nil }
 	reconcilePendingUpdateForInstall = func(runningVersion string) (repair.PendingUpdateReconcileResult, error) {
 		called = true
 		if runningVersion != version {
@@ -162,7 +165,7 @@ func TestUpdaterReconcilesPendingUpdateBeforeInstallModeDispatch(t *testing.T) {
 		return repair.PendingUpdateReconcileResult{Pending: true, Cleared: true}, nil
 	}
 	meta := &cachedUpdate{Channel: "preview", Version: "v1.18.0-preview.65", Size: 42}
-	if err := (&App{}).reconcilePendingUpdateBeforeInstall("install-1", meta); err != nil {
+	if err := (&App{}).reconcilePendingUpdateForRequest("install-1", meta); err != nil {
 		t.Fatal(err)
 	}
 	if !called {
@@ -170,20 +173,74 @@ func TestUpdaterReconcilesPendingUpdateBeforeInstallModeDispatch(t *testing.T) {
 	}
 }
 
-func TestUpdaterBlocksInstallWhilePreviousReleaseAwaitsHealth(t *testing.T) {
+func TestUpdaterArchivesSupersededUpdateBeforeReconciliation(t *testing.T) {
 	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
 	originalReconcile := reconcilePendingUpdateForInstall
 	t.Cleanup(func() {
 		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
+		reconcilePendingUpdateForInstall = originalReconcile
+	})
+
+	archived := false
+	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) {
+		archived = true
+		return true, nil
+	}
+	reconcilePendingUpdateForInstall = func(string) (repair.PendingUpdateReconcileResult, error) {
+		if !archived {
+			t.Fatal("reconciliation ran before superseded update archival")
+		}
+		return repair.PendingUpdateReconcileResult{}, nil
+	}
+	meta := &cachedUpdate{Channel: "stable", Version: "v1.20.0", Size: 42}
+	if err := (&App{}).reconcilePendingUpdateForRequest("install-1", meta); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpdaterReconcilesBeforeDownloading(t *testing.T) {
+	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
+	originalReconcile := reconcilePendingUpdateForInstall
+	t.Cleanup(func() {
+		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
 		reconcilePendingUpdateForInstall = originalReconcile
 	})
 
 	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) { return false, nil }
+	reconcilePendingUpdateForInstall = func(string) (repair.PendingUpdateReconcileResult, error) {
+		return repair.PendingUpdateReconcileResult{Pending: true}, errors.New("blocked before download")
+	}
+	err := (&App{}).ApplyUpdateRequest("stable", "v1.20.0", "preflight-recovery")
+	if err == nil || !strings.Contains(err.Error(), "blocked before download") {
+		t.Fatalf("pre-download recovery error=%v", err)
+	}
+}
+
+func TestUpdaterBlocksInstallWhilePreviousReleaseAwaitsHealth(t *testing.T) {
+	originalExists := pendingUpdateExistsForInstall
+	originalArchive := archiveSupersededPendingUpdateForInstall
+	originalReconcile := reconcilePendingUpdateForInstall
+	t.Cleanup(func() {
+		pendingUpdateExistsForInstall = originalExists
+		archiveSupersededPendingUpdateForInstall = originalArchive
+		reconcilePendingUpdateForInstall = originalReconcile
+	})
+
+	pendingUpdateExistsForInstall = func() bool { return true }
+	archiveSupersededPendingUpdateForInstall = func() (bool, error) {
+		return false, errors.New("not a superseded flat-layout transaction")
+	}
 	reconcilePendingUpdateForInstall = func(string) (repair.PendingUpdateReconcileResult, error) {
 		return repair.PendingUpdateReconcileResult{Pending: true, AwaitingHealth: true}, repair.ErrPendingUpdateAwaitingHealth
 	}
 	meta := &cachedUpdate{Channel: "preview", Version: "v1.18.0-preview.65", Size: 42}
-	err := (&App{}).reconcilePendingUpdateBeforeInstall("install-1", meta)
+	err := (&App{}).reconcilePendingUpdateForRequest("install-1", meta)
 	if err == nil || !strings.Contains(err.Error(), "startup health check") {
 		t.Fatalf("health-check recovery error = %v", err)
 	}

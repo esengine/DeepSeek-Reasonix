@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -282,6 +283,30 @@ func TestFleetParallelDisjointWriters(t *testing.T) {
 	}
 	if maxConcurrent.Load() < 2 {
 		t.Fatalf("expected concurrent starts, max=%d", maxConcurrent.Load())
+	}
+}
+
+func TestFleetAggregatePreservesEveryReferenceUnderToolLimit(t *testing.T) {
+	results := make([]fleetItemResult, 3)
+	for i := range results {
+		results[i] = fleetItemResult{
+			index:  i,
+			status: fleetItemCompleted,
+			output: fmt.Sprintf("BEGIN-%d\n%s\nEND-%d", i+1, strings.Repeat(string(rune('a'+i)), 20*1024), i+1),
+			ref:    fmt.Sprintf("sa_result_%d", i+1),
+		}
+	}
+	out := formatFleetAggregate(results, false)
+	if len(out) > subagentAggregateBudgetBytes {
+		t.Fatalf("aggregate bytes = %d, want <= %d", len(out), subagentAggregateBudgetBytes)
+	}
+	if _, notice := truncateToolOutput(out); notice != "" {
+		t.Fatalf("bounded fleet aggregate still hit generic truncation: %s", notice)
+	}
+	for i := range results {
+		if !strings.Contains(out, results[i].ref) {
+			t.Fatalf("aggregate lost ref %q", results[i].ref)
+		}
 	}
 }
 
