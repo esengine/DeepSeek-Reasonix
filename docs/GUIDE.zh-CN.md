@@ -51,6 +51,7 @@ default_model = "deepseek-flash"   # 执行器；设 [agent].planner_model 可�
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop；兼容旧配置
 # cursor_shape = "bar"             # block|underline|bar；CLI/TUI 输入光标
+show_turn_usage = false             # 隐藏 TUI 每轮 token/费用回执；默认 true
 
 [agent]
 reasoning_language = "auto"      # 可见思考过程语言：auto|zh|en

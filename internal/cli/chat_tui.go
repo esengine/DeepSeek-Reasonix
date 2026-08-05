@@ -92,6 +92,9 @@ type chatTUI struct {
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
+	// showTurnUsage controls whether completed per-request token/cost receipts are
+	// retained in transcript scrollback. Usage accounting remains active either way.
+	showTurnUsage bool
 
 	// balance is the last-fetched wallet-balance readout (e.g. "¥110.00"), "" when
 	// the provider declares no balance_url or a fetch failed. Refreshed async on
@@ -591,6 +594,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		pendingCommit:        &commitBuf,
 		diffMaxLines:         diffFoldLimit,
 		showReasoning:        nativeScrollback,
+		showTurnUsage:        true,
 		shellOutputs:         make(map[string]string),
 		shellExpanded:        make(map[string]bool),
 		shellTranscriptIdx:   make(map[string]int),
@@ -4138,10 +4142,12 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
 		}
-		if line := renderTurnReceipt(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
-			m.finalizeStreamed()
-			m.commitSpacer()
-			m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})
+		if m.showTurnUsage {
+			if line := renderTurnReceipt(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
+				m.finalizeStreamed()
+				m.commitSpacer()
+				m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})
+			}
 		}
 
 	case event.Notice:

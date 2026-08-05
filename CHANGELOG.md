@@ -8,6 +8,8 @@ branch.
 
 ### Added
 
+- Added `[ui].show_turn_usage` so CLI/TUI users can hide per-request token and
+  cost receipts from transcript scrollback without disabling usage accounting.
 - Added the structured Goal completion protocol: the always-registered
   `update_goal` tool (continue/complete/blocked with reason and next_action)
   replaces the `[goal:*]` footer markers. The Goal FSM is now the exclusive
