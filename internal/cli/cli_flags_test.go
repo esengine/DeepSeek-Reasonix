@@ -143,6 +143,25 @@ func TestResolveSessionQueryByIDAndPreview(t *testing.T) {
 	}
 }
 
+func TestResolveSessionQueryByMachineSessionID(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
+	dir := t.TempDir()
+	path := saveQueryTestSession(t, dir, "opaque-branch.jsonl", "resume by machine id")
+	machineID := machineSessionIDWithKey(agent.BranchID(path), identityKey)
+	if machineID == "" || !looksLikeMachineSessionID(machineID) {
+		t.Fatalf("machine session id = %q", machineID)
+	}
+
+	got, err := resolveSessionQuery(dir, machineID)
+	if err != nil || got != path {
+		t.Fatalf("resolve by machine id = (%q, %v), want %q", got, err, path)
+	}
+	missing := "session_" + strings.Repeat("0", 32)
+	if _, err := resolveSessionQuery(dir, missing); err == nil || !strings.Contains(err.Error(), "no session") {
+		t.Fatalf("missing machine id error = %v", err)
+	}
+}
+
 func saveQueryTestSession(t *testing.T, dir, name, prompt string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
