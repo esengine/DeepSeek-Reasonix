@@ -205,7 +205,11 @@ func validateNestedRequired(raw json.RawMessage, typ reflect.Type, at string) er
 		typ = typ.Elem()
 	}
 	if typ == reflect.TypeOf(json.RawMessage{}) {
-		if len(bytes.TrimSpace(raw)) == 0 || !json.Valid(raw) {
+		// 可选字段（omitempty）缺省时为空——放行；非空才要求合法 JSON。
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return nil
+		}
+		if !json.Valid(raw) {
 			return validationError(at + " must contain valid JSON")
 		}
 		return nil
@@ -253,7 +257,11 @@ func validateValue(value reflect.Value, at string, omitEmpty bool) error {
 	typ := value.Type()
 	if typ == reflect.TypeOf(json.RawMessage{}) {
 		raw := value.Interface().(json.RawMessage)
-		if len(bytes.TrimSpace(raw)) == 0 || !json.Valid(raw) {
+		// 可选字段（omitempty）缺省时为空——放行；非空才要求合法 JSON。
+		if len(bytes.TrimSpace(raw)) == 0 {
+			return nil
+		}
+		if !json.Valid(raw) {
 			return validationError(at + " must contain valid JSON")
 		}
 		return nil

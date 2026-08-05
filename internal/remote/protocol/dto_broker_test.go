@@ -21,6 +21,7 @@ func TestBrokerProviderRequestRoundTripIsLossless(t *testing.T) {
 		}},
 		Tools:       []provider.ToolSchema{{Name: "read", Description: "read a file", Parameters: json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)}},
 		Temperature: &temperature, MaxTokens: 4096,
+		ResponseFormat: &provider.ResponseFormat{Type: "json_object"},
 	}
 	wired := BrokerProviderRequestFromProvider(want)
 	raw, err := json.Marshal(BrokerStreamOpenParams{StreamID: "s1", ProviderRef: "local/model", Request: wired})
@@ -198,5 +199,23 @@ func TestBrokerSchemaUsesTypedRequestChunkAndJSONValue(t *testing.T) {
 	responsesItem := findProperty(t, chunk, "responsesItem")
 	if chunk.Type != "object" || len(findProperty(t, chunk, "type").Schema.Enum) != 9 || responsesItem.Required || responsesItem.Schema.Type != "json" {
 		t.Fatalf("chunk schema is not a typed enum object: %#v", chunk)
+	}
+}
+
+// TestBrokerChunkRoundTripsReasoningMeta：reasoning id/status 过 Host↔Desktop
+// broker 往返不丢失（管理员 #7234："远端 broker 路径，如适用"）。
+func TestBrokerChunkRoundTripsReasoningMeta(t *testing.T) {
+	original := provider.Chunk{
+		Type:            provider.ChunkReasoning,
+		ReasoningID:     "rs_broker_1",
+		ReasoningStatus: "completed",
+	}
+	wired := BrokerProviderChunkFromProvider(original)
+	if wired.ReasoningID != "rs_broker_1" || wired.ReasoningStatus != "completed" {
+		t.Fatalf("wire lost reasoning meta: %q/%q", wired.ReasoningID, wired.ReasoningStatus)
+	}
+	back := wired.ProviderChunk()
+	if back.ReasoningID != original.ReasoningID || back.ReasoningStatus != original.ReasoningStatus {
+		t.Fatalf("round-trip lost reasoning meta: %q/%q", back.ReasoningID, back.ReasoningStatus)
 	}
 }

@@ -88,7 +88,26 @@ const (
 	parallelTaskSkipped   parallelTaskStatus = "skipped"
 )
 
-func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (result string, err error) {
+	// Group lifecycle: the group card's terminal is an explicit event from
+	// the tool itself (running once children start, exactly one terminal at
+	// the end) so frontends never infer group completion from the children
+	// they happen to have observed — children dispatch asynchronously, and a
+	// fast first child can finish before later children even appear. Every
+	// exit path (including validation failures) emits a terminal.
+	parentID, sink, _, ok := CallContext(ctx)
+	if !ok || sink == nil {
+		parentID = "parallel_tasks"
+		sink = event.Discard
+	}
+	merger := newSubagentProgressMerger(realProgressClock{}, sink, parentID)
+	defer merger.Close()
+	var statuses []parallelTaskStatus
+	defer func() {
+		merger.directStatus(parentID, parallelGroupTerminalPhase(ctx, err, statuses))
+	}()
+	ctx = withSubagentProgressMerger(ctx, merger)
+
 	var params struct {
 		Tasks []parallelTaskItem `json:"tasks"`
 	}
@@ -113,11 +132,8 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		return "", fmt.Errorf("parallel_tasks is not configured")
 	}
 
-	parentID, sink, _, ok := CallContext(ctx)
-	if !ok || sink == nil {
-		parentID = "parallel_tasks"
-		sink = event.Discard
-	}
+	// The group starts running once children begin dispatching.
+	merger.directStatus(parentID, subagentPhaseRunning)
 
 	type subResult struct {
 		index  int
@@ -133,7 +149,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 	outputs := make([]string, n)
 	refs := make([]string, n)
 	taskErrs := make([]error, n)
-	statuses := make([]parallelTaskStatus, n)
+	statuses = make([]parallelTaskStatus, n)
 	for i := range params.Tasks {
 		statuses[i] = parallelTaskPending
 	}
@@ -275,6 +291,24 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 		return formatParallelTasksAggregate(outputs, refs, taskErrs, statuses, true), err
 	}
 	return formatParallelTasksAggregate(outputs, refs, taskErrs, statuses, false), nil
+}
+
+// parallelGroupTerminalPhase classifies a parallel_tasks group's single
+// terminal status: cancellation/deadline wins, then any failed child, then
+// any error (including validation failures), then completed.
+func parallelGroupTerminalPhase(ctx context.Context, err error, statuses []parallelTaskStatus) subagentProgressPhase {
+	if ctx.Err() != nil {
+		return subagentPhaseCancelled
+	}
+	for _, st := range statuses {
+		if st == parallelTaskFailed {
+			return subagentPhaseFailed
+		}
+	}
+	if err != nil {
+		return subagentPhaseFailed
+	}
+	return subagentPhaseCompleted
 }
 
 func parallelTasksWereCancelled(statuses []parallelTaskStatus) bool {

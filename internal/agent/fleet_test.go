@@ -67,6 +67,98 @@ func TestBackgroundFleetRegistersEveryWriterUntilCompletion(t *testing.T) {
 	}
 }
 
+// TestBackgroundFleetProgressLifecycleUsesStableIDs guards both sides of the
+// background handoff: Execute must leave the shared merger alive for the job,
+// and group/child progress must be emitted through the raw parent sink so IDs
+// are namespaced exactly once and match the cards already dispatched.
+func TestBackgroundFleetProgressLifecycleUsesStableIDs(t *testing.T) {
+	root := t.TempDir()
+	rec := &recordSink{}
+	prov := &fleetHoldProvider{started: make(chan struct{}, 2), release: make(chan struct{})}
+	task := NewTaskTool(prov, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(mustSubagentStore(t), root, "base", "high").
+		WithScheduler(NewSubagentScheduler(2, 2))
+	fleet := NewFleetTool(task)
+	manager := jobs.NewManager(event.Discard)
+	defer manager.Close()
+	ctx := withCallContext(context.Background(), "fleet-call", rec, nil, false)
+	ctx = jobs.WithManager(ctx, manager)
+	ctx = jobs.WithSession(ctx, "progress-session")
+	args := json.RawMessage(`{
+		"run_in_background":true,
+		"tasks":[
+			{"prompt":"first","write_paths":["first.md"]},
+			{"prompt":"second","write_paths":["second.md"]}
+		]
+	}`)
+	if _, err := fleet.Execute(ctx, args); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		select {
+		case <-prov.started:
+		case <-time.After(2 * time.Second):
+			t.Fatal("timed out waiting for background fleet child")
+		}
+	}
+	close(prov.release)
+	running := manager.RunningForSession("progress-session")
+	if len(running) != 1 {
+		t.Fatalf("running fleet jobs = %+v, want 1", running)
+	}
+	result := manager.WaitForSession(context.Background(), "progress-session", []string{running[0].ID}, 5)
+	if len(result) != 1 || result[0].Status != jobs.Done {
+		t.Fatalf("background fleet result = %+v, want one completed job", result)
+	}
+
+	groupStatuses := []string{}
+	childStatuses := map[string][]string{}
+	childPreviews := map[string]bool{}
+	for _, e := range rec.kinds(event.ToolProgress) {
+		if strings.Contains(e.Tool.ID, "fleet-call/fleet-call") {
+			t.Fatalf("progress ID was namespaced twice: %+v", e.Tool)
+		}
+		switch {
+		case e.Tool.ID == "fleet-call" && progressName(e) == event.SubagentProgressStatusName:
+			if e.Tool.ParentID != "" {
+				t.Fatalf("group progress ParentID = %q, want empty", e.Tool.ParentID)
+			}
+			groupStatuses = append(groupStatuses, progressOutput(e))
+		case strings.HasPrefix(e.Tool.ID, "fleet-call/fleet-"):
+			if e.Tool.ParentID != "fleet-call" {
+				t.Fatalf("child progress ParentID = %q, want fleet-call", e.Tool.ParentID)
+			}
+			if progressName(e) == event.SubagentProgressStatusName {
+				childStatuses[e.Tool.ID] = append(childStatuses[e.Tool.ID], progressOutput(e))
+			}
+			if progressName(e) == event.SubagentProgressTextName && progressOutput(e) != "" {
+				childPreviews[e.Tool.ID] = true
+			}
+		}
+	}
+	if len(groupStatuses) != 2 || groupStatuses[0] != string(subagentPhaseRunning) || groupStatuses[1] != string(subagentPhaseCompleted) {
+		t.Fatalf("group lifecycle = %v, want running → completed", groupStatuses)
+	}
+	for _, id := range []string{"fleet-call/fleet-1", "fleet-call/fleet-2"} {
+		statuses := childStatuses[id]
+		if len(statuses) < 2 || statuses[0] != string(subagentPhaseRunning) || statuses[len(statuses)-1] != string(subagentPhaseCompleted) {
+			t.Fatalf("child %s lifecycle = %v, want running → … → completed", id, statuses)
+		}
+		terminals := 0
+		for _, status := range statuses {
+			if isTerminalStatusOutput(status) {
+				terminals++
+			}
+		}
+		if terminals != 1 {
+			t.Fatalf("child %s terminals = %d, want exactly one", id, terminals)
+		}
+		if !childPreviews[id] {
+			t.Fatalf("child %s never emitted its text preview", id)
+		}
+	}
+}
+
 func TestBackgroundFleetRegistersReservationWhileItemsAreQueued(t *testing.T) {
 	root := t.TempDir()
 	store := checkpoint.New("", root)

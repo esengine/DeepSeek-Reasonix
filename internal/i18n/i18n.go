@@ -75,6 +75,18 @@ type Messages struct {
 	ChatThoughtForFmt                      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt                  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatToolWorkingFmt                     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
+	ChatSubagentPhaseQueued                string // sub-agent progress phase label ("queued")
+	ChatSubagentPhaseRunning               string // ("running")
+	ChatSubagentPhaseReasoning             string // ("reasoning")
+	ChatSubagentPhaseResponding            string // ("responding")
+	ChatSubagentPhaseTool                  string // ("using tools")
+	ChatSubagentPhaseRetrying              string // ("retrying")
+	ChatSubagentPhaseCompleted             string // ("completed")
+	ChatSubagentPhaseFailed                string // ("failed")
+	ChatSubagentPhaseCancelled             string // ("cancelled")
+	ChatSubagentProgressFmt                string // live progress line — %s = phase label, %d = elapsed s, %d = idle s ("%s · %ds · %ds ago")
+	ChatSubagentProgressDoneFmt            string // terminal summary — %s = phase label, %d = duration s ("%s · %ds")
+	ChatSubagentPreviewLabel               string // verbose preview marker ("▎")
 	ChatStatusRetryingFmt                  string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
 	ChatStatusCancellingFmt                string // "%s stopping… (%ds · Ctrl+C exits)" — %s = spinner, %d = elapsed s
 	ChatStatusIdle                         string // shortcuts hint when idle

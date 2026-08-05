@@ -2,8 +2,9 @@ package responses
 
 import (
 	"net/url"
-	"reasonix/internal/provider"
 	"strings"
+
+	"reasonix/internal/provider"
 )
 
 // vendorCapabilities describes how a Responses-compatible endpoint deviates

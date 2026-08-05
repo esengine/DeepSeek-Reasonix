@@ -6,12 +6,31 @@ import { useT } from "../lib/i18n";
 import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
-import type { Item } from "../lib/useController";
+import { isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
+import type { Translator } from "../lib/i18n";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
 const SUBAGENT_TOOLS = new Set(["task", "run_skill", "explore", "research", "review", "security_review"]);
+
+function subagentPhaseLabel(t: Translator, phase: SubagentPhase): string {
+  switch (phase) {
+    case "queued": return t("subagent.phase.queued");
+    case "running": return t("subagent.phase.running");
+    case "reasoning": return t("subagent.phase.reasoning");
+    case "responding": return t("subagent.phase.responding");
+    case "tool": return t("subagent.phase.tool");
+    case "retrying": return t("subagent.phase.retrying");
+    case "completed": return t("subagent.phase.completed");
+    case "failed": return t("subagent.phase.failed");
+    case "cancelled": return t("subagent.phase.cancelled");
+  }
+}
+
+function formatElapsedSeconds(ms: number): string {
+  return String(Math.max(0, Math.round(ms / 1000)));
+}
 
 /** Lines shown by default in a shell output block before the "show all" button. */
 const SHELL_PREVIEW_LINES = 10;
@@ -92,6 +111,29 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
       ? [item.profile.model, item.profile.effort ? `effort ${item.profile.effort}` : ""].filter(Boolean).join(" · ")
       : "";
 
+  // Sub-agent progress chip: phase + running elapsed + recent activity. The
+  // 1s ticker only runs while a progress card is live; terminal cards show
+  // the final duration instead.
+  const sp = item.subagentProgress;
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!sp || isTerminalSubagentPhase(sp.phase)) return;
+    const id = window.setInterval(() => setNowTick(Date.now()), 1000);
+    return () => window.clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sp]);
+  const subagentChip = sp
+    ? (() => {
+        const label = subagentPhaseLabel(t, sp.phase);
+        if (isTerminalSubagentPhase(sp.phase)) {
+          const ms = sp.durationMs ?? item.durationMs ?? 0;
+          return `${label} · ${t("subagent.phase.elapsed", { n: formatElapsedSeconds(ms) })}`;
+        }
+        return `${label} · ${t("subagent.phase.elapsed", { n: formatElapsedSeconds(nowTick - sp.startedAt) })} · ${t("subagent.activity.ago", { n: formatElapsedSeconds(nowTick - sp.lastActivityAt) })}`;
+      })()
+    : "";
+  const hasSubagentPreview = Boolean(sp && (sp.reasoning || sp.text || sp.notice));
+
   // All tools default to collapsed. Sub-agent tools open while running so the
   // user sees nested calls; they collapse when done. Reasoning (AssistantMessage)
   // also opens while streaming and closes on finish.
@@ -126,7 +168,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // Shell output: split into preview + "show all" toggle.
   const shellOutput = item.isShell && displayOutput ? displayOutput : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
-  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error);
+  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error || hasSubagentPreview);
   const errorText = item.error ? normalizeErrorText(item.error) : "";
   const errorSummary = errorText ? summarizeToolError(errorText, t("tool.errorReceiptMismatch")) : "";
   const hasErrorDetails = errorText ? errorNeedsDetails(errorText, errorSummary) : false;
@@ -192,6 +234,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
+        {subagentChip && (
+          <span className={`tool__subagent-chip tool__subagent-chip--${sp?.phase}`} data-phase={sp?.phase}>
+            <span className="tool__subagent-dot" aria-hidden="true" />
+            {subagentChip}
+          </span>
+        )}
         {summary && <span className="tool__summary">{summary}</span>}
         {duration && <span className="tool__duration">{duration}</span>}
         {hasBody && (
@@ -218,6 +266,30 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
               <DiffView original={d.original} modified={d.modified} language={d.lang} maxHeight={260} />
             </div>
           ))
+        )}
+
+        {hasSubagentPreview && sp && (
+          <div className="tool__subagent-preview">
+            {sp.reasoning && (
+              <div className="tool__subagent-preview-section">
+                <div className="tool__subagent-preview-label">{t("subagent.preview.reasoning")}</div>
+                <pre className="tool__subagent-preview-text">{sp.reasoning}</pre>
+              </div>
+            )}
+            {sp.text && (
+              <div className="tool__subagent-preview-section">
+                <div className="tool__subagent-preview-label">{t("subagent.preview.text")}</div>
+                <pre className="tool__subagent-preview-text">{sp.text}</pre>
+              </div>
+            )}
+            {sp.notice && (
+              <div className="tool__subagent-preview-section">
+                <div className="tool__subagent-preview-label">{t("subagent.preview.notice")}</div>
+                <pre className="tool__subagent-preview-text">{sp.notice}</pre>
+              </div>
+            )}
+            {sp.truncated && <div className="tool__note">{t("subagent.preview.truncated")}</div>}
+          </div>
         )}
 
         {hasNested && (
