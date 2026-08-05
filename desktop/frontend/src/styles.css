@@ -20450,6 +20450,10 @@ body > .mermaid-diagram--fullscreen {
   align-items: flex-start;
   gap: 8px;
   margin-bottom: 8px;
+  /* Many attachments (images/refs) stack rows without bound and squeeze the
+     transcript viewport (see #7578). Cap the area and scroll internally. */
+  max-height: min(30vh, 200px);
+  overflow-y: auto;
 }
 .composer-context__item {
   display: inline-flex;
@@ -20646,12 +20650,20 @@ body > .mermaid-diagram--fullscreen {
   flex-direction: column;
   gap: 6px;
   margin-bottom: 8px;
+  /* Pasting many long texts stacks fold blocks without bound and squeezes the
+     transcript viewport (see #7578). Cap the list and scroll internally. */
+  max-height: min(30vh, 240px);
+  overflow-y: auto;
 }
 .composer__pasted-block {
   border: 1px solid var(--border);
   border-radius: 7px;
   background: var(--panel);
   overflow: hidden;
+  /* The capped .composer__pasted list is a column flex container; without
+     this, flex-shrink would crush every block to a few px instead of
+     scrolling (#7578). */
+  flex-shrink: 0;
 }
 .composer__pasted-head {
   display: flex;
