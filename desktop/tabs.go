@@ -5584,6 +5584,7 @@ const (
 	defaultTopicTitle      = "新的会话"
 	defaultTopicTitleEn    = "New session"
 	defaultTopicTitleZhTW  = "新的會話"
+	defaultTopicTitleRu    = "Новый сеанс"
 	topicTitleSourceAuto   = "auto"
 	topicTitleSourceManual = "manual"
 )
@@ -5593,6 +5594,7 @@ const (
 	desktopLocaleEn
 	desktopLocaleZh
 	desktopLocaleZhTW
+	desktopLocaleRu
 )
 
 func (a *App) setDesktopLocale(locale string) {
@@ -5602,6 +5604,8 @@ func (a *App) setDesktopLocale(locale string) {
 		a.desktopLocale.Store(desktopLocaleZhTW)
 	case strings.HasPrefix(normalized, "zh"):
 		a.desktopLocale.Store(desktopLocaleZh)
+	case strings.HasPrefix(normalized, "ru"):
+		a.desktopLocale.Store(desktopLocaleRu)
 	default:
 		a.desktopLocale.Store(desktopLocaleEn)
 	}
@@ -5625,6 +5629,8 @@ func (a *App) localizedDefaultTopicTitle() string {
 		return defaultTopicTitleZhTW
 	case desktopLocaleEn:
 		return defaultTopicTitleEn
+	case desktopLocaleRu:
+		return defaultTopicTitleRu
 	default:
 		return defaultTopicTitle
 	}
@@ -5632,7 +5638,7 @@ func (a *App) localizedDefaultTopicTitle() string {
 
 func isDefaultTopicTitle(title string) bool {
 	switch strings.TrimSpace(title) {
-	case defaultTopicTitle, defaultTopicTitleEn, defaultTopicTitleZhTW:
+	case defaultTopicTitle, defaultTopicTitleEn, defaultTopicTitleZhTW, defaultTopicTitleRu:
 		return true
 	default:
 		return false
@@ -5957,15 +5963,20 @@ func (a *App) forkTopicTitle(title string) string {
 			return "Forked session"
 		case desktopLocaleZhTW:
 			return "分叉會話"
+		case desktopLocaleRu:
+			return "Копия сеанса"
 		default:
 			return "分叉会话"
 		}
 	}
-	if strings.HasSuffix(base, " · 分叉") || strings.HasSuffix(base, " · fork") {
+	if strings.HasSuffix(base, " · 分叉") || strings.HasSuffix(base, " · fork") || strings.HasSuffix(base, " · копия") {
 		return base
 	}
 	if a.desktopLocale.Load() == desktopLocaleEn {
 		return base + " · fork"
+	}
+	if a.desktopLocale.Load() == desktopLocaleRu {
+		return base + " · копия"
 	}
 	return base + " · 分叉"
 }

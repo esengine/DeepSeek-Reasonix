@@ -16,6 +16,7 @@ func TestDefaultTopicTitleLocalizesAtAPIBoundary(t *testing.T) {
 		{locale: "en-US", want: defaultTopicTitleEn},
 		{locale: "zh-CN", want: defaultTopicTitle},
 		{locale: "zh-TW", want: defaultTopicTitleZhTW},
+		{locale: "ru-RU", want: defaultTopicTitleRu},
 	} {
 		app.setDesktopLocale(tt.locale)
 		if got := app.localizedTopicTitle(defaultTopicTitle, topicTitleSourceAuto); got != tt.want {
@@ -82,7 +83,7 @@ func TestCreateTopicPreservesManualDefaultTitle(t *testing.T) {
 }
 
 func TestDefaultTopicTitleVariantsRemainPersistenceSentinels(t *testing.T) {
-	for _, title := range []string{defaultTopicTitle, defaultTopicTitleEn, defaultTopicTitleZhTW} {
+	for _, title := range []string{defaultTopicTitle, defaultTopicTitleEn, defaultTopicTitleZhTW, defaultTopicTitleRu} {
 		if !isDefaultTopicTitle(title) {
 			t.Fatalf("title %q was not recognized as a default sentinel", title)
 		}

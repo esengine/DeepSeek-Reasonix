@@ -152,6 +152,14 @@ func trayMenuLabels(locale string) trayLabels {
 			quitTooltip: "退出 Reasonix",
 		}
 	}
+	if locale == "ru" {
+		return trayLabels{
+			openTitle:   "Открыть",
+			openTooltip: "Открыть окно Reasonix",
+			quitTitle:   "Выход",
+			quitTooltip: "Выйти из Reasonix",
+		}
+	}
 	return trayLabels{
 		openTitle:   "Open",
 		openTooltip: "Open the Reasonix window",
