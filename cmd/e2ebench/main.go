@@ -17,6 +17,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"reasonix/internal/ablation"
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
@@ -67,6 +68,9 @@ type result struct {
 	task
 	runMetrics
 	Profile string `json:"profile"`
+	// Arm is the ablation arm the harness requested, not the arm the child
+	// reported, so a run that died before writing metrics is still attributable.
+	Arm     string `json:"arm"`
 	Passed  bool
 	Skipped bool
 	Note    string
@@ -114,6 +118,7 @@ func main() {
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
 	profileFlag := flag.String("profile", benchmarkProfileBaseline, "prompt profile: baseline | delivery")
+	ablateFlag := flag.String("ablate", "", "ablation arm: subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	outMD := flag.String("out", "", "write the markdown report here (default: stdout)")
 	outJSON := flag.String("json", "", "write the JSON report here (optional)")
 	budget := flag.Int("budget", defaultSuiteTokenBudget, "abort once total tokens cross this (0 = no cap)")
@@ -130,11 +135,16 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
+	arm, err := ablation.Parse(*ablateFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
 
 	if *mode == "diff" {
 		report := runDiff(diffOpts{
 			bin: *bin, model: *model, repo: *repo, base: *base,
-			testCmd: *testCmd, profile: profile, maxSteps: *maxSteps, timeoutSec: *timeoutSec, attempts: *attempts,
+			testCmd: *testCmd, profile: profile, ablate: arm, maxSteps: *maxSteps, timeoutSec: *timeoutSec, attempts: *attempts,
 		})
 		emit(report, *outMD, "")
 		return
@@ -162,7 +172,7 @@ func main() {
 			results = append(results, result{task: t, Profile: profile, Skipped: true, Note: "skipped: token budget reached"})
 			continue
 		}
-		r := runTask(*bin, *model, profile, t)
+		r := runTask(*bin, *model, profile, arm, t)
 		total += r.PromptTokens + r.CompletionTokens
 		results = append(results, r)
 	}
@@ -234,8 +244,9 @@ func loadTasks(suite string) ([]task, error) {
 // runTask copies the task's seed workdir into a temp dir, runs the agent there,
 // then drops in verify.sh and runs it as the grader. The grader is added only
 // after the run so the agent can't read the answer key.
-func runTask(bin, model, profile string, t task) result {
+func runTask(bin, model, profile string, arm ablation.Set, t task) result {
 	r := result{task: t, Profile: profile}
+	r.Arm = arm.Arm()
 
 	work, err := os.MkdirTemp("", "e2ebench-"+t.ID+"-")
 	if err != nil {
@@ -255,7 +266,7 @@ func runTask(bin, model, profile string, t task) result {
 	defer cancel()
 
 	metricsPath := filepath.Join(work, ".run-metrics.json")
-	args := buildRunTaskArgs(metricsPath, model, profile, t.MaxSteps, t.Prompt)
+	args := buildRunTaskArgs(metricsPath, model, profile, arm, t.MaxSteps, t.Prompt)
 
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = work
@@ -283,7 +294,7 @@ func runTask(bin, model, profile string, t task) result {
 	return r
 }
 
-func buildRunTaskArgs(metricsPath, model, profile string, maxSteps int, prompt string) []string {
+func buildRunTaskArgs(metricsPath, model, profile string, arm ablation.Set, maxSteps int, prompt string) []string {
 	// Benchmarks are unattended and their fixtures require ordinary workspace
 	// writes. Auto still honors explicit ask/deny rules and the sandbox boundary.
 	args := []string{"run", "--auto", "--metrics", metricsPath}
@@ -294,6 +305,11 @@ func buildRunTaskArgs(metricsPath, model, profile string, maxSteps int, prompt s
 		args = append(args, "--max-steps", fmt.Sprint(maxSteps))
 	}
 	args = appendBenchmarkProfileArgs(args, profile)
+	// The control arm must produce a byte-identical command line to the one the
+	// suite ran before ablation existed, so its numbers stay comparable.
+	if !arm.Empty() {
+		args = append(args, "--ablate", arm.String())
+	}
 	return append(args, prompt)
 }
 
@@ -345,10 +361,16 @@ func render(results []result) string {
 	}
 
 	profile := benchmarkProfileBaseline
-	if len(results) > 0 && results[0].Profile != "" {
-		profile = results[0].Profile
+	arm := "full"
+	if len(results) > 0 {
+		if results[0].Profile != "" {
+			profile = results[0].Profile
+		}
+		if results[0].Arm != "" {
+			arm = results[0].Arm
+		}
 	}
-	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark (%s)\n\n", profile)
+	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark (%s · arm `%s`)\n\n", profile, arm)
 	fmt.Fprintf(&b, "**Solved:** %d/%d (%s) · **Cost per solved:** %s · **Tokens per solved:** %s · **Median wall time:** %s\n\n",
 		passed, ran, pct(passed, ran),
 		costPerSolved(cost, passed, currency), tokensPerSolved(pTok+cTok, passed), dur(median(walls)))

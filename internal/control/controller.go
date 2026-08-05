@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
 	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
@@ -175,6 +176,7 @@ type Controller struct {
 	// entering the provider-visible registry (Balanced dual-model Planner).
 	proxyToolsFn   func() map[string][]plugin.CachedTool
 	runtimeProfile capability.Profile
+	ablation       ablation.Set
 
 	// goals owns the active goal's FSM (status, intercepts, idle/turn counters)
 	// and its persistence, behind its own mutex so a per-turn goal save never
@@ -480,6 +482,9 @@ type Options struct {
 	// RuntimeProfile selects capability routing/filtering behavior. Empty keeps
 	// the backward-compatible Balanced profile.
 	RuntimeProfile capability.Profile
+	// Ablation switches subsystems off for a benchmark arm. The zero value runs
+	// everything.
+	Ablation ablation.Set
 }
 
 // New builds a Controller. A nil Sink is replaced with event.Discard. When the
@@ -548,6 +553,7 @@ func New(opts Options) *Controller {
 		mcpConfigureSpec:                  opts.MCPConfigureSpec,
 		capabilityRuntime:                 opts.CapabilityRuntime,
 		runtimeProfile:                    runtimeProfile,
+		ablation:                          opts.Ablation,
 		workspaceRoot:                     opts.WorkspaceRoot,
 		externalFolderToolRefs:            opts.ExternalFolderToolRefs,
 		approval:                          newApprovalManager(opts.Policy, ToolApprovalAsk, opts.ApprovalTimeout),

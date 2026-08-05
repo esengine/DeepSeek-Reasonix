@@ -14,6 +14,7 @@ import (
 
 	"mvdan.cc/sh/v3/syntax"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/capability"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/diff"
@@ -456,6 +457,10 @@ type Agent struct {
 	deliveryScopeID             string
 	deliveryScopeActive         bool
 	deliveryCheckpoint          evidence.DeliveryCheckpoint
+
+	// ablation names the subsystems a benchmark arm switched off. The zero value
+	// is the control arm.
+	ablation ablation.Set
 
 	// classifierTaskText is the host-trusted task text for delivery intent
 	// classification, set by sub-agent spawners whose Run input carries host
@@ -1069,6 +1074,10 @@ type Options struct {
 	// final answer. It changes host control flow, not tool schemas.
 	DeliveryProfile bool
 
+	// Ablation switches subsystems off for a benchmark arm. The zero value runs
+	// everything, so ordinary callers leave it unset.
+	Ablation ablation.Set
+
 	// ClassifierTaskText, when non-empty, is the pristine task text delivery
 	// intent classification should judge instead of the raw Run input. Sub-agent
 	// spawners set it before prepending host framing (subagent/workspace context,
@@ -1214,6 +1223,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		evidence:                  evidence.NewLedger(),
 		projectChecks:             append([]instruction.VerifyCheck(nil), opts.ProjectChecks...),
 		deliveryProfile:           opts.DeliveryProfile,
+		ablation:                  opts.Ablation,
 		classifierTaskText:        opts.ClassifierTaskText,
 		capabilityLedger:          opts.CapabilityLedger,
 		capabilityAudit:           opts.CapabilityAudit,
@@ -1571,7 +1581,7 @@ func (c finalReadinessCheck) audit(result evidence.ReadinessAuditResult, recover
 }
 
 func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
-	if a.evidence == nil {
+	if a.evidence == nil || a.ablation.Off(ablation.Evidence) {
 		return finalReadinessCheck{}
 	}
 	var missing []string

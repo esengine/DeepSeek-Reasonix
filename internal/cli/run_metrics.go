@@ -69,6 +69,7 @@ type RunMetrics struct {
 
 	// Run accounting: what a benchmark needs to price one solved task and name
 	// the guard that ended a failed one.
+	Arm                string         `json:"arm"`
 	DurationMs         int64          `json:"duration_ms"`
 	Outcome            string         `json:"outcome"`
 	ToolCalls          int            `json:"tool_calls"`

@@ -26,6 +26,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
@@ -262,6 +263,7 @@ type cliBuildOverrides struct {
 	HeadlessApprovalMode string
 	Stderr               io.Writer
 	OnSessionRecovered   func(control.SessionRecoveryInfo) error
+	Ablation             ablation.Set
 }
 
 func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
@@ -287,6 +289,7 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		StatsSource:          "cli",
 		Stderr:               overrides.Stderr,
 		OnSessionRecovered:   overrides.OnSessionRecovered,
+		Ablation:             overrides.Ablation,
 	}
 }
 
@@ -464,6 +467,7 @@ func runAgent(args []string, version string) int {
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
+	ablateFlag := fs.String("ablate", "", "benchmark arm: comma-separated subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	cont := registerContinueFlag(fs)
 	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
@@ -506,6 +510,11 @@ func runAgent(args []string, version string) int {
 		format = runOutputEventsJSONL
 	}
 	profile, err := parseRuntimeProfile(*profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
+	}
+	ablated, err := ablation.Parse(*ablateFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
@@ -667,6 +676,7 @@ func runAgent(args []string, version string) int {
 		WorkspaceRoot:        workspaceRoot,
 		HeadlessApprovalMode: permissions.approval,
 		OnSessionRecovered:   cliSessionRecoveredHandler(leases),
+		Ablation:             ablated,
 	}
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, sink, profile, overrides)
 	if err != nil {
@@ -713,6 +723,7 @@ func runAgent(args []string, version string) int {
 	if metrics != nil {
 		metrics.m.DurationMs = time.Since(started).Milliseconds()
 		metrics.m.Outcome = completion.class
+		metrics.m.Arm = ablated.Arm()
 		if exec := ctrl.Executor(); exec != nil {
 			if audit := exec.CapabilityAudit(); audit != nil {
 				snap := audit.Snapshot()

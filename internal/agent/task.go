@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -253,6 +254,7 @@ type TaskTool struct {
 	identityProfile     func(modelRef, effort string) (string, string)
 	maxSubagentDepth    int
 	deliveryProfile     bool
+	ablation            ablation.Set
 	workspaceLease      *workspacelease.Owner
 	// scheduler is the session-scoped concurrency + write-claim controller.
 	// nil falls back to the legacy jobs.ReserveStart cap for background tasks.
@@ -394,6 +396,13 @@ func (t *TaskTool) WithMaxSubagentDepth(depth int) *TaskTool {
 // the mutation gate remains dormant for them.
 func (t *TaskTool) WithDeliveryProfile(enabled bool) *TaskTool {
 	t.deliveryProfile = enabled
+	return t
+}
+
+// WithAblation propagates the parent's benchmark arm so a sub-agent runs with
+// the same subsystems switched off.
+func (t *TaskTool) WithAblation(set ablation.Set) *TaskTool {
+	t.ablation = set
 	return t
 }
 
@@ -1676,6 +1685,7 @@ func (t *TaskTool) subagentOptions(ctx context.Context, maxSteps int, pricing *p
 		SubagentDepth:       childDepth,
 		MaxSubagentDepth:    t.maxDepth(),
 		DeliveryProfile:     t.deliveryProfile,
+		Ablation:            t.ablation,
 		WorkspaceLease:      t.workspaceLease,
 		RecoveryGate:        t.recoveryGate,
 		RecoveryAgentID:     "subagent",

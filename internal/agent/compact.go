@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -79,6 +80,20 @@ What is still in progress or unstarted, and the single most concrete next action
 
 Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
 
+// compactThresholds returns the prompt-token boundaries maybeCompact switches
+// on. The compaction ablation arm collapses the snip and fold triggers onto
+// soft, so the cache-preserving deferral branch is unreachable and the session
+// folds as soon as it grows — what a harness with no prompt-cache strategy does.
+func (a *Agent) compactThresholds() (soft, snip, high int) {
+	high = int(float64(a.contextWindow) * a.compactRatio)
+	snip = int(float64(a.contextWindow) * a.toolResultSnipRatio)
+	soft = int(float64(a.contextWindow) * a.softCompactRatio)
+	if a.ablation.Off(ablation.Compaction) {
+		high, snip = soft, soft
+	}
+	return soft, snip, high
+}
+
 // maybeCompact compacts the session when the last turn's prompt has grown to the
 // configured fraction of the context window. It is a no-op when compaction is
 // disabled (no window) or usage is unavailable.
@@ -86,9 +101,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
 		return
 	}
-	high := int(float64(a.contextWindow) * a.compactRatio)
-	snip := int(float64(a.contextWindow) * a.toolResultSnipRatio)
-	soft := int(float64(a.contextWindow) * a.softCompactRatio)
+	soft, snip, high := a.compactThresholds()
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
 	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {

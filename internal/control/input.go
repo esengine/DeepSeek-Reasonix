@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
 	"reasonix/internal/memory"
 	"reasonix/internal/planmode"
@@ -206,11 +207,11 @@ func (c *Controller) composeWithGoal(
 		// Relevant facts ride only the real user-turn tail. This preserves the
 		// stable system/tool prefix and keeps synthetic recovery turns free of
 		// accidental recall. A just-written fact already arrives in memory-update.
-		if len(notes) == 0 {
+		if len(notes) == 0 && !c.ablation.Off(ablation.Retrieval) {
 			if block := c.memory.recall(source).Block(); block != "" {
 				text = strings.TrimRight(text, "\n") + "\n\n" + block
 			}
-		} else {
+		} else if len(notes) > 0 {
 			c.memory.recordRecall(memory.RecallResult{
 				Query:      strings.TrimSpace(source),
 				Suppressed: "memory update already supplies the new fact",
