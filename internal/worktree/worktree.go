@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -66,70 +65,22 @@ func Inspect(ctx context.Context, workspaceRoot string) Availability {
 // subdirectory, Result.WorkspaceRoot points at the corresponding subdirectory
 // in the new worktree.
 func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, error) {
-	info, err := inspect(ctx, workspaceRoot)
+	res, err := NewManager(managedRoot).Create(ctx, workspaceRoot, CreatePolicy{
+		Kind:        KindDelivery,
+		DirtyPolicy: DirtyPolicyCommittedHead,
+		Durable:     true,
+	})
 	if err != nil {
 		return Result{}, err
 	}
-	managedRoot = strings.TrimSpace(managedRoot)
-	if managedRoot == "" {
-		return Result{}, errors.New("Reasonix worktree storage is unavailable")
-	}
-	if err := os.MkdirAll(managedRoot, 0o700); err != nil {
-		return Result{}, fmt.Errorf("create Reasonix worktree storage: %w", err)
-	}
-
-	repoSum := sha256.Sum256([]byte(info.commonDir))
-	repoKey := hex.EncodeToString(repoSum[:8])
-	repoBase := safePathComponent(filepath.Base(info.RepoRoot))
-	if repoBase == "" {
-		repoBase = "repository"
-	}
-
-	for attempt := 0; attempt < 5; attempt++ {
-		id, randomErr := randomID()
-		if randomErr != nil {
-			return Result{}, randomErr
-		}
-		branch := fmt.Sprintf("reasonix/delivery-%s-%s", time.Now().Format("20060102-150405"), id)
-		worktreeRoot := filepath.Join(managedRoot, repoKey, id, repoBase)
-		if _, statErr := os.Stat(worktreeRoot); statErr == nil {
-			continue
-		} else if !os.IsNotExist(statErr) {
-			return Result{}, fmt.Errorf("inspect worktree destination: %w", statErr)
-		}
-		if err := os.MkdirAll(filepath.Dir(worktreeRoot), 0o700); err != nil {
-			return Result{}, fmt.Errorf("create worktree parent: %w", err)
-		}
-
-		_, stderr, addErr := runGit(ctx, info.RepoRoot, "worktree", "add", "-b", branch, worktreeRoot, info.head)
-		if addErr != nil {
-			// A random branch collision is retryable. We deliberately leave any
-			// non-empty partial directory untouched rather than risk deleting user
-			// data after Git returned an ambiguous failure.
-			if strings.Contains(strings.ToLower(stderr), "already exists") {
-				continue
-			}
-			return Result{}, fmt.Errorf("create Git worktree: %w%s", addErr, stderrSuffix(stderr))
-		}
-
-		selectedRoot := worktreeRoot
-		if prefix := filepath.FromSlash(strings.Trim(strings.TrimSpace(info.prefix), "/")); prefix != "" && prefix != "." {
-			selectedRoot = filepath.Join(worktreeRoot, prefix)
-			st, statErr := os.Stat(selectedRoot)
-			if statErr != nil || !st.IsDir() {
-				return Result{}, fmt.Errorf("created worktree is missing selected project subdirectory %q", prefix)
-			}
-		}
-		return Result{
-			WorkspaceRoot: selectedRoot,
-			WorktreeRoot:  worktreeRoot,
-			SourceRoot:    info.RepoRoot,
-			Branch:        branch,
-			Head:          info.head,
-			SourceDirty:   info.SourceDirty,
-		}, nil
-	}
-	return Result{}, errors.New("could not allocate a unique Delivery worktree")
+	return Result{
+		WorkspaceRoot: res.WorkspaceRoot,
+		WorktreeRoot:  res.WorktreeRoot,
+		SourceRoot:    res.SourceRoot,
+		Branch:        res.Branch,
+		Head:          res.BaseCommit,
+		SourceDirty:   res.SourceDirty,
+	}, nil
 }
 
 // IsManagedPath reports whether path belongs to Reasonix's durable worktree
@@ -233,6 +184,25 @@ func runGit(parent context.Context, dir string, args ...string) (stdout, stderr 
 	ctx, cancel := context.WithTimeout(parent, gitTimeout(args))
 	defer cancel()
 	cmd := gitcmd.Command(ctx, dir, args...)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	err = cmd.Run()
+	if ctx.Err() != nil {
+		err = ctx.Err()
+	}
+	return outBuf.String(), strings.TrimSpace(errBuf.String()), err
+}
+
+func runGitInput(parent context.Context, dir string, input []byte, args ...string) (stdout, stderr string, err error) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, gitTimeout(args))
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", gitCommandArgs(runtime.GOOS, dir, args...)...)
+	proc.HideWindow(cmd)
+	cmd.Stdin = bytes.NewReader(input)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
