@@ -227,6 +227,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	applyDeepSeekOfficialDefaultPricing(cfg)
 	backfillDeepSeekOfficialPrices(cfg)
 	normalizeEffortConfig(cfg)
+	normalizeLongHorizon(cfg)
 	backfillDeepSeekPro(cfg)
 	if userDefaultModelExplicit {
 		restoreUnresolvableProjectDefaultModel(cfg, userDefaultModel)
@@ -459,6 +460,36 @@ func normalizeLegacyEffort(c *Config) {
 		if strings.EqualFold(strings.TrimSpace(c.Providers[i].Effort), "off") {
 			c.Providers[i].Effort = ""
 		}
+	}
+}
+
+// normalizeLongHorizon applies OSWorld 2.0-informed compaction tuning when the
+// user opts into long-horizon mode. When enabled, compaction triggers earlier
+// (lower soft/snip ratios) so implicit state is captured into a summary before
+// the context window fills, and the verification interval defaults to 50 steps.
+// This directly addresses the #1 failure mode in OSWorld 2.0: agents losing
+// track of implicit state after ~2.5 hours / 250+ tool calls.
+//
+// Ratios at the standard defaults (0.5/0.6) are upgraded to long-horizon values
+// (0.4/0.5). Explicit user overrides (any other value) are preserved.
+func normalizeLongHorizon(c *Config) {
+	if c == nil || !c.LongHorizonEnabled() {
+		return
+	}
+	// Lower compaction triggers: summarize earlier to capture implicit state
+	// before it's lost to snip/prune. Only adjust standard defaults so
+	// explicit user ratios survive.
+	if c.Agent.SoftCompactRatio == 0.5 {
+		c.Agent.SoftCompactRatio = 0.4 // 0.5 → 0.4: notice earlier
+	}
+	if c.Agent.ToolResultSnipRatio == 0.6 {
+		c.Agent.ToolResultSnipRatio = 0.5 // 0.6 → 0.5: snip earlier
+	}
+	// CompactRatio and CompactForceRatio stay at 0.8/0.9 — the trigger point
+	// doesn't change, but the agent gets more runway to notice and snip before
+	// the hard fold.
+	if c.Agent.VerificationInterval == 0 {
+		c.Agent.VerificationInterval = 50 // nudge every 50 steps
 	}
 }
 

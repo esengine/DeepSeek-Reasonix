@@ -754,6 +754,33 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 			Detail: fmt.Sprintf("provider tools array capacity = %d entries. run_mcp collapses every mcp__<server>__<tool> into a single dispatcher; see internal/plugin/metatool.go.", len(names)),
 		})
 	}
+
+	// Long-horizon mode diagnostic: show compaction tuning and implicit-state
+	// preservation sections so the user can verify the OSWorld 2.0 adjustments
+	// are active. Fires when long_horizon is enabled or when the diagnostic env
+	// is set (same trigger as the tool-surface dump above).
+	if cfg.LongHorizonEnabled() || os.Getenv("REASONIX_DUMP_TOOL_SURFACE") != "" {
+		lhMode := "standard"
+		sections := "7 sections (no implicit-state capture)"
+		if cfg.LongHorizonEnabled() {
+			lhMode = "long-horizon"
+			sections = "10 sections (includes Hidden state, Sources consulted, Open questions)"
+		}
+		sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelInfo,
+			Text:  fmt.Sprintf("compaction mode [%s]: soft=%.0f%% snip=%.0f%% compact=%.0f%% force=%.0f%% | summary %s | verification_interval=%d",
+				lhMode,
+				cfg.Agent.SoftCompactRatio*100,
+				cfg.Agent.ToolResultSnipRatio*100,
+				cfg.Agent.CompactRatio*100,
+				cfg.Agent.CompactForceRatio*100,
+				sections,
+				cfg.Agent.VerificationInterval),
+			Detail: fmt.Sprintf("long_horizon=%v. Long-horizon mode lowers soft/snip ratios so implicit state is captured into the summary earlier. The 3 new summary sections (Hidden state & recovered facts, Sources consulted, Open questions & uncertainties) directly address OSWorld 2.0's top failure modes: implicit state loss, cross-source reasoning gaps, and guess-instead-of-ask behavior.",
+				cfg.LongHorizonEnabled()),
+		})
+	}
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
 	}
