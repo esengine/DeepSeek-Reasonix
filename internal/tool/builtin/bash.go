@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -470,7 +471,7 @@ func commandPreview(cmd string) string {
 }
 
 func bashCommandEnv(ctx context.Context) []string {
-	env := secrets.ProcessEnv()
+	env := restoreHostHomeEnv(secrets.ProcessEnv())
 	if runtime.GOOS == "windows" {
 		return env
 	}
@@ -557,6 +558,40 @@ func isExecutableFile(path string) bool {
 		return false
 	}
 	return info.Mode().Perm()&0o111 != 0
+}
+
+// hostAccountHome resolves the OS account's home directory from the user
+// database (not $HOME), once. Empty when unresolvable.
+var hostAccountHome = sync.OnceValue(func() string {
+	u, err := user.Current()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(u.HomeDir)
+})
+
+// restoreHostHomeEnv points the subprocess HOME at the OS account's real home
+// when the reasonix process itself runs with an overridden HOME (e.g. a
+// service launcher forcing HOME onto a config dir), so CLIs that resolve
+// credentials via $HOME (gh, arkcli, …) keep working. The inherited HOME is
+// kept untouched when the account home is unknown, not a directory, or
+// already the effective value.
+func restoreHostHomeEnv(env []string) []string {
+	return restoreHomeEnv(env, hostAccountHome())
+}
+
+func restoreHomeEnv(env []string, home string) []string {
+	if home == "" {
+		return env
+	}
+	current, ok := envValue(env, "HOME")
+	if !ok || current == home {
+		return env
+	}
+	if info, err := os.Stat(home); err != nil || !info.IsDir() {
+		return env
+	}
+	return setEnvValue(env, "HOME", home)
 }
 
 func setEnvValue(env []string, key, value string) []string {

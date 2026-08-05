@@ -142,3 +142,42 @@ func TestRunShellPATHCommandFiltersEnvWhenEnabled(t *testing.T) {
 		t.Fatalf("login-shell PATH probe leaked filtered env: %q", out)
 	}
 }
+
+func TestRestoreHomeEnvPrefersAccountHome(t *testing.T) {
+	home := t.TempDir()
+	got := restoreHomeEnv([]string{"HOME=/overridden", "PATH=/usr/bin"}, home)
+	if v, _ := envValue(got, "HOME"); v != home {
+		t.Fatalf("HOME = %q, want account home %q", v, home)
+	}
+	if v, _ := envValue(got, "PATH"); v != "/usr/bin" {
+		t.Fatalf("PATH = %q, want untouched", v)
+	}
+}
+
+func TestRestoreHomeEnvFallbacks(t *testing.T) {
+	// Account home missing on disk: inherited HOME stays.
+	missing := filepath.Join(t.TempDir(), "does-not-exist")
+	got := restoreHomeEnv([]string{"HOME=/overridden"}, missing)
+	if v, _ := envValue(got, "HOME"); v != "/overridden" {
+		t.Fatalf("HOME = %q, want inherited value kept for missing account home", v)
+	}
+
+	// Empty account home: inherited HOME stays.
+	got = restoreHomeEnv([]string{"HOME=/overridden"}, "")
+	if v, _ := envValue(got, "HOME"); v != "/overridden" {
+		t.Fatalf("HOME = %q, want inherited value kept for empty account home", v)
+	}
+
+	// No inherited HOME: do not invent one.
+	got = restoreHomeEnv([]string{"PATH=/usr/bin"}, t.TempDir())
+	if _, ok := envValue(got, "HOME"); ok {
+		t.Fatalf("HOME = %v, want it absent when the parent env has none", got)
+	}
+
+	// Already the account home: unchanged.
+	home := t.TempDir()
+	got = restoreHomeEnv([]string{"HOME=" + home}, home)
+	if v, _ := envValue(got, "HOME"); v != home {
+		t.Fatalf("HOME = %q, want %q", v, home)
+	}
+}
