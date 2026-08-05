@@ -32,8 +32,8 @@ type dispatchItem struct {
 }
 
 // recordDispatcher keeps filesystem latency off provider/UI event goroutines.
-// Dispatchers are shared per state directory, so controller rebuilds and the
-// Remote Workbench do not create one goroutine per recorder instance.
+// Dispatchers are shared per state directory, so controller rebuilds do not
+// create one goroutine per recorder instance.
 type recordDispatcher struct {
 	writer *Writer
 	queue  chan dispatchItem

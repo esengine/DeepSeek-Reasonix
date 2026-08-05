@@ -5396,8 +5396,6 @@ func (c *Controller) Jobs() []jobs.View {
 }
 
 // CancelJob stops one background job owned by this controller's session.
-// Remote Workbench exposes this through its required jobCancel capability;
-// local callers may continue using the existing manager-backed lifecycle.
 func (c *Controller) CancelJob(id string) bool {
 	if c.jobs == nil {
 		return false

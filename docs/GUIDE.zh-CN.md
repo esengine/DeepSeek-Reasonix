@@ -219,6 +219,12 @@ Goal、由 `todo_write` 工具驱动的实时 Todo 面板，以及已配置 prov
 `--model`、`--max-steps` 或 `--resume`；不传 `--model` 时，`serve` 使用用户全局
 `default_model`。
 
+如果当前 Provider 尚未保存 API Key，绑定在回环地址的 Serve 仍会启动，并先显示 Provider
+配置页，而不是在浏览器连接前直接失败。通过 Serve 认证后可在该页输入 Key；Reasonix 会以受限
+权限写入**当前主机**的全局凭据文件，在同一进程内重建 Controller，然后进入正常 Web UI。
+凭据写入接口在非回环监听器上始终禁用。对于 SSH 远程窗口，“当前主机”指经 SSH 隧道访问的
+远端主机；Key 不会从桌面本机自动复制过去。
+
 ## 通过 ACP 接入编辑器
 
 `reasonix acp` 把 Reasonix 作为 ACP v1 stdio agent 提供给编辑器和其他 host 客户端。
@@ -284,7 +290,9 @@ reasonix remote fs ls gpu-box:'~/projects/app'
 在桌面端,于 **设置 -> 远程 SSH** 管理主机,再通过状态栏徽标或主机行的 **远程浏览器** 按钮经
 SFTP 浏览与编辑文件、管理端口转发、启动/打开远程工作区。打开工作区时会创建一个类似 VS Code
 Remote SSH 的独立 Reasonix 原生窗口。主窗口持有 SSH 隧道；远程窗口是隔离的轻量外壳，不会恢复
-或抢占本地对话会话。
+或抢占本地对话会话。远程网页使用**远端**主机上的 Provider 配置与 API Key —— 桌面端绝不会把
+本机 Provider 暴露给远端主机。如果远端缺少当前 Provider 的 API Key，窗口会先显示经过认证的
+配置页，只把 Key 保存到远端 Reasonix 凭据文件，并在不重启远端 Serve 的情况下激活 Provider。
 
 ## 自定义 OpenAI-compatible provider
 

@@ -29,7 +29,6 @@ me.patch("/", async (c) => {
       throw new ApiError(422, "invalid_handle", "Handles are 3–30 chars: letters, numbers, and underscores.");
     }
     if (handle !== user.handle) {
-      if (await users.handleTaken(handle)) throw new ApiError(409, "handle_taken", "That handle is already taken.");
       update.handle = handle;
     }
   }
@@ -38,6 +37,7 @@ me.patch("/", async (c) => {
   if (patch.avatarUrl !== undefined) update.avatarUrl = patch.avatarUrl;
 
   const row = await users.updateProfile(user.id, update);
+  if (!row) throw new ApiError(409, "handle_taken", "That handle is already taken.");
   return c.json({ user: toAccountUser(row) });
 });
 

@@ -47,6 +47,10 @@ branch.
 - Added `reasonix serve --port-file/--token-file/--pid-file` so a supervised
   headless serve can bind an ephemeral port and read its auth token from a file
   (keeping it out of `ps`).
+- Added an authenticated, loopback-only Provider setup page for `reasonix
+  serve`. A Serve whose selected Provider is missing its API key now remains
+  reachable, stores the submitted key in that host's Reasonix credential file,
+  and rebuilds the active controller in place without restarting Serve.
 - Added Claude Code-style searchable CLI pickers for models, providers, and
   sessions, with arrow, Vim, and `Ctrl+P` / `Ctrl+N` navigation.
 - Added `-p` / `--print`, `text`, `json`, and `stream-json` output modes for
@@ -59,6 +63,20 @@ branch.
 
 ### Changed
 
+- Remote SSH workspaces now open as a standalone remote web window again.
+  Opening a workspace from the status bar or the Remote Server tab starts or
+  reuses the remote `reasonix serve`, tunnels its loopback port, and opens the
+  Serve web client in a dedicated per-host window. The remote web page uses
+  the provider configuration and API keys on the **remote** host; the desktop
+  no longer exposes its local providers to remote hosts. If the selected remote
+  Provider is missing its API key, the window opens a setup page that saves the
+  key only on that host and then opens the normal Serve UI. The Remote Workbench
+  protocol, its Provider Broker, and the same-window remote projection were
+  removed. Legacy mirror and provider-trust files are not deleted
+  automatically; Settings -> Remote SSH shows a cleanup card when they exist.
+  The hidden `remote attach-workspace`, `remote runtime-workbench`, and
+  `remote workbench-build-id` commands now fail with a pointer to
+  `reasonix remote connect <host> --open`.
 - Automatic Plan Mode has been retired. Plan Mode is now always entered through
   an explicit user choice, and the one-time config v5 upgrade removes legacy
   `agent.auto_plan` and `agent.auto_plan_classifier` values so upgraded users

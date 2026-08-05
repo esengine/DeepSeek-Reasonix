@@ -1067,9 +1067,9 @@ func (m *Manager) RunningForSession(parentSession string) []View {
 		// synchronously, but the process tree may still be unwinding. Keep the job
 		// on the operational running surface until its done channel closes so
 		// Desktop rebuild guards and Delivery workspace leases cannot declare the
-		// runtime idle early. The public view remains "running" for compatibility
-		// with the Remote Workbench JobStatus enum; clients may render a local
-		// "stopping" state after they request cancellation.
+		// runtime idle early. The public view remains "running" while a stop is
+		// in flight; clients may render a local "stopping" state after they
+		// request cancellation.
 		out = append(out, View{ID: j.ID, Kind: j.Kind, Label: j.Label, Status: string(Running), StartedAt: j.startedAt})
 		j.mu.Unlock()
 	}

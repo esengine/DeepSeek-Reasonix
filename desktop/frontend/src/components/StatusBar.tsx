@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, Check, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Laptop, Layers, Percent, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
+import { Activity, ChevronsUpDown, CircleDollarSign, CircleGauge, Database, Folder, GitBranch, Layers, Percent, RefreshCw, Server, Settings, Square, Unplug, Wallet, Zap } from "lucide-react";
 import { AnchoredPopover } from "./AnchoredPopover";
 import { RemoteConnectionErrorDialog } from "./RemoteConnectionErrorDialog";
 import { Tooltip } from "./Tooltip";
@@ -9,7 +9,6 @@ import { normalizeStatusBarItems, type StatusBarItemId } from "../lib/statusBarI
 import { isRemoteDegradedWarning, isRemoteHostKeyMismatch, isRemoteTerminalFailure, remoteConnectionErrorSummaryKey } from "../lib/remoteErrors";
 import { type BackgroundRuntimeView, type BalanceInfo, type ContextInfo, type JobView, type RemoteConnectionStatus, type RemoteHostView, type UsageSourceStats, type WireUsage } from "../lib/types";
 import { useRemoteStore } from "../store/remote";
-import type { WorkbenchActiveTarget } from "../lib/workbenchTarget";
 
 type StatusBarLabelStyle = "icon" | "text";
 
@@ -177,8 +176,6 @@ export function StatusBar({
   onOpenRemoteWorkspace,
   remoteHosts = [],
   remoteStatuses = {},
-  workbenchTarget,
-  onSwitchLocal,
   jobs = [],
   onCancelJob,
   backgroundRuntimes = [],
@@ -208,8 +205,6 @@ export function StatusBar({
   onOpenRemoteWorkspace?: (host: RemoteHostView) => void;
   remoteHosts?: RemoteHostView[];
   remoteStatuses?: Record<string, RemoteConnectionStatus>;
-  workbenchTarget?: WorkbenchActiveTarget;
-  onSwitchLocal?: () => void;
   jobs?: JobView[];
   onCancelJob?: (jobID: string) => Promise<boolean>;
   backgroundRuntimes?: BackgroundRuntimeView[];
@@ -369,12 +364,10 @@ export function StatusBar({
           onConnect={onConnectRemote}
           onDisconnect={onDisconnectRemote}
           onManage={onManageRemote}
-          workbenchTarget={workbenchTarget}
-          onSwitchLocal={onSwitchLocal}
         />
         <JobsStatusBarChip
           jobs={jobs}
-          activeJobsRemote={workbenchTarget?.kind === "ssh"}
+          activeJobsRemote={false}
           onCancelJob={onCancelJob}
           runtimes={backgroundRuntimes}
           onCancelRuntimeJob={onCancelRuntimeJob}
@@ -410,8 +403,8 @@ function JobsStatusBarChip({
   const [stopping, setStopping] = useState<Set<string>>(() => new Set());
   const triggerRef = useRef<HTMLButtonElement>(null);
   const groups = runtimes.filter((runtime) => runtime.running || runtime.pendingPrompt || runtime.jobs.length > 0);
-  // BackgroundRuntimes is process-local, while active Remote Workbench jobs
-  // arrive through the active controller snapshot. Keep both sources visible.
+  // BackgroundRuntimes is process-local, while jobs from the active controller
+  // snapshot may come from another runtime. Keep both sources visible.
   if (jobs.length > 0 && (activeJobsRemote || !groups.some((runtime) => runtime.jobs.length > 0))) {
     groups.push({ tabId: "", title: "", detached: false, running: false, pendingPrompt: false, jobs });
   }
@@ -531,8 +524,6 @@ function RemoteStatusBarChip({
   onConnect,
   onDisconnect,
   onManage,
-  workbenchTarget,
-  onSwitchLocal,
 }: {
   hosts: RemoteHostView[];
   statuses: Record<string, RemoteConnectionStatus>;
@@ -541,8 +532,6 @@ function RemoteStatusBarChip({
   onConnect?: (host: RemoteHostView) => void;
   onDisconnect?: (hostId: string) => void;
   onManage?: () => void;
-  workbenchTarget?: WorkbenchActiveTarget;
-  onSwitchLocal?: () => void;
 }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -568,12 +557,7 @@ function RemoteStatusBarChip({
   const worstHost = hosts.find((host) => host.id === worst.hostId) ?? hosts[0];
   const triggerState = isRemoteTerminalFailure(worst) ? "error" : worst.state;
   const triggerStatus = isRemoteTerminalFailure(worst) ? t("remote.status.failed") : t(`remote.status.${worst.state}`);
-  const activeRemoteHost = workbenchTarget?.kind === "ssh"
-    ? hosts.find((host) => host.id === workbenchTarget.hostId)
-    : undefined;
-  const triggerLabel = activeRemoteHost
-    ? t("remote.statusBar.activeWorkspace", { host: activeRemoteHost.label, workspace: compactPath(workbenchTarget?.workspace) })
-    : worst.state === "stopped" && !worst.error
+  const triggerLabel = worst.state === "stopped" && !worst.error
     ? t("remote.statusBar.disconnected")
     : t("remote.statusBar.summary", { host: worstHost.label, status: triggerStatus });
 
@@ -602,23 +586,6 @@ function RemoteStatusBarChip({
       >
         <section role="dialog" aria-label={t("remote.switcher.title")}>
           <header className="remote-switcher__header">{t("remote.switcher.title")}</header>
-          <button
-            type="button"
-            className="remote-switcher__local"
-            aria-current={workbenchTarget?.kind !== "ssh" ? "true" : undefined}
-            onClick={() => {
-              if (workbenchTarget?.kind !== "ssh") return;
-              setOpen(false);
-              onSwitchLocal?.();
-            }}
-          >
-            <span className="remote-switcher__icon"><Laptop size={14} aria-hidden="true" /></span>
-            <span className="remote-switcher__copy">
-              <strong>{t("remote.switcher.local")}</strong>
-              <small>{t("remote.switcher.currentSession")}</small>
-            </span>
-            {workbenchTarget?.kind !== "ssh" && <Check size={14} className="remote-switcher__check" aria-hidden="true" />}
-          </button>
           <div className="remote-switcher__section-label">{t("remote.switcher.hosts")}</div>
           <div className="remote-switcher__hosts">
             {hosts.map((host) => {
@@ -648,9 +615,6 @@ function RemoteStatusBarChip({
                     </span>
                   </button>
                     <span className="remote-switcher__actions">
-                    {workbenchTarget?.kind === "ssh" && workbenchTarget.hostId === host.id && (
-                      <Check size={14} className="remote-switcher__check" aria-label={t("remote.switcher.currentSession")} />
-                    )}
                     <button
                       type="button"
                       className="btn btn--small btn--primary"

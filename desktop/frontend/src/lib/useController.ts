@@ -9,7 +9,6 @@ import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt } from "./bridge";
 import { invalidateCache } from "./composerHistory";
 import { formatGuardianAssessmentNotice } from "./guardianEvents";
-import type { WorkbenchTargetToken } from "./goalSubmit";
 import { createRafBatch } from "./rafBatch";
 import { t, type DictKey } from "./i18n";
 import { sameTodoList } from "./todoVisibility";
@@ -2790,7 +2789,6 @@ export function useController() {
     structured?: import("./invocationDisplay").StructuredInvocationSubmit,
     initialGoal?: {
       goal: string;
-      target: WorkbenchTargetToken;
       collaborationMode: CollaborationMode;
       toolApprovalMode: ToolApprovalMode;
     },
@@ -2817,9 +2815,6 @@ export function useController() {
             structured?.invocations ?? [],
             initialGoal.collaborationMode,
             initialGoal.toolApprovalMode,
-            initialGoal.target.kind,
-            initialGoal.target.identityGen,
-            initialGoal.target.requestSeq,
           )
         : structured
         ? app.SubmitInvocationsToTab(tabId, structured.display.trim(), structured.input.trim(), structured.invocations)

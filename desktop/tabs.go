@@ -29,7 +29,6 @@ import (
 	"reasonix/internal/fileutil"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
-	"reasonix/internal/remote/workbench/target"
 	"reasonix/internal/store"
 	"reasonix/internal/worktree"
 )
@@ -2252,7 +2251,7 @@ func (a *App) ListTabs() []TabMeta {
 	}
 	a.mu.RUnlock()
 	if !needsRepair {
-		return a.workbenchProjectTabMetas(enrichTabMetas(out))
+		return enrichTabMetas(out)
 	}
 
 	a.mu.Lock()
@@ -2263,7 +2262,7 @@ func (a *App) ListTabs() []TabMeta {
 		}
 	}
 	a.mu.Unlock()
-	return a.workbenchProjectTabMetas(enrichTabMetas(out))
+	return enrichTabMetas(out)
 }
 
 // syncTabWorkspaceRootSpellings repoints open project tabs at the registry's
@@ -2306,9 +2305,7 @@ func (a *App) registerProjectRoot(workspaceRoot string) {
 // session selected by the given topic. Topic selection resolves to a concrete
 // session path first; the visible tab is then attached to that session runtime.
 func (a *App) OpenProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
-	return a.withWorkbenchLocalNavigation(func() (TabMeta, error) {
-		return a.openProjectTab(workspaceRoot, topicID)
-	})
+	return a.openProjectTab(workspaceRoot, topicID)
 }
 
 func (a *App) openProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
@@ -2451,9 +2448,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 // OpenGlobalTab opens a new global-scope tab (no project root). The global
 // workspace root is the reasonix user config directory.
 func (a *App) OpenGlobalTab(topicID string) (TabMeta, error) {
-	return a.withWorkbenchLocalNavigation(func() (TabMeta, error) {
-		return a.openGlobalTab(topicID)
-	})
+	return a.openGlobalTab(topicID)
 }
 
 func (a *App) openGlobalTab(topicID string) (TabMeta, error) {
@@ -2470,9 +2465,7 @@ func (a *App) openGlobalTab(topicID string) (TabMeta, error) {
 // OpenProjectTab/OpenGlobalTab, it does not resolve the topic to the latest
 // session first; sessionPath is the runtime identity being selected.
 func (a *App) OpenTopicSession(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
-	return a.withWorkbenchLocalNavigation(func() (TabMeta, error) {
-		return a.openTopicSession(scope, workspaceRoot, topicID, sessionPath)
-	})
+	return a.openTopicSession(scope, workspaceRoot, topicID, sessionPath)
 }
 
 func (a *App) openTopicSession(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
@@ -2501,33 +2494,29 @@ func (a *App) openTopicSession(scope, workspaceRoot, topicID, sessionPath string
 // the classic tab path, then prunes every non-active visible tab so historical
 // clicks do not accumulate hidden startup work.
 func (a *App) ActivateTopic(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
-	return a.withWorkbenchLocalNavigation(func() (TabMeta, error) {
-		a.singleSurfaceMu.Lock()
-		defer a.singleSurfaceMu.Unlock()
+	a.singleSurfaceMu.Lock()
+	defer a.singleSurfaceMu.Unlock()
 
-		var meta TabMeta
-		var err error
-		if strings.TrimSpace(sessionPath) != "" {
-			meta, err = a.openTopicSession(scope, workspaceRoot, topicID, sessionPath)
-		} else if strings.TrimSpace(scope) == "project" {
-			meta, err = a.openProjectTab(workspaceRoot, topicID)
-		} else {
-			meta, err = a.openGlobalTab(topicID)
-		}
-		if err != nil {
-			return TabMeta{}, err
-		}
-		return a.keepOnlyVisibleTab(meta.ID)
-	})
+	var meta TabMeta
+	var err error
+	if strings.TrimSpace(sessionPath) != "" {
+		meta, err = a.openTopicSession(scope, workspaceRoot, topicID, sessionPath)
+	} else if strings.TrimSpace(scope) == "project" {
+		meta, err = a.openProjectTab(workspaceRoot, topicID)
+	} else {
+		meta, err = a.openGlobalTab(topicID)
+	}
+	if err != nil {
+		return TabMeta{}, err
+	}
+	return a.keepOnlyVisibleTab(meta.ID)
 }
 
 // EnsureBlankSurface mirrors EnsureBlankTab for no-tab-strip layouts: after
 // creating or reusing a blank session, it removes other visible tabs while
 // preserving running runtimes as detached background sessions.
 func (a *App) EnsureBlankSurface(scope, workspaceRoot string) (TabMeta, error) {
-	return a.withWorkbenchLocalNavigation(func() (TabMeta, error) {
-		return a.ensureBlankSurface(scope, workspaceRoot, "")
-	})
+	return a.ensureBlankSurface(scope, workspaceRoot, "")
 }
 
 func (a *App) ensureBlankSurface(scope, workspaceRoot, tokenMode string) (TabMeta, error) {
@@ -2561,9 +2550,7 @@ func tabInWorkspace(tab *WorkspaceTab, workspaceRoot string) bool {
 // creates one if none exists. Reusing a blank tab keeps repeated "new session"
 // clicks from piling up empty conversations.
 func (a *App) EnsureBlankTab(scope, workspaceRoot string) (TabMeta, error) {
-	return a.withWorkbenchLocalNavigation(func() (TabMeta, error) {
-		return a.ensureBlankTab(scope, workspaceRoot, "")
-	})
+	return a.ensureBlankTab(scope, workspaceRoot, "")
 }
 
 func (a *App) ensureBlankTab(scope, workspaceRoot, forcedTokenMode string) (TabMeta, error) {
@@ -2983,34 +2970,10 @@ func (a *App) SetActiveTab(tabID string) error {
 	if alreadyActive {
 		return nil
 	}
-	k := a.workbench()
-	k.transitionMu.Lock()
-	defer k.transitionMu.Unlock()
-
-	// Re-check after fencing Remote activation. Framework hydration may repeat a
-	// same-tab SetActiveTab call; that is not a user request to leave Remote.
 	a.mu.RLock()
-	_, ok = a.tabs[tabID]
 	active := a.tabs[a.activeTabID]
-	alreadyActive = a.activeTabID == tabID
 	a.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("tab %q not found", tabID)
-	}
-	if alreadyActive {
-		return nil
-	}
-	activeTarget, _, _ := k.targets.Active()
-	switched := activeTarget.Kind == target.KindRemote
-	var targetID target.Identity
-	var targetGen, targetSeq uint64
-	if switched {
-		targetID, targetGen, targetSeq = k.targets.SwitchLocal()
-	}
 	if err := a.snapshotTabForAction(active, "switching tabs"); err != nil {
-		if switched {
-			a.emitWorkbenchTarget("disconnected", targetID, targetGen, targetSeq, "")
-		}
 		return err
 	}
 
@@ -3030,11 +2993,6 @@ func (a *App) SetActiveTab(tabID string) error {
 	// I/O outside the lock — disk writes can block for hundreds of ms on
 	// Windows when antivirus or the search indexer briefly locks the file.
 	a.saveTabsWrite(dir, entries, activeID, version)
-	if switched {
-		a.emitWorkbenchTarget("disconnected", targetID, targetGen, targetSeq, "")
-		a.emitReady(a.ctx, tabID)
-		a.emitWorkbenchLocalRuntimeRebuilt(tabID)
-	}
 	a.kickDeferredRebuildRetry()
 	return nil
 }

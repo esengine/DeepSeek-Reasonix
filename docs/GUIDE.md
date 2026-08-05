@@ -246,6 +246,15 @@ model and reasoning-effort controls, Goal, a live todo panel fed by the
 `--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
 user-global `default_model`.
 
+If the selected Provider has no saved API key, a loopback-bound Serve still
+starts and shows a Provider setup page instead of failing before the browser can
+connect. After authentication, enter the key there; Reasonix writes it to this
+host's global credential file with restricted permissions, rebuilds the active
+controller in the same process, and opens the normal UI. The credential-writing
+endpoint is disabled for non-loopback listeners. For a remote SSH window,
+"this host" means the remote host reached through the SSH tunnel; the key is
+not copied from the desktop machine.
+
 ## Editor integrations over ACP
 
 `reasonix acp` exposes Reasonix as an ACP v1 stdio agent for editors and other
@@ -325,7 +334,12 @@ files over SFTP, manage port forwards, and start/open the remote workspace.
 Opening a workspace creates a separate native Reasonix window, similar to a
 VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
 window is an isolated, lightweight shell and does not restore or acquire local
-conversation sessions.
+conversation sessions. The remote web page uses the provider configuration and
+API keys on the **remote** host — the desktop never exposes its own providers
+to a remote host. If that host is missing the selected Provider's API key, the
+window shows the authenticated setup page first, saves the key only in the
+remote Reasonix credential file, and activates the Provider without restarting
+the remote Serve process.
 
 ## Custom OpenAI-compatible providers
 

@@ -63,7 +63,7 @@ export class UserRepo {
       .run();
   }
 
-  async updateProfile(id: number, patch: ProfilePatch): Promise<UserRow> {
+  async updateProfile(id: number, patch: ProfilePatch): Promise<UserRow | null> {
     const sets: string[] = [];
     const binds: unknown[] = [];
     const add = (col: string, value: unknown): void => {
@@ -76,7 +76,14 @@ export class UserRepo {
     if (patch.avatarUrl !== undefined) add("avatar_url", patch.avatarUrl);
     add("updated_at", new Date().toISOString());
     binds.push(id);
-    await this.db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?${binds.length}`).bind(...binds).run();
+    const idParam = binds.length;
+    let where = `id = ?${idParam}`;
+    if (patch.handle !== undefined) {
+      binds.push(patch.handle);
+      where += ` AND NOT EXISTS (SELECT 1 FROM users other WHERE other.handle = ?${binds.length} AND other.id != ?${idParam})`;
+    }
+    const result = await this.db.prepare(`UPDATE users SET ${sets.join(", ")} WHERE ${where}`).bind(...binds).run();
+    if (result.meta.changes === 0) return null;
     const row = await this.byId(id);
     if (!row) throw new Error("user row missing after profile update");
     return row;

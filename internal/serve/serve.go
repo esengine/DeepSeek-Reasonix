@@ -63,6 +63,8 @@ type Server struct {
 	titleUsageSink  event.Sink
 	titles          *titleCache
 	auth            *authGate // nil when auth is disabled
+	providerSetupMu sync.RWMutex
+	providerSetup   providerSetupState
 	// leases guards the active session file against other runtimes (a desktop
 	// window, another CLI). Wired by the serve CLI command with the keeper that
 	// already holds the startup session's lease; nil (tests, embedded use)
@@ -196,7 +198,13 @@ func titleProviderConfig(entry *config.ProviderEntry) provider.Config {
 func (s *Server) switchModel(ctx context.Context, ref string) error {
 	s.bindMu.Lock()
 	defer s.bindMu.Unlock()
+	return s.switchModelLocked(ctx, ref)
+}
 
+// switchModelLocked performs switchModel while bindMu is held by the caller.
+// Provider setup uses this form so credential persistence and the controller
+// rebuild are one ordered operation relative to every session/model rebind.
+func (s *Server) switchModelLocked(ctx context.Context, ref string) error {
 	// Snapshot the current controller under a short read of s.mu only.
 	cur := s.ctl()
 	if controllerHasActiveRuntimeWork(cur) {
@@ -286,6 +294,7 @@ func (s *Server) switchModel(ctx context.Context, ref string) error {
 	}
 	s.ctrl = newCtrl
 	s.mu.Unlock()
+	s.refreshProviderSetup(currentModelRef(newCtrl))
 
 	// Off-lock: tear down the old controller. Close can block up to 15s.
 	cur.Close()
@@ -396,6 +405,8 @@ func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.index)
 	mux.HandleFunc("GET /assets/logo-wordmark.svg", s.logoWordmark)
+	mux.HandleFunc("GET /provider-setup", s.providerSetupStatus)
+	mux.HandleFunc("POST /provider-setup", s.providerSetupSave)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /history", s.history)
 	mux.HandleFunc("GET /context", s.context)
@@ -503,6 +514,10 @@ func (s *Server) RunGracefulListener(ctx context.Context, ln net.Listener) error
 }
 
 func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
+	if setup, ok := s.providerSetupSnapshot(); ok && setup.Required {
+		s.providerSetupIndex(w)
+		return
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = config.MigrateLegacyIfNeeded()
 	lang := "auto"

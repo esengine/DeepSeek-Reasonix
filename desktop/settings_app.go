@@ -162,7 +162,6 @@ type AgentView struct {
 	CompactRatio           float64 `json:"compactRatio,omitempty"`
 	EffectiveCompactRatio  float64 `json:"effectiveCompactRatio,omitempty"`
 	CompactRatioOverridden bool    `json:"compactRatioOverridden,omitempty"`
-	CompactRatioRemote     bool    `json:"compactRatioRemote,omitempty"`
 }
 
 type BotAllowlistView struct {
@@ -1106,7 +1105,6 @@ func (a *App) Settings() SettingsView {
 			v.Agent.CompactRatioOverridden = math.Abs(effective-v.Agent.CompactRatio) > 0.0001
 		}
 	}
-	v.Agent.CompactRatioRemote = a.activeWorkbenchTargetIsRemote()
 	added := providerAccessSet(cfg.Desktop.ProviderAccess)
 	resolver := config.NewCredentialResolverForRoot(root)
 	credentialsRevision := providerCredentialsRevision()
@@ -1757,7 +1755,6 @@ func (a *App) rebuildSetting(setting string) error {
 	a.runtimeRebuildMu.Lock()
 	err := a.rebuildSettingLocked(setting)
 	a.runtimeRebuildMu.Unlock()
-	a.refreshWorkbenchProviderBrokerAsync()
 	return err
 }
 
@@ -2682,11 +2679,7 @@ func (a *App) FetchAllProviderModels(providers []ProviderView) map[string][]stri
 
 // DeleteProvider removes a provider and retargets open idle tabs that used it.
 func (a *App) DeleteProvider(name string) error {
-	err := a.deleteProviderAndRetargetTabs(name)
-	if err == nil {
-		a.refreshWorkbenchProviderBrokerAsync()
-	}
-	return err
+	return a.deleteProviderAndRetargetTabs(name)
 }
 
 // RemoveProviderAccess hides a provider from Settings > Model > Access and from
@@ -2694,12 +2687,7 @@ func (a *App) DeleteProvider(name string) error {
 // for back-compat, but visible defaults and idle tabs are retargeted away from
 // the removed access entry when another accessed provider is available. Custom
 // providers are deleted outright.
-func (a *App) RemoveProviderAccess(name string) (err error) {
-	defer func() {
-		if err == nil {
-			a.refreshWorkbenchProviderBrokerAsync()
-		}
-	}()
+func (a *App) RemoveProviderAccess(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("remove provider access: empty provider name")

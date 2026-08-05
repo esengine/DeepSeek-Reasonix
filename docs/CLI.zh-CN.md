@@ -388,6 +388,7 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/memory archived` | 列出 archive facts 及其受管路径。 |
 | `/memory recover <archive-path>` | 不覆盖 active data，把 archive 恢复为新 revision。 |
 
-这些命令始终作用于当前 session controller。Remote Workbench 使用远程 memory catalog，
-绝不回退读取桌面本机记忆。权限、自动召回、写入确认和迁移行为见
+这些命令始终作用于当前 session controller。当会话位于远端主机上（`reasonix remote
+connect` 或桌面的远程网页窗口）时，它们使用远程 memory catalog，绝不回退读取桌面本机
+记忆。权限、自动召回、写入确认和迁移行为见
 [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.zh-CN.md)。

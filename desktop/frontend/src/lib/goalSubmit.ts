@@ -1,27 +1,4 @@
 import type { StructuredInvocationSubmit } from "./invocationDisplay";
-import type { WorkbenchActiveTarget, WorkbenchTargetKind } from "./workbenchTarget";
-
-export type WorkbenchTargetToken = {
-  kind: WorkbenchTargetKind;
-  identityGen: number;
-  requestSeq: number;
-};
-
-export function workbenchTargetToken(target: WorkbenchActiveTarget): WorkbenchTargetToken | null {
-  if (
-    !Number.isSafeInteger(target.identityGen) ||
-    !Number.isSafeInteger(target.requestSeq) ||
-    (target.identityGen ?? 0) <= 0 ||
-    (target.requestSeq ?? -1) < 0
-  ) {
-    return null;
-  }
-  return {
-    kind: target.kind,
-    identityGen: target.identityGen!,
-    requestSeq: target.requestSeq!,
-  };
-}
 
 /**
  * Activate a Goal, then submit the first turn.
@@ -55,20 +32,18 @@ export async function activateGoalAndSubmit({
 }
 
 /**
- * Tab- and target-scoped first Goal turn. The backend receives both the source
- * tab and the workbench projection token in one call, so a later target switch
- * cannot split Goal activation from the structured Skill submit.
+ * Tab-scoped first Goal turn. The backend receives the source tab in one call,
+ * so Goal activation and the structured Skill submit cannot be split by a tab
+ * switch.
  */
 export async function activateGoalAndSubmitOnTab({
   tabId,
-  target,
   displayText,
   submitText,
   structured,
   sendToTab,
 }: {
   tabId: string;
-  target: WorkbenchTargetToken;
   displayText: string;
   submitText: string;
   structured?: StructuredInvocationSubmit;
@@ -78,11 +53,9 @@ export async function activateGoalAndSubmitOnTab({
     displayText: string,
     submitText: string,
     structured?: StructuredInvocationSubmit,
-    target?: WorkbenchTargetToken,
   ) => void | Promise<void>;
 }): Promise<void> {
   const sourceTabId = tabId;
-  const sourceTarget = { ...target };
   const goal = displayText.trim();
   await sendToTab(
     sourceTabId,
@@ -90,6 +63,5 @@ export async function activateGoalAndSubmitOnTab({
     goal,
     structured ? submitText.trim() : `/goal ${submitText.trim()}`,
     structured,
-    sourceTarget,
   );
 }

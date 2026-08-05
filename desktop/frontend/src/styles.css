@@ -36506,6 +36506,31 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg-faint);
   font-size: var(--text-sm);
 }
+.remote-hosts__legacy {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-elev);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.remote-hosts__legacy h3 {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--fg);
+}
+.remote-hosts__legacy p {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--fg-faint);
+}
+.remote-hosts__legacy-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
 .remote-host-row {
   display: flex;
   align-items: center;

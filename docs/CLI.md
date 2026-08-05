@@ -447,7 +447,8 @@ names, and owned archive paths.
 | `/memory archived` | List archived facts and their owned paths. |
 | `/memory recover <archive-path>` | Recover an archive as a new revision without overwriting active data. |
 
-These commands run against the active session controller. In a Remote Workbench
-they use the remote memory catalog and never fall back to local desktop memory.
-See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for authority, automatic
-recall, write confirmation, and migration behavior.
+These commands run against the active session controller. When the session
+lives on a remote host (`reasonix remote connect` / a desktop remote web
+window), they use the remote memory catalog and never fall back to local
+desktop memory. See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for
+authority, automatic recall, write confirmation, and migration behavior.

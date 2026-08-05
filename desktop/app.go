@@ -52,8 +52,6 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
-	"reasonix/internal/remote/protocol"
-	"reasonix/internal/remote/workbench/target"
 	"reasonix/internal/repair"
 	"reasonix/internal/skill"
 	"reasonix/internal/stats"
@@ -245,9 +243,36 @@ type App struct {
 
 	// Remote SSH module: the manager is created lazily on the first remote
 	// binding call and closed on shutdown.
-	remoteMu        sync.Mutex
-	remoteRuntime   remoteKernel
-	workbenchKernel *workbenchKernel // Local + Remote workbench adapters
+	remoteMu      sync.Mutex
+	remoteRuntime remoteKernel
+
+	// Remote web windows (SSH Serve child processes). The main process tracks
+	// the live child plus transient handoff processes for each host. Host-scoped
+	// lifecycle operations are generation-fenced and serialized so an overlapping
+	// disconnect/stop cannot miss a window that is still being spawned. Closing a
+	// window releases only its registration, while the remote Serve and the SSH
+	// connection keep running. The child deliberately skips local runtimes.
+	remoteWindows          *remoteWindowRegistry
+	remoteWindowLifecycles remoteWindowLifecycleRegistry
+	remoteWindowOpener     func(remoteWindowLaunch) error // test-only injection
+	// remoteWindowTicket/remoteWindowHostKey are set from argv before Wails
+	// starts in a child process. They gate the blank-shell middleware and the
+	// startup branches so the child never initializes local runtimes.
+	remoteWindowTicket  string
+	remoteWindowHostKey string
+	// remoteWindowOwnerID scopes child single-instance locks to one primary
+	// Desktop process. remoteWindowParentPID is set only in children and lets
+	// them exit when that owner (and therefore its SSH tunnel) disappears.
+	remoteWindowOwnerID   string
+	remoteWindowParentPID int
+	// remoteWindowMu serializes ticket consumption and navigation in a child
+	// process so a handoff arriving before domReady cannot be overridden by the
+	// initial ticket (or vice versa). remoteWindowTicketConsumed makes the
+	// initial handoff idempotent because WebKit fires OnDomReady again after the
+	// shell navigates to the remote Serve page.
+	remoteWindowMu             sync.Mutex
+	remoteWindowTicketConsumed bool
+	remoteWindow               *remoteWindowLaunch
 
 	// promptHistoryTape is a lazy, cursor-addressed view of prompt history. It
 	// stores session order and per-session parsed entries only after that session is
@@ -459,6 +484,8 @@ func NewApp() *App {
 		mediaTokens:         newMediaTokenStore(),
 		botInstalls:         map[string]*botInstallSession{},
 		botRuntime:          newDesktopBotRuntime(),
+		remoteWindows:       newRemoteWindowRegistry(),
+		remoteWindowOwnerID: newRemoteWindowOwnerID(),
 	}
 	a.terminals = newTerminalManager(a)
 	a.botBridge = a.newBotBridge()
@@ -484,6 +511,13 @@ func (a *App) Platform() string {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startWindowsWebView2StartupFallback(ctx)
+	if a.remoteWindowTicket != "" {
+		// Remote web window child: no local tabs, tray, heartbeat, providers,
+		// or remote manager. domReady consumes the ticket and navigates; the
+		// owner watcher closes the window if the primary Desktop disappears.
+		a.watchRemoteWindowOwner(ctx)
+		return
+	}
 	installSystemQuitHook()
 	a.startTray()
 	a.enableDeferredRebuildRetry()
@@ -518,6 +552,12 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) beforeClose(ctx context.Context) bool {
+	if a.remoteWindowTicket != "" {
+		// A remote web window closes immediately — nothing to snapshot, lease,
+		// or hide. Closing it must not stop the remote Serve or the main
+		// process's SSH connection.
+		return false
+	}
 	if a.forceQuit.Swap(false) || consumeSystemQuitRequested() {
 		return false
 	}
@@ -852,6 +892,15 @@ func (a *App) snapshotAllTabs() {
 
 // shutdown snapshots all tabs, saves the final window geometry, and closes tabs.
 func (a *App) shutdown(context.Context) {
+	if a.remoteWindowTicket != "" {
+		// Remote web window child: nothing to snapshot or stop locally.
+		return
+	}
+	// A real quit also terminates surviving web windows: their tunnels die with
+	// this process, so a leftover window would only show a dead Serve page.
+	// The remote Serve itself stays resident by design. Background (tray)
+	// close never reaches shutdown and keeps the windows alive.
+	a.closeAllRemoteWindows()
 	// Run after controller teardown (and after its deferred lifecycle unlocks)
 	// so every accepted usage record reaches disk before a normal app exit.
 	defer func() {
@@ -929,6 +978,11 @@ func (a *App) domReady(_ context.Context) {
 	// SA_ONSTACK flags required by Go; this is a no-op outside Linux.
 	repairWebKitSignalHandlers()
 
+	if a.remoteWindowTicket != "" {
+		a.domReadyRemoteWindow()
+		return
+	}
+
 	state, ok := loadWindowState()
 	if ok {
 		// Validate saved position against current screens. Wails v2 doesn't
@@ -1005,9 +1059,6 @@ func validateTurnInput(input string) error {
 
 func (a *App) SubmitToTab(tabID, input string) error {
 	if err := validateTurnInput(input); err != nil {
-		return err
-	}
-	if handled, err := a.workbenchSubmit(input, input, "", nil, false); handled {
 		return err
 	}
 	return a.submitToTab(tabID, input, false)
@@ -1154,10 +1205,6 @@ func (a *App) RunShell(command string) error {
 }
 
 func (a *App) RunShellForTab(tabID, command string) error {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		_, err := a.workbenchRequest(protocol.MethodShellRun, protocol.ShellRunParams{Command: command})
-		return err
-	}
 	admission, ctrl, err := a.beginTabTurn(tabID, true)
 	if err != nil {
 		return err
@@ -1180,9 +1227,6 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) error {
 	if err := validateTurnInput(input); err != nil {
 		return err
 	}
-	if handled, err := a.workbenchSubmit(input, display, "", nil, false); handled {
-		return err
-	}
 	admission, ctrl, err := a.beginTabTurn(tabID, true)
 	if err != nil {
 		return err
@@ -1197,9 +1241,6 @@ func (a *App) SubmitDisplayToTab(tabID, display, input string) error {
 
 func (a *App) SubmitDeliveryRecoveryToTab(tabID, display, input string) error {
 	if err := validateTurnInput(input); err != nil {
-		return err
-	}
-	if handled, err := a.workbenchSubmit(input, display, "", nil, true); handled {
 		return err
 	}
 	admission, ctrl, err := a.beginTabTurn(tabID, true)
@@ -1221,17 +1262,6 @@ type InvocationRequest struct {
 	Offset int    `json:"offset"`
 }
 
-func protocolInvocationRequests(invocations []InvocationRequest) []protocol.Invocation {
-	out := make([]protocol.Invocation, 0, len(invocations))
-	for _, invocation := range invocations {
-		out = append(out, protocol.Invocation{
-			Name: invocation.Name,
-			Kind: protocol.InvocationKind(invocation.Kind),
-		})
-	}
-	return out
-}
-
 func controlInvocationRequests(invocations []InvocationRequest) []control.InvocationRequest {
 	out := make([]control.InvocationRequest, 0, len(invocations))
 	for _, invocation := range invocations {
@@ -1244,9 +1274,6 @@ func controlInvocationRequests(invocations []InvocationRequest) []control.Invoca
 
 func (a *App) SubmitInvocationsToTab(tabID, display, input string, invocations []InvocationRequest) error {
 	if err := validateInvocationTurnInput(input, invocations); err != nil {
-		return err
-	}
-	if handled, err := a.workbenchSubmit(input, display, "", protocolInvocationRequests(invocations), false); handled {
 		return err
 	}
 	admission, ctrl, err := a.beginTabTurn(tabID, true)
@@ -1269,10 +1296,6 @@ func validateInvocationTurnInput(input string, invocations []InvocationRequest) 
 		return nil
 	}
 	return validateTurnInput(input)
-}
-
-func workbenchTargetChangedErr() error {
-	return fmt.Errorf("Execution target changed before the Goal could start; retry from the intended tab")
 }
 
 func (a *App) submitInitialGoalToLocalTab(
@@ -1315,84 +1338,23 @@ func (a *App) submitInitialGoalToLocalTab(
 	return drained, nil
 }
 
-// SubmitInitialGoalToTab keeps Goal activation and the first turn on the
-// workbench projection the user submitted from. Wails dispatches bound methods
-// on separate goroutines, so tabID alone cannot distinguish a stale Remote
-// projection from the Local controller underneath the same tab.
+// SubmitInitialGoalToTab activates a Goal and submits its first turn on the
+// requested tab.
 func (a *App) SubmitInitialGoalToTab(
 	tabID, goal, display, input string,
 	invocations []InvocationRequest,
 	collaborationMode, toolApprovalMode string,
-	targetKind string,
-	targetIdentityGen, targetRequestSeq uint64,
 ) ([]string, error) {
 	if err := validateInvocationTurnInput(input, invocations); err != nil {
 		return []string{}, err
 	}
-	k := a.workbench()
-	k.transitionMu.Lock()
-	active, identityGen, requestSeq := k.targets.Active()
-	expectedKind := target.Kind(strings.TrimSpace(targetKind))
-	if (expectedKind != target.KindLocal && expectedKind != target.KindRemote) ||
-		active.Kind != expectedKind ||
-		identityGen != targetIdentityGen ||
-		requestSeq != targetRequestSeq {
-		k.transitionMu.Unlock()
-		return []string{}, workbenchTargetChangedErr()
-	}
-
-	if active.Kind == target.KindLocal {
-		drained, err := a.submitInitialGoalToLocalTab(
-			tabID, toolApprovalMode, goal, display, input, invocations,
-		)
-		k.transitionMu.Unlock()
-		return drained, err
-	}
-
-	cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench()
-	if !ok || remoteTabID != tabID {
-		k.transitionMu.Unlock()
-		return []string{}, workbenchTargetChangedErr()
-	}
-	goal = strings.TrimSpace(goal)
-	input = strings.TrimSpace(input)
-	if goal == "" || input == "" {
-		k.transitionMu.Unlock()
-		return []string{}, fmt.Errorf("goal and input are required")
-	}
-	ctx, cancel := context.WithTimeout(a.bootContext(), 30*time.Second)
-	defer cancel()
-	remoteCollaboration := protocol.CollaborationMode(normalizeCollaborationMode(collaborationMode))
-	remoteApproval := protocol.ToolApprovalMode(normalizeToolApprovalMode(toolApprovalMode))
-	remoteGoal := goal
-	_, err := cli.Request(ctx, string(protocol.MethodSessionProfileSet), protocol.SessionProfileSetParams{
-		Patch: protocol.ProfilePatch{
-			CollaborationMode: &remoteCollaboration,
-			ToolApprovalMode:  &remoteApproval,
-			Goal:              &remoteGoal,
-		},
-	})
-	if err == nil {
-		_, err = cli.Request(ctx, string(protocol.MethodSessionSubmit), protocol.SessionSubmitParams{
-			Input: input, DisplayText: display, Invocations: protocolInvocationRequests(invocations),
-		})
-	}
-	generation := cli.Generation()
-	k.transitionMu.Unlock()
-	if err != nil {
-		a.warnForTab(remoteTabID, err.Error())
-		go a.workbenchRefreshSnapshot(generation, remoteTabID)
-		return []string{}, err
-	}
-	go a.workbenchRefreshSnapshot(generation, remoteTabID)
-	return []string{}, nil
+	return a.submitInitialGoalToLocalTab(
+		tabID, toolApprovalMode, goal, display, input, invocations,
+	)
 }
 
 func (a *App) SubmitEditedDisplayToTab(tabID, display, input, original string) error {
 	if err := validateTurnInput(input); err != nil {
-		return err
-	}
-	if handled, err := a.workbenchSubmit(input, display, original, nil, false); handled {
 		return err
 	}
 	admission, ctrl, err := a.beginTabTurn(tabID, true)
@@ -1426,18 +1388,6 @@ func (a *App) Cancel() {
 }
 
 func (a *App) CancelTab(tabID string) {
-	if cli, snapshot, _, _, ok := a.activeRemoteWorkbench(); ok {
-		go func() {
-			ctx, cancel := context.WithTimeout(a.bootContext(), 10*time.Second)
-			defer cancel()
-			if snapshot.Runtime.CurrentOperation != nil {
-				_, _ = cli.Request(ctx, string(protocol.MethodOperationCancel), protocol.OperationCancelParams{ExpectedOperationID: snapshot.Runtime.CurrentOperation.OperationID})
-				return
-			}
-			_, _ = cli.Cancel(ctx)
-		}()
-		return
-	}
 	if ctrl := a.ctrlByTabID(tabID); ctrl != nil {
 		ctrl.Cancel()
 	}
@@ -1452,14 +1402,6 @@ func (a *App) Steer(text string) error {
 // A rejected steer is returned to the frontend so its guidance shelf retains
 // the text and submits it as a regular follow-up after the turn completes.
 func (a *App) SteerForTab(tabID, text string) error {
-	if cli, snapshot, _, _, ok := a.activeRemoteWorkbench(); ok {
-		turnID := cli.State().CurrentTurnID
-		if turnID == "" && snapshot.Runtime.CurrentTurn != nil {
-			turnID = snapshot.Runtime.CurrentTurn.TurnID
-		}
-		_, err := a.workbenchRequest(protocol.MethodTurnSteer, protocol.TurnSteerParams{ExpectedTurnID: turnID, Text: text})
-		return err
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -1775,21 +1717,6 @@ func safeControllerSessionDir(ctrl control.SessionAPI) (dir string, ok bool) {
 // Approve answers a pending approval_request by ID: allow runs the call, session
 // also remembers the grant for the rest of the session.
 func (a *App) Approve(id string, allow, session, persist bool) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		decision := protocol.DecisionDeny
-		if allow {
-			switch {
-			case persist:
-				decision = protocol.DecisionAllowPersistent
-			case session:
-				decision = protocol.DecisionAllowSession
-			default:
-				decision = protocol.DecisionAllowOnce
-			}
-		}
-		_, _ = a.workbenchRequest(protocol.MethodPromptApprove, protocol.PromptApproveParams{PromptID: protocol.PromptID(id), Decision: decision})
-		return
-	}
 	ctrl := a.ctrlByTabID("")
 	if ctrl != nil {
 		ctrl.Approve(id, allow, session, persist)
@@ -1798,10 +1725,6 @@ func (a *App) Approve(id string, allow, session, persist bool) {
 
 // ApproveTab is like Approve but scoped to a specific tab.
 func (a *App) ApproveTab(tabID, id string, allow, session, persist bool) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		a.Approve(id, allow, session, persist)
-		return
-	}
 	ctrl := a.ctrlForRuntimeTabID(tabID)
 	if ctrl != nil {
 		ctrl.Approve(id, allow, session, persist)
@@ -1848,10 +1771,6 @@ func (a *App) RecoveryCheckpointEnabledTab(_ string) bool {
 // already awaiting confirmation rebuilds its modal instead of showing a
 // "waiting" status with no way to answer — and no way to stop.
 func (a *App) ReplayPendingPrompts() {
-	if cli, _, _, tabID, ok := a.activeRemoteWorkbench(); ok {
-		go a.workbenchRefreshSnapshot(cli.Generation(), tabID)
-		return
-	}
 	a.mu.RLock()
 	tabs := a.runtimeTabsLocked()
 	ctrls := make([]control.SessionAPI, 0, len(tabs))
@@ -1893,19 +1812,6 @@ func (a *App) SetMode(mode string) {
 // ones the backend still holds (plan/memory/sandbox-escape never drain, and
 // auto keeps approvals an allow policy would not cover — #6432).
 func (a *App) SetModeForTab(tabID, mode string) []string {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		mode = strings.ToLower(strings.TrimSpace(mode))
-		collaboration := protocol.CollaborationNormal
-		approval := protocol.ToolApprovalAsk
-		if strings.Contains(mode, "plan") {
-			collaboration = protocol.CollaborationPlan
-		}
-		if strings.Contains(mode, "yolo") {
-			approval = protocol.ToolApprovalYOLO
-		}
-		_, _ = a.workbenchSetProfile(protocol.ProfilePatch{CollaborationMode: &collaboration, ToolApprovalMode: &approval})
-		return []string{}
-	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return nil
@@ -2006,21 +1912,6 @@ func (a *App) SetComposerProfileForTab(tabID, collaborationMode, toolApprovalMod
 	toolApprovalMode = normalizeToolApprovalMode(toolApprovalMode)
 	goal = strings.TrimSpace(goal)
 
-	remoteCollaboration := protocol.CollaborationMode(collaborationMode)
-	remoteApproval := protocol.ToolApprovalMode(toolApprovalMode)
-	remoteGoal := goal
-	if handled, err := a.workbenchSetProfile(protocol.ProfilePatch{
-		CollaborationMode: &remoteCollaboration,
-		ToolApprovalMode:  &remoteApproval,
-		Goal:              &remoteGoal,
-	}); handled {
-		if err != nil {
-			a.warnForTab(tabID, err.Error())
-			return []string{}, err
-		}
-		return []string{}, nil
-	}
-
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return []string{}, fmt.Errorf("tab is no longer available")
@@ -2065,10 +1956,6 @@ func (a *App) SetComposerProfileForTab(tabID, collaborationMode, toolApprovalMod
 }
 
 func (a *App) SetCollaborationModeForTab(tabID, mode string) {
-	remoteMode := protocol.CollaborationMode(normalizeCollaborationMode(mode))
-	if handled, _ := a.workbenchSetProfile(protocol.ProfilePatch{CollaborationMode: &remoteMode}); handled {
-		return
-	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return
@@ -2121,14 +2008,6 @@ func (a *App) AnswerQuestion(id string, answers []QuestionAnswer) {
 }
 
 func (a *App) AnswerQuestionForTab(tabID, id string, answers []QuestionAnswer) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		remoteAnswers := make([]protocol.QuestionAnswer, 0, len(answers))
-		for _, answer := range answers {
-			remoteAnswers = append(remoteAnswers, protocol.QuestionAnswer{QuestionID: protocol.QuestionID(answer.QuestionID), Selected: append([]string(nil), answer.Selected...)})
-		}
-		_, _ = a.workbenchRequest(protocol.MethodPromptAnswer, protocol.PromptAnswerParams{PromptID: protocol.PromptID(id), Answers: remoteAnswers})
-		return
-	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return
@@ -2149,13 +2028,6 @@ func (a *App) Compact() error {
 // CompactForTab compacts the requested tab without depending on which tab is
 // focused when the asynchronous frontend call reaches the backend.
 func (a *App) CompactForTab(tabID string) error {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		_, err := a.workbenchRequest(protocol.MethodSessionCompact, protocol.SessionCompactParams{})
-		if err == nil {
-			a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		}
-		return err
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2237,13 +2109,6 @@ func (a *App) NewSession() error {
 // NewSessionForTab snapshots and rotates the requested tab regardless of which
 // tab becomes active while the Wails call is in flight.
 func (a *App) NewSessionForTab(tabID string) error {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		if _, err := a.workbenchRequest(protocol.MethodSessionNew, protocol.SessionNewParams{}); err != nil {
-			return err
-		}
-		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		return nil
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2360,13 +2225,6 @@ func (a *App) ClearSession() error {
 
 // ClearSessionForTab clears the requested tab regardless of later focus changes.
 func (a *App) ClearSessionForTab(tabID string) error {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		if _, err := a.workbenchRequest(protocol.MethodSessionClear, protocol.SessionClearParams{}); err != nil {
-			return err
-		}
-		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		return nil
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2654,9 +2512,6 @@ func (a *App) Checkpoints() []CheckpointMeta {
 }
 
 func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
-	if snapshot, ok := a.workbenchSnapshot(); ok {
-		return workbenchCheckpointMetas(snapshot.Checkpoints)
-	}
 	a.mu.RLock()
 	var ctrl control.SessionAPI
 	if tab := a.tabByIDLocked(tabID); tab != nil {
@@ -2754,38 +2609,6 @@ func insertCheckpointFilePreview(preview []string, path string, limit int) []str
 // caller (frontend ToolCard) loads this on demand when the user expands a
 // collapsed tool card. Returns nil when the tool ID is not found.
 func (a *App) ToolResultForTab(tabID, toolID string) *control.ToolResultData {
-	if cli, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		ctx, cancel := context.WithTimeout(a.bootContext(), 15*time.Second)
-		defer cancel()
-		beforeTurn := 0
-		for {
-			page, err := cli.HistoryBefore(ctx, beforeTurn, protocol.HistoryMaxTurns)
-			if err != nil {
-				return nil
-			}
-			result := &control.ToolResultData{}
-			found := false
-			for _, message := range page.Messages {
-				for _, call := range message.ToolCalls {
-					if call.ID == toolID {
-						result.Args = workbenchString(call.Arguments)
-						found = true
-					}
-				}
-				if message.ToolCallID == toolID {
-					result.Output = workbenchString(message.Content)
-					found = true
-				}
-			}
-			if found {
-				return result
-			}
-			if !page.HasOlder || page.StartTurn <= 0 {
-				return nil
-			}
-			beforeTurn = page.StartTurn
-		}
-	}
 	a.mu.RLock()
 	var ctrl control.SessionAPI
 	if tab := a.tabByIDLocked(tabID); tab != nil {
@@ -2810,22 +2633,6 @@ func (a *App) Rewind(turn int, scope string) error {
 // Compatibility wrapper over the transactional path when available; falls back
 // to Controller.Rewind which prechecks conversation before files for both scope.
 func (a *App) RewindForTab(tabID string, turn int, scope string) error {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		remoteScope := protocol.RewindBoth
-		switch scope {
-		case "code":
-			remoteScope = protocol.RewindCode
-		case "conversation":
-			remoteScope = protocol.RewindConversation
-		}
-		_, err := a.workbenchRequest(protocol.MethodSessionRewind, protocol.SessionRewindParams{
-			CheckpointID: protocol.CheckpointID(fmt.Sprintf("checkpoint_%d", turn)), Scope: remoteScope,
-		})
-		if err == nil {
-			a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		}
-		return err
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -2845,12 +2652,6 @@ func (a *App) RewindForTab(tabID string, turn int, scope string) error {
 
 // PreviewRewindForTab returns a structured precheck without mutating state.
 func (a *App) PreviewRewindForTab(tabID string, turn int, scope string) RewindPlanView {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return RewindPlanView{
-			OK: false, Error: "remote host uses legacy rewind semantics",
-			DisabledReason: "remote host uses legacy rewind semantics",
-		}
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return RewindPlanView{OK: false, Error: readOnlyChannelErr().Error()}
@@ -2878,24 +2679,6 @@ func (a *App) PreviewRewindForTab(tabID string, turn int, scope string) RewindPl
 
 // CommitRewindForTab executes prepare (if planID empty) then commit immediately.
 func (a *App) CommitRewindForTab(tabID, planID string, turn int, scope string) RewindResultView {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		// Remote keeps old protocol.
-		remoteScope := protocol.RewindBoth
-		switch scope {
-		case "code":
-			remoteScope = protocol.RewindCode
-		case "conversation":
-			remoteScope = protocol.RewindConversation
-		}
-		_, err := a.workbenchRequest(protocol.MethodSessionRewind, protocol.SessionRewindParams{
-			CheckpointID: protocol.CheckpointID(fmt.Sprintf("checkpoint_%d", turn)), Scope: remoteScope,
-		})
-		if err != nil {
-			return RewindResultView{OK: false, Error: err.Error()}
-		}
-		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		return RewindResultView{OK: true}
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return RewindResultView{OK: false, Error: readOnlyChannelErr().Error()}
@@ -2939,9 +2722,6 @@ func (a *App) CommitRewindForTab(tabID, planID string, turn int, scope string) R
 
 // UndoRewindForTab undoes the last successful rewind on the tab when available.
 func (a *App) UndoRewindForTab(tabID, transactionID string) RewindResultView {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return RewindResultView{OK: false, Error: "remote host uses legacy rewind semantics"}
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return RewindResultView{OK: false, Error: readOnlyChannelErr().Error()}
@@ -2962,9 +2742,6 @@ func (a *App) UndoRewindForTab(tabID, transactionID string) RewindResultView {
 
 // PreviewWorkspaceFileRevertForTab prepares a single-file session-owned revert.
 func (a *App) PreviewWorkspaceFileRevertForTab(tabID, path string) RewindPlanView {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return RewindPlanView{OK: false, Error: "remote host uses legacy rewind semantics", Path: path}
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return RewindPlanView{OK: false, Error: readOnlyChannelErr().Error(), Path: path}
@@ -2987,9 +2764,6 @@ func (a *App) PreviewWorkspaceFileRevertForTab(tabID, path string) RewindPlanVie
 // CommitWorkspaceFileRevertForTab commits a single-file revert.
 // resolution is "keep_current" or "overwrite_checkpoint".
 func (a *App) CommitWorkspaceFileRevertForTab(tabID, planID, resolution string) RewindResultView {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return RewindResultView{OK: false, Error: "remote host uses legacy rewind semantics"}
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return RewindResultView{OK: false, Error: readOnlyChannelErr().Error()}
@@ -3094,9 +2868,6 @@ func (a *App) Fork(turn int) (TabMeta, error) {
 // backend begins processing the request. The fork becomes active only while the
 // source tab still owns focus, so a later tab selection remains authoritative.
 func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return TabMeta{}, fmt.Errorf("CAPABILITY_UNAVAILABLE: Remote fork needs per-tab Remote session projection")
-	}
 	sourceTab, ctrl := a.tabAndCtrlByID(tabID)
 	if sourceTab == nil || ctrl == nil {
 		return TabMeta{}, nil
@@ -3189,15 +2960,6 @@ func (a *App) SummarizeFrom(turn int) error {
 }
 
 func (a *App) SummarizeFromForTab(tabID string, turn int) error {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		_, err := a.workbenchRequest(protocol.MethodSessionSummarize, protocol.SessionSummarizeParams{
-			CheckpointID: protocol.CheckpointID(fmt.Sprintf("checkpoint_%d", turn)), Direction: protocol.SummaryFrom,
-		})
-		if err == nil {
-			a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		}
-		return err
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -3213,15 +2975,6 @@ func (a *App) SummarizeUpTo(turn int) error {
 }
 
 func (a *App) SummarizeUpToForTab(tabID string, turn int) error {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		_, err := a.workbenchRequest(protocol.MethodSessionSummarize, protocol.SessionSummarizeParams{
-			CheckpointID: protocol.CheckpointID(fmt.Sprintf("checkpoint_%d", turn)), Direction: protocol.SummaryUpTo,
-		})
-		if err == nil {
-			a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		}
-		return err
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return readOnlyChannelErr()
@@ -3329,9 +3082,6 @@ func (a *App) activeSessionDir() string {
 // marking the one the current conversation is writing to and attaching any
 // user-chosen titles.
 func (a *App) ListSessions() []SessionMeta {
-	if a.activeWorkbenchTargetIsRemote() {
-		return []SessionMeta{}
-	}
 	dir := a.activeSessionDir()
 	infos, err := agent.ListSessions(dir)
 	if err != nil {
@@ -3368,9 +3118,6 @@ func (a *App) ListSessions() []SessionMeta {
 // ListTrashedSessions returns sessions that were moved to the local trash,
 // newest-deleted first. These can be previewed, restored, or permanently purged.
 func (a *App) ListTrashedSessions() []SessionMeta {
-	if a.activeWorkbenchTargetIsRemote() {
-		return []SessionMeta{}
-	}
 	out := []SessionMeta{}
 	for _, dir := range a.knownSessionDirs() {
 		paths, err := listTrashedSessionFiles(dir)
@@ -3539,9 +3286,6 @@ func channelDisplayName(provider, domain string) string {
 // has an in-process runtime, the runtime is cancelled and removed first so
 // autosave cannot recreate or append to the deleted file later.
 func (a *App) DeleteSession(path string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteSavedSessionManagementErr()
-	}
 	return friendlySessionFileError(a.deleteSession(path, false))
 }
 
@@ -3549,9 +3293,6 @@ func (a *App) DeleteSession(path string) error {
 // marker is only a hint; the backend re-reads the branch and parent immediately
 // before changing runtime state or moving any files.
 func (a *App) DeleteRecoveryCopy(path string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteSavedSessionManagementErr()
-	}
 	return friendlySessionFileError(a.deleteSession(path, true))
 }
 
@@ -4058,9 +3799,6 @@ func (a *App) activeSessionPath(dir string) string {
 
 // RestoreSession moves a trashed session back into the saved-session list.
 func (a *App) RestoreSession(path string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteSavedSessionManagementErr()
-	}
 	return friendlySessionFileError(a.restoreSession(path))
 }
 
@@ -4123,18 +3861,12 @@ func (a *App) sessionOpen(dir, sessionPath string) bool {
 // PurgeTrashedSession permanently removes a trashed session and its title/display
 // sidecars.
 func (a *App) PurgeTrashedSession(path string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteSavedSessionManagementErr()
-	}
 	return friendlySessionFileError(a.purgeTrashedSession(path, false))
 }
 
 // PurgeRecoveryCopy is the guarded permanent-cleanup path. A trashed branch is
 // rechecked against its live parent; missing, stale, or divergent data is kept.
 func (a *App) PurgeRecoveryCopy(path string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteSavedSessionManagementErr()
-	}
 	return friendlySessionFileError(a.purgeTrashedSession(path, true))
 }
 
@@ -4172,9 +3904,6 @@ func (a *App) purgeTrashedSession(path string, requireRedundantRecovery bool) er
 // the branch meta sidecar, with the legacy .titles.json map kept as a
 // compatibility write-through for older desktop data paths.
 func (a *App) RenameSession(path, title string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteSavedSessionManagementErr()
-	}
 	dir := a.activeSessionDir()
 	sessionPath, _, err := validateSessionPath(dir, path)
 	if err != nil {
@@ -4204,9 +3933,6 @@ func (a *App) ResumeSessionPage(path string, limit int) (HistoryPage, error) {
 }
 
 func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPage, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return HistoryPage{}, remoteSavedSessionManagementErr()
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
@@ -4232,9 +3958,6 @@ func (a *App) ResumeSessionPageForTab(tabID, path string, limit int) (HistoryPag
 // path is a runtime identity, so changing to a different path must replace the
 // tab's controller binding rather than mutating the current controller in place.
 func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return nil, remoteSavedSessionManagementErr()
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
@@ -4260,9 +3983,6 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 }
 
 func (a *App) OpenChannelSessionForTab(tabID, path string) ([]HistoryMessage, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return nil, remoteSavedSessionManagementErr()
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
@@ -4285,9 +4005,6 @@ func (a *App) OpenChannelSessionForTab(tabID, path string) ([]HistoryMessage, er
 }
 
 func (a *App) OpenChannelSessionPageForTab(tabID, path string, limit int) (HistoryPage, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return HistoryPage{}, remoteSavedSessionManagementErr()
-	}
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if tab == nil || ctrl == nil {
 		return HistoryPage{}, fmt.Errorf("tab is not ready")
@@ -4880,9 +4597,6 @@ func loadResumableSession(sessionPath string) (*agent.Session, error) {
 // PreviewSession reads a saved session for display only. It does not snapshot or
 // swap the active controller, so the history drawer can call it while a turn runs.
 func (a *App) PreviewSession(path string) ([]HistoryMessage, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return nil, remoteSavedSessionManagementErr()
-	}
 	sessionDir, sessionPath, err := a.sessionDirForPath(path)
 	if err != nil {
 		return nil, err
@@ -4932,9 +4646,6 @@ type promptHistoryTape struct {
 // carry a cursor and page limit. Older clients may still pass a bare nonce; that
 // path keeps the old cache-hit behavior.
 func (a *App) ScanPromptHistory(rawRequest string) (PromptHistoryResult, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return PromptHistoryResult{}, remoteSavedSessionManagementErr()
-	}
 	req := parsePromptHistoryRequest(rawRequest)
 	dir := a.activeSessionDir()
 	sessionPath := a.activeSessionPath(dir)
@@ -5823,18 +5534,6 @@ func (a *App) HistoryPage(beforeTurn, limit int) HistoryPage {
 }
 
 func (a *App) HistoryPageForTab(tabID string, beforeTurn, limit int) HistoryPage {
-	if cli, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		ctx, cancel := context.WithTimeout(a.bootContext(), 15*time.Second)
-		defer cancel()
-		page, err := cli.HistoryBefore(ctx, beforeTurn, normalizeHistoryPageLimit(limit))
-		if err != nil {
-			return HistoryPage{Messages: []HistoryMessage{}}
-		}
-		return workbenchHistoryPage(page)
-	}
-	if a.activeWorkbenchTargetIsRemote() {
-		return HistoryPage{Messages: []HistoryMessage{}}
-	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -5928,9 +5627,6 @@ func historyMessagesForTurnRange(messages []HistoryMessage, startTurn, endTurn i
 }
 
 func (a *App) HistoryForTab(tabID string) []HistoryMessage {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return a.HistoryPageForTab(tabID, 0, maxHistoryPageTurns).Messages
-	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -5963,13 +5659,6 @@ func (a *App) HistoryForTab(tabID string) []HistoryMessage {
 }
 
 func (a *App) HistoryCheckpointTurnsForTab(tabID string) []int {
-	if snapshot, ok := a.workbenchSnapshot(); ok {
-		out := make([]int, 0, len(snapshot.Checkpoints))
-		for _, checkpoint := range snapshot.Checkpoints {
-			out = append(out, checkpoint.DisplayTurn)
-		}
-		return out
-	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -6855,17 +6544,6 @@ func (a *App) ContextUsage() ContextInfo {
 }
 
 func (a *App) ContextUsageForTab(tabID string) ContextInfo {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodSessionContext, protocol.SessionContextParams{})
-		if err != nil {
-			return ContextInfo{}
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodSessionContext, raw)
-		if err != nil {
-			return ContextInfo{}
-		}
-		return workbenchContextInfo(decoded.(protocol.SessionContextResult).Context)
-	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	var ctrl control.SessionAPI
@@ -6932,18 +6610,6 @@ func (a *App) Balance() BalanceInfo {
 
 func (a *App) BalanceForTab(tabID string) BalanceInfo {
 	currency := a.balanceDisplayCurrency()
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodSessionBalance, protocol.SessionBalanceParams{Currency: currency})
-		if err != nil {
-			return BalanceInfo{Err: err.Error()}
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodSessionBalance, raw)
-		if err != nil {
-			return BalanceInfo{Err: err.Error()}
-		}
-		result := decoded.(protocol.SessionBalanceResult)
-		return BalanceInfo{Available: result.Available, Display: result.Display}
-	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return BalanceInfo{}
@@ -6986,18 +6652,6 @@ func (a *App) Jobs() []JobView {
 }
 
 func (a *App) JobsForTab(tabID string) []JobView {
-	_, _, _, remoteTabID, remoteActive := a.activeRemoteWorkbench()
-	if remoteActive && (tabID == "" || tabID == remoteTabID) {
-		raw, err := a.workbenchRequest(protocol.MethodJobList, protocol.JobListParams{})
-		if err != nil {
-			return []JobView{}
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodJobList, raw)
-		if err != nil {
-			return []JobView{}
-		}
-		return workbenchJobs(decoded.(protocol.JobListResult).Jobs)
-	}
 	out := []JobView{}
 	ctrl := a.ctrlForRuntimeTabID(tabID)
 	return a.jobsForCtrl(ctrl, out)
@@ -7015,33 +6669,12 @@ func (a *App) CancelJobForTab(tabID, jobID string) (bool, error) {
 	if jobID == "" {
 		return false, fmt.Errorf("job id is required")
 	}
-	cli, _, _, remoteTabID, remoteActive := a.activeRemoteWorkbench()
-	// An explicit non-remote tab id identifies a process-local runtime even
-	// while Remote Workbench owns the visible surface. Resolve that owner before
-	// falling back to the active remote target so the global jobs popover can
-	// stop local and remote work side by side.
-	if tabID != "" && (!remoteActive || tabID != remoteTabID) {
+	if tabID != "" {
 		ctrl := a.ctrlForRuntimeTabID(tabID)
 		if ctrl != nil {
 			return cancelJobForController(ctrl, jobID)
 		}
-		if remoteActive {
-			return false, fmt.Errorf("tab %q changed before stopping background job; retry", tabID)
-		}
 		return false, nil
-	}
-	if remoteActive {
-		ctx, cancel := context.WithTimeout(a.bootContext(), 30*time.Second)
-		defer cancel()
-		raw, err := cli.Request(ctx, string(protocol.MethodJobCancel), protocol.JobCancelParams{JobID: protocol.JobID(jobID)})
-		if err != nil {
-			return false, err
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodJobCancel, raw)
-		if err != nil {
-			return false, err
-		}
-		return decoded.(protocol.JobCancelResult).Disposition == protocol.JobCancelled, nil
 	}
 	return cancelJobForController(a.ctrlForRuntimeTabID(tabID), jobID)
 }
@@ -7210,10 +6843,6 @@ func (a *App) imageInputEnabledForTab(tabID string) bool {
 }
 
 func (a *App) MetaForTab(tabID string) Meta {
-	if _, snapshot, _, _, ok := a.activeRemoteWorkbench(); ok {
-		id, _, _ := a.workbench().targets.Active()
-		return workbenchMeta(snapshot, id.Workspace)
-	}
 	a.mu.RLock()
 	tab := a.tabByIDLocked(tabID)
 	snap := snapshotTabRuntimeLocked(tab)
@@ -7343,9 +6972,6 @@ func (a *App) AutoResearchCurrent() AutoResearchStatusView {
 }
 
 func (a *App) AutoResearchStatus(tabID string) AutoResearchStatusView {
-	if a.activeWorkbenchTargetIsRemote() {
-		return AutoResearchStatusView{OpenCriteria: []AutoResearchCriterionView{}}
-	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return AutoResearchStatusView{OpenCriteria: []AutoResearchCriterionView{}}
@@ -7358,9 +6984,6 @@ func (a *App) AutoResearchStatus(tabID string) AutoResearchStatusView {
 }
 
 func (a *App) AutoResearchList(tabID string) []AutoResearchStatusView {
-	if a.activeWorkbenchTargetIsRemote() {
-		return []AutoResearchStatusView{}
-	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return []AutoResearchStatusView{}
@@ -7377,9 +7000,6 @@ func (a *App) AutoResearchList(tabID string) []AutoResearchStatusView {
 }
 
 func (a *App) AutoResearchFindings(tabID string, limit int) []AutoResearchFindingView {
-	if a.activeWorkbenchTargetIsRemote() {
-		return []AutoResearchFindingView{}
-	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return []AutoResearchFindingView{}
@@ -7405,9 +7025,6 @@ func (a *App) AutoResearchFindings(tabID string, limit int) []AutoResearchFindin
 }
 
 func (a *App) AutoResearchOpenTask(tabID string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteAutoResearchUnavailableErr()
-	}
 	status := a.AutoResearchStatus(tabID)
 	if strings.TrimSpace(status.TaskPath) == "" {
 		return os.ErrInvalid
@@ -7416,9 +7033,6 @@ func (a *App) AutoResearchOpenTask(tabID string) error {
 }
 
 func (a *App) AutoResearchRecordEvidence(tabID, criterionID string, input AutoResearchEvidenceView) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteAutoResearchUnavailableErr()
-	}
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return os.ErrInvalid
@@ -7444,20 +7058,6 @@ func (a *App) SetGoal(goal string) error {
 // can submit a structured Skill without a /goal prose fallback, and the
 // frontend aborts that submit when activation fails.
 func (a *App) SetGoalForTab(tabID, goal string) error {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		var err error
-		if strings.TrimSpace(goal) == "" {
-			_, err = a.workbenchRequest(protocol.MethodSessionGoalClear, protocol.SessionGoalClearParams{})
-		} else {
-			_, err = a.workbenchRequest(protocol.MethodSessionGoalSet, protocol.SessionGoalSetParams{Goal: goal})
-		}
-		if err != nil {
-			a.warnForTab(remoteTabID, err.Error())
-			return err
-		}
-		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		return nil
-	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return a.workspaceNotReadyErr(nil)
@@ -7517,18 +7117,6 @@ func (a *App) ClearGoalForTab(tabID string) error {
 // ResumeGoalForTab re-enters a blocked or stopped Goal while preserving its
 // delivery scope, budget history, and persisted verification checkpoint.
 func (a *App) ResumeGoalForTab(tabID string) bool {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodSessionGoalResume, protocol.SessionGoalResumeParams{})
-		if err != nil {
-			return false
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodSessionGoalResume, raw)
-		if err != nil {
-			return false
-		}
-		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		return decoded.(protocol.SessionGoalResumeResult).Resumed
-	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return false
@@ -7551,18 +7139,6 @@ func (a *App) ResumeGoalForTab(tabID string) bool {
 // PauseGoalForTab suspends a running Goal without clearing it; ResumeGoalForTab
 // restores it (with one extra budget slice when it was budget-paused).
 func (a *App) PauseGoalForTab(tabID string) bool {
-	if cli, _, _, remoteTabID, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodSessionGoalPause, protocol.SessionGoalPauseParams{})
-		if err != nil {
-			return false
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodSessionGoalPause, raw)
-		if err != nil {
-			return false
-		}
-		a.workbenchRefreshSnapshot(cli.Generation(), remoteTabID)
-		return decoded.(protocol.SessionGoalPauseResult).Paused
-	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return false
@@ -7596,11 +7172,6 @@ func (a *App) SetToolApprovalMode(mode string) {
 // SetToolApprovalModeForTab returns the pending approval prompt ids the
 // switch auto-allowed (see SetModeForTab).
 func (a *App) SetToolApprovalModeForTab(tabID, mode string) []string {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		remoteMode := protocol.ToolApprovalMode(strings.TrimSpace(mode))
-		_, _ = a.workbenchSetProfile(protocol.ProfilePatch{ToolApprovalMode: &remoteMode})
-		return []string{}
-	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		return nil
@@ -7661,9 +7232,6 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "skill", Description: i18n.M.CmdSkill, Kind: "builtin", Group: "skills"},
 		{Name: "reload-cmd", Description: i18n.M.CmdReloadCmd, Kind: "builtin", Group: "management"},
 	}
-	if catalog, ok := a.workbenchSessionCatalog(); ok {
-		return appendRemoteSessionCommands(out, catalog)
-	}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	a.mu.RUnlock()
@@ -7704,26 +7272,6 @@ func (a *App) Commands() []CommandInfo {
 
 func docsBuiltinCommand(name string) CommandInfo {
 	return CommandInfo{Name: name, Description: i18n.M.CmdDocs, Hint: "<question>", Kind: "builtin", Group: "integrations"}
-}
-
-func appendRemoteSessionCommands(out []CommandInfo, catalog protocol.SessionCatalogResult) []CommandInfo {
-	for _, item := range catalog.BuiltinCommands {
-		out = append(out, CommandInfo{
-			Name: item.Name, Description: item.Description, Hint: item.Hint,
-			Kind: "builtin", Group: item.Group,
-		})
-	}
-	for _, item := range catalog.Skills {
-		out = append(out, CommandInfo{Name: item.Name, Description: item.Description, Kind: "skill", Group: "skills"})
-	}
-	for _, item := range catalog.Commands {
-		kind, group := "custom", "skills"
-		if strings.HasPrefix(item.Name, "mcp__") {
-			kind, group = "mcp", "integrations"
-		}
-		out = append(out, CommandInfo{Name: item.Name, Description: item.Description, Kind: kind, Group: group})
-	}
-	return resolveDocsCommand(out)
 }
 
 func resolveDocsCommand(commands []CommandInfo) []CommandInfo {
@@ -7778,24 +7326,6 @@ type SlashArgsResult struct {
 // /skill, /hooks) for the composer — the same logic the chat TUI uses. Empty
 // Items means the input has no structured arguments to complete.
 func (a *App) SlashArgs(input string) SlashArgsResult {
-	if cli, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		ctx, cancel := context.WithTimeout(a.bootContext(), 10*time.Second)
-		defer cancel()
-		raw, err := cli.Request(ctx, string(protocol.MethodComposerSlashArgs), protocol.ComposerSlashArgsParams{Input: input})
-		if err != nil {
-			return SlashArgsResult{Items: []SlashArgItem{}}
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodComposerSlashArgs, raw)
-		if err != nil {
-			return SlashArgsResult{Items: []SlashArgItem{}}
-		}
-		remote := decoded.(protocol.ComposerSlashArgsResult)
-		out := SlashArgsResult{Items: []SlashArgItem{}, From: remote.From}
-		for _, item := range remote.Items {
-			out.Items = append(out.Items, SlashArgItem{Label: item.Label, Insert: item.Insert, Hint: item.Hint, Descend: item.Descend})
-		}
-		return out
-	}
 	a.mu.RLock()
 	ctrl := a.activeCtrlLocked()
 	model := ""
@@ -9973,9 +9503,6 @@ func (a *App) Models() []ModelInfo {
 }
 
 func (a *App) ModelsForTab(tabID string) []ModelInfo {
-	if _, snapshot, catalog, _, ok := a.activeRemoteWorkbench(); ok {
-		return workbenchModels(catalog, snapshot.Meta.ResolvedProfile.Model)
-	}
 	a.mu.RLock()
 	curModel := ""
 	workspaceRoot := ""
@@ -10242,11 +9769,6 @@ type modelSwitchTiming struct {
 }
 
 func (a *App) SetModelForTab(tabID, name string) (retErr error) {
-	if strings.TrimSpace(name) != "" {
-		if handled, err := a.workbenchSetProfile(protocol.ProfilePatch{Model: &name}); handled {
-			return err
-		}
-	}
 	if a.ctx == nil || name == "" {
 		return nil
 	}
@@ -10447,17 +9969,6 @@ func (a *App) Effort() EffortInfo {
 }
 
 func (a *App) EffortForTab(tabID string) EffortInfo {
-	if _, snapshot, catalog, _, ok := a.activeRemoteWorkbench(); ok {
-		currentModel := snapshot.Meta.ResolvedProfile.Model
-		for _, model := range catalog.Models {
-			if string(model.Ref) != currentModel {
-				continue
-			}
-			levels := append([]string(nil), model.Effort.Levels...)
-			return EffortInfo{Supported: model.Effort.Supported, Current: snapshot.Meta.ResolvedProfile.Effort, Default: model.Effort.Default, Levels: levels}
-		}
-		return EffortInfo{Current: snapshot.Meta.ResolvedProfile.Effort, Levels: []string{}}
-	}
 	entry, err := a.currentProviderEntryForTab(tabID)
 	if err != nil {
 		return EffortInfo{Current: "auto", Levels: []string{}}
@@ -10478,9 +9989,6 @@ func (a *App) SetEffort(level string) error {
 }
 
 func (a *App) SetEffortForTab(tabID, level string) error {
-	if handled, err := a.workbenchSetProfile(protocol.ProfilePatch{Effort: &level}); handled {
-		return err
-	}
 	tab := a.tabByID(tabID)
 	if tab == nil {
 		if strings.TrimSpace(tabID) == "" {
@@ -10621,11 +10129,6 @@ func (a *App) SetTokenMode(mode string) error {
 }
 
 func (a *App) SetTokenModeForTab(tabID, mode string) error {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		remoteMode := protocol.TokenMode(strings.TrimSpace(mode))
-		_, err := a.workbenchSetProfile(protocol.ProfilePatch{TokenMode: &remoteMode})
-		return err
-	}
 	mode = boot.NormalizeTokenMode(mode)
 	tab := a.tabByID(tabID)
 	if tab == nil {
@@ -10970,22 +10473,6 @@ func (a *App) ListDir(rel string) []DirEntry {
 
 // ListDirForTab is the tab-scoped variant used by multi-tab frontend surfaces.
 func (a *App) ListDirForTab(tabID, rel string) []DirEntry {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodFileList, protocol.FileListParams{Path: rel})
-		if err != nil {
-			return []DirEntry{}
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodFileList, raw)
-		if err != nil {
-			return []DirEntry{}
-		}
-		entries := decoded.(protocol.FileListResult).Entries
-		out := make([]DirEntry, 0, len(entries))
-		for _, entry := range entries {
-			out = append(out, DirEntry{Name: entry.Name, Path: entry.Path, IsDir: entry.IsDir})
-		}
-		return out
-	}
 	root, ctrl, ok := a.workspaceTargetForTab(tabID)
 	if !ok {
 		return []DirEntry{}
@@ -11039,22 +10526,6 @@ func (a *App) SearchFileRefs(query string) []DirEntry {
 
 // SearchFileRefsForTab is the tab-scoped variant used by multi-tab frontend surfaces.
 func (a *App) SearchFileRefsForTab(tabID, query string) []DirEntry {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodFileSearch, protocol.FileSearchParams{Query: query})
-		if err != nil {
-			return []DirEntry{}
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodFileSearch, raw)
-		if err != nil {
-			return []DirEntry{}
-		}
-		entries := decoded.(protocol.FileSearchResult).Entries
-		out := make([]DirEntry, 0, len(entries))
-		for _, entry := range entries {
-			out = append(out, DirEntry{Name: entry.Name, Path: entry.Path, IsDir: entry.IsDir})
-		}
-		return out
-	}
 	root, ctrl, ok := a.workspaceTargetForTab(tabID)
 	if !ok {
 		return []DirEntry{}
@@ -11126,25 +10597,6 @@ func (a *App) ReadFile(rel string) FilePreview {
 
 // ReadFileForTab returns a preview resolved against the requested tab.
 func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		out := FilePreview{Path: rel}
-		raw, err := a.workbenchRequest(protocol.MethodFilePreview, protocol.FilePreviewParams{Path: rel})
-		if err != nil {
-			out.Err = err.Error()
-			return out
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodFilePreview, raw)
-		if err != nil {
-			out.Err = err.Error()
-			return out
-		}
-		result := decoded.(protocol.FilePreviewResult)
-		out.Path, out.Size, out.Binary, out.Truncated, out.Kind = result.Path, result.SizeBytes, result.Binary, result.Truncated, string(result.Kind)
-		if result.Body != nil {
-			out.Body = *result.Body
-		}
-		return out
-	}
 	out := FilePreview{Path: rel}
 	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
 	if err != nil || !ok {
@@ -11236,9 +10688,6 @@ func (a *App) OpenWorkspacePath(rel string) error {
 
 // OpenWorkspacePathForTab opens a path resolved against the requested tab.
 func (a *App) OpenWorkspacePathForTab(tabID, rel string) error {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return fmt.Errorf("CAPABILITY_UNAVAILABLE: Remote workspace paths cannot be opened by the Desktop file manager")
-	}
 	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
 	if err != nil || !ok {
 		return os.ErrInvalid
@@ -11254,9 +10703,6 @@ func (a *App) RevealWorkspacePath(rel string) error {
 
 // RevealWorkspacePathForTab reveals a path resolved against the requested tab.
 func (a *App) RevealWorkspacePathForTab(tabID, rel string) error {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return fmt.Errorf("CAPABILITY_UNAVAILABLE: Remote workspace paths cannot be revealed by the Desktop file manager")
-	}
 	path, ok, err := a.workspaceOrExternalPathForTab(tabID, rel)
 	if err != nil || !ok {
 		return os.ErrInvalid
@@ -11969,9 +11415,6 @@ var writableScopes = []memory.Scope{memory.ScopeUser, memory.ScopeProject, memor
 // active/archived auto-memories, and the writable scopes. Read-only; mutations
 // go through Remember / SaveDoc.
 func (a *App) Memory() MemoryView {
-	if a.activeWorkbenchTargetIsRemote() {
-		return emptyMemoryView()
-	}
 	return a.memoryForCtrl(nil, true)
 }
 
@@ -11982,9 +11425,6 @@ func (a *App) Memory() MemoryView {
 // An empty tabID is treated as "no tab specified" and falls back to the
 // active tab for backward compatibility.
 func (a *App) MemoryForTab(tabID string) MemoryView {
-	if a.activeWorkbenchTargetIsRemote() {
-		return emptyMemoryView()
-	}
 	if tabID == "" {
 		return a.memoryForCtrl(nil, true)
 	}
@@ -12076,16 +11516,10 @@ func emptyMemoryView() MemoryView {
 // panel's explicit "remember" action, equivalent to typing "/remember <note>".
 // An unknown scope falls back to project. Returns the file written.
 func (a *App) Remember(scope, note string) (string, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return "", remoteMemoryUnavailableErr()
-	}
 	return a.rememberForCtrl(nil, scope, note, true)
 }
 
 func (a *App) RememberForTab(tabID, scope, note string) (string, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return "", remoteMemoryUnavailableErr()
-	}
 	if tabID == "" {
 		return a.rememberForCtrl(nil, scope, note, true)
 	}
@@ -12110,16 +11544,10 @@ func (a *App) rememberForCtrl(ctrl control.SessionAPI, scope, note string, fallb
 // Forget deletes a saved auto-memory by name — the panel's delete action for a
 // fact the model owns. A no-op when no controller is attached.
 func (a *App) Forget(name string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteMemoryUnavailableErr()
-	}
 	return a.forgetForCtrl(nil, name, true)
 }
 
 func (a *App) ForgetForTab(tabID, name string) error {
-	if a.activeWorkbenchTargetIsRemote() {
-		return remoteMemoryUnavailableErr()
-	}
 	if tabID == "" {
 		return a.forgetForCtrl(nil, name, true)
 	}
@@ -12144,16 +11572,10 @@ func (a *App) forgetForCtrl(ctrl control.SessionAPI, name string, fallback bool)
 // RestoreArchivedMemory recovers one archived fact without replacing active
 // memory. The store preserves its identity and creates a new audited revision.
 func (a *App) RestoreArchivedMemory(archivePath string) (MemoryFact, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return MemoryFact{}, remoteMemoryUnavailableErr()
-	}
 	return a.restoreArchivedMemoryForCtrl(nil, archivePath, true)
 }
 
 func (a *App) RestoreArchivedMemoryForTab(tabID, archivePath string) (MemoryFact, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return MemoryFact{}, remoteMemoryUnavailableErr()
-	}
 	if tabID == "" {
 		return a.restoreArchivedMemoryForCtrl(nil, archivePath, true)
 	}
@@ -12215,9 +11637,6 @@ func (a *App) MemoryRevisionsForTab(tabID, ref string) []MemoryFact {
 
 func (a *App) memoryRevisionsForCtrl(ctrl control.SessionAPI, ref string, fallback bool) []MemoryFact {
 	out := []MemoryFact{}
-	if a.activeWorkbenchTargetIsRemote() {
-		return out
-	}
 	if ctrl == nil {
 		if !fallback {
 			return out
@@ -12236,16 +11655,10 @@ func (a *App) memoryRevisionsForCtrl(ctrl control.SessionAPI, ref string, fallba
 }
 
 func (a *App) RestoreMemoryRevision(ref string, revision int) (MemoryFact, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return MemoryFact{}, remoteMemoryUnavailableErr()
-	}
 	return a.restoreMemoryRevisionForCtrl(nil, ref, revision, true)
 }
 
 func (a *App) RestoreMemoryRevisionForTab(tabID, ref string, revision int) (MemoryFact, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return MemoryFact{}, remoteMemoryUnavailableErr()
-	}
 	if tabID == "" {
 		return a.restoreMemoryRevisionForCtrl(nil, ref, revision, true)
 	}
@@ -12274,16 +11687,10 @@ func (a *App) restoreMemoryRevisionForCtrl(ctrl control.SessionAPI, ref string, 
 // SaveDoc overwrites a memory doc with the panel editor's contents. The controller
 // validates path against the recognized memory files. Returns the file written.
 func (a *App) SaveDoc(path, body string) (string, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return "", remoteMemoryUnavailableErr()
-	}
 	return a.saveDocForCtrl(nil, path, body, true)
 }
 
 func (a *App) SaveDocForTab(tabID, path, body string) (string, error) {
-	if a.activeWorkbenchTargetIsRemote() {
-		return "", remoteMemoryUnavailableErr()
-	}
 	if tabID == "" {
 		return a.saveDocForCtrl(nil, path, body, true)
 	}
