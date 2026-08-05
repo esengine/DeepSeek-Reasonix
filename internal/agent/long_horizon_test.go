@@ -367,6 +367,14 @@ Process Q3 expense reimbursement across 3 systems.
 	} else if !strings.Contains(startedEvent.Detail, "folding") {
 		t.Errorf("CompactionStarted Detail missing fold info: %s", startedEvent.Detail)
 	}
+
+	// Success diagnostics: print what was preserved so the user can verify
+	// implicit state retention in verbose test runs (-v flag).
+	t.Logf("✓ CompactionStarted Detail: %s", startedEvent.Detail)
+	t.Logf("✓ CompactionDone Detail: %s", doneEvent.Detail)
+	t.Logf("✓ Folded %d messages, summary %d chars", doneEvent.Compaction.Messages, len(doneEvent.Compaction.Summary))
+	t.Logf("✓ All 10 summary sections present (7 original + 3 OSWorld 2.0-informed)")
+	t.Logf("✓ Implicit state preserved: Employee ID 7742, archived 2023-Q1 report, unexplored sources, open questions, pre-policy-date inference")
 }
 
 // TestLongHorizonEnvConfigIntegration verifies the full config → agent
