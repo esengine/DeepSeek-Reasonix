@@ -36,7 +36,6 @@ import (
 	"reasonix/internal/plugin"
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
-	"reasonix/internal/remote/protocol"
 	"reasonix/internal/sandbox"
 	"reasonix/internal/skill"
 	"reasonix/internal/store"
@@ -435,6 +434,15 @@ func TestCommandsDocsShowsOnlyRuntimeWinner(t *testing.T) {
 	}
 }
 
+func commandInfoByName(commands []CommandInfo, name string) (CommandInfo, bool) {
+	for _, command := range commands {
+		if command.Name == name {
+			return command, true
+		}
+	}
+	return CommandInfo{}, false
+}
+
 func TestCommandsDocsAccountsForHiddenCompatibilityAliases(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -499,40 +507,6 @@ func TestCommandsDocsDoesNotDisplaceQualifiedCustomCommands(t *testing.T) {
 			t.Fatalf("command %q = %+v, %v; want kind %q", want.name, command, ok, want.kind)
 		}
 	}
-}
-
-func TestAppendRemoteSessionCommandsUsesHostResolvedDocsName(t *testing.T) {
-	base := []CommandInfo{{Name: "new", Kind: "builtin", Group: "actions"}}
-	legacy := appendRemoteSessionCommands(base, protocol.SessionCatalogResult{})
-	if _, ok := commandInfoByName(legacy, "docs"); ok {
-		t.Fatalf("new desktop invented /docs for an older host: %+v", legacy)
-	}
-	catalog := protocol.SessionCatalogResult{
-		BuiltinCommands: []protocol.BuiltinCommandCatalogItem{{
-			Name: control.ReasonixDocsSlashName, Description: "host docs", Hint: "<question>", Group: "integrations",
-		}},
-		Commands: []protocol.CommandCatalogItem{{Name: "manuals:docs", Description: "plugin docs"}},
-		Skills:   []protocol.SkillCatalogItem{},
-	}
-	commands := appendRemoteSessionCommands(base, catalog)
-	if _, ok := commandInfoByName(commands, "docs"); ok {
-		t.Fatalf("remote commands invented an unavailable short docs route: %+v", commands)
-	}
-	if fallback, ok := commandInfoByName(commands, control.ReasonixDocsSlashName); !ok || fallback.Kind != "builtin" || fallback.Hint != "<question>" {
-		t.Fatalf("remote qualified docs fallback = %+v, %v", fallback, ok)
-	}
-	if canonical, ok := commandInfoByName(commands, "manuals:docs"); !ok || canonical.Kind != "custom" {
-		t.Fatalf("remote canonical plugin docs = %+v, %v", canonical, ok)
-	}
-}
-
-func commandInfoByName(commands []CommandInfo, name string) (CommandInfo, bool) {
-	for _, command := range commands {
-		if command.Name == name {
-			return command, true
-		}
-	}
-	return CommandInfo{}, false
 }
 
 func TestCommandsClassifiesSubagentSkills(t *testing.T) {
@@ -7184,7 +7158,7 @@ func TestSubmitEntryPointsRejectEmptyProviderInput(t *testing.T) {
 			return app.SubmitEditedDisplayToTab("missing", "visible prompt", "\n", "original prompt")
 		}},
 		{name: "initial goal", call: func() error {
-			_, err := app.SubmitInitialGoalToTab("missing", "goal", "visible prompt", "", nil, "normal", "auto", "local", 0, 0)
+			_, err := app.SubmitInitialGoalToTab("missing", "goal", "visible prompt", "", nil, "normal", "auto")
 			return err
 		}},
 	} {

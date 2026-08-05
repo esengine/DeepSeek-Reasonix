@@ -1,0 +1,23 @@
+---
+import Account from '../../layouts/Account.astro';
+---
+<Account
+  wide
+  title="Public profile — Reasonix"
+  titleEn="Public profile — Reasonix"
+  titleZh="公开主页 — Reasonix"
+  description="View a Reasonix community profile.">
+  <div id="public-profile-gate" class="auth-msg">Loading profile…</div>
+
+  <div id="public-profile" hidden>
+    <div class="acct-id">
+      <img id="public-profile-avatar" hidden width="72" height="72" alt="" style="border-radius:18px;object-fit:cover" />
+      <div>
+        <h1 id="public-profile-name" class="acct-handle"></h1>
+        <div id="public-profile-handle" class="acct-email"></div>
+      </div>
+    </div>
+    <p id="public-profile-bio" style="white-space:pre-wrap;line-height:1.7"></p>
+    <p class="hint"><span class="l-en">Joined </span><span class="l-zh">加入于 </span><span id="public-profile-joined"></span></p>
+  </div>
+</Account>

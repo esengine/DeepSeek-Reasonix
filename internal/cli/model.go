@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
+	"reasonix/internal/provider"
 )
 
 // runModelSubcommand handles "/model": with no argument it opens the configured
@@ -101,7 +102,11 @@ func (m *chatTUI) runModelSubcommand(input string) {
 }
 
 func (m *chatTUI) openModelPicker() {
-	refs := modelRefs()
+	var catalog []provider.Descriptor
+	if m.ctrl != nil {
+		catalog = m.ctrl.ProviderCatalog()
+	}
+	refs := mergeExtensionModelRefs(modelRefs(), catalog)
 	if len(refs) == 0 {
 		m.notice("model: no configured chat models")
 		return
@@ -168,6 +173,35 @@ func modelRefs() []string {
 		for _, model := range p.ChatModelList() {
 			out = append(out, p.Name+"/"+model)
 		}
+	}
+	return out
+}
+
+// mergeExtensionModelRefs folds the session's extension provider catalog into
+// the config-backed picker list. Extension refs arrive fully namespaced
+// (plugin/<plugin>/<provider>/<model>); entries already listed (or blank) are
+// dropped so a claim-replaced config ref never appears twice. A nil catalog
+// returns base unchanged — the no-extension path is untouched.
+func mergeExtensionModelRefs(base []string, catalog []provider.Descriptor) []string {
+	if len(catalog) == 0 {
+		return base
+	}
+	seen := make(map[string]bool, len(base)+len(catalog))
+	out := make([]string, 0, len(base)+len(catalog))
+	for _, ref := range base {
+		if seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		out = append(out, ref)
+	}
+	for _, d := range catalog {
+		ref := strings.TrimSpace(d.Ref)
+		if ref == "" || seen[ref] {
+			continue
+		}
+		seen[ref] = true
+		out = append(out, ref)
 	}
 	return out
 }

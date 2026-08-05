@@ -233,6 +233,9 @@ reasonix session status <machine-session-id> --json [--dir SESSION_DIR | --proje
 reasonix session recovery [<machine-session-id>] --json [--dir SESSION_DIR | --project-root PATH]
 reasonix task list --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
 reasonix task show <task-id> --json [--dir SESSION_DIR | --project-root PATH] [--session MACHINE_SESSION_ID]
+reasonix task monitor list --json [--dir PROJECT_DIR]
+reasonix task monitor status <task-id> --json [--dir PROJECT_DIR]
+reasonix task monitor events <task-id> --json|--jsonl [--dir PROJECT_DIR] [--after N] [--follow]
 reasonix hook list --json [--project-root PATH] [--home-dir PATH]
 reasonix hook status --json [--project-root PATH] [--home-dir PATH]
 ```
@@ -426,10 +429,11 @@ the displayed list matches the commands the TUI accepts.
 | `/memory [subcommand]` | Inspect instructions, memory provenance, recall, revisions, and recovery. |
 | `/rewind` | Restore conversation and/or code to an earlier turn. |
 | `/tree`, `/branch`, `/switch` | Inspect or navigate conversation branches. |
+| `/reload` | Reload the agent runtime (extensions, tools, skills, commands, hooks, providers) while keeping the session. Queued once while a turn runs, then fail-atomic: a failed rebuild keeps the current runtime. |
 
 Switching model, effort, or work mode rebuilds the runtime while preserving the
 active conversation, session-scoped permission overrides, additional directory
-access, and session ownership.
+access, and session ownership. `/reload` uses the same fail-atomic rebuild.
 
 ### Memory diagnostics and recovery
 
@@ -447,7 +451,8 @@ names, and owned archive paths.
 | `/memory archived` | List archived facts and their owned paths. |
 | `/memory recover <archive-path>` | Recover an archive as a new revision without overwriting active data. |
 
-These commands run against the active session controller. In a Remote Workbench
-they use the remote memory catalog and never fall back to local desktop memory.
-See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for authority, automatic
-recall, write confirmation, and migration behavior.
+These commands run against the active session controller. When the session
+lives on a remote host (`reasonix remote connect` / a desktop remote web
+window), they use the remote memory catalog and never fall back to local
+desktop memory. See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for
+authority, automatic recall, write confirmation, and migration behavior.

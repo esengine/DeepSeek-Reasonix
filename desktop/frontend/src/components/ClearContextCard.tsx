@@ -4,7 +4,7 @@ import {
   DecisionConfirmBar,
   PromptAction,
   PromptBadge,
-  PromptDescriptionToggle,
+  PromptDescriptionDisclosure,
   PromptShelf,
 } from "./PromptShelf";
 
@@ -104,6 +104,7 @@ export function ClearContextCard({
   return (
     <PromptShelf
       decision
+      className="prompt-shelf--clear-context"
       barRef={shelfRef}
       titleId="clear-context-shelf-title"
       title={t("clearContext.title")}
@@ -119,7 +120,6 @@ export function ClearContextCard({
               description={action.desc}
               descriptionId={`${instanceId}-description-${index}`}
               descriptionDisclosure
-              descriptionExpanded={selectedIndex === index && descriptionExpanded}
               onDescriptionOverflowChange={selectedIndex === index ? setDescriptionTruncated : undefined}
               onClick={() => {
                 if (submitting) return;
@@ -134,11 +134,14 @@ export function ClearContextCard({
       }
       note={
         descriptionTruncated ? (
-          <PromptDescriptionToggle
-            descriptionId={selectedDescriptionId}
+          <PromptDescriptionDisclosure
+            descriptionId={`${selectedDescriptionId}-detail`}
+            label={actions[selectedIndex]?.label}
+            description={actions[selectedIndex]?.desc ?? ""}
             expanded={descriptionExpanded}
             onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
             disabled={submitting}
+            alwaysVisible={actions[selectedIndex]?.tone === "danger"}
           />
         ) : undefined
       }
@@ -151,8 +154,6 @@ export function ClearContextCard({
           danger={selectedIndex === 1}
         />
       }
-    >
-      <p className="prompt-shelf__note">{t("clearContext.detail")}</p>
-    </PromptShelf>
+    />
   );
 }

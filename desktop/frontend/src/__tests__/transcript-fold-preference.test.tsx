@@ -94,6 +94,18 @@ const { setProcessFoldPreference } = await server.ssrLoadModule("/src/lib/proces
 const items = [
   { kind: "user", id: "u1", text: "ask" },
   { kind: "assistant", id: "a1", text: "answered", reasoning: "quick thought", streaming: false, workDurationMs: 3_000 },
+  {
+    kind: "notice",
+    id: "decision-1",
+    level: "info",
+    text: "Decision recorded: answered",
+    decisionReceipt: {
+      id: "ask-1",
+      kind: "ask",
+      subject: "Choose a model: DeepSeek V4",
+      outcome: "answered",
+    },
+  },
 ];
 
 const container = dom.window.document.getElementById("root")!;
@@ -111,6 +123,8 @@ try {
 
   ok(container.querySelector(".turn-collapse"), "completed turn renders its work fold");
   ok(!container.querySelector(".turn-collapse--open"), "auto preference keeps the completed fold collapsed");
+  ok(container.textContent?.includes("Question answered"), "Ask receipt keeps its completed title");
+  ok(!container.querySelector(".notice-line__decision-outcome"), "Ask receipt does not repeat the answered outcome");
 
   await act(async () => {
     setProcessFoldPreference("expanded");

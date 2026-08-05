@@ -93,6 +93,15 @@ const (
 	// GuardianAssessment reports the outcome of a guardian sub-agent safety review.
 	// Carries GuardianResult payload (Outcome, RiskLevel, Rationale, etc.).
 	GuardianAssessment
+	// ExtensionSurface carries a structured UI surface published by an extension
+	// sidecar (Extension payload with one of the Card/Form/Notification
+	// sub-structs set). Appended last to keep the Kind values before it
+	// wire-stable.
+	ExtensionSurface
+	// ExtensionStatus carries a one-line status contribution published by an
+	// extension sidecar (Extension payload with Status set). Appended last to
+	// keep the Kind values before it wire-stable.
+	ExtensionStatus
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
@@ -240,6 +249,95 @@ type Ask struct {
 	Questions []AskQuestion
 }
 
+// Extension surface kind values carried by ExtensionSurfacePayload.Kind. They
+// mirror the extension protocol's structured surface kinds; "request" is
+// reserved for stage-8b request surfaces (stage 8a routes blocking prompts
+// through the ordinary AskRequest channel instead).
+const (
+	ExtensionSurfaceStatus       = "status"
+	ExtensionSurfaceCard         = "card"
+	ExtensionSurfaceForm         = "form"
+	ExtensionSurfaceNotification = "notification"
+	ExtensionSurfaceRequest      = "request"
+)
+
+// ExtensionSurfacePayload carries one extension sidecar's structured UI
+// contribution for the ExtensionSurface / ExtensionStatus kinds. The structs
+// mirror the Extension Protocol v1 UI payload DTOs field-for-field so any
+// frontend can render them with native widgets; the protocol stays
+// structured-only (no HTML/CSS/JS/URLs). All user-visible strings are already
+// credential-redacted by the host UI hub before the event is emitted. Exactly
+// one sub-struct is set, selected by Kind.
+type ExtensionSurfacePayload struct {
+	PluginID     string
+	SurfaceID    string
+	SessionID    string
+	Generation   uint64
+	Kind         string // status | card | form | notification (request reserved)
+	Status       *ExtensionStatusView
+	Card         *ExtensionCardView
+	Form         *ExtensionFormView
+	Notification *ExtensionNotificationView
+}
+
+// ExtensionStatusView is a one-line status contribution (mirrors the
+// protocol's UIStatusPayload).
+type ExtensionStatusView struct {
+	Label    string
+	Detail   string
+	Severity string // info | warn | error
+	Progress *float64
+}
+
+// ExtensionKeyValue is one labelled value row in a card (mirrors UIKeyValue).
+type ExtensionKeyValue struct {
+	Key   string
+	Value string
+}
+
+// ExtensionActionRef renders a button invoking a declared extension action
+// (mirrors UIActionRef).
+type ExtensionActionRef struct {
+	ActionID string
+	Label    string
+}
+
+// ExtensionCardView is a rich read-only surface (mirrors UICardPayload).
+type ExtensionCardView struct {
+	Title    string
+	Markdown string
+	Text     string
+	Fields   []ExtensionKeyValue
+	Progress *float64
+	Actions  []ExtensionActionRef
+}
+
+// ExtensionFormField is one input row of a form surface (mirrors UIFormField).
+type ExtensionFormField struct {
+	Key      string
+	Label    string
+	Kind     string // confirm | input | select | multiselect
+	Options  []string
+	Default  any
+	Required bool
+}
+
+// ExtensionFormView is an editable surface; submissions return to the
+// extension through the UI hub (mirrors UIFormPayload).
+type ExtensionFormView struct {
+	Title   string
+	Message string
+	Fields  []ExtensionFormField
+}
+
+// ExtensionNotificationView is a transient toast-style message (mirrors
+// UINotificationPayload).
+type ExtensionNotificationView struct {
+	Title    string
+	Body     string
+	Severity string // info | warn | error
+}
+
 // Compaction carries a context-compaction pass for the CompactionStarted /
 // CompactionDone events. On CompactionStarted only Trigger is set. On
 // CompactionDone, Messages/Summary/Archive are filled in (an aborted pass leaves
@@ -330,6 +428,7 @@ const (
 	NoticeCodeSessionRecoveryAdoptedCovered = "session_recovery_adopted_covered"
 	NoticeCodeSessionRecoveryDepthCap       = "session_recovery_depth_cap"
 	NoticeCodeSessionShutdownRecoveryForked = "session_shutdown_recovery_forked"
+	NoticeCodeDecisionReceipt               = "decision_receipt"
 )
 
 type Event struct {
@@ -350,20 +449,22 @@ type Event struct {
 	// session (Usage events only), so a frontend can show the aggregate hit-rate
 	// — which doesn't crater on a short turn or after compaction — alongside
 	// Usage's single-turn numbers.
-	SessionHit   int             // Usage: cumulative cache-hit prompt tokens this session
-	SessionMiss  int             // Usage: cumulative cache-miss prompt tokens this session
-	Level        Level           // Notice
-	Audience     NoticeAudience  // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
-	Approval     Approval        // ApprovalRequest
-	Ask          Ask             // AskRequest
-	Err          error           // TurnDone: non-nil on failure
-	Cancelled    bool            // TurnDone: Cancel was requested while the turn was active
-	Outcome      string          // TurnDone: optional machine-readable recoverable outcome
-	Readiness    *FinalReadiness // TurnDone: structured final-readiness recovery state
-	Compaction   Compaction      // Compaction
-	Guardian     GuardianResult
-	RetryAttempt int // Retrying: 1-based attempt about to be made
-	RetryMax     int // Retrying: total attempts before giving up
+	SessionHit      int                      // Usage: cumulative cache-hit prompt tokens this session
+	SessionMiss     int                      // Usage: cumulative cache-miss prompt tokens this session
+	Level           Level                    // Notice
+	Audience        NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
+	Approval        Approval                 // ApprovalRequest
+	Ask             Ask                      // AskRequest
+	Extension       *ExtensionSurfacePayload // ExtensionSurface / ExtensionStatus (nil for every other kind)
+	Err             error                    // TurnDone: non-nil on failure
+	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
+	Outcome         string                   // TurnDone: optional machine-readable recoverable outcome
+	Readiness       *FinalReadiness          // TurnDone: structured final-readiness recovery state
+	Compaction      Compaction               // Compaction
+	Guardian        GuardianResult
+	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
+	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
+	RetryMax        int                       // Retrying: total attempts before giving up
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

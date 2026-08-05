@@ -46,6 +46,8 @@ type Inventory struct {
 	Skills     []SkillRef
 	Agents     []AgentRef
 	Commands   []CommandRef
+	Prompts    []PromptRef
+	Themes     []ThemeRef
 	Hooks      []HookRef
 	MCPServers []MCPServerRef
 }
@@ -89,6 +91,24 @@ type CommandRef struct {
 	Invocation  string
 }
 
+// PromptRef is one prompt template a plugin contributes from a prompts
+// directory (the Manifest v1 name for what legacy manifests call commands).
+// Prompt files share the slash-command file shape (flat <name>.md with
+// frontmatter) but map to kernel KindPrompt contributions, not commands.
+type PromptRef struct {
+	Name        string
+	Description string
+	ArgHint     string
+	Path        string
+}
+
+// ThemeRef is one theme file (*.reasonix-theme) a plugin contributes,
+// resolved from the manifest's themes list (plain paths and globs).
+type ThemeRef struct {
+	Name string
+	Path string
+}
+
 type HookRef struct {
 	Event       string
 	Match       string
@@ -124,6 +144,17 @@ type Manifest struct {
 	Commands   []string
 	Hooks      map[string][]Hook
 	MCPServers map[string]MCPServer
+	// Prompts are directories of flat <name>.md prompt templates — the
+	// Manifest v1 name for what legacy manifests call commands. The two are
+	// separate semantic sets: commands become slash commands, prompts become
+	// kernel KindPrompt contributions. A path listed under both stays in both.
+	Prompts []string
+	// Themes are *.reasonix-theme file paths or per-segment glob patterns
+	// (e.g. "themes/*.reasonix-theme"), all lexically inside the plugin root.
+	Themes []string
+	// Runtime declares a plugin-owned runtime process (Manifest v1 only).
+	// nil for legacy, Codex, and Claude packages.
+	Runtime *RuntimeSpec
 }
 
 type Hook struct {
@@ -372,19 +403,46 @@ func RelativeRoot(reasonixHome, root string) string {
 
 func ParseDir(root string) (Package, []string, error) {
 	root = filepath.Clean(root)
+	// A manifest that EXISTS but fails to parse fails loudly with the real
+	// error (a v1 typo names its field path); only a missing file falls
+	// through to the next manifest kind.
 	if pkg, warnings, err := parseNative(filepath.Join(root, NativeManifest), root); err == nil {
 		return pkg, warnings, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Package{}, nil, err
 	}
 	if pkg, warnings, err := parseCodex(filepath.Join(root, CodexManifest), root); err == nil {
 		return pkg, warnings, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Package{}, nil, err
 	}
 	if pkg, warnings, err := parseClaudePlugin(filepath.Join(root, ClaudeManifest), root); err == nil {
 		return pkg, warnings, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return Package{}, nil, err
 	}
 	return Package{}, nil, fmt.Errorf("no %s, %s, or %s found", NativeManifest, CodexManifest, ClaudeManifest)
 }
 
 func parseNative(path, root string) (Package, []string, error) {
+	b, err := fileencoding.ReadFileUTF8(path)
+	if err != nil {
+		return Package{}, nil, err
+	}
+	apiVersion, err := sniffManifestAPIVersion(b)
+	if err != nil {
+		return Package{}, nil, err
+	}
+	if apiVersion != "" {
+		return parseNativeV1(b, root, apiVersion)
+	}
+	return parseNativeLegacy(b, root)
+}
+
+// parseNativeLegacy is the pre-v1 native manifest path, preserved
+// byte-for-byte: manifests without an apiVersion parse exactly as they
+// always have, including silently ignoring unknown fields.
+func parseNativeLegacy(b []byte, root string) (Package, []string, error) {
 	var raw struct {
 		Name        string               `json:"name"`
 		Version     string               `json:"version"`
@@ -396,7 +454,7 @@ func parseNative(path, root string) (Package, []string, error) {
 		Hooks       map[string][]Hook    `json:"hooks"`
 		MCPServers  map[string]MCPServer `json:"mcpServers"`
 	}
-	if err := readJSONFile(path, &raw); err != nil {
+	if err := json.Unmarshal(b, &raw); err != nil {
 		return Package{}, nil, err
 	}
 	skills, err := parseSkillPaths(raw.Skills)
@@ -745,6 +803,16 @@ func validateManifest(root string, m *Manifest) error {
 			return err
 		}
 	}
+	for _, p := range m.Prompts {
+		if err := validateRelativePath(p); err != nil {
+			return err
+		}
+	}
+	for _, p := range m.Themes {
+		if err := validateRelativePath(p); err != nil {
+			return err
+		}
+	}
 	for event, hooks := range m.Hooks {
 		if strings.TrimSpace(event) == "" {
 			return fmt.Errorf("hook event is required")
@@ -833,6 +901,17 @@ func (p Package) CommandRoots() []string {
 	return out
 }
 
+// PromptRoots returns the absolute prompt-template directories this package
+// contributes (Manifest v1 prompts).
+func (p Package) PromptRoots() []string {
+	var out []string
+	for _, rel := range p.Manifest.Prompts {
+		out = append(out, filepath.Join(p.Root, filepath.FromSlash(rel)))
+	}
+	sort.Strings(out)
+	return out
+}
+
 func (p Package) CapabilityCounts() (skills, commands, hooks, mcp int) {
 	skills = len(p.skillRefs())
 	commands = len(p.commandRefs())
@@ -845,11 +924,50 @@ func (p Package) CapabilityCounts() (skills, commands, hooks, mcp int) {
 
 func (p Package) AgentCount() int { return len(p.agentRefs()) }
 
+// PromptCount counts the prompt templates discovered under Manifest.Prompts.
+func (p Package) PromptCount() int { return len(p.promptRefs()) }
+
+// ThemeCount counts the theme files resolved from Manifest.Themes.
+func (p Package) ThemeCount() int { return len(p.themeRefs()) }
+
+// CapabilitySummary is the full per-package capability count set. The
+// four-value CapabilityCounts predates Manifest v1 and keeps its signature
+// for existing callers (the desktop module among them); the v1 additions
+// live here.
+type CapabilitySummary struct {
+	Skills     int
+	Agents     int
+	Commands   int
+	Hooks      int
+	MCPServers int
+	Prompts    int
+	Themes     int
+	Runtime    bool
+}
+
+// CapabilitySummary counts everything the package contributes, including
+// the Manifest v1 additions (prompts, themes, runtime).
+func (p Package) CapabilitySummary() CapabilitySummary {
+	skills, commands, hooks, mcp := p.CapabilityCounts()
+	return CapabilitySummary{
+		Skills:     skills,
+		Agents:     p.AgentCount(),
+		Commands:   commands,
+		Hooks:      hooks,
+		MCPServers: mcp,
+		Prompts:    len(p.promptRefs()),
+		Themes:     len(p.themeRefs()),
+		Runtime:    p.Manifest.Runtime != nil,
+	}
+}
+
 func (p Package) Inventory() Inventory {
 	return Inventory{
 		Skills:     p.skillRefs(),
 		Agents:     p.agentRefs(),
 		Commands:   p.commandRefs(),
+		Prompts:    p.promptRefs(),
+		Themes:     p.themeRefs(),
 		Hooks:      p.hookRefs(),
 		MCPServers: p.mcpServerRefs(),
 	}
@@ -874,6 +992,67 @@ func (p Package) commandRefs() []CommandRef {
 			Invocation:  "/" + c.Name,
 		})
 	}
+	return out
+}
+
+// promptRefs loads the package's prompt dirs through the same loader the
+// command inventory uses (internal/command): prompt templates share the
+// slash-command file shape, so names, frontmatter, and malformed-file
+// handling stay identical.
+func (p Package) promptRefs() []PromptRef {
+	roots := p.PromptRoots()
+	if len(roots) == 0 {
+		return nil
+	}
+	cmds, _ := command.Load(roots...) // best-effort, like commandRefs
+	out := make([]PromptRef, 0, len(cmds))
+	for _, c := range cmds {
+		out = append(out, PromptRef{
+			Name:        c.Name,
+			Description: c.Description,
+			ArgHint:     c.ArgHint,
+			Path:        c.Source,
+		})
+	}
+	return out
+}
+
+// themeRefs resolves the manifest's themes list (plain paths and
+// per-segment globs) to concrete theme files. Parse-time validation has
+// already rejected escapes and non-regular files, so unreadable entries
+// here simply drop out (they were reported as parse warnings).
+func (p Package) themeRefs() []ThemeRef {
+	seen := map[string]bool{}
+	var out []ThemeRef
+	for _, pattern := range p.Manifest.Themes {
+		var matches []string
+		if hasGlobMeta(pattern) {
+			matches, _ = globThemePattern(p.Root, pattern)
+		} else {
+			abs := filepath.Join(p.Root, filepath.FromSlash(pattern))
+			if info, err := os.Stat(abs); err == nil && info.Mode().IsRegular() {
+				matches = []string{abs}
+			}
+		}
+		for _, match := range matches {
+			match = filepath.Clean(match)
+			if seen[match] {
+				continue
+			}
+			seen[match] = true
+			base := filepath.Base(match)
+			out = append(out, ThemeRef{
+				Name: strings.TrimSuffix(base, filepath.Ext(base)),
+				Path: match,
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		return out[i].Path < out[j].Path
+	})
 	return out
 }
 

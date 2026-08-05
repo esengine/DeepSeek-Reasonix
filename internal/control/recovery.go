@@ -65,6 +65,14 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 	// and ReplayPending do not keep a stale prompt.
 	pending := c.approval.resolve(id)
 	if pending.reply != nil {
+		outcome := "recovery_revise"
+		switch action {
+		case agent.RecoveryActionContinue:
+			outcome = "recovery_continue"
+		case agent.RecoveryActionContinueTask:
+			outcome = "recovery_continue_task"
+		}
+		c.recordDecisionReceipt(pending, outcome)
 		switch action {
 		case agent.RecoveryActionContinue, agent.RecoveryActionContinueTask:
 			pending.reply <- approvalReply{allow: true}
@@ -189,6 +197,29 @@ func (c *Controller) carryRecoveryState(path string) {
 	}
 	gate.Restore(gate.Snapshot())
 	c.saveRecoveryState(path)
+}
+
+// CarryRecoveryFrom moves prev's in-memory recovery checkpoint into c across
+// a same-session controller rebuild (boot.Rebuild). Live approval channels
+// never cross the boundary — pending recovery prompts are cleared, not
+// transferred, matching the in-session carry above. Call it only when no
+// persisted sidecar was restored (the outgoing controller never pinned a
+// session path); a sidecar restored by Resume is the authoritative state.
+func (c *Controller) CarryRecoveryFrom(prev *Controller) {
+	if c == nil || prev == nil {
+		return
+	}
+	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	prev.mu.Lock()
+	prevGate := prev.recoveryGate
+	prev.mu.Unlock()
+	c.mu.Lock()
+	gate := c.recoveryGate
+	c.mu.Unlock()
+	if gate == nil || prevGate == nil {
+		return
+	}
+	gate.Restore(prevGate.Snapshot())
 }
 
 func (c *Controller) flushRecoveryPersistence(path string) {

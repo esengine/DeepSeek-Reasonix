@@ -20,6 +20,7 @@ import (
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
@@ -340,6 +341,12 @@ type Agent struct {
 	// Plan workflows. nil disables gating entirely.
 	gate Gate
 
+	// extensions, when non-nil, is the frozen Extension Protocol v1 dispatcher
+	// for this controller generation. The run loop consults it at the
+	// agent-side intercept points (see extensions.go); nil means no v1 runtime
+	// packages are installed and every point passes through byte-identically.
+	extensions *dispatch.Dispatcher
+
 	// recoveryGate, when non-nil, is the Auto Guard boundary for Auto mode.
 	// Shared by root and sub-agents for the same controller task. nil disables
 	// recovery checks (Ask/YOLO, headless without wiring, or feature off).
@@ -640,6 +647,17 @@ func (a *Agent) SetGate(g Gate) {
 		g = nil
 	}
 	a.gate = g
+}
+
+// SetExtensions installs the extension dispatcher after construction. Boot
+// uses it because sidecars — and therefore the dispatcher — only exist after
+// snapshot assembly, which runs after the agent is built. Safe to call before
+// the run loop starts; nil disables interception.
+func (a *Agent) SetExtensions(d *dispatch.Dispatcher) {
+	if a == nil {
+		return
+	}
+	a.extensions = d
 }
 
 // SetRecoveryGate installs Auto Guard. Safe to call before the run loop starts;
@@ -1122,6 +1140,13 @@ type Options struct {
 	SubagentDepth    int
 	MaxSubagentDepth int
 
+	// Extensions is the frozen extension dispatcher for this agent's controller
+	// generation (Extension Protocol v1). Nil means no v1 runtime packages are
+	// installed; the run loop then passes every intercept point through
+	// byte-identically. Boot installs it with SetExtensions once sidecars are
+	// live (they start after the agent is constructed).
+	Extensions *dispatch.Dispatcher
+
 	// MutationObserver is the host-side file mutation observer shared with
 	// (or cloned for) sub-agents. nil disables v2 capture. Does not affect
 	// provider-visible tool schemas or prompts.
@@ -1206,6 +1231,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		modelRef:                  strings.TrimSpace(opts.ModelRef),
 		sink:                      sink,
 		gate:                      gate,
+		extensions:                opts.Extensions,
 		recoveryGate:              opts.RecoveryGate,
 		recoveryAgentID:           strings.TrimSpace(opts.RecoveryAgentID),
 		recoveryTaskID:            strings.TrimSpace(opts.RecoveryTaskID),
@@ -1337,6 +1363,12 @@ func (a *Agent) Run(ctx context.Context, input string) (runErr error) {
 		defer func() { a.updateDeliveryCheckpoint(runErr) }()
 	}
 	defer a.activeTurnCreatedAt.Store(0)
+
+	// agent.before_start: an extension may abort the run before the user turn
+	// is appended. The redacted reason surfaces like a normal run error.
+	if err := a.interceptAgentStart(ctx); err != nil {
+		return err
+	}
 
 	_, state := a.beginRunTurn(ctx, input)
 	state.runMaxSteps = runMaxSteps
@@ -2845,7 +2877,7 @@ func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
 // stream so a sink can re-render the streamed raw text as styled markdown. The
 // accumulated text and reasoning are also returned so the caller can round-trip
 // reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, string, string, []provider.ToolCall, []json.RawMessage, *provider.Usage, bool, bool, []provider.ToolCall, error) {
+func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, string, string, string, string, []provider.ToolCall, []json.RawMessage, *provider.Usage, bool, bool, []provider.ToolCall, error) {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
 		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
 	})
@@ -2863,11 +2895,26 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	for i := range requestMessages {
 		requestMessages[i].CreatedAt = 0
 	}
+	// context.prepare: extensions may rewrite the message copy feeding THIS
+	// request. The session log is never touched — the replacement is
+	// ephemeral, so the next request starts from the unmodified history and
+	// the prompt-cache prefix stays intact across turns.
+	requestMessages, err := a.interceptContextPrepare(ctx, requestMessages)
+	if err != nil {
+		return "", "", "", "", "", nil, nil, nil, false, false, nil, err
+	}
 	req := provider.Request{
-		Messages:    requestMessages,
-		Tools:       a.tools.Schemas(),
-		MaxTokens:   a.maxOutputTokens,
-		Temperature: provider.OptionalTemperature(a.temperature),
+		Messages:       requestMessages,
+		Tools:          a.tools.Schemas(),
+		MaxTokens:      a.maxOutputTokens,
+		Temperature:    provider.OptionalTemperature(a.temperature),
+		ResponseFormat: responseFormatFromRequest(ctx),
+	}
+	// provider.request: the fully assembled request gets one last ruling
+	// (revalidated by the payload registry) before it goes on the wire.
+	req, err = a.interceptProviderRequest(ctx, req)
+	if err != nil {
+		return "", "", "", "", "", nil, nil, nil, false, false, nil, err
 	}
 	inputFloor := 0
 	if previous := a.lastUsage.Load(); previous != nil {
@@ -2875,7 +2922,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	}
 	ch, err := provider.StreamWithRequestBudgetEstimate(ctx, a.prov, req, inputFloor)
 	if err != nil {
-		return "", "", "", nil, nil, provider.UsageWithRequestAttemptCount(ctx, nil), false, false, nil, err
+		return "", "", "", "", "", nil, nil, provider.UsageWithRequestAttemptCount(ctx, nil), false, false, nil, err
 	}
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
@@ -2885,7 +2932,8 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	transformReasoning := a.hooks != nil && a.hooks.HasPostLLMCall()
 
 	var text, reasoning strings.Builder
-	var signature string // provider-issued proof for the reasoning (Anthropic thinking)
+	var signature string                    // provider-issued proof for the reasoning (Anthropic thinking)
+	var reasoningID, reasoningStatus string // Responses reasoning item id/status (meta chunk)
 	var calls []provider.ToolCall
 	var responsesItems []json.RawMessage
 	var partialCalls []provider.ToolCall
@@ -2902,7 +2950,8 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			}
 		}
 		stored = display
-		if signature != "" || provider.RequiresReasoningRoundTrip(a.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
+		providerBound := signature != "" || reasoningID != "" || reasoningStatus != ""
+		if providerBound || provider.RequiresReasoningRoundTrip(a.prov) || (len(calls) > 0 && provider.RequiresToolCallReasoning(a.prov)) {
 			stored = original
 		}
 		return stored, display
@@ -2914,25 +2963,46 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			stored, _ := finishReasoning()
 			usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-			return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, ctx.Err()
+			return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, ctx.Err()
 		case c, ok := <-ch:
 			if !ok {
 				if err := ctx.Err(); err != nil {
 					stored, _ := finishReasoning()
 					usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 					usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-					return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, err
+					return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, err
 				}
 				stored, display := finishReasoning()
-				if text.Len() > 0 || display != "" {
+				// provider.response: extensions rule on the assembled terminal
+				// response before it is persisted. A replacement becomes the
+				// visible assistant turn (the user's transcript); a block fails
+				// the turn.
+				providerSignature := signature
+				finalText, finalReasoning, signature, calls, usage, err := a.interceptProviderResponse(
+					ctx, text.String(), stored, signature, calls, usage)
+				if err != nil {
+					return "", "", "", "", "", nil, nil, nil, false, partialToolStarted, partialCalls, err
+				}
+				// Responses reasoning IDs/status and Anthropic signatures are
+				// provider-bound metadata. Never attach the provider's metadata
+				// to reasoning that an extension replaced.
+				if finalReasoning != stored || signature != providerSignature {
+					reasoningID, reasoningStatus = "", ""
+				}
+				if finalReasoning != stored {
+					// The extension replaced the reasoning: what is persisted
+					// and what the closing Message event re-renders must agree.
+					display = finalReasoning
+				}
+				if finalText != "" || display != "" {
 					sink.Emit(event.Event{
 						Kind:      event.Message,
-						Text:      DisplayAssistantText(text.String()),
+						Text:      DisplayAssistantText(finalText),
 						Reasoning: display,
 					})
 				}
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				return text.String(), stored, signature, calls, responsesItems, usage, false, false, partialCalls, nil
+				return finalText, finalReasoning, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, false, partialCalls, nil
 			}
 			chunk = c
 		}
@@ -2942,6 +3012,14 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			if chunk.Signature != "" {
 				signature = chunk.Signature
 			}
+			// 元数据 chunk（空 Text）：reasoning item id/status 贯通
+			// SSE → session → 下一轮回传（评审 #7234 第 1 点）。
+			if chunk.ReasoningID != "" {
+				reasoningID = chunk.ReasoningID
+			}
+			if chunk.ReasoningStatus != "" {
+				reasoningStatus = chunk.ReasoningStatus
+			}
 			if chunk.Text != "" && !transformReasoning {
 				sink.Emit(event.Event{Kind: event.Reasoning, Text: chunk.Text})
 			}
@@ -2950,7 +3028,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), finishReasonClientReasoningLimit)
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 				a.lastUsage.Store(usage)
-				return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, errReasoningByteLimitExceeded
+				return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, errReasoningByteLimitExceeded
 			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
@@ -3000,14 +3078,14 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				stored, _ := finishReasoning()
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				return text.String(), stored, signature, calls, responsesItems, usage, true, partialToolStarted, partialCalls, chunk.Err
+				return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, true, partialToolStarted, partialCalls, chunk.Err
 			}
 			stored, _ := finishReasoning()
 			if errors.Is(chunk.Err, context.Canceled) || errors.Is(chunk.Err, context.DeadlineExceeded) {
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 			}
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-			return text.String(), stored, signature, calls, responsesItems, usage, false, partialToolStarted, partialCalls, chunk.Err
+			return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, chunk.Err
 		}
 	}
 }

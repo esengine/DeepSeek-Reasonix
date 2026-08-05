@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/extension/providerext"
 )
 
 // resolveModelForCLI picks the chat model a CLI subcommand should boot on. A
@@ -21,10 +22,15 @@ import (
 //     ACP session param, etc.). The ref must resolve AND be configured.
 //     There is no silent fallback — explicit choices that misfire must
 //     fail loudly so the user is not quietly rerouted onto a model they
-//     did not ask for.
+//     did not ask for. Plugin-namespaced refs (plugin/<plugin>/<provider>/
+//     <model>) pass through unresolved: they belong to extension sidecars,
+//     not the config catalog, and boot's merged resolver is their only gate.
 func resolveModelForCLI(explicitRef string, cfg *config.Config) (ref string, fallback bool, err error) {
 	explicitRef = strings.TrimSpace(explicitRef)
 	if explicitRef != "" {
+		if providerext.PluginRefOwner(explicitRef) != "" {
+			return explicitRef, false, nil
+		}
 		entry, ok := cfg.ResolveModel(explicitRef)
 		if !ok {
 			return "", false, fmt.Errorf("unknown model %q", explicitRef)

@@ -82,6 +82,11 @@ func (m *chatTUI) slashItems() []compItem {
 	for _, p := range m.prompts() {
 		items = append(items, compItem{label: "/" + p.Name, insert: "/" + p.Name + " ", hint: p.Description})
 	}
+	if m.ctrl != nil {
+		for _, a := range m.ctrl.ExtensionActions() {
+			items = append(items, compItem{label: a.Slash, insert: a.Slash + " ", hint: extensionActionHint(a)})
+		}
+	}
 	return items
 }
 

@@ -175,6 +175,8 @@ type Manager struct {
 
 	stalledWarning time.Duration
 	teardownGrace  time.Duration
+
+	taskRecorder TaskRecorder // optional task-monitoring lifecycle hook
 }
 
 type completion struct {
@@ -184,6 +186,16 @@ type completion struct {
 
 // Option configures a Manager.
 type Option func(*Manager)
+
+// TaskRecorder observes background-job lifecycle for task monitoring. The
+// store-backed write side lives outside jobs (typically internal/taskmonitor);
+// jobs only calls the hooks. RecordStart runs on the caller's goroutine,
+// RecordDone on the job's own goroutine — implementations must be safe for
+// concurrent use and must not block or fail the job pipeline (best-effort).
+type TaskRecorder interface {
+	RecordStart(id, kind, label string)
+	RecordDone(id string, st Status, err error)
+}
 
 // WithStalledWarningAfter enables one stalled warning per job after d without
 // job-owned visible output. A non-positive duration disables stalled warnings.
@@ -218,6 +230,17 @@ func WithJobStartObserver(observer func(done <-chan struct{})) Option {
 func WithSessionOwnershipProbe(probe func(path string) bool) Option {
 	return func(m *Manager) { m.sessionOwnershipProbe = probe }
 }
+
+// WithTaskRecorder installs an optional background-job lifecycle recorder for
+// task monitoring. A nil recorder disables recording.
+func WithTaskRecorder(r TaskRecorder) Option {
+	return func(m *Manager) { m.taskRecorder = r }
+}
+
+// SetTaskRecorder installs (or clears, with nil) the lifecycle recorder after
+// construction. Controllers that assemble their job manager before the
+// recorder's dependencies (workspace root, session id) are known use this.
+func (m *Manager) SetTaskRecorder(r TaskRecorder) { m.taskRecorder = r }
 
 // TeardownGrace reports the manager's configured close/destroy wait window.
 func (m *Manager) TeardownGrace() time.Duration { return m.teardownGrace }
@@ -433,6 +456,10 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 	}
 
 	m.emitIfActive(parentSession, event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: startedText(kind, id, label)})
+
+	if !nilutil.IsNil(m.taskRecorder) {
+		m.taskRecorder.RecordStart(id, kind, label)
+	}
 
 	m.wg.Add(1)
 	if m.stalledWarning > 0 {
@@ -767,6 +794,10 @@ func (m *Manager) recordCompletion(parentSession, id, kind, label string, st Sta
 	shouldEmit = active == "" || parentSession == "" || active == parentSession
 	m.mu.Unlock()
 
+	if !nilutil.IsNil(m.taskRecorder) {
+		m.taskRecorder.RecordDone(id, st, err)
+	}
+
 	level, text := event.LevelInfo, fmt.Sprintf("background %s finished: %s", kind, id)
 	detail := ""
 	switch st {
@@ -1067,9 +1098,9 @@ func (m *Manager) RunningForSession(parentSession string) []View {
 		// synchronously, but the process tree may still be unwinding. Keep the job
 		// on the operational running surface until its done channel closes so
 		// Desktop rebuild guards and Delivery workspace leases cannot declare the
-		// runtime idle early. The public view remains "running" for compatibility
-		// with the Remote Workbench JobStatus enum; clients may render a local
-		// "stopping" state after they request cancellation.
+		// runtime idle early. The public view remains "running" while a stop is
+		// in flight; clients may render a local "stopping" state after they
+		// request cancellation.
 		out = append(out, View{ID: j.ID, Kind: j.Kind, Label: j.Label, Status: string(Running), StartedAt: j.startedAt})
 		j.mu.Unlock()
 	}
