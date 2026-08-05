@@ -37,13 +37,15 @@ func remoteCommand(args []string, version string) int {
 	case "forward":
 		return remoteForwardCLI(args[1:])
 	case "serve":
-		return remoteServeCLI(args[1:])
+		return remoteServeCLI(args[1:], version)
 	case "fs":
 		return remoteFSCLI(args[1:])
 	case "attach-workspace":
 		return remoteAttachWorkspaceCLI(args[1:], version)
 	case "runtime-workbench":
 		return remoteRuntimeWorkbenchCLI(args[1:], version)
+	case "workbench-build-id":
+		return remoteWorkbenchBuildIDCLI(args[1:], version)
 	case "help", "-h", "--help":
 		remoteUsage()
 		return 0
@@ -52,6 +54,25 @@ func remoteCommand(args []string, version string) int {
 		remoteUsage()
 		return 2
 	}
+}
+
+// The Remote Workbench protocol and its hidden subcommands were removed. The
+// command names stay routable for one release so old scripts and launchers fail
+// with an actionable message instead of "unknown subcommand"; the following
+// stable release deletes the stubs and the routes entirely.
+func removedWorkbenchCommand(name string) int {
+	fmt.Fprintf(os.Stderr, "reasonix remote %s: Remote Workbench 已移除，请使用 `reasonix remote connect <host> --open`\n", name)
+	return 1
+}
+
+func remoteAttachWorkspaceCLI(args []string, version string) int {
+	return removedWorkbenchCommand("attach-workspace")
+}
+func remoteRuntimeWorkbenchCLI(args []string, version string) int {
+	return removedWorkbenchCommand("runtime-workbench")
+}
+func remoteWorkbenchBuildIDCLI(args []string, version string) int {
+	return removedWorkbenchCommand("workbench-build-id")
 }
 
 // editUserConfig runs mutate against the user-global config file under the edit
@@ -74,11 +95,17 @@ func editUserConfig(mutate func(*config.Config) error) error {
 	return cfg.SaveTo(path)
 }
 
+const remoteAddUsage = "usage: reasonix remote add <name> [user@]host[:port] [flags]"
+
 func remoteAddCLI(args []string) int {
 	// Positionals come first (name, target); Go's flag package stops at the
 	// first non-flag argument, so the flags are parsed from what follows.
+	if commandHelpRequested(args, 2) {
+		fmt.Fprintln(os.Stdout, remoteAddUsage)
+		return 0
+	}
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix remote add <name> [user@]host[:port] [flags]")
+		fmt.Fprintln(os.Stderr, remoteAddUsage)
 		return 2
 	}
 	name, target := args[0], args[1]
@@ -87,11 +114,11 @@ func remoteAddCLI(args []string) int {
 	jump := fs.String("jump", "", "ProxyJump chain (OpenSSH syntax)")
 	workspace := fs.String("workspace", "", "default remote workspace directory")
 	useSSHConfig := fs.Bool("use-ssh-config", false, "layer ~/.ssh/config values under unset fields")
-	serveInstall := fs.String("serve-install", "auto", "serve install strategy: auto|npm|upload|never")
+	serveInstall := fs.String("serve-install", "auto", "remote CLI install strategy: auto|npm|upload|never")
 	passphraseEnv := fs.String("passphrase-env", "", "env var name holding the key passphrase")
 	passwordEnv := fs.String("password-env", "", "env var name holding the login password")
-	if err := fs.Parse(args[2:]); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args[2:]); !ok {
+		return code
 	}
 	user, host, port, err := remote.ParseTarget(target)
 	if err != nil {
@@ -195,8 +222,8 @@ func remoteRemoveCLI(args []string) int {
 func remoteImportCLI(args []string) int {
 	fs := newFlagSet("remote import")
 	all := fs.Bool("all", false, "import every concrete ~/.ssh/config alias")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	src, err := remote.LoadUserSSHConfig()
 	if err != nil {

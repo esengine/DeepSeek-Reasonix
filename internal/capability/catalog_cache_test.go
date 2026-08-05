@@ -137,6 +137,84 @@ func TestDeliveryRouteRenderKeepsCapabilityIDAndProxyInstruction(t *testing.T) {
 	}
 }
 
+func TestCapabilityProxyRouteRenderKeepsConcreteMCPIDs(t *testing.T) {
+	for _, entry := range []Entry{
+		{ID: "mcp-tool:gh/search_issues", Kind: KindMCPTool, Name: "gh/search_issues", Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "gh"},
+		{ID: "mcp-server:gh", Kind: KindMCPServer, Name: "gh", Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "gh"},
+	} {
+		out := RenderTransientBlock(RouteDecision{
+			CapabilityProxy: true,
+			Candidates:      []RouteCandidate{{Entry: entry, Policy: AutoUsePrefer, Reason: "matches task"}},
+		})
+		if !strings.Contains(out, "- "+entry.ID+" ") {
+			t.Fatalf("capability proxy route must lead with the concrete id %q:\n%s", entry.ID, out)
+		}
+		if strings.Contains(out, "source:mcp/gh") {
+			t.Fatalf("capability proxy route rewrote %q to an unusable source target:\n%s", entry.ID, out)
+		}
+		if !strings.Contains(out, `use_capability(action="call", capability_id="`+entry.ID+`"`) {
+			t.Fatalf("capability proxy route lost the concrete call instruction for %q:\n%s", entry.ID, out)
+		}
+	}
+
+	// CapabilityProxy only replaces the MCP connector. Other configured
+	// capability kinds still use their ordinary source routing.
+	skill := Entry{ID: "skill:review", Kind: KindSkill, Name: "review", Status: StatusConfigured, ConnectSource: "skills"}
+	out := RenderTransientBlock(RouteDecision{
+		CapabilityProxy: true,
+		Candidates:      []RouteCandidate{{Entry: skill, Policy: AutoUseSuggest, Reason: "matches task"}},
+	})
+	if !strings.Contains(out, "source:skills") || !strings.Contains(out, "connect_tool_source") {
+		t.Fatalf("MCP proxy routing changed the ordinary skill connector:\n%s", out)
+	}
+}
+
+func TestOrdinaryRouteRenderDeduplicatesCollapsedMCPSourceLines(t *testing.T) {
+	candidates := []RouteCandidate{
+		{
+			Entry: Entry{
+				ID: "mcp-tool:search/search", Kind: KindMCPTool, Name: "search/search",
+				Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "search",
+			},
+			Policy: AutoUsePrefer, Reason: "the task appears to need fresh external data",
+		},
+		{
+			Entry: Entry{
+				ID: "mcp-tool:search/fetch", Kind: KindMCPTool, Name: "search/fetch",
+				Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "search",
+			},
+			Policy: AutoUsePrefer, Reason: "the task appears to need fresh external data",
+		},
+		{
+			Entry: Entry{
+				ID: "mcp-tool:docs/read", Kind: KindMCPTool, Name: "docs/read",
+				Status: StatusConfigured, ConnectSource: "mcp", ConnectName: "docs",
+			},
+			Policy: AutoUsePrefer, Reason: "the task appears to need fresh external data",
+		},
+	}
+
+	out := RenderTransientBlock(RouteDecision{Candidates: candidates})
+	if got := strings.Count(out, "- source:mcp/search "); got != 1 {
+		t.Fatalf("collapsed MCP source rendered %d times, want 1:\n%s", got, out)
+	}
+	if got := strings.Count(out, "- source:mcp/docs "); got != 1 {
+		t.Fatalf("independent MCP source rendered %d times, want 1:\n%s", got, out)
+	}
+
+	for _, decision := range []RouteDecision{
+		{Delivery: true, Candidates: candidates},
+		{CapabilityProxy: true, Candidates: candidates},
+	} {
+		proxyOut := RenderTransientBlock(decision)
+		for _, candidate := range candidates {
+			if !strings.Contains(proxyOut, "- "+candidate.Entry.ID+" ") {
+				t.Fatalf("proxy route lost concrete capability %q:\n%s", candidate.Entry.ID, proxyOut)
+			}
+		}
+	}
+}
+
 func TestCatalogKeepsProxyToolsAfterConnect(t *testing.T) {
 	proxy := map[string][]plugin.CachedTool{
 		"gh": {{Name: "search_issues", Description: "search", ReadOnly: true}},

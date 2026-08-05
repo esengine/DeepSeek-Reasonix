@@ -1,10 +1,12 @@
 package memory
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
@@ -23,10 +25,16 @@ func AppendDoc(path, note string) error {
 	if note == "" {
 		return nil
 	}
+	if err := ensureDestinationNotSymlink(path); err != nil {
+		return err
+	}
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
+	}
+	if err := ensureDestinationNotSymlink(path); err != nil {
+		return err
 	}
 
 	existing, _ := fileencoding.ReadFileUTF8(path) // missing → new file
@@ -44,20 +52,48 @@ func AppendDoc(path, note string) error {
 	default:
 		out = strings.TrimRight(body, "\n") + "\n\n" + quickAddHeading + "\n\n" + bullet + "\n"
 	}
-	return os.WriteFile(path, []byte(out), 0o644)
+	return writeDocBytes(path, []byte(out))
 }
 
 // writeDocFile overwrites path with body, creating the parent directory and
 // ensuring a single trailing newline. Used by Set.WriteDoc for the panel's
 // in-place editor (path validation happens in the caller).
 func writeDocFile(path, body string) error {
+	out := strings.TrimRight(body, "\n") + "\n"
+	return writeDocBytes(path, []byte(out))
+}
+
+func writeDocBytes(path string, body []byte) error {
+	if err := ensureDestinationNotSymlink(path); err != nil {
+		return err
+	}
 	if dir := filepath.Dir(path); dir != "" {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 	}
-	out := strings.TrimRight(body, "\n") + "\n"
-	return os.WriteFile(path, []byte(out), 0o644)
+	if err := ensureDestinationNotSymlink(path); err != nil {
+		return err
+	}
+
+	return fileutil.AtomicWriteFile(path, body, 0o644)
+}
+
+// ensureDestinationNotSymlink rejects an existing final symlink. Ancestor
+// symlinks may be legitimate platform/workspace aliases (for example macOS
+// /var), while the sibling-temp atomic replace never follows a final link.
+func ensureDestinationNotSymlink(path string) error {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to write %q through a symlink", path)
+	}
+	return nil
 }
 
 // insertUnderHeading appends bullet to the end of the section started by heading

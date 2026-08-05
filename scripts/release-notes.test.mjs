@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadCatalog, releaseForVersion, renderGitHubRelease, validateCatalog } from "./release-notes.mjs";
+import { validateReleaseEvent } from "./release-event.mjs";
 
 test("the committed release catalog is valid and newest first", async () => {
   const catalog = await loadCatalog();
@@ -43,5 +44,78 @@ test("validation rejects bilingual drift", () => {
         ],
       }),
     /title\.zh/,
+  );
+});
+
+test("managed Preview records bind every surface to one exact ordinal", () => {
+  const release = {
+    version: "1.19.0-preview.3",
+    releaseId: "1.19.0-preview.3",
+    baseVersion: "1.19.0",
+    date: "2026-07-31",
+    channel: "prerelease",
+    status: "reviewed",
+    previousRelease: "1.19.0-preview.2",
+    builds: {
+      cli: "v1.19.0-preview.3",
+      desktop: "v1.19.0-preview.3",
+      npm: "1.19.0-canary.3",
+    },
+    title: { en: "Preview", zh: "预览版" },
+    summary: { en: "Preview summary", zh: "预览版摘要" },
+    surfaces: ["cli"],
+    guides: [],
+    highlights: [{
+      kind: "fixed",
+      title: { en: "Fix", zh: "修复" },
+      body: { en: "A fix.", zh: "一项修复。" },
+      refs: [1],
+    }],
+    changes: { new: [], improved: [], fixed: [] },
+    upgrade: [],
+    risks: [],
+    contributors: [],
+    links: {
+      github: "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/v1.19.0-preview.3",
+      compare: "https://github.com/esengine/DeepSeek-Reasonix/compare/v1.19.0-preview.2...v1.19.0-preview.3",
+      download: "https://reasonix.io/?download=desktop&channel=preview#start",
+    },
+  };
+
+  assert.doesNotThrow(() => validateCatalog({ schemaVersion: 1, releases: [release] }));
+  assert.throws(
+    () => validateCatalog({
+      schemaVersion: 1,
+      releases: [{ ...release, builds: { ...release.builds, npm: "1.19.0-canary.4" } }],
+    }),
+    /builds\.npm/,
+  );
+});
+
+test("publication marker is bound to reviewed version, channel, SHA, and builds", () => {
+  const release = {
+    version: "1.19.0-preview.3",
+    channel: "prerelease",
+    candidateSha: "a".repeat(40),
+    builds: {
+      cli: "v1.19.0-preview.3",
+      desktop: "v1.19.0-preview.3",
+      npm: "1.19.0-canary.3",
+    },
+  };
+  const event = {
+    schemaVersion: 1,
+    releaseId: release.version,
+    channel: "preview",
+    candidateSha: release.candidateSha,
+    publishedAt: "2026-07-31T00:00:00.000Z",
+    releaseNotesUrl: "https://reasonix.io/changelog/v1.19.0-preview.3/",
+    builds: release.builds,
+  };
+
+  assert.doesNotThrow(() => validateReleaseEvent(event, release));
+  assert.throws(
+    () => validateReleaseEvent({ ...event, candidateSha: "b".repeat(40) }, release),
+    /candidateSha/,
   );
 });

@@ -101,7 +101,7 @@ func (m *chatTUI) runWorkModeCommand(input string) tea.Cmd {
 		m.notice(i18n.M.RuntimeSwitchPending)
 		return nil
 	}
-	if m.ctrl.Running() || m.pendingApproval != nil || m.chooser != nil || len(m.ctrl.Jobs()) > 0 {
+	if m.runtimeSwitchBusy() {
 		m.notice(i18n.M.WorkModeSwitchBusy)
 		return nil
 	}

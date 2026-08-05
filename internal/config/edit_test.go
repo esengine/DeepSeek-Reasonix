@@ -2,13 +2,17 @@ package config
 
 import (
 	"bytes"
+	"fmt"
+	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -130,6 +134,9 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	if err := c.SetDesktopAppearance("dark", "graphite"); err != nil {
 		t.Fatalf("SetDesktopAppearance: %v", err)
 	}
+	if err := c.SetDesktopTerminalTheme("light"); err != nil {
+		t.Fatalf("SetDesktopTerminalTheme: %v", err)
+	}
 	if err := c.SetDesktopLayoutStyle("workbench"); err != nil {
 		t.Fatalf("SetDesktopLayoutStyle: %v", err)
 	}
@@ -158,6 +165,9 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	if got := c.DesktopThemeStyle(); got != "graphite" {
 		t.Fatalf("desktop theme style = %q, want graphite", got)
 	}
+	if got := c.DesktopTerminalTheme(); got != "light" {
+		t.Fatalf("desktop terminal theme = %q, want light", got)
+	}
 	if got := c.DesktopLayoutStyle(); got != "workbench" {
 		t.Fatalf("desktop layout style = %q, want workbench", got)
 	}
@@ -166,6 +176,48 @@ func TestDesktopPreferencesAreSeparateFromCLI(t *testing.T) {
 	}
 	if got, want := c.DesktopStatusBarItems(), []string{"model", "balance", "cache"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("desktop status bar items = %v, want %v", got, want)
+	}
+}
+
+func TestSetDesktopTerminalThemeValidatesPreference(t *testing.T) {
+	c := Default()
+	for _, theme := range []string{"auto", "dark", "light"} {
+		if err := c.SetDesktopTerminalTheme(theme); err != nil {
+			t.Fatalf("SetDesktopTerminalTheme(%q): %v", theme, err)
+		}
+		if got := c.DesktopTerminalTheme(); got != theme {
+			t.Fatalf("DesktopTerminalTheme() = %q, want %q", got, theme)
+		}
+	}
+	if err := c.SetDesktopTerminalTheme("sepia"); err == nil {
+		t.Fatal("SetDesktopTerminalTheme(sepia) succeeded, want validation error")
+	}
+}
+
+func TestDesktopCurrencyNormalizesAndRefreshesOfficialPricing(t *testing.T) {
+	c := Default()
+	c.Desktop.Language = "zh"
+	if err := c.SetDesktopCurrency("usd"); err != nil {
+		t.Fatalf("SetDesktopCurrency USD: %v", err)
+	}
+	if got := c.DesktopCurrency(); got != "USD" {
+		t.Fatalf("desktop currency = %q, want USD", got)
+	}
+	flash, _ := c.Provider("deepseek-flash")
+	if flash.Price == nil || flash.Price.Output != 0.28 || flash.Price.Currency != "$" {
+		t.Fatalf("USD flash price = %+v", flash.Price)
+	}
+	if err := c.SetDesktopCurrency("auto"); err != nil {
+		t.Fatalf("SetDesktopCurrency auto: %v", err)
+	}
+	if got := c.DesktopCurrency(); got != "" {
+		t.Fatalf("auto desktop currency = %q, want empty", got)
+	}
+	if flash.Price == nil || flash.Price.Output != 2 || flash.Price.Currency != "¥" {
+		t.Fatalf("auto Chinese flash price = %+v", flash.Price)
+	}
+	if err := c.SetDesktopCurrency("EUR"); err == nil {
+		t.Fatal("SetDesktopCurrency accepted unsupported EUR")
 	}
 }
 
@@ -555,6 +607,38 @@ func TestSetReasoningLanguage(t *testing.T) {
 	}
 }
 
+func TestSetCompactRatio(t *testing.T) {
+	c := Default()
+	for _, ratio := range []float64{0.65, 0.7, 0.8, 0.85} {
+		if err := c.SetCompactRatio(ratio); err != nil {
+			t.Fatalf("SetCompactRatio(%v): %v", ratio, err)
+		}
+		if c.Agent.CompactRatio != ratio {
+			t.Fatalf("compact ratio = %v, want %v", c.Agent.CompactRatio, ratio)
+		}
+	}
+
+	previous := c.Agent.CompactRatio
+	for _, ratio := range []float64{0.64, 0.86, math.NaN(), math.Inf(1), math.Inf(-1)} {
+		if err := c.SetCompactRatio(ratio); err == nil {
+			t.Fatalf("SetCompactRatio(%v) should fail", ratio)
+		}
+		if c.Agent.CompactRatio != previous {
+			t.Fatalf("rejected ratio %v changed compact ratio to %v", ratio, c.Agent.CompactRatio)
+		}
+	}
+
+	c.Agent.ToolResultSnipRatio = 0.75
+	if err := c.SetCompactRatio(0.7); err == nil {
+		t.Fatal("SetCompactRatio should reject a value at or below the configured snip ratio")
+	}
+	c.Agent.ToolResultSnipRatio = 0.6
+	c.Agent.CompactForceRatio = 0.8
+	if err := c.SetCompactRatio(0.8); err == nil {
+		t.Fatal("SetCompactRatio should reject a value at or above the configured force ratio")
+	}
+}
+
 func TestNormalizeEffortDeepSeek(t *testing.T) {
 	e := &ProviderEntry{Name: "deepseek", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4"}
 	cap := EffortCapabilityForEntry(e)
@@ -677,6 +761,74 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	}
 }
 
+func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModels(t *testing.T) {
+	for _, endpoint := range []struct {
+		kind    string
+		baseURL string
+	}{
+		{kind: "openai", baseURL: "https://api.deepseek.com"},
+		{kind: "openai", baseURL: "https://api.deepseek.com/v1"},
+		{kind: "openai", baseURL: "https://eu.deepseek.com/v1"},
+		{kind: "anthropic", baseURL: "https://api.deepseek.com/anthropic"},
+	} {
+		official := &ProviderEntry{
+			Name:              "deepseek",
+			Kind:              endpoint.kind,
+			BaseURL:           endpoint.baseURL,
+			Model:             "deepseek-v4-pro",
+			Vision:            true,
+			ReasoningProtocol: ReasoningProtocolDeepSeek,
+		}
+		if EffectiveVision(official) {
+			t.Fatalf("official DeepSeek endpoint %q must remain text-only", endpoint.baseURL)
+		}
+		if ExplicitModelVision(official) {
+			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", endpoint.baseURL)
+		}
+	}
+
+	future := &ProviderEntry{
+		Name:         "deepseek",
+		Kind:         "openai",
+		BaseURL:      "https://api.deepseek.com",
+		Model:        "deepseek-v5-vision",
+		VisionModels: []string{"deepseek-v5-vision"},
+	}
+	if !EffectiveVision(future) || !ExplicitModelVision(future) {
+		t.Fatal("model listed in vision_models must opt in on the official DeepSeek endpoint")
+	}
+
+	visionOn := true
+	cfg := &Config{Providers: []ProviderEntry{{
+		Name:    "deepseek",
+		Kind:    "openai",
+		BaseURL: "https://api.deepseek.com",
+		Models:  []string{"deepseek-v5-override"},
+		ModelOverrides: map[string]ProviderModelOverride{
+			"deepseek-v5-override": {Vision: &visionOn},
+		},
+	}}}
+	overridden, ok := cfg.ResolveModel("deepseek/deepseek-v5-override")
+	if !ok {
+		t.Fatal("ResolveModel did not find explicit future DeepSeek model")
+	}
+	if !EffectiveVision(overridden) || !ExplicitModelVision(overridden) {
+		t.Fatal("model_overrides vision=true must opt in on the official DeepSeek endpoint")
+	}
+
+	custom := &ProviderEntry{
+		Name:              "deepseek-gateway",
+		Kind:              "openai",
+		BaseURL:           "https://gateway.example/v1",
+		Model:             "deepseek-v4-pro",
+		Vision:            true,
+		ReasoningProtocol: ReasoningProtocolDeepSeek,
+	}
+	if !EffectiveVision(custom) {
+		t.Fatal("explicit vision=true must remain available for custom DeepSeek gateways")
+	}
+}
+
 func TestEffectiveVisionUsesPerModelVisionList(t *testing.T) {
 	c := &Config{Providers: []ProviderEntry{{
 		Name:         "custom",
@@ -718,6 +870,7 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 		Models:            []string{"deepseek-v4-flash", "plain-chat"},
 		Default:           "plain-chat",
 		ContextWindow:     131_072,
+		MaxOutputTokens:   8_192,
 		ReasoningProtocol: ReasoningProtocolOpenAI,
 		SupportedEfforts:  []string{"low", "medium", "high"},
 		ModelOverrides: map[string]ProviderModelOverride{
@@ -727,6 +880,7 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 				DefaultEffort:     "max",
 				Vision:            &visionOff,
 				ContextWindow:     1_000_000,
+				MaxOutputTokens:   32_768,
 			},
 		},
 	}}}
@@ -748,6 +902,9 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 	if deepseek.ContextWindow != 1_000_000 {
 		t.Fatalf("deepseek context window = %d, want per-model override", deepseek.ContextWindow)
 	}
+	if deepseek.MaxOutputTokens != 32_768 {
+		t.Fatalf("deepseek max output tokens = %d, want per-model override", deepseek.MaxOutputTokens)
+	}
 
 	plain, ok := c.ResolveModel("gateway/plain-chat")
 	if !ok {
@@ -758,6 +915,9 @@ func TestResolveModelAppliesModelOverrides(t *testing.T) {
 	}
 	if plain.ContextWindow != 131_072 {
 		t.Fatalf("plain context window = %d, want inherited provider value", plain.ContextWindow)
+	}
+	if plain.MaxOutputTokens != 8_192 {
+		t.Fatalf("plain max output tokens = %d, want inherited provider value", plain.MaxOutputTokens)
 	}
 }
 
@@ -929,6 +1089,9 @@ func TestPluginMutators(t *testing.T) {
 	}
 	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", CallTimeoutSeconds: -1}); err == nil {
 		t.Error("negative call_timeout_seconds should error")
+	}
+	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", StartupTimeoutSeconds: -1}); err == nil {
+		t.Error("negative startup_timeout_seconds should error")
 	}
 	if err := c.UpsertPlugin(PluginEntry{Name: "bad", Command: "x", ToolTimeoutSeconds: map[string]int{"generate": -1}}); err == nil {
 		t.Error("negative tool_timeout_seconds should error")
@@ -1495,6 +1658,64 @@ reasoning_language = "zh"
 	}
 }
 
+func TestRetiredConfigMigrationRequiresConfigFileLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	const original = "[agent]\nmemory_compiler = \"compact\"\n"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release, err := acquireConfigFileEditLockWithTimeout(path, time.Second)
+	if err != nil {
+		t.Fatalf("hold config file lock: %v", err)
+	}
+	defer release()
+
+	previousTimeout := configEditLockTimeout
+	configEditLockTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { configEditLockTimeout = previousTimeout })
+
+	changed, err := migrateLegacyMemoryCompilerFile(path)
+	if err == nil || changed {
+		t.Fatalf("migration while file lock held = (%v, %v), want unchanged lock error", changed, err)
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != original {
+		t.Fatalf("blocked migration changed config:\n%s", got)
+	}
+}
+
+func TestLegacyMCPTierMigrationRequiresConfigFileLock(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	const original = "[[plugins]]\nname = \"playwright\"\ntier = \"lazy\"\n"
+	if err := os.WriteFile(path, []byte(original), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	release, err := acquireConfigFileEditLockWithTimeout(path, time.Second)
+	if err != nil {
+		t.Fatalf("hold config file lock: %v", err)
+	}
+	defer release()
+
+	previousTimeout := configEditLockTimeout
+	configEditLockTimeout = 30 * time.Millisecond
+	t.Cleanup(func() { configEditLockTimeout = previousTimeout })
+
+	err = migrateLegacyMCPTiersFile(path)
+	if err == nil {
+		t.Fatal("migration succeeded while another process-equivalent config transaction held the file lock")
+	}
+	got, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != original {
+		t.Fatalf("blocked migration changed config:\n%s", got)
+	}
+}
+
 // TestMigrateLegacyMemoryCompilerKeepsMultilineSystemPrompt reproduces the
 // review finding: a multiline system_prompt quoting a `memory_compiler = ...`
 // example line must survive the retired-key migration byte-for-byte.
@@ -1982,23 +2203,24 @@ legacy_preference = "keep"
 	}
 }
 
-func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) {
+func TestProviderEntriesConfigEqualIgnoresRuntimeState(t *testing.T) {
 	a := ProviderEntry{Name: "relay", Kind: "openai", BaseURL: "https://relay.example/v1", Model: "m", APIKeyEnv: "RELAY_API_KEY"}
 	b := a
 	a.resolvedAPIKey = "old-secret"
 	a.resolvedSource = CredentialSource{Kind: CredentialSourceCredentials, Label: "old"}
+	a.persistedOfficialCurrency = "USD"
 	b.resolvedAPIKey = "new-secret"
 	b.resolvedSource = CredentialSource{Kind: CredentialSourceEnvironment, Label: "new"}
 	if !ProviderEntriesConfigEqual(a, b) {
-		t.Fatal("runtime-only credential state caused a persisted provider conflict")
+		t.Fatal("runtime-only provider state caused a persisted provider conflict")
 	}
 	b.Headers = map[string]string{"X-External": "changed"}
 	if ProviderEntriesConfigEqual(a, b) {
 		t.Fatal("persisted provider field change was ignored")
 	}
 	snapshot := ProviderEntryConfigSnapshot(a)
-	if snapshot.resolvedAPIKey != "" || snapshot.resolvedSource != (CredentialSource{}) {
-		t.Fatal("provider config snapshot retained runtime credential state")
+	if snapshot.resolvedAPIKey != "" || snapshot.resolvedSource != (CredentialSource{}) || snapshot.persistedOfficialCurrency != "" {
+		t.Fatal("provider config snapshot retained runtime state")
 	}
 	cfg := &Config{Providers: []ProviderEntry{a}}
 	updated := a
@@ -2009,7 +2231,7 @@ func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) 
 		t.Fatal(err)
 	}
 	got, _ := cfg.Provider("relay")
-	if got.APIKey() != "old-secret" || got.Headers["X-Replayed"] != "yes" {
+	if got.APIKey() != "old-secret" || got.Headers["X-Replayed"] != "yes" || got.persistedOfficialCurrency != "USD" {
 		t.Fatalf("runtime-preserving upsert = %+v", got)
 	}
 	updated.APIKeyEnv = "NEW_RELAY_API_KEY"
@@ -2019,6 +2241,9 @@ func TestProviderEntriesConfigEqualIgnoresResolvedCredentialState(t *testing.T) 
 	got, _ = cfg.Provider("relay")
 	if got.resolvedAPIKey != "" || got.resolvedSource != (CredentialSource{}) {
 		t.Fatal("runtime credential survived an api_key_env change")
+	}
+	if got.persistedOfficialCurrency != "USD" {
+		t.Fatal("pricing provenance was lost after an api_key_env change")
 	}
 }
 
@@ -2050,6 +2275,85 @@ func TestSaveToExistingProjectRemovesPluginDelta(t *testing.T) {
 	}
 	if len(got.Plugins) != 0 {
 		t.Fatalf("plugins = %+v, want none", got.Plugins)
+	}
+}
+
+func TestSaveToNewProjectKeepsPluginSourcesSeparate(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "unknown", Command: "unknown-mcp"},
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, name := range []string{"unknown", "project"} {
+		if !strings.Contains(text, `name    = "`+name+`"`) {
+			t.Fatalf("new project config missing plugin %q:\n%s", name, text)
+		}
+	}
+	for _, name := range []string{"user", "mcp-json", "legacy", "package"} {
+		if strings.Contains(text, `name    = "`+name+`"`) {
+			t.Fatalf("new project config leaked plugin %q:\n%s", name, text)
+		}
+	}
+}
+
+func TestSaveToExistingProjectKeepsPluginSourcesSeparate(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("# keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if !strings.Contains(text, `name    = "project"`) || strings.Contains(text, `name    = "user"`) || strings.Contains(text, `name    = "mcp-json"`) {
+		t.Fatalf("existing project config crossed plugin source boundaries:\n%s", text)
+	}
+}
+
+func TestSaveToExistingProjectRemovesPluginDeltaWithOnlyForeignSources(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[[plugins]]\nname = \"old\"\ncommand = \"old-mcp\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "[[plugins]]") {
+		t.Fatalf("project plugin block remained after its last owned entry was removed:\n%s", body)
 	}
 }
 
@@ -2209,7 +2513,7 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	if !cap.Supported {
 		t.Fatalf("deepseek model behind proxy should expose effort, got %+v", cap)
 	}
-	wantLevels := []string{"auto", "disabled", "high", "max"}
+	wantLevels := []string{"auto", "disabled", "low", "high", "max"}
 	if len(cap.Levels) != len(wantLevels) {
 		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
 	}
@@ -2226,6 +2530,9 @@ func TestEffortCapabilityUsesKnownModelRegistry(t *testing.T) {
 	}
 	if got, err := NormalizeEffort(e, "max"); err != nil || got != "max" {
 		t.Fatalf("NormalizeEffort(max) = %q/%v, want max/nil", got, err)
+	}
+	if got, err := NormalizeEffort(e, "low"); err != nil || got != "low" {
+		t.Fatalf("NormalizeEffort(low) = %q/%v, want low/nil", got, err)
 	}
 }
 
@@ -2404,5 +2711,284 @@ func TestEffortCapabilityEmptySupportedEffortsNotConfigurable(t *testing.T) {
 	e2.SupportedEfforts = []string{}
 	if cap := EffortCapabilityForEntry(&e2); cap.Supported {
 		t.Fatalf("empty supported_efforts should also fall through to the heuristic, got %+v", cap)
+	}
+}
+
+func TestWriteFilePreservesSymlinkToWritableTarget(t *testing.T) {
+	home := t.TempDir()
+	targetDir := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	target := filepath.Join(targetDir, "target.toml")
+	link := UserConfigPath()
+	if err := os.WriteFile(target, []byte("default_model = \"old\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	cfg := Default()
+	cfg.DefaultModel = "deepseek-pro"
+	if err := cfg.WriteFile(link); err != nil {
+		t.Fatalf("WriteFile through symlink: %v", err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("WriteFile replaced the config symlink")
+	}
+	var persisted Config
+	if _, err := toml.DecodeFile(target, &persisted); err != nil {
+		t.Fatalf("decode target: %v", err)
+	}
+	if persisted.DefaultModel != "deepseek-pro" {
+		t.Fatalf("target default_model = %q, want deepseek-pro", persisted.DefaultModel)
+	}
+}
+
+func TestSaveToPreservesMultiLevelSymlinkChain(t *testing.T) {
+	home := t.TempDir()
+	targetDir := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	target := filepath.Join(targetDir, "target.toml")
+	first := filepath.Join(targetDir, "first.toml")
+	second := UserConfigPath()
+	if err := os.WriteFile(target, []byte("default_model = \"old\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, first); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	if err := os.Symlink(first, second); err != nil {
+		t.Skipf("symlink chains are unavailable: %v", err)
+	}
+
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveConfigAccessPath(second, true)
+	if err != nil {
+		t.Fatalf("resolveConfigAccessPath(second): %v", err)
+	}
+	if got != resolvedTarget {
+		t.Fatalf("resolveConfigAccessPath(second) = %q, want %q", got, resolvedTarget)
+	}
+
+	cfg := Default()
+	cfg.DefaultModel = "deepseek-pro"
+	if err := cfg.SaveTo(second); err != nil {
+		t.Fatalf("SaveTo through symlink chain: %v", err)
+	}
+	for name, path := range map[string]string{"first": first, "second": second} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			t.Fatalf("Lstat(%s): %v", name, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("SaveTo replaced the %s symlink", name)
+		}
+	}
+	var persisted Config
+	if _, err := toml.DecodeFile(target, &persisted); err != nil {
+		t.Fatalf("decode target: %v", err)
+	}
+	if persisted.DefaultModel != "deepseek-pro" {
+		t.Fatalf("target default_model = %q, want deepseek-pro", persisted.DefaultModel)
+	}
+}
+
+// makeDirReadOnly makes a directory non-writable using the platform's real
+// permission mechanism. Windows directory read-only attributes do not block
+// writes, so the test must use an ACL there.
+func makeDirReadOnly(dir string) (func(), error) {
+	if runtime.GOOS == "windows" {
+		const everyoneSID = "*S-1-1-0"
+		if err := exec.Command("icacls", dir, "/deny", everyoneSID+":(W)").Run(); err != nil {
+			return nil, fmt.Errorf("icacls /deny: %w", err)
+		}
+		return func() {
+			_ = exec.Command("icacls", dir, "/remove:d", everyoneSID).Run()
+		}, nil
+	}
+
+	info, err := os.Stat(dir)
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Chmod(dir, 0o555); err != nil {
+		return nil, err
+	}
+	return func() { _ = os.Chmod(dir, info.Mode().Perm()) }, nil
+}
+
+func TestSaveToUnwritableUserSymlinkTargetPreservesLink(t *testing.T) {
+	home := t.TempDir()
+	targetDir := filepath.Join(t.TempDir(), "readonly")
+	t.Setenv("REASONIX_HOME", home)
+	target := filepath.Join(targetDir, "target.toml")
+	link := UserConfigPath()
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("default_model = \"old\"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	cleanup, err := makeDirReadOnly(targetDir)
+	if err != nil {
+		t.Fatalf("make target directory read-only: %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	cfg := Default()
+	cfg.DefaultModel = "deepseek-pro"
+	if err := cfg.SaveTo(link); err == nil {
+		t.Fatal("SaveTo through symlink with unwritable target unexpectedly succeeded")
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("failed target write replaced the user config symlink")
+	}
+	var persisted Config
+	if _, err := toml.DecodeFile(target, &persisted); err != nil {
+		t.Fatalf("decode unchanged target config: %v", err)
+	}
+	if persisted.DefaultModel != "old" {
+		t.Fatalf("failed write changed target default_model to %q", persisted.DefaultModel)
+	}
+}
+
+func TestSaveToBrokenUserSymlinkFailsAndPreservesLink(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	link := UserConfigPath()
+	missingTarget := filepath.Join(t.TempDir(), "missing", "target.toml")
+	if err := os.Symlink(missingTarget, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	cfg := Default()
+	cfg.DefaultModel = "deepseek-pro"
+	if err := cfg.SaveTo(link); err == nil {
+		t.Fatal("SaveTo through broken user symlink unexpectedly succeeded")
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("failed write replaced the broken user config symlink")
+	}
+}
+
+func TestSaveToProjectSymlinkOutsideRootFailsWithoutReadingOrReplacing(t *testing.T) {
+	project := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.toml")
+	link := filepath.Join(project, "reasonix.toml")
+	const sentinel = "private_token = \"must-not-be-copied\"\n"
+	if err := os.WriteFile(target, []byte(sentinel), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+	if _, err := LoadForRootReadOnly(project); err == nil {
+		t.Fatal("LoadForRootReadOnly accepted a project config symlink outside root")
+	}
+
+	cfg := Default()
+	cfg.DefaultModel = "deepseek-pro"
+	if err := cfg.SaveTo(link); err == nil {
+		t.Fatal("SaveTo through project symlink outside root unexpectedly succeeded")
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("failed project config write replaced the external symlink")
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != sentinel {
+		t.Fatalf("project config write changed outside target:\n%s", got)
+	}
+}
+
+func TestProjectConfigSymlinkWithinRootLoadsAndSavesTarget(t *testing.T) {
+	project := t.TempDir()
+	targetDir := filepath.Join(project, "config")
+	target := filepath.Join(targetDir, "reasonix.toml")
+	link := filepath.Join(project, "reasonix.toml")
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("default_model = \"deepseek-pro\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("config", "reasonix.toml"), link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	loaded, err := LoadForRootReadOnly(project)
+	if err != nil {
+		t.Fatalf("LoadForRootReadOnly through internal symlink: %v", err)
+	}
+	if loaded.DefaultModel != "deepseek-pro" {
+		t.Fatalf("loaded default_model = %q, want deepseek-pro", loaded.DefaultModel)
+	}
+	loaded.Agent.Temperature = 0.42
+	if err := loaded.SaveTo(link); err != nil {
+		t.Fatalf("SaveTo through internal project symlink: %v", err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("SaveTo replaced an internal project config symlink")
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "temperature = 0.42") {
+		t.Fatalf("internal symlink target was not updated:\n%s", raw)
+	}
+}
+
+func TestBrokenProjectConfigSymlinkFailsLoadAndSave(t *testing.T) {
+	project := t.TempDir()
+	link := filepath.Join(project, "reasonix.toml")
+	if err := os.Symlink(filepath.Join("missing", "reasonix.toml"), link); err != nil {
+		t.Skipf("symlinks are unavailable: %v", err)
+	}
+
+	if _, err := LoadForRootReadOnly(project); err == nil {
+		t.Fatal("LoadForRootReadOnly accepted a broken project config symlink")
+	}
+	cfg := Default()
+	cfg.DefaultModel = "deepseek-pro"
+	if err := cfg.SaveTo(link); err == nil {
+		t.Fatal("SaveTo accepted a broken project config symlink")
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("failed operations replaced the broken project config symlink")
 	}
 }

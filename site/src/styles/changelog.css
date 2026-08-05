@@ -409,6 +409,55 @@ body {
   .release-footer > span { order: 3; width: 100%; margin: 0; }
 }
 
+.release-channel-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin: 14px 0 18px;
+}
+
+.release-channel-tabs a {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-2);
+  padding: 7px 10px;
+  text-align: center;
+  text-decoration: none;
+  transition: background 0.2s, border-color 0.2s, color 0.2s;
+}
+
+.release-channel-tabs a:hover {
+  border-color: color-mix(in oklch, var(--accent) 40%, var(--line));
+  color: var(--accent-deep);
+}
+
+.release-channel-tabs a.active {
+  background: var(--accent-soft);
+  border-color: color-mix(in oklch, var(--accent) 46%, var(--line));
+  color: var(--accent-deep);
+}
+
+.release-channel-tabs a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.release-builds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.release-builds span {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  padding: 6px 10px;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .release-version-link, .release-guide { transition: none; }
+  .release-version-link, .release-guide, .release-channel-tabs a { transition: none; }
 }

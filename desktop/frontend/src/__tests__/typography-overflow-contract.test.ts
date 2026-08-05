@@ -6,7 +6,10 @@ import { fileURLToPath } from "node:url";
 import { TEXT_SIZES } from "../lib/textSize";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
-const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+const styles = [
+  readFileSync(resolve(testDir, "../styles.css"), "utf8"),
+  readFileSync(resolve(testDir, "../components/CompactRatioSettings.css"), "utf8"),
+].join("\n").replace(/\/\*[\s\S]*?\*\//g, "");
 
 let passed = 0;
 let failed = 0;
@@ -120,6 +123,11 @@ eq(finalDeclaration(".provider-template-card span", "-webkit-line-clamp"), "2", 
 eq(finalDeclaration(".provider-model-draft__list", "grid-auto-rows"), "min-content", "provider model rows grow with their content");
 eq(finalDeclaration(".provider-model-draft__option", "min-height"), undefined, "provider model cards do not force undersized rows");
 eq(finalDeclaration(".provider-model-draft__option", "overflow"), "hidden", "provider model cards contain overflowing controls");
+eq(finalDeclaration(".compact-ratio-presets", "width"), "100%", "compaction presets use the full settings control width");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "flex"), "1 1 0", "three compaction presets share the available width equally");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "flex-direction"), "column", "compaction presets place percentage and strategy on separate lines");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "min-height"), "44px", "two-line compaction presets keep a stable target height");
+eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "white-space"), "normal", "compaction labels do not depend on ellipsis for their meaning");
 
 eq(finalDeclaration(".statusbar", "white-space"), "nowrap", "status bar keeps metrics on one row");
 eq(finalDeclaration(".statusbar", "overflow"), "hidden", "status bar clips instead of overflowing");
@@ -244,6 +252,13 @@ eq(
 );
 eq(finalDeclaration(".code", "font-family"), "var(--font-code-family)", "code blocks keep the regional code font");
 eq(finalDeclaration(".md-code", "font-family"), "var(--font-code-family)", "inline code keeps the regional code font");
+eq(finalDeclaration(".code code", "font-family"), "inherit", "nested code text inherits the regional code font");
+eq(finalDeclaration(".code-line-text", "font-family"), "inherit", "line-numbered code text inherits its viewer font");
+eq(
+  finalDeclaration(".code-lines-wrap", "font-family"),
+  "var(--typography-code-font, var(--font-mono))",
+  "line-numbered code viewers use the regional code font",
+);
 eq(
   finalDeclaration(".diff", "font-size"),
   "var(--typography-code-size, calc(12.5px * var(--global-font-scale)))",
@@ -341,6 +356,28 @@ ok(
   /@media\s*\(max-width:\s*820px\)[\s\S]*?\.app\s+\.layout[\s\S]*?grid-template-columns\s*:\s*minmax\(0,\s*1fr\)\s*!important[\s\S]*?\.app\s+\.sidebar[\s\S]*?display\s*:\s*none\s*!important[\s\S]*?\.app\s+\.chat-pane[\s\S]*?grid-column\s*:\s*1\s*!important/.test(styles),
   "narrow workbench layout hides side panels and keeps chat single-column",
 );
+
+for (const selector of [
+  ".reasoning__head",
+  ".turn-collapse__reasoning-head",
+  ".process-card__head",
+  ".tool__difflabel",
+  ".msg-memory-citations",
+  ".msg-memory-citations__source",
+  ".msg-memory-citations__note",
+  ".msg-attachment__name",
+  ".msg-attachment__meta",
+  ".msg-pasted-head",
+  ".msg-pasted-expanded",
+  ".msg-edit__input",
+  ".msg-edit__btn",
+  ".msg__send-failed",
+  ":root[data-theme-style] .process-card__kind",
+  ':root[data-theme-style] .msg--assistant > .process-card[data-tone="violet"] .process-card__name',
+]) {
+  const size = finalDeclaration(selector, "font-size");
+  ok(size !== undefined && !/^[0-9.]+px$/.test(size), `${selector} font size follows the text-size scale`);
+}
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

@@ -173,10 +173,27 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
   cache_hit: { en: "Cache hit rate", zh: "缓存命中率" },
   tool_error: { en: "Tool errors", zh: "工具错误" },
   updater_error: { en: "Updater errors", zh: "更新器错误" },
+  updater_event: { en: "Updater events", zh: "更新器事件" },
   compaction: { en: "Compactions", zh: "压缩" },
   turns: { en: "Turns", zh: "轮次" },
   desktop_hang: { en: "Desktop hangs", zh: "桌面卡死" },
   desktop_hang_age: { en: "Desktop hang age", zh: "桌面卡死时长" },
+  desktop_exit: { en: "Desktop exits", zh: "桌面退出" },
+  desktop_exit_phase: { en: "Abnormal exit phase", zh: "异常退出阶段" },
+  desktop_uptime: { en: "Uptime before exit", zh: "退出前运行时长" },
+  desktop_install: { en: "Install profile", zh: "安装方式" },
+  desktop_update_transition: { en: "Update transition", zh: "升级阶段" },
+  desktop_restore: { en: "Window restore", zh: "窗口恢复" },
+  desktop_webview2_failure: { en: "WebView2 failures", zh: "WebView2 故障" },
+  recovery_failure: { en: "Recovery failures", zh: "恢复失败" },
+  recovery_rule_continue: { en: "Rule recovery continues", zh: "规则恢复继续" },
+  recovery_review_continue: { en: "Review recovery continues", zh: "复核恢复继续" },
+  recovery_human_prompt: { en: "Recovery prompts", zh: "恢复询问" },
+  recovery_human_continue: { en: "Human recovery continues", zh: "人工恢复继续" },
+  recovery_human_revise: { en: "Human recovery revisions", zh: "人工恢复修订" },
+  recovery_review_error: { en: "Recovery review errors", zh: "恢复复核错误" },
+  recovery_repeat_prompt: { en: "Repeated recovery prompts", zh: "重复恢复询问" },
+  recovery_review_latency: { en: "Recovery review latency", zh: "恢复复核耗时" },
   client_surface: { en: "Client surface", zh: "客户端形态" },
   client_version: { en: "Client version", zh: "客户端版本" },
   settings_language: { en: "Settings: language", zh: "设置：语言" },
@@ -210,6 +227,12 @@ const METRIC_SIGNAL_LABELS: Record<string, { en: string; zh: string }> = {
   settings_bot_connection_status: { en: "Bot: connection status", zh: "机器人：连接状态" },
   settings_bot_connection_model: { en: "Bot: connection model", zh: "机器人：连接模型" },
   settings_bot_connection_approval: { en: "Bot: connection approval", zh: "机器人：连接审批" },
+  cli_mode: { en: "CLI mode", zh: "CLI 模式" },
+  cli_profile: { en: "CLI profile", zh: "CLI 配置档" },
+  cli_permission_mode: { en: "CLI permission mode", zh: "CLI 权限模式" },
+  cli_session_mode: { en: "CLI session mode", zh: "CLI 会话模式" },
+  cli_turn_latency: { en: "CLI turn latency", zh: "CLI turn 延迟" },
+  cli_exit: { en: "CLI turn outcome", zh: "CLI turn 结果" },
 };
 
 const AGENT_METRIC_SIGNALS = [
@@ -219,10 +242,29 @@ const AGENT_METRIC_SIGNALS = [
   "cache_hit",
   "tool_error",
   "updater_error",
+  "updater_event",
   "compaction",
   "turns",
   "desktop_hang",
   "desktop_hang_age",
+  "desktop_exit",
+  "desktop_exit_phase",
+  "desktop_uptime",
+  "desktop_install",
+  "desktop_update_transition",
+  "desktop_restore",
+  "desktop_webview2_failure",
+  "cli_turn_latency",
+  "cli_exit",
+  "recovery_failure",
+  "recovery_rule_continue",
+  "recovery_review_continue",
+  "recovery_human_prompt",
+  "recovery_human_continue",
+  "recovery_human_revise",
+  "recovery_review_error",
+  "recovery_repeat_prompt",
+  "recovery_review_latency",
 ];
 const DEFAULT_OPEN_SETTING_GROUPS = new Set(["Client", "Models", "Providers"]);
 
@@ -230,7 +272,7 @@ const SETTINGS_METRIC_GROUPS: { en: string; zh: string; signals: string[] }[] = 
   {
     en: "Client",
     zh: "客户端",
-    signals: ["client_surface", "client_version", "settings_language"],
+    signals: ["client_surface", "client_version", "settings_language", "cli_mode", "cli_profile", "cli_permission_mode", "cli_session_mode"],
   },
   {
     en: "Appearance and layout",
@@ -392,6 +434,10 @@ function agentHealth(rows: MetricRow[], previousRows: MetricRow[]): string {
   const prevCache = cacheHitRate(previousRows);
   const desktopHangs = sumMetric(rows, "desktop_hang");
   const prevDesktopHangs = sumMetric(previousRows, "desktop_hang");
+  const abnormalExits = rows.filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal").reduce((sum, r) => sum + r.total, 0);
+  const prevAbnormalExits = previousRows.filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal").reduce((sum, r) => sum + r.total, 0);
+  const webViewFailures = sumMetric(rows, "desktop_webview2_failure");
+  const prevWebViewFailures = sumMetric(previousRows, "desktop_webview2_failure");
   const rateCard = (signal: string, en: string, zh: string) => {
     const value = ratioPer100(rows, signal);
     const prev = ratioPer100(previousRows, signal);
@@ -421,6 +467,20 @@ ${healthCard(
   countHealthLevel(desktopHangs),
   healthDeltaHTML(deltaLabel(desktopHangs, prevDesktopHangs)),
   healthDetailHTML(rows, "desktop_hang_age"),
+)}
+${healthCard(
+  { en: "Abnormal desktop exits", zh: "桌面异常退出" },
+  String(abnormalExits),
+  countHealthLevel(abnormalExits),
+  healthDeltaHTML(deltaLabel(abnormalExits, prevAbnormalExits)),
+  healthDetailHTML(rows, "desktop_exit_phase"),
+)}
+${healthCard(
+  { en: "WebView2 process failures", zh: "WebView2 进程故障" },
+  String(webViewFailures),
+  countHealthLevel(webViewFailures),
+  healthDeltaHTML(deltaLabel(webViewFailures, prevWebViewFailures)),
+  healthDetailHTML(rows, "desktop_webview2_failure"),
 )}
 </div>`;
 }
@@ -504,7 +564,7 @@ function preferencePanel(title: string, body: string, active: boolean): string {
 
 function reportGroups(rows: CrashRow[], compact = false): string {
   if (!rows.length) return `<div class="empty">${i18n("No diagnostic reports yet — that's the good kind of empty", "还没有诊断报告，这是好消息")}</div>`;
-  return `<div class="crash-list${compact ? " compact" : ""}"><div class="crash-head"><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span>${i18n("count", "次数")}</span></div>${rows
+  return `<div class="crash-list${compact ? " compact" : ""}"><div class="crash-head"><span>${i18n("summary", "摘要")}</span><span>${i18n("scope", "范围")}</span><span>${i18n("health", "状态")}</span><span title="${i18n("Groups are filtered by the selected window; occurrence totals are lifetime counts", "分组按所选时间窗口过滤；次数为全生命周期累计")}">${i18n("lifetime count", "累计次数")}</span></div>${rows
     .map((c) => {
       const platform = [c.last_os, c.last_arch].filter(Boolean).join("/");
       const versions = `${c.first_version || "?"} → ${c.last_version || "?"}`;
@@ -530,10 +590,14 @@ export function renderStats(
     metrics: MetricRow[];
     previousMetrics: MetricRow[];
     metricUsers: MetricRow[];
+    metricUsersUnavailable: boolean;
+    /** Oldest computed_at in the rollup; empty when the window was queried live. */
+    metricUsersComputedAt: string;
     sources: { label: string; users: number }[];
     overview: OverviewCounts;
     latestVersion: string;
     filters: {
+      surface: "desktop" | "cli";
       status: string;
       source: string;
       version: string;
@@ -555,15 +619,25 @@ export function renderStats(
   const anyPing = days.some((d) => d.opens > 0);
   const agentMetrics = data.metrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
   const previousAgentMetrics = data.previousMetrics.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
-  const settingsMetrics = data.metrics.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
-  const settingsMetricUsers = data.metricUsers.filter((r) => r.signal === "client_surface" || r.signal === "client_version" || r.signal.startsWith("settings_"));
+  const agentMetricUsers = data.metricUsers.filter((r) => AGENT_METRIC_SIGNALS.includes(r.signal));
+  const isSettingsSignal = (signal: string) =>
+    signal === "client_surface" || signal === "client_version" || signal.startsWith("settings_") ||
+    ["cli_mode", "cli_profile", "cli_permission_mode", "cli_session_mode"].includes(signal);
+  const settingsMetrics = data.metrics.filter((r) => isSettingsSignal(r.signal));
+  const settingsMetricUsers = data.metricUsers.filter((r) => isSettingsSignal(r.signal));
   const cache = cacheHitRate(agentMetrics);
   const providerRate = ratioPer100(agentMetrics, "provider_error");
   const toolRate = ratioPer100(agentMetrics, "tool_error");
   const desktopHangs = sumMetric(agentMetrics, "desktop_hang");
+  const abnormalExits = agentMetrics
+    .filter((r) => r.signal === "desktop_exit" && r.bucket === "abnormal")
+    .reduce((sum, r) => sum + r.total, 0);
+  const webViewFailures = sumMetric(agentMetrics, "desktop_webview2_failure");
   const healthWatchCount =
     [healthLevel("cache", cache), healthLevel("rate", providerRate), healthLevel("rate", toolRate)].filter((v) => v === "warn" || v === "bad").length +
-    (desktopHangs > 0 ? 1 : 0);
+    (desktopHangs > 0 ? 1 : 0) +
+    (abnormalExits > 0 ? 1 : 0) +
+    (webViewFailures > 0 ? 1 : 0);
   const modulePath = (module: StatsModule) => (module === "usage" ? "/stats" : `/stats/${module}`);
   const filterQS = (patch: Record<string, string>, module: StatsModule = activeModule) => {
     const params = new URLSearchParams();
@@ -575,6 +649,7 @@ export function renderStats(
     put("version", data.filters.version);
     put("os", data.filters.os);
     put("platform", data.filters.platform);
+    put("surface", data.filters.surface === "cli" ? "cli" : "");
     if (data.filters.newLatest) params.set("new", "latest");
     if (data.filters.regressed) params.set("regressed", "1");
     if (data.filters.windowDays === 7) params.set("window", "7d");
@@ -594,6 +669,10 @@ export function renderStats(
   const windowControls = `<div class="segmented" aria-label="Time window">
 <a class="${range === 7 ? "active" : ""}"${range === 7 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "7d" }))}">7d</a>
 <a class="${range === 30 ? "active" : ""}"${range === 30 ? ` aria-current="true"` : ""} href="${esc(filterQS({ window: "" }))}">30d</a>
+</div>`;
+  const surfaceControls = `<div class="segmented" aria-label="Client surface">
+<a class="${data.filters.surface === "desktop" ? "active" : ""}"${data.filters.surface === "desktop" ? ` aria-current="true"` : ""} href="${esc(filterQS({ surface: "" }))}">${i18n("Desktop", "桌面端")}</a>
+<a class="${data.filters.surface === "cli" ? "active" : ""}"${data.filters.surface === "cli" ? ` aria-current="true"` : ""} href="${esc(filterQS({ surface: "cli" }))}">CLI</a>
 </div>`;
   const preferenceControls = `<div class="segmented" aria-label="Preference metric mode">
 <a class="${data.filters.preferenceMode === "users" ? "active" : ""}"${data.filters.preferenceMode === "users" ? ` aria-current="true"` : ""} href="${esc(
@@ -655,9 +734,30 @@ ${developmentDiagnostics.length ? `<section class="module-panel"><h3>${i18nHTML(
 ${filters}
 <section class="module-panel"><h3>${i18nHTML("All report groups <b>— open, regression, severity, count, recency</b>", "全部诊断分组 <b>— 未处理、回归、严重性、次数和最近出现</b>")}</h3>${reportGroups(data.crashes)}</section>
 </section>`;
+  const sevenDayHref = esc(filterQS({ window: "7d" }, "preferences"));
+  const unavailableNotice =
+    range === 30
+      ? i18nHTML(
+          `The 30-day deduplication is precomputed hourly and has not reached every signal yet. <a href="${sevenDayHref}">Use 7d</a> meanwhile.`,
+          `30 天去重统计由后台每小时预聚合，目前还没覆盖到全部信号。<a href="${sevenDayHref}">先看 7 天</a>。`,
+        )
+      : i18nHTML(`The ${rangeText} deduplication did not finish.`, `${rangeText} 的去重统计没能跑完。`);
+  // A precomputed window can silently go stale if the rollup cron stops, so the
+  // heading carries how old the least recently recomputed signal is.
+  const computedAt = data.metricUsersComputedAt
+    ? ` <b>${esc(data.metricUsersComputedAt.slice(0, 16).replace("T", " "))}Z</b>`
+    : "";
+  const healthComputedAt = data.metricUsersComputedAt
+    ? ` ${esc(data.metricUsersComputedAt.slice(0, 16).replace("T", " "))}Z`
+    : "";
   const installsPanel = preferencePanel(
-    i18nHTML(`Deduplicated installs <b>— ${rangeText}</b>`, `按安装去重 <b>— ${rangeText}</b>`),
-    settingsDashboard(settingsMetricUsers, { collapseSections: true }),
+    i18nHTML(
+      `Deduplicated installs <b>— ${rangeText}</b>${computedAt ? ` computed${computedAt}` : ""}`,
+      `按安装去重 <b>— ${rangeText}</b>${computedAt ? ` 统计于${computedAt}` : ""}`,
+    ),
+    data.metricUsersUnavailable
+      ? `<div class="empty">${unavailableNotice}</div>`
+      : settingsDashboard(settingsMetricUsers, { collapseSections: true }),
     data.filters.preferenceMode === "users",
   );
   const opensPanel = preferencePanel(
@@ -670,6 +770,13 @@ ${filters}
 <div class="preference-compare">${preferencePanels}</div></section>`;
   const healthModule = `<section id="health" class="card full module-card"><div class="module-head"><div><span>${i18n("Module", "模块")}</span><h2>${i18n("Agent health", "运行健康")}</h2></div><div class="module-actions"><a class="module-action" href="${esc(filterQS({}, "preferences"))}">${i18n("Preferences", "设置偏好")}</a></div></div>
 <section class="module-panel"><h3>${i18nHTML(`Health summary <b>— ${rangeText}, compared with previous window</b>`, `健康摘要 <b>— ${rangeText}，对比上一窗口</b>`)}</h3>${agentHealth(agentMetrics, previousAgentMetrics)}</section>
+<section class="module-panel"><h3>${i18nHTML(`Affected installs <b>— ${rangeText}, deduplicated${healthComputedAt ? `, computed ${healthComputedAt}` : ""}</b>`, `受影响安装 <b>— ${rangeText}，按安装去重${healthComputedAt ? `，统计于 ${healthComputedAt}` : ""}</b>`)}</h3>${
+    data.metricUsersUnavailable
+      ? `<div class="empty">${range === 30
+          ? i18nHTML(`The 30-day deduplication is not ready. <a href="${esc(filterQS({ window: "7d" }, "health"))}">Use 7d</a> meanwhile.`, `30 天去重统计尚未就绪。<a href="${esc(filterQS({ window: "7d" }, "health"))}">先看 7 天</a>。`)
+          : i18n(`The ${rangeText} deduplication did not finish.`, `${rangeText} 的去重统计没能跑完。`)}</div>`
+      : metricsCards(agentMetricUsers, ["desktop_hang", "desktop_hang_age", "desktop_webview2_failure", "desktop_restore", "desktop_exit"])
+  }</section>
 <section class="module-panel"><h3>${i18nHTML(`Signal distributions <b>— ${rangeText}, opt-in aggregate</b>`, `信号分布 <b>— ${rangeText}，opt-in 汇总</b>`)}</h3>${metricsCards(agentMetrics)}</section>
 </section>`;
   const activeModuleHTML: Record<StatsModule, string> = {
@@ -683,10 +790,10 @@ ${filters}
     "Reasonix · Crash & Telemetry",
     "health",
     `${dashboardNav}
-<div id="top" class="hero-line"><div><h1>${i18n("Crash & Telemetry", "桌面端健康看板")}</h1><p class="sub">${i18nHTML(
+<div id="top" class="hero-line"><div><h1>${i18n("Crash & Telemetry", "客户端健康看板")}</h1><p class="sub">${i18nHTML(
       `${rangeText} window · anonymous launch pings, opt-in aggregate metrics, and user-sent diagnostic reports only`,
       `${rangeText} 时间窗口 · 仅包含匿名启动 ping、opt-in 汇总指标和用户发送的诊断报告`,
-    )}</p></div>${windowControls}</div>
+    )}</p></div><div class="module-actions">${surfaceControls}${windowControls}</div></div>
 ${pageOverview}
 <div class="grid">
 ${activeModuleHTML[activeModule]}

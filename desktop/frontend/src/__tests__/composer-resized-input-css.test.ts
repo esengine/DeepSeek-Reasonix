@@ -56,6 +56,9 @@ eq(finalDeclaration(".composer-card--resized .composer__input", "height"), "100%
 eq(finalDeclaration(".composer-card--resized .composer__input", "overflow-y"), "auto", "resized textarea scrolls internally");
 eq(finalDeclaration(".composer-card--resized .composer__rich-input", "height"), "100%", "resized rich input fills the card's input area");
 eq(finalDeclaration(".composer-card--resized .composer__rich-input", "overflow-y"), "auto", "resized rich input scrolls internally");
+eq(finalDeclaration(".composer-invocation-caret-anchor", "min-width"), "1px", "invocation caret anchor keeps a compact hit target");
+eq(finalDeclaration(".composer-invocation-caret-anchor", "width"), undefined, "invocation caret anchor can expand around WebView2-hosted text");
+eq(finalDeclaration(".composer-invocation-caret-anchor", "overflow"), undefined, "invocation caret anchor does not clip WebView2-hosted text");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

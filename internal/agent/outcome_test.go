@@ -50,6 +50,27 @@ func TestFailedCallsSurfaceError(t *testing.T) {
 	}
 }
 
+func TestCompletedMCPConnectIsNotReportedAsUnknown(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(mcpAliasTool{
+		fakeTool: fakeTool{name: "mcp__mock__echo", readOnly: true},
+		server:   "mock",
+		raw:      "echo",
+		visible:  "echo",
+	})
+	a := New(nil, reg, NewSession(""), Options{}, event.Discard)
+
+	out := a.executeOne(context.Background(), provider.ToolCall{Name: "mcp__mock__connect", Arguments: `{}`})
+	if out.errMsg != "" || !strings.Contains(out.output, `MCP server "mock" is connected`) {
+		t.Fatalf("completed connect was not recovered: %+v", out)
+	}
+	for _, name := range []string{"mcp__missing__connect", "mcp__mock__not_connect"} {
+		if out := a.executeOne(context.Background(), provider.ToolCall{Name: name, Arguments: `{}`}); out.errMsg == "" {
+			t.Fatalf("unadvertised call %q should remain unknown: %+v", name, out)
+		}
+	}
+}
+
 func TestPortableMCPCallUsesCanonicalSecurityIdentity(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(mcpAliasTool{

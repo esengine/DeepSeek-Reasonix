@@ -282,7 +282,10 @@ func appendUniqueToolNames(base []string, extra ...string) []string {
 // can't mutate the shared set.
 func builtinSkills() []Skill {
 	readCodeTools := []string{"read_file", "ls", "glob", "grep", "code_index"}
-	reviewTools := append(append([]string(nil), readCodeTools...), "bash")
+	// use_capability is the stable MCP proxy for strict review children: they
+	// never inherit direct mcp__* schemas, so the proxy must be allowlisted or
+	// review/security-review cannot discover authorized read-only MCP readers.
+	reviewTools := append(append([]string(nil), readCodeTools...), "bash", "use_capability")
 	base := []Skill{
 		{
 			Name:        "init",

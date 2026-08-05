@@ -15,7 +15,16 @@ if [ "${EVENT_NAME:-}" = "workflow_dispatch" ] || [ "${IN_ORCHESTRATED:-false}" 
 		exit 1
 	fi
 	if [ "${IN_CHANNEL:-stable}" = "canary" ]; then
-		arg="v${base}-canary.${RUN_NUMBER:?canary requires run number}"
+		if [ "${IN_ORCHESTRATED:-false}" != "true" ]; then
+			echo "::error::public npm Canary releases must be dispatched by release-preview.yml" >&2
+			exit 1
+		fi
+		preview_number="${IN_PREVIEW_NUMBER:-${RUN_NUMBER:-}}"
+		if [[ ! "$preview_number" =~ ^(0|[1-9][0-9]*)$ ]]; then
+			echo "::error::canary preview number must be a non-negative integer, got: $preview_number" >&2
+			exit 1
+		fi
+		arg="v${base}-canary.${preview_number}"
 	else
 		tag="${IN_TAG:-}"
 		if [ -z "$tag" ]; then

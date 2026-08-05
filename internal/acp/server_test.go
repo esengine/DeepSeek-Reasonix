@@ -523,7 +523,11 @@ func drainPrompt(t *testing.T, c *rpcClient, promptCh chan frame) ([]frame, fram
 					return notifs, resp
 				}
 			}
-		case <-time.After(2 * time.Second):
+		// A full prompt crosses the ACP server, controller, agent, and transcript
+		// persistence path. Loaded Windows release runners can leave that
+		// asynchronous pipeline idle for more than two seconds, so keep a
+		// generous but bounded responsiveness limit for the end-to-end helper.
+		case <-time.After(5 * time.Second):
 			t.Fatal("session/prompt: timed out")
 		}
 	}
@@ -623,6 +627,12 @@ func TestServeLifecycle(t *testing.T) {
 	steer := extensions.AgentCapabilities.Meta["reasonix.io"].SessionSteer
 	if steer == nil || steer.Method != sessionSteerMethod {
 		t.Errorf("sessionSteer capability = %+v, want method %q", steer, sessionSteerMethod)
+	}
+	for _, method := range []string{sessionStatusMethod, sessionStatusUpdateMethod} {
+		capability, ok := ir.AgentCapabilities.Meta[method].(map[string]any)
+		if !ok || capability["schemaVersion"] != float64(reasonixStatusSchemaVersion) {
+			t.Errorf("%s capability = %#v, want schemaVersion %d", method, ir.AgentCapabilities.Meta[method], reasonixStatusSchemaVersion)
+		}
 	}
 	if len(ir.AuthMethods) != 1 || ir.AuthMethods[0].ID != "reasonix-setup" || ir.AuthMethods[0].Type != "terminal" {
 		t.Fatalf("authMethods = %+v, want terminal reasonix setup", ir.AuthMethods)

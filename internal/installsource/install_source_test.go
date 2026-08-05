@@ -712,6 +712,7 @@ func TestPlanMCPJSONIgnoresRetiredApprovalPolicy(t *testing.T) {
   "mcpServers": {
     "admin": {
       "command": "admin-mcp",
+      "startup_timeout_seconds": 30,
       "call_timeout_seconds": 45,
       "tool_timeout_seconds": {"wipe": 120},
       "trusted_read_only_tools": ["status"],
@@ -725,7 +726,7 @@ func TestPlanMCPJSONIgnoresRetiredApprovalPolicy(t *testing.T) {
 		t.Fatalf("parseMCPJSON: entries=%+v warnings=%v err=%v", entries, warnings, err)
 	}
 	got := entries[0]
-	if got.CallTimeoutSeconds != 45 || got.ToolTimeoutSeconds["wipe"] != 120 {
+	if got.StartupTimeoutSeconds != 30 || got.CallTimeoutSeconds != 45 || got.ToolTimeoutSeconds["wipe"] != 120 {
 		t.Fatalf("MCP timeout config was dropped: %+v", got)
 	}
 }
@@ -982,19 +983,32 @@ func TestApplyMCPReplaceDisconnectsLiveServerBeforeConnect(t *testing.T) {
 func TestApplyMCPRollsBackOnSaveFailure(t *testing.T) {
 	project := t.TempDir()
 	home := t.TempDir()
-	// Pre-create a directory at the config path so cfg.SaveTo will fail
-	// (it cannot overwrite a non-empty directory with the file it wants).
-	if err := os.MkdirAll(filepath.Join(project, "reasonix.toml"), 0o755); err != nil {
+	configPath := filepath.Join(project, "reasonix.toml")
+	if err := os.WriteFile(configPath, []byte("# valid before connect\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(project, "reasonix.toml", "blocker"), "x")
 
 	var disconnects atomic.Int32
 	stub := &stubConnector{toolCount: 2, disconnectCalls: &disconnects}
 	tl := NewTool(Options{
 		ProjectRoot: project,
 		HomeDir:     home,
-		ConnectMCP:  stub.connector(),
+		ConnectMCP: func(entry config.PluginEntry) (MCPConnectResult, error) {
+			result, err := stub.connector()(entry)
+			if err != nil {
+				return result, err
+			}
+			// Simulate an external destructive change after the live connection
+			// succeeds but before the strict commit-time reload.
+			if err := os.Remove(configPath); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(configPath, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			writeFile(t, filepath.Join(configPath, "blocker"), "x")
+			return result, nil
+		},
 		OnDisconnect: func(string) bool {
 			disconnects.Add(1)
 			return true

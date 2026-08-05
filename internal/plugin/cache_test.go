@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/sandbox"
@@ -194,6 +195,16 @@ func TestCacheInvalidatesOnSchemaCacheKeyMismatch(t *testing.T) {
 	}
 	if _, ok := LoadCachedSchema(spec.Name, "different-cache-key"); ok {
 		t.Fatal("LoadCachedSchema: hit despite mismatching expectedKey")
+	}
+}
+
+func TestSchemaCacheKeyIgnoresHostOnlyStartupTimeouts(t *testing.T) {
+	spec := sampleSpec()
+	want := SchemaCacheKey(spec)
+	spec.DefaultStartupTimeout = 30 * time.Second
+	spec.StartupTimeout = 90 * time.Second
+	if got := SchemaCacheKey(spec); got != want {
+		t.Fatalf("host-only startup timeout changed provider schema cache key: got %q want %q", got, want)
 	}
 }
 

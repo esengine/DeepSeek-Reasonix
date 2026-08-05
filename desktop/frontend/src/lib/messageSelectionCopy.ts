@@ -32,7 +32,7 @@ export function messageSelectionContextText(doc: Document, target: EventTarget |
   const selection = doc.getSelection();
   if (!targetWithinSelectedMessage(target, selection)) return null;
   return messageSelectionCopyText({
-    text: selection?.toString() ?? "",
+    text: restoreLatexInSelection(selection),
     isCollapsed: selection == null || selection.isCollapsed,
     targetIsEditable: isEditableTarget(target),
     intersectsMessage: selectionIntersectsMessage(selection, doc),
@@ -71,7 +71,7 @@ export function installMessageSelectionCopy(doc: Document = document): () => voi
   const onCopy = (event: ClipboardEvent) => {
     const selection = doc.getSelection();
     const text = messageSelectionCopyText({
-      text: selection?.toString() ?? "",
+      text: restoreLatexInSelection(selection),
       isCollapsed: selection == null || selection.isCollapsed,
       targetIsEditable: isEditableTarget(event.target),
       intersectsMessage: selectionIntersectsMessage(selection, doc),
@@ -85,6 +85,141 @@ export function installMessageSelectionCopy(doc: Document = document): () => voi
 
   doc.addEventListener("copy", onCopy);
   return () => doc.removeEventListener("copy", onCopy);
+}
+
+function restoreLatexInSelection(selection: Selection | null): string {
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) return "";
+  const range = selection.getRangeAt(0);
+  const baseText = selection.toString();
+  if (baseText.trim() === "") return "";
+
+  const formulas = selectedKatexRoots(range);
+  if (formulas.length === 0) return baseText;
+
+  const doc = range.commonAncestorContainer.ownerDocument;
+  if (!doc) return baseText;
+
+  let cursorNode = range.startContainer;
+  let cursorOffset = range.startOffset;
+  let text = "";
+
+  for (const formula of formulas) {
+    const source = katexSource(formula);
+    if (source == null) continue;
+
+    const formulaRange = doc.createRange();
+    formulaRange.selectNode(formula);
+    if (comparePoints(
+      doc,
+      formulaRange.endContainer,
+      formulaRange.endOffset,
+      range.startContainer,
+      range.startOffset,
+    ) <= 0) continue;
+    if (comparePoints(
+      doc,
+      formulaRange.startContainer,
+      formulaRange.startOffset,
+      range.endContainer,
+      range.endOffset,
+    ) >= 0) break;
+
+    if (comparePoints(
+      doc,
+      cursorNode,
+      cursorOffset,
+      formulaRange.startContainer,
+      formulaRange.startOffset,
+    ) < 0) {
+      const before = doc.createRange();
+      before.setStart(cursorNode, cursorOffset);
+      before.setEnd(formulaRange.startContainer, formulaRange.startOffset);
+      text += before.toString();
+    }
+
+    text += source;
+    if (comparePoints(
+      doc,
+      formulaRange.endContainer,
+      formulaRange.endOffset,
+      range.endContainer,
+      range.endOffset,
+    ) >= 0) {
+      return text;
+    }
+    cursorNode = formulaRange.endContainer;
+    cursorOffset = formulaRange.endOffset;
+  }
+
+  if (comparePoints(
+    doc,
+    cursorNode,
+    cursorOffset,
+    range.endContainer,
+    range.endOffset,
+  ) < 0) {
+    const after = doc.createRange();
+    after.setStart(cursorNode, cursorOffset);
+    after.setEnd(range.endContainer, range.endOffset);
+    text += after.toString();
+  }
+  return text || baseText;
+}
+
+function selectedKatexRoots(range: Range): HTMLElement[] {
+  const common = elementFromNode(range.commonAncestorContainer);
+  if (!common) return [];
+
+  const roots = new Set<HTMLElement>();
+  const ancestor = katexRoot(common);
+  if (ancestor && rangeIntersectsNode(range, ancestor)) roots.add(ancestor);
+
+  const candidates = common.matches(".katex, .katex-display")
+    ? [common, ...Array.from(common.querySelectorAll(".katex, .katex-display"))]
+    : Array.from(common.querySelectorAll(".katex, .katex-display"));
+  for (const candidate of candidates) {
+    const root = katexRoot(candidate);
+    if (root && rangeIntersectsNode(range, root)) roots.add(root);
+  }
+
+  return Array.from(roots).sort((a, b) => {
+    if (a === b) return 0;
+    const position = a.compareDocumentPosition(b);
+    return position & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+  });
+}
+
+function katexRoot(node: Element): HTMLElement | null {
+  const display = node.closest<HTMLElement>(".katex-display");
+  if (display) return display;
+  return node.closest<HTMLElement>(".katex");
+}
+
+function katexSource(root: HTMLElement): string | null {
+  const annotation = root.querySelector<HTMLElement>(
+    'annotation[encoding="application/x-tex"]',
+  );
+  const tex = annotation?.textContent ?? root.getAttribute("data-latex-source");
+  if (!tex) return null;
+  return root.classList.contains("katex-display")
+    ? `$$\n${tex}\n$$`
+    : `$${tex}$`;
+}
+
+function comparePoints(
+  doc: Document,
+  leftNode: Node,
+  leftOffset: number,
+  rightNode: Node,
+  rightOffset: number,
+): number {
+  const left = doc.createRange();
+  left.setStart(leftNode, leftOffset);
+  left.collapse(true);
+  const right = doc.createRange();
+  right.setStart(rightNode, rightOffset);
+  right.collapse(true);
+  return left.compareBoundaryPoints(0, right);
 }
 
 function selectionIntersectsMessage(selection: Selection | null, root: ParentNode): boolean {

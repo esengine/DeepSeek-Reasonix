@@ -20,6 +20,53 @@ type pathBoundWriter struct {
 	workDir string
 }
 
+// pathBoundCapabilityProxy preserves the provider-visible use_capability
+// contract while enforcing an explicit write_paths boundary after dynamic
+// resolution. Discovery stays available, but a call must resolve to a proven
+// read-only, non-destructive target before any MCP process or tool executes.
+type pathBoundCapabilityProxy struct {
+	inner    tool.Tool
+	resolver tool.CallResolver
+}
+
+func (p pathBoundCapabilityProxy) Name() string            { return p.inner.Name() }
+func (p pathBoundCapabilityProxy) Description() string     { return p.inner.Description() }
+func (p pathBoundCapabilityProxy) Schema() json.RawMessage { return p.inner.Schema() }
+func (p pathBoundCapabilityProxy) ReadOnly() bool          { return p.inner.ReadOnly() }
+
+func (p pathBoundCapabilityProxy) ResolveCall(ctx context.Context, args json.RawMessage) (tool.ResolvedCall, error) {
+	resolved, err := p.resolver.ResolveCall(ctx, args)
+	if err != nil {
+		return tool.ResolvedCall{}, err
+	}
+	if resolved.ProxyAction != "call" || resolved.SkipExecute {
+		return resolved, nil
+	}
+	if resolved.Target == nil || !resolved.ReadOnly || mcpDestructiveHint(resolved.Target) {
+		return tool.ResolvedCall{}, fmt.Errorf("use_capability target %q is not proven read-only; explicit write_paths sub-agents cannot execute unscoped MCP writers", resolved.TargetName)
+	}
+	return resolved, nil
+}
+
+func (p pathBoundCapabilityProxy) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	resolved, err := p.ResolveCall(ctx, args)
+	if err != nil {
+		return "", err
+	}
+	if resolved.Commit != nil {
+		if err := resolved.Commit(); err != nil {
+			return "", err
+		}
+	}
+	if resolved.SkipExecute {
+		return resolved.Result, nil
+	}
+	if resolved.Target == nil {
+		return "", fmt.Errorf("use_capability resolved no target")
+	}
+	return resolved.Target.Execute(ctx, resolved.Args)
+}
+
 func (w pathBoundWriter) Name() string            { return w.inner.Name() }
 func (w pathBoundWriter) Description() string     { return w.inner.Description() }
 func (w pathBoundWriter) Schema() json.RawMessage { return w.inner.Schema() }
@@ -90,6 +137,15 @@ func BindWritePaths(reg *tool.Registry, claims WritePathSet, workDir string, kee
 				continue
 			}
 			bound.Add(rebound)
+			continue
+		}
+		if name == "use_capability" {
+			resolver, ok := tl.(tool.CallResolver)
+			if !ok {
+				removed = append(removed, name)
+				continue
+			}
+			bound.Add(pathBoundCapabilityProxy{inner: tl, resolver: resolver})
 			continue
 		}
 		if tl.ReadOnly() {

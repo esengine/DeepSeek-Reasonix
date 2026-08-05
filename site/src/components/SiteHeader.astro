@@ -1,5 +1,5 @@
 ---
-type ActiveItem = 'features' | 'how' | 'skills' | 'community' | 'docs' | 'changelog' | 'start';
+type ActiveItem = 'features' | 'how' | 'skills' | 'community' | 'docs' | 'changelog';
 
 const {
   active,
@@ -12,6 +12,7 @@ const {
 };
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
 const items: Array<{
   id: ActiveItem;
   href: string;
@@ -25,7 +26,6 @@ const items: Array<{
   { id: 'community', href: `${base}/#community`, en: 'Community', zh: '社区', secondary: true },
   { id: 'docs', href: `${base}/docs/`, en: 'Docs', zh: '文档' },
   { id: 'changelog', href: `${base}/changelog/`, en: 'Changelog', zh: '更新日志' },
-  { id: 'start', href: `${base}/#start`, en: 'Get started', zh: '快速开始', secondary: true },
 ];
 ---
 
@@ -47,6 +47,18 @@ const items: Array<{
         </a>
       ))}
     </nav>
+    <a
+      class="nav-github"
+      href={repo}
+      target="_blank"
+      rel="noreferrer"
+      aria-label="Reasonix GitHub repository"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M12 .7a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.3 2.8.1 3.1.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .7Z" />
+      </svg>
+      <span class="nav-github-label">GitHub</span>
+    </a>
     <div class="lang-switch" role="group" aria-label="Language">
       <button type="button" data-lang="en" class="active">EN</button>
       <button type="button" data-lang="zh">中文</button>

@@ -34,6 +34,15 @@ func TestLevelConstants(t *testing.T) {
 	}
 }
 
+func TestNoticeAudienceConstants(t *testing.T) {
+	if NoticeAudienceDefault != "" {
+		t.Errorf("NoticeAudienceDefault = %q, want empty for backward-compatible delivery", NoticeAudienceDefault)
+	}
+	if NoticeAudienceOperator != "operator" {
+		t.Errorf("NoticeAudienceOperator = %q, want operator", NoticeAudienceOperator)
+	}
+}
+
 // --- FuncSink ---
 
 func TestFuncSinkEmit(t *testing.T) {
@@ -63,13 +72,29 @@ func TestSyncTreatsTypedNilSinkAsDiscard(t *testing.T) {
 }
 
 type readinessAuditRecorder struct {
-	events []evidence.ReadinessAudit
+	events   []evidence.ReadinessAudit
+	recovery []ProtocolRecoveryAudit
+	turns    int
 }
 
 func (r *readinessAuditRecorder) Emit(Event) {}
 
 func (r *readinessAuditRecorder) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	r.events = append(r.events, a)
+}
+
+func (r *readinessAuditRecorder) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
+	r.recovery = append(r.recovery, a)
+}
+
+func (r *readinessAuditRecorder) RecordTurnCompletion() { r.turns++ }
+
+func TestSyncForwardsTurnCompletion(t *testing.T) {
+	rec := &readinessAuditRecorder{}
+	RecordTurnCompletion(Sync(rec))
+	if rec.turns != 1 {
+		t.Fatalf("turn completions = %d, want 1", rec.turns)
+	}
 }
 
 func TestSyncForwardsReadinessAuditReceipts(t *testing.T) {
@@ -87,6 +112,17 @@ func TestSyncForwardsReadinessAuditReceipts(t *testing.T) {
 	}
 	if rec.events[0].Result != evidence.ReadinessBlocked || rec.events[0].MissingProjectChecks != 1 {
 		t.Fatalf("readiness audit not forwarded through Sync: %+v", rec.events[0])
+	}
+}
+
+func TestSyncForwardsProtocolRecoveryWithoutEmittingUIEvent(t *testing.T) {
+	rec := &readinessAuditRecorder{}
+	sink := Sync(rec)
+
+	RecordProtocolRecovery(sink, ProtocolRecoveryAudit{Kind: ProtocolRecoveryMissingReasoningRetryReplaced})
+
+	if len(rec.recovery) != 1 || rec.recovery[0].Kind != ProtocolRecoveryMissingReasoningRetryReplaced {
+		t.Fatalf("protocol recovery not forwarded through Sync: %+v", rec.recovery)
 	}
 }
 

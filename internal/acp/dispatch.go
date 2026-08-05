@@ -13,8 +13,10 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/eventwire"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/shellparse"
 )
 
 // notifier is the slice of Conn the dispatch sink depends on: it pushes
@@ -54,8 +56,13 @@ type updateSink struct {
 	cwd     string
 	approve func(id string, allow, session, persist bool)
 	answer  func(id string, answers []event.AskAnswer)
-	mu      sync.Mutex
-	turnCtx context.Context
+	status  func(event.Event)
+	// extensionSurface records the client's negotiated
+	// reasonix.extensionSurface support: structured surfaces go out as vendor
+	// session/update payloads on top of the always-sent text fallback.
+	extensionSurface bool
+	mu               sync.Mutex
+	turnCtx          context.Context
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
@@ -80,6 +87,14 @@ func (s *updateSink) bindApprove(fn func(id string, allow, session, persist bool
 func (s *updateSink) bindAnswer(fn func(id string, answers []event.AskAnswer)) {
 	s.answer = fn
 }
+
+// bindStatus installs the vendor-status observer. It receives typed events,
+// never raw reasoning text or terminal transcripts.
+func (s *updateSink) bindStatus(fn func(event.Event)) { s.status = fn }
+
+// bindExtensionSurface records whether the client negotiated structured
+// extension-surface support in the initialize handshake.
+func (s *updateSink) bindExtensionSurface(supported bool) { s.extensionSurface = supported }
 
 func (s *updateSink) setTurnContext(ctx context.Context) {
 	s.mu.Lock()
@@ -106,6 +121,9 @@ func (s *updateSink) currentTurnContext() context.Context {
 // Emit implements event.Sink. The agent calls it serially (see event.Sink), so no
 // locking is needed; write serialization lives in Conn.
 func (s *updateSink) Emit(e event.Event) {
+	if s.status != nil {
+		s.status(e)
+	}
 	switch e.Kind {
 	case event.Reasoning:
 		if e.Text == "" {
@@ -189,7 +207,100 @@ func (s *updateSink) Emit(e event.Event) {
 		// clients such as Zed already know how to render this interaction.
 		turnCtx := s.currentTurnContext()
 		go s.requestAsk(turnCtx, e.Ask)
+
+	case event.ExtensionSurface, event.ExtensionStatus:
+		s.emitExtension(e)
 	}
+}
+
+// emitExtension maps one extension structured-UI event onto ACP updates. A
+// client that negotiated reasonix.extensionSurface receives the structured DTO
+// (the shared eventwire JSON contract) in a vendor session/update variant;
+// every client — including that one, belt and suspenders — also receives the
+// flattened text fallback as an ordinary agent_message_chunk. Blocking
+// form/request prompts never arrive here: the hub routes those through
+// AskRequest, which already rides the session/request_permission round-trip.
+func (s *updateSink) emitExtension(e event.Event) {
+	p := e.Extension
+	if p == nil {
+		return
+	}
+	if s.extensionSurface {
+		if dto := eventwire.ToWireExtensionSurface(p); dto != nil {
+			s.send(extensionSurfaceUpdate{
+				SessionUpdate: extensionSurfaceUpdateKind,
+				Meta: map[string]any{
+					"reasonix.io": map[string]any{
+						"extensionSurface": dto,
+					},
+				},
+			})
+		}
+	}
+	text := extensionSurfaceText(p)
+	if text == "" {
+		return
+	}
+	prefix := "\n\n"
+	if extensionSeverityWarns(p) {
+		prefix += "[warning] "
+	}
+	s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(prefix + text)})
+}
+
+// extensionSurfaceText flattens one extension surface payload to plain text
+// for clients without structured-surface support: status →
+// "[plugin] label: detail", card → title + body + fields, form → title +
+// message, notification → title + body.
+func extensionSurfaceText(p *event.ExtensionSurfacePayload) string {
+	var b strings.Builder
+	write := func(s string) {
+		if s == "" {
+			return
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(s)
+	}
+	switch {
+	case p.Status != nil:
+		line := "[" + p.PluginID + "] " + p.Status.Label
+		if p.Status.Detail != "" {
+			line += ": " + p.Status.Detail
+		}
+		write(line)
+	case p.Card != nil:
+		write(p.Card.Title)
+		body := p.Card.Text
+		if p.Card.Markdown != "" {
+			body = p.Card.Markdown
+		}
+		write(body)
+		for _, f := range p.Card.Fields {
+			write(f.Key + ": " + f.Value)
+		}
+	case p.Form != nil:
+		write(p.Form.Title)
+		write(p.Form.Message)
+	case p.Notification != nil:
+		write(p.Notification.Title)
+		write(p.Notification.Body)
+	}
+	return b.String()
+}
+
+// extensionSeverityWarns reports whether the payload carries a warn/error
+// severity, which earns the same "[warning] " prefix as event.Notice.
+func extensionSeverityWarns(p *event.ExtensionSurfacePayload) bool {
+	severity := ""
+	if p.Status != nil {
+		severity = p.Status.Severity
+	}
+	if p.Notification != nil {
+		severity = p.Notification.Severity
+	}
+	return severity == "warn" || severity == "error"
 }
 
 func (s *updateSink) send(update any) {
@@ -204,9 +315,15 @@ func (s *updateSink) replay(msgs []provider.Message) {
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleUser:
+			// Replay the user-authored view, not the persisted wire form:
+			// UserMessageText strips injected transient blocks (<response-language>
+			// etc.) and unwraps memory-compiler contracts, same as every other
+			// surface (#6882). A turn that was pure injection replays as nothing.
 			text := m.Content
 			if steer, ok := agent.SteerText(text); ok {
 				text = steer
+			} else {
+				text = agent.UserMessageText(m)
 			}
 			if text != "" {
 				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})
@@ -215,8 +332,10 @@ func (s *updateSink) replay(msgs []provider.Message) {
 			if m.ReasoningContent != "" {
 				s.send(messageChunk{SessionUpdate: "agent_thought_chunk", Content: textBlock(m.ReasoningContent)})
 			}
-			if m.Content != "" {
-				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(m.Content)})
+			// Same display filter as live emission: goal markers and evidence
+			// blocks stay in history for parsing but never reach the client.
+			if display := agent.DisplayAssistantText(m.Content); display != "" {
+				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(display)})
 			}
 			for _, tc := range m.ToolCalls {
 				s.send(toolCall{
@@ -267,6 +386,9 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 			Title:      title,
 			Kind:       toolKindFor(a.Tool),
 			Status:     "pending",
+			RawInput:   rawJSON(string(a.RawInput)),
+			Locations:  s.toolLocations(a.Tool, string(a.RawInput)),
+			Meta:       s.permissionMeta(a),
 		},
 		Options: options,
 	}
@@ -284,6 +406,51 @@ func (s *updateSink) requestPermission(ctx context.Context, a event.Approval) {
 		}
 	}
 	s.approve(a.ID, allow, session, persist)
+}
+
+// permissionMeta carries Reasonix-owned structured data that an ACP supervisor
+// may trust independently from model-supplied rawInput. A foreground bash call
+// receives argv only when the command is a single static command: shell
+// expansion, control operators, redirects, assignments, and background jobs all
+// fail closed and remain interactive.
+func (s *updateSink) permissionMeta(a event.Approval) map[string]any {
+	reasonix := map[string]any{
+		"approvalId": a.ID,
+		"tool":       a.Tool,
+		"subject":    a.Subject,
+		"fresh":      a.Fresh,
+	}
+	if reason := strings.TrimSpace(a.Reason); reason != "" {
+		reasonix["reason"] = reason
+	}
+	if a.Tool == "bash" && strings.TrimSpace(s.cwd) != "" {
+		var input struct {
+			Command                     string `json:"command"`
+			RunInBackground             bool   `json:"run_in_background"`
+			PreserveBackgroundProcesses bool   `json:"preserve_background_processes"`
+		}
+		if json.Unmarshal(a.RawInput, &input) == nil &&
+			!input.RunInBackground && !input.PreserveBackgroundProcesses {
+			cwd, cwdErr := filepath.Abs(s.cwd)
+			features, featureOK := shellparse.AnalyzeApprovalFeatures(input.Command)
+			command, commandErr := shellparse.ParseStaticCommand(input.Command, shellparse.StaticCommandPolicy{})
+			exact := featureOK && !features.DynamicCommandName && !features.NestedExecution &&
+				!features.Expansion && !features.Assignment && !features.Redirection &&
+				!shellparse.ContainsUnquotedGlob(input.Command)
+			for _, arg := range command.Argv {
+				// Tilde expansion is shell-dependent and therefore not exact argv.
+				if strings.HasPrefix(arg, "~") {
+					exact = false
+				}
+			}
+			if cwdErr == nil && commandErr == nil && exact && len(command.Argv) > 0 {
+				reasonix["commandSchemaVersion"] = 1
+				reasonix["argv"] = command.Argv
+				reasonix["cwd"] = cwd
+			}
+		}
+	}
+	return map[string]any{"reasonix.io": reasonix}
 }
 
 func (s *updateSink) requestAsk(ctx context.Context, a event.Ask) {

@@ -7,7 +7,51 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"reasonix/internal/memory"
 )
+
+func TestResolveRefsInjectsOnlyNewNestedInstructionsOnce(t *testing.T) {
+	root := t.TempDir()
+	service := filepath.Join(root, "services", "api")
+	sibling := filepath.Join(root, "services", "web")
+	for _, dir := range []string{service, sibling} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for path, body := range map[string]string{
+		filepath.Join(root, "AGENTS.md"):             "ROOT RULE",
+		filepath.Join(root, "services", "AGENTS.md"): "SERVICES RULE",
+		filepath.Join(service, "AGENTS.md"):          "API RULE",
+		filepath.Join(sibling, "AGENTS.md"):          "WEB RULE",
+		filepath.Join(service, "handler.go"):         "package api",
+		filepath.Join(service, "handler_test.go"):    "package api",
+	} {
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	c := New(Options{WorkspaceRoot: root, Memory: memory.Load(memory.Options{CWD: root})})
+	block, errs := c.ResolveRefs(context.Background(), "review @services/api/handler.go and @services/api/handler_test.go")
+	if len(errs) != 0 {
+		t.Fatalf("ResolveRefs errors = %v", errs)
+	}
+	for _, want := range []string{"<path-instructions", "SERVICES RULE", "API RULE", "package api"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("resolved block missing %q:\n%s", want, block)
+		}
+	}
+	for _, unwanted := range []string{"ROOT RULE", "WEB RULE"} {
+		if strings.Contains(block, unwanted) {
+			t.Fatalf("resolved block included %q outside the nested delta:\n%s", unwanted, block)
+		}
+	}
+	if strings.Count(block, "SERVICES RULE") != 1 || strings.Count(block, "API RULE") != 1 {
+		t.Fatalf("nested instructions were duplicated across refs:\n%s", block)
+	}
+}
 
 func TestFileRefLine(t *testing.T) {
 	dir := t.TempDir()

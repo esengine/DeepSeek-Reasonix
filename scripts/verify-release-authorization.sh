@@ -13,6 +13,7 @@ caller_workflow_sha="${CALLER_WORKFLOW_SHA:?CALLER_WORKFLOW_SHA is required}"
 caller_sha="${CALLER_SHA:?CALLER_SHA is required}"
 approved_cli_tag="${APPROVED_CLI_TAG:?APPROVED_CLI_TAG is required}"
 approved_sha="${APPROVED_SHA:?APPROVED_SHA is required}"
+approved_channel="${APPROVED_CHANNEL:-stable}"
 
 if [ "$actual_caller" != "$expected_caller" ]; then
 	echo "::error::orchestrated release caller is $actual_caller, expected $expected_caller" >&2
@@ -22,8 +23,22 @@ if [ "$caller_ref_protected" != "true" ]; then
 	echo "::error::orchestrated release caller ref is not protected: $caller_ref" >&2
 	exit 1
 fi
-if [[ ! "$approved_cli_tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-	echo "::error::approved CLI tag must be vMAJOR.MINOR.PATCH, got: $approved_cli_tag" >&2
+case "$approved_channel" in
+stable)
+	approved_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+	approved_tag_description='vMAJOR.MINOR.PATCH'
+	;;
+preview)
+	approved_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-preview\.([1-9][0-9]*)$'
+	approved_tag_description='vMAJOR.MINOR.PATCH-preview.N'
+	;;
+*)
+	echo "::error::approved release channel must be stable or preview, got: $approved_channel" >&2
+	exit 1
+	;;
+esac
+if [[ ! "$approved_cli_tag" =~ $approved_tag_pattern ]]; then
+	echo "::error::approved CLI tag must be $approved_tag_description, got: $approved_cli_tag" >&2
 	exit 1
 fi
 
@@ -43,7 +58,7 @@ workflow_dispatch)
 	fi
 	;;
 *)
-	echo "::error::unsupported stable release caller event: $caller_event" >&2
+	echo "::error::unsupported orchestrated release caller event: $caller_event" >&2
 	exit 1
 	;;
 esac

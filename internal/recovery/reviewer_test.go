@@ -66,7 +66,7 @@ func TestReviewerRequestShape(t *testing.T) {
 		usage:    &provider.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15},
 	}
 	sink := &captureSink{}
-	s := NewSessionWithSink(prov, &provider.Pricing{Input: 1, Output: 2}, sink)
+	s := NewSessionWithSink(prov, &provider.Pricing{Input: 1, Output: 2}, "deepseek/recovery-reviewer", sink)
 	failure := &FailureEvent{Tool: "bash", ErrSummary: "exit 1", Verification: true, OutputExcerpt: "FAIL"}
 	proposal := Proposal{Tool: "write_file", Subject: "a.go", Mutates: true, Args: json.RawMessage(`{"path":"a.go"}`)}
 	v, err := s.Review(context.Background(), failure, []string{"note"}, proposal, "fix the test")
@@ -106,6 +106,9 @@ func TestReviewerRequestShape(t *testing.T) {
 	}
 	if sink.events[0].Usage == nil || sink.events[0].Usage.PromptTokens != 10 {
 		t.Fatalf("usage = %+v", sink.events[0].Usage)
+	}
+	if sink.events[0].ModelRef != "deepseek/recovery-reviewer" {
+		t.Fatalf("usage model ref = %q", sink.events[0].ModelRef)
 	}
 }
 

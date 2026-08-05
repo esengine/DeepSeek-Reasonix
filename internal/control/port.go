@@ -54,6 +54,7 @@ type TurnControl interface {
 	SubmitInvocationDisplay(display, input string, invocations []InvocationRequest)
 	SubmitEditedDisplay(display, input, original string)
 	SubmitHTTP(input string)
+	SubmitHTTPFormat(input, format string)
 	SubmitUserTurn(input, display string)
 	Send(input string)
 	SendWithRaw(input, raw string)
@@ -75,6 +76,7 @@ type TurnControl interface {
 // posture (ask/auto/yolo). It mirrors the approvalManager surface.
 type Approvals interface {
 	Approve(id string, allow, session, persist bool)
+	ResolvePlanDecision(id string, action PlanDecisionAction) error
 	// ResolveRecovery answers an Auto Guard card: continue|continue_task|revise. Revise
 	// refuses the mutation and steers feedback.
 	ResolveRecovery(id string, action agent.RecoveryAction, feedback string) error
@@ -99,6 +101,8 @@ type Goals interface {
 	SetGoal(goal string)
 	SetGoalWithResearchMode(goal string, researchMode GoalResearchMode)
 	ResumeGoal() bool
+	PauseGoal() bool
+	GoalRuntime() GoalRuntimeView
 	GoalStrict(strict bool)
 	ClearGoal()
 	AutoResearchSummary() (*autoresearch.Summary, bool)
@@ -118,6 +122,11 @@ type SessionHistory interface {
 	CheckpointTurnsByMessageIndex() map[int]int
 	CheckpointHasBoundary(turn int) bool
 	Rewind(turn int, scope RewindScope) error
+	PrepareRewind(turn int, scope RewindScope) (checkpoint.RewindPlan, error)
+	CommitRewind(planID string) (checkpoint.RewindResult, error)
+	UndoRewind(transactionID string) (checkpoint.RewindResult, error)
+	PrepareFileRevert(path string) (checkpoint.RewindPlan, error)
+	CommitFileRevert(planID string, resolution checkpoint.ConflictResolution) (checkpoint.RewindResult, error)
 	Fork(turn int) (string, error)
 	ForkNamed(turn int, name string) (string, error)
 	ForkSession(turn int, name string) (string, error)
@@ -139,6 +148,10 @@ type MemoryControl interface {
 	SaveMemory(m memory.Memory) (string, error)
 	ForgetMemory(name string) error
 	QueueMemory(note string)
+	MemoryRevisions(ref string) []memory.Memory
+	RestoreMemory(ref string, revision int) (memory.Memory, error)
+	RestoreArchivedMemory(archivePath string) (memory.Memory, error)
+	LastMemoryRecall() memory.RecallResult
 }
 
 // Capabilities covers the session's pluggable surface — MCP servers, skills,
@@ -170,6 +183,16 @@ type Capabilities interface {
 	DisconnectedMCPNames() []string
 	UnregisterMCPServerTools(name string) bool
 	ImportMCPEntries(entries []config.PluginEntry) (total, added, updated, connected, failed, skipped int, err error)
+	// Extension UI (stage 8a): enumerate handshake-declared extension actions
+	// and invoke one by its public /<plugin>:<action> name. Nil hub → empty /
+	// error; the stage-8b slash dispatch resolves these.
+	ExtensionActions() []ExtensionActionView
+	InvokeExtensionAction(ctx context.Context, name string, args map[string]string) (string, error)
+	// ProviderCatalog is the session's merged provider catalog — config/broker
+	// base plus sidecar-declared extension providers (plugin/... refs). Nil
+	// when no extension declared providers; frontends merge it into their
+	// model pickers and skip nil.
+	ProviderCatalog() []provider.Descriptor
 }
 
 // Status covers read-only run/usage/billing telemetry and task list state.

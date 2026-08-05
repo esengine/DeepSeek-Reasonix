@@ -157,6 +157,34 @@ function printResult(r: BenchResult): void {
 }
 
 console.log("\nhistory performance benchmark");
-for (const c of cases) {
-  printResult(runCase(c));
+const results = cases.map(runCase);
+for (const result of results) {
+  printResult(result);
 }
+
+const failures: string[] = [];
+for (let index = 0; index < results.length; index += 1) {
+  const result = results[index];
+  const input = cases[index];
+  const expectedMessages = input.turns * (2 + input.toolsPerTurn);
+  if (result.messages !== expectedMessages) failures.push(`${result.name}: unexpected message count`);
+  if (result.turnGroups !== input.turns) failures.push(`${result.name}: unexpected turn-group count`);
+  if (result.convertMs > 1_000 || result.reducerMs > 1_000 || result.transcriptComputeMs > 1_000) {
+    failures.push(`${result.name}: exceeded 1s responsiveness ceiling`);
+  }
+}
+
+const full10KB = results.find((result) => result.name === "200-turns-full-10KB");
+const archived10KB = results.find((result) => result.name === "200-turns-archived-10KB");
+if (!full10KB || full10KB.itemStringBytes * 10 >= full10KB.jsonBytes) {
+  failures.push("restored full tool results retained too much source text");
+}
+if (!archived10KB || archived10KB.itemStringBytes * 5 >= archived10KB.jsonBytes) {
+  failures.push("restored archived tool results retained too much source text");
+}
+
+if (failures.length > 0) {
+  for (const failure of failures) process.stderr.write(`FAIL ${failure}\n`);
+  process.exit(1);
+}
+process.stdout.write("PASS long-history performance contracts\n");

@@ -1,6 +1,7 @@
 // Run: tsx src/__tests__/workspace-changes-errors.test.tsx
 
 import { JSDOM } from "jsdom";
+import { registerHooks } from "node:module";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -10,6 +11,18 @@ import { LocaleProvider } from "../lib/i18n";
 import { resetWorkspaceTreeMemoryForTests } from "../lib/workspaceTreeMemory";
 import type { AppBindings } from "../lib/bridge";
 import type { DirEntry, GitCommitView, WorkspaceChangeDetailView, WorkspaceChangesView } from "../lib/types";
+
+// Markdown previews lazy-load MarkdownRenderer, whose KaTeX stylesheet belongs
+// to the same production chunk. Node's tsx loader has no CSS module support,
+// so map stylesheet imports to the existing empty asset stub in this DOM test.
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.endsWith(".css")) {
+      return nextResolve("./asset-stub-for-tests.ts", { ...context, parentURL: import.meta.url });
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 let passed = 0;
 let failed = 0;
@@ -67,6 +80,8 @@ function installDom() {
   globalThis.localStorage = dom.window.localStorage;
   globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
   globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
+  (dom.window.HTMLElement.prototype as unknown as { attachEvent: () => void }).attachEvent = () => {};
+  (dom.window.HTMLElement.prototype as unknown as { detachEvent: () => void }).detachEvent = () => {};
   Object.defineProperty(dom.window.HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => {} });
   Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", {
     configurable: true,
@@ -185,6 +200,23 @@ async function renderFilesWorkspace(methods: Partial<AppBindings>, props: Partia
 }
 
 console.log("\nworkspace changes git errors");
+
+{
+  const { dom, root, rerender } = await renderFilesWorkspace({}, { open: false });
+  let threw = false;
+  try {
+    await rerender({ open: true });
+  } catch (error) {
+    threw = true;
+    process.stdout.write(`  ERROR ${String(error)}\n`);
+  }
+  ok(!threw, "workspace panel can open after a closed render without changing hook order");
+  ok(document.querySelector(".workspace-panel") !== null, "workspace panel renders after the closed-to-open transition");
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
 
 {
   const { dom, root } = await renderWorkspace({ files: [], gitAvailable: false });
@@ -762,6 +794,98 @@ console.log("\nworkspace changes git errors");
     document.querySelector('[data-workspace-path="src/main/java/App.java"] .workspace-file-icon')?.textContent !== "",
     "workspace files render a Seti file-type icon",
   );
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
+  const { dom, root } = await renderFilesWorkspace({
+    ListDirForTab: async (_tabId, dir) => dir === ""
+      ? [
+          { name: "code.ts", isDir: false },
+          { name: "README.md", isDir: false },
+        ]
+      : [],
+    ReadFileForTab: async (_tabId, path) => ({
+      path,
+      body: path === "README.md" ? "# Documentation" : "const value = 42;",
+      size: 17,
+      truncated: false,
+      binary: false,
+    }),
+  });
+
+  await waitFor("searchable code file", () => document.querySelector('[data-workspace-path="code.ts"]') != null);
+  await act(async () => {
+    document
+      .querySelector<HTMLButtonElement>('[data-workspace-path="code.ts"]')
+      ?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("code preview search action", () => document.querySelector('button[aria-label="Find"]') != null);
+  ok(
+    document.querySelector('button[aria-label="Find"]') != null,
+    "searchable code previews expose a visible search action",
+  );
+
+  const filterInput = document.querySelector<HTMLInputElement>('input[placeholder="Filter files…"]');
+  await act(async () => {
+    filterInput?.focus();
+    filterInput?.dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "f",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushPromises();
+  });
+  await waitFor("panel-scoped code search", () => document.querySelector(".code-search__input") != null);
+  ok(
+    document.activeElement === document.querySelector(".code-search__input"),
+    "workspace find shortcut opens and focuses code search from the file filter",
+  );
+
+  await act(async () => {
+    document
+      .querySelector<HTMLButtonElement>(".code-search__close")
+      ?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("closed code search", () => document.querySelector(".code-search") == null);
+  await act(async () => {
+    document
+      .querySelector<HTMLButtonElement>('button[aria-label="Find"]')
+      ?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("button-opened code search", () => document.querySelector(".code-search__input") != null);
+  ok(
+    document.activeElement === document.querySelector(".code-search__input"),
+    "visible search action opens and focuses the same search UI",
+  );
+
+  await act(async () => {
+    document
+      .querySelector<HTMLButtonElement>('[data-workspace-path="README.md"]')
+      ?.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
+    await flushPromises();
+  });
+  await waitFor("markdown preview", () => document.body.textContent?.includes("Documentation") === true);
+  ok(
+    document.querySelector('button[aria-label="Find"]') == null,
+    "Markdown previews do not expose the code-search action",
+  );
+  const markdownFindEvent = new window.KeyboardEvent("keydown", {
+    key: "f",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  filterInput?.dispatchEvent(markdownFindEvent);
+  ok(!markdownFindEvent.defaultPrevented, "Markdown previews preserve the host find shortcut");
 
   await act(async () => {
     root.unmount();

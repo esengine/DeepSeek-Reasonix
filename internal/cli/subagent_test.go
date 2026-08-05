@@ -211,22 +211,35 @@ func TestSubagentProfileCLIRejectsReservedAndCustomCommandNames(t *testing.T) {
 func TestSubagentProfileCLIEditBuiltinModelOverride(t *testing.T) {
 	isolateCLIConfigHome(t)
 	cfg := config.Default()
+	cfg.DefaultModel = "offline/chat"
+	cfg.Providers = []config.ProviderEntry{{
+		Name:             "offline",
+		Kind:             "openai",
+		BaseURL:          "https://offline.example.com",
+		Model:            "chat",
+		APIKeyEnv:        "REASONIX_SUBAGENT_OFFLINE_KEY",
+		SupportedEfforts: []string{"low", "high"},
+		DefaultEffort:    "low",
+	}}
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatal(err)
 	}
-	if rc := subagentCommand([]string{"edit", "review", "--model", "deepseek-pro"}); rc != 0 {
+	if rc := subagentCommand([]string{"edit", "review", "--model", "offline/chat", "--effort", "high"}); rc != 0 {
 		t.Fatalf("builtin edit rc = %d", rc)
 	}
 	loaded := config.LoadForEdit(config.UserConfigPath())
-	if got := subagentOverride(loaded.Agent.SubagentModels, "review"); !strings.HasPrefix(got, "deepseek-pro/") {
+	if got := subagentOverride(loaded.Agent.SubagentModels, "review"); got != "offline/chat" {
 		t.Fatalf("review model override = %q", got)
+	}
+	if got := subagentOverride(loaded.Agent.SubagentEfforts, "review"); got != "high" {
+		t.Fatalf("review effort override = %q", got)
 	}
 	out := captureStdout(t, func() {
 		if rc := subagentCommand([]string{"list"}); rc != 0 {
 			t.Fatalf("list rc = %d", rc)
 		}
 	})
-	if !strings.Contains(out, "review") || !strings.Contains(out, "model=deepseek-pro/") {
+	if !strings.Contains(out, "review") || !strings.Contains(out, "model=offline/chat") || !strings.Contains(out, "effort=high") {
 		t.Fatalf("list did not show built-in override:\n%s", out)
 	}
 	if rc := subagentCommand([]string{"edit", "review", "--model="}); rc != 0 {

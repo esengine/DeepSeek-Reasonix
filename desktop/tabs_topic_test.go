@@ -132,7 +132,7 @@ func TestSessionListCacheRefillsAfterInvalidate(t *testing.T) {
 	first := []agent.SessionInfo{{Path: filepath.Join(dir, "first.jsonl")}}
 	second := []agent.SessionInfo{{Path: filepath.Join(dir, "second.jsonl")}}
 
-	token := cache.versionToken()
+	token := cache.versionToken(dir)
 	cache.put(dir, first, map[string]string{"first.jsonl": "First"}, token)
 	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "first.jsonl" || titles["first.jsonl"] != "First" {
 		t.Fatalf("initial cache entry = %+v, %+v, %v", infos, titles, ok)
@@ -147,10 +147,152 @@ func TestSessionListCacheRefillsAfterInvalidate(t *testing.T) {
 		t.Fatalf("stale token repopulated cache after invalidate")
 	}
 
-	token = cache.versionToken()
+	token = cache.versionToken(dir)
 	cache.put(dir, second, map[string]string{"second.jsonl": "Second"}, token)
 	if infos, titles, ok := cache.get(dir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "second.jsonl" || titles["second.jsonl"] != "Second" {
 		t.Fatalf("refilled cache entry = %+v, %+v, %v", infos, titles, ok)
+	}
+}
+
+func TestSessionListCacheInvalidatesOnlyChangedDirectory(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	changedDir := filepath.Join(t.TempDir(), "changed")
+	untouchedDir := filepath.Join(t.TempDir(), "untouched")
+	changedToken := cache.versionToken(changedDir)
+	untouchedToken := cache.versionToken(untouchedDir)
+	cache.put(changedDir, []agent.SessionInfo{{Path: filepath.Join(changedDir, "old.jsonl")}}, nil, changedToken)
+	cache.put(untouchedDir, []agent.SessionInfo{{Path: filepath.Join(untouchedDir, "keep.jsonl")}}, nil, untouchedToken)
+
+	if !cache.invalidateDirs(changedDir) {
+		t.Fatal("invalidateDirs reported no changed directory")
+	}
+	if _, _, ok := cache.get(changedDir); ok {
+		t.Fatal("changed directory survived scoped invalidation")
+	}
+	if infos, _, ok := cache.get(untouchedDir); !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "keep.jsonl" {
+		t.Fatalf("unrelated directory was invalidated: %+v, %v", infos, ok)
+	}
+
+	cache.put(changedDir, []agent.SessionInfo{{Path: filepath.Join(changedDir, "stale.jsonl")}}, nil, changedToken)
+	if _, _, ok := cache.get(changedDir); ok {
+		t.Fatal("stale directory token repopulated cache after scoped invalidation")
+	}
+
+	equivalentDir := filepath.Join(untouchedDir, ".")
+	if !cache.invalidateDirs(equivalentDir) {
+		t.Fatal("invalidateDirs rejected an equivalent cleaned directory")
+	}
+	if _, _, ok := cache.get(untouchedDir); ok {
+		t.Fatal("equivalent directory spelling did not invalidate the absolute cache key")
+	}
+	if got := sessionListCacheDirForPath(""); got != "" {
+		t.Fatalf("empty session path resolved to cache directory %q", got)
+	}
+}
+
+func TestSessionListCacheExpiresForExternalProcessReconciliation(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	dir := t.TempDir()
+	token := cache.versionToken(dir)
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, token)
+
+	key := sessionListCacheDirKey(dir)
+	cache.mu.Lock()
+	entry := cache.byDir[key]
+	entry.cachedAt = time.Now().Add(-sessionListCacheTTL)
+	cache.byDir[key] = entry
+	cache.mu.Unlock()
+
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatal("expired directory listing remained cached")
+	}
+	if _, exists := cache.byDir[key]; exists {
+		t.Fatal("expired directory listing was not removed")
+	}
+}
+
+func TestProjectTreeMetadataChangePreservesSessionListings(t *testing.T) {
+	oldProjectCache := projectSessionCache
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	t.Cleanup(func() {
+		projectSessionCache = oldProjectCache
+	})
+
+	dir := t.TempDir()
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "keep.jsonl")}}, nil, projectSessionCache.versionToken(dir))
+	emitted := 0
+	app := NewApp()
+	app.projectTreeChangedHook = func() { emitted++ }
+	app.emitProjectTreeMetadataChanged()
+
+	if _, _, ok := projectSessionCache.get(dir); !ok {
+		t.Fatal("metadata-only project tree change invalidated session listing")
+	}
+	if emitted != 1 {
+		t.Fatalf("project tree hook calls = %d, want 1", emitted)
+	}
+}
+
+func TestSessionListCacheForgetRejectsInFlightFillAndReadd(t *testing.T) {
+	cache := &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	dir := t.TempDir()
+	staleToken := cache.versionToken(dir)
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, staleToken)
+
+	if !cache.forgetDirs(dir) {
+		t.Fatal("forgetDirs reported no removed directory")
+	}
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatal("forgotten directory remained cached")
+	}
+	cache.mu.Lock()
+	_, versionRetained := cache.dirVersions[sessionListCacheDirKey(dir)]
+	cache.mu.Unlock()
+	if versionRetained {
+		t.Fatal("forgotten directory retained lifecycle metadata")
+	}
+
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "stale.jsonl")}}, nil, staleToken)
+	if _, _, ok := cache.get(dir); ok {
+		t.Fatal("in-flight pre-removal fill repopulated forgotten directory")
+	}
+
+	readdToken := cache.versionToken(dir)
+	if readdToken.dirVersion == staleToken.dirVersion {
+		t.Fatal("re-added directory reused its pre-removal token")
+	}
+	cache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "fresh.jsonl")}}, nil, readdToken)
+	infos, _, ok := cache.get(dir)
+	if !ok || len(infos) != 1 || filepath.Base(infos[0].Path) != "fresh.jsonl" {
+		t.Fatalf("re-added directory did not accept fresh listing: %+v, %v", infos, ok)
+	}
+}
+
+func TestRemoveWorkspaceForgetsProjectSessionCache(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldProjectCache := projectSessionCache
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	t.Cleanup(func() { projectSessionCache = oldProjectCache })
+
+	projectRoot := t.TempDir()
+	if err := addProject(projectRoot, "Cached Project"); err != nil {
+		t.Fatalf("add project: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	staleToken := projectSessionCache.versionToken(dir)
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "old.jsonl")}}, nil, staleToken)
+
+	app := NewApp()
+	if err := app.RemoveWorkspace(projectRoot); err != nil {
+		t.Fatalf("RemoveWorkspace: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("removed workspace session listing remained cached")
+	}
+
+	projectSessionCache.put(dir, []agent.SessionInfo{{Path: filepath.Join(dir, "stale.jsonl")}}, nil, staleToken)
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("removed workspace accepted an in-flight stale cache fill")
 	}
 }
 
@@ -163,6 +305,7 @@ func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
 	})
 
 	dir := t.TempDir()
+	otherDir := t.TempDir()
 	sessionPath := filepath.Join(dir, "rename-me.jsonl")
 	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
 		t.Fatalf("write session: %v", err)
@@ -172,8 +315,9 @@ func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
 	app := NewApp()
 	app.setTestCtrl(ctrl, "")
 
-	token := projectSessionCache.versionToken()
+	token := projectSessionCache.versionToken(dir)
 	projectSessionCache.put(dir, []agent.SessionInfo{{Path: sessionPath}}, map[string]string{"rename-me.jsonl": "old"}, token)
+	projectSessionCache.put(otherDir, []agent.SessionInfo{{Path: filepath.Join(otherDir, "keep.jsonl")}}, nil, projectSessionCache.versionToken(otherDir))
 	if _, _, ok := projectSessionCache.get(dir); !ok {
 		t.Fatalf("expected primed project tree cache")
 	}
@@ -182,6 +326,53 @@ func TestRenameSessionInvalidatesProjectTreeCache(t *testing.T) {
 	}
 	if _, _, ok := projectSessionCache.get(dir); ok {
 		t.Fatalf("RenameSession should invalidate project tree cache")
+	}
+	if _, _, ok := projectSessionCache.get(otherDir); !ok {
+		t.Fatalf("RenameSession invalidated an unrelated session directory")
+	}
+}
+
+func TestArchiveAndRestoreSessionInvalidateOnlyOwningDirectory(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldProjectCache := projectSessionCache
+	projectSessionCache = &sessionListCache{byDir: map[string]sessionListCacheEntry{}}
+	t.Cleanup(func() {
+		projectSessionCache = oldProjectCache
+	})
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := writeLegacySession(t, dir, "scoped-cache.jsonl", "cache scope", time.Now())
+	otherDir := t.TempDir()
+	prime := func(cacheDir, sessionPath string) {
+		projectSessionCache.put(cacheDir, []agent.SessionInfo{{Path: sessionPath}}, nil, projectSessionCache.versionToken(cacheDir))
+	}
+	prime(dir, path)
+	prime(otherDir, filepath.Join(otherDir, "keep.jsonl"))
+
+	app := NewApp()
+	if err := app.DeleteSession(path); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("DeleteSession kept the owning directory cached")
+	}
+	if _, _, ok := projectSessionCache.get(otherDir); !ok {
+		t.Fatal("DeleteSession invalidated an unrelated directory")
+	}
+
+	trashPath := filepath.Join(dir, sessionTrashDir, "scoped-cache.jsonl", "scoped-cache.jsonl")
+	prime(dir, path)
+	if err := app.RestoreSession(trashPath); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	if _, _, ok := projectSessionCache.get(dir); ok {
+		t.Fatal("RestoreSession kept the owning directory cached")
+	}
+	if _, _, ok := projectSessionCache.get(otherDir); !ok {
+		t.Fatal("RestoreSession invalidated an unrelated directory")
 	}
 }
 
@@ -1472,8 +1663,9 @@ func TestBuildTabControllerRestoresPinnedSessionBeforeTopicFallback(t *testing.T
 		t.Fatalf("restored session path = %q, want pinned %q", got, pinned)
 	}
 	history := tab.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "full 64-turn conversation" {
-		t.Fatalf("restored history = %+v, want pinned long conversation", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "full 64-turn conversation" {
+		t.Fatalf("restored history = %+v, want fresh system prompt and pinned long conversation", history)
 	}
 	f := loadTabsFile()
 	if len(f.Tabs) != 1 || filepath.Clean(f.Tabs[0].SessionPath) != filepath.Clean(pinned) {
@@ -1523,8 +1715,9 @@ func TestBuildTabControllerUsesPinnedSessionMetaWorkspace(t *testing.T) {
 		t.Fatalf("tab workspace root = %q, want project A %q", got, normalizeProjectRoot(projectA))
 	}
 	history := tab.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "project A prompt" {
-		t.Fatalf("restored history = %+v, want project A prompt", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "project A prompt" {
+		t.Fatalf("restored history = %+v, want fresh system prompt and project A prompt", history)
 	}
 }
 
@@ -1647,7 +1840,10 @@ func TestLoadPinnedTabSessionFallsBackToMigratedBasename(t *testing.T) {
 	path := writeLegacySession(t, dir, "migrated-tab.jsonl", "resume after path migration", time.Now())
 	oldPath := filepath.Join(t.TempDir(), "old-reasonix", "projects", "slug", "sessions", filepath.Base(path))
 
-	loaded, pinnedPath, ok := loadPinnedTabSession(dir, oldPath)
+	loaded, pinnedPath, ok, err := loadPinnedTabSession(dir, oldPath)
+	if err != nil {
+		t.Fatalf("loadPinnedTabSession: %v", err)
+	}
 	if !ok || loaded == nil {
 		t.Fatalf("loadPinnedTabSession did not recover migrated basename: ok=%v loaded=%v path=%q", ok, loaded, pinnedPath)
 	}
@@ -1681,8 +1877,101 @@ func TestLoadPinnedTabSessionSkipsCleanupPending(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if loaded, pinnedPath, ok := loadPinnedTabSession(dir, path); ok || loaded != nil || pinnedPath != "" {
+	if loaded, pinnedPath, ok, err := loadPinnedTabSession(dir, path); err != nil || ok || loaded != nil || pinnedPath != "" {
 		t.Fatalf("loadPinnedTabSession cleanup-pending = loaded:%v path:%q ok:%v, want skipped", loaded, pinnedPath, ok)
+	}
+}
+
+func TestLoadPinnedTabSessionPreservesLoadError(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := writeLegacySession(t, dir, "unsafe-pinned.jsonl", "checkpoint", time.Now())
+	events := `{"schema_version":99,"type":"replace","messages":[{"role":"user","content":"newer"}]}` + "\n"
+	if err := os.WriteFile(agent.SessionEventLogPath(path), []byte(events), 0o600); err != nil {
+		t.Fatalf("write future event log: %v", err)
+	}
+
+	loaded, pinnedPath, ok, err := loadPinnedTabSession(dir, path)
+	if err == nil || !strings.Contains(err.Error(), "uses schema 99") {
+		t.Fatalf("loadPinnedTabSession error = %v, want future-schema refusal", err)
+	}
+	if loaded != nil || !ok || filepath.Clean(pinnedPath) != filepath.Clean(path) {
+		t.Fatalf("load result = loaded:%v path:%q ok:%v, want pinned path retained with hard error", loaded, pinnedPath, ok)
+	}
+	if got, readErr := os.ReadFile(agent.SessionEventLogPath(path)); readErr != nil || string(got) != events {
+		t.Fatalf("event log changed after refusal: bytes=%q err=%v", got, readErr)
+	}
+}
+
+func TestBuildTabControllerSurfacesPinnedSessionLoadError(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	t.Setenv("REASONIX_TEST_KEY", "sk-test")
+	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
+		t.Fatalf("mkdir config dir: %v", err)
+	}
+	if err := os.WriteFile(config.UserConfigPath(), []byte(`
+default_model = "test-provider/test-model"
+
+[[providers]]
+name = "test-provider"
+kind = "openai"
+base_url = "https://test.invalid/v1"
+model = "test-model"
+api_key_env = "REASONIX_TEST_KEY"
+`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	dir := desktopSessionDir(globalWorkspaceRoot())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := writeLegacySession(t, dir, "unsafe-startup.jsonl", "checkpoint", time.Now())
+	events := `{"schema_version":1,"type":"replace","messages":[{"role":"user","content":"newer"}]}` + "\n"
+	logPath := agent.SessionEventLogPath(path)
+	if err := os.WriteFile(logPath, []byte(events), 0o600); err != nil {
+		t.Fatalf("write native event log: %v", err)
+	}
+	const oversizedSparseLog = int64(1 << 30)
+	if err := os.Truncate(logPath, oversizedSparseLog); err != nil {
+		t.Fatalf("make sparse oversized event log: %v", err)
+	}
+
+	app := NewApp()
+	tab := app.createTabEntryWithID("global", globalTabWorkspaceRoot(), "", "tab_unsafe_startup")
+	tab.SessionPath = path
+	tab.model = "test-provider/test-model"
+	tab.sink = &tabEventSink{tabID: tab.ID, app: app}
+	app.tabs[tab.ID] = tab
+	app.tabOrder = []string{tab.ID}
+	app.activeTabID = tab.ID
+
+	app.buildTabController(tab)
+	if tab.Ctrl != nil || tab.Ready {
+		t.Fatalf("unsafe session runtime = hasCtrl:%v ready:%v, want failed startup", tab.Ctrl != nil, tab.Ready)
+	}
+	if !strings.Contains(tab.StartupErr, agent.ErrSessionReplayLimitExceeded.Error()) || strings.Contains(tab.StartupErr, path) {
+		t.Fatalf("startup error = %q, want path-free replay-budget error", tab.StartupErr)
+	}
+	if filepath.Clean(tab.SessionPath) != filepath.Clean(path) {
+		t.Fatalf("session path = %q, want original %q", tab.SessionPath, path)
+	}
+	info, err := os.Stat(logPath)
+	if err != nil {
+		t.Fatalf("stat event log after startup refusal: %v", err)
+	}
+	if info.Size() != oversizedSparseLog {
+		t.Fatalf("event log size after startup refusal = %d, want %d", info.Size(), oversizedSparseLog)
+	}
+	app.sharedHostsMu.Lock()
+	sharedHosts := len(app.sharedHosts)
+	app.sharedHostsMu.Unlock()
+	if sharedHosts != 0 {
+		t.Fatalf("shared hosts after failed startup = %d, want 0", sharedHosts)
 	}
 }
 
@@ -2751,8 +3040,9 @@ func TestOpenProjectTabResolvesProjectSessionFromLegacyDir(t *testing.T) {
 		t.Fatalf("opened session path = %q, want %q", got, sessionPath)
 	}
 	history := tab.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "legacy project prompt" {
-		t.Fatalf("opened history = %+v, want legacy project prompt", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "legacy project prompt" {
+		t.Fatalf("opened history = %+v, want fresh system prompt and legacy project prompt", history)
 	}
 }
 
@@ -3889,5 +4179,47 @@ func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) 
 		if title := loadTopicTitle(projectRoot, topicID); title == "" {
 			t.Fatalf("title index missing %q", topicID)
 		}
+	}
+}
+
+// A freshly created empty session must not hijack the topic from the
+// conversation the user actually had: content-bearing sessions outrank
+// content-free ones regardless of updatedAt (#7305).
+func TestFindTopicSessionPrefersContentOverNewerEmpty(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	projectRoot := robustTempDir(t)
+	app := NewApp()
+	topic, err := app.CreateTopic("project", projectRoot, "")
+	if err != nil {
+		t.Fatalf("CreateTopic: %v", err)
+	}
+	dir := desktopSessionDir(projectRoot)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+
+	contentPath := writeTopicSessionWithPrompt(t, dir, "content.jsonl", topic.ID, defaultTopicTitle, projectRoot, "real conversation", time.Now().Add(-time.Hour))
+
+	emptyPath := filepath.Join(dir, "empty.jsonl")
+	if err := os.WriteFile(emptyPath, nil, 0o644); err != nil {
+		t.Fatalf("write empty session: %v", err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(emptyPath, agent.BranchMeta{
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
+		Scope:         "project",
+		WorkspaceRoot: projectRoot,
+		TopicID:       topic.ID,
+		TopicTitle:    defaultTopicTitle,
+	}); err != nil {
+		t.Fatalf("save empty branch meta: %v", err)
+	}
+
+	if got, _ := app.findTopicSessionForTarget("project", projectRoot, topic.ID); got != contentPath {
+		t.Fatalf("topic session = %q, want content-bearing %q to outrank newer empty %q", got, contentPath, emptyPath)
+	}
+	if got, _ := app.findTopicContentSessionForTarget("project", projectRoot, topic.ID); got != contentPath {
+		t.Fatalf("content topic session = %q, want %q", got, contentPath)
 	}
 }

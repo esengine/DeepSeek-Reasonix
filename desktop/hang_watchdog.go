@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	goruntime "runtime"
 	"sync/atomic"
 	"time"
 )
@@ -42,6 +43,17 @@ func mainThreadHeartbeatAge(now time.Time) (time.Duration, time.Time, bool) {
 		age = 0
 	}
 	return age, time.Unix(0, lastWall), true
+}
+
+func resetMainThreadHeartbeatAfterSleep(lastCheck, now time.Time) bool {
+	if now.Sub(lastCheck) <= mainThreadSleepSkip {
+		return false
+	}
+	// The native UI heartbeat and this Go ticker are both suspended while the
+	// machine sleeps. Treat wake as a fresh observation epoch so the sleep gap
+	// cannot be reported as a multi-minute UI-thread hang on the next tick.
+	recordMainThreadHeartbeat(now)
+	return true
 }
 
 func (a *App) startMainThreadWatchdog() {
@@ -88,7 +100,7 @@ func (a *App) watchMainThreadHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-ticker.C:
-			if now.Sub(lastCheck) > mainThreadSleepSkip {
+			if resetMainThreadHeartbeatAfterSleep(lastCheck, now) {
 				lastCheck = now
 				continue
 			}
@@ -109,13 +121,13 @@ func (a *App) watchMainThreadHeartbeat(ctx context.Context) {
 
 func (a *App) recordMainThreadHang(age time.Duration, lastHeartbeat, observedAt time.Time) {
 	report := mainThreadHangReport(age, lastHeartbeat, observedAt)
-	wrote := writePendingReport(report, false)
+	wrote := writePendingReport(report, true)
 	if m := a.metrics.Load(); m != nil {
-		m.inc("desktop_hang", "main_thread")
+		m.inc("desktop_hang", mainThreadMetricBucket())
 		m.inc("desktop_hang_age", hangAgeBucket(age))
 		m.persist()
 	}
-	slog.Warn("desktop: mac main thread heartbeat stalled",
+	slog.Warn("desktop: native UI thread heartbeat stalled",
 		"age", age.Round(time.Millisecond).String(),
 		"lastHeartbeat", lastHeartbeat.Format(time.RFC3339),
 		"pendingReport", wrote,
@@ -123,10 +135,11 @@ func (a *App) recordMainThreadHang(age time.Duration, lastHeartbeat, observedAt 
 }
 
 func mainThreadHangReport(age time.Duration, lastHeartbeat, observedAt time.Time) crashReport {
+	label, errorType, platformName, topFrame := mainThreadDiagnosticIdentity()
 	age = age.Round(time.Second)
-	message := fmt.Sprintf(`[mac.main_thread.hang]
+	message := fmt.Sprintf(`[%s]
 
-Reasonix detected that the macOS main-thread heartbeat stopped for %s.
+Reasonix detected that the %s UI-thread heartbeat stopped for %s.
 
 --- watchdog context ---
 last heartbeat: %s
@@ -136,6 +149,8 @@ bucket: %s
 
 --- native runtime context ---
 %s`,
+		label,
+		platformName,
 		age,
 		lastHeartbeat.UTC().Format(time.RFC3339),
 		observedAt.UTC().Format(time.RFC3339),
@@ -146,13 +161,27 @@ bucket: %s
 	report := baseCrashReport("performance")
 	report.SchemaVersion = 2
 	report.Source = "native.watchdog"
-	report.Label = "mac.main_thread.hang"
-	report.ErrorType = "MacMainThreadHang"
-	report.ErrorMessage = sanitizeCrashText("macOS main thread heartbeat stopped; AppKit/Wails run loop may be blocked.", maxCrashFieldBytes)
-	report.TopFrame = "mac.main_thread.heartbeat"
+	report.Label = label
+	report.ErrorType = errorType
+	report.ErrorMessage = sanitizeCrashText(platformName+" UI thread heartbeat stopped; the native/Wails message loop may be blocked.", maxCrashFieldBytes)
+	report.TopFrame = topFrame
 	report.OccurredAt = observedAt.UTC().Format(time.RFC3339)
 	report.Message = sanitizeCrashText(message, maxCrashDetailBytes)
 	return report
+}
+
+func mainThreadDiagnosticIdentity() (label, errorType, platformName, topFrame string) {
+	if goruntime.GOOS == "windows" {
+		return "windows.ui_thread.hang", "WindowsUIThreadHang", "Windows", "windows.ui_thread.heartbeat"
+	}
+	return "mac.main_thread.hang", "MacMainThreadHang", "macOS", "mac.main_thread.heartbeat"
+}
+
+func mainThreadMetricBucket() string {
+	if goruntime.GOOS == "windows" {
+		return "windows_ui_thread"
+	}
+	return "main_thread"
 }
 
 func hangAgeBucket(age time.Duration) string {

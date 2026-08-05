@@ -25,11 +25,12 @@ type turnOrchestrator struct {
 }
 
 type orchestratedTurn struct {
-	input          string
-	raw            string
-	display        string
-	editedOriginal string
-	synthetic      bool
+	input            string
+	raw              string
+	display          string
+	editedOriginal   string
+	synthetic        bool
+	goalContinuation *goalContinuationSnapshot
 }
 
 func newTurnOrchestrator(c *Controller) *turnOrchestrator {
@@ -48,8 +49,29 @@ func (o *turnOrchestrator) runSyntheticTurnWithRawDisplay(ctx context.Context, i
 	return o.runOrchestratedTurn(ctx, orchestratedTurn{input: input, raw: raw, display: display, synthetic: true})
 }
 
+func (o *turnOrchestrator) runGoalContinuationTurnWithRawDisplay(
+	ctx context.Context,
+	input, raw, display string,
+	res goalAdvanceResult,
+) (bool, error) {
+	snapshot, ok := o.c.goals.admitContinuation(res)
+	if !ok {
+		return false, nil
+	}
+	err := o.runOrchestratedTurn(ctx, orchestratedTurn{
+		input:            input,
+		raw:              raw,
+		display:          display,
+		synthetic:        true,
+		goalContinuation: &snapshot,
+	})
+	return true, err
+}
+
 func (o *turnOrchestrator) runComposedSyntheticTurn(ctx context.Context, text string) error {
 	c := o.c
+	ctx = agent.WithRawUserInput(ctx, text)
+	ctx = c.withPlannerTurnMetadata(ctx, text, true, c.messageCount())
 	return c.runner.Run(ctx, c.ComposeSynthetic(text))
 }
 
@@ -61,13 +83,27 @@ func (o *turnOrchestrator) runSubagentSkillGoalLoop(ctx context.Context, sk skil
 }
 
 func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, skills []skill.Skill, task, raw, display string, runner skill.SubagentRunner, planMode bool) error {
+	expectedContinuationEpoch := o.c.goals.continuationToken()
+	// The skill turn's model requests count against the active goal's token
+	// budget, so bind a recorder for the span even though the sub-agent cannot
+	// call update_goal itself.
+	if scopeID, _, ok := o.c.goals.deliveryScope(); ok {
+		recorder := o.c.goals.newTurnRecorder(scopeID, o.c.goals.continuationToken())
+		o.c.goalUsageTee.setActiveRecorder(recorder)
+		ctx = provider.WithRequestBudget(ctx, recorder)
+	}
 	if err := o.runSubagentSkillTurns(ctx, skills, task, raw, display, runner, planMode); err != nil {
 		if ctx.Err() != nil {
+			o.c.goalUsageTee.setActiveRecorder(nil)
 			o.c.stopGoal(GoalStatusStopped)
 		}
+		if errors.Is(err, provider.ErrRequestBudgetExhausted) && o.c.goals.active() {
+			return o.continueGoal(ctx, expectedContinuationEpoch, err)
+		}
+		o.c.goalUsageTee.setActiveRecorder(nil)
 		return err
 	}
-	return o.continueGoal(ctx)
+	return o.continueGoal(ctx, expectedContinuationEpoch, nil)
 }
 
 // runSubagentSkillTurns records the composed user task and distilled child
@@ -143,8 +179,9 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 		toolEvent.Output = answer
 		c.sink.Emit(event.Event{Kind: event.ToolResult, Tool: toolEvent})
 		c.executor.Session().Add(provider.Message{Role: provider.RoleAssistant, Content: answer})
-		c.sink.Emit(event.Event{Kind: event.Text, Text: answer})
-		c.sink.Emit(event.Event{Kind: event.Message, Text: answer})
+		display := agent.DisplayAssistantText(answer)
+		c.sink.Emit(event.Event{Kind: event.Text, Text: display})
+		c.sink.Emit(event.Event{Kind: event.Message, Text: display})
 	}
 
 	c.clearInFlightTurn()
@@ -160,7 +197,34 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	ctx = jobs.WithSession(ctx, parentSession)
 	userImages := c.inputImages(turn.input)
 	ctx = agent.WithUserImages(ctx, userImages)
-	input := c.compose(turn.input, turn.raw, !turn.synthetic)
+	ctx = agent.WithRawUserInput(ctx, turn.raw)
+	continuation := turn.goalContinuation
+	var input string
+	if continuation != nil {
+		input = c.composeWithGoal(
+			turn.input,
+			turn.raw,
+			false,
+			continuation.goal,
+			GoalStatusRunning,
+			continuation.researchMode,
+			continuation.autoResearchTaskID,
+		)
+	} else {
+		input = c.compose(turn.input, turn.raw, !turn.synthetic)
+	}
+	// input.receive: the composed text crosses the extension chain before it
+	// enters the session (checkpoint, hooks, and the model all see the final
+	// text). A block ruling aborts the turn with the redacted reason surfaced,
+	// mirroring the PromptSubmit hook's abort path; a required-class extension
+	// failure fails the turn.
+	input, blocked, interceptErr := c.interceptInputReceive(ctx, input)
+	if interceptErr != nil {
+		return interceptErr
+	}
+	if blocked {
+		return nil
+	}
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	defer c.recordDisplayForNewUser(startMessages, turn.display)
@@ -192,15 +256,46 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
 	}
 	c.markInFlightTurn(startMessages, !turn.synthetic && !IsSyntheticUserMessage(turn.raw))
-	autoResearchTaskID := c.goals.currentAutoResearchTaskID()
+	var autoResearchTaskID string
+	if continuation != nil {
+		autoResearchTaskID = continuation.autoResearchTaskID
+	} else {
+		autoResearchTaskID = c.goals.currentAutoResearchTaskID()
+	}
 	autoResearchAcceptedBefore := c.autoResearchAcceptedEvidenceIDs(autoResearchTaskID)
 	c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
+	if continuation != nil {
+		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{
+			ID:       continuation.scopeID,
+			TaskText: continuation.goal,
+		})
+	} else if scopeID, task, ok := c.goals.deliveryScope(); ok {
+		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: scopeID, TaskText: task})
+	}
+	// Goal turns get a per-turn recorder bound to the goal scope+epoch: the
+	// update_goal tool records its candidate report here, and billable usage
+	// events during the turn fold into the goal's token budget. The span stays
+	// active until the FSM commits (advanceGoalAfterTurn) so evaluator usage
+	// also counts; error paths that skip the FSM clear it explicitly.
+	if goalScopeID, ok := c.goals.goalScopeIDForTurn(continuation); ok {
+		recorder := c.goals.newTurnRecorder(goalScopeID, c.goals.continuationToken())
+		if c.executor != nil {
+			recorder.setProgressBefore(c.executor.HostProgressSignature())
+		}
+		ctx = tool.WithGoalTurnRecorder(ctx, recorder)
+		ctx = provider.WithRequestBudget(ctx, recorder)
+		c.goalUsageTee.setActiveRecorder(recorder)
+	}
 	modelInput := input
 	if !turn.synthetic {
-		modelInput = c.withCapabilityRoute(input, turn.raw)
+		modelInput = c.withCapabilityRoute(ctx, input, turn.raw)
 	}
-	if scopeID, task, ok := c.goals.deliveryScope(); ok {
-		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{ID: scopeID, TaskText: task})
+	ctx = c.withPlannerTurnMetadata(ctx, turn.raw, turn.synthetic, startMessages)
+	// Real user turns open a fresh Recovery Episode. Goal auto-continues and
+	// other synthetic turns inherit the current Episode so budgets accumulate
+	// only within one host-owned execution round.
+	if !turn.synthetic {
+		c.beginRecoveryEpisode()
 	}
 	err = c.runner.Run(ctx, modelInput)
 	c.persistGoalDeliveryCheckpoint()
@@ -259,11 +354,16 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 		return err
 	}
 	if !allow {
-		return nil // keep planning; plan mode stays on
+		// The host decides whether denial means "revise and keep planning" or
+		// "exit without executing" by leaving plan mode on or switching it off.
+		return nil
 	}
 	c.SetPlanMode(false)
 	todoArgs := c.seedPlanTodos(proposal)
 	execStart := c.sessionMessageCount()
+	// Starting plan execution is a real Recovery Episode boundary even though
+	// the follow-up turn is synthetic.
+	c.beginRecoveryEpisode()
 	// The plan is the go-ahead: don't re-prompt for each write of the approved
 	// work. Auto-approve writers for the duration of this execution turn only; a
 	// later turn (even "continue") falls back to the normal per-tool approval.
@@ -287,88 +387,190 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 }
 
 func (o *turnOrchestrator) runGoalLoopWithRawDisplay(ctx context.Context, input, raw, display string) error {
-	if err := o.runTurnWithRawDisplay(ctx, input, raw, display); err != nil {
+	expectedContinuationEpoch := o.c.goals.continuationToken()
+	err := o.runTurnWithRawDisplay(ctx, input, raw, display)
+	if err != nil {
 		if ctx.Err() != nil {
+			o.c.goalUsageTee.setActiveRecorder(nil)
 			o.c.stopGoal(GoalStatusStopped)
-		} else {
-			var readiness *agent.FinalReadinessError
-			if errors.As(err, &readiness) {
-				o.c.stopGoal(GoalStatusBlocked)
-			}
+			return err
 		}
-		return err
+		var readinessErr *agent.FinalReadinessError
+		if (!errors.As(err, &readinessErr) && !errors.Is(err, provider.ErrRequestBudgetExhausted)) || !o.c.goals.active() {
+			// Terminal provider/host error (or a plain non-Goal Delivery
+			// readiness failure): stop auto-continue. With no active Goal the
+			// error surfaces the recovery card; with a Goal it stays running so
+			// the next ordinary user message keeps the same scope.
+			o.c.goalUsageTee.setActiveRecorder(nil)
+			return err
+		}
+		// FinalReadinessError is absorbed below: the Goal FSM continues with
+		// the missing requirements as the next turn's prompt.
 	}
-	return o.continueGoal(ctx)
+	return o.continueGoal(ctx, expectedContinuationEpoch, err)
 }
 
 func (o *turnOrchestrator) runEditedGoalLoopWithRawDisplay(ctx context.Context, input, raw, display, original string) error {
-	if err := o.runEditedTurnWithRawDisplay(ctx, input, raw, display, original); err != nil {
+	expectedContinuationEpoch := o.c.goals.continuationToken()
+	err := o.runEditedTurnWithRawDisplay(ctx, input, raw, display, original)
+	if err != nil {
 		if ctx.Err() != nil {
+			o.c.goalUsageTee.setActiveRecorder(nil)
 			o.c.stopGoal(GoalStatusStopped)
-		} else {
-			var readiness *agent.FinalReadinessError
-			if errors.As(err, &readiness) {
-				o.c.stopGoal(GoalStatusBlocked)
-			}
+			return err
 		}
-		return err
+		var readinessErr *agent.FinalReadinessError
+		if (!errors.As(err, &readinessErr) && !errors.Is(err, provider.ErrRequestBudgetExhausted)) || !o.c.goals.active() {
+			o.c.goalUsageTee.setActiveRecorder(nil)
+			return err
+		}
 	}
-	return o.continueGoal(ctx)
+	return o.continueGoal(ctx, expectedContinuationEpoch, err)
 }
 
-func (o *turnOrchestrator) continueGoal(ctx context.Context) error {
+// continueGoal runs the goal auto-continuation loop. A FinalReadinessError
+// from the last turn is absorbed into the FSM decision (the Goal continues
+// with the missing requirements); any other terminal error stops the loop and
+// is returned to the caller.
+func (o *turnOrchestrator) continueGoal(ctx context.Context, expectedContinuationEpoch uint64, firstTurnErr error) error {
 	c := o.c
+	turnErr := firstTurnErr
 	for {
-		cont := o.advanceGoalAfterTurn()
-		if !cont {
+		res := o.advanceGoalAfterTurn(ctx, expectedContinuationEpoch, turnErr)
+		if !res.cont {
 			return nil
 		}
 		if err := ctx.Err(); err != nil {
 			c.stopGoal(GoalStatusStopped)
 			return err
 		}
+		intercept, ok := c.goals.acceptContinuation(res)
+		if !ok {
+			return nil
+		}
 		turn := goalContinueTurn
-		if msg, ok := c.goals.takeIntercept(); ok {
-			turn = msg
-			if strings.Contains(msg, "AutoResearch readiness check failed") {
-				c.noticeDetail("Goal is not ready to complete yet; continuing the remaining work.", msg)
-			} else {
-				c.noticeDetail("Goal still has unfinished task state; continuing the remaining work.", msg)
+		if intercept != "" {
+			turn = intercept
+			if res.interceptNotice != "" {
+				c.noticeDetail(res.interceptNotice, intercept)
 			}
 		}
-		if err := o.runSyntheticTurnWithRawDisplay(ctx, turn, turn, ""); err != nil {
+		admitted, err := o.runGoalContinuationTurnWithRawDisplay(ctx, turn, turn, "", res)
+		if err != nil {
 			if ctx.Err() != nil {
 				c.stopGoal(GoalStatusStopped)
+				return err
 			}
-			return err
+			var readinessErr *agent.FinalReadinessError
+			if !errors.As(err, &readinessErr) && !errors.Is(err, provider.ErrRequestBudgetExhausted) {
+				// Terminal provider/host error: stop auto-continue; the Goal
+				// stays running for the next user turn.
+				c.goalUsageTee.setActiveRecorder(nil)
+				return err
+			}
+			turnErr = err
+		} else {
+			turnErr = nil
 		}
+		if !admitted {
+			return nil
+		}
+		expectedContinuationEpoch = res.continuationEpoch
 	}
 }
 
-func (o *turnOrchestrator) advanceGoalAfterTurn() bool {
+// advanceGoalAfterTurn gathers every input the FSM needs off the goal lock —
+// the turn's update_goal report, Delivery readiness, budget/usage state, and
+// the evaluator verdict — then lets the FSM exclusively decide complete,
+// continue, blocked, or pause. The usage span bound to this turn stays active
+// until here so evaluator usage also counts against the goal budget.
+func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedContinuationEpoch uint64, turnErr error) goalAdvanceResult {
 	c := o.c
-	// Gather every input the FSM needs off the goal lock: parse the marker,
-	// snapshot the executor's todos + readiness, and check tool activity. None
-	// of these touch goal state, so the machine's critical section stays pure.
-	status, reason, _ := parseGoalStatusMarker(lastAssistantText(c.History()))
-	autoResearchTaskID := c.goals.currentAutoResearchTaskID()
-	var readiness string
-	if c.executor != nil {
-		readiness = c.executor.GoalReadinessFailure()
+	recorder := c.goalUsageTee.activeRecorder()
+	defer c.goalUsageTee.setActiveRecorder(nil)
+	// Only active Goal turns bind a recorder. Ordinary and edited non-Goal
+	// turns still pass through the shared turn wrapper, but must not enter the
+	// Goal FSM or pay for an isolated completion evaluation.
+	if recorder == nil || recorder.epoch != expectedContinuationEpoch ||
+		!c.goals.turnActive(recorder.scopeID, recorder.epoch) {
+		return goalAdvanceResult{cont: false}
+	}
+
+	var readiness agent.ReadinessResult
+	var readinessErr *agent.FinalReadinessError
+	var budgetErr *provider.RequestBudgetError
+	budgetRequestBlocked := ""
+	if errors.As(turnErr, &budgetErr) {
+		budgetRequestBlocked = fmt.Sprintf("token budget cannot admit another provider request (%d/%d tokens used, %d remaining; next input estimate %d)",
+			budgetErr.Used, budgetErr.Limit, budgetErr.Remaining, budgetErr.EstimatedInput)
+	} else if errors.As(turnErr, &readinessErr) {
+		readiness = agent.ReadinessResult{
+			Ready:       false,
+			Missing:     append([]string(nil), readinessErr.Missing...),
+			Reason:      readinessErr.Reason,
+			ProgressKey: readinessErr.Reason,
+		}
+	} else if turnErr != nil {
+		// Terminal provider/host error: stop auto-continue without an FSM
+		// transition; the goal stays running for the next user turn.
+		return goalAdvanceResult{cont: false}
+	} else if c.executor != nil {
+		readiness = c.executor.ReadinessResult()
 	}
 	if arReadiness := c.autoResearchReadinessFailure(); arReadiness != "" {
-		if readiness != "" {
-			readiness += "\n" + arReadiness
+		readiness.Ready = false
+		readiness.Missing = append(readiness.Missing, "autoresearch")
+		if readiness.Reason != "" {
+			readiness.Reason += "\n" + arReadiness
 		} else {
-			readiness = arReadiness
+			readiness.Reason = arReadiness
 		}
 	}
+	autoResearchTaskID := c.goals.currentAutoResearchTaskID()
+
+	// The validated update_goal report for this turn, if any.
+	var report *goalTurnReport
+	if recorder != nil {
+		report = recorder.validReport(expectedContinuationEpoch)
+	}
+
+	// The bounded evaluator runs once, only when the model gave no report and
+	// readiness has no definite missing list; never past an exhausted budget
+	// (no new model requests may start beyond the limit). Failures fail closed
+	// in the FSM.
+	var evaluator *goalEvaluatorVerdict
+	var evaluatorFailed string
+	if budgetRequestBlocked == "" && report == nil && len(readiness.Missing) == 0 && !c.goals.budgetExhausted() {
+		if recorder != nil {
+			ctx = provider.WithRequestBudget(ctx, recorder)
+		}
+		if c.evaluator == nil {
+			evaluatorFailed = "goal evaluator unavailable"
+		} else if verdict, err := c.evaluator.Evaluate(ctx, c.goalEvaluatorEvidence()); err != nil {
+			evaluatorFailed = err.Error()
+		} else {
+			evaluator = &goalEvaluatorVerdict{outcome: verdict.Outcome, reason: verdict.Reason}
+		}
+	}
+
+	var progressBefore, progressAfter string
+	if recorder != nil {
+		progressBefore = recorder.progressBeforeText()
+	}
+	if c.executor != nil {
+		progressAfter = c.executor.HostProgressSignature()
+	}
+
 	res := c.goals.advance(goalAdvanceInput{
-		status:     status,
-		reason:     reason,
-		toolCalled: c.toolWasCalledLastTurn(),
-		todos:      c.goalTodos(),
-		readiness:  readiness,
+		report:               report,
+		readiness:            readiness,
+		evaluator:            evaluator,
+		evaluatorFailed:      evaluatorFailed,
+		budgetRequestBlocked: budgetRequestBlocked,
+		todos:                c.goalTodos(),
+		progressBefore:       progressBefore,
+		progressAfter:        progressAfter,
+		expectedEpoch:        &expectedContinuationEpoch,
 	})
 	c.persistGoalState(res.path, res.data, res.ok)
 	if res.notice != "" {
@@ -378,7 +580,7 @@ func (o *turnOrchestrator) advanceGoalAfterTurn() bool {
 	if res.notice == goalCompleteNotice && c.executor != nil {
 		c.completeRemainingGoalTodos()
 	}
-	return res.cont
+	return res
 }
 
 func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {

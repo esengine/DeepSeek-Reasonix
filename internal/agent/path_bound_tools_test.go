@@ -41,6 +41,103 @@ func TestBindWritePathsRebindsBashWriteRoots(t *testing.T) {
 	}
 }
 
+func TestBindWritePathsKeepsCapabilitySchemaButBlocksResolvedWriter(t *testing.T) {
+	root := t.TempDir()
+	claim, err := NormalizeWritePaths(root, []string{"frontend"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	target := readOnlyBoundaryTarget{name: "mcp__fs__write", calls: &calls}
+	proxy := readOnlyBoundaryProxy{resolved: tool.ResolvedCall{
+		ProxyAction: "call",
+		TargetName:  target.Name(),
+		Target:      target,
+		ReadOnly:    false,
+		Args:        json.RawMessage(`{}`),
+	}}
+	reg := tool.NewRegistry()
+	reg.Add(proxy)
+	bound, removed := BindWritePaths(reg, claim, root, false)
+	if len(removed) != 0 {
+		t.Fatalf("removed = %v, want stable proxy retained", removed)
+	}
+	got, ok := bound.Get("use_capability")
+	if !ok {
+		t.Fatal("path-bound registry missing use_capability")
+	}
+	if got.Name() != proxy.Name() || got.Description() != proxy.Description() || string(got.Schema()) != string(proxy.Schema()) || got.ReadOnly() != proxy.ReadOnly() {
+		t.Fatal("path-bound wrapper changed provider-visible use_capability contract")
+	}
+	a := New(nil, bound, NewSession("sys"), Options{}, event.Discard)
+	out := a.executeOne(context.Background(), provider.ToolCall{
+		ID: "writer", Name: "use_capability",
+		Arguments: `{"action":"call","capability_id":"mcp-tool:fs/write","arguments":{}}`,
+	})
+	if out.errMsg == "" || !strings.Contains(out.output, "not proven read-only") {
+		t.Fatalf("resolved writer outcome = %+v, want path-bound block", out)
+	}
+	if calls != 0 {
+		t.Fatalf("resolved MCP writer executed %d times, want zero", calls)
+	}
+}
+
+func TestBindWritePathsAllowsResolvedReadOnlyCapability(t *testing.T) {
+	root := t.TempDir()
+	claim, err := NormalizeWritePaths(root, []string{"frontend"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	target := readOnlyBoundaryTarget{name: "mcp__search__query", readOnly: true, calls: &calls}
+	reg := tool.NewRegistry()
+	reg.Add(readOnlyBoundaryProxy{resolved: tool.ResolvedCall{
+		ProxyAction: "call",
+		TargetName:  target.Name(),
+		Target:      target,
+		ReadOnly:    true,
+		Args:        json.RawMessage(`{}`),
+	}})
+	bound, _ := BindWritePaths(reg, claim, root, false)
+	a := New(nil, bound, NewSession("sys"), Options{}, event.Discard)
+	out := a.executeOne(context.Background(), provider.ToolCall{
+		ID: "reader", Name: "use_capability",
+		Arguments: `{"action":"call","capability_id":"mcp-tool:search/query","arguments":{}}`,
+	})
+	if out.errMsg != "" || out.blocked || calls != 1 {
+		t.Fatalf("resolved reader outcome = %+v calls=%d, want one successful call", out, calls)
+	}
+}
+
+func TestTaskExplicitWritePathsCannotBypassBoundaryThroughCapabilityProxy(t *testing.T) {
+	root := t.TempDir()
+	var writerCalls int32
+	target := parallelResolvedWriterTarget{calls: &writerCalls}
+	parent := tool.NewRegistry()
+	parent.Add(readOnlyBoundaryProxy{resolved: tool.ResolvedCall{
+		ProxyAction: "call",
+		TargetName:  target.Name(),
+		Target:      target,
+		ReadOnly:    false,
+		Args:        json.RawMessage(`{}`),
+	}})
+	task := newTestTaskTool(t, proxyWriterCallingProvider{}, parent, "sys", "", "", nil).
+		WithTranscripts(NewSubagentStore(t.TempDir()), root, "base-model", "base-effort")
+	out, err := task.Execute(testTaskContext(), json.RawMessage(`{
+		"prompt":"attempt dynamic writer",
+		"write_paths":["frontend"]
+	}`))
+	if err != nil {
+		t.Fatalf("task Execute: %v\n%s", err, out)
+	}
+	if writerCalls != 0 {
+		t.Fatalf("path-bound task executed MCP writer %d times, want zero", writerCalls)
+	}
+	if !strings.Contains(out, "writer blocked") {
+		t.Fatalf("task did not recover after host boundary block:\n%s", out)
+	}
+}
+
 func TestParentWriteReservationBlocksOverlappingSubagentAcquire(t *testing.T) {
 	root := t.TempDir()
 	sched := NewSubagentScheduler(4, 2)

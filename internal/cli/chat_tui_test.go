@@ -10,6 +10,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/colorprofile"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -17,6 +19,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/checkpoint"
+	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
@@ -963,6 +966,11 @@ func TestApprovalChoicesPreserveDecisionSemantics(t *testing.T) {
 			tool: control.SandboxEscapeApprovalTool,
 			want: []approvalChoice{{allow: true}, {allow: true, allowForSession: true}, {}},
 		},
+		{
+			name: "plan decision",
+			tool: planApprovalTool,
+			want: []approvalChoice{{allow: true}, {}, {exitPlan: true}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1003,6 +1011,57 @@ func TestApprovalChoicesPreserveDecisionSemantics(t *testing.T) {
 	}})
 	if len(planLabels) != 2 || planLabels[0] != "Adopt the new plan and continue" || planLabels[1] != "Do not adopt; let Auto adjust" {
 		t.Fatalf("plan-change recovery labels = %v", planLabels)
+	}
+	planApprovalLabels := approvalChoiceLabels(&event.Approval{Tool: planApprovalTool})
+	if len(planApprovalLabels) != 3 || planApprovalLabels[0] != "Start execution" ||
+		planApprovalLabels[1] != "Revise plan (keep planning)" || planApprovalLabels[2] != "Exit without executing" {
+		t.Fatalf("plan approval labels = %v", planApprovalLabels)
+	}
+}
+
+func TestPlanApprovalActionsSynchronizeTUIAndControllerMode(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      tea.KeyPressMsg
+		wantPlan bool
+	}{
+		{name: "start execution", key: tea.KeyPressMsg{Code: '1'}},
+		{name: "revise plan", key: tea.KeyPressMsg{Code: '2'}, wantPlan: true},
+		{name: "exit without executing", key: tea.KeyPressMsg{Code: '3'}},
+		{name: "legacy n keeps planning", key: tea.KeyPressMsg{Code: 'n'}, wantPlan: true},
+		{name: "escape keeps planning", key: tea.KeyPressMsg{Code: tea.KeyEscape}, wantPlan: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctrl := control.New(control.Options{})
+			t.Cleanup(ctrl.Close)
+			m := newTestChatTUI()
+			m.ctrl = ctrl
+			m.planMode = true
+			m.ctrl.SetPlanMode(true)
+			m.pendingApproval = &event.Approval{ID: "plan", Tool: planApprovalTool}
+
+			next, _ := m.handleApprovalKey(tt.key)
+			m = next.(chatTUI)
+			if m.pendingApproval != nil {
+				t.Fatal("plan approval was not resolved")
+			}
+			if m.planMode != tt.wantPlan || m.ctrl.PlanMode() != tt.wantPlan {
+				t.Fatalf("plan mode = tui %v/controller %v, want %v", m.planMode, m.ctrl.PlanMode(), tt.wantPlan)
+			}
+		})
+	}
+}
+
+func TestPlanApprovalBannerShowsThreeExplicitActions(t *testing.T) {
+	m := newTestChatTUI()
+	m.width = 120
+	m.pendingApproval = &event.Approval{ID: "plan", Tool: planApprovalTool}
+	banner := ansi.Strip(m.renderApprovalBanner())
+	for _, want := range []string{"Start execution", "Revise plan (keep planning)", "Exit without executing"} {
+		if !strings.Contains(banner, want) {
+			t.Fatalf("plan approval banner missing %q:\n%s", want, banner)
+		}
 	}
 }
 
@@ -1269,9 +1328,9 @@ func TestUserBubbleEchoedImmediately(t *testing.T) {
 }
 
 func TestUserBubbleIsLightweightTranscriptLine(t *testing.T) {
-	prevColor := colorEnabled
-	colorEnabled = true
-	defer func() { colorEnabled = prevColor }()
+	prevColor := activeColorProfile
+	activeColorProfile = colorprofile.ANSI256
+	defer func() { activeColorProfile = prevColor }()
 
 	got := renderUserBubble("hello world", 80, false)
 	plain := ansi.Strip(got)
@@ -1306,6 +1365,51 @@ func TestUnsendDiscardsBufferedEvents(t *testing.T) {
 	}
 	if len(*m.pendingCommit) != 0 {
 		t.Errorf("a discarded turn should leave nothing in scrollback, committed=%v", *m.pendingCommit)
+	}
+}
+
+func TestRecoveryPauseTurnDoneIsInformational(t *testing.T) {
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+	const backendFallback = "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send \"continue\" to start a fresh attempt, or add instructions to change direction."
+	tests := []struct {
+		lang string
+		want string
+	}{
+		{
+			lang: "en",
+			want: "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.",
+		},
+		{
+			lang: "zh",
+			want: "已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。",
+		},
+		{
+			lang: "zh-TW",
+			want: "已暫停自動重試。Reasonix 已停止重複嘗試，並保留已完成的工作。傳送「繼續」即可開始新一輪，也可以補充要求來調整方向。",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lang, func(t *testing.T) {
+			i18n.DetectLanguage(tt.lang)
+			m := newTestChatTUI()
+			m.width = 240
+			m.ingestEvent(event.Event{
+				Kind:    event.TurnDone,
+				Err:     &agent.RecoveryPauseError{Message: backendFallback},
+				Outcome: event.TurnOutcomeRecoveryPaused,
+			})
+
+			got := ansi.Strip(strings.Join(*m.pendingCommit, "\n"))
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("recovery pause transcript = %q, want localized pause message %q", got, tt.want)
+			}
+			if tt.lang != "en" && strings.Contains(got, backendFallback) {
+				t.Fatalf("recovery pause transcript = %q, must not leak English fallback into %s", got, tt.lang)
+			}
+			if strings.Contains(got, i18n.M.ErrorPrefix) {
+				t.Fatalf("recovery pause transcript = %q, must not use error prefix %q", got, i18n.M.ErrorPrefix)
+			}
+		})
 	}
 }
 
@@ -2192,6 +2296,103 @@ func TestLanguageCommandSwitchesImmediatelyAndPersists(t *testing.T) {
 	}
 }
 
+func TestLanguageCommandRefreshesCurrentController(t *testing.T) {
+	isolateUserConfig(t)
+	i18n.DetectLanguage("en")
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+
+	oldCtrl := control.New(control.Options{Label: "deepseek-flash"})
+	t.Cleanup(oldCtrl.Close)
+	m := newTestChatTUI()
+	m.ctrl = oldCtrl
+	m.modelRef = "deepseek-flash/deepseek-v4-flash"
+	m.runtimeProfile = "full"
+	var gotSpec controllerBuildSpec
+	m.buildController = func(spec controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
+		gotSpec = spec
+		return control.New(control.Options{Label: "deepseek-flash"}), nil
+	}
+
+	cmd := m.runSlashCommand("/language zh")
+	if cmd == nil {
+		t.Fatal("/language should queue a controller refresh")
+	}
+	next, _ := m.Update(cmd())
+	m = next.(chatTUI)
+	t.Cleanup(m.ctrl.Close)
+	if m.ctrl == oldCtrl {
+		t.Fatal("/language kept the stale controller after a successful refresh")
+	}
+	if gotSpec.ModelRef != m.modelRef || gotSpec.RuntimeProfile != "full" {
+		t.Fatalf("language refresh spec = %+v", gotSpec)
+	}
+}
+
+func TestCurrencyCommandPersistsAndRefreshesCurrentController(t *testing.T) {
+	isolateUserConfig(t)
+	i18n.DetectLanguage("en")
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+
+	oldCtrl := control.New(control.Options{Label: "deepseek-flash"})
+	t.Cleanup(oldCtrl.Close)
+	m := newTestChatTUI()
+	m.ctrl = oldCtrl
+	m.modelRef = "deepseek-flash/deepseek-v4-flash"
+	m.runtimeProfile = "full"
+	var gotSpec controllerBuildSpec
+	m.buildController = func(spec controllerBuildSpec, _ []provider.Message, _ string, _ control.SessionAPI) (*control.Controller, error) {
+		gotSpec = spec
+		return control.New(control.Options{Label: "deepseek-flash"}), nil
+	}
+
+	cmd := m.runSlashCommand("/currency CNY")
+	if cmd == nil {
+		t.Fatal("/currency should queue a controller refresh")
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if got := cfg.DesktopCurrency(); got != "CNY" {
+		t.Fatalf("saved currency = %q, want CNY", got)
+	}
+	next, _ := m.Update(cmd())
+	m = next.(chatTUI)
+	t.Cleanup(m.ctrl.Close)
+	if m.ctrl == oldCtrl {
+		t.Fatal("/currency kept the stale controller after a successful refresh")
+	}
+	if gotSpec.ModelRef != m.modelRef || gotSpec.RuntimeProfile != "full" {
+		t.Fatalf("currency refresh spec = %+v", gotSpec)
+	}
+}
+
+func TestCurrencyRefreshFailureKeepsCurrentController(t *testing.T) {
+	isolateUserConfig(t)
+	oldCtrl := control.New(control.Options{Label: "deepseek-flash"})
+	t.Cleanup(oldCtrl.Close)
+	m := newTestChatTUI()
+	m.ctrl = oldCtrl
+	m.modelRef = "deepseek-flash/deepseek-v4-flash"
+	m.runtimeProfile = "full"
+	m.buildController = func(controllerBuildSpec, []provider.Message, string, control.SessionAPI) (*control.Controller, error) {
+		return nil, errors.New("build failed")
+	}
+
+	cmd := m.runCurrencySubcommand("/currency CNY")
+	if cmd == nil {
+		t.Fatal("/currency should queue a controller refresh")
+	}
+	next, _ := m.Update(cmd())
+	m = next.(chatTUI)
+	if m.ctrl != oldCtrl {
+		t.Fatal("failed currency refresh replaced the usable controller")
+	}
+	if m.modelSwitchPending || m.pendingModelSwitch != nil {
+		t.Fatal("failed currency refresh left the runtime switch pending")
+	}
+	if got := config.LoadForEdit(config.UserConfigPath()).DesktopCurrency(); got != "CNY" {
+		t.Fatalf("failed refresh should retain the persisted preference, got %q", got)
+	}
+}
+
 func TestLanguageCommandAutoClearsPinnedLanguage(t *testing.T) {
 	isolateUserConfig(t)
 	i18n.DetectLanguage("en")
@@ -2491,12 +2692,68 @@ func TestQueueNavigationResetOnNonUpDownKey(t *testing.T) {
 		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
 	}
 
-	// A regular key should reset the queue navigation cursor.
+	// A regular key while editing a queued item should preserve the cursor
+	// so the user can type replacement text. (#4877)
 	letter := tea.KeyPressMsg{Code: 'a'}
 	model, _ = m.Update(letter)
 	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should stay at 0 while editing queued item, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueEditTypingDoesNotResetCursor(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"first", "second"}
+
+	// Navigate up to select the last item.
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should be 1 after up, got %d", m.queueEditCursor)
+	}
+
+	// Type several characters — cursor must survive each keystroke.
+	for _, c := range "hello" {
+		letter := tea.KeyPressMsg{Code: c}
+		model, _ = m.Update(letter)
+		m = model.(chatTUI)
+	}
+	if m.queueEditCursor != 1 {
+		t.Fatalf("cursor should stay at 1 after typing, got %d", m.queueEditCursor)
+	}
+}
+
+func TestQueueEditReplaceOnEnter(t *testing.T) {
+	m := newTestChatTUI()
+	m.state = tuiRunning
+	m.pendingInterject = []string{"hello"}
+
+	// Navigate up to select the item.
+	up := tea.KeyPressMsg{Code: tea.KeyUp}
+	model, _ := m.Update(up)
+	m = model.(chatTUI)
+	if m.queueEditCursor != 0 {
+		t.Fatalf("cursor should be 0 after up, got %d", m.queueEditCursor)
+	}
+
+	// Simulate real typing: clear input, send key presses through Update.
+	m.input.SetValue("")
+	m.input.SetValue("world")
+	enter := tea.KeyPressMsg{Code: tea.KeyEnter}
+	model, _ = m.Update(enter)
+	m = model.(chatTUI)
+
+	if len(m.pendingInterject) != 1 {
+		t.Fatalf("queue should still have 1 item, got %d", len(m.pendingInterject))
+	}
+	if m.pendingInterject[0] != "world" {
+		t.Fatalf("queue[0] should be %q, got %q", "world", m.pendingInterject[0])
+	}
 	if m.queueEditCursor != -1 {
-		t.Fatalf("cursor should reset on non-up/down key, got %d", m.queueEditCursor)
+		t.Fatalf("cursor should reset after enter, got %d", m.queueEditCursor)
 	}
 }
 
@@ -3041,7 +3298,31 @@ func TestSlashCodeCommentSubmitStartsTurn(t *testing.T) {
 	}
 }
 
-func TestUnknownSlashCommandDoesNotStartTurn(t *testing.T) {
+func TestUnknownSlashCommandStartsOrdinaryTurnWithNotice(t *testing.T) {
+	r := &recordingTurnRunner{}
+	events := make(chan event.Event, 8)
+	ctrl := control.New(control.Options{
+		Runner: r,
+		Sink:   event.FuncSink(func(e event.Event) { events <- e }),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	input := "/definitely-not-a-command"
+	m.input.SetValue(input)
+
+	model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = model.(chatTUI)
+	waitForCLIEvent(t, events, event.TurnDone)
+
+	if len(r.inputs) != 1 || r.inputs[0] != input {
+		t.Fatalf("unknown slash command should start one ordinary turn, inputs=%q", r.inputs)
+	}
+	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, "unknown command") {
+		t.Fatalf("unknown slash command should be reported in transcript, got:\n%s", got)
+	}
+}
+
+func TestSlashDocsShowsLocalOverviewWithoutStartingTurn(t *testing.T) {
 	r := &recordingTurnRunner{}
 	ctrl := control.New(control.Options{
 		Runner: r,
@@ -3049,16 +3330,42 @@ func TestUnknownSlashCommandDoesNotStartTurn(t *testing.T) {
 	})
 	m := newTestChatTUI()
 	m.ctrl = ctrl
-	m.input.SetValue("/definitely-not-a-command")
 
-	model, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	m = model.(chatTUI)
-
-	if len(r.inputs) != 0 {
-		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", r.inputs)
+	if cmd := m.runSlashCommand("/docs"); cmd != nil {
+		t.Fatal("bare /docs should complete locally")
 	}
-	if got := strings.Join(m.transcript, "\n"); !strings.Contains(got, "unknown command") {
-		t.Fatalf("unknown slash command should be reported in transcript, got:\n%s", got)
+	if len(r.inputs) != 0 {
+		t.Fatalf("bare /docs should not start a model turn, inputs=%q", r.inputs)
+	}
+	transcript := strings.Join(m.transcript, "\n")
+	if !strings.Contains(transcript, "digest=sha256:") || !strings.Contains(transcript, "/docs") {
+		t.Fatalf("bare /docs transcript missing corpus identity or usage:\n%s", transcript)
+	}
+}
+
+func TestQualifiedSlashDocsBypassesConflictingCustomCommand(t *testing.T) {
+	r := &recordingTurnRunner{}
+	commands := []command.Command{
+		{Name: "docs", Body: "legacy docs"},
+	}
+	ctrl := control.New(control.Options{
+		Runner:   r,
+		Commands: commands,
+		Sink:     event.FuncSink(func(event.Event) {}),
+	})
+	m := newTestChatTUI()
+	m.ctrl = ctrl
+	m.commands = commands
+
+	if cmd := m.runSlashCommand("/reasonix:docs"); cmd != nil {
+		t.Fatal("bare /reasonix:docs should complete locally")
+	}
+	if len(r.inputs) != 0 {
+		t.Fatalf("bare /reasonix:docs should not start a model turn, inputs=%q", r.inputs)
+	}
+	transcript := strings.Join(m.transcript, "\n")
+	if !strings.Contains(transcript, "digest=sha256:") || !strings.Contains(transcript, "Usage: /reasonix:docs <question>") || strings.Contains(transcript, "legacy docs") {
+		t.Fatalf("qualified built-in docs was shadowed:\n%s", transcript)
 	}
 }
 
@@ -3180,6 +3487,22 @@ func TestDynamicMCPFreshApprovalHidesRememberedChoices(t *testing.T) {
 	}
 }
 
+func TestDynamicBashApprovalChoicesUseExactLiteralRules(t *testing.T) {
+	const command = "git status $(touch /tmp/reasonix-dynamic-approval)"
+	approval := &event.Approval{Tool: "bash", Subject: command}
+	choices := approvalChoices(approval)
+	if len(choices) != 4 {
+		t.Fatalf("dynamic Bash choices = %+v, want ordinary four-choice approval", choices)
+	}
+	want := "Bash=" + command
+	if !strings.Contains(choices[1].label, want) {
+		t.Fatalf("session choice = %q, want exact rule %q", choices[1].label, want)
+	}
+	if !strings.Contains(choices[2].label, want) {
+		t.Fatalf("persistent choice = %q, want exact rule %q", choices[2].label, want)
+	}
+}
+
 func TestFreshApprovalSessionChoiceIsLimitedToSandboxEscape(t *testing.T) {
 	if !freshApprovalAllowsSession(control.SandboxEscapeApprovalTool) {
 		t.Fatal("sandbox escape should allow an explicit session choice")
@@ -3191,8 +3514,9 @@ func TestFreshApprovalSessionChoiceIsLimitedToSandboxEscape(t *testing.T) {
 	}
 }
 
-// TestSlashQuitExit verifies that /quit and /exit slash commands return tea.Quit,
-// providing an alternative to Ctrl+D and the bare "quit"/"exit" text commands.
+// TestSlashQuitExit verifies that /quit and /exit slash commands quit through
+// the shutdown path (tuiShutdownMsg → snapshot → tea.Quit, #5879), providing an
+// alternative to Ctrl+D and the bare "quit"/"exit" text commands.
 func TestSlashQuitExit(t *testing.T) {
 	m := newTestChatTUI()
 	for _, cmd := range []string{"/quit", "/exit"} {
@@ -3202,8 +3526,8 @@ func TestSlashQuitExit(t *testing.T) {
 			continue
 		}
 		msg := got()
-		if _, ok := msg.(tea.QuitMsg); !ok {
-			t.Errorf("%s cmd should produce QuitMsg, got %T", cmd, msg)
+		if _, ok := msg.(tuiShutdownMsg); !ok {
+			t.Errorf("%s cmd should produce tuiShutdownMsg, got %T", cmd, msg)
 		}
 	}
 }
@@ -3343,8 +3667,8 @@ func TestSecondCtrlCQuitsAfterCancelIsAlreadyRequested(t *testing.T) {
 	if secondCmd == nil {
 		t.Fatal("second Ctrl+C after cancel request should quit")
 	}
-	if msg := secondCmd(); msg != (tea.QuitMsg{}) {
-		t.Fatalf("second Ctrl+C command = %T, want tea.QuitMsg", msg)
+	if msg := secondCmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("second Ctrl+C command = %T, want tuiShutdownMsg (snapshot-before-quit, #5879)", msg)
 	}
 }
 
@@ -3824,5 +4148,56 @@ func TestShiftTabLeavesDontAskForAskMode(t *testing.T) {
 	m.cycleMode()
 	if got := m.ctrl.ToolApprovalMode(); got != control.ToolApprovalAsk {
 		t.Fatalf("Shift+Tab from dontAsk = %q, want ask", got)
+	}
+}
+
+// TestQuitGesturesRouteThroughShutdown guards #5879: every in-TUI quit gesture
+// must emit tuiShutdownMsg (whose handler snapshots the session) rather than
+// tea.Quit directly, which would drop everything past the last snapshot.
+func TestQuitGesturesRouteThroughShutdown(t *testing.T) {
+	ctrlC := tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+
+	// Double Ctrl+C on an idle, empty composer.
+	m := newTestChatTUI()
+	model, cmd := m.Update(ctrlC)
+	m = model.(chatTUI)
+	if cmd != nil {
+		if msg := cmd(); msg == (tea.QuitMsg{}) {
+			t.Fatal("first Ctrl+C must not quit")
+		}
+	}
+	_, cmd = m.Update(ctrlC)
+	if cmd == nil {
+		t.Fatal("second Ctrl+C should return a command")
+	}
+	if msg := cmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("double Ctrl+C emitted %T, want tuiShutdownMsg", msg)
+	}
+
+	// Ctrl+D.
+	m = newTestChatTUI()
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	if cmd == nil {
+		t.Fatal("Ctrl+D should return a command")
+	}
+	if msg := cmd(); msg != (tuiShutdownMsg{}) {
+		t.Fatalf("Ctrl+D emitted %T, want tuiShutdownMsg", msg)
+	}
+}
+
+// TestMessageEventReplacesStreamedAnswer guards #6665 on the TUI side: the
+// final Message event carries the canonical display text (protocol blocks
+// stripped at emission), and it must replace the raw streamed accumulation.
+func TestMessageEventReplacesStreamedAnswer(t *testing.T) {
+	m := newTestChatTUI()
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "answer <autoresearch-evidence>{\"id\":\"e1\"}</autoresearch-evidence> tail"})
+	m.ingestEvent(event.Event{Kind: event.Message, Text: "answer  tail"})
+
+	joined := strings.Join(m.transcript, "\n")
+	if strings.Contains(joined, "autoresearch-evidence") {
+		t.Fatalf("committed transcript still contains evidence block:\n%s", joined)
+	}
+	if !strings.Contains(joined, "answer") {
+		t.Fatalf("committed transcript lost the answer text:\n%s", joined)
 	}
 }

@@ -2,11 +2,15 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
 	"testing"
+
+	"reasonix/internal/agent"
 )
 
 // Platform errnos for the blocked-file classes. Windows values follow the
@@ -71,5 +75,27 @@ func TestFriendlySessionFileErrorPassesThroughOtherErrors(t *testing.T) {
 	notExist := &os.PathError{Op: "lstat", Path: "gone.jsonl", Err: syscall.ENOENT}
 	if got := friendlySessionFileError(notExist); got != error(notExist) {
 		t.Fatalf("not-exist error rewritten to %v", got)
+	}
+}
+
+func TestFriendlySessionLoadErrorPreservesBudgetAndSanitizesDecoderDetails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "private-session.jsonl")
+	limitErr := &agent.SessionReplayLimitError{
+		Path: path, Resource: "encoded_bytes", Value: 200, Limit: 100,
+	}
+	if got := friendlySessionLoadError(limitErr); got != limitErr {
+		t.Fatalf("budget error = %v, want original path-free error", got)
+	}
+	if strings.Contains(limitErr.Error(), path) {
+		t.Fatalf("budget error leaked path: %q", limitErr)
+	}
+
+	decodeErr := fmt.Errorf("decode %s: malformed event", path)
+	got := friendlySessionLoadError(decodeErr)
+	if !errors.Is(got, errSessionHistoryUnreadable) {
+		t.Fatalf("decoder error = %v, want errSessionHistoryUnreadable", got)
+	}
+	if strings.Contains(got.Error(), path) {
+		t.Fatalf("sanitized decoder error leaked path: %q", got)
 	}
 }

@@ -14,6 +14,7 @@ import (
 
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/pluginpkg"
+	"reasonix/internal/sandbox"
 )
 
 func writeSettings(t *testing.T, dir, json string) {
@@ -42,6 +43,21 @@ func writeHookTestBytes(t *testing.T, path string, body []byte) {
 	}
 }
 
+func TestContextFileUsableRequiresReadableRegularFile(t *testing.T) {
+	root := t.TempDir()
+	if ContextFileUsable("") {
+		t.Fatal("empty context path should be unusable")
+	}
+	if ContextFileUsable(root) {
+		t.Fatal("context directory should be unusable")
+	}
+	path := filepath.Join(root, "CLAUDE.md")
+	writeHookTestFile(t, path, "Use the bundled workflow.")
+	if !ContextFileUsable(path) {
+		t.Fatal("readable regular context file should be usable")
+	}
+}
+
 func requireNode(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("node"); err != nil {
@@ -54,7 +70,12 @@ func requireNode(t *testing.T) {
 // built test binary can stall for seconds on a loaded machine, and these
 // tests assert behavior, not latency. Tests asserting the timeout path keep
 // their own tight budgets — that direction cannot flake under load.
-const realSpawnTimeout = 15 * time.Second
+//
+// 15s proved insufficient on a loaded Windows GitHub runner
+// (TestLoadNormalizesQuotedNodeEvalHooksPerProject timed out at 15.03s in
+// CI), so the budget is 60s; the ceiling only fires on a genuine hang, so
+// a larger value costs nothing when children exit normally.
+const realSpawnTimeout = 60 * time.Second
 
 const sampleSettings = `{"hooks":{"PreToolUse":[{"match":"bash","command":"echo pre"}],"Stop":[{"command":"echo stop"}]}}`
 
@@ -69,21 +90,15 @@ func hookSettingsWithCommand(t *testing.T, event Event, command string) string {
 	return string(body)
 }
 
-func TestLoadTrustGating(t *testing.T) {
+func TestLoadProjectHooksByDefault(t *testing.T) {
 	home := t.TempDir()
 	proj := t.TempDir()
 	writeSettings(t, proj, sampleSettings)
 	writeSettings(t, home, `{"hooks":{"PostToolUse":[{"command":"echo g"}]}}`)
 
-	// Untrusted: only the global hook loads.
-	got := Load(LoadOptions{ProjectRoot: proj, HomeDir: home, Trusted: false})
-	if len(got) != 1 || got[0].Scope != ScopeGlobal {
-		t.Fatalf("untrusted load should be global-only, got %d %+v", len(got), got)
-	}
-	// Trusted: project hooks (before global) load too.
-	got = Load(LoadOptions{ProjectRoot: proj, HomeDir: home, Trusted: true})
+	got := Load(LoadOptions{ProjectRoot: proj, HomeDir: home})
 	if len(got) != 3 {
-		t.Fatalf("trusted load should include project + global, got %d", len(got))
+		t.Fatalf("default load should include project + global, got %d", len(got))
 	}
 	if got[0].Scope != ScopeProject {
 		t.Errorf("project hooks should sort first, got %s", got[0].Scope)
@@ -332,6 +347,52 @@ func TestRepairablePowerShellFileArgs(t *testing.T) {
 	}
 }
 
+// installSuperpowersV611HookFixture reproduces the package shape reported in
+// #6602: a Codex-kind installation of superpowers 6.1.1 whose Claude
+// compatibility manifest launches a quoted, mixed-separator run-hook.cmd.
+// Keep the hooks document byte-for-byte equivalent to the upstream v6.1.1
+// declaration so changes in parsing, root expansion, or execution mode cannot
+// silently fall back to a synthetic contract that the affected plugin did not
+// use.
+func installSuperpowersV611HookFixture(t *testing.T, home string) string {
+	t.Helper()
+	reasonixHome := filepath.Join(home, ".reasonix")
+	root := filepath.Join(reasonixHome, "plugins", "superpowers fixture")
+	writeHookTestFile(t, filepath.Join(root, pluginpkg.CodexManifest), `{
+  "name": "superpowers",
+  "description": "Core skills library for Claude Code",
+  "version": "6.1.1"
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start",
+            "async": false
+          }
+        ]
+      }
+    ]
+  }
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "run-hook.cmd"),
+		"@echo off\r\nset /p hook_input=\r\necho %1:%hook_input%\r\n")
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers fixture",
+		Version:      "6.1.1",
+		ManifestKind: "codex",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
 func TestLoadPermissionRequestHook(t *testing.T) {
 	home := t.TempDir()
 	writeSettings(t, home, `{"hooks":{"PermissionRequest":[{"match":"bash","command":"notify"}]}}`)
@@ -342,6 +403,126 @@ func TestLoadPermissionRequestHook(t *testing.T) {
 	}
 	if got[0].Event != PermissionRequest || got[0].Match != "bash" || got[0].Command != "notify" {
 		t.Fatalf("loaded hook = %+v, want PermissionRequest/bash/notify", got[0])
+	}
+}
+
+func TestLoadSuperpowersV611SessionStartExecutionContract(t *testing.T) {
+	home := t.TempDir()
+	root := installSuperpowersV611HookFixture(t, home)
+
+	got := Load(LoadOptions{HomeDir: home, ProjectRoot: filepath.Join(home, "workspace")})
+	if len(got) != 1 {
+		t.Fatalf("hooks = %+v, want the upstream superpowers SessionStart hook", got)
+	}
+	h := got[0]
+	if h.Scope != ScopePlugin || h.Event != SessionStart || h.Match != "startup|clear|compact" {
+		t.Fatalf("loaded hook identity = %+v", h)
+	}
+	if h.ExecutionMode != ExecutionShell || h.Shell != "" || h.Argv != nil {
+		t.Fatalf("execution contract = mode %q shell %q argv %#v, want automatic shell form",
+			h.ExecutionMode, h.Shell, h.Argv)
+	}
+	wantCommand := `"` + root + `/hooks/run-hook.cmd" session-start`
+	if h.Command != wantCommand {
+		t.Fatalf("command = %q, want exact expanded upstream command %q", h.Command, wantCommand)
+	}
+	if h.Cwd != root || h.PayloadFormat != "claude" || h.Env["CLAUDE_PLUGIN_ROOT"] != root {
+		t.Fatalf("Claude execution metadata = %+v", h)
+	}
+}
+
+func TestLoadSuperpowersV620PreservesExplicitBashRequirement(t *testing.T) {
+	home := t.TempDir()
+	root := filepath.Join(home, ".reasonix", "plugins", "superpowers")
+	writeHookTestFile(t, filepath.Join(root, pluginpkg.CodexManifest), `{
+  "name": "superpowers",
+  "version": "6.2.0",
+  "skills": "./skills/"
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{
+  "hooks": {
+    "SessionStart": [{
+      "matcher": "startup|clear|compact",
+      "hooks": [{
+        "type": "command",
+        "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" session-start",
+        "shell": "bash",
+        "async": false
+      }]
+    }]
+  }
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "run-hook.cmd"), "@echo off\r\n")
+	if err := pluginpkg.Upsert(filepath.Join(home, ".reasonix"), pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "6.2.0",
+		ManifestKind: "codex",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Load(LoadOptions{HomeDir: home, ProjectRoot: filepath.Join(home, "workspace")})
+	if len(got) != 1 {
+		t.Fatalf("hooks = %+v, want the upstream superpowers 6.2.0 SessionStart hook", got)
+	}
+	h := got[0]
+	if h.ExecutionMode != ExecutionShell || h.Shell != "bash" || h.Argv != nil {
+		t.Fatalf("execution contract = mode %q shell %q argv %#v, want explicit Bash shell form",
+			h.ExecutionMode, h.Shell, h.Argv)
+	}
+	if !requiresWindowsBash(h.HookConfig) {
+		t.Fatal("superpowers 6.2.0 hook should declare a Windows Bash runtime dependency")
+	}
+	if want := `"` + filepath.ToSlash(root) + `/hooks/run-hook.cmd" session-start`; h.Command != want {
+		t.Fatalf("command = %q, want %q", h.Command, want)
+	}
+}
+
+func TestPluginExplicitBashCommandUsesPOSIXCompatibleRoot(t *testing.T) {
+	root := `C:\Users\Test User\AppData\Roaming\reasonix\plugins\superpowers`
+	config := pluginHookExecutionConfigForPlatform(pluginpkg.Hook{
+		Command:      `"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd" session-start`,
+		ShellCommand: true,
+		Shell:        "bash",
+	}, root, "windows")
+	want := `"C:/Users/Test User/AppData/Roaming/reasonix/plugins/superpowers/hooks/run-hook.cmd" session-start`
+	if config.Command != want {
+		t.Fatalf("explicit Bash command = %q, want POSIX-compatible root %q", config.Command, want)
+	}
+}
+
+func TestExplicitBashRuntimeUsesConfiguredPath(t *testing.T) {
+	wantPath := filepath.Join(t.TempDir(), "PortableGit", "bin", "bash.exe")
+	var resolvedPath string
+	options := RuntimeOptionsForShell("bash", wantPath)
+	err := checkRuntimeForPlatform(HookConfig{
+		Command:       `"C:\\Users\\Test User\\plugins\\superpowers\\hooks\\run-hook.cmd" session-start`,
+		ExecutionMode: ExecutionShell,
+		Shell:         "bash",
+	}, options, "windows", func(path string) (string, error) {
+		resolvedPath = path
+		return path, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolvedPath != wantPath {
+		t.Fatalf("resolved Bash path = %q, want configured path %q", resolvedPath, wantPath)
+	}
+}
+
+func TestExplicitBashRuntimeReportsMissingDependency(t *testing.T) {
+	err := checkRuntimeForPlatform(HookConfig{
+		Command:       `"C:\\Users\\Test User\\plugins\\superpowers\\hooks\\run-hook.cmd" session-start`,
+		ExecutionMode: ExecutionShell,
+		Shell:         "bash",
+	}, RuntimeOptions{}, "windows", func(string) (string, error) {
+		return "", missingWindowsHookBashError()
+	})
+	if err == nil || !strings.Contains(err.Error(), "Git Bash") {
+		t.Fatalf("missing Bash runtime error = %v", err)
 	}
 }
 
@@ -378,6 +559,59 @@ func TestLoadIncludesPluginSessionStartHook(t *testing.T) {
 	}
 	if got[1].Scope != ScopeGlobal {
 		t.Fatalf("second hook = %+v, want global", got[1])
+	}
+}
+
+// TestInspectNoHomeDirResolvesPluginRootFromPlatformHome: with HomeDir empty
+// (the hook-machine default after #7420) and an isolated REASONIX_HOME, the
+// plugin probe and global settings resolve from the platform Reasonix home —
+// <home>/plugins and <home>/settings.json — not a doubled .reasonix segment.
+func TestInspectNoHomeDirResolvesPluginRootFromPlatformHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	root := filepath.Join(home, "plugins", "superpowers")
+	// Global settings live directly under the platform Reasonix home
+	// (writeSettings would add .reasonix, the OS-home convention #7420 fixes).
+	if err := os.MkdirAll(home, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "settings.json"), []byte(`{"hooks":{"PostToolUse":[{"command":"echo global"}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeHookTestFile(t, filepath.Join(root, pluginpkg.CodexManifest), `{
+  "name": "superpowers",
+  "version": "6.1.0",
+  "skills": "./skills/"
+}`)
+	writeHookTestFile(t, filepath.Join(root, "hooks", "session-start-codex"), "#!/usr/bin/env bash\necho ok\n")
+	if err := pluginpkg.Upsert(home, pluginpkg.InstalledPlugin{
+		Name:         "superpowers",
+		Root:         "plugins/superpowers",
+		Version:      "6.1.0",
+		ManifestKind: "codex",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	insp := Inspect(LoadOptions{ProjectRoot: "/workspace"})
+	// Inspect reports project + plugin + global sources; assertions focus on
+	// the two that #7420 broke: plugin and global must resolve from the
+	// platform Reasonix home, not a doubled .reasonix segment.
+	var pluginOK, globalOK bool
+	for _, s := range insp.Sources {
+		switch s.Scope {
+		case ScopePlugin:
+			pluginOK = s.Status == "ok" && strings.Contains(s.Path, filepath.Join(home, "plugins"))
+		case ScopeGlobal:
+			globalOK = s.Status == "ok" && strings.Contains(s.Path, filepath.Join(home, "settings.json"))
+		}
+	}
+	if !pluginOK {
+		t.Fatalf("plugin source not resolved from platform home: %+v", insp.Sources)
+	}
+	if !globalOK {
+		t.Fatalf("global source not resolved from platform home: %+v", insp.Sources)
 	}
 }
 
@@ -445,6 +679,44 @@ func TestLoadIncludesPluginClaudeCompatibilityHooks(t *testing.T) {
 	}
 	if h := byEvent[PostToolUse]; h.PayloadFormat != "claude" || h.Env["CLAUDE_PLUGIN_ROOT"] != root {
 		t.Fatalf("Claude compatibility metadata = %+v", h)
+	}
+}
+
+func TestLoadPluginHooksPreservesExecutionContract(t *testing.T) {
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, ".reasonix")
+	root := filepath.Join(reasonixHome, "plugins", "hook-contract")
+	writeHookTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
+  "name": "hook-contract",
+  "hooks": {
+    "SessionStart": [
+      {"command":"bin/check","args":[],"shellCommand":true},
+      {"command":"printf 'one' && printf 'two'","shell":"bash"}
+    ]
+  }
+}`)
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name:         "hook-contract",
+		Root:         "plugins/hook-contract",
+		ManifestKind: "native",
+		Enabled:      true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got := Load(LoadOptions{HomeDir: home})
+	if len(got) != 2 {
+		t.Fatalf("hooks = %+v, want two plugin hooks", got)
+	}
+	if got[0].ExecutionMode != ExecutionExec || got[0].Argv == nil || len(got[0].Argv) != 0 {
+		t.Fatalf("empty args hook = %+v, want explicit exec form", got[0])
+	}
+	if want := filepath.Join(root, "bin", "check"); got[0].Command != want {
+		t.Fatalf("exec command = %q, want plugin-relative %q", got[0].Command, want)
+	}
+	if got[1].ExecutionMode != ExecutionShell || got[1].Shell != "bash" ||
+		got[1].Command != "printf 'one' && printf 'two'" {
+		t.Fatalf("shell hook = %+v, want raw Bash shell form", got[1])
 	}
 }
 
@@ -648,6 +920,14 @@ func TestWindowsBatchCommandLineLeavesOtherShellContractsAlone(t *testing.T) {
 	}
 }
 
+func TestWindowsCmdCommandLinePreservesCompoundShellScript(t *testing.T) {
+	command := `"C:\plugins\hook.cmd" "argument with spaces" && echo "chained" | findstr chained`
+	want := `cmd.exe /d /s /c ""C:\plugins\hook.cmd" "argument with spaces" && echo "chained" | findstr chained"`
+	if got := windowsCmdCommandLine(command); got != want {
+		t.Fatalf("cmd command line = %q, want %q", got, want)
+	}
+}
+
 func TestWindowsPOSIXShellPreservesExplicitInterpreterPaths(t *testing.T) {
 	called := false
 	resolve := func() (string, error) {
@@ -738,9 +1018,6 @@ func TestReasonixHomeOverridesGlobalHookPaths(t *testing.T) {
 	if got := GlobalSettingsPath(""); got != filepath.Join(reasonixHome, SettingsFilename) {
 		t.Fatalf("GlobalSettingsPath = %q, want Reasonix home", got)
 	}
-	if got := TrustPath(""); got != filepath.Join(reasonixHome, TrustFilename) {
-		t.Fatalf("TrustPath = %q, want Reasonix home", got)
-	}
 	hooks := Load(LoadOptions{})
 	if len(hooks) != 1 || hooks[0].Command != "echo rx" {
 		t.Fatalf("Load hooks = %+v, want Reasonix home hook only", hooks)
@@ -750,7 +1027,6 @@ func TestReasonixHomeOverridesGlobalHookPaths(t *testing.T) {
 func TestReasonixHomeDoesNotFallBackToLegacyWhenIsolated(t *testing.T) {
 	home := t.TempDir()
 	reasonixHome := filepath.Join(t.TempDir(), "rx-home")
-	proj := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("REASONIX_HOME", reasonixHome)
@@ -761,27 +1037,6 @@ func TestReasonixHomeDoesNotFallBackToLegacyWhenIsolated(t *testing.T) {
 		t.Fatalf("Load hooks = %+v, want empty (isolated REASONIX_HOME must not load legacy hooks)", hooks)
 	}
 
-	absProj, err := filepath.Abs(proj)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, err := json.Marshal(trustFile{Projects: map[string]bool{absProj: true}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	legacyTrust := filepath.Join(home, SettingsDirname, TrustFilename)
-	if err := os.WriteFile(legacyTrust, body, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if IsTrusted(proj, "") {
-		t.Fatal("legacy trust must not be honored when REASONIX_HOME is set and trust.json is absent")
-	}
-	if err := Trust(proj, ""); err != nil {
-		t.Fatalf("Trust: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(reasonixHome, TrustFilename)); err != nil {
-		t.Fatalf("Trust should write current Reasonix home trust file: %v", err)
-	}
 }
 
 func TestProjectDefinesHooks(t *testing.T) {
@@ -1309,8 +1564,13 @@ func TestRunFiltersByEventAndTool(t *testing.T) {
 
 func TestRunClaudePayloadAndDirectArgs(t *testing.T) {
 	hooks := []ResolvedHook{{
-		HookConfig: HookConfig{Command: "/tmp/agent-critter", Argv: []string{"--hook"}, PayloadFormat: "claude"},
-		Event:      PostToolUseFailure,
+		HookConfig: HookConfig{
+			Command:       "/tmp/agent-critter",
+			Argv:          []string{"--hook"},
+			ExecutionMode: ExecutionExec,
+			PayloadFormat: "claude",
+		},
+		Event: PostToolUseFailure,
 	}}
 	var input SpawnInput
 	Run(context.Background(), Payload{
@@ -1318,7 +1578,7 @@ func TestRunClaudePayloadAndDirectArgs(t *testing.T) {
 		ToolName: "bash", ToolArgs: json.RawMessage(`{"command":"false"}`),
 		ToolResult: "remote: denied", Error: "exit 1",
 	}, hooks, func(_ context.Context, in SpawnInput) SpawnResult { input = in; return SpawnResult{ExitCode: 0} })
-	if input.Command != "/tmp/agent-critter" || len(input.Args) != 1 || input.Args[0] != "--hook" {
+	if input.Command != "/tmp/agent-critter" || input.Mode != ExecutionExec || len(input.Args) != 1 || input.Args[0] != "--hook" {
 		t.Fatalf("direct hook input = %+v", input)
 	}
 	var payload map[string]any
@@ -1494,20 +1754,6 @@ func TestRunFiltersPermissionRequestByTool(t *testing.T) {
 	}
 }
 
-func TestTrustStore(t *testing.T) {
-	home := t.TempDir()
-	proj := t.TempDir()
-	if IsTrusted(proj, home) {
-		t.Error("project should start untrusted")
-	}
-	if err := Trust(proj, home); err != nil {
-		t.Fatalf("trust: %v", err)
-	}
-	if !IsTrusted(proj, home) {
-		t.Error("project should be trusted after Trust")
-	}
-}
-
 func TestDefaultSpawner(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uses a POSIX shell")
@@ -1532,6 +1778,40 @@ func TestDefaultSpawner(t *testing.T) {
 	r = DefaultSpawner(ctx, SpawnInput{Command: "sleep 5", Timeout: 100 * time.Millisecond})
 	if !r.TimedOut {
 		t.Errorf("expected timeout, got %+v", r)
+	}
+}
+
+func TestDefaultSpawnerExplicitShellPreservesCompoundScript(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows shell selection is covered by windows_batch_test.go")
+	}
+	r := DefaultSpawner(context.Background(), SpawnInput{
+		Command: `printf '%s' "$HOOK_TEST_MARKER" && printf '%s' '|done'`,
+		Mode:    ExecutionShell,
+		Shell:   "bash",
+		Env:     map[string]string{"HOOK_TEST_MARKER": "shell"},
+		Timeout: realSpawnTimeout,
+	})
+	if r.ExitCode != 0 || r.Stdout != "shell|done" {
+		t.Fatalf("explicit shell-form hook failed: %+v", r)
+	}
+}
+
+func TestPowerShellCommandEncodesScriptWithoutQuoteReparsing(t *testing.T) {
+	command := `Write-Output "a && 'b'"; $value = "C:\Program Files\hook"`
+	cmd := powerShellCommand(context.Background(), "powershell", command)
+	if got, want := cmd.Args[:4], []string{"powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("PowerShell argv prefix = %#v, want %#v", got, want)
+	}
+	decoded, err := decodePowerShellCommandForTest(cmd.Args[4])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := decoded, sandbox.PowerShellUTF8Script(command); got != want {
+		t.Fatalf("decoded command = %q, want %q", got, want)
+	}
+	if strings.Contains(cmd.Args[4], command) {
+		t.Fatalf("raw script leaked into Windows command-line quoting: %#v", cmd.Args)
 	}
 }
 

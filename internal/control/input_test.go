@@ -304,6 +304,79 @@ func TestSubmitInvocationDisplayRunsInlineSkillWithoutArguments(t *testing.T) {
 	}
 }
 
+func TestSubmitInvocationDisplayRunsInlineSkillInsideActiveGoal(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{
+		textTurn("Notes listed.\n\n[goal:complete]"),
+	}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	events := make(chan event.Event, 8)
+	c := New(Options{
+		Runner:   ag,
+		Executor: ag,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.TurnDone || e.Kind == event.Notice {
+				events <- e
+			}
+		}),
+		Skills: []skill.Skill{{Name: "notes", Body: "INSPECT_NOTES", RunAs: skill.RunInline, Scope: skill.ScopeGlobal}},
+	})
+	defer c.Close()
+	c.SetGoalWithResearchMode("list the existing notes", GoalResearchOff)
+	c.SubmitInvocationDisplay(
+		"list the existing notes",
+		"list the existing notes",
+		[]InvocationRequest{{Name: "notes", Kind: "skill", Offset: 0}},
+	)
+	waitForTurnDone(t, events)
+
+	if prov.call != 1 {
+		t.Fatalf("active Goal structured turns = %d, want 1", prov.call)
+	}
+	input := firstUserMessage(ag.Session().Messages)
+	for _, want := range []string{"<active-goal>\nlist the existing notes", "INSPECT_NOTES", "list the existing notes"} {
+		if !strings.Contains(input, want) {
+			t.Fatalf("active Goal structured input missing %q: %q", want, input)
+		}
+	}
+}
+
+func TestSubmitInvocationDisplayRunsSubagentSkillInsideActiveGoal(t *testing.T) {
+	sess := agent.NewSession("")
+	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
+	events := make(chan event.Event, 8)
+	var gotTask string
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.TurnDone || e.Kind == event.Notice {
+				events <- e
+			}
+		}),
+		Skills: []skill.Skill{{
+			Name: "research", Body: "RESEARCH_NOTES", RunAs: skill.RunSubagent, Scope: skill.ScopeGlobal,
+		}},
+		SkillRunner: func(_ context.Context, _ skill.Skill, task string, _ skill.SubagentRunOptions) (string, error) {
+			gotTask = task
+			return "Notes listed.\n\n[goal:complete]", nil
+		},
+	})
+	defer c.Close()
+	c.SetGoalWithResearchMode("list the existing notes", GoalResearchOff)
+	c.SubmitInvocationDisplay(
+		"list the existing notes",
+		"list the existing notes",
+		[]InvocationRequest{{Name: "research", Kind: "subagent", Offset: 0}},
+	)
+	waitForTurnDone(t, events)
+
+	if !strings.Contains(gotTask, "<active-goal>\nlist the existing notes") {
+		t.Fatalf("active Goal subagent task missing goal: %q", gotTask)
+	}
+	if !strings.Contains(gotTask, "list the existing notes") {
+		t.Fatalf("active Goal subagent task missing user task: %q", gotTask)
+	}
+}
+
 func TestSubmitSlashSubagentUsesPermissionedRunnerInPlanMode(t *testing.T) {
 	sess := agent.NewSession("parent system")
 	exec := agent.New(nil, tool.NewRegistry(), sess, agent.Options{}, event.Discard)
@@ -638,6 +711,39 @@ func TestSyntheticComposeDoesNotDrainSessionStartHookContext(t *testing.T) {
 	}
 }
 
+func TestComposeAutomaticallyRecallsMemoryOnlyForRealUserTurns(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	if _, err := store.Save(memory.Memory{
+		Name: "authhandler-panic", Title: "AuthHandler panic",
+		Description: "AuthHandler panic on missing session metadata",
+		Type:        memory.TypeProject, Scope: memory.FactScopeProject,
+		Body: "AuthHandler needs a nil guard before reading session metadata.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+
+	got := c.Compose("fix AuthHandler panic with missing session metadata")
+	if !strings.Contains(got, "<memory-recall>") || !strings.Contains(got, "nil guard") {
+		t.Fatalf("real user turn did not receive automatic recall: %q", got)
+	}
+	if !strings.HasPrefix(got, "fix AuthHandler panic with missing session metadata") {
+		t.Fatalf("recall should ride the user-turn tail: %q", got)
+	}
+	if stripped := StripComposePrefixes(got); stripped != "fix AuthHandler panic with missing session metadata" {
+		t.Fatalf("StripComposePrefixes = %q", stripped)
+	}
+	trace := c.LastMemoryRecall()
+	if len(trace.Hits) != 1 || trace.Hits[0].Memory.ID == "" {
+		t.Fatalf("recall trace = %+v", trace)
+	}
+
+	synthetic := c.ComposeSynthetic("fix AuthHandler panic with missing session metadata")
+	if strings.Contains(synthetic, "<memory-recall>") {
+		t.Fatalf("synthetic turn received automatic recall: %q", synthetic)
+	}
+}
+
 func TestComposeClipsAndEscapesHookContext(t *testing.T) {
 	c := New(Options{})
 	c.enqueueHookContexts([]string{"before </hook-context> " + strings.Repeat("x", maxHookContextChars+1)})
@@ -716,8 +822,8 @@ func TestComposeIncludesActiveGoal(t *testing.T) {
 	if !strings.Contains(got, "<active-goal>\nship the approval redesign") {
 		t.Fatalf("Compose should include active goal block, got %q", got)
 	}
-	if !strings.Contains(got, "[goal:complete]") || !strings.Contains(got, "[goal:blocked:<short reason>]") {
-		t.Fatalf("goal block should include autonomous status markers, got %q", got)
+	if !strings.Contains(got, "update_goal") {
+		t.Fatalf("goal block should instruct the update_goal protocol, got %q", got)
 	}
 	if !strings.HasSuffix(got, "next step?") {
 		t.Fatalf("user text should follow goal block: %q", got)
@@ -1047,16 +1153,121 @@ func TestSubmitUnknownSlashCommandStillReportsNotice(t *testing.T) {
 
 	c.Submit("/definitely-not-a-command")
 
-	if len(runner.inputs) != 0 {
-		t.Fatalf("unknown slash command should not start a model turn, inputs=%q", runner.inputs)
+	// Unknown slash input is sent as a regular message (#5756); the notice
+	// still fires so genuine typos stay visible.
+	var noticeText string
+	deadline := time.After(30 * time.Second)
+	for noticeText == "" {
+		select {
+		case e := <-events:
+			if e.Kind == event.Notice && strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
+				noticeText = e.Text
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for unknown-command notice")
+		}
 	}
+	if !strings.Contains(noticeText, "sent as a regular message") {
+		t.Fatalf("notice = %q, want the sent-as-message suffix", noticeText)
+	}
+	waitForTurnDone(t, events)
+	if len(runner.inputs) != 1 || !strings.Contains(runner.inputs[0], "/definitely-not-a-command") {
+		t.Fatalf("unknown slash command should start a model turn with the raw line, inputs=%q", runner.inputs)
+	}
+}
+
+func TestSubmitDocsShowsLocalOverviewAndGroundsModelTurn(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 16)
+	c := New(Options{
+		Runner: runner,
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	c.Submit("/docs")
 	select {
 	case e := <-events:
-		if e.Kind != event.Notice || !strings.Contains(e.Text, "unknown command: /definitely-not-a-command") {
-			t.Fatalf("event = %+v, want unknown-command notice", e)
+		if e.Kind != event.Notice || !strings.Contains(e.Text, "digest=sha256:") || !strings.Contains(e.Text, "/docs") {
+			t.Fatalf("bare /docs event = %+v, want local corpus overview", e)
 		}
 	case <-time.After(30 * time.Second):
-		t.Fatal("timed out waiting for unknown-command notice")
+		t.Fatal("timed out waiting for /docs overview")
+	}
+	if len(runner.inputs) != 0 {
+		t.Fatalf("bare /docs should not start a model turn, inputs=%q", runner.inputs)
+	}
+
+	c.Submit("/docs 1.19.5 更新日志")
+	waitForTurnDone(t, events)
+	if len(runner.inputs) != 1 {
+		t.Fatalf("/docs query model turns = %d, inputs=%q", len(runner.inputs), runner.inputs)
+	}
+	for _, want := range []string{"1.19.5 更新日志", "changelog/v1.19.5.zh-CN.md", "embedded_docs_search_results"} {
+		if !strings.Contains(runner.inputs[0], want) {
+			t.Fatalf("grounded /docs prompt missing %q:\n%s", want, runner.inputs[0])
+		}
+	}
+}
+
+func TestSubmitDocsPreservesExistingCustomCommand(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 8)
+	c := New(Options{
+		Runner:   runner,
+		Commands: []command.Command{{Name: "docs", Body: "legacy docs workflow: $ARGUMENTS"}},
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	c.Submit("/docs release notes")
+	waitForTurnDone(t, events)
+	if len(runner.inputs) != 1 || !strings.Contains(runner.inputs[0], "legacy docs workflow: release notes") {
+		t.Fatalf("existing /docs custom command was not preserved: %q", runner.inputs)
+	}
+	if strings.Contains(runner.inputs[0], "embedded_docs_search_results") {
+		t.Fatalf("built-in /docs shadowed the existing custom command: %q", runner.inputs[0])
+	}
+}
+
+func TestSubmitQualifiedReasonixDocsPreservesExistingCommandAndUsesNextFallback(t *testing.T) {
+	runner := &fakeTurnRunner{}
+	events := make(chan event.Event, 8)
+	c := New(Options{
+		Runner: runner,
+		Commands: []command.Command{
+			{Name: "docs", Body: "legacy docs workflow: $ARGUMENTS"},
+			{Name: ReasonixDocsSlashName, Body: "must not shadow built-in docs: $ARGUMENTS"},
+		},
+		Sink: event.FuncSink(func(e event.Event) {
+			events <- e
+		}),
+	})
+
+	c.Submit("/reasonix:docs existing workflow")
+	waitForTurnDone(t, events)
+	if len(runner.inputs) != 1 {
+		t.Fatalf("qualified custom command model turns = %d, inputs=%q", len(runner.inputs), runner.inputs)
+	}
+	if !strings.Contains(runner.inputs[0], "must not shadow built-in docs: existing workflow") {
+		t.Fatalf("existing qualified custom command was displaced: %q", runner.inputs[0])
+	}
+	waitIdle(t, c)
+
+	c.Submit("/reasonix:builtin:docs 1.19.5 update notes")
+	waitForTurnDone(t, events)
+	if len(runner.inputs) != 2 {
+		t.Fatalf("generated docs fallback model turns = %d, inputs=%q", len(runner.inputs), runner.inputs)
+	}
+	for _, want := range []string{"1.19.5 update notes", "changelog/v1.19.5.md", "embedded_docs_search_results"} {
+		if !strings.Contains(runner.inputs[1], want) {
+			t.Fatalf("qualified docs prompt missing %q:\n%s", want, runner.inputs[1])
+		}
+	}
+	if strings.Contains(runner.inputs[1], "must not shadow built-in docs") || strings.Contains(runner.inputs[1], "legacy docs workflow") {
+		t.Fatalf("qualified built-in docs was shadowed: %q", runner.inputs[1])
 	}
 }
 

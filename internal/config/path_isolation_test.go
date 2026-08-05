@@ -29,3 +29,20 @@ func TestProcessTestEnvironmentContainsAllUserStatePaths(t *testing.T) {
 		})
 	}
 }
+
+// TestStatsDirResolution pins the stats data root: <state home>/stats, where
+// the state home is REASONIX_STATE_HOME when set and REASONIX_HOME otherwise.
+// Usage records live under the state root — not the install directory, which
+// is replaced on upgrade — so a wrong resolution would silently lose stats.
+func TestStatsDirResolution(t *testing.T) {
+	home := t.TempDir()
+	state := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	if got := StatsDir(); got != filepath.Join(home, "stats") {
+		t.Fatalf("REASONIX_HOME stats dir: want %q, got %q", filepath.Join(home, "stats"), got)
+	}
+	t.Setenv("REASONIX_STATE_HOME", state)
+	if got := StatsDir(); got != filepath.Join(state, "stats") {
+		t.Fatalf("REASONIX_STATE_HOME stats dir: want %q, got %q", filepath.Join(state, "stats"), got)
+	}
+}

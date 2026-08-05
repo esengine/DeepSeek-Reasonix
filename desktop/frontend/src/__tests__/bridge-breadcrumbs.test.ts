@@ -65,7 +65,7 @@ ok(
 const errorStart = snapshotBreadcrumbs().length;
 now = 100;
 try {
-  await app.CheckUpdate();
+  await app.CheckUpdate("");
 } catch {
   // Expected: this branch verifies the breadcrumb emitted by the proxy rejection path.
 }

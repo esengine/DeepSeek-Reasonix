@@ -110,6 +110,25 @@ one mode selector:
 | Tool approval | `ask`, `auto`, `yolo` | `configOptions` with id `tool_approval` |
 
 Use `session/set_config_option` for model, effort, work mode, and tool approval.
+Its parameters are `sessionId`, `configId` and `value`, where `configId` is the
+`id` of the option as advertised in `configOptions`:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "method": "session/set_config_option",
+  "params": {
+    "sessionId": "session-id",
+    "configId": "tool_approval",
+    "value": "yolo"
+  }
+}
+```
+
+Note that the field is `configId`, not `optionId`. The result is the full
+refreshed `configOptions` array. An unknown id returns `-32602 InvalidParams`.
+
 Model, effort, and work-mode changes rebuild the session controller while
 preserving its history and the other axes. Tool-approval changes update the
 gate without rebuilding the controller.
@@ -188,6 +207,30 @@ not Reasonix's internal steer marker.
 On `InvalidRequest`, the guidance was not queued. A client may wait for the
 active prompt to finish and offer the text as a normal new prompt, but it should
 not silently report the failed steer as accepted.
+
+## Runtime reload and extension surface
+
+Reasonix advertises two more extension points in
+`agentCapabilities._meta["reasonix.io"]`:
+
+- `sessionReloadExtensions` — the vendor method
+  `_reasonix.io/session/reloadExtensions`. Calling it reloads the session's
+  agent runtime (extensions, tools, skills, commands, hooks, providers) with
+  the same fail-atomic semantics as the CLI `/reload` command: while a turn
+  or rebuild is active exactly one reload is queued (`{"queued": true}`) and
+  runs when the session goes idle; otherwise the runtime is rebuilt and
+  swapped atomically, and a failed rebuild keeps the previous runtime. After
+  a successful reload Reasonix pushes a fresh `available_commands_update`.
+- `extensionSurface` — structured extension UI support. Clients that also
+  advertise `reasonix.io.extensionSurface` in their initialize `_meta`
+  receive structured extension surface payloads; clients without it receive
+  equivalent text fallbacks (`agent_message_chunk` for cards and statuses,
+  permission requests for extension forms), so no client-side handling is
+  required to stay compatible.
+
+Extension actions declared by installed plugins are exposed as
+`/<plugin>:<action>` in `available_commands_update` and can be invoked like
+any other slash command.
 
 ## Compatibility and cache behavior
 

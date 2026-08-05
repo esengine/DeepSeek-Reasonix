@@ -1,139 +1,120 @@
-# Releasing
+# Releasing Reasonix
 
-How Reasonix ships, who can ship what, and the canary-before-stable flow.
+Reasonix has one user-facing release line: the official `X.Y.Z` version. The
+release engine keeps the proven Stable publication topology: three immutable
+Git tags on one `main-v2` commit and one protected orchestrator.
 
-## Branch model: trunk + tags
+| Surface | Immutable tag | Public result |
+| --- | --- | --- |
+| CLI | `vX.Y.Z` | GitHub Release and Homebrew |
+| npm | `npm-vX.Y.Z` | root and platform packages; `latest`, `canary`, and `next` compatibility aliases |
+| Desktop | `desktop-vX.Y.Z` | signed GitHub Release, immutable R2 directory, and `latest/latest.json` |
 
-- **`main-v2`** is the single development line (the v2 / 1.x trunk). Every PR merges here.
-- **Production is a tag, not a branch.** A release is a tagged snapshot of `main-v2`:
-  `v1.4.0` (CLI), `npm-v1.4.0` (npm), `desktop-v1.4.0` (desktop).
-- **`v1`** is the archived 1.0/legacy line — maintenance only.
-- **Hotfix** an already-released version by branching from its tag, fixing, and tagging again.
+The three tags are implementation identities, not user-selectable channels.
+They must always resolve to the same commit and may never be moved or deleted.
 
-There is no separate "production" or "develop" branch by design — the canary channel
-provides the pre-release buffer instead of a long-lived branch.
+The Go SDK module (`sdk/go`) is versioned independently of the three product
+surfaces: its tags look like `sdk/go/vX.Y.Z` (first: `sdk/go/v1.0.0`) and
+point at the release commit that first shipped the corresponding Extension
+Protocol major. SDK tags do not trigger product releases, do not move, and
+do not change the three-tag contract above.
 
-## Channels
+## Daily release flow
 
-| Surface | Stable | Pre-release buffer |
-|---|---|---|
-| npm | `latest` (current 1.x stable) | `next` (rc), `canary` (`npm i reasonix@canary`) |
-| Desktop | R2 `latest/` pointer + release gateway | R2 `canary/` pointer + release gateway proxy (never on the GitHub releases page) |
+The normal developer path has one version input, one reviewed Notes PR, one
+terminal command, and one environment approval:
 
-A canary build is isolated: it **never** moves `latest` / `next` / desktop `latest/`.
-Testers opt in explicitly. (Desktop builds carry `-X main.channel=canary`; npm versions
-ending in `-canary.N` publish under the `canary` dist-tag.)
+1. Open Actions → **Prepare release** and enter `X.Y.Z`.
+2. Review and merge the generated bilingual release-notes PR.
+3. From an authenticated maintainer checkout, run:
 
-## Who can release what
-
-| Action | Who | Mechanism |
-|---|---|---|
-| **Cut a canary** | any maintainer (write access) | `workflow_dispatch`, runs without a production approval |
-| **Ship stable** | release-tag creators + one configured reviewer | atomically push the three stable tags; the **Release stable** workflow requests one GitHub `release`-environment approval before every channel publishes |
-| **Ship a standalone RC** | release-tag creators + one configured reviewer | push the surface-specific prerelease tag; that one standalone workflow requests one `release` approval |
-
-So a maintainer can dispatch a canary anytime. A stable release pauses once in
-the **Release stable** run until a configured reviewer approves the GitHub
-`release` environment; the CLI, npm, and Desktop jobs then continue without
-another GitHub environment prompt. Windows signing intentionally retains
-separate SignPath confirmations for the AMD64 and ARM64 requests.
-
-> Repo settings backing this: Environments → `release` has the release owners as
-> required reviewers, and the release-tag ruleset restricts
-> `v*`/`npm-v*`/`desktop-v*` creation, update, and deletion. Only the
-> orchestrator and standalone RC/recovery paths reference the protected
-> environment.
-
-The reusable publishers additionally require the stable orchestrator to run on
-the protected stable tag (or protected `main-v2` recovery ref). Normal tag-push
-releases bind the caller workflow commit to the approved SHA. Recovery keeps the
-fixed control-plane workflow on protected `main-v2`, resolves the existing three
-tags to one immutable historical SHA on `main-v2`, and uses that SHA only for the
-actual build and publication checkouts. Every publisher revalidates its remote
-release tag immediately before publication. An unprotected branch cannot claim
-that it already passed the approval job.
-
-Repository `write` access remains a privileged role: GitHub Actions workflows on
-repository branches can access repository-level Actions secrets. Do not grant
-`write` to someone who must be technically unable to publish. A stricter trust
-separation requires moving external publication credentials to protected
-environment secrets or provider-side OIDC/trusted-publishing policies; the
-workflow approval and tag ruleset primarily protect the supported release path
-from accidental or unauthorized invocation.
-
-## The release loop
-
-1. **Develop** — PRs land on `main-v2` (branch auto-deletes on merge).
-2. **Prepare the release notes** — Actions → **Prepare release notes**. Enter the
-   intended version and, when needed, the previous desktop tag. The workflow sends
-   only public merged-PR metadata to DeepSeek, creates equivalent English and Chinese
-   product notes, validates their structure and citations, and opens a review PR.
-   Review and edit that PR like product copy. Once merged, the same catalog entry
-   drives `/changelog/` and both CLI and Desktop GitHub Releases; the desktop
-   app links to that web history from Settings → Updates. A missing catalog
-   entry blocks stable publication.
-3. **Cut a canary** before the intended release (e.g. heading for `1.4.0`):
-   - Desktop: Actions → **Release desktop** → `channel: canary`, `base_version: 1.4.0`
-   - CLI: Actions → **Release npm** → `base_version: 1.4.0`
-   - Publishes `1.4.0-canary.N` to the desktop R2 `canary/` pointer (no GitHub release) and npm `@canary`.
-4. **Test** — testers install `reasonix@canary` (CLI) or grab the desktop canary
-   build from its R2 link, and report bugs.
-5. **Fix** on `main-v2` via PRs; re-cut the canary as needed (`canary.N` bumps).
-   Re-run **Prepare release notes** after material fixes; it updates the same branch
-   and PR without publishing anything.
-6. **Ship stable** when the canary is clean and the release-notes PR is merged —
-   create the three tags locally, then push them atomically:
    ```sh
-   git tag v1.4.0
-   git tag npm-v1.4.0
-   git tag desktop-v1.4.0
-   git push --atomic origin v1.4.0 npm-v1.4.0 desktop-v1.4.0
+   ./scripts/release-stable.sh X.Y.Z
    ```
-   The `v1.4.0` tag starts **Release stable**. Its preflight requires all three
-   tags to exist on the exact current `main-v2` commit, renders the reviewed
-   release notes, and runs the cache guard. It then **waits once for a configured
-   reviewer to approve the GitHub `release` environment** before invoking all
-   three publishers. The approval records the immutable release commit; every
-   publisher checks out that SHA and fails if its remote tag moves afterward.
-   The two Windows signing requests then retain their manual SignPath
-   confirmations as a separate control.
-   A stable `npm-v*` publish moves the `latest` dist-tag automatically (build.mjs)
-   and release-npm.yml verifies it landed. **Do not skip the npm tag**: the stable
-   preflight fails when the matching `npm-v*` or `desktop-v*` tag is missing or
-   points elsewhere. That guard exists because 1.0.0–1.17.5 shipped without
-   stable npm tags and `npm update -g` silently downgraded users to 0.53.2 (#5822).
-   The CLI and npm jobs run concurrently; the CLI's freshness check may warn while
-   npm is still propagating, while release-npm.yml's verify step owns the final
-   assertion. The stable orchestrator finishes with a postflight that verifies
-   both GitHub Releases contain their required assets and npm `latest` exactly
-   matches the approved version; missing artifacts can no longer produce a green
-   stable run.
-7. **Next cycle** — the canary rolls on toward `1.5.0`.
 
-## Notes
+4. Approve the resulting **Release stable** run once in the `release`
+   environment.
+5. Wait for its postflight to verify CLI, npm, Desktop, R2, Homebrew, and the
+   changelog.
 
-- Canary version numbers use the workflow `run_number`, so the desktop and CLI canary
-  numbers differ (e.g. `canary.11` vs `canary.2`). Only monotonicity per channel matters.
-- A stable `-rc` tag (e.g. `npm-v1.4.0-rc.1`) still ships under `next`, not `canary`.
-- Recover an interrupted stable release by dispatching **Release stable** from
-  protected `main-v2` with the existing `vX.Y.Z` tag. Recovery requires the CLI,
-  npm, and Desktop tags to remain aligned on an ancestor of current `main-v2`,
-  then uses the same single approval and postflight. Never move or recreate the
-  published tags to pick up a workflow fix.
-- Windows release signing uses SignPath trusted-build and origin verification.
-  Keep **Use approval process** enabled on `release-signing`: the AMD64 and ARM64
-  requests can each require a manual confirmation after the single GitHub
-  release-environment approval.
-- Desktop in-app updates use R2 first, then the `crash.reasonix.io` desktop release
-  gateway. The gateway resolves the `desktop-v*` release line directly and never uses
-  GitHub's repository-wide `/releases/latest`, because plain `v*` tags are the CLI
-  release line. Stable CLI releases also carry a compatibility `latest.json` asset so
-  older desktop builds that still use GitHub `latest` do not 404.
-- Canary uses R2 plus the same gateway proxy for the `canary/` pointer; it never
-  appears on the GitHub releases page.
-- DeepSeek is an editorial drafting dependency, not a runtime or publishing dependency.
-  The API key is available only to the manually dispatched preparation workflow; tag
-  workflows publish the reviewed JSON already committed to `main-v2` and never call a model.
-- Windows and Linux apply downloaded, minisign-verified artifacts in place. macOS
-  applies in-app only for Developer ID signed and notarized builds; ad-hoc/local
-  builds fall back to the download page.
+If repository policy prevents Actions from opening the Notes PR, the workflow
+still pushes `release-notes/vX.Y.Z` and prints this recoverable handoff:
+
+```sh
+gh pr create --repo esengine/DeepSeek-Reasonix \
+  --base main-v2 --head release-notes/vX.Y.Z --fill
+```
+
+Do not rerun Notes generation merely because PR creation was denied.
+
+## What the tag helper proves
+
+`scripts/release-stable.sh` fails before creating any public ref unless:
+
+- the version is canonical `MAJOR.MINOR.PATCH`;
+- remote `main-v2` is the commit that introduces or updates the complete,
+  reviewed Stable catalog record;
+- exact-commit `main-v2` CI completed successfully;
+- `vX.Y.Z`, `npm-vX.Y.Z`, and `desktop-vX.Y.Z` are all absent.
+
+It then pushes a no-op guard for that exact `main-v2` SHA and all three
+lightweight tags with one atomic Git transaction. If `main-v2` advanced while
+CI was running, the complete transaction is rejected and no version tag is
+consumed. A partial tag set is therefore not a normal failure mode. The
+`vX.Y.Z` event starts the existing protected Stable relay; maintainers do not
+dispatch child CLI, npm, or Desktop publishers.
+
+## Publication and approval
+
+The protected Stable workflow re-resolves all three tags to one SHA on
+`main-v2` history, revalidates that normal candidates introduced their reviewed
+Notes and passed exact-SHA push CI, and runs the cache guard before requesting
+the sole human approval. `main-v2` may safely advance after the atomic tag
+transaction without invalidating that candidate. After approval it performs a
+no-publication SignPath preflight, then runs CLI, npm, and Desktop publishers
+against the immutable candidate.
+
+The npm publisher advances `latest`, `canary`, and `next` to the same official
+version. `canary` and `next` remain only so historical scripts continue to
+install a supported build; they are not testing channels and are not advertised.
+
+No custom GitHub App, App private key, repository-owner setting change, manual
+tag UI, or child-workflow approval is required.
+
+## Recovery
+
+For a partial Stable publication, open **Release stable** on protected
+`main-v2`, enter the existing `vX.Y.Z`, select only the missing surfaces, and
+approve `release` once. Recovery accepts only an immutable three-tag set that
+remains on `main-v2` history. It must reuse matching public content and fail
+closed on conflicting checksums, signatures, manifests, npm provenance, or R2
+objects.
+
+Never move, delete, or recreate a published tag. Ship product corrections as a
+higher patch version.
+
+## Retired prerelease paths
+
+Normal Preview, Canary, and RC publication entrypoints are disabled. Historical
+tags, Releases, package versions, changelog pages, and the final bridge endpoints
+remain available for compatibility, but they do not appear in current download
+navigation or release preparation.
+
+Old CLI and Desktop channel settings resolve to the official line. Frozen
+Preview endpoints continue to lead old clients to the bridge build, which can
+then upgrade to the current official release.
+
+## First release after cutover
+
+For the first release after this change, independently prove:
+
+- the three tags resolve to the reviewed Notes merge SHA;
+- both GitHub Releases contain their complete expected assets;
+- npm root and all six platform packages report that SHA and
+  `latest == canary == next`;
+- R2 immutable and latest manifests are byte-identical and every URL works;
+- Homebrew and reasonix.io show the same version;
+- old bridge clients can upgrade to the official release.
+
+The release is incomplete until every public surface reaches a terminal,
+verified state.

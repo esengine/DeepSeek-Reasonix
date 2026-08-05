@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"reasonix/internal/capdiag"
-	"reasonix/internal/hook"
 	"reasonix/internal/pluginpkg"
 )
 
@@ -31,7 +30,7 @@ func TestCollectStaticNoNetworkSideEffects(t *testing.T) {
 	write(t, filepath.Join(home, ".reasonix", "commands", "hi.md"),
 		"---\ndescription: home hi\n---\nH $ARGUMENTS\n")
 
-	// Untrusted project hooks.
+	// Project hooks load automatically.
 	write(t, filepath.Join(root, ".reasonix", "settings.json"), `{
   "hooks": {
     "PreToolUse": [{"match": "(", "command": "echo bad"}, {"match": ".*", "command": "echo ok"}]
@@ -48,7 +47,7 @@ auto_start = false
 `)
 
 	// Instruction file.
-	write(t, filepath.Join(root, "AGENTS.md"), "# Agents\nUse go test.\n")
+	write(t, filepath.Join(root, "AGENTS.md"), "# Agents\nUse go test.\n@../secret.md\n")
 
 	r := capdiag.Collect(capdiag.Options{
 		Root:            root,
@@ -63,6 +62,13 @@ auto_start = false
 	if r.Live {
 		t.Fatal("static mode must set live=false")
 	}
+	if len(r.MCP.Servers) != 1 {
+		t.Fatalf("MCP servers = %+v, want one effective entry", r.MCP.Servers)
+	}
+	mcp := r.MCP.Servers[0]
+	if !mcp.Effective || mcp.Source != "project_config" || mcp.SourcePath != "<workspace>/reasonix.toml" {
+		t.Fatalf("effective MCP provenance = %+v", mcp)
+	}
 	// Missing convention dirs should not produce warnings.
 	for _, is := range r.Issues {
 		if strings.Contains(is.Message, "missing") && is.Subsystem == "skills" && is.Code != "skill.missing_description" {
@@ -76,7 +82,7 @@ auto_start = false
 	}
 	for _, want := range []string{
 		"skill.shadowed", "skill.missing_description", "command.shadowed",
-		"hook.untrusted_project", "hook.invalid_matcher", "mcp.command_not_found",
+		"hook.invalid_matcher", "mcp.command_not_found", "instruction.import_outside_source",
 	} {
 		if !codes[want] {
 			t.Fatalf("missing issue code %s in %+v", want, codes)
@@ -143,7 +149,7 @@ func TestMissingConventionDirsNoWarning(t *testing.T) {
 	_ = r.Skills.Roots
 }
 
-func TestTrustedProjectHooks(t *testing.T) {
+func TestProjectHooksEnabledByDefault(t *testing.T) {
 	root := t.TempDir()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -151,19 +157,14 @@ func TestTrustedProjectHooks(t *testing.T) {
 	write(t, filepath.Join(root, ".reasonix", "settings.json"), `{
   "hooks": {"Stop": [{"command": "echo done"}]}
 }`)
-	if err := hook.Trust(root, home); err != nil {
-		t.Fatal(err)
-	}
 	r := capdiag.Collect(capdiag.Options{
 		Root: root, HomeDir: home, ReasonixHomeDir: filepath.Join(home, ".reasonix"),
 	})
-	for _, is := range r.Issues {
-		if is.Code == "hook.untrusted_project" {
-			t.Fatalf("trusted project should not warn untrusted: %+v", is)
-		}
-	}
 	if !r.Hooks.TrustedProject {
-		t.Fatal("expected trusted_project")
+		t.Fatal("compatibility field trusted_project should reflect default enablement")
+	}
+	if len(r.Hooks.Entries) != 1 || r.Hooks.Entries[0].Scope != "project" {
+		t.Fatalf("project hook should be diagnosed as active by default: %+v", r.Hooks.Entries)
 	}
 }
 
@@ -214,10 +215,6 @@ func TestUnknownHookEventIsReported(t *testing.T) {
     "NotARealEvent": [{"command": "echo hi"}]
   }
 }`)
-	// Trust so project hooks load into inspect entries.
-	if err := hook.Trust(root, home); err != nil {
-		t.Fatal(err)
-	}
 	r := capdiag.Collect(capdiag.Options{
 		Root: root, HomeDir: home, ReasonixHomeDir: filepath.Join(home, ".reasonix"),
 	})
@@ -231,6 +228,65 @@ func TestUnknownHookEventIsReported(t *testing.T) {
 	if !found {
 		t.Fatalf("expected hook.unknown_event, issues=%+v", r.Issues)
 	}
+}
+
+func TestCollectIgnoresMatchersOnNonToolHookEvents(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, ".reasonix")
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_HOME", reasonixHome)
+	write(t, filepath.Join(reasonixHome, "settings.json"), `{
+  "hooks": {
+    "Stop": [{"match": "(", "command": "echo done"}]
+  }
+}`)
+
+	r := capdiag.Collect(capdiag.Options{
+		Root: root, HomeDir: home, ReasonixHomeDir: reasonixHome,
+	})
+	if len(r.Hooks.Entries) != 1 {
+		t.Fatalf("hook entries = %+v, want one Stop hook", r.Hooks.Entries)
+	}
+	for _, issue := range r.Issues {
+		if issue.Code == "hook.invalid_matcher" {
+			t.Fatalf("non-tool Stop matcher was reported invalid: %+v", issue)
+		}
+	}
+}
+
+func TestCollectRejectsNonRegularPluginContextFile(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, ".reasonix")
+	t.Setenv("HOME", home)
+	t.Setenv("REASONIX_HOME", reasonixHome)
+
+	pluginRoot := filepath.Join(reasonixHome, "plugins", "demo")
+	write(t, filepath.Join(pluginRoot, pluginpkg.NativeManifest), `{
+  "name": "demo",
+  "hooks": {
+    "SessionStart": [{"contextFile": "CLAUDE.md"}]
+  }
+}`)
+	if err := os.MkdirAll(filepath.Join(pluginRoot, "CLAUDE.md"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
+		Name: "demo", Root: "plugins/demo", ManifestKind: "reasonix", Enabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	r := capdiag.Collect(capdiag.Options{
+		Root: root, HomeDir: home, ReasonixHomeDir: reasonixHome,
+	})
+	for _, issue := range r.Issues {
+		if issue.Code == "hook.missing_context_file" {
+			return
+		}
+	}
+	t.Fatalf("expected hook.missing_context_file for context directory, issues=%+v", r.Issues)
 }
 
 func TestPluginPackageCommandsAreReported(t *testing.T) {

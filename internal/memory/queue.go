@@ -1,6 +1,9 @@
 package memory
 
-import "context"
+import (
+	"context"
+	"encoding/json"
+)
 
 // Queue receives a one-line note about a memory change a tool just made, so the
 // controller can fold it into the current turn — taking effect this session
@@ -8,6 +11,10 @@ import "context"
 // read it from their call context the same way background tools read the job
 // manager.
 type Queue interface{ QueueMemory(note string) }
+
+type autoMemoryWriteClaimer interface {
+	ClaimAutoMemoryWrite(args json.RawMessage) bool
+}
 
 type queueKey struct{}
 
@@ -20,4 +27,15 @@ func WithQueue(ctx context.Context, q Queue) context.Context {
 func QueueFromContext(ctx context.Context) (Queue, bool) {
 	q, ok := ctx.Value(queueKey{}).(Queue)
 	return q, ok && q != nil
+}
+
+// ClaimAutoMemoryWriteFromContext consumes a host-issued create-only grant.
+// Manual/approved writes have no claim and retain the legacy update behavior.
+func ClaimAutoMemoryWriteFromContext(ctx context.Context, args json.RawMessage) bool {
+	q, ok := QueueFromContext(ctx)
+	if !ok {
+		return false
+	}
+	claimer, ok := q.(autoMemoryWriteClaimer)
+	return ok && claimer.ClaimAutoMemoryWrite(args)
 }

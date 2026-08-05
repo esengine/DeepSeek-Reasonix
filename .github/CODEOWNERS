@@ -1,3 +1,14 @@
 # Every pull request requests review from the maintainers below.
 # Either maintainer can review and merge any change.
 * @SivanCola @esengine
+
+# Keep the provider-side signing policy and its GitHub control plane under the
+# same explicit review boundary as the machine-readable contract.
+/.signpath/ @SivanCola @esengine
+/.github/workflows/release-stable.yml @SivanCola @esengine
+/.github/workflows/release-stable-trigger.yml @SivanCola @esengine
+/.github/workflows/release-desktop.yml @SivanCola @esengine
+/scripts/complete-signpath-request.ps1 @SivanCola @esengine
+/scripts/package-windows-desktop.sh @SivanCola @esengine
+/scripts/verify-windows-authenticode.ps1 @SivanCola @esengine
+/cmd/signpath-contract/ @SivanCola @esengine

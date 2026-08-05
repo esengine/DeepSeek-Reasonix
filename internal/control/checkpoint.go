@@ -1,7 +1,6 @@
 package control
 
 import (
-	"fmt"
 	"sync"
 
 	"reasonix/internal/checkpoint"
@@ -57,9 +56,9 @@ func (m *checkpointManager) enabled() bool {
 	return m.store != nil
 }
 
-// begin opens a checkpoint for the turn about to run, recording msgIndex as the
-// conversation-rewind boundary. No-op when checkpoints are disabled.
-func (m *checkpointManager) begin(input string, msgIndex int) {
+// beginWithObserver opens a checkpoint and updates the mutation observer's
+// ownership turn for subsequent captures.
+func (m *checkpointManager) beginWithObserver(input string, msgIndex int, obs *checkpoint.MutationObserver) {
 	m.mu.Lock()
 	store := m.store
 	if store == nil {
@@ -70,6 +69,10 @@ func (m *checkpointManager) begin(input string, msgIndex int) {
 	m.turn++
 	m.bound[turn] = msgIndex
 	m.mu.Unlock()
+	if obs != nil {
+		obs.NoteCrossTurnBackgroundWriter(turn)
+		obs.SetOwnershipTurn(turn)
+	}
 	store.Begin(turn, input, msgIndex)
 }
 
@@ -119,18 +122,6 @@ func (m *checkpointManager) fileState(path string) (checkpoint.FileState, bool) 
 	return store.FileState(path)
 }
 
-// restoreCode reverts every file changed at or after turn to its pre-turn
-// content. Errors when checkpoints are disabled.
-func (m *checkpointManager) restoreCode(turn int) (written, deleted []string, err error) {
-	m.mu.Lock()
-	store := m.store
-	m.mu.Unlock()
-	if store == nil {
-		return nil, nil, fmt.Errorf("checkpoints unavailable")
-	}
-	return store.RestoreCode(turn)
-}
-
 // snapshot records a pre-edit file change into the open checkpoint — the
 // executor's pre-edit hook. No-op when disabled.
 func (m *checkpointManager) snapshot(ch diff.Change) {
@@ -144,9 +135,16 @@ func (m *checkpointManager) snapshot(ch diff.Change) {
 
 // truncateFrom renumbers future turns from `turn` and drops every boundary at or
 // after it — the conversation-rewind renumber after the message log is cut back.
-func (m *checkpointManager) truncateFrom(turn int) {
+func (m *checkpointManager) truncateFrom(turn int) error {
 	m.mu.Lock()
 	store := m.store
+	m.mu.Unlock()
+	if store != nil {
+		if err := store.TruncateFrom(turn); err != nil {
+			return err
+		}
+	}
+	m.mu.Lock()
 	m.turn = turn
 	for k := range m.bound {
 		if k >= turn {
@@ -154,9 +152,7 @@ func (m *checkpointManager) truncateFrom(turn int) {
 		}
 	}
 	m.mu.Unlock()
-	if store != nil {
-		store.TruncateFrom(turn)
-	}
+	return nil
 }
 
 // clearBounds drops every boundary after a summarize restructures the log (so
@@ -166,4 +162,11 @@ func (m *checkpointManager) clearBounds() {
 	m.mu.Lock()
 	m.bound = map[int]int{}
 	m.mu.Unlock()
+}
+
+// storeRef returns the live store pointer without holding mu across caller work.
+func (m *checkpointManager) storeRef() *checkpoint.Store {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.store
 }

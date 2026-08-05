@@ -1157,8 +1157,15 @@ func TestTaskToolCarriesRecentKeepIntoSubsessions(t *testing.T) {
 
 func newTestTaskTool(t *testing.T, prov provider.Provider, reg *tool.Registry, sysPrompt, subagentModel, subagentEffort string, resolve func(string, string) (provider.Provider, *provider.Pricing, int, error)) *TaskTool {
 	t.Helper()
-	return NewTaskTool(prov, nil, reg, 20, 0, 0, 0, 0, 0, 0, 0.0, "", sysPrompt, nil, 0, subagentModel, subagentEffort, resolve).
-		WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
+	return NewTaskToolWithOptions(TaskToolOptions{
+		Provider:        prov,
+		ParentRegistry:  reg,
+		MaxSteps:        20,
+		SysPrompt:       sysPrompt,
+		SubagentModel:   subagentModel,
+		SubagentEffort:  subagentEffort,
+		ResolveProvider: resolve,
+	}).WithTranscripts(NewSubagentStore(t.TempDir()), t.TempDir(), "base-model", "base-effort")
 }
 
 type panicProvider struct{ name string }

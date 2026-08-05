@@ -1,243 +1,291 @@
-# Session History and Synthesis Memory Retrieval
+# Context Engine v2: Instructions, Memory, and Retrieval
 
-This document describes the lightweight retrieval layer added for session
-history and saved memories. It is the implementation note behind the `history`
-and `memory` tools, the archive-on-forget behavior, and the fresh human approval
-gate for agent-written memory.
+Context Engine v2 gives Reasonix two durable context layers with different
+authority:
 
-## Goals
+- **Standing instructions** define how the agent must work.
+- **Background memory** stores facts that may help later but can become stale.
 
-- Bring useful past-session context back without injecting dynamic history into
-  the stable system prompt.
-- Keep Reasonix cache-first: stable prompt bytes stay stable across turns, while
-  history and saved facts are fetched on demand.
-- Avoid a heavy retrieval dependency. The implementation is pure Go and does not
-  introduce SQLite, CGO, a vector database, or an embedding model.
-- Make memory trustworthy. Agent-initiated memory writes and archives must be
-  visible to the user and approved every time.
-- Preserve traceability. A wrong memory should stop affecting the agent, but the
-  removed document should remain inspectable.
+Keeping those layers separate is the central design rule. A fact should not
+silently become a command, and a long-lived rule should not depend on retrieval
+finding it at the right moment.
 
-## Non-Goals
+## Choose the right layer
 
-- This is not semantic embedding search. It is lexical retrieval with BM25,
-  tuned for code, commands, error phrases, filenames, and explicit decisions.
-- This does not auto-summarize every session into memory. The `memory` layer is a
-  synthesis cache: only stable conclusions that the user approves become saved
-  documents.
-- Archived memories are not active knowledge. They exist for audit and recovery,
-  not for recall.
+| Put this in | Use it for | Examples |
+| --- | --- | --- |
+| `AGENTS.md`, `REASONIX.md`, or `CLAUDE.md` | Rules that must be present on every relevant turn | required test commands, repository boundaries, review conventions |
+| Project memory | Durable facts that apply only to this workspace | release branch, non-obvious service constraint, project ticket URL |
+| Global memory | A fact that should be available in every workspace | a user preference explicitly chosen as global |
+| Session history | Original wording, tool output, or a decision that is not yet a stable fact | an error from yesterday, an abandoned approach |
 
-## Retrieval Core
+Keep instruction files short. They are part of the cache-stable prompt prefix,
+so every extra paragraph is carried by every turn. Store discoverable facts as
+memory instead.
 
-`internal/retrieval` contains the shared retrieval primitives:
+A minimal project file is usually enough:
 
-- tokenization for Latin words and CJK runes;
-- document-frequency and BM25 scoring;
-- compact snippets around query terms;
-- `KeepTopRelativeScore`, which keeps the best hit but trims weak trailing hits
-  below a relative score floor.
+```markdown
+# Build and verify
 
-The relative score floor is intentionally small (`0.15`) and applied after
-sorting. It prevents common-word-only matches from crowding out the useful hit,
-while still preserving multiple close matches when they are genuinely relevant.
-
-## Session History Tool
-
-The `history` tool is read-only and lives in `internal/history`.
-
-It supports two operations:
-
-- `search`: rank saved session records by BM25.
-- `around`: read a bounded transcript window around a returned hit.
-
-Search input can be scoped:
-
-- `project`: current session directory only.
-- `global`: current session directory, user-global session directory, and
-  compacted-history archive directory.
-
-Search indexes these record kinds by default:
-
-- user text;
-- assistant text;
-- tool inputs;
-- tool errors.
-
-Normal tool output is excluded by default because it can be large and noisy. It
-can be requested explicitly with `kind=["tool_output"]`, optionally filtered by
-`tool_name`.
-
-`around` enforces path confinement. It only accepts paths under the configured
-session or archive roots, so a model cannot use the tool as a general file reader.
-
-When search returns no hits, the tool explicitly tells the agent that zero
-results are not proof that an event never happened. It suggests retrying with
-rarer terms, widening scope, or including tool output only when needed.
-
-## Saved Memory Recall Tool
-
-The `memory` tool is read-only and lives in `internal/memory/recall.go`.
-
-It supports:
-
-- `search`: BM25 over active memory files.
-- `read`: return one full active memory by name.
-- `list`: show the active memory index, optionally filtered by type.
-
-Only active memories from the project memory store participate. Archived memory
-files are excluded from `search`, `read`, and `list`.
-
-The searchable text combines:
-
-- slug/name;
-- title;
-- normalized type;
-- description;
-- body.
-
-This makes short user-facing descriptions useful, while still allowing recall by
-the detailed body when the agent knows a rare phrase from the saved fact.
-
-## Memory as Synthesis Cache
-
-Reasonix treats saved memory as a synthesis cache rather than as a raw transcript
-cache.
-
-The intended workflow is:
-
-1. The agent searches `history` or `memory` when it needs old context.
-2. If retrieval produces a stable reusable conclusion, the agent proposes a
-   `remember` write.
-3. The user reviews and approves or denies the write.
-4. Future sessions can reuse the saved document directly.
-
-This avoids repeatedly paying retrieval cost for the same stable conclusion,
-while keeping the saved set small and auditable.
-
-## Desktop Candidate Suggestions
-
-The desktop Memory page can scan recent local sessions and produce draft
-candidates:
-
-- memory candidates from explicit long-lived preferences, rules, or project
-  conventions in recent user turns;
-- skill candidates from repeated workflow categories across recent sessions.
-
-This is intentionally a suggestion layer, not an automatic writer:
-
-- scanning can be run manually from the Memory page. Users may also enable a
-  desktop UI preference that scans automatically when the Suggestions tab opens;
-- candidates show their proposed body plus short evidence snippets before any
-  write;
-- accepting a memory candidate writes through the controller's active memory
-  path, so the current session gets the same transient turn-tail update as a
-  `remember` write;
-- accepting a skill candidate writes through the normal skill store, preserving
-  skill name validation, scope handling, and no-overwrite behavior.
-
-No candidate scan changes the stable system prompt or provider-visible tool
-schema. Saved memories and created skills become part of the stable prefix only
-through the existing next-session discovery path.
-
-## Archive-on-Forget
-
-`forget` no longer permanently deletes the memory file. It removes the memory
-from the active index and moves the file into `.archive/` with a timestamped
-filename:
-
-```
-.archive/<UTC timestamp>-<name>.md
+- Run `go test ./...` before reporting completion.
+- Do not edit generated files under `desktop/frontend/wailsjs/`.
+- Keep public API changes backward compatible.
 ```
 
-The active store and recall tool ignore archived files. Local management
-surfaces still expose them for traceability:
+In the CLI, `/remember <note>` and `# <note>` directly append a note to the
+project instruction document. They are shortcuts for standing guidance, not the
+agent's background-fact `remember` tool.
 
-- `/memory`;
-- CLI/TUI memory views;
-- desktop memory panel.
+## Instruction resolution
 
-This is important because an incorrect memory can be more disruptive than no
-memory, but a hard delete makes it difficult to audit how the agent reached a
-bad conclusion.
+Reasonix recognizes `REASONIX.md`, `AGENTS.md`, and `CLAUDE.md`, plus matching
+`.local.md` variants. It first loads user-global instruction files from the
+Reasonix home directory. It then walks from the workspace root to the target
+path; at each directory it loads the normal files followed by that directory's
+`.local.md` files.
 
-## Human Approval Contract
+Deeper directories beat broader directories, and a local variant beats normal
+files in the same directory. Later entries therefore win when rules conflict.
+The current user request remains the highest-authority user instruction. Files
+with identical expanded content are deduplicated, preferring the more specific
+source.
 
-Agent-initiated `remember` and `forget` calls require a fresh approval every
-time.
+An instruction file can import another file with a standalone relative line:
 
-The controller treats these tools like plan approval:
+```markdown
+@docs/agent-testing.md
+```
 
-- Auto approval and YOLO/full-access mode do not bypass them.
-- Guardian/safety review cannot allow them on the user's behalf.
-- Session grants and persistent allow rules are not created for them.
-- Pending memory approvals are not drained when the user toggles auto approval.
-- Non-interactive headless runs and sub-agents refuse them instead of treating
-  `Ask` as autonomous allow.
+Imports are expanded deterministically, deduplicated, limited to five levels,
+and confined to the directory owned by the source instruction file. Absolute
+paths, parent escapes, symlink escapes, unreadable imports, and cycles are
+rejected and surfaced as diagnostics rather than silently trusted.
 
-The approval subject is generated from the tool arguments before the
-`ApprovalRequest` event is emitted:
+Use the following command to see the actual result:
 
-- `remember` shows a compact preview of the name/title, normalized type,
-  description, and body.
-- `forget` shows the memory name being archived.
+```text
+/memory instructions
+```
 
-External notification hooks only receive the tool name, not the memory body,
-because notification channels may be less private than the local UI.
+It reports load precedence, scope, target directory, imports, and diagnostics.
+The desktop Context Center exposes the same provenance.
 
-User-initiated memory edits in the desktop panel or CLI remain direct user
-actions and do not go through the agent approval prompt.
+## Background fact model
 
-## Boot Wiring
+Each fact is a Markdown file with:
 
-`internal/boot` registers the tools in the shared registry:
+- an immutable `id`;
+- a monotonic `revision`;
+- `created_at` and `updated_at` timestamps;
+- a human-readable name, title, and description;
+- an independent `type` and `scope`;
+- the Markdown body.
 
-- `history`;
-- `memory`;
-- `remember`;
-- `forget`.
+`type` classifies the content:
 
-The saved memory index still folds into the system prompt once at session start,
-after the base prompt. This preserves the cache-first prefix contract. Mid-session
-memory changes are injected only as transient turn-tail notes and become part of
-the stable prefix on the next session.
+- `user`: user identity or preferences;
+- `feedback`: guidance about how to work and why;
+- `project`: project goals or constraints not already evident in the repository;
+- `reference`: external resources such as URLs or ticket IDs.
 
-## UI and CLI Surfaces
+`scope` controls reach:
 
-Local management surfaces distinguish active and archived memory:
+- `project` is the safe default;
+- `global` must be chosen explicitly.
 
-- Active memories can be searched, read, and used by the agent.
-- Archived memories are read-only audit entries.
-- Candidate suggestions are drafts until the user confirms them.
+Type does not imply scope. Project feedback remains project-local, and a global
+reference remains a reference.
 
-The desktop `Memory()` payload always returns non-nil arrays for docs, facts,
-archives, and scopes. This is a Wails JSON contract: nil Go slices encode as
-`null`, while the frontend expects arrays for `.map` and `.length`.
+When equivalent project and global facts exist, automatic recall uses the
+project fact. Both remain visible in Context Center and `/memory`, with the
+override explained instead of deleting or hiding either source.
 
-## Test Coverage
+For compatibility and first-turn usability, globally scoped `user` and
+`feedback` bodies are snapshotted into a lower-priority stable-guidance section
+at session start. When an equivalent project fact exists, it suppresses that
+global guidance before the stable prefix is built, so project-over-global
+precedence does not depend on a later recall match. Other fact bodies remain
+retrieval-only until relevant.
 
-The change is covered across layers:
+## Automatic recall
 
-- retrieval scoring, snippets, tokenizer behavior, and relative-score trimming;
-- `history` search, global/archive scope, tool input/error indexing,
-  common-word-noise trimming, path confinement, and `around`;
-- `memory` search/read/list, type filtering, 0-result fallback guidance, archived
-  memory exclusion, and validation;
-- archive-on-forget file movement, index updates, timestamp parsing, ordering,
-  and read-only file repair;
-- controller approval behavior under ask/auto/YOLO, including fresh approval and
-  approval-preview visibility;
-- boot-level tool registration and real model tool-call execution;
-- desktop `Memory()` payload shape for active and archived facts;
-- desktop memory/skill candidate generation, confirmation writes, and non-nil
-  suggestion arrays;
-- frontend CSS and TypeScript checks with generated Wails bindings.
+Before each real user turn, Reasonix searches active facts using the raw user
+message. Host-added provider context is not fed back into the query. The selected
+facts are appended to that user turn as a bounded, low-authority suffix; they do
+not mutate the system prompt or tool schema.
 
-## Operational Notes
+Recall is conservative:
 
-- Prefer distinctive search terms: function names, command fragments, error
-  text, ticket IDs, file names, and decision keywords.
-- Use `history` when the original wording or tool output matters.
-- Use `memory` when looking for approved, stable conclusions.
-- Archive wrong facts instead of overwriting them when the old fact should no
-  longer influence the agent and should remain traceable.
+- generic turns such as "continue" do not trigger recall;
+- distinctive lexical matches are ranked with BM25;
+- project facts receive a small relevance preference;
+- stale facts are down-ranked, not silently deleted;
+- equivalent project facts suppress global fallbacks for that recall;
+- global `user` / `feedback` facts already present as stable guidance are not
+  duplicated by automatic recall;
+- at most four facts and 2,400 characters are included by default;
+- fact storage paths are omitted, and home-directory prefixes in snippets are
+  replaced with `<local-home>`.
+
+Freshness depends on fact type:
+
+| Type | Fresh | Current | Stale after |
+| --- | ---: | ---: | ---: |
+| `reference` | 14 days | 45 days | 45 days |
+| `project` | 30 days | 180 days | 180 days |
+| `user`, `feedback` | 90 days | 365 days | 365 days |
+
+Freshness is a warning and ranking signal, not a truth claim. Recalled text
+explicitly tells the model that it may be wrong and cannot override the current
+request or standing instructions.
+
+Inspect the last decision with:
+
+```text
+/memory recall
+```
+
+The trace includes the query, selected IDs and revisions, scores, match reasons,
+freshness, budget use, omitted count, and suppression reason.
+
+The explicit read-only `memory` tool remains available for deeper `search`,
+`read`, and `list` operations. Use `history` instead when exact wording or tool
+output matters.
+
+## Safe writes and confirmation
+
+The ordinary path is zero-configuration. Reasonix may automatically create a
+new memory only when all of these conditions hold:
+
+- the owning controller has the current project store (interactive or top-level
+  headless, never a sub-agent);
+- the type is explicitly `project` or `reference`;
+- the scope is project or omitted;
+- the operation is create-only, not an update;
+- the body is within the automatic-write budget;
+- no credential, secret, private key, or email address is detected;
+- no fact with the same name, title, or description already exists.
+
+The grant is one-shot and the storage layer enforces create-only semantics, so a
+concurrent fact cannot be overwritten after assessment.
+
+Everything else still requires explicit confirmation:
+
+- global facts;
+- `user` preferences and `feedback`;
+- updates to an existing ID or revision;
+- possible duplicates;
+- sensitive or oversized content;
+- every `forget` operation.
+
+Auto and Yolo do not bypass those confirmations. Guardian and permission hooks
+cannot approve them for the user. A top-level headless controller may use only
+the same one-shot low-risk create path above. Sub-agents and headless surfaces
+without the owning scoped controller fail closed; all other memory mutations
+still require an interactive confirmation surface.
+
+Direct edits made by the user in Context Center, `/remember`, restore, and
+recovery commands are already explicit user actions and do not add another
+approval prompt.
+
+## Revisions, archive, and recovery
+
+Updating a fact creates an immutable snapshot of the previous revision. A stale
+`expected_revision` is rejected instead of overwriting a newer edit.
+
+Restoring an old revision does not rewind storage in place. Reasonix copies the
+chosen content into a new, higher revision, preserving a monotonic audit trail:
+
+```text
+/memory revisions <id-or-name>
+/memory restore <id-or-name> <revision>
+```
+
+`forget` removes a fact from active recall and moves it to `.archive/`. Recovery
+accepts only an archive entry owned by the current store, rejects symlink and
+path escapes, refuses ID/name collisions, and never overwrites an active file:
+
+```text
+/memory archived
+/memory recover <archive-path>
+```
+
+Recovered content also becomes a new monotonic revision. Restore and recovery
+apply to the current session through a one-turn tail note, then join the stable
+prefix naturally on the next session.
+
+## Zero-configuration suggestions
+
+Opening the desktop Suggestions tab automatically scans recent local user turns.
+There is no setup toggle. It proposes:
+
+- durable memory candidates from explicit preferences, constraints, and project
+  conventions;
+- Skill candidates from repeated workflow patterns.
+
+Scanning uses original user content, deduplicates against facts from both scopes
+and loaded instruction bodies, and never writes by itself. Every candidate shows
+evidence and must be explicitly accepted. Remote workspaces fail closed:
+Reasonix does not fall back to local sessions or local memory when the remote
+surface cannot provide the feature.
+
+## Management surfaces
+
+Bare `/memory` shows every active fact from both scopes, including ID, revision,
+type, scope, freshness, and storage provenance. Structured completion is
+available in CLI, desktop, and remote workspaces.
+
+| Command | Result |
+| --- | --- |
+| `/memory` | Combined instruction, fact, and archive summary |
+| `/memory instructions` | Precedence, directories, imports, diagnostics |
+| `/memory recall` | Last automatic-recall trace |
+| `/memory revisions <ref>` | Active fact and immutable history |
+| `/memory restore <ref> <revision>` | Restore as a new revision |
+| `/memory archived` | Archived facts and paths |
+| `/memory recover <path>` | Recover an owned archive as a new revision |
+
+Context Center provides the same model visually, including conflicts and
+project-over-global explanations.
+
+## Upgrade compatibility
+
+Context Engine v2 upgrades existing stores without requiring setup:
+
+- legacy facts without IDs receive deterministic `legacy-*` identities;
+- missing revisions start at revision 1;
+- missing scope is inferred from the containing project/global directory;
+- migration is idempotent and writes the new metadata only once;
+- compatibility routing fields keep older clients from moving facts to the
+  wrong directory when versions share a state root;
+- old `MEMORY.md` indexes are treated as derived data and rebuilt from fact
+  files;
+- legacy Memory v5 `<memory-compiler-execution>` transcript blocks remain
+  readable, while the retired `[agent].memory_compiler` setting is removed.
+
+No vector database, embedding service, setup wizard, or re-index command is
+required.
+
+## Cache and privacy contract
+
+- Standing instructions and the derived memory index join the stable prefix at
+  session start.
+- Provider-visible instruction provenance uses stable `workspace/...` and
+  `user/...` labels; absolute source and store paths stay in local diagnostics.
+- Provider-visible memory tool results use stable `project/<name>.md` and
+  `global/<name>.md` references. Those references round-trip directly through
+  read, update, revision, and archive operations, including when both scopes
+  contain the same name; Context Center and local recovery diagnostics retain
+  the real storage paths.
+- Dynamic recall and mid-session changes are appended only to the current user
+  turn.
+- Diagnostics never enter provider requests.
+- Automatic recall omits fact storage paths and redacts home-directory prefixes
+  in snippets.
+- External approval notifications receive the tool name, not memory contents.
+- Remote management uses the remote controller's memory catalog and never reads
+  the desktop machine's local store as a fallback.
+
+This keeps the provider-visible prefix stable while making dynamic context
+observable and recoverable.

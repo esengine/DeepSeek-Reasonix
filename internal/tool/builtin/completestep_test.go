@@ -528,6 +528,62 @@ func TestCompleteStepMatchesParaphrasedCommands(t *testing.T) {
 	}
 }
 
+func TestCompleteStepAcceptsSuccessfulReviewEvidence(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review completed",
+		"evidence":[{"kind":"review","summary":"the built-in review completed"}]}`)); err != nil {
+		t.Fatalf("successful review evidence rejected: %v", err)
+	}
+}
+
+func TestCompleteStepRejectsFailedReviewEvidence(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), false, true))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review completed",
+		"evidence":[{"kind":"review","summary":"the built-in review completed"}]}`)); err == nil {
+		t.Fatal("failed review task must not satisfy review evidence")
+	}
+}
+
+func TestCompleteStepRejectsReviewEvidenceBeforeLatestMutation(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	_, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review completed",
+		"evidence":[{"kind":"review","summary":"the built-in review completed"}]}`))
+	if err == nil || !strings.Contains(err.Error(), "review must be newer and cover the changed result") {
+		t.Fatalf("stale review evidence should be rejected with recovery guidance, got %v", err)
+	}
+}
+
+func TestCompleteStepAcceptsStructuredReviewWithBlockingFindings(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	ledger.Record(evidence.Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+		"kind":"review",
+		"verdict":"block",
+		"reviewed_paths":["changed.go"],
+		"findings":[{"severity":"critical","summary":"must fix","path":"changed.go"}]
+	}`)})
+	ctx := evidence.WithLedger(context.Background(), ledger)
+
+	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
+		"step":"Review code","result":"review found blocking follow-up",
+		"evidence":[{"kind":"review","summary":"structured review completed with a blocking finding"}]}`)); err != nil {
+		t.Fatalf("a blocking verdict should complete the review activity while remaining enforceable by delivery gates: %v", err)
+	}
+}
+
 func TestCompleteStepExplainsFailedCommandReceipt(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.Receipt{ToolName: "bash", Success: false, Command: "ls scripts/test_lines.txt 2>&1"})

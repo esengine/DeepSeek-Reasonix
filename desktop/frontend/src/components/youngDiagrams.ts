@@ -254,7 +254,15 @@ function findYoungCallEnd(src: string, openIdx: number): number {
  * actually parses it as math. If the macro is already inside a math
  * block (the existing common case), just substitute the expanded form.
  */
-export function expandYoungDiagrams(src: string): string {
+export interface YoungDiagramExpansion {
+  source: string;
+  rendered: string;
+}
+
+export function expandYoungDiagrams(
+  src: string,
+  mapExpansion?: (expansion: YoungDiagramExpansion) => string,
+): string {
   let out = "";
   let i = 0;
   // Track whether we're inside a math block. We use a small stack-like
@@ -321,14 +329,19 @@ export function expandYoungDiagrams(src: string): string {
           i = callEnd;
           continue;
         }
+        const replacement = mapExpansion?.({
+          source: src.slice(i, callEnd),
+          rendered: expanded,
+        }) ?? expanded;
+
         // Wrap in `$…$` only if we're outside math. Inside math, the
         // surrounding `$`/`$$` already supplies the math delimiters.
         if (depth === 0) {
           const leadingSep = out.endsWith("$") && !isEscapedDollar(out, out.length - 1) ? " " : "";
           const trailingSep = src[callEnd] === "$" && !isEscapedDollar(src, callEnd) ? " " : "";
-          out += leadingSep + "$" + expanded + "$" + trailingSep;
+          out += leadingSep + "$" + replacement + "$" + trailingSep;
         } else {
-          out += expanded;
+          out += replacement;
         }
         i = callEnd;
         continue;

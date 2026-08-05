@@ -31,6 +31,126 @@ func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	}
 }
 
+func TestLedgerDistinguishesWorkflowSpecificMutation(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("remember", json.RawMessage(`{"body":"ORBIT-42"}`), true, false))
+	if !ledger.HasSuccessfulToolReceipt("remember") {
+		t.Fatal("successful remember receipt was not found")
+	}
+	if ledger.HasSuccessfulMutationOtherThan("remember") {
+		t.Fatal("remember-only mutation was treated as an unrelated workspace mutation")
+	}
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+	if !ledger.HasSuccessfulMutationOtherThan("remember") {
+		t.Fatal("workspace mutation was hidden by the remember allowance")
+	}
+}
+
+func TestLedgerMatchesFreshSuccessfulReviewReceipt(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	if !ledger.HasCompletedReview() {
+		t.Fatal("successful dedicated review tool should verify review evidence")
+	}
+	legacy := NewLedger()
+	legacy.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), true, true))
+	if !legacy.HasCompletedReview() {
+		t.Fatal("successful task(profile=review) should verify review evidence")
+	}
+	failed := NewLedger()
+	failed.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review"}`), false, true))
+	if failed.HasCompletedReview() {
+		t.Fatal("failed review task must not verify review evidence")
+	}
+	background := NewLedger()
+	background.Record(ReceiptFromToolCall("task", json.RawMessage(`{"profile":"review","run_in_background":true}`), true, true))
+	if background.HasCompletedReview() {
+		t.Fatal("starting a background review must not count as a completed review")
+	}
+}
+
+func TestLedgerRejectsReviewBeforeLatestMutation(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	if ledger.HasCompletedReview() {
+		t.Fatal("review evidence before the latest mutation must be stale")
+	}
+}
+
+func TestLedgerRequiresReviewCoverageAfterMutation(t *testing.T) {
+	fresh := NewLedger()
+	fresh.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	fresh.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"changed.go"}`), true, true))
+	fresh.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
+	if !fresh.HasCompletedReview() {
+		t.Fatal("review after reading the latest changed path should count")
+	}
+
+	unrelated := NewLedger()
+	unrelated.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	unrelated.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"other.go"}`), true, true))
+	unrelated.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review something else"}`), true, true))
+	if unrelated.HasCompletedReview() {
+		t.Fatal("review that did not inspect the latest changed path must not count")
+	}
+}
+
+func TestLedgerHostReviewCoverageRequiresContentForEveryPath(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/b.go"}`), true, false))
+	mutation, ok := ledger.LatestSuccessfulMutationIndex()
+	if !ok {
+		t.Fatal("missing mutation index")
+	}
+	ledger.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/a.go"}`), true, true))
+	if ledger.HasHostReviewCoverageAfter(mutation, []string{"internal/a.go", "internal/b.go"}) {
+		t.Fatal("one path read must not cover a two-path change set")
+	}
+	ledger.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/b.go"}`), true, true))
+	if !ledger.HasHostReviewCoverageAfter(mutation, []string{"internal/a.go", "internal/b.go"}) {
+		t.Fatal("fresh reads of every changed path should prove host review coverage")
+	}
+
+	diff := NewLedger()
+	diff.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+	diffMutation, ok := diff.LatestSuccessfulMutationIndex()
+	if !ok {
+		t.Fatal("missing diff mutation index")
+	}
+	diff.Record(Receipt{ToolName: "bash", Success: true, Command: "git diff", OutputBytes: 200})
+	if !diff.HasHostReviewCoverageAfter(diffMutation, []string{"internal/a.go", "internal/b.go"}) {
+		t.Fatal("an output-producing whole git diff should cover the current change set")
+	}
+	for _, command := range []string{"git status --short", "git diff --check"} {
+		insufficient := NewLedger()
+		insufficient.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+		idx, ok := insufficient.LatestSuccessfulMutationIndex()
+		if !ok {
+			t.Fatal("missing insufficient mutation index")
+		}
+		insufficient.Record(Receipt{ToolName: "bash", Success: true, Command: command, OutputBytes: 200})
+		if insufficient.HasHostReviewCoverageAfter(idx, []string{"internal/a.go"}) {
+			t.Fatalf("%q must not count as content review", command)
+		}
+	}
+}
+
+func TestLedgerAcceptsCollectedStructuredReviewReport(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"changed.go"}`), true, false))
+	ledger.Record(Receipt{ToolName: "review_report", Success: true, Args: json.RawMessage(`{
+		"kind":"review",
+		"verdict":"block",
+		"reviewed_paths":["changed.go"],
+		"findings":[{"severity":"critical","summary":"must fix","path":"changed.go"}]
+	}`)})
+	if !ledger.HasCompletedReview() {
+		t.Fatal("a structured report completes the review activity even when its verdict requires follow-up")
+	}
+}
+
 func TestLedgerHasWriteOrCommandSince(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(Receipt{ToolName: "todo_write", Success: true, Todos: []TodoItem{{Content: "edit", Status: "in_progress"}}})
@@ -856,6 +976,7 @@ func TestToolCallMutatesForDeliveryProfile(t *testing.T) {
 		{name: "security_review meta", toolName: "security_review", args: `{"task":"security"}`},
 		{name: "use_capability meta", toolName: "use_capability", args: `{"action":"inspect","capability_id":"mcp-server:github"}`},
 		{name: "test command", toolName: "bash", args: `{"command":"go test ./..."}`},
+		{name: "npx vitest pipeline", toolName: "bash", args: `{"command":"npx vitest run src/lib/foo.test.ts 2>&1 | tail -40"}`},
 		{name: "node syntax check", toolName: "bash", args: `{"command":"node --check app.js"}`},
 		{name: "node syntax check pipeline", toolName: "bash", args: `{"command":"tail -n +2 app.html | head -n 20 | node --check"}`},
 		{name: "node eval stays opaque", toolName: "bash", args: `{"command":"node -e 'console.log(1)'"}`, want: true},
@@ -866,6 +987,9 @@ func TestToolCallMutatesForDeliveryProfile(t *testing.T) {
 		{name: "node test rerun state stays opaque", toolName: "bash", args: `{"command":"node --test --test-rerun-failures=state.json"}`, want: true},
 		{name: "node test cpu profile stays opaque", toolName: "bash", args: `{"command":"node --test --cpu-prof"}`, want: true},
 		{name: "diff review", toolName: "bash", args: `{"command":"git diff --check"}`},
+		{name: "PowerShell network probe does not write workspace", toolName: "bash", args: `{"command":"Test-NetConnection -ComputerName example.com -Port 443"}`},
+		{name: "resolved read-only substitution", toolName: "bash", args: `{"command":"basename \"$(pwd)\""}`},
+		{name: "writer in substitution", toolName: "bash", args: `{"command":"basename \"$(touch out)\""}`, want: true},
 		{name: "formatter write", toolName: "bash", args: `{"command":"gofmt -w internal/a.go"}`, want: true},
 		{name: "file redirect", toolName: "bash", args: `{"command":"printf x > generated.txt"}`, want: true},
 		{name: "compound verification", toolName: "bash", args: `{"command":"go test ./... 2>&1 | tail -20"}`},
@@ -914,6 +1038,13 @@ func TestRunnerWriteOutputFlagsCannotMasqueradeAsVerification(t *testing.T) {
 		"go test -test.gocoverdir=covdir ./...",
 		"gotestsum -- -test.coverprofile=cover.out ./...",
 		"npm test -- --updateSnapshot",
+		"npx vitest run --update",
+		"npx vitest run --update=true",
+		"npx vitest run -u=true",
+		"npx jest --updateSnapshot=true",
+		"npx vitest run --coverage",
+		"npx vitest run --outputFile=result.json",
+		"npx --yes vitest run",
 		"npm test -- --json --outputFile=result.json",
 		"yarn test --outputFile.json=result.json",
 		"pytest --report-log=log.jsonl",
@@ -937,6 +1068,8 @@ func TestRunnerWriteOutputFlagsCannotMasqueradeAsVerification(t *testing.T) {
 		"go test -test.v -test.run TestFoo ./...",
 		"pytest --trace",
 		"npm test -- --json",
+		"npx vitest run src/lib/foo.test.ts 2>&1 | tail -40",
+		"npx jest src/lib/foo.test.ts",
 		"mypy src/",
 		"mypy --strict src/",
 	} {

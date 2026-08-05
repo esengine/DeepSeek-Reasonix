@@ -3,27 +3,15 @@ import Base from '../layouts/Base.astro';
 import SiteHeader from '../components/SiteHeader.astro';
 
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const R2_LATEST = 'https://dl.reasonix.io/latest';
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
-
-let desktopVersion = 'v1.1.0';
-let goVer = '1.1.0';
-try {
-  const r = await fetch(`${R2_LATEST}/latest.json`);
-  if (r.ok) {
-    const d = await r.json();
-    const version = String(d.version || desktopVersion).replace(/^v?/, 'v');
-    desktopVersion = version;
-    goVer = desktopVersion.replace(/^v/, '') || goVer;
-  }
-} catch {}
-const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
+const desktopStableFallback = `${repo}/releases/latest/download`;
+const goVer = 'latest';
 ---
 <Base
   title="Docs — Reasonix"
   titleEn="Docs — Reasonix"
   titleZh="文档 — Reasonix"
-  description="Install Reasonix, start your first session, connect ACP-compatible editors, configure providers and credentials, and understand prefix cache, permissions, sandboxing, MCP plugins, memory, rewind, desktop and bot workflows.">
+  description="Install Reasonix, start your first session, search version-matched embedded docs and release notes, connect ACP-compatible editors, configure providers and credentials, and understand prefix cache, permissions, sandboxing, MCP plugins, memory, rewind, desktop and bot workflows.">
 
   <SiteHeader active="docs" scrolled />
 
@@ -40,7 +28,9 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
         <div class="side-group">
           <span class="gh"><span class="l-en">Daily use</span><span class="l-zh">日常使用</span></span>
           <a href="#cli"><strong><span class="l-en">Commands</span><span class="l-zh">命令与快捷键</span></strong><small><span class="l-en">Slash commands, mouse, Goal</span><span class="l-zh">斜杠命令、鼠标、Goal</span></small></a>
+          <a href="#embedded-docs"><strong><span class="l-en">Built-in docs</span><span class="l-zh">内置文档检索</span></strong><small><span class="l-en">Offline guides and release notes</span><span class="l-zh">离线指南与更新日志</span></small></a>
           <a href="#permissions"><strong><span class="l-en">Approvals</span><span class="l-zh">审批与沙箱</span></strong><small><span class="l-en">Ask, Auto, YOLO, sandbox</span><span class="l-zh">Ask、Auto、YOLO、沙箱</span></small></a>
+          <a href="#extensions"><strong><span class="l-en">Extensions</span><span class="l-zh">扩展与 Sidecar</span></strong><small><span class="l-en">Providers, UI, runtime hooks</span><span class="l-zh">Provider、UI、运行时拦截</span></small></a>
           <a href="#mcp"><strong><span class="l-en">Plugins</span><span class="l-zh">插件 MCP</span></strong><small><span class="l-en">Tools, prompts, resources</span><span class="l-zh">工具、提示词、资源</span></small></a>
           <a href="#acp"><strong><span class="l-en">Editor integration</span><span class="l-zh">编辑器接入</span></strong><small><span class="l-en">ACP sessions and steering</span><span class="l-zh">ACP 会话与回合中引导</span></small></a>
           <a href="#surfaces"><strong><span class="l-en">Desktop &amp; bots</span><span class="l-zh">桌面端与 Bot</span></strong><small><span class="l-en">Use Reasonix from IM</span><span class="l-zh">从 IM 使用 Reasonix</span></small></a>
@@ -57,6 +47,8 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
         <a href={`${repo}/blob/main-v2/docs/GUIDE.md`}><span class="l-en">Guide</span><span class="l-zh">使用指南</span></a>
         <a class="l-en" href={`${repo}/blob/main-v2/docs/ACP.md`}>ACP editor integration</a>
         <a class="l-zh" href={`${repo}/blob/main-v2/docs/ACP.zh-CN.md`}>ACP 编辑器接入</a>
+        <a class="l-en" href={`${repo}/blob/main-v2/docs/EXTENSIONS.md`}>Extensions &amp; sidecars</a>
+        <a class="l-zh" href={`${repo}/blob/main-v2/docs/EXTENSIONS.zh-CN.md`}>扩展与 Sidecar</a>
         <a href={`${repo}/blob/main-v2/docs/CAPABILITY_DIAGNOSTICS.md`}><span class="l-en">Capability diagnostics</span><span class="l-zh">能力诊断</span></a>
         <a href={`${repo}/blob/main-v2/docs/SPEC.md`}><span class="l-en">Engineering spec</span><span class="l-zh">工程规范</span></a>
         <a href={`${repo}/blob/main-v2/docs/CONFIG_PATHS.md`}><span class="l-en">Config paths</span><span class="l-zh">配置路径</span></a>
@@ -77,9 +69,9 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
             <strong><span class="l-en">Control work</span><span class="l-zh">控制执行</span></strong>
             <span><span class="l-en">Use approvals, sandboxing, Goal, and rewind to keep changes manageable.</span><span class="l-zh">用审批、沙箱、Goal 和回退管理改动。</span></span>
           </a>
-          <a href="#mcp">
-            <strong><span class="l-en">Extend tools</span><span class="l-zh">扩展工具</span></strong>
-            <span><span class="l-en">Connect MCP servers, prompts, resources, desktop, and bots.</span><span class="l-zh">连接 MCP server、提示词、资源、桌面端和 Bot。</span></span>
+          <a href="#extensions">
+            <strong><span class="l-en">Extend Reasonix</span><span class="l-zh">扩展 Reasonix</span></strong>
+            <span><span class="l-en">Build sidecars, Providers, UI, prompts, themes, and MCP tools.</span><span class="l-zh">开发 Sidecar、Provider、UI、提示词、主题与 MCP 工具。</span></span>
           </a>
           <a href="#configfile">
             <strong><span class="l-en">Look up details</span><span class="l-zh">查阅细节</span></strong>
@@ -90,7 +82,7 @@ const R2_DESKTOP = `https://dl.reasonix.io/desktop-${desktopVersion}`;
 
       <h2 id="install"><span class="l-en">CLI / TUI</span><span class="l-zh">CLI / TUI</span></h2>
       <p><span class="l-en">Install the terminal app with one command on macOS, Linux, Windows, or WSL. <code>reasonix</code> opens the interactive TUI; <code>reasonix run</code> is the headless automation entry.</span><span class="l-zh">一条命令安装终端应用,支持 macOS、Linux、Windows 或 WSL。<code>reasonix</code> 打开交互式 TUI；<code>reasonix run</code> 用于无界面自动执行。</span></p>
-      <div class="codeblock"><button data-copy="npm i -g reasonix">Copy</button><span class="c"># npm (recommended · 推荐)</span>
+      <div class="codeblock codeblock--copy"><button data-copy="npm i -g reasonix">Copy</button><span class="c"># npm (recommended · 推荐)</span>
 npm i -g reasonix
 
 <span class="c"># Homebrew</span>
@@ -114,39 +106,39 @@ brew install esengine/reasonix/reasonix</div>
           <li><span class="l-en">Scriptable runs through <code>reasonix run</code>, including piped input and explicit model selection.</span><span class="l-zh">可脚本化的 <code>reasonix run</code>,支持管道输入和显式模型选择。</span></li>
         </ul>
       </div>
-      <div class="callout"><span class="ico">!</span><span><span class="l-en">To install the legacy <strong>0.x</strong> version, pin it explicitly with <code>npm i -g reasonix@0.53.2</code>. The commands above, Homebrew, and desktop/release downloads install Reasonix 1.x; the current desktop download build is <strong>v<span class="rxv">{goVer}</span></strong>.</span><span class="l-zh">如需安装 legacy <strong>0.x</strong> 版本,请显式 pin: <code>npm i -g reasonix@0.53.2</code>。上方命令、Homebrew 与桌面端/Release 下载对应 Reasonix 1.x；当前桌面端下载构建为 <strong>v<span class="rxv">{goVer}</span></strong>。</span></span></div>
+      <div class="callout"><span class="ico">!</span><span><span class="l-en">To install the legacy <strong>0.x</strong> version, pin it explicitly with <code>npm i -g reasonix@0.53.2</code>. The commands above, Homebrew, and desktop/release downloads install Reasonix 1.x; the current desktop download build is <strong><span data-release-version="desktop">{goVer}</span></strong>.</span><span class="l-zh">如需安装 legacy <strong>0.x</strong> 版本,请显式 pin: <code>npm i -g reasonix@0.53.2</code>。上方命令、Homebrew 与桌面端/Release 下载对应 Reasonix 1.x；当前桌面端下载构建为 <strong><span data-release-version="desktop">{goVer}</span></strong>。</span></span></div>
 
       <h2 id="desktop"><span class="l-en">Desktop app</span><span class="l-zh">桌面端</span></h2>
       <div class="desktop-panel">
         <div class="desktop-panel-head">
-          <span class="desktop-kicker"><span class="l-en">Native app · v<span class="rxv">{goVer}</span></span><span class="l-zh">原生桌面端 · v<span class="rxv">{goVer}</span></span></span>
+          <span class="desktop-kicker"><span class="l-en">Native app · <span data-release-version="desktop">{goVer}</span></span><span class="l-zh">原生桌面端 · <span data-release-version="desktop">{goVer}</span></span></span>
           <h3><span class="l-en">Use Reasonix with a full desktop workspace</span><span class="l-zh">用完整桌面工作区运行 Reasonix</span></h3>
           <p><span class="l-en">The desktop app runs the same local Reasonix engine as the CLI, with visual sessions, settings, MCP status, memory, checkpoints, tool approvals, and IM bot connections in one place.</span><span class="l-zh">桌面端运行与 CLI 相同的本地 Reasonix 引擎,并把可视化会话、设置、MCP 状态、记忆、检查点、工具审批和 IM Bot 连接集中到一个工作区。</span></p>
         </div>
         <div class="desktop-downloads" aria-label="Desktop downloads">
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-darwin-universal.dmg`} data-desktop-asset="Reasonix-darwin-universal.dmg" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-darwin-universal.dmg`} data-desktop-asset="Reasonix-darwin-universal.dmg" download>
             <strong>macOS</strong>
             <span><span class="l-en">Universal DMG · Apple Silicon + Intel</span><span class="l-zh">通用 DMG · Apple Silicon + Intel</span></span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-windows-amd64-installer.exe`} data-desktop-asset="Reasonix-windows-amd64-installer.exe" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-windows-amd64-installer.exe`} data-desktop-asset="Reasonix-windows-amd64-installer.exe" download>
             <strong>Windows</strong>
             <span><span class="l-en">x64 installer</span><span class="l-zh">x64 安装器</span></span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-linux-amd64.deb`} data-desktop-asset="Reasonix-linux-amd64.deb" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-linux-amd64.deb`} data-desktop-asset="Reasonix-linux-amd64.deb" download>
             <strong>Linux</strong>
             <span><span class="l-en">Debian / Ubuntu .deb</span><span class="l-zh">Debian / Ubuntu .deb</span></span>
           </a>
         </div>
         <div class="desktop-downloads desktop-downloads--secondary" aria-label="Alternate desktop downloads">
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-darwin-arm64.zip`} data-desktop-asset="Reasonix-darwin-arm64.zip" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-darwin-arm64.zip`} data-desktop-asset="Reasonix-darwin-arm64.zip" download>
             <strong>macOS</strong>
             <span>Apple Silicon zip</span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-windows-arm64-installer.exe`} data-desktop-asset="Reasonix-windows-arm64-installer.exe" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-windows-arm64-installer.exe`} data-desktop-asset="Reasonix-windows-arm64-installer.exe" download>
             <strong>Windows</strong>
             <span>ARM64 installer</span>
           </a>
-          <a class="desktop-download" href={`${R2_DESKTOP}/Reasonix-linux-amd64.tar.gz`} data-desktop-asset="Reasonix-linux-amd64.tar.gz" download>
+          <a class="desktop-download" href={`${desktopStableFallback}/Reasonix-linux-amd64.tar.gz`} data-desktop-asset="Reasonix-linux-amd64.tar.gz" download>
             <strong>Linux</strong>
             <span><span class="l-en">Generic amd64 tarball</span><span class="l-zh">通用 amd64 压缩包</span></span>
           </a>
@@ -159,13 +151,13 @@ brew install esengine/reasonix/reasonix</div>
       </div>
       <h3 id="macos-quarantine"><span class="l-en">macOS quarantine warning</span><span class="l-zh">macOS 隔离属性提示</span></h3>
       <p><span class="l-en">Use this only when Reasonix was downloaded from the official site or GitHub release, moved to <code>/Applications</code>, and macOS still says the app cannot be opened, cannot be verified, or is damaged. This removes the quarantine flag that macOS attaches to downloaded apps.</span><span class="l-zh">仅在 Reasonix 来自官网或 GitHub Release、已经放入 <code>/Applications</code>,但 macOS 仍提示“无法打开”“无法验证开发者”或“应用已损坏”时使用。它会移除 macOS 给下载应用附加的隔离属性。</span></p>
-      <div class="codeblock"><button data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button><span class="c"># Quit Reasonix first, then run in Terminal.</span>
+      <div class="codeblock codeblock--copy"><button data-copy="sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app">Copy</button><span class="c"># Quit Reasonix first, then run in Terminal.</span>
 sudo xattr -rd com.apple.quarantine /Applications/Reasonix.app</div>
       <div class="callout"><span class="ico">!</span><span><span class="l-en">Only run this for an official Reasonix app you trust. If the app is installed somewhere else, replace <code>/Applications/Reasonix.app</code> with that exact app path, then reopen Reasonix.</span><span class="l-zh">只对可信的官方 Reasonix 应用执行这条命令。如果安装在其他位置,请把 <code>/Applications/Reasonix.app</code> 替换为实际 app 路径,然后重新打开 Reasonix。</span></span></div>
 
       <h2 id="quickstart"><span class="l-en">Quick start</span><span class="l-zh">快速上手</span></h2>
       <p><span class="l-en">First run is minimal — <code>reasonix setup</code> walks you through picking a provider and key, then saves it under Reasonix home. Then point Reasonix at a repo and start a session:</span><span class="l-zh">首次运行很简单——<code>reasonix setup</code> 引导你选择 provider 并填写密钥,然后保存到 Reasonix home。接着指向仓库、开始会话:</span></p>
-      <div class="codeblock"><button data-copy="cd your-project && reasonix">Copy</button>cd your-project
+      <div class="codeblock codeblock--copy"><button data-copy="cd your-project && reasonix">Copy</button>cd your-project
 reasonix</div>
       <p><span class="l-en">Then just describe the task:</span><span class="l-zh">然后直接描述任务:</span></p>
       <div class="codeblock"><span class="a">›</span> add retry with backoff to the http client
@@ -175,7 +167,7 @@ reasonix</div>
 
       <h2 id="serve"><span class="l-en">Web frontend</span><span class="l-zh">Web 前端</span></h2>
       <p><span class="l-en"><code>reasonix serve</code> starts the same local Reasonix engine behind a browser UI. Use it when you want a desktop-style surface without installing the desktop app, when running Reasonix on a remote development box through a tunnel, or when you want a shareable view of a live session.</span><span class="l-zh"><code>reasonix serve</code> 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、在远程开发机上通过 tunnel 使用,或把当前会话临时共享给浏览器查看。</span></p>
-      <div class="codeblock"><button data-copy="cd your-project && reasonix serve">Copy</button>cd your-project
+      <div class="codeblock codeblock--copy"><button data-copy="cd your-project && reasonix serve">Copy</button>cd your-project
 reasonix serve
 <span class="c"># open http://127.0.0.1:8787</span></div>
       <div class="web-panel">
@@ -188,7 +180,7 @@ reasonix serve
         </ul>
       </div>
       <p><span class="l-en">The default listen address is <code>127.0.0.1:8787</code> with <code>auth_mode = "none"</code>. Keep that for local-only use. If the server is reachable from another machine, enable auth before sharing the URL.</span><span class="l-zh">默认监听 <code>127.0.0.1:8787</code>,认证模式是 <code>auth_mode = "none"</code>。这个默认值只适合本机使用；如果其他机器能访问,请先开启认证再分享 URL。</span></p>
-      <div class="codeblock"><button data-copy="reasonix serve --auth token">Copy</button><span class="c"># token auth prints a share URL with ?token=...</span>
+      <div class="codeblock codeblock--copy"><button data-copy="reasonix serve --auth token">Copy</button><span class="c"># token auth prints a share URL with ?token=...</span>
 reasonix serve --auth token
 reasonix serve --addr 0.0.0.0:8787 --auth token
 
@@ -203,7 +195,7 @@ behind_proxy = true    <span class="c"># only behind a trusted reverse proxy</sp
 
       <h2 id="config"><span class="l-en">Configuration</span><span class="l-zh">配置</span></h2>
       <p><span class="l-en">Reasonix talks directly to configured OpenAI-compatible providers such as DeepSeek or MiMo with your own API keys. Provider config stores only the key name in <code>api_key_env</code>; the actual secret saved by <code>reasonix setup</code> or desktop Settings lives in the global <code>&lt;Reasonix home&gt;/.env</code>.</span><span class="l-zh">Reasonix 使用你自己的 API Key 直连配置好的 OpenAI-compatible provider,例如 DeepSeek 或 MiMo。Provider 配置只在 <code>api_key_env</code> 里记录密钥名称；通过 <code>reasonix setup</code> 或桌面端设置保存的真实密钥会写入全局 <code>&lt;Reasonix home&gt;/.env</code>。</span></p>
-      <div class="codeblock"><button data-copy="reasonix setup">Copy</button>reasonix setup
+      <div class="codeblock codeblock--copy"><button data-copy="reasonix setup">Copy</button>reasonix setup
 <span class="c"># saves provider keys to &lt;Reasonix home&gt;/.env, for example:</span>
 DEEPSEEK_API_KEY=sk-...</div>
       <p><span class="l-en">Project <code>.env</code> files are not provider-key fallbacks. They are only used for workspace-scoped variable expansion in MCP/plugin settings. Persistent options live in the <a href="#configfile">config file</a>.</span><span class="l-zh">项目 <code>.env</code> 不是 provider key 的 fallback。它只用于 MCP/plugin 配置里的工作区级变量展开。持久化选项见<a href="#configfile">配置文件</a>。</span></p>
@@ -216,10 +208,36 @@ DEEPSEEK_API_KEY=sk-...</div>
       <h2 id="cache"><span class="l-en">Prefix cache</span><span class="l-zh">前缀缓存</span></h2>
       <p><span class="l-en">DeepSeek bills cached prefix tokens at a fraction of fresh computation. Most agents waste this: they reorder messages, rewrite summaries mid-session, or inject volatile timestamps — every change invalidates the cache from that point on.</span><span class="l-zh">DeepSeek 对缓存前缀 token 的计费远低于新计算。多数智能体浪费了这一点:重排消息、会话中改写摘要、注入易变的时间戳——任何改动都会让其后的缓存全部失效。</span></p>
       <p><span class="l-en">Reasonix serializes context deterministically and only ever appends. The practical effect: hours-long sessions where 90%+ of every request replays from cache, and input-token cost collapses to ~1/5. See the <a href={`${base}/#how`}>animated walkthrough</a> on the home page.</span><span class="l-zh">Reasonix 以确定性方式序列化上下文,并且永远只追加。实际效果:数小时的会话中每次请求 90% 以上从缓存重放,输入 token 成本降到约 1/5。可在首页查看<a href={`${base}/#how`}>动态演示</a>。</span></p>
+      <p><span class="l-en">Automatic compaction starts at 80% of the model context by default. Desktop Settings and <code>reasonix config compact-ratio</code> share the user-level value; choose 65–85%, or use <code>--local</code> for a project override. Lower values compact earlier and can reduce prefix-cache reuse.</span><span class="l-zh">自动压缩默认在模型上下文达到 80% 时启动。桌面端设置与 <code>reasonix config compact-ratio</code> 共用用户级设置；可在 65–85% 之间选择，也可用 <code>--local</code> 添加项目覆盖。阈值越低越早压缩，也可能降低前缀缓存复用率。</span></p>
 
       <h2 id="permissions"><span class="l-en">Permissions &amp; sandbox</span><span class="l-zh">权限与沙箱</span></h2>
-      <p><span class="l-en">Permissions gate each tool call: <code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; fallback. Read-only tools generally pass; writers fall back to <code>[permissions] mode</code>. Ask is not read-only: an approved writer can still run. The sandbox is the enforced capability boundary. <code>reasonix run</code> stays autonomous but still honours <code>deny</code>.</span><span class="l-zh">权限逐个把关工具调用:<code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; 兜底。只读工具通常放行；写工具回退到 <code>[permissions] mode</code>。Ask 不是只读：writer 获得批准后仍会执行；沙箱才是强制能力边界。<code>reasonix run</code> 自主运行,但仍遵守 <code>deny</code>。</span></p>
+      <p><span class="l-en">Permissions gate each tool call: <code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; fallback. Read-only tools generally pass; writers fall back to <code>[permissions] mode</code>. Ask is not read-only: an approved writer can still run. The sandbox is the enforced capability boundary. Headless <code>reasonix run</code> defaults to Ask and fails closed when a writer needs approval; use <code>-y</code>, <code>--auto</code>, or <code>--permission-mode auto</code> for intentional unattended writes. <code>[permissions] allow_dynamic_bash = true</code> is an advanced opt-in that lets an Allow fallback cover nested or indirect Bash. Explicit ask and deny rules still apply.</span><span class="l-zh">权限逐个把关工具调用:<code>deny</code> &gt; <code>ask</code> &gt; <code>allow</code> &gt; 兜底。只读工具通常放行；写工具回退到 <code>[permissions] mode</code>。Ask 不是只读：writer 获得批准后仍会执行；沙箱才是强制能力边界。无界面的 <code>reasonix run</code> 默认使用 Ask，写操作需要审批时会安全拒绝；要显式启用无人值守写入，请使用 <code>-y</code>、<code>--auto</code> 或 <code>--permission-mode auto</code>。高级用户可设置 <code>[permissions] allow_dynamic_bash = true</code>，让 Allow fallback 覆盖嵌套或间接 Bash。显式 ask 与 deny 规则仍然生效。</span></p>
       <p><span class="l-en">The sandbox is enforcement: file-writers refuse any path outside <code>[sandbox] workspace_root</code> (default: the current dir), resolving symlinks and <code>..</code> so a link cannot tunnel out. <code>bash = "enforce"</code> jails shell commands when an OS sandbox backend is available (Seatbelt on macOS, bubblewrap on Linux); without one, bash is refused instead of running unconfined. Install the backend or set <code>bash = "off"</code> to explicitly restore the pre-1.16 unconfined behavior.</span><span class="l-zh">沙箱负责强制执行:写文件工具拒绝 <code>[sandbox] workspace_root</code>(默认当前目录)之外的任何路径,并解析符号链接与 <code>..</code>,防止借链接逃逸。<code>bash = "enforce"</code> 会在存在 OS 沙箱后端时隔离 shell 命令（macOS Seatbelt、Linux bubblewrap）；没有后端时会拒绝执行 bash，而不是非隔离运行。安装对应后端，或显式设置 <code>bash = "off"</code> 来恢复 1.16 之前的非隔离行为。</span></p>
+
+      <h2 id="extensions"><span class="l-en">Extensions &amp; sidecars</span><span class="l-zh">扩展与 Sidecar</span></h2>
+      <p><span class="l-en">Plugin packages have two layers. Declarative contributions ship skills, agents, commands, prompts, hooks, MCP servers, and themes. A Manifest v1 <code>runtime</code> adds an out-of-process Sidecar speaking the stable Extension Protocol v1; it can intercept runtime events, own replacement strategies, contribute streaming model Providers, and publish structured UI.</span><span class="l-zh">插件包分为两层：声明式贡献可以分发 skills、agents、commands、prompts、hooks、MCP server 与主题；Manifest v1 的 <code>runtime</code> 则启动独立 Sidecar，通过稳定的 Extension Protocol v1 拦截运行时事件、持有替换策略、提供流式模型 Provider，并发布结构化 UI。</span></p>
+      <div class="doc-choice-grid">
+        <div>
+          <strong><span class="l-en">MCP or Extension Protocol?</span><span class="l-zh">MCP 还是 Extension Protocol？</span></strong>
+          <p><span class="l-en">Use MCP for portable tools, prompts, and resources. Use a code extension when the feature must participate in the Agent lifecycle, replace host behavior, provide models, or render native surfaces.</span><span class="l-zh">可移植的工具、提示词与资源优先使用 MCP；需要进入 Agent 生命周期、替换宿主行为、提供模型或原生界面时，才使用代码型扩展。</span></p>
+        </div>
+        <div>
+          <strong><span class="l-en">Stable and cache-aware</span><span class="l-zh">稳定且缓存友好</span></strong>
+          <p><span class="l-en">Each turn pins one runtime generation. Sidecars initialize with four-way concurrency inside one shared 30-second startup budget. No-op reloads keep the prompt prefix byte-identical; stable replacements remain cacheable, while per-turn timestamps or random values in prompts and schemas destroy reuse.</span><span class="l-zh">每个回合固定使用一个 runtime generation；Sidecar 最多 4 路并行初始化，并共享 30 秒总启动预算。空操作重载保持提示词前缀字节不变；稳定替换仍可缓存，把时间戳或随机值逐回合写入提示词与 Schema 则会破坏复用。</span></p>
+        </div>
+      </div>
+      <p><span class="l-en">The repository includes a complete starter with its manifest, Go Sidecar, build commands, linked installation, reload loop, and visible input rewrite:</span><span class="l-zh">仓库提供了完整 starter，包含 Manifest、Go Sidecar、构建命令、链接安装、重载循环与可观察的输入改写：</span></p>
+      <div class="codeblock">git clone https://github.com/esengine/DeepSeek-Reasonix.git
+cd DeepSeek-Reasonix/sdk/go/examples/starterextension
+go build -o bin/starter-extension.exe .
+plugin_root="$(pwd -P)"
+reasonix plugin install "$plugin_root" --dry-run
+reasonix plugin install "$plugin_root" --link --replace --yes
+<span class="c"># Start a session, or reload while idle</span>
+/reload</div>
+      <p><span class="l-en">On Windows PowerShell, set <code>$pluginRoot = (Resolve-Path .).Path</code> and pass <code>$pluginRoot</code> to both install commands. Then send <code>starter: explain sidecars</code> to verify the intercept. The first public Go SDK release is <code>sdk/go/v1.0.0</code>; before that immutable tag exists, use the starter from a source checkout.</span><span class="l-zh">Windows PowerShell 请先设置 <code>$pluginRoot = (Resolve-Path .).Path</code>，再把 <code>$pluginRoot</code> 传给两条安装命令。随后发送 <code>starter: 解释 Sidecar</code> 验证拦截。Go SDK 的首个公开版本是 <code>sdk/go/v1.0.0</code>；该不可变标签发布前，请直接从源码 checkout 使用 starter。</span></p>
+      <div class="callout"><span class="ico">!</span><span><span class="l-en"><strong>Full trust:</strong> a code Sidecar runs outside the Reasonix sandbox with the inherited environment and can override permission decisions. Dry-run the install, review the runtime command and declared capabilities, and install only code you trust completely.</span><span class="l-zh"><strong>完全信任：</strong>代码型 Sidecar 运行在 Reasonix Sandbox 之外，继承宿主环境并可覆盖权限决定。请先 dry-run，检查 Runtime 命令与声明能力，只安装完全信任的代码。</span></span></div>
+      <p><span class="l-en">Continue with the <a href={`${repo}/blob/main-v2/docs/EXTENSIONS.md`}>extension guide</a>, <a href={`${repo}/blob/main-v2/docs/PLUGIN_PACKAGES.md#manifest-v1-extensions`}>Manifest v1 reference</a>, <a href={`${repo}/blob/main-v2/sdk/go/README.md`}>Go SDK</a>, and <a href={`${repo}/blob/main-v2/docs/EXTENSION_PROTOCOL.md`}>wire protocol</a>.</span><span class="l-zh">后续请阅读<a href={`${repo}/blob/main-v2/docs/EXTENSIONS.zh-CN.md`}>扩展指南</a>、<a href={`${repo}/blob/main-v2/docs/PLUGIN_PACKAGES.zh-CN.md#manifest-v1扩展`}>Manifest v1 参考</a>、<a href={`${repo}/blob/main-v2/sdk/go/README.md`}>Go SDK</a>和<a href={`${repo}/blob/main-v2/docs/EXTENSION_PROTOCOL.zh-CN.md`}>线协议</a>。</span></p>
 
       <h2 id="mcp"><span class="l-en">Plugins (MCP)</span><span class="l-zh">插件(MCP)</span></h2>
       <p><span class="l-en">Reasonix is an MCP client. A <code>[[plugins]]</code> entry's <code>type</code> selects the transport: <code>stdio</code> launches a local subprocess, while <code>http</code> connects to a Streamable HTTP server with optional headers expanded from the environment. Tools surface to the model as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>.</span><span class="l-zh">Reasonix 是一个 MCP 客户端。<code>[[plugins]]</code> 条目的 <code>type</code> 选择传输方式：<code>stdio</code> 启动本地子进程；<code>http</code> 连接 Streamable HTTP server,可从环境变量展开静态 headers。工具以 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 呈现给模型。</span></p>
@@ -238,7 +256,7 @@ headers = &#123; Authorization = "Bearer $&#123;STRIPE_KEY&#125;" &#125;</div>
 
       <h2 id="acp"><span class="l-en">Editor integration (ACP)</span><span class="l-zh">编辑器接入（ACP）</span></h2>
       <p><span class="l-en">Reasonix implements Agent Client Protocol (ACP) v1 as an NDJSON JSON-RPC 2.0 agent over stdio. An ACP-compatible editor or host starts <code>reasonix acp</code>, opens workspace-scoped sessions, and receives streamed messages, tool activity, plans, permission requests, and configuration updates.</span><span class="l-zh">Reasonix 实现了 Agent Client Protocol（ACP）v1，通过 stdio 提供 NDJSON JSON-RPC 2.0 agent。兼容 ACP 的编辑器或 host 启动 <code>reasonix acp</code>、打开工作区会话，并接收流式消息、工具活动、计划、权限请求和配置更新。</span></p>
-      <div class="codeblock"><button data-copy="reasonix acp">Copy</button>reasonix acp                    <span class="c"># use the configured default model</span>
+      <div class="codeblock codeblock--copy"><button data-copy="reasonix acp">Copy</button>reasonix acp                    <span class="c"># use the configured default model</span>
 reasonix acp --model &lt;name&gt;     <span class="c"># choose the startup model</span>
 reasonix acp --profile delivery <span class="c"># economy | balanced | delivery</span></div>
       <div class="doc-choice-grid">
@@ -262,13 +280,20 @@ reasonix acp --profile delivery <span class="c"># economy | balanced | delivery<
       <h2 id="cli"><span class="l-en">CLI &amp; slash commands</span><span class="l-zh">命令行与斜杠命令</span></h2>
       <div class="codeblock">reasonix setup            <span class="c"># first-run: pick provider + keys</span>
 reasonix                  <span class="c"># interactive session, prompts before writes</span>
-reasonix run "&lt;task&gt;"     <span class="c"># autonomous run, honours deny rules</span>
+reasonix run "&lt;task&gt;"     <span class="c"># headless Ask; writers fail closed</span>
+reasonix run -y "&lt;task&gt;"  <span class="c"># opt into unattended ordinary writes</span>
 reasonix serve            <span class="c"># browser UI at 127.0.0.1:8787</span>
 reasonix bot doctor       <span class="c"># check saved IM bot connections</span></div>
+      <div class="codeblock">reasonix config compact-ratio              <span class="c"># effective value + source</span>
+reasonix config compact-ratio 75           <span class="c"># user-global default</span>
+reasonix config compact-ratio --local 75   <span class="c"># project override</span></div>
+      <p><span class="l-en">Run <code>reasonix upgrade</code> to install the latest official release. Legacy channel arguments and saved channel settings remain accepted during the 1.x compatibility period, but they resolve to the same official release and are removed when configuration is saved.</span><span class="l-zh">运行 <code>reasonix upgrade</code> 安装最新正式版。1.x 兼容期内仍接受旧渠道参数与已保存设置，但它们都会解析为同一正式版，并在下次保存配置时移除。</span></p>
+      <div class="codeblock">reasonix upgrade
+reasonix upgrade</div>
       <p><span class="l-en">Inside a session, slash commands run locally — <code>/help</code> lists them all:</span><span class="l-zh">会话中,斜杠命令在本地运行——<code>/help</code> 列出全部:</span></p>
       <div class="codeblock">/compact   /new      /clear    /rewind   /tree
 /branch    /switch   /todo     /model    /mouse   /mcp
-/skills    /hooks    /memory   /sandbox
+/skills    /hooks    /memory   /sandbox  /docs
 /language  /theme    /work-mode /paste-image /goal
 /reasoning-language /output-style /help</div>
       <p><span class="l-en"><code>Shift+Tab</code> cycles Ask → Auto → Plan, while <code>Ctrl+Y</code> toggles YOLO independently. Use <code>/theme auto|light|dark</code> for the terminal background mode or choose a named accent from bare <code>/theme</code>. Long drafts grow and then scroll inside the composer; wheel events over the transcript continue to scroll the conversation.</span><span class="l-zh"><code>Shift+Tab</code> 按 Ask → Auto → Plan 循环，<code>Ctrl+Y</code> 独立切换 YOLO。用 <code>/theme auto|light|dark</code> 选择终端背景模式，也可从不带参数的 <code>/theme</code> 中选择命名强调色。长草稿会先增长，超过上限后在输入框内滚动；鼠标位于 transcript 时仍滚动对话。</span></p>
@@ -276,8 +301,17 @@ reasonix bot doctor       <span class="c"># check saved IM bot connections</span
       <p><span class="l-en">Mouse capture is on by default so Reasonix can handle transcript selection, wheel scroll, and the scrollbar. Turn it off with <code>/mouse</code>, or start with <code>REASONIX_DISABLE_MOUSE=1</code>, when you prefer the terminal's own selection behavior.</span><span class="l-zh">默认会开启鼠标接管，用于对话选中、滚轮滚动和滚动条。需要终端自己的选中行为时，用 <code>/mouse</code> 关闭；也可以用 <code>REASONIX_DISABLE_MOUSE=1</code> 默认关闭。</span></p>
       <p><span class="l-en">In a local session, releasing an in-app text selection copies through the native system clipboard and shows success only after the write completes. SSH falls back to a clearly labelled OSC 52 request. Text paste remains your terminal's bracketed-paste shortcut, such as <code>Cmd+V</code> on macOS. Image paste is separate: use <code>Ctrl+V</code> on macOS/Linux, <code>Alt+V</code> on Windows, or <code>/paste-image</code>; the footer shows <code>Pasting image…</code> while the attachment is prepared.</span><span class="l-zh">本地会话中，应用内文本选区会写入系统剪贴板，只有写入完成后才提示成功；SSH 会回退到明确标记的 OSC 52 请求。文本继续使用终端原生 bracketed-paste 快捷键，例如 macOS 的 <code>Cmd+V</code>。图片粘贴使用独立入口：macOS/Linux 按 <code>Ctrl+V</code>，Windows 按 <code>Alt+V</code>，或运行 <code>/paste-image</code>；附件准备期间底栏显示“正在粘贴图片…”。</span></p>
       <p><span class="l-en"><code>/branch [name]</code> forks the current conversation tip, <code>/switch &lt;id|name&gt;</code> loads another branch, and <code>/clear</code> confirms before discarding unsaved context. Custom commands are Markdown files under <code>.reasonix/commands/</code> or <code>~/.reasonix/commands/</code>.</span><span class="l-zh"><code>/branch [name]</code> 从当前会话尖端分叉,<code>/switch &lt;id|name&gt;</code> 加载另一条分支,<code>/clear</code> 会确认后丢弃未保存上下文。自定义命令是 <code>.reasonix/commands/</code> 或 <code>~/.reasonix/commands/</code> 下的 Markdown 文件。</span></p>
-      <p><span class="l-en"><code>/goal</code> is for long-running objectives. Ordinary chat never changes mode automatically. Normal goals stay lightweight; clearly long-horizon work can use the AutoResearch strategy, which keeps state under <code>.reasonix/autoresearch/...</code>, tracks evidence, and forces a new direction when progress stalls. Use <code>/goal --research &lt;objective&gt;</code> to force it or <code>/goal --simple &lt;objective&gt;</code> to keep the lightweight path. AutoResearch is a Goal strategy, not a separate app-start daemon or standalone built-in skill.</span><span class="l-zh"><code>/goal</code> 用于长目标。普通聊天不会自动切换模式。普通 goal 保持轻量；明显长周期的任务可以启用 AutoResearch 策略，在 <code>.reasonix/autoresearch/...</code> 下保存状态、记录证据，并在进展停滞时强制换方向。用 <code>/goal --research &lt;目标&gt;</code> 强制启用，或用 <code>/goal --simple &lt;目标&gt;</code> 保持轻量路径。AutoResearch 是 Goal 的策略，不是 App 启动即运行的 daemon，也不是独立内置 skill。</span></p>
+      <p><span class="l-en"><code>/goal</code> is for long-running objectives. Ordinary chat never changes mode automatically. Goals run under a per-class budget (simple 10 turns / 200k tokens, write 20 turns / 400k tokens, AutoResearch 40 turns / 800k tokens; 4 turns without host-verifiable progress pause) — <code>/goal status</code> shows the runtime, <code>/goal pause</code> suspends, <code>/goal resume</code> continues (budget pauses add one more slice). Each goal turn ends with a structured <code>update_goal</code> report (continue/complete/blocked) that the host validates against Delivery readiness; without a report, an independent bounded evaluator judges the turn once and any failure pauses safely. Clearly long-horizon work can use the AutoResearch strategy, which keeps state under <code>.reasonix/autoresearch/...</code>, tracks evidence, and forces a new direction when progress stalls. Use <code>/goal --research &lt;objective&gt;</code> to force it or <code>/goal --simple &lt;objective&gt;</code> to keep the lightweight path. AutoResearch is a Goal strategy, not a separate app-start daemon or standalone built-in skill.</span><span class="l-zh"><code>/goal</code> 用于长目标。普通聊天不会自动切换模式。Goal 按类别运行在预算内（简单 10 轮 / 20 万 token，写入型 20 轮 / 40 万 token，AutoResearch 40 轮 / 80 万 token；连续 4 轮无宿主可验证进展会暂停）——<code>/goal status</code> 显示运行摘要，<code>/goal pause</code> 暂停，<code>/goal resume</code> 继续（预算型暂停追加一档额度）。每个目标 turn 结束时通过结构化的 <code>update_goal</code> 报告（continue/complete/blocked），宿主会用 Delivery readiness 校验；没有报告时由独立有界 evaluator 判定一次，任何故障都会安全暂停。明显长周期的任务可以启用 AutoResearch 策略，在 <code>.reasonix/autoresearch/...</code> 下保存状态、记录证据，并在进展停滞时强制换方向。用 <code>/goal --research &lt;目标&gt;</code> 强制启用，或用 <code>/goal --simple &lt;目标&gt;</code> 保持轻量路径。AutoResearch 是 Goal 的策略，不是 App 启动即运行的 daemon，也不是独立内置 skill。</span></p>
       <p><span class="l-en">Use <code>@path</code> to inject files or directories, and <code>@server:uri</code> for MCP resources. Plan Mode is an explicit user choice: select it in the desktop collaboration control or cycle to it with <code>Shift+Tab</code> in the CLI. <code>reasonix config reasoning-language auto|zh|en</code> updates the user default from scripts; <code>--local</code> remains available for settings that support project-local overrides.</span><span class="l-zh">用 <code>@path</code> 注入文件或目录,用 <code>@server:uri</code> 引入 MCP resource。计划模式始终由用户显式选择：桌面端在协作方式中选择，CLI 用 <code>Shift+Tab</code> 切换。脚本中可用 <code>reasonix config reasoning-language auto|zh|en</code> 更新用户级默认值；<code>--local</code> 仍可用于支持项目级覆盖的设置。</span></p>
+
+      <h2 id="embedded-docs"><span class="l-en">Built-in documentation search</span><span class="l-zh">内置文档检索</span></h2>
+      <p><span class="l-en">Every CLI and Desktop release bundles the reviewed Markdown guides and release-note catalog from that exact source revision. Search is local and offline, and every result identifies the product version, source revision, and corpus digest. Release CI rejects a build when its embedded corpus does not match the release candidate, so an installed version keeps version-matched guidance instead of silently switching to newer website content.</span><span class="l-zh">每个 CLI 与桌面端版本都会内置该源码 revision 对应的、经过审查的 Markdown 指南和更新日志目录。检索完全在本地离线完成，每条结果都会标明产品版本、源码 revision 与语料 digest。发布 CI 会拒绝内置语料与候选版本不匹配的构建，因此已安装版本始终使用与自身版本匹配的说明，不会静默切换到更新的官网内容。</span></p>
+      <div class="codeblock">/docs                              <span class="c"># corpus version, revision, digest, and examples</span>
+/docs 1.19.5 changelog             <span class="c"># search locally, then answer with the configured AI</span>
+/docs 1.19.5 更新日志               <span class="c"># 中文问题会优先返回中文证据</span></div>
+      <p><span class="l-en">Bare <code>/docs</code> only displays local corpus information and does not call a model. With a question, Reasonix retrieves version-matched evidence first, then asks the AI configured for the current session to produce a sourced answer. Ordinary natural-language questions can also trigger the read-only <code>docs</code> tool automatically, but the slash command guarantees retrieval before the answer instead of relying on the model to choose the tool.</span><span class="l-zh">直接输入 <code>/docs</code> 只显示本地语料信息，不调用模型。带问题时，Reasonix 会先检索与版本匹配的证据，再交给当前会话配置的 AI 生成带来源的回答。普通自然语言问题也可能自动触发只读 <code>docs</code> 工具；斜杠命令则保证先检索再回答，不依赖模型自行决定是否调用工具。</span></p>
+      <div class="callout"><span class="ico">i</span><span><span class="l-en">Custom commands and compatible plugin or skill aliases keep ownership of <code>/docs</code>. If it is already taken, choose the built-in entry shown in the slash menu—normally <code>/reasonix:docs</code>, or the next free <code>reasonix:</code>-qualified name. Reasonix never overwrites the existing command. CLI and Desktop use the same rule; a remote Desktop displays the command catalog resolved by its host.</span><span class="l-zh">自定义命令以及兼容插件或 Skill 别名会继续拥有 <code>/docs</code>。如果该名称已被占用，请使用斜杠菜单中显示的内置入口——通常是 <code>/reasonix:docs</code>，或下一个空闲的 <code>reasonix:</code> 限定名。Reasonix 不会覆盖已有命令。CLI 与桌面端遵循同一规则；远程桌面端显示由主机解析后的命令目录。</span></span></div>
+      <p><span class="l-en">For the complete retrieval contract, corpus filters, tool schema, and maintainer release checks, see the <a href={`${repo}/blob/main-v2/docs/GUIDE.md#embedded-documentation-retrieval`}>full guide</a> and <a href={`${repo}/blob/main-v2/docs/TOOL_CONTRACT.md`}>tool contract</a>.</span><span class="l-zh">完整检索约定、语料筛选、工具 schema 与维护者发版检查见<a href={`${repo}/blob/main-v2/docs/GUIDE.zh-CN.md#内置文档检索`}>完整指南</a>和<a href={`${repo}/blob/main-v2/docs/TOOL_CONTRACT.zh-CN.md`}>工具契约</a>。</span></p>
 
       <h2 id="configfile"><span class="l-en">Config file</span><span class="l-zh">配置文件</span></h2>
       <p><span class="l-en">Resolution order: flags &gt; <code>./reasonix.toml</code> &gt; global <code>config.toml</code> under Reasonix home &gt; compatible legacy config &gt; built-in defaults. Starting with v1.8.1, Reasonix home is <code>~/.reasonix</code> on macOS/Linux and <code>%APPDATA%\reasonix</code> on Windows; set <code>REASONIX_HOME</code> only for tests, CI, or portable installs.</span><span class="l-zh">解析顺序:flags &gt; <code>./reasonix.toml</code> &gt; Reasonix home 下的全局 <code>config.toml</code> &gt; 兼容 legacy config &gt; 内置默认值。从 v1.8.1 起,Reasonix home 在 macOS/Linux 为 <code>~/.reasonix</code>,Windows 为 <code>%APPDATA%\reasonix</code>；只有测试、CI 或便携安装才需要设置 <code>REASONIX_HOME</code>。</span></p>
@@ -289,6 +323,7 @@ shortcut_layout = "desktop"        <span class="c"># optional compatibility sett
 
 [agent]
 reasoning_language = "auto"        <span class="c"># auto|zh|en</span>
+compact_ratio = 0.8                <span class="c"># editable as 65–85% in Settings or CLI</span>
 planner_model = "deepseek-pro"     <span class="c"># optional read-only planner</span>
 
 [[providers]]
@@ -347,6 +382,10 @@ call_timeout_seconds = 600</div>
         <a class="doc-card" href={`${repo}/blob/main-v2/docs/CAPABILITY_DIAGNOSTICS.md`}>
           <h3><span class="l-en">Capability diagnostics →</span><span class="l-zh">能力诊断 →</span></h3>
           <p><span class="l-en"><code>reasonix doctor capabilities</code>, desktop Diagnostics, and <code>/reasonix-guide</code>.</span><span class="l-zh"><code>reasonix doctor capabilities</code>、桌面端诊断与 <code>/reasonix-guide</code>。</span></p>
+        </a>
+        <a class="doc-card" href={`${repo}/blob/main-v2/docs/EXTENSIONS.md`}>
+          <h3><span class="l-en">Build an extension →</span><span class="l-zh">开发扩展 →</span></h3>
+          <p><span class="l-en">Start with a complete Sidecar, Manifest v1, Go SDK, reload loop, and security model.</span><span class="l-zh">从完整 Sidecar、Manifest v1、Go SDK、重载循环与安全模型开始。</span></p>
         </a>
         <a class="doc-card" href={`${repo}/blob/main-v2/docs/BOT_GUIDE.md`}>
           <h3><span class="l-en">Bot guide →</span><span class="l-zh">Bot 指南 →</span></h3>

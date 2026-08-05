@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,10 +16,48 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
 )
+
+func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
+	if !strings.Contains(titlePrompt, "same language as the user's message") {
+		t.Fatalf("title prompt does not preserve the user's language: %q", titlePrompt)
+	}
+}
+
+type titleUsageProvider struct{}
+
+func (titleUsageProvider) Name() string { return "title" }
+func (titleUsageProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	ch := make(chan provider.Chunk, 3)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: "Short title"}
+	ch <- provider.Chunk{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+type titleUsageSink struct{ events []event.Event }
+
+func (s *titleUsageSink) Emit(e event.Event) { s.events = append(s.events, e) }
+
+func TestGenerateTitleRecordsUsageWithModelIdentity(t *testing.T) {
+	sink := &titleUsageSink{}
+	s := &Server{
+		titleProv:      titleUsageProvider{},
+		titleModelRef:  "deepseek/deepseek-v4-flash",
+		titleUsageSink: sink,
+	}
+	if got := s.generateTitle(context.Background(), "hello"); got != "Short title" {
+		t.Fatalf("title = %q", got)
+	}
+	if len(sink.events) != 1 || sink.events[0].Kind != event.Usage || sink.events[0].ModelRef != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("title usage event = %+v", sink.events)
+	}
+}
 
 // fakeRunner stands in for an agent.Runner: it records the composed input and
 // returns without emitting model events, so the controller's TurnDone is the
@@ -135,6 +174,46 @@ func TestServeSubmitRejectsShellShortcut(t *testing.T) {
 	case in := <-got:
 		t.Fatalf("runner should not run shell submit, got %q", in)
 	default:
+	}
+}
+
+func TestServeSubmitValidatesFormat(t *testing.T) {
+	bc := NewBroadcaster()
+	got := make(chan string, 1)
+	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	post := func(body string) int {
+		resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Unsupported format is rejected with 400 and the runner never runs.
+	if code := post(`{"input":"hi","format":"xml"}`); code != http.StatusBadRequest {
+		t.Fatalf("unsupported format status = %d, want 400", code)
+	}
+	select {
+	case in := <-got:
+		t.Fatalf("runner must not run for rejected format, got %q", in)
+	default:
+	}
+
+	// Whitespace-padded json_object is normalized and accepted.
+	if code := post(`{"input":"hi","format":"  json_object  "}`); code != http.StatusAccepted {
+		t.Fatalf("padded json_object status = %d, want 202", code)
+	}
+	select {
+	case in := <-got:
+		if in != "hi" {
+			t.Fatalf("runner ran %q, want hi", in)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner never ran for padded json_object")
 	}
 }
 
@@ -307,6 +386,23 @@ func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	}
 }
 
+func TestServeIndexReportsSessionDeleteFailures(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"'cannot_delete_active': 'Cannot delete the active session'",
+		"'cannot_delete_active': '无法删除当前会话'",
+		"'delete_failed': 'Could not delete the session. Check your connection and try again.'",
+		"'delete_failed': '无法删除会话，请检查连接后重试'",
+		"if(target&&target.current){showNotice(__('cannot_delete_active'),'warn');return;}",
+		"if(!r.ok){showNotice((await r.text()).trim()||('HTTP '+r.status),'warn');}",
+		"}).catch(()=>showNotice(__('delete_failed'),'warn'));",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing session delete failure handling %q", want)
+		}
+	}
+}
+
 func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 	html := string(indexHTML)
 	for _, want := range []string{
@@ -318,6 +414,38 @@ func TestServeIndexHandlesRetryingEvents(t *testing.T) {
 		if !strings.Contains(html, want) {
 			t.Fatalf("serve index missing retrying support %q", want)
 		}
+	}
+}
+
+func TestServeIndexPresentsRecoveryPauseAsNotice(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"e.outcome==='recovery_paused'",
+		"showNotice('⏸ '+__('recovery_paused'))",
+		"'recovery_paused': 'Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.'",
+		"'recovery_paused': '已暂停自动重试。Reasonix 已停止重复尝试，并保留已完成的工作。发送“继续”即可开始新一轮，也可以补充要求来调整方向。'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing recovery pause support %q", want)
+		}
+	}
+}
+
+func TestServeIndexRendersAndReloadsExtensions(t *testing.T) {
+	html := string(indexHTML)
+	for _, want := range []string{
+		"case 'extension_surface': if(e.extension)renderExtensionSurface(e.extension); break;",
+		"case 'extension_status': if(e.extension)renderExtensionSurface(e.extension); break;",
+		"const node=el('div','notice'",
+		"post('/extensions/reload',{})",
+		"{cmd:'reload',sig:'/reload'",
+	} {
+		if !strings.Contains(html, want) {
+			t.Fatalf("serve index missing extension support %q", want)
+		}
+	}
+	if strings.Contains(html, "p.card.markdown+'</") {
+		t.Fatal("extension Markdown must not be inserted as HTML")
 	}
 }
 
@@ -416,6 +544,81 @@ func TestServeModelsMarksActiveByModelRef(t *testing.T) {
 	}
 	if !active["alternate/shared-chat"] {
 		t.Fatal("alternate/shared-chat was not marked active")
+	}
+}
+
+func TestServeModelsIncludesExtensionProviderCatalog(t *testing.T) {
+	writeServeModelConfig(t)
+
+	bc := NewBroadcaster()
+	ref := "plugin/demo/cloud/extension-chat"
+	ctrl := control.New(control.Options{
+		Sink:     bc,
+		Label:    "extension-chat",
+		ModelRef: ref,
+		ProviderResolver: &provider.StaticResolver{Descriptors: []provider.Descriptor{{
+			Ref: ref, Model: "extension-chat", DisplayName: "Extension Chat",
+		}},
+		},
+	})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body struct {
+		Models []struct {
+			Ref      string `json:"ref"`
+			Provider string `json:"provider"`
+			Kind     string `json:"kind"`
+			Active   bool   `json:"active"`
+		} `json:"models"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, model := range body.Models {
+		if model.Ref == ref {
+			if model.Provider != "plugin/demo/cloud" || model.Kind != "extension" || !model.Active {
+				t.Fatalf("extension model = %+v", model)
+			}
+			return
+		}
+	}
+	t.Fatalf("extension provider %q missing from models: %+v", ref, body.Models)
+}
+
+func TestServeExtensionReloadPublishesOnlySuccessfulReplacement(t *testing.T) {
+	bc := NewBroadcaster()
+	old := control.New(control.Options{Sink: bc, ModelRef: "default/model"})
+	s := New(old, bc, config.ServeConfig{})
+
+	wantErr := errors.New("sidecar did not initialize")
+	s.rebuildController = func(context.Context, *control.Controller, string) (*control.Controller, error) {
+		return nil, wantErr
+	}
+	if err := s.reloadExtensions(context.Background()); !errors.Is(err, wantErr) {
+		t.Fatalf("reload error = %v, want %v", err, wantErr)
+	}
+	if s.ctl() != old {
+		t.Fatal("failed reload replaced the working controller")
+	}
+
+	replacement := control.New(control.Options{Sink: bc, ModelRef: "default/model"})
+	s.rebuildController = func(_ context.Context, gotOld *control.Controller, ref string) (*control.Controller, error) {
+		if gotOld != old || ref != "default/model" {
+			t.Fatalf("rebuild inputs old=%p ref=%q", gotOld, ref)
+		}
+		return replacement, nil
+	}
+	if err := s.reloadExtensions(context.Background()); err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if s.ctl() != replacement {
+		t.Fatal("successful reload did not publish the replacement")
 	}
 }
 

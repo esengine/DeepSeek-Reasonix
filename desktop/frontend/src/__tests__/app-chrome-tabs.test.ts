@@ -3,6 +3,8 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createBoundedRefreshCoordinator, sameTabMetaLists, shouldRefreshTabMetaForEvent, tabMetaFallbackDelay } from "../lib/tabMetaRefresh";
+import type { TabMeta } from "../lib/types";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
@@ -14,6 +16,8 @@ const transcriptSource = readFileSync(resolve(testDir, "../components/Transcript
 const composerSource = readFileSync(resolve(testDir, "../components/Composer.tsx"), "utf8");
 const controllerSource = readFileSync(resolve(testDir, "../lib/useController.ts"), "utf8");
 const bridgeSource = readFileSync(resolve(testDir, "../lib/bridge.ts"), "utf8");
+const workspacePanelSource = readFileSync(resolve(testDir, "../components/WorkspacePanel.tsx"), "utf8");
+const rewindCommitSource = readFileSync(resolve(testDir, "../lib/rewindCommit.ts"), "utf8");
 const layoutStoreSource = readFileSync(resolve(testDir, "../store/layout.ts"), "utf8");
 const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
@@ -28,6 +32,16 @@ function ok(value: unknown, label: string) {
     process.stdout.write(`  FAIL  ${label}\n`);
     failed += 1;
   }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }
 
 function matchingBlocks(selector: string): string[] {
@@ -54,6 +68,179 @@ function finalDeclaration(selector: string, property: string): string | undefine
 }
 
 console.log("\napp chrome tabs");
+
+const tabMeta = (overrides: Partial<TabMeta> = {}): TabMeta => ({
+  id: "tab-1",
+  scope: "project",
+  workspaceRoot: "/repo",
+  workspaceName: "repo",
+  topicId: "topic-1",
+  topicTitle: "Topic",
+  label: "model",
+  ready: true,
+  running: false,
+  cancellable: false,
+  mode: "normal",
+  active: true,
+  cwd: "/repo",
+  ...overrides,
+});
+
+ok(sameTabMetaLists([tabMeta()], [tabMeta()]), "identical tab metadata suppresses redundant state writes");
+ok(!sameTabMetaLists([tabMeta()], [tabMeta({ running: true })]), "runtime tab changes still invalidate metadata state");
+ok(tabMetaFallbackDelay("visible") === 15_000, "visible tab metadata fallback runs at low frequency");
+ok(tabMetaFallbackDelay("hidden") === 60_000, "hidden tab metadata fallback backs off further");
+ok(shouldRefreshTabMetaForEvent("turn_started"), "turn start refreshes tab runtime metadata immediately");
+ok(shouldRefreshTabMetaForEvent("approval_request"), "approval prompts refresh tab runtime metadata immediately");
+ok(!shouldRefreshTabMetaForEvent("text_delta"), "stream deltas do not trigger tab-list requests");
+
+{
+  const coordinator = createBoundedRefreshCoordinator<TabMeta[]>(2);
+  const first = deferred<TabMeta[]>();
+  const second = deferred<TabMeta[]>();
+  let loads = 0;
+  const firstRefresh = coordinator.run(() => {
+    loads += 1;
+    return first.promise;
+  });
+  const secondRefresh = coordinator.run(() => {
+    loads += 1;
+    return second.promise;
+  });
+  const saturatedRefresh = coordinator.run(() => {
+    loads += 1;
+    return Promise.resolve([]);
+  });
+  await Promise.resolve();
+  ok(loads === 2, "tab metadata refresh caps outstanding backend calls");
+
+  const latestTabs = [tabMeta({ id: "tab-latest" })];
+  second.resolve(latestTabs);
+  const saturatedResult = await saturatedRefresh;
+  ok(saturatedResult.coalesced, "saturated tab metadata refresh joins the newest request");
+  ok(saturatedResult.value === latestTabs, "saturated tab metadata refresh returns authoritative tabs instead of an empty sentinel");
+  ok(saturatedResult.latest, "coalesced newest tab metadata remains eligible to update state");
+
+  first.resolve([tabMeta({ id: "tab-stale" })]);
+  const firstResult = await firstRefresh;
+  await secondRefresh;
+  ok(!firstResult.latest, "an older tab metadata response cannot replace a newer snapshot");
+}
+
+{
+  const coordinator = createBoundedRefreshCoordinator<TabMeta[]>(2);
+  const preMutationA = deferred<TabMeta[]>();
+  const preMutationB = deferred<TabMeta[]>();
+  const postMutation = deferred<TabMeta[]>();
+  let loads = 0;
+  const loadValues: TabMeta[][] = [
+    [tabMeta({ id: "pre-a" })],
+    [tabMeta({ id: "pre-b" })],
+    [tabMeta({ id: "post-mutation" })],
+  ];
+  const loadPromises = [preMutationA.promise, preMutationB.promise, postMutation.promise];
+
+  const firstRefresh = coordinator.run(() => {
+    const index = loads;
+    loads += 1;
+    return loadPromises[index] ?? Promise.resolve(loadValues[index] ?? []);
+  });
+  const secondRefresh = coordinator.run(() => {
+    const index = loads;
+    loads += 1;
+    return loadPromises[index] ?? Promise.resolve(loadValues[index] ?? []);
+  });
+  await Promise.resolve();
+  ok(loads === 2, "pre-mutation tab metadata fills both in-flight slots");
+
+  const mutationRefresh = coordinator.run(
+    () => {
+      const index = loads;
+      loads += 1;
+      return loadPromises[index] ?? Promise.resolve(loadValues[index] ?? []);
+    },
+    { invalidate: true },
+  );
+  await Promise.resolve();
+  ok(loads === 2, "post-mutation refresh does not start until an in-flight slot frees");
+
+  preMutationA.resolve(loadValues[0]);
+  const firstResult = await firstRefresh;
+  await Promise.resolve();
+  await Promise.resolve();
+  ok(loads === 3, "post-mutation refresh starts as a trailing load after a slot frees");
+  ok(!firstResult.latest, "pre-mutation snapshot is not authoritative after invalidate");
+
+  const postTabs = loadValues[2];
+  postMutation.resolve(postTabs);
+  const mutationResult = await mutationRefresh;
+  ok(!mutationResult.coalesced, "post-mutation refresh does not join a pre-mutation request");
+  ok(mutationResult.value === postTabs, "post-mutation refresh returns the mutation-after snapshot");
+  ok(mutationResult.latest, "post-mutation trailing refresh remains eligible to update state");
+
+  preMutationB.resolve(loadValues[1]);
+  const secondResult = await secondRefresh;
+  ok(!secondResult.latest, "pre-mutation coalesced request cannot overwrite post-mutation state");
+}
+
+{
+  const coordinator = createBoundedRefreshCoordinator<TabMeta[]>(1);
+  const preMutation = deferred<TabMeta[]>();
+  const latestPostMutation = deferred<TabMeta[]>();
+  const started: string[] = [];
+
+  const preMutationRefresh = coordinator.run(() => {
+    started.push("pre");
+    return preMutation.promise;
+  });
+  await Promise.resolve();
+
+  const firstMutationRefresh = coordinator.run(
+    () => {
+      started.push("first-mutation");
+      return Promise.resolve([tabMeta({ id: "first-mutation" })]);
+    },
+    { invalidate: true },
+  );
+  const latestMutationRefresh = coordinator.run(
+    () => {
+      started.push("latest-mutation");
+      return latestPostMutation.promise;
+    },
+    { invalidate: true },
+  );
+
+  preMutation.resolve([tabMeta({ id: "pre" })]);
+  const preMutationResult = await preMutationRefresh;
+  await Promise.resolve();
+  await Promise.resolve();
+  ok(started.join(",") === "pre,latest-mutation", "queued invalidations retain only the latest trailing load");
+  ok(!preMutationResult.latest, "queued invalidations fence the pre-mutation load");
+
+  const latestTabs = [tabMeta({ id: "latest-mutation" })];
+  latestPostMutation.resolve(latestTabs);
+  const [firstMutationResult, latestMutationResult] = await Promise.all([firstMutationRefresh, latestMutationRefresh]);
+  ok(firstMutationResult.value === latestTabs, "an older queued mutation waits for the latest post-mutation snapshot");
+  ok(latestMutationResult.value === latestTabs, "the latest queued mutation receives its post-mutation snapshot");
+  ok(firstMutationResult.latest && latestMutationResult.latest, "the shared trailing snapshot remains authoritative");
+}
+
+ok(
+  !appSource.includes("setInterval(() => void refreshTabMetas(), 2000)") &&
+    appSource.includes('document.addEventListener("visibilitychange", onVisibilityChange)') &&
+    appSource.includes("createBoundedRefreshCoordinator<TabMeta[]>(TAB_META_MAX_IN_FLIGHT)") &&
+    appSource.includes("void refreshTabMetas();\n        schedule();"),
+  "tab metadata refresh is event-driven with a visibility-aware fallback",
+);
+
+ok(
+  appSource.includes("refreshTabMetas(undefined, { afterMutation: true })") &&
+    appSource.includes("{ afterMutation: true }") &&
+    appSource.includes("if (shouldRefreshTabMetaForEvent(e.kind)) {") &&
+    appSource.includes("void refreshTabMetas(undefined, { afterMutation: true });") &&
+    /await refreshTabMetas\(\s*\(\) => isNavigationIntentCurrent\(request\.navigationIntentSeq\),\s*\{\s*afterMutation:\s*true\s*\},?\s*\)/.test(appSource),
+  "tab lifecycle events and explicit mutations force a post-mutation trailing metadata refresh",
+);
 
 ok(
   /import \{ TabBar \} from "\.\/TabBar";/.test(appChromeSource),
@@ -245,7 +432,19 @@ ok(
 );
 
 ok(
-  /const controllerReady = state\.meta\?\.ready === true && !state\.backendActivationPending && !runtimeTransitioning;/.test(appSource) &&
+  /if \(scope === "code"\) \{[\s\S]*?rewindForTabDetailed\(sourceTabId, turn, scope\)[\s\S]*?transactionId: outcome\.transactionId/.test(appSource),
+  "code-only rewind retains the committed transaction id for real undo",
+);
+
+ok(
+  /onSessionRevertCommitted\?\.\(workspaceTabId, result\)/.test(workspacePanelSource) &&
+    /onSessionRevertCommitted=\{handleSessionRevertCommitted\}/.test(appSource) &&
+    /handleSessionRevertCommitted[\s\S]*?transactionId: outcome\.transactionId/.test(appSource),
+  "single-file session revert publishes its transaction id to the app undo state",
+);
+
+ok(
+  /const controllerReady =\s*state\.meta\?\.ready === true &&\s*\(!state\.meta\.runtime \|\| state\.meta\.runtime\.phase === "ready"\) &&\s*!state\.meta\.startupErr &&\s*!state\.backendActivationPending &&\s*!runtimeTransitioning;/.test(appSource) &&
     /if \(!activeTabId \|\| !controllerReady\) return;\s*void commitThenSend\(activeTabId, text\)\.catch/.test(appSource) &&
     /onPrompt=\{handleTranscriptPrompt\}/.test(appSource) &&
     /submitDisabled=\{!controllerReady\}/.test(appSource),
@@ -261,7 +460,7 @@ ok(
 
 ok(
   /commitThenSendRef\.current\(sourceTabId, trimmed, submitText\.trim\(\), structured\)/.test(appSource) &&
-    /sendToTab\(sourceTabId, displayText, submitText, undefined, structured\)/.test(appSource) &&
+    /sendToTab\(sourceTabId, displayText, submitText, undefined, structured, initialGoal\)/.test(appSource) &&
     /onSteer=\{handleSteer\}/.test(appSource) &&
     /composerInsertRequestsByTab\[activeTabId\]/.test(appSource) &&
     /consumedInsertIdByDraftRef\.current\[draftKey\]/.test(composerSource),
@@ -280,19 +479,47 @@ ok(
   /app\.NewSessionForTab\(tabId\)/.test(controllerSource) &&
     /app\.ClearSessionForTab\(tabId\)/.test(controllerSource) &&
     /app\.CompactForTab\(tabId\)/.test(controllerSource) &&
-    /app\.RewindForTab\(sourceTabId, turn, actionScope\)/.test(controllerSource) &&
+    /import\("\.\/rewindCommit"\)/.test(controllerSource) &&
+    /app\.PreviewRewindForTab\(sourceTabId, turn, scope\)/.test(rewindCommitSource) &&
+    /app\.CommitRewindForTab\(sourceTabId, remoteLegacy \? "" : \(plan\.planId \|\| ""\), turn, scope\)/.test(rewindCommitSource) &&
+    /app\.UndoRewindForTab\(sourceTabId, transactionId\)/.test(rewindCommitSource) &&
     /app\.ForkForTab\(sourceTabId, turn\)/.test(controllerSource) &&
     /app\.SummarizeFromForTab\(sourceTabId, turn\)/.test(controllerSource) &&
     /NewSessionForTab\(tabID: string\)/.test(bridgeSource) &&
     /CompactForTab\(tabID: string\)/.test(bridgeSource) &&
-    /RewindForTab\(tabID: string, turn: number, scope: string\)/.test(bridgeSource),
+    /PreviewRewindForTab\(tabID: string, turn: number, scope: string\)/.test(bridgeSource) &&
+    /CommitRewindForTab\(tabID: string, planID: string, turn: number, scope: string\)/.test(bridgeSource) &&
+    /UndoRewindForTab\(tabID: string, transactionID: string\)/.test(bridgeSource),
   "session-changing controller actions use explicit tab-scoped Wails bindings",
+);
+
+ok(
+  /plan\.coverage === "partial"/.test(rewindCommitSource) &&
+    /window\.confirm\(t\("rewind\.confirmPartialCoverage"/.test(rewindCommitSource) &&
+    /plan\?\.conflicts\?\.length \? "overwrite_checkpoint" : ""/.test(workspacePanelSource),
+  "rewind previews warn on incomplete coverage and only authorize file overwrite after a conflict confirmation",
 );
 
 ok(
   /const transcriptHydrating = state\.hydrating && !state\.hydrateHistoryLoaded;/.test(appSource) &&
     /hydrating=\{transcriptHydrating\}/.test(appSource),
   "Welcome is suppressed only until transcript history has loaded",
+);
+
+ok(
+  /const creationEmptyHero =/.test(appSource) &&
+    /!sidebarImDetailConnection/.test(appSource) &&
+    /!transcriptHydrating/.test(appSource) &&
+    /!hydratePlaceholderActive/.test(appSource) &&
+    /chat-pane\$\{creationEmptyHero \? " chat-pane--creation-empty" : ""\}/.test(appSource) &&
+    /heroMode=\{creationEmptyHero\}/.test(appSource),
+  "Creation empty hero waits for hydration and skips IM/Bot detail panels",
+);
+
+ok(
+  /if \(heroMode\) \{[\s\S]*?const maxHeight = 96;[\s\S]*?setTextareaAutoHeight/.test(composerSource) &&
+    !/if \(heroMode\) \{\s*setTextareaAutoHeight\(20\);/.test(composerSource),
+  "Creation hero composer auto-grows multi-line drafts instead of clipping at 20px",
 );
 
 ok(
@@ -318,11 +545,11 @@ ok(
   /const navigationRunningRef = useRef\(false\);/.test(appSource) &&
     /const navigationPendingRef = useRef<PendingDesktopNavigationRequest \| null>\(null\);/.test(appSource) &&
     /const runNavigationRequest = useCallback\(async \(request: PendingDesktopNavigationRequest\)/.test(appSource) &&
-    /const latest = \(\) => request\.seq === navigationSeqRef\.current;/.test(appSource) &&
-    /return activateTopic\(scope, workspaceRoot, topicId/.test(appSource) &&
-    /return openTopicSession\(scope, workspaceRoot, topicId/.test(appSource) &&
-    /return openGlobalTab\(topicId\)/.test(appSource) &&
-    /return openProjectTab\(workspaceRoot, topicId\)/.test(appSource) &&
+    /const latest = \(\) => request\.seq === navigationSeqRef\.current && isNavigationIntentCurrent\(request\.navigationIntentSeq\);/.test(appSource) &&
+    /return activateTopic\(scope, workspaceRoot, topicId, sessionPath \|\| "", request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openTopicSession\(scope, workspaceRoot, topicId, sessionPath, request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openGlobalTab\(topicId, request\.navigationIntentSeq\)/.test(appSource) &&
+    /return openProjectTab\(workspaceRoot, topicId, request\.navigationIntentSeq\)/.test(appSource) &&
     /enqueueNavigationRequest\([\s\S]*runningRef: navigationRunningRef, pendingRef: navigationPendingRef/.test(appSource) &&
     !/openTopicQueueRef\.current\.catch\(\(\) => \{\}\)\.then/.test(appSource) &&
     /const refreshLatestTabMetas = async \(\): Promise<TabMeta\[]> => \{[\s\S]*if \(latest\(\)\) setTabMetas\(tabs\);/.test(navigationBlock) &&
@@ -413,8 +640,15 @@ ok(
 ok(
   finalDeclaration(".app--windows.app--creation .topicbar", "position") === "relative" &&
     finalDeclaration(".app--windows.app--creation .topicbar", "z-index") === "var(--z-app-chrome)" &&
-    finalDeclaration(".app--windows.app--creation .topicbar", "transform") === "translateY(-4px) !important",
-  "Windows Creation topic bar lifts its menus above conversation content without changing titlebar alignment",
+    finalDeclaration(".app--windows.app--creation .topicbar", "min-height") === "40px" &&
+    finalDeclaration(":root[data-theme-style] .app--windows.app--creation .topicbar", "min-height") === "40px" &&
+    finalDeclaration(".app--windows.app--creation .topicbar", "transform") === "none !important" &&
+    finalDeclaration(".app--windows.app--creation .topicbar__title-row", "transform") === "none" &&
+    finalDeclaration(".app--windows-frameless.app--creation", "--windows-window-controls-height") === "40px" &&
+    finalDeclaration(".app--creation .topicbar", "min-height") === "56px" &&
+    finalDeclaration(":root[data-theme-style] .app--creation .topicbar", "padding-top") === "14px" &&
+    finalDeclaration(".app--creation .topicbar__title-row", "transform") === "translateY(-3px)",
+  "Windows Creation stays 40px while macOS and Linux keep the shared Creation geometry",
 );
 
 for (const selector of [
@@ -423,7 +657,7 @@ for (const selector of [
 ]) {
   ok(
     finalDeclaration(selector, "--app-chrome-height") === "0px" &&
-      finalDeclaration(selector, "grid-template-rows") === "minmax(0, 1fr)" &&
+      finalDeclaration(selector, "grid-template-rows") === "minmax(0, 1fr) var(--statusbar-height)" &&
       finalDeclaration(selector, "background") === "var(--bg)",
     `${selector} removes the workbench chrome row`,
   );
@@ -452,6 +686,63 @@ ok(
     finalDeclaration(".workbench-dock__tabs", "--wails-draggable") === "no-drag" &&
     finalDeclaration(".workbench-dock__tab", "--wails-draggable") === "no-drag",
   "maximized workbench dock keeps a draggable title region while tabs remain clickable",
+);
+
+ok(
+  finalDeclaration(":root[data-theme-style] .workbench-dock__tab--active::after", "bottom") === "1px",
+  "active dock underline stays inside the visible dock edge",
+);
+
+for (const selector of [
+  ".app--classic .workbench-dock__tab + .workbench-dock__tab::before",
+  ".app--workbench .workbench-dock__tab + .workbench-dock__tab::before",
+]) {
+  ok(
+    finalDeclaration(selector, "width") === "1px" &&
+      finalDeclaration(selector, "height") === "16px" &&
+      finalDeclaration(selector, "background")?.includes("--border-soft"),
+    `${selector} renders a restrained divider between right-dock tabs`,
+  );
+}
+
+ok(
+  finalDeclaration(".app--creation .workbench-dock__tab + .workbench-dock__tab::before", "content") === undefined,
+  "Creation right-dock tabs keep their equal-column treatment without dividers",
+);
+
+for (const selector of [
+  ".app--windows-frameless.app--workbench .workbench-dock__tools",
+  ":root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tools",
+]) {
+  const padding = finalDeclaration(selector, "padding") ?? "";
+  ok(
+    finalDeclaration(selector, "height") === "calc(40px + var(--windows-window-controls-height))" &&
+      padding === "var(--windows-window-controls-height) 12px 0" &&
+      !padding.includes("--windows-window-controls-safe"),
+    `${selector} keeps dock tabs on a full-width row below Windows controls`,
+  );
+}
+
+for (const selector of [
+  ".app--windows-frameless.app--workbench .workbench-dock__tools::before",
+  ":root[data-theme-style] .app--windows-frameless.app--workbench .workbench-dock__tools::before",
+]) {
+  ok(
+    finalDeclaration(selector, "top") === "calc(var(--windows-window-controls-height) - 1px)" &&
+      finalDeclaration(selector, "height") === "1px",
+    `${selector} separates the Windows title row from the dock tabs`,
+  );
+}
+
+ok(
+  finalDeclaration(".app--windows-frameless:not(.app--workbench) .workbench-dock__tools", "padding-right") === undefined &&
+    finalDeclaration(":root[data-theme-style] .app--windows-frameless:not(.app--workbench) .workbench-dock__tools", "padding-right") === undefined,
+  "classic dock tabs do not reserve native window-control space on their separate chrome row",
+);
+
+ok(
+  /@container \(max-width: 420px\) \{[\s\S]*?\.app--classic \.workbench-dock__tab,[\s\S]*?\.app--workbench \.workbench-dock__tab,[\s\S]*?padding-left:\s*10px;[\s\S]*?padding-right:\s*10px;[\s\S]*?gap:\s*4px;/.test(stylesSource),
+  "classic and workbench share the same compact four-tab spacing at narrow dock widths",
 );
 
 for (const selector of [
@@ -503,6 +794,18 @@ ok(
   finalDeclaration(".skip-to-composer", "box-shadow") === "none" &&
     finalDeclaration(".skip-to-composer:focus-visible", "box-shadow")?.includes("0 12px 28px"),
   "offscreen skip link does not leak its focus shadow into the workbench title area",
+);
+
+// The Wails drag runtime drops any mousedown with detail !== 1, so a double
+// click on a drag region never reaches the OS: both title-bar-hiding platforms
+// have to zoom from here or not at all.
+ok(
+  /chromeDoubleClickZooms\s*=\s*windowsFramelessChrome\s*\|\|\s*desktopPlatform === "darwin"/.test(appSource),
+  "title-bar double click zooms on macOS as well as frameless Windows",
+);
+ok(
+  /handleChromeTitlebarDoubleClick[\s\S]{0,400}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
+  "title-bar double click still ignores interactive controls",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

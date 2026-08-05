@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sign the finished NSIS container only when the exact payload used to build it
+     is present and already Authenticode-signed. GitHub Actions wraps this flat
+     bundle in a zip before SignPath receives it. Keep this versioned separately
+     so provisioning it cannot break releases still using windows-installer. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="*installer*.exe">
+      <authenticode-sign />
+    </pe-file>
+    <pe-file path="reasonix-desktop.exe">
+      <authenticode-verify />
+    </pe-file>
+    <pe-file path="reasonix-guard.exe">
+      <authenticode-verify />
+    </pe-file>
+    <pe-file path="reasonix-launcher.exe">
+      <authenticode-verify />
+    </pe-file>
+    <pe-file path="reasonix-update-helper.exe">
+      <authenticode-verify />
+    </pe-file>
+    <pe-file path="reasonix-cli.exe">
+      <authenticode-verify />
+    </pe-file>
+    <pe-file path="reasonix-uninstall.exe">
+      <authenticode-verify />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

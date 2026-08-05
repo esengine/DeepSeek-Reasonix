@@ -19,6 +19,9 @@ const prHref = (ref: number) => `${repo}/pull/${ref}`;
    patch release — it gets the compact hero; anything else (including
    "Reasonix 1.18.0 — Better agents") keeps the full hero. */
 const isThematic = isThematicTitle(release.title.en, release.version);
+const isPreview = release.channel === 'prerelease';
+const latestForChannel = releases[0];
+const downloadHref = isPreview ? 'https://reasonix.io/?download=desktop#start' : release.links.download;
 
 const kindLabel = (kind: string) => ({
   new: { en: 'New', zh: '新增' },
@@ -68,7 +71,7 @@ const titleZh = `Reasonix v${release.version} 更新日志`;
 const description = release.summary.en;
 ---
 
-<Base title={titleEn} titleEn={titleEn} titleZh={titleZh} description={description} canonical={canonical}>
+<Base title={titleEn} titleEn={titleEn} titleZh={titleZh} description={description} canonical={canonical} noindex={isPreview}>
   <SiteHeader active="changelog" scrolled />
 
   <main class="release-stage">
@@ -84,14 +87,16 @@ const description = release.summary.en;
         <div class="release-rail__eyebrow"><span class="release-rail__mark"></span><span class="l-en">Release ledger</span><span class="l-zh">版本档案</span></div>
         <nav>
           {railGroups.map((group) => {
-            const visible = group.items.slice(0, RAIL_VISIBLE);
-            const overflow = group.items.slice(RAIL_VISIBLE);
+            const channelItems = group.items;
+            if (!channelItems.length) return null;
+            const visible = channelItems.slice(0, RAIL_VISIBLE);
+            const overflow = channelItems.slice(RAIL_VISIBLE);
             return (
               <div class="release-rail__group">
                 <p class="release-rail__minor">{group.key}.x</p>
                 {visible.map((item) => (
                   <a class:list={["release-version-link", { active: item.version === release.version }]} href={`${base}${releasePath(item.version)}`}>
-                    <span class="release-version-link__line"><strong>v{item.version}</strong>{item === releases[0] && <em><span class="l-en">Latest</span><span class="l-zh">最新</span></em>}</span>
+                    <span class="release-version-link__line"><strong>v{item.version}</strong>{item === latestForChannel && <em><span class="l-en">Latest</span><span class="l-zh">最新</span></em>}</span>
                     <small>{item.date}</small>
                   </a>
                 ))}
@@ -103,7 +108,7 @@ const description = release.summary.en;
                     </summary>
                     {overflow.map((item) => (
                       <a class:list={["release-version-link", { active: item.version === release.version }]} href={`${base}${releasePath(item.version)}`}>
-                        <span class="release-version-link__line"><strong>v{item.version}</strong>{item === releases[0] && <em><span class="l-en">Latest</span><span class="l-zh">最新</span></em>}</span>
+                        <span class="release-version-link__line"><strong>v{item.version}</strong>{item === latestForChannel && <em><span class="l-en">Latest</span><span class="l-zh">最新</span></em>}</span>
                         <small>{item.date}</small>
                       </a>
                     ))}
@@ -119,7 +124,7 @@ const description = release.summary.en;
       <article class="release-paper">
         <header class:list={["release-hero", { "release-hero--compact": !isThematic }]}>
           <div class="release-hero__meta">
-            <span class="release-channel"><span class="release-channel__dot"></span>{release.channel}</span>
+            {isPreview && <span class="release-channel release-channel--preview"><span class="release-channel__dot"></span><span class="l-en">Historical archive</span><span class="l-zh">历史归档</span></span>}
             <time datetime={release.date}>{release.date}</time>
           </div>
           {isThematic && <p class="release-hero__version">Reasonix / v{release.version}</p>}
@@ -130,6 +135,13 @@ const description = release.summary.en;
               return <span><span class="l-en">{label.en}</span><span class="l-zh">{label.zh}</span></span>;
             })}
           </div>
+          {release.builds && (
+            <div class="release-builds" aria-label="Published builds">
+              <span><strong>CLI</strong> {release.builds.cli}</span>
+              <span><strong>Desktop</strong> {release.builds.desktop}</span>
+              <span><strong>npm</strong> {release.builds.npm}</span>
+            </div>
+          )}
           {isThematic ? (
             <blockquote><span class="l-en">{release.summary.en}</span><span class="l-zh">{release.summary.zh}</span></blockquote>
           ) : (
@@ -137,7 +149,7 @@ const description = release.summary.en;
           )}
           {isThematic && (
             <div class="release-hero__actions">
-              <a class="btn btn-dark" href={release.links.download}><span class="l-en">Download v{release.version}</span><span class="l-zh">下载 v{release.version}</span></a>
+              <a class="btn btn-dark" href={downloadHref}><span class="l-en">Download current release</span><span class="l-zh">下载当前正式版</span></a>
               <a class="btn btn-ghost" href={release.links.github}><span class="l-en">View on GitHub ↗</span><span class="l-zh">在 GitHub 查看 ↗</span></a>
             </div>
           )}
@@ -245,7 +257,7 @@ const description = release.summary.en;
             <h2><span class="l-en">Ship with a safer Reasonix.</span><span class="l-zh">升级到更可靠的 Reasonix。</span></h2>
           </div>
           <div class="release-download__actions">
-            <a class="btn btn-dark" href={release.links.download}><span class="l-en">Download</span><span class="l-zh">下载</span></a>
+          <a class="btn btn-dark" href={downloadHref}><span class="l-en">Download</span><span class="l-zh">下载</span></a>
             <a class="release-compare" href={release.links.compare}><span class="l-en">Full comparison ↗</span><span class="l-zh">完整差异 ↗</span></a>
           </div>
         </section>

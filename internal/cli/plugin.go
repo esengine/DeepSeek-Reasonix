@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/hook"
 	"reasonix/internal/installsource"
 	"reasonix/internal/pluginpkg"
 )
@@ -228,9 +230,12 @@ func pluginShowCommand(args []string) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
-	skills, commands, hooks, mcp := pkg.CapabilityCounts()
-	fmt.Printf("name: %s\nversion: %s\nenabled: %t\nkind: %s\nroot: %s\nsource: %s\nskills: %d\ncommands: %d\nhooks: %d\nmcpServers: %d\n",
-		p.Name, p.Version, p.Enabled, p.ManifestKind, root, p.Source, skills, commands, hooks, mcp)
+	summary := pkg.CapabilitySummary()
+	fmt.Printf("name: %s\nversion: %s\nenabled: %t\nkind: %s\nroot: %s\nsource: %s\nskills: %d\ncommands: %d\nprompts: %d\nhooks: %d\nmcpServers: %d\nthemes: %d\n",
+		p.Name, p.Version, p.Enabled, p.ManifestKind, root, p.Source, summary.Skills, summary.Commands, summary.Prompts, summary.Hooks, summary.MCPServers, summary.Themes)
+	if summary.Runtime {
+		fmt.Print(pluginpkg.RuntimeTrustText(pkg.Manifest.Runtime))
+	}
 	printPluginInventory(p.Name, pkg.Inventory())
 	for _, warning := range warnings {
 		fmt.Println("warning:", warning)
@@ -269,6 +274,26 @@ func printPluginInventory(pluginName string, inv pluginpkg.Inventory) {
 			} else {
 				fmt.Printf("  %s\t%s\n", invocation, desc)
 			}
+		}
+	}
+	if len(inv.Prompts) > 0 {
+		fmt.Println("prompts:")
+		for _, pr := range inv.Prompts {
+			desc := pr.Description
+			if desc == "" {
+				desc = "(no description)"
+			}
+			if pr.ArgHint != "" {
+				fmt.Printf("  %s %s\t%s\n", pr.Name, pr.ArgHint, desc)
+			} else {
+				fmt.Printf("  %s\t%s\n", pr.Name, desc)
+			}
+		}
+	}
+	if len(inv.Themes) > 0 {
+		fmt.Println("themes:")
+		for _, theme := range inv.Themes {
+			fmt.Printf("  %s\t%s\n", theme.Name, theme.Path)
 		}
 	}
 	if len(inv.Hooks) > 0 {
@@ -333,11 +358,62 @@ func pluginDoctorCommand(args []string) int {
 			return 1
 		}
 	}
+	for _, promptRoot := range pkg.PromptRoots() {
+		if st, err := os.Stat(promptRoot); err != nil || !st.IsDir() {
+			fmt.Fprintf(os.Stderr, "missing prompt root: %s\n", promptRoot)
+			return 1
+		}
+	}
+	if rt := pkg.Manifest.Runtime; rt != nil {
+		fmt.Print(pluginpkg.RuntimeTrustText(rt))
+		if err := checkRuntimeCommand(rt, root); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 1
+		}
+	}
 	for _, warning := range warnings {
 		fmt.Println("warning:", warning)
 	}
+	workspaceRoot, _ := os.Getwd()
+	cfg, _ := config.LoadForRootReadOnly(workspaceRoot)
+	runtimeOptions := hook.RuntimeOptions{}
+	if cfg != nil {
+		runtimeOptions = hook.RuntimeOptionsForShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path)
+	}
+	runtimeIssues := hook.CheckPackageRuntime(pkg, runtimeOptions)
+	for _, issue := range runtimeIssues {
+		fmt.Fprintf(os.Stderr, "unavailable %s hook: %v\n", issue.Event, issue.Err)
+	}
+	if len(runtimeIssues) > 0 {
+		fmt.Fprintln(os.Stderr, "remediation: install Git for Windows, or configure [tools.shell] prefer=\"bash\" and path to a usable bash.exe")
+		return 1
+	}
 	fmt.Printf("ok: %s (%s)\n", p.Name, filepath.Clean(root))
 	return 0
+}
+
+// checkRuntimeCommand verifies a Manifest v1 runtime command resolves to
+// something runnable. ${REASONIX_PLUGIN_ROOT} expands to the installed root;
+// other relative path forms resolve against the plugin root. Bare executable
+// names are looked up on PATH (a miss is a warning, not a failure — PATH
+// varies by environment).
+func checkRuntimeCommand(rt *pluginpkg.RuntimeSpec, root string) error {
+	expanded := pluginpkg.ExpandRuntimeCommand(rt.Command, root)
+	pathForm := filepath.IsAbs(expanded) || strings.ContainsRune(expanded, '/') || strings.ContainsRune(expanded, filepath.Separator)
+	if !pathForm {
+		if _, err := exec.LookPath(expanded); err != nil {
+			fmt.Printf("warning: runtime command %q not found on PATH\n", expanded)
+		}
+		return nil
+	}
+	if !filepath.IsAbs(expanded) {
+		expanded = filepath.Join(root, filepath.FromSlash(expanded))
+	}
+	info, err := os.Stat(expanded)
+	if err != nil || info.IsDir() {
+		return fmt.Errorf("runtime command not found: %s", expanded)
+	}
+	return nil
 }
 
 func pluginSetEnabledCommand(args []string, enabled bool) int {

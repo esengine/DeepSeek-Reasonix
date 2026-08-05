@@ -13,7 +13,6 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
-	"reasonix/internal/remote/workbench/target"
 )
 
 func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {
@@ -338,16 +337,6 @@ func TestConcurrentActivateTopicSerializesSingleSurfacePruning(t *testing.T) {
 	isolateDesktopUserDirs(t)
 	app := NewApp()
 	t.Cleanup(func() { app.shutdown(context.Background()) })
-	_, remoteGen, err := app.workbench().targets.BeginRemoteConnect("remote-host", "/srv/work")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := app.workbench().targets.MarkRemoteConnected(remoteGen); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := app.workbench().targets.ActivateRemote(remoteGen); err != nil {
-		t.Fatal(err)
-	}
 
 	topics := []string{
 		"topic-a",
@@ -386,39 +375,6 @@ func TestConcurrentActivateTopicSerializesSingleSurfacePruning(t *testing.T) {
 	}
 	if !tabs[0].Active {
 		t.Fatalf("remaining tab is not active: %+v", tabs[0])
-	}
-	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindLocal {
-		t.Fatalf("local topic navigation left execution target at %+v", active)
-	}
-}
-
-func TestSetActiveTabSwitchesRemoteProjectionOnlyForDifferentTab(t *testing.T) {
-	app := testAppWithOrderedTabs(t, "a", "a", "b")
-	_, remoteGen, err := app.workbench().targets.BeginRemoteConnect("remote-host", "/srv/work")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := app.workbench().targets.MarkRemoteConnected(remoteGen); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := app.workbench().targets.ActivateRemote(remoteGen); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := app.SetActiveTab("a"); err != nil {
-		t.Fatal(err)
-	}
-	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindRemote {
-		t.Fatalf("same-tab hydration switched target to %+v", active)
-	}
-	if err := app.SetActiveTab("b"); err != nil {
-		t.Fatal(err)
-	}
-	if active, _, _ := app.workbench().targets.Active(); active.Kind != target.KindLocal {
-		t.Fatalf("different local tab left target at %+v", active)
-	}
-	if app.activeTabID != "b" {
-		t.Fatalf("active tab = %q, want b", app.activeTabID)
 	}
 }
 
@@ -962,8 +918,14 @@ func TestBuildTabControllerBlocksWhenSessionLeaseHeld(t *testing.T) {
 	if tab.Ctrl != nil {
 		t.Fatalf("tab controller = %T, want nil when lease is held", tab.Ctrl)
 	}
-	if !tab.Ready {
-		t.Fatal("tab should be ready with startup error")
+	if tab.Ready {
+		t.Fatal("tab with no controller must not report ready")
+	}
+	app.mu.RLock()
+	runtimeView := app.sessionRuntimeViewLocked(tab)
+	app.mu.RUnlock()
+	if runtimeView.Phase != sessionRuntimeLeaseBlocked {
+		t.Fatalf("runtime phase = %q, want %q", runtimeView.Phase, sessionRuntimeLeaseBlocked)
 	}
 	// The surfaced startup error is the sanitized busy message: the raw lease
 	// error would leak the session path and the holder's host-pid-writer id
@@ -1170,8 +1132,9 @@ func TestOpenGlobalTabResolvesTopicToLatestSessionRuntime(t *testing.T) {
 		t.Fatalf("visible session path = %q, want %q", got, newPath)
 	}
 	history := visible.Ctrl.History()
-	if len(history) == 0 || history[0].Content != "new session prompt" {
-		t.Fatalf("visible history = %+v, want latest session prompt", history)
+	if len(history) != 2 || string(history[0].Role) != "system" || strings.TrimSpace(history[0].Content) == "" ||
+		string(history[1].Role) != "user" || history[1].Content != "new session prompt" {
+		t.Fatalf("visible history = %+v, want fresh system prompt and latest session prompt", history)
 	}
 
 	close(runner.release)

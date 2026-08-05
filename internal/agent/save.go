@@ -216,6 +216,7 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 		return fmt.Errorf("lock session file: %w", err)
 	}
 	defer unlockFile()
+	observeUnleasedSessionWrite(path, mode)
 	if mode == sessionSaveSnapshot && s.snapshotUpToDate(path) {
 		// Nothing changed since the last successful save to this exact path:
 		// skip the rest of the save — including the full transcript serialize
@@ -475,6 +476,21 @@ func (s *Session) checkSnapshotWrite(path string, next []provider.Message, nextD
 			// the real tool results where the placeholders were fabricated —
 			// so no load-time repair is left to force a rewrite.
 			repairPending = false
+		}
+	}
+	if !appendShaped && baseState.ok && baseState.revisionKnown &&
+		baseState.revision == currentRevision && !contentUnchanged {
+		// Revision equality alone is not ownership proof: another writer can
+		// land transcript/event-log bytes and crash before advancing the
+		// ledger. Require the current bytes to still match this Session's
+		// persisted digest (or its pre-normalization raw form) before treating
+		// an internally reshaped snapshot as a safe full rewrite.
+		owned := s.ownsPersistedState(path, existingDigest, currentRevision, currentLedgerDigest, nextVersion)
+		if !owned && rawDiffers {
+			owned = s.ownsPersistedState(path, rawDigest, currentRevision, currentLedgerDigest, nextVersion)
+		}
+		if owned {
+			appendShaped = true
 		}
 	}
 	if appendShaped {
@@ -1226,10 +1242,41 @@ func canonicalSessionSavePath(path string) string {
 	if abs, err := filepath.Abs(key); err == nil {
 		key = abs
 	}
+	// Resolve physical identity, not just spelling. Otherwise a symlink or
+	// junction alias can acquire a second sidecar lock for the same transcript.
+	key = resolvePathThroughExistingAncestor(key)
 	if runtime.GOOS == "windows" {
+		if strings.HasPrefix(strings.ToUpper(key), `\\?\UNC\`) {
+			key = `\\` + key[len(`\\?\UNC\`):]
+		} else {
+			key = strings.TrimPrefix(key, `\\?\`)
+		}
 		key = strings.ToLower(key)
 	}
 	return key
+}
+
+// resolvePathThroughExistingAncestor resolves the deepest existing ancestor
+// and appends every still-missing component. Fresh sessions can be nested under
+// directories that have not been created yet; resolving only the immediate
+// parent leaves aliases above that directory split into different lease keys.
+func resolvePathThroughExistingAncestor(path string) string {
+	current := filepath.Clean(path)
+	missing := make([]string, 0, 4)
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil {
+			for i := len(missing) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, missing[i])
+			}
+			return resolved
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return path
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 // CanonicalSessionPath is the identity key of a session path: cleaned,
@@ -1277,6 +1324,7 @@ func loadSessionUnlocked(path string) (*Session, error) {
 	// slice headers: when NormalizeSession allocated a new backing array, the
 	// session is marked dirty so the next Save persists the fix.
 	normalized := NormalizeSession(s.Messages)
+	normalized = migrateLegacyProviderContent(normalized)
 	if len(normalized) != len(s.Messages) || (len(s.Messages) > 0 && &normalized[0] != &s.Messages[0]) {
 		s.normalizedDirty = true
 		// Keep the pre-repair transcript: checkSnapshotWrite must be able to
@@ -1473,16 +1521,23 @@ func ReconcileCleanupPending(dir string, cleanup func(CleanupPendingInfo) error)
 	if err := ReconcileSessionSidecars(dir); err != nil {
 		errs = append(errs, err)
 	}
+	if err := reconcileRecoveryTrashStages(dir); err != nil {
+		errs = append(errs, err)
+	}
 	pending, err := ListCleanupPending(dir)
 	if err != nil {
 		errs = append(errs, err)
 		return errors.Join(errs...)
 	}
-	if cleanup == nil {
-		return errors.Join(errs...)
-	}
 	for _, item := range pending {
-		if err := cleanup(item); err != nil {
+		handled, err := reconcileRecoveryTrashPending(item)
+		if !handled {
+			if cleanup == nil {
+				continue
+			}
+			err = cleanup(item)
+		}
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", item.SessionPath, err))
 		}
 	}
@@ -1976,10 +2031,10 @@ func SessionPreviewFromMessages(msgs []provider.Message) (string, int) {
 	first := ""
 	turns := 0
 	for _, m := range msgs {
-		if m.Role == provider.RoleUser && IsUserAuthoredTurn(m.Content) {
+		if m.Role == provider.RoleUser && IsUserAuthoredTurn(UserMessageText(m)) {
 			turns++
 			if first == "" {
-				first = truncatePreview(UserPreviewText(m.Content))
+				first = truncatePreview(previewProse(UserMessageText(m)))
 			}
 		}
 	}
@@ -1997,14 +2052,36 @@ func previewSession(path string) (string, int) {
 	first := ""
 	turns := 0
 	for _, m := range msgs {
-		if m.Role == provider.RoleUser && IsUserAuthoredTurn(m.Content) {
+		if m.Role == provider.RoleUser && IsUserAuthoredTurn(UserMessageText(m)) {
 			turns++
 			if first == "" {
-				first = truncatePreview(UserPreviewText(m.Content))
+				first = truncatePreview(previewProse(UserMessageText(m)))
 			}
 		}
 	}
 	return first, turns
+}
+
+// previewProse drops the leading @file references a prompt opens with so the
+// preview shows what was asked rather than a row of paths. A prompt that is
+// nothing but references keeps them — there is nothing else to show.
+func previewProse(s string) string {
+	rest := strings.TrimLeft(s, " \t")
+	for strings.HasPrefix(rest, "@") {
+		end := strings.IndexAny(rest, " \t\r\n")
+		if end < 0 {
+			return s
+		}
+		next := strings.TrimLeft(rest[end:], " \t")
+		if strings.TrimSpace(next) == "" {
+			return s
+		}
+		rest = next
+	}
+	if rest == "" {
+		return s
+	}
+	return rest
 }
 
 // truncatePreview clamps a preview line to 80 runes with an ellipsis, matching

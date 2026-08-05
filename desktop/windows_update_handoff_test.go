@@ -8,7 +8,7 @@ import (
 
 func TestInstallerCommandLineUsesVisibleUpdateModeAndKeepsDFlagLast(t *testing.T) {
 	got := installerCommandLine(`C:\Temp\Reasonix Installer.exe`, `D:\Tools\Reasonix App`)
-	want := `"C:\Temp\Reasonix Installer.exe" /REASONIXUPDATE=1 /D=D:\Tools\Reasonix App`
+	want := `"C:\Temp\Reasonix Installer.exe" /REASONIXUPDATE=1 /REASONIXSTAGE=1 /D=D:\Tools\Reasonix App`
 	if got != want {
 		t.Fatalf("installerCommandLine = %q, want %q", got, want)
 	}
@@ -24,19 +24,53 @@ func TestWindowsUpdateHandoffArgsCarryParentInstallAndRelaunch(t *testing.T) {
 	got := windowsUpdateHandoffArgs(
 		4242,
 		`C:\Users\Jane Doe\AppData\Local\Reasonix\updates\Reasonix-windows-amd64-installer.exe`,
+		strings.Repeat("a", 64),
 		`D:\Tools\Reasonix App`,
 		`D:\Tools\Reasonix App\reasonix-desktop.exe`,
 		"v1.6.0",
+		"2026-07-29T00:00:00Z",
+		"transaction-1",
 	)
 	want := []string{
 		"--parent-pid", "4242",
 		"--installer", `C:\Users\Jane Doe\AppData\Local\Reasonix\updates\Reasonix-windows-amd64-installer.exe`,
+		"--installer-sha256", strings.Repeat("a", 64),
 		"--to-version", "v1.6.0",
+		"--created-at", "2026-07-29T00:00:00Z",
+		"--transaction-id", "transaction-1",
 		"--install-dir", `D:\Tools\Reasonix App`,
 		"--relaunch", `D:\Tools\Reasonix App\reasonix-desktop.exe`,
 	}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+}
+
+func TestWindowsVersionedUpdateHandoffArgsDoNotRequireLegacyPendingIdentity(t *testing.T) {
+	got := windowsVersionedUpdateHandoffArgs(
+		4242,
+		`C:\Temp\Reasonix-installer.exe`,
+		strings.Repeat("b", 64),
+		`D:\Tools\Reasonix`,
+		`D:\Tools\Reasonix\reasonix-launcher.exe`,
+		"v1.20.0",
+	)
+	want := []string{
+		"--parent-pid", "4242",
+		"--installer", `C:\Temp\Reasonix-installer.exe`,
+		"--installer-sha256", strings.Repeat("b", 64),
+		"--to-version", "v1.20.0",
+		"--install-layout", "versioned-v1",
+		"--install-dir", `D:\Tools\Reasonix`,
+		"--relaunch", `D:\Tools\Reasonix\reasonix-launcher.exe`,
+	}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args = %#v, want %#v", got, want)
+	}
+	for _, legacy := range []string{"--created-at", "--transaction-id"} {
+		if strings.Contains(strings.Join(got, " "), legacy) {
+			t.Fatalf("versioned handoff must not carry legacy field %s", legacy)
+		}
 	}
 }
 
@@ -52,8 +86,13 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`!define REASONIX_LAUNCHER "reasonix-launcher.exe"`,
 		`!define REASONIX_CLI "reasonix-cli.exe"`,
 		`!define REASONIX_PORTABLE_ENTRY "Reasonix.exe"`,
+		`!define REASONIX_LAYOUT_INSTALLER "reasonix-layout-installer.exe"`,
+		`!define REASONIX_PAYLOAD_MANIFEST "reasonix-payload.json"`,
+		`!define REASONIX_PAYLOAD_SIGNATURE "reasonix-payload.json.minisig"`,
 		"Var ReasonixUpdateMode",
+		"Var ReasonixStageMode",
 		`${GetOptions} $R0 "/REASONIXUPDATE=" $R1`,
+		`${GetOptions} $R0 "/REASONIXSTAGE=" $R2`,
 		"Function reasonix.skipSetupPageForUpdate",
 		"Function reasonix.showUpdateProgress",
 		`!define MUI_PAGE_CUSTOMFUNCTION_PRE reasonix.skipFinishPageForUpdate`,
@@ -69,6 +108,7 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`LangString reasonixUpdateSubtitle ${LANG_TRADCHINESE} "正在安裝已驗證的更新，完成後 Reasonix 將自動重新啟動。"`,
 		"Function reasonix.waitForExecutableUnlock",
 		`FileOpen $1 "$INSTDIR\${PRODUCT_EXECUTABLE}" a`,
+		`FileOpen $1 "$INSTDIR\versions\v${INFO_PRODUCTVERSION}\${PRODUCT_EXECUTABLE}" a`,
 		`FileOpen $1 "$INSTDIR\${REASONIX_GUARD}" a`,
 		`FileOpen $1 "$INSTDIR\${REASONIX_LAUNCHER}" a`,
 		`FileOpen $1 "$INSTDIR\${REASONIX_CLI}" a`,
@@ -77,7 +117,12 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		"Call reasonix.waitForExecutableUnlock",
 		`File "/oname=${REASONIX_UPDATE_HELPER}" "${REASONIX_UPDATE_HELPER}"`,
 		`File "/oname=${REASONIX_CLI}" "${REASONIX_CLI}"`,
-		`File "/oname=${REASONIX_PORTABLE_ENTRY}" "${REASONIX_LAUNCHER}"`,
+		`File "/oname=${REASONIX_LAYOUT_INSTALLER}" "${REASONIX_GUARD}"`,
+		`nsExec::ExecToLog /OEM`,
+		`Reasonix layout activator output:`,
+		`--activate-staging "$R9" --no-relaunch`,
+		`File "/oname=${REASONIX_PAYLOAD_MANIFEST}" "${REASONIX_PAYLOAD_MANIFEST}"`,
+		`File "/oname=${REASONIX_PAYLOAD_SIGNATURE}" "${REASONIX_PAYLOAD_SIGNATURE}"`,
 		`Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"`,
 		`Delete "$INSTDIR\${REASONIX_CLI}"`,
 	} {
@@ -95,6 +140,22 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	if wait < 0 || copyFiles < 0 || wait > copyFiles {
 		t.Fatalf("installer must wait for the running exe to unlock before wails.files (wait=%d copy=%d)", wait, copyFiles)
 	}
+	stageBranch := strings.Index(script, "StrCmp $ReasonixStageMode \"1\" reasonix_stage_payload")
+	if stageBranch < 0 || stageBranch > copyFiles {
+		t.Fatalf("staging mode must bypass live executable unlock before payload extraction (branch=%d copy=%d)", stageBranch, copyFiles)
+	}
+	if !strings.Contains(script, "Goto reasonix_section_done") {
+		t.Fatal("staging mode must skip registry, shortcuts, associations, and uninstaller")
+	}
+	if strings.Contains(script, `FileOpen $0 "$INSTDIR\current.json" w`) {
+		t.Fatal("normal installer must delegate the current.json commit to the atomic Go activator")
+	}
+	metadataBranch := strings.Index(script, `reasonix_stage_payload:`)
+	metadataFile := strings.Index(script, `File "/oname=${REASONIX_PAYLOAD_MANIFEST}"`)
+	normalInstall := strings.Index(script, `reasonix_normal_install:`)
+	if metadataBranch < 0 || metadataFile < 0 || normalInstall < 0 || metadataBranch > metadataFile || metadataFile > normalInstall {
+		t.Fatalf("payload manifest must be extracted only in staging mode (branch=%d file=%d)", metadataBranch, metadataFile)
+	}
 }
 
 func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) {
@@ -110,11 +171,25 @@ func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) 
 		`./cmd/update-helper`,
 		`build/windows/installer/$UPDATE_HELPER`,
 		`stamp_windows_executable "build/windows/installer/$UPDATE_HELPER"`,
-		`cp "$helper" "$staging/$UPDATE_HELPER"`,
-		`"$ROOT/scripts/verify-windows-portable.sh" "$staging"`,
+		`cp "build/windows/installer/$UPDATE_HELPER" "$payload_dir/$UPDATE_HELPER"`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("desktop-build.sh missing %q", want)
+		}
+	}
+
+	packageData, err := os.ReadFile("../scripts/package-windows-desktop.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	packager := string(packageData)
+	for _, want := range []string{
+		`cp "$PAYLOAD/$UPDATE_HELPER" "$INSTALLER_DIR/$UPDATE_HELPER"`,
+		`cp "$PAYLOAD/$UPDATE_HELPER" "$portable_staging/versions/$version_label/$UPDATE_HELPER"`,
+		`"$ROOT/scripts/verify-windows-portable.sh" "$portable_staging"`,
+	} {
+		if !strings.Contains(packager, want) {
+			t.Fatalf("package-windows-desktop.sh missing %q", want)
 		}
 	}
 }

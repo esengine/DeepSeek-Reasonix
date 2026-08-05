@@ -120,6 +120,131 @@ func TestReadOnlyRegistryDisarmsMutationExpectation(t *testing.T) {
 	}
 }
 
+func TestDeliveryResolvedReadOnlyBashDoesNotArmMutationReadiness(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(stubBash{})
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{toolCallChunk("pwd-base", "bash", `{"command":"basename \"$(pwd)\""}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "workspace basename inspected"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	if err := a.Run(context.Background(), "inspect and report the current workspace basename"); err != nil {
+		t.Fatalf("resolved read-only delivery command: %v", err)
+	}
+	if _, ok := a.evidence.LatestSuccessfulMutationIndex(); ok {
+		t.Fatal("resolved read-only bash was recorded as a mutation")
+	}
+	msgs := a.session.Snapshot()
+	var resolved bool
+	for _, msg := range msgs {
+		for _, call := range msg.ToolCalls {
+			if call.ID == "pwd-base" && call.ResolvedReadOnly != nil && *call.ResolvedReadOnly {
+				resolved = true
+			}
+		}
+	}
+	if !resolved {
+		t.Fatal("session receipt did not preserve resolved_read_only=true")
+	}
+}
+
+func TestDeliveryConversationTokenSurvivesToNextTurnWithoutActionEvidence(t *testing.T) {
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{{Type: provider.ChunkText, Text: "Understood."}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "ORBIT-42"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, tool.NewRegistry(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	if err := a.Run(context.Background(), "Remember ORBIT-42 and answer on the next turn."); err != nil {
+		t.Fatalf("deferred conversation turn was blocked: %v", err)
+	}
+	if err := a.Run(context.Background(), "What was the code?"); err != nil {
+		t.Fatalf("answer turn was blocked: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want exactly two conversational turns", prov.call)
+	}
+	if got := lastAssistantContent(a.Session()); got != "ORBIT-42" {
+		t.Fatalf("last assistant text = %q, want ORBIT-42", got)
+	}
+}
+
+func TestDeliveryDurableMemoryRequiresRememberWithoutCodeCeremony(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "remember", readOnly: false})
+	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{toolCallChunk("remember", "remember", `{"description":"ORBIT code","body":"ORBIT-42"}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Saved for future sessions."}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	if err := a.Run(context.Background(), "Remember ORBIT-42 permanently across sessions"); err != nil {
+		t.Fatalf("durable-memory workflow inherited code-delivery ceremony: %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want remember plus final answer", prov.call)
+	}
+	if a.deliveryCriteriaEstablished {
+		t.Fatal("durable-memory-only workflow should not manufacture code acceptance criteria")
+	}
+
+	missing := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
+		{{Type: provider.ChunkText, Text: "I'll remember it."}, {Type: provider.ChunkDone}},
+	}}
+	b := New(missing, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+	err := b.Run(context.Background(), "Remember ORBIT-42 permanently across sessions")
+	var readiness *FinalReadinessError
+	if !errors.As(err, &readiness) || !strings.Contains(readiness.Reason, "remember tool") {
+		t.Fatalf("text-only durable-memory claim err = %v", err)
+	}
+}
+
+func TestNonGoalUpdateGoalWithVisibleTextDoesNotSpendRepairRound(t *testing.T) {
+	goalTool, ok := tool.LookupBuiltin("update_goal")
+	if !ok {
+		t.Fatal("update_goal builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(goalTool)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{{Type: provider.ChunkText, Text: "Here is the answer."}, toolCallChunk("goal", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "unexpected repair"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+	if err := a.Run(context.Background(), "answer normally"); err != nil {
+		t.Fatalf("non-Goal update_goal with text: %v", err)
+	}
+	if prov.call != 1 {
+		t.Fatalf("provider calls = %d, want no repair round", prov.call)
+	}
+	if got := lastAssistantContent(a.Session()); got != "Here is the answer." {
+		t.Fatalf("last assistant text = %q", got)
+	}
+	if got := lastToolResult(a.Session(), "update_goal"); !strings.Contains(got, "only available while an active goal turn") {
+		t.Fatalf("paired update_goal result = %q", got)
+	}
+}
+
+func TestNonGoalToolOnlyUpdateGoalGetsAtMostOneRepairRound(t *testing.T) {
+	goalTool, ok := tool.LookupBuiltin("update_goal")
+	if !ok {
+		t.Fatal("update_goal builtin not registered")
+	}
+	reg := tool.NewRegistry()
+	reg.Add(goalTool)
+	prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
+		{toolCallChunk("goal-1", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
+		{toolCallChunk("goal-2", "update_goal", `{"status":"complete"}`), {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "unexpected third round"}, {Type: provider.ChunkDone}},
+	}}
+	a := New(prov, reg, NewSession("sys"), Options{}, event.Discard)
+	err := a.Run(context.Background(), "answer normally")
+	if err == nil || !strings.Contains(err.Error(), "repeatedly called update_goal outside Goal mode") {
+		t.Fatalf("repeated tool-only misuse error = %v", err)
+	}
+	if prov.call != 2 {
+		t.Fatalf("provider calls = %d, want one repair round", prov.call)
+	}
+}
+
 func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
@@ -144,8 +269,8 @@ func TestDeliveryPlanModeReturnsProposalBeforeExecutionReadiness(t *testing.T) {
 	// Approval disables plan mode before the controller starts execution. The
 	// same delivery expectations must become enforceable again at that boundary.
 	a.SetPlanMode(false)
-	if got := a.finalReadinessFailure(); !strings.Contains(got, "state change") {
-		t.Fatalf("execution readiness did not resume after plan mode: %q", got)
+	if got := a.ReadinessResult(); !strings.Contains(got.Reason, "state change") {
+		t.Fatalf("execution readiness did not resume after plan mode: %q", got.Reason)
 	}
 }
 
@@ -161,12 +286,12 @@ func TestPlanModeDefersCapabilityRequirementsUntilExecution(t *testing.T) {
 		{Entry: capability.Entry{ID: "skill:deploy"}, Policy: capability.AutoUseRequire},
 	}})
 
-	if got := a.finalReadinessCheck(); got.applies || got.reason != "" {
+	if got := a.finalReadinessCheckFor(); got.applies || got.reason != "" {
 		t.Fatalf("Plan proposal was forced through delivery capability gates: %+v", got)
 	}
 
 	a.SetPlanMode(false)
-	got := a.finalReadinessCheck()
+	got := a.finalReadinessCheckFor()
 	if !got.applies || !strings.Contains(got.reason, "required capabilities") {
 		t.Fatalf("execution did not restore required capability gate: %+v", got)
 	}
@@ -281,7 +406,11 @@ func TestRunSubAgentReadinessFailureWithoutMutationStillFails(t *testing.T) {
 	}
 }
 
-func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
+func TestFinalReadinessFailsImmediatelyWithoutRetries(t *testing.T) {
+	// Delivery no longer retries readiness with hidden model messages: the run
+	// ends on the FIRST unsatisfied final answer, and the host decides what
+	// happens next (Goal FSM auto-continues; plain turns surface the recovery
+	// card). Repeated reads must not buy extra provider calls.
 	newReg := func() *tool.Registry {
 		reg := tool.NewRegistry()
 		reg.Add(fakeReadFileTool{})
@@ -293,8 +422,6 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 		return []provider.Chunk{toolCallChunk(id, "read_file", `{"path":"a.go"}`), {Type: provider.ChunkDone}}
 	}
 
-	// Stalled: the model answers text-only every round — no new receipts, so
-	// the base budget (3) applies unchanged.
 	stalled := &scriptedProvider{name: "p", turns: [][]provider.Chunk{finalText}}
 	a := New(stalled, newReg(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
 	err := a.Run(context.Background(), "fix the crash in a.go")
@@ -302,16 +429,20 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 	if !errors.As(err, &readinessErr) {
 		t.Fatalf("expected FinalReadinessError, got %v", err)
 	}
-	if readinessErr.Attempts != maxFinalReadinessBlocks {
-		t.Fatalf("stalled attempts = %d, want %d", readinessErr.Attempts, maxFinalReadinessBlocks)
+	if readinessErr.Attempts != 1 {
+		t.Fatalf("attempts = %d, want 1 (no readiness retries)", readinessErr.Attempts)
+	}
+	if stalled.call != 1 {
+		t.Fatalf("provider calls = %d, want 1 (no hidden retry messages)", stalled.call)
+	}
+	if !a.deliveryRecoveryPending {
+		t.Fatal("delivery recovery must be pending for an explicit continuation")
 	}
 
-	// Repeating the same read does not change any missing requirement. Different
-	// call IDs must not turn that duplicate receipt into six paid retries.
+	// A read that changed nothing still ends the run at the first final answer.
 	converging := &scriptedProvider{name: "p", turns: [][]provider.Chunk{
-		finalText,                // block 1
-		readCall("1"), finalText, // progress → block 2
-		readCall("2"), finalText, // duplicate → block 3 → base cap
+		readCall("1"), finalText,
+		readCall("2"), finalText,
 	}}
 	a2 := New(converging, newReg(), NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
 	err2 := a2.Run(context.Background(), "fix the crash in a.go")
@@ -319,8 +450,8 @@ func TestFinalReadinessBudgetExtendsOnlyWithProgress(t *testing.T) {
 	if !errors.As(err2, &readinessErr2) {
 		t.Fatalf("expected FinalReadinessError, got %v", err2)
 	}
-	if readinessErr2.Attempts != maxFinalReadinessBlocks {
-		t.Fatalf("duplicate-receipt attempts = %d, want %d", readinessErr2.Attempts, maxFinalReadinessBlocks)
+	if converging.call != 2 {
+		t.Fatalf("provider calls = %d, want 2 (work turn + one final answer)", converging.call)
 	}
 }
 
@@ -331,8 +462,6 @@ func TestExplicitDeliveryRecoveryPreservesEvidenceOnce(t *testing.T) {
 	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
 		{toolCallChunk("todo", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-		finalText,
-		finalText,
 		finalText,
 		{toolCallChunk("review", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("verify", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
@@ -364,6 +493,7 @@ func TestOrdinaryFollowUpDoesNotPreserveFailedDeliveryEvidence(t *testing.T) {
 	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
 		{toolCallChunk("todo", "todo_write", `{"todos":[{"content":"Ship main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("write", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
+		finalText,
 		finalText,
 		finalText,
 		finalText,
@@ -402,7 +532,6 @@ func TestPreviewStripsDeliveryMarkerAndSyntheticTurns(t *testing.T) {
 		{Role: provider.RoleSystem, Content: "sys"},
 		{Role: provider.RoleUser, Content: first},
 		{Role: provider.RoleAssistant, Content: "hi"},
-		{Role: provider.RoleUser, Content: finalReadinessRetryMessage("missing receipts") + "\n\n" + DeliveryRuntimeMarker},
 		{Role: provider.RoleUser, Content: MidTurnSteerPrefix + "\nslow down"},
 		{Role: provider.RoleUser, Content: "帮我写一个魂斗罗游戏\n\n" + DeliveryRuntimeMarker},
 	}
@@ -411,9 +540,233 @@ func TestPreviewStripsDeliveryMarkerAndSyntheticTurns(t *testing.T) {
 		t.Fatalf("preview = %q", preview)
 	}
 	if turns != 2 {
-		t.Fatalf("turns = %d, want 2 (synthetic + steer excluded)", turns)
+		t.Fatalf("turns = %d, want 2 (steer excluded)", turns)
 	}
-	if !IsSyntheticUserText(finalReadinessRetryMessage("x")) {
-		t.Fatal("readiness retry not detected as synthetic")
+}
+
+func TestDeliveryTaskNeedsEvidenceSkipsDiagnosticConversations(t *testing.T) {
+	// Diagnostic/troubleshooting conversations ask "what's wrong" or "why"
+	// without requesting code changes. They must not demand host-observable
+	// work — the agent can only give advice, not mutate files.
+	diagnostic := []string{
+		"what's wrong with my wifi",
+		"I don't want to install dependencies",
+		"please don't install any dependencies",
+		"why can't I install the plugin?",
+		"why can't I run WPS?",
+		"why can't I check my email in Outlook?",
+		"can you analyze why WPS won't open?",
+		"why did the plugin update fail?",
+		"can you explain why install keeps failing?",
+		"why does this make a difference?",
+		"why does the node selection matter?",
+		"why is `Python` popular?",
+		"what does `context.Context` mean?",
+		"why can't I open github.com/?",
+		"为什么wps导入zetero参考文献报错",
+		"为什么无法安装插件",
+		"为什么不能安装插件",
+		"为什么 WPS 不能运行",
+		"为什么无法检查 Outlook 邮件",
+		"分析一下为什么 WPS 不能运行",
+		"为什么安装插件失败",
+		"为什么更新配置后报错",
+		"帮我看看这是什么问题",
+		"为什么zotero连接不上，我不敢重新安装",
+		"诊断数据库连接失败的原因",
+		"这软件打不开了，怎么回事",
+	}
+	for _, input := range diagnostic {
+		if deliveryTaskNeedsEvidence(input) {
+			t.Errorf("diagnostic input %q incorrectly classified as needing evidence", input)
+		}
+	}
+
+	// Mutation-worded tasks still require evidence.
+	taskInputs := []string{
+		"fix the crash in a.go",
+		"帮我修复wps的崩溃问题",
+		"create a new login endpoint",
+		"添加一个单元测试",
+		"modify the existing config",
+		"patch the parser",
+		"replace the old endpoint",
+		"make the requested changes",
+		"调整现有配置",
+		"替换旧接口",
+		"thanks for fixing that, now update the tests",
+		"谢谢你，请继续修改配置",
+	}
+	for _, input := range taskInputs {
+		if !deliveryTaskNeedsEvidence(input) {
+			t.Errorf("mutation task %q incorrectly classified as NOT needing evidence", input)
+		}
+	}
+}
+
+func TestDeliveryTaskNeedsEvidenceKeepsReadOnlyTechnicalWork(t *testing.T) {
+	inputs := []string{
+		"review this pull request and report whether it is correct",
+		"run go test ./... and tell me why it fails",
+		"why does go test fail?",
+		"why does go build ./... fail?",
+		"why does npm run build fail?",
+		"why does git status fail?",
+		"why does `custom-lint --strict` fail?",
+		"why does ./scripts/verify.sh fail?",
+		"为什么 go build ./... 会失败",
+		"why can't I run main.go?",
+		"why does README.md render incorrectly?",
+		"reproduce the crash and identify the root cause",
+		"inspect main.go for security vulnerabilities",
+		"诊断当前项目的数据库连接失败原因",
+	}
+	for _, input := range inputs {
+		if !deliveryTaskNeedsEvidence(input) {
+			t.Errorf("read-only technical task %q did not require host-observable evidence", input)
+		}
+		if deliveryTaskNeedsMutation(input) {
+			t.Errorf("read-only technical task %q incorrectly required a mutation", input)
+		}
+	}
+}
+
+func TestDeliveryTaskNeedsMutationHandlesMixedIntent(t *testing.T) {
+	mutationInputs := []string{
+		"modify the existing config",
+		"patch the parser",
+		"make the requested changes",
+		"I don't want to install dependencies, but update the existing config",
+		"I can't install dependencies; please edit the existing config instead",
+		"I can't install dependencies and please update the config",
+		"do not install dependencies and please update the config",
+		"I can't install dependencies so update the config",
+		"I can't install dependencies please update the existing config",
+		"can you explain why it fails and fix it",
+		"我不想安装新依赖，请修改现有配置修复这个问题",
+		"我无法安装新依赖，但请修改现有配置",
+		"无法安装新依赖请修改配置",
+		"不要安装依赖请更新配置",
+		"无法安装新依赖所以修改配置",
+		"为什么这个方案失败，请修复它",
+		"调整现有配置",
+		"替换旧接口",
+	}
+	for _, input := range mutationInputs {
+		if !deliveryTaskNeedsMutation(input) {
+			t.Errorf("mixed-intent input %q did not require a mutation", input)
+		}
+	}
+
+	readOnlyInputs := []string{
+		"review only; do not fix anything",
+		"I don't want to install dependencies",
+		"please don't install any dependencies",
+		"why can't I install the plugin?",
+		"do not install and update dependencies",
+		"don't fix or update anything",
+		"只分析，不要修改代码",
+		"请不要安装或更新依赖",
+		"不想请团队修改代码",
+		"禁止申请修改配置",
+		"为什么无法安装插件",
+		"为什么不能安装插件",
+		"为什么zotero连接不上，我不敢重新安装",
+	}
+	for _, input := range readOnlyInputs {
+		if deliveryTaskNeedsMutation(input) {
+			t.Errorf("read-only input %q incorrectly required a mutation", input)
+		}
+	}
+}
+
+func TestDeliveryMixedIntentRequiresMutationEvidence(t *testing.T) {
+	inputs := []string{
+		"I can't install dependencies and please update the config",
+		"无法安装新依赖请修改配置",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Add(fakeReadFileTool{})
+			reg.Add(fakeWriterTool{})
+			answer := []provider.Chunk{
+				{Type: provider.ChunkText, Text: "Done; the config is updated."},
+				{Type: provider.ChunkDone},
+			}
+			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
+			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+			err := a.Run(context.Background(), input)
+			var readinessErr *FinalReadinessError
+			if !errors.As(err, &readinessErr) {
+				t.Fatalf("text-only completion escaped the mutation gate: %v", err)
+			}
+			if !strings.Contains(readinessErr.Reason, "state change") {
+				t.Fatalf("readiness reason = %q, want missing state change", readinessErr.Reason)
+			}
+		})
+	}
+}
+
+func TestDeliveryReadOnlyTechnicalTaskRequiresEvidence(t *testing.T) {
+	inputs := []string{
+		"review this pull request and report whether it is correct",
+		"why does go build ./... fail?",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Add(fakeReadFileTool{})
+			reg.Add(fakeWriterTool{})
+			answer := []provider.Chunk{
+				{Type: provider.ChunkText, Text: "Reviewed; everything is correct."},
+				{Type: provider.ChunkDone},
+			}
+			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{answer, answer, answer}}
+			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+			err := a.Run(context.Background(), input)
+			var readinessErr *FinalReadinessError
+			if !errors.As(err, &readinessErr) {
+				t.Fatalf("text-only technical work escaped the evidence gate: %v", err)
+			}
+			if !strings.Contains(readinessErr.Reason, "host-observable work") {
+				t.Fatalf("readiness reason = %q, want missing host-observable work", readinessErr.Reason)
+			}
+			if strings.Contains(readinessErr.Reason, "state change") {
+				t.Fatalf("read-only work incorrectly required a mutation: %q", readinessErr.Reason)
+			}
+		})
+	}
+}
+
+func TestDeliveryDiagnosticConversationCompletes(t *testing.T) {
+	// End-to-end: a diagnostic troubleshooting conversation with no mutation
+	// keywords must complete without a FinalReadinessError — the agent can
+	// give advice but can't write files on the user's machine.
+	inputs := []string{
+		"为什么wps导入zetero参考文献报错，请你帮我诊断一下",
+		"分析一下为什么 WPS 不能运行",
+		"why can't I check my email in Outlook?",
+		"what does `context.Context` mean?",
+	}
+	for _, input := range inputs {
+		t.Run(input, func(t *testing.T) {
+			reg := tool.NewRegistry()
+			reg.Add(fakeReadFileTool{})
+			reg.Add(fakeWriterTool{})
+			// The model gives advice text (no tool calls) — a diagnostic response.
+			advice := []provider.Chunk{
+				{Type: provider.ChunkText, Text: "请尝试以下步骤：1. 检查端口监听 2. 重新注册插件"},
+				{Type: provider.ChunkDone},
+			}
+			prov := &scriptedProvider{name: "p", turns: [][]provider.Chunk{advice}}
+			a := New(prov, reg, NewSession("sys"), Options{DeliveryProfile: true}, event.Discard)
+			if err := a.Run(context.Background(), input); err != nil {
+				t.Fatalf("diagnostic conversation deadlocked: %v", err)
+			}
+			if prov.call != 1 {
+				t.Fatalf("diagnostic conversation had %d provider calls, want 1 (no readiness retries)", prov.call)
+			}
+		})
 	}
 }

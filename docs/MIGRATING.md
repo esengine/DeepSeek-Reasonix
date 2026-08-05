@@ -11,7 +11,7 @@ changed and how to move over.
 | Language | TypeScript / Node | Go |
 | Branch | [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) (maintenance only) | `main-v2` (default, active) |
 | Versions | `0.x` (up to v0.54.x) | `1.0.0`+ |
-| Install | `npm i -g reasonix@0.53.2` (pin a `0.x` version) | `npm i -g reasonix` — `latest` points at the current `1.x` stable; or a release archive / `go build` |
+| Install | `npm i -g reasonix@0.53.2` (pin a `0.x` version) | `npm i -g reasonix` — `latest` points at the current official `1.x` release; or a release archive / `go build` |
 | Code intelligence | embedding semantic search + tree-sitter symbols | LSP-assisted code reading plus grep/read_file/glob; semantic index is not yet ported |
 
 "v1" and "v2" are **codebase generations**, not semver: the v1 line never reached
@@ -23,15 +23,15 @@ changed and how to move over.
 same way esbuild/biome ship native binaries via npm). The binary itself is a
 standalone Go executable; npm is only the installer, not a runtime dependency.
 
-**`npm i -g reasonix` installs the current `1.x` stable.** npm's `latest` tag
+**`npm i -g reasonix` installs the current official `1.x` release.** npm's `latest` tag
 moved to the Go line with `1.17.5` — the earlier "`latest` stays pinned to
 `0.x`" migration guard silently downgraded `npm update -g` users once 1.x went
-stable (#5822), so it was retired. Release candidates still ship under the
-`next` tag; `0.x` stays installable by pinning:
+official (#5822), so it was retired. Public release candidates are no longer
+published. The legacy `next` and `canary` tags are compatibility aliases for
+the same official version; `0.x` stays installable by pinning:
 
 ```sh
-npm i -g reasonix          # current 1.x stable
-npm i -g reasonix@next     # release candidate, when one is ahead of stable
+npm i -g reasonix          # current official 1.x release
 npm i -g reasonix@0.53.2   # pin the legacy TS build
 ```
 
@@ -85,6 +85,47 @@ v0.x sessions are in a custom Windows install/data directory, use
 See
 [Configuration paths](./CONFIG_PATHS.md) for the full path list and limitations.
 
+## Context Engine v2 upgrade
+
+Instruction and memory upgrades are automatic and do not require a setup mode,
+re-index command, or new configuration:
+
+| Existing data | Upgrade behavior |
+| --- | --- |
+| `REASONIX.md`, `AGENTS.md`, `CLAUDE.md` | Loaded as standing instructions with source, directory, precedence, imports, and diagnostics. Existing file names remain valid. |
+| Nested instruction files | Resolve from workspace root to the active target path; within one directory, `.local.md` wins. Deeper directories still outrank broader ones. |
+| Legacy fact without `id` / `revision` | Receives a deterministic scope-aware `legacy-*` ID and starts at revision 1. Migration is idempotent. |
+| Legacy fact without `metadata.scope` | Scope is inferred from the project/global directory that already owns the file. |
+| Existing `MEMORY.md` | Treated as a derived index and rebuilt from active fact files; hand-carried stale entries do not become facts. |
+| Existing active facts | Remain active and gain revision history only when subsequently changed. |
+| Existing archive entries | Remain excluded from recall and can be recovered explicitly from Context Center or `/memory recover`. |
+| Old Memory v5 transcript | Remains readable; previews recover the original user prompt from `<memory-compiler-execution>`. |
+| `[agent].memory_compiler` | Retired and removed by the existing one-time config migration. |
+
+The first current boot persists missing identity/timestamp metadata without
+changing the fact body. Compatibility routing fields keep older Reasonix
+clients from moving a fact into the wrong scope directory if versions share the
+same state root.
+
+After upgrading, use these diagnostics instead of editing migration state:
+
+```text
+/memory
+/memory instructions
+/memory recall
+/memory revisions <id-or-name>
+/memory archived
+```
+
+New relevant facts are recalled automatically. Only bounded, non-sensitive,
+create-only project/reference facts may be saved without a confirmation;
+global facts, preferences, feedback, updates, duplicates, sensitive content,
+and every archive operation remain explicit user decisions. The desktop
+Suggestions tab scans automatically but never saves a candidate until accepted.
+
+See [Context Engine v2](./SESSION_MEMORY_RETRIEVAL.md) for the full precedence,
+freshness, recovery, cache, privacy, and remote-workspace contract.
+
 ## What's the same
 
 The agent core carries over: the loop, tools (read/write/edit/glob/grep/bash/…),
@@ -101,15 +142,20 @@ and DeepSeek prefix-cache–oriented design.
 - **MCP project identity and schema-cache URLs are credential-aware**: userinfo
   and credential query values (token, api_key, password, ...) do not enter the
   project launch identity digest or schema cache key, so credential rotation
-  keeps an unchanged project launch authorization. User-installed servers do
-  not compute a project identity digest. Legacy per-tool reader receipts are
-  ignored and removed on the next authorization-state write.
-- **MCP setup is now add-and-use.** Servers added by the user (Desktop, user
-  config, legacy user import, or a user-installed plugin package) connect
-  immediately and permit all calls. Repository `reasonix.toml` / `.mcp.json`
-  servers instead require one pre-launch confirmation for their exact stable
-  identity, before a subprocess or network request exists. Host sandbox,
-  read-root, and write-root policy changes do not invalidate server identity.
+  keeps the same project runtime/cache identity. User-installed servers do not
+  compute a project identity digest. Legacy launch/tool authorization receipts
+  are no longer required by configured MCP servers.
+- **MCP setup is now add-and-use.** Servers added by the user (Desktop, CLI,
+  user config, legacy user import, or a user-installed plugin package) are
+  trusted immediately and global installs persist to `config.toml`. Repository
+  `reasonix.toml` / `.mcp.json` servers stay project-scoped and are trusted
+  without a separate launch confirmation. Project entries override same-name
+  global entries; `reasonix.toml` overrides `.mcp.json` inside the project.
+  Treat opening an unfamiliar repository as opting into executable project
+  configuration: review `.reasonix/settings.json`, `reasonix.toml`, and
+  `.mcp.json` before starting Reasonix. If a repository causes unexpected MCP
+  or Hook behavior, close that workspace and correct or remove the project-local
+  entries before reopening it.
 - **stdio MCP connections are persistent.** This fixes stateful servers that
   lost browser/session state when writer calls received a fresh process.
 - **Plan mode and permission policy are now independent**: Plan directs the
@@ -119,7 +165,7 @@ and DeepSeek prefix-cache–oriented design.
   whole planning phase. Explicit execution-phase tools such as `complete_step` also
   remain unavailable until plan approval. `plan_mode_read_only_commands` is
   still parsed and round-tripped for old configs, but it no longer controls
-  main Plan availability. Installed or explicitly authorized servers contribute their
+  main Plan availability. Installed or project-configured servers contribute their
   non-destructive `readOnlyHint` tools to planner/read-only registries
   automatically. Use `read_only_task` /
   `read_only_skill` when a child must be technically restricted to read-only;

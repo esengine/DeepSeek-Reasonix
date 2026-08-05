@@ -52,7 +52,11 @@ func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDia
 		return ""
 	}
 
-	groups := []string{shortTokens(u.TotalTokens) + " tok"}
+	total := shortTokens(u.TotalTokens) + " tok"
+	if u.Estimated {
+		total = "≈" + total
+	}
+	groups := []string{total}
 	if u.PromptTokens > 0 {
 		cached := u.CacheHitTokens
 		fresh := u.CacheMissTokens
@@ -71,6 +75,9 @@ func renderTurnReceipt(u *provider.Usage, p *provider.Pricing, d *event.CacheDia
 	}
 	if p != nil {
 		groups = append(groups, fmt.Sprintf("%s%.4f", p.Symbol(), p.Cost(u)))
+	}
+	if u.Estimated {
+		groups = append(groups, "estimated")
 	}
 
 	separator := footerHint(" · ")

@@ -92,28 +92,27 @@ func loadCCSwitchMCPFromRoot(root string) ([]PluginEntry, error) {
 }
 
 func ImportCCSwitchMCPEntries(entries []PluginEntry) (total, added, updated int, err error) {
-	cfg, err := Load()
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	return importMCPEntries(cfg, entries)
+	return importMCPEntries(entries)
 }
 
 // ImportCCSwitchMCP upserts cc-switch's Reasonix-enabled MCP servers into the
-// active Reasonix config and saves it.
+// user-global Reasonix config and saves it.
 func ImportCCSwitchMCP() (total, added, updated int, err error) {
 	entries, err := LoadCCSwitchMCP()
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	cfg, err := Load()
-	if err != nil {
-		return 0, 0, 0, err
-	}
-	return importMCPEntries(cfg, entries)
+	return importMCPEntries(entries)
 }
 
-func importMCPEntries(cfg *Config, entries []PluginEntry) (total, added, updated int, err error) {
+func importMCPEntries(entries []PluginEntry) (total, added, updated int, err error) {
+	path := UserConfigPath()
+	if strings.TrimSpace(path) == "" {
+		return 0, 0, 0, fmt.Errorf("cc-switch import: cannot resolve user config path")
+	}
+	unlock := LockUserConfigEdits()
+	defer unlock()
+	cfg := LoadForEdit(path)
 	existing := make(map[string]PluginEntry, len(cfg.Plugins))
 	for _, p := range cfg.Plugins {
 		existing[p.Name] = p
@@ -124,12 +123,13 @@ func importMCPEntries(cfg *Config, entries []PluginEntry) (total, added, updated
 		} else {
 			added++
 		}
+		e.Source = MCPSourceUserConfig
 		if err := cfg.UpsertPlugin(e); err != nil {
 			return 0, 0, 0, err
 		}
 		existing[e.Name] = e
 	}
-	if err := cfg.Save(); err != nil {
+	if err := cfg.SaveTo(path); err != nil {
 		return 0, 0, 0, err
 	}
 	return len(entries), added, updated, nil

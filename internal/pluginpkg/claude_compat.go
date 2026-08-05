@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -34,7 +35,8 @@ type claudeHookDocument struct {
 		Hooks   []struct {
 			Type        string            `json:"type"`
 			Command     string            `json:"command"`
-			Args        []string          `json:"args"`
+			Args        *[]string         `json:"args"`
+			Shell       string            `json:"shell"`
 			Description string            `json:"description"`
 			Timeout     int               `json:"timeout"`
 			Async       bool              `json:"async"`
@@ -179,9 +181,25 @@ func appendClaudeHooksFile(root, rel string, manifest *Manifest) ([]string, []Co
 					issues = append(issues, CompatibilityIssue{Capability: "hooks", Path: rel, Reason: reason})
 					continue
 				}
-				command := strings.TrimSpace(item.Command)
-				if command == "" {
+				command := item.Command
+				if strings.TrimSpace(command) == "" {
 					continue
+				}
+				argsSet := item.Args != nil
+				var args []string
+				shell := ""
+				if argsSet {
+					// Exec-form arguments are literal. Preserve empty and
+					// whitespace-only values exactly as declared.
+					args = append([]string{}, (*item.Args)...)
+				} else {
+					shell = strings.ToLower(strings.TrimSpace(item.Shell))
+					if !validClaudeHookShell(shell) {
+						reason := fmt.Sprintf("%s hook %q uses unsupported shell %q", event, command, item.Shell)
+						warnings = append(warnings, rel+": "+reason)
+						issues = append(issues, CompatibilityIssue{Capability: "hooks", Path: rel, Reason: reason})
+						continue
+					}
 				}
 				if ifExpr := strings.TrimSpace(item.If); ifExpr != "" {
 					reason := fmt.Sprintf("%s hook %q has a conditional \"if\": %q that Reasonix does not evaluate — it runs unconditionally instead of only for the matching case", event, command, ifExpr)
@@ -215,8 +233,10 @@ func appendClaudeHooksFile(root, rel string, manifest *Manifest) ([]string, []Co
 				manifest.Hooks[event] = appendUniqueHook(manifest.Hooks[event], Hook{
 					Match:         match,
 					Command:       command,
-					Args:          cleanStringList(item.Args),
+					Args:          args,
+					ArgsSet:       argsSet,
 					ShellCommand:  true,
+					Shell:         shell,
 					Async:         item.Async,
 					PayloadFormat: "claude",
 					Description:   firstNonEmpty(strings.TrimSpace(item.Description), "Claude-compatible hook from "+rel),
@@ -265,10 +285,15 @@ func appendUniqueHook(hooks []Hook, candidate Hook) []Hook {
 // silently drop the second one.
 func hooksEqual(a, b Hook) bool {
 	return a.Match == b.Match && a.Command == b.Command &&
-		strings.Join(a.Args, "\x00") == strings.Join(b.Args, "\x00") &&
+		a.ArgsSet == b.ArgsSet && slices.Equal(a.Args, b.Args) &&
+		a.ShellCommand == b.ShellCommand && a.Shell == b.Shell &&
 		a.PayloadFormat == b.PayloadFormat &&
 		a.Async == b.Async && a.Timeout == b.Timeout && a.Cwd == b.Cwd &&
 		maps.Equal(a.Env, b.Env)
+}
+
+func validClaudeHookShell(shell string) bool {
+	return shell == "" || shell == "bash" || shell == "powershell"
 }
 
 func appendClaudeMCPFile(root string, manifest *Manifest) ([]string, []CompatibilityIssue) {

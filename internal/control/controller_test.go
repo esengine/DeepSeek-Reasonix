@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +26,7 @@ import (
 	"reasonix/internal/hook"
 	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
+	"reasonix/internal/memory"
 	"reasonix/internal/permission"
 	"reasonix/internal/plugin"
 	"reasonix/internal/pluginpkg"
@@ -37,6 +39,47 @@ type typedNilControllerSink struct{}
 
 func (*typedNilControllerSink) Emit(event.Event) {}
 
+func TestResolvePlanDecisionRecordsDistinctOutcomes(t *testing.T) {
+	tests := []struct {
+		action PlanDecisionAction
+		allow  bool
+	}{
+		{action: PlanDecisionStartExecution, allow: true},
+		{action: PlanDecisionRevisePlan, allow: false},
+		{action: PlanDecisionExitPlan, allow: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.action), func(t *testing.T) {
+			session := agent.NewSession("sys")
+			session.Add(provider.Message{Role: provider.RoleAssistant, Content: "proposed plan"})
+			exec := agent.New(nil, nil, session, agent.Options{}, event.Discard)
+			c := New(Options{Executor: exec})
+			id, reply := c.approval.registerDecisionKind(planApprovalTool, "", "", true, false, "plan", nil)
+
+			if err := c.ResolvePlanDecision(id, tt.action); err != nil {
+				t.Fatalf("ResolvePlanDecision: %v", err)
+			}
+			select {
+			case got := <-reply:
+				if got.allow != tt.allow {
+					t.Fatalf("reply allow = %v, want %v", got.allow, tt.allow)
+				}
+			default:
+				t.Fatal("plan decision did not unblock the approval waiter")
+			}
+
+			messages := session.Snapshot()
+			if len(messages) != 2 || len(messages[1].DecisionReceipts) != 1 {
+				t.Fatalf("persisted messages = %+v, want receipt attached to plan answer", messages)
+			}
+			receipt := messages[1].DecisionReceipts[0]
+			if receipt.Kind != "plan" || receipt.Outcome != string(tt.action) {
+				t.Fatalf("receipt = %+v, want plan/%s", receipt, tt.action)
+			}
+		})
+	}
+}
+
 func isolateControlConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -47,6 +90,15 @@ func isolateControlConfigHome(t *testing.T) string {
 	t.Setenv("AppData", filepath.Join(home, "AppData"))
 	t.Chdir(t.TempDir())
 	return home
+}
+
+func controlTestPluginByName(entries []config.PluginEntry, name string) (config.PluginEntry, bool) {
+	for _, entry := range entries {
+		if entry.Name == name {
+			return entry, true
+		}
+	}
+	return config.PluginEntry{}, false
 }
 
 type appendingRunner struct {
@@ -128,6 +180,36 @@ func (fakeControlTool) ReadOnly() bool { return true }
 type startBackgroundJobTool struct {
 	started chan string
 	release chan struct{}
+}
+
+func TestCancelJobCannotCrossSessionBoundary(t *testing.T) {
+	manager := jobs.NewManager(event.Discard)
+	t.Cleanup(manager.Close)
+	pathA := filepath.Join(t.TempDir(), "session-a.jsonl")
+	pathB := filepath.Join(t.TempDir(), "session-b.jsonl")
+	controllerA := New(Options{Jobs: manager})
+	controllerB := New(Options{Jobs: manager})
+	controllerA.sessionPath = pathA
+	controllerB.sessionPath = pathB
+
+	jobA := manager.StartForSession(agent.BranchID(pathA), "bash", "a", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+	jobB := manager.StartForSession(agent.BranchID(pathB), "bash", "b", func(ctx context.Context, _ io.Writer) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	})
+
+	if controllerA.CancelJob(jobB.ID) {
+		t.Fatal("controller A cancelled controller B's job")
+	}
+	if !controllerA.CancelJob(jobA.ID) {
+		t.Fatal("controller A did not cancel its own job")
+	}
+	if !controllerB.CancelJob(jobB.ID) {
+		t.Fatal("controller B did not retain ownership of its job")
+	}
 }
 
 func (t startBackgroundJobTool) Name() string        { return "start_background_job" }
@@ -461,6 +543,71 @@ func TestGoalStatePersistsNextToSessionPath(t *testing.T) {
 	}
 }
 
+func TestSetGoalDurableRestoresInMemoryStateWhenSidecarWriteFails(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+
+	c.SetGoal("keep the old goal")
+	oldStatus := c.GoalStatus()
+	notDirectory := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(notDirectory, []byte("block nested writes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.goals.setStatePath(filepath.Join(notDirectory, "goal.json"))
+
+	if err := c.SetGoalDurable("replace the goal", ""); err == nil {
+		t.Fatal("SetGoalDurable succeeded despite an invalid sidecar parent")
+	}
+	if got := c.Goal(); got != "keep the old goal" {
+		t.Fatalf("Goal() after failed durable write = %q, want old Goal", got)
+	}
+	if got := c.GoalStatus(); got != oldStatus {
+		t.Fatalf("GoalStatus() after failed durable write = %q, want %q", got, oldStatus)
+	}
+}
+
+func TestSetGoalDurableRollsBackAutoResearchTaskAndNotice(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "session.jsonl")
+	sink := &noticeSink{}
+	exec := agent.New(nil, nil, agent.NewSession("sys"), agent.Options{}, event.Discard)
+	c := New(Options{
+		Executor:      exec,
+		SessionDir:    root,
+		SessionPath:   path,
+		WorkspaceRoot: root,
+		Sink:          sink,
+		Label:         "test",
+	})
+
+	c.SetGoal("keep the old goal")
+	notDirectory := filepath.Join(root, "not-a-directory")
+	if err := os.WriteFile(notDirectory, []byte("block nested writes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.goals.setStatePath(filepath.Join(notDirectory, "goal.json"))
+
+	goal := "investigate the root cause and fix the performance regression, then verify with tests"
+	if err := c.SetGoalDurable(goal, ""); err == nil {
+		t.Fatal("SetGoalDurable succeeded despite an invalid sidecar parent")
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".reasonix", "autoresearch"))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read autoresearch dir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("autoresearch task count after rollback = %d, want 0", len(entries))
+	}
+	for _, notice := range sink.notices() {
+		if strings.Contains(notice, "autoresearch task created") || strings.Contains(notice, "autoresearch task resumed") {
+			t.Fatalf("durable failure emitted success notice %q", notice)
+		}
+	}
+}
+
 func TestResumeRestoresTerminalGoalTodosFromSidecar(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -634,7 +781,8 @@ func TestSnapshotAdoptsNewerDiskForPureStalePrefix(t *testing.T) {
 	staleSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
 	staleSess.Add(provider.Message{Role: provider.RoleAssistant, Content: "one"})
 	staleExec := agent.New(nil, nil, staleSess, agent.Options{}, event.Discard)
-	stale := New(Options{Executor: staleExec, SessionDir: dir, SessionPath: path, Label: "test"})
+	sink := &noticeSink{}
+	stale := New(Options{Executor: staleExec, SessionDir: dir, SessionPath: path, Label: "test", Sink: sink})
 
 	currentSess := agent.NewSession("sys")
 	currentSess.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
@@ -663,6 +811,10 @@ func TestSnapshotAdoptsNewerDiskForPureStalePrefix(t *testing.T) {
 	}
 	if got := len(stale.executor.Session().Snapshot()); got != 5 {
 		t.Fatalf("stale controller adopted message count = %d, want 5", got)
+	}
+	notice, ok := sink.lastNotice()
+	if !ok || notice.Code != event.NoticeCodeSessionRecoveryAdopted || notice.Audience != event.NoticeAudienceOperator {
+		t.Fatalf("adoption notice = %+v, want typed operator recovery notice", notice)
 	}
 }
 
@@ -1047,6 +1199,45 @@ func TestSnapshotActivityPersistsOwnedCompactionRewrite(t *testing.T) {
 	}
 }
 
+func TestEditedPromptMetadataAfterMidTurnSnapshotStaysOnOwnedSession(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "edited-mid-turn.jsonl")
+
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "edited prompt"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "partial"})
+	if err := sess.Save(path); err != nil {
+		t.Fatalf("Save mid-turn transcript: %v", err)
+	}
+	// The model finishes after the periodic snapshot. Turn teardown then adds
+	// local inline-edit metadata to the already-persisted user message.
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "final"})
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	ctrl := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
+	ctrl.markEditedForNewUser(1, "original prompt")
+
+	if err := ctrl.SnapshotActivity(); err != nil {
+		t.Fatalf("SnapshotActivity edited turn: %v", err)
+	}
+	if got := ctrl.SessionPath(); got != path {
+		t.Fatalf("edited turn moved to recovery path %q, want owned path %q", got, path)
+	}
+	loaded, err := agent.LoadSession(path)
+	if err != nil {
+		t.Fatalf("LoadSession: %v", err)
+	}
+	if got := len(loaded.Messages); got != 4 {
+		t.Fatalf("saved message count = %d, want 4: %+v", got, loaded.Messages)
+	}
+	user := loaded.Messages[1]
+	if !user.Edited || user.Original != "original prompt" || user.Content != "edited prompt" {
+		t.Fatalf("saved edited user metadata = %+v", user)
+	}
+	if matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl")); err != nil || len(matches) != 0 {
+		t.Fatalf("spurious recovery branches = %v err=%v, want none", matches, err)
+	}
+}
+
 func TestRecoveryBranchPersistsLaterOwnedCompactionRewrite(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -1074,7 +1265,11 @@ func TestRecoveryBranchPersistsLaterOwnedCompactionRewrite(t *testing.T) {
 	}
 	notices := sink.notices()
 	if len(notices) == 0 {
-		t.Fatal("initial recovery emitted no user notice")
+		t.Fatal("initial recovery emitted no operator notice")
+	}
+	notice, ok := sink.lastNotice()
+	if !ok || notice.Code != event.NoticeCodeSessionRecoveryForked || notice.Audience != event.NoticeAudienceOperator {
+		t.Fatalf("fork recovery notice = %+v, want typed operator recovery notice", notice)
 	}
 	if got := notices[len(notices)-1]; strings.Contains(got, agent.BranchID(recoveryPath)) || strings.Contains(got, "recovery branch") {
 		t.Fatalf("initial recovery notice exposed internal branch detail: %q", got)
@@ -1212,11 +1407,13 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 	current.Add(provider.Message{Role: provider.RoleAssistant, Content: "shutdown tail"})
 	exec := agent.New(nil, nil, current, agent.Options{}, event.Discard)
 	var handoff SessionRecoveryInfo
+	sink := &noticeSink{}
 	c := New(Options{
 		Executor:    exec,
 		SessionDir:  dir,
 		SessionPath: path,
 		Label:       "shutdown",
+		Sink:        sink,
 		OnSessionRecovered: func(info SessionRecoveryInfo) error {
 			handoff = info
 			return nil
@@ -1242,6 +1439,10 @@ func TestRecoverShutdownSnapshotPersistsAndReanchorsSession(t *testing.T) {
 	}
 	if got := recovered.Snapshot(); len(got) != 3 || got[2].Content != "shutdown tail" {
 		t.Fatalf("shutdown recovery transcript = %+v", got)
+	}
+	notice, ok := sink.lastNotice()
+	if !ok || notice.Code != event.NoticeCodeSessionShutdownRecoveryForked || notice.Audience != event.NoticeAudienceOperator {
+		t.Fatalf("shutdown recovery notice = %+v, want typed operator recovery notice", notice)
 	}
 }
 
@@ -1613,6 +1814,30 @@ func TestAdoptHistoryPreservesRewriteBaseline(t *testing.T) {
 	}
 }
 
+func TestAdoptEmptyHistoryRestoresPersistedGoalState(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "empty-session.jsonl")
+	if err := agent.NewSession("").Save(path); err != nil {
+		t.Fatalf("Save empty session: %v", err)
+	}
+
+	oldExec := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+	old := New(Options{Executor: oldExec, SessionDir: dir, SessionPath: path, Label: "old"})
+	old.SetGoal("preserve the zero-turn goal")
+	old.stopGoal(GoalStatusBlocked)
+
+	newExec := agent.New(nil, nil, agent.NewSession(""), agent.Options{}, event.Discard)
+	replacement := New(Options{Executor: newExec, SessionDir: dir, Label: "replacement", DisableColdResumePrune: true})
+	replacement.AdoptHistory(nil, path)
+
+	if got := replacement.Goal(); got != "preserve the zero-turn goal" {
+		t.Fatalf("Goal after empty-history adoption = %q", got)
+	}
+	if got := replacement.GoalStatus(); got != GoalStatusBlocked {
+		t.Fatalf("GoalStatus after empty-history adoption = %q, want blocked", got)
+	}
+}
+
 func TestAdoptHistoryRejectsStaleCarriedHistoryBaseline(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -1815,6 +2040,22 @@ type noticeSink struct {
 	events []event.Event
 }
 
+func TestSessionRecoveryNoticesAreOperatorScoped(t *testing.T) {
+	for _, code := range []string{
+		event.NoticeCodeSessionRecoveryForked,
+		event.NoticeCodeSessionRecoveryAdopted,
+		event.NoticeCodeSessionRecoveryAdoptedCovered,
+		event.NoticeCodeSessionRecoveryDepthCap,
+		event.NoticeCodeSessionShutdownRecoveryForked,
+	} {
+		notice := sessionRecoveryNotice(code, "maintenance")
+		if notice.Kind != event.Notice || notice.Level != event.LevelWarn ||
+			notice.Audience != event.NoticeAudienceOperator || notice.Code != code {
+			t.Fatalf("session recovery notice %q = %+v, want typed operator warning", code, notice)
+		}
+	}
+}
+
 func (s *noticeSink) Emit(e event.Event) {
 	s.mu.Lock()
 	s.events = append(s.events, e)
@@ -1831,6 +2072,17 @@ func (s *noticeSink) notices() []string {
 		}
 	}
 	return out
+}
+
+func (s *noticeSink) lastNotice() (event.Event, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := len(s.events) - 1; i >= 0; i-- {
+		if s.events[i].Kind == event.Notice {
+			return s.events[i], true
+		}
+	}
+	return event.Event{}, false
 }
 
 func TestSnapshotConflictAtRecoveryDepthCapForceSavesCurrentBranch(t *testing.T) {
@@ -1885,6 +2137,10 @@ func TestSnapshotConflictAtRecoveryDepthCapForceSavesCurrentBranch(t *testing.T)
 	notices := sink.notices()
 	if len(notices) == 0 || !strings.Contains(notices[len(notices)-1], "saved the current conflict copy in place") {
 		t.Fatalf("notices = %v, want depth-cap notice", notices)
+	}
+	notice, ok := sink.lastNotice()
+	if !ok || notice.Code != event.NoticeCodeSessionRecoveryDepthCap || notice.Audience != event.NoticeAudienceOperator {
+		t.Fatalf("depth-cap notice = %+v, want typed operator recovery notice", notice)
 	}
 	if stale.NeedsRewriteSave() {
 		t.Fatal("rewrite baseline not re-anchored by depth-cap force save")
@@ -2544,6 +2800,48 @@ func TestRegisterMCPServerOnDemandDefersConnectionUntilFirstUse(t *testing.T) {
 	}
 }
 
+func TestControllerMCPHotLifecycleUpdatesCapabilityRuntime(t *testing.T) {
+	t.Setenv("REASONIX_CACHE_HOME", t.TempDir())
+	host := plugin.NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	runtime := agent.NewMCPCapabilityRuntime(context.Background(), host, nil, reg, nil)
+	ctrl := New(Options{
+		Host: host, Registry: reg, PluginCtx: context.Background(), CapabilityRuntime: runtime,
+	})
+	frontend := runtime.NewFrontend(nil, nil)
+	entry := config.PluginEntry{
+		Name: "hot", Type: "http", URL: "http://127.0.0.1:1", Source: config.MCPSourceUserConfig,
+	}
+
+	if _, err := ctrl.RegisterMCPServerOnDemand(entry); err != nil {
+		t.Fatalf("RegisterMCPServerOnDemand: %v", err)
+	}
+	listed, err := frontend.Execute(context.Background(), json.RawMessage(`{"action":"list"}`))
+	if err != nil || !strings.Contains(listed, `"name": "hot"`) {
+		t.Fatalf("hot add list = %q, %v", listed, err)
+	}
+
+	if !ctrl.UnregisterMCPServerTools("hot") {
+		t.Fatal("UnregisterMCPServerTools returned false")
+	}
+	listed, err = frontend.Execute(context.Background(), json.RawMessage(`{"action":"list"}`))
+	if err != nil || !strings.Contains(listed, `"status": "disabled"`) {
+		t.Fatalf("disabled list = %q, %v", listed, err)
+	}
+
+	if _, err := ctrl.RegisterMCPServerOnDemand(entry); err != nil {
+		t.Fatalf("re-enable RegisterMCPServerOnDemand: %v", err)
+	}
+	if !ctrl.DisconnectMCPServer("hot") {
+		t.Fatal("DisconnectMCPServer returned false for runtime-only placeholder")
+	}
+	listed, err = frontend.Execute(context.Background(), json.RawMessage(`{"action":"list"}`))
+	if err != nil || strings.Contains(listed, `"name": "hot"`) {
+		t.Fatalf("runtime-only disconnect leaked list entry = %q, %v", listed, err)
+	}
+}
+
 func TestAddMCPServerAuthorizesExplicitUserAddBeforeConnecting(t *testing.T) {
 	var configured plugin.Spec
 	c := New(Options{
@@ -2557,6 +2855,179 @@ func TestAddMCPServerAuthorizesExplicitUserAddBeforeConnecting(t *testing.T) {
 	if configured.ConfigSource != string(config.MCPSourceUserConfig) ||
 		!configured.Authorized || configured.RequireLaunchApproval || configured.WorkspaceRoot != "/workspace" {
 		t.Fatalf("configured spec = %+v, want user-authorized add-and-use policy", configured)
+	}
+}
+
+func TestAddMCPServerWritesGlobalConfigWithoutShadowingProject(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	projectPath := filepath.Join(workspace, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte(`
+[[plugins]]
+name = "project-only"
+command = "project-only"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(req.ID) == 0 || string(req.ID) == "null" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := any(map[string]any{})
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"serverInfo":      map[string]any{"name": "global-docs", "version": "1"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "search",
+				"description": "Search documentation.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": req.ID, "result": result})
+	}))
+	defer server.Close()
+
+	host := plugin.NewHost()
+	defer host.Close()
+	ctrl := New(Options{Host: host, Registry: tool.NewRegistry(), PluginCtx: context.Background(), WorkspaceRoot: workspace})
+	if n, err := ctrl.AddMCPServer(config.PluginEntry{Name: "global-docs", Type: "http", URL: server.URL}); err != nil || n != 1 {
+		t.Fatalf("AddMCPServer(global-docs) = (%d, %v), want one connected tool", n, err)
+	}
+	globalCfg := config.LoadForEdit(config.UserConfigPath())
+	globalEntry, found := controlTestPluginByName(globalCfg.Plugins, "global-docs")
+	if !found || globalEntry.URL != server.URL {
+		t.Fatalf("global config entry = %+v, found=%v", globalEntry, found)
+	}
+	projectCfg := config.LoadForEdit(projectPath)
+	if _, found := controlTestPluginByName(projectCfg.Plugins, "global-docs"); found {
+		t.Fatalf("global install leaked into project config: %+v", projectCfg.Plugins)
+	}
+	if _, found := controlTestPluginByName(projectCfg.Plugins, "project-only"); !found {
+		t.Fatalf("project config was not preserved: %+v", projectCfg.Plugins)
+	}
+}
+
+func TestAddMCPServerRejectsProjectNameCollision(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "shared"
+command = "project-shared"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctrl := New(Options{Host: plugin.NewHost(), WorkspaceRoot: workspace})
+	defer ctrl.Close()
+	if _, err := ctrl.AddMCPServer(config.PluginEntry{Name: "shared", Command: "global-shared"}); err == nil || !strings.Contains(err.Error(), "already configured") {
+		t.Fatalf("AddMCPServer(shared) error = %v, want project collision", err)
+	}
+	if _, found := controlTestPluginByName(config.LoadForEdit(config.UserConfigPath()).Plugins, "shared"); found {
+		t.Fatal("rejected project collision created a global shadow")
+	}
+}
+
+func TestConnectConfiguredProjectMCPIsTrustedByDefault(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if len(req.ID) == 0 || string(req.ID) == "null" {
+			w.WriteHeader(http.StatusAccepted)
+			return
+		}
+		result := any(map[string]any{})
+		switch req.Method {
+		case "initialize":
+			result = map[string]any{
+				"protocolVersion": "2025-03-26",
+				"serverInfo":      map[string]any{"name": "project-docs", "version": "1"},
+			}
+		case "tools/list":
+			result = map[string]any{"tools": []map[string]any{{
+				"name":        "search",
+				"description": "Search project documentation.",
+				"inputSchema": map[string]any{"type": "object"},
+			}}}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0",
+			"id":      req.ID,
+			"result":  result,
+		})
+	}))
+	defer server.Close()
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(fmt.Sprintf(`
+[[plugins]]
+name = "project-docs"
+type = "http"
+url = %q
+`, server.URL)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	host := plugin.NewHost()
+	defer host.Close()
+	reg := tool.NewRegistry()
+	var configured plugin.Spec
+	ctrl := New(Options{
+		Host:          host,
+		Registry:      reg,
+		PluginCtx:     context.Background(),
+		WorkspaceRoot: workspace,
+		MCPConfigureSpec: func(spec *plugin.Spec) {
+			configured = *spec
+		},
+	})
+
+	n, err := ctrl.ConnectConfiguredMCPServer("project-docs")
+	if err != nil {
+		t.Fatalf("ConnectConfiguredMCPServer: %v", err)
+	}
+	if n != 1 || requests.Load() == 0 {
+		t.Fatalf("trusted project MCP = %d tools, %d requests; want 1 tool and a live connection", n, requests.Load())
+	}
+	if _, ok := reg.Get("mcp__project-docs__search"); !ok {
+		t.Fatalf("project MCP tool missing; names=%v", reg.Names())
+	}
+	if !configured.Authorized || configured.RequireLaunchApproval || configured.Dir != workspace {
+		t.Fatalf("project MCP spec = %+v, want trusted project-scoped runtime", configured)
+	}
+
+	nextHost := plugin.NewHost()
+	defer nextHost.Close()
+	nextCtrl := New(Options{
+		Host:          nextHost,
+		Registry:      tool.NewRegistry(),
+		PluginCtx:     context.Background(),
+		WorkspaceRoot: workspace,
+	})
+	if n, err := nextCtrl.ConnectConfiguredMCPServer("project-docs"); err != nil || n != 1 {
+		t.Fatalf("subsequent project MCP connection = (%d, %v), want zero-confirmation trust", n, err)
 	}
 }
 
@@ -2697,7 +3168,12 @@ tier = "lazy"
 
 	reg := tool.NewRegistry()
 	reg.Add(fakeControlTool{name: "mcp__mock__connect"})
-	c := New(Options{Host: plugin.NewHost(), Registry: reg})
+	host := plugin.NewHost()
+	defer host.Close()
+	spec := plugin.Spec{Name: "mock", Command: "mock-mcp", Authorized: true}
+	runtime := agent.NewMCPCapabilityRuntime(context.Background(), host, []plugin.Spec{spec}, reg, nil)
+	runtime.ConfigureServers([]config.PluginEntry{{Name: "mock", Command: "mock-mcp"}}, []plugin.Spec{spec}, map[string]bool{"mock": true})
+	c := New(Options{Host: host, Registry: reg, CapabilityRuntime: runtime})
 
 	disconnected, err := c.RemoveMCPServer("mock")
 	if err != nil {
@@ -2711,6 +3187,34 @@ tier = "lazy"
 	}
 	if names := c.ConfiguredMCPNames(); len(names) != 0 {
 		t.Fatalf("ConfiguredMCPNames() = %v, want empty after remove", names)
+	}
+	proxy := runtime.NewFrontend(nil, nil)
+	listed, listErr := proxy.Execute(context.Background(), json.RawMessage(`{"action":"list"}`))
+	if listErr != nil || strings.Contains(listed, `"name": "mock"`) {
+		t.Fatalf("removed server leaked through capability list = %q, %v", listed, listErr)
+	}
+}
+
+func TestConfiguredMCPNamesUseControllerWorkspaceInsteadOfProcessCWD(t *testing.T) {
+	isolateControlConfigHome(t)
+	workspace := t.TempDir()
+	other := t.TempDir()
+	t.Chdir(other)
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(`
+[[plugins]]
+name = "workspace-mcp"
+command = "workspace-mcp"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	c := New(Options{WorkspaceRoot: workspace, Host: plugin.NewHost()})
+	defer c.Close()
+	if got := c.ConfiguredMCPNames(); !reflect.DeepEqual(got, []string{"workspace-mcp"}) {
+		t.Fatalf("ConfiguredMCPNames() = %v, want workspace-mcp from %s", got, workspace)
+	}
+	if got := c.DisconnectedMCPNames(); !reflect.DeepEqual(got, []string{"workspace-mcp"}) {
+		t.Fatalf("DisconnectedMCPNames() = %v, want workspace-mcp from %s", got, workspace)
 	}
 }
 
@@ -3178,6 +3682,53 @@ func TestGuardianCannotAutoAllowFreshHumanApprovalTools(t *testing.T) {
 	}
 }
 
+func TestLowRiskProjectMemoryCreateSkipsApprovalPrompt(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	approvals := 0
+	c := New(Options{
+		Memory: &memory.Set{Store: store},
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.ApprovalRequest {
+				approvals++
+			}
+		}),
+	})
+	args := json.RawMessage(`{"name":"release-target","description":"Project release target","type":"project","body":"Release from main-v2."}`)
+	allow, remember, reason, err := gateApprover{c}.ApproveWithReason(context.Background(), memoryRememberTool, "", args)
+	if err != nil || !allow || remember || reason != "" || approvals != 0 {
+		t.Fatalf("safe project create = (%v,%v,%q,%v), approvals=%d", allow, remember, reason, err, approvals)
+	}
+
+	out, err := memory.NewRememberTool(store).Execute(memory.WithQueue(context.Background(), c), args)
+	if err != nil || !strings.Contains(out, "Saved memory") {
+		t.Fatalf("auto-approved remember execution = %q, %v", out, err)
+	}
+	if got := store.List(); len(got) != 1 || got[0].Name != "release-target" {
+		t.Fatalf("saved memories = %+v", got)
+	}
+}
+
+func TestExistingMemoryRevokesAbandonedAutomaticCreateClaim(t *testing.T) {
+	store := memory.Store{Dir: t.TempDir()}
+	c := New(Options{Memory: &memory.Set{Store: store}})
+	args := json.RawMessage(`{"name":"release-target","description":"Project release target","type":"project","body":"Release from main-v2."}`)
+
+	if assessment := memory.AssessRememberWrite(store, args); !assessment.AutoAllow {
+		t.Fatalf("initial assessment = %+v", assessment)
+	}
+	c.memory.authorizeAutoRemember(args) // approval was issued, then the turn was cancelled
+	if _, err := store.Save(memory.Memory{Name: "release-target", Description: "concurrent", Body: "existing"}); err != nil {
+		t.Fatal(err)
+	}
+	if assessment := memory.AssessRememberWrite(store, args); assessment.AutoAllow {
+		t.Fatalf("existing assessment = %+v", assessment)
+	}
+	c.memory.revokeAutoRemember(args)
+	if c.ClaimAutoMemoryWrite(args) {
+		t.Fatal("abandoned automatic create claim survived an existing-memory reassessment")
+	}
+}
+
 // TestSessionGrantShortCircuitsGuardianReview: a session grant (or YOLO / the
 // approved-plan window) answers an ordinary approval before any guardian review
 // or prompt is attempted. Absorbed from PR #6413 by @myipanta.
@@ -3222,7 +3773,7 @@ func TestHeadlessGateRefusesFreshHumanApprovalTools(t *testing.T) {
 
 	allow, reason, err := gate.Check(context.Background(), "bash", json.RawMessage(`{"command":"go test ./..."}`), false)
 	if err != nil || !allow || reason != "" {
-		t.Fatalf("ordinary headless ask = (%v,%q,%v), want autonomous allow", allow, reason, err)
+		t.Fatalf("legacy bootstrap ask = (%v,%q,%v), want compatibility allow", allow, reason, err)
 	}
 }
 
@@ -4744,4 +5295,22 @@ func cmdNames(cmds []command.Command) []string {
 		names[i] = c.Name
 	}
 	return names
+}
+
+// TestCacheColdAfterFailureFallsBackTo24h：配置加载失败/模型解析失败时
+// 保守回退 24h（评审 #7168 第 4 点）——不得用 10m 提前触发 prune。
+func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
+	c := New(Options{})
+	orig := c.workspaceRoot
+	c.workspaceRoot = "/nonexistent/definitely-missing-root"
+	defer func() { c.workspaceRoot = orig }()
+	if got := c.cacheColdAfter(); got != 24*time.Hour {
+		t.Fatalf("load failure must fall back to 24h, got %v", got)
+	}
+	// 未知模型同样 24h
+	c2 := New(Options{})
+	c2.modelRef = "definitely-not-a-real-model-xyz"
+	if got := c2.cacheColdAfter(); got != 24*time.Hour {
+		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
+	}
 }

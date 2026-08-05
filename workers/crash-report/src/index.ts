@@ -1,6 +1,7 @@
 // Ingest + dashboard for desktop crash/feedback/performance reports and the
-// anonymous launch ping. Reports are user-initiated; pings are opt-out
-// (desktop.telemetry).
+// anonymous launch ping. Frontend reports are user-initiated; native fatal and
+// lifecycle reports are sent on the next launch under the same opt-out desktop
+// telemetry gate as pings.
 import { z } from "zod";
 import type { Env } from "./env";
 import { html, redirect } from "./shell";
@@ -22,7 +23,13 @@ import type { Bindings as RegistryBindings } from "./registry/env";
 import { PackageRepo } from "./registry/db/packages";
 import { EventRepo } from "./registry/db/events";
 import { renderCommunity } from "./community";
-import { desktopReleaseChannel, handleDesktopReleaseManifest } from "./desktop_release";
+import {
+  cliReleaseChannel,
+  desktopReleaseChannel,
+  handleCLIRelease,
+  handleDesktopReleaseManifest,
+  handleReleaseGatewayRequest,
+} from "./desktop_release";
 
 const MAX_BODY_BYTES = 96 * 1024;
 const LATEST_SAMPLES_PER_GROUP = 5;
@@ -72,17 +79,87 @@ const Report = z.object({
 });
 type ReportPayload = z.infer<typeof Report>;
 
-const Ping = z.object({
+const ClientSurface = z.enum(["desktop", "cli"]);
+type ClientSurfaceName = z.infer<typeof ClientSurface>;
+
+type TelemetryTableNames = {
+  pings: "pings" | "cli_pings";
+  metrics: "metrics" | "cli_metrics";
+  metricUsers: "metric_users" | "cli_metric_users";
+};
+
+const TELEMETRY_TABLES: Record<ClientSurfaceName, TelemetryTableNames> = {
+  desktop: { pings: "pings", metrics: "metrics", metricUsers: "metric_users" },
+  cli: { pings: "cli_pings", metrics: "cli_metrics", metricUsers: "cli_metric_users" },
+};
+
+export function telemetryTableNames(surface: ClientSurfaceName): TelemetryTableNames {
+  return TELEMETRY_TABLES[surface];
+}
+
+export const CLI_TELEMETRY_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS cli_pings (
+     date TEXT NOT NULL,
+     install_id TEXT NOT NULL,
+     version TEXT NOT NULL,
+     os TEXT NOT NULL,
+     arch TEXT NOT NULL,
+     os_version TEXT NOT NULL DEFAULT '',
+     opens INTEGER NOT NULL DEFAULT 1,
+     PRIMARY KEY (date, install_id)
+   )`,
+  `CREATE TABLE IF NOT EXISTS cli_metrics (
+     date TEXT NOT NULL,
+     version TEXT NOT NULL,
+     os TEXT NOT NULL,
+     signal TEXT NOT NULL,
+     bucket TEXT NOT NULL,
+     count INTEGER NOT NULL DEFAULT 0,
+     PRIMARY KEY (date, version, os, signal, bucket)
+   )`,
+  `CREATE TABLE IF NOT EXISTS cli_metric_users (
+     date TEXT NOT NULL,
+     signal TEXT NOT NULL,
+     bucket TEXT NOT NULL,
+     install_id TEXT NOT NULL,
+     version TEXT NOT NULL,
+     os TEXT NOT NULL,
+     PRIMARY KEY (date, signal, bucket, install_id)
+   )`,
+  // No secondary indexes: each primary key already leads with `date`, which is
+  // what every dashboard query filters on. See migrate-window-index-fix.sql.
+] as const;
+
+const cliTelemetrySchemaPromises = new WeakMap<object, Promise<void>>();
+
+export function ensureCLITelemetrySchema(env: Pick<Env, "DB">): Promise<void> {
+  const key = env.DB as unknown as object;
+  const existing = cliTelemetrySchemaPromises.get(key);
+  if (existing) return existing;
+  const creation = env.DB
+    .batch(CLI_TELEMETRY_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)))
+    .then(() => undefined)
+    .catch((err) => {
+      cliTelemetrySchemaPromises.delete(key);
+      throw err;
+    });
+  cliTelemetrySchemaPromises.set(key, creation);
+  return creation;
+}
+
+export const Ping = z.object({
   installId: z.string().regex(/^[0-9a-f]{32}$/),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
   arch: z.string().min(1).max(32),
   osVersion: z.string().max(128).optional(),
+  surface: ClientSurface.default("desktop"),
 });
 
-// Opt-in aggregate desktop metrics: a per-launch snapshot of (signal, bucket)
-// counters. No install id, no content — unknown signals are discarded before
-// storage so older workers can accept batches from newer clients safely.
+// Opt-in aggregate client metrics: a per-launch snapshot of (signal, bucket)
+// counters. The optional surface-specific random install id deduplicates DAU;
+// there is no user content. Unknown signals are discarded before storage so
+// older workers can accept batches from newer clients safely.
 const METRIC_SIGNALS = [
   "finish_reason",
   "empty_final",
@@ -90,10 +167,33 @@ const METRIC_SIGNALS = [
   "cache_hit",
   "tool_error",
   "updater_error",
+  "updater_event",
   "compaction",
   "turns",
   "desktop_hang",
   "desktop_hang_age",
+  "desktop_exit",
+  "desktop_exit_phase",
+  "desktop_uptime",
+  "desktop_install",
+  "desktop_update_transition",
+  "desktop_restore",
+  "desktop_webview2_failure",
+  "cli_mode",
+  "cli_profile",
+  "cli_permission_mode",
+  "cli_session_mode",
+  "cli_turn_latency",
+  "cli_exit",
+  "recovery_failure",
+  "recovery_rule_continue",
+  "recovery_review_continue",
+  "recovery_human_prompt",
+  "recovery_human_continue",
+  "recovery_human_revise",
+  "recovery_review_error",
+  "recovery_repeat_prompt",
+  "recovery_review_latency",
   "client_surface",
   "client_version",
   "settings_language",
@@ -161,6 +261,7 @@ export const Metrics = z.object({
     .optional(),
   version: z.string().min(1).max(64),
   os: z.string().min(1).max(32),
+  surface: ClientSurface.default("desktop"),
   counters: z
     .array(z.union([KnownMetricCounter, UnknownMetricCounter]))
     .min(1)
@@ -506,10 +607,12 @@ async function handlePing(request: Request, env: Env): Promise<Response> {
   const parsed = Ping.safeParse(raw);
   if (!parsed.success) return new Response("bad request", { status: 400 });
   const p = parsed.data;
+  const tables = telemetryTableNames(p.surface);
 
   try {
+    if (p.surface === "cli") await ensureCLITelemetrySchema(env);
     await env.DB.prepare(
-      `INSERT INTO pings (date, install_id, version, os, arch, os_version, opens)
+      `INSERT INTO ${tables.pings} (date, install_id, version, os, arch, os_version, opens)
        VALUES (date('now'), ?1, ?2, ?3, ?4, ?5, 1)
        ON CONFLICT (date, install_id) DO UPDATE SET
          opens = opens + 1, version = ?2, os_version = ?5`,
@@ -534,21 +637,23 @@ async function handleMetrics(request: Request, env: Env): Promise<Response> {
   if (!parsed.success) return new Response("bad request", { status: 400 });
   const m = parsed.data;
   if (m.counters.length === 0) return new Response("ok", { status: 202 });
+  const tables = telemetryTableNames(m.surface);
 
-  const upsert = env.DB.prepare(
-    `INSERT INTO metrics (date, version, os, signal, bucket, count)
-     VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
-     ON CONFLICT (date, version, os, signal, bucket) DO UPDATE SET
-       count = count + ?5`,
-  );
   try {
+    if (m.surface === "cli") await ensureCLITelemetrySchema(env);
+    const upsert = env.DB.prepare(
+      `INSERT INTO ${tables.metrics} (date, version, os, signal, bucket, count)
+       VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
+       ON CONFLICT (date, version, os, signal, bucket) DO UPDATE SET
+         count = count + ?5`,
+    );
     await env.DB.batch(m.counters.map((c) => upsert.bind(m.version, m.os, c.signal, c.bucket, c.count)));
   } catch (err) {
     return storageUnavailable("metrics", err);
   }
   if (m.installId) {
     const userUpsert = env.DB.prepare(
-      `INSERT INTO metric_users (date, version, os, signal, bucket, install_id)
+      `INSERT INTO ${tables.metricUsers} (date, version, os, signal, bucket, install_id)
        VALUES (date('now'), ?1, ?2, ?3, ?4, ?5)
        ON CONFLICT (date, signal, bucket, install_id) DO UPDATE SET
          version = ?1, os = ?2`,
@@ -585,6 +690,7 @@ async function formObject(request: Request): Promise<Record<string, string>> {
 }
 
 type StatsFilters = {
+  surface: "desktop" | "cli";
   status: string;
   source: string;
   version: string;
@@ -598,8 +704,10 @@ type StatsFilters = {
 
 function statsFilters(url: URL): StatsFilters {
   const status = url.searchParams.get("status") ?? "";
+  const surface = url.searchParams.get("surface") ?? "desktop";
   const windowParam = url.searchParams.get("window") ?? "";
   return {
+    surface: surface === "cli" ? "cli" : "desktop",
     status: ["open", "resolved", "ignored"].includes(status) ? status : "",
     source: (url.searchParams.get("source") ?? "").slice(0, 32),
     version: (url.searchParams.get("version") ?? "").slice(0, 64),
@@ -613,7 +721,7 @@ function statsFilters(url: URL): StatsFilters {
 }
 
 async function crashGroups(env: Env, filters: StatsFilters, latestVersion: string) {
-  const where: string[] = [];
+  const where: string[] = [diagnosticWindowWhere(filters.windowDays)];
   const binds: unknown[] = [];
   const add = (sql: string, value?: unknown) => {
     where.push(sql.replace("?", `?${binds.length + 1}`));
@@ -738,7 +846,10 @@ type ParsedVersion = {
 };
 
 function parseReleaseVersion(version: string): ParsedVersion | null {
-  const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  // The dashboard's "latest" lane is for shipped stable builds. Development,
+  // prerelease, and build-metadata values remain visible in version facets but
+  // must not become the release baseline used for regression triage.
+  const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/);
   if (!m) return null;
   return {
     version,
@@ -748,7 +859,7 @@ function parseReleaseVersion(version: string): ParsedVersion | null {
   };
 }
 
-function newestReleaseVersion(versions: string[]): string {
+export function newestReleaseVersion(versions: string[]): string {
   const parsed = versions
     .filter((v) => v && v.toLowerCase() !== "dev")
     .map(parseReleaseVersion)
@@ -763,14 +874,15 @@ function newestReleaseVersion(versions: string[]): string {
   return parsed[0]?.version ?? "";
 }
 
-async function latestObservedVersion(env: Env): Promise<string> {
-  const rows = await env.DB.prepare(
-    `SELECT version FROM (
-       SELECT version FROM pings WHERE date >= date('now', '-29 day')
-       UNION
-       SELECT last_version AS version FROM groups
-     ) AS versions WHERE version <> ''`,
-  ).all<{ version: string }>();
+async function latestObservedVersion(env: Env, surface: ClientSurfaceName): Promise<string> {
+  const table = telemetryTableNames(surface).pings;
+  // Require independent installations and use pings as the sole source of
+  // release truth. A single synthetic diagnostic must never promote v9.9.9 (or
+  // a prerelease) to "latest" for every report group.
+  const sql = `SELECT version FROM ${table}
+    WHERE date >= date('now', '-29 day') AND version <> ''
+    GROUP BY version HAVING COUNT(DISTINCT install_id) >= 2`;
+  const rows = await env.DB.prepare(sql).all<{ version: string }>();
   return newestReleaseVersion(rows.results.map((r) => r.version));
 }
 
@@ -782,13 +894,14 @@ type OverviewCounts = {
   criticalOpenReports: number;
 };
 
-async function latestAdoptionPct(env: Env, latestVersion: string, days: 7 | 30): Promise<number | null> {
+async function latestAdoptionPct(env: Env, latestVersion: string, days: 7 | 30, surface: ClientSurfaceName): Promise<number | null> {
   if (!latestVersion) return null;
+  const table = telemetryTableNames(surface).pings;
   const row = await env.DB.prepare(
     `SELECT
       COUNT(DISTINCT install_id) AS total_installs,
       COUNT(DISTINCT CASE WHEN version = ?1 THEN install_id END) AS latest_installs
-    FROM pings WHERE date >= date('now', '${currentWindowSince(days)}')`,
+    FROM ${table} WHERE date >= date('now', '${currentWindowSince(days)}')`,
   )
     .bind(latestVersion)
     .first<{ total_installs: number; latest_installs: number }>();
@@ -797,7 +910,16 @@ async function latestAdoptionPct(env: Env, latestVersion: string, days: 7 | 30):
   return (Number(row?.latest_installs ?? 0) / total) * 100;
 }
 
-async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30): Promise<OverviewCounts> {
+async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30, surface: ClientSurfaceName): Promise<OverviewCounts> {
+  if (surface === "cli") {
+    return {
+      latestAdoptionPct: await latestAdoptionPct(env, latestVersion, days, surface),
+      openReports: 0,
+      newLatestReports: 0,
+      regressedReports: 0,
+      criticalOpenReports: 0,
+    };
+  }
   // Keep the overview's red state aligned with the effective severity used by
   // the diagnostics list. Historical rows retain their stored severity, so
   // known browser notices and development builds must be discounted here too.
@@ -817,7 +939,7 @@ async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30)
           SUM(CASE WHEN first_version = ?1 THEN 1 ELSE 0 END) AS new_latest_reports,
           SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
           SUM(CASE WHEN status = 'open' AND ${criticalActionable} THEN 1 ELSE 0 END) AS critical_open_reports
-        FROM groups`,
+        FROM groups WHERE ${diagnosticWindowWhere(days)}`,
       )
         .bind(latestVersion)
         .first<{ open_reports: number; new_latest_reports: number; regressed_reports: number; critical_open_reports: number }>()
@@ -827,11 +949,11 @@ async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30)
           0 AS new_latest_reports,
           SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
           SUM(CASE WHEN status = 'open' AND ${criticalActionable} THEN 1 ELSE 0 END) AS critical_open_reports
-        FROM groups`,
+        FROM groups WHERE ${diagnosticWindowWhere(days)}`,
       ).first<{ open_reports: number; new_latest_reports: number; regressed_reports: number; critical_open_reports: number }>();
   const [row, adoptionPct] = await Promise.all([
     diagnosticCounts,
-    latestAdoptionPct(env, latestVersion, days),
+    latestAdoptionPct(env, latestVersion, days, surface),
   ]);
   return {
     latestAdoptionPct: adoptionPct,
@@ -846,6 +968,10 @@ function currentWindowSince(days: 7 | 30): string {
   return `-${days - 1} day`;
 }
 
+export function diagnosticWindowWhere(days: 7 | 30): string {
+  return `date(last_seen) >= date('now', '${currentWindowSince(days)}')`;
+}
+
 function previousWindowSince(days: 7 | 30): string {
   return `-${days * 2 - 1} day`;
 }
@@ -854,25 +980,61 @@ function previousWindowUntil(days: 7 | 30): string {
   return currentWindowSince(days);
 }
 
-async function metricRows(env: Env, days: 7 | 30, previous = false): Promise<{ signal: string; bucket: string; total: number }[]> {
+async function metricRows(env: Env, days: 7 | 30, surface: ClientSurfaceName, previous = false): Promise<{ signal: string; bucket: string; total: number }[]> {
   const where = previous
     ? `date >= date('now', '${previousWindowSince(days)}') AND date < date('now', '${previousWindowUntil(days)}')`
     : `date >= date('now', '${currentWindowSince(days)}')`;
+  const table = telemetryTableNames(surface).metrics;
   const rows = await env.DB.prepare(
-    `SELECT signal, bucket, SUM(count) AS total FROM metrics WHERE ${where} GROUP BY signal, bucket ORDER BY signal, total DESC`,
+    `SELECT signal, bucket, SUM(count) AS total FROM ${table} WHERE ${where} GROUP BY signal, bucket ORDER BY signal, total DESC`,
   ).all<{ signal: string; bucket: string; total: number }>();
   return rows.results;
 }
 
-async function metricUserRows(env: Env, days: 7 | 30): Promise<{ signal: string; bucket: string; total: number }[]> {
+// The 30-day desktop window is served from the cron-built rollup: computing it
+// live exceeds what D1 spends on one query (see refreshMetricUserRollup). Null
+// here means "not computed yet", which the dashboard says out loud rather than
+// rendering as an empty result.
+async function rollupMetricUserRows(
+  env: Env,
+): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
   try {
+    await ensureRollupSchema(env);
     const rows = await env.DB.prepare(
-      `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM metric_users WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
+      `SELECT signal, bucket, total, computed_at FROM metric_user_rollup WHERE window_days = ?1 ORDER BY signal, total DESC`,
+    )
+      .bind(ROLLUP_WINDOW_DAYS)
+      .all<{ signal: string; bucket: string; total: number; computed_at: string }>();
+    if (!rows.results.length) return null;
+    // Oldest wins: the cursor refreshes a slice at a time, so this is how far
+    // behind the least recently recomputed signal is.
+    const computedAt = rows.results.reduce((min, r) => (r.computed_at < min ? r.computed_at : min), rows.results[0].computed_at);
+    return { rows: rows.results, computedAt };
+  } catch (err) {
+    console.warn("metric_user_rollup read failed", err);
+    return null;
+  }
+}
+
+// Null means the query did not complete, which is distinct from "no rows": at
+// ~1M rows a day, the 30-day COUNT(DISTINCT install_id) exceeds what D1 will
+// spend on one query and comes back as a CPU-limit reset. Rendering that as an
+// empty dashboard would read as "nobody uses these settings".
+async function metricUserRows(
+  env: Env,
+  days: 7 | 30,
+  surface: ClientSurfaceName,
+): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
+  if (surface === "desktop" && days === ROLLUP_WINDOW_DAYS) return rollupMetricUserRows(env);
+  try {
+    const table = telemetryTableNames(surface).metricUsers;
+    const rows = await env.DB.prepare(
+      `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM ${table} WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
     ).all<{ signal: string; bucket: string; total: number }>();
-    return rows.results;
+    return { rows: rows.results, computedAt: "" };
   } catch (err) {
     console.warn("metric_users query failed", err);
-    return [];
+    return null;
   }
 }
 
@@ -887,11 +1049,15 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   const filters = statsFilters(url);
   const days = filters.windowDays;
   const since = currentWindowSince(days);
+  const surface = activeModule === "diagnostics" ? "desktop" : filters.surface;
+  if (activeModule === "diagnostics") filters.surface = "desktop";
+  if (surface === "cli") await ensureCLITelemetrySchema(env);
+  const pingsTable = telemetryTableNames(surface).pings;
   const bars = (sql: string) => env.DB.prepare(sql).all<Bar>().then((r) => r.results);
   const pingVersions = () =>
-    bars(`SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC LIMIT 15`);
+    bars(`SELECT version AS label, COUNT(DISTINCT install_id) AS users FROM ${pingsTable} WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC LIMIT 15`);
   const pingPlatforms = () =>
-    bars(`SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM pings WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC`);
+    bars(`SELECT os || ' ' || arch AS label, COUNT(DISTINCT install_id) AS users FROM ${pingsTable} WHERE date >= date('now', '${since}') GROUP BY label ORDER BY users DESC`);
 
   let daily: { date: string; users: number; opens: number }[] = [];
   let versions: Bar[] = [];
@@ -900,6 +1066,8 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   let metrics: MetricTotals = [];
   let previousMetrics: MetricTotals = [];
   let metricUsers: MetricTotals = [];
+  let metricUsersUnavailable = false;
+  let metricUsersComputedAt = "";
   let sources: Bar[] = [];
   let overview: OverviewCounts = {
     latestAdoptionPct: null,
@@ -911,15 +1079,15 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   let latestVersion = "";
 
   if (activeModule === "usage") {
-    latestVersion = await latestObservedVersion(env);
+    latestVersion = await latestObservedVersion(env, surface);
     const [dailyR, versionsR, platformsR, metricsR, overviewR] = await Promise.all([
       env.DB.prepare(
-        `SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM pings WHERE date >= date('now', '${since}') GROUP BY date`,
+        `SELECT date, COUNT(*) AS users, SUM(opens) AS opens FROM ${pingsTable} WHERE date >= date('now', '${since}') GROUP BY date`,
       ).all<{ date: string; users: number; opens: number }>(),
       pingVersions(),
       pingPlatforms(),
-      metricRows(env, days),
-      diagnosticOverview(env, latestVersion, days),
+      metricRows(env, days, surface),
+      diagnosticOverview(env, latestVersion, days, surface),
     ]);
     daily = dailyR.results;
     versions = versionsR;
@@ -927,10 +1095,10 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     metrics = metricsR;
     overview = overviewR;
   } else if (activeModule === "diagnostics") {
-    latestVersion = await latestObservedVersion(env);
+    latestVersion = await latestObservedVersion(env, "desktop");
     const [crashesR, sourcesR, versionsR, platformsR] = await Promise.all([
       crashGroups(env, filters, latestVersion),
-      bars("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC"),
+      bars(`SELECT source AS label, COUNT(*) AS users FROM groups WHERE ${diagnosticWindowWhere(days)} GROUP BY source ORDER BY users DESC`),
       pingVersions(),
       pingPlatforms(),
     ]);
@@ -939,14 +1107,27 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     versions = versionsR;
     platforms = platformsR;
   } else if (activeModule === "preferences") {
-    [metrics, metricUsers] = await Promise.all([metricRows(env, days), metricUserRows(env, days)]);
+    const [metricsR, usersR] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
+    metrics = metricsR;
+    metricUsersUnavailable = usersR === null;
+    metricUsers = usersR?.rows ?? [];
+    metricUsersComputedAt = usersR?.computedAt ?? "";
   } else {
-    [metrics, previousMetrics] = await Promise.all([metricRows(env, days), metricRows(env, days, true)]);
+    const [metricsR, previousMetricsR, usersR] = await Promise.all([
+      metricRows(env, days, surface),
+      metricRows(env, days, surface, true),
+      metricUserRows(env, days, surface),
+    ]);
+    metrics = metricsR;
+    previousMetrics = previousMetricsR;
+    metricUsersUnavailable = usersR === null;
+    metricUsers = usersR?.rows ?? [];
+    metricUsersComputedAt = usersR?.computedAt ?? "";
   }
 
   return html(
     renderStats(
-      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, sources, overview, latestVersion, filters },
+      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, metricUsersUnavailable, metricUsersComputedAt, sources, overview, latestVersion, filters },
       user,
       activeModule,
     ),
@@ -1172,6 +1353,9 @@ const RETENTION = [
   { table: "pings", keepDays: 30 },
   { table: "metrics", keepDays: 60 },
   { table: "metric_users", keepDays: 30 },
+  { table: "cli_pings", keepDays: 30 },
+  { table: "cli_metrics", keepDays: 60 },
+  { table: "cli_metric_users", keepDays: 30 },
 ] as const;
 // Deletes run in rowid chunks so a run never holds one giant transaction.
 // Steady state is one expired day per table; the chunk cap is a backstop that
@@ -1183,6 +1367,101 @@ const RETENTION_MAX_CHUNKS = 200;
 // scheduled handler dispatches on controller.cron; every other trigger
 // (the retention cron, manual runs) falls through to the purge.
 const SENTINEL_CRON = "17 1,7,13,19 * * *";
+const ROLLUP_CRON = "23 * * * *";
+
+// The preferences module's 30-day COUNT(DISTINCT install_id) spans ~28M rows
+// and D1 abandons it mid-query. It cannot be summed from per-day totals either:
+// an install active on twelve days would count twelve times. So the window is
+// computed here instead, one signal at a time — a single signal takes ~1s, and
+// the cursor spreads the ~57 of them across hourly runs rather than blowing one
+// invocation's CPU budget.
+const ROLLUP_WINDOW_DAYS = 30;
+const ROLLUP_SIGNALS_PER_RUN = 8;
+
+const ROLLUP_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS metric_user_rollup (
+     window_days INTEGER NOT NULL,
+     signal TEXT NOT NULL,
+     bucket TEXT NOT NULL,
+     total INTEGER NOT NULL,
+     computed_at TEXT NOT NULL,
+     PRIMARY KEY (window_days, signal, bucket)
+   )`,
+  `CREATE TABLE IF NOT EXISTS metric_user_rollup_state (
+     id INTEGER PRIMARY KEY CHECK (id = 1),
+     next_signal INTEGER NOT NULL,
+     updated_at TEXT NOT NULL
+   )`,
+] as const;
+
+const rollupSchemaPromises = new WeakMap<object, Promise<void>>();
+
+function ensureRollupSchema(env: Pick<Env, "DB">): Promise<void> {
+  const key = env.DB as unknown as object;
+  const existing = rollupSchemaPromises.get(key);
+  if (existing) return existing;
+  const creation = env.DB
+    .batch(ROLLUP_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)))
+    .then(() => undefined)
+    .catch((err) => {
+      rollupSchemaPromises.delete(key);
+      throw err;
+    });
+  rollupSchemaPromises.set(key, creation);
+  return creation;
+}
+
+export async function refreshMetricUserRollup(env: Env, signalsPerRun = ROLLUP_SIGNALS_PER_RUN): Promise<void> {
+  await ensureRollupSchema(env);
+  const state = await env.DB.prepare("SELECT next_signal FROM metric_user_rollup_state WHERE id = 1").first<{
+    next_signal: number;
+  }>();
+  const start = Number(state?.next_signal ?? 0) % METRIC_SIGNALS.length;
+  const now = new Date().toISOString();
+  let advanced = 0;
+
+  for (let i = 0; i < signalsPerRun && i < METRIC_SIGNALS.length; i++) {
+    const signal = METRIC_SIGNALS[(start + i) % METRIC_SIGNALS.length];
+    try {
+      const rows = await env.DB.prepare(
+        `SELECT bucket, COUNT(DISTINCT install_id) AS total FROM metric_users
+         WHERE date >= date('now', '-${ROLLUP_WINDOW_DAYS - 1} day') AND signal = ?1
+         GROUP BY bucket`,
+      )
+        .bind(signal)
+        .all<{ bucket: string; total: number }>();
+      // Delete and insert in one batch so a reader never sees a signal
+      // half-replaced; an empty result still clears the previous window's rows.
+      await env.DB.batch([
+        env.DB
+          .prepare("DELETE FROM metric_user_rollup WHERE window_days = ?1 AND signal = ?2")
+          .bind(ROLLUP_WINDOW_DAYS, signal),
+        ...rows.results.map((r) =>
+          env.DB
+            .prepare(
+              `INSERT INTO metric_user_rollup (window_days, signal, bucket, total, computed_at)
+               VALUES (?1, ?2, ?3, ?4, ?5)`,
+            )
+            .bind(ROLLUP_WINDOW_DAYS, signal, r.bucket, r.total, now),
+        ),
+      ]);
+      advanced++;
+    } catch (err) {
+      // One signal timing out must not strand the cursor on it forever.
+      console.error(`rollup: ${signal} failed`, err);
+      advanced++;
+    }
+  }
+
+  await env.DB
+    .prepare(
+      `INSERT INTO metric_user_rollup_state (id, next_signal, updated_at) VALUES (1, ?1, ?2)
+       ON CONFLICT(id) DO UPDATE SET next_signal = ?1, updated_at = ?2`,
+    )
+    .bind((start + advanced) % METRIC_SIGNALS.length, now)
+    .run();
+  console.log(`rollup: refreshed ${advanced} signals from index ${start}`);
+}
 
 // Ingest sentinel. The 2026-07-03 blackout went unnoticed for ten days because
 // clients swallow ping failures by design and nothing watched the write path.
@@ -1290,6 +1569,11 @@ async function runIngestSentinel(env: Env): Promise<void> {
 }
 
 async function purgeExpiredStatsRows(env: Env): Promise<void> {
+  try {
+    await ensureCLITelemetrySchema(env);
+  } catch (err) {
+    console.error("retention: CLI telemetry schema unavailable", err);
+  }
   for (const { table, keepDays } of RETENTION) {
     // Keep exactly the newest `keepDays` dates: today plus keepDays-1 back,
     // matching the `date >= date('now', '-{keepDays-1} day')` reads.
@@ -1323,7 +1607,13 @@ export default {
     const method = request.method;
 
     const desktopRelease = desktopReleaseChannel(path);
-    if (desktopRelease && method === "GET") return handleDesktopReleaseManifest(desktopRelease);
+    if (desktopRelease) {
+      return handleReleaseGatewayRequest(method, () => handleDesktopReleaseManifest(desktopRelease));
+    }
+    const cliRelease = cliReleaseChannel(path);
+    if (cliRelease) {
+      return handleReleaseGatewayRequest(method, () => handleCLIRelease(cliRelease));
+    }
 
     if (path === "/v1/report" && method === "POST") return handleReport(request, env);
     if (path === "/v1/ping" && method === "POST") return handlePing(request, env);
@@ -1385,7 +1675,6 @@ export default {
       path === "/v1/report" ||
       path === "/v1/ping" ||
       path === "/v1/metrics" ||
-      desktopReleaseChannel(path) ||
       path === "/login" ||
       path === "/register" ||
       path === "/logout" ||
@@ -1402,6 +1691,10 @@ export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (controller.cron === SENTINEL_CRON) {
       ctx.waitUntil(runIngestSentinel(env));
+      return;
+    }
+    if (controller.cron === ROLLUP_CRON) {
+      ctx.waitUntil(refreshMetricUserRollup(env));
       return;
     }
     ctx.waitUntil(purgeExpiredStatsRows(env));

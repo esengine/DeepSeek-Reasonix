@@ -3,7 +3,6 @@ package config
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -40,6 +39,73 @@ api_key_env = "X_KEY"
 	}
 }
 
+func TestMergeTOMLProviderAccessPreservesExplicitEmpty(t *testing.T) {
+	userPath := writeUserProviderAccess(t, "[desktop]\nprovider_access = []\n")
+
+	access, declared, err := mergeTOMLProviderAccess([]string{userPath})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if !declared {
+		t.Fatal("provider_access declaration was not detected")
+	}
+	if access == nil || len(access) != 0 {
+		t.Fatalf("provider_access = %#v, want a non-nil empty slice", access)
+	}
+}
+
+func TestMergeTOMLProviderAccessIgnoresProjectOnlyList(t *testing.T) {
+	isolateUserConfigHome(t)
+	userPath := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(userPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userPath, []byte("default_model = \"deepseek/deepseek-v4-flash\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[desktop]\nprovider_access = [\"deepseek\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	access, declared, err := mergeTOMLProviderAccess([]string{userPath, projectPath})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if declared || access != nil {
+		t.Fatalf("project-only access = %#v (declared=%v); an undeclared user list means allow-all", access, declared)
+	}
+}
+
+func TestMergeTOMLProviderAccessUnionsWhenUserDeclares(t *testing.T) {
+	userPath := writeUserProviderAccess(t, "[desktop]\nprovider_access = [\"deepseek\"]\n")
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[desktop]\nprovider_access = [\"project-b\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	access, declared, err := mergeTOMLProviderAccess([]string{userPath, projectPath})
+	if err != nil {
+		t.Fatalf("mergeTOMLProviderAccess: %v", err)
+	}
+	if !declared || len(access) != 2 || access[0] != "deepseek" || access[1] != "project-b" {
+		t.Fatalf("access = %#v (declared=%v), want the union of both scopes", access, declared)
+	}
+}
+
+func writeUserProviderAccess(t *testing.T, body string) string {
+	t.Helper()
+	isolateUserConfigHome(t)
+	path := UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func TestLoadForEditDecodesGB18030TOML(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")
@@ -65,7 +131,7 @@ api_key_env = "LOCAL_KEY"
 	}
 }
 
-func TestLoadForEditMigratesLegacyMCPTiers(t *testing.T) {
+func TestLoadForEditNormalizesLegacyMCPTiersWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reasonix.toml")
 	body := `
@@ -92,11 +158,8 @@ model = "m"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(updated), "\ntier") {
-		t.Fatalf("legacy tier lines should be removed from file:\n%s", updated)
-	}
-	if !strings.Contains(string(updated), `command = "npx"`) || !strings.Contains(string(updated), `name = "local"`) {
-		t.Fatalf("migration should preserve ordinary config:\n%s", updated)
+	if string(updated) != body {
+		t.Fatalf("LoadForEdit must not rewrite config outside its caller's edit transaction:\n%s", updated)
 	}
 }
 

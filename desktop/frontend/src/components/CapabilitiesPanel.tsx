@@ -1036,6 +1036,12 @@ function ServerDetails({
           <span className="cap-detail__label">{t("caps.status")}</span>
           <span className="cap-detail__value">{serverStatusLabel(s, t)}</span>
         </div>
+        {s.source && (
+          <div className="cap-detail">
+            <span className="cap-detail__label">{t("caps.serverSource")}</span>
+            <span className="cap-detail__value">{mcpServerSourceLabel(s, t)}</span>
+          </div>
+        )}
         <div className="cap-detail">
           <span className="cap-detail__label">{t("caps.transport")}</span>
           <span className="cap-detail__value">{s.transport}</span>
@@ -1627,6 +1633,15 @@ export function parseMCPQuickDefinition(raw: string): MCPServerInput {
   return { name: quickMCPName(definition), transport: "stdio", command: definition, args: [], url: "", env: null, headers: null };
 }
 
+type PluginRuntimePlan = {
+  command?: string;
+  args?: string[];
+  intercepts?: string[];
+  replaces?: string[];
+  capabilities?: string[];
+  fullTrust?: boolean;
+};
+
 type PluginInstallPlanAction = {
   action?: string;
   kind?: string;
@@ -1638,6 +1653,7 @@ type PluginInstallPlanAction = {
   compatibility?: string;
   mappedCapabilities?: string[];
   skippedCapabilities?: PluginCompatibilityIssue[];
+  runtime?: PluginRuntimePlan;
   agentCount?: number;
   skillCount?: number;
   commandCount?: number;
@@ -1937,12 +1953,46 @@ function PluginPlanPreview({ plan }: { plan: PluginInstallPlanView }) {
 							{asArray(action.skippedCapabilities).map((issue, issueIndex) => <span className="cap-plugin-plan__warning" key={`${issue.capability}-${issue.path || ""}-${issueIndex}`}>{issue.capability}: {issue.reason}</span>)}
 							{action.message && <span className="cap-plugin-action__source">{action.message}</span>}
 							{action.error && <span className="cap-plugin-plan__warning">{action.error}</span>}
+							{action.runtime ? <PluginRuntimeTrustBlock runtime={action.runtime} /> : null}
 						</div>
 					))}
 				</div>
 			) : (
 				<pre className="cap-plugin-plan__raw">{plan.raw}</pre>
 			)}
+		</div>
+	);
+}
+
+// PluginRuntimeTrustBlock renders the prominent FULL TRUST warning for a
+// plugin that declares a runtime process. Install/update/replace/--link
+// already imply full trust, so this is disclosure, not a second confirmation.
+function PluginRuntimeTrustBlock({ runtime }: { runtime: PluginRuntimePlan }) {
+	const t = useT();
+	const commandLine = [runtime.command, ...asArray(runtime.args)].filter(Boolean).join(" ");
+	const groups: { label: string; values: string[] }[] = [
+		{ label: t("caps.pluginRuntimeIntercepts"), values: asArray(runtime.intercepts) },
+		{ label: t("caps.pluginRuntimeReplaces"), values: asArray(runtime.replaces) },
+		{ label: t("caps.pluginRuntimeCapabilities"), values: asArray(runtime.capabilities) },
+	];
+	return (
+		<div className="cap-plugin-runtime" role="alert">
+			<div className="cap-plugin-runtime__title">{t("caps.pluginRuntimeFullTrust")}</div>
+			{commandLine ? (
+				<div className="cap-plugin-runtime__row">
+					<span className="cap-plugin-runtime__label">{t("caps.pluginRuntimeCommand")}</span>
+					<code className="cap-plugin-runtime__cmd">{commandLine}</code>
+				</div>
+			) : null}
+			{groups
+				.filter((group) => group.values.length > 0)
+				.map((group) => (
+					<div className="cap-plugin-runtime__row" key={group.label}>
+						<span className="cap-plugin-runtime__label">{group.label}</span>
+						<span>{group.values.join(", ")}</span>
+					</div>
+				))}
+			<div className="cap-plugin-runtime__risk">{t("caps.pluginRuntimeRisk")}</div>
 		</div>
 	);
 }
@@ -2294,6 +2344,7 @@ function parsePluginInstallPlan(raw: string): PluginInstallPlanView {
 				compatibility: stringValue(item.compatibility),
 				mappedCapabilities: (Array.isArray(item.mappedCapabilities) ? item.mappedCapabilities : []).filter((value): value is string => typeof value === "string"),
 				skippedCapabilities: (Array.isArray(item.skippedCapabilities) ? item.skippedCapabilities : []) as PluginCompatibilityIssue[],
+				runtime: parsePluginRuntimePlan(item.runtime),
 				agentCount: numericValue(item.agentCount), skillCount: numericValue(item.skillCount), commandCount: numericValue(item.commandCount), hookCount: numericValue(item.hookCount), toolCount: numericValue(item.toolCount),
 			}];
 		});
@@ -2317,6 +2368,25 @@ function numericValue(value: unknown): number | undefined {
 
 function stringValue(value: unknown): string | undefined {
 	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+// parsePluginRuntimePlan extracts the FULL TRUST runtime block a plugin
+// install plan carries (installsource.RuntimePlanInfo). Anything malformed
+// simply drops out — the risk UI is additive and must never break planning.
+function parsePluginRuntimePlan(value: unknown): PluginRuntimePlan | undefined {
+	if (!value || typeof value !== "object") return undefined;
+	const item = value as Record<string, unknown>;
+	const command = stringValue(item.command);
+	if (!command) return undefined;
+	const list = (v: unknown): string[] => (Array.isArray(v) ? v : []).filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+	return {
+		command,
+		args: list(item.args),
+		intercepts: list(item.intercepts),
+		replaces: list(item.replaces),
+		capabilities: list(item.capabilities),
+		fullTrust: item.fullTrust === true,
+	};
 }
 
 function pluginPlanActionLabel(action: PluginInstallPlanAction, t: ReturnType<typeof useT>): string {
@@ -2371,12 +2441,19 @@ function mcpSettingsServerSummary(server: ServerView, t: ReturnType<typeof useT>
 	return parts.join(" · ");
 }
 
-function mcpLaunchAuthorizationRequired(server: ServerView): boolean {
-	return Boolean(server.requiresLaunchApproval);
-}
-
-function mcpLaunchAuthorizationLabel(t: ReturnType<typeof useT>): string {
-	return t("caps.authorizeAndConnect");
+function mcpServerSourceLabel(server: ServerView, t: ReturnType<typeof useT>): string {
+	switch (server.source) {
+		case "project":
+			return server.configSource
+				? t("caps.sourceProjectConfig", { config: server.configSource })
+				: t("caps.sourceProject");
+		case "plugin":
+			return t("caps.sourcePlugin");
+		case "builtin":
+			return t("caps.sourceBuiltin");
+		default:
+			return t("caps.sourceUser");
+	}
 }
 
 function mcpSettingsSearchText(server: ServerView): string {
@@ -2385,6 +2462,8 @@ function mcpSettingsSearchText(server: ServerView): string {
 		server.transport,
 		serverCommand(server),
 		server.error,
+		server.source,
+		server.configSource,
 		server.managedByPlugin,
 		...(server.toolList ?? []).flatMap((tool) => [tool.name, tool.description]),
 	].filter(Boolean).join(" ").toLowerCase();
@@ -2417,27 +2496,23 @@ function MCPSettingsServerRow({
 	busy,
 	onOpen,
 	onRetry,
-	onAuthorize,
 	onToggle,
+	onRemove,
 }: {
 	server: ServerView;
 	busy: boolean;
 	onOpen: () => void;
 	onRetry: () => void;
-	onAuthorize: () => void;
 	onToggle: (enabled: boolean) => void;
+	onRemove: () => void;
 }) {
 	const t = useT();
 	const lifecycle = mcpServerLifecycleActions(server);
 	const target = serverCommand(server);
 	const opensAuth = shouldOpenAuth(server);
-	const requiresAuthorization = !opensAuth && server.status !== "disabled" && Boolean(server.requiresLaunchApproval);
-	const actionLabel = requiresAuthorization ? mcpLaunchAuthorizationLabel(t) : serverActionLabel(server, t);
+	const actionLabel = serverActionLabel(server, t);
+	const canRemove = server.configured && !server.builtIn && !server.managedByPlugin;
 	const handlePrimaryAction = () => {
-		if (requiresAuthorization) {
-			onAuthorize();
-			return;
-		}
 		if (opensAuth) {
 			openExternal((server.authUrl || "").trim());
 			return;
@@ -2456,6 +2531,7 @@ function MCPSettingsServerRow({
 						<span className={`cap-dot cap-dot--${server.status}`} aria-hidden />
 						<span className="cap-mcp-list-row__name">{server.name}</span>
 						<span className="cap-mcp-list-row__transport">{server.transport}</span>
+						{server.source === "project" && <span className="cap-row__builtin">{t("caps.projectServerBadge")}</span>}
 						{server.builtIn && <span className="cap-row__builtin">{t("caps.builtIn")}</span>}
 					</span>
 					<span className={`cap-mcp-list-row__summary${server.status === "failed" ? " cap-mcp-list-row__summary--error" : ""}`}>
@@ -2469,7 +2545,17 @@ function MCPSettingsServerRow({
 				<ChevronRight className="cap-mcp-list-row__chevron" aria-hidden size={16} />
 			</button>
 			<div className="cap-mcp-list-row__actions">
-				{requiresAuthorization || lifecycle.showRetryInRow ? (
+				{canRemove && (
+					<InlineConfirmButton
+						label={t("caps.remove")}
+						confirmLabel={t("caps.confirmRemove")}
+						cancelLabel={t("common.cancel")}
+						disabled={busy}
+						danger
+						onConfirm={onRemove}
+					/>
+				)}
+				{lifecycle.showRetryInRow ? (
 					<button className="btn btn--small" disabled={busy} type="button" onClick={handlePrimaryAction}>
 						{actionLabel}
 					</button>
@@ -2498,8 +2584,8 @@ function MCPSettingsServerGroup({
 	busy,
 	onOpen,
 	onRetry,
-	onAuthorize,
 	onToggle,
+	onRemove,
 }: {
 	title: string;
 	hint?: string;
@@ -2507,8 +2593,8 @@ function MCPSettingsServerGroup({
 	busy: boolean;
 	onOpen: (name: string) => void;
 	onRetry: (name: string) => void;
-	onAuthorize: (name: string) => void;
 	onToggle: (name: string, enabled: boolean) => void;
+	onRemove: (name: string) => void;
 }) {
 	if (servers.length === 0) return null;
 	return (
@@ -2526,9 +2612,9 @@ function MCPSettingsServerGroup({
 						server={server}
 						busy={busy}
 						onOpen={() => onOpen(server.name)}
-						onRetry={() => onRetry(server.name)}
-						onAuthorize={() => onAuthorize(server.name)}
-						onToggle={(enabled) => onToggle(server.name, enabled)}
+							onRetry={() => onRetry(server.name)}
+							onToggle={(enabled) => onToggle(server.name, enabled)}
+							onRemove={() => onRemove(server.name)}
 					/>
 				))}
 			</div>
@@ -3016,8 +3102,6 @@ export function MCPServersSettingsPage() {
 			setBusy(false);
 		}
 	};
-	const authorizeProjectAndConnect = async (name: string) =>
-		mutate(() => app.AuthorizeAndConnectMCPServer(name));
 	const browseMarketplace = async (search = marketplaceQuery) => {
 		setBusy(true);
 		setErr(null);
@@ -3045,8 +3129,15 @@ export function MCPServersSettingsPage() {
 		const normalizedQuery = query.trim().toLowerCase();
 		return normalizedQuery ? sorted.filter((server) => mcpSettingsSearchText(server).includes(normalizedQuery)) : sorted;
 	}, [query, servers]);
-	const configuredServers = useMemo(() => filteredServers.filter((server) => !server.managedByPlugin), [filteredServers]);
-	const managedServers = useMemo(() => filteredServers.filter((server) => Boolean(server.managedByPlugin)), [filteredServers]);
+	const projectServers = useMemo(() => filteredServers.filter((server) => server.source === "project"), [filteredServers]);
+	const managedServers = useMemo(
+		() => filteredServers.filter((server) => server.source === "plugin" || Boolean(server.managedByPlugin)),
+		[filteredServers],
+	);
+	const installedServers = useMemo(
+		() => filteredServers.filter((server) => server.source !== "project" && server.source !== "plugin" && !server.managedByPlugin),
+		[filteredServers],
+	);
 	const selectedServer = screen.kind === "detail" || screen.kind === "edit"
 		? servers?.find((server) => server.name === screen.name)
 		: undefined;
@@ -3095,13 +3186,24 @@ export function MCPServersSettingsPage() {
 					{!loading && servers.length === 0 && <div className="mem-empty">{t("caps.noServers")}</div>}
 					{!loading && servers.length > 0 && filteredServers.length === 0 && <div className="mem-empty">{t("caps.noServerMatches")}</div>}
 					<MCPSettingsServerGroup
-						title={t("caps.configuredServers")}
-						servers={configuredServers}
+						title={t("caps.projectServers")}
+						hint={t("caps.projectServersHint")}
+						servers={projectServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onAuthorize={(name) => void authorizeProjectAndConnect(name)}
-						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
+					/>
+					<MCPSettingsServerGroup
+						title={t("caps.installedServers")}
+						hint={t("caps.installedServersHint")}
+						servers={installedServers}
+						busy={actionBusy}
+						onOpen={(name) => setScreen({ kind: "detail", name })}
+							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
 					<MCPSettingsServerGroup
 						title={t("caps.pluginServers")}
@@ -3109,9 +3211,9 @@ export function MCPServersSettingsPage() {
 						servers={managedServers}
 						busy={actionBusy}
 						onOpen={(name) => setScreen({ kind: "detail", name })}
-						onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
-						onAuthorize={(name) => void authorizeProjectAndConnect(name)}
-						onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRetry={(name) => void mutate(() => app.ReconnectMCPServer(name))}
+							onToggle={(name, enabled) => void mutate(() => app.SetMCPServerEnabled(name, enabled))}
+							onRemove={(name) => void mutate(() => app.RemoveMCPServer(name))}
 					/>
 				</>
 			)}
@@ -3189,12 +3291,6 @@ export function MCPServersSettingsPage() {
 							</details>
 						</div>
 					)}
-					{mcpLaunchAuthorizationRequired(selectedServer) && <div className="cap-mcp-detail-error">
-						<div className="drawer__summary">{t("caps.projectLaunchExplanation")}</div>
-						<div className="cap-mcp-editor__actions">
-							<button className="btn btn--small" disabled={actionBusy} type="button" onClick={() => void authorizeProjectAndConnect(selectedServer.name)}>{mcpLaunchAuthorizationLabel(t)}</button>
-						</div>
-					</div>}
 					<ServerDetails
 						s={selectedServer}
 						tools={selectedServer.toolList ?? []}

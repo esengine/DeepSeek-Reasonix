@@ -65,6 +65,14 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 	// and ReplayPending do not keep a stale prompt.
 	pending := c.approval.resolve(id)
 	if pending.reply != nil {
+		outcome := "recovery_revise"
+		switch action {
+		case agent.RecoveryActionContinue:
+			outcome = "recovery_continue"
+		case agent.RecoveryActionContinueTask:
+			outcome = "recovery_continue_task"
+		}
+		c.recordDecisionReceipt(pending, outcome)
 		switch action {
 		case agent.RecoveryActionContinue, agent.RecoveryActionContinueTask:
 			pending.reply <- approvalReply{allow: true}
@@ -111,7 +119,7 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 			msgs := c.executor.Session().Snapshot()
 			for i := len(msgs) - 1; i >= 0; i-- {
 				if string(msgs[i].Role) == "user" && strings.TrimSpace(msgs[i].Content) != "" {
-					text := strings.TrimSpace(msgs[i].Content)
+					text := agent.UserMessageText(msgs[i])
 					if len(text) > 800 {
 						return text[:800] + "…"
 					}
@@ -191,6 +199,29 @@ func (c *Controller) carryRecoveryState(path string) {
 	c.saveRecoveryState(path)
 }
 
+// CarryRecoveryFrom moves prev's in-memory recovery checkpoint into c across
+// a same-session controller rebuild (boot.Rebuild). Live approval channels
+// never cross the boundary — pending recovery prompts are cleared, not
+// transferred, matching the in-session carry above. Call it only when no
+// persisted sidecar was restored (the outgoing controller never pinned a
+// session path); a sidecar restored by Resume is the authoritative state.
+func (c *Controller) CarryRecoveryFrom(prev *Controller) {
+	if c == nil || prev == nil {
+		return
+	}
+	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	prev.mu.Lock()
+	prevGate := prev.recoveryGate
+	prev.mu.Unlock()
+	c.mu.Lock()
+	gate := c.recoveryGate
+	c.mu.Unlock()
+	if gate == nil || prevGate == nil {
+		return
+	}
+	gate.Restore(prevGate.Snapshot())
+}
+
 func (c *Controller) flushRecoveryPersistence(path string) {
 	if c == nil {
 		return
@@ -215,7 +246,8 @@ func (c *Controller) saveRecoveryState(path string) {
 	gate := c.recoveryGate
 	c.mu.Unlock()
 	if gate != nil {
-		if err := recovery.SaveSnapshot(path, gate.Snapshot()); err != nil {
+		// Persist evidence-only projection; never write active Episode locks.
+		if err := recovery.SaveSnapshot(path, gate.PersistenceSnapshot()); err != nil {
 			slog.Warn("controller: recovery snapshot", "err", err)
 		}
 	}
@@ -274,6 +306,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 		recoveryFirstNonEmpty(pending.Subject, pending.Tool),
 		recoveryFirstNonEmpty(pending.Rationale, "Auto Guard"),
 		true,
+		false,
 		recovery.ApprovalKindRecovery,
 		ev.Recovery,
 	)
@@ -312,4 +345,22 @@ func recoveryFirstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// beginRecoveryEpisode opens a fresh host-owned Recovery Episode. Failure,
+// reviewer, and stop budgets clear; explicit task grants survive. Safe to call
+// when recovery is disabled.
+func (c *Controller) beginRecoveryEpisode() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	gate := c.recoveryGate
+	c.mu.Unlock()
+	if gate == nil {
+		return
+	}
+	if ctrl, ok := any(gate).(agent.RecoveryEpisodeControl); ok {
+		ctrl.BeginEpisode()
+	}
 }

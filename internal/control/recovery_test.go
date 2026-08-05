@@ -59,8 +59,8 @@ func TestRecoveryExecutionRiskDoesNotPrompt(t *testing.T) {
 	reg.Add(bash)
 
 	prov := &recordingProvider{streams: [][]provider.Chunk{
-		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "1", Name: "bash", Arguments: `{"command":"go test ./..."}`}}},
-		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "2", Name: "bash", Arguments: `{"command":"git push origin feature"}`}}},
+		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "1", Name: "bash", Arguments: `{"command":"npx vitest run src/lib/foo.test.ts 2>&1 | tail -40"}`}}},
+		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "2", Name: "bash", Arguments: `{"command":"svn diff"}`}}},
 		{{Type: provider.ChunkText, Text: "done"}},
 	}}
 
@@ -79,10 +79,50 @@ func TestRecoveryExecutionRiskDoesNotPrompt(t *testing.T) {
 	}
 
 	if bash.runs != 2 {
-		t.Fatalf("bash runs = %d, want failed verification plus automatic push", bash.runs)
+		t.Fatalf("bash runs = %d, want failed npx verification plus automatic svn diff", bash.runs)
 	}
 	if got := c.RecoveryMetrics().HumanPrompts; got != 0 {
 		t.Fatalf("execution risk prompts = %d, want 0", got)
+	}
+}
+
+func TestRecoveryStaleEditCanReadAndRetryWithFreshAnchor(t *testing.T) {
+	edit := &recoveryWriteTool{name: "edit_file", failOnce: true}
+	read := &recoveryWriteTool{name: "read_file", readOnly: true}
+	reg := tool.NewRegistry()
+	reg.Add(edit)
+	reg.Add(read)
+
+	prov := &recordingProvider{streams: [][]provider.Chunk{
+		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+			ID: "1", Name: "edit_file",
+			Arguments: `{"path":"prompt.txt","old_string":"stale","new_string":"ready"}`,
+		}}},
+		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+			ID: "2", Name: "read_file", Arguments: `{"path":"prompt.txt"}`,
+		}}},
+		{{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+			ID: "3", Name: "edit_file",
+			Arguments: `{"path":"prompt.txt","old_string":"current","new_string":"ready"}`,
+		}}},
+		{{Type: provider.ChunkText, Text: "done"}},
+	}}
+	ag := agent.New(prov, reg, agent.NewSession("sys"), agent.Options{MaxSteps: 8}, event.Discard)
+	c := New(Options{
+		Runner: ag, Executor: ag,
+		Policy: permission.Policy{Mode: permission.Allow},
+	})
+	c.SetToolApprovalMode(ToolApprovalAuto)
+	c.EnableInteractiveApproval()
+
+	if err := c.Run(context.Background(), "repair the stale edit"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if edit.runs != 2 || read.runs != 1 {
+		t.Fatalf("tool runs edit=%d read=%d, want edit=2 read=1", edit.runs, read.runs)
+	}
+	if got := c.RecoveryMetrics().HumanPrompts; got != 0 {
+		t.Fatalf("stale-anchor recovery prompts = %d, want 0", got)
 	}
 }
 

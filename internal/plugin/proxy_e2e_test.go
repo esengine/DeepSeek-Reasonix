@@ -18,10 +18,11 @@ import (
 // as a stdio MCP server via TestHelperProcess.
 func mockSpec() plugin.Spec {
 	return plugin.Spec{
-		Name:    "mock",
-		Command: os.Args[0],
-		Args:    []string{"-test.run=TestHelperProcess", "--"},
-		Env:     map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		Name:       "mock",
+		Command:    os.Args[0],
+		Args:       []string{"-test.run=TestHelperProcess", "--"},
+		Env:        map[string]string{"GO_WANT_HELPER_PROCESS": "1"},
+		Authorized: true, // install/boot sets this; proxy never invents trust
 	}
 }
 

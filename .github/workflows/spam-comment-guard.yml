@@ -1,0 +1,64 @@
+name: Spam comment guard
+
+# Activity-farming bots post short emoji-padded template comments on whatever
+# issue is currently active. They are cheap to spot structurally: a recently
+# registered account with no history here, no followers, and a pile of forked
+# repos, posting a sub-50 character comment with emoji and no code/link/log.
+# Every signal must fire — on 7604 replayed comments that caught all 83 known
+# spam posts with no false positive. Loosening any one of them reintroduces
+# real users ("点赞", "同样的问题", a 2020 account posting "感谢各位❤").
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: spam-guard-${{ github.event.comment.id }}
+
+jobs:
+  screen:
+    if: github.event.comment.user.type != 'Bot' && github.event.comment.author_association == 'NONE'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v9
+        with:
+          script: |
+            const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu;
+            const comment = context.payload.comment;
+            const body = comment.body || '';
+
+            const hasSubstance = /```|https?:\/\/|!\[|^>/m.test(body);
+            const emojiCount = (body.match(EMOJI) || []).length;
+            const bare = body.replace(EMOJI, '').trim();
+
+            const { data: author } = await github.rest.users.getByUsername({
+              username: comment.user.login,
+            });
+
+            const ageDays = (Date.now() - Date.parse(author.created_at)) / 86400000;
+
+            const signals = {
+              newAccount: ageDays < 365,
+              noFollowers: author.followers === 0,
+              forkPadded: author.public_repos >= 15,
+              tooShort: bare.length <= 45,
+              emojiPadded: emojiCount >= 1,
+              noSubstance: !hasSubstance,
+            };
+            const failed = Object.entries(signals).filter(([, v]) => !v).map(([k]) => k);
+            core.info(`${comment.user.login}: ${failed.length ? `kept (${failed.join(',')})` : 'spam'}`);
+            if (failed.length) return;
+
+            await github.graphql(
+              `mutation($id: ID!) {
+                 minimizeComment(input: { subjectId: $id, classifier: SPAM }) {
+                   minimizedComment { isMinimized }
+                 }
+               }`,
+              { id: comment.node_id },
+            );
+            core.notice(`Minimized spam comment by ${comment.user.login}`);

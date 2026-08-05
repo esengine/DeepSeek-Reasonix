@@ -61,7 +61,7 @@ func sessionWithFreshSystemPrompt(session *agent.Session, system string) *agent.
 	}
 	messages := session.Snapshot()
 	persisted := systemPromptFrom(messages)
-	if persisted == "" {
+	if persisted == "" && strings.TrimSpace(system) == "" {
 		return session
 	}
 	logSystemPromptSwap(persisted, system, "")

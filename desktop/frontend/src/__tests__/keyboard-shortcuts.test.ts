@@ -7,9 +7,11 @@ import {
   formatShortcutCombo,
   formatShortcutComboParts,
   isCloseTabShortcut,
+  isReservedComposerHistoryShortcut,
   matchesShortcut,
   shortcutAcceptsCombo,
   shortcutConflict,
+  shortcutDefinition,
   type ShortcutPlatform,
 } from "../lib/keyboardShortcuts";
 import { topicShortcutIndexFromEvent, topicShortcutLabel } from "../lib/topicShortcuts";
@@ -117,6 +119,18 @@ eq(shortcutAcceptsCombo("composer.send", { key: "s", ctrl: true }), false, "comp
 eq(shortcutAcceptsCombo("app.newSession", { key: "s", ctrl: true }), true, "unrestricted shortcuts still accept other keys");
 eq(formatShortcutCombo(defaultShortcutCombo("composer.newline", "darwin"), "darwin"), "⇧Enter", "formats the mac newline chord");
 eq(formatShortcutCombo(defaultShortcutCombo("composer.newline", "windows"), "windows"), "Shift+Enter", "formats the Windows newline chord");
+eq(matchesShortcut(event("z", { metaKey: true }), "composer.undo", "darwin"), true, "Cmd+Z matches composer undo on macOS");
+eq(matchesShortcut(event("z", { ctrlKey: true }), "composer.undo", "windows"), true, "Ctrl+Z matches composer undo on Windows");
+eq(matchesShortcut(event("z", { metaKey: true, shiftKey: true }), "composer.redo", "darwin"), true, "Cmd+Shift+Z matches composer redo on macOS");
+eq(matchesShortcut(event("z", { ctrlKey: true, shiftKey: true }), "composer.redo", "linux"), true, "Ctrl+Shift+Z matches composer redo on Linux");
+eq(matchesShortcut(event("y", { ctrlKey: true }), "composer.redo", "windows"), false, "Ctrl+Y remains a Composer-level conditional fallback");
+eq(isReservedComposerHistoryShortcut(event("z", { metaKey: true }), "darwin"), true, "macOS undo is reserved while editing");
+eq(isReservedComposerHistoryShortcut(event("z", { ctrlKey: true, shiftKey: true }), "windows"), true, "Windows redo is reserved while editing");
+eq(isReservedComposerHistoryShortcut(event("y", { ctrlKey: true }), "windows"), false, "conditional Ctrl+Y redo does not reserve a global shortcut");
+eq(shortcutDefinition("composer.undo").configurable, false, "composer undo is visible but locked to the native editing chord");
+eq(shortcutDefinition("composer.redo").configurable, false, "composer redo is visible but locked to the native editing chord");
+eq(shortcutConflict("app.newSession", { key: "z", ctrl: true }, "windows")?.action, "composer.undo", "custom shortcuts cannot take the Windows undo chord");
+eq(shortcutConflict("app.newSession", { key: "z", ctrl: true, shift: true }, "windows")?.action, "composer.redo", "custom shortcuts cannot take the Windows redo chord");
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

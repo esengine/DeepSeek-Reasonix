@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -22,6 +23,7 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
+	"reasonix/internal/telemetry"
 )
 
 func TestChdirTo(t *testing.T) {
@@ -112,7 +114,7 @@ func TestRunResumeRejectsCleanupPending(t *testing.T) {
 	}
 
 	errOut := captureStderr(t, func() {
-		if rc := runAgent([]string{"--resume", path, "continue task"}); rc != 1 {
+		if rc := runAgent([]string{"--resume", path, "continue task"}, "dev"); rc != 1 {
 			t.Fatalf("run --resume cleanup-pending rc = %d, want 1", rc)
 		}
 	})
@@ -262,10 +264,8 @@ func hasPluginNamed(cfg *config.Config, name string) bool {
 }
 
 func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
-	defer func(prev func() (terminalRGB, bool)) {
-		queryTerminalBackgroundForTheme = prev
-	}(queryTerminalBackgroundForTheme)
-	queryTerminalBackgroundForTheme = func() (terminalRGB, bool) {
+	defer func(prev func() (terminalRGB, bool)) { terminalProbe = prev }(terminalProbe)
+	terminalProbe = func() (terminalRGB, bool) {
 		t.Fatal("metadata command should not query terminal background")
 		return terminalRGB{}, false
 	}
@@ -293,16 +293,19 @@ func TestMetadataCommandsDoNotProbeTerminalTheme(t *testing.T) {
 }
 
 func TestRunDispatchesACPLongFlagAlias(t *testing.T) {
-	errOut := captureStderr(t, func() {
-		if rc := Run([]string{"--acp", "-h"}, "test-version"); rc != 2 {
-			t.Fatalf("Run --acp -h rc = %d, want 2", rc)
+	out, errOut := captureCLIOutput(t, func() {
+		if rc := Run([]string{"--acp", "-h"}, "test-version"); rc != 0 {
+			t.Fatalf("Run --acp -h rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(errOut, "Usage of acp:") {
-		t.Fatalf("--acp should dispatch to the ACP command, got stderr:\n%s", errOut)
+	if !strings.Contains(out, "Usage of acp:") {
+		t.Fatalf("--acp should dispatch to the ACP command, got stdout:\n%s", out)
 	}
-	if strings.Contains(errOut, "unknown command") {
-		t.Fatalf("--acp should not be treated as an unknown command:\n%s", errOut)
+	if errOut != "" {
+		t.Fatalf("--acp help wrote stderr: %q", errOut)
+	}
+	if strings.Contains(out, "unknown command") {
+		t.Fatalf("--acp should not be treated as an unknown command:\n%s", out)
 	}
 }
 
@@ -318,7 +321,7 @@ func TestRunDefaultsToInteractiveSession(t *testing.T) {
 	cliIsInteractive = func() bool { return true }
 
 	var gotArgs []string
-	runInteractiveSession = func(args []string) int {
+	runInteractiveSession = func(args []string, _ string) int {
 		gotArgs = append([]string(nil), args...)
 		return 17
 	}
@@ -341,7 +344,7 @@ func TestRunNoArgsNonInteractivePrintsUsage(t *testing.T) {
 		cliIsInteractive = prevInteractive
 	})
 	cliIsInteractive = func() bool { return false }
-	runInteractiveSession = func(args []string) int {
+	runInteractiveSession = func(args []string, _ string) int {
 		t.Fatalf("non-interactive no-arg Run should not start session with %#v", args)
 		return 99
 	}
@@ -365,6 +368,7 @@ func TestRunRoutesBareInteractiveFlagsToSession(t *testing.T) {
 	for _, args := range [][]string{
 		{"--continue"},
 		{"--continue=true"},
+		{"-c"},
 		{"-c=true"},
 		{"--resume=true"},
 		{"-r=true"},
@@ -374,7 +378,7 @@ func TestRunRoutesBareInteractiveFlagsToSession(t *testing.T) {
 		{"--effort=max"},
 	} {
 		var gotArgs []string
-		runInteractiveSession = func(args []string) int {
+		runInteractiveSession = func(args []string, _ string) int {
 			gotArgs = append([]string(nil), args...)
 			return 23
 		}
@@ -388,15 +392,93 @@ func TestRunRoutesBareInteractiveFlagsToSession(t *testing.T) {
 	}
 }
 
+func TestRunReportsFlagParseErrors(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "run unknown flag", args: []string{"run", "--unknown"}, want: "unknown flag: --unknown"},
+		{name: "run invalid value", args: []string{"run", "--max-steps=invalid"}, want: "invalid argument \"invalid\" for \"--max-steps\" flag"},
+		{name: "run missing value", args: []string{"run", "--model"}, want: "flag needs an argument: --model"},
+		{name: "chat unknown flag", args: []string{"chat", "--unknown"}, want: "unknown flag: --unknown"},
+		{name: "serve unknown flag", args: []string{"serve", "--unknown"}, want: "flag provided but not defined: -unknown"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stderr := captureStderr(t, func() {
+				if rc := Run(tt.args, "test-version"); rc != 2 {
+					t.Fatalf("Run(%q) rc = %d, want 2", tt.args, rc)
+				}
+			})
+			if !strings.Contains(stderr, tt.want) {
+				t.Fatalf("Run(%q) stderr = %q, want %q", tt.args, stderr, tt.want)
+			}
+			if strings.Contains(stderr, "Usage of") {
+				t.Fatalf("Run(%q) should print a concise error, got:\n%s", tt.args, stderr)
+			}
+		})
+	}
+}
+
+func TestSubcommandHelpReturnsSuccess(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "run", args: []string{"run", "--help"}, want: "Usage of run:"},
+		{name: "chat", args: []string{"chat", "--help"}, want: "Usage of reasonix:"},
+		{name: "serve", args: []string{"serve", "--help"}, want: "Usage of serve:"},
+		{name: "upgrade", args: []string{"upgrade", "--help"}, want: "Usage of upgrade:"},
+		{name: "remote connect", args: []string{"remote", "connect", "--help"}, want: "Usage of remote connect:"},
+		{name: "remote add before name", args: []string{"remote", "add", "--help"}, want: remoteAddUsage},
+		{name: "remote add before target", args: []string{"remote", "add", "box", "--help"}, want: remoteAddUsage},
+		{name: "remote serve before action", args: []string{"remote", "serve", "--help"}, want: remoteServeUsage},
+		{name: "remote serve before name", args: []string{"remote", "serve", "start", "--help"}, want: remoteServeUsage},
+		{name: "subagent create", args: []string{"subagent", "create", "--help"}, want: subagentUsageText},
+		{name: "subagent edit", args: []string{"subagent", "edit", "--help"}, want: subagentUsageText},
+		{name: "subagent delete", args: []string{"subagent", "delete", "--help"}, want: subagentUsageText},
+		{name: "subagent try", args: []string{"subagent", "try", "--help"}, want: subagentUsageText},
+		{name: "subagent run", args: []string{"subagent", "run", "--help"}, want: subagentUsageText},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stdout, stderr := captureCLIOutput(t, func() {
+				if rc := Run(tt.args, "test-version"); rc != 0 {
+					t.Fatalf("Run(%q) rc = %d, want 0", tt.args, rc)
+				}
+			})
+			if !strings.Contains(stdout, tt.want) {
+				t.Fatalf("Run(%q) help missing %q:\n%s", tt.args, tt.want, stdout)
+			}
+			if stderr != "" {
+				t.Fatalf("Run(%q) help wrote stderr: %q", tt.args, stderr)
+			}
+			if strings.Contains(stdout, "help requested") {
+				t.Fatalf("Run(%q) reported help as an error:\n%s", tt.args, stdout)
+			}
+		})
+	}
+}
+
 func TestRunPrintAliasDispatchesRunFlags(t *testing.T) {
 	isolateCLIConfigHome(t)
-	errOut := captureStderr(t, func() {
-		if rc := Run([]string{"-p", "-h"}, "test-version"); rc != 2 {
-			t.Fatalf("Run(-p -h) rc = %d, want 2", rc)
+	out, errOut := captureCLIOutput(t, func() {
+		if rc := Run([]string{"-p", "-h"}, "test-version"); rc != 0 {
+			t.Fatalf("Run(-p -h) rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(errOut, "Usage of run:") {
-		t.Fatalf("-p should dispatch to one-shot run flags, got:\n%s", errOut)
+	if !strings.Contains(out, "Usage of run:") {
+		t.Fatalf("-p should dispatch to one-shot run flags, got:\n%s", out)
+	}
+	if errOut != "" {
+		t.Fatalf("-p help wrote stderr: %q", errOut)
 	}
 }
 
@@ -407,17 +489,20 @@ func TestRunPrintFlagAfterLeadingFlagsDispatchesRun(t *testing.T) {
 	isolateCLIConfigHome(t)
 	prev := runInteractiveSession
 	t.Cleanup(func() { runInteractiveSession = prev })
-	runInteractiveSession = func([]string) int {
+	runInteractiveSession = func([]string, string) int {
 		t.Fatal("print flag after leading flags must not route to the interactive session")
 		return 0
 	}
-	errOut := captureStderr(t, func() {
-		if rc := Run([]string{"--model", "x", "-p", "-h"}, "test-version"); rc != 2 {
-			t.Fatalf("Run(--model x -p -h) rc = %d, want 2", rc)
+	out, errOut := captureCLIOutput(t, func() {
+		if rc := Run([]string{"--model", "x", "-p", "-h"}, "test-version"); rc != 0 {
+			t.Fatalf("Run(--model x -p -h) rc = %d, want 0", rc)
 		}
 	})
-	if !strings.Contains(errOut, "Usage of run:") {
-		t.Fatalf("--model x -p should dispatch to one-shot run flags, got:\n%s", errOut)
+	if !strings.Contains(out, "Usage of run:") {
+		t.Fatalf("--model x -p should dispatch to one-shot run flags, got:\n%s", out)
+	}
+	if errOut != "" {
+		t.Fatalf("--model x -p help wrote stderr: %q", errOut)
 	}
 }
 
@@ -438,6 +523,18 @@ func TestParsePermissionModeClaudeAliases(t *testing.T) {
 	}
 }
 
+func TestResolveRunPermissionModeRequiresExplicitAuto(t *testing.T) {
+	if got, err := resolveRunPermissionMode("ask", false, false); err != nil || got != "ask" {
+		t.Fatalf("default run permission mode = (%q, %v), want ask", got, err)
+	}
+	if got, err := resolveRunPermissionMode("ask", true, false); err != nil || got != "auto" {
+		t.Fatalf("-y run permission mode = (%q, %v), want auto", got, err)
+	}
+	if got, err := resolveRunPermissionMode("dontAsk", true, true); err == nil || got != "" {
+		t.Fatalf("combined permission flags = (%q, %v), want conflict", got, err)
+	}
+}
+
 func TestRunKeepsChatAndCodeCompatibilityAliases(t *testing.T) {
 	isolateCLIConfigHome(t)
 
@@ -445,7 +542,7 @@ func TestRunKeepsChatAndCodeCompatibilityAliases(t *testing.T) {
 	t.Cleanup(func() { runInteractiveSession = prev })
 
 	var calls [][]string
-	runInteractiveSession = func(args []string) int {
+	runInteractiveSession = func(args []string, _ string) int {
 		calls = append(calls, append([]string(nil), args...))
 		return 0
 	}
@@ -685,6 +782,174 @@ func TestConfigReasoningLanguageRejectsAliases(t *testing.T) {
 	}
 }
 
+func TestConfigCompactRatioCommandWritesUserConfigAndReportsSource(t *testing.T) {
+	isolateCLIConfigHome(t)
+	userCfg := config.Default()
+	userCfg.Agent.Temperature = 0.42
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "compact-ratio", "75.5"}, "test-version"); rc != 0 {
+			t.Fatalf("config compact-ratio rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "compact_ratio = 75.5%") || !strings.Contains(out, "user:") {
+		t.Fatalf("config compact-ratio output = %q", out)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if got := cfg.Agent.CompactRatio; got != 0.755 {
+		t.Fatalf("saved compact ratio = %v, want 0.755", got)
+	}
+	if got := cfg.Agent.Temperature; got != 0.42 {
+		t.Fatalf("compact-ratio update changed temperature to %v, want 0.42", got)
+	}
+
+	out = captureStdout(t, func() {
+		if rc := Run([]string{"config", "compact-ratio"}, "test-version"); rc != 0 {
+			t.Fatalf("config compact-ratio query rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "compact_ratio = 75.5%") || !strings.Contains(out, "user:") {
+		t.Fatalf("config compact-ratio query output = %q", out)
+	}
+}
+
+func TestConfigCompactRatioQueryReportsBuiltInDefault(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "compact-ratio"}, "test-version"); rc != 0 {
+			t.Fatalf("config compact-ratio query rc = %d, want 0", rc)
+		}
+	})
+	if out != "compact_ratio = 80% (built-in default)\n" {
+		t.Fatalf("config compact-ratio query output = %q", out)
+	}
+}
+
+func TestConfigCompactRatioLocalCreatesMinimalProjectOverride(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	userCfg := config.Default()
+	userCfg.DefaultModel = "mimo-pro"
+	if err := userCfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("write user config: %v", err)
+	}
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "compact-ratio", "--local", "70"}, "test-version"); rc != 0 {
+			t.Fatalf("config compact-ratio --local rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "compact_ratio = 70%") || !strings.Contains(out, "project:") {
+		t.Fatalf("config compact-ratio --local output = %q", out)
+	}
+
+	body, err := os.ReadFile("reasonix.toml")
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	if strings.Contains(string(body), "default_model") {
+		t.Fatalf("project compact-ratio override should not pin default_model:\n%s", body)
+	}
+	if !strings.Contains(string(body), "[agent]") || !strings.Contains(string(body), "compact_ratio = 0.7") {
+		t.Fatalf("project config missing compact_ratio override:\n%s", body)
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("load merged config: %v", err)
+	}
+	if cfg.DefaultModel != "mimo-pro" {
+		t.Fatalf("default_model = %q, want global mimo-pro", cfg.DefaultModel)
+	}
+	if cfg.Agent.CompactRatio != 0.7 {
+		t.Fatalf("compact ratio = %v, want local 0.7", cfg.Agent.CompactRatio)
+	}
+
+	out = captureStdout(t, func() {
+		if rc := Run([]string{"config", "compact-ratio"}, "test-version"); rc != 0 {
+			t.Fatalf("config compact-ratio query rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "compact_ratio = 70%") || !strings.Contains(out, "project:") {
+		t.Fatalf("project compact-ratio query output = %q", out)
+	}
+}
+
+func TestConfigCompactRatioRejectsValuesOutsideEditableRange(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	for _, value := range []string{"64", "86", "NaN", "+Inf", "not-a-number"} {
+		t.Run(value, func(t *testing.T) {
+			errOut := captureStderr(t, func() {
+				if rc := Run([]string{"config", "compact-ratio", value}, "test-version"); rc != 2 {
+					t.Fatalf("config compact-ratio %s rc = %d, want 2", value, rc)
+				}
+			})
+			if !strings.Contains(errOut, "percentage between 65 and 85") {
+				t.Fatalf("config compact-ratio %s stderr = %q", value, errOut)
+			}
+		})
+	}
+	if _, err := os.Stat(config.UserConfigPath()); !os.IsNotExist(err) {
+		t.Fatalf("invalid compact ratio wrote user config, stat err=%v", err)
+	}
+}
+
+func TestConfigCurrencyCommandWritesUserConfig(t *testing.T) {
+	isolateCLIConfigHome(t)
+
+	out := captureStdout(t, func() {
+		if rc := Run([]string{"config", "currency", "CNY"}, "test-version"); rc != 0 {
+			t.Fatalf("config currency rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, `currency = "CNY"`) || !strings.Contains(out, "resolved: CNY") {
+		t.Fatalf("config currency output = %q", out)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if got := cfg.DesktopCurrency(); got != "CNY" {
+		t.Fatalf("saved currency = %q, want CNY", got)
+	}
+}
+
+func TestConfigCurrencyAutoUsesResolvedCLILocale(t *testing.T) {
+	isolateCLIConfigHome(t)
+	i18n.DetectLanguage("zh-TW")
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+
+	out := captureStdout(t, func() {
+		if rc := configCurrencyCommand([]string{"auto"}); rc != 0 {
+			t.Fatalf("config currency auto rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, `currency = "auto"`) || !strings.Contains(out, "resolved: CNY") {
+		t.Fatalf("config currency auto output = %q", out)
+	}
+	cfg := config.LoadForEdit(config.UserConfigPath())
+	if got := cfg.DesktopCurrency(); got != "" {
+		t.Fatalf("auto should clear saved currency, got %q", got)
+	}
+}
+
+func TestConfigCurrencyRejectsProjectScope(t *testing.T) {
+	isolateCLIConfigHome(t)
+	errOut := captureStderr(t, func() {
+		if rc := Run([]string{"config", "currency", "--local", "USD"}, "test-version"); rc != 2 {
+			t.Fatalf("config currency --local rc = %d, want 2", rc)
+		}
+	})
+	if !strings.Contains(errOut, "user-level only") {
+		t.Fatalf("config currency --local stderr = %q", errOut)
+	}
+	if _, err := os.Stat("reasonix.toml"); !os.IsNotExist(err) {
+		t.Fatalf("config currency --local wrote project config, stat err=%v", err)
+	}
+}
+
 func TestProvidersWithMissingKeysOnlyChecksActiveDefaultModel(t *testing.T) {
 	cfg := config.Default()
 	t.Setenv("DEEPSEEK_API_KEY", "")
@@ -777,6 +1042,325 @@ func TestWithNotificationsWrapsCLISinkWithConfiguredSender(t *testing.T) {
 	}
 	if sender.messages[0].Body != "Turn finished" {
 		t.Fatalf("notification body = %q, want Turn finished", sender.messages[0].Body)
+	}
+}
+
+func TestConfigTelemetryCommandRoundTripAndOptOutCleanup(t *testing.T) {
+	isolateCLIConfigHome(t)
+	out := captureStdout(t, func() {
+		if rc := configTelemetryCommand(nil); rc != 0 {
+			t.Fatalf("config telemetry query rc = %d", rc)
+		}
+	})
+	if !strings.Contains(out, `cli_metrics = "auto"`) {
+		t.Fatalf("default telemetry query = %q", out)
+	}
+	if rc := configTelemetryCommand([]string{"on"}); rc != 0 {
+		t.Fatalf("config telemetry on rc = %d", rc)
+	}
+	cfg, err := config.Load()
+	if err != nil || cfg.CLITelemetryMode() != "on" {
+		t.Fatalf("saved telemetry mode = %q, err = %v", cfg.CLITelemetryMode(), err)
+	}
+	pending := filepath.Join(config.ReasonixHomeDir(), "cli-telemetry-pending")
+	if err := os.MkdirAll(pending, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pending, "pending.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rc := configTelemetryCommand([]string{"off"}); rc != 0 {
+		t.Fatalf("config telemetry off rc = %d", rc)
+	}
+	if _, err := os.Stat(pending); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("opt-out did not remove pending queue: %v", err)
+	}
+}
+
+func TestConfigTelemetryCommandReportsOptOutCleanupFailure(t *testing.T) {
+	isolateCLIConfigHome(t)
+	previous := cleanupCLITelemetry
+	t.Cleanup(func() { cleanupCLITelemetry = previous })
+	cleanupCLITelemetry = func(string) error { return errors.New("cleanup denied") }
+
+	errOut := captureStderr(t, func() {
+		if rc := configTelemetryCommand([]string{"off"}); rc != 1 {
+			t.Fatalf("config telemetry off rc = %d, want 1", rc)
+		}
+	})
+	if !strings.Contains(errOut, "telemetry disabled") || !strings.Contains(errOut, "cleanup denied") {
+		t.Fatalf("cleanup failure stderr = %q", errOut)
+	}
+	cfg, err := config.Load()
+	if err != nil || cfg.CLITelemetryMode() != "off" {
+		t.Fatalf("saved telemetry mode = %q, err = %v", cfg.CLITelemetryMode(), err)
+	}
+}
+
+func TestCLITelemetryConsentDefaultsYesAndPromptsOnlyOnce(t *testing.T) {
+	isolateCLIConfigHome(t)
+	clearCLITelemetryPolicyEnv(t)
+	t.Cleanup(func() { i18n.DetectLanguage("en") })
+	i18n.DetectLanguage("en")
+
+	previousStart := startCLITelemetryReporter
+	t.Cleanup(func() { startCLITelemetryReporter = previousStart })
+	want := &telemetry.Reporter{}
+	starts := 0
+	startCLITelemetryReporter = func(opts telemetry.Options) *telemetry.Reporter {
+		starts++
+		saved, err := config.LoadForEditReadOnlyStrict(config.UserConfigPath())
+		if err != nil || !saved.CLITelemetryConfigured() || saved.CLITelemetryMode() != "auto" {
+			t.Fatalf("telemetry started before consent was saved: mode=%q configured=%v err=%v", saved.CLITelemetryMode(), saved.CLITelemetryConfigured(), err)
+		}
+		return want
+	}
+
+	cfg := config.Default()
+	var out, errOut bytes.Buffer
+	got := startCLITelemetryWithIO(cfg, telemetry.Options{
+		Version: "v1.20.0", Interactive: true, CLIMode: "tui",
+	}, strings.NewReader("\n"), &out, &errOut)
+	if got != want || starts != 1 {
+		t.Fatalf("first start = %p, calls=%d; want %p, 1", got, starts, want)
+	}
+	if !strings.Contains(out.String(), "crash.reasonix.io") || !strings.Contains(out.String(), "[Y/n]:") || !strings.Contains(out.String(), "reasonix config telemetry off") {
+		t.Fatalf("consent prompt is incomplete: %q", out.String())
+	}
+	if errOut.Len() != 0 {
+		t.Fatalf("unexpected consent stderr: %q", errOut.String())
+	}
+	if !cfg.CLITelemetryConfigured() || cfg.CLITelemetryMode() != "auto" {
+		t.Fatalf("runtime config was not synchronized: mode=%q configured=%v", cfg.CLITelemetryMode(), cfg.CLITelemetryConfigured())
+	}
+
+	var secondOut bytes.Buffer
+	if got := startCLITelemetryWithIO(cfg, telemetry.Options{
+		Version: "v1.20.0", Interactive: true, CLIMode: "tui",
+	}, strings.NewReader("n\n"), &secondOut, &errOut); got != want {
+		t.Fatalf("second start = %p, want %p", got, want)
+	}
+	if secondOut.Len() != 0 || starts != 2 {
+		t.Fatalf("saved decision prompted again: output=%q calls=%d", secondOut.String(), starts)
+	}
+}
+
+func TestCLITelemetryConsentNoDisablesAndCleansPending(t *testing.T) {
+	isolateCLIConfigHome(t)
+	clearCLITelemetryPolicyEnv(t)
+
+	previousStart := startCLITelemetryReporter
+	t.Cleanup(func() { startCLITelemetryReporter = previousStart })
+	starts := 0
+	startCLITelemetryReporter = func(telemetry.Options) *telemetry.Reporter {
+		starts++
+		return &telemetry.Reporter{}
+	}
+	home := config.ReasonixHomeDir()
+	pending := filepath.Join(home, "cli-telemetry-pending")
+	if err := os.MkdirAll(pending, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pending, "pending.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	var out, errOut bytes.Buffer
+	if got := startCLITelemetryWithIO(cfg, telemetry.Options{
+		Version: "v1.20.0", Interactive: true, CLIMode: "tui",
+	}, strings.NewReader("n\n"), &out, &errOut); got != nil {
+		t.Fatalf("declined telemetry returned reporter %p", got)
+	}
+	if starts != 0 {
+		t.Fatalf("declined telemetry started upload %d times", starts)
+	}
+	if cfg.CLITelemetryMode() != "off" || !cfg.CLITelemetryConfigured() {
+		t.Fatalf("decline was not saved in runtime config: mode=%q configured=%v", cfg.CLITelemetryMode(), cfg.CLITelemetryConfigured())
+	}
+	if _, err := os.Stat(pending); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("decline did not clear pending queue: %v", err)
+	}
+	saved, err := config.LoadForEditReadOnlyStrict(config.UserConfigPath())
+	if err != nil || saved.CLITelemetryMode() != "off" || !saved.CLITelemetryConfigured() {
+		t.Fatalf("saved decline = mode %q configured=%v err=%v", saved.CLITelemetryMode(), saved.CLITelemetryConfigured(), err)
+	}
+}
+
+func TestCLITelemetryConsentSaveFailureDoesNotUpload(t *testing.T) {
+	isolateCLIConfigHome(t)
+	clearCLITelemetryPolicyEnv(t)
+
+	previousSave := persistCLITelemetryConsent
+	previousStart := startCLITelemetryReporter
+	t.Cleanup(func() {
+		persistCLITelemetryConsent = previousSave
+		startCLITelemetryReporter = previousStart
+	})
+	persistCLITelemetryConsent = func(string) error { return errors.New("read-only config") }
+	starts := 0
+	startCLITelemetryReporter = func(telemetry.Options) *telemetry.Reporter {
+		starts++
+		return &telemetry.Reporter{}
+	}
+
+	cfg := config.Default()
+	var out, errOut bytes.Buffer
+	if got := startCLITelemetryWithIO(cfg, telemetry.Options{
+		Version: "v1.20.0", Interactive: true, CLIMode: "tui",
+	}, strings.NewReader("\n"), &out, &errOut); got != nil {
+		t.Fatalf("save failure returned reporter %p", got)
+	}
+	if starts != 0 || cfg.CLITelemetryConfigured() {
+		t.Fatalf("save failure started=%d configured=%v", starts, cfg.CLITelemetryConfigured())
+	}
+	if !strings.Contains(errOut.String(), "read-only config") {
+		t.Fatalf("save failure was not explained: %q", errOut.String())
+	}
+}
+
+func TestConfiguredCLITelemetryDoesNotPromptAgain(t *testing.T) {
+	isolateCLIConfigHome(t)
+	clearCLITelemetryPolicyEnv(t)
+	previousSave := persistCLITelemetryConsent
+	previousStart := startCLITelemetryReporter
+	t.Cleanup(func() {
+		persistCLITelemetryConsent = previousSave
+		startCLITelemetryReporter = previousStart
+	})
+	persistCalls := 0
+	persistCLITelemetryConsent = func(string) error {
+		persistCalls++
+		return nil
+	}
+	want := &telemetry.Reporter{}
+	startCalls := 0
+	startCLITelemetryReporter = func(opts telemetry.Options) *telemetry.Reporter {
+		startCalls++
+		if telemetry.Enabled(opts.Mode, opts.Version, opts.Interactive) {
+			return want
+		}
+		return nil
+	}
+
+	for _, mode := range []string{"auto", "on", "off"} {
+		cfg := config.Default()
+		if err := cfg.SetCLITelemetryMode(mode); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		got := startCLITelemetryWithIO(cfg, telemetry.Options{
+			Version: "v1.20.0", Interactive: true, CLIMode: "tui",
+		}, strings.NewReader("n\n"), &out, io.Discard)
+		if out.Len() != 0 {
+			t.Fatalf("configured mode %q prompted again: %q", mode, out.String())
+		}
+		if mode == "off" && got != nil {
+			t.Fatalf("configured off returned reporter %p", got)
+		}
+		if mode != "off" && got != want {
+			t.Fatalf("configured %s returned %p, want %p", mode, got, want)
+		}
+	}
+	if persistCalls != 0 || startCalls != 3 {
+		t.Fatalf("configured modes persisted=%d started=%d, want 0 and 3", persistCalls, startCalls)
+	}
+}
+
+func TestUndecidedCLITelemetryDoesNotPromptOrUploadWhenIneligible(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		version     string
+		interactive bool
+		envKey      string
+		envValue    string
+	}{
+		{name: "noninteractive", version: "v1.20.0"},
+		{name: "development", version: "dev", interactive: true},
+		{name: "CI", version: "v1.20.0", interactive: true, envKey: "CI", envValue: "1"},
+		{name: "do not track", version: "v1.20.0", interactive: true, envKey: "DO_NOT_TRACK", envValue: "1"},
+		{name: "environment opt out", version: "v1.20.0", interactive: true, envKey: "REASONIX_TELEMETRY", envValue: "0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateCLIConfigHome(t)
+			clearCLITelemetryPolicyEnv(t)
+			if tc.envKey != "" {
+				t.Setenv(tc.envKey, tc.envValue)
+			}
+			cfg, err := config.LoadForRootReadOnly(".")
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out, errOut bytes.Buffer
+			if got := startCLITelemetryWithIO(cfg, telemetry.Options{
+				Version: tc.version, Interactive: tc.interactive, CLIMode: "tui",
+			}, strings.NewReader("\n"), &out, &errOut); got != nil {
+				t.Fatalf("ineligible telemetry returned reporter %p", got)
+			}
+			if out.Len() != 0 || errOut.Len() != 0 {
+				t.Fatalf("ineligible telemetry wrote output: stdout=%q stderr=%q", out.String(), errOut.String())
+			}
+			if _, err := os.Stat(config.UserConfigPath()); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("ineligible invocation wrote config: %v", err)
+			}
+		})
+	}
+}
+
+func TestLegacySafeModeEnvDoesNotAlterConfiguredCLITelemetry(t *testing.T) {
+	isolateCLIConfigHome(t)
+	clearCLITelemetryPolicyEnv(t)
+	t.Setenv("REASONIX_SAFE_MODE", "1")
+	cfg := config.Default()
+	if err := cfg.SetCLITelemetryMode("auto"); err != nil {
+		t.Fatal(err)
+	}
+	previousStart := startCLITelemetryReporter
+	t.Cleanup(func() { startCLITelemetryReporter = previousStart })
+	want := &telemetry.Reporter{}
+	startCLITelemetryReporter = func(telemetry.Options) *telemetry.Reporter { return want }
+	if got := startCLITelemetryWithIO(cfg, telemetry.Options{
+		Version: "v1.20.0", Interactive: true, CLIMode: "tui",
+	}, strings.NewReader(""), io.Discard, io.Discard); got != want {
+		t.Fatalf("telemetry reporter = %p, want %p", got, want)
+	}
+}
+
+func TestCLITelemetryConsentPromptIsLocalized(t *testing.T) {
+	isolateCLIConfigHome(t)
+	clearCLITelemetryPolicyEnv(t)
+	previousSave := persistCLITelemetryConsent
+	previousStart := startCLITelemetryReporter
+	t.Cleanup(func() {
+		persistCLITelemetryConsent = previousSave
+		startCLITelemetryReporter = previousStart
+		i18n.DetectLanguage("en")
+	})
+	persistCLITelemetryConsent = func(string) error { return nil }
+	startCLITelemetryReporter = func(telemetry.Options) *telemetry.Reporter { return nil }
+
+	for _, lang := range []string{"en", "zh", "zh-TW"} {
+		i18n.DetectLanguage(lang)
+		var out bytes.Buffer
+		startCLITelemetryWithIO(config.Default(), telemetry.Options{
+			Version: "v1.20.0", Interactive: true, CLIMode: "tui",
+		}, strings.NewReader("\n"), &out, io.Discard)
+		for _, required := range []string{"crash.reasonix.io", "reasonix config telemetry off", "[Y/n]:"} {
+			if !strings.Contains(out.String(), required) {
+				t.Fatalf("%s consent prompt missing %q: %q", lang, required, out.String())
+			}
+		}
+	}
+}
+
+func clearCLITelemetryPolicyEnv(t *testing.T) {
+	t.Helper()
+	for _, key := range []string{
+		"DO_NOT_TRACK", "REASONIX_TELEMETRY", "REASONIX_SAFE_MODE", "CI", "CONTINUOUS_INTEGRATION",
+		"GITHUB_ACTIONS", "GITLAB_CI", "BUILDKITE", "CIRCLECI", "JENKINS_URL",
+		"TEAMCITY_VERSION", "TF_BUILD",
+	} {
+		t.Setenv(key, "")
 	}
 }
 
@@ -1539,6 +2123,14 @@ func captureStderr(t *testing.T, fn func()) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+func captureCLIOutput(t *testing.T, fn func()) (stdout, stderr string) {
+	t.Helper()
+	stderr = captureStderr(t, func() {
+		stdout = captureStdout(t, fn)
+	})
+	return stdout, stderr
 }
 
 func TestProvidersWithMissingKeysOnlyReferenced(t *testing.T) {

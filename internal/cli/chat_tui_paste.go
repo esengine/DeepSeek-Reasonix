@@ -2,17 +2,20 @@ package cli
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/atotto/clipboard"
 
 	"reasonix/internal/control"
+	"reasonix/internal/provider"
 	"reasonix/internal/secrets"
 	"reasonix/internal/shellparse"
 )
@@ -49,8 +52,7 @@ func (m *chatTUI) shouldFoldPaste(s string) bool {
 
 func (m *chatTUI) insertFoldedPaste(s string) {
 	m.deleteComposerSelection()
-	label := foldedPasteLabel(m.nextPasteID, pastedLineCount(s))
-	m.nextPasteID++
+	label := foldedPasteLabel(m.takeNextPasteID(), pastedLineCount(s))
 	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{label: label, text: s})
 	m.input.InsertString(label + " ")
 }
@@ -60,8 +62,7 @@ func (m *chatTUI) insertFoldedPaste(s string) {
 // edited and removed like any other text, not stranded in a separate tray.
 func (m *chatTUI) insertImageRef(path string) {
 	m.deleteComposerSelection()
-	label := fmt.Sprintf("[image #%d]", m.nextPasteID)
-	m.nextPasteID++
+	label := fmt.Sprintf("[image #%d]", m.takeNextPasteID())
 	m.pastedBlocks = append(m.pastedBlocks, pastedBlock{label: label, text: "@" + path, image: true})
 	m.input.InsertString(label + " ")
 	m.growInputToFit()
@@ -80,7 +81,207 @@ func (m *chatTUI) expandPastedBlocks(displayed string) string {
 		}
 		sent = strings.ReplaceAll(sent, block.label, repl)
 	}
+	// Recover orphaned paste labels that lost their block entries during a
+	// session reload.  Each label follows the format
+	// [Pasted text #N · M lines]; the original content was expanded into the
+	// transcript the last time it was submitted.  Scan the conversation
+	// history for a prior user message carrying the matching Begin/End block
+	// and re-expand from there. Labels with no verified content remain literal.
+	sent = m.recoverOrphanedPasteLabels(sent)
 	return sent
+}
+
+var foldedPasteLabelRe = regexp.MustCompile(`\[Pasted text #(\d+) · (\d+) lines\]`)
+
+// recoverOrphanedPasteLabels restores paste content only at the explicit
+// resubmission boundary. Persisted history remains byte-stable for prefix-cache
+// reuse; labels that cannot be proven to belong to a prior expanded user
+// message are left unchanged rather than rewriting literal user text.
+func (m *chatTUI) recoverOrphanedPasteLabels(sent string) string {
+	var history []provider.Message
+	if m.ctrl != nil {
+		history = m.ctrl.History()
+	}
+	return recoverOrphanedPasteLabelsFromHistory(sent, m.pastedBlocks, history)
+}
+
+func recoverOrphanedPasteLabelsFromHistory(sent string, knownBlocks []pastedBlock, history []provider.Message) string {
+	// Fast path: no label-like tokens at all.
+	if !strings.Contains(sent, "[Pasted text #") {
+		return sent
+	}
+	matches := foldedPasteLabelRe.FindAllString(sent, -1)
+	if len(matches) == 0 {
+		return sent
+	}
+	// Collect the labels we already know about so we only attempt recovery
+	// for genuinely orphaned ones.
+	known := make(map[string]bool, len(knownBlocks))
+	for _, b := range knownBlocks {
+		known[b.label] = true
+	}
+	seen := make(map[string]bool, len(matches))
+	for _, label := range matches {
+		if known[label] || seen[label] || strings.Contains(sent, "--- Begin "+label+" ---") {
+			continue
+		}
+		seen[label] = true
+		var recovered string
+		found := false
+		ambiguous := false
+		for i := len(history) - 1; i >= 0; i-- {
+			if history[i].Role != provider.RoleUser {
+				continue
+			}
+			for _, body := range expandedPasteBodies(history[i].Content, label) {
+				if !found {
+					recovered = body
+					found = true
+					continue
+				}
+				if recovered != body {
+					ambiguous = true
+					break
+				}
+			}
+			if ambiguous {
+				break
+			}
+		}
+		if found && !ambiguous {
+			sent = strings.ReplaceAll(sent, label, renderFoldedPasteBlock(pastedBlock{
+				label: label,
+				text:  recovered,
+			}))
+		}
+	}
+	return sent
+}
+
+func expandedPasteBodies(content, label string) []string {
+	expectedLines, ok := foldedPasteLineCount(label)
+	if !ok {
+		return nil
+	}
+	beginMarker := "--- Begin " + label + " ---"
+	endMarker := "\n--- End " + label + " ---"
+	var bodies []string
+	for searchFrom := 0; searchFrom < len(content); {
+		beginOffset := strings.Index(content[searchFrom:], beginMarker)
+		if beginOffset < 0 {
+			break
+		}
+		bodyStart := searchFrom + beginOffset + len(beginMarker)
+		if bodyStart >= len(content) || content[bodyStart] != '\n' {
+			searchFrom = bodyStart
+			continue
+		}
+		bodyStart++
+		endSearchFrom := bodyStart
+		foundEnd := false
+		for endSearchFrom < len(content) {
+			endOffset := strings.Index(content[endSearchFrom:], endMarker)
+			if endOffset < 0 {
+				break
+			}
+			bodyEnd := endSearchFrom + endOffset
+			searchFrom = bodyEnd + len(endMarker)
+			body := content[bodyStart:bodyEnd]
+			if body != "" && pastedLineCount(body) == expectedLines {
+				bodies = append(bodies, body)
+				foundEnd = true
+				break
+			}
+			endSearchFrom = searchFrom
+		}
+		if !foundEnd {
+			break
+		}
+	}
+	return bodies
+}
+
+func foldedPasteLineCount(label string) (int, bool) {
+	match := foldedPasteLabelRe.FindStringSubmatch(label)
+	if len(match) < 3 || match[0] != label {
+		return 0, false
+	}
+	lines, err := strconv.Atoi(match[2])
+	if err != nil || lines < 1 {
+		return 0, false
+	}
+	return lines, true
+}
+
+// nextPasteIDForHistory prevents labels from being reused after resume or
+// restart. Older sessions may contain duplicate legacy IDs; starting above the
+// maximum keeps every newly created label unambiguous.
+func nextPasteIDForHistory(history []provider.Message) int {
+	next, _ := pasteIDStateForHistory(history)
+	return next
+}
+
+func pasteIDStateForHistory(history []provider.Message) (int, map[int]struct{}) {
+	next := 1
+	used := make(map[int]struct{})
+	for _, msg := range history {
+		for _, match := range foldedPasteLabelRe.FindAllStringSubmatch(msg.Content, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			id, err := strconv.Atoi(match[1])
+			if err != nil || id < 1 {
+				continue
+			}
+			used[id] = struct{}{}
+			if id >= next && id < math.MaxInt {
+				next = id + 1
+			}
+		}
+	}
+	return next, used
+}
+
+func (m *chatTUI) takeNextPasteID() int {
+	if m.ctrl != nil {
+		m.syncPasteIDStateFromHistory(m.ctrl.History())
+	}
+	candidate := m.nextPasteID
+	if candidate < 1 {
+		candidate = 1
+	}
+	if m.usedPasteIDs == nil {
+		m.usedPasteIDs = make(map[int]struct{})
+	}
+	for {
+		if _, used := m.usedPasteIDs[candidate]; !used {
+			m.usedPasteIDs[candidate] = struct{}{}
+			if candidate == math.MaxInt {
+				m.nextPasteID = 1
+			} else {
+				m.nextPasteID = candidate + 1
+			}
+			return candidate
+		}
+		if candidate == math.MaxInt {
+			candidate = 1
+		} else {
+			candidate++
+		}
+	}
+}
+
+func (m *chatTUI) syncPasteIDStateFromHistory(history []provider.Message) {
+	next, used := pasteIDStateForHistory(history)
+	if m.usedPasteIDs == nil {
+		m.usedPasteIDs = make(map[int]struct{}, len(used))
+	}
+	for id := range used {
+		m.usedPasteIDs[id] = struct{}{}
+	}
+	if m.nextPasteID < 1 || next > m.nextPasteID {
+		m.nextPasteID = next
+	}
 }
 
 func (m *chatTUI) pasteLabelsIn(s string) []string {

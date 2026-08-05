@@ -15,7 +15,6 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/config"
-	"reasonix/internal/control"
 	"reasonix/internal/filelock"
 	"reasonix/internal/fileutil"
 	"reasonix/internal/store"
@@ -61,6 +60,12 @@ func loadSessionTitles(dir string) map[string]string {
 		return m
 	}
 	_ = json.Unmarshal(b, &m)
+	// Older builds could persist titles polluted with internal wrappers
+	// (memory-compiler contracts, transient blocks) — clean at the read
+	// boundary; UserPreviewText is a no-op on clean titles (#5666).
+	for key, title := range m {
+		m[key] = agent.UserPreviewText(title)
+	}
 	return m
 }
 
@@ -1175,17 +1180,44 @@ func saveOrRemoveSessionDisplays(dir string, m sessionDisplayMap) error {
 	return saveSessionDisplays(dir, m)
 }
 
+// updateSessionDisplays serializes the display sidecar's read-modify-write
+// cycle. Parallel tabs can record display text concurrently; atomic rename
+// protects readers from partial JSON but cannot prevent the last writer from
+// replacing another tab's freshly added keys (#6873).
+func updateSessionDisplays(dir string, mutate func(sessionDisplayMap) bool) error {
+	if strings.TrimSpace(dir) == "" {
+		return errors.New("display directory is empty")
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
+	defer cancel()
+	release, err := filelock.Acquire(ctx, sessionDisplayPath(dir)+".lock")
+	if err != nil {
+		return fmt.Errorf("lock display sidecar: %w", err)
+	}
+	defer release()
+
+	m := loadSessionDisplays(dir)
+	if !mutate(m) {
+		return nil
+	}
+	return saveOrRemoveSessionDisplays(dir, m)
+}
+
 func removeSessionDisplayKey(dir, key string) error {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return nil
 	}
-	m := loadSessionDisplays(dir)
-	if m[key] == nil {
-		return nil
-	}
-	delete(m, key)
-	return saveOrRemoveSessionDisplays(dir, m)
+	return updateSessionDisplays(dir, func(m sessionDisplayMap) bool {
+		if m[key] == nil {
+			return false
+		}
+		delete(m, key)
+		return true
+	})
 }
 
 func removeSessionDisplay(dir, sessionPath string) error {
@@ -1196,22 +1228,20 @@ func removeSessionDisplay(dir, sessionPath string) error {
 }
 
 func pruneSessionDisplays(dir string, protected map[string]struct{}) error {
-	m := loadSessionDisplays(dir)
-	if len(m) == 0 {
-		return nil
-	}
-	changed := false
-	for key := range m {
-		if sessionDisplayKeyStillOwned(dir, key, protected) {
-			continue
+	return updateSessionDisplays(dir, func(m sessionDisplayMap) bool {
+		if len(m) == 0 {
+			return false
 		}
-		delete(m, key)
-		changed = true
-	}
-	if !changed {
-		return nil
-	}
-	return saveOrRemoveSessionDisplays(dir, m)
+		changed := false
+		for key := range m {
+			if sessionDisplayKeyStillOwned(dir, key, protected) {
+				continue
+			}
+			delete(m, key)
+			changed = true
+		}
+		return changed
+	})
 }
 
 func sessionDisplayKeyStillOwned(dir, key string, protected map[string]struct{}) bool {
@@ -1246,13 +1276,14 @@ func recordSessionDisplay(dir, sessionPath, content, display string) error {
 	if strings.TrimSpace(sessionPath) == "" || content == display || strings.TrimSpace(display) == "" {
 		return nil
 	}
-	m := loadSessionDisplays(dir)
-	key := filepath.Base(sessionPath)
-	if m[key] == nil {
-		m[key] = map[string]string{}
-	}
-	m[key][messageDisplayKey(content)] = display
-	return saveSessionDisplays(dir, m)
+	return updateSessionDisplays(dir, func(m sessionDisplayMap) bool {
+		key := filepath.Base(sessionPath)
+		if m[key] == nil {
+			m[key] = map[string]string{}
+		}
+		m[key][messageDisplayKey(content)] = display
+		return true
+	})
 }
 
 // sessionDisplayResolver loads the sidecar once and returns a per-message
@@ -1269,7 +1300,7 @@ func sessionDisplayResolverFromMap(displays sessionDisplayMap, sessionPath strin
 				return display
 			}
 		}
-		return control.StripComposePrefixes(content)
+		return historyReplayUserContent(content)
 	}
 }
 

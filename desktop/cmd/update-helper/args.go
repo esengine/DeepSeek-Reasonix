@@ -4,10 +4,10 @@ import "fmt"
 
 func installerCommandLine(installer, dir string) string {
 	// Auto-updates use a dedicated visible progress mode instead of NSIS /S.
-	// The installer skips its welcome and directory pages in this mode, keeps
-	// the current install directory fixed, and closes itself after the file copy
-	// completes so this helper can relaunch Reasonix.
-	line := fmt.Sprintf(`"%s" /REASONIXUPDATE=1`, installer)
+	// The current helper also requires staging-only extraction: NSIS never writes
+	// the live install, and the helper compare-and-publishes the claimed release
+	// unit after validating every staged member.
+	line := fmt.Sprintf(`"%s" /REASONIXUPDATE=1 /REASONIXSTAGE=1`, installer)
 	if dir != "" {
 		line += " /D=" + dir
 	}

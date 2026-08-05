@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"reasonix/internal/extension/protocol"
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/mcpdiag"
@@ -45,13 +47,16 @@ const (
 //   - "provider/model"    — that specific model under that provider.
 //
 // Either is rejected when the target does not exist, so a UI can't strand
-// the config on a model that doesn't exist.
+// the config on a model that doesn't exist. Plugin-namespaced refs
+// (plugin/<plugin>/<provider>/<model>) are the exception: they belong to
+// extension sidecars, so the config catalog cannot vouch for them — boot's
+// merged resolver gates them at the next launch instead.
 func (c *Config) SetDefaultModel(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("set default: empty name")
 	}
-	if _, ok := c.ResolveModel(name); !ok {
+	if _, ok := c.ResolveModel(name); !ok && protocol.PluginRefOwner(name) == "" {
 		return fmt.Errorf("set default: no such model %q (configured: %s)", name, c.providerNames())
 	}
 	c.DefaultModel = name
@@ -134,23 +139,27 @@ func (c *Config) UpsertProvider(e ProviderEntry) error {
 }
 
 // UpsertProviderPreservingRuntime applies persisted provider fields while
-// retaining credentials and capability state resolved by the latest config
-// load. It is used when replaying an optimistic edit log onto fresh state.
+// retaining process-only state derived by the latest config load. It is used
+// when replaying an optimistic edit log onto fresh state.
 func (c *Config) UpsertProviderPreservingRuntime(e ProviderEntry) error {
-	if current, ok := c.Provider(e.Name); ok && strings.TrimSpace(current.APIKeyEnv) == strings.TrimSpace(e.APIKeyEnv) {
-		e.resolvedAPIKey = current.resolvedAPIKey
-		e.resolvedSource = current.resolvedSource
-		e.visionOverride = current.visionOverride
+	if current, ok := c.Provider(e.Name); ok {
+		e.persistedOfficialCurrency = current.persistedOfficialCurrency
+		if strings.TrimSpace(current.APIKeyEnv) == strings.TrimSpace(e.APIKeyEnv) {
+			e.resolvedAPIKey = current.resolvedAPIKey
+			e.resolvedSource = current.resolvedSource
+			e.visionOverride = current.visionOverride
+		}
 	}
 	return c.UpsertProvider(e)
 }
 
 // ProviderEntryConfigSnapshot strips process-only state from a provider copy so
-// optimistic edit logs never retain resolved credential values.
+// optimistic edit logs contain only persisted configuration.
 func ProviderEntryConfigSnapshot(entry ProviderEntry) ProviderEntry {
 	entry.resolvedAPIKey = ""
 	entry.resolvedSource = CredentialSource{}
 	entry.visionOverride = nil
+	entry.persistedOfficialCurrency = ""
 	return entry
 }
 
@@ -221,6 +230,27 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 	return nil
 }
 
+// SetDesktopCurrency pins the user-global official pricing region independently
+// from language. The name is retained for persisted-schema compatibility.
+// Empty/auto follows the language preference.
+func (c *Config) SetDesktopCurrency(currency string) error {
+	overridePersisted := false
+	switch strings.ToUpper(strings.TrimSpace(currency)) {
+	case "", "AUTO":
+		c.Desktop.Currency = ""
+	case "CNY", "RMB", "CNH":
+		c.Desktop.Currency = "CNY"
+		overridePersisted = true
+	case "USD":
+		c.Desktop.Currency = "USD"
+		overridePersisted = true
+	default:
+		return fmt.Errorf("desktop currency %q: must be auto|CNY|USD", currency)
+	}
+	applyDeepSeekOfficialDefaultPricingWithOverride(c, overridePersisted)
+	return nil
+}
+
 // SetDesktopAppearance sets desktop-only theme preferences. It must not affect
 // CLI theme settings or provider-visible request data.
 func (c *Config) SetDesktopAppearance(theme, style string) error {
@@ -243,6 +273,22 @@ func (c *Config) SetDesktopAppearance(theme, style string) error {
 		return fmt.Errorf("desktop theme style %q: must be graphite|aurora|slate|carbon|nocturne|amber", style)
 	}
 	c.Desktop.ThemeStyle = normalized
+	return nil
+}
+
+// SetDesktopTerminalTheme sets the integrated terminal colour preference.
+// This is desktop-only UI state and never rebuilds or changes model requests.
+func (c *Config) SetDesktopTerminalTheme(theme string) error {
+	switch strings.ToLower(strings.TrimSpace(theme)) {
+	case "", "auto":
+		c.Desktop.TerminalTheme = "auto"
+	case "dark":
+		c.Desktop.TerminalTheme = "dark"
+	case "light":
+		c.Desktop.TerminalTheme = "light"
+	default:
+		return fmt.Errorf("desktop terminal theme %q: must be auto|dark|light", theme)
+	}
 	return nil
 }
 
@@ -350,9 +396,48 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
+// SetDesktopUpdateChannel is retained for pre-single-channel Wails clients.
+// Clearing the legacy field keeps the next canonical write channel-free.
+func (c *Config) SetDesktopUpdateChannel(_ string) error {
+	c.Desktop.UpdateChannel = ""
+	return nil
+}
+
+// SetCLIUpdateChannel is retained for older CLI scripts. Every recognized
+// historical value migrates to the official channel and is omitted on save.
+func (c *Config) SetCLIUpdateChannel(channel string) error {
+	switch strings.ToLower(strings.TrimSpace(channel)) {
+	case "", "stable", "preview", "canary", "beta", "next":
+		c.CLI.UpdateChannel = ""
+	default:
+		return fmt.Errorf("CLI update channel %q is unsupported; Reasonix now uses the official release channel", channel)
+	}
+	return nil
+}
+
 // SetColdResumePrune toggles auto-elision of stale tool results on cold resume.
 func (c *Config) SetColdResumePrune(enabled bool) error {
 	c.Agent.ColdResumePrune = &enabled
+	return nil
+}
+
+// SetCompactRatio updates the user-controlled auto-compaction threshold.
+// Keep the editable range inside the default snip/force guard rails so lowering
+// the threshold cannot accidentally turn normal cache growth into constant
+// compaction, while higher values still retain context-exhaustion headroom.
+func (c *Config) SetCompactRatio(ratio float64) error {
+	if math.IsNaN(ratio) || math.IsInf(ratio, 0) || ratio < 0.65 || ratio > 0.85 {
+		return fmt.Errorf("compact ratio %v: must be between 0.65 and 0.85", ratio)
+	}
+	snip := c.Agent.ToolResultSnipRatio
+	force := c.Agent.CompactForceRatio
+	if snip > 0 && ratio <= snip {
+		return fmt.Errorf("compact ratio %.2f: must be greater than tool result snip ratio %.2f", ratio, snip)
+	}
+	if force > 0 && ratio >= force {
+		return fmt.Errorf("compact ratio %.2f: must be less than force ratio %.2f", ratio, force)
+	}
+	c.Agent.CompactRatio = ratio
 	return nil
 }
 
@@ -365,6 +450,21 @@ func (c *Config) SetDesktopTelemetry(enabled bool) error {
 // SetDesktopMetrics sets whether the desktop sends aggregate desktop metrics.
 func (c *Config) SetDesktopMetrics(enabled bool) error {
 	c.Desktop.Metrics = &enabled
+	return nil
+}
+
+// SetCLITelemetryMode sets the user-global content-free CLI metrics policy.
+func (c *Config) SetCLITelemetryMode(mode string) error {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "auto":
+		c.Telemetry.CLIMetrics = "auto"
+	case "on":
+		c.Telemetry.CLIMetrics = "on"
+	case "off":
+		c.Telemetry.CLIMetrics = "off"
+	default:
+		return fmt.Errorf("cli_metrics %q: must be auto|on|off", mode)
+	}
 	return nil
 }
 
@@ -811,8 +911,38 @@ func ClearPluginAuthenticationInSource(name string) (PluginEntry, bool, string, 
 // action cannot drift to another project's reasonix.toml or .mcp.json after the
 // user switches tabs while the action is waiting on a lifecycle lock.
 func ClearPluginAuthenticationInSourceForRoot(root, name string) (PluginEntry, bool, string, error) {
-	if path := pluginTOMLSourcePathForRoot(root, name); path != "" {
-		cfg := LoadForEdit(path)
+	resolvedRoot := resolveRoot(root)
+	projectTOML := "reasonix.toml"
+	projectMCPJSON := mcpJSONFile
+	if resolvedRoot != "." {
+		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
+		projectMCPJSON = filepath.Join(resolvedRoot, mcpJSONFile)
+	}
+	lockPaths := append([]string{}, userConfigCandidatePaths()...)
+	lockPaths = append(lockPaths, projectTOML, projectMCPJSON)
+	if legacy := legacyConfigPath(); strings.TrimSpace(legacy) != "" {
+		lockPaths = append(lockPaths, legacy)
+	}
+	unlock, err := lockConfigFilesEdits(lockPaths...)
+	if err != nil {
+		return PluginEntry{}, false, "", fmt.Errorf("clear plugin authentication: %w", err)
+	}
+	defer unlock()
+
+	cfg, err := LoadForRootReadOnly(root)
+	if err != nil {
+		return PluginEntry{}, false, "", err
+	}
+	entry, found := pluginEntryByName(cfg.Plugins, strings.TrimSpace(name))
+	if !found {
+		return PluginEntry{}, false, "", fmt.Errorf("clear plugin authentication: no plugin %q", name)
+	}
+	path := MCPConfigPathForEntry(root, entry)
+	if entry.Source != MCPSourceProjectMCPJSON {
+		cfg, err := LoadForEditReadOnlyStrict(path)
+		if err != nil {
+			return PluginEntry{}, false, path, err
+		}
 		updated, changed, err := cfg.ClearPluginAuthentication(name)
 		if err != nil {
 			return PluginEntry{}, false, path, err
@@ -824,15 +954,11 @@ func ClearPluginAuthenticationInSourceForRoot(root, name string) (PluginEntry, b
 		}
 		return updated, changed, path, nil
 	}
-	mcpPath := mcpJSONFile
-	if resolved := resolveRoot(root); resolved != "." {
-		mcpPath = filepath.Join(resolved, mcpJSONFile)
-	}
-	updated, changed, err := clearMCPJSONAuthentication(mcpPath, name)
+	updated, changed, err := clearMCPJSONAuthentication(path, name)
 	if err != nil {
 		return PluginEntry{}, false, "", err
 	}
-	return updated, changed, mcpPath, nil
+	return updated, changed, path, nil
 }
 
 func pluginTOMLSourcePathForRoot(root, name string) string {
@@ -855,23 +981,284 @@ func pluginTOMLSourcePathForRoot(root, name string) string {
 	return ""
 }
 
+// MCPConfigPathForEntry returns the writable config file that owns entry.
+// Runtime configuration is merged by name, so callers must use provenance
+// instead of saving the merged Config back to whichever file happens to have
+// the highest priority.
+func MCPConfigPathForEntry(root string, entry PluginEntry) string {
+	resolvedRoot := resolveRoot(root)
+	projectTOML := "reasonix.toml"
+	projectMCPJSON := mcpJSONFile
+	if resolvedRoot != "." {
+		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
+		projectMCPJSON = filepath.Join(resolvedRoot, mcpJSONFile)
+	}
+	switch entry.Source {
+	case MCPSourceProjectConfig:
+		return projectTOML
+	case MCPSourceProjectMCPJSON:
+		return projectMCPJSON
+	case MCPSourceUserConfig:
+		for _, path := range userConfigCandidatePaths() {
+			cfg := LoadForEditWithoutCredentials(path)
+			if _, ok := pluginEntryByName(cfg.Plugins, entry.Name); ok {
+				return path
+			}
+		}
+		return UserConfigPath()
+	case MCPSourceLegacyUser:
+		return legacyConfigPath()
+	case MCPSourcePluginPackage:
+		return ""
+	}
+	if path := pluginTOMLSourcePathForRoot(root, entry.Name); path != "" {
+		return path
+	}
+	if _, found, err := LoadMCPJSONPlugin(projectMCPJSON, entry.Name); err == nil && found {
+		return projectMCPJSON
+	}
+	return UserConfigPath()
+}
+
+// UpsertPluginInSourceForRoot writes entry back to its owning scope. New and
+// legacy user entries are normalized into the current user-global config;
+// project entries remain in their original project file.
+func UpsertPluginInSourceForRoot(root string, entry PluginEntry) (string, error) {
+	path := MCPConfigPathForEntry(root, entry)
+	switch entry.Source {
+	case MCPSourceProjectMCPJSON:
+		unlock, err := LockConfigFileEdits(path)
+		if err != nil {
+			return path, err
+		}
+		defer unlock()
+		if _, err := UpsertMCPJSONPlugin(path, entry); err != nil {
+			return path, err
+		}
+		return path, nil
+	case MCPSourcePluginPackage:
+		return "", fmt.Errorf("MCP server %q is managed by an installed plugin package", entry.Name)
+	case MCPSourceProjectConfig:
+		// Keep the project path selected above.
+	default:
+		path = UserConfigPath()
+		if strings.TrimSpace(path) == "" {
+			return "", fmt.Errorf("cannot resolve user config path")
+		}
+		entry.Source = MCPSourceUserConfig
+	}
+
+	unlock, err := LockConfigFileEdits(path)
+	if err != nil {
+		return path, err
+	}
+	defer unlock()
+	cfg, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		return path, err
+	}
+	if err := cfg.UpsertPlugin(entry); err != nil {
+		return path, err
+	}
+	return path, cfg.SaveTo(path)
+}
+
+// InstallUserPluginForRoot persists an explicit global MCP install together
+// with its durable activation state. All config sources that can shadow the
+// global declaration stay locked through conflict detection, save, activation,
+// and any rollback, so a failed activation write cannot remove or overwrite a
+// concurrent config update.
+func InstallUserPluginForRoot(root string, entry PluginEntry, forceEnable bool) (string, error) {
+	entry.Source = MCPSourceUserConfig
+	unlock, err := LockConfigFilesEdits(mcpConfigSourcePathsForRoot(root)...)
+	if err != nil {
+		return "", fmt.Errorf("install MCP server: %w", err)
+	}
+	defer unlock()
+
+	effective, err := LoadForRootReadOnly(root)
+	if err != nil {
+		return "", err
+	}
+	for _, configured := range effective.Plugins {
+		if configured.Name != entry.Name {
+			continue
+		}
+		if configured.Source != MCPSourceUserConfig && configured.Source != MCPSourceLegacyUser {
+			return "", fmt.Errorf(
+				"MCP server %q is already configured by %s; edit or remove that declaration before installing a global server with the same name",
+				entry.Name,
+				configured.Source,
+			)
+		}
+		break
+	}
+
+	path := UserConfigPath()
+	if strings.TrimSpace(path) == "" {
+		return "", fmt.Errorf("cannot resolve user config path")
+	}
+	cfg, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		return path, err
+	}
+	previous, hadPrevious := pluginEntryByName(cfg.Plugins, entry.Name)
+	if err := cfg.UpsertPlugin(entry); err != nil {
+		return path, err
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return path, err
+	}
+
+	store := DefaultMCPActivationStore()
+	var activationErr error
+	if forceEnable {
+		activationErr = store.SetServerEnabled(entry, root, true)
+	} else {
+		activationErr = store.ClearServer(entry, root)
+	}
+	if activationErr == nil {
+		return path, nil
+	}
+
+	var restoreErr error
+	if hadPrevious {
+		restoreErr = cfg.UpsertPlugin(previous)
+	} else {
+		cfg.RemovePlugin(entry.Name)
+	}
+	if restoreErr == nil {
+		restoreErr = cfg.SaveTo(path)
+	}
+	if restoreErr != nil {
+		restoreErr = fmt.Errorf("restore MCP server config: %w", restoreErr)
+	}
+	return path, errors.Join(activationErr, restoreErr)
+}
+
+// RemovePluginFromSourceForRoot removes exactly the declaration represented by
+// entry. Lower-priority same-name declarations are intentionally preserved so
+// they can become effective after a project override is removed.
+func RemovePluginFromSourceForRoot(root string, entry PluginEntry) (bool, string, error) {
+	path := MCPConfigPathForEntry(root, entry)
+	if entry.Source == MCPSourcePluginPackage {
+		return false, "", fmt.Errorf("MCP server %q is managed by an installed plugin package", entry.Name)
+	}
+	if strings.TrimSpace(path) == "" {
+		return false, "", nil
+	}
+	unlock, err := LockConfigFileEdits(path)
+	if err != nil {
+		return false, path, err
+	}
+	defer unlock()
+	return removePluginFromSourceForRootLocked(entry, path)
+}
+
+// removePluginFromSourceForRootLocked removes exactly one source declaration
+// while the caller holds that source's config edit lock.
+func removePluginFromSourceForRootLocked(entry PluginEntry, path string) (bool, string, error) {
+	switch entry.Source {
+	case MCPSourceProjectMCPJSON:
+		removed, err := RemoveMCPJSONPlugin(path, entry.Name)
+		return removed, path, err
+	case MCPSourcePluginPackage:
+		return false, "", fmt.Errorf("MCP server %q is managed by an installed plugin package", entry.Name)
+	case MCPSourceLegacyUser:
+		edit, changed, err := planLegacyMCPDisable(path, entry.Name)
+		if err != nil || !changed {
+			return false, path, err
+		}
+		if err := applyConfigSourceEdits([]configSourceEdit{edit}); err != nil {
+			return false, path, err
+		}
+		return true, path, nil
+	}
+	cfg, err := LoadForEditReadOnlyStrict(path)
+	if err != nil {
+		return false, path, err
+	}
+	if !cfg.RemovePlugin(entry.Name) {
+		return false, path, nil
+	}
+	if err := cfg.SaveTo(path); err != nil {
+		return false, path, err
+	}
+	return true, path, nil
+}
+
+// RemovePluginFromEffectiveSourceForRoot removes only the declaration currently
+// selected by the project-over-global precedence rules.
+func RemovePluginFromEffectiveSourceForRoot(root, name string) (PluginEntry, bool, string, error) {
+	unlock, err := LockConfigFilesEdits(mcpConfigSourcePathsForRoot(root)...)
+	if err != nil {
+		return PluginEntry{}, false, "", fmt.Errorf("remove effective MCP server: %w", err)
+	}
+	defer unlock()
+
+	cfg, err := LoadForRootReadOnly(root)
+	if err != nil {
+		return PluginEntry{}, false, "", err
+	}
+	entry, found := pluginEntryByName(cfg.Plugins, strings.TrimSpace(name))
+	if !found {
+		return PluginEntry{}, false, "", nil
+	}
+	path := MCPConfigPathForEntry(root, entry)
+	removed, path, err := removePluginFromSourceForRootLocked(entry, path)
+	return entry, removed, path, err
+}
+
+// mcpConfigSourcePathsForRoot returns every writable source whose precedence can
+// decide which declaration is effective. A source-selection operation must lock
+// all of them before loading, otherwise another process can add a higher-priority
+// declaration after the load and turn a "remove effective" action into a removal
+// of a now-shadowed source.
+func mcpConfigSourcePathsForRoot(root string) []string {
+	resolvedRoot := resolveRoot(root)
+	projectTOML := "reasonix.toml"
+	projectMCPJSON := mcpJSONFile
+	if resolvedRoot != "." {
+		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
+		projectMCPJSON = filepath.Join(resolvedRoot, mcpJSONFile)
+	}
+	paths := append([]string{}, userConfigCandidatePaths()...)
+	paths = append(paths, projectTOML, projectMCPJSON)
+	if legacy := legacyConfigPath(); strings.TrimSpace(legacy) != "" {
+		paths = append(paths, legacy)
+	}
+	return paths
+}
+
 type configSourceEdit struct {
-	path   string
-	before []byte
-	perm   os.FileMode
-	write  func() error
+	path         string
+	resolvedPath string
+	before       []byte
+	perm         os.FileMode
+	write        func() error
 }
 
 func newConfigSourceEdit(path string, write func() error) (configSourceEdit, error) {
-	info, err := os.Stat(path)
+	userOwned := isUserConfigPath(path) || samePath(path, legacyConfigPath())
+	resolved, err := resolveConfigAccessPath(path, userOwned)
 	if err != nil {
 		return configSourceEdit{}, err
 	}
-	before, err := os.ReadFile(path)
+	info, err := os.Stat(resolved)
 	if err != nil {
 		return configSourceEdit{}, err
 	}
-	return configSourceEdit{path: path, before: before, perm: info.Mode().Perm(), write: write}, nil
+	before, err := os.ReadFile(resolved)
+	if err != nil {
+		return configSourceEdit{}, err
+	}
+	return configSourceEdit{
+		path:         path,
+		resolvedPath: resolved,
+		before:       before,
+		perm:         info.Mode().Perm(),
+		write:        write,
+	}, nil
 }
 
 func applyConfigSourceEdits(edits []configSourceEdit) error {
@@ -879,7 +1266,7 @@ func applyConfigSourceEdits(edits []configSourceEdit) error {
 		if err := edits[i].write(); err != nil {
 			var rollbackErrs []error
 			for j := i; j >= 0; j-- {
-				if rollbackErr := fileutil.AtomicWriteFile(edits[j].path, edits[j].before, edits[j].perm); rollbackErr != nil {
+				if rollbackErr := fileutil.AtomicWriteFile(edits[j].resolvedPath, edits[j].before, edits[j].perm); rollbackErr != nil {
 					rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %s: %w", edits[j].path, rollbackErr))
 				}
 			}
@@ -893,11 +1280,12 @@ func applyConfigSourceEdits(edits []configSourceEdit) error {
 }
 
 func planTOMLPluginRemoval(path, name string) (configSourceEdit, bool, error) {
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return configSourceEdit{}, false, nil
-		}
+	_, exists, err := statConfigPath(path)
+	if err != nil {
 		return configSourceEdit{}, false, err
+	}
+	if !exists {
+		return configSourceEdit{}, false, nil
 	}
 	cfg := Default()
 	if err := mergeFile(cfg, path); err != nil {
@@ -912,13 +1300,14 @@ func planTOMLPluginRemoval(path, name string) (configSourceEdit, bool, error) {
 }
 
 func planMCPJSONPluginRemoval(path, name string) (configSourceEdit, bool, error) {
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return configSourceEdit{}, false, nil
-		}
+	resolved, exists, err := statConfigPath(path)
+	if err != nil {
 		return configSourceEdit{}, false, err
 	}
-	root, servers, err := readMCPJSONRaw(path)
+	if !exists {
+		return configSourceEdit{}, false, nil
+	}
+	root, servers, err := readMCPJSONRaw(resolved)
 	if err != nil {
 		return configSourceEdit{}, false, err
 	}
@@ -926,7 +1315,7 @@ func planMCPJSONPluginRemoval(path, name string) (configSourceEdit, bool, error)
 		return configSourceEdit{}, false, nil
 	}
 	delete(servers, name)
-	edit, err := newConfigSourceEdit(path, func() error { return writeMCPJSONServers(path, root, servers) })
+	edit, err := newConfigSourceEdit(path, func() error { return writeMCPJSONServers(resolved, root, servers) })
 	return edit, err == nil, err
 }
 
@@ -934,14 +1323,18 @@ func planLegacyMCPDisable(path, name string) (configSourceEdit, bool, error) {
 	if strings.TrimSpace(path) == "" {
 		return configSourceEdit{}, false, nil
 	}
-	info, err := os.Stat(path)
+	resolved, err := resolveConfigAccessPath(path, true)
+	if err != nil {
+		return configSourceEdit{}, false, err
+	}
+	info, err := os.Stat(resolved)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return configSourceEdit{}, false, nil
 		}
 		return configSourceEdit{}, false, err
 	}
-	data, err := fileencoding.ReadFileUTF8(path)
+	data, err := fileencoding.ReadFileUTF8(resolved)
 	if err != nil {
 		return configSourceEdit{}, false, err
 	}
@@ -1010,7 +1403,7 @@ func planLegacyMCPDisable(path, name string) (configSourceEdit, bool, error) {
 	}
 	out = append(out, '\n')
 	edit, err := newConfigSourceEdit(path, func() error {
-		return fileutil.AtomicWriteFile(path, out, info.Mode().Perm())
+		return fileutil.AtomicWriteFile(resolved, out, info.Mode().Perm())
 	})
 	return edit, err == nil, err
 }
@@ -1026,7 +1419,36 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 		return false, fmt.Errorf("remove MCP server: name is required")
 	}
 
-	unlock := LockUserConfigEdits()
+	userPaths := userConfigCandidatePaths()
+	resolvedRoot := resolveRoot(root)
+	projectTOML := "reasonix.toml"
+	if resolvedRoot != "." {
+		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
+	}
+	isUserPath := false
+	for _, path := range userPaths {
+		if samePath(path, projectTOML) {
+			isUserPath = true
+			break
+		}
+	}
+	mcpPath := mcpJSONFile
+	if resolvedRoot != "." {
+		mcpPath = filepath.Join(resolvedRoot, mcpJSONFile)
+	}
+	legacyPath := legacyConfigPath()
+	lockPaths := append([]string{}, userPaths...)
+	if !isUserPath {
+		lockPaths = append(lockPaths, projectTOML)
+	}
+	lockPaths = append(lockPaths, mcpPath)
+	if legacyPath != "" {
+		lockPaths = append(lockPaths, legacyPath)
+	}
+	unlock, err := lockConfigFilesEdits(lockPaths...)
+	if err != nil {
+		return false, fmt.Errorf("remove MCP server: %w", err)
+	}
 	defer unlock()
 
 	var edits []configSourceEdit
@@ -1040,23 +1462,9 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 		}
 		return nil
 	}
-	userPaths := userConfigCandidatePaths()
 	for _, path := range userPaths {
 		if err := planTOML(path); err != nil {
 			return false, err
-		}
-	}
-
-	resolvedRoot := resolveRoot(root)
-	projectTOML := "reasonix.toml"
-	if resolvedRoot != "." {
-		projectTOML = filepath.Join(resolvedRoot, "reasonix.toml")
-	}
-	isUserPath := false
-	for _, path := range userPaths {
-		if samePath(path, projectTOML) {
-			isUserPath = true
-			break
 		}
 	}
 	if !isUserPath {
@@ -1065,10 +1473,6 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 		}
 	}
 
-	mcpPath := mcpJSONFile
-	if resolvedRoot != "." {
-		mcpPath = filepath.Join(resolvedRoot, mcpJSONFile)
-	}
 	mcpEdit, changed, err := planMCPJSONPluginRemoval(mcpPath, name)
 	if err != nil {
 		return false, err
@@ -1076,7 +1480,7 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 	if changed {
 		edits = append(edits, mcpEdit)
 	}
-	legacyEdit, changed, err := planLegacyMCPDisable(legacyConfigPath(), name)
+	legacyEdit, changed, err := planLegacyMCPDisable(legacyPath, name)
 	if err != nil {
 		return false, err
 	}
@@ -1096,6 +1500,9 @@ func RemovePluginFromSourcesForRoot(root, name string) (bool, error) {
 func validatePlugin(e PluginEntry) error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("plugin: name is required")
+	}
+	if e.StartupTimeoutSeconds < 0 {
+		return fmt.Errorf("plugin %q: startup_timeout_seconds must be >= 0", e.Name)
 	}
 	if e.CallTimeoutSeconds < 0 {
 		return fmt.Errorf("plugin %q: call_timeout_seconds must be >= 0", e.Name)
@@ -1133,28 +1540,53 @@ func validatePlugin(e PluginEntry) error {
 // accumulates fields that override the user's global config. User configs still
 // write the full annotated template since they are the user's own settings store.
 func (c *Config) SaveTo(path string) error {
-	scope := renderScopeForPath(path)
-	if scope == RenderScopeProject {
-		return c.saveProjectIncremental(path)
+	if c == nil {
+		return fmt.Errorf("save config: nil config")
 	}
-	return c.SaveToScope(path, scope)
+	if c.editLoadErr != nil {
+		return fmt.Errorf("save config loaded from %q: %w", path, c.editLoadErr)
+	}
+	scope := renderScopeForPath(path)
+	if scope == RenderScopeUser {
+		if err := currentUserConfigEditLockError(); err != nil {
+			return fmt.Errorf("save user config: %w", err)
+		}
+	}
+	resolved, err := resolveConfigAccessPath(path, scope == RenderScopeUser)
+	if err != nil {
+		return err
+	}
+	if scope == RenderScopeProject {
+		return c.saveProjectIncrementalResolved(path, resolved)
+	}
+	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
 }
 
 func (c *Config) SaveToScope(path string, scope RenderScope) error {
+	if c == nil {
+		return fmt.Errorf("save config: nil config")
+	}
+	if c.editLoadErr != nil {
+		return fmt.Errorf("save config loaded from %q: %w", path, c.editLoadErr)
+	}
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
-	return writeConfigFile(path, RenderTOMLForScope(c, scope))
+	userConfig := scope == RenderScopeUser || (scope == RenderScopeFull && isUserConfigPath(path))
+	if userConfig {
+		if err := currentUserConfigEditLockError(); err != nil {
+			return fmt.Errorf("save user config: %w", err)
+		}
+	}
+	resolved, err := resolveConfigAccessPath(path, userConfig)
+	if err != nil {
+		return err
+	}
+	return writeConfigFileResolved(resolved, RenderTOMLForScope(c, scope), configFilePerm(path))
 }
 
-// saveProjectIncremental merges only the delta (non-default sections/fields)
-// into the existing project config file, preserving all other content verbatim.
-func (c *Config) saveProjectIncremental(path string) error {
-	if strings.TrimSpace(path) == "" {
-		return fmt.Errorf("save: empty config path")
-	}
-
-	raw, err := fileencoding.ReadFileUTF8(path)
+func (c *Config) saveProjectIncrementalResolved(logicalPath, resolvedPath string) error {
+	raw, err := fileencoding.ReadFileUTF8(resolvedPath)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			return err
@@ -1166,14 +1598,14 @@ func (c *Config) saveProjectIncremental(path string) error {
 	isNew := body == ""
 
 	if isNew {
-		return writeConfigFile(path, RenderTOMLForScope(c, RenderScopeProject))
+		return writeConfigFileResolved(resolvedPath, RenderTOMLForScope(c, RenderScopeProject), configFilePerm(logicalPath))
 	}
 
 	delta := RenderTOMLProjectDelta(c)
 	if tomlBodyHasTopLevelKey(body, "config_version") && !tomlBodyHasTopLevelKey(delta, "config_version") {
 		delta = fmt.Sprintf("config_version = %d\n", configVersion(c)) + delta
 	}
-	removePlugins := len(c.Plugins) == 0 && tomlBodyHasSection(body, "plugins")
+	removePlugins := len(tomlPluginsForScope(c.Plugins, RenderScopeProject)) == 0 && tomlBodyHasSection(body, "plugins")
 	removeSandboxBash := shouldRemoveIneffectiveProjectSandboxBash(body, c)
 	_, hasLegacyDesktopAutoGuard := tomlSectionKeyValue(body, "desktop", "default_auto_recovery_checkpoint")
 	_, hasRetiredAgentAutoGuard := tomlSectionKeyValue(body, "agent", "auto_recovery_checkpoint")
@@ -1200,7 +1632,7 @@ func (c *Config) saveProjectIncremental(path string) error {
 	if writeProviderAccess {
 		body = upsertTOMLSectionKey(body, "desktop", "provider_access", "provider_access = "+renderStringArray(c.Desktop.ProviderAccess))
 	}
-	return writeConfigFile(path, body)
+	return writeConfigFileResolved(resolvedPath, body, configFilePerm(logicalPath))
 }
 
 func shouldRemoveIneffectiveProjectSandboxBash(body string, c *Config) bool {
@@ -1302,11 +1734,48 @@ reasoning_language = %q
 	return cfg.ReasoningLanguage(), writeConfigFile(path, body)
 }
 
+// SaveMinimalProjectCompactRatio writes a new project config that only
+// overrides [agent].compact_ratio.
+func SaveMinimalProjectCompactRatio(path string, ratio float64) (float64, error) {
+	cfg := Default()
+	if err := cfg.SetCompactRatio(ratio); err != nil {
+		return 0, err
+	}
+	body := fmt.Sprintf(`# Reasonix project configuration.
+# Project-local overrides are merged over the user config.
+
+[agent]
+compact_ratio = %s
+`, formatFloat(cfg.Agent.CompactRatio))
+	return cfg.Agent.CompactRatio, writeConfigFile(path, body)
+}
+
 func writeConfigFile(path, body string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("save: empty config path")
 	}
-	return fileutil.AtomicWriteFile(path, []byte(body), configFilePerm(path))
+	return atomicWriteToConfigFile(path, body, configFilePerm(path))
+}
+
+func writeConfigFileResolved(path, body string, perm os.FileMode) error {
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("save: empty config path")
+	}
+	return fileutil.AtomicWriteFile(path, []byte(body), perm)
+}
+
+// atomicWriteToConfigFile resolves the path once and writes only the validated
+// final target. This preserves valid links and fails closed for broken user
+// links or project links that escape their project root.
+func atomicWriteToConfigFile(path, body string, perm os.FileMode) error {
+	resolved, err := resolveConfigReadPath(path)
+	if err != nil {
+		return err
+	}
+	if err := fileutil.AtomicWriteFile(resolved, []byte(body), perm); err != nil {
+		return fmt.Errorf("write symlink target %q: %w", resolved, err)
+	}
+	return nil
 }
 
 func configFilePerm(path string) os.FileMode {
@@ -1325,11 +1794,17 @@ func WritePermissionsAllow(path string, allow []string) error {
 		return fmt.Errorf("write permissions: empty config path")
 	}
 
-	raw, err := fileencoding.ReadFileUTF8(path)
+	resolved, exists, err := statConfigPath(path)
 	if err != nil {
-		if !os.IsNotExist(err) {
+		return err
+	}
+	var raw []byte
+	if exists {
+		raw, err = fileencoding.ReadFileUTF8(resolved)
+		if err != nil {
 			return err
 		}
+	} else {
 		raw = nil
 	}
 
@@ -1347,7 +1822,7 @@ func WritePermissionsAllow(path string, allow []string) error {
 	if !slices.Equal(candidate.Permissions.Allow, allow) {
 		return fmt.Errorf("write permissions: validate updated allow: got %v, want %v", candidate.Permissions.Allow, allow)
 	}
-	return writeConfigFile(path, body)
+	return writeConfigFileResolved(resolved, body, configFilePerm(path))
 }
 
 // replaceTOMLSection replaces the content of a named TOML section (including

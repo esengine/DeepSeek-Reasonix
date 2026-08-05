@@ -64,9 +64,9 @@ Then open **Settings → Skills** (or fix the file under `.reasonix/skills` /
 reasonix doctor capabilities | sed -n '/Hooks/,/Plugins/p'
 ```
 
-If you see `hook.untrusted_project`, trust the workspace in **Settings → Hooks**
-(or the CLI trust flow). Matchers are **anchored** regexes: `file` does not match
-`read_file`.
+Project hooks load automatically from `.reasonix/settings.json`. If they do not
+fire, confirm the active workspace and restart Reasonix after saving. Matchers
+are **anchored** regexes: `file` does not match `read_file`.
 
 ### 3. “MCP tools don’t show up”
 
@@ -86,6 +86,13 @@ Common codes: `mcp.command_not_found`, `mcp.invalid_transport`,
 `mcp.start_failed`, `mcp.no_tools`. On desktop, prefer **Settings → Diagnostics**
 with “Include current session runtime” to read the **active tab Host** without
 starting a second Host.
+
+Each MCP entry identifies the exact winning configuration with `source`,
+`source_path`, and `effective`. Startup failures also report `startup_stage`
+(`launch`, `authorization`, `initialize`, or `tools/list`),
+`startup_elapsed_ms`, and a bounded, credential-redacted `stderr` tail. This
+distinguishes duplicate/shadowed registration from a genuinely slow or broken
+handshake without exposing full process output.
 
 ### 4. Ask the agent (`reasonix-guide`)
 
@@ -172,9 +179,9 @@ Open **Settings → Diagnostics**:
 | Include current session runtime | Merge connected / failed / deferred / disabled from the **active tab Host** only |
 | Open settings (on an issue) | Jumps to MCP / Skills / Plugins / Hooks when `settings_tab` is set |
 
-The page never auto-edits config, auto-trusts projects, auto-enables packages,
-or reconnects MCP. Opening Diagnostics does not rebuild the controller or
-snapshot the session.
+The page never edits config, executes hooks, auto-enables packages, or
+reconnects MCP. Opening Diagnostics does not rebuild the controller or snapshot
+the session.
 
 ## JSON schema (version 1)
 
@@ -186,6 +193,12 @@ Top-level fields:
 - `summary` — error/warning/info counts and resource counts
 - `instructions`, `skills`, `commands`, `hooks`, `plugins`, `mcp`
 - `issues[]` — ordered list of findings
+
+Plugin package entries are additive for Manifest v1: each package also
+reports `prompts` and `themes` counts and a `runtime` flag when the plugin
+declares a code runtime (see
+<a href="./PLUGIN_PACKAGES.md">Plugin packages</a>). Older readers can ignore
+these fields; `schema_version` stays `1`.
 
 Issue shape:
 
@@ -206,7 +219,7 @@ Stable codes include:
 
 - `skill.shadowed`, `skill.missing_description`, `skill.disabled`
 - `command.shadowed`, `command.read_failed`
-- `hook.untrusted_project`, `hook.invalid_matcher`, `hook.missing_command`, `hook.malformed_settings`
+- `hook.invalid_matcher`, `hook.missing_command`, `hook.malformed_settings`
 - `plugin.missing_root`, `plugin.invalid_manifest`, `plugin.compatibility`
 - `mcp.invalid_transport`, `mcp.command_not_found`, `mcp.missing_command`, `mcp.missing_url`
 - `mcp.start_failed`, `mcp.no_tools`, `mcp.runtime_unavailable`
@@ -218,7 +231,7 @@ Array and issue order is deterministic for scripting and tests.
 | Severity | Meaning | CLI exit |
 | --- | --- | --- |
 | `error` | Broken config or failed live start | `1` |
-| `warning` | Actionable but non-fatal (e.g. untrusted project hooks) | `0` |
+| `warning` | Actionable but non-fatal (e.g. a missing hook command) | `0` |
 | `info` | Shadowing, disabled assets, runtime unavailable | `0` |
 
 ## Path and secret safety

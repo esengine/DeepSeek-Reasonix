@@ -64,7 +64,11 @@ func TestRenderMemoryGroupsDocsAndStore(t *testing.T) {
 		Store: store,
 		Index: store.Index(),
 	})
-	for _, want := range []string{"memory", "docs", "(project)", "REASONIX.md", "saved memories", "saved-fact", "Saved Fact", "doc edits apply next session"} {
+	for _, want := range []string{
+		"memory", "instructions", "precedence=1", "scope=project", "REASONIX.md",
+		"saved memories", "saved-fact", "Saved Fact", "revision=1", "freshness=fresh",
+		"doc edits apply next session",
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("memory view missing %q:\n%s", want, got)
 		}
@@ -106,8 +110,8 @@ func TestRenderHooksUsesSharedVisualLanguage(t *testing.T) {
 		HookConfig: hook.HookConfig{Command: strings.Repeat("echo ", 30)},
 		Event:      hook.PreToolUse,
 		Scope:      hook.ScopeProject,
-	}}, false, true)
-	for _, want := range []string{"hooks (1 active)", "PreToolUse", "project", "…", "not trusted", "/hooks trust"} {
+	}})
+	for _, want := range []string{"hooks (1 active)", "PreToolUse", "project", "…", ".reasonix/settings.json"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("hooks view missing %q:\n%s", want, got)
 		}
@@ -121,7 +125,7 @@ func TestRenderHooksShowsPermissionRequestMatch(t *testing.T) {
 		HookConfig: hook.HookConfig{Command: "notify", Match: "bash"},
 		Event:      hook.PermissionRequest,
 		Scope:      hook.ScopeGlobal,
-	}}, true, true)
+	}})
 	for _, want := range []string{"PermissionRequest", "global", "bash", "notify"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("hooks view missing %q:\n%s", want, got)
@@ -146,6 +150,42 @@ func TestRenderHelpGroupsCommands(t *testing.T) {
 		t.Fatalf("help view should not use one-line command chains:\n%s", got)
 	}
 	assertLinesWithin(t, got, width)
+}
+
+func TestRenderHelpDocsShowsOnlyRuntimeWinner(t *testing.T) {
+	got := renderHelp(72,
+		[]command.Command{{Name: "docs", Description: "custom docs"}},
+		[]skill.Skill{{Name: "docs", Description: "docs skill"}},
+		nil,
+	)
+	if count := strings.Count(got, "/docs"); count != 1 {
+		t.Fatalf("help contains %d /docs entries, want one:\n%s", count, got)
+	}
+	if !strings.Contains(got, "custom docs") || strings.Contains(got, "docs skill") {
+		t.Fatalf("help did not preserve the runtime-winning custom command:\n%s", got)
+	}
+	if !strings.Contains(got, "/reasonix:docs") {
+		t.Fatalf("help did not preserve the qualified built-in docs fallback:\n%s", got)
+	}
+}
+
+func TestRenderHelpDocsUsesQualifiedFallbackForHiddenAlias(t *testing.T) {
+	got := renderHelp(72,
+		[]command.Command{
+			{Name: "docs", Plugin: "manuals", Hidden: true},
+			{Name: "manuals:docs", Plugin: "manuals", Description: "plugin docs"},
+		},
+		nil,
+		nil,
+	)
+	if strings.Contains(got, "\n  /docs ") {
+		t.Fatalf("help exposed a misleading hidden /docs alias:\n%s", got)
+	}
+	for _, want := range []string{"/reasonix:docs", "/manuals:docs"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help missing %q:\n%s", want, got)
+		}
+	}
 }
 
 func TestRenderSkillPathsStaysWithinWidth(t *testing.T) {

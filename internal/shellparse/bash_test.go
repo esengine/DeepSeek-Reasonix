@@ -79,6 +79,48 @@ func TestStaticFields(t *testing.T) {
 	}
 }
 
+func TestContainsUnquotedGlob(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: "rg TODO *.go", want: true},
+		{command: "rg TODO file?.go", want: true},
+		{command: "rg TODO [ab].go", want: true},
+		{command: `rg TODO "*.go"`},
+		{command: `rg TODO '*.go'`},
+		{command: `rg TODO \*.go`},
+		{command: "git status --short"},
+	}
+	for _, tt := range tests {
+		if got := ContainsUnquotedGlob(tt.command); got != tt.want {
+			t.Errorf("ContainsUnquotedGlob(%q) = %v, want %v", tt.command, got, tt.want)
+		}
+	}
+}
+
+func TestAnalyzeApprovalFeaturesMarksNonStaticArgumentsAsExpansion(t *testing.T) {
+	tests := []struct {
+		command string
+		want    bool
+	}{
+		{command: "printf '%s\\n' {a,b}", want: true},
+		{command: "printf '%s\\n' @(a|b)", want: true},
+		{command: `printf '%s\\n' "{a,b}"`},
+		{command: `printf '%s\\n' \{a,b\}`},
+	}
+	for _, tt := range tests {
+		command := tt.command
+		features, ok := AnalyzeApprovalFeatures(command)
+		if !ok {
+			t.Fatalf("AnalyzeApprovalFeatures(%q) failed", command)
+		}
+		if features.Expansion != tt.want {
+			t.Errorf("AnalyzeApprovalFeatures(%q) expansion = %v, want %v", command, features.Expansion, tt.want)
+		}
+	}
+}
+
 func TestParseStaticCommandPolicy(t *testing.T) {
 	got, err := ParseStaticCommand(`FOO=bar MESSAGE='hello world' go test ./...`, StaticCommandPolicy{AllowEnvAssignments: true})
 	if err != nil {

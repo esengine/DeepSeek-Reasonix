@@ -229,7 +229,11 @@ func (a *Agent) deliveryReviewGateFailure() string {
 			return "structured review reported blocking findings; fix them and re-run review"
 		}
 		if !ok {
-			return "medium-risk changes require a successful review after the latest mutation (run the review skill; its subagent submits review_report)" + reviewCoverageHint(paths)
+			hostProof := a.evidence.HasSuccessfulDeliverySignoffAfter(mutation) &&
+				a.evidence.HasHostReviewCoverageAfter(mutation, paths)
+			if !hostProof {
+				return "medium-risk changes require either a successful structured review or host-proven verification plus diff/file inspection after the latest mutation" + reviewCoverageHint(paths)
+			}
 		}
 		if report != nil {
 			a.pendingReviewWarnings = append(a.pendingReviewWarnings, report.WarningSummaries()...)

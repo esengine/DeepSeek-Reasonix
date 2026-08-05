@@ -93,6 +93,10 @@ func newGoalDeliveryYoloTestApp(t *testing.T, goalStatus string) (*App, *Workspa
 	if err := tab.ensureSessionLease(path); err != nil {
 		t.Fatalf("ensure session lease: %v", err)
 	}
+	app.mu.Lock()
+	app.newSessionRuntimeLocked(tab, sessionRuntimeKey(path))
+	app.advanceSessionRuntimeEpochLocked(tab)
+	app.mu.Unlock()
 	t.Cleanup(func() {
 		if ctrl := app.controllerForTab(tab); ctrl != nil {
 			ctrl.Close()
@@ -119,6 +123,13 @@ func TestGoalDeliveryYoloTokenSwitchPreservesBlockedGoalCheckpoint(t *testing.T)
 	}
 	if currentTabTokenMode(tab) != boot.TokenModeDelivery {
 		t.Fatalf("token mode = %q, want delivery", currentTabTokenMode(tab))
+	}
+	app.mu.RLock()
+	runtimeForPath := app.runtimeBySessionKey[sessionRuntimeKey(path)]
+	runtimeCount := len(app.runtimeBySessionKey)
+	app.mu.RUnlock()
+	if runtimeForPath == nil || runtimeForPath.Owner != tab || runtimeCount != 1 {
+		t.Fatalf("runtime registry after Goal+Delivery switch = owner %p count %d, want tab %p count 1", runtimeForPath, runtimeCount, tab)
 	}
 	var persisted struct {
 		DeliveryCheckpoint evidence.DeliveryCheckpoint `json:"deliveryCheckpoint"`
@@ -371,6 +382,82 @@ func TestPlanYoloDeliveryOrderConverges(t *testing.T) {
 				t.Fatalf("final axes plan=%v approval=%q token=%q", ctrl.PlanMode(), ctrl.ToolApprovalMode(), currentTabTokenMode(tab))
 			}
 		})
+	}
+}
+
+func TestEveryCollaborationAndTokenModeCombinationConvergesInBothOrders(t *testing.T) {
+	collaborationModes := []string{"normal", "plan", "goal"}
+	tokenModes := []string{boot.TokenModeEconomy, boot.TokenModeFull, boot.TokenModeDelivery}
+	orders := []string{"collaboration-first", "token-first"}
+
+	for _, collaborationMode := range collaborationModes {
+		for _, tokenMode := range tokenModes {
+			for _, order := range orders {
+				t.Run(collaborationMode+"/"+tokenMode+"/"+order, func(t *testing.T) {
+					app, tab, _, path := newGoalDeliveryYoloTestApp(t, control.GoalStatusRunning)
+					app.SetToolApprovalModeForTab(tab.ID, control.ToolApprovalAsk)
+
+					setCollaboration := func() {
+						switch collaborationMode {
+						case "goal":
+							app.SetGoalForTab(tab.ID, "exercise all runtime axes")
+							app.SetCollaborationModeForTab(tab.ID, "goal")
+						case "plan":
+							app.SetCollaborationModeForTab(tab.ID, "plan")
+						default:
+							app.SetGoalForTab(tab.ID, "")
+							app.SetCollaborationModeForTab(tab.ID, "normal")
+						}
+					}
+					setToken := func() {
+						if err := app.SetTokenModeForTab(tab.ID, tokenMode); err != nil {
+							t.Fatalf("SetTokenModeForTab(%q): %v", tokenMode, err)
+						}
+					}
+					if order == "collaboration-first" {
+						setCollaboration()
+						setToken()
+					} else {
+						setToken()
+						setCollaboration()
+					}
+
+					ctrl := app.controllerForTab(tab)
+					if ctrl == nil {
+						t.Fatal("final controller is nil")
+					}
+					if got := currentTabTokenMode(tab); got != tokenMode {
+						t.Fatalf("token mode = %q, want %q", got, tokenMode)
+					}
+					switch collaborationMode {
+					case "goal":
+						if ctrl.PlanMode() || ctrl.GoalStatus() != control.GoalStatusRunning ||
+							ctrl.Goal() != "exercise all runtime axes" {
+							t.Fatalf("Goal axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
+						}
+					case "plan":
+						if !ctrl.PlanMode() || ctrl.GoalStatus() == control.GoalStatusRunning {
+							t.Fatalf("Plan axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
+						}
+					default:
+						if ctrl.PlanMode() || ctrl.GoalStatus() == control.GoalStatusRunning {
+							t.Fatalf("Normal axes plan=%v goal=%q status=%q", ctrl.PlanMode(), ctrl.Goal(), ctrl.GoalStatus())
+						}
+					}
+					app.mu.RLock()
+					runtimeForPath := app.runtimeBySessionKey[sessionRuntimeKey(path)]
+					runtimeCount := len(app.runtimeBySessionKey)
+					view := app.sessionRuntimeViewLocked(tab)
+					app.mu.RUnlock()
+					if runtimeForPath == nil || runtimeForPath.Owner != tab || runtimeCount != 1 {
+						t.Fatalf("runtime registry owner=%#v count=%d, want one runtime for tab", runtimeForPath, runtimeCount)
+					}
+					if view.Phase != sessionRuntimeReady || tab.sessionLeaseRuntimeKey() != sessionRuntimeKey(path) {
+						t.Fatalf("runtime phase=%q lease=%q, want ready/%q", view.Phase, tab.sessionLeaseRuntimeKey(), sessionRuntimeKey(path))
+					}
+				})
+			}
+		}
 	}
 }
 

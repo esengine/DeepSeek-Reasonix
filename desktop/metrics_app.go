@@ -31,6 +31,7 @@ const metricsPendingFile = "metrics-pending.json"
 const metricsPostTimeout = 8 * time.Second
 
 var statusCodePattern = regexp.MustCompile(`status (\d{3})`)
+var metricsPendingMu sync.Mutex
 
 type counters map[string]map[string]int // signal -> bucket -> count
 
@@ -280,6 +281,24 @@ func (a *App) recordSettingsMetricsSnapshot(c *config.Config) {
 	m.persist()
 }
 
+// recordDiagnosticMetric persists one bounded operational signal even when the
+// native event arrives before Wails OnStartup installs the session aggregator.
+func (a *App) recordDiagnosticMetric(signal, bucket string) {
+	if version == "dev" {
+		return
+	}
+	m := a.metrics.Load()
+	if m == nil {
+		cfg, err := config.Load()
+		if err != nil || !cfg.DesktopMetrics() {
+			return
+		}
+		m = newMetricsAggregator(config.MemoryUserDir())
+	}
+	m.inc(signal, metricBucket(bucket))
+	m.persist()
+}
+
 // observe maps one event to counter increments, reading only enumerated facts
 // (finish reason, error class, cache-hit bucket) — never message text.
 func (m *metricsAggregator) observe(e event.Event) {
@@ -296,7 +315,7 @@ func (m *metricsAggregator) observe(e event.Event) {
 		}
 	case event.TurnDone:
 		m.inc("turns", "total")
-		if e.Err != nil {
+		if e.Err != nil && e.Outcome != event.TurnOutcomeRecoveryPaused {
 			m.inc("provider_error", errorClass(e.Err.Error()))
 		}
 	case event.ToolResult:
@@ -328,12 +347,37 @@ func cacheBucket(hit, miss int) string {
 	}
 }
 
+// badRequestReason separates the 400s that need different fixes. Every arm
+// returns a fixed label matched against a fixed substring, so nothing the
+// provider echoed back can reach the bucket — the same constraint errorClass
+// works under. Unrecognized shapes stay plain http_400 rather than guessing.
+func badRequestReason(low string) string {
+	switch {
+	case strings.Contains(low, "image_url"), strings.Contains(low, "unknown variant"):
+		return "content"
+	case strings.Contains(low, "is not of type"), strings.Contains(low, "invalid schema for function"):
+		return "schema"
+	case strings.Contains(low, "thinking") && strings.Contains(low, "passed back"):
+		return "reasoning_replay"
+	case strings.Contains(low, "thinking") && (strings.Contains(low, "expected a boolean") || strings.Contains(low, "invalid type")):
+		return "thinking_shape"
+	case strings.Contains(low, "context length"), strings.Contains(low, "maximum context"), strings.Contains(low, "too long"):
+		return "context_length"
+	case strings.Contains(low, "tool_calls"), strings.Contains(low, "missing field name"):
+		return "tool_calls"
+	}
+	return ""
+}
+
 // errorClass extracts only the failure category — never the message itself, which
 // can echo request content back from a provider.
 func errorClass(msg string) string {
 	if mm := statusCodePattern.FindStringSubmatch(msg); mm != nil {
 		switch code := mm[1]; {
 		case code == "400":
+			if reason := badRequestReason(strings.ToLower(msg)); reason != "" {
+				return "http_400_" + reason
+			}
 			return "http_400"
 		case code == "401" || code == "403":
 			return "http_401"
@@ -345,6 +389,16 @@ func errorClass(msg string) string {
 	}
 	low := strings.ToLower(msg)
 	switch {
+	case strings.Contains(low, "authorization cancelled"):
+		return "authorization_cancelled"
+	case strings.Contains(low, "authorization failed"):
+		return "authorization_failed"
+	case strings.Contains(low, "package manager busy"):
+		return "package_manager_busy"
+	case strings.Contains(low, "package install failed"):
+		return "package_install_failed"
+	case strings.Contains(low, "package verify failed"), strings.Contains(low, "signature verification failed"):
+		return "package_verify_failed"
 	case strings.Contains(low, "reset"), strings.Contains(low, "interrupt"), strings.Contains(low, "eof"):
 		return "stream_interrupted"
 	case strings.Contains(low, "timeout"), strings.Contains(low, "deadline"):
@@ -429,9 +483,11 @@ func (m *metricsAggregator) persist() {
 	m.c = counters{}
 	m.mu.Unlock()
 
+	metricsPendingMu.Lock()
 	pending := readCounters(m.path)
 	pending.merge(delta)
 	writeCounters(m.path, pending)
+	metricsPendingMu.Unlock()
 }
 
 func readCounters(path string) counters {
@@ -490,9 +546,12 @@ func (a *App) flushMetrics() {
 	}
 	path := filepath.Join(config.MemoryUserDir(), metricsPendingFile)
 	temp := path + ".sending"
+	metricsPendingMu.Lock()
 	if os.Rename(path, temp) != nil {
+		metricsPendingMu.Unlock()
 		return // nothing pending
 	}
+	metricsPendingMu.Unlock()
 	flat := flatten(readCounters(temp))
 	payload := metricsPayload{Version: version, OS: runtime.GOOS, Counters: flat}
 	if id, err := installID(); err == nil {
@@ -502,9 +561,11 @@ func (a *App) flushMetrics() {
 		_ = os.Remove(temp)
 		return
 	}
+	metricsPendingMu.Lock()
 	pending := readCounters(path)
 	pending.merge(readCounters(temp))
 	writeCounters(path, pending)
+	metricsPendingMu.Unlock()
 	_ = os.Remove(temp)
 }
 

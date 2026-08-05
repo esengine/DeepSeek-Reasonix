@@ -69,6 +69,96 @@ func TestACPInitializesWithoutAPIKey(t *testing.T) {
 	}
 }
 
+func TestACPRejectsInvalidSupervisorFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"--planner=maybe"},
+		{"--sandbox-network=maybe"},
+		{"--sandbox-bash=maybe"},
+	} {
+		if rc := acpCommand(args, "test-version"); rc != 2 {
+			t.Fatalf("acpCommand(%v) rc = %d, want 2", args, rc)
+		}
+	}
+}
+
+func TestACPSupervisorRuntimeStateUsesHardOverrides(t *testing.T) {
+	isolateCLIConfigHome(t)
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte(`
+[agent]
+planner_model = "configured-planner"
+
+[sandbox]
+network = true
+bash = "off"
+
+allow_write = ["../outside"]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	off := false
+	factory := &acpFactory{
+		plannerOff: true, networkOverride: &off, bashOverride: "enforce", workspaceOnly: true,
+	}
+	state, err := factory.SessionRuntimeState(context.Background(), acp.SessionRuntimeStateParams{
+		Cwd: project, Model: "configured-planner", RuntimeProfile: "balanced",
+	})
+	if err != nil {
+		t.Fatalf("SessionRuntimeState: %v", err)
+	}
+	if state.PlannerMode != "off" || state.Sandbox.Mode != "enforce" || state.Sandbox.NetworkEnabled {
+		t.Fatalf("runtime overrides = %+v", state)
+	}
+	if len(state.Sandbox.WriteRoots) != 1 || state.Sandbox.WriteRoots[0] != project || state.Sandbox.WorkspaceRoot != project {
+		t.Fatalf("workspace confinement = %+v", state.Sandbox)
+	}
+}
+
+func TestACPSupervisorRuntimeStateDegradesWhenSandboxIsUnavailable(t *testing.T) {
+	isolateCLIConfigHome(t)
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "reasonix.toml"), []byte("[sandbox]\nbash = \"enforce\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unavailable := func() bool { return false }
+	params := acp.SessionRuntimeStateParams{Cwd: project, RuntimeProfile: "balanced"}
+
+	state, err := (&acpFactory{
+		bashOverride: "enforce", sandboxAvailable: unavailable,
+	}).SessionRuntimeState(context.Background(), params)
+	if err != nil {
+		t.Fatalf("default ACP startup must report unavailable sandbox instead of failing: %v", err)
+	}
+	if state.Sandbox.Mode != "enforce" || state.Sandbox.Available {
+		t.Fatalf("degraded sandbox state = %+v", state.Sandbox)
+	}
+
+	_, err = (&acpFactory{
+		bashOverride: "enforce", requireSandbox: true, sandboxAvailable: unavailable,
+	}).SessionRuntimeState(context.Background(), params)
+	if err == nil || !strings.Contains(err.Error(), "sandbox unavailable") {
+		t.Fatalf("explicit enforce must fail closed, got %v", err)
+	}
+}
+
+func TestEffectiveACPPlannerModeMatchesSelectedRuntime(t *testing.T) {
+	cfg := config.Default()
+	cfg.Agent.PlannerModel = "planner/planner-model"
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "executor", Kind: "openai", Model: "executor-model"},
+		{Name: "planner", Kind: "openai", Model: "planner-model"},
+	}
+	if got := effectiveACPPlannerMode(cfg, false, "executor/executor-model", "balanced"); got != "on" {
+		t.Fatalf("balanced split-model planner mode = %q, want on", got)
+	}
+	if got := effectiveACPPlannerMode(cfg, false, "executor/executor-model", "economy"); got != "off" {
+		t.Fatalf("economy planner mode = %q, want off", got)
+	}
+	if got := effectiveACPPlannerMode(cfg, false, "planner/planner-model", "balanced"); got != "off" {
+		t.Fatalf("same-model planner mode = %q, want off", got)
+	}
+}
+
 func TestACPFactoryLoadsSessionCwdProjectConfig(t *testing.T) {
 	home := isolateCLIConfigHome(t)
 	if _, err := config.SetCredential("REASONIX_TEST_KEY", "test-key"); err != nil {

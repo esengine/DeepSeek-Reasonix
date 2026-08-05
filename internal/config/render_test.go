@@ -201,12 +201,14 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Desktop.LayoutStyle = "workbench"
 	orig.Desktop.Theme = "dark"
 	orig.Desktop.ThemeStyle = "graphite"
+	orig.Desktop.TerminalTheme = "light"
 	orig.Desktop.CloseBehavior = "background"
 	orig.Desktop.DisplayMode = "compact"
 	orig.Desktop.StatusBarStyle = "text"
 	orig.Desktop.StatusBarItems = []string{"model", "balance", "cache"}
 	orig.Desktop.DefaultToolApprovalMode = "auto"
 	orig.Desktop.CheckUpdates = boolPtr(false)
+	orig.Desktop.UpdateChannel = "preview"
 	orig.Desktop.Telemetry = boolPtr(false)
 	orig.Notifications.Enabled = true
 	orig.Notifications.TurnDone = true
@@ -226,9 +228,10 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Tools.Shell.Prefer = "bash"
 	orig.Tools.Shell.Path = "/usr/local/bin/bash"
 	orig.Permissions = PermissionsConfig{
-		Mode:  "deny",
-		Deny:  []string{"Bash(rm -rf*)"},
-		Allow: []string{"Bash(go test:*)", "read_file"},
+		Mode:             "deny",
+		Deny:             []string{"Bash(rm -rf*)"},
+		Allow:            []string{"Bash(go test:*)", "read_file"},
+		AllowDynamicBash: true,
 	}
 	orig.Network = NetworkConfig{
 		ProxyMode: "custom",
@@ -351,6 +354,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.Desktop.ThemeStyle != "graphite" {
 		t.Errorf("desktop.theme_style = %q, want graphite", got.Desktop.ThemeStyle)
 	}
+	if got.Desktop.TerminalTheme != "light" {
+		t.Errorf("desktop.terminal_theme = %q, want light", got.Desktop.TerminalTheme)
+	}
 	if got.Desktop.CloseBehavior != "background" {
 		t.Errorf("desktop.close_behavior = %q, want background", got.Desktop.CloseBehavior)
 	}
@@ -368,6 +374,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if got.Desktop.CheckUpdates == nil || *got.Desktop.CheckUpdates {
 		t.Errorf("desktop.check_updates = %+v, want false", got.Desktop.CheckUpdates)
+	}
+	if got.DesktopUpdateChannel() != "stable" {
+		t.Errorf("desktop.update_channel = %q, want stable", got.DesktopUpdateChannel())
 	}
 	if got.Agent.RecoveryModel != "mimo-pro" || got.Agent.RecoveryTemperature != 0 {
 		t.Errorf("agent recovery settings not preserved: %+v", got.Agent)
@@ -580,13 +589,15 @@ approval_mode = "prompt"
 	}
 }
 
-func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
+func TestRenderTOMLPreservesMCPTimeouts(t *testing.T) {
 	cfg := Default()
 	cfg.Tools.MCPCallTimeoutSeconds = intPtr(450)
+	cfg.Tools.MCPStartupTimeoutSeconds = intPtr(45)
 	cfg.Plugins = []PluginEntry{{
-		Name:               "maker",
-		Command:            "maker-mcp",
-		CallTimeoutSeconds: 600,
+		Name:                  "maker",
+		Command:               "maker-mcp",
+		StartupTimeoutSeconds: 60,
+		CallTimeoutSeconds:    600,
 		ToolTimeoutSeconds: map[string]int{
 			"generate/video": 1800,
 			"search":         120,
@@ -596,6 +607,8 @@ func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
 	rendered := RenderTOML(cfg)
 	for _, want := range []string{
 		"mcp_call_timeout_seconds = 450",
+		"mcp_startup_timeout_seconds = 45",
+		"startup_timeout_seconds = 60",
 		"call_timeout_seconds = 600",
 		`tool_timeout_seconds = { "generate/video" = 1800, "search" = 120 }`,
 		"Raw MCP tool names",
@@ -611,6 +624,12 @@ func TestRenderTOMLPreservesMCPCallTimeouts(t *testing.T) {
 	}
 	if got.Tools.MCPCallTimeoutSeconds == nil || *got.Tools.MCPCallTimeoutSeconds != 450 {
 		t.Fatalf("MCPCallTimeoutSeconds round trip = %v, want 450", got.Tools.MCPCallTimeoutSeconds)
+	}
+	if got.Tools.MCPStartupTimeoutSeconds == nil || *got.Tools.MCPStartupTimeoutSeconds != 45 {
+		t.Fatalf("MCPStartupTimeoutSeconds round trip = %v, want 45", got.Tools.MCPStartupTimeoutSeconds)
+	}
+	if got.Plugins[0].StartupTimeoutSeconds != 60 {
+		t.Fatalf("StartupTimeoutSeconds round trip = %d, want 60", got.Plugins[0].StartupTimeoutSeconds)
 	}
 	if got.Plugins[0].CallTimeoutSeconds != 600 {
 		t.Fatalf("CallTimeoutSeconds round trip = %d, want 600", got.Plugins[0].CallTimeoutSeconds)
@@ -756,24 +775,29 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	c := Default()
 	c.Language = "zh"
 	c.Desktop.Language = "zh"
+	c.Desktop.Currency = "CNY"
 	c.Desktop.Theme = "dark"
 	c.Desktop.ThemeStyle = "graphite"
 	c.Desktop.CloseBehavior = "background"
 	c.Desktop.StatusBarStyle = "text"
 	c.Desktop.DefaultToolApprovalMode = "auto"
 	c.Desktop.CheckUpdates = boolPtr(false)
+	c.Desktop.UpdateChannel = "preview"
 	c.Agent.RecoveryModel = "deepseek-pro"
 	c.Agent.RecoveryTemperature = 0.2
 
 	user := RenderTOMLForScope(c, RenderScopeUser)
-	for _, want := range []string{"config_version = 5", "[desktop]", `theme = "dark"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
+	for _, want := range []string{"config_version = 5", "[desktop]", `currency = "CNY"`, `theme = "dark"`, `terminal_theme = "auto"`, `close_behavior = "background"`, `status_bar_style = "text"`, `default_tool_approval_mode = "auto"`, `check_updates = false`, `recovery_model = "deepseek-pro"`, "[notifications]", "[tools.shell]"} {
 		if !strings.Contains(user, want) {
 			t.Fatalf("user render missing %q:\n%s", want, user)
 		}
 	}
+	if strings.Contains(user, "update_channel") || strings.Contains(user, "[cli]") {
+		t.Fatalf("user render retained retired update channel:\n%s", user)
+	}
 
 	project := RenderTOMLForScope(c, RenderScopeProject)
-	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior =", "default_tool_approval_mode =", "default_auto_recovery_checkpoint =", "check_updates =", "max_steps", "planner_max_steps"} {
+	for _, forbidden := range []string{"[desktop]", "[notifications]", "close_behavior =", "default_tool_approval_mode =", "default_auto_recovery_checkpoint =", "check_updates =", "update_channel =", "max_steps", "planner_max_steps"} {
 		if strings.Contains(project, forbidden) {
 			t.Fatalf("project render should not contain %q:\n%s", forbidden, project)
 		}
@@ -799,6 +823,44 @@ func TestScopedRenderSeparatesUserAndProjectConfig(t *testing.T) {
 	}
 	if strings.Contains(user, "recovery_temperature") || strings.Contains(project, "recovery_temperature") {
 		t.Fatalf("deprecated recovery_temperature must not be rendered:\nuser:\n%s\nproject:\n%s", user, project)
+	}
+}
+
+func TestScopedRenderKeepsPluginsInTheirOwningConfig(t *testing.T) {
+	cfg := Default()
+	cfg.Plugins = []PluginEntry{
+		{Name: "unknown", Command: "unknown-mcp"},
+		{Name: "user", Command: "user-mcp", Source: MCPSourceUserConfig},
+		{Name: "project", Command: "project-mcp", Source: MCPSourceProjectConfig},
+		{Name: "mcp-json", Command: "json-mcp", Source: MCPSourceProjectMCPJSON},
+		{Name: "legacy", Command: "legacy-mcp", Source: MCPSourceLegacyUser},
+		{Name: "package", Command: "package-mcp", Source: MCPSourcePluginPackage},
+	}
+
+	tests := []struct {
+		name  string
+		body  string
+		want  []string
+		avoid []string
+	}{
+		{name: "full", body: RenderTOMLForScope(cfg, RenderScopeFull), want: []string{"unknown", "user", "project", "mcp-json", "legacy", "package"}},
+		{name: "user", body: RenderTOMLForScope(cfg, RenderScopeUser), want: []string{"unknown", "user"}, avoid: []string{"project", "mcp-json", "legacy", "package"}},
+		{name: "project", body: RenderTOMLForScope(cfg, RenderScopeProject), want: []string{"unknown", "project"}, avoid: []string{"user", "mcp-json", "legacy", "package"}},
+		{name: "project delta", body: RenderTOMLProjectDelta(cfg), want: []string{"unknown", "project"}, avoid: []string{"user", "mcp-json", "legacy", "package"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, name := range tt.want {
+				if !strings.Contains(tt.body, `name    = "`+name+`"`) {
+					t.Fatalf("render missing plugin %q:\n%s", name, tt.body)
+				}
+			}
+			for _, name := range tt.avoid {
+				if strings.Contains(tt.body, `name    = "`+name+`"`) {
+					t.Fatalf("render leaked plugin %q:\n%s", name, tt.body)
+				}
+			}
+		})
 	}
 }
 
@@ -839,6 +901,30 @@ func TestProjectDeltaRendersToolsShellOverrides(t *testing.T) {
 	}
 	if got.Tools.Shell.Prefer != "bash" || got.Tools.Shell.Path != "/usr/local/bin/bash" {
 		t.Fatalf("tools.shell = %+v, want bash with path", got.Tools.Shell)
+	}
+}
+
+func TestResponsesProviderModeRoundTripsInUserAndProjectRender(t *testing.T) {
+	legacyFalse := false
+	cfg := Default()
+	cfg.Providers = append(cfg.Providers, ProviderEntry{
+		Name: "responses-test", Kind: "responses", BaseURL: "https://example.com/v1",
+		Model: "model", APIKeyEnv: "RESPONSES_API_KEY",
+		ResponsesMode: "stateful", ResponsesStateful: &legacyFalse,
+	})
+
+	for _, rendered := range []string{RenderTOMLForScope(cfg, RenderScopeUser), RenderTOMLProjectDelta(cfg)} {
+		if !strings.Contains(rendered, `responses_mode = "stateful"`) || !strings.Contains(rendered, "responses_stateful = false") {
+			t.Fatalf("responses settings missing from render:\n%s", rendered)
+		}
+		var decoded Config
+		if _, err := toml.Decode(rendered, &decoded); err != nil {
+			t.Fatalf("decode responses config: %v\n%s", err, rendered)
+		}
+		entry, ok := decoded.Provider("responses-test")
+		if !ok || entry.ResponsesMode != "stateful" || entry.ResponsesStateful == nil || *entry.ResponsesStateful {
+			t.Fatalf("responses settings did not round-trip: %+v, found=%v", entry, ok)
+		}
 	}
 }
 
@@ -887,7 +973,7 @@ func TestRenderTOMLRoundTripsPerModelPrices(t *testing.T) {
 		Models:    []string{"deepseek-v4-flash", "deepseek-v4-pro"},
 		Default:   "deepseek-v4-flash",
 		APIKeyEnv: "DEEPSEEK_API_KEY",
-		Prices:    deepSeekV4Prices(),
+		Prices:    DeepSeekV4PricesForCurrency("CNY"),
 	}}
 
 	var got Config
@@ -981,7 +1067,8 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 				"mode": "fast",
 			},
 		},
-		AuthHeader: true,
+		AuthHeader:      true,
+		MaxOutputTokens: 16_384,
 		ModelOverrides: map[string]ProviderModelOverride{
 			"deepseek-v4-flash": {
 				ReasoningProtocol: ReasoningProtocolDeepSeek,
@@ -989,6 +1076,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 				DefaultEffort:     "high",
 				Vision:            boolPtr(false),
 				ContextWindow:     262_144,
+				MaxOutputTokens:   32_768,
 			},
 		},
 	}}
@@ -1003,7 +1091,7 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	if !strings.Contains(rendered, `auth_header = true`) {
 		t.Fatalf("rendered TOML missing auth_header:\n%s", rendered)
 	}
-	if !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) || !strings.Contains(rendered, `context_window = 262144`) {
+	if !strings.Contains(rendered, `max_output_tokens = 16384`) || !strings.Contains(rendered, `model_overrides`) || !strings.Contains(rendered, `reasoning_protocol = "deepseek"`) || !strings.Contains(rendered, `context_window = 262144`) || !strings.Contains(rendered, `max_output_tokens = 32768`) {
 		t.Fatalf("rendered TOML missing model overrides:\n%s", rendered)
 	}
 
@@ -1024,17 +1112,20 @@ func TestRenderTOMLRoundTripsProviderHeadersAndModelOverrides(t *testing.T) {
 	if !p.AuthHeader {
 		t.Fatal("auth_header after round trip = false, want true")
 	}
+	if p.MaxOutputTokens != 16_384 {
+		t.Fatalf("provider max_output_tokens after round trip = %d, want 16384", p.MaxOutputTokens)
+	}
 	metadata, ok := p.ExtraBody["metadata"].(map[string]any)
 	if !ok || metadata["mode"] != "fast" {
 		t.Fatalf("extra_body metadata after round trip = %+v", p.ExtraBody["metadata"])
 	}
 	ov := p.ModelOverrides["deepseek-v4-flash"]
-	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision || ov.ContextWindow != 262_144 {
+	if ov.ReasoningProtocol != ReasoningProtocolDeepSeek || !reflect.DeepEqual(ov.SupportedEfforts, []string{"high", "max"}) || ov.DefaultEffort != "high" || ov.Vision == nil || *ov.Vision || ov.ContextWindow != 262_144 || ov.MaxOutputTokens != 32_768 {
 		t.Fatalf("model override after round trip = %+v", ov)
 	}
 
-	// Older releases do not know context_window inside model_overrides, but their
-	// TOML decoder must still accept a config written by this release.
+	// Older releases do not know context_window/max_output_tokens inside model
+	// overrides, but their TOML decoder must still accept this release's config.
 	type legacyModelOverride struct {
 		ReasoningProtocol string   `toml:"reasoning_protocol"`
 		SupportedEfforts  []string `toml:"supported_efforts"`

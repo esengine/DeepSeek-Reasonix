@@ -115,3 +115,40 @@ func TestAutoInstallPreservesNPMFailureWhenNoUploadBinaryExists(t *testing.T) {
 		t.Fatalf("auto install hid the actionable failures: %v", err)
 	}
 }
+
+func TestAutoInstallDownloadsVerifiedCrossPlatformBinaryAfterNPMFailure(t *testing.T) {
+	skipOnWindows(t)
+	root := t.TempDir()
+	uploaded := uploadedBinPath(root)
+	conn := newFakeConn(t, root, func(cmd string) (remote.ExecResult, error) {
+		switch {
+		case strings.Contains(cmd, "npm i -g reasonix"):
+			return remote.ExecResult{Stdout: []byte("npm: command not found"), ExitCode: 127}, nil
+		case strings.Contains(cmd, "command -v reasonix"):
+			if _, err := os.Stat(uploaded); err == nil {
+				return ok(uploaded + "\nreasonix v1.2.3\nportfile:yes\n")
+			}
+			return ok("\n")
+		default:
+			return ok("")
+		}
+	})
+	fetched := false
+	bin, _, err := ensureBinary(context.Background(), conn, conn.fs, Options{
+		Install: InstallAuto, LocalBinary: "/local/reasonix", LocalGOOS: "darwin", LocalGOARCH: "arm64",
+		ProductVersion: "v1.2.3",
+		FetchBinary: func(_ context.Context, version, goos, goarch string) ([]byte, error) {
+			fetched = true
+			if version != "v1.2.3" || goos != "linux" || goarch != "amd64" {
+				t.Fatalf("fetch target = %s %s/%s", version, goos, goarch)
+			}
+			return []byte("linux-amd64-cli"), nil
+		},
+	}, root, "linux", "amd64", pathsFor(root, root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fetched || bin != uploaded {
+		t.Fatalf("bin=%q fetched=%v", bin, fetched)
+	}
+}

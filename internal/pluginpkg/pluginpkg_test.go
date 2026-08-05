@@ -1,8 +1,10 @@
 package pluginpkg
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -344,6 +346,52 @@ func TestParseClaudeHooksKeepsDistinctEnvTimeoutAsyncCwd(t *testing.T) {
 	}
 }
 
+func TestParseClaudeHooksPreservesExecAndShellForms(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "hook-contract-pack"}`)
+	writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{
+  "hooks": {"SessionStart": [
+    {"hooks": [
+      {"type":"command","command":"node","args":[],"shell":"powershell"},
+      {"type":"command","command":"tool","args":[""," spaced ","$HOME"]},
+      {"type":"command","command":"Write-Output \"a && b\"","shell":"powershell"}
+    ]}
+  ]}
+}`)
+
+	pkg, warnings, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	hooks := pkg.Manifest.Hooks["SessionStart"]
+	if len(hooks) != 3 {
+		t.Fatalf("hooks = %#v, want 3", hooks)
+	}
+	if !hooks[0].ArgsSet || hooks[0].Args == nil || len(hooks[0].Args) != 0 || hooks[0].Shell != "" {
+		t.Fatalf("explicit empty args did not remain exec form (and ignore shell): %#v", hooks[0])
+	}
+	wantArgs := []string{"", " spaced ", "$HOME"}
+	if !hooks[1].ArgsSet || !reflect.DeepEqual(hooks[1].Args, wantArgs) {
+		t.Fatalf("literal exec args = %#v, want %#v", hooks[1].Args, wantArgs)
+	}
+	if hooks[2].ArgsSet || hooks[2].Shell != "powershell" || !hooks[2].ShellCommand {
+		t.Fatalf("PowerShell hook did not remain shell form: %#v", hooks[2])
+	}
+}
+
+func TestHookJSONPreservesExplicitEmptyArgs(t *testing.T) {
+	var hook Hook
+	if err := json.Unmarshal([]byte(`{"command":"bin/check","args":[]}`), &hook); err != nil {
+		t.Fatal(err)
+	}
+	if !hook.ArgsSet || hook.Args == nil || len(hook.Args) != 0 {
+		t.Fatalf("hook = %#v, want explicit empty exec-form args", hook)
+	}
+}
+
 func TestParseClaudeHooksWarnOnUnsupportedSemantics(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -450,6 +498,27 @@ func TestParseClaudeHooksWarnOnUnsupportedSemantics(t *testing.T) {
 				t.Fatal("hook should still be imported despite the unsupported semantics")
 			}
 		})
+	}
+}
+
+func TestParseClaudeHooksSkipsUnsupportedShell(t *testing.T) {
+	root := t.TempDir()
+	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "hook-pack"}`)
+	writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"),
+		`{"hooks":{"PostToolUse":[{"hooks":[{"type":"command","command":"echo ok","shell":"cmd"}]}]}}`)
+
+	pkg, warnings, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if pkg.Compatibility.Status != "none" {
+		t.Fatalf("compatibility status = %q, want none", pkg.Compatibility.Status)
+	}
+	if len(pkg.Manifest.Hooks) != 0 {
+		t.Fatalf("unsupported shell hook was imported: %#v", pkg.Manifest.Hooks)
+	}
+	if len(warnings) != 1 || !strings.Contains(warnings[0], `unsupported shell "cmd"`) {
+		t.Fatalf("warnings = %v, want unsupported shell diagnostic", warnings)
 	}
 }
 

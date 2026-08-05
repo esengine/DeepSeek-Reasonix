@@ -86,8 +86,24 @@ func TestBackoffDelay(t *testing.T) {
 	if d := backoffDelay(5, 3*time.Second); d != 3*time.Second {
 		t.Errorf("Retry-After should win: %v", d)
 	}
-	if d := backoffDelay(1, time.Hour); d != maxBackoff {
-		t.Errorf("Retry-After should be capped to %v, got %v", maxBackoff, d)
+	if d := backoffDelay(1, 45*time.Second); d != 45*time.Second {
+		t.Errorf("Retry-After beyond the backoff cap should still be honored: %v", d)
+	}
+	if d := backoffDelay(1, time.Hour); d != maxRetryAfter {
+		t.Errorf("Retry-After should be capped to %v, got %v", maxRetryAfter, d)
+	}
+}
+
+func TestParseRetryAfterAcceptsHTTPDate(t *testing.T) {
+	resp := &http.Response{Header: http.Header{}}
+	resp.Header.Set("Retry-After", time.Now().Add(30*time.Second).UTC().Format(http.TimeFormat))
+	if d := parseRetryAfter(resp); d < 25*time.Second || d > 31*time.Second {
+		t.Errorf("http-date Retry-After = %v, want ~30s", d)
+	}
+
+	resp.Header.Set("Retry-After", time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat))
+	if d := parseRetryAfter(resp); d != 0 {
+		t.Errorf("elapsed http-date Retry-After = %v, want 0", d)
 	}
 }
 
@@ -250,7 +266,8 @@ func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 		return statusResp(200, nil), nil
 	})}
 	var infos []RetryInfo
-	ctx := WithRetryNotify(context.Background(), func(i RetryInfo) { infos = append(infos, i) })
+	ctx := WithRequestAttemptCounter(context.Background())
+	ctx = WithRetryNotify(ctx, func(i RetryInfo) { infos = append(infos, i) })
 
 	resp, err := SendWithRetry(ctx, cl, SendOptions{Provider: "p", KeyEnv: "KEY"}, newDummyReq)
 	if err != nil {
@@ -261,5 +278,32 @@ func TestSendWithRetryRecoversAndNotifies(t *testing.T) {
 	}
 	if len(infos) != 1 || infos[0].Attempt != 1 || infos[0].Max != MaxRetries {
 		t.Fatalf("retry notify = %#v, want one Attempt 1/%d", infos, MaxRetries)
+	}
+	if got := RequestAttemptCount(ctx); got != 2 {
+		t.Fatalf("request attempt count = %d, want 2", got)
+	}
+}
+
+func TestRequestAttemptCountSurvivesRetriesThenTerminalFailure(t *testing.T) {
+	calls := 0
+	cl := &http.Client{Transport: rtFunc(func(r *http.Request) (*http.Response, error) {
+		calls++
+		if calls < 3 {
+			return statusResp(http.StatusServiceUnavailable, nil), nil
+		}
+		return statusResp(http.StatusBadRequest, nil), nil
+	})}
+	ctx := WithRequestAttemptCounter(context.Background())
+	providerCtx := WithRequestAttemptCounter(ctx)
+
+	if _, err := SendWithRetry(providerCtx, cl, SendOptions{Provider: "p"}, newDummyReq); err == nil {
+		t.Fatal("expected terminal provider error")
+	}
+	if got := RequestAttemptCount(ctx); got != 3 {
+		t.Fatalf("request attempt count = %d, want 3", got)
+	}
+	usage := UsageWithRequestAttemptCount(ctx, nil)
+	if usage == nil || usage.TotalTokens != 0 || usage.RequestCount != 3 {
+		t.Fatalf("failed request usage = %+v, want tokens=0 requests=3", usage)
 	}
 }

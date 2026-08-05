@@ -14,8 +14,11 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # cursor_shape = "bar"   # block|underline|bar; text input cursor shape; slim default avoids covering CJK characters
 
 [desktop]
+# language = "auto"   # auto|en|zh; auto follows the browser/OS locale
+# currency = "auto"   # auto|CNY|USD; explicitly set it independently from language
 layout_style = "classic"   # classic|workbench|creation; desktop layout style
 # theme = "auto"   # desktop only: auto|dark|light
+# terminal_theme = "auto"   # integrated terminal: auto|dark|light; auto follows the desktop app
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 
 [notifications]
@@ -26,7 +29,7 @@ ask_request = true   # notify when a question is waiting
 
 [agent]
 # system_prompt = "You are ..."   # custom persona/prompt; unset or empty = built-in default
-# system_prompt_file = "prompts/system.md"   # overrides system_prompt when set
+# system_prompt_file = "prompts/system.md"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>
 temperature       = 0.0
 # recovery_model = ""               # optional reviewer for low-risk automatic recovery; falls back to guardian_model then main model
 # reasoning_language = "auto"   # visible reasoning text: auto|zh|en
@@ -50,8 +53,9 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # recommended editable presets for Kimi CN/Global, Kimi Coding Plan, MiMo API
 # and Anthropic/token-plan regions, MiniMax CN/Global API and Anthropic routes,
 # GLM/Z.AI CN/Global API and coding-plan routes, OpenCode Go/Zen, Qwen/DashScope
-# CN/Global API and coding-plan routes, StepFun, NovitaAI, GMI, Vercel AI
-# Gateway, HuggingFace, NVIDIA, Atlas Cloud, KiloCode, and Ollama Cloud.
+# CN/Global API and coding-plan routes, Token Rhythm (基元律动), StepFun,
+# NovitaAI, GMI, Vercel AI Gateway, HuggingFace, NVIDIA, Atlas Cloud, KiloCode,
+# and Ollama Cloud.
 [[providers]]
 name        = "deepseek"
 kind        = "openai"
@@ -62,8 +66,9 @@ api_key_env = "DEEPSEEK_API_KEY"
 context_window = 1000000
 # Optional per-model context budgets. Omitted models inherit context_window.
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000 } }
-# Official DeepSeek providers seed RMB prices by default.
-# Set prices explicitly only when you want to pin a currency/rate.
+# Official DeepSeek providers use CNY or USD regional prices from
+# [desktop].currency; auto follows the selected language and defaults to USD.
+# Set prices explicitly only when you want to pin custom rates.
 # prices = { "deepseek-v4-flash" = { cache_hit = 0.02, input = 1, output = 2, currency = "¥" }, "deepseek-v4-pro" = { cache_hit = 0.025, input = 3, output = 6, currency = "¥" } }   # per 1M tokens
 # DeepSeek thinking is always on; effort: high | max. Omit for auto (provider default).
 effort      = "high"
@@ -116,6 +121,7 @@ enabled = true   # inject a stable startup summary of OS, shell, and common tool
 [tools]
 enabled = []   # empty = all built-in tools
 bash_timeout_seconds = 120   # foreground safety cap; set 0 for no tool-local cap
+mcp_startup_timeout_seconds = 30   # background initialize + tools/list safety cap; per-server overrides may raise it
 mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool overrides may raise it
 
 [tools.background_jobs]
@@ -146,7 +152,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /
 # PermissionRequest / UserPromptSubmit / Stop). They are NOT configured here — put them in
 # settings.json: <Reasonix home>/settings.json (global, always on) and
-# <project>/.reasonix/settings.json (project, runs only after `/hooks trust`).
+# <project>/.reasonix/settings.json (project, loaded automatically).
 # Exit 0 = pass, exit 2 = block (PreToolUse / UserPromptSubmit only). Example
 # <Reasonix home>/settings.json:
 #   { "hooks": {
@@ -164,6 +170,8 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [[plugins]]
 # name    = "example"
 # command = "reasonix-plugin-example"
+# # Startup may continue in the background after the first caller stops waiting.
+# # startup_timeout_seconds = 60
 # # Per-server MCP call timeout; 0 keeps the global/default cap.
 # # call_timeout_seconds = 600
 # # Raw MCP tool names with per-tool call timeouts.

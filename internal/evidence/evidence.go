@@ -334,6 +334,7 @@ type TodoStepMatch struct {
 type Receipt struct {
 	ToolName  string          `json:"tool_name"`
 	Args      json.RawMessage `json:"args,omitempty"`
+	Profile   string          `json:"profile,omitempty"`
 	Success   bool            `json:"success"`
 	Command   string          `json:"command,omitempty"`
 	Step      string          `json:"step,omitempty"`
@@ -475,6 +476,50 @@ func (l *Ledger) Len() int {
 	return len(l.receipts)
 }
 
+// ReceiptProgressSummary counts successful host-observable receipts by category
+// for cross-turn progress signatures. Failed receipts and reads never count:
+// repeated reads, failed bookkeeping, and reworded answers must not masquerade
+// as progress. Categories are not mutually exclusive (a successful bash command
+// that also writes counts in both), which is fine for a change detector.
+type ReceiptProgressSummary struct {
+	Writes   int // successful mutations/writes
+	Commands int // successful commands (bash receipts)
+	Todos    int // successful todo_write receipts
+	Signoffs int // successful complete_step signoffs
+	Reviews  int // successful review receipts
+}
+
+// ReceiptProgressSummary returns the current ledger's progress counts.
+func (l *Ledger) ReceiptProgressSummary() ReceiptProgressSummary {
+	if l == nil {
+		return ReceiptProgressSummary{}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out ReceiptProgressSummary
+	for _, r := range l.receipts {
+		if !r.Success {
+			continue
+		}
+		if r.Mutation || r.Write {
+			out.Writes++
+		}
+		if r.Command != "" {
+			out.Commands++
+		}
+		if r.ToolName == "todo_write" {
+			out.Todos++
+		}
+		if r.ToolName == "complete_step" && r.StepProof {
+			out.Signoffs++
+		}
+		if successfulForegroundReviewReceipt(r) || completedStructuredReviewReceipt(r, nil) {
+			out.Reviews++
+		}
+	}
+	return out
+}
+
 // HasWriteOrCommandSince reports whether a successful write or command receipt
 // was recorded at or after index — host-observable progress, as opposed to
 // bookkeeping receipts (todo_write, complete_step, ask), which carry neither a
@@ -558,6 +603,70 @@ func (l *Ledger) HasSuccessfulCommand(command string) bool {
 		}
 	}
 	return false
+}
+
+// HasCompletedReview reports whether a review completed with evidence that is
+// fresh for the latest mutation. Structured review_report receipts are the
+// strongest proof and also cover collected background reviews. Foreground
+// review/task adapters remain compatible, but after a mutation their child
+// receipts must show that the changed result was actually inspected.
+func (l *Ledger) HasCompletedReview() bool {
+	if l == nil {
+		return false
+	}
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+
+	mutation := -1
+	for i, r := range receipts {
+		if r.Success && r.Mutation {
+			mutation = i
+		}
+	}
+	start := mutation + 1
+	requiredPaths := []string(nil)
+	if mutation >= 0 {
+		requiredPaths = receipts[mutation].Paths
+	}
+
+	for i := start; i < len(receipts); i++ {
+		r := receipts[i]
+		if completedStructuredReviewReceipt(r, requiredPaths) {
+			return true
+		}
+		if !successfulForegroundReviewReceipt(r) {
+			continue
+		}
+		if mutation < 0 || receiptsReviewChanges(receipts, start, i, mutation) {
+			return true
+		}
+	}
+	return false
+}
+
+func successfulForegroundReviewReceipt(r Receipt) bool {
+	if !r.Success {
+		return false
+	}
+	if r.ToolName == "review" {
+		return true
+	}
+	if r.ToolName != "task" || r.Profile != "review" {
+		return false
+	}
+	var p struct {
+		RunInBackground bool `json:"run_in_background"`
+	}
+	return json.Unmarshal(r.Args, &p) == nil && !p.RunInBackground
+}
+
+func completedStructuredReviewReceipt(r Receipt, requiredPaths []string) bool {
+	if !r.Success || r.ToolName != "review_report" {
+		return false
+	}
+	report, err := ParseReviewReport(r.Args)
+	return err == nil && report.Kind == ReviewKindReview && report.CoversPaths(requiredPaths)
 }
 
 // HasFailedCommand reports whether the cited command ran this turn but exited
@@ -756,6 +865,85 @@ func (l *Ledger) HasSuccessfulReviewAfter(after int) bool {
 	return receiptsReviewChanges(receipts, start, len(receipts), after)
 }
 
+// HasHostReviewCoverageAfter reports whether host-observed content inspection
+// after the latest mutation covers the production paths required by a Medium
+// Delivery review. A plain, output-producing `git diff` covers the current
+// change set; otherwise every required path needs a read receipt or a
+// content-printing command that names it. Summary/status/check-only commands
+// and model prose never satisfy this stronger alternative to review_report.
+func (l *Ledger) HasHostReviewCoverageAfter(after int, requiredPaths []string) bool {
+	if l == nil {
+		return false
+	}
+	start := after + 1
+	if start < 0 {
+		start = 0
+	}
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+	if after >= len(receipts) {
+		return false
+	}
+	for i := start; i < len(receipts); i++ {
+		r := receipts[i]
+		if r.Success && r.ToolName == "bash" && r.OutputBytes > 0 && commandShowsWholeGitDiff(r.Command) {
+			return true
+		}
+	}
+	wanted := normalizePaths(requiredPaths)
+	if len(wanted) == 0 {
+		return false
+	}
+	for _, path := range wanted {
+		needle := strings.ToLower(filepath.ToSlash(path))
+		covered := false
+		for i := start; i < len(receipts); i++ {
+			r := receipts[i]
+			if !r.Success {
+				continue
+			}
+			if r.Read {
+				for _, observed := range r.Paths {
+					candidate := strings.ToLower(filepath.ToSlash(normalizePath(observed)))
+					if candidate == needle || strings.HasSuffix(candidate, "/"+needle) {
+						covered = true
+						break
+					}
+				}
+			}
+			if !covered && r.ToolName == "bash" && r.OutputBytes > 0 && commandShowsContentForPath(r.Command, needle) {
+				covered = true
+			}
+			if covered {
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
+}
+
+func commandShowsWholeGitDiff(command string) bool {
+	file, err := shellparse.ParseBash(command)
+	if err != nil || shellparse.HasHereDoc(file) || len(file.Stmts) != 1 {
+		return false
+	}
+	stmt := file.Stmts[0]
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) > 0 {
+		return false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) != 2 {
+		return false
+	}
+	base, okBase := shellparse.StaticWord(call.Args[0])
+	sub, okSub := shellparse.StaticWord(call.Args[1])
+	return okBase && okSub && strings.EqualFold(filepath.Base(base), "git") && strings.EqualFold(sub, "diff")
+}
+
 func receiptsReviewChanges(receipts []Receipt, start, end, mutationIndex int) bool {
 	if mutationIndex >= len(receipts) {
 		return false
@@ -940,6 +1128,44 @@ func (l *Ledger) HasAnySuccessfulReceipt() bool {
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
 		if r.Success {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSuccessfulToolReceipt reports whether a named tool completed
+// successfully in the current evidence scope.
+func (l *Ledger) HasSuccessfulToolReceipt(name string) bool {
+	name = strings.TrimSpace(name)
+	if l == nil || name == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == name {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSuccessfulMutationOtherThan distinguishes a workflow-specific state
+// change (for example durable memory) from unrelated workspace mutations that
+// still need the full Delivery verification/review contract.
+func (l *Ledger) HasSuccessfulMutationOtherThan(allowed ...string) bool {
+	if l == nil {
+		return false
+	}
+	allow := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		allow[strings.TrimSpace(name)] = true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.Mutation && !allow[r.ToolName] {
 			return true
 		}
 	}
@@ -1372,6 +1598,9 @@ func ReceiptFromToolCall(toolName string, args json.RawMessage, success bool, re
 		if toolName == "bash" {
 			r.Command = stringField(fields, "command")
 		}
+		if toolName == "task" {
+			r.Profile = stringField(fields, "profile")
+		}
 		if toolName == "complete_step" {
 			r.Step = completeStepIdentity(fields)
 			r.StepProof = completeStepHasProof(fields)
@@ -1567,18 +1796,17 @@ func bashMayMutate(command string) bool {
 	}
 	for _, segment := range segments {
 		normalized, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		if !safeRedirects || shellsafe.ContainsShellSyntax(normalized) {
+		if !safeRedirects {
 			return true
 		}
-		fields, malformed := shellparse.StaticFields(normalized)
-		if malformed != "" || len(fields) == 0 {
-			return true
-		}
-		if bashSegmentIsVerification(fields) {
+		if staticFields, malformed := shellparse.StaticFields(normalized); malformed == "" && len(staticFields) > 0 && bashSegmentIsVerification(staticFields) {
 			continue
 		}
-		base, sub, readOnly := shellsafe.CommandIsReadOnly(normalized)
-		if !readOnly || bashReadOnlyCommandWrites(base, sub, fields) {
+		base, sub, fields, workspaceNonMutating := shellsafe.ClassifyWorkspaceNonMutatingCommand(normalized)
+		if !workspaceNonMutating {
+			return true
+		}
+		if bashReadOnlyCommandWrites(base, sub, fields) {
 			return true
 		}
 	}
@@ -1623,6 +1851,56 @@ func IsDeliveryVerificationCommand(command string) bool {
 	return bashCommandIsVerification(command)
 }
 
+type verificationCommandRecommendation struct {
+	label    string
+	examples []string
+}
+
+// verificationCommandRecommendations is the single source for the concrete
+// model-readable examples and the family labels used to diagnose test failures.
+// It is intentionally a safe recommended subset rather than an exhaustive
+// rendering of bashSegmentIsVerification: accepted commands that may install
+// dependencies or create workspace outputs should not be suggested as the
+// first recovery action.
+func verificationCommandRecommendations() []verificationCommandRecommendation {
+	return []verificationCommandRecommendation{
+		{label: "go test|vet", examples: []string{"go test ./...", "go vet ./..."}},
+		{label: "git diff --check", examples: []string{"git diff --check"}},
+		{label: "pytest/py.test", examples: []string{"pytest tests/", "py.test tests/"}},
+		{label: "gotestsum", examples: []string{"gotestsum"}},
+		{label: "staticcheck", examples: []string{"staticcheck ./..."}},
+		{label: "golangci-lint", examples: []string{"golangci-lint run"}},
+		{label: "tsc", examples: []string{"tsc --noEmit"}},
+		{label: "mypy (no report flag)", examples: []string{"mypy src/"}},
+		{label: "npm|pnpm|yarn|bun test|check|lint", examples: []string{"npm test", "pnpm check", "yarn lint", "bun test"}},
+		{label: "npm run test|check|lint|typecheck", examples: []string{"npm run typecheck"}},
+		{label: "cargo test|check|clippy", examples: []string{"cargo test", "cargo check", "cargo clippy"}},
+		{label: "node --check|--test", examples: []string{"node --check index.js", "node --test"}},
+		{label: "make|just test|check|lint|verify|ci", examples: []string{"make test", "just verify"}},
+		{label: "python -m pytest|unittest", examples: []string{"python -m pytest", "python -m unittest"}},
+		{label: "dotnet test", examples: []string{"dotnet test"}},
+		{label: "swift test", examples: []string{"swift test"}},
+		{label: "mvn|gradle test|check|verify", examples: []string{"mvn test", "gradle check"}},
+	}
+}
+
+// VerificationCommandSummary returns compact, model-readable recovery
+// guidance. It lists only recommended command families that the classifier
+// accepts, while omitting known self-installing and direct workspace-output
+// command forms from first-line guidance.
+func VerificationCommandSummary() string {
+	recommendations := verificationCommandRecommendations()
+	commands := make([]string, 0, len(recommendations))
+	for _, recommendation := range recommendations {
+		commands = append(commands, recommendation.examples...)
+	}
+	return "recommended recognized verification commands: " + strings.Join(commands, ", ") + ". " +
+		"Read-only inspection commands (grep/find/cat/wc/head/tail) are NOT verification; " +
+		"inline interpreters (node -e, python -c) are blocked in delivery mode. " +
+		"A read-only extraction pipeline ending in a recognized verifier " +
+		"(e.g. tail -n +1 file | node --check -) is accepted."
+}
+
 func bashSegmentIsVerification(fields []string) bool {
 	if len(fields) == 0 {
 		return false
@@ -1651,11 +1929,17 @@ func bashSegmentIsVerification(fields []string) bool {
 			}
 			return true
 		}
-		return args[0] == "build" && !hasCommandArg(args, "-o")
+		// A package pattern can expand to one main package, so even `go build
+		// ./...` may write a workspace binary. Package expansion and inherited
+		// GOFLAGS are unavailable to this static classifier; fail closed for all
+		// build forms and keep test/vet as the recognized Go verifiers.
+		return false
 	case "git":
 		return len(args) > 1 && args[0] == "diff" && hasCommandArg(args[1:], "--check")
-	case "pytest", "py.test", "gotestsum", "staticcheck", "golangci-lint", "tsc":
+	case "pytest", "py.test", "gotestsum", "staticcheck", "golangci-lint":
 		return true
+	case "tsc":
+		return tscSegmentIsVerification(args)
 	case "mypy":
 		for _, arg := range args {
 			if mypyFlagWritesReport(arg) {
@@ -1668,18 +1952,177 @@ func bashSegmentIsVerification(fields []string) bool {
 			return true
 		}
 		return len(args) > 1 && args[0] == "run" && hasCommandArg(args[1:2], "test", "check", "lint", "typecheck")
+	case "npx":
+		return npxSegmentIsVerification(args)
 	case "node":
 		return nodeSegmentIsVerification(args)
 	case "make", "just":
 		return len(args) > 0 && hasCommandArg(args[:1], "test", "check", "lint", "verify", "ci")
 	case "python", "python3":
-		return len(args) > 1 && args[0] == "-m" && hasCommandArg(args[1:2], "pytest", "unittest", "compileall")
+		return len(args) > 1 && args[0] == "-m" && hasCommandArg(args[1:2], "pytest", "unittest")
 	case "dotnet":
 		return len(args) > 0 && args[0] == "test"
+	case "swift":
+		// swift test runs the SwiftPM test suite; build artifacts stay under
+		// the package's own .build directory (including --enable-code-coverage
+		// reports). Other swift subcommands (build/run/package) can write
+		// binaries or mutate the package, so only the test form is a
+		// recognized verifier. Explicit report destinations, attachment dirs,
+		// and scratch-dir redirects are rejected by writeOutputFlags. Note
+		// that swift test may run Package.swift build plugins (arbitrary
+		// code) — the same trust boundary as go test / cargo test.
+		if len(args) == 0 || args[0] != "test" {
+			return false
+		}
+		// Control modes that do not run the test suite (help, listing) must
+		// not count as verification; mirror the tsc treatment of --help.
+		for _, arg := range args[1:] {
+			name := strings.TrimLeft(strings.ToLower(arg), "-")
+			if i := strings.IndexByte(name, '='); i >= 0 {
+				name = name[:i]
+			}
+			switch name {
+			case "help", "h", "version", "list-tests", "l":
+				return false
+			}
+		}
+		return true
 	case "mvn", "mvnw", "gradle", "gradlew":
 		return len(args) > 0 && hasCommandArg(args, "test", "check", "verify")
 	}
 	return false
+}
+
+// tscSegmentIsVerification accepts only one-shot, explicit no-emit type checks.
+// Bare tsc commands may emit JavaScript, declarations, and source maps; control
+// modes may write config, skip checking, exit after printing metadata, or watch
+// indefinitely. Any explicit false value wins conservatively even if another
+// no-emit flag appears in the same command.
+func tscSegmentIsVerification(args []string) bool {
+	noEmit := false
+	for i, arg := range args {
+		if tscFlagDisqualifiesVerification(arg) {
+			return false
+		}
+		switch strings.ToLower(arg) {
+		case "--noemit":
+			if i+1 < len(args) && strings.EqualFold(args[i+1], "false") {
+				return false
+			}
+			noEmit = true
+		case "--noemit=true":
+			noEmit = true
+		case "--noemit=false":
+			return false
+		}
+	}
+	return noEmit
+}
+
+// tscFlagDisqualifiesVerification rejects modes that do not perform a bounded
+// type check and destinations that write independently of JavaScript/declaration
+// emit. Default incremental metadata remains conventional verifier cache;
+// explicit output destinations and control modes fail closed as mutations.
+func tscFlagDisqualifiesVerification(arg string) bool {
+	name := strings.ToLower(arg)
+	if i := strings.IndexByte(name, '='); i >= 0 {
+		name = name[:i]
+	}
+	switch name {
+	case "--tsbuildinfofile", "--generatetrace", "--generatecpuprofile",
+		"--init", "--help", "-h", "-?", "--all", "--version", "-v",
+		"--showconfig", "--listfilesonly", "--nocheck", "--watch", "-w",
+		"--build", "-b", "--clean":
+		return true
+	default:
+		return false
+	}
+}
+
+// npxSegmentIsVerification unwraps only known test runners invoked directly,
+// with no npx control flags. Treating arbitrary npx packages as verification
+// would let package installation or an opaque executable masquerade as a
+// read-only check. Runner flags that update snapshots, write reports, or enable
+// coverage are rejected by the caller and the checks below.
+func npxSegmentIsVerification(args []string) bool {
+	if len(args) == 0 || strings.HasPrefix(args[0], "-") {
+		return false
+	}
+	runner, ok := npxRunnerName(args[0])
+	if !ok {
+		return false
+	}
+	runnerArgs := args[1:]
+	switch runner {
+	case "vitest", "jest", "mocha", "ava", "eslint":
+		// Known test/lint runners are verification unless an argument asks them
+		// to update snapshots, collect coverage, or write a report.
+	case "prettier":
+		// Prettier without an explicit check mode formats to stdout and is not a
+		// project verification receipt. Keep only its read-only check forms.
+		if !hasCommandArg(runnerArgs, "--check", "-c", "--list-different") {
+			return false
+		}
+	case "tsc":
+		return tscSegmentIsVerification(runnerArgs)
+	default:
+		// Playwright/Cypress produce project reports, screenshots, or videos by
+		// default; tsx/ts-node execute source. They remain mutations.
+		return false
+	}
+	for _, arg := range runnerArgs {
+		name := strings.ToLower(arg)
+		if i := strings.IndexByte(name, '='); i >= 0 {
+			name = name[:i]
+		}
+		switch name {
+		case "--update", "-u", "--updatesnapshot", "--update-snapshots",
+			"--output-file", "-o", "--cache-location":
+			return false
+		}
+		if name == "--coverage" || strings.HasPrefix(name, "--coverage.") {
+			return false
+		}
+	}
+	return true
+}
+
+// npxRunnerName accepts only a bare package name with an optional ordinary
+// version or dist-tag suffix. Paths and package protocols such as
+// eslint@npm:other-package must not inherit a known runner's trust boundary.
+func npxRunnerName(spec string) (string, bool) {
+	if spec == "" || strings.ContainsAny(spec, `/\`) {
+		return "", false
+	}
+	name := strings.ToLower(spec)
+	if strings.HasPrefix(name, "@") {
+		return "", false
+	}
+	if i := strings.LastIndexByte(name, '@'); i >= 0 {
+		if i == 0 || !plainNpxVersion(name[i+1:]) {
+			return "", false
+		}
+		name = name[:i]
+	}
+	return name, true
+}
+
+func plainNpxVersion(version string) bool {
+	if version == "" {
+		return false
+	}
+	for _, r := range version {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			continue
+		}
+		switch r {
+		case '.', '-', '+', '_', '~', '^', '*':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func nodeSegmentIsVerification(args []string) bool {
@@ -1775,21 +2218,29 @@ func hasCommandArg(args []string, candidates ...string) bool {
 // A runner invoked with one of them changes workspace state, so the segment
 // must not count as read-only verification.
 var writeOutputFlags = map[string]bool{
-	"snapshot-update": true, // pytest-snapshot / syrupy
-	"updatesnapshot":  true, // jest --updateSnapshot via npm/yarn wrappers
-	"junitxml":        true, // pytest
-	"junit-xml":       true, // pytest / mypy
-	"junitfile":       true, // gotestsum
-	"jsonfile":        true, // gotestsum
-	"coverprofile":    true, // go test
-	"cpuprofile":      true, // go test
-	"memprofile":      true, // go test
-	"blockprofile":    true, // go test
-	"mutexprofile":    true, // go test
-	"testlogfile":     true, // go test binary
-	"gocoverdir":      true, // go test binary
-	"outputfile":      true, // jest/vitest --outputFile (with --json)
-	"report-log":      true, // pytest-reportlog
+	"snapshot-update":                  true, // pytest-snapshot / syrupy
+	"updatesnapshot":                   true, // jest --updateSnapshot via npm/yarn wrappers
+	"junitxml":                         true, // pytest
+	"junit-xml":                        true, // pytest / mypy
+	"junitfile":                        true, // gotestsum
+	"jsonfile":                         true, // gotestsum
+	"coverprofile":                     true, // go test
+	"cpuprofile":                       true, // go test
+	"memprofile":                       true, // go test
+	"blockprofile":                     true, // go test
+	"mutexprofile":                     true, // go test
+	"testlogfile":                      true, // go test binary
+	"gocoverdir":                       true, // go test binary
+	"outputfile":                       true, // jest/vitest --outputFile (with --json)
+	"report-log":                       true, // pytest-reportlog
+	"xunit-output":                     true, // swift test --xunit-output writes a JUnit XML report
+	"scratch-path":                     true, // swift test --scratch-path redirects the build dir
+	"build-path":                       true, // swift test --build-path: legacy alias of --scratch-path
+	"cache-path":                       true, // swift test --cache-path redirects the shared cache dir
+	"event-stream-output-path":         true, // swift test (Swift 6.x): swift-testing JSON output
+	"experimental-event-stream-output": true, // swift test (Swift 6.x): experimental event-stream output
+	"attachments-path":                 true, // swift test (Swift 6.x): Swift Testing attachments dir
+	"experimental-attachments-path":    true, // swift test (Swift 6.x): experimental attachments dir
 }
 
 func hasWriteOutputFlag(args []string) bool {

@@ -6,6 +6,8 @@ package provider
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,30 +39,71 @@ const (
 
 // Message is a single conversation message.
 type Message struct {
-	Role             Role     `json:"role"`
-	Content          string   `json:"content,omitempty"`
+	Role Role `json:"role"`
+	// Content is the provider-visible conversation content. Keeping this legacy
+	// field provider-visible preserves replay for older CLI/Desktop releases.
+	Content string `json:"content,omitempty"`
+	// RawContent is the user-authored form of a user turn, when it differs from
+	// Content because the host added transient context. Older releases ignore
+	// this field and still replay the provider-visible Content safely.
+	RawContent string `json:"raw_content,omitempty"`
+	// ProviderContent is a transitional field written by early Context Engine v2
+	// builds. Loaders migrate it into Content/RawContent before normal use.
+	ProviderContent  string   `json:"provider_content,omitempty"`
 	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…) on user (attachments) and tool (MCP image results) messages; embedded only for vision-capable models
 	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	// ReasoningID is the provider-issued identifier of the reasoning item
+	// (OpenAI Responses schema: Reasoning.id is required on input items).
+	// Captured from the streamed output item and round-tripped back into
+	// the input on subsequent turns, matching the wire schema.
+	ReasoningID string `json:"reasoning_id,omitempty"`
+	// ReasoningStatus is the final status of the reasoning item
+	// ("in_progress" | "completed") as issued by the server's done event,
+	// round-tripped back into the input alongside ReasoningID.
+	ReasoningStatus string `json:"reasoning_status,omitempty"`
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
 	// replayed on the next turn when a tool call followed thinking; providers
 	// without signed reasoning (e.g. the openai-compatible ones) leave it empty.
 	// Round-tripped alongside ReasoningContent.
-	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
-	ToolCalls          []ToolCall       `json:"tool_calls,omitempty"`      // set by assistant
-	ToolCallID         string           `json:"tool_call_id,omitempty"`    // links a tool result to its call
-	Name               string           `json:"name,omitempty"`            // tool message: tool name
-	MemoryCitations    []MemoryCitation `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
-	WorkDurationMs     int64            `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
-	CreatedAt          int64            `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
-	Edited             bool             `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
-	Original           string           `json:"original,omitempty"`        // user prompt before inline edit
+	ReasoningSignature string     `json:"reasoning_signature,omitempty"`
+	ToolCalls          []ToolCall `json:"tool_calls,omitempty"` // set by assistant
+	// ResponsesItems preserves provider-issued Responses API output items that
+	// must be replayed on a stateless follow-up. Today only DeepSeek
+	// web_search_call items use this path; other providers ignore the field.
+	// Keeping the opaque JSON on the assistant turn makes resume/restart safe,
+	// while omitempty keeps old session files byte-compatible when unused.
+	ResponsesItems  []json.RawMessage `json:"responses_items,omitempty"`
+	ToolCallID      string            `json:"tool_call_id,omitempty"`    // links a tool result to its call
+	Name            string            `json:"name,omitempty"`            // tool message: tool name
+	MemoryCitations []MemoryCitation  `json:"memoryCitations,omitempty"` // local UI metadata; provider requests ignore it
+	WorkDurationMs  int64             `json:"workDurationMs,omitempty"`  // local UI metadata; provider requests ignore it
+	CreatedAt       int64             `json:"createdAt,omitempty"`       // local UI metadata; unix milliseconds; stripped before provider requests
+	Edited          bool              `json:"edited,omitempty"`          // local UI metadata; provider requests ignore it
+	Original        string            `json:"original,omitempty"`        // user prompt before inline edit
 	// LocalOnly marks durable transcript content that must never be sent to a
 	// model provider. Interrupted streaming output uses it so every frontend can
 	// replay what the user saw without feeding partial reasoning or tool-call
 	// arguments back into the next request.
-	LocalOnly       bool                     `json:"local_only,omitempty"`
-	InterruptedTurn *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+	LocalOnly       bool             `json:"local_only,omitempty"`
+	DecisionReceipt *DecisionReceipt `json:"decision_receipt,omitempty"`
+	// DecisionReceipts are local-only metadata attached to a provider-visible
+	// message. Keeping them on the existing assistant record preserves the
+	// assistant/tool-result adjacency required by current and older readers.
+	// ModelMessages strips the field before handing requests to providers.
+	DecisionReceipts []*DecisionReceipt       `json:"decision_receipts,omitempty"`
+	InterruptedTurn  *InterruptedTurnRecovery `json:"interrupted_turn,omitempty"`
+}
+
+// DecisionReceipt is durable, provider-excluded evidence of a user-owned
+// approval decision. It intentionally contains only bounded labels and the
+// outcome, never free-form guidance or provider-visible content.
+type DecisionReceipt struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Tool    string `json:"tool,omitempty"`
+	Subject string `json:"subject,omitempty"`
+	Outcome string `json:"outcome"`
 }
 
 // InterruptedTurnRecovery is the durable, provider-excluded handoff for a turn
@@ -121,9 +164,19 @@ type ToolCall struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
-	Diff      string `json:"diff,omitempty"`
-	Added     int    `json:"added,omitempty"`
-	Removed   int    `json:"removed,omitempty"`
+	// ThoughtSignature is an opaque Gemini-issued proof attached to a function
+	// call. OpenAI-compatible Gemini endpoints require it on message replay.
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+	Diff             string `json:"diff,omitempty"`
+	Added            int    `json:"added,omitempty"`
+	Removed          int    `json:"removed,omitempty"`
+	// Resolved* fields are Reasonix-local display metadata for stable proxy
+	// calls such as use_capability. Provider request builders deliberately
+	// serialize only provider-visible fields, so these values never alter the
+	// provider-visible conversation or prompt-cache prefix.
+	ResolvedName     string `json:"resolved_name,omitempty"`
+	CapabilityID     string `json:"capability_id,omitempty"`
+	ResolvedReadOnly *bool  `json:"resolved_read_only,omitempty"`
 }
 
 // ToolSchema is a tool definition exposed to the model. Parameters is JSON Schema.
@@ -139,7 +192,24 @@ type Request struct {
 	Tools       []ToolSchema
 	Temperature *float64 // nil = omit; non-nil = send the value, including 0
 	MaxTokens   int
+	// ResponseFormat, when non-nil, asks the endpoint for structured JSON
+	// output (Responses: text.format.type=json_object). Nil omits the field
+	// entirely — the common path must stay byte-stable for prompt caching.
+	ResponseFormat *ResponseFormat `json:"ResponseFormat,omitempty"`
 }
+
+// ResponseFormat asks a provider to constrain its output shape.
+type ResponseFormat struct {
+	// Type is the structured format: "json_object" is the only shape the
+	// Responses endpoints currently define (MiMo/DashScope/OpenAI).
+	Type string `json:"type"`
+}
+
+// DefaultReasoningOutputTokens is the conservative provider-side budget used
+// for official reasoning APIs whose documented contract safely accepts 32K.
+// Unknown compatible gateways must opt in through configuration instead of
+// inheriting this value merely because they implement an OpenAI-shaped wire.
+const DefaultReasoningOutputTokens = 32 * 1024
 
 // TemperaturePtr wraps v in a pointer so callers that explicitly want a
 // specific temperature, including 0 for deterministic output, can distinguish
@@ -174,18 +244,31 @@ func SanitizeToolPairing(msgs []Message) []Message { return NormalizeMessages(ms
 // handed to any provider. Healthy sessions without such records keep their
 // original backing slice, preserving the allocation and prompt-cache fast path.
 func ModelMessages(msgs []Message) []Message {
+	needsCopy := false
 	for _, m := range msgs {
-		if m.LocalOnly {
-			out := make([]Message, 0, len(msgs)-1)
-			for _, candidate := range msgs {
-				if !candidate.LocalOnly {
-					out = append(out, candidate)
-				}
-			}
-			return out
+		if m.LocalOnly || m.RawContent != "" || m.ProviderContent != "" || m.DecisionReceipt != nil || len(m.DecisionReceipts) > 0 {
+			needsCopy = true
+			break
 		}
 	}
-	return msgs
+	if !needsCopy {
+		return msgs
+	}
+	out := make([]Message, 0, len(msgs))
+	for _, candidate := range msgs {
+		if candidate.LocalOnly {
+			continue
+		}
+		if candidate.ProviderContent != "" {
+			candidate.Content = candidate.ProviderContent
+			candidate.ProviderContent = ""
+		}
+		candidate.RawContent = ""
+		candidate.DecisionReceipt = nil
+		candidate.DecisionReceipts = nil
+		out = append(out, candidate)
+	}
+	return out
 }
 
 // NormalizeMessages repairs a conversation history so it satisfies the tool-call
@@ -216,7 +299,52 @@ func NormalizeMessages(msgs []Message) []Message {
 // Save/LoadSession remains a byte-for-byte conversation round trip for histories
 // that were already on disk.
 func NormalizeSessionMessages(msgs []Message) []Message {
-	return normalizeMessages(msgs, false)
+	return normalizeMessages(attachStandaloneDecisionReceipts(msgs), false)
+}
+
+// attachStandaloneDecisionReceipts migrates the short-lived receipt encoding
+// that stored a LocalOnly assistant message between an assistant tool call and
+// its result. Folding that metadata into the latest assistant message repairs
+// already-written sessions before tool-pair normalization can fabricate a
+// placeholder. Healthy histories return the original slice unchanged.
+func attachStandaloneDecisionReceipts(msgs []Message) []Message {
+	target := -1
+	needsMigration := false
+	for i, m := range msgs {
+		switch {
+		case m.Role == RoleUser && !m.LocalOnly:
+			target = -1
+		case m.Role == RoleAssistant && !m.LocalOnly:
+			target = i
+		case target >= 0 && m.LocalOnly && m.DecisionReceipt != nil:
+			needsMigration = true
+		}
+		if needsMigration {
+			break
+		}
+	}
+	if !needsMigration {
+		return msgs
+	}
+
+	out := make([]Message, 0, len(msgs))
+	target = -1
+	for _, m := range msgs {
+		switch {
+		case m.Role == RoleUser && !m.LocalOnly:
+			target = -1
+		case m.Role == RoleAssistant && !m.LocalOnly:
+			out = append(out, m)
+			target = len(out) - 1
+			continue
+		case target >= 0 && m.LocalOnly && m.DecisionReceipt != nil:
+			receipts := append([]*DecisionReceipt(nil), out[target].DecisionReceipts...)
+			out[target].DecisionReceipts = append(receipts, m.DecisionReceipt)
+			continue
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 func normalizeMessages(msgs []Message, dropOrphanTools bool) []Message {
@@ -543,6 +671,7 @@ const (
 	ChunkUsage                              // token usage for the completion
 	ChunkDone                               // completion finished normally
 	ChunkError                              // an error occurred
+	ChunkResponsesItem                      // a complete provider-issued Responses API output item for stateless replay
 )
 
 // Usage reports token accounting for a completion. Cache hit/miss come from
@@ -552,6 +681,8 @@ const (
 // CompletionTokens reported by thinking-capable models. FinishReason carries
 // the model's last reported choices[0].finish_reason so the agent can surface
 // abnormal terminations ("length", "content_filter", "repetition_truncation").
+// Estimated marks counts reconstructed locally because the provider's terminal
+// usage record did not arrive; exact provider usage leaves it false.
 type Usage struct {
 	PromptTokens     int
 	CompletionTokens int
@@ -560,6 +691,15 @@ type Usage struct {
 	CacheMissTokens  int    // prompt tokens not cached
 	ReasoningTokens  int    // subset of CompletionTokens spent on chain-of-thought
 	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
+	Estimated        bool
+	// BudgetAccounted is host-local bookkeeping: request-budget middleware has
+	// already committed these tokens, so an event-sink fallback must not count
+	// them twice. Provider implementations never serialize this field.
+	BudgetAccounted bool
+	// RequestCount is the number of provider requests represented by this
+	// aggregate. Zero means one request for backward compatibility. Recovery
+	// paths that merge multiple attempts set the exact count.
+	RequestCount int
 }
 
 // Pricing is a provider's per-1M-token rates, used to estimate spend. Currency
@@ -646,12 +786,20 @@ func isThreeLetterCurrencyCode(value string) bool {
 // Chunk is a single streamed event. Read the field matching Type.
 type Chunk struct {
 	Type      ChunkType
-	Text      string    // ChunkText, ChunkReasoning
-	Signature string    // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
-	ToolCall  *ToolCall // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
-	ArgChars  int       // ChunkToolCallArgsDelta: cumulative argument characters received for this call
-	Usage     *Usage    // ChunkUsage
-	Err       error     // ChunkError
+	Text      string // ChunkText, ChunkReasoning
+	Signature string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
+	// ReasoningID/ReasoningStatus ride the final ChunkReasoning of a turn
+	// (empty Text): the provider-issued reasoning item id/status captured
+	// from the SSE stream, so the Agent can persist them into the session
+	// and the next turn's input reasoning item round-trips them (review
+	// #7234 — OpenAI Responses schema marks Reasoning.id required).
+	ReasoningID     string          // ChunkReasoning: provider-issued reasoning item id
+	ReasoningStatus string          // ChunkReasoning: final reasoning item status ("completed")
+	ToolCall        *ToolCall       // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
+	ArgChars        int             // ChunkToolCallArgsDelta: cumulative argument characters received for this call
+	ResponsesItem   json.RawMessage // ChunkResponsesItem: opaque validated Responses API output item
+	Usage           *Usage          // ChunkUsage
+	Err             error           // ChunkError
 }
 
 // StreamInterruptedError marks a recoverable transport cut that happened after
@@ -713,17 +861,46 @@ func RequiresToolCallReasoning(p Provider) bool {
 	return ok && policy.RequiresToolCallReasoning()
 }
 
+// ReasoningRoundTripPolicy is optionally implemented by providers that require
+// every assistant message to preserve provider-issued reasoning in later
+// requests. This is broader than ToolCallReasoningPolicy, which covers only
+// assistant tool_calls turns.
+type ReasoningRoundTripPolicy interface {
+	RequiresReasoningRoundTrip() bool
+}
+
+// RequiresReasoningRoundTrip reports whether raw provider reasoning must be
+// retained and replayed on all assistant messages.
+func RequiresReasoningRoundTrip(p Provider) bool {
+	if nilutil.IsNil(p) {
+		return false
+	}
+	policy, ok := p.(ReasoningRoundTripPolicy)
+	return ok && policy.RequiresReasoningRoundTrip()
+}
+
 // MissingToolCallReasoningWarningPolicy is optionally implemented by providers
 // whose replay protocol requires reasoning_content, but whose active model may
-// not reliably emit it. Request serialization should stay conservative while
-// user-visible diagnostics can be quieter for models where missing reasoning is
-// expected behavior.
+// not reliably emit it. The legacy Warning name is retained for source
+// compatibility; the agent now uses this policy for silent bounded recovery and
+// emits no user-visible protocol notice.
 type MissingToolCallReasoningWarningPolicy interface {
 	WarnOnMissingToolCallReasoning() bool
 }
 
+// MissingToolCallReasoningWarningIdentityPolicy optionally supplies the stable,
+// non-credential configuration identity used to rate-limit missing-reasoning
+// recovery attempts. The legacy name preserves adapters and persisted state.
+// Implementations may include adapter kind, endpoint, model, and thinking
+// controls; the raw identity never leaves memory and is hashed before
+// persistence.
+type MissingToolCallReasoningWarningIdentityPolicy interface {
+	MissingToolCallReasoningWarningIdentity() string
+}
+
 // WarnOnMissingToolCallReasoning reports whether a tool_calls turn with empty
-// reasoning_content should surface a visible warning.
+// reasoning_content should enter silent recovery. Its legacy name is preserved
+// for provider implementations compiled against the original diagnostic API.
 func WarnOnMissingToolCallReasoning(p Provider) bool {
 	if nilutil.IsNil(p) {
 		return false
@@ -733,6 +910,26 @@ func WarnOnMissingToolCallReasoning(p Provider) bool {
 		return policy.WarnOnMissingToolCallReasoning()
 	}
 	return RequiresToolCallReasoning(p)
+}
+
+// MissingToolCallReasoningWarningFingerprint returns an opaque stable key for
+// one provider configuration's recovery cooldown. Concrete adapters distinguish
+// endpoint/model/protocol changes; providers without the optional policy retain
+// a safe type-and-name fallback. The legacy name preserves the on-disk state
+// contract. The digest prevents local state from exposing raw endpoints or
+// model identifiers.
+func MissingToolCallReasoningWarningFingerprint(p Provider) string {
+	if nilutil.IsNil(p) {
+		return ""
+	}
+	identity := fmt.Sprintf("%T\x00%s", p, strings.TrimSpace(p.Name()))
+	if policy, ok := p.(MissingToolCallReasoningWarningIdentityPolicy); ok {
+		if configured := strings.TrimSpace(policy.MissingToolCallReasoningWarningIdentity()); configured != "" {
+			identity = configured
+		}
+	}
+	digest := sha256.Sum256([]byte(identity))
+	return hex.EncodeToString(digest[:])
 }
 
 // Config is a resolved provider instance configuration.

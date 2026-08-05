@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/colorprofile"
+
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/control"
@@ -13,9 +15,9 @@ import (
 )
 
 func TestTurnReceiptKeepsCompletePerTurnBreakdown(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	defer i18n.DetectLanguage("en")
-	colorEnabled = false
+	activeColorProfile = colorprofile.NoTTY
 	configureCLITheme("dark")
 	i18n.DetectLanguage("zh")
 
@@ -43,9 +45,9 @@ func TestTurnReceiptKeepsCompletePerTurnBreakdown(t *testing.T) {
 }
 
 func TestTurnReceiptFallsBackToDerivedFreshTokensAndWrapsCleanly(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	defer i18n.DetectLanguage("en")
-	colorEnabled = true
+	activeColorProfile = colorprofile.ANSI256
 	configureCLITheme("dark")
 	i18n.DetectLanguage("en")
 
@@ -74,9 +76,24 @@ func TestTurnReceiptIgnoresEmptyUsage(t *testing.T) {
 	}
 }
 
+func TestTurnReceiptMarksEstimatedUsage(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	defer i18n.DetectLanguage("en")
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+	i18n.DetectLanguage("en")
+
+	got := renderTurnReceipt(&provider.Usage{TotalTokens: 1_024, Estimated: true}, nil, nil)
+	for _, want := range []string{"≈1.0K tok", "estimated"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("estimated turn receipt %q missing %q", got, want)
+		}
+	}
+}
+
 func TestTurnReceiptBandUsesSingleQuietBoundary(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = false
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
 	configureCLITheme("dark")
 
 	band := renderTurnReceiptBand("  TURN  14.0K tok · in 13.6K", 48)
@@ -96,11 +113,9 @@ func TestTurnReceiptBandUsesSingleQuietBoundary(t *testing.T) {
 }
 
 func TestTurnReceiptAdaptsContrastAcrossThemes(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	defer i18n.DetectLanguage("en")
-	colorEnabled = true
+	activeColorProfile = colorprofile.ANSI256
 	i18n.DetectLanguage("en")
 
 	for _, tt := range []struct {
@@ -128,12 +143,10 @@ func TestTurnReceiptAdaptsContrastAcrossThemes(t *testing.T) {
 }
 
 func TestStatusFooterSemanticPaletteAcrossThemes(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
 	t.Setenv("REASONIX_THEME", "")
 	t.Setenv("REASONIX_THEME_STYLE", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
 	for _, tt := range []struct {
 		mode, labelSGR, valueSGR, infoSGR, secondarySGR string
@@ -170,9 +183,7 @@ func TestStatusFooterSemanticPaletteAcrossThemes(t *testing.T) {
 }
 
 func TestStatusFooterThemesKeepIdenticalGeometry(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 
 	m := newTestChatTUI()
 	m.ctrl = control.New(control.Options{})
@@ -182,25 +193,23 @@ func TestStatusFooterThemesKeepIdenticalGeometry(t *testing.T) {
 	m.balance = "¥12.34"
 	m.gitStatus = gitStatus{Repo: "DeepSeek-Reasonix", Branch: "feature/theme-footer", Added: 3}
 
-	render := func(mode string, colors bool) string {
-		colorEnabled = colors
+	render := func(mode string, profile colorprofile.Profile) string {
+		activeColorProfile = profile
 		configureCLITheme(mode)
 		primary := m.primaryStatusLine(" Auto ", false, false)
 		return ansi.Strip(m.renderStatusBlock(primary, 132))
 	}
-	dark := render("dark", true)
-	light := render("light", true)
-	plain := render("dark", false)
+	dark := render("dark", colorprofile.ANSI256)
+	light := render("light", colorprofile.ANSI256)
+	plain := render("dark", colorprofile.NoTTY)
 	if dark != light || dark != plain {
 		t.Fatalf("theme modes changed footer geometry:\ndark:\n%s\nlight:\n%s\nplain:\n%s", dark, light, plain)
 	}
 }
 
 func TestStatusFooterGitAndDividerAdaptToTheme(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 
 	for _, tt := range []struct {
 		mode, gitSGR, borderSGR string
@@ -225,10 +234,8 @@ func TestStatusFooterGitAndDividerAdaptToTheme(t *testing.T) {
 }
 
 func TestContextFooterColorsOnlyValuesByUrgency(t *testing.T) {
-	t.Setenv("COLORTERM", "")
-	t.Setenv("TERM_PROGRAM", "")
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = true
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.ANSI256
 	configureCLITheme("dark")
 
 	normal := strings.Join(renderContextStatusGroups(10, 100, .8), " ")
@@ -248,8 +255,8 @@ func TestContextFooterColorsOnlyValuesByUrgency(t *testing.T) {
 }
 
 func TestStatusFooterNoColorKeepsSemanticLabels(t *testing.T) {
-	defer restoreThemeForTest(colorEnabled, activeCLITheme)
-	colorEnabled = false
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
 	configureCLITheme("dark")
 
 	m := newTestChatTUI()

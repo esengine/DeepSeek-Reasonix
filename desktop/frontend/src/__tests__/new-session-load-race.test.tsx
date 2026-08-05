@@ -269,6 +269,146 @@ await act(async () => {
   root.unmount();
 });
 
+// Reusing a blank tab must invalidate the old hydration request. The backend
+// may return the same tab id, so the request sequence (not the tab id) is the
+// session boundary that prevents orphaned tool cards from coming back.
+const reusedOldHistory = deferred<{
+  messages: HistoryMessage[];
+  startTurn: number;
+  endTurn: number;
+  totalTurns: number;
+  hasOlder: boolean;
+}>();
+const reusedHistoryCalls: string[] = [];
+const reusedTab = tabMeta({ id: "tab-reused", sessionPath: "/sessions/old.jsonl" });
+const reusedTabPage = {
+  messages: [
+    { role: "assistant", content: "", toolCalls: [{ id: "old-call", name: "bash", arguments: "pwd" }] },
+    { role: "tool", toolCallId: "old-call", toolName: "bash", content: "/old" },
+  ] as HistoryMessage[],
+  startTurn: 0,
+  endTurn: 0,
+  totalTurns: 0,
+  hasOlder: false,
+};
+const reusedEmptyPage = { messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false };
+window.go.main.App = {
+  ListTabs: async () => [reusedTab],
+  MetaForTab: async () => meta({ sessionPath: "/sessions/new.jsonl" }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryPageForTab: async () => {
+    reusedHistoryCalls.push("history");
+    return reusedHistoryCalls.length === 1 ? reusedOldHistory.promise : reusedEmptyPage;
+  },
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  EnsureBlankTab: async () => ({ ...reusedTab, sessionPath: "/sessions/new.jsonl", active: true }),
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const reuseRoot = createRoot(rootEl);
+await act(async () => {
+  reuseRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("reused tab startup history", () => reusedHistoryCalls.length === 1);
+
+await act(async () => {
+  await controller?.ensureBlankTab("project", "/repo");
+  await flushPromises();
+});
+eq(reusedHistoryCalls.length, 2, "reusing a blank tab forces a fresh history request");
+eq(controller?.state.items.some((item) => item.kind === "tool" && item.id === "old-call"), false, "fresh blank-tab hydration has no old tool card");
+
+await act(async () => {
+  reusedOldHistory.resolve(reusedTabPage);
+  await reusedOldHistory.promise;
+  await flushPromises();
+});
+eq(controller?.state.items.some((item) => item.kind === "tool" && item.id === "old-call"), false, "late old-session history cannot restore an orphaned tool card");
+
+await act(async () => {
+  reuseRoot.unmount();
+});
+
+// A tab-bar click can overtake EnsureBlankTab while its backend call is still
+// in flight. Its intent must invalidate the older completion immediately, and
+// the stale backend activation must be repaired after it eventually returns.
+const queuedBlank = deferred<TabMeta>();
+const raceTabA = tabMeta({ id: "race-a", active: true, sessionPath: "/sessions/race-a.jsonl" });
+const raceTabB = tabMeta({ id: "race-b", active: false, sessionPath: "/sessions/race-b.jsonl" });
+const raceBlank = tabMeta({ id: "race-blank", active: false, sessionPath: "/sessions/race-blank.jsonl" });
+let raceBackendActiveId = raceTabA.id;
+const raceHistoryCalls: string[] = [];
+const raceSetActiveCalls: string[] = [];
+window.go.main.App = {
+  ListTabs: async () => [raceTabA, raceTabB, raceBlank].map((tab) => ({ ...tab, active: tab.id === raceBackendActiveId })),
+  MetaForTab: async (tabID: string) => meta({ sessionPath: `/sessions/${tabID}.jsonl` }),
+  ContextUsageForTab: async () => context,
+  EffortForTab: async () => effort,
+  BalanceForTab: async () => balance,
+  JobsForTab: async () => jobs,
+  CheckpointsForTab: async () => checkpoints,
+  HistoryPageForTab: async (tabID: string) => {
+    raceHistoryCalls.push(tabID);
+    return reusedEmptyPage;
+  },
+  HistoryCheckpointTurnsForTab: async () => [],
+  ReplayPendingPrompts: async () => {},
+  EnsureBlankTab: async () => {
+    const tab = await queuedBlank.promise;
+    raceBackendActiveId = tab.id;
+    return tab;
+  },
+  SetActiveTab: async (tabID: string) => {
+    raceSetActiveCalls.push(tabID);
+    raceBackendActiveId = tabID;
+  },
+} as Partial<AppBindings> as AppBindings;
+
+controller = undefined;
+const queuedRaceRoot = createRoot(rootEl);
+await act(async () => {
+  queuedRaceRoot.render(<Probe />);
+  await flushPromises();
+});
+await waitFor("queued blank race startup", () => controller?.activeTabId === raceTabA.id);
+
+let pendingBlank: Promise<TabMeta> | undefined;
+await act(async () => {
+  pendingBlank = controller?.ensureBlankTab("project", "/repo");
+  await flushPromises();
+});
+const tabClickIntent = controller?.noteNavigationIntent();
+if (tabClickIntent === undefined) throw new Error("missing queued tab intent");
+
+let pendingTabSwitch: Promise<TabMeta[] | undefined> | undefined;
+await act(async () => {
+  pendingTabSwitch = controller?.switchTab(raceTabB.id, raceTabB, tabClickIntent);
+  await pendingTabSwitch;
+  await flushPromises();
+});
+eq(controller?.activeTabId, raceTabB.id, "queued tab click becomes visible before the older blank completion");
+eq(raceBackendActiveId, raceTabB.id, "queued tab click becomes backend-active before the older blank completion");
+
+await act(async () => {
+  queuedBlank.resolve({ ...raceBlank, active: true });
+  await pendingBlank;
+  await flushPromises();
+});
+eq(controller?.activeTabId, raceTabB.id, "late blank completion cannot replace the newer visible tab");
+eq(raceHistoryCalls.includes(raceBlank.id), false, "stale blank completion does not hydrate the abandoned tab");
+eq(raceBackendActiveId, raceTabB.id, "late blank completion reasserts the newer backend-active tab");
+eq(raceSetActiveCalls.join(","), `${raceTabB.id},${raceTabB.id}`, "stale blank completion repairs backend focus exactly once");
+
+await act(async () => {
+  queuedRaceRoot.unmount();
+});
+
 const guardedStartupTabs = deferred<TabMeta[]>();
 const staleProjectA = "/repo/project-a";
 const targetProjectB = "/repo/project-b";

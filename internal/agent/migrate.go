@@ -32,8 +32,9 @@ type legacyEvent struct {
 type legacyToolCall struct {
 	ID       string `json:"id"`
 	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
+		Name             string `json:"name"`
+		Arguments        string `json:"arguments"`
+		ThoughtSignature string `json:"thought_signature"`
 	} `json:"function"`
 }
 
@@ -530,8 +531,9 @@ type legacyAssistantMsg struct {
 type legacyToolCallObj struct {
 	ID       string `json:"id"`
 	Function struct {
-		Name      string `json:"name"`
-		Arguments string `json:"arguments"`
+		Name             string `json:"name"`
+		Arguments        string `json:"arguments"`
+		ThoughtSignature string `json:"thought_signature"`
 	} `json:"function"`
 }
 
@@ -589,9 +591,10 @@ func transformAndCopyJsonl(src, dst string) error {
 		flatCalls := make([]provider.ToolCall, len(legacyCalls))
 		for i, tc := range legacyCalls {
 			flatCalls[i] = provider.ToolCall{
-				ID:        tc.ID,
-				Name:      tc.Function.Name,
-				Arguments: tc.Function.Arguments,
+				ID:               tc.ID,
+				Name:             tc.Function.Name,
+				Arguments:        tc.Function.Arguments,
+				ThoughtSignature: tc.Function.ThoughtSignature,
 			}
 		}
 		// Re-serialize the full message with flat tool_calls. We only modify
@@ -974,7 +977,10 @@ func reconstructSession(path string) ([]provider.Message, error) {
 		case "model.final":
 			m := provider.Message{Role: provider.RoleAssistant, Content: e.Content, ReasoningContent: e.ReasoningContent}
 			for _, tc := range e.ToolCalls {
-				m.ToolCalls = append(m.ToolCalls, provider.ToolCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
+				m.ToolCalls = append(m.ToolCalls, provider.ToolCall{
+					ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments,
+					ThoughtSignature: tc.Function.ThoughtSignature,
+				})
 				toolName[tc.ID] = tc.Function.Name
 			}
 			msgs = append(msgs, m)

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/alecthomas/chroma/v2"
 	"github.com/alecthomas/chroma/v2/formatters"
 	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/alecthomas/chroma/v2/styles"
@@ -32,10 +33,19 @@ const (
 )
 
 var (
-	diffChromaStyle = styles.Get("github-dark")
-	diffChromaFmt   = formatters.Get("terminal256")
-	hunkRE          = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
+	diffChromaFmt = formatters.Get("terminal256")
+	hunkRE        = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 )
+
+// Resolve on each render so runtime theme switches and theme-sweep preview
+// frames cannot retain syntax colours from the previous light/dark mode.
+func activeDiffChromaStyle() *chroma.Style {
+	mode := chroma.Dark
+	if activeCLITheme.name == "light" {
+		mode = chroma.Light
+	}
+	return styles.GetForMode("github-dark", mode)
+}
 
 // diffStat renders a change's "+A -B" tally, green/red, omitting a zero side.
 func diffStat(d event.FileDiff) string {
@@ -139,7 +149,7 @@ func diffBar(sign byte, code, path string, width int, bg, signFg string, lineNo,
 		barW = 4
 	}
 	code = clampPlain(code, barW-2)
-	if !colorEnabled {
+	if !colorOn() {
 		return "  " + gutter + " " + string(sign) + " " + code
 	}
 	hl := reapplyBG(highlightCode(path, code), bg)
@@ -196,7 +206,7 @@ func atoi(s string) int {
 
 func highlightClamped(code, path string, w int) string {
 	c := clampPlain(code, w)
-	if !colorEnabled {
+	if !colorOn() {
 		return c
 	}
 	return highlightCode(path, c)
@@ -257,7 +267,7 @@ func highlightCode(path, code string) string {
 		return code
 	}
 	var b strings.Builder
-	if diffChromaFmt.Format(&b, diffChromaStyle, it) != nil {
+	if diffChromaFmt.Format(&b, activeDiffChromaStyle(), it) != nil {
 		return code
 	}
 	return strings.TrimRight(b.String(), "\n")

@@ -55,6 +55,20 @@ func TestDeliveryReviewGateExplainsOpaqueMutationRecovery(t *testing.T) {
 	}
 }
 
+func TestNonDeliveryProfileNeverRequiresStructuredReview(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "review", readOnly: true})
+	reg.Add(fakeTool{name: "security_review", readOnly: true})
+	a := &Agent{deliveryProfile: false, evidence: ledger, tools: reg}
+
+	if got := a.deliveryReviewGateFailure(); got != "" {
+		t.Fatalf("non-Delivery review gate = %q, want disabled", got)
+	}
+}
+
 func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	ledger := evidence.NewLedger()
 	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/permission/gate.go"}`), true, false))
@@ -86,6 +100,32 @@ func TestDeliveryReviewGateHighRiskStillRequiresSecurityReview(t *testing.T) {
 	}`)})
 	if got := a.deliveryReviewGateFailure(); got != "" {
 		t.Fatalf("review gate = %q after both reports, want ready", got)
+	}
+}
+
+func TestDeliveryReviewGateMediumAcceptsHostProvenVerificationAndCoverage(t *testing.T) {
+	ledger := evidence.NewLedger()
+	ledger.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	ledger.Record(evidence.ReceiptFromToolCall("bash", json.RawMessage(`{"command":"go test ./..."}`), true, true))
+	ledger.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, true))
+	ledger.Record(evidence.Receipt{ToolName: "complete_step", Success: true, Args: json.RawMessage(`{
+		"step":"fix parser",
+		"evidence":[{"kind":"verification","command":"go test ./..."}]
+	}`)})
+
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "review", readOnly: true})
+	a := &Agent{deliveryProfile: true, evidence: ledger, tools: reg}
+	if got := a.deliveryReviewGateFailure(); got != "" {
+		t.Fatalf("medium-risk host proof was rejected: %q", got)
+	}
+
+	missingVerification := evidence.NewLedger()
+	missingVerification.Record(evidence.ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, false))
+	missingVerification.Record(evidence.ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/agent/parser.go"}`), true, true))
+	a.evidence = missingVerification
+	if got := a.deliveryReviewGateFailure(); !strings.Contains(got, "host-proven verification") {
+		t.Fatalf("medium-risk review without verification = %q, want host-proof guidance", got)
 	}
 }
 

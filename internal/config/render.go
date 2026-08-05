@@ -97,8 +97,14 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# language = \"zh\"   # desktop UI language; empty/auto = browser/OS auto-detect\n")
 		}
+		if currency := c.DesktopCurrency(); currency != "" {
+			fmt.Fprintf(&b, "currency = %q   # official pricing currency: CNY|USD; empty/auto follows language\n", currency)
+		} else {
+			b.WriteString("# currency = \"USD\"   # official pricing currency: CNY|USD; empty/auto follows language\n")
+		}
 		fmt.Fprintf(&b, "layout_style = %q   # desktop layout: classic|workbench|creation\n", c.DesktopLayoutStyle())
 		fmt.Fprintf(&b, "theme = %q   # desktop only: auto|dark|light\n", c.DesktopTheme())
+		fmt.Fprintf(&b, "terminal_theme = %q   # integrated terminal: auto|dark|light; auto follows the desktop app\n", c.DesktopTerminalTheme())
 		if style := c.DesktopThemeStyle(); style != "" {
 			fmt.Fprintf(&b, "theme_style = %q   # desktop accent palette\n", style)
 		} else {
@@ -114,8 +120,8 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "status_bar_items = %s   # desktop: ordered visible bottom status bar items\n", renderStringArray(c.DesktopStatusBarItems()))
 		fmt.Fprintf(&b, "default_tool_approval_mode = %q   # desktop: Ask/Auto/YOLO default for newly-created sessions\n", c.DesktopDefaultToolApprovalMode())
 		fmt.Fprintf(&b, "check_updates = %v   # desktop: check for new versions on startup\n", c.DesktopCheckUpdates())
-		fmt.Fprintf(&b, "telemetry = %v   # desktop: anonymous launch ping (install id + version + OS); never content\n", c.DesktopTelemetry())
-		fmt.Fprintf(&b, "metrics = %v   # desktop: aggregate desktop metrics (anonymous signal/bucket counts); never content\n", c.DesktopMetrics())
+		fmt.Fprintf(&b, "telemetry = %v   # desktop: anonymous launch ping + scrubbed next-launch native crash diagnostics; never content\n", c.DesktopTelemetry())
+		fmt.Fprintf(&b, "metrics = %v   # desktop: aggregate quality/lifecycle metrics (anonymous signal/bucket counts); never content\n", c.DesktopMetrics())
 		// A non-nil empty slice is intentional: provider_access = [] means the
 		// user removed every desktop access entry. Omitting it would make the next
 		// load treat the config as legacy and infer access again.
@@ -138,6 +144,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 
 	if scope != RenderScopeProject {
+		if c.CLITelemetryConfigured() {
+			b.WriteString("[telemetry]\n")
+			fmt.Fprintf(&b, "cli_metrics = %q   # CLI content-free usage metrics: auto|on|off; auto requires a local interactive terminal\n\n", c.CLITelemetryMode())
+		}
+
 		b.WriteString("[notifications]\n")
 		fmt.Fprintf(&b, "enabled = %v   # system notifications for CLI and desktop turns; default off\n", c.Notifications.Enabled)
 		fmt.Fprintf(&b, "turn_done = %v   # notify when a turn finishes\n", c.Notifications.TurnDone)
@@ -202,7 +213,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	if c.Agent.SystemPromptFile != "" {
 		fmt.Fprintf(&b, "system_prompt_file = %q\n", c.Agent.SystemPromptFile)
 	} else {
-		b.WriteString("# system_prompt_file = \"prompts/system.md\"   # overrides system_prompt when set\n")
+		b.WriteString("# system_prompt_file = \"prompts/system.md\"   # project paths stay in <workspace>; user paths may fall back to <reasonix home>\n")
 	}
 	fmt.Fprintf(&b, "temperature       = %s\n", formatFloat(c.Agent.Temperature))
 	if strings.TrimSpace(c.Agent.RecoveryModel) != "" {
@@ -318,11 +329,20 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.AuthHeader {
 				b.WriteString("auth_header = true   # Anthropic-compatible: send Authorization: Bearer <api_key> instead of x-api-key\n")
 			}
+			if p.ResponsesMode != "" {
+				fmt.Fprintf(&b, "responses_mode = %q   # responses provider: stateless|stateful\n", p.ResponsesMode)
+			}
+			if p.ResponsesStateful != nil {
+				fmt.Fprintf(&b, "responses_stateful = %t   # legacy responses mode switch\n", *p.ResponsesStateful)
+			}
 			if p.BalanceURL != "" {
 				fmt.Fprintf(&b, "balance_url = %q   # optional; wallet-balance endpoint shown in the status bar\n", p.BalanceURL)
 			}
 			if p.ContextWindow > 0 {
 				fmt.Fprintf(&b, "context_window = %d   # tokens; compaction triggers near this limit\n", p.ContextWindow)
+			}
+			if p.MaxOutputTokens != 0 {
+				fmt.Fprintf(&b, "max_output_tokens = %d   # total output cap; 0 = provider default, negative = omit when optional\n", p.MaxOutputTokens)
 			}
 			if p.Price != nil {
 				fmt.Fprintf(&b, "price       = %s   # provider-wide fallback, per 1M tokens\n", renderPricingInline(p.Price))
@@ -345,8 +365,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if p.VisionDetail != "" {
 				fmt.Fprintf(&b, "vision_detail = %q   # openai image detail hint: low|high; empty = auto\n", p.VisionDetail)
 			}
+			if p.WebSearch != nil {
+				fmt.Fprintf(&b, "web_search  = %t   # provider-executed web_search tool; omitted defaults on for supported official DeepSeek APIs\n", *p.WebSearch)
+			}
 			if p.ReasoningProtocol != "" {
-				fmt.Fprintf(&b, "reasoning_protocol = %q   # auto|deepseek|openai|none; overrides model/endpoint reasoning detection\n", p.ReasoningProtocol)
+				fmt.Fprintf(&b, "reasoning_protocol = %q   # auto|deepseek|glm|openai|none; overrides model/endpoint reasoning detection\n", p.ReasoningProtocol)
 			}
 			if len(p.SupportedEfforts) > 0 {
 				fmt.Fprintf(&b, "supported_efforts = %s   # custom /effort levels exposed by this provider; overrides the built-in Kind/BaseURL default\n", renderStringArray(p.SupportedEfforts))
@@ -355,7 +378,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 				fmt.Fprintf(&b, "default_effort    = %q   # used when /effort is auto or unset; must be one of supported_efforts\n", p.DefaultEffort)
 			}
 			if len(p.ModelOverrides) > 0 {
-				fmt.Fprintf(&b, "model_overrides   = %s   # per-model context/reasoning/vision overrides for mixed gateways\n", renderModelOverrides(p.ModelOverrides))
+				fmt.Fprintf(&b, "model_overrides   = %s   # per-model context/output/reasoning/vision overrides for mixed gateways\n", renderModelOverrides(p.ModelOverrides))
 			}
 			if p.NoProxy {
 				b.WriteString("no_proxy    = true   # reach this base_url directly, never via the proxy\n")
@@ -378,6 +401,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("]\n")
 	}
 	fmt.Fprintf(&b, "bash_timeout_seconds = %d   # foreground safety cap; set 0 for no tool-local cap\n", c.BashTimeoutSeconds())
+	fmt.Fprintf(&b, "mcp_startup_timeout_seconds = %d   # background initialize + tools/list safety cap; per-plugin overrides may raise it\n", c.MCPStartupTimeoutSeconds())
 	fmt.Fprintf(&b, "mcp_call_timeout_seconds = %d   # default MCP call safety cap; per-plugin/tool overrides may raise it\n\n", c.MCPCallTimeoutSeconds())
 
 	b.WriteString("[tools.background_jobs]\n")
@@ -428,6 +452,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		mode = "ask"
 	}
 	fmt.Fprintf(&b, "mode  = %q\n", mode)
+	if c.Permissions.AllowDynamicBash {
+		b.WriteString("allow_dynamic_bash = true   # advanced: let mode=allow cover command substitution and interpreter -c/-e\n")
+	} else {
+		b.WriteString("# allow_dynamic_bash = false   # advanced opt-in; deny/ask and exact rules still take precedence\n")
+	}
 	b.WriteString(renderRuleList("deny", c.Permissions.Deny, `["Bash(rm -rf*)", "Bash(git push*)"]   # hard-blocked in every mode`))
 	b.WriteString(renderRuleList("allow", c.Permissions.Allow, `["Bash(go test:*)", "Bash(git status:*)"]   # never prompted`))
 	b.WriteString(renderRuleList("ask", c.Permissions.Ask, `["Edit(src/**)"]   # force a prompt even if otherwise allowed`))
@@ -699,10 +728,12 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	b.WriteString("# External MCP servers. type: \"stdio\" (default, a subprocess) | \"http\" | \"sse\".\n")
 	b.WriteString("# ${VAR} / ${VAR:-default} are expanded from the environment in command/args/env/url/headers.\n")
-	if len(c.Plugins) == 0 {
+	plugins := tomlPluginsForScope(c.Plugins, scope)
+	if len(plugins) == 0 {
 		b.WriteString("# [[plugins]]\n")
 		b.WriteString("# name    = \"example\"\n")
 		b.WriteString("# command = \"reasonix-plugin-example\"\n")
+		b.WriteString("# startup_timeout_seconds = 60    # optional initialize + tools/list cap\n")
 		b.WriteString("# call_timeout_seconds = 600       # optional per-server MCP call timeout\n")
 		b.WriteString("# tool_timeout_seconds = { \"generate_video\" = 1800 }   # raw MCP tool names\n")
 		b.WriteString("# [[plugins]]                                  # a remote server over Streamable HTTP\n")
@@ -711,7 +742,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		b.WriteString("# url     = \"https://mcp.stripe.com\"\n")
 		b.WriteString("# headers = { Authorization = \"Bearer ${STRIPE_KEY}\" }\n")
 	} else {
-		for _, pl := range c.Plugins {
+		for _, pl := range plugins {
 			b.WriteString("\n[[plugins]]\n")
 			fmt.Fprintf(&b, "name    = %q\n", pl.Name)
 			if pl.Type != "" {
@@ -732,6 +763,10 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			if len(pl.Env) > 0 {
 				fmt.Fprintf(&b, "env     = %s\n", renderStringMap(pl.Env))
 			}
+			if pl.StartupTimeoutSeconds > 0 {
+				b.WriteString("# Per-server MCP initialize + tools/list timeout; 0 keeps the global/default cap.\n")
+				fmt.Fprintf(&b, "startup_timeout_seconds = %d\n", pl.StartupTimeoutSeconds)
+			}
 			if pl.CallTimeoutSeconds > 0 {
 				b.WriteString("# Per-server MCP call timeout; 0 keeps the global/default cap.\n")
 				fmt.Fprintf(&b, "call_timeout_seconds = %d\n", pl.CallTimeoutSeconds)
@@ -747,6 +782,31 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	}
 
 	return b.String()
+}
+
+// tomlPluginsForScope keeps merged runtime entries in their owning config
+// source. Unknown provenance is retained for callers that construct a Config
+// directly before saving it to a specific target.
+func tomlPluginsForScope(plugins []PluginEntry, scope RenderScope) []PluginEntry {
+	if scope == RenderScopeFull {
+		return plugins
+	}
+	out := make([]PluginEntry, 0, len(plugins))
+	for _, pl := range plugins {
+		switch pl.Source {
+		case MCPSourceUnknown:
+			out = append(out, pl)
+		case MCPSourceUserConfig:
+			if scope == RenderScopeUser {
+				out = append(out, pl)
+			}
+		case MCPSourceProjectConfig:
+			if scope == RenderScopeProject {
+				out = append(out, pl)
+			}
+		}
+	}
+	return out
 }
 
 // RenderTOMLProjectDelta generates TOML containing only the sections and fields
@@ -963,11 +1023,20 @@ func RenderTOMLProjectDelta(c *Config) string {
 			if p.AuthHeader {
 				b.WriteString("auth_header = true\n")
 			}
+			if p.ResponsesMode != "" {
+				fmt.Fprintf(&b, "responses_mode = %q\n", p.ResponsesMode)
+			}
+			if p.ResponsesStateful != nil {
+				fmt.Fprintf(&b, "responses_stateful = %t\n", *p.ResponsesStateful)
+			}
 			if p.BalanceURL != "" {
 				fmt.Fprintf(&b, "balance_url = %q\n", p.BalanceURL)
 			}
 			if p.ContextWindow > 0 {
 				fmt.Fprintf(&b, "context_window = %d\n", p.ContextWindow)
+			}
+			if p.MaxOutputTokens != 0 {
+				fmt.Fprintf(&b, "max_output_tokens = %d\n", p.MaxOutputTokens)
 			}
 			if p.Price != nil {
 				fmt.Fprintf(&b, "price       = %s\n", renderPricingInline(p.Price))
@@ -989,6 +1058,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 			}
 			if p.VisionDetail != "" {
 				fmt.Fprintf(&b, "vision_detail = %q\n", p.VisionDetail)
+			}
+			if p.WebSearch != nil {
+				fmt.Fprintf(&b, "web_search  = %t\n", *p.WebSearch)
 			}
 			if p.ReasoningProtocol != "" {
 				fmt.Fprintf(&b, "reasoning_protocol = %q\n", p.ReasoningProtocol)
@@ -1012,6 +1084,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 	// [tools]
 	if len(c.Tools.Enabled) > 0 ||
 		(c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0) ||
+		(c.Tools.MCPStartupTimeoutSeconds != nil && *c.Tools.MCPStartupTimeoutSeconds > 0) ||
 		(c.Tools.MCPCallTimeoutSeconds != nil && *c.Tools.MCPCallTimeoutSeconds > 0) {
 		b.WriteString("[tools]\n")
 		if len(c.Tools.Enabled) > 0 {
@@ -1019,6 +1092,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if c.Tools.BashTimeoutSeconds != nil && *c.Tools.BashTimeoutSeconds != 0 {
 			fmt.Fprintf(&b, "bash_timeout_seconds = %d\n", *c.Tools.BashTimeoutSeconds)
+		}
+		if c.Tools.MCPStartupTimeoutSeconds != nil && *c.Tools.MCPStartupTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "mcp_startup_timeout_seconds = %d\n", *c.Tools.MCPStartupTimeoutSeconds)
 		}
 		if c.Tools.MCPCallTimeoutSeconds != nil && *c.Tools.MCPCallTimeoutSeconds > 0 {
 			fmt.Fprintf(&b, "mcp_call_timeout_seconds = %d\n", *c.Tools.MCPCallTimeoutSeconds)
@@ -1079,6 +1155,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if mode != "ask" {
 			fmt.Fprintf(&b, "mode = %q\n", mode)
 		}
+		if c.Permissions.AllowDynamicBash {
+			b.WriteString("allow_dynamic_bash = true\n")
+		}
 		if len(c.Permissions.Deny) > 0 {
 			fmt.Fprintf(&b, "deny = %s\n", renderStringArray(c.Permissions.Deny))
 		}
@@ -1126,7 +1205,7 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 
 	// [[plugins]] — always include when set; replaces all existing entries
-	for _, pl := range c.Plugins {
+	for _, pl := range tomlPluginsForScope(c.Plugins, RenderScopeProject) {
 		b.WriteString("[[plugins]]\n")
 		fmt.Fprintf(&b, "name    = %q\n", pl.Name)
 		if pl.Type != "" {
@@ -1146,6 +1225,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		}
 		if len(pl.Env) > 0 {
 			fmt.Fprintf(&b, "env     = %s\n", renderStringMap(pl.Env))
+		}
+		if pl.StartupTimeoutSeconds > 0 {
+			fmt.Fprintf(&b, "startup_timeout_seconds = %d\n", pl.StartupTimeoutSeconds)
 		}
 		if pl.CallTimeoutSeconds > 0 {
 			b.WriteString("# Per-server MCP call timeout; 0 keeps the global/default cap.\n")
@@ -1509,11 +1591,14 @@ func renderModelOverride(ov ProviderModelOverride) string {
 	if ov.ContextWindow > 0 {
 		parts = append(parts, fmt.Sprintf("context_window = %d", ov.ContextWindow))
 	}
+	if ov.MaxOutputTokens != 0 {
+		parts = append(parts, fmt.Sprintf("max_output_tokens = %d", ov.MaxOutputTokens))
+	}
 	return "{ " + strings.Join(parts, ", ") + " }"
 }
 
 func modelOverrideEmpty(ov ProviderModelOverride) bool {
-	return ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.ContextWindow <= 0
+	return ov.ReasoningProtocol == "" && len(ov.SupportedEfforts) == 0 && ov.DefaultEffort == "" && ov.Vision == nil && ov.ContextWindow <= 0 && ov.MaxOutputTokens == 0
 }
 
 func hasPositiveIntMap(m map[string]int) bool {

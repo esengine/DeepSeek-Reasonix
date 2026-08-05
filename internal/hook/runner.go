@@ -77,6 +77,13 @@ func (r *Runner) Has(event Event) bool {
 // keeps streaming reasoning live unless a transform is actually wired up.
 func (r *Runner) HasPostLLMCall() bool { return r.Has(PostLLMCall) }
 
+// ToolMutationHooksEnabled reports whether any hook runs around a tool call.
+// These hooks execute user shell code and may mutate paths that the tool itself
+// does not declare, so checkpoint coverage must account for them.
+func (r *Runner) ToolMutationHooksEnabled() bool {
+	return r.Has(PreToolUse) || r.Has(PostToolUse) || r.Has(PostToolUseFailure)
+}
+
 // PreToolUse fires before a tool call. block=true means the call must be
 // refused; message is the reason (fed back to the model and shown to the user).
 func (r *Runner) PreToolUse(ctx context.Context, name string, args json.RawMessage) (block bool, message string) {

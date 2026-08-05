@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -273,6 +274,56 @@ func TestUpdateSinkApprovalAllowAlways(t *testing.T) {
 	}
 }
 
+func TestUpdateSinkPermissionCarriesStructuredContext(t *testing.T) {
+	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
+		raw, _ := json.Marshal(params)
+		var p PermissionRequestParams
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("permission params: %v", err)
+		}
+		if string(p.ToolCall.RawInput) != `{"path":"src/main.go","content":"next"}` {
+			t.Fatalf("rawInput = %s", p.ToolCall.RawInput)
+		}
+		if len(p.ToolCall.Locations) != 1 || !strings.HasSuffix(filepath.ToSlash(p.ToolCall.Locations[0].Path), "/src/main.go") {
+			t.Fatalf("locations = %+v", p.ToolCall.Locations)
+		}
+		meta, ok := p.ToolCall.Meta["reasonix.io"].(map[string]any)
+		if !ok || meta["tool"] != "write_file" || meta["approvalId"] != "structured" || meta["reason"] != "write requested by the active goal" {
+			t.Fatalf("metadata = %#v", p.ToolCall.Meta)
+		}
+		var wire map[string]any
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatalf("permission wire shape: %v", err)
+		}
+		toolCall, ok := wire["toolCall"].(map[string]any)
+		if !ok {
+			t.Fatalf("toolCall wire shape = %#v", wire["toolCall"])
+		}
+		if _, present := toolCall["reason"]; present {
+			t.Fatalf("ACP v1 toolCall has non-standard root reason: %#v", toolCall)
+		}
+		res, _ := json.Marshal(PermissionRequestResult{Outcome: PermissionOutcome{Outcome: "selected", OptionID: string(OptRejectOnce)}})
+		return res, nil
+	}}
+	sink := newUpdateSink(fn, "sess-structured")
+	sink.bindCwd(t.TempDir())
+	got := make(chan approveCall, 1)
+	sink.bindApprove(func(id string, allow, session, persist bool) { got <- approveCall{id, allow, session, persist} })
+	sink.Emit(event.Event{Kind: event.ApprovalRequest, Approval: event.Approval{
+		ID: "structured", Tool: "write_file", Subject: "src/main.go",
+		Reason:   "write requested by the active goal",
+		RawInput: json.RawMessage(`{"path":"src/main.go","content":"next"}`),
+	}})
+	select {
+	case decision := <-got:
+		if decision.allow {
+			t.Fatalf("rejected permission was allowed: %+v", decision)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("permission was never resolved")
+	}
+}
+
 func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 	fn := &fakeNotifier{onReq: func(_ string, params any) (json.RawMessage, error) {
 		raw, _ := json.Marshal(params)
@@ -321,6 +372,52 @@ func TestUpdateSinkApprovalBashPrefix(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("approve was never called")
+	}
+}
+
+func TestPermissionMetaOnlyTrustsForegroundStaticBash(t *testing.T) {
+	cwd := t.TempDir()
+	sink := newUpdateSink(&fakeNotifier{}, "sess-static-command")
+	sink.bindCwd(cwd)
+
+	for _, tc := range []struct {
+		name     string
+		rawInput string
+		wantArgv []string
+	}{
+		{name: "static", rawInput: `{"command":"go test ./..."}`, wantArgv: []string{"go", "test", "./..."}},
+		{name: "quoted static", rawInput: `{"command":"node -e 'process.exit(0)'"}`, wantArgv: []string{"node", "-e", "process.exit(0)"}},
+		{name: "expansion", rawInput: `{"command":"go test $PACKAGE"}`},
+		{name: "glob expansion", rawInput: `{"command":"go test ./*.go"}`},
+		{name: "brace expansion", rawInput: `{"command":"printf '%s' {a,b}"}`},
+		{name: "tilde expansion", rawInput: `{"command":"test -f ~/.config/reasonix.toml"}`},
+		{name: "control syntax", rawInput: `{"command":"go test ./... && git status"}`},
+		{name: "background", rawInput: `{"command":"go test ./...","run_in_background":true}`},
+		{name: "preserved descendants", rawInput: `{"command":"go test ./...","preserve_background_processes":true}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			meta := sink.permissionMeta(event.Approval{
+				ID: "command", Tool: "bash", Subject: "command", RawInput: json.RawMessage(tc.rawInput),
+			})
+			reasonix, ok := meta["reasonix.io"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasonix metadata = %#v", meta)
+			}
+			argv, present := reasonix["argv"]
+			if len(tc.wantArgv) == 0 {
+				if present {
+					t.Fatalf("unsafe command received trusted argv: %#v", argv)
+				}
+				return
+			}
+			got, ok := argv.([]string)
+			if !ok || strings.Join(got, "\x00") != strings.Join(tc.wantArgv, "\x00") {
+				t.Fatalf("argv = %#v, want %#v", argv, tc.wantArgv)
+			}
+			if reasonix["commandSchemaVersion"] != 1 || reasonix["cwd"] != filepath.Clean(cwd) {
+				t.Fatalf("trusted command metadata = %#v", reasonix)
+			}
+		})
 	}
 }
 
@@ -542,6 +639,18 @@ func TestApprovalOptionsFreshDynamicToolOnlyAllowOnceOrReject(t *testing.T) {
 	}
 }
 
+func TestDynamicBashApprovalOptionsUseExactSessionLiteral(t *testing.T) {
+	const command = "git status $(touch /tmp/reasonix-dynamic-approval)"
+	options := approvalOptions("bash", command, false)
+	if len(options) != 3 || options[1].Kind != OptAllowAlways {
+		t.Fatalf("dynamic Bash options = %+v, want ordinary options with session grant", options)
+	}
+	want := "Bash=" + command
+	if !strings.Contains(options[1].Name, want) {
+		t.Fatalf("dynamic Bash session option = %q, want exact rule %q", options[1].Name, want)
+	}
+}
+
 func TestClipKeepsValidUTF8(t *testing.T) {
 	text := strings.Repeat("a", maxResultChars-1) + "界" + strings.Repeat("b", 20)
 	got := clip(text)
@@ -564,5 +673,60 @@ func TestClip(t *testing.T) {
 	}
 	if !strings.Contains(got, "10 more chars truncated") {
 		t.Errorf("clip note missing: %q", got[len(got)-40:])
+	}
+}
+
+// Replay must show the user-authored view, not the persisted wire form:
+// injected transient blocks and protocol markers stay in history for parsing
+// but never reach the client (#6882).
+func TestUpdateSinkReplayStripsInjectedWrappers(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+	sink.replay([]provider.Message{
+		{
+			Role: provider.RoleUser,
+			Content: "<response-language>\nFinal answer language preference: use Simplified Chinese.\n</response-language>\n" +
+				"Introduce yourself",
+		},
+		{
+			Role:    provider.RoleAssistant,
+			Content: "Here you go.\n[goal:continue]",
+		},
+	})
+
+	u := fn.updateMap(t, 0)
+	content, _ := u["content"].(map[string]any)
+	if content["text"] != "Introduce yourself" {
+		t.Fatalf("replayed user text = %v, want the authored text only", content["text"])
+	}
+	u = fn.updateMap(t, 1)
+	content, _ = u["content"].(map[string]any)
+	if content["text"] != "Here you go." {
+		t.Fatalf("replayed assistant text = %v, want goal marker stripped", content["text"])
+	}
+}
+
+// TestUpdateSinkDropsSubagentProgress locks the ACP policy for the reserved
+// sub-agent progress ToolProgress channels: every body stays out of ACP
+// notifications, exactly like ordinary ToolProgress (which has no handler).
+func TestUpdateSinkDropsSubagentProgress(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressStatusName, Output: "running",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressReasoningName, Output: "thinking",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressTextName, Output: "answer preview",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressNoticeName, Output: "heads up",
+		Truncated: true,
+	}})
+	if got := len(fn.notifs); got != 0 {
+		t.Fatalf("sub-agent progress produced %d notifications, want 0", got)
 	}
 }

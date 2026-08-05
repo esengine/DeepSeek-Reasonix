@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent/testutil"
@@ -34,9 +35,9 @@ func (t *steerThenCancelTool) Execute(context.Context, json.RawMessage) (string,
 }
 
 // TestRunFlushesUnconsumedSteersOnCancel proves a steer that is still queued
-// when the turn is cancelled survives into the session (history + next turn's
-// context) and emits its Steer event, instead of being silently dropped
-// (#6238: queued guidance vanished from both the model and the transcript).
+// when the turn is cancelled survives in local history but not the next model
+// context, and emits an explicit warning instead of presenting it as
+// successfully applied guidance.
 func TestRunFlushesUnconsumedSteersOnCancel(t *testing.T) {
 	mp := testutil.NewMock("m",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "steer_then_cancel", Arguments: `{}`}}},
@@ -45,10 +46,10 @@ func TestRunFlushesUnconsumedSteersOnCancel(t *testing.T) {
 	hijack := &steerThenCancelTool{steerText: "use plan B"}
 	reg := tool.NewRegistry()
 	reg.Add(hijack)
-	var steerEvents []string
+	var notices []event.Event
 	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Steer {
-			steerEvents = append(steerEvents, e.Text)
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeUnappliedSteer {
+			notices = append(notices, e)
 		}
 	})
 	a := New(mp, reg, NewSession(""), Options{}, sink)
@@ -66,25 +67,55 @@ func TestRunFlushesUnconsumedSteersOnCancel(t *testing.T) {
 	}
 
 	var persisted []string
+	var localOnly bool
 	for _, m := range a.Session().Messages {
-		if m.Role != provider.RoleUser {
-			continue
-		}
 		if text, ok := SteerText(m.Content); ok {
 			persisted = append(persisted, text)
+			localOnly = m.LocalOnly && m.Role == provider.RoleTool &&
+				m.ToolCallID == provider.LocalOnlyToolID && m.Name == provider.LocalOnlyToolName
 		}
 	}
 	if len(persisted) != 1 || persisted[0] != "use plan B" {
 		t.Fatalf("unconsumed steer should be persisted once and round-trip through SteerText, got %v", persisted)
 	}
-	if len(steerEvents) != 1 || steerEvents[0] != "use plan B" {
-		t.Fatalf("flushed steer should emit its Steer event, got %v", steerEvents)
+	if !localOnly {
+		t.Fatal("unconsumed steer must use the provider-excluded local-only sentinel")
+	}
+	for _, m := range provider.ModelMessages(a.Session().Snapshot()) {
+		if text, ok := SteerText(m.Content); ok {
+			t.Fatalf("unconsumed steer %q leaked into the next model context", text)
+		}
+	}
+	if len(notices) != 1 || notices[0].Level != event.LevelWarn ||
+		!strings.Contains(notices[0].Text, "use plan B") ||
+		!strings.Contains(notices[0].Text, "not applied") {
+		t.Fatalf("flushed steer should emit an explicit warning, got %+v", notices)
 	}
 	if n := a.steerQueueLen(); n != 0 {
 		t.Fatalf("steer queue should be empty after the turn, len=%d", n)
 	}
 	if a.Steer("after the turn") {
 		t.Fatalf("Steer must be rejected once the turn has exited")
+	}
+}
+
+// TestCloseSteerIntakeIfIdleMakesAdmissionLinearizable pins the normal turn
+// exit boundary: once the final queue check observes no pending guidance, a
+// later steer must be rejected rather than accepted and flushed as unapplied.
+func TestCloseSteerIntakeIfIdleMakesAdmissionLinearizable(t *testing.T) {
+	a := New(nil, tool.NewRegistry(), NewSession(""), Options{}, event.Discard)
+	a.steerMu.Lock()
+	a.steerRunActive = true
+	a.steerMu.Unlock()
+
+	if !a.closeSteerIntakeIfIdle() {
+		t.Fatal("empty steer intake should close")
+	}
+	if a.Steer("too late") {
+		t.Fatal("steer after the final queue check must be rejected")
+	}
+	if n := a.steerQueueLen(); n != 0 {
+		t.Fatalf("rejected steer remained queued, len=%d", n)
 	}
 }
 

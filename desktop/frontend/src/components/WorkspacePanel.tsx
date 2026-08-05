@@ -22,6 +22,7 @@ import {
   Minimize2,
   RefreshCw,
   Search,
+  TerminalSquare,
   X,
 } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -51,9 +52,11 @@ import type {
   FilePreview,
   GitCommitView,
   GitCommitDetailView,
+  RewindResultView,
   WorkspaceChangeDetailView,
   WorkspaceChangesView,
 } from "../lib/types";
+import { workspaceGitStatusLabel } from "../lib/workspaceChanges";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { formatSelectionReference, languageFor } from "../lib/selectedTextContext";
 import { cleanGitDiff } from "../lib/diff";
@@ -192,8 +195,10 @@ export function WorkspacePanel({
   onPreviewModeChange,
   onAddToChat,
   onAddCodeToChat,
+  onOpenInTerminal,
   onRequestPanelWidth,
   onFileTreeRefresh,
+  onSessionRevertCommitted,
   refreshKey,
   initialViewMode = "files",
   revealPathRequest,
@@ -216,8 +221,10 @@ export function WorkspacePanel({
   onPreviewModeChange?: (active: boolean) => void;
   onAddToChat?: (text: string) => void;
   onAddCodeToChat?: (path: string, code: string) => void;
+  onOpenInTerminal?: (path: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
+  onSessionRevertCommitted?: (tabId: string, result: RewindResultView) => void;
   refreshKey?: number;
   initialViewMode?: "files" | "changed";
   revealPathRequest?: WorkspaceRevealRequest | null;
@@ -273,6 +280,8 @@ export function WorkspacePanel({
   const [treeWidthMode, setTreeWidthMode] = useState<WorkspaceSplitTreeWidthMode>("manual");
   const [treeResizing, setTreeResizing] = useState(false);
   const [recentOpen, setRecentOpen] = useState(false);
+  const [codeSearchRequestPending, setCodeSearchRequestPending] = useState(false);
+  const [codeSearchRequestPath, setCodeSearchRequestPath] = useState<string | null>(null);
   /** Changes overview: commit history is secondary and starts collapsed. */
   const [commitHistoryOpen, setCommitHistoryOpen] = useState(false);
   const lastPreviewModeActiveRef = useRef<boolean | null>(null);
@@ -870,22 +879,61 @@ export function WorkspacePanel({
         {changes.map((change) => {
           const dir = parentPath(change.path);
           return (
-            <button
-              key={change.path}
-              className="workspace-change"
-              type="button"
-              onClick={() => selectFile(change.path)}
-            >
-              <FileText size={14} />
-              <span className="workspace-change__body">
-                <span className="workspace-change__name">{basename(change.path)}</span>
-                {dir && <span className="workspace-change__path">{dir}</span>}
-                {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
-              </span>
-              <span className="workspace-change__meta">
-                {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{change.gitStatus}</span>}
-              </span>
-            </button>
+            <div key={change.path} className="workspace-change-row">
+              <button
+                className="workspace-change"
+                type="button"
+                onClick={() => selectFile(change.path)}
+              >
+                <FileText size={14} />
+                <span className="workspace-change__body">
+                  <span className="workspace-change__name">{basename(change.path)}</span>
+                  {dir && <span className="workspace-change__path">{dir}</span>}
+                  {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
+                </span>
+                <span className="workspace-change__meta">
+                  {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{workspaceGitStatusLabel(change.gitStatus, t)}</span>}
+                </span>
+              </button>
+              {change.canSessionRevert && change.sources.includes("session") && (
+                <button
+                  type="button"
+                  className="workspace-change__revert"
+                  title={t("workspace.revertSessionFile")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void (async () => {
+                      const plan = await app.PreviewWorkspaceFileRevertForTab(workspaceTabId, change.path);
+                      if (!plan?.ok && !plan?.canFiles && !(plan?.conflicts?.length)) {
+                        return;
+                      }
+					  const resolution = plan?.conflicts?.length ? "overwrite_checkpoint" : "";
+                      if (plan?.conflicts?.length) {
+                        const ok = window.confirm(
+                          t("workspace.revertSessionFileConflict", {
+                            path: change.path,
+                            conflicts: (plan.conflicts || []).join("\n"),
+                          }),
+                        );
+                        if (!ok) return;
+                      }
+                      const result = await app.CommitWorkspaceFileRevertForTab(
+                        workspaceTabId,
+                        plan.planId || "",
+                        resolution,
+                      );
+                      if (result?.ok) {
+                        onSessionRevertCommitted?.(workspaceTabId, result);
+                        void loadWorkspaceChanges();
+                        if (selectedPath === change.path) void loadChangeDetail();
+                      }
+                    })();
+                  }}
+                >
+                  {t("workspace.revertSessionFileShort")}
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
@@ -1211,6 +1259,15 @@ export function WorkspacePanel({
     [effectiveTreeWidth, maxTreeWidthForPanel, setSavedTreeWidth],
   );
 
+  useEffect(() => {
+    setCodeSearchRequestPending(false);
+    setCodeSearchRequestPath(null);
+  }, [selectedPath]);
+
+  const consumeCodeSearchRequest = useCallback(() => {
+    setCodeSearchRequestPending(false);
+  }, []);
+
   if (!open) return null;
 
   const selectedTextFromPreview = (): string => {
@@ -1415,6 +1472,11 @@ export function WorkspacePanel({
       !preview.binary &&
       !isMarkdown,
   );
+  const openCodeSearch = () => {
+    if (!codePreviewActive || !selectedPath) return;
+    setCodeSearchRequestPath(selectedPath);
+    setCodeSearchRequestPending(true);
+  };
   const treeBlankMenuItems: ContextMenuItem[] = [
     {
       key: "refresh-tree",
@@ -1430,6 +1492,17 @@ export function WorkspacePanel({
       className={`workspace-panel${embeddedDockMode ? " workspace-panel--embedded" : ""}${showTreeRail ? " workspace-panel--with-tree-rail" : ""}${changedMode ? " workspace-panel--detail-only" : ""}${changedMode && !selectedPath ? " workspace-panel--changed-overview" : ""}${previewVisible && actualTreeVisible ? " workspace-panel--split-preview" : ""}${actualTreeVisible ? "" : " workspace-panel--tree-hidden"}${previewVisible ? "" : " workspace-panel--preview-hidden"}${treeResizing ? " workspace-panel--tree-resizing" : ""}`}
       aria-label={t("workspace.title")}
       style={panelStyle}
+      onKeyDownCapture={(event) => {
+        if (
+          codePreviewActive
+          && (event.ctrlKey || event.metaKey)
+          && event.key.toLowerCase() === "f"
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          openCodeSearch();
+        }
+      }}
     >
       {previewVisible && <section className="workspace-preview">
         <header className="workspace-preview__head">
@@ -1460,6 +1533,19 @@ export function WorkspacePanel({
           </div>
 
           <div className="workspace-preview__window-actions">
+            {codePreviewActive && (
+              <Tooltip label={t("workspace.searchPlaceholder")}>
+                <button
+                  className="workspace-iconbtn"
+                  type="button"
+                  aria-label={t("workspace.searchPlaceholder")}
+                  aria-keyshortcuts="Control+F Meta+F"
+                  onClick={openCodeSearch}
+                >
+                  <Search size={15} />
+                </button>
+              </Tooltip>
+            )}
             <Tooltip label={maximized ? t("workspace.restore") : t("workspace.maximize")}>
               <button className="workspace-iconbtn" onClick={onToggleMaximized}>
                 {maximized ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
@@ -1850,6 +1936,8 @@ export function WorkspacePanel({
                   language={languageFor(selectedPath)}
                   sourceSize={preview.size}
                   showLineNumbers
+                  searchRequestPending={codeSearchRequestPending && codeSearchRequestPath === selectedPath}
+                  onSearchRequestConsumed={consumeCodeSearchRequest}
                 />
               )}
             </>
@@ -2040,6 +2128,17 @@ export function WorkspacePanel({
                 label: t("workspace.revealInFileManager"),
                 onSelect: revealInFileManager,
               },
+              ...(onOpenInTerminal
+                ? [{
+                    icon: <TerminalSquare size={14} />,
+                    label: t("workspace.openInTerminal"),
+                    onSelect: () => {
+                      const target = treeMenu;
+                      setTreeMenu(null);
+                      onOpenInTerminal(target.path);
+                    },
+                  }]
+                : []),
             ]}
           />
         </FloatingMenu>

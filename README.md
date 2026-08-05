@@ -11,6 +11,8 @@
   &nbsp;·&nbsp;
   <a href="./docs/ACP.md">ACP</a>
   &nbsp;·&nbsp;
+  <a href="./docs/EXTENSIONS.md">Extensions</a>
+  &nbsp;·&nbsp;
   <a href="./docs/SPEC.md">Spec</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">Website</a>
@@ -28,6 +30,11 @@
   <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors"><img src="https://img.shields.io/github/contributors/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=bc8cff&labelColor=161b22&logo=github&logoColor=white" alt="contributors"/></a>
   <a href="https://github.com/esengine/DeepSeek-Reasonix/discussions"><img src="https://img.shields.io/github/discussions/esengine/DeepSeek-Reasonix.svg?style=flat-square&color=58a6ff&labelColor=161b22&logo=github&logoColor=white" alt="Discussions"/></a>
   <a href="https://discord.gg/XF78rEME2D"><img src="https://img.shields.io/badge/discord-join-5865F2.svg?style=flat-square&labelColor=161b22&logo=discord&logoColor=white" alt="Discord"/></a>
+</p>
+
+<p align="center">
+  <a href="https://trendshift.io/repositories/27020?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-27020" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/27020/monthly?language=Go" alt="esengine/DeepSeek-Reasonix | Trendshift" width="250" height="55"/></a>
+  <a href="https://trendshift.io/repositories/27020?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-27020" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/27020" alt="esengine/DeepSeek-Reasonix | Trendshift" width="250" height="55"/></a>
 </p>
 
 <br/>
@@ -49,8 +56,9 @@
 - **Multi-model & composable.** DeepSeek ships as a preset; any
   OpenAI-compatible endpoint is a config entry, not new code. Optionally run
   two models together (executor + planner) in separate, cache-stable sessions.
-- **Plugin-driven.** External tools run as subprocesses over stdio JSON-RPC
-  (MCP-compatible). Built-in tools self-register at compile time.
+- **Plugin-driven.** MCP servers contribute tools, prompts, and resources;
+  Extension Protocol v1 sidecars can also intercept runtime events, contribute
+  Providers and structured UI, and ship versioned plugin packages.
 - **Cache-aware context maintenance.** Startup injects a small stable environment
   summary, stale tool output is snipped/pruned before summary compaction, and the
   built-in tool schema contract is documented for regression review.
@@ -139,12 +147,17 @@ For advanced CLI usage and configuration, see the **[CLI reference](./docs/CLI.m
 - **Getting started:** [Guide](./docs/GUIDE.md) · [CLI reference](./docs/CLI.md) ·
   [Configuration paths](./docs/CONFIG_PATHS.md) · [ACP editor integration](./docs/ACP.md)
 - **Features & troubleshooting:** [Subagent profiles](./docs/SUBAGENT_PROFILES.md) ·
+  [Context Engine v2](./docs/SESSION_MEMORY_RETRIEVAL.md) ·
   [Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md) ·
-  [Recovery and Safe Mode](./docs/RECOVERY.md) · [Bot guide](./docs/BOT_GUIDE.md) ·
+  [Recovery and updates](./docs/RECOVERY.md) · [Bot guide](./docs/BOT_GUIDE.md) ·
   [Checkpoints & rewind](./docs/CHECKPOINTS.md)
 - **Engineering & migration:** [Spec](./docs/SPEC.md) ·
   [Task contracts & pause policy](./docs/TASK_CONTRACT.md) ·
   [Tool contract](./docs/TOOL_CONTRACT.md) · [Migrating from 0.x](./docs/MIGRATING.md)
+- **Extension development:** [Extensions](./docs/EXTENSIONS.md) ·
+  [Plugin packages and Manifest v1](./docs/PLUGIN_PACKAGES.md) ·
+  [Extension Protocol](./docs/EXTENSION_PROTOCOL.md) ·
+  [Go SDK and starter](./sdk/go/README.md)
 
 ## Star History
 

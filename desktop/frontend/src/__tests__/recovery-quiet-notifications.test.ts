@@ -39,8 +39,8 @@ ok(!appSource.includes("OpenTabRecoveryParent"), "App does not expose recovery c
 ok(!appSource.includes("recovery.openOriginalFailed"), "App does not carry recovery compare failure text");
 
 ok(controllerSource.includes("function quietTranscriptNoticeKey"), "controller centralizes quiet transcript notices");
-ok(controllerSource.includes("if (quietTranscriptNoticeKey(rawText))"), "raw quiet notices are skipped before localization");
-ok(controllerSource.includes("if (quietTranscriptNoticeKey(text))"), "localized quiet notices are skipped before rendering");
+ok(controllerSource.includes("if (quietTranscriptNoticeKey(rawText, code))"), "raw quiet notices are skipped before localization");
+ok(controllerSource.includes("if (quietTranscriptNoticeKey(text, code))"), "localized quiet notices are skipped before rendering");
 
 const removedPromptKeys = [
   "recovery.open",

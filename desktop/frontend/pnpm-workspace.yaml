@@ -3,3 +3,4 @@ allowBuilds:
 
 overrides:
   mdast-util-gfm-autolink-literal: 2.0.0
+  undici: 7.29.0

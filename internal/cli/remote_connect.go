@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/i18n"
 	"reasonix/internal/netclient"
+	"reasonix/internal/releaseasset"
 	"reasonix/internal/remote"
 	"reasonix/internal/remote/bootstrap"
 	"reasonix/internal/remote/forward"
@@ -126,27 +128,78 @@ func terminalHostKeyPrompt(_ context.Context, q remote.HostKeyQuestion) (bool, e
 	return answer == "y" || answer == "yes", nil
 }
 
-// remoteConnectCLI runs a foreground supervisor: connect, bootstrap serve,
-// forward the serve port and configured forwards, and hold the tunnel until
-// Ctrl-C. The remote serve keeps running after disconnect.
-func remoteConnectCLI(args []string, version string) int {
-	// args[0] is "connect" or "open".
-	openAlias := args[0] == "open"
+// remoteConnectSyntax is the parsed form of `reasonix remote connect|open …`.
+type remoteConnectSyntax struct {
+	name        string
+	workspace   string
+	localPort   int
+	noServe     bool
+	open        bool
+	forwardOnly bool
+}
+
+const remoteConnectUsage = "usage: reasonix remote connect <name> [flags]"
+
+// parseRemoteConnectSyntax accepts both documented orders:
+//
+//	reasonix remote connect <name> [flags]
+//	reasonix remote connect [flags] <name>
+//
+// Go's flag package stops at the first positional, so `<name> --open` used to
+// fail even though help/GUIDE show that form. We keep stdlib flags (so `-open`
+// still works) and only special-case a leading host name.
+func parseRemoteConnectSyntax(args []string, openAlias bool) (remoteConnectSyntax, error) {
 	fs := newFlagSet("remote connect")
 	workspace := fs.String("workspace", "", "remote workspace directory")
 	localPort := fs.Int("local-port", 0, "local port to bind for the serve tunnel (0 = auto)")
 	noServe := fs.Bool("no-serve", false, "only establish forwards; do not bootstrap serve")
 	open := fs.Bool("open", openAlias, "print/open the serve URL")
 	forwardOnly := fs.Bool("forward-only", false, "apply configured forwards only; no serve")
-	if err := fs.Parse(args[1:]); err != nil {
-		return 2
+
+	var name string
+	flagArgs := args
+	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
+		name = args[0]
+		flagArgs = args[1:]
+	}
+	if err := parseCommandFlagSet(fs, flagArgs); err != nil {
+		return remoteConnectSyntax{}, err
 	}
 	rest := fs.Args()
-	if len(rest) != 1 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix remote connect <name> [flags]")
+	switch {
+	case name != "" && len(rest) == 0:
+		// name-first: connect <name> [flags]
+	case name == "" && len(rest) == 1:
+		// flags-first: connect [flags] <name>
+		name = rest[0]
+	default:
+		return remoteConnectSyntax{}, errors.New(remoteConnectUsage)
+	}
+	return remoteConnectSyntax{
+		name:        name,
+		workspace:   *workspace,
+		localPort:   *localPort,
+		noServe:     *noServe,
+		open:        *open,
+		forwardOnly: *forwardOnly,
+	}, nil
+}
+
+// remoteConnectCLI runs a foreground supervisor: connect, bootstrap serve,
+// forward the serve port and configured forwards, and hold the tunnel until
+// Ctrl-C. The remote serve keeps running after disconnect.
+func remoteConnectCLI(args []string, version string) int {
+	// args[0] is "connect" or "open".
+	openAlias := args[0] == "open"
+	syntax, err := parseRemoteConnectSyntax(args[1:], openAlias)
+	if err != nil {
+		if code, ok := reportCommandFlagError(err); ok {
+			return code
+		}
+		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	name := rest[0]
+	name := syntax.name
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -154,7 +207,7 @@ func remoteConnectCLI(args []string, version string) int {
 		return 1
 	}
 	entry, _ := cfg.RemoteHost(name)
-	ws := *workspace
+	ws := syntax.workspace
 	if ws == "" {
 		ws = entry.Workspace
 	}
@@ -197,14 +250,16 @@ func remoteConnectCLI(args []string, version string) int {
 		fmt.Fprintf(os.Stderr, "%s %v\n", i18n.M.ErrorPrefix, err)
 	}
 
-	if !*noServe && !*forwardOnly {
+	if !syntax.noServe && !syntax.forwardOnly {
 		res, err := bootstrap.EnsureServe(ctx, client, bootstrap.Options{
-			Workspace:   ws,
-			Install:     entry.ServeInstallMode(),
-			LocalBinary: currentExecutable(),
-			LocalGOOS:   runtime.GOOS,
-			LocalGOARCH: runtime.GOARCH,
-			MinVersion:  bootstrap.MinServeVersion,
+			Workspace:      ws,
+			Install:        entry.ServeInstallMode(),
+			LocalBinary:    currentExecutable(),
+			LocalGOOS:      runtime.GOOS,
+			LocalGOARCH:    runtime.GOARCH,
+			ProductVersion: version,
+			FetchBinary:    fetchRemoteCLIBinary,
+			MinVersion:     bootstrap.MinServeVersion,
 			Progress: func(step, detail string) {
 				fmt.Fprintf(os.Stderr, i18n.M.RemoteBootstrapStepFmt+"\n", step, detail)
 			},
@@ -213,13 +268,13 @@ func remoteConnectCLI(args []string, version string) int {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
 		}
-		localURL, ferr := forwardServe(client, res.State.Addr, *localPort, res.Token)
+		localURL, ferr := forwardServe(client, res.State.Addr, syntax.localPort, res.Token)
 		if ferr != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, ferr)
 			return 1
 		}
 		fmt.Printf(i18n.M.RemoteServeReadyFmt+"\n", localURL)
-		if *open {
+		if syntax.open {
 			_ = openInBrowser(localURL)
 		}
 	}
@@ -279,18 +334,39 @@ func currentExecutable() string {
 	return ""
 }
 
+func fetchRemoteCLIBinary(ctx context.Context, version, goos, goarch string) ([]byte, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
+	}
+	client, err := netclient.NewHTTPClient(cfg.NetworkProxySpec(), netclient.TransportOptions{
+		ResponseHeaderTimeout: 30 * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	client.Timeout = 2 * time.Minute
+	return releaseasset.DownloadCLI(ctx, client, version, goos, goarch)
+}
+
+const remoteServeUsage = "usage: reasonix remote serve start|stop|status|logs <name> [--workspace PATH] [-n N]"
+
 // remoteServeCLI: serve start|stop|status|logs <name>.
-func remoteServeCLI(args []string) int {
+func remoteServeCLI(args []string, version string) int {
+	if commandHelpRequested(args, 2) {
+		fmt.Fprintln(os.Stdout, remoteServeUsage)
+		return 0
+	}
 	if len(args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: reasonix remote serve start|stop|status|logs <name> [--workspace PATH] [-n N]")
+		fmt.Fprintln(os.Stderr, remoteServeUsage)
 		return 2
 	}
 	action := args[0]
 	fs := newFlagSet("remote serve")
 	workspace := fs.String("workspace", "", "remote workspace directory")
 	n := fs.Int("n", 200, "log lines to show (logs)")
-	if err := fs.Parse(args[2:]); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args[2:]); !ok {
+		return code
 	}
 	name := args[1]
 	cfg, err := config.Load()
@@ -323,7 +399,7 @@ func remoteServeCLI(args []string) int {
 		res, err := bootstrap.EnsureServe(ctx, client, bootstrap.Options{
 			Workspace: ws, Install: entry.ServeInstallMode(),
 			LocalBinary: currentExecutable(), LocalGOOS: runtime.GOOS, LocalGOARCH: runtime.GOARCH,
-			MinVersion: bootstrap.MinServeVersion,
+			ProductVersion: version, FetchBinary: fetchRemoteCLIBinary, MinVersion: bootstrap.MinServeVersion,
 		})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)

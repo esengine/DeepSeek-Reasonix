@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,6 +39,7 @@ import (
 
 	// Blank import registers the provider kind the same way cmd/reasonix's main
 	// does; importing builtin above registers the built-in tools.
+	_ "reasonix/internal/provider/anthropic"
 	_ "reasonix/internal/provider/openai"
 )
 
@@ -50,6 +52,45 @@ func TestAgentKeepPolicyFromConfig(t *testing.T) {
 	}
 	if got := agentKeepPolicy([]string{"errors", "user_marked"}); got != agent.KeepErrors|agent.KeepUserMarked {
 		t.Fatalf("combined keep policy = %v, want errors|user_marked", got)
+	}
+}
+
+func TestApplyRuntimeAutoPricingCurrency(t *testing.T) {
+	tests := []struct {
+		name            string
+		runtimeCurrency string
+		desktopCurrency string
+		desktopLanguage string
+		language        string
+		wantCurrency    string
+		wantOutput      float64
+	}{
+		{name: "auto Chinese locale", runtimeCurrency: "CNY", wantCurrency: "¥", wantOutput: 2},
+		{name: "auto English locale", runtimeCurrency: "USD", wantCurrency: "$", wantOutput: 0.28},
+		{name: "explicit USD wins", runtimeCurrency: "CNY", desktopCurrency: "USD", wantCurrency: "$", wantOutput: 0.28},
+		{name: "explicit CNY wins", runtimeCurrency: "USD", desktopCurrency: "CNY", wantCurrency: "¥", wantOutput: 2},
+		{name: "desktop language wins", runtimeCurrency: "USD", desktopLanguage: "zh", wantCurrency: "¥", wantOutput: 2},
+		{name: "CLI language wins", runtimeCurrency: "USD", language: "zh", wantCurrency: "¥", wantOutput: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.Default()
+			cfg.Desktop.Currency = tt.desktopCurrency
+			cfg.Desktop.Language = tt.desktopLanguage
+			cfg.Language = tt.language
+			cfg.ApplyDeepSeekOfficialDefaultPricing()
+
+			applyRuntimeAutoPricingCurrency(cfg, tt.runtimeCurrency)
+
+			deepseek, ok := cfg.Provider("deepseek-flash")
+			if !ok {
+				t.Fatal("default DeepSeek provider is missing")
+			}
+			price := deepseek.PriceForModel("deepseek-v4-flash")
+			if price == nil || price.Currency != tt.wantCurrency || price.Output != tt.wantOutput {
+				t.Fatalf("flash price = %#v, want currency %q output %v", price, tt.wantCurrency, tt.wantOutput)
+			}
+		})
 	}
 }
 
@@ -140,7 +181,8 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
-func TestBuildSafeModeSkipsCleanupPendingReconciliation(t *testing.T) {
+func TestBuildRunsCleanupPendingDespiteSafeModeEnv(t *testing.T) {
+	// v1.20+: REASONIX_SAFE_MODE no longer skips cleanup reconciliation.
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
@@ -158,8 +200,8 @@ func TestBuildSafeModeSkipsCleanupPendingReconciliation(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 	defer ctrl.Close()
-	if called {
-		t.Fatal("safe mode ran cleanup-pending reconciliation")
+	if !called {
+		t.Fatal("cleanup-pending reconciler must still run when REASONIX_SAFE_MODE is set")
 	}
 }
 
@@ -487,7 +529,8 @@ model = "x"
 		t.Fatalf("LoadSession: %v", err)
 	}
 	msgs := sess.Snapshot()
-	if len(msgs) != 5 || !strings.HasSuffix(msgs[1].Content, "first skill task") || msgs[2].Content != "first skill answer" || msgs[3].Content != "second skill task" || !msgs[4].LocalOnly {
+	modelMessages := provider.ModelMessages(msgs)
+	if len(msgs) != 5 || len(modelMessages) != 4 || !strings.HasSuffix(modelMessages[1].Content, "first skill task") || modelMessages[2].Content != "first skill answer" || modelMessages[3].Content != "second skill task" || !msgs[4].LocalOnly {
 		t.Fatalf("failed skill transcript = %+v, want tasks plus provider-excluded failure recovery", msgs)
 	}
 }
@@ -1009,8 +1052,8 @@ func (p *headlessTaskTestProvider) Stream(context.Context, provider.Request) (<-
 // TestBuildHeadlessApprovalModePropagatesToTaskSubagentGate pins boot.Build's
 // actual wiring for the fix: a `task` sub-agent spawned from a headless run
 // must honor the same --permission-mode contract as the parent executor
-// instead of the mode-unaware default gate (ask resolves to allow) that boot
-// used to build unconditionally. Auto must fail closed on write_file's
+// instead of the mode-unaware default gate that boot used to build
+// unconditionally. Ask and Auto must fail closed on write_file's
 // explicit ask rule even inside the sub-agent; only yolo may bypass it.
 func TestBuildHeadlessApprovalModePropagatesToTaskSubagentGate(t *testing.T) {
 	runTaskWriteOnce := func(t *testing.T, mode string) bool {
@@ -1051,6 +1094,9 @@ model = "x"
 		return statErr == nil
 	}
 
+	if written := runTaskWriteOnce(t, "ask"); written {
+		t.Fatalf("ask: task sub-agent wrote sub.txt despite having no approval UI")
+	}
 	if written := runTaskWriteOnce(t, "auto"); written {
 		t.Fatalf("auto: task sub-agent wrote sub.txt despite the explicit ask rule on write_file")
 	}
@@ -1135,7 +1181,7 @@ func TestRecoveryHeadlessModeUsesExplicitFrontendCapability(t *testing.T) {
 // later at runtime via Shift+Tab (Controller.SetToolApprovalMode) — followed
 // by a runtime switch to auto must also reach the task sub-agent's gate.
 // Before this fix, the sub-agent gate was captured once at boot with the
-// mode-unaware default (ask resolves to allow) and had no rebuild hook, so a
+// mode-unaware default and had no rebuild hook, so a
 // later SetToolApprovalMode(auto) call updated only the parent executor.
 func TestBuildInteractiveApprovalModeSwitchPropagatesToTaskSubagentGate(t *testing.T) {
 	isolateConfigHome(t)
@@ -1286,6 +1332,129 @@ func TestNewProviderAppliesConfiguredDefaultEffort(t *testing.T) {
 	}
 }
 
+func TestNewProviderPreservesExplicitlySupportedKimiK3Efforts(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:              "opencode-go",
+		Kind:              "openai",
+		BaseURL:           srv.URL,
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"high", "max"},
+		DefaultEffort:     "max",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if got := gotReq["reasoning_effort"]; got != "max" {
+		t.Fatalf("reasoning_effort = %#v, want explicitly supported max", got)
+	}
+}
+
+func TestNewProviderAppliesOfficialKimiK3RequestContract(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:              "kimi-cn",
+		Kind:              "openai",
+		BaseURL:           "https://api.moonshot.cn/v1",
+		ChatURL:           srv.URL,
+		Model:             "kimi-k3",
+		ReasoningProtocol: config.ReasoningProtocolOpenAI,
+		SupportedEfforts:  []string{"low", "high", "max"},
+		DefaultEffort:     "max",
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages:    []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+		Temperature: provider.TemperaturePtr(0),
+		MaxTokens:   2000,
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if gotReq["reasoning_effort"] != "max" || gotReq["max_completion_tokens"] != float64(2000) {
+		t.Fatalf("official Kimi K3 request = %+v, want max effort and max_completion_tokens", gotReq)
+	}
+	for _, field := range []string{"temperature", "max_tokens"} {
+		if _, ok := gotReq[field]; ok {
+			t.Fatalf("official Kimi K3 request must omit %q: %+v", field, gotReq)
+		}
+	}
+}
+
+func TestNewProviderPropagatesConfiguredMaxOutputTokens(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name: "openai", Kind: "openai", BaseURL: "https://api.openai.com/v1",
+		ChatURL: srv.URL, Model: "o3", MaxOutputTokens: 4096,
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+	if gotReq["max_completion_tokens"] != float64(4096) {
+		t.Fatalf("max_completion_tokens = %#v, want 4096: %+v", gotReq["max_completion_tokens"], gotReq)
+	}
+	if _, exists := gotReq["max_tokens"]; exists {
+		t.Fatalf("official OpenAI request must omit max_tokens: %+v", gotReq)
+	}
+}
+
 func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1323,6 +1492,83 @@ func TestNewProviderAppliesModelReasoningProtocol(t *testing.T) {
 	thinking, ok := gotReq["thinking"].(map[string]any)
 	if !ok || thinking["type"] != "enabled" {
 		t.Fatalf("thinking = %#v, want enabled", gotReq["thinking"])
+	}
+}
+
+func TestNewProviderBuildsDeepSeekAnthropicPreset(t *testing.T) {
+	preset, ok := config.CuratedProviderPreset("deepseek-anthropic")
+	if !ok || len(preset.Entries) != 1 {
+		t.Fatalf("DeepSeek Anthropic preset = %+v", preset)
+	}
+	var cfg config.Config
+	if err := cfg.UpsertProvider(preset.Entries[0]); err != nil {
+		t.Fatalf("UpsertProvider: %v", err)
+	}
+	entry, ok := cfg.ResolveModel("deepseek-anthropic/deepseek-v4-flash")
+	if !ok {
+		t.Fatal("ResolveModel failed")
+	}
+	p, err := NewProvider(entry)
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	if p.Name() != "deepseek-anthropic" || !provider.RequiresToolCallReasoning(p) || provider.RequiresReasoningRoundTrip(p) {
+		t.Fatalf("assembled DeepSeek Anthropic provider = %T/%q policies=%v/%v", p, p.Name(), provider.RequiresToolCallReasoning(p), provider.RequiresReasoningRoundTrip(p))
+	}
+}
+
+func TestNewProviderAllowsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
+	var gotReq map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	p, err := NewProvider(&config.ProviderEntry{
+		Name:         "deepseek",
+		Kind:         "openai",
+		BaseURL:      "https://api.deepseek.com",
+		ChatURL:      srv.URL,
+		Model:        "deepseek-v5-vision",
+		VisionModels: []string{"deepseek-v5-vision"},
+	})
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	ch, err := p.Stream(context.Background(), provider.Request{
+		Messages: []provider.Message{{
+			Role: provider.RoleUser, Content: "describe",
+			Images: []string{"data:image/png;base64,AAAA"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("stream error: %v", chunk.Err)
+		}
+	}
+
+	messages, ok := gotReq["messages"].([]any)
+	if !ok || len(messages) != 1 {
+		t.Fatalf("messages = %#v, want one message", gotReq["messages"])
+	}
+	message, ok := messages[0].(map[string]any)
+	if !ok {
+		t.Fatalf("message = %#v, want object", messages[0])
+	}
+	parts, ok := message["content"].([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("content = %#v, want [text, image_url]", message["content"])
+	}
+	imagePart, ok := parts[1].(map[string]any)
+	if !ok || imagePart["type"] != "image_url" {
+		t.Fatalf("image part = %#v, want image_url", parts[1])
 	}
 }
 
@@ -1409,7 +1655,8 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 	}
 }
 
-func TestBuildSafeModeSkipsSkillDiscovery(t *testing.T) {
+func TestBuildDiscoversSkillsDespiteSafeModeEnv(t *testing.T) {
+	// v1.20+: skill discovery is not gated by REASONIX_SAFE_MODE.
 	dir := robustTempDir(t)
 	home := robustTempDir(t)
 	t.Setenv("HOME", home)
@@ -1425,17 +1672,8 @@ func TestBuildSafeModeSkipsSkillDiscovery(t *testing.T) {
 	}
 	defer ctrl.Close()
 
-	if skills := ctrl.Skills(); len(skills) != 0 {
-		t.Fatalf("safe mode skills = %+v, want none", skills)
-	}
-	if skills := ctrl.AllSkills(); len(skills) != 0 {
-		t.Fatalf("safe mode all skills = %+v, want none", skills)
-	}
-	if skills := ctrl.SlashSkills(); len(skills) != 0 {
-		t.Fatalf("safe mode slash skills = %+v, want none", skills)
-	}
-	if sys := systemMessage(ctrl.History()); strings.Contains(sys, "# Skills") || strings.Contains(sys, "project-skill") || strings.Contains(sys, "global-skill") {
-		t.Fatalf("safe mode system prompt contains skills:\n%s", sys)
+	if skills := ctrl.AllSkills(); len(skills) == 0 {
+		t.Fatal("skills must still be discovered when REASONIX_SAFE_MODE is set")
 	}
 }
 
@@ -1649,6 +1887,72 @@ model = "x"
 	}
 	if requestMessageContains(fullReq.Messages, provider.RoleUser, "<delivery-runtime>") {
 		t.Fatal("full profile unexpectedly received the delivery runtime contract")
+	}
+}
+
+func TestBuildBalancedDualModelAddsStableProxyToExecutor(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("balanced-dual-proxy")
+	setBootTokenProfileTestProvider(t, prov)
+
+	writeConfig := func(planner bool) {
+		plannerLine := ""
+		plannerProvider := ""
+		if planner {
+			plannerLine = `planner_model = "planner"`
+			plannerProvider = `
+
+[[providers]]
+name = "planner"
+kind = "boot-token-profile-test"
+model = "planner-model"`
+		}
+		writeFile(t, dir, "reasonix.toml", fmt.Sprintf(`
+default_model = "executor"
+
+[agent]
+system_prompt = "BASE"
+%s
+
+[[providers]]
+name = "executor"
+kind = "boot-token-profile-test"
+model = "executor-model"%s
+`, plannerLine, plannerProvider))
+	}
+
+	writeConfig(false)
+	single, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	singleEntries := single.ToolContractEntries()
+	single.Close()
+	if slices.Contains(contractEntryNames(singleEntries), "use_capability") {
+		t.Fatal("single-model Balanced must keep its existing executor prefix")
+	}
+
+	writeConfig(true)
+	dual, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dual.Close()
+	dualEntries := dual.ToolContractEntries()
+	dualNames := contractEntryNames(dualEntries)
+	if !slices.Contains(dualNames, "use_capability") {
+		t.Fatalf("dual-model Balanced executor missing stable capability proxy: %v", dualNames)
+	}
+	if len(dualEntries) != len(singleEntries)+1 {
+		t.Fatalf("dual-model executor contract = %d tools, want single-model(%d)+use_capability", len(dualEntries), len(singleEntries))
+	}
+	for _, entry := range singleEntries {
+		if !slices.Contains(dualNames, entry.Name) {
+			t.Fatalf("dual-model executor dropped existing tool %q", entry.Name)
+		}
 	}
 }
 
@@ -1882,6 +2186,7 @@ func defaultFullBootToolNames() []string {
 		"complete_step",
 		"delete_range",
 		"delete_symbol",
+		"docs",
 		"edit_file",
 		"explore",
 		"fleet",
@@ -1908,6 +2213,7 @@ func defaultFullBootToolNames() []string {
 		"read_only_task",
 		"read_session",
 		"read_skill",
+		"read_subagent_result",
 		"remember",
 		"research",
 		"review",
@@ -1916,6 +2222,7 @@ func defaultFullBootToolNames() []string {
 		"slash_command",
 		"task",
 		"todo_write",
+		"update_goal",
 		"wait",
 		"web_fetch",
 		"write_file",
@@ -1931,6 +2238,7 @@ func economyBootToolNames() []string {
 		"edit_file",
 		"kill_shell",
 		"read_file",
+		"update_goal",
 		"wait",
 		"write_file",
 	}
@@ -1982,6 +2290,7 @@ command = "reasonix-missing-mockmcp"
 		"edit_file",
 		"kill_shell",
 		"read_file",
+		"update_goal",
 		"wait",
 		"write_file",
 	}
@@ -1998,7 +2307,7 @@ command = "reasonix-missing-mockmcp"
 		"explore", "research", "review", "security_review",
 		"lsp_definition", "lsp_references", "lsp_hover", "lsp_diagnostics",
 		"code_index", "complete_step", "glob", "grep", "ls", "move_file", "multi_edit", "todo_write",
-		"history", "list_sessions", "read_session", "memory", "remember", "forget", "slash_command",
+		"docs", "history", "list_sessions", "read_session", "memory", "remember", "forget", "slash_command",
 	} {
 		if requestHasTool(req, forbidden) {
 			t.Fatalf("economy first request should hide %q; tools=%v", forbidden, toolSchemaNames(req.Tools))
@@ -2024,6 +2333,7 @@ func TestBuildTokenEconomyConnectsOptionalSourcesOnDemand(t *testing.T) {
 		{source: "search", tools: []string{"code_index", "glob", "grep", "ls"}},
 		{source: "files", tools: []string{"delete_range", "delete_symbol", "move_file", "multi_edit", "notebook_edit"}},
 		{source: "workflow", tools: []string{"complete_step", "todo_write"}},
+		{source: "docs", tools: []string{"docs"}},
 		{source: "sessions", tools: []string{"history", "list_sessions", "read_session"}},
 		{source: "memory", tools: []string{"forget", "memory", "remember"}},
 		{source: "commands", tools: []string{"slash_command"}},
@@ -3593,6 +3903,39 @@ allow = ["Bash(go test:*)"]
 	}
 }
 
+func TestRememberDynamicBashLiteralIsNotCoveredByBroadRule(t *testing.T) {
+	workspace := robustTempDir(t)
+	writeFile(t, workspace, "reasonix.toml", `
+[permissions]
+allow = ["Bash(git*)"]
+`)
+
+	const literal = "Bash=git status $(touch /tmp/reasonix-dynamic-approval)"
+	res := rememberPermissionRule(workspace, literal)
+	if !res.Saved || res.CoveredBy != "" || res.Err != nil {
+		t.Fatalf("remember dynamic literal = %+v, want newly saved rule", res)
+	}
+	cfg := config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	if !hasPermissionRule(cfg.Permissions.Allow, "Bash(git*)") || !hasPermissionRule(cfg.Permissions.Allow, literal) {
+		t.Fatalf("allow rules = %v, want broad rule and dynamic literal", cfg.Permissions.Allow)
+	}
+
+	res = rememberPermissionRule(workspace, literal)
+	if res.Saved || res.CoveredBy != literal || res.Err != nil {
+		t.Fatalf("remember duplicate dynamic literal = %+v, want exact deduplication", res)
+	}
+	cfg = config.LoadForEdit(filepath.Join(workspace, "reasonix.toml"))
+	count := 0
+	for _, rule := range cfg.Permissions.Allow {
+		if rule == literal {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("dynamic literal count = %d in %v, want 1", count, cfg.Permissions.Allow)
+	}
+}
+
 func TestRememberPermissionRulePrunesNarrowRulesWhenSavingBroaderRule(t *testing.T) {
 	workspace := robustTempDir(t)
 	writeFile(t, workspace, "reasonix.toml", `
@@ -4032,22 +4375,29 @@ func TestPartitionByTier(t *testing.T) {
 	}
 }
 
-func TestPluginSpecsMapConfiguredCallTimeouts(t *testing.T) {
+func TestPluginSpecsMapConfiguredMCPTimeouts(t *testing.T) {
 	specs := PluginSpecsForRootWithOptions([]config.PluginEntry{{
-		Name:               "maker",
-		Command:            "maker-mcp",
-		CallTimeoutSeconds: 600,
+		Name:                  "maker",
+		Command:               "maker-mcp",
+		StartupTimeoutSeconds: 45,
+		CallTimeoutSeconds:    600,
 		ToolTimeoutSeconds: map[string]int{
 			"generate_video": 1800,
 			" ":              120,
 			"zero":           0,
 		},
-	}}, "", PluginSpecOptions{DefaultCallTimeout: 300 * time.Second})
+	}}, "", PluginSpecOptions{
+		DefaultStartupTimeout: 30 * time.Second,
+		DefaultCallTimeout:    300 * time.Second,
+	})
 	if len(specs) != 1 {
 		t.Fatalf("PluginSpecs returned %d specs, want 1", len(specs))
 	}
 	if specs[0].DefaultCallTimeout != 5*time.Minute {
 		t.Fatalf("DefaultCallTimeout = %v, want 5m", specs[0].DefaultCallTimeout)
+	}
+	if specs[0].DefaultStartupTimeout != 30*time.Second || specs[0].StartupTimeout != 45*time.Second {
+		t.Fatalf("startup timeouts = default %v override %v, want 30s/45s", specs[0].DefaultStartupTimeout, specs[0].StartupTimeout)
 	}
 	if specs[0].CallTimeout != 10*time.Minute {
 		t.Fatalf("CallTimeout = %v, want 10m", specs[0].CallTimeout)
@@ -4073,8 +4423,8 @@ func TestPluginSpecsMapMCPSourceDefaults(t *testing.T) {
 		{name: "user config", source: config.MCPSourceUserConfig, wantAuthorized: true},
 		{name: "legacy user config", source: config.MCPSourceLegacyUser, wantAuthorized: true},
 		{name: "plugin package", source: config.MCPSourcePluginPackage, wantAuthorized: true},
-		{name: "project config", source: config.MCPSourceProjectConfig, wantApproval: true},
-		{name: "project mcp json", source: config.MCPSourceProjectMCPJSON, wantApproval: true},
+		{name: "project config", source: config.MCPSourceProjectConfig, wantAuthorized: true},
+		{name: "project mcp json", source: config.MCPSourceProjectMCPJSON, wantAuthorized: true},
 		{name: "unknown"},
 	}
 
@@ -4151,6 +4501,19 @@ func TestApplyDefaultMCPCallTimeoutPreservesConfiguredDefault(t *testing.T) {
 	}
 	if specs[1].DefaultCallTimeout != 5*time.Minute {
 		t.Fatalf("empty DefaultCallTimeout = %v, want 5m", specs[1].DefaultCallTimeout)
+	}
+}
+
+func TestApplyDefaultMCPStartupTimeoutPreservesConfiguredDefault(t *testing.T) {
+	specs := applyDefaultMCPStartupTimeout([]plugin.Spec{
+		{Name: "configured", DefaultStartupTimeout: 20 * time.Second},
+		{Name: "empty"},
+	}, 30*time.Second)
+	if specs[0].DefaultStartupTimeout != 20*time.Second {
+		t.Fatalf("configured DefaultStartupTimeout overwritten: %v", specs[0].DefaultStartupTimeout)
+	}
+	if specs[1].DefaultStartupTimeout != 30*time.Second {
+		t.Fatalf("empty DefaultStartupTimeout = %v, want 30s", specs[1].DefaultStartupTimeout)
 	}
 }
 
@@ -4519,7 +4882,11 @@ model = "x"
 		testutil.Turn{Text: "done"},
 	)
 	setBootTokenProfileTestProvider(t, prov)
-	ctrl, err := Build(context.Background(), Options{Sink: event.Discard, AdditionalDirs: []string{extra}})
+	ctrl, err := Build(context.Background(), Options{
+		Sink:                 event.Discard,
+		AdditionalDirs:       []string{extra},
+		HeadlessApprovalMode: control.ToolApprovalYolo,
+	})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -4741,37 +5108,30 @@ func TestHelperProcess(t *testing.T) {
 	}
 }
 
-// TestBuildSafeModeOmitsSourceConnectorAndSkillTools pins the Safe Mode
-// surface across token modes: no Economy connect_tool_source (it could
-// re-expose skills, commands, memory, and MCP), no install_source, and no
-// skill tools — while slash_command stays registered with an empty list.
-func TestBuildSafeModeOmitsSourceConnectorAndSkillTools(t *testing.T) {
+// TestBuildKeepsSourceConnectorAndSkillToolsDespiteSafeModeEnv pins that
+// v1.20+ no longer strips tools when REASONIX_SAFE_MODE is set.
+func TestBuildKeepsSourceConnectorAndSkillToolsDespiteSafeModeEnv(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
 	t.Chdir(dir)
 	t.Setenv("REASONIX_SAFE_MODE", "1")
 
-	for _, tokenMode := range []string{TokenModeFull, TokenModeEconomy} {
-		ctrl, err := Build(context.Background(), Options{
-			SessionDir: filepath.Join(t.TempDir(), "sessions"),
-			TokenMode:  tokenMode,
-			Sink:       event.Discard,
-		})
-		if err != nil {
-			t.Fatalf("Build(%q): %v", tokenMode, err)
-		}
-		names := map[string]bool{}
-		for _, e := range ctrl.ToolContractEntries() {
-			names[e.Name] = true
-		}
-		ctrl.Close()
-		for _, banned := range []string{"connect_tool_source", "install_source", "run_skill", "read_skill", "read_only_skill"} {
-			if names[banned] {
-				t.Fatalf("safe mode (%q) registered %s", tokenMode, banned)
-			}
-		}
-		if !names["slash_command"] {
-			t.Fatalf("safe mode (%q) should still register slash_command", tokenMode)
+	ctrl, err := Build(context.Background(), Options{
+		SessionDir: filepath.Join(t.TempDir(), "sessions"),
+		TokenMode:  TokenModeFull,
+		Sink:       event.Discard,
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	names := map[string]bool{}
+	for _, e := range ctrl.ToolContractEntries() {
+		names[e.Name] = true
+	}
+	ctrl.Close()
+	for _, want := range []string{"install_source", "run_skill", "slash_command"} {
+		if !names[want] {
+			t.Fatalf("expected %s when REASONIX_SAFE_MODE is set", want)
 		}
 	}
 }

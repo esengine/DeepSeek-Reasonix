@@ -154,6 +154,13 @@ type MCPServerAuthorization interface {
 // error instead of executing.
 type readerExecutionIntentKey struct{}
 
+// nonDestructiveMCPExecutionIntentKey carries a per-call, immutable
+// authorization basis for Planner-trusted MCP: the server is authorized and the
+// live tool is non-destructive, even when it lacks readOnlyHint. The MCP
+// dispatcher re-checks authorization and destructiveHint before tools/call;
+// drift returns a retryable error with zero execution.
+type nonDestructiveMCPExecutionIntentKey struct{}
+
 // planReplacementAuthorizationKey carries a one-call authorization from the
 // host's Auto plan gate. It lets todo_write replace the current in_progress
 // step after the plan transition has been reviewed, without weakening ordinary
@@ -169,6 +176,20 @@ func WithReaderExecutionIntent(ctx context.Context) context.Context {
 // non-destructive reader lane.
 func HasReaderExecutionIntent(ctx context.Context) bool {
 	intent, _ := ctx.Value(readerExecutionIntentKey{}).(bool)
+	return intent
+}
+
+// WithNonDestructiveMCPExecutionIntent marks ctx as a Planner-trusted MCP
+// invocation: authorized server, non-destructive live tool. Unlike the reader
+// lane it does not require readOnlyHint.
+func WithNonDestructiveMCPExecutionIntent(ctx context.Context) context.Context {
+	return context.WithValue(ctx, nonDestructiveMCPExecutionIntentKey{}, true)
+}
+
+// HasNonDestructiveMCPExecutionIntent reports whether this call entered through
+// the Planner non-destructive MCP lane.
+func HasNonDestructiveMCPExecutionIntent(ctx context.Context) bool {
+	intent, _ := ctx.Value(nonDestructiveMCPExecutionIntentKey{}).(bool)
 	return intent
 }
 

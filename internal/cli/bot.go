@@ -51,8 +51,8 @@ func botStart(args []string, version string) int {
 	dir := fs.String("dir", "", "工作目录")
 	model := fs.String("model", "", "模型名（空则用 default_model）")
 
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -191,8 +191,8 @@ func botDoctor(args []string) int {
 	jsonOut := fs.Bool("json", false, "JSON 格式输出")
 	deep := fs.Bool("deep", false, "执行更详细的本机诊断")
 
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 
 	cfg, err := loadBotCommandConfig()
@@ -481,8 +481,8 @@ Usage:
 func botWeixinLogin(args []string) int {
 	fs := flag.NewFlagSet("bot weixin-login", flag.ContinueOnError)
 	timeoutSeconds := fs.Int("timeout", 480, "登录超时时间（秒）")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 
 	cfg, err := loadBotCommandConfig()

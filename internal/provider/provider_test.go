@@ -128,6 +128,112 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 	}
 }
 
+func TestDecisionReceiptIsDurableButProviderExcluded(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "write_file", Subject: "src/app.go", Outcome: "allow_once"}
+	in := []Message{
+		{Role: RoleUser, Content: "edit the app"},
+		{Role: RoleAssistant, LocalOnly: true, DecisionReceipt: receipt},
+		{Role: RoleAssistant, Content: "done"},
+	}
+	model := ModelMessages(in)
+	if len(model) != 2 || model[0].Content != "edit the app" || model[1].Content != "done" {
+		t.Fatalf("provider messages leaked decision receipt: %+v", model)
+	}
+	if len(in) != 3 || in[1].DecisionReceipt != receipt || !in[1].LocalOnly {
+		t.Fatalf("stored receipt was not preserved: %+v", in)
+	}
+}
+
+func TestAttachedDecisionReceiptPreservesCurrentAndLegacyToolPairing(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+	stored := []Message{
+		{Role: RoleUser, Content: "run it"},
+		{
+			Role:             RoleAssistant,
+			ToolCalls:        []ToolCall{{Name: "bash", Arguments: `{}`}},
+			DecisionReceipts: []*DecisionReceipt{receipt},
+		},
+		{Role: RoleTool, Name: "bash", Content: "ok"},
+	}
+
+	current := SanitizeToolPairing(ModelMessages(stored))
+	if len(current) != 3 || current[2].Content != "ok" {
+		t.Fatalf("current reader changed the valid tool turn: %+v", current)
+	}
+	if len(current[1].DecisionReceipts) != 0 {
+		t.Fatalf("provider-visible message leaked local decision metadata: %+v", current[1])
+	}
+
+	// Older binaries ignore the new metadata field. The remaining legacy view
+	// must still contain the same adjacent assistant/result pair, including the
+	// positional pairing used by providers that omit tool-call IDs.
+	legacy := append([]Message(nil), stored...)
+	legacy[1].DecisionReceipts = nil
+	legacy = SanitizeToolPairing(legacy)
+	if len(legacy) != 3 || legacy[1].Role != RoleAssistant || legacy[2].Role != RoleTool || legacy[2].Content != "ok" {
+		t.Fatalf("legacy reader lost the actual tool result: %+v", legacy)
+	}
+}
+
+func TestNormalizeSessionMessagesMigratesInterleavedDecisionReceipt(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+	old := []Message{
+		{Role: RoleUser, Content: "run it"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Name: "bash", Arguments: `{}`}}},
+		{Role: RoleAssistant, LocalOnly: true, DecisionReceipt: receipt},
+		{Role: RoleTool, ToolCallID: "call-1", Name: "bash", Content: "actual result"},
+	}
+
+	got := NormalizeSessionMessages(old)
+	if len(got) != 3 {
+		t.Fatalf("migrated messages = %d, want receipt folded into assistant: %+v", len(got), got)
+	}
+	if len(got[1].DecisionReceipts) != 1 || got[1].DecisionReceipts[0] != receipt {
+		t.Fatalf("migrated assistant receipt = %+v, want original receipt", got[1].DecisionReceipts)
+	}
+	if got[2].Role != RoleTool || got[2].Content != "actual result" || strings.Contains(got[2].Content, "interrupted") {
+		t.Fatalf("migrated tool result = %+v, want the actual result without a placeholder", got[2])
+	}
+}
+
+func TestModelMessagesUsesProviderContentWithoutMutatingStoredMessage(t *testing.T) {
+	stored := []Message{{
+		Role:            RoleUser,
+		Content:         "fix the bug",
+		ProviderContent: "<reasoning-language>zh</reasoning-language>\n\nfix the bug",
+	}}
+
+	model := ModelMessages(stored)
+	if len(model) != 1 {
+		t.Fatalf("ModelMessages length = %d, want 1", len(model))
+	}
+	if got := model[0].Content; got != stored[0].ProviderContent {
+		t.Fatalf("model content = %q, want provider content %q", got, stored[0].ProviderContent)
+	}
+	if model[0].ProviderContent != "" {
+		t.Fatalf("provider-local field leaked into model message: %q", model[0].ProviderContent)
+	}
+	if stored[0].Content != "fix the bug" || stored[0].ProviderContent == "" {
+		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
+func TestModelMessagesStripsRawContentWithoutChangingLegacyContent(t *testing.T) {
+	const rendered = "<reasoning-language>zh</reasoning-language>\n\nfix the bug"
+	stored := []Message{{Role: RoleUser, Content: rendered, RawContent: "fix the bug"}}
+
+	model := ModelMessages(stored)
+	if len(model) != 1 || model[0].Content != rendered {
+		t.Fatalf("provider-visible content changed: %+v", model)
+	}
+	if model[0].RawContent != "" {
+		t.Fatalf("raw display metadata leaked into provider request: %+v", model[0])
+	}
+	if stored[0].RawContent != "fix the bug" || stored[0].Content != rendered {
+		t.Fatalf("stored message was mutated: %+v", stored[0])
+	}
+}
+
 func TestLocalOnlySentinelIsSafeWhenNewFieldsAreIgnoredByLegacyReader(t *testing.T) {
 	legacyView := []Message{
 		{Role: RoleUser, Content: "task"},
@@ -498,10 +604,41 @@ func TestRoleConstants(t *testing.T) {
 	}
 }
 
+func TestMessageResponsesItemsRemainBackwardCompatible(t *testing.T) {
+	var legacy Message
+	if err := json.Unmarshal([]byte(`{"role":"assistant","content":"answer"}`), &legacy); err != nil {
+		t.Fatalf("unmarshal legacy message: %v", err)
+	}
+	if len(legacy.ResponsesItems) != 0 {
+		t.Fatalf("legacy ResponsesItems = %#v, want empty", legacy.ResponsesItems)
+	}
+	legacyJSON, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy message: %v", err)
+	}
+	if strings.Contains(string(legacyJSON), "responses_items") {
+		t.Fatalf("legacy message gained responses_items: %s", legacyJSON)
+	}
+
+	raw := json.RawMessage(`{"id":"ws_1","type":"web_search_call","status":"completed"}`)
+	current := Message{Role: RoleAssistant, Content: "answer", ResponsesItems: []json.RawMessage{raw}}
+	encoded, err := json.Marshal(current)
+	if err != nil {
+		t.Fatalf("marshal current message: %v", err)
+	}
+	var roundTrip Message
+	if err := json.Unmarshal(encoded, &roundTrip); err != nil {
+		t.Fatalf("unmarshal current message: %v", err)
+	}
+	if len(roundTrip.ResponsesItems) != 1 || string(roundTrip.ResponsesItems[0]) != string(raw) {
+		t.Fatalf("round-tripped ResponsesItems = %#v", roundTrip.ResponsesItems)
+	}
+}
+
 // --- ChunkType constants ---
 
 func TestChunkTypeConstants(t *testing.T) {
-	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError}
+	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem}
 	for i, ct := range types {
 		if int(ct) != i {
 			t.Errorf("ChunkType %d: got %d", i, int(ct))

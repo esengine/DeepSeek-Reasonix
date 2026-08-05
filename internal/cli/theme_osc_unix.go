@@ -17,7 +17,7 @@ const (
 )
 
 func queryTerminalBackground() (terminalRGB, bool) {
-	if !colorEnabled {
+	if !colorOn() {
 		return terminalRGB{}, false
 	}
 	inFd := int(os.Stdin.Fd())

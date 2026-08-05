@@ -89,6 +89,7 @@ type QualityUsage struct {
 	ReasoningTokens  int  `json:"reasoning_tokens"`
 	CacheHitTokens   int  `json:"cache_hit_tokens"`
 	CacheMissTokens  int  `json:"cache_miss_tokens"`
+	Estimated        bool `json:"estimated,omitempty"`
 	CacheHitPercent  *int `json:"cache_hit_percent,omitempty"`
 }
 
@@ -109,6 +110,7 @@ type qualityTelemetry struct {
 		ReasoningTokens  int                           `json:"reasoningTokens"`
 		CacheHitTokens   int                           `json:"cacheHitTokens"`
 		CacheMissTokens  int                           `json:"cacheMissTokens"`
+		Estimated        bool                          `json:"estimated,omitempty"`
 		RequestCount     int                           `json:"requestCount"`
 		Sources          map[string]qualitySourceUsage `json:"sources"`
 	} `json:"usage"`
@@ -223,6 +225,7 @@ func summarizeQualityUsage(telemetry qualityTelemetry) QualityUsage {
 		ReasoningTokens:  telemetry.Usage.ReasoningTokens,
 		CacheHitTokens:   telemetry.Usage.CacheHitTokens,
 		CacheMissTokens:  telemetry.Usage.CacheMissTokens,
+		Estimated:        telemetry.Usage.Estimated,
 	}
 	if total := usage.CacheHitTokens + usage.CacheMissTokens; total > 0 {
 		percent := usage.CacheHitTokens * 100 / total

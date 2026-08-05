@@ -54,6 +54,28 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 	}
 }
 
+func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
+	w := ToWire(event.Event{
+		Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeDecisionReceipt,
+		Text: "Decision recorded: allow_once",
+		DecisionReceipt: &provider.DecisionReceipt{
+			ID: "approval-1", Kind: "tool", Tool: "write_file", Subject: "src/app.go", Outcome: "allow_once",
+		},
+	})
+	if w.DecisionReceipt == nil || w.DecisionReceipt.ID != "approval-1" || w.DecisionReceipt.Outcome != "allow_once" {
+		t.Fatalf("wire receipt = %+v", w.DecisionReceipt)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"code":"decision_receipt"`, `"decisionReceipt"`, `"outcome":"allow_once"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("receipt JSON = %s, want %s", b, want)
+		}
+	}
+}
+
 func TestKindNamesComplete(t *testing.T) {
 	for k := event.Kind(0); k < event.KindCount; k++ {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
@@ -76,11 +98,13 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
 		"detail?: string;",
-		`outcome?: "final_readiness";`,
+		`outcome?: "final_readiness" | "recovery_paused";`,
 		"retryAttempt?: number;",
 		"retryMax?: number;",
 		"memoryCitations?: MemoryCitation[];",
 		"export interface MemoryCitation",
+		"resolvedName?: string;",
+		"capabilityId?: string;",
 		"cacheDiagnostics?: WireCacheDiagnostics;",
 		"export interface WireCacheDiagnostics",
 		"prefixHash: string;",
@@ -106,6 +130,27 @@ func TestToWireNoticeDetail(t *testing.T) {
 	for _, want := range []string{`"kind":"notice"`, `"text":"short"`, `"detail":"diagnostics"`, `"level":"warn"`} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("notice JSON = %s, want it to contain %s", string(b), want)
+		}
+	}
+}
+
+func TestToWireToolCarriesResolvedCapabilityMetadata(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		ID: "c1", Name: "use_capability",
+		Args:         `{"action":"call","capability_id":"mcp-tool:db/write"}`,
+		ResolvedName: "mcp__db__write", CapabilityID: "mcp-tool:db/write",
+		ReadOnly: false, Refreshed: true,
+	}})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{
+		`"name":"use_capability"`, `"resolvedName":"mcp__db__write"`,
+		`"capabilityId":"mcp-tool:db/write"`, `"readOnly":false`, `"refreshed":true`,
+	} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("tool JSON = %s, want %s", b, want)
 		}
 	}
 }
@@ -211,7 +256,7 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 		Kind: event.Usage,
 		Usage: &provider.Usage{
 			PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200,
-			CacheHitTokens: 900, CacheMissTokens: 100, ReasoningTokens: 33,
+			CacheHitTokens: 900, CacheMissTokens: 100, ReasoningTokens: 33, Estimated: true,
 		},
 		Pricing:     &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2},
 		UsageSource: event.UsageSourceTitle,
@@ -230,6 +275,7 @@ func TestToWireUsagePayloadJSON(t *testing.T) {
 	for _, want := range []string{
 		`"kind":"usage"`, `"promptTokens":1000`, `"completionTokens":200`, `"totalTokens":1200`,
 		`"cacheHitTokens":900`, `"cacheMissTokens":100`, `"reasoningTokens":33`,
+		`"estimated":true`,
 		`"source":"title"`, `"sessionCacheHitTokens":8000`, `"sessionCacheMissTokens":2000`,
 		`"currency":"¥"`, `"costUsd":`, `"cacheDiagnostics":`, `"prefixHash":"p"`,
 		`"prefixChanged":true`, `"prefixChangeReasons":["log_rewrite"]`, `"toolSchemaTokens":42`,

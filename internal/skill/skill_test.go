@@ -702,8 +702,8 @@ func TestBuiltinSubagentSkillsDeclareAllowedTools(t *testing.T) {
 	cases := map[string][]string{
 		"explore":         {"read_file", "ls", "glob", "grep", "code_index"},
 		"research":        {"read_file", "ls", "glob", "grep", "code_index", "web_fetch"},
-		"review":          {"read_file", "ls", "glob", "grep", "code_index", "bash"},
-		"security-review": {"read_file", "ls", "glob", "grep", "code_index", "bash"},
+		"review":          {"read_file", "ls", "glob", "grep", "code_index", "bash", "use_capability"},
+		"security-review": {"read_file", "ls", "glob", "grep", "code_index", "bash", "use_capability"},
 	}
 	for name, want := range cases {
 		sk, ok := st.Read(name)

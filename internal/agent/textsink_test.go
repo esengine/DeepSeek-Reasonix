@@ -62,6 +62,27 @@ func TestTextSinkCanShowReasoningInVerboseMode(t *testing.T) {
 	}
 }
 
+func TestTextSinkFormatsCapabilityProxyForHeadlessCLI(t *testing.T) {
+	var b strings.Builder
+	s := NewTextSink(&b, nil, 80)
+	args := `{"action":"call","capability_id":"mcp-tool:github/search_issues","arguments":{"query":"bug"}}`
+
+	s.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{Name: "use_capability", Args: args}})
+	s.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		Name: "use_capability", Args: args, Err: "blocked by permission policy",
+	}})
+	s.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
+		Name: "use_capability", Args: `{"action":"list"}`,
+	}})
+
+	want := "  -> MCP(mcp-tool:github/search_issues)\n" +
+		"  ⊘ MCP(mcp-tool:github/search_issues) blocked by permission policy\n" +
+		"  -> MCP(list)\n"
+	if got := b.String(); got != want {
+		t.Fatalf("TextSink capability output mismatch:\n got: %q\nwant: %q", got, want)
+	}
+}
+
 // fakeRenderer returns a fixed string so the redraw escape sequence is testable
 // without a real markdown library.
 type fakeRenderer struct{}

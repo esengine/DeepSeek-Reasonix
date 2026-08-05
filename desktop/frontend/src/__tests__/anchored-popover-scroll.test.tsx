@@ -49,11 +49,11 @@ async function nextFrame() {
   });
 }
 
-function Harness() {
+function Harness({ showAnchor = true }: { showAnchor?: boolean }) {
   const anchorRef = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <button ref={anchorRef} data-testid="anchor">Anchor</button>
+      {showAnchor && <button ref={anchorRef} data-testid="anchor">Anchor</button>}
       <AnchoredPopover
         open
         anchorRef={anchorRef}
@@ -103,14 +103,27 @@ if (!rootEl) throw new Error("missing root");
 const root = createRoot(rootEl);
 
 await act(async () => {
-  root.render(<Harness />);
+  root.render(<Harness showAnchor={false} />);
 });
-await nextFrame();
 
 const popover = document.querySelector<HTMLElement>("[data-anchored-popover='active']");
 if (!popover) throw new Error("popover did not render");
 
+eq(popover.style.left, "8px", "unmeasured popover uses the visible horizontal fallback");
+eq(popover.style.top, "8px", "unmeasured popover uses the visible vertical fallback");
+eq(popover.style.visibility, "visible", "unmeasured popover remains visible");
+eq(popover.dataset.ready, "false", "fallback position does not pretend layout is ready");
+
+// Exhaust the first scheduled measurement while the anchor is unavailable.
+await nextFrame();
+
+await act(async () => {
+  root.render(<Harness />);
+});
+await nextFrame();
+
 eq(popover.style.top, "138px", "popover starts below the anchor");
+eq(popover.dataset.ready, "true", "popover becomes ready after measurement recovers");
 
 await act(async () => {
   anchorTop = 40;
@@ -119,6 +132,15 @@ await act(async () => {
 });
 
 eq(popover.style.top, "78px", "popover follows the anchor after a scroll event");
+
+await act(async () => {
+  root.render(<Harness showAnchor={false} />);
+  window.dispatchEvent(new Event("scroll", { bubbles: true }));
+  await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)));
+});
+
+eq(popover.style.top, "78px", "popover keeps its last valid position while the anchor is unavailable");
+eq(popover.dataset.ready, "true", "temporary anchor loss keeps the last measured position ready");
 
 await act(async () => {
   root.unmount();

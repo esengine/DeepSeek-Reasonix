@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -100,6 +101,11 @@ func MigrateLegacyIfNeededForRoot(root string) (*MigrationResult, error) {
 	if dest == "" {
 		return nil, credErr
 	}
+	unlock, err := LockConfigFileEdits(dest)
+	if err != nil {
+		return nil, errors.Join(credErr, err)
+	}
+	defer unlock()
 	if _, err := os.Stat(dest); err == nil {
 		return nil, credErr
 	}
@@ -183,6 +189,16 @@ func MigrateLegacyCredentialsForRoot(root string) error {
 // settings page is stable across Global/project tabs. Existing global entries win
 // on name collisions, and source files are left untouched.
 func MigrateMCPToUserConfigOnUpgrade(projectRoots []string) (*MCPGlobalMigrationResult, error) {
+	dest := userConfigPath()
+	if dest == "" {
+		return nil, nil
+	}
+	unlock, err := LockConfigFileEdits(dest)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+
 	marker := mcpGlobalMigrationMarkerPath()
 	if marker == "" {
 		return nil, nil
@@ -237,6 +253,7 @@ func migrateMCPToUserConfig(projectRoots []string) (*MCPGlobalMigrationResult, e
 			if name == "" || have[name] || validatePlugin(entry) != nil {
 				continue
 			}
+			entry.Source = MCPSourceUserConfig
 			userCfg.Plugins = append(userCfg.Plugins, entry)
 			have[name] = true
 			result.Added++
@@ -617,7 +634,9 @@ func writeCredentialsEnv(home string, lines []string) error {
 
 func migrateSupportData(legacyDir, newDir string) []string {
 	var warnings []string
-	items := []string{"sessions", "projects", "skills", "archive", "hooks.json"}
+	// settings.json carries the global hooks; leaving it out silently emptied
+	// them for anyone whose home moved (#4652).
+	items := []string{"sessions", "projects", "skills", "archive", "hooks.json", "settings.json"}
 	for _, item := range items {
 		src := filepath.Join(legacyDir, item)
 		fi, err := os.Stat(src)
@@ -636,6 +655,12 @@ func migrateSupportData(legacyDir, newDir string) []string {
 				warnings = append(warnings, fmt.Sprintf("successfully migrated directory %s", item))
 			}
 		} else {
+			if _, err := os.Stat(dst); err == nil {
+				// A file already written at the destination is newer than the
+				// legacy copy; never overwrite user state during migration.
+				warnings = append(warnings, fmt.Sprintf("kept existing file %s", item))
+				continue
+			}
 			if err := copyFile(src, dst); err != nil {
 				warnings = append(warnings, fmt.Sprintf("failed to migrate file %s: %v", item, err))
 			} else {

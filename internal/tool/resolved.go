@@ -29,6 +29,11 @@ type ResolvedCall struct {
 	// running a target tool (inspect, decline, unavailable, or an already-
 	// connected server directory call).
 	SkipExecute bool
+	// HostCompleted marks a call action whose final read-only result was produced
+	// and safety-checked by the host during resolution. Strict read-only agents
+	// use it to distinguish a validated connected-server directory from an
+	// unresolved dynamic call with a missing target.
+	HostCompleted bool
 	// Result is a precomputed result when SkipExecute is true.
 	Result string
 	// Unavailable marks a host-proven unavailable capability.

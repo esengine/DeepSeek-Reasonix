@@ -20,11 +20,10 @@ Reasonix 1.0 是一次从零开始的 **Go 重写**。它使用全新的代码�
 
 `npm` 仍是主要安装渠道。npm 包会下载预编译的 Go 二进制文件，方式与 esbuild/biome 类似；二进制本身是独立的 Go 可执行文件，npm 不是运行时依赖。
 
-**`npm i -g reasonix` 会安装当前稳定的 `1.x` 版本。** npm 的 `latest` 标签已从 `1.17.5` 起切换到 Go 版本。候选版本继续使用 `next` 标签；旧版 `0.x` 仍可通过固定版本安装：
+**`npm i -g reasonix` 会安装当前正式的 `1.x` 版本。** npm 的 `latest` 标签已从 `1.17.5` 起切换到 Go 版本。以后不再公开发布候选版本；旧 `next` 与 `canary` 标签仅作为兼容别名，始终指向同一个正式版本。旧版 `0.x` 仍可通过固定版本安装：
 
 ```sh
-npm i -g reasonix          # 当前稳定的 1.x
-npm i -g reasonix@next     # 候选版本（当其领先于稳定版时）
+npm i -g reasonix          # 当前正式的 1.x
 npm i -g reasonix@0.53.2   # 固定到旧版 TypeScript 构建
 ```
 
@@ -67,6 +66,42 @@ cd DeepSeek-Reasonix && make build                        # -> bin/reasonix(.exe
 
 完整路径和限制见[配置路径](./CONFIG_PATHS.zh-CN.md)。
 
+## Context Engine v2 升级
+
+指令与记忆升级会自动完成，不需要 setup mode、re-index 命令或新配置：
+
+| 现有数据 | 升级行为 |
+| --- | --- |
+| `REASONIX.md`、`AGENTS.md`、`CLAUDE.md` | 作为常驻指令加载，并附带来源、目录、precedence、imports 和 diagnostics；原文件名继续有效。 |
+| 嵌套指令文件 | 从 workspace root 解析到当前目标路径；同一目录内 `.local.md` 优先，更深目录仍高于更浅目录。 |
+| 没有 `id` / `revision` 的旧事实 | 获得确定性的 scope-aware `legacy-*` ID，并从 revision 1 开始；migration 幂等。 |
+| 没有 `metadata.scope` 的旧事实 | 根据原本拥有该文件的 project/global 目录推导 scope。 |
+| 现有 `MEMORY.md` | 作为派生 index，根据 active fact 文件重建；陈旧手写条目不会变成事实。 |
+| 现有 active facts | 保持 active，之后发生修改时才开始产生 revision history。 |
+| 现有 archive entries | 继续排除在 recall 外，可从 Context Center 或 `/memory recover` 显式恢复。 |
+| 旧 Memory v5 transcript | 继续可读；preview 会从 `<memory-compiler-execution>` 恢复原始用户提示。 |
+| `[agent].memory_compiler` | 已退役，由既有一次性配置 migration 清除。 |
+
+升级后第一次当前版本启动会补齐缺失的 identity/time metadata，不修改 fact body。若新旧版本
+共享同一 state root，兼容路由字段会避免旧客户端把事实移到错误 scope 目录。
+
+升级后请使用诊断命令，不要手工修改 migration state：
+
+```text
+/memory
+/memory instructions
+/memory recall
+/memory revisions <id-or-name>
+/memory archived
+```
+
+新的相关事实会自动召回。只有有界、非敏感、纯创建的 project/reference 事实可以免确认保存；
+全局事实、偏好、feedback、更新、重复项、敏感内容和所有归档操作仍是显式用户决定。桌面
+Suggestions tab 会自动扫描，但候选在用户接受前绝不会写入。
+
+完整 precedence、freshness、恢复、cache、隐私与远程 workspace 契约见
+[Context Engine v2](./SESSION_MEMORY_RETRIEVAL.zh-CN.md)。
+
 ## 保持不变的部分
 
 agent 核心延续了原有能力：循环、读写编辑与 glob/grep/bash 等工具、子智能体（`task`、explore/research/review）、Skill、Hook、Plan 模式、MCP 客户端，以及针对 DeepSeek 前缀缓存的设计。
@@ -75,13 +110,13 @@ agent 核心延续了原有能力：循环、读写编辑与 glob/grep/bash 等�
 
 - **代码智能**：Go 重写版通过 LSP 辅助代码读取，并结合 `grep`、`read_file` 和 `glob` 理解本地代码。v1 的语义搜索与 tree-sitter 符号索引尚未移植，CodeGraph 也不再以内置 MCP server 形式提供。
 - **Plan 模式**：新增 `complete_step`，用于基于证据确认步骤完成。
-- **MCP 项目身份与 schema 缓存 URL 感知凭据**：userinfo 和 token/api_key/password 等查询值不会进入项目启动身份摘要或 schema 缓存键，因此轮换凭据不会使项目授权失效。用户安装的 server 不计算项目身份摘要。旧的逐工具 reader 回执不再使用，并会在下一次写入授权状态时移除。
-- **MCP 添加后即可使用**：用户通过桌面端、全局配置、旧配置导入或主动安装插件包添加的 server 会立即连接并允许调用。仓库内 `reasonix.toml` / `.mcp.json` 声明的 server 则必须先针对稳定身份确认一次，确认前不会启动进程或发起网络请求。
+- **MCP 项目身份与 schema 缓存 URL 感知凭据**：userinfo 和 token/api_key/password 等查询值不会进入项目运行身份摘要或 schema 缓存键，因此轮换凭据不会改变项目运行时/缓存身份。用户安装的 server 不计算项目身份摘要；已配置 MCP 不再需要旧的启动或逐工具授权回执。
+- **MCP 添加后即可使用**：用户通过桌面端、CLI、全局配置、旧配置导入或主动安装插件包添加的 server 默认可信，全局安装统一写入 `config.toml`。仓库内 `reasonix.toml` / `.mcp.json` 声明保留在项目中，同样无需额外启动确认。同名时项目覆盖全局，项目内部 `reasonix.toml` 高于 `.mcp.json`。打开陌生仓库等同于接受其中可执行的项目配置；启动 Reasonix 前应检查 `.reasonix/settings.json`、`reasonix.toml` 和 `.mcp.json`。如果仓库引发异常的 MCP 或 Hooks 行为，可用安全模式重新启动，在恢复期间禁用这些外部集成。
 - **stdio MCP 连接持久化**：writer 调用不再创建新进程，浏览器或会话类 server 的状态可以保留。
 - **Plan 与权限策略相互独立**：普通内置工具和 Bash 仍遵循 Ask/Auto/YOLO 与 Sandbox；已安装或代理解析的 MCP 写入/破坏性工具，以及来自未授权 server 的读取工具，在整个规划阶段保持阻止。`complete_step` 等执行阶段工具也要等计划获批后才能使用。
-- `plan_mode_read_only_commands` 仍可解析和保存，以兼容旧配置，但不再决定主 Plan 流程能否调用工具。安装或明确确认 MCP server 后，其非破坏性的 `readOnlyHint` 工具会自动进入 planner 与只读子智能体，不需要逐工具信任配置。
+- `plan_mode_read_only_commands` 仍可解析和保存，以兼容旧配置，但不再决定主 Plan 流程能否调用工具。安装或通过项目配置声明 MCP server 后，其非破坏性的 `readOnlyHint` 工具会自动进入 planner 与只读子智能体，不需要逐工具信任配置。
 - 使用 `read_only_task` / `read_only_skill` 创建技术上只读的子智能体；普通 `task` / `run_skill` 仍可写入，并受权限与 Sandbox 控制。未声明 `readOnlyHint` 的 MCP 工具仍按 writer 处理。
-- `default_tools_approval_mode`、`tools.<raw>.approval_mode` 和 `approvals_reviewer` 已停用，加载时忽略并在下次保存时移除；安装或明确授权 server 后，其所有工具直接可用。
+- `default_tools_approval_mode`、`tools.<raw>.approval_mode` 和 `approvals_reviewer` 已停用，加载时忽略并在下次保存时移除；安装或通过项目配置声明 server 后，其所有工具直接可用。
 - **Web Dashboard 仍然可用，桌面端更推荐**：需要浏览器访问时，可运行
   `reasonix serve` 启动本地 Web UI；日常可视化使用优先选择 Wails 桌面端，
   终端工作流继续使用 CLI/TUI。

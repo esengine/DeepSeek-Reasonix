@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -101,6 +102,83 @@ func TestJobArtifactMetadataPreservesLabel(t *testing.T) {
 	}
 }
 
+func TestListArtifactViewsVerifiesTerminalArtifactPresence(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	type artifactCase struct {
+		id       string
+		status   Status
+		metaOK   bool
+		metaErr  string
+		artifact string
+		legacy   bool
+		want     bool
+	}
+	cases := []artifactCase{
+		{id: "task-running", status: Running, metaOK: true, artifact: "file", want: false},
+		{id: "task-unknown", status: Status("future"), metaOK: true, artifact: "file", want: false},
+		{id: "task-missing", status: Done, metaOK: true, want: false},
+		{id: "task-error", status: Done, metaOK: true, metaErr: "write failed", artifact: "file", want: false},
+		{id: "task-directory", status: Done, metaOK: true, artifact: "directory", want: false},
+		{id: "task-complete", status: Done, metaOK: true, artifact: "file", want: true},
+		{id: "task-legacy", status: Done, metaOK: true, artifact: "file", legacy: true, want: true},
+	}
+	for _, tc := range cases {
+		logName := tc.id + jobLogExt
+		metaLogPath := logName
+		if tc.legacy {
+			metaLogPath = ""
+		}
+		if err := writeMeta(filepath.Join(dir, tc.id+jobMetaExt), artifactMeta{
+			ID:               tc.id,
+			Kind:             "task",
+			Status:           tc.status,
+			StartedAt:        time.Now().Add(-time.Minute).UnixMilli(),
+			FinishedAt:       time.Now().UnixMilli(),
+			ArtifactComplete: tc.metaOK,
+			ArtifactError:    tc.metaErr,
+			LogPath:          metaLogPath,
+		}); err != nil {
+			t.Fatalf("write %s metadata: %v", tc.id, err)
+		}
+		switch tc.artifact {
+		case "file":
+			if err := os.WriteFile(filepath.Join(dir, logName), []byte("persisted output"), 0o600); err != nil {
+				t.Fatalf("write %s artifact: %v", tc.id, err)
+			}
+		case "directory":
+			if err := os.Mkdir(filepath.Join(dir, logName), 0o700); err != nil {
+				t.Fatalf("create %s artifact directory: %v", tc.id, err)
+			}
+		}
+	}
+
+	views, err := ListArtifactViews(sessionPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool, len(views))
+	for _, view := range views {
+		got[view.ID] = view.ArtifactComplete
+	}
+	if len(got) != len(cases) {
+		t.Fatalf("artifact views = %+v, want %d entries", views, len(cases))
+	}
+	for _, tc := range cases {
+		complete, ok := got[tc.id]
+		if !ok {
+			t.Errorf("%s artifact view is missing", tc.id)
+			continue
+		}
+		if complete != tc.want {
+			t.Errorf("%s artifact complete = %v, want %v", tc.id, complete, tc.want)
+		}
+	}
+}
+
 func TestJobArtifactUsesPrivatePermissions(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows file ACLs are not represented by Unix permission bits")
@@ -181,6 +259,259 @@ func TestRestoreSessionArtifactsAndAdvanceSequence(t *testing.T) {
 	<-next.done
 	if next.ID == j.ID {
 		t.Fatalf("new job reused restored id %q", next.ID)
+	}
+}
+
+func TestRestoreRunningArtifactAsInterrupted(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	metaPath := filepath.Join(dir, "task-1"+jobMetaExt)
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:               "task-1",
+		Kind:             "task",
+		Status:           Running,
+		StartedAt:        time.Now().Add(-time.Minute).UnixMilli(),
+		ArtifactComplete: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewManager(event.Discard, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+
+	if got := m.RunningForSession("session"); len(got) != 0 {
+		t.Fatalf("restored stale job remained live: %+v", got)
+	}
+	if m.KillForSession("session", "task-1") {
+		t.Fatal("restored interrupted job must not be killable")
+	}
+	result := m.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("restored result = %+v, want interrupted", result)
+	}
+
+	persisted, err := readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != Interrupted || persisted.FinishedAt == 0 || persisted.ArtifactComplete {
+		t.Fatalf("persisted restored metadata = %+v", persisted)
+	}
+}
+
+func TestRestoreRunningArtifactDefersTombstoneWhenRepairWriteFails(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	metaPath := filepath.Join(dir, "task-1"+jobMetaExt)
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:        "task-1",
+		Kind:      "task",
+		Status:    Running,
+		StartedAt: time.Now().Add(-time.Minute).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	originalRepair := repairArtifactMeta
+	repairArtifactMeta = func(string, artifactMeta) error {
+		return errors.New("simulated repair failure")
+	}
+	t.Cleanup(func() { repairArtifactMeta = originalRepair })
+
+	sink := &recordingSink{}
+	m := NewManager(sink, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+
+	if result := m.WaitForSession(context.Background(), "session", []string{"task-1"}, 1); len(result) != 0 {
+		t.Fatalf("failed repair published an in-memory tombstone: %+v", result)
+	}
+	persisted, err := readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != Running || persisted.FinishedAt != 0 {
+		t.Fatalf("failed repair changed durable metadata: %+v", persisted)
+	}
+	m.mu.Lock()
+	loaded := m.loaded["session"]
+	m.mu.Unlock()
+	if loaded {
+		t.Fatal("failed repair marked the session loaded and prevented retry")
+	}
+	sink.mu.Lock()
+	events := append([]event.Event(nil), sink.events...)
+	sink.mu.Unlock()
+	if len(events) != 1 || events[0].Kind != event.Notice || events[0].Level != event.LevelWarn ||
+		events[0].Text != "Background job recovery did not complete." ||
+		!strings.Contains(events[0].Detail, "task-1") || !strings.Contains(events[0].Detail, "simulated repair failure") {
+		t.Fatalf("repair failure notice = %+v", events)
+	}
+
+	repairArtifactMeta = originalRepair
+	m.SetActiveSessionPath("session", sessionPath)
+	result := m.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("retried repair result = %+v, want interrupted", result)
+	}
+	m.mu.Lock()
+	loaded = m.loaded["session"]
+	m.mu.Unlock()
+	if !loaded {
+		t.Fatal("successful retry did not mark the session loaded")
+	}
+	persisted, err = readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.Status != Interrupted || persisted.FinishedAt == 0 || persisted.ArtifactComplete {
+		t.Fatalf("retried repair metadata = %+v, want durable interrupted tombstone", persisted)
+	}
+}
+
+func TestRestoreRunningArtifactFromClosedOwnerAsInterrupted(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	dir := ArtifactDir(sessionPath)
+	metaPath := filepath.Join(dir, "task-1"+jobMetaExt)
+	owner := NewManager(event.Discard)
+	ownerID := owner.ownerID
+	owner.Close()
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:        "task-1",
+		Kind:      "task",
+		OwnerID:   ownerID,
+		Status:    Running,
+		StartedAt: time.Now().Add(-time.Minute).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	restored := NewManager(event.Discard, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
+	defer restored.Close()
+	restored.SetActiveSessionPath("session", sessionPath)
+	result := restored.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("restored result = %+v, want interrupted after the original owner closed", result)
+	}
+}
+
+func TestRestoreRunningArtifactWithoutSessionOwnershipDefersRepair(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	metaPath := filepath.Join(ArtifactDir(sessionPath), "task-1"+jobMetaExt)
+	if err := writeMeta(metaPath, artifactMeta{
+		ID:        "task-1",
+		Kind:      "task",
+		Status:    Running,
+		StartedAt: time.Now().Add(-time.Minute).UnixMilli(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	observer := NewManager(event.Discard)
+	observer.SetActiveSessionPath("session", sessionPath)
+	if result := observer.WaitForSession(context.Background(), "session", []string{"task-1"}, 1); len(result) != 0 {
+		observer.Close()
+		t.Fatalf("unowned observer published a running artifact: %+v", result)
+	}
+	meta, err := readMeta(metaPath)
+	if err != nil {
+		observer.Close()
+		t.Fatal(err)
+	}
+	if meta.Status != Running || meta.FinishedAt != 0 {
+		observer.Close()
+		t.Fatalf("unowned observer rewrote running metadata: %+v", meta)
+	}
+	observer.Close()
+
+	owner := NewManager(event.Discard, WithSessionOwnershipProbe(func(path string) bool {
+		return path == sessionPath
+	}))
+	defer owner.Close()
+	owner.SetActiveSessionPath("session", sessionPath)
+	result := owner.WaitForSession(context.Background(), "session", []string{"task-1"}, 1)
+	if len(result) != 1 || result[0].Status != Interrupted {
+		t.Fatalf("owned reload = %+v, want interrupted", result)
+	}
+}
+
+func TestRestoreDoesNotInterruptJobOwnedByLiveManager(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	first := NewManager(event.Discard)
+	defer first.Close()
+	first.SetActiveSessionPath("session", sessionPath)
+
+	release := make(chan struct{})
+	job := first.StartForSession("session", "task", "running", func(context.Context, io.Writer) (string, error) {
+		<-release
+		return "done", nil
+	})
+	metaPath := filepath.Join(ArtifactDir(sessionPath), job.ID+jobMetaExt)
+
+	second := NewManager(event.Discard)
+	defer second.Close()
+	second.SetActiveSessionPath("session", sessionPath)
+
+	meta, err := readMeta(metaPath)
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	if meta.Status != Running {
+		close(release)
+		t.Fatalf("a replacement manager interrupted a still-live job: status=%q", meta.Status)
+	}
+	if got := second.RunningForSession("session"); len(got) != 0 {
+		close(release)
+		t.Fatalf("replacement manager published an unowned live job: %+v", got)
+	}
+
+	close(release)
+	<-job.done
+	second.SetActiveSessionPath("session", sessionPath)
+	result := second.WaitForSession(context.Background(), "session", []string{job.ID}, 1)
+	if len(result) != 1 || result[0].Status != Done {
+		t.Fatalf("replacement manager did not load the terminal artifact after owner completion: %+v", result)
+	}
+}
+
+func TestRunningJobArtifactMetadataIsIncomplete(t *testing.T) {
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	m := NewManager(event.Discard)
+	defer m.Close()
+	m.SetActiveSessionPath("session", sessionPath)
+
+	release := make(chan struct{})
+	job := m.StartForSession("session", "task", "running", func(context.Context, io.Writer) (string, error) {
+		<-release
+		return "done", nil
+	})
+	metaPath := filepath.Join(ArtifactDir(sessionPath), job.ID+jobMetaExt)
+	meta, err := readMeta(metaPath)
+	if err != nil {
+		close(release)
+		t.Fatal(err)
+	}
+	if meta.Status != Running || meta.FinishedAt != 0 || meta.ArtifactComplete {
+		close(release)
+		t.Fatalf("running metadata = %+v", meta)
+	}
+
+	close(release)
+	<-job.done
+	meta, err = readMeta(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status != Done || meta.FinishedAt == 0 || !meta.ArtifactComplete {
+		t.Fatalf("terminal metadata = %+v", meta)
 	}
 }
 

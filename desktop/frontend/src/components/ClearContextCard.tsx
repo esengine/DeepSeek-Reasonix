@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import {
   DecisionConfirmBar,
   PromptAction,
   PromptBadge,
+  PromptDescriptionDisclosure,
   PromptShelf,
 } from "./PromptShelf";
 
@@ -18,7 +19,10 @@ export function ClearContextCard({
   const shelfRef = useRef<HTMLDivElement | null>(null);
   // Default safe choice: cancel.
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
+  const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const instanceId = useId();
   const selectedIndexRef = useRef(0);
   selectedIndexRef.current = selectedIndex;
   const submittingRef = useRef(false);
@@ -42,6 +46,8 @@ export function ClearContextCard({
       tone: "danger" as const,
     },
   ];
+  const selectedDescriptionId = `${instanceId}-description-${selectedIndex}`;
+  const descriptionExpanded = expandedDescriptionId === selectedDescriptionId;
 
   useEffect(() => {
     shelfRef.current?.focus();
@@ -98,6 +104,7 @@ export function ClearContextCard({
   return (
     <PromptShelf
       decision
+      className="prompt-shelf--clear-context"
       barRef={shelfRef}
       titleId="clear-context-shelf-title"
       title={t("clearContext.title")}
@@ -111,6 +118,9 @@ export function ClearContextCard({
               keyLabel={action.key}
               label={action.label}
               description={action.desc}
+              descriptionId={`${instanceId}-description-${index}`}
+              descriptionDisclosure
+              onDescriptionOverflowChange={selectedIndex === index ? setDescriptionTruncated : undefined}
               onClick={() => {
                 if (submitting) return;
                 setSelectedIndex(index);
@@ -122,6 +132,19 @@ export function ClearContextCard({
           ))}
         </>
       }
+      note={
+        descriptionTruncated ? (
+          <PromptDescriptionDisclosure
+            descriptionId={`${selectedDescriptionId}-detail`}
+            label={actions[selectedIndex]?.label}
+            description={actions[selectedIndex]?.desc ?? ""}
+            expanded={descriptionExpanded}
+            onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
+            disabled={submitting}
+            alwaysVisible={actions[selectedIndex]?.tone === "danger"}
+          />
+        ) : undefined
+      }
       footer={
         <DecisionConfirmBar
           hint={t("decision.selectHint")}
@@ -131,8 +154,6 @@ export function ClearContextCard({
           danger={selectedIndex === 1}
         />
       }
-    >
-      <p className="prompt-shelf__note">{t("clearContext.detail")}</p>
-    </PromptShelf>
+    />
   );
 }

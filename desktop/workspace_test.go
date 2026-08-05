@@ -1194,25 +1194,33 @@ func TestWorkspaceChangesUsesRequestedTabCheckpoints(t *testing.T) {
 	sessionA := filepath.Join(sessionDir, "a.jsonl")
 	sessionB := filepath.Join(sessionDir, "b.jsonl")
 	content := "old"
+	afterExists := true
 	now := time.Now()
 
 	for _, tc := range []struct {
-		session string
-		path    string
-		prompt  string
+		session       string
+		path          string
+		prompt        string
+		schemaVersion int
+		afterExisted  *bool
+		afterSHA256   string
 	}{
-		{sessionA, "a.txt", "edit a"},
-		{sessionB, "b.txt", "edit b"},
+		{sessionA, "a.txt", "edit a", checkpoint.SchemaV2, &afterExists, checkpoint.Digest([]byte("new"))},
+		{sessionB, "b.txt", "edit b", 0, nil, ""},
 	} {
 		ckptDir := strings.TrimSuffix(tc.session, ".jsonl") + ".ckpt"
 		if err := os.MkdirAll(ckptDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 		seedCheckpoint(t, ckptDir, checkpoint.Checkpoint{
-			Turn:   0,
-			Time:   now,
-			Prompt: tc.prompt,
-			Files:  []checkpoint.FileSnap{{Path: tc.path, Content: &content}},
+			SchemaVersion: tc.schemaVersion,
+			Turn:          0,
+			Time:          now,
+			Prompt:        tc.prompt,
+			Files: []checkpoint.FileSnap{{
+				Path: tc.path, Content: &content,
+				AfterExisted: tc.afterExisted, AfterSHA256: tc.afterSHA256,
+			}},
 		})
 	}
 
@@ -1236,6 +1244,13 @@ func TestWorkspaceChangesUsesRequestedTabCheckpoints(t *testing.T) {
 	}
 	if byPath["b.txt"].LatestPrompt != "edit b" {
 		t.Fatalf("requested tab b changes = %+v, want b.txt from tab b", got.Files)
+	}
+	if byPath["b.txt"].CanSessionRevert {
+		t.Fatalf("legacy checkpoint must not enable destructive one-click revert: %+v", byPath["b.txt"])
+	}
+	gotA := app.WorkspaceChanges("a")
+	if len(gotA.Files) != 1 || !gotA.Files[0].CanSessionRevert {
+		t.Fatalf("verified v2 checkpoint should enable session revert: %+v", gotA.Files)
 	}
 }
 

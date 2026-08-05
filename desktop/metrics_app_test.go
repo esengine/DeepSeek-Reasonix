@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"reasonix/internal/config"
@@ -34,6 +35,7 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		{Kind: event.CompactionDone},
 		{Kind: event.Notice, Text: "No visible answer was produced; asking the assistant to respond again.", Detail: "empty final answer blocked: model returned no visible answer text; retrying"},
 		{Kind: event.TurnDone, Err: errors.New("deepseek-flash: status 429: rate limited")},
+		{Kind: event.TurnDone, Err: errors.New("automatic recovery paused"), Outcome: event.TurnOutcomeRecoveryPaused},
 		{Kind: event.TurnDone},
 	}
 	for _, e := range feed {
@@ -47,7 +49,7 @@ func TestObserveClassifiesEvents(t *testing.T) {
 		"compaction":     {"total": 1},
 		"empty_final":    {"total": 1},
 		"provider_error": {"http_429": 1},
-		"turns":          {"total": 2},
+		"turns":          {"total": 3},
 	}
 	for sig, buckets := range want {
 		for b, n := range buckets {
@@ -189,6 +191,11 @@ func TestErrorClass(t *testing.T) {
 		"read: connection reset by peer":      "stream_interrupted",
 		"stream interrupted mid-flight":       "stream_interrupted",
 		"context deadline exceeded (timeout)": "timeout",
+		"update: authorization cancelled":     "authorization_cancelled",
+		"update: authorization failed":        "authorization_failed",
+		"update: package manager busy":        "package_manager_busy",
+		"update: package install failed":      "package_install_failed",
+		"update: package verify failed":       "package_verify_failed",
 		"some unrecognized failure":           "other",
 	}
 	for msg, want := range cases {
@@ -238,5 +245,44 @@ func TestPersistMergesAcrossSessions(t *testing.T) {
 	}
 	if n := len(flatten(readCounters(path))); n != 1 {
 		t.Errorf("flatten produced %d counters, want 1", n)
+	}
+}
+
+func TestErrorClassSeparatesBadRequestCauses(t *testing.T) {
+	// Verbatim provider bodies from reported issues, each needing a different fix.
+	cases := map[string]string{
+		`status 400: messages[203]: unknown variant ` + "`image_url`" + `, expected ` + "`text`": "http_400_content",
+		`status 400: Invalid schema for function 'ls': null is not of type "array"`:              "http_400_schema",
+		"status 400: The `content[].thinking` in the thinking mode must be passed back":          "http_400_reasoning_replay",
+		"status 400: thinking: invalid type: map, expected a boolean":                            "http_400_thinking_shape",
+		"status 400: This model's maximum context length is 65536 tokens":                        "http_400_context_length",
+		"status 400: missing field name at line 1":                                               "http_400_tool_calls",
+		"status 400: something nobody has classified yet":                                        "http_400",
+	}
+	for msg, want := range cases {
+		if got := errorClass(msg); got != want {
+			t.Errorf("errorClass(%q) = %q, want %q", msg, got, want)
+		}
+	}
+}
+
+func TestErrorClassNeverEchoesProviderText(t *testing.T) {
+	// The bucket is uploaded; the message is not. A label must be a fixed token,
+	// so no substring of a body carrying user code or prompt text can reach it.
+	secrets := []string{
+		"status 400: Invalid schema for function 'ls': /home/alice/secret-project is not of type \"array\"",
+		"status 400: unknown variant `image_url` in ~/work/client-contract.pdf",
+		"status 400: thinking: invalid type: map, expected a boolean, key=sk-abc123",
+	}
+	for _, msg := range secrets {
+		got := errorClass(msg)
+		for _, leak := range []string{"alice", "secret", "client-contract", "sk-abc123", "/home", "~/work"} {
+			if strings.Contains(got, leak) {
+				t.Fatalf("errorClass(%q) = %q, leaked %q", msg, got, leak)
+			}
+		}
+		if !strings.HasPrefix(got, "http_400") {
+			t.Errorf("errorClass(%q) = %q, want an http_400 label", msg, got)
+		}
 	}
 }

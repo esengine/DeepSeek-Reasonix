@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -32,13 +33,36 @@ func ensureBinary(ctx context.Context, conn Conn, fs *sftpfs.FS, opts Options, h
 		return installViaNPM(ctx, conn, opts.MinVersion)
 	case InstallUpload:
 		return installViaUpload(ctx, conn, fs, opts, home, goos, goarch, uploaded)
-	default: // auto: try npm, then upload
+	default: // auto: try npm, packaged same-platform upload, then verified release upload
 		if b, v, nerr := installViaNPM(ctx, conn, opts.MinVersion); nerr == nil {
 			return b, v, nil
-		} else if opts.LocalBinary == "" {
-			return "", "", fmt.Errorf("%w; bootstrap: no local Reasonix CLI is available for upload", nerr)
+		} else {
+			attempts := []error{nerr}
+			if opts.LocalBinary != "" && opts.LocalGOOS == goos && opts.LocalGOARCH == goarch {
+				if b, v, uploadErr := installViaUpload(ctx, conn, fs, opts, home, goos, goarch, uploaded); uploadErr == nil {
+					return b, v, nil
+				} else {
+					attempts = append(attempts, uploadErr)
+				}
+			} else if opts.LocalBinary == "" {
+				attempts = append(attempts, errors.New("bootstrap: no local Reasonix CLI is available for upload"))
+			} else {
+				attempts = append(attempts, fmt.Errorf("bootstrap: local binary is %s/%s but remote is %s/%s", opts.LocalGOOS, opts.LocalGOARCH, goos, goarch))
+			}
+			if opts.FetchBinary != nil {
+				binary, fetchErr := opts.FetchBinary(ctx, opts.ProductVersion, goos, goarch)
+				if fetchErr == nil {
+					if b, v, uploadErr := installBinaryBytes(ctx, conn, fs, binary, opts.MinVersion, home, uploaded); uploadErr == nil {
+						return b, v, nil
+					} else {
+						attempts = append(attempts, uploadErr)
+					}
+				} else {
+					attempts = append(attempts, fmt.Errorf("bootstrap: fetch official %s/%s CLI: %w", goos, goarch, fetchErr))
+				}
+			}
+			return "", "", fmt.Errorf("bootstrap: automatic install failed: %w", errors.Join(attempts...))
 		}
-		return installViaUpload(ctx, conn, fs, opts, home, goos, goarch, uploaded)
 	}
 }
 
@@ -107,13 +131,20 @@ func installViaUpload(ctx context.Context, conn Conn, fs *sftpfs.FS, opts Option
 	if rerr != nil {
 		return "", "", fmt.Errorf("bootstrap: read local binary: %w", rerr)
 	}
+	return installBinaryBytes(ctx, conn, fs, data, opts.MinVersion, home, uploaded)
+}
+
+func installBinaryBytes(ctx context.Context, conn Conn, fs *sftpfs.FS, data []byte, minVersion, home, uploaded string) (bin, version string, err error) {
+	if len(data) == 0 {
+		return "", "", fmt.Errorf("bootstrap: downloaded binary is empty")
+	}
 	if err := fs.MkdirAll(ctx, dirOf(uploaded)); err != nil {
 		return "", "", err
 	}
 	if err := fs.WriteFileAtomic(ctx, uploaded, data, 0o755); err != nil {
 		return "", "", fmt.Errorf("bootstrap: upload binary: %w", err)
 	}
-	loc, ver := locate(ctx, conn, uploaded, opts.MinVersion)
+	loc, ver := locate(ctx, conn, uploaded, minVersion)
 	if loc == "" {
 		return "", "", fmt.Errorf("bootstrap: uploaded binary not runnable on remote")
 	}

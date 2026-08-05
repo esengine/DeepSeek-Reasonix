@@ -7,7 +7,7 @@ import (
 
 func TestInstallerCommandLineUsesVisibleUpdateModeAndLeavesDFlagLast(t *testing.T) {
 	got := installerCommandLine(`C:\Temp\Reasonix Installer.exe`, `D:\Tools\Reasonix App`)
-	want := `"C:\Temp\Reasonix Installer.exe" /REASONIXUPDATE=1 /D=D:\Tools\Reasonix App`
+	want := `"C:\Temp\Reasonix Installer.exe" /REASONIXUPDATE=1 /REASONIXSTAGE=1 /D=D:\Tools\Reasonix App`
 	if got != want {
 		t.Fatalf("installerCommandLine = %q, want %q", got, want)
 	}
@@ -16,5 +16,8 @@ func TestInstallerCommandLineUsesVisibleUpdateModeAndLeavesDFlagLast(t *testing.
 	}
 	if !strings.HasSuffix(got, `/D=D:\Tools\Reasonix App`) {
 		t.Fatalf("/D= must be the final unquoted NSIS token, got %q", got)
+	}
+	if !strings.Contains(got, " /REASONIXSTAGE=1") {
+		t.Fatalf("auto-update must extract away from the live install, got %q", got)
 	}
 }

@@ -8,6 +8,7 @@ import { Composer } from "../components/Composer";
 import { invalidateCache } from "../lib/composerHistory";
 import { composerDraftKeyForTab } from "../lib/composerDraftKey";
 import { LocaleProvider } from "../lib/i18n";
+import { resetCustomShortcuts, saveCustomShortcut } from "../lib/keyboardShortcuts";
 import {
   SELECTED_TEXT_MAX_CHARS,
   formatSelectedTextContext,
@@ -170,6 +171,24 @@ function textarea(): HTMLTextAreaElement {
   const node = document.querySelector("textarea") as HTMLTextAreaElement | null;
   if (!node) throw new Error("composer textarea did not render");
   return node;
+}
+
+function updateTextareaFromUser(
+  value: string,
+  inputType: "insertText" | "deleteContentBackward" | "historyUndo" | "historyRedo",
+) {
+  const input = textarea();
+  input.focus();
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+  if (!setter) throw new Error("textarea value setter is unavailable");
+  setter.call(input, value);
+  input.dispatchEvent(new window.InputEvent("input", {
+    bubbles: true,
+    data: inputType === "insertText" ? value.slice(-1) : null,
+    inputType,
+  }));
+  input.dispatchEvent(new window.Event("change", { bubbles: true }));
+  input.dispatchEvent(new window.KeyboardEvent("keyup", { key: "x", bubbles: true }));
 }
 
 function sendButton(): HTMLButtonElement {
@@ -422,24 +441,93 @@ console.log("\ncomposer session draft");
 {
   const dom = installDom();
   const sent: Array<{ display: string; submit?: string }> = [];
-  const { root } = await renderComposer({
+  const { root, rerender } = await renderComposer({
     onSend: (display, submit) => {
       sent.push({ display, submit });
     },
   });
+  const typedPrefix = "typed before paste: ";
+  await rerender({ insertRequest: { id: 100, text: typedPrefix, mode: "replace" } });
   const rawPaste = "error: failed to compile\r\nat loader.ts:10\r\nat run.ts:22";
   const normalizedPaste = "error: failed to compile\nat loader.ts:10\nat run.ts:22";
   const event = textPasteEvent(rawPaste);
 
   await act(async () => {
     const input = textarea();
-    input.selectionStart = input.selectionEnd = 0;
+    input.selectionStart = input.selectionEnd = typedPrefix.length;
     input.dispatchEvent(event);
     await flushTimers();
   });
 
   eq(event.defaultPrevented, true, "short text paste is handled by React state");
-  eq(textarea().value, normalizedPaste, "short multiline paste is visible in the composer");
+  eq(textarea().value, typedPrefix + normalizedPaste, "short multiline paste is visible after existing text");
+
+  const undo = new window.KeyboardEvent("keydown", { key: "z", ctrlKey: true, bubbles: true, cancelable: true });
+  await act(async () => {
+    textarea().dispatchEvent(undo);
+    await flushTimers();
+  });
+  eq(undo.defaultPrevented, true, "Ctrl+Z handles the programmatic paste transaction");
+  eq(textarea().value, typedPrefix, "Ctrl+Z preserves the text typed before a short paste");
+
+  const redo = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(redo);
+    await flushTimers();
+  });
+  eq(redo.defaultPrevented, true, "Ctrl+Shift+Z redoes the programmatic paste transaction");
+  eq(textarea().value, typedPrefix + normalizedPaste, "redo restores the short paste after existing text");
+
+  const undoAgain = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoAgain);
+    await flushTimers();
+  });
+  eq(textarea().value, typedPrefix, "a second undo returns to the pre-paste boundary");
+
+  await act(async () => {
+    updateTextareaFromUser(`${typedPrefix}X`, "insertText");
+    await flushTimers();
+  });
+  await rerender();
+  eq(textarea().value, `${typedPrefix}X`, "ordinary typing after paste undo updates the draft");
+  await act(async () => {
+    updateTextareaFromUser(typedPrefix, "deleteContentBackward");
+    await flushTimers();
+  });
+  await rerender();
+
+  const staleRedo = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(staleRedo);
+    await flushTimers();
+  });
+  eq(staleRedo.defaultPrevented, false, "a new native edit invalidates the programmatic redo transaction");
+  eq(textarea().value, typedPrefix, "stale redo cannot resurrect an earlier paste");
+
+  await act(async () => {
+    const input = textarea();
+    input.selectionStart = input.selectionEnd = typedPrefix.length;
+    input.dispatchEvent(textPasteEvent(rawPaste));
+    await flushTimers();
+  });
 
   await act(async () => {
     sendButton().click();
@@ -447,12 +535,466 @@ console.log("\ncomposer session draft");
   });
 
   eq(sent.length, 1, "short multiline paste submits once");
-  eq(sent[0]?.display, normalizedPaste, "short multiline paste is preserved in display text");
-  eq(sent[0]?.submit, normalizedPaste, "short multiline paste is preserved in submit text");
+  eq(sent[0]?.display, typedPrefix + normalizedPaste, "short multiline paste is preserved in display text");
+  eq(sent[0]?.submit, typedPrefix + normalizedPaste, "short multiline paste is preserved in submit text");
 
   await act(async () => {
     root.unmount();
   });
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const { root, rerender } = await renderComposer();
+  const base = "base:";
+  const pasted = "paste";
+  await rerender({ insertRequest: { id: 101, text: base, mode: "replace" } });
+  await act(async () => {
+    const input = textarea();
+    input.selectionStart = input.selectionEnd = base.length;
+    input.dispatchEvent(textPasteEvent(pasted));
+    await flushTimers();
+  });
+  eq(textarea().value, base + pasted, "interleaved-history test starts at the paste boundary");
+
+  await act(async () => {
+    updateTextareaFromUser(`${base}${pasted}X`, "insertText");
+    await flushTimers();
+  });
+  await rerender();
+  await act(async () => {
+    updateTextareaFromUser(base + pasted, "deleteContentBackward");
+    await flushTimers();
+  });
+  await rerender();
+
+  const undoNativeDelete = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoNativeDelete);
+    await flushTimers();
+  });
+  eq(
+    undoNativeDelete.defaultPrevented,
+    false,
+    "Ctrl+Z leaves a native deletion above the paste transaction to the browser",
+  );
+  eq(
+    textarea().value,
+    base + pasted,
+    "matching net text does not make the older paste transaction look newest",
+  );
+
+  await act(async () => {
+    updateTextareaFromUser(`${base}${pasted}X`, "historyUndo");
+    await flushTimers();
+  });
+  await rerender();
+  const undoNativeInsert = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoNativeInsert);
+    await flushTimers();
+  });
+  eq(
+    undoNativeInsert.defaultPrevented,
+    false,
+    "Ctrl+Z leaves the remaining native insertion to the browser",
+  );
+
+  await act(async () => {
+    updateTextareaFromUser(base + pasted, "historyUndo");
+    await flushTimers();
+  });
+  await rerender();
+  const undoPasteAfterNative = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoPasteAfterNative);
+    await flushTimers();
+  });
+  eq(
+    undoPasteAfterNative.defaultPrevented,
+    true,
+    "the paste transaction becomes undoable only after newer native edits are exhausted",
+  );
+  eq(textarea().value, base, "ordered undo eventually restores the pre-paste text");
+
+  const redoPasteBeforeNative = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(redoPasteBeforeNative);
+    await flushTimers();
+  });
+  eq(
+    redoPasteBeforeNative.defaultPrevented,
+    true,
+    "ordered redo restores the custom paste before its newer native edits",
+  );
+  eq(textarea().value, base + pasted, "custom redo returns to the browser redo boundary");
+
+  const redoNativeAfterPaste = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(redoNativeAfterPaste);
+    await flushTimers();
+  });
+  eq(
+    redoNativeAfterPaste.defaultPrevented,
+    false,
+    "newer native redo remains browser-owned after the paste redo",
+  );
+
+  await act(async () => root.unmount());
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const { root, rerender } = await renderComposer();
+  await act(async () => {
+    textarea().dispatchEvent(textPasteEvent("first"));
+    await flushTimers();
+  });
+  await act(async () => {
+    updateTextareaFromUser("firstX", "insertText");
+    await flushTimers();
+  });
+  await rerender();
+  await act(async () => {
+    const input = textarea();
+    input.selectionStart = input.selectionEnd = input.value.length;
+    input.dispatchEvent(textPasteEvent("second"));
+    await flushTimers();
+  });
+  eq(textarea().value, "firstXsecond", "two custom pastes can surround a native edit");
+
+  const undoSecondPaste = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoSecondPaste);
+    await flushTimers();
+  });
+  eq(undoSecondPaste.defaultPrevented, true, "the newest custom paste undoes first");
+  eq(textarea().value, "firstX", "undoing the second paste reaches its native boundary");
+
+  const undoInterleavedNative = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoInterleavedNative);
+    await flushTimers();
+  });
+  eq(
+    undoInterleavedNative.defaultPrevented,
+    false,
+    "the native edit between two custom pastes remains browser-owned",
+  );
+  await act(async () => {
+    updateTextareaFromUser("first", "historyUndo");
+    await flushTimers();
+  });
+  await rerender();
+
+  const undoFirstPaste = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoFirstPaste);
+    await flushTimers();
+  });
+  eq(undoFirstPaste.defaultPrevented, true, "the older custom paste follows the native undo segment");
+  eq(textarea().value, "", "ordered undo reaches the start of the mixed timeline");
+
+  const redoFirstPaste = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(redoFirstPaste);
+    await flushTimers();
+  });
+  eq(redoFirstPaste.defaultPrevented, true, "ordered redo restores the first custom paste");
+  eq(textarea().value, "first", "redo reaches the native segment after the first paste");
+
+  const redoInterleavedNative = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(redoInterleavedNative);
+    await flushTimers();
+  });
+  eq(
+    redoInterleavedNative.defaultPrevented,
+    false,
+    "ordered redo returns the interleaved native edit to the browser",
+  );
+  await act(async () => {
+    updateTextareaFromUser("firstX", "historyRedo");
+    await flushTimers();
+  });
+  await rerender();
+
+  const redoSecondPaste = new window.KeyboardEvent("keydown", {
+    key: "Z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(redoSecondPaste);
+    await flushTimers();
+  });
+  eq(redoSecondPaste.defaultPrevented, true, "the second custom paste redoes after the native segment");
+  eq(textarea().value, "firstXsecond", "mixed custom/native redo restores the final state");
+
+  await act(async () => root.unmount());
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  await act(async () => {
+    resetCustomShortcuts();
+    await flushTimers();
+  });
+  saveCustomShortcut("toolApproval.yolo", { key: "z", ctrl: true });
+  let yoloToggles = 0;
+  const { root } = await renderComposer({
+    onToggleYoloApprovalMode: () => {
+      yoloToggles += 1;
+    },
+  });
+  await act(async () => {
+    textarea().dispatchEvent(textPasteEvent("pasted"));
+    await flushTimers();
+  });
+  const undoPaste = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoPaste);
+    await flushTimers();
+  });
+  eq(undoPaste.defaultPrevented, true, "legacy Ctrl+Z YOLO binding yields to composer undo while editing");
+  eq(textarea().value, "", "legacy Ctrl+Z YOLO binding still undoes the paste");
+  eq(yoloToggles, 0, "legacy Ctrl+Z YOLO binding does not toggle YOLO while editing");
+
+  await act(async () => {
+    saveCustomShortcut("toolApproval.yolo", { key: "z", ctrl: true, shift: true });
+    await flushTimers();
+  });
+  const legacyRedo = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    shiftKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(legacyRedo);
+    await flushTimers();
+  });
+  eq(legacyRedo.defaultPrevented, true, "legacy Ctrl+Shift+Z YOLO binding yields to composer redo while editing");
+  eq(textarea().value, "pasted", "legacy Ctrl+Shift+Z YOLO binding still redoes the paste");
+  eq(yoloToggles, 0, "legacy Ctrl+Shift+Z YOLO binding does not toggle YOLO while editing");
+
+  await act(async () => {
+    saveCustomShortcut("toolApproval.yolo", { key: "u", ctrl: true });
+    textarea().dispatchEvent(new window.KeyboardEvent("keydown", {
+      key: "z",
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    }));
+    await flushTimers();
+  });
+  eq(textarea().value, "", "Ctrl+Z prepares a custom redo transaction after YOLO is rebound");
+
+  const ctrlYRedo = new window.KeyboardEvent("keydown", {
+    key: "y",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(ctrlYRedo);
+    await flushTimers();
+  });
+  eq(ctrlYRedo.defaultPrevented, true, "Ctrl+Y redoes the paste when the YOLO shortcut is rebound");
+  eq(textarea().value, "pasted", "Ctrl+Y restores the programmatic paste");
+  eq(yoloToggles, 0, "Ctrl+Y does not toggle YOLO after that action is rebound");
+
+  await act(async () => {
+    resetCustomShortcuts();
+    await flushTimers();
+  });
+  const defaultCtrlY = new window.KeyboardEvent("keydown", {
+    key: "y",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(defaultCtrlY);
+    await flushTimers();
+  });
+  eq(defaultCtrlY.defaultPrevented, true, "default Ctrl+Y remains reserved for the YOLO shortcut");
+  eq(yoloToggles, 1, "default Ctrl+Y still toggles YOLO exactly once");
+  eq(textarea().value, "pasted", "the YOLO shortcut does not mutate composer history");
+
+  await act(async () => root.unmount());
+  resetCustomShortcuts();
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const { root, rerender } = await renderComposer({
+    tabId: "tab-a",
+    sessionKey: "session:project:/repo:topic-a:session-a",
+  });
+  const longPaste = Array.from({ length: 20 }, (_, index) => `line ${index + 1}`).join("\n");
+  await act(async () => {
+    textarea().dispatchEvent(textPasteEvent(longPaste));
+    await flushTimers();
+  });
+  ok(document.querySelector(".composer__pasted-label") !== null, "long paste creates a folded block");
+  const previewButton = document.querySelector<HTMLButtonElement>(".composer__pasted-actions button");
+  if (!previewButton) throw new Error("long paste preview button did not render");
+  await act(async () => {
+    previewButton.click();
+    await flushTimers();
+  });
+  ok(document.querySelector(".composer__pasted-preview") !== null, "long paste preview opens without changing text history");
+
+  await rerender({
+    tabId: "tab-b",
+    sessionKey: "session:project:/repo:topic-b:session-b",
+    insertRequest: { id: 101, text: "draft B", mode: "replace" },
+  });
+  const unrelatedUndo = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(unrelatedUndo);
+    await flushTimers();
+  });
+  eq(unrelatedUndo.defaultPrevented, false, "another draft does not inherit the paste undo transaction");
+  eq(textarea().value, "draft B", "Ctrl+Z in another draft leaves its text unchanged");
+
+  await rerender({ tabId: "tab-a", sessionKey: "session:project:/repo:topic-a:session-a" });
+  ok(document.querySelector(".composer__pasted-preview") !== null, "source draft restores its open long-paste preview");
+  const foldedUndo = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(foldedUndo);
+    await flushTimers();
+  });
+  eq(foldedUndo.defaultPrevented, true, "source draft keeps its own folded-paste undo transaction");
+  eq(textarea().value, "", "Ctrl+Z removes the folded-paste label");
+  ok(document.querySelector(".composer__pasted-label") === null, "Ctrl+Z removes the folded block state");
+  ok(document.querySelector(".composer__pasted-preview") === null, "Ctrl+Z also clears preview state with the folded block");
+
+  await act(async () => root.unmount());
+  dom.window.close();
+}
+
+{
+  const dom = installDom();
+  const { root } = await renderComposer();
+  const longPaste = Array.from({ length: 20 }, (_, index) => `expanded ${index + 1}`).join("\n");
+  await act(async () => {
+    textarea().dispatchEvent(textPasteEvent(longPaste));
+    await flushTimers();
+  });
+  const expandButton = document.querySelectorAll<HTMLButtonElement>(".composer__pasted-actions button")[1];
+  if (!expandButton) throw new Error("long paste expand button did not render");
+  await act(async () => {
+    expandButton.click();
+    await flushTimers();
+  });
+  eq(textarea().value, longPaste, "expanding a folded paste restores its original text");
+  ok(document.querySelector(".composer__pasted-label") === null, "expanded paste no longer renders a folded label");
+
+  const undoExpand = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoExpand);
+    await flushTimers();
+  });
+  eq(undoExpand.defaultPrevented, true, "Ctrl+Z treats pasted-block expansion as a custom transaction");
+  ok(document.querySelector(".composer__pasted-label") !== null, "undoing expansion restores the folded block");
+
+  const undoLongPaste = new window.KeyboardEvent("keydown", {
+    key: "z",
+    ctrlKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  await act(async () => {
+    textarea().dispatchEvent(undoLongPaste);
+    await flushTimers();
+  });
+  eq(undoLongPaste.defaultPrevented, true, "a second Ctrl+Z undoes the original folded paste");
+  eq(textarea().value, "", "undoing the original folded paste restores the empty draft");
+
+  await act(async () => root.unmount());
   dom.window.close();
 }
 
@@ -577,7 +1119,7 @@ console.log("\ncomposer session draft");
   textarea().setSelectionRange(2, 2);
   const menuItems = await openComposerInputMenu();
   await act(async () => {
-    menuItems[2]?.click();
+    menuItems[4]?.click();
     await flushTimers();
   });
   await rerender({
@@ -624,7 +1166,7 @@ console.log("\ncomposer session draft");
   textarea().setSelectionRange(1, 4);
   const menuItems = await openComposerInputMenu();
   await act(async () => {
-    menuItems[0]?.click();
+    menuItems[2]?.click();
     await clipboardWriteStarted.promise;
   });
   await rerender({

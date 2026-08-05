@@ -51,6 +51,7 @@ type Messages struct {
 	ChatTip             string // tip line under the chat banner
 	TurnCancelled       string // shown when Ctrl-C aborts the in-flight turn but the chat keeps running
 	InterruptedRecovery string // replay notice for a durable interrupted turn
+	RecoveryPaused      string // controlled Auto retry pause; user can continue in the next message
 	NoSessionToResume   string // shown when --continue / --resume finds nothing
 	ResumeRequiresTTY   string // shown when --resume runs piped instead of on a terminal
 	PickSessionLabel    string // header on the --resume picker
@@ -62,17 +63,30 @@ type Messages struct {
 	ResumeAlreadyActive string // shown when /resume targets the current session
 	ResumedTitle        string // banner title after a /resume switch
 
-	RenameUsage     string // /rename with no args
-	RenameNoSession string // /rename with no active session
-	RenameDoneFmt   string // /rename succeeded (one %s = new title)
-	ResumePickTitle string // header in the interactive resume picker
-	ResumePickHint  string // keyboard hint in the interactive resume picker
+	RenameUsage            string // /rename with no args
+	RenameNoSession        string // /rename with no active session
+	RenameDoneFmt          string // /rename succeeded (one %s = new title)
+	ResumePickTitle        string // header in the interactive resume picker
+	ResumePickHint         string // keyboard hint in the interactive resume picker
+	ResumeRecoveryBadgeFmt string // recovery-copy badge — %s = short parent session id
 
 	// chat TUI status line / approval banner.
 	ChatThinking                           string // live reasoning marker label, e.g. "thinking…"
 	ChatThoughtForFmt                      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt                  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatToolWorkingFmt                     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
+	ChatSubagentPhaseQueued                string // sub-agent progress phase label ("queued")
+	ChatSubagentPhaseRunning               string // ("running")
+	ChatSubagentPhaseReasoning             string // ("reasoning")
+	ChatSubagentPhaseResponding            string // ("responding")
+	ChatSubagentPhaseTool                  string // ("using tools")
+	ChatSubagentPhaseRetrying              string // ("retrying")
+	ChatSubagentPhaseCompleted             string // ("completed")
+	ChatSubagentPhaseFailed                string // ("failed")
+	ChatSubagentPhaseCancelled             string // ("cancelled")
+	ChatSubagentProgressFmt                string // live progress line — %s = phase label, %d = elapsed s, %d = idle s ("%s · %ds · %ds ago")
+	ChatSubagentProgressDoneFmt            string // terminal summary — %s = phase label, %d = duration s ("%s · %ds")
+	ChatSubagentPreviewLabel               string // verbose preview marker ("▎")
 	ChatStatusRetryingFmt                  string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
 	ChatStatusCancellingFmt                string // "%s stopping… (%ds · Ctrl+C exits)" — %s = spinner, %d = elapsed s
 	ChatStatusIdle                         string // shortcuts hint when idle
@@ -92,6 +106,7 @@ type Messages struct {
 	ChatStatusCacheAvgFmt                  string // cache status tag, "%s" = session-average hit rate with percent sign
 	ChatStatusPlanApproval                 string // shortcuts hint while a plan is pending
 	PlanApprovalPrompt                     string // one-line "plan above is ready" banner shown above the input
+	PlanApprovalChoices                    string // start / revise / exit-without-executing choice list
 	ChatStatusToolApproval                 string // shortcuts hint while a tool call awaits approval
 	ToolApprovalPromptFmt                  string // approval banner — tool, subject suffix, source/intent detail, choices
 	ToolApprovalChoices                    string // standard approval choice list
@@ -158,16 +173,21 @@ type Messages struct {
 	AskSubmitHint      string // submit-tab keyboard hint
 
 	// output style listing (/output-style).
-	OutputStyleNone    string // no styles available
-	OutputStyleHeader  string // header above the listing
-	OutputStyleHint    string // how to select one
-	ThemeHeader        string // header above the /theme listing
-	ThemeHint          string // how to select a theme
-	ThemeChangedFmt    string // "/theme <name>" succeeded
-	ThemeUnknownFmt    string // "/theme <name>" unknown
-	LanguageHeader     string // header above the /language listing
-	LanguageHint       string // how to select a language
-	LanguageChangedFmt string // "/language <tag>" succeeded, %s = saved tag, %s = resolved tag
+	OutputStyleNone           string // no styles available
+	OutputStyleHeader         string // header above the listing
+	OutputStyleHint           string // how to select one
+	ThemeHeader               string // header above the /theme listing
+	ThemeHint                 string // how to select a theme
+	ThemeChangedFmt           string // "/theme <name>" succeeded
+	ThemeUnknownFmt           string // "/theme <name>" unknown
+	LanguageHeader            string // header above the /language listing
+	LanguageHint              string // how to select a language
+	LanguageChangedFmt        string // "/language <tag>" succeeded, %s = saved tag, %s = resolved tag
+	CurrencyHeader            string // header above the /currency listing
+	CurrencyHint              string // how to select a pricing currency
+	CurrencyChangedFmt        string // "/currency <mode>" succeeded, %s = saved mode, %s = resolved currency
+	RuntimeRefreshBusy        string // runtime-affecting setting cannot change while work is active
+	RuntimeRefreshUnavailable string // current session cannot rebuild after a runtime-affecting setting change
 
 	// context compaction card (CompactionStarted / CompactionDone events).
 	CompactionWorking string // shown while the summarizer runs
@@ -175,6 +195,10 @@ type Messages struct {
 	CompactionUnit    string // the noun counted, e.g. "messages"
 	CompactionAuto    string // trigger label: reached the window threshold
 	CompactionManual  string // trigger label: user ran /compact
+
+	// extension structured-UI surfaces (ExtensionSurface / ExtensionStatus events).
+	ExtFormFieldsHint string // form card: field values are collected through the usual prompts
+	ExtRunActionFmt   string // card action hint, one %s = the /<plugin>:<action> slash name
 
 	// chat TUI slash commands.
 	SlashCompactDone             string // "/compact" succeeded
@@ -188,6 +212,7 @@ type Messages struct {
 	SlashTodoCleared             string // "/todo" dismissed the pinned task list
 	SlashUnavailable             string // the command is configured off (no callback wired)
 	SlashUnknown                 string // shown when the user types an unrecognised "/cmd"
+	SlashUnknownSentAsMessage    string // suffix: the unrecognised "/cmd" line was sent as a regular message
 	SlashHelp                    string // listed commands
 	SlashPromptEmpty             string // an MCP prompt returned no text to send
 	SlashMCPNone                 string // /mcp when no MCP servers are connected
@@ -226,6 +251,7 @@ type Messages struct {
 	CmdModel            string // /model
 	CmdStatus           string // /status
 	CmdWorkMode         string // /work-mode
+	CmdDocs             string // /docs
 	CmdMemory           string // /memory
 	CmdMigrate          string // /migrate
 	CmdGoal             string // /goal
@@ -239,9 +265,11 @@ type Messages struct {
 	CmdOutputStyle      string // /output-style
 	CmdTheme            string // /theme
 	CmdLanguage         string // /language
+	CmdCurrency         string // /currency
 	CmdSkill            string // /skills
 	CmdVerbose          string // /verbose
 	CmdReloadCmd        string // /reload-cmd
+	CmdReload           string // /reload
 	CmdDiffFold         string // /diff-fold
 	CmdSandbox          string // /sandbox
 	CmdEffort           string // /effort
@@ -266,7 +294,6 @@ type Messages struct {
 	ArgMcpList          string // /mcp list
 	ArgMcpConnected     string // /mcp remove <server> tag
 	ArgHooksList        string // /hooks list
-	ArgHooksTrust       string // /hooks trust
 	ArgModelCurrent     string // /model <ref> active tag
 	ArgEffortAuto       string // /effort auto
 	ArgEffortLow        string // /effort low
@@ -294,53 +321,69 @@ type Messages struct {
 	ListMcpNone         string // no mcp servers
 
 	// in-chat memory/model/rewind notices.
-	MemoryNone                string
-	MemoryLoaded              string
-	MemorySavedHeader         string
-	MemoryStoredUnderFmt      string
-	MemoryEditHint            string
-	ForgetUsage               string
-	ForgetDoneFmt             string
-	QuickRememberEmpty        string
-	QuickRememberDoneFmt      string
-	GoalEmpty                 string
-	GoalCurrentFmt            string
-	GoalSetFmt                string
-	GoalCleared               string
-	ModelSwitchUnavailable    string
-	ModelSwitchBusy           string
-	ModelAlreadyOnFmt         string
-	ModelSwitchingFmt         string
-	ModelSwitchedFmt          string
-	ModelListHeader           string
-	RuntimeSwitchPending      string
-	WorkModeStatusFmt         string
-	WorkModeListHeaderFmt     string
-	WorkModeListHint          string
-	WorkModeEconomyLabel      string
-	WorkModeBalancedLabel     string
-	WorkModeDeliveryLabel     string
-	WorkModeEconomyDesc       string
-	WorkModeBalancedDesc      string
-	WorkModeDeliveryDesc      string
-	WorkModeUsage             string
-	WorkModeSwitchUnavailable string
-	WorkModeSwitchBusy        string
-	WorkModeAlreadyOnFmt      string
-	WorkModeSwitchingFmt      string
-	WorkModeSwitchedFmt       string
-	RewindNone                string
-	RewindCodeConversation    string
-	RewindConversationOnly    string
-	RewindCodeOnly            string
-	RewindFork                string
-	RewindSummarizeFrom       string
-	RewindSummarizeUpto       string
-	RewindPickTitle           string
-	RewindPickHint            string
-	RewindRestoreTitleFmt     string
-	RewindApplyHint           string
-	RewindEmpty               string
+
+	MemoryNone                   string
+	MemoryLoaded                 string
+	MemorySavedHeader            string
+	MemoryStoredUnderFmt         string
+	MemoryEditHint               string
+	ForgetUsage                  string
+	ForgetDoneFmt                string
+	QuickRememberEmpty           string
+	QuickRememberDoneFmt         string
+	GoalEmpty                    string
+	GoalCurrentFmt               string
+	GoalSetFmt                   string
+	GoalCleared                  string
+	GoalNotRunning               string
+	GoalNotPaused                string
+	GoalPaused                   string
+	GoalPausedReason             string
+	GoalPausedFmt                string // %s = stop cause
+	GoalBudgetExtended           string
+	GoalRuntimeFmt               string // turns, limits, no-progress, extensions
+	GoalRuntimeLastReason        string
+	ModelSwitchUnavailable       string
+	ModelSwitchBusy              string
+	ModelAlreadyOnFmt            string
+	ModelSwitchingFmt            string
+	ModelSwitchedFmt             string
+	ModelListHeader              string
+	RuntimeSwitchPending         string
+	RuntimeReloadQueued          string // /reload queued behind active work; the idle drain runs it
+	RuntimeReloaded              string // /reload completed (no generation available)
+	RuntimeReloadedGenerationFmt string // /reload completed; %d is the runtime build generation
+	WorkModeStatusFmt            string
+	WorkModeListHeaderFmt        string
+	WorkModeListHint             string
+	WorkModeEconomyLabel         string
+	WorkModeBalancedLabel        string
+	WorkModeDeliveryLabel        string
+	WorkModeEconomyDesc          string
+	WorkModeBalancedDesc         string
+	WorkModeDeliveryDesc         string
+	WorkModeUsage                string
+	WorkModeSwitchUnavailable    string
+	WorkModeSwitchBusy           string
+	WorkModeAlreadyOnFmt         string
+	WorkModeSwitchingFmt         string
+	WorkModeSwitchedFmt          string
+	RewindNone                   string
+	RewindCodeConversation       string
+	RewindConversationOnly       string
+	RewindCodeOnly               string
+	RewindFork                   string
+	RewindSummarizeFrom          string
+	RewindSummarizeUpto          string
+	RewindPickTitle              string
+	RewindPickHint               string
+	RewindRestoreTitleFmt        string
+	RewindApplyHint              string
+	RewindCoverageTitle          string
+	RewindCoverageWarningFmt     string
+	RewindConfirmHint            string
+	RewindUnavailableFmt         string
+	RewindEmpty                  string
 
 	// skill picker overlay (/skills interactive panel in CLI TUI)
 	SkillPickerTitle             string
@@ -528,6 +571,7 @@ type Messages struct {
 
 	// `reasonix upgrade` / `reasonix update` — self-update
 	UpgradeChecking            string // "Checking for updates…"
+	UpgradeChannelDeprecated   string // legacy channel selection is ignored
 	UpgradeDevBuild            string // dev builds cannot self-update
 	UpgradeFetchFailed         string // "failed to check for updates: %v"
 	UpgradeInvalidVersion      string // remote version not valid semver
@@ -545,6 +589,27 @@ type Messages struct {
 	UpgradeApplying            string // "Replacing binary…"
 	UpgradeApplyFailed         string // "failed to apply update: %v"
 	UpgradeSuccessFmt          string // "Updated %s → %s"
+
+	// `reasonix report` — local CLI crash review and explicit upload
+	ReportNoPending           string
+	ReportHeaderFmt           string
+	ReportCapturedFmt         string
+	ReportPreviewOnlyFmt      string
+	ReportSendPrompt          string
+	ReportKept                string
+	ReportDeletedFmt          string
+	ReportSentFmt             string
+	ReportConfigFailedFmt     string
+	ReportUploadFailedFmt     string
+	ReportSentDeleteFailedFmt string
+	ReportUsageBody           string
+
+	// First eligible interactive CLI telemetry consent.
+	CLITelemetryConsentNotice           string
+	CLITelemetryConsentPrompt           string
+	CLITelemetryConsentInvalid          string
+	CLITelemetryConsentSaveFailedFmt    string
+	CLITelemetryConsentCleanupFailedFmt string
 
 	// usage / help
 	UsageBody string // full multi-line help text
@@ -574,7 +639,17 @@ func (m Messages) ProviderStatusMessage(status int) string {
 
 // M is the active catalogue. DetectLanguage replaces it; English is the
 // default so any code path that runs before detection still has text.
-var M = English
+var (
+	M               = English
+	currentLanguage = "en"
+)
+
+// CurrentLanguage returns the language tag installed by the latest
+// DetectLanguage call. It lets frontends reuse the resolved locale without
+// re-reading the environment and accidentally ignoring an explicit override.
+func CurrentLanguage() string {
+	return currentLanguage
+}
 
 // DetectLanguage selects a catalogue from override (e.g. cfg.Language) or the
 // environment and installs it as M. Returns the resolved tag ("en", "zh") so
@@ -603,14 +678,15 @@ func setLanguage(tag string) string {
 	switch tag {
 	case "zh-tw", "zh-TW":
 		M = ChineseTraditional
-		return "zh-TW"
+		currentLanguage = "zh-TW"
 	case "zh":
 		M = Chinese
-		return "zh"
+		currentLanguage = "zh"
 	default:
 		M = English
-		return "en"
+		currentLanguage = "en"
 	}
+	return currentLanguage
 }
 
 // normalize maps a locale string (e.g. "zh_CN.UTF-8", "zh-Hans-CN", "Chinese

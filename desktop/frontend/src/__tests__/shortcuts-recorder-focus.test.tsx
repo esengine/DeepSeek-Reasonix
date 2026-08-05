@@ -86,6 +86,19 @@ async function main() {
   const keyButton = container.querySelector<HTMLButtonElement>(".shortcuts-settings__key");
   ok(Boolean(keyButton), "recorder button renders");
   if (!keyButton) throw new Error("no recorder button");
+  const undoButton = container.querySelector<HTMLButtonElement>('[data-shortcut-action="composer.undo"]');
+  const redoButton = container.querySelector<HTMLButtonElement>('[data-shortcut-action="composer.redo"]');
+  ok(Boolean(undoButton), "composer undo appears in shortcut settings");
+  ok(Boolean(redoButton), "composer redo appears in shortcut settings");
+  ok(Boolean(undoButton?.disabled), "composer undo stays locked to the native editing chord");
+  ok(Boolean(redoButton?.disabled), "composer redo stays locked to the native editing chord");
+  ok(undoButton?.textContent?.includes("Ctrl") === true && undoButton.textContent.includes("Z"), "composer undo shows Ctrl+Z on non-mac platforms");
+  ok(
+    redoButton?.textContent?.includes("Ctrl") === true
+      && redoButton.textContent.includes("Shift")
+      && redoButton.textContent.includes("Z"),
+    "composer redo shows Ctrl+Shift+Z on non-mac platforms",
+  );
 
   // Click WITHOUT focusing — JSDOM (like WebKit/WKWebView) does not focus
   // buttons on click, so this reproduces the desktop app's event flow.

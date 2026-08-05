@@ -55,6 +55,7 @@ func TestGenManifest(t *testing.T) {
 	names := []string{
 		"Reasonix-darwin-arm64.zip",
 		"Reasonix-darwin-amd64.zip",
+		"Reasonix-darwin-universal.dmg",
 		"Reasonix-windows-amd64-installer.exe",
 		"Reasonix-windows-amd64.zip", // portable download, not the updater channel
 		"Reasonix-windows-arm64-installer.exe",
@@ -88,6 +89,9 @@ func TestGenManifest(t *testing.T) {
 	if m.DownloadPage != "https://reasonix.io/?download=desktop#start" {
 		t.Fatalf("download_page = %q, want official install page", m.DownloadPage)
 	}
+	if m.ReleaseNotesURL != "https://reasonix.io/changelog/v1.2.0/" {
+		t.Fatalf("release_notes_url = %q, want exact version history", m.ReleaseNotesURL)
+	}
 	if len(m.Platforms) != 5 {
 		t.Fatalf("want 5 platforms, got %d: %v", len(m.Platforms), m.Platforms)
 	}
@@ -114,13 +118,117 @@ func TestGenManifest(t *testing.T) {
 	if !strings.HasSuffix(arm.URL, "/Reasonix-windows-arm64-installer.exe") {
 		t.Fatalf("windows-arm64 url = %q, want the installer, not the portable zip", arm.URL)
 	}
-	// The Linux updater channel must stay the .tar.gz; the co-located .deb is a
-	// human download and must not shadow the linux-amd64 key.
+	// The Linux portable channel stays the .tar.gz; the co-located .deb lands
+	// only in native_packages so older clients keep resolving platforms["linux-amd64"].
 	lin, ok := m.Platforms["linux-amd64"]
 	if !ok {
 		t.Fatal("linux-amd64 missing")
 	}
 	if !strings.HasSuffix(lin.URL, "/Reasonix-linux-amd64.tar.gz") {
 		t.Fatalf("linux-amd64 url = %q, want the .tar.gz, not the .deb", lin.URL)
+	}
+	if lin.Sig == "" || lin.SHA256 == "" || lin.Size == 0 {
+		t.Fatalf("linux portable asset incomplete: %+v", lin)
+	}
+	deb, ok := m.NativePackages["linux-amd64"]
+	if !ok {
+		t.Fatal("native_packages linux-amd64 missing")
+	}
+	if !strings.HasSuffix(deb.URL, "/Reasonix-linux-amd64.deb") {
+		t.Fatalf("native linux-amd64 url = %q, want the .deb", deb.URL)
+	}
+	if deb.Sig != deb.URL+".minisig" || deb.SHA256 == "" || deb.Size == 0 {
+		t.Fatalf("native linux asset incomplete: %+v", deb)
+	}
+	if len(m.Downloads) != 2 {
+		t.Fatalf("want 2 website downloads, got %d: %+v", len(m.Downloads), m.Downloads)
+	}
+	for _, name := range []string{"Reasonix-darwin-universal.dmg", "Reasonix-windows-amd64.zip"} {
+		asset, ok := m.Downloads[name]
+		if !ok {
+			t.Fatalf("website download %q missing", name)
+		}
+		if !strings.HasSuffix(asset.URL, "/"+name) ||
+			asset.Sig != asset.URL+".minisig" ||
+			asset.SHA256 == "" ||
+			asset.Size == 0 {
+			t.Fatalf("website download %q incomplete: %+v", name, asset)
+		}
+	}
+}
+
+func TestGenManifestCanReuseStableNotesForStandaloneRC(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Reasonix-linux-amd64.tar.gz"), []byte("rc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := genManifest(dir, "v1.3.0-rc.1", "desktop-v1.3.0-rc.1", "v1.3.0"); err != nil {
+		t.Fatalf("genManifest: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "latest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m update.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if m.ReleaseNotesURL != "https://reasonix.io/changelog/v1.3.0/" {
+		t.Fatalf("release_notes_url = %q, want stable base history", m.ReleaseNotesURL)
+	}
+}
+
+// TestGenManifestIgnoresUnknownNativePackages ensures a .deb without a known
+// platform key is skipped rather than inventing a native_packages entry.
+func TestGenManifestIgnoresUnknownNativePackages(t *testing.T) {
+	dir := t.TempDir()
+	for _, n := range []string{
+		"Reasonix-linux-amd64.tar.gz",
+		"Reasonix-mystery.deb",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(n), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("GITHUB_REPOSITORY", "esengine/DeepSeek-Reasonix")
+	if err := genManifest(dir, "v1.2.0", "desktop-v1.2.0"); err != nil {
+		t.Fatalf("genManifest: %v", err)
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, "latest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m update.Manifest
+	if err := json.Unmarshal(raw, &m); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.NativePackages) != 0 {
+		t.Fatalf("unexpected native_packages: %+v", m.NativePackages)
+	}
+}
+
+func TestGenWindowsPayloadManifestHashesExactReleaseUnit(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range update.WindowsPayloadFileNames() {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("payload:"+name), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := genWindowsPayloadManifest(dir, "v2.3.4"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, update.WindowsPayloadManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hashes, err := update.DecodeWindowsPayloadManifest(b, "v2.3.4")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range update.WindowsPayloadFileNames() {
+		want := update.WindowsPayloadSHA256([]byte("payload:" + name))
+		if hashes[name] != want {
+			t.Fatalf("manifest hash for %s = %q, want %q", name, hashes[name], want)
+		}
 	}
 }

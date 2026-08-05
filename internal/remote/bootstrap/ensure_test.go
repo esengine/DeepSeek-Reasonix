@@ -22,6 +22,7 @@ import (
 // remote home, so ~ resolves to it.
 type fakeConn struct {
 	fs      *sftpfs.FS
+	sftpErr error
 	mu      sync.Mutex
 	execs   []string
 	handler func(cmd string) (remote.ExecResult, error)
@@ -34,7 +35,12 @@ func (f *fakeConn) Exec(_ context.Context, cmd string) (remote.ExecResult, error
 	return f.handler(cmd)
 }
 
-func (f *fakeConn) SFTP() (*sftpfs.FS, error) { return f.fs, nil }
+func (f *fakeConn) SFTP() (*sftpfs.FS, error) {
+	if f.sftpErr != nil {
+		return nil, f.sftpErr
+	}
+	return f.fs, nil
+}
 
 func (f *fakeConn) ranContaining(sub string) bool {
 	f.mu.Lock()

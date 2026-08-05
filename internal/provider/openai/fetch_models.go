@@ -23,6 +23,11 @@ const (
 	ModelFetchAuthAuto    ModelFetchAuthMode = ""
 	ModelFetchAuthBearer  ModelFetchAuthMode = "bearer"
 	ModelFetchAuthXAPIKey ModelFetchAuthMode = "x-api-key"
+
+	// fetchModelsMaxBody caps the response body read from a model-list
+	// endpoint. Large providers like OpenRouter return ~530 KB for 338
+	// models; 2 MiB leaves headroom while keeping memory bounded.
+	fetchModelsMaxBody = 2 << 20 // 2 MiB
 )
 
 type FetchModelsOptions struct {
@@ -73,9 +78,12 @@ func FetchModelsWithOptions(ctx context.Context, baseURL, apiKey string, opts Fe
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, fetchModelsMaxBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("fetch models: read response: %w", err)
+	}
+	if len(body) > fetchModelsMaxBody {
+		return nil, fmt.Errorf("fetch models: response too large (exceeds %d bytes)", fetchModelsMaxBody)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -93,8 +101,8 @@ func FetchModelsWithOptions(ctx context.Context, baseURL, apiKey string, opts Fe
 
 	ids := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
-		if m.ID != "" {
-			ids = append(ids, m.ID)
+		if id := normalizeModelID(baseURL, m.ID); id != "" {
+			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)

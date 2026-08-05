@@ -141,17 +141,15 @@ func TestSessionDataGuardDeniesSecurityBoundaryFiles(t *testing.T) {
 	g := NewSessionDataGuard(root, nil)
 
 	// settings.json holds the global hooks (arbitrary shell commands run on
-	// every future session); trust.json decides whose project hooks run at
-	// all. Both are a security boundary, not a runtime ledger.
-	for _, target := range []string{
-		filepath.Join(root, "settings.json"),
-		filepath.Join(root, "trust.json"),
-	} {
-		if err := g.Check(target); err == nil {
-			t.Errorf("Check(%q) = nil, want security-boundary denial", target)
-		} else if !strings.Contains(err.Error(), "security boundary") {
-			t.Errorf("Check(%q) error %q should name the security boundary", target, err)
-		}
+	// every future session), so it remains a security boundary.
+	target := filepath.Join(root, "settings.json")
+	if err := g.Check(target); err == nil {
+		t.Errorf("Check(%q) = nil, want security-boundary denial", target)
+	} else if !strings.Contains(err.Error(), "security boundary") {
+		t.Errorf("Check(%q) error %q should name the security boundary", target, err)
+	}
+	if err := g.Check(filepath.Join(root, "trust.json")); err != nil {
+		t.Errorf("obsolete trust.json should not remain a security boundary: %v", err)
 	}
 	// The same names nested below the state root are ordinary files (a project
 	// checkout under a home workspace may legitimately contain them).

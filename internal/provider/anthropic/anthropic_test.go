@@ -99,6 +99,30 @@ func TestBuildRequestNoSystem(t *testing.T) {
 	}
 }
 
+func TestConfiguredMaxOutputTokensRespectsMandatoryAnthropicFallback(t *testing.T) {
+	configured, err := New(provider.Config{
+		Name: "anthropic", Model: "claude-opus-4-8",
+		Extra: map[string]any{"max_output_tokens": 8192},
+	})
+	if err != nil {
+		t.Fatalf("New configured provider: %v", err)
+	}
+	if got := configured.(*client).buildRequest(provider.Request{}).MaxTokens; got != 8192 {
+		t.Fatalf("configured max_tokens = %d, want 8192", got)
+	}
+
+	disabled, err := New(provider.Config{
+		Name: "anthropic", Model: "claude-opus-4-8",
+		Extra: map[string]any{"max_output_tokens": -1},
+	})
+	if err != nil {
+		t.Fatalf("New disabled provider: %v", err)
+	}
+	if got := disabled.(*client).buildRequest(provider.Request{}).MaxTokens; got != defaultMaxTokens {
+		t.Fatalf("mandatory max_tokens fallback = %d, want %d", got, defaultMaxTokens)
+	}
+}
+
 func TestStreamAnnotatesIndexedToolSchemaError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
@@ -156,6 +180,25 @@ func TestNewDetectsMiMoSchemaDialect(t *testing.T) {
 		}
 		if got := p.(*client).mimo; got != tc.want {
 			t.Errorf("New(%q).mimo = %v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+}
+
+func TestNewDetectsOfficialDeepSeekEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://api.deepseek.com/anthropic", true},
+		{"https://api.deepseek.com/anthropic/v1", true},
+		{"https://proxy.example.com/anthropic", false},
+	} {
+		p, err := New(provider.Config{Name: "test", BaseURL: tc.baseURL, Model: "deepseek-v4-flash"})
+		if err != nil {
+			t.Fatalf("New(%q): %v", tc.baseURL, err)
+		}
+		if got := p.(*client).deepseek; got != tc.want {
+			t.Errorf("New(%q).deepseek = %v, want %v", tc.baseURL, got, tc.want)
 		}
 	}
 }
@@ -358,6 +401,31 @@ func TestBuildRequestThinking(t *testing.T) {
 	}
 }
 
+func TestBuildRequestOmitsResolvedToolCallMetadata(t *testing.T) {
+	readOnly := false
+	c := &client{model: "claude-opus-4-8"}
+	req := c.buildRequest(provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{
+			ID: "call_1", Name: "use_capability", Arguments: `{}`,
+			ResolvedName: "mcp__db__write", CapabilityID: "mcp-tool:db/write",
+			ResolvedReadOnly: &readOnly,
+		}},
+	}}})
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, forbidden := range []string{"resolved_name", "resolvedName", "capability_id", "capabilityId", "resolved_read_only", "resolvedReadOnly", "mcp__db__write"} {
+		if strings.Contains(string(b), forbidden) {
+			t.Fatalf("provider request leaked local tool metadata %q: %s", forbidden, b)
+		}
+	}
+	if !strings.Contains(string(b), `"name":"use_capability"`) {
+		t.Fatalf("provider request lost stable proxy name: %s", b)
+	}
+}
+
 func TestBuildRequestThinkingEnabledGateway(t *testing.T) {
 	c := &client{model: "LongCat-2.0", thinking: "enabled", effort: "disabled"}
 	r := c.buildRequest(provider.Request{
@@ -376,6 +444,176 @@ func TestBuildRequestThinkingEnabledGateway(t *testing.T) {
 		if block.Type == "thinking" {
 			t.Fatalf("enabled/disabled gateway must not replay Anthropic signed thinking blocks: %+v", r.Messages[1])
 		}
+	}
+}
+
+func TestBuildRequestDeepSeekThinking(t *testing.T) {
+	c := &client{model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", effort: "max"}
+	r := c.buildRequest(provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleSystem, Content: "stable system"},
+			{Role: provider.RoleUser, Content: "weather?"},
+			{Role: provider.RoleAssistant, ReasoningContent: "I should call the tool.",
+				ToolCalls: []provider.ToolCall{{ID: "t1", Name: "get_weather", Arguments: `{"city":"Paris"}`}}},
+			{Role: provider.RoleTool, ToolCallID: "t1", Content: "sunny"},
+		},
+		Tools: []provider.ToolSchema{{Name: "get_weather", Parameters: json.RawMessage(`{"type":"object"}`)}},
+	})
+
+	if !provider.RequiresToolCallReasoning(c) || provider.RequiresReasoningRoundTrip(c) {
+		t.Fatal("DeepSeek thinking must preserve tool-call reasoning without retaining ordinary-turn reasoning")
+	}
+	if r.Thinking == nil || r.Thinking.Type != "enabled" || r.Thinking.Display != "" {
+		t.Fatalf("thinking config = %+v, want enabled without Anthropic display", r.Thinking)
+	}
+	if r.OutputConfig == nil || r.OutputConfig.Effort != "max" {
+		t.Fatalf("output_config = %+v, want max", r.OutputConfig)
+	}
+	asst := r.Messages[1]
+	if len(asst.Content) != 2 || asst.Content[0].Type != "thinking" || asst.Content[0].Thinking != "I should call the tool." || asst.Content[0].Signature != "" || asst.Content[1].Type != "tool_use" {
+		t.Fatalf("DeepSeek assistant blocks = %+v, want unsigned thinking before tool_use", asst.Content)
+	}
+	if r.System[0].CacheControl != nil || r.Tools[0].CacheControl != nil {
+		t.Fatal("DeepSeek ignores cache_control; system/tools must omit it")
+	}
+	for _, message := range r.Messages {
+		for _, block := range message.Content {
+			if block.CacheControl != nil {
+				t.Fatalf("DeepSeek message block unexpectedly carries cache_control: %+v", block)
+			}
+		}
+	}
+}
+
+func TestMissingToolCallReasoningWarningFingerprintTracksAnthropicConfiguration(t *testing.T) {
+	first := &client{name: "deepseek", baseURL: "https://api.deepseek.com/anthropic", model: "deepseek-v4-pro", deepseek: true, thinking: "enabled", effort: "high"}
+	same := &client{name: "deepseek", baseURL: "https://api.deepseek.com/anthropic", model: "deepseek-v4-pro", deepseek: true, thinking: "enabled", effort: "high"}
+	flash := &client{name: "deepseek", baseURL: "https://api.deepseek.com/anthropic", model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", effort: "high"}
+	got := provider.MissingToolCallReasoningWarningFingerprint(first)
+	if got != provider.MissingToolCallReasoningWarningFingerprint(same) {
+		t.Fatal("equivalent Anthropic configurations produced different fingerprints")
+	}
+	if got == provider.MissingToolCallReasoningWarningFingerprint(flash) {
+		t.Fatal("Anthropic model change did not re-key the warning fingerprint")
+	}
+}
+
+func TestBuildRequestDeepSeekReplaysOnlyToolCallReasoningFromHistory(t *testing.T) {
+	toolTurn := []provider.Message{
+		{Role: provider.RoleUser, Content: "weather?"},
+		{Role: provider.RoleAssistant, ReasoningContent: "I should call the tool.",
+			ToolCalls: []provider.ToolCall{{ID: "t1", Name: "get_weather", Arguments: `{"city":"Paris"}`}}},
+		{Role: provider.RoleTool, ToolCallID: "t1", Content: "sunny"},
+	}
+	for _, tc := range []struct {
+		name     string
+		thinking string
+		effort   string
+	}{
+		{name: "current request has no tools", thinking: "enabled", effort: "high"},
+		{name: "thinking disabled after tool call", thinking: "enabled", effort: "disabled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &client{model: "deepseek-v4-flash", deepseek: true, thinking: tc.thinking, effort: tc.effort}
+			r := c.buildRequest(provider.Request{Messages: toolTurn})
+			if len(r.Tools) != 0 {
+				t.Fatalf("current request tools = %+v, want none", r.Tools)
+			}
+			if len(r.Messages) != 3 {
+				t.Fatalf("messages = %+v, want user/assistant/user", r.Messages)
+			}
+			blocks := r.Messages[1].Content
+			if len(blocks) != 2 || blocks[0].Type != "thinking" || blocks[0].Thinking != "I should call the tool." || blocks[1].Type != "tool_use" {
+				t.Fatalf("assistant blocks = %+v, want historical thinking before tool_use", blocks)
+			}
+		})
+	}
+
+	t.Run("reasoning without a tool call stays omitted", func(t *testing.T) {
+		c := &client{model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", effort: "high"}
+		r := c.buildRequest(provider.Request{
+			Messages: []provider.Message{
+				{Role: provider.RoleUser, Content: "hello"},
+				{Role: provider.RoleAssistant, Content: "hi", ReasoningContent: "private scratchpad"},
+			},
+			Tools: []provider.ToolSchema{{Name: "get_weather"}},
+		})
+		if len(r.Messages) != 2 || len(r.Messages[1].Content) != 1 || r.Messages[1].Content[0].Type != "text" {
+			t.Fatalf("non-tool assistant blocks = %+v, want visible text only", r.Messages)
+		}
+	})
+}
+
+func TestBuildRequestDeepSeekThinkingModes(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, input, want string
+	}{
+		{name: "Flash low", model: "deepseek-v4-flash", input: "low", want: "low"},
+		{name: "Flash legacy medium", model: "deepseek-v4-flash", input: "medium", want: "high"},
+		{name: "Flash legacy xhigh", model: "deepseek-v4-flash", input: "xhigh", want: "high"},
+		{name: "Pro low", model: "deepseek-v4-pro", input: "low", want: "high"},
+		{name: "Pro legacy medium", model: "deepseek-v4-pro", input: "medium", want: "high"},
+		{name: "Pro legacy xhigh", model: "deepseek-v4-pro", input: "xhigh", want: "max"},
+		{name: "Sonnet alias uses Flash", model: "claude-sonnet-4-6", input: "low", want: "low"},
+		{name: "Opus alias uses Pro", model: "claude-opus-4-8", input: "xhigh", want: "max"},
+		{name: "unknown model falls back to Flash", model: "unknown-model", input: "xhigh", want: "high"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := (&client{model: tc.model, deepseek: true, effort: tc.input}).buildRequest(provider.Request{})
+			if r.Thinking == nil || r.Thinking.Type != "enabled" || r.OutputConfig == nil || r.OutputConfig.Effort != tc.want {
+				t.Fatalf("DeepSeek thinking = %+v / %+v, want enabled/%s", r.Thinking, r.OutputConfig, tc.want)
+			}
+		})
+	}
+	t.Run("provider default", func(t *testing.T) {
+		r := (&client{model: "deepseek-v4-flash", deepseek: true}).buildRequest(provider.Request{})
+		if r.Thinking == nil || r.Thinking.Type != "enabled" || r.OutputConfig != nil {
+			t.Fatalf("default DeepSeek thinking = %+v / %+v, want enabled/provider-default effort", r.Thinking, r.OutputConfig)
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		c := &client{model: "deepseek-v4-flash", deepseek: true, thinking: "enabled", effort: "disabled"}
+		r := c.buildRequest(provider.Request{
+			Messages: []provider.Message{{Role: provider.RoleAssistant, ReasoningContent: "do not replay"}},
+			Tools:    []provider.ToolSchema{{Name: "tool"}},
+		})
+		if r.Thinking == nil || r.Thinking.Type != "disabled" || r.OutputConfig != nil {
+			t.Fatalf("disabled DeepSeek thinking = %+v / %+v", r.Thinking, r.OutputConfig)
+		}
+		if provider.RequiresToolCallReasoning(c) || provider.RequiresReasoningRoundTrip(c) {
+			t.Fatal("disabled DeepSeek thinking must not retain reasoning for replay")
+		}
+		if len(r.Messages) != 0 {
+			t.Fatalf("reasoning-only assistant should be omitted when thinking is disabled: %+v", r.Messages)
+		}
+	})
+}
+
+func TestBuildRequestDeepSeekPreservesCallerTemperature(t *testing.T) {
+	zero := provider.TemperaturePtr(0)
+	r := (&client{model: "deepseek-v4-flash", deepseek: true}).buildRequest(provider.Request{Temperature: zero})
+	if r.Temperature == nil || *r.Temperature != 0 {
+		t.Fatalf("DeepSeek temperature = %v, want explicit zero", r.Temperature)
+	}
+	b, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(b), `"temperature":0`) {
+		t.Fatalf("DeepSeek request omitted explicit temperature: %s", b)
+	}
+
+	native := (&client{model: "claude-opus-4-8"}).buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0.5)})
+	if native.Temperature != nil {
+		t.Fatalf("native Anthropic temperature = %v, want omitted", native.Temperature)
+	}
+	b, err = json.Marshal(native)
+	if err != nil {
+		t.Fatalf("marshal native: %v", err)
+	}
+	if strings.Contains(string(b), `"temperature"`) {
+		t.Fatalf("native Anthropic request must omit temperature: %s", b)
 	}
 }
 
@@ -532,7 +770,16 @@ func TestStreamSupportsBearerAuthHeaderAndCustomHeaders(t *testing.T) {
 		gotVersion = r.Header.Get("anthropic-version")
 		gotUserAgent = r.Header.Get("User-Agent")
 		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+		_, _ = io.WriteString(w, `event: message_start
+data: {"type":"message_start","message":{"usage":{"input_tokens":2,"output_tokens":0}}}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`)
 	}))
 	defer srv.Close()
 
@@ -560,7 +807,11 @@ func TestStreamSupportsBearerAuthHeaderAndCustomHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
 	}
-	for range ch {
+	var usage *provider.Usage
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
 	}
 
 	if gotAuth != "Bearer sk-test" {
@@ -574,6 +825,9 @@ func TestStreamSupportsBearerAuthHeaderAndCustomHeaders(t *testing.T) {
 	}
 	if gotUserAgent != "Reasonix" {
 		t.Fatalf("User-Agent = %q, want Reasonix", gotUserAgent)
+	}
+	if usage == nil || usage.RequestCount != 1 {
+		t.Fatalf("usage request count = %+v, want 1", usage)
 	}
 }
 

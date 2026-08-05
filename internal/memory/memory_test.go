@@ -38,6 +38,111 @@ func TestComposeAppendsAfterBase(t *testing.T) {
 	}
 }
 
+func TestBlockSeparatesStandingInstructionsFromBackgroundMemory(t *testing.T) {
+	set := &Set{
+		Docs:  []Source{{Path: "/p/AGENTS.md", Scope: ScopeProject, Directory: "/p", Body: "Always run tests.", Depth: 0}},
+		Index: "- [API decision](api-decision.md) — [project/project] Chosen in an earlier session",
+		Store: Store{Dir: "/memory/project"},
+	}
+	block := set.Block()
+	for _, want := range []string{"# Instructions", "## workspace/AGENTS.md (project", "## Background memory index", "background, not standing instructions"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("Block() missing %q:\n%s", want, block)
+		}
+	}
+	for _, privatePath := range []string{"/p/AGENTS.md", "/memory/project"} {
+		if strings.Contains(block, privatePath) {
+			t.Fatalf("Block() exposed machine-local path %q:\n%s", privatePath, block)
+		}
+	}
+}
+
+func TestLoadIncludesStableGlobalPreferencesAndFeedback(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	mustWrite(t, filepath.Join(proj, "AGENTS.md"), "STANDING INSTRUCTION BODY")
+	store := StoreFor(user, proj)
+	if _, err := store.Save(Memory{Name: "alpha-user", Description: "global preference", Type: TypeUser, Scope: FactScopeGlobal, Body: "GLOBAL USER BODY"}); err != nil {
+		t.Fatal(err)
+	}
+	legacyFeedback := "---\nname: zeta-feedback\ndescription: legacy global feedback\nmetadata:\n  type: feedback\n---\n\nGLOBAL FEEDBACK BODY\n"
+	mustWrite(t, filepath.Join(store.GlobalDir, "zeta-feedback.md"), legacyFeedback)
+	if err := reindexIn(store.GlobalDir, "zeta-feedback", Memory{Name: "zeta-feedback", Description: "legacy global feedback", Type: TypeFeedback, Scope: FactScopeGlobal}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{Name: "global-reference", Description: "global reference", Type: TypeReference, Scope: FactScopeGlobal, Body: "GLOBAL REFERENCE BODY"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{Name: "project-feedback", Description: "project feedback", Type: TypeFeedback, Scope: FactScopeProject, Body: "PROJECT FEEDBACK BODY"}); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj, UserDir: user})
+	if len(set.GlobalGuidance) != 2 {
+		t.Fatalf("global guidance = %+v, want user + feedback only", set.GlobalGuidance)
+	}
+	block := set.Block()
+	for _, want := range []string{"## Global preferences and feedback", "GLOBAL USER BODY", "GLOBAL FEEDBACK BODY"} {
+		if !strings.Contains(block, want) {
+			t.Fatalf("Block() missing %q:\n%s", want, block)
+		}
+	}
+	for _, excluded := range []string{"GLOBAL REFERENCE BODY", "PROJECT FEEDBACK BODY"} {
+		if strings.Contains(block, excluded) {
+			t.Fatalf("Block() promoted non-guidance body %q:\n%s", excluded, block)
+		}
+	}
+	if strings.Index(block, "GLOBAL USER BODY") > strings.Index(block, "GLOBAL FEEDBACK BODY") {
+		t.Fatalf("global guidance is not deterministically sorted by name:\n%s", block)
+	}
+	if strings.Index(block, "## Global preferences and feedback") > strings.Index(block, "# Instructions") && strings.Contains(block, "# Instructions") {
+		t.Fatalf("lower-priority global guidance must precede standing instructions:\n%s", block)
+	}
+	if again := set.Block(); again != block {
+		t.Fatal("unchanged memory snapshot produced unstable prompt bytes")
+	}
+}
+
+func TestLoadProjectFactSuppressesEquivalentGlobalGuidance(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	store := StoreFor(user, proj)
+	if _, err := store.Save(Memory{
+		Name: "response-style", Type: TypeFeedback, Scope: FactScopeGlobal,
+		Description: "global style", Body: "Always be verbose.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{
+		Name: "response-style", Type: TypeFeedback, Scope: FactScopeProject,
+		Description: "project style", Body: "Be concise in this project.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Save(Memory{
+		Name: "language", Type: TypeUser, Scope: FactScopeGlobal,
+		Description: "global language", Body: "Answer in Chinese.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	set := Load(Options{CWD: proj, UserDir: user})
+	if len(set.GlobalGuidance) != 1 || set.GlobalGuidance[0].Name != "language" {
+		t.Fatalf("global guidance = %+v, want only unshadowed language preference", set.GlobalGuidance)
+	}
+	block := set.Block()
+	if strings.Contains(block, "Always be verbose.") {
+		t.Fatalf("shadowed global guidance leaked into stable prefix:\n%s", block)
+	}
+	if !strings.Contains(block, "Answer in Chinese.") {
+		t.Fatalf("unshadowed global guidance missing from stable prefix:\n%s", block)
+	}
+}
+
 // TestDiscoverPrecedenceOrder checks user → ancestor → project → local ordering,
 // which puts the most specific guidance last.
 func TestDiscoverPrecedenceOrder(t *testing.T) {
@@ -162,27 +267,6 @@ func TestImportCycleDoesNotHang(t *testing.T) {
 	}
 }
 
-// TestImportTargetClassification guards the "@mention vs @import" heuristic.
-func TestImportTargetClassification(t *testing.T) {
-	cases := []struct {
-		line string
-		want bool
-	}{
-		{"@docs/setup.md", true},
-		{"@./notes.txt", true},
-		{"@/abs/path.md", true},
-		{"@mention", false},      // prose-y, no separator/dot
-		{"@", false},             // bare
-		{"@a/b and more", false}, // not the only token
-		{"plain text", false},
-	}
-	for _, c := range cases {
-		if _, got := importTarget(c.line); got != c.want {
-			t.Errorf("importTarget(%q) = %v, want %v", c.line, got, c.want)
-		}
-	}
-}
-
 func mustMkdir(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -213,8 +297,8 @@ func TestImportDiamondAndCycle(t *testing.T) {
 	body := set.Docs[0].Body
 
 	count := strings.Count(body, "SHARED CONTENT")
-	if count != 2 {
-		t.Errorf("expected 'SHARED CONTENT' to appear twice, got %d times. Body:\n%s", count, body)
+	if count != 1 {
+		t.Errorf("expected exact imported content to appear once, got %d times. Body:\n%s", count, body)
 	}
 	if strings.Contains(body, "skipped: import cycle") {
 		t.Errorf("body contains incorrect import cycle message:\n%s", body)

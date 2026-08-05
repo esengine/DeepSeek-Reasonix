@@ -2,9 +2,28 @@
 
 -
 
+## Issues
+
+<!--
+If this resolves a report, put `Fixes #123` on its own line — GitHub only
+auto-closes from a bare line, so `- Fixes #123` in a list does nothing and the
+report stays open. If it only relates to one, use `Refs #123` instead: the
+release workflow then asks that reporter to verify once the fix ships.
+-->
+
 ## Verification
 
 -
+
+## Documentation impact
+
+Documentation-impact: TODO
+
+For changes to user-visible CLI, Desktop, configuration, provider, permission,
+or tool behavior, use one of:
+
+- `Documentation-impact: updated - <what changed>` and update `docs/*.md`.
+- `Documentation-impact: none - <why the embedded documentation remains correct>`.
 
 ## Cache impact
 

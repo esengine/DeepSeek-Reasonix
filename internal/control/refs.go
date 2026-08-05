@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"reasonix/internal/fileref"
+	"reasonix/internal/instruction"
 	"reasonix/internal/proc"
 	"reasonix/internal/secrets"
 )
@@ -843,6 +845,14 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 	refs := c.detectRefsMode(line, scopedOnly)
 	refs = resolveBareNames(refs, c.workspaceRoot)
 	var b strings.Builder
+	includedInstructionPaths := map[string]bool{}
+	includedInstructionBodies := map[string]bool{}
+	if current := c.memory.current(); current != nil {
+		for _, doc := range current.Docs {
+			includedInstructionPaths[cleanAbsPath(doc.Path)] = true
+			includedInstructionBodies[doc.Body] = true
+		}
+	}
 	for _, r := range refs {
 		switch r.kind {
 		case refResource:
@@ -862,6 +872,13 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 				errs = append(errs, "@"+r.raw+" — "+err.Error())
 				continue
 			}
+			pathInstructions, diagnostics := c.resolveReferencedInstructions(r, baseDir, includedInstructionPaths, includedInstructionBodies)
+			if pathInstructions != "" {
+				appendRefBlock(&b, "path-instructions", `target="`+html.EscapeString(displayPathForRef(r))+`"`, pathInstructions)
+			}
+			for _, diagnostic := range diagnostics {
+				errs = append(errs, "@"+r.raw+" — "+diagnostic.Message)
+			}
 			tag := "file"
 			if isDir {
 				tag = "dir"
@@ -876,6 +893,52 @@ func (c *Controller) resolveRefs(ctx context.Context, line string, scopedOnly bo
 		}
 	}
 	return b.String(), errs
+}
+
+func (c *Controller) resolveReferencedInstructions(r ref, baseDir string, includedPaths, includedBodies map[string]bool) (string, []instruction.Diagnostic) {
+	mem := c.memory.current()
+	if mem == nil || strings.TrimSpace(c.workspaceRoot) == "" || r.baseDir != "" {
+		return "", nil
+	}
+	absPath, absBase, ok := resolveAbsRef(r.path, baseDir)
+	if !ok || cleanAbsPath(absBase) != cleanAbsPath(c.workspaceRoot) {
+		return "", nil
+	}
+	targetDir := absPath
+	if info, err := os.Stat(absPath); err != nil || !info.IsDir() {
+		targetDir = filepath.Dir(absPath)
+	}
+	resolved := instruction.Resolve(instruction.ResolveOptions{
+		WorkspaceRoot: c.workspaceRoot,
+		TargetDir:     targetDir,
+		UserDir:       mem.UserDir,
+	})
+	var delta []instruction.Document
+	for _, doc := range resolved.Documents {
+		pathKey := cleanAbsPath(doc.Path)
+		if includedPaths[pathKey] || includedBodies[doc.Body] {
+			continue
+		}
+		includedPaths[pathKey] = true
+		includedBodies[doc.Body] = true
+		delta = append(delta, doc)
+	}
+	return instruction.Block(delta), resolved.Diagnostics
+}
+
+func displayPathForRef(r ref) string {
+	if r.displayPath != "" {
+		return r.displayPath
+	}
+	return r.path
+}
+
+func cleanAbsPath(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(abs)
 }
 
 func appendRefBlock(b *strings.Builder, tag, attr, body string) {

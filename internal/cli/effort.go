@@ -41,8 +41,8 @@ func (m *chatTUI) runEffortCommand(input string) tea.Cmd {
 		m.notice("model switching is unavailable in this session")
 		return nil
 	}
-	if m.ctrl.Running() {
-		m.notice("finish or cancel the current turn before changing effort")
+	if m.runtimeSwitchBusy() {
+		m.notice("finish or cancel active work and stop background jobs before changing effort")
 		return nil
 	}
 	if m.modelSwitchPending {
@@ -135,9 +135,20 @@ func (m *chatTUI) currentConfigProvider() (*config.ProviderEntry, string, error)
 	if err != nil {
 		return nil, "", err
 	}
+	// When the per-tab ref is empty we are inheriting the configured
+	// default — let resolveModelForCLI fall through a keyless default to
+	// the next configured provider (issue #6996). When m.modelRef is
+	// already set we honor it verbatim: the user picked that model
+	// explicitly (via /model, on the model switcher, or in the bootstrap
+	// step) and we must not silently swap to a different provider just
+	// because the entry happens to be keyless.
 	ref := m.modelRef
 	if strings.TrimSpace(ref) == "" {
-		ref = cfg.DefaultModel
+		var rerr error
+		ref, _, rerr = resolveModelForCLI("", cfg)
+		if rerr != nil {
+			return nil, "", rerr
+		}
 	}
 	entry, ok := cfg.ResolveModel(ref)
 	if !ok {

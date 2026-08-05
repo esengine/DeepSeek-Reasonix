@@ -26,6 +26,17 @@ test("≤640px: marketing nav contracts to fit 390px viewports", async () => {
   assert.match(block, /\.theme-switch button \{ padding: 6px 9px/);
 });
 
+test("≤1100px: marketing navigation collapses before controls overlap", async () => {
+  const css = await source("../styles/global.css");
+  const tabletBlock = mediaBlock(css, 1100);
+  const mobileBlock = mediaBlock(css, 900);
+
+  assert.match(tabletBlock, /\.nav-links \{ display: none/);
+  assert.match(tabletBlock, /\.nav-github \{ margin-left: auto; padding-inline: 8px/);
+  assert.match(tabletBlock, /\.nav-github-label \{ display: none/);
+  assert.match(mobileBlock, /\.nav-github \{ display: none/);
+});
+
 test("≤360px: marketing nav keeps every control within 320px", async () => {
   const css = await source("../styles/global.css");
   const block = mediaBlock(css, 360);

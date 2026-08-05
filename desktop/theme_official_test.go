@@ -385,8 +385,8 @@ func TestOfficialAssetRoute(t *testing.T) {
 	}
 }
 
-// Safe mode never lists or serves official assets; Graphite path only.
-func TestOfficialSafeMode(t *testing.T) {
+// v1.20+: REASONIX_SAFE_MODE no longer restricts official theme packs.
+func TestOfficialThemesAvailableDespiteSafeModeEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_SAFE_MODE", "1")
@@ -396,17 +396,11 @@ func TestOfficialSafeMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(list) != 6 {
-		t.Fatalf("safe mode must list only base styles, got %d", len(list))
+	if len(list) < 6 {
+		t.Fatalf("official themes must remain available, got %d packs", len(list))
 	}
-	if err := app.ActivateThemePack(officialThemes()[0].manifest.ID); err == nil {
-		t.Fatal("safe mode must refuse official activation")
-	}
-	mw := app.themeAssetMiddleware()
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) }))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, officialAssetURL(officialThemes()[0].manifest.ID, "background.webp"), nil))
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("safe mode asset status %d", rec.Code)
+	// Activation of an official pack must not be refused solely by Safe Mode env.
+	if err := app.ActivateThemePack(officialThemes()[0].manifest.ID); err != nil {
+		t.Fatalf("official activation: %v", err)
 	}
 }

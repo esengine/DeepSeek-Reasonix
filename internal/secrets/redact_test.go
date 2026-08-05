@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -124,6 +125,89 @@ func TestRedactMasksNonBearerAuthorizationSchemes(t *testing.T) {
 	}
 	if again := Redact(got); again != got {
 		t.Fatalf("authorization redaction not idempotent:\nonce:  %q\ntwice: %q", got, again)
+	}
+}
+
+func TestRedactMasksURLUserInfo(t *testing.T) {
+	in := "proxy request failed: https://proxy-user:pa@ss@proxy.example.com:8443/connect"
+	got := Redact(in)
+	for _, leaked := range []string{"proxy-user", "pa", "ss"} {
+		if strings.Contains(got, leaked) {
+			t.Fatalf("URL credential leaked %q in:\n%s", leaked, got)
+		}
+	}
+	for _, want := range []string{"https://[redacted]@proxy.example.com:8443/connect", "proxy request failed"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("redacted output missing %q:\n%s", want, got)
+		}
+	}
+	if again := Redact(got); again != got {
+		t.Fatalf("URL redaction not idempotent:\nonce:  %q\ntwice: %q", got, again)
+	}
+}
+
+func TestRedactCredentialsForExternalErrors(t *testing.T) {
+	tests := []struct {
+		name   string
+		err    error
+		leaked []string
+		want   string
+	}{
+		{
+			name:   "prose api key",
+			err:    errors.New("provider rejected api key: relaykey_abcdefghijklmn"),
+			leaked: []string{"relaykey_abcdefghijklmn"},
+			want:   "provider rejected api key:",
+		},
+		{
+			name:   "partially masked token",
+			err:    errors.New("provider rejected token ****ae54"),
+			leaked: []string{"ae54"},
+			want:   "provider rejected token",
+		},
+		{
+			name:   "bearer token",
+			err:    errors.New("upstream returned Authorization: Bearer abcdef0123456789abcdef"),
+			leaked: []string{"abcdef0123456789abcdef"},
+			want:   "upstream returned",
+		},
+		{
+			name:   "proxy URL user info",
+			err:    errors.New("dial https://proxy-user:pa@ss@proxy.example.com:8443: refused"),
+			leaked: []string{"proxy-user", "pa", "ss"},
+			want:   "proxy.example.com:8443",
+		},
+		{
+			name:   "key value is idempotent",
+			err:    errors.New("provider rejected DEEPSEEK_API_KEY=sk-real-secret-value-123456"),
+			leaked: []string{"sk-real-secret-value-123456"},
+			want:   "provider rejected DEEPSEEK_API_KEY=",
+		},
+		{
+			name:   "opaque mixed case token",
+			err:    errors.New("credential relayKeyAbcdefghijkl rejected"),
+			leaked: []string{"relayKeyAbcdefghijkl"},
+			want:   "credential",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := RedactError(tt.err)
+			for _, leaked := range tt.leaked {
+				if strings.Contains(got, leaked) {
+					t.Fatalf("credential leaked %q in %q", leaked, got)
+				}
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("diagnostic context missing %q in %q", tt.want, got)
+			}
+			if again := RedactCredentials(got); again != got {
+				t.Fatalf("external error redaction not idempotent:\nonce:  %q\ntwice: %q", got, again)
+			}
+		})
+	}
+	if got := RedactError(nil); got != "" {
+		t.Fatalf("RedactError(nil) = %q, want empty", got)
 	}
 }
 

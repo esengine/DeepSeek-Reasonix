@@ -12,16 +12,16 @@ const windowsWebView2StartupFallbackDelay = 15 * time.Second
 
 const windowsWebView2StartupFallbackMessage = "The desktop interface did not become ready within 15 seconds. " +
 	"An unavailable Windows system proxy or a WebView2 failure may be blocking startup. " +
-	"Check the system proxy, then restart Reasonix. If the problem continues, start Reasonix with --safe-mode.\n\n" +
+	"Check the system proxy, then restart Reasonix. If the problem continues, repair Microsoft Edge WebView2 Runtime or reinstall Reasonix.\n\n" +
 	"桌面界面在 15 秒内未能就绪。不可用的 Windows 系统代理或 WebView2 故障可能阻塞了启动。" +
-	"请检查系统代理后重启 Reasonix；如果问题仍然存在，请使用 --safe-mode 启动。"
+	"请检查系统代理后重启 Reasonix；如果问题仍然存在，请修复 Microsoft Edge WebView2 Runtime 或重新安装 Reasonix。"
 
 // startWindowsWebView2StartupFallback prevents StartHidden from turning a slow
 // or failed WebView2 navigation into an apparently missing application. Proxy
 // isolation is the primary repair; this watchdog is the last-resort visible
 // recovery path for policy-forced proxies and unrelated WebView2 failures.
 func (a *App) startWindowsWebView2StartupFallback(ctx context.Context) {
-	if !shouldStartWindowsWebView2StartupFallback(goruntime.GOOS) {
+	if !shouldStartWindowsWebView2StartupFallback(goruntime.GOOS, a.remoteWindowTicket != "") {
 		return
 	}
 	go func() {
@@ -47,8 +47,8 @@ func (a *App) startWindowsWebView2StartupFallback(ctx context.Context) {
 	}()
 }
 
-func shouldStartWindowsWebView2StartupFallback(goos string) bool {
-	return goos == "windows"
+func shouldStartWindowsWebView2StartupFallback(goos string, remoteWindow bool) bool {
+	return goos == "windows" && !remoteWindow
 }
 
 func awaitStartupFallback(ctx context.Context, timeout <-chan time.Time, ready func() bool) bool {

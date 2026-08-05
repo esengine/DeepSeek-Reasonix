@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<!--
+  Polkit policy for Reasonix desktop in-app .deb upgrades.
+  The action only authorizes the fixed root-owned helper with argv1=install.
+  Active sessions require auth_admin every time; authorization is not retained.
+-->
+<policyconfig>
+  <vendor>Reasonix</vendor>
+  <vendor_url>https://reasonix.io</vendor_url>
+
+  <action id="io.reasonix.desktop.update">
+    <description gettext-domain="reasonix-desktop">Install a Reasonix desktop update</description>
+    <description xml:lang="zh_CN" gettext-domain="reasonix-desktop">安装 Reasonix 桌面端更新</description>
+    <description xml:lang="zh_TW" gettext-domain="reasonix-desktop">安裝 Reasonix 桌面端更新</description>
+    <message gettext-domain="reasonix-desktop">Authentication is required to install a Reasonix update</message>
+    <message xml:lang="zh_CN" gettext-domain="reasonix-desktop">安装 Reasonix 更新需要管理员授权</message>
+    <message xml:lang="zh_TW" gettext-domain="reasonix-desktop">安裝 Reasonix 更新需要管理員授權</message>
+    <defaults>
+      <allow_any>no</allow_any>
+      <allow_inactive>no</allow_inactive>
+      <allow_active>auth_admin</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/reasonix/reasonix-update-helper</annotate>
+    <annotate key="org.freedesktop.policykit.exec.argv1">install</annotate>
+  </action>
+</policyconfig>

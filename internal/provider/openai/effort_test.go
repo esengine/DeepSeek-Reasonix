@@ -47,6 +47,151 @@ func TestEffortNormalization(t *testing.T) {
 	}
 }
 
+func TestExplicitSupportedEffortsPreservesKimiK3Max(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "opencode-go",
+		BaseURL: "https://opencode.ai/zen/go/v1",
+		Model:   "kimi-k3",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":            "max",
+			"supported_efforts": []string{"high", "max"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := p.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "max" {
+		t.Fatalf("reasoning_effort = %q, want explicitly supported max", got)
+	}
+}
+
+func TestExplicitSupportedEffortsPreserveCustomGenericEffort(t *testing.T) {
+	const effort = "ultra"
+	p, err := New(provider.Config{
+		Name:    "custom-openai",
+		BaseURL: "https://gateway.example.com/v1",
+		Model:   "custom-reasoning-model",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":            effort,
+			"supported_efforts": []string{"high", effort},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New custom effort: %v", err)
+	}
+	req := p.(*client).buildRequest(provider.Request{})
+	if req.ReasoningEffort != effort {
+		t.Fatalf("reasoning_effort = %q, want %q", req.ReasoningEffort, effort)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if !strings.Contains(string(body), `"reasoning_effort":"ultra"`) {
+		t.Fatalf("custom effort was not preserved on the wire: %s", body)
+	}
+}
+
+func TestExplicitSupportedEffortsPreserveCustomDeepSeekEfforts(t *testing.T) {
+	for _, effort := range []string{"medium", "none"} {
+		t.Run(effort, func(t *testing.T) {
+			p, err := New(provider.Config{
+				Name:    "custom-deepseek",
+				BaseURL: "https://gateway.example.com/v1",
+				Model:   "deepseek-v4-flash",
+				APIKey:  "k",
+				Extra: map[string]any{
+					"effort":             effort,
+					"reasoning_protocol": "deepseek",
+					"supported_efforts":  []string{"low", "medium", "high", "none"},
+				},
+			})
+			if err != nil {
+				t.Fatalf("New custom DeepSeek effort: %v", err)
+			}
+			req := p.(*client).buildRequest(provider.Request{})
+			if req.ReasoningEffort != effort {
+				t.Fatalf("reasoning_effort = %q, want %q", req.ReasoningEffort, effort)
+			}
+			if req.Thinking == nil || req.Thinking.Type != "enabled" {
+				t.Fatalf("thinking = %#v, want enabled", req.Thinking)
+			}
+			body, err := json.Marshal(req)
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			if !strings.Contains(string(body), `"reasoning_effort":"`+effort+`"`) {
+				t.Fatalf("custom DeepSeek effort was not preserved on the wire: %s", body)
+			}
+		})
+	}
+}
+
+func TestExplicitSupportedEffortsRejectUndeclaredEffort(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra map[string]any
+	}{
+		{
+			name: "generic",
+			extra: map[string]any{
+				"effort":            "ultra",
+				"supported_efforts": []string{"high"},
+			},
+		},
+		{
+			name: "generic-max",
+			extra: map[string]any{
+				"effort":            "max",
+				"supported_efforts": []string{"high"},
+			},
+		},
+		{
+			name: "deepseek",
+			extra: map[string]any{
+				"effort":             "max",
+				"reasoning_protocol": "deepseek",
+				"supported_efforts":  []string{"medium", "none"},
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := New(provider.Config{
+				Name:    "custom-" + tc.name,
+				BaseURL: "https://gateway.example.com/v1",
+				Model:   "custom-reasoning-model",
+				APIKey:  "k",
+				Extra:   tc.extra,
+			})
+			if err == nil || !strings.Contains(err.Error(), "supported_efforts") {
+				t.Fatalf("New error = %v, want supported_efforts rejection", err)
+			}
+		})
+	}
+}
+
+func TestImplicitOnlySupportedEffortsKeepBuiltInValidation(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "generic",
+		BaseURL: "https://gateway.example.com/v1",
+		Model:   "reasoning-model",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":            "max",
+			"supported_efforts": []string{"", " auto ", " "},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := p.(*client).effort; got != "high" {
+		t.Fatalf("effort = %q, want built-in max-to-high clamp", got)
+	}
+}
+
 func TestEffortInvalidRejected(t *testing.T) {
 	_, err := New(provider.Config{
 		Name: "p", BaseURL: "https://api.xiaomimimo.com/v1", Model: "m", APIKey: "k",
@@ -78,7 +223,11 @@ func TestReasoningProtocolOverridesEndpointHeuristic(t *testing.T) {
 		BaseURL: "https://api.deepseek.com/v1",
 		Model:   "deepseek-v4-flash",
 		APIKey:  "k",
-		Extra:   map[string]any{"reasoning_protocol": "none", "effort": "max"},
+		Extra: map[string]any{
+			"reasoning_protocol": "none",
+			"effort":             "max",
+			"supported_efforts":  []string{"low"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("New none protocol: %v", err)

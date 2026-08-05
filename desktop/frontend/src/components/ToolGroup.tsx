@@ -102,6 +102,7 @@ function toolDisplayName(name: string): string {
     case "kill_shell": return "Kill Shell";
     case "wait":
     case "waitJob": return "Wait";
+    case "use_capability": return "MCP";
     default: return titleCaseName(name);
   }
 }

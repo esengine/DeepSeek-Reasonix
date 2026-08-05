@@ -25,6 +25,10 @@ export function dirEntryMenuLabel(entry: DirEntry): string {
   return entry.displayName || entry.name;
 }
 
+function fileReferenceItemKey(entry: DirEntry): string {
+  return (entry.isDir ? "d:" : "f:") + (entry.path || entry.name);
+}
+
 export function activeFileReferenceToken(text: string): { raw: string; dir: string; frag: string } | null {
   const queryText = text.replace(/[\r\n]+$/u, "");
   const match = activeRefTokenRe.exec(queryText);
@@ -205,7 +209,7 @@ export function FileReferenceMenu({
     return (
       <div className="slashmenu" role="listbox">
         {items.map((entry, index) => (
-          <div key={(entry.isDir ? "d:" : "f:") + (entry.path || entry.name)}>
+          <div key={fileReferenceItemKey(entry)}>
             {renderEntry(entry, index)}
           </div>
         ))}
@@ -217,7 +221,7 @@ export function FileReferenceMenu({
     <VirtualMenu
       items={items}
       activeIndex={activeIndex}
-      itemKey={(entry) => (entry.isDir ? "d:" : "f:") + (entry.path || entry.name)}
+      itemKey={fileReferenceItemKey}
       renderItem={renderEntry}
     />
   );

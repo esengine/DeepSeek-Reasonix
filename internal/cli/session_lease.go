@@ -59,6 +59,14 @@ func (m *chatTUI) followSessionLease() {
 	}
 }
 
+// cliSessionRecoveredHandler moves the single-session CLI lease during the
+// controller's recovery commit. The callback runs before Controller changes its
+// session path, closing the unguarded interval that event-driven follow-up
+// calls left after ordinary turn-end and mid-turn autosaves.
+func cliSessionRecoveredHandler(leases *control.SessionLeaseKeeper) func(control.SessionRecoveryInfo) error {
+	return leases.HandleSessionRecovered
+}
+
 // copySessionForWriting duplicates the session at src into a fresh session
 // file beside it and returns the new path. It backs the --copy escape hatch:
 // when src is held by another runtime, the copy gives this process a session

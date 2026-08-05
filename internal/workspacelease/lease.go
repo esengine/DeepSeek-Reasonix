@@ -40,8 +40,26 @@ type Owner struct {
 	background    int
 	acquired      bool
 	acquiring     bool
+	waiting       bool
 	acquireDone   chan struct{}
 	releaseSystem func()
+}
+
+// State is a sanitized process-local snapshot used by Desktop to explain a
+// workspace conflict. It deliberately contains no path, PID, or lock token.
+type State struct {
+	Acquired bool
+	Waiting  bool
+}
+
+// State returns the current acquisition state without performing lease I/O.
+func (o *Owner) State() State {
+	if o == nil {
+		return State{}
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return State{Acquired: o.acquired, Waiting: o.waiting}
 }
 
 type localLock struct {
@@ -195,6 +213,7 @@ func (o *Owner) AcquireWrite(ctx context.Context) error {
 		release, err := o.acquire(ctx)
 		o.mu.Lock()
 		o.acquiring = false
+		o.waiting = false
 		if err == nil {
 			o.acquired = true
 			o.releaseSystem = release
@@ -254,6 +273,9 @@ func (o *Owner) acquire(ctx context.Context) (func(), error) {
 			return
 		}
 		waited = true
+		o.mu.Lock()
+		o.waiting = true
+		o.mu.Unlock()
 		if o.onWait != nil {
 			o.onWait()
 		}

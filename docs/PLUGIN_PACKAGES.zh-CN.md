@@ -1,6 +1,6 @@
 # Reasonix 插件包
 
-Reasonix 插件包把 skills、hooks 和 MCP servers 组织成一个可安装单元。
+Reasonix 插件包把 skills、hooks、MCP servers、prompts、主题和代码型扩展组织成一个可安装单元。
 
 ## CLI 模式
 
@@ -202,7 +202,13 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
     "SessionStart": [
       {
         "command": "hooks/session-start",
+        "args": [],
         "description": "Load startup context"
+      },
+      {
+        "command": "printf 'ready' && ./hooks/audit",
+        "shell": "bash",
+        "description": "Run a compound shell script"
       }
     ]
   },
@@ -215,6 +221,100 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
 ```
 
 相对路径都按插件根目录解析。Reasonix 安装插件时不会执行第三方安装脚本。
+
+插件 Hook 的执行形态是显式的：
+
+- 只要出现 `args`（包括 `"args": []`），就使用 **exec form**。`command`
+  是可执行文件，每个参数都会按原值直接传递，不经过 Shell 解析或变量展开。
+- 未提供 `args` 且提供 `shell` 时，使用 **shell form**。完整 `command`
+  会原样交给 `bash`、`powershell`/`pwsh`、`cmd`（仅 Windows）或 `auto`。
+  Windows 上 `auto` 优先选择 Git Bash，找不到时回退 PowerShell。
+- 既未声明 `args` 也未声明 `shell` 的已有原生 Hook 继续使用 Reasonix
+  历史 Shell 命令行为；`shellCommand: true` 仍作为 shell form 的旧写法兼容。
+
+## Manifest v1（扩展）
+
+插件可以通过声明 `apiVersion` 启用 v1 Manifest：
+
+```json
+{
+  "apiVersion": "reasonix.io/plugin/v1",
+  "name": "example",
+  "version": "1.0.0",
+  "description": "Example extension",
+  "contributes": {
+    "skills": ["skills"],
+    "agents": ["agents"],
+    "commands": ["commands"],
+    "prompts": ["prompts"],
+    "hooks": {},
+    "mcpServers": {},
+    "themes": ["themes/*.reasonix-theme"]
+  },
+  "runtime": {
+    "command": "${REASONIX_PLUGIN_ROOT}/bin/example",
+    "args": [],
+    "env": {},
+    "required": true,
+    "priority": 0,
+    "intercepts": ["input.receive", "tool.before"],
+    "replaces": ["system_prompt"],
+    "capabilities": ["interceptors", "strategies", "providers", "ui"]
+  }
+}
+```
+
+解析规则：
+
+- **没有** `apiVersion` 的 Manifest 继续按旧格式解析，行为不变（旧格式
+  忽略未知字段）。
+- v1 是严格的：根对象或 `contributes`/`runtime` 下的任何未知字段都会
+  报错并指明字段路径，避免拼写错误静默失效。
+- 未知 major version（如 `reasonix.io/plugin/v2`）直接拒绝加载。
+- v1 可以同时使用旧顶层字段（`skills`、`hooks`、`mcpServers` 等）与
+  `contributes`：完全相同的路径去重；同名但定义不同的条目报 Manifest
+  错误并指明键名。
+- 所有相对路径与 glob 必须位于插件根目录内：拒绝路径穿越、绝对路径、
+  逃逸 symlink 和非普通 theme 文件。
+
+新资源类型：
+
+- `prompts` 使用与 commands 相同的模板语义和参数替换，公开名为
+  `/<plugin>:<name>`；`commands` 保持兼容别名。
+- `themes` 是 `.reasonix-theme` 文件，在 Desktop 设置中以只读插件主题
+  展示（ID 为 `plugin:<plugin>:<theme>`），不会复制进用户主题库。插件
+  被禁用或卸载时，若当前使用的是它的主题，界面回退到基础样式但保留该
+  ID，重新安装同一插件后自动恢复。
+
+`runtime` 块声明的是代码型扩展——由 Reasonix 启动并通过 Extension
+Protocol（基于 stdio 的 JSON-RPC 2.0，方法索引见
+`docs/EXTENSION_PROTOCOL.generated.md`，Go SDK 见 `sdk/go/README.md`）
+驱动的 Sidecar 进程：
+
+- `command`/`args`/`env` 仅支持 **exec form**：command 即可执行文件，
+  绝不经过 Shell 解释；`${REASONIX_PLUGIN_ROOT}` 展开为插件安装根目录。
+- `intercepts` 声明要拦截的事件（如 `input.receive`、`tool.before`、
+  `permission.decision`）；`replaces` 声明可以持有的替换槽
+  （`system_prompt`、`context`、`provider_request`、`provider_response`、
+  `compaction`、`session_policy`、`permission`、`frontend_events`、
+  `tool:<name>`、`provider:<ref>`）。同一替换槽在所有已安装插件中只能有
+  一个 owner，争用会导致构建失败并列出来源。
+- `capabilities` 按能力族授权：`interceptors`、`strategies`、`providers`、
+  `ui`。Sidecar 在握手时声明的任何超出 Manifest 的能力都会被拒绝。
+- 扩展提供的模型以 `plugin/<plugin>/<provider>/<model>` 形式出现在模型
+  选择器中；该 ref 同样可用作 `default_model`（包括首次启动），并可
+  在 `/model`、Desktop 与 ACP 的模型切换中使用。
+
+**完全信任（Full trust）。** 代码型扩展运行在 Sandbox 之外，继承未过滤
+的完整环境：它可以读取完整会话与环境、绕过权限、直接操作本机；扩展在
+`permission.decision` 上的 "allow" 可以覆盖宿主的 deny。安装、更新、
+替换或 `--link` 一个带有 `runtime` 块的插件**即代表授权**——不会有二次
+确认，`--link` 模式在内容变化后自动保持信任。因此安装预览、
+`reasonix plugin show`、能力诊断和 Desktop 安装界面都会显著展示
+`FULL TRUST` 区块，列出 Runtime 命令、Interceptors、替换槽和
+Provider/UI 能力。安装前请确认该区块内容，只安装你完全信任的运行时。
+只有通过插件安装流程写入插件状态的 Runtime 才能启动；项目配置无法
+声明代码型 Sidecar。
 
 ## Codex 与 Claude 兼容
 
@@ -257,7 +357,10 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
 - 插件根目录的 `CLAUDE.md` 会映射为内置的 `SessionStart` 上下文 hook。
   Reasonix 会直接读取该文件，不通过 shell 命令。
 - `.claude/settings.json` 和 `hooks/hooks.json` 里的 command hooks 会按同名事件映射。
-  `matcher`、`args`、`async`、`env` 和 timeout 均会保留。`matcher` 以及 Hook 脚本看到的
+  `matcher`、`args`、`shell`、`async`、`env` 和 timeout 均会保留。Claude 的执行契约
+  也会完整保留：只要出现 `args`（即使是空数组）就按 exec form 执行，并逐项原样传参；
+  省略 `args` 才按 shell form 执行，将原始命令交给声明的 Bash 或 PowerShell。
+  `matcher` 以及 Hook 脚本看到的
   `tool_name` 会在 Reasonix 与 Claude 的工具名之间互译（`bash` ↔ `Bash`、
   `write_file` ↔ `Write` 等），因此 `"Bash"` 这类 matcher 能正确触发；Reasonix 里所有会
   启动子代理的工具（`task`、`read_only_task`、`parallel_tasks`，以及专用的
@@ -286,10 +389,15 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
   stdin 使用 Claude 兼容的 snake_case 载荷（包括 `hook_event_name`）。宿主会在启动
   进程前展开 `${CLAUDE_PLUGIN_ROOT}` 和 `${REASONIX_PLUGIN_ROOT}`，也兼容不带花括号的
   `$NAME` 与 Windows `%NAME%` 写法，因此插件相对路径不再依赖目标 shell 的环境变量
-  语法。Windows 上显式声明的裸 `sh -c`/`bash -c` hook 会复用 Git for Windows Bash
-  探测，即使 Bash 不在 `cmd.exe` 的 `PATH` 中也能执行；带目录的显式解释器路径保持
+  语法。Windows 上未显式指定 Shell 的 shell-form Hook 会和 Reasonix Shell 工具一样，
+  优先选择 Git Bash，找不到时回退 PowerShell。显式 Bash Hook 以及旧式裸
+  `sh -c`/`bash -c` Hook 会复用 Git for Windows Bash 探测，即使 Bash 不在
+  `cmd.exe` 的 `PATH` 中也能执行；带目录的显式解释器路径保持
   不变。如果机器确实没有可用 Bash，hook 会返回清晰的依赖提示，而不是本地化的
-  “无法识别 sh”乱码。旧代码页输出也会在进入界面前转换为 UTF-8。`PreToolUse` 和
+  “无法识别 sh”乱码。通过 `[tools.shell] prefer = "bash"` 和
+  `path = ".../bash.exe"` 配置的非标准目录或便携版 Bash 也会被显式 Bash Hook 复用。
+  `reasonix plugin doctor <名称>` 和 `reasonix doctor capabilities` 会在 Hook 首次触发前
+  报告缺失的 Shell 依赖。旧代码页输出也会在进入界面前转换为 UTF-8。`PreToolUse` 和
   `UserPromptSubmit` hook 仍可
   通过退出码 2 或退出码 0 时的 JSON 拒绝形态拒绝该次调用（`PreToolUse` 用
   `hookSpecificOutput.permissionDecision`，`UserPromptSubmit` 用顶层

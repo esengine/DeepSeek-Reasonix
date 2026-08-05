@@ -15,6 +15,7 @@ import (
 	"hash/fnv"
 	"io"
 	"log/slog"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -26,6 +27,7 @@ import (
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
+	"reasonix/internal/secrets"
 	"reasonix/internal/tool"
 )
 
@@ -76,6 +78,12 @@ type Spec struct {
 	Env     map[string]string
 	URL     string
 	Headers map[string]string
+	// DefaultStartupTimeout is the background initialize + tools/list safety cap
+	// for this server. Zero keeps Reasonix's built-in default.
+	DefaultStartupTimeout time.Duration
+	// StartupTimeout overrides DefaultStartupTimeout for this server. It is
+	// host-only lifecycle policy and never changes provider-visible tool schemas.
+	StartupTimeout time.Duration
 	// DefaultCallTimeout is the global MCP call cap for this server. Zero keeps
 	// Reasonix's built-in defaultCallTimeout.
 	DefaultCallTimeout time.Duration
@@ -398,6 +406,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
 				}
 				c.close()
+				err = newStartupFailure("tools/list", phaseAStart, c.startupStderr(), err)
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("list tools from %q: %w", spec.Name, err)}
 				return
 			}
@@ -702,6 +711,9 @@ type Failure struct {
 	Name                   string
 	Transport              string
 	Error                  string
+	Stage                  string
+	Elapsed                time.Duration
+	Stderr                 string
 	RequiresLaunchApproval bool
 }
 
@@ -767,8 +779,16 @@ func (h *Host) Failures() []Failure {
 func (h *Host) ConnectingServers() []string {
 	h.spawningMu.Lock()
 	defer h.spawningMu.Unlock()
-	out := make([]string, 0, len(h.spawning))
-	for name := range h.spawning {
+	names := make(map[string]struct{}, len(h.spawning))
+	for key, attempt := range h.spawning {
+		name := key
+		if attempt != nil && strings.TrimSpace(attempt.server) != "" {
+			name = attempt.server
+		}
+		names[name] = struct{}{}
+	}
+	out := make([]string, 0, len(names))
+	for name := range names {
 		out = append(out, name)
 	}
 	sort.Strings(out)
@@ -783,8 +803,10 @@ func (h *Host) RecordFailure(s Spec, err error) {
 	if tt == "" {
 		tt = "stdio"
 	}
+	stage, elapsed, stderr := startupFailureDetails(err)
 	f := Failure{
 		Name: s.Name, Transport: tt, Error: summarizeFailureError(err),
+		Stage: stage, Elapsed: elapsed, Stderr: stderr,
 		RequiresLaunchApproval: requiresLaunchApproval(err),
 	}
 	for i := range h.failures {
@@ -868,26 +890,66 @@ func (h *Host) endDeferredSpawn() {
 var ErrSpawningInFlight = errors.New("server spawn already in progress")
 
 type spawnAttempt struct {
-	done  chan struct{}
-	tools []tool.Tool
-	err   error
+	server string
+	done   chan struct{}
+	tools  []tool.Tool
+	err    error
+}
+
+// ConnectionResult is the eventual result of a session-owned background MCP
+// handshake. Tools are provider adapters and remain off the caller's registry
+// unless the caller explicitly registers them.
+type ConnectionResult struct {
+	Tools []tool.Tool
+	Err   error
+}
+
+// EnsureConnectedInBackground starts or joins one shared initialize +
+// tools/list handshake owned by lifeCtx. The returned channel is buffered, so a
+// caller may stop waiting while the server continues toward readiness. Host
+// shutdown and Remove cancel the background work and wait for its goroutine.
+func (h *Host) EnsureConnectedInBackground(lifeCtx context.Context, s Spec) <-chan ConnectionResult {
+	result := make(chan ConnectionResult, 1)
+	startupBase, cancelStartupBase := context.WithCancel(lifeCtx)
+	generation := h.registerDeferredCancel(s.Name, cancelStartupBase)
+	if !h.beginDeferredSpawn() {
+		cancelStartupBase()
+		result <- ConnectionResult{Err: fmt.Errorf("plugin host is closed")}
+		return result
+	}
+	go func() {
+		defer h.endDeferredSpawn()
+		defer cancelStartupBase()
+		started := time.Now()
+		startupCtx, cancelStartup := context.WithTimeout(startupBase, s.startupTimeout())
+		tools, err := h.EnsureConnectedWithLifecycle(lifeCtx, startupCtx, s, generation)
+		cancelStartup()
+		if err != nil {
+			err = newStartupFailure("connect", started, "", err)
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, ErrDeferredSpawnCancelled) {
+				h.RecordFailure(s, err)
+			}
+		}
+		result <- ConnectionResult{Tools: tools, Err: err}
+	}()
+	return result
 }
 
 // beginSpawn atomically claims the sole right to spawn the named server.
 // Returns owner=true if the caller should proceed. When another caller is
 // already spawning the same server, owner=false and done is closed when that
 // spawn finishes.
-func (h *Host) beginSpawn(name string) (*spawnAttempt, bool) {
+func (h *Host) beginSpawn(key, server string) (*spawnAttempt, bool) {
 	h.spawningMu.Lock()
 	defer h.spawningMu.Unlock()
 	if h.spawning == nil {
 		h.spawning = make(map[string]*spawnAttempt)
 	}
-	if attempt, ok := h.spawning[name]; ok {
+	if attempt, ok := h.spawning[key]; ok {
 		return attempt, false
 	}
-	attempt := &spawnAttempt{done: make(chan struct{})}
-	h.spawning[name] = attempt
+	attempt := &spawnAttempt{server: server, done: make(chan struct{})}
+	h.spawning[key] = attempt
 	return attempt, true
 }
 
@@ -922,6 +984,15 @@ func (h *Host) hasLocked(name string) bool {
 // HasClient reports whether a server with this name is already connected to the host.
 func (h *Host) HasClient(name string) bool { return h.has(name) }
 
+// HasClientForSpec reports whether the shared Host client for spec.Name was
+// created from the same runtime connection identity. Server names are only a
+// display/routing namespace; they are not sufficient authorization identity
+// when controllers with different project configs share one Host.
+func (h *Host) HasClientForSpec(spec Spec) bool {
+	c := h.client(spec.Name)
+	return c != nil && MCPRuntimeSpecMatches(c.spec, spec)
+}
+
 // ToolsFor returns the namespaced tool instances for an already-connected client.
 // ctx bounds the tools/list call so a non-responsive server does not hang
 // permanently. An error is returned when no client with that name is connected.
@@ -942,6 +1013,162 @@ func (h *Host) ToolsFor(ctx context.Context, name string) ([]tool.Tool, error) {
 		return tools, nil
 	}
 	return c.listTools(ctx)
+}
+
+// ToolsForSpec is the identity-bound variant used by stable capability
+// frontends. It refuses a same-name client from another controller, project
+// identity, endpoint, or prior hot-update generation instead of treating that
+// client as the current runtime's authorized server.
+func (h *Host) ToolsForSpec(ctx context.Context, spec Spec) ([]tool.Tool, error) {
+	h.mu.RLock()
+	closed := h.closed
+	h.mu.RUnlock()
+	if closed {
+		return nil, fmt.Errorf("plugin host is closed")
+	}
+	c := h.client(spec.Name)
+	if c == nil {
+		return nil, fmt.Errorf("client %q not found on shared host", spec.Name)
+	}
+	if !MCPRuntimeSpecMatches(c.spec, spec) {
+		return nil, fmt.Errorf("connected MCP server %q identity does not match the current runtime configuration", spec.Name)
+	}
+	if tools, ok := c.cachedTools(); ok {
+		return tools, nil
+	}
+	return c.listTools(ctx)
+}
+
+// MCPRuntimeSpecMatches compares the complete host-local runtime behavior of
+// two specs while deliberately excluding non-behavioral handles such as the
+// stderr writer and LaunchManager pointer. Secret values are compared only in
+// memory and are never serialized into diagnostics or provider-visible state.
+func MCPRuntimeSpecMatches(a, b Spec) bool {
+	return reflect.DeepEqual(mcpRuntimeSpecIdentityOf(a), mcpRuntimeSpecIdentityOf(b))
+}
+
+// MCPToolMatchesSpec reports whether a concrete plugin adapter or pinned lazy
+// placeholder belongs to the requested runtime spec. Unknown tool
+// implementations fail closed when a runtime-bound capability frontend asks.
+func MCPToolMatchesSpec(t tool.Tool, spec Spec) bool {
+	switch typed := t.(type) {
+	case *remoteTool:
+		return typed != nil && typed.client != nil && MCPRuntimeSpecMatches(typed.client.spec, spec)
+	case *lazyTool:
+		return typed != nil && typed.shared != nil && MCPRuntimeSpecMatches(typed.shared.spec, spec)
+	default:
+		return false
+	}
+}
+
+type mcpRuntimeSpecIdentity struct {
+	Name                    string
+	Package                 string
+	Type                    string
+	Command                 string
+	Args                    []string
+	Env                     map[string]string
+	URL                     string
+	Headers                 map[string]string
+	DefaultStartupTimeout   time.Duration
+	StartupTimeout          time.Duration
+	DefaultCallTimeout      time.Duration
+	CallTimeout             time.Duration
+	ToolTimeouts            map[string]time.Duration
+	Dir                     string
+	WorkspaceRoot           string
+	LaunchWorkspace         string
+	ConfigSource            string
+	RequireLaunchApproval   bool
+	LaunchArgs              []string
+	LauncherIdentityArgs    []string
+	LauncherLocator         string
+	LauncherResolvedVersion string
+	LauncherDigest          string
+	ProcessMode             MCPProcessMode
+	Sandbox                 sandbox.Spec
+	StateDir                string
+	StripRawPrefix          string
+	LowPriority             bool
+}
+
+func mcpRuntimeSpecIdentityOf(s Spec) mcpRuntimeSpecIdentity {
+	launchWorkspace := ""
+	if s.LaunchManager != nil {
+		launchWorkspace = s.LaunchManager.WorkspaceFingerprint()
+	}
+	return mcpRuntimeSpecIdentity{
+		Name:                    strings.TrimSpace(s.Name),
+		Package:                 strings.TrimSpace(s.Package),
+		Type:                    canonicalMCPRuntimeTransport(s.Type),
+		Command:                 s.Command,
+		Args:                    nonEmptyStrings(s.Args),
+		Env:                     nonEmptyStringMap(s.Env),
+		URL:                     s.URL,
+		Headers:                 nonEmptyStringMap(s.Headers),
+		DefaultStartupTimeout:   s.DefaultStartupTimeout,
+		StartupTimeout:          s.StartupTimeout,
+		DefaultCallTimeout:      s.DefaultCallTimeout,
+		CallTimeout:             s.CallTimeout,
+		ToolTimeouts:            nonEmptyDurationMap(s.ToolTimeouts),
+		Dir:                     s.Dir,
+		WorkspaceRoot:           s.WorkspaceRoot,
+		LaunchWorkspace:         launchWorkspace,
+		ConfigSource:            strings.TrimSpace(s.ConfigSource),
+		RequireLaunchApproval:   s.RequireLaunchApproval,
+		LaunchArgs:              nonEmptyStrings(s.LaunchArgs),
+		LauncherIdentityArgs:    nonEmptyStrings(s.LauncherIdentityArgs),
+		LauncherLocator:         s.LauncherLocator,
+		LauncherResolvedVersion: s.LauncherResolvedVersion,
+		LauncherDigest:          s.LauncherDigest,
+		ProcessMode:             s.ResolvedProcessMode(),
+		Sandbox:                 canonicalMCPRuntimeSandbox(s.Sandbox),
+		StateDir:                s.StateDir,
+		StripRawPrefix:          s.StripRawPrefix,
+		LowPriority:             s.LowPriority,
+	}
+}
+
+func canonicalMCPRuntimeTransport(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "stdio":
+		return "stdio"
+	case "http", "streamable-http", "streamable_http":
+		return "streamable-http"
+	case "sse":
+		return "sse"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
+}
+
+func canonicalMCPRuntimeSandbox(in sandbox.Spec) sandbox.Spec {
+	in.WriteRoots = nonEmptyStrings(in.WriteRoots)
+	in.ReadRoots = nonEmptyStrings(in.ReadRoots)
+	in.AppContainerWriteRoots = nonEmptyStrings(in.AppContainerWriteRoots)
+	in.ForbidReadRoots = nonEmptyStrings(in.ForbidReadRoots)
+	return in
+}
+
+func nonEmptyStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	return in
+}
+
+func nonEmptyStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	return in
+}
+
+func nonEmptyDurationMap(in map[string]time.Duration) map[string]time.Duration {
+	if len(in) == 0 {
+		return nil
+	}
+	return in
 }
 
 // client returns the named connected client, or nil.
@@ -1008,7 +1235,7 @@ func (h *Host) addWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferr
 	if deferredGeneration != 0 {
 		spawnKey = fmt.Sprintf("%s#%d", s.Name, deferredGeneration)
 	}
-	attempt, owner := h.beginSpawn(spawnKey)
+	attempt, owner := h.beginSpawn(spawnKey, s.Name)
 	if !owner {
 		select {
 		case <-attempt.done:
@@ -1040,6 +1267,7 @@ func (h *Host) addConnected(ctx context.Context, s Spec) ([]tool.Tool, error) {
 }
 
 func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spec, deferredGeneration uint64) ([]tool.Tool, error) {
+	startupStarted := time.Now()
 	h.mu.RLock()
 	if h.closed {
 		h.mu.RUnlock()
@@ -1054,6 +1282,7 @@ func (h *Host) addConnectedWithLifecycle(lifeCtx, callCtx context.Context, s Spe
 	ts, err := c.listTools(callCtx)
 	if err != nil {
 		c.close()
+		err = newStartupFailure("tools/list", startupStarted, c.startupStderr(), err)
 		return nil, fmt.Errorf("list tools: %w", err)
 	}
 	c.toolCount = len(ts)
@@ -1167,18 +1396,19 @@ var ErrDeferredSpawnCancelled = errors.New("deferred MCP spawn cancelled")
 // (prompts + resources) can still call it later. Callers that don't care pass
 // the same ctx for both.
 func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
+	started := time.Now()
 	var err error
 	s, err = applyStoredLauncherLock(s)
 	if err != nil {
-		return nil, err
+		return nil, newStartupFailure("launch", started, "", err)
 	}
 	s, err = resolveProjectLaunchAuthorization(callCtx, s)
 	if err != nil {
-		return nil, err
+		return nil, newStartupFailure("authorization", started, "", err)
 	}
 	t, err := newTransport(lifeCtx, s)
 	if err != nil {
-		return nil, err
+		return nil, newStartupFailure("launch", started, "", err)
 	}
 	tt := strings.ToLower(strings.TrimSpace(s.Type))
 	if tt == "" {
@@ -1187,6 +1417,7 @@ func start(lifeCtx, callCtx context.Context, s Spec) (*Client, error) {
 	c := &Client{name: s.Name, t: t, spec: s, transport: tt}
 	if err := c.initialize(callCtx); err != nil {
 		c.close()
+		err = newStartupFailure("initialize", started, c.startupStderr(), err)
 		return nil, err
 	}
 	return c, nil
@@ -1654,7 +1885,7 @@ func shortNameHash(s string) string {
 }
 
 func summarizeFailureError(err error) string {
-	msg := strings.Join(strings.Fields(err.Error()), " ")
+	msg := strings.Join(strings.Fields(secrets.RedactCredentials(err.Error())), " ")
 	const max = 500
 	if len(msg) > max {
 		msg = msg[:max] + "..."
@@ -1777,6 +2008,14 @@ func (t *remoteTool) ExecuteWithImages(ctx context.Context, args json.RawMessage
 		// dispatching.
 		if !t.MCPServerAuthorized() || !readOnly || destructive {
 			return "", nil, fmt.Errorf("MCP server %q changed the authorization or security metadata for tool %q; the call was blocked before dispatch — refresh the server from a parent session before retrying", t.client.name, t.rawName)
+		}
+	}
+	if tool.HasNonDestructiveMCPExecutionIntent(ctx) {
+		// Planner lane: authorized + non-destructive only. Missing readOnlyHint
+		// is intentional and does not block; destructive promotion or lost
+		// authorization must produce zero tools/call.
+		if !t.MCPServerAuthorized() || destructive {
+			return "", nil, fmt.Errorf("MCP server %q changed the authorization or destructive classification for tool %q; the call was blocked before dispatch — retry so Reasonix can re-apply the current Planner MCP safety boundary", t.client.name, t.rawName)
 		}
 	}
 	res, err := t.client.call(ctx, "tools/call", map[string]any{

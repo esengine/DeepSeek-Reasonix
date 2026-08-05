@@ -61,6 +61,22 @@ func TestMCPActivationStoreDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
+func TestProjectMCPIsTrustedButActivationRemainsWorkspaceScoped(t *testing.T) {
+	for _, source := range []MCPConfigSource{MCPSourceProjectConfig, MCPSourceProjectMCPJSON} {
+		entry := PluginEntry{Name: "project-mcp", Source: source}
+		if !source.UserAuthorized() || !source.ProjectScoped() {
+			t.Fatalf("project source %q policy = authorized:%v scoped:%v, want trusted and workspace scoped",
+				source, source.UserAuthorized(), source.ProjectScoped())
+		}
+		scopeA, workspaceA, gotSource, _ := ActivationIdentity(entry, "/workspace/a")
+		scopeB, workspaceB, _, _ := ActivationIdentity(entry, "/workspace/b")
+		if scopeA != MCPActivationWorkspace || scopeB != MCPActivationWorkspace || workspaceA == "" || workspaceA == workspaceB {
+			t.Fatalf("project activation identities = (%q,%q,%q) and (%q,%q), want distinct workspace scopes",
+				scopeA, workspaceA, gotSource, scopeB, workspaceB)
+		}
+	}
+}
+
 func TestMCPActivationStoreConcurrentIndependentWriters(t *testing.T) {
 	home := t.TempDir()
 	const writers = 24

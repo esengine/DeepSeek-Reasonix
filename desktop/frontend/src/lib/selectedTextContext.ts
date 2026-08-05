@@ -1,3 +1,5 @@
+import { pathToLang } from "./lang";
+
 export interface SelectedTextReference {
   id: string;
   text: string;
@@ -163,26 +165,7 @@ function fenceFor(text: string): string {
 }
 
 export function languageFor(path: string): string | undefined {
-  const name = (path.split("/").filter(Boolean).pop() ?? "").toLowerCase();
-  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1) : name;
-  const byExt: Record<string, string> = {
-    css: "css",
-    go: "go",
-    html: "html",
-    js: "javascript",
-    json: "json",
-    jsx: "jsx",
-    md: "markdown",
-    py: "python",
-    rs: "rust",
-    sh: "bash",
-    toml: "toml",
-    ts: "typescript",
-    tsx: "tsx",
-    yaml: "yaml",
-    yml: "yaml",
-  };
-  return byExt[ext];
+  return pathToLang(path) || undefined;
 }
 
 export function formatSelectionReference(path: string, text: string): string {

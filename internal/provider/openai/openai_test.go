@@ -27,7 +27,7 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi there\"}}]}\n\ndata: [DONE]\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi there\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\ndata: [DONE]\n\n")
 	}))
 	defer srv.Close()
 
@@ -49,12 +49,16 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 		t.Fatalf("Stream after retries: %v", err)
 	}
 	var got strings.Builder
+	var usage *provider.Usage
 	for chunk := range ch {
 		if chunk.Type == provider.ChunkError {
 			t.Fatalf("unexpected stream error: %v", chunk.Err)
 		}
 		if chunk.Type == provider.ChunkText {
 			got.WriteString(chunk.Text)
+		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
 		}
 	}
 	if got.String() != "hi there" {
@@ -65,6 +69,23 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 	}
 	if len(attempts) != 2 || attempts[0] != 1 || attempts[1] != 2 {
 		t.Errorf("retry-notify attempts = %v, want [1 2]", attempts)
+	}
+	if usage == nil || usage.RequestCount != 3 {
+		t.Errorf("usage request count = %+v, want 3", usage)
+	}
+}
+
+func TestMergeUsageCountsStreamsNotUsageChunks(t *testing.T) {
+	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2}
+	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2}
+	oneStream := mergeUsage(firstChunk, secondChunk, false)
+	if oneStream.RequestCount != 2 {
+		t.Fatalf("same-stream request count = %d, want 2", oneStream.RequestCount)
+	}
+	nextStream := &provider.Usage{PromptTokens: 3, TotalTokens: 3, RequestCount: 1}
+	combined := mergeUsage(oneStream, nextStream, true)
+	if combined.RequestCount != 3 {
+		t.Fatalf("multi-stream request count = %d, want 3", combined.RequestCount)
 	}
 }
 
@@ -126,6 +147,345 @@ func TestBuildRequestScopesLegacyTupleMigrationToMiMo(t *testing.T) {
 	other := (&client{}).buildRequest(req)
 	if got := string(other.Tools[0].Function.Parameters); got != string(legacy) {
 		t.Fatalf("non-MiMo parameters changed:\n got: %s\nwant: %s", got, legacy)
+	}
+}
+
+func TestBuildRequestOrdinaryDeepSeekBytesStayPrefixFree(t *testing.T) {
+	c := &client{model: "deepseek-v4-flash", deepseek: true, effort: "high"}
+	body, err := json.Marshal(c.buildRequest(provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}}))
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	want := `{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hi"}],"stream":true,"stream_options":{"include_usage":true},"reasoning_effort":"high","thinking":{"type":"enabled"}}`
+	if string(body) != want {
+		t.Fatalf("ordinary DeepSeek request bytes changed:\n got: %s\nwant: %s", body, want)
+	}
+	if strings.Contains(string(body), `"prefix"`) {
+		t.Fatalf("ordinary request leaked prefix mode: %s", body)
+	}
+}
+
+func TestBuildPrefixRequestAppendsWireOnlyAssistantTail(t *testing.T) {
+	c := &client{model: "deepseek-v4-pro", deepseek: true, effort: "high"}
+	req := provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write a long answer"}}}
+	body, err := json.Marshal(c.buildPrefixRequest(req, "partial answer", "provider reasoning"))
+	if err != nil {
+		t.Fatalf("marshal prefix request: %v", err)
+	}
+	var decoded struct {
+		Messages []map[string]json.RawMessage `json:"messages"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode prefix request: %v", err)
+	}
+	if len(decoded.Messages) != 2 {
+		t.Fatalf("messages = %d, want original user plus wire-only assistant prefix", len(decoded.Messages))
+	}
+	last := decoded.Messages[1]
+	if string(last["role"]) != `"assistant"` || string(last["content"]) != `"partial answer"` || string(last["prefix"]) != `true` {
+		t.Fatalf("prefix tail = %v, want assistant content with prefix=true", last)
+	}
+	if string(last["reasoning_content"]) != `"provider reasoning"` {
+		t.Fatalf("thinking prefix lost reasoning_content: %s", last)
+	}
+	if len(req.Messages) != 1 {
+		t.Fatal("buildPrefixRequest mutated the caller's persisted message slice")
+	}
+
+	disabled := &client{model: c.model, deepseek: true, effort: c.effort, thinkingType: "disabled"}
+	disabledBody, err := json.Marshal(disabled.buildPrefixRequest(req, "partial answer", "must stay local"))
+	if err != nil {
+		t.Fatalf("marshal disabled prefix request: %v", err)
+	}
+	if strings.Contains(string(disabledBody), "reasoning_content") || strings.Contains(string(disabledBody), "must stay local") {
+		t.Fatalf("non-thinking prefix must omit reasoning_content: %s", disabledBody)
+	}
+}
+
+func TestNewScopesPrefixContinuationToOfficialDeepSeekChatURL(t *testing.T) {
+	official, err := New(provider.Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKey: "k"})
+	if err != nil {
+		t.Fatalf("New official DeepSeek: %v", err)
+	}
+	if got := official.(*client).prefixChatURL; got != "https://api.deepseek.com/beta/chat/completions" {
+		t.Fatalf("official prefix URL = %q", got)
+	}
+
+	gateway, err := New(provider.Config{
+		Name: "gateway", BaseURL: "https://gateway.example/v1", Model: "deepseek-v4-flash", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "deepseek"},
+	})
+	if err != nil {
+		t.Fatalf("New custom gateway: %v", err)
+	}
+	if got := gateway.(*client).prefixChatURL; got != "" {
+		t.Fatalf("custom gateway must not bypass itself for Beta continuation, got %q", got)
+	}
+}
+
+func TestStreamContinuesDeepSeekLengthWithAssistantPrefix(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch r.URL.Path {
+		case "/chat/completions":
+			if strings.Contains(string(body), `"prefix":true`) {
+				t.Errorf("initial request unexpectedly enabled prefix mode: %s", body)
+			}
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think one. \"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":\"length\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3,\"total_tokens\":13,\"prompt_cache_hit_tokens\":8,\"prompt_cache_miss_tokens\":2,\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		case "/beta/chat/completions":
+			var decoded struct {
+				Messages []map[string]json.RawMessage `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Errorf("decode continuation request: %v", err)
+				http.Error(w, "invalid continuation request", http.StatusBadRequest)
+				return
+			}
+			last := decoded.Messages[len(decoded.Messages)-1]
+			if string(last["role"]) != `"assistant"` || string(last["content"]) != `"partial"` || string(last["prefix"]) != `true` {
+				t.Errorf("continuation tail = %s", last)
+			}
+			if string(last["reasoning_content"]) != `"think one. "` {
+				t.Errorf("continuation reasoning_content = %s", last["reasoning_content"])
+			}
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think two. \"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\" rest\"},\"finish_reason\":\"stop\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":2,\"total_tokens\":22,\"prompt_cache_hit_tokens\":18,\"prompt_cache_miss_tokens\":2,\"completion_tokens_details\":{\"reasoning_tokens\":1}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text, reasoning strings.Builder
+	var usage *provider.Usage
+	usageChunks, doneChunks := 0, 0
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkReasoning:
+			reasoning.WriteString(chunk.Text)
+		case provider.ChunkUsage:
+			usageChunks++
+			usage = chunk.Usage
+		case provider.ChunkDone:
+			doneChunks++
+		case provider.ChunkError:
+			t.Fatalf("automatic continuation errored: %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "partial rest" || reasoning.String() != "think one. think two. " {
+		t.Fatalf("requests=%d text=%q reasoning=%q", requests, text.String(), reasoning.String())
+	}
+	if usageChunks != 1 || doneChunks != 1 || usage == nil {
+		t.Fatalf("usage chunks=%d done chunks=%d usage=%+v", usageChunks, doneChunks, usage)
+	}
+	if usage.PromptTokens != 30 || usage.CompletionTokens != 5 || usage.TotalTokens != 35 || usage.RequestCount != 2 ||
+		usage.CacheHitTokens != 26 || usage.CacheMissTokens != 4 || usage.ReasoningTokens != 2 || usage.FinishReason != "stop" {
+		t.Fatalf("merged usage = %+v", usage)
+	}
+}
+
+func TestStreamContinuesReasoningOnlyDeepSeekLength(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		body, _ := io.ReadAll(r.Body)
+		w.Header().Set("Content-Type", "text/event-stream")
+		switch r.URL.Path {
+		case "/chat/completions":
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think one. \"},\"finish_reason\":\"length\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3,\"total_tokens\":13,\"completion_tokens_details\":{\"reasoning_tokens\":3}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		case "/beta/chat/completions":
+			var decoded struct {
+				Messages []map[string]json.RawMessage `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Errorf("decode continuation request: %v", err)
+				http.Error(w, "invalid continuation request", http.StatusBadRequest)
+				return
+			}
+			last := decoded.Messages[len(decoded.Messages)-1]
+			if string(last["role"]) != `"assistant"` || string(last["content"]) != `""` || string(last["prefix"]) != `true` {
+				t.Errorf("reasoning-only continuation tail = %s", last)
+			}
+			if string(last["reasoning_content"]) != `"think one. "` {
+				t.Errorf("continuation reasoning_content = %s", last["reasoning_content"])
+			}
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"think two. \"}}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}]}\n\n")
+			_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":20,\"completion_tokens\":4,\"total_tokens\":24,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\n")
+			_, _ = io.WriteString(w, "data: [DONE]\n\n")
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text, reasoning strings.Builder
+	var usage *provider.Usage
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkReasoning:
+			reasoning.WriteString(chunk.Text)
+		case provider.ChunkUsage:
+			usage = chunk.Usage
+		case provider.ChunkError:
+			t.Fatalf("automatic reasoning-only continuation errored: %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "answer" || reasoning.String() != "think one. think two. " {
+		t.Fatalf("requests=%d text=%q reasoning=%q", requests, text.String(), reasoning.String())
+	}
+	if usage == nil || usage.PromptTokens != 30 || usage.CompletionTokens != 7 || usage.TotalTokens != 37 ||
+		usage.ReasoningTokens != 5 || usage.FinishReason != "stop" {
+		t.Fatalf("merged usage = %+v", usage)
+	}
+}
+
+func TestStreamKeepsTruncatedAnswerWhenDeepSeekBetaFails(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path == "/beta/chat/completions" {
+			http.Error(w, `{"error":{"message":"beta unavailable"}}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"keep me\"},\"finish_reason\":\"length\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text strings.Builder
+	var usage *provider.Usage
+	for chunk := range ch {
+		switch chunk.Type {
+		case provider.ChunkText:
+			text.WriteString(chunk.Text)
+		case provider.ChunkUsage:
+			usage = chunk.Usage
+		case provider.ChunkError:
+			t.Fatalf("Beta failure must fall back to the original answer, got %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "keep me" || usage == nil || usage.FinishReason != "length" {
+		t.Fatalf("requests=%d text=%q usage=%+v", requests, text.String(), usage)
+	}
+}
+
+func TestStreamBoundsRepeatedDeepSeekLengthContinuation(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"piece\"},\"finish_reason\":\"length\"}]}\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":3}}\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "write"}}})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	var text strings.Builder
+	var usage *provider.Usage
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkText {
+			text.WriteString(chunk.Text)
+		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("unexpected stream error: %v", chunk.Err)
+		}
+	}
+	if requests != 2 || text.String() != "piecepiece" || usage == nil || usage.FinishReason != "length" {
+		t.Fatalf("requests=%d text=%q usage=%+v", requests, text.String(), usage)
+	}
+}
+
+func TestStreamDoesNotPrefixContinueToolCalls(t *testing.T) {
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{}"}}]}}]}`+"\n\n")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{},"finish_reason":"length"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`+"\n\n")
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	c := &client{
+		name: "deepseek", apiKey: "k", baseURL: srv.URL, chatURL: srv.URL + "/chat/completions",
+		prefixChatURL: srv.URL + "/beta/chat/completions", model: "deepseek-v4-flash", deepseek: true,
+		effort: "high", http: srv.Client(), idleTimeout: defaultStreamIdleTimeout,
+	}
+	ch, err := c.Stream(context.Background(), provider.Request{})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	toolCalls := 0
+	var usage *provider.Usage
+	for chunk := range ch {
+		if chunk.Type == provider.ChunkToolCall {
+			toolCalls++
+		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
+		}
+		if chunk.Type == provider.ChunkError {
+			t.Fatalf("unexpected stream error: %v", chunk.Err)
+		}
+	}
+	if requests != 1 || toolCalls != 1 || usage == nil || usage.FinishReason != "length" {
+		t.Fatalf("requests=%d toolCalls=%d usage=%+v", requests, toolCalls, usage)
 	}
 }
 
@@ -407,6 +767,80 @@ func TestBuildRequestAlwaysSerializesContent(t *testing.T) {
 	}
 }
 
+func TestBuildRequestOmitsResolvedToolCallMetadata(t *testing.T) {
+	readOnly := false
+	c := &client{model: "deepseek-v4"}
+	req := c.buildRequest(provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleAssistant,
+		ToolCalls: []provider.ToolCall{{
+			ID: "call_1", Name: "use_capability", Arguments: `{}`,
+			ResolvedName: "mcp__db__write", CapabilityID: "mcp-tool:db/write",
+			ResolvedReadOnly: &readOnly,
+		}},
+	}}})
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, forbidden := range []string{"resolved_name", "resolvedName", "capability_id", "capabilityId", "resolved_read_only", "resolvedReadOnly", "mcp__db__write"} {
+		if strings.Contains(string(b), forbidden) {
+			t.Fatalf("provider request leaked local tool metadata %q: %s", forbidden, b)
+		}
+	}
+	if !strings.Contains(string(b), `"name":"use_capability"`) {
+		t.Fatalf("provider request lost stable proxy name: %s", b)
+	}
+}
+
+// TestToolResultEmptyNameStillSerialized guards MiMo #4711: a strict
+// OpenAI-compatible backend rejects a role=tool message whose `name` key is
+// absent ("Param Incorrect, name is not set"). A legacy empty-name tool result
+// must still carry the key (as an empty string) rather than vanish via
+// omitempty.
+func TestToolResultEmptyNameStillSerialized(t *testing.T) {
+	c := &client{model: "deepseek-v4"}
+	req := c.buildRequest(provider.Request{Messages: []provider.Message{
+		// Both the tool_call and its result have an empty name: the legacy
+		// #4727 shape where backfill has no source to recover from. The wire
+		// must still carry the name key so strict backends don't 400.
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "call_1", Name: "", Content: "file contents"},
+	}})
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// The tool result message must carry the name key even though the name is
+	// empty — strict backends 400 a missing key.
+	var msgs []map[string]any
+	if err := json.Unmarshal(b, &msgs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	roles := []string{msgs[0]["role"].(string), msgs[1]["role"].(string)}
+	if roles[1] != "tool" {
+		t.Fatalf("second message role = %q, want tool", roles[1])
+	}
+	// Tool message: name key must be present (empty string serialized).
+	if _, ok := msgs[1]["name"]; !ok {
+		t.Fatalf("tool message lost its name key (must serialize empty): %s", b)
+	}
+	if name, _ := msgs[1]["name"].(string); name != "" {
+		t.Fatalf("tool message name = %q, want empty (legacy empty-name result)", name)
+	}
+	// Non-tool messages: name key must stay absent (byte-stable prefix).
+	for i, m := range msgs {
+		if roles[i] == "tool" {
+			continue
+		}
+		if _, ok := m["name"]; ok {
+			t.Fatalf("non-tool message %d leaked name key: %s", i, b)
+		}
+	}
+}
+
 // TestStreamRepairsDanglingToolCalls reproduces and guards the DeepSeek 400
 // "An assistant message with 'tool_calls' must be followed by tool messages
 // responding to each 'tool_call_id'". A resumed/interrupted session can carry an
@@ -622,6 +1056,57 @@ func TestBuildRequestForwardsReasoningEffort(t *testing.T) {
 	}
 }
 
+func TestNewDeepSeekV4FlashForwardsLowEffort(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4-flash",
+		APIKey:  "test",
+		Extra: map[string]any{
+			"effort":             "low",
+			"reasoning_protocol": "deepseek",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New Flash low: %v", err)
+	}
+	if got := p.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
+		t.Fatalf("Flash reasoning_effort = %q, want low", got)
+	}
+
+	_, err = New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com",
+		Model:   "deepseek-v4-pro",
+		APIKey:  "test",
+		Extra: map[string]any{
+			"effort":             "low",
+			"reasoning_protocol": "deepseek",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires deepseek-v4-flash") {
+		t.Fatalf("New Pro low error = %v, want model-scoped rejection", err)
+	}
+
+	custom, err := New(provider.Config{
+		Name:    "custom-deepseek",
+		BaseURL: "https://gateway.example.com/v1",
+		Model:   "custom-flash",
+		APIKey:  "test",
+		Extra: map[string]any{
+			"effort":             "low",
+			"reasoning_protocol": "deepseek",
+			"supported_efforts":  []string{"low", "high", "max"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New explicit custom low: %v", err)
+	}
+	if got := custom.(*client).buildRequest(provider.Request{}).ReasoningEffort; got != "low" {
+		t.Fatalf("custom reasoning_effort = %q, want explicit low", got)
+	}
+}
+
 func TestBuildRequestTemperatureSerialization(t *testing.T) {
 	c := &client{model: "m"}
 
@@ -652,6 +1137,167 @@ func TestBuildRequestTemperatureSerialization(t *testing.T) {
 	nonzero := c.buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0.25)})
 	if nonzero.Temperature == nil || *nonzero.Temperature != 0.25 {
 		t.Fatalf("nonzero request temperature = %v, want ptr(0.25)", nonzero.Temperature)
+	}
+}
+
+func TestBuildRequestKimiK3OfficialWireShape(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "kimi-cn",
+		BaseURL: "https://api.moonshot.cn/v1",
+		Model:   "kimi-k3",
+		APIKey:  "k",
+		Extra: map[string]any{
+			"effort":             "max",
+			"supported_efforts":  []string{"low", "high", "max"},
+			"reasoning_protocol": "openai",
+			"extra_body": map[string]any{
+				"top_p":                 0.5,
+				"n":                     2,
+				"presence_penalty":      1,
+				"frequency_penalty":     1,
+				"max_completion_tokens": 99,
+				"trace_id":              "keep-me",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if !provider.RequiresReasoningRoundTrip(p) {
+		t.Fatal("official Kimi K3 must retain raw reasoning for complete assistant-message replay")
+	}
+	req := p.(*client).buildRequest(provider.Request{
+		Temperature: provider.TemperaturePtr(0),
+		MaxTokens:   2000,
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "first"},
+			{Role: provider.RoleAssistant, Content: "answer", ReasoningContent: "provider reasoning"},
+			{Role: provider.RoleUser, Content: "use a tool"},
+			{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call-1", Name: "lookup", Arguments: `{}`}}},
+			{Role: provider.RoleTool, ToolCallID: "call-1", Name: "lookup", Content: "result"},
+		},
+	})
+	if req.Temperature != nil || req.MaxTokens != 0 || req.MaxCompletionTokens != 2000 {
+		t.Fatalf("Kimi K3 request limits = temperature %v, max_tokens %d, max_completion_tokens %d", req.Temperature, req.MaxTokens, req.MaxCompletionTokens)
+	}
+	if req.ReasoningEffort != "max" {
+		t.Fatalf("reasoning_effort = %q, want max", req.ReasoningEffort)
+	}
+	if got := req.Messages[1].ReasoningContent; got == nil || *got != "provider reasoning" {
+		t.Fatalf("plain assistant reasoning_content = %v, want provider reasoning", got)
+	}
+	if got := req.Messages[3].ReasoningContent; got == nil || *got != "" {
+		t.Fatalf("tool-call assistant reasoning_content = %v, want explicit empty string", got)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(body, &wire); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, field := range []string{"temperature", "max_tokens", "top_p", "n", "presence_penalty", "frequency_penalty"} {
+		if _, ok := wire[field]; ok {
+			t.Fatalf("official Kimi K3 payload must omit %q: %s", field, body)
+		}
+	}
+	if wire["max_completion_tokens"] != float64(2000) || wire["trace_id"] != "keep-me" {
+		t.Fatalf("Kimi K3 payload lost output budget or unrelated extra body: %s", body)
+	}
+
+	gateway, err := New(provider.Config{
+		Name:    "opencode-go",
+		BaseURL: "https://opencode.ai/zen/go/v1",
+		Model:   "kimi-k3",
+		Extra: map[string]any{
+			"effort":            "max",
+			"supported_efforts": []string{"high", "max"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New gateway: %v", err)
+	}
+	if provider.RequiresReasoningRoundTrip(gateway) {
+		t.Fatal("Kimi-specific wire policy must not be inferred for a relay")
+	}
+	gatewayReq := gateway.(*client).buildRequest(provider.Request{Temperature: provider.TemperaturePtr(0), MaxTokens: 77})
+	if gatewayReq.Temperature == nil || gatewayReq.MaxTokens != 77 || gatewayReq.MaxCompletionTokens != 0 {
+		t.Fatalf("relay request was changed by official Kimi compatibility: %+v", gatewayReq)
+	}
+}
+
+func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
+	newClient := func(t *testing.T, baseURL, model string, maxOutputTokens int) *client {
+		t.Helper()
+		p, err := New(provider.Config{
+			Name: "test", BaseURL: baseURL, Model: model,
+			Extra: map[string]any{"max_output_tokens": maxOutputTokens},
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return p.(*client)
+	}
+
+	deepseek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", 0).buildRequest(provider.Request{})
+	if deepseek.MaxTokens != provider.DefaultReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
+		t.Fatalf("DeepSeek output budget = max_tokens %d, max_completion_tokens %d", deepseek.MaxTokens, deepseek.MaxCompletionTokens)
+	}
+
+	thinkingDisabledProvider, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Extra: map[string]any{"thinking": "disabled", "max_output_tokens": 0},
+	})
+	if err != nil {
+		t.Fatalf("New thinking-disabled DeepSeek: %v", err)
+	}
+	thinkingDisabled := thinkingDisabledProvider.(*client).buildRequest(provider.Request{})
+	if thinkingDisabled.MaxTokens != 0 || thinkingDisabled.MaxCompletionTokens != 0 {
+		t.Fatalf("thinking-disabled DeepSeek received an automatic output budget: %+v", thinkingDisabled)
+	}
+	effortDisabledProvider, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Extra: map[string]any{"effort": "disabled", "max_output_tokens": 0},
+	})
+	if err != nil {
+		t.Fatalf("New effort-disabled DeepSeek: %v", err)
+	}
+	effortDisabled := effortDisabledProvider.(*client).buildRequest(provider.Request{})
+	if effortDisabled.MaxTokens != 0 || effortDisabled.Thinking == nil || effortDisabled.Thinking.Type != "disabled" {
+		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled without an automatic budget", effortDisabled)
+	}
+
+	explicitDisabledProvider, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Extra: map[string]any{"thinking": "disabled", "max_output_tokens": 8192},
+	})
+	if err != nil {
+		t.Fatalf("New explicitly capped DeepSeek: %v", err)
+	}
+	explicitDisabled := explicitDisabledProvider.(*client).buildRequest(provider.Request{})
+	if explicitDisabled.MaxTokens != 8192 {
+		t.Fatalf("explicit thinking-disabled DeepSeek budget = %d, want 8192", explicitDisabled.MaxTokens)
+	}
+
+	disabledDeepSeek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", -1).buildRequest(provider.Request{})
+	if disabledDeepSeek.MaxTokens != 0 || disabledDeepSeek.MaxCompletionTokens != 0 {
+		t.Fatalf("disabled DeepSeek output budget = %+v", disabledDeepSeek)
+	}
+
+	officialOpenAI := newClient(t, "https://api.openai.com/v1", "o3", 8192).buildRequest(provider.Request{})
+	if officialOpenAI.MaxTokens != 0 || officialOpenAI.MaxCompletionTokens != 8192 {
+		t.Fatalf("official OpenAI output budget = max_tokens %d, max_completion_tokens %d", officialOpenAI.MaxTokens, officialOpenAI.MaxCompletionTokens)
+	}
+
+	gateway := newClient(t, "https://gateway.example/v1", "plain-chat", 8192).buildRequest(provider.Request{})
+	if gateway.MaxTokens != 8192 || gateway.MaxCompletionTokens != 0 {
+		t.Fatalf("compatible gateway output budget = max_tokens %d, max_completion_tokens %d", gateway.MaxTokens, gateway.MaxCompletionTokens)
+	}
+
+	unspecifiedGateway := newClient(t, "https://gateway.example/v1", "plain-chat", 0).buildRequest(provider.Request{})
+	if unspecifiedGateway.MaxTokens != 0 || unspecifiedGateway.MaxCompletionTokens != 0 {
+		t.Fatalf("unspecified compatible gateway received a budget: %+v", unspecifiedGateway)
 	}
 }
 
@@ -819,6 +1465,96 @@ func TestNewZhipuSetsFlag(t *testing.T) {
 	}
 }
 
+func TestNewExplicitGLMProtocolOnGateway(t *testing.T) {
+	for _, tc := range []struct {
+		effort string
+		want   string
+	}{
+		{effort: "", want: "enabled"},
+		{effort: "enabled", want: "enabled"},
+		{effort: "disabled", want: "disabled"},
+	} {
+		p, err := New(provider.Config{
+			Name:    "glm-gateway",
+			BaseURL: "https://gateway.example.com/v1",
+			Model:   "glm-5.2",
+			APIKey:  "k",
+			Extra: map[string]any{
+				"reasoning_protocol": "glm",
+				"effort":             tc.effort,
+			},
+		})
+		if err != nil {
+			t.Fatalf("New(explicit GLM, effort=%q): %v", tc.effort, err)
+		}
+		c := p.(*client)
+		if !c.zhipu {
+			t.Fatalf("explicit GLM protocol did not select GLM wire shape")
+		}
+		req := c.buildRequest(provider.Request{})
+		if req.Thinking == nil || req.Thinking.Type != tc.want {
+			t.Fatalf("effort=%q thinking = %+v, want %q", tc.effort, req.Thinking, tc.want)
+		}
+		if req.ReasoningEffort != "" {
+			t.Fatalf("explicit GLM protocol sent reasoning_effort=%q", req.ReasoningEffort)
+		}
+	}
+}
+
+func TestBuildRequestRoundTripsGLMReasoningHistory(t *testing.T) {
+	build := func(effort string) (*client, chatRequest) {
+		p, err := New(provider.Config{
+			Name:    "glm-gateway",
+			BaseURL: "https://tokenrhythm.studio/v1",
+			Model:   "glm-5.2",
+			APIKey:  "k",
+			Extra: map[string]any{
+				"reasoning_protocol": "glm",
+				"effort":             effort,
+			},
+		})
+		if err != nil {
+			t.Fatalf("New(GLM, effort=%q): %v", effort, err)
+		}
+		c := p.(*client)
+		out := c.buildRequest(provider.Request{Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "inspect"},
+			{Role: provider.RoleAssistant, ReasoningContent: "read main.go first", ToolCalls: []provider.ToolCall{{
+				ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
+			}}},
+			{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
+			{Role: provider.RoleUser, Content: "continue"},
+			{Role: provider.RoleAssistant, Content: "done", ReasoningContent: "combine the result"},
+		}})
+		return c, out
+	}
+
+	enabled, enabledReq := build("enabled")
+	if enabled.RequiresToolCallReasoning() || !enabled.RequiresReasoningRoundTrip() {
+		t.Fatal("thinking-enabled GLM must preserve complete reasoning history without enabling DeepSeek recovery policy")
+	}
+	if got := enabledReq.Messages[1].ReasoningContent; got == nil || *got != "read main.go first" {
+		t.Fatalf("enabled GLM reasoning_content = %v, want provider-issued reasoning", got)
+	}
+	if got := enabledReq.Messages[4].ReasoningContent; got == nil || *got != "combine the result" {
+		t.Fatalf("enabled GLM plain-turn reasoning_content = %v, want complete reasoning history", got)
+	}
+	if provider.WarnOnMissingToolCallReasoning(enabled) {
+		t.Fatal("GLM must preserve available reasoning without entering DeepSeek-specific missing-reasoning recovery")
+	}
+
+	disabled, disabledReq := build("disabled")
+	if disabled.RequiresToolCallReasoning() || disabled.RequiresReasoningRoundTrip() {
+		t.Fatal("thinking-disabled GLM must not require new reasoning round trips")
+	}
+	if got := disabledReq.Messages[1].ReasoningContent; got == nil || *got != "read main.go first" {
+		t.Fatalf("disabled GLM must preserve reasoning from an earlier thinking round, got %v", got)
+	}
+	if got := disabledReq.Messages[4].ReasoningContent; got == nil || *got != "combine the result" {
+		t.Fatalf("disabled GLM must preserve plain reasoning from an earlier thinking round, got %v", got)
+	}
+}
+
 // TestBuildRequestGenericThinking covers the vendor-agnostic `thinking` config
 // field on a provider we don't auto-detect: thinking.type is emitted as set, and
 // an empty/unset field leaves thinking off the wire entirely.
@@ -880,6 +1616,21 @@ func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 	}{
 		{name: "effort-disabled", extra: map[string]any{"effort": "disabled"}},
 		{name: "thinking-disabled", extra: map[string]any{"thinking": "disabled"}},
+		{
+			name: "effort-disabled-with-explicit-levels",
+			extra: map[string]any{
+				"effort":            "disabled",
+				"supported_efforts": []string{"disabled", "high", "max"},
+			},
+		},
+		{
+			name: "thinking-disabled-overrides-explicit-levels",
+			extra: map[string]any{
+				"thinking":          "disabled",
+				"effort":            "max",
+				"supported_efforts": []string{"high"},
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := base
@@ -1133,27 +1884,25 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	}
 }
 
-func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) {
+func TestWarnOnMissingToolCallReasoningFollowsDeepSeekThinkingModels(t *testing.T) {
 	tests := []struct {
-		name  string
 		model string
 		want  bool
 	}{
-		{name: "exact flash", model: "deepseek-v4-flash", want: false},
-		{name: "namespaced flash", model: "deepseek/deepseek-v4-flash", want: false},
-		{name: "exact pro", model: "deepseek-v4-pro", want: true},
-		{name: "namespaced pro", model: "deepseek/deepseek-v4-pro", want: true},
-		{name: "mixed case pro", model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
-		{name: "reasoner", model: "deepseek-reasoner", want: true},
-		{name: "r1", model: "deepseek-ai/DeepSeek-R1-0528", want: true},
-		{name: "generic deepseek", model: "deepseek-chat", want: false},
-		{name: "gateway deepseek v3", model: "deepseek-ai/DeepSeek-V3.2", want: false},
-		{name: "prover is not pro", model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
-		{name: "dated pro variant", model: "deepseek-v4-pro-0923", want: true},
-		{name: "dotted pro variant", model: "deepseek-v4-pro.1", want: true},
+		{model: "deepseek-v4-flash", want: true},
+		{model: "deepseek/deepseek-v4-flash", want: true},
+		{model: "deepseek-v4-pro", want: true},
+		{model: "deepseek/deepseek-v4-pro", want: true},
+		{model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
+		{model: "deepseek-reasoner", want: true},
+		{model: "deepseek-ai/DeepSeek-R1-0528", want: true},
+		{model: "deepseek-ai/DeepSeek-V3.2", want: true},
+		{model: "deepseek-chat", want: false},
+		{model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
+		{model: "custom-model", want: false},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.model, func(t *testing.T) {
 			p, err := New(provider.Config{
 				Name:    "deepseek-proxy",
 				BaseURL: "https://gateway.example/v1",
@@ -1173,6 +1922,17 @@ func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) 
 		})
 	}
 
+	explicitThinking, err := New(provider.Config{
+		Name: "custom-thinking", BaseURL: "https://gateway.example/v1", Model: "custom-model", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "deepseek", "thinking": "enabled"},
+	})
+	if err != nil {
+		t.Fatalf("New explicit thinking provider: %v", err)
+	}
+	if !provider.WarnOnMissingToolCallReasoning(explicitThinking) {
+		t.Fatal("explicit DeepSeek thinking must diagnose missing tool-call reasoning")
+	}
+
 	p, err := New(provider.Config{
 		Name:    "deepseek-v4-pro-openai-protocol",
 		BaseURL: "https://gateway.example/v1",
@@ -1185,6 +1945,35 @@ func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) 
 	}
 	if provider.WarnOnMissingToolCallReasoning(p) {
 		t.Fatal("OpenAI protocol should not warn using DeepSeek reasoning_content policy")
+	}
+	if provider.WarnOnMissingToolCallReasoning(&client{deepseek: true, thinkingType: "disabled"}) {
+		t.Fatal("disabled thinking must not diagnose missing tool-call reasoning")
+	}
+}
+
+func TestMissingToolCallReasoningWarningFingerprintTracksOpenAIConfiguration(t *testing.T) {
+	newProvider := func(baseURL, model string) provider.Provider {
+		p, err := New(provider.Config{
+			Name: "deepseek", BaseURL: baseURL, Model: model, APIKey: "secret",
+			Extra: map[string]any{"reasoning_protocol": "deepseek", "effort": "high"},
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return p
+	}
+	first := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-pro"))
+	same := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-pro"))
+	changedEndpoint := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://other.example/v1", "deepseek-v4-pro"))
+	changedModel := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-flash"))
+	if first != same {
+		t.Fatal("equivalent OpenAI configurations produced different fingerprints")
+	}
+	if first == changedEndpoint || first == changedModel {
+		t.Fatal("endpoint or model change did not re-key the warning fingerprint")
+	}
+	if len(first) != 64 || strings.Contains(first, "gateway") || strings.Contains(first, "deepseek") {
+		t.Fatalf("fingerprint is not an opaque SHA-256 digest: %q", first)
 	}
 }
 
@@ -1374,5 +2163,193 @@ func TestBuildRequestDefaultsEmptyToolParameters(t *testing.T) {
 	}
 	if got, want := string(fn["parameters"]), `{"properties":{},"type":"object"}`; got != want {
 		t.Fatalf("nil parameters should default to %s, got %s in %s", want, got, body)
+	}
+}
+
+func TestStreamReadsGeminiThoughtSignature(t *testing.T) {
+	tests := []struct {
+		name     string
+		toolCall string
+	}{
+		{
+			name:     "current extra_content shape",
+			toolCall: `{"index":0,"id":"call_abc123","type":"function","extra_content":{"google":{"thought_signature":"gemini_sig_xyz789"}},"function":{"name":"write_file"}}`,
+		},
+		{
+			name:     "legacy function shape",
+			toolCall: `{"index":0,"id":"call_abc123","type":"function","function":{"name":"write_file","thought_signature":"gemini_sig_xyz789"}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				_, _ = io.WriteString(w,
+					"data: {\"choices\":[{\"delta\":{\"tool_calls\":["+tc.toolCall+"]}}]}\n\n"+
+						"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"path\\\":\\\"test.txt\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n"+
+						"data: [DONE]\n\n")
+			}))
+			defer srv.Close()
+
+			p, err := New(provider.Config{Name: "gemini", BaseURL: srv.URL, Model: "gemini-3.6-flash"})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+
+			ch, err := p.Stream(context.Background(), provider.Request{})
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+
+			var got *provider.ToolCall
+			for chunk := range ch {
+				if chunk.Type == provider.ChunkToolCall {
+					got = chunk.ToolCall
+				}
+			}
+			if got == nil {
+				t.Fatal("expected ChunkToolCall but none received")
+			}
+			if got.ThoughtSignature != "gemini_sig_xyz789" {
+				t.Errorf("ThoughtSignature = %q, want %q", got.ThoughtSignature, "gemini_sig_xyz789")
+			}
+			if got.Arguments != `{"path":"test.txt"}` {
+				t.Errorf("Arguments = %q, want complete streamed arguments", got.Arguments)
+			}
+		})
+	}
+}
+
+func TestBuildRequestScopesGeminiThoughtSignature(t *testing.T) {
+	req := provider.Request{
+		Messages: []provider.Message{{
+			Role: provider.RoleAssistant,
+			ToolCalls: []provider.ToolCall{{
+				ID:               "call_abc123",
+				Name:             "write_file",
+				Arguments:        `{"path":"test.txt"}`,
+				ThoughtSignature: "gemini_sig_xyz789",
+			}},
+		}},
+	}
+
+	for _, tc := range []struct {
+		name          string
+		baseURL       string
+		model         string
+		wantSignature string
+	}{
+		{"official Gemini endpoint", "https://generativelanguage.googleapis.com/v1beta/openai", "custom-alias", "gemini_sig_xyz789"},
+		{"Gemini-compatible gateway", "https://openrouter.ai/api/v1", "google/gemini-3.1-pro", "gemini_sig_xyz789"},
+		{"same history after provider switch", "https://api.deepseek.com/v1", "deepseek-chat", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &client{name: tc.name, baseURL: tc.baseURL, model: tc.model}
+			body, err := json.Marshal(c.buildRequest(req))
+			if err != nil {
+				t.Fatalf("marshal request: %v", err)
+			}
+			var wire struct {
+				Messages []struct {
+					ToolCalls []struct {
+						ExtraContent *struct {
+							Google struct {
+								ThoughtSignature string `json:"thought_signature"`
+							} `json:"google"`
+						} `json:"extra_content"`
+						Function struct {
+							ThoughtSignature string `json:"thought_signature"`
+						} `json:"function"`
+					} `json:"tool_calls"`
+				} `json:"messages"`
+			}
+			if err := json.Unmarshal(body, &wire); err != nil {
+				t.Fatalf("unmarshal request: %v", err)
+			}
+			if len(wire.Messages) == 0 || len(wire.Messages[0].ToolCalls) != 1 {
+				t.Fatalf("unexpected request shape: %s", body)
+			}
+			toolCall := wire.Messages[0].ToolCalls[0]
+			gotSignature := ""
+			if toolCall.ExtraContent != nil {
+				gotSignature = toolCall.ExtraContent.Google.ThoughtSignature
+			}
+			if gotSignature != tc.wantSignature {
+				t.Errorf("thought_signature = %q, want %q", gotSignature, tc.wantSignature)
+			}
+			if tc.wantSignature == "" && toolCall.ExtraContent != nil {
+				t.Errorf("non-Gemini request should omit extra_content: %s", body)
+			}
+			if got := toolCall.Function.ThoughtSignature; got != "" {
+				t.Errorf("legacy function.thought_signature should not be sent, got %q", got)
+			}
+		})
+	}
+}
+
+func TestNormaliseUsageAnthropicStyleFallback(t *testing.T) {
+	tests := []struct {
+		name string
+		json string
+		want provider.Usage
+	}{
+		{
+			name: "cache hit",
+			json: `{"usage":{"input_tokens":21,"output_tokens":393,"cache_creation_input_tokens":0,"cache_read_input_tokens":188086}}`,
+			want: provider.Usage{
+				PromptTokens:     188107,
+				CompletionTokens: 393,
+				TotalTokens:      188500,
+				CacheHitTokens:   188086,
+				CacheMissTokens:  21,
+			},
+		},
+		{
+			name: "cache creation",
+			json: `{"usage":{"input_tokens":21,"output_tokens":393,"cache_creation_input_tokens":188086,"cache_read_input_tokens":0}}`,
+			want: provider.Usage{
+				PromptTokens:     188107,
+				CompletionTokens: 393,
+				TotalTokens:      188500,
+				CacheMissTokens:  188107,
+			},
+		},
+		{
+			name: "DeepSeek fields take priority",
+			json: `{"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_cache_hit_tokens":30,"prompt_cache_miss_tokens":70,"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":888,"cache_read_input_tokens":999}}`,
+			want: provider.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+				CacheHitTokens:   30,
+				CacheMissTokens:  70,
+			},
+		},
+		{
+			name: "OpenAI nested fields take priority",
+			json: `{"usage":{"prompt_tokens":100,"completion_tokens":50,"total_tokens":150,"prompt_tokens_details":{"cached_tokens":40},"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":888,"cache_read_input_tokens":999}}`,
+			want: provider.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+				CacheHitTokens:   40,
+				CacheMissTokens:  60,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var response streamResponse
+			if err := json.Unmarshal([]byte(tc.json), &response); err != nil {
+				t.Fatalf("unmarshal usage fixture: %v", err)
+			}
+			if response.Usage == nil {
+				t.Fatal("usage fixture did not decode usage")
+			}
+			if got := normaliseUsage(response.Usage); got == nil || *got != tc.want {
+				t.Fatalf("normaliseUsage() = %+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }

@@ -73,6 +73,10 @@ type RouteDecision struct {
 	// the model to the stable use_capability proxy — connect_tool_source is not
 	// registered in Delivery, so instructing it would dead-end the route.
 	Delivery bool
+	// CapabilityProxy directs unready MCP candidates to use_capability rather
+	// than connect_tool_source. True for Delivery and for dual-model Planner
+	// boots that expose the stable proxy without Economy's connector.
+	CapabilityProxy bool
 }
 
 func SkillEntries(skills []skill.Skill, tools []tool.ContractEntry) []Entry {
@@ -199,7 +203,7 @@ func PromoteDelivery(decision RouteDecision) RouteDecision {
 		}
 		return decision.Candidates[i].Entry.ID < decision.Candidates[j].Entry.ID
 	})
-	return RouteDecision{Candidates: limitRouteCandidates(decision.Candidates), Delivery: true}
+	return RouteDecision{Candidates: limitRouteCandidates(decision.Candidates), Delivery: true, CapabilityProxy: true}
 }
 
 func limitRouteCandidates(candidates []RouteCandidate) []RouteCandidate {
@@ -229,40 +233,50 @@ func RenderTransientBlock(d RouteDecision) string {
 		return ""
 	}
 	var b strings.Builder
+	seenLines := make(map[string]struct{}, len(d.Candidates))
 	b.WriteString(`<capability-route version="1">` + "\n")
 	b.WriteString("Relevant capabilities for this turn:\n")
 	for _, c := range d.Candidates {
 		e := c.Entry
+		proxyMCP := d.CapabilityProxy && (e.Kind == KindMCPTool || e.Kind == KindMCPServer)
 		target := e.ID
-		if !d.Delivery && e.Status != StatusReady && e.ConnectSource != "" {
+		if !d.Delivery && !proxyMCP && e.Status != StatusReady && e.ConnectSource != "" {
 			target = fmt.Sprintf("source:%s", e.ConnectSource)
 			if e.ConnectName != "" {
 				target += "/" + e.ConnectName
 			}
 		}
-		fmt.Fprintf(&b, "- %s %s: %s", target, c.Policy, c.Reason)
+		var line strings.Builder
+		fmt.Fprintf(&line, "- %s %s: %s", target, c.Policy, c.Reason)
 		if e.Status != "" && e.Status != StatusReady {
-			fmt.Fprintf(&b, " (status=%s)", e.Status)
+			fmt.Fprintf(&line, " (status=%s)", e.Status)
 		}
 		switch {
-		case d.Delivery:
-			// Delivery has no connect_tool_source; the stable proxy both
-			// connects and calls on demand, keeping the concrete capability id.
+		case d.Delivery || proxyMCP:
+			// Delivery and dual-model Planner have no connect_tool_source for
+			// MCP; the stable proxy both connects and calls on demand, keeping
+			// the concrete capability id.
 			if e.Status != StatusReady {
 				switch e.Kind {
 				case KindMCPTool:
-					fmt.Fprintf(&b, "; call use_capability(action=\"call\", capability_id=%q, arguments={...}) — it connects the server on demand after approval", e.ID)
+					fmt.Fprintf(&line, "; call use_capability(action=\"call\", capability_id=%q, arguments={...}) — it connects the server on demand after approval", e.ID)
 				case KindMCPServer:
-					fmt.Fprintf(&b, "; call use_capability(action=\"call\", capability_id=%q) to connect it (after approval) and list its tools, then call a listed mcp-tool id", e.ID)
+					fmt.Fprintf(&line, "; call use_capability(action=\"call\", capability_id=%q) to connect it (after approval) and list its tools, then call a listed mcp-tool id", e.ID)
 				}
 			}
 		case e.ConnectSource != "":
 			if e.ConnectName != "" {
-				fmt.Fprintf(&b, "; first call connect_tool_source with source=%q name=%q", e.ConnectSource, e.ConnectName)
+				fmt.Fprintf(&line, "; first call connect_tool_source with source=%q name=%q", e.ConnectSource, e.ConnectName)
 			} else {
-				fmt.Fprintf(&b, "; first call connect_tool_source with source=%q", e.ConnectSource)
+				fmt.Fprintf(&line, "; first call connect_tool_source with source=%q", e.ConnectSource)
 			}
 		}
+		rendered := line.String()
+		if _, duplicate := seenLines[rendered]; duplicate {
+			continue
+		}
+		seenLines[rendered] = struct{}{}
+		b.WriteString(rendered)
 		b.WriteByte('\n')
 	}
 	b.WriteString("Policy: suggest means consider it; prefer means use it unless clearly unnecessary; require means call it or report a host-proven unavailable state. Do not treat planner claims about tool unavailability as facts.\n")

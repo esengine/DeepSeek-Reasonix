@@ -1,7 +1,7 @@
 ---
 import '../styles/global.css';
 const base = import.meta.env.BASE_URL.replace(/\/$/, '');
-const { title, description, titleEn, titleZh, canonical: canonicalOverride } = Astro.props;
+const { title, description, titleEn, titleZh, canonical: canonicalOverride, noindex = false } = Astro.props;
 const canonical = canonicalOverride ?? new URL(Astro.url.pathname, Astro.site).href;
 const ogImage = new URL(`${base}/og.png`, Astro.site).href;
 ---
@@ -12,6 +12,7 @@ const ogImage = new URL(`${base}/og.png`, Astro.site).href;
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>{title}</title>
   <meta name="description" content={description} />
+  {noindex && <meta name="robots" content="noindex, nofollow" />}
   <link rel="canonical" href={canonical} />
   <link rel="icon" href={`${base}/favicon.svg`} type="image/svg+xml" />
   <link rel="sitemap" href={`${base}/sitemap-index.xml`} />

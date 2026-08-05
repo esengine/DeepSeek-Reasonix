@@ -1,10 +1,20 @@
 name: CodeQL
 
 on:
+  # Docs/release-notes/root-Markdown changes carry no analyzable code; the
+  # weekly cron keeps the full scan cadence regardless.
   push:
     branches: ["main-v2"]
+    paths-ignore:
+      - 'docs/**'
+      - 'release-notes/**'
+      - '*.md'
   pull_request:
     branches: ["main-v2"]
+    paths-ignore:
+      - 'docs/**'
+      - 'release-notes/**'
+      - '*.md'
   schedule:
     - cron: "27 3 * * 1"
 
@@ -30,11 +40,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.37.4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.37.4
         with:
           category: "/language:${{ matrix.language }}"

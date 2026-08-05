@@ -195,6 +195,7 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 					tabToInject.Ctrl = ctrl
 					tabToInject.Ready = true
 					tabToInject.StartupErr = ""
+					app.advanceSessionRuntimeEpochLocked(tabToInject)
 					app.mu.Unlock()
 					close(injected)
 					return
@@ -275,6 +276,7 @@ func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
 					tabToInject.Ctrl = ctrl
 					tabToInject.Ready = true
 					tabToInject.StartupErr = ""
+					app.advanceSessionRuntimeEpochLocked(tabToInject)
 					app.mu.Unlock()
 					close(injected)
 					return

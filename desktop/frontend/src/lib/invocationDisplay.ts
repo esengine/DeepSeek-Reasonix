@@ -38,6 +38,23 @@ export function invocationRequests(invocations: ComposerInvocation[]): Invocatio
   }));
 }
 
+// A user can paste a complete slash invocation without selecting the rich
+// composer token. Goal setup needs the same structured path for that input so
+// the slash name is not absorbed into the goal text.
+export function typedStructuredInvocationDraft(
+  text: string,
+  commands: CommandInfo[],
+): { text: string; invocations: ComposerInvocation[] } | null {
+  const match = /^\/([A-Za-z0-9_.:-]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+  if (!match) return null;
+  const command = commands.find((candidate) => candidate.name === match[1] && commandUsesStructuredInvocation(candidate));
+  if (!command) return null;
+  return {
+    text: (match[2] ?? "").trim(),
+    invocations: [{ id: `typed-invocation-${command.name}`, offset: 0, command }],
+  };
+}
+
 export type InvocationTextSegment =
   | { type: "text"; content: string; start: number }
   | { type: "invocation"; invocation: InvocationDisplay; offset: number };
@@ -47,6 +64,10 @@ const knownSubagents = new Set(["general-purpose", "explore", "research", "revie
 
 export function commandUsesStructuredInvocation(command: CommandInfo): boolean {
   return command.kind === "skill" || command.kind === "subagent";
+}
+
+export function commandAvailableAtSlashPosition(command: CommandInfo, atMessageStart: boolean): boolean {
+  return atMessageStart || commandUsesStructuredInvocation(command);
 }
 
 export function invocationLabel(name: string): string {

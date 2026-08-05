@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # Validate one stable release tag set and emit the values shared by all release
 # workflows. Stable releases are deliberately all-or-nothing: the CLI, npm, and
-# desktop tags must resolve to one commit. A tag-push release requires current
-# main-v2; an explicit recovery may target an older commit on main-v2 history
-# while the trusted workflow itself remains on current protected main-v2.
+# desktop tags must resolve to one commit. Normal publication accepts the Notes
+# candidate after main-v2 advances beyond it; the protected workflow separately
+# revalidates that candidate's Notes change and exact push CI. Recovery may also
+# target an older commit while the control plane stays on current main-v2.
 set -euo pipefail
 
 release_tag="${RELEASE_TAG:?RELEASE_TAG is required}"
@@ -35,28 +36,29 @@ if [ -z "$main_sha" ]; then
 	exit 1
 fi
 
-if [ "$checkout_sha" != "$main_sha" ]; then
-	echo "::error::release control checkout is $checkout_sha, but $release_remote/main-v2 is $main_sha" >&2
+git fetch --quiet --no-tags "$release_remote" refs/heads/main-v2
+if ! git merge-base --is-ancestor "$checkout_sha" "$main_sha"; then
+	echo "::error::release control checkout $checkout_sha is not on $release_remote/main-v2 history ($main_sha)" >&2
 	exit 1
 fi
 
-release_sha="$checkout_sha"
-if [ "$allow_recovery" = "true" ]; then
-	release_sha="$(
-		git ls-remote --tags "$release_remote" "refs/tags/$cli_tag" "refs/tags/$cli_tag^{}" |
-			awk '/\^\{\}$/ { print $1; found = 1; exit } NR == 1 { first = $1 } END { if (!found) print first }'
-	)"
-	if [ -z "$release_sha" ]; then
-		echo "::error::required stable release tag is missing: $cli_tag" >&2
-		exit 1
-	fi
-	git fetch --quiet --no-tags "$release_remote" refs/heads/main-v2
-	git fetch --quiet --no-tags "$release_remote" "refs/tags/$cli_tag"
-	if ! git merge-base --is-ancestor "$release_sha" "$main_sha"; then
-		echo "::error::recovery tag $cli_tag points to $release_sha, which is not an ancestor of $release_remote/main-v2 ($main_sha)" >&2
-		exit 1
-	fi
-	echo "stable recovery: $cli_tag remains on main-v2 history at $release_sha; current main-v2 is $main_sha"
+release_sha="$(
+	git ls-remote --tags "$release_remote" "refs/tags/$cli_tag" "refs/tags/$cli_tag^{}" |
+		awk '/\^\{\}$/ { print $1; found = 1; exit } NR == 1 { first = $1 } END { if (!found) print first }'
+)"
+if [ -z "$release_sha" ]; then
+	echo "::error::required stable release tag is missing: $cli_tag" >&2
+	exit 1
+fi
+git fetch --quiet --no-tags "$release_remote" "refs/tags/$cli_tag"
+if ! git merge-base --is-ancestor "$release_sha" "$main_sha"; then
+	echo "::error::stable tag $cli_tag points to $release_sha, which is not an ancestor of $release_remote/main-v2 ($main_sha)" >&2
+	exit 1
+fi
+if [ "$release_sha" != "$main_sha" ]; then
+	mode="candidate"
+	[ "$allow_recovery" = "true" ] && mode="recovery"
+	echo "stable $mode: $cli_tag remains on main-v2 history at $release_sha; current main-v2 is $main_sha"
 fi
 
 for tag in "$cli_tag" "$npm_tag" "$desktop_tag"; do

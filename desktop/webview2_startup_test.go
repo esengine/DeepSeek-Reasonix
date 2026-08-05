@@ -8,17 +8,19 @@ import (
 
 func TestWindowsWebView2StartupFallbackScope(t *testing.T) {
 	tests := []struct {
-		name string
-		goos string
-		want bool
+		name         string
+		goos         string
+		remoteWindow bool
+		want         bool
 	}{
-		{name: "Windows window", goos: "windows", want: true},
-		{name: "non-Windows window", goos: "darwin", want: false},
+		{name: "primary Windows window", goos: "windows", want: true},
+		{name: "remote Windows window", goos: "windows", remoteWindow: true, want: false},
+		{name: "non-Windows primary window", goos: "darwin", want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := shouldStartWindowsWebView2StartupFallback(tt.goos); got != tt.want {
-				t.Fatalf("shouldStartWindowsWebView2StartupFallback(%q) = %v, want %v", tt.goos, got, tt.want)
+			if got := shouldStartWindowsWebView2StartupFallback(tt.goos, tt.remoteWindow); got != tt.want {
+				t.Fatalf("shouldStartWindowsWebView2StartupFallback(%q, %v) = %v, want %v", tt.goos, tt.remoteWindow, got, tt.want)
 			}
 		})
 	}

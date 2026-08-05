@@ -36,7 +36,7 @@ func TestRunResumeRefusedWhenSessionLeaseHeld(t *testing.T) {
 	holdSessionLease(t, path)
 
 	errOut := captureStderr(t, func() {
-		if rc := runAgent([]string{"--resume", path, "continue task"}); rc != 1 {
+		if rc := runAgent([]string{"--resume", path, "continue task"}, "dev"); rc != 1 {
 			t.Fatalf("run --resume held rc = %d, want 1", rc)
 		}
 	})
@@ -55,7 +55,7 @@ func TestRunCopyRequiresResumeTarget(t *testing.T) {
 	isolateCLIConfigHome(t)
 
 	errOut := captureStderr(t, func() {
-		if rc := runAgent([]string{"--copy", "do things"}); rc != 2 {
+		if rc := runAgent([]string{"--copy", "do things"}, "dev"); rc != 2 {
 			t.Fatalf("run --copy without target rc = %d, want 2", rc)
 		}
 	})
@@ -79,7 +79,7 @@ func TestRunResumeCopyJSONKeepsStdoutClean(t *testing.T) {
 	var errOut string
 	out := captureStdout(t, func() {
 		errOut = captureStderr(t, func() {
-			rc = runAgent([]string{"--resume", src, "--copy", "--output-format", "json", "continue task"})
+			rc = runAgent([]string{"--resume", src, "--copy", "--output-format", "json", "continue task"}, "dev")
 		})
 	})
 	// Setup fails in the isolated home (no provider), so the run ends with a JSON
@@ -114,7 +114,7 @@ func TestRunResumeCopyContinuesInDuplicate(t *testing.T) {
 	var rc int
 	out := captureStdout(t, func() {
 		_ = captureStderr(t, func() {
-			rc = runAgent([]string{"--resume", src, "--copy", "continue task"})
+			rc = runAgent([]string{"--resume", src, "--copy", "continue task"}, "dev")
 		})
 	})
 	// The isolated home has no provider config, so the run itself fails after
@@ -174,7 +174,7 @@ func TestRunResumeReleasesLeaseOnExit(t *testing.T) {
 	// No provider config in the isolated home: the run fails after the lease
 	// was taken, and the deferred release must still run.
 	_ = captureStderr(t, func() {
-		if rc := runAgent([]string{"--resume", path, "continue task"}); rc != 1 {
+		if rc := runAgent([]string{"--resume", path, "continue task"}, "dev"); rc != 1 {
 			t.Fatalf("run --resume rc = %d, want 1 (setup fails in isolated home)", rc)
 		}
 	})

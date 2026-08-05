@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package main
 
@@ -8,6 +8,6 @@ import (
 )
 
 func main() {
-	fmt.Fprintln(os.Stderr, "reasonix-update-helper is only used by Windows desktop builds")
+	fmt.Fprintln(os.Stderr, "reasonix-update-helper is only used by Windows and Linux desktop builds")
 	os.Exit(2)
 }

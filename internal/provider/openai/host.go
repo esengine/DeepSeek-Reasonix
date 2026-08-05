@@ -38,6 +38,78 @@ func IsDeepSeek(baseURL string) bool {
 	return matchesVendorHost(baseURL, "deepseek.com", "api.deepseek.com")
 }
 
+// IsOpenAI reports whether baseURL points at OpenAI's official API host. Keep
+// this exact-host so a compatible gateway under another openai.com subdomain
+// cannot accidentally receive the official max_completion_tokens wire shape.
+func IsOpenAI(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "api.openai.com")
+}
+
+// deepSeekPrefixChatURL returns the official Beta chat endpoint that enables
+// assistant-prefix completion. Derive it only from a URL already hosted by
+// DeepSeek: custom gateways may opt into the DeepSeek reasoning wire shape, but
+// must never be bypassed by an automatic request to the vendor's direct API.
+func deepSeekPrefixChatURL(chatURL string) string {
+	if !IsDeepSeek(chatURL) {
+		return ""
+	}
+	u, err := url.Parse(strings.TrimSpace(chatURL))
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	u.Path = "/beta/chat/completions"
+	u.RawPath = ""
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
+}
+
+// IsGeminiAPI reports whether baseURL points at Google's Gemini Developer API.
+// Keep this exact-host: other googleapis.com services do not share Gemini's
+// model resource-name compatibility quirk.
+func IsGeminiAPI(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "generativelanguage.googleapis.com")
+}
+
+// usesGeminiThoughtSignatures reports whether the current endpoint/model speaks
+// Gemini's OpenAI-compatible thought-signature extension. The official endpoint
+// is authoritative even when a custom model alias is used; compatible gateways
+// are detected from the model ID they route (for example google/gemini-3-pro).
+// Keeping this decision on the current client prevents a Gemini-authored history
+// from leaking extra_content.google fields after a same-session provider switch.
+func usesGeminiThoughtSignatures(baseURL, model string) bool {
+	if IsGeminiAPI(baseURL) {
+		return true
+	}
+	for _, segment := range strings.FieldsFunc(strings.ToLower(strings.TrimSpace(model)), func(r rune) bool {
+		return r == '/' || r == ':'
+	}) {
+		if segment == "gemini" || strings.HasPrefix(segment, "gemini-") || strings.HasPrefix(segment, "gemini_") {
+			return true
+		}
+	}
+	return false
+}
+
+// normalizeModelID converts Gemini's resource-form model names returned by some
+// /models responses into the bare IDs required by OpenAI-compatible chat calls.
+// Other providers and already-normalized Gemini IDs pass through unchanged.
+func normalizeModelID(baseURL, model string) string {
+	model = strings.TrimSpace(model)
+	if IsGeminiAPI(baseURL) {
+		model = strings.TrimPrefix(model, "models/")
+	}
+	return model
+}
+
 // IsMiniMax reports whether baseURL points at MiniMax's OpenAI-compatible
 // endpoint (api.minimaxi.com or any *.minimaxi.com subdomain).
 //
@@ -65,11 +137,38 @@ func IsZhipu(baseURL string) bool {
 		matchesVendorHost(baseURL, "z.ai", "api.z.ai")
 }
 
+// IsTokenRhythm reports whether baseURL points at Token Rhythm's official
+// OpenAI-compatible gateway. Keep this exact-host: model-aware protocol
+// upgrades must not affect unrelated subdomains or similarly named relays.
+func IsTokenRhythm(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(u.Hostname(), "tokenrhythm.studio")
+}
+
 // IsLongCat reports whether baseURL points at LongCat's OpenAI-compatible API.
 // LongCat uses the OpenAI chat shape, but gates thinking with thinking.type
 // enabled|disabled rather than the generic reasoning_effort field.
 func IsLongCat(baseURL string) bool {
 	return matchesVendorHost(baseURL, "longcat.chat", "api.longcat.chat")
+}
+
+// IsKimiAPI reports whether baseURL is one of Moonshot's official Kimi direct
+// API endpoints. Gate Kimi-specific wire compatibility on the exact API hosts
+// so OpenAI-compatible relays carrying the same model ID remain untouched.
+func IsKimiAPI(baseURL string) bool {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(u.Hostname()) {
+	case "api.moonshot.cn", "api.moonshot.ai":
+		return true
+	default:
+		return false
+	}
 }
 
 // IsOllamaCloud reports whether baseURL points at Ollama Cloud's hosted

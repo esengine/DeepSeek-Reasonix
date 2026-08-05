@@ -343,6 +343,8 @@ async function waitFor(label: string, predicate: () => boolean) {
   throw new Error(`timed out waiting for ${label}`);
 }
 
+let projectedRuntimeEpoch = "runtime-local";
+
 function tabMeta(): TabMeta {
   return {
     id: "tab-a",
@@ -355,6 +357,7 @@ function tabMeta(): TabMeta {
     sessionPath: "/repo/sessions/tab-a.jsonl",
     label: "model",
     ready: true,
+    runtime: { phase: "ready", epoch: projectedRuntimeEpoch },
     running: false,
     cancellable: false,
     mode: "normal",
@@ -369,6 +372,7 @@ function metaForTab(): Meta {
   return {
     label: "model",
     ready: true,
+    runtime: { phase: "ready", epoch: projectedRuntimeEpoch },
     eventChannel: "agent:event",
     cwd: "/repo",
     workspaceRoot: "/repo",
@@ -387,15 +391,18 @@ function metaForTab(): Meta {
 const context: ContextInfo = { used: 0, window: 100, sessionTokens: 0 };
 const effortInfo: EffortInfo = { supported: true, current: "auto", default: "auto", levels: ["auto"] };
 const eventHandlers: Array<(e: WireEvent) => void> = [];
-const rebuiltHandlers: Array<(tabId?: string) => void> = [];
+const rebuiltHandlers: Array<(tabId?: string, runtimeEpoch?: string) => void> = [];
 let holdNextListTabs: Promise<void> | undefined;
 let modeDrain: ReturnType<typeof deferred<string[]>> | undefined;
 let toolApprovalModeDrain: ReturnType<typeof deferred<string[]>> | undefined;
+let composerProfileDrain: ReturnType<typeof deferred<string[]>> | undefined;
+let composerProfileCalls = 0;
+let rejectNextComposerProfile = false;
 
 window.runtime = {
   EventsOn: (name: string, cb: (payload: unknown) => void) => {
     if (name === "agent:event") eventHandlers.push(cb as (e: WireEvent) => void);
-    if (name === "runtime:rebuilt") rebuiltHandlers.push(cb as (tabId?: string) => void);
+    if (name === "runtime:rebuilt") rebuiltHandlers.push(cb as (tabId?: string, runtimeEpoch?: string) => void);
     return () => {};
   },
   BrowserOpenURL: () => {},
@@ -424,6 +431,14 @@ window.go = {
       SetActiveTab: async () => {},
       SetModeForTab: async () => modeDrain?.promise ?? [],
       SetToolApprovalModeForTab: async () => toolApprovalModeDrain?.promise ?? [],
+      SetComposerProfileForTab: async () => {
+        composerProfileCalls += 1;
+        if (rejectNextComposerProfile) {
+          rejectNextComposerProfile = false;
+          throw new Error("profile transaction failed");
+        }
+        return composerProfileDrain?.promise ?? [];
+      },
     } as Partial<AppBindings> as AppBindings,
   },
 };
@@ -449,6 +464,34 @@ await act(async () => {
   await flushPromises();
   await flushPromises();
 });
+
+// A Local tab already has an accepted epoch before Workbench projects a
+// Remote runtime onto the same surface. The Remote transition must publish its
+// authority before tagged Host events arrive, or the frontend rejects them all
+// as stale Local traffic.
+const remoteEpochApproval = {
+  kind: "approval_request",
+  tabId: "tab-a",
+  runtimeEpoch: "runtime-remote",
+  approval: { id: "remote-epoch-1", tool: "bash", subject: "Remote epoch prompt" },
+} as WireEvent;
+await act(async () => {
+  for (const handler of eventHandlers) handler(remoteEpochApproval);
+  await flushPromises();
+});
+eq(controller?.state.approval, undefined, "a Remote event is fenced while the Local epoch is still authoritative");
+await act(async () => {
+  projectedRuntimeEpoch = "runtime-remote";
+  for (const handler of rebuiltHandlers) handler("tab-a", "runtime-remote");
+  for (const handler of eventHandlers) handler(remoteEpochApproval);
+  await flushPromises();
+});
+eq(controller?.state.approval?.id, "remote-epoch-1", "the projected Remote epoch admits tagged Host events");
+await act(async () => {
+  for (const handler of eventHandlers) handler({ kind: "turn_done", tabId: "tab-a", runtimeEpoch: "runtime-remote" } as WireEvent);
+  await flushPromises();
+});
+eq(controller?.state.approval, undefined, "the Remote epoch regression fixture resets cleanly");
 
 // A reconciliation fetch starts (its snapshot time is captured now), then the
 // backend attach replays the pending plan approval before the fetch resolves.
@@ -581,6 +624,110 @@ eq(controller?.state.running, false, "fresh idle snapshot releases the blocked s
     await flushPromises();
   });
   eq(controller?.state.approval?.subject, "new tool-approval prompt", "a late SetToolApprovalModeForTab drain cannot dismiss a new same-id prompt");
+
+  const profileApprovalID = "profile-drain-1";
+  await act(async () => {
+    for (const handler of eventHandlers) {
+      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: profileApprovalID, tool: "bash", subject: "old composer-profile prompt" } } as WireEvent);
+    }
+    await flushPromises();
+  });
+  composerProfileDrain = deferred<string[]>();
+  const profileCallsBefore = composerProfileCalls;
+  let profilePromise: Promise<boolean> | undefined;
+  await act(async () => {
+    profilePromise = controller?.setComposerProfileForTab("tab-a", "plan", "auto", "");
+    await flushPromises();
+  });
+  eq(composerProfileCalls, profileCallsBefore + 1, "one composer-profile sync uses one atomic backend call");
+  await act(async () => {
+    for (const handler of rebuiltHandlers) handler("tab-a");
+    for (const handler of eventHandlers) {
+      handler({ kind: "approval_request", tabId: "tab-a", approval: { id: profileApprovalID, tool: "bash", subject: "new composer-profile prompt" } } as WireEvent);
+    }
+    await flushPromises();
+  });
+  await act(async () => {
+    composerProfileDrain?.resolve([profileApprovalID]);
+    await profilePromise;
+    await flushPromises();
+  });
+  eq(controller?.state.approval?.subject, "new composer-profile prompt", "a late atomic profile drain cannot dismiss a new same-id prompt");
+
+  composerProfileDrain = undefined;
+  const falseRebuildProfileCallsBefore = composerProfileCalls;
+  await act(async () => {
+    await controller?.setComposerProfileForTab("tab-a", "plan", "auto", "");
+    await controller?.setComposerProfileForTab("tab-a", "plan", "auto", "");
+    await flushPromises();
+  });
+  eq(composerProfileCalls, falseRebuildProfileCallsBefore, "a rebuild notice without a new runtime identity does not replay the same profile");
+
+  const rebuiltProfileCallsBefore = composerProfileCalls;
+  await act(async () => {
+    projectedRuntimeEpoch = "runtime-next";
+    for (const handler of rebuiltHandlers) handler("tab-a", "runtime-next");
+    await controller?.setComposerProfileForTab("tab-a", "plan", "auto", "");
+    await controller?.setComposerProfileForTab("tab-a", "plan", "auto", "");
+    await flushPromises();
+  });
+  eq(composerProfileCalls, rebuiltProfileCallsBefore + 1, "same profile applies once per actual runtime generation");
+
+  const concurrentProfileDrain = deferred<string[]>();
+  composerProfileDrain = concurrentProfileDrain;
+  const changedProfileCallsBefore = composerProfileCalls;
+  let concurrentProfileA: Promise<boolean> | undefined;
+  let concurrentProfileB: Promise<boolean> | undefined;
+  await act(async () => {
+    concurrentProfileA = controller?.setComposerProfileForTab("tab-a", "normal", "ask", "new goal");
+    concurrentProfileB = controller?.setComposerProfileForTab("tab-a", "normal", "ask", "new goal");
+    await flushPromises();
+  });
+  eq(composerProfileCalls, changedProfileCallsBefore + 1, "concurrent identical profile replays share one backend call");
+  await act(async () => {
+    concurrentProfileDrain.resolve([]);
+    await Promise.all([concurrentProfileA, concurrentProfileB]);
+    await flushPromises();
+  });
+
+  const olderProfileDrain = deferred<string[]>();
+  const latestProfileDrain = deferred<string[]>();
+  composerProfileDrain = olderProfileDrain;
+  const orderedProfileCallsBefore = composerProfileCalls;
+  let olderProfile: Promise<boolean> | undefined;
+  let latestProfile: Promise<boolean> | undefined;
+  await act(async () => {
+    olderProfile = controller?.setComposerProfileForTab("tab-a", "plan", "yolo", "older intent");
+    latestProfile = controller?.setComposerProfileForTab("tab-a", "normal", "ask", "latest intent");
+    await flushPromises();
+  });
+  eq(composerProfileCalls, orderedProfileCallsBefore + 1, "different composer profiles are serialized per tab");
+  composerProfileDrain = latestProfileDrain;
+  await act(async () => {
+    olderProfileDrain.resolve([]);
+    await olderProfile;
+    await flushPromises();
+  });
+  eq(composerProfileCalls, orderedProfileCallsBefore + 2, "latest composer profile starts after the older transaction");
+  await act(async () => {
+    latestProfileDrain.resolve([]);
+    await latestProfile;
+    await flushPromises();
+  });
+
+  composerProfileDrain = undefined;
+  rejectNextComposerProfile = true;
+  const retryCallsBefore = composerProfileCalls;
+  let failedProfile = true;
+  let retriedProfile = false;
+  await act(async () => {
+    failedProfile = await controller!.setComposerProfileForTab("tab-a", "plan", "ask", "retry goal");
+    retriedProfile = await controller!.setComposerProfileForTab("tab-a", "plan", "ask", "retry goal");
+    await flushPromises();
+  });
+  eq(failedProfile, false, "failed composer profile transaction blocks the caller");
+  eq(retriedProfile, true, "failed composer profile transaction remains retryable");
+  eq(composerProfileCalls, retryCallsBefore + 2, "failed profile key is not cached as applied");
 }
 
 await act(async () => {

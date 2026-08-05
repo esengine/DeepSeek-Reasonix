@@ -3,8 +3,6 @@ package instruction
 import (
 	"context"
 	"strings"
-
-	"reasonix/internal/memory"
 )
 
 // VerifyCheck is a host-observable project check extracted from structured
@@ -35,7 +33,7 @@ func FromContext(ctx context.Context) []VerifyCheck {
 
 // ExtractHostChecks reads only the structured "Reasonix host checks" section.
 // Ordinary project instructions remain guidance and do not become hard gates.
-func ExtractHostChecks(docs []memory.Source) []VerifyCheck {
+func ExtractHostChecks(docs []Document) []VerifyCheck {
 	seen := map[string]bool{}
 	var checks []VerifyCheck
 	for _, doc := range docs {

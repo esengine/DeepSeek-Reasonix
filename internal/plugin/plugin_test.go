@@ -135,6 +135,71 @@ func assertDeadlineNear(t *testing.T, got, want time.Duration) {
 	}
 }
 
+func TestMCPRuntimeSpecMatchesExactHostIdentity(t *testing.T) {
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	managerA := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), workspace)
+	managerB := mcplaunch.NewManager(filepath.Join(t.TempDir(), mcplaunch.StateFilename), workspace)
+	base := Spec{
+		Name: "database", Package: "trusted-package", Type: "http",
+		Command: "launcher", Args: []string{"--serve"}, Env: map[string]string{"TOKEN": "secret-a"},
+		URL: "https://example.invalid/mcp", Headers: map[string]string{"Authorization": "Bearer secret-a"},
+		DefaultStartupTimeout: 30 * time.Second, StartupTimeout: 45 * time.Second,
+		DefaultCallTimeout: 5 * time.Minute, CallTimeout: 30 * time.Second,
+		ToolTimeouts: map[string]time.Duration{"query": 45 * time.Second},
+		Dir:          "/work", WorkspaceRoot: workspace, LaunchManager: managerA,
+		ConfigSource: "project_config", Authorized: true, RequireLaunchApproval: true,
+		LaunchArgs: []string{"pkg@1.0.0", "--offline"}, LauncherIdentityArgs: []string{"pkg@1.0.0"},
+		LauncherLocator: "pkg@1.0.0", LauncherResolvedVersion: "1.0.0", LauncherDigest: "digest-a",
+		ProcessMode: MCPProcessConfined,
+		Sandbox: sandbox.Spec{
+			Mode: "enforce", WriteRoots: []string{"/write"}, ReadRoots: []string{"/read"},
+			AppContainerWriteRoots: []string{"/state"}, ForbidReadRoots: []string{"/secret"},
+			Network: true, MinimalWrites: true, Shell: sandbox.Shell{Kind: sandbox.ShellBash, Path: "/bin/bash"},
+		},
+		StateDir: "/state", StripRawPrefix: "db_", LowPriority: true,
+	}
+
+	equivalent := base
+	equivalent.Type = "streamable_http"
+	equivalent.LaunchManager = managerB
+	equivalent.Authorized = false // Authorization is checked separately from runtime identity.
+	equivalent.Stderr = &bytes.Buffer{}
+	if !MCPRuntimeSpecMatches(base, equivalent) {
+		t.Fatal("equivalent runtime specs with separate authorization/stderr handles did not match")
+	}
+
+	emptyA := Spec{Name: "empty", Type: "", Args: nil, Env: nil, Headers: nil, ToolTimeouts: nil}
+	emptyB := Spec{Name: "empty", Type: "stdio", Args: []string{}, Env: map[string]string{}, Headers: map[string]string{}, ToolTimeouts: map[string]time.Duration{}}
+	if !MCPRuntimeSpecMatches(emptyA, emptyB) {
+		t.Fatal("nil and empty runtime collections should be behaviorally equivalent")
+	}
+
+	mutations := []struct {
+		name   string
+		mutate func(*Spec)
+	}{
+		{name: "endpoint", mutate: func(s *Spec) { s.URL = "https://other.invalid/mcp" }},
+		{name: "header secret", mutate: func(s *Spec) { s.Headers = map[string]string{"Authorization": "Bearer secret-b"} }},
+		{name: "environment secret", mutate: func(s *Spec) { s.Env = map[string]string{"TOKEN": "secret-b"} }},
+		{name: "default startup timeout", mutate: func(s *Spec) { s.DefaultStartupTimeout = time.Minute }},
+		{name: "startup timeout", mutate: func(s *Spec) { s.StartupTimeout = time.Minute }},
+		{name: "config source", mutate: func(s *Spec) { s.ConfigSource = "user_config" }},
+		{name: "workspace", mutate: func(s *Spec) { s.WorkspaceRoot = "/other-workspace" }},
+		{name: "launcher digest", mutate: func(s *Spec) { s.LauncherDigest = "digest-b" }},
+		{name: "sandbox", mutate: func(s *Spec) { s.Sandbox.Network = false }},
+		{name: "prefix", mutate: func(s *Spec) { s.StripRawPrefix = "other_" }},
+	}
+	for _, tc := range mutations {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := base
+			tc.mutate(&changed)
+			if MCPRuntimeSpecMatches(base, changed) {
+				t.Fatalf("runtime identity ignored %s change", tc.name)
+			}
+		})
+	}
+}
+
 func TestClientCallAppliesBuiltInDefaultTimeout(t *testing.T) {
 	for _, transportName := range []string{"stdio", "http"} {
 		t.Run(transportName, func(t *testing.T) {
@@ -713,6 +778,136 @@ func TestStdioFailureCapturesStderr(t *testing.T) {
 	}
 }
 
+func TestStartupFailureReportsStageElapsedAndRedactedStderr(t *testing.T) {
+	lifeCtx, cancelLife := context.WithCancel(context.Background())
+	defer cancelLife()
+	startupCtx, cancelStartup := context.WithTimeout(lifeCtx, 40*time.Millisecond)
+	defer cancelStartup()
+
+	host := NewHost()
+	defer host.Close()
+	spec := Spec{
+		Name:    "slow-stderr",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestHelperProcess", "--"},
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS":        "1",
+			"GO_WANT_HELPER_INIT_MS":        "250",
+			"GO_WANT_HELPER_STARTUP_STDERR": "Authorization: Bearer startup-secret-value",
+		},
+	}
+	_, err := host.AddWithLifecycle(lifeCtx, startupCtx, spec)
+	if err == nil {
+		t.Fatal("slow initialize unexpectedly succeeded")
+	}
+	msg := err.Error()
+	for _, want := range []string{"initialize", "after ", "stderr:", "Bearer [redacted]"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("startup error missing %q: %v", want, err)
+		}
+	}
+	if strings.Contains(msg, "startup-secret-value") {
+		t.Fatalf("startup error leaked credential: %v", err)
+	}
+
+	host.RecordFailure(spec, err)
+	failures := host.Failures()
+	if len(failures) != 1 || failures[0].Stage != "initialize" || failures[0].Elapsed <= 0 {
+		t.Fatalf("structured startup failure = %+v", failures)
+	}
+	if !strings.Contains(failures[0].Stderr, "Bearer [redacted]") {
+		t.Fatalf("structured stderr was not redacted: %+v", failures[0])
+	}
+}
+
+func TestFailureSummaryRedactsCredentials(t *testing.T) {
+	got := summarizeFailureError(errors.New("startup failed: Authorization: Bearer summary-secret-value"))
+	if strings.Contains(got, "summary-secret-value") || !strings.Contains(got, "Bearer [redacted]") {
+		t.Fatalf("failure summary was not redacted: %q", got)
+	}
+}
+
+func TestEnsureConnectedInBackgroundSurvivesShortCallerWait(t *testing.T) {
+	lifeCtx, cancelLife := context.WithCancel(context.Background())
+	defer cancelLife()
+	host := NewHost()
+	defer host.Close()
+	spec := Spec{
+		Name:           "slow-background",
+		Command:        os.Args[0],
+		Args:           []string{"-test.run=TestHelperProcess", "--"},
+		StartupTimeout: 2 * time.Second,
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"GO_WANT_HELPER_INIT_MS": "150",
+		},
+	}
+	result := host.EnsureConnectedInBackground(lifeCtx, spec)
+	select {
+	case got := <-result:
+		t.Fatalf("background startup settled before the short caller wait: %+v", got)
+	case <-time.After(20 * time.Millisecond):
+		// The caller can return here without cancelling the session-owned startup.
+	}
+	select {
+	case got := <-result:
+		if got.Err != nil || len(got.Tools) != 2 {
+			t.Fatalf("background startup result = %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("background startup did not finish")
+	}
+	if !host.HasClient(spec.Name) {
+		t.Fatal("successful background startup did not leave a session-owned client")
+	}
+}
+
+func TestEnsureConnectedInBackgroundRemoveDoesNotResurrectServer(t *testing.T) {
+	lifeCtx, cancelLife := context.WithCancel(context.Background())
+	defer cancelLife()
+	host := NewHost()
+	defer host.Close()
+	spec := Spec{
+		Name:           "removed-background",
+		Command:        os.Args[0],
+		Args:           []string{"-test.run=TestHelperProcess", "--"},
+		StartupTimeout: 2 * time.Second,
+		Env: map[string]string{
+			"GO_WANT_HELPER_PROCESS": "1",
+			"GO_WANT_HELPER_INIT_MS": "500",
+		},
+	}
+	result := host.EnsureConnectedInBackground(lifeCtx, spec)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		connecting := host.ConnectingServers()
+		if len(connecting) > 0 {
+			if len(connecting) != 1 || connecting[0] != spec.Name {
+				t.Fatalf("ConnectingServers = %v, want exact configured name %q", connecting, spec.Name)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("background startup never entered the in-flight state")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if _, found := host.Remove(spec.Name); !found {
+		t.Fatal("Host.Remove did not cancel the background generation")
+	}
+	select {
+	case got := <-result:
+		if got.Err == nil {
+			t.Fatalf("removed background startup unexpectedly succeeded: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("removed background startup did not settle")
+	}
+	if host.HasClient(spec.Name) || len(host.ServerNames()) != 0 {
+		t.Fatalf("removed background server was resurrected: %v", host.ServerNames())
+	}
+}
+
 func TestStdioUsesConfiguredPATHForCommandLookup(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1084,6 +1279,9 @@ func TestHelperProcess(t *testing.T) {
 	}
 	defer os.Exit(0)
 	incrementHelperCounter(os.Getenv("GO_WANT_HELPER_START_COUNT"))
+	if msg := os.Getenv("GO_WANT_HELPER_STARTUP_STDERR"); msg != "" {
+		_, _ = os.Stderr.WriteString(msg + "\n")
+	}
 
 	var initDelay time.Duration
 	if ms := os.Getenv("GO_WANT_HELPER_INIT_MS"); ms != "" {

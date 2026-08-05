@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"reasonix/internal/tool"
 )
@@ -20,7 +21,7 @@ func (forgetTool) Name() string { return "forget" }
 
 func (forgetTool) Description() string {
 	return "Delete a saved memory by name when it is wrong, stale, or superseded, so it stops loading into future sessions. " +
-		"Use the slug from the memory index — the \"<name>\" in \"[label](<name>.md)\". " +
+		"Use the stable project/<name>.md or global/<name>.md reference returned by memory search/read/list. " +
 		"Prefer updating a memory with `remember` (reuse its name) over forget-then-recreate; reach for forget only when the fact should no longer exist at all."
 }
 
@@ -28,7 +29,7 @@ func (forgetTool) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
-			"name": {"type": "string", "description": "Slug of the memory to delete, as shown in the index (the \"<name>\" in \"[label](<name>.md)\")."}
+			"name": {"type": "string", "description": "Stable memory id, project/<name>.md or global/<name>.md reference, or legacy slug of the memory to archive."}
 		},
 		"required": ["name"]
 	}`)
@@ -44,15 +45,23 @@ func (t forgetTool) Execute(ctx context.Context, args json.RawMessage) (string, 
 	if in.Name == "" {
 		return "", fmt.Errorf("name is required")
 	}
+	memory, found := t.store.Read(in.Name)
 	archive, err := t.store.Archive(in.Name)
 	if err != nil {
 		return "", err
 	}
 	if q, ok := QueueFromContext(ctx); ok {
-		q.QueueMemory("Forgot memory \"" + slug(in.Name) + "\" — disregard its line still shown in the saved-memories index until next session.")
+		name := slug(strings.TrimSuffix(in.Name, ".md"))
+		if found {
+			name = memory.Name
+		}
+		q.QueueMemory("Forgot memory \"" + name + "\" — disregard its loaded guidance and background-index entry for the rest of this session.")
 	}
 	if archive != "" {
-		return fmt.Sprintf("Forgot memory %q (it no longer applies and will not load in future sessions; archived to %s).", in.Name, archive), nil
+		if found {
+			return fmt.Sprintf("Forgot memory %q (it no longer applies and will not load in future sessions; archived from %s).", in.Name, providerMemoryReference(memory)), nil
+		}
+		return fmt.Sprintf("Forgot memory %q (it no longer applies and will not load in future sessions; archived).", in.Name), nil
 	}
 	return fmt.Sprintf("Forgot memory %q (it no longer applies and will not load in future sessions).", in.Name), nil
 }

@@ -9,7 +9,15 @@ import { Tooltip } from "./Tooltip";
 
 // ModelSwitcher opens an upward popover listing configured providers. Selecting
 // one switches the active model while the current conversation continues.
-export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?: string; onPick: (name: string) => void }) {
+export function ModelSwitcher({
+  label,
+  tabId,
+  onPick,
+}: {
+  label: string;
+  tabId?: string;
+  onPick: (name: string) => boolean | Promise<boolean>;
+}) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -17,6 +25,11 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
   const [triggerWidth, setTriggerWidth] = useState<number | undefined>(undefined);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const loadSeqRef = useRef(0);
+  const currentTabKeyRef = useRef(tabId ?? "");
+  const pendingPickCountByTabRef = useRef(new Map<string, number>());
+  const pickSeqByTabRef = useRef(new Map<string, number>());
+  currentTabKeyRef.current = tabId ?? "";
 
   // Measure trigger width off the render path to avoid forced layout
   useEffect(() => {
@@ -29,12 +42,31 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
     return () => observer.disconnect();
   }, []);
 
-  const loadModels = useCallback(() => {
-    return (tabId ? app.ModelsForTab(tabId) : app.Models()).then((next) => setModels(asArray(next))).catch(() => {});
-  }, [tabId]);
+  const loadModelsForTab = useCallback((targetTabId?: string) => {
+    const targetKey = targetTabId ?? "";
+    const seq = ++loadSeqRef.current;
+    return (targetTabId ? app.ModelsForTab(targetTabId) : app.Models())
+      .then((next) => {
+        if (seq === loadSeqRef.current && currentTabKeyRef.current === targetKey) {
+          setModels(asArray(next).map(normalizeModelInfo));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const loadModels = useCallback(
+    () => loadModelsForTab(tabId),
+    [loadModelsForTab, tabId],
+  );
 
   useEffect(() => {
     void loadModels();
+  }, [loadModels]);
+
+  useEffect(() => {
+    const refresh = () => void loadModels();
+    window.addEventListener("reasonix:model-catalog-changed", refresh);
+    return () => window.removeEventListener("reasonix:model-catalog-changed", refresh);
   }, [loadModels]);
 
   useEffect(() => {
@@ -82,10 +114,50 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
   }, [label, models, t]);
   const triggerLabel = currentProvider ? `${label} · ${currentProvider}` : label;
 
-  const pick = (name: string) => {
-    setModels((prev) => prev.map((m) => ({ ...m, current: m.ref === name })));
+  const pick = (model: ModelInfo) => {
     setOpen(false);
-    onPick(name);
+    const pendingKey = tabId ?? "";
+    const pendingPickCount = pendingPickCountByTabRef.current.get(pendingKey) ?? 0;
+    // A catalog refresh can still report the outgoing model as current while
+    // an earlier switch is rebuilding. In that window, selecting it again is
+    // an intentional last-click-wins rollback rather than a no-op.
+    if (model.current && pendingPickCount === 0) return;
+    const previousModels = models;
+    const pickSeq = (pickSeqByTabRef.current.get(pendingKey) ?? 0) + 1;
+    pickSeqByTabRef.current.set(pendingKey, pickSeq);
+    // Catalog requests started before this click describe the outgoing model
+    // and must not overwrite the optimistic last-click choice.
+    loadSeqRef.current += 1;
+    setModels((prev) => prev.map((m) => ({ ...m, current: m.ref === model.ref })));
+    pendingPickCountByTabRef.current.set(pendingKey, pendingPickCount + 1);
+    const settlePick = (switched: boolean) => {
+      const nextCount = Math.max(
+        0,
+        (pendingPickCountByTabRef.current.get(pendingKey) ?? 0) - 1,
+      );
+      if (nextCount === 0) pendingPickCountByTabRef.current.delete(pendingKey);
+      else pendingPickCountByTabRef.current.set(pendingKey, nextCount);
+      // A superseded completion no longer owns the visible selection. Only the
+      // latest failed click may roll back and reconcile with the backend.
+      if (
+        switched ||
+        pickSeqByTabRef.current.get(pendingKey) !== pickSeq ||
+        currentTabKeyRef.current !== pendingKey
+      ) {
+        return;
+      }
+      setModels(previousModels);
+      void loadModelsForTab(tabId);
+    };
+    try {
+      void Promise.resolve(onPick(model.ref)).then(
+        (switched) => settlePick(switched),
+        () => settlePick(false),
+      );
+    } catch (err) {
+      settlePick(false);
+      throw err;
+    }
   };
 
   return (
@@ -123,7 +195,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Escape") setOpen(false);
-                if (e.key === "Enter" && filtered.length === 1) pick(filtered[0].ref);
+                if (e.key === "Enter" && filtered.length === 1) pick(filtered[0]);
               }}
             />
           </div>
@@ -139,7 +211,7 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
                   role="option"
                   aria-selected={m.current}
                   className={`modelsw__item ${m.current ? "modelsw__item--current" : ""}`}
-                  onClick={() => pick(m.ref)}
+                  onClick={() => pick(m)}
                 >
                   <span className="modelsw__copy">
                     <span className="modelsw__model">{m.model}</span>
@@ -153,6 +225,14 @@ export function ModelSwitcher({ label, tabId, onPick }: { label: string; tabId?:
       </AnchoredPopover>
     </div>
   );
+}
+
+export function normalizeModelInfo(model: ModelInfo): ModelInfo {
+  return {
+    ...model,
+    provider: String(model.provider ?? ""),
+    model: String(model.model ?? ""),
+  };
 }
 
 function providerLabel(provider: string, t: ReturnType<typeof useT>): string {
