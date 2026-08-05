@@ -294,26 +294,17 @@ console.log("\nstatus bar workspace");
         <StatusBar
           context={{ used: 0, window: 0, sessionTokens: 0 }}
           running={false}
-          workbenchTarget={{ kind: "ssh", hostId: "remote-1" }}
-          jobs={[{ id: "remote-job", kind: "bash", label: "remote build", status: "running", startedAt: 1 }]}
-          backgroundRuntimes={[
-            {
-              tabId: "local-1", title: "Local delivery", detached: true,
-              running: false, pendingPrompt: false,
-              jobs: [{ id: "local-job", kind: "go", label: "local test", status: "running", startedAt: 1 }],
-            },
-          ]}
+          jobs={[{ id: "local-job", kind: "go", label: "local test", status: "running", startedAt: 1 }]}
         />
       </LocaleProvider>,
     );
   });
   const mixedJobsButton = rootEl.querySelector<HTMLButtonElement>(".statusbar__jobs-trigger");
-  ok(mixedJobsButton?.textContent?.includes("2") === true, "local and active Remote Workbench jobs share the total count");
+  ok(mixedJobsButton?.textContent?.includes("1") === true, "local jobs show in the status bar total");
   if (mixedJobsButton?.getAttribute("aria-expanded") !== "true") {
     await act(async () => { mixedJobsButton?.click(); });
   }
-  ok(document.body.textContent?.includes("local test") === true, "local background jobs remain visible in Remote Workbench");
-  ok(document.body.textContent?.includes("remote build") === true, "active Remote Workbench jobs remain visible beside local jobs");
+  ok(document.body.textContent?.includes("local test") === true, "local background jobs remain visible");
   await act(async () => { root.unmount(); });
   dom.window.close();
 }

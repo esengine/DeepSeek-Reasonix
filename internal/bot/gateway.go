@@ -214,6 +214,12 @@ type sessionState struct {
 	workspaceRoot    string
 	toolApprovalMode string
 	sessionPath      string
+	// mappingDegraded records that this state intentionally runs on a fresh
+	// session because its session_mappings target could not be used at build
+	// time. It keeps later messages (whose profile re-resolves the mapping)
+	// from tearing the state down every turn; convergence back onto the
+	// mapped file happens on the next gateway restart.
+	mappingDegraded  bool
 	cancel           context.CancelFunc
 	pendingAsks      map[string][]event.AskQuestion
 	pendingApprovals map[string]event.Approval
@@ -230,6 +236,11 @@ type sessionRuntimeProfile struct {
 	workspaceRoot    string
 	toolApprovalMode string
 	sessionPath      string
+	// sessionPathOptional marks sessionPath as a persisted session_mappings
+	// binding rather than an explicit /attach: when the mapped file cannot be
+	// loaded or leased, the session degrades to a fresh path instead of
+	// dropping the message (#6917).
+	sessionPathOptional bool
 }
 
 type sessionRuntimeOverride struct {
@@ -2253,24 +2264,40 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 	}
 	state.ctrl = ctrl
 	if profile.sessionPath != "" {
-		if err := leases.Rebind(profile.sessionPath); err != nil {
-			ctrl.Close()
-			leases.Release()
-			gw.logger.Error("attached bot session is in use", "err", control.SessionInUseMessage(err))
-			return nil
-		}
-		loaded, err := agent.LoadSession(profile.sessionPath)
-		if err != nil {
-			ctrl.Close()
-			leases.Release()
-			if os.IsNotExist(err) {
-				gw.logger.Error("attached bot session missing", "session_path", profile.sessionPath)
-			} else {
-				gw.logger.Error("attached bot session load failed", "session_path", profile.sessionPath, "err", err)
+		// A mapped binding degrades to a fresh session on failure; only an
+		// explicit /attach is allowed to hard-fail the message, because the
+		// user named that exact session.
+		degrade := func(reason string, err error) bool {
+			if !profile.sessionPathOptional {
+				return false
 			}
-			return nil
+			gw.logger.Warn("mapped bot session unavailable; starting fresh", "reason", reason, "session_path", profile.sessionPath, "err", err)
+			profile.sessionPath = ""
+			state.sessionPath = ""
+			state.mappingDegraded = true
+			return true
 		}
-		ctrl.Resume(loaded, profile.sessionPath)
+		if err := leases.Rebind(profile.sessionPath); err != nil {
+			if !degrade("lease held elsewhere", err) {
+				ctrl.Close()
+				leases.Release()
+				gw.logger.Error("attached bot session is in use", "err", control.SessionInUseMessage(err))
+				return nil
+			}
+		} else if loaded, err := agent.LoadSession(profile.sessionPath); err != nil {
+			if !degrade("load failed", err) {
+				ctrl.Close()
+				leases.Release()
+				if os.IsNotExist(err) {
+					gw.logger.Error("attached bot session missing", "session_path", profile.sessionPath)
+				} else {
+					gw.logger.Error("attached bot session load failed", "session_path", profile.sessionPath, "err", err)
+				}
+				return nil
+			}
+		} else {
+			ctrl.Resume(loaded, profile.sessionPath)
+		}
 	}
 	ctrl.EnableInteractiveApproval()
 	ctrl.SetToolApprovalMode(profile.toolApprovalMode)
@@ -2328,15 +2355,63 @@ func updateSessionStateRuntime(state *sessionState, msg InboundMessage, profile 
 func (gw *BotGateway) sessionProfileForMessage(msg InboundMessage) sessionRuntimeProfile {
 	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
 	var sessionPath string
+	sessionPathOptional := false
 	if override, ok := gw.sessionRuntimeOverrideForMessage(msg); ok {
 		sessionPath = override.sessionPath
 	}
-	return sessionRuntimeProfile{
-		model:            strings.TrimSpace(model),
-		workspaceRoot:    strings.TrimSpace(workspaceRoot),
-		toolApprovalMode: normalizeBotToolApprovalMode(toolApprovalMode),
-		sessionPath:      canonicalBotPath(sessionPath),
+	// A persisted session_mappings binding is the durable chat→session link
+	// the desktop writes into the connection config. Without consuming it
+	// here, every gateway restart or runtime rebuild opened a brand-new
+	// session file for the chat and the configured binding was display-only
+	// (#6917, #6934).
+	if sessionPath == "" {
+		if mapped := gw.sessionMappingPathForMessage(msg); mapped != "" {
+			sessionPath = mapped
+			sessionPathOptional = true
+		}
 	}
+	return sessionRuntimeProfile{
+		model:               strings.TrimSpace(model),
+		workspaceRoot:       strings.TrimSpace(workspaceRoot),
+		toolApprovalMode:    normalizeBotToolApprovalMode(toolApprovalMode),
+		sessionPath:         canonicalBotPath(sessionPath),
+		sessionPathOptional: sessionPathOptional,
+	}
+}
+
+// sessionMappingPathForMessage resolves the persisted session_mappings entry
+// for a message to an existing session file. Only bindings that resolve to a
+// present, readable file participate — a moved or deleted target quietly
+// degrades to normal session creation rather than blocking the chat.
+func (gw *BotGateway) sessionMappingPathForMessage(msg InboundMessage) string {
+	gw.mu.Lock()
+	var mappings []SessionMapping
+	if msg.ConnectionID != "" {
+		if channel, ok := gw.cfg.ConnectionChannels[msg.ConnectionID]; ok {
+			mappings = channel.SessionMappings
+		}
+	}
+	if len(mappings) == 0 {
+		if channel, ok := gw.cfg.Channels[msg.Platform]; ok {
+			mappings = channel.SessionMappings
+		}
+	}
+	gw.mu.Unlock()
+	mapping, ok := matchingSessionMapping(mappings, msg)
+	if !ok {
+		return ""
+	}
+	path := botSessionPathFromTarget(mapping.SessionID)
+	if path == "" {
+		path = botSessionPathFromTarget(mapping.SessionSource)
+	}
+	if path == "" {
+		return ""
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return ""
+	}
+	return path
 }
 
 func sessionStateMatchesRuntime(state *sessionState, profile sessionRuntimeProfile) bool {
@@ -2358,6 +2433,13 @@ func sessionStateMatchesRuntime(state *sessionState, profile sessionRuntimeProfi
 	}
 	if stateRoot != wantRoot {
 		return false
+	}
+	// A state that already degraded off its mapped session keeps running on
+	// its fresh path even though the profile re-resolves the mapping each
+	// message; rebuilding here would spawn a new session per message while the
+	// mapped file stays unavailable.
+	if profile.sessionPathOptional && state.mappingDegraded {
+		return true
 	}
 	if canonicalBotPath(state.sessionPath) != canonicalBotPath(profile.sessionPath) {
 		return false

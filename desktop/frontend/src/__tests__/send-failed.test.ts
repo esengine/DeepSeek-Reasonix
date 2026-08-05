@@ -8,7 +8,6 @@ import { continueDelivery } from "../lib/deliveryContinue";
 import {
   activateGoalAndSubmit,
   activateGoalAndSubmitOnTab,
-  workbenchTargetToken,
 } from "../lib/goalSubmit";
 import type { WireEvent } from "../lib/types";
 
@@ -26,17 +25,6 @@ function eq(a: unknown, b: unknown, label: string) {
 }
 
 console.log("\nsend failure feedback");
-
-eq(
-  workbenchTargetToken({ kind: "local", identityGen: 1, requestSeq: 0 })?.requestSeq,
-  0,
-  "initial Local workbench target keeps its zero request sequence",
-);
-eq(
-  workbenchTargetToken({ kind: "local", identityGen: 1 }),
-  null,
-  "workbench target without a request sequence fails closed",
-);
 
 {
   const calls: string[] = [];
@@ -97,7 +85,6 @@ eq(
   let activeTab = "tab-a";
   const pending = activateGoalAndSubmitOnTab({
     tabId: "tab-a",
-    target: { kind: "ssh", identityGen: 7, requestSeq: 11 },
     displayText: "Cross-tab safe goal",
     submitText: "/ui-ux-pro-max Cross-tab safe goal",
     structured: {
@@ -105,10 +92,10 @@ eq(
       input: "Cross-tab safe goal",
       invocations: [{ name: "ui-ux-pro-max", kind: "skill", offset: 0 }],
     },
-    sendToTab: async (tabId, goal, display, submit, structured, target) => {
+    sendToTab: async (tabId, goal, display, submit, structured) => {
       await submitGate;
       calls.push(
-        `send:${tabId}:${goal}:${display}:${submit}:${structured?.invocations[0]?.name ?? ""}:${target?.kind}:${target?.identityGen}:${target?.requestSeq}:active=${activeTab}`,
+        `send:${tabId}:${goal}:${display}:${submit}:${structured?.invocations[0]?.name ?? ""}:active=${activeTab}`,
       );
     },
   });
@@ -118,8 +105,8 @@ eq(
   await pending;
   eq(
     calls.join("|"),
-    "switched-to-tab-b|send:tab-a:Cross-tab safe goal:Cross-tab safe goal:/ui-ux-pro-max Cross-tab safe goal:ui-ux-pro-max:ssh:7:11:active=tab-b",
-    "activateGoalAndSubmitOnTab keeps Goal and Skill on the captured source tab and target",
+    "switched-to-tab-b|send:tab-a:Cross-tab safe goal:Cross-tab safe goal:/ui-ux-pro-max Cross-tab safe goal:ui-ux-pro-max:active=tab-b",
+    "activateGoalAndSubmitOnTab keeps Goal and Skill on the captured source tab",
   );
 }
 
@@ -267,14 +254,19 @@ const controllerSource = readFileSync(resolve(here, "../lib/useController.ts"), 
 eq(typesSource.includes('"mcp_surface_ready"'), true, "TypeScript EventKind declares mcp_surface_ready");
 eq(controllerSource.includes('e.kind === "mcp_surface_ready"'), true, "reducer handles mcp_surface_ready before optimistic confirmation");
 eq(
-  /state\.approval!\.tool === "exit_plan_mode" && allow\) await applyCollaborationMode\("normal"\);/.test(appSource),
+  /if \(allow\) \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "start_execution"\);/.test(appSource),
   true,
-  "plan approval clears the remembered plan restore intent before execution",
+  "plan approval clears the remembered plan restore intent and records start execution explicitly",
 );
 eq(
-  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*approve\(state\.approval!\.id, false, false, false\);\s*\}\}/.test(appSource),
+  /onExitPlan=\{async \(\) => \{\s*await applyCollaborationMode\("normal"\);\s*resolvePlanDecision\(state\.approval!\.id, "exit_plan"\);\s*\}\}/.test(appSource),
   true,
-  "exit-without-executing switches to Normal before rejecting the pending plan",
+  "exit-without-executing switches to Normal before recording the explicit plan exit",
+);
+eq(
+  /onRevisePlan=\{\(text\) => \{[\s\S]{0,260}resolvePlanDecision\(state\.approval!\.id, "revise_plan"\);/.test(appSource),
+  true,
+  "plan revision records a distinct revise decision",
 );
 eq(
   !/exit_plan_mode[\s\S]{0,240}rememberUserIntent:\s*false/.test(appSource),
@@ -304,13 +296,11 @@ eq(
 eq(
     appSource.includes("activateGoalAndSubmitOnTab({") &&
     appSource.includes("tabId: sourceTabId") &&
-    appSource.includes("target: sourceTarget") &&
-    appSource.includes("target ? {") &&
     appSource.includes("goal: nextGoal") &&
     appSource.includes("collaborationMode: controllerComposerProfileCollaborationMode(composerProfile)") &&
     appSource.includes("toolApprovalMode,"),
   true,
-  "initial Goal activation captures the submission tab and workbench target",
+  "initial Goal activation captures the submission tab",
 );
 eq(
   appSource.includes("setControllerGoalForTab(tabId, trimmed)") && appSource.includes("clearControllerGoalForTab(tabId)"),

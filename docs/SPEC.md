@@ -617,7 +617,12 @@ default 3). Profile names are resolved at runtime from the Skill store and
 must never enter tool schemas or the parent system prompt. Custom and named
 built-in profile bodies are the full child system prompt (no implicit
 concise default). `parallel_tasks` remains the compatible read-only batch
-API on the same scheduler. See [Subagent profiles](./SUBAGENT_PROFILES.md)
+API on the same scheduler. In a persisted parent session, parallel/fleet
+children save independent transcripts; the aggregate carries bounded previews
+and stable refs, and `read_subagent_result` pages a referenced final answer by
+UTF-8 byte offset under the current conversation-lineage/workspace boundary.
+Headless runs remain ephemeral and return fair bounded previews without refs.
+See [Subagent profiles](./SUBAGENT_PROFILES.md)
 for the user-facing command and file-format contract.
 
 ## 4. Data Types (`internal/provider`)

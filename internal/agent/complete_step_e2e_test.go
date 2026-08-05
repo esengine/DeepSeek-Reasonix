@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -60,13 +61,9 @@ func hostAdvances(sink *recordSink) int {
 	return n
 }
 
-func readinessBlocked(sink *recordSink) bool {
-	for _, e := range sink.kinds(event.Notice) {
-		if e.Text == finalReadinessNoticeText() && strings.Contains(e.Detail, "latest successful todo_write") {
-			return true
-		}
-	}
-	return false
+func readinessBlocked(err error) bool {
+	var readinessErr *FinalReadinessError
+	return errors.As(err, &readinessErr)
 }
 
 // sessionContains reports whether any message body holds sub — used to assert a
@@ -102,8 +99,9 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	sink := &recordSink{}
 	a := New(mp, evidenceRegistry(), NewSession("sys"), Options{}, sink)
 
-	if err := a.Run(context.Background(), "implement the plan"); err != nil {
-		t.Fatalf("final answer blocked despite host-advanced completions: %v", err)
+	runErr := a.Run(context.Background(), "implement the plan")
+	if runErr != nil {
+		t.Fatalf("final answer blocked despite host-advanced completions: %v", runErr)
 	}
 	for i, td := range a.todoState {
 		if canonicalTodoStatus(td.Status) != "completed" {
@@ -113,7 +111,7 @@ func TestE2ESerialPlanHostAdvancesAndAllowsFinalAnswer(t *testing.T) {
 	if n := hostAdvances(sink); n < 2 {
 		t.Fatalf("host advanced %d times, want >=2 (one per complete_step)", n)
 	}
-	if readinessBlocked(sink) {
+	if readinessBlocked(runErr) {
 		t.Fatal("a correctly signed-off plan should not trip the readiness gate")
 	}
 }
@@ -148,6 +146,9 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 		Arguments: `{"todos":[{"content":"alpha","status":"in_progress"},{"content":"beta","status":"pending"}]}`}}})
 	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "t0", Name: "todo_write", Content: "Todos updated"})
 
+	// The premature "all done" ends the first Run immediately (no readiness
+	// retries). A follow-up turn signs the steps off with complete_step (the
+	// cited diff paths are proven from the session history) and clears the gate.
 	mp := testutil.NewMock("m",
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "w1", Name: "write_file", Arguments: `{"path":"alpha.go"}`}}},
 		testutil.Turn{Text: "all done"},
@@ -157,15 +158,15 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 			Arguments: `{"step":"beta","result":"done","evidence":[{"kind":"manual","summary":"verified by inspection"}]}`}}},
 		testutil.Turn{Text: "all done now"},
 	)
-	sink := &recordSink{}
-	a := New(mp, evidenceRegistry(), sess, Options{}, sink)
+	a := New(mp, evidenceRegistry(), sess, Options{}, event.Discard)
 	a.SetSession(sess) // rebuilds canonical {alpha in_progress, beta pending}
 
-	if err := a.Run(context.Background(), "finish up"); err != nil {
-		t.Fatalf("Run: %v", err)
+	firstErr := a.Run(context.Background(), "finish up")
+	if !readinessBlocked(firstErr) {
+		t.Fatalf("premature 'all done' error = %v, want FinalReadinessError from the cross-turn canonical gate", firstErr)
 	}
-	if !readinessBlocked(sink) {
-		t.Fatal("premature 'all done' was not blocked by the cross-turn canonical gate")
+	if err := a.Run(context.Background(), "finish up"); err != nil {
+		t.Fatalf("follow-up Run: %v", err)
 	}
 	for i, td := range a.todoState {
 		if canonicalTodoStatus(td.Status) != "completed" {

@@ -822,8 +822,8 @@ func TestComposeIncludesActiveGoal(t *testing.T) {
 	if !strings.Contains(got, "<active-goal>\nship the approval redesign") {
 		t.Fatalf("Compose should include active goal block, got %q", got)
 	}
-	if !strings.Contains(got, "[goal:complete]") || !strings.Contains(got, "[goal:blocked:<short reason>]") {
-		t.Fatalf("goal block should include autonomous status markers, got %q", got)
+	if !strings.Contains(got, "update_goal") {
+		t.Fatalf("goal block should instruct the update_goal protocol, got %q", got)
 	}
 	if !strings.HasSuffix(got, "next step?") {
 		t.Fatalf("user text should follow goal block: %q", got)

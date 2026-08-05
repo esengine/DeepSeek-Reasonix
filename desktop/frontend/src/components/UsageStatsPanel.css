@@ -1,24 +1,15 @@
 /* ── Usage statistics panel (UsageStatsPanel.tsx) ─────────────────────────
    Charts are hand-drawn SVG driven entirely by theme variables, so both stock
-   themes and theme packs adapt automatically. The heatmap's 5 levels and the
-   per-model palette derive from --accent / --fg via color-mix. */
+   themes and theme packs adapt automatically. The heatmap's 5 levels come from
+   --accent via color-mix; model colours are the fixed --chart-1..5 series
+   (rank order by token volume) plus the gray --chart-other step, with
+   light/dark variants defined in styles.css. */
 
 .usage-stats {
-  --stats-hue-l: 66%;
   display: flex;
   flex-direction: column;
   gap: 18px;
   min-width: 0;
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) .usage-stats {
-    --stats-hue-l: 46%;
-  }
-}
-
-:root[data-theme="light"] .usage-stats {
-  --stats-hue-l: 42%;
 }
 
 .usage-stats__toolbar {
@@ -315,7 +306,7 @@
   width: 14px;
   height: 3px;
   border-radius: 2px;
-  background: var(--accent);
+  background: color-mix(in srgb, var(--accent) 80%, var(--fg));
 }
 
 /* per-model donut + list */
@@ -386,6 +377,67 @@
   background: var(--bg-elev);
 }
 
+/* "Other" aggregate row: the entire row is one native button that toggles the
+   detail list. */
+.usage-stats__model-row--expandable {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.usage-stats__model-item {
+  list-style: none;
+}
+
+.usage-stats__model-row + .usage-stats__model-item {
+  border-top: 1px solid var(--border-soft);
+}
+
+/* Decorative chevron inside the "Other" row button. */
+.usage-stats__model-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  margin-right: 4px;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  vertical-align: middle;
+}
+
+/* Expanded "Other" detail rows: indented, slightly recessed, caption size. */
+.usage-stats__model-row--sub {
+  padding-left: 28px;
+  background: color-mix(in srgb, var(--bg-elev) 55%, transparent);
+  font-size: var(--font-caption);
+}
+
+/* "Other" details expand with an accordion: the wrapper is a grid whose
+   single track animates 0fr → 1fr, so the inner list slides open smoothly
+   instead of popping in. */
+.usage-stats__model-other-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.25s ease;
+}
+
+.usage-stats__model-other-wrap--open {
+  grid-template-rows: 1fr;
+}
+
+.usage-stats__model-other-list {
+  overflow: hidden;
+  min-height: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .usage-stats__model-name {
   color: var(--fg);
   overflow: hidden;
@@ -454,15 +506,35 @@
   gap: 5px;
 }
 
+/* Hover tooltip breakdown rows for the "Other" aggregate (trend + donut):
+   indented, muted, same gray swatch as the Other step. */
+.usage-stats__tip-row--other {
+  padding-left: 8px;
+  color: var(--fg-faint);
+}
+
+.usage-stats__tip-breakdown {
+  border-top: 1px solid var(--border-soft);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.usage-stats__tip-more {
+  padding-left: 8px;
+  color: var(--fg-faint);
+  font-style: italic;
+}
+
 .usage-stats__foot {
   font-size: var(--font-caption);
   color: var(--fg-faint);
 }
 
-/* cache hit-rate trend curve: theme accent (like the heatmap), drawn above
-   the token bars. No point markers — the line alone reads the trend. */
+/* cache hit-rate trend curve: theme accent shifted slightly toward the
+   foreground so it stays distinct from the pure-accent top model bars; drawn
+   above the token bars. No point markers — the line alone reads the trend. */
 .usage-stats__trend {
-  stroke: var(--accent);
+  stroke: color-mix(in srgb, var(--accent) 80%, var(--fg));
   stroke-width: 2;
   opacity: 0.9;
   pointer-events: none;
@@ -485,7 +557,7 @@
 
 /* Marker that lights up on the hit-rate curve for the hovered day. */
 .usage-stats__trend-dot {
-  fill: var(--accent);
+  fill: color-mix(in srgb, var(--accent) 80%, var(--fg));
   stroke: var(--bg-elev);
   stroke-width: 2;
   pointer-events: none;

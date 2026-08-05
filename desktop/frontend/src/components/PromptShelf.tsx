@@ -1,6 +1,6 @@
 import type { ReactNode, RefObject } from "react";
 
-export { PromptAction, PromptDescriptionToggle } from "./PromptAction";
+export { PromptAction, PromptDescriptionDisclosure, PromptDescriptionToggle } from "./PromptAction";
 
 export function PromptShelf({
   className,
@@ -130,6 +130,8 @@ export function DecisionConfirmBar({
   hint,
   confirmLabel,
   onConfirm,
+  secondaryLabel,
+  onSecondary,
   disabled = false,
   confirmDisabled = false,
   danger = false,
@@ -137,12 +139,24 @@ export function DecisionConfirmBar({
   hint: ReactNode;
   confirmLabel: ReactNode;
   onConfirm: () => void;
+  secondaryLabel?: ReactNode;
+  onSecondary?: () => void;
   disabled?: boolean;
   confirmDisabled?: boolean;
   danger?: boolean;
 }) {
   return (
     <div className="decision-confirm-bar">
+      {secondaryLabel && onSecondary && (
+        <button
+          type="button"
+          className="btn btn--small decision-confirm-bar__secondary"
+          onClick={onSecondary}
+          disabled={disabled}
+        >
+          {secondaryLabel}
+        </button>
+      )}
       <div className="decision-confirm-bar__hint">{hint}</div>
       <button
         type="button"

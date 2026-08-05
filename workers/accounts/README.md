@@ -69,7 +69,8 @@ Errors are `{ "error": { "code": "...", "message": "..." } }` with a matching HT
 
 ## Configuration
 
-`wrangler.toml` `[vars]` (non-secret): `APP_ORIGIN`, `ALLOWED_ORIGINS`,
+`wrangler.toml` `[vars]` (non-secret): `APP_ORIGIN` (web frontend),
+`ACCOUNT_ORIGIN` (this Worker's canonical public origin), `ALLOWED_ORIGINS`,
 `COOKIE_DOMAIN`, `EMAIL_PROVIDER` (`stub` | `resend`), `MAIL_FROM`, `ADMIN_EMAILS`.
 
 Secrets (`wrangler secret put NAME`): `SESSION_PEPPER` (any long random string),
@@ -86,7 +87,13 @@ pnpm db:apply:local                 # create local D1 tables
 pnpm dev                            # wrangler dev on http://localhost:8787
 ```
 
-Put local secrets in `.dev.vars` (git-ignored), e.g. `SESSION_PEPPER="dev-pepper"`.
+Put local overrides and secrets in `.dev.vars` (git-ignored), e.g.:
+
+```dotenv
+ACCOUNT_ORIGIN="http://localhost:8787"
+SESSION_PEPPER="dev-pepper"
+```
+
 Register a user, then read the verification link from the `wrangler dev` console.
 
 ## Deploy

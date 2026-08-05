@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"reasonix/internal/shellparse"
 	"reasonix/internal/shellsafe"
 )
 
@@ -36,12 +35,8 @@ func isReadOnlyBashSubject(subject string) bool {
 	if normalized, ok := normalizeBashSafeRedirectsForMatch(subject); ok {
 		subject = normalized
 	}
-	base, sub, ok := shellsafe.CommandIsReadOnly(subject)
+	base, sub, fields, ok := shellsafe.ClassifyReadOnlyCommand(subject)
 	if !ok {
-		return false
-	}
-	fields, malformed := shellparse.StaticFields(subject)
-	if malformed != "" {
 		return false
 	}
 	if sub == "" {

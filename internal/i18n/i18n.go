@@ -75,6 +75,18 @@ type Messages struct {
 	ChatThoughtForFmt                      string // collapsed reasoning summary, "%d" = elapsed s
 	ChatStatusThinkingFmt                  string // "%s thinking… (%ds · <cancel hint>)" — %s = spinner, %d = elapsed s
 	ChatToolWorkingFmt                     string // "%s working · %ds" under a running tool — %s = spinner, %d = elapsed s
+	ChatSubagentPhaseQueued                string // sub-agent progress phase label ("queued")
+	ChatSubagentPhaseRunning               string // ("running")
+	ChatSubagentPhaseReasoning             string // ("reasoning")
+	ChatSubagentPhaseResponding            string // ("responding")
+	ChatSubagentPhaseTool                  string // ("using tools")
+	ChatSubagentPhaseRetrying              string // ("retrying")
+	ChatSubagentPhaseCompleted             string // ("completed")
+	ChatSubagentPhaseFailed                string // ("failed")
+	ChatSubagentPhaseCancelled             string // ("cancelled")
+	ChatSubagentProgressFmt                string // live progress line — %s = phase label, %d = elapsed s, %d = idle s ("%s · %ds · %ds ago")
+	ChatSubagentProgressDoneFmt            string // terminal summary — %s = phase label, %d = duration s ("%s · %ds")
+	ChatSubagentPreviewLabel               string // verbose preview marker ("▎")
 	ChatStatusRetryingFmt                  string // "%s retrying (%d/%d)…" — %s = spinner, %d/%d = attempt/max
 	ChatStatusCancellingFmt                string // "%s stopping… (%ds · Ctrl+C exits)" — %s = spinner, %d = elapsed s
 	ChatStatusIdle                         string // shortcuts hint when idle
@@ -184,6 +196,10 @@ type Messages struct {
 	CompactionAuto    string // trigger label: reached the window threshold
 	CompactionManual  string // trigger label: user ran /compact
 
+	// extension structured-UI surfaces (ExtensionSurface / ExtensionStatus events).
+	ExtFormFieldsHint string // form card: field values are collected through the usual prompts
+	ExtRunActionFmt   string // card action hint, one %s = the /<plugin>:<action> slash name
+
 	// chat TUI slash commands.
 	SlashCompactDone             string // "/compact" succeeded
 	SlashCompactFailed           string // "/compact" errored, prefixed before the underlying error
@@ -253,6 +269,7 @@ type Messages struct {
 	CmdSkill            string // /skills
 	CmdVerbose          string // /verbose
 	CmdReloadCmd        string // /reload-cmd
+	CmdReload           string // /reload
 	CmdDiffFold         string // /diff-fold
 	CmdSandbox          string // /sandbox
 	CmdEffort           string // /effort
@@ -304,57 +321,69 @@ type Messages struct {
 	ListMcpNone         string // no mcp servers
 
 	// in-chat memory/model/rewind notices.
-	MemoryNone                string
-	MemoryLoaded              string
-	MemorySavedHeader         string
-	MemoryStoredUnderFmt      string
-	MemoryEditHint            string
-	ForgetUsage               string
-	ForgetDoneFmt             string
-	QuickRememberEmpty        string
-	QuickRememberDoneFmt      string
-	GoalEmpty                 string
-	GoalCurrentFmt            string
-	GoalSetFmt                string
-	GoalCleared               string
-	ModelSwitchUnavailable    string
-	ModelSwitchBusy           string
-	ModelAlreadyOnFmt         string
-	ModelSwitchingFmt         string
-	ModelSwitchedFmt          string
-	ModelListHeader           string
-	RuntimeSwitchPending      string
-	WorkModeStatusFmt         string
-	WorkModeListHeaderFmt     string
-	WorkModeListHint          string
-	WorkModeEconomyLabel      string
-	WorkModeBalancedLabel     string
-	WorkModeDeliveryLabel     string
-	WorkModeEconomyDesc       string
-	WorkModeBalancedDesc      string
-	WorkModeDeliveryDesc      string
-	WorkModeUsage             string
-	WorkModeSwitchUnavailable string
-	WorkModeSwitchBusy        string
-	WorkModeAlreadyOnFmt      string
-	WorkModeSwitchingFmt      string
-	WorkModeSwitchedFmt       string
-	RewindNone                string
-	RewindCodeConversation    string
-	RewindConversationOnly    string
-	RewindCodeOnly            string
-	RewindFork                string
-	RewindSummarizeFrom       string
-	RewindSummarizeUpto       string
-	RewindPickTitle           string
-	RewindPickHint            string
-	RewindRestoreTitleFmt     string
-	RewindApplyHint           string
-	RewindCoverageTitle       string
-	RewindCoverageWarningFmt  string
-	RewindConfirmHint         string
-	RewindUnavailableFmt      string
-	RewindEmpty               string
+
+	MemoryNone                   string
+	MemoryLoaded                 string
+	MemorySavedHeader            string
+	MemoryStoredUnderFmt         string
+	MemoryEditHint               string
+	ForgetUsage                  string
+	ForgetDoneFmt                string
+	QuickRememberEmpty           string
+	QuickRememberDoneFmt         string
+	GoalEmpty                    string
+	GoalCurrentFmt               string
+	GoalSetFmt                   string
+	GoalCleared                  string
+	GoalNotRunning               string
+	GoalNotPaused                string
+	GoalPaused                   string
+	GoalPausedReason             string
+	GoalPausedFmt                string // %s = stop cause
+	GoalBudgetExtended           string
+	GoalRuntimeFmt               string // turns, limits, no-progress, extensions
+	GoalRuntimeLastReason        string
+	ModelSwitchUnavailable       string
+	ModelSwitchBusy              string
+	ModelAlreadyOnFmt            string
+	ModelSwitchingFmt            string
+	ModelSwitchedFmt             string
+	ModelListHeader              string
+	RuntimeSwitchPending         string
+	RuntimeReloadQueued          string // /reload queued behind active work; the idle drain runs it
+	RuntimeReloaded              string // /reload completed (no generation available)
+	RuntimeReloadedGenerationFmt string // /reload completed; %d is the runtime build generation
+	WorkModeStatusFmt            string
+	WorkModeListHeaderFmt        string
+	WorkModeListHint             string
+	WorkModeEconomyLabel         string
+	WorkModeBalancedLabel        string
+	WorkModeDeliveryLabel        string
+	WorkModeEconomyDesc          string
+	WorkModeBalancedDesc         string
+	WorkModeDeliveryDesc         string
+	WorkModeUsage                string
+	WorkModeSwitchUnavailable    string
+	WorkModeSwitchBusy           string
+	WorkModeAlreadyOnFmt         string
+	WorkModeSwitchingFmt         string
+	WorkModeSwitchedFmt          string
+	RewindNone                   string
+	RewindCodeConversation       string
+	RewindConversationOnly       string
+	RewindCodeOnly               string
+	RewindFork                   string
+	RewindSummarizeFrom          string
+	RewindSummarizeUpto          string
+	RewindPickTitle              string
+	RewindPickHint               string
+	RewindRestoreTitleFmt        string
+	RewindApplyHint              string
+	RewindCoverageTitle          string
+	RewindCoverageWarningFmt     string
+	RewindConfirmHint            string
+	RewindUnavailableFmt         string
+	RewindEmpty                  string
 
 	// skill picker overlay (/skills interactive panel in CLI TUI)
 	SkillPickerTitle             string

@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/instruction"
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
+	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -85,6 +86,12 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	if blocked, early := a.parseToolCall(plan); early {
 		return blocked
 	}
+	// tool.before: extensions rule on the parsed call before any policy or
+	// permission check. A valid replacement is re-parsed so every later stage
+	// sees the call that will actually execute.
+	if blocked, early := a.interceptToolBefore(ctx, plan); early {
+		return blocked
+	}
 	if blocked, early := a.resolveToolPolicy(ctx, plan); early {
 		return blocked
 	}
@@ -146,6 +153,14 @@ func (a *Agent) parseToolCall(plan *toolCallPlan) (toolOutcome, bool) {
 	plan.evidenceName = canonicalName
 	plan.evidenceArgs = json.RawMessage(plan.call.Arguments)
 	plan.readOnly = t.ReadOnly()
+	if canonicalName == "bash" && permission.BashCommandIsReadOnly(plan.execArgs) {
+		// Bash is schema-level writer-capable, but the host can resolve a
+		// concrete invocation to read-only after parsing its arguments. Carry
+		// that fact through permission, mutation accounting, evidence, and the
+		// refreshed local tool receipt without changing the provider schema.
+		plan.readOnly = true
+		plan.resolvedMeta = &tool.ResolvedCall{TargetName: canonicalName, ReadOnly: true}
+	}
 	return toolOutcome{}, false
 }
 
@@ -309,14 +324,15 @@ func (a *Agent) applyDeliveryPolicyGates(plan *toolCallPlan) (toolOutcome, bool)
 	}
 
 	plan.mutates = evidence.ToolCallMutates(plan.evidenceName, plan.evidenceArgs, plan.readOnly)
-	if a.deliveryProfile && evidence.ToolCallRequiresDeliveryCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !a.deliveryCriteriaEstablished {
+	persistentWorkflowCall := a.deliveryPersistentExpected && !a.deliveryMutationExpected && plan.evidenceName == "remember"
+	if a.deliveryProfile && !persistentWorkflowCall && evidence.ToolCallRequiresDeliveryCriteria(plan.evidenceName, plan.evidenceArgs, plan.readOnly) && !a.deliveryCriteriaEstablished {
 		return toolOutcome{
 			output:  "blocked: delivery-first mode requires acceptance criteria before state-changing work. Call todo_write with a concrete, verifiable task list, then retry this tool call.",
 			blocked: true,
 			errMsg:  "blocked: delivery acceptance criteria required",
 		}, true
 	}
-	if a.deliveryProfile && plan.mutates && !a.hasActiveCanonicalTodo() {
+	if a.deliveryProfile && !persistentWorkflowCall && plan.mutates && !a.hasActiveCanonicalTodo() {
 		return toolOutcome{
 			output:  "blocked: delivery-first mode requires every state change to belong to the current in_progress todo. Preserve the completed todo prefix, append a concrete new item if more work was discovered, mark that item in_progress with todo_write, then retry this mutation.",
 			blocked: true,
@@ -434,6 +450,12 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 				blocked: true,
 				errMsg:  fmt.Sprintf("blocked: %v", err),
 			}, true
+		}
+		// permission.decision: the host verdict is computed first; the
+		// extension ruling may override it in either direction (an allow
+		// overriding a host deny is the full-trust contract and is audited).
+		if blocked, early := a.interceptExtensionPermission(ctx, plan, &allow); early {
+			return blocked, true
 		}
 		if !allow {
 			return toolOutcome{
@@ -624,11 +646,15 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	} else {
 		result, err = runTool.Execute(cctx, runArgs)
 	}
+	// tool.after: extensions rule on the executed result (success or error)
+	// before evidence, hooks, and recovery observation, so every downstream
+	// consumer sees the final (possibly replaced) outcome.
+	result, err = a.interceptToolAfter(ctx, call, result, err)
 	if a.evidence != nil {
 		// Always record the model-visible call for audit, then the real target
 		// attributes for mutation/read classification when they differ.
 		if call.Name == "complete_step" {
-			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, t.ReadOnly())
+			rec := evidence.ReceiptFromToolCall(call.Name, json.RawMessage(call.Arguments), err == nil, readOnly)
 			a.evidence.Record(rec)
 			if err == nil {
 				a.advanceCanonicalTodo(rec.Step)

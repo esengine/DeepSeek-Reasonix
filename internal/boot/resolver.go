@@ -5,6 +5,9 @@ import (
 	"strings"
 
 	"reasonix/internal/config"
+	"reasonix/internal/extension"
+	"reasonix/internal/extension/providerext"
+	"reasonix/internal/extension/sidecar"
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
 )
@@ -69,11 +72,52 @@ func (r *LocalProviderResolver) Resolve(selection provider.Selection) (provider.
 	return NewProviderWithProxy(entry, r.proxy)
 }
 
-func resolveProvider(opts Options, cfg *config.Config, proxy netclient.ProxySpec, selection provider.Selection) (provider.Provider, error) {
-	if opts.ProviderResolver != nil {
-		return opts.ProviderResolver.Resolve(selection)
+func resolveProvider(resolver provider.Resolver, cfg *config.Config, proxy netclient.ProxySpec, selection provider.Selection) (provider.Provider, error) {
+	if resolver != nil {
+		return resolver.Resolve(selection)
 	}
 	return NewLocalProviderResolver(cfg, proxy).Resolve(selection)
+}
+
+// mergeSidecarProviders wraps the build's resolver with the extension-hosted
+// provider adapter (stage 7) whenever a started sidecar declared providers in
+// its handshake. The base resolver — the caller-owned broker when
+// opts.ProviderResolver is set, the local config-backed one otherwise — keeps
+// serving every non-plugin ref; plugin providers are additive on top of it,
+// and an exact-ref collision without the plugin's provider:<ref> claim is a
+// *providerext.ConflictError (fatal at the call site). The merged Resolver is
+// also the sidecar clients' stream router, installed here so inbound
+// stream/chunk and stream/end notifications reach the buffered streams.
+func mergeSidecarProviders(base provider.Resolver, mgr *sidecar.Manager, claims map[extension.Slot]extension.ContributionSource) (provider.Resolver, error) {
+	if mgr == nil {
+		return base, nil
+	}
+	declares := false
+	for _, client := range mgr.Clients() {
+		if len(client.Handshake().Providers) > 0 {
+			declares = true
+			break
+		}
+	}
+	if !declares {
+		return base, nil
+	}
+	clientsFn := func() []providerext.ProviderClient {
+		clients := mgr.Clients()
+		out := make([]providerext.ProviderClient, 0, len(clients))
+		for _, client := range clients {
+			out = append(out, client)
+		}
+		return out
+	}
+	merged, err := providerext.New(base, clientsFn, claims)
+	if err != nil {
+		return nil, err
+	}
+	for _, client := range mgr.Clients() {
+		client.SetStreamRouter(merged)
+	}
+	return merged, nil
 }
 
 func modelRefFromEntry(e *config.ProviderEntry) string {
@@ -86,12 +130,14 @@ func modelRefFromEntry(e *config.ProviderEntry) string {
 	return e.Name + "/" + e.Model
 }
 
-// resolveModelEntry synthesizes only non-secret metadata from the Broker
-// catalog. A caller-owned resolver is authoritative even when the credential-
-// free Host happens to contain a provider with the same ref.
-func resolveModelEntry(opts Options, cfg *config.Config, modelName string) (*config.ProviderEntry, string, error) {
-	if opts.ProviderResolver != nil {
-		entry := syntheticEntryFromResolver(opts.ProviderResolver, modelName)
+// resolveModelEntry synthesizes only non-secret metadata from the resolver
+// catalog. A caller-owned (or extension-merged) resolver is authoritative even
+// when the credential-free Host happens to contain a provider with the same
+// ref. The unknown-model error names every ref the session could have used,
+// including plugin-namespaced refs a merged extension resolver serves.
+func resolveModelEntry(resolver provider.Resolver, cfg *config.Config, modelName string) (*config.ProviderEntry, string, error) {
+	if resolver != nil {
+		entry := syntheticEntryFromResolver(resolver, modelName)
 		if strings.TrimSpace(entry.Name) != "" {
 			return entry, modelRefFromEntry(entry), nil
 		}
@@ -99,12 +145,35 @@ func resolveModelEntry(opts Options, cfg *config.Config, modelName string) (*con
 	if entry, ok := cfg.ResolveModel(modelName); ok {
 		return entry, modelRefFromEntry(entry), nil
 	}
-	return nil, "", fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `reasonix setup` to reconfigure", ErrUnknownModel, modelName, providerNames(cfg))
+	available := providerNames(cfg)
+	if pluginRefs := extensionCatalogRefs(resolver); len(pluginRefs) > 0 {
+		if available != "" {
+			available += "/"
+		}
+		available += strings.Join(pluginRefs, "/")
+	}
+	return nil, "", fmt.Errorf("%w %q (configured: %s); note: defining [[providers]] replaces the built-in presets, so add a [[providers]] entry for it or use a configured name, or run `reasonix setup` to reconfigure", ErrUnknownModel, modelName, available)
 }
 
-func resolveOptionalEntry(opts Options, cfg *config.Config, ref string) (*config.ProviderEntry, bool) {
-	if opts.ProviderResolver != nil {
-		entry := syntheticEntryFromResolver(opts.ProviderResolver, ref)
+// extensionCatalogRefs returns the plugin-namespaced refs a resolver's catalog
+// serves, for error messages and pickers that merge extension providers with
+// the config's own. Nil-safe: no resolver (or no plugin refs) → nil.
+func extensionCatalogRefs(resolver provider.Resolver) []string {
+	if resolver == nil {
+		return nil
+	}
+	var out []string
+	for _, d := range resolver.Catalog() {
+		if providerext.PluginRefOwner(d.Ref) != "" {
+			out = append(out, d.Ref)
+		}
+	}
+	return out
+}
+
+func resolveOptionalEntry(resolver provider.Resolver, cfg *config.Config, ref string) (*config.ProviderEntry, bool) {
+	if resolver != nil {
+		entry := syntheticEntryFromResolver(resolver, ref)
 		if strings.TrimSpace(entry.Name) != "" {
 			return entry, true
 		}

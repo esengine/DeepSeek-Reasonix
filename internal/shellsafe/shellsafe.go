@@ -7,6 +7,8 @@ package shellsafe
 import (
 	"strings"
 
+	"mvdan.cc/sh/v3/syntax"
+
 	"reasonix/internal/shellparse"
 )
 
@@ -98,8 +100,157 @@ func ContainsShellSyntax(cmd string) bool {
 // ok is false when the command contains shell syntax or the base/subcommand is
 // not a known read-only operation.
 func CommandIsReadOnly(command string) (base, sub string, ok bool) {
+	base, sub, _, ok = ClassifyReadOnlyCommand(command)
+	return base, sub, ok
+}
+
+// ClassifyReadOnlyCommand returns the resolved argument fields as well as the
+// command classification. Dynamic fields are opaque placeholders and are
+// returned only for the narrowly verified substitution shape above.
+func ClassifyReadOnlyCommand(command string) (base, sub string, fields []string, ok bool) {
 	fields, malformed := shellparse.StaticFields(command)
-	if malformed != "" || len(fields) == 0 {
+	if malformed != "" {
+		var dynamic bool
+		fields, dynamic, ok = resolvedReadOnlyFields(command, false)
+		if !ok || !dynamic {
+			return "", "", nil, false
+		}
+	}
+	if len(fields) == 0 {
+		return "", "", nil, false
+	}
+	base = strings.ToLower(fields[0])
+	if ReadOnlyCommands[base] {
+		if hasResolvedSubstitution(fields) && !substitutionSafeCommands[base] {
+			return "", "", nil, false
+		}
+		return base, "", fields, true
+	}
+	if len(fields) > 1 {
+		if subs, prefixed := ReadOnlyPrefixes[base]; prefixed {
+			sub = strings.ToLower(fields[1])
+			if subs[sub] {
+				return base, sub, fields, true
+			}
+		}
+	}
+	return "", "", nil, false
+}
+
+const resolvedSubstitutionPlaceholder = "__reasonix_read_only_substitution__"
+
+var substitutionSafeCommands = map[string]bool{
+	"cat": true, "head": true, "tail": true, "ls": true,
+	"grep": true, "egrep": true, "fgrep": true, "rg": true,
+	"echo": true, "printf": true, "pwd": true, "whoami": true,
+	"id": true, "uname": true, "hostname": true, "wc": true,
+	"stat": true, "file": true, "du": true, "df": true,
+	"cmp": true, "comm": true, "true": true, "false": true,
+	"test": true, "[": true, "basename": true, "dirname": true,
+	"realpath": true, "readlink": true,
+}
+
+func hasResolvedSubstitution(fields []string) bool {
+	for _, field := range fields {
+		if strings.Contains(field, resolvedSubstitutionPlaceholder) {
+			return true
+		}
+	}
+	return false
+}
+
+// resolvedReadOnlyFields accepts one narrow dynamic shape: a command from the
+// read-only table with a double-quoted command substitution whose nested
+// command is itself a single, static, argument-safe read-only command. It never
+// evaluates output. Unquoted substitutions, parameters, arithmetic, process
+// substitutions, redirects, assignments, chains, and background jobs remain
+// fail-closed.
+func resolvedReadOnlyFields(command string, nested bool) ([]string, bool, bool) {
+	file, err := shellparse.ParseBash(command)
+	if err != nil || len(file.Stmts) != 1 {
+		return nil, false, false
+	}
+	return resolvedReadOnlyStmt(file.Stmts[0], nested)
+}
+
+func resolvedReadOnlyStmt(stmt *syntax.Stmt, nested bool) ([]string, bool, bool) {
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || stmt.Disown || len(stmt.Redirs) > 0 {
+		return nil, false, false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) == 0 {
+		return nil, false, false
+	}
+	fields := make([]string, 0, len(call.Args))
+	dynamic := false
+	for _, word := range call.Args {
+		field, wordDynamic, ok := resolvedReadOnlyWord(word)
+		if !ok {
+			return nil, false, false
+		}
+		fields = append(fields, field)
+		dynamic = dynamic || wordDynamic
+	}
+	base, sub, tableOK := readOnlyFields(fields)
+	if !tableOK || (nested && (!substitutionSafeCommands[base] || !nestedReadOnlyArgsSafe(base, sub, fields))) {
+		return nil, false, false
+	}
+	return fields, dynamic, true
+}
+
+func resolvedReadOnlyWord(word *syntax.Word) (string, bool, bool) {
+	if static, ok := shellparse.StaticWord(word); ok {
+		return static, false, true
+	}
+	if word == nil {
+		return "", false, false
+	}
+	var out strings.Builder
+	dynamic := false
+	for _, part := range word.Parts {
+		value, partDynamic, ok := resolvedReadOnlyWordPart(part, false)
+		if !ok {
+			return "", false, false
+		}
+		out.WriteString(value)
+		dynamic = dynamic || partDynamic
+	}
+	return out.String(), dynamic, true
+}
+
+func resolvedReadOnlyWordPart(part syntax.WordPart, doubleQuoted bool) (string, bool, bool) {
+	switch value := part.(type) {
+	case *syntax.Lit:
+		return value.Value, false, true
+	case *syntax.SglQuoted:
+		return value.Value, false, true
+	case *syntax.DblQuoted:
+		var out strings.Builder
+		dynamic := false
+		for _, nested := range value.Parts {
+			text, partDynamic, ok := resolvedReadOnlyWordPart(nested, true)
+			if !ok {
+				return "", false, false
+			}
+			out.WriteString(text)
+			dynamic = dynamic || partDynamic
+		}
+		return out.String(), dynamic, true
+	case *syntax.CmdSubst:
+		if !doubleQuoted || value.TempFile || value.ReplyVar || len(value.Stmts) != 1 {
+			return "", false, false
+		}
+		if _, _, ok := resolvedReadOnlyStmt(value.Stmts[0], true); !ok {
+			return "", false, false
+		}
+		return resolvedSubstitutionPlaceholder, true, true
+	default:
+		return "", false, false
+	}
+}
+
+func readOnlyFields(fields []string) (base, sub string, ok bool) {
+	if len(fields) == 0 {
 		return "", "", false
 	}
 	base = strings.ToLower(fields[0])
@@ -107,14 +258,34 @@ func CommandIsReadOnly(command string) (base, sub string, ok bool) {
 		return base, "", true
 	}
 	if len(fields) > 1 {
-		if subs, prefixed := ReadOnlyPrefixes[base]; prefixed {
-			sub = strings.ToLower(fields[1])
-			if subs[sub] {
-				return base, sub, true
-			}
+		sub = strings.ToLower(fields[1])
+		if ReadOnlyPrefixes[base][sub] {
+			return base, sub, true
 		}
 	}
 	return "", "", false
+}
+
+func nestedReadOnlyArgsSafe(base, sub string, fields []string) bool {
+	args := fields[1:]
+	if sub != "" && len(args) > 0 {
+		args = args[1:]
+	}
+	for _, arg := range args {
+		switch {
+		case base == "find" && (arg == "-exec" || arg == "-execdir" || arg == "-delete" || arg == "-ok" || arg == "-okdir" || arg == "-fls" || arg == "-fprint" || arg == "-fprint0" || arg == "-fprintf"):
+			return false
+		case base == "sed" && (strings.HasPrefix(arg, "-i") || strings.HasPrefix(arg, "--in-place")):
+			return false
+		case base == "sort" && (strings.HasPrefix(arg, "-o") || arg == "--output" || strings.HasPrefix(arg, "--output=")):
+			return false
+		case base == "git" && (sub == "diff" || sub == "show" || sub == "log") && (arg == "--output" || strings.HasPrefix(arg, "--output=")):
+			return false
+		case base == "go" && sub == "env" && (arg == "-w" || arg == "-u"):
+			return false
+		}
+	}
+	return base != "git" || sub != "tag" || len(args) == 0 || args[0] == "-l" || args[0] == "--list"
 }
 
 // CommandIsWorkspaceNonMutating reports commands that Delivery can execute
@@ -122,16 +293,23 @@ func CommandIsReadOnly(command string) (base, sub string, ok bool) {
 // subset; network probes live only in workspaceNonMutatingCommands so this
 // classification cannot silently widen approval or read-only subagent access.
 func CommandIsWorkspaceNonMutating(command string) (base, sub string, ok bool) {
-	if base, sub, ok = CommandIsReadOnly(command); ok {
-		return base, sub, true
+	base, sub, _, ok = ClassifyWorkspaceNonMutatingCommand(command)
+	return base, sub, ok
+}
+
+// ClassifyWorkspaceNonMutatingCommand is the field-carrying form used by
+// Delivery mutation accounting.
+func ClassifyWorkspaceNonMutatingCommand(command string) (base, sub string, fields []string, ok bool) {
+	if base, sub, fields, ok = ClassifyReadOnlyCommand(command); ok {
+		return base, sub, fields, true
 	}
 	fields, malformed := shellparse.StaticFields(command)
 	if malformed != "" || len(fields) == 0 {
-		return "", "", false
+		return "", "", nil, false
 	}
 	base = strings.ToLower(fields[0])
 	if workspaceNonMutatingCommands[base] {
-		return base, "", true
+		return base, "", fields, true
 	}
-	return "", "", false
+	return "", "", nil, false
 }

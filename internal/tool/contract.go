@@ -44,10 +44,13 @@ func contractEntriesFromTools(tools []Tool, canonical map[string]json.RawMessage
 }
 
 // ContractEntries returns the registry's provider-visible contract snapshot.
+// The tool list is captured under the lock, but the per-tool method calls
+// (Schema/Description/ReadOnly) run AFTER it is released: a lazy MCP
+// placeholder's ReadOnly takes the spawn mutex, and the spawn's trySwap takes
+// this registry's write lock — holding the read lock across ReadOnly is an
+// AB-BA deadlock (boot's snapshot assembly hit it with a live swap in flight).
 func (r *Registry) ContractEntries() []ContractEntry {
 	r.mu.RLock()
-	defer r.mu.RUnlock()
-
 	tools := make([]Tool, 0, len(r.order))
 	canonical := make(map[string]json.RawMessage, len(r.order))
 	for _, name := range r.order {
@@ -58,6 +61,7 @@ func (r *Registry) ContractEntries() []ContractEntry {
 		tools = append(tools, t)
 		canonical[name] = r.canon[name]
 	}
+	r.mu.RUnlock()
 	return contractEntriesFromTools(tools, canonical)
 }
 

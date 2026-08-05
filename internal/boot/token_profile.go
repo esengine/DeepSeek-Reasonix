@@ -34,6 +34,7 @@ var tokenEconomyCoreBuiltins = []string{
 	"edit_file",
 	"kill_shell",
 	"read_file",
+	"update_goal",
 	"wait",
 	"write_file",
 }

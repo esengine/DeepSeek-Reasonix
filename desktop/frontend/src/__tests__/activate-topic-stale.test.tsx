@@ -298,8 +298,12 @@ await waitFor("queued last click applies once it runs", () => controller?.active
 // enqueue time — the queue-based scenario above only proves the mechanism.
 const appSource = readFileSync(new URL("../App.tsx", import.meta.url), "utf8");
 ok(
-  /const enqueueNavigation = useCallback\(\(input: DesktopNavigationIntent\)[\s\S]{0,900}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,900}?enqueueNavigationRequest\(/.test(appSource),
-  "App.enqueueNavigation captures a shared navigation intent before enqueueNavigationRequest",
+  /const enqueueNavigation = useCallback\(\(input: DesktopNavigationIntent\)[\s\S]{0,900}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,900}?enqueueNavigationWithIntent\(input, navigationIntentSeq\)/.test(appSource),
+  "App.enqueueNavigation captures a shared navigation intent before handing the request to the queue",
+);
+ok(
+  /const enqueueNavigationWithIntent = useCallback\([\s\S]{0,900}?enqueueNavigationRequest\([\s\S]{0,900}?\{ \.\.\.input, navigationIntentSeq \}/.test(appSource),
+  "App.enqueueNavigationWithIntent forwards the captured intent into enqueueNavigationRequest",
 );
 ok(
   /const enqueueTabSwitch = useCallback\([\s\S]{0,1400}?const navigationIntentSeq = noteNavigationIntent\(\);[\s\S]{0,1400}?switchTab\(request\.tabId, request\.optimisticTab, request\.navigationIntentSeq\)/.test(appSource),

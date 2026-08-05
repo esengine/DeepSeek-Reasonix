@@ -792,6 +792,55 @@ func TestBuildRequestOmitsResolvedToolCallMetadata(t *testing.T) {
 	}
 }
 
+// TestToolResultEmptyNameStillSerialized guards MiMo #4711: a strict
+// OpenAI-compatible backend rejects a role=tool message whose `name` key is
+// absent ("Param Incorrect, name is not set"). A legacy empty-name tool result
+// must still carry the key (as an empty string) rather than vanish via
+// omitempty.
+func TestToolResultEmptyNameStillSerialized(t *testing.T) {
+	c := &client{model: "deepseek-v4"}
+	req := c.buildRequest(provider.Request{Messages: []provider.Message{
+		// Both the tool_call and its result have an empty name: the legacy
+		// #4727 shape where backfill has no source to recover from. The wire
+		// must still carry the name key so strict backends don't 400.
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "call_1", Name: "", Content: "file contents"},
+	}})
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// The tool result message must carry the name key even though the name is
+	// empty — strict backends 400 a missing key.
+	var msgs []map[string]any
+	if err := json.Unmarshal(b, &msgs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	roles := []string{msgs[0]["role"].(string), msgs[1]["role"].(string)}
+	if roles[1] != "tool" {
+		t.Fatalf("second message role = %q, want tool", roles[1])
+	}
+	// Tool message: name key must be present (empty string serialized).
+	if _, ok := msgs[1]["name"]; !ok {
+		t.Fatalf("tool message lost its name key (must serialize empty): %s", b)
+	}
+	if name, _ := msgs[1]["name"].(string); name != "" {
+		t.Fatalf("tool message name = %q, want empty (legacy empty-name result)", name)
+	}
+	// Non-tool messages: name key must stay absent (byte-stable prefix).
+	for i, m := range msgs {
+		if roles[i] == "tool" {
+			continue
+		}
+		if _, ok := m["name"]; ok {
+			t.Fatalf("non-tool message %d leaked name key: %s", i, b)
+		}
+	}
+}
+
 // TestStreamRepairsDanglingToolCalls reproduces and guards the DeepSeek 400
 // "An assistant message with 'tool_calls' must be followed by tool messages
 // responding to each 'tool_call_id'". A resumed/interrupted session can carry an

@@ -1,9 +1,33 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+// PauseClass names the guard that deliberately ended a run, so a host can
+// classify an outcome without reaching into the unexported pause types.
+// Empty for ordinary provider/tool failures.
+func PauseClass(err error) string {
+	var maxSteps *maxStepsPause
+	if errors.As(err, &maxSteps) {
+		return "max_steps"
+	}
+	var stall *todoStallPause
+	if errors.As(err, &stall) {
+		return "todo_stall"
+	}
+	var readiness *FinalReadinessError
+	if errors.As(err, &readiness) {
+		return "final_readiness"
+	}
+	var recovery *RecoveryPauseError
+	if errors.As(err, &recovery) {
+		return "recovery_paused"
+	}
+	return ""
+}
 
 // FinalReadinessError reports that the model exhausted its recovery attempts
 // before satisfying the host-observed delivery checks.

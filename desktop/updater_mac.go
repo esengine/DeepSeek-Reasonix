@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -181,14 +182,55 @@ func waitForMacHandoffReady(reader *os.File, timeout time.Duration) error {
 	if err := reader.SetReadDeadline(time.Now().Add(timeout)); err != nil {
 		return err
 	}
-	buf := make([]byte, len("ready"))
-	if _, err := io.ReadFull(reader, buf); err != nil {
+	var response macHandoffReadyResponse
+	if err := json.NewDecoder(io.LimitReader(reader, 64<<10)).Decode(&response); err != nil {
 		return err
 	}
-	if string(buf) != "ready" {
-		return fmt.Errorf("unexpected readiness response")
+	switch response.Status {
+	case "ready":
+		return nil
+	case "error":
+		phase := strings.TrimSpace(response.Phase)
+		if phase == "" {
+			phase = "startup"
+		}
+		detail := strings.TrimSpace(response.Error)
+		if detail == "" {
+			detail = "unknown helper error"
+		}
+		return fmt.Errorf("helper failed during %s: %s", phase, detail)
+	default:
+		return fmt.Errorf("unexpected readiness response %q", response.Status)
 	}
-	return nil
+}
+
+type macHandoffReadyResponse struct {
+	Status string `json:"status"`
+	Phase  string `json:"phase,omitempty"`
+	Error  string `json:"error,omitempty"`
+}
+
+func writeMacHandoffReadyResponse(fd int, response macHandoffReadyResponse) error {
+	if fd == 0 {
+		return nil
+	}
+	ready := os.NewFile(uintptr(fd), "reasonix-update-ready")
+	if ready == nil {
+		return fmt.Errorf("readiness pipe is unavailable")
+	}
+	defer ready.Close()
+	return json.NewEncoder(ready).Encode(response)
+}
+
+func reportMacHandoffStartupFailure(cfg macUpdateHandoffConfig, phase string, err error) {
+	if err == nil {
+		return
+	}
+	_ = writeMacHandoffReadyResponse(cfg.ReadyFD, macHandoffReadyResponse{
+		Status: "error",
+		Phase:  phase,
+		Error:  err.Error(),
+	})
 }
 
 // maybeRunMacUpdateHandoff handles the detached self-update child before Wails
@@ -260,13 +302,16 @@ func runMacUpdateHandoff(cfg macUpdateHandoffConfig) int {
 	pending, err := readMacUpdateHandoff()
 	if err != nil {
 		logf("cannot read pending update handoff: %v", err)
+		reportMacHandoffStartupFailure(cfg, "read-pending-transaction", err)
 		return 1
 	}
 	if strings.TrimSpace(pending.ToVersion) != cfg.ToVersion ||
 		strings.TrimSpace(pending.CreatedAt) != cfg.CreatedAt ||
 		repair.UpdateTransactionID(pending) != cfg.TransactionID ||
 		pending.HandoffOwnerPID <= 0 {
-		logf("pending update does not match handoff identity")
+		err := fmt.Errorf("pending update does not match handoff identity")
+		logf("%v", err)
+		reportMacHandoffStartupFailure(cfg, "validate-transaction-identity", err)
 		return 1
 	}
 	if err := completeMacHandoffHandshake(cfg); err != nil {
@@ -543,23 +588,11 @@ func completeMacHandoffHandshake(cfg macUpdateHandoffConfig) error {
 	if cfg.ReadyFD == 0 && cfg.ProceedFD == 0 {
 		return nil
 	}
-	ready := os.NewFile(uintptr(cfg.ReadyFD), "reasonix-update-ready")
 	proceed := os.NewFile(uintptr(cfg.ProceedFD), "reasonix-update-proceed")
-	if ready == nil || proceed == nil {
-		if ready != nil {
-			_ = ready.Close()
-		}
-		if proceed != nil {
-			_ = proceed.Close()
-		}
+	if proceed == nil {
 		return fmt.Errorf("handoff pipe is unavailable")
 	}
-	if _, err := io.WriteString(ready, "ready"); err != nil {
-		_ = ready.Close()
-		_ = proceed.Close()
-		return fmt.Errorf("signal readiness: %w", err)
-	}
-	if err := ready.Close(); err != nil {
+	if err := writeMacHandoffReadyResponse(cfg.ReadyFD, macHandoffReadyResponse{Status: "ready"}); err != nil {
 		_ = proceed.Close()
 		return fmt.Errorf("signal readiness: %w", err)
 	}

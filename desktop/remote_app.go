@@ -18,7 +18,6 @@ import (
 	"reasonix/internal/remote"
 	"reasonix/internal/remote/bootstrap"
 	"reasonix/internal/remote/forward"
-	"reasonix/internal/remote/protocol"
 )
 
 // ── View structs mirrored in frontend/src/lib/types.ts ──
@@ -223,8 +222,64 @@ func (a *App) emitRemoteEvent(name string, payload any) {
 }
 
 // remoteEventSink implementation on *App.
-func (a *App) onStatus(s RemoteConnectionStatusView) { a.emitRemoteEvent("remote:status", s) }
-func (a *App) onServer(s RemoteServerView)           { a.emitRemoteEvent("remote:server", s) }
+func (a *App) onStatus(s RemoteConnectionStatusView) {
+	a.emitRemoteEvent("remote:status", s)
+	// A terminal SSH failure (auth, host key, exhausted retries) kills the
+	// tunnel: close the host's web window so the user is not left staring at a
+	// dead Serve page. The frontend already shows the failure reason through
+	// the remote:status event. Transient reconnects (reconnecting/degraded)
+	// keep the window open.
+	if s.State == "stopped" && s.Error != "" {
+		// Status callbacks may run while desktopRemoteManager.mu is held, so never
+		// wait on the host lifecycle mutex here. Capturing the generation before
+		// queueing makes a later explicit reconnect/open supersede this close.
+		op := a.beginRemoteWindowHostOperation(s.HostID)
+		a.goSafe("remoteWindowTerminalClose", func() {
+			_ = op.run(func(func() bool) error {
+				a.closeRemoteWindowForHost(s.HostID)
+				return nil
+			})
+		})
+		return
+	}
+	// After a reconnect the loopback tunnel rebinds to a new port. Re-point an
+	// open web window at the fresh Serve URL so it stays usable.
+	if s.State == "connected" && a.hasRemoteWindow(s.HostID) {
+		a.refreshRemoteWindowAfterReconnect(s.HostID)
+	}
+}
+
+// refreshRemoteWindowAfterReconnect re-establishes the Serve forward after an
+// SSH reconnect and navigates the host's web window to the new loopback URL.
+// The remote Serve process is reused, so this is a cheap state probe when the
+// tunnel already rebinding — the window is kept regardless of failure, and the
+// user can reopen it if the Serve itself went away.
+func (a *App) refreshRemoteWindowAfterReconnect(hostID string) {
+	op := a.beginRemoteWindowHostOperation(hostID)
+	a.goSafe("remoteWindowReconnect", func() {
+		_ = op.run(func(current func() bool) error {
+			rt, err := a.remoteRT()
+			if err != nil {
+				return nil
+			}
+			status := rt.ServerStatus(hostID)
+			if status.State != "ready" || strings.TrimSpace(status.Workspace) == "" {
+				return nil
+			}
+			view, token, err := rt.EnsureServer(a.bootContext(), hostID, status.Workspace)
+			if err != nil || view.State != "ready" || view.LocalURL == "" || !current() {
+				return nil
+			}
+			if !a.hasRemoteWindow(hostID) {
+				return nil
+			}
+			_ = a.openRemoteWindowForHost(hostID, serveURLWithToken(view.LocalURL, token))
+			return nil
+		})
+	})
+}
+
+func (a *App) onServer(s RemoteServerView) { a.emitRemoteEvent("remote:server", s) }
 func (a *App) onForwards(hostID string, f []RemoteForwardView) {
 	a.emitRemoteEvent("remote:forwards", map[string]any{"hostId": hostID, "forwards": f})
 }
@@ -256,11 +311,18 @@ func (a *App) UpdateRemoteHost(id string, in RemoteHostInput) (RemoteHostView, e
 }
 
 func (a *App) RemoveRemoteHost(id string) error {
-	rt, err := a.remoteRT()
-	if err != nil {
-		return err
-	}
-	return rt.RemoveHost(id)
+	op := a.beginRemoteWindowHostOperation(id)
+	return op.run(func(func() bool) error {
+		rt, err := a.remoteRT()
+		if err != nil {
+			return err
+		}
+		if err := rt.RemoveHost(id); err != nil {
+			return err
+		}
+		a.closeRemoteWindowForHost(id)
+		return nil
+	})
 }
 
 func (a *App) ScanSSHConfig() ([]RemoteHostInput, error) {
@@ -317,11 +379,21 @@ func applyRemoteConnectionError(view *RemoteConnectionStatusView, err error) {
 }
 
 func (a *App) DisconnectRemoteHost(id string) error {
-	rt, err := a.remoteRT()
-	if err != nil {
-		return err
-	}
-	return rt.Disconnect(id)
+	op := a.beginRemoteWindowHostOperation(id)
+	return op.run(func(func() bool) error {
+		rt, err := a.remoteRT()
+		if err != nil {
+			return err
+		}
+		if err := rt.Disconnect(id); err != nil {
+			return err
+		}
+		// An explicit disconnect kills the loopback tunnel; close the host's web
+		// window so the user is not left staring at a dead Serve page. The remote
+		// Serve itself stays resident.
+		a.closeRemoteWindowForHost(id)
+		return nil
+	})
 }
 
 func (a *App) RemoteConnectionStatuses() []RemoteConnectionStatusView {
@@ -423,29 +495,70 @@ func (a *App) RemoveRemoteForward(hostID, forwardID string) error {
 	return rt.RemoveForward(hostID, forwardID)
 }
 
-func (a *App) EnsureRemoteServer(hostID, workspace string) error {
-	rt, err := a.remoteRT()
-	if err != nil {
-		return err
-	}
-	a.goSafe("remoteEnsureServer", func() {
-		_, _, _ = rt.EnsureServer(a.bootContext(), hostID, workspace)
+// OpenRemoteWorkspace is the idempotent "open remote web" entry: it starts or
+// reuses the target workspace's remote Serve, atomically replaces the loopback
+// tunnel, then opens (or re-points) the host's web window.
+//
+// Two-phase switch contract:
+//   - If Serve/tunnel establishment fails, nothing is touched: the previous
+//     window and tunnel stay exactly as they were, and no workspace is saved.
+//   - Once the new Serve and tunnel are committed, the switch is final. A
+//     window-open failure (spawn error) surfaces to the caller while the Serve
+//     stays ready for the new workspace, and the recorded last workspace
+//     matches the running Serve so the next open reuses it. The previous
+//     window, if any, is left in place; it is re-pointed by the next
+//     successful open (or closed by an explicit disconnect/stop).
+func (a *App) OpenRemoteWorkspace(hostID, workspace string) error {
+	op := a.beginRemoteWindowHostOperation(hostID)
+	return op.run(func(current func() bool) error {
+		rt, err := a.remoteRT()
+		if err != nil {
+			return err
+		}
+		view, token, err := rt.EnsureServer(a.bootContext(), hostID, workspace)
+		if err != nil {
+			return err
+		}
+		// A disconnect, stop, removal, or terminal SSH failure that began while
+		// EnsureServer was in flight owns the final state and must prevent a late
+		// child window from being spawned against its dead tunnel.
+		if !current() {
+			return nil
+		}
+		if view.LocalURL == "" {
+			return fmt.Errorf("remote serve did not report a local URL")
+		}
+		url := serveURLWithToken(view.LocalURL, token)
+		a.saveLastRemoteWorkspace(hostID, workspace)
+		return a.openRemoteWindowForHost(hostID, url)
 	})
-	return nil
 }
 
-// OpenRemoteWorkspace opens the Remote Workbench path: SSH stdio attach-workspace
-// + local Provider Broker. It does not open a Serve HTML child window.
-func (a *App) OpenRemoteWorkspace(hostID, workspace string) error {
-	return a.WorkbenchConnectRemote(hostID, workspace)
+// serveURLWithToken appends the one-shot Serve token to the first-visit URL.
+// The remote serve converts it to an HttpOnly cookie on the first request and
+// redirects to a token-free URL.
+func serveURLWithToken(localURL, token string) string {
+	if token != "" && !strings.Contains(localURL, "token=") {
+		return fmt.Sprintf("%s?token=%s", strings.TrimRight(localURL, "/"), token)
+	}
+	return localURL
 }
 
 func (a *App) StopRemoteServer(hostID string) error {
-	rt, err := a.remoteRT()
-	if err != nil {
-		return err
-	}
-	return rt.StopServer(hostID)
+	op := a.beginRemoteWindowHostOperation(hostID)
+	return op.run(func(func() bool) error {
+		rt, err := a.remoteRT()
+		if err != nil {
+			return err
+		}
+		if err := rt.StopServer(hostID); err != nil {
+			return err
+		}
+		// Stopping the service also tears down the loopback tunnel, so close the
+		// host's web window.
+		a.closeRemoteWindowForHost(hostID)
+		return nil
+	})
 }
 
 func (a *App) RemoteServerStatus(hostID string) (RemoteServerView, error) {
@@ -518,15 +631,14 @@ type desktopRemoteManager struct {
 	mu    sync.Mutex
 	hosts map[string]*managedHost
 
-	newClient          func(remote.Options) (desktopSSHClient, error)
-	ensureServe        func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error)
-	ensureWorkbenchCLI func(context.Context, bootstrap.Conn, bootstrap.WorkbenchOptions) (bootstrap.WorkbenchCLI, error)
-	stopServe          func(context.Context, bootstrap.Conn, string) error
-	serveLogs          func(context.Context, bootstrap.Conn, string, int, *strings.Builder) error
-	localBinary        func() string
-	fetchRemoteBinary  func(context.Context, string, string, string) ([]byte, error)
-	promptGate         chan struct{}
-	promptSeq          uint64
+	newClient         func(remote.Options) (desktopSSHClient, error)
+	ensureServe       func(context.Context, bootstrap.Conn, bootstrap.Options) (bootstrap.Result, error)
+	stopServe         func(context.Context, bootstrap.Conn, string) error
+	serveLogs         func(context.Context, bootstrap.Conn, string, int, *strings.Builder) error
+	localBinary       func() string
+	fetchRemoteBinary func(context.Context, string, string, string) ([]byte, error)
+	promptGate        chan struct{}
+	promptSeq         uint64
 }
 
 func newDesktopRemoteManager(sink remoteEventSink) *desktopRemoteManager {
@@ -536,9 +648,8 @@ func newDesktopRemoteManager(sink remoteEventSink) *desktopRemoteManager {
 		newClient: func(opts remote.Options) (desktopSSHClient, error) {
 			return remote.New(opts)
 		},
-		ensureServe:        bootstrap.EnsureServe,
-		ensureWorkbenchCLI: bootstrap.EnsureWorkbenchCLI,
-		stopServe:          bootstrap.Stop,
+		ensureServe: bootstrap.EnsureServe,
+		stopServe:   bootstrap.Stop,
 		serveLogs: func(ctx context.Context, conn bootstrap.Conn, workspace string, n int, out *strings.Builder) error {
 			return bootstrap.Logs(ctx, conn, workspace, n, out)
 		},
@@ -856,75 +967,6 @@ func (m *desktopRemoteManager) ResolveSecret(hostID, promptID, secret string, ac
 	default:
 		return fmt.Errorf("SSH credential prompt already resolved for %q", hostID)
 	}
-}
-
-// workbenchPeerIdentity returns the target key authenticated by the live Go SSH
-// connection. It never synthesizes a placeholder identity: Provider Broker
-// authorization must be bound to a real, verified transport peer.
-func (m *desktopRemoteManager) workbenchPeerIdentity(hostID string) (RemoteFingerprintView, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	mh := m.hosts[hostID]
-	if mh == nil || mh.verifiedPeer == nil || (mh.status.State != "connected" && mh.status.State != "degraded") {
-		return RemoteFingerprintView{}, false
-	}
-	return *mh.verifiedPeer, true
-}
-
-// workbenchAskPassHandler reuses the established Remote SSH UI channel. The
-// main-window flow connects the managed Go SSH transport first, so an OpenSSH
-// host-key confirmation is accepted only when its fingerprint matches that
-// already-authenticated peer. Passwords/passphrases still travel through the
-// existing one-shot secret dialog and are never placed in argv or persisted.
-func (m *desktopRemoteManager) workbenchAskPassHandler(hostID string, entry config.RemoteHostEntry) RemoteAskPassHandler {
-	return func(ctx context.Context, prompt RemoteAskPassPrompt) (RemoteAskPassAnswer, error) {
-		m.mu.Lock()
-		mh := m.hosts[hostID]
-		var peer *RemoteFingerprintView
-		if mh != nil && mh.verifiedPeer != nil {
-			copyPeer := *mh.verifiedPeer
-			peer = &copyPeer
-		}
-		m.mu.Unlock()
-		if mh == nil {
-			return RemoteAskPassAnswer{}, fmt.Errorf("host %q is no longer connected", hostID)
-		}
-		switch prompt.Kind {
-		case RemoteAskPassHostKeyChanged:
-			return RemoteAskPassAnswer{}, fmt.Errorf("host key changed for %q", hostID)
-		case RemoteAskPassHostKeyConfirm:
-			if peer == nil || !strings.Contains(prompt.Message, peer.SHA256) {
-				return RemoteAskPassAnswer{}, fmt.Errorf("OpenSSH peer identity does not match the verified host %q", hostID)
-			}
-			return RemoteAskPassAnswer{Accepted: true, Value: "yes"}, nil
-		case RemoteAskPassKeyPassphrase:
-			if entry.PassphraseEnv != "" {
-				if value := config.ResolveCredential(entry.PassphraseEnv).Value; value != "" {
-					return RemoteAskPassAnswer{Accepted: true, Value: value}, nil
-				}
-			}
-			value, err := m.secretPrompt(hostID, mh)(ctx, remote.SecretPassphrase, peerLabel(peer, entry), entry.IdentityFile)
-			return RemoteAskPassAnswer{Accepted: err == nil, Value: value}, err
-		default:
-			if entry.PasswordEnv != "" {
-				if value := config.ResolveCredential(entry.PasswordEnv).Value; value != "" {
-					return RemoteAskPassAnswer{Accepted: true, Value: value}, nil
-				}
-			}
-			value, err := m.secretPrompt(hostID, mh)(ctx, remote.SecretPassword, peerLabel(peer, entry), "")
-			return RemoteAskPassAnswer{Accepted: err == nil, Value: value}, err
-		}
-	}
-}
-
-func peerLabel(peer *RemoteFingerprintView, entry config.RemoteHostEntry) string {
-	if peer != nil && strings.TrimSpace(peer.Address) != "" {
-		return peer.Address
-	}
-	if entry.User != "" {
-		return entry.User + "@" + entry.Host
-	}
-	return entry.Host
 }
 
 // hostKeyPrompt returns a HostKeyPrompt that surfaces the fingerprint as a
@@ -1275,6 +1317,7 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		return RemoteServerView{}, "", fmt.Errorf("host %q connection was replaced", hostID)
 	}
 	previousServer := mh.server
+	previousToken := mh.token
 	m.mu.Unlock()
 	c := mh.client
 	opCtx, cancel := managedOperationContext(ctx, mh)
@@ -1305,7 +1348,7 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 	})
 	if err != nil {
 		view := RemoteServerView{HostID: hostID, Workspace: workspace, State: "error", Error: err.Error()}
-		m.publishServerIfCurrent(hostID, mh, view, "")
+		m.publishFailedServeStart(hostID, mh, previousServer, previousToken, view)
 		return view, "", err
 	}
 	if !m.isCurrent(hostID, mh) {
@@ -1330,7 +1373,7 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 			cleanupCancel()
 		}
 		view := RemoteServerView{HostID: hostID, Workspace: workspace, State: "error", Error: ferr.Error()}
-		m.publishServerIfCurrent(hostID, mh, view, "")
+		m.publishFailedServeStart(hostID, mh, previousServer, previousToken, view)
 		return view, "", ferr
 	}
 	localURL := fmt.Sprintf("http://%s/", bound)
@@ -1340,38 +1383,6 @@ func (m *desktopRemoteManager) EnsureServer(ctx context.Context, hostID, workspa
 		return RemoteServerView{}, "", fmt.Errorf("host %q connection was replaced", hostID)
 	}
 	return view, res.Token, nil
-}
-
-// EnsureWorkbenchCLI prepares the exact Host executable required by the
-// Desktop's strict Remote Workbench Build ID. The per-host bootstrap mutex also
-// prevents the legacy serve installer from racing the Workbench installer.
-func (m *desktopRemoteManager) EnsureWorkbenchCLI(ctx context.Context, hostID string, entry config.RemoteHostEntry, expected protocol.BuildID) (string, error) {
-	mh := m.managed(hostID)
-	if mh == nil || mh.client == nil {
-		return "", fmt.Errorf("host %q is not connected", hostID)
-	}
-	mh.serveMu.Lock()
-	defer mh.serveMu.Unlock()
-	if !m.isCurrent(hostID, mh) {
-		return "", fmt.Errorf("host %q connection was replaced", hostID)
-	}
-	opCtx, cancel := managedOperationContext(ctx, mh)
-	defer cancel()
-	result, err := m.ensureWorkbenchCLI(opCtx, mh.client, bootstrap.WorkbenchOptions{
-		Install:       entry.ServeInstallMode(),
-		LocalBinary:   m.localBinary(),
-		LocalGOOS:     runtime.GOOS,
-		LocalGOARCH:   runtime.GOARCH,
-		ExpectedBuild: expected,
-		FetchBinary:   m.fetchRemoteBinary,
-	})
-	if err != nil {
-		return "", err
-	}
-	if !m.isCurrent(hostID, mh) {
-		return "", fmt.Errorf("host %q connection was replaced", hostID)
-	}
-	return result.Path, nil
 }
 
 func (m *desktopRemoteManager) StopServer(hostID string) error {
@@ -1493,6 +1504,21 @@ func managedOperationContext(parent context.Context, mh *managedHost) (context.C
 		stop()
 		cancel()
 	}
+}
+
+// publishFailedServeStart keeps host server ownership on a previous ready
+// Serve when a new Serve or its tunnel failed to establish. The previous
+// Serve is still running with its tunnel (forward Replace is atomic), so
+// Stop/Logs and reconnect refresh must keep operating on the workspace that
+// actually runs; the failure is delivered through the EnsureServer return
+// value and the caller's actionErr. When there is no previous ready Serve
+// (first start), the error view is published so the UI can show it.
+func (m *desktopRemoteManager) publishFailedServeStart(hostID string, generation *managedHost, previous RemoteServerView, previousToken string, failed RemoteServerView) {
+	if previous.State == "ready" {
+		m.publishServerIfCurrent(hostID, generation, previous, previousToken)
+		return
+	}
+	m.publishServerIfCurrent(hostID, generation, failed, "")
 }
 
 func (m *desktopRemoteManager) publishServerIfCurrent(hostID string, generation *managedHost, view RemoteServerView, token string) bool {

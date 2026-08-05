@@ -36,6 +36,7 @@ globalThis.Node = dom.window.Node;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.Event = dom.window.Event;
 globalThis.CustomEvent = dom.window.CustomEvent;
+globalThis.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
 globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.window);
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 Object.defineProperty(dom.window, "matchMedia", {
@@ -94,6 +95,18 @@ const { setProcessFoldPreference } = await server.ssrLoadModule("/src/lib/proces
 const items = [
   { kind: "user", id: "u1", text: "ask" },
   { kind: "assistant", id: "a1", text: "answered", reasoning: "quick thought", streaming: false, workDurationMs: 3_000 },
+  {
+    kind: "notice",
+    id: "decision-1",
+    level: "info",
+    text: "Decision recorded: answered",
+    decisionReceipt: {
+      id: "ask-1",
+      kind: "ask",
+      subject: "Choose a model: DeepSeek V4",
+      outcome: "answered",
+    },
+  },
 ];
 const streamingItems = [
   { kind: "user", id: "u1", text: "stream" },
@@ -147,6 +160,8 @@ try {
   });
   ok(container.querySelector(".turn-collapse"), "completed turn renders its work fold");
   ok(!container.querySelector(".turn-collapse--open"), "auto preference collapses the completed fold with an answer outside");
+  ok(container.textContent?.includes("Question answered"), "Ask receipt keeps its completed title");
+  ok(!container.querySelector(".notice-line__decision-outcome"), "Ask receipt does not repeat the answered outcome");
 
   await act(async () => {
     setProcessFoldPreference("expanded");

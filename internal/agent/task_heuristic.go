@@ -58,9 +58,11 @@ func heuristicInputIsTask(input string) bool {
 		}
 		return false
 	}
-	// Default for ambiguous input: a false negative (task treated as chat)
-	// disarms delivery gates, so only short ambiguous inputs stay conversational.
-	return heuristicInputHasStrongTaskSignal(normalized) || len(words) > 5
+	// Ambiguous prose stays conversational. Delivery evidence gates require a
+	// concrete host-observable signal rather than using message length as a
+	// proxy; explicit mutations, files, commands, failures, and audit verbs are
+	// still classified below.
+	return heuristicInputHasStrongTaskSignal(normalized)
 }
 
 func heuristicInputHasStrongTaskSignal(input string) bool {
@@ -74,7 +76,7 @@ func heuristicInputHasStrongTaskSignal(input string) bool {
 	// Mutation intent has a richer, negation-aware vocabulary than this generic
 	// task heuristic. Reuse it so short requests such as "push the branch" do not
 	// bypass delivery gates merely because the two keyword lists drift apart.
-	if deliveryTaskNeedsMutation(normalized) {
+	if deliveryTaskHasMutationIntent(normalized) || deliveryTaskNeedsPersistentAction(normalized) {
 		return true
 	}
 

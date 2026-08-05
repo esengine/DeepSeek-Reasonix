@@ -242,9 +242,21 @@ behind_proxy = true    # only behind a trusted reverse proxy
 
 The web UI exposes chat, tool approvals, session history, rewind/fork/summarize,
 model and reasoning-effort controls, Goal, a live todo panel fed by the
-`todo_write` tool, and provider balance when configured. Use `--model`,
+`todo_write` tool, extension status/card/form/notification surfaces, and
+provider balance when configured. Extension-hosted providers appear in the
+model picker. Run `/reload` while idle to fail-atomically reload extension
+sidecars and the runtime generation without restarting Serve. Use `--model`,
 `--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
 user-global `default_model`.
+
+If the selected Provider has no saved API key, a loopback-bound Serve still
+starts and shows a Provider setup page instead of failing before the browser can
+connect. After authentication, enter the key there; Reasonix writes it to this
+host's global credential file with restricted permissions, rebuilds the active
+controller in the same process, and opens the normal UI. The credential-writing
+endpoint is disabled for non-loopback listeners. For a remote SSH window,
+"this host" means the remote host reached through the SSH tunnel; the key is
+not copied from the desktop machine.
 
 ## Editor integrations over ACP
 
@@ -325,7 +337,15 @@ files over SFTP, manage port forwards, and start/open the remote workspace.
 Opening a workspace creates a separate native Reasonix window, similar to a
 VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
 window is an isolated, lightweight shell and does not restore or acquire local
-conversation sessions.
+conversation sessions. The remote web page uses the provider configuration and
+API keys on the **remote** host — the desktop never exposes its own providers
+to a remote host. If that host is missing the selected Provider's API key, the
+window shows the authenticated setup page first, saves the key only in the
+remote Reasonix credential file, and activates the Provider without restarting
+the remote Serve process. A transient SSH outage keeps the remote window open;
+the desktop reconnects in the background, re-attaches its loopback forward, and
+reloads the window against the recovered Serve. An authentication or host-key
+failure is terminal and closes the unusable remote window instead.
 
 ## Custom OpenAI-compatible providers
 
@@ -1015,12 +1035,24 @@ why the existing version-matched guidance remains correct.
 
 Goal is the unified runtime for long-running objectives. Ordinary `/goal`
 objectives stay lightweight: Reasonix keeps working until the goal is complete,
-blocked, or cleared. When a goal is clearly long-horizon, Goal automatically
-enables the AutoResearch strategy instead of requiring a separate
+blocked, paused, or cleared. When a goal is clearly long-horizon, Goal
+automatically enables the AutoResearch strategy instead of requiring a separate
 `/auto-research` skill; `auto-research` is not listed as a standalone built-in
 skill in Settings -> Skills or the slash menu. Ordinary chat never changes the
 collaboration mode implicitly; choose Goal in the composer or use `/goal` to
 start a long-running objective.
+
+Goal runs under a per-class budget: simple goals get 10 turns / 200k tokens,
+write goals 20 turns / 400k tokens, and AutoResearch goals 40 turns / 800k
+tokens; four consecutive turns without host-verifiable progress pause the goal.
+A paused goal keeps its todos, Delivery checkpoint, and budget history — use
+`/goal resume` to continue (budget pauses add one more slice of the same
+class), or `/goal pause` to pause a running goal manually. `/goal status`
+shows the full runtime summary. At the end of every goal turn the model reports
+its disposition through the structured `update_goal` tool (continue/complete/
+blocked); when no report arrives, an independent bounded evaluator judges the
+turn once, and any evaluator failure pauses the goal instead of continuing
+silently.
 
 For complex work, write the objective as a
 [task contract](./TASK_CONTRACT.md): Context, Request, Output format,
@@ -1177,6 +1209,14 @@ the strict read-only entrances:
 | `read_only_skill` | The same isolation driving an existing skill |
 | `reasonix review` (CLI) | Read-only review of a diff or branch |
 | Desktop preview/review subagents | Read-only desktop analysis surfaces |
+
+In persisted sessions, `parallel_tasks` and `fleet` return a bounded preview
+plus one `Subagent reference` per completed child instead of concatenating every
+full answer into a truncation-prone tool result. The parent can call
+`read_subagent_result` with that reference and page by `offset_bytes`; results
+are scoped to the current conversation lineage and workspace. Headless runs
+without a persisted parent session remain ephemeral and receive fair bounded
+previews, but cannot mint durable references.
 
 The interactive two-model Planner uses a dedicated construction path
 (`NewPlannerAgent`): it still blocks bash, file writers, and ordinary writers,
