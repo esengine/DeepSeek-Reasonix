@@ -824,6 +824,19 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// Configured enabled MCP: cache-hit placeholders without starting processes;
 	// cache-miss servers get one background catalog discovery.
 	registerEnabledMCP := func(specs []plugin.Spec) {
+		// Meta-tool mode: collapse the per-tool mcp__<server>__<tool> surface
+		// into a single run_mcp dispatcher. Spawns still fire (the Host needs
+		// connected clients to dispatch through), but NO mcp__ tools enter the
+		// registry — KickSpawns constructs lazySpawn with removePrefix="" so the
+		// post-spawn trySwap is a registry no-op. The provider's tools array
+		// stays at builtins + 1 regardless of MCP server/tool count. Enabled by
+		// [tools] meta_tool = true in config, or REASONIX_MCP_META_TOOL=1 env
+		// override. See internal/plugin/metatool.go and meta_capacity_test.go.
+		if cfg.MCPMetaToolEnabled() && len(specs) > 0 {
+			plugin.KickSpawns(ctx, pluginHost, specs)
+			reg.Add(plugin.NewMetaTool(pluginHost, specs))
+			return
+		}
 		for _, s := range specs {
 			if pluginHost.HasClient(s.Name) {
 				tools, err := pluginHost.ToolsFor(ctx, s.Name)
@@ -862,6 +875,31 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	registerEnabledMCP(configSpecs)
 
+	// Tool-surface diagnostic: emit the provider-visible capacity so the
+	// run_mcp meta-tool mode's effect is observable in a real run. Gated by
+	// the meta-tool being enabled (config or env) or REASONIX_DUMP_TOOL_SURFACE
+	// so normal startup stays quiet. This is the same number the model sees
+	// every turn as its tools array — the whole point of run_mcp is to shrink it.
+	if cfg.MCPMetaToolEnabled() || os.Getenv("REASONIX_DUMP_TOOL_SURFACE") != "" {
+		names := reg.Names()
+		mcpTop := 0
+		for _, n := range names {
+			if strings.HasPrefix(n, tool.MCPNamePrefix) {
+				mcpTop++
+			}
+		}
+		_, hasMeta := reg.Get(plugin.MetaToolName)
+		mode := "per-tool mcp__ (default)"
+		if cfg.MCPMetaToolEnabled() {
+			mode = "run_mcp meta-tool"
+		}
+		sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelInfo,
+			Text:  fmt.Sprintf("tool surface [%s]: %d tools (%d mcp__ top-level, run_mcp registered=%v)", mode, len(names), mcpTop, hasMeta),
+			Detail: fmt.Sprintf("provider tools array capacity = %d entries. run_mcp collapses every mcp__<server>__<tool> into a single dispatcher; see internal/plugin/metatool.go.", len(names)),
+		})
+	}
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
 	}

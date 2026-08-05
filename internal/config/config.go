@@ -1579,6 +1579,16 @@ type ToolsConfig struct {
 	BashTimeoutSeconds       *int                 `toml:"bash_timeout_seconds"`
 	MCPStartupTimeoutSeconds *int                 `toml:"mcp_startup_timeout_seconds"`
 	MCPCallTimeoutSeconds    *int                 `toml:"mcp_call_timeout_seconds"`
+	// MetaTool collapses every per-tool mcp__<server>__<tool> top-level entry
+	// into a single run_mcp dispatcher, shrinking the provider's tools array
+	// from builtins + (servers × tools/server) down to builtins + 1. This
+	// directly reduces model attention dilution across dozens of MCP schemas.
+	// Nil (unset, the default) keeps the legacy per-tool surface so existing
+	// behavior is unchanged; set [tools] meta_tool = true to opt in. The env
+	// var REASONIX_MCP_META_TOOL overrides this value when set, for ad-hoc
+	// testing, CI, and mcp-surface-dump without editing config. See
+	// internal/plugin/metatool.go and MCPMetaToolEnabled.
+	MetaTool                 *bool                `toml:"meta_tool"`
 	BackgroundJobs           BackgroundJobsConfig `toml:"background_jobs"`
 	Search                   SearchConfig         `toml:"search"`
 	Shell                    ShellConfig          `toml:"shell"`
@@ -1622,6 +1632,42 @@ func (c *Config) MCPStartupTimeoutSeconds() int {
 		return defaultMCPStartupTimeoutSeconds
 	}
 	return *c.Tools.MCPStartupTimeoutSeconds
+}
+
+// MCPMetaToolEnabled reports whether the run_mcp meta-tool dispatcher should
+// replace the per-tool mcp__<server>__<tool> surface. Resolution order:
+//
+//  1. REASONIX_MCP_META_TOOL env var — when set to a recognized boolean
+//     spelling (1/true/yes/on enables, 0/false/no/off disables) it overrides
+//     everything, so CI, mcp-surface-dump, and ad-hoc testing can flip the
+//     mode without editing config.
+//  2. [tools] meta_tool config value — the persistent, per-project setting.
+//  3. Default off (nil) — preserves the legacy per-tool surface exactly.
+//
+// boot.go calls this instead of plugin.MetaToolEnabled (which is env-only)
+// so the config file is the primary control and the env var is the override.
+func (c *Config) MCPMetaToolEnabled() bool {
+	if v, ok := mcpMetaToolEnvOverride(); ok {
+		return v
+	}
+	if c == nil || c.Tools.MetaTool == nil {
+		return false
+	}
+	return *c.Tools.MetaTool
+}
+
+// mcpMetaToolEnvOverride parses REASONIX_MCP_META_TOOL. It returns
+// (value, true) when the env var is explicitly set to a recognized boolean
+// spelling, and (false, false) when unset or unrecognized so the caller falls
+// back to the config value.
+func mcpMetaToolEnvOverride() (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REASONIX_MCP_META_TOOL"))) {
+	case "1", "true", "yes", "on":
+		return true, true
+	case "0", "false", "no", "off":
+		return false, true
+	}
+	return false, false
 }
 
 // BackgroundJobsConfig tunes parent-created background jobs.
