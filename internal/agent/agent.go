@@ -379,6 +379,11 @@ type Agent struct {
 	// disables tracking (source compat for direct construction).
 	stateTracker StateTracker
 
+	// navigator is the OSWorld 2.0 state-based navigator kernel. Superset of
+	// stateTracker: provides closed-loop correction + env sensing on top of
+	// implicit-state tracking. nil falls back to stateTracker alone.
+	navigator NavigatorKernel
+
 	// asker, when non-nil, lets the `ask` tool put questions to the user. nil in
 	// headless runs (no interactive user). Set via SetAsker.
 	asker Asker
@@ -1056,6 +1061,16 @@ type Options struct {
 	// direct construction; boot always supplies it for full agents).
 	StateTracker StateTracker
 
+	// Navigator is the OSWorld 2.0 "state-based navigator" kernel. When
+	// non-nil, it wraps every tool call in a continuous-state, closed-loop
+	// cycle (hypothesis → act → observe → correct) and maintains implicit
+	// state across compaction independently of the prompt. It is a superset of
+	// StateTracker: when both are set, the Navigator's ImplicitStateDigest is
+	// also injected into compaction summaries. nil disables the kernel (the
+	// agent falls back to StateTracker alone). The Navigator lives in
+	// internal/navigator and is host-agnostic; boot wires a ReasonixAdapter.
+	Navigator NavigatorKernel
+
 	// MissingReasoningWarnStateDir, when non-empty, points at the shared
 	// directory where missing tool-call thinking recovery retries are gated by
 	// opaque provider-configuration fingerprint (#7059). The field name is kept
@@ -1229,6 +1244,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		configWriteApprover:       configWriteApprover,
 		hooks:                     hooks,
 		stateTracker:              opts.StateTracker,
+		navigator:                 opts.Navigator,
 		jobs:                      opts.Jobs,
 		writeScheduler:            opts.WriteScheduler,
 		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),

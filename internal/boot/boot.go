@@ -40,6 +40,7 @@ import (
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/memory"
 	"reasonix/internal/migration"
+	"reasonix/internal/navigator"
 	"reasonix/internal/netclient"
 	"reasonix/internal/outputstyle"
 	"reasonix/internal/permission"
@@ -1686,6 +1687,20 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// does not lose it. The default in-memory implementation is host-agnostic;
 	// HERMES can substitute its own backend via the StateTracker interface.
 	stateTracker := agent.NewDefaultStateTracker(0, sink) // 0 = default 20-entry episodic window
+
+	// OSWorld 2.0 Navigator Kernel: the "state-based navigator" paradigm.
+	// Wraps every tool call in a continuous-state, closed-loop cycle and
+	// maintains implicit state in its own state graph (survives compaction
+	// and crashes). The ReasonixAdapter bridges to the tool registry + event
+	// sink; a FilesystemSensor monitors the workspace root for env drift.
+	// The Navigator is a superset of StateTracker — both are wired so the
+	// agent gets the Navigator's closed-loop correction + env sensing while
+	// the StateTracker continues its per-call implicit-state capture.
+	navAdapter := navigator.NewReasonixAdapter(reg, sink, navigator.ReasonixAdapterOptions{})
+	navKernel := navigator.New(navAdapter, navigator.Options{HistoryWindow: 50})
+	navKernel.AddSensor(navigator.NewFilesystemSensor(root, 3))
+	navKernel.AddSensor(navigator.NewProcessSensor(""))
+
 	executor := agent.New(execProv, reg, execSess, agent.Options{
 		MaxSteps:     maxSteps,
 		MaxStepsKey:  opts.MaxStepsKey,
@@ -1695,6 +1710,7 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		Gate:         headlessGate,
 		Hooks:        hookRunner,
 		StateTracker: stateTracker,
+		Navigator:    navKernel,
 		Jobs:         jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
