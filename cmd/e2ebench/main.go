@@ -113,7 +113,14 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -profile delivery\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 	}
 
-	mode := flag.String("mode", "suite", "suite | diff (diff = generate tests for the PR diff and grade with the repo's tests)")
+	mode := flag.String("mode", "suite", "suite | diff | swebench")
+	subset := flag.String("subset", "benchmarks/swebench/subset.json", "swebench mode: instance subset file")
+	namespace := flag.String("namespace", "swebench", "swebench mode: registry namespace holding the evaluation images")
+	runID := flag.String("run-id", "reasonix", "swebench mode: run id passed to the official harness")
+	harnessPy := flag.String("harness-python", "python3", "swebench mode: interpreter with the swebench package installed")
+	dataset := flag.String("dataset", "princeton-nlp/SWE-bench_Verified", "swebench mode: dataset name")
+	workers := flag.Int("workers", 4, "swebench mode: parallel grader workers")
+	keepImages := flag.Bool("keep-images", false, "swebench mode: keep instance images instead of removing them after each run")
 	suite := flag.String("suite", "benchmarks/e2e", "suite root (contains tasks/<id>/)")
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
@@ -139,6 +146,21 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+
+	if *mode == "swebench" {
+		cwd, _ := os.Getwd()
+		report := runSwebench(swebenchOpts{
+			bin: *bin, subset: *subset, namespace: *namespace, model: *model,
+			profile: profile, arm: arm, runID: *runID, workDir: cwd,
+			harness: *harnessPy, dataset: *dataset, maxSteps: *maxSteps,
+			timeoutSec: *timeoutSec, workers: *workers, keepImages: *keepImages,
+		})
+		emit(report, *outMD, "")
+		if *outJSON != "" {
+			fmt.Fprintln(os.Stderr, "note: -json is not written in swebench mode; the harness report is authoritative")
+		}
+		return
 	}
 
 	if *mode == "diff" {
@@ -330,6 +352,22 @@ func grade(work, taskDir string) bool {
 }
 
 func render(results []result) string {
+	profile := benchmarkProfileBaseline
+	arm := "full"
+	if len(results) > 0 {
+		if results[0].Profile != "" {
+			profile = results[0].Profile
+		}
+		if results[0].Arm != "" {
+			arm = results[0].Arm
+		}
+	}
+	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (%s · arm `%s`)\n\n", profile, arm) + renderBody(results)
+}
+
+// renderBody is the report without a heading, so a caller that supplies its own
+// (SWE-bench mode) does not stack two titles.
+func renderBody(results []result) string {
 	var b strings.Builder
 	passed, ran := 0, 0
 	var pTok, cTok, hit, miss, compacts, tools, toolFails int
@@ -360,17 +398,6 @@ func render(results []result) string {
 		}
 	}
 
-	profile := benchmarkProfileBaseline
-	arm := "full"
-	if len(results) > 0 {
-		if results[0].Profile != "" {
-			profile = results[0].Profile
-		}
-		if results[0].Arm != "" {
-			arm = results[0].Arm
-		}
-	}
-	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark (%s · arm `%s`)\n\n", profile, arm)
 	fmt.Fprintf(&b, "**Solved:** %d/%d (%s) · **Cost per solved:** %s · **Tokens per solved:** %s · **Median wall time:** %s\n\n",
 		passed, ran, pct(passed, ran),
 		costPerSolved(cost, passed, currency), tokensPerSolved(pTok+cTok, passed), dur(median(walls)))

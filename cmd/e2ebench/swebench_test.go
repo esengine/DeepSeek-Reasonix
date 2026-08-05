@@ -113,6 +113,22 @@ func TestSwebenchReportParsesTheHarnessSummary(t *testing.T) {
 	}
 }
 
+// Issue text arrives verbatim from GitHub and routinely contains quotes,
+// backticks, $ and newlines. It becomes one argv element inside a `bash -lc`
+// string, so a quoting slip would let a problem statement run commands.
+func TestShellQuoteAllContainsHostileIssueText(t *testing.T) {
+	hostile := "it's broken; `rm -rf /`; $(whoami)\n\"quoted\" && echo pwned"
+	got := shellQuoteAll([]string{"run", hostile})
+	if !strings.HasPrefix(got, "'run' '") || !strings.HasSuffix(got, "'") {
+		t.Fatalf("every element must be single-quoted: %s", got)
+	}
+	// Inside single quotes the shell expands nothing, so the only way out is an
+	// unescaped apostrophe: every one in the payload must have been rewritten.
+	if strings.Count(got, `'\''`) != strings.Count(hostile, "'") {
+		t.Fatalf("apostrophes not all escaped: %s", got)
+	}
+}
+
 func TestSwebenchAgentArgsKeepTheControlArmClean(t *testing.T) {
 	got := swebenchAgentArgs("/tmp/m.json", "e2e", benchmarkProfileBaseline, ablation.Set{}, 60, "fix it")
 	want := []string{"run", "--auto", "--metrics", "/tmp/m.json", "--model", "e2e", "--max-steps", "60", "fix it"}
