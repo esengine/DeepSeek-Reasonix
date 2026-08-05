@@ -14,6 +14,7 @@
     "typecheck": "tsc --noEmit",
     "test:terminal": "tsx src/__tests__/terminal-events.test.ts && tsx src/__tests__/terminal-store.test.ts && tsx src/__tests__/terminal-output.test.ts && tsx src/__tests__/terminal-theme.test.ts && tsx src/__tests__/workspace-layout.test.ts",
     "test:usage-stats": "tsx src/__tests__/usage-stats-format.test.ts && tsx src/__tests__/usage-stats-panel.test.tsx",
+    "test:local-paths": "tsx src/__tests__/local-path-links.test.tsx && tsx src/__tests__/local-path-click-e2e.test.tsx",
     "test:settings-responsive": "tsx src/__tests__/settings-responsive-layout.test.ts",
     "pretest": "pnpm test:terminal && tsx src/__tests__/rich-composer-selection.test.tsx && tsx src/__tests__/context-center-contract.test.ts && tsx src/__tests__/provider-model-cache.test.ts && tsx src/__tests__/format-tokens.test.ts && pnpm test:usage-stats && pnpm test:settings-responsive && pnpm test:composer-menu-viewport",
     "test:composer-menu-viewport": "tsx src/__tests__/composer-menu-viewport.test.ts && tsx src/__tests__/virtual-menu-identity.test.tsx",

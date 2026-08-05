@@ -269,6 +269,9 @@ jobs:
       - name: Test usage statistics frontend
         run: pnpm --dir frontend test:usage-stats
 
+      - name: Test local-path linkification frontend
+        run: pnpm --dir frontend test:local-paths
+
       - name: vet
         run: go vet ./...
 

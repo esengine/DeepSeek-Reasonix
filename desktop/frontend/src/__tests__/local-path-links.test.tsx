@@ -183,7 +183,29 @@ const codePunct = renderToStaticMarkup(
     {"见 `D:\\x\\y.md。` 完成"}
   </ReactMarkdown>,
 );
-ok(!codePunct.includes("<a"), "code span with trailing punctuation is not converted");
+ok(codePunct.includes('href="file:///D:/x/y.md"'), "code span trailing CJK period is trimmed for the href");
+ok(codePunct.includes("<code>D:\\x\\y.md。</code>"), "code span label keeps the original spelling");
+
+const codeParens = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"见 `D:\\x\\y.md（已生成）` 完成"}
+  </ReactMarkdown>,
+);
+ok(codeParens.includes('href="file:///D:/x/y.md"'), "code span trailing full-width paren group is trimmed");
+
+const codeSpace = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"见 `D:\\a\\b c.md` 完成"}
+  </ReactMarkdown>,
+);
+ok(codeSpace.includes('href="file:///D:/a/b%20c.md"'), "code span keeps unescaped spaces (backtick workaround)");
+
+const codeUnc = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"见 `\\\\nas\\share\\docs\\report.md` 完成"}
+  </ReactMarkdown>,
+);
+ok(codeUnc.includes("//nas/share/docs/report.md"), "code span UNC href carries the slash-form share path");
 
 const codeCommand = renderToStaticMarkup(
   <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>

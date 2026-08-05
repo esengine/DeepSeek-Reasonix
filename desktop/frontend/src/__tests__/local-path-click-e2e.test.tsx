@@ -150,5 +150,19 @@ console.log("\nheadless click-to-open e2e");
   ok(browsed.length === 1, "system browser still only saw the http link");
 }
 
+// 7. Code-span path with unescaped spaces stays clickable (the backtick
+// workaround for spaces from #7426) and the decoded path keeps the space.
+{
+  const anchors = await renderClick("结果：`D:\\a\\b c\\report final.md` 请查看");
+  ok(anchors.length === 1, "space-containing code-span path renders exactly one anchor");
+  const href = anchors[0]?.getAttribute("href") ?? "";
+  ok(href === "file:///D:/a/b%20c/report%20final.md", `spaces percent-encoded in the href (${href})`);
+  await act(async () => {
+    anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+  ok(opened.length === 5, "space-containing code-span click invoked OpenLocalPath");
+  ok(opened[4] === "D:/a/b c/report final.md", `OpenLocalPath received the unescaped path (${opened[4]})`);
+}
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

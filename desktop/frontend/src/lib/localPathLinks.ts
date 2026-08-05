@@ -1,11 +1,12 @@
 // Local-path linkification for chat markdown (issue #7426).
 //
-// AI replies frequently print local file paths as plain text (Windows drive
-// paths, UNC paths, file:/// URLs). GFM autolink literals only recognize
-// http(s)/www/email, so these render as inert text. This module rewrites
-// matching text nodes into markdown links whose href is a file:/// URL; the
-// link click handler (RichMarkdownLink) routes those to the native
-// OpenLocalPath binding instead of the system browser.
+// AI replies frequently print local file paths as plain text or inside
+// backtick code spans (Windows drive paths, UNC paths, file:/// URLs). GFM
+// autolink literals only recognize http(s)/www/email, so these render as
+// inert text. This module rewrites matching text nodes (and code spans whose
+// entire content is exactly one path) into markdown links whose href is a
+// file:/// URL; the link click handler (RichMarkdownLink) routes those to
+// the native OpenLocalPath binding instead of the system browser.
 
 import { visit } from "unist-util-visit";
 import type { Parent, Link, Root, Text, InlineCode } from "mdast";
@@ -63,6 +64,19 @@ function stripTrailingClosers(raw: string): string {
   return stripped;
 }
 
+// Code-span content is literal: backslashes and spaces are real characters
+// and markdown text-node unescaping must NOT run here. A code span is
+// converted when its entire content is exactly one path — drive path,
+// file:/// URL or UNC share (literal `\\` prefix) — with trailing sentence
+// punctuation trimmed the same way the text-node matcher does. Windows-
+// illegal characters (`<>"|?*`) are excluded, and spaces are kept
+// (unambiguous inside a code span), which is what makes `D:\a\b c.md`
+// clickable — the backtick form is the documented workaround for paths
+// with spaces (#7426).
+const CODE_SPAN_PATH_RE = new RegExp(
+  String.raw`^(?:[A-Za-z]:[\\/][^\n<>"|?*]+|file:///[^\n<>"|?*]+|\\\\[^\\\s]+\\[^\n<>"|?*]+)$`,
+);
+
 export interface LocalPathSegment {
   /** Raw text to render (keeps the original spelling, escapes intact). */
   text: string;
@@ -70,23 +84,11 @@ export interface LocalPathSegment {
   path?: string;
 }
 
-/** Options for {@link linkifyLocalPaths}. */
-export interface LinkifyOptions {
-  /**
-   * Unescape `\ ` / `\t` pairs before opening. Markdown text nodes carry
-   * backslash-escaped spaces (`D:\a\b\ c.md` is the escaped spelling of
-   * `D:\a\b c.md`), but code-span content is literal — a backslash there is
-   * a real character — so inline-code callers pass `false` (default `true`).
-   */
-  unescape?: boolean;
-}
-
 /**
  * Splits `text` into plain segments and clickable local-path segments.
  * Pure function — unit tests cover the full recognition matrix here.
  */
-export function linkifyLocalPaths(text: string, opts: LinkifyOptions = {}): LocalPathSegment[] {
-  const unescape = opts.unescape ?? true;
+export function linkifyLocalPaths(text: string): LocalPathSegment[] {
   const matches: Array<{ start: number; end: number; raw: string; kind: "file" | "drive" | "unc" }> = [];
   const patterns: Array<[RegExp, "file" | "drive" | "unc"]> = [
     [FILE_RE, "file"],
@@ -117,7 +119,7 @@ export function linkifyLocalPaths(text: string, opts: LinkifyOptions = {}): Loca
     // `\\` escape); restore the real UNC prefix for the native opener.
     const path = m.kind === "unc" ? "\\" + stripTrailingClosers(m.raw) : stripTrailingClosers(m.raw);
     if (path) {
-      segments.push({ text: m.raw, path: unescape ? unescapeRefPath(path) : path });
+      segments.push({ text: m.raw, path: unescapeRefPath(path) });
     } else {
       segments.push({ text: m.raw });
     }
@@ -183,22 +185,26 @@ export function remarkLocalPathLinks() {
     visit(tree, "inlineCode", (node: InlineCode, index: number | undefined, parent) => {
       if (parent === undefined || parent === null || index === undefined || index === null) return;
       if (parent.type === "link" || parent.type === "linkReference") return;
-      // Code-span content is literal: backslashes are real characters, so the
-      // markdown text-node unescaping must NOT run here.
-      const segments = linkifyLocalPaths(node.value, { unescape: false });
-      if (segments.length !== 1 || segments[0].path === undefined) return;
-      // Convert only when the whole span is exactly one clean path: no
-      // trailing-punctuation trimming, no command-like prefix (`cd D:\x`),
-      // no literal escaped-space pair (`\ ` can never name a real file).
-      if (segments[0].text !== node.value) return;
+      // A literal `\ ` pair is the escaped-space spelling leaking into code
+      // and never resolves to a real file name — leave those spans alone.
       if (/\\[ \t]/.test(node.value)) return;
+      // Trim trailing sentence punctuation, then a whole trailing full-width
+      // paren group (`D:\x\y.md（已生成）`), then closers with the same
+      // paren-balance rule the text-node matcher uses.
+      const cleaned = stripTrailingClosers(
+        node.value
+          .replace(/[，。；、！？,;!?]+$/, "")
+          .replace(/（[^（）]*）$/, "")
+          .trimEnd(),
+      );
+      if (!CODE_SPAN_PATH_RE.test(cleaned)) return;
       plan.push({
         parent,
         index,
         nodes: [
           {
             type: "link",
-            url: localPathHref(segments[0].path),
+            url: localPathHref(cleaned),
             title: null,
             // Keep the code span as the link label so the path still looks
             // like a literal path (and stays selectable) — renders as
