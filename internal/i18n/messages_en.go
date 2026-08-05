@@ -47,7 +47,7 @@ var English = Messages{
 
 	ChatThinking:                           "thinking…",
 	ChatThoughtForFmt:                      "thought for %ds",
-	ChatStatusThinkingFmt:                  "%s thinking… (%ds · Esc cancels)",
+	ChatStatusThinkingFmt:                  "%s thinking… (%ds · Ctrl+C cancels)",
 	ChatToolWorkingFmt:                     "%s working · %ds",
 	ChatSubagentPhaseQueued:                "queued",
 	ChatSubagentPhaseRunning:               "running",

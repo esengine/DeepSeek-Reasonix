@@ -48,7 +48,7 @@ var Chinese = Messages{
 
 	ChatThinking:                           "思考中…",
 	ChatThoughtForFmt:                      "思考了 %d 秒",
-	ChatStatusThinkingFmt:                  "%s 思考中… (%d 秒 · Esc 取消)",
+	ChatStatusThinkingFmt:                  "%s 思考中… (%d 秒 · Ctrl+C 取消)",
 	ChatToolWorkingFmt:                     "%s 运行中 · %d 秒",
 	ChatSubagentPhaseQueued:                "排队中",
 	ChatSubagentPhaseRunning:               "运行中",

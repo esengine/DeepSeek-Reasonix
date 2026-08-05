@@ -156,27 +156,62 @@ func saveTestImageAttachment(t *testing.T, root string) string {
 	return path
 }
 
-// TestEscCancelsRunningTurnWithCompletionOpen reproduces the report that Esc
-// (unlike Ctrl+C) did not stop a running turn: an active completion menu
-// captured Esc to close itself and returned before reaching the running-turn
-// cancel branch, while Ctrl+C — not in the completion switch — fell through.
-func TestEscCancelsRunningTurnWithCompletionOpen(t *testing.T) {
+// TestEscDoesNotCancelRunningTurn ensures Esc stays a "dismiss the menu"
+// key while a turn is running — the user has to press Ctrl+C to actually
+// abort, so a stray Esc can't kill a streaming turn. When the completion
+// menu is open, Esc should close the menu and leave the turn running.
+// Regression for the earlier behavior where Esc (unlike Ctrl+C) cancelled
+// the turn only after the completion menu dropped it.
+func TestEscDoesNotCancelRunningTurn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		open bool
+	}{
+		{"completion menu open", true},
+		{"no completion menu", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := &blockingTurnRunner{started: make(chan struct{})}
+			ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
+			ctrl.Send("hi")
+			<-r.started // the turn is in flight and cancellable
+
+			m := newTestChatTUI()
+			m.ctrl = ctrl
+			m.state = tuiRunning
+			m.completion.active = tc.open // e.g. a "/" typed into the composer while waiting
+
+			_, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEscape})
+
+			if !ctrl.Running() {
+				t.Fatal("Esc must not cancel a running turn; use Ctrl+C")
+			}
+			// clean up so the runner goroutine can exit before the test ends
+			ctrl.Cancel()
+		})
+	}
+}
+
+// TestCtrlCCancelsRunningTurnWithCompletionOpen is the Ctrl+C counterpart of
+// the prior Esc regression: completion menus capture Esc but not Ctrl+C, so
+// the main handler always runs and aborts the turn.
+func TestCtrlCCancelsRunningTurnWithCompletionOpen(t *testing.T) {
 	r := &blockingTurnRunner{started: make(chan struct{})}
 	ctrl := control.New(control.Options{Runner: r, Sink: event.Discard, SessionDir: t.TempDir(), Label: "test"})
 	ctrl.Send("hi")
-	<-r.started // the turn is in flight and cancellable
+	<-r.started
 
 	m := newTestChatTUI()
 	m.ctrl = ctrl
 	m.state = tuiRunning
-	m.completion.active = true // e.g. a "/" typed into the composer while waiting
+	m.completion.active = true
 
-	_, _ = m.update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	_, _ = m.update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 	deadline := time.Now().Add(2 * time.Second)
 	for ctrl.Running() {
 		if time.Now().After(deadline) {
-			t.Fatal("Esc did not cancel the running turn (completion menu swallowed it)")
+			t.Fatal("Ctrl+C did not cancel the running turn")
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

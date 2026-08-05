@@ -1267,10 +1267,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.acceptCompletion()
 				return m, nil
 			case "esc":
+				// Esc always dismisses the completion menu. Cancel/abort during a
+				// running turn is Ctrl+C's job (see the main Esc handler); the
+				// main handler intentionally no longer cancels a running turn
+				// so a stray Esc can't kill it.
 				m.completion = completion{}
-				if m.state == tuiRunning {
-					break // a turn is running — also cancel it via the main Esc handler
-				}
 				return m, nil
 			}
 		}
@@ -1315,41 +1316,33 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		switch msg.String() {
 		case "esc":
-			// "Back out" of the most specific in-progress state: un-send a just-sent
-			// turn (server not yet replied), cancel a streaming turn, or clear
-			// typed-but-unsent input. Mode switches (normal/plan/YOLO) are
-			// exclusively driven by Shift+Tab — Esc must not silently flip a
-			// session from plan or YOLO back to a less-permissive mode. PR #3051
-			// removed the YOLO half of this; plan mode was missed and is fixed
-			// here. Scrollback is the terminal's now, so there's no viewport to
-			// dismiss.
-			switch {
-			case m.state == tuiRunning && m.bubblePending:
-				m.unsendPending()
-			case m.state == tuiRunning:
-				m.ctrl.Cancel()
-				// Defensive: if the controller is no longer running (cancel
-				// completed synchronously, e.g. for shell commands), transition
-				// to idle immediately instead of waiting for TurnDone.
-				if !m.ctrl.Running() {
-					m.state = tuiIdle
-					m.confirmBubbleSent()
+			// Esc cancels a running turn only at the moment the user hits it
+			// (un-send a just-sent bubble) — once the controller is actively
+			// running, aborting requires Ctrl+C so a stray Esc can't kill the
+			// turn. Mode switches (normal/plan/YOLO) are exclusively driven by
+			// Shift+Tab — Esc must not silently flip a session from plan or YOLO
+			// back to a less-permissive mode. PR #3051 removed the YOLO half of
+			// this; plan mode was missed and is fixed here. Scrollback is the
+			// terminal's now, so there's no viewport to dismiss.
+			if m.state == tuiRunning {
+				if m.bubblePending {
+					m.unsendPending()
 				}
-			default:
-				// Idle (any mode): a double-Esc on an empty composer opens the
-				// rewind picker (Claude Code's gesture); a first Esc just arms
-				// it. Non-empty input clears as before.
-				if strings.TrimSpace(m.input.Value()) == "" {
-					if !m.lastEsc.IsZero() && time.Since(m.lastEsc) < 600*time.Millisecond {
-						m.lastEsc = time.Time{}
-						m.openRewind()
-					} else {
-						m.lastEsc = time.Now()
-					}
+				return m, nil
+			}
+			// Idle (any mode): a double-Esc on an empty composer opens the
+			// rewind picker (Claude Code's gesture); a first Esc just arms it.
+			// Non-empty input clears as before.
+			if strings.TrimSpace(m.input.Value()) == "" {
+				if !m.lastEsc.IsZero() && time.Since(m.lastEsc) < 600*time.Millisecond {
+					m.lastEsc = time.Time{}
+					m.openRewind()
 				} else {
-					m.input.Reset()
-					m.pastedBlocks = nil
+					m.lastEsc = time.Now()
 				}
+			} else {
+				m.input.Reset()
+				m.pastedBlocks = nil
 			}
 			return m, nil
 		case "ctrl+c", "super+c", "meta+c":
