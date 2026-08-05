@@ -658,6 +658,9 @@ func configureChatTextarea(ti *textarea.Model) {
 	// Linux terminals send Ctrl+arrows for the same intent.
 	ti.KeyMap.WordForward = key.NewBinding(key.WithKeys("alt+right", "alt+f", "ctrl+right"))
 	ti.KeyMap.WordBackward = key.NewBinding(key.WithKeys("alt+left", "alt+b", "ctrl+left"))
+	// mirrors the word-motion convention: macOS uses Alt+Backspace, Windows and
+	// Linux terminals send Ctrl+Backspace to delete the word behind the cursor.
+	ti.KeyMap.DeleteWordBackward = key.NewBinding(key.WithKeys("alt+backspace", "ctrl+w", "ctrl+backspace"))
 	ti.Focus()
 }
 
