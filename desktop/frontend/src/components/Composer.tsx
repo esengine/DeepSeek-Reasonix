@@ -1733,16 +1733,21 @@ export function Composer({
     if (!normalized.text) return;
     if (normalized.truncated) showToast(t("composer.selectedTextTruncated"), "warn");
     const path = selectedTextRequest.path;
+    const source = selectedTextRequest.source;
     const duplicate = selectedTextRefsRef.current.some(
-      (reference) => reference.text === normalized.text && (reference.path ?? "") === (path ?? ""),
+      (reference) =>
+        reference.text === normalized.text
+        && (reference.path ?? "") === (path ?? "")
+        && (reference.source ?? "") === (source ?? ""),
     );
     if (!duplicate) {
       const next = [
         ...selectedTextRefsRef.current,
         {
-          id: `${path ? "code" : "chat"}-selection-${selectedTextRequest.id}`,
+          id: `${path ? "code" : source === "terminal" ? "terminal" : "chat"}-selection-${selectedTextRequest.id}`,
           text: normalized.text,
           ...(path ? { path } : {}),
+          ...(source ? { source } : {}),
         },
       ];
       selectedTextRefsRef.current = next;
@@ -4301,7 +4306,11 @@ export function Composer({
                 requestActiveDraftFrame(focusComposerInput);
               }}
               name={reference.path ? reference.path.split("/").filter(Boolean).pop() ?? reference.path : selectedTextSnippet(reference.text)}
-              meta={reference.path ? t("composer.selectedCode") : t("composer.selectedText")}
+              meta={reference.path
+                ? t("composer.selectedCode")
+                : reference.source === "terminal"
+                  ? t("composer.selectedTerminal")
+                  : t("composer.selectedText")}
               icon={reference.path ? <FileText size={20} /> : <MessageSquare size={20} />}
             />
           ))}

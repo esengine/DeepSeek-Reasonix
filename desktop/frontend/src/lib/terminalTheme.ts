@@ -103,7 +103,10 @@ export function terminalThemeForElement(element: Element): ITheme {
     foreground: cssToken(style, "--terminal-fg", resolved === "light" ? "#25272a" : "#e8e5df"),
     cursor: cssToken(style, "--terminal-cursor", resolved === "light" ? "#9a4f00" : "#e6a15c"),
     cursorAccent: cssToken(style, "--terminal-bg", resolved === "light" ? "#f7f8fa" : "#111315"),
-    selectionBackground: cssToken(style, "--terminal-selection", resolved === "light" ? "#b9d7ff" : "#344c68"),
+    selectionBackground: cssToken(style, "--terminal-selection", resolved === "light" ? "#6aa8ff" : "#5b7eab"),
+    selectionInactiveBackground: cssToken(style, "--terminal-selection", resolved === "light" ? "#6aa8ff" : "#5b7eab"),
+    // Keep selected glyphs high-contrast against the stronger selection fill.
+    selectionForeground: resolved === "light" ? "#0b1f3a" : "#ffffff",
   };
 }
 

@@ -2128,7 +2128,10 @@ a[href] {
    the terminal occupies column 2 row 3, statusbar at row 4. */
 .layout--terminal-drawer-open {
   grid-template-rows: var(--app-chrome-height) minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height);
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1);
 }
 /* Disable the open/close transition during a terminal resize drag. */
 .layout--terminal-resizing.layout--terminal-drawer-open {
@@ -2203,11 +2206,17 @@ a[href] {
 }
 .layout.layout--workbench-chrome-hidden.layout--terminal-drawer-open {
   grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) var(--statusbar-height) !important;
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1) !important;
 }
 .app--creation .layout.layout--creation-chrome-hidden.layout--terminal-drawer-open {
   grid-template-rows: minmax(0, 1fr) var(--terminal-height, 280px) !important;
-  transition: grid-template-columns 0.16s ease, min-width 0.16s ease, grid-template-rows 0.25s ease !important;
+  transition:
+    grid-template-columns 0.16s ease,
+    min-width 0.16s ease,
+    grid-template-rows 0.22s cubic-bezier(0.2, 0.72, 0.2, 1) !important;
 }
 /* StatusBar shifts to row 4 when the terminal drawer adds an extra row. */
 .layout--terminal-drawer-open .statusbar {
@@ -37049,7 +37058,7 @@ body > .mermaid-diagram--fullscreen {
   --terminal-muted: var(--fg-dim);
   --terminal-faint: var(--fg-faint);
   --terminal-cursor: var(--accent);
-  --terminal-selection: color-mix(in srgb, var(--accent) 28%, transparent);
+  --terminal-selection: color-mix(in srgb, var(--accent) 46%, transparent);
 }
 :root[data-terminal-theme="dark"] {
   --terminal-bg: #111315;
@@ -37060,7 +37069,7 @@ body > .mermaid-diagram--fullscreen {
   --terminal-muted: #a7a19a;
   --terminal-faint: #70777f;
   --terminal-cursor: #e6a15c;
-  --terminal-selection: #344c68;
+  --terminal-selection: #5b7eab;
 }
 :root[data-terminal-theme="light"] {
   --terminal-bg: #f7f8fa;
@@ -37071,7 +37080,7 @@ body > .mermaid-diagram--fullscreen {
   --terminal-muted: #5f6670;
   --terminal-faint: #8b929b;
   --terminal-cursor: #9a4f00;
-  --terminal-selection: #b9d7ff;
+  --terminal-selection: #6aa8ff;
 }
 :root[data-terminal-theme="dark"] .terminal-panel { color-scheme: dark; }
 :root[data-terminal-theme="light"] .terminal-panel { color-scheme: light; }
@@ -37106,6 +37115,7 @@ body > .mermaid-diagram--fullscreen {
 .terminal-session__close:hover, .terminal-session__close:focus-visible { color: var(--danger); outline: none; }
 .terminal-panel__content { min-width: 0; min-height: 0; flex: 1; background: var(--terminal-bg); }
 .terminal-view { width: 100%; height: 100%; padding: 8px 4px 4px 8px; background: var(--terminal-bg); color: var(--terminal-fg); }
+.terminal-view .xterm-selection div { opacity: 1; }
 .terminal-empty { display: flex; align-items: center; justify-content: center; gap: 9px; height: 100%; padding: 24px; color: var(--terminal-muted); text-align: center; }
 .terminal-empty--action { flex-direction: column; }
 .terminal-empty--error strong { max-width: min(100%, 560px); overflow-wrap: anywhere; }

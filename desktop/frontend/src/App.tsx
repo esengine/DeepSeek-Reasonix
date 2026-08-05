@@ -2910,20 +2910,39 @@ export default function App() {
     [setSavedTerminalHeight, terminalPanelOpen, terminalRenderHeight, terminalResizeMaxHeight],
   );
 
-  // Manage terminal content visibility for open/close animation.
-  // On open: mount content immediately. On close: wait for the grid-template-rows
-  // transition to finish before unmounting.
-  const handleTerminalTransitionEnd = useCallback((event: React.TransitionEvent<HTMLDivElement>) => {
-    if (event.propertyName === "grid-template-rows" && !terminalPanelOpen) {
-      setTerminalContentVisible(false);
-    }
-  }, [terminalPanelOpen]);
-
+  // Keep the terminal panel mounted after the first open. Closing only collapses
+  // --terminal-height; remounting xterm mid-transition is what made reopen feel
+  // hitchy. The lazy chunk still loads on first open (or hover prefetch below).
   useEffect(() => {
     if (terminalPanelOpen) {
       setTerminalContentVisible(true);
     }
   }, [terminalPanelOpen]);
+
+  // Pause xterm fit/PTY resize for the whole open/close height animation. Letting
+  // ResizeObserver thrash fit()+backend resize on every interpolated frame is
+  // what still made close feel slightly sticky after the panel stayed mounted.
+  const [terminalFitEnabled, setTerminalFitEnabled] = useState(false);
+  useEffect(() => {
+    if (!terminalPanelOpen) {
+      setTerminalFitEnabled(false);
+      return;
+    }
+    if (terminalResizing) {
+      setTerminalFitEnabled(true);
+      return;
+    }
+    const reduceMotion = typeof window !== "undefined"
+      && typeof window.matchMedia === "function"
+      && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const delay = reduceMotion ? 0 : 240;
+    const timer = window.setTimeout(() => setTerminalFitEnabled(true), delay);
+    return () => window.clearTimeout(timer);
+  }, [terminalPanelOpen, terminalResizing]);
+
+  const prefetchTerminalPanel = useCallback(() => {
+    void import("./components/TerminalPanel");
+  }, []);
 
   const openWorkspacePanel = useCallback(
     (mode: RightDockMode = rightDockMode) => {
@@ -3164,6 +3183,16 @@ export default function App() {
     setSelectedTextRequestsByTab((current) => ({
       ...current,
       [activeTabId]: { id: selectedTextRequestIdRef.current, text: selected },
+    }));
+  }, [activeTabId]);
+
+  const addTerminalSelectionToComposer = useCallback((text: string) => {
+    const selected = text.trim();
+    if (!activeTabId || !selected) return;
+    selectedTextRequestIdRef.current += 1;
+    setSelectedTextRequestsByTab((current) => ({
+      ...current,
+      [activeTabId]: { id: selectedTextRequestIdRef.current, text: selected, source: "terminal" },
     }));
   }, [activeTabId]);
 
@@ -4217,7 +4246,6 @@ export default function App() {
           .filter(Boolean)
           .join(" ")}
         style={layoutStyle}
-        onTransitionEnd={handleTerminalTransitionEnd}
       >
         {!appChromeHidden && (
           <AppChrome
@@ -4643,6 +4671,8 @@ export default function App() {
                     type="button"
                     aria-label={t("rightDock.terminal")}
                     aria-pressed={terminalPanelOpen}
+                    onPointerEnter={prefetchTerminalPanel}
+                    onFocus={prefetchTerminalPanel}
                     onClick={toggleTerminalPanel}
                   >
                     <TerminalSquare size={14} />
@@ -5188,11 +5218,13 @@ export default function App() {
                   tabId={activeTabId ?? ""}
                   cwd={state.meta?.cwd}
                   readOnly={Boolean(activeTab?.readOnly)}
+                  fitEnabled={terminalFitEnabled}
                   onClose={() => {
                     setTerminalPanelOpen(false);
                     saveTerminalPanelOpen(false);
                   }}
                   onAddOutput={(sessionId) => void addTerminalOutputToComposer(sessionId)}
+                  onAddSelection={addTerminalSelectionToComposer}
                 />
               </Suspense>
             )}

@@ -178,6 +178,19 @@ eq(
   "terminal output reaches chat only through the explicit add-output action",
 );
 eq(
+  /const addTerminalSelectionToComposer = useCallback\(\(text: string\) => \{[\s\S]*?source: "terminal"/.test(appSource)
+    && /onAddSelection=\{addTerminalSelectionToComposer\}/.test(appSource),
+  true,
+  "terminal text selections route into the composer as terminal-sourced selected text",
+);
+eq(
+  /onSelectionActionChange=\{onAddSelection \? handleSelectionActionChange : undefined\}/.test(terminalPanelSource)
+    && /useGlobalShortcut\(\s*"selection\.addToChat"/.test(terminalPanelSource)
+    && /transcript-selection-action/.test(terminalPanelSource),
+  true,
+  "terminal panel exposes Add to Chat for an active xterm selection",
+);
+eq(
   /@media \(max-width: 820px\) \{[\s\S]*?\.layout--terminal-drawer-open \.terminal-drawer[\s\S]*?display: flex !important/.test(stylesSource),
   true,
   "terminal drawer stays visible on narrow viewports",
@@ -295,6 +308,25 @@ eq(
   /const TerminalPanel = lazy\(\(\) => import\("\.\/components\/TerminalPanel"\)/.test(appSource),
   true,
   "terminal and xterm load only when the terminal drawer opens",
+);
+eq(
+  /onPointerEnter=\{prefetchTerminalPanel\}/.test(appSource)
+    && /void import\("\.\/components\/TerminalPanel"\)/.test(appSource),
+  true,
+  "hovering the topic-bar terminal control prefetches the terminal panel chunk",
+);
+eq(
+  /Keep the terminal panel mounted after the first open/.test(appSource)
+    && !/setTerminalContentVisible\(false\)/.test(appSource),
+  true,
+  "closing the terminal drawer keeps the panel mounted so reopen only animates height",
+);
+eq(
+  /fitEnabled=\{terminalFitEnabled\}/.test(appSource)
+    && /Pause xterm fit\/PTY resize for the whole open\/close height animation/.test(appSource)
+    && /fitEnabled=\{fitEnabled\}/.test(terminalPanelSource),
+  true,
+  "terminal open/close pauses xterm fit so the height animation is not fighting resize work",
 );
 
 console.log(`\n${passed} passed, ${failed} failed, ${passed + failed} total`);
