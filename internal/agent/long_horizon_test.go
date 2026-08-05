@@ -83,12 +83,12 @@ func TestCompactSendsEnhancedPromptToSummarizer(t *testing.T) {
 func TestLongHorizonCompactionThresholds(t *testing.T) {
 	const windowSize = 100000 // 100K token window
 	cases := []struct {
-		name       string
-		softRatio  float64
-		snipRatio  float64
-		wantSoft   int
-		wantSnip   int
-		wantHigh   int
+		name      string
+		softRatio float64
+		snipRatio float64
+		wantSoft  int
+		wantSnip  int
+		wantHigh  int
 	}{
 		{
 			name:      "standard-defaults",
@@ -153,11 +153,11 @@ func TestLongHorizonSoftNoticeEarlier(t *testing.T) {
 	var standardNotices []event.Event
 	sink1 := event.FuncSink(func(e event.Event) { standardNotices = append(standardNotices, e) })
 	a1 := New(prov1, tool.NewRegistry(), sess1, Options{
-		ContextWindow:    windowSize,
-		SoftCompactRatio: 0.5,
+		ContextWindow:       windowSize,
+		SoftCompactRatio:    0.5,
 		ToolResultSnipRatio: 0.6,
-		CompactRatio:     0.8,
-		CompactForceRatio: 0.9,
+		CompactRatio:        0.8,
+		CompactForceRatio:   0.9,
 	}, sink1)
 	a1.maybeCompact(context.Background(), &provider.Usage{PromptTokens: promptAt45Pct})
 	if len(standardNotices) != 0 {
@@ -173,11 +173,11 @@ func TestLongHorizonSoftNoticeEarlier(t *testing.T) {
 	var lhNotices []event.Event
 	sink2 := event.FuncSink(func(e event.Event) { lhNotices = append(lhNotices, e) })
 	a2 := New(prov2, tool.NewRegistry(), sess2, Options{
-		ContextWindow:    windowSize,
-		SoftCompactRatio: 0.4, // long-horizon adjusted
+		ContextWindow:       windowSize,
+		SoftCompactRatio:    0.4, // long-horizon adjusted
 		ToolResultSnipRatio: 0.5,
-		CompactRatio:     0.8,
-		CompactForceRatio: 0.9,
+		CompactRatio:        0.8,
+		CompactForceRatio:   0.9,
 	}, sink2)
 	a2.maybeCompact(context.Background(), &provider.Usage{PromptTokens: promptAt45Pct})
 	if len(lhNotices) == 0 {
@@ -428,6 +428,263 @@ func TestLongHorizonEnvConfigIntegration(t *testing.T) {
 	if len(notices) == 0 {
 		t.Error("soft notice should fire at 90K (below standard 100K threshold but above long-horizon 80K)")
 	}
+}
+
+// TestCompactionDoneDetailReportsSectionContentChars verifies that the enhanced
+// compactionDoneDetail reports per-section character counts — not just presence —
+// so the user can see when a section header exists but has no body (a signal that
+// the summarizer skipped it).
+func TestCompactionDoneDetailReportsSectionContentChars(t *testing.T) {
+	// Summary with all 5 sections, one of which has an empty body.
+	summary := `## Standing facts & constraints
+- fact A
+- fact B
+
+## Hidden state & recovered facts
+- Employee ID 7742 found in archive
+
+## Sources consulted
+
+## Open questions & uncertainties
+- Need user confirmation
+
+## Pending & next step
+- Submit report
+`
+	detail := compactionDoneDetail(summary)
+	// All 5 sections are present.
+	if !strings.Contains(detail, "5/5") {
+		t.Errorf("expected 5/5 sections present, got: %s", detail)
+	}
+	// Standing facts has real content ("- fact A\n- fact B" = 17 chars).
+	if !strings.Contains(detail, "Standing facts & constraints: 17 chars") {
+		t.Errorf("expected Standing facts char count 17, got: %s", detail)
+	}
+	// Sources consulted has an empty body — the diagnostic must flag it.
+	if !strings.Contains(detail, "Sources consulted: empty-header") {
+		t.Errorf("expected Sources consulted empty-header flag, got: %s", detail)
+	}
+	t.Logf("✓ compactionDoneDetail: %s", detail)
+}
+
+// TestImplicitStateLossWarningSilentOnCompleteSummary verifies the warning is
+// empty (no warning emitted) when all 3 critical implicit-state sections have
+// real content.
+func TestImplicitStateLossWarningSilentOnCompleteSummary(t *testing.T) {
+	summary := `## Hidden state & recovered facts
+- Employee ID 7742 found in archive
+- Inferred path /opt/hidden
+
+## Sources consulted
+- Checked: ChaseBank API, GMail
+- NOT checked: Slack #finance
+
+## Open questions & uncertainties
+- Is transaction #8842 a duplicate?
+`
+	warning := implicitStateLossWarning(summary)
+	if warning != "" {
+		t.Errorf("expected no warning for complete summary, got: %s", warning)
+	}
+	t.Log("✓ No implicit-state loss warning for complete summary")
+}
+
+// TestImplicitStateLossWarningFiresOnMissingSection verifies the warning fires
+// when one of the 3 critical sections is entirely absent.
+func TestImplicitStateLossWarningFiresOnMissingSection(t *testing.T) {
+	// Summary missing "Open questions & uncertainties" entirely.
+	summary := `## Hidden state & recovered facts
+- Employee ID 7742
+
+## Sources consulted
+- Checked: ChaseBank
+`
+	warning := implicitStateLossWarning(summary)
+	if warning == "" {
+		t.Fatal("expected warning for missing Open questions section, got empty string")
+	}
+	if !strings.Contains(warning, "missing") {
+		t.Errorf("warning should mention 'missing', got: %s", warning)
+	}
+	if !strings.Contains(warning, "Open questions & uncertainties") {
+		t.Errorf("warning should name the missing section, got: %s", warning)
+	}
+	t.Logf("✓ Warning fired for missing section: %s", warning)
+}
+
+// TestImplicitStateLossWarningFiresOnEmptyHeader verifies the warning fires
+// when a critical section header exists but has no body content.
+func TestImplicitStateLossWarningFiresOnEmptyHeader(t *testing.T) {
+	// Summary with all 3 sections, but "Hidden state" has an empty body.
+	summary := `## Hidden state & recovered facts
+
+## Sources consulted
+- Checked: API
+
+## Open questions & uncertainties
+- Confirm X?
+`
+	warning := implicitStateLossWarning(summary)
+	if warning == "" {
+		t.Fatal("expected warning for empty Hidden state body, got empty string")
+	}
+	if !strings.Contains(warning, "empty-header") {
+		t.Errorf("warning should mention 'empty-header', got: %s", warning)
+	}
+	if !strings.Contains(warning, "Hidden state & recovered facts") {
+		t.Errorf("warning should name the empty section, got: %s", warning)
+	}
+	t.Logf("✓ Warning fired for empty-header: %s", warning)
+}
+
+// TestCompactionEmitsImplicitStateLossWarning is the end-to-end test: when the
+// summarizer returns a summary that drops a critical implicit-state section, the
+// compaction flow must emit a LevelWarn notice so the user sees the loss at
+// runtime.
+func TestCompactionEmitsImplicitStateLossWarning(t *testing.T) {
+	// Summarizer returns a summary missing "Sources consulted" and
+	// "Open questions & uncertainties" — the exact OSWorld 2.0 failure mode.
+	incompleteSummary := `## Standing facts & constraints
+- User wants expense report
+
+## Goal
+Process Q3 expenses.
+
+## Decisions & rationale
+- Used API approach
+
+## Files & code
+- /tmp/report.json
+
+## Commands & outcomes
+- ran parse: OK
+
+## Errors & fixes
+- none
+
+## Hidden state & recovered facts
+- Employee ID 7742 in archive
+
+## Pending & next step
+- Submit report
+`
+	prov := &fakeProvider{reply: incompleteSummary}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "Process Q3 expense. Check all systems."},
+		{Role: provider.RoleAssistant, Content: "Found Employee ID 7742 in archive, but haven't checked Slack or Confluence yet."},
+		{Role: provider.RoleUser, Content: "Continue"},
+		{Role: provider.RoleAssistant, Content: "Need to confirm if this is a duplicate."},
+	}}
+
+	var warnNotices []event.Event
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Level == event.LevelWarn {
+			warnNotices = append(warnNotices, e)
+		}
+	})
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow:       100000,
+		SoftCompactRatio:    0.4,
+		ToolResultSnipRatio: 0.5,
+		CompactRatio:        0.8,
+		CompactForceRatio:   0.9,
+		RecentKeep:          2,
+	}, sink)
+
+	if err := a.compact(context.Background(), "auto", "", true); err != nil {
+		t.Fatalf("compact failed: %v", err)
+	}
+
+	// The compaction must have emitted a LevelWarn about the missing sections.
+	var lossWarning *event.Event
+	for i := range warnNotices {
+		if strings.Contains(warnNotices[i].Text, "implicit state") {
+			lossWarning = &warnNotices[i]
+			break
+		}
+	}
+	if lossWarning == nil {
+		t.Fatalf("expected LevelWarn about implicit state loss, got %d warn notices: %v", len(warnNotices), warnNotices)
+	}
+	if !strings.Contains(lossWarning.Text, "Sources consulted") {
+		t.Errorf("warning should mention 'Sources consulted' as missing, got: %s", lossWarning.Text)
+	}
+	if !strings.Contains(lossWarning.Text, "Open questions") {
+		t.Errorf("warning should mention 'Open questions' as missing, got: %s", lossWarning.Text)
+	}
+	t.Logf("✓ Runtime implicit-state loss warning: %s", lossWarning.Text)
+}
+
+// TestCompactionNoLossWarningForCompleteSummary verifies that when the summarizer
+// returns a complete summary with all 3 critical sections, NO loss warning is
+// emitted — the detector is silent on success.
+func TestCompactionNoLossWarningForCompleteSummary(t *testing.T) {
+	completeSummary := `## Standing facts & constraints
+- Budget cap $5000
+
+## Goal
+Process expenses.
+
+## Decisions & rationale
+- API approach
+
+## Files & code
+- report.json
+
+## Commands & outcomes
+- parse: OK
+
+## Errors & fixes
+- none
+
+## Hidden state & recovered facts
+- Employee ID 7742 in archive
+
+## Sources consulted
+- Checked: ChaseBank, GMail
+- NOT checked: Slack
+
+## Open questions & uncertainties
+- Confirm duplicate?
+
+## Pending & next step
+- Submit
+`
+	prov := &fakeProvider{reply: completeSummary}
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: "Process expenses."},
+		{Role: provider.RoleAssistant, Content: "Found Employee ID 7742, checked ChaseBank and GMail, need to confirm duplicate."},
+		{Role: provider.RoleUser, Content: "Continue"},
+		{Role: provider.RoleAssistant, Content: "Still need to check Slack."},
+	}}
+
+	var warnNotices []event.Event
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Level == event.LevelWarn {
+			warnNotices = append(warnNotices, e)
+		}
+	})
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow:       100000,
+		SoftCompactRatio:    0.4,
+		ToolResultSnipRatio: 0.5,
+		CompactRatio:        0.8,
+		CompactForceRatio:   0.9,
+		RecentKeep:          2,
+	}, sink)
+
+	if err := a.compact(context.Background(), "auto", "", true); err != nil {
+		t.Fatalf("compact failed: %v", err)
+	}
+
+	for _, w := range warnNotices {
+		if strings.Contains(w.Text, "implicit state") {
+			t.Errorf("should NOT emit loss warning for complete summary, got: %s", w.Text)
+		}
+	}
+	t.Log("✓ No loss warning for complete summary (detector silent on success)")
 }
 
 func min(a, b int) int {

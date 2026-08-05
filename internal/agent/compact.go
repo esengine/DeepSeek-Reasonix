@@ -299,6 +299,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// re-summarized away and the user's own words are never touched. Digests
 	// accumulate (small) rather than collapsing into one lossy rolling summary.
 	summary, err := a.summarizeWithRetry(ctx, fold, instructions)
+	mechanical := false
 	if err != nil {
 		// Mechanical fold: the foldable region is already archived, so stand in a
 		// deterministic marker rather than aborting. /compact then always frees
@@ -306,6 +307,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		// verbatim user turns kept above are untouched.
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context was compacted without a generated summary.", Detail: "compaction summary unavailable (" + err.Error() + "); folded mechanically"})
 		summary = mechanicalFoldDigest(len(fold), archived)
+		mechanical = true
 	}
 
 	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)
@@ -324,6 +326,17 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
 	}, Detail: compactionDoneDetail(summary)})
+
+	// Implicit-state loss detector: for model-generated summaries (not mechanical
+	// folds), check that the 3 OSWorld 2.0-informed sections are present with real
+	// content. A missing or empty-header section means the summarizer skipped it —
+	// implicit state was likely lost to the fold. Emit a LevelWarn so the user can
+	// see at runtime when compaction dropped recoverable state, and re-state it.
+	if !mechanical {
+		if warning := implicitStateLossWarning(summary); warning != "" {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: warning})
+		}
+	}
 	return nil
 }
 
@@ -478,8 +491,10 @@ func countKeptErrors(kept []provider.Message) int {
 }
 
 // compactionDoneDetail produces a human-readable diagnostic of which implicit-
-// state sections the summary actually contains. This lets the user verify that
-// hidden state, sources, and open questions were captured — not lost to the fold.
+// state sections the summary actually contains, including the content length of
+// each section so the user can verify that hidden state, sources, and open
+// questions were captured with real content — not just empty headers — and not
+// lost to the fold.
 func compactionDoneDetail(summary string) string {
 	sections := []string{
 		"Standing facts & constraints",
@@ -488,16 +503,100 @@ func compactionDoneDetail(summary string) string {
 		"Open questions & uncertainties",
 		"Pending & next step",
 	}
-	var present []string
+	type sectionStat struct {
+		name    string
+		present bool
+		chars   int
+	}
+	stats := make([]sectionStat, 0, len(sections))
 	for _, s := range sections {
-		if strings.Contains(summary, s) {
-			present = append(present, s)
+		chars := sectionContentChars(summary, s)
+		stats = append(stats, sectionStat{name: s, present: chars >= 0, chars: chars})
+	}
+	present := 0
+	for _, st := range stats {
+		if st.present {
+			present++
 		}
 	}
-	if len(present) == 0 {
+	if present == 0 {
 		return "summary has no recognized implicit-state sections (may be a mechanical fold)"
 	}
-	return fmt.Sprintf("summary contains %d/%d key sections: %s", len(present), len(sections), strings.Join(present, ", "))
+	// Build a per-section breakdown so the user can see not just presence but
+	// content richness — an empty header (0 chars) is a warning sign that the
+	// summarizer skipped a section even though it was requested.
+	parts := make([]string, 0, len(stats))
+	for _, st := range stats {
+		if !st.present {
+			parts = append(parts, st.name+": MISSING")
+		} else if st.chars == 0 {
+			parts = append(parts, st.name+": empty-header")
+		} else {
+			parts = append(parts, fmt.Sprintf("%s: %d chars", st.name, st.chars))
+		}
+	}
+	return fmt.Sprintf("summary contains %d/%d key sections — %s", present, len(sections), strings.Join(parts, "; "))
+}
+
+// sectionContentChars returns the character count of the content under the named
+// section header (the text between this header and the next "## " header or end
+// of summary). Returns -1 if the section header is absent. A return of 0 means
+// the header exists but has no body — a signal that the summarizer acknowledged
+// the section without actually capturing any state.
+func sectionContentChars(summary, header string) int {
+	idx := strings.Index(summary, header)
+	if idx < 0 {
+		return -1
+	}
+	rest := summary[idx+len(header):]
+	// Find the next section header ("## " at the start of a line). We search in
+	// the untrimmed rest so the leading newline that separates an empty body
+	// from the next header is preserved — trimming first would make the next
+	// "## " appear at position 0 (without a preceding "\n"), causing the search
+	// to skip it and incorrectly fold the next section's content into this one.
+	nextIdx := strings.Index(rest, "\n## ")
+	var body string
+	if nextIdx < 0 {
+		body = rest
+	} else {
+		body = rest[:nextIdx]
+	}
+	body = strings.TrimSpace(body)
+	return len(body)
+}
+
+// implicitStateLossWarning inspects the compaction summary for the 3
+// OSWorld 2.0-informed implicit-state sections. It returns a non-empty message
+// when any of them is missing or has an empty body — the signal that implicit
+// state was likely lost to the fold. The caller emits this as a LevelWarn so
+// the user can see, at runtime, when compaction dropped recoverable state.
+func implicitStateLossWarning(summary string) string {
+	critical := []string{
+		"Hidden state & recovered facts",
+		"Sources consulted",
+		"Open questions & uncertainties",
+	}
+	var missing []string
+	var empty []string
+	for _, section := range critical {
+		chars := sectionContentChars(summary, section)
+		if chars < 0 {
+			missing = append(missing, section)
+		} else if chars == 0 {
+			empty = append(empty, section)
+		}
+	}
+	if len(missing) == 0 && len(empty) == 0 {
+		return ""
+	}
+	var parts []string
+	if len(missing) > 0 {
+		parts = append(parts, fmt.Sprintf("missing: %s", strings.Join(missing, ", ")))
+	}
+	if len(empty) > 0 {
+		parts = append(parts, fmt.Sprintf("empty-header: %s", strings.Join(empty, ", ")))
+	}
+	return fmt.Sprintf("Compaction may have lost implicit state — %s. Review the summary and consider re-stating critical hidden facts in the next turn.", strings.Join(parts, "; "))
 }
 
 // isCompactionSummary reports whether m is a rolling summary from a prior fold.
