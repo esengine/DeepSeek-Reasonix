@@ -99,6 +99,8 @@ type Goals interface {
 	SetGoal(goal string)
 	SetGoalWithResearchMode(goal string, researchMode GoalResearchMode)
 	ResumeGoal() bool
+	PauseGoal() bool
+	GoalRuntime() GoalRuntimeView
 	GoalStrict(strict bool)
 	ClearGoal()
 	AutoResearchSummary() (*autoresearch.Summary, bool)

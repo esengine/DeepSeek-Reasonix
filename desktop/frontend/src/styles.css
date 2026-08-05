@@ -85,6 +85,20 @@
   --accent-soft: rgba(217, 119, 87, 0.14);
   --accent-strong: #e58a6b;
   --grad: linear-gradient(120deg, var(--accent), var(--accent-strong));
+  /* Chart series colours for the usage-stats model charts (donut + stacked
+     trend). A fixed two-set palette taken from GitHub Primer's data-viz
+     tokens (data-blue/green/orange/purple/pink/gray emphasis, light + dark
+     variants; dark orange uses the palette's brighter .5 step #c46212
+     instead of the official #984b10 emphasis, which reads brownish on this
+     dark background); theme styles and theme packs deliberately do not
+     override these so charts keep the same readable sets in both
+     directions. */
+  --chart-1: #0576ff;
+  --chart-2: #2f6f37;
+  --chart-3: #c46212;
+  --chart-4: #975bf1;
+  --chart-5: #d34591;
+  --chart-other: #576270;
   --chat-user-bg: color-mix(in srgb, var(--accent) 16%, var(--bg-elev-2));
   --chat-user-border: color-mix(in srgb, var(--accent) 28%, var(--border-soft));
   --chat-user-fg: var(--fg);
@@ -335,6 +349,12 @@
     --accent-fg: #fff;
     --accent-soft: rgba(47, 95, 168, 0.12);
     --accent-strong: #244f91;
+    --chart-1: #006edb;
+    --chart-2: #30a147;
+    --chart-3: #eb670f;
+    --chart-4: #894ceb;
+    --chart-5: #ce2c85;
+    --chart-other: #808fa3;
     --chat-user-bg: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
     --chat-user-border: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
     --chat-user-fg: var(--fg);
@@ -404,6 +424,12 @@
   --accent-fg: #fff;
   --accent-soft: rgba(47, 95, 168, 0.12);
   --accent-strong: #244f91;
+  --chart-1: #006edb;
+  --chart-2: #30a147;
+  --chart-3: #eb670f;
+  --chart-4: #894ceb;
+  --chart-5: #ce2c85;
+  --chart-other: #808fa3;
   --chat-user-bg: color-mix(in srgb, var(--accent) 9%, var(--bg-elev));
   --chat-user-border: color-mix(in srgb, var(--accent) 22%, var(--border-soft));
   --chat-user-fg: var(--fg);
@@ -7464,6 +7490,35 @@ body > .mermaid-diagram--fullscreen {
 .composer-intent-menu__stop:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.composer-intent-menu__goal-actions {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+}
+
+.composer-intent-menu__goal-actions .composer-intent-menu__stop {
+  justify-self: end;
+}
+
+.composer-intent-menu__goal-runtime {
+  padding: 0 6px 4px;
+}
+
+.composer-intent-menu__goal-runtime-line {
+  display: block;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--dim);
+}
+
+.composer-intent-menu__goal-runtime-line--blocked {
+  color: var(--err);
+}
+
+.composer-intent-menu__goal-runtime-line--paused {
+  color: var(--warn);
 }
 
 .composer-more-menu {

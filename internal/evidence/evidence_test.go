@@ -31,6 +31,21 @@ func TestLedgerRecordsSuccessAndFailureReceipts(t *testing.T) {
 	}
 }
 
+func TestLedgerDistinguishesWorkflowSpecificMutation(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("remember", json.RawMessage(`{"body":"ORBIT-42"}`), true, false))
+	if !ledger.HasSuccessfulToolReceipt("remember") {
+		t.Fatal("successful remember receipt was not found")
+	}
+	if ledger.HasSuccessfulMutationOtherThan("remember") {
+		t.Fatal("remember-only mutation was treated as an unrelated workspace mutation")
+	}
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+	if !ledger.HasSuccessfulMutationOtherThan("remember") {
+		t.Fatal("workspace mutation was hidden by the remember allowance")
+	}
+}
+
 func TestLedgerMatchesFreshSuccessfulReviewReceipt(t *testing.T) {
 	ledger := NewLedger()
 	ledger.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review changes"}`), true, true))
@@ -78,6 +93,47 @@ func TestLedgerRequiresReviewCoverageAfterMutation(t *testing.T) {
 	unrelated.Record(ReceiptFromToolCall("review", json.RawMessage(`{"task":"review something else"}`), true, true))
 	if unrelated.HasCompletedReview() {
 		t.Fatal("review that did not inspect the latest changed path must not count")
+	}
+}
+
+func TestLedgerHostReviewCoverageRequiresContentForEveryPath(t *testing.T) {
+	ledger := NewLedger()
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+	ledger.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/b.go"}`), true, false))
+	mutation, ok := ledger.LatestSuccessfulMutationIndex()
+	if !ok {
+		t.Fatal("missing mutation index")
+	}
+	ledger.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/a.go"}`), true, true))
+	if ledger.HasHostReviewCoverageAfter(mutation, []string{"internal/a.go", "internal/b.go"}) {
+		t.Fatal("one path read must not cover a two-path change set")
+	}
+	ledger.Record(ReceiptFromToolCall("read_file", json.RawMessage(`{"path":"internal/b.go"}`), true, true))
+	if !ledger.HasHostReviewCoverageAfter(mutation, []string{"internal/a.go", "internal/b.go"}) {
+		t.Fatal("fresh reads of every changed path should prove host review coverage")
+	}
+
+	diff := NewLedger()
+	diff.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+	diffMutation, ok := diff.LatestSuccessfulMutationIndex()
+	if !ok {
+		t.Fatal("missing diff mutation index")
+	}
+	diff.Record(Receipt{ToolName: "bash", Success: true, Command: "git diff", OutputBytes: 200})
+	if !diff.HasHostReviewCoverageAfter(diffMutation, []string{"internal/a.go", "internal/b.go"}) {
+		t.Fatal("an output-producing whole git diff should cover the current change set")
+	}
+	for _, command := range []string{"git status --short", "git diff --check"} {
+		insufficient := NewLedger()
+		insufficient.Record(ReceiptFromToolCall("edit_file", json.RawMessage(`{"path":"internal/a.go"}`), true, false))
+		idx, ok := insufficient.LatestSuccessfulMutationIndex()
+		if !ok {
+			t.Fatal("missing insufficient mutation index")
+		}
+		insufficient.Record(Receipt{ToolName: "bash", Success: true, Command: command, OutputBytes: 200})
+		if insufficient.HasHostReviewCoverageAfter(idx, []string{"internal/a.go"}) {
+			t.Fatalf("%q must not count as content review", command)
+		}
 	}
 }
 
@@ -932,6 +988,8 @@ func TestToolCallMutatesForDeliveryProfile(t *testing.T) {
 		{name: "node test cpu profile stays opaque", toolName: "bash", args: `{"command":"node --test --cpu-prof"}`, want: true},
 		{name: "diff review", toolName: "bash", args: `{"command":"git diff --check"}`},
 		{name: "PowerShell network probe does not write workspace", toolName: "bash", args: `{"command":"Test-NetConnection -ComputerName example.com -Port 443"}`},
+		{name: "resolved read-only substitution", toolName: "bash", args: `{"command":"basename \"$(pwd)\""}`},
+		{name: "writer in substitution", toolName: "bash", args: `{"command":"basename \"$(touch out)\""}`, want: true},
 		{name: "formatter write", toolName: "bash", args: `{"command":"gofmt -w internal/a.go"}`, want: true},
 		{name: "file redirect", toolName: "bash", args: `{"command":"printf x > generated.txt"}`, want: true},
 		{name: "compound verification", toolName: "bash", args: `{"command":"go test ./... 2>&1 | tail -20"}`},

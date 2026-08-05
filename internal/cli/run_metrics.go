@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"os"
+	"strings"
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -65,6 +66,19 @@ type RunMetrics struct {
 	CapabilityRouterCompletionTok  int     `json:"capability_router_completion_tokens,omitempty"`
 	CapabilityRouterCost           float64 `json:"capability_router_cost,omitempty"`
 	CapabilityRouterLatencyMs      int64   `json:"capability_router_latency_ms,omitempty"`
+
+	// Run accounting: what a benchmark needs to price one solved task and name
+	// the guard that ended a failed one.
+	Arm                string         `json:"arm"`
+	DurationMs         int64          `json:"duration_ms"`
+	Outcome            string         `json:"outcome"`
+	ToolCalls          int            `json:"tool_calls"`
+	ToolFailures       int            `json:"tool_failures"`
+	ToolDurationMs     int64          `json:"tool_duration_ms"`
+	SubagentToolCalls  int            `json:"subagent_tool_calls"`
+	Retries            int            `json:"retries"`
+	ToolCallsByName    map[string]int `json:"tool_calls_by_name,omitempty"`
+	ToolFailuresByName map[string]int `json:"tool_failures_by_name,omitempty"`
 }
 
 // metricsSink forwards every event to the real sink and accumulates the per-call
@@ -101,7 +115,40 @@ func (s *metricsSink) Emit(e event.Event) {
 	if e.Kind == event.CompactionStarted {
 		s.m.Compactions++
 	}
+	if e.Kind == event.ToolResult {
+		s.recordToolResult(e.Tool)
+	}
+	if e.Kind == event.Retrying {
+		s.m.Retries++
+	}
 	s.inner.Emit(e)
+}
+
+// recordToolResult attributes a finished call by the name the model emitted,
+// not Tool.ResolvedName — a wasted call is a wrong model decision, and the
+// proxy target it resolved to would hide which name was picked.
+func (s *metricsSink) recordToolResult(t event.Tool) {
+	name := strings.TrimSpace(t.Name)
+	if name == "" {
+		name = "unknown"
+	}
+	s.m.ToolCalls++
+	s.m.ToolDurationMs += t.DurationMs
+	if t.ParentID != "" {
+		s.m.SubagentToolCalls++
+	}
+	if s.m.ToolCallsByName == nil {
+		s.m.ToolCallsByName = map[string]int{}
+	}
+	s.m.ToolCallsByName[name]++
+	if t.Err == "" {
+		return
+	}
+	s.m.ToolFailures++
+	if s.m.ToolFailuresByName == nil {
+		s.m.ToolFailuresByName = map[string]int{}
+	}
+	s.m.ToolFailuresByName[name]++
 }
 
 func (s *metricsSink) RecordReadinessAudit(a evidence.ReadinessAudit) {

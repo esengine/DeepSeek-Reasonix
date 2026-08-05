@@ -2959,6 +2959,22 @@ export function useController() {
     return resumeGoalForTab(activeTabId);
   }, [activeTabId, resumeGoalForTab]);
 
+  const pauseGoalForTab = useCallback(async (tabId: string): Promise<boolean> => {
+    if (!tabId) return false;
+    try {
+      const paused = await app.PauseGoalForTab(tabId);
+      await refreshMetaForTab(tabId);
+      return paused;
+    } catch {
+      return false;
+    }
+  }, [refreshMetaForTab]);
+
+  const pauseGoal = useCallback(async (): Promise<boolean> => {
+    if (!activeTabId) return false;
+    return pauseGoalForTab(activeTabId);
+  }, [activeTabId, pauseGoalForTab]);
+
   const newSession = useCallback(async () => {
     const tabId = activeTabId;
     if (tabId) await waitForTabReady(tabId);
@@ -3634,7 +3650,7 @@ export function useController() {
     liveStore,
     activeTabId,
     send, sendToTab, recoverDeliveryToTab, runShell, runShellForTab, steer, steerForTab, notice, cancel, approve, resolveRecovery, answerQuestion, setControllerMode,
-    setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab,
+    setCollaborationMode, setCollaborationModeForTab, setToolApprovalMode, setToolApprovalModeForTab, setComposerProfileForTab, setGoal, setGoalForTab, clearGoal, clearGoalForTab, resumeGoal, resumeGoalForTab, pauseGoal, pauseGoalForTab,
     newSession, clearSession, listSessions, listTrashedSessions, resumeSession, openChannelSession, previewSession, deleteSession, restoreSession, purgeTrashedSession, renameSession,
     loadOlderHistory,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, rewindForTabDetailed, undoRewindForTab, setModel, setEffort, setTokenMode, cancelJob,

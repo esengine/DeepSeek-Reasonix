@@ -1,0 +1,107 @@
+package control
+
+import (
+	"sync"
+
+	"reasonix/internal/event"
+	"reasonix/internal/evidence"
+	"reasonix/internal/provider"
+)
+
+// goalUsageTee wraps the controller's event sink and attributes billable usage
+// events to the active goal turn's recorder, so every model request under the
+// same Goal scope — executor, planner, subagent, compaction, classifier,
+// capability router, recovery reviewer, and goal evaluator — counts against the
+// goal's token budget. Title generation and unrelated background calls are
+// excluded. The tee forwards every event unchanged, so frontends see the same
+// stream they would without accounting.
+type goalUsageTee struct {
+	inner event.Sink
+	mu    sync.Mutex
+	// active is the current goal turn's recorder; nil when no goal turn is
+	// running. Writes happen on the turn goroutine; the tee serializes reads.
+	active *goalTurnRecorder
+}
+
+// NewGoalUsageTee wraps inner in a usage-accounting tee. Pass the returned sink
+// to both the agent/executor and the Controller (control.New detects it and
+// attaches the goal machine).
+func NewGoalUsageTee(inner event.Sink) event.Sink {
+	if inner == nil {
+		inner = event.Discard
+	}
+	return &goalUsageTee{inner: inner}
+}
+
+// Emit forwards the event and, for billable usage while a goal turn is active,
+// folds the tokens into the turn recorder.
+func (t *goalUsageTee) Emit(e event.Event) {
+	if t == nil {
+		return
+	}
+	if e.Kind == event.Usage && e.Usage != nil && !e.Usage.BudgetAccounted && e.UsageSource != event.UsageSourceTitle {
+		t.mu.Lock()
+		rec := t.active
+		t.mu.Unlock()
+		if rec != nil {
+			rec.addUsage(usageTotalTokens(e.Usage))
+		}
+	}
+	if t.inner != nil {
+		t.inner.Emit(e)
+	}
+}
+
+// RecordTurnCompletion forwards the optional completion accounting to the
+// inner sink when it opts in, so wrapping the sink never loses lifecycle
+// bookkeeping.
+func (t *goalUsageTee) RecordTurnCompletion() {
+	if t == nil || t.inner == nil {
+		return
+	}
+	if ts, ok := t.inner.(event.TurnCompletionSink); ok {
+		ts.RecordTurnCompletion()
+	}
+}
+
+// RecordReadinessAudit forwards the optional readiness audit receipts.
+func (t *goalUsageTee) RecordReadinessAudit(a evidence.ReadinessAudit) {
+	if t == nil || t.inner == nil {
+		return
+	}
+	if rs, ok := t.inner.(event.ReadinessAuditSink); ok {
+		rs.RecordReadinessAudit(a)
+	}
+}
+
+// setActiveRecorder binds the current goal turn's recorder (nil clears it).
+func (t *goalUsageTee) setActiveRecorder(rec *goalTurnRecorder) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.active = rec
+	t.mu.Unlock()
+}
+
+// activeRecorder returns the current goal turn's recorder, if any.
+func (t *goalUsageTee) activeRecorder() *goalTurnRecorder {
+	if t == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.active
+}
+
+// usageTotalTokens prefers TotalTokens and falls back to the non-overlapping
+// prompt + completion sum, so cache hit/miss tokens are never double-counted.
+func usageTotalTokens(u *provider.Usage) int {
+	if u == nil {
+		return 0
+	}
+	if u.TotalTokens > 0 {
+		return u.TotalTokens
+	}
+	return u.PromptTokens + u.CompletionTokens
+}

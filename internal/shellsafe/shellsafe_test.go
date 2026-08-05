@@ -21,6 +21,8 @@ func TestCommandIsReadOnly(t *testing.T) {
 		// PowerShell permission-safe inspection commands.
 		`Get-Process -Name mongod`, `Get-ChildItem -Path .`,
 		`Get-NetTCPConnection -LocalPort 6379`, `Resolve-Path .`,
+		// Narrow, recursively proven read-only command substitution.
+		`basename "$(pwd)"`, `dirname "$(realpath .)"`,
 	}
 	for _, c := range readOnly {
 		if _, _, ok := CommandIsReadOnly(c); !ok {
@@ -37,6 +39,9 @@ func TestCommandIsReadOnly(t *testing.T) {
 		// shell syntax can smuggle a write past a read-only base word.
 		"git status && rm -rf /", "cat a | tee b", "echo $(rm x)",
 		"git status > out.txt", "ls; rm x", "git log `whoami`", "echo $HOME",
+		`basename "$(touch out)"`, `basename "$(pwd; touch out)"`,
+		`basename "$(date --set tomorrow)"`, `basename "$(find . -delete)"`,
+		`basename $(pwd)`, `basename "$HOME"`, `find . "$(printf -- -delete)"`,
 		// unknown command.
 		"frobnicate --all",
 		// Network probes do not write the workspace, but they are not safe to

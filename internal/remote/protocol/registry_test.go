@@ -20,7 +20,7 @@ session/list session/create session/rename session/close session/trashList sessi
 session/subscribe session/unsubscribe session/history session/content session/event session/resync_required catalog/changed
 session/submit turn/steer turn/cancel prompt/approve prompt/answer shell/run operation/cancel
 session/new session/clear session/fork session/rewind session/compact session/summarize session/profile/set
-session/goal/set session/goal/resume session/goal/clear session/context session/balance job/list job/cancel
+session/goal/set session/goal/resume session/goal/pause session/goal/clear session/context session/balance job/list job/cancel
 composer/slashArgs composer/history file/list file/search file/preview git/history git/commitDetail
 memory/get memory/suggestions memory/remember memory/forget memory/document/save memory/suggestion/accept
 skill/suggestion/accept research/status research/list research/findings research/evidence/record
@@ -47,7 +47,7 @@ broker/catalog broker/stream/open broker/stream/cancel broker/stream/chunk broke
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("method surface mismatch\n got: %v\nwant: %v", got, want)
 	}
-	if clientReq != 69 || hostNotif != 3 || hostReq != 3 || clientNotif != 3 {
+	if clientReq != 70 || hostNotif != 3 || hostReq != 3 || clientNotif != 3 {
 		t.Fatalf("directions = clientReq=%d hostNotif=%d hostReq=%d clientNotif=%d", clientReq, hostNotif, hostReq, clientNotif)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
 	"reasonix/internal/memory"
 	"reasonix/internal/planmode"
@@ -206,11 +207,11 @@ func (c *Controller) composeWithGoal(
 		// Relevant facts ride only the real user-turn tail. This preserves the
 		// stable system/tool prefix and keeps synthetic recovery turns free of
 		// accidental recall. A just-written fact already arrives in memory-update.
-		if len(notes) == 0 {
+		if len(notes) == 0 && !c.ablation.Off(ablation.Retrieval) {
 			if block := c.memory.recall(source).Block(); block != "" {
 				text = strings.TrimRight(text, "\n") + "\n\n" + block
 			}
-		} else {
+		} else if len(notes) > 0 {
 			c.memory.recordRecall(memory.RecallResult{
 				Query:      strings.TrimSpace(source),
 				Suppressed: "memory update already supplies the new fact",
@@ -374,7 +375,7 @@ const goalTaskContractInstructions = `Goal mode: pursue this goal autonomously. 
 - Pause only when the next step involves an irreversible or externally visible operation, the requested scope has changed, or progress requires information only the user can provide. Otherwise keep working and report assumptions at the end.
 - Complete only when the concrete request is done, the output format and constraints are satisfied, and relevant verification was attempted or reported unavailable.
 
-Do not stop after describing a plan; execute the next useful step. End every goal-mode assistant reply with exactly one status marker on its own line: [goal:continue], [goal:complete], or [goal:blocked:<short reason>].`
+Do not stop after describing a plan; execute the next useful step. End every goal-mode turn by calling the update_goal tool with your disposition: continue (work is ongoing — give the next concrete step in next_action), complete (only when fully done and verified), or blocked (only when the user can unblock). The host validates your claim and decides whether to continue automatically.`
 
 const autoResearchGoalInstructions = `AutoResearch protocol: this goal looks like long-horizon research, debugging, optimization, or implementation work. Treat AutoResearch as a durable strategy for this Goal, not as a background daemon or a global skill.
 - Say briefly in the first visible reply that the goal is being handled with AutoResearch and that host-owned state lives under .reasonix/autoresearch/<task-id>/, using the actual task_id from <autoresearch-runtime>.
@@ -512,6 +513,8 @@ const (
 	GoalCommandStatus GoalCommandAction = iota + 1
 	GoalCommandSet
 	GoalCommandClear
+	GoalCommandPause
+	GoalCommandResume
 )
 
 type GoalCommand struct {
@@ -534,6 +537,10 @@ func ParseGoalCommand(input string) (GoalCommand, bool) {
 		return GoalCommand{Action: GoalCommandStatus, Strict: strict, ResearchMode: researchMode}, true
 	case "clear", "off", "stop", "done":
 		return GoalCommand{Action: GoalCommandClear, Strict: strict, ResearchMode: researchMode}, true
+	case "pause":
+		return GoalCommand{Action: GoalCommandPause, Strict: strict, ResearchMode: researchMode}, true
+	case "resume":
+		return GoalCommand{Action: GoalCommandResume, Strict: strict, ResearchMode: researchMode}, true
 	default:
 		return GoalCommand{Action: GoalCommandSet, Text: actionArgs, Strict: strict, ResearchMode: researchMode}, true
 	}

@@ -4294,13 +4294,33 @@ func (m *chatTUI) runGoalSubcommand(input string) tea.Cmd {
 		m.echoLocalCommand(input)
 		m.ctrl.ClearGoal()
 		m.notice(i18n.M.GoalCleared)
+	case control.GoalCommandPause:
+		m.echoLocalCommand(input)
+		if !m.ctrl.PauseGoal() {
+			m.notice(i18n.M.GoalNotRunning)
+		}
+	case control.GoalCommandResume:
+		m.echoLocalCommand(input)
+		if !m.ctrl.ResumeGoal() {
+			m.notice(i18n.M.GoalNotPaused)
+		}
 	default:
 		m.echoLocalCommand(input)
 		goal := m.ctrl.Goal()
 		if strings.TrimSpace(goal) == "" {
 			m.notice(i18n.M.GoalEmpty)
-		} else {
-			m.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
+			break
+		}
+		m.notice(fmt.Sprintf(i18n.M.GoalCurrentFmt, goal))
+		rt := m.ctrl.GoalRuntime()
+		m.notice(fmt.Sprintf(i18n.M.GoalRuntimeFmt,
+			rt.TurnsUsed, rt.TurnsLimit, rt.TokensUsed, rt.TokensLimit,
+			rt.NoProgressTurns, rt.NoProgressLimit, rt.BudgetExtensions))
+		if rt.LastReason != "" {
+			m.notice(fmt.Sprintf("%s: %s", i18n.M.GoalRuntimeLastReason, rt.LastReason))
+		}
+		if rt.StopCause != "" {
+			m.notice(fmt.Sprintf(i18n.M.GoalPausedFmt, rt.StopCause))
 		}
 	}
 	return nil

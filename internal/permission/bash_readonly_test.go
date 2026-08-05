@@ -32,6 +32,7 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"Get-Process -Name mongod", true},
 		{"Get-ChildItem -Path .", true},
 		{"Get-NetTCPConnection -LocalPort 6379", true},
+		{`basename "$(pwd)"`, true},
 
 		// Git read-only
 		{"git log", true},
@@ -91,6 +92,8 @@ func TestIsReadOnlyBashSubject(t *testing.T) {
 		{"diff <(sort a.txt) <(sort b.txt)", false},
 		{"cat >(tee output.txt)", false},
 		{"ls $(touch output.txt)", false},
+		{`basename "$(touch output.txt)"`, false},
+		{`basename $(pwd)`, false},
 		{"ls `touch output.txt`", false},
 		{"ls || rm file.txt", false},
 		{"ls & rm file.txt", false},

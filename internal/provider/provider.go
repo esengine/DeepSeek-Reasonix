@@ -679,6 +679,10 @@ type Usage struct {
 	ReasoningTokens  int    // subset of CompletionTokens spent on chain-of-thought
 	FinishReason     string // "stop", "tool_calls", "length", "content_filter", "repetition_truncation", …
 	Estimated        bool
+	// BudgetAccounted is host-local bookkeeping: request-budget middleware has
+	// already committed these tokens, so an event-sink fallback must not count
+	// them twice. Provider implementations never serialize this field.
+	BudgetAccounted bool
 	// RequestCount is the number of provider requests represented by this
 	// aggregate. Zero means one request for backward compatibility. Recovery
 	// paths that merge multiple attempts set the exact count.

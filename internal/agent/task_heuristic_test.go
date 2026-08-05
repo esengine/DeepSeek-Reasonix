@@ -65,6 +65,8 @@ func TestHeuristicInputIsTask(t *testing.T) {
 		{"markdown file", "why does README.md render incorrectly", true},
 		{"relative script", "why does ./scripts/verify.sh fail", true},
 		{"email is not file reference", "thanks, email me@example.com later", false},
+		{"long conversation is not task", "Remember ORBIT-42 and answer on the next turn please", false},
+		{"durable memory is task", "Remember ORBIT-42 permanently across sessions", true},
 
 		// Edge cases.
 		{"empty", "", false},

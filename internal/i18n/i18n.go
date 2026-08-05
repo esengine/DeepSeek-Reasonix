@@ -317,6 +317,14 @@ type Messages struct {
 	GoalCurrentFmt            string
 	GoalSetFmt                string
 	GoalCleared               string
+	GoalNotRunning            string
+	GoalNotPaused             string
+	GoalPaused                string
+	GoalPausedReason          string
+	GoalPausedFmt             string // %s = stop cause
+	GoalBudgetExtended        string
+	GoalRuntimeFmt            string // turns, limits, no-progress, extensions
+	GoalRuntimeLastReason     string
 	ModelSwitchUnavailable    string
 	ModelSwitchBusy           string
 	ModelAlreadyOnFmt         string

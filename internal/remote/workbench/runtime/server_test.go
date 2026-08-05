@@ -240,6 +240,16 @@ func (c *profileFakeController) ResumeGoal() bool {
 	c.goalStatus = string(protocol.GoalRunning)
 	return true
 }
+func (c *profileFakeController) PauseGoal() bool {
+	if c.goal == "" || c.goalStatus != string(protocol.GoalRunning) {
+		return false
+	}
+	c.goalStatus = string(protocol.GoalBlocked)
+	return true
+}
+func (c *profileFakeController) GoalRuntime() control.GoalRuntimeView {
+	return control.GoalRuntimeView{TurnsUsed: 2, TurnsLimit: 20, TokensUsed: 12345, TokensLimit: 400000, NoProgressTurns: 1, NoProgressLimit: 4, LastReason: "verification is still missing", StopCause: "", BudgetExtensions: 0}
+}
 func (c *profileFakeController) Goal() string       { return c.goal }
 func (c *profileFakeController) GoalStatus() string { return c.goalStatus }
 
@@ -322,6 +332,16 @@ func (c *projectionController) ResumeGoal() bool {
 	}
 	c.goalStatus = string(protocol.GoalRunning)
 	return true
+}
+func (c *projectionController) PauseGoal() bool {
+	if c.goal == "" || c.goalStatus != string(protocol.GoalRunning) {
+		return false
+	}
+	c.goalStatus = string(protocol.GoalBlocked)
+	return true
+}
+func (c *projectionController) GoalRuntime() control.GoalRuntimeView {
+	return control.GoalRuntimeView{TurnsUsed: 2, TurnsLimit: 20, TokensUsed: 12345, TokensLimit: 400000, NoProgressTurns: 1, NoProgressLimit: 4, LastReason: "verification is still missing", StopCause: "", BudgetExtensions: 0}
 }
 func (c *projectionController) Goal() string       { return c.goal }
 func (c *projectionController) GoalStatus() string { return c.goalStatus }

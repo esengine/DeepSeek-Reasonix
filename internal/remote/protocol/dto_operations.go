@@ -248,6 +248,14 @@ type SessionGoalResumeResult struct {
 	Status  GoalStatus `json:"status"`
 }
 
+type SessionGoalPauseParams struct{ SessionMutation }
+
+type SessionGoalPauseResult struct {
+	Paused bool       `json:"paused"`
+	Goal   string     `json:"goal"`
+	Status GoalStatus `json:"status"`
+}
+
 type SessionGoalClearParams struct{ SessionMutation }
 
 type SessionGoalClearResult struct {

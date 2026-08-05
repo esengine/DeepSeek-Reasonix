@@ -2,6 +2,474 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.19.7",
+      "date": "2026-08-05",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix v1.19.7",
+        "zh": "Reasonix v1.19.7"
+      },
+      "summary": {
+        "en": "This release improves sub-agent result handling, adds server-side web search controls, fixes multiple desktop and agent issues, and includes various stability and usability enhancements.",
+        "zh": "此版本改进了子 Agent 结果处理，添加了服务端网页搜索控制，修复了多个桌面端和 Agent 问题，并包含多项稳定性和可用性增强。"
+      },
+      "surfaces": [
+        "agent",
+        "cli",
+        "config",
+        "desktop",
+        "provider",
+        "recovery",
+        "remote",
+        "serve",
+        "updates"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "User Guide",
+            "zh": "用户指南"
+          },
+          "body": {
+            "en": "Learn how to use Reasonix effectively.",
+            "zh": "了解如何有效使用 Reasonix。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/93243ab14b95c8235cf21ddae455ac9e453cb1b6/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "User Guide (Chinese)",
+            "zh": "用户指南（中文）"
+          },
+          "body": {
+            "en": "Learn how to use Reasonix effectively (Chinese).",
+            "zh": "了解如何有效使用 Reasonix（中文）。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/93243ab14b95c8235cf21ddae455ac9e453cb1b6/docs/GUIDE.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Specification",
+            "zh": "规范"
+          },
+          "body": {
+            "en": "Reasonix technical specification.",
+            "zh": "Reasonix 技术规范。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/93243ab14b95c8235cf21ddae455ac9e453cb1b6/docs/SPEC.md"
+        },
+        {
+          "title": {
+            "en": "Tool Contract",
+            "zh": "工具契约"
+          },
+          "body": {
+            "en": "Details of the tool contract used by Reasonix.",
+            "zh": "Reasonix 使用的工具契约详情。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/93243ab14b95c8235cf21ddae455ac9e453cb1b6/docs/TOOL_CONTRACT.md"
+        },
+        {
+          "title": {
+            "en": "Tool Contract (Chinese)",
+            "zh": "工具契约（中文）"
+          },
+          "body": {
+            "en": "Details of the tool contract used by Reasonix (Chinese).",
+            "zh": "Reasonix 使用的工具契约详情（中文）。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/93243ab14b95c8235cf21ddae455ac9e453cb1b6/docs/TOOL_CONTRACT.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "DeepSeek server-side web search control",
+            "zh": "DeepSeek 服务端网页搜索控制"
+          },
+          "body": {
+            "en": "Added server-side web search support for the DeepSeek Responses API, including streaming lifecycle events and replay of completed search items. Enabled by default on official endpoints, with explicit opt-out. Exposed in Desktop provider settings with privacy, token usage, and billing guidance.",
+            "zh": "为 DeepSeek Responses API 添加了服务端网页搜索支持，包括流式生命周期事件和已完成搜索项的重放。在官方端点上默认启用，可显式关闭。在桌面端提供者设置中展示，并提供隐私、Token 用量和计费指导。"
+          },
+          "refs": [
+            7466
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Preserve complete parallel sub-agent results",
+            "zh": "保留并行子 Agent 完整结果"
+          },
+          "body": {
+            "en": "Each parallel sub-agent result is now stored in its own record, preventing truncation. Added a read-only pager for lossless retrieval of sub-agent results.",
+            "zh": "每个并行子 Agent 的结果现在存储在自己的记录中，防止截断。添加了只读分页器，用于无损检索子 Agent 结果。"
+          },
+          "refs": [
+            7375
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Custom providers no longer inherit DeepSeek defaults",
+            "zh": "自定义提供者不再继承 DeepSeek 默认值"
+          },
+          "body": {
+            "en": "Fixed a bug where user-defined providers silently acquired DeepSeek's balance URL, price table, and context window, leading to incorrect billing and compaction behavior.",
+            "zh": "修复了用户定义的提供者会静默获取 DeepSeek 的余额 URL、价格表和上下文窗口的错误，该错误导致计费和压缩行为不正确。"
+          },
+          "refs": [
+            7386
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Planner no longer produces duplicate answers on Q&A tasks",
+            "zh": "规划器在问答任务中不再产生重复答案"
+          },
+          "body": {
+            "en": "The planner now correctly concludes answer-only turns without starting the executor, preventing duplicate responses on pure question/comparison/analysis tasks.",
+            "zh": "规划器现在能正确结束仅回答的轮次，而无需启动执行器，防止在纯问题/比较/分析任务中出现重复响应。"
+          },
+          "refs": [
+            7504
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop: empty sessions no longer hijack topic resolution",
+            "zh": "桌面端：空会话不再劫持主题解析"
+          },
+          "body": {
+            "en": "Fixed an issue where a newly created empty session could permanently outrank actual conversations, making real transcripts inaccessible in the UI.",
+            "zh": "修复了新创建的空会话可能永久优先于实际对话，导致真实记录在 UI 中无法访问的问题。"
+          },
+          "refs": [
+            7494
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Auto-research evidence blocks no longer leak into displayed answers",
+            "zh": "自动研究证据块不再泄漏到显示的答案中"
+          },
+          "body": {
+            "en": "Protocol evidence blocks are now filtered from displayed assistant answers on all surfaces, keeping output clean.",
+            "zh": "协议证据块现在在所有界面上从显示的助手答案中过滤掉，保持输出整洁。"
+          },
+          "refs": [
+            7493
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Send unknown slash input as a regular message",
+              "zh": "将未知斜杠输入作为常规消息发送"
+            },
+            "body": {
+              "en": "Unknown slash commands are now sent as regular model turns instead of being dead-ended, with a notice that the command was unrecognized.",
+              "zh": "未知斜杠命令现在作为常规模型轮次发送，而不是被终止，并提示命令未被识别。"
+            },
+            "refs": [
+              7496
+            ]
+          },
+          {
+            "title": {
+              "en": "Recognize swift test as a delivery verification command",
+              "zh": "将 swift test 识别为交付验证命令"
+            },
+            "body": {
+              "en": "Swift/SwiftPM projects now have a host-recognized verification command for delivery finalization.",
+              "zh": "Swift/SwiftPM 项目现在拥有用于交付最终确认的主机识别验证命令。"
+            },
+            "refs": [
+              7480
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Move desktop style to the top of General settings",
+              "zh": "将桌面风格移至通用设置首项"
+            },
+            "body": {
+              "en": "The Desktop style selector is now the first setting in General settings for better visibility.",
+              "zh": "桌面风格选择器现在是通用设置中的第一项，以提高可见性。"
+            },
+            "refs": [
+              7515
+            ]
+          },
+          {
+            "title": {
+              "en": "Sanitize stored display titles at the read boundary",
+              "zh": "在读取边界清理存储的显示标题"
+            },
+            "body": {
+              "en": "Legacy internal strings in session/topic titles and previews are now cleaned when loaded, preventing raw wrappers from appearing in history and tabs.",
+              "zh": "会话/主题标题和预览中的旧版内部字符串现在在加载时被清理，防止原始包装器出现在历史记录和标签页中。"
+            },
+            "refs": [
+              7501
+            ]
+          },
+          {
+            "title": {
+              "en": "ACP replay uses user-authored view",
+              "zh": "ACP 重放使用用户创作视图"
+            },
+            "body": {
+              "en": "Reopening a session now replays the user-authored view instead of raw persisted wire form, hiding injected transient blocks and protocol markers.",
+              "zh": "重新打开会话现在重放用户创作视图，而不是原始持久化的传输形式，隐藏注入的瞬态块和协议标记。"
+            },
+            "refs": [
+              7502
+            ]
+          },
+          {
+            "title": {
+              "en": "Raise model-list response cap with truncation detection",
+              "zh": "提高模型列表响应上限并添加截断检测"
+            },
+            "body": {
+              "en": "The model-list response cap was raised to 2 MiB to accommodate large provider responses, with clear error on overflow.",
+              "zh": "模型列表响应上限提高到 2 MiB，以适应大型提供者响应，并在溢出时提供明确错误。"
+            },
+            "refs": [
+              7383
+            ]
+          },
+          {
+            "title": {
+              "en": "Observe session saves without an in-process lease owner",
+              "zh": "观测缺少进程内租约所有者的会话保存"
+            },
+            "body": {
+              "en": "Added deduplicated structured diagnostics for unleased session saves so future single-writer enforcement can account for legitimate writers without changing save behavior in this release.",
+              "zh": "为无租约会话保存增加了去重的结构化诊断，便于后续单写者约束覆盖合法写入方；本版本不改变保存行为。"
+            },
+            "refs": [
+              7532
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Honor persisted session_mappings when resolving chat sessions",
+              "zh": "解析聊天会话时遵循持久化的 session_mappings"
+            },
+            "body": {
+              "en": "Fixed bot chats fragmenting into one-turn sessions by making the gateway respect persisted session mappings.",
+              "zh": "通过使网关遵循持久化的会话映射，修复了机器人聊天分散为单轮会话的问题。"
+            },
+            "refs": [
+              7531
+            ]
+          },
+          {
+            "title": {
+              "en": "Recover half-open stream stalls and tolerate empty data: lines",
+              "zh": "恢复半开流停滞并容忍空 data: 行"
+            },
+            "body": {
+              "en": "Fixed stream robustness issues in the OpenAI-compatible provider, including watchdog stall recovery and handling of empty heartbeat lines.",
+              "zh": "修复了 OpenAI 兼容提供者中的流稳健性问题，包括看门狗停滞恢复和空心跳行的处理。"
+            },
+            "refs": [
+              7374
+            ]
+          },
+          {
+            "title": {
+              "en": "Keep ask interactive after model switches in serve",
+              "zh": "在 serve 中切换模型后保持 ask 交互"
+            },
+            "body": {
+              "en": "Re-enabled interactive approval and asker wiring on controllers rebuilt by model or effort switches.",
+              "zh": "重新启用了由模型或努力切换重建的控制器上的交互式批准和询问器连接。"
+            },
+            "refs": [
+              7450
+            ]
+          },
+          {
+            "title": {
+              "en": "Make local file paths in chat clickable on Windows",
+              "zh": "使聊天中的本地文件路径在 Windows 上可点击"
+            },
+            "body": {
+              "en": "File paths printed by the AI in chat replies are now clickable on Windows, opening with the default application.",
+              "zh": "AI 在聊天回复中打印的文件路径现在在 Windows 上可点击，使用默认应用程序打开。"
+            },
+            "refs": [
+              7465
+            ]
+          },
+          {
+            "title": {
+              "en": "Resolve global hooks from platform Reasonix home in hook machine",
+              "zh": "在 hook 机器中从平台 Reasonix 主目录解析全局钩子"
+            },
+            "body": {
+              "en": "Fixed hook status/list commands reporting global hooks as missing when they are configured.",
+              "zh": "修复了 hook status/list 命令在配置了全局钩子时报告缺失的问题。"
+            },
+            "refs": [
+              7441
+            ]
+          },
+          {
+            "title": {
+              "en": "Recover superseded pending transactions in updater",
+              "zh": "在更新器中恢复被取代的待处理事务"
+            },
+            "body": {
+              "en": "Fixed blocked in-app updates after a flat-to-versioned Windows reinstall by recovering valid pending transactions from the old layout.",
+              "zh": "通过从旧布局恢复有效的待处理事务，修复了从扁平到版本化 Windows 重新安装后应用内更新被阻止的问题。"
+            },
+            "refs": [
+              7376
+            ]
+          },
+          {
+            "title": {
+              "en": "Snapshot the session on every quit gesture in TUI",
+              "zh": "在 TUI 中每次退出手势时快照会话"
+            },
+            "body": {
+              "en": "Fixed data loss on certain TUI quit gestures by ensuring session snapshot and lease finalization on every exit.",
+              "zh": "通过确保每次退出时进行会话快照和租约最终确认，修复了某些 TUI 退出手势上的数据丢失问题。"
+            },
+            "refs": [
+              7489
+            ]
+          },
+          {
+            "title": {
+              "en": "Preserve queue cursor when editing queued feedback in TUI",
+              "zh": "在 TUI 中编辑排队反馈时保留队列光标"
+            },
+            "body": {
+              "en": "Fixed queued feedback editing in TUI where typing replacement text would reset the cursor and append instead of replace.",
+              "zh": "修复了 TUI 中排队反馈编辑的问题，即输入替换文本会重置光标并追加而不是替换。"
+            },
+            "refs": [
+              4916
+            ]
+          },
+          {
+            "title": {
+              "en": "Zoom on title-bar double click on macOS",
+              "zh": "在 macOS 上双击标题栏缩放"
+            },
+            "body": {
+              "en": "Double-clicking the custom title bar on macOS now triggers window zoom, matching standard platform behavior.",
+              "zh": "在 macOS 上双击自定义标题栏现在会触发窗口缩放，符合标准平台行为。"
+            },
+            "refs": [
+              7473
+            ]
+          },
+          {
+            "title": {
+              "en": "Record why Windows proxy detection fell through",
+              "zh": "记录 Windows 代理检测失败的原因"
+            },
+            "body": {
+              "en": "Added debug logging for Windows proxy detection failures to aid troubleshooting.",
+              "zh": "添加了 Windows 代理检测失败的调试日志，以帮助故障排除。"
+            },
+            "refs": [
+              7474
+            ]
+          },
+          {
+            "title": {
+              "en": "Correct Windows signing state in desktop README",
+              "zh": "更正桌面 README 中的 Windows 签名状态"
+            },
+            "body": {
+              "en": "Updated desktop README to reflect that Windows builds are Authenticode-signed.",
+              "zh": "更新了桌面 README，以反映 Windows 构建已进行 Authenticode 签名。"
+            },
+            "refs": [
+              7475
+            ]
+          },
+          {
+            "title": {
+              "en": "Release workflow fixes for npm recovery",
+              "zh": "npm 恢复的发布工作流修复"
+            },
+            "body": {
+              "en": "Fixed release workflow issues related to npm recovery control plane loading and staging cleanup tolerance.",
+              "zh": "修复了与 npm 恢复控制平面加载和暂存清理容忍度相关的发布工作流问题。"
+            },
+            "refs": [
+              7482,
+              7478,
+              7477
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [
+        {
+          "title": {
+            "en": "DeepSeek web-search privacy and billing",
+            "zh": "DeepSeek 网页搜索的隐私与计费"
+          },
+          "body": {
+            "en": "On official DeepSeek Responses and Anthropic endpoints, omitting web_search now enables server-side search by default. Search queries are sent to DeepSeek and token usage or charges may increase; set web_search = false to opt out.",
+            "zh": "在 DeepSeek 官方 Responses 与 Anthropic 端点上，省略 web_search 现在会默认启用服务端搜索。搜索查询会发送给 DeepSeek，Token 用量或费用可能增加；如需退出，请设置 web_search = false。"
+          },
+          "refs": [
+            7466
+          ]
+        }
+      ],
+      "contributors": [
+        "esengine",
+        "github-actions[bot]",
+        "SivanCola",
+        "dependabot[bot]",
+        "hobostay",
+        "Oxygen56",
+        "siwenyu666-beep",
+        "ryukeilee",
+        "MagnumGoYB",
+        "ahmedalbusaidy",
+        "Lxiny-zy",
+        "liaoyl830"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.19.7",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.19.6...desktop-v1.19.7",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.19.7",
+      "baseVersion": "1.19.7",
+      "status": "reviewed",
+      "previousRelease": "1.19.6",
+      "builds": {
+        "cli": "v1.19.7",
+        "desktop": "v1.19.7",
+        "npm": "1.19.7"
+      }
+    },
+    {
       "version": "1.19.6",
       "date": "2026-08-04",
       "channel": "stable",

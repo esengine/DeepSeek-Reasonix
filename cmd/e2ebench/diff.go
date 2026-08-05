@@ -11,11 +11,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/shellparse"
 )
 
 type diffOpts struct {
 	bin, model, repo, base, testCmd, profile string
+	ablate                                   ablation.Set
 	maxSteps, timeoutSec, attempts           int
 }
 
@@ -85,6 +87,9 @@ func runOnce(o diffOpts, srcFiles, pkgs []string, prompt string) diffReport {
 		args = append(args, "--model", o.model)
 	}
 	args = appendBenchmarkProfileArgs(args, o.profile)
+	if !o.ablate.Empty() {
+		args = append(args, "--ablate", o.ablate.String())
+	}
 	args = append(args, prompt)
 	cmd := exec.CommandContext(ctx, o.bin, args...)
 	cmd.Dir = o.repo

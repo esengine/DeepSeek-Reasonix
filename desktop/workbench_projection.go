@@ -142,7 +142,27 @@ func workbenchMeta(snapshot protocol.SessionSnapshot, workspace string) Meta {
 		Bypass:            profile.ToolApprovalMode == protocol.ToolApprovalYOLO,
 		CollaborationMode: string(profile.CollaborationMode), ToolApprovalMode: string(profile.ToolApprovalMode),
 		TokenMode: string(profile.TokenMode), Goal: workbenchString(snapshot.Meta.Goal), GoalStatus: string(snapshot.Meta.GoalStatus),
+		GoalRuntime:    workbenchGoalRuntime(snapshot.Meta.GoalRuntime),
 		CanonicalTodos: workbenchCanonicalTodos(snapshot.Todos),
+	}
+}
+
+// workbenchGoalRuntime maps the optional remote Goal runtime DTO; old hosts
+// leave it nil.
+func workbenchGoalRuntime(rt *protocol.GoalRuntimeView) *GoalRuntimeView {
+	if rt == nil {
+		return nil
+	}
+	return &GoalRuntimeView{
+		TurnsUsed:        rt.TurnsUsed,
+		TurnsLimit:       rt.TurnsLimit,
+		TokensUsed:       rt.TokensUsed,
+		TokensLimit:      rt.TokensLimit,
+		NoProgressTurns:  rt.NoProgressTurns,
+		NoProgressLimit:  rt.NoProgressLimit,
+		LastReason:       rt.LastReason,
+		StopCause:        rt.StopCause,
+		BudgetExtensions: rt.BudgetExtensions,
 	}
 }
 

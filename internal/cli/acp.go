@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/ablation"
 	"reasonix/internal/acp"
 	"reasonix/internal/boot"
 	"reasonix/internal/config"
@@ -107,6 +108,15 @@ func (f *acpFactory) SessionDir() string {
 	return config.SessionDir()
 }
 
+// ablationSet maps the ACP --planner=off hard override onto the shared
+// subsystem switch boot consults.
+func (f *acpFactory) ablationSet() ablation.Set {
+	if f.plannerOff {
+		return ablation.New(ablation.Planner)
+	}
+	return ablation.Set{}
+}
+
 // NewSession assembles the per-session controller. Resources (MCP subprocesses)
 // are released via the controller's Cleanup, run on ctrl.Close().
 func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*control.Controller, error) {
@@ -137,7 +147,7 @@ func (f *acpFactory) NewSession(ctx context.Context, p acp.SessionParams) (*cont
 		OnSessionRecovered:       p.OnSessionRecovered,
 		FileOverlay:              p.FileOverlay,
 		TerminalRunner:           p.Terminal,
-		DisablePlanner:           f.plannerOff,
+		Ablation:                 f.ablationSet(),
 		SandboxNetworkOverride:   f.networkOverride,
 		SandboxBashOverride:      bashOverride,
 		WorkspaceOnly:            f.workspaceOnly,

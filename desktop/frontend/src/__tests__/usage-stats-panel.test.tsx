@@ -79,9 +79,9 @@ const usageStats = (req: UsageStatsRequest): Promise<UsageStatsRange> => {
       tokens: 21,
       daily: Array.from({ length: 400 }, (_, index) => ({
         day: day(index - 399),
-        total: 1,
-        byModel: { "deepseek/model": 1 },
-        byProvider: { deepseek: 1 },
+        total: 21,
+        byModel: Object.fromEntries(Array.from({ length: 21 }, (_, modelIndex) => [`deepseek/model-${modelIndex + 1}`, 1])),
+        byProvider: { deepseek: 21 },
         requests: 1,
         turns: 1,
         cacheHit: 0,
@@ -125,11 +125,47 @@ ok(rootEl.querySelectorAll("rect.usage-stats__heat-cell--5").length === 1, "init
 ok(rootEl.textContent?.includes("Completed turns") === true && !rootEl.textContent?.includes("Sessions"), "completed turns are not mislabeled as sessions");
 ok(rootEl.querySelectorAll("rect.usage-stats__bar-hit").length === 180, "long custom trends render at most 180 interactive columns");
 ok(rootEl.textContent?.includes("Showing the latest 180 days") === true, "bounded trends disclose the visible window");
-const modelSegments = rootEl.querySelectorAll("circle.usage-stats__donut-seg");
-const primaryColour = modelSegments[0]?.getAttribute("stroke") ?? "";
-ok(primaryColour.includes("var(--accent)") && primaryColour.includes("var(--fg)"), "model colours adapt to the active theme");
-const overflowColour = modelSegments[20]?.getAttribute("stroke") ?? "";
-ok(overflowColour.includes("var(--accent)") && overflowColour.includes("var(--fg)"), "overflow model colours also adapt to the active theme");
+  const modelSegments = rootEl.querySelectorAll("circle.usage-stats__donut-seg");
+  ok(modelSegments.length === 6, "21 models collapse into five steps plus Other");
+  // Model colours map to the fixed --chart-1..5 series (rank order) plus the
+  // gray --chart-other step; each series colour is mixed toward --bg-elev
+  // like the heatmap levels (light/dark hex variants live in styles.css), so
+  // the assertions only check the rank-to-variable mapping.
+  const seriesVar = (color: string) => color.match(/var\(--chart-\d+\)/)?.[0] ?? "";
+  const primaryColour = modelSegments[0]?.getAttribute("stroke") ?? "";
+  ok(seriesVar(primaryColour) === "var(--chart-1)" && primaryColour.includes("72%") && primaryColour.includes("var(--bg-elev)"), "most-used model keeps the first series colour softened toward the card background");
+  const lastTopColour = modelSegments[4]?.getAttribute("stroke") ?? "";
+  ok(seriesVar(lastTopColour) === "var(--chart-5)", "fifth model gets the fifth series colour");
+  const otherColour = modelSegments[modelSegments.length - 1]?.getAttribute("stroke") ?? "";
+  ok(otherColour === "var(--chart-other)", "models beyond the top five collapse into the gray Other step");
+  const series = [...modelSegments].slice(0, 5).map((seg) => seriesVar(seg.getAttribute("stroke") ?? ""));
+  ok(new Set(series).size === 5, "the five model steps each get a distinct series colour");
+
+const otherToggle = rootEl.querySelector<HTMLButtonElement>("button.usage-stats__model-row--expandable");
+ok(otherToggle instanceof dom.window.HTMLButtonElement, "Other uses one native button for the whole expandable row");
+ok(otherToggle?.querySelector("button") === null, "Other does not nest an interactive button inside another button");
+ok(otherToggle?.getAttribute("aria-expanded") === "false", "Other exposes its collapsed state on the row button");
+await act(async () => {
+  otherToggle?.click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+ok(otherToggle?.getAttribute("aria-expanded") === "true", "clicking the Other row exposes its expanded state");
+ok(rootEl.querySelector(".usage-stats__model-other-wrap--open") !== null, "clicking the Other row opens the detail list");
+
+await act(async () => {
+  modelSegments[modelSegments.length - 1]?.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true, clientX: 120, clientY: 120 }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+ok(rootEl.querySelectorAll(".usage-stats__tip-breakdown .usage-stats__tip-row--other").length === 5, "donut tooltip caps the visible Other breakdown");
+ok(rootEl.querySelector(".usage-stats__tip-breakdown .usage-stats__tip-more") !== null, "donut tooltip discloses omitted Other models");
+await act(async () => {
+  modelSegments[modelSegments.length - 1]?.dispatchEvent(new dom.window.MouseEvent("mouseout", { bubbles: true }));
+  rootEl.querySelector("rect.usage-stats__bar-hit")?.dispatchEvent(new dom.window.MouseEvent("mouseover", { bubbles: true, clientX: 120, clientY: 120 }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+const trendTip = rootEl.querySelector(".usage-stats__tip--screen");
+ok(trendTip?.querySelectorAll(".usage-stats__tip-row--other").length === 5, "daily tooltip caps the visible Other breakdown");
+ok(trendTip?.querySelector(".usage-stats__tip-more") !== null, "daily tooltip discloses omitted Other models");
 
 const cliButton = [...rootEl.querySelectorAll("button")].find((button) => button.textContent === "CLI");
 if (!cliButton) throw new Error("missing CLI source button");

@@ -74,8 +74,9 @@ import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "remote", "skills", "subagents", "plugins", "memory", "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "updates"];
 export type SettingsInitialFocus =
-  | { target: "bot-allowlist"; connectionId?: string }
-  | { target: "model-access" };
+  | { target: "bot-allowlist"; connectionId?: string; requestId?: number }
+  | { target: "model-access"; requestId?: number }
+  | { target: "model-stats"; requestId: number };
 type DesktopPlatform = "darwin" | "windows" | "linux";
 
 const MCPServersSettingsPage = lazy(() => import("./CapabilitiesPanel").then((module) => ({ default: module.MCPServersSettingsPage })));
@@ -4087,8 +4088,20 @@ function botDraftWithDerivedGatewayState(draft: BotSettingsView): BotSettingsVie
 function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: ModelsSectionProps) {
   const t = useT();
   const [subtab, setSubtab] = useState<"usage" | "access" | "stats">(
-    initialFocus?.target === "model-access" ? "access" : "usage",
+    initialFocus?.target === "model-access"
+      ? "access"
+      : initialFocus?.target === "model-stats"
+        ? "stats"
+        : "usage",
   );
+  // The command palette may re-target this section while the settings panel is
+  // already open (the subtab state is not remounted by a tab change). Each
+  // freshly allocated focus request runs this effect once, including repeated
+  // requests for the same target after the user changes subtabs.
+  useEffect(() => {
+    if (initialFocus?.target !== "model-access" && initialFocus?.target !== "model-stats") return;
+    setSubtab(initialFocus.target === "model-access" ? "access" : "stats");
+  }, [initialFocus?.target, initialFocus?.requestId]);
   const autoRefreshKeyRef = useRef("");
   const autoRefreshGenerationRef = useRef(0);
   const refs = useMemo(() => allRefs(s), [s.providers]);

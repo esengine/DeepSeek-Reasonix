@@ -10,7 +10,7 @@ import (
 	"reasonix/internal/plugin"
 )
 
-func (c *Controller) withCapabilityRoute(composed, routeInput string) string {
+func (c *Controller) withCapabilityRoute(ctx context.Context, composed, routeInput string) string {
 	if c == nil {
 		return composed
 	}
@@ -21,7 +21,7 @@ func (c *Controller) withCapabilityRoute(composed, routeInput string) string {
 	if routeInput == "" {
 		return composed
 	}
-	decision := c.routeCapabilities(routeInput)
+	decision := c.routeCapabilities(ctx, routeInput)
 	// Pass structured decision to the agent via ledger — never re-parse the prompt.
 	if c.executor != nil {
 		c.executor.SeedCapabilityRoute(decision)
@@ -42,7 +42,10 @@ func (c *Controller) withCapabilityRoute(composed, routeInput string) string {
 	return block + "\n\n" + composed
 }
 
-func (c *Controller) routeCapabilities(routeInput string) capability.RouteDecision {
+func (c *Controller) routeCapabilities(ctx context.Context, routeInput string) capability.RouteDecision {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	tools := c.ToolContractEntries()
 	profile := c.runtimeProfile
 	if profile == "" {
@@ -112,7 +115,7 @@ func (c *Controller) routeCapabilities(routeInput string) capability.RouteDecisi
 			}
 		}
 		if !strong {
-			decision = c.semanticRouter.RouteSemantic(context.Background(), routeInput, catalog, decision)
+			decision = c.semanticRouter.RouteSemantic(ctx, routeInput, catalog, decision)
 			if c.capabilityProxy {
 				decision.CapabilityProxy = true
 			}

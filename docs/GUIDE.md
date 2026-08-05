@@ -1015,12 +1015,24 @@ why the existing version-matched guidance remains correct.
 
 Goal is the unified runtime for long-running objectives. Ordinary `/goal`
 objectives stay lightweight: Reasonix keeps working until the goal is complete,
-blocked, or cleared. When a goal is clearly long-horizon, Goal automatically
-enables the AutoResearch strategy instead of requiring a separate
+blocked, paused, or cleared. When a goal is clearly long-horizon, Goal
+automatically enables the AutoResearch strategy instead of requiring a separate
 `/auto-research` skill; `auto-research` is not listed as a standalone built-in
 skill in Settings -> Skills or the slash menu. Ordinary chat never changes the
 collaboration mode implicitly; choose Goal in the composer or use `/goal` to
 start a long-running objective.
+
+Goal runs under a per-class budget: simple goals get 10 turns / 200k tokens,
+write goals 20 turns / 400k tokens, and AutoResearch goals 40 turns / 800k
+tokens; four consecutive turns without host-verifiable progress pause the goal.
+A paused goal keeps its todos, Delivery checkpoint, and budget history — use
+`/goal resume` to continue (budget pauses add one more slice of the same
+class), or `/goal pause` to pause a running goal manually. `/goal status`
+shows the full runtime summary. At the end of every goal turn the model reports
+its disposition through the structured `update_goal` tool (continue/complete/
+blocked); when no report arrives, an independent bounded evaluator judges the
+turn once, and any evaluator failure pauses the goal instead of continuing
+silently.
 
 For complex work, write the objective as a
 [task contract](./TASK_CONTRACT.md): Context, Request, Output format,

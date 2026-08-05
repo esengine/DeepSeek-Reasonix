@@ -476,6 +476,50 @@ func (l *Ledger) Len() int {
 	return len(l.receipts)
 }
 
+// ReceiptProgressSummary counts successful host-observable receipts by category
+// for cross-turn progress signatures. Failed receipts and reads never count:
+// repeated reads, failed bookkeeping, and reworded answers must not masquerade
+// as progress. Categories are not mutually exclusive (a successful bash command
+// that also writes counts in both), which is fine for a change detector.
+type ReceiptProgressSummary struct {
+	Writes   int // successful mutations/writes
+	Commands int // successful commands (bash receipts)
+	Todos    int // successful todo_write receipts
+	Signoffs int // successful complete_step signoffs
+	Reviews  int // successful review receipts
+}
+
+// ReceiptProgressSummary returns the current ledger's progress counts.
+func (l *Ledger) ReceiptProgressSummary() ReceiptProgressSummary {
+	if l == nil {
+		return ReceiptProgressSummary{}
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var out ReceiptProgressSummary
+	for _, r := range l.receipts {
+		if !r.Success {
+			continue
+		}
+		if r.Mutation || r.Write {
+			out.Writes++
+		}
+		if r.Command != "" {
+			out.Commands++
+		}
+		if r.ToolName == "todo_write" {
+			out.Todos++
+		}
+		if r.ToolName == "complete_step" && r.StepProof {
+			out.Signoffs++
+		}
+		if successfulForegroundReviewReceipt(r) || completedStructuredReviewReceipt(r, nil) {
+			out.Reviews++
+		}
+	}
+	return out
+}
+
 // HasWriteOrCommandSince reports whether a successful write or command receipt
 // was recorded at or after index — host-observable progress, as opposed to
 // bookkeeping receipts (todo_write, complete_step, ask), which carry neither a
@@ -821,6 +865,85 @@ func (l *Ledger) HasSuccessfulReviewAfter(after int) bool {
 	return receiptsReviewChanges(receipts, start, len(receipts), after)
 }
 
+// HasHostReviewCoverageAfter reports whether host-observed content inspection
+// after the latest mutation covers the production paths required by a Medium
+// Delivery review. A plain, output-producing `git diff` covers the current
+// change set; otherwise every required path needs a read receipt or a
+// content-printing command that names it. Summary/status/check-only commands
+// and model prose never satisfy this stronger alternative to review_report.
+func (l *Ledger) HasHostReviewCoverageAfter(after int, requiredPaths []string) bool {
+	if l == nil {
+		return false
+	}
+	start := after + 1
+	if start < 0 {
+		start = 0
+	}
+	l.mu.Lock()
+	receipts := append([]Receipt(nil), l.receipts...)
+	l.mu.Unlock()
+	if after >= len(receipts) {
+		return false
+	}
+	for i := start; i < len(receipts); i++ {
+		r := receipts[i]
+		if r.Success && r.ToolName == "bash" && r.OutputBytes > 0 && commandShowsWholeGitDiff(r.Command) {
+			return true
+		}
+	}
+	wanted := normalizePaths(requiredPaths)
+	if len(wanted) == 0 {
+		return false
+	}
+	for _, path := range wanted {
+		needle := strings.ToLower(filepath.ToSlash(path))
+		covered := false
+		for i := start; i < len(receipts); i++ {
+			r := receipts[i]
+			if !r.Success {
+				continue
+			}
+			if r.Read {
+				for _, observed := range r.Paths {
+					candidate := strings.ToLower(filepath.ToSlash(normalizePath(observed)))
+					if candidate == needle || strings.HasSuffix(candidate, "/"+needle) {
+						covered = true
+						break
+					}
+				}
+			}
+			if !covered && r.ToolName == "bash" && r.OutputBytes > 0 && commandShowsContentForPath(r.Command, needle) {
+				covered = true
+			}
+			if covered {
+				break
+			}
+		}
+		if !covered {
+			return false
+		}
+	}
+	return true
+}
+
+func commandShowsWholeGitDiff(command string) bool {
+	file, err := shellparse.ParseBash(command)
+	if err != nil || shellparse.HasHereDoc(file) || len(file.Stmts) != 1 {
+		return false
+	}
+	stmt := file.Stmts[0]
+	if stmt == nil || stmt.Negated || stmt.Background || stmt.Coprocess || len(stmt.Redirs) > 0 {
+		return false
+	}
+	call, ok := stmt.Cmd.(*syntax.CallExpr)
+	if !ok || len(call.Assigns) > 0 || len(call.Args) != 2 {
+		return false
+	}
+	base, okBase := shellparse.StaticWord(call.Args[0])
+	sub, okSub := shellparse.StaticWord(call.Args[1])
+	return okBase && okSub && strings.EqualFold(filepath.Base(base), "git") && strings.EqualFold(sub, "diff")
+}
+
 func receiptsReviewChanges(receipts []Receipt, start, end, mutationIndex int) bool {
 	if mutationIndex >= len(receipts) {
 		return false
@@ -1005,6 +1128,44 @@ func (l *Ledger) HasAnySuccessfulReceipt() bool {
 	defer l.mu.Unlock()
 	for _, r := range l.receipts {
 		if r.Success {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSuccessfulToolReceipt reports whether a named tool completed
+// successfully in the current evidence scope.
+func (l *Ledger) HasSuccessfulToolReceipt(name string) bool {
+	name = strings.TrimSpace(name)
+	if l == nil || name == "" {
+		return false
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.ToolName == name {
+			return true
+		}
+	}
+	return false
+}
+
+// HasSuccessfulMutationOtherThan distinguishes a workflow-specific state
+// change (for example durable memory) from unrelated workspace mutations that
+// still need the full Delivery verification/review contract.
+func (l *Ledger) HasSuccessfulMutationOtherThan(allowed ...string) bool {
+	if l == nil {
+		return false
+	}
+	allow := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		allow[strings.TrimSpace(name)] = true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for _, r := range l.receipts {
+		if r.Success && r.Mutation && !allow[r.ToolName] {
 			return true
 		}
 	}
@@ -1635,18 +1796,17 @@ func bashMayMutate(command string) bool {
 	}
 	for _, segment := range segments {
 		normalized, safeRedirects := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		if !safeRedirects || shellsafe.ContainsShellSyntax(normalized) {
+		if !safeRedirects {
 			return true
 		}
-		fields, malformed := shellparse.StaticFields(normalized)
-		if malformed != "" || len(fields) == 0 {
-			return true
-		}
-		if bashSegmentIsVerification(fields) {
+		if staticFields, malformed := shellparse.StaticFields(normalized); malformed == "" && len(staticFields) > 0 && bashSegmentIsVerification(staticFields) {
 			continue
 		}
-		base, sub, workspaceNonMutating := shellsafe.CommandIsWorkspaceNonMutating(normalized)
-		if !workspaceNonMutating || bashReadOnlyCommandWrites(base, sub, fields) {
+		base, sub, fields, workspaceNonMutating := shellsafe.ClassifyWorkspaceNonMutatingCommand(normalized)
+		if !workspaceNonMutating {
+			return true
+		}
+		if bashReadOnlyCommandWrites(base, sub, fields) {
 			return true
 		}
 	}

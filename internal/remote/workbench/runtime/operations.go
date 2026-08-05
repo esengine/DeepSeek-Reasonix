@@ -286,8 +286,10 @@ func (s *Server) notifySessionResync(sessionID protocol.SessionID, reason protoc
 type goalController interface {
 	SetGoal(string)
 	ResumeGoal() bool
+	PauseGoal() bool
 	Goal() string
 	GoalStatus() string
+	GoalRuntime() control.GoalRuntimeView
 }
 
 type durableGoalController interface {
@@ -308,6 +310,23 @@ func protocolGoal(ctrl goalController) (string, protocol.GoalStatus) {
 		}
 	}
 	return goal, status
+}
+
+// protocolGoalRuntime maps the controller's Goal runtime view onto the optional
+// wire DTO. Nil when the controller exposes no runtime (old hosts).
+func protocolGoalRuntime(ctrl goalController) *protocol.GoalRuntimeView {
+	rt := ctrl.GoalRuntime()
+	return &protocol.GoalRuntimeView{
+		TurnsUsed:        rt.TurnsUsed,
+		TurnsLimit:       rt.TurnsLimit,
+		TokensUsed:       rt.TokensUsed,
+		TokensLimit:      rt.TokensLimit,
+		NoProgressTurns:  rt.NoProgressTurns,
+		NoProgressLimit:  rt.NoProgressLimit,
+		LastReason:       rt.LastReason,
+		StopCause:        rt.StopCause,
+		BudgetExtensions: rt.BudgetExtensions,
+	}
 }
 
 func (s *Server) setGoal(p protocol.SessionGoalSetParams) (protocol.SessionGoalSetResult, error) {
@@ -370,4 +389,24 @@ func (s *Server) clearGoal(p protocol.SessionGoalClearParams) (protocol.SessionG
 		s.notifyStateChanged(sess.id)
 	}
 	return protocol.SessionGoalClearResult{Cleared: true}, nil
+}
+
+func (s *Server) pauseGoal(p protocol.SessionGoalPauseParams) (protocol.SessionGoalPauseResult, error) {
+	s.profileMu.Lock()
+	defer s.profileMu.Unlock()
+
+	sess, err := s.sessionForMutation(p.ExpectedHostEpoch, p.Target, p.ExpectedRuntimeEpoch)
+	if err != nil {
+		return protocol.SessionGoalPauseResult{}, err
+	}
+	controller, ok := sess.ctrl.(goalController)
+	if !ok {
+		return protocol.SessionGoalPauseResult{}, protocol.MustRemoteError(protocol.ErrCapabilityUnavailable, protocol.ErrorOptions{})
+	}
+	paused := controller.PauseGoal()
+	if paused {
+		s.notifyStateChanged(sess.id)
+	}
+	goal, status := protocolGoal(controller)
+	return protocol.SessionGoalPauseResult{Paused: paused, Goal: goal, Status: status}, nil
 }

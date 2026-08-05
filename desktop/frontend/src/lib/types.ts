@@ -592,6 +592,7 @@ export interface Meta {
   tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
+  goalRuntime?: GoalRuntime;
   autoResearch?: AutoResearchCompactView;
   canonicalTodos?: Todo[];
 }
@@ -601,6 +602,20 @@ export type ToolApprovalMode = "ask" | "auto" | "yolo";
 // "full" is the persisted compatibility value for the Balanced runtime profile.
 export type TokenMode = "full" | "economy" | "delivery";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
+
+// GoalRuntime is the optional Goal budget/runtime summary the backend attaches
+// to Meta. Absent for old hosts or when no goal is active.
+export interface GoalRuntime {
+  turnsUsed: number;
+  turnsLimit: number;
+  tokensUsed: number;
+  tokensLimit: number;
+  noProgressTurns: number;
+  noProgressLimit: number;
+  lastReason?: string;
+  stopCause?: string;
+  budgetExtensions: number;
+}
 
 export interface AutoResearchCompactView {
   taskId: string;
