@@ -190,11 +190,15 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 // MiMo documents reasoning alongside tool calls but does not guarantee it on
 // every round (observed: mimo-v2.5-pro tool-call turn with empty reasoning),
 // so a missing chain-of-thought is endpoint-conditional, not a degradation
-// signal — silence the warning. Capability-driven (review #7234):
-// toolCallReasoning=false vendors (DashScope) never warn — no round-trip
-// contract; singleSegmentReasoning=true vendors (MiMo) never warn — their
-// tool-call thinking is a single optional segment. Only multi-segment
-// thinking vendors that require replay (DeepSeek) warn, scoped to non-flash.
+// signal — silence the warning. This mirrors openai.go's model-scoped gate.
+//
+// Vendor-scoped (2026-08-07, MiMo-Code alignment):
+// MiMo preserves reasoning on replay but does not guarantee it every
+// round (observed: mimo-v2.5-pro tool-call turn with empty reasoning),
+// so a missing chain-of-thought is endpoint-conditional, not a
+// degradation worth a warning. toolCallReasoning=false vendors
+// (DashScope) never warn — no round-trip contract. Only DeepSeek
+// warns, scoped to non-flash models.
 func (c *client) WarnOnMissingToolCallReasoning() bool {
 	if !c.caps.toolCallReasoning {
 		return false
