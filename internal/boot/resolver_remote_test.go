@@ -18,7 +18,7 @@ func TestRemoteResolverMetadataOverridesHostProviderWithSameRef(t *testing.T) {
 		CacheHitPerMillion: 0.1, InputPerMillion: 1.25, OutputPerMillion: 4.5,
 	}}}
 
-	entry, ref, err := resolveModelEntry(Options{ProviderResolver: resolver}, cfg, "shared/model")
+	entry, ref, err := resolveModelEntry(resolver, cfg, "shared/model")
 	if err != nil {
 		t.Fatal(err)
 	}

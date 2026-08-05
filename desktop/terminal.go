@@ -266,9 +266,6 @@ func (a *App) terminalTargetForTab(tabID string, requireWritable bool) (terminal
 	readOnly := tab.ReadOnly
 	a.mu.RUnlock()
 
-	if a.activeWorkbenchTargetIsRemote() {
-		return terminalTarget{}, errTerminalRemote
-	}
 	if requireWritable && readOnly {
 		return terminalTarget{}, readOnlyChannelErr()
 	}
@@ -298,7 +295,7 @@ func (a *App) revalidateTerminalTarget(target terminalTarget, requireWritable bo
 		root = tab.WorkspaceRoot
 	}
 	a.mu.RUnlock()
-	if !valid || a.activeWorkbenchTargetIsRemote() {
+	if !valid {
 		return errTerminalStaleTab
 	}
 	if requireWritable && readOnly {

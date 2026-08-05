@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "db:apply:local": "wrangler d1 migrations apply reasonix-accounts --local",
     "db:apply:remote": "wrangler d1 migrations apply reasonix-accounts --remote"
@@ -16,6 +17,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260724.1",
     "typescript": "^5.8.0",
+    "vitest": "^3.2.0",
     "wrangler": "^4.114.0"
   },
   "overrides": {

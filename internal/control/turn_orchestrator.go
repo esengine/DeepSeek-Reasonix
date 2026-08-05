@@ -213,6 +213,18 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	} else {
 		input = c.compose(turn.input, turn.raw, !turn.synthetic)
 	}
+	// input.receive: the composed text crosses the extension chain before it
+	// enters the session (checkpoint, hooks, and the model all see the final
+	// text). A block ruling aborts the turn with the redacted reason surfaced,
+	// mirroring the PromptSubmit hook's abort path; a required-class extension
+	// failure fails the turn.
+	input, blocked, interceptErr := c.interceptInputReceive(ctx, input)
+	if interceptErr != nil {
+		return interceptErr
+	}
+	if blocked {
+		return nil
+	}
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	defer c.recordDisplayForNewUser(startMessages, turn.display)

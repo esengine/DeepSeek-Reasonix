@@ -11,6 +11,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/secrets"
 )
 
 // deferredRebuildRetryInterval is how often the retry loop probes a held
@@ -18,6 +19,11 @@ import (
 var deferredRebuildRetryInterval = 2 * time.Second
 
 const deferredStartupBuildLabel = "__startup__"
+
+// deferredRuntimeReloadLabel marks a queued ReloadRuntime in the pending map.
+// Like the startup label it is not a user setting name; the retry loop routes
+// it to the boot.Rebuild reload path instead of a settings rebuild.
+const deferredRuntimeReloadLabel = "__reload__"
 
 // deferredRebuildState tracks tabs whose settings were saved to disk but whose
 // runtime could not refresh, plus tabs whose initial startup failed, because
@@ -85,6 +91,10 @@ func (a *App) scheduleDeferredStartupBuild(tabID string) {
 
 func isDeferredStartupBuild(setting string) bool {
 	return setting == deferredStartupBuildLabel
+}
+
+func isDeferredRuntimeReload(setting string) bool {
+	return setting == deferredRuntimeReloadLabel
 }
 
 func (a *App) clearDeferredRebuild(tabID string) {
@@ -187,6 +197,10 @@ func (a *App) retryDeferredRebuild(tabID, setting string) {
 		a.retryDeferredStartupBuild(tabID, tab)
 		return
 	}
+	if isDeferredRuntimeReload(setting) {
+		a.retryDeferredRuntimeReload(tabID, tab)
+		return
+	}
 	// Hold the rebuild mutex across probe + rebuild: the probe briefly acquires
 	// the session lease, and a concurrent manual rebuild's ensureSessionLease
 	// would see that probe as "held by another runtime" and spuriously defer.
@@ -229,6 +243,66 @@ func (a *App) retryDeferredRebuild(tabID, setting string) {
 	a.clearDeferredRebuild(tabID)
 	slog.Warn("desktop: deferred settings rebuild failed", "setting", setting, "tab", tabID, "err", err)
 	a.warnForTab(tabID, fmt.Sprintf("%s was saved but the session could not refresh: %s", setting, err.Error()))
+}
+
+// retryDeferredRuntimeReload drives one queued ReloadRuntime pass. The
+// probing contract mirrors retryDeferredRebuild: wait for the tab to be
+// active and idle and for its lease to look free, then run the boot.Rebuild
+// reload; busy/lease answers keep waiting, anything else gives up loudly.
+func (a *App) retryDeferredRuntimeReload(tabID string, tab *WorkspaceTab) {
+	// Hold the rebuild mutex across probe + reload: the probe briefly
+	// acquires the session lease, and a concurrent rebuild's ensure lease
+	// would read that probe as "held by another runtime" and spuriously
+	// defer (same contract as retryDeferredRebuild).
+	a.runtimeRebuildMu.Lock()
+	defer a.runtimeRebuildMu.Unlock()
+	// The reload shares rebuildSettingTurnLocked, whose bookkeeping is written
+	// for the active tab; wait until the user is back on this tab rather than
+	// refreshing whichever tab happens to be focused.
+	if a.activeTab() != tab {
+		return
+	}
+	ctrl := a.controllerForTab(tab)
+	if ctrl == nil {
+		// Mid-(re)build on another path; racing a second build+swap against it
+		// is what this loop must avoid.
+		return
+	}
+	if controllerHasActiveRuntimeWork(ctrl) {
+		return
+	}
+	if !a.deferredRebuildLeaseLooksFree(tab) {
+		return
+	}
+	err := a.reloadRuntimeTurnLocked(tab)
+	if err == nil {
+		// rebuildSettingTurnLocked already cleared the pending entry for the
+		// tab it refreshed; just announce it.
+		a.noticeForTab(tabID, "runtime reloaded after the session went idle")
+		return
+	}
+	if errors.Is(err, agent.ErrSessionLeaseHeld) {
+		return // grabbed back before we could reload; keep waiting
+	}
+	var busy *rebuildBusyError
+	if errors.As(err, &busy) {
+		return // a turn started meanwhile; retry once it finishes
+	}
+	// Anything else will not resolve by waiting; give up loudly instead of
+	// retrying forever. The error may come from provider/config plumbing and
+	// carry credential-shaped values (passwords, resolved API keys) — the
+	// tested helper redacts before the text reaches logs or the frontend.
+	a.clearDeferredRebuild(tabID)
+	failure := deferredReloadFailedText(err)
+	slog.Warn("desktop: "+failure, "tab", tabID)
+	a.warnForTab(tabID, failure)
+}
+
+// deferredReloadFailedText is the failure line for an unrecoverable deferred
+// reload — the single formatter both the log and the tab warning use, so a
+// credential-shaped error can never reach either sink unredacted.
+func deferredReloadFailedText(err error) string {
+	return "runtime reload failed: " + secrets.RedactCredentials(err.Error())
 }
 
 func (a *App) retryDeferredStartupBuild(tabID string, tab *WorkspaceTab) {

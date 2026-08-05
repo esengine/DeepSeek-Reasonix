@@ -896,7 +896,7 @@ func TestParallelTasksGroupLifecycleEvents(t *testing.T) {
 func TestParallelTasksGroupLifecycleCancelled(t *testing.T) {
 	rec := &recordSink{}
 	started := make(chan struct{})
-	task := newTestTaskTool(t, &blockingProvider{started: started}, tool.NewRegistry(), "sys", "", "", nil)
+	task := newTestTaskTool(t, &cancelBlockingProvider{started: started}, tool.NewRegistry(), "sys", "", "", nil)
 	parallel := NewParallelTasksTool(task, tool.NewRegistry())
 	ctx, cancel := context.WithCancel(withCallContext(context.Background(), "parallel-call", rec, nil, false))
 	defer cancel()
@@ -926,6 +926,19 @@ func TestParallelTasksGroupLifecycleCancelled(t *testing.T) {
 	if terminals != 1 {
 		t.Fatalf("group terminals = %d, want exactly one", terminals)
 	}
+}
+
+type cancelBlockingProvider struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (p *cancelBlockingProvider) Name() string { return "cancel-blocking" }
+
+func (p *cancelBlockingProvider) Stream(ctx context.Context, _ provider.Request) (<-chan provider.Chunk, error) {
+	p.once.Do(func() { close(p.started) })
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 
 // TestParallelTasksGroupLifecycleFailedOnValidation proves validation failures

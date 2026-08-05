@@ -2,7 +2,7 @@ VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 GOEXE := $(shell go env GOEXE)
 
-.PHONY: build vet fmt test desktop-test desktop-test-short desktop-test-times hooks cross clean
+.PHONY: build vet fmt test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
@@ -25,6 +25,12 @@ desktop-test-short:
 
 desktop-test-times:
 	cd desktop && go test -count=1 -json . | python3 ../scripts/desktop-test-times.py
+
+sdk-test:
+	cd sdk/go && go test ./...
+
+sdk-test-race:
+	cd sdk/go && go test -race ./...
 
 hooks:
 	@git config core.hooksPath .githooks

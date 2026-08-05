@@ -16,8 +16,16 @@ import Account from '../layouts/Account.astro';
       <div>
         <div id="acct-handle" class="acct-handle"></div>
         <div id="acct-email" class="acct-email"></div>
+        <a id="acct-profile-link" class="auth-small" href="/u/"><span class="l-en">View public profile</span><span class="l-zh">查看公开主页</span></a>
       </div>
       <span id="acct-role" class="acct-role"></span>
+    </div>
+
+    <div id="verification-wrap" hidden>
+      <h2 class="acct-h2"><span class="l-en">Email verification</span><span class="l-zh">邮箱验证</span></h2>
+      <div id="verification-msg" class="auth-msg" hidden></div>
+      <p class="hint"><span class="l-en">Your email is not confirmed. Some community actions remain locked.</span><span class="l-zh">你的邮箱尚未验证，部分社区操作仍不可用。</span></p>
+      <button id="resend-verification-btn" type="button" class="btn btn-ghost"><span class="l-en">Resend verification email</span><span class="l-zh">重新发送验证邮件</span></button>
     </div>
 
     <h2 class="acct-h2"><span class="l-en">Profile</span><span class="l-zh">资料</span></h2>
@@ -30,7 +38,7 @@ import Account from '../layouts/Account.astro';
       <div class="field">
         <label for="f-handle"><span class="l-en">Handle</span><span class="l-zh">用户名</span></label>
         <input id="f-handle" type="text" minlength="3" maxlength="30" />
-        <span class="hint"><span class="l-en">Your public profile lives at /u/&lt;handle&gt;.</span><span class="l-zh">你的公开主页地址是 /u/&lt;用户名&gt;。</span></span>
+        <span class="hint"><span class="l-en">Your public profile is linked above.</span><span class="l-zh">你的公开主页链接显示在上方。</span></span>
       </div>
       <div class="field">
         <label for="f-bio"><span class="l-en">Bio</span><span class="l-zh">简介</span></label>

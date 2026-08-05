@@ -269,6 +269,20 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		}
 	}
 
+	// compaction.prepare: extensions rule on the fold and the accumulated
+	// guidance (hook + /compact focus) for THIS pass only. A block skips the
+	// pass; the caller surfaces the reason through its usual notice path.
+	var err error
+	fold, instructions, err = a.interceptCompactionPrepare(ctx, fold, instructions)
+	if err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
+	}
+	if len(fold) == 0 {
+		a.emitCompactionAborted(trigger)
+		return nil // the extension replaced the fold with nothing to fold
+	}
+
 	archived := ""
 	if a.archiveDir != "" {
 		path, err := archiveMessages(a.archiveDir, fold)
@@ -291,6 +305,14 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		// verbatim user turns kept above are untouched.
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context was compacted without a generated summary.", Detail: "compaction summary unavailable (" + err.Error() + "); folded mechanically"})
 		summary = mechanicalFoldDigest(len(fold), archived)
+	}
+
+	// compaction.complete: extensions rule on the produced summary before it
+	// is written into the session; a replacement is persisted as the summary.
+	summary, err = a.interceptCompactionComplete(ctx, summary)
+	if err != nil {
+		a.emitCompactionAborted(trigger)
+		return err
 	}
 
 	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)

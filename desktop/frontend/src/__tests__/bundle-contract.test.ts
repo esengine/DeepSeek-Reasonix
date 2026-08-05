@@ -23,6 +23,7 @@ const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.
 const settingsEntrySource = readFileSync(resolve(here, "../components/SettingsPanelEntry.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
+const localPathLinksSource = readFileSync(resolve(here, "../lib/localPathLinks.ts"), "utf8");
 const i18nSource = readFileSync(resolve(here, "../lib/i18n.tsx"), "utf8");
 const mainSource = readFileSync(resolve(here, "../main.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(here, "../styles.css"), "utf8");
@@ -105,6 +106,10 @@ ok(
 ok(
   markdownSource.includes('import("./MarkdownRenderer")'),
   "Markdown wrapper loads markdown renderer on demand",
+);
+ok(
+  !/String\.raw`[^`]*\(\?<!/s.test(localPathLinksSource),
+  "Markdown local-path support avoids RegExp lookbehind required by newer WebKit",
 );
 ok(
   !/import\s+\{\s*zh\s*\}\s+from\s+["']\.\.\/locales\/zh["']/.test(i18nSource) &&

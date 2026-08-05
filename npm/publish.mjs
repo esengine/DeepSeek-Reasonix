@@ -295,7 +295,10 @@ export function publishPackages({
   candidateSha,
   runner = defaultRunner,
   sleep = defaultSleep,
-  attempts = 6,
+  // npm's public registry can lag a successful immutable publish by several
+  // minutes. Keep this bounded, but allow enough time for normal replication
+  // before recovery treats the package as missing.
+  attempts = 31,
   log = console.log,
 }) {
   if (!Array.isArray(packages) || packages.length === 0) {

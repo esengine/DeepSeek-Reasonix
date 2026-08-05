@@ -15,6 +15,7 @@ import (
 
 	"github.com/BurntSushi/toml"
 
+	"reasonix/internal/extension/protocol"
 	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/mcpdiag"
@@ -46,13 +47,16 @@ const (
 //   - "provider/model"    — that specific model under that provider.
 //
 // Either is rejected when the target does not exist, so a UI can't strand
-// the config on a model that doesn't exist.
+// the config on a model that doesn't exist. Plugin-namespaced refs
+// (plugin/<plugin>/<provider>/<model>) are the exception: they belong to
+// extension sidecars, so the config catalog cannot vouch for them — boot's
+// merged resolver gates them at the next launch instead.
 func (c *Config) SetDefaultModel(name string) error {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return fmt.Errorf("set default: empty name")
 	}
-	if _, ok := c.ResolveModel(name); !ok {
+	if _, ok := c.ResolveModel(name); !ok && protocol.PluginRefOwner(name) == "" {
 		return fmt.Errorf("set default: no such model %q (configured: %s)", name, c.providerNames())
 	}
 	c.DefaultModel = name

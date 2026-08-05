@@ -1,4 +1,4 @@
-Unicode true
+﻿Unicode true
 
 ####
 ## Reasonix per-user NSIS installer.
@@ -350,7 +350,9 @@ reasonix_normal_install:
     !else
     !error "${REASONIX_GUARD} was not found; normal installs require the signed layout activator."
     !endif
-    ExecWait '"$PLUGINSDIR\${REASONIX_LAYOUT_INSTALLER}" --install-root "$INSTDIR" --version "v${INFO_PRODUCTVERSION}" --activate-staging "$R9" --no-relaunch' $0
+    DetailPrint "Reasonix layout activator output:"
+    nsExec::ExecToLog /OEM '"$PLUGINSDIR\${REASONIX_LAYOUT_INSTALLER}" --install-root "$INSTDIR" --version "v${INFO_PRODUCTVERSION}" --activate-staging "$R9" --no-relaunch'
+    Pop $0
     StrCmp $0 "0" reasonix_layout_activated
     DetailPrint "Reasonix layout activation failed with exit code $0; the previous version remains active."
     RMDir /r "$R9"

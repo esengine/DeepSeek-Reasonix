@@ -54,6 +54,28 @@ func TestToWireNoticeCarriesCode(t *testing.T) {
 	}
 }
 
+func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
+	w := ToWire(event.Event{
+		Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeDecisionReceipt,
+		Text: "Decision recorded: allow_once",
+		DecisionReceipt: &provider.DecisionReceipt{
+			ID: "approval-1", Kind: "tool", Tool: "write_file", Subject: "src/app.go", Outcome: "allow_once",
+		},
+	})
+	if w.DecisionReceipt == nil || w.DecisionReceipt.ID != "approval-1" || w.DecisionReceipt.Outcome != "allow_once" {
+		t.Fatalf("wire receipt = %+v", w.DecisionReceipt)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"code":"decision_receipt"`, `"decisionReceipt"`, `"outcome":"allow_once"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("receipt JSON = %s, want %s", b, want)
+		}
+	}
+}
+
 func TestKindNamesComplete(t *testing.T) {
 	for k := event.Kind(0); k < event.KindCount; k++ {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
