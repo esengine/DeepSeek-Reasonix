@@ -55,6 +55,7 @@ type TurnControl interface {
 	SubmitInvocationDisplay(display, input string, invocations []InvocationRequest)
 	SubmitEditedDisplay(display, input, original string)
 	SubmitHTTP(input string)
+	SubmitHTTPFormat(input, format string)
 	SubmitUserTurn(input, display string)
 	Send(input string)
 	SendWithRaw(input, raw string)

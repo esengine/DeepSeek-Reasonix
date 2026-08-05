@@ -1133,6 +1133,9 @@ function renderToolResult(tool) {
   scrollDown();
 }
 function renderToolProgress(tool) {
+  // Reserved sub-agent progress channels (reasonix.subagent.*) are an internal
+  // local-frontend contract; they must never land in ordinary tool output.
+  if (tool.name && tool.name.indexOf('reasonix.subagent.') === 0) return;
   const card=toolCards[tool.id]; if(!card)return;
   const body=card.querySelector('.card-body'); if(!body)return;
   body.style.display=''; card.dataset.open='true';

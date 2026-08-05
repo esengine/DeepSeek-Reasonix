@@ -52,6 +52,15 @@ type Message struct {
 	ProviderContent  string   `json:"provider_content,omitempty"`
 	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…) on user (attachments) and tool (MCP image results) messages; embedded only for vision-capable models
 	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
+	// ReasoningID is the provider-issued identifier of the reasoning item
+	// (OpenAI Responses schema: Reasoning.id is required on input items).
+	// Captured from the streamed output item and round-tripped back into
+	// the input on subsequent turns, matching the wire schema.
+	ReasoningID string `json:"reasoning_id,omitempty"`
+	// ReasoningStatus is the final status of the reasoning item
+	// ("in_progress" | "completed") as issued by the server's done event,
+	// round-tripped back into the input alongside ReasoningID.
+	ReasoningStatus string `json:"reasoning_status,omitempty"`
 	// ReasoningSignature is an opaque, provider-issued proof that ReasoningContent
 	// is genuine model output. Anthropic requires the signed thinking block be
 	// replayed on the next turn when a tool call followed thinking; providers
@@ -166,6 +175,17 @@ type Request struct {
 	Tools       []ToolSchema
 	Temperature *float64 // nil = omit; non-nil = send the value, including 0
 	MaxTokens   int
+	// ResponseFormat, when non-nil, asks the endpoint for structured JSON
+	// output (Responses: text.format.type=json_object). Nil omits the field
+	// entirely — the common path must stay byte-stable for prompt caching.
+	ResponseFormat *ResponseFormat
+}
+
+// ResponseFormat asks a provider to constrain its output shape.
+type ResponseFormat struct {
+	// Type is the structured format: "json_object" is the only shape the
+	// Responses endpoints currently define (MiMo/DashScope/OpenAI).
+	Type string `json:"type"`
 }
 
 // DefaultReasoningOutputTokens is the conservative provider-side budget used
@@ -701,14 +721,21 @@ func isThreeLetterCurrencyCode(value string) bool {
 
 // Chunk is a single streamed event. Read the field matching Type.
 type Chunk struct {
-	Type          ChunkType
-	Text          string          // ChunkText, ChunkReasoning
-	Signature     string          // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
-	ToolCall      *ToolCall       // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
-	ArgChars      int             // ChunkToolCallArgsDelta: cumulative argument characters received for this call
-	ResponsesItem json.RawMessage // ChunkResponsesItem: opaque validated Responses API output item
-	Usage         *Usage          // ChunkUsage
-	Err           error           // ChunkError
+	Type      ChunkType
+	Text      string // ChunkText, ChunkReasoning
+	Signature string // ChunkReasoning: opaque proof for the reasoning (Anthropic thinking signature), when issued
+	// ReasoningID/ReasoningStatus ride the final ChunkReasoning of a turn
+	// (empty Text): the provider-issued reasoning item id/status captured
+	// from the SSE stream, so the Agent can persist them into the session
+	// and the next turn's input reasoning item round-trips them (review
+	// #7234 — OpenAI Responses schema marks Reasoning.id required).
+	ReasoningID     string          // ChunkReasoning: provider-issued reasoning item id
+	ReasoningStatus string          // ChunkReasoning: final reasoning item status ("completed")
+	ToolCall        *ToolCall       // ChunkToolCallStart (ID+Name only), ChunkToolCallArgsDelta (ID+Name), ChunkToolCall (complete)
+	ArgChars        int             // ChunkToolCallArgsDelta: cumulative argument characters received for this call
+	ResponsesItem   json.RawMessage // ChunkResponsesItem: opaque validated Responses API output item
+	Usage           *Usage          // ChunkUsage
+	Err             error           // ChunkError
 }
 
 // StreamInterruptedError marks a recoverable transport cut that happened after

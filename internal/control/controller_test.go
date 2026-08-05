@@ -5255,3 +5255,21 @@ func cmdNames(cmds []command.Command) []string {
 	}
 	return names
 }
+
+// TestCacheColdAfterFailureFallsBackTo24h：配置加载失败/模型解析失败时
+// 保守回退 24h（评审 #7168 第 4 点）——不得用 10m 提前触发 prune。
+func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
+	c := New(Options{})
+	orig := c.workspaceRoot
+	c.workspaceRoot = "/nonexistent/definitely-missing-root"
+	defer func() { c.workspaceRoot = orig }()
+	if got := c.cacheColdAfter(); got != 24*time.Hour {
+		t.Fatalf("load failure must fall back to 24h, got %v", got)
+	}
+	// 未知模型同样 24h
+	c2 := New(Options{})
+	c2.modelRef = "definitely-not-a-real-model-xyz"
+	if got := c2.cacheColdAfter(); got != 24*time.Hour {
+		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
+	}
+}

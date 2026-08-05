@@ -38,10 +38,141 @@ import type {
   WireAsk,
   WireEvent,
   WireFinalReadiness,
+  WireTool,
   WireUsage,
 } from "./types";
 
 export type ToolStatus = "running" | "done" | "error" | "stopped";
+
+// Reserved ToolProgress channel names for sub-agent progress previews (the Go
+// tracker emits these; ordinary tool progress must never use them).
+export const SUBAGENT_PROGRESS_STATUS = "reasonix.subagent.status";
+export const SUBAGENT_PROGRESS_REASONING = "reasonix.subagent.reasoning";
+export const SUBAGENT_PROGRESS_TEXT = "reasonix.subagent.text";
+export const SUBAGENT_PROGRESS_NOTICE = "reasonix.subagent.notice";
+
+// Reserved names are matched by prefix so a future channel never falls back
+// to ordinary tool output on older frontends.
+const SUBAGENT_PROGRESS_PREFIX = "reasonix.subagent.";
+
+const SUBAGENT_PROGRESS_PHASES = new Set([
+  "queued", "running", "reasoning", "responding", "tool", "retrying", "completed", "failed", "cancelled",
+]);
+
+// Tool names that initialize a sub-agent progress card. parallel_tasks/fleet
+// are group cards: they settle when their whole child progress tree is
+// terminal, since they never receive a terminal status of their own.
+const SUBAGENT_PROGRESS_TOOLS = new Set(["task", "read_only_task", "parallel_tasks", "fleet"]);
+
+// Per-channel preview retention. The backend already bounds what it sends
+// (8 KiB pending per child); these caps keep one hot card from dominating the
+// live conversation memory.
+const SUBAGENT_PREVIEW_REASONING_LIMIT = 8 << 10;
+const SUBAGENT_PREVIEW_TEXT_LIMIT = 8 << 10;
+const SUBAGENT_PREVIEW_NOTICE_LIMIT = 2 << 10;
+
+export type SubagentPhase =
+  | "queued" | "running" | "reasoning" | "responding" | "tool" | "retrying"
+  | "completed" | "failed" | "cancelled";
+
+// In-memory-only sub-agent progress preview. Never persisted: history
+// hydration rebuilds tool items from the transcript without these fields, and
+// the full sub-agent transcript stays the source of truth after a restart.
+export type SubagentProgress = {
+  phase: SubagentPhase;
+  reasoning: string;
+  text: string;
+  notice: string;
+  lastActivityAt: number;
+  truncated: boolean;
+  durationMs?: number;
+  startedAt: number;
+};
+
+export function isSubagentProgressName(name: string | undefined): boolean {
+  return !!name && name.startsWith(SUBAGENT_PROGRESS_PREFIX);
+}
+
+export function isTerminalSubagentPhase(phase: string | undefined): boolean {
+  return phase === "completed" || phase === "failed" || phase === "cancelled";
+}
+
+function isGroupSubagentTool(name: string): boolean {
+  return name === "parallel_tasks" || name === "fleet";
+}
+
+function terminalStatusOf(phase: string): ToolStatus {
+  switch (phase) {
+    case "completed": return "done";
+    case "failed": return "error";
+    case "cancelled": return "stopped";
+  }
+  return "running";
+}
+
+function freshSubagentProgress(): SubagentProgress {
+  const now = Date.now();
+  return { phase: "running", reasoning: "", text: "", notice: "", lastActivityAt: now, truncated: false, startedAt: now };
+}
+
+/** Keeps the most recent `limit` code points; surrogate pairs stay intact. */
+function tailPreview(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const pts = Array.from(text);
+  return pts.slice(pts.length - limit).join("");
+}
+
+// --- Sub-agent progress reducer helpers --------------------------------------
+
+// Applies one reserved ToolProgress event to the target card's in-memory
+// preview. The card must exist (its dispatch always precedes progress events)
+// and have been initialized by the dispatch. Never writes tool.output, never
+// touches the parent LiveStream, and never produces history data.
+function applySubagentProgress(s: State, t: WireTool): State {
+  if (!t.id) return s;
+  const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === t.id);
+  if (idx < 0) return s;
+  const next = [...s.items];
+  const it = next[idx];
+  if (it.kind !== "tool" || !it.subagentProgress) return s;
+  const sp: SubagentProgress = { ...it.subagentProgress, lastActivityAt: Date.now() };
+  switch (t.name) {
+    case SUBAGENT_PROGRESS_STATUS: {
+      const phase = t.output ?? "";
+      if (!SUBAGENT_PROGRESS_PHASES.has(phase)) return s; // unknown phase: ignore
+      sp.phase = phase as SubagentPhase;
+      if (isTerminalSubagentPhase(phase) && typeof t.durationMs === "number") sp.durationMs = t.durationMs;
+      break;
+    }
+    case SUBAGENT_PROGRESS_REASONING:
+      sp.reasoning = tailPreview(sp.reasoning + (t.output ?? ""), SUBAGENT_PREVIEW_REASONING_LIMIT);
+      sp.truncated = sp.truncated || !!t.truncated;
+      break;
+    case SUBAGENT_PROGRESS_TEXT:
+      sp.text = tailPreview(sp.text + (t.output ?? ""), SUBAGENT_PREVIEW_TEXT_LIMIT);
+      sp.truncated = sp.truncated || !!t.truncated;
+      break;
+    case SUBAGENT_PROGRESS_NOTICE:
+      sp.notice = tailPreview(sp.notice + (t.output ?? ""), SUBAGENT_PREVIEW_NOTICE_LIMIT);
+      sp.truncated = sp.truncated || !!t.truncated;
+      break;
+    default:
+      return s;
+  }
+  const status = isTerminalSubagentPhase(sp.phase) ? terminalStatusOf(sp.phase) : it.status;
+  next[idx] = { ...it, subagentProgress: sp, status };
+  return { ...s, items: next };
+}
+
+// Nested real tool activity refreshes its sub-agent parent's recent activity
+// and switches the phase to "tool". Terminal parents are left untouched.
+function touchSubagentParent(next: Item[], parentId: string): void {
+  const idx = next.findIndex((it) => it.kind === "tool" && it.id === parentId && it.subagentProgress);
+  if (idx < 0) return;
+  const it = next[idx];
+  if (it.kind !== "tool" || !it.subagentProgress || isTerminalSubagentPhase(it.subagentProgress.phase)) return;
+  next[idx] = { ...it, subagentProgress: { ...it.subagentProgress, phase: "tool", lastActivityAt: Date.now() } };
+}
 
 export type LiveStream = {
   id: string;
@@ -113,6 +244,7 @@ export type Item =
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
       argChars?: number; // args still streaming from the model: cumulative chars received
+      subagentProgress?: SubagentProgress; // in-memory-only preview, never hydrated from history
     };
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
@@ -978,7 +1110,7 @@ function applyEvent(s: State, e: WireEvent): State {
           ...s,
           turnArgChars,
           seq: s.seq + 1,
-          items: [...s.items, { kind: "tool", id, name: t.name, args: "", readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", argChars: t.argChars || undefined, parentId: t.parentId }],
+          items: [...s.items, { kind: "tool", id, name: t.name, args: "", readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", argChars: t.argChars || undefined, parentId: t.parentId, subagentProgress: SUBAGENT_PROGRESS_TOOLS.has(t.name) ? freshSubagentProgress() : undefined }],
         };
       }
       const id = t.id || `tool${s.seq}`;
@@ -990,13 +1122,19 @@ function applyEvent(s: State, e: WireEvent): State {
           const args = t.args ? t.args : it.args;
           const fileDiff = fileDiffFromWire(t);
           const summary = summarizeFileDiff(fileDiff) || summarize(t.name, args) || (t.name === it.name && args === it.args ? it.summary : undefined);
-          next[idx] = { ...it, name: t.name, args, readOnly: t.readOnly, resolvedName: t.resolvedName ?? it.resolvedName, capabilityId: t.capabilityId ?? it.capabilityId, profile: t.profile ?? it.profile, summary, fileDiff, argChars: undefined };
+          next[idx] = { ...it, name: t.name, args, readOnly: t.readOnly, resolvedName: t.resolvedName ?? it.resolvedName, capabilityId: t.capabilityId ?? it.capabilityId, profile: t.profile ?? it.profile, summary, fileDiff, argChars: undefined, subagentProgress: it.subagentProgress ?? (SUBAGENT_PROGRESS_TOOLS.has(t.name) ? freshSubagentProgress() : undefined) };
         }
+        if (t.parentId) touchSubagentParent(next, t.parentId);
         return { ...s, items: next };
       }
       const args = t.args ?? "";
       const fileDiff = fileDiffFromWire(t);
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "tool", id, name: t.name, args, readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", summary: summarizeFileDiff(fileDiff) || summarize(t.name, args), fileDiff, isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile }] };
+      const created: ToolItem = { kind: "tool", id, name: t.name, args, readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", summary: summarizeFileDiff(fileDiff) || summarize(t.name, args), fileDiff, isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile, subagentProgress: SUBAGENT_PROGRESS_TOOLS.has(t.name) ? freshSubagentProgress() : undefined };
+      const items = [...s.items, created];
+      // A sub-agent call nested under a task card refreshes that card's
+      // recent activity and switches its phase to "tool".
+      if (t.parentId) touchSubagentParent(items, t.parentId);
+      return { ...s, seq: s.seq + 1, items };
     }
     case "tool_result": {
       const t = e.tool;
@@ -1017,12 +1155,35 @@ function applyEvent(s: State, e: WireEvent): State {
           // demand via app.ToolResultForTab when the card is expanded.
           const existing = it;
           const summary = t.err ? undefined : existing.summary || summarize(existing.name, existing.args, t.output);
+          let status: ToolStatus = t.err ? "error" : "done";
+          if (existing.subagentProgress) {
+            // Sub-agent progress owns the card's final visual: a background
+            // call that returned a job id stays running while the child
+            // works; a cancelled child keeps its stopped semantics even when
+            // the aggregate result carries an error. Group cards
+            // (parallel_tasks/fleet) settle only from their own lifecycle
+            // terminal event — the backend emits running at start and exactly
+            // one terminal at the end (including validation failures and
+            // zero-child cancellation) — never from inferring the children
+            // observed so far, since a background group's children dispatch
+            // asynchronously and a fast child can finish before later ones
+            // even appear.
+            if (isGroupSubagentTool(existing.name)) {
+              status = isTerminalSubagentPhase(existing.subagentProgress.phase)
+                ? terminalStatusOf(existing.subagentProgress.phase)
+                : "running";
+            } else if (!isTerminalSubagentPhase(existing.subagentProgress.phase)) {
+              status = "running";
+            } else {
+              status = terminalStatusOf(existing.subagentProgress.phase);
+            }
+          }
           next[idx] = {
             ...existing,
             readOnly: t.readOnly,
             resolvedName: t.resolvedName ?? existing.resolvedName,
             capabilityId: t.capabilityId ?? existing.capabilityId,
-            status: t.err ? "error" : "done",
+            status,
             output: t.output,
             error: t.err,
             truncated: t.truncated,
@@ -1031,16 +1192,25 @@ function applyEvent(s: State, e: WireEvent): State {
           };
         }
       }
+      // A nested result refreshes its sub-agent parent's recent activity.
+      if (t.parentId) touchSubagentParent(next, t.parentId);
       return { ...s, items: compactArchivedToolItems(next) };
     }
     case "tool_progress": {
       const t = e.tool;
       if (!t?.id) return s;
+      // Reserved sub-agent progress channels update the card's in-memory
+      // preview; they never touch tool.output or the parent's live stream.
+      if (isSubagentProgressName(t.name)) {
+        return applySubagentProgress(s, t);
+      }
       const idx = s.items.findIndex((it) => it.kind === "tool" && it.id === t.id);
       if (idx < 0) return s;
       const next = [...s.items];
       const it = next[idx];
       if (it.kind === "tool") next[idx] = { ...it, output: (it.output ?? "") + (t.output ?? "") };
+      // Streaming output of a sub-agent's real tool refreshes its card.
+      if (t.parentId) touchSubagentParent(next, t.parentId);
       return { ...s, items: next };
     }
     case "usage": {

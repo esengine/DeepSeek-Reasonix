@@ -176,6 +176,46 @@ func TestServeSubmitRejectsShellShortcut(t *testing.T) {
 	}
 }
 
+func TestServeSubmitValidatesFormat(t *testing.T) {
+	bc := NewBroadcaster()
+	got := make(chan string, 1)
+	ctrl := control.New(control.Options{Runner: fakeRunner{got: got}, Sink: bc})
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	post := func(body string) int {
+		resp, err := http.Post(srv.URL+"/submit", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	// Unsupported format is rejected with 400 and the runner never runs.
+	if code := post(`{"input":"hi","format":"xml"}`); code != http.StatusBadRequest {
+		t.Fatalf("unsupported format status = %d, want 400", code)
+	}
+	select {
+	case in := <-got:
+		t.Fatalf("runner must not run for rejected format, got %q", in)
+	default:
+	}
+
+	// Whitespace-padded json_object is normalized and accepted.
+	if code := post(`{"input":"hi","format":"  json_object  "}`); code != http.StatusAccepted {
+		t.Fatalf("padded json_object status = %d, want 202", code)
+	}
+	select {
+	case in := <-got:
+		if in != "hi" {
+			t.Fatalf("runner ran %q, want hi", in)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("runner never ran for padded json_object")
+	}
+}
+
 func TestHistoryMessagesPreserveToolDetails(t *testing.T) {
 	got := historyMessages([]provider.Message{
 		{Role: provider.RoleUser, Content: "run command"},

@@ -51,6 +51,10 @@ type BrokerProviderRequest struct {
 	Tools       []provider.ToolSchema `json:"tools"`
 	Temperature *float64              `json:"temperature,omitempty"`
 	MaxTokens   int                   `json:"maxTokens" validate:"min=0"`
+	// ResponseFormat carries a structured-output request ("json_object")
+	// across the Host↔Desktop boundary. Omitted when unset so the wire
+	// shape stays backward-compatible.
+	ResponseFormat *provider.ResponseFormat `json:"responseFormat,omitempty"`
 }
 
 // BrokerProviderRequestFromProvider copies a provider request into its stable
@@ -65,20 +69,30 @@ func BrokerProviderRequestFromProvider(request provider.Request) BrokerProviderR
 	if tools == nil {
 		tools = []provider.ToolSchema{}
 	}
+	format := request.ResponseFormat
+	if format != nil && format.Type == "" {
+		format = nil
+	}
 	return BrokerProviderRequest{
 		Messages: messages, Tools: tools, Temperature: request.Temperature,
-		MaxTokens: request.MaxTokens,
+		MaxTokens:      request.MaxTokens,
+		ResponseFormat: format,
 	}
 }
 
 // ProviderRequest reconstructs the local Provider input without serializing it
 // through an unversioned opaque JSON blob.
 func (request BrokerProviderRequest) ProviderRequest() provider.Request {
+	format := request.ResponseFormat
+	if format != nil && format.Type == "" {
+		format = nil
+	}
 	return provider.Request{
-		Messages:    append([]provider.Message(nil), request.Messages...),
-		Tools:       append([]provider.ToolSchema(nil), request.Tools...),
-		Temperature: request.Temperature,
-		MaxTokens:   request.MaxTokens,
+		Messages:       append([]provider.Message(nil), request.Messages...),
+		Tools:          append([]provider.ToolSchema(nil), request.Tools...),
+		Temperature:    request.Temperature,
+		MaxTokens:      request.MaxTokens,
+		ResponseFormat: format,
 	}
 }
 
@@ -172,14 +186,19 @@ type BrokerProviderError struct {
 }
 
 type BrokerProviderChunk struct {
-	Type          BrokerChunkType      `json:"type"`
-	Text          string               `json:"text,omitempty"`
-	Signature     string               `json:"signature,omitempty"`
-	ToolCall      *provider.ToolCall   `json:"toolCall,omitempty"`
-	ArgChars      int                  `json:"argChars,omitempty" validate:"min=0"`
-	ResponsesItem *json.RawMessage     `json:"responsesItem,omitempty"`
-	Usage         *BrokerProviderUsage `json:"usage,omitempty"`
-	Error         *BrokerProviderError `json:"error,omitempty"`
+	Type      BrokerChunkType `json:"type"`
+	Text      string          `json:"text,omitempty"`
+	Signature string          `json:"signature,omitempty"`
+	// ReasoningID/ReasoningStatus ride the reasoning chunk across the
+	// Host↔Desktop broker (review #7234: reasoning item id/status must
+	// survive the remote path so the next turn can round-trip them).
+	ReasoningID     string               `json:"reasoningID,omitempty"`
+	ReasoningStatus string               `json:"reasoningStatus,omitempty"`
+	ToolCall        *provider.ToolCall   `json:"toolCall,omitempty"`
+	ArgChars        int                  `json:"argChars,omitempty" validate:"min=0"`
+	ResponsesItem   *json.RawMessage     `json:"responsesItem,omitempty"`
+	Usage           *BrokerProviderUsage `json:"usage,omitempty"`
+	Error           *BrokerProviderError `json:"error,omitempty"`
 }
 
 func (chunk BrokerProviderChunk) Validate() error {
@@ -213,6 +232,7 @@ func BrokerProviderChunkFromProvider(chunk provider.Chunk) BrokerProviderChunk {
 	wired := BrokerProviderChunk{
 		Type: brokerChunkTypeFromProvider(chunk.Type), Text: chunk.Text,
 		Signature: chunk.Signature, ToolCall: chunk.ToolCall, ArgChars: chunk.ArgChars,
+		ReasoningID: chunk.ReasoningID, ReasoningStatus: chunk.ReasoningStatus,
 	}
 	if len(chunk.ResponsesItem) > 0 {
 		item := append(json.RawMessage(nil), chunk.ResponsesItem...)
@@ -246,6 +266,7 @@ func (chunk BrokerProviderChunk) ProviderChunk() provider.Chunk {
 	converted := provider.Chunk{
 		Type: providerChunkTypeFromBroker(chunk.Type), Text: chunk.Text,
 		Signature: chunk.Signature, ToolCall: chunk.ToolCall, ArgChars: chunk.ArgChars,
+		ReasoningID: chunk.ReasoningID, ReasoningStatus: chunk.ReasoningStatus,
 	}
 	if chunk.ResponsesItem != nil {
 		converted.ResponsesItem = append(json.RawMessage(nil), (*chunk.ResponsesItem)...)
