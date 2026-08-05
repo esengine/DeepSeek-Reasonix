@@ -53,6 +53,14 @@ type runMetrics struct {
 	CapabilityReviewBlocks     int     `json:"capability_review_blocks,omitempty"`
 	CapabilityRouterCost       float64 `json:"capability_router_cost,omitempty"`
 	CapabilityRouterLatencyMs  int64   `json:"capability_router_latency_ms,omitempty"`
+
+	Outcome            string         `json:"outcome,omitempty"`
+	ToolCalls          int            `json:"tool_calls,omitempty"`
+	ToolFailures       int            `json:"tool_failures,omitempty"`
+	SubagentToolCalls  int            `json:"subagent_tool_calls,omitempty"`
+	Retries            int            `json:"retries,omitempty"`
+	ToolCallsByName    map[string]int `json:"tool_calls_by_name,omitempty"`
+	ToolFailuresByName map[string]int `json:"tool_failures_by_name,omitempty"`
 }
 
 type result struct {
@@ -62,6 +70,27 @@ type result struct {
 	Passed  bool
 	Skipped bool
 	Note    string
+	// WallMs is the harness's own clock, not the agent's self-report, so the
+	// number stays comparable when the same suite runs against another harness.
+	WallMs int64 `json:"wall_ms"`
+}
+
+// class is the published failure taxonomy: solved, the guard that stopped the
+// run, or wrong_patch when the agent finished cleanly and the grader still
+// failed. outcome carries the agent's own classification when it wrote metrics.
+func (r result) class() string {
+	switch {
+	case r.Skipped:
+		return "skipped"
+	case r.Passed:
+		return "solved"
+	case r.Outcome != "" && r.Outcome != "success":
+		return r.Outcome
+	case r.Outcome == "":
+		return "no_metrics"
+	default:
+		return "wrong_patch"
+	}
 }
 
 const defaultSuiteTokenBudget = 800_000
@@ -233,10 +262,17 @@ func runTask(bin, model, profile string, t task) result {
 	cmd.Stdout = os.Stderr // stream the run to the job log, keep stdout clean for the report
 	cmd.Stderr = os.Stderr
 	cmd.WaitDelay = 10 * time.Second // bound the wait for a stuck child after ctx timeout
+	startedAt := time.Now()
 	runErr := cmd.Run()
+	r.WallMs = time.Since(startedAt).Milliseconds()
 
 	if m, err := readMetrics(metricsPath); err == nil {
 		r.runMetrics = m
+	}
+	// A killed child never writes metrics, so the deadline is the only place
+	// this failure mode is still observable.
+	if ctx.Err() == context.DeadlineExceeded {
+		r.Outcome = "timeout"
 	}
 	if runErr != nil {
 		r.Note = "run: " + runErr.Error()
@@ -280,9 +316,11 @@ func grade(work, taskDir string) bool {
 func render(results []result) string {
 	var b strings.Builder
 	passed, ran := 0, 0
-	var pTok, cTok, hit, miss, compacts int
+	var pTok, cTok, hit, miss, compacts, tools, toolFails int
 	var cost float64
+	var walls []int64
 	currency := ""
+	classes := map[string]int{}
 	for _, r := range results {
 		if r.Skipped {
 			continue
@@ -291,12 +329,16 @@ func render(results []result) string {
 		if r.Passed {
 			passed++
 		}
+		classes[r.class()]++
 		pTok += r.PromptTokens
 		cTok += r.CompletionTokens
 		hit += r.CacheHitTokens
 		miss += r.CacheMissTokens
 		compacts += r.Compactions
+		tools += r.ToolCalls
+		toolFails += r.ToolFailures
 		cost += r.Cost
+		walls = append(walls, r.WallMs)
 		if r.Currency != "" {
 			currency = r.Currency
 		}
@@ -307,28 +349,36 @@ func render(results []result) string {
 		profile = results[0].Profile
 	}
 	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark (%s)\n\n", profile)
-	fmt.Fprintf(&b, "**Accuracy:** %d/%d (%s) · **Cache hit:** %s · **Tokens:** %s (prompt %s / completion %s) · **Compactions:** %d · **Cost:** %s%.4f\n\n",
-		passed, ran, pct(passed, ran), pct(hit, hit+miss),
-		comma(pTok+cTok), comma(pTok), comma(cTok), compacts, currencySym(currency), cost)
+	fmt.Fprintf(&b, "**Solved:** %d/%d (%s) · **Cost per solved:** %s · **Tokens per solved:** %s · **Median wall time:** %s\n\n",
+		passed, ran, pct(passed, ran),
+		costPerSolved(cost, passed, currency), tokensPerSolved(pTok+cTok, passed), dur(median(walls)))
+	fmt.Fprintf(&b, "**Cache hit:** %s · **Tokens:** %s (prompt %s / completion %s) · **Tool calls:** %s (%s failed) · **Compactions:** %d · **Cost:** %s%.4f\n\n",
+		pct(hit, hit+miss), comma(pTok+cTok), comma(pTok), comma(cTok),
+		comma(tools), comma(toolFails), compacts, currencySym(currency), cost)
 
-	fmt.Fprintf(&b, "| Task | Result | Steps | Prompt | Completion | Cache hit | Compact | Cost |\n")
-	fmt.Fprintf(&b, "|------|--------|------:|-------:|-----------:|----------:|--------:|-----:|\n")
+	fmt.Fprintf(&b, "| Task | Result | Class | Steps | Tools | Time | Prompt | Completion | Cache hit | Cost |\n")
+	fmt.Fprintf(&b, "|------|--------|-------|------:|------:|-----:|-------:|-----------:|----------:|-----:|\n")
 	for _, r := range results {
 		switch {
 		case r.Skipped:
-			fmt.Fprintf(&b, "| `%s` | ⏭️ skipped | — | — | — | — | — | — |\n", r.ID)
+			fmt.Fprintf(&b, "| `%s` | ⏭️ skipped | — | — | — | — | — | — | — | — |\n", r.ID)
 		default:
 			res := "❌ fail"
 			if r.Passed {
 				res = "✅ pass"
 			}
-			fmt.Fprintf(&b, "| `%s` | %s | %d | %s | %s | %s | %d | %s%.4f |\n",
-				r.ID, res, r.Steps, comma(r.PromptTokens), comma(r.CompletionTokens),
+			fmt.Fprintf(&b, "| `%s` | %s | %s | %d | %d | %s | %s | %s | %s | %s%.4f |\n",
+				r.ID, res, r.class(), r.Steps, r.ToolCalls, dur(r.WallMs),
+				comma(r.PromptTokens), comma(r.CompletionTokens),
 				pct(r.CacheHitTokens, r.CacheHitTokens+r.CacheMissTokens),
-				r.Compactions, currencySym(r.Currency), r.Cost)
+				currencySym(r.Currency), r.Cost)
 		}
 	}
-	fmt.Fprintf(&b, "\n<sub>Real provider run. Cache-hit %% is cached prompt tokens / total prompt tokens.</sub>\n")
+	fmt.Fprintf(&b, "\n<sub>Real provider run. Cache-hit %% is cached prompt tokens / total prompt tokens. Wall time is measured by the harness and includes process startup.</sub>\n")
+
+	if breakdown := failureBreakdown(classes); breakdown != "" {
+		fmt.Fprintf(&b, "\n**Failures by class:** %s\n", breakdown)
+	}
 
 	notes := false
 	for _, r := range results {
@@ -351,6 +401,58 @@ func pct(n, d int) string {
 		return "n/a"
 	}
 	return fmt.Sprintf("%.0f%%", 100*float64(n)/float64(d))
+}
+
+func costPerSolved(cost float64, solved int, currency string) string {
+	if solved == 0 {
+		return "n/a"
+	}
+	return fmt.Sprintf("%s%.4f", currencySym(currency), cost/float64(solved))
+}
+
+func tokensPerSolved(tokens, solved int) string {
+	if solved == 0 {
+		return "n/a"
+	}
+	return comma(tokens / solved)
+}
+
+func median(ms []int64) int64 {
+	if len(ms) == 0 {
+		return 0
+	}
+	sorted := append([]int64(nil), ms...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	return sorted[len(sorted)/2]
+}
+
+func dur(ms int64) string {
+	if ms <= 0 {
+		return "—"
+	}
+	d := time.Duration(ms) * time.Millisecond
+	if d < time.Minute {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+}
+
+func failureBreakdown(classes map[string]int) string {
+	names := make([]string, 0, len(classes))
+	for name := range classes {
+		if name != "solved" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s ×%d", name, classes[name]))
+	}
+	return strings.Join(parts, " · ")
 }
 
 func comma(n int) string {

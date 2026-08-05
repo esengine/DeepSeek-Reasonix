@@ -711,6 +711,8 @@ func runAgent(args []string, version string) int {
 		})
 	}
 	if metrics != nil {
+		metrics.m.DurationMs = time.Since(started).Milliseconds()
+		metrics.m.Outcome = completion.class
 		if exec := ctrl.Executor(); exec != nil {
 			if audit := exec.CapabilityAudit(); audit != nil {
 				snap := audit.Snapshot()
