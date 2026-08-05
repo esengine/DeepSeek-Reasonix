@@ -37,33 +37,35 @@ func (failedRequestProvider) Stream(ctx context.Context, _ provider.Request) (<-
 	return nil, err
 }
 
-func TestMergeStreamUsageCountsProviderRequests(t *testing.T) {
-	first := &provider.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15}
-	retry := &provider.Usage{PromptTokens: 20, CompletionTokens: 8, TotalTokens: 28}
-	got := mergeStreamUsage(first, retry)
-	if got == nil || got.TotalTokens != 43 || got.RequestCount != 2 {
-		t.Fatalf("merged usage = %+v, want total=43 requests=2", got)
-	}
+func TestEmitRecoveryAttemptUsageAccountsBillingOnly(t *testing.T) {
+	var events []event.Event
+	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
+	a := New(failedRequestProvider{}, tool.NewRegistry(), NewSession(""), Options{ModelRef: "recovery/model"}, sink)
 
-	third := &provider.Usage{PromptTokens: 1, CompletionTokens: 1, TotalTokens: 2}
-	got = mergeStreamUsage(got, third)
-	if got.RequestCount != 3 {
-		t.Fatalf("nested merged request count = %d, want 3", got.RequestCount)
-	}
+	// An attempt with real tokens is billed as its own event and never touches
+	// lastUsage: the context gauge and compaction decision read the adopted
+	// attempt's clean numbers, not a billing sum (#7620).
+	a.emitRecoveryAttemptUsage(&provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12, CacheMissTokens: 10})
+	// A nil attempt (no terminal usage chunk) still records the provider call
+	// as a request-only event; stats persist it while frontends ignore it.
+	a.emitRecoveryAttemptUsage(nil)
+	// An attempt whose stream failed before usage still billed the request.
+	a.emitRecoveryAttemptUsage(&provider.Usage{RequestCount: 1})
 
-	got = mergeStreamUsage(nil, retry)
-	if got == nil || got.TotalTokens != retry.TotalTokens || got.RequestCount != 2 {
-		t.Fatalf("missing first usage = %+v, want retry tokens and 2 requests", got)
+	if len(events) != 3 {
+		t.Fatalf("recovery attempt events = %d, want 3: %+v", len(events), events)
 	}
-	got = mergeStreamUsage(first, nil)
-	if got == nil || got.TotalTokens != first.TotalTokens || got.RequestCount != 2 {
-		t.Fatalf("missing retry usage = %+v, want first tokens and 2 requests", got)
+	if events[0].Kind != event.Usage || events[0].Usage == nil ||
+		events[0].Usage.TotalTokens != 12 || events[0].Usage.PromptTokens != 10 {
+		t.Fatalf("first attempt event = %+v, want the attempt's own tokens", events[0])
 	}
-
-	requestOnly := &provider.Usage{RequestCount: 3}
-	got = mergeStreamUsage(first, requestOnly)
-	if got == nil || got.TotalTokens != first.TotalTokens || got.RequestCount != 4 {
-		t.Fatalf("request-only retry usage = %+v, want first tokens and 4 requests", got)
+	for _, e := range events[1:] {
+		if e.Usage == nil || e.Usage.TotalTokens != 0 || e.Usage.RequestCount != 1 {
+			t.Fatalf("request-only event = %+v, want total=0 requests=1", e)
+		}
+	}
+	if a.LastUsage() != nil {
+		t.Fatalf("recovery accounting updated lastUsage to %+v, want untouched", a.LastUsage())
 	}
 }
 

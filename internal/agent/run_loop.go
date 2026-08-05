@@ -400,10 +400,24 @@ func (a *Agent) streamWithMissingReasoningRecovery(ctx context.Context, turn int
 			streamSink.Discard()
 			// The recovery stream was intentionally invisible, so do not persist
 			// partial retry text/reasoning as though the user had already seen it.
-			return streamedTurn{usage: mergeStreamUsage(first.usage, retry.usage), err: retry.err}
+			// The discarded first attempt is billed here; the failed retry's own
+			// usage rides the returned turn (emitTurnUsage emits it when present,
+			// and the request-only fallback below keeps the request count
+			// truthful when the retry produced no usage).
+			a.emitRecoveryAttemptUsage(first.usage)
+			if retry.usage == nil {
+				a.emitRecoveryAttemptUsage(nil)
+			}
+			return streamedTurn{usage: retry.usage, err: retry.err}
 		}
 		streamSink.Flush()
-		first.usage = mergeStreamUsage(first.usage, retry.usage)
+		// The retry failed and the first response is structurally valid, so it
+		// stays the adopted turn. The failed retry's call is billed here (a
+		// request-only record when it produced no usage); the adopted first
+		// attempt's clean usage rides the returned turn through emitTurnUsage,
+		// so the context gauge and compaction decision never see a summed
+		// prompt (#7620).
+		a.emitRecoveryAttemptUsage(retry.usage)
 		if first.usage != nil {
 			a.lastUsage.Store(first.usage)
 		}
@@ -413,10 +427,13 @@ func (a *Agent) streamWithMissingReasoningRecovery(ctx context.Context, turn int
 
 	streamSink.Discard()
 	retrySink.Flush()
-	retry.usage = mergeStreamUsage(first.usage, retry.usage)
-	if retry.usage != nil {
-		a.lastUsage.Store(retry.usage)
-	}
+	// The retry's usage alone describes the window: both attempts send the
+	// byte-identical prompt, so the retry's prompt tokens are the real context
+	// fill. The first attempt's tokens are billed as a separate event below;
+	// the old merged-sum record doubled the reported prompt and could trip
+	// auto-compaction at half the real usage (#7620). runToolLoop's
+	// emitTurnUsage stores this clean usage in lastUsage.
+	a.emitRecoveryAttemptUsage(first.usage)
 	retryMissing, _ := a.observeMissingToolCallReasoning(retry.calls, retry.reasoning)
 	if retryMissing {
 		event.RecordProtocolRecovery(a.sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
@@ -442,42 +459,22 @@ func (a *Agent) streamTurn(ctx context.Context, turn int, sink event.Sink) strea
 	}
 }
 
-func mergeStreamUsage(first, retry *provider.Usage) *provider.Usage {
-	if first == nil && retry == nil {
-		return nil
+// emitRecoveryAttemptUsage bills one discarded recovery attempt as its own
+// usage event. The missing-reasoning retry discards the first attempt's stream
+// events, but the provider still billed that call, so session cost and request
+// totals must see it. A nil usage (no terminal usage chunk) still records the
+// request (request-only, RequestCount=1) that stats persist while frontends
+// ignore. Unlike emitTurnUsage this never writes lastUsage: the context gauge
+// and compaction decision must reflect the adopted attempt's real prompt, not
+// a billing sum (#7620).
+func (a *Agent) emitRecoveryAttemptUsage(usage *provider.Usage) {
+	if usage == nil || (usage.TotalTokens <= 0 && usage.RequestCount <= 0) {
+		a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef,
+			Usage: &provider.Usage{RequestCount: 1}, Pricing: a.pricing, UsageSource: a.usageSource})
+		return
 	}
-	if first == nil {
-		merged := *retry
-		// The first provider request still happened even if its terminal usage
-		// chunk was lost. Preserve the retry's known tokens and count both calls.
-		merged.RequestCount = 1 + usageRequestCount(retry)
-		return &merged
-	}
-	if retry == nil {
-		merged := *first
-		// Likewise, a failed recovery request without usage is still an API call.
-		merged.RequestCount = usageRequestCount(first) + 1
-		return &merged
-	}
-	merged := *retry
-	merged.PromptTokens += first.PromptTokens
-	merged.CompletionTokens += first.CompletionTokens
-	merged.TotalTokens += first.TotalTokens
-	merged.CacheHitTokens += first.CacheHitTokens
-	merged.CacheMissTokens += first.CacheMissTokens
-	merged.ReasoningTokens += first.ReasoningTokens
-	merged.RequestCount = usageRequestCount(first) + usageRequestCount(retry)
-	return &merged
-}
-
-func usageRequestCount(usage *provider.Usage) int {
-	if usage == nil {
-		return 0
-	}
-	if usage.RequestCount > 0 {
-		return usage.RequestCount
-	}
-	return 1
+	a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef,
+		Usage: usage, Pricing: a.pricing, UsageSource: a.usageSource})
 }
 
 func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiagnostics) {

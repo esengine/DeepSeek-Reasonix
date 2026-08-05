@@ -535,8 +535,27 @@ func TestRunSilentlyRecoversMissingToolCallReasoning(t *testing.T) {
 		t.Fatalf("tool dispatches = %d, want one adopted call", got)
 	}
 	usageEvents := sink.kinds(event.Usage)
-	if len(usageEvents) == 0 || usageEvents[0].Usage == nil || usageEvents[0].Usage.TotalTokens != 25 || usageEvents[0].Usage.CacheHitTokens != 10 || usageEvents[0].Usage.CacheMissTokens != 10 {
-		t.Fatalf("recovery usage was not merged truthfully: %+v", usageEvents)
+	// Billing stays truthful across two separate attempt events (12 + 13), no
+	// single record carries the old summed total, and the adopted retry's clean
+	// usage — not the doubled prompt — feeds lastUsage (#7620).
+	var usageTotal int
+	var sawHit, sawMiss bool
+	for _, e := range usageEvents {
+		if e.Usage == nil {
+			continue
+		}
+		usageTotal += e.Usage.TotalTokens
+		sawHit = sawHit || e.Usage.CacheHitTokens > 0
+		sawMiss = sawMiss || e.Usage.CacheMissTokens > 0
+		if e.Usage.TotalTokens == 25 {
+			t.Fatalf("recovery usage still merged into one record: %+v", usageEvents)
+		}
+	}
+	if usageTotal != 25 || !sawHit || !sawMiss {
+		t.Fatalf("recovery billing total = %d hit=%v miss=%v, want 25 across separate events: %+v", usageTotal, sawHit, sawMiss, usageEvents)
+	}
+	if u := a.LastUsage(); u == nil || u.PromptTokens != 10 {
+		t.Fatalf("lastUsage = %+v, want the retry's clean prompt (10), not the summed 20", u)
 	}
 	if sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted) != 1 || sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryRecovered) != 1 {
 		t.Fatalf("unexpected recovery audit: %+v", sink.recovery)
@@ -587,8 +606,16 @@ func TestMissingReasoningRecoveryAdoptsRetryWithoutToolCall(t *testing.T) {
 		t.Fatalf("discarded tool dispatches = %d, want 0", got)
 	}
 	usageEvents := sink.kinds(event.Usage)
-	if len(usageEvents) == 0 || usageEvents[0].Usage == nil || usageEvents[0].Usage.TotalTokens != 25 {
-		t.Fatalf("replacement usage was not merged truthfully: %+v", usageEvents)
+	// Billing stays truthful across two separate attempt events (12 + 13) while
+	// no single record carries the old summed total (#7620).
+	var usageTotal int
+	for _, e := range usageEvents {
+		if e.Usage != nil {
+			usageTotal += e.Usage.TotalTokens
+		}
+	}
+	if usageTotal != 25 {
+		t.Fatalf("replacement usage total = %d, want 25 across separate events: %+v", usageTotal, usageEvents)
 	}
 	if sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryAttempted) != 1 ||
 		sink.recoveryCount(event.ProtocolRecoveryMissingReasoningRetryReplaced) != 1 ||
@@ -626,8 +653,20 @@ func TestMissingReasoningRecoveryFailureFallsBackBeforeToolExecution(t *testing.
 		t.Fatalf("tool results = %d, want the original call executed once", toolResults)
 	}
 	usageEvents := sink.kinds(event.Usage)
-	if len(usageEvents) == 0 || usageEvents[0].Usage == nil || usageEvents[0].Usage.TotalTokens != 23 {
-		t.Fatalf("failed recovery usage was not accounted for: %+v", usageEvents)
+	// The adopted first attempt (12) rides the turn's own usage event; the
+	// failed retry (11) is billed as its own separate event — no summed
+	// record (#7620).
+	var usageTotal int
+	for _, e := range usageEvents {
+		if e.Usage != nil {
+			usageTotal += e.Usage.TotalTokens
+		}
+	}
+	if usageTotal != 23 {
+		t.Fatalf("failed recovery usage total = %d, want 23 across separate events: %+v", usageTotal, usageEvents)
+	}
+	if u := a.LastUsage(); u == nil || u.PromptTokens != 10 {
+		t.Fatalf("lastUsage = %+v, want the adopted first attempt's clean prompt (10), not the summed 23", u)
 	}
 	if sink.recoveryCount(event.ProtocolRecoveryMissingReasoningFallback) != 1 {
 		t.Fatalf("fallback audit missing: %+v", sink.recovery)
@@ -659,8 +698,20 @@ func TestMissingReasoningRecoveryCancellationAccountsBothAttempts(t *testing.T) 
 		t.Fatalf("discarded tool dispatches = %d, want 0", got)
 	}
 	usages := sink.kinds(event.Usage)
-	if len(usages) != 1 || usages[0].Usage == nil || usages[0].Usage.TotalTokens != 23 || usages[0].Usage.FinishReason != "interrupted" {
-		t.Fatalf("recovery cancellation usage = %+v, want one merged interrupted total of 23", usages)
+	// The cancelled turn bills both attempts as separate events (12 + 11) — the
+	// first here, the interrupted retry via the returned usage — so the total
+	// stays truthful without a summed record (#7620).
+	var usageTotal int
+	var sawInterrupted bool
+	for _, e := range usages {
+		if e.Usage == nil {
+			continue
+		}
+		usageTotal += e.Usage.TotalTokens
+		sawInterrupted = sawInterrupted || e.Usage.FinishReason == "interrupted"
+	}
+	if len(usages) != 2 || usageTotal != 23 || !sawInterrupted {
+		t.Fatalf("recovery cancellation usage = %+v, want two attempts totaling 23 with one interrupted", usages)
 	}
 }
 
