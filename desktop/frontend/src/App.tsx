@@ -4486,7 +4486,7 @@ export default function App() {
 
         <section className={`chat-pane${creationEmptyHero ? " chat-pane--creation-empty" : ""}`}>
           <>
-          <header className="topicbar" onDoubleClick={(e) => { if (!sidebarWorkbench) return; if (desktopPlatform !== "darwin") return; const el = e.target as HTMLElement; if (el.tagName === "BUTTON" || el.closest("button")) return; window.runtime?.WindowToggleMaximise?.(); }}>
+          <header className="topicbar">
             {workbenchChromeHidden && (
               <Tooltip label={sidebarToggleTitle}>
                 <button
@@ -5099,7 +5099,7 @@ export default function App() {
             ].join(" ")}
             aria-label={t("rightDock.workbench")}
           >
-            <div className="workbench-dock__tools" onDoubleClick={(e) => { if (!sidebarWorkbench) return; if (desktopPlatform !== "darwin") return; const el = e.target as HTMLElement; if (el.tagName === "BUTTON" || el.closest("button")) return; window.runtime?.WindowToggleMaximise?.(); }}>
+            <div className="workbench-dock__tools">
               <div className="workbench-dock__tabs" role="tablist" aria-label={t("rightDock.views")}>
                 {SHOW_CONTEXT_DOCK && desktopLayoutStyle !== "creation" && (
                   <button
