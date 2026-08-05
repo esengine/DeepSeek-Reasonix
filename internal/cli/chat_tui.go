@@ -1419,8 +1419,6 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastCtrlCAt = time.Now()
 			m.notice(i18n.M.CtrlCQuitHint)
 			return m, finalize(m, nil)
-		case "ctrl+d":
-			return m, shutdownNow
 		case "ctrl+l":
 			if m.state != tuiRunning {
 				m.finalizeStreamed()

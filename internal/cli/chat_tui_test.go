@@ -4174,14 +4174,19 @@ func TestQuitGesturesRouteThroughShutdown(t *testing.T) {
 		t.Fatalf("double Ctrl+C emitted %T, want tuiShutdownMsg", msg)
 	}
 
-	// Ctrl+D.
+	// Ctrl+D forward-deletes the character at the cursor (readline semantics,
+	// matching the Delete key fixed in #1728/#1735). It must NOT quit.
 	m = newTestChatTUI()
+	m.input.SetValue("123")
+	m.input.SetCursorColumn(2) // cursor between "2" and "3"
 	_, cmd = m.Update(tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
-	if cmd == nil {
-		t.Fatal("Ctrl+D should return a command")
+	if cmd != nil {
+		if msg := cmd(); msg == (tuiShutdownMsg{}) {
+			t.Fatal("Ctrl+D must not quit")
+		}
 	}
-	if msg := cmd(); msg != (tuiShutdownMsg{}) {
-		t.Fatalf("Ctrl+D emitted %T, want tuiShutdownMsg", msg)
+	if got := m.input.Value(); got != "12" {
+		t.Fatalf("Ctrl+D deleted %q, want %q", got, "12")
 	}
 }
 
