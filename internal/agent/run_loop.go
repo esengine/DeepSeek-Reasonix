@@ -604,6 +604,16 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 	if a.evidence != nil {
 		receiptMark = a.evidence.Len()
 	}
+	// OSWorld 2.0 implicit-state defense: record pre-call state so the tracker
+	// can pair it with the post-call result and extract recovered facts (file
+	// paths, IDs, config values) that compaction would otherwise lose.
+	var stateTokens []ToolCallToken
+	if a.stateTracker != nil {
+		stateTokens = make([]ToolCallToken, len(calls))
+		for i, call := range calls {
+			stateTokens[i] = a.stateTracker.BeforeToolCall(ctx, call)
+		}
+	}
 	batch := a.executeBatch(ctx, calls)
 	results, images := batch.results, batch.images
 	for i, call := range calls {
@@ -614,6 +624,11 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 			ToolCallID: call.ID,
 			Name:       call.Name,
 		})
+		// Pair the pre-call snapshot with the result so the tracker can compute
+		// the state delta and extract implicit facts from the tool output.
+		if a.stateTracker != nil && i < len(stateTokens) {
+			a.stateTracker.AfterToolCall(ctx, stateTokens[i], results[i], nil)
+		}
 	}
 	// If the context was cancelled during tool execution, return after storing
 	// the batch results so the session keeps paired tool-call history.

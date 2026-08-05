@@ -373,6 +373,12 @@ type Agent struct {
 	// tool call. nil disables hook firing.
 	hooks ToolHooks
 
+	// stateTracker is the OSWorld 2.0 continuous-state core. When non-nil, the
+	// run loop records implicit state around each tool call so compaction does
+	// not lose recovered file paths, inferred IDs, or unexplored sources. nil
+	// disables tracking (source compat for direct construction).
+	stateTracker StateTracker
+
 	// asker, when non-nil, lets the `ask` tool put questions to the user. nil in
 	// headless runs (no interactive user). Set via SetAsker.
 	asker Asker
@@ -1043,6 +1049,13 @@ type Options struct {
 	// disables hook firing.
 	Hooks ToolHooks
 
+	// StateTracker is the OSWorld 2.0 continuous-state-management core. When
+	// non-nil, the run loop captures implicit state (recovered file paths,
+	// inferred IDs, unexplored sources) before and after each tool call so
+	// compaction does not lose it. nil disables tracking (source compat for
+	// direct construction; boot always supplies it for full agents).
+	StateTracker StateTracker
+
 	// MissingReasoningWarnStateDir, when non-empty, points at the shared
 	// directory where missing tool-call thinking recovery retries are gated by
 	// opaque provider-configuration fingerprint (#7059). The field name is kept
@@ -1215,6 +1228,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		sandboxEscapeApprover:     sandboxEscapeApprover,
 		configWriteApprover:       configWriteApprover,
 		hooks:                     hooks,
+		stateTracker:              opts.StateTracker,
 		jobs:                      opts.Jobs,
 		writeScheduler:            opts.WriteScheduler,
 		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),

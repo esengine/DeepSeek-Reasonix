@@ -310,6 +310,21 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 		mechanical = true
 	}
 
+	// OSWorld 2.0 implicit-state injection: if the StateTracker has accumulated
+	// implicit facts (recovered file paths, inferred IDs, unexplored sources)
+	// and the model-generated summary lacks the "Hidden state" section, append
+	// the tracker's snapshot so compaction does not lose recovered context.
+	// This is the runtime defense that pairs with implicitStateLossWarning:
+	// instead of only warning when state is lost, we proactively inject it.
+	if !mechanical && a.stateTracker != nil {
+		if snapshot := a.stateTracker.SnapshotImplicitState(); snapshot != "" {
+			if sectionContentChars(summary, "Hidden state & recovered facts") <= 0 {
+				summary += "\n\n## Hidden state & recovered facts (injected by StateTracker)\n" + snapshot
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Implicit state injected into compaction summary.", Detail: fmt.Sprintf("StateTracker provided %d bytes of recovered facts that the model-generated summary omitted.", len(snapshot))})
+			}
+		}
+	}
+
 	compacted := make([]provider.Message, 0, head+len(kept)+1+len(msgs)-start)
 	compacted = append(compacted, msgs[:head]...)
 	compacted = append(compacted, kept...)

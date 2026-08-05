@@ -1681,15 +1681,21 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	})
 
 	execSess := agent.NewSession(sysPrompt)
+	// OSWorld 2.0 continuous-state core: tracks implicit state (recovered file
+	// paths, inferred IDs, unexplored sources) across tool calls so compaction
+	// does not lose it. The default in-memory implementation is host-agnostic;
+	// HERMES can substitute its own backend via the StateTracker interface.
+	stateTracker := agent.NewDefaultStateTracker(0, sink) // 0 = default 20-entry episodic window
 	executor := agent.New(execProv, reg, execSess, agent.Options{
-		MaxSteps:    maxSteps,
-		MaxStepsKey: opts.MaxStepsKey,
-		Temperature: cfg.Agent.Temperature,
-		Pricing:     entry.Price,
-		ModelRef:    modelRef,
-		Gate:        headlessGate,
-		Hooks:       hookRunner,
-		Jobs:        jm,
+		MaxSteps:     maxSteps,
+		MaxStepsKey:  opts.MaxStepsKey,
+		Temperature:  cfg.Agent.Temperature,
+		Pricing:      entry.Price,
+		ModelRef:     modelRef,
+		Gate:         headlessGate,
+		Hooks:        hookRunner,
+		StateTracker: stateTracker,
+		Jobs:         jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,
