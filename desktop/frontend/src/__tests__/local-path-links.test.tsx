@@ -149,5 +149,55 @@ const uppercase = renderToStaticMarkup(
 );
 ok(!uppercase.includes("file:///"), "uppercase FILE:/// stays inert (case-sensitive allowlist)");
 
+console.log("\nremark plugin — inlineCode (backtick) code spans");
+
+const codePath = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"见 `D:\\x\\y.md` 完成"}
+  </ReactMarkdown>,
+);
+ok(codePath.includes('href="file:///D:/x/y.md"'), "code span drive path renders as a file:/// anchor");
+ok(codePath.includes("<code>D:\\x\\y.md</code>"), "code span is kept as the link label");
+ok(
+  codePath.includes('<a href="file:///D:/x/y.md"><code>D:\\x\\y.md</code></a>'),
+  "anchor wraps the code span",
+);
+
+const codeCjk = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"已保存到 `D:\\Project\\中停时分析\\05-静态验收.md`"}
+  </ReactMarkdown>,
+);
+ok(codeCjk.includes('href="file:///D:/Project/%E4%B8%AD%E5%81%9C%E6%97%B6%E5%88%86%E6%9E%90/05-%E9%9D%99%E6%80%81%E9%AA%8C%E6%94%B6.md"'),
+  "code span with CJK dirs percent-encodes");
+
+const codeFileUrl = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"见 `file:///D:/a/b.txt` 完成"}
+  </ReactMarkdown>,
+);
+ok(codeFileUrl.includes('href="file:///D:/a/b.txt"'), "code span file URL renders its own anchor");
+
+const codePunct = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"见 `D:\\x\\y.md。` 完成"}
+  </ReactMarkdown>,
+);
+ok(!codePunct.includes("<a"), "code span with trailing punctuation is not converted");
+
+const codeCommand = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"运行 `cd D:\\x\\y.md` 命令"}
+  </ReactMarkdown>,
+);
+ok(!codeCommand.includes("<a"), "code span with a command prefix is not converted");
+
+const codeEscapedSpace = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"见 `D:\\a\\b\\ c.md` 完成"}
+  </ReactMarkdown>,
+);
+ok(!codeEscapedSpace.includes("<a"), "code span with a literal escaped space is not converted");
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

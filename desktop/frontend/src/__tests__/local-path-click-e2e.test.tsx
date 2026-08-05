@@ -135,5 +135,20 @@ console.log("\nheadless click-to-open e2e");
   ok(anchors.length === 0, "no anchors for plain text");
 }
 
+// 6. Path quoted in a code span (backticks) is clickable too.
+{
+  const anchors = await renderClick("生成完毕：`D:\\a\\b\\report.md` 已保存");
+  ok(anchors.length === 1, "code-span path renders exactly one anchor");
+  const href = anchors[0]?.getAttribute("href") ?? "";
+  ok(href === "file:///D:/a/b/report.md", `code-span anchor href is the file URL (${href})`);
+  ok(anchors[0]?.querySelector("code") !== null, "anchor keeps the code span as its label");
+  await act(async () => {
+    anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
+  });
+  ok(opened.length === 4, "code-span click invoked OpenLocalPath");
+  ok(opened[3] === "D:/a/b/report.md", `OpenLocalPath received the code-span path (${opened[3]})`);
+  ok(browsed.length === 1, "system browser still only saw the http link");
+}
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

@@ -8,7 +8,7 @@
 // OpenLocalPath binding instead of the system browser.
 
 import { visit } from "unist-util-visit";
-import type { Parent, Link, Root, Text } from "mdast";
+import type { Parent, Link, Root, Text, InlineCode } from "mdast";
 import { unescapeRefPath } from "./refToken";
 
 // Sentence punctuation is excluded from path characters: Windows forbids `：`
@@ -70,11 +70,23 @@ export interface LocalPathSegment {
   path?: string;
 }
 
+/** Options for {@link linkifyLocalPaths}. */
+export interface LinkifyOptions {
+  /**
+   * Unescape `\ ` / `\t` pairs before opening. Markdown text nodes carry
+   * backslash-escaped spaces (`D:\a\b\ c.md` is the escaped spelling of
+   * `D:\a\b c.md`), but code-span content is literal — a backslash there is
+   * a real character — so inline-code callers pass `false` (default `true`).
+   */
+  unescape?: boolean;
+}
+
 /**
  * Splits `text` into plain segments and clickable local-path segments.
  * Pure function — unit tests cover the full recognition matrix here.
  */
-export function linkifyLocalPaths(text: string): LocalPathSegment[] {
+export function linkifyLocalPaths(text: string, opts: LinkifyOptions = {}): LocalPathSegment[] {
+  const unescape = opts.unescape ?? true;
   const matches: Array<{ start: number; end: number; raw: string; kind: "file" | "drive" | "unc" }> = [];
   const patterns: Array<[RegExp, "file" | "drive" | "unc"]> = [
     [FILE_RE, "file"],
@@ -105,7 +117,7 @@ export function linkifyLocalPaths(text: string): LocalPathSegment[] {
     // `\\` escape); restore the real UNC prefix for the native opener.
     const path = m.kind === "unc" ? "\\" + stripTrailingClosers(m.raw) : stripTrailingClosers(m.raw);
     if (path) {
-      segments.push({ text: m.raw, path: unescapeRefPath(path) });
+      segments.push({ text: m.raw, path: unescape ? unescapeRefPath(path) : path });
     } else {
       segments.push({ text: m.raw });
     }
@@ -136,14 +148,16 @@ export function localPathHref(path: string): string {
 /**
  * Remark plugin: rewrites plain-text nodes containing local paths into link
  * nodes (text + link alternation), so the markdown renderer hands them to
- * RichMarkdownLink which routes them to the native opener.
+ * RichMarkdownLink which routes them to the native opener. Code spans whose
+ * entire content is exactly one local path are wrapped in a link the same
+ * way — AI replies often quote paths in backticks.
  *
  * Collection and replacement are separate passes: replacing during the visit
  * would re-visit the freshly inserted link children and nest anchors.
  */
 export function remarkLocalPathLinks() {
   return (tree: Root) => {
-    const plan: Array<{ parent: Parent; index: number; nodes: Array<Text | Link> }> = [];
+    const plan: Array<{ parent: Parent; index: number; nodes: Array<Text | Link | InlineCode> }> = [];
     visit(tree, "text", (node: Text, index: number | undefined, parent) => {
       if (parent === undefined || parent === null || index === undefined || index === null) return;
       // Skip link internals: rewriting their text would nest <a> elements
@@ -164,6 +178,34 @@ export function remarkLocalPathLinks() {
               }
             : { type: "text", value: seg.text },
         ),
+      });
+    });
+    visit(tree, "inlineCode", (node: InlineCode, index: number | undefined, parent) => {
+      if (parent === undefined || parent === null || index === undefined || index === null) return;
+      if (parent.type === "link" || parent.type === "linkReference") return;
+      // Code-span content is literal: backslashes are real characters, so the
+      // markdown text-node unescaping must NOT run here.
+      const segments = linkifyLocalPaths(node.value, { unescape: false });
+      if (segments.length !== 1 || segments[0].path === undefined) return;
+      // Convert only when the whole span is exactly one clean path: no
+      // trailing-punctuation trimming, no command-like prefix (`cd D:\x`),
+      // no literal escaped-space pair (`\ ` can never name a real file).
+      if (segments[0].text !== node.value) return;
+      if (/\\[ \t]/.test(node.value)) return;
+      plan.push({
+        parent,
+        index,
+        nodes: [
+          {
+            type: "link",
+            url: localPathHref(segments[0].path),
+            title: null,
+            // Keep the code span as the link label so the path still looks
+            // like a literal path (and stays selectable) — renders as
+            // <a><code>D:\x\y.md</code></a>.
+            children: [node],
+          },
+        ],
       });
     });
     // Back-to-front keeps earlier indices valid within the same parent.
