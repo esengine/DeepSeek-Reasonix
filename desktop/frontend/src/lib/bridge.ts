@@ -600,7 +600,6 @@ interface WailsRuntime {
   WindowGetSize?(): Promise<{ w: number; h: number }>;
   WindowGetPosition?(): Promise<{ x: number; y: number }>;
   WindowIsMaximised?(): Promise<boolean>;
-  WindowToggleMaximise?(): void;
   ClipboardSetText?(text: string): Promise<boolean>;
   // Native OS file drop (desktop only); useDropTarget gates delivery to elements
   // carrying the --wails-drop-target CSS property. Absent in the browser dev mock.

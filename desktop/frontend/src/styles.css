@@ -28835,6 +28835,9 @@ body > .mermaid-diagram--fullscreen {
   padding: 14px 12px 10px;
 }
 
+.app--darwin .layout--workbench-chrome-hidden .sidebar--workbench {
+  padding-top: 46px;
+}
 
 .sidebar--workbench .sidebar__head {
   flex: 0 0 auto;
