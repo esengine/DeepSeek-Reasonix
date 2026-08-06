@@ -31,7 +31,11 @@ docs_changed=()
 while IFS= read -r file; do
 	[ -z "$file" ] && continue
 	case "$file" in
-		docs/*.md) docs_changed+=("$file") ;;
+		docs/*.md|\
+		docs/*/*.md|\
+		docs/*/*/*.md|\
+		docs/*/*/*/*.md|\
+		docs/*/*/*/*/*.md) docs_changed+=("$file") ;;
 	esac
 	case "$file" in
 		*_test.go|*.test.*|*.spec.*|*/__tests__/*|*/go.mod|*/go.sum|go.mod|go.sum|*/pnpm-lock.yaml|*/package-lock.json)
@@ -41,6 +45,12 @@ while IFS= read -r file; do
 	case "$file" in
 		cmd/reasonix/*|\
 		desktop/*|\
+		desktop/frontend/*|\
+		desktop/frontend/src/*|\
+		desktop/frontend/src/*/*|\
+		desktop/frontend/src/*/*/*|\
+		desktop/frontend/src/*/*/*/*|\
+		desktop/frontend/src/*/*/*/*/*|\
 		internal/agent/*|\
 		internal/boot/*|\
 		internal/cli/*|\
