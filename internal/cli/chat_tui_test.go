@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"time"
 
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -1561,11 +1562,13 @@ func TestMouseWheelAndPageKeysScrollTranscript(t *testing.T) {
 	}
 
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	cur = adv(cur, wheelScrollTickMsg{}) // coalescing tick applies the notch
 	if got, want := cur.viewport.YOffset(), bottom-3; got != want {
 		t.Fatalf("wheel-up YOffset = %d, want %d", got, want)
 	}
 
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	cur = adv(cur, wheelScrollTickMsg{})
 	if got := cur.viewport.YOffset(); got != bottom {
 		t.Fatalf("wheel-down should return by one wheel step, YOffset=%d want bottom=%d", got, bottom)
 	}
@@ -1597,6 +1600,7 @@ func TestRunningStreamPreservesScrolledReadingPosition(t *testing.T) {
 	}
 	cur.state = tuiRunning
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	cur = adv(cur, wheelScrollTickMsg{})
 	readOffset := cur.viewport.YOffset()
 	if cur.viewport.AtBottom() {
 		t.Fatal("wheel-up should leave the bottom before streaming output arrives")
@@ -1611,11 +1615,114 @@ func TestRunningStreamPreservesScrolledReadingPosition(t *testing.T) {
 	}
 
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelDown})
+	cur = adv(cur, wheelScrollTickMsg{})
 	if got, want := cur.viewport.YOffset(), readOffset+3; got != want {
 		t.Fatalf("wheel-down while running should move one wheel step, got %d want %d", got, want)
 	}
 	if cur.viewport.AtBottom() {
 		t.Fatal("one wheel-down step from the reading position should not jump straight to bottom")
+	}
+}
+
+// TestApplyWheelDelta proves the wheel accumulator adds notches in the gesture
+// direction (down = +1, up = -1) and can flip sign mid-burst.
+func TestApplyWheelDelta(t *testing.T) {
+	for _, c := range []struct {
+		accum, delta, want int
+	}{
+		{0, 1, 1},   // first down notch
+		{3, -1, 2},  // up cancels part of a pending down burst
+		{2, -4, -2}, // burst flips direction
+		{-5, -1, -6},
+	} {
+		if got := applyWheelDelta(c.accum, c.delta); got != c.want {
+			t.Errorf("applyWheelDelta(%d, %d) = %d, want %d", c.accum, c.delta, got, c.want)
+		}
+	}
+}
+
+// TestWheelScrollCoalescesBurstIntoSingleTick proves a burst of wheel events
+// emits exactly one coalescing tick (no tick stacking) and the tick applies the
+// summed magnitude — wheelScrollRows lines per notch — in one scroll.
+func TestWheelScrollCoalescesBurstIntoSingleTick(t *testing.T) {
+	m := newTestChatTUI()
+	m.viewport = viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	lines := make([]string, 100)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i)
+	}
+	m.viewport.SetContent(strings.Join(lines, "\n"))
+
+	// N rapid wheel-down events: only the first may schedule the tick.
+	for i := 0; i < 10; i++ {
+		next, cmd := m.update(tea.MouseWheelMsg{X: 80, Y: 0, Button: tea.MouseWheelDown})
+		m = next.(chatTUI)
+		if i == 0 {
+			if cmd == nil {
+				t.Fatal("first wheel event should schedule a coalescing tick")
+			}
+		} else if cmd != nil {
+			t.Fatalf("wheel event %d scheduled another tick; a burst must emit exactly one", i+1)
+		}
+	}
+	if m.wheelAccum != 10 || !m.wheelPending {
+		t.Fatalf("accumulator = %d, pending = %v; want 10 pending notches, true", m.wheelAccum, m.wheelPending)
+	}
+
+	// The tick applies the summed magnitude: 10 notches × 3 rows.
+	next, cmd := m.update(wheelScrollTickMsg{})
+	m = next.(chatTUI)
+	if cmd != nil {
+		t.Fatal("wheel tick should not return a command")
+	}
+	if got, want := m.viewport.YOffset(), 30; got != want {
+		t.Fatalf("wheel tick YOffset = %d, want %d (10 notches × 3 rows)", got, want)
+	}
+	if m.wheelAccum != 0 || m.wheelPending {
+		t.Fatalf("accumulator = %d, pending = %v after tick; want 0, false", m.wheelAccum, m.wheelPending)
+	}
+
+	// Up notches accumulate negative and scroll back up.
+	for i := 0; i < 5; i++ {
+		next, _ := m.update(tea.MouseWheelMsg{X: 80, Y: 0, Button: tea.MouseWheelUp})
+		m = next.(chatTUI)
+	}
+	next, _ = m.update(wheelScrollTickMsg{})
+	m = next.(chatTUI)
+	if got, want := m.viewport.YOffset(), 15; got != want {
+		t.Fatalf("up burst YOffset = %d, want %d (5 notches × 3 rows)", got, want)
+	}
+
+	// A net-zero burst (down then up) still ticks once but scrolls nothing.
+	for i := 0; i < 3; i++ {
+		next, _ := m.update(tea.MouseWheelMsg{X: 80, Y: 0, Button: tea.MouseWheelDown})
+		m = next.(chatTUI)
+		next, _ = m.update(tea.MouseWheelMsg{X: 80, Y: 0, Button: tea.MouseWheelUp})
+		m = next.(chatTUI)
+	}
+	before := m.viewport.YOffset()
+	next, _ = m.update(wheelScrollTickMsg{})
+	m = next.(chatTUI)
+	if got := m.viewport.YOffset(); got != before {
+		t.Fatalf("net-zero burst should scroll nothing, YOffset %d → %d", before, got)
+	}
+	if m.wheelPending {
+		t.Fatal("tick should clear wheelPending even for a net-zero burst")
+	}
+}
+
+// TestStreamFlushDueThrottlesWithinWindow pins the flush throttle decision with
+// injected times: only boundaries at least streamFlushInterval apart render.
+func TestStreamFlushDueThrottlesWithinWindow(t *testing.T) {
+	now := time.Now()
+	if streamFlushDue(now, now.Add(streamFlushInterval-time.Millisecond)) {
+		t.Error("a flush inside the throttle window should be deferred")
+	}
+	if !streamFlushDue(now, now.Add(streamFlushInterval)) {
+		t.Error("a flush at the interval boundary should be due")
+	}
+	if !streamFlushDue(time.Time{}, now) {
+		t.Error("the first flush (no previous flush) should be due immediately")
 	}
 }
 
@@ -3035,6 +3142,7 @@ func TestTranscriptTailFollow(t *testing.T) {
 	}
 
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	cur = adv(cur, wheelScrollTickMsg{})
 	if cur.viewport.AtBottom() {
 		t.Fatal("wheel-up should break the bottom pin")
 	}
@@ -3065,6 +3173,7 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		}
 		// Scroll up to leave the bottom.
 		cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+		cur = adv(cur, wheelScrollTickMsg{})
 		if cur.viewport.AtBottom() {
 			t.Fatal("wheel-up should break the bottom pin")
 		}
@@ -3083,6 +3192,7 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		}
 		cur.state = tuiRunning
 		cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+		cur = adv(cur, wheelScrollTickMsg{})
 		if cur.viewport.AtBottom() {
 			t.Fatal("wheel-up should break the bottom pin")
 		}
@@ -3117,6 +3227,7 @@ func TestForceGotoBottomScrollsWithoutTranscriptChange(t *testing.T) {
 	}
 
 	cur = next(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	cur = next(cur, wheelScrollTickMsg{})
 	if cur.viewport.AtBottom() {
 		t.Fatal("wheel-up should break the bottom pin")
 	}
@@ -3154,6 +3265,7 @@ func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
 		cur = next(cur, notice)
 	}
 	cur = next(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	cur = next(cur, wheelScrollTickMsg{})
 	if cur.viewport.AtBottom() {
 		t.Fatal("wheel-up should break the bottom pin")
 	}
@@ -3174,6 +3286,7 @@ func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
 	}
 
 	cur = next(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	cur = next(cur, wheelScrollTickMsg{})
 	cur.forceGotoBottom = true
 	cur, cmd = adv(cur, tea.WindowSizeMsg{Width: 80, Height: 8})
 	if cmd == nil {

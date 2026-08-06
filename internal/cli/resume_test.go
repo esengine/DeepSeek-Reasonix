@@ -372,6 +372,7 @@ func TestResumeWhileScrolledUpPinsViewportToBottom(t *testing.T) {
 	}
 
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	cur = adv(cur, wheelScrollTickMsg{}) // coalescing tick applies the notch
 	if cur.viewport.AtBottom() {
 		t.Fatal("wheel-up should move the old transcript away from the bottom")
 	}
