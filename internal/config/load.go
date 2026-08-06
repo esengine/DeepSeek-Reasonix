@@ -69,10 +69,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	cfg.setExpansionEnv(expansionEnv)
 	cfg.CredentialsStore = credentialsStoreMode()
 
-	projectTOML := "reasonix.toml"
-	if root != "." {
-		projectTOML = filepath.Join(root, "reasonix.toml")
-	}
+	projectTOML := projectTOMLPath(root)
 	if primary := userConfigPath(); primary != "" {
 		if _, err := resolveConfigAccessPath(primary, true); err != nil {
 			return nil, err
@@ -892,10 +889,7 @@ func MigrateLegacyAgentStepLimitsForRoot(root string) (bool, error) {
 	if userPath := userConfigLoadPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	projectPath := "reasonix.toml"
-	if root != "." {
-		projectPath = filepath.Join(root, "reasonix.toml")
-	}
+	projectPath := projectTOMLPath(root)
 	paths = append(paths, projectPath)
 
 	changedAny := false
@@ -937,10 +931,7 @@ func MigrateLegacyRedactToolOutputForRoot(root string) (bool, error) {
 	if userPath := userConfigLoadPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	projectPath := "reasonix.toml"
-	if root != "." {
-		projectPath = filepath.Join(root, "reasonix.toml")
-	}
+	projectPath := projectTOMLPath(root)
 	paths = append(paths, projectPath)
 
 	changedAny := false
@@ -979,10 +970,7 @@ func MigrateLegacyMemoryCompilerForRoot(root string) (bool, error) {
 	if userPath := userConfigLoadPath(); userPath != "" {
 		paths = append(paths, userPath)
 	}
-	projectPath := "reasonix.toml"
-	if root != "." {
-		projectPath = filepath.Join(root, "reasonix.toml")
-	}
+	projectPath := projectTOMLPath(root)
 	paths = append(paths, projectPath)
 
 	changedAny := false
