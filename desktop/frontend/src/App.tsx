@@ -336,6 +336,15 @@ const MAX_DISMISSED_TODO_KEYS = 160;
 type HistoryScopeFilter = { scope: "global" | "project"; workspaceRoot: string };
 type WorkspaceInsertTarget = "composer" | "planRevision";
 type DesktopPlatform = "darwin" | "windows" | "linux";
+const MACOS_WORKBENCH_TITLEBAR_HEIGHT = 46;
+
+function isMacOSWorkbenchSidebarTitlebar(target: HTMLElement | null, clientY: number, platform: DesktopPlatform): boolean {
+  if (platform !== "darwin") return false;
+  const sidebar = target?.closest(".sidebar--workbench");
+  if (!(sidebar instanceof HTMLElement)) return false;
+  const offsetY = clientY - sidebar.getBoundingClientRect().top;
+  return offsetY >= 0 && offsetY < MACOS_WORKBENCH_TITLEBAR_HEIGHT;
+}
 
 function useWindowsMaximised(enabled: boolean): readonly [boolean, () => void] {
   const [maximised, setMaximised] = useState(false);
@@ -2143,7 +2152,7 @@ export default function App() {
   const todoItem = todoEntry?.item ?? null;
   const metaTodos = state.meta?.canonicalTodos;
   const todos = useMemo(
-    () => resolveTodoPanelTodos(metaTodos, todoItem ? parseTodos(todoItem.args) : []),
+    () => resolveTodoPanelTodos(metaTodos, todoItem ? parseTodos(todoItem.args) : undefined),
     [metaTodos, todoItem],
   );
   const [dismissedTodoKeys, setDismissedTodoKeys] = useState<Set<string>>(loadDismissedTodoKeys);
@@ -4300,13 +4309,15 @@ export default function App() {
   const handleChromeTitlebarDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     if (!chromeDoubleClickZooms) return;
     const target = event.target as HTMLElement | null;
-    if (!target?.closest(".app-chrome, .topicbar, .workbench-dock__tools")) return;
-    if (target.closest("button, input, textarea, select, a, [role='button'], [role='tab'], .windows-window-controls")) return;
+    const onChromeSurface = target?.closest(".app-chrome, .topicbar, .workbench-dock__tools");
+    const onMacOSWorkbenchSidebarTitlebar = isMacOSWorkbenchSidebarTitlebar(target, event.clientY, desktopPlatform);
+    if (!onChromeSurface && !onMacOSWorkbenchSidebarTitlebar) return;
+    if (target?.closest("button, input, textarea, select, a, [role='button'], [role='tab'], .windows-window-controls")) return;
     event.preventDefault();
     void app.ToggleMaximiseMainWindow()
       .then(() => window.setTimeout(syncMainWindowMaximised, 80))
       .catch(() => undefined);
-  }, [chromeDoubleClickZooms, syncMainWindowMaximised]);
+  }, [chromeDoubleClickZooms, desktopPlatform, syncMainWindowMaximised]);
   // Creation keeps the classic sidebar/chat structure while gating chrome tweaks
   // behind its own style flag so classic/workbench remain unchanged.
   const appChromeHidden = sidebarWorkbench || sidebarCreation;

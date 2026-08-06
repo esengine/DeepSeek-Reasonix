@@ -1,5 +1,10 @@
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+BUILD_TIME_UTC := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+LDFLAGS := -s -w \
+	-X main.version=$(VERSION) \
+	-X main.gitCommit=$(GIT_COMMIT) \
+	-X main.buildTimeUTC=$(BUILD_TIME_UTC)
 GOEXE := $(shell go env GOEXE)
 
 .PHONY: build vet fmt test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean

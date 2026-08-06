@@ -8,7 +8,24 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
+	"reasonix/internal/provider"
 )
+
+func TestMetricsSinkUsesProviderCacheWriteCost(t *testing.T) {
+	s := &metricsSink{inner: event.Discard}
+	s.Emit(event.Event{
+		Kind: event.Usage,
+		Usage: &provider.Usage{
+			CacheMissTokens:        500_000,
+			CacheWriteTokens:       100_000,
+			CacheWriteBilledTokens: 200_000,
+		},
+		Pricing: &provider.Pricing{Input: 2},
+	})
+	if got := s.Snapshot().Cost; got != 1.2 {
+		t.Fatalf("metrics cost = %f, want 1.2", got)
+	}
+}
 
 func TestMetricsSinkAccumulatesReadinessAudit(t *testing.T) {
 	s := &metricsSink{inner: event.Discard}

@@ -67,9 +67,13 @@ func Inspect(opts LoadOptions) Inspection {
 	}
 
 	// Plugin hooks (enabled packages only — same as Load).
-	appendPluginInspect(&out, reasonixHome(opts.HomeDir), opts.ProjectRoot)
+	reasonixHomeDir := reasonixHomeForOptions(opts)
+	appendPluginInspect(&out, reasonixHomeDir, opts.ProjectRoot)
 
-	g := GlobalSettingsPath(opts.HomeDir)
+	g := filepath.Join(reasonixHomeDir, SettingsFilename)
+	if reasonixHomeDir == "" {
+		g = GlobalSettingsPath(opts.HomeDir)
+	}
 	st := inspectSettingsFile(g, ScopeGlobal)
 	if st.Status == "missing" {
 		if legacy := legacyGlobalSettingsPath(opts.HomeDir); legacy != "" {

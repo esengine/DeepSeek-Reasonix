@@ -342,6 +342,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	if got.UICursorShape() != "bar" {
 		t.Errorf("ui.cursor_shape = %q, want bar", got.UICursorShape())
 	}
+	if !got.UI.ShowTurnUsage {
+		t.Error("ui.show_turn_usage = false, want true")
+	}
 	if got.Desktop.Language != "en" {
 		t.Errorf("desktop.language = %q, want en", got.Desktop.Language)
 	}
@@ -945,6 +948,29 @@ func TestProjectDeltaRendersUICursorShape(t *testing.T) {
 	}
 	if got.UICursorShape() != "block" {
 		t.Fatalf("ui.cursor_shape = %q, want block", got.UICursorShape())
+	}
+}
+
+func TestShowTurnUsageDefaultsOnAndRendersFalseOverride(t *testing.T) {
+	c := Default()
+	if !c.UI.ShowTurnUsage {
+		t.Fatal("ui.show_turn_usage should default to true")
+	}
+
+	c.UI.ShowTurnUsage = false
+	delta := RenderTOMLProjectDelta(c)
+	for _, want := range []string{"[ui]", "show_turn_usage = false"} {
+		if !strings.Contains(delta, want) {
+			t.Fatalf("project delta missing %q:\n%s", want, delta)
+		}
+	}
+
+	got := Default()
+	if _, err := toml.Decode(delta, got); err != nil {
+		t.Fatalf("decode project delta: %v\n%s", err, delta)
+	}
+	if got.UI.ShowTurnUsage {
+		t.Fatal("ui.show_turn_usage false override did not round-trip")
 	}
 }
 

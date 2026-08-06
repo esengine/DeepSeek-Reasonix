@@ -207,7 +207,7 @@ DEEPSEEK_API_KEY=sk-...</div>
 
       <h2 id="cache"><span class="l-en">Prefix cache</span><span class="l-zh">前缀缓存</span></h2>
       <p><span class="l-en">DeepSeek bills cached prefix tokens at a fraction of fresh computation. Most agents waste this: they reorder messages, rewrite summaries mid-session, or inject volatile timestamps — every change invalidates the cache from that point on.</span><span class="l-zh">DeepSeek 对缓存前缀 token 的计费远低于新计算。多数智能体浪费了这一点:重排消息、会话中改写摘要、注入易变的时间戳——任何改动都会让其后的缓存全部失效。</span></p>
-      <p><span class="l-en">Reasonix serializes context deterministically and only ever appends. The practical effect: hours-long sessions where 90%+ of every request replays from cache, and input-token cost collapses to ~1/5. See the <a href={`${base}/#how`}>animated walkthrough</a> on the home page.</span><span class="l-zh">Reasonix 以确定性方式序列化上下文,并且永远只追加。实际效果:数小时的会话中每次请求 90% 以上从缓存重放,输入 token 成本降到约 1/5。可在首页查看<a href={`${base}/#how`}>动态演示</a>。</span></p>
+      <p><span class="l-en">Reasonix serializes context deterministically and only ever appends. The practical effect: hours-long sessions where 90%+ of every request replays from cache, and input-token cost collapses to ~1/5.</span><span class="l-zh">Reasonix 以确定性方式序列化上下文,并且永远只追加。实际效果:数小时的会话中每次请求 90% 以上从缓存重放,输入 token 成本降到约 1/5。</span></p>
       <p><span class="l-en">Automatic compaction starts at 80% of the model context by default. Desktop Settings and <code>reasonix config compact-ratio</code> share the user-level value; choose 65–85%, or use <code>--local</code> for a project override. Lower values compact earlier and can reduce prefix-cache reuse.</span><span class="l-zh">自动压缩默认在模型上下文达到 80% 时启动。桌面端设置与 <code>reasonix config compact-ratio</code> 共用用户级设置；可在 65–85% 之间选择，也可用 <code>--local</code> 添加项目覆盖。阈值越低越早压缩，也可能降低前缀缓存复用率。</span></p>
 
       <h2 id="permissions"><span class="l-en">Permissions &amp; sandbox</span><span class="l-zh">权限与沙箱</span></h2>
@@ -363,9 +363,9 @@ call_timeout_seconds = 600</div>
       <p><span class="l-en">From <strong>Settings -> Bots</strong>, connect Feishu, Lark, or WeChat, then send Reasonix messages from IM. The local desktop runtime handles model calls, tools, approvals, and sandboxing, while IM receives progress, approval cards or text commands, and final results. Headless gateways can be started with <code>reasonix bot start --channels feishu,lark,weixin --dir /path/to/project</code>.</span><span class="l-zh">在 <strong>Settings -> Bots</strong> 中连接飞书、Lark 或微信后,即可从 IM 给 Reasonix 发消息。本地桌面运行时负责模型调用、工具、审批和沙箱,IM 侧接收进度、审批卡片或文本命令以及最终结果。也可以用 <code>reasonix bot start --channels feishu,lark,weixin --dir /path/to/project</code> 启动 headless gateway。</span></p>
 
       <div class="doc-cards">
-        <a class="doc-card" href={`${base}/#how`}>
-          <h3><span class="l-en">See the cache in action →</span><span class="l-zh">看缓存如何工作 →</span></h3>
-          <p><span class="l-en">Scroll-driven walkthrough of prefix replay on the home page.</span><span class="l-zh">首页的滚动演示:前缀重放的每一轮。</span></p>
+        <a class="doc-card" href={`${base}/#surfaces`}>
+          <h3><span class="l-en">One engine, four surfaces →</span><span class="l-zh">一个引擎,四个入口 →</span></h3>
+          <p><span class="l-en">Terminal, desktop app, browser, and ACP editors share this config.</span><span class="l-zh">终端、桌面端、浏览器与 ACP 编辑器共用这套配置。</span></p>
         </a>
         <a class="doc-card" href={`${repo}/blob/main-v2/docs/CONFIG_PATHS.md`}>
           <h3><span class="l-en">Configuration paths →</span><span class="l-zh">配置路径 →</span></h3>

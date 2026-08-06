@@ -25,6 +25,7 @@ import (
 	"reasonix/internal/jobs"
 	"reasonix/internal/memory"
 	"reasonix/internal/nilutil"
+	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -40,7 +41,11 @@ import (
 const maxToolOutputBytes = 32 * 1024
 
 const maxEmptyFinalBlocks = 3
-const maxStreamRecoveries = 3
+
+// maxStreamRecoveries is the number of body-phase stream retries after the
+// initial sampling attempt (Codex-aligned default: 1 + 5 = 6 attempts total).
+const maxStreamRecoveries = 5
+const maxSamplingAttempts = maxStreamRecoveries + 1
 const maxExecutorHandoffNudges = 1
 
 const defaultReasoningByteLimit = 128 * 1024
@@ -329,6 +334,13 @@ type Agent struct {
 	// agents. Unlike planMode it is not a collaboration toggle: it remains on
 	// for the agent's lifetime and validates proxy calls after resolution.
 	readOnlyExecution bool
+
+	// mutationDependencyBarrier is set for the remainder of a provider tool
+	// batch after any mutating call fails or is blocked. executeOne re-checks
+	// it after proxy resolution so use_capability cannot bypass the barrier by
+	// advertising schema-level ReadOnly()==true. Parallel read-only segments
+	// never set it. Cleared at the start of each executeBatch.
+	mutationDependencyBarrier atomic.Bool
 
 	// plannerMCPExecution relaxes the strict read-only MCP boundary for the
 	// two-model Planner only: authorized, non-destructive MCP targets may run
@@ -2861,33 +2873,17 @@ func toolBudgetNoticeText() string {
 	return "Tool round limit reached; asking the assistant to summarize progress."
 }
 
-func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
-	switch {
-	case hadPartialTool:
-		return "The previous assistant response was interrupted while a tool call was streaming. Continue the same task now. If a tool is still needed, issue a fresh complete tool call from scratch; do not rely on any partial tool-call arguments from the interrupted stream."
-	case hasPartialText:
-		return "The previous assistant response was interrupted during streaming. Continue the same task now. Partial text remains visible to the user but was excluded from model context; avoid needlessly repeating it, and do not assume it was complete."
-	default:
-		return "The previous assistant response was interrupted during streaming before visible answer text was completed. Continue the same task now and provide the next useful response."
-	}
+// samplingRequest is a once-prepared, frozen provider request for one model
+// round. All stream retries replay this exact payload — no synthetic recovery
+// messages, no schema reorder, no previous_response_id drift from failed attempts.
+type samplingRequest struct {
+	req provider.Request
 }
 
-// stream runs one completion, emitting reasoning and text deltas as typed
-// events and collecting complete tool calls. A Message event closes the text
-// stream so a sink can re-render the streamed raw text as styled markdown. The
-// accumulated text and reasoning are also returned so the caller can round-trip
-// reasoning on the next turn.
-func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, string, string, string, string, []provider.ToolCall, []json.RawMessage, *provider.Usage, bool, bool, []provider.ToolCall, error) {
-	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
-		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
-	})
-	ctx = provider.WithRequestAttemptCounter(ctx)
-	// A stream can terminate locally before the provider channel closes (for
-	// example when the client-side reasoning guard fires). Own a child context
-	// here so every return path aborts the HTTP request and releases the provider
-	// reader instead of leaving generation and billing running in the background.
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+// prepareSamplingRequest runs interceptors and schema fetch once per model
+// round. Callers deep-copy via freezeProviderRequest before each Stream so
+// providers cannot mutate the shared freeze across retries.
+func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, error) {
 	// CreatedAt is durable UI metadata, not model input. Strip it from the
 	// transport copy so wall-clock differences never invalidate the provider's
 	// prompt-cache prefix (and custom providers cannot accidentally send it).
@@ -2901,7 +2897,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	// the prompt-cache prefix stays intact across turns.
 	requestMessages, err := a.interceptContextPrepare(ctx, requestMessages)
 	if err != nil {
-		return "", "", "", "", "", nil, nil, nil, false, false, nil, err
+		return samplingRequest{}, err
 	}
 	req := provider.Request{
 		Messages:       requestMessages,
@@ -2914,15 +2910,96 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	// (revalidated by the payload registry) before it goes on the wire.
 	req, err = a.interceptProviderRequest(ctx, req)
 	if err != nil {
-		return "", "", "", "", "", nil, nil, nil, false, false, nil, err
+		return samplingRequest{}, err
 	}
-	inputFloor := 0
-	if previous := a.lastUsage.Load(); previous != nil {
-		inputFloor = previous.PromptTokens
+	return samplingRequest{req: freezeProviderRequest(req)}, nil
+}
+
+// freezeProviderRequest deep-copies the provider-visible request surface so
+// retries share identical messages, tools order, temperature, and format.
+func freezeProviderRequest(req provider.Request) provider.Request {
+	out := req
+	if len(req.Messages) > 0 {
+		out.Messages = append([]provider.Message(nil), req.Messages...)
+		for i := range out.Messages {
+			if len(out.Messages[i].ToolCalls) > 0 {
+				out.Messages[i].ToolCalls = append([]provider.ToolCall(nil), out.Messages[i].ToolCalls...)
+			}
+			if len(out.Messages[i].Images) > 0 {
+				out.Messages[i].Images = append([]string(nil), out.Messages[i].Images...)
+			}
+			if len(out.Messages[i].ResponsesItems) > 0 {
+				items := make([]json.RawMessage, len(out.Messages[i].ResponsesItems))
+				for j, item := range out.Messages[i].ResponsesItems {
+					items[j] = append(json.RawMessage(nil), item...)
+				}
+				out.Messages[i].ResponsesItems = items
+			}
+		}
 	}
-	ch, err := provider.StreamWithRequestBudgetEstimate(ctx, a.prov, req, inputFloor)
+	if len(req.Tools) > 0 {
+		out.Tools = make([]provider.ToolSchema, len(req.Tools))
+		for i, schema := range req.Tools {
+			out.Tools[i] = schema
+			if len(schema.Parameters) > 0 {
+				out.Tools[i].Parameters = append(json.RawMessage(nil), schema.Parameters...)
+			}
+		}
+	}
+	if req.Temperature != nil {
+		t := *req.Temperature
+		out.Temperature = &t
+	}
+	if req.ResponseFormat != nil {
+		rf := *req.ResponseFormat
+		out.ResponseFormat = &rf
+	}
+	return out
+}
+
+// stream runs one completion, emitting reasoning and text deltas as typed
+// events and collecting complete tool calls. A Message event closes the text
+// stream so a sink can re-render the streamed raw text as styled markdown. The
+// accumulated text and reasoning are also returned so the caller can round-trip
+// reasoning on the next turn.
+//
+// When frozen is non-nil, the request is not rebuilt from session — retries
+// must replay the same provider-visible body.
+func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, string, string, string, string, []provider.ToolCall, []json.RawMessage, *provider.Usage, bool, bool, []provider.ToolCall, int, error) {
+	return a.streamWithFrozen(ctx, turn, sink, nil, "")
+}
+
+func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink, frozen *samplingRequest, attemptID string) (string, string, string, string, string, []provider.ToolCall, []json.RawMessage, *provider.Usage, bool, bool, []provider.ToolCall, int, error) {
+	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
+		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max, RetryScope: event.RetryScopeHeaders})
+	})
+	// Reuse a parent attempt counter when present so stream retries accumulate
+	// into one RequestCount; otherwise install a fresh counter for this call.
+	ctx = provider.WithRequestAttemptCounter(ctx)
+	// A stream can terminate locally before the provider channel closes (for
+	// example when the client-side reasoning guard fires). Own a child context
+	// here so every return path aborts the HTTP request and releases the provider
+	// reader instead of leaving generation and billing running in the background.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var req provider.Request
+	var err error
+	if frozen != nil {
+		req = freezeProviderRequest(frozen.req)
+	} else {
+		prepared, perr := a.prepareSamplingRequest(ctx)
+		if perr != nil {
+			return "", "", "", "", "", nil, nil, nil, false, false, nil, 0, perr
+		}
+		req = prepared.req
+	}
+	// After #7725 Goal token request admission was removed, stream goes
+	// directly to the provider. Provider-visible cache controls stay stable
+	// across retries and request timing because they are derived from req alone.
+	ch, err := a.prov.Stream(ctx, req)
 	if err != nil {
-		return "", "", "", "", "", nil, nil, provider.UsageWithRequestAttemptCount(ctx, nil), false, false, nil, err
+		return "", "", "", "", "", nil, nil, provider.UsageWithRequestAttemptCount(ctx, nil), false, false, nil, 0, err
 	}
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
@@ -2939,6 +3016,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 	var partialCalls []provider.ToolCall
 	var usage *provider.Usage
 	var partialToolStarted bool
+	var maxArgChars int
 	var lastArgProgress time.Time
 	finishReasoning := func() (stored, display string) {
 		original := reasoning.String()
@@ -2963,14 +3041,14 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			stored, _ := finishReasoning()
 			usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-			return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, ctx.Err()
+			return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, maxArgChars, ctx.Err()
 		case c, ok := <-ch:
 			if !ok {
 				if err := ctx.Err(); err != nil {
 					stored, _ := finishReasoning()
 					usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 					usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-					return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, err
+					return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, maxArgChars, err
 				}
 				stored, display := finishReasoning()
 				// provider.response: extensions rule on the assembled terminal
@@ -2981,7 +3059,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				finalText, finalReasoning, signature, calls, usage, err := a.interceptProviderResponse(
 					ctx, text.String(), stored, signature, calls, usage)
 				if err != nil {
-					return "", "", "", "", "", nil, nil, nil, false, partialToolStarted, partialCalls, err
+					return "", "", "", "", "", nil, nil, nil, false, partialToolStarted, partialCalls, maxArgChars, err
 				}
 				// Responses reasoning IDs/status and Anthropic signatures are
 				// provider-bound metadata. Never attach the provider's metadata
@@ -3002,7 +3080,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 					})
 				}
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				return finalText, finalReasoning, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, false, partialCalls, nil
+				return finalText, finalReasoning, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, false, partialCalls, maxArgChars, nil
 			}
 			chunk = c
 		}
@@ -3028,7 +3106,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), finishReasonClientReasoningLimit)
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
 				a.lastUsage.Store(usage)
-				return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, errReasoningByteLimitExceeded
+				return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, maxArgChars, errReasoningByteLimitExceeded
 			}
 		case provider.ChunkText:
 			text.WriteString(chunk.Text)
@@ -3042,7 +3120,7 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			if tc := chunk.ToolCall; tc != nil {
 				partialCalls = upsertPartialToolCall(partialCalls, *tc)
 				sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
-					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true,
+					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true, AttemptID: attemptID,
 				}})
 			}
 		case provider.ChunkToolCallArgsDelta:
@@ -3051,11 +3129,14 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			// partial dispatch with the cumulative size (time-throttled) so the
 			// UI can show progress instead of a dead counter for the duration of
 			// a 30KB write_file body.
+			if chunk.ArgChars > maxArgChars {
+				maxArgChars = chunk.ArgChars
+			}
 			if tc := chunk.ToolCall; tc != nil && time.Since(lastArgProgress) >= 250*time.Millisecond {
 				partialCalls = upsertPartialToolCall(partialCalls, *tc)
 				lastArgProgress = time.Now()
 				sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
-					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true, ArgChars: chunk.ArgChars,
+					ID: tc.ID, Name: tc.Name, ReadOnly: a.toolReadOnly(tc.Name), Partial: true, ArgChars: chunk.ArgChars, AttemptID: attemptID,
 				}})
 			}
 		case provider.ChunkToolCall:
@@ -3063,6 +3144,9 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 			if chunk.ToolCall != nil {
 				calls = append(calls, *chunk.ToolCall)
 				partialCalls = upsertPartialToolCall(partialCalls, *chunk.ToolCall)
+				if n := len(chunk.ToolCall.Arguments); n > maxArgChars {
+					maxArgChars = n
+				}
 			}
 		case provider.ChunkResponsesItem:
 			if len(chunk.ResponsesItem) > 0 {
@@ -3078,14 +3162,14 @@ func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, 
 				stored, _ := finishReasoning()
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 				usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-				return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, true, partialToolStarted, partialCalls, chunk.Err
+				return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, true, partialToolStarted, partialCalls, maxArgChars, chunk.Err
 			}
 			stored, _ := finishReasoning()
 			if errors.Is(chunk.Err, context.Canceled) || errors.Is(chunk.Err, context.DeadlineExceeded) {
 				usage = bestEffortStreamUsage(usage, text.Len(), reasoning.Len(), "interrupted")
 			}
 			usage = provider.UsageWithRequestAttemptCount(ctx, usage)
-			return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, chunk.Err
+			return text.String(), stored, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, false, partialToolStarted, partialCalls, maxArgChars, chunk.Err
 		}
 	}
 }
@@ -3199,6 +3283,7 @@ func (a *Agent) systemPrompt() string {
 type batchExecution struct {
 	results            []string
 	images             [][]string
+	executions         []*tool.ShellExecution
 	recoveryStopTurn   bool
 	recoveryStopReason string
 }
@@ -3322,6 +3407,63 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		}
 	}
 
+	// mutationBatchStop is the deterministic dependency barrier: after any
+	// mutating call fails or is blocked, later mutating and verification calls
+	// in the same provider batch are skipped (not_run/dependency). Host-proven
+	// read-only diagnosis may still run. executeOne also re-checks after proxy
+	// resolution so use_capability cannot bypass this pass.
+	mutationBatchStop := false
+	a.mutationDependencyBarrier.Store(false)
+	markDependencySkipped := func(start int) {
+		a.mutationDependencyBarrier.Store(true)
+		for j := start; j < len(calls); j++ {
+			if results[j] != "" {
+				continue
+			}
+			// Pre-classify when statically certain. Proxies and ambiguous
+			// targets fall through to run() so executeOne can resolve the real
+			// target and re-apply the barrier before Commit/Execute.
+			if !batchCallStaticallySkippable(a, calls[j]) {
+				continue
+			}
+			isVerification := calls[j].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[j].Arguments)))
+			msg := "blocked: skipped because an earlier modification in this tool batch failed or was blocked. " +
+				"Fix or re-run the failed change first; verification was not executed."
+			var ex *tool.ShellExecution
+			if calls[j].Name == "bash" {
+				ex = &tool.ShellExecution{
+					Kind:         "shell",
+					State:        tool.ShellStateNotRun,
+					FailurePhase: tool.ShellPhaseDependency,
+					MutationRisk: tool.ShellMutationNotStarted,
+					Verification: tool.ShellVerificationNotVerification,
+				}
+				if isVerification {
+					ex.Verification = tool.ShellVerificationNotRun
+				}
+				if t, _, amb := a.tools.ResolveCall(calls[j].Name); t != nil && len(amb) == 0 {
+					if bt, ok := t.(tool.DetailedExecutor); ok {
+						if desc := bt.ExecutionDescriptor(json.RawMessage(calls[j].Arguments)); desc != nil {
+							ex.Shell = desc.Shell
+							ex.ShellVersion = desc.ShellVersion
+							ex.Platform = desc.Platform
+							ex.SupportsAndAnd = desc.SupportsAndAnd
+						}
+					}
+				}
+			}
+			results[j] = msg
+			outcomes[j] = toolOutcome{
+				output:    msg,
+				blocked:   true,
+				errMsg:    firstLine(msg),
+				execution: ex,
+			}
+			durations[j] = 0
+		}
+		mutationBatchStop = true
+	}
+
 	for _, batch := range partitionToolCalls(a.tools, calls) {
 		if ctx.Err() != nil {
 			markCancelled(batch.start)
@@ -3332,6 +3474,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			break
 		}
 		if batch.parallel && batch.end-batch.start > 1 {
+			// Parallel segments are read-only by construction; no mutation barrier.
 			ranUntil := runParallel(ctx, batch.start, batch.end, run)
 			for i := batch.start; i < ranUntil; i++ {
 				finalize(i)
@@ -3368,6 +3511,33 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 				markRecoveryStopped(i, recoveryStopReason)
 				break
 			}
+			if mutationBatchStop {
+				// Fill dependency skips for remaining mutating/verify calls, then
+				// allow any residual read-only diagnosis to run individually.
+				if results[i] != "" {
+					continue
+				}
+				t, _, ambiguous := a.tools.ResolveCall(calls[i].Name)
+				known := t != nil && len(ambiguous) == 0
+				readOnly := known && t.ReadOnly()
+				if calls[i].Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(calls[i].Arguments)) {
+					readOnly = true
+				}
+				isVerification := calls[i].Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(calls[i].Arguments)))
+				mutates := evidence.ToolCallMutates(calls[i].Name, json.RawMessage(calls[i].Arguments), readOnly)
+				if mutates || isVerification {
+					markDependencySkipped(i)
+					// markDependencySkipped fills this index; move on.
+					if results[i] != "" {
+						continue
+					}
+				}
+			}
+			if results[i] != "" {
+				// Pre-filled dependency skip.
+				finalize(i)
+				continue
+			}
 			run(i)
 			finalize(i)
 			if outcomes[i].recoveryStopTurn {
@@ -3375,6 +3545,11 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 				recoveryStopReason = outcomes[i].recoveryStopReason
 				markRecoveryStopped(i+1, recoveryStopReason)
 				break
+			}
+			// Mutation/verification failure barrier for the rest of this batch.
+			if batchCallIsMutatingFailure(a, calls[i], outcomes[i]) {
+				mutationBatchStop = true
+				markDependencySkipped(i + 1)
 			}
 			// After each tool execution, also check if the context was cancelled.
 			// If so, stop executing remaining tools and return immediately so
@@ -3397,7 +3572,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		if c.ResolvedReadOnly != nil {
 			readOnly = *c.ResolvedReadOnly
 		}
-		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		tr := event.Tool{
 			ID:           c.ID,
 			Name:         c.Name,
 			Args:         c.Arguments,
@@ -3408,7 +3583,9 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			ReadOnly:     readOnly,
 			Truncated:    o.truncated,
 			DurationMs:   durations[i],
-		}})
+			Execution:    toEventShellExecution(o.execution, durations[i]),
+		}
+		a.sink.Emit(event.Event{Kind: event.ToolResult, Tool: tr})
 		if o.truncated && o.truncMsg != "" {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: o.truncMsg})
 		}
@@ -3417,8 +3594,10 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		a.applyStormBreaker(calls, outcomes, results, receiptMark)
 	}
 	images := make([][]string, len(calls))
+	executions := make([]*tool.ShellExecution, len(calls))
 	for i := range outcomes {
 		images[i] = outcomes[i].images
+		executions[i] = outcomes[i].execution
 		if outcomes[i].recoveryStopTurn {
 			recoveryBatchStop = true
 			if outcomes[i].recoveryStopReason != "" {
@@ -3429,9 +3608,132 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 	return batchExecution{
 		results:            results,
 		images:             images,
+		executions:         executions,
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
 	}
+}
+
+func toEventShellExecution(in *tool.ShellExecution, durationMs int64) *event.ShellExecution {
+	if in == nil {
+		return nil
+	}
+	out := &event.ShellExecution{
+		Kind:           in.Kind,
+		Shell:          in.Shell,
+		ShellVersion:   in.ShellVersion,
+		Platform:       in.Platform,
+		SupportsAndAnd: in.SupportsAndAnd,
+		State:          in.State,
+		FailurePhase:   in.FailurePhase,
+		OutputTail:     in.OutputTail,
+		MutationRisk:   in.MutationRisk,
+		Verification:   in.Verification,
+		DurationMs:     in.DurationMs,
+	}
+	if out.DurationMs == 0 && durationMs > 0 {
+		out.DurationMs = durationMs
+	}
+	if in.ExitCode != nil {
+		code := *in.ExitCode
+		out.ExitCode = &code
+	}
+	return out
+}
+
+func toProviderToolExecution(in *tool.ShellExecution) *provider.ToolExecution {
+	if in == nil {
+		return nil
+	}
+	out := &provider.ToolExecution{
+		Kind:           in.Kind,
+		Shell:          in.Shell,
+		ShellVersion:   in.ShellVersion,
+		Platform:       in.Platform,
+		SupportsAndAnd: in.SupportsAndAnd,
+		State:          in.State,
+		FailurePhase:   in.FailurePhase,
+		OutputTail:     in.OutputTail,
+		MutationRisk:   in.MutationRisk,
+		Verification:   in.Verification,
+		DurationMs:     in.DurationMs,
+	}
+	if in.ExitCode != nil {
+		code := *in.ExitCode
+		out.ExitCode = &code
+	}
+	return out
+}
+
+// batchCallIsMutatingFailure reports whether a finished call was a mutation
+// (file write / non-readonly bash mutation) that failed or was blocked, so later
+// mutations and verifications in the same batch must not run.
+func batchCallIsMutatingFailure(a *Agent, call provider.ToolCall, o toolOutcome) bool {
+	if o.errMsg == "" && !o.blocked {
+		return false
+	}
+	readOnly := false
+	t, _, ambiguous := a.tools.ResolveCall(call.Name)
+	known := t != nil && len(ambiguous) == 0
+	if known {
+		readOnly = t.ReadOnly()
+	}
+	if call.ResolvedReadOnly != nil {
+		readOnly = *call.ResolvedReadOnly
+	}
+	if o.resolved {
+		readOnly = o.resolvedReadOnly
+	}
+	if call.Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(call.Arguments)) {
+		readOnly = true
+	}
+	// Verification failures do not open the dependency barrier by themselves —
+	// only a failed modification does.
+	if call.Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments))) {
+		return false
+	}
+	// Resolved writers (including MCP targets behind use_capability) count even
+	// when the provider-visible proxy advertised ReadOnly.
+	if o.resolved && !o.resolvedReadOnly {
+		return true
+	}
+	if evidence.ToolCallMutates(call.Name, json.RawMessage(call.Arguments), readOnly) {
+		return true
+	}
+	// Fail closed only for a target the host could not classify at all. A blanket
+	// !readOnly fallback here would re-admit exactly the writers ToolCallMutates
+	// deliberately exempts (todo_write, complete_step, ask, bash_output, wait and
+	// the other non-mutation meta tools): a failed todo update would then block
+	// every real edit left in the batch. Resolved writer proxies already returned
+	// true above, so narrowing this does not reopen the use_capability path.
+	return !known
+}
+
+// batchCallStaticallySkippable reports whether a remaining call can be marked
+// not_run/dependency without resolving a proxy. Proxies and unknown tools
+// return false so executeOne can resolve the real target first.
+func batchCallStaticallySkippable(a *Agent, call provider.ToolCall) bool {
+	t, _, ambiguous := a.tools.ResolveCall(call.Name)
+	if t == nil || len(ambiguous) > 0 {
+		// Unknown / ambiguous: fail closed via executeOne path.
+		return false
+	}
+	// Proxy resolution may consult a live connected capability and its result
+	// can change between calls. Do not resolve here merely to pre-fill a skip:
+	// executeOne resolves exactly once, then applyMutationDependencyBarrier
+	// classifies the real target before Commit or Execute.
+	if _, ok := t.(tool.CallResolver); ok {
+		return false
+	}
+	readOnly := t.ReadOnly()
+	if call.Name == "bash" && permission.BashCommandIsReadOnly(json.RawMessage(call.Arguments)) {
+		readOnly = true
+	}
+	isVerification := call.Name == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(json.RawMessage(call.Arguments)))
+	if isVerification {
+		return true
+	}
+	return !readOnly || evidence.ToolCallMutates(call.Name, json.RawMessage(call.Arguments), readOnly)
 }
 
 func (a *Agent) emitFullToolDispatch(c provider.ToolCall, refreshed bool) {
@@ -3772,6 +4074,9 @@ type toolOutcome struct {
 	resolvedName     string
 	capabilityID     string
 	resolvedReadOnly bool
+	// execution is local shell metadata (optional). Provider messages strip it
+	// via ModelMessages; UI/event sinks surface it on ToolResult cards.
+	execution *tool.ShellExecution
 	// recoveryGeneration is the gate generation captured before execution so
 	// ObserveResult can ignore stale results after a mode switch.
 	recoveryGeneration uint64

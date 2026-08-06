@@ -81,14 +81,16 @@ func heuristicInputHasStrongTaskSignal(input string) bool {
 	}
 
 	// Failure/help descriptions are actionable even when phrased without an
-	// imperative verb, e.g. "the auth isn't working".
-	taskPhrases := []string{
-		"not working", "isn't working", "doesn't work", "dont work", "don't work",
-		"can you help", "help with", "broken", "error", "bug", "issue", "failed", "failing", "crash", "cannot", "can't",
-		"问题", "不工作", "无法", "不能", "报错", "错误", "失败", "崩溃", "异常",
-		"卡住", "卡住了", "没反应", "不生效", "异常退出",
+	// imperative verb, e.g. "the auth isn't working". Shared fault signals keep
+	// task recognition and Goal budget classification from drifting apart.
+	if taskInputHasFaultSignal(normalized) {
+		return true
 	}
-	for _, phrase := range taskPhrases {
+	helpPhrases := []string{
+		"can you help", "help with", "cannot", "can't",
+		"无法", "不能",
+	}
+	for _, phrase := range helpPhrases {
 		if strings.Contains(normalized, phrase) {
 			return true
 		}

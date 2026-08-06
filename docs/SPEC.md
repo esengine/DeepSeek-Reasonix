@@ -677,6 +677,7 @@ default_model = "deepseek"   # provider name (→ its default model) or "provide
 [ui]
 # shortcut_layout = "desktop"       # classic|desktop; compatibility setting
 # cursor_shape = "bar"              # CLI/TUI textarea cursor: underline|block|bar
+show_turn_usage = false              # hide per-request token/cost receipts in the TUI; default true
 
 [agent]
 system_prompt = "You are Reasonix, a coding agent..."  # or system_prompt_file = "..."

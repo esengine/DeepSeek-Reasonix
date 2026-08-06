@@ -41,6 +41,7 @@ func newTestChatTUI() chatTUI {
 		toolLineCountByID:    map[string]int{},
 		subagentProgressIdx:  map[string]int{},
 		subagentProgress:     map[string]*cliSubagentProgress{},
+		showTurnUsage:        true,
 	}
 }
 
@@ -136,6 +137,23 @@ func TestTurnReceiptLeavesOneBlankRowAfterAssistantAnswer(t *testing.T) {
 	}
 	if !strings.Contains(ansi.Strip(m.transcript[2]), "TURN") {
 		t.Fatalf("last block should be the turn receipt, got %q", m.transcript[2])
+	}
+}
+
+func TestTurnReceiptCanBeHiddenWithoutDisablingUsageAccounting(t *testing.T) {
+	m := newTestChatTUI()
+	m.showTurnUsage = false
+	m.ingestEvent(event.Event{Kind: event.Text, Text: "Answer"})
+	m.ingestEvent(event.Event{Kind: event.Message})
+	m.ingestEvent(event.Event{Kind: event.Usage, Usage: &provider.Usage{
+		PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12,
+	}})
+
+	if len(m.transcript) != 1 {
+		t.Fatalf("hidden turn receipt should not add transcript blocks, got %d: %v", len(m.transcript), m.transcript)
+	}
+	if m.turnTokens != 2 {
+		t.Fatalf("hidden turn receipt should still account for completion tokens, got %d", m.turnTokens)
 	}
 }
 

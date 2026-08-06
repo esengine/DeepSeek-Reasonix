@@ -41,8 +41,12 @@ SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"
 if ! git -C "$ROOT" diff-index --quiet HEAD --; then
 	SOURCE_REVISION="$SOURCE_REVISION+dirty"
 fi
+# Short commit + real UTC build clock for CLI `version --verbose/--json`.
+GIT_COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+BUILD_TIME_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # The remote protocol source-revision ldflag was removed with Remote Workbench.
 product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION -X reasonix/internal/productdocs.linkedRevision=$SOURCE_REVISION"
+cli_identity_ldflags="-X main.version=$VERSION -X main.gitCommit=$GIT_COMMIT -X main.buildTimeUTC=$BUILD_TIME_UTC $product_docs_ldflags"
 
 cleanup() {
 	if [ -n "$windows_resource_tool_dir" ]; then
@@ -75,12 +79,12 @@ build_cli() {
 	mkdir -p "$(dirname "$cli_out")"
 	if [ "$arch" = universal ]; then
 		cli_tmp=$(mktemp -d)
-		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $product_docs_ldflags" -o "$cli_tmp/amd64" ./cmd/reasonix)
-		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $product_docs_ldflags" -o "$cli_tmp/arm64" ./cmd/reasonix)
+		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $cli_identity_ldflags" -o "$cli_tmp/amd64" ./cmd/reasonix)
+		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $cli_identity_ldflags" -o "$cli_tmp/arm64" ./cmd/reasonix)
 		lipo -create "$cli_tmp/amd64" "$cli_tmp/arm64" -output "$cli_out"
 		rm -rf "$cli_tmp"
 	else
-		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $product_docs_ldflags" -o "$cli_out" ./cmd/reasonix)
+		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $cli_identity_ldflags" -o "$cli_out" ./cmd/reasonix)
 	fi
 }
 

@@ -347,7 +347,7 @@ func (gs *Session) normalizeAlternation() {
 	if !merged {
 		return
 	}
-	gs.sess.Rewrite(out)
+	gs.sess.Rewrite(out, "guardian_merge")
 }
 
 // Load replaces the guardian's internal agent session with the one at path,
@@ -593,6 +593,8 @@ func (gs *Session) addReviewUsage(usage *provider.Usage) {
 	gs.reviewUsage.TotalTokens += usage.TotalTokens
 	gs.reviewUsage.CacheHitTokens += usage.CacheHitTokens
 	gs.reviewUsage.CacheMissTokens += usage.CacheMissTokens
+	gs.reviewUsage.CacheWriteTokens += usage.CacheWriteTokens
+	gs.reviewUsage.CacheWriteBilledTokens += usage.CacheWriteBilledTokens
 	gs.reviewUsage.ReasoningTokens += usage.ReasoningTokens
 	gs.reviewUsage.RequestCount += guardianUsageRequestCount(usage)
 	gs.reviewUsage.Estimated = gs.reviewUsage.Estimated || usage.Estimated

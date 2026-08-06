@@ -53,10 +53,11 @@ if (localeChunks.length !== 2) {
 for (const path of localeChunks) {
   const name = basename(path);
   // Task Monitor adds 37 user-facing labels to each on-demand locale, while
-  // Extension UI adds its own status and action copy. Keep both dictionaries
-  // within narrowly measured, explicit allowances. The retrieval system
+  // Extension UI adds its own status and action copy. The retrieval system
   // (retrieve_info + knowledge cache) adds Simplified-Chinese guidance copy,
-  // so zh gets the same measured allowance as zh-TW.
+  // and upstream shell execution contract cards add verification strings.
+  // Keep both dictionaries within a measured, explicit allowance covering
+  // both additions; zh gets the same budget as zh-TW.
   const budget = 54 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }

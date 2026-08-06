@@ -125,7 +125,7 @@ echo "解释这段代码" | reasonix run
 
 未使用 `-p` 或结构化输出格式时，`reasonix run` 保持正常的终端流式展示。它也接受
 `--model`、`--profile`、`--max-steps`、`--effort`、`--dir`、`--add-dir`、
-`--continue`、`--resume PATH`、`--copy`、`--allowed-tools` 和
+`--continue`、`--resume QUERY`、`--copy`、`--allowed-tools` 和
 `--permission-mode`，以及作为 `--permission-mode auto` 别名的 `--auto` / `-y`。
 
 ### 基准对照组
@@ -260,8 +260,9 @@ reasonix --resume provider-config --copy
 - `--copy` 不修改原 transcript，而是在新的可写会话中继续。原会话已被另一个
   Reasonix 进程占用时可以使用它。
 
-一次性运行可用 `reasonix run --resume PATH "任务"` 指定 session 文件路径。Session
-lease 会阻止桌面端和 CLI 同时写入同一个 transcript。
+一次性运行可用 `reasonix run --resume QUERY "任务"`，支持 session 文件路径、
+session ID，或来自 `--events-jsonl` / `reasonix session show --json` 的不透明
+machine session ID。Session lease 会阻止桌面端和 CLI 同时写入同一个 transcript。
 
 ## 权限
 

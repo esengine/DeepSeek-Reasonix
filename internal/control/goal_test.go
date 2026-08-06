@@ -835,7 +835,7 @@ func TestGoalRepeatedBlockedStopsAfterThreeTurns(t *testing.T) {
 // no intercept.
 func TestGoalBlockedReportTransitionsImmediately(t *testing.T) {
 	g := &goalMachine{goal: "wait for user review", status: GoalStatusRunning}
-	g.turnsLimit, g.tokensLimit = 10, 200_000
+	g.turnsLimit = 10
 	g.noProgressLimit = defaultNoProgressLimit
 
 	res := g.advance(goalAdvanceInput{

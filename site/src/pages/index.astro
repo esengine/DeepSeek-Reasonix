@@ -22,7 +22,7 @@ const half = Math.ceil(community.list.length / 2);
 const rowA = community.list.slice(0, half);
 const rowB = community.list.slice(half);
 
-const desc = "Open-source AI coding agent for your terminal, browser, and ACP-compatible editor, engineered around DeepSeek's byte-stable prefix cache. Long sessions hold 90%+ cache hit and input-token cost collapses to ~1/5. A single Go binary. npm · Homebrew · desktop · web UI. MIT.";
+const desc = "Open-source AI coding agent you can leave running. One local engine, four ways in — terminal, desktop app, browser, or your editor over ACP. Plan mode, permissions, a workspace sandbox and checkpoints keep long autonomous runs reviewable. A single Go binary, no runtime to install. MIT.";
 const ld = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -37,9 +37,9 @@ const ld = {
 };
 ---
 <Base
-  title="Reasonix — DeepSeek-native coding agent for your terminal"
-  titleEn="Reasonix — DeepSeek-native coding agent for your terminal"
-  titleZh="Reasonix — DeepSeek 原生的终端编码 Agent"
+  title="Reasonix — a coding agent you can leave running"
+  titleEn="Reasonix — a coding agent you can leave running"
+  titleZh="Reasonix — 可以一直开着跑的编码 Agent"
   description={desc}>
 
   <script type="application/ld+json" set:html={JSON.stringify(ld)} slot="head" is:inline />
@@ -48,16 +48,15 @@ const ld = {
 
   <main>
   <section class="hero">
-    <canvas class="hero-dots"></canvas>
     <div class="wrap">
-      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">DeepSeek-native · built for your terminal · MIT</span><span class="l-zh">DeepSeek 原生 · 为终端而生 · MIT</span></div>
+      <div class="eyebrow reveal"><span class="dot"></span><span class="l-en">Open source · MIT · a single Go binary</span><span class="l-zh">开源 · MIT · 单个 Go 二进制</span></div>
       <h1 class="reveal" style="--d:0.06s">
-        <span class="l-en">A <span class="grad">DeepSeek</span>-native agent<br />for your <span class="tt">terminal</span>.</span>
-        <span class="l-zh"><span class="grad">DeepSeek</span> 原生的<br />终端编码 <span class="tt">Agent</span>。</span>
+        <span class="l-en">A coding agent you can<br /><span class="tt">leave running</span>.</span>
+        <span class="l-zh">可以<span class="tt">一直开着跑</span>的<br />编码 Agent。</span>
       </h1>
       <p class="sub reveal" style="--d:0.12s">
-        <span class="l-en">The loop is append-only, aligned to DeepSeek's byte-stable prefix cache — so long sessions hold <b>90%+ cache hit</b> and input-token cost collapses to <b>~1/5</b>. Use the same engine from the CLI/TUI, desktop app, local browser UI, or an ACP-compatible editor.</span>
-        <span class="l-zh">运行循环 append-only,对齐 DeepSeek 字节稳定的 prefix-cache —— 长会话缓存命中 <b>90%+</b>,输入 token 成本降到 <b>约 1/5</b>。CLI/TUI、桌面端、本地浏览器 UI 和兼容 ACP 的编辑器共用同一引擎。</span>
+        <span class="l-en">One local engine, four ways in — terminal, desktop app, browser, or your editor over ACP. Plan mode, permissions, a workspace sandbox and per-turn checkpoints keep a long autonomous run something you can still read and undo.</span>
+        <span class="l-zh">一套本地引擎,四个入口——终端、桌面端、浏览器,或通过 ACP 接入你的编辑器。计划模式、权限、工作区沙箱与逐轮 checkpoint,让长时间自治运行始终可读、可撤销。</span>
       </p>
       <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
         <div class="install-option install-option--desktop">
@@ -100,11 +99,11 @@ const ld = {
       </nav>
 
       <div class="term-stage reveal" style="--d:0.26s">
-        <div class="fig"><span class="l-en">fig. 01 — a live session, cache still warm</span><span class="l-zh">图 01 —— 一场实时会话,缓存依然温热</span></div>
+        <div class="fig"><span class="l-en">fig. 01 — one task, start to finish</span><span class="l-zh">图 01 —— 一个任务,从开始到结束</span></div>
         <div class="term">
           <div class="term-bar"><i></i><i></i><i></i><span class="title">~/app — reasonix</span></div>
-          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> reasonix <span class="t-dim"><span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-warm">●</span> <span class="t-dim">2 files · cache 94.2% → 95.1%</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
-          <div class="term-stat"><span>cache <b data-cnt="95.1" data-dec="1" data-suf="% hit">95.1% hit</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>model <b>deepseek-v4-flash</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
+          <div class="term-body"><span class="tl"><span class="t-acc">◆</span> reasonix <span class="t-dim"><span class="rxv">{goVer}</span> · deepseek-v4-flash · ~/app</span></span><span class="tl"><span class="t-vio">›</span> add retry with backoff to the http client</span><span class="tl"><span class="t-acc">◇</span> plan <span class="t-dim">3 steps · 2 files · 1 test run</span></span><span class="tl"><span class="t-warm">●</span> allow <span class="t-dim">edit internal/net/client.go</span>  <span class="t-ok">yes</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client.go</span>  <span class="t-add">+24 −3</span></span><span class="tl"><span class="t-ok">✓</span> edit <span class="t-dim">internal/net/client_test.go</span>  <span class="t-add">+41 −0</span></span><span class="tl"><span class="t-ok">✓</span> run <span class="t-dim">go test ./internal/net/</span>  <span class="t-ok">ok</span> <span class="t-dim">(0.21s)</span></span><span class="tl"><span class="t-acc">◆</span> checkpoint <span class="t-dim">#14 — revert this turn anytime</span></span><span class="tl"><span class="t-vio">›</span> <span class="caret"></span></span></div>
+          <div class="term-stat"><span>surface <b>cli</b></span><span>tools <b data-cnt="9" data-suf=" calls">9 calls</b></span><span>session <b data-cnt="18" data-suf="m">18m</b></span><span>cost <b data-cnt="0.043" data-dec="3" data-pre="$">$0.043</b></span></div>
         </div>
       </div>
     </div>
@@ -114,42 +113,41 @@ const ld = {
     <div class="wrap">
       <div class="sec-head split reveal">
         <span class="kicker"><span class="l-en">Features</span><span class="l-zh">特性</span></span>
-        <h2><span class="l-en">Built for long, <span class="em">cheap</span> sessions.</span><span class="l-zh">为长会话、<span class="em">低成本</span>而生。</span></h2>
-        <p><span class="l-en">Most agents pay full price for the same growing prompt every turn. Reasonix keeps the prefix byte-identical so DeepSeek's cache does the heavy lifting — and everything else follows.</span><span class="l-zh">多数 agent 每回合都为同一段不断增长的 prompt 付全价。Reasonix 让前缀逐字节稳定,让 DeepSeek 的缓存替你扛下来——其余一切由此而来。</span></p>
+        <h2><span class="l-en">Autonomy you can <span class="em">actually audit.</span></span><span class="l-zh">可以<span class="em">真正审阅</span>的自治。</span></h2>
+        <p><span class="l-en">Letting an agent run for hours is only useful if you can see what it did and undo the parts you don't want. Every layer here exists for that: plan first, gate each tool call, checkpoint every turn.</span><span class="l-zh">让 agent 跑上几个小时,前提是你能看清它做了什么、并撤销你不想要的部分。这里的每一层都为此存在:先规划、逐次工具调用受控、逐轮 checkpoint。</span></p>
       </div>
       <div class="feat-grid">
         <div class="feat reveal">
-          <span class="tag">01 / cache-first</span>
-          <h3><span class="l-en">Cache-first loop</span><span class="l-zh">缓存优先循环</span></h3>
-          <p><span class="l-en">Append-only history aligned to DeepSeek's prefix cache. 90%+ hit on long sessions; input tokens bill at ~1/5.</span><span class="l-zh">append-only 历史对齐 DeepSeek prefix-cache。长会话 90%+ 命中,输入 token 约 1/5 计费。</span></p>
-          <div class="feat-viz" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="n"></i><i class="n"></i><i class="n"></i></div>
+          <span class="tag">01 / permissions</span>
+          <h3><span class="l-en">Every tool call is gated</span><span class="l-zh">每次工具调用都受控</span></h3>
+          <p><span class="l-en">Reads, writes, and shell commands each ask separately, and the workspace sandbox bounds what a command can touch even after you say yes.</span><span class="l-zh">读取、写入、shell 命令分别询问；即便你放行,工作区沙箱仍限定命令能触碰的范围。</span></p>
+          <code class="feat-chip">$ allow edit internal/net/client.go? [y/n/always]</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
-          <span class="tag">02 / single binary</span>
-          <h3><span class="l-en">Single Go binary</span><span class="l-zh">单个 Go 二进制</span></h3>
-          <p><span class="l-en">CGO-free, cross-compiled for darwin/linux/windows × amd64/arm64. No Node runtime to install or babysit.</span><span class="l-zh">无 CGO,交叉编译覆盖 darwin/linux/windows × amd64/arm64。运行不需要 Node。</span></p>
+          <span class="tag">02 / checkpoints</span>
+          <h3><span class="l-en">Undo any turn</span><span class="l-zh">任意一轮都可回退</span></h3>
+          <p><span class="l-en">Each turn writes a checkpoint outside git, so a six-hour run rewinds to any point without touching your commit history.</span><span class="l-zh">每轮在 git 之外写入 checkpoint,六小时的运行可回退到任意一点,且不污染你的提交历史。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.04s">
-          <span class="tag">03 / mcp</span>
-          <h3>MCP first-class</h3>
-          <p><span class="l-en">stdio, SSE, streamable HTTP. External servers merge their tools into one registry under a prefix.</span><span class="l-zh">stdio、SSE、streamable HTTP。外部服务器的工具以前缀合并进同一 registry。</span></p>
+          <span class="tag">03 / plan mode</span>
+          <h3><span class="l-en">Plan before it touches anything</span><span class="l-zh">动手前先给出计划</span></h3>
+          <p><span class="l-en"><code>/plan</code> holds every write until you've read the plan and approved it.</span><span class="l-zh"><code>/plan</code> 会先给出计划,在你读过并批准前不写入任何东西。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
-          <span class="tag">04 / plan + sandbox</span>
-          <h3><span class="l-en">Plan mode &amp; sandbox</span><span class="l-zh">计划模式 + 沙箱</span></h3>
-          <p><span class="l-en"><code>/plan</code> asks the model to plan first; Permissions and the workspace sandbox still govern every tool call.</span><span class="l-zh"><code>/plan</code> 要求模型先规划；每次工具调用仍由权限与工作区沙箱控制。</span></p>
-          <code class="feat-chip">$ /plan → plan first · permissions still apply</code>
+          <span class="tag">04 / mcp + skills</span>
+          <h3><span class="l-en">Extend it without forking it</span><span class="l-zh">不用 fork 就能扩展</span></h3>
+          <p><span class="l-en">MCP over stdio, SSE, and streamable HTTP merges external tools into one registry. Markdown skills and subagents — explore, research, review, security-review — run with their own isolated tool sets.</span><span class="l-zh">MCP 支持 stdio、SSE 与 streamable HTTP,把外部工具合并进同一 registry。Markdown 技能与子智能体(explore / research / review / security-review)各自持有隔离的工具集。</span></p>
+          <code class="feat-chip">$ reasonix mcp add · ~/.reasonix/skills/</code>
         </div>
         <div class="feat reveal" style="--d:0.06s">
-          <span class="tag">05 / subagents</span>
-          <h3><span class="l-en">Subagents &amp; skills</span><span class="l-zh">子智能体与技能</span></h3>
-          <p><span class="l-en">explore / research / review / security-review agents, plus Markdown skill scripts with isolated tools.</span><span class="l-zh">explore / research / review / security-review 子智能体,加 Markdown 技能脚本与隔离工具。</span></p>
+          <span class="tag">05 / single binary</span>
+          <h3><span class="l-en">One file, no runtime</span><span class="l-zh">一个文件,零运行时</span></h3>
+          <p><span class="l-en">CGO-free Go, cross-compiled for darwin/linux/windows × amd64/arm64. Nothing to install underneath it.</span><span class="l-zh">无 CGO 的 Go,交叉编译覆盖 darwin/linux/windows × amd64/arm64。底下不需要装任何东西。</span></p>
         </div>
         <div class="feat reveal" style="--d:0.1s">
-          <span class="tag">06 / cli + web + acp</span>
-          <h3><span class="l-en">Terminal, browser, or editor</span><span class="l-zh">终端、浏览器或编辑器</span></h3>
-          <p><span class="l-en">Use the full-screen TUI, run <code>reasonix serve</code> for a local browser UI, <a href="?download=vscode#start" data-goto="vscode">install the Reasonix VS Code extension</a>, or connect another ACP-compatible editor through <code>reasonix acp</code>. Every surface uses the same local engine.</span><span class="l-zh">使用全屏 TUI、通过 <code>reasonix serve</code> 打开本地浏览器 UI、<a href="?download=vscode#start" data-goto="vscode">安装 Reasonix VS Code 扩展</a>，或通过 <code>reasonix acp</code> 连接其他兼容 ACP 的编辑器；所有入口都使用同一套本地引擎。</span></p>
-          <code class="feat-chip">$ reasonix acp</code>
+          <span class="tag">06 / local-first</span>
+          <h3><span class="l-en">Your key, your machine</span><span class="l-zh">你的 Key,你的机器</span></h3>
+          <p><span class="l-en">Bring your own DeepSeek key. The engine runs locally — your code goes to the model you configured and nowhere else. MIT licensed, developed in public.</span><span class="l-zh">使用你自己的 DeepSeek Key。引擎在本地运行——代码只发往你配置的模型,不去别处。MIT 许可,公开开发。</span></p>
         </div>
       </div>
     </div>
@@ -157,35 +155,57 @@ const ld = {
 
   <div class="divider" aria-hidden="true"><span class="line"></span></div>
 
-  <section id="how">
-    <div class="how-track">
-      <div class="how-stage">
-        <div class="wrap">
-          <div class="sec-head center reveal">
-            <span class="kicker"><span class="l-en">How it works</span><span class="l-zh">工作原理</span></span>
-            <h2><span class="l-en">Every turn reuses <span class="em">the last.</span></span><span class="l-zh">每一轮都复用<span class="em">上一轮。</span></span></h2>
-            <p><span class="l-en">Each request replays the exact same byte-for-byte prefix, so the model only computes what's new. Long sessions get cheaper per turn — not more expensive.</span><span class="l-zh">每次请求都逐字节重放完全相同的前缀,模型只计算新增部分。会话越长,每轮越便宜——而不是越贵。</span></p>
+  <section id="surfaces">
+    <div class="wrap">
+      <div class="sec-head split reveal">
+        <span class="kicker"><span class="l-en">Surfaces</span><span class="l-zh">使用形态</span></span>
+        <h2><span class="l-en">One engine. <span class="em">Four ways in.</span></span><span class="l-zh">同一个引擎。<span class="em">四个入口。</span></span></h2>
+        <p><span class="l-en">Not four products — one local engine behind four front ends. Sessions, permissions, skills and MCP servers are shared, so a task you start in the terminal is waiting for you in the desktop app.</span><span class="l-zh">不是四个产品,而是一个本地引擎配四个前端。会话、权限、技能与 MCP 服务器都共享——在终端起的任务,打开桌面端就在那儿等着。</span></p>
+      </div>
+      <div class="surf-grid">
+        <div class="surf reveal">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win cli">
+              <i class="bar"></i>
+              <span class="body"><i class="l" style="--w:62%"></i><i class="l" style="--w:44%"></i><i class="l ok" style="--w:70%"></i><i class="l" style="--w:38%"></i><i class="cur"></i></span>
+            </span>
           </div>
-          <div class="cache-panel reveal">
-            <div class="cache-grid">
-              <div class="cache-steps">
-                <span class="cap" data-step="1"><span class="n">01</span><span class="l-en">Cold start — everything is computed</span><span class="l-zh">冷启动——全部需要计算</span></span>
-                <span class="cap" data-step="2"><span class="n">02</span><span class="l-en">The previous turn replays from cache</span><span class="l-zh">上一轮全部从缓存重放</span></span>
-                <span class="cap" data-step="3"><span class="n">03</span><span class="l-en">Only the new request is computed</span><span class="l-zh">只计算新增的请求</span></span>
-                <span class="cap" data-step="4"><span class="n">04</span><span class="l-en">90%+ cache hit — cheaper every turn</span><span class="l-zh">命中 90%+——越跑越便宜</span></span>
-              </div>
-              <div class="cache-rows-wrap">
-                <div class="cache-row"><span class="lbl">turn 1</span><span class="blk new"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 2</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 3</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 4</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-legend">
-                  <span><i style="background: var(--accent);"></i><span class="l-en">new tokens — computed</span><span class="l-zh">新 token——需要计算</span></span>
-                  <span><i style="background: color-mix(in oklch, var(--accent) 12%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);"></i><span class="l-en">cached prefix — replayed, billed at ~1/5</span><span class="l-zh">缓存前缀——重放,约 1/5 计费</span></span>
-                </div>
-              </div>
-            </div>
+          <h3><span class="l-en">Terminal</span><span class="l-zh">终端</span></h3>
+          <p><span class="l-en">Full-screen TUI — diff review, approvals, slash commands.</span><span class="l-zh">全屏 TUI——diff 审阅、审批、斜杠命令。</span></p>
+          <code>reasonix</code>
+        </div>
+        <div class="surf reveal" style="--d:0.06s">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win app">
+              <i class="bar"></i>
+              <span class="body"><span class="side"><i></i><i></i><i></i></span><span class="main"><i class="l" style="--w:80%"></i><i class="l" style="--w:55%"></i><i class="l ok" style="--w:66%"></i></span></span>
+            </span>
           </div>
+          <h3><span class="l-en">Desktop app</span><span class="l-zh">桌面端</span></h3>
+          <p><span class="l-en">Sessions side by side, settings, approvals, auto-update.</span><span class="l-zh">多会话并列、设置、审批与自动更新。</span></p>
+          <code><span class="l-en">macOS · Windows · Linux</span><span class="l-zh">macOS · Windows · Linux</span></code>
+        </div>
+        <div class="surf reveal" style="--d:0.12s">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win web">
+              <i class="bar url"></i>
+              <span class="body"><i class="l" style="--w:72%"></i><i class="l" style="--w:48%"></i><i class="l ok" style="--w:60%"></i><i class="l" style="--w:36%"></i></span>
+            </span>
+          </div>
+          <h3><span class="l-en">Browser</span><span class="l-zh">浏览器</span></h3>
+          <p><span class="l-en">A local web UI on your own machine. Add auth before you expose it.</span><span class="l-zh">跑在你自己机器上的本地 Web UI。对外暴露前先开认证。</span></p>
+          <code>reasonix serve</code>
+        </div>
+        <div class="surf reveal" style="--d:0.18s">
+          <div class="surf-art" aria-hidden="true">
+            <span class="surf-win ide">
+              <i class="bar"></i>
+              <span class="body"><span class="tree"><i></i><i></i><i></i><i></i></span><span class="main"><i class="l" style="--w:70%"></i><i class="l add" style="--w:52%"></i><i class="l add" style="--w:44%"></i><i class="l" style="--w:64%"></i></span></span>
+            </span>
+          </div>
+          <h3><span class="l-en">Your editor</span><span class="l-zh">你的编辑器</span></h3>
+          <p><span class="l-en">VS Code and VSCodium via the extension; anything else that speaks ACP.</span><span class="l-zh">通过扩展接入 VS Code 与 VSCodium；其他支持 ACP 的编辑器同样可用。</span></p>
+          <code>reasonix acp</code>
         </div>
       </div>
     </div>
@@ -205,7 +225,7 @@ const ld = {
         <div class="step reveal" style="--d:0.08s">
           <span class="num">02</span>
           <h3><span class="l-en">Point it at a repo</span><span class="l-zh">指向你的仓库</span></h3>
-          <p><span class="l-en">Reasonix maps the codebase once, then keeps that map in the warm prefix.</span><span class="l-zh">Reasonix 只做一次代码库测绘,然后把这份地图常驻在温热的前缀缓存里。</span></p>
+          <p><span class="l-en">It maps the codebase once and keeps that map for the rest of the session.</span><span class="l-zh">只做一次代码库测绘,这份地图在整场会话里一直有效。</span></p>
           <code>cd your-project &amp;&amp; reasonix</code>
         </div>
         <div class="step reveal" style="--d:0.16s">
@@ -404,7 +424,7 @@ const ld = {
       </nav>
     </div>
     <div class="foot-sub">
-      <span><span class="l-en">Engineered around DeepSeek's prefix cache.</span><span class="l-zh">围绕 DeepSeek 前缀缓存而设计。</span></span>
+      <span><span class="l-en">Built to be left running.</span><span class="l-zh">为长时间常驻运行而造。</span></span>
       <span class="ver"><span class="rxv">{goVer}</span> · official</span>
     </div>
   </footer>

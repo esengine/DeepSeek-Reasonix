@@ -4,26 +4,10 @@ package i18n
 // as English unless a phrase genuinely demands re-ordering — call sites pass
 // arguments positionally and won't reshuffle.
 var ChineseTraditional = Messages{
-	Subtitle:        "設定與插件驅動的 coding agent",
 	WelcomeTitleFmt: "歡迎使用 %s",
 	NoConfigYet:     "還沒有設定 — 現在來設定一下吧。",
-	StartingChatFmt: "正在啟動 %s…",
-	SetKeyHint:      "設定好 API key 後執行 `reasonix`。",
-	ConfigLabel:     "設定",
-	ModelsLabel:     "模型",
-	ConfigNotFound:  "未找到 — 使用內建預設值",
-	ConfigErrorFmt:  "%s — 錯誤：%v",
-	NoKey:           "未設定 key",
-	Ready:           "已就緒",
-	GetStarted:      "開始使用",
-	StepScaffold:    "生成 reasonix.toml",
-	StepSetKey:      "設定 API key",
 
-	InitHint:       "專案記憶（AGENTS.md）在會話內由模型生成：執行 `reasonix`，然後 `/init` —— 模型會分析程式碼庫並寫入。設定請用 `reasonix setup`。",
-	StepSetKeyHint: "執行 `reasonix setup`，或 export DEEPSEEK_API_KEY=…",
-	StepChatDesc:   "互動式會話",
-	StepRunDesc:    "執行單次任務",
-	HelpFooter:     "reasonix help · 檢視全部命令",
+	InitHint: "專案記憶（AGENTS.md）在會話內由模型生成：執行 `reasonix`，然後 `/init` —— 模型會分析程式碼庫並寫入。設定請用 `reasonix setup`。",
 
 	ChatTip:             "對話上下文將跨輪保留。輸入 'exit' 或按 Ctrl-D 退出。",
 	TurnCancelled:       "已取消 — 回到提示符",
@@ -33,7 +17,6 @@ var ChineseTraditional = Messages{
 	ResumeRequiresTTY:   "--resume 需要互動式終端；用 --continue 直接恢復最近一次",
 	PickSessionLabel:    "恢復哪個會話？",
 
-	ResumeListHeader:       "會話（/resume <n> 切換）",
 	ResumeBusy:             "請先完成或取消當前這一輪再恢復會話",
 	ResumeBadIndexFmt:      "請選擇 1–%d 的會話（用 /resume 檢視列表）",
 	ResumeAlreadyActive:    "已在該會話中",
@@ -75,7 +58,7 @@ var ChineseTraditional = Messages{
 	ChatStatusBalanceLabel:                 "餘額",
 	ChatStatusCacheNowFmt:                  "本次命中 %s",
 	ChatStatusCacheAvgFmt:                  "平均 %s",
-	ChatStatusPlanApproval:                 "1 開始執行 · 2 修改計畫 · 3 暫不執行並退出 · n/Esc 繼續規劃 · PgUp/PgDn 捲動",
+	ChatStatusPlanApproval:                 "1 開始執行 · 2 修改計畫 · 3 暫不執行並退出 · n/Esc 繼續規劃 · PgUp/PgDn/Ctrl+Home/End 捲動",
 	PlanApprovalPrompt:                     "計畫已生成（見上方）— 請選擇下一步操作",
 	PlanApprovalChoices:                    "1. 開始執行\n2. 修改計畫（繼續規劃）\n3. 暫不執行，退出計畫模式\n選擇 [1/2/3]（y 開始執行；n/Esc 繼續規劃）",
 	ChatStatusToolApproval:                 "1 本次允許 · 2 本會話允許此範圍 · 提供時 3/4 為前綴或儲存 · n/Esc 拒絕 · Ctrl-C 取消本輪",
@@ -140,15 +123,13 @@ var ChineseTraditional = Messages{
 	DiffFoldedFmt:                          "… 還有 %d 行",
 
 	OutputStyleNone:           "沒有可用的輸出風格",
-	OutputStyleHeader:         "輸出風格：",
-	OutputStyleHint:           "在 reasonix.toml 設定 agent.output_style 即可啟用（下次會話生效）",
 	ThemeHeader:               "主題：",
 	ThemeHint:                 "使用 /theme <auto|light|dark|style> 切換",
 	ThemeChangedFmt:           "已切換主題為 %s / %s",
 	ThemeUnknownFmt:           "未知主題 %q",
 	LanguageHeader:            "語言：",
 	LanguageHint:              "使用 /language <auto|en|zh|zh-TW> 切換",
-	LanguageChangedFmt:        "語言已設為 %s（當前解析為：%s）",
+	LanguageChangedFmt:        "語言已設為 %s（目前解析為：%s）",
 	CurrencyHeader:            "計價貨幣：",
 	CurrencyHint:              "使用 /currency <auto|CNY|USD> 切換",
 	CurrencyChangedFmt:        "計價貨幣已設為 %s（目前解析為：%s）",
@@ -163,23 +144,18 @@ var ChineseTraditional = Messages{
 
 	ExtFormFieldsHint:         "欄位將透過逐項提問收集",
 	ExtRunActionFmt:           "執行 %s",
-	SlashCompactDone:          "已壓縮 — 舊的中段換成一段摘要，最近幾輪保留原樣",
 	SlashCompactFailed:        "壓縮失敗",
-	SlashNewDone:              "已開啟新上下文 — 之前的對話已存檔",
+	SlashNewDone:              "已開啟新會話 — 之前的對話已存檔",
 	SlashNewFailed:            "新建會話失敗",
-	SlashUnavailable:          "當前建構不支援該命令",
 	SlashUnknown:              "未知命令",
 	SlashUnknownSentAsMessage: "已作為普通訊息發送",
 	SlashTodoCleared:          "已清除任務清單",
-	SlashHelp:                 "命令：/compact · /new（/clear）· /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切換模型）· /effort · /theme · /language · /mcp · /skills · /plugins · /hooks · /paste-image · /docs · /memory · /migrate · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
-	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 個可用",
 	SkillPickerMatchingFmt:       "%d 個匹配 · 共 %d 個",
 	SkillPickerHint:              "↑↓ 移動 · Space 開關 · Enter 儲存 · / 搜尋 · s 來源 · r 重新掃描 · Esc 取消",
 	SkillPickerDetailHint:        "↑↓ 移動 · Enter 選擇 · Space 開關 · Esc 返回",
 	SkillPickerSearchEmpty:       "沒有匹配的 skill",
-	SkillPickerSearchPrompt:      "搜尋: ",
 	SkillPickerSearchPlaceholder: "搜尋 skills...",
 	SkillPickerSourceTitle:       "來源",
 	SkillPickerSourceActiveFmt:   "%d 個有效",
@@ -281,13 +257,11 @@ var ChineseTraditional = Messages{
 	SlashCopyListHeader: "選擇要複製的回覆：",
 	SlashExportDoneFmt:  "會話已匯出到 %s",
 	SlashExportEmpty:    "沒有可匯出的訊息",
-	ArgSkillList:        "列出 skills",
 	ArgSkillShow:        "檢視 skill 內容",
 	ArgSkillNew:         "新建一個 skill",
 	ArgSkillPaths:       "顯示發現路徑",
 	ArgMcpAdd:           "連線一個伺服器",
 	ArgMcpRemove:        "斷開一個伺服器",
-	ArgMcpList:          "顯示已設定的伺服器",
 	ArgMcpConnected:     "已連線",
 	ArgHooksList:        "列出生效的 hooks",
 	ArgModelCurrent:     "當前",
@@ -304,7 +278,6 @@ var ChineseTraditional = Messages{
 
 	ListModelsHeaderFmt: "模型（當前：%s）",
 	ListModelsHint:      "用底部的模型切換器，或輸入 /model <provider/model>",
-	ListMemoryHeader:    "記憶檔案",
 	ListMemoryNone:      "暫無記憶 — 用 “/remember <內容>” 新增，或執行 /init 生成 AGENTS.md",
 	ListSkillsHeaderFmt: "skills（%d 個）",
 	ListSkillsNone:      "暫無 skill — 呼叫內建的（如 /init），或用 install_skill 建立一個",
@@ -313,10 +286,6 @@ var ChineseTraditional = Messages{
 	ListMcpHeader:       "MCP 伺服器",
 	ListMcpNone:         "未連線 MCP 伺服器 — 在 reasonix.toml（[[plugins]]）或專案 .mcp.json 中新增",
 
-	MemoryNone:                   "還沒有載入任何記憶 — 輸入 “/remember 內容” 可快速記錄，也可以在專案根目錄建立 REASONIX.md",
-	MemoryLoaded:                 "當前已載入的記憶：",
-	MemorySavedHeader:            "  已記錄的條目（用 “/forget <name>” 刪除）：",
-	MemoryStoredUnderFmt:         "  存放於 %s",
 	MemoryEditHint:               "可直接編輯記憶文件，或輸入 “/remember 內容” 快速記錄；文件變動會在下次會話生效",
 	ForgetUsage:                  "用法：/forget <name> — name 是 /memory 中顯示的條目標識",
 	ForgetDoneFmt:                "已刪除記憶：%s",
@@ -331,7 +300,7 @@ var ChineseTraditional = Messages{
 	RuntimeSwitchPending:         "請等待目前執行階段切換完成",
 	RuntimeReloadQueued:          "已加入重載佇列——目前工作完成後執行",
 	RuntimeReloaded:              "執行階段已重載",
-	RuntimeReloadedGenerationFmt: "執行階段已重載（generation %d）",
+	RuntimeReloadedGenerationFmt: "執行階段已重載（構建代號 %d）",
 	WorkModeStatusFmt:            "工作 %s",
 	WorkModeListHeaderFmt:        "工作模式（目前：%s）",
 	WorkModeListHint:             "使用 /work-mode economy|balanced|delivery 切換（/profile 為相容別名）",
@@ -364,16 +333,13 @@ var ChineseTraditional = Messages{
 	RewindUnavailableFmt:         "無法回滾：%s",
 	RewindEmpty:                  "(空)",
 
-	SelectProvidersLabel:     "選擇要啟用的 provider",
 	EnterAPIKeysHeader:       "輸入 API key（Enter 跳過、稍後再設）：",
-	MissingKeyIntro:          "reasonix.toml 已設定好 — 只差一個 API key 就可以開始。",
 	WroteFileFmt:             "已寫入 %s",
 	SetupComplete:            "設定完成。",
 	SetupCancelled:           "設定已取消。",
 	TryHintFmt:               "試試: %s",
 	NextHint:                 "下一步：設定 API key（執行 `reasonix setup` 或 export DEEPSEEK_API_KEY=...），然後執行 `reasonix run \"你的任務\"`。",
 	ConfirmReconfigureFmt:    "%s 已存在。重新設定並覆蓋？",
-	KeepingExisting:          "保留原設定不變。",
 	NotOverwritingFmt:        "%s 已存在，不覆蓋",
 	SetupManagerTitle:        "供應商設定",
 	SetupAddOpenAI:           "新增 OpenAI 相容供應商",
@@ -414,19 +380,15 @@ var ChineseTraditional = Messages{
 	FetchModelsSuccessFmt:      "發現 %d 個 %s 模型",
 	FetchModelsFailedFmt:       "取得 %s 模型失敗: %v",
 	FetchModelsUsingPresetsFmt: "無法線上取得 %s 的模型，使用預設列表",
-	FamilyKeyPromptFmt:         "輸入 %s 的 API key 以取得可用模型（Enter 跳過）：",
 	SelectModelsLabel:          "選擇要啟用的 %s 模型",
-	NoModelsAvailableFmt:       "%s: 沒有可用模型，跳過",
 	CustomFetchEmpty:           "/models 返回為空，回退到手動輸入",
 	AnthropicFetchEmpty:        "/models 返回為空 — Anthropic 相容服務通常不提供此端點，回退到手動輸入",
-	SkipStaleCustomEntryFmt:    "跳過 reasonix.toml 裡的舊 %q 條目（指向 %s）— 請手動從 [[providers]] 裡刪除",
 	APIKeyAlreadySetFmt:        "復用已設定的 %s",
 	APIKeyResetPromptFmt:       "重新輸入 %s？",
 	InvalidAPIKeyEnvFmt:        "%q 不是有效的 API Key 變數名稱。只能使用字母、數字和底線（例如 MY_PROVIDER_API_KEY）；請勿在此填寫模型名稱。",
 	RepairedAPIKeyEnvFmt:       "provider %s：已將無效的 API Key 變數名稱 %q 修復為 %q",
 
 	// custom provider
-	CustomProviderLabel:  "自訂模型",
 	CustomProviderDesc:   "新增第三方 OpenAI 相容模型",
 	CustomAddMethodLabel: "新增第三方 OpenAI 相容模型 - 選擇新增方式",
 	CustomMethodManual:   "手動輸入模型名稱",
@@ -438,7 +400,6 @@ var ChineseTraditional = Messages{
 	CustomAddedFmt:       "已新增自訂模型: %s",
 
 	// Anthropic 相容 provider
-	AnthropicProviderLabel:         "自訂模型2",
 	AnthropicProviderDesc:          "新增第三方 Anthropic 相容模型",
 	AnthropicAddMethodLabel:        "新增第三方 Anthropic 相容模型 - 選擇新增方式",
 	AnthropicMethodManual:          "手動輸入模型名稱",
@@ -455,15 +416,15 @@ var ChineseTraditional = Messages{
 
 	RemoteConnectingFmt:       "正在連線 %s…",
 	RemoteConnectedFmt:        "已連線到 %s",
-	RemoteReconnectingFmt:     "正在重新連線 %s(第 %d 次)…",
-	RemoteDegradedFmt:         "已連線到 %s,但部分連接埠轉送未建立",
-	RemoteDisconnected:        "已中斷(遠端 serve 仍在執行)",
-	RemoteServeReadyFmt:       "遠端 serve 就緒:%s",
-	RemoteHostKeyPromptFmt:    "未知的主機金鑰 %s\n  類型:  %s\n  指紋:  %s",
-	RemotePassphrasePromptFmt: "%s 的金鑰通關密語:",
-	RemotePasswordPromptFmt:   "%s 的登入密碼:",
-	RemoteBootstrapStepFmt:    "遠端 serve:%s %s",
-	RemoteNoHostsHint:         "尚未設定遠端主機;用 `reasonix remote add <名稱> [user@]host` 新增",
+	RemoteReconnectingFmt:     "正在重新連線 %s（第 %d 次）…",
+	RemoteDegradedFmt:         "已連線到 %s，但部分連接埠轉送未建立",
+	RemoteDisconnected:        "已中斷（遠端 serve 仍在執行）",
+	RemoteServeReadyFmt:       "遠端 serve 就緒：%s",
+	RemoteHostKeyPromptFmt:    "未知的主機金鑰 %s\n  類型：%s\n  指紋：%s",
+	RemotePassphrasePromptFmt: "%s 的金鑰通關密語：",
+	RemotePasswordPromptFmt:   "%s 的登入密碼：",
+	RemoteBootstrapStepFmt:    "遠端 serve：%s %s",
+	RemoteNoHostsHint:         "尚未設定遠端主機；用 `reasonix remote add <名稱> [user@]host` 新增",
 
 	UnknownCommandFmt:         "未知命令 %q",
 	UsageRunHint:              "用法：reasonix -p [--model NAME] <task>",
@@ -473,7 +434,7 @@ var ChineseTraditional = Messages{
 	WriteEnvErr:               "寫入 .env 失敗：",
 
 	ProviderErrBadRequest:          "請求格式錯誤 (HTTP 400)：請求體被拒絕，通常是程式缺陷。若持續出現請回報。",
-	ProviderErrAuth:                "認證失敗 (HTTP 401)：API key 缺失、錯誤或已過期。請檢查 .env 中的金鑰，或執行 `reasonix setup`。",
+	ProviderErrAuth:                "認證失敗 (HTTP 401)：未讀到 API key（缺失或未設定）。請在 .env 中設定金鑰，或執行 `reasonix setup`。",
 	ProviderErrInsufficientBalance: "餘額不足 (HTTP 402)：帳戶餘額不足，請前往儲值後重試。",
 	ProviderErrUnprocessable:       "參數錯誤 (HTTP 422)：某個請求參數被拒絕，通常是程式缺陷。若持續出現請回報。",
 	ProviderErrInputSensitive:      "輸入被 MiniMax 內容審查拒絕（錯誤碼 1026）。審查對象可能包含對話歷史和工具結果；請調整相關內容，或建立新對話只保留必要上下文。原樣重試通常無效。",
@@ -533,10 +494,13 @@ var ChineseTraditional = Messages{
   reasonix session show|status <machine-session-id> --json [--dir PATH]  查詢單一脫敏會話
   reasonix session recovery [<machine-session-id>] --json [--dir PATH]  查詢脫敏復原狀態
   reasonix hook list|status --json [--dir PATH]         檢視脫敏 Hook 狀態
-  reasonix task list|show --json [--dir PATH]           檢視脫敏 Task 狀態
+  reasonix task list|show|status|events|stop|cancel|monitor|tmux --json [--dir PATH]
+                                                         檢視或控制脫敏 Task
   reasonix bot start|doctor|weixin-login                多管道 IM bot 閘道
   reasonix upgrade [--check] [--force]                   更新到最新正式版（別名：reasonix update）
-  reasonix version
+  reasonix completion bash|zsh|fish                     列印 shell 補全腳本到 stdout
+  reasonix version [--verbose|--json]                   列印版本（單行）或建置元資訊
+  reasonix --version | -v                               單行版本（腳本安全）
   reasonix help
 
 範例：
@@ -578,8 +542,8 @@ var ChineseTraditional = Messages{
 	GoalPaused:                 "目標已暫停 — /goal resume 可繼續",
 	GoalPausedReason:           "使用者手動暫停",
 	GoalPausedFmt:              "目標已暫停（%s）— 使用 /goal resume 繼續",
-	GoalBudgetExtended:         "目標已恢復 — 追加了一檔預算額度",
-	GoalRuntimeFmt:             "執行狀態：輪次 %d/%d，token %d/%d，無進展 %d/%d，預算追加 %d 次",
+	GoalBudgetExtended:         "目標已恢復 — 追加了一檔輪次數",
+	GoalRuntimeFmt:             "執行狀態：輪次 %d/%d，token %d，無進展 %d/%d，追加 %d",
 	GoalRuntimeLastReason:      "最近原因",
 	ProviderErrAuthRejected:    "認證失敗 (HTTP 401)：服務端拒絕了你的 API key。可能是 key 錯誤或已過期，也可能是服務端出現瞬時鑑權/額度問題——已退避重試仍失敗。請稍後再試，或檢查 .env 中的金鑰 / 執行 `reasonix setup`。",
 	SelectMoreAboveFmt:         "  ↑ 上方還有 %d 個",

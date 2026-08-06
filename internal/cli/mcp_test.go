@@ -464,6 +464,72 @@ func TestRenderMCPStatusShowsQuarantinedTools(t *testing.T) {
 	}
 }
 
+func TestRenderMCPStatusShowsConfigSource(t *testing.T) {
+	got := renderMCPStatus(120,
+		[]plugin.ServerStatus{{
+			Name: "docs", Transport: "stdio", ConfigSource: "project_config", Tools: 1,
+			ToolList: []plugin.ToolInfo{{Name: "search", Description: "find docs"}},
+		}},
+		nil, nil, nil,
+	)
+	for _, want := range []string{"docs", "source=project_config", "tools", "search", "source=project_config"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("rendered MCP status missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRenderMCPStatusStripsControlSequencesFromExternalText(t *testing.T) {
+	// Malicious MCP description with CSI clear + OSC clipboard poke must not
+	// survive into the TUI payload.
+	evil := "safe\x1b[2J\x1b]52;c;AAAA\x07 payload"
+	got := renderMCPStatus(160,
+		[]plugin.ServerStatus{{
+			Name: "evil\x1b[31m", Transport: "stdio", ConfigSource: "user\x1b[0m",
+			Tools: 1,
+			ToolList: []plugin.ToolInfo{
+				{Name: "ok", Description: evil},
+				{Name: "bad", SchemaError: "schema\x1b[1merr"},
+			},
+		}},
+		[]plugin.Prompt{{Server: "evil", Name: "p", Description: "prompt\x1b[2J"}},
+		[]plugin.Resource{{Server: "evil", URI: "file:///x", Name: "res\x1b]0;x\x07"}},
+		[]plugin.Failure{{Name: "fail", Error: "boom\x1b[2J"}},
+	)
+	for _, ban := range []string{"\x1b", "\x07", "]52;", "[2J", "[31m", "[1m"} {
+		if strings.Contains(got, ban) {
+			t.Fatalf("control sequence %q leaked into MCP status:\n%q", ban, got)
+		}
+	}
+	if !strings.Contains(got, "safe") || !strings.Contains(got, "payload") {
+		t.Fatalf("sanitized description lost content:\n%s", got)
+	}
+	// Invalid tools must not appear under the ordinary tools list.
+	toolsIdx := strings.Index(got, "tools")
+	unavailIdx := strings.Index(got, "unavailable tools")
+	if toolsIdx < 0 || unavailIdx < 0 {
+		t.Fatalf("expected tools and unavailable sections:\n%s", got)
+	}
+	toolsSection := got[toolsIdx:unavailIdx]
+	if strings.Contains(toolsSection, "bad") {
+		t.Fatalf("invalid tool listed under tools:\n%s", toolsSection)
+	}
+	if !strings.Contains(got[unavailIdx:], "bad") {
+		t.Fatalf("invalid tool missing from unavailable:\n%s", got)
+	}
+}
+
+func TestSanitizeExternalDisplayText(t *testing.T) {
+	in := "hello\x1b[2J\x1b]52;c;QQ\x07 world\n\t!"
+	got := sanitizeExternalDisplayText(in)
+	if strings.ContainsAny(got, "\x1b\x07\n\t") {
+		t.Fatalf("controls remain: %q", got)
+	}
+	if got != "hello world !" {
+		t.Fatalf("sanitize = %q", got)
+	}
+}
+
 func TestMCPCapabilitiesTextUsesAdvertisedTools(t *testing.T) {
 	if got := mcpCapabilitiesText(mcpServerView{HasTools: true}); got != "tools" {
 		t.Fatalf("mcpCapabilitiesText = %q, want tools", got)

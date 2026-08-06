@@ -1678,6 +1678,29 @@ func BashToolCallMixesMutationAndVerification(args json.RawMessage) bool {
 	return bashContainsVerificationSegment(command) && bashMayMutate(command)
 }
 
+// BashToolCallMixesMutationAndMaskableVerification is the ordinary-mode subset of
+// BashToolCallMixesMutationAndVerification: the same mixed shape, but only when
+// the shell's exit status can actually hide the earlier step's failure.
+//
+// Delivery mode blocks the broad shape because a mutation invalidates the
+// verification *receipt* regardless of exit status. Ordinary mode has no receipt
+// to protect — its only concern is a result that looks successful while an
+// earlier step failed. `build && test` cannot produce that (bash short-circuits
+// and reports the failing status), so blocking it would reject the single most
+// common shell shape in real projects for no safety gain. `build; test` can,
+// and stays blocked.
+func BashToolCallMixesMutationAndMaskableVerification(args json.RawMessage) bool {
+	if !BashToolCallMixesMutationAndVerification(args) {
+		return false
+	}
+	command, ok := bashCommandFromArgs(args)
+	if !ok {
+		return false
+	}
+	canMask, analyzed := shellparse.CanMaskEarlierFailure(command)
+	return analyzed && canMask
+}
+
 // BashToolCallMasksVerificationExit reports the common `check; echo $?` shape.
 // The trailing reporter makes the shell call itself succeed even when the
 // verifier failed, so a successful tool receipt cannot prove the check passed.
@@ -1724,46 +1747,113 @@ func BashToolCallMasksVerificationExit(args json.RawMessage) bool {
 // this shape before execution and directs callers to auditable file tools,
 // script files, or conventional verifier commands instead.
 func BashToolCallUsesOpaqueInlineInterpreter(args json.RawMessage) bool {
+	command, ok := bashCommandFromArgs(args)
+	if !ok {
+		return false
+	}
+	return bashCommandUsesOpaqueInlineInterpreter(command)
+}
+
+// BashToolCallUsesNonTerminalInlineInterpreter reports whether an opaque
+// inline interpreter (python -c, node -e, …) is not the last top-level segment
+// *and* a later segment can overwrite its exit status. Ordinary mode blocks that
+// shape deterministically without rewriting the command. An `&&` chain is left
+// alone: bash short-circuits it, so the interpreter's failure is still the
+// call's exit status and nothing is hidden.
+func BashToolCallUsesNonTerminalInlineInterpreter(args json.RawMessage) bool {
+	command, ok := bashCommandFromArgs(args)
+	if !ok {
+		return false
+	}
+	segments, _, ok := shellparse.SplitTopLevel(command)
+	if !ok || len(segments) < 2 {
+		// Unknown / unparseable syntax: do not pretend full analysis.
+		return false
+	}
+	if canMask, analyzed := shellparse.CanMaskEarlierFailure(command); !analyzed || !canMask {
+		return false
+	}
+	for i, segment := range segments {
+		if !bashSegmentUsesOpaqueInlineInterpreter(segment) {
+			continue
+		}
+		if i < len(segments)-1 {
+			return true
+		}
+	}
+	return false
+}
+
+// BashCommandMayBeOpaqueMutation reports whether a sole opaque inline
+// interpreter call is allowed to run but cannot be proven read-only for
+// mutation-risk labeling.
+func BashCommandMayBeOpaqueMutation(args json.RawMessage) bool {
+	return BashToolCallUsesOpaqueInlineInterpreter(args)
+}
+
+func bashCommandFromArgs(args json.RawMessage) (string, bool) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(args, &fields); err != nil {
-		return false
+		return "", false
 	}
 	command := strings.TrimSpace(stringField(fields, "command"))
-	if command == "" {
-		return false
-	}
+	return command, command != ""
+}
+
+func bashCommandUsesOpaqueInlineInterpreter(command string) bool {
 	segments, _, ok := shellparse.SplitTopLevel(command)
 	if !ok {
 		return false
 	}
 	for _, segment := range segments {
-		normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
-		argv, malformed := shellparse.StaticFields(normalized)
-		if malformed != "" || len(argv) == 0 {
-			continue
-		}
-		base := strings.ToLower(filepath.Base(argv[0]))
-		args := argv[1:]
-		switch base {
-		case "node", "bun":
-			if hasCommandArg(args, "-e", "--eval", "-p", "--print") {
-				return true
-			}
-		case "python", "python3", "ruby", "perl":
-			if hasCommandArg(args, "-c", "-e") {
-				return true
-			}
-		case "php":
-			if hasCommandArg(args, "-r") {
-				return true
-			}
-		case "deno":
-			if len(args) > 0 && strings.EqualFold(args[0], "eval") {
-				return true
-			}
+		if bashSegmentUsesOpaqueInlineInterpreter(segment) {
+			return true
 		}
 	}
 	return false
+}
+
+func bashSegmentUsesOpaqueInlineInterpreter(segment string) bool {
+	normalized, _ := shellsafe.NormalizeBashSafeRedirectsForMatch(segment)
+	argv, malformed := shellparse.StaticFields(normalized)
+	if malformed != "" || len(argv) == 0 {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(argv[0]))
+	args := argv[1:]
+	switch base {
+	case "node", "bun":
+		return hasCommandArg(args, "-e", "--eval", "-p", "--print")
+	case "python", "python3", "ruby", "perl":
+		return hasCommandArg(args, "-c", "-e")
+	case "php":
+		return hasCommandArg(args, "-r")
+	case "deno":
+		return len(args) > 0 && strings.EqualFold(args[0], "eval")
+	}
+	return false
+}
+
+// ShellContractPreflightMessage is the model-facing recovery text when a
+// deterministic shell contract blocks a call before launch.
+func ShellContractPreflightMessage(reason string) string {
+	switch reason {
+	case "mixed":
+		return "blocked: this command runs a verification check after a state-changing segment, separated so the " +
+			"check's exit status would hide a failure in that earlier segment. " +
+			"Chain them with '&&' so a failed step stops the command and stays the result, " +
+			"or run the modification and the verification as separate calls."
+	case "mask_exit":
+		return "blocked: the trailing echo/printf of $? masks the verifier's exit status, so this command would look successful even when the check failed. " +
+			"Run the verifier by itself and let its exit status be the tool result."
+	case "inline_nonterminal":
+		return "blocked: an inline interpreter (python -c, node -e, …) is followed by a segment that can hide its failure. " +
+			"Chain with '&&' so the interpreter's exit status survives, run it as the final command, " +
+			"or use edit_file for file changes and put script source in a file."
+	default:
+		return "blocked: this shell command violates the host execution contract. " +
+			"Use edit_file for modifications and a separate shell call for verification."
+	}
 }
 
 func bashContainsVerificationSegment(command string) bool {

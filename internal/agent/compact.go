@@ -102,6 +102,17 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		return
 	}
 	soft, snip, high := a.compactThresholds()
+	// A turn that sits under the trigger is the breathing room a healthy
+	// compaction buys; it clears the stuck latch and the run counter. This has to
+	// happen before the soft/snip branches return, because a compaction that
+	// settles the prompt anywhere in [snip, high) is working exactly as intended:
+	// leaving a stale run count behind there would latch the *next* compaction as
+	// "the window is too small" and silently disable auto-compaction for the rest
+	// of the session.
+	if u.PromptTokens < high {
+		a.consecutiveCompacts = 0
+		a.compactStuck = false
+	}
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
 	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {
@@ -120,11 +131,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		return
 	}
 	if u.PromptTokens < high {
-		// A turn that sits under the trigger is the breathing room a healthy
-		// compaction buys; it clears the stuck latch and the run counter.
-		a.consecutiveCompacts = 0
-		a.compactStuck = false
-		return
+		return // the latch was already cleared above
 	}
 	if a.compactStuck {
 		return
@@ -326,7 +333,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 			summaryTagClose,
 	})
 	compacted = append(compacted, msgs[start:]...)
-	a.session.Rewrite(compacted)
+	a.session.Rewrite(compacted, "compact_"+trigger)
 
 	a.sink.Emit(event.Event{Kind: event.CompactionDone, Compaction: event.Compaction{
 		Trigger: trigger, Messages: len(fold), Summary: summary, Archive: archived,
@@ -369,7 +376,7 @@ func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
 		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
 	})
 	next = append(next, localOnly...)
-	a.session.Rewrite(next)
+	a.session.Rewrite(next, "summarize_from")
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
 	return nil
@@ -406,7 +413,7 @@ func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
 	})
 	next = append(next, localOnly...)
 	next = append(next, msgs[toIdx:]...)
-	a.session.Rewrite(next)
+	a.session.Rewrite(next, "summarize_up_to")
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
 		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
 	return nil
@@ -721,7 +728,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 			a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
 		}
 	}()
-	ch, err := provider.StreamWithRequestBudget(ctx, a.prov, provider.Request{
+	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: sys},
 			{Role: provider.RoleUser, Content: renderTranscript(region)},

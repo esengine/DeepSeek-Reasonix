@@ -2,6 +2,399 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.21.0",
+      "date": "2026-08-06",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.21.0: Shell Execution Contract, Cache Accuracy, and CLI Polish",
+        "zh": "Reasonix 1.21.0：Shell 执行契约、缓存精度与 CLI 打磨"
+      },
+      "summary": {
+        "en": "This release introduces a structured shell execution contract with phase-aware error reporting, improves prompt-cache hit rates and cost accounting, and delivers a wave of CLI and desktop refinements — including stream recovery, session temp persistence, and a refreshed website.",
+        "zh": "此版本引入了结构化的 Shell 执行契约与分阶段错误报告，提升了提示缓存命中率与成本核算精度，并带来一系列 CLI 与桌面端改进——包括流恢复、会话临时文件持久化以及焕新的官网。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Shell Execution Contract",
+            "zh": "Shell 执行契约"
+          },
+          "body": {
+            "en": "Learn how Reasonix now reports shell identity, exit phase, and verification status for every command.",
+            "zh": "了解 Reasonix 如何为每条命令报告 Shell 身份、退出阶段与验证状态。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a44361deba5de2e5450fc9ef63c382dafe585b48/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Session Temporary Files",
+            "zh": "会话临时文件"
+          },
+          "body": {
+            "en": "Bash temporary files now persist across commands within a session, with automatic cleanup.",
+            "zh": "Bash 临时文件现在在会话内的多条命令间持久保留，并自动清理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a44361deba5de2e5450fc9ef63c382dafe585b48/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "CLI Usage Receipts",
+            "zh": "CLI 用量回执"
+          },
+          "body": {
+            "en": "You can now hide per-turn token/cost receipts in the TUI while keeping usage accounting active.",
+            "zh": "现在可以在 TUI 中隐藏每轮 token/费用回执，同时保持用量统计活跃。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a44361deba5de2e5450fc9ef63c382dafe585b48/docs/CONFIG_PATHS.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Structured Shell Execution with Phase-Aware Errors",
+            "zh": "结构化 Shell 执行与分阶段错误报告"
+          },
+          "body": {
+            "en": "Shell commands now carry internal metadata (shell identity, platform, exit code, failure phase, mutation risk, verification status) for accurate error presentation across Desktop, CLI, and ACP. The provider-visible tool schema remains unchanged.",
+            "zh": "Shell 命令现在携带内部元数据（Shell 身份、平台、退出码、失败阶段、变更风险、验证状态），在桌面端、CLI 和 ACP 中准确呈现错误。Provider 可见的工具 schema 保持不变。"
+          },
+          "refs": [
+            7757
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Prompt-Cache Hit Rate and Cost Accuracy",
+            "zh": "提示缓存命中率与成本精度提升"
+          },
+          "body": {
+            "en": "Adaptive Anthropic cache TTL extends the cache window after idle periods, reducing unnecessary rewrites. Cache diagnostics now correctly attribute changes, and cost accounting includes cache-write premiums for accurate billing.",
+            "zh": "自适应 Anthropic 缓存 TTL 在空闲后延长缓存窗口，减少不必要的重写。缓存诊断现在正确归因变更，成本核算包含缓存写入溢价以实现准确计费。"
+          },
+          "refs": [
+            7724,
+            7751
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Stream Interruption Recovery",
+            "zh": "流中断恢复"
+          },
+          "body": {
+            "en": "Interrupted provider streams are now replayed atomically up to five times, preventing partial tool execution. Desktop, CLI, and ACP surfaces roll back speculative output until a clean terminal event is received.",
+            "zh": "中断的 Provider 流现在可原子重放最多五次，防止部分工具执行。桌面端、CLI 和 ACP 界面会回滚推测性输出，直到收到干净的终止事件。"
+          },
+          "refs": [
+            7737
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Session-Wide Bash Temporary Files",
+            "zh": "会话级 Bash 临时文件持久化"
+          },
+          "body": {
+            "en": "Bash temporary files now persist across commands within a session via a private session directory, while per-command sandboxing is preserved. Automatic rotation and cleanup prevent leaks.",
+            "zh": "Bash 临时文件现在通过私有会话目录在会话内的多条命令间持久保留，同时保持每条命令的沙箱隔离。自动轮换与清理防止泄漏。"
+          },
+          "refs": [
+            7664
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "CLI Polish: Scrolling, Completions, and Keyboard",
+            "zh": "CLI 打磨：滚动、补全与键盘操作"
+          },
+          "body": {
+            "en": "Transcript scrolling now follows output correctly, slash-command completions are cached for responsiveness, and keyboard shortcuts are refined: Ctrl+Backspace deletes words, while Ctrl+Insert/Shift+Insert handle clipboard operations.",
+            "zh": "对话滚动现在正确跟随输出，斜杠命令补全被缓存以提升响应速度，键盘快捷键得到优化：Ctrl+Backspace 删除单词，Ctrl+Insert/Shift+Insert 处理剪贴板操作。"
+          },
+          "refs": [
+            7706,
+            7690,
+            7656
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop: Blank Session Provider, Todo Panel, and Windows Shortcuts",
+            "zh": "桌面端：空白会话 Provider、待办面板与 Windows 快捷方式修复"
+          },
+          "body": {
+            "en": "Reused blank sessions now respect the default provider. The todo panel updates live from todo_write events. Windows shortcuts broken by versioned upgrades are automatically repaired.",
+            "zh": "复用的空白会话现在遵循默认 Provider。待办面板根据 todo_write 事件实时更新。因版本化升级而损坏的 Windows 快捷方式会被自动修复。"
+          },
+          "refs": [
+            7736,
+            7709,
+            7752
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Goal Token Limits Removed",
+            "zh": "移除 Goal token 硬上限"
+          },
+          "body": {
+            "en": "Per-Goal token hard limits and request-admission middleware have been removed, preventing premature work pauses. Turn quotas and no-progress protection remain active.",
+            "zh": "移除了每个 Goal 的 token 硬上限与请求准入中间件，防止工作提前暂停。轮次配额与无进展保护仍然有效。"
+          },
+          "refs": [
+            7725
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "SWE-bench Verified Evaluation Mode",
+            "zh": "SWE-bench Verified 评估模式"
+          },
+          "body": {
+            "en": "e2ebench now supports SWE-bench Verified, running the agent inside official evaluation images with restricted egress for honest, auditable scores.",
+            "zh": "e2ebench 现在支持 SWE-bench Verified，在官方评估镜像内运行 Agent 并限制网络出口，以获得诚实、可审计的分数。"
+          },
+          "refs": [
+            7733
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Website Refreshed with Agent-First Messaging",
+            "zh": "官网焕新：以 Agent 能力为先"
+          },
+          "body": {
+            "en": "The landing page now leads with what the agent can do, featuring a real task replay, updated feature cards, and a new Surfaces section showing all four front ends.",
+            "zh": "着陆页现在以 Agent 的能力为先，展示真实任务回放、更新的功能卡片以及展示全部四种前端界面的新 Surfaces 区块。"
+          },
+          "refs": [
+            7759
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "CLI: Hide per-turn usage receipts",
+              "zh": "CLI：隐藏每轮用量回执"
+            },
+            "body": {
+              "en": "Added `[ui].show_turn_usage` config to hide token/cost receipts in the TUI while keeping accounting active.",
+              "zh": "新增 `[ui].show_turn_usage` 配置，可在 TUI 中隐藏 token/费用回执，同时保持用量统计活跃。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: Version metadata and shell completion",
+              "zh": "CLI：版本元信息与 Shell 补全"
+            },
+            "body": {
+              "en": "`reasonix version --verbose/--json` shows commit and build time. Shell completion registry aligned with real parsers.",
+              "zh": "`reasonix version --verbose/--json` 显示提交与构建时间。Shell 补全注册表与实际解析器对齐。"
+            },
+            "refs": [
+              7740
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: Ctrl+Insert copy and Shift+Insert paste",
+              "zh": "CLI：Ctrl+Insert 复制与 Shift+Insert 粘贴"
+            },
+            "body": {
+              "en": "Added classic terminal clipboard keys: Ctrl+Insert copies selection, Shift+Insert pastes via native clipboard.",
+              "zh": "新增经典终端剪贴板快捷键：Ctrl+Insert 复制选中内容，Shift+Insert 通过原生剪贴板粘贴。"
+            },
+            "refs": [
+              7656
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "CLI: Rewind picker shows real user prompts and scrolls",
+              "zh": "CLI：回退选择器显示真实用户提示并可滚动"
+            },
+            "body": {
+              "en": "The rewind picker now displays the user's original input instead of composed provider prompts, and scrolls within a viewport for long sessions.",
+              "zh": "回退选择器现在显示用户的原始输入而非组合后的 Provider 提示，并在长会话中于视口内滚动。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: `run --resume` accepts machine session IDs",
+              "zh": "CLI：`run --resume` 接受机器会话 ID"
+            },
+            "body": {
+              "en": "One-shot `run --resume` now resolves opaque machine session IDs in addition to filesystem paths.",
+              "zh": "一次性 `run --resume` 现在除了文件系统路径外，还能解析不透明的机器会话 ID。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: `--profile` flag routes to interactive session",
+              "zh": "CLI：`--profile` 标志路由至交互式会话"
+            },
+            "body": {
+              "en": "Bare `reasonix --profile …` now correctly dispatches to the interactive session path as documented.",
+              "zh": "无子命令的 `reasonix --profile …` 现在按文档正确路由至交互式会话路径。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: Diagnostics, keyring migration, and Reasonix-home hardening",
+              "zh": "CLI：诊断、密钥环迁移与 Reasonix-home 加固"
+            },
+            "body": {
+              "en": "Startup diagnostics now expose progress and bounded recovery signals, keyring migration fails closed under timeout or error, and CLI tooling consistently uses the exact Reasonix home while redacting paths in reports.",
+              "zh": "启动诊断现在提供进度与有界恢复信号；密钥环迁移在超时或错误时安全停止；CLI 工具统一使用准确的 Reasonix home，并在报告中隐藏路径。"
+            },
+            "refs": [
+              7663
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop: macOS workbench sidebar titlebar zoom",
+              "zh": "桌面端：macOS 工作台侧边栏标题栏缩放"
+            },
+            "body": {
+              "en": "Double-clicking the empty titlebar strip above the workbench sidebar on macOS now triggers native window zoom.",
+              "zh": "在 macOS 上双击工作台侧边栏上方的空白标题栏区域现在会触发原生窗口缩放。"
+            },
+            "refs": [
+              4754
+            ]
+          },
+          {
+            "title": {
+              "en": "Serve: Replay pending prompts for late SSE clients",
+              "zh": "Serve：为迟到的 SSE 客户端重放待处理提示"
+            },
+            "body": {
+              "en": "When a browser attaches to `reasonix serve` after a confirm-gated tool is queued, the pending approval prompt is now replayed.",
+              "zh": "当浏览器在确认门控工具排队后连接到 `reasonix serve` 时，现在会重放待处理的批准提示。"
+            },
+            "refs": [
+              7708
+            ]
+          },
+          {
+            "title": {
+              "en": "Documentation and i18n consolidation",
+              "zh": "文档与国际化整合"
+            },
+            "body": {
+              "en": "Consolidated documentation updates including Simplified Chinese reasoning-provider reference, removed unused i18n keys, and completed locale translations.",
+              "zh": "整合文档更新，包括简体中文推理 Provider 参考、移除未使用的 i18n 键以及完成语言环境翻译。"
+            },
+            "refs": [
+              7764
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Desktop: Repair Windows uninstall registration",
+              "zh": "桌面端：修复 Windows 卸载注册项"
+            },
+            "body": {
+              "en": "Upgrades from legacy Tauri installs no longer leave stale uninstall entries that could remove the current installation.",
+              "zh": "从旧版 Tauri 安装升级不再留下可能删除当前安装的过期卸载条目。"
+            },
+            "refs": [
+              7729
+            ]
+          },
+          {
+            "title": {
+              "en": "Release: Tolerate npm registry visibility lag",
+              "zh": "发布：容忍 npm 注册表可见性延迟"
+            },
+            "body": {
+              "en": "Extended the npm registry visibility window to 5 minutes to prevent publication stalls.",
+              "zh": "将 npm 注册表可见性窗口延长至 5 分钟，防止发布停滞。"
+            },
+            "refs": [
+              7629
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "title": {
+            "en": "No manual migration is required",
+            "zh": "无需手动迁移"
+          },
+          "body": {
+            "en": "Upgrade to v1.21.0 normally; existing configuration and sessions remain compatible.",
+            "zh": "可直接升级到 v1.21.0；现有配置与会话保持兼容。"
+          },
+          "refs": [
+            7773,
+            7780
+          ]
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "skyzhao1223",
+        "esengine",
+        "Nontee22",
+        "elonwoo",
+        "weikengchen",
+        "Hezi-crypto",
+        "azhonglee",
+        "rixzkiye",
+        "rongbc",
+        "mife-user"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.21.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.20.0...desktop-v1.21.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.21.0",
+      "baseVersion": "1.21.0",
+      "status": "reviewed",
+      "previousRelease": "1.20.0",
+      "builds": {
+        "cli": "v1.21.0",
+        "desktop": "v1.21.0",
+        "npm": "1.21.0"
+      }
+    },
+    {
       "version": "1.20.0",
       "date": "2026-08-05",
       "channel": "stable",
