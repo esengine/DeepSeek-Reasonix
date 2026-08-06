@@ -1761,7 +1761,7 @@ export const zhTW: Record<DictKey, string> = {
   "settings.addProvider.resetPreset": "重設為預設",
   "settings.addProvider.confirmResetPreset": "確認重設",
   "settings.customProviderName": "自訂供應商名稱",
-  "settings.customProviderNamePlaceholder": "",
+  "settings.customProviderNamePlaceholder": "例如 my-proxy",
   "settings.providerNamePlaceholder": "供應商名稱（如 deepseek-proxy）",
   "settings.providerProtocol": "接入協定",
   "settings.providerProtocolOpenAI": "OpenAI-compatible",
