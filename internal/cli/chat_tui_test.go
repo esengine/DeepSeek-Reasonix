@@ -4286,6 +4286,7 @@ func TestDesktopShortcutLayoutDoesNotStealCompletionTab(t *testing.T) {
 		kind:        compSlash,
 		items:       []compItem{{label: "/mcp", insert: "/mcp ", descend: true}},
 		replaceFrom: 0,
+		replaceTo:   len("/"),
 	}
 
 	out, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyTab})

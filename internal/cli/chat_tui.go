@@ -314,12 +314,11 @@ type chatTUI struct {
 	// in the slash menu as "/<name>" and managed via /skills.
 	skills []skill.Skill
 
-	// slashCatalog is an immutable completion list rebuilt only when
-	// commands/skills/host/controller identity change. Keystroke filtering
-	// never reconstructs skill descriptions or MCP prompt lists (#6417, #7090).
+	// slashCatalog is an immutable completion list rebuilt only on explicit
+	// invalidation (model switch, skill rescan, /reload-cmd, …). Ordinary
+	// keystrokes only filter this snapshot — no fingerprint walk (#6417, #7090).
 	slashCatalog     []compItem
-	slashCatalogKey  string
-	slashCatalogOnce bool // true when slashCatalog is valid for slashCatalogKey
+	slashCatalogOnce bool // true when slashCatalog holds a valid snapshot
 
 	// skillPick is the interactive skill picker overlay for /skills. nil when closed.
 	skillPick *skillPicker
@@ -1481,11 +1480,10 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice(i18n.M.CtrlCQuitHint)
 			return m, finalize(m, nil)
 		case "ctrl+d":
-			// Compatible Ctrl+D: forward-delete one character when the
-			// composer has content; only quit when idle with an empty
-			// composer (bash/readline-style EOF). Do not intercept a
-			// running turn's empty composer as quit (#7638-compatible).
-			if strings.TrimSpace(m.input.Value()) != "" {
+			// Compatible Ctrl+D: forward-delete when the composer has any
+			// raw content (including whitespace-only); only quit when idle
+			// with a truly empty composer (bash/readline-style EOF).
+			if m.input.Value() != "" {
 				// Delegate to textarea DeleteCharacterForward (bound to
 				// ctrl+d by default) so mid-line forward delete works.
 				var ic tea.Cmd

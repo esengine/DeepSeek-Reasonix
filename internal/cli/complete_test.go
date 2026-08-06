@@ -227,9 +227,12 @@ func TestActiveAtToken(t *testing.T) {
 		{`see @my\ dir/`, `my\ dir/`, true, 4},
 	}
 	for _, c := range cases {
-		at, tok, ok := activeAtToken(c.val, len(c.val))
+		at, end, tok, ok := activeAtToken(c.val, len(c.val))
 		if ok != c.wantOK || (ok && (tok != c.wantTok || at != c.wantAt)) {
-			t.Errorf("activeAtToken(%q) = (%d,%q,%v), want (%d,%q,%v)", c.val, at, tok, ok, c.wantAt, c.wantTok, c.wantOK)
+			t.Errorf("activeAtToken(%q) = (%d,%d,%q,%v), want (%d,_,%q,%v)", c.val, at, end, tok, ok, c.wantAt, c.wantTok, c.wantOK)
+		}
+		if ok && (end < at || end > len(c.val) || c.val[at:end] != "@"+tok) {
+			t.Errorf("activeAtToken(%q) span [%d,%d) = %q, want @%s", c.val, at, end, c.val[at:end], c.wantTok)
 		}
 	}
 }
@@ -508,6 +511,7 @@ func TestEnterOnExactSlashArgSubmitsWhenPrefixAlsoMatches(t *testing.T) {
 		items:       []compItem{{label: "1", insert: "1"}, {label: "10", insert: "10"}},
 		sel:         0,
 		replaceFrom: len("/resume "),
+		replaceTo:   len("/resume 1"),
 	}
 
 	got, _ := m.update(tea.KeyPressMsg{Code: tea.KeyEnter})
