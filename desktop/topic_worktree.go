@@ -100,6 +100,7 @@ func (a *App) CreateTopicWorktree(sourceRoot string) (TopicWorktreeOpenResult, e
 	if err := saveTopicWorktreeBinding(sourceRoot, binding); err != nil {
 		return TopicWorktreeOpenResult{}, fmt.Errorf("isolated worktree was created at %s but Reasonix could not record the topic binding: %w", created.WorktreeRoot, err)
 	}
+	writeTopicWorktreeCreatedHead(created.WorktreeRoot, created.Head)
 
 	var tab TabMeta
 	if a.singleSurfaceLayoutEnabled() {
@@ -278,9 +279,114 @@ func topicHasWorktreeBinding(sourceRoot, topicID string) bool {
 	return ok
 }
 
+func removeTopicWorktreeBinding(sourceRoot, topicID string) error {
+	sourceRoot = normalizeProjectRoot(sourceRoot)
+	topicID = strings.TrimSpace(topicID)
+	if sourceRoot == "" || topicID == "" {
+		return nil
+	}
+	path := topicWorktreesPath(sourceRoot)
+	topicWorktreeBindingsMu.Lock()
+	defer topicWorktreeBindingsMu.Unlock()
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var file struct {
+		Bindings []TopicWorktreeBinding `json:"bindings"`
+	}
+	if json.Unmarshal(raw, &file) != nil {
+		return nil
+	}
+	next := make([]TopicWorktreeBinding, 0, len(file.Bindings))
+	removed := false
+	for _, item := range file.Bindings {
+		if strings.TrimSpace(item.TopicID) == topicID {
+			removed = true
+			// Persist creation head into the worktree before dropping the
+			// binding so orphan reclaim can still distinguish pristine trees.
+			if head := strings.TrimSpace(item.Head); head != "" {
+				root := strings.TrimSpace(item.WorktreeRoot)
+				if root == "" {
+					root = strings.TrimSpace(item.WorkspaceRoot)
+				}
+				if root != "" && readTopicWorktreeCreatedHead(root) == "" {
+					writeTopicWorktreeCreatedHead(root, head)
+				}
+			}
+			continue
+		}
+		next = append(next, item)
+	}
+	if !removed {
+		return nil
+	}
+	payload, err := json.MarshalIndent(struct {
+		Bindings []TopicWorktreeBinding `json:"bindings"`
+	}{Bindings: next}, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(payload, '\n'), 0o644); err != nil {
+		return err
+	}
+	return fileutil.ReplaceFile(tmp, path)
+}
+
+func sourceRootForManagedTopicWorktree(managedRoot, topicID string) string {
+	managedRoot = filepath.Clean(strings.TrimSpace(managedRoot))
+	topicID = strings.TrimSpace(topicID)
+	if managedRoot == "" {
+		return ""
+	}
+	f := loadProjectsFile()
+	for _, project := range f.Projects {
+		bindings := loadTopicWorktreeBindings(project.Root)
+		if topicID != "" {
+			if binding, ok := bindings[topicID]; ok {
+				if sameProjectRoot(binding.WorkspaceRoot, managedRoot) || sameProjectRoot(binding.WorktreeRoot, managedRoot) {
+					return normalizeProjectRoot(project.Root)
+				}
+			}
+			continue
+		}
+		for _, binding := range bindings {
+			if sameProjectRoot(binding.WorkspaceRoot, managedRoot) || sameProjectRoot(binding.WorktreeRoot, managedRoot) {
+				return normalizeProjectRoot(project.Root)
+			}
+		}
+	}
+	return ""
+}
+
+const topicWorktreeCreatedHeadFile = ".reasonix-topic-created-head"
+
+func writeTopicWorktreeCreatedHead(worktreeRoot, head string) {
+	worktreeRoot = strings.TrimSpace(worktreeRoot)
+	head = strings.TrimSpace(head)
+	if worktreeRoot == "" || head == "" {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(worktreeRoot, topicWorktreeCreatedHeadFile), []byte(head+"\n"), 0o644)
+}
+
+func readTopicWorktreeCreatedHead(worktreeRoot string) string {
+	raw, err := os.ReadFile(filepath.Join(worktreeRoot, topicWorktreeCreatedHeadFile))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
 // reclaimOrphanTopicWorktrees removes managed topic worktrees that are no
 // longer referenced by any project binding and remain pristine. Dirty or
-// advanced worktrees are skipped.
+// advanced worktrees are skipped. Without a durable created-head marker,
+// unbound trees are left alone so committed work cannot be force-removed.
 func (a *App) reclaimOrphanTopicWorktrees() {
 	managed := strings.TrimSpace(config.DeliveryWorktreeDir())
 	if managed == "" {
@@ -310,6 +416,10 @@ func (a *App) reclaimOrphanTopicWorktrees() {
 		if branchErr != nil || !strings.HasPrefix(strings.TrimSpace(branchOut), "reasonix/topic-") {
 			return filepath.SkipDir
 		}
+		createdHead := readTopicWorktreeCreatedHead(path)
+		if createdHead == "" {
+			return filepath.SkipDir
+		}
 		common, _, sourceErr := worktree.RunGit(a.bootContext(), path, "rev-parse", "--git-common-dir")
 		if sourceErr != nil {
 			return filepath.SkipDir
@@ -323,8 +433,7 @@ func (a *App) reclaimOrphanTopicWorktrees() {
 		if filepath.Base(source) == ".git" {
 			source = filepath.Dir(source)
 		}
-		head, _, _ := worktree.RunGit(a.bootContext(), path, "rev-parse", "--verify", "HEAD")
-		_ = removePristineTopicWorktree(a.bootContext(), source, path, strings.TrimSpace(head))
+		_ = removePristineTopicWorktree(a.bootContext(), source, path, createdHead)
 		return filepath.SkipDir
 	})
 }

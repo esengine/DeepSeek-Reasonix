@@ -2308,9 +2308,42 @@ func (a *App) syncTabWorkspaceRootSpellings() {
 
 // registerProjectRoot indexes workspaceRoot in the project registry and
 // realigns open tabs when the registry adopted a new spelling of the root.
+// Managed Reasonix worktrees are never registered as sidebar projects (#4304).
 func (a *App) registerProjectRoot(workspaceRoot string) {
+	workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	if workspaceRoot == "" {
+		return
+	}
+	if worktree.IsManagedPath(workspaceRoot, config.DeliveryWorktreeDir()) {
+		return
+	}
 	_ = addProject(workspaceRoot, "")
 	a.syncTabWorkspaceRootSpellings()
+}
+
+// resolveProjectOpenRoots maps a caller-supplied project path + topic to the
+// logical sidebar root and agent runtime root. Managed worktree paths resolve
+// back to their source project when a topic binding exists.
+func resolveProjectOpenRoots(workspaceRoot, topicID string) (logicalRoot, runtimeRoot string) {
+	workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	topicID = strings.TrimSpace(topicID)
+	if workspaceRoot == "" {
+		return "", ""
+	}
+	if !worktree.IsManagedPath(workspaceRoot, config.DeliveryWorktreeDir()) {
+		runtime, source := resolveTopicRuntimeRoot(workspaceRoot, topicID)
+		return source, runtime
+	}
+	if source := sourceRootForManagedTopicWorktree(workspaceRoot, topicID); source != "" {
+		runtime, _ := resolveTopicRuntimeRoot(source, topicID)
+		if runtime == "" {
+			runtime = workspaceRoot
+		}
+		return source, runtime
+	}
+	// Delivery worktrees are first-class projects; topic isolation never
+	// reaches here without a binding.
+	return workspaceRoot, workspaceRoot
 }
 
 // OpenProjectTab builds a controller scoped to workspaceRoot and opens the
@@ -2442,7 +2475,7 @@ func (a *App) openTopicTabWithRoots(scope, sourceRoot, runtimeRoot, topicID, ses
 			a.mu.Unlock()
 			return TabMeta{}, err
 		}
-		if err := pinNewEmptySessionBranchMeta(sessionPath, scope, actualRoot, topicID, topicTitle); err != nil {
+		if err := pinNewEmptySessionBranchMeta(sessionPath, scope, logicalRoot, topicID, topicTitle); err != nil {
 			a.mu.Unlock()
 			return TabMeta{}, err
 		}
@@ -2516,8 +2549,14 @@ func (a *App) openTopicSession(scope, workspaceRoot, topicID, sessionPath string
 		if workspaceRoot == "" {
 			return TabMeta{}, fmt.Errorf("workspaceRoot is required")
 		}
-		saveWorkspace(workspaceRoot)
-		a.registerProjectRoot(workspaceRoot)
+		logicalRoot, runtimeRoot := resolveProjectOpenRoots(workspaceRoot, topicID)
+		saveWorkspace(logicalRoot)
+		a.registerProjectRoot(logicalRoot)
+		_, validPath, err := a.sessionDirForPath(sessionPath)
+		if err != nil {
+			return TabMeta{}, err
+		}
+		return a.openTopicTabWithRoots("project", logicalRoot, runtimeRoot, topicID, validPath, true)
 	}
 	_, validPath, err := a.sessionDirForPath(sessionPath)
 	if err != nil {
@@ -4109,13 +4148,23 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 			return
 		}
 		// Topic worktree sessions (#4304) live under the source project's session
-		// dir, so dir-based binding resolves to the source root. BranchMeta keeps
-		// the isolated runtime root; prefer that for agent cwd and keep SourceRoot
-		// as the sidebar identity. Never register the managed worktree as a project.
+		// dir, so dir-based binding resolves to the source root. BranchMeta may
+		// still name either the source (current) or the managed worktree
+		// (legacy). Prefer an explicit runtime/source split from the topic
+		// binding so reopen keeps the agent in the worktree.
 		if binding.hasMeta {
 			if metaRoot := normalizeProjectRoot(binding.meta.WorkspaceRoot); metaRoot != "" && !sameProjectRoot(metaRoot, workspaceRoot) {
 				sourceRoot = workspaceRoot
 				workspaceRoot = metaRoot
+			}
+		}
+		if sourceRoot == "" {
+			if topicID := strings.TrimSpace(binding.topicID); topicID != "" {
+				runtime, source := resolveTopicRuntimeRoot(workspaceRoot, topicID)
+				if source != "" && runtime != "" && !sameProjectRoot(runtime, source) {
+					sourceRoot = source
+					workspaceRoot = runtime
+				}
 			}
 		}
 		if sourceRoot == "" {
@@ -7500,6 +7549,12 @@ func (a *App) deleteTopic(topicID string) error {
 	if err := removeTopicFromProjectsFile(topicID); err != nil {
 		return err
 	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		_ = removeTopicWorktreeBinding(root, topicID)
+	}
 	a.emitProjectTreeMetadataChanged()
 	return nil
 }
@@ -9095,9 +9150,27 @@ func (a *App) knownSessionDirs() []string {
 	return out
 }
 
-func topicSessionMatchMatchesTarget(match topicSessionMatch, scope, workspaceRoot string) bool {
+func topicSessionMatchMatchesTarget(match topicSessionMatch, scope, workspaceRoot, topicID string) bool {
 	if scope == "project" {
-		return match.scope == "project" && sameProjectRoot(match.workspaceRoot, workspaceRoot)
+		if match.scope != "project" {
+			return false
+		}
+		if sameProjectRoot(match.workspaceRoot, workspaceRoot) {
+			return true
+		}
+		// Sessions created before the source-root pin may still name the
+		// managed worktree in BranchMeta; accept them when the topic binding
+		// under the source project points at that runtime.
+		topicID = strings.TrimSpace(topicID)
+		if topicID == "" {
+			return false
+		}
+		binding, ok := loadTopicWorktreeBinding(workspaceRoot, topicID)
+		if !ok {
+			return false
+		}
+		return sameProjectRoot(match.workspaceRoot, binding.WorkspaceRoot) ||
+			sameProjectRoot(match.workspaceRoot, binding.WorktreeRoot)
 	}
 	return match.scope == "" || match.scope == "global"
 }
@@ -9122,7 +9195,7 @@ func (a *App) findTopicSessionForTargetByContent(scope, workspaceRoot, topicID s
 	var candidates []candidate
 	for _, dir := range a.knownSessionDirs() {
 		for _, match := range topicSessionMatches(dir, topicID) {
-			if !topicSessionMatchMatchesTarget(match, scope, workspaceRoot) {
+			if !topicSessionMatchMatchesTarget(match, scope, workspaceRoot, topicID) {
 				continue
 			}
 			candidates = append(candidates, candidate{match: match, dir: dir})

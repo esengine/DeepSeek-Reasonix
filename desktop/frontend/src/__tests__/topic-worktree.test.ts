@@ -27,6 +27,7 @@ ok(/key: "topic-worktree"/.test(tree), "project menu offers opt-in topic worktre
 ok(/kind: "topic-worktree"/.test(app) && /enqueueNavigation\(\{ kind: "topic-worktree"/.test(app), "creation shares the last-click-wins navigation queue");
 ok(/createTopicWorktree/.test(controller) && /app\.CreateTopicWorktree/.test(controller), "controller opens the created topic worktree tab");
 ok(/activeTab\?\.sourceRoot \|\| activeTab\?\.workspaceRoot/.test(app), "sidebar highlights the source project for topic worktrees");
+ok(/node\.root === \(tab\.sourceRoot \|\| tab\.workspaceRoot\)/.test(app), "active topic turns resolve against the source project root");
 ok(/topicWorktreeCreatedDirty/.test(app), "dirty source checkout receives an explicit warning");
 ok(/sourceRoot\?: string/.test(source("../lib/types.ts")), "tab meta carries sourceRoot for logical project identity");
 

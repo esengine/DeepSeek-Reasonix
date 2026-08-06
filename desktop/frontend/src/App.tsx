@@ -901,7 +901,7 @@ function activeTopicTurnsFromTree(tree: ProjectNode[], tab?: TabMeta): number | 
         if (
           scope === targetScope &&
           node.topicId === tab.topicId &&
-          (scope === "global" || node.root === tab.workspaceRoot)
+          (scope === "global" || node.root === (tab.sourceRoot || tab.workspaceRoot))
         ) {
           return node.turns;
         }

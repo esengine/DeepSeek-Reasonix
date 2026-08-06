@@ -3114,8 +3114,8 @@ func controllerSessionDir(ctrl control.SessionAPI) string {
 
 func tabSessionDir(tab *WorkspaceTab) string {
 	if tab != nil {
-		if tab.WorkspaceRoot != "" {
-			return desktopSessionDir(tab.WorkspaceRoot)
+		if root := tabLogicalProjectRoot(tab); root != "" {
+			return desktopSessionDir(root)
 		}
 		if tab.Ctrl != nil {
 			if dir := tab.Ctrl.SessionDir(); dir != "" {
