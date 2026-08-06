@@ -585,6 +585,7 @@ func TestTranscriptResizeKeepsScrolledReaderOnSameBlock(t *testing.T) {
 	contentWidth := transcriptContentWidth(m.width, false)
 	secondBlockStart := transcriptBlockLineCount(m.transcript[0], contentWidth)
 	m.viewport.SetYOffset(secondBlockStart)
+	m.markUserScrolled() // explicit leave-tail; production paths do this via wheel/PgUp
 	if m.viewport.AtBottom() {
 		t.Fatal("test reader anchor must be above the transcript bottom")
 	}
