@@ -20,6 +20,7 @@ type swebenchOpts struct {
 	namespace  string
 	model      string
 	profile    string
+	permission string
 	arm        ablation.Set
 	runID      string
 	workDir    string
@@ -29,6 +30,13 @@ type swebenchOpts struct {
 	timeoutSec int
 	workers    int
 	keepImages bool
+	// network is the docker network agent containers join. It must have no
+	// route off-box; proxyURL is the only way out, and it allowlists the model
+	// API. Without this the agent finds the upstream fix on GitHub — SWE-bench
+	// instance ids are PR numbers and the issue text searches straight to the
+	// patch — and every solve is unearned.
+	network  string
+	proxyURL string
 }
 
 // The agent runs unconfined inside the instance container: the container is
@@ -62,7 +70,15 @@ func runSwebenchInstance(o swebenchOpts, inst swebenchInstance) (result, string)
 	container := swebenchContainer(inst.InstanceID)
 	_ = dockerRun("rm", "-f", container)
 
-	if out, err := dockerOutput("run", "-d", "--name", container, image, "sleep", "infinity"); err != nil {
+	runArgs := []string{"run", "-d", "--name", container}
+	if o.network != "" {
+		runArgs = append(runArgs, "--network", o.network)
+	}
+	for _, kv := range proxyEnv(o.proxyURL) {
+		runArgs = append(runArgs, "-e", kv)
+	}
+	runArgs = append(runArgs, image, "sleep", "infinity")
+	if out, err := dockerOutput(runArgs...); err != nil {
 		r.Note = "start container: " + firstLine(out)
 		r.Outcome = "container_error"
 		return r, ""
@@ -81,7 +97,7 @@ func runSwebenchInstance(o swebenchOpts, inst swebenchInstance) (result, string)
 	}
 
 	metricsPath := "/tmp/reasonix-metrics.json"
-	args := swebenchAgentArgs(metricsPath, o.model, o.profile, o.arm, o.maxSteps, swebenchPrompt(inst))
+	args := swebenchAgentArgs(metricsPath, o.model, o.profile, o.permission, o.arm, o.maxSteps, swebenchPrompt(inst))
 	agentCmd := append([]string{"exec", "-e", "REASONIX_HOME=/opt/rxhome", container},
 		testbedShell("/usr/local/bin/reasonix "+shellQuoteAll(args))...)
 
@@ -91,13 +107,28 @@ func runSwebenchInstance(o swebenchOpts, inst swebenchInstance) (result, string)
 	runErr := dockerRunCtx(ctx, agentCmd...)
 	r.WallMs = time.Since(startedAt).Milliseconds()
 
-	if raw, err := dockerOutput("exec", container, "cat", metricsPath); err == nil {
-		var m runMetrics
-		if json.Unmarshal([]byte(raw), &m) == nil {
-			arm := r.Arm
-			r.runMetrics = m
-			r.Arm = arm
+	// Prefer the final record; fall back to the snapshot a killed agent left.
+	// The final file is authoritative and the sidecar is only ever read when it
+	// is absent, so the two can never be counted together.
+	r.Unaccounted = true
+	for _, src := range []struct {
+		path    string
+		partial bool
+	}{{metricsPath, false}, {metricsPath + ".partial", true}} {
+		raw, err := dockerOutput("exec", container, "cat", src.path)
+		if err != nil {
+			continue
 		}
+		var m runMetrics
+		if json.Unmarshal([]byte(raw), &m) != nil {
+			continue
+		}
+		arm := r.Arm
+		r.runMetrics = m
+		r.Arm = arm
+		r.Unaccounted = false
+		r.Partial = src.partial || !m.Complete
+		break
 	}
 	if ctx.Err() != nil {
 		r.Outcome = "timeout"
@@ -172,7 +203,34 @@ func gradeSwebench(o swebenchOpts, patches map[string]string, order []string) (s
 	return report, json.Unmarshal(raw, &report)
 }
 
+// preflight fails before the first container instead of after fifty. A unit
+// test can only check the argv we build; it cannot know whether this binary
+// accepts it. An earlier run lost a full arm to a flag that existed on the
+// interactive command but not on `run`.
+func preflight(o swebenchOpts) error {
+	posture, err := permissionFlag(o.permission)
+	if err != nil {
+		return err
+	}
+	help, err := exec.Command(o.bin, "run", "--help").CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s run --help: %w", o.bin, err)
+	}
+	name, _, _ := strings.Cut(strings.TrimPrefix(posture, "--"), "=")
+	if !strings.Contains(string(help), "--"+name) {
+		return fmt.Errorf("%s run does not accept --%s; the %q posture would fail on every instance", o.bin, name, o.permission)
+	}
+	if o.network == "" || o.proxyURL == "" {
+		return fmt.Errorf("-network and -proxy are required: with off-box egress the agent reads the upstream fix and every solve is unearned")
+	}
+	return nil
+}
+
 func runSwebench(o swebenchOpts) string {
+	if err := preflight(o); err != nil {
+		fmt.Fprintln(os.Stderr, "preflight:", err)
+		os.Exit(2)
+	}
 	instances, err := loadSwebenchSubset(o.subset)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load subset:", err)
@@ -215,10 +273,26 @@ func renderSwebench(results []result, o swebenchOpts) string {
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "## SWE-bench Verified — Reasonix (arm `%s`)\n\n", o.arm.Arm())
-	fmt.Fprintf(&b, "<sub>model `%s` · subset `%s` · run `%s` · agent runs inside the official instance image · graded by the official harness</sub>\n\n",
-		model, filepath.Base(o.subset), o.runID)
+	posture := o.permission
+	if posture == "" {
+		posture = "auto"
+	}
+	fmt.Fprintf(&b, "<sub>model `%s` · permissions `%s` · subset `%s` · run `%s` · agent runs inside the official instance image · graded by the official harness</sub>\n\n",
+		model, posture, filepath.Base(o.subset), o.runID)
 	b.WriteString(renderBody(results))
 	return b.String()
+}
+
+// proxyEnv sets both cases because the Go client reads the lowercase names via
+// httpproxy.FromEnvironment while curl and pip inside the image read either.
+func proxyEnv(url string) []string {
+	if strings.TrimSpace(url) == "" {
+		return nil
+	}
+	return []string{
+		"http_proxy=" + url, "https_proxy=" + url,
+		"HTTP_PROXY=" + url, "HTTPS_PROXY=" + url,
+	}
 }
 
 func firstLine(s string) string {

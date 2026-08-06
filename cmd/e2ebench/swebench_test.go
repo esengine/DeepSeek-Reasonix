@@ -130,13 +130,35 @@ func TestShellQuoteAllContainsHostileIssueText(t *testing.T) {
 }
 
 func TestSwebenchAgentArgsKeepTheControlArmClean(t *testing.T) {
-	got := swebenchAgentArgs("/tmp/m.json", "e2e", benchmarkProfileBaseline, ablation.Set{}, 60, "fix it")
-	want := []string{"run", "--auto", "--metrics", "/tmp/m.json", "--model", "e2e", "--max-steps", "60", "fix it"}
+	got := swebenchAgentArgs("/tmp/m.json", "e2e", benchmarkProfileBaseline, "auto", ablation.Set{}, 60, "fix it")
+	want := []string{"run", "--permission-mode=auto", "--metrics", "/tmp/m.json", "--model", "e2e", "--max-steps", "60", "fix it"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("control args = %v, want %v", got, want)
 	}
-	ablated := swebenchAgentArgs("/tmp/m.json", "", benchmarkProfileBaseline, ablation.New(ablation.Evidence), 0, "fix it")
-	if !reflect.DeepEqual(ablated, []string{"run", "--auto", "--metrics", "/tmp/m.json", "--ablate", "evidence", "fix it"}) {
+	ablated := swebenchAgentArgs("/tmp/m.json", "", benchmarkProfileBaseline, "auto", ablation.New(ablation.Evidence), 0, "fix it")
+	if !reflect.DeepEqual(ablated, []string{"run", "--permission-mode=auto", "--metrics", "/tmp/m.json", "--ablate", "evidence", "fix it"}) {
 		t.Fatalf("ablated args = %v", ablated)
+	}
+}
+
+// The two postures must differ in exactly one argument. If anything else moved
+// between arms, the published delta would not isolate the permission gate.
+func TestPermissionPostureIsTheOnlyDifferenceBetweenArms(t *testing.T) {
+	a := swebenchAgentArgs("/m.json", "e2e", benchmarkProfileBaseline, "auto", ablation.Set{}, 60, "fix it")
+	b := swebenchAgentArgs("/m.json", "e2e", benchmarkProfileBaseline, "yolo", ablation.Set{}, 60, "fix it")
+	if len(a) != len(b) {
+		t.Fatalf("arms differ in argument count: %v vs %v", a, b)
+	}
+	diffs := 0
+	for i := range a {
+		if a[i] != b[i] {
+			diffs++
+		}
+	}
+	if diffs != 1 || a[1] != "--permission-mode=auto" || b[1] != "--permission-mode=bypassPermissions" {
+		t.Fatalf("arms must differ only in the posture flag: %v vs %v", a, b)
+	}
+	if _, err := permissionFlag("bypass"); err == nil {
+		t.Fatal("an unknown posture must fail loudly rather than silently running unattended")
 	}
 }

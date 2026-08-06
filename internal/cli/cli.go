@@ -673,7 +673,11 @@ func runAgent(args []string, version string) int {
 	}
 	var metrics *metricsSink
 	if *metricsPath != "" {
-		metrics = &metricsSink{inner: sink}
+		metrics = &metricsSink{
+			inner:         sink,
+			partialPath:   partialMetricsPath(*metricsPath),
+			snapshotEvery: 2 * time.Second,
+		}
 		sink = metrics
 	}
 	sink = withNotifications(sink, cfg)
@@ -748,13 +752,16 @@ func runAgent(args []string, version string) int {
 		})
 	}
 	if metrics != nil {
-		metrics.m.DurationMs = time.Since(started).Milliseconds()
-		metrics.m.Outcome = completion.class
-		metrics.m.Arm = ablated.Arm()
+		// Snapshot under the sink's lock: a background job can still be emitting
+		// into it while this goroutine assembles the final record.
+		final := metrics.Snapshot()
+		final.DurationMs = time.Since(started).Milliseconds()
+		final.Outcome = completion.class
+		final.Arm = ablated.Arm()
 		if exec := ctrl.Executor(); exec != nil {
 			if audit := exec.CapabilityAudit(); audit != nil {
 				snap := audit.Snapshot()
-				metrics.m.MergeCapabilityAuditCounters(
+				final.MergeCapabilityAuditCounters(
 					snap.Routes, snap.RoutedCandidates, snap.RoutedRequire, snap.RoutedPrefer, snap.RoutedSuggest, snap.Declines,
 					snap.SemanticRoutes, snap.SemanticFallbacks,
 					snap.RequireMissing, snap.RequireRecovered, snap.PreferMissing, snap.PreferRecovered,
@@ -766,7 +773,7 @@ func runAgent(args []string, version string) int {
 				)
 			}
 		}
-		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
+		if err := writeMetrics(*metricsPath, final); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
 	}
