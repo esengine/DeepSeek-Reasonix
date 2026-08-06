@@ -218,8 +218,16 @@ type chatTUI struct {
 	// cards, and replay bundles are regenerated after a resize.
 	transcriptSources []transcriptSource
 	wrappedLines      []string // transcript wrapped to viewport width (rendered each frame)
-	viewport          viewport.Model
-	sel               selection
+	// wrapCache caches each block's width-wrapped rendering, keyed by block
+	// index, so a dirty frame re-wraps only changed blocks instead of the
+	// whole transcript (see wrapTranscriptBlocks in transcript.go). Entries
+	// carry the block content they were produced from, so a stale entry is
+	// detected by comparison and can never be served; the cache is dropped
+	// wholesale when the wrap width changes.
+	wrapCache      map[int]wrapCacheEntry
+	wrapCacheWidth int
+	viewport       viewport.Model
+	sel            selection
 	// autoScroll drives edge-drag scrolling: -1 up, +1 down, 0 off. dragX is the
 	// column the drag is held at, so the ticker can extend the selection head.
 	autoScroll int
@@ -877,7 +885,7 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Re-feed only when the content grew or the width changed (re-wrapping is
 	// the expensive part); a bare scroll or spinner tick keeps the offset.
 	if len(cm.transcript) != prevLines || cm.width != prevWidth || cm.transcriptDirty {
-		wrapped := wrapTranscript(strings.Join(cm.transcript, "\n"), contentW)
+		wrapped := cm.wrapTranscriptBlocks(cm.transcript, contentW)
 		cm.viewport.SetContent(wrapped)
 		cm.wrappedLines = strings.Split(wrapped, "\n")
 		if wasAtBottom {
@@ -1904,6 +1912,8 @@ func (m *chatTUI) clearTranscriptDisplay() {
 	m.transcript = nil
 	m.transcriptSources = nil
 	m.wrappedLines = nil
+	m.wrapCache = nil
+	m.wrapCacheWidth = 0
 	m.viewport.SetContent("")
 	m.shellOutputs = make(map[string]string)
 	m.shellExpanded = make(map[string]bool)

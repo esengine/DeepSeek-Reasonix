@@ -74,6 +74,8 @@ func (m *chatTUI) removeTranscriptBlock(index int) {
 	m.ensureTranscriptSources()
 	m.transcript = append(m.transcript[:index], m.transcript[index+1:]...)
 	m.transcriptSources = append(m.transcriptSources[:index], m.transcriptSources[index+1:]...)
+	// Indexes shift; drop the per-block wrap cache wholesale (removals are rare).
+	m.wrapCache = nil
 }
 
 func (m *chatTUI) truncateTranscriptBlocks(length int) {
@@ -81,6 +83,7 @@ func (m *chatTUI) truncateTranscriptBlocks(length int) {
 	m.ensureTranscriptSources()
 	m.transcript = m.transcript[:length]
 	m.transcriptSources = m.transcriptSources[:length]
+	m.wrapCache = nil
 }
 
 func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth int) string {
@@ -219,6 +222,9 @@ func renderTurnReceiptBand(receipt string, contentWidth int) string {
 
 func (m *chatTUI) reflowTranscript(terminalWidth int) {
 	m.ensureTranscriptSources()
+	// Reflow regenerates blocks at a new width; drop the per-block wrap cache
+	// so every block re-wraps (the width change alone would also invalidate it).
+	m.wrapCache = nil
 	for i, source := range m.transcriptSources {
 		if source.kind == transcriptSourceFixed {
 			continue
@@ -335,6 +341,108 @@ func wrapTranscript(s string, width int) string {
 		return s
 	}
 	return lipgloss.NewStyle().Width(width).Render(s)
+}
+
+// wrapCacheEntry caches one transcript block's width-wrapped rendering along
+// with the block content it was produced from and the block's widest wrapped
+// line. The content field lets a stale entry (block replaced, removed, or
+// reflowed at the same index) be detected by a string comparison — an
+// unchanged block compares equal by string pointer in O(1), so a dirty frame
+// only re-wraps the blocks that actually changed.
+type wrapCacheEntry struct {
+	content string
+	wrapped string
+	widest  int
+}
+
+// widestWrappedLine returns the widest visible line width of a wrapped block.
+func widestWrappedLine(wrapped string) int {
+	widest := 0
+	for _, ln := range strings.Split(wrapped, "\n") {
+		if w := ansi.StringWidth(ln); w > widest {
+			widest = w
+		}
+	}
+	return widest
+}
+
+// wrapTranscriptBlocks joins the per-block width-wrapped transcript lines,
+// reusing cached wraps keyed by block index, and is byte-identical to
+// wrapTranscript(strings.Join(blocks, "\n"), width). That equivalence is what
+// makes a dirty frame re-wrap only the changed blocks instead of the whole
+// transcript:
+//
+//   - every rendered block closes its SGR sequences at its end, so lipgloss's
+//     wrap writer never reopens a style across a block boundary (the gate in
+//     transcript_wrap_test.go pins this for the real renderers);
+//   - x/ansi's wrap can leave a word glued into a line wider than the target
+//     width (a hyphen filling the line exactly, or a wide rune at width 1);
+//     lipgloss then pads every line of the WHOLE string to that widest line,
+//     so the join re-pads each block's lines to the same global widest line.
+//
+// The cache is keyed by block index and dropped whenever the width changes;
+// stale entries are detected by the content comparison, so any future
+// transcript mutation site stays correct without remembering to invalidate.
+func (m *chatTUI) wrapTranscriptBlocks(blocks []string, width int) string {
+	if width <= 0 {
+		return strings.Join(blocks, "\n")
+	}
+	if m.wrapCache == nil || m.wrapCacheWidth != width {
+		m.wrapCache = make(map[int]wrapCacheEntry, len(blocks))
+		m.wrapCacheWidth = width
+	}
+	// Drop entries for indices beyond the (possibly shrunk) transcript.
+	for i := len(blocks); i < len(m.wrapCache); i++ {
+		delete(m.wrapCache, i)
+	}
+	globalWidest := width
+	for i, block := range blocks {
+		entry, ok := m.wrapCache[i]
+		if !ok || entry.content != block {
+			entry = wrapCacheEntry{content: block, wrapped: wrapTranscript(block, width)}
+			entry.widest = widestWrappedLine(entry.wrapped)
+			m.wrapCache[i] = entry
+		}
+		if entry.widest > globalWidest {
+			globalWidest = entry.widest
+		}
+	}
+	if globalWidest <= width {
+		// Every line already fits the width: per-block wraps are padded to
+		// width, exactly like the whole-transcript wrap.
+		var b strings.Builder
+		for i := range blocks {
+			if i > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(m.wrapCache[i].wrapped)
+		}
+		return b.String()
+	}
+	// Some block contains a line wider than the width (see the x/ansi note
+	// above); whole-transcript wrapping pads every line to that widest line,
+	// so pad each block's uniformly-padded lines up to the same width.
+	padTo := globalWidest
+	var b strings.Builder
+	for i := range blocks {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		entry := m.wrapCache[i]
+		if pad := padTo - max(width, entry.widest); pad > 0 {
+			lines := strings.Split(entry.wrapped, "\n")
+			for j, ln := range lines {
+				if j > 0 {
+					b.WriteByte('\n')
+				}
+				b.WriteString(ln)
+				b.WriteString(strings.Repeat(" ", pad))
+			}
+		} else {
+			b.WriteString(entry.wrapped)
+		}
+	}
+	return b.String()
 }
 
 type clipboardCopyMsg struct {
