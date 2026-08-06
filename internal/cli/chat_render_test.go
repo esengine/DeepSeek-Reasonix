@@ -3,6 +3,7 @@ package cli
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbles/v2/textarea"
 	"github.com/charmbracelet/x/ansi"
@@ -231,6 +232,53 @@ func TestStreamAnswerFlushesCompletedParagraphs(t *testing.T) {
 	}
 	if m.pending.Len() != 0 || m.answerIdx != -1 {
 		t.Errorf("answer state should reset after commit, pending=%d idx=%d", m.pending.Len(), m.answerIdx)
+	}
+}
+
+// TestStreamAnswerThrottlesDeferredFlushes proves paragraph boundaries inside
+// the throttle window defer to a single flush tick instead of re-rendering the
+// whole accumulated answer each time, and the tick applies the accumulated
+// render in one pass.
+func TestStreamAnswerThrottlesDeferredFlushes(t *testing.T) {
+	m := newTestChatTUI()
+
+	// The first completed paragraph flushes immediately (no prior flush).
+	if cmd := m.ingestEvent(event.Event{Kind: event.Text, Text: "First paragraph.\n\n"}); cmd != nil {
+		t.Fatalf("first paragraph should flush immediately, got a deferral tick")
+	}
+	joined := strings.Join(m.transcript, "\n")
+	if !strings.Contains(joined, "First paragraph.") {
+		t.Fatalf("first paragraph should render at once, transcript=%v", m.transcript)
+	}
+
+	// Pin the throttle window open so the next boundaries must defer.
+	m.lastStreamFlush = time.Now()
+	if cmd := m.ingestEvent(event.Event{Kind: event.Text, Text: "Second paragraph.\n\n"}); cmd == nil {
+		t.Fatal("a paragraph inside the throttle window should defer to a flush tick")
+	}
+	if cmd := m.ingestEvent(event.Event{Kind: event.Text, Text: "Third paragraph.\n\n"}); cmd != nil {
+		t.Fatal("a second deferral must not schedule another flush tick")
+	}
+	if !m.streamFlushPending {
+		t.Fatal("streamFlushPending should be set while a flush tick is pending")
+	}
+	joined = strings.Join(m.transcript, "\n")
+	if strings.Contains(joined, "Second paragraph.") {
+		t.Fatalf("deferred paragraphs must not render before the flush tick, transcript=%v", m.transcript)
+	}
+
+	// The flush tick applies the whole accumulated prefix in one render.
+	next, cmd := m.update(streamFlushTickMsg{})
+	m = next.(chatTUI)
+	if cmd != nil {
+		t.Fatal("flush tick should not return a command")
+	}
+	joined = strings.Join(m.transcript, "\n")
+	if !strings.Contains(joined, "Second paragraph.") || !strings.Contains(joined, "Third paragraph.") {
+		t.Fatalf("flush tick should render all accumulated paragraphs, transcript=%v", m.transcript)
+	}
+	if m.streamFlushPending {
+		t.Fatal("streamFlushPending should clear once the flush tick fires")
 	}
 }
 

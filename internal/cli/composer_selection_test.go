@@ -122,6 +122,7 @@ func TestComposerWheelChainsToTranscriptAtInternalBoundary(t *testing.T) {
 	}
 
 	m = updateComposerMouseTestTUI(t, m, wheelUp)
+	m = updateComposerMouseTestTUI(t, m, wheelScrollTickMsg{}) // coalescing tick applies the chained notch
 	if got, want := m.viewport.YOffset(), bottom-composerWheelRows; got != want {
 		t.Fatalf("wheel at composer top chained transcript to %d, want %d", got, want)
 	}

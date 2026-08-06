@@ -171,6 +171,12 @@ type chatTUI struct {
 	// that doesn't close a new paragraph re-renders nothing.
 	answerIdx     int
 	answerFlushed int
+	// lastStreamFlush is when the streaming answer block was last re-rendered
+	// (a goldmark pass); streamFlushPending marks a re-render deferred to
+	// streamFlushTick because a paragraph boundary landed inside the throttle
+	// window. Together they cap full-answer re-renders while streaming.
+	lastStreamFlush    time.Time
+	streamFlushPending bool
 	// toolStreamIdx is the transcript index of a running tool's live-output block
 	// (streamed via ToolProgress under the tool card); -1 when none. toolStreamID
 	// is the call ID it belongs to. Only a bounded tail is kept — the last few
@@ -252,6 +258,12 @@ type chatTUI struct {
 	// dead target and dragging it never leaves a transcript selection behind.
 	scrollbarDrag       bool
 	scrollbarGrabOffset int
+	// wheelAccum / wheelPending coalesce wheel gestures: notches accumulate
+	// while a wheelScrollTick is pending and apply as one scroll per tick, so a
+	// wheel burst (30-120+ events/sec) causes one ClearScreen+repaint instead of
+	// one per event.
+	wheelAccum   int
+	wheelPending bool
 	// copyNoticeText is a transient "copied to clipboard" hint shown on the status
 	// line after a mouse-drag, right-click, or Ctrl+C selection copy; "" when none
 	// is showing. copyNoticeSeq guards its expiry tick so an older copy's timer
@@ -474,6 +486,14 @@ func shutdownNow() tea.Msg { return tuiShutdownMsg{} }
 // elapsedTickMsg fires once a second while a turn runs, driving the "thinking
 // Ns" counter in the status line.
 type elapsedTickMsg struct{}
+
+// wheelScrollTickMsg fires wheelCoalesceInterval after the first accumulated
+// wheel notch; the handler applies the whole coalesced gesture in one scroll.
+type wheelScrollTickMsg struct{}
+
+// streamFlushTickMsg fires streamFlushInterval after a streaming re-render was
+// deferred (see streamAnswer); the handler applies the accumulated render.
+type streamFlushTickMsg struct{}
 
 // balanceMsg carries the result of an async wallet-balance fetch; text is the
 // formatted readout ("" when none/failed).
@@ -1050,9 +1070,18 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// ordinary nested-scroll behavior and avoids a dead wheel at boundaries.
 		switch msg.Button {
 		case tea.MouseWheelUp:
-			m.viewport.ScrollUp(3)
+			m.wheelAccum = applyWheelDelta(m.wheelAccum, -1)
 		case tea.MouseWheelDown:
-			m.viewport.ScrollDown(3)
+			m.wheelAccum = applyWheelDelta(m.wheelAccum, 1)
+		}
+		// Coalesce a wheel burst: fast wheels and trackpad inertia emit dozens of
+		// MouseWheelMsg per second, and every viewport scroll forces a full
+		// ClearScreen + repaint in Update's Warp-compat path. Only the first notch
+		// of a burst starts the ~16ms tick; the rest just accumulate, so the
+		// viewport moves once per tick with the summed magnitude.
+		if !m.wheelPending {
+			m.wheelPending = true
+			return m, wheelScrollTick()
 		}
 		m.syncScrollModeAfterGesture()
 		return m, nil
@@ -1169,6 +1198,34 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, autoScrollTick()
+
+	case wheelScrollTickMsg:
+		// Apply the coalesced wheel gesture: wheelScrollRows lines per accumulated
+		// notch in the net direction. A net-zero burst (up then down) scrolls
+		// nothing. One scroll per tick keeps Update's ClearScreen+repaint rate
+		// bounded no matter how fast the wheel events arrive.
+		if !m.wheelPending {
+			return m, nil
+		}
+		m.wheelPending = false
+		notches := m.wheelAccum
+		m.wheelAccum = 0
+		switch {
+		case notches < 0:
+			m.viewport.ScrollUp(-notches * wheelScrollRows)
+		case notches > 0:
+			m.viewport.ScrollDown(notches * wheelScrollRows)
+		}
+		return m, nil
+
+	case streamFlushTickMsg:
+		// Apply the streaming re-render deferred by streamAnswer (throttled by
+		// streamFlushDue); a no-op when the answer was already committed.
+		if m.streamFlushPending {
+			m.streamFlushPending = false
+			m.flushStreamAnswer()
+		}
+		return m, nil
 
 	case tea.MouseReleaseMsg:
 		if msg.Button == tea.MouseLeft && m.validComposerSelection() {
@@ -1730,7 +1787,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentEventMsg:
 		e := event.Event(msg)
-		m.ingestEvent(e)
+		if c := m.ingestEvent(e); c != nil {
+			cmds = append(cmds, c)
+		}
 		turnDone := e.Kind == event.TurnDone
 		gitMaybeChanged := e.Kind == event.ToolResult && !e.Tool.ReadOnly
 		// Coalesce a burst: the goroutine that produced this event has already
@@ -1743,7 +1802,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for drained := 0; drained < maxEventDrain; drained++ {
 			select {
 			case e2 := <-m.eventCh:
-				m.ingestEvent(e2)
+				if c := m.ingestEvent(e2); c != nil {
+					cmds = append(cmds, c)
+				}
 				if e2.Kind == event.TurnDone {
 					turnDone = true
 				}
@@ -2975,11 +3036,40 @@ func (m *chatTUI) commitReasoningBeforeAnswer() {
 // rewritten in place as later paragraphs land — so a long reply appears chunk by
 // chunk instead of all at once on turn end. The trailing, still-streaming block
 // stays buffered (a half-written fence/list never renders early), and it only
-// re-renders when a new paragraph actually closes.
-func (m *chatTUI) streamAnswer() {
+// re-renders when a new paragraph actually closes. Re-renders are throttled to
+// one per streamFlushInterval: a boundary inside the window defers to a
+// streamFlushTick instead of re-parsing the whole accumulated answer with
+// goldmark again, capping the cost of a fast stream at ~12.5 re-renders/sec.
+// The tick guarantees the deferred render still happens, so final output is
+// identical — only the intermediate re-render rate changes. Returns a flush
+// tick command when a render was deferred, nil otherwise.
+func (m *chatTUI) streamAnswer() tea.Cmd {
 	if m.nativeScrollback {
-		return
+		return nil
 	}
+	if len(flushableMarkdownPrefix(m.pending.String())) <= m.answerFlushed {
+		return nil
+	}
+	if !streamFlushDue(m.lastStreamFlush, time.Now()) {
+		// A new paragraph landed inside the throttle window: defer the re-render
+		// to the flush tick. Only the first deferral schedules the tick; later
+		// boundaries in the same window just keep accumulating in pending.
+		if !m.streamFlushPending {
+			m.streamFlushPending = true
+			return streamFlushTick()
+		}
+		return nil
+	}
+	m.flushStreamAnswer()
+	return nil
+}
+
+// flushStreamAnswer applies one streaming re-render: the accumulated answer
+// prefix is (re)parsed by the markdown renderer and written into the open
+// answer block. Shared by streamAnswer's immediate path and streamFlushTick's
+// deferred path so both stay byte-identical.
+func (m *chatTUI) flushStreamAnswer() {
+	m.lastStreamFlush = time.Now()
 	prefix := flushableMarkdownPrefix(m.pending.String())
 	if len(prefix) <= m.answerFlushed {
 		return
@@ -4247,11 +4337,13 @@ func (m *chatTUI) unsendPending() {
 // the reasoning and answer streamed so far, then commits its own line —
 // preserving order. Switching on the event Kind replaces the old prefix-sniffing
 // of a flattened byte stream: the structure is now explicit.
-func (m *chatTUI) ingestEvent(e event.Event) {
+// ingestEvent applies one agent event to the TUI state and returns any command
+// it produced (currently only the stream-flush deferral tick from streamAnswer).
+func (m *chatTUI) ingestEvent(e event.Event) tea.Cmd {
 	if e.Kind == event.Retrying {
 		m.retryAttempt = e.RetryAttempt
 		m.retryMax = e.RetryMax
-		return
+		return nil
 	}
 	if e.Kind == event.StreamAttempt {
 		// Body-phase replay: clear any in-progress tool presentation and surface
@@ -4276,7 +4368,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 			m.turnDiscarded = false
 			m.state = tuiIdle
 		}
-		return
+		return nil
 	}
 	// The first packet of any kind means the server replied — confirm the send so
 	// Esc cancels the stream instead of un-sending. TurnStarted is local (emitted
@@ -4311,7 +4403,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 	case event.Text:
 		m.commitReasoningBeforeAnswer()
 		m.pending.WriteString(e.Text)
-		m.streamAnswer()
+		return m.streamAnswer()
 
 	case event.Message:
 		// The answer stream is complete — freeze reasoning + the markdown answer.
@@ -4523,6 +4615,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// ApprovalRequest when a plan-mode turn produces a proposal), so there's
 		// nothing to detect here.
 	}
+	return nil
 }
 
 // finalizeStreamed freezes any in-progress reasoning + answer into scrollback so
@@ -4539,6 +4632,45 @@ func waitForAgentEvent(ch chan event.Event) tea.Cmd {
 
 func elapsedTick() tea.Cmd {
 	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return elapsedTickMsg{} })
+}
+
+// Wheel scrolling coalescing: fast wheels and trackpad inertia burst dozens of
+// MouseWheelMsg per second, and every viewport scroll forces a full
+// ClearScreen + repaint (Update's Warp-compat path). Notches accumulate for
+// wheelCoalesceInterval and apply as one scroll of wheelScrollRows lines per
+// notch, bounding full repaints to ~60/s instead of one per event. The 3-line
+// per-notch distance is unchanged from the pre-coalescing behavior.
+const (
+	wheelCoalesceInterval = 16 * time.Millisecond
+	wheelScrollRows       = 3
+)
+
+func wheelScrollTick() tea.Cmd {
+	return tea.Tick(wheelCoalesceInterval, func(time.Time) tea.Msg { return wheelScrollTickMsg{} })
+}
+
+// applyWheelDelta adds one wheel notch (down = +1, up = -1) to the pending
+// accumulator. Pure so the coalescing arithmetic is directly unit-testable.
+func applyWheelDelta(accum, delta int) int {
+	return accum + delta
+}
+
+// Streaming flush throttling: re-rendering the whole accumulated answer with
+// goldmark at every paragraph boundary is O(answer²); boundaries closer than
+// streamFlushInterval defer to the flush tick instead, capping re-renders at
+// ~12.5/sec. The final output is unchanged (commitPending is not throttled and
+// the tick guarantees the deferred render still happens).
+const streamFlushInterval = 80 * time.Millisecond
+
+// streamFlushDue reports whether a streaming flush may render now, given the
+// last flush time. Time is injected so tests can pin the throttle window
+// without sleeping.
+func streamFlushDue(last, now time.Time) bool {
+	return now.Sub(last) >= streamFlushInterval
+}
+
+func streamFlushTick() tea.Cmd {
+	return tea.Tick(streamFlushInterval, func(time.Time) tea.Msg { return streamFlushTickMsg{} })
 }
 
 // runSlashCommand handles "/<cmd> <args>" input. Local commands queue their
