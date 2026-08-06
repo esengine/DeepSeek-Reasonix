@@ -2,6 +2,7 @@ package taskmonitor
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -165,6 +166,35 @@ func TestControlService_RequeueFailedTaskDoesNotClaimLiveRuntime(t *testing.T) {
 	snap, _ := s.GetTask(context.Background(), "/p", "failed")
 	if snap.RuntimeState != RuntimeStateExited {
 		t.Fatalf("requeue changed runtime state to %q, want exited", snap.RuntimeState)
+	}
+}
+
+func TestControlService_RequeueInvokesSchedulerWhenConfigured(t *testing.T) {
+	s := NewInMemoryStore()
+	cs := NewControlService(s)
+	called := 0
+	cs.SetScheduler(func(_ context.Context, projectDir, taskID string) error {
+		called++
+		if projectDir != "/p" || taskID != "failed" {
+			t.Fatalf("scheduler target=%q/%q", projectDir, taskID)
+		}
+		return nil
+	})
+	mustUpsertControl(t, s, "/p", TaskSnapshot{SchemaVersion: 1, TaskID: "failed", SessionID: "s1", State: TaskStateFailed, RuntimeState: RuntimeStateExited, Version: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	res, err := cs.RequeueTask(context.Background(), "/p", "failed", 1, "")
+	if err != nil || !res.Accepted || called != 1 {
+		t.Fatalf("result=%+v err=%v called=%d", res, err, called)
+	}
+}
+
+func TestControlService_RequeueReportsRuntimeStartFailure(t *testing.T) {
+	s := NewInMemoryStore()
+	cs := NewControlService(s)
+	cs.SetScheduler(func(context.Context, string, string) error { return errors.New("runtime unavailable") })
+	mustUpsertControl(t, s, "/p", TaskSnapshot{SchemaVersion: 1, TaskID: "failed", SessionID: "s1", State: TaskStateFailed, RuntimeState: RuntimeStateExited, Version: 1, CreatedAt: time.Now(), UpdatedAt: time.Now()})
+	res, err := cs.RequeueTask(context.Background(), "/p", "failed", 1, "")
+	if err != nil || res.Accepted || res.Error == nil || res.Error.Code != ErrTaskRuntimeStartFailed {
+		t.Fatalf("result=%+v err=%v", res, err)
 	}
 }
 

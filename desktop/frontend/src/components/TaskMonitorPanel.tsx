@@ -75,6 +75,28 @@ function shortID(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
 }
 
+export function taskTree(tasks: TaskSnapshot[]): Array<{ task: TaskSnapshot; depth: number }> {
+  const byParent = new Map<string, TaskSnapshot[]>();
+  const roots: TaskSnapshot[] = [];
+  for (const task of tasks) {
+    const parent = task.parent_task_id;
+    if (parent && tasks.some((candidate) => candidate.task_id === parent)) {
+      const children = byParent.get(parent) ?? [];
+      children.push(task);
+      byParent.set(parent, children);
+    } else roots.push(task);
+  }
+  const out: Array<{ task: TaskSnapshot; depth: number }> = [];
+  const visit = (task: TaskSnapshot, depth: number, seen: Set<string>) => {
+    if (seen.has(task.task_id)) return;
+    const nextSeen = new Set(seen).add(task.task_id);
+    out.push({ task, depth: Math.min(depth, 8) });
+    for (const child of byParent.get(task.task_id) ?? []) visit(child, depth + 1, nextSeen);
+  };
+  for (const root of roots) visit(root, Math.max(0, root.depth ?? 0), new Set());
+  return out;
+}
+
 function eventSummary(ev: TaskEvent, t: ReturnType<typeof useT>): string {
   if (ev.error_code) return t("task.event.error", { code: ev.error_code });
   switch (ev.event_type) {
@@ -254,6 +276,7 @@ export function TaskMonitorPanel({
     (a, b) =>
       new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
   );
+  const tree = taskTree(sorted);
 
   return (
     <div className={`taskmonitor${popover ? " taskmonitor--popover" : ""}`}>
@@ -318,7 +341,7 @@ export function TaskMonitorPanel({
           )}
 
           {!loading &&
-            sorted.map((task) => {
+            tree.map(({ task, depth }) => {
               const cfg = stateConfig(task.state, t);
               const runtime = runtimeConfig(task.runtime_state, t);
               const isOpen = expanded.has(task.task_id);
@@ -331,6 +354,7 @@ export function TaskMonitorPanel({
                 <div
                   key={task.task_id}
                   className={`taskmonitor__task taskmonitor__task--${safeStateClass(task.state)}`}
+                  style={{ marginLeft: `${depth * 16}px` }}
                 >
                   <div className="taskmonitor__task-head">
                     <button
@@ -406,6 +430,8 @@ export function TaskMonitorPanel({
                             </dd>
                           </>
                         )}
+                        {task.kind && <><dt>Kind</dt><dd>{task.kind}</dd></>}
+                        {task.attempt && <><dt>Attempt</dt><dd>{task.attempt}</dd></>}
                       </dl>
 
                       {/* Events section */}

@@ -1,11 +1,9 @@
 // Package taskmonitor defines the unified Task Monitor domain model and
-// read-only query interfaces for observing background tasks. It provides
+// query/control interfaces for observing and safely re-dispatching tasks. It provides
 // TaskSnapshot, TaskEvent, TaskState, RuntimeState and a Store abstraction.
 //
-// The package does not read private session files, does not parse internal
-// Reasonix state files, and does not implement a second state machine — it
-// is a pure observation layer that reuses the existing jobs.Manager as its
-// source of truth.
+// Runtime ownership remains with the host; RuntimeStarter is the narrow seam
+// used by the scheduler to request a fresh execution.
 package taskmonitor
 
 import (
@@ -169,6 +167,11 @@ type TaskSnapshot struct {
 	UpdatedAt         time.Time    `json:"updated_at"`
 	ErrorCode         string       `json:"error_code,omitempty"`
 	ErrorSummary      string       `json:"error_summary,omitempty"`
+	ParentTaskID      string       `json:"parent_task_id,omitempty"`
+	ParentSessionID   string       `json:"parent_session_id,omitempty"`
+	Kind              string       `json:"kind,omitempty"`
+	Depth             int          `json:"depth,omitempty"`
+	Attempt           int          `json:"attempt,omitempty"`
 }
 
 // Validate returns a non-nil error if required fields are missing or
@@ -216,20 +219,37 @@ func (ts TaskSnapshot) Validate() error {
 		return fmt.Errorf("TaskSnapshot.ErrorSummary exceeds max length %d",
 			maxErrorSummaryLen)
 	}
+	for name, value := range map[string]string{"ParentTaskID": ts.ParentTaskID, "ParentSessionID": ts.ParentSessionID, "Kind": ts.Kind} {
+		if len(value) > maxFieldLen {
+			return fmt.Errorf("TaskSnapshot.%s exceeds max length %d", name, maxFieldLen)
+		}
+	}
+	if ts.Depth < 0 || ts.Depth > 32 {
+		return fmt.Errorf("TaskSnapshot.Depth must be between 0 and 32")
+	}
+	if ts.Attempt < 0 {
+		return fmt.Errorf("TaskSnapshot.Attempt must not be negative")
+	}
 	return nil
 }
 
 // TaskEvent is a single sanitised event in a task's lifecycle.
 type TaskEvent struct {
-	Sequence     int          `json:"sequence"`
-	Timestamp    time.Time    `json:"timestamp"`
-	EventType    string       `json:"event_type"`
-	TaskID       string       `json:"task_id"`
-	SessionID    string       `json:"session_id"`
-	State        TaskState    `json:"state"`
-	RuntimeState RuntimeState `json:"runtime_state,omitempty"`
-	ErrorCode    string       `json:"error_code,omitempty"`
-	ErrorSummary string       `json:"error_summary,omitempty"`
+	Sequence        int          `json:"sequence"`
+	Timestamp       time.Time    `json:"timestamp"`
+	EventType       string       `json:"event_type"`
+	TaskID          string       `json:"task_id"`
+	JobID           string       `json:"job_id,omitempty"`
+	SessionID       string       `json:"session_id"`
+	State           TaskState    `json:"state"`
+	RuntimeState    RuntimeState `json:"runtime_state,omitempty"`
+	ErrorCode       string       `json:"error_code,omitempty"`
+	ErrorSummary    string       `json:"error_summary,omitempty"`
+	ParentTaskID    string       `json:"parent_task_id,omitempty"`
+	ParentSessionID string       `json:"parent_session_id,omitempty"`
+	Kind            string       `json:"kind,omitempty"`
+	Depth           int          `json:"depth,omitempty"`
+	Attempt         int          `json:"attempt,omitempty"`
 }
 
 // Validate returns a non-nil error on required-field violations.
@@ -252,11 +272,25 @@ func (te TaskEvent) Validate() error {
 	if len(te.TaskID) > maxFieldLen {
 		return fmt.Errorf("TaskEvent.TaskID exceeds max length %d", maxFieldLen)
 	}
+	if len(te.JobID) > maxFieldLen {
+		return fmt.Errorf("TaskEvent.JobID exceeds max length %d", maxFieldLen)
+	}
 	if len(te.SessionID) > maxFieldLen {
 		return fmt.Errorf("TaskEvent.SessionID exceeds max length %d", maxFieldLen)
 	}
 	if len(te.EventType) > maxFieldLen {
 		return fmt.Errorf("TaskEvent.EventType exceeds max length %d", maxFieldLen)
+	}
+	for name, value := range map[string]string{"ParentTaskID": te.ParentTaskID, "ParentSessionID": te.ParentSessionID, "Kind": te.Kind} {
+		if len(value) > maxFieldLen {
+			return fmt.Errorf("TaskEvent.%s exceeds max length %d", name, maxFieldLen)
+		}
+	}
+	if te.Depth < 0 || te.Depth > 32 {
+		return fmt.Errorf("TaskEvent.Depth must be between 0 and 32")
+	}
+	if te.Attempt < 0 {
+		return fmt.Errorf("TaskEvent.Attempt must not be negative")
 	}
 	if len(te.ErrorCode) > maxFieldLen {
 		return fmt.Errorf("TaskEvent.ErrorCode exceeds max length %d", maxFieldLen)

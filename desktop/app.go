@@ -12314,7 +12314,7 @@ func (a *App) ListTasksForSession(sessionID string) ([]taskmonitor.TaskSnapshot,
 func filterTasksBySession(tasks []taskmonitor.TaskSnapshot, sessionID string) []taskmonitor.TaskSnapshot {
 	filtered := make([]taskmonitor.TaskSnapshot, 0, len(tasks))
 	for _, task := range tasks {
-		if task.SessionID == sessionID {
+		if task.SessionID == sessionID || task.ParentSessionID == sessionID {
 			filtered = append(filtered, task)
 		}
 	}

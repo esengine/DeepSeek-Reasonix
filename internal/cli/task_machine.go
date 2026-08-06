@@ -19,6 +19,9 @@ type machineTask struct {
 	StartedAt        string `json:"started_at"`
 	FinishedAt       string `json:"finished_at,omitempty"`
 	ArtifactComplete bool   `json:"artifact_complete"`
+	ParentTaskID     string `json:"parent_task_id,omitempty"`
+	ParentSessionID  string `json:"parent_session_id,omitempty"`
+	Depth            int    `json:"depth,omitempty"`
 }
 
 type machineTaskList struct {
@@ -169,6 +172,7 @@ func machineTasks(dir, sessionFilter string, identityKey []byte) ([]machineTask,
 				StartedAt:        machineUnixMillis(view.StartedAt),
 				FinishedAt:       finishedAt,
 				ArtifactComplete: artifactComplete,
+				Depth:            0,
 			})
 		}
 		artifacts, err := agent.ListSubagentsByParent(dir, rawSessionID)
@@ -198,6 +202,8 @@ func machineTasks(dir, sessionFilter string, identityKey []byte) ([]machineTask,
 				StartedAt:        machineTime(artifact.Meta.CreatedAt),
 				FinishedAt:       finishedAt,
 				ArtifactComplete: artifactComplete,
+				ParentSessionID:  sessionID,
+				Depth:            1,
 			})
 		}
 	}

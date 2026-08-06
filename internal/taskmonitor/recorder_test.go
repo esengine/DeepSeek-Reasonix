@@ -28,7 +28,7 @@ func TestTaskRecorder_Lifecycle(t *testing.T) {
 	if err != nil || snap == nil {
 		t.Fatalf("GetTask after start: %+v, %v", snap, err)
 	}
-	if snap.State != TaskStateRunning || snap.RuntimeState != RuntimeStateAlive || snap.Version != 1 || snap.SessionID != "sess-1" {
+	if snap.State != TaskStateRunning || snap.RuntimeState != RuntimeStateAlive || snap.Version != 1 || snap.SessionID != "sess-1" || snap.ParentSessionID != "" {
 		t.Fatalf("snapshot after start = %+v", snap)
 	}
 	if snap.JobID != "task-1" {
@@ -50,6 +50,23 @@ func TestTaskRecorder_Lifecycle(t *testing.T) {
 	}
 	if events[1].State != TaskStateSucceeded || events[1].RuntimeState != RuntimeStateExited || events[1].Sequence != 2 {
 		t.Fatalf("event[1] = %+v", events[1])
+	}
+}
+
+func TestTaskRecorder_ParentMetadata(t *testing.T) {
+	dir := t.TempDir()
+	r, store := newRecorderForTest(t, dir)
+	r.RecordStartWithParent("child-1", "subagent", "child", "parent-1", "sess-1")
+	snap, err := store.GetTask(context.Background(), dir, monitorTaskID("sess-1", "child-1"))
+	if err != nil || snap == nil {
+		t.Fatalf("GetTask: %+v, %v", snap, err)
+	}
+	if snap.ParentTaskID != "parent-1" || snap.ParentSessionID != "sess-1" || snap.Kind != "subagent" || snap.Depth != 1 {
+		t.Fatalf("parent metadata = %+v", snap)
+	}
+	events, err := store.ListEvents(context.Background(), dir, snap.TaskID, 0)
+	if err != nil || len(events) != 1 || events[0].ParentTaskID != "parent-1" {
+		t.Fatalf("parent event = %+v, %v", events, err)
 	}
 }
 

@@ -121,6 +121,24 @@ func (s *InMemoryStore) AppendEvent(projectDir string, ev TaskEvent) error {
 	if ev.RuntimeState != "" {
 		snap.RuntimeState = ev.RuntimeState
 	}
+	if ev.JobID != "" {
+		snap.JobID = ev.JobID
+	}
+	if ev.ParentTaskID != "" {
+		snap.ParentTaskID = ev.ParentTaskID
+	}
+	if ev.ParentSessionID != "" {
+		snap.ParentSessionID = ev.ParentSessionID
+	}
+	if ev.Kind != "" {
+		snap.Kind = ev.Kind
+	}
+	if ev.Depth != 0 {
+		snap.Depth = ev.Depth
+	}
+	if ev.Attempt != 0 {
+		snap.Attempt = ev.Attempt
+	}
 	snap.UpdatedAt = ev.Timestamp
 	if ev.ErrorCode != "" {
 		snap.ErrorCode = ev.ErrorCode
