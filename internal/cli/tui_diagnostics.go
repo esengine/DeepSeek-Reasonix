@@ -20,7 +20,6 @@ const (
 	tuiDiagnosticLogRetention = 7 * 24 * time.Hour
 	tuiWatchdogInterval       = time.Second
 	tuiWatchdogStall          = 10 * time.Second
-	tuiWatchdogCloseWait      = 2 * time.Second
 )
 
 // tuiDiagnostics owns process-level diagnostics while an interactive terminal
@@ -177,16 +176,10 @@ func (d *tuiDiagnostics) Close() {
 		default:
 			close(d.stopWatch)
 		}
-		// Wait for the watchdog to stop writing before closing the log file.
-		done := make(chan struct{})
-		go func() {
-			d.watchWG.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-		case <-time.After(tuiWatchdogCloseWait):
-		}
+		// Wait for the watchdog to fully exit before closing the log. A timed
+		// wait left a window where runtime.Stack / Sync / Kill could still write
+		// the file after Close returned.
+		d.watchWG.Wait()
 		// Do not overwrite a logger deliberately installed by another owner
 		// after the TUI started.
 		if slog.Default() == d.logger && d.previous != nil {

@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
@@ -414,9 +414,8 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 			o := outcomes[key]
 			switch o.Status {
 			case legacyKeyringFound:
-				if v := strings.TrimSpace(o.Value); v != "" {
-					missing[key] = v
-				}
+				// Secret was stored by the probe path (helper or in-process).
+				// Do not trust Value from the parent-visible outcome map.
 			case legacyKeyringAbsent:
 				// Confirmed empty probe only — never on error/timeout.
 				_ = markLegacyKeyringMigrationDone(key)
@@ -440,26 +439,10 @@ func legacyKeyringMigrationMarkerPath(key string) string {
 	if strings.TrimSpace(home) == "" || key == "" {
 		return ""
 	}
-	// Env var names are identifiers, not secrets. Use a filesystem-safe form of
-	// the name itself (not a hash) so CodeQL does not treat this as secret storage.
-	return filepath.Join(home, "state", "legacy-keyring-checked", sanitizeLegacyKeyringMarkerName(key))
-}
-
-func sanitizeLegacyKeyringMarkerName(key string) string {
-	var b strings.Builder
-	b.Grow(len(key))
-	for _, r := range key {
-		switch {
-		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-':
-			b.WriteRune(r)
-		default:
-			b.WriteByte('_')
-		}
-	}
-	if b.Len() == 0 {
-		return "_empty"
-	}
-	return b.String()
+	// Env var names are identifiers, not secrets. RawURL base64 is collision-free
+	// and filesystem-safe without hashing secret material.
+	name := base64.RawURLEncoding.EncodeToString([]byte(key))
+	return filepath.Join(home, "state", "legacy-keyring-checked", name)
 }
 
 func legacyKeyringMigrationDone(key string) bool {

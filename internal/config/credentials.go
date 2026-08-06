@@ -65,14 +65,14 @@ var userCredentialEditMu sync.Mutex
 
 var storedCredentialValueLookup = storedCredentialValue
 
-// legacyKeyringCredentialValueImpl is the platform keyring probe. Production
-// migration never calls it in-process; it runs only inside an isolated helper
+// legacyKeyringProbeImpl is the platform keyring probe. Production migration
+// never calls it in the parent process; it runs only inside an isolated helper
 // child so a stuck D-Bus can be killed with the process (#7507).
-var legacyKeyringCredentialValueImpl = legacyKeyringCredentialValue
+var legacyKeyringProbeImpl = legacyKeyringProbe
 
-// legacyKeyringCredentialValueLookup is the test-facing single-key hook. Unit
-// tests substitute it; production migration uses the helper batch path instead.
-var legacyKeyringCredentialValueLookup = legacyKeyringCredentialValue
+// legacyKeyringProbeLookup is the test-facing single-key hook returning the full
+// four-state outcome. Unit tests substitute it; production uses the helper.
+var legacyKeyringProbeLookup = legacyKeyringProbe
 
 // legacyKeyringLookupTimeout is the shared budget for one legacy keyring scan.
 var legacyKeyringLookupTimeout = time.Second

@@ -8,15 +8,18 @@ import (
 	ss "github.com/zalando/go-keyring/secret_service"
 )
 
-func legacyKeyringCredentialValue(key string) (string, bool) {
+// legacyKeyringProbe reads one legacy credential from Secret Service.
+// Connection/Unlock/Search/session failures return error (no marker).
+// Empty search results or empty secret values return absent (marker OK).
+func legacyKeyringProbe(key string) legacyKeyringOutcome {
 	key = strings.TrimSpace(key)
 	if key == "" {
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
 
 	svc, err := ss.NewSecretService()
 	if err != nil {
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}
 	defer svc.Conn.Close()
 
@@ -26,25 +29,31 @@ func legacyKeyringCredentialValue(key string) (string, bool) {
 		"service":  credentialsKeyringService,
 	}
 	if err := svc.Unlock(collection.Path()); err != nil {
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}
 	results, err := svc.SearchItems(collection, search)
-	if err != nil || len(results) == 0 {
-		return "", false
+	if err != nil {
+		return legacyKeyringOutcome{Status: legacyKeyringError}
+	}
+	if len(results) == 0 {
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
 
 	session, err := svc.OpenSession()
 	if err != nil {
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}
 	defer svc.Close(session)
 
 	if err := svc.Unlock(results[0]); err != nil {
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}
 	secret, err := svc.GetSecret(results[0], session.Path())
-	if err != nil || secret == nil || len(secret.Value) == 0 {
-		return "", false
+	if err != nil {
+		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}
-	return string(secret.Value), true
+	if secret == nil || len(secret.Value) == 0 {
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+	}
+	return legacyKeyringOutcome{Status: legacyKeyringFound, Value: string(secret.Value)}
 }

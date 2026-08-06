@@ -20,7 +20,7 @@ const (
 )
 
 // legacyKeyringStatus classifies one keyring probe outcome for migration.
-// Only StatusAbsent may write a migration-done marker.
+// Only absent may write a migration-done marker.
 type legacyKeyringStatus string
 
 const (
@@ -31,6 +31,8 @@ const (
 )
 
 // legacyKeyringOutcome is the four-state result for one env key.
+// Value is only populated inside the helper (or in-process tests) before
+// secure storage; it is never returned to the parent process over stdout.
 type legacyKeyringOutcome struct {
 	Status legacyKeyringStatus
 	Value  string
@@ -40,14 +42,14 @@ type legacyKeyringHelperReport struct {
 	Results []legacyKeyringHelperResult `json:"results"`
 }
 
+// legacyKeyringHelperResult is parent-visible metadata only — no secret fields.
 type legacyKeyringHelperResult struct {
 	Key    string `json:"key"`
 	Status string `json:"status"`
-	Value  string `json:"value,omitempty"`
 }
 
 // legacyKeyringHelperEnabled controls whether batch probes spawn an isolated
-// child. Tests disable it and drive legacyKeyringCredentialValueLookup instead.
+// child. Tests disable it and drive legacyKeyringProbeLookup instead.
 var legacyKeyringHelperEnabled = true
 
 // MaybeRunLegacyKeyringHelper reports whether this process is the isolated
@@ -69,21 +71,23 @@ func runLegacyKeyringHelper() int {
 	keys := splitLegacyKeyringKeys(os.Getenv(legacyKeyringKeysEnv))
 	report := legacyKeyringHelperReport{Results: make([]legacyKeyringHelperResult, 0, len(keys))}
 	for _, key := range keys {
-		value, ok := legacyKeyringCredentialValueImpl(key)
-		res := legacyKeyringHelperResult{Key: key, Status: string(legacyKeyringAbsent)}
-		if ok {
-			if strings.TrimSpace(value) != "" {
-				res.Status = string(legacyKeyringFound)
-				res.Value = value
-			} else {
-				// Explicit empty secret is still a successful lookup with no usable value.
-				res.Status = string(legacyKeyringAbsent)
+		o := legacyKeyringProbeImpl(key)
+		status := o.Status
+		// Store found secrets inside the helper so stdout never carries plaintext
+		// credentials. A store failure is reported as error (no marker).
+		if status == legacyKeyringFound {
+			if strings.TrimSpace(o.Value) == "" {
+				status = legacyKeyringAbsent
+			} else if _, err := StoreCredentialLines([]string{key + "=" + o.Value}); err != nil {
+				status = legacyKeyringError
 			}
 		}
-		// Platform impl collapses transport errors into !ok; treat as absent so
-		// a healthy empty keyring can mark done. Process-level failures are
-		// reported by the parent when the helper exits non-zero or times out.
-		report.Results = append(report.Results, res)
+		// Scrub before any further handling; never encode Value.
+		o.Value = ""
+		report.Results = append(report.Results, legacyKeyringHelperResult{
+			Key:    key,
+			Status: string(status),
+		})
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(report); err != nil {
 		fmt.Fprintln(os.Stderr, "legacy keyring helper encode:", err)
@@ -109,7 +113,9 @@ func splitLegacyKeyringKeys(raw string) []string {
 
 // lookupLegacyKeyringBatch probes keys under a shared deadline.
 // Production uses one helper subprocess (Kill+Wait on timeout). Tests disable
-// the helper and resolve via legacyKeyringCredentialValueLookup in-process.
+// the helper and resolve via legacyKeyringProbeLookup in-process.
+// Returned outcomes never include secret Values for the helper path; in-process
+// tests store found secrets before scrubbing Value.
 func lookupLegacyKeyringBatch(keys []string, budget time.Duration) map[string]legacyKeyringOutcome {
 	out := make(map[string]legacyKeyringOutcome, len(keys))
 	if len(keys) == 0 {
@@ -127,12 +133,17 @@ func lookupLegacyKeyringBatch(keys []string, budget time.Duration) map[string]le
 func lookupLegacyKeyringBatchInProcess(keys []string) map[string]legacyKeyringOutcome {
 	out := make(map[string]legacyKeyringOutcome, len(keys))
 	for _, key := range keys {
-		value, ok := legacyKeyringCredentialValueLookup(key)
-		if ok && strings.TrimSpace(value) != "" {
-			out[key] = legacyKeyringOutcome{Status: legacyKeyringFound, Value: value}
-			continue
+		o := legacyKeyringProbeLookup(key)
+		if o.Status == legacyKeyringFound {
+			if strings.TrimSpace(o.Value) == "" {
+				o = legacyKeyringOutcome{Status: legacyKeyringAbsent}
+			} else if _, err := StoreCredentialLines([]string{key + "=" + o.Value}); err != nil {
+				o = legacyKeyringOutcome{Status: legacyKeyringError}
+			} else {
+				o.Value = "" // never leave secrets in the returned map
+			}
 		}
-		out[key] = legacyKeyringOutcome{Status: legacyKeyringAbsent}
+		out[key] = o
 	}
 	return out
 }
@@ -160,11 +171,10 @@ func lookupLegacyKeyringBatchViaHelper(keys []string, budget time.Duration) map[
 
 	// Always reap: context timeout kills the process; Wait is inside Run.
 	if ctx.Err() == context.DeadlineExceeded {
-		// Kill may race with natural exit; leave timeout status for unfinished keys.
 		if stdout.Len() == 0 {
 			return out
 		}
-		// Partial stdout is unusual but parse what we got; unparsed stay timeout.
+		// Partial metadata is rare; parse what arrived, leave others as timeout.
 	} else if runErr != nil {
 		for _, key := range keys {
 			out[key] = legacyKeyringOutcome{Status: legacyKeyringError}
@@ -189,11 +199,8 @@ func lookupLegacyKeyringBatchViaHelper(keys []string, budget time.Duration) map[
 		}
 		switch legacyKeyringStatus(res.Status) {
 		case legacyKeyringFound:
-			if strings.TrimSpace(res.Value) == "" {
-				out[key] = legacyKeyringOutcome{Status: legacyKeyringAbsent}
-			} else {
-				out[key] = legacyKeyringOutcome{Status: legacyKeyringFound, Value: res.Value}
-			}
+			// Helper already persisted any secret; parent only sees metadata.
+			out[key] = legacyKeyringOutcome{Status: legacyKeyringFound}
 		case legacyKeyringAbsent:
 			out[key] = legacyKeyringOutcome{Status: legacyKeyringAbsent}
 		case legacyKeyringError:
@@ -216,7 +223,6 @@ func legacyKeyringHelperCommand(ctx context.Context, keys []string) (*exec.Cmd, 
 		legacyKeyringHelperEnv+"="+legacyKeyringHelperFlag,
 		legacyKeyringKeysEnv+"="+strings.Join(keys, "\n"),
 	)
-	// Prevent the child from inheriting a half-built terminal state.
 	cmd.Stdin = nil
 	return cmd, nil
 }
@@ -227,7 +233,6 @@ func helperProcessArgs() []string {
 	name := filepath.Base(os.Args[0])
 	if strings.HasSuffix(name, ".test") || strings.HasSuffix(name, ".test.exe") ||
 		strings.Contains(os.Args[0], string(filepath.Separator)+"_test"+string(filepath.Separator)) {
-		// Match no tests; TestMain still runs and dispatches the helper env.
 		return []string{"-test.run=^$", "-test.v=false"}
 	}
 	return nil
