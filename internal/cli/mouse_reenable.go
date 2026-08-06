@@ -21,9 +21,9 @@ const mouseReenableMinInterval = 500 * time.Millisecond
 
 // mouseReenableMsg is delivered after the rate-limit quiet period so a pending
 // trailing re-enable can fire without sleeping in tests (inject the msg).
-type mouseReenableMsg struct {
-	seq int
-}
+// Only one timer is armed at a time (mouseReenableTimerArmed); later requests
+// just set mouseReenablePending, so no generation/seq is required.
+type mouseReenableMsg struct{}
 
 // maybeReenableMouse returns a tea.Raw cmd that re-enables mouse tracking when
 // capture is on and the rate limit allows. Inside the rate-limit window it
@@ -57,9 +57,8 @@ func (m *chatTUI) armMouseReenableTimer(now time.Time) tea.Cmd {
 		wait = 0
 	}
 	m.mouseReenableTimerArmed = true
-	seq := m.mouseReenableSeq
 	return tea.Tick(wait, func(time.Time) tea.Msg {
-		return mouseReenableMsg{seq: seq}
+		return mouseReenableMsg{}
 	})
 }
 
@@ -71,12 +70,9 @@ func (m *chatTUI) emitMouseReenable(now time.Time) tea.Cmd {
 	return tea.Raw(enableMouseTracking)
 }
 
-// handleMouseReenableMsg processes a trailing-edge timer. Stale seq values
-// (superseded by a later schedule) are ignored.
-func (m *chatTUI) handleMouseReenableMsg(msg mouseReenableMsg) tea.Cmd {
-	if msg.seq != m.mouseReenableSeq {
-		return nil
-	}
+// handleMouseReenableMsg processes a trailing-edge timer. If a request was
+// still pending after the quiet period, emit enable now.
+func (m *chatTUI) handleMouseReenableMsg(_ mouseReenableMsg) tea.Cmd {
 	m.mouseReenableTimerArmed = false
 	if !m.mouseReenablePending {
 		return nil

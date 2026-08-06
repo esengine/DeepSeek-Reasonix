@@ -237,7 +237,6 @@ type chatTUI struct {
 	lastMouseReenable       time.Time
 	mouseReenablePending    bool
 	mouseReenableTimerArmed bool
-	mouseReenableSeq        int
 	// wantMouseReenable is set by TurnDone (and similar settle points) and
 	// consumed once in Update so the raw enable sequence is batched with the
 	// frame that paints the settled state.

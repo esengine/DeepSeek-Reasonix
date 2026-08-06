@@ -180,9 +180,12 @@ func TestStreamAnswerSuffixInvalidationNotFullRebuild(t *testing.T) {
 		}
 	}
 	if cur.answerIdx < 0 {
-		// streamAnswer only opens a block after a flushable prefix; ensure we did.
-		// Empty pending without closed paragraph would leave answerIdx < 0.
-		// Our paragraphs end with \n\n so a block should exist after first Update.
+		// Paragraphs end with \n\n so streamAnswer must open a live answer block.
+		t.Fatal("streamAnswer never opened an answer block after flushable paragraphs")
+	}
+	// Prefix wrap lines must still match the joined content of history blocks.
+	if got := cur.wrappedContentString(); got == "" {
+		t.Fatal("wrappedContentString empty after streamed answer")
 	}
 }
 
@@ -197,8 +200,7 @@ func TestClampCursorToTerminal(t *testing.T) {
 func TestMouseReenableTrailingEdge(t *testing.T) {
 	// Controllable clock: first request emits; second inside the window arms
 	// trailing pending; timer msg after window emits again.
-	var fakeNow time.Time
-	fakeNow = time.Unix(1_700_000_000, 0)
+	fakeNow := time.Unix(1_700_000_000, 0)
 	mouseNowFn = func() time.Time { return fakeNow }
 	t.Cleanup(func() { mouseNowFn = nil })
 
@@ -238,8 +240,7 @@ func TestMouseReenableTrailingEdge(t *testing.T) {
 
 	// Advance clock past the interval and deliver the timer msg.
 	fakeNow = fakeNow.Add(mouseReenableMinInterval + time.Millisecond)
-	seq := m.mouseReenableSeq
-	cmd4 := m.handleMouseReenableMsg(mouseReenableMsg{seq: seq})
+	cmd4 := m.handleMouseReenableMsg(mouseReenableMsg{})
 	if cmd4 == nil {
 		t.Fatal("trailing timer must emit enable when pending")
 	}
@@ -249,8 +250,7 @@ func TestMouseReenableTrailingEdge(t *testing.T) {
 }
 
 func TestMouseReenableRateLimit(t *testing.T) {
-	var fakeNow time.Time
-	fakeNow = time.Unix(1_700_000_000, 0)
+	fakeNow := time.Unix(1_700_000_000, 0)
 	mouseNowFn = func() time.Time { return fakeNow }
 	t.Cleanup(func() { mouseNowFn = nil })
 
@@ -260,10 +260,9 @@ func TestMouseReenableRateLimit(t *testing.T) {
 	if m.maybeReenableMouse() == nil {
 		t.Fatal("first re-enable should emit a raw cmd")
 	}
-	// Second call is trailing schedule, not nil — pending path.
-	if !m.mouseReenablePending {
-		// Call again to enter window
-		_ = m.maybeReenableMouse()
+	// Second call is trailing schedule — pending path, not a silent drop.
+	if m.maybeReenableMouse() == nil && !m.mouseReenablePending {
+		t.Fatal("in-window call must arm trailing pending, not silently drop")
 	}
 	if !m.mouseReenablePending {
 		t.Fatal("in-window call must be pending, not silently dropped")
