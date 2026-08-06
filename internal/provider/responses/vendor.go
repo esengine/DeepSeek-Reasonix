@@ -83,7 +83,12 @@ var vendorTable = map[string]vendorCapabilities{
 		toolCallReasoning:      false,
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
-		summaryRequired:        true,
+		// summaryRequired: input reasoning items 需要 summary 列表（回传历史推理时）。
+		// summaryMode 不设置：DashScope Responses API 无 reasoning.summary
+		// 请求参数。推理摘要始终通过 response.reasoning_summary_text.delta
+		// 输出，无法通过参数关闭。控制推理开关用 enable_thinking，不用
+		// reasoning.summary。
+		summaryRequired: true,
 	},
 	"deepseek": {
 		stateless:              true,
@@ -92,6 +97,7 @@ var vendorTable = map[string]vendorCapabilities{
 		singleSegmentReasoning: false,
 		ignoresTemperature:     false,
 		defaultMaxOutputTokens: provider.DefaultReasoningOutputTokens,
+		summaryMode:            "detailed",
 	},
 	"mimo": {
 		stateless:              true,
