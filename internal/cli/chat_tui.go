@@ -92,6 +92,9 @@ type chatTUI struct {
 	// turnTokens accumulates this turn's output tokens (summed from per-step Usage
 	// events) for the live "↓N" readout in the running status line.
 	turnTokens int
+	// showTurnUsage controls whether completed per-request token/cost receipts are
+	// retained in transcript scrollback. Usage accounting remains active either way.
+	showTurnUsage bool
 
 	// balance is the last-fetched wallet-balance readout (e.g. "¥110.00"), "" when
 	// the provider declares no balance_url or a fetch failed. Refreshed async on
@@ -609,6 +612,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		pendingCommit:        &commitBuf,
 		diffMaxLines:         diffFoldLimit,
 		showReasoning:        nativeScrollback,
+		showTurnUsage:        true,
 		shellOutputs:         make(map[string]string),
 		shellExpanded:        make(map[string]bool),
 		shellTranscriptIdx:   make(map[string]int),
@@ -676,6 +680,9 @@ func configureChatTextarea(ti *textarea.Model) {
 	// Linux terminals send Ctrl+arrows for the same intent.
 	ti.KeyMap.WordForward = key.NewBinding(key.WithKeys("alt+right", "alt+f", "ctrl+right"))
 	ti.KeyMap.WordBackward = key.NewBinding(key.WithKeys("alt+left", "alt+b", "ctrl+left"))
+	// mirrors the word-motion convention: macOS uses Alt+Backspace, Windows and
+	// Linux terminals send Ctrl+Backspace to delete the word behind the cursor.
+	ti.KeyMap.DeleteWordBackward = key.NewBinding(key.WithKeys("alt+backspace", "ctrl+w", "ctrl+backspace"))
 	ti.Focus()
 }
 
@@ -1125,14 +1132,14 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		// Any keystroke dismisses a finished selection (copy is a right-click),
-		// with a few exceptions: Ctrl/Super/Meta+C copies the selection, the
-		// paste shortcuts keep it so the async clipboard result can replace
-		// it, and Left/Right collapse it to its ordered start/end.
+		// with a few exceptions: Ctrl/Super/Meta+C and Ctrl+Insert copy the
+		// selection, the paste shortcuts keep it so the async clipboard result
+		// can replace it, and Left/Right collapse it to its ordered start/end.
 		sel := m.sel
 		m.sel = selection{}
 		if m.validComposerSelection() && !m.composerSel.empty() {
 			switch {
-			case msg.String() == "ctrl+c" || msg.String() == "super+c" || msg.String() == "meta+c":
+			case msg.String() == "ctrl+c" || msg.String() == "super+c" || msg.String() == "meta+c" || msg.String() == "ctrl+insert":
 				cmds = append(cmds, m.copySelectionWithNotice(m.selectedComposerText()))
 				return m, finalize(m, cmds)
 			case imagePasteShortcut(msg.String(), runtime.GOOS):
@@ -1331,6 +1338,17 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, finalize(m, cmds)
 		}
+		// Shift+Insert is the classic terminal paste key. Most terminals
+		// intercept it themselves and deliver the clipboard text as bracketed
+		// paste (tea.PasteMsg); some forward the key sequence instead (e.g. via
+		// the kitty keyboard protocol). Bind it explicitly so paste works
+		// either way — same native-clipboard read path as right-click, so SSH
+		// sessions get the same remote hint and never read the remote host's
+		// clipboard.
+		if msg.String() == "shift+insert" {
+			cmds = append(cmds, pasteClipboardText())
+			return m, finalize(m, cmds)
+		}
 		switch msg.String() {
 		case "esc":
 			// "Back out" of the most specific in-progress state: un-send a just-sent
@@ -1368,6 +1386,21 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.Reset()
 					m.pastedBlocks = nil
 				}
+			}
+			return m, nil
+		case "ctrl+insert":
+			// Terminal-convention copy without Ctrl+C's destructive side
+			// effects: copy an active selection if there is one, otherwise do
+			// nothing (no clear-input, no cancel, no quit). The selection lives
+			// in-app because Reasonix owns the mouse, so the terminal's own
+			// Ctrl+Insert (which copies the terminal selection) would see an
+			// empty one.
+			if sel.active && !sel.empty() {
+				m.sel = sel // restore so selectedText() can read it
+				text := m.selectedText()
+				m.sel = selection{}
+				cmds = append(cmds, m.copySelectionWithNotice(text))
+				return m, finalize(m, cmds)
 			}
 			return m, nil
 		case "ctrl+c", "super+c", "meta+c":
@@ -4176,10 +4209,12 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		if e.Usage != nil {
 			m.turnTokens += e.Usage.CompletionTokens
 		}
-		if line := renderTurnReceipt(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
-			m.finalizeStreamed()
-			m.commitSpacer()
-			m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})
+		if m.showTurnUsage {
+			if line := renderTurnReceipt(e.Usage, e.Pricing, e.CacheDiagnostics); line != "" {
+				m.finalizeStreamed()
+				m.commitSpacer()
+				m.commitTranscriptSource(transcriptSource{kind: transcriptSourceTurnReceipt, raw: line})
+			}
 		}
 
 	case event.Notice:

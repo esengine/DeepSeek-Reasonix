@@ -57,6 +57,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting
 # cursor_shape = "bar"             # block|underline|bar; CLI/TUI text cursor
+show_turn_usage = false             # hide per-request token/cost receipts in the TUI; default true
 
 [agent]
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en

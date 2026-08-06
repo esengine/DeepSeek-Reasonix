@@ -125,7 +125,11 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	defer c.recordDisplayForNewUser(startMessages, display)
-	c.beginCheckpoint(input)
+	// The checkpoint prompt labels the turn in the rewind picker (and is
+	// prefilled into the composer after a conversation rewind), so it must be
+	// the user's own text — never the composed provider input with its
+	// transient <response-language>/<reasoning-language>/memory/hook blocks.
+	c.beginCheckpoint(firstNonEmpty(raw, task))
 	if c.guardianSess != nil {
 		c.guardianSess.ResetTurn()
 	}
@@ -235,9 +239,12 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	// appended, so the recorded message boundary precedes it and pre-edit
 	// snapshots land here. Synthetic continuations stay attached to the visible
 	// turn that spawned them; otherwise hidden user-role messages would advance
-	// backend checkpoint turns without a matching frontend turn.
+	// backend checkpoint turns without a matching frontend turn. The label is
+	// the user's own text (raw, falling back to the expanded input) — the
+	// composed provider input carries transient prefab blocks that must never
+	// surface in the rewind picker or be prefilled into the composer.
 	if !turn.synthetic {
-		c.beginCheckpoint(input)
+		c.beginCheckpoint(firstNonEmpty(turn.raw, turn.input))
 	}
 	if c.guardianSess != nil {
 		c.guardianSess.ResetTurn()

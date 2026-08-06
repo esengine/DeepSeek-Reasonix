@@ -8,6 +8,8 @@ branch.
 
 ### Added
 
+- Added `[ui].show_turn_usage` so CLI/TUI users can hide per-request token and
+  cost receipts from transcript scrollback without disabling usage accounting.
 - Added Extension Protocol v1 and the unified extension kernel: installed or
   linked sidecars can contribute tools, skills, commands, hooks, MCP servers,
   providers, interceptors, and structured UI surfaces through a versioned
