@@ -777,6 +777,9 @@ func (m chatTUI) scrollbarGrabRowOffset(row int) int {
 
 func (m *chatTUI) dragScrollbar(row int) {
 	m.viewport.SetYOffset(scrollbarYOffset(m.viewport.Height(), row, len(m.wrappedLines), m.scrollbarGrabOffset))
+	// Sync immediately so a streaming event between drag motions cannot see a
+	// stale followTail and yank the reader back to the bottom (#6430/#6978).
+	m.syncScrollModeAfterGesture()
 }
 
 // transcriptCaret maps a screen cell (x, y) in the transcript region to an

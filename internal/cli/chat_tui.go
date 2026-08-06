@@ -233,7 +233,11 @@ type chatTUI struct {
 	wrapWidth      int
 	wrapBlockCount int
 	// lastMouseReenable rate-limits ConPTY mouse re-enable sequences (#7583).
-	lastMouseReenable time.Time
+	// mouseReenablePending + timer cover trailing-edge fires after a resize storm.
+	lastMouseReenable       time.Time
+	mouseReenablePending    bool
+	mouseReenableTimerArmed bool
+	mouseReenableSeq        int
 	// wantMouseReenable is set by TurnDone (and similar settle points) and
 	// consumed once in Update so the raw enable sequence is batched with the
 	// frame that paints the settled state.
@@ -451,10 +455,6 @@ const resetMouseTracking = ansi.ResetModeMouseX10 +
 	ansi.ResetModeMouseExtUtf8 +
 	ansi.ResetModeMouseExtUrxvt +
 	ansi.ResetModeMouseExtSgrPixel
-
-// resetThenEnableMouseTracking fully resets then re-enables cell-motion tracking.
-// Used when ConPTY has lost the mode after long output (#7583).
-const resetThenEnableMouseTracking = resetMouseTracking + enableMouseTracking
 
 // compactDoneMsg reports that an async /compact pass returned. The card was
 // already drawn from the CompactionDone event; this only surfaces a failure and
@@ -925,12 +925,14 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// semantic reflow without selecting unrelated text.
 		cm.sel = selection{}
 	}
-	// Rebuild wrap cache when content, width, or in-place dirty edits change.
-	// Append-only streaming is incremental; width/dirty/mid-history is full.
-	forceFullWrap := widthChanged || cm.transcriptDirty || len(cm.transcript) < prevLines
-	if len(cm.transcript) != prevLines || forceFullWrap || cm.wrapWidth != contentW {
+	// Wrap sync: full rebuild only on width change or history shrink. Streaming
+	// answer/tool rewrites use invalidateWrapFrom → suffix-only re-wrap; the
+	// transcriptDirty flag alone must never force a full-history rebuild (#6978).
+	forceFullWrap := widthChanged || len(cm.transcript) < prevLines
+	wrapBehind := cm.wrapWidth != contentW || cm.wrapBlockCount != len(cm.transcript)
+	if forceFullWrap || wrapBehind || len(cm.transcript) != prevLines {
 		if cm.syncWrappedLines(contentW, forceFullWrap) {
-			cm.viewport.SetContent(cm.wrappedContentString())
+			cm.feedViewportContent()
 		}
 		if followTail || cm.shouldFollowTail() {
 			cm.viewport.GotoBottom() // tail-follow: stay pinned to newest output
@@ -950,17 +952,25 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	cm.transcriptDirty = false
 
-	// Rate-limited mouse re-enable after resize, focus regain, or turn settle
-	// so Windows ConPTY keeps wheel → MouseWheelMsg (#7583).
+	// Rate-limited mouse re-enable after real resize, focus regain, or turn
+	// settle so Windows ConPTY keeps wheel → MouseWheelMsg (#7583). Trailing
+	// timer msgs are handled here too. Same-size WindowSizeMsg (session-switch
+	// rebuilds) must not force a spurious Raw cmd.
 	var mouseCmd tea.Cmd
-	switch msg.(type) {
-	case tea.WindowSizeMsg, tea.FocusMsg:
+	switch v := msg.(type) {
+	case tea.WindowSizeMsg:
+		if cm.width != prevWidth || cm.height != prevHeight {
+			mouseCmd = cm.maybeReenableMouse()
+		}
+	case tea.FocusMsg:
 		mouseCmd = cm.maybeReenableMouse()
+	case mouseReenableMsg:
+		mouseCmd = cm.handleMouseReenableMsg(v)
 	}
 	if cm.wantMouseReenable {
 		cm.wantMouseReenable = false
 		if c := cm.maybeReenableMouse(); c != nil {
-			mouseCmd = tea.Batch(mouseCmd, c)
+			mouseCmd = batchCmds(mouseCmd, c)
 		}
 	}
 
@@ -970,10 +980,29 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// force a full clear+redraw whenever the offset actually moved.
 	if cm.viewport.YOffset() != prevYOff && !cm.nativeScrollback && !cm.sessionSwitch {
 		cm.sessionSwitch = false
-		return cm, tea.Batch(tea.ClearScreen, mouseCmd, cmd)
+		return cm, batchCmds(tea.ClearScreen, mouseCmd, cmd)
 	}
 	cm.sessionSwitch = false
-	return cm, tea.Batch(mouseCmd, cmd)
+	return cm, batchCmds(mouseCmd, cmd)
+}
+
+// batchCmds is tea.Batch that collapses an all-nil list to nil so callers can
+// assert "no work" without false positives from Batch(nil, nil).
+func batchCmds(cmds ...tea.Cmd) tea.Cmd {
+	var out []tea.Cmd
+	for _, c := range cmds {
+		if c != nil {
+			out = append(out, c)
+		}
+	}
+	switch len(out) {
+	case 0:
+		return nil
+	case 1:
+		return out[0]
+	default:
+		return tea.Batch(out...)
+	}
 }
 
 // update runs the model's message handling. Update wraps it to keep the
@@ -1133,6 +1162,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.viewport.ScrollUp(1)
 		}
+		m.syncScrollModeAfterGesture()
 		m.sel.head = m.transcriptCaret(m.dragX, edgeY)
 		// Stop at the boundary so a held edge can't run away to the very end.
 		if (m.autoScroll > 0 && m.viewport.AtBottom()) || (m.autoScroll < 0 && m.viewport.AtTop()) {
@@ -1163,10 +1193,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// "what's selected" cue and a right-click can still re-copy it. A plain
 		// click (no drag) clears any prior selection.
 		if m.scrollbarDrag {
-			m.dragScrollbar(msg.Y)
+			m.dragScrollbar(msg.Y) // already syncs scrollMode
 			m.scrollbarDrag = false
 			m.scrollbarGrabOffset = 0
-			m.syncScrollModeAfterGesture()
 			return m, nil
 		}
 		m.autoScroll = 0 // stop edge auto-scroll
@@ -2269,7 +2298,6 @@ func (m *chatTUI) streamReasoning(chunk string) {
 	m.setTranscriptBlock(m.reasoningTextIdx, reasoningBlock(raw, m.width, reasoningTailLines), transcriptSource{
 		kind: transcriptSourceReasoning, raw: raw, maxLines: reasoningTailLines,
 	})
-	m.transcriptDirty = true
 }
 
 // reasoningBlock renders raw thinking text as dim, width-wrapped lines under a
@@ -2381,8 +2409,7 @@ func (m *chatTUI) streamToolOutput(id, chunk string) {
 	for i, ln := range vis {
 		lines[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
 	}
-	m.transcript[m.toolStreamIdx] = connectorBlock(lines)
-	m.transcriptDirty = true
+	m.rewriteTranscriptBlock(m.toolStreamIdx, connectorBlock(lines))
 }
 
 // pushToolLine appends a completed output line to the bounded tail, dropping the
@@ -2505,7 +2532,6 @@ func (m *chatTUI) renderSubagentProgress(id string) {
 		return
 	}
 	m.setTranscriptBlock(idx, m.subagentProgressBlock(id, sp), transcriptSource{kind: transcriptSourceSubagentProgress, raw: id})
-	m.transcriptDirty = true
 }
 
 // tickSubagentProgress refreshes the elapsed / recent-activity fields of live
@@ -2515,7 +2541,6 @@ func (m *chatTUI) tickSubagentProgress() {
 	if m.nativeScrollback {
 		return
 	}
-	changed := false
 	for id, sp := range m.subagentProgress {
 		if sp.terminal || sp.phase == "" {
 			continue
@@ -2525,10 +2550,6 @@ func (m *chatTUI) tickSubagentProgress() {
 			continue
 		}
 		m.setTranscriptBlock(idx, m.subagentProgressBlock(id, sp), transcriptSource{kind: transcriptSourceSubagentProgress, raw: id})
-		changed = true
-	}
-	if changed {
-		m.transcriptDirty = true
 	}
 }
 
@@ -2761,7 +2782,7 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 	if n == 0 {
 		// Tool finished with no output: clear the "working…" placeholder but
 		// keep the slot (shellTranscriptIdx still points here for late progress).
-		m.transcript[idx] = ""
+		m.rewriteTranscriptBlock(idx, "")
 		return
 	}
 	if full, ok := m.shellOutputs[id]; ok {
@@ -2774,16 +2795,16 @@ func (m *chatTUI) collapseShellSlot(id string, idx int, resultOutput string) {
 				preview[i] = dim(clampPlain(lines[i], m.width-len([]rune(connector))))
 			}
 			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-			m.transcript[idx] = connectorBlock(preview)
+			m.rewriteTranscriptBlock(idx, connectorBlock(preview))
 		} else {
 			rendered := make([]string, total)
 			for i, ln := range lines {
 				rendered[i] = dim(clampPlain(ln, m.width-len([]rune(connector))))
 			}
-			m.transcript[idx] = connectorBlock(rendered)
+			m.rewriteTranscriptBlock(idx, connectorBlock(rendered))
 		}
 	} else {
-		m.transcript[idx] = connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))})
+		m.rewriteTranscriptBlock(idx, connectorBlock([]string{dim(fmt.Sprintf("%d lines", n))}))
 	}
 	m.shellTranscriptIdx[id] = idx
 }
@@ -2824,7 +2845,7 @@ func (m *chatTUI) toggleShellOutput() {
 				preview[i] = dim(clampPlain(lines[i], innerW))
 			}
 			preview[shellPreviewLines] = dim(fmt.Sprintf("… %d more lines (Ctrl+B)", total-shellPreviewLines))
-			m.transcript[lastIdx] = connectorBlock(preview)
+			m.rewriteTranscriptBlock(lastIdx, connectorBlock(preview))
 		}
 	} else {
 		// Expand: show up to shellExpandMaxLines lines.
@@ -2840,9 +2861,8 @@ func (m *chatTUI) toggleShellOutput() {
 		if total > shellExpandMaxLines {
 			rendered = append(rendered, dim(fmt.Sprintf("… %d more lines", total-shellExpandMaxLines)))
 		}
-		m.transcript[lastIdx] = connectorBlock(rendered)
+		m.rewriteTranscriptBlock(lastIdx, connectorBlock(rendered))
 	}
-	m.transcriptDirty = true
 	if m.nativeScrollback {
 		m.commitLine(m.transcript[lastIdx])
 	}
@@ -2895,8 +2915,7 @@ func (m *chatTUI) tickToolRunning() {
 	m.toolStreamFrame++
 	frame := toolWorkingFrames[m.toolStreamFrame%len(toolWorkingFrames)]
 	secs := int(time.Since(m.toolStreamStart).Seconds())
-	m.transcript[m.toolStreamIdx] = connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))})
-	m.transcriptDirty = true
+	m.rewriteTranscriptBlock(m.toolStreamIdx, connectorBlock([]string{dim(fmt.Sprintf(i18n.M.ChatToolWorkingFmt, frame, secs))}))
 }
 
 // commitReasoning closes the live thinking block: the "▎ thinking…" marker is
@@ -2972,9 +2991,10 @@ func (m *chatTUI) streamAnswer() {
 		m.answerIdx = len(m.transcript)
 		m.commitTranscriptSource(source)
 	} else {
+		// setTranscriptBlock invalidates the wrap suffix from answerIdx so the
+		// next Update only re-wraps the live answer block — not the full history.
 		block := m.renderTranscriptSource(source, m.width)
 		m.setTranscriptBlock(m.answerIdx, block, source)
-		m.transcriptDirty = true
 	}
 }
 
@@ -2995,7 +3015,6 @@ func (m *chatTUI) commitPending() {
 	} else {
 		block := m.renderTranscriptSource(source, m.width)
 		m.setTranscriptBlock(m.answerIdx, block, source)
-		m.transcriptDirty = true
 	}
 	m.pending.Reset()
 	m.answerIdx = -1
