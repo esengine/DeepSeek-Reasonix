@@ -30,7 +30,7 @@ func builtinSlashSpecs() []builtinSlashSpec {
 		{name: "/tree", insert: "/tree", hint: i18n.M.CmdTree, showInHelp: true},
 		{name: "/branch", insert: "/branch ", hint: i18n.M.CmdBranch, showInHelp: true},
 		{name: "/switch", insert: "/switch ", hint: i18n.M.CmdSwitchBranch, showInHelp: true},
-		{name: "/todo", insert: "/todo", hint: i18n.M.CmdTodo, showInHelp: true},
+		{name: "/todo", aliases: []string{"/todos"}, insert: "/todo", hint: i18n.M.CmdTodo, showInHelp: true},
 		{name: "/mcp", insert: "/mcp", hint: i18n.M.CmdMcp, showInHelp: true},
 		{name: "/remote", insert: "/remote", hint: i18n.M.CmdRemote, showInHelp: true},
 		{name: "/plugins", aliases: []string{"/plugin"}, insert: "/plugins", hint: i18n.M.CmdPlugins, showInHelp: true},
