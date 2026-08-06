@@ -7,9 +7,27 @@ import (
 	"testing"
 
 	"reasonix/internal/event"
+	"reasonix/internal/hook"
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
 )
+
+func TestToolHooksMayMutateWorkspaceUsesRunnerCapabilities(t *testing.T) {
+	if toolHooksMayMutateWorkspace(hook.NewRunner(nil, "/tmp", nil, nil)) {
+		t.Fatal("empty hook runner must not create a checkpoint coverage gap")
+	}
+	sessionOnly := hook.NewRunner([]hook.ResolvedHook{{Event: hook.SessionStart}}, "/tmp", nil, nil)
+	if toolHooksMayMutateWorkspace(sessionOnly) {
+		t.Fatal("non-tool hooks must not create a tool mutation coverage gap")
+	}
+	preTool := hook.NewRunner([]hook.ResolvedHook{{Event: hook.PreToolUse}}, "/tmp", nil, nil)
+	if !toolHooksMayMutateWorkspace(preTool) {
+		t.Fatal("PreToolUse shell hook must preserve the conservative coverage gap")
+	}
+	if !toolHooksMayMutateWorkspace(&stubHooks{}) {
+		t.Fatal("custom legacy ToolHooks without a capability report must remain conservative")
+	}
+}
 
 // stubHooks blocks PreToolUse for named tools and records what it saw.
 type stubHooks struct {

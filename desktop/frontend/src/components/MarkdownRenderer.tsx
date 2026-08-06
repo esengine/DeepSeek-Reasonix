@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useMemo, useRef } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import type { Components } from "react-markdown";
 import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
@@ -23,6 +23,13 @@ const STATUS_MARKER_RE = /(?:✅|☑|☒|✔️?|✓|\[[xX ]\])/;
 const STATUS_MARKER_GLOBAL_RE = /(?:✅|☑|☒|✔️?|✓|\[[xX ]\])/g;
 const BULLET_RE = /^[-*•]\s+\S/;
 const DIVIDER_RE = /^[\s\-_=─━—]+$/;
+
+// file:/// hrefs come from local-path linkification (remarkLocalPathLinks)
+// and must survive react-markdown's default URL sanitisation, which would
+// otherwise blank them along with javascript: and friends.
+function markdownUrlTransform(value: string): string {
+  return value.startsWith("file:///") ? value : defaultUrlTransform(value);
+}
 
 function splitStatusLine(line: string): string[] {
   const parts = (line.match(STATUS_MARKER_GLOBAL_RE) ?? []).length > 1
@@ -137,6 +144,9 @@ const MarkdownRenderer = memo(function MarkdownRenderer({
       remarkPlugins={reasonixRemarkPlugins}
       rehypePlugins={reasonixRehypePlugins}
       components={components}
+      // file:/// anchors (local path linkification) are safe to keep; the
+      // default transform would blank them along with javascript: etc.
+      urlTransform={markdownUrlTransform}
     >
       {mathContent}
     </ReactMarkdown>

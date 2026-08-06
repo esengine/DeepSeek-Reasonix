@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useT } from "../lib/i18n";
 import type { QuestionAnswer, WireAsk, WireAskQuestion } from "../lib/types";
 import {
   DecisionConfirmBar,
   PromptAction,
+  PromptDescriptionDisclosure,
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
@@ -28,12 +29,15 @@ export function AskCard({
   const [custom, setCustom] = useState<Record<string, string>>({});
   const [customOpen, setCustomOpen] = useState(false);
   const [active, setActive] = useState(0);
-  // Extra decision rows after option labels: custom answer / skip chat.
-  // selectedIndex indexes options, then custom, then skip.
+  // Extra decision row after option labels: custom answer. Skip is a
+  // secondary footer action rather than an answer choice.
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [expandedDescriptionId, setExpandedDescriptionId] = useState<string | null>(null);
+  const [descriptionTruncated, setDescriptionTruncated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const shelfRef = useRef<HTMLDivElement | null>(null);
   const customInputRef = useRef<HTMLInputElement | null>(null);
+  const instanceId = useId();
 
   const questions = ask.questions;
   const q = questions[Math.min(active, questions.length - 1)];
@@ -41,11 +45,17 @@ export function AskCard({
   const progress = `${Math.min(active + 1, questions.length)}/${questions.length}`;
   const hasMultipleQuestions = questions.length > 1;
 
-  // Row layout: [options...] [custom] [skip]
+  // Row layout: [options...] [custom]
   const optionCount = q?.options.length ?? 0;
   const customRowIndex = optionCount;
-  const skipRowIndex = optionCount + 1;
-  const rowCount = optionCount + 2;
+  const rowCount = optionCount + 1;
+  const selectedOption = selectedIndex >= 0 && selectedIndex < optionCount
+    ? q?.options[selectedIndex]
+    : undefined;
+  const selectedDescriptionId = selectedOption
+    ? `${instanceId}-description-${selectedIndex}`
+    : undefined;
+  const descriptionExpanded = selectedDescriptionId !== undefined && expandedDescriptionId === selectedDescriptionId;
 
   useEffect(() => {
     shelfRef.current?.focus();
@@ -61,6 +71,10 @@ export function AskCard({
     setCustomOpen(false);
     setSelectedIndex(0);
   }, [active]);
+
+  useEffect(() => {
+    setExpandedDescriptionId(null);
+  }, [active, ask.id]);
 
   useEffect(() => {
     if (customOpen) customInputRef.current?.focus();
@@ -137,16 +151,11 @@ export function AskCard({
       // Opening custom clears option picks for this question.
       setCustomOpen(true);
       setSel((s) => ({ ...s, [q.id]: [] }));
-    } else if (index === skipRowIndex) {
-      setCustomOpen(false);
-      setCustom((c) => ({ ...c, [q.id]: "" }));
-      setSel((s) => ({ ...s, [q.id]: [] }));
     }
   };
 
   const canConfirm = (): boolean => {
     if (!q || submitting) return false;
-    if (selectedIndex === skipRowIndex) return true;
     if (selectedIndex === customRowIndex) {
       return Boolean(custom[q.id]?.trim());
     }
@@ -161,12 +170,6 @@ export function AskCard({
 
   const confirmSelected = () => {
     if (!q || submitting || !canConfirm()) return;
-    if (selectedIndex === skipRowIndex) {
-      setSubmitting(true);
-      // Skip and continue chat: submit empty answers for the whole ask.
-      onDismiss();
-      return;
-    }
     if (selectedIndex === customRowIndex) {
       finishOrAdvance();
       return;
@@ -239,9 +242,7 @@ export function AskCard({
 
   if (!q) return null;
 
-  const confirmLabel = selectedIndex === skipRowIndex
-    ? t("ask.justChat")
-    : isLast
+  const confirmLabel = isLast
       ? t("common.submit")
       : t("ask.next");
 
@@ -276,35 +277,29 @@ export function AskCard({
             return (
               <PromptAction
                 key={o.label}
+                actionId={`${instanceId}-row-${index}`}
                 keyLabel={q.options.length <= 9 ? String(index + 1) : ""}
                 label={o.label}
                 description={o.description}
+                descriptionId={`${instanceId}-description-${index}`}
+                descriptionDisclosure
+                onDescriptionOverflowChange={selectedIndex === index ? setDescriptionTruncated : undefined}
                 onClick={() => selectRow(index)}
                 // Single-select: cursor owns selection. Multi-select: selected
                 // means checked; active is the keyboard cursor only.
                 selected={q.multi ? on : cursor}
                 active={q.multi ? cursor : false}
                 disabled={submitting}
-                title={o.description || undefined}
               />
             );
           })}
           <PromptAction
+            actionId={`${instanceId}-row-${customRowIndex}`}
             keyLabel=""
             label={t("ask.customAnswer")}
-            description={t("ask.customAnswerDesc")}
             onClick={() => selectRow(customRowIndex)}
             selected={selectedIndex === customRowIndex || customOpen}
             disabled={submitting}
-          />
-          <PromptAction
-            keyLabel=""
-            label={t("ask.justChat")}
-            description={t("ask.justChatDesc")}
-            onClick={() => selectRow(skipRowIndex)}
-            selected={selectedIndex === skipRowIndex}
-            disabled={submitting}
-            tone="danger"
           />
         </>
       }
@@ -324,35 +319,54 @@ export function AskCard({
           </div>
         )
       }
+      note={
+        <>
+          {selectedDescriptionId && descriptionTruncated && (
+            <PromptDescriptionDisclosure
+              descriptionId={`${selectedDescriptionId}-detail`}
+              label={selectedOption?.label}
+              description={selectedOption?.description}
+              expanded={descriptionExpanded}
+              onToggle={() => setExpandedDescriptionId((current) => current === selectedDescriptionId ? null : selectedDescriptionId)}
+              disabled={submitting}
+            />
+          )}
+          {customOpen && (
+            <div className="ask-shelf__custom-row">
+              <input
+                ref={customInputRef}
+                className="ask-shelf__custom"
+                placeholder={t("ask.customPlaceholder")}
+                value={custom[q.id] ?? ""}
+                disabled={submitting}
+                onChange={(e) => setTyped(q, e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canConfirm()) {
+                    e.preventDefault();
+                    confirmSelected();
+                  }
+                  e.stopPropagation();
+                }}
+              />
+            </div>
+          )}
+        </>
+      }
       footer={
         <DecisionConfirmBar
           hint={t("decision.selectHint")}
           confirmLabel={confirmLabel}
           onConfirm={confirmSelected}
+          secondaryLabel={t("ask.justChat")}
+          onSecondary={() => {
+            if (submitting) return;
+            setSubmitting(true);
+            onDismiss();
+          }}
           disabled={submitting}
           confirmDisabled={!canConfirm()}
         />
       }
-    >
-      {customOpen && (
-        <div className="ask-shelf__custom-row">
-          <input
-            ref={customInputRef}
-            className="ask-shelf__custom"
-            placeholder={t("ask.customPlaceholder")}
-            value={custom[q.id] ?? ""}
-            disabled={submitting}
-            onChange={(e) => setTyped(q, e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && canConfirm()) {
-                e.preventDefault();
-                confirmSelected();
-              }
-              e.stopPropagation();
-            }}
-          />
-        </div>
-      )}
-    </PromptShelf>
+    />
   );
 }

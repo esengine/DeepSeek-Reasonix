@@ -60,6 +60,12 @@ func loadSessionTitles(dir string) map[string]string {
 		return m
 	}
 	_ = json.Unmarshal(b, &m)
+	// Older builds could persist titles polluted with internal wrappers
+	// (memory-compiler contracts, transient blocks) — clean at the read
+	// boundary; UserPreviewText is a no-op on clean titles (#5666).
+	for key, title := range m {
+		m[key] = agent.UserPreviewText(title)
+	}
 	return m
 }
 

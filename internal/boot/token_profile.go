@@ -34,6 +34,7 @@ var tokenEconomyCoreBuiltins = []string{
 	"edit_file",
 	"kill_shell",
 	"read_file",
+	"update_goal",
 	"wait",
 	"write_file",
 }
@@ -80,6 +81,7 @@ type toolSourceConnector struct {
 	install       func(context.Context) (string, error)
 	webFetch      func(context.Context) (string, error)
 	lsp           func(context.Context) (string, error)
+	docs          func(context.Context) (string, error)
 	sessions      func(context.Context) (string, error)
 	memory        func(context.Context) (string, error)
 	commands      func(context.Context) (string, error)
@@ -93,7 +95,7 @@ type toolSourceConnector struct {
 func (*toolSourceConnector) Name() string { return "connect_tool_source" }
 
 func (*toolSourceConnector) Description() string {
-	return "Economy mode only: enable optional tools for the current task. For mcp, pass a configured server name or omit it to list servers. Enabled tools are available on the next model request."
+	return "Economy mode only: enable optional tools for the current task, including embedded Reasonix docs. For mcp, pass a configured server name or omit it to list servers. Enabled tools are available on the next model request."
 }
 
 func (*toolSourceConnector) ReadOnly() bool { return true }
@@ -102,7 +104,7 @@ func (*toolSourceConnector) Schema() json.RawMessage {
 	return json.RawMessage(`{
 		"type":"object",
 		"properties":{
-			"source":{"type":"string","description":"Tool source to enable: search, files, workflow, sessions, memory, commands, skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, or read_only_task."},
+			"source":{"type":"string","description":"Tool source to enable: docs, search, files, workflow, sessions, memory, commands, skills, read_only_skill, mcp, lsp, web_fetch, install_source, task, or read_only_task."},
 			"name":{"type":"string","description":"For source=mcp, the configured server name. Omit to list configured MCP servers without connecting them."}
 		},
 		"required":["source"]
@@ -165,6 +167,8 @@ func (t *toolSourceConnector) executeLocked(ctx context.Context, source, name, r
 		out, err = runSourceInstaller(ctx, "web_fetch", t.webFetch)
 	case "lsp":
 		out, err = runSourceInstaller(ctx, "lsp", t.lsp)
+	case "docs":
+		out, err = runSourceInstaller(ctx, "docs", t.docs)
 	case "sessions":
 		out, err = runSourceInstaller(ctx, "sessions", t.sessions)
 	case "memory":
@@ -212,6 +216,8 @@ func normalizeToolSource(source string) string {
 		return "install_source"
 	case "session", "sessions", "history", "conversation", "conversations":
 		return "sessions"
+	case "doc", "docs", "documentation", "help", "manual":
+		return "docs"
 	case "memory", "memories", "remember":
 		return "memory"
 	case "command", "commands", "slash", "slash_command", "slash-command":
@@ -244,6 +250,9 @@ func (t *toolSourceConnector) availableSources() []string {
 	}
 	if t.lsp != nil {
 		out = append(out, "lsp")
+	}
+	if t.docs != nil {
+		out = append(out, "docs")
 	}
 	if t.sessions != nil {
 		out = append(out, "sessions")

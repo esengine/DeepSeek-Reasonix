@@ -10,7 +10,14 @@ import (
 // colorprofile owns the NO_COLOR, CLICOLOR_FORCE, TERM=dumb and isatty rules,
 // so piped output stays plain. Colour fidelity is derived from it, never probed
 // a second time.
-var activeColorProfile = colorprofile.Detect(os.Stdout, os.Environ())
+var activeColorProfile = detectColorProfile(ansiConsoleReady())
+
+func detectColorProfile(ansiReady bool) colorprofile.Profile {
+	if !ansiReady {
+		return colorprofile.ASCII
+	}
+	return colorprofile.Detect(os.Stdout, os.Environ())
+}
 
 func colorOn() bool {
 	return activeColorProfile > colorprofile.ASCII

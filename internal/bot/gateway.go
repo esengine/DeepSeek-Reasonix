@@ -55,15 +55,17 @@ type GatewayConfig struct {
 	//
 	// Reentrancy contract for all GatewayConfig callbacks (OnInbound,
 	// OnSessionReady, OnToolApprovalModeChange): they run synchronously on
-	// gateway-owned dispatch/turn goroutines that Stop drains before returning.
-	// A callback must therefore never call Stop, nor block until a goroutine
-	// that does so completes — Stop would wait on the very goroutine running
-	// the callback, a guaranteed deadlock. Hosts that want to shut the gateway
-	// down in reaction to a callback must trigger the shutdown asynchronously.
+	// gateway-owned dispatch/turn goroutines; OnSessionReady can also run on a
+	// controller recovery/autosave goroutine. Stop drains all of those paths
+	// before returning. A callback must therefore never call Stop, nor block
+	// until a goroutine that does so completes — Stop would wait on the very
+	// goroutine running the callback, a guaranteed deadlock. Hosts that want to
+	// shut the gateway down in reaction to a callback must trigger the shutdown
+	// asynchronously.
 	OnInbound func(InboundMessage)
-	// OnSessionReady notifies the host after the bot has created or reused the
-	// controller for an inbound remote. Hosts may persist the concrete session ID
-	// or keep the remote as a read-only channel.
+	// OnSessionReady notifies the host after the bot has created, reused, or
+	// recovered the controller for an inbound remote. Hosts may persist the
+	// concrete session ID or keep the remote as a read-only channel.
 	OnSessionReady func(InboundMessage, string) error
 	// OnToolApprovalModeChange persists a remote IM request such as /yolo on.
 	// The gateway updates the live session and in-memory defaults first; this
@@ -201,6 +203,8 @@ type botController interface {
 }
 
 type sessionState struct {
+	lifecycleMu      sync.Mutex
+	retired          bool
 	ctrl             botController
 	sink             *sessionEventSink
 	leases           *control.SessionLeaseKeeper
@@ -210,6 +214,12 @@ type sessionState struct {
 	workspaceRoot    string
 	toolApprovalMode string
 	sessionPath      string
+	// mappingDegraded records that this state intentionally runs on a fresh
+	// session because its session_mappings target could not be used at build
+	// time. It keeps later messages (whose profile re-resolves the mapping)
+	// from tearing the state down every turn; convergence back onto the
+	// mapped file happens on the next gateway restart.
+	mappingDegraded  bool
 	cancel           context.CancelFunc
 	pendingAsks      map[string][]event.AskQuestion
 	pendingApprovals map[string]event.Approval
@@ -219,11 +229,18 @@ type sessionState struct {
 	lastActive       time.Time
 }
 
+var errBotSessionRetired = errors.New("bot session retired during recovery")
+
 type sessionRuntimeProfile struct {
 	model            string
 	workspaceRoot    string
 	toolApprovalMode string
 	sessionPath      string
+	// sessionPathOptional marks sessionPath as a persisted session_mappings
+	// binding rather than an explicit /attach: when the mapped file cannot be
+	// loaded or leased, the session degrades to a fresh path instead of
+	// dropping the message (#6917).
+	sessionPathOptional bool
 }
 
 type sessionRuntimeOverride struct {
@@ -635,6 +652,19 @@ func (gw *BotGateway) closeSessionState(state *sessionState) {
 	if state == nil {
 		return
 	}
+	// Serialize retirement with recovery ownership handoffs. Stop unlinks
+	// sessions before turn goroutines drain, so a recovery callback captured by
+	// the controller can still arrive here. Marking the state retired under the
+	// same lock prevents that callback from reacquiring a lease after teardown;
+	// an already-running handoff completes before the lease is released below.
+	state.lifecycleMu.Lock()
+	if state.retired {
+		state.lifecycleMu.Unlock()
+		return
+	}
+	state.retired = true
+	state.lifecycleMu.Unlock()
+
 	gw.mu.Lock()
 	cancel := state.cancel
 	state.cancel = nil
@@ -2195,43 +2225,79 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		gw.mu.Unlock()
 	}
 
-	// 创建新 Controller
+	// Create the lease owner before the controller so automatic conflict
+	// recovery can move ownership to the recovery branch before the controller
+	// commits to writing it. Without this callback the bot kept guarding the
+	// original path while continuing on an unleased recovery path.
 	sessionSink := &sessionEventSink{}
+	leases := control.NewSessionLeaseKeeper()
+	state := &sessionState{
+		sink:             sessionSink,
+		leases:           leases,
+		platform:         msg.Platform,
+		connectionID:     strings.TrimSpace(msg.ConnectionID),
+		model:            profile.model,
+		workspaceRoot:    profile.workspaceRoot,
+		toolApprovalMode: profile.toolApprovalMode,
+		sessionPath:      profile.sessionPath,
+		pendingAsks:      make(map[string][]event.AskQuestion),
+		createdAt:        time.Now(),
+		lastActive:       time.Now(),
+	}
 	gw.logger.Info("bot session creating", "platform", msg.Platform, "chat_type", msg.ChatType, "chat", hashID(msg.ChatID), "session", key[:8], "model", profile.model, "workspace_set", profile.workspaceRoot != "", "tool_approval_mode", profile.toolApprovalMode)
 	ctrl, err := boot.Build(ctx, boot.Options{
-		Model:           profile.model,
-		MaxSteps:        gw.cfg.MaxSteps,
-		MaxStepsKey:     "bot.max_steps",
-		RequireKey:      true,
-		Sink:            sessionSink,
-		WorkspaceRoot:   profile.workspaceRoot,
-		SessionDir:      botSessionDir(profile.workspaceRoot),
-		ApprovalTimeout: gw.approvalTimeout(),
+		Model:              profile.model,
+		MaxSteps:           gw.cfg.MaxSteps,
+		MaxStepsKey:        "bot.max_steps",
+		RequireKey:         true,
+		Sink:               sessionSink,
+		StatsSource:        "bot",
+		WorkspaceRoot:      profile.workspaceRoot,
+		SessionDir:         botSessionDir(profile.workspaceRoot),
+		ApprovalTimeout:    gw.approvalTimeout(),
+		OnSessionRecovered: gw.botSessionRecoveredHandler(key, msg, state),
 	})
 	if err != nil {
+		leases.Release()
 		gw.logger.Error("build controller failed", "err", secrets.RedactError(err))
 		return nil
 	}
-	leases := control.NewSessionLeaseKeeper()
+	state.ctrl = ctrl
 	if profile.sessionPath != "" {
-		if err := leases.Rebind(profile.sessionPath); err != nil {
-			ctrl.Close()
-			leases.Release()
-			gw.logger.Error("attached bot session is in use", "err", control.SessionInUseMessage(err))
-			return nil
-		}
-		loaded, err := agent.LoadSession(profile.sessionPath)
-		if err != nil {
-			ctrl.Close()
-			leases.Release()
-			if os.IsNotExist(err) {
-				gw.logger.Error("attached bot session missing", "session_path", profile.sessionPath)
-			} else {
-				gw.logger.Error("attached bot session load failed", "session_path", profile.sessionPath, "err", err)
+		// A mapped binding degrades to a fresh session on failure; only an
+		// explicit /attach is allowed to hard-fail the message, because the
+		// user named that exact session.
+		degrade := func(reason string, err error) bool {
+			if !profile.sessionPathOptional {
+				return false
 			}
-			return nil
+			gw.logger.Warn("mapped bot session unavailable; starting fresh", "reason", reason, "session_path", profile.sessionPath, "err", err)
+			profile.sessionPath = ""
+			state.sessionPath = ""
+			state.mappingDegraded = true
+			return true
 		}
-		ctrl.Resume(loaded, profile.sessionPath)
+		if err := leases.Rebind(profile.sessionPath); err != nil {
+			if !degrade("lease held elsewhere", err) {
+				ctrl.Close()
+				leases.Release()
+				gw.logger.Error("attached bot session is in use", "err", control.SessionInUseMessage(err))
+				return nil
+			}
+		} else if loaded, err := agent.LoadSession(profile.sessionPath); err != nil {
+			if !degrade("load failed", err) {
+				ctrl.Close()
+				leases.Release()
+				if os.IsNotExist(err) {
+					gw.logger.Error("attached bot session missing", "session_path", profile.sessionPath)
+				} else {
+					gw.logger.Error("attached bot session load failed", "session_path", profile.sessionPath, "err", err)
+				}
+				return nil
+			}
+		} else {
+			ctrl.Resume(loaded, profile.sessionPath)
+		}
 	}
 	ctrl.EnableInteractiveApproval()
 	ctrl.SetToolApprovalMode(profile.toolApprovalMode)
@@ -2261,20 +2327,6 @@ func (gw *BotGateway) getOrCreateSession(ctx context.Context, key string, msg In
 		delete(gw.controllers, key)
 		replace = existing
 	}
-	state := &sessionState{
-		ctrl:             ctrl,
-		sink:             sessionSink,
-		leases:           leases,
-		platform:         msg.Platform,
-		connectionID:     strings.TrimSpace(msg.ConnectionID),
-		model:            profile.model,
-		workspaceRoot:    profile.workspaceRoot,
-		toolApprovalMode: profile.toolApprovalMode,
-		sessionPath:      profile.sessionPath,
-		pendingAsks:      make(map[string][]event.AskQuestion),
-		createdAt:        time.Now(),
-		lastActive:       time.Now(),
-	}
 	gw.controllers[key] = state
 	gw.mu.Unlock()
 	gw.closeSessionState(replace)
@@ -2303,15 +2355,63 @@ func updateSessionStateRuntime(state *sessionState, msg InboundMessage, profile 
 func (gw *BotGateway) sessionProfileForMessage(msg InboundMessage) sessionRuntimeProfile {
 	model, workspaceRoot, toolApprovalMode := gw.sessionOptionsForMessage(msg)
 	var sessionPath string
+	sessionPathOptional := false
 	if override, ok := gw.sessionRuntimeOverrideForMessage(msg); ok {
 		sessionPath = override.sessionPath
 	}
-	return sessionRuntimeProfile{
-		model:            strings.TrimSpace(model),
-		workspaceRoot:    strings.TrimSpace(workspaceRoot),
-		toolApprovalMode: normalizeBotToolApprovalMode(toolApprovalMode),
-		sessionPath:      canonicalBotPath(sessionPath),
+	// A persisted session_mappings binding is the durable chat→session link
+	// the desktop writes into the connection config. Without consuming it
+	// here, every gateway restart or runtime rebuild opened a brand-new
+	// session file for the chat and the configured binding was display-only
+	// (#6917, #6934).
+	if sessionPath == "" {
+		if mapped := gw.sessionMappingPathForMessage(msg); mapped != "" {
+			sessionPath = mapped
+			sessionPathOptional = true
+		}
 	}
+	return sessionRuntimeProfile{
+		model:               strings.TrimSpace(model),
+		workspaceRoot:       strings.TrimSpace(workspaceRoot),
+		toolApprovalMode:    normalizeBotToolApprovalMode(toolApprovalMode),
+		sessionPath:         canonicalBotPath(sessionPath),
+		sessionPathOptional: sessionPathOptional,
+	}
+}
+
+// sessionMappingPathForMessage resolves the persisted session_mappings entry
+// for a message to an existing session file. Only bindings that resolve to a
+// present, readable file participate — a moved or deleted target quietly
+// degrades to normal session creation rather than blocking the chat.
+func (gw *BotGateway) sessionMappingPathForMessage(msg InboundMessage) string {
+	gw.mu.Lock()
+	var mappings []SessionMapping
+	if msg.ConnectionID != "" {
+		if channel, ok := gw.cfg.ConnectionChannels[msg.ConnectionID]; ok {
+			mappings = channel.SessionMappings
+		}
+	}
+	if len(mappings) == 0 {
+		if channel, ok := gw.cfg.Channels[msg.Platform]; ok {
+			mappings = channel.SessionMappings
+		}
+	}
+	gw.mu.Unlock()
+	mapping, ok := matchingSessionMapping(mappings, msg)
+	if !ok {
+		return ""
+	}
+	path := botSessionPathFromTarget(mapping.SessionID)
+	if path == "" {
+		path = botSessionPathFromTarget(mapping.SessionSource)
+	}
+	if path == "" {
+		return ""
+	}
+	if info, err := os.Stat(path); err != nil || info.IsDir() {
+		return ""
+	}
+	return path
 }
 
 func sessionStateMatchesRuntime(state *sessionState, profile sessionRuntimeProfile) bool {
@@ -2333,6 +2433,13 @@ func sessionStateMatchesRuntime(state *sessionState, profile sessionRuntimeProfi
 	}
 	if stateRoot != wantRoot {
 		return false
+	}
+	// A state that already degraded off its mapped session keeps running on
+	// its fresh path even though the profile re-resolves the mapping each
+	// message; rebuilding here would spawn a new session per message while the
+	// mapped file stays unavailable.
+	if profile.sessionPathOptional && state.mappingDegraded {
+		return true
 	}
 	if canonicalBotPath(state.sessionPath) != canonicalBotPath(profile.sessionPath) {
 		return false
@@ -2399,12 +2506,65 @@ func (gw *BotGateway) rememberSessionReady(msg InboundMessage, ctrl botControlle
 	if gw.cfg.OnSessionReady == nil || ctrl == nil {
 		return
 	}
-	sessionID := botSessionTarget(ctrl.SessionPath())
+	gw.rememberSessionPath(msg, ctrl.SessionPath())
+}
+
+func (gw *BotGateway) rememberSessionPath(msg InboundMessage, sessionPath string) {
+	if gw.cfg.OnSessionReady == nil {
+		return
+	}
+	sessionID := botSessionTarget(sessionPath)
 	if sessionID == "" {
 		return
 	}
 	if err := gw.cfg.OnSessionReady(msg, sessionID); err != nil {
 		gw.logger.Warn("remember bot session failed", "platform", msg.Platform, "connection", msg.ConnectionID, "err", err)
+	}
+}
+
+// botSessionRecoveredHandler keeps the controller path, its writer lease, and
+// the remote-to-session mapping on the same recovery generation. The lease
+// handoff runs first and is failure-atomic: if the recovery path is already
+// owned, the controller stays on the original path and the old lease remains
+// held. Mapping updates are limited to this exact sessionState so a late
+// callback from a retired controller cannot overwrite its replacement.
+func (gw *BotGateway) botSessionRecoveredHandler(key string, msg InboundMessage, state *sessionState) func(control.SessionRecoveryInfo) error {
+	return func(info control.SessionRecoveryInfo) error {
+		if state == nil || state.leases == nil {
+			return nil
+		}
+		// Keep the lease handoff and mapping publication atomic with respect to
+		// state retirement. In particular, never let a callback that outlives
+		// Stop reacquire a lease after closeSessionState has released it.
+		state.lifecycleMu.Lock()
+		defer state.lifecycleMu.Unlock()
+		if state.retired {
+			return errBotSessionRetired
+		}
+		if err := state.leases.HandleSessionRecovered(info); err != nil {
+			return err
+		}
+
+		originalPath := canonicalBotPath(info.OriginalPath)
+		recoveryPath := canonicalBotPath(info.RecoveryPath)
+		live := false
+		gw.mu.Lock()
+		if gw.controllers[key] == state {
+			live = true
+			if canonicalBotPath(state.sessionPath) == originalPath {
+				state.sessionPath = recoveryPath
+			}
+			if override, ok := gw.sessionOverrides[key]; ok && canonicalBotPath(override.sessionPath) == originalPath {
+				override.sessionPath = recoveryPath
+				gw.sessionOverrides[key] = override
+			}
+		}
+		gw.mu.Unlock()
+
+		if live {
+			gw.rememberSessionPath(msg, recoveryPath)
+		}
+		return nil
 	}
 }
 

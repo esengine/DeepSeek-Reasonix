@@ -161,6 +161,9 @@ func TestReserveStartForSessionCountsKilledJobUntilExit(t *testing.T) {
 	if !m.KillForSession("session-a", j.ID) {
 		t.Fatal("KillForSession did not find running job")
 	}
+	if got := m.RunningForSession("session-a"); len(got) != 1 || got[0].ID != j.ID || got[0].Status != string(Running) {
+		t.Fatalf("running view while killed job unwinds = %+v, want one operationally-running job", got)
+	}
 	if release, running, ok := m.ReserveStartForSession("session-a", "task", 1); ok {
 		release()
 		t.Fatal("reserved a replacement while killed writer goroutine was still running")
@@ -170,6 +173,9 @@ func TestReserveStartForSessionCountsKilledJobUntilExit(t *testing.T) {
 	close(exit)
 	if res := m.WaitForSession(context.Background(), "session-a", []string{j.ID}, 5); len(res) != 1 || res[0].Status != Killed {
 		t.Fatalf("killed job result = %+v", res)
+	}
+	if got := m.RunningForSession("session-a"); len(got) != 0 {
+		t.Fatalf("running view after killed job exited = %+v, want empty", got)
 	}
 	if release, running, ok := m.ReserveStartForSession("session-a", "task", 1); !ok || running != 0 {
 		t.Fatalf("reservation after exit = (running=%d, ok=%v), want (0, true)", running, ok)
@@ -481,12 +487,15 @@ func TestKillStatusObservableBeforeGoroutineReturns(t *testing.T) {
 	if len(res) != 1 || res[0].Status != Killed {
 		t.Fatalf("want Killed before the goroutine returns, got %+v", res)
 	}
-	if n := len(m.Running()); n != 0 {
-		t.Fatalf("a killed job should not still be Running(), got %d", n)
+	if n := len(m.Running()); n != 1 {
+		t.Fatalf("a killed-but-unwinding job must remain operationally running, got %d", n)
 	}
 
 	close(release)
 	m.Wait(context.Background(), []string{j.ID}, 5)
+	if n := len(m.Running()); n != 0 {
+		t.Fatalf("job remained operationally running after goroutine exit, got %d", n)
+	}
 }
 
 // Close cancels every still-running job.
@@ -788,13 +797,16 @@ func TestCloseWithGraceTimesOutForNonCooperativeJob(t *testing.T) {
 	if got := result.TimedOut[0]; got.ID != j.ID || got.Kind != "task" || got.Label != "cleanup" || got.Waited <= 0 {
 		t.Fatalf("timed out job = %+v, want id=%s kind=task label=cleanup waited>0", got, j.ID)
 	}
-	if running := m.Running(); len(running) != 0 {
-		t.Fatalf("cancelled close jobs should not remain Running, got %+v", running)
+	if running := m.Running(); len(running) != 1 || running[0].ID != j.ID {
+		t.Fatalf("timed-out close job must remain operationally running, got %+v", running)
 	}
 
 	releaseJob()
 	res := m.Wait(context.Background(), []string{j.ID}, 5)
 	if len(res) != 1 || res[0].Status != Killed {
 		t.Fatalf("want killed after delayed close cleanup, got %+v", res)
+	}
+	if running := m.Running(); len(running) != 0 {
+		t.Fatalf("close job remained running after delayed cleanup, got %+v", running)
 	}
 }

@@ -110,7 +110,11 @@ func (a *Agent) maintainStaleToolResults(mode toolResultMaintenanceMode) (PruneS
 	if st.Results == 0 {
 		return st, nil
 	}
-	a.session.Rewrite(next)
+	reason := "prune"
+	if mode == toolResultSnip {
+		reason = "snip"
+	}
+	a.session.Rewrite(next, reason)
 	return st, nil
 }
 

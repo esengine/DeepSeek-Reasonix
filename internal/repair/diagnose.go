@@ -77,7 +77,7 @@ func Diagnose(ctx context.Context, opts DiagnoseOptions) (DiagnosticReport, erro
 	for _, check := range configReport.Checks {
 		if check.Exists && !check.Valid {
 			valid = false
-			report.add("error", "config.invalid_toml", check.Scope, "Configuration cannot be parsed: "+check.Error, "Run reasonix-guard repair; add --project only for a project config.")
+			report.add("error", "config.invalid_toml", check.Scope, "Configuration cannot be parsed: "+check.Error, "Run reasonix doctor repair; add --project only for a project config.")
 		}
 	}
 	checkSensitiveFileMode(&report, config.UserConfigPath(), "global config")
@@ -95,7 +95,7 @@ func Diagnose(ctx context.Context, opts DiagnoseOptions) (DiagnosticReport, erro
 	// `tier` lines on disk, so use the variant that never writes config files.
 	cfg, err := config.LoadForRootReadOnly(root)
 	if err != nil {
-		report.add("error", "config.load_failed", "runtime", err.Error(), "Start in Safe Mode, then inspect global and project configuration.")
+		report.add("error", "config.load_failed", "runtime", err.Error(), "Run reasonix doctor repair, then inspect the reported global or project configuration.")
 		return report, nil
 	}
 	validateProviders(&report, cfg)
@@ -291,7 +291,7 @@ func checkDerivedJSON(report *DiagnosticReport) {
 			continue
 		}
 		if !json.Valid(b) {
-			report.add("warning", "derived.invalid_json", "derived:"+name, fmt.Sprintf("Derived desktop state %s is malformed.", filepath.Base(path)), "Run reasonix-guard rebuild --target "+name+".")
+			report.add("warning", "derived.invalid_json", "derived:"+name, fmt.Sprintf("Derived desktop state %s is malformed.", filepath.Base(path)), "Run reasonix doctor repair, or delete the broken derived file after backing it up.")
 		}
 	}
 }

@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/eventwire"
 	"reasonix/internal/permission"
 	"reasonix/internal/provider"
 	"reasonix/internal/shellparse"
@@ -56,8 +57,17 @@ type updateSink struct {
 	approve func(id string, allow, session, persist bool)
 	answer  func(id string, answers []event.AskAnswer)
 	status  func(event.Event)
-	mu      sync.Mutex
-	turnCtx context.Context
+	// extensionSurface records the client's negotiated
+	// reasonix.extensionSurface support: structured surfaces go out as vendor
+	// session/update payloads on top of the always-sent text fallback.
+	extensionSurface bool
+	// speculativeToolIDs tracks parent-sampling tool IDs published under the
+	// active stream_attempt (attempt-scoped partials only). Guarded by mu —
+	// parent sampling and background sub-agents may Emit concurrently.
+	speculativeToolIDs map[string]struct{}
+	activeAttemptID    string
+	mu                 sync.Mutex
+	turnCtx            context.Context
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
@@ -86,6 +96,10 @@ func (s *updateSink) bindAnswer(fn func(id string, answers []event.AskAnswer)) {
 // bindStatus installs the vendor-status observer. It receives typed events,
 // never raw reasoning text or terminal transcripts.
 func (s *updateSink) bindStatus(fn func(event.Event)) { s.status = fn }
+
+// bindExtensionSurface records whether the client negotiated structured
+// extension-surface support in the initialize handshake.
+func (s *updateSink) bindExtensionSurface(supported bool) { s.extensionSurface = supported }
 
 func (s *updateSink) setTurnContext(ctx context.Context) {
 	s.mu.Lock()
@@ -128,12 +142,30 @@ func (s *updateSink) Emit(e event.Event) {
 		}
 		s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(e.Text)})
 
+	case event.StreamAttempt:
+		// Attempt bookkeeping only. ACP still skips partial ToolDispatch (no
+		// pending card until full args arrive after commit), so discard must not
+		// invent failures for unpublished IDs. Full dispatches and parentId
+		// nested tools are real work and are never speculative.
+		s.mu.Lock()
+		switch e.StreamAttempt.Action {
+		case event.StreamAttemptBegin:
+			s.activeAttemptID = e.StreamAttempt.ID
+			s.speculativeToolIDs = nil
+		case event.StreamAttemptCommit, event.StreamAttemptDiscard:
+			s.activeAttemptID = ""
+			s.speculativeToolIDs = nil
+		}
+		s.mu.Unlock()
+
 	case event.ToolDispatch:
 		// Skip the early (Partial) dispatch and later same-ID preview refresh: ACP
 		// expects one pending tool_call and has no file-diff update payload.
 		if e.Tool.Partial || e.Tool.Refreshed {
 			return
 		}
+		// Full dispatches only arrive after a committed sampling attempt (or from
+		// nested sub-agents). Never mark them speculative.
 		// todo_write is the agent's task list; mirror it as an ACP plan update so
 		// the client renders structured progress alongside the tool_call.
 		if e.Tool.Name == "todo_write" {
@@ -157,6 +189,11 @@ func (s *updateSink) Emit(e event.Event) {
 		if e.Tool.Err != "" {
 			status = "failed"
 			text = e.Tool.Err
+		}
+		if e.Tool.ID != "" {
+			s.mu.Lock()
+			delete(s.speculativeToolIDs, e.Tool.ID)
+			s.mu.Unlock()
 		}
 		s.send(toolCallUpdateMsg{
 			SessionUpdate: "tool_call_update",
@@ -198,7 +235,100 @@ func (s *updateSink) Emit(e event.Event) {
 		// clients such as Zed already know how to render this interaction.
 		turnCtx := s.currentTurnContext()
 		go s.requestAsk(turnCtx, e.Ask)
+
+	case event.ExtensionSurface, event.ExtensionStatus:
+		s.emitExtension(e)
 	}
+}
+
+// emitExtension maps one extension structured-UI event onto ACP updates. A
+// client that negotiated reasonix.extensionSurface receives the structured DTO
+// (the shared eventwire JSON contract) in a vendor session/update variant;
+// every client — including that one, belt and suspenders — also receives the
+// flattened text fallback as an ordinary agent_message_chunk. Blocking
+// form/request prompts never arrive here: the hub routes those through
+// AskRequest, which already rides the session/request_permission round-trip.
+func (s *updateSink) emitExtension(e event.Event) {
+	p := e.Extension
+	if p == nil {
+		return
+	}
+	if s.extensionSurface {
+		if dto := eventwire.ToWireExtensionSurface(p); dto != nil {
+			s.send(extensionSurfaceUpdate{
+				SessionUpdate: extensionSurfaceUpdateKind,
+				Meta: map[string]any{
+					"reasonix.io": map[string]any{
+						"extensionSurface": dto,
+					},
+				},
+			})
+		}
+	}
+	text := extensionSurfaceText(p)
+	if text == "" {
+		return
+	}
+	prefix := "\n\n"
+	if extensionSeverityWarns(p) {
+		prefix += "[warning] "
+	}
+	s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(prefix + text)})
+}
+
+// extensionSurfaceText flattens one extension surface payload to plain text
+// for clients without structured-surface support: status →
+// "[plugin] label: detail", card → title + body + fields, form → title +
+// message, notification → title + body.
+func extensionSurfaceText(p *event.ExtensionSurfacePayload) string {
+	var b strings.Builder
+	write := func(s string) {
+		if s == "" {
+			return
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(s)
+	}
+	switch {
+	case p.Status != nil:
+		line := "[" + p.PluginID + "] " + p.Status.Label
+		if p.Status.Detail != "" {
+			line += ": " + p.Status.Detail
+		}
+		write(line)
+	case p.Card != nil:
+		write(p.Card.Title)
+		body := p.Card.Text
+		if p.Card.Markdown != "" {
+			body = p.Card.Markdown
+		}
+		write(body)
+		for _, f := range p.Card.Fields {
+			write(f.Key + ": " + f.Value)
+		}
+	case p.Form != nil:
+		write(p.Form.Title)
+		write(p.Form.Message)
+	case p.Notification != nil:
+		write(p.Notification.Title)
+		write(p.Notification.Body)
+	}
+	return b.String()
+}
+
+// extensionSeverityWarns reports whether the payload carries a warn/error
+// severity, which earns the same "[warning] " prefix as event.Notice.
+func extensionSeverityWarns(p *event.ExtensionSurfacePayload) bool {
+	severity := ""
+	if p.Status != nil {
+		severity = p.Status.Severity
+	}
+	if p.Notification != nil {
+		severity = p.Notification.Severity
+	}
+	return severity == "warn" || severity == "error"
 }
 
 func (s *updateSink) send(update any) {
@@ -213,9 +343,15 @@ func (s *updateSink) replay(msgs []provider.Message) {
 	for _, m := range msgs {
 		switch m.Role {
 		case provider.RoleUser:
+			// Replay the user-authored view, not the persisted wire form:
+			// UserMessageText strips injected transient blocks (<response-language>
+			// etc.) and unwraps memory-compiler contracts, same as every other
+			// surface (#6882). A turn that was pure injection replays as nothing.
 			text := m.Content
 			if steer, ok := agent.SteerText(text); ok {
 				text = steer
+			} else {
+				text = agent.UserMessageText(m)
 			}
 			if text != "" {
 				s.send(messageChunk{SessionUpdate: "user_message_chunk", Content: textBlock(text)})
@@ -224,8 +360,10 @@ func (s *updateSink) replay(msgs []provider.Message) {
 			if m.ReasoningContent != "" {
 				s.send(messageChunk{SessionUpdate: "agent_thought_chunk", Content: textBlock(m.ReasoningContent)})
 			}
-			if m.Content != "" {
-				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(m.Content)})
+			// Same display filter as live emission: goal markers and evidence
+			// blocks stay in history for parsing but never reach the client.
+			if display := agent.DisplayAssistantText(m.Content); display != "" {
+				s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(display)})
 			}
 			for _, tc := range m.ToolCalls {
 				s.send(toolCall{

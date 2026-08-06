@@ -73,7 +73,7 @@ func TestStatusExtensionTracksMultipleSessionsAndUsage(t *testing.T) {
 			sink.Emit(event.Event{Kind: event.Phase, Source: event.UsageSourceExecutor, Text: "executor · implementing"})
 			sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{
 				PromptTokens: 10, CompletionTokens: 4, ReasoningTokens: 2,
-				CacheHitTokens: 7, CacheMissTokens: 3,
+				CacheHitTokens: 7, CacheMissTokens: 3, Estimated: true,
 			}, Pricing: &provider.Pricing{CacheHit: 0.1, Input: 1, Output: 2, Currency: "USD"}, UsageSource: event.UsageSourceExecutor})
 			sink.Emit(event.Event{Kind: event.Usage, Usage: &provider.Usage{
 				PromptTokens: 5, CompletionTokens: 1, CacheMissTokens: 5,
@@ -108,6 +108,9 @@ func TestStatusExtensionTracksMultipleSessionsAndUsage(t *testing.T) {
 	}
 	if usage.UsageSource != "mixed" || usage.CacheHitRatio == nil || usage.EstimatedCost == nil || usage.Currency == nil || *usage.Currency != "USD" {
 		t.Fatalf("usage metadata = %+v", usage)
+	}
+	if !usage.Estimated {
+		t.Fatalf("cumulative usage lost estimated marker: %+v", usage)
 	}
 	secondStatus := getStatus(t, client, second)
 	if secondStatus.Sequence != initialSecond.Sequence || secondStatus.Usage.Cumulative.PromptTokens != 0 {
@@ -197,8 +200,8 @@ func TestRestoreStatusMarksInterruptedTurnPaused(t *testing.T) {
 			ReadyForReview: true,
 			Risks:          []string{},
 		},
-		TurnUsage:  persistedUsageAccumulator{PromptTokens: 3, Events: 1},
-		Cumulative: persistedUsageAccumulator{PromptTokens: 11, Events: 2},
+		TurnUsage:  persistedUsageAccumulator{PromptTokens: 3, Estimated: true, Events: 1},
+		Cumulative: persistedUsageAccumulator{PromptTokens: 11, Estimated: true, Events: 2},
 	})
 	snapshot := restored.snapshot()
 	if snapshot.state != "idle" || snapshot.phase != "recovery_paused" {
@@ -212,6 +215,9 @@ func TestRestoreStatusMarksInterruptedTurnPaused(t *testing.T) {
 	}
 	if snapshot.turnUsage.PromptTokens != 3 || snapshot.cumulative.PromptTokens != 11 {
 		t.Fatalf("interrupted usage was lost: turn=%+v cumulative=%+v", snapshot.turnUsage, snapshot.cumulative)
+	}
+	if !snapshot.turnUsage.Estimated || !snapshot.cumulative.Estimated {
+		t.Fatalf("interrupted estimated marker was lost: turn=%+v cumulative=%+v", snapshot.turnUsage, snapshot.cumulative)
 	}
 }
 

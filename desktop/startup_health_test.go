@@ -87,38 +87,68 @@ func TestShutdownWaitsForRuntimeLifecycleMutation(t *testing.T) {
 	}
 }
 
-// TestShutdownDoesNotBlessStartupBeforeReady pins the recovery contract that a
-// clean exit before the window ever reached domReady keeps the incomplete
-// startup record: quitting a build that boots but never paints must not reset
-// the crash-loop counter (nor bless a probationary update), or repeated
-// attempts would never reach the Guard recovery threshold and the rollback
-// backups would be deleted under a broken release.
-func TestShutdownDoesNotBlessStartupBeforeReady(t *testing.T) {
+// TestShutdownRecordsLKGOnlyAfterReady pins that last-known-good config is only
+// written after the window reached domReady. A quit before paint must not
+// rewrite the LKG snapshot from an incomplete boot.
+func TestShutdownRecordsLKGOnlyAfterReady(t *testing.T) {
 	isolateDesktopUserDirs(t)
-	tracker := repair.NewStartupTracker(filepath.Join(t.TempDir(), "startup-state.json"))
-	if _, err := tracker.Begin("test-version", false); err != nil {
-		t.Fatal(err)
-	}
 	a := NewApp()
-	a.startupTracker = tracker
-
+	// Pre-ready shutdown is a no-op for LKG (startupReady is false).
 	a.shutdown(context.Background())
-	state, err := tracker.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if state.Phase != "starting" {
-		t.Fatalf("pre-ready shutdown must keep the incomplete phase, got %q", state.Phase)
-	}
-
 	a.startupReady.Store(true)
+	// Post-ready shutdown attempts RecordHealthyConfig; missing user config is fine.
 	a.shutdown(context.Background())
-	state, err = tracker.Read()
-	if err != nil {
+}
+
+func TestCaptureAndCommitPendingUpdateHealthUsesExactStartupIdentity(t *testing.T) {
+	originalRead := readPendingUpdateForHealth
+	originalMark := markPendingUpdateHealthyAfterReady
+	t.Cleanup(func() {
+		readPendingUpdateForHealth = originalRead
+		markPendingUpdateHealthyAfterReady = originalMark
+	})
+	tx := &repair.UpdateTransaction{
+		SchemaVersion: 1,
+		ToVersion:     version,
+		CreatedAt:     "2026-08-05T00:00:00Z",
+		Platform:      "darwin/arm64",
+		TargetKind:    "app-bundle",
+		TargetPath:    "/Applications/Reasonix.app",
+		BackupPath:    "/Applications/Reasonix.app.reasonix-update-backup",
+	}
+	readPendingUpdateForHealth = func() (*repair.UpdateTransaction, error) { return tx, nil }
+	app := NewApp()
+	capturePendingUpdateHealthIdentity(app)
+	wantID := repair.UpdateTransactionID(tx)
+	if app.healthyUpdateCreatedAt != tx.CreatedAt || app.healthyUpdateTransactionID != wantID {
+		t.Fatalf("captured health identity=(%q,%q), want (%q,%q)", app.healthyUpdateCreatedAt, app.healthyUpdateTransactionID, tx.CreatedAt, wantID)
+	}
+	called := false
+	markPendingUpdateHealthyAfterReady = func(running, createdAt, transactionID string) error {
+		called = true
+		if running != version || createdAt != tx.CreatedAt || transactionID != wantID {
+			t.Fatalf("health commit=(%q,%q,%q)", running, createdAt, transactionID)
+		}
+		return nil
+	}
+	if err := app.commitPendingUpdateHealth(); err != nil {
 		t.Fatal(err)
 	}
-	if state.Phase != "clean-exit" {
-		t.Fatalf("post-ready shutdown must mark clean-exit, got %q", state.Phase)
+	if !called {
+		t.Fatal("exact startup transaction was not committed")
+	}
+}
+
+func TestCapturePendingUpdateHealthRejectsDifferentTargetVersion(t *testing.T) {
+	originalRead := readPendingUpdateForHealth
+	t.Cleanup(func() { readPendingUpdateForHealth = originalRead })
+	readPendingUpdateForHealth = func() (*repair.UpdateTransaction, error) {
+		return &repair.UpdateTransaction{ToVersion: version + "-other", CreatedAt: "2026-08-05T00:00:00Z"}, nil
+	}
+	app := NewApp()
+	capturePendingUpdateHealthIdentity(app)
+	if app.healthyUpdateCreatedAt != "" || app.healthyUpdateTransactionID != "" {
+		t.Fatalf("captured unrelated transaction: %+v", app)
 	}
 }
 

@@ -28,6 +28,11 @@ type FileOverlay interface {
 // locally; err is only meaningful when ok is true. Runners are only consulted
 // when the local OS sandbox is not enforcing — a host terminal cannot honor
 // the local confinement configuration.
+//
+// envOverrides, when non-nil, is a small map of environment variables the host
+// terminal should set for the command (typically TMPDIR/TMP/TEMP for the
+// session-private temporary directory). Callers must not pass a full host
+// environment dump — only the overrides Reasonix owns.
 type TerminalRunner interface {
-	RunCommand(ctx context.Context, command, cwd string, timeout time.Duration) (output string, ok bool, err error)
+	RunCommand(ctx context.Context, command, cwd string, timeout time.Duration, envOverrides map[string]string) (output string, ok bool, err error)
 }

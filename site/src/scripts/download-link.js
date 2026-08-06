@@ -24,8 +24,7 @@ export function releaseChannelFromURL(input, base = "https://reasonix.io/") {
   if (url.hash !== "#start") return "";
   const pane = url.searchParams.get("download") || "";
   if (pane !== "desktop" && pane !== "cli") return "";
-  const channel = url.searchParams.get("channel") || "";
-  return channel === "stable" || channel === "preview" ? channel : "";
+  return "";
 }
 
 export function downloadURLForPane(input, pane, channel, base = "https://reasonix.io/") {
@@ -37,11 +36,8 @@ export function downloadURLForPane(input, pane, channel, base = "https://reasoni
     return "";
   }
   url.searchParams.set("download", pane);
-  if (pane === "desktop" || pane === "cli") {
-    url.searchParams.set("channel", channel === "preview" ? "preview" : "stable");
-  } else {
-    url.searchParams.delete("channel");
-  }
+  void channel;
+  url.searchParams.delete("channel");
   url.hash = "start";
   return url.href;
 }

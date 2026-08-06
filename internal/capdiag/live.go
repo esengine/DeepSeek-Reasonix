@@ -20,7 +20,7 @@ func lookPath(cmd string) (string, error) {
 // connection results, and always closes the Host (including stdio children).
 // Persistence (startup stats / schema cache) is disabled so --live stays
 // free of cache/state side effects under Reasonix home.
-func probeLiveMCP(rep *MCPReport, cfg *config.Config, root, home string, timeout time.Duration) []Issue {
+func probeLiveMCP(rep *MCPReport, cfg *config.Config, root, home, reasonixHome string, timeout time.Duration) []Issue {
 	var issues []Issue
 	if cfg == nil {
 		return issues
@@ -99,10 +99,13 @@ func probeLiveMCP(rep *MCPReport, cfg *config.Config, root, home string, timeout
 		}
 	}
 	for _, f := range host.Failures() {
-		errText := sanitizeErrTextWithPaths(f.Error, root, home)
+		errText := sanitizeErrTextWithPaths(f.Error, root, home, reasonixHome)
 		if i, ok := byName[f.Name]; ok {
 			rep.Servers[i].RuntimeStatus = "failed"
 			rep.Servers[i].Error = errText
+			rep.Servers[i].StartupStage = f.Stage
+			rep.Servers[i].StartupElapsedMS = f.Elapsed.Milliseconds()
+			rep.Servers[i].Stderr = sanitizeErrTextWithPaths(f.Stderr, root, home, reasonixHome)
 		}
 		issues = append(issues, Issue{
 			Severity: "error", Code: "mcp.start_failed", Subsystem: "mcp",

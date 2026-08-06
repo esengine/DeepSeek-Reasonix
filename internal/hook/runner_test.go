@@ -43,6 +43,27 @@ func TestNewRunnerWithHooks(t *testing.T) {
 	}
 }
 
+func TestToolMutationHooksEnabled(t *testing.T) {
+	tests := []struct {
+		name  string
+		event Event
+		want  bool
+	}{
+		{name: "session hook", event: SessionStart, want: false},
+		{name: "pre tool", event: PreToolUse, want: true},
+		{name: "post tool", event: PostToolUse, want: true},
+		{name: "post tool failure", event: PostToolUseFailure, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := NewRunner([]ResolvedHook{{Event: tt.event}}, "/tmp", nil, nil)
+			if got := r.ToolMutationHooksEnabled(); got != tt.want {
+				t.Fatalf("ToolMutationHooksEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Runner.PreToolUse ---
 
 func TestRunnerPreToolUseNoHooks(t *testing.T) {

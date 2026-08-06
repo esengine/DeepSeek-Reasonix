@@ -27,7 +27,7 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi there\"}}]}\n\ndata: [DONE]\n\n")
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"hi there\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":2,\"total_tokens\":5}}\n\ndata: [DONE]\n\n")
 	}))
 	defer srv.Close()
 
@@ -49,12 +49,16 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 		t.Fatalf("Stream after retries: %v", err)
 	}
 	var got strings.Builder
+	var usage *provider.Usage
 	for chunk := range ch {
 		if chunk.Type == provider.ChunkError {
 			t.Fatalf("unexpected stream error: %v", chunk.Err)
 		}
 		if chunk.Type == provider.ChunkText {
 			got.WriteString(chunk.Text)
+		}
+		if chunk.Type == provider.ChunkUsage {
+			usage = chunk.Usage
 		}
 	}
 	if got.String() != "hi there" {
@@ -65,6 +69,26 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 	}
 	if len(attempts) != 2 || attempts[0] != 1 || attempts[1] != 2 {
 		t.Errorf("retry-notify attempts = %v, want [1 2]", attempts)
+	}
+	if usage == nil || usage.RequestCount != 3 {
+		t.Errorf("usage request count = %+v, want 3", usage)
+	}
+}
+
+func TestMergeUsageCountsStreamsNotUsageChunks(t *testing.T) {
+	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2, CacheWriteTokens: 2, CacheWriteBilledTokens: 2.5}
+	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2, CacheWriteTokens: 3, CacheWriteBilledTokens: 6}
+	oneStream := mergeUsage(firstChunk, secondChunk, false)
+	if oneStream.RequestCount != 2 {
+		t.Fatalf("same-stream request count = %d, want 2", oneStream.RequestCount)
+	}
+	if oneStream.CacheWriteTokens != 5 || oneStream.CacheWriteBilledTokens != 8.5 {
+		t.Fatalf("same-stream cache writes = raw %d billed %v, want 5/8.5", oneStream.CacheWriteTokens, oneStream.CacheWriteBilledTokens)
+	}
+	nextStream := &provider.Usage{PromptTokens: 3, TotalTokens: 3, RequestCount: 1}
+	combined := mergeUsage(oneStream, nextStream, true)
+	if combined.RequestCount != 3 {
+		t.Fatalf("multi-stream request count = %d, want 3", combined.RequestCount)
 	}
 }
 
@@ -276,7 +300,7 @@ func TestStreamContinuesDeepSeekLengthWithAssistantPrefix(t *testing.T) {
 	if usageChunks != 1 || doneChunks != 1 || usage == nil {
 		t.Fatalf("usage chunks=%d done chunks=%d usage=%+v", usageChunks, doneChunks, usage)
 	}
-	if usage.PromptTokens != 30 || usage.CompletionTokens != 5 || usage.TotalTokens != 35 ||
+	if usage.PromptTokens != 30 || usage.CompletionTokens != 5 || usage.TotalTokens != 35 || usage.RequestCount != 2 ||
 		usage.CacheHitTokens != 26 || usage.CacheMissTokens != 4 || usage.ReasoningTokens != 2 || usage.FinishReason != "stop" {
 		t.Fatalf("merged usage = %+v", usage)
 	}
@@ -771,6 +795,55 @@ func TestBuildRequestOmitsResolvedToolCallMetadata(t *testing.T) {
 	}
 }
 
+// TestToolResultEmptyNameStillSerialized guards MiMo #4711: a strict
+// OpenAI-compatible backend rejects a role=tool message whose `name` key is
+// absent ("Param Incorrect, name is not set"). A legacy empty-name tool result
+// must still carry the key (as an empty string) rather than vanish via
+// omitempty.
+func TestToolResultEmptyNameStillSerialized(t *testing.T) {
+	c := &client{model: "deepseek-v4"}
+	req := c.buildRequest(provider.Request{Messages: []provider.Message{
+		// Both the tool_call and its result have an empty name: the legacy
+		// #4727 shape where backfill has no source to recover from. The wire
+		// must still carry the name key so strict backends don't 400.
+		{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "call_1", Name: "", Arguments: `{}`}}},
+		{Role: provider.RoleTool, ToolCallID: "call_1", Name: "", Content: "file contents"},
+	}})
+	b, err := json.Marshal(req.Messages)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	// The tool result message must carry the name key even though the name is
+	// empty — strict backends 400 a missing key.
+	var msgs []map[string]any
+	if err := json.Unmarshal(b, &msgs); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	roles := []string{msgs[0]["role"].(string), msgs[1]["role"].(string)}
+	if roles[1] != "tool" {
+		t.Fatalf("second message role = %q, want tool", roles[1])
+	}
+	// Tool message: name key must be present (empty string serialized).
+	if _, ok := msgs[1]["name"]; !ok {
+		t.Fatalf("tool message lost its name key (must serialize empty): %s", b)
+	}
+	if name, _ := msgs[1]["name"].(string); name != "" {
+		t.Fatalf("tool message name = %q, want empty (legacy empty-name result)", name)
+	}
+	// Non-tool messages: name key must stay absent (byte-stable prefix).
+	for i, m := range msgs {
+		if roles[i] == "tool" {
+			continue
+		}
+		if _, ok := m["name"]; ok {
+			t.Fatalf("non-tool message %d leaked name key: %s", i, b)
+		}
+	}
+}
+
 // TestStreamRepairsDanglingToolCalls reproduces and guards the DeepSeek 400
 // "An assistant message with 'tool_calls' must be followed by tool messages
 // responding to each 'tool_call_id'". A resumed/interrupted session can carry an
@@ -1157,6 +1230,80 @@ func TestBuildRequestKimiK3OfficialWireShape(t *testing.T) {
 	}
 }
 
+func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
+	newClient := func(t *testing.T, baseURL, model string, maxOutputTokens int) *client {
+		t.Helper()
+		p, err := New(provider.Config{
+			Name: "test", BaseURL: baseURL, Model: model,
+			Extra: map[string]any{"max_output_tokens": maxOutputTokens},
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return p.(*client)
+	}
+
+	deepseek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", 0).buildRequest(provider.Request{})
+	if deepseek.MaxTokens != provider.DefaultReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
+		t.Fatalf("DeepSeek output budget = max_tokens %d, max_completion_tokens %d", deepseek.MaxTokens, deepseek.MaxCompletionTokens)
+	}
+
+	thinkingDisabledProvider, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Extra: map[string]any{"thinking": "disabled", "max_output_tokens": 0},
+	})
+	if err != nil {
+		t.Fatalf("New thinking-disabled DeepSeek: %v", err)
+	}
+	thinkingDisabled := thinkingDisabledProvider.(*client).buildRequest(provider.Request{})
+	if thinkingDisabled.MaxTokens != 0 || thinkingDisabled.MaxCompletionTokens != 0 {
+		t.Fatalf("thinking-disabled DeepSeek received an automatic output budget: %+v", thinkingDisabled)
+	}
+	effortDisabledProvider, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Extra: map[string]any{"effort": "disabled", "max_output_tokens": 0},
+	})
+	if err != nil {
+		t.Fatalf("New effort-disabled DeepSeek: %v", err)
+	}
+	effortDisabled := effortDisabledProvider.(*client).buildRequest(provider.Request{})
+	if effortDisabled.MaxTokens != 0 || effortDisabled.Thinking == nil || effortDisabled.Thinking.Type != "disabled" {
+		t.Fatalf("effort-disabled DeepSeek request = %+v, want thinking disabled without an automatic budget", effortDisabled)
+	}
+
+	explicitDisabledProvider, err := New(provider.Config{
+		Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro",
+		Extra: map[string]any{"thinking": "disabled", "max_output_tokens": 8192},
+	})
+	if err != nil {
+		t.Fatalf("New explicitly capped DeepSeek: %v", err)
+	}
+	explicitDisabled := explicitDisabledProvider.(*client).buildRequest(provider.Request{})
+	if explicitDisabled.MaxTokens != 8192 {
+		t.Fatalf("explicit thinking-disabled DeepSeek budget = %d, want 8192", explicitDisabled.MaxTokens)
+	}
+
+	disabledDeepSeek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", -1).buildRequest(provider.Request{})
+	if disabledDeepSeek.MaxTokens != 0 || disabledDeepSeek.MaxCompletionTokens != 0 {
+		t.Fatalf("disabled DeepSeek output budget = %+v", disabledDeepSeek)
+	}
+
+	officialOpenAI := newClient(t, "https://api.openai.com/v1", "o3", 8192).buildRequest(provider.Request{})
+	if officialOpenAI.MaxTokens != 0 || officialOpenAI.MaxCompletionTokens != 8192 {
+		t.Fatalf("official OpenAI output budget = max_tokens %d, max_completion_tokens %d", officialOpenAI.MaxTokens, officialOpenAI.MaxCompletionTokens)
+	}
+
+	gateway := newClient(t, "https://gateway.example/v1", "plain-chat", 8192).buildRequest(provider.Request{})
+	if gateway.MaxTokens != 8192 || gateway.MaxCompletionTokens != 0 {
+		t.Fatalf("compatible gateway output budget = max_tokens %d, max_completion_tokens %d", gateway.MaxTokens, gateway.MaxCompletionTokens)
+	}
+
+	unspecifiedGateway := newClient(t, "https://gateway.example/v1", "plain-chat", 0).buildRequest(provider.Request{})
+	if unspecifiedGateway.MaxTokens != 0 || unspecifiedGateway.MaxCompletionTokens != 0 {
+		t.Fatalf("unspecified compatible gateway received a budget: %+v", unspecifiedGateway)
+	}
+}
+
 func TestBuildRequestDeepSeekThinking(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -1321,6 +1468,96 @@ func TestNewZhipuSetsFlag(t *testing.T) {
 	}
 }
 
+func TestNewExplicitGLMProtocolOnGateway(t *testing.T) {
+	for _, tc := range []struct {
+		effort string
+		want   string
+	}{
+		{effort: "", want: "enabled"},
+		{effort: "enabled", want: "enabled"},
+		{effort: "disabled", want: "disabled"},
+	} {
+		p, err := New(provider.Config{
+			Name:    "glm-gateway",
+			BaseURL: "https://gateway.example.com/v1",
+			Model:   "glm-5.2",
+			APIKey:  "k",
+			Extra: map[string]any{
+				"reasoning_protocol": "glm",
+				"effort":             tc.effort,
+			},
+		})
+		if err != nil {
+			t.Fatalf("New(explicit GLM, effort=%q): %v", tc.effort, err)
+		}
+		c := p.(*client)
+		if !c.zhipu {
+			t.Fatalf("explicit GLM protocol did not select GLM wire shape")
+		}
+		req := c.buildRequest(provider.Request{})
+		if req.Thinking == nil || req.Thinking.Type != tc.want {
+			t.Fatalf("effort=%q thinking = %+v, want %q", tc.effort, req.Thinking, tc.want)
+		}
+		if req.ReasoningEffort != "" {
+			t.Fatalf("explicit GLM protocol sent reasoning_effort=%q", req.ReasoningEffort)
+		}
+	}
+}
+
+func TestBuildRequestRoundTripsGLMReasoningHistory(t *testing.T) {
+	build := func(effort string) (*client, chatRequest) {
+		p, err := New(provider.Config{
+			Name:    "glm-gateway",
+			BaseURL: "https://tokenrhythm.studio/v1",
+			Model:   "glm-5.2",
+			APIKey:  "k",
+			Extra: map[string]any{
+				"reasoning_protocol": "glm",
+				"effort":             effort,
+			},
+		})
+		if err != nil {
+			t.Fatalf("New(GLM, effort=%q): %v", effort, err)
+		}
+		c := p.(*client)
+		out := c.buildRequest(provider.Request{Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "inspect"},
+			{Role: provider.RoleAssistant, ReasoningContent: "read main.go first", ToolCalls: []provider.ToolCall{{
+				ID: "call_1", Name: "read_file", Arguments: `{"path":"main.go"}`,
+			}}},
+			{Role: provider.RoleTool, ToolCallID: "call_1", Name: "read_file", Content: "package main"},
+			{Role: provider.RoleUser, Content: "continue"},
+			{Role: provider.RoleAssistant, Content: "done", ReasoningContent: "combine the result"},
+		}})
+		return c, out
+	}
+
+	enabled, enabledReq := build("enabled")
+	if enabled.RequiresToolCallReasoning() || !enabled.RequiresReasoningRoundTrip() {
+		t.Fatal("thinking-enabled GLM must preserve complete reasoning history without enabling DeepSeek recovery policy")
+	}
+	if got := enabledReq.Messages[1].ReasoningContent; got == nil || *got != "read main.go first" {
+		t.Fatalf("enabled GLM reasoning_content = %v, want provider-issued reasoning", got)
+	}
+	if got := enabledReq.Messages[4].ReasoningContent; got == nil || *got != "combine the result" {
+		t.Fatalf("enabled GLM plain-turn reasoning_content = %v, want complete reasoning history", got)
+	}
+	if provider.WarnOnMissingToolCallReasoning(enabled) {
+		t.Fatal("GLM must preserve available reasoning without entering DeepSeek-specific missing-reasoning recovery")
+	}
+
+	disabled, disabledReq := build("disabled")
+	if disabled.RequiresToolCallReasoning() || disabled.RequiresReasoningRoundTrip() {
+		t.Fatal("thinking-disabled GLM must not require new reasoning round trips")
+	}
+	if got := disabledReq.Messages[1].ReasoningContent; got == nil || *got != "read main.go first" {
+		t.Fatalf("disabled GLM must preserve reasoning from an earlier thinking round, got %v", got)
+	}
+	if got := disabledReq.Messages[4].ReasoningContent; got == nil || *got != "combine the result" {
+		t.Fatalf("disabled GLM must preserve plain reasoning from an earlier thinking round, got %v", got)
+	}
+}
+
 // TestBuildRequestGenericThinking covers the vendor-agnostic `thinking` config
 // field on a provider we don't auto-detect: thinking.type is emitted as set, and
 // an empty/unset field leaves thinking off the wire entirely.
@@ -1382,6 +1619,21 @@ func TestBuildRequestDeepSeekDisabled(t *testing.T) {
 	}{
 		{name: "effort-disabled", extra: map[string]any{"effort": "disabled"}},
 		{name: "thinking-disabled", extra: map[string]any{"thinking": "disabled"}},
+		{
+			name: "effort-disabled-with-explicit-levels",
+			extra: map[string]any{
+				"effort":            "disabled",
+				"supported_efforts": []string{"disabled", "high", "max"},
+			},
+		},
+		{
+			name: "thinking-disabled-overrides-explicit-levels",
+			extra: map[string]any{
+				"thinking":          "disabled",
+				"effort":            "max",
+				"supported_efforts": []string{"high"},
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := base
@@ -1635,27 +1887,25 @@ func TestBuildRequestAlwaysSendsReasoningKeyOnDeepSeekToolCalls(t *testing.T) {
 	}
 }
 
-func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) {
+func TestWarnOnMissingToolCallReasoningFollowsDeepSeekThinkingModels(t *testing.T) {
 	tests := []struct {
-		name  string
 		model string
 		want  bool
 	}{
-		{name: "exact flash", model: "deepseek-v4-flash", want: false},
-		{name: "namespaced flash", model: "deepseek/deepseek-v4-flash", want: false},
-		{name: "exact pro", model: "deepseek-v4-pro", want: true},
-		{name: "namespaced pro", model: "deepseek/deepseek-v4-pro", want: true},
-		{name: "mixed case pro", model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
-		{name: "reasoner", model: "deepseek-reasoner", want: true},
-		{name: "r1", model: "deepseek-ai/DeepSeek-R1-0528", want: true},
-		{name: "generic deepseek", model: "deepseek-chat", want: false},
-		{name: "gateway deepseek v3", model: "deepseek-ai/DeepSeek-V3.2", want: false},
-		{name: "prover is not pro", model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
-		{name: "dated pro variant", model: "deepseek-v4-pro-0923", want: true},
-		{name: "dotted pro variant", model: "deepseek-v4-pro.1", want: true},
+		{model: "deepseek-v4-flash", want: true},
+		{model: "deepseek/deepseek-v4-flash", want: true},
+		{model: "deepseek-v4-pro", want: true},
+		{model: "deepseek/deepseek-v4-pro", want: true},
+		{model: "deepseek-ai/DeepSeek-V4-Pro", want: true},
+		{model: "deepseek-reasoner", want: true},
+		{model: "deepseek-ai/DeepSeek-R1-0528", want: true},
+		{model: "deepseek-ai/DeepSeek-V3.2", want: true},
+		{model: "deepseek-chat", want: false},
+		{model: "deepseek-ai/DeepSeek-Prover-V2", want: false},
+		{model: "custom-model", want: false},
 	}
 	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+		t.Run(tc.model, func(t *testing.T) {
 			p, err := New(provider.Config{
 				Name:    "deepseek-proxy",
 				BaseURL: "https://gateway.example/v1",
@@ -1675,6 +1925,17 @@ func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) 
 		})
 	}
 
+	explicitThinking, err := New(provider.Config{
+		Name: "custom-thinking", BaseURL: "https://gateway.example/v1", Model: "custom-model", APIKey: "k",
+		Extra: map[string]any{"reasoning_protocol": "deepseek", "thinking": "enabled"},
+	})
+	if err != nil {
+		t.Fatalf("New explicit thinking provider: %v", err)
+	}
+	if !provider.WarnOnMissingToolCallReasoning(explicitThinking) {
+		t.Fatal("explicit DeepSeek thinking must diagnose missing tool-call reasoning")
+	}
+
 	p, err := New(provider.Config{
 		Name:    "deepseek-v4-pro-openai-protocol",
 		BaseURL: "https://gateway.example/v1",
@@ -1687,6 +1948,35 @@ func TestWarnOnMissingToolCallReasoningMatchesDeepSeekModelFamily(t *testing.T) 
 	}
 	if provider.WarnOnMissingToolCallReasoning(p) {
 		t.Fatal("OpenAI protocol should not warn using DeepSeek reasoning_content policy")
+	}
+	if provider.WarnOnMissingToolCallReasoning(&client{deepseek: true, thinkingType: "disabled"}) {
+		t.Fatal("disabled thinking must not diagnose missing tool-call reasoning")
+	}
+}
+
+func TestMissingToolCallReasoningWarningFingerprintTracksOpenAIConfiguration(t *testing.T) {
+	newProvider := func(baseURL, model string) provider.Provider {
+		p, err := New(provider.Config{
+			Name: "deepseek", BaseURL: baseURL, Model: model, APIKey: "secret",
+			Extra: map[string]any{"reasoning_protocol": "deepseek", "effort": "high"},
+		})
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		return p
+	}
+	first := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-pro"))
+	same := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-pro"))
+	changedEndpoint := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://other.example/v1", "deepseek-v4-pro"))
+	changedModel := provider.MissingToolCallReasoningWarningFingerprint(newProvider("https://gateway.example/v1", "deepseek-v4-flash"))
+	if first != same {
+		t.Fatal("equivalent OpenAI configurations produced different fingerprints")
+	}
+	if first == changedEndpoint || first == changedModel {
+		t.Fatal("endpoint or model change did not re-key the warning fingerprint")
+	}
+	if len(first) != 64 || strings.Contains(first, "gateway") || strings.Contains(first, "deepseek") {
+		t.Fatalf("fingerprint is not an opaque SHA-256 digest: %q", first)
 	}
 }
 

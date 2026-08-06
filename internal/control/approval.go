@@ -57,6 +57,10 @@ type approvalManager struct {
 	// requestApproval): Sink implementations must not block and must not call
 	// back into Ask or the tool-approval chain, or they deadlock the prompt.
 	promptMu sync.Mutex
+	// promptEmitMu serializes prompt registration and emission with an SSE
+	// attach handoff. It is separate from promptMu because promptMu remains
+	// held while waiting for the user's answer.
+	promptEmitMu sync.Mutex
 }
 
 func newApprovalManager(policy permission.Policy, mode string, timeout time.Duration) approvalManager {
@@ -262,6 +266,7 @@ func (a *approvalManager) registerDecisionKindWithInput(tool, subject, reason st
 		autoDrain = a.autoApprovalWouldAllowLocked(tool, subject)
 	}
 	a.approvals[id] = pendingApproval{
+		id:   id,
 		tool: tool, subject: subject, reason: reason, rawInput: append(json.RawMessage(nil), rawInput...), fresh: fresh, requireHuman: requireHuman,
 		autoDrain: autoDrain, kind: kind, recovery: rec, reply: reply,
 	}
@@ -345,6 +350,20 @@ func (a *approvalManager) resolve(id string) pendingApproval {
 	p := a.approvals[id]
 	delete(a.approvals, id)
 	return p
+}
+
+// resolveTool removes id only when it belongs to the expected specialized
+// decision surface. A mismatched bridge call must not consume another approval
+// type that happens to share the same short numeric id.
+func (a *approvalManager) resolveTool(id, tool string) (pendingApproval, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p, ok := a.approvals[id]
+	if !ok || p.tool != tool {
+		return pendingApproval{}, false
+	}
+	delete(a.approvals, id)
+	return p, true
 }
 
 // registerAsk allocates an ask ID, records the pending question batch, and

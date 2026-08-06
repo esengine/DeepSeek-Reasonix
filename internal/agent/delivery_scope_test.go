@@ -45,24 +45,24 @@ func deliveryGoalContext(id, task string) context.Context {
 	return WithDeliveryExecutionScope(context.Background(), DeliveryExecutionScope{ID: id, TaskText: task})
 }
 
-func TestDeliveryGoalContinueDefersTaskMutationExpectation(t *testing.T) {
+func TestDeliveryGoalFinalAnswerAlwaysGatesMutationExpectation(t *testing.T) {
 	reg := tool.NewRegistry()
 	reg.Add(fakeReadFileTool{})
 	reg.Add(fakeWriterTool{})
 	prov := &scriptedProvider{name: "delivery", turns: [][]provider.Chunk{
 		{toolCallChunk("read", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "Investigation complete.\n\n[goal:continue]"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "Implemented.\n\n[goal:complete]"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Investigation complete."}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Implemented."}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
 	ctx := deliveryGoalContext("goal-1", "fix the crash in main.go")
-	if err := a.Run(ctx, "investigate the crash"); err != nil {
-		t.Fatalf("continue turn: %v", err)
-	}
-	err := a.Run(ctx, "continue the goal")
+	// A read-only final answer is gated on the mutation expectation immediately:
+	// the host no longer defers readiness for marker-carrying turns, the Goal
+	// FSM absorbs the failure and continues with the missing requirements.
+	err := a.Run(ctx, "investigate the crash")
 	var readiness *FinalReadinessError
 	if !errors.As(err, &readiness) || !strings.Contains(readiness.Reason, "state change") {
-		t.Fatalf("complete without any goal mutation err = %v, want mutation readiness failure", err)
+		t.Fatalf("read-only final answer err = %v, want mutation readiness failure", err)
 	}
 }
 
@@ -75,8 +75,8 @@ func TestDeliveryGoalScopeCarriesSignedOffMutationAcrossTurns(t *testing.T) {
 		{toolCallChunk("review", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("verify", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("signoff", "complete_step", `{"step":"Ship main","result":"implemented","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "Implementation complete.\n\n[goal:continue]"}, {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "Final summary.\n\n[goal:complete]"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Implementation complete."}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Final summary."}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
 	ctx := deliveryGoalContext("goal-1", "implement main")
@@ -99,7 +99,7 @@ func TestDeliveryGoalRestoredPendingMutationCompletesWithoutNewWrite(t *testing.
 		{toolCallChunk("review", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("verify", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("signoff", "complete_step", `{"step":"Ship main","result":"implemented","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "Recovered and verified.\n\n[goal:complete]"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "Recovered and verified."}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
 	a.RestoreDeliveryCheckpoint(evidence.DeliveryCheckpoint{
@@ -126,10 +126,10 @@ func TestDeliveryGoalNewMutationInvalidatesPriorSignoff(t *testing.T) {
 		{toolCallChunk("review-1", "read_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("verify-1", "bash", `{"command":"go test ./..."}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("signoff-1", "complete_step", `{"step":"Ship main","result":"implemented","evidence":[{"kind":"verification","summary":"tests pass","command":"go test ./..."}]}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "First chunk done.\n\n[goal:continue]"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "First chunk done."}, {Type: provider.ChunkDone}},
 		{toolCallChunk("criteria-2", "todo_write", `{"todos":[{"content":"Polish main","status":"in_progress"}]}`), {Type: provider.ChunkDone}},
 		{toolCallChunk("write-2", "write_file", `{"path":"main.go"}`), {Type: provider.ChunkDone}},
-		{{Type: provider.ChunkText, Text: "All done.\n\n[goal:complete]"}, {Type: provider.ChunkDone}},
+		{{Type: provider.ChunkText, Text: "All done."}, {Type: provider.ChunkDone}},
 	}}
 	a := New(prov, reg, NewSession(""), Options{DeliveryProfile: true}, event.Discard)
 	ctx := deliveryGoalContext("goal-1", "implement main")

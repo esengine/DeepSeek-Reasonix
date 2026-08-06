@@ -20,6 +20,8 @@ description: |
 vendor: "Reasonix Contributors"
 homepage: "https://github.com/esengine/DeepSeek-Reasonix"
 license: "MIT"
+scripts:
+  postinstall: ./build/linux/postinstall.sh
 # Runtime libraries the WebKitGTK 4.1 build links against (-tags webkit2_41); apt
 # pulls them in on install. These package names ship from Ubuntu 22.04 / Debian 12 on.
 # pkexec is required for the in-app Polkit authorization update path.
@@ -32,8 +34,8 @@ contents:
     dst: /usr/bin/reasonix-desktop
     file_info:
       mode: 0755
-  - src: ./build/bin/reasonix-guard
-    dst: /usr/bin/reasonix-guard
+  - src: ./build/bin/reasonix-launcher
+    dst: /usr/bin/reasonix-launcher
     file_info:
       mode: 0755
   - src: ./build/bin/reasonix

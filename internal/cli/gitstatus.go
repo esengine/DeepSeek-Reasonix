@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,7 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"reasonix/internal/secrets"
+	"reasonix/internal/gitcmd"
 )
 
 const gitStatusTimeout = 700 * time.Millisecond
@@ -73,11 +72,10 @@ func loadGitStatus(ctx context.Context, cwd string) (gitStatus, error) {
 }
 
 func runGit(ctx context.Context, cwd string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := gitcmd.Command(ctx, "", args...)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Env = append(secrets.ProcessEnv(), "GIT_OPTIONAL_LOCKS=0")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err

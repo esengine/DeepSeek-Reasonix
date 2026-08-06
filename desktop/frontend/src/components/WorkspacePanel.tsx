@@ -52,9 +52,11 @@ import type {
   FilePreview,
   GitCommitView,
   GitCommitDetailView,
+  RewindResultView,
   WorkspaceChangeDetailView,
   WorkspaceChangesView,
 } from "../lib/types";
+import { workspaceGitStatusLabel } from "../lib/workspaceChanges";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { formatSelectionReference, languageFor } from "../lib/selectedTextContext";
 import { cleanGitDiff } from "../lib/diff";
@@ -196,6 +198,7 @@ export function WorkspacePanel({
   onOpenInTerminal,
   onRequestPanelWidth,
   onFileTreeRefresh,
+  onSessionRevertCommitted,
   refreshKey,
   initialViewMode = "files",
   revealPathRequest,
@@ -221,6 +224,7 @@ export function WorkspacePanel({
   onOpenInTerminal?: (path: string) => void;
   onRequestPanelWidth?: (width: number) => void;
   onFileTreeRefresh?: () => void;
+  onSessionRevertCommitted?: (tabId: string, result: RewindResultView) => void;
   refreshKey?: number;
   initialViewMode?: "files" | "changed";
   revealPathRequest?: WorkspaceRevealRequest | null;
@@ -875,22 +879,61 @@ export function WorkspacePanel({
         {changes.map((change) => {
           const dir = parentPath(change.path);
           return (
-            <button
-              key={change.path}
-              className="workspace-change"
-              type="button"
-              onClick={() => selectFile(change.path)}
-            >
-              <FileText size={14} />
-              <span className="workspace-change__body">
-                <span className="workspace-change__name">{basename(change.path)}</span>
-                {dir && <span className="workspace-change__path">{dir}</span>}
-                {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
-              </span>
-              <span className="workspace-change__meta">
-                {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{change.gitStatus}</span>}
-              </span>
-            </button>
+            <div key={change.path} className="workspace-change-row">
+              <button
+                className="workspace-change"
+                type="button"
+                onClick={() => selectFile(change.path)}
+              >
+                <FileText size={14} />
+                <span className="workspace-change__body">
+                  <span className="workspace-change__name">{basename(change.path)}</span>
+                  {dir && <span className="workspace-change__path">{dir}</span>}
+                  {change.latestPrompt && <span className="workspace-change__detail">{change.latestPrompt}</span>}
+                </span>
+                <span className="workspace-change__meta">
+                  {change.gitStatus && <span className="workspace-change__badge workspace-change__badge--git">{workspaceGitStatusLabel(change.gitStatus, t)}</span>}
+                </span>
+              </button>
+              {change.canSessionRevert && change.sources.includes("session") && (
+                <button
+                  type="button"
+                  className="workspace-change__revert"
+                  title={t("workspace.revertSessionFile")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void (async () => {
+                      const plan = await app.PreviewWorkspaceFileRevertForTab(workspaceTabId, change.path);
+                      if (!plan?.ok && !plan?.canFiles && !(plan?.conflicts?.length)) {
+                        return;
+                      }
+					  const resolution = plan?.conflicts?.length ? "overwrite_checkpoint" : "";
+                      if (plan?.conflicts?.length) {
+                        const ok = window.confirm(
+                          t("workspace.revertSessionFileConflict", {
+                            path: change.path,
+                            conflicts: (plan.conflicts || []).join("\n"),
+                          }),
+                        );
+                        if (!ok) return;
+                      }
+                      const result = await app.CommitWorkspaceFileRevertForTab(
+                        workspaceTabId,
+                        plan.planId || "",
+                        resolution,
+                      );
+                      if (result?.ok) {
+                        onSessionRevertCommitted?.(workspaceTabId, result);
+                        void loadWorkspaceChanges();
+                        if (selectedPath === change.path) void loadChangeDetail();
+                      }
+                    })();
+                  }}
+                >
+                  {t("workspace.revertSessionFileShort")}
+                </button>
+              )}
+            </div>
           );
         })}
       </div>
@@ -1216,6 +1259,15 @@ export function WorkspacePanel({
     [effectiveTreeWidth, maxTreeWidthForPanel, setSavedTreeWidth],
   );
 
+  useEffect(() => {
+    setCodeSearchRequestPending(false);
+    setCodeSearchRequestPath(null);
+  }, [selectedPath]);
+
+  const consumeCodeSearchRequest = useCallback(() => {
+    setCodeSearchRequestPending(false);
+  }, []);
+
   if (!open) return null;
 
   const selectedTextFromPreview = (): string => {
@@ -1420,19 +1472,11 @@ export function WorkspacePanel({
       !preview.binary &&
       !isMarkdown,
   );
-  useEffect(() => {
-    setCodeSearchRequestPending(false);
-    setCodeSearchRequestPath(null);
-  }, [selectedPath]);
-
   const openCodeSearch = () => {
     if (!codePreviewActive || !selectedPath) return;
     setCodeSearchRequestPath(selectedPath);
     setCodeSearchRequestPending(true);
   };
-  const consumeCodeSearchRequest = useCallback(() => {
-    setCodeSearchRequestPending(false);
-  }, []);
   const treeBlankMenuItems: ContextMenuItem[] = [
     {
       key: "refresh-tree",

@@ -1,6 +1,8 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
 import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
+import { parseTodos } from "../lib/tools";
+import { resolveTodoPanelTodos } from "../lib/todoVisibility";
 import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
@@ -93,6 +95,21 @@ function usage(source: string): WireUsage {
 console.log("\nuse controller meta");
 
 {
+  eq(
+    modelSwitchNoticeText("active work is still running; running=false; pending_prompt=false; background_jobs=2; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
+    "The model cannot change while 2 background jobs are running. Open Background jobs in the status bar to stop them.",
+    "model busy guard names the background-job blocker",
+  );
+  eq(
+    effortSwitchNoticeText("active work is still running; running=true; pending_prompt=false; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing effort"),
+    "Reasoning effort cannot change while the current answer is running. Stop it first.",
+    "effort busy guard names the running-answer blocker",
+  );
+  eq(
+    tokenModeSwitchNoticeText("active work is still running; running=true; pending_prompt=true; background_jobs=0; finish or cancel the current turn, answer pending prompts, and stop background jobs before changing token mode"),
+    "Work mode cannot change while a prompt is waiting for your response. Handle it first.",
+    "work mode busy guard prioritizes the pending prompt blocker",
+  );
   eq(
     modelSwitchNoticeText("finish or cancel the current turn, answer pending prompts, and stop background jobs before changing model"),
     "The model cannot change yet. Stop the current answer, handle pending prompts, or wait for background jobs to finish.",
@@ -246,6 +263,21 @@ console.log("\nuse controller meta");
     "unapplied steer keeps the user's guidance while localizing the warning",
   );
   eq(
+    localizedNoticeText("reworded recovery copy", "session_recovery_forked"),
+    "The session changed on disk, so the unsaved local transcript was kept as a conflict copy.",
+    "session recovery fork localization uses its stable notice code",
+  );
+  eq(
+    localizedNoticeText("reworded covered adoption", "session_recovery_adopted_covered"),
+    "The session changed on disk, so Reasonix adopted the newer transcript; the local changes were already covered.",
+    "covered session adoption localization uses its stable notice code",
+  );
+  eq(
+    localizedNoticeText("reworded depth cap", "session_recovery_depth_cap"),
+    "Repeated save conflicts were detected, so the current conflict copy was saved in place.",
+    "session recovery depth-cap localization uses its stable notice code",
+  );
+  eq(
     localizedNoticeText("Tool round limit reached; asking the assistant to summarize progress.", "unknown_future_code"),
     "Tool round limit reached; asking the assistant to summarize progress.",
     "an unknown notice code falls back to exact-text matching",
@@ -260,7 +292,7 @@ console.log("\nuse controller meta");
 {
   let s = reducer(initialState, {
     type: "event",
-    e: { kind: "notice", level: "warn", text: "session conflicts kept recurring; kept the transcript on the current recovery branch" },
+    e: { kind: "notice", level: "warn", code: "session_recovery_depth_cap", text: "reworded recovery maintenance" },
   });
   s = reducer(s, {
     type: "event",
@@ -382,6 +414,50 @@ console.log("\nuse controller meta");
 
   const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
   eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");
+}
+
+{
+  const delayedLiveMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  const hydrated = reducer({ ...initialState, meta: delayedLiveMeta }, { type: "meta", meta: delayedLiveMeta });
+  const noLiveTodo = hydrated.items.find((item) => item.kind === "tool" && item.name === "todo_write");
+  eq(
+    resolveTodoPanelTodos(hydrated.meta?.canonicalTodos, noLiveTodo ? parseTodos(noLiveTodo.args) : undefined),
+    delayedLiveMeta.canonicalTodos,
+    "panel uses fresh Meta todos while the live todo_write event is delayed",
+  );
+
+  const staleMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "in_progress" },
+      { content: "Ship the fix", status: "pending" },
+    ],
+  });
+  const liveArgs = JSON.stringify({
+    todos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  let liveState = reducer({ ...initialState, meta: staleMeta }, { type: "event", e: { kind: "turn_started" } });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_dispatch", tool: { id: "todo-live", name: "todo_write", args: liveArgs, readOnly: true } },
+  });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_result", tool: { id: "todo-live", name: "todo_write", readOnly: true, output: "Todos updated" } },
+  });
+  const liveTodo = liveState.items.find((item) => item.kind === "tool" && item.name === "todo_write");
+  eq(
+    JSON.stringify(resolveTodoPanelTodos(liveState.meta?.canonicalTodos, liveTodo ? parseTodos(liveTodo.args) : undefined)),
+    JSON.stringify(JSON.parse(liveArgs).todos),
+    "panel switches to the live todo_write snapshot after it arrives",
+  );
 }
 
 {

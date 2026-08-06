@@ -22,6 +22,7 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `notebook_edit` | false | Edit one cell of a Jupyter notebook (.ipynb). Target a cell by 0-based cell_number (or cell_id). edit_mode: "replace" (default) swaps the cell's source; "insert" adds a new cell after cell_number (use -1 to prepend at the top), taking cell_type and new_source; "delete" removes the cell. cell_type is "code" or "markdown" (required for insert). Editing a code cell clears its outputs. Prefer this over edit_file for notebooks - it keeps the JSON valid. |
 | `read_file` | true | Read a text file with optional line offset/limit. Output prefixes each line with its 1-based number so subsequent edit_file calls can target exact lines. Use `offset` and `limit` to page through large files; the tool reports total length and pagination hints in a trailer. |
 | `todo_write` | true | Record and update a structured task list for the current work. Send the COMPLETE list every call - it replaces the previous one. Use it to plan multi-step work and show progress: keep exactly one item in_progress at a time, and flip an item to completed the moment it's done (don't batch completions). Skip it for trivial single-step tasks. |
+| `update_goal` | true | Report this turn's disposition for the active goal: `continue` (work is ongoing - give a concrete next_action), `complete` (fully done and verified), or `blocked` (only the user can unblock). The host validates the claim against Delivery acceptance criteria and budget and decides whether to continue automatically. Outside an active goal turn the call fails closed without changing any state. |
 | `wait` | true | Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job. |
 | `web_fetch` | true | Fetch a URL over HTTPS/HTTP and return its text content. HTML pages are reduced to readable text; JSON / plain text / markdown bodies come back verbatim. Use to read documentation pages, API responses, or source files hosted somewhere the local filesystem can't reach. |
 | `write_file` | false | Write content to a file at the given path (overwriting existing content). Creates parent directories as needed. |
@@ -94,11 +95,18 @@ not change when MCP inventory changes. Balanced Executor deliberately retains
 its direct `mcp__*` tools, so its overall provider prefix may still change when
 those direct tools are installed, connected, or refreshed.
 
-`ask`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
+`ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
-`read_only_task`, `read_session`, `read_skill`, `remember`, `research`,
+`read_only_task`, `read_session`, `read_skill`, `read_subagent_result`, `remember`, `research`,
 `review`, `run_skill`, `security_review`, `slash_command`, `task`.
+
+`parallel_tasks` and `fleet` keep their combined result below the single-tool
+output limit by returning a fair preview and a stable `Subagent reference` for
+every persisted child. `read_subagent_result` pages through one referenced
+final answer by UTF-8 byte offset, so long parallel research remains lossless
+without injecting every report into the parent context at once. References are
+restricted to the current conversation lineage and workspace.
 
 `use_capability` (`action` = `list` | `inspect` | `call` | `decline`): Delivery
 Executor, plus both Planner and Executor in Balanced dual-model sessions; not
@@ -118,7 +126,8 @@ enable optional sources on demand:
 `read_file`, `wait`, `write_file`.
 
 Everything else is explicit and on demand. `connect_tool_source` supports
-`search` (`code_index`, `glob`, `grep`, `ls`), `files` (specialized move,
+`docs` (the read-only embedded `docs` tool), `search` (`code_index`, `glob`,
+`grep`, `ls`), `files` (specialized move,
 multi-edit, delete, and notebook tools), `workflow` (`todo_write`,
 `complete_step`), `sessions` (`history`, `list_sessions`, `read_session`),
 `memory` (`memory`, `remember`, `forget`), `commands` (`slash_command`),

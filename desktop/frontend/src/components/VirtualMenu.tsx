@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 // VirtualMenu is the shared scroll container for the composer's "/" and "@"
@@ -20,9 +20,14 @@ export function VirtualMenu<T>({
   estimateSize?: (item: T, index: number) => number;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const getItemKey = useCallback(
+    (index: number) => itemKey(items[index], index),
+    [itemKey, items],
+  );
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scrollRef.current,
+    getItemKey,
     estimateSize: (index) => estimateSize?.(items[index], index) ?? 34,
     overscan: 10,
     // Measurement callbacks can arrive during React's commit phase. Let the
@@ -42,7 +47,7 @@ export function VirtualMenu<T>({
       <div ref={virtualizer.containerRef} className="slashmenu__sizer">
         {virtualizer.getVirtualItems().map((row) => (
           <div
-            key={itemKey(items[row.index], row.index)}
+            key={row.key}
             data-index={row.index}
             ref={virtualizer.measureElement}
             className="slashmenu__row"

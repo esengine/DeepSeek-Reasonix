@@ -18,8 +18,8 @@ func doctorCapabilitiesCommand(args []string) int {
 	jsonOut := fs.Bool("json", false, "print a single JSON object to stdout")
 	live := fs.Bool("live", false, "start automatic MCP servers in an isolated Host (may network)")
 	timeoutStr := fs.String("timeout", "", "per-server live probe timeout (1s-60s; requires --live; default 5s)")
-	if err := fs.Parse(args); err != nil {
-		return 2
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return code
 	}
 	if fs.NArg() != 0 {
 		fmt.Fprintln(os.Stderr, "usage: reasonix doctor capabilities [--root PATH] [--json] [--live] [--timeout 5s]")

@@ -1,10 +1,8 @@
 name: Release desktop
 
-# Desktop (Wails) release line. Stable releases are called by
-# release-stable.yml after its single GitHub environment approval. Desktop
-# prerelease tags are relayed by release-desktop-trigger.yml to this workflow on
-# protected main-v2. Production SignPath requests therefore always have the
-# exact main-v2 origin; both public channels use the production policy.
+# Desktop (Wails) release line. Official releases are called by
+# release-stable.yml after its single GitHub environment approval. Production
+# SignPath requests therefore have the exact protected main-v2 origin.
 #
 # Wails cannot cross-compile a CGO/WebKit binary, so build/ fans out to one native
 # runner per platform. Artifacts are minisign-signed (MINISIGN_* secrets), a
@@ -12,25 +10,19 @@ name: Release desktop
 # release and mirrored to R2 (the updater reads R2 first, then the crash worker
 # release gateway; stable desktop releases own GitHub's repository-wide "latest").
 #
-# The same build/sign/manifest pipeline serves two channels. Approved
-# orchestrators publish Stable or Preview, while manual dispatch supports
-# Stable/RC recovery and non-publishing Preview signing checks. Preview advances
-# only R2's preview/ pointer and never appears on the GitHub releases page. The
-# legacy canary/ pointer is mirrored for clients released before the rename.
+# Historical workflow-call inputs still understand Preview artifacts so old
+# runs remain diagnosable. They are not exposed by manual dispatch and cannot
+# create a new public Preview release.
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: "Release channel"
+        description: "Recovery channel"
         type: choice
-        options: [stable, preview]
+        options: [stable]
         default: stable
       tag:
         description: "stable: tag to publish (e.g. desktop-v1.1.0)"
-        required: false
-        type: string
-      base_version:
-        description: "Preview signing checks: intended next stable version, e.g. 1.5.0"
         required: false
         type: string
       production_signing_smoke:
@@ -73,12 +65,12 @@ on:
         default: false
         type: boolean
       orchestrator:
-        description: "Trusted release orchestrator: stable or preview"
+        description: "Trusted release orchestrator (legacy Preview calls remain readable)"
         required: false
         default: stable
         type: string
       preview_number:
-        description: "Canonical Preview ordinal supplied by release-preview.yml"
+        description: "Legacy Preview ordinal for old workflow-call compatibility"
         required: false
         default: ""
         type: string
@@ -213,7 +205,7 @@ jobs:
           # execute, including during recovery of an older candidate.
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
@@ -261,13 +253,24 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.sha }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Cache hit guard
         run: ./scripts/cache-guard.sh
+
+      - name: Verify embedded documentation identity
+        env:
+          DOCS_BUILD_VERSION: ${{ needs.resolve.outputs.version }}
+          DOCS_SOURCE_REVISION: ${{ needs.resolve.outputs.sha }}
+        run: |
+          if [ ! -f scripts/verify-embedded-docs.sh ]; then
+            echo "Legacy candidate predates the embedded docs contract; skipping."
+            exit 0
+          fi
+          bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION" "$DOCS_SOURCE_REVISION"
 
   build:
     name: build (${{ matrix.name }})
@@ -299,16 +302,16 @@ jobs:
         with:
           ref: ${{ needs.resolve.outputs.sha }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
-      - uses: pnpm/action-setup@v6
+      - uses: pnpm/action-setup@v6.0.9
         with:
           version: 10
 
@@ -501,12 +504,26 @@ jobs:
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         run: cp signed-installer/*installer*.exe dist/
 
+      # Recovery builds intentionally check out the immutable product SHA,
+      # which can predate a verifier repair. Fetch only the verifier from the
+      # protected workflow commit so recovery can validate old immutable
+      # artifacts without rebuilding them from a moving product branch.
+      - name: Checkout protected release verifier
+        if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          path: release-control
+          sparse-checkout: scripts/verify-windows-authenticode.ps1
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
       - name: Verify Windows Authenticode release contract
         if: runner.os == 'Windows' && env.HAS_SIGNPATH == 'true'
         shell: pwsh
         run: |
           $arch = if ("${{ matrix.platform }}" -eq "windows/arm64") { "arm64" } else { "amd64" }
-          ./scripts/verify-windows-authenticode.ps1 `
+          ./release-control/scripts/verify-windows-authenticode.ps1 `
             -PayloadDirectory signed-payload `
             -InstallerPath "dist/Reasonix-windows-$arch-installer.exe" `
             -PortableArchivePath "dist/Reasonix-windows-$arch.zip" `
@@ -569,13 +586,13 @@ jobs:
           VERIFY_RELEASE_CHECKOUT: true
         run: bash release-control/scripts/resolve-desktop-candidate.sh
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -712,7 +729,7 @@ jobs:
           path: release-control
           ref: ${{ github.workflow_sha }}
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: release-control/desktop/go.mod
           cache: true
@@ -869,7 +886,18 @@ jobs:
               "$signature_verifier" verify "$payload"
             done < <(find "$directory" -type f -name '*.minisig' -print0)
           }
+          require_signature_coverage() {
+            local directory="$1"
+            local payload
+            while IFS= read -r -d '' payload; do
+              if [ ! -s "$payload.minisig" ]; then
+                echo "::error::Desktop payload has no non-empty signature: $payload"
+                return 1
+              fi
+            done < <(find "$directory" -type f ! -name '*.minisig' ! -name 'latest.json' -print0)
+          }
           verify_signature_directory assets
+          require_signature_coverage assets
 
           # A version directory is immutable once written. Recovery may fill an
           # incomplete candidate subset, but it may never replace conflicting or
@@ -887,24 +915,28 @@ jobs:
             aws s3 cp "s3://${R2_BUCKET}/${TAG}/" "$existing_directory/" \
               --recursive --endpoint-url "$ENDPOINT"
             verify_signature_directory "$existing_directory"
-            bash release-control/scripts/verify-desktop-release-directory.sh \
-              --allow-missing --allow-legacy-manifest \
-              --allow-signature-differences assets "$existing_directory"
             if [ -f "$existing_directory/latest.json" ]; then
               existing_manifest=true
               bash release-control/scripts/validate-desktop-release-manifest.sh \
                 "legacy-${validation_channel}" "$VERSION" "$asset_base" \
                 "$existing_directory/latest.json" "$NOTES_VERSION"
-              bash release-control/scripts/compare-desktop-release-manifests.sh \
-                assets/latest.json "$existing_directory/latest.json"
+              bash release-control/scripts/verify-desktop-release-manifest-assets.sh \
+                "$existing_directory/latest.json" "$existing_directory"
+              cp "$existing_directory/latest.json" assets/latest.json
             fi
+            bash release-control/scripts/verify-desktop-release-directory.sh \
+              --allow-missing --allow-legacy-manifest \
+              --allow-authenticated-payload-differences assets "$existing_directory"
 
-            # Preserve already-published valid signature bytes. Minisign
-            # signatures are intentionally non-deterministic, so a recovery
-            # may fill missing signatures but must not replace existing ones.
+            # Preserve every already-published authenticated payload/signature
+            # pair. Platform signing and packaging are non-deterministic, so a
+            # recovery may fill missing pairs but must not replace valid ones.
             while IFS= read -r -d '' signature; do
               relative="${signature#"$existing_directory"/}"
+              payload="${signature%.minisig}"
+              payload_relative="${payload#"$existing_directory"/}"
               mkdir -p "assets/$(dirname "$relative")"
+              cp "$payload" "assets/$payload_relative"
               cp "$signature" "assets/$relative"
             done < <(find "$existing_directory" -type f -name '*.minisig' -print0)
           fi
@@ -926,6 +958,9 @@ jobs:
           bash release-control/scripts/verify-desktop-release-directory.sh \
             --allow-legacy-manifest assets "$published_directory"
           verify_signature_directory "$published_directory"
+          require_signature_coverage "$published_directory"
+          bash release-control/scripts/verify-desktop-release-manifest-assets.sh \
+            "$published_directory/latest.json" "$published_directory"
 
           aws s3 cp "s3://${R2_BUCKET}/${TAG}/latest.json" \
             /tmp/reasonix-desktop-tag-latest.json --endpoint-url "$ENDPOINT"
@@ -954,14 +989,22 @@ jobs:
               return 0
             fi
 
-            local legacy_base="$current_base"
-            if [ "$current_channel" = "preview" ]; then
-              legacy_base="https://dl.reasonix.io/desktop-preview/"
-            fi
             if bash release-control/scripts/validate-desktop-release-manifest.sh \
-              "legacy-${current_channel}" "$current_version" "$legacy_base" \
+              "legacy-${current_channel}" "$current_version" "$current_base" \
               "$current_file"; then
-              echo "using legacy $current_channel manifest $current_version only as the monotonic migration baseline"
+              echo "using legacy $current_channel manifest $current_version at its immutable base only as the monotonic migration baseline"
+              return 0
+            fi
+
+            # Early Preview pointers referenced the mutable desktop-preview/
+            # directory. Try that layout only after the immutable legacy layout
+            # so later legacy pointers retain their version-bound asset URLs.
+            local legacy_preview_base="https://dl.reasonix.io/desktop-preview/"
+            if [ "$current_channel" = "preview" ] && \
+              bash release-control/scripts/validate-desktop-release-manifest.sh \
+                legacy-preview "$current_version" "$legacy_preview_base" \
+                "$current_file"; then
+              echo "using legacy Preview manifest $current_version at the rolling base only as the monotonic migration baseline"
               return 0
             fi
             echo "::error::existing Desktop $current_channel pointer is invalid"

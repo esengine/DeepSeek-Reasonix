@@ -11,15 +11,35 @@ import (
 var errTestFailure = errors.New("failed")
 
 type recordSink struct {
-	events []event.Kind
+	events   []event.Kind
+	recovery []event.ProtocolRecoveryAudit
 }
 
 func (s *recordSink) Emit(e event.Event) {
 	s.events = append(s.events, e.Kind)
 }
 
+func (s *recordSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
+	s.recovery = append(s.recovery, a)
+}
+
 type recordSender struct {
 	messages []Message
+}
+
+func TestSinkForwardsProtocolRecoveryWithoutNotification(t *testing.T) {
+	inner := &recordSink{}
+	sender := &recordSender{}
+	sink := NewSink(inner, sender, config.NotificationsConfig{Enabled: true, TurnDone: true})
+
+	event.RecordProtocolRecovery(sink, event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningFallback})
+
+	if len(inner.recovery) != 1 || inner.recovery[0].Kind != event.ProtocolRecoveryMissingReasoningFallback {
+		t.Fatalf("forwarded protocol recovery = %+v", inner.recovery)
+	}
+	if len(sender.messages) != 0 {
+		t.Fatalf("protocol recovery sent user notification: %+v", sender.messages)
+	}
 }
 
 func (s *recordSender) Send(m Message) error {

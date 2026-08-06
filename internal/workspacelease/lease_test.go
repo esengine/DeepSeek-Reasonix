@@ -178,6 +178,45 @@ func TestOwnersSerializeSameWorkspaceAndNotifyOnce(t *testing.T) {
 	second.EndRun()
 }
 
+func TestStateReportsWaitingAndAcquiredWithoutIdentity(t *testing.T) {
+	root, locks := t.TempDir(), t.TempDir()
+	first, err := New(root, locks, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting := make(chan struct{}, 1)
+	second, err := New(root, locks, func() { waiting <- struct{}{} })
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.BeginRun()
+	second.BeginRun()
+	if err := first.AcquireWrite(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := first.State(); !got.Acquired || got.Waiting {
+		t.Fatalf("first owner state = %+v, want acquired and not waiting", got)
+	}
+	acquired := make(chan error, 1)
+	go func() { acquired <- second.AcquireWrite(context.Background()) }()
+	select {
+	case <-waiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second owner did not report waiting")
+	}
+	if got := second.State(); got.Acquired || !got.Waiting {
+		t.Fatalf("second owner state = %+v, want waiting and not acquired", got)
+	}
+	first.EndRun()
+	if err := <-acquired; err != nil {
+		t.Fatal(err)
+	}
+	if got := second.State(); !got.Acquired || got.Waiting {
+		t.Fatalf("second owner state after acquire = %+v, want acquired and not waiting", got)
+	}
+	second.EndRun()
+}
+
 func TestIndependentWorkspacesDoNotBlockEachOther(t *testing.T) {
 	locks := t.TempDir()
 	first, err := New(t.TempDir(), locks, nil)

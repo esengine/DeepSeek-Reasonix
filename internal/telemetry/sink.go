@@ -21,7 +21,6 @@ type Options struct {
 	Version        string
 	HomeDir        string
 	Interactive    bool
-	SafeMode       bool
 	Proxy          netclient.ProxySpec
 	CLIMode        string
 	Profile        string
@@ -38,8 +37,8 @@ type Reporter struct {
 }
 
 func Start(opts Options) *Reporter {
-	if !Enabled(opts.Mode, opts.Version, opts.Interactive, opts.SafeMode) {
-		if (strings.EqualFold(strings.TrimSpace(opts.Mode), "off") && !opts.SafeMode) || envOptOut() {
+	if !Enabled(opts.Mode, opts.Version, opts.Interactive) {
+		if strings.EqualFold(strings.TrimSpace(opts.Mode), "off") || envOptOut() {
 			_ = Cleanup(opts.HomeDir)
 		}
 		return nil
@@ -129,6 +128,11 @@ func (s *sink) Emit(e event.Event) {
 
 func (s *sink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	event.RecordReadinessAudit(s.inner, a)
+}
+
+func (s *sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
+	add(s.counts, "tool_call_reasoning_recovery", string(a.Kind), 1)
+	event.RecordProtocolRecovery(s.inner, a)
 }
 
 func (s *sink) observe(e event.Event) {

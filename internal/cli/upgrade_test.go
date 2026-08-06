@@ -243,15 +243,13 @@ func TestPickCLIRelease(t *testing.T) {
 		t.Errorf("stable channel: got %q, want v1.6.0", got)
 	}
 
-	preview := []ghRelease{
+	prereleases := []ghRelease{
 		completeCLIRelease("v1.18.0-preview.2", true),
 		completeCLIRelease("v1.19.0-rc.1", true),
 		completeCLIRelease("v1.18.0-preview.12", true),
-		completeCLIRelease("v1.18.0-preview.13", false), // GitHub prerelease metadata must agree.
-		completeCLIRelease("v1.17.21", false),
 	}
-	if got := pick(preview, cliReleasePreview); got != "v1.18.0-preview.12" {
-		t.Errorf("preview channel: got %q, want v1.18.0-preview.12", got)
+	if got := pick(prereleases, cliReleaseStable); got != "" {
+		t.Errorf("official release selection accepted prerelease %q", got)
 	}
 
 	incomplete := completeCLIRelease("v1.7.0", false)
@@ -371,7 +369,7 @@ func TestValidateCLIUpgradeRedirect(t *testing.T) {
 
 func TestCLIReleaseChannelContract(t *testing.T) {
 	if !strings.HasSuffix(ghAPIReleases, "?per_page=100") {
-		t.Fatalf("CLI release query must retain enough history for Stable after frequent Preview releases: %q", ghAPIReleases)
+		t.Fatalf("CLI release query must retain enough history to skip archived prereleases: %q", ghAPIReleases)
 	}
 
 	for _, tc := range []struct {
@@ -381,8 +379,9 @@ func TestCLIReleaseChannelContract(t *testing.T) {
 	}{
 		{"", cliReleaseStable, true},
 		{"stable", cliReleaseStable, true},
-		{"PREVIEW", cliReleasePreview, true},
-		{"canary", "", false},
+		{"PREVIEW", cliReleaseStable, true},
+		{"canary", cliReleaseStable, true},
+		{"next", cliReleaseStable, true},
 		{"rc", "", false},
 	} {
 		got, err := parseCLIReleaseChannel(tc.value)
@@ -398,10 +397,7 @@ func TestCLIReleaseChannelContract(t *testing.T) {
 	}{
 		{"v1.17.21", cliReleaseStable, true},
 		{"v1.18.0-preview.1", cliReleaseStable, false},
-		{"v1.18.0-preview.1", cliReleasePreview, true},
-		{"v1.18.0-preview.01", cliReleasePreview, false},
-		{"v1.18.0-rc.1", cliReleasePreview, false},
-		{"v1.18.0", cliReleasePreview, false},
+		{"v1.18.0-rc.1", cliReleaseStable, false},
 	} {
 		if got := versionBelongsToCLIChannel(tc.version, tc.channel); got != tc.want {
 			t.Errorf("versionBelongsToCLIChannel(%q, %q) = %v, want %v", tc.version, tc.channel, got, tc.want)
@@ -420,12 +416,12 @@ func TestParseAndResolveCLIUpgradeChannel(t *testing.T) {
 		wantForce  bool
 	}{
 		{name: "fresh default", configured: "", want: cliReleaseStable},
-		{name: "follow saved preview", configured: "preview", want: cliReleasePreview},
-		{name: "switch to preview", args: []string{"preview"}, configured: "stable", want: cliReleasePreview, wantSave: true},
-		{name: "switch back after flags", args: []string{"--check", "stable"}, configured: "preview", want: cliReleaseStable, wantSave: true, wantCheck: true},
-		{name: "flags after positional", args: []string{"preview", "--force"}, configured: "stable", want: cliReleasePreview, wantSave: true, wantForce: true},
-		{name: "one off override", args: []string{"--channel", "preview"}, configured: "stable", want: cliReleasePreview},
-		{name: "matching compatibility flag", args: []string{"preview", "--channel=preview"}, configured: "stable", want: cliReleasePreview, wantSave: true},
+		{name: "saved preview migrates", configured: "preview", want: cliReleaseStable},
+		{name: "legacy preview positional", args: []string{"preview"}, configured: "stable", want: cliReleaseStable},
+		{name: "stable positional", args: []string{"--check", "stable"}, configured: "preview", want: cliReleaseStable, wantCheck: true},
+		{name: "legacy flags after positional", args: []string{"preview", "--force"}, configured: "stable", want: cliReleaseStable, wantForce: true},
+		{name: "legacy one off override", args: []string{"--channel", "preview"}, configured: "stable", want: cliReleaseStable},
+		{name: "mixed legacy aliases", args: []string{"preview", "--channel=stable"}, configured: "stable", want: cliReleaseStable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			syntax, err := parseCLIUpgradeSyntax(tc.args)
@@ -446,9 +442,7 @@ func TestParseAndResolveCLIUpgradeChannel(t *testing.T) {
 
 func TestParseCLIUpgradeChannelRejectsAmbiguousArguments(t *testing.T) {
 	for _, args := range [][]string{
-		{"canary"},
 		{"stable", "preview"},
-		{"stable", "--channel", "preview"},
 		{"--channel", "rc"},
 		{"--channel"},
 		{"--channel="},
@@ -471,34 +465,41 @@ func TestUpgradeCommandRejectsMalformedConfigWithoutPanicking(t *testing.T) {
 	}
 }
 
-func TestPersistCLIReleaseChannelWritesUserConfig(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("REASONIX_HOME", home)
-	if err := persistCLIReleaseChannel(cliReleasePreview); err != nil {
-		t.Fatalf("persist preview channel: %v", err)
-	}
-	cfg, err := config.LoadForEditReadOnlyStrict(config.UserConfigPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.CLIUpdateChannel(); got != "preview" {
-		t.Fatalf("saved CLI channel = %q, want preview", got)
-	}
-	raw, err := os.ReadFile(config.UserConfigPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "[cli]") || !strings.Contains(string(raw), `update_channel = "preview"`) {
-		t.Fatalf("saved config missing CLI channel:\n%s", raw)
+func TestPersistCLIReleaseChannelRemovesLegacyConfig(t *testing.T) {
+	for _, legacy := range []string{"stable", "preview", "canary", "beta", "next"} {
+		t.Run(legacy, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("REASONIX_HOME", home)
+			if err := os.WriteFile(config.UserConfigPath(), []byte("[cli]\nupdate_channel = \""+legacy+"\"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := persistCLIReleaseChannel(cliReleaseStable); err != nil {
+				t.Fatalf("migrate legacy channel: %v", err)
+			}
+			cfg, err := config.LoadForEditReadOnlyStrict(config.UserConfigPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.CLIUpdateChannel(); got != "stable" {
+				t.Fatalf("saved CLI channel = %q, want stable", got)
+			}
+			raw, err := os.ReadFile(config.UserConfigPath())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), "[cli]") || strings.Contains(string(raw), "update_channel") {
+				t.Fatalf("saved config retained retired CLI channel:\n%s", raw)
+			}
+		})
 	}
 }
 
 func TestFetchCLIReleasePointer(t *testing.T) {
-	valid := completeCLIRelease("v1.18.0-preview.1", true)
-	invalidMetadata := completeCLIRelease("v1.18.0-preview.1", false)
-	incomplete := completeCLIRelease("v1.18.0-preview.1", true)
+	valid := completeCLIRelease("v1.18.0", false)
+	invalidMetadata := completeCLIRelease("v1.18.0-preview.1", true)
+	incomplete := completeCLIRelease("v1.18.0", false)
 	incomplete.Assets = incomplete.Assets[:len(incomplete.Assets)-1]
-	insecure := completeCLIRelease("v1.18.0-preview.1", true)
+	insecure := completeCLIRelease("v1.18.0", false)
 	insecure.Assets[0].BrowserDownloadURL = "http://example.invalid/reasonix.tar.gz"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -522,17 +523,17 @@ func TestFetchCLIReleasePointer(t *testing.T) {
 	}))
 	defer server.Close()
 
-	release, err := fetchCLIReleasePointer(server.Client(), server.URL+"/valid", cliReleasePreview)
-	if err != nil || release.TagName != "v1.18.0-preview.1" {
-		t.Fatalf("valid Preview pointer = (%+v, %v)", release, err)
+	release, err := fetchCLIReleasePointer(server.Client(), server.URL+"/valid", cliReleaseStable)
+	if err != nil || release.TagName != "v1.18.0" {
+		t.Fatalf("valid official pointer = (%+v, %v)", release, err)
 	}
-	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/invalid", cliReleasePreview); err == nil {
-		t.Fatal("pointer with mismatched GitHub prerelease metadata should fail closed")
+	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/invalid", cliReleaseStable); err == nil {
+		t.Fatal("prerelease pointer should fail closed")
 	}
-	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/incomplete", cliReleasePreview); err == nil {
+	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/incomplete", cliReleaseStable); err == nil {
 		t.Fatal("pointer missing a required CLI asset should fall back")
 	}
-	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/insecure", cliReleasePreview); err == nil {
+	if _, err := fetchCLIReleasePointer(server.Client(), server.URL+"/insecure", cliReleaseStable); err == nil {
 		t.Fatal("pointer with an insecure asset URL should fall back")
 	}
 }

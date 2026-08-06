@@ -3,7 +3,7 @@
 import { JSDOM } from "jsdom";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { ModelSwitcher } from "../components/ModelSwitcher";
+import { ModelSwitcher, normalizeModelInfo } from "../components/ModelSwitcher";
 import { LocaleProvider } from "../lib/i18n";
 import type { ModelInfo } from "../lib/types";
 
@@ -53,6 +53,15 @@ let calls = 0;
 const picked: string[] = [];
 const pickGates: Array<ReturnType<typeof deferred<boolean>>> = [];
 let catalogLoader: (() => Promise<ModelInfo[]>) | undefined;
+const normalizedNullMetadata = normalizeModelInfo({
+  ref: "provider-a/model-a",
+  provider: null,
+  model: null,
+  current: true,
+} as unknown as ModelInfo);
+if (normalizedNullMetadata.provider !== "" || normalizedNullMetadata.model !== "") {
+  throw new Error(`null model metadata was not normalized: ${JSON.stringify(normalizedNullMetadata)}`);
+}
 let currentCatalog: ModelInfo[] = [
   { ref: "glm-cn/glm-5.2", provider: "glm-cn", model: "glm-5.2", current: true },
 ];
@@ -311,6 +320,25 @@ newerPickGate.resolve(true);
 await act(async () => {
   await newerPickGate.promise;
 });
+
+// Legacy or malformed settings can surface null display metadata despite the
+// bridge contract. Catalog loading must normalize it before grouping/search.
+currentCatalog = [
+  { ref: "provider-a/model-a", provider: null, model: null, current: true } as unknown as ModelInfo,
+  { ref: "provider-b/model-b", provider: "provider-b", model: "model-b", current: false },
+];
+await act(async () => {
+  root.render(renderSwitcher("model-a", "tab-null-metadata"));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+await act(async () => {
+  (document.querySelector(".modelsw__trigger") as HTMLButtonElement).click();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+const nullSafeOptions = Array.from(document.querySelectorAll<HTMLElement>("[role='option']"));
+if (nullSafeOptions.length !== 2) {
+  throw new Error(`null model metadata prevented catalog rendering: ${nullSafeOptions.length}`);
+}
 
 await act(async () => root.unmount());
 console.log("model switcher refresh: PASS");

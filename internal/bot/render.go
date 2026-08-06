@@ -193,6 +193,13 @@ func (s *renderSink) Emit(e event.Event) {
 		}
 
 	case event.Notice:
+		if e.Audience == event.NoticeAudienceOperator {
+			// Persistence recovery remains available through controller logs and
+			// local operator surfaces. It is not actionable for the remote chat
+			// participant and must not interrupt their conversation (#7215).
+			s.logger.Debug("bot suppressed operator notice", "code", e.Code)
+			break
+		}
 		if e.Level == event.LevelWarn {
 			_ = s.send(OutboundMessage{
 				ConnectionID: s.connID,

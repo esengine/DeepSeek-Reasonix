@@ -3,6 +3,7 @@ import { Check, Copy, Images, LockKeyhole, Minus, Plus, RotateCcw } from "lucide
 import { app } from "../lib/bridge";
 import { useT, type DictKey } from "../lib/i18n";
 import { THEME_STYLES, type Theme, type ThemeStyle, isThemeStyle } from "../lib/theme";
+import type { TerminalThemePreference } from "../lib/terminalTheme";
 import type { ConversationWidth } from "../lib/conversationWidth";
 import { TEXT_SIZES, type TextSize } from "../lib/textSize";
 import { type FontFamily, type MonoFontFamily } from "../lib/fontFamily";
@@ -85,6 +86,7 @@ function monoFontFamilyLabel(font: MonoFontFamily, t: ReturnType<typeof useT>): 
 export function AppearanceOverview({
   theme,
   themeStyle,
+  terminalTheme,
   conversationWidth,
   textSize,
   showDisplayZoom,
@@ -95,6 +97,7 @@ export function AppearanceOverview({
   customMonoFontName,
   onTheme,
   onThemeStyle,
+  onTerminalTheme,
   onConversationWidth,
   onTextSize,
   onRestartZoom,
@@ -105,6 +108,7 @@ export function AppearanceOverview({
 }: {
   theme: Theme;
   themeStyle: ThemeStyle;
+  terminalTheme: TerminalThemePreference;
   conversationWidth: ConversationWidth;
   textSize: TextSize;
   showDisplayZoom: boolean;
@@ -115,6 +119,7 @@ export function AppearanceOverview({
   customMonoFontName: string;
   onTheme: (t: Theme) => void;
   onThemeStyle: (style: ThemeStyle) => void;
+  onTerminalTheme: (theme: TerminalThemePreference) => void;
   onConversationWidth: (width: ConversationWidth) => void;
   onTextSize: (size: TextSize) => void;
   onRestartZoom: (zoom: ZoomLevel) => Promise<void>;
@@ -357,6 +362,32 @@ export function AppearanceOverview({
                 onClick={() => void handleThemeMode(opt)}
               >
                 {opt === "auto" ? t("settings.themeAuto") : opt === "light" ? t("settings.themeLight") : t("settings.themeDark")}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="appearance-overview__row">
+          <div id="appearance-terminal-theme-label" className="appearance-overview__row-label">{t("settings.terminalTheme")}</div>
+          <div
+            className="set-seg appearance-overview__segmented appearance-overview__segmented--theme"
+            role="radiogroup"
+            aria-labelledby="appearance-terminal-theme-label"
+          >
+            {(["auto", "light", "dark"] as TerminalThemePreference[]).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                role="radio"
+                aria-checked={terminalTheme === opt}
+                className={`set-seg__btn${terminalTheme === opt ? " set-seg__btn--on" : ""}`}
+                onClick={() => onTerminalTheme(opt)}
+              >
+                {opt === "auto"
+                  ? t("settings.terminalThemeAuto")
+                  : opt === "light"
+                    ? t("settings.terminalThemeLight")
+                    : t("settings.terminalThemeDark")}
               </button>
             ))}
           </div>

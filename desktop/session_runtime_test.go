@@ -7,8 +7,128 @@ import (
 	"strings"
 	"testing"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/control"
+	"reasonix/internal/tool"
 )
+
+func TestSessionParentLive(t *testing.T) {
+	app := NewApp()
+	path := filepath.Join(t.TempDir(), "parent.jsonl")
+	otherPath := filepath.Join(filepath.Dir(path), "other.jsonl")
+	if app.sessionParentLive(path) {
+		t.Fatal("session without a tab or runtime reported live")
+	}
+
+	building := &WorkspaceTab{ID: "building", SessionPath: path}
+	app.tabs[building.ID] = building
+	if !app.sessionParentLive(path) {
+		t.Fatal("building tab session did not report live")
+	}
+	if app.subagentParentProbeForBuild(building)(path) {
+		t.Fatal("initial build treated its own unbound session as a competing live parent")
+	}
+	if !app.subagentParentProbeForBuild(&WorkspaceTab{ID: "other-build"})(path) {
+		t.Fatal("concurrent build did not see the other building tab as live")
+	}
+	if app.sessionParentLive(otherPath) {
+		t.Fatal("unrelated session reported live")
+	}
+	delete(app.tabs, building.ID)
+
+	ctrl := control.New(control.Options{SessionDir: filepath.Dir(path), SessionPath: path, Label: "ready"})
+	t.Cleanup(ctrl.Close)
+	ready := &WorkspaceTab{ID: "ready", Ctrl: ctrl, Ready: true}
+	app.tabs[ready.ID] = ready
+	if !app.sessionParentLive(path) {
+		t.Fatal("ready controller session did not report live")
+	}
+	delete(app.tabs, ready.ID)
+
+	detached := &WorkspaceTab{ID: "detached"}
+	app.detachedSessions["detached"] = detached
+	app.mu.Lock()
+	app.newSessionRuntimeLocked(detached, sessionRuntimeKey(path))
+	app.mu.Unlock()
+	if !app.sessionParentLive(path) {
+		t.Fatal("detached runtime session did not report live")
+	}
+}
+
+func TestCleanupStaleRunningWithDesktopParentProbe(t *testing.T) {
+	sessionDir := t.TempDir()
+	parentSession := "parent"
+	parentPath := filepath.Join(sessionDir, parentSession+".jsonl")
+	app := NewApp()
+	building := &WorkspaceTab{ID: "building", SessionPath: parentPath}
+	app.tabs[building.ID] = building
+	sweeper := &WorkspaceTab{ID: "concurrent-build"}
+
+	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents"))
+	prepareRunning := func() string {
+		run, err := store.PrepareFresh(agent.SubagentSpec{
+			Kind:          "task",
+			Name:          "task",
+			WorkspaceRoot: t.TempDir(),
+			ParentSession: parentSession,
+			SystemPrompt:  "sys",
+			Registry:      tool.NewRegistry(),
+			Model:         "model",
+		})
+		if err != nil {
+			t.Fatalf("PrepareFresh: %v", err)
+		}
+		if err := store.MarkRunning(run); err != nil {
+			t.Fatalf("MarkRunning: %v", err)
+		}
+		ref := run.Ref
+		run.Release()
+		return ref
+	}
+	requireStatus := func(ref string, want agent.SubagentStatus) {
+		meta, err := store.LoadMeta(ref)
+		if err != nil {
+			t.Fatalf("LoadMeta(%s): %v", ref, err)
+		}
+		if meta.Status != want {
+			t.Fatalf("status(%s) = %q, want %q", ref, meta.Status, want)
+		}
+	}
+
+	crashRef := prepareRunning()
+	cleaned, err := store.WithParentSessionProbe(app.subagentParentProbeForBuild(building)).CleanupStaleRunning()
+	if err != nil {
+		t.Fatalf("CleanupStaleRunning for initial owner build: %v", err)
+	}
+	if cleaned != 1 {
+		t.Fatalf("cleaned for initial owner build = %d, want 1", cleaned)
+	}
+	requireStatus(crashRef, agent.SubagentInterrupted)
+
+	liveRef := prepareRunning()
+	cleaned, err = store.WithParentSessionProbe(app.subagentParentProbeForBuild(sweeper)).CleanupStaleRunning()
+	if err != nil {
+		t.Fatalf("CleanupStaleRunning with live parent: %v", err)
+	}
+	if cleaned != 0 {
+		t.Fatalf("cleaned with live parent = %d, want 0", cleaned)
+	}
+	requireStatus(liveRef, agent.SubagentRunning)
+
+	delete(app.tabs, building.ID)
+	laterRef := prepareRunning()
+	cleaned, err = agent.NewSubagentStore(filepath.Join(sessionDir, "subagents")).
+		WithParentSessionProbe(app.subagentParentProbeForBuild(sweeper)).
+		CleanupStaleRunning()
+	if err != nil {
+		t.Fatalf("CleanupStaleRunning after parent exit: %v", err)
+	}
+	if cleaned != 2 {
+		t.Fatalf("cleaned after parent exit = %d, want 2", cleaned)
+	}
+	requireStatus(liveRef, agent.SubagentInterrupted)
+	requireStatus(laterRef, agent.SubagentInterrupted)
+}
 
 func TestMetaNeverReportsReadyWithoutController(t *testing.T) {
 	app := NewApp()

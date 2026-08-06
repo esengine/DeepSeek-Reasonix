@@ -76,6 +76,21 @@ func TestTurnReceiptIgnoresEmptyUsage(t *testing.T) {
 	}
 }
 
+func TestTurnReceiptMarksEstimatedUsage(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	defer i18n.DetectLanguage("en")
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+	i18n.DetectLanguage("en")
+
+	got := renderTurnReceipt(&provider.Usage{TotalTokens: 1_024, Estimated: true}, nil, nil)
+	for _, want := range []string{"≈1.0K tok", "estimated"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("estimated turn receipt %q missing %q", got, want)
+		}
+	}
+}
+
 func TestTurnReceiptBandUsesSingleQuietBoundary(t *testing.T) {
 	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
 	activeColorProfile = colorprofile.NoTTY

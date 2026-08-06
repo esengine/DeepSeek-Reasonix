@@ -49,7 +49,7 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	start := time.Now().Add(-2 * time.Second).UnixMilli()
 	tab.recordTurnStarted(start)
 	tab.recordUsage(event.Event{
-		Usage:       &provider.Usage{PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140, CacheHitTokens: 70, CacheMissTokens: 30, ReasoningTokens: 10},
+		Usage:       &provider.Usage{PromptTokens: 100, CompletionTokens: 40, TotalTokens: 140, CacheHitTokens: 70, CacheMissTokens: 30, ReasoningTokens: 10, RequestCount: 3, Estimated: true},
 		UsageSource: event.UsageSourceSubagent,
 		SessionHit:  70,
 		SessionMiss: 30,
@@ -58,8 +58,11 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	tab.recordTurnDone(start + 1500)
 
 	got := tab.telemetrySnapshot().Usage
-	if got.RequestCount != 1 || got.PromptTokens != 100 || got.CompletionTokens != 40 || got.TotalTokens != 140 || got.ReasoningTokens != 10 {
+	if got.RequestCount != 3 || got.PromptTokens != 100 || got.CompletionTokens != 40 || got.TotalTokens != 140 || got.ReasoningTokens != 10 {
 		t.Fatalf("usage tokens = %+v", got)
+	}
+	if !got.Estimated || got.LastEstimated {
+		t.Fatalf("usage lost estimated marker: %+v", got)
 	}
 	if got.CacheHitTokens != 70 || got.CacheMissTokens != 30 {
 		t.Fatalf("cache tokens = hit %d miss %d", got.CacheHitTokens, got.CacheMissTokens)
@@ -70,8 +73,11 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	if got.SessionCost <= 0 || got.SessionCurrency != "¥" {
 		t.Fatalf("cost = %f %q, want positive ¥", got.SessionCost, got.SessionCurrency)
 	}
-	if got.Sources[event.UsageSourceSubagent].SessionCost <= 0 || got.Sources[event.UsageSourceSubagent].RequestCount != 1 {
-		t.Fatalf("subagent source stats = %+v, want one costed request", got.Sources[event.UsageSourceSubagent])
+	if got.Sources[event.UsageSourceSubagent].SessionCost <= 0 || got.Sources[event.UsageSourceSubagent].RequestCount != 3 {
+		t.Fatalf("subagent source stats = %+v, want three costed requests", got.Sources[event.UsageSourceSubagent])
+	}
+	if !got.Sources[event.UsageSourceSubagent].Estimated {
+		t.Fatalf("subagent source lost estimated marker: %+v", got.Sources[event.UsageSourceSubagent])
 	}
 
 	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
@@ -85,8 +91,28 @@ func TestWorkspaceTabAggregatesSessionUsageTelemetry(t *testing.T) {
 	if context.CacheHitTokens != 70 || context.CacheMissTokens != 30 {
 		t.Fatalf("context usage cache tokens = hit %d miss %d, want 70/30", context.CacheHitTokens, context.CacheMissTokens)
 	}
-	if panel := app.ContextPanel("tab"); panel.TotalTokens != 140 {
-		t.Fatalf("context panel total tokens = %d, want 140", panel.TotalTokens)
+	if !context.Estimated {
+		t.Fatalf("context usage lost estimated marker: %+v", context)
+	}
+	if panel := app.ContextPanel("tab"); panel.TotalTokens != 140 || panel.Estimated || !panel.SessionEstimated {
+		t.Fatalf("context panel usage = %+v, want exact executor turn and estimated session", panel)
+	}
+}
+
+func TestWorkspaceTabMarksEstimatedExecutorTurn(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		Usage:       &provider.Usage{PromptTokens: 10, CompletionTokens: 5, TotalTokens: 15, Estimated: true},
+		UsageSource: event.UsageSourceExecutor,
+	})
+	got := tab.telemetrySnapshot().Usage
+	if !got.Estimated || !got.LastEstimated {
+		t.Fatalf("executor usage lost estimated marker: %+v", got)
+	}
+	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
+	panel := app.ContextPanel("tab")
+	if !panel.SessionEstimated {
+		t.Fatalf("executor panel session usage lost estimated marker: %+v", panel)
 	}
 }
 
@@ -106,6 +132,34 @@ func TestWorkspaceTabRepricesUsageWithoutMixingCurrencies(t *testing.T) {
 	want := 0.14 + 0.1*0.28
 	if got.SessionCurrency != "$" || got.SessionCost != want {
 		t.Fatalf("repriced usage = %f %q, want %f USD", got.SessionCost, got.SessionCurrency, want)
+	}
+}
+
+func TestWorkspaceTabRepricesCacheWritesWithoutLosingBillingTier(t *testing.T) {
+	tab := &WorkspaceTab{}
+	tab.recordUsage(event.Event{
+		Usage: &provider.Usage{
+			PromptTokens:           500_000,
+			TotalTokens:            500_000,
+			CacheMissTokens:        500_000,
+			CacheWriteTokens:       100_000,
+			CacheWriteBilledTokens: 200_000,
+		},
+		UsageSource: event.UsageSourceExecutor,
+		Pricing:     &provider.Pricing{Input: 2, Currency: "CNY"},
+	})
+	if ok := tab.repriceUsage(map[string]*provider.Pricing{
+		event.UsageSourceExecutor: {Input: 1, Currency: "USD"},
+	}); !ok {
+		t.Fatal("repriceUsage rejected cache-write usage")
+	}
+	got := tab.telemetrySnapshot().Usage
+	// 400K ordinary input units + 200K billed cache-write units.
+	if got.SessionCurrency != "$" || got.SessionCost != 0.6 {
+		t.Fatalf("repriced cache-write usage = %f %q, want 0.6 USD", got.SessionCost, got.SessionCurrency)
+	}
+	if got.CacheWriteTokens != 100_000 || got.CacheWriteBilledTokens != 200_000 {
+		t.Fatalf("persisted cache writes = raw %d billed %v", got.CacheWriteTokens, got.CacheWriteBilledTokens)
 	}
 }
 
@@ -252,14 +306,16 @@ func TestTelemetryLastContextRoundTripAndLegacyDefaults(t *testing.T) {
 	want := tabTelemetrySnapshot{
 		Version: 2,
 		Usage: sessionUsageStats{
-			PromptTokens:         100,
-			TotalTokens:          120,
-			LastUsedTokens:       120,
-			LastPromptTokens:     100,
-			LastCompletionTokens: 20,
-			LastReasoningTokens:  8,
-			LastCacheHitTokens:   70,
-			LastCacheMissTokens:  30,
+			PromptTokens:           100,
+			TotalTokens:            120,
+			CacheWriteTokens:       5,
+			CacheWriteBilledTokens: 10,
+			LastUsedTokens:         120,
+			LastPromptTokens:       100,
+			LastCompletionTokens:   20,
+			LastReasoningTokens:    8,
+			LastCacheHitTokens:     70,
+			LastCacheMissTokens:    30,
 		},
 	}
 	if err := saveTelemetry(path, want); err != nil {
@@ -274,11 +330,17 @@ func TestTelemetryLastContextRoundTripAndLegacyDefaults(t *testing.T) {
 		got.LastCacheMissTokens != want.Usage.LastCacheMissTokens {
 		t.Fatalf("last context round trip = %+v, want %+v", got, want.Usage)
 	}
+	if got.CacheWriteTokens != 5 || got.CacheWriteBilledTokens != 10 {
+		t.Fatalf("cache-write round trip = raw %d billed %v, want 5/10", got.CacheWriteTokens, got.CacheWriteBilledTokens)
+	}
 
 	if err := os.WriteFile(path, []byte(`{"version":2,"usage":{"promptTokens":50,"totalTokens":50}}`), 0o644); err != nil {
 		t.Fatalf("write pre-last-context telemetry: %v", err)
 	}
 	legacy := loadTelemetry(path).Usage
+	if legacy.CacheWriteTokens != 0 || legacy.CacheWriteBilledTokens != 0 {
+		t.Fatalf("legacy cache-write fields = raw %d billed %v, want zero defaults", legacy.CacheWriteTokens, legacy.CacheWriteBilledTokens)
+	}
 	if legacy.LastUsedTokens != 0 ||
 		legacy.LastPromptTokens != 0 ||
 		legacy.LastCompletionTokens != 0 ||
@@ -332,6 +394,96 @@ func TestContextFallbackUsesPersistedExecutorUsageAfterRebind(t *testing.T) {
 		panel.CacheHitTokens != 70 ||
 		panel.CacheMissTokens != 30 {
 		t.Fatalf("context panel fallback = %+v, want persisted executor breakdown", panel)
+	}
+}
+
+// TestContextFallbackUsesLatestAttemptAfterMultiAttemptUsage locks the stream-
+// recovery telemetry contract: billable Prompt/Completion may be 2×30K, but
+// Last* fields (and rebind fallback) must use Context* from the latest attempt.
+func TestContextFallbackUsesLatestAttemptAfterMultiAttemptUsage(t *testing.T) {
+	ag := agent.New(
+		usageProvider{usage: nil},
+		tool.NewRegistry(),
+		agent.NewSession("system"),
+		agent.Options{ContextWindow: 200_000},
+		event.Discard,
+	)
+	tab := &WorkspaceTab{
+		ID:    "tab",
+		Ctrl:  control.New(control.Options{Executor: ag, Sink: event.Discard}),
+		Scope: "global",
+		Ready: true,
+	}
+	// Two 30K prompt attempts: billable sum 60K+5, latest context 30K+2.
+	tab.recordUsage(event.Event{
+		Usage: &provider.Usage{
+			PromptTokens:            60_000,
+			CompletionTokens:        5,
+			TotalTokens:             60_005,
+			CacheMissTokens:         60_000,
+			ContextPromptTokens:     30_000,
+			ContextCompletionTokens: 2,
+			ContextReasoningTokens:  1,
+			ContextCacheMissTokens:  30_000,
+		},
+		UsageSource: event.UsageSourceExecutor,
+	})
+	got := tab.telemetrySnapshot().Usage
+	if got.LastUsedTokens != 30_002 ||
+		got.LastPromptTokens != 30_000 ||
+		got.LastCompletionTokens != 2 ||
+		got.LastReasoningTokens != 1 ||
+		got.LastCacheMissTokens != 30_000 {
+		t.Fatalf("last context from multi-attempt usage = %+v, want latest 30000+2", got)
+	}
+	// Session billable totals still accumulate the full aggregate.
+	if got.PromptTokens != 60_000 || got.CompletionTokens != 5 {
+		t.Fatalf("session billable totals = prompt %d completion %d, want 60000/5", got.PromptTokens, got.CompletionTokens)
+	}
+
+	app := &App{tabs: map[string]*WorkspaceTab{"tab": tab}}
+	context := app.ContextUsageForTab("tab")
+	if context.Used != 30_002 {
+		t.Fatalf("rebind context Used = %d, want latest fill 30002 (not billable 60005)", context.Used)
+	}
+	panel := app.ContextPanel("tab")
+	if panel.UsedTokens != 30_002 ||
+		panel.PromptTokens != 30_000 ||
+		panel.CompletionTokens != 2 ||
+		panel.ReasoningTokens != 1 ||
+		panel.CacheMissTokens != 30_000 {
+		t.Fatalf("rebind context panel = %+v, want latest-attempt breakdown", panel)
+	}
+}
+
+// Providers that omit cache split report ContextCache 0/0 with a valid Context
+// prompt/completion shape. Last* cache must stay 0/0 — not fall back to the
+// multi-attempt billable cache aggregate.
+func TestContextTelemetryKeepsZeroCacheWhenContextShapePresent(t *testing.T) {
+	tab := &WorkspaceTab{ID: "tab", Scope: "global", Ready: true}
+	tab.recordUsage(event.Event{
+		Usage: &provider.Usage{
+			PromptTokens:            60_000,
+			CompletionTokens:        5,
+			TotalTokens:             60_005,
+			CacheMissTokens:         60_000, // billable aggregate from retries
+			ContextPromptTokens:     30_000,
+			ContextCompletionTokens: 2,
+			// ContextCache* intentionally zero: provider did not report a split.
+		},
+		UsageSource: event.UsageSourceExecutor,
+		SessionHit:  0,
+		SessionMiss: 60_000,
+	})
+	got := tab.telemetrySnapshot().Usage
+	if got.LastPromptTokens != 30_000 || got.LastCompletionTokens != 2 {
+		t.Fatalf("last context tokens = prompt %d completion %d, want 30000/2", got.LastPromptTokens, got.LastCompletionTokens)
+	}
+	if got.LastCacheHitTokens != 0 || got.LastCacheMissTokens != 0 {
+		t.Fatalf("last cache = hit %d miss %d, want 0/0 (unreported), not aggregate 60000", got.LastCacheHitTokens, got.LastCacheMissTokens)
+	}
+	if got.LastUsedTokens != 30_002 {
+		t.Fatalf("LastUsedTokens = %d, want 30002", got.LastUsedTokens)
 	}
 }
 

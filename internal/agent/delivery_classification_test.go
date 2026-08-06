@@ -31,6 +31,8 @@ func TestDeliveryClassificationMatrix(t *testing.T) {
 		{"advisory change application", "为什么申请修改失败", false, false},
 		{"negated change", "please don't make the requested changes", false, false},
 		{"negated chinese", "请勿修改代码", false, false},
+		{"negated inspection", "Explain why it fails. Do not inspect or change files.", false, false},
+		{"negated chinese inspection", "解释失败原因，不要检查或修改文件", false, false},
 		{"review only", "review only and do not fix anything", true, false},
 		{"markdown anchor", "why does README.md render incorrectly?", true, false},
 		{"git command", "why does git diff --check fail?", true, false},
@@ -56,6 +58,14 @@ func TestDeliveryClassificationMatrix(t *testing.T) {
 		{"chinese reset", "无法安装依赖请在现有配置中修改", true, true},
 		{"negated request", "不想请团队修改代码", false, false},
 		{"negated application", "禁止申请修改配置", false, false},
+		{"deferred conversation token", "Remember ORBIT-42 and answer on the next turn.", false, false},
+		{"chinese deferred conversation token", "记住 ORBIT-42，下一轮回答", false, false},
+		{"deferred token with durable negation", "Remember ORBIT-42 for the next turn. Do not save it permanently.", false, false},
+		{"chinese deferred token with durable negation", "记住 ORBIT-42，下一轮回答。不要写入文件或长期记忆。", false, false},
+		{"long conversational context", "Please keep this code in mind because I will ask you about it in my next message", false, false},
+		{"durable memory", "Remember ORBIT-42 permanently across sessions", true, true},
+		{"chinese durable memory", "请永久记住 ORBIT-42，跨会话也要保留", true, true},
+		{"durable memory advice", "How do I save a preference permanently across sessions?", false, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -15,28 +15,26 @@ func clearPolicyEnv(t *testing.T) {
 
 func TestEnabledPolicy(t *testing.T) {
 	clearPolicyEnv(t)
-	if !Enabled("auto", "v1.20.0", true, false) {
+	if !Enabled("auto", "v1.20.0", true) {
 		t.Fatal("auto should enable a release build on an interactive terminal")
 	}
-	if Enabled("auto", "v1.20.0", false, false) {
+	if Enabled("auto", "v1.20.0", false) {
 		t.Fatal("auto should disable headless execution")
 	}
-	if !Enabled("on", "v1.20.0", false, false) {
+	if !Enabled("on", "v1.20.0", false) {
 		t.Fatal("on should permit a local headless release run")
 	}
 	for _, tc := range []struct {
 		name    string
 		mode    string
 		version string
-		safe    bool
 	}{
 		{name: "off", mode: "off", version: "v1.20.0"},
 		{name: "development", mode: "on", version: "dev"},
 		{name: "test version", mode: "on", version: "test-version"},
-		{name: "safe mode", mode: "on", version: "v1.20.0", safe: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if Enabled(tc.mode, tc.version, true, tc.safe) {
+			if Enabled(tc.mode, tc.version, true) {
 				t.Fatal("policy unexpectedly enabled telemetry")
 			}
 		})
@@ -54,7 +52,7 @@ func TestEnabledHonorsEnvironmentOptOuts(t *testing.T) {
 		t.Run(tc.key, func(t *testing.T) {
 			clearPolicyEnv(t)
 			t.Setenv(tc.key, tc.value)
-			if Enabled("on", "v1.20.0", true, false) {
+			if Enabled("on", "v1.20.0", true) {
 				t.Fatal("environment opt-out was ignored")
 			}
 		})

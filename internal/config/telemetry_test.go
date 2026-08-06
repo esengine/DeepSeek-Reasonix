@@ -45,13 +45,14 @@ func TestCLITelemetryIsUserGlobalAndSafeModeForcesOff(t *testing.T) {
 	if got := cfg.CLITelemetryMode(); got != "on" {
 		t.Fatalf("project overrode user telemetry: %q", got)
 	}
+	// v1.20+ ignores REASONIX_SAFE_MODE: user telemetry preference is preserved.
 	t.Setenv("REASONIX_SAFE_MODE", "1")
-	safe, err := LoadForRootReadOnly(root)
+	still, err := LoadForRootReadOnly(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := safe.CLITelemetryMode(); got != "off" {
-		t.Fatalf("Safe Mode telemetry = %q", got)
+	if got := still.CLITelemetryMode(); got != "on" {
+		t.Fatalf("telemetry under REASONIX_SAFE_MODE = %q, want on", got)
 	}
 }
 

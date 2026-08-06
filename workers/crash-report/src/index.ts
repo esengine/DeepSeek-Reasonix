@@ -126,9 +126,8 @@ export const CLI_TELEMETRY_SCHEMA_SQL = [
      os TEXT NOT NULL,
      PRIMARY KEY (date, signal, bucket, install_id)
    )`,
-  "CREATE INDEX IF NOT EXISTS cli_pings_version ON cli_pings (version)",
-  "CREATE INDEX IF NOT EXISTS cli_metrics_signal_bucket ON cli_metrics (signal, bucket)",
-  "CREATE INDEX IF NOT EXISTS cli_metric_users_signal_bucket ON cli_metric_users (signal, bucket)",
+  // No secondary indexes: each primary key already leads with `date`, which is
+  // what every dashboard query filters on. See migrate-window-index-fix.sql.
 ] as const;
 
 const cliTelemetrySchemaPromises = new WeakMap<object, Promise<void>>();
@@ -722,7 +721,7 @@ function statsFilters(url: URL): StatsFilters {
 }
 
 async function crashGroups(env: Env, filters: StatsFilters, latestVersion: string) {
-  const where: string[] = [];
+  const where: string[] = [diagnosticWindowWhere(filters.windowDays)];
   const binds: unknown[] = [];
   const add = (sql: string, value?: unknown) => {
     where.push(sql.replace("?", `?${binds.length + 1}`));
@@ -847,7 +846,10 @@ type ParsedVersion = {
 };
 
 function parseReleaseVersion(version: string): ParsedVersion | null {
-  const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  // The dashboard's "latest" lane is for shipped stable builds. Development,
+  // prerelease, and build-metadata values remain visible in version facets but
+  // must not become the release baseline used for regression triage.
+  const m = version.trim().match(/^v?(\d+)\.(\d+)\.(\d+)$/);
   if (!m) return null;
   return {
     version,
@@ -857,7 +859,7 @@ function parseReleaseVersion(version: string): ParsedVersion | null {
   };
 }
 
-function newestReleaseVersion(versions: string[]): string {
+export function newestReleaseVersion(versions: string[]): string {
   const parsed = versions
     .filter((v) => v && v.toLowerCase() !== "dev")
     .map(parseReleaseVersion)
@@ -874,13 +876,12 @@ function newestReleaseVersion(versions: string[]): string {
 
 async function latestObservedVersion(env: Env, surface: ClientSurfaceName): Promise<string> {
   const table = telemetryTableNames(surface).pings;
-  const sql = surface === "desktop"
-    ? `SELECT version FROM (
-         SELECT version FROM ${table} WHERE date >= date('now', '-29 day')
-         UNION
-         SELECT last_version AS version FROM groups
-       ) AS versions WHERE version <> ''`
-    : `SELECT version FROM ${table} WHERE date >= date('now', '-29 day') AND version <> ''`;
+  // Require independent installations and use pings as the sole source of
+  // release truth. A single synthetic diagnostic must never promote v9.9.9 (or
+  // a prerelease) to "latest" for every report group.
+  const sql = `SELECT version FROM ${table}
+    WHERE date >= date('now', '-29 day') AND version <> ''
+    GROUP BY version HAVING COUNT(DISTINCT install_id) >= 2`;
   const rows = await env.DB.prepare(sql).all<{ version: string }>();
   return newestReleaseVersion(rows.results.map((r) => r.version));
 }
@@ -938,7 +939,7 @@ async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30,
           SUM(CASE WHEN first_version = ?1 THEN 1 ELSE 0 END) AS new_latest_reports,
           SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
           SUM(CASE WHEN status = 'open' AND ${criticalActionable} THEN 1 ELSE 0 END) AS critical_open_reports
-        FROM groups`,
+        FROM groups WHERE ${diagnosticWindowWhere(days)}`,
       )
         .bind(latestVersion)
         .first<{ open_reports: number; new_latest_reports: number; regressed_reports: number; critical_open_reports: number }>()
@@ -948,7 +949,7 @@ async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30,
           0 AS new_latest_reports,
           SUM(CASE WHEN regressed_at <> '' THEN 1 ELSE 0 END) AS regressed_reports,
           SUM(CASE WHEN status = 'open' AND ${criticalActionable} THEN 1 ELSE 0 END) AS critical_open_reports
-        FROM groups`,
+        FROM groups WHERE ${diagnosticWindowWhere(days)}`,
       ).first<{ open_reports: number; new_latest_reports: number; regressed_reports: number; critical_open_reports: number }>();
   const [row, adoptionPct] = await Promise.all([
     diagnosticCounts,
@@ -965,6 +966,10 @@ async function diagnosticOverview(env: Env, latestVersion: string, days: 7 | 30,
 
 function currentWindowSince(days: 7 | 30): string {
   return `-${days - 1} day`;
+}
+
+export function diagnosticWindowWhere(days: 7 | 30): string {
+  return `date(last_seen) >= date('now', '${currentWindowSince(days)}')`;
 }
 
 function previousWindowSince(days: 7 | 30): string {
@@ -986,16 +991,50 @@ async function metricRows(env: Env, days: 7 | 30, surface: ClientSurfaceName, pr
   return rows.results;
 }
 
-async function metricUserRows(env: Env, days: 7 | 30, surface: ClientSurfaceName): Promise<{ signal: string; bucket: string; total: number }[]> {
+// The 30-day desktop window is served from the cron-built rollup: computing it
+// live exceeds what D1 spends on one query (see refreshMetricUserRollup). Null
+// here means "not computed yet", which the dashboard says out loud rather than
+// rendering as an empty result.
+async function rollupMetricUserRows(
+  env: Env,
+): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
+  try {
+    await ensureRollupSchema(env);
+    const rows = await env.DB.prepare(
+      `SELECT signal, bucket, total, computed_at FROM metric_user_rollup WHERE window_days = ?1 ORDER BY signal, total DESC`,
+    )
+      .bind(ROLLUP_WINDOW_DAYS)
+      .all<{ signal: string; bucket: string; total: number; computed_at: string }>();
+    if (!rows.results.length) return null;
+    // Oldest wins: the cursor refreshes a slice at a time, so this is how far
+    // behind the least recently recomputed signal is.
+    const computedAt = rows.results.reduce((min, r) => (r.computed_at < min ? r.computed_at : min), rows.results[0].computed_at);
+    return { rows: rows.results, computedAt };
+  } catch (err) {
+    console.warn("metric_user_rollup read failed", err);
+    return null;
+  }
+}
+
+// Null means the query did not complete, which is distinct from "no rows": at
+// ~1M rows a day, the 30-day COUNT(DISTINCT install_id) exceeds what D1 will
+// spend on one query and comes back as a CPU-limit reset. Rendering that as an
+// empty dashboard would read as "nobody uses these settings".
+async function metricUserRows(
+  env: Env,
+  days: 7 | 30,
+  surface: ClientSurfaceName,
+): Promise<{ rows: { signal: string; bucket: string; total: number }[]; computedAt: string } | null> {
+  if (surface === "desktop" && days === ROLLUP_WINDOW_DAYS) return rollupMetricUserRows(env);
   try {
     const table = telemetryTableNames(surface).metricUsers;
     const rows = await env.DB.prepare(
       `SELECT signal, bucket, COUNT(DISTINCT install_id) AS total FROM ${table} WHERE date >= date('now', '${currentWindowSince(days)}') GROUP BY signal, bucket ORDER BY signal, total DESC`,
     ).all<{ signal: string; bucket: string; total: number }>();
-    return rows.results;
+    return { rows: rows.results, computedAt: "" };
   } catch (err) {
     console.warn("metric_users query failed", err);
-    return [];
+    return null;
   }
 }
 
@@ -1027,6 +1066,8 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
   let metrics: MetricTotals = [];
   let previousMetrics: MetricTotals = [];
   let metricUsers: MetricTotals = [];
+  let metricUsersUnavailable = false;
+  let metricUsersComputedAt = "";
   let sources: Bar[] = [];
   let overview: OverviewCounts = {
     latestAdoptionPct: null,
@@ -1057,7 +1098,7 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     latestVersion = await latestObservedVersion(env, "desktop");
     const [crashesR, sourcesR, versionsR, platformsR] = await Promise.all([
       crashGroups(env, filters, latestVersion),
-      bars("SELECT source AS label, COUNT(*) AS users FROM groups GROUP BY source ORDER BY users DESC"),
+      bars(`SELECT source AS label, COUNT(*) AS users FROM groups WHERE ${diagnosticWindowWhere(days)} GROUP BY source ORDER BY users DESC`),
       pingVersions(),
       pingPlatforms(),
     ]);
@@ -1066,14 +1107,27 @@ async function handleStats(request: Request, env: Env, user: User, activeModule:
     versions = versionsR;
     platforms = platformsR;
   } else if (activeModule === "preferences") {
-    [metrics, metricUsers] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
+    const [metricsR, usersR] = await Promise.all([metricRows(env, days, surface), metricUserRows(env, days, surface)]);
+    metrics = metricsR;
+    metricUsersUnavailable = usersR === null;
+    metricUsers = usersR?.rows ?? [];
+    metricUsersComputedAt = usersR?.computedAt ?? "";
   } else {
-    [metrics, previousMetrics] = await Promise.all([metricRows(env, days, surface), metricRows(env, days, surface, true)]);
+    const [metricsR, previousMetricsR, usersR] = await Promise.all([
+      metricRows(env, days, surface),
+      metricRows(env, days, surface, true),
+      metricUserRows(env, days, surface),
+    ]);
+    metrics = metricsR;
+    previousMetrics = previousMetricsR;
+    metricUsersUnavailable = usersR === null;
+    metricUsers = usersR?.rows ?? [];
+    metricUsersComputedAt = usersR?.computedAt ?? "";
   }
 
   return html(
     renderStats(
-      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, sources, overview, latestVersion, filters },
+      { daily, versions, platforms, crashes, metrics, previousMetrics, metricUsers, metricUsersUnavailable, metricUsersComputedAt, sources, overview, latestVersion, filters },
       user,
       activeModule,
     ),
@@ -1313,6 +1367,101 @@ const RETENTION_MAX_CHUNKS = 200;
 // scheduled handler dispatches on controller.cron; every other trigger
 // (the retention cron, manual runs) falls through to the purge.
 const SENTINEL_CRON = "17 1,7,13,19 * * *";
+const ROLLUP_CRON = "23 * * * *";
+
+// The preferences module's 30-day COUNT(DISTINCT install_id) spans ~28M rows
+// and D1 abandons it mid-query. It cannot be summed from per-day totals either:
+// an install active on twelve days would count twelve times. So the window is
+// computed here instead, one signal at a time — a single signal takes ~1s, and
+// the cursor spreads the ~57 of them across hourly runs rather than blowing one
+// invocation's CPU budget.
+const ROLLUP_WINDOW_DAYS = 30;
+const ROLLUP_SIGNALS_PER_RUN = 8;
+
+const ROLLUP_SCHEMA_SQL = [
+  `CREATE TABLE IF NOT EXISTS metric_user_rollup (
+     window_days INTEGER NOT NULL,
+     signal TEXT NOT NULL,
+     bucket TEXT NOT NULL,
+     total INTEGER NOT NULL,
+     computed_at TEXT NOT NULL,
+     PRIMARY KEY (window_days, signal, bucket)
+   )`,
+  `CREATE TABLE IF NOT EXISTS metric_user_rollup_state (
+     id INTEGER PRIMARY KEY CHECK (id = 1),
+     next_signal INTEGER NOT NULL,
+     updated_at TEXT NOT NULL
+   )`,
+] as const;
+
+const rollupSchemaPromises = new WeakMap<object, Promise<void>>();
+
+function ensureRollupSchema(env: Pick<Env, "DB">): Promise<void> {
+  const key = env.DB as unknown as object;
+  const existing = rollupSchemaPromises.get(key);
+  if (existing) return existing;
+  const creation = env.DB
+    .batch(ROLLUP_SCHEMA_SQL.map((sql) => env.DB.prepare(sql)))
+    .then(() => undefined)
+    .catch((err) => {
+      rollupSchemaPromises.delete(key);
+      throw err;
+    });
+  rollupSchemaPromises.set(key, creation);
+  return creation;
+}
+
+export async function refreshMetricUserRollup(env: Env, signalsPerRun = ROLLUP_SIGNALS_PER_RUN): Promise<void> {
+  await ensureRollupSchema(env);
+  const state = await env.DB.prepare("SELECT next_signal FROM metric_user_rollup_state WHERE id = 1").first<{
+    next_signal: number;
+  }>();
+  const start = Number(state?.next_signal ?? 0) % METRIC_SIGNALS.length;
+  const now = new Date().toISOString();
+  let advanced = 0;
+
+  for (let i = 0; i < signalsPerRun && i < METRIC_SIGNALS.length; i++) {
+    const signal = METRIC_SIGNALS[(start + i) % METRIC_SIGNALS.length];
+    try {
+      const rows = await env.DB.prepare(
+        `SELECT bucket, COUNT(DISTINCT install_id) AS total FROM metric_users
+         WHERE date >= date('now', '-${ROLLUP_WINDOW_DAYS - 1} day') AND signal = ?1
+         GROUP BY bucket`,
+      )
+        .bind(signal)
+        .all<{ bucket: string; total: number }>();
+      // Delete and insert in one batch so a reader never sees a signal
+      // half-replaced; an empty result still clears the previous window's rows.
+      await env.DB.batch([
+        env.DB
+          .prepare("DELETE FROM metric_user_rollup WHERE window_days = ?1 AND signal = ?2")
+          .bind(ROLLUP_WINDOW_DAYS, signal),
+        ...rows.results.map((r) =>
+          env.DB
+            .prepare(
+              `INSERT INTO metric_user_rollup (window_days, signal, bucket, total, computed_at)
+               VALUES (?1, ?2, ?3, ?4, ?5)`,
+            )
+            .bind(ROLLUP_WINDOW_DAYS, signal, r.bucket, r.total, now),
+        ),
+      ]);
+      advanced++;
+    } catch (err) {
+      // One signal timing out must not strand the cursor on it forever.
+      console.error(`rollup: ${signal} failed`, err);
+      advanced++;
+    }
+  }
+
+  await env.DB
+    .prepare(
+      `INSERT INTO metric_user_rollup_state (id, next_signal, updated_at) VALUES (1, ?1, ?2)
+       ON CONFLICT(id) DO UPDATE SET next_signal = ?1, updated_at = ?2`,
+    )
+    .bind((start + advanced) % METRIC_SIGNALS.length, now)
+    .run();
+  console.log(`rollup: refreshed ${advanced} signals from index ${start}`);
+}
 
 // Ingest sentinel. The 2026-07-03 blackout went unnoticed for ten days because
 // clients swallow ping failures by design and nothing watched the write path.
@@ -1542,6 +1691,10 @@ export default {
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     if (controller.cron === SENTINEL_CRON) {
       ctx.waitUntil(runIngestSentinel(env));
+      return;
+    }
+    if (controller.cron === ROLLUP_CRON) {
+      ctx.waitUntil(refreshMetricUserRollup(env));
       return;
     }
     ctx.waitUntil(purgeExpiredStatsRows(env));

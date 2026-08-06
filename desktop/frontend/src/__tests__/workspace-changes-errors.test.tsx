@@ -202,6 +202,23 @@ async function renderFilesWorkspace(methods: Partial<AppBindings>, props: Partia
 console.log("\nworkspace changes git errors");
 
 {
+  const { dom, root, rerender } = await renderFilesWorkspace({}, { open: false });
+  let threw = false;
+  try {
+    await rerender({ open: true });
+  } catch (error) {
+    threw = true;
+    process.stdout.write(`  ERROR ${String(error)}\n`);
+  }
+  ok(!threw, "workspace panel can open after a closed render without changing hook order");
+  ok(document.querySelector(".workspace-panel") !== null, "workspace panel renders after the closed-to-open transition");
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
+{
   const { dom, root } = await renderWorkspace({ files: [], gitAvailable: false });
   await waitFor("git unavailable warning", () => document.body.textContent?.includes("Git status is unavailable for this workspace.") === true);
   ok(document.body.textContent?.includes("Git status is unavailable for this workspace.") === true, "gitAvailable=false renders a warning");

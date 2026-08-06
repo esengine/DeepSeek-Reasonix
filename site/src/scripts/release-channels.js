@@ -1,5 +1,4 @@
 const STABLE_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-const PREVIEW_TAG = /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-preview\.(0|[1-9]\d*)$/;
 const DESKTOP_DOWNLOAD_PAGE = "https://reasonix.io/?download=desktop#start";
 const DESKTOP_ASSETS = [
   ["platforms", "darwin-arm64", "Reasonix-darwin-arm64.zip"],
@@ -12,7 +11,7 @@ const DESKTOP_ASSETS = [
   ["downloads", "Reasonix-windows-amd64.zip", "Reasonix-windows-amd64.zip"],
 ];
 const DESKTOP_ASSET_NAMES = new Set(DESKTOP_ASSETS.map(([, , name]) => name));
-const STABLE_DESKTOP_RELEASE_TAG = /^desktop-(v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$/;
+const OFFICIAL_DESKTOP_RELEASE_TAG = /^(?:desktop-)?(v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const MAX_RELEASE_ASSET_SIZE = 1 << 30;
 
@@ -28,14 +27,14 @@ export const CLI_RELEASE_ASSETS = [
 ];
 const CLI_RELEASE_ASSET_NAMES = new Set(CLI_RELEASE_ASSETS);
 
-export const publicReleaseChannels = new Set(["stable", "preview"]);
+export const publicReleaseChannels = new Set(["stable"]);
 
-export function normalizePublicReleaseChannel(value) {
-  return value === "preview" ? "preview" : "stable";
+export function normalizePublicReleaseChannel(_value) {
+  return "stable";
 }
 
-export function cliUpgradeCommand(value) {
-  return `reasonix upgrade ${normalizePublicReleaseChannel(value)}`;
+export function cliUpgradeCommand(_value) {
+  return "reasonix upgrade";
 }
 
 export function releaseVersionLabel(model) {
@@ -47,10 +46,6 @@ function parsePublicTag(tag) {
   let match = value.match(STABLE_TAG);
   if (match) {
     return { tag: value, channel: "stable", order: match.slice(1) };
-  }
-  match = value.match(PREVIEW_TAG);
-  if (match) {
-    return { tag: value, channel: "preview", order: match.slice(1) };
   }
   return null;
 }
@@ -135,7 +130,7 @@ export function selectCLIRelease(releases, requestedChannel) {
   for (const release of Array.isArray(releases) ? releases : []) {
     const parsed = parsePublicTag(release?.tag_name);
     if (!parsed || parsed.channel !== channel) continue;
-    if (Boolean(release?.prerelease) !== (channel === "preview")) continue;
+    if (Boolean(release?.prerelease)) continue;
     if (!releaseAssetMap(release)) continue;
     if (!selectedTag || compareOrder(parsed.order, selectedTag.order) > 0) {
       selected = release;
@@ -157,7 +152,7 @@ export function cliReleaseModel(releases, requestedChannel) {
   const exactChangelogURL = `https://reasonix.io/changelog/${parsed.tag}/`;
   const changelogURL = release.release_notes_url === exactChangelogURL
     ? exactChangelogURL
-    : `https://reasonix.io/changelog/${channel}/`;
+    : "https://reasonix.io/changelog/";
   return {
     channel,
     version: parsed.tag,
@@ -170,11 +165,11 @@ export function cliReleaseModel(releases, requestedChannel) {
 
 function desktopAssetBases(parsed) {
   const tag = `desktop-${parsed.tag}`;
-  const bases = [`https://dl.reasonix.io/${tag}/`];
-  if (parsed.channel === "stable") {
-    bases.push(`https://github.com/esengine/DeepSeek-Reasonix/releases/download/${tag}/`);
-  }
-  return bases;
+  return [
+    `https://dl.reasonix.io/${tag}/`,
+    `https://github.com/esengine/DeepSeek-Reasonix/releases/download/${tag}/`,
+    `https://github.com/esengine/DeepSeek-Reasonix/releases/download/${parsed.tag}/`,
+  ];
 }
 
 function normalizeDesktopManifest(manifest, requestedChannel) {
@@ -237,16 +232,14 @@ export function desktopReleaseModel(manifest, requestedChannel) {
     assets,
     changelogURL: manifest.release_notes_url === `https://reasonix.io/changelog/${parsed.tag}/`
       ? manifest.release_notes_url
-      : `https://reasonix.io/changelog/${parsed.channel}/`,
+      : "https://reasonix.io/changelog/",
   };
 }
 
-// GitHub Latest is owned by Desktop, so it can safely bridge the deployment
-// window before an older six-asset manifest is replaced by the new eight-asset
-// format. Preview has no GitHub release and never uses this fallback.
+// Accept both historical desktop-v* releases and the combined v* release.
 export function desktopGitHubReleaseModel(release) {
   const match = typeof release?.tag_name === "string"
-    ? release.tag_name.match(STABLE_DESKTOP_RELEASE_TAG)
+    ? release.tag_name.match(OFFICIAL_DESKTOP_RELEASE_TAG)
     : null;
   if (!match || release?.draft !== false || release?.prerelease !== false) return null;
 
@@ -280,7 +273,7 @@ export function desktopGitHubReleaseModel(release) {
     version: match[1],
     displayVersion: match[1].slice(1),
     assets: Object.fromEntries(DESKTOP_ASSETS.map(([, , name]) => [name, found[name]])),
-    changelogURL: "https://reasonix.io/changelog/stable/",
+    changelogURL: "https://reasonix.io/changelog/",
   };
 }
 

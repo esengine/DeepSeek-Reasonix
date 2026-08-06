@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"runtime"
 	"strings"
-	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"reasonix/desktop/internal/update"
+	"reasonix/internal/installlayout"
 	"reasonix/internal/repair"
 )
 
@@ -27,6 +28,14 @@ var errUpdateInProgress = errors.New("update: another download or install is alr
 
 var updaterRequestIDRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
+var (
+	pendingUpdateExistsForInstall            = repair.PendingUpdateExists
+	archiveSupersededPendingUpdateForInstall = archiveSupersededPendingUpdateAfterReady
+	reconcilePendingUpdateForInstall         = repair.ReconcilePendingUpdate
+	readPendingUpdateForHealth               = repair.ReadPendingUpdate
+	markPendingUpdateHealthyAfterReady       = repair.MarkUpdateHealthyExact
+)
+
 func validateUpdaterRequest(requestID, selectedChannel, expectedVersion string) (string, string, string, error) {
 	requestID = strings.TrimSpace(requestID)
 	if !updaterRequestIDRE.MatchString(requestID) {
@@ -34,13 +43,7 @@ func validateUpdaterRequest(requestID, selectedChannel, expectedVersion string) 
 	}
 	selectedChannel = targetUpdateChannel(selectedChannel)
 	expectedVersion = strings.TrimSpace(expectedVersion)
-	var valid bool
-	if selectedChannel == "preview" {
-		valid = previewDesktopVersionRE.MatchString(expectedVersion)
-	} else {
-		valid = stableDesktopVersionRE.MatchString(expectedVersion)
-	}
-	if !valid {
+	if !stableDesktopVersionRE.MatchString(expectedVersion) {
 		return "", "", "", fmt.Errorf("update: invalid %s version %q", selectedChannel, expectedVersion)
 	}
 	return requestID, selectedChannel, expectedVersion, nil
@@ -143,35 +146,13 @@ func (a *App) openDownloadPage(selectedChannel string) {
 	}
 }
 
-// DownloadUpdate preserves the original one-argument Wails contract. It derives
-// the version and request identity from the selected channel before entering the
-// request-bound implementation used by the current frontend.
-func (a *App) DownloadUpdate(selectedChannel string) (*UpdateDownloadResult, error) {
-	selectedChannel = targetUpdateChannel(selectedChannel)
-	info, err := a.CheckUpdate(selectedChannel)
-	if err != nil {
-		return nil, err
-	}
-	if info == nil || info.Err != "" || !info.Available {
-		return nil, fmt.Errorf("update: no checked %s update is available", selectedChannel)
-	}
-	requestID := fmt.Sprintf("legacy-download-%d", time.Now().UnixNano())
-	return a.DownloadUpdateRequest(selectedChannel, info.Latest, requestID)
-}
-
-// DownloadUpdateRequest downloads, verifies, and caches the exact version bound
-// to a frontend request. Installation remains a separate explicit user action.
-func (a *App) DownloadUpdateRequest(selectedChannel, expectedVersion, requestID string) (*UpdateDownloadResult, error) {
+// downloadUpdateRequest downloads, verifies, and caches the exact version bound
+// to a request. Used only by ApplyUpdateRequest; not exposed as a Wails binding.
+func (a *App) downloadUpdateRequest(selectedChannel, expectedVersion, requestID string) (*UpdateDownloadResult, error) {
 	requestID, selectedChannel, expectedVersion, err := validateUpdaterRequest(requestID, selectedChannel, expectedVersion)
 	if err != nil {
 		return nil, err
 	}
-	finish, err := a.beginUpdaterOperation(requestID)
-	if err != nil {
-		return nil, err
-	}
-	defer finish()
-
 	profile := detectInstallProfile()
 	if !profile.CanSelfUpdate || !canSelfUpdate() {
 		return nil, a.requireManualUpdate(requestID, selectedChannel, expectedVersion, profile)
@@ -218,31 +199,13 @@ func (a *App) DownloadUpdateRequest(selectedChannel, expectedVersion, requestID 
 	}, nil
 }
 
-// InstallUpdate preserves the original one-argument Wails contract. The cached
-// artifact supplies the trusted expected version for the strict implementation.
-func (a *App) InstallUpdate(selectedChannel string) error {
-	selectedChannel = targetUpdateChannel(selectedChannel)
-	meta, _, err := readVerifiedCachedUpdateForChannel(selectedChannel)
-	if err != nil {
-		return err
-	}
-	requestID := fmt.Sprintf("legacy-install-%d", time.Now().UnixNano())
-	return a.InstallUpdateRequest(selectedChannel, meta.Version, requestID)
-}
-
-// InstallUpdateRequest applies the exact cached, verified update bound to a
-// frontend request and then exits/relaunches.
-func (a *App) InstallUpdateRequest(selectedChannel, expectedVersion, requestID string) error {
+// installUpdateRequest applies the exact cached, verified update bound to a
+// request and then exits/relaunches. Used only by ApplyUpdateRequest.
+func (a *App) installUpdateRequest(selectedChannel, expectedVersion, requestID string) error {
 	requestID, selectedChannel, expectedVersion, err := validateUpdaterRequest(requestID, selectedChannel, expectedVersion)
 	if err != nil {
 		return err
 	}
-	finish, err := a.beginUpdaterOperation(requestID)
-	if err != nil {
-		return err
-	}
-	defer finish()
-
 	profile := detectInstallProfile()
 	if !profile.CanSelfUpdate || !canSelfUpdate() {
 		return a.requireManualUpdate(requestID, selectedChannel, expectedVersion, profile)
@@ -287,6 +250,9 @@ func (a *App) InstallUpdateRequest(selectedChannel, expectedVersion, requestID s
 	if artifactKindFromMeta(meta.ArtifactKind) != artifactKindFromMeta(wantKind) {
 		return a.failUpdate(requestID, selectedChannel, expectedVersion, errUpdateCacheMismatch)
 	}
+	if err := a.reconcilePendingUpdateForRequest(requestID, meta); err != nil {
+		return err
+	}
 
 	switch profile.Mode {
 	case installModeDeb:
@@ -294,6 +260,34 @@ func (a *App) InstallUpdateRequest(selectedChannel, expectedVersion, requestID s
 	default:
 		return a.installPortableUpdate(requestID, meta, data)
 	}
+}
+
+// reconcilePendingUpdateForRequest runs before download and again before
+// install-mode dispatch. The early pass avoids paying download and verification
+// costs for a blocked update; the second pass prevents a profile change or a
+// concurrent process from bypassing an unfinished release-unit transaction.
+func (a *App) reconcilePendingUpdateForRequest(requestID string, meta *cachedUpdate) error {
+	if pendingUpdateExistsForInstall() {
+		a.emitProgress(requestID, meta.Channel, meta.Version, "recovering", meta.Size, meta.Size, "")
+		// A user-initiated update proves the desktop reached a usable UI. Retire
+		// an eligible superseded app-bundle or flat-layout transaction here as
+		// well as in the delayed post-DOM health task, so an immediate click never
+		// has to fail once and ask the user to retry.
+		if archived, archiveErr := archiveSupersededPendingUpdateForInstall(); archiveErr != nil {
+			slog.Debug("desktop: superseded update was not eligible for automatic archival", "err", archiveErr)
+		} else if archived {
+			slog.Info("desktop: archived superseded update before install")
+		}
+	}
+	if _, err := reconcilePendingUpdateForInstall(version); err != nil {
+		if errors.Is(err, repair.ErrPendingUpdateAwaitingHealth) {
+			err = fmt.Errorf("update recovery: the previous update is still completing its startup health check; wait briefly and try again")
+		} else {
+			err = fmt.Errorf("update recovery: could not safely finish the previous update: %w", err)
+		}
+		return a.failUpdate(requestID, meta.Channel, meta.Version, err)
+	}
+	return nil
 }
 
 func (a *App) installDebUpdate(requestID string, meta *cachedUpdate) error {
@@ -324,7 +318,7 @@ func (a *App) installDebUpdate(requestID string, meta *cachedUpdate) error {
 	a.emitProgress(requestID, meta.Channel, meta.Version, "installing", meta.Size, meta.Size, "")
 	a.emitProgress(requestID, meta.Channel, meta.Version, "done", meta.Size, meta.Size, "")
 	a.shutdown(a.ctx)
-	_ = relaunchThroughGuard()
+	_ = relaunchThroughLauncher()
 	os.Exit(0)
 	return nil
 }
@@ -332,11 +326,12 @@ func (a *App) installDebUpdate(requestID string, meta *cachedUpdate) error {
 func (a *App) installPortableUpdate(requestID string, meta *cachedUpdate, data []byte) error {
 	a.emitProgress(requestID, meta.Channel, meta.Version, "installing", meta.Size, meta.Size, "")
 	var preparedUpdate *repair.UpdateTransaction
-	if runtime.GOOS == "windows" || runtime.GOOS == "linux" {
-		// Back up the complete release unit (main binary + Guard/launcher
-		// siblings the installer also replaces) so rollback never leaves a
-		// mixed-version install. Deb installs deliberately skip this — Guard
-		// cannot rewrite /usr/bin and would corrupt dpkg state.
+	versionedPortable := (runtime.GOOS == "windows" || runtime.GOOS == "linux") && installlayout.HasCurrent(currentInstallDir())
+	if (runtime.GOOS == "windows" || runtime.GOOS == "linux") && !versionedPortable {
+		// Back up the complete legacy release unit (main binary plus launcher
+		// and migration siblings) so rollback never leaves a mixed-version
+		// install. Deb installs deliberately skip this because package-manager
+		// state owns /usr/bin.
 		var err error
 		preparedUpdate, err = repair.PrepareFileUpdate(version, meta.Version, currentExecutablePath(), updateSiblingArtifacts()...)
 		if err != nil {
@@ -346,22 +341,24 @@ func (a *App) installPortableUpdate(requestID string, meta *cachedUpdate, data [
 	var err error
 	switch runtime.GOOS {
 	case "windows":
-		err = applyWindowsFile(meta.Path, meta.SHA256, preparedUpdate)
+		err = applyWindowsFile(meta.Path, meta.SHA256, meta.Version, preparedUpdate)
 	case "darwin":
 		err = applyMac(meta.Path, meta.Version)
 	case "linux":
-		err = applyLinux(data, preparedUpdate)
+		if versionedPortable {
+			err = applyLinuxVersioned(data, meta.Version)
+		} else {
+			err = applyLinux(data, preparedUpdate)
+		}
 	default:
 		err = fmt.Errorf("self-update unsupported on %s", runtime.GOOS)
 	}
 	if err != nil {
 		if runtime.GOOS == "linux" {
-			// applyLinux replaces the Guard binary before the main-binary
-			// swap, so a failure here can already have produced a mixed
-			// install. Restore the recorded release unit instead of
-			// discarding the rollback metadata; if the restore itself fails,
-			// keep the pending transaction so Guard can retry the rollback on
-			// the next launch.
+			// applyLinux replaces the legacy migration member before the main
+			// binary swap, so a failure can already have produced a mixed
+			// install. Restore the recorded release unit immediately; if that
+			// fails, retain the transaction for explicit repair/reconciliation.
 			if preparedUpdate != nil {
 				if _, rollbackErr := repair.RollbackPendingUpdateExact(preparedUpdate); rollbackErr != nil {
 					err = errors.Join(err, fmt.Errorf("restore prepared release unit: %w", rollbackErr))
@@ -394,28 +391,44 @@ func (a *App) installPortableUpdate(requestID string, meta *cachedUpdate, data [
 	// macOS the installer/helper we launched takes over once we exit.
 	a.shutdown(a.ctx)
 	if runtime.GOOS == "linux" {
-		_ = relaunchThroughGuard()
+		_ = relaunchThroughLauncher()
 	}
 	os.Exit(0)
 	return nil
 }
 
-// ApplyUpdate is kept for older frontend bindings and tests. New UI code uses the
-// explicit download → install split.
-func (a *App) ApplyUpdate() error {
-	selectedChannel := targetUpdateChannel("")
-	info, err := a.CheckUpdate(selectedChannel)
+// ApplyUpdateRequest downloads, verifies, installs, and relaunches the exact
+// version bound to a frontend request. This is the v1.20+ single-action update
+// path ("更新并重启"); there is no durable cross-restart pending state when the
+// operation fails — the user simply retries.
+func (a *App) ApplyUpdateRequest(selectedChannel, expectedVersion, requestID string) error {
+	requestID, selectedChannel, expectedVersion, err := validateUpdaterRequest(requestID, selectedChannel, expectedVersion)
 	if err != nil {
 		return err
 	}
-	if info == nil || info.Err != "" || !info.Available {
-		return fmt.Errorf("update: no checked update is available")
-	}
-	requestID := fmt.Sprintf("legacy-%d", time.Now().UnixNano())
-	if _, err := a.DownloadUpdateRequest(selectedChannel, info.Latest, requestID+"-download"); err != nil {
+	finish, err := a.beginUpdaterOperation(requestID)
+	if err != nil {
 		return err
 	}
-	return a.InstallUpdateRequest(selectedChannel, info.Latest, requestID+"-install")
+	// One owner covers the complete download -> verify -> install -> relaunch
+	// sequence, so another request cannot slip into the former phase gap.
+	defer finish()
+
+	if err := a.reconcilePendingUpdateForRequest(requestID, &cachedUpdate{
+		Channel: selectedChannel,
+		Version: expectedVersion,
+	}); err != nil {
+		return err
+	}
+	if _, err := a.downloadUpdateRequest(selectedChannel, expectedVersion, requestID); err != nil {
+		return err
+	}
+	a.emitProgress(requestID, selectedChannel, expectedVersion, "installing", 0, 0, "")
+	if err := a.installUpdateRequest(selectedChannel, expectedVersion, requestID); err != nil {
+		return err
+	}
+	a.emitProgress(requestID, selectedChannel, expectedVersion, "relaunching", 0, 0, "")
+	return nil
 }
 
 // downloadVerify downloads the asset (streaming progress), verifies its minisign

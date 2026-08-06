@@ -54,8 +54,17 @@ ok(
   "onboarding opens the model access flow instead of model usage",
 );
 ok(
-  /initialFocus\?\.target === "model-access" \? "access" : "usage"/.test(settingsSource),
-  "model settings honor the onboarding access target while preserving usage as the default",
+  /initialFocus\?\.target === "model-access"[\s\S]*?initialFocus\?\.target === "model-stats"[\s\S]*?"usage"/.test(settingsSource),
+  "model settings honor access and statistics focus targets while preserving usage as the default",
+);
+ok(
+  !settingsSource.includes("modelFocusHandledRef"),
+  "each fresh model focus object can re-target the same subtab again",
+);
+ok(
+  /setSettingsFocus\(\(current\) => \(\{[\s\S]*?target: "model-stats",[\s\S]*?requestId: \(current\?\.requestId \?\? 0\) \+ 1,[\s\S]*?\}\)\)/.test(appSource) &&
+    /initialFocus\?\.requestId/.test(settingsSource),
+  "usage statistics commands derive a monotonic request id from the shared focus state",
 );
 ok(
   /case "deepseek-responses":\s*return t\("settings\.addProvider\.preset\.deepseekResponsesDesc"\)/.test(settingsSource),
@@ -66,15 +75,38 @@ ok(
   "DeepSeek Anthropic preset uses a localized description",
 );
 ok(
+  /case "token-rhythm":\s*return t\("settings\.addProvider\.preset\.tokenRhythmDesc"\)/.test(settingsSource) &&
+    /preset\.id === "token-rhythm"\) return t\("settings\.addProvider\.preset\.tokenRhythmLabel"\)/.test(settingsSource),
+  "Token Rhythm preset localizes the English and Chinese brand names",
+);
+ok(
   [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
     source.includes('"settings.addProvider.preset.deepseekResponsesDesc"') &&
-    source.includes('"settings.addProvider.preset.deepseekAnthropicDesc"'),
+    source.includes('"settings.addProvider.preset.deepseekAnthropicDesc"') &&
+    source.includes('"settings.addProvider.preset.tokenRhythmLabel"') &&
+    source.includes('"settings.addProvider.preset.tokenRhythmDesc"'),
   ),
-  "DeepSeek protocol preset descriptions are present in every supported locale",
+  "provider preset localization is present in every supported locale",
+);
+ok(
+  enLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "Token Rhythm"') &&
+    zhLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "基元律动"') &&
+    zhTWLocaleSource.includes('"settings.addProvider.preset.tokenRhythmLabel": "基元律动"'),
+  "Token Rhythm preset uses the official English and Chinese brand names",
+);
+ok(
+  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+    source.includes('"settings.reasoningProtocol.glm"'),
+  ),
+  "GLM reasoning protocol is localized in every supported locale",
 );
 ok(
   /mockPreset\("deepseek-anthropic",\s*"DeepSeek Anthropic"/.test(bridgeSource),
   "browser mock exposes the DeepSeek Anthropic preset",
+);
+ok(
+  /mockPreset\("token-rhythm",\s*"Token Rhythm"/.test(bridgeSource),
+  "browser mock exposes the Token Rhythm preset",
 );
 ok(
   /function mockProviderPresetDisplayRank\(id: string\): number \{\s*if \(id === "deepseek-responses"\) return -1;\s*if \(id === "deepseek-anthropic"\) return 0;/.test(bridgeSource),

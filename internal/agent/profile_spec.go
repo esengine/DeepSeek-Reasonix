@@ -53,6 +53,10 @@ type ProfileExecSpec struct {
 	UseProfilePrompt bool
 	// ReadOnly forces the read-only registry even when the profile can write.
 	ReadOnly bool
+	// AllowNoTools preserves the ordinary parallel research path for children
+	// that can answer directly without host tools. Explicit task/profile calls
+	// keep failing closed on an empty registry.
+	AllowNoTools bool
 	// CallTools is the optional per-call tools whitelist.
 	CallTools []string
 	// ProfileTools is the profile frontmatter allowed-tools list.
@@ -70,6 +74,10 @@ type ProfileExecSpec struct {
 	ForkFrom     string
 	// RunInBackground starts a jobs.Manager background job.
 	RunInBackground bool
+	// BackgroundWriter marks work already hosted by a parent background job
+	// (for example fleet). It participates in checkpoint writer exclusion
+	// without spawning a second nested job.
+	BackgroundWriter bool
 	// Nested marks nested sub-agent acquires (fail-fast on concurrency limits).
 	Nested bool
 }

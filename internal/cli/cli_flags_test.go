@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/pflag"
 	"reasonix/internal/agent"
 	"reasonix/internal/provider"
 )
@@ -30,6 +31,43 @@ func TestSplitAllowedToolRulesRejectsUnbalancedParentheses(t *testing.T) {
 		if _, err := splitAllowedToolRules([]string{input}); err == nil {
 			t.Fatalf("splitAllowedToolRules(%q) unexpectedly succeeded", input)
 		}
+	}
+}
+
+func TestRegisterContinueFlagShorthandParses(t *testing.T) {
+	cases := []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"-c"}, true},
+		{[]string{"-c=true"}, true},
+		{[]string{"--continue"}, true},
+		{[]string{"--continue=true"}, true},
+		{[]string{}, false},
+	}
+	for _, tc := range cases {
+		fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
+		cont := registerContinueFlag(fs)
+		if err := fs.Parse(tc.args); err != nil {
+			t.Fatalf("Parse(%#v): %v", tc.args, err)
+		}
+		if *cont != tc.want {
+			t.Fatalf("Parse(%#v) continue = %v, want %v", tc.args, *cont, tc.want)
+		}
+	}
+}
+
+// Regression guard: registering the shorthand with BoolVar instead of BoolP
+// leaves "-c" unparseable ("unknown shorthand flag") while accidentally
+// accepting "--c" as a long flag name (the pre-fix bug, #7156/#7171).
+func TestRegisterContinueFlagRejectsAccidentalLongC(t *testing.T) {
+	fs := pflag.NewFlagSet("reasonix", pflag.ContinueOnError)
+	cont := registerContinueFlag(fs)
+	if err := fs.Parse([]string{"--c"}); err == nil {
+		t.Fatalf("Parse(--c) should fail: --c must not exist as a long flag name")
+	}
+	if *cont {
+		t.Fatalf("--c unexpectedly set the continue flag")
 	}
 }
 
@@ -81,6 +119,25 @@ func TestStripLeadingPrintFlag(t *testing.T) {
 		if got := stripLeadingPrintFlag(tc.args); !reflect.DeepEqual(got, tc.want) {
 			t.Fatalf("stripLeadingPrintFlag(%#v) = %#v, want %#v", tc.args, got, tc.want)
 		}
+	}
+}
+
+func TestResolveSessionQueryByMachineSessionID(t *testing.T) {
+	identityKey := installMachineTestIdentity(t)
+	dir := t.TempDir()
+	path := saveQueryTestSession(t, dir, "opaque-branch.jsonl", "resume by machine id")
+	machineID := machineSessionIDWithKey(agent.BranchID(path), identityKey)
+	if machineID == "" || !looksLikeMachineSessionID(machineID) {
+		t.Fatalf("machine session id = %q", machineID)
+	}
+
+	got, err := resolveSessionQuery(dir, machineID)
+	if err != nil || got != path {
+		t.Fatalf("resolve by machine id = (%q, %v), want %q", got, err, path)
+	}
+	missing := "session_" + strings.Repeat("0", 32)
+	if _, err := resolveSessionQuery(dir, missing); err == nil || !strings.Contains(err.Error(), "no session") {
+		t.Fatalf("missing machine id error = %v", err)
 	}
 }
 

@@ -14,11 +14,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
-	"reasonix/internal/proc"
+	"reasonix/internal/gitcmd"
 )
 
 const (
@@ -233,8 +232,7 @@ func runGit(parent context.Context, dir string, args ...string) (stdout, stderr 
 	}
 	ctx, cancel := context.WithTimeout(parent, gitTimeout(args))
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", gitCommandArgs(runtime.GOOS, dir, args...)...)
-	proc.HideWindow(cmd)
+	cmd := gitcmd.Command(ctx, dir, args...)
 	var outBuf, errBuf bytes.Buffer
 	cmd.Stdout = &outBuf
 	cmd.Stderr = &errBuf
@@ -250,15 +248,6 @@ func gitTimeout(args []string) time.Duration {
 		return gitWorktreeAddTimeout
 	}
 	return gitProbeTimeout
-}
-
-func gitCommandArgs(goos, dir string, args ...string) []string {
-	commandArgs := []string{"-c", "core.fsmonitor=false", "-c", "maintenance.auto=false"}
-	if goos == "windows" {
-		commandArgs = append(commandArgs, "-c", "core.longpaths=true")
-	}
-	commandArgs = append(commandArgs, "-C", dir)
-	return append(commandArgs, args...)
 }
 
 func randomID() (string, error) {

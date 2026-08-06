@@ -116,9 +116,10 @@ func TestMCPJSONCallTimeoutsRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := UpsertMCPJSONPlugin(path, PluginEntry{
-		Name:               "maker",
-		Command:            "maker-mcp",
-		CallTimeoutSeconds: 600,
+		Name:                  "maker",
+		Command:               "maker-mcp",
+		StartupTimeoutSeconds: 60,
+		CallTimeoutSeconds:    600,
 		ToolTimeoutSeconds: map[string]int{
 			"generate/video": 1800,
 			"search":         120,
@@ -136,6 +137,9 @@ func TestMCPJSONCallTimeoutsRoundTrip(t *testing.T) {
 	}
 	if got[0].CallTimeoutSeconds != 600 {
 		t.Fatalf("call_timeout_seconds = %d, want 600", got[0].CallTimeoutSeconds)
+	}
+	if got[0].StartupTimeoutSeconds != 60 {
+		t.Fatalf("startup_timeout_seconds = %d, want 60", got[0].StartupTimeoutSeconds)
 	}
 	if got[0].ToolTimeoutSeconds["generate/video"] != 1800 || got[0].ToolTimeoutSeconds["search"] != 120 {
 		t.Fatalf("tool_timeout_seconds = %+v, want generate/video=1800 search=120", got[0].ToolTimeoutSeconds)

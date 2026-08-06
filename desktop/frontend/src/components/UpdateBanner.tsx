@@ -5,12 +5,11 @@ import { useUpdater } from "../lib/useUpdater";
 const MB = 1024 * 1024;
 const mb = (n: number) => (n / MB).toFixed(1);
 
-// UpdateBanner checks for an update once on mount and, when one is available, shows
-// a dismissible top banner that drives the download → verify → restart/install flow
-// (or, on macOS manual builds, links out to the download page). It renders nothing while idle, checking,
-// or already current — a quiet auto-check that only surfaces when actionable. A
-// failed check can be dismissed here (network blips shouldn't pin the UI); the
-// Settings panel is where a manual check shows errors inline.
+// UpdateBanner checks for an update once on mount and, when one is available,
+// shows a dismissible top banner with a single "update and restart" action
+// (or, on macOS manual builds, links out to the download page). It renders
+// nothing while idle, checking, or already current. A failed check can be
+// dismissed here; Settings is where a manual check shows errors inline.
 export function UpdateBanner({
   enabled = true,
   onShowReleaseNotes,
@@ -19,7 +18,7 @@ export function UpdateBanner({
   onShowReleaseNotes?: (version: string) => void;
 }) {
   const t = useT();
-  const { status, check, download, install, openDownload, reset } = useUpdater();
+  const { status, check, apply, openDownload, reset } = useUpdater();
   const [dismissed, setDismissed] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,8 +42,8 @@ export function UpdateBanner({
               {t("updater.releaseNotes")}
             </button>
           )}
-          <button className="btn btn--small btn--primary" onClick={() => download(info)}>
-            {info.canSelfUpdate ? t("updater.downloadUpdate") : t("updater.goToDownload")}
+          <button className="btn btn--small btn--primary" onClick={() => apply(info)}>
+            {info.canSelfUpdate ? t("updater.updateAndRestart") : t("updater.goToDownload")}
           </button>
           <button className="btn btn--small" onClick={() => setDismissed(info.latest)}>
             {t("updater.dismiss")}
@@ -66,26 +65,6 @@ export function UpdateBanner({
     }
     case "verifying":
       return <div className="banner banner--update">{t("updater.verifying")}</div>;
-    case "downloaded":
-      return (
-        <div className="banner banner--update">
-          <span className="banner__msg">{t("updater.downloaded", { v: status.info.latest })}</span>
-          <span className="banner__spacer" />
-          {onShowReleaseNotes && (
-            <button className="btn btn--small" onClick={() => onShowReleaseNotes(status.info.latest)}>
-              {t("updater.releaseNotes")}
-            </button>
-          )}
-          <button className="btn btn--small btn--primary" onClick={install}>
-            {status.info.requiresElevation || status.info.installMode === "deb"
-              ? t("updater.authorizeInstall")
-              : t("updater.restartInstall")}
-          </button>
-          <button className="btn btn--small" onClick={() => reset()}>
-            {t("updater.dismiss")}
-          </button>
-        </div>
-      );
     case "authorizing":
       return <div className="banner banner--update">{t("updater.authorizing")}</div>;
     case "installing":
@@ -96,22 +75,34 @@ export function UpdateBanner({
             : t("updater.installing")}
         </div>
       );
+    case "relaunching":
     case "done":
       return <div className="banner banner--update">{t("updater.done")}</div>;
     case "error": {
-      const failedMessage = t("updater.failed", { msg: status.message });
+      const failedMessage = status.disposition === "recovery"
+        ? t("updater.recoveryBlocked")
+        : status.disposition === "manual"
+          ? t("updater.manualUpdateRequired")
+          : t("updater.failed", { msg: status.message });
+      const downloadFirst = status.disposition !== "retryable";
       return (
         <div className="banner banner--update banner--error banner--actionable">
           <span className="banner__msg" title={failedMessage}>
             {failedMessage}
           </span>
           <span className="banner__spacer" />
-          {status.manualHint && (
-            <button className="btn btn--small" onClick={openDownload}>
-              {t("updater.goToDownload")}
+          {downloadFirst && (
+            <button className="btn btn--small btn--primary" onClick={openDownload}>
+              {t("updater.officialDownload")}
             </button>
           )}
-          <button className="btn btn--small btn--primary" onClick={() => void check()}>
+          <button
+            className={`btn btn--small${downloadFirst ? "" : " btn--primary"}`}
+            onClick={() => {
+              if (status.info) apply(status.info);
+              else void check();
+            }}
+          >
             {t("updater.retry")}
           </button>
           <button className="btn btn--small" onClick={() => reset()}>

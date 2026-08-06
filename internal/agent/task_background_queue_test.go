@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/checkpoint"
 	"reasonix/internal/event"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
@@ -19,6 +20,8 @@ import (
 // the parent tool call on Acquire.
 func TestBackgroundTaskReturnsBeforeSlotFrees(t *testing.T) {
 	root := t.TempDir()
+	store := checkpoint.New("", root)
+	observer := checkpoint.NewMutationObserver(checkpoint.ObserverOptions{Store: store})
 	sched := NewSubagentScheduler(1, 1)
 	// Hold the only slot.
 	holdRelease, err := sched.Acquire(context.Background(), AcquireRequest{Writer: false})
@@ -36,7 +39,8 @@ func TestBackgroundTaskReturnsBeforeSlotFrees(t *testing.T) {
 
 	task := NewTaskTool(prov, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
 		WithTranscripts(mustSubagentStore(t), root, "base", "high").
-		WithScheduler(sched)
+		WithScheduler(sched).
+		WithMutationObserver(observer)
 
 	done := make(chan string, 1)
 	go func() {
@@ -64,6 +68,9 @@ func TestBackgroundTaskReturnsBeforeSlotFrees(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("background task blocked on concurrency slot instead of returning a job id")
 	}
+	if writers := observer.ActiveWriters(); len(writers) != 1 {
+		t.Fatalf("queued background writer = %+v, want one rewind exclusion", writers)
+	}
 
 	// Free the slot so the background job can finish (and not leak).
 	holdRelease()
@@ -75,6 +82,9 @@ func TestBackgroundTaskReturnsBeforeSlotFrees(t *testing.T) {
 	result := jm.WaitForSession(context.Background(), "sess-bg", []string{jobID}, 5)
 	if len(result) != 1 || result[0].Status != jobs.Done {
 		t.Fatalf("background job result = %+v, want one completed job", result)
+	}
+	if writers := observer.ActiveWriters(); len(writers) != 0 {
+		t.Fatalf("completed background writer still registered: %+v", writers)
 	}
 }
 

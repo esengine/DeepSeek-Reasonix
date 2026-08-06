@@ -62,6 +62,13 @@ auto_start = false
 	if r.Live {
 		t.Fatal("static mode must set live=false")
 	}
+	if len(r.MCP.Servers) != 1 {
+		t.Fatalf("MCP servers = %+v, want one effective entry", r.MCP.Servers)
+	}
+	mcp := r.MCP.Servers[0]
+	if !mcp.Effective || mcp.Source != "project_config" || mcp.SourcePath != "<workspace>/reasonix.toml" {
+		t.Fatalf("effective MCP provenance = %+v", mcp)
+	}
 	// Missing convention dirs should not produce warnings.
 	for _, is := range r.Issues {
 		if strings.Contains(is.Message, "missing") && is.Subsystem == "skills" && is.Code != "skill.missing_description" {
@@ -113,6 +120,41 @@ auto_start = false
 	if len(r.Instructions.Docs) == 0 {
 		t.Fatal("expected AGENTS.md in instructions")
 	}
+}
+
+func TestCollectUsesExactReasonixHomeForGlobalHooks(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, "AppData", "Roaming", "reasonix")
+	write(t, filepath.Join(reasonixHome, "settings.json"), `{
+  "hooks": {
+    "SessionStart": [{"command": "echo exact-home"}]
+  }
+}`)
+
+	report := capdiag.Collect(capdiag.Options{
+		Root:            root,
+		HomeDir:         home,
+		ReasonixHomeDir: reasonixHome,
+	})
+	if report.Summary.Hooks != 1 || len(report.Hooks.Entries) != 1 {
+		t.Fatalf("hooks = %+v, summary = %+v", report.Hooks, report.Summary)
+	}
+	for _, source := range report.Hooks.Sources {
+		if source.Scope == "global" {
+			if source.Status != "ok" || source.HookCount != 1 {
+				t.Fatalf("global hook source = %+v, want exact Reasonix home settings", source)
+			}
+			if source.Path != "<reasonix-home>/settings.json" && source.Path != "<reasonix-home>\\settings.json" {
+				// displayPath uses ToSlash
+				if !strings.Contains(source.Path, "<reasonix-home>") {
+					t.Fatalf("global path = %q, want <reasonix-home> prefix", source.Path)
+				}
+			}
+			return
+		}
+	}
+	t.Fatal("global hook source not reported")
 }
 
 func TestMissingConventionDirsNoWarning(t *testing.T) {

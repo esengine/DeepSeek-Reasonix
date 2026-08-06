@@ -5,6 +5,7 @@ import "@xterm/xterm/css/xterm.css";
 
 import { useTerminalStore } from "../store/terminal";
 import { registerTerminalSink, startTerminalEventBridge } from "../lib/terminalEvents";
+import { observeTerminalTheme, terminalThemeForElement } from "../lib/terminalTheme";
 import type { TerminalSessionView } from "../lib/types";
 
 export function TerminalView({ tabId, session }: { tabId: string; session: TerminalSessionView }) {
@@ -21,11 +22,15 @@ export function TerminalView({ tabId, session }: { tabId: string; session: Termi
       cursorBlink: true,
       fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
       fontSize: 13,
-      theme: { background: "#111315", foreground: "#e8e5df", cursor: "#e6a15c" },
+      theme: terminalThemeForElement(host),
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(host);
+    const updateTheme = () => {
+      terminal.options.theme = terminalThemeForElement(host);
+    };
+    const stopObservingTheme = observeTerminalTheme(host, updateTheme);
     const unregister = registerTerminalSink(session.id, (bytes) => terminal.write(bytes));
     const input = terminal.onData((data) => { void write(tabId, session.id, data).catch(() => {}); });
     const outputResize = terminal.onResize(({ cols, rows }) => { void resize(tabId, session.id, cols, rows).catch(() => {}); });
@@ -39,6 +44,7 @@ export function TerminalView({ tabId, session }: { tabId: string; session: Termi
     fitTerminal();
     return () => {
       observer?.disconnect();
+      stopObservingTheme();
       input.dispose();
       outputResize.dispose();
       unregister();

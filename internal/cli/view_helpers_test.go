@@ -152,6 +152,42 @@ func TestRenderHelpGroupsCommands(t *testing.T) {
 	assertLinesWithin(t, got, width)
 }
 
+func TestRenderHelpDocsShowsOnlyRuntimeWinner(t *testing.T) {
+	got := renderHelp(72,
+		[]command.Command{{Name: "docs", Description: "custom docs"}},
+		[]skill.Skill{{Name: "docs", Description: "docs skill"}},
+		nil,
+	)
+	if count := strings.Count(got, "/docs"); count != 1 {
+		t.Fatalf("help contains %d /docs entries, want one:\n%s", count, got)
+	}
+	if !strings.Contains(got, "custom docs") || strings.Contains(got, "docs skill") {
+		t.Fatalf("help did not preserve the runtime-winning custom command:\n%s", got)
+	}
+	if !strings.Contains(got, "/reasonix:docs") {
+		t.Fatalf("help did not preserve the qualified built-in docs fallback:\n%s", got)
+	}
+}
+
+func TestRenderHelpDocsUsesQualifiedFallbackForHiddenAlias(t *testing.T) {
+	got := renderHelp(72,
+		[]command.Command{
+			{Name: "docs", Plugin: "manuals", Hidden: true},
+			{Name: "manuals:docs", Plugin: "manuals", Description: "plugin docs"},
+		},
+		nil,
+		nil,
+	)
+	if strings.Contains(got, "\n  /docs ") {
+		t.Fatalf("help exposed a misleading hidden /docs alias:\n%s", got)
+	}
+	for _, want := range []string{"/reasonix:docs", "/manuals:docs"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("help missing %q:\n%s", want, got)
+		}
+	}
+}
+
 func TestRenderSkillPathsStaysWithinWidth(t *testing.T) {
 	width := 72
 	got := renderSkillPaths(width, []skill.Root{{

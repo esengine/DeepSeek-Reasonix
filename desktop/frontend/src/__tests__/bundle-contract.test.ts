@@ -20,8 +20,10 @@ function ok(cond: boolean, label: string) {
 const here = dirname(fileURLToPath(import.meta.url));
 const appSource = readFileSync(resolve(here, "../App.tsx"), "utf8");
 const projectTreeSource = readFileSync(resolve(here, "../components/ProjectTree.tsx"), "utf8");
+const settingsEntrySource = readFileSync(resolve(here, "../components/SettingsPanelEntry.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(here, "../components/SettingsPanel.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(here, "../components/Markdown.tsx"), "utf8");
+const localPathLinksSource = readFileSync(resolve(here, "../lib/localPathLinks.ts"), "utf8");
 const i18nSource = readFileSync(resolve(here, "../lib/i18n.tsx"), "utf8");
 const mainSource = readFileSync(resolve(here, "../main.tsx"), "utf8");
 const stylesSource = readFileSync(resolve(here, "../styles.css"), "utf8");
@@ -42,9 +44,15 @@ ok(
   "App keeps secondary drawers out of the initial chunk",
 );
 ok(
-  appSource.includes('import("./components/SettingsPanel")') &&
+  appSource.includes('import("./components/SettingsPanelEntry")') &&
     appSource.includes('import("./components/HistoryPanel")'),
   "App loads secondary drawers on demand",
+);
+ok(
+  settingsEntrySource.includes('import "./CompactRatioSettings.css"') &&
+    settingsEntrySource.includes('from "./SettingsPanel"') &&
+    !settingsSource.includes('import "./CompactRatioSettings.css"'),
+  "Settings CSS stays in the lazy production entry without breaking direct module tests",
 );
 ok(
   !appSource.includes("openAllHistory") &&
@@ -98,6 +106,10 @@ ok(
 ok(
   markdownSource.includes('import("./MarkdownRenderer")'),
   "Markdown wrapper loads markdown renderer on demand",
+);
+ok(
+  !/String\.raw`[^`]*\(\?<!/s.test(localPathLinksSource),
+  "Markdown local-path support avoids RegExp lookbehind required by newer WebKit",
 );
 ok(
   !/import\s+\{\s*zh\s*\}\s+from\s+["']\.\.\/locales\/zh["']/.test(i18nSource) &&

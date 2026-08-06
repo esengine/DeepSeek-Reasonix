@@ -20,8 +20,8 @@ const prHref = (ref: number) => `${repo}/pull/${ref}`;
    "Reasonix 1.18.0 — Better agents") keeps the full hero. */
 const isThematic = isThematicTitle(release.title.en, release.version);
 const isPreview = release.channel === 'prerelease';
-const channelLabel = isPreview ? { en: 'Preview', zh: '预览版' } : { en: 'Stable', zh: '稳定版' };
-const latestForChannel = releases.find((item) => item.channel === release.channel);
+const latestForChannel = releases[0];
+const downloadHref = isPreview ? 'https://reasonix.io/?download=desktop#start' : release.links.download;
 
 const kindLabel = (kind: string) => ({
   new: { en: 'New', zh: '新增' },
@@ -71,7 +71,7 @@ const titleZh = `Reasonix v${release.version} 更新日志`;
 const description = release.summary.en;
 ---
 
-<Base title={titleEn} titleEn={titleEn} titleZh={titleZh} description={description} canonical={canonical}>
+<Base title={titleEn} titleEn={titleEn} titleZh={titleZh} description={description} canonical={canonical} noindex={isPreview}>
   <SiteHeader active="changelog" scrolled />
 
   <main class="release-stage">
@@ -85,13 +85,9 @@ const description = release.summary.en;
     <div class="release-grid">
       <aside class="release-rail" aria-label="Release versions">
         <div class="release-rail__eyebrow"><span class="release-rail__mark"></span><span class="l-en">Release ledger</span><span class="l-zh">版本档案</span></div>
-        <div class="release-channel-tabs">
-          <a class:list={{ active: !isPreview }} aria-current={!isPreview ? 'page' : undefined} href={`${base}/changelog/stable`}><span class="l-en">Stable</span><span class="l-zh">稳定版</span></a>
-          <a class:list={{ active: isPreview }} aria-current={isPreview ? 'page' : undefined} href={`${base}/changelog/preview`}><span class="l-en">Preview</span><span class="l-zh">预览版</span></a>
-        </div>
         <nav>
           {railGroups.map((group) => {
-            const channelItems = group.items.filter((item) => item.channel === release.channel);
+            const channelItems = group.items;
             if (!channelItems.length) return null;
             const visible = channelItems.slice(0, RAIL_VISIBLE);
             const overflow = channelItems.slice(RAIL_VISIBLE);
@@ -128,7 +124,7 @@ const description = release.summary.en;
       <article class="release-paper">
         <header class:list={["release-hero", { "release-hero--compact": !isThematic }]}>
           <div class="release-hero__meta">
-            <span class:list={["release-channel", { "release-channel--preview": isPreview }]}><span class="release-channel__dot"></span><span class="l-en">{channelLabel.en}</span><span class="l-zh">{channelLabel.zh}</span></span>
+            {isPreview && <span class="release-channel release-channel--preview"><span class="release-channel__dot"></span><span class="l-en">Historical archive</span><span class="l-zh">历史归档</span></span>}
             <time datetime={release.date}>{release.date}</time>
           </div>
           {isThematic && <p class="release-hero__version">Reasonix / v{release.version}</p>}
@@ -153,7 +149,7 @@ const description = release.summary.en;
           )}
           {isThematic && (
             <div class="release-hero__actions">
-              <a class="btn btn-dark" href={release.links.download}><span class="l-en">Download v{release.version}</span><span class="l-zh">下载 v{release.version}</span></a>
+              <a class="btn btn-dark" href={downloadHref}><span class="l-en">Download current release</span><span class="l-zh">下载当前正式版</span></a>
               <a class="btn btn-ghost" href={release.links.github}><span class="l-en">View on GitHub ↗</span><span class="l-zh">在 GitHub 查看 ↗</span></a>
             </div>
           )}
@@ -261,7 +257,7 @@ const description = release.summary.en;
             <h2><span class="l-en">Ship with a safer Reasonix.</span><span class="l-zh">升级到更可靠的 Reasonix。</span></h2>
           </div>
           <div class="release-download__actions">
-            <a class="btn btn-dark" href={release.links.download}><span class="l-en">Download</span><span class="l-zh">下载</span></a>
+          <a class="btn btn-dark" href={downloadHref}><span class="l-en">Download</span><span class="l-zh">下载</span></a>
             <a class="release-compare" href={release.links.compare}><span class="l-en">Full comparison ↗</span><span class="l-zh">完整差异 ↗</span></a>
           </div>
         </section>

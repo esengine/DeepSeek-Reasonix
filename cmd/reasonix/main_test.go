@@ -29,8 +29,11 @@ func TestRunWithCrashCaptureRecordsAndReraises(t *testing.T) {
 	if err != nil || len(reports) != 1 {
 		t.Fatalf("captured reports=%d err=%v", len(reports), err)
 	}
-	if got := reports[0].Report.TopFrame; !strings.Contains(got, "main_test.go:") {
-		t.Fatalf("top frame = %q, want panic call site in main_test.go", got)
+	// Token-like function and file basenames may be redacted by the current
+	// privacy filter. Keep asserting that the top frame is the test call site
+	// without requiring its pre-redaction basename.
+	if got := reports[0].Report.TopFrame; !strings.Contains(got, "_test.go:") {
+		t.Fatalf("top frame = %q, want sanitized panic call site in a test file", got)
 	}
 	preview, err := crashreport.Preview(reports[0].Report)
 	if err != nil {

@@ -35,6 +35,5 @@ CREATE TABLE IF NOT EXISTS cli_metric_users (
   PRIMARY KEY (date, signal, bucket, install_id)
 );
 
-CREATE INDEX IF NOT EXISTS cli_pings_version ON cli_pings (version);
-CREATE INDEX IF NOT EXISTS cli_metrics_signal_bucket ON cli_metrics (signal, bucket);
-CREATE INDEX IF NOT EXISTS cli_metric_users_signal_bucket ON cli_metric_users (signal, bucket);
+-- No secondary indexes here: every primary key above already leads with `date`.
+-- migrate-window-index-fix.sql explains what adding one costs.

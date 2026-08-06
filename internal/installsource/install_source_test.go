@@ -712,6 +712,7 @@ func TestPlanMCPJSONIgnoresRetiredApprovalPolicy(t *testing.T) {
   "mcpServers": {
     "admin": {
       "command": "admin-mcp",
+      "startup_timeout_seconds": 30,
       "call_timeout_seconds": 45,
       "tool_timeout_seconds": {"wipe": 120},
       "trusted_read_only_tools": ["status"],
@@ -725,7 +726,7 @@ func TestPlanMCPJSONIgnoresRetiredApprovalPolicy(t *testing.T) {
 		t.Fatalf("parseMCPJSON: entries=%+v warnings=%v err=%v", entries, warnings, err)
 	}
 	got := entries[0]
-	if got.CallTimeoutSeconds != 45 || got.ToolTimeoutSeconds["wipe"] != 120 {
+	if got.StartupTimeoutSeconds != 30 || got.CallTimeoutSeconds != 45 || got.ToolTimeoutSeconds["wipe"] != 120 {
 		t.Fatalf("MCP timeout config was dropped: %+v", got)
 	}
 }

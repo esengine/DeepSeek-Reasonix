@@ -43,6 +43,179 @@ func TestResumeDispatchOpensPicker(t *testing.T) {
 	}
 }
 
+func TestOrderResumeSessionsGroupsRecoveryCopiesAndPrefersNewestLeaf(t *testing.T) {
+	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	root := agent.SessionInfo{Path: "/sessions/root.jsonl", ModTime: base.Add(4 * time.Minute)}
+	olderLeaf := agent.SessionInfo{
+		Path: "/sessions/recovery-old.jsonl", ModTime: base.Add(2 * time.Minute),
+		Recovered: true, ParentID: "root",
+	}
+	newerLeaf := agent.SessionInfo{
+		Path: "/sessions/recovery-new.jsonl", ModTime: base.Add(3 * time.Minute),
+		Recovered: true, ParentID: "root",
+	}
+	other := agent.SessionInfo{Path: "/sessions/other.jsonl", ModTime: base.Add(time.Minute)}
+
+	got := orderResumeSessions([]agent.SessionInfo{root, newerLeaf, olderLeaf, other})
+	want := []string{newerLeaf.Path, olderLeaf.Path, root.Path, other.Path}
+	if len(got) != len(want) {
+		t.Fatalf("ordered sessions len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i].Path != want[i] {
+			t.Fatalf("ordered[%d] = %q, want %q (all=%v)", i, got[i].Path, want[i], got)
+		}
+	}
+}
+
+func TestMostRecentSessionIgnoresRecoveryPickerLeafPreference(t *testing.T) {
+	dir := t.TempDir()
+	rootPath := filepath.Join(dir, "root.jsonl")
+	recoveryPath := filepath.Join(dir, "recovery.jsonl")
+	saveTestSession(t, rootPath, "latest parent prompt")
+	saveTestSession(t, recoveryPath, "older recovery prompt")
+
+	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	if err := agent.SaveBranchMetaPreserveUpdated(rootPath, agent.BranchMeta{
+		ID: "root", CreatedAt: base, UpdatedAt: base.Add(4 * time.Minute),
+		SchemaVersion: agent.BranchMetaCountsVersion, Turns: 1, Preview: "latest parent prompt",
+	}); err != nil {
+		t.Fatalf("save root meta: %v", err)
+	}
+	if err := agent.SaveBranchMetaPreserveUpdated(recoveryPath, agent.BranchMeta{
+		ID: "recovery", ParentID: "root", Recovered: true,
+		CreatedAt: base, UpdatedAt: base.Add(3 * time.Minute),
+		SchemaVersion: agent.BranchMetaCountsVersion, Turns: 1, Preview: "older recovery prompt",
+	}); err != nil {
+		t.Fatalf("save recovery meta: %v", err)
+	}
+
+	grouped := recentSessions(dir)
+	if len(grouped) != 2 || grouped[0].Path != recoveryPath {
+		t.Fatalf("interactive resume order = %+v, want recovery leaf grouped first", grouped)
+	}
+	latest, ok := mostRecentSession(dir)
+	if !ok {
+		t.Fatal("mostRecentSession found no session")
+	}
+	if latest.Path != rootPath {
+		t.Fatalf("--continue session = %q, want chronologically newest %q", latest.Path, rootPath)
+	}
+}
+
+func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
+	dir := t.TempDir()
+	parentPath := filepath.Join(dir, "recovery-parent.jsonl")
+	disk := agent.NewSession("sys")
+	disk.Add(provider.Message{Role: provider.RoleUser, Content: "shared prompt"})
+	disk.Add(provider.Message{Role: provider.RoleAssistant, Content: "disk answer"})
+	if err := disk.Save(parentPath); err != nil {
+		t.Fatalf("save parent: %v", err)
+	}
+	stale := agent.NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "shared prompt"})
+	stale.Add(provider.Message{Role: provider.RoleAssistant, Content: "recovered answer"})
+	recovery, err := stale.SaveRecoveryBranch(agent.RecoveryBranchOptions{OriginalPath: parentPath})
+	if err != nil {
+		t.Fatalf("save recovery branch: %v", err)
+	}
+	covered := agent.NewSession("")
+	covered.Messages = append([]provider.Message(nil), stale.Snapshot()...)
+	covered.Add(provider.Message{Role: provider.RoleUser, Content: "later parent turn"})
+	if err := covered.Save(parentPath); err != nil {
+		t.Fatalf("cover recovery branch in parent: %v", err)
+	}
+	recoveryMeta, ok, err := agent.LoadBranchMeta(recovery.Path)
+	if err != nil || !ok {
+		t.Fatalf("load recovery meta: ok=%v err=%v", ok, err)
+	}
+	recoveryMeta.UpdatedAt = time.Now().Add(-2 * agent.RecoveryGCGracePeriod)
+	if err := agent.SaveBranchMetaPreserveUpdated(recovery.Path, recoveryMeta); err != nil {
+		t.Fatalf("age recovery branch: %v", err)
+	}
+
+	targetPath := filepath.Join(dir, "wanted.jsonl")
+	saveTestSession(t, targetPath, "WANTED-SESSION")
+	targetMeta, ok, err := agent.LoadBranchMeta(targetPath)
+	if err != nil || !ok {
+		t.Fatalf("load target meta: ok=%v err=%v", ok, err)
+	}
+	targetMeta.UpdatedAt = time.Now().Add(-4 * agent.RecoveryGCGracePeriod)
+	if err := agent.SaveBranchMetaPreserveUpdated(targetPath, targetMeta); err != nil {
+		t.Fatalf("age target session: %v", err)
+	}
+
+	candidates, err := agent.ReclaimableRecoveryBranches(dir, time.Now(), agent.RecoveryGCGracePeriod)
+	if err != nil || len(candidates) != 1 || candidates[0] != recovery.Path {
+		t.Fatalf("recovery GC precondition = %v err=%v, want %q", candidates, err, recovery.Path)
+	}
+	sessions := recentSessions(dir)
+	targetIndex := 0
+	for i, session := range sessions {
+		if session.Path == targetPath {
+			targetIndex = i + 1
+		}
+	}
+	if targetIndex != len(sessions) || targetIndex < 2 {
+		t.Fatalf("target index = %d in %+v, want a trailing row shifted by GC", targetIndex, sessions)
+	}
+
+	active := agent.NewSession("sys")
+	active.Add(provider.Message{Role: provider.RoleUser, Content: "active prompt"})
+	exec := agent.New(nil, nil, active, agent.Options{}, event.Discard)
+	ctrl := control.New(control.Options{Executor: exec, SessionDir: dir, Label: "test"})
+	ctrl.SetSessionPath(filepath.Join(dir, "active-unpersisted.jsonl"))
+	m := newTestChatTUI()
+	m.width = 80
+	m.ctrl = ctrl
+
+	m.runResumeCommand("/resume " + strconv.Itoa(targetIndex))
+
+	if got := ctrl.SessionPath(); got != targetPath {
+		t.Fatalf("session path = %q, want completed index target %q", got, targetPath)
+	}
+	if _, err := os.Stat(recovery.Path); err != nil {
+		t.Fatalf("numeric resume mutated its displayed session list: %v", err)
+	}
+}
+
+func TestCapResumeSessionGroupsDoesNotSplitRecoveryFamily(t *testing.T) {
+	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	sessions := make([]agent.SessionInfo, 0, 12)
+	for i := 0; i < 9; i++ {
+		sessions = append(sessions, agent.SessionInfo{
+			Path:    filepath.Join("/sessions", "standalone-"+strconv.Itoa(i)+".jsonl"),
+			ModTime: base.Add(time.Duration(20-i) * time.Minute),
+		})
+	}
+	sessions = append(sessions,
+		agent.SessionInfo{Path: "/sessions/root.jsonl", ModTime: base.Add(3 * time.Minute)},
+		agent.SessionInfo{Path: "/sessions/recovery-a.jsonl", ModTime: base.Add(2 * time.Minute), Recovered: true, ParentID: "root"},
+		agent.SessionInfo{Path: "/sessions/recovery-b.jsonl", ModTime: base.Add(time.Minute), Recovered: true, ParentID: "root"},
+	)
+
+	got := capResumeSessionGroups(orderResumeSessions(sessions), resumeListCap)
+	if len(got) != 9 {
+		t.Fatalf("capped sessions len = %d, want 9 complete standalone groups", len(got))
+	}
+	for _, session := range got {
+		if session.Recovered || agent.BranchID(session.Path) == "root" {
+			t.Fatalf("cap split recovery family instead of omitting it: %+v", got)
+		}
+	}
+}
+
+func TestSessionPickerLabelIdentifiesRecoveryParent(t *testing.T) {
+	session := agent.SessionInfo{
+		Path: "/sessions/recovery.jsonl", Preview: "keep working", Turns: 3,
+		Recovered: true, ParentID: "20260803-long-parent-id",
+	}
+	label := sessionPickerLabel(session)
+	if recoverySessionBadge(session) == "" || !strings.Contains(label, "20260803") {
+		t.Fatalf("recovery picker label = %q, want recovery badge and short parent id", label)
+	}
+}
+
 // TestResumePickerNavigateAndSelect proves the picker's up/down navigation and
 // Enter to resume the selected session.
 func TestResumePickerNavigateAndSelect(t *testing.T) {

@@ -11,7 +11,7 @@ changed and how to move over.
 | Language | TypeScript / Node | Go |
 | Branch | [`v1`](https://github.com/esengine/DeepSeek-Reasonix/tree/v1) (maintenance only) | `main-v2` (default, active) |
 | Versions | `0.x` (up to v0.54.x) | `1.0.0`+ |
-| Install | `npm i -g reasonix@0.53.2` (pin a `0.x` version) | `npm i -g reasonix` — `latest` points at the current `1.x` stable; or a release archive / `go build` |
+| Install | `npm i -g reasonix@0.53.2` (pin a `0.x` version) | `npm i -g reasonix` — `latest` points at the current official `1.x` release; or a release archive / `go build` |
 | Code intelligence | embedding semantic search + tree-sitter symbols | LSP-assisted code reading plus grep/read_file/glob; semantic index is not yet ported |
 
 "v1" and "v2" are **codebase generations**, not semver: the v1 line never reached
@@ -23,15 +23,15 @@ changed and how to move over.
 same way esbuild/biome ship native binaries via npm). The binary itself is a
 standalone Go executable; npm is only the installer, not a runtime dependency.
 
-**`npm i -g reasonix` installs the current `1.x` stable.** npm's `latest` tag
+**`npm i -g reasonix` installs the current official `1.x` release.** npm's `latest` tag
 moved to the Go line with `1.17.5` — the earlier "`latest` stays pinned to
 `0.x`" migration guard silently downgraded `npm update -g` users once 1.x went
-stable (#5822), so it was retired. Release candidates still ship under the
-`next` tag; `0.x` stays installable by pinning:
+official (#5822), so it was retired. Public release candidates are no longer
+published. The legacy `next` and `canary` tags are compatibility aliases for
+the same official version; `0.x` stays installable by pinning:
 
 ```sh
-npm i -g reasonix          # current 1.x stable
-npm i -g reasonix@next     # release candidate, when one is ahead of stable
+npm i -g reasonix          # current official 1.x release
 npm i -g reasonix@0.53.2   # pin the legacy TS build
 ```
 
@@ -154,8 +154,8 @@ and DeepSeek prefix-cache–oriented design.
   Treat opening an unfamiliar repository as opting into executable project
   configuration: review `.reasonix/settings.json`, `reasonix.toml`, and
   `.mcp.json` before starting Reasonix. If a repository causes unexpected MCP
-  or Hook behavior, restart in Safe Mode to disable those external integrations
-  while recovering.
+  or Hook behavior, close that workspace and correct or remove the project-local
+  entries before reopening it.
 - **stdio MCP connections are persistent.** This fixes stateful servers that
   lost browser/session state when writer calls received a fresh process.
 - **Plan mode and permission policy are now independent**: Plan directs the

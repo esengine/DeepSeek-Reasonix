@@ -70,6 +70,21 @@ type SessionRuntimeStateProvider interface {
 type ReasonixStatusGoal struct {
 	Status    string `json:"status"`
 	Objective string `json:"objective,omitempty"`
+	// Runtime is the optional Goal budget/runtime summary; absent for old
+	// hosts or when no goal is active.
+	Runtime *ReasonixGoalRuntime `json:"runtime,omitempty"`
+}
+
+type ReasonixGoalRuntime struct {
+	TurnsUsed        int    `json:"turnsUsed"`
+	TurnsLimit       int    `json:"turnsLimit"`
+	TokensUsed       int    `json:"tokensUsed"`
+	TokensLimit      int    `json:"tokensLimit"` // Deprecated: always 0; retained for protocol compatibility.
+	NoProgressTurns  int    `json:"noProgressTurns"`
+	NoProgressLimit  int    `json:"noProgressLimit"`
+	LastReason       string `json:"lastReason,omitempty"`
+	StopCause        string `json:"stopCause,omitempty"`
+	BudgetExtensions int    `json:"budgetExtensions"`
 }
 
 type ReasonixTurnOutcome struct {
@@ -89,6 +104,7 @@ type ReasonixUsage struct {
 	ReasoningTokens  int      `json:"reasoningTokens"`
 	CacheHitTokens   int      `json:"cacheHitTokens"`
 	CacheMissTokens  int      `json:"cacheMissTokens"`
+	Estimated        bool     `json:"estimated,omitempty"`
 	CacheHitRatio    *float64 `json:"cacheHitRatio"`
 	EstimatedCost    *float64 `json:"estimatedCost"`
 	Currency         *string  `json:"currency"`
@@ -134,6 +150,7 @@ type usageAccumulator struct {
 	reasoningTokens  int
 	cacheHitTokens   int
 	cacheMissTokens  int
+	estimated        bool
 	events           int
 	pricedEvents     int
 	estimatedCost    float64
@@ -150,6 +167,7 @@ func (a *usageAccumulator) add(u *provider.Usage, pricing *provider.Pricing, sou
 	a.reasoningTokens += u.ReasoningTokens
 	a.cacheHitTokens += u.CacheHitTokens
 	a.cacheMissTokens += u.CacheMissTokens
+	a.estimated = a.estimated || u.Estimated
 	a.events++
 	source = strings.TrimSpace(source)
 	if source == "" {
@@ -182,6 +200,7 @@ func (a usageAccumulator) wire() ReasonixUsage {
 		ReasoningTokens:  a.reasoningTokens,
 		CacheHitTokens:   a.cacheHitTokens,
 		CacheMissTokens:  a.cacheMissTokens,
+		Estimated:        a.estimated,
 		UsageSource:      a.source,
 	}
 	if usage.UsageSource == "" {
@@ -342,6 +361,7 @@ type persistedUsageAccumulator struct {
 	ReasoningTokens  int     `json:"reasoningTokens"`
 	CacheHitTokens   int     `json:"cacheHitTokens"`
 	CacheMissTokens  int     `json:"cacheMissTokens"`
+	Estimated        bool    `json:"estimated,omitempty"`
 	Events           int     `json:"events"`
 	PricedEvents     int     `json:"pricedEvents"`
 	EstimatedCost    float64 `json:"estimatedCost"`
@@ -364,7 +384,7 @@ func persistUsage(a usageAccumulator) persistedUsageAccumulator {
 	return persistedUsageAccumulator{
 		PromptTokens: a.promptTokens, CompletionTokens: a.completionTokens,
 		ReasoningTokens: a.reasoningTokens, CacheHitTokens: a.cacheHitTokens,
-		CacheMissTokens: a.cacheMissTokens, Events: a.events,
+		CacheMissTokens: a.cacheMissTokens, Estimated: a.estimated, Events: a.events,
 		PricedEvents: a.pricedEvents, EstimatedCost: a.estimatedCost,
 		Currency: a.currency, Source: a.source,
 	}
@@ -374,7 +394,7 @@ func restoreUsage(a persistedUsageAccumulator) usageAccumulator {
 	return usageAccumulator{
 		promptTokens: a.PromptTokens, completionTokens: a.CompletionTokens,
 		reasoningTokens: a.ReasoningTokens, cacheHitTokens: a.CacheHitTokens,
-		cacheMissTokens: a.CacheMissTokens, events: a.Events,
+		cacheMissTokens: a.CacheMissTokens, estimated: a.Estimated, events: a.Events,
 		pricedEvents: a.PricedEvents, estimatedCost: a.EstimatedCost,
 		currency: a.Currency, source: a.Source,
 	}
@@ -616,9 +636,24 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 	t := telemetry.snapshot()
 	goalStatus := "none"
 	goalObjective := ""
+	var goalRuntime *ReasonixGoalRuntime
 	if ctrl != nil {
 		goalStatus = normalizeGoalStatus(ctrl.GoalStatus())
 		goalObjective = clipStatusText(ctrl.Goal(), 16_384)
+		if strings.TrimSpace(goalObjective) != "" {
+			rt := ctrl.GoalRuntime()
+			goalRuntime = &ReasonixGoalRuntime{
+				TurnsUsed:        rt.TurnsUsed,
+				TurnsLimit:       rt.TurnsLimit,
+				TokensUsed:       rt.TokensUsed,
+				TokensLimit:      rt.TokensLimit,
+				NoProgressTurns:  rt.NoProgressTurns,
+				NoProgressLimit:  rt.NoProgressLimit,
+				LastReason:       rt.LastReason,
+				StopCause:        rt.StopCause,
+				BudgetExtensions: rt.BudgetExtensions,
+			}
+		}
 	}
 	if t.goalOverride != "" {
 		goalStatus = t.goalOverride
@@ -657,6 +692,7 @@ func (s *acpSession) statusSnapshot() ReasonixSessionStatus {
 		Goal: ReasonixStatusGoal{
 			Status:    goalStatus,
 			Objective: goalObjective,
+			Runtime:   goalRuntime,
 		},
 		Phase:          phase,
 		TurnOutcome:    t.turnOutcome,

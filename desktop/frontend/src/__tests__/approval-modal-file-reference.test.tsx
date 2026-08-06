@@ -241,7 +241,9 @@ console.log("\napproval modal file references");
   });
 
   const text = document.body.textContent ?? "";
-  ok(text.includes("仅本次不进沙箱运行：go test ./..."), "sandbox escape approval localizes subject in Chinese UI");
+  ok(text.includes("go test ./..."), "sandbox escape approval keeps the command visible in Chinese UI");
+  ok(!text.includes("仅本次不进沙箱运行："), "sandbox escape approval removes the redundant scope prefix from the command block");
+  eq((text.match(/go test \.\/\.\.\./g) ?? []).length, 1, "sandbox escape approval renders the command once");
   ok(text.includes("Windows 不提供这条命令所需的 OS 级 Bash 沙箱"), "sandbox escape approval localizes the retired Windows backend reason in Chinese UI");
   ok(text.includes("允许一次"), "sandbox escape Chinese approval shows allow once");
   ok(text.includes("本会话使用真实环境"), "sandbox escape Chinese approval shows session grant");
@@ -438,6 +440,12 @@ console.log("\napproval modal file references");
     "npm run build\n\nRun the build command to verify frontend artifacts.",
     "default-open tool approval keeps the complete subject visible",
   );
+  eq(
+    (document.body.textContent?.match(/npm run build/g) ?? []).length,
+    1,
+    "tool approval renders the command once instead of repeating it in header metadata",
+  );
+  ok(document.querySelector(".prompt-shelf__meta") == null, "tool approval omits duplicate subject metadata");
   // Subject is always visible; reason expands when short enough / via Details.
   const actions = [...document.querySelectorAll(".prompt-shelf__actions .prompt-action")] as HTMLElement[];
   eq(actions.length, 4, "ordinary tool approval exposes four select-then-confirm options");

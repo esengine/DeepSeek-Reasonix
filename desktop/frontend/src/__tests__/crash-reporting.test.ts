@@ -13,6 +13,7 @@ import {
   opaqueScriptFingerprintHint,
   parseReportedPerf,
   performanceLabelForReason,
+  performanceFingerprintHintForReason,
   serializeReportedPerf,
   shouldPromptForLongTasks,
   shouldPromptForEventLoopLag,
@@ -54,7 +55,7 @@ const legacyObject = function LegacyObject() {} as unknown as ObjectConstructor 
 installObjectHasOwnPolyfill(legacyObject);
 eq(legacyObject.hasOwn?.({ own: true }, "own"), true, "Object.hasOwn polyfill accepts own properties");
 eq(legacyObject.hasOwn?.(Object.create({ inherited: true }), "inherited"), false, "Object.hasOwn polyfill rejects inherited properties");
-for (const file of ["../components/VirtualMenu.tsx", "../components/WorkspacePanel.tsx", "../components/editors/HljsDiff.tsx"]) {
+for (const file of ["../components/VirtualMenu.tsx", "../components/WorkspacePanel.tsx", "../components/editors/HljsDiff.tsx", "../components/editors/LineNumberCode.tsx"]) {
   const source = readFileSync(resolve(testDir, file), "utf8");
   const fileParts = file.split("/");
   const label = fileParts[fileParts.length - 1];
@@ -186,6 +187,14 @@ eq(formatPerformanceContext(perf).includes("long tasks: 3"), true, "formats long
 eq(perfPayload.message.includes("event loop lag 1300ms"), true, "payload message keeps lag context");
 eq(performanceLabelForReason("long task 900ms"), "performance.longtask", "labels long task pressure");
 eq(performanceLabelForReason("js heap 87% of limit"), "performance.heap", "labels heap pressure");
+eq(performanceFingerprintHintForReason("js heap 87% of limit"), "frontend.performance.heap.high", "tracks high heap pressure separately");
+eq(performanceFingerprintHintForReason("js heap 97% of limit"), "frontend.performance.heap.critical", "tracks critical heap pressure separately");
+eq(performanceFingerprintHintForReason("long task 900ms"), undefined, "does not repartition non-heap performance groups");
+eq(
+  buildPerformancePayload({ ...perf, reason: "js heap 97% of limit" }).fingerprintHint,
+  "frontend.performance.heap.critical",
+  "adds the heap tier to the report fingerprint",
+);
 eq(shouldRecordLongTaskSample(14_000, 900, 15_000), false, "ignores startup long tasks before grace ends");
 eq(shouldRecordLongTaskSample(16_000, 40, 15_000), false, "ignores short long-task observer entries");
 eq(shouldRecordLongTaskSample(16_000, 900, 15_000), true, "records post-grace long tasks");

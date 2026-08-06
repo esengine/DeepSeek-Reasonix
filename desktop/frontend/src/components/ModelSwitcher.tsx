@@ -48,7 +48,7 @@ export function ModelSwitcher({
     return (targetTabId ? app.ModelsForTab(targetTabId) : app.Models())
       .then((next) => {
         if (seq === loadSeqRef.current && currentTabKeyRef.current === targetKey) {
-          setModels(asArray(next));
+          setModels(asArray(next).map(normalizeModelInfo));
         }
       })
       .catch(() => {});
@@ -225,6 +225,14 @@ export function ModelSwitcher({
       </AnchoredPopover>
     </div>
   );
+}
+
+export function normalizeModelInfo(model: ModelInfo): ModelInfo {
+  return {
+    ...model,
+    provider: String(model.provider ?? ""),
+    model: String(model.model ?? ""),
+  };
 }
 
 function providerLabel(provider: string, t: ReturnType<typeof useT>): string {

@@ -22,14 +22,15 @@ export type ThemeExperienceView = {
   effectiveStyle: ThemeStyle | string;
   activeThemeId?: string;
   activePack?: ThemePackView | null;
-  safeMode: boolean;
+  /** Non-fatal plugin theme discovery issues (invalid files skipped). */
+  warnings?: string[];
 };
 
 export type GalleryTab = "catalog" | "user";
 
 export type ThemeSelection =
   | { kind: "base"; id: ThemeStyle; pack?: ThemePackView }
-  | { kind: "official" | "user"; id: string; pack: ThemePackView };
+  | { kind: "official" | "user" | "plugin"; id: string; pack: ThemePackView };
 
 let experienceCache: ThemeExperienceView | null = null;
 let previewDepth = 0;
@@ -44,7 +45,7 @@ export function getCachedThemeExperience(): ThemeExperienceView | null {
  * override, not the persisted base appearance restored when the pack is cleared.
  */
 export function configuredBaseStyleForSync(view: ThemeExperienceView): ThemeStyle | null {
-  if (!view.safeMode && view.activePack) return null;
+  if (view.activePack) return null;
   return (isThemeStyle(view.baseStyle) ? view.baseStyle : "graphite") as ThemeStyle;
 }
 
@@ -69,11 +70,10 @@ export async function loadThemeExperience(): Promise<ThemeExperienceView> {
   // Partial test mocks and older shells may only expose Settings + GetActiveThemePack.
   let themeMode: Theme = "auto";
   let baseStyle: ThemeStyle = "graphite";
-  let safeMode = false;
   try {
     const settingsApi = app as typeof app & {
-      DesktopStartupSettings?: () => Promise<{ desktopTheme?: string; desktopThemeStyle?: string; safeMode?: boolean }>;
-      Settings?: () => Promise<{ desktopTheme?: string; desktopThemeStyle?: string; safeMode?: boolean }>;
+      DesktopStartupSettings?: () => Promise<{ desktopTheme?: string; desktopThemeStyle?: string }>;
+      Settings?: () => Promise<{ desktopTheme?: string; desktopThemeStyle?: string }>;
     };
     const settings =
       typeof settingsApi.DesktopStartupSettings === "function"
@@ -84,7 +84,6 @@ export async function loadThemeExperience(): Promise<ThemeExperienceView> {
     if (settings) {
       themeMode = (settings.desktopTheme as Theme) || "auto";
       baseStyle = (isThemeStyle(settings.desktopThemeStyle) ? settings.desktopThemeStyle : "graphite") as ThemeStyle;
-      safeMode = (settings as { safeMode?: boolean }).safeMode === true;
     }
   } catch {
     // Keep defaults.
@@ -97,7 +96,6 @@ export async function loadThemeExperience(): Promise<ThemeExperienceView> {
       const active = await app.GetActiveThemePack();
       activePack = active?.pack ?? null;
       activeThemeId = active?.activeThemeId || undefined;
-      safeMode = safeMode || active?.safeMode === true;
     }
   } catch {
     // Keep pack unset.
@@ -109,7 +107,6 @@ export async function loadThemeExperience(): Promise<ThemeExperienceView> {
     effectiveStyle: activePack?.baseStyle || baseStyle,
     activeThemeId,
     activePack,
-    safeMode,
   };
   experienceCache = normalizeExperience(view);
   return experienceCache;
@@ -125,7 +122,7 @@ function normalizeExperience(view: ThemeExperienceView): ThemeExperienceView {
     effectiveStyle,
     activeThemeId: view.activeThemeId || undefined,
     activePack: view.activePack ?? null,
-    safeMode: view.safeMode === true,
+    warnings: Array.isArray(view.warnings) ? view.warnings.filter((w): w is string => typeof w === "string" && w.trim().length > 0) : undefined,
   };
 }
 
@@ -134,7 +131,7 @@ export function applyExperienceToDOM(view: ThemeExperienceView): void {
   const theme = (view.themeMode === "light" || view.themeMode === "dark" || view.themeMode === "auto" ? view.themeMode : "auto") as Theme;
   const base = (isThemeStyle(view.baseStyle) ? view.baseStyle : "graphite") as ThemeStyle;
   setBaseAppearance(theme, base);
-  if (view.safeMode || !view.activePack) {
+  if (!view.activePack) {
     clearThemePack();
     applyTheme(theme, base, { persist: false });
     return;
@@ -240,17 +237,20 @@ export function groupThemePacks(packs: ThemePackView[]): {
   official: ThemePackView[];
   user: ThemePackView[];
   base: ThemePackView[];
+  plugin: ThemePackView[];
 } {
   const official: ThemePackView[] = [];
   const user: ThemePackView[] = [];
   const base: ThemePackView[] = [];
+  const plugin: ThemePackView[] = [];
   for (const p of packs) {
     const k = themePackKind(p);
     if (k === "official") official.push(p);
     else if (k === "base") base.push(p);
+    else if (k === "plugin") plugin.push(p);
     else user.push(p);
   }
-  return { official, user, base };
+  return { official, user, base, plugin };
 }
 
 export function selectionFromPack(pack: ThemePackView): ThemeSelection {

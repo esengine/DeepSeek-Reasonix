@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -93,7 +94,11 @@ const terminalOutputByteLimit = 1 << 20
 // so the user watches it live. ok=false when the client has no terminal
 // capability or creation fails — the bash tool then executes locally. A
 // timeout kills the terminal and returns what it printed.
-func (c *clientIO) RunCommand(ctx context.Context, command, cwd string, timeout time.Duration) (string, bool, error) {
+//
+// envOverrides are standard temporary-directory variables (TMPDIR/TMP/TEMP)
+// for the session-private temp directory. They are serialized as ACP v1
+// EnvVariable[] and never include the full host environment.
+func (c *clientIO) RunCommand(ctx context.Context, command, cwd string, timeout time.Duration, envOverrides map[string]string) (string, bool, error) {
 	if !c.caps.Terminal {
 		return "", false, nil
 	}
@@ -101,6 +106,7 @@ func (c *clientIO) RunCommand(ctx context.Context, command, cwd string, timeout 
 		SessionID:       c.sessionID,
 		Command:         command,
 		Cwd:             cwd,
+		Env:             envMapToVariables(envOverrides),
 		OutputByteLimit: terminalOutputByteLimit,
 	})
 	if err != nil {
@@ -139,6 +145,28 @@ func (c *clientIO) RunCommand(ctx context.Context, command, cwd string, timeout 
 		return output, true, fmt.Errorf("terminated by signal %s", *exit.Signal)
 	}
 	return output, true, nil
+}
+
+// envMapToVariables converts a small override map into ACP EnvVariable entries.
+// Empty or nil maps yield nil (omitted from JSON).
+func envMapToVariables(env map[string]string) []EnvVariable {
+	if len(env) == 0 {
+		return nil
+	}
+	// Stable order for tests and logs.
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		if strings.TrimSpace(k) == "" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]EnvVariable, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, EnvVariable{Name: k, Value: env[k]})
+	}
+	return out
 }
 
 func (c *clientIO) terminalOutput(ctx context.Context, id TerminalIDParams) (string, *TerminalExitStatus) {

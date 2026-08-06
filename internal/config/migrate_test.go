@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -715,14 +716,14 @@ func TestMigrateImportsLegacyCredentialsEvenWhenPrimaryConfigExists(t *testing.T
 
 func TestMigrateImportsLegacyKeyringCredentials(t *testing.T) {
 	legacyHome(t)
-	old := legacyKeyringCredentialValueLookup
-	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+	old := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "DEEPSEEK_API_KEY" {
-			return "sk-old-keyring", true
+			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-old-keyring"}
 		}
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
-	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+	t.Cleanup(func() { legacyKeyringProbeLookup = old })
 
 	res, err := MigrateLegacyIfNeeded()
 	if err != nil {
@@ -760,14 +761,14 @@ api_key_env = "WORKSPACE_ONLY_KEY"
 `), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	old := legacyKeyringCredentialValueLookup
-	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+	old := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "WORKSPACE_ONLY_KEY" {
-			return "sk-workspace", true
+			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-workspace"}
 		}
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
-	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+	t.Cleanup(func() { legacyKeyringProbeLookup = old })
 
 	if err := MigrateLegacyCredentialsForRoot(project); err != nil {
 		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
@@ -791,14 +792,14 @@ func TestMigrateLegacyCredentialsSkipsKeyringWhenIsolated(t *testing.T) {
 	t.Setenv("REASONIX_HOME", isolated)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 
-	old := legacyKeyringCredentialValueLookup
-	legacyKeyringCredentialValueLookup = func(key string) (string, bool) {
+	old := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "DEEPSEEK_API_KEY" {
-			return "legacy-keyring-value", true
+			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "legacy-keyring-value"}
 		}
-		return "", false
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
-	t.Cleanup(func() { legacyKeyringCredentialValueLookup = old })
+	t.Cleanup(func() { legacyKeyringProbeLookup = old })
 
 	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
 		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
@@ -1062,5 +1063,69 @@ func TestMigrateSupportData(t *testing.T) {
 				t.Fatalf("migrated %s mode = %o, want %o", check.rel, got, check.perm)
 			}
 		}
+	}
+}
+
+func TestMigrateLegacyCredentialsFileImportIgnoresKeyringMarker(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := markLegacyKeyringMigrationDone("DEEPSEEK_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	paths := legacyCredentialsPaths()
+	if len(paths) == 0 {
+		t.Skip("no legacy credentials paths on this platform")
+	}
+	target := paths[0]
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("DEEPSEEK_API_KEY=sk-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldLookup := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
+		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+	}
+	t.Cleanup(func() {
+		legacyKeyringProbeLookup = oldLookup
+	})
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if !strings.Contains(string(data), "sk-from-file") {
+		t.Fatalf("file import blocked by keyring marker: %q", data)
+	}
+}
+
+func TestMigrateLegacyCredentialsErrorDoesNotWriteKeyringMarker(t *testing.T) {
+	legacyHome(t)
+	oldLookup := legacyKeyringProbeLookup
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
+		return legacyKeyringOutcome{Status: legacyKeyringError}
+	}
+	t.Cleanup(func() {
+		legacyKeyringProbeLookup = oldLookup
+	})
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	if legacyKeyringMigrationDone("DEEPSEEK_API_KEY") {
+		t.Fatal("keyring error must not write a migration-done marker")
+	}
+	if credentialCurrentStoreHasKey("DEEPSEEK_API_KEY") {
+		t.Fatal("keyring error must not store a credential")
 	}
 }

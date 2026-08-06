@@ -21,8 +21,18 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"reasonix/internal/installlayout"
 	"reasonix/internal/repair"
 )
+
+// resolveWindowsUpdateHelperSource finds the on-disk helper for the running
+// install: versioned active dir first, then the flat InstallRoot layout.
+func resolveWindowsUpdateHelperSource(installDir string) string {
+	if path, err := installlayout.ActiveUpdateHelperPath(installDir); err == nil {
+		return path
+	}
+	return filepath.Join(installDir, windowsUpdateHelperFileName)
+}
 
 const windowsUpdateHelperFileName = "reasonix-update-helper.exe"
 
@@ -46,6 +56,32 @@ func startWindowsUpdateHandoff(installerPath, installerSHA256, installDir, relau
 	// directly here would make a failed/partial install indistinguishable from a
 	// successful handoff, so a missing or quarantined helper must fail safely.
 	return startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaunchPath, prepared)
+}
+
+func startWindowsVersionedUpdateHandoff(installerPath, installerSHA256, installDir, relaunchPath, targetVersion string) error {
+	if installDir == "" {
+		return os.ErrNotExist
+	}
+	helperPath, helperSHA256, err := prepareVersionedWindowsUpdateHelper(installDir)
+	if err != nil {
+		return err
+	}
+	releaseExecution, err := claimWindowsUpdateHelperExecutionFn(helperPath, helperSHA256)
+	if err != nil {
+		return fmt.Errorf("claim copied Windows update helper: %w", err)
+	}
+	defer releaseExecution()
+	err = retryWindowsUpdateHelperStart(func() error {
+		cmd := exec.Command(helperPath, windowsVersionedUpdateHandoffArgs(
+			os.Getpid(), installerPath, installerSHA256, installDir, relaunchPath, targetVersion,
+		)...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+		return cmd.Start()
+	})
+	if err != nil {
+		return windowsUpdateHelperStartError(err)
+	}
+	return nil
 }
 
 func startWindowsUpdateHelper(installerPath, installerSHA256, installDir, relaunchPath string, prepared *repair.UpdateTransaction) error {
@@ -89,9 +125,10 @@ func preparedWindowsUpdateHelperSHA256(prepared *repair.UpdateTransaction, insta
 	if prepared == nil || prepared.TargetKind != "file" || repair.UpdateTransactionID(prepared) == "" {
 		return "", fmt.Errorf("prepare Windows update helper: transaction identity is incomplete")
 	}
-	helperPath := filepath.Clean(filepath.Join(installDir, windowsUpdateHelperFileName))
+	// Match by basename so versioned layouts (versions/<ver>/helper) and flat
+	// layouts (InstallRoot/helper) share one prepare path.
 	for _, file := range prepared.Files {
-		if !strings.EqualFold(filepath.Clean(file.TargetPath), helperPath) {
+		if !strings.EqualFold(filepath.Base(file.TargetPath), windowsUpdateHelperFileName) {
 			continue
 		}
 		if file.MissingBefore || !validWindowsSHA256(file.SHA256) {
@@ -99,6 +136,7 @@ func preparedWindowsUpdateHelperSHA256(prepared *repair.UpdateTransaction, insta
 		}
 		return strings.TrimSpace(file.SHA256), nil
 	}
+	_ = installDir
 	return "", fmt.Errorf("prepare Windows update helper: helper is outside the prepared release unit")
 }
 
@@ -112,7 +150,7 @@ func validWindowsSHA256(value string) bool {
 }
 
 func prepareWindowsUpdateHelper(installDir, preparedSHA256 string) (string, [sha256.Size]byte, error) {
-	src := filepath.Join(installDir, windowsUpdateHelperFileName)
+	src := resolveWindowsUpdateHelperSource(installDir)
 	data, err := os.ReadFile(src)
 	if err != nil {
 		return "", [sha256.Size]byte{}, err
@@ -121,6 +159,27 @@ func prepareWindowsUpdateHelper(installDir, preparedSHA256 string) (string, [sha
 	if !strings.EqualFold(hex.EncodeToString(expectedSHA256[:]), strings.TrimSpace(preparedSHA256)) {
 		return "", [sha256.Size]byte{}, fmt.Errorf("packaged Windows update helper changed after transaction prepare")
 	}
+	if err := validateWindowsUpdateHelper(data, runtime.GOARCH); err != nil {
+		return "", [sha256.Size]byte{}, fmt.Errorf("validate packaged Windows update helper: %w", err)
+	}
+	dir, err := updateCacheDir()
+	if err != nil {
+		return "", [sha256.Size]byte{}, err
+	}
+	dst, err := stageWindowsUpdateHelperCopy(dir, data)
+	if err != nil {
+		return "", [sha256.Size]byte{}, err
+	}
+	return dst, expectedSHA256, nil
+}
+
+func prepareVersionedWindowsUpdateHelper(installDir string) (string, [sha256.Size]byte, error) {
+	src := resolveWindowsUpdateHelperSource(installDir)
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return "", [sha256.Size]byte{}, err
+	}
+	expectedSHA256 := sha256.Sum256(data)
 	if err := validateWindowsUpdateHelper(data, runtime.GOARCH); err != nil {
 		return "", [sha256.Size]byte{}, fmt.Errorf("validate packaged Windows update helper: %w", err)
 	}

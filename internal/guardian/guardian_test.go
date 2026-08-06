@@ -17,9 +17,10 @@ import (
 )
 
 type scriptedProvider struct {
-	mu        sync.Mutex
-	responses []scriptedResponse
-	requests  []provider.Request
+	mu           sync.Mutex
+	responses    []scriptedResponse
+	requests     []provider.Request
+	defaultUsage *provider.Usage
 }
 
 type scriptedResponse struct {
@@ -39,6 +40,10 @@ func (p *scriptedProvider) Stream(ctx context.Context, req provider.Request) (<-
 		p.responses = p.responses[1:]
 	}
 	p.mu.Unlock()
+	if resp.usage == nil && p.defaultUsage != nil {
+		usage := *p.defaultUsage
+		resp.usage = &usage
+	}
 
 	ch := make(chan provider.Chunk, 3)
 	if resp.err != nil {
@@ -208,6 +213,29 @@ func TestGuardianUsageDoesNotLeakAcrossReviews(t *testing.T) {
 	}
 }
 
+func TestGuardianUsageAggregatesEveryModelCall(t *testing.T) {
+	prov := &scriptedProvider{responses: []scriptedResponse{
+		{text: "", usage: &provider.Usage{PromptTokens: 3, CompletionTokens: 1, TotalTokens: 4}},
+		{text: `{"risk_level":"low","user_authorization":"high","outcome":"allow","rationale":"ok"}`, usage: &provider.Usage{PromptTokens: 5, CompletionTokens: 2, TotalTokens: 7, RequestCount: 2}},
+	}}
+	sink := &captureSink{}
+	gs := NewSession(prov, tool.NewRegistry(), PolicyPrompt(), "guardian-test", 0, nil, sink)
+	parent := agent.NewSession("sys")
+	parent.Add(provider.Message{Role: provider.RoleUser, Content: "do it"})
+
+	if allow, _, err := gs.Review(context.Background(), "write_file", json.RawMessage(`{"file_path":"a.txt"}`), parent); err != nil || !allow {
+		t.Fatalf("Review = allow %v err %v, want allow nil", allow, err)
+	}
+	events := sink.guardianEvents()
+	if len(events) != 1 || events[0].Guardian.Usage == nil {
+		t.Fatalf("guardian events = %+v, want one usage-bearing event", events)
+	}
+	usage := events[0].Guardian.Usage
+	if usage.PromptTokens != 8 || usage.CompletionTokens != 3 || usage.TotalTokens != 11 || usage.RequestCount != 3 {
+		t.Fatalf("aggregated usage = %+v, want prompt=8 completion=3 total=11 requests=3", usage)
+	}
+}
+
 // TestGuardianReviewTurnsAlternateRoles pins the review request shape: the
 // transcript evidence and action request ride in one combined user message per
 // review, so the guardian session alternates user/assistant strictly and
@@ -321,8 +349,9 @@ func TestGuardianLoadResetsLegacyConsecutiveUserSessions(t *testing.T) {
 // user turn — consecutive user roles again. The post-review normalization must
 // keep the session strictly alternating across that fold.
 func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
-	prov := &scriptedProvider{} // default allow verdict, also serves the summarizer
-	gs := NewSession(prov, tool.NewRegistry(), PolicyPrompt(), "guardian-test", 0, nil, &captureSink{})
+	prov := &scriptedProvider{defaultUsage: &provider.Usage{TotalTokens: 1}} // default allow verdict, also serves the summarizer
+	sink := &captureSink{}
+	gs := NewSession(prov, tool.NewRegistry(), PolicyPrompt(), "guardian-test", 0, nil, sink)
 	parent := agent.NewSession("sys")
 
 	filler := strings.Repeat("parent transcript filler. ", 160)
@@ -342,6 +371,14 @@ func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
 	}
 	if !hasDigest {
 		t.Fatal("test setup: guardian compaction did not fold anything, the digest adjacency is not exercised")
+	}
+	events := sink.guardianEvents()
+	if len(events) != compactEvery {
+		t.Fatalf("guardian events = %d, want %d", len(events), compactEvery)
+	}
+	usage := events[len(events)-1].Guardian.Usage
+	if usage == nil || usage.TotalTokens != 2 || usage.RequestCount != 2 {
+		t.Fatalf("compacting review usage = %+v, want total=2 requests=2", usage)
 	}
 	for i := 1; i < len(msgs); i++ {
 		if msgs[i].Role == msgs[i-1].Role {

@@ -37,8 +37,12 @@ async function uniqueHandle(users: UserRepo, base: string): Promise<string> {
   return `user${randomSuffix(8)}`;
 }
 
-function verifyLink(c: { req: { url: string } }, token: string): string {
-  return `${new URL(c.req.url).origin}/auth/verify?token=${token}`;
+// Built from the configured ACCOUNT_ORIGIN, never the request origin: the Host
+// header is caller-controlled, so a request-derived origin would let emailed
+// verification links point at an attacker-chosen host (#5550).
+export function verifyLink(accountOrigin: string, token: string): string {
+  const base = accountOrigin.replace(/\/+$/, "");
+  return `${base}/auth/verify?token=${encodeURIComponent(token)}`;
 }
 
 // Register is deliberately enumeration-safe: the response is identical whether or
@@ -55,11 +59,11 @@ auth.post("/register", async (c) => {
     const role: Role = isAdminEmail(c.env, email) ? "admin" : "member";
     const user = await users.create({ handle, email, passwordHash: await hashPassword(password), displayName: displayName ?? "", role });
     const token = await emailTokens.issue(user.id, "verify", VERIFY_TTL_MS);
-    await mailer.send({ to: email, ...verifyEmail(verifyLink(c, token)) });
+    await mailer.send({ to: email, ...verifyEmail(verifyLink(c.env.ACCOUNT_ORIGIN, token)) });
   } else if (existing.email_verified === 0) {
     await emailTokens.invalidateForUser(existing.id, "verify");
     const token = await emailTokens.issue(existing.id, "verify", VERIFY_TTL_MS);
-    await mailer.send({ to: email, ...verifyEmail(verifyLink(c, token)) });
+    await mailer.send({ to: email, ...verifyEmail(verifyLink(c.env.ACCOUNT_ORIGIN, token)) });
   } else {
     await mailer.send({ to: email, ...accountExistsEmail(`${c.env.APP_ORIGIN}/login`, `${c.env.APP_ORIGIN}/forgot`) });
   }
@@ -132,7 +136,7 @@ auth.post("/resend-verification", async (c) => {
   if (user && user.email_verified === 0) {
     await emailTokens.invalidateForUser(user.id, "verify");
     const token = await emailTokens.issue(user.id, "verify", VERIFY_TTL_MS);
-    await buildMailer(c.env).send({ to: email, ...verifyEmail(verifyLink(c, token)) });
+    await buildMailer(c.env).send({ to: email, ...verifyEmail(verifyLink(c.env.ACCOUNT_ORIGIN, token)) });
   }
   return c.json({ ok: true, message: "If that address needs confirming, a new link is on its way." });
 });

@@ -34,30 +34,3 @@ func DeliveryExecutionScopeFromContext(ctx context.Context) (DeliveryExecutionSc
 	}
 	return scope, true
 }
-
-type deliveryGoalDisposition int
-
-const (
-	deliveryGoalFinal deliveryGoalDisposition = iota
-	deliveryGoalContinue
-	deliveryGoalBlocked
-)
-
-func deliveryDisposition(text string) deliveryGoalDisposition {
-	lines := strings.Split(text, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.ToLower(strings.TrimSpace(lines[i]))
-		if line == "" {
-			continue
-		}
-		switch {
-		case line == "[goal:continue]":
-			return deliveryGoalContinue
-		case strings.HasPrefix(line, "[goal:blocked:") && strings.HasSuffix(line, "]"):
-			return deliveryGoalBlocked
-		default:
-			return deliveryGoalFinal
-		}
-	}
-	return deliveryGoalFinal
-}

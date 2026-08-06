@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -306,4 +307,31 @@ func SaveSessionLeaseInfo(path string, info SessionLeaseInfo) error {
 
 func sessionLeaseInfoPath(path string) string {
 	return store.SessionLeaseInfo(canonicalSessionSavePath(path))
+}
+
+// unleasedWriteObserved dedupes the write-authority probe below to one report
+// per canonical path per process.
+var unleasedWriteObserved sync.Map
+
+// observeUnleasedSessionWrite is the store-P2 write-authority probe: the target
+// model is "the lease holder is the only writer of a session's content", but
+// enforcement can't land before we know every writer that currently saves
+// without holding the lease (fresh-session creation saves before the first
+// Rebind, headless runs, recovery tooling, ...). Until then this only records
+// evidence: one structured warning per path per process, never a failure. The
+// snapshot-conflict machinery stays the safety net for the writers this
+// surfaces.
+func observeUnleasedSessionWrite(path string, mode sessionSaveMode) {
+	canonical := canonicalSessionSavePath(path)
+	if _, ok := sessionLeaseOwners.Load(canonical); ok {
+		return
+	}
+	if _, seen := unleasedWriteObserved.LoadOrStore(canonical, struct{}{}); seen {
+		return
+	}
+	slog.Warn("session: save without a held lease (write-authority probe, store P2)",
+		"path", filepath.Base(path),
+		"mode", int(mode),
+		"writer", SessionWriterID(),
+	)
 }

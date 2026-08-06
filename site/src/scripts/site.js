@@ -1,11 +1,10 @@
-import { downloadPaneFromURL, downloadURLForPane, releaseChannelFromURL } from "./download-link.js";
+import { downloadPaneFromURL, downloadURLForPane } from "./download-link.js";
 import {
   cliReleaseModel,
   cliUpgradeCommand,
   desktopGitHubReleaseModel,
   desktopReleaseModel,
   fetchFirstJSON,
-  normalizePublicReleaseChannel,
   releaseVersionLabel,
 } from "./release-channels.js";
 import { initTheme } from "./theme.js";
@@ -129,7 +128,11 @@ import { initTheme } from "./theme.js";
   };
 
   const requestedPane = downloadPaneFromURL(window.location.href);
-  const requestedReleaseChannel = releaseChannelFromURL(window.location.href);
+  const legacyChannelURL = new URL(window.location.href);
+  if (legacyChannelURL.searchParams.has("channel")) {
+    legacyChannelURL.searchParams.delete("channel");
+    window.history.replaceState(null, "", legacyChannelURL.href);
+  }
   if (requestedPane) {
     activatePane(requestedPane);
     if (requestedPane === "desktop") flashOSCard();
@@ -233,15 +236,11 @@ import { initTheme } from "./theme.js";
     });
   });
 
-  /* public release channels */
-  const releaseModels = {
-    desktop: { stable: null, preview: null },
-    cli: { stable: null, preview: null },
-  };
-  const selectedChannels = { desktop: "stable", cli: "stable" };
+  /* public official releases */
+  const releaseModels = { desktop: null, cli: null };
   const releasesPage = "https://github.com/esengine/DeepSeek-Reasonix/releases";
   const reflectPaneURL = (surface) => {
-    const nextURL = downloadURLForPane(window.location.href, surface, selectedChannels[surface]);
+    const nextURL = downloadURLForPane(window.location.href, surface, "");
     if (nextURL) window.history.replaceState(null, "", nextURL);
   };
 
@@ -262,92 +261,51 @@ import { initTheme } from "./theme.js";
   const fallbackReleaseURL = () => releasesPage;
 
   const renderReleaseSurface = (surface) => {
-    const channel = selectedChannels[surface];
-    const model = releaseModels[surface][channel];
+    const model = releaseModels[surface];
     document.querySelectorAll('[data-release-version="' + surface + '"]').forEach((element) => {
       element.textContent = releaseVersionLabel(model);
     });
-    document.querySelectorAll('[data-release-summary="' + surface + '"] [data-channel-copy]').forEach((copy) => {
-      copy.hidden = copy.dataset.channelCopy !== channel;
-    });
     document.querySelectorAll('[data-release-notes="' + surface + '"]').forEach((link) => {
-      const path = model?.changelogURL ? new URL(model.changelogURL).pathname : "changelog/" + channel + "/";
+      const path = model?.changelogURL ? new URL(model.changelogURL).pathname : "changelog/";
       link.href = new URL(path, window.location.origin + "/").href;
-    });
-    document.querySelectorAll('[data-release-switch="' + surface + '"] [data-release-channel]').forEach((button) => {
-      const active = button.dataset.releaseChannel === channel;
-      button.classList.toggle("active", active);
-      button.setAttribute("aria-pressed", active ? "true" : "false");
     });
 
     const assetAttribute = "data-" + surface + "-asset";
     document.querySelectorAll("[" + assetAttribute + "]").forEach((link) => {
       const asset = link.getAttribute(assetAttribute);
-      const target = model?.assets?.[asset] || fallbackReleaseURL(surface, channel, asset);
+      const target = model?.assets?.[asset] || fallbackReleaseURL();
       link.href = target;
       if (target === releasesPage) link.removeAttribute("download");
       else link.setAttribute("download", "");
     });
 
     if (surface === "cli") {
-      const command = cliUpgradeCommand(channel);
+      const command = cliUpgradeCommand();
       document.querySelectorAll('[data-release-command="cli"]').forEach((element) => { element.textContent = command; });
       document.querySelectorAll('.release-upgrade-command [data-copy]').forEach((button) => { button.dataset.copy = command; });
     }
   };
 
-  const selectReleaseChannel = (surface, value, reflectURL) => {
-    selectedChannels[surface] = normalizePublicReleaseChannel(value);
-    renderReleaseSurface(surface);
-    if (reflectURL) reflectPaneURL(surface);
-  };
-
-  document.querySelectorAll("[data-release-switch]").forEach((group) => {
-    const surface = group.dataset.releaseSwitch;
-    group.querySelectorAll("[data-release-channel]").forEach((button) => {
-      button.addEventListener("click", () => selectReleaseChannel(surface, button.dataset.releaseChannel, true));
-    });
-  });
-  if (requestedReleaseChannel && (requestedPane === "desktop" || requestedPane === "cli")) {
-    selectedChannels[requestedPane] = requestedReleaseChannel;
-  }
   renderReleaseSurface("desktop");
   renderReleaseSurface("cli");
+  if (requestedPane) reflectPaneURL(requestedPane);
 
-  const desktopEndpoints = {
-    stable: [
-      "https://crash.reasonix.io/v1/desktop/releases/stable/latest.json",
-      "https://dl.reasonix.io/latest/latest.json",
-    ],
-    preview: [
-      "https://crash.reasonix.io/v1/desktop/releases/preview/latest.json",
-      "https://crash.reasonix.io/v1/desktop/releases/canary/latest.json",
-      "https://dl.reasonix.io/preview/latest.json",
-      "https://dl.reasonix.io/canary/latest.json",
-    ],
-  };
-  ["stable", "preview"].forEach((channel) => {
-    const manifestModel = fetchFirstJSON(
-      desktopEndpoints[channel],
+  fetchFirstJSON([
+    "https://dl.reasonix.io/latest/latest.json",
+    "https://crash.reasonix.io/v1/desktop/releases/stable/latest.json",
+  ], fetch, (manifest) => Boolean(desktopReleaseModel(manifest)))
+    .then((manifest) => desktopReleaseModel(manifest))
+    .catch(() => fetchFirstJSON(
+      ["https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/latest"],
       fetch,
-      (manifest) => Boolean(desktopReleaseModel(manifest, channel)),
-    )
-      .then((manifest) => desktopReleaseModel(manifest, channel));
-    const modelRequest = channel === "stable"
-      ? manifestModel.catch(() => fetchFirstJSON(
-        ["https://api.github.com/repos/esengine/DeepSeek-Reasonix/releases/latest"],
-        fetch,
-        (release) => Boolean(desktopGitHubReleaseModel(release)),
-      ).then(desktopGitHubReleaseModel))
-      : manifestModel;
-    modelRequest
-      .then((model) => {
-        if (!model) return;
-        releaseModels.desktop[channel] = model;
-        if (selectedChannels.desktop === channel) renderReleaseSurface("desktop");
-      })
-      .catch(() => {});
-  });
+      (release) => Boolean(desktopGitHubReleaseModel(release)),
+    ).then(desktopGitHubReleaseModel))
+    .then((model) => {
+      if (!model) return;
+      releaseModels.desktop = model;
+      renderReleaseSurface("desktop");
+    })
+    .catch(() => {});
 
   let githubCLIReleases;
   const fallbackCLIReleases = () => {
@@ -356,21 +314,19 @@ import { initTheme } from "./theme.js";
     ]).catch(() => null);
     return githubCLIReleases;
   };
-  ["stable", "preview"].forEach((channel) => {
-    fetchFirstJSON(
-      [`https://crash.reasonix.io/v1/cli/releases/${channel}/latest.json`],
-      fetch,
-      (payload) => Boolean(cliReleaseModel(Array.isArray(payload) ? payload : [payload], channel)),
-    )
-      .catch(() => fallbackCLIReleases())
-      .then((payload) => {
-        const releases = Array.isArray(payload) ? payload : payload ? [payload] : [];
-        const model = cliReleaseModel(releases, channel);
-        if (!model) return;
-        releaseModels.cli[channel] = model;
-        if (channel === "stable") updateCLIPackageVersion(model);
-        if (selectedChannels.cli === channel) renderReleaseSurface("cli");
-      })
-      .catch(() => {});
-  });
+  fetchFirstJSON(
+    ["https://crash.reasonix.io/v1/cli/releases/stable/latest.json"],
+    fetch,
+    (payload) => Boolean(cliReleaseModel(Array.isArray(payload) ? payload : [payload])),
+  )
+    .catch(() => fallbackCLIReleases())
+    .then((payload) => {
+      const releases = Array.isArray(payload) ? payload : payload ? [payload] : [];
+      const model = cliReleaseModel(releases);
+      if (!model) return;
+      releaseModels.cli = model;
+      updateCLIPackageVersion(model);
+      renderReleaseSurface("cli");
+    })
+    .catch(() => {});
 })();

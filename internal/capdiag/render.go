@@ -66,8 +66,11 @@ func RenderText(r Report) string {
 
 	fmt.Fprintf(&b, "Plugins (%d)\n", len(r.Plugins.Packages))
 	for _, p := range r.Plugins.Packages {
-		fmt.Fprintf(&b, "  - %s enabled=%v status=%s skills=%d commands=%d hooks=%d mcp=%d\n",
-			p.Name, p.Enabled, p.Status, p.Skills, p.Commands, p.Hooks, p.MCPServers)
+		fmt.Fprintf(&b, "  - %s enabled=%v status=%s skills=%d commands=%d prompts=%d hooks=%d mcp=%d themes=%d\n",
+			p.Name, p.Enabled, p.Status, p.Skills, p.Commands, p.Prompts, p.Hooks, p.MCPServers, p.Themes)
+		if p.Runtime {
+			b.WriteString("    runtime: FULL TRUST (declares a runtime process)\n")
+		}
 		fmt.Fprintf(&b, "    root: %s\n", p.Root)
 	}
 	if len(r.Plugins.Packages) == 0 {
@@ -77,7 +80,7 @@ func RenderText(r Report) string {
 
 	fmt.Fprintf(&b, "MCP (%d)\n", len(r.MCP.Servers))
 	for _, s := range r.MCP.Servers {
-		fmt.Fprintf(&b, "  - %s transport=%s intent=%s source=%s", s.Name, s.Transport, s.StartIntent, s.Source)
+		fmt.Fprintf(&b, "  - %s transport=%s intent=%s source=%s effective=%v", s.Name, s.Transport, s.StartIntent, s.Source, s.Effective)
 		if s.RuntimeStatus != "" {
 			fmt.Fprintf(&b, " runtime=%s", s.RuntimeStatus)
 		}
@@ -85,8 +88,17 @@ func RenderText(r Report) string {
 			fmt.Fprintf(&b, " tools=%d", s.ToolCount)
 		}
 		b.WriteByte('\n')
+		if s.SourcePath != "" {
+			fmt.Fprintf(&b, "    source_path: %s\n", s.SourcePath)
+		}
+		if s.StartupStage != "" {
+			fmt.Fprintf(&b, "    startup: stage=%s elapsed_ms=%d\n", s.StartupStage, s.StartupElapsedMS)
+		}
 		if s.Error != "" {
 			fmt.Fprintf(&b, "    error: %s\n", s.Error)
+		}
+		if s.Stderr != "" {
+			fmt.Fprintf(&b, "    stderr: %s\n", s.Stderr)
 		}
 	}
 	if len(r.MCP.Servers) == 0 {

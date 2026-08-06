@@ -22,7 +22,21 @@ export type EventKind =
   | "mcp_surface_ready"
   | "retrying"
   | "steer"
-  | "guardian_assessment";
+  | "guardian_assessment"
+  | "extension_surface"
+  | "extension_status"
+  | "stream_attempt";
+
+export type StreamAttemptAction = "begin" | "discard" | "commit";
+
+export interface WireStreamAttempt {
+  id: string;
+  action: StreamAttemptAction;
+  attempt?: number;
+  max?: number;
+  /** Fixed enum only: connection_reset | premature_eof | idle_timeout */
+  reason?: string;
+}
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -51,6 +65,8 @@ export interface WireTool {
   argChars?: number; // partial only: cumulative argument chars streamed so far
   refreshed?: boolean; // same-ID full dispatch with a preview recomputed after an earlier write
   parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
+  /** Host-local stream_attempt id for speculative parent partials only. */
+  attemptId?: string;
   diff?: string;
   added?: number;
   removed?: number;
@@ -76,12 +92,19 @@ export interface WireUsage {
   cacheHitTokens: number;
   cacheMissTokens: number;
   reasoningTokens?: number;
+  estimated?: boolean;
   source?: string;
   cacheDiagnostics?: WireCacheDiagnostics;
   // Session-cumulative cache tokens — the status bar shows the aggregate
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
+  /** Latest single-request shape for context gauges; omit → use billable totals. */
+  contextPromptTokens?: number;
+  contextCompletionTokens?: number;
+  contextReasoningTokens?: number;
+  contextCacheHitTokens?: number;
+  contextCacheMissTokens?: number;
   cost?: number;
   currency?: string;
   // Deprecated compatibility alias. Prefer cost + currency.
@@ -126,6 +149,14 @@ export interface WireGuardian {
   usage?: WireUsage;
 }
 
+export interface WireDecisionReceipt {
+  id: string;
+  kind: string;
+  tool?: string;
+  subject?: string;
+  outcome: string;
+}
+
 export interface WireAskOption {
   label: string;
   description?: string;
@@ -142,6 +173,78 @@ export interface WireAskQuestion {
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
+}
+
+// Extension UI surfaces (stage 8a) — structured-only documents published by
+// extension sidecars through the host UI hub. Exactly one sub-struct is set,
+// selected by `kind`.
+export interface WireExtensionStatus {
+  label: string;
+  detail?: string;
+  severity?: string; // "info" | "warn" | "error"
+  progress?: number;
+}
+
+export interface WireExtensionKeyValue {
+  key: string;
+  value: string;
+}
+
+export interface WireExtensionActionRef {
+  actionId: string;
+  label: string;
+}
+
+export interface WireExtensionCard {
+  title?: string;
+  markdown?: string;
+  text?: string;
+  fields?: WireExtensionKeyValue[];
+  progress?: number;
+  actions?: WireExtensionActionRef[];
+}
+
+export interface WireExtensionFormField {
+  key: string;
+  label?: string;
+  kind?: string; // "confirm" | "input" | "select" | "multiselect"
+  options?: string[];
+  default?: unknown;
+  required?: boolean;
+}
+
+export interface WireExtensionForm {
+  title?: string;
+  message?: string;
+  fields: WireExtensionFormField[];
+}
+
+export interface WireExtensionNotification {
+  title: string;
+  body?: string;
+  severity?: string; // "info" | "warn" | "error"
+}
+
+export interface WireExtensionSurface {
+  pluginId: string;
+  surfaceId: string;
+  sessionId?: string;
+  generation?: number;
+  kind: string; // "status" | "card" | "form" | "notification"
+  status?: WireExtensionStatus;
+  card?: WireExtensionCard;
+  form?: WireExtensionForm;
+  notification?: WireExtensionNotification;
+}
+
+// ExtensionActionView is one handshake-declared extension UI action, the JSON
+// twin of desktop's ExtensionActionView (stage 8b2). Slash is the public
+// invocation name, "/<plugin>:<action>".
+export interface ExtensionActionView {
+  plugin: string;
+  action: string;
+  slash: string;
+  description?: string;
 }
 
 // QuestionAnswer is the reply for one question, sent back via AnswerQuestion.
@@ -174,11 +277,16 @@ export interface WireEvent {
   ask?: WireAsk;
   compaction?: WireCompaction;
   guardian?: WireGuardian;
+  decisionReceipt?: WireDecisionReceipt;
+  extension?: WireExtensionSurface;
   err?: string;
   outcome?: "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
+  /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
+  retryScope?: "headers" | "stream";
+  streamAttempt?: WireStreamAttempt;
   // Tab routing: set by the Go-side tabEventSink so multi-tab frontends
   // route each event to the correct per-tab reducer.
   tabId?: string;
@@ -350,9 +458,11 @@ export interface ContextPanelInfo {
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  estimated?: boolean;
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
   sessionCompletionTokens: number;
+  sessionEstimated?: boolean;
   requestCount?: number;
   elapsedMs?: number;
   sessionCost?: number;
@@ -372,6 +482,7 @@ export interface UsageSourceStats {
   reasoningTokens: number;
   cacheHitTokens: number;
   cacheMissTokens: number;
+  estimated?: boolean;
   requestCount: number;
   sessionCost?: number;
   sessionCurrency?: string;
@@ -420,6 +531,7 @@ export interface HistoryMessage {
   messages?: number;
   summary?: string;
   archive?: string;
+  decisionReceipt?: WireDecisionReceipt;
 }
 
 export interface HistoryToolCall {
@@ -470,6 +582,45 @@ export interface CheckpointMeta {
   time: number; // unix ms
   canCode?: boolean;
   canConversation?: boolean;
+  coverage?: string;
+  coverageGaps?: string[];
+  expiredFilePayload?: boolean;
+  activeWriters?: number;
+  legacy?: boolean;
+  canUndoFiles?: boolean;
+  disabledReason?: string;
+}
+
+export interface RewindPlanView {
+  planId?: string;
+  turn?: number;
+  scope?: string;
+  coverage?: string;
+  coverageGaps?: string[];
+  legacy?: boolean;
+  expiredFilePayload?: boolean;
+  canFiles?: boolean;
+  canConversation?: boolean;
+  disabledReason?: string;
+  conflicts?: string[];
+  files?: string[];
+  fileCount?: number;
+  activeWriters?: number;
+  path?: string;
+  ok?: boolean;
+  error?: string;
+}
+
+export interface RewindResultView {
+  ok?: boolean;
+  transactionId?: string;
+  undoAvailable?: boolean;
+  written?: string[];
+  deleted?: string[];
+  conversationOk?: boolean;
+  error?: string;
+  conflicts?: string[];
+  coverage?: string;
 }
 
 // SessionMeta is one saved session for the history panel.
@@ -525,6 +676,7 @@ export interface ContextInfo {
   sessionCurrency?: string;
   cacheHitTokens?: number;
   cacheMissTokens?: number;
+  estimated?: boolean;
   sources?: Record<string, UsageSourceStats>;
 }
 
@@ -548,6 +700,7 @@ export interface Meta {
   tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
+  goalRuntime?: GoalRuntime;
   autoResearch?: AutoResearchCompactView;
   canonicalTodos?: Todo[];
 }
@@ -557,6 +710,21 @@ export type ToolApprovalMode = "ask" | "auto" | "yolo";
 // "full" is the persisted compatibility value for the Balanced runtime profile.
 export type TokenMode = "full" | "economy" | "delivery";
 export type GoalStatus = "running" | "complete" | "blocked" | "stopped";
+
+// GoalRuntime is the optional Goal budget/runtime summary the backend attaches
+// to Meta. Absent for old hosts or when no goal is active.
+export interface GoalRuntime {
+  turnsUsed: number;
+  turnsLimit: number;
+  tokensUsed: number;
+  /** @deprecated Goal has no hard token limit; retained as 0 for old hosts/clients. */
+  tokensLimit: number;
+  noProgressTurns: number;
+  noProgressLimit: number;
+  lastReason?: string;
+  stopCause?: string;
+  budgetExtensions: number;
+}
 
 export interface AutoResearchCompactView {
   taskId: string;
@@ -713,6 +881,7 @@ export interface WorkspaceChangeView {
   turns?: number[];
   latestPrompt?: string;
   latestTime?: number;
+  canSessionRevert?: boolean;
 }
 
 export interface WorkspaceChangesView {
@@ -1268,6 +1437,13 @@ export interface RemoteServerView {
   error?: string;
 }
 
+/** Path-free summary of files left behind by the removed Remote Workbench. */
+export interface RemoteLegacyWorkbenchData {
+  mirrorCount: number;
+  mirrorBytes: number;
+  trustFile: boolean;
+}
+
 export interface RemoteForwardsEvent {
   hostId: string;
   forwards: RemoteForwardView[];
@@ -1396,8 +1572,9 @@ export interface ProviderView {
   keySourcePath?: string;
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
-  reasoningProtocol: string; // auto|deepseek|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|deepseek|glm|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
+  webSearch?: boolean; // expose a provider-executed web search tool when supported
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
   modelOverrides?: ProviderModelOverrideView[] | null;
@@ -1447,6 +1624,65 @@ export interface BalanceInfo {
   err?: string;
 }
 
+// ── Usage statistics (desktop/stats_app.go) ────────────────────────────────
+
+// UsageStatsRequest selects the aggregation range and optional entry-point
+// filter for the usage statistics panel. Range is "7" | "14" | "30" | "90" |
+// "custom"; custom requires from/to as "2006-01-02" (inclusive, local dates).
+// Source "" or "all" aggregates every entry point; "desktop" | "cli" | "serve"
+// | "bot" | "remote" filters to that source's records.
+export interface UsageStatsRequest {
+  range: string;
+  from?: string;
+  to?: string;
+  source?: string;
+}
+
+// DailyTokenUsage is one day's token total, per-model split and turn count in
+// the daily trend series.
+export interface DailyTokenUsage {
+  day: string; // "2006-01-02"
+  total: number;
+  byModel: Record<string, number>; // model ref -> tokens
+  byProvider: Record<string, number>; // provider name -> tokens
+  requests: number; // API calls that day
+  turns: number;
+  cacheHit: number; // cached input tokens that day
+  cacheMiss: number; // uncached input tokens that day
+}
+
+// ModelTokenUsage is one model's aggregate within the range.
+export interface ModelTokenUsage {
+  model: string; // canonical "provider/model"
+  provider: string;
+  tokens: number;
+  percent: number; // 0..100
+}
+
+// ProviderTokenUsage is one provider's aggregate within the range.
+export interface ProviderTokenUsage {
+  provider: string;
+  tokens: number;
+  percent: number;
+}
+
+// UsageStatsRange is the full aggregate the settings panel renders.
+export interface UsageStatsRange {
+  from: string;
+  to: string;
+  tokens: number;
+  requests: number; // API calls
+  turns: number; // completed turns
+  cacheHit: number;
+  cacheMiss: number;
+  activeDays: number;
+  topModel: string;
+  topProvider: string;
+  daily: DailyTokenUsage[];
+  models: ModelTokenUsage[];
+  providers: ProviderTokenUsage[];
+}
+
 // JobView is one running background job (desktop/app.go Jobs) for the status bar.
 export interface JobView {
   id: string;
@@ -1454,6 +1690,36 @@ export interface JobView {
   label: string;
   status: string; // "running"
   startedAt: number; // unix milliseconds
+}
+
+export interface ActiveWorkView {
+  running: boolean;
+  pendingPrompt: boolean;
+  cancellable: boolean;
+  jobs: JobView[];
+}
+
+export interface JobCancelBatchView {
+  cancelled: string[];
+  notRunning: string[];
+}
+
+export interface BackgroundRuntimeView {
+  tabId: string;
+  title: string;
+  detached: boolean;
+  running: boolean;
+  pendingPrompt: boolean;
+  jobs: JobView[];
+}
+
+export interface WorkspaceConflictView {
+  state: "none" | "local" | "external";
+  ownerTabId?: string;
+  ownerTitle?: string;
+  ownerWork: ActiveWorkView;
+  canReveal: boolean;
+  canCreateWorktree: boolean;
 }
 
 export interface PermissionsView {
@@ -1499,6 +1765,9 @@ export interface AgentView {
   systemPrompt: string;
   coldResumePrune: boolean;
   reasoningLanguage: string; // "auto" | "zh" | "en"
+  compactRatio?: number; // Advanced global default; older backends omit it.
+  effectiveCompactRatio?: number; // Active local session after project overrides.
+  compactRatioOverridden?: boolean;
 }
 
 export interface BotAllowlistView {
@@ -1728,16 +1997,18 @@ export interface SettingsView {
   desktopLayoutStyle: string; // "classic" | "workbench" | "creation"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
+  desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
   closeBehavior: string; // "background" | "quit"
   displayMode: string;   // "standard" | "compact"
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   defaultToolApprovalMode: ToolApprovalMode | string; // default for newly-created sessions
   checkUpdates: boolean; // check for new versions on startup
-  updateChannel: string; // "stable" | "preview"
+  updateChannel: string; // compatibility field; always "stable"
   telemetry: boolean; // anonymous launch ping + scrubbed next-launch native crash diagnostics
   metrics: boolean; // aggregate quality/lifecycle metrics (anonymous signal/bucket counts)
   configPath: string;
+  shadowedByPath?: string; // workspace reasonix.toml that outranks configPath, when one exists
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
@@ -1750,13 +2021,15 @@ export interface DesktopStartupSettingsView {
   desktopLayoutStyle: string; // "classic" | "workbench"
   desktopTheme: string; // "auto" | "dark" | "light"
   desktopThemeStyle: string;
+  desktopTerminalTheme: string; // "auto" follows app | "dark" | "light"
   displayMode: string;   // "standard" | "compact"
   statusBarStyle: string; // "icon" | "text"
   statusBarItems: string[]; // ordered visible status bar item ids
   checkUpdates: boolean; // check for new versions on startup
-  updateChannel: string; // "stable" | "preview"
-  safeMode?: boolean; // recovery startup with external integrations disabled
+  updateChannel: string; // compatibility field; always "stable"
   conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
+  configWarnings?: string[]; // non-blocking load recovery notices
+  configPath?: string;
 }
 
 export type ExternalOpenerKind = "file-manager" | "editor" | "terminal";
@@ -1805,8 +2078,61 @@ export interface UpdateProgress {
   requestId: string;
   version: string;
   channel: "stable" | "preview" | string;
-  phase: "downloading" | "verifying" | "downloaded" | "authorizing" | "installing" | "done" | "error";
+  phase: "downloading" | "verifying" | "downloaded" | "authorizing" | "recovering" | "installing" | "relaunching" | "done" | "error";
   received: number;
   total: number;
   err?: string;
+}
+
+// Task Monitor panel types (internal/taskmonitor).
+
+export type TaskState =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "stale"
+  | string; // forward-compat
+
+export type RuntimeState = "unknown" | "alive" | "exited" | string;
+
+export interface TaskSnapshot {
+  schema_version: number;
+  task_id: string;
+  job_id?: string; // jobs.Manager-local runtime identifier
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState; // absent in snapshots written before this field existed
+  version: number;
+  created_at: string; // ISO 8601
+  updated_at: string; // ISO 8601
+  error_code?: string;
+  error_summary?: string;
+}
+
+export interface ControlResult {
+  schema_version: number;
+  command: string;
+  task_id: string;
+  session_id?: string;
+  state?: TaskState;
+  runtime_state?: RuntimeState;
+  version?: number;
+  accepted: boolean;
+  idempotent: boolean;
+  error?: { code: string; message: string };
+}
+
+export interface TaskEvent {
+  sequence: number;
+  timestamp: string; // ISO 8601
+  event_type: string;
+  task_id: string;
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState;
+  error_code?: string;
+  error_summary?: string;
 }

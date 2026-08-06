@@ -144,3 +144,26 @@ func TestCLIProfileBuildOptionsUseResolvedLocaleForAutoPricing(t *testing.T) {
 		}
 	}
 }
+
+func TestTUIDiagnosticsMilestoneFlushesNonEmptyLog(t *testing.T) {
+	home := t.TempDir()
+	d := startTUIDiagnostics(home)
+	t.Cleanup(d.Close)
+	d.Milestone("config_load_begin")
+	d.Milestone("controller_build_done")
+	if d.Path() == "" {
+		t.Fatal("expected diagnostic log path")
+	}
+	body, err := os.ReadFile(d.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(body) == 0 {
+		t.Fatal("diagnostic log must not be empty after milestones")
+	}
+	for _, want := range []string{"diagnostics_started", "config_load_begin", "controller_build_done"} {
+		if !strings.Contains(string(body), want) {
+			t.Fatalf("log missing %q:\n%s", want, body)
+		}
+	}
+}

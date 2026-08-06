@@ -1,22 +1,20 @@
 name: Release
 
-# Native CLI binary line. Stable and Preview releases are called by their
-# approved all-surface orchestrators. Manual dispatch remains available only for
-# Stable/RC recovery; standalone prereleases remain internal stable-channel
-# checkpoints behind the `release` gate.
+# Native CLI binary line. Official releases are called by the protected Stable
+# orchestrator. Manual dispatch remains available only for official recovery;
+# historical Preview inputs below are workflow-call compatibility, not a public
+# publication entrypoint.
 on:
   workflow_dispatch:
     inputs:
       channel:
         description: "Standalone CLI recovery channel"
         required: true
-        # Public Preview recovery reruns release-preview.yml so every surface and
-        # its immutable release-event marker stay aligned.
         default: stable
         type: choice
         options: [stable]
       tag:
-        description: "Existing protected Stable/RC CLI tag (for example v1.18.0 or v1.18.0-rc.1)"
+        description: "Existing official CLI tag (for example v1.18.0)"
         required: true
         type: string
   workflow_call:
@@ -44,12 +42,12 @@ on:
         default: false
         type: boolean
       orchestrator:
-        description: "Trusted release orchestrator: stable or preview"
+        description: "Trusted release orchestrator (legacy Preview calls remain readable)"
         required: false
         default: stable
         type: string
       allow_preview_recovery:
-        description: "Allow an approved Preview tag from main-v2 history"
+        description: "Legacy compatibility for already-created Preview runs"
         required: false
         default: false
         type: boolean
@@ -176,20 +174,30 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.resolve.outputs.sha }}
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
       - run: ./scripts/cache-guard.sh
+      - name: Verify embedded documentation identity
+        env:
+          DOCS_BUILD_VERSION: ${{ needs.resolve.outputs.tag }}
+          DOCS_SOURCE_REVISION: ${{ needs.resolve.outputs.sha }}
+        run: |
+          if [ ! -f scripts/verify-embedded-docs.sh ]; then
+            echo "Legacy candidate predates the embedded docs contract; skipping."
+            exit 0
+          fi
+          bash scripts/verify-embedded-docs.sh "$DOCS_BUILD_VERSION" "$DOCS_SOURCE_REVISION"
 
   goreleaser:
     name: archives + checksums + homebrew tap
     needs: [resolve, cache-guard]
     if: ${{ always() && !cancelled() && needs.cache-guard.result == 'success' }}
     runs-on: ubuntu-latest
-    # The stable caller has already passed the single GitHub release approval.
-    # Standalone prereleases pass release-gate above. This job therefore must not
-    # add a second GitHub environment approval.
+    # The Stable caller has already passed the single GitHub release approval.
+    # Official standalone recovery passes release-gate above. This job therefore
+    # must not add a second GitHub environment approval.
     steps:
       - uses: actions/checkout@v7
         with:
@@ -203,11 +211,25 @@ jobs:
           fetch-depth: 0
           path: release-control
           ref: ${{ github.workflow_sha }}
-      - uses: actions/setup-go@v6
+      - name: Isolate release-control checkout from product git state
+        run: |
+          set -euo pipefail
+          git_common_dir="$(git rev-parse --path-format=absolute --git-common-dir)"
+          exclude_file="$git_common_dir/info/exclude"
+          if ! grep -qxF '/release-control/' "$exclude_file"; then
+            printf '%s\n' '/release-control/' >> "$exclude_file"
+          fi
+          git check-ignore -q release-control/
+          dirty="$(git status --porcelain --untracked-files=all)"
+          if [ -n "$dirty" ]; then
+            printf 'product checkout is dirty before release:\n%s\n' "$dirty" >&2
+            exit 1
+          fi
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
       - name: Download orchestrator-reviewed release notes

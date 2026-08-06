@@ -75,10 +75,14 @@ servers, then inspect or call a non-destructive capability. If a capability is
 destructive, do not treat that as missing configuration or an unavailable MCP:
 write the operation into the plan for the executor instead.
 
-If your research shows the task needs no changes and no actions at all (already
-implemented, already resolved), explain that briefly and end your reply with a
-final line containing exactly [no_changes]. Never emit that marker when any
-work, verification, or follow-up remains.`
+If the task needs no executor actions at all, end your reply with a final line
+containing exactly [no_changes]. That covers two cases: your research shows the
+work is already done (already implemented, already resolved — explain that
+briefly), and the task is a question, comparison, analysis, or explanation that
+your reply itself fully answers — write the complete answer, then the marker.
+The host then delivers your reply directly instead of starting the executor.
+Never emit that marker when any workspace change, command, verification, or
+follow-up action remains.`
 
 const executorHandoffMarker = "Reasonix executor handoff"
 
@@ -119,14 +123,15 @@ func PlannerPromptWithContext(context string) string {
 // executor (a full tool-using Agent) carries it out. The sessions never mix, so
 // neither model's prefix is disturbed by the other's turns.
 type Coordinator struct {
-	planner        provider.Provider
-	plannerSess    *Session
-	plannerSystem  string
-	plannerPricing *provider.Pricing
-	plannerAgent   *Agent
-	executor       *Agent
-	temperature    float64
-	sink           event.Sink
+	planner         provider.Provider
+	plannerSess     *Session
+	plannerSystem   string
+	plannerPricing  *provider.Pricing
+	plannerModelRef string
+	plannerAgent    *Agent
+	executor        *Agent
+	temperature     float64
+	sink            event.Sink
 	// plannerPolicy chooses executor-only, plan-and-execute, or plan-for-approval
 	// per turn. nil preserves the historical "plan every turn" constructor
 	// behavior used by direct Coordinator callers.
@@ -178,15 +183,16 @@ func newCoordinator(planner provider.Provider, plannerSession *Session, plannerP
 		executor.executorHandoffGuard = true
 	}
 	return &Coordinator{
-		planner:        planner,
-		plannerSess:    plannerSession,
-		plannerSystem:  plannerSystem,
-		plannerPricing: plannerPricing,
-		plannerAgent:   plannerAgent,
-		executor:       executor,
-		temperature:    temperature,
-		sink:           sink,
-		plannerPolicy:  policy,
+		planner:         planner,
+		plannerSess:     plannerSession,
+		plannerSystem:   plannerSystem,
+		plannerPricing:  plannerPricing,
+		plannerModelRef: strings.TrimSpace(plannerOptions.ModelRef),
+		plannerAgent:    plannerAgent,
+		executor:        executor,
+		temperature:     temperature,
+		sink:            sink,
+		plannerPolicy:   policy,
 	}
 }
 
@@ -400,8 +406,9 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 	if isNoOpPlan(plan) {
 		c.persistExecutorNoOp(ctx, input, plan)
 		// The relayed conclusion is planner text; keep its source so sinks
-		// attribute it like every other planner emission.
-		c.sink.Emit(event.Event{Kind: event.Text, Text: plan, Source: event.UsageSourcePlanner})
+		// attribute it like every other planner emission. Display goes through
+		// the standard filter so the [no_changes] contract line stays internal.
+		c.sink.Emit(event.Event{Kind: event.Text, Text: DisplayAssistantText(plan), Source: event.UsageSourcePlanner})
 		return nil
 	}
 	runExecutorWithPlan := func(ctx context.Context, planText string) error {
@@ -815,6 +822,15 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		rawContent = rawInput
 	}
 	c.plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: input, RawContent: rawContent})
+	ctx = provider.WithRequestAttemptCounter(ctx)
+	var usage *provider.Usage
+	streamCompleted := false
+	defer func() {
+		accounted := provider.UsageWithRequestAttemptCount(ctx, usage)
+		if accounted != nil || streamCompleted {
+			c.sink.Emit(event.Event{Kind: event.Usage, ModelRef: c.plannerModelRef, Usage: accounted, Pricing: c.plannerPricing, Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner})
+		}
+	}()
 
 	ch, err := c.planner.Stream(ctx, provider.Request{
 		Messages:    provider.ModelMessages(c.plannerSess.Messages),
@@ -826,7 +842,6 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 	}
 
 	var text strings.Builder
-	var usage *provider.Usage
 	for chunk := range ch {
 		switch chunk.Type {
 		case provider.ChunkText:
@@ -839,10 +854,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 			return "", chunk.Err
 		}
 	}
-	// Closes the planner's raw text block (no markdown redraw) and prints its
-	// usage line, mirroring the old Fprintln + printUsage tail.
-	c.sink.Emit(event.Event{Kind: event.Usage, Usage: usage, Pricing: c.plannerPricing, Source: event.UsageSourcePlanner, UsageSource: event.UsageSourcePlanner})
-
+	streamCompleted = true
 	plan := text.String()
 	c.plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: plan})
 	return plan, nil

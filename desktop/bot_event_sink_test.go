@@ -131,3 +131,36 @@ func TestBotEventForwarderApprovalNoticeDoesNotExposeReplyID(t *testing.T) {
 		t.Fatal("approval notice was not sent")
 	}
 }
+
+func TestBotEventForwarderSuppressesOperatorNoticesWithoutHidingUserWarnings(t *testing.T) {
+	forwarder := &botEventForwarder{
+		runtime: &desktopBotRuntime{},
+		targets: []botForwardTarget{{
+			ConnID:   "feishu-lark",
+			Domain:   "lark",
+			ChatID:   "oc-group-1",
+			ChatType: bot.ChatGroup,
+		}},
+		queue: make(chan string, 2),
+	}
+
+	forwarder.Emit(event.Event{
+		Kind:     event.Notice,
+		Level:    event.LevelWarn,
+		Audience: event.NoticeAudienceOperator,
+		Code:     event.NoticeCodeSessionRecoveryForked,
+		Text:     "local session maintenance",
+	})
+	forwarder.Emit(event.Event{
+		Kind:  event.Notice,
+		Level: event.LevelWarn,
+		Text:  "please retry the user action",
+	})
+
+	if got := len(forwarder.queue); got != 1 {
+		t.Fatalf("queued messages = %d, want only the actionable user warning", got)
+	}
+	if got := <-forwarder.queue; got != "⚠️ please retry the user action" {
+		t.Fatalf("queued message = %q, want the ordinary user warning", got)
+	}
+}

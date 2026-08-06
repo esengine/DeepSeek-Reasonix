@@ -138,6 +138,14 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
     onTabChange(tabId);
   };
 
+  const handleTabAuxClick = (event: ReactMouseEvent<HTMLButtonElement>, tabId: string) => {
+    // DOM MouseEvent.button: 1 is the auxiliary button, normally the middle/wheel button.
+    if (event.button !== 1) return;
+    event.preventDefault();
+    event.stopPropagation();
+    handleClose(tabId);
+  };
+
   const openTabMenu = (event: ReactMouseEvent<HTMLButtonElement> | ReactKeyboardEvent<HTMLButtonElement>, tabId: string) => {
     event.preventDefault();
     event.stopPropagation();
@@ -225,6 +233,11 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
               aria-label={annotatedTitle}
               style={projectAccentStyle(tab.projectColor)}
               onClick={() => handleTabClick(tab.id)}
+              onAuxClick={(event) => handleTabAuxClick(event, tab.id)}
+              onMouseDown={(event) => {
+                // Prevent the browser/webview middle-click auto-scroll before auxclick fires.
+                if (event.button === 1) event.preventDefault();
+              }}
               onContextMenu={(event) => openTabMenu(event, tab.id)}
               onKeyDown={(event) => {
                 if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {

@@ -216,6 +216,7 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 		return fmt.Errorf("lock session file: %w", err)
 	}
 	defer unlockFile()
+	observeUnleasedSessionWrite(path, mode)
 	if mode == sessionSaveSnapshot && s.snapshotUpToDate(path) {
 		// Nothing changed since the last successful save to this exact path:
 		// skip the rest of the save — including the full transcript serialize
@@ -1520,16 +1521,23 @@ func ReconcileCleanupPending(dir string, cleanup func(CleanupPendingInfo) error)
 	if err := ReconcileSessionSidecars(dir); err != nil {
 		errs = append(errs, err)
 	}
+	if err := reconcileRecoveryTrashStages(dir); err != nil {
+		errs = append(errs, err)
+	}
 	pending, err := ListCleanupPending(dir)
 	if err != nil {
 		errs = append(errs, err)
 		return errors.Join(errs...)
 	}
-	if cleanup == nil {
-		return errors.Join(errs...)
-	}
 	for _, item := range pending {
-		if err := cleanup(item); err != nil {
+		handled, err := reconcileRecoveryTrashPending(item)
+		if !handled {
+			if cleanup == nil {
+				continue
+			}
+			err = cleanup(item)
+		}
+		if err != nil {
 			errs = append(errs, fmt.Errorf("%s: %w", item.SessionPath, err))
 		}
 	}
@@ -2026,7 +2034,7 @@ func SessionPreviewFromMessages(msgs []provider.Message) (string, int) {
 		if m.Role == provider.RoleUser && IsUserAuthoredTurn(UserMessageText(m)) {
 			turns++
 			if first == "" {
-				first = truncatePreview(UserMessageText(m))
+				first = truncatePreview(previewProse(UserMessageText(m)))
 			}
 		}
 	}
@@ -2047,11 +2055,33 @@ func previewSession(path string) (string, int) {
 		if m.Role == provider.RoleUser && IsUserAuthoredTurn(UserMessageText(m)) {
 			turns++
 			if first == "" {
-				first = truncatePreview(UserMessageText(m))
+				first = truncatePreview(previewProse(UserMessageText(m)))
 			}
 		}
 	}
 	return first, turns
+}
+
+// previewProse drops the leading @file references a prompt opens with so the
+// preview shows what was asked rather than a row of paths. A prompt that is
+// nothing but references keeps them — there is nothing else to show.
+func previewProse(s string) string {
+	rest := strings.TrimLeft(s, " \t")
+	for strings.HasPrefix(rest, "@") {
+		end := strings.IndexAny(rest, " \t\r\n")
+		if end < 0 {
+			return s
+		}
+		next := strings.TrimLeft(rest[end:], " \t")
+		if strings.TrimSpace(next) == "" {
+			return s
+		}
+		rest = next
+	}
+	if rest == "" {
+		return s
+	}
+	return rest
 }
 
 // truncatePreview clamps a preview line to 80 runes with an ellipsis, matching

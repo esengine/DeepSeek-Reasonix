@@ -74,6 +74,7 @@ credentials_store = "auto"   # legacy compatibility; provider keys are in .env
 [ui]
 theme = "auto"
 cursor_shape = "bar"         # CLI/TUI text cursor: underline|block|bar
+show_turn_usage = false       # hide per-request token/cost receipts in the TUI; default true
 
 [desktop]
 provider_access = ["deepseek"]
@@ -98,6 +99,10 @@ redaction. Secrets belong in the global `.env` below.
 `[ui].cursor_shape` affects only the CLI/TUI composer. The default `bar` stays
 visible without covering double-width CJK characters; use `block` or
 `underline` if you prefer those cursor shapes.
+
+`[ui].show_turn_usage = false` hides the token and cost receipt appended to the
+TUI transcript after each model request. Accounting and live status updates
+remain active. The default is `true`.
 
 ### Custom provider `api_key_env` names
 

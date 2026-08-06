@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useT, type Translator } from "../lib/i18n";
 import type { CommandInfo } from "../lib/types";
 import { VirtualMenu } from "./VirtualMenu";
@@ -18,6 +19,10 @@ type SlashCommandGroup = "actions" | "management" | "subagents" | "skills" | "in
 type SlashMenuRow =
   | { type: "group"; group: SlashCommandGroup; label: string }
   | { type: "command"; command: CommandInfo; commandIndex: number };
+
+function slashMenuRowKey(row: SlashMenuRow): string {
+  return row.type === "group" ? `group:${row.group}` : `${row.command.kind}:${row.command.name}`;
+}
 
 const slashCommandGroups: SlashCommandGroup[] = ["actions", "subagents", "skills", "integrations", "management"];
 const slashCommandGroupOrder = new Map(slashCommandGroups.map((group, index) => [group, index]));
@@ -62,27 +67,29 @@ export function SlashMenu({
   disabledReason?: string;
 }) {
   const t = useT();
-  const grouped = new Map<SlashCommandGroup, Array<{ command: CommandInfo; commandIndex: number }>>();
-  items.forEach((command, commandIndex) => {
-    const group = slashCommandGroup(command);
-    const groupItems = grouped.get(group) ?? [];
-    groupItems.push({ command, commandIndex });
-    grouped.set(group, groupItems);
-  });
-  const rows: SlashMenuRow[] = slashCommandGroups.flatMap((group) => {
-    const groupItems = grouped.get(group);
-    if (!groupItems?.length) return [];
-    return [
-      { type: "group" as const, group, label: t(`slash.group.${group}`) },
-      ...groupItems.map(({ command, commandIndex }) => ({ type: "command" as const, command, commandIndex })),
-    ];
-  });
+  const rows = useMemo<SlashMenuRow[]>(() => {
+    const grouped = new Map<SlashCommandGroup, Array<{ command: CommandInfo; commandIndex: number }>>();
+    items.forEach((command, commandIndex) => {
+      const group = slashCommandGroup(command);
+      const groupItems = grouped.get(group) ?? [];
+      groupItems.push({ command, commandIndex });
+      grouped.set(group, groupItems);
+    });
+    return slashCommandGroups.flatMap((group) => {
+      const groupItems = grouped.get(group);
+      if (!groupItems?.length) return [];
+      return [
+        { type: "group" as const, group, label: t(`slash.group.${group}`) },
+        ...groupItems.map(({ command, commandIndex }) => ({ type: "command" as const, command, commandIndex })),
+      ];
+    });
+  }, [items, t]);
   const activeRowIndex = rows.findIndex((row) => row.type === "command" && row.commandIndex === activeIndex);
   return (
     <VirtualMenu
       items={rows}
       activeIndex={activeRowIndex}
-      itemKey={(row) => row.type === "group" ? `group:${row.group}` : `${row.command.kind}:${row.command.name}:${row.commandIndex}`}
+      itemKey={slashMenuRowKey}
       estimateSize={(row) => row.type === "group" ? 26 : 34}
       renderItem={(row) => row.type === "group" ? (
         <div className="slashmenu__group" role="separator" aria-label={row.label}>

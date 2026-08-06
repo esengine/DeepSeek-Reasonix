@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -124,6 +125,56 @@ func TestParallelTasksForegroundCompletesAndClosesWorkers(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("parallel_tasks foreground execution did not return; workers likely waited on spawnCh forever")
+	}
+}
+
+func TestParallelTasksLongResultsStayIndependentlyRetrievable(t *testing.T) {
+	workspace := t.TempDir()
+	store := NewSubagentStore(t.TempDir())
+	task := NewTaskTool(parallelLongResultProvider{}, nil, tool.NewRegistry(), 20, 0, 0, 0, 0, 0, 0, 0.0, "", "sys", nil, 0, "", "", nil).
+		WithTranscripts(store, workspace, "base-model", "base-effort")
+	parallel := NewParallelTasksTool(task, tool.NewRegistry())
+	ctx := WithParentSession(withCallContext(context.Background(), "parallel-call", event.Discard, nil, false), "parent-session")
+
+	out, err := parallel.Execute(ctx, json.RawMessage(`{"tasks":[{"prompt":"first report"},{"prompt":"second report"}]}`))
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(out) > subagentAggregateBudgetBytes {
+		t.Fatalf("aggregate bytes = %d, want <= %d", len(out), subagentAggregateBudgetBytes)
+	}
+	if _, notice := truncateToolOutput(out); notice != "" {
+		t.Fatalf("bounded aggregate still hit the generic truncator: %s", notice)
+	}
+	if strings.Count(out, "Subagent reference: sa_") != 2 {
+		t.Fatalf("aggregate did not preserve every child ref:\n%s", out)
+	}
+	if !strings.Contains(out, "preview truncated; read the full result") {
+		t.Fatalf("aggregate did not explain lossless retrieval:\n%s", out)
+	}
+
+	refs := subagentRefsFromText(out)
+	if len(refs) != 2 {
+		t.Fatalf("refs = %v, want 2", refs)
+	}
+	reader := NewSubagentResultTool(task)
+	for i, ref := range refs {
+		page, readErr := reader.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"ref":%q,"limit_bytes":24576}`, ref)))
+		if readErr != nil {
+			t.Fatalf("read result %d: %v", i+1, readErr)
+		}
+		wantBegin, wantEnd := "FIRST-BEGIN", "FIRST-END"
+		if i == 1 {
+			wantBegin, wantEnd = "SECOND-BEGIN", "SECOND-END"
+		}
+		if !strings.Contains(page, wantBegin) || !strings.Contains(page, wantEnd) || !strings.Contains(page, "End of subagent result") {
+			t.Fatalf("read result %d was not complete: head=%q tail=%q", i+1, page[:minInt(120, len(page))], page[max(0, len(page)-120):])
+		}
+	}
+
+	otherCtx := WithParentSession(context.Background(), "other-session")
+	if _, err := reader.Execute(otherCtx, json.RawMessage(fmt.Sprintf(`{"ref":%q}`, refs[0]))); err == nil {
+		t.Fatal("reader accepted a result from an unrelated parent session")
 	}
 }
 
@@ -308,6 +359,32 @@ func (parallelStaticProvider) Stream(context.Context, provider.Request) (<-chan 
 	return ch, nil
 }
 
+type parallelLongResultProvider struct{}
+
+func (parallelLongResultProvider) Name() string { return "parallel-long-result" }
+
+func (parallelLongResultProvider) Stream(_ context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	begin, end, fill := "FIRST-BEGIN", "FIRST-END", "a"
+	if strings.Contains(lastUser(req), "second report") {
+		begin, end, fill = "SECOND-BEGIN", "SECOND-END", "b"
+	}
+	ch := make(chan provider.Chunk, 2)
+	ch <- provider.Chunk{Type: provider.ChunkText, Text: begin + "\n" + strings.Repeat(fill, 20*1024) + "\n" + end}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
+
+func subagentRefsFromText(text string) []string {
+	var refs []string
+	for _, line := range strings.Split(text, "\n") {
+		if strings.HasPrefix(line, "Subagent reference: ") {
+			refs = append(refs, strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: ")))
+		}
+	}
+	return refs
+}
+
 type promptRoutingProvider struct{}
 
 func (promptRoutingProvider) Name() string { return "prompt-routing" }
@@ -415,7 +492,7 @@ func TestChildMaxStepsSharedDefault(t *testing.T) {
 
 func TestTaskToolPropagatesDeliveryProfileToSubagents(t *testing.T) {
 	task := (&TaskTool{}).WithDeliveryProfile(true)
-	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "")
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
 	if !opts.DeliveryProfile {
 		t.Fatal("sub-agent options did not inherit delivery profile")
 	}
@@ -427,7 +504,7 @@ func TestTaskToolSharesWorkspaceLeaseWithSubagents(t *testing.T) {
 		t.Fatalf("New workspace lease: %v", err)
 	}
 	task := (&TaskTool{}).WithWorkspaceLease(owner)
-	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "")
+	opts := task.subagentOptions(context.Background(), 0, nil, 0, 1, "", nil)
 	if opts.WorkspaceLease != owner {
 		t.Fatal("sub-agent options did not share the parent's workspace lease owner")
 	}

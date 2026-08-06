@@ -227,3 +227,159 @@ func TestRecoveryParentGuardRefusesInFlightParentRewrite(t *testing.T) {
 		t.Fatalf("guard during parent rewrite err = %v, want ErrSessionLeaseHeld", err)
 	}
 }
+
+func ageRecoveryBranchForGC(t *testing.T, path string) {
+	t.Helper()
+	meta, ok, err := LoadBranchMeta(path)
+	if err != nil || !ok {
+		t.Fatalf("LoadBranchMeta: ok=%v err=%v", ok, err)
+	}
+	meta.UpdatedAt = time.Now().Add(-2 * RecoveryGCGracePeriod)
+	if err := SaveBranchMetaPreserveUpdated(path, meta); err != nil {
+		t.Fatalf("age recovery meta: %v", err)
+	}
+}
+
+func TestTrashReclaimableRecoveryBranchUsesRecoverableDesktopLayout(t *testing.T) {
+	dir := t.TempDir()
+	parentPath, branchPath, branchMsgs := forkRecoveryBranch(t, dir, "trash-covered")
+	coverBranchInParent(t, parentPath, branchMsgs)
+	ageRecoveryBranchForGC(t, branchPath)
+
+	if err := TrashReclaimableRecoveryBranch(branchPath, dir); err != nil {
+		t.Fatalf("TrashReclaimableRecoveryBranch: %v", err)
+	}
+	if _, err := os.Stat(branchPath); !os.IsNotExist(err) {
+		t.Fatalf("live recovery transcript still exists: %v", err)
+	}
+	if IsCleanupPending(branchPath) {
+		t.Fatal("cleanup-pending marker remained after completed trash move")
+	}
+	itemDir := filepath.Join(dir, recoveryTrashDir, filepath.Base(branchPath))
+	for _, path := range []string{
+		filepath.Join(itemDir, filepath.Base(branchPath)),
+		filepath.Join(itemDir, filepath.Base(BranchMetaPath(branchPath))),
+		filepath.Join(itemDir, filepath.Base(store.SessionEventLog(branchPath))),
+		filepath.Join(itemDir, recoveryTrashMetaFile),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("recoverable trash artifact %s: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(parentPath); err != nil {
+		t.Fatalf("parent session changed by recovery trash: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(itemDir, recoveryTrashPendingFile)); !os.IsNotExist(err) {
+		t.Fatalf("completed trash entry retained pending marker: %v", err)
+	}
+}
+
+func TestTrashReclaimableRecoveryBranchEnforcesGraceAtFinalGuard(t *testing.T) {
+	dir := t.TempDir()
+	parentPath, branchPath, branchMsgs := forkRecoveryBranch(t, dir, "trash-fresh")
+	coverBranchInParent(t, parentPath, branchMsgs)
+
+	if err := TrashReclaimableRecoveryBranch(branchPath, dir); !errors.Is(err, ErrRecoveryBranchNotIdle) {
+		t.Fatalf("fresh recovery trash err = %v, want ErrRecoveryBranchNotIdle", err)
+	}
+	if _, err := os.Stat(branchPath); err != nil {
+		t.Fatalf("fresh recovery branch was not preserved: %v", err)
+	}
+}
+
+func TestInterruptedRecoveryTrashStageReconcilesBeforePublication(t *testing.T) {
+	dir := t.TempDir()
+	_, branchPath, _ := forkRecoveryBranch(t, dir, "staged-crash")
+	key := filepath.Base(branchPath)
+	stageDir, err := reserveRecoveryTrashStage(dir)
+	if err != nil {
+		t.Fatalf("reserveRecoveryTrashStage: %v", err)
+	}
+	if err := prepareRecoveryTrashStage(branchPath, key, stageDir); err != nil {
+		t.Fatalf("prepareRecoveryTrashStage: %v", err)
+	}
+	if IsCleanupPending(branchPath) {
+		t.Fatal("live cleanup marker should not be used by the staging protocol")
+	}
+	if _, err := os.Stat(branchPath); !os.IsNotExist(err) {
+		t.Fatalf("live transcript still exists after staging: %v", err)
+	}
+	if store.IsSessionTranscriptName(filepath.Base(stageDir)) {
+		t.Fatalf("staging directory is Desktop-visible by name: %s", stageDir)
+	}
+	for _, target := range []string{
+		filepath.Join(stageDir, key),
+		filepath.Join(stageDir, recoveryTrashPendingFile),
+	} {
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("staged recovery artifact %s: %v", target, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(stageDir, recoveryTrashMetaFile)); !os.IsNotExist(err) {
+		t.Fatalf("incomplete stage became Desktop-visible through trash metadata: %v", err)
+	}
+
+	// Simulate a process crash after the transcript rename but before any
+	// sidecars moved. Startup reconciliation must finish the hidden stage and
+	// publish one complete Desktop trash item without the hard-delete callback.
+	calledFallback := false
+	if err := ReconcileCleanupPending(dir, func(CleanupPendingInfo) error {
+		calledFallback = true
+		return errors.New("hard-delete fallback must not run")
+	}); err != nil {
+		t.Fatalf("ReconcileCleanupPending: %v", err)
+	}
+	if calledFallback {
+		t.Fatal("recovery trash stage reached hard-delete fallback")
+	}
+	if _, err := os.Stat(stageDir); !os.IsNotExist(err) {
+		t.Fatalf("staging directory remained after publication: %v", err)
+	}
+	itemDir := filepath.Join(dir, recoveryTrashDir, key)
+	for _, target := range []string{
+		filepath.Join(itemDir, key),
+		filepath.Join(itemDir, filepath.Base(BranchMetaPath(branchPath))),
+		filepath.Join(itemDir, filepath.Base(store.SessionEventLog(branchPath))),
+		filepath.Join(itemDir, recoveryTrashMetaFile),
+	} {
+		if _, err := os.Stat(target); err != nil {
+			t.Fatalf("reconciled recovery artifact %s: %v", target, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(itemDir, recoveryTrashPendingFile)); !os.IsNotExist(err) {
+		t.Fatalf("published trash entry retained pending marker: %v", err)
+	}
+}
+
+func TestReconcileCleanupPendingFinishesRecoveryTrashWithoutHardDeleteCallback(t *testing.T) {
+	dir := t.TempDir()
+	_, branchPath, _ := forkRecoveryBranch(t, dir, "trash-interrupted")
+	key := filepath.Base(branchPath)
+	itemName, itemDir, err := reserveRecoveryTrashItemDir(dir, key)
+	if err != nil {
+		t.Fatalf("reserveRecoveryTrashItemDir: %v", err)
+	}
+	if err := prepareRecoveryTrashEntry(branchPath, key, itemDir); err != nil {
+		t.Fatalf("prepare trash entry before simulated crash: %v", err)
+	}
+	if err := MarkCleanupPending(branchPath, recoveryTrashOperationPrefix+itemName); err != nil {
+		t.Fatalf("MarkCleanupPending: %v", err)
+	}
+
+	calledFallback := false
+	if err := ReconcileCleanupPending(dir, func(CleanupPendingInfo) error {
+		calledFallback = true
+		return errors.New("hard-delete fallback must not run")
+	}); err != nil {
+		t.Fatalf("ReconcileCleanupPending: %v", err)
+	}
+	if calledFallback {
+		t.Fatal("recovery-trash marker reached hard-delete fallback")
+	}
+	if IsCleanupPending(branchPath) {
+		t.Fatal("cleanup-pending marker remained after reconciliation")
+	}
+	if _, err := os.Stat(filepath.Join(itemDir, recoveryTrashMetaFile)); err != nil {
+		t.Fatalf("reconciled trash metadata: %v", err)
+	}
+}

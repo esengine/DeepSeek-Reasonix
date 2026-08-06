@@ -87,6 +87,13 @@ Common codes: `mcp.command_not_found`, `mcp.invalid_transport`,
 with “Include current session runtime” to read the **active tab Host** without
 starting a second Host.
 
+Each MCP entry identifies the exact winning configuration with `source`,
+`source_path`, and `effective`. Startup failures also report `startup_stage`
+(`launch`, `authorization`, `initialize`, or `tools/list`),
+`startup_elapsed_ms`, and a bounded, credential-redacted `stderr` tail. This
+distinguishes duplicate/shadowed registration from a genuinely slow or broken
+handshake without exposing full process output.
+
 ### 4. Ask the agent (`reasonix-guide`)
 
 In an interactive session:
@@ -186,6 +193,12 @@ Top-level fields:
 - `summary` — error/warning/info counts and resource counts
 - `instructions`, `skills`, `commands`, `hooks`, `plugins`, `mcp`
 - `issues[]` — ordered list of findings
+
+Plugin package entries are additive for Manifest v1: each package also
+reports `prompts` and `themes` counts and a `runtime` flag when the plugin
+declares a code runtime (see
+<a href="./PLUGIN_PACKAGES.md">Plugin packages</a>). Older readers can ignore
+these fields; `schema_version` stays `1`.
 
 Issue shape:
 

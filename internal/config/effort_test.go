@@ -142,6 +142,62 @@ func TestIsOllamaCloudEntry(t *testing.T) {
 	}
 }
 
+func TestIsMimoEntry(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://api.xiaomimimo.com/v1", true},
+		{"https://api.xiaomimimo.com/v1/responses", true},
+		{"https://api.deepseek.com", false},
+		{"https://dashscope.aliyuncs.com/compatible-mode/v1", false},
+		{"https://api.xiaomimimo.com.attacker.example/v1", false},
+		{"https://example.com/?u=api.xiaomimimo.com", false},
+		{"", false},
+	} {
+		if got := isMimoEntry(&ProviderEntry{BaseURL: tc.baseURL}); got != tc.want {
+			t.Errorf("baseURL=%q: isMimoEntry=%v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+	if isMimoEntry(nil) {
+		t.Fatal("isMimoEntry(nil) must be false")
+	}
+}
+
+func TestMimoEffortSupportsNone(t *testing.T) {
+	e := &ProviderEntry{
+		Kind:              "responses",
+		BaseURL:           "https://api.xiaomimimo.com/v1",
+		ReasoningProtocol: ReasoningProtocolOpenAI,
+	}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		t.Fatal("MiMo effort must be supported")
+	}
+	for _, level := range []string{"auto", "none", "low", "medium", "high"} {
+		if !containsString(cap.Levels, level) {
+			t.Errorf("MiMo capability missing %q: %v", level, cap.Levels)
+		}
+	}
+	got, err := NormalizeEffort(e, "none")
+	if err != nil || got != "none" {
+		t.Fatalf("MiMo none = %q/%v, want none/nil", got, err)
+	}
+	for _, level := range []string{"low", "medium", "high"} {
+		if got, err := NormalizeEffort(e, level); err != nil || got != level {
+			t.Fatalf("MiMo %s = %q/%v, want %s/nil", level, got, err, level)
+		}
+	}
+	if _, err := NormalizeEffort(e, "xhigh"); err == nil {
+		t.Fatal("MiMo xhigh must be rejected")
+	}
+	// A plain OpenAI endpoint keeps rejecting none.
+	plain := &ProviderEntry{Kind: "openai", BaseURL: "https://example.com/v1", ReasoningProtocol: ReasoningProtocolOpenAI}
+	if got, err := NormalizeEffort(plain, "none"); err == nil || got != "" {
+		t.Fatalf("plain OpenAI none = %q/%v, want error", got, err)
+	}
+}
+
 func TestEffortCapabilityZhipu(t *testing.T) {
 	e := &ProviderEntry{Kind: "openai", BaseURL: "https://open.bigmodel.cn/api/paas/v4", Model: "glm-4.5-air"}
 	cap := EffortCapabilityForEntry(e)
@@ -159,6 +215,64 @@ func TestEffortCapabilityZhipu(t *testing.T) {
 	}
 	if cap.Default != "enabled" {
 		t.Errorf("default = %q, want enabled (GLM ships with thinking on)", cap.Default)
+	}
+}
+
+func TestEffortCapabilityExplicitGLMProtocolOnGateway(t *testing.T) {
+	e := &ProviderEntry{
+		Name:              "glm-gateway",
+		Kind:              "openai",
+		BaseURL:           "https://gateway.example.com/v1",
+		Model:             "glm-5.2",
+		ReasoningProtocol: ReasoningProtocolGLM,
+	}
+	cap := EffortCapabilityForEntry(e)
+	want := []string{"auto", "enabled", "disabled"}
+	if !cap.Supported || cap.Default != "enabled" || len(cap.Levels) != len(want) {
+		t.Fatalf("explicit GLM capability = %+v, want levels %v default enabled", cap, want)
+	}
+	for i := range want {
+		if cap.Levels[i] != want[i] {
+			t.Fatalf("explicit GLM levels[%d] = %q, want %q", i, cap.Levels[i], want[i])
+		}
+	}
+	if got, err := NormalizeEffort(e, "disabled"); err != nil || got != "disabled" {
+		t.Fatalf("explicit GLM disabled = %q/%v, want disabled/nil", got, err)
+	}
+	if got, err := NormalizeEffort(e, "high"); err != nil || got != "enabled" {
+		t.Fatalf("explicit GLM legacy high = %q/%v, want enabled/nil", got, err)
+	}
+}
+
+func TestGLMModelRegistryUpgradesLegacyGatewayConfig(t *testing.T) {
+	for _, model := range []string{"glm-5", "glm-5.1", "glm-5.2"} {
+		t.Run(model, func(t *testing.T) {
+			// This is the shape persisted by an older Token Rhythm installation:
+			// no reasoning_protocol and no model_overrides metadata.
+			e := &ProviderEntry{
+				Name:    "token-rhythm",
+				Kind:    "openai",
+				BaseURL: "https://tokenrhythm.studio/v1",
+				Model:   model,
+			}
+			if got := ReasoningProtocolForEntry(e); got != ReasoningProtocolGLM {
+				t.Fatalf("ReasoningProtocolForEntry() = %q, want %q", got, ReasoningProtocolGLM)
+			}
+			cap := EffortCapabilityForEntry(e)
+			want := []string{"auto", "enabled", "disabled"}
+			if !cap.Supported || cap.Default != "enabled" || !stringSlicesEqual(cap.Levels, want) {
+				t.Fatalf("legacy gateway GLM capability = %+v, want levels %v default enabled", cap, want)
+			}
+		})
+	}
+
+	nonGLM := &ProviderEntry{Kind: "openai", BaseURL: "https://tokenrhythm.studio/v1", Model: "my-glm-5.2-alias"}
+	if got := ReasoningProtocolForEntry(nonGLM); got != "" {
+		t.Fatalf("non-exact GLM alias protocol = %q, want empty without explicit override", got)
+	}
+	otherGateway := &ProviderEntry{Kind: "openai", BaseURL: "https://opencode.ai/zen/go/v1", Model: "glm-5.2"}
+	if got := ReasoningProtocolForEntry(otherGateway); got != "" {
+		t.Fatalf("unrelated gateway GLM protocol = %q, want empty without explicit override", got)
 	}
 }
 

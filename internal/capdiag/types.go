@@ -153,17 +153,23 @@ type PluginPackageReport struct {
 
 // PluginPackageInfo is one installed package.
 type PluginPackageInfo struct {
-	Name         string   `json:"name"`
-	Enabled      bool     `json:"enabled"`
-	Version      string   `json:"version,omitempty"`
-	Root         string   `json:"root"`
-	ManifestKind string   `json:"manifest_kind,omitempty"`
-	Skills       int      `json:"skills"`
-	Commands     int      `json:"commands"`
-	Hooks        int      `json:"hooks"`
-	MCPServers   int      `json:"mcp_servers"`
-	Warnings     []string `json:"warnings,omitempty"`
-	Status       string   `json:"status"` // ok | missing_root | invalid_manifest | disabled
+	Name         string `json:"name"`
+	Enabled      bool   `json:"enabled"`
+	Version      string `json:"version,omitempty"`
+	Root         string `json:"root"`
+	ManifestKind string `json:"manifest_kind,omitempty"`
+	Skills       int    `json:"skills"`
+	Commands     int    `json:"commands"`
+	Hooks        int    `json:"hooks"`
+	MCPServers   int    `json:"mcp_servers"`
+	// Prompts, Themes, and Runtime are the Manifest v1 additions. They stay
+	// omitempty so schema v1 consumers see no shape change for legacy
+	// packages.
+	Prompts  int      `json:"prompts,omitempty"`
+	Themes   int      `json:"themes,omitempty"`
+	Runtime  bool     `json:"runtime,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+	Status   string   `json:"status"` // ok | missing_root | invalid_manifest | disabled
 }
 
 // MCPReport covers merged MCP server configuration and optional live/runtime state.
@@ -173,19 +179,24 @@ type MCPReport struct {
 
 // MCPServerInfo is one merged MCP server.
 type MCPServerInfo struct {
-	Name          string        `json:"name"`
-	Source        string        `json:"source,omitempty"` // toml | mcp_json | plugin_package
-	PackageOwner  string        `json:"package_owner,omitempty"`
-	Transport     string        `json:"transport"`
-	StartIntent   string        `json:"start_intent"`      // automatic | off
-	Command       string        `json:"command,omitempty"` // redacted path form
-	URLHost       string        `json:"url_host,omitempty"`
-	EnvKeys       []string      `json:"env_keys,omitempty"`
-	HeaderKeys    []string      `json:"header_keys,omitempty"`
-	RuntimeStatus string        `json:"runtime_status,omitempty"` // connected | failed | deferred | disabled | skipped | probed
-	ToolCount     int           `json:"tool_count,omitempty"`
-	Tools         []MCPToolInfo `json:"tools,omitempty"`
-	Error         string        `json:"error,omitempty"`
+	Name             string        `json:"name"`
+	Source           string        `json:"source,omitempty"` // user_config | project_config | project_mcp_json | plugin_package | host_session
+	SourcePath       string        `json:"source_path,omitempty"`
+	Effective        bool          `json:"effective"`
+	PackageOwner     string        `json:"package_owner,omitempty"`
+	Transport        string        `json:"transport"`
+	StartIntent      string        `json:"start_intent"`      // automatic | off
+	Command          string        `json:"command,omitempty"` // redacted path form
+	URLHost          string        `json:"url_host,omitempty"`
+	EnvKeys          []string      `json:"env_keys,omitempty"`
+	HeaderKeys       []string      `json:"header_keys,omitempty"`
+	RuntimeStatus    string        `json:"runtime_status,omitempty"` // connected | failed | deferred | disabled | skipped | probed
+	ToolCount        int           `json:"tool_count,omitempty"`
+	Tools            []MCPToolInfo `json:"tools,omitempty"`
+	Error            string        `json:"error,omitempty"`
+	StartupStage     string        `json:"startup_stage,omitempty"`
+	StartupElapsedMS int64         `json:"startup_elapsed_ms,omitempty"`
+	Stderr           string        `json:"stderr,omitempty"`
 }
 
 // MCPToolInfo is one tool discovered during live/runtime probe.

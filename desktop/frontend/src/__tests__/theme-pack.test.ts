@@ -20,9 +20,16 @@ import {
   setBaseAppearance,
   themePackKind,
 } from "../lib/themePack";
-import { applyTheme, getThemeStyle } from "../lib/theme";
+import { applyTheme, getThemeStyle, THEME_STYLES } from "../lib/theme";
+import {
+  baseCodeReadabilityStylesheet,
+  codeReadabilityRatios,
+  contrastRatio,
+  deriveCreationCodeReadabilityPalette,
+  deriveCodeReadabilityPalette,
+} from "../lib/codeReadability";
 import { BASE_STYLE_PREVIEW_PALETTES, themePreviewPalette } from "../lib/themePreviewPalette";
-import { themePreviewPaneAlpha } from "../components/ThemePreviewSurface";
+import { themePreviewCodePalette, themePreviewPaneAlpha } from "../components/ThemePreviewSurface";
 import {
   activateThemePack,
   applyExperienceToDOM,
@@ -38,6 +45,7 @@ const stylesSource = readFileSync(resolve(testDir, "../styles.css"), "utf8");
 const appSource = readFileSync(resolve(testDir, "../App.tsx"), "utf8");
 const librarySource = readFileSync(resolve(testDir, "../components/ThemeLibrary.tsx"), "utf8");
 const gallerySource = readFileSync(resolve(testDir, "../components/ThemeGallery.tsx"), "utf8");
+const previewSurfaceSource = readFileSync(resolve(testDir, "../components/ThemePreviewSurface.tsx"), "utf8");
 const confirmDialogSource = readFileSync(resolve(testDir, "../components/ConfirmDialog.tsx"), "utf8");
 const overviewSource = readFileSync(resolve(testDir, "../components/AppearanceOverview.tsx"), "utf8");
 const settingsSource = readFileSync(resolve(testDir, "../components/SettingsPanel.tsx"), "utf8");
@@ -64,22 +72,49 @@ function ok(value: boolean, label: string) {
 // Minimal DOM for applyThemePack
 const attrs = new Map<string, string>();
 const styleProps = new Map<string, string>();
-const styleEl: {
+type MockHead = {
+  appendChild: (el: MockStyleElement) => MockStyleElement;
+  removeChild: (el: MockStyleElement) => void;
+};
+
+type MockStyleElement = {
   id: string;
   textContent: string;
-  parentElement: { removeChild: (el: unknown) => void } | null;
+  parentElement: MockHead | null;
   remove: () => void;
-} = {
-  id: "",
-  textContent: "",
-  parentElement: null,
-  remove() {
-    const idx = headChildren.indexOf(styleEl);
+};
+const headChildren: MockStyleElement[] = [];
+const mockHead: MockHead = {
+  appendChild(el: MockStyleElement) {
+    const existing = headChildren.indexOf(el);
+    if (existing >= 0) headChildren.splice(existing, 1);
+    headChildren.push(el);
+    el.parentElement = mockHead;
+    return el;
+  },
+  removeChild(el: MockStyleElement) {
+    const idx = headChildren.indexOf(el);
     if (idx >= 0) headChildren.splice(idx, 1);
-    styleEl.textContent = "";
+    el.parentElement = null;
   },
 };
-const headChildren: unknown[] = [];
+
+function createMockStyleElement(): MockStyleElement {
+  const el: MockStyleElement = {
+    id: "",
+    textContent: "",
+    parentElement: null,
+    remove() {
+      mockHead.removeChild(el);
+      el.textContent = "";
+    },
+  };
+  return el;
+}
+
+function styleText(id: string): string {
+  return headChildren.find((el) => el.id === id)?.textContent || "";
+}
 
 (globalThis as unknown as { document: unknown }).document = {
   documentElement: {
@@ -98,24 +133,12 @@ const headChildren: unknown[] = [];
       },
     },
   },
-  head: {
-    appendChild(el: unknown) {
-      headChildren.push(el);
-      styleEl.parentElement = {
-        removeChild(child: unknown) {
-          const idx = headChildren.indexOf(child);
-          if (idx >= 0) headChildren.splice(idx, 1);
-        },
-      };
-      return el;
-    },
-  },
+  head: mockHead,
   getElementById(id: string) {
-    if (id === "reasonix-theme-pack-overlay" && headChildren.includes(styleEl)) return styleEl;
-    return null;
+    return headChildren.find((el) => el.id === id) || null;
   },
   createElement(tag: string) {
-    if (tag === "style") return styleEl;
+    if (tag === "style") return createMockStyleElement();
     return {};
   },
   querySelector() {
@@ -136,6 +159,88 @@ ok(isSafeHex("#aabbccdd"), "accepts #RRGGBBAA");
 ok(!isSafeHex("url(x)"), "rejects url()");
 ok(!isSafeHex("linear-gradient(red,blue)"), "rejects gradient");
 ok(isThemeTokenKey("accent") && !isThemeTokenKey("hack"), "token whitelist");
+
+const translucentCodePalette = deriveCodeReadabilityPalette("dark", "graphite", {
+  bg: "#102030",
+  bgSoft: "#ffffff33",
+  fg: "#f4f5f7",
+  borderSoft: "#ffffff22",
+});
+ok(/^#[0-9a-f]{6}$/.test(translucentCodePalette.background), "code background is flattened to an opaque color");
+ok(translucentCodePalette.background === "#404d59", "transparent bgSoft is composited over the theme background");
+ok(
+  Object.values(codeReadabilityRatios(translucentCodePalette)).every((ratio) => ratio >= 4.5),
+  "every code and diff text role reaches WCAG AA on its rendered background",
+);
+ok(
+  /^#[0-9a-f]{6}$/.test(translucentCodePalette.additionBackground) &&
+    /^#[0-9a-f]{6}$/.test(translucentCodePalette.deletionBackground),
+  "diff row backgrounds are pre-composited opaque colors",
+);
+ok(
+  contrastRatio(translucentCodePalette.addition, translucentCodePalette.additionBackground) >= 4.5 &&
+    contrastRatio(translucentCodePalette.deletion, translucentCodePalette.deletionBackground) >= 4.5,
+  "diff semantic text reaches WCAG AA on the final tinted row",
+);
+const adversarialMidtonePalette = deriveCodeReadabilityPalette("dark", "graphite", {
+  bg: "#3fcd1c",
+  bgSoft: "#cd1ce4",
+  fg: "#3fcd1c",
+  ok: "#15803d",
+  err: "#dc2626",
+});
+ok(
+  Object.values(codeReadabilityRatios(adversarialMidtonePalette)).every((ratio) => ratio >= 4.5),
+  "midtone custom themes keep every syntax role readable on plain and tinted diff rows",
+);
+let generatedPaletteMinimum = Number.POSITIVE_INFINITY;
+for (let index = 0; index < 512; index += 1) {
+  const sample = ((index * 2654435761) >>> 0).toString(16).padStart(8, "0");
+  const palette = deriveCodeReadabilityPalette(index % 2 === 0 ? "dark" : "light", "graphite", {
+    bg: `#${sample.slice(0, 6)}`,
+    bgSoft: `#${sample.slice(2, 8)}`,
+    fg: `#${sample.slice(0, 6)}`,
+    ok: `#${sample.slice(1, 7)}`,
+    err: `#${sample.slice(2, 8)}`,
+  });
+  generatedPaletteMinimum = Math.min(generatedPaletteMinimum, ...Object.values(codeReadabilityRatios(palette)));
+}
+ok(generatedPaletteMinimum >= 4.5, "generated custom palettes preserve WCAG AA across every rendered code surface");
+const invertedDarkPack = deriveCodeReadabilityPalette("dark", "graphite", { bg: "#ffffff", bgSoft: "#fafafa" });
+ok(invertedDarkPack.string === "#0a3069", "syntax direction follows final code luminance instead of global dark mode");
+
+const baseReadabilityCSS = baseCodeReadabilityStylesheet(THEME_STYLES);
+for (const style of THEME_STYLES) {
+  for (const mode of ["dark", "light"] as const) {
+    const palette = deriveCodeReadabilityPalette(mode, style);
+    const basePack = draftPackView({
+      id: `base-${style}`,
+      name: style,
+      baseStyle: style,
+      tokens: {},
+      recipes: { density: "comfortable", corners: "soft" },
+    });
+    ok(
+      Object.values(codeReadabilityRatios(palette)).every((ratio) => ratio >= 4.5),
+      `${style} ${mode} base code palette reaches WCAG AA`,
+    );
+    ok(
+      JSON.stringify(themePreviewCodePalette(basePack, mode)) === JSON.stringify(palette),
+      `${style} ${mode} preview uses the live code palette`,
+    );
+  }
+}
+for (const mode of ["dark", "light"] as const) {
+  ok(
+    Object.values(codeReadabilityRatios(deriveCreationCodeReadabilityPalette(mode))).every((ratio) => ratio >= 4.5),
+    `Creation ${mode} code palette reaches WCAG AA`,
+  );
+}
+ok(
+  baseReadabilityCSS.includes(':root[data-theme-style="graphite"]') &&
+    baseReadabilityCSS.includes('.app--creation{--code-bg:'),
+  "base stylesheet installs complete root and Creation code palettes",
+);
 
 ok(isSafeBackgroundURL("/__reasonix_theme_asset/my-theme/abc/background.png"), "asset URL allowed");
 ok(isSafeBackgroundURL("data:image/png;base64,aaa"), "data URL allowed");
@@ -177,8 +282,10 @@ applyThemePack(draft);
 ok(attrs.get("data-theme-pack") === "preview-pack", "sets data-theme-pack");
 ok(attrs.get("data-theme-has-bg") === "true", "marks background present");
 ok(styleProps.has("--theme-bg-image"), "sets background image var");
-ok((styleEl as { textContent: string }).textContent.includes("--accent:#ff0000"), "injects dark accent override");
-ok((styleEl as { textContent: string }).textContent.includes("--r:14px"), "applies round corners recipe");
+ok(styleText("reasonix-theme-pack-overlay").includes("--accent:#ff0000"), "injects dark accent override");
+ok(styleText("reasonix-theme-pack-overlay").includes("--code-bg:#101115"), "injects an opaque code readability island");
+ok(styleText("reasonix-theme-pack-overlay").includes("--hl-comment:"), "injects contrast-checked syntax roles");
+ok(styleText("reasonix-theme-pack-overlay").includes("--r:14px"), "applies round corners recipe");
 
 const twoSceneDraft = draftPackView({
   ...draft,
@@ -190,6 +297,12 @@ ok(styleProps.get("--theme-bg-task-image")?.includes("background-task.png") === 
 ok(styleProps.get("--theme-bg-task-opacity") === "0.35", "sets independent task opacity");
 ok(styleProps.get("--theme-pane-card-pct") === "76%", "computes home card pane opacity");
 ok(styleProps.get("--theme-pane-task-card-pct") === "82%", "computes task card pane opacity");
+ok(styleProps.get("--theme-pane-session-hover-pct") === "76%", "computes home session-hover opacity tier");
+ok(styleProps.get("--theme-pane-child-pct") === "80%", "computes home child opacity tier");
+ok(styleProps.get("--theme-pane-interact-pct") === "90%", "computes home interaction opacity tier");
+ok(styleProps.get("--theme-pane-task-session-hover-pct") === "94%", "computes task session-hover opacity tier");
+ok(styleProps.get("--theme-pane-task-child-pct") === "98%", "computes task child opacity tier");
+ok(styleProps.get("--theme-pane-task-interact-pct") === "100%", "caps task interaction opacity tier");
 ok(attrs.get("data-theme-safe-area") === "right", "task background controls safe area");
 
 // Older shells and partial mocks can expose the independent task scene without
@@ -211,6 +324,18 @@ ok(attrs.get("data-theme-scene") === "home", "scene home on root");
 
 // Preview cancel restores previous (null) pack
 clearThemePack();
+ok(
+  [
+    "--theme-pane-session-hover-pct",
+    "--theme-pane-child-pct",
+    "--theme-pane-interact-pct",
+    "--theme-pane-task-session-hover-pct",
+    "--theme-pane-task-child-pct",
+    "--theme-pane-task-interact-pct",
+  ].every((property) => !styleProps.has(property)),
+  "clearing a pack removes every extended pane opacity tier",
+);
+ok(styleText("reasonix-base-code-readability").includes("--code-add-bg:"), "applyTheme installs the base code readability stylesheet");
 beginThemePreview(draft);
 ok(attrs.get("data-theme-pack") === "preview-pack", "preview applies pack");
 cancelThemePreview();
@@ -298,7 +423,6 @@ const activeAuroraExperience = {
   effectiveStyle: "aurora" as const,
   activeThemeId: aurora.id,
   activePack: aurora,
-  safeMode: false,
 };
 applyExperienceToDOM(activeAuroraExperience);
 ok(configuredBaseStyleForSync(activeAuroraExperience) === null, "active pack effective style is not mirrored as configured base");
@@ -310,7 +434,7 @@ ok(
 );
 
 // Density recipe must land in overlay CSS and have stylesheet consumers.
-ok((styleEl as { textContent: string }).textContent.includes("--theme-density-pad") || packSource.includes("--theme-density-pad:6px"), "compact density vars defined in pack builder");
+ok(styleText("reasonix-theme-pack-overlay").includes("--theme-density-pad") || packSource.includes("--theme-density-pad:6px"), "compact density vars defined in pack builder");
 const compactDraft = draftPackView({
   id: "dense",
   name: "Dense",
@@ -319,8 +443,8 @@ const compactDraft = draftPackView({
   recipes: { density: "compact", corners: "soft" },
 });
 applyThemePack(compactDraft);
-ok((styleEl as { textContent: string }).textContent.includes("--theme-density-pad:6px"), "compact density injected");
-ok((styleEl as { textContent: string }).textContent.includes("--theme-row-h:28px"), "compact row height injected");
+ok(styleText("reasonix-theme-pack-overlay").includes("--theme-density-pad:6px"), "compact density injected");
+ok(styleText("reasonix-theme-pack-overlay").includes("--theme-row-h:28px"), "compact row height injected");
 ok(stylesSource.includes("padding: var(--theme-density-pad"), "density pad consumed by cards");
 ok(stylesSource.includes("gap: var(--theme-density-gap"), "density gap consumed");
 ok(stylesSource.includes("--list-row-height: var(--theme-row-h)"), "density maps to list row height");
@@ -337,6 +461,12 @@ const unguardedTransparencySelectors = transparencySlice
   .split("\n")
   .filter((line) => line.includes(":root[data-theme-pack]") && !line.includes('[data-theme-has-bg="true"]'));
 ok(unguardedTransparencySelectors.length === 0, "token-only packs keep opaque layout surfaces");
+ok(
+  !transparencySlice.includes(".app:not(.app--creation) .code,") &&
+    !transparencySlice.includes(".app:not(.app--creation) .diff,") &&
+    transparencySlice.includes(".app:not(.app--creation) .md-code,"),
+  "pane transparency keeps block code and diff opaque while preserving inline-code styling",
+);
 ok(stylesSource.includes("var(--theme-pane-card-pct, 88%)"), "home cards consume pane opacity tier");
 ok(stylesSource.includes("var(--theme-pane-task-card-pct, 88%)"), "task cards consume pane opacity tier");
 ok(stylesSource.includes("var(--tp-pane-card-pct, 88%)"), "preview cards consume the same pane opacity tier");
@@ -423,6 +553,7 @@ ok(experienceSource.includes("ActivateBaseStyle") || experienceSource.includes("
 ok(experienceSource.includes("selectedThemeId") || gallerySource.includes("selected"), "selection is frontend state");
 ok(gallerySource.includes("loading=\"lazy\"") || gallerySource.includes('loading="lazy"'), "gallery thumbs lazy-load");
 ok(gallerySource.includes("ThemePreviewSurface") || gallerySource.includes("theme-preview-surface"), "isolated detail preview");
+ok(previewSurfaceSource.includes("theme-preview-surface__code-island"), "theme preview includes real code and diff samples");
 ok(gallerySource.includes('themePackKind(pack) === "base"') && gallerySource.includes('variant="thumbnail"'), "base gallery cards render semantic UI thumbnails");
 ok(gallerySource.includes('themePackKind(p) === "base"'), "immersive rail renders base-style thumbnails");
 for (const style of ["graphite", "aurora", "slate", "carbon", "nocturne", "amber"] as const) {
@@ -546,6 +677,14 @@ ok(stylesSource.includes(".theme-gallery__detail-user-actions") && stylesSource.
 ok(stylesSource.includes(".theme-gallery__rail-section-head") && stylesSource.includes(".theme-gallery__rail-section-items"), "immersive rail groups have lightweight headings and item stacks");
 ok(stylesSource.includes(".theme-gallery__detail-status"), "active status has dedicated non-button styling");
 ok(stylesSource.includes(".theme-editor__setting-hint"), "content-area guidance has dedicated responsive styling");
+ok(stylesSource.includes("background: var(--code-bg, var(--bg-soft))"), "code and diff surfaces consume the opaque code background");
+ok(
+  stylesSource.includes("--diff-row-bg: var(--code-add-bg") &&
+    stylesSource.includes("--inline-diff-row-bg: var(--code-del-bg") &&
+    stylesSource.includes("background: var(--tp-code-add-bg)") &&
+    stylesSource.includes("background: var(--tp-code-del-bg)"),
+  "live and preview diff rows consume the same pre-composited safe backgrounds",
+);
 ok(localeZh.includes('"settings.themeEditor.safeArea": "界面内容区域"') && localeZh.includes('"settings.themeEditor.safeAreaHint": "选择文字和卡片主要显示的位置；建议避开图片主体。"'), "Chinese content-area copy explains foreground placement");
 
 // Pack overlay stays at :root — Workbench/Creation element-scoped auto-light
