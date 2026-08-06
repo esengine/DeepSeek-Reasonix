@@ -1,4 +1,4 @@
-package agent
+package taskintent
 
 import (
 	"strings"
@@ -23,14 +23,14 @@ var taskFaultReadonlySignals = []string{
 	"原因", "根因",
 }
 
-// GoalTaskNeedsWriteBudget reports whether a Goal objective should start on the
+// GoalNeedsWriteBudget reports whether a Goal objective should start on the
 // extended write turn budget. It preserves every explicit mutation classification used by
 // ordinary Delivery, then additionally treats bare fault/bug/crash statements as
 // write work unless the user asked only for analysis, explanation, or a no-modify
 // constraint. Ordinary Delivery evidence/mutation gates keep using
-// deliveryTaskNeedsMutation / classifyDeliveryTaskIntent unchanged.
-func GoalTaskNeedsWriteBudget(input string) bool {
-	if TaskNeedsMutation(input) {
+// NeedsMutation / Classify unchanged.
+func GoalNeedsWriteBudget(input string) bool {
+	if NeedsMutation(input) {
 		return true
 	}
 	return goalBareFaultImpliesWrite(input)

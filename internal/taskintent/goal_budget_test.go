@@ -1,17 +1,17 @@
-package agent
+package taskintent
 
 import "testing"
 
-func TestGoalTaskNeedsWriteBudgetMatrix(t *testing.T) {
+func TestGoalNeedsWriteBudgetMatrix(t *testing.T) {
 	// User-reported Chinese bare fault statement must land on the write budget.
 	const userReported = "数据模型管理器又出现历史 BUG 了……"
-	if !GoalTaskNeedsWriteBudget(userReported) {
-		t.Fatalf("GoalTaskNeedsWriteBudget(%q) = false, want write", userReported)
+	if !GoalNeedsWriteBudget(userReported) {
+		t.Fatalf("GoalNeedsWriteBudget(%q) = false, want write", userReported)
 	}
 	// Ordinary Delivery must still treat the same bare fault as non-mutation
 	// (observable read / evidence, not write-required).
-	if deliveryTaskNeedsMutation(userReported) {
-		t.Fatalf("deliveryTaskNeedsMutation(%q) changed; ordinary Delivery must stay non-mutation", userReported)
+	if NeedsMutation(userReported) {
+		t.Fatalf("NeedsMutation(%q) changed; ordinary Delivery must stay non-mutation", userReported)
 	}
 
 	writeCases := []string{
@@ -26,7 +26,7 @@ func TestGoalTaskNeedsWriteBudgetMatrix(t *testing.T) {
 		"解释失败原因并修复",
 	}
 	for _, input := range writeCases {
-		if !GoalTaskNeedsWriteBudget(input) {
+		if !GoalNeedsWriteBudget(input) {
 			t.Errorf("Goal write budget missing for %q", input)
 		}
 	}
@@ -43,7 +43,7 @@ func TestGoalTaskNeedsWriteBudgetMatrix(t *testing.T) {
 		"hello",
 	}
 	for _, input := range simpleCases {
-		if GoalTaskNeedsWriteBudget(input) {
+		if GoalNeedsWriteBudget(input) {
 			t.Errorf("Goal simple budget expected for %q", input)
 		}
 	}
@@ -60,7 +60,7 @@ func TestGoalBareFaultDoesNotChangeDeliveryClassification(t *testing.T) {
 		"数据模型管理器又出现历史 BUG 了……",
 	}
 	for _, input := range readonly {
-		if deliveryTaskNeedsMutation(input) {
+		if NeedsMutation(input) {
 			t.Errorf("delivery mutation incorrectly true for %q", input)
 		}
 	}
@@ -69,7 +69,7 @@ func TestGoalBareFaultDoesNotChangeDeliveryClassification(t *testing.T) {
 		"为什么失败然后修复它",
 	}
 	for _, input := range mutation {
-		if !deliveryTaskNeedsMutation(input) {
+		if !NeedsMutation(input) {
 			t.Errorf("delivery mutation incorrectly false for %q", input)
 		}
 	}

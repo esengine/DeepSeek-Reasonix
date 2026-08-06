@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
 	"reasonix/internal/provider"
+	"reasonix/internal/taskintent"
 	"reasonix/internal/tool"
 )
 
@@ -206,10 +207,10 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	} else if strings.TrimSpace(classifierInput) == "" {
 		classifierInput = rawInput
 	}
-	intent := classifyDeliveryTaskIntent(classifierInput)
-	a.deliveryTaskExpected = intent == deliveryIntentObservableRead || intent == deliveryIntentMutation || intent == deliveryIntentPersistentAction
-	a.deliveryMutationExpected = intent == deliveryIntentMutation && registryHasWriterTools(a.tools)
-	a.deliveryPersistentExpected = deliveryTaskNeedsPersistentAction(classifierInput)
+	intent := taskintent.Classify(classifierInput)
+	a.deliveryTaskExpected = intent.NeedsEvidence()
+	a.deliveryMutationExpected = intent == taskintent.Mutation && registryHasWriterTools(a.tools)
+	a.deliveryPersistentExpected = taskintent.NeedsPersistentAction(classifierInput)
 	a.recoveryTaskSummary = boundedRecoveryTaskSummary(classifierInput)
 	// A cancelled/error turn leaves a provider-excluded recovery record at the
 	// transcript tail. Fold its bounded facts into this new user turn exactly
