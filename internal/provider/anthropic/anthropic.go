@@ -462,6 +462,47 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 	return r
 }
 
+type streamedToolCall struct {
+	provider.ToolCall
+	argumentBuffer bytes.Buffer
+	buffered       bool
+}
+
+func (c *streamedToolCall) appendArguments(fragment string) {
+	if fragment == "" {
+		return
+	}
+	if c.buffered {
+		c.argumentBuffer.WriteString(fragment)
+		return
+	}
+	if c.Arguments == "" {
+		c.Arguments = fragment
+		return
+	}
+	c.buffered = true
+	c.argumentBuffer.Grow(len(c.Arguments) + len(fragment))
+	c.argumentBuffer.WriteString(c.Arguments)
+	c.argumentBuffer.WriteString(fragment)
+	c.Arguments = ""
+}
+
+func (c *streamedToolCall) argumentLen() int {
+	if c.buffered {
+		return c.argumentBuffer.Len()
+	}
+	return len(c.Arguments)
+}
+
+func (c *streamedToolCall) complete() *provider.ToolCall {
+	if c.buffered {
+		c.Arguments = c.argumentBuffer.String()
+		c.argumentBuffer = bytes.Buffer{}
+		c.buffered = false
+	}
+	return &c.ToolCall
+}
+
 // readStream parses the Messages API SSE stream into Chunks. Text deltas emit live;
 // each tool_use content block emits a ChunkToolCallStart when its id+name are known
 // and a complete ChunkToolCall when the block closes; usage is assembled from
@@ -513,8 +554,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return sendChunk(ctx, out, chunk)
 	}
 
-	tools := map[int]*provider.ToolCall{} // tool_use blocks, keyed by content index
-	argBuckets := map[int]int{}           // last emitted 2KB progress bucket per block
+	tools := map[int]*streamedToolCall{} // tool_use blocks, keyed by content index
+	argBuckets := map[int]int{}          // last emitted 2KB progress bucket per block
 	var inTok, outTok, cacheCreate, cacheRead int
 	var stopReason string
 	haveUsage := false
@@ -568,7 +609,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			if ev.ContentBlock != nil {
 				switch ev.ContentBlock.Type {
 				case "tool_use":
-					tc := &provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}
+					tc := &streamedToolCall{ToolCall: provider.ToolCall{ID: ev.ContentBlock.ID, Name: ev.ContentBlock.Name}}
 					tools[ev.Index] = tc
 					if !send(provider.Chunk{Type: provider.ChunkToolCallStart, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}}) {
 						return
@@ -613,12 +654,12 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 				}
 			case "input_json_delta":
 				if tc := tools[ev.Index]; tc != nil {
-					tc.Arguments += ev.Delta.PartialJSON
+					tc.appendArguments(ev.Delta.PartialJSON)
 					// Progress ticks for large streaming argument payloads, one
 					// per 2KB bucket (see the openai provider for rationale).
-					if bucket := len(tc.Arguments) / 2048; bucket > argBuckets[ev.Index] {
+					if bucket := tc.argumentLen() / 2048; bucket > argBuckets[ev.Index] {
 						argBuckets[ev.Index] = bucket
-						if !send(provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}, ArgChars: len(tc.Arguments)}) {
+						if !send(provider.Chunk{Type: provider.ChunkToolCallArgsDelta, ToolCall: &provider.ToolCall{ID: tc.ID, Name: tc.Name}, ArgChars: tc.argumentLen()}) {
 							return
 						}
 					}
@@ -626,7 +667,7 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			}
 		case "content_block_stop":
 			if tc := tools[ev.Index]; tc != nil {
-				if !send(provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc}) {
+				if !send(provider.Chunk{Type: provider.ChunkToolCall, ToolCall: tc.complete()}) {
 					return
 				}
 				delete(tools, ev.Index)
