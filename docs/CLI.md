@@ -370,7 +370,9 @@ single-key shortcuts.
 | `Ctrl+Y` | Toggle YOLO independently of the composer-mode cycle. |
 
 The responsive footer keeps interaction state on the left and, when space
-allows, places model, effort, and work mode on the right. Its second row shows
+allows, places model, effort, and work mode on the right. Its second row leads
+with the session working directory — home-shortened and compacted under width
+pressure so the Git repo@branch identity beside it survives — then shows
 available repository and session telemetry such as cache hit rate, context use,
 compaction headroom, background jobs, and balance. `ready` means the composer is
 idle; that slot changes when a picker, approval, image paste, shell mode, or

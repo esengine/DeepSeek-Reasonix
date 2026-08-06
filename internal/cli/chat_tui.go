@@ -359,6 +359,10 @@ type chatTUI struct {
 	statuslineCmd string
 	statuslineOut string
 	gitStatus     gitStatus
+	// cwd is the session working directory captured at startup; the status
+	// block's identity row renders it so the user always sees where the agent
+	// runs. Read-only for the session (no in-TUI cd).
+	cwd string
 
 	// statusLineCount is the number of terminal rows the status block occupies
 	// (wrapped working line + wrapped status line + wrapped data line). Updated
@@ -590,6 +594,9 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 	nativeScrollback := detectTermuxTerminal()
 	history := ctrl.History()
 	nextPasteID, usedPasteIDs := pasteIDStateForHistory(history)
+	// A failed Getwd degrades to no cwd in the status block rather than
+	// blocking startup; the footer simply shows Git/telemetry as before.
+	cwd, _ := os.Getwd()
 	return chatTUI{
 		ctrl:                 ctrl,
 		label:                ctrl.Label(),
@@ -626,6 +633,7 @@ func newChatTUI(ctrl control.SessionAPI, missing string, eventCh chan event.Even
 		skills:               ctrl.SlashSkills(),
 		viewport:             viewport.New(viewport.WithWidth(termW)),
 		statusLineCount:      3,
+		cwd:                  cwd,
 	}
 }
 

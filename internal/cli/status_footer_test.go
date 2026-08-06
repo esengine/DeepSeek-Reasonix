@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -204,6 +206,84 @@ func TestStatusFooterThemesKeepIdenticalGeometry(t *testing.T) {
 	plain := render("dark", colorprofile.NoTTY)
 	if dark != light || dark != plain {
 		t.Fatalf("theme modes changed footer geometry:\ndark:\n%s\nlight:\n%s\nplain:\n%s", dark, light, plain)
+	}
+}
+
+func TestStatusFooterShowsWorkingDirectory(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	home, _ := os.UserHomeDir()
+	m := newTestChatTUI()
+	m.cwd = filepath.Join(home, "Desktop", "DeepSeek-Reasonix")
+	m.gitStatus = gitStatus{Repo: "DeepSeek-Reasonix", Branch: "main"}
+
+	line := ansi.Strip(m.layoutGitTelemetry(120))
+	if !strings.Contains(line, "~/Desktop/DeepSeek-Reasonix") {
+		t.Fatalf("identity should show the home-shortened cwd: %q", line)
+	}
+	if !strings.Contains(line, "DeepSeek-Reasonix@main") {
+		t.Fatalf("identity should keep the git branch beside the cwd: %q", line)
+	}
+}
+
+func TestStatusFooterWorkingDirectoryWithoutGit(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	home, _ := os.UserHomeDir()
+	m := newTestChatTUI()
+	m.cwd = filepath.Join(home, "playground")
+
+	line := ansi.Strip(m.layoutGitTelemetry(80))
+	if !strings.Contains(line, "~/playground") {
+		t.Fatalf("identity should show the cwd without a git repo: %q", line)
+	}
+}
+
+func TestStatusFooterWorkingDirectoryCompactsUnderWidthPressure(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.cwd = "/very/long/path/that/keeps/going/deeper/and/deeper/into/the/workspace/tree/project-name"
+	m.gitStatus = gitStatus{Repo: "project-name", Branch: "main"}
+
+	line := ansi.Strip(m.layoutGitTelemetry(60))
+	if visibleWidth(line) > 60 {
+		t.Fatalf("identity overflows its budget (%d > 60): %q", visibleWidth(line), line)
+	}
+	if !strings.Contains(line, "…") {
+		t.Fatalf("long cwd should be compacted: %q", line)
+	}
+	if !strings.Contains(line, "project-name@main") {
+		t.Fatalf("git identity should survive path compaction: %q", line)
+	}
+}
+
+func TestStatusFooterWorkingDirectoryYieldsToGitOnTinyTerminal(t *testing.T) {
+	defer restoreThemeForTest(activeColorProfile, activeCLITheme)
+	activeColorProfile = colorprofile.NoTTY
+	configureCLITheme("dark")
+
+	m := newTestChatTUI()
+	m.cwd = "/a/very/long/path"
+	m.gitStatus = gitStatus{Repo: "repo", Branch: "main"}
+
+	// At 12 columns not even a path stub fits beside the branch; the repo
+	// identity must stay and the line must not overflow.
+	line := ansi.Strip(m.layoutGitTelemetry(12))
+	if visibleWidth(line) > 12 {
+		t.Fatalf("identity overflows its budget (%d > 12): %q", visibleWidth(line), line)
+	}
+	if strings.Contains(line, "/a/very/long/path") {
+		t.Fatalf("path should yield to the git identity on a tiny terminal: %q", line)
+	}
+	if !strings.Contains(line, "repo@main") {
+		t.Fatalf("git identity should survive on a tiny terminal: %q", line)
 	}
 }
 
