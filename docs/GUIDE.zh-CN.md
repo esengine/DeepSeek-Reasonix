@@ -1009,8 +1009,9 @@ workflow 工具、session history、memory 写入、slash command、Skills、MCP
 subagent 都在任务需要时才连接。
 Balanced（均衡）是提供完整工具面的默认档；配置独立 Planner 时，Planner 与 Executor 都会获得各自的
 `use_capability` frontend，规划阶段发现的 capability 可在 handoff 后按同一 ID 直接执行，同时保留
-Executor 的完整直接 MCP 工具面。固定代理自身的 schema 保持稳定，但由于 Balanced Executor 刻意保留
-直接 `mcp__*`，安装、连接或刷新这些直接工具时，Executor 的整体 provider 工具前缀仍可能变化。Delivery（交付优先）
+Executor 的完整直接 MCP 工具面。配置中的 MCP 暴露模式也会在会话启动时自动选择：匹配缓存且工具面较小
+的服务器继续直接暴露，工具面较大或缓存未知的服务器在该会话只使用稳定代理。代理自身的 schema 保持稳定；
+只有刻意保留的小型直接 MCP 工具可能在安装、连接或刷新时改变整体 provider 工具前缀。Delivery（交付优先）
 保留完整工具面，额外增加稳定能力代理 `use_capability`（list/inspect/call MCP，包括
 `auto_start=false`，且不改变主工具 Schema），并增加“明确验收标准、修复根因、运行验证、复审最终
 diff”的稳定交付合约。该合约由宿主运行时强制执行：没有具体 `todo_write` 验收清单时会阻止变更和验证

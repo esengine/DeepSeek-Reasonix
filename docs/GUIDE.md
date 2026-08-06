@@ -1307,10 +1307,12 @@ read/bash/edit/write, background-shell lifecycle controls, `ask`, and
 session history, memory mutation, slash commands, Skills, MCP, LSP, web access,
 installation, and subagents are connected only when the task needs them.
 Balanced is the default with the complete tool surface; when a distinct Planner is configured, both
-Planner and Executor add the fixed `use_capability` proxy. The proxy schema is
-stable, but the Balanced Executor deliberately retains direct `mcp__*` tools,
-so its overall provider tool prefix may still change when those direct tools
-are installed, connected, or refreshed. Delivery keeps that complete surface,
+Planner and Executor add the fixed `use_capability` proxy. Configured MCP
+exposure is also selected automatically at session boot: small surfaces with a
+matching cache remain direct, while large or unknown surfaces use only the
+stable proxy for that session. The proxy schema is stable; only the intentionally
+small direct MCP surfaces can change the overall provider tool prefix when
+their tools are installed, connected, or refreshed. Delivery keeps that complete surface,
 adds one stable proxy tool (`use_capability`) for on-demand MCP inspect/call
 without schema churn, and adds a stable contract to establish acceptance
 criteria, fix root causes, verify the result, and review the final diff. The

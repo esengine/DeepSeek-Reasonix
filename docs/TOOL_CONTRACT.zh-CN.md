@@ -75,6 +75,13 @@ read/diff 证据。
 Executor 刻意保留直接 `mcp__*` 工具，因此安装、连接或刷新这些直接工具时，Executor 的整体 provider
 前缀仍可能变化。
 
+配置中的 MCP 暴露模式在会话启动时自动选择，不增加用户设置项。工具面较小且 schema cache
+匹配的服务器继续直接暴露，以保留具体工具调用的低延迟；当缓存工具面较大（至少 16 个工具，或估算
+schema 达到 16 KiB，并按模型上下文窗口缩放），或任一配置服务器缺少/持有过期 schema cache 时，
+Reasonix 会对这组配置 MCP 只暴露稳定的 `use_capability` 代理。选择结果在整个会话内固定，后台
+握手完成不会改变 provider 可见工具前缀。显式传入的 host-session MCP 仍保持直接暴露，并且只作用于
+当前会话。
+
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,

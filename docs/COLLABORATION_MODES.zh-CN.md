@@ -107,7 +107,7 @@ Delivery 使用与 Balanced 相同的完整工具面，额外增加稳定的能�
 - 对明确要求实现、修复或修改的任务，如果没有观察到真实变更，宿主会拒绝“已经完成”的纯文本声明；只读分析仍可凭读取/检查证据正常结束。
 - Skill/MCP 的 `require`/`prefer` 路由由宿主门禁强制：`require` 必须成功调用（宿主确认不可用时可带真实 blocker 结束），`prefer` 缺失会提醒一次，之后必须调用或 `use_capability(action="decline")` 提交非空理由。
 - 中/高风险改动会强制运行结构化 `review` / `security_review`（通过审查子 Agent 的 `review_report`）；`task`/`run_skill` 等元工具本身不算 mutation，子 Agent 的真实写入会回传父级证据账本。
-- Delivery 的 system contract 与 `use_capability` Schema 是每个该 Profile 会话固定的 provider 前缀；按需连接 MCP 不会改变该固定代理 Schema。Balanced 双模型中的 Planner 代理同样稳定；Executor 刻意保留直接 `mcp__*` 工具，因此这些直接工具安装、连接或刷新时，Executor 的整体 provider 前缀仍可能变化。升级到本版本或从其他 Profile 切换过来会产生一次新的缓存前缀。
+- Delivery 的 system contract 与 `use_capability` Schema 是每个该 Profile 会话固定的 provider 前缀；按需连接 MCP 不会改变该固定代理 Schema。Balanced 双模型中的 Planner 代理同样稳定；配置 MCP 会在启动时自动选择暴露模式：小型且缓存命中的面继续直接暴露，较大或缓存未知的面使用固定代理，因此只有小型直接工具在安装、连接或刷新时可能改变 Executor 的整体 provider 前缀。升级到本版本或从其他 Profile 切换过来会产生一次新的缓存前缀。
 
 ### 怎么选择
 

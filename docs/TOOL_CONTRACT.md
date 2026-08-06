@@ -96,6 +96,16 @@ not change when MCP inventory changes. Balanced Executor deliberately retains
 its direct `mcp__*` tools, so its overall provider prefix may still change when
 those direct tools are installed, connected, or refreshed.
 
+Configured MCP exposure is selected automatically at session boot; it adds no
+user-facing setting. A small server surface with a matching schema cache stays
+direct for the lower-latency concrete tool call. When the cached surface is
+large (at least 16 tools or an estimated schema payload at or above 16 KiB, scaled
+to the model context window), or any configured server has a missing/stale
+schema cache, Reasonix exposes only the stable `use_capability` proxy for that
+configured MCP set. The choice is frozen for the session, so a background
+handshake cannot change the provider-visible tool prefix. Explicit
+host-session MCP servers remain direct and scoped to that session.
+
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
