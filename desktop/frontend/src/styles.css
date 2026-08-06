@@ -3005,6 +3005,90 @@ a[href] {
   flex-direction: column;
 }
 
+.session-timeline {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-soft);
+}
+.session-timeline__label {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.session-timeline__rail {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 4px 6px;
+}
+.session-timeline__rail::before {
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: 50%;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--border);
+  transform: translateY(-50%);
+}
+.session-timeline__node {
+  --wails-draggable: no-drag;
+  position: relative;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg-dim);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: var(--z-app-content);
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.session-timeline__node:hover {
+  color: var(--fg);
+  border-color: var(--fg-faint);
+}
+.session-timeline__node--current {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+.session-timeline__node--checkpoint {
+  box-shadow: 0 0 0 2px var(--bg-soft), 0 0 0 3.5px var(--accent-soft);
+}
+.session-timeline__compact {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  background: var(--fg-faint);
+  z-index: var(--z-app-content);
+  cursor: default;
+}
+
 /* loading screen shown while boot.Build runs in the background */
 .loading-screen {
   flex: 1;
