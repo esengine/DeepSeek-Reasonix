@@ -1,24 +1,19 @@
 package config
 
 import (
+	"context"
 	"encoding/base64"
-	"encoding/json"
-	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 func TestLookupLegacyKeyringBatchInProcessFourState(t *testing.T) {
-	oldHelper := legacyKeyringHelperEnabled
 	oldLookup := legacyKeyringProbeLookup
-	legacyKeyringHelperEnabled = false
-	t.Cleanup(func() {
-		legacyKeyringHelperEnabled = oldHelper
-		legacyKeyringProbeLookup = oldLookup
-	})
+	t.Cleanup(func() { legacyKeyringProbeLookup = oldLookup })
 
-	legacyKeyringProbeLookup = func(key string) legacyKeyringOutcome {
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		switch key {
 		case "FOUND":
 			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "secret"}
@@ -35,7 +30,7 @@ func TestLookupLegacyKeyringBatchInProcessFourState(t *testing.T) {
 		t.Fatalf("FOUND = %+v, want found with scrubbed value", got["FOUND"])
 	}
 	if !credentialCurrentStoreHasKey("FOUND") {
-		t.Fatal("FOUND secret should have been stored in-process")
+		t.Fatal("FOUND secret should have been stored via store-if-absent")
 	}
 	if got["EMPTY"].Status != legacyKeyringAbsent {
 		t.Fatalf("EMPTY = %+v, want absent", got["EMPTY"])
@@ -53,26 +48,16 @@ func TestLegacyKeyringErrorDoesNotWriteMarker(t *testing.T) {
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 
-	oldHelper := legacyKeyringHelperEnabled
 	oldLookup := legacyKeyringProbeLookup
-	legacyKeyringHelperEnabled = false
-	t.Cleanup(func() {
-		legacyKeyringHelperEnabled = oldHelper
-		legacyKeyringProbeLookup = oldLookup
-	})
+	t.Cleanup(func() { legacyKeyringProbeLookup = oldLookup })
 
-	legacyKeyringProbeLookup = func(string) legacyKeyringOutcome {
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
 		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}
-	// Drive only the keyring branch via batch + mark logic used by migrate.
 	outcomes := lookupLegacyKeyringBatch([]string{"DEEPSEEK_API_KEY"}, time.Second)
 	if outcomes["DEEPSEEK_API_KEY"].Status != legacyKeyringError {
 		t.Fatalf("status = %+v", outcomes["DEEPSEEK_API_KEY"])
 	}
-	if outcomes["DEEPSEEK_API_KEY"].Status == legacyKeyringAbsent {
-		t.Fatal("error must not be treated as absent")
-	}
-	// Migrate-style: only mark absent
 	if outcomes["DEEPSEEK_API_KEY"].Status == legacyKeyringAbsent {
 		_ = markLegacyKeyringMigrationDone("DEEPSEEK_API_KEY")
 	}
@@ -81,51 +66,124 @@ func TestLegacyKeyringErrorDoesNotWriteMarker(t *testing.T) {
 	}
 }
 
-func TestLookupLegacyKeyringBatchHelperTimeoutKillsChild(t *testing.T) {
-	oldHelper := legacyKeyringHelperEnabled
+func TestLookupLegacyKeyringBatchSharedContextTimeout(t *testing.T) {
+	oldLookup := legacyKeyringProbeLookup
 	oldTimeout := legacyKeyringLookupTimeout
-	legacyKeyringHelperEnabled = true
-	legacyKeyringLookupTimeout = 80 * time.Millisecond
+	legacyKeyringLookupTimeout = 40 * time.Millisecond
 	t.Cleanup(func() {
-		legacyKeyringHelperEnabled = oldHelper
+		legacyKeyringProbeLookup = oldLookup
 		legacyKeyringLookupTimeout = oldTimeout
 	})
-	t.Setenv(legacyKeyringStallEnv, "500ms")
+
+	legacyKeyringProbeLookup = func(ctx context.Context, key string) legacyKeyringOutcome {
+		if key == "FAST" {
+			return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+		}
+		// Block until the shared budget cancels; must not leave a hung goroutine
+		// after the batch returns (probe returns when ctx is done).
+		<-ctx.Done()
+		return legacyKeyringOutcome{Status: legacyKeyringTimeout}
+	}
 
 	start := time.Now()
-	got := lookupLegacyKeyringBatch([]string{"DEEPSEEK_API_KEY"}, legacyKeyringLookupTimeout)
+	got := lookupLegacyKeyringBatch([]string{"FAST", "SLOW"}, legacyKeyringLookupTimeout)
 	elapsed := time.Since(start)
-	if got["DEEPSEEK_API_KEY"].Status != legacyKeyringTimeout {
-		t.Fatalf("status = %q, want timeout (got %+v)", got["DEEPSEEK_API_KEY"].Status, got["DEEPSEEK_API_KEY"])
+	if got["FAST"].Status != legacyKeyringAbsent {
+		t.Fatalf("FAST = %+v", got["FAST"])
 	}
-	if elapsed < 60*time.Millisecond {
-		t.Fatalf("elapsed %v, want near the budget", elapsed)
+	if got["SLOW"].Status != legacyKeyringTimeout {
+		t.Fatalf("SLOW = %+v, want timeout", got["SLOW"])
 	}
-	if elapsed > 400*time.Millisecond {
-		t.Fatalf("elapsed %v, helper was not killed promptly", elapsed)
+	if elapsed > 250*time.Millisecond {
+		t.Fatalf("elapsed %v, shared budget did not bound the scan", elapsed)
 	}
 }
 
-func TestLegacyKeyringHelperStdoutHasNoSecrets(t *testing.T) {
-	// Unit-level contract: helper report type has no Value field and encode
-	// path only emits key+status. Platform probe is stubbed for determinism.
-	oldImpl := legacyKeyringProbeImpl
-	legacyKeyringProbeImpl = func(key string) legacyKeyringOutcome {
-		return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-must-not-leak"}
-	}
-	t.Cleanup(func() { legacyKeyringProbeImpl = oldImpl })
+func TestStoreCredentialIfAbsentDoesNotClobberNewerValue(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 
-	// Capture helper main path by calling the report builder logic via run with
-	// a redirected stdout is heavy; assert the public JSON schema instead.
-	report := legacyKeyringHelperReport{Results: []legacyKeyringHelperResult{{
-		Key: "DEEPSEEK_API_KEY", Status: string(legacyKeyringFound),
-	}}}
-	raw, err := json.Marshal(report)
-	if err != nil {
+	// Force interleaving without sleep:
+	// 1) parent path has already decided the key is missing (outside lock)
+	// 2) user writes a new value
+	// 3) store-if-absent re-checks under lock and skips the stale keyring value
+	parentChecked := make(chan struct{})
+	userDone := make(chan struct{})
+	result := make(chan bool, 1)
+
+	go func() {
+		<-parentChecked
+		<-userDone
+		stored, err := storeCredentialIfAbsentAndNotCleared("DEEPSEEK_API_KEY", "sk-old-keyring")
+		if err != nil {
+			t.Errorf("store-if-absent: %v", err)
+		}
+		result <- stored
+	}()
+
+	close(parentChecked)
+	if _, err := SetCredential("DEEPSEEK_API_KEY", "sk-user-new"); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(raw), "sk-") || strings.Contains(string(raw), "value") {
-		t.Fatalf("helper report must not include secrets or value fields: %s", raw)
+	close(userDone)
+
+	if stored := <-result; stored {
+		t.Fatal("store-if-absent must not overwrite a concurrent user write")
+	}
+	if !credentialCurrentStoreHasKey("DEEPSEEK_API_KEY") {
+		t.Fatal("user value missing")
+	}
+	// Ensure the stored value is the user write, not the keyring secret.
+	val, ok := envFileValue(UserCredentialsPath(), "DEEPSEEK_API_KEY")
+	if !ok || val != "sk-user-new" {
+		t.Fatalf("credential = (%q, %v), want sk-user-new", val, ok)
+	}
+}
+
+func TestStoreCredentialIfAbsentDoesNotClobberTombstone(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
+
+	if _, err := SetCredential("DEEPSEEK_API_KEY", "sk-temp"); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemoveCredential("DEEPSEEK_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	if !credentialCurrentStoreClearedKey("DEEPSEEK_API_KEY") {
+		t.Fatal("expected cleared tombstone")
+	}
+
+	parentChecked := make(chan struct{})
+	userDone := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	var stored bool
+	var storeErr error
+	go func() {
+		defer wg.Done()
+		<-parentChecked
+		<-userDone
+		stored, storeErr = storeCredentialIfAbsentAndNotCleared("DEEPSEEK_API_KEY", "sk-old-keyring")
+	}()
+
+	close(parentChecked)
+	// Tombstone already present; signal and join.
+	close(userDone)
+	wg.Wait()
+	if storeErr != nil {
+		t.Fatal(storeErr)
+	}
+	if stored {
+		t.Fatal("store-if-absent must not revive a cleared key from keyring")
+	}
+	if credentialCurrentStoreHasKey("DEEPSEEK_API_KEY") {
+		t.Fatal("tombstone was overwritten with a keyring value")
+	}
+	if !credentialCurrentStoreClearedKey("DEEPSEEK_API_KEY") {
+		t.Fatal("tombstone missing after store-if-absent")
 	}
 }
 
@@ -138,10 +196,8 @@ func TestLegacyKeyringMarkerUsesRawURLBase64(t *testing.T) {
 	if !strings.HasSuffix(path, wantName) {
 		t.Fatalf("marker path = %q, want suffix %q", path, wantName)
 	}
-	// Distinct keys that would collapse under char-folding stay distinct.
 	other := legacyKeyringMigrationMarkerPath("A_B_C_")
 	if path == other {
 		t.Fatalf("marker collision between %q and A_B_C_", key)
 	}
-	_ = os.RemoveAll(home)
 }

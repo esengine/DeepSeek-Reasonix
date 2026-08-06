@@ -3,6 +3,7 @@
 package config
 
 import (
+	"context"
 	"errors"
 	"strings"
 
@@ -11,15 +12,23 @@ import (
 
 // legacyKeyringProbe reads one legacy credential from the platform keyring.
 // keyring.ErrNotFound (and empty values) are absent; other errors stay error.
-func legacyKeyringProbe(key string) legacyKeyringOutcome {
+// ctx is checked before the call so a shared batch budget can stop the scan;
+// platform Get is not context-aware on these OSes.
+func legacyKeyringProbe(ctx context.Context, key string) legacyKeyringOutcome {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+	}
+	if err := ctx.Err(); err != nil {
+		return legacyKeyringOutcome{Status: legacyKeyringTimeout}
 	}
 	value, err := keyring.Get(credentialsKeyringService, key)
 	if err != nil {
 		if errors.Is(err, keyring.ErrNotFound) {
 			return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+		}
+		if ctx.Err() != nil {
+			return legacyKeyringOutcome{Status: legacyKeyringTimeout}
 		}
 		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}

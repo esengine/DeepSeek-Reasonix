@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"testing"
 
@@ -8,19 +9,14 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	if code, handled := MaybeRunLegacyKeyringHelper(); handled {
-		os.Exit(code)
-	}
 	if os.Getenv("REASONIX_CONFIG_LOCK_HELPER") == "1" {
 		os.Exit(m.Run())
 	}
 	// RunWithIsolatedUserState redirects every path-shaped location, but the OS
 	// keyring has no environment variable in front of it, so legacy migration
 	// would read the credentials of whoever is running the tests. Cases that
-	// exercise the lookup substitute their own. Disable the helper so unit
-	// tests stay in-process with the stub below.
-	legacyKeyringHelperEnabled = false
-	legacyKeyringProbeLookup = func(string) legacyKeyringOutcome {
+	// exercise the lookup substitute their own.
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
 		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
 	testenv.RunWithIsolatedUserState(m)
@@ -30,7 +26,7 @@ func TestMain(m *testing.M) {
 // stay green either way, so the substitution itself is what gets asserted.
 func TestKeyringLookupStaysOutOfTheRealStore(t *testing.T) {
 	for _, key := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"} {
-		o := legacyKeyringProbeLookup(key)
+		o := legacyKeyringProbeLookup(context.Background(), key)
 		if o.Status != legacyKeyringAbsent || o.Value != "" {
 			t.Fatalf("%s resolved through the real keyring in tests: %+v", key, o)
 		}

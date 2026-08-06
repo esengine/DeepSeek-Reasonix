@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -716,7 +717,7 @@ func TestMigrateImportsLegacyCredentialsEvenWhenPrimaryConfigExists(t *testing.T
 func TestMigrateImportsLegacyKeyringCredentials(t *testing.T) {
 	legacyHome(t)
 	old := legacyKeyringProbeLookup
-	legacyKeyringProbeLookup = func(key string) legacyKeyringOutcome {
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "DEEPSEEK_API_KEY" {
 			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-old-keyring"}
 		}
@@ -761,7 +762,7 @@ api_key_env = "WORKSPACE_ONLY_KEY"
 		t.Fatal(err)
 	}
 	old := legacyKeyringProbeLookup
-	legacyKeyringProbeLookup = func(key string) legacyKeyringOutcome {
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "WORKSPACE_ONLY_KEY" {
 			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-workspace"}
 		}
@@ -792,7 +793,7 @@ func TestMigrateLegacyCredentialsSkipsKeyringWhenIsolated(t *testing.T) {
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 
 	old := legacyKeyringProbeLookup
-	legacyKeyringProbeLookup = func(key string) legacyKeyringOutcome {
+	legacyKeyringProbeLookup = func(_ context.Context, key string) legacyKeyringOutcome {
 		if key == "DEEPSEEK_API_KEY" {
 			return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "legacy-keyring-value"}
 		}
@@ -1088,14 +1089,11 @@ func TestMigrateLegacyCredentialsFileImportIgnoresKeyringMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	oldHelper := legacyKeyringHelperEnabled
 	oldLookup := legacyKeyringProbeLookup
-	legacyKeyringHelperEnabled = false
-	legacyKeyringProbeLookup = func(string) legacyKeyringOutcome {
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
 		return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 	}
 	t.Cleanup(func() {
-		legacyKeyringHelperEnabled = oldHelper
 		legacyKeyringProbeLookup = oldLookup
 	})
 
@@ -1113,14 +1111,11 @@ func TestMigrateLegacyCredentialsFileImportIgnoresKeyringMarker(t *testing.T) {
 
 func TestMigrateLegacyCredentialsErrorDoesNotWriteKeyringMarker(t *testing.T) {
 	legacyHome(t)
-	oldHelper := legacyKeyringHelperEnabled
 	oldLookup := legacyKeyringProbeLookup
-	legacyKeyringHelperEnabled = false
-	legacyKeyringProbeLookup = func(string) legacyKeyringOutcome {
+	legacyKeyringProbeLookup = func(context.Context, string) legacyKeyringOutcome {
 		return legacyKeyringOutcome{Status: legacyKeyringError}
 	}
 	t.Cleanup(func() {
-		legacyKeyringHelperEnabled = oldHelper
 		legacyKeyringProbeLookup = oldLookup
 	})
 
