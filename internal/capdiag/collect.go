@@ -287,14 +287,10 @@ func collectCommands(root string, disp func(string) string) (AssetReport, []Issu
 
 func collectHooks(root, home, reasonixHome string, cfg *config.Config, disp func(string) string) (HookReport, []Issue) {
 	var issues []Issue
-	// Prefer explicit home for settings when tests isolate HOME.
-	homeDir := home
-	if reasonixHome != "" && home == "" {
-		homeDir = filepath.Dir(reasonixHome)
-	}
 	insp := hook.Inspect(hook.LoadOptions{
-		ProjectRoot: root,
-		HomeDir:     homeDir,
+		ProjectRoot:     root,
+		HomeDir:         home,
+		ReasonixHomeDir: reasonixHome,
 	})
 	runtimeOptions := hook.RuntimeOptions{}
 	if cfg != nil {
