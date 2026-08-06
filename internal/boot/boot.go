@@ -2227,10 +2227,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		ctrl.SetCapabilityProxyRouting(true)
 	} else if tokenEconomy {
 		ctrl.WireCapabilityRouting(cfg.Plugins, capSpecs, nil, nil)
-	} else if dualModelPlanner {
-		// Balanced dual-model: load plugin config + schema cache so not-yet-
-		// started MCP can route through the stable Planner/Executor proxy.
-		// No semantic router — deterministic route only.
+	} else if dualModelPlanner || mcpExposure.useCapability() {
+		// Balanced dual-model and automatic large/unknown MCP surfaces: load
+		// plugin config + schema cache so not-yet-started MCP can route through
+		// the stable use_capability proxy. No semantic router — deterministic
+		// route only.
 		ctrl.WireCapabilityRouting(cfg.Plugins, capSpecs, nil, capAudit)
 		ctrl.SetCapabilityProxyRouting(true)
 	}

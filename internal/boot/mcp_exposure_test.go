@@ -11,6 +11,7 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/plugin"
+	"reasonix/internal/provider"
 )
 
 func TestChooseMCPExposureKeepsSmallKnownSurfaceDirect(t *testing.T) {
@@ -171,6 +172,54 @@ command = "reasonix-missing-beta"
 	}
 }
 
+func TestBuildAutomaticMCPProxyRoutesThroughCapability(t *testing.T) {
+	isolateConfigHome(t)
+	dir := robustTempDir(t)
+	t.Chdir(dir)
+	registerBootTokenProfileTestProvider()
+	prov := testutil.NewMock("auto-mcp-route", testutil.Turn{Text: "done"})
+	setBootTokenProfileTestProvider(t, prov)
+	writeFile(t, dir, "reasonix.toml", `
+default_model = "test-model"
+
+[[providers]]
+name = "test-model"
+kind = "boot-token-profile-test"
+model = "x"
+
+[[plugins]]
+name = "alpha"
+command = "reasonix-missing-alpha"
+`)
+	seedMCPExposureCaches(t, dir, autoMCPToolThreshold)
+
+	ctrl, err := Build(context.Background(), Options{Sink: event.Discard})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	if err := ctrl.Run(context.Background(), "use alpha mcp"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := prov.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("requests = %d, want 1", len(reqs))
+	}
+	if !requestHasTool(reqs[0], "use_capability") {
+		t.Fatalf("automatic MCP proxy must expose use_capability; tools=%v", toolSchemaNames(reqs[0].Tools))
+	}
+	if requestHasTool(reqs[0], "connect_tool_source") {
+		t.Fatalf("Balanced automatic MCP proxy must not expose connect_tool_source; tools=%v", toolSchemaNames(reqs[0].Tools))
+	}
+	if !requestMessageContains(reqs[0].Messages, provider.RoleUser, "use_capability(action=\"call\"") {
+		t.Fatalf("automatic MCP route must direct the model to use_capability:\n%s", requestUserContent(reqs[0]))
+	}
+	if requestMessageContains(reqs[0].Messages, provider.RoleUser, "connect_tool_source") {
+		t.Fatalf("automatic MCP route must not direct the model to connect_tool_source:\n%s", requestUserContent(reqs[0]))
+	}
+}
+
 func TestBuildKeepsSmallMCPSurfaceDirect(t *testing.T) {
 	isolateConfigHome(t)
 	dir := robustTempDir(t)
@@ -245,4 +294,18 @@ func cachedMCPTools(count, schemaBytes int) []plugin.CachedTool {
 		})
 	}
 	return tools
+}
+
+func requestUserContent(req provider.Request) string {
+	var content strings.Builder
+	for _, message := range req.Messages {
+		if message.Role != provider.RoleUser {
+			continue
+		}
+		if content.Len() > 0 {
+			content.WriteString("\n\n")
+		}
+		content.WriteString(message.Content)
+	}
+	return content.String()
 }
