@@ -104,8 +104,8 @@ func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
 
 	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
 	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
-	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultReasoningOutputTokens {
-		t.Fatalf("DeepSeek max_output_tokens = %#v, want %d", got, provider.DefaultReasoningOutputTokens)
+	if got := deepseekBody["max_output_tokens"]; got != 131072 {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want 131072", got)
 	}
 
 	for _, effort := range []string{"none", "disabled", "off", " NONE "} {

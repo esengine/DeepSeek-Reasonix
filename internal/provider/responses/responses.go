@@ -151,7 +151,7 @@ func New(cfg Config) provider.Provider {
 		baseURL: strings.TrimRight(cfg.BaseURL, "/"), model: cfg.Model, effort: cfg.Effort,
 		vendor: vendor, caps: cap, mode: cfg.mode(), sessionCache: sessionCache, webSearch: cfg.WebSearch, maxOutputTokens: maxOutputTokens,
 		vision: vision,
-		http:   httpClient, idleTimeout: defaultStreamIdleTimeout,
+		http:   httpClient, idleTimeout: cap.streamIdleTimeout,
 	}
 }
 
