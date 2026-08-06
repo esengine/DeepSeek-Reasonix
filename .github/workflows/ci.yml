@@ -136,10 +136,12 @@ jobs:
       # Pull requests run a Windows smoke suite: the packages that actually
       # carry *_windows.go code, the startup/checkpoint packages with portable
       # filesystem contracts, plus cmd/. The full ./... sweep stays on pushes
-      # to main-v2; the Unix legs always run the full suite.
+      # to main-v2; the Unix legs always run the full suite. Keep the job-level
+      # budget above normal 7-9 minute runner variance; each package test binary
+      # remains independently bounded by Go's 3 minute timeout below.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
-        timeout-minutes: 10
+        timeout-minutes: 15
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
