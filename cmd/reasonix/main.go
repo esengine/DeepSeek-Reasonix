@@ -22,6 +22,9 @@ var version = "dev"
 var runCLI = cli.Run
 
 func main() {
+	if code, handled := config.MaybeRunLegacyKeyringHelper(); handled {
+		os.Exit(code)
+	}
 	os.Exit(runWithCrashCapture(os.Args[1:], version))
 }
 

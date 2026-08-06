@@ -1064,3 +1064,47 @@ func TestMigrateSupportData(t *testing.T) {
 		}
 	}
 }
+
+func TestMigrateLegacyCredentialsFileImportIgnoresKeyringMarker(t *testing.T) {
+	_, dest, _ := legacyHome(t)
+	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dest, []byte(`default_model = "deepseek-flash/deepseek-chat"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := markLegacyKeyringMigrationDone("DEEPSEEK_API_KEY"); err != nil {
+		t.Fatal(err)
+	}
+	paths := legacyCredentialsPaths()
+	if len(paths) == 0 {
+		t.Skip("no legacy credentials paths on this platform")
+	}
+	target := paths[0]
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("DEEPSEEK_API_KEY=sk-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	oldHelper := legacyKeyringHelperEnabled
+	oldLookup := legacyKeyringCredentialValueLookup
+	legacyKeyringHelperEnabled = false
+	legacyKeyringCredentialValueLookup = func(string) (string, bool) { return "", false }
+	t.Cleanup(func() {
+		legacyKeyringHelperEnabled = oldHelper
+		legacyKeyringCredentialValueLookup = oldLookup
+	})
+
+	if err := MigrateLegacyCredentialsForRoot("."); err != nil {
+		t.Fatalf("MigrateLegacyCredentialsForRoot: %v", err)
+	}
+	data, err := os.ReadFile(UserCredentialsPath())
+	if err != nil {
+		t.Fatalf("read migrated credentials: %v", err)
+	}
+	if !strings.Contains(string(data), "sk-from-file") {
+		t.Fatalf("file import blocked by keyring marker: %q", data)
+	}
+}

@@ -8,13 +8,18 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if code, handled := MaybeRunLegacyKeyringHelper(); handled {
+		os.Exit(code)
+	}
 	if os.Getenv("REASONIX_CONFIG_LOCK_HELPER") == "1" {
 		os.Exit(m.Run())
 	}
 	// RunWithIsolatedUserState redirects every path-shaped location, but the OS
 	// keyring has no environment variable in front of it, so legacy migration
 	// would read the credentials of whoever is running the tests. Cases that
-	// exercise the lookup substitute their own.
+	// exercise the lookup substitute their own. Disable the helper so unit
+	// tests stay in-process with the stub below.
+	legacyKeyringHelperEnabled = false
 	legacyKeyringCredentialValueLookup = func(string) (string, bool) { return "", false }
 	testenv.RunWithIsolatedUserState(m)
 }

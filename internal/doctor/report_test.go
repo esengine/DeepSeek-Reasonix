@@ -164,14 +164,19 @@ func TestHomeIsolationWarningDetectsMismatch(t *testing.T) {
 		t.Skip("account home unavailable")
 	}
 	t.Setenv("REASONIX_HOME", "")
-	t.Setenv("HOME", filepath.Join(t.TempDir(), "service-home"))
-	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	serviceHome := filepath.Join(t.TempDir(), "service-home")
+	t.Setenv("HOME", serviceHome)
+	t.Setenv("USERPROFILE", serviceHome)
 	got := homeIsolationWarning()
 	if got == "" {
 		t.Fatal("expected HOME mismatch warning")
 	}
 	if !strings.Contains(got, "REASONIX_HOME") {
 		t.Fatalf("warning = %q, want REASONIX_HOME guidance", got)
+	}
+	// Shareable output must not embed either absolute home path.
+	if strings.Contains(got, serviceHome) || strings.Contains(got, acct.HomeDir) {
+		t.Fatalf("warning leaked a home path: %q", got)
 	}
 	t.Setenv("REASONIX_HOME", t.TempDir())
 	if got := homeIsolationWarning(); got != "" {

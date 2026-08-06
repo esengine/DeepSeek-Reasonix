@@ -20,6 +20,7 @@ const (
 	tuiDiagnosticLogRetention = 7 * 24 * time.Hour
 	tuiWatchdogInterval       = time.Second
 	tuiWatchdogStall          = 10 * time.Second
+	tuiWatchdogCloseWait      = 2 * time.Second
 )
 
 // tuiDiagnostics owns process-level diagnostics while an interactive terminal
@@ -38,10 +39,10 @@ type tuiDiagnostics struct {
 	path     string
 	close    sync.Once
 
-	mu           sync.Mutex
 	lastProgress atomic.Int64 // unix nano of last Update/View progress
 	stopWatch    chan struct{}
 	watchOnce    sync.Once
+	watchWG      sync.WaitGroup
 	killed       atomic.Bool
 }
 
@@ -116,7 +117,11 @@ func (d *tuiDiagnostics) StartWatchdog(p *tea.Program) {
 	}
 	d.watchOnce.Do(func() {
 		d.markProgress()
-		go d.watch(p)
+		d.watchWG.Add(1)
+		go func() {
+			defer d.watchWG.Done()
+			d.watch(p)
+		}()
 	})
 }
 
@@ -171,6 +176,16 @@ func (d *tuiDiagnostics) Close() {
 		case <-d.stopWatch:
 		default:
 			close(d.stopWatch)
+		}
+		// Wait for the watchdog to stop writing before closing the log file.
+		done := make(chan struct{})
+		go func() {
+			d.watchWG.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(tuiWatchdogCloseWait):
 		}
 		// Do not overwrite a logger deliberately installed by another owner
 		// after the TUI started.

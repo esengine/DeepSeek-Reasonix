@@ -64,38 +64,18 @@ var credentialSourceTracker = struct {
 var userCredentialEditMu sync.Mutex
 
 var storedCredentialValueLookup = storedCredentialValue
+
+// legacyKeyringCredentialValueImpl is the platform keyring probe. Production
+// migration never calls it in-process; it runs only inside an isolated helper
+// child so a stuck D-Bus can be killed with the process (#7507).
 var legacyKeyringCredentialValueImpl = legacyKeyringCredentialValue
-var legacyKeyringCredentialValueLookup = legacyKeyringCredentialValueWithTimeout
 
-// legacyKeyringLookupTimeout bounds Secret Service / platform keyring probes
-// during legacy credential migration. An unhealthy session bus (stuck
-// gnome-keyring, etc.) must not hang CLI startup indefinitely (#7507).
-// The shared budget for a full migration scan is applied in migrateLegacyCredentialsIfNeededForRoot.
+// legacyKeyringCredentialValueLookup is the test-facing single-key hook. Unit
+// tests substitute it; production migration uses the helper batch path instead.
+var legacyKeyringCredentialValueLookup = legacyKeyringCredentialValue
+
+// legacyKeyringLookupTimeout is the shared budget for one legacy keyring scan.
 var legacyKeyringLookupTimeout = time.Second
-
-// legacyKeyringCredentialValueWithTimeout wraps the platform keyring lookup so
-// a stuck D-Bus reply fails closed (treat as missing) instead of blocking the
-// process. A hung probe may leave a short-lived goroutine until the bus
-// answers; that is preferable to never starting.
-func legacyKeyringCredentialValueWithTimeout(key string) (string, bool) {
-	type result struct {
-		value string
-		ok    bool
-	}
-	ch := make(chan result, 1)
-	go func() {
-		value, ok := legacyKeyringCredentialValueImpl(key)
-		ch <- result{value: value, ok: ok}
-	}()
-	timer := time.NewTimer(legacyKeyringLookupTimeout)
-	defer timer.Stop()
-	select {
-	case r := <-ch:
-		return r.value, r.ok
-	case <-timer.C:
-		return "", false
-	}
-}
 
 // CredentialResolver resolves credentials repeatedly for one caller-owned view
 // build. It keeps expensive global credential-store lookups bounded to one per

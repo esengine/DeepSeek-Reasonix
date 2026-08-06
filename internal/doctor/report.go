@@ -390,8 +390,10 @@ func homeIsolationWarning() string {
 	if samePathFold(envClean, acctClean) {
 		return ""
 	}
-	return "process HOME (" + redactHome(envClean) + ") differs from the OS account home (" +
-		redactHome(acctClean) + "); keep the real account HOME for services and isolate Reasonix with REASONIX_HOME"
+	// Do not embed either absolute path: when HOME is overridden, redactHome
+	// cannot mask the account home, and shareable doctor output must stay free
+	// of machine-local identity.
+	return "process HOME differs from the OS account home; keep the real account HOME for services and isolate Reasonix with REASONIX_HOME"
 }
 
 func samePathFold(a, b string) bool {

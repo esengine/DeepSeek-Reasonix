@@ -2,7 +2,6 @@ package config
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+	"unicode"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
@@ -372,14 +371,13 @@ func normalizedMCPMigrationRoots(roots []string) []string {
 
 func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	missing := map[string]string{}
-	skip := func(key string) bool {
-		return credentialCurrentStoreHasKey(key) ||
-			credentialCurrentStoreClearedKey(key) ||
-			legacyKeyringMigrationDone(key)
+	// File import ignores keyring markers: a marker only means "do not re-probe
+	// keyring for this env name", never "skip legacy credential files".
+	skipStore := func(key string) bool {
+		return credentialCurrentStoreHasKey(key) || credentialCurrentStoreClearedKey(key)
 	}
 	// Prefer legacy credential files first so a healthy file import does not
-	// depend on Secret Service / D-Bus. Keyring probes run only for remaining
-	// keys, under a shared 1s budget so a stuck bus cannot hang startup (#7507).
+	// depend on Secret Service / D-Bus (#7507).
 	for _, src := range legacyCredentialsPaths() {
 		if src == "" {
 			continue
@@ -390,7 +388,7 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 		}
 		assignments := parseCredentialLines(strings.Split(string(data), "\n"))
 		for key, value := range assignments {
-			if _, exists := missing[key]; !exists && !skip(key) {
+			if _, exists := missing[key]; !exists && !skipStore(key) {
 				missing[key] = value
 			}
 		}
@@ -398,28 +396,35 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	keys := credentialEnvNamesForRoot(root)
 	needKeyring := make([]string, 0, len(keys))
 	for _, key := range keys {
-		if skip(key) {
+		if skipStore(key) {
 			continue
 		}
 		if _, exists := missing[key]; exists {
 			continue
 		}
+		// Marker only filters keyring probes.
+		if legacyKeyringMigrationDone(key) {
+			continue
+		}
 		needKeyring = append(needKeyring, key)
 	}
 	if len(needKeyring) > 0 {
-		values, completed, timedOut := lookupLegacyKeyringBatch(needKeyring, legacyKeyringLookupTimeout)
+		outcomes := lookupLegacyKeyringBatch(needKeyring, legacyKeyringLookupTimeout)
 		for _, key := range needKeyring {
-			if !completed[key] {
-				// Timed out before this key finished — no marker, retry later.
-				_ = timedOut
-				continue
+			o := outcomes[key]
+			switch o.Status {
+			case legacyKeyringFound:
+				if v := strings.TrimSpace(o.Value); v != "" {
+					missing[key] = v
+				}
+			case legacyKeyringAbsent:
+				// Confirmed empty probe only — never on error/timeout.
+				_ = markLegacyKeyringMigrationDone(key)
+			case legacyKeyringError, legacyKeyringTimeout:
+				// Leave unmarked so the next launch retries.
+			default:
+				// Unknown status: treat as timeout (no marker).
 			}
-			if value := strings.TrimSpace(values[key]); value != "" {
-				missing[key] = value
-				continue
-			}
-			// Successful empty lookup: mark done so we do not re-probe forever.
-			_ = markLegacyKeyringMigrationDone(key)
 		}
 	}
 	if len(missing) == 0 {
@@ -429,62 +434,32 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	return err
 }
 
-// lookupLegacyKeyringBatch probes the legacy keyring for the given keys under a
-// single shared deadline. completed marks keys whose lookup returned before the
-// budget expired (including empty successes). timedOut is true when the budget
-// expired with keys still outstanding; partial successes remain in values.
-func lookupLegacyKeyringBatch(keys []string, budget time.Duration) (values map[string]string, completed map[string]bool, timedOut bool) {
-	values = map[string]string{}
-	completed = map[string]bool{}
-	if len(keys) == 0 {
-		return values, completed, false
-	}
-	if budget <= 0 {
-		budget = time.Second
-	}
-	type result struct {
-		key   string
-		value string
-		ok    bool
-	}
-	ch := make(chan result, len(keys))
-	for _, key := range keys {
-		key := key
-		go func() {
-			// Use the package lookup hook so tests can inject fakes and so the
-			// default timeout wrapper still bounds a single stuck keyring call.
-			value, ok := legacyKeyringCredentialValueLookup(key)
-			ch <- result{key: key, value: value, ok: ok}
-		}()
-	}
-	deadline := time.NewTimer(budget)
-	defer deadline.Stop()
-	remaining := len(keys)
-	for remaining > 0 {
-		select {
-		case r := <-ch:
-			remaining--
-			completed[r.key] = true
-			if r.ok {
-				values[r.key] = r.value
-			} else {
-				values[r.key] = ""
-			}
-		case <-deadline.C:
-			return values, completed, true
-		}
-	}
-	return values, completed, false
-}
-
 func legacyKeyringMigrationMarkerPath(key string) string {
 	home := ReasonixHomeDir()
-	if strings.TrimSpace(home) == "" || strings.TrimSpace(key) == "" {
+	key = strings.TrimSpace(key)
+	if strings.TrimSpace(home) == "" || key == "" {
 		return ""
 	}
-	// Hash the env name so filesystem-safe markers never embed secrets.
-	sum := sha256.Sum256([]byte(key))
-	return filepath.Join(home, "state", "legacy-keyring-migrated", fmt.Sprintf("%x", sum[:8]))
+	// Env var names are identifiers, not secrets. Use a filesystem-safe form of
+	// the name itself (not a hash) so CodeQL does not treat this as secret storage.
+	return filepath.Join(home, "state", "legacy-keyring-checked", sanitizeLegacyKeyringMarkerName(key))
+}
+
+func sanitizeLegacyKeyringMarkerName(key string) string {
+	var b strings.Builder
+	b.Grow(len(key))
+	for _, r := range key {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "_empty"
+	}
+	return b.String()
 }
 
 func legacyKeyringMigrationDone(key string) bool {
