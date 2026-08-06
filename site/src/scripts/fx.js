@@ -37,34 +37,4 @@
     });
   };
   document.addEventListener("rx:term-played", runCounters);
-
-  /* scroll-driven cache narrative (sticky) */
-  const track = document.querySelector(".how-track");
-  if (track) {
-    const rows = Array.from(track.querySelectorAll(".cache-row"));
-    const caps = Array.from(track.querySelectorAll(".cap"));
-    rows.forEach((row) =>
-      row.querySelectorAll(".blk").forEach((b, i) => b.style.setProperty("--i", i)));
-    const stickyOK = () => rich() && innerWidth > 900;
-    const setStep = (n) => {
-      rows.forEach((r, i) => r.classList.toggle("row-on", i < n));
-      caps.forEach((c) => c.classList.toggle("on", +c.dataset.step === n));
-    };
-    const onScroll = () => {
-      if (!stickyOK()) {
-        document.body.classList.add("how-flat");
-        setStep(4);
-        return;
-      }
-      document.body.classList.remove("how-flat");
-      const r = track.getBoundingClientRect();
-      const total = r.height - innerHeight;
-      const p = Math.min(1, Math.max(0, -r.top / total));
-      if (r.top > innerHeight) { setStep(0); return; }
-      setStep(Math.min(4, 1 + Math.floor(p * 4)));
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
-    onScroll();
-  }
 })();

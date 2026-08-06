@@ -213,42 +213,6 @@ const ld = {
 
   <div class="divider" aria-hidden="true"><span class="line"></span></div>
 
-  <section id="how">
-    <div class="how-track">
-      <div class="how-stage">
-        <div class="wrap">
-          <div class="sec-head center reveal">
-            <span class="kicker"><span class="l-en">Under the hood</span><span class="l-zh">技术细节</span></span>
-            <h2><span class="l-en">Hour six costs about what <span class="em">hour one did.</span></span><span class="l-zh">跑到第六小时,成本和<span class="em">第一小时差不多。</span></span></h2>
-            <p><span class="l-en">The history is append-only, so each request replays a byte-identical prefix and the model only computes what's new. It's an implementation detail — it just happens to be the one that decides whether leaving the agent running is something you can afford.</span><span class="l-zh">历史是 append-only 的,每次请求重放逐字节相同的前缀,模型只计算新增部分。这只是一个实现细节——只不过它恰好决定了「让 agent 一直跑着」你负不负担得起。</span></p>
-          </div>
-          <div class="cache-panel reveal">
-            <div class="cache-grid">
-              <div class="cache-steps">
-                <span class="cap" data-step="1"><span class="n">01</span><span class="l-en">Cold start — everything is computed</span><span class="l-zh">冷启动——全部需要计算</span></span>
-                <span class="cap" data-step="2"><span class="n">02</span><span class="l-en">The previous turn replays from cache</span><span class="l-zh">上一轮全部从缓存重放</span></span>
-                <span class="cap" data-step="3"><span class="n">03</span><span class="l-en">Only the new request is computed</span><span class="l-zh">只计算新增的请求</span></span>
-                <span class="cap" data-step="4"><span class="n">04</span><span class="l-en">90%+ cache hit — cheaper every turn</span><span class="l-zh">命中 90%+——越跑越便宜</span></span>
-              </div>
-              <div class="cache-rows-wrap">
-                <div class="cache-row"><span class="lbl">turn 1</span><span class="blk new"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 2</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 3</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-row"><span class="lbl">turn 4</span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk hit"></span><span class="blk new"></span><span class="blk new"></span></div>
-                <div class="cache-legend">
-                  <span><i style="background: var(--accent);"></i><span class="l-en">new tokens — computed</span><span class="l-zh">新 token——需要计算</span></span>
-                  <span><i style="background: color-mix(in oklch, var(--accent) 12%, transparent); border: 1px solid color-mix(in oklch, var(--accent) 40%, transparent);"></i><span class="l-en">cached prefix — replayed, billed at ~1/5</span><span class="l-zh">缓存前缀——重放,约 1/5 计费</span></span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <div class="divider" aria-hidden="true"><span class="line"></span></div>
-
   <section>
     <div class="wrap">
       <div class="steps">
