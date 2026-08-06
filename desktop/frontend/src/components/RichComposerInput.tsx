@@ -16,6 +16,8 @@ import {
   sortComposerInvocations,
   type ComposerInvocation,
 } from "../lib/invocationDisplay";
+import { useT } from "../lib/i18n";
+import { localizedCommandDescription } from "../lib/slashI18n";
 import { activeRefTokenRe } from "../lib/refToken";
 import type { CommandInfo } from "../lib/types";
 import { InvocationBadge } from "./InvocationBadge";
@@ -516,6 +518,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
   onCompositionStart,
   onCompositionEnd,
 }, ref) => {
+  const t = useT();
   const rootRef = useRef<HTMLDivElement>(null);
   const pendingSelectionRef = useRef<PendingSelection>(null);
   // contentEditable mutates its DOM before input fires. Keep that browser-owned
@@ -878,7 +881,7 @@ export const RichComposerInput = forwardRef<RichComposerInputHandle, {
         <InvocationBadge
           invocation={invocation}
           kind={invocation.kind}
-          description={item.command.description}
+          description={localizedCommandDescription(item.command, t)}
           onRemove={() => {
             const current = known.get(item.id);
             const currentOffset = current?.offset ?? offset;

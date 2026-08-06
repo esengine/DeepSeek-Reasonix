@@ -50,7 +50,7 @@ if (localeChunks.length !== 2) {
 }
 for (const path of localeChunks) {
   const name = basename(path);
-  const budget = name.startsWith("zh-TW-") ? 53 * 1024 : 52 * 1024;
+  const budget = name.startsWith("zh-TW-") ? 57 * 1024 : 56 * 1024;
   assertBudget(`${name} gzip`, gzipBytes(path), budget);
 }
 

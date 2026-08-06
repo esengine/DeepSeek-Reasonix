@@ -1,4 +1,6 @@
 import { useEffect, useRef } from "react";
+import { useT } from "../lib/i18n";
+import { localizedArgHint } from "../lib/slashI18n";
 import type { SlashArgItem } from "../lib/types";
 
 // ArgMenu is the autocomplete dropdown for a slash command's arguments (the part
@@ -7,15 +9,18 @@ import type { SlashArgItem } from "../lib/types";
 // owns filtering, the active index, and key handling. Reuses .slashmenu styling.
 export function ArgMenu({
   items,
+  commandName,
   activeIndex,
   onPick,
   onHover,
 }: {
   items: SlashArgItem[];
+  commandName?: string;
   activeIndex: number;
   onPick: (it: SlashArgItem) => void;
   onHover: (i: number) => void;
 }) {
+  const t = useT();
   // Keep the keyboard-selected item in view (the list overflows at 280px).
   const activeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -37,7 +42,7 @@ export function ArgMenu({
           onMouseMove={() => onHover(i)}
         >
           <span className="slashmenu__name">{it.label}</span>
-          {it.hint && <span className="slashmenu__hint">{it.hint}</span>}
+          {it.hint && <span className="slashmenu__hint">{commandName ? localizedArgHint(commandName, it.label, t) ?? it.hint : it.hint}</span>}
         </button>
       ))}
     </div>
