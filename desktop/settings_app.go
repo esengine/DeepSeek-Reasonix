@@ -1901,18 +1901,19 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRuntimeSnapshot, runtime normalizedTabRuntime, model, prevPath, setting string, oldCtrl control.SessionAPI, carried []provider.Message, reload bool) (control.SessionAPI, normalizedTabRuntime, string, error) {
 	opts := boot.Options{
 		Model: model, RequireKey: false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     snap.sink,
-		WorkspaceRoot:            snap.workspaceRoot,
-		SessionDir:               sessionDirForSnapshot(snap),
-		EffortOverride:           cloneStringPtr(snap.effort),
-		TokenMode:                runtime.tokenMode,
-		SharedHost:               a.lookupSharedHost(snap.sharedHostKey),
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		AutoPricingCurrency:       a.desktopAutoPricingCurrency(),
+		StatsSource:               "desktop",
+		Sink:                      snap.sink,
+		WorkspaceRoot:             snap.workspaceRoot,
+		SessionDir:                sessionDirForSnapshot(snap),
+		EffortOverride:            cloneStringPtr(snap.effort),
+		TokenMode:                 runtime.tokenMode,
+		SharedHost:                a.lookupSharedHost(snap.sharedHostKey),
+		CleanupPendingReconciler:  reconcileDesktopCleanupPending,
+		SubagentParentLive:        a.subagentParentProbeForBuild(tab),
+		SubagentCleanupSerialized: a.serializedSubagentCleanup,
+		SessionRecoveryMeta:       a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:        a.handleTabSessionRecovered(tab),
 	}
 	if reload && oldCtrl != nil {
 		old, ok := oldCtrl.(*control.Controller)

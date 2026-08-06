@@ -144,13 +144,13 @@ func TestSubagentEffectiveIdentityUsesAuthoritativeExternalResolver(t *testing.T
 }
 
 func TestNewSubagentStoreRequiresSessionDir(t *testing.T) {
-	if got, err := newSubagentStore("", nil); err != nil || got != nil {
+	if got, err := newSubagentStore("", nil, nil); err != nil || got != nil {
 		if err != nil {
 			t.Fatalf("empty session dir error = %v", err)
 		}
 		t.Fatalf("empty session dir should disable subagent store, got %#v", got)
 	}
-	if got, err := newSubagentStore(t.TempDir(), nil); err != nil || got == nil {
+	if got, err := newSubagentStore(t.TempDir(), nil, nil); err != nil || got == nil {
 		if err != nil {
 			t.Fatalf("non-empty session dir error = %v", err)
 		}
@@ -180,7 +180,7 @@ func TestNewSubagentStoreCleansStaleRunningRefs(t *testing.T) {
 	ref := run.Ref
 	run.Release()
 
-	got, err := newSubagentStore(sessionDir, nil)
+	got, err := newSubagentStore(sessionDir, nil, nil)
 	if err != nil {
 		t.Fatalf("newSubagentStore: %v", err)
 	}
