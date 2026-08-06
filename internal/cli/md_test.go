@@ -1,8 +1,12 @@
 package cli
 
 import (
+	"net/url"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 )
 
 // TestRenderEmpty covers the contract that empty / whitespace-only input
@@ -97,6 +101,52 @@ func TestRenderConstructs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRenderLinksAsTerminalHyperlinks(t *testing.T) {
+	root := t.TempDir()
+	r := newMarkdownRendererWithWorkspaceRoot(120, root)
+	localPath := filepath.Join(root, filepath.FromSlash(".omc/research/mockup.html"))
+	wantLocal := (&url.URL{Scheme: "file", Path: localPath}).String()
+
+	local := r.Render("[mockup](.omc/research/mockup.html)")
+	wantLocalSequence := terminalHyperlinkStart + wantLocal + "\x1b\\mockup" + terminalHyperlinkClose
+	if !strings.Contains(local, wantLocalSequence) {
+		t.Fatalf("local Markdown link did not render as an OSC 8 hyperlink:\n%q\nwant sequence %q", local, wantLocalSequence)
+	}
+	if plain := ansi.Strip(local); !strings.Contains(plain, "mockup (.omc/research/mockup.html)") {
+		t.Fatalf("local link destination disappeared from visible output: %q", plain)
+	}
+
+	external := r.Render("[docs](https://example.com/reasonix/docs)")
+	wantExternalSequence := terminalHyperlinkStart + "https://example.com/reasonix/docs" + "\x1b\\docs" + terminalHyperlinkClose
+	if !strings.Contains(external, wantExternalSequence) {
+		t.Fatalf("external Markdown link did not render as an OSC 8 hyperlink:\n%q\nwant sequence %q", external, wantExternalSequence)
+	}
+
+	if got := visibleWidth(local); got != visibleWidth("mockup (.omc/research/mockup.html)\n") {
+		t.Fatalf("OSC 8 changed the visible width: got %d, want %d", got, visibleWidth("mockup (.omc/research/mockup.html)\n"))
+	}
+}
+
+func TestRenderCopyOmitsTerminalHyperlinkControls(t *testing.T) {
+	r := newMarkdownRendererWithWorkspaceRoot(120, t.TempDir())
+	got := r.RenderCopy("[mockup](.omc/research/mockup.html)", "copy")
+	if strings.Contains(got, terminalHyperlinkStart) || strings.Contains(got, terminalHyperlinkClose) {
+		t.Fatalf("copy rendering leaked OSC 8 controls: %q", got)
+	}
+	if !strings.Contains(got, "mockup (.omc/research/mockup.html)") {
+		t.Fatalf("copy rendering lost link text or destination: %q", got)
+	}
+}
+
+func TestMarkdownLinkTargetRejectsUnsupportedOrUnsafeDestinations(t *testing.T) {
+	r := newMarkdownRendererWithWorkspaceRoot(80, t.TempDir())
+	for _, destination := range []string{"#section", "javascript:alert(1)", "https://example.com/\x1b]8;;evil"} {
+		if got := r.markdownLinkTarget(destination); got != "" {
+			t.Errorf("markdownLinkTarget(%q) = %q, want empty", destination, got)
+		}
 	}
 }
 

@@ -649,7 +649,7 @@ func runAgent(args []string, version string) int {
 			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
 				termW = w
 			}
-			renderer = newMarkdownRenderer(termW)
+			renderer = newMarkdownRendererWithWorkspaceRoot(termW, workspaceRoot)
 		}
 		textSink := agent.NewTextSink(os.Stdout, renderer, termW)
 		textSink.SetShowReasoning(*showThinking)
