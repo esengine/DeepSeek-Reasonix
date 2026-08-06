@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
@@ -371,16 +373,13 @@ func normalizedMCPMigrationRoots(roots []string) []string {
 func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	missing := map[string]string{}
 	skip := func(key string) bool {
-		return credentialCurrentStoreHasKey(key) || credentialCurrentStoreClearedKey(key)
+		return credentialCurrentStoreHasKey(key) ||
+			credentialCurrentStoreClearedKey(key) ||
+			legacyKeyringMigrationDone(key)
 	}
-	for _, key := range credentialEnvNamesForRoot(root) {
-		if skip(key) {
-			continue
-		}
-		if value, ok := legacyKeyringCredentialValueLookup(key); ok {
-			missing[key] = value
-		}
-	}
+	// Prefer legacy credential files first so a healthy file import does not
+	// depend on Secret Service / D-Bus. Keyring probes run only for remaining
+	// keys, under a shared 1s budget so a stuck bus cannot hang startup (#7507).
 	for _, src := range legacyCredentialsPaths() {
 		if src == "" {
 			continue
@@ -396,11 +395,116 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 			}
 		}
 	}
+	keys := credentialEnvNamesForRoot(root)
+	needKeyring := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if skip(key) {
+			continue
+		}
+		if _, exists := missing[key]; exists {
+			continue
+		}
+		needKeyring = append(needKeyring, key)
+	}
+	if len(needKeyring) > 0 {
+		values, completed, timedOut := lookupLegacyKeyringBatch(needKeyring, legacyKeyringLookupTimeout)
+		for _, key := range needKeyring {
+			if !completed[key] {
+				// Timed out before this key finished — no marker, retry later.
+				_ = timedOut
+				continue
+			}
+			if value := strings.TrimSpace(values[key]); value != "" {
+				missing[key] = value
+				continue
+			}
+			// Successful empty lookup: mark done so we do not re-probe forever.
+			_ = markLegacyKeyringMigrationDone(key)
+		}
+	}
 	if len(missing) == 0 {
 		return nil
 	}
 	_, err := StoreCredentialLines(credentialLines(missing))
 	return err
+}
+
+// lookupLegacyKeyringBatch probes the legacy keyring for the given keys under a
+// single shared deadline. completed marks keys whose lookup returned before the
+// budget expired (including empty successes). timedOut is true when the budget
+// expired with keys still outstanding; partial successes remain in values.
+func lookupLegacyKeyringBatch(keys []string, budget time.Duration) (values map[string]string, completed map[string]bool, timedOut bool) {
+	values = map[string]string{}
+	completed = map[string]bool{}
+	if len(keys) == 0 {
+		return values, completed, false
+	}
+	if budget <= 0 {
+		budget = time.Second
+	}
+	type result struct {
+		key   string
+		value string
+		ok    bool
+	}
+	ch := make(chan result, len(keys))
+	for _, key := range keys {
+		key := key
+		go func() {
+			// Use the package lookup hook so tests can inject fakes and so the
+			// default timeout wrapper still bounds a single stuck keyring call.
+			value, ok := legacyKeyringCredentialValueLookup(key)
+			ch <- result{key: key, value: value, ok: ok}
+		}()
+	}
+	deadline := time.NewTimer(budget)
+	defer deadline.Stop()
+	remaining := len(keys)
+	for remaining > 0 {
+		select {
+		case r := <-ch:
+			remaining--
+			completed[r.key] = true
+			if r.ok {
+				values[r.key] = r.value
+			} else {
+				values[r.key] = ""
+			}
+		case <-deadline.C:
+			return values, completed, true
+		}
+	}
+	return values, completed, false
+}
+
+func legacyKeyringMigrationMarkerPath(key string) string {
+	home := ReasonixHomeDir()
+	if strings.TrimSpace(home) == "" || strings.TrimSpace(key) == "" {
+		return ""
+	}
+	// Hash the env name so filesystem-safe markers never embed secrets.
+	sum := sha256.Sum256([]byte(key))
+	return filepath.Join(home, "state", "legacy-keyring-migrated", fmt.Sprintf("%x", sum[:8]))
+}
+
+func legacyKeyringMigrationDone(key string) bool {
+	path := legacyKeyringMigrationMarkerPath(key)
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func markLegacyKeyringMigrationDone(key string) error {
+	path := legacyKeyringMigrationMarkerPath(key)
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte("v1\n"), 0o644)
 }
 
 func credentialLines(assignments map[string]string) []string {

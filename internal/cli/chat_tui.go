@@ -48,6 +48,10 @@ type chatTUI struct {
 	ctrl    control.SessionAPI
 	label   string
 	missing string // missing-key warning surfaced once in the banner, "" when ready
+	// diagnostics is the process-owned TUI log/watchdog started before terminal
+	// takeover. Nil in unit tests that construct chatTUI without chatREPL.
+	diagnostics      *tuiDiagnostics
+	firstFrameLogged bool
 
 	width  int
 	height int
@@ -845,6 +849,17 @@ func suspendWithMouseReset() tea.Cmd {
 }
 
 func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Feed the startup/stall watchdog so freezes leave a goroutine dump and
+	// recover the terminal instead of a zero-byte log (#7435).
+	if m.diagnostics != nil {
+		m.diagnostics.markProgress()
+	}
+	logFirstFrame := false
+	if m.diagnostics != nil && !m.firstFrameLogged {
+		if _, ok := msg.(tea.WindowSizeMsg); ok {
+			logFirstFrame = true
+		}
+	}
 	wasAtBottom := m.viewport.AtBottom()
 	prevLines := len(m.transcript)
 	prevWidth := m.width
@@ -856,6 +871,12 @@ func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	next, cmd := m.update(msg)
 	cm := next.(chatTUI)
+	if logFirstFrame {
+		cm.firstFrameLogged = true
+		if cm.diagnostics != nil {
+			cm.diagnostics.Milestone("first_frame")
+		}
+	}
 
 	contentW := transcriptContentWidth(cm.width, cm.nativeScrollback)
 	cm.viewport.SetWidth(contentW)

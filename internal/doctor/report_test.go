@@ -3,6 +3,7 @@ package doctor
 import (
 	"encoding/json"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -153,5 +154,27 @@ func TestCollectFlagsIgnoredEnforceConfig(t *testing.T) {
 	plain := RenderText(Report{Sandbox: SandboxReport{Bash: "off"}})
 	if strings.Contains(plain, "ignored") {
 		t.Fatalf("plain off must not claim the config was ignored:\n%s", plain)
+	}
+}
+
+func TestHomeIsolationWarningDetectsMismatch(t *testing.T) {
+	// Prefer a synthetic mismatch without requiring root privileges.
+	acct, err := user.Current()
+	if err != nil || acct == nil || strings.TrimSpace(acct.HomeDir) == "" {
+		t.Skip("account home unavailable")
+	}
+	t.Setenv("REASONIX_HOME", "")
+	t.Setenv("HOME", filepath.Join(t.TempDir(), "service-home"))
+	t.Setenv("USERPROFILE", os.Getenv("HOME"))
+	got := homeIsolationWarning()
+	if got == "" {
+		t.Fatal("expected HOME mismatch warning")
+	}
+	if !strings.Contains(got, "REASONIX_HOME") {
+		t.Fatalf("warning = %q, want REASONIX_HOME guidance", got)
+	}
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	if got := homeIsolationWarning(); got != "" {
+		t.Fatalf("REASONIX_HOME set should silence warning, got %q", got)
 	}
 }

@@ -1049,16 +1049,18 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	// Bubble Tea owns the terminal from the resume picker through controller
+	// shutdown. Start diagnostics before config/controller work so hangs leave a
+	// non-zero log with milestones (#7435, #7507).
+	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
+	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_begin")
 	cfg, err := config.Load()
 	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
 		cliCursorShape = cfg.UICursorShape()
 	}
-	// Bubble Tea owns the terminal from the resume picker through controller
-	// shutdown. Route process logs and plugin stderr to a private, bounded file
-	// for that whole lifetime; user-facing warnings arrive as typed TUI events.
-	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
-	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_done")
 
 	// Decide whether we're starting fresh or resuming. --resume opens an
 	// interactive picker; --continue / -c jumps straight into the newest.
@@ -1154,6 +1156,7 @@ func chatREPL(args []string, version string) int {
 		Stderr:             diagnostics.Writer(),
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	}
+	diagnostics.Milestone("controller_build_begin")
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, profile, overrides)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
@@ -1169,6 +1172,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	diagnostics.Milestone("controller_build_done")
 
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
@@ -1231,9 +1235,10 @@ func chatREPL(args []string, version string) int {
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m.diagnostics = diagnostics
 	m.planMode = permissions.plan
 	m.leases = leases
-	if cfg, err := config.Load(); err == nil {
+	if cfg != nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
 		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
@@ -1310,7 +1315,9 @@ func chatREPL(args []string, version string) int {
 	// Non-Termux terminals use an alt-screen transcript viewport. Termux stays
 	// in the normal buffer so native touch scrollback and soft-keyboard focus
 	// keep working; finalized transcript lines are emitted via tea.Println.
+	diagnostics.Milestone("terminal_takeover_begin")
 	p := tea.NewProgram(m)
+	diagnostics.StartWatchdog(p)
 	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
 	// before the terminal goes away, then unwind through the normal close path
 	// so resume picks up the interrupted session (#3772).
@@ -1323,6 +1330,7 @@ func chatREPL(args []string, version string) int {
 	}()
 	final, runErr := p.Run()
 	signal.Stop(hangup)
+	diagnostics.Milestone("terminal_released")
 	// Close the active controller plus any retired ones from /model switches.
 	// Retired controllers were stashed rather than closed at switch time
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
