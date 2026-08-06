@@ -3,11 +3,11 @@
 </p>
 
 <p align="center">
-  <strong>English</strong>
+  <a href="./README.md">English</a>
   &nbsp;·&nbsp;
   <a href="./README.zh-CN.md">简体中文</a>
   &nbsp;·&nbsp;
-  <a href="./README.ru.md">Русский</a>
+  <strong>Русский</strong>
   &nbsp;·&nbsp;
   <a href="./docs/GUIDE.md">Guide</a>
   &nbsp;·&nbsp;
@@ -41,76 +41,75 @@
 
 <br/>
 
-<h3 align="center">A DeepSeek-native AI coding agent for your terminal.</h3>
-<p align="center">A config- and plugin-driven harness — a single static Go binary, tuned around DeepSeek's prefix cache so token costs stay low across long sessions.</p>
+<h3 align="center">DeepSeek-native AI coding agent для вашего терминала.</h3>
+<p align="center">Тонкий harness на конфигурации и плагинах — один статический Go-бинарник, заточенный под prefix cache DeepSeek, чтобы стоимость токенов оставалась низкой в длинных сессиях.</p>
 
 <br/>
 
 > [!IMPORTANT]
-> **Community · 加入社区** — bilingual Discord for setup help (`#help` / `#求助`), workflow showcases, and feature ideas. → **<https://discord.gg/XF78rEME2D>**
+> **Community · 加入社区 · Сообщество** — bilingual Discord: помощь с установкой (`#help` / `#求助`), воркфлоу и идеи фич. → **<https://discord.gg/XF78rEME2D>**
 
 <br/>
 
-## Features
+## Возможности
 
-- **Config-driven.** Providers, the agent, enabled tools, and plugins are all
-  declared in `reasonix.toml`. No hardcoded models.
-- **Multi-model & composable.** DeepSeek ships as a preset; any
-  OpenAI-compatible endpoint is a config entry, not new code. Optionally run
-  two models together (executor + planner) in separate, cache-stable sessions.
-- **Plugin-driven.** MCP servers contribute tools, prompts, and resources;
-  Extension Protocol v1 sidecars can also intercept runtime events, contribute
-  Providers and structured UI, and ship versioned plugin packages.
-- **Cache-aware context maintenance.** Startup injects a small stable environment
-  summary, stale tool output is snipped/pruned before summary compaction, and the
-  built-in tool schema contract is documented for regression review.
+- **Config-driven.** Providers, agent, включённые tools и plugins объявляются в
+  `reasonix.toml`. Модели не захардкожены.
+- **Multi-model и composable.** DeepSeek идёт как preset; любой
+  OpenAI-compatible endpoint — это запись в конфиге, а не новый код. Опционально
+  два модели вместе (executor + planner) в отдельных cache-stable sessions.
+- **Plugin-driven.** MCP servers дают tools, prompts и resources;
+  Extension Protocol v1 sidecars могут перехватывать runtime events, добавлять
+  Providers и structured UI, а также поставлять versioned plugin packages.
+- **Cache-aware обслуживание контекста.** При старте — небольшой стабильный
+  environment summary; устаревший tool output snip/prune до summary compaction;
+  built-in tool schema contract задокументирован для regression review.
 - **Zero-friction distribution.** `CGO_ENABLED=0` single binary; cross-compile
-  to six targets with one command. The result is a fully self-contained static
-  binary — nothing to install on the target machine beyond the binary itself.
+  на шесть targets одной командой. На целевой машине нужен только сам бинарник.
 
-## Install
+## Установка
 
-Choose the path that matches how you want to use Reasonix. The CLI/TUI,
-desktop app, and VS Code extension all use the same local Reasonix engine.
+Выберите путь под ваш сценарий. CLI/TUI, desktop app и VS Code extension
+используют один и тот же локальный движок Reasonix.
 
-### Path A: CLI / TUI
+### Путь A: CLI / TUI
 
-Install the native binary through npm on any supported platform, or use
-Homebrew on macOS:
+Установите native binary через npm на любой supported platform или через
+Homebrew на macOS:
 
 ```sh
 npm i -g reasonix                  # any OS; pulls the prebuilt native binary
 brew install esengine/reasonix/reasonix   # macOS
 ```
 
-Prebuilt archives (`darwin|linux|windows × amd64|arm64`) and `SHA256SUMS` are on
-every [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
+Prebuilt archives (`darwin|linux|windows × amd64|arm64`) и `SHA256SUMS` — в
+каждом [GitHub release](https://github.com/esengine/DeepSeek-Reasonix/releases).
 
-### Path B: Desktop app
+### Путь B: Desktop app
 
-Use the [official download page](https://reasonix.io/?download=desktop#start)
-for the latest desktop build.
+Актуальную desktop-сборку берите на
+[официальной странице загрузок](https://reasonix.io/?download=desktop#start).
 
-| Platform | Package | Architecture |
+| Платформа | Пакет | Архитектура |
 | --- | --- | --- |
-| macOS | Universal `.dmg` or `.zip` | Apple Silicon / Intel |
-| Windows | Installer `.exe` or portable `.zip` | x64 / ARM64 |
-| Linux | `.deb` or `.tar.gz` | x64 |
+| macOS | Universal `.dmg` или `.zip` | Apple Silicon / Intel |
+| Windows | Installer `.exe` или portable `.zip` | x64 / ARM64 |
+| Linux | `.deb` или `.tar.gz` | x64 |
 
-Windows installers are code-signed through [SignPath.io](https://signpath.io/)
-with a free certificate provided by the [SignPath Foundation](https://signpath.org/).
+Windows-installer’ы code-signed через [SignPath.io](https://signpath.io/)
+бесплатным сертификатом [SignPath Foundation](https://signpath.org/).
 
-### Path C: VS Code extension
+### Путь C: VS Code extension
 
-Complete Path A first. The extension does not bundle the CLI; it starts your
-local `reasonix acp` backend and adds native chat, editor context, tool-call
-approvals, model selection, and workspace sessions.
+Сначала завершите путь A. Расширение **не** бандлит CLI: оно стартует локальный
+бэкенд `reasonix acp` и добавляет native chat, editor context, tool-call
+approvals, выбор модели и workspace sessions.
 
-- **VS Code:** [install from Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=SivanLiu.reasonix-agent)
-- **VSCodium / Eclipse Theia:** [install from Open VSX Registry](https://open-vsx.org/extension/SivanLiu/reasonix-agent)
-- **Extension ID:** `SivanLiu.reasonix-agent` · [source and usage guide](https://github.com/SivanCola/reasonix-vscode)
+- **VS Code:** [Visual Studio Marketplace](https://marketplace.visualstudio.com/items?itemName=SivanLiu.reasonix-agent)
+- **VSCodium / Eclipse Theia:** [Open VSX Registry](https://open-vsx.org/extension/SivanLiu/reasonix-agent)
+- **Extension ID:** `SivanLiu.reasonix-agent` · [исходники и гайд](https://github.com/SivanCola/reasonix-vscode)
 
-### Path D: Build from source
+### Путь D: Сборка из исходников
 
 ```sh
 git clone https://github.com/esengine/DeepSeek-Reasonix.git
@@ -119,11 +118,11 @@ make build      # -> bin/reasonix(.exe)
 make cross      # -> dist/ (darwin|linux|windows × amd64|arm64)
 ```
 
-## Quick start
+## Быстрый старт
 
 ### CLI / TUI
 
-These commands are for the CLI/TUI installed through Path A:
+Команды для CLI/TUI, установленного через путь A:
 
 ```sh
 reasonix setup                      # configure a provider and model
@@ -131,25 +130,28 @@ reasonix                            # start an interactive session
 reasonix run "implement the TODOs in main.go"
 ```
 
-In an interactive session, run `/init` when you want Reasonix to create project
-instructions.
+В интерактивной сессии выполните `/init`, когда нужно, чтобы Reasonix создал
+project instructions.
 
 ### Desktop app
 
-Download the installer for your platform from the
-[official download page](https://reasonix.io/?download=desktop#start), install
-and launch Reasonix, then configure a provider and model in the app. The CLI
-commands above are not required for the desktop app.
+Скачайте installer для своей платформы с
+[официальной страницы загрузок](https://reasonix.io/?download=desktop#start),
+установите и запустите Reasonix, затем настройте provider и model в приложении.
+CLI-команды выше для desktop не обязательны.
 
-For advanced CLI usage and configuration, see the **[CLI reference](./docs/CLI.md)**,
-**[Guide](./docs/GUIDE.md)**, and
+Продвинутый CLI и конфигурация: **[CLI reference](./docs/CLI.md)**,
+**[Guide](./docs/GUIDE.md)** и
 **[configuration paths](./docs/CONFIG_PATHS.md)**.
 
-## Documentation
+## Документация
 
-- **Getting started:** [Guide](./docs/GUIDE.md) · [CLI reference](./docs/CLI.md) ·
+Сейчас подробные docs на русском ещё не переведены — ссылки ведут на английские
+версии (как fallback). Китайские варианты: `*.zh-CN.md`.
+
+- **Старт:** [Guide](./docs/GUIDE.md) · [CLI reference](./docs/CLI.md) ·
   [Configuration paths](./docs/CONFIG_PATHS.md) · [ACP editor integration](./docs/ACP.md)
-- **Features & troubleshooting:** [Subagent profiles](./docs/SUBAGENT_PROFILES.md) ·
+- **Фичи и troubleshooting:** [Subagent profiles](./docs/SUBAGENT_PROFILES.md) ·
   [Context Engine v2](./docs/SESSION_MEMORY_RETRIEVAL.md) ·
   [Capability diagnostics](./docs/CAPABILITY_DIAGNOSTICS.md) ·
   [Recovery and updates](./docs/RECOVERY.md) · [Bot guide](./docs/BOT_GUIDE.md) ·
@@ -174,10 +176,10 @@ For advanced CLI usage and configuration, see the **[CLI reference](./docs/CLI.m
 
 <br/>
 
-## Acknowledgments
+## Благодарности
 
-A small list of folks whose work has shaped Reasonix the most — the current top
-20 contributors by commit count. The full contributor graph is on
+Небольшой список людей, чья работа сильнее всего сформировала Reasonix —
+текущий top 20 contributors по числу коммитов. Полный граф:
 [GitHub](https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors?all=1).
 
 <!-- reasonix-top-contributors:start -->
@@ -190,9 +192,9 @@ A small list of folks whose work has shaped Reasonix the most — the current to
 | [**CnsMaple**](https://github.com/CnsMaple) | [**cyq1017**](https://github.com/cyq1017) | [**JesonChou**](https://github.com/JesonChou) | [**XTLine**](https://github.com/XTLine) |
 <!-- reasonix-top-contributors:end -->
 
-Also a separate thank-you to [**Bernardxu123**](https://github.com/Bernardxu123)
-for designing the project logo, and to
-[AIGC Link](https://xhslink.com/m/80ngts127cA) for promoting the project on XiaoHongShu.
+Отдельное спасибо [**Bernardxu123**](https://github.com/Bernardxu123)
+за дизайн логотипа проекта и
+[AIGC Link](https://xhslink.com/m/80ngts127cA) за промо на XiaoHongShu.
 
 <p align="center">
   <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">
@@ -205,18 +207,17 @@ for designing the project logo, and to
 ---
 
 <p align="center">
-  <sub>MIT — see <a href="./LICENSE">LICENSE</a></sub>
+  <sub>MIT — см. <a href="./LICENSE">LICENSE</a></sub>
   <br/>
   <sub>Built by the community at <a href="https://github.com/esengine/DeepSeek-Reasonix/graphs/contributors">esengine/DeepSeek-Reasonix</a></sub>
 </p>
 
 ---
 
-<p align="center"><sub><strong>Support this project</strong></sub></p>
+<p align="center"><sub><strong>Поддержать проект</strong></sub></p>
 
-If Reasonix has been useful and you'd like to say thanks, you can. It stays a
-coffee, not a contract — donations don't buy feature priority or change how
-issues get triaged.
+Если Reasonix оказался полезен и хочется сказать «спасибо» — можно. Это
+кофе, а не контракт: донаты не покупают приоритет фич и не меняют triage issues.
 
 - **International** — PayPal: [paypal.me/yuhuahui](https://paypal.me/yuhuahui)
 - **国内** — 微信支付（扫码）
