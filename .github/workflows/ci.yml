@@ -30,13 +30,14 @@ jobs:
       desktop: ${{ steps.filter.outputs.desktop }}
       site: ${{ steps.filter.outputs.site }}
       sdk: ${{ steps.filter.outputs.sdk }}
+      workers: ${{ steps.filter.outputs.workers }}
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - id: filter
         run: |
-          code=true; desktop=true; site=true; sdk=true
+          code=true; desktop=true; site=true; sdk=true; workers=true
           base=""
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
@@ -46,7 +47,7 @@ jobs:
           if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
             files=$(git diff --name-only "$base" HEAD)
             if [ -n "$files" ]; then
-              code=false; desktop=false; site=false; sdk=false
+              code=false; desktop=false; site=false; sdk=false; workers=false
               # Root-module CI: desktop/ is a separate module, so only the
               # clearly unrelated paths below can skip it.
               if echo "$files" | grep -qvE '^(docs/|site/|release-notes/|desktop/|workers/|[^/]+\.md$)'; then code=true; fi
@@ -58,9 +59,11 @@ jobs:
               # its DTOs are generated from internal/extension/protocol, so
               # both paths must trigger the sdk job.
               if echo "$files" | grep -qE '^(sdk/|internal/extension/)'; then sdk=true; fi
+              # workers/ (Cloudflare Workers) are covered by their own job.
+              if echo "$files" | grep -q '^workers/'; then workers=true; fi
             fi
           fi
-          { echo "code=$code"; echo "desktop=$desktop"; echo "site=$site"; echo "sdk=$sdk"; } >> "$GITHUB_OUTPUT"
+          { echo "code=$code"; echo "desktop=$desktop"; echo "site=$site"; echo "sdk=$sdk"; echo "workers=$workers"; } >> "$GITHUB_OUTPUT"
 
   # The ruleset requires the per-OS check names (test (ubuntu-latest) etc.).
   # A matrix job skipped at job level reports no per-leg checks at all, so
@@ -458,6 +461,67 @@ jobs:
         timeout-minutes: 20
         run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
 
+  # workers/ (Cloudflare Workers) are excluded from the root Go matrix and the
+  # desktop jobs above, so they previously had no PR-time coverage — their
+  # tests and typechecks ran only on main-v2 pushes (deploy-*-worker.yml).
+  # Run each worker's vitest suite and tsc --noEmit on every PR touching
+  # workers/. accounts/ and forum/ use pnpm; crash-report/ uses npm.
+  workers:
+    needs: changes
+    if: always()
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: workers/accounts
+            pkg: pnpm
+            lockfile: workers/accounts/pnpm-lock.yaml
+            install: pnpm install --frozen-lockfile
+          - dir: workers/crash-report
+            pkg: npm
+            lockfile: workers/crash-report/package-lock.json
+            install: npm ci
+          - dir: workers/forum
+            pkg: pnpm
+            lockfile: workers/forum/pnpm-lock.yaml
+            install: pnpm install --frozen-lockfile
+    runs-on: ubuntu-latest
+    env:
+      RUN_STEPS: ${{ github.event_name != 'pull_request' || needs.changes.outputs.workers != 'false' }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/checkout@v7
+
+      # pnpm must be on PATH before setup-node so its pnpm cache can locate
+      # the store (same order as the desktop job).
+      - if: env.RUN_STEPS == 'true' && matrix.pkg == 'pnpm'
+        uses: pnpm/action-setup@v6.0.9
+        with:
+          version: 10
+          run_install: false
+
+      - if: env.RUN_STEPS == 'true'
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: ${{ matrix.pkg }}
+          cache-dependency-path: ${{ matrix.lockfile }}
+
+      - name: Install dependencies
+        if: env.RUN_STEPS == 'true'
+        run: ${{ matrix.install }}
+
+      - name: test
+        if: env.RUN_STEPS == 'true'
+        run: ${{ matrix.pkg }} test
+
+      - name: typecheck
+        if: env.RUN_STEPS == 'true'
+        run: ${{ matrix.pkg }} run typecheck
+
   lint:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
@@ -510,9 +574,10 @@ jobs:
           node scripts/check-single-release-public-contract.mjs
 
   # The site/ auth client has security-sensitive redirect-validation logic
-  # (safeNext) covered by node:test unit tests. Those tests use only Node
-  # builtins, so no `npm install` is needed — run them directly on every PR so
-  # a regression in redirect validation fails the build instead of shipping.
+  # (safeNext) covered by node:test unit tests, and `npm run build` catches
+  # .astro compile errors that previously surfaced only on main-v2 deploys
+  # (pages.yml). Run both on every PR so regressions fail the build instead
+  # of shipping.
   site:
     needs: changes
     if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.site != 'false')
@@ -526,9 +591,18 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
 
       - name: test
         run: npm test
+
+      - name: build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npm ci
+          npm run build
 
   govulncheck:
     needs: changes
