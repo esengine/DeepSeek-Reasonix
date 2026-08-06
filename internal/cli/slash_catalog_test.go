@@ -79,14 +79,12 @@ func TestCtrlDForwardDeletesWhitespaceOnly(t *testing.T) {
 	m.input.SetValue("   ")
 	m.input.SetCursorColumn(0)
 	msg := tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
-	out, cmd := m.Update(msg)
+	out, _ := m.Update(msg)
 	m = out.(chatTUI)
-	if cmd != nil {
-		// shutdown cmd would be non-nil; forward-delete may still return nil cmd
-	}
 	if got := m.input.Value(); got == "   " {
 		// At least one space should be deleted; exact remainder depends on
-		// textarea delete-forward at col 0.
+		// textarea delete-forward at col 0. Unchanged value would mean quit
+		// (or no-op) rather than forward-delete.
 		t.Fatalf("ctrl+d on whitespace-only must forward-delete, not quit; value still %q", got)
 	}
 	if m.state != tuiIdle {
@@ -109,15 +107,28 @@ func TestCtrlDQuitsWhenIdleAndEmpty(t *testing.T) {
 
 func TestActiveAtTokenFullSpanAndMidCursor(t *testing.T) {
 	val := "see @foo and more"
-	// Cursor mid-token after "@fo"
+	// Cursor mid-token after "@fo" → query is caret-limited "fo", span is full "@foo".
 	cursor := strings.Index(val, "@fo") + len("@fo")
 	at, end, tok, ok := activeAtToken(val, cursor)
-	if !ok || at != strings.Index(val, "@") || tok != "foo" {
-		// Full token is "foo" even mid-token (extends past caret to space).
-		t.Fatalf("activeAtToken mid-token = (%d,%d,%q,%v), want full token foo", at, end, tok, ok)
+	if !ok || at != strings.Index(val, "@") || tok != "fo" {
+		t.Fatalf("activeAtToken mid-token = (%d,%d,%q,%v), want query fo", at, end, tok, ok)
 	}
 	if val[at:end] != "@foo" {
-		t.Fatalf("span = %q, want @foo", val[at:end])
+		t.Fatalf("replace span = %q, want @foo (full token past caret)", val[at:end])
+	}
+}
+
+func TestMCPSurfaceReadyInvalidatesSlashCatalog(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
+	m.skills = []skill.Skill{{Name: "warm", Description: "warm"}}
+	_ = m.slashItems()
+	if !m.slashCatalogOnce {
+		t.Fatal("expected warm catalog")
+	}
+	m.ingestEvent(event.Event{Kind: event.MCPSurfaceReady})
+	if m.slashCatalogOnce {
+		t.Fatal("MCPSurfaceReady must invalidate slash catalog")
 	}
 }
 
@@ -169,46 +180,37 @@ func TestShiftTabAndBacktabBothAccepted(t *testing.T) {
 		t.Fatal("expected controller")
 	}
 
-	// Exercise the string switch arms directly via synthetic msgs. Platforms
-	// may stringify KeyTab+Shift as either "shift+tab" or "backtab"; we force
-	// both paths by calling the handler logic through Update when possible and
-	// asserting the case labels exist by cycling twice with known strings.
-	//
-	// KeyTab+ModShift:
+	// Production uses modeToggleKey for both encodings before the key switch.
+	for _, key := range []string{"shift+tab", "backtab"} {
+		if !modeToggleKey(key) {
+			t.Fatalf("modeToggleKey(%q) = false, want true", key)
+		}
+	}
+	if modeToggleKey("tab") || modeToggleKey("shift+enter") {
+		t.Fatal("modeToggleKey must not accept unrelated keys")
+	}
+
+	// Platform form: KeyTab+ModShift (typically String() == "shift+tab").
 	msg := tea.KeyPressMsg{Code: tea.KeyTab, Mod: tea.ModShift}
 	s := msg.String()
-	if s != "shift+tab" && s != "backtab" {
-		t.Fatalf("KeyTab+ModShift String() = %q", s)
+	if !modeToggleKey(s) {
+		t.Fatalf("KeyTab+ModShift String() = %q is not a mode-toggle key", s)
 	}
 	before := m.ctrl.ToolApprovalMode()
 	out, _ := m.Update(msg)
 	m = out.(chatTUI)
 	if m.ctrl.ToolApprovalMode() == before && !m.planMode {
-		t.Fatalf("%q did not cycle mode", s)
+		t.Fatalf("%q did not cycle mode via Update", s)
 	}
 
-	// Second encoding: if the first was "shift+tab", still verify "backtab"
-	// is handled by re-entering the switch with a raw message after resetting
-	// mode. We can't construct a KeyPressMsg that String()s to the other form
-	// portably, so call cycleMode once more and assert "backtab" is listed in
-	// the case clause by scanning source... instead: use update path only for
-	// the platform form and unit-check that both strings are in the switch via
-	// a tiny helper.
-	for _, key := range []string{"shift+tab", "backtab"} {
-		if !modeToggleKey(key) {
-			t.Fatalf("%q must be a recognized mode-toggle key", key)
-		}
-	}
-}
-
-// modeToggleKey reports whether s is a recognized Shift+Tab encoding for the
-// mode cycle switch in chatTUI.update (both platform forms must be listed).
-func modeToggleKey(s string) bool {
-	switch s {
-	case "shift+tab", "backtab":
-		return true
-	default:
-		return false
+	// Explicit CSI-Z / legacy "backtab" text encoding through the production
+	// Update path (Key.String returns Text when non-empty).
+	before = m.ctrl.ToolApprovalMode()
+	planBefore := m.planMode
+	out, _ = m.Update(tea.KeyPressMsg{Text: "backtab"})
+	m = out.(chatTUI)
+	if m.ctrl.ToolApprovalMode() == before && m.planMode == planBefore {
+		t.Fatal(`Update(Text:"backtab") did not cycle mode — production path must honor modeToggleKey("backtab")`)
 	}
 }
 

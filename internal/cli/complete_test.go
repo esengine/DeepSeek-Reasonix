@@ -231,8 +231,15 @@ func TestActiveAtToken(t *testing.T) {
 		if ok != c.wantOK || (ok && (tok != c.wantTok || at != c.wantAt)) {
 			t.Errorf("activeAtToken(%q) = (%d,%d,%q,%v), want (%d,_,%q,%v)", c.val, at, end, tok, ok, c.wantAt, c.wantTok, c.wantOK)
 		}
-		if ok && (end < at || end > len(c.val) || c.val[at:end] != "@"+tok) {
-			t.Errorf("activeAtToken(%q) span [%d,%d) = %q, want @%s", c.val, at, end, c.val[at:end], c.wantTok)
+		if ok {
+			if end < at || end > len(c.val) || !strings.HasPrefix(c.val[at:end], "@") {
+				t.Errorf("activeAtToken(%q) span [%d,%d) invalid", c.val, at, end)
+			}
+			// At EOF, caret-limited query equals the full token after '@'.
+			fullTok := c.val[at+1 : end]
+			if !strings.HasPrefix(fullTok, tok) {
+				t.Errorf("activeAtToken(%q) query %q is not a prefix of full token %q", c.val, tok, fullTok)
+			}
 		}
 	}
 }

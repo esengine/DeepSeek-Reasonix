@@ -70,7 +70,7 @@ func (m chatTUI) handleMCPImportKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.notice("mcp import: " + err.Error())
 			return m, nil
 		}
-		m.host = m.ctrl.Host()
+		m.refreshHostAndInvalidateSlashCatalog()
 		m.notice(fmt.Sprintf("imported %d selected MCP servers from cc-switch (%d added, %d updated, %d connected, %d failed, %d skipped)", total, added, updated, connected, failed, skipped))
 	}
 	return m, nil

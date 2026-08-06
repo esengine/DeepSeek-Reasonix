@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/fileref"
 	"reasonix/internal/i18n"
+	"reasonix/internal/plugin"
 	"reasonix/internal/skill"
 )
 
@@ -82,6 +83,24 @@ func (m *chatTUI) slashItems() []compItem {
 func (m *chatTUI) invalidateSlashCatalog() {
 	m.slashCatalogOnce = false
 	m.slashCatalog = nil
+}
+
+// refreshHostAndInvalidateSlashCatalog reloads m.host from the controller and
+// drops the slash catalog so MCP prompts (and any host-backed menu entries)
+// rebuild on the next slashItems call. Use after connect/disconnect/remove/
+// import, MCPSurfaceReady, auth clear, and every other host mutation path.
+func (m *chatTUI) refreshHostAndInvalidateSlashCatalog() {
+	if m.ctrl != nil {
+		m.host = m.ctrl.Host()
+	}
+	m.invalidateSlashCatalog()
+}
+
+// setHostAndInvalidateSlashCatalog assigns a host pointer (e.g. from a model-
+// switch message) and invalidates the slash catalog.
+func (m *chatTUI) setHostAndInvalidateSlashCatalog(host *plugin.Host) {
+	m.host = host
+	m.invalidateSlashCatalog()
 }
 
 // buildSlashCatalog constructs the full slash menu from current sources.
@@ -462,12 +481,14 @@ func subsequenceMatch(target, query string) bool {
 // The '@' must start the line or follow whitespace, so emails like "a@b" don't
 // trigger it. A backslash-escaped space or tab is part of the token.
 //
-// Returns (at, end, token, ok) where [at, end) is the full token span to
-// replace on accept (including '@') and token is the text after '@' for menu
-// filtering. The span extends past the cursor to the next unescaped whitespace
-// so accepting mid-token never leaves a dangling suffix (e.g. "@foo|bar" →
-// "@file.md " not "@file.mdbar").
-func activeAtToken(val string, cursor int) (at, end int, token string, ok bool) {
+// Returns (at, end, query, ok):
+//   - [at, end) is the full token span to replace on accept (including '@'),
+//     extending past the caret to the next unescaped whitespace so mid-token
+//     accept never leaves a dangling suffix ("@foo|bar" → "@file.md ", not
+//     "@file.mdbar").
+//   - query is only the text after '@' up to the caret, used for menu filtering
+//     ("@fo|o" filters as "fo", not "foo").
+func activeAtToken(val string, cursor int) (at, end int, query string, ok bool) {
 	if cursor < 0 || cursor > len(val) {
 		cursor = len(val)
 	}
@@ -484,9 +505,14 @@ func activeAtToken(val string, cursor int) (at, end int, token string, ok bool) 
 		case '@':
 			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' || val[i-1] == '\n' {
 				end = tokenEnd(val, i+1)
-				// Filter with the full token so mid-token accepts still match
-				// the path being edited; replace span is always [at, end).
-				return i, end, val[i+1 : end], true
+				queryEnd := cursor
+				if queryEnd < i+1 {
+					queryEnd = i + 1
+				}
+				if queryEnd > end {
+					queryEnd = end
+				}
+				return i, end, val[i+1 : queryEnd], true
 			}
 			return 0, 0, "", false
 		}
