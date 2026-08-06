@@ -370,3 +370,163 @@ func TestResolveSystemPromptForRootDecodesGB18030(t *testing.T) {
 		t.Fatalf("system prompt = %q, want decoded Chinese prompt", got)
 	}
 }
+
+// ── Layered system prompt (user layer + project layer) ──
+
+func TestLayeredSystemPromptUserFileOnly(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "prompts", "u.md"), []byte(" 用户规则：必须中文回答 \n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	cfg.systemPromptFileSource = promptFileSourceUser
+	cfg.Agent.SystemPromptFile = "prompts/u.md"
+	cfg.systemPromptFileUserValue = cfg.Agent.SystemPromptFile
+
+	out, err := cfg.ResolveLayeredSystemPromptForRoot(root)
+	if err != nil {
+		t.Fatalf("ResolveLayeredSystemPromptForRoot: %v", err)
+	}
+	if out.UserFileMissing != nil {
+		t.Fatalf("unexpected UserFileMissing: %v", out.UserFileMissing)
+	}
+	// A lone user-level file stays bare — no layer headers.
+	if out.Prompt != "用户规则：必须中文回答" {
+		t.Fatalf("Prompt = %q, want bare user content", out.Prompt)
+	}
+}
+
+func TestLayeredSystemPromptComposesUserAndProject(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "prompts", "u.md"), []byte("系统级：做完必须 commit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "prompts", "p.md"), []byte("项目级：本仓库不 commit"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	cfg.systemPromptFileSource = promptFileSourceProject
+	cfg.systemPromptFileUserValue = "prompts/u.md"
+	cfg.systemPromptFileProjectValue = "prompts/p.md"
+	cfg.Agent.SystemPromptFile = cfg.systemPromptFileProjectValue
+
+	out, err := cfg.ResolveLayeredSystemPromptForRoot(root)
+	if err != nil {
+		t.Fatalf("ResolveLayeredSystemPromptForRoot: %v", err)
+	}
+	if out.UserFileMissing != nil {
+		t.Fatalf("unexpected UserFileMissing: %v", out.UserFileMissing)
+	}
+	want := systemPromptUserLayerHeader + "\n" + "系统级：做完必须 commit" +
+		"\n\n" + systemPromptProjectLayerHeader + "\n" + "项目级：本仓库不 commit"
+	if out.Prompt != want {
+		t.Fatalf("Prompt = %q, want composed layers:\n%s", out.Prompt, want)
+	}
+}
+
+func TestLayeredSystemPromptUserMissingWarnsAndFallsBack(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+
+	cfg := Default()
+	cfg.systemPromptFileSource = promptFileSourceUser
+	cfg.Agent.SystemPromptFile = "prompts/nope.md"
+	cfg.systemPromptFileUserValue = cfg.Agent.SystemPromptFile
+
+	out, err := cfg.ResolveLayeredSystemPromptForRoot(root)
+	if err != nil {
+		t.Fatalf("missing user file should degrade, got fatal: %v", err)
+	}
+	if out.UserFileMissing == nil || !IsMissingSystemPromptFile(out.UserFileMissing) {
+		t.Fatalf("UserFileMissing = %v, want a missing-file marker", out.UserFileMissing)
+	}
+	if out.Prompt != DefaultSystemPrompt {
+		t.Fatalf("Prompt = %q, want built-in default fallback", out.Prompt)
+	}
+}
+
+func TestLayeredSystemPromptProjectMissingSkipsSilently(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	if err := os.MkdirAll(filepath.Join(home, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "prompts", "u.md"), []byte("用户规则"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default()
+	cfg.systemPromptFileSource = promptFileSourceProject
+	cfg.systemPromptFileUserValue = "prompts/u.md"
+	cfg.systemPromptFileProjectValue = "prompts/absent.md" // not present in workspace
+	cfg.Agent.SystemPromptFile = cfg.systemPromptFileProjectValue
+
+	out, err := cfg.ResolveLayeredSystemPromptForRoot(root)
+	if err != nil {
+		t.Fatalf("missing project file should be silent, got: %v", err)
+	}
+	if out.UserFileMissing != nil {
+		t.Fatalf("unexpected UserFileMissing: %v", out.UserFileMissing)
+	}
+	// Project layer absent → user content stays bare, no headers.
+	if out.Prompt != "用户规则" {
+		t.Fatalf("Prompt = %q, want bare user content", out.Prompt)
+	}
+}
+
+func TestLayeredSystemPromptProjectEscapeStaysFatal(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("REASONIX_HOME", t.TempDir())
+
+	cfg := Default()
+	cfg.systemPromptFileSource = promptFileSourceProject
+	cfg.systemPromptFileProjectValue = "../escape.md"
+	cfg.Agent.SystemPromptFile = cfg.systemPromptFileProjectValue
+
+	if _, err := cfg.ResolveLayeredSystemPromptForRoot(root); err == nil || IsMissingSystemPromptFile(err) ||
+		!strings.Contains(err.Error(), "relative path within the workspace") {
+		t.Fatalf("escape attempt err = %v, want fatal relative-path error", err)
+	}
+}
+
+func TestLayeredSystemPromptProjectOnlyAppendsToDefault(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("REASONIX_HOME", t.TempDir())
+	if err := os.MkdirAll(filepath.Join(root, "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "prompts", "p.md"), []byte("项目级规则"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Default() // no user-level file at all
+	cfg.systemPromptFileSource = promptFileSourceProject
+	cfg.systemPromptFileProjectValue = "prompts/p.md"
+	cfg.Agent.SystemPromptFile = cfg.systemPromptFileProjectValue
+
+	out, err := cfg.ResolveLayeredSystemPromptForRoot(root)
+	if err != nil {
+		t.Fatalf("ResolveLayeredSystemPromptForRoot: %v", err)
+	}
+	want := DefaultSystemPrompt + "\n\n" + systemPromptProjectLayerHeader + "\n" + "项目级规则"
+	if out.Prompt != want {
+		t.Fatalf("Prompt = %q, want default + project layer:\n%s", out.Prompt, want)
+	}
+}

@@ -66,16 +66,22 @@ type Config struct {
 	Secrets          SecretsConfig       `toml:"secrets"`
 	Remote           RemoteConfig        `toml:"remote"`
 
-	systemPromptFileSource     promptFileSource
-	providerSources            map[string]providerSourceScope
-	shadowedProjectProviders   []ProviderEntry
-	ignoredProjectDefaultModel string
-	ignoredLegacyStepLimits    bool
-	expansionEnv               map[string]string
-	pluginPackageOwners        map[string]string
-	pluginPackageSkillOwners   map[string][]string
-	pluginPackageAgentOwners   map[string][]string
-	editLoadErr                error
+	systemPromptFileSource promptFileSource
+	// systemPromptFileUserValue / systemPromptFileProjectValue retain the raw
+	// system_prompt_file value from each config scope so the layered resolver
+	// can read both, even though the merged Agent.SystemPromptFile holds only
+	// the winning one.
+	systemPromptFileUserValue    string
+	systemPromptFileProjectValue string
+	providerSources              map[string]providerSourceScope
+	shadowedProjectProviders     []ProviderEntry
+	ignoredProjectDefaultModel   string
+	ignoredLegacyStepLimits      bool
+	expansionEnv                 map[string]string
+	pluginPackageOwners          map[string]string
+	pluginPackageSkillOwners     map[string][]string
+	pluginPackageAgentOwners     map[string][]string
+	editLoadErr                  error
 	// loadWarnings are non-fatal issues observed while loading config (corrupt
 	// user/project files recovered via last-known-good or defaults). They never
 	// rewrite the original file; the UI may surface them for doctor repair.
@@ -2179,17 +2185,31 @@ func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 	}
 
 	if c.systemPromptFileSource == promptFileSourceProject {
-		if filepath.IsAbs(path) || !filepath.IsLocal(filepath.Clean(path)) {
-			return "", fmt.Errorf("project system_prompt_file %q must be a relative path within the workspace", path)
-		}
-		candidate := filepath.Join(resolveRoot(root), path)
-		b, err := readProjectSystemPromptFile(root, path)
-		if err != nil {
-			return "", newSystemPromptFileError(path, []string{candidate}, []error{err})
-		}
-		return strings.TrimSpace(string(b)), nil
+		return c.resolveProjectSystemPromptFileConfined(root, path)
 	}
 
+	return c.resolveUserSystemPromptFile(root, path)
+}
+
+// resolveProjectSystemPromptFileConfined reads a project-scope prompt file: the
+// path must be workspace-relative and is opened under os.Root so neither ".." nor
+// symlinks can escape the workspace.
+func (c *Config) resolveProjectSystemPromptFileConfined(root, path string) (string, error) {
+	if filepath.IsAbs(path) || !filepath.IsLocal(filepath.Clean(path)) {
+		return "", fmt.Errorf("project system_prompt_file %q must be a relative path within the workspace", path)
+	}
+	candidate := filepath.Join(resolveRoot(root), path)
+	b, err := readProjectSystemPromptFile(root, path)
+	if err != nil {
+		return "", newSystemPromptFileError(path, []string{candidate}, []error{err})
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// resolveUserSystemPromptFile reads a trusted user-scope prompt file: absolute
+// paths directly, relative paths probed under the workspace root first, then the
+// Reasonix home.
+func (c *Config) resolveUserSystemPromptFile(root, path string) (string, error) {
 	if filepath.IsAbs(path) {
 		b, err := fileencoding.ReadFileUTF8(path)
 		if err != nil {
@@ -2214,6 +2234,86 @@ func (c *Config) ResolveSystemPromptForRoot(root string) (string, error) {
 		readErrors = append(readErrors, fmt.Errorf("%s: %w", candidate, err))
 	}
 	return "", newSystemPromptFileError(path, candidates, readErrors)
+}
+
+// Layer and precedence headers prepended when user- and project-level prompt
+// files are composed. With only a user-level file the content stays bare
+// (unchanged single-file behavior).
+const (
+	systemPromptUserLayerHeader    = "以下为系统级规则："
+	systemPromptProjectLayerHeader = "以下为项目级规则，假如跟系统级规则冲突，在本项目范围内以项目级规则为准："
+)
+
+// LayeredSystemPrompt is the composed system prompt from the user- and
+// project-level system_prompt_file layers.
+type LayeredSystemPrompt struct {
+	// Prompt is the composed text: the user-level file (or the inline/default
+	// fallback) as the base, plus the project-level file appended with an
+	// explicit precedence note when present.
+	Prompt string
+	// UserFileMissing is non-nil when a user-level prompt file was configured
+	// but absent at every allowed location; the caller should warn and the
+	// base already fell back to the inline/default prompt. A project-level
+	// file missing from the workspace is skipped silently by design.
+	UserFileMissing error
+}
+
+// ResolveLayeredSystemPromptForRoot composes the system prompt from up to two
+// system_prompt_file layers. The trusted user-level file replaces the built-in
+// default as before; the workspace-confined project-level file is appended with
+// a header stating that project rules win within this project. Only missing
+// user files degrade (with UserFileMissing set); containment or permission
+// errors from either layer stay fatal.
+func (c *Config) ResolveLayeredSystemPromptForRoot(root string) (LayeredSystemPrompt, error) {
+	var out LayeredSystemPrompt
+
+	userValue := c.systemPromptFileUserValue
+	if userValue == "" && c.systemPromptFileSource != promptFileSourceProject {
+		// Single-source configuration (no project file involved): the merged
+		// value is the user layer.
+		userValue = c.Agent.SystemPromptFile
+	}
+
+	base := ""
+	userFromFile := false
+	if userValue != "" {
+		content, err := c.resolveUserSystemPromptFile(root, userValue)
+		if err != nil {
+			if !IsMissingSystemPromptFile(err) {
+				return out, err
+			}
+			out.UserFileMissing = err
+			base = c.InlineSystemPrompt()
+		} else {
+			base = content
+			userFromFile = true
+		}
+	} else {
+		base = c.InlineSystemPrompt()
+	}
+
+	projectContent := ""
+	if c.systemPromptFileProjectValue != "" {
+		content, err := c.resolveProjectSystemPromptFileConfined(root, c.systemPromptFileProjectValue)
+		if err != nil {
+			if !IsMissingSystemPromptFile(err) {
+				return out, err
+			}
+			// Project prompt file absent from the workspace: skip silently.
+		} else {
+			projectContent = content
+		}
+	}
+
+	if projectContent == "" {
+		out.Prompt = base
+		return out, nil
+	}
+	if userFromFile {
+		base = systemPromptUserLayerHeader + "\n" + base
+	}
+	out.Prompt = base + "\n\n" + systemPromptProjectLayerHeader + "\n" + projectContent
+	return out, nil
 }
 
 func readProjectSystemPromptFile(root, path string) ([]byte, error) {
