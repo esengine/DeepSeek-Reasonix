@@ -2,7 +2,6 @@ package plugin
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,12 +26,13 @@ const (
 	gracefulCloseWaitBudget = 750 * time.Millisecond
 )
 
-// stdioTransport speaks newline-delimited JSON-RPC 2.0 over a subprocess's
-// stdin/stdout — the MCP stdio convention (one JSON message per line, no
-// embedded newlines). A dedicated reader goroutine owns stdout and demuxes each
-// response to the waiting call by id, so a call can abandon a blocking read the
-// moment its context is cancelled (the subprocess is bound to the session, not
-// the turn, so a hung server would otherwise hang a cancelled turn forever).
+// stdioTransport speaks JSON-RPC 2.0 over a subprocess's stdin/stdout using the
+// standard MCP/LSP Content-Length framing on write, and accepts either that
+// framing or legacy newline-delimited JSON on read (see readStdioFrame). A
+// dedicated reader goroutine owns stdout and demuxes each response to the
+// waiting call by id, so a call can abandon a blocking read the moment its
+// context is cancelled (the subprocess is bound to the session, not the turn,
+// so a hung server would otherwise hang a cancelled turn forever).
 // callMu serialises a request/response round-trip over the shared pipe.
 type stdioTransport struct {
 	name   string
@@ -549,9 +550,10 @@ func mergePathLists(primary, secondary string) string {
 const stdioReplyQueueBound = 16
 
 // readLoop owns stdout for the transport's lifetime: it reads one JSON-RPC
-// message per line, routes progress notifications, answers server requests, and
-// hands each response to the call waiting on its id. On any read error it fails
-// every pending call and exits.
+// message (Content-Length-framed or legacy NDJSON — see readStdioFrame), routes
+// progress notifications, answers server requests, and hands each response to
+// the call waiting on its id. On any read error it fails every pending call and
+// exits.
 func (t *stdioTransport) readLoop() {
 	// Server-request replies go through replyLoop, never directly to stdin:
 	// readLoop is the only goroutine draining stdout, and blocking it on
@@ -561,8 +563,7 @@ func (t *stdioTransport) readLoop() {
 	defer close(replies)
 	go t.replyLoop(replies)
 	for {
-		line, readErr := t.stdout.ReadBytes('\n')
-		line = bytes.TrimSpace(line)
+		line, readErr := readStdioFrame(t.stdout)
 		if len(line) > 0 {
 			t.handleInboundLine(line, replies)
 		}
@@ -694,7 +695,14 @@ func (t *stdioTransport) write(v any) error {
 	}
 	t.writeMu.Lock()
 	defer t.writeMu.Unlock()
-	if _, err = t.stdin.Write(append(b, '\n')); err != nil {
+	// Standard MCP/LSP framing. Built as one frame so a partial write can
+	// never expose a torn header to the server.
+	frame := make([]byte, 0, len(b)+32)
+	frame = append(frame, "Content-Length: "...)
+	frame = strconv.AppendInt(frame, int64(len(b)), 10)
+	frame = append(frame, "\r\n\r\n"...)
+	frame = append(frame, b...)
+	if _, err = t.stdin.Write(frame); err != nil {
 		return t.withStderr(err)
 	}
 	return nil

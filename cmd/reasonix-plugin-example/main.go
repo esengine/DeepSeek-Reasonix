@@ -1,7 +1,8 @@
 // Command reasonix-plugin-example is a reference Reasonix plugin: a minimal MCP stdio
-// server speaking newline-delimited JSON-RPC 2.0 on stdin/stdout. It exists to
-// document the contract end-to-end (the protocol the internal/plugin client
-// drives) and to give users a working example to copy.
+// server speaking JSON-RPC 2.0 on stdin/stdout with the standard MCP/LSP
+// Content-Length framing. It exists to document the contract end-to-end (the
+// protocol the internal/plugin client drives) and to give users a working
+// example to copy.
 //
 // Wire it up in reasonix.toml:
 //
@@ -13,7 +14,8 @@
 // its prompt as the "/mcp__example__review" slash command, and its resource as
 // the "@example:doc://style-guide" reference.
 //
-// Protocol, one JSON object per line:
+// Protocol — standard Content-Length frames from reasonix; one-JSON-per-line
+// input is also accepted for hand-run pipelines:
 //   - initialize                 → {protocolVersion, capabilities, serverInfo}
 //   - notifications/initialized  (notification, no id) → ignored
 //   - tools/list                 → {tools: [{name, description, inputSchema, annotations}]}
@@ -31,8 +33,10 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -77,14 +81,14 @@ const (
 )
 
 // serve runs the read-dispatch-reply loop until stdin closes (reasonix closed the
-// pipe / is shutting down). Each line is one JSON-RPC message.
+// pipe / is shutting down). Each frame is one JSON-RPC message.
 func serve(in *os.File, out *os.File) error {
 	r := bufio.NewReader(in)
 	w := bufio.NewWriter(out)
 	defer w.Flush()
 
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := readFrame(r)
 		if len(line) > 0 {
 			if rerr := handleLine(line, w); rerr != nil {
 				return rerr
@@ -96,6 +100,50 @@ func serve(in *os.File, out *os.File) error {
 		if err != nil {
 			return nil // EOF or pipe closed: clean shutdown
 		}
+	}
+}
+
+// readFrame reads one JSON-RPC message. reasonix writes standard MCP/LSP
+// Content-Length frames; hand-run pipelines may still send one JSON object per
+// line, so both forms are accepted.
+func readFrame(r *bufio.Reader) ([]byte, error) {
+	for {
+		line, err := r.ReadBytes('\n')
+		line = trimSpace(line)
+		if len(line) == 0 {
+			if err != nil {
+				return nil, err
+			}
+			continue // blank line between frames
+		}
+		if line[0] == '{' {
+			return line, err // legacy one-JSON-per-line payload
+		}
+		if !strings.HasPrefix(strings.ToLower(string(line)), "content-length:") {
+			if err != nil {
+				return nil, err
+			}
+			continue // other header line
+		}
+		value := strings.TrimSpace(string(line[len("content-length:"):]))
+		n, perr := strconv.Atoi(value)
+		if perr != nil || n < 0 {
+			return nil, fmt.Errorf("malformed Content-Length %q", value)
+		}
+		for {
+			h, herr := r.ReadBytes('\n')
+			if len(trimSpace(h)) == 0 {
+				break // header block ends at the first blank line
+			}
+			if herr != nil {
+				return nil, herr
+			}
+		}
+		body := make([]byte, n)
+		if _, err := io.ReadFull(r, body); err != nil {
+			return nil, err
+		}
+		return trimSpace(body), nil
 	}
 }
 

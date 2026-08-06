@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -160,17 +162,24 @@ func TestDesktopMCPHelperProcess(t *testing.T) {
 		}
 		defer instanceListener.Close()
 	}
-	dec := json.NewDecoder(os.Stdin)
+	br := bufio.NewReader(os.Stdin)
 	enc := json.NewEncoder(os.Stdout)
 	for {
+		payload, err := readMCPFrame(br)
+		if len(payload) == 0 {
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					return
+				}
+				t.Fatalf("read helper request: %v", err)
+			}
+			continue
+		}
 		var req struct {
 			ID     *int   `json:"id"`
 			Method string `json:"method"`
 		}
-		if err := dec.Decode(&req); err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			}
+		if err := json.Unmarshal(payload, &req); err != nil {
 			t.Fatalf("decode helper request: %v", err)
 		}
 		if req.ID == nil {
@@ -194,6 +203,50 @@ func TestDesktopMCPHelperProcess(t *testing.T) {
 		if err := enc.Encode(map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": result}); err != nil {
 			t.Fatalf("encode helper response: %v", err)
 		}
+	}
+}
+
+// readMCPFrame reads one JSON-RPC message from a plugin's stdin, accepting the
+// standard MCP/LSP Content-Length framing (what internal/plugin now writes) as
+// well as legacy newline-delimited JSON.
+func readMCPFrame(r *bufio.Reader) ([]byte, error) {
+	for {
+		line, err := r.ReadBytes('\n')
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if line[0] == '{' {
+			return line, err
+		}
+		if !strings.HasPrefix(strings.ToLower(string(line)), "content-length:") {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		value := strings.TrimSpace(string(line[len("content-length:"):]))
+		n, perr := strconv.Atoi(value)
+		if perr != nil || n < 0 {
+			return nil, fmt.Errorf("malformed Content-Length %q", value)
+		}
+		for {
+			h, herr := r.ReadBytes('\n')
+			if len(bytes.TrimSpace(h)) == 0 {
+				break
+			}
+			if herr != nil {
+				return nil, herr
+			}
+		}
+		body := make([]byte, n)
+		if _, err := io.ReadFull(r, body); err != nil {
+			return nil, err
+		}
+		return bytes.TrimSpace(body), nil
 	}
 }
 
