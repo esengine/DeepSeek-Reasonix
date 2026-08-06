@@ -99,53 +99,96 @@ func TestLookupLegacyKeyringBatchSharedContextTimeout(t *testing.T) {
 	}
 }
 
-func TestStoreCredentialIfAbsentDoesNotClobberNewerValue(t *testing.T) {
+// TestLookupLegacyKeyringBatchDoesNotClobberUserWrite forces the production
+// probe→store window: the batch has already decided the key needs import
+// (probe returns found), then the user writes a new value before store-if-absent.
+func TestLookupLegacyKeyringBatchDoesNotClobberUserWrite(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 
-	// Force interleaving without sleep:
-	// 1) parent path has already decided the key is missing (outside lock)
-	// 2) user writes a new value
-	// 3) store-if-absent re-checks under lock and skips the stale keyring value
-	parentChecked := make(chan struct{})
-	userDone := make(chan struct{})
-	result := make(chan bool, 1)
+	oldLookup := legacyKeyringProbeLookup
+	t.Cleanup(func() { legacyKeyringProbeLookup = oldLookup })
 
-	go func() {
-		<-parentChecked
-		<-userDone
-		stored, err := storeCredentialIfAbsentAndNotCleared("DEEPSEEK_API_KEY", "sk-old-keyring")
-		if err != nil {
-			t.Errorf("store-if-absent: %v", err)
+	probeReached := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	var once sync.Once
+	legacyKeyringProbeLookup = func(ctx context.Context, key string) legacyKeyringOutcome {
+		if key != "DEEPSEEK_API_KEY" {
+			return legacyKeyringOutcome{Status: legacyKeyringAbsent}
 		}
-		result <- stored
+		once.Do(func() { close(probeReached) })
+		select {
+		case <-releaseProbe:
+		case <-ctx.Done():
+			return legacyKeyringOutcome{Status: legacyKeyringTimeout}
+		}
+		return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-old-keyring"}
+	}
+
+	done := make(chan map[string]legacyKeyringOutcome, 1)
+	go func() {
+		done <- lookupLegacyKeyringBatch([]string{"DEEPSEEK_API_KEY"}, time.Second)
 	}()
 
-	close(parentChecked)
+	select {
+	case <-probeReached:
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe did not reach the interleaving checkpoint")
+	}
 	if _, err := SetCredential("DEEPSEEK_API_KEY", "sk-user-new"); err != nil {
 		t.Fatal(err)
 	}
-	close(userDone)
+	close(releaseProbe)
 
-	if stored := <-result; stored {
-		t.Fatal("store-if-absent must not overwrite a concurrent user write")
+	got := <-done
+	if got["DEEPSEEK_API_KEY"].Status != legacyKeyringFound {
+		t.Fatalf("batch status = %+v, want found (store skipped)", got["DEEPSEEK_API_KEY"])
 	}
-	if !credentialCurrentStoreHasKey("DEEPSEEK_API_KEY") {
-		t.Fatal("user value missing")
-	}
-	// Ensure the stored value is the user write, not the keyring secret.
 	val, ok := envFileValue(UserCredentialsPath(), "DEEPSEEK_API_KEY")
 	if !ok || val != "sk-user-new" {
-		t.Fatalf("credential = (%q, %v), want sk-user-new", val, ok)
+		t.Fatalf("credential = (%q, %v), want sk-user-new (keyring must not clobber)", val, ok)
 	}
 }
 
-func TestStoreCredentialIfAbsentDoesNotClobberTombstone(t *testing.T) {
+// TestLookupLegacyKeyringBatchDoesNotReviveTombstone forces the same production
+// probe→store window against a cleared tombstone written after the probe starts.
+func TestLookupLegacyKeyringBatchDoesNotReviveTombstone(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
 	t.Setenv("REASONIX_CREDENTIALS_STORE", "file")
 
+	// Start empty: no value and no tombstone so the batch will probe.
+	oldLookup := legacyKeyringProbeLookup
+	t.Cleanup(func() { legacyKeyringProbeLookup = oldLookup })
+
+	probeReached := make(chan struct{})
+	releaseProbe := make(chan struct{})
+	var once sync.Once
+	legacyKeyringProbeLookup = func(ctx context.Context, key string) legacyKeyringOutcome {
+		if key != "DEEPSEEK_API_KEY" {
+			return legacyKeyringOutcome{Status: legacyKeyringAbsent}
+		}
+		once.Do(func() { close(probeReached) })
+		select {
+		case <-releaseProbe:
+		case <-ctx.Done():
+			return legacyKeyringOutcome{Status: legacyKeyringTimeout}
+		}
+		return legacyKeyringOutcome{Status: legacyKeyringFound, Value: "sk-old-keyring"}
+	}
+
+	done := make(chan map[string]legacyKeyringOutcome, 1)
+	go func() {
+		done <- lookupLegacyKeyringBatch([]string{"DEEPSEEK_API_KEY"}, time.Second)
+	}()
+
+	select {
+	case <-probeReached:
+	case <-time.After(2 * time.Second):
+		t.Fatal("probe did not reach the interleaving checkpoint")
+	}
+	// Write then clear while probe is blocked: tombstone must win.
 	if _, err := SetCredential("DEEPSEEK_API_KEY", "sk-temp"); err != nil {
 		t.Fatal(err)
 	}
@@ -153,37 +196,20 @@ func TestStoreCredentialIfAbsentDoesNotClobberTombstone(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !credentialCurrentStoreClearedKey("DEEPSEEK_API_KEY") {
-		t.Fatal("expected cleared tombstone")
+		t.Fatal("expected cleared tombstone before releasing probe")
 	}
+	close(releaseProbe)
 
-	parentChecked := make(chan struct{})
-	userDone := make(chan struct{})
-	var wg sync.WaitGroup
-	wg.Add(1)
-	var stored bool
-	var storeErr error
-	go func() {
-		defer wg.Done()
-		<-parentChecked
-		<-userDone
-		stored, storeErr = storeCredentialIfAbsentAndNotCleared("DEEPSEEK_API_KEY", "sk-old-keyring")
-	}()
-
-	close(parentChecked)
-	// Tombstone already present; signal and join.
-	close(userDone)
-	wg.Wait()
-	if storeErr != nil {
-		t.Fatal(storeErr)
-	}
-	if stored {
-		t.Fatal("store-if-absent must not revive a cleared key from keyring")
+	got := <-done
+	if got["DEEPSEEK_API_KEY"].Status != legacyKeyringFound {
+		// store-if-absent skipped → still reported found (already handled)
+		t.Fatalf("batch status = %+v", got["DEEPSEEK_API_KEY"])
 	}
 	if credentialCurrentStoreHasKey("DEEPSEEK_API_KEY") {
-		t.Fatal("tombstone was overwritten with a keyring value")
+		t.Fatal("keyring import revived a tombstoned credential")
 	}
 	if !credentialCurrentStoreClearedKey("DEEPSEEK_API_KEY") {
-		t.Fatal("tombstone missing after store-if-absent")
+		t.Fatal("tombstone missing after batch")
 	}
 }
 
