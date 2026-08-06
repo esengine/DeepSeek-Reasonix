@@ -2183,6 +2183,7 @@ func defaultFullBootToolNames() []string {
 		"bash",
 		"bash_output",
 		"code_index",
+		"code_verify",
 		"complete_step",
 		"delete_range",
 		"delete_symbol",

@@ -334,6 +334,13 @@ func NewContinuousStateManager(historyWindow int) *ContinuousStateManager {
 // Seed initializes the root snapshot (step 0) from the initial environment
 // observation. Must be called once before BeforeAction.
 func (m *ContinuousStateManager) Seed(ctx context.Context, ifaceHash, envHash string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.seedLocked(ctx, ifaceHash, envHash)
+}
+
+// seedLocked is Seed with the manager lock already held.
+func (m *ContinuousStateManager) seedLocked(ctx context.Context, ifaceHash, envHash string) {
 	root := StateSnapshot{
 		Step:          0,
 		At:            time.Now(),
@@ -348,6 +355,12 @@ func (m *ContinuousStateManager) Seed(ctx context.Context, ifaceHash, envHash st
 // BeforeAction returns the predicted next snapshot so the ClosedLoopEngine can
 // compare it against the real observation in AfterAction.
 func (m *ContinuousStateManager) BeforeAction(ctx context.Context, action string) StateSnapshot {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.beforeActionLocked(ctx, action)
+}
+
+func (m *ContinuousStateManager) beforeActionLocked(ctx context.Context, action string) StateSnapshot {
 	prev, ok := m.history.Latest()
 	if !ok {
 		prev = StateSnapshot{Step: -1, ParentStep: -1}
@@ -358,6 +371,12 @@ func (m *ContinuousStateManager) BeforeAction(ctx context.Context, action string
 // AfterAction records the real observed snapshot, upserts any newly recovered
 // implicit facts, and returns the delta vs the prediction (for the engine).
 func (m *ContinuousStateManager) AfterAction(ctx context.Context, action string, obs StateSnapshot, recovered []Fact) StateSnapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.afterActionLocked(ctx, action, obs, recovered)
+}
+
+func (m *ContinuousStateManager) afterActionLocked(ctx context.Context, action string, obs StateSnapshot, recovered []Fact) StateSnapshot {
 	prev, ok := m.history.Latest()
 	if !ok {
 		prev = StateSnapshot{Step: -1, ParentStep: -1}
@@ -369,7 +388,7 @@ func (m *ContinuousStateManager) AfterAction(ctx context.Context, action string,
 	// Carry forward all accumulated implicit facts, then upsert the new ones.
 	// This is the core defense against implicit-state amnesia: facts already
 	// recovered are never re-derived or dropped — they ride along verbatim.
-	obs.ImplicitFacts = m.upsertFacts(append(append([]Fact{}, prev.ImplicitFacts...), recovered...))
+	obs.ImplicitFacts = m.upsertFactsLocked(append(append([]Fact{}, prev.ImplicitFacts...), recovered...))
 	m.graph.Add(obs)
 	m.history.Append(obs)
 	return obs
@@ -380,6 +399,11 @@ func (m *ContinuousStateManager) AfterAction(ctx context.Context, action string,
 func (m *ContinuousStateManager) upsertFacts(incoming []Fact) []Fact {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.upsertFactsLocked(incoming)
+}
+
+// upsertFactsLocked is upsertFacts with the manager lock already held.
+func (m *ContinuousStateManager) upsertFactsLocked(incoming []Fact) []Fact {
 	for _, f := range incoming {
 		if f.Key == "" {
 			continue
@@ -425,11 +449,21 @@ func (m *ContinuousStateManager) ImplicitStateDigest() string {
 // Rewind pops the history back to the given step, so the ClosedLoopEngine can
 // retry from a known-good state. The graph keeps all branches for analysis.
 func (m *ContinuousStateManager) Rewind(toStep int) (StateSnapshot, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.history.Rewind(toStep)
 }
 
 // Graph returns the state graph for analysis/debugging.
-func (m *ContinuousStateManager) Graph() *StateGraph { return m.graph }
+func (m *ContinuousStateManager) Graph() *StateGraph {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.graph
+}
 
 // History returns the state history for analysis/debugging.
-func (m *ContinuousStateManager) History() *StateHistory { return m.history }
+func (m *ContinuousStateManager) History() *StateHistory {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.history
+}

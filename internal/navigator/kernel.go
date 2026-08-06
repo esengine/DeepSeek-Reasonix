@@ -54,7 +54,15 @@ type Navigator struct {
 	lastObserve                time.Time
 	lastObserved               *StateSnapshot
 	observeEvery               time.Duration
+
+	// watchMu guards watchStarted so StartBackgroundWatch is idempotent.
+	watchMu      sync.Mutex
+	watchStarted bool
 }
+
+// DefaultWatchInterval is how often the background environment watch samples
+// the sensors when the host does not override the interval.
+const DefaultWatchInterval = 2 * time.Second
 
 // New creates a Navigator wired to the given adapter. The adapter is the only
 // dependency on a specific host — everything else is host-agnostic.
@@ -231,25 +239,36 @@ func actionVerbForTool(name string) string {
 // The host should call this for every action it wants the navigator to govern.
 // Actions the host runs outside the navigator (e.g. internal bookkeeping) are
 // invisible to the kernel and won't get state protection — that's the trade.
+//
+// Execute is the composed form of the observer-mode pair BeginAction/EndAction:
+// it runs the action itself through the adapter. Hosts that execute tools
+// through their own dispatcher (like Reasonix's run loop) should instead call
+// BeginAction before the tool runs and EndAction after, so the kernel observes
+// the same action without executing it a second time.
 func (n *Navigator) Execute(ctx context.Context, action HostAction) (HostResult, Correction, error) {
+	if _, err := n.BeginAction(ctx, action); err != nil {
+		return HostResult{}, Correction{Strategy: StrategyAskHost, Reason: "permission denied or kernel not ready", At: time.Now()}, err
+	}
+	result, aerr := n.adapter.Execute(ctx, action)
+	corr, cerr := n.EndAction(ctx, action, result)
+	if aerr != nil {
+		return result, corr, aerr
+	}
+	return result, corr, cerr
+}
+
+// BeginAction is the observer-mode "before" half of the closed loop. It
+// snapshots the environment, predicts the expected outcome, and pre-checks
+// the host permission gate — without executing the action itself. The host
+// executes the tool through its own dispatcher, then calls EndAction with the
+// real result so the kernel can verify, correct, and record state.
+func (n *Navigator) BeginAction(ctx context.Context, action HostAction) (StateSnapshot, error) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	if !n.started {
-		// Auto-seed on first execute so a host that forgot Seed() still works.
-		n.started = true
-		ifaceHash, envDigest, _, _ := n.sensor.SnapshotAll(ctx)
-		envHash := envDigest
-		if envHash == "" {
-			if snap, serr := n.adapter.SnapshotEnv(ctx); serr == nil {
-				envHash = snap
-			}
-		}
-		n.state.Seed(ctx, ifaceHash, envHash)
-	}
+	n.ensureStartedLocked(ctx)
 
-	actionLabel := actionLabel(action)
-	predicted := n.state.BeforeAction(ctx, actionLabel)
+	predicted := n.state.BeforeAction(ctx, actionLabel(action))
 
 	// Pre-action: permission check (fail-closed — never bypass the host gate).
 	if allowed, reason := n.adapter.Permission(ctx, action); !allowed {
@@ -258,19 +277,26 @@ func (n *Navigator) Execute(ctx context.Context, action HostAction) (HostResult,
 			Text:   "Action blocked by host permission gate",
 			Detail: reason, Step: predicted.Step,
 		})
-		return HostResult{}, Correction{Strategy: StrategyAskHost, Reason: "permission denied: " + reason, At: time.Now()}, ErrAskHost
+		return predicted, ErrAskHost
 	}
+	return predicted, nil
+}
 
-	// Act: the host executes through its real path (hooks, evidence, etc.).
-	result, err := n.adapter.Execute(ctx, action)
-	if err != nil {
-		// Execution error — record a deviation and let the corrector decide.
-		dev := Deviation{Kind: DeviationTotalMismatch, Message: fmt.Sprintf("host execute error: %v", err)}
-		corr := n.loop.Decide(actionLabel, dev, n.lastGoodStep)
-		n.loop.RecordCorrection(corr)
-		n.adapter.Emit(ctx, HostEvent{Kind: "correction", Level: "warn", Text: corr.Reason, Step: predicted.Step})
-		return result, corr, err
-	}
+// EndAction is the observer-mode "after" half of the closed loop. It snapshots
+// the environment post-action, recovers implicit facts from the result,
+// verifies prediction vs reality, records the state transition, applies any
+// correction, and flushes correlated sensor events. The returned Correction
+// tells the host what to do next (continue / re-inject facts / retry / roll
+// back / ask the user); ErrAskHost is returned when the kernel asks the host
+// to stop and consult the user.
+func (n *Navigator) EndAction(ctx context.Context, action HostAction, result HostResult) (Correction, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	n.ensureStartedLocked(ctx)
+
+	actionLabel := actionLabel(action)
+	predicted := n.state.BeforeAction(ctx, actionLabel)
 
 	// Observe: snapshot the env after the action.
 	ifaceHash, envDigest, _, _ := n.sensor.SnapshotAll(ctx)
@@ -335,7 +361,7 @@ func (n *Navigator) Execute(ctx context.Context, action HostAction) (HostResult,
 		}
 	case StrategyAskHost:
 		n.adapter.Emit(ctx, HostEvent{Kind: "correction", Level: "error", Text: corr.Reason, Step: observed.Step})
-		return result, corr, ErrAskHost
+		return corr, ErrAskHost
 	}
 
 	// Flush correlated sensor events.
@@ -347,8 +373,69 @@ func (n *Navigator) Execute(ctx context.Context, action HostAction) (HostResult,
 		})
 	}
 
-	return result, corr, nil
+	return corr, nil
 }
+
+// ensureStartedLocked auto-seeds the kernel on first use so a host that never
+// calls Seed() still works. The caller must hold n.mu.
+func (n *Navigator) ensureStartedLocked(ctx context.Context) {
+	if n.started {
+		return
+	}
+	n.started = true
+	ifaceHash, envDigest, _, _ := n.sensor.SnapshotAll(ctx)
+	envHash := envDigest
+	if envHash == "" {
+		if snap, serr := n.adapter.SnapshotEnv(ctx); serr == nil {
+			envHash = snap
+		}
+	}
+	n.state.Seed(ctx, ifaceHash, envHash)
+}
+
+// StartBackgroundWatch launches the "dead light under the lamp" defense:
+// a goroutine that periodically snapshots the environment sensors so changes
+// that happen outside tool calls (downloads finishing, notifications arriving,
+// background processes appearing) are still noticed and correlated into events
+// the host flushes at the next EndAction. The watcher only samples and ingests
+// — it never enters the state graph, so it cannot race the tool loop's
+// Before/EndAction step accounting. It stops when ctx is cancelled, so hosts
+// bind it to the run lifecycle.
+//
+// StartBackgroundWatch is idempotent: a second call is a no-op until the
+// first watch's context is cancelled.
+func (n *Navigator) StartBackgroundWatch(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = DefaultWatchInterval
+	}
+	n.watchMu.Lock()
+	if n.watchStarted {
+		n.watchMu.Unlock()
+		return
+	}
+	n.watchStarted = true
+	n.watchMu.Unlock()
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				_, _, _, _ = n.sensor.SnapshotAll(ctx)
+				// Bound the correlator so a long-lived session with churning
+				// files cannot grow it without limit while no tool call runs.
+				n.sensor.TrimEvents(maxPendingEvents)
+			}
+		}
+	}()
+}
+
+// maxPendingEvents bounds the correlator's pending event buffer for hosts
+// that never flush between long stretches of background-only sampling.
+const maxPendingEvents = 512
 
 // ImplicitStateDigest returns the accumulated implicit facts as a text digest,
 // for the host to inject into compaction summaries. This is the bridge between

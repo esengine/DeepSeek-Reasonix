@@ -1298,6 +1298,44 @@ type AgentConfig struct {
 	// and surface unresolved questions. 0 disables nudges. Only effective when
 	// LongHorizon is enabled. Default 50 when LongHorizon is on.
 	VerificationInterval int `toml:"verification_interval"`
+	// TokenGovernance enables the OPT-261~265 token-management modules
+	// (load shedder, cache-invalidation compactor, context-window resizer,
+	// admission gatekeeper, prompt-cache warmer). All modules are advisory:
+	// they record statistics and surface events, never vetoing a turn.
+	// nil = off (default); preserves existing behavior.
+	TokenGovernance *TokenGovernanceConfig `toml:"token_governance"`
+	// Cosplay parameterizes the CoSPlay co-evolution code-verification tool
+	// (code_verify): inference-time test generation → execution matrix →
+	// repair rounds → consensus, with no ground-truth data. nil = tool uses
+	// built-in defaults; the tool is always registered regardless.
+	Cosplay *CosplayConfig `toml:"cosplay"`
+}
+
+// CosplayConfig parameterizes the CoSPlay co-evolution code-verification
+// tool. Zero values fall back to the tool defaults (2 rounds, 4 tests).
+type CosplayConfig struct {
+	Enabled        bool `toml:"enabled"`
+	MaxRounds      int  `toml:"max_rounds"`
+	NumTests       int  `toml:"num_tests"`
+	TimeoutSeconds int  `toml:"timeout_seconds"`
+}
+
+// TokenGovernanceConfig parameterizes the OPT-261~265 token-management
+// modules. Every module is advisory by design — the run loop only gains
+// visibility into token pressure, never veto power.
+type TokenGovernanceConfig struct {
+	Enabled           bool   `toml:"enabled"`
+	LoadShedder       bool   `toml:"load_shedder"`
+	LoadThreshold     int    `toml:"load_threshold"`
+	ShedStrategy      string `toml:"shed_strategy"`
+	CacheCompactor    bool   `toml:"cache_compactor"`
+	WindowResizer     bool   `toml:"window_resizer"`
+	ContextWindowMin  int    `toml:"context_window_min"`
+	ContextWindowMax  int    `toml:"context_window_max"`
+	AdmissionGate     bool   `toml:"admission_gate"`
+	AdmissionCapacity int    `toml:"admission_capacity"`
+	CacheWarmer       bool   `toml:"cache_warmer"`
+	WarmerStrategy    string `toml:"warmer_strategy"`
 }
 
 // ProviderEntry declares a model provider instance. ContextWindow is the model's

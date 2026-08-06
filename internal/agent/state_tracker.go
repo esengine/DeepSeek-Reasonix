@@ -60,22 +60,43 @@ type StateTracker interface {
 
 // NavigatorKernel is the minimal agent-facing interface for the OSWorld 2.0
 // "state-based navigator" kernel (full implementation in internal/navigator).
-// The agent only needs the implicit-state digest for compaction injection;
-// the navigator's closed-loop correction and env sensing run through its own
-// HostAdapter at the boot layer. This interface keeps the agent decoupled from
-// the navigator package — the concrete *navigator.Navigator satisfies it.
+// The agent observes every tool call through the observer-mode pair
+// BeginAction/EndAction: the kernel snapshots the environment, predicts the
+// expected outcome, verifies the real result against it, and returns a
+// correction the agent applies (re-inject lost facts, warn on rollback, ...).
+// ImplicitStateDigest feeds compaction summaries. The concrete
+// *navigator.Navigator satisfies it via the agent-side bridge.
 type NavigatorKernel interface {
 	// ImplicitStateDigest returns the navigator's accumulated recovered facts
 	// as text, for injection into a compaction summary's "Hidden state &
 	// recovered facts" section. Empty when no facts have been recovered.
 	ImplicitStateDigest() string
 
-	// ObserveToolCall feeds one host-executed tool call (real outcome from the
-	// agent's own CallResolver path — permission, hooks, and evidence already
-	// applied) into the navigator's state graph. It returns advisory correction
-	// text ("" = continue); the navigator never re-executes tools, so the
-	// agent keeps execution authority.
-	ObserveToolCall(ctx context.Context, toolName string, args string, result string, err error) string
+	// BeginAction opens the observer window for one tool call: environment
+	// snapshot + outcome prediction + permission pre-check. The host then
+	// executes the tool through its own dispatcher and must call EndAction
+	// with the real result. Returns nil when the action may proceed.
+	BeginAction(ctx context.Context, verb, args string) error
+
+	// EndAction closes the observer window: verifies prediction vs reality,
+	// records the state transition, and returns the correction the agent
+	// should apply. ErrAskHost (wrapped) is returned when the kernel asks the
+	// host to stop and consult the user.
+	EndAction(ctx context.Context, verb, args string, output string, toolErr error) (CorrectionBrief, error)
+}
+
+// CorrectionBrief is the agent-facing verdict of one navigator observation.
+// It deliberately avoids navigator package types so the agent stays decoupled.
+type CorrectionBrief struct {
+	// Strategy is one of: continue / reinject_facts / retry / rollback /
+	// ask_host.
+	Strategy string
+	// Reason is the human-readable explanation of the correction.
+	Reason string
+	// Reinject carries the lost implicit facts (as "key: value" strings) that
+	// the agent should thread back into the conversation when Strategy is
+	// "reinject_facts".
+	Reinject []string
 }
 
 // ToolCallToken pairs a BeforeToolCall snapshot with its AfterToolCall delta.

@@ -47,6 +47,31 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
 #                                  or a custom .reasonix/output-styles/<name>.md ; empty = default
 
+# OPT-261~265 token governance (advisory): OPT-in visibility into token
+# pressure. Modules only record statistics and surface events — they never
+# veto a tool call or turn. Off by default.
+# [agent.token_governance]
+# enabled = true
+# load_shedder = true          # OPT-261: shed signal when a turn's tokens spike
+# load_threshold = 250000      # token volume that triggers the shed advisory
+# shed_strategy = "oldest"     # oldest | newest | random
+# cache_compactor = true       # OPT-262: dedupe invalidated cache keys per turn
+# window_resizer = true        # OPT-263: advisory context-window resize suggestion
+# context_window_min = 32000
+# context_window_max = 512000
+# admission_gate = true        # OPT-264: admit/reject advisory by token capacity
+# admission_capacity = 300000
+# cache_warmer = true          # OPT-265: register stable prompt prefixes for warming
+# warmer_strategy = "lru"
+
+# CoSPlay co-evolution code verification (code_verify tool). Always
+# registered; these tune its defaults. No ground-truth data, no fine-tuning.
+# [agent.cosplay]
+# enabled = true
+# max_rounds = 2        # repair rounds per verification
+# num_tests = 4         # generated tests per round
+# timeout_seconds = 10  # per-test process timeout
+
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
 # models reuses the same connection; no need to re-declare base_url/api_key.

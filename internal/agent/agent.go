@@ -413,6 +413,12 @@ type Agent struct {
 	toolRounds            int
 	lastVerificationRound int
 
+	// tokenGovernance aggregates the OPT-261~265 token-management modules
+	// (load shedder, cache-invalidation compactor, window resizer, admission
+	// gatekeeper, prompt-cache warmer). Advisory only — never vetoes a turn.
+	// nil disables governance entirely.
+	tokenGovernance *TokenGovernance
+
 	// asker, when non-nil, lets the `ask` tool put questions to the user. nil in
 	// headless runs (no interactive user). Set via SetAsker.
 	asker Asker
@@ -1121,6 +1127,13 @@ type Options struct {
 	// verification nudges (only when LongHorizon is enabled). 0 disables.
 	VerificationInterval int
 
+	// TokenGovernance aggregates the OPT-261~265 token-management modules
+	// (load shedder, cache-invalidation compactor, context-window resizer,
+	// admission gatekeeper, prompt-cache warmer). Advisory only: it records
+	// statistics and surfaces reports; it never vetoes a tool call or turn.
+	// nil disables governance (source compat; boot wires it from config).
+	TokenGovernance *TokenGovernance
+
 	// MissingReasoningWarnStateDir, when non-empty, points at the shared
 	// directory where missing tool-call thinking recovery retries are gated by
 	// opaque provider-configuration fingerprint (#7059). The field name is kept
@@ -1329,6 +1342,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		navigator:                 opts.Navigator,
 		longHorizon:               opts.LongHorizon,
 		verificationInterval:      opts.VerificationInterval,
+		tokenGovernance:           opts.TokenGovernance,
 		jobs:                      opts.Jobs,
 		writeScheduler:            opts.WriteScheduler,
 		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),

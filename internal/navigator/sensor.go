@@ -146,6 +146,14 @@ func (s *ProcessSensor) Snapshot(ctx context.Context) (string, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// An empty pattern means "no filter" — on a desktop every tasklist changes
+	// constantly, so the hash would never be stable and each snapshot would
+	// run an expensive full process listing. Treat it as "not monitoring":
+	// report a stable empty state without shelling out.
+	if s.pattern == "" {
+		return "", "", nil
+	}
+
 	current := make(map[string]bool)
 	out, err := s.listProcesses()
 	if err != nil {
@@ -153,7 +161,7 @@ func (s *ProcessSensor) Snapshot(ctx context.Context) (string, string, error) {
 		return "", "", nil
 	}
 	for _, line := range out {
-		if s.pattern == "" || strings.Contains(line, s.pattern) {
+		if strings.Contains(line, s.pattern) {
 			current[line] = true
 		}
 	}
@@ -334,6 +342,18 @@ func (c *EventCorrelator) Flush() []SensorEvent {
 	return out
 }
 
+// Trim drops the oldest pending events until at most limit remain. It is a
+// bound on the buffer for hosts that sample in the background without
+// flushing; events are best-effort diagnostics, so dropping old ones is safe.
+func (c *EventCorrelator) Trim(limit int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if limit <= 0 || len(c.pending) <= limit {
+		return
+	}
+	c.pending = append([]SensorEvent(nil), c.pending[len(c.pending)-limit:]...)
+}
+
 // DynamicEnvSensor orchestrates all attached sensors. The kernel calls
 // SnapshotAll before and after each action; the diff between the two calls is
 // what feeds the ClosedLoopEngine's comparator.
@@ -377,3 +397,12 @@ func (d *DynamicEnvSensor) SnapshotAll(ctx context.Context) (ifaceHash, envHash,
 
 // FlushEvents returns the correlated event batch.
 func (d *DynamicEnvSensor) FlushEvents() []SensorEvent { return d.correlator.Flush() }
+
+// TrimEvents bounds the pending event buffer, dropping the oldest events when
+// the correlator exceeds limit. Used by the background watch so a session with
+// churning files cannot grow the buffer without limit while no tool call runs
+// to flush it. Events are best-effort diagnostics — dropping the oldest is
+// acceptable; the environment hash still carries drift detection.
+func (d *DynamicEnvSensor) TrimEvents(limit int) {
+	d.correlator.Trim(limit)
+}

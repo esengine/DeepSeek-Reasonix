@@ -150,6 +150,16 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
 		return
 	}
+	// OPT-263: advisory context-window resizer. It suggests a window for the
+	// current pressure but never changes the running window — the agent stays
+	// deterministic and the user keeps control via config.
+	if a.tokenGovernance != nil {
+		if sugg := a.tokenGovernance.SuggestWindow(a.contextWindow); sugg > 0 && sugg != a.contextWindow {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+				Text:   "context window resizer suggests adjusting the window (advisory)",
+				Detail: fmt.Sprintf("current=%d suggested=%d — tune agent.token_governance.context_window_max to apply", a.contextWindow, sugg)})
+		}
+	}
 	soft, snip, high := a.compactThresholds()
 	// A turn that sits under the trigger is the breathing room a healthy
 	// compaction buys; it clears the stuck latch and the run counter. This has to

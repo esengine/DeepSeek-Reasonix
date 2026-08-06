@@ -147,6 +147,56 @@
     }
   },
   {
+    "Name": "code_verify",
+    "Description": "Runs CoSPlay co-evolution verification on code without ground-truth data: generates discriminating tests, executes a code×test matrix over repair rounds, and returns the consensus best result. Pass language, code (or file), a task description, and optional input/expected examples.",
+    "ReadOnly": true,
+    "Schema": {
+      "properties": {
+        "code": {
+          "description": "The code to verify (function/type definitions; omit when file is set).",
+          "type": "string"
+        },
+        "examples": {
+          "description": "Input/output pairs used to build discriminating tests.",
+          "items": {
+            "properties": {
+              "expected": {
+                "description": "Expected result, e.g. \"42\".",
+                "type": "string"
+              },
+              "input": {
+                "description": "Invocation expression or argument, e.g. \"21\".",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "file": {
+          "description": "Path to a file containing the code (alternative to code).",
+          "type": "string"
+        },
+        "function": {
+          "description": "Entry function name, if known.",
+          "type": "string"
+        },
+        "language": {
+          "description": "Code language: go | python | javascript",
+          "type": "string"
+        },
+        "task": {
+          "description": "What the code is supposed to do.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "language"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "Name": "complete_step",
     "Description": "Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done — the verification you ran (command + result), a completed built-in review that is fresh for any later changes, the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off — it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step — its title or number, matching the task list), `result` (what is now true/changed), `evidence` (≥1 item, each with `kind` = verification|review|diff|files|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`.",
     "ReadOnly": true,

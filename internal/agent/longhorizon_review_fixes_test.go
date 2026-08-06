@@ -132,7 +132,8 @@ func TestExecuteBatchExposesPerCallErrors(t *testing.T) {
 
 // TestRunLoopFeedsNavigatorAndTracker is the integration test for review
 // fixes 1 and 3: a full Run with a failing tool must (a) pass the real error
-// to the StateTracker, and (b) feed the Navigator through ObserveToolCall so
+// to the StateTracker, and (b) feed the Navigator through its closed-loop
+// BeginAction/EndAction observer window so
 // its state graph recovers facts — proving the navigator is no longer dead
 // code and the run loop still executes tools through the agent's own path.
 func TestRunLoopFeedsNavigatorAndTracker(t *testing.T) {
@@ -148,7 +149,7 @@ func TestRunLoopFeedsNavigatorAndTracker(t *testing.T) {
 	}}
 	a := New(prov, reg, NewSession(""), Options{
 		StateTracker: tracker,
-		Navigator:    nav,
+		Navigator:    NewNavigatorBridge(nav),
 		LongHorizon:  true,
 	}, sink)
 	if err := a.Run(context.Background(), "do it"); err != nil {
@@ -163,7 +164,7 @@ func TestRunLoopFeedsNavigatorAndTracker(t *testing.T) {
 	if digest := tracker.SnapshotImplicitState(); !strings.Contains(digest, "boom") {
 		t.Errorf("StateTracker digest should include the error fact, got %q", digest)
 	}
-	// (b) Navigator was fed via ObserveToolCall and recovered facts.
+	// (b) Navigator was fed through the observer window and recovered facts.
 	if digest := nav.ImplicitStateDigest(); !strings.Contains(digest, "boom") {
 		t.Errorf("Navigator digest should include the error fact, got %q", digest)
 	}

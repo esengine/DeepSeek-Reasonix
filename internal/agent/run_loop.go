@@ -832,6 +832,22 @@ func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiag
 	if a.lastUsage.Load() == nil && usage.PromptTokens > 0 {
 		a.storeLatestRequestUsage(usage)
 	}
+	// OPT-261~265 token governance (advisory): feed this turn's usage through
+	// the load shedder / admission gatekeeper / cache-invalidation compactor /
+	// prompt-cache warmer. Only visibility — never a veto.
+	if a.tokenGovernance != nil {
+		rep := a.tokenGovernance.ObserveUsage(usage, a.modelRef, cacheDiagnostics)
+		if rep.Shed {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeLoopGuard,
+				Text:   "token load shedder triggered (advisory)",
+				Detail: fmt.Sprintf("turn used %d tokens, above the shed threshold", rep.ObservedTokens)})
+		}
+		if rep.Rejected {
+			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeLoopGuard,
+				Text:   "admission gatekeeper refused load (advisory)",
+				Detail: fmt.Sprintf("turn used %d tokens, over capacity", rep.ObservedTokens)})
+		}
+	}
 	a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing,
 		UsageSource:      a.usageSource,
 		CacheDiagnostics: cacheDiagnostics,
@@ -965,6 +981,22 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 			stateTokens[i] = a.stateTracker.BeforeToolCall(ctx, call)
 		}
 	}
+	// OSWorld 2.0 navigator closed loop — observer half. Open the state window
+	// for every tool call before the batch runs: the kernel snapshots the
+	// environment, predicts the expected change, and pre-checks permissions.
+	// BeginAction is advisory here (the agent's own permission gate is the
+	// authoritative check), so a denial only surfaces as an event.
+	if a.navigator != nil {
+		for _, call := range calls {
+			if err := a.navigator.BeginAction(ctx, call.Name, call.Arguments); err != nil {
+				a.sink.Emit(event.Event{
+					Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeLoopGuard,
+					Text:   "navigator blocked tool call at permission pre-check",
+					Detail: fmt.Sprintf("%s: %v — agent gate still decides; proceeding", call.Name, err),
+				})
+			}
+		}
+	}
 	batch := a.executeBatch(ctx, calls)
 	results, images := batch.results, batch.images
 	for i, call := range calls {
@@ -989,17 +1021,13 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		if a.stateTracker != nil && i < len(stateTokens) {
 			a.stateTracker.AfterToolCall(ctx, stateTokens[i], results[i], callErr)
 		}
-		// Navigator advisory observation: feed the real outcome into the state
-		// graph (never re-executes — the call above already ran through the
-		// agent's permission/hooks/evidence path).
+		// Close the navigator observer window: verify prediction vs reality,
+		// recover implicit facts, and apply whatever correction fired
+		// (re-inject lost facts, warn on rollback/retry, ...). The real
+		// per-call error is passed so failures are tracked, not masked.
 		if a.navigator != nil {
-			if advice := a.navigator.ObserveToolCall(ctx, call.Name, call.Arguments, results[i], callErr); advice != "" {
-				a.sink.Emit(event.Event{
-					Kind: event.Notice, Level: event.LevelWarn,
-					Text:   advice,
-					Detail: "advisory correction from the navigator kernel; the agent decides whether to act",
-				})
-			}
+			brief, _ := a.navigator.EndAction(ctx, call.Name, call.Arguments, results[i], callErr)
+			a.applyNavigatorCorrection(ctx, state, brief)
 		}
 	}
 	// OSWorld 2.0 verification nudge: every VerificationInterval tool-call
@@ -1113,6 +1141,59 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 // cross-source reasoning gaps, and guess-instead-of-ask behavior.
 func verificationNudgeMessage(interval int) string {
 	return fmt.Sprintf("Verification checkpoint (%d tool-call rounds since the last one): before continuing, (1) confirm your progress still matches the original goal, (2) re-check the assumptions and hidden state you recovered earlier (file paths, IDs, data sources) — are they still true?, (3) decide whether any identified-but-unexplored source now matters. Surface unresolved questions to the user instead of guessing.", interval)
+}
+
+// applyNavigatorCorrection acts on the verdict of one navigator observation.
+// It is the agent-side half of the OSWorld 2.0 closed loop:
+//   - reinject_facts → thread the lost implicit facts back into the
+//     conversation as a short user message (the direct fix for implicit-state
+//     amnesia; the model can re-read them without a compaction round).
+//   - retry → surface as a warning so the loop guard/evidence signals can
+//     react to repeated no-op actions.
+//   - rollback / ask_host → surface as an error event so the frontend and the
+//     user see the kernel rewound or asked for help.
+//
+// All paths are non-fatal: the navigator observes and advises, it never
+// vetoes a tool result the agent already committed to the session.
+func (a *Agent) applyNavigatorCorrection(ctx context.Context, state *runLoopState, brief CorrectionBrief) {
+	if brief.Strategy == "" || brief.Strategy == "continue" {
+		return
+	}
+	switch brief.Strategy {
+	case "reinject_facts":
+		if len(brief.Reinject) == 0 {
+			return
+		}
+		facts := strings.Join(brief.Reinject, "; ")
+		if len(facts) > 500 {
+			facts = facts[:500]
+		}
+		msg := fmt.Sprintf("[navigator] recovered implicit state you may have lost: %s", facts)
+		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(msg)})
+		a.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+			Text:   "navigator re-injected recovered implicit state",
+			Detail: brief.Reason,
+		})
+	case "retry":
+		a.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeLoopGuard,
+			Text:   "navigator suggests retrying an action",
+			Detail: brief.Reason,
+		})
+	case "rollback":
+		a.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeLoopGuard,
+			Text:   "navigator rewound to a known-good state",
+			Detail: brief.Reason,
+		})
+	case "ask_host":
+		a.sink.Emit(event.Event{
+			Kind: event.Notice, Level: event.LevelWarn, Code: event.NoticeCodeLoopGuard,
+			Text:   "navigator needs host/user decision",
+			Detail: brief.Reason,
+		})
+	}
 }
 
 func toolCallsAreOutOfContextGoalReports(ctx context.Context, calls []provider.ToolCall) bool {

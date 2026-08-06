@@ -28,6 +28,7 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/cosplay"
 	"reasonix/internal/environment"
 	"reasonix/internal/event"
 	"reasonix/internal/extension"
@@ -1116,6 +1117,21 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		reg.Add(agent.NewParallelTasksTool(taskTool, reg))
 		reg.Add(agent.NewFleetTool(taskTool))
 		reg.Add(agent.NewSubagentResultTool(taskTool))
+		// CoSPlay co-evolution code verification (manual tool; always
+		// registered, parameters tuned from config when present).
+		verifyTool := cosplay.NewCodeVerifyTool()
+		if cp := cfg.Agent.Cosplay; cp != nil {
+			if cp.MaxRounds > 0 {
+				verifyTool.MaxRounds = cp.MaxRounds
+			}
+			if cp.NumTests > 0 {
+				verifyTool.NumTests = cp.NumTests
+			}
+			if cp.TimeoutSeconds > 0 {
+				verifyTool.Timeout = cp.TimeoutSeconds
+			}
+		}
+		reg.Add(verifyTool)
 		return "enabled task."
 	}
 	addReadOnlyTaskTool := func() string {
@@ -1850,13 +1866,36 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// sink; a FilesystemSensor monitors the workspace root for env drift.
 	// The Navigator is a superset of StateTracker — both are wired so the
 	// agent gets the Navigator's closed-loop correction + env sensing while
-	// the StateTracker continues its per-call implicit-state capture.
+	// the StateTracker continues its per-call implicit-state capture. The
+	// bridge adapts the kernel to the agent's string-based tool-call shape.
+	// The navigator is only wired in long-horizon mode (its env sensors and
+	// closed loop target OSWorld 2.0-class long tasks).
 	var navKernel *navigator.Navigator
 	if longHorizonMode {
 		navAdapter := navigator.NewReasonixAdapter(reg, sink, navigator.ReasonixAdapterOptions{})
 		navKernel = navigator.New(navAdapter, navigator.Options{HistoryWindow: 50})
 		navKernel.AddSensor(navigator.NewFilesystemSensor(root, 3))
 		navKernel.AddSensor(navigator.NewProcessSensor(""))
+	}
+
+	// OPT-261~265 token governance (advisory): wired from config, off by
+	// default. Records token-pressure statistics and surfaces events; never
+	// vetoes a turn.
+	var tokenGovernance *agent.TokenGovernance
+	if tg := cfg.Agent.TokenGovernance; tg != nil && tg.Enabled {
+		tokenGovernance = agent.NewTokenGovernance(agent.TokenGovernanceOptions{
+			LoadShedder:       tg.LoadShedder,
+			LoadThreshold:     tg.LoadThreshold,
+			ShedStrategy:      tg.ShedStrategy,
+			CacheCompactor:    tg.CacheCompactor,
+			WindowResizer:     tg.WindowResizer,
+			ContextWindowMin:  tg.ContextWindowMin,
+			ContextWindowMax:  tg.ContextWindowMax,
+			AdmissionGate:     tg.AdmissionGate,
+			AdmissionCapacity: tg.AdmissionCapacity,
+			CacheWarmer:       tg.CacheWarmer,
+			WarmerStrategy:    tg.WarmerStrategy,
+		})
 	}
 
 	executor := agent.New(execProv, reg, execSess, agent.Options{
@@ -1868,9 +1907,10 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Gate:                 headlessGate,
 		Hooks:                hookRunner,
 		StateTracker:         stateTracker,
-		Navigator:            navKernel,
+		Navigator:            agent.NewNavigatorBridge(navKernel),
 		LongHorizon:          longHorizonMode,
 		VerificationInterval: cfg.Agent.VerificationInterval,
+		TokenGovernance:      tokenGovernance,
 		Jobs:                 jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
@@ -1898,6 +1938,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}, sink)
 
 	var runner agent.Runner = executor
+	// OSWorld 2.0 "dead light" defense: bind the navigator's background
+	// environment watch to the runner's lifetime so environment updates that
+	// arrive between tool calls (downloads, notifications, processes) are
+	// sampled and surfaced at the next EndAction.
+	if navKernel != nil {
+		runner = &navigatorWatchRunner{Runner: runner, kernel: navKernel}
+	}
 	label := entry.Model
 	// Two-model collaboration: a distinct planner_model wraps the executor in a
 	// Coordinator with its own session, kept separate for cache stability. The
