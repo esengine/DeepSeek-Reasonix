@@ -314,6 +314,13 @@ type chatTUI struct {
 	// in the slash menu as "/<name>" and managed via /skills.
 	skills []skill.Skill
 
+	// slashCatalog is an immutable completion list rebuilt only when
+	// commands/skills/host/controller identity change. Keystroke filtering
+	// never reconstructs skill descriptions or MCP prompt lists (#6417, #7090).
+	slashCatalog     []compItem
+	slashCatalogKey  string
+	slashCatalogOnce bool // true when slashCatalog is valid for slashCatalogKey
+
 	// skillPick is the interactive skill picker overlay for /skills. nil when closed.
 	skillPick *skillPicker
 
@@ -1474,7 +1481,26 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice(i18n.M.CtrlCQuitHint)
 			return m, finalize(m, nil)
 		case "ctrl+d":
-			return m, shutdownNow
+			// Compatible Ctrl+D: forward-delete one character when the
+			// composer has content; only quit when idle with an empty
+			// composer (bash/readline-style EOF). Do not intercept a
+			// running turn's empty composer as quit (#7638-compatible).
+			if strings.TrimSpace(m.input.Value()) != "" {
+				// Delegate to textarea DeleteCharacterForward (bound to
+				// ctrl+d by default) so mid-line forward delete works.
+				var ic tea.Cmd
+				m.input, ic = m.input.Update(msg)
+				if ic != nil {
+					cmds = append(cmds, ic)
+				}
+				m.growInputToFit()
+				m.updateCompletion()
+				return m, finalize(m, cmds)
+			}
+			if m.state == tuiIdle {
+				return m, shutdownNow
+			}
+			return m, nil
 		case "ctrl+l":
 			if m.state != tuiRunning {
 				m.finalizeStreamed()
@@ -1494,9 +1520,11 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+b":
 			m.toggleShellOutput()
 			return m, finalize(m, cmds)
-		case "shift+tab":
-			// Shift+Tab toggles Plan only. Tool approval stays on its own axis:
-			// Ask/Auto are explicit choices, and YOLO is a separate Ctrl+Y toggle.
+		case "shift+tab", "backtab":
+			// Shift+Tab toggles Plan only. Some terminals encode it as
+			// "backtab" (CSI Z) rather than "shift+tab" (#6660).
+			// Tool approval stays on its own axis: Ask/Auto are explicit
+			// choices, and YOLO is a separate Ctrl+Y toggle.
 			m.cycleMode()
 			return m, nil
 		case "enter":
@@ -1710,6 +1738,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.label = msg.label
 			m.commands = msg.commands
 			m.skills = msg.skills
+			m.invalidateSlashCatalog()
 			m.host = msg.host
 			m.modelRef = msg.ref
 			if msg.profile != "" {
@@ -4502,6 +4531,7 @@ func (m *chatTUI) runSlashCommand(input string) tea.Cmd {
 		prev := len(m.commands)
 		err := m.ctrl.ReloadCommands(context.Background())
 		m.commands = m.ctrl.Commands()
+		m.invalidateSlashCatalog()
 		m.updateCompletion()
 		if err != nil {
 			m.notice("reload-cmd: " + err.Error())

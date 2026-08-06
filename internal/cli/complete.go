@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	rw "github.com/mattn/go-runewidth"
 
 	"reasonix/internal/control"
 	"reasonix/internal/fileref"
@@ -57,9 +58,74 @@ const (
 	maxFileSearchItems = 20
 )
 
-// slashItems is the full set of slash commands offered for completion: the
-// built-in verbs, custom commands, skills (each as "/<name>"), and MCP prompts.
+// slashItems returns the cached slash catalog, rebuilding it only when the
+// underlying commands/skills/prompts/extension sources change.
 func (m *chatTUI) slashItems() []compItem {
+	key := m.slashCatalogFingerprint()
+	if m.slashCatalogOnce && m.slashCatalogKey == key && m.slashCatalog != nil {
+		return m.slashCatalog
+	}
+	items := m.buildSlashCatalog()
+	// Store an immutable snapshot so keystroke filtering never mutates shared state.
+	out := make([]compItem, len(items))
+	copy(out, items)
+	m.slashCatalog = out
+	m.slashCatalogKey = key
+	m.slashCatalogOnce = true
+	return m.slashCatalog
+}
+
+// invalidateSlashCatalog drops the cached catalog so the next keystroke rebuilds it.
+func (m *chatTUI) invalidateSlashCatalog() {
+	m.slashCatalogOnce = false
+	m.slashCatalog = nil
+	m.slashCatalogKey = ""
+}
+
+// slashCatalogFingerprint identifies the sources that contribute to slashItems.
+// It is intentionally name/description-based so slice identity alone is enough
+// and ordinary typing never rebuilds the catalog.
+func (m *chatTUI) slashCatalogFingerprint() string {
+	var b strings.Builder
+	b.Grow(256 + len(m.commands)*24 + len(m.skills)*48)
+	fmt.Fprintf(&b, "c=%d;", len(m.commands))
+	for _, c := range m.commands {
+		if c.Hidden {
+			continue
+		}
+		b.WriteString(c.Name)
+		b.WriteByte('|')
+		b.WriteString(c.Description)
+		b.WriteByte(';')
+	}
+	fmt.Fprintf(&b, "s=%d;", len(m.skills))
+	for _, s := range m.skills {
+		b.WriteString(s.SlashName())
+		b.WriteByte('|')
+		b.WriteString(s.Description)
+		b.WriteByte('|')
+		b.WriteString(string(s.RunAs))
+		b.WriteByte(';')
+	}
+	for _, p := range m.prompts() {
+		b.WriteString(p.Name)
+		b.WriteByte('|')
+		b.WriteString(p.Description)
+		b.WriteByte(';')
+	}
+	if m.ctrl != nil {
+		for _, a := range m.ctrl.ExtensionActions() {
+			b.WriteString(a.Slash)
+			b.WriteByte('|')
+			b.WriteString(a.Label)
+			b.WriteByte(';')
+		}
+	}
+	return b.String()
+}
+
+// buildSlashCatalog constructs the full slash menu from current sources.
+func (m *chatTUI) buildSlashCatalog() []compItem {
 	docsOwner := control.ResolveSlashCommandOwner(control.DocsSlashName, m.commands, m.skills)
 	docsBuiltin := "/" + control.ResolvedBuiltinSlashName(control.DocsSlashName, m.commands, m.skills)
 	items := renameSlashItem(builtinSlashItems(), "/docs", docsBuiltin)
@@ -122,23 +188,27 @@ func removeSlashItems(items []compItem, label string) []compItem {
 // token under the cursor is "@…".
 func (m *chatTUI) updateCompletion() {
 	val := m.input.Value()
+	cursor := m.inputCursorByteOffset()
 
 	// An @-reference token under the cursor wins — it can appear mid-line, even
 	// inside a slash command's arguments (e.g. "/review @file").
-	if at, token, ok := activeAtToken(val); ok {
+	if at, token, ok := activeAtToken(val, cursor); ok {
 		if items := m.atItems(token); len(items) > 0 {
 			m.setCompletion(compAt, items, at)
 			return
 		}
 	}
 
+	// Slash completion only when the line is a pure slash command being typed
+	// from the start (not mid-line after free text). Use the full value so a
+	// mid-token cursor still filters the catalog without rewriting the line.
 	if strings.HasPrefix(val, "/") {
 		if items, from, ok := m.explicitSubcommandItems(val); ok && len(items) > 0 {
 			m.setCompletion(compSlashArg, items, from)
 			return
 		}
 		if !strings.ContainsAny(val, " \t\n") {
-			// Still naming the command itself.
+			// Still naming the command itself. Catalog is cached; filter is cheap.
 			if items := fuzzyFilterSlash(m.slashItems(), val); len(items) > 0 {
 				m.setCompletion(compSlash, items, 0)
 				return
@@ -154,6 +224,53 @@ func (m *chatTUI) updateCompletion() {
 	}
 
 	m.completion = completion{}
+}
+
+// inputCursorByteOffset returns the byte offset of the insertion caret in
+// input.Value(). Falls back to len(Value) when layout is unavailable so
+// completion still works in unit tests that never size the window.
+func (m *chatTUI) inputCursorByteOffset() int {
+	val := m.input.Value()
+	if val == "" {
+		return 0
+	}
+	// Prefer the visual-row model used by mouse selection: it already maps
+	// the caret to a stable rune offset into Value().
+	if m.width > 0 {
+		rows := m.composerRows()
+		if len(rows) > 0 {
+			// Reconstruct offset from textarea cursor row/column via caret helpers.
+			if cur := m.input.Cursor(); cur != nil {
+				// Absolute visual row inside the wrapped content.
+				absRow := m.input.ScrollYOffset() + cur.Y
+				if absRow >= 0 && absRow < len(rows) {
+					row := rows[absRow]
+					// Map screen column (prompt-adjusted) to cell offset.
+					// cur.X is relative to the textarea content origin.
+					col := cur.X
+					if col < 0 {
+						col = 0
+					}
+					// Walk cells by visual width to find the caret byte offset.
+					visual := 0
+					for _, cell := range row.cells {
+						w := rw.RuneWidth(cell.r)
+						if visual+w > col {
+							if cell.offset >= 0 && cell.offset <= len(val) {
+								return cell.offset
+							}
+							break
+						}
+						visual += w
+					}
+					if row.endOffset >= 0 && row.endOffset <= len(val) {
+						return row.endOffset
+					}
+				}
+			}
+		}
+	}
+	return len(val)
 }
 
 // slashArgItems completes the arguments of a slash command (everything after the
@@ -359,14 +476,19 @@ func subsequenceMatch(target, query string) bool {
 	return false
 }
 
-// activeAtToken finds the @-reference token ending at the cursor (assumed at the
-// input's end). The '@' must start the line or follow whitespace, so emails
-// like "a@b" don't trigger it. A backslash-escaped space or tab is part of the
-// token (the form EscapeRefPath inserts for paths with spaces), so completion
-// can descend through such directories. Returns the '@' offset and the text
-// after it.
-func activeAtToken(val string) (int, string, bool) {
-	for i := len(val) - 1; i >= 0; i-- {
+// activeAtToken finds the @-reference token ending at the cursor. cursor is a
+// byte offset into val; when out of range the scan uses the end of the string
+// (legacy behaviour). The '@' must start the line or follow whitespace, so
+// emails like "a@b" don't trigger it. A backslash-escaped space or tab is part
+// of the token (the form EscapeRefPath inserts for paths with spaces), so
+// completion can descend through such directories. Returns the '@' offset and
+// the text after it up to the cursor (not past it), so mid-line typing does
+// not jump the caret or complete trailing text (#6719).
+func activeAtToken(val string, cursor int) (int, string, bool) {
+	if cursor < 0 || cursor > len(val) {
+		cursor = len(val)
+	}
+	for i := cursor - 1; i >= 0; i-- {
 		switch val[i] {
 		case ' ', '\t':
 			if i > 0 && val[i-1] == '\\' {
@@ -378,7 +500,7 @@ func activeAtToken(val string) (int, string, bool) {
 			return 0, "", false
 		case '@':
 			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' || val[i-1] == '\n' {
-				return i, val[i+1:], true
+				return i, val[i+1 : cursor], true
 			}
 			return 0, "", false
 		}
@@ -597,6 +719,8 @@ func (m *chatTUI) completionSelectedInsertPresent() bool {
 // acceptCompletion applies the selected item to the input, then recomputes the
 // menu from the new value: it re-opens one level deeper (a descended directory
 // or a freshly completed command's arguments) or closes when nothing applies.
+// Cursor moves to the end of the inserted token only on accept — ordinary
+// keystrokes never call this path, so mid-line typing keeps its caret (#6719).
 func (m *chatTUI) acceptCompletion() {
 	if m.completion.sel >= len(m.completion.items) {
 		m.completion = completion{}
@@ -608,8 +732,31 @@ func (m *chatTUI) acceptCompletion() {
 	if rf > len(val) {
 		rf = len(val)
 	}
-	m.input.SetValue(val[:rf] + it.insert)
-	m.input.CursorEnd()
+	// Replace only the token under completion; keep any suffix after the old
+	// token so accepting mid-line does not drop trailing text.
+	// When the menu was opened with cursor mid-token, replaceFrom..cursor was
+	// the active span; after accept we rebuild as prefix + insert + remainder
+	// past the original token end (best-effort: remainder is anything after
+	// the previously typed fragment starting at replaceFrom).
+	oldFragEnd := len(val)
+	if m.completion.kind == compAt {
+		// For @ tokens the active fragment is replaceFrom..cursor; remainder
+		// after cursor is preserved.
+		cursor := m.inputCursorByteOffset()
+		if cursor >= rf && cursor <= len(val) {
+			oldFragEnd = cursor
+		}
+	}
+	newVal := val[:rf] + it.insert + val[oldFragEnd:]
+	insertEnd := rf + len(it.insert)
+	m.input.SetValue(newVal)
+	// Place caret at the end of the inserted completion only. Fall back to
+	// CursorEnd when the layout has no width yet (unit tests).
+	if m.width > 0 {
+		m.setComposerCursor(len([]rune(newVal[:min(insertEnd, len(newVal))])))
+	} else {
+		m.input.CursorEnd()
+	}
 	if it.descend || strings.HasSuffix(it.insert, " ") {
 		m.updateCompletion()
 		return

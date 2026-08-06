@@ -227,7 +227,7 @@ func TestActiveAtToken(t *testing.T) {
 		{`see @my\ dir/`, `my\ dir/`, true, 4},
 	}
 	for _, c := range cases {
-		at, tok, ok := activeAtToken(c.val)
+		at, tok, ok := activeAtToken(c.val, len(c.val))
 		if ok != c.wantOK || (ok && (tok != c.wantTok || at != c.wantAt)) {
 			t.Errorf("activeAtToken(%q) = (%d,%q,%v), want (%d,%q,%v)", c.val, at, tok, ok, c.wantAt, c.wantTok, c.wantOK)
 		}
