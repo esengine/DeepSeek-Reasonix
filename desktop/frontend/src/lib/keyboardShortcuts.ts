@@ -5,6 +5,7 @@ export type ShortcutPlatform = "darwin" | "windows" | "linux";
 
 export type ShortcutAction =
   | "app.newSession"
+  | "app.toggleWindow"
   | "commandPalette.open"
   | "composer.newline"
   | "composer.redo"
@@ -56,12 +57,27 @@ export type ShortcutDefinition = {
   allowInEditable?: boolean;
   configurable?: boolean;
   allowedKeys?: readonly string[];
+  /** OS-level binding persisted in desktop config, not document keydown. */
+  osLevel?: boolean;
 };
 
 const SHORTCUTS_STORAGE_KEY = "reasonix.customShortcuts";
 const SHORTCUTS_CHANGED_EVENT = "reasonix:shortcuts-changed";
 
 export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
+  {
+    action: "app.toggleWindow",
+    section: "global",
+    labelKey: "shortcuts.action.toggleWindow",
+    descriptionKey: "shortcuts.desc.toggleWindow",
+    defaults: {
+      darwin: { key: " ", meta: true, shift: true },
+      windows: { key: " ", ctrl: true, shift: true },
+      linux: { key: " ", ctrl: true, shift: true },
+    },
+    osLevel: true,
+    preventDefault: true,
+  },
   {
     action: "app.newSession",
     section: "session",
@@ -464,12 +480,69 @@ export function comboFromKeyboardEvent(event: KeyboardShortcutEvent): ShortcutCo
 }
 
 export function matchesShortcut(event: KeyboardShortcutEvent, action: ShortcutAction, platform: ShortcutPlatform): boolean {
+  const definition = shortcutDefinition(action);
+  if (definition.osLevel) return false;
   const combo = comboFromKeyboardEvent(event);
   if (!combo) return false;
-  const definition = shortcutDefinition(action);
   if (sameCombo(combo, resolvedShortcutCombo(action, platform))) return true;
   if (loadCustomShortcuts()[action]) return false;
   return definition.aliases?.[platform]?.some((alias) => sameCombo(combo, alias)) ?? false;
+}
+
+/** Stable config/TOML form: ctrl+shift+space */
+export function serializeShortcutCombo(combo: ShortcutCombo): string {
+  const normalized = normalizeCombo(combo);
+  const parts: string[] = [];
+  if (normalized.ctrl) parts.push("ctrl");
+  if (normalized.meta) parts.push("meta");
+  if (normalized.alt) parts.push("alt");
+  if (normalized.shift) parts.push("shift");
+  const key = normalized.key === " " ? "space" : normalized.key.toLowerCase();
+  parts.push(key);
+  return parts.join("+");
+}
+
+export function parseShortcutComboBinding(binding: string | undefined | null): ShortcutCombo | null {
+  const raw = (binding ?? "").trim().toLowerCase();
+  if (!raw || raw === "off" || raw === "none" || raw === "disabled" || raw === "-") return null;
+  const parts = raw.split(/[+\-\s_]+/).filter(Boolean);
+  let ctrl = false;
+  let meta = false;
+  let alt = false;
+  let shift = false;
+  let key = "";
+  for (const part of parts) {
+    switch (part) {
+      case "ctrl":
+      case "control":
+        ctrl = true;
+        break;
+      case "cmd":
+      case "command":
+      case "meta":
+      case "super":
+      case "win":
+      case "windows":
+        meta = true;
+        break;
+      case "alt":
+      case "option":
+      case "opt":
+        alt = true;
+        break;
+      case "shift":
+        shift = true;
+        break;
+      case "mod":
+      case "primary":
+        // Resolved against the current platform when displaying defaults.
+        break;
+      default:
+        key = part === "space" ? " " : part;
+    }
+  }
+  if (!key) return null;
+  return normalizeCombo({ key, ctrl, meta, alt, shift });
 }
 
 export function isReservedComposerHistoryShortcut(
@@ -508,7 +581,7 @@ export function useGlobalShortcut(
 ): void {
   const definition = shortcutDefinition(action);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || definition.osLevel) return;
     const platform = detectShortcutPlatform();
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (isShortcutRecorderTarget(event.target)) return;

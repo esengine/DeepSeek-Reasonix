@@ -339,6 +339,27 @@ func (c *Config) SetDesktopCloseBehavior(mode string) error {
 	return nil
 }
 
+// SetDesktopGlobalHotkey sets the OS-level window summon/hide binding.
+// Empty clears the override so the platform default applies again.
+// "off" stores an explicit disabled sentinel.
+func (c *Config) SetDesktopGlobalHotkey(binding string) error {
+	raw := strings.TrimSpace(binding)
+	switch strings.ToLower(raw) {
+	case "off", "none", "disabled", "-":
+		c.Desktop.GlobalHotkey = "off"
+		return nil
+	case "":
+		c.Desktop.GlobalHotkey = ""
+		return nil
+	}
+	normalized := normalizeDesktopGlobalHotkey(raw)
+	if normalized == "" {
+		return fmt.Errorf("global hotkey %q: need modifiers plus one key (e.g. ctrl+shift+space)", binding)
+	}
+	c.Desktop.GlobalHotkey = normalized
+	return nil
+}
+
 // SetDesktopDisplayMode sets the transcript display mode. UI-only.
 func (c *Config) SetDesktopDisplayMode(mode string) error {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
