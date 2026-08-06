@@ -5,6 +5,7 @@ on:
     paths:
       - "release-notes/**"
       - "scripts/release-notes*.mjs"
+      - "scripts/release-event.mjs"
       - "site/src/pages/changelog/**"
       - "site/src/components/ChangelogPage.astro"
       - "desktop/frontend/src/App.tsx"
