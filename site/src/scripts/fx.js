@@ -3,10 +3,6 @@
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const rich = () => document.body.dataset.motion === "rich" && !reduced;
   const lerp = (a, b, t) => a + (b - a) * t;
-  const mouse = { x: innerWidth / 2, y: innerHeight / 2, active: false };
-  window.addEventListener("mousemove", (e) => {
-    mouse.x = e.clientX; mouse.y = e.clientY; mouse.active = true;
-  }, { passive: true });
 
   /* run a rAF loop only while `el` is on screen — no idle spinning */
   const rafWhileVisible = (el, fn) => {
@@ -26,54 +22,6 @@
       setRunning(entries[entries.length - 1].isIntersecting);
     }).observe(el);
   };
-
-  /* particle grid (hero canvas) */
-  const canvas = document.querySelector(".hero-dots");
-  if (canvas) {
-    const ctx = canvas.getContext("2d");
-    const hero = canvas.parentElement;
-    let w = 0, h = 0, dpr = 1, dots = [];
-    const SP = 36;
-    const build = () => {
-      dpr = Math.min(devicePixelRatio || 1, 2);
-      const r = hero.getBoundingClientRect();
-      w = r.width; h = r.height;
-      canvas.width = w * dpr; canvas.height = h * dpr;
-      canvas.style.width = w + "px"; canvas.style.height = h + "px";
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      dots = [];
-      for (let y = SP; y < h - 8; y += SP)
-        for (let x = SP / 2 + ((y / SP) % 2 ? SP / 2 : 0); x < w - 8; x += SP)
-          dots.push({ x, y, a: 0 });
-    };
-    build();
-    window.addEventListener("resize", build);
-    let mx = -9999, my = -9999;
-    const accent = () =>
-      getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#3a5fd0";
-    rafWhileVisible(hero, () => {
-      const r = hero.getBoundingClientRect();
-      ctx.clearRect(0, 0, w, h);
-      if (!rich()) return;
-      const tx = mouse.active ? mouse.x - r.left : -9999;
-      const ty = mouse.active ? mouse.y - r.top : -9999;
-      mx = lerp(mx < -999 ? tx : mx, tx, 0.14);
-      my = lerp(my < -999 ? ty : my, ty, 0.14);
-      const col = accent();
-      for (const d of dots) {
-        const dist = Math.hypot(d.x - mx, d.y - my);
-        const target = dist < 150 ? 1 - dist / 150 : 0;
-        d.a = lerp(d.a, target, 0.12);
-        const base = 0.13;
-        ctx.beginPath();
-        ctx.arc(d.x, d.y, 1.1 + d.a * 1.3, 0, 7);
-        if (d.a > 0.02) { ctx.globalAlpha = base + d.a * 0.65; ctx.fillStyle = col; }
-        else { ctx.globalAlpha = base; ctx.fillStyle = "#9aa0a6"; }
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
-    });
-  }
 
   /* terminal 3D tilt toward cursor */
   const term = document.querySelector(".term");

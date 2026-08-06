@@ -1,5 +1,5 @@
 ---
-type ActiveItem = 'features' | 'how' | 'skills' | 'community' | 'docs' | 'changelog';
+type ActiveItem = 'features' | 'surfaces' | 'skills' | 'community' | 'docs' | 'changelog';
 
 const {
   active,
@@ -21,7 +21,7 @@ const items: Array<{
   secondary?: boolean;
 }> = [
   { id: 'features', href: `${base}/#features`, en: 'Features', zh: '特性' },
-  { id: 'how', href: `${base}/#how`, en: 'How it works', zh: '工作原理', secondary: true },
+  { id: 'surfaces', href: `${base}/#surfaces`, en: 'Surfaces', zh: '使用形态', secondary: true },
   { id: 'skills', href: `${base}/skills/`, en: 'Skills', zh: '技能市场' },
   { id: 'community', href: `${base}/#community`, en: 'Community', zh: '社区', secondary: true },
   { id: 'docs', href: `${base}/docs/`, en: 'Docs', zh: '文档' },
