@@ -1817,8 +1817,6 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			reg.Add(capProxy)
 		}
 	}
-<<<<<<< HEAD
-
 	// Tool-surface diagnostic: emit the provider-visible capacity so the
 	// meta-tool mode's effect is observable in a real run. Gated by the
 	// meta-tool being enabled (config or env) or REASONIX_DUMP_TOOL_SURFACE
