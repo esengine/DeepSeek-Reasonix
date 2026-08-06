@@ -377,7 +377,7 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 
 	runAttempt := func(attemptID string, sink event.Sink) streamedTurn {
 		before := provider.RequestAttemptCount(ctx)
-		result := a.streamTurnFrozen(ctx, turn, sink, &frozen, attemptID)
+		result := a.streamWithFrozen(ctx, turn, sink, &frozen, attemptID)
 		after := provider.RequestAttemptCount(ctx)
 		delta := after - before
 		if delta < 0 {
@@ -498,17 +498,6 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		return result
 	}
 	return last
-}
-
-func (a *Agent) streamTurnFrozen(ctx context.Context, turn int, sink event.Sink, frozen *samplingRequest, attemptID string) streamedTurn {
-	text, reasoning, signature, reasoningID, reasoningStatus, calls, responsesItems, usage, interrupted, partialToolStarted, partialCalls, maxArgChars, err := a.streamWithFrozen(ctx, turn, sink, frozen, attemptID)
-	return streamedTurn{
-		text: text, reasoning: reasoning, signature: signature,
-		reasoningID: reasoningID, reasoningStatus: reasoningStatus,
-		calls: calls, responsesItems: responsesItems, usage: usage,
-		interrupted: interrupted, partialToolStarted: partialToolStarted, partialCalls: partialCalls,
-		maxArgChars: maxArgChars, err: err,
-	}
 }
 
 func (a *Agent) emitStreamAttempt(id string, action event.StreamAttemptAction, attempt int, reason string, err error) {
