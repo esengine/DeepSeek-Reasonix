@@ -71,7 +71,7 @@ body[data-lang="zh"] .l-en { display: none !important; }
 body[data-lang="zh"] h1,
 body[data-lang="zh"] h2,
 body[data-lang="zh"] h3 { letter-spacing: 0; }
-body[data-lang="zh"] .hero h1 { font-size: clamp(42px, 5.6vw, 72px); line-height: 1.22; }
+body[data-lang="zh"] .hero h1 { font-size: clamp(38px, 4.6vw, 62px); line-height: 1.24; }
 
 .lang-switch, .theme-switch {
   display: inline-flex; gap: 2px; padding: 3px;
@@ -168,7 +168,7 @@ body[data-lang="zh"] .hero h1 { font-size: clamp(42px, 5.6vw, 72px); line-height
 .hero h1 em { font-style: italic; color: var(--accent); }
 .hero h1 .tt {
   color: var(--accent);
-  box-shadow: inset 0 -0.12em 0 color-mix(in oklch, var(--accent) 22%, transparent);
+  box-shadow: inset 0 -0.06em 0 color-mix(in oklch, var(--accent) 30%, transparent);
 }
 .hero .sub {
   margin: 26px auto 0; max-width: 640px;
@@ -178,8 +178,8 @@ body[data-lang="zh"] .hero h1 { font-size: clamp(42px, 5.6vw, 72px); line-height
 .hero .sub b { color: var(--ink); font-weight: 600; }
 
 .hero-install {
-  --hero-action-height: 48px;
-  --hero-action-width: 160px;
+  --hero-action-height: 46px;
+  --hero-action-width: 178px;
   width: min(850px, 100%); margin: 40px auto 0;
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
 }
@@ -322,8 +322,8 @@ body[data-lang="zh"] .hero h1 { font-size: clamp(42px, 5.6vw, 72px); line-height
 .term-stat b { color: oklch(0.86 0.02 260); font-weight: 500; }
 
 /* sections */
-section { padding: 150px 0 0; }
-.sec-head { max-width: 680px; margin: 0 auto 64px; text-align: center; }
+section { padding: 118px 0 0; }
+.sec-head { max-width: 680px; margin: 0 auto 56px; text-align: center; }
 .sec-head.center { margin-left: auto; margin-right: auto; text-align: center; }
 .kicker {
   font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; letter-spacing: 0.02em;
@@ -582,8 +582,8 @@ body.how-flat .how-stage { position: static; min-height: 0; display: block; }
 .os-card:hover::after, .doc-card:hover::after { opacity: 1; }
 
 /* dividers */
-.divider { position: relative; height: 40px; margin-top: 110px; pointer-events: none; }
-.divider + section { padding-top: 70px; }
+.divider { position: relative; height: 24px; margin-top: 84px; pointer-events: none; }
+.divider + section { padding-top: 52px; }
 .divider .line {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: min(1100px, calc(100% - 80px)); height: 1px;
