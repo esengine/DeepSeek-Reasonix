@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -402,6 +403,15 @@ type Agent struct {
 	// stateTracker: provides closed-loop correction + env sensing on top of
 	// implicit-state tracking. nil falls back to stateTracker alone.
 	navigator NavigatorKernel
+
+	// longHorizon mirrors Options.LongHorizon: enables the 10-section compaction
+	// prompt and implicit-state injection. verificationInterval mirrors
+	// Options.VerificationInterval; toolRounds/lastVerificationRound drive the
+	// runtime verification nudge.
+	longHorizon           bool
+	verificationInterval  int
+	toolRounds            int
+	lastVerificationRound int
 
 	// asker, when non-nil, lets the `ask` tool put questions to the user. nil in
 	// headless runs (no interactive user). Set via SetAsker.
@@ -1101,6 +1111,16 @@ type Options struct {
 	// internal/navigator and is host-agnostic; boot wires a ReasonixAdapter.
 	Navigator NavigatorKernel
 
+	// LongHorizon enables the OSWorld 2.0 long-horizon adjustments: earlier
+	// compaction triggers, the 10-section compaction prompt with implicit-state
+	// sections, StateTracker/Navigator wiring, and verification nudges. false
+	// keeps the legacy 7-section compaction prompt and no state tracking.
+	LongHorizon bool
+
+	// VerificationInterval is the number of tool-call rounds between runtime
+	// verification nudges (only when LongHorizon is enabled). 0 disables.
+	VerificationInterval int
+
 	// MissingReasoningWarnStateDir, when non-empty, points at the shared
 	// directory where missing tool-call thinking recovery retries are gated by
 	// opaque provider-configuration fingerprint (#7059). The field name is kept
@@ -1197,6 +1217,24 @@ type Options struct {
 // until the model gives a final answer, the context is cancelled, or the
 // provider errors (compaction keeps the context bounded). A nil sink is replaced
 // with event.Discard so the agent can always emit unconditionally.
+// nonNilInterface returns v as-is unless v is a typed-nil interface
+// value (a nil concrete pointer wrapped in an interface), in which
+// case it returns nil so callers can test v == nil safely.
+func nonNilInterface[T any](v T) T {
+	if any(v) == nil {
+		return v
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func:
+		if rv.IsNil() {
+			var zero T
+			return zero
+		}
+	}
+	return v
+}
+
 func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Options, sink event.Sink) *Agent {
 	if opts.SoftCompactRatio <= 0 {
 		opts.SoftCompactRatio = defaultSoftCompactRatio
@@ -1257,6 +1295,12 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if reasoningByteLimit == 0 {
 		reasoningByteLimit = defaultReasoningByteLimit
 	}
+	// Purify interface fields: a typed-nil concrete pointer assigned to
+	// an interface is non-nil (the classic Go trap). boot passes nil
+	// *navigator.Navigator when long_horizon is off; treat it as no
+	// kernel rather than dereferencing a nil receiver at call time.
+	opts.StateTracker = nonNilInterface(opts.StateTracker)
+	opts.Navigator = nonNilInterface(opts.Navigator)
 	a := &Agent{
 		prov:                      prov,
 		tools:                     tools,
@@ -1283,6 +1327,8 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		hooks:                     hooks,
 		stateTracker:              opts.StateTracker,
 		navigator:                 opts.Navigator,
+		longHorizon:               opts.LongHorizon,
+		verificationInterval:      opts.VerificationInterval,
 		jobs:                      opts.Jobs,
 		writeScheduler:            opts.WriteScheduler,
 		writeWorkspaceRoot:        strings.TrimSpace(opts.WriteWorkspaceRoot),
@@ -3314,6 +3360,7 @@ type batchExecution struct {
 	results            []string
 	images             [][]string
 	executions         []*tool.ShellExecution
+	errs               []error // per-call failure (nil = success), aligned with results
 	recoveryStopTurn   bool
 	recoveryStopReason string
 }
@@ -3635,10 +3682,17 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			}
 		}
 	}
+	errs := make([]error, len(calls))
+	for i, o := range outcomes {
+		if o.errMsg != "" {
+			errs[i] = errors.New(o.errMsg)
+		}
+	}
 	return batchExecution{
 		results:            results,
 		images:             images,
 		executions:         executions,
+		errs:               errs,
 		recoveryStopTurn:   recoveryBatchStop,
 		recoveryStopReason: recoveryStopReason,
 	}

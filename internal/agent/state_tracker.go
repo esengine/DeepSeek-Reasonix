@@ -69,6 +69,13 @@ type NavigatorKernel interface {
 	// as text, for injection into a compaction summary's "Hidden state &
 	// recovered facts" section. Empty when no facts have been recovered.
 	ImplicitStateDigest() string
+
+	// ObserveToolCall feeds one host-executed tool call (real outcome from the
+	// agent's own CallResolver path — permission, hooks, and evidence already
+	// applied) into the navigator's state graph. It returns advisory correction
+	// text ("" = continue); the navigator never re-executes tools, so the
+	// agent keeps execution authority.
+	ObserveToolCall(ctx context.Context, toolName string, args string, result string, err error) string
 }
 
 // ToolCallToken pairs a BeforeToolCall snapshot with its AfterToolCall delta.
@@ -113,6 +120,8 @@ type defaultStateTracker struct {
 	pending     []preCallSnapshot   // BeforeToolCall entries awaiting AfterToolCall
 	seq         int64               // monotonically increasing token counter
 	maxEpisodic int                 // window size (default 20)
+	maxImplicit int                 // cap on accumulated implicit facts (default 500)
+	factIx      map[string]int      // (source + "\x00" + fact) -> index into implicit
 	sink        event.Sink          // optional event sink for diagnostics
 }
 
@@ -132,6 +141,8 @@ func NewDefaultStateTracker(maxEpisodic int, sink event.Sink) StateTracker {
 	}
 	return &defaultStateTracker{
 		maxEpisodic: maxEpisodic,
+		maxImplicit: 500,
+		factIx:      make(map[string]int),
 		sink:        sink,
 	}
 }
@@ -201,12 +212,32 @@ func (s *defaultStateTracker) AfterToolCall(ctx context.Context, token ToolCallT
 	// explicitly. These are the facts most easily lost to compaction.
 	implicit := extractImplicitFacts(snap.toolName, result, err)
 	entry.Implicit = implicit
+	// Accumulate with cross-call dedup (later observation of the same
+	// (source, fact) wins) and a hard capacity cap, so long tasks do not
+	// grow the implicit set without bound or re-inject the same facts on
+	// every compaction.
 	for _, fact := range implicit {
+		key := snap.toolName + "\x00" + fact
+		if idx, ok := s.factIx[key]; ok {
+			s.implicit[idx].Fact = fact
+			s.implicit[idx].Extracted = time.Now()
+			continue
+		}
+		s.factIx[key] = len(s.implicit)
 		s.implicit = append(s.implicit, ImplicitEntry{
 			Source:    snap.toolName,
 			Fact:      fact,
 			Extracted: time.Now(),
 		})
+	}
+	if len(s.implicit) > s.maxImplicit {
+		// Evict the oldest facts beyond the cap and rebuild the index.
+		over := len(s.implicit) - s.maxImplicit
+		s.implicit = append([]ImplicitEntry(nil), s.implicit[over:]...)
+		s.factIx = make(map[string]int, len(s.implicit))
+		for i, e := range s.implicit {
+			s.factIx[e.Source+"\x00"+e.Fact] = i
+		}
 	}
 
 	// Append to the episodic window, evicting the oldest if over capacity.

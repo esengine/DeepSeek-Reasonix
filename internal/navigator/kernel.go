@@ -46,6 +46,14 @@ type Navigator struct {
 	lastGoodStep int
 	// started guards Seed() so it runs exactly once.
 	started bool
+
+	// ObserveToolCall (advisory path) state: throttled sensor snapshots and
+	// the last observation used for drift detection. The advisory path feeds
+	// host-executed tools into the state graph without re-executing them.
+	lastEnvHash, lastIfaceHash string
+	lastObserve                time.Time
+	lastObserved               *StateSnapshot
+	observeEvery               time.Duration
 }
 
 // New creates a Navigator wired to the given adapter. The adapter is the only
@@ -61,6 +69,9 @@ func New(adapter HostAdapter, opts Options) *Navigator {
 		sensor:       NewDynamicEnvSensor(),
 		adapter:      adapter,
 		lastGoodStep: -1,
+		// Throttle advisory-path sensor snapshots (filesystem walks on every
+		// tool call are too expensive for long sessions).
+		observeEvery: 3 * time.Second,
 	}
 }
 
@@ -104,6 +115,113 @@ func (n *Navigator) Seed(ctx context.Context) error {
 	n.state.Seed(ctx, ifaceHash, envHash)
 	n.started = true
 	return nil
+}
+
+// ObserveToolCall feeds one host-executed tool call into the navigator without
+// re-executing it (advisory mode). The host has already run the tool through its
+// own permission/hooks/evidence path; the navigator only records the observation,
+// recovers implicit facts, detects failure deviations, and returns correction
+// advice as text ("" = continue). The host decides whether to act on the advice
+// — the navigator never executes tools on the host's behalf, so the agent's
+// security boundary is never bypassed.
+func (n *Navigator) ObserveToolCall(ctx context.Context, toolName string, args string, result string, err error) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// Auto-seed on first observe (mirrors Execute's auto-seed).
+	if !n.started {
+		n.started = true
+		ifaceHash, envDigest, _, serr := n.sensor.SnapshotAll(ctx)
+		if serr != nil {
+			ifaceHash, envDigest = "", ""
+		}
+		envHash := envDigest
+		if envHash == "" {
+			if snap, aerr := n.adapter.SnapshotEnv(ctx); aerr == nil {
+				envHash = snap
+			}
+		}
+		n.state.Seed(ctx, ifaceHash, envHash)
+		n.lastEnvHash, n.lastIfaceHash = envHash, ifaceHash
+	}
+
+	action := HostAction{Verb: actionVerbForTool(toolName), Target: toolName, Args: args}
+	label := actionLabel(action)
+
+	// Throttle sensor snapshots: reuse the last hashes within the interval.
+	now := time.Now()
+	ifaceHash, envHash := n.lastIfaceHash, n.lastEnvHash
+	if now.Sub(n.lastObserve) >= n.observeEvery {
+		if h, e, _, serr := n.sensor.SnapshotAll(ctx); serr == nil {
+			ifaceHash, envHash = h, e
+			if envHash == "" {
+				if snap, aerr := n.adapter.SnapshotEnv(ctx); aerr == nil {
+					envHash = snap
+				}
+			}
+			n.lastIfaceHash, n.lastEnvHash = ifaceHash, envHash
+			n.lastObserve = now
+		}
+	}
+
+	recovered := ExtractImplicitFacts(label, result, err)
+	observed := StateSnapshot{InterfaceHash: ifaceHash, EnvHash: envHash}
+	observed = n.state.AfterAction(ctx, label, observed, recovered)
+
+	// Deviation: tool failures are the signal we act on. Env-hash changes are
+	// expected when tools modify files, so they are not treated as drift here
+	// (Execute's prediction-based Compare handles that in full-loop mode).
+	dev := Deviation{Kind: DeviationNone}
+	if err != nil {
+		dev = Deviation{Kind: DeviationTotalMismatch, Message: "tool reported an error: " + err.Error()}
+	}
+
+	corr := n.loop.Decide(label, dev, n.lastGoodStep)
+	n.loop.RecordCorrection(corr)
+	if dev.Kind == DeviationNone {
+		n.lastGoodStep = observed.Step
+	}
+	n.lastObserved = &observed
+
+	// Flush correlated sensor events.
+	for _, ev := range n.sensor.FlushEvents() {
+		n.adapter.Emit(ctx, HostEvent{
+			Kind:   "sensor",
+			Level:  sensorLevel(ev.Severity),
+			Text:   fmt.Sprintf("%s %s: %s", ev.Source, ev.Kind, ev.Subject),
+			Detail: ev.Detail,
+			Step:   observed.Step,
+		})
+	}
+
+	switch corr.Strategy {
+	case StrategyContinue:
+		return ""
+	case StrategyRetry:
+		return fmt.Sprintf("navigator advises retrying %q: %s (attempt %d)", label, corr.Reason, corr.RetryCount)
+	case StrategyRollback:
+		return fmt.Sprintf("navigator advises rolling back to step %d after %q: %s", corr.RewindTo, label, corr.Reason)
+	default:
+		return fmt.Sprintf("navigator requests host review of %q: %s", label, corr.Reason)
+	}
+}
+
+// actionVerbForTool maps a Reasonix tool name to a coarse verb so the state
+// graph's action-effect model can classify it. Unknown tools default to
+// "exec" (a generic side-effecting action).
+func actionVerbForTool(name string) string {
+	switch {
+	case strings.HasPrefix(name, "read") || strings.Contains(name, "view") || strings.Contains(name, "list"):
+		return "read"
+	case strings.HasPrefix(name, "write") || strings.Contains(name, "edit") || strings.Contains(name, "patch") || strings.Contains(name, "create"):
+		return "write"
+	case strings.Contains(name, "bash") || strings.Contains(name, "exec") || strings.Contains(name, "terminal"):
+		return "exec"
+	case strings.Contains(name, "click") || strings.Contains(name, "type") || strings.Contains(name, "scroll"):
+		return "click"
+	default:
+		return "exec"
+	}
 }
 
 // Execute is the main entry point the host calls instead of its own tool

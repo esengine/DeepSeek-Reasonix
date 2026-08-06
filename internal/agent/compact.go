@@ -47,12 +47,11 @@ const (
 // failure (then a mechanical fold) instead of hanging compaction indefinitely.
 const summaryTimeout = 90 * time.Second
 
-// summarySystemPrompt steers the executor to distill older history into a
-// structured briefing it can keep relying on after the originals are dropped.
-// The section layout mirrors what a coding agent actually needs to resume work
-// mid-task: the goal verbatim, the concrete state of the code, and an explicit
-// next step — so the post-compaction turn doesn't lose the thread or re-derive
-// decisions already made.
+// summarySystemPrompt is the long-horizon compaction prompt: the 7 standard
+// sections plus the 3 OSWorld 2.0-informed implicit-state sections (Hidden
+// state & recovered facts, Sources consulted, Open questions & uncertainties).
+// summarySystemPromptStandard is the legacy 7-section prompt used when
+// long_horizon is off. (a *Agent).summaryPrompt() picks between them.
 const summarySystemPrompt = `You are compacting the earlier part of a coding agent's conversation to save context.
 The agent keeps your summary alongside the user's own turns (kept verbatim) and the recent tail; your job is to fold the assistant/tool work into a briefing it can resume from.
 Write under these exact headings, omitting a heading only if it has no content:
@@ -88,6 +87,47 @@ Unresolved questions, missing information, and assumptions that need user confir
 What is still in progress or unstarted, and the single most concrete next action to take.
 
 Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
+
+// summarySystemPromptStandard is the legacy 7-section compaction prompt (no
+// OSWorld 2.0 implicit-state sections). Used when long_horizon is disabled so
+// the switch semantics match reality: long_horizon=false keeps the pre-OSWorld
+// behavior exactly.
+const summarySystemPromptStandard = `You are compacting the earlier part of a coding agent's conversation to save context.
+The agent keeps your summary alongside the user's own turns (kept verbatim) and the recent tail; your job is to fold the assistant/tool work into a briefing it can resume from.
+Write under these exact headings, omitting a heading only if it has no content:
+
+## Standing facts & constraints
+Everything the user stated that still governs the work — names, paths, IDs, versions, tokens, preferences, and hard "never do X" rules — in their own words. Be exhaustive; this is the durable contract, so prefer over- to under-including.
+
+## Goal
+The user's request and intent.
+
+## Decisions & rationale
+Key choices made so far and why — so they are not re-litigated or reversed.
+
+## Files & code
+Files read or modified, with the specific facts that matter: signatures, line locations, data shapes, and exact edits applied. Be concrete; this is what lets the agent act without re-reading everything.
+
+## Commands & outcomes
+Commands run (builds, tests, git) and their relevant results — what passed, what failed, and the error text that matters.
+
+## Errors & fixes
+Problems hit and how they were resolved (or not), so the same dead ends are not repeated.
+
+## Pending & next step
+What is still in progress or unstarted, and the single most concrete next action to take.
+
+Rules: be terse — bullet points and fragments, not prose. Preserve identifiers, paths, and numbers exactly. Do NOT invent anything not present in the messages; if something is unknown, leave it out rather than guessing.`
+
+// summaryPrompt returns the compaction system prompt for the current mode:
+// the 10-section long-horizon prompt when long_horizon is on, otherwise the
+// legacy 7-section prompt.
+func (a *Agent) summaryPrompt() string {
+	if a.longHorizon {
+		return summarySystemPrompt
+	}
+	return summarySystemPromptStandard
+}
 
 // compactThresholds returns the prompt-token boundaries maybeCompact switches
 // on. The compaction ablation arm collapses the snip and fold triggers onto
@@ -344,14 +384,13 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// the tracker's snapshot so compaction does not lose recovered context.
 	// This is the runtime defense that pairs with implicitStateLossWarning:
 	// instead of only warning when state is lost, we proactively inject it.
-	if !mechanical && a.stateTracker != nil {
+	if !mechanical && a.longHorizon && a.stateTracker != nil {
 		if snapshot := a.stateTracker.SnapshotImplicitState(); snapshot != "" {
 			if sectionContentChars(summary, "Hidden state & recovered facts") <= 0 {
 				summary += "\n\n## Hidden state & recovered facts (injected by StateTracker)\n" + snapshot
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Implicit state injected into compaction summary.", Detail: fmt.Sprintf("StateTracker provided %d bytes of recovered facts that the model-generated summary omitted.", len(snapshot))})
 			}
 		}
-	}
 	}
 
 	// OSWorld 2.0 Navigator kernel: when the navigator is wired, its
@@ -361,7 +400,7 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 	// when both are present, both digests are merged so no recovered fact is
 	// lost. If the section already exists (from StateTracker above), the
 	// navigator's facts are appended to it rather than creating a duplicate.
-	if !mechanical && a.navigator != nil {
+	if !mechanical && a.longHorizon && a.navigator != nil {
 		if navDigest := a.navigator.ImplicitStateDigest(); navDigest != "" {
 			chars := sectionContentChars(summary, "Hidden state & recovered facts")
 			if chars <= 0 {
@@ -928,7 +967,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 	ctx, cancel := context.WithTimeout(ctx, summaryTimeout)
 	defer cancel()
 	ctx = provider.WithRequestAttemptCounter(ctx)
-	sys := summarySystemPrompt
+	sys := a.summaryPrompt()
 	if strings.TrimSpace(instructions) != "" {
 		sys += "\n\nAdditional focus for this compaction (prioritize keeping this):\n" + strings.TrimSpace(instructions)
 	}

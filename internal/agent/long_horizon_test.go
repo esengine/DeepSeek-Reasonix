@@ -60,7 +60,9 @@ func TestCompactSendsEnhancedPromptToSummarizer(t *testing.T) {
 		{Role: provider.RoleUser, Content: "next"},
 		{Role: provider.RoleAssistant, Content: "step three — checked 3 sources, 2 remaining"},
 	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2}, event.Discard)
+	// long_horizon must be enabled for the 10-section prompt (the switch
+	// semantics: off keeps the legacy 7-section prompt).
+	a := New(prov, tool.NewRegistry(), sess, Options{RecentKeep: 2, LongHorizon: true}, event.Discard)
 
 	if err := a.compact(context.Background(), "auto", "", true); err != nil {
 		t.Fatalf("compact: %v", err)

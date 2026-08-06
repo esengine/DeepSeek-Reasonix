@@ -1833,7 +1833,15 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// paths, inferred IDs, unexplored sources) across tool calls so compaction
 	// does not lose it. The default in-memory implementation is host-agnostic;
 	// HERMES can substitute its own backend via the StateTracker interface.
-	stateTracker := agent.NewDefaultStateTracker(0, sink) // 0 = default 20-entry episodic window
+	// OSWorld 2.0 state wiring is gated on long_horizon so the switch
+	// semantics match reality: when long_horizon is off, no StateTracker or
+	// Navigator is constructed and compaction stays on the legacy 7-section
+	// prompt (agent.Options.LongHorizon=false).
+	longHorizonMode := cfg.LongHorizonEnabled()
+	var stateTracker agent.StateTracker
+	if longHorizonMode {
+		stateTracker = agent.NewDefaultStateTracker(0, sink) // 0 = default 20-entry episodic window
+	}
 
 	// OSWorld 2.0 Navigator Kernel: the "state-based navigator" paradigm.
 	// Wraps every tool call in a continuous-state, closed-loop cycle and
@@ -1843,22 +1851,27 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// The Navigator is a superset of StateTracker — both are wired so the
 	// agent gets the Navigator's closed-loop correction + env sensing while
 	// the StateTracker continues its per-call implicit-state capture.
-	navAdapter := navigator.NewReasonixAdapter(reg, sink, navigator.ReasonixAdapterOptions{})
-	navKernel := navigator.New(navAdapter, navigator.Options{HistoryWindow: 50})
-	navKernel.AddSensor(navigator.NewFilesystemSensor(root, 3))
-	navKernel.AddSensor(navigator.NewProcessSensor(""))
+	var navKernel *navigator.Navigator
+	if longHorizonMode {
+		navAdapter := navigator.NewReasonixAdapter(reg, sink, navigator.ReasonixAdapterOptions{})
+		navKernel = navigator.New(navAdapter, navigator.Options{HistoryWindow: 50})
+		navKernel.AddSensor(navigator.NewFilesystemSensor(root, 3))
+		navKernel.AddSensor(navigator.NewProcessSensor(""))
+	}
 
 	executor := agent.New(execProv, reg, execSess, agent.Options{
-		MaxSteps:     maxSteps,
-		MaxStepsKey:  opts.MaxStepsKey,
-		Temperature:  cfg.Agent.Temperature,
-		Pricing:      entry.Price,
-		ModelRef:     modelRef,
-		Gate:         headlessGate,
-		Hooks:        hookRunner,
-		StateTracker: stateTracker,
-		Navigator:    navKernel,
-		Jobs:         jm,
+		MaxSteps:             maxSteps,
+		MaxStepsKey:          opts.MaxStepsKey,
+		Temperature:          cfg.Agent.Temperature,
+		Pricing:              entry.Price,
+		ModelRef:             modelRef,
+		Gate:                 headlessGate,
+		Hooks:                hookRunner,
+		StateTracker:         stateTracker,
+		Navigator:            navKernel,
+		LongHorizon:          longHorizonMode,
+		VerificationInterval: cfg.Agent.VerificationInterval,
+		Jobs:                 jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
 		WriteScheduler:               subagentScheduler,

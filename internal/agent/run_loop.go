@@ -979,10 +979,43 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 			msg.ToolExecution = toProviderToolExecution(batch.executions[i])
 		}
 		a.session.Add(msg)
-		// Pair the pre-call snapshot with the result so the tracker can compute
-		// the state delta and extract implicit facts from the tool output.
+		// Pair the pre-call snapshot with the result and the REAL per-call error
+		// (not nil), so the tracker records failures correctly instead of
+		// marking every call successful.
+		var callErr error
+		if i < len(batch.errs) {
+			callErr = batch.errs[i]
+		}
 		if a.stateTracker != nil && i < len(stateTokens) {
-			a.stateTracker.AfterToolCall(ctx, stateTokens[i], results[i], nil)
+			a.stateTracker.AfterToolCall(ctx, stateTokens[i], results[i], callErr)
+		}
+		// Navigator advisory observation: feed the real outcome into the state
+		// graph (never re-executes — the call above already ran through the
+		// agent's permission/hooks/evidence path).
+		if a.navigator != nil {
+			if advice := a.navigator.ObserveToolCall(ctx, call.Name, call.Arguments, results[i], callErr); advice != "" {
+				a.sink.Emit(event.Event{
+					Kind: event.Notice, Level: event.LevelWarn,
+					Text:   advice,
+					Detail: "advisory correction from the navigator kernel; the agent decides whether to act",
+				})
+			}
+		}
+	}
+	// OSWorld 2.0 verification nudge: every VerificationInterval tool-call
+	// rounds, remind the model to verify progress against the goal and surface
+	// open questions instead of guessing (config [agent] verification_interval).
+	if a.longHorizon && a.verificationInterval > 0 {
+		a.toolRounds++
+		if a.toolRounds-a.lastVerificationRound >= a.verificationInterval {
+			a.lastVerificationRound = a.toolRounds
+			nudge := verificationNudgeMessage(a.verificationInterval)
+			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
+			a.sink.Emit(event.Event{
+				Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeLoopGuard,
+				Text:   "Verification checkpoint reached.",
+				Detail: fmt.Sprintf("%d tool-call rounds elapsed; asked the assistant to verify goal alignment, re-check hidden-state assumptions, and surface open questions", a.verificationInterval),
+			})
 		}
 	}
 	// If the context was cancelled during tool execution, return after storing
@@ -1072,6 +1105,14 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeToolBudget, Text: toolBudgetNoticeText(), Detail: fmt.Sprintf("budget (%s=%d) exhausted: one grace round to finalize", state.runMaxStepsKey, state.runMaxSteps)})
 	}
 	return true, nil
+}
+
+// verificationNudgeMessage is the model-facing reminder injected every
+// verificationInterval tool-call rounds when long-horizon mode is on.
+// It targets OSWorld 2.0's top failure modes: implicit-state amnesia,
+// cross-source reasoning gaps, and guess-instead-of-ask behavior.
+func verificationNudgeMessage(interval int) string {
+	return fmt.Sprintf("Verification checkpoint (%d tool-call rounds since the last one): before continuing, (1) confirm your progress still matches the original goal, (2) re-check the assumptions and hidden state you recovered earlier (file paths, IDs, data sources) — are they still true?, (3) decide whether any identified-but-unexplored source now matters. Surface unresolved questions to the user instead of guessing.", interval)
 }
 
 func toolCallsAreOutOfContextGoalReports(ctx context.Context, calls []provider.ToolCall) bool {
