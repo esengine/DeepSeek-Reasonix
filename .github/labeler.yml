@@ -13,7 +13,7 @@ mcp:
   - changed-files:
       - any-glob-to-any-file:
           - 'internal/plugin/**'
-          - 'internal/codegraph/**'
+          - 'internal/mcpregistry/**'
 
 config:
   - changed-files:
@@ -33,6 +33,14 @@ skills:
           - 'internal/tool/**'
 
 tui:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'internal/cli/**'
+
+# Terminal rendering / flicker / repaint lives in the CLI TUI package
+# (bubbletea/lipgloss view code), so this overlaps with tui and both labels
+# co-apply — same as issue-auto-label.yml, where rendering is its own area.
+rendering:
   - changed-files:
       - any-glob-to-any-file:
           - 'internal/cli/**'
