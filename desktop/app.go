@@ -758,6 +758,7 @@ func (a *App) restoreOrBuildTabs() {
 	// Reap any orphaned codegraph processes from a previous crash or older
 	// version that leaked them, so they don't accumulate across restarts.
 	a.reapOrphanCodeGraph()
+	a.reclaimOrphanTopicWorktrees()
 	ctx := a.ctx
 	ensureWorkspace()
 
@@ -796,6 +797,11 @@ func (a *App) restoreOrBuildTabs() {
 			var tab *WorkspaceTab
 			if entry.Scope == "project" {
 				tab = a.createTabEntryWithID(entry.Scope, entry.WorkspaceRoot, entry.TopicID, id)
+				tab.SourceRoot = strings.TrimSpace(entry.SourceRoot)
+				if tab.SourceRoot != "" {
+					tab.TopicTitle = topicTitleForTab(entry.Scope, tab.SourceRoot, entry.TopicID)
+					tab.topicTitleSource = loadTopicTitleSource(topicTitleRoot(entry.Scope, tab.SourceRoot), entry.TopicID)
+				}
 			} else {
 				tab = a.createTabEntryWithID("global", globalTabWorkspaceRoot(), entry.TopicID, id)
 			}
@@ -2222,7 +2228,7 @@ func (a *App) assignFreshSessionTopic(tab *WorkspaceTab) {
 	topicID := newTopicID()
 	a.mu.Lock()
 	scope := tab.Scope
-	workspaceRoot := tab.WorkspaceRoot
+	workspaceRoot := tabLogicalProjectRoot(tab)
 	tab.TopicID = topicID
 	tab.TopicTitle = defaultTopicTitle
 	tab.topicTitleSource = topicTitleSourceAuto
@@ -2254,7 +2260,7 @@ func (a *App) ensureTabTopicIndexedForUserTurn(tab *WorkspaceTab) {
 		return
 	}
 	scope := tab.Scope
-	workspaceRoot := tab.WorkspaceRoot
+	workspaceRoot := tabLogicalProjectRoot(tab)
 	tab.TopicID = topicID
 	tab.TopicTitle = defaultTopicTitle
 	tab.topicTitleSource = topicTitleSourceAuto

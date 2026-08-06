@@ -456,6 +456,7 @@ type DesktopNavigationIntent =
   | { kind: "topic"; scope: string; workspaceRoot: string; topicId: string; sessionPath?: string }
   | { kind: "blank"; scope: string; workspaceRoot: string }
   | { kind: "delivery-worktree"; workspaceRoot: string }
+  | { kind: "topic-worktree"; workspaceRoot: string }
   | { kind: "sidebar-im"; connection: SidebarImConnection }
   | { kind: "resume-session"; session: SessionMeta };
 type DesktopNavigationInput = DesktopNavigationIntent & { navigationIntentSeq: number };
@@ -1132,6 +1133,7 @@ export default function App() {
     switchTab,
     openProjectTab,
     createDeliveryWorktree,
+    createTopicWorktree,
     openGlobalTab,
     closeTab,
     reorderTabs,
@@ -2588,10 +2590,12 @@ export default function App() {
   }, [refreshTabMetas, setControllerCollaborationMode]);
 
   const blankSessionTarget = useCallback(() => {
-    const activeWorkspaceRoot = activeTab?.scope === "project" ? activeTab.workspaceRoot || "" : "";
+    const activeWorkspaceRoot = activeTab?.scope === "project"
+      ? (activeTab.sourceRoot || activeTab.workspaceRoot || "")
+      : "";
     const scope = activeWorkspaceRoot ? "project" : "global";
     return { scope, workspaceRoot: activeWorkspaceRoot };
-  }, [activeTab?.scope, activeTab?.workspaceRoot]);
+  }, [activeTab?.scope, activeTab?.sourceRoot, activeTab?.workspaceRoot]);
 
   useEffect(() => {
     let cancelled = false;
@@ -3794,6 +3798,25 @@ export default function App() {
         return;
       }
 
+      if (request.kind === "topic-worktree") {
+        const result = await createTopicWorktree(request.workspaceRoot, request.navigationIntentSeq);
+        if (!latest()) return;
+        seedActiveTabMeta(result.tab);
+        setProjectRevision((value) => value + 1);
+        await refreshLatestTabMetas();
+        if (!latest()) return;
+        showToast(
+          result.sourceDirty
+            ? t("projectTree.topicWorktreeCreatedDirty", { branch: result.branch })
+            : t("projectTree.topicWorktreeCreated", { branch: result.branch }),
+          result.sourceDirty ? "warn" : "info",
+          { durationMs: result.sourceDirty ? 7000 : 3500 },
+        );
+        setTabRevealSignal((signal) => signal + 1);
+        setTranscriptRevealSignal((signal) => signal + 1);
+        return;
+      }
+
       if (request.kind === "sidebar-im") {
         const { connection } = request;
         const target = sidebarImSessionTarget(connection);
@@ -3858,6 +3881,11 @@ export default function App() {
         showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
         return;
       }
+      if (request.kind === "topic-worktree") {
+        console.warn("isolated topic worktree creation failed", err);
+        showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
+        return;
+      }
       if (request.kind === "sidebar-im") {
         console.warn("bot sidebar open failed", err);
         showToast(t("sidebar.imOpenFailed", { name: request.connection.title }));
@@ -3875,7 +3903,7 @@ export default function App() {
         showToast(err?.message || String(err));
       }
     }
-  }, [activateTopic, createDeliveryWorktree, ensureBlankSurface, ensureBlankTab, isNavigationIntentCurrent, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
+  }, [activateTopic, createDeliveryWorktree, createTopicWorktree, ensureBlankSurface, ensureBlankTab, isNavigationIntentCurrent, openChannelSession, openGlobalTab, openProjectTab, openTopicSession, refreshHistoryView, resumeSession, seedActiveTabMeta, showToast, singleSurfaceLayout, t]);
 
   const enqueueNavigationWithIntent = useCallback((input: DesktopNavigationIntent, navigationIntentSeq: number): Promise<void> => {
     return enqueueNavigationRequest(
@@ -4492,13 +4520,14 @@ export default function App() {
           <section className="sidebar__section sidebar__section--projects">
             <ProjectTree
               activeScope={activeTab?.scope}
-              activeWorkspaceRoot={activeTab?.workspaceRoot}
+              activeWorkspaceRoot={activeTab?.sourceRoot || activeTab?.workspaceRoot}
               activeTopicId={activeTab?.topicId}
               activeSessionPath={activeTab?.sessionPath}
               imTopicSources={imTopicSources}
               onOpenTopic={handleOpenTopic}
               onCreateTopic={(scope, workspaceRoot) => openBlankSession(scope, scope === "project" ? workspaceRoot : "")}
               onCreateDeliveryWorktree={(workspaceRoot) => enqueueNavigation({ kind: "delivery-worktree", workspaceRoot })}
+              onCreateTopicWorktree={(workspaceRoot) => enqueueNavigation({ kind: "topic-worktree", workspaceRoot })}
               onTopicsChanged={refreshProjectsAndTabs}
               onRenameTopic={renameTopic}
               refreshSignal={projectRevision}

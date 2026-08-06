@@ -156,7 +156,8 @@ func (b *displayTurnBuffer) materialize() []HistoryMessage {
 type WorkspaceTab struct {
 	ID                  string             // stable random id
 	Scope               string             // "project" | "global"
-	WorkspaceRoot       string             // project root dir (empty for global)
+	WorkspaceRoot       string             // runtime project root dir (may be a topic worktree)
+	SourceRoot          string             // logical sidebar project root when WorkspaceRoot is isolated
 	SharedHostKey       string             // opaque key for the shared plugin host (set by buildTabController)
 	TopicID             string             // topic within the project
 	TopicTitle          string             // display title
@@ -637,6 +638,7 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		ID:                  detachedRuntimeTabID(key),
 		Scope:               tab.Scope,
 		WorkspaceRoot:       tab.WorkspaceRoot,
+		SourceRoot:          tab.SourceRoot,
 		SharedHostKey:       tab.SharedHostKey,
 		TopicID:             tab.TopicID,
 		TopicTitle:          tab.TopicTitle,
@@ -2143,6 +2145,7 @@ type TabMeta struct {
 	ID                string                   `json:"id"`
 	Scope             string                   `json:"scope"`
 	WorkspaceRoot     string                   `json:"workspaceRoot"`
+	SourceRoot        string                   `json:"sourceRoot,omitempty"`
 	WorkspaceName     string                   `json:"workspaceName"`
 	WorkspacePath     string                   `json:"workspacePath,omitempty"`
 	GitBranch         string                   `json:"gitBranch,omitempty"`
@@ -2199,7 +2202,8 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		ID:                tab.ID,
 		Scope:             tab.Scope,
 		WorkspaceRoot:     tab.WorkspaceRoot,
-		WorkspaceName:     workspaceName(tab.WorkspaceRoot),
+		SourceRoot:        strings.TrimSpace(tab.SourceRoot),
+		WorkspaceName:     workspaceName(tabLogicalProjectRoot(tab)),
 		WorkspacePath:     tab.WorkspaceRoot,
 		TopicID:           tab.TopicID,
 		TopicTitle:        a.localizedTopicTitle(tab.TopicTitle, tab.topicTitleSource),
@@ -2225,7 +2229,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.ProjectColor = globalProjectColor()
 		m.WorkspaceName = globalProjectTitle()
 	case "project":
-		m.ProjectColor = projectColor(tab.WorkspaceRoot)
+		m.ProjectColor = projectColor(tabLogicalProjectRoot(tab))
 	}
 	if tab.Ctrl != nil {
 		status := tab.Ctrl.RuntimeStatus()
@@ -2323,11 +2327,12 @@ func (a *App) openProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
-	saveWorkspace(workspaceRoot)
-	a.registerProjectRoot(workspaceRoot)
+	runtimeRoot, sourceRoot := resolveTopicRuntimeRoot(workspaceRoot, topicID)
+	saveWorkspace(sourceRoot)
+	a.registerProjectRoot(sourceRoot)
 
-	sessionPath, _ := a.findTopicSessionForTarget("project", workspaceRoot, topicID)
-	return a.openTopicTab("project", workspaceRoot, topicID, sessionPath)
+	sessionPath, _ := a.findTopicSessionForTarget("project", sourceRoot, topicID)
+	return a.openTopicTabWithRoots("project", sourceRoot, runtimeRoot, topicID, sessionPath, true)
 }
 
 func (a *App) openTopicTab(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
@@ -2341,10 +2346,11 @@ func (a *App) openProjectTabInactive(workspaceRoot, topicID string) (TabMeta, er
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
-	a.registerProjectRoot(workspaceRoot)
+	runtimeRoot, sourceRoot := resolveTopicRuntimeRoot(workspaceRoot, topicID)
+	a.registerProjectRoot(sourceRoot)
 
-	sessionPath, _ := a.findTopicSessionForTarget("project", workspaceRoot, topicID)
-	return a.openTopicTabWithActivation("project", workspaceRoot, topicID, sessionPath, false)
+	sessionPath, _ := a.findTopicSessionForTarget("project", sourceRoot, topicID)
+	return a.openTopicTabWithRoots("project", sourceRoot, runtimeRoot, topicID, sessionPath, false)
 }
 
 func (a *App) openGlobalTabInactive(topicID string) (TabMeta, error) {
@@ -2358,9 +2364,27 @@ func (a *App) openGlobalTabInactive(topicID string) (TabMeta, error) {
 }
 
 func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionPath string, activate bool) (TabMeta, error) {
-	actualRoot := workspaceRoot
+	return a.openTopicTabWithRoots(scope, workspaceRoot, workspaceRoot, topicID, sessionPath, activate)
+}
+
+func (a *App) openTopicTabWithRoots(scope, sourceRoot, runtimeRoot, topicID, sessionPath string, activate bool) (TabMeta, error) {
+	logicalRoot := sourceRoot
+	actualRoot := runtimeRoot
 	if scope == "global" {
+		logicalRoot = ""
 		actualRoot = globalWorkspaceRoot()
+	}
+	if scope == "project" {
+		if strings.TrimSpace(logicalRoot) == "" {
+			logicalRoot = actualRoot
+		}
+		if strings.TrimSpace(actualRoot) == "" {
+			actualRoot = logicalRoot
+		}
+	}
+	sessionHome := logicalRoot
+	if scope == "global" {
+		sessionHome = actualRoot
 	}
 	targetKey := sessionRuntimeKey(sessionPath)
 
@@ -2383,7 +2407,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 	}
 
 	for _, tab := range a.tabs {
-		if tabMatchesTopicTarget(tab, scope, workspaceRoot, topicID) {
+		if tabMatchesTopicTarget(tab, scope, logicalRoot, topicID) {
 			if activate {
 				a.activeTabID = tab.ID
 			}
@@ -2405,15 +2429,15 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 	}
 
 	tabID := a.newUniqueTabIDLocked()
-	topicTitle := topicTitleForTab(scope, workspaceRoot, topicID)
-	if t, source, ok := topicTitleFallbackForOpen(workspaceRoot, topicID, sessionPath); ok {
+	topicTitle := topicTitleForTab(scope, logicalRoot, topicID)
+	if t, source, ok := topicTitleFallbackForOpen(logicalRoot, topicID, sessionPath); ok {
 		topicTitle = t
-		_ = setTopicTitleWithSource(workspaceRoot, topicID, t, source)
+		_ = setTopicTitleWithSource(logicalRoot, topicID, t, source)
 	}
 
 	if sessionPath == "" {
 		var err error
-		sessionPath, err = createEmptySessionFile(desktopSessionDir(actualRoot), "")
+		sessionPath, err = createEmptySessionFile(desktopSessionDir(sessionHome), "")
 		if err != nil {
 			a.mu.Unlock()
 			return TabMeta{}, err
@@ -2424,13 +2448,18 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 		}
 	}
 	profile := loadTabSessionProfile(sessionPath)
+	sourceForTab := ""
+	if scope == "project" && !sameProjectRoot(logicalRoot, actualRoot) {
+		sourceForTab = logicalRoot
+	}
 	tab := &WorkspaceTab{
 		ID:               tabID,
 		Scope:            scope,
 		WorkspaceRoot:    actualRoot,
+		SourceRoot:       sourceForTab,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
-		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID),
+		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, logicalRoot), topicID),
 		SessionPath:      sessionPath,
 		disabledMCP:      map[string]ServerView{},
 	}
@@ -2545,13 +2574,13 @@ func tabMatchesTopicTarget(tab *WorkspaceTab, scope, workspaceRoot, topicID stri
 	if scope == "global" {
 		return true
 	}
-	return sameProjectRoot(tab.WorkspaceRoot, workspaceRoot)
+	return sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot)
 }
 
 func tabInWorkspace(tab *WorkspaceTab, workspaceRoot string) bool {
 	return tab != nil &&
 		tab.Scope == "project" &&
-		sameProjectRoot(tab.WorkspaceRoot, workspaceRoot)
+		sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot)
 }
 
 // EnsureBlankTab activates the existing blank tab for the target scope, or
@@ -2749,7 +2778,7 @@ func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoo
 	if tab == nil || tab.Scope != scope {
 		return false
 	}
-	if scope == "project" && !sameProjectRoot(tab.WorkspaceRoot, workspaceRoot) {
+	if scope == "project" && !sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot) {
 		return false
 	}
 	if tab.Ctrl == nil {
@@ -2913,7 +2942,7 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 		if tab == nil || tab.Scope != scope || strings.TrimSpace(tab.TopicID) == "" {
 			continue
 		}
-		if scope == "project" && !sameProjectRoot(tab.WorkspaceRoot, workspaceRoot) {
+		if scope == "project" && !sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot) {
 			continue
 		}
 		openTopics[tab.TopicID] = true
@@ -3959,7 +3988,7 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 			a.persistTabSessionPath(tab, path)
 			a.mu.RLock()
 			indexScope := tab.Scope
-			indexRoot := tab.WorkspaceRoot
+			indexRoot := tabLogicalProjectRoot(tab)
 			indexTopicID := strings.TrimSpace(tab.TopicID)
 			indexTopicTitle := tab.TopicTitle
 			a.mu.RUnlock()
@@ -4070,6 +4099,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	reopenTerminalGate := false
 	scope := binding.scope
 	workspaceRoot := binding.workspaceRoot
+	sourceRoot := ""
 	if scope == "" {
 		scope = "global"
 	}
@@ -4078,19 +4108,45 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 		if workspaceRoot == "" {
 			return
 		}
-		a.registerProjectRoot(workspaceRoot)
+		// Topic worktree sessions (#4304) live under the source project's session
+		// dir, so dir-based binding resolves to the source root. BranchMeta keeps
+		// the isolated runtime root; prefer that for agent cwd and keep SourceRoot
+		// as the sidebar identity. Never register the managed worktree as a project.
+		if binding.hasMeta {
+			if metaRoot := normalizeProjectRoot(binding.meta.WorkspaceRoot); metaRoot != "" && !sameProjectRoot(metaRoot, workspaceRoot) {
+				sourceRoot = workspaceRoot
+				workspaceRoot = metaRoot
+			}
+		}
+		if sourceRoot == "" {
+			existingSource := strings.TrimSpace(tab.SourceRoot)
+			existingRuntime := strings.TrimSpace(tab.WorkspaceRoot)
+			if existingSource != "" && sameProjectRoot(workspaceRoot, existingSource) && existingRuntime != "" && !sameProjectRoot(existingRuntime, existingSource) {
+				sourceRoot = existingSource
+				workspaceRoot = existingRuntime
+			}
+		}
+		registerRoot := workspaceRoot
+		if sourceRoot != "" {
+			registerRoot = sourceRoot
+		}
+		a.registerProjectRoot(registerRoot)
 	} else {
 		scope = "global"
 		workspaceRoot = globalTabWorkspaceRoot()
 	}
+	titleRoot := workspaceRoot
+	if sourceRoot != "" {
+		titleRoot = sourceRoot
+	}
 	topicID := strings.TrimSpace(binding.topicID)
 	topicTitle := strings.TrimSpace(binding.topicTitle)
 	if topicTitle == "" && topicID != "" {
-		topicTitle = topicTitleForTab(scope, workspaceRoot, topicID)
+		topicTitle = topicTitleForTab(scope, titleRoot, topicID)
 	}
 	topicSource := ""
 	if topicID != "" {
-		topicSource = loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID)
+		topicSource = loadTopicTitleSource(topicTitleRoot(scope, titleRoot), topicID)
 	}
 
 	a.mu.Lock()
@@ -4103,6 +4159,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	oldWorkspaceRoot := tab.WorkspaceRoot
 	changed := tab.Scope != scope ||
 		tab.WorkspaceRoot != workspaceRoot ||
+		tab.SourceRoot != sourceRoot ||
 		canonicalTabSessionPath(tab.SessionPath) != canonicalTabSessionPath(binding.path)
 	// Spelling-only root updates still persist above, but an equivalent root is
 	// the same workspace — do not warn the user about a switch.
@@ -4117,6 +4174,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	}
 	tab.Scope = scope
 	tab.WorkspaceRoot = workspaceRoot
+	tab.SourceRoot = sourceRoot
 	tab.SessionPath = canonicalTabSessionPath(binding.path)
 	if topicID != "" {
 		changed = changed || tab.TopicID != topicID
@@ -4763,6 +4821,7 @@ type desktopTabEntry struct {
 	ID               string  `json:"id"`
 	Scope            string  `json:"scope"`
 	WorkspaceRoot    string  `json:"workspaceRoot"`
+	SourceRoot       string  `json:"sourceRoot,omitempty"`
 	TopicID          string  `json:"topicId"`
 	SessionPath      string  `json:"sessionPath,omitempty"`
 	ReadOnly         bool    `json:"readOnly,omitempty"`
@@ -4826,6 +4885,7 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 				ID:               tab.ID,
 				Scope:            tab.Scope,
 				WorkspaceRoot:    tab.WorkspaceRoot,
+				SourceRoot:       strings.TrimSpace(tab.SourceRoot),
 				TopicID:          tab.TopicID,
 				SessionPath:      tab.currentSessionPath(),
 				ReadOnly:         tab.ReadOnly,
@@ -8006,20 +8066,21 @@ func (a *App) ListProjectTree() []ProjectNode {
 				continue
 			}
 			children = append(children, ProjectNode{
-				Key:            "topic_" + tid,
-				Kind:           "topic",
-				Label:          topicTitle,
-				Root:           p.Root,
-				TopicID:        tid,
-				ProjectColor:   p.Color,
-				Turns:          summary.displayTurns(),
-				CreatedAt:      topicCreatedAtForTree(createdMap, tid),
-				LastActivityAt: summary.lastActivityAt,
-				Open:           open,
-				Running:        running,
-				Status:         status,
-				Pinned:         pinned,
-				Children:       runtimeSessionNodes("project", p.Root, tid, p.Color),
+				Key:              "topic_" + tid,
+				Kind:             "topic",
+				Label:            topicTitle,
+				Root:             p.Root,
+				TopicID:          tid,
+				ProjectColor:     p.Color,
+				Turns:            summary.displayTurns(),
+				CreatedAt:        topicCreatedAtForTree(createdMap, tid),
+				LastActivityAt:   summary.lastActivityAt,
+				Open:             open,
+				Running:          running,
+				Status:           status,
+				Pinned:           pinned,
+				IsolatedWorktree: topicHasWorktreeBinding(p.Root, tid),
+				Children:         runtimeSessionNodes("project", p.Root, tid, p.Color),
 			})
 		}
 		node.Label = title

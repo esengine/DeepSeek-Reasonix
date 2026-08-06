@@ -304,6 +304,7 @@ export interface TabMeta {
   tabType?: "session" | "file";
   scope: string;
   workspaceRoot: string;
+  sourceRoot?: string;
   workspaceName: string;
   workspacePath?: string;
   gitBranch?: string;
@@ -396,6 +397,16 @@ export interface DeliveryWorktreeOpenResult {
   workspaceRoot: string;
   worktreeRoot: string;
   sourceRoot: string;
+  branch: string;
+  sourceDirty: boolean;
+  tab: TabMeta;
+}
+
+export interface TopicWorktreeOpenResult {
+  topicId: string;
+  sourceRoot: string;
+  workspaceRoot: string;
+  worktreeRoot: string;
   branch: string;
   sourceDirty: boolean;
   tab: TabMeta;

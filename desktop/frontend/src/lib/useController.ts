@@ -20,6 +20,7 @@ import type {
   CollaborationMode,
   ContextInfo,
   DeliveryWorktreeOpenResult,
+  TopicWorktreeOpenResult,
   EffortInfo,
   HistoryMessage,
   HistoryPage,
@@ -4002,6 +4003,27 @@ export function useController() {
     return result;
   }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, navigationCompletionCurrent, reassertVisibleTabAfterStaleNavigation, reconcileTabRuntime]);
 
+  const createTopicWorktree = useCallback(async (workspaceRoot: string, navigationIntentSeq?: number): Promise<TopicWorktreeOpenResult> => {
+    const navigationSeq = navigationIntentSeq ?? beginActiveNavigation();
+    const snapshotAt = promptEventClock();
+    const result = await app.CreateTopicWorktree(workspaceRoot);
+    const meta = result.tab;
+    if (!navigationCompletionCurrent(navigationSeq, "tab.topic-worktree", meta.id)) {
+      await reassertVisibleTabAfterStaleNavigation("tab.topic-worktree", meta.id);
+      return result;
+    }
+    const isNewTab = !statesRef.current.has(meta.id);
+    setActiveTabId(meta.id);
+    activeTabIdRef.current = meta.id;
+    confirmBackendActiveTab(meta.id);
+    dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
+    dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
+    const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic");
+    if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
+    else void load;
+    return result;
+  }, [beginActiveNavigation, confirmBackendActiveTab, dispatchRuntimeStatusForTab, dispatchTo, loadSessionDataForTab, navigationCompletionCurrent, reassertVisibleTabAfterStaleNavigation, reconcileTabRuntime]);
+
   const closeTab = useCallback(async (
     tabId: string,
     policy: "keep_running" | "stop_and_close" = "keep_running",
@@ -4038,7 +4060,7 @@ export function useController() {
     loadOlderHistory,
     refreshMeta, pickWorkspace, switchWorkspace, compact, rewind, rewindForTab, rewindForTabDetailed, undoRewindForTab, setModel, setEffort, setTokenMode, cancelJob,
     fetchMemory, remember, forget, saveDoc,
-    switchTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, createDeliveryWorktree, closeTab, reorderTabs,
+    switchTab, openProjectTab, openGlobalTab, openTopicSession, ensureBlankTab, activateTopic, ensureBlankSurface, createDeliveryWorktree, createTopicWorktree, closeTab, reorderTabs,
     // Invalidate in-flight navigation completions (activateTopic's stale
     // guard) from outside the hook. The App-level navigation queue must call
     // this at ENQUEUE time: a queued click does not run — and so does not
