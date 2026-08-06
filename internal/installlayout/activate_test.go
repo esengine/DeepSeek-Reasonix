@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -211,6 +212,30 @@ func TestActivateVersionRejectsSymlinkSource(t *testing.T) {
 	}
 	if HasCurrent(root) {
 		t.Fatal("current.json must not be written after failed activation")
+	}
+}
+
+func TestNormalizeMemberName(t *testing.T) {
+	// Windows lowercases member names so the case-insensitive filesystem
+	// matches the whitelist; other platforms preserve case. Leading/trailing
+	// whitespace is always trimmed.
+	cases := []struct{ in string }{
+		{"reasonix-desktop"},
+		{"  reasonix-cli  "},
+		{"\treasonix-update-helper\n"},
+		{""},
+		{"   "},
+		{"Reasonix.exe"},
+		{"  Reasonix-Desktop.Exe  "},
+	}
+	for _, tc := range cases {
+		want := strings.TrimSpace(tc.in)
+		if runtime.GOOS == "windows" {
+			want = strings.ToLower(want)
+		}
+		if got := normalizeMemberName(tc.in); got != want {
+			t.Errorf("normalizeMemberName(%q) = %q, want %q", tc.in, got, want)
+		}
 	}
 }
 
