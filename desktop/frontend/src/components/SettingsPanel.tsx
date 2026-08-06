@@ -667,6 +667,19 @@ export function ShortcutsSection({
   const [osConflict, setOsConflict] = useState<string | null>(null);
 
   useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+  useEffect(() => {
+    const runtime = typeof window !== "undefined" ? window.runtime : undefined;
+    if (!runtime?.EventsOn) return;
+    return runtime.EventsOn("desktop:global-hotkey-error", (payload?: unknown) => {
+      const message =
+        payload && typeof payload === "object" && "message" in payload && typeof (payload as { message: unknown }).message === "string"
+          ? (payload as { message: string }).message
+          : typeof payload === "string"
+            ? payload
+            : "unknown error";
+      setOsConflict(message);
+    });
+  }, []);
 
   const definitions = shortcutDefinitions();
   const commitShortcut = async (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
@@ -779,14 +792,20 @@ export function ShortcutsSection({
           </div>
         )}
         {definitions.map((definition) => {
+          const rawHotkey = (globalHotkey ?? "").trim().toLowerCase();
+          const osDisabled = Boolean(
+            definition.osLevel && (rawHotkey === "off" || rawHotkey === "none" || rawHotkey === "disabled" || rawHotkey === "-"),
+          );
           const resolved = definition.osLevel
-            ? (parseShortcutComboBinding(globalHotkey) ?? defaultShortcutCombo(definition.action, platform))
+            ? (osDisabled ? null : (parseShortcutComboBinding(globalHotkey) ?? defaultShortcutCombo(definition.action, platform)))
             : resolvedShortcutCombo(definition.action, platform);
           const defaultCombo = definition.defaults[platform];
-          const display = formatShortcutCombo(resolved, platform);
+          const display = osDisabled
+            ? t("settings.shortcutsDisabled")
+            : formatShortcutCombo(resolved!, platform);
           const isCustom = definition.osLevel
-            ? formatShortcutCombo(resolved, platform) !== formatShortcutCombo(defaultCombo, platform)
-            : formatShortcutCombo(resolved, platform) !== formatShortcutCombo(defaultCombo, platform);
+            ? osDisabled || formatShortcutCombo(resolved!, platform) !== formatShortcutCombo(defaultCombo, platform)
+            : formatShortcutCombo(resolved!, platform) !== formatShortcutCombo(defaultCombo, platform);
           const isRecording = recording === definition.action;
           return (
             <div className="shortcuts-settings__row" key={definition.action}>
@@ -817,8 +836,37 @@ export function ShortcutsSection({
                   }}
                   onKeyDown={(event) => { if (isRecording) void commitShortcut(definition.action, event); }}
                 >
-                  {isRecording ? t("settings.shortcutsRecording") : <ShortcutComboDisplay combo={resolved} platform={platform} />}
+                  {isRecording
+                    ? t("settings.shortcutsRecording")
+                    : osDisabled
+                      ? t("settings.shortcutsDisabled")
+                      : <ShortcutComboDisplay combo={resolved!} platform={platform} />}
                 </button>
+                {definition.osLevel && (
+                  <button
+                    className="chip"
+                    type="button"
+                    disabled={osDisabled}
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          await app.SetDesktopGlobalHotkey("off");
+                          await onGlobalHotkeyChange?.();
+                          setOsConflict(null);
+                        } catch (err) {
+                          setOsConflict(err instanceof Error ? err.message : String(err));
+                          return;
+                        }
+                        setConflict(null);
+                        setUnsupportedAction(null);
+                        setRecording(null);
+                        setRevision((value) => value + 1);
+                      })();
+                    }}
+                  >
+                    {t("settings.shortcutsDisable")}
+                  </button>
+                )}
                 <button
                   className="chip"
                   type="button"

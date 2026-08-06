@@ -468,8 +468,9 @@ func (c *Config) DesktopCloseBehavior() string {
 	return normalizeCloseBehavior(c.UI.CloseBehavior)
 }
 
-// DesktopGlobalHotkey returns the OS-level window-toggle binding.
-// Empty config uses a platform default; the sentinel "off" disables registration.
+// DesktopGlobalHotkey returns the OS-level window-toggle binding used for
+// registration. Empty config uses a platform default; the sentinel "off"
+// disables registration (returns "").
 func (c *Config) DesktopGlobalHotkey() string {
 	raw := ""
 	if c != nil {
@@ -478,6 +479,24 @@ func (c *Config) DesktopGlobalHotkey() string {
 	switch strings.ToLower(raw) {
 	case "off", "none", "disabled", "-":
 		return ""
+	case "":
+		return defaultDesktopGlobalHotkey()
+	default:
+		return normalizeDesktopGlobalHotkey(raw)
+	}
+}
+
+// DesktopGlobalHotkeySetting returns the value Settings should display.
+// Unlike DesktopGlobalHotkey, the explicit "off" sentinel stays "off" so the
+// UI does not collapse disabled into the platform default.
+func (c *Config) DesktopGlobalHotkeySetting() string {
+	raw := ""
+	if c != nil {
+		raw = strings.TrimSpace(c.Desktop.GlobalHotkey)
+	}
+	switch strings.ToLower(raw) {
+	case "off", "none", "disabled", "-":
+		return "off"
 	case "":
 		return defaultDesktopGlobalHotkey()
 	default:

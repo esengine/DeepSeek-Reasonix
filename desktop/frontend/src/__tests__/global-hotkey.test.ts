@@ -24,6 +24,9 @@ ok(/serializeShortcutCombo/.test(shortcuts) && /parseShortcutComboBinding/.test(
 ok(/SetDesktopGlobalHotkey/.test(bridge), "bridge exposes SetDesktopGlobalHotkey");
 ok(/definition\.osLevel/.test(settings) && /SetDesktopGlobalHotkey/.test(settings), "settings persists OS hotkey via Go");
 ok(/settings\.shortcutsOsConflict/.test(settings), "settings surfaces OS registration conflicts");
+ok(/desktop:global-hotkey-error/.test(settings), "settings listens for startup OS hotkey errors");
+ok(/SetDesktopGlobalHotkey\("off"\)/.test(settings) && /settings\.shortcutsDisable/.test(settings), "settings can disable the OS hotkey");
+ok(/rawHotkey === "off"/.test(settings) && /settings\.shortcutsDisabled/.test(settings), "disabled hotkey displays as Off instead of the default");
 
 if (failed) process.exit(1);
 console.log("global hotkey tests passed");

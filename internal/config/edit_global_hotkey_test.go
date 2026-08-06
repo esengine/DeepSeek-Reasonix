@@ -21,6 +21,9 @@ func TestDesktopGlobalHotkeyDefaultAndOff(t *testing.T) {
 	if got := c.DesktopGlobalHotkey(); got != "" {
 		t.Fatalf("off = %q, want empty", got)
 	}
+	if got := c.DesktopGlobalHotkeySetting(); got != "off" {
+		t.Fatalf("off setting = %q, want off", got)
+	}
 	if !c.DesktopGlobalHotkeyConfigured() {
 		t.Fatal("expected configured sentinel")
 	}

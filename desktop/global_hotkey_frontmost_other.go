@@ -3,7 +3,8 @@
 package main
 
 func windowIsFrontmost() bool {
-	// Without a reliable compositor focus probe, treat a non-backgrounded
-	// window as frontmost so the hotkey still toggles hide/show.
-	return true
+	// No reliable compositor focus probe on this build. Prefer summon over
+	// hide so a hotkey press while another app is focused still raises Reasonix
+	// instead of accidentally hiding a visible-but-unfocused window.
+	return false
 }

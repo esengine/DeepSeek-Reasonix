@@ -1631,6 +1631,8 @@ export const zh: Record<DictKey, string> = {
   "settings.shortcutsHint": "从同一个来源自定义桌面快捷键。帮助表和实际监听都会使用这些绑定。显示/隐藏是系统级热键，Reasonix 在后台时也能唤起。",
   "settings.shortcutsResetAll": "重置全部快捷键",
   "settings.shortcutsReset": "重置",
+  "settings.shortcutsDisable": "关闭",
+  "settings.shortcutsDisabled": "已关闭",
   "settings.shortcutsRecording": "按下组合键",
   "settings.shortcutsConflict": "{action} 与 {conflict} 冲突，请换一个快捷键。",
   "settings.shortcutsOsConflict": "无法注册系统热键：{message}",

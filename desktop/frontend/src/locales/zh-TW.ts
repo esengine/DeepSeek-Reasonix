@@ -1262,6 +1262,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.shortcutsHint": "從同一個來源自訂桌面快捷鍵。幫助表和實際監聽都會使用這些綁定。顯示/隱藏是系統級熱鍵，Reasonix 在背景時也能喚起。",
   "settings.shortcutsResetAll": "重置全部快捷鍵",
   "settings.shortcutsReset": "重置",
+  "settings.shortcutsDisable": "關閉",
+  "settings.shortcutsDisabled": "已關閉",
   "settings.shortcutsRecording": "按下組合鍵",
   "settings.shortcutsConflict": "{action} 與 {conflict} 衝突，請換一個快捷鍵。",
   "settings.shortcutsOsConflict": "無法註冊系統熱鍵：{message}",

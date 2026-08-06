@@ -1629,6 +1629,8 @@ export const en = {
   "settings.shortcutsHint": "Customize desktop shortcuts from one shared source. The help sheet and active handlers use these same bindings. Show/hide is an OS-level hotkey and works while Reasonix is in the background.",
   "settings.shortcutsResetAll": "Reset all shortcuts",
   "settings.shortcutsReset": "Reset",
+  "settings.shortcutsDisable": "Disable",
+  "settings.shortcutsDisabled": "Off",
   "settings.shortcutsRecording": "Press keys",
   "settings.shortcutsConflict": "{action} conflicts with {conflict}. Choose another shortcut.",
   "settings.shortcutsOsConflict": "Could not register the system hotkey: {message}",

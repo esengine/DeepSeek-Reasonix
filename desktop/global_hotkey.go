@@ -13,13 +13,17 @@ import (
 // globalHotkeyHolder is the currently registered OS binding, if any.
 type globalHotkeyHolder struct {
 	binding string
-	stop    context.CancelFunc
+	cancel  context.CancelFunc
+	// waitUnregister blocks until the previous OS registration has released
+	// the binding, so a rebind cannot Register before Unregister finishes.
+	waitUnregister func()
 }
 
 var (
 	globalHotkeyMu     sync.Mutex
 	globalHotkeyActive *globalHotkeyHolder
-	// registerGlobalHotkeyBinding is replaced in tests.
+	// registerGlobalHotkeyBinding is replaced in tests. It must cancel via
+	// ctx and invoke waitUnregister after Unregister completes.
 	registerGlobalHotkeyBinding = platformRegisterGlobalHotkey
 )
 
@@ -40,20 +44,25 @@ func (a *App) startGlobalHotkey() {
 func (a *App) stopGlobalHotkey() {
 	globalHotkeyMu.Lock()
 	defer globalHotkeyMu.Unlock()
-	if globalHotkeyActive != nil {
-		globalHotkeyActive.stop()
-		globalHotkeyActive = nil
+	stopActiveGlobalHotkeyLocked()
+}
+
+func stopActiveGlobalHotkeyLocked() {
+	if globalHotkeyActive == nil {
+		return
 	}
+	globalHotkeyActive.cancel()
+	if globalHotkeyActive.waitUnregister != nil {
+		globalHotkeyActive.waitUnregister()
+	}
+	globalHotkeyActive = nil
 }
 
 func (a *App) rebindGlobalHotkey(binding string) error {
 	binding = strings.TrimSpace(binding)
 	globalHotkeyMu.Lock()
 	defer globalHotkeyMu.Unlock()
-	if globalHotkeyActive != nil {
-		globalHotkeyActive.stop()
-		globalHotkeyActive = nil
-	}
+	stopActiveGlobalHotkeyLocked()
 	if binding == "" {
 		return nil
 	}
@@ -61,11 +70,16 @@ func (a *App) rebindGlobalHotkey(binding string) error {
 	onTrigger := func() {
 		a.goSafe("toggleFromHotkey", a.toggleMainWindowFromHotkey)
 	}
-	if err := registerGlobalHotkeyBinding(ctx, binding, onTrigger); err != nil {
+	waitUnregister, err := registerGlobalHotkeyBinding(ctx, binding, onTrigger)
+	if err != nil {
 		cancel()
 		return err
 	}
-	globalHotkeyActive = &globalHotkeyHolder{binding: binding, stop: cancel}
+	globalHotkeyActive = &globalHotkeyHolder{
+		binding:        binding,
+		cancel:         cancel,
+		waitUnregister: waitUnregister,
+	}
 	return nil
 }
 

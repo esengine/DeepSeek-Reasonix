@@ -11,16 +11,18 @@ import (
 	"golang.design/x/hotkey"
 )
 
-func platformRegisterGlobalHotkey(ctx context.Context, binding string, onTrigger func()) error {
+func platformRegisterGlobalHotkey(ctx context.Context, binding string, onTrigger func()) (func(), error) {
 	mods, key, err := parseHotkeyBinding(binding)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	hk := hotkey.New(mods, key)
 	if err := hk.Register(); err != nil {
-		return fmt.Errorf("OS refused binding %q: %w", binding, err)
+		return nil, fmt.Errorf("OS refused binding %q: %w", binding, err)
 	}
+	unregistered := make(chan struct{})
 	go func() {
+		defer close(unregistered)
 		defer func() {
 			if err := hk.Unregister(); err != nil {
 				slog.Debug("desktop: unregister global hotkey", "err", err)
@@ -41,7 +43,9 @@ func platformRegisterGlobalHotkey(ctx context.Context, binding string, onTrigger
 			}
 		}
 	}()
-	return nil
+	return func() {
+		<-unregistered
+	}, nil
 }
 
 func parseHotkeyBinding(binding string) ([]hotkey.Modifier, hotkey.Key, error) {
