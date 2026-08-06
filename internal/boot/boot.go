@@ -678,17 +678,15 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	// Configured enabled MCP: cache-hit placeholders without starting processes;
 	// cache-miss servers get one background catalog discovery.
 	registerEnabledMCP := func(specs []plugin.Spec) {
-		// Meta-tool mode: collapse the per-tool mcp__<server>__<tool> surface
-		// into a single run_mcp dispatcher. Spawns still fire (the Host needs
-		// connected clients to dispatch through), but NO mcp__ tools enter the
-		// registry — KickSpawns constructs lazySpawn with removePrefix="" so the
-		// post-spawn trySwap is a registry no-op. The provider's tools array
-		// stays at builtins + 1 regardless of MCP server/tool count. Enabled by
-		// [tools] meta_tool = true in config, or REASONIX_MCP_META_TOOL=1 env
-		// override. See internal/plugin/metatool.go and meta_capacity_test.go.
-		if cfg.MCPMetaToolEnabled() && len(specs) > 0 {
-			plugin.KickSpawns(ctx, pluginHost, specs)
-			reg.Add(plugin.NewMetaTool(pluginHost, specs))
+		// Meta-tool mode: hide the per-tool mcp__<server>__<tool> surface and
+		// let use_capability be the single MCP entry point. use_capability
+		// already provides list/inspect/call with spec-based identity,
+		// CallResolver security flow, lazy startup, and stable schema — no
+		// second dispatcher needed. capProxy is registered later (after
+		// capRuntime construction) when cfg.MCPMetaToolEnabled() is true.
+		// Enabled by [tools] meta_tool = true in config, or
+		// REASONIX_MCP_META_TOOL=1 env override.
+		if cfg.MCPMetaToolEnabled() {
 			return
 		}
 		for _, s := range specs {
@@ -728,32 +726,6 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 		configSpecs = filtered
 	}
 	registerEnabledMCP(configSpecs)
-
-	// Tool-surface diagnostic: emit the provider-visible capacity so the
-	// run_mcp meta-tool mode's effect is observable in a real run. Gated by
-	// the meta-tool being enabled (config or env) or REASONIX_DUMP_TOOL_SURFACE
-	// so normal startup stays quiet. This is the same number the model sees
-	// every turn as its tools array — the whole point of run_mcp is to shrink it.
-	if cfg.MCPMetaToolEnabled() || os.Getenv("REASONIX_DUMP_TOOL_SURFACE") != "" {
-		names := reg.Names()
-		mcpTop := 0
-		for _, n := range names {
-			if strings.HasPrefix(n, tool.MCPNamePrefix) {
-				mcpTop++
-			}
-		}
-		_, hasMeta := reg.Get(plugin.MetaToolName)
-		mode := "per-tool mcp__ (default)"
-		if cfg.MCPMetaToolEnabled() {
-			mode = "run_mcp meta-tool"
-		}
-		sink.Emit(event.Event{
-			Kind:  event.Notice,
-			Level: event.LevelInfo,
-			Text:  fmt.Sprintf("tool surface [%s]: %d tools (%d mcp__ top-level, run_mcp registered=%v)", mode, len(names), mcpTop, hasMeta),
-			Detail: fmt.Sprintf("provider tools array capacity = %d entries. run_mcp collapses every mcp__<server>__<tool> into a single dispatcher; see internal/plugin/metatool.go.", len(names)),
-		})
-	}
 	for _, msg := range demoteMessages {
 		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: msg})
 	}
@@ -1613,17 +1585,44 @@ func Build(ctx context.Context, opts Options) (*control.Controller, error) {
 	}
 	// Always build the runtime when a plugin host exists so task/fleet children
 	// can use the stable proxy even in Balanced/Economy without Delivery.
-	if pluginHost != nil || len(capSpecs) > 0 || tokenDelivery || dualModelPlanner {
+	// Meta-tool mode also needs the runtime so use_capability can proxy MCP.
+	if pluginHost != nil || len(capSpecs) > 0 || tokenDelivery || dualModelPlanner || cfg.MCPMetaToolEnabled() {
 		capRuntime = agent.NewMCPCapabilityRuntime(ctx, pluginHost, capSpecs, reg, catalogFn)
 		capRuntime.ConfigureServers(cfg.Plugins, capSpecs, enabledMCPNames)
 	}
-	if tokenDelivery || dualModelPlanner {
+	if tokenDelivery || dualModelPlanner || cfg.MCPMetaToolEnabled() {
 		capLedger = capability.NewLedger()
 		capAudit = &capability.Audit{}
 		if capRuntime != nil {
 			capProxy = capRuntime.NewFrontend(capLedger, capAudit)
 			reg.Add(capProxy)
 		}
+	}
+
+	// Tool-surface diagnostic: emit the provider-visible capacity so the
+	// meta-tool mode's effect is observable in a real run. Gated by the
+	// meta-tool being enabled (config or env) or REASONIX_DUMP_TOOL_SURFACE
+	// so normal startup stays quiet. This fires after capProxy registration
+	// so use_capability is visible in the count when meta-tool mode is on.
+	if cfg.MCPMetaToolEnabled() || os.Getenv("REASONIX_DUMP_TOOL_SURFACE") != "" {
+		names := reg.Names()
+		mcpTop := 0
+		for _, n := range names {
+			if strings.HasPrefix(n, tool.MCPNamePrefix) {
+				mcpTop++
+			}
+		}
+		_, hasCapProxy := reg.Get("use_capability")
+		mode := "per-tool mcp__ (default)"
+		if cfg.MCPMetaToolEnabled() {
+			mode = "use_capability meta-tool"
+		}
+		sink.Emit(event.Event{
+			Kind:   event.Notice,
+			Level:  event.LevelInfo,
+			Text:   fmt.Sprintf("tool surface [%s]: %d tools (%d mcp__ top-level, use_capability registered=%v)", mode, len(names), mcpTop, hasCapProxy),
+			Detail: fmt.Sprintf("provider tools array capacity = %d entries. Meta-tool mode hides every mcp__<server>__<tool> behind use_capability (list/inspect/call with spec-based identity, CallResolver security, lazy startup); see internal/agent/usecapability.go.", len(names)),
+		})
 	}
 	skillStore.ConfigureInvocationPolicy(string(runtimeProfile), func(requires []string) []string {
 		connected := map[string]bool{}

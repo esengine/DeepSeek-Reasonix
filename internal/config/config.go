@@ -1571,23 +1571,26 @@ func clonePricing(p *provider.Pricing) *provider.Pricing {
 
 // ToolsConfig selects which built-in tools are enabled. Empty means all of them.
 type ToolsConfig struct {
-	Enabled                  []string             `toml:"enabled"`
-	BashTimeoutSeconds       *int                 `toml:"bash_timeout_seconds"`
-	MCPStartupTimeoutSeconds *int                 `toml:"mcp_startup_timeout_seconds"`
-	MCPCallTimeoutSeconds    *int                 `toml:"mcp_call_timeout_seconds"`
+	Enabled                  []string `toml:"enabled"`
+	BashTimeoutSeconds       *int     `toml:"bash_timeout_seconds"`
+	MCPStartupTimeoutSeconds *int     `toml:"mcp_startup_timeout_seconds"`
+	MCPCallTimeoutSeconds    *int     `toml:"mcp_call_timeout_seconds"`
 	// MetaTool collapses every per-tool mcp__<server>__<tool> top-level entry
-	// into a single run_mcp dispatcher, shrinking the provider's tools array
+	// behind a single use_capability proxy, shrinking the provider's tools array
 	// from builtins + (servers × tools/server) down to builtins + 1. This
 	// directly reduces model attention dilution across dozens of MCP schemas.
+	// use_capability provides list/inspect/call with spec-based identity,
+	// CallResolver security flow (permission/hooks/evidence), lazy startup,
+	// and a fixed schema that stays stable across connection drift.
 	// Nil (unset, the default) keeps the legacy per-tool surface so existing
 	// behavior is unchanged; set [tools] meta_tool = true to opt in. The env
 	// var REASONIX_MCP_META_TOOL overrides this value when set, for ad-hoc
 	// testing, CI, and mcp-surface-dump without editing config. See
-	// internal/plugin/metatool.go and MCPMetaToolEnabled.
-	MetaTool                 *bool                `toml:"meta_tool"`
-	BackgroundJobs           BackgroundJobsConfig `toml:"background_jobs"`
-	Search                   SearchConfig         `toml:"search"`
-	Shell                    ShellConfig          `toml:"shell"`
+	// internal/agent/usecapability.go and MCPMetaToolEnabled.
+	MetaTool       *bool                `toml:"meta_tool"`
+	BackgroundJobs BackgroundJobsConfig `toml:"background_jobs"`
+	Search         SearchConfig         `toml:"search"`
+	Shell          ShellConfig          `toml:"shell"`
 }
 
 const (
@@ -1630,8 +1633,8 @@ func (c *Config) MCPStartupTimeoutSeconds() int {
 	return *c.Tools.MCPStartupTimeoutSeconds
 }
 
-// MCPMetaToolEnabled reports whether the run_mcp meta-tool dispatcher should
-// replace the per-tool mcp__<server>__<tool> surface. Resolution order:
+// MCPMetaToolEnabled reports whether the use_capability proxy should replace
+// the per-tool mcp__<server>__<tool> surface. Resolution order:
 //
 //  1. REASONIX_MCP_META_TOOL env var — when set to a recognized boolean
 //     spelling (1/true/yes/on enables, 0/false/no/off disables) it overrides
@@ -1642,6 +1645,9 @@ func (c *Config) MCPStartupTimeoutSeconds() int {
 //
 // boot.go calls this instead of plugin.MetaToolEnabled (which is env-only)
 // so the config file is the primary control and the env var is the override.
+// When enabled, boot hides mcp__ tools and registers use_capability, which
+// provides list/inspect/call with spec-based identity, CallResolver security,
+// lazy startup, and a fixed schema (see internal/agent/usecapability.go).
 func (c *Config) MCPMetaToolEnabled() bool {
 	if v, ok := mcpMetaToolEnvOverride(); ok {
 		return v

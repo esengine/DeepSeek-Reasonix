@@ -2,8 +2,8 @@
 // config (15 servers × 5 tools, matching meta_capacity_test.go's scenario) and
 // prints the provider-visible tool surface for both modes:
 //
-//   1. baseline  — REASONIX_MCP_META_TOOL unset  → per-tool mcp__<server>__<tool>
-//   2. run_mcp   — REASONIX_MCP_META_TOOL=1       → single run_mcp dispatcher
+//  1. baseline  — REASONIX_MCP_META_TOOL unset  → per-tool mcp__<server>__<tool>
+//  2. use_capability — REASONIX_MCP_META_TOOL=1  → single use_capability proxy
 //
 // It proves the capacity drop is real on the production boot path, not just in
 // unit tests. The demo servers declare a nonexistent command so no subprocess
@@ -91,8 +91,8 @@ func run() error {
 
 // writeDemoConfig writes a reasonix.toml with an OpenAI provider (uses
 // OPENAI_API_KEY from the environment) and 15 background MCP server entries.
-// When metaTool is true, it adds [tools] meta_tool = true so the run_mcp
-// dispatcher is enabled via the CONFIG FILE path (not the env override) —
+// When metaTool is true, it adds [tools] meta_tool = true so the use_capability
+// proxy is enabled via the CONFIG FILE path (not the env override) —
 // this is what proves the config item works end-to-end on the real boot path.
 // The provider is only needed so boot.Build resolves a model and reaches
 // registerBackground — no API call is made during Build.
@@ -163,13 +163,13 @@ func seedDemoCaches(workspace string) error {
 
 // surface captures the provider-visible tool surface after Build.
 type surface struct {
-	mode         string
-	totalTools   int
-	mcpTopLevel  int
-	hasRunMCP    bool
-	toolNames    []string
-	schemasBytes int
-	buildErr     error
+	mode             string
+	totalTools       int
+	mcpTopLevel      int
+	hasUseCapability bool
+	toolNames        []string
+	schemasBytes     int
+	buildErr         error
 }
 
 func buildAndDump(ctx context.Context, workspace string, metaTool bool) (surface, []string, error) {
@@ -208,7 +208,7 @@ func buildAndDump(ctx context.Context, workspace string, metaTool bool) (surface
 
 	entries := ctrl.ToolContractEntries()
 	s := surface{
-		mode:      modeLabel(metaTool),
+		mode:       modeLabel(metaTool),
 		totalTools: len(entries),
 	}
 	for _, e := range entries {
@@ -216,8 +216,8 @@ func buildAndDump(ctx context.Context, workspace string, metaTool bool) (surface
 		if strings.HasPrefix(e.Name, tool.MCPNamePrefix) {
 			s.mcpTopLevel++
 		}
-		if e.Name == plugin.MetaToolName {
-			s.hasRunMCP = true
+		if e.Name == "use_capability" {
+			s.hasUseCapability = true
 		}
 	}
 	// Measure the serialized tools-array bytes — the real "attention" cost.
@@ -237,14 +237,14 @@ func buildAndDump(ctx context.Context, workspace string, metaTool bool) (surface
 
 func modeLabel(metaTool bool) string {
 	if metaTool {
-		return "run_mcp meta-tool"
+		return "use_capability meta-tool"
 	}
 	return "per-tool mcp__ (baseline)"
 }
 
 func printComparison(baseline, meta surface, baselineNotices, metaNotices []string) {
 	fmt.Println("────────────────────────────────────────────────────────────")
-	fmt.Println("MODE                 tools   mcp__   run_mcp   tools-array bytes")
+	fmt.Println("MODE                 tools   mcp__   use_cap   tools-array bytes")
 	fmt.Println("────────────────────────────────────────────────────────────")
 	printRow(baseline)
 	printRow(meta)
@@ -264,14 +264,14 @@ func printComparison(baseline, meta surface, baselineNotices, metaNotices []stri
 		fmt.Println("  " + n)
 	}
 	fmt.Println()
-	fmt.Println("=== boot.go diagnostic Notices (run_mcp run) ===")
+	fmt.Println("=== boot.go diagnostic Notices (use_capability run) ===")
 	for _, n := range metaNotices {
 		fmt.Println("  " + n)
 	}
 
-	if meta.hasRunMCP {
+	if meta.hasUseCapability {
 		fmt.Println()
-		fmt.Println("=== run_mcp registered: YES (single dispatcher replaces all mcp__ entries) ===")
+		fmt.Println("=== use_capability registered: YES (single proxy replaces all mcp__ entries) ===")
 	}
 	if meta.buildErr != nil {
 		fmt.Printf("\n[meta-tool build error: %v]\n", meta.buildErr)
@@ -280,11 +280,11 @@ func printComparison(baseline, meta surface, baselineNotices, metaNotices []stri
 		fmt.Printf("\n[baseline build error: %v]\n", baseline.buildErr)
 	}
 
-	// Print the run_mcp tool name list when present, so the dispatcher's
+	// Print the use_capability tool name list when present, so the proxy's
 	// surface is visible.
-	if meta.hasRunMCP {
+	if meta.hasUseCapability {
 		fmt.Println()
-		fmt.Println("=== run_mcp-mode tool name list ===")
+		fmt.Println("=== use_capability-mode tool name list ===")
 		fmt.Println(strings.Join(meta.toolNames, "\n"))
 	}
 }
@@ -294,5 +294,5 @@ func printRow(s surface) {
 		fmt.Printf("%-22s  BUILD FAILED: %v\n", s.mode, s.buildErr)
 		return
 	}
-	fmt.Printf("%-22s  %5d   %5d   %5v     %d\n", s.mode, s.totalTools, s.mcpTopLevel, s.hasRunMCP, s.schemasBytes)
+	fmt.Printf("%-22s  %5d   %5d   %5v     %d\n", s.mode, s.totalTools, s.mcpTopLevel, s.hasUseCapability, s.schemasBytes)
 }
