@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"reasonix/internal/boot"
@@ -37,6 +38,21 @@ const (
 	serverCount    = 15
 	toolsPerServer = 5
 )
+
+// secretPattern matches credential-shaped substrings that can surface in
+// boot/config error messages (e.g. an API key echoed back by the provider
+// config resolver). We redact them before printing so build failures never
+// leak sensitive material to the terminal/log (CodeQL CWE-532).
+var secretPattern = regexp.MustCompile(`(?i)(sk-[A-Za-z0-9_-]{4,}|(?:api[_-]?key|token|secret|password|key)\\s*[=:]\\s*[^\\s,;}\\]]+)`)
+
+// redactErr returns a safe description of err for logging: secret-shaped
+// substrings are masked and the concrete error type is included.
+func redactErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("%T: %s", err, secretPattern.ReplaceAllString(err.Error(), "$1***"))
+}
 
 func main() {
 	if err := run(); err != nil {
@@ -274,10 +290,10 @@ func printComparison(baseline, meta surface, baselineNotices, metaNotices []stri
 		fmt.Println("=== use_capability registered: YES (single proxy replaces all mcp__ entries) ===")
 	}
 	if meta.buildErr != nil {
-		fmt.Printf("\n[meta-tool build error: %v]\n", meta.buildErr)
+		fmt.Printf("\n[meta-tool build error: %s]\n", redactErr(meta.buildErr))
 	}
 	if baseline.buildErr != nil {
-		fmt.Printf("\n[baseline build error: %v]\n", baseline.buildErr)
+		fmt.Printf("\n[baseline build error: %s]\n", redactErr(baseline.buildErr))
 	}
 
 	// Print the use_capability tool name list when present, so the proxy's
@@ -291,7 +307,7 @@ func printComparison(baseline, meta surface, baselineNotices, metaNotices []stri
 
 func printRow(s surface) {
 	if s.buildErr != nil {
-		fmt.Printf("%-22s  BUILD FAILED: %v\n", s.mode, s.buildErr)
+		fmt.Printf("%-22s  BUILD FAILED: %s\n", s.mode, redactErr(s.buildErr))
 		return
 	}
 	fmt.Printf("%-22s  %5d   %5d   %5v     %d\n", s.mode, s.totalTools, s.mcpTopLevel, s.hasUseCapability, s.schemasBytes)
