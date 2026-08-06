@@ -51,6 +51,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	fmt.Fprintf(&b, "config_version = %d   # schema marker for diagnostics; old versions may ignore it\n", configVersion(c))
 	fmt.Fprintf(&b, "default_model = %q\n", c.DefaultModel)
+	if c.DefaultWorkMode != "" {
+		fmt.Fprintf(&b, "default_work_mode = %q   # economy|balanced|delivery; used when no --profile flag is passed\n", c.DefaultWorkMode)
+	}
 	if c.Language != "" {
 		fmt.Fprintf(&b, "language      = %q   # ui/model language; empty = auto-detect from $LANG / $REASONIX_LANG\n", c.Language)
 	} else {
@@ -827,6 +830,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 	}
 	if c.DefaultModel != d.DefaultModel {
 		fmt.Fprintf(&b, "default_model = %q\n", c.DefaultModel)
+	}
+	if c.DefaultWorkMode != "" && c.DefaultWorkMode != d.DefaultWorkMode {
+		fmt.Fprintf(&b, "default_work_mode = %q\n", c.DefaultWorkMode)
 	}
 	if c.Language != "" && c.Language != d.Language {
 		fmt.Fprintf(&b, "language = %q\n", c.Language)

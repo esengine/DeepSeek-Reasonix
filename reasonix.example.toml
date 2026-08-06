@@ -5,6 +5,7 @@
 # Reasonix's global <Reasonix home>/.env. Never put API key values here.
 
 default_model = "deepseek"   # a provider name (→ its default model) or "provider/model"
+# default_work_mode = "delivery"   # economy|balanced|delivery; new-session default when no --profile flag is passed (balanced = today's default)
 # language      = "zh"   # ui language; empty = auto-detect from $LANG / $REASONIX_LANG
 
 [ui]

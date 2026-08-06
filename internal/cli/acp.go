@@ -68,7 +68,7 @@ func acpCommand(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "sandbox-bash must be auto or enforce")
 		return 2
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
+	profile, err := resolveRuntimeProfile(stdFlagChanged(fs, "profile"), profileFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
