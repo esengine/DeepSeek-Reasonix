@@ -49,6 +49,7 @@ import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessio
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { NoticeCard, Transcript } from "./components/Transcript";
+import { SessionReportCard, type SessionReport } from "./components/SessionReportCard";
 import { Composer } from "./components/Composer";
 import { TranscriptSelectionMenu } from "./components/TranscriptSelectionMenu";
 import { TodoPanel } from "./components/TodoPanel";
@@ -2155,6 +2156,39 @@ export default function App() {
     () => resolveTodoPanelTodos(metaTodos, todoItem ? parseTodos(todoItem.args) : []),
     [metaTodos, todoItem],
   );
+  const [reportOpen, setReportOpen] = useState(false);
+  const sessionReport = useMemo<SessionReport>(() => {
+    let turns = 0;
+    let activeMs = 0;
+    let edits = 0;
+    let added = 0;
+    let removed = 0;
+    for (const item of state.items) {
+      if (item.kind === "user") turns++;
+      else if (item.kind === "assistant") activeMs += item.workDurationMs ?? 0;
+      else if (item.kind === "tool" && item.fileDiff) {
+        edits++;
+        added += item.fileDiff.added;
+        removed += item.fileDiff.removed;
+      }
+    }
+    const usage = state.usage;
+    return {
+      turns,
+      promptTokens: usage?.promptTokens ?? 0,
+      completionTokens: usage?.completionTokens ?? 0,
+      cacheHitTokens: usage?.sessionCacheHitTokens ?? usage?.cacheHitTokens ?? 0,
+      cacheMissTokens: usage?.sessionCacheMissTokens ?? usage?.cacheMissTokens ?? 0,
+      cost: usage?.cost,
+      currency: usage?.currency,
+      activeMs,
+      todosDone: todos.filter((todo) => todo.status === "completed").length,
+      todosTotal: todos.length,
+      edits,
+      added,
+      removed,
+    };
+  }, [state.items, state.usage, todos]);
   const [dismissedTodoKeys, setDismissedTodoKeys] = useState<Set<string>>(loadDismissedTodoKeys);
   const todoKey = useMemo(() => todoDismissalKey(todos), [todos]);
   const todoBatch = useMemo(() => todoBatchKey(todos), [todos]);
@@ -4770,6 +4804,18 @@ export default function App() {
                   </div>
                 )}
               </div>
+              <Tooltip label={t("topicBar.report")}>
+                <button
+                  className="topicbar__action-btn topicbar__action-btn--icon topicbar__action-btn--utility"
+                  type="button"
+                  disabled={!sessionHasContent}
+                  aria-label={t("topicBar.report")}
+                  aria-pressed={reportOpen}
+                  onClick={() => setReportOpen((open) => !open)}
+                >
+                  <BarChart3 size={14} />
+                </button>
+              </Tooltip>
               </>
               )}
               {!sidebarCreation && (
@@ -4982,6 +5028,9 @@ export default function App() {
 
           {!sidebarImDetailConnection && (
           <footer className={["footer", terminalPanelOpen && !sidebarCreation ? "footer--compact" : "", decisionSurface ? "footer--decision" : ""].filter(Boolean).join(" ")} ref={footerRef}>
+            {reportOpen && (
+              <SessionReportCard report={sessionReport} onClose={() => setReportOpen(false)} />
+            )}
             {showTodos && (
               <TodoPanel
                 key={scopedTodoBatch}

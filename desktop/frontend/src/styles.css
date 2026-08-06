@@ -6241,6 +6241,85 @@ body > .mermaid-diagram--fullscreen {
   overflow-y: auto;
 }
 
+/* ── session report card (topicbar toggle) ───────────────────────────── */
+.session-report {
+  max-width: var(--maxw);
+  margin: 0 auto 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.session-report__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.session-report__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 650;
+}
+.session-report__close {
+  --wails-draggable: no-drag;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg-faint);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+.session-report__close:hover {
+  color: var(--fg);
+  background: var(--bg-soft);
+}
+.session-report__grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 14px 12px;
+}
+.session-report__stat {
+  flex: 1 1 120px;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-soft);
+}
+.session-report__stat-icon {
+  color: var(--fg-faint);
+}
+.session-report__stat-label {
+  color: var(--fg-dim);
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.session-report__stat-value {
+  color: var(--fg);
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.session-report__stat-hint {
+  color: var(--fg-faint);
+  font-size: 11px;
+}
+
 /* ── undo-rewind banner (above composer after a rewind) ─────────────── */
 .undo-rewind {
   display: flex;
