@@ -104,9 +104,17 @@ func legacyKeyringProbe(ctx context.Context, key string) legacyKeyringOutcome {
 }
 
 // openPrivateSessionBus dials a private session-bus connection (Auth+Hello)
-// without using the process-global SessionBus cache. Dial/Auth/Hello are not
-// context-aware in godbus, so the whole connect is raced against ctx and any
-// late connection is closed to reclaim godbus worker goroutines.
+// without using the process-global SessionBus cache.
+//
+// Connection lifecycle is bound to ctx via dbus.WithContext(ctx): when the
+// migration budget expires, godbus closes the transport so Auth/Hello that have
+// already obtained a *Conn unblock instead of hanging forever. We never call
+// dbus-launch (NoAutoStartup): missing session address fails closed as error,
+// which is correct for headless/CI and avoids an uncancellable CombinedOutput.
+//
+// Dial itself is still not fully context-cancellable in godbus before newConn
+// installs WithContext; the outer select bounds the caller's wait, and any late
+// *Conn is always closed.
 func openPrivateSessionBus(ctx context.Context) (*dbus.Conn, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -117,13 +125,13 @@ func openPrivateSessionBus(ctx context.Context) (*dbus.Conn, error) {
 	}
 	ch := make(chan result, 1)
 	go func() {
-		// Private connection: ConnectSessionBus = Dial + Auth + Hello, not shared.
-		conn, err := dbus.ConnectSessionBus()
+		conn, err := connectPrivateSessionBus(ctx)
 		ch <- result{conn: conn, err: err}
 	}()
 	select {
 	case <-ctx.Done():
-		// Reap a late success so workers cannot leak past the deadline.
+		// Drain so the connect goroutine is reaped when WithContext causes
+		// Auth/Hello to return; always Close a late *Conn.
 		go func() {
 			r := <-ch
 			if r.conn != nil {
@@ -133,10 +141,40 @@ func openPrivateSessionBus(ctx context.Context) (*dbus.Conn, error) {
 		return nil, ctx.Err()
 	case r := <-ch:
 		if r.err != nil {
+			if r.conn != nil {
+				_ = r.conn.Close()
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, r.err
+		}
+		if err := ctx.Err(); err != nil {
+			_ = r.conn.Close()
+			return nil, err
 		}
 		return r.conn, nil
 	}
+}
+
+// connectPrivateSessionBus opens a private, context-bound session bus and
+// completes Auth+Hello. Prefer NoAutoStartup so we never block in dbus-launch.
+func connectPrivateSessionBus(ctx context.Context) (*dbus.Conn, error) {
+	// WithContext: parent cancel → conn.Close → unblocks Auth transport I/O and
+	// Hello Call waiters once the *Conn exists.
+	conn, err := dbus.SessionBusPrivateNoAutoStartup(dbus.WithContext(ctx))
+	if err != nil {
+		return nil, err
+	}
+	if err := conn.Auth(nil); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if err := conn.Hello(); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func ssResolveLoginCollection(ctx context.Context, svc dbus.BusObject) (dbus.ObjectPath, error) {
