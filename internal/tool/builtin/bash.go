@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"mvdan.cc/sh/v3/syntax"
 
@@ -406,13 +407,55 @@ func reapShellProcess(cmd *exec.Cmd, tracked *proc.TrackedCommand) {
 
 // progressWriter forwards each chunk the command writes to a tool.ProgressFunc,
 // so foreground bash output streams to the frontend as it is produced.
-type progressWriter struct{ emit tool.ProgressFunc }
+type progressWriter struct {
+	emit tool.ProgressFunc
+	// tail holds the trailing bytes of an incomplete UTF-8 rune that straddled
+	// two Write calls, so it can be completed and emitted on the next Write.
+	tail []byte
+}
 
 func newProgressWriter(emit tool.ProgressFunc) *progressWriter { return &progressWriter{emit: emit} }
 
 func (w *progressWriter) Write(p []byte) (int, error) {
-	w.emit(string(p))
+	// os/exec copies pipe output at arbitrary byte boundaries, so a multi-byte
+	// UTF-8 rune (CJK, emoji) can land split across two Writes. Each chunk is
+	// emitted as its own ToolProgress event and JSON-encoded independently, so a
+	// split rune would be replaced with U+FFFD and the character lost in the
+	// live stream. Hold back a trailing incomplete rune for the next Write; a
+	// genuinely invalid byte has no completion to wait for and is left in place.
+	combined := append(w.tail, p...)
+	w.tail = nil
+	emit := combined
+	if start, ok := incompleteTailStart(combined); ok {
+		emit = combined[:start]
+		w.tail = append([]byte(nil), combined[start:]...)
+	}
+	if len(emit) > 0 {
+		w.emit(string(emit))
+	}
 	return len(p), nil
+}
+
+// incompleteTailStart reports whether p ends inside an unfinished multi-byte
+// UTF-8 rune and, if so, returns the index where that rune begins so the caller
+// can hold it back. It leaves genuinely invalid bytes (a stray continuation
+// with no lead) in place rather than holding them forever, which would stall
+// the stream.
+func incompleteTailStart(p []byte) (int, bool) {
+	// Walk back over trailing continuation bytes to the lead byte of the last
+	// rune (ASCII bytes are their own lead, so this stops at them too).
+	end := len(p)
+	for end > 0 && !utf8.RuneStart(p[end-1]) {
+		end--
+	}
+	if end == 0 {
+		return 0, false // buffer is all continuation bytes (no lead) — malformed, don't hold
+	}
+	start := end - 1 // index of the last rune's lead byte
+	if utf8.FullRune(p[start:]) {
+		return 0, false // last rune is complete
+	}
+	return start, true
 }
 
 // hasUnquotedSeq reports whether seq appears in s outside any single- or
