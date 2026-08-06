@@ -55,7 +55,7 @@ func TestLongHorizonPreservesExplicitRatios(t *testing.T) {
 	cfg := Default()
 	enabled := true
 	cfg.Agent.LongHorizon = &enabled
-	cfg.Agent.SoftCompactRatio = 0.35  // user override — should survive
+	cfg.Agent.SoftCompactRatio = 0.35    // user override — should survive
 	cfg.Agent.ToolResultSnipRatio = 0.42 // user override — should survive
 	cfg.Agent.VerificationInterval = 30  // user override — should survive
 	normalizeLongHorizon(cfg)

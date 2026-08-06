@@ -15,11 +15,11 @@ func TestMCPMetaToolEnabledResolution(t *testing.T) {
 	trueVal, falseVal := true, false
 
 	cases := []struct {
-		name    string
-		envSet  string // "" means unset, any other value means Setenv(name, envSet)
-		envVal  string
-		cfg     *bool
-		want    bool
+		name   string
+		envSet string // "" means unset, any other value means Setenv(name, envSet)
+		envVal string
+		cfg    *bool
+		want   bool
 	}{
 		// Config unset (nil), env unset → off (default, preserves legacy behavior).
 		{"nil config, env unset", "unset", "", nil, false},
@@ -103,9 +103,9 @@ func TestMCPMetaToolEnvOverrideHelper(t *testing.T) {
 	saveAndClearEnv(t)
 
 	cases := []struct {
-		env  string
-		val  bool
-		ok   bool
+		env string
+		val bool
+		ok  bool
 	}{
 		{"", false, false},
 		{"1", true, true},

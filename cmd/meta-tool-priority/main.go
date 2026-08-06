@@ -20,8 +20,8 @@ import (
 // envCase is one REASONIX_MCP_META_TOOL scenario.
 type envCase struct {
 	label string
-	value string  // raw value to Setenv; when unset is true, Unsetenv is used
-	unset bool    // true = Unsetenv, false = Setenv(value)
+	value string // raw value to Setenv; when unset is true, Unsetenv is used
+	unset bool   // true = Unsetenv, false = Setenv(value)
 }
 
 // cfgCase is one [tools] meta_tool config scenario.
