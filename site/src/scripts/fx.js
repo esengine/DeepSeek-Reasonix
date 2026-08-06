@@ -2,45 +2,6 @@
 (function () {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const rich = () => document.body.dataset.motion === "rich" && !reduced;
-  const lerp = (a, b, t) => a + (b - a) * t;
-
-  /* run a rAF loop only while `el` is on screen — no idle spinning */
-  const rafWhileVisible = (el, fn) => {
-    let rafId = 0, running = false;
-    const loop = () => {
-      if (!running) return;
-      fn();
-      rafId = requestAnimationFrame(loop);
-    };
-    const setRunning = (on) => {
-      if (on === running) return;
-      running = on;
-      if (on) rafId = requestAnimationFrame(loop);
-      else cancelAnimationFrame(rafId);
-    };
-    new IntersectionObserver((entries) => {
-      setRunning(entries[entries.length - 1].isIntersecting);
-    }).observe(el);
-  };
-
-  /* terminal 3D tilt toward cursor */
-  const term = document.querySelector(".term");
-  if (term && matchMedia("(pointer: fine)").matches) {
-    const stage = term.parentElement;
-    let rx = 0, ry = 0, trx = 0, try_ = 0;
-    stage.addEventListener("mousemove", (e) => {
-      const r = stage.getBoundingClientRect();
-      try_ = ((e.clientX - r.left) / r.width - 0.5) * 5;
-      trx = (0.5 - (e.clientY - r.top) / r.height) * 4;
-    });
-    stage.addEventListener("mouseleave", () => { trx = 0; try_ = 0; });
-    rafWhileVisible(stage, () => {
-      if (!rich()) { term.style.transform = ""; return; }
-      rx = lerp(rx, trx, 0.08);
-      ry = lerp(ry, try_, 0.08);
-      term.style.transform = `rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg)`;
-    });
-  }
 
   /* spotlight border on cards */
   document.querySelectorAll(".feat, .os-card, .doc-card").forEach((card) => {
