@@ -1743,3 +1743,27 @@ func TestNormalizeOfficialDeepSeekModelsSkipsExplicitModelList(t *testing.T) {
 		t.Fatal("normalizeOfficialDeepSeekModels must not add pro when Models is explicitly set")
 	}
 }
+
+func TestApplyDeepSeekOfficialPricingOverridesProviderWidePrice(t *testing.T) {
+	// deepseek-responses uses a `models` list + provider-wide `price` fallback.
+	// p.Model is empty, so the old code path never matched the USD default and
+	// left the user's session cost in dollars even with [desktop] currency=CNY.
+	c := &Config{
+		Desktop: DesktopConfig{Currency: "CNY"},
+		Providers: []ProviderEntry{{
+			Name:    "deepseek-responses",
+			Kind:    "responses",
+			BaseURL: "https://api.deepseek.com",
+			Models:  []string{"deepseek-v4-flash"},
+			Price:   &provider.Pricing{CacheHit: 0.0028, Input: 0.14, Output: 0.28, Currency: "$"},
+		}},
+	}
+	applyDeepSeekOfficialDefaultPricing(c)
+	got := c.Providers[0].Price
+	if got == nil || got.Currency != "¥" {
+		t.Fatalf("provider-wide price currency = %+v, want ¥ (CNY table)", got)
+	}
+	if got.Input != 1 || got.Output != 2 {
+		t.Fatalf("provider-wide price = %+v, want flash CNY 1/2", got)
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -159,4 +160,27 @@ func normalizeCurrency(currency string) string {
 	default:
 		return ""
 	}
+}
+
+// PrimaryCurrency returns the ISO currency of the largest reported balance.
+// DeepSeek returns one Info per currency; the largest balance is the one the
+// user actually recharged, so display should follow it rather than a UI
+// language guess (an overseas Chinese user recharges USD but uses a zh UI).
+func (b *Balance) PrimaryCurrency() string {
+	if b == nil || len(b.Infos) == 0 {
+		return ""
+	}
+	best := ""
+	bestVal := -1.0
+	for _, i := range b.Infos {
+		v, err := strconv.ParseFloat(strings.TrimSpace(i.TotalBalance), 64)
+		if err != nil || v <= 0 {
+			continue
+		}
+		if v > bestVal {
+			bestVal = v
+			best = i.Currency
+		}
+	}
+	return normalizeCurrency(best)
 }

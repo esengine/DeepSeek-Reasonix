@@ -2348,6 +2348,20 @@ export function useController() {
     dispatchTo(tabId, { type: "backend_activation_done" });
   }, [dispatchTo]);
 
+  // SettingsPanel dispatches "reasonix:model-catalog-changed" after applying
+  // model/currency changes. The backend rebuilds the active controller for
+  // currency, so re-fetch the wallet readout — otherwise the status bar keeps
+  // showing the previous currency after the user picks CNY/USD in Settings.
+  useEffect(() => {
+    const onModelCatalogChanged = () => {
+      const tabId = activeTabIdRef.current;
+      if (!tabId) return;
+      void refreshBalanceForTab(tabId);
+    };
+    window.addEventListener("reasonix:model-catalog-changed", onModelCatalogChanged);
+    return () => window.removeEventListener("reasonix:model-catalog-changed", onModelCatalogChanged);
+  }, [refreshBalanceForTab]);
+
   const reassertVisibleTabAfterStaleNavigation = useCallback(async (kind: string, staleTabId: string): Promise<void> => {
     // Backend navigation calls activate their result before returning. If a
     // newer tab click won in the frontend while that call was in flight, put

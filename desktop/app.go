@@ -6708,7 +6708,6 @@ func (a *App) Balance() BalanceInfo {
 }
 
 func (a *App) BalanceForTab(tabID string) BalanceInfo {
-	currency := a.balanceDisplayCurrency()
 	ctrl := a.ctrlByTabID(tabID)
 	if ctrl == nil {
 		return BalanceInfo{}
@@ -6719,6 +6718,16 @@ func (a *App) BalanceForTab(tabID string) BalanceInfo {
 	}
 	if b == nil {
 		return BalanceInfo{} // provider declares no balance endpoint
+	}
+	// Display follows the user's actual recharge currency when set; otherwise
+	// fall back to the largest reported balance (an overseas Chinese user
+	// recharges USD but uses a zh UI — language must not force CNY). Only when
+	// the provider reports no usable balance does the UI pricing currency win.
+	currency := a.balanceDisplayCurrency()
+	if actual := b.PrimaryCurrency(); actual != "" {
+		if cfg, _, err := a.loadDesktopUserConfigForView(); err == nil && cfg != nil && cfg.DesktopCurrency() == "" {
+			currency = actual
+		}
 	}
 	return BalanceInfo{Available: true, Display: b.DisplayForCurrency(currency)}
 }

@@ -85,3 +85,20 @@ func TestDisplayUSDOnly(t *testing.T) {
 		t.Errorf("DisplayForCurrency(CNY) = %q, want explicit real fallback currency %q", got, "USD $9.99")
 	}
 }
+
+func TestPrimaryCurrencyFollowsLargestBalance(t *testing.T) {
+	b := &Balance{Infos: []Info{
+		{Currency: "USD", TotalBalance: "9.99"},
+		{Currency: "CNY", TotalBalance: "70.16"},
+	}}
+	if got := b.PrimaryCurrency(); got != "CNY" {
+		t.Fatalf("PrimaryCurrency = %q, want CNY (largest balance)", got)
+	}
+	b2 := &Balance{Infos: []Info{
+		{Currency: "USD", TotalBalance: "9.99"},
+		{Currency: "CNY", TotalBalance: "0.00"},
+	}}
+	if got := b2.PrimaryCurrency(); got != "USD" {
+		t.Fatalf("PrimaryCurrency = %q, want USD (zero CNY skipped)", got)
+	}
+}
