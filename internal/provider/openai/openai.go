@@ -298,6 +298,13 @@ type client struct {
 
 func (c *client) Name() string { return c.name }
 
+// OutputBudget reports the total output budget the client will request.
+func (c *client) OutputBudget() int { return c.maxOutputTokens }
+
+// SharesContextWindow reports whether max_output_tokens competes with the
+// prompt input for the same context window (DeepSeek Chat Completions).
+func (c *client) SharesContextWindow() bool { return c.deepseek }
+
 func (c *client) RequiresToolCallReasoning() bool {
 	return c != nil && c.deepseek && c.thinkingType != "disabled"
 }

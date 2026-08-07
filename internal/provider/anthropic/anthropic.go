@@ -168,6 +168,13 @@ type client struct {
 
 func (c *client) Name() string { return c.name }
 
+// OutputBudget reports the total output budget the client will request.
+func (c *client) OutputBudget() int { return c.defaultMaxTokens }
+
+// SharesContextWindow reports whether max_tokens competes with the prompt
+// input for the same context window (DeepSeek Anthropic endpoint).
+func (c *client) SharesContextWindow() bool { return c.deepseek }
+
 func (c *client) deepSeekThinkingEnabled() bool {
 	return c != nil && c.deepseek && c.thinking != "disabled" && c.effort != "disabled"
 }

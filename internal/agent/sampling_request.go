@@ -33,10 +33,17 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	if err != nil {
 		return samplingRequest{}, err
 	}
+	// Shared-window vendors (DeepSeek) clip max_output_tokens so input +
+	// output stays inside context_window; otherwise the API rejects with 400.
+	// A nil/independent provider keeps its default (MaxTokens unchanged).
+	maxTokens := a.maxOutputTokens
+	if clipped, ok := a.effectiveOutputBudget(requestMessages); ok {
+		maxTokens = clipped
+	}
 	req := provider.Request{
 		Messages:       requestMessages,
 		Tools:          a.tools.Schemas(),
-		MaxTokens:      a.maxOutputTokens,
+		MaxTokens:      maxTokens,
 		Temperature:    provider.OptionalTemperature(a.temperature),
 		ResponseFormat: responseFormatFromRequest(ctx),
 		EffortOverride: a.governorOverride(),

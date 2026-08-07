@@ -265,6 +265,7 @@ type Agent struct {
 	maxStepsKey        string
 	reasoningByteLimit int
 	maxOutputTokens    int
+	outputBudget       int // provider's total output budget; compaction force threshold stays under context_window - outputBudget
 	// executorHandoffGuard is enabled by Coordinator for the executor agent. The
 	// per-turn marker check in Run keeps ordinary single-model turns unaffected.
 	executorHandoffGuard bool
@@ -1228,6 +1229,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxStepsKey:               maxStepsKey,
 		reasoningByteLimit:        reasoningByteLimit,
 		maxOutputTokens:           opts.MaxOutputTokens,
+		outputBudget:              outputBudgetOf(prov),
 		temperature:               opts.Temperature,
 		pricing:                   opts.Pricing,
 		usageSource:               usageSourceOrDefault(opts.UsageSource, event.UsageSourceExecutor),
