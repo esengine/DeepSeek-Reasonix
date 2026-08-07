@@ -44,7 +44,7 @@ type modelingAnalyze struct{}
 func (modelingAnalyze) Name() string { return "modeling_analyze" }
 
 func (modelingAnalyze) Description() string {
-	return "Compute a compact geometric descriptor of a mesh file (obj/stl/ply) or voxel file (.vox) — ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens."
+	return "Compute a compact geometric descriptor of a mesh file (obj/stl/ply/gltf) or voxel file (.vox) — ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens."
 }
 
 func (modelingAnalyze) Schema() json.RawMessage {

@@ -1015,7 +1015,7 @@
   },
   {
     "Name": "modeling_analyze",
-    "Description": "Compute a compact geometric descriptor of a mesh file (obj/stl/ply) or voxel file (.vox) — ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens.",
+    "Description": "Compute a compact geometric descriptor of a mesh file (obj/stl/ply/gltf) or voxel file (.vox) — ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens.",
     "ReadOnly": true,
     "Schema": {
       "properties": {
@@ -1037,12 +1037,15 @@
     "Schema": {
       "properties": {
         "format": {
-          "description": "Target format (extension).",
+          "description": "Target format (extension). gltf/glb/fbx require Blender.",
           "enum": [
             "obj",
             "stl",
             "ply",
-            "vox"
+            "vox",
+            "gltf",
+            "glb",
+            "fbx"
           ],
           "type": "string"
         },
