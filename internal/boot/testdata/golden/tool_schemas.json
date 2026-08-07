@@ -1076,12 +1076,14 @@
           "type": "number"
         },
         "op": {
-          "description": "Operation to apply.",
+          "description": "Operation to apply (retopo/unwrap require Blender).",
           "enum": [
             "cleanup",
             "triangulate",
             "merge",
-            "decimate"
+            "decimate",
+            "retopo",
+            "unwrap"
           ],
           "type": "string"
         },
