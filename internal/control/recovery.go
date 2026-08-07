@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -117,9 +118,9 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 				return ""
 			}
 			msgs := c.executor.Session().Snapshot()
-			for i := len(msgs) - 1; i >= 0; i-- {
-				if string(msgs[i].Role) == "user" && strings.TrimSpace(msgs[i].Content) != "" {
-					text := agent.UserMessageText(msgs[i])
+			for _, v := range slices.Backward(msgs) {
+				if string(v.Role) == "user" && strings.TrimSpace(v.Content) != "" {
+					text := agent.UserMessageText(v)
 					if len(text) > 800 {
 						return text[:800] + "…"
 					}
@@ -297,6 +298,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 	// Strict fresh decision: never session/persist grants, never auto-drain on
 	// mode switch.
 	c.approval.promptMu.Lock()
+	c.approval.promptEmitMu.Lock()
 	// Hold promptMu for the duration of registration+emit only; waiting happens
 	// in the recovery gate on its own channel. We deliberately do not block here
 	// on the approval reply — ResolveRecovery unblocks the gate.
@@ -330,6 +332,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 	}()
 
 	c.sink.Emit(c.approvalRequestEvent(ev))
+	c.approval.promptEmitMu.Unlock()
 	c.approval.promptMu.Unlock()
 
 	if c.hooks != nil {

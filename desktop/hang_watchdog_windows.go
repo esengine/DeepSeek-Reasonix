@@ -113,10 +113,7 @@ func windowClassName(hwnd uintptr) string {
 }
 
 func windowMessageLoopResponsive(hwnd uintptr, timeout time.Duration) bool {
-	timeoutMS := timeout.Milliseconds()
-	if timeoutMS < 250 {
-		timeoutMS = 250
-	}
+	timeoutMS := max(timeout.Milliseconds(), 250)
 	var result uintptr
 	ok, _, _ := sendMessageTimeoutProc.Call(
 		hwnd,

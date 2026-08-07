@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -30,14 +31,18 @@ type task struct {
 }
 
 type runMetrics struct {
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	CacheHitTokens   int     `json:"cache_hit_tokens"`
-	CacheMissTokens  int     `json:"cache_miss_tokens"`
-	Steps            int     `json:"steps"`
-	Cost             float64 `json:"cost"`
-	Currency         string  `json:"currency"`
-	Compactions      int     `json:"compactions"`
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	CacheHitTokens   int `json:"cache_hit_tokens"`
+	CacheMissTokens  int `json:"cache_miss_tokens"`
+	// PrefixChangeReasonCounts mirrors internal/cli.RunMetrics's field of the
+	// same name: per-run tallies of why the cache prefix changed (e.g.
+	// "compact_auto", "snip", "tools"), omitempty for older metrics files.
+	PrefixChangeReasonCounts map[string]int `json:"prefix_change_reason_counts,omitempty"`
+	Steps                    int            `json:"steps"`
+	Cost                     float64        `json:"cost"`
+	Currency                 string         `json:"currency"`
+	Compactions              int            `json:"compactions"`
 
 	// Optional Delivery capability counters (omitempty for baseline/old metrics).
 	ReadinessChecks            int     `json:"readiness_checks,omitempty"`
@@ -55,6 +60,7 @@ type runMetrics struct {
 	CapabilityRouterCost       float64 `json:"capability_router_cost,omitempty"`
 	CapabilityRouterLatencyMs  int64   `json:"capability_router_latency_ms,omitempty"`
 
+	Complete           bool           `json:"complete"`
 	Outcome            string         `json:"outcome,omitempty"`
 	ToolCalls          int            `json:"tool_calls,omitempty"`
 	ToolFailures       int            `json:"tool_failures,omitempty"`
@@ -77,6 +83,18 @@ type result struct {
 	// WallMs is the harness's own clock, not the agent's self-report, so the
 	// number stays comparable when the same suite runs against another harness.
 	WallMs int64 `json:"wall_ms"`
+	// Unaccounted marks a run whose metrics file never landed — a killed agent
+	// writes nothing. Its real cost is unknown, so it is kept out of the cost
+	// and token aggregates instead of being averaged in as zero, which would
+	// quietly understate every published per-task figure.
+	Unaccounted bool `json:"unaccounted"`
+	// Partial marks accounting recovered from an in-flight snapshot after the
+	// agent was killed. The numbers are real but stop at the last snapshot, so
+	// they are counted as lower bounds rather than dropped.
+	Partial bool `json:"partial"`
+	// Trajectory is the digest of the run's recorded event trajectory; nil
+	// unless the harness ran with -trajectories.
+	Trajectory *trajectorySummary `json:"trajectory,omitempty"`
 }
 
 // class is the published failure taxonomy: solved, the guard that stopped the
@@ -108,18 +126,29 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  # Run the committed suite:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s\n\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 		fmt.Fprintf(flag.CommandLine.Output(), "  # Grade a PR's diff with a retry budget:\n")
-		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -mode diff -base origin/main -repo . -attempts 3 -timeout 1800\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
+		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -mode diff -base origin/main-v2 -repo . -attempts 3 -timeout 1800\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 		fmt.Fprintf(flag.CommandLine.Output(), "\n  # Run the same suite with the delivery contract:\n")
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -profile delivery\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 	}
 
-	mode := flag.String("mode", "suite", "suite | diff (diff = generate tests for the PR diff and grade with the repo's tests)")
+	mode := flag.String("mode", "suite", "suite | diff | swebench")
+	subset := flag.String("subset", "benchmarks/swebench/subset.json", "swebench mode: instance subset file")
+	namespace := flag.String("namespace", "swebench", "swebench mode: registry namespace holding the evaluation images")
+	runID := flag.String("run-id", "reasonix", "swebench mode: run id passed to the official harness")
+	harnessPy := flag.String("harness-python", "python3", "swebench mode: interpreter with the swebench package installed")
+	dataset := flag.String("dataset", "princeton-nlp/SWE-bench_Verified", "swebench mode: dataset name")
+	permission := flag.String("permission", "auto", "swebench mode: agent permission posture (auto | yolo)")
+	network := flag.String("network", "", "swebench mode: docker network for agent containers; must have no off-box route")
+	proxyURL := flag.String("proxy", "", "swebench mode: the only egress the agent gets, expected to allowlist just the model API")
+	workers := flag.Int("workers", 4, "swebench mode: parallel grader workers")
+	keepImages := flag.Bool("keep-images", false, "swebench mode: keep instance images instead of removing them after each run")
 	suite := flag.String("suite", "benchmarks/e2e", "suite root (contains tasks/<id>/)")
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
 	profileFlag := flag.String("profile", benchmarkProfileBaseline, "prompt profile: baseline | delivery")
 	ablateFlag := flag.String("ablate", "", "ablation arm: subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	outMD := flag.String("out", "", "write the markdown report here (default: stdout)")
+	trajDir := flag.String("trajectories", "", "suite mode: write one <task-id>.trajectory.jsonl per task into this directory")
 	outJSON := flag.String("json", "", "write the JSON report here (optional)")
 	budget := flag.Int("budget", defaultSuiteTokenBudget, "abort once total tokens cross this (0 = no cap)")
 	// diff-mode flags
@@ -139,6 +168,26 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
+	}
+
+	if *mode == "swebench" {
+		if _, err := permissionFlag(*permission); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		cwd, _ := os.Getwd()
+		report := runSwebench(swebenchOpts{
+			bin: *bin, subset: *subset, namespace: *namespace, model: *model,
+			profile: profile, permission: *permission, arm: arm, runID: *runID, workDir: cwd,
+			harness: *harnessPy, dataset: *dataset, maxSteps: *maxSteps,
+			timeoutSec: *timeoutSec, workers: *workers, keepImages: *keepImages,
+			network: *network, proxyURL: *proxyURL,
+		})
+		emit(report, *outMD, "")
+		if *outJSON != "" {
+			fmt.Fprintln(os.Stderr, "note: -json is not written in swebench mode; the harness report is authoritative")
+		}
+		return
 	}
 
 	if *mode == "diff" {
@@ -165,17 +214,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	var results []result
-	total := 0
-	for _, t := range tasks {
-		if *budget > 0 && total >= *budget {
-			results = append(results, result{task: t, Profile: profile, Skipped: true, Note: "skipped: token budget reached"})
-			continue
-		}
-		r := runTask(*bin, *model, profile, arm, t)
-		total += r.PromptTokens + r.CompletionTokens
-		results = append(results, r)
-	}
+	results := runSuite(*bin, *model, profile, arm, tasks, *budget, *trajDir)
 
 	report := render(results)
 	if *outMD != "" {
@@ -241,12 +280,38 @@ func loadTasks(suite string) ([]task, error) {
 	return tasks, nil
 }
 
+// runSuite runs each task in order until the token budget is exhausted;
+// remaining tasks are reported as skipped rather than silently dropped.
+func runSuite(bin, model, profile string, arm ablation.Set, tasks []task, budget int, trajDir string) []result {
+	var results []result
+	total := 0
+	for _, t := range tasks {
+		if budget > 0 && total >= budget {
+			results = append(results, result{task: t, Profile: profile, Skipped: true, Note: "skipped: token budget reached"})
+			continue
+		}
+		r := runTask(bin, model, profile, arm, t, trajDir)
+		total += r.PromptTokens + r.CompletionTokens
+		results = append(results, r)
+	}
+	return results
+}
+
 // runTask copies the task's seed workdir into a temp dir, runs the agent there,
 // then drops in verify.sh and runs it as the grader. The grader is added only
 // after the run so the agent can't read the answer key.
-func runTask(bin, model, profile string, arm ablation.Set, t task) result {
+func runTask(bin, model, profile string, arm ablation.Set, t task, trajDir string) result {
 	r := result{task: t, Profile: profile}
 	r.Arm = arm.Arm()
+
+	trajPath := ""
+	if trajDir != "" {
+		if err := os.MkdirAll(trajDir, 0o755); err != nil {
+			r.Note = "trajectory dir: " + err.Error()
+			return r
+		}
+		trajPath = filepath.Join(trajDir, t.ID+".trajectory.jsonl")
+	}
 
 	work, err := os.MkdirTemp("", "e2ebench-"+t.ID+"-")
 	if err != nil {
@@ -266,7 +331,7 @@ func runTask(bin, model, profile string, arm ablation.Set, t task) result {
 	defer cancel()
 
 	metricsPath := filepath.Join(work, ".run-metrics.json")
-	args := buildRunTaskArgs(metricsPath, model, profile, arm, t.MaxSteps, t.Prompt)
+	args := buildRunTaskArgs(metricsPath, trajPath, model, profile, arm, t.MaxSteps, t.Prompt)
 
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = work
@@ -279,6 +344,11 @@ func runTask(bin, model, profile string, arm ablation.Set, t task) result {
 
 	if m, err := readMetrics(metricsPath); err == nil {
 		r.runMetrics = m
+	}
+	if trajPath != "" {
+		if summary, err := summarizeTrajectory(trajPath); err == nil {
+			r.Trajectory = summary
+		}
 	}
 	// A killed child never writes metrics, so the deadline is the only place
 	// this failure mode is still observable.
@@ -294,10 +364,13 @@ func runTask(bin, model, profile string, arm ablation.Set, t task) result {
 	return r
 }
 
-func buildRunTaskArgs(metricsPath, model, profile string, arm ablation.Set, maxSteps int, prompt string) []string {
+func buildRunTaskArgs(metricsPath, trajectoryPath, model, profile string, arm ablation.Set, maxSteps int, prompt string) []string {
 	// Benchmarks are unattended and their fixtures require ordinary workspace
 	// writes. Auto still honors explicit ask/deny rules and the sandbox boundary.
 	args := []string{"run", "--auto", "--metrics", metricsPath}
+	if trajectoryPath != "" {
+		args = append(args, "--trajectory", trajectoryPath)
+	}
 	if model != "" {
 		args = append(args, "--model", model)
 	}
@@ -330,36 +403,6 @@ func grade(work, taskDir string) bool {
 }
 
 func render(results []result) string {
-	var b strings.Builder
-	passed, ran := 0, 0
-	var pTok, cTok, hit, miss, compacts, tools, toolFails int
-	var cost float64
-	var walls []int64
-	currency := ""
-	classes := map[string]int{}
-	for _, r := range results {
-		if r.Skipped {
-			continue
-		}
-		ran++
-		if r.Passed {
-			passed++
-		}
-		classes[r.class()]++
-		pTok += r.PromptTokens
-		cTok += r.CompletionTokens
-		hit += r.CacheHitTokens
-		miss += r.CacheMissTokens
-		compacts += r.Compactions
-		tools += r.ToolCalls
-		toolFails += r.ToolFailures
-		cost += r.Cost
-		walls = append(walls, r.WallMs)
-		if r.Currency != "" {
-			currency = r.Currency
-		}
-	}
-
 	profile := benchmarkProfileBaseline
 	arm := "full"
 	if len(results) > 0 {
@@ -370,13 +413,79 @@ func render(results []result) string {
 			arm = results[0].Arm
 		}
 	}
-	fmt.Fprintf(&b, "## 🤖 Reasonix e2e benchmark (%s · arm `%s`)\n\n", profile, arm)
+	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (%s · arm `%s`)\n\n", profile, arm) + renderBody(results)
+}
+
+// renderBody is the report without a heading, so a caller that supplies its own
+// (SWE-bench mode) does not stack two titles.
+func renderBody(results []result) string {
+	var b strings.Builder
+	passed, ran := 0, 0
+	accounted, accountedSolved, unaccounted, unaccountedSolved, partial := 0, 0, 0, 0, 0
+	var pTok, cTok, hit, miss, compacts, tools, toolFails int
+	var cost float64
+	var walls []int64
+	currency := ""
+	classes := map[string]int{}
+	prefixChangeReasons := map[string]int{}
+	for _, r := range results {
+		if r.Skipped {
+			continue
+		}
+		ran++
+		if r.Passed {
+			passed++
+		}
+		classes[r.class()]++
+		walls = append(walls, r.WallMs)
+		if r.Unaccounted {
+			unaccounted++
+			if r.Passed {
+				unaccountedSolved++
+			}
+			continue
+		}
+		accounted++
+		if r.Passed {
+			accountedSolved++
+		}
+		if r.Partial {
+			partial++
+		}
+		pTok += r.PromptTokens
+		cTok += r.CompletionTokens
+		hit += r.CacheHitTokens
+		miss += r.CacheMissTokens
+		compacts += r.Compactions
+		tools += r.ToolCalls
+		toolFails += r.ToolFailures
+		cost += r.Cost
+		if r.Currency != "" {
+			currency = r.Currency
+		}
+		for reason, n := range r.PrefixChangeReasonCounts {
+			prefixChangeReasons[reason] += n
+		}
+	}
+
+	// Cost and tokens are divided by the solved instances we actually have
+	// accounting for. Dividing by every solve would treat a lost metrics file as
+	// a free solve and understate the published figure.
 	fmt.Fprintf(&b, "**Solved:** %d/%d (%s) · **Cost per solved:** %s · **Tokens per solved:** %s · **Median wall time:** %s\n\n",
 		passed, ran, pct(passed, ran),
-		costPerSolved(cost, passed, currency), tokensPerSolved(pTok+cTok, passed), dur(median(walls)))
+		costPerSolved(cost, accountedSolved, currency), tokensPerSolved(pTok+cTok, accountedSolved), dur(median(walls)))
 	fmt.Fprintf(&b, "**Cache hit:** %s · **Tokens:** %s (prompt %s / completion %s) · **Tool calls:** %s (%s failed) · **Compactions:** %d · **Cost:** %s%.4f\n\n",
 		pct(hit, hit+miss), comma(pTok+cTok), comma(pTok), comma(cTok),
 		comma(tools), comma(toolFails), compacts, currencySym(currency), cost)
+	b.WriteString(renderTimeAttribution(results))
+	if unaccounted > 0 {
+		fmt.Fprintf(&b, "> **Accounting incomplete for %d of %d instances** (%d of them solved): the agent was killed before it wrote any metrics, so their cost and tokens are unknown. Totals above cover the %d accounted instances only, and per-solved figures divide by the %d accounted solves — the true totals are higher.\n\n",
+			unaccounted, ran, unaccountedSolved, accounted, accountedSolved)
+	}
+	if partial > 0 {
+		fmt.Fprintf(&b, "> **%d of %d instances contributed partial accounting**: the agent was killed mid-run and its numbers were recovered from the last in-flight snapshot. What is counted is real but stops at that snapshot, so every total above is a lower bound.\n\n",
+			partial, ran)
+	}
 
 	fmt.Fprintf(&b, "| Task | Result | Class | Steps | Tools | Time | Prompt | Completion | Cache hit | Cost |\n")
 	fmt.Fprintf(&b, "|------|--------|-------|------:|------:|-----:|-------:|-----------:|----------:|-----:|\n")
@@ -400,6 +509,9 @@ func render(results []result) string {
 
 	if breakdown := failureBreakdown(classes); breakdown != "" {
 		fmt.Fprintf(&b, "\n**Failures by class:** %s\n", breakdown)
+	}
+	if breakdown := reasonBreakdown(prefixChangeReasons); breakdown != "" {
+		fmt.Fprintf(&b, "\n**Cache resets by cause:** %s\n", breakdown)
 	}
 
 	notes := false
@@ -444,7 +556,7 @@ func median(ms []int64) int64 {
 		return 0
 	}
 	sorted := append([]int64(nil), ms...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 	return sorted[len(sorted)/2]
 }
 
@@ -473,6 +585,25 @@ func failureBreakdown(classes map[string]int) string {
 	parts := make([]string, 0, len(names))
 	for _, name := range names {
 		parts = append(parts, fmt.Sprintf("%s ×%d", name, classes[name]))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// reasonBreakdown renders cache-prefix-change reason counts (compact_auto,
+// snip, prune, tools, ...) the same way failureBreakdown renders failure
+// classes, so a hit-rate regression in a PR shows which operation caused it.
+func reasonBreakdown(reasons map[string]int) string {
+	names := make([]string, 0, len(reasons))
+	for name := range reasons {
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s ×%d", name, reasons[name]))
 	}
 	return strings.Join(parts, " · ")
 }

@@ -319,7 +319,7 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 	// Wait for the tab's controller to be built (it's started
 	// asynchronously in a goroutine by openTopicTab).
 	var ctrl heartbeatRuntimeStatus
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		if candidate := e.app.ctrlByTabID(tabMeta.ID); candidate != nil {
 			ctrl = candidate
 			break
@@ -597,11 +597,11 @@ type heartbeatSchedule struct {
 }
 
 func parseHeartbeatSchedule(interval string) (heartbeatSchedule, bool) {
-	idx := strings.Index(interval, "|")
-	if idx < 0 {
+	_, after, ok0 := strings.Cut(interval, "|")
+	if !ok0 {
 		return heartbeatSchedule{}, false
 	}
-	raw := strings.TrimSpace(interval[idx+1:])
+	raw := strings.TrimSpace(after)
 	if raw == "" {
 		return heartbeatSchedule{}, false
 	}
@@ -625,7 +625,7 @@ func parseHeartbeatSchedule(interval string) (heartbeatSchedule, bool) {
 	case "daily":
 		return s, true
 	case "weekly", "biweekly":
-		for _, part := range strings.Split(rule, ",") {
+		for part := range strings.SplitSeq(rule, ",") {
 			if wd, ok := parseHeartbeatWeekday(part); ok {
 				s.days = append(s.days, wd)
 			}
@@ -681,7 +681,7 @@ func previousHeartbeatScheduleAt(t HeartbeatTask, now time.Time) (time.Time, boo
 
 func previousHeartbeatWeeklyAt(s heartbeatSchedule, now time.Time, windowDays int, anchor time.Time) (time.Time, bool) {
 	var best time.Time
-	for offset := 0; offset < windowDays; offset++ {
+	for offset := range windowDays {
 		day := now.AddDate(0, 0, -offset)
 		for _, wd := range s.days {
 			if day.Weekday() != wd {

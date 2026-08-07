@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- IsValidName ---
+// IsValidName
 
 func TestIsValidName(t *testing.T) {
 	cases := []struct {
@@ -34,7 +34,7 @@ func TestIsValidName(t *testing.T) {
 	}
 }
 
-// --- splitFrontmatter ---
+// splitFrontmatter
 
 func TestSplitFrontmatterNoFence(t *testing.T) {
 	fm, body := splitFrontmatter("just body")
@@ -73,7 +73,7 @@ func TestSplitFrontmatterQuotedValues(t *testing.T) {
 	}
 }
 
-// --- parseAllowedTools ---
+// parseAllowedTools
 
 func TestParseAllowedToolsEmpty(t *testing.T) {
 	if got := parseAllowedTools(""); got != nil {
@@ -115,7 +115,7 @@ func TestParseAllowedToolsExtraSpaces(t *testing.T) {
 	}
 }
 
-// --- parseRunAs ---
+// parseRunAs
 
 func TestParseRunAsExplicit(t *testing.T) {
 	if parseRunAs("subagent", "", "") != RunSubagent {
@@ -150,7 +150,7 @@ func TestParseRunAsDefault(t *testing.T) {
 	}
 }
 
-// --- resolveCustomPaths ---
+// resolveCustomPaths
 
 func TestResolveCustomPathsTilde(t *testing.T) {
 	home := t.TempDir()
@@ -183,7 +183,7 @@ func TestResolveCustomPathsEmpty(t *testing.T) {
 	}
 }
 
-// --- dedupePaths ---
+// dedupePaths
 
 func TestDedupePaths(t *testing.T) {
 	got := dedupePaths([]string{"/a", "/b", "/a", "/c", "/b"})
@@ -199,7 +199,7 @@ func TestDedupePathsEmpty(t *testing.T) {
 	}
 }
 
-// --- stubBody ---
+// stubBody
 
 func TestStubBody(t *testing.T) {
 	body := stubBody("my-skill")
@@ -214,7 +214,7 @@ func TestStubBody(t *testing.T) {
 	}
 }
 
-// --- Read edge cases ---
+// Read edge cases
 
 func TestReadInvalidName(t *testing.T) {
 	home := t.TempDir()
@@ -234,7 +234,7 @@ func TestReadNotFound(t *testing.T) {
 	}
 }
 
-// --- Create edge cases ---
+// Create edge cases
 
 func TestCreateInvalidName(t *testing.T) {
 	home := t.TempDir()
@@ -464,7 +464,7 @@ func TestDeleteRefusesScopeMismatch(t *testing.T) {
 	}
 }
 
-// --- New edge cases ---
+// New edge cases
 
 func TestNewWithCustomPaths(t *testing.T) {
 	custom := t.TempDir()

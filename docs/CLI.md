@@ -157,6 +157,22 @@ reasonix run --ablate evidence,planner --metrics run.json "fix the failing test"
 This is a measurement tool, not a tuning knob: switching a subsystem off makes
 Reasonix worse at the work it was added for.
 
+### Trajectory recording
+
+`--trajectory PATH` appends the run's full event stream — tool dispatches and
+results with absolute start/end times, reasoning, retries, readiness and
+recovery decisions — as one timestamped, sequenced JSONL record per event, so
+a run can be replayed and its time attributed offline (tool execution vs. the
+model thinking between calls). Records reuse the shared `eventwire` JSON
+contract under an `event` key, wrapped in `schema_version`, `seq`, and `ts`
+(unix ms). Every completed line survives a killed run. Unlike `--events-jsonl`,
+the file contains prompts, tool arguments, and reasoning: treat it with the
+same care as a session transcript.
+
+```sh
+reasonix run --metrics run.json --trajectory run.trajectory.jsonl "fix the failing test"
+```
+
 ### Output formats
 
 | Format | Behavior |

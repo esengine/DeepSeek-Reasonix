@@ -135,7 +135,7 @@ func goalArgItems(prior []string) []SlashItem {
 		{Label: "--simple", Insert: "--simple ", Hint: "force lightweight Goal"},
 		{Label: "status", Insert: "status", Hint: "show active goal and budget runtime"},
 		{Label: "pause", Insert: "pause", Hint: "pause the running goal (keeps all state)"},
-		{Label: "resume", Insert: "resume", Hint: "resume a paused goal (adds one budget slice)"},
+		{Label: "resume", Insert: "resume", Hint: "resume a paused goal (adds one turn slice)"},
 		{Label: "clear", Insert: "clear", Hint: "stop goal mode"},
 	}
 }

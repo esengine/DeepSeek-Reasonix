@@ -85,10 +85,7 @@ func newStartupFailure(stage string, started time.Time, stderr string, err error
 	if errors.As(err, &existing) {
 		return err
 	}
-	elapsed := time.Since(started)
-	if elapsed < 0 {
-		elapsed = 0
-	}
+	elapsed := max(time.Since(started), 0)
 	return &startupFailure{
 		Stage:   strings.TrimSpace(stage),
 		Elapsed: elapsed,

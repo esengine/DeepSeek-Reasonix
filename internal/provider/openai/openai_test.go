@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -76,11 +77,14 @@ func TestStreamRetriesThenSucceeds(t *testing.T) {
 }
 
 func TestMergeUsageCountsStreamsNotUsageChunks(t *testing.T) {
-	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2}
-	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2}
+	firstChunk := &provider.Usage{PromptTokens: 2, TotalTokens: 2, RequestCount: 2, CacheWriteTokens: 2, CacheWriteBilledTokens: 2.5}
+	secondChunk := &provider.Usage{CompletionTokens: 1, TotalTokens: 1, RequestCount: 2, CacheWriteTokens: 3, CacheWriteBilledTokens: 6}
 	oneStream := mergeUsage(firstChunk, secondChunk, false)
 	if oneStream.RequestCount != 2 {
 		t.Fatalf("same-stream request count = %d, want 2", oneStream.RequestCount)
+	}
+	if oneStream.CacheWriteTokens != 5 || oneStream.CacheWriteBilledTokens != 8.5 {
+		t.Fatalf("same-stream cache writes = raw %d billed %v, want 5/8.5", oneStream.CacheWriteTokens, oneStream.CacheWriteBilledTokens)
 	}
 	nextStream := &provider.Usage{PromptTokens: 3, TotalTokens: 3, RequestCount: 1}
 	combined := mergeUsage(oneStream, nextStream, true)
@@ -1241,7 +1245,7 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 	}
 
 	deepseek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", 0).buildRequest(provider.Request{})
-	if deepseek.MaxTokens != provider.DefaultReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
+	if deepseek.MaxTokens != 131072 || deepseek.MaxCompletionTokens != 0 {
 		t.Fatalf("DeepSeek output budget = max_tokens %d, max_completion_tokens %d", deepseek.MaxTokens, deepseek.MaxCompletionTokens)
 	}
 
@@ -1674,9 +1678,7 @@ func withEffort(c provider.Config, effort string) provider.Config {
 		extra = map[string]any{}
 	} else {
 		cp := make(map[string]any, len(extra)+1)
-		for k, v := range extra {
-			cp[k] = v
-		}
+		maps.Copy(cp, extra)
 		extra = cp
 	}
 	extra["effort"] = effort

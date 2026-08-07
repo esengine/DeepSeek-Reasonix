@@ -126,7 +126,8 @@ func New(cfg Config) provider.Provider {
 	vendor := DetectVendor(cfg.BaseURL)
 	cap := capabilitiesFor(vendor)
 	maxOutputTokens := cfg.MaxOutputTokens
-	// 默认输出预算从 vendor 表取（deepseek 32K / mimo 64K）——消除硬编码
+	// 默认输出预算从 vendor 表取（deepseek 128K / mimo 128K）——消除硬编码
+
 	// 常量分叉（review：responses.go 硬编码与 caps.defaultMaxOutputTokens
 	// 职责重叠）。条件保留：thinking-disabled 的 deepseek 请求不设自动
 	// 预算（与 openai.go 一致——服务端默认即可；测试断言该行为）。
@@ -722,14 +723,21 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return
 	}
 	if err := scanner.Err(); err != nil {
+		var reason string
 		if stalled.Load() {
 			err = fmt.Errorf("responses: stream idle timeout after %s", idle)
+			reason = provider.StreamInterruptIdleTimeout
+		} else {
+			reason = provider.ClassifyStreamInterrupt(err)
 		}
-		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}})
+		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(err, reason)})
 		return
 	}
+	// Protocol-defined terminal response events are required. Connection close
+	// before a terminal event leaves the attempt uncommitted — including any
+	// complete tool calls already forwarded as speculative output.
 	if !terminal {
-		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: io.ErrUnexpectedEOF}})
+		_ = sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(io.ErrUnexpectedEOF, provider.StreamInterruptPrematureEOF)})
 		return
 	}
 	if completedResponseID != "" {
@@ -767,6 +775,7 @@ func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Ch
 		return true
 	default:
 	}
+	notifySendChunkEnterBlocking()
 	select {
 	case out <- chunk:
 		return true
@@ -788,10 +797,7 @@ func usageFromResponse(response *sseResponse) *provider.Usage {
 	if u.OutputTokensDetails != nil {
 		reasoning = u.OutputTokensDetails.ReasoningTokens
 	}
-	miss := u.InputTokens - cached
-	if miss < 0 {
-		miss = 0
-	}
+	miss := max(u.InputTokens-cached, 0)
 	total := u.TotalTokens
 	if total == 0 {
 		total = u.InputTokens + u.OutputTokens

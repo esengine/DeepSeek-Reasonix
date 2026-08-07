@@ -32,7 +32,7 @@ const (
 	ErrInternal       = -32603
 )
 
-// --- initialize ---
+// initialize
 
 // InitializeParams is the client's handshake. The agent records the client's
 // capabilities — fs read/write proxying and host terminals are used when
@@ -168,7 +168,7 @@ type AuthenticateParams struct {
 // AuthenticateResult is the empty authentication ack.
 type AuthenticateResult struct{}
 
-// --- session/new ---
+// session/new
 
 // SessionNewParams opens a session rooted at cwd, optionally with MCP servers
 // the agent should connect for the session's lifetime.
@@ -259,7 +259,7 @@ type SessionNewResult struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 }
 
-// --- session modes ---
+// session modes
 
 // SessionMode is one operating mode the client can switch the session into.
 type SessionMode struct {
@@ -297,7 +297,7 @@ type SessionModelState struct {
 	CurrentModelID  string      `json:"currentModelId"`
 }
 
-// --- session/load ---
+// session/load
 
 // SessionLoadParams resumes a session saved under sessionId (the id a prior
 // session/new returned), optionally re-rooting it at cwd with fresh MCP servers.
@@ -317,7 +317,7 @@ type SessionLoadResult struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 }
 
-// --- session/resume ---
+// session/resume
 
 // SessionResumeParams resumes a session without replaying its transcript.
 type SessionResumeParams struct {
@@ -333,7 +333,7 @@ type SessionResumeResult struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 }
 
-// --- session/set_config_option ---
+// session/set_config_option
 
 // SetSessionConfigOptionParams changes one advertised session config option.
 type SetSessionConfigOptionParams struct {
@@ -365,7 +365,7 @@ type SessionConfigSelectOption struct {
 	Description string `json:"description,omitempty"`
 }
 
-// --- session/set_model ---
+// session/set_model
 
 // SetSessionModelParams is ACP's legacy model-switching request.
 type SetSessionModelParams struct {
@@ -376,7 +376,7 @@ type SetSessionModelParams struct {
 // SetSessionModelResult is the empty ack for legacy model switching.
 type SetSessionModelResult struct{}
 
-// --- session/list ---
+// session/list
 
 // SessionListParams lists known sessions, optionally filtered by cwd.
 type SessionListParams struct {
@@ -400,7 +400,7 @@ type SessionInfo struct {
 	Meta      map[string]any `json:"_meta,omitempty"`
 }
 
-// --- session/close ---
+// session/close
 
 // SessionCloseParams closes an active session and releases its resources.
 type SessionCloseParams struct {
@@ -410,7 +410,7 @@ type SessionCloseParams struct {
 // SessionCloseResult is the empty close ack.
 type SessionCloseResult struct{}
 
-// --- session/delete ---
+// session/delete
 
 // SessionDeleteParams removes a session from future session/list results.
 type SessionDeleteParams struct {
@@ -420,7 +420,7 @@ type SessionDeleteParams struct {
 // SessionDeleteResult is the empty delete ack.
 type SessionDeleteResult struct{}
 
-// --- content blocks (inbound prompt) ---
+// content blocks (inbound prompt)
 
 // ContentBlock is one piece of a prompt. The agent reads text blocks and the
 // inline text of resource blocks (embeddedContext); image/audio are accepted on
@@ -461,7 +461,7 @@ func FlattenPrompt(blocks []ContentBlock) string {
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
 }
 
-// --- session/prompt ---
+// session/prompt
 
 // SessionPromptParams sends a turn's prompt to a session.
 type SessionPromptParams struct {
@@ -516,7 +516,7 @@ type SessionPromptResult struct {
 	TranscriptPath *string    `json:"transcriptPath,omitempty"`
 }
 
-// --- session/update (agent → client notifications) ---
+// session/update (agent → client notifications)
 //
 // SessionUpdate is a tagged union discriminated by sessionUpdate. The variants
 // reuse the JSON key "content" with two incompatible shapes (a single block for
@@ -639,7 +639,7 @@ type currentModeUpdate struct {
 	CurrentModeID string `json:"currentModeId"`
 }
 
-// --- fs/* (agent → client requests) ---
+// fs/* (agent → client requests)
 
 // FSReadTextFileParams asks the client for a file's current text, including
 // unsaved editor state. Line (1-based) and Limit page the content; Reasonix
@@ -664,15 +664,19 @@ type FSWriteTextFileParams struct {
 	Content   string `json:"content"`
 }
 
-// --- terminal/* (agent → client requests) ---
+// terminal/* (agent → client requests)
 
 // TerminalCreateParams starts a command in a client-owned terminal.
+// Env follows ACP v1's official EnvVariable[] shape (same as MCP env): only
+// the overrides Reasonix owns (typically TMPDIR/TMP/TEMP) are sent — never a
+// full host environment dump.
 type TerminalCreateParams struct {
-	SessionID       string   `json:"sessionId"`
-	Command         string   `json:"command"`
-	Args            []string `json:"args,omitempty"`
-	Cwd             string   `json:"cwd,omitempty"`
-	OutputByteLimit int      `json:"outputByteLimit,omitempty"`
+	SessionID       string        `json:"sessionId"`
+	Command         string        `json:"command"`
+	Args            []string      `json:"args,omitempty"`
+	Cwd             string        `json:"cwd,omitempty"`
+	Env             []EnvVariable `json:"env,omitempty"`
+	OutputByteLimit int           `json:"outputByteLimit,omitempty"`
 }
 
 // TerminalCreateResult returns the id used by the other terminal methods.
@@ -705,14 +709,14 @@ type TerminalExitStatus struct {
 	Signal   *string `json:"signal,omitempty"`
 }
 
-// --- session/cancel (client → agent notification) ---
+// session/cancel (client → agent notification)
 
 // SessionCancelParams cancels an in-progress turn.
 type SessionCancelParams struct {
 	SessionID string `json:"sessionId"`
 }
 
-// --- session/request_permission (agent → client request) ---
+// session/request_permission (agent → client request)
 
 // PermissionOptionKind classifies an option for host UI styling. It is an ACP v1
 // wire enum, so host-visible permission choices must stay within the official

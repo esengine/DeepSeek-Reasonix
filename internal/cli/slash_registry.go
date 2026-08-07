@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"slices"
 	"strings"
 
 	"reasonix/internal/i18n"
@@ -93,10 +94,8 @@ func canonicalBuiltinSlashCommand(name string) string {
 		if name == spec.name {
 			return spec.name
 		}
-		for _, alias := range spec.aliases {
-			if name == alias {
-				return spec.name
-			}
+		if slices.Contains(spec.aliases, name) {
+			return spec.name
 		}
 	}
 	return name

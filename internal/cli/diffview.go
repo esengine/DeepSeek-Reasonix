@@ -144,19 +144,13 @@ func diffBody(d event.FileDiff, path string, width, maxLines int) []string {
 // bar mid-line — and padded to the bar width so it runs edge to edge.
 func diffBar(sign byte, code, path string, width int, bg, signFg string, lineNo, gw int) string {
 	gutter := dim(lpad(strconv.Itoa(lineNo), gw))
-	barW := width - 2 - gw - 1
-	if barW < 4 {
-		barW = 4
-	}
+	barW := max(width-2-gw-1, 4)
 	code = clampPlain(code, barW-2)
 	if !colorOn() {
 		return "  " + gutter + " " + string(sign) + " " + code
 	}
 	hl := reapplyBG(highlightCode(path, code), bg)
-	pad := barW - 2 - visibleWidth(code)
-	if pad < 0 {
-		pad = 0
-	}
+	pad := max(barW-2-visibleWidth(code), 0)
 	return "  " + gutter + " " + bg + signFg + string(sign) + ansiReset + bg + " " + hl + strings.Repeat(" ", pad) + ansiReset
 }
 
@@ -232,7 +226,7 @@ func expandTabs(s string) string {
 	for _, r := range s {
 		if r == '\t' {
 			n := tabWidth - col%tabWidth
-			for i := 0; i < n; i++ {
+			for range n {
 				b.WriteByte(' ')
 			}
 			col += n

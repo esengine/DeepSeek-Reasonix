@@ -527,10 +527,7 @@ func TestControlService_ConcurrentKillersRemainCallScoped(t *testing.T) {
 		{taskID: "task-a", sessionID: "session-a"},
 		{taskID: "task-b", sessionID: "session-b"},
 	} {
-		tc := tc
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-started
 			killer := &mockKiller{fn: func(sessionID, taskID string) bool {
 				killed <- sessionID + "/" + taskID
@@ -540,7 +537,7 @@ func TestControlService_ConcurrentKillersRemainCallScoped(t *testing.T) {
 			if err != nil || !res.Accepted {
 				t.Errorf("StopTaskWithKiller(%s): result=%+v err=%v", tc.taskID, res, err)
 			}
-		}()
+		})
 	}
 	close(started)
 	wg.Wait()
@@ -572,17 +569,15 @@ func TestControlService_ConcurrentAccess(t *testing.T) {
 	success := 0
 	var mu sync.Mutex
 
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			res, _ := cs.StopTaskWithKiller(context.Background(), "/p", "t1", 1, "", "", killer)
 			if res.Accepted {
 				mu.Lock()
 				success++
 				mu.Unlock()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	// Exactly one caller should succeed due to mutex + version CAS

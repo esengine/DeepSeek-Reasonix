@@ -304,7 +304,7 @@ export interface AppBindings {
   WorkspaceConflictForTab(tabID: string): Promise<WorkspaceConflictView>;
   RevealWorkspaceWriterForTab(tabID: string): Promise<TabMeta>;
   CloseTabWithPolicy(tabID: string, policy: "keep_running" | "stop_and_close"): Promise<void>;
-  ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string } | null>;
+  ToolResultForTab(tabID: string, toolID: string): Promise<{ args: string; output: string; execution?: import("./types").WireShellExecution } | null>;
   Meta(): Promise<Meta>;
   MetaForTab(tabID: string): Promise<Meta>;
   AutoResearchCurrent(): Promise<AutoResearchStatusView>;
@@ -514,6 +514,8 @@ export interface AppBindings {
   CheckUpdate(channel: string): Promise<UpdateInfo | null>;
   /** v1.20+ single-action update: download, verify, install, relaunch. */
   ApplyUpdateRequest(channel: string, expectedVersion: string, requestId: string): Promise<void>;
+  /** Discard a stuck previous update transaction so the next install can proceed. */
+  AbandonPendingUpdate?(): Promise<void>;
   OpenDownloadPage(): Promise<void>;
   OpenUserConfigPath?(): Promise<void>;
   ReloadUserConfig?(): Promise<{ configWarnings?: string[]; configPath?: string } | null>;
@@ -522,6 +524,7 @@ export interface AppBindings {
   // Crash overlay "Send report" (desktop/crash_app.go): scrubs user paths, attaches
   // version/os/arch, POSTs to the collection endpoint. Only ever sent on user click.
   ReportCrash(kind: string, detail: string): Promise<void>;
+  RecordUIPerf(signals: Record<string, string>): Promise<void>;
   ListTabs(): Promise<TabMeta[]>;
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
   DeliveryWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
@@ -914,7 +917,7 @@ export function __emitMockRemote(ch: MockRemoteChannel, payload: unknown): void 
 // app proxies each call to the live binding (or the dev mock only when truly
 // outside the shell), so a late-injected window.go is picked up transparently.
 function bridgeBreadcrumb(method: string): string {
-  if (method === "ReportCrash") return "";
+  if (method === "ReportCrash" || method === "RecordUIPerf") return "";
   if (/^(Submit|SubmitDisplay|RunShell|Steer|Cancel|Approve|AnswerQuestion|ReplayPendingPrompts)/.test(method))
     return `turn ${method}`;
   if (/^(SetModel|SetEffort|SetTokenMode|SetDefaultModel|SetPlannerModel|SetSubagentModel|SetSubagentEffort|SetMaxSubagentDepth|SetMaxSubagentConcurrency|SetMaxParallelWriters)/.test(method))
@@ -4668,6 +4671,7 @@ function makeMockApp(): AppBindings {
       await delay(300);
       emitUpdater({ requestId, version: expectedVersion, channel: selectedChannel, phase: "relaunching", received: 0, total: 0 });
     },
+    async AbandonPendingUpdate() {},
     async OpenDownloadPage() {
       if (typeof window !== "undefined") {
         window.open("https://reasonix.io/?download=desktop#start", "_blank", "noopener");
@@ -4693,9 +4697,8 @@ function makeMockApp(): AppBindings {
       await delay(300);
       return "";
     },
-    async ReportCrash() {
-      await delay(300);
-    },
+    async ReportCrash() { await delay(300); },
+    async RecordUIPerf() {},
     // Tab management mocks.
     async ListTabs() {
       return mockTabs.map((tab) => ({ ...tab }));

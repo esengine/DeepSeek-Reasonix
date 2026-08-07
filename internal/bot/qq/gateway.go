@@ -146,7 +146,7 @@ func (a *adapter) getAccessToken(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", qqTokenURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, qqTokenURL, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -421,7 +421,7 @@ func (a *adapter) apiBaseURL() string {
 }
 
 func (a *adapter) getGatewayURL(ctx context.Context, token string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", a.apiBaseURL()+"/gateway", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.apiBaseURL()+"/gateway", nil)
 	if err != nil {
 		return "", err
 	}
@@ -616,7 +616,7 @@ func (a *adapter) sendMessageChunk(ctx context.Context, msg bot.OutboundMessage,
 			}
 			rows = append(rows, map[string]any{"buttons": buttons})
 		}
-		payload["keyboard"] = map[string]interface{}{
+		payload["keyboard"] = map[string]any{
 			"content": rows,
 		}
 		return a.sendMessagePayload(ctx, msg, payload, seq)
@@ -643,7 +643,7 @@ func (a *adapter) sendMessagePayload(ctx context.Context, msg bot.OutboundMessag
 	url := a.qqSendURL(msg)
 
 	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(body))
 	if err != nil {
 		return bot.SendResult{}, err
 	}

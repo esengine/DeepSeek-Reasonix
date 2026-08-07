@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"maps"
 	"sort"
 
 	"reasonix/internal/provider"
@@ -64,9 +65,7 @@ func (s *RuntimeSnapshot) InterceptorChain() map[InterceptorPoint][]Contribution
 // Replacements returns the winning owner per replacement slot (a copy).
 func (s *RuntimeSnapshot) Replacements() map[Slot]ContributionSource {
 	out := make(map[Slot]ContributionSource, len(s.replacements))
-	for slot, owner := range s.replacements {
-		out[slot] = owner
-	}
+	maps.Copy(out, s.replacements)
 	return out
 }
 

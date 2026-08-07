@@ -115,6 +115,7 @@ effort         = "high"
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tools into the prompt
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # optional trusted executable path; workspace-local paths are not auto-executed
 

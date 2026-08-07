@@ -2,10 +2,12 @@ package config
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -370,17 +372,13 @@ func normalizedMCPMigrationRoots(roots []string) []string {
 
 func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	missing := map[string]string{}
-	skip := func(key string) bool {
+	// File import ignores keyring markers: a marker only means "do not re-probe
+	// keyring for this env name", never "skip legacy credential files".
+	skipStore := func(key string) bool {
 		return credentialCurrentStoreHasKey(key) || credentialCurrentStoreClearedKey(key)
 	}
-	for _, key := range credentialEnvNamesForRoot(root) {
-		if skip(key) {
-			continue
-		}
-		if value, ok := legacyKeyringCredentialValueLookup(key); ok {
-			missing[key] = value
-		}
-	}
+	// Prefer legacy credential files first so a healthy file import does not
+	// depend on Secret Service / D-Bus (#7507).
 	for _, src := range legacyCredentialsPaths() {
 		if src == "" {
 			continue
@@ -391,8 +389,41 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 		}
 		assignments := parseCredentialLines(strings.Split(string(data), "\n"))
 		for key, value := range assignments {
-			if _, exists := missing[key]; !exists && !skip(key) {
+			if _, exists := missing[key]; !exists && !skipStore(key) {
 				missing[key] = value
+			}
+		}
+	}
+	keys := credentialEnvNamesForRoot(root)
+	needKeyring := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if skipStore(key) {
+			continue
+		}
+		if _, exists := missing[key]; exists {
+			continue
+		}
+		// Marker only filters keyring probes.
+		if legacyKeyringMigrationDone(key) {
+			continue
+		}
+		needKeyring = append(needKeyring, key)
+	}
+	if len(needKeyring) > 0 {
+		outcomes := lookupLegacyKeyringBatch(needKeyring, legacyKeyringLookupTimeout)
+		for _, key := range needKeyring {
+			o := outcomes[key]
+			switch o.Status {
+			case legacyKeyringFound:
+				// Secret was stored by the probe path (helper or in-process).
+				// Do not trust Value from the parent-visible outcome map.
+			case legacyKeyringAbsent:
+				// Confirmed empty probe only — never on error/timeout.
+				_ = markLegacyKeyringMigrationDone(key)
+			case legacyKeyringError, legacyKeyringTimeout:
+				// Leave unmarked so the next launch retries.
+			default:
+				// Unknown status: treat as timeout (no marker).
 			}
 		}
 	}
@@ -401,6 +432,38 @@ func migrateLegacyCredentialsIfNeededForRoot(root string) error {
 	}
 	_, err := StoreCredentialLines(credentialLines(missing))
 	return err
+}
+
+func legacyKeyringMigrationMarkerPath(key string) string {
+	home := ReasonixHomeDir()
+	key = strings.TrimSpace(key)
+	if strings.TrimSpace(home) == "" || key == "" {
+		return ""
+	}
+	// Env var names are identifiers, not secrets. RawURL base64 is collision-free
+	// and filesystem-safe without hashing secret material.
+	name := base64.RawURLEncoding.EncodeToString([]byte(key))
+	return filepath.Join(home, "state", "legacy-keyring-checked", name)
+}
+
+func legacyKeyringMigrationDone(key string) bool {
+	path := legacyKeyringMigrationMarkerPath(key)
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func markLegacyKeyringMigrationDone(key string) error {
+	path := legacyKeyringMigrationMarkerPath(key)
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte("v1\n"), 0o644)
 }
 
 func credentialLines(assignments map[string]string) []string {
@@ -608,12 +671,8 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(base)+len(overlay))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range overlay {
-		out[k] = v
-	}
+	maps.Copy(out, base)
+	maps.Copy(out, overlay)
 	return out
 }
 

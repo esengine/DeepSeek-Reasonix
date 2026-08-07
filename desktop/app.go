@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"mime"
 	"net/http"
 	"net/url"
@@ -20,6 +21,7 @@ import (
 	"path/filepath"
 	"regexp"
 	goruntime "runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -54,12 +56,24 @@ import (
 	"reasonix/internal/pluginpkg"
 	"reasonix/internal/provider"
 	"reasonix/internal/repair"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/skill"
 	"reasonix/internal/stats"
 	"reasonix/internal/store"
 	"reasonix/internal/taskmonitor"
 	"reasonix/internal/tool"
 )
+
+// sessionTempFromController returns the logical-session private temporary
+// directory manager for a same-session controller rebuild. Nil when the
+// controller is missing or is not a *control.Controller.
+func sessionTempFromController(ctrl control.SessionAPI) *sessiontemp.Manager {
+	c, ok := ctrl.(*control.Controller)
+	if !ok || c == nil {
+		return nil
+	}
+	return c.SessionTemp()
+}
 
 // eventChannel is the Wails runtime event name the frontend subscribes to for the
 // agent's typed event stream. One channel carries every event kind; the payload's
@@ -869,6 +883,13 @@ func resolveNewSessionModel(cfg *config.Config) string {
 	def := strings.TrimSpace(cfg.DefaultModel)
 	config.NormalizeLegacyMimoCustomProvidersForRefs(cfg, def)
 	if resolved, _, ok := cfg.ResolveDesktopNewSessionModel(); ok {
+		// Keep provider identity explicit at the new-session boundary. A bare
+		// model id is ambiguous when two configured gateways expose the same
+		// model, and a provider-only ref otherwise compares unequal to the
+		// canonical ref stored on a running tab.
+		if entry, found := cfg.ResolveModel(resolved); found {
+			return entry.Name + "/" + entry.Model
+		}
 		return resolved
 	}
 	return ""
@@ -1074,7 +1095,7 @@ func (a *App) commitPendingUpdateHealth() error {
 	)
 }
 
-// --- bound command surface (frontend → controller) ---
+// bound command surface (frontend → controller)
 // Each method guards on a nil controller so a pre-startup or failed-build call is
 // a no-op, never a panic.
 
@@ -2616,6 +2637,7 @@ func (a *App) CheckpointsForTab(tabID string) []CheckpointMeta {
 	canCodeAfter := true
 	codeFileSet := make(map[string]bool, len(metas)*2)
 	codeFilePreview := []string{}
+	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
 	for i := len(out) - 1; i >= 0; i-- {
 		if len(out[i].Files) > 0 {
 			hasCodeAfter = true
@@ -5519,12 +5541,15 @@ type HistoryMessage struct {
 	ToolName           string                    `json:"toolName,omitempty"`
 	ToolResultArchived bool                      `json:"toolResultArchived,omitempty"`
 	ToolResultError    string                    `json:"toolResultError,omitempty"`
-	Pending            bool                      `json:"pending,omitempty"`
-	Trigger            string                    `json:"trigger,omitempty"`
-	Messages           int                       `json:"messages,omitempty"`
-	Summary            string                    `json:"summary,omitempty"`
-	Archive            string                    `json:"archive,omitempty"`
-	DecisionReceipt    *provider.DecisionReceipt `json:"decisionReceipt,omitempty"`
+	// Execution is local shell metadata restored onto ToolCards after history
+	// reload. Omitted when absent so older frontends ignore it safely.
+	Execution       *provider.ToolExecution   `json:"execution,omitempty"`
+	Pending         bool                      `json:"pending,omitempty"`
+	Trigger         string                    `json:"trigger,omitempty"`
+	Messages        int                       `json:"messages,omitempty"`
+	Summary         string                    `json:"summary,omitempty"`
+	Archive         string                    `json:"archive,omitempty"`
+	DecisionReceipt *provider.DecisionReceipt `json:"decisionReceipt,omitempty"`
 }
 
 type HistoryToolCall struct {
@@ -5659,10 +5684,7 @@ func historyPageFromMessages(messages []HistoryMessage, beforeTurn, limit int) H
 	if beforeTurn <= 0 || beforeTurn > totalTurns {
 		beforeTurn = totalTurns
 	}
-	startTurn := beforeTurn - limit
-	if startTurn < 0 {
-		startTurn = 0
-	}
+	startTurn := max(beforeTurn-limit, 0)
 	page := HistoryPage{
 		StartTurn:  startTurn,
 		EndTurn:    beforeTurn,
@@ -5947,6 +5969,7 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 			hm.ToolCallID = m.ToolCallID
 			hm.ToolName = m.Name
 			hm.Content, hm.ToolResultArchived, hm.ToolResultError = historyToolResultContent(m.Content, m.ToolCallID != "")
+			hm.Execution = m.ToolExecution
 		}
 		hasVisibleLocalContent := strings.TrimSpace(hm.Content) != "" || strings.TrimSpace(hm.Reasoning) != "" || len(hm.ToolCalls) > 0 || (!m.LocalOnly && m.Role == provider.RoleTool)
 		if !m.LocalOnly || hasVisibleLocalContent {
@@ -6010,10 +6033,7 @@ func historyPageFromProviderMessages(
 	if beforeTurn <= 0 || beforeTurn > totalTurns {
 		beforeTurn = totalTurns
 	}
-	startTurn := beforeTurn - limit
-	if startTurn < 0 {
-		startTurn = 0
-	}
+	startTurn := max(beforeTurn-limit, 0)
 	page := HistoryPage{
 		StartTurn:  startTurn,
 		EndTurn:    beforeTurn,
@@ -6300,7 +6320,7 @@ func historyLineCount(s string) int {
 
 func historyNonEmptyLineCount(s string) int {
 	count := 0
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if strings.TrimSpace(line) != "" {
 			count++
 		}
@@ -6599,9 +6619,9 @@ func updateHistoryToolCallSummary(out []HistoryMessage, callID, output string) {
 	if callID == "" {
 		return
 	}
-	for i := len(out) - 1; i >= 0; i-- {
-		for j := range out[i].ToolCalls {
-			call := &out[i].ToolCalls[j]
+	for _, v := range slices.Backward(out) {
+		for j := range v.ToolCalls {
+			call := &v.ToolCalls[j]
 			if call.ID != callID {
 				continue
 			}
@@ -6831,7 +6851,7 @@ type GoalRuntimeView struct {
 	TurnsUsed        int    `json:"turnsUsed"`
 	TurnsLimit       int    `json:"turnsLimit"`
 	TokensUsed       int    `json:"tokensUsed"`
-	TokensLimit      int    `json:"tokensLimit"`
+	TokensLimit      int    `json:"tokensLimit"` // Deprecated: always 0; retained for bridge compatibility.
 	NoProgressTurns  int    `json:"noProgressTurns"`
 	NoProgressLimit  int    `json:"noProgressLimit"`
 	LastReason       string `json:"lastReason,omitempty"`
@@ -8137,9 +8157,7 @@ func (a *App) mcpServersView() []ServerView {
 	}
 	ctrl := tab.Ctrl
 	disabled := make(map[string]ServerView, len(tab.disabledMCP))
-	for name, s := range tab.disabledMCP {
-		disabled[name] = s
-	}
+	maps.Copy(disabled, tab.disabledMCP)
 	order := append([]string(nil), tab.mcpOrder...)
 	workspaceRoot := tab.WorkspaceRoot
 	tabID := tab.ID
@@ -9424,9 +9442,7 @@ func cloneStringIntMap(values map[string]int) map[string]int {
 		return nil
 	}
 	out := make(map[string]int, len(values))
-	for key, value := range values {
-		out[key] = value
-	}
+	maps.Copy(out, values)
 	return out
 }
 
@@ -9923,6 +9939,39 @@ func (a *App) SetModel(name string) error {
 	return a.SetModelForTab("", name)
 }
 
+// persistTabModelIfCurrent repairs stale model metadata without letting an
+// older default overwrite a newer explicit model switch. Model switches use
+// the same runtimeRebuildMu, so whichever operation acquires it last owns the
+// persisted provider identity.
+func (a *App) persistTabModelIfCurrent(tab *WorkspaceTab, model string) error {
+	model = strings.TrimSpace(model)
+	if tab == nil || model == "" {
+		return nil
+	}
+	a.runtimeRebuildMu.Lock()
+	defer a.runtimeRebuildMu.Unlock()
+
+	a.mu.RLock()
+	if tab.removed || a.tabs[tab.ID] != tab {
+		a.mu.RUnlock()
+		return fmt.Errorf("tab %q changed while persisting model; retry", tab.ID)
+	}
+	if tab.Ctrl == nil || strings.TrimSpace(tab.model) != model {
+		a.mu.RUnlock()
+		return nil
+	}
+	a.mu.RUnlock()
+
+	path := a.currentSessionPathFor(tab)
+	if path == "" {
+		return nil
+	}
+	if err := agent.SetBranchModelPreserveUpdated(path, model); err != nil {
+		return fmt.Errorf("persist selected model: %w", err)
+	}
+	return nil
+}
+
 type modelSwitchTiming struct {
 	Total          time.Duration
 	LockWait       time.Duration
@@ -10091,6 +10140,9 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		// Same logical session: keep the private temporary directory across
+		// model switches (Issue #7575).
+		SessionTemp: sessionTempFromController(oldCtrl),
 	})
 	if err != nil {
 		return err
@@ -10138,6 +10190,17 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 	// The runtime now reflects the on-disk config; drop any deferred refresh.
 	a.clearDeferredRebuild(tab.ID)
 	a.persistTabSessionPath(tab, path)
+	// Keep the provider identity in the session sidecar inside the same
+	// runtimeRebuildMu transaction as the controller swap. Empty sessions do
+	// not autosave a turn, so without this write a later startup can prefer the
+	// outgoing provider from stale metadata. Serializing it here also preserves
+	// last-click-wins when a new-session default switch overlaps an explicit
+	// model selection.
+	if path != "" {
+		if err := agent.SetBranchModelPreserveUpdated(path, name); err != nil {
+			return fmt.Errorf("persist selected model: %w", err)
+		}
+	}
 	a.notifyTabRuntimeRebuilt(tab)
 	timing.SwapAndPersist = time.Since(stageStarted)
 	return nil
@@ -10260,6 +10323,9 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		// Same logical session: keep the private temporary directory across
+		// effort switches (Issue #7575).
+		SessionTemp: sessionTempFromController(oldCtrl),
 	})
 	if err != nil {
 		return err
@@ -10397,6 +10463,9 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		// Same logical session: keep the private temporary directory across
+		// token-mode switches (Issue #7575).
+		SessionTemp: sessionTempFromController(oldCtrl),
 	})
 	if err != nil {
 		return err
@@ -10812,7 +10881,7 @@ func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
 
 	buf := make([]byte, filePreviewLimit+1)
 	n, err := f.Read(buf)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		out.Err = err.Error()
 		return out
 	}
@@ -11251,7 +11320,7 @@ func saveExclusiveExportPayloads(targets []string, payloadCount int, payloadAt f
 // while bytes are staged; the caller restores finalMode only after the payload
 // has been completely written and synced.
 func createExportTempFile(dir string) (*os.File, os.FileMode, error) {
-	for attempt := 0; attempt < exportTempCreateAttempts; attempt++ {
+	for range exportTempCreateAttempts {
 		var suffix [12]byte
 		if _, err := rand.Read(suffix[:]); err != nil {
 			return nil, 0, fmt.Errorf("generate export temp name: %w", err)
@@ -11346,7 +11415,7 @@ func removeExportFileIfSame(path string, created os.FileInfo) {
 func exportOperationError(operation, path string, err error) error {
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) {
-		return fmt.Errorf("%s %s: %v", operation, filepath.Base(path), pathErr.Err)
+		return fmt.Errorf("%s %s: %w", operation, filepath.Base(path), pathErr.Err)
 	}
 	return fmt.Errorf("%s %s: %w", operation, filepath.Base(path), err)
 }
@@ -11476,7 +11545,7 @@ func workspaceRelativeIn(path, workspaceRoot string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
-// --- memory panel (frontend ⇄ controller) ---
+// memory panel (frontend ⇄ controller)
 
 type MemoryImport struct {
 	Path       string `json:"path"`

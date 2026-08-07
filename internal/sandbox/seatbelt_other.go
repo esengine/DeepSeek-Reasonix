@@ -80,13 +80,39 @@ func Available() bool {
 // forbid-read paths so directories appear empty and files read as empty. The
 // rest of the filesystem is mounted read-only (matching macOS Seatbelt).
 func bwrapArgs(spec Spec, sh Shell, command string) []string {
+	args := bwrapBaseArgs(spec)
+	return append(args, sh.argv(command)...)
+}
+
+// bwrapArgsForArgs is like bwrapArgs but accepts raw argv instead of a shell
+// command string. It builds the same sandbox prefix and appends the caller's
+// argv directly — no shell interpreter wrapping.
+func bwrapArgsForArgs(spec Spec, args []string) []string {
+	out := bwrapBaseArgs(spec)
+	// /tmp is replaced above (tmpfs or session-private bind) so MCP servers
+	// cannot inspect unrelated host temporary files. A configured executable
+	// may itself live below /tmp, though (for example a downloaded one-shot
+	// launcher or a Go test helper). Re-expose only that exact file, read-only,
+	// after every masking mount so the process can start without revealing its
+	// siblings. Session-private binds already contain the generation's files,
+	// so only host-/tmp executables need this re-mount.
+	out = append(out, bwrapExecutableMountArgs(args)...)
+	return append(out, args...)
+}
+
+// bwrapBaseArgs is the shared bubblewrap prefix for shell and raw-argv launches.
+// With Spec.SessionTemp set, the private directory is bind-mounted at /tmp so
+// consecutive Bash calls in the same logical session share temporary files.
+// Without it (MCP and other independent sandboxes), /tmp is a fresh empty
+// tmpfs as before.
+func bwrapBaseArgs(spec Spec) []string {
 	args := []string{
 		"--unshare-net", // deny network by default
 		"--ro-bind", "/", "/",
 		"--dev", "/dev",
 		"--proc", "/proc",
-		"--tmpfs", "/tmp",
 	}
+	args = append(args, bwrapTmpMountArgs(spec)...)
 	if spec.Network {
 		// Re-allow network by removing the network namespace.
 		args = args[1:] // drop --unshare-net
@@ -99,42 +125,14 @@ func bwrapArgs(spec Spec, sh Shell, command string) []string {
 			args = append(args, "--bind", root, root)
 		}
 	}
-	args = append(args, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
-	return append(args, sh.argv(command)...)
+	return append(args, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
 }
 
-// bwrapArgsForArgs is like bwrapArgs but accepts raw argv instead of a shell
-// command string. It builds the same sandbox prefix and appends the caller's
-// argv directly — no shell interpreter wrapping.
-func bwrapArgsForArgs(spec Spec, args []string) []string {
-	out := []string{
-		"--unshare-net", // deny network by default
-		"--ro-bind", "/", "/",
-		"--dev", "/dev",
-		"--proc", "/proc",
-		"--tmpfs", "/tmp",
+func bwrapTmpMountArgs(spec Spec) []string {
+	if dir := strings.TrimSpace(spec.SessionTemp); dir != "" {
+		return []string{"--bind", dir, "/tmp"}
 	}
-	if spec.Network {
-		// Re-allow network by removing the network namespace.
-		out = out[1:] // drop --unshare-net
-	}
-	for _, root := range spec.WriteRoots {
-		out = append(out, "--bind", root, root)
-	}
-	if !spec.MinimalWrites {
-		for _, root := range linuxWriteDirs() {
-			out = append(out, "--bind", root, root)
-		}
-	}
-	out = append(out, bwrapForbidReadArgs(spec.ForbidReadRoots)...)
-	// /tmp is intentionally replaced with an empty filesystem above so MCP
-	// servers cannot inspect unrelated host temporary files. A configured
-	// executable may itself live below /tmp, though (for example a downloaded
-	// one-shot launcher or a Go test helper). Re-expose only that exact file,
-	// read-only, after every masking mount so the process can start without
-	// revealing its siblings.
-	out = append(out, bwrapExecutableMountArgs(args)...)
-	return append(out, args...)
+	return []string{"--tmpfs", "/tmp"}
 }
 
 // bwrapForbidReadArgs returns mounts suitable for both configured directory
@@ -209,7 +207,7 @@ func bwrapExecutableMountArgs(args []string) []string {
 	}
 	out := make([]string, 0, 2*strings.Count(rel, string(filepath.Separator))+4)
 	current := "/tmp"
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}

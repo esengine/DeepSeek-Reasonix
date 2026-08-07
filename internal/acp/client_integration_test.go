@@ -107,7 +107,7 @@ func TestClientIORunCommandLifecycle(t *testing.T) {
 	req.results["terminal/release"] = struct{}{}
 	io := newClientIO(req, "sess-1", ClientCapabilities{Terminal: true})
 
-	out, ok, err := io.RunCommand(context.Background(), "echo hello", "/proj", time.Minute)
+	out, ok, err := io.RunCommand(context.Background(), "echo hello", "/proj", time.Minute, nil)
 	if !ok || err != nil || out != "hello from client" {
 		t.Fatalf("RunCommand = %q, %v, %v", out, ok, err)
 	}
@@ -119,20 +119,20 @@ func TestClientIORunCommandLifecycle(t *testing.T) {
 	// A nonzero exit surfaces as an error alongside the captured output.
 	exitOne := 1
 	req.results["terminal/output"] = TerminalOutputResult{Output: "boom", ExitStatus: &TerminalExitStatus{ExitCode: &exitOne}}
-	out, ok, err = io.RunCommand(context.Background(), "false", "/proj", time.Minute)
+	out, ok, err = io.RunCommand(context.Background(), "false", "/proj", time.Minute, nil)
 	if !ok || err == nil || !strings.Contains(err.Error(), "exit status 1") || out != "boom" {
 		t.Fatalf("RunCommand nonzero exit = %q, %v, %v", out, ok, err)
 	}
 
 	// No terminal capability → unhandled, local bash runs instead.
 	none := newClientIO(req, "sess-1", ClientCapabilities{})
-	if _, ok, _ := none.RunCommand(context.Background(), "echo", "/proj", time.Minute); ok {
+	if _, ok, _ := none.RunCommand(context.Background(), "echo", "/proj", time.Minute, nil); ok {
 		t.Fatal("RunCommand without capability must report ok=false")
 	}
 
 	// terminal/create failure degrades to unhandled rather than failing the call.
 	req.errs["terminal/create"] = fmt.Errorf("client rejected")
-	if _, ok, _ := io.RunCommand(context.Background(), "echo", "/proj", time.Minute); ok {
+	if _, ok, _ := io.RunCommand(context.Background(), "echo", "/proj", time.Minute, nil); ok {
 		t.Fatal("RunCommand with failed create must report ok=false")
 	}
 }

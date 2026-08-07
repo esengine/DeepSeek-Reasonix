@@ -199,7 +199,7 @@ func main() {
 		// against the --wails-drop-target element instead.
 		DragAndDrop: dragAndDrop,
 
-		// --- per-platform adaptation (see desktop/README.md for the rationale) ---
+		// per-platform adaptation (see desktop/README.md for the rationale)
 		Mac: &mac.Options{
 			// Inset traffic-lights over a frameless-feeling header; the frontend
 			// leaves a drag region at the top (CSS --wails-draggable).

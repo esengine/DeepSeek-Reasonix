@@ -1,4 +1,4 @@
-package agent
+package taskintent
 
 import "testing"
 
@@ -69,11 +69,11 @@ func TestDeliveryClassificationMatrix(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := deliveryTaskNeedsEvidence(tt.input); got != tt.wantEvidence {
-				t.Errorf("deliveryTaskNeedsEvidence(%q) = %v, want %v", tt.input, got, tt.wantEvidence)
+			if got := NeedsEvidence(tt.input); got != tt.wantEvidence {
+				t.Errorf("NeedsEvidence(%q) = %v, want %v", tt.input, got, tt.wantEvidence)
 			}
-			if got := deliveryTaskNeedsMutation(tt.input); got != tt.wantMutation {
-				t.Errorf("deliveryTaskNeedsMutation(%q) = %v, want %v", tt.input, got, tt.wantMutation)
+			if got := NeedsMutation(tt.input); got != tt.wantMutation {
+				t.Errorf("NeedsMutation(%q) = %v, want %v", tt.input, got, tt.wantMutation)
 			}
 		})
 	}

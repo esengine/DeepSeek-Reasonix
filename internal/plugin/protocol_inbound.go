@@ -114,8 +114,8 @@ func mcpRoots(workspaceRoot string) []mcpRoot {
 	clean := filepath.Clean(abs)
 	path := filepath.ToSlash(clean)
 	fileURL := &url.URL{Scheme: "file"}
-	if strings.HasPrefix(path, "//") {
-		parts := strings.SplitN(strings.TrimPrefix(path, "//"), "/", 2)
+	if after, ok := strings.CutPrefix(path, "//"); ok {
+		parts := strings.SplitN(after, "/", 2)
 		fileURL.Host = parts[0]
 		if len(parts) == 2 {
 			fileURL.Path = "/" + parts[1]

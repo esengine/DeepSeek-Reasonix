@@ -102,10 +102,43 @@ const (
 	// extension sidecar (Extension payload with Status set). Appended last to
 	// keep the Kind values before it wire-stable.
 	ExtensionStatus
+	// StreamAttempt marks the local lifecycle of one sampling attempt within a
+	// model round (StreamAttempt payload: begin | discard | commit). IDs are
+	// host-local only — never persisted or sent to the model. Appended last to
+	// keep earlier Kind values wire-stable; older clients ignore unknown kinds.
+	StreamAttempt
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
 )
+
+// StreamAttemptAction is the lifecycle phase of a local sampling attempt.
+type StreamAttemptAction string
+
+const (
+	StreamAttemptBegin   StreamAttemptAction = "begin"
+	StreamAttemptDiscard StreamAttemptAction = "discard"
+	StreamAttemptCommit  StreamAttemptAction = "commit"
+)
+
+// RetryScope distinguishes connection+header retries from body-phase stream
+// retries. Older clients ignore the empty/unknown value.
+type RetryScope string
+
+const (
+	RetryScopeHeaders RetryScope = "headers"
+	RetryScopeStream  RetryScope = "stream"
+)
+
+// StreamAttemptInfo carries host-local bookkeeping for one sampling attempt.
+// Reason is a fixed enum (connection_reset | premature_eof | idle_timeout).
+type StreamAttemptInfo struct {
+	ID      string
+	Action  StreamAttemptAction
+	Attempt int // 1-based attempt number
+	Max     int // total attempts including the first (typically 6)
+	Reason  string
+}
 
 const TurnOutcomeFinalReadiness = "final_readiness"
 
@@ -158,6 +191,10 @@ type Tool struct {
 	ReadOnly     bool
 	Truncated    bool  // ToolResult: Output was head+tailed before display/model
 	DurationMs   int64 // ToolResult: wall-clock execution time in milliseconds
+	// StartedAt/EndedAt are unix-millisecond execution bounds (ToolResult).
+	// Zero when the call never ran (dependency-skipped, cancelled, synthetic).
+	StartedAt int64
+	EndedAt   int64
 	// Partial marks an early ToolDispatch emitted when a call begins (ID/Name set,
 	// Args still streaming) so a frontend can show the card immediately; a second,
 	// full ToolDispatch (Partial false, Args set) follows when the call completes.
@@ -175,8 +212,33 @@ type Tool struct {
 	// sub-agent's calls carry the parent `task` call's ID so a frontend can nest
 	// them under it. Empty for top-level calls.
 	ParentID string
+	// AttemptID is the host-local stream_attempt id that produced a speculative
+	// partial ToolDispatch. Empty for committed/full dispatches and for nested
+	// sub-agent tools. Frontends must only journal partial events whose
+	// AttemptID matches the active stream_attempt begin.
+	AttemptID string
 	FileDiff
 	Profile *Profile // ToolDispatch: subagent model/effort (set for task/skill calls)
+	// Execution is optional local shell metadata (ToolResult). Never sent to
+	// model providers; omitempty keeps old wire readers compatible.
+	Execution *ShellExecution
+}
+
+// ShellExecution mirrors tool.ShellExecution for event sinks without importing
+// the tool package (event is a lower-level dependency of tool consumers).
+type ShellExecution struct {
+	Kind           string `json:"kind,omitempty"`
+	Shell          string `json:"shell,omitempty"`
+	ShellVersion   string `json:"shellVersion,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	SupportsAndAnd bool   `json:"supportsAndAnd"`
+	State          string `json:"state,omitempty"`
+	FailurePhase   string `json:"failurePhase,omitempty"`
+	ExitCode       *int   `json:"exitCode,omitempty"`
+	OutputTail     string `json:"outputTail,omitempty"`
+	MutationRisk   string `json:"mutationRisk,omitempty"`
+	Verification   string `json:"verification,omitempty"`
+	DurationMs     int64  `json:"durationMs,omitempty"`
 }
 
 // FileDiff is a previewed change carried on a writer tool's full ToolDispatch
@@ -465,6 +527,8 @@ type Event struct {
 	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
 	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
 	RetryMax        int                       // Retrying: total attempts before giving up
+	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
+	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

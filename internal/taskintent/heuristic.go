@@ -1,6 +1,7 @@
-package agent
+package taskintent
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -8,7 +9,7 @@ import (
 // heuristicInputIsTask reports whether a user input reads as an actionable
 // task rather than conversational chat. The delivery evidence gate uses it to
 // decide when a turn should be held to acceptance-criteria expectations
-// (deliveryTaskNeedsEvidence); greetings and acknowledgements must not arm the
+// (NeedsEvidence); greetings and acknowledgements must not arm the
 // delivery gates.
 func heuristicInputIsTask(input string) bool {
 	trimmed := strings.TrimSpace(input)
@@ -28,10 +29,8 @@ func heuristicInputIsTask(input string) bool {
 
 	words := strings.Fields(normalized)
 	if len(words) <= 3 {
-		for _, greeting := range shortGreetings {
-			if normalized == greeting {
-				return false
-			}
+		if slices.Contains(shortGreetings, normalized) {
+			return false
 		}
 	}
 
@@ -43,17 +42,17 @@ func heuristicInputIsTask(input string) bool {
 		"谢谢你", "辛苦了",
 	}
 	for _, phrase := range chatPhrases {
-		index := strings.Index(normalized, phrase)
-		if index < 0 {
+		before, after, ok := strings.Cut(normalized, phrase)
+		if !ok {
 			continue
 		}
 		// Acknowledgement wording only short-circuits a purely conversational
 		// turn. Preserve a real task before it or after an explicit transition,
 		// e.g. "thanks for fixing that; now update the tests".
-		if prefix := strings.TrimSpace(normalized[:index]); prefix != "" && heuristicInputHasStrongTaskSignal(prefix) {
+		if prefix := strings.TrimSpace(before); prefix != "" && heuristicInputHasStrongTaskSignal(prefix) {
 			return true
 		}
-		if deliveryTaskHasFollowUpAfterChat(normalized[index+len(phrase):]) {
+		if deliveryTaskHasFollowUpAfterChat(after) {
 			return true
 		}
 		return false
@@ -76,19 +75,21 @@ func heuristicInputHasStrongTaskSignal(input string) bool {
 	// Mutation intent has a richer, negation-aware vocabulary than this generic
 	// task heuristic. Reuse it so short requests such as "push the branch" do not
 	// bypass delivery gates merely because the two keyword lists drift apart.
-	if deliveryTaskHasMutationIntent(normalized) || deliveryTaskNeedsPersistentAction(normalized) {
+	if deliveryTaskHasMutationIntent(normalized) || NeedsPersistentAction(normalized) {
 		return true
 	}
 
 	// Failure/help descriptions are actionable even when phrased without an
-	// imperative verb, e.g. "the auth isn't working".
-	taskPhrases := []string{
-		"not working", "isn't working", "doesn't work", "dont work", "don't work",
-		"can you help", "help with", "broken", "error", "bug", "issue", "failed", "failing", "crash", "cannot", "can't",
-		"问题", "不工作", "无法", "不能", "报错", "错误", "失败", "崩溃", "异常",
-		"卡住", "卡住了", "没反应", "不生效", "异常退出",
+	// imperative verb, e.g. "the auth isn't working". Shared fault signals keep
+	// task recognition and Goal budget classification from drifting apart.
+	if taskInputHasFaultSignal(normalized) {
+		return true
 	}
-	for _, phrase := range taskPhrases {
+	helpPhrases := []string{
+		"can you help", "help with", "cannot", "can't",
+		"无法", "不能",
+	}
+	for _, phrase := range helpPhrases {
 		if strings.Contains(normalized, phrase) {
 			return true
 		}
@@ -153,14 +154,9 @@ func containsTaskNeedle(input, needle string) bool {
 	if containsNonASCII(needle) || strings.Contains(needle, " ") {
 		return strings.Contains(input, needle)
 	}
-	for _, word := range strings.FieldsFunc(input, func(r rune) bool {
+	return slices.Contains(strings.FieldsFunc(input, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_'
-	}) {
-		if word == needle {
-			return true
-		}
-	}
-	return false
+	}), needle)
 }
 
 func containsNonASCII(s string) bool {

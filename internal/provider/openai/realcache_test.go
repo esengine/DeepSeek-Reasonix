@@ -92,7 +92,7 @@ func TestRealDeepSeekCacheProbe(t *testing.T) {
 	bigHead := "You are a coding agent. Follow these standing instructions precisely. " +
 		strings.Repeat("Keep the prefix identical across turns so the context cache can serve it. ", 60)
 
-	// ---- Probe 1: does the cache serve a repeated prefix at all? ----
+	// Probe 1: does the cache serve a repeated prefix at all?
 	base := []provider.Message{
 		{Role: provider.RoleSystem, Content: bigHead},
 		{Role: provider.RoleUser, Content: "Reply with the single word: ok."},
@@ -114,7 +114,7 @@ func TestRealDeepSeekCacheProbe(t *testing.T) {
 			"or the prefix is below the cacheable size")
 	}
 
-	// ---- Probe 3 (cheap, do it early): does v4-flash emit reasoning_content? ----
+	// Probe 3 (cheap, do it early): does v4-flash emit reasoning_content?
 	t.Logf("==== Probe 3: does deepseek-v4-flash return reasoning_content? ====")
 	t.Logf("saw reasoning chunks: %v   reasoning_tokens reported: %d   reasoning_text_len: %d",
 		p1a.sawReasoning, p1a.reasoning, len(p1a.reasoningText))
@@ -122,7 +122,7 @@ func TestRealDeepSeekCacheProbe(t *testing.T) {
 		t.Logf("→ this v4-flash response did not contain reasoning_content; replay cost applies only to tool-call turns that actually carry provider-issued reasoning")
 	}
 
-	// ---- Probe 2: cost/cache effect of required tool-call reasoning replay ----
+	// Probe 2: cost/cache effect of required tool-call reasoning replay
 	longReasoning := strings.Repeat("Let me think carefully about each requirement and weigh the trade-offs. ", 40)
 	histBase := func(withReasoning bool) []provider.Message {
 		asst := provider.Message{

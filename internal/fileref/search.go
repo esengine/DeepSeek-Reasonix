@@ -149,10 +149,7 @@ func Search(root, query string, limit int) []SearchResult {
 	// out by a large number of file matches.
 	const dirQuota = 5
 	out := make([]SearchResult, 0, limit)
-	nDirs := len(dirHits)
-	if nDirs > dirQuota {
-		nDirs = dirQuota
-	}
+	nDirs := min(len(dirHits), dirQuota)
 	out = append(out, dirHits[:nDirs]...)
 	remaining := limit - len(out)
 	if remaining > 0 {
@@ -177,7 +174,7 @@ func Search(root, query string, limit int) []SearchResult {
 // directories above the file (e.g. "src/planind/index.tsx" with query
 // "planind" matches the "planind" segment).
 func pathSegmentContains(relSlash, queryLower string) bool {
-	for _, seg := range strings.Split(relSlash, "/") {
+	for seg := range strings.SplitSeq(relSlash, "/") {
 		if strings.Contains(strings.ToLower(seg), queryLower) {
 			return true
 		}

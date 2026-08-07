@@ -476,7 +476,7 @@ func TestSubagentProgressGroupBudgetBoundsBurstAndServesAll(t *testing.T) {
 	t.Cleanup(merger.Close)
 
 	const n = 64
-	for i := 0; i < n; i++ {
+	for i := range n {
 		child := "child-" + string(rune('0'+i/10)) + string(rune('0'+i%10))
 		// Ordinary phase transitions share the budget with previews: 64
 		// status changes alone must not exceed the 32 events/s contract.
@@ -501,7 +501,7 @@ func TestSubagentProgressGroupBudgetBoundsBurstAndServesAll(t *testing.T) {
 	// Once the budget refills, every child is served exactly once — no child
 	// starves behind a high-activity sibling.
 	var rest []event.Event
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		clock.Advance(time.Second)
 		rest = append(rest, collectFor(t, ch, 50*time.Millisecond)...)
 	}

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,9 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
 	"reasonix/internal/jobs"
+	"reasonix/internal/permission"
 	"reasonix/internal/provider"
+	"reasonix/internal/tool"
 )
 
 func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
@@ -65,6 +68,43 @@ func TestGenerateTitleRecordsUsageWithModelIdentity(t *testing.T) {
 type fakeRunner struct{ got chan string }
 
 func (f fakeRunner) Run(_ context.Context, input string) error { f.got <- input; return nil }
+
+type serveApprovalWriter struct{}
+
+func (serveApprovalWriter) Name() string        { return "serve_write" }
+func (serveApprovalWriter) Description() string { return "write a test file" }
+func (serveApprovalWriter) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"path":{"type":"string"}}}`)
+}
+func (serveApprovalWriter) ReadOnly() bool { return false }
+func (serveApprovalWriter) Execute(context.Context, json.RawMessage) (string, error) {
+	return "ok", nil
+}
+
+type serveApprovalProvider struct {
+	mu   sync.Mutex
+	turn int
+}
+
+func (p *serveApprovalProvider) Name() string { return "serve-approval-test" }
+func (p *serveApprovalProvider) Stream(context.Context, provider.Request) (<-chan provider.Chunk, error) {
+	p.mu.Lock()
+	turn := p.turn
+	p.turn++
+	p.mu.Unlock()
+
+	ch := make(chan provider.Chunk, 2)
+	if turn == 0 {
+		ch <- provider.Chunk{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{
+			ID: "serve-approval-1", Name: "serve_write", Arguments: `{"path":"a.txt"}`,
+		}}
+	} else {
+		ch <- provider.Chunk{Type: provider.ChunkText, Text: "done"}
+	}
+	ch <- provider.Chunk{Type: provider.ChunkDone}
+	close(ch)
+	return ch, nil
+}
 
 func TestServeSubmitRunsAndBroadcastsTurnDone(t *testing.T) {
 	bc := NewBroadcaster()
@@ -114,11 +154,11 @@ func TestServeEndpoints(t *testing.T) {
 	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
-	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != 200 {
+	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("history = %v / %v", resp, err)
 	}
 
-	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != 200 {
+	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 
@@ -365,7 +405,7 @@ func TestServeIndexPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Errorf("index status = %d", resp.StatusCode)
 	}
 	ct := resp.Header.Get("Content-Type")
@@ -945,7 +985,7 @@ func TestServeContextEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 	var body map[string]int
@@ -955,5 +995,248 @@ func TestServeContextEndpoint(t *testing.T) {
 	// Before any turn, used should be 0.
 	if body["used"] != 0 {
 		t.Errorf("used = %d, want 0", body["used"])
+	}
+}
+
+// TestServeEventsReplaysPendingAskOnAttach proves a late /events subscriber
+// receives a still-blocked ask_request. Without replay, the browser attaches to
+// a healthy-looking session that never surfaces the parked prompt (#7643).
+func TestServeEventsReplaysPendingAskOnAttach(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	ctrl.EnableInteractiveApproval()
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	firstSub, cancelFirst := bc.Subscribe()
+	defer cancelFirst()
+
+	askCtx, cancelAsk := context.WithCancel(context.Background())
+	askDone := make(chan error, 1)
+	go func() {
+		_, err := ctrl.Ask(askCtx, []event.AskQuestion{{
+			ID: "q1", Prompt: "pick one", Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+		}})
+		askDone <- err
+	}()
+
+	select {
+	case data := <-firstSub:
+		if !strings.Contains(string(data), `"kind":"ask_request"`) {
+			t.Fatalf("initial subscriber got %s, want ask_request", data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for initial ask_request")
+	}
+
+	resp, err := http.Get(srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/events status = %d", resp.StatusCode)
+	}
+
+	replayed := make(chan string, 1)
+	go func() {
+		buf := make([]byte, 0, 4096)
+		tmp := make([]byte, 512)
+		for {
+			n, readErr := resp.Body.Read(tmp)
+			if n > 0 {
+				buf = append(buf, tmp[:n]...)
+				if strings.Contains(string(buf), `"kind":"ask_request"`) {
+					replayed <- string(buf)
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	select {
+	case <-replayed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late SSE attach never received replayed ask_request")
+	}
+
+	select {
+	case err := <-askDone:
+		t.Fatalf("ask resolved before the late client answered: %v", err)
+	default:
+	}
+
+	// Reconnect recovery must be connection-local: the existing subscriber
+	// must not receive the same prompt a second time.
+	select {
+	case data := <-firstSub:
+		t.Fatalf("existing subscriber got duplicate replay: %s", data)
+	default:
+	}
+
+	cancelAsk()
+	select {
+	case <-askDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("blocked ask did not exit after test cancellation")
+	}
+}
+
+// TestServeEventsReplayHandoffSerializesPromptEmission proves the controller's
+// attach handoff can register a subscriber and replay while prompt emission is
+// serialized, so a prompt cannot land between those two operations.
+func TestServeEventsReplayHandoffSerializesPromptEmission(t *testing.T) {
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{Sink: bc})
+	ctrl.EnableInteractiveApproval()
+
+	askCtx, cancelAsk := context.WithCancel(context.Background())
+	defer cancelAsk()
+	taskDone := make(chan struct{})
+	var sub <-chan []byte
+	var cancelSub func()
+	ctrl.ReplayPendingPromptsWith(func() event.Sink {
+		sub, cancelSub = bc.Subscribe()
+		go func() {
+			_, _ = ctrl.Ask(askCtx, []event.AskQuestion{{
+				ID: "q1", Prompt: "pick one", Options: []event.AskOption{{Label: "A"}, {Label: "B"}},
+			}})
+			close(taskDone)
+		}()
+		return event.FuncSink(func(e event.Event) { bc.EmitTo(sub, e) })
+	})
+	defer cancelSub()
+
+	select {
+	case data := <-sub:
+		if !strings.Contains(string(data), `"kind":"ask_request"`) {
+			t.Fatalf("handoff subscriber got %s, want ask_request", data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("handoff subscriber never received ask_request")
+	}
+	select {
+	case data := <-sub:
+		t.Fatalf("handoff subscriber got duplicate ask_request: %s", data)
+	default:
+	}
+
+	cancelAsk()
+	select {
+	case <-taskDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handoff ask did not exit after cancellation")
+	}
+}
+
+// TestServeEventsReplaysPendingApprovalOnAttach covers the actual approval
+// surface from #7643: a late browser must receive a parked ApprovalRequest and
+// be able to answer it through the serve HTTP endpoint.
+func TestServeEventsReplaysPendingApprovalOnAttach(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(serveApprovalWriter{})
+	ag := agent.New(&serveApprovalProvider{}, reg, agent.NewSession(""), agent.Options{}, event.Discard)
+	bc := NewBroadcaster()
+	ctrl := control.New(control.Options{
+		Runner:   ag,
+		Executor: ag,
+		Sink:     bc,
+		Policy:   permission.New("ask", nil, nil, nil),
+	})
+	ctrl.EnableInteractiveApproval()
+	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
+	defer srv.Close()
+
+	runDone := make(chan error, 1)
+	go func() { runDone <- ctrl.Executor().Run(context.Background(), "write a file") }()
+
+	deadline := time.After(2 * time.Second)
+	for !ctrl.PendingPrompt() {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for parked approval")
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+
+	resp, err := http.Get(srv.URL + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("/events status = %d", resp.StatusCode)
+	}
+
+	replayed := make(chan eventwire.Event, 1)
+	go func() {
+		buf := make([]byte, 0, 4096)
+		tmp := make([]byte, 512)
+		for {
+			n, readErr := resp.Body.Read(tmp)
+			if n > 0 {
+				buf = append(buf, tmp[:n]...)
+				if strings.Contains(string(buf), `"kind":"approval_request"`) {
+					frame := string(buf)
+					start := strings.Index(frame, "data: ")
+					if start < 0 {
+						return
+					}
+					end := strings.IndexByte(frame[start:], '\n')
+					if end < 0 {
+						end = len(frame) - start
+					}
+					var wire eventwire.Event
+					if json.Unmarshal([]byte(strings.TrimSpace(frame[start+len("data: "):start+end])), &wire) == nil {
+						replayed <- wire
+					}
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	var approval eventwire.Event
+	select {
+	case approval = <-replayed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("late SSE attach never received replayed approval_request")
+	}
+	if approval.Kind != "approval_request" || approval.Approval == nil || approval.Approval.Tool != "serve_write" {
+		t.Fatalf("replayed approval = %+v, want serve_write approval_request", approval)
+	}
+
+	payload, err := json.Marshal(map[string]any{"id": approval.Approval.ID, "allow": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/approve", strings.NewReader(string(payload)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	answer, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer.Body.Close()
+	if answer.StatusCode != http.StatusNoContent {
+		t.Fatalf("/approve status = %d", answer.StatusCode)
+	}
+
+	select {
+	case err := <-runDone:
+		if err != nil {
+			t.Fatalf("executor run after approval: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("executor did not finish after approval")
 	}
 }

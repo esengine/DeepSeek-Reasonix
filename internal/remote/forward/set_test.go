@@ -1,6 +1,7 @@
 package forward
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -136,7 +137,7 @@ func TestDuplicateForwardRejected(t *testing.T) {
 	if _, err := set.Add(spec); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := set.Add(spec); err != ErrDuplicateForward {
+	if _, err := set.Add(spec); !errors.Is(err, ErrDuplicateForward) {
 		t.Fatalf("second add err = %v, want ErrDuplicateForward", err)
 	}
 }
@@ -211,7 +212,7 @@ func TestReplaceWhileDetachedPreservesExistingForward(t *testing.T) {
 	if _, err := set.Add(old); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := set.Replace(Spec{Name: "serve", Direction: Local, BindAddr: "127.0.0.1:0", TargetAddr: "new:80"}); err != ErrNotAttached {
+	if _, err := set.Replace(Spec{Name: "serve", Direction: Local, BindAddr: "127.0.0.1:0", TargetAddr: "new:80"}); !errors.Is(err, ErrNotAttached) {
 		t.Fatalf("Replace error = %v, want ErrNotAttached", err)
 	}
 	entries := set.List()
@@ -240,7 +241,7 @@ func TestBindBusyReported(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected bind-busy error")
 	}
-	if err != ErrBindBusy && !containsErr(err, ErrBindBusy) {
+	if !errors.Is(err, ErrBindBusy) {
 		t.Fatalf("err = %v, want ErrBindBusy", err)
 	}
 }
@@ -294,22 +295,6 @@ func TestRemoteForwardEndToEnd(t *testing.T) {
 	if string(buf) != "rrrr" {
 		t.Fatalf("echo = %q", buf)
 	}
-}
-
-func containsErr(err, target error) bool {
-	type wrapper interface{ Unwrap() []error }
-	if w, ok := err.(wrapper); ok {
-		for _, e := range w.Unwrap() {
-			if e == target || containsErr(e, target) {
-				return true
-			}
-		}
-	}
-	type single interface{ Unwrap() error }
-	if s, ok := err.(single); ok {
-		return containsErr(s.Unwrap(), target)
-	}
-	return err == target
 }
 
 var _ = fmt.Sprintf

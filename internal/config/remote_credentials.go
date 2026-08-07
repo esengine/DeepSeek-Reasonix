@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/sha256"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -96,8 +97,8 @@ func EditUserConfigWithCredentials(mutate func(*Config) ([]CredentialChange, err
 	applied := make([]string, 0, len(changes))
 	rollback := func() {
 		seen := map[string]bool{}
-		for i := len(applied) - 1; i >= 0; i-- {
-			key := applied[i]
+		for _, v := range slices.Backward(applied) {
+			key := v
 			if seen[key] {
 				continue
 			}

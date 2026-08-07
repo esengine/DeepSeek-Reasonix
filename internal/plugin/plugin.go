@@ -15,6 +15,7 @@ import (
 	"hash/fnv"
 	"io"
 	"log/slog"
+	"maps"
 	"reflect"
 	"regexp"
 	"sort"
@@ -390,8 +391,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				phaseADur := recordedPhaseADur()
 				cancelStartup()
 				if !p.SkipPersistence {
-					h.bgWrites.Add(1)
-					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+					h.bgWrites.Go(func() { ; _ = RecordStartup(spec.Name, phaseADur) })
 				}
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("start plugin %q: %w", spec.Name, err)}
 				return
@@ -402,8 +402,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				phaseADur := recordedPhaseADur()
 				cancelStartup()
 				if !p.SkipPersistence {
-					h.bgWrites.Add(1)
-					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+					h.bgWrites.Go(func() { ; _ = RecordStartup(spec.Name, phaseADur) })
 				}
 				c.close()
 				err = newStartupFailure("tools/list", phaseAStart, c.startupStderr(), err)
@@ -418,9 +417,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			phaseADur := recordedPhaseADur()
 			cancelStartup()
 			if !p.SkipPersistence {
-				h.bgWrites.Add(1)
-				go func() {
-					defer h.bgWrites.Done()
+				h.bgWrites.Go(func() {
 					_ = RecordStartup(spec.Name, phaseADur)
 					_ = SaveCachedSchema(spec.Name, CachedSchema{
 						CacheKey: SchemaCacheKey(spec),
@@ -431,7 +428,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 						},
 						Tools: cacheableToolsOf(ts),
 					})
-				}()
+				})
 			}
 
 			// Prompts and resources are deferred to StartPhaseB so the boot path
@@ -506,11 +503,9 @@ func (h *Host) Close() {
 // Callers must enqueue before their Close-drained startup owner completes, so
 // Close cannot begin waiting before the WaitGroup increment is visible.
 func (h *Host) queueBackgroundWrite(write func()) {
-	h.bgWrites.Add(1)
-	go func() {
-		defer h.bgWrites.Done()
+	h.bgWrites.Go(func() {
 		write()
-	}()
+	})
 }
 
 // StartPhaseB asynchronously fetches the auxiliary surfaces (prompts and
@@ -647,11 +642,15 @@ type ToolInfo struct {
 type ServerStatus struct {
 	Name      string
 	Transport string
-	Tools     int
-	Prompts   int
-	Resources int
-	HasTools  bool
-	ToolList  []ToolInfo
+	// ConfigSource is the config plane that registered this server
+	// (user_config, project_config, workspace, built-in, …). Empty when unknown.
+	// Surfaced in /mcp status so operators can tell where a tool came from (#6578).
+	ConfigSource string
+	Tools        int
+	Prompts      int
+	Resources    int
+	HasTools     bool
+	ToolList     []ToolInfo
 }
 
 // AuthorizeSpecLaunch records durable consent for an explicitly user-installed
@@ -741,10 +740,11 @@ func (h *Host) Servers() []ServerStatus {
 	out := make([]ServerStatus, 0, len(h.clients))
 	for _, c := range h.clients {
 		s := ServerStatus{
-			Name:      c.name,
-			Transport: c.transport,
-			Tools:     c.toolCount,
-			HasTools:  c.hasTools,
+			Name:         c.name,
+			Transport:    c.transport,
+			ConfigSource: strings.TrimSpace(c.spec.ConfigSource),
+			Tools:        c.toolCount,
+			HasTools:     c.hasTools,
 		}
 		c.toolsMu.Lock()
 		s.ToolList = append([]ToolInfo(nil), c.tools...)
@@ -1539,14 +1539,10 @@ func (c *Client) withProgress(ctx context.Context, method string, params any) (a
 
 	token := fmt.Sprintf("reasonix-%d", c.progressID.Add(1))
 	copyParams := make(map[string]any, len(callParams))
-	for key, value := range callParams {
-		copyParams[key] = value
-	}
+	maps.Copy(copyParams, callParams)
 	meta := map[string]any{}
 	if existing, ok := callParams["_meta"].(map[string]any); ok {
-		for key, value := range existing {
-			meta[key] = value
-		}
+		maps.Copy(meta, existing)
 	}
 	meta["progressToken"] = token
 	copyParams["_meta"] = meta
@@ -1560,7 +1556,7 @@ func (c *Client) callTransport(ctx context.Context, method string, params any) (
 		return res, err
 	}
 	if initErr := c.initializeSession(ctx, false); initErr != nil {
-		return nil, fmt.Errorf("%w; reinitialize failed: %v", err, initErr)
+		return nil, fmt.Errorf("%w; reinitialize failed: %w", err, initErr)
 	}
 	return c.t.call(ctx, method, params)
 }
@@ -1893,7 +1889,7 @@ func summarizeFailureError(err error) string {
 	return msg
 }
 
-// --- JSON-RPC message types (shared by every transport) ---
+// JSON-RPC message types (shared by every transport)
 
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
@@ -1916,7 +1912,7 @@ type rpcError struct {
 
 func (e *rpcError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
 
-// --- remote tool adapter ---
+// remote tool adapter
 
 type remoteTool struct {
 	client           *Client

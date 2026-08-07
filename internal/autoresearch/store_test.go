@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -124,7 +125,7 @@ func TestCreateTaskReservesIDsAtomicallyAcrossStores(t *testing.T) {
 	start := make(chan struct{})
 	var ready sync.WaitGroup
 	ready.Add(workers)
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			store := NewStore(root)
 			ready.Done()
@@ -137,7 +138,7 @@ func TestCreateTaskReservesIDsAtomicallyAcrossStores(t *testing.T) {
 	close(start)
 
 	ids := map[string]string{}
-	for i := 0; i < workers; i++ {
+	for range workers {
 		res := <-results
 		if res.err != nil {
 			t.Fatalf("CreateTask worker failed: %v", res.err)
@@ -482,7 +483,7 @@ func TestConcurrentDirectionWritesAreSerializedPerTask(t *testing.T) {
 	const writers = 20
 	var wg sync.WaitGroup
 	errs := make(chan error, writers)
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -657,12 +658,7 @@ func containsValidationError(errors []ValidationError, file, field string) bool 
 }
 
 func containsString(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func ptrString(s string) *string {

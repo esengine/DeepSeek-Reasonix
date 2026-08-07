@@ -12,8 +12,15 @@ export interface TodoPanelScopeInput {
   eventChannel?: string | null;
 }
 
-export function resolveTodoPanelTodos(canonical: Todo[] | null | undefined, fallback: Todo[]): Todo[] {
-  return Array.isArray(canonical) ? canonical : fallback;
+export function resolveTodoPanelTodos(
+  canonical: Todo[] | null | undefined,
+  live?: Todo[] | null,
+): Todo[] {
+  // `live` is set only when the transcript has a completed top-level todo_write.
+  // Prefer it over MetaForTab — meta only refreshes on turn_done / focus change,
+  // so mid-turn status flips otherwise freeze until the user switches tabs (#7642).
+  if (live !== undefined && live !== null) return live;
+  return Array.isArray(canonical) ? canonical : [];
 }
 
 export function sameTodoList(a: Todo[] | null | undefined, b: Todo[] | null | undefined): boolean {

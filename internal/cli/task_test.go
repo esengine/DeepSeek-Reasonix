@@ -81,7 +81,7 @@ func captureOut(fn func() int) (int, string) {
 	return ec, string(data)
 }
 
-// --- JSON schema tests ---
+// JSON schema tests
 
 func TestTaskList_JSON_SchemaVersion(t *testing.T) {
 	s := testStore(t)
@@ -172,7 +172,7 @@ func TestTaskList_JSON_ProjectIsolation(t *testing.T) {
 	}
 }
 
-// --- status ---
+// status
 
 func TestTaskStatus_JSON_Found(t *testing.T) {
 	s := testStore(t)
@@ -235,7 +235,7 @@ func TestTaskStatus_JSON_SchemaVersion(t *testing.T) {
 	}
 }
 
-// --- events ---
+// events
 
 func TestTaskEvents_JSON_SchemaVersion(t *testing.T) {
 	s := testStore(t)
@@ -421,7 +421,7 @@ func TestTaskEvents_NoFlag(t *testing.T) {
 	}
 }
 
-// --- CLI wiring ---
+// CLI wiring
 
 func TestTaskCommand_Dispatch(t *testing.T) {
 	s := testStore(t)
@@ -478,7 +478,7 @@ func TestTaskCommand_UnknownSubcommand(t *testing.T) {
 	}
 }
 
-// --- FileStore integration tests (real filesystem) ---
+// FileStore integration tests (real filesystem)
 
 // writeTaskData creates a FileStore-compatible task tree in dir and resets
 // taskStore so the CLI uses the production FileStore path.
@@ -642,7 +642,7 @@ func TestFileStoreIntegration_ListTasks_Empty(t *testing.T) {
 	}
 }
 
-// --- CLI+JobKiller e2e tests ---
+// CLI+JobKiller e2e tests
 
 // mockJobKiller is a thread-safe mock for JobKiller.
 type mockJobKiller struct {

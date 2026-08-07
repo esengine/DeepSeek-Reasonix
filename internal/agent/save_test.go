@@ -2117,7 +2117,7 @@ func TestSaveSnapshotSameRevisionAllowsOwnedNonPrefixAppend(t *testing.T) {
 	// Simulate recovery: load the saved transcript into a new session, then
 	// add more messages. Every subsequent SaveSnapshot must succeed without a
 	// diverged conflict while the persisted digest still proves ownership.
-	for turn := 0; turn < 5; turn++ {
+	for turn := range 5 {
 		s, err := LoadSession(path)
 		if err != nil {
 			t.Fatalf("LoadSession turn %d: %v", turn, err)

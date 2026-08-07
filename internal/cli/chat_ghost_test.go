@@ -17,7 +17,7 @@ func TestClampWidth(t *testing.T) {
 	// Over width: every resulting line fits, content is preserved.
 	long := strings.Repeat("x", 200)
 	out := clampWidth(long, 40)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if visibleWidth(line) > 40 {
 			t.Errorf("clamped line exceeds 40: width=%d", visibleWidth(line))
 		}

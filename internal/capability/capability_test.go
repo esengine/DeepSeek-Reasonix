@@ -71,7 +71,7 @@ func TestRouteRespectsSkillAutoUseMetadata(t *testing.T) {
 
 func TestRouteKeepsAllStrongCandidatesBeforeSuggestBudget(t *testing.T) {
 	entries := make([]Entry, 0, 8)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		entries = append(entries, Entry{ID: fmt.Sprintf("skill:required-%d", i), Kind: KindSkill, Name: fmt.Sprintf("required-%d", i), AutoUse: AutoUsePrefer, Triggers: []string{"ship"}})
 	}
 	entries = append(entries,

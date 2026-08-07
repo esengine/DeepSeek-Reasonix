@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// --- write_file extended tests ---
+// write_file extended tests
 
 func TestWriteFileCreatesParentDirs(t *testing.T) {
 	dir := t.TempDir()
@@ -81,7 +81,7 @@ func TestWriteFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- move_file tests ---
+// move_file tests
 
 func TestMoveFileMovesIntoParentDir(t *testing.T) {
 	dir := t.TempDir()
@@ -244,7 +244,7 @@ func TestMoveFileFallsBackForCrossDeviceRename(t *testing.T) {
 	}
 }
 
-// --- edit_file extended tests ---
+// edit_file extended tests
 
 func TestEditFileNotFound(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "missing.txt")
@@ -392,7 +392,7 @@ func TestEditFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- multi_edit extended tests ---
+// multi_edit extended tests
 
 func TestMultiEditEmptyEdits(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "a.txt")
@@ -506,7 +506,7 @@ func TestMultiEditChained(t *testing.T) {
 	}
 }
 
-// --- confine tests ---
+// confine tests
 
 func TestConfineRejectsEscape(t *testing.T) {
 	dir := t.TempDir()
@@ -534,7 +534,7 @@ func TestConfineEmptyRootsAllowsAll(t *testing.T) {
 	}
 }
 
-// --- resolveIn tests ---
+// resolveIn tests
 
 func TestResolveInAbsolute(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "absolute", "path")

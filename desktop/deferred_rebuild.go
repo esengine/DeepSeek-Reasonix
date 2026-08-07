@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -163,9 +164,7 @@ func (a *App) deferredRebuildTick(markIdle bool) bool {
 		return true
 	}
 	pending := make(map[string]string, len(d.pending))
-	for id, setting := range d.pending {
-		pending[id] = setting
-	}
+	maps.Copy(pending, d.pending)
 	d.mu.Unlock()
 
 	for tabID, setting := range pending {

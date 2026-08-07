@@ -3,6 +3,7 @@ package responses
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -104,8 +105,8 @@ func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
 
 	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
 	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
-	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultReasoningOutputTokens {
-		t.Fatalf("DeepSeek max_output_tokens = %#v, want %d", got, provider.DefaultReasoningOutputTokens)
+	if got := deepseekBody["max_output_tokens"]; got != 131072 {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want 131072", got)
 	}
 
 	for _, effort := range []string{"none", "disabled", "off", " NONE "} {
@@ -250,18 +251,18 @@ func TestStreamDoesNotDuplicateDoneText(t *testing.T) {
 	defer server.Close()
 
 	chunks := collect(t, New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
-	var text string
+	var text strings.Builder
 	var usage *provider.Usage
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkText {
-			text += chunk.Text
+			text.WriteString(chunk.Text)
 		}
 		if chunk.Type == provider.ChunkUsage {
 			usage = chunk.Usage
 		}
 	}
-	if text != "hello" {
-		t.Fatalf("streamed text = %q, want one copy", text)
+	if text.String() != "hello" {
+		t.Fatalf("streamed text = %q, want one copy", text.String())
 	}
 	if usage == nil || usage.CacheHitTokens != 2 || usage.CacheMissTokens != 1 || usage.ReasoningTokens != 1 || usage.RequestCount != 1 {
 		t.Fatalf("usage = %+v", usage)
@@ -286,16 +287,16 @@ func TestStreamToleratesWebSearchLifecycleEvents(t *testing.T) {
 	chunks := collect(t, New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}), provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "search"}},
 	})
-	var text string
+	var text strings.Builder
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkText {
-			text += chunk.Text
+			text.WriteString(chunk.Text)
 		}
 		if chunk.Type == provider.ChunkError {
 			t.Fatalf("unexpected stream error: %v", chunk.Err)
 		}
 	}
-	if text != "found it" || chunks[len(chunks)-1].Type != provider.ChunkDone {
+	if text.String() != "found it" || chunks[len(chunks)-1].Type != provider.ChunkDone {
 		t.Fatalf("chunks = %#v, want searched answer followed by done", chunks)
 	}
 }
@@ -753,7 +754,8 @@ func TestFailedEventSurfacesAuthenticationError(t *testing.T) {
 	chunks := collect(t, New(Config{Name: "test", APIKey: "key", KeyEnv: "TEST_API_KEY", BaseURL: server.URL, Model: "m"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkError {
-			if _, ok := chunk.Err.(*provider.AuthError); !ok || !strings.Contains(chunk.Err.Error(), "TEST_API_KEY") {
+			var authErr *provider.AuthError
+			if !errors.As(chunk.Err, &authErr) || !strings.Contains(chunk.Err.Error(), "TEST_API_KEY") {
 				t.Fatalf("error = %T %v", chunk.Err, chunk.Err)
 			}
 			return
@@ -1124,21 +1126,21 @@ func TestReasoningMetaChunkEndToEnd(t *testing.T) {
 }
 
 // TestVendorTableMaxOutputTokens：默认输出预算完全由 vendor 表驱动——
-// mimo 65536（长思考不截断）、deepseek 32K、unknown 不设。
+// mimo 128000（长思考不截断）、deepseek 128K、unknown 不设。
 func TestVendorTableMaxOutputTokens(t *testing.T) {
 	msg := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
 
-	// mimo：表默认 65536（思考模式不设会顶到服务端 32768 截断）
+	// mimo：表默认 128000（思考模式不设会顶到服务端 32768 截断）
 	mimo := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro"}).(*client)
 	body, _, _ := mimo.buildRequestBody(provider.Request{Messages: msg})
-	if got := body["max_output_tokens"]; got != 65536 {
-		t.Fatalf("mimo max_output_tokens = %#v, want 65536 (vendor table)", got)
+	if got := body["max_output_tokens"]; got != 128000 {
+		t.Fatalf("mimo max_output_tokens = %#v, want 128000 (vendor table)", got)
 	}
-	// mimo 思考禁用也设 65536（mimo 无 thinking-disabled 豁免——表无条件）
+	// mimo 思考禁用也设 128000（mimo 无 thinking-disabled 豁免——表无条件）
 	noThinking := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", Effort: "none"}).(*client)
 	nb, _, _ := noThinking.buildRequestBody(provider.Request{Messages: msg})
-	if nb["max_output_tokens"] != 65536 {
-		t.Fatalf("mimo thinking-disabled budget = %#v, want 65536", nb["max_output_tokens"])
+	if nb["max_output_tokens"] != 128000 {
+		t.Fatalf("mimo thinking-disabled budget = %#v, want 128000", nb["max_output_tokens"])
 	}
 	// deepseek 值来自表（非硬编码常量）
 	ds := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}).(*client)

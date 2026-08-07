@@ -26,6 +26,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -50,10 +51,14 @@ const (
 	// defaultBaseURL is the first-party endpoint; config may override it (e.g. a
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
-	// defaultMaxTokens is the output ceiling used when neither the provider config
-	// nor the request supplies one. Anthropic requires max_tokens, so unlike the
-	// optional OpenAI-compatible budget it cannot be omitted.
-	defaultMaxTokens = 32768
+	// defaultMaxTokens is the conservative output ceiling used when neither the
+	// provider config nor the request supplies one. Anthropic requires max_tokens,
+	// but support is model-specific, so native Anthropic and unknown compatible
+	// gateways must not inherit a universal 128K request.
+	defaultMaxTokens = provider.DefaultReasoningOutputTokens
+	// deepSeekDefaultMaxTokens is safe only for the official DeepSeek Anthropic-
+	// compatible endpoint, whose reasoning models support the higher ceiling.
+	deepSeekDefaultMaxTokens = provider.DefaultHighOutputTokens
 )
 
 func init() {
@@ -73,6 +78,22 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	// Anthropic's API surface is at {root}/v1/messages, so c.baseURL stores
+	// the *root* -- without any trailing /v1. The setup wizard, however, lets
+	// users paste a full OpenAI-compatible URL (e.g.
+	// "https://proxy.example.com/v1") because that's what /models probes
+	// expect. Stripping the trailing /v1 here makes both forms land on the
+	// same endpoint without forcing users to remember Anthropic's quirky
+	// root-vs-versioned split. Without this, a user pasting
+	// "https://proxy.example.com/v1" would probe /v1/models successfully
+	// but get the chat client concatenating onto
+	// "https://proxy.example.com/v1/v1/messages" -- a 404.
+	root := strings.TrimRight(baseURL, "/")
+	root = strings.TrimSuffix(root, "/v1")
+	if root == "" {
+		root = defaultBaseURL
+	}
+	officialDeepSeek := openai.IsDeepSeek(root)
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
@@ -88,25 +109,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		// Messages requires max_tokens, so an optional-budget disable request
 		// falls back to the provider's stable mandatory default.
 		maxOutputTokens = defaultMaxTokens
+		if officialDeepSeek {
+			maxOutputTokens = deepSeekDefaultMaxTokens
+		}
 	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: network: %w", err)
-	}
-	// Anthropic's API surface is at {root}/v1/messages, so c.baseURL stores
-	// the *root* — without any trailing /v1. The setup wizard, however, lets
-	// users paste a full OpenAI-compatible URL (e.g.
-	// "https://proxy.example.com/v1") because that's what /models probes
-	// expect. Stripping the trailing /v1 here makes both forms land on the
-	// same endpoint without forcing users to remember Anthropic's quirky
-	// root-vs-versioned split. Without this, a user pasting
-	// "https://proxy.example.com/v1" would probe /v1/models successfully
-	// but get the chat client concatenating onto
-	// "https://proxy.example.com/v1/v1/messages" — a 404.
-	root := strings.TrimRight(baseURL, "/")
-	root = strings.TrimSuffix(root, "/v1")
-	if root == "" {
-		root = defaultBaseURL
 	}
 	return &client{
 		name:             name,
@@ -115,7 +124,8 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		keySource:        keySource,
 		baseURL:          root,
 		model:            cfg.Model,
-		deepseek:         openai.IsDeepSeek(root),
+		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
+		deepseek:         officialDeepSeek,
 		thinking:         thinking,
 		effort:           effort,
 		vision:           vision,
@@ -141,6 +151,7 @@ type client struct {
 	keySource        string // source of keyEnv, surfaced in auth errors
 	baseURL          string
 	model            string
+	nativeAnthropic  bool   // first-party endpoint: documented default-5m cache-write pricing applies
 	deepseek         bool   // official DeepSeek Anthropic endpoint: unsigned reasoning replay + automatic cache
 	thinking         string // "adaptive" enables extended thinking; "" = off (config-driven)
 	effort           string // output_config.effort: low|medium|high|xhigh|max; "" = provider default
@@ -261,7 +272,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 	requestCtx := provider.WithRequestAttemptCounter(ctx)
 	buf := bufPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	if err := json.NewEncoder(buf).Encode(c.buildRequest(req)); err != nil {
+	if err := json.NewEncoder(buf).Encode(c.buildRequest(requestCtx, req)); err != nil {
 		bufPool.Put(buf)
 		return nil, fmt.Errorf("%s: marshal request: %w", c.name, err)
 	}
@@ -301,7 +312,7 @@ func (c *client) Stream(ctx context.Context, req provider.Request) (<-chan provi
 // become `tool_use` blocks; RoleTool results become `tool_result` blocks in a user
 // turn. Consecutive same-role messages are coalesced because the API requires
 // alternating user/assistant turns (tool results are user turns).
-func (c *client) buildRequest(req provider.Request) anthRequest {
+func (c *client) buildRequest(_ context.Context, req provider.Request) anthRequest {
 	var system []textBlock
 	var msgs []anthMessage
 
@@ -394,7 +405,10 @@ func (c *client) buildRequest(req provider.Request) anthRequest {
 	// tools → system → messages, so a marker on the last system block caches
 	// tools+system together; with no system, mark the last tool. A marker on the
 	// last block of the last message caches the conversation prefix, accruing hits
-	// incrementally as turns are appended. Max 4 breakpoints; we use ≤2.
+	// incrementally as turns are appended. Max 4 breakpoints; we use ≤2. Keep
+	// Anthropic's default 5m TTL by omitting the ttl field. Besides being cheaper
+	// than the opt-in 1h write, this keeps provider-visible request bytes stable
+	// across turns, retries, and wall-clock timing.
 	if !c.deepseek {
 		if n := len(system); n > 0 {
 			system[n-1].CacheControl = ephemeral()
@@ -637,7 +651,11 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 			}
 			mergeUsage(ev.Usage)
 		case "message_stop":
-			// Stream complete; fall through to finalize below.
+			// Anthropic's terminal event. Tool blocks may already have closed;
+			// without this, the attempt stays speculative and is not committed.
+			// Stop reading immediately so a post-terminal connection reset cannot
+			// reclassify a complete response as interrupted.
+			goto finalize
 		case "error":
 			msg := "stream error"
 			if ev.Error != nil && ev.Error.Message != "" {
@@ -652,22 +670,42 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return
 	}
 	if stalled.Load() {
-		send(provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)})
+		err := fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped", c.name, idleTimeout)
+		send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(err, provider.StreamInterruptIdleTimeout)})
 		return
 	}
 	if err := scanner.Err(); err != nil {
-		send(provider.Chunk{Type: provider.ChunkError, Err: fmt.Errorf("%s: read stream: %w", c.name, err)})
+		wrapped := fmt.Errorf("%s: read stream: %w", c.name, err)
+		if provider.IsConnReset(err) {
+			send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(wrapped, provider.ClassifyStreamInterrupt(err))})
+			return
+		}
+		send(provider.Chunk{Type: provider.ChunkError, Err: wrapped})
 		return
 	}
+	// EOF / clean close before message_stop is an uncommitted attempt. Complete
+	// ChunkToolCall blocks that arrived earlier remain speculative.
+	send(provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(
+		fmt.Errorf("%s: stream ended before message_stop: %w", c.name, io.ErrUnexpectedEOF),
+		provider.StreamInterruptPrematureEOF,
+	)})
+	return
 
+finalize:
 	if haveUsage {
+		cacheWriteBilledTokens := 0.0
+		if cacheCreate > 0 && c.nativeAnthropic {
+			cacheWriteBilledTokens = float64(cacheCreate) * cacheWrite5MinuteInputMultiplier
+		}
 		usage := &provider.Usage{
-			PromptTokens:     inTok + cacheCreate + cacheRead,
-			CompletionTokens: outTok,
-			TotalTokens:      inTok + cacheCreate + cacheRead + outTok,
-			CacheHitTokens:   cacheRead,
-			CacheMissTokens:  inTok + cacheCreate, // uncached input + cache writes (billed ≥1×)
-			FinishReason:     mapStopReason(stopReason),
+			PromptTokens:           inTok + cacheCreate + cacheRead,
+			CompletionTokens:       outTok,
+			TotalTokens:            inTok + cacheCreate + cacheRead + outTok,
+			CacheHitTokens:         cacheRead,
+			CacheMissTokens:        inTok + cacheCreate,
+			CacheWriteTokens:       cacheCreate,
+			CacheWriteBilledTokens: cacheWriteBilledTokens,
+			FinishReason:           mapStopReason(stopReason),
 		}
 		provider.ApplyRequestAttemptCount(ctx, usage)
 		if !send(provider.Chunk{Type: provider.ChunkUsage, Usage: usage}) {
@@ -742,7 +780,9 @@ func formatWebSearchResults(raw json.RawMessage) string {
 	return "\n" + b.String() + "\n"
 }
 
-// --- Messages API wire protocol ---
+// Messages API wire protocol
+
+const cacheWrite5MinuteInputMultiplier = 1.25
 
 func ephemeral() *cacheControl { return &cacheControl{Type: "ephemeral"} }
 

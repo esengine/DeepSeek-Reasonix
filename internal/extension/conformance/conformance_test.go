@@ -64,9 +64,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// ---------------------------------------------------------------------------
 // Host client fixture
-// ---------------------------------------------------------------------------
 
 const (
 	testPluginID = "conformance-ext"
@@ -136,9 +134,7 @@ func decodeReplacement(t *testing.T, result protocol.InterceptResult, out any) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Stub UI handler and stream router
-// ---------------------------------------------------------------------------
 
 // stubUI records host/ui/publish calls and answers host/ui/request through a
 // programmable function (default: the user cancelled).
@@ -243,9 +239,7 @@ func protocolReason(t *testing.T, err error) protocol.ErrorReason {
 	return ""
 }
 
-// ---------------------------------------------------------------------------
 // Tests: initialize handshake
-// ---------------------------------------------------------------------------
 
 // TestHandshakeAccepted proves the host accepts the example's full
 // declaration: subscriptions, the system_prompt strategy slot, the namespaced
@@ -306,9 +300,7 @@ func TestHandshakeUnderDeclaredRejected(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Tests: intercepts and strategy
-// ---------------------------------------------------------------------------
 
 // TestInputReceiveRewrite drives the "/fs " trigger: the example replaces the
 // input; ordinary input continues untouched.
@@ -385,9 +377,7 @@ func TestSystemPromptStrategy(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Tests: provider broker
-// ---------------------------------------------------------------------------
 
 // TestProviderCatalog fetches the extension's provider catalog through the
 // host client.
@@ -499,9 +489,7 @@ func TestProviderStreamCancel(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Tests: content refs
-// ---------------------------------------------------------------------------
 
 // TestContentRefRehydration sends an intercept payload above the 64 KiB
 // externalization threshold: the host moves it into a content ref, and the
@@ -530,9 +518,7 @@ func TestContentRefRehydration(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Tests: UI
-// ---------------------------------------------------------------------------
 
 // TestSessionStartPublishes drives one session.start observation: the example
 // publishes its status line and demo card through host/ui/publish.
@@ -638,9 +624,7 @@ func TestUISubmitRoundTrip(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Tests: timeout and crash
-// ---------------------------------------------------------------------------
 
 // TestInterceptTimeout stalls the example past the intercept budget; the host
 // must surface the frozen intercept_timeout reason.

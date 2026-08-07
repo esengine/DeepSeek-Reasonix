@@ -2,12 +2,23 @@ version: "2"
 
 linters:
   enable:
+    - copyloopvar
     - errcheck
+    - errorlint
     - govet
     - ineffassign
+    - intrange
+    - modernize
     - staticcheck
     - unused
+    - usestdlibvars
   settings:
+    modernize:
+      # omitempty -> omitzero changes which fields are written for nested
+      # structs. That is a wire-format change to session files and the
+      # extension protocol, not a refactor, so it lands on its own.
+      disable:
+        - omitzero
     errcheck:
       check-type-assertions: false
       exclude-functions:
@@ -15,6 +26,11 @@ linters:
         - (io.Closer).Close
         - (*net/http.Response).Body.Close
         - golang.org/x/term.Restore
+        # Win32: CloseHandle in a defer mirrors the Close exclusions above, and
+        # LazyProc.Call always returns a non-nil errno — the caller reads r1.
+        - golang.org/x/sys/windows.CloseHandle
+        - (*syscall.LazyProc).Call
+        - (*golang.org/x/sys/windows.LazyProc).Call
     staticcheck:
       checks:
         - all

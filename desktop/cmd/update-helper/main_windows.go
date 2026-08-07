@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"reasonix/desktop/internal/winuninstall"
 	"reasonix/internal/installlayout"
 	"reasonix/internal/repair"
 )
@@ -26,15 +28,16 @@ import (
 const parentExitTimeout = 2 * time.Minute
 
 var (
-	waitForProcessExitFn       = waitForProcessExit
-	runInstallerFn             = runInstaller
-	startRelaunchFn            = startRelaunch
-	claimPendingFileUpdateFn   = repair.ClaimPendingFileUpdateExact
-	installStagedReleaseUnitFn = installStagedWindowsReleaseUnit
-	recordInstalledUpdateFn    = repair.RecordClaimedFileUpdateInstalled
-	stageInstallerFn           = stageVerifiedInstaller
-	claimInstallerExecutionFn  = claimVerifiedInstallerForExecution
-	lstatUpdateStagingFn       = os.Lstat
+	waitForProcessExitFn                    = waitForProcessExit
+	runInstallerFn                          = runInstaller
+	startRelaunchFn                         = startRelaunch
+	claimPendingFileUpdateFn                = repair.ClaimPendingFileUpdateExact
+	installStagedReleaseUnitFn              = installStagedWindowsReleaseUnit
+	recordInstalledUpdateFn                 = repair.RecordClaimedFileUpdateInstalled
+	stageInstallerFn                        = stageVerifiedInstaller
+	claimInstallerExecutionFn               = claimVerifiedInstallerForExecution
+	lstatUpdateStagingFn                    = os.Lstat
+	reconcileWindowsUninstallRegistrationFn = winuninstall.Reconcile
 )
 
 func main() {
@@ -287,6 +290,12 @@ func runVersionedWindowsUpdate(logger *log.Logger, installer, installerSHA256, i
 		logger.Printf("activate versioned release: %v", err)
 		return recoverExisting()
 	}
+	if _, err := reconcileWindowsUninstallRegistrationFn(installDir, toVersion); err != nil {
+		// The release is already active and must not be rolled back for stale
+		// Add/Remove Programs metadata. A later update or full installer retries
+		// this idempotent reconciliation.
+		logger.Printf("reconcile Windows uninstall registration: %v", err)
+	}
 	if relaunch != "" {
 		if err := startRelaunchFn(preferRelaunchPath(relaunch, installDir), installDir); err != nil {
 			logger.Printf("relaunch versioned release: %v", err)
@@ -491,7 +500,7 @@ func newLogger() *log.Logger {
 func waitForProcessExit(pid uint32, timeout time.Duration) error {
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
 	if err != nil {
-		if err == windows.ERROR_INVALID_PARAMETER {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return nil
 		}
 		return err
@@ -525,7 +534,7 @@ func cleanupOwnedWindowsUpdateDirectory(path string, owner os.FileInfo) error {
 	if path == "" || owner == nil || !owner.IsDir() {
 		return fmt.Errorf("Windows update cleanup identity is incomplete")
 	}
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
 		from, err := windows.UTF16PtrFromString(path)
 		if err != nil {

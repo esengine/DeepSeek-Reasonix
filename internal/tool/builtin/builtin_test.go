@@ -490,7 +490,7 @@ func TestGlobNoMatches(t *testing.T) {
 	}
 }
 
-// --- GB18030 encoding integration tests (issue #2637) ---
+// GB18030 encoding integration tests (issue #2637)
 
 func TestReadFileGB18030(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "gbk.txt")

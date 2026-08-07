@@ -1,8 +1,13 @@
 VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X main.version=$(VERSION)
+BUILD_TIME_UTC := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+GIT_COMMIT := $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
+LDFLAGS := -s -w \
+	-X main.version=$(VERSION) \
+	-X main.gitCommit=$(GIT_COMMIT) \
+	-X main.buildTimeUTC=$(BUILD_TIME_UTC)
 GOEXE := $(shell go env GOEXE)
 
-.PHONY: build vet fmt test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean
+.PHONY: build vet fmt lint lint-cross lint-update test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
@@ -13,6 +18,20 @@ vet:
 
 fmt:
 	gofmt -w .
+
+lint:
+	go run ./tools/repolint
+
+lint-update:
+	go run ./tools/repolint -update
+
+# Linting one GOOS leaves every //go:build windows and darwin file unchecked.
+lint-cross:
+	@for t in "linux ." "darwin ." "windows ." "linux desktop" "windows desktop"; do \
+		set -- $$t; \
+		echo "== golangci-lint GOOS=$$1 ($$2)"; \
+		(cd $$2 && GOOS=$$1 golangci-lint run --timeout=5m ./...) || exit 1; \
+	done
 
 test:
 	go test ./...

@@ -246,7 +246,7 @@ func TestResolveSystemPromptRejectsProjectPathEscapes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := t.TempDir()
 			outside := test.path(root)
-			if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), []byte(fmt.Sprintf("[agent]\nsystem_prompt_file = %q\n", outside)), 0o600); err != nil {
+			if err := os.WriteFile(filepath.Join(root, "reasonix.toml"), fmt.Appendf(nil, "[agent]\nsystem_prompt_file = %q\n", outside), 0o600); err != nil {
 				t.Fatal(err)
 			}
 			cfg, err := LoadForRootReadOnly(root)

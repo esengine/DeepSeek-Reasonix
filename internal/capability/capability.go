@@ -218,10 +218,7 @@ func limitRouteCandidates(candidates []RouteCandidate) []RouteCandidate {
 			suggested = append(suggested, candidate)
 		}
 	}
-	slots := targetCandidates - len(strong)
-	if slots < 0 {
-		slots = 0
-	}
+	slots := max(targetCandidates-len(strong), 0)
 	if len(suggested) > slots {
 		suggested = suggested[:slots]
 	}

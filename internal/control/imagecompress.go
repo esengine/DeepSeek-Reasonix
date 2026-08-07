@@ -63,15 +63,9 @@ func compressForVision(raw []byte, mime string) ([]byte, string) {
 // aspect ratio (each side at least 1px).
 func scaledDims(w, h, m int) (int, int) {
 	if w >= h {
-		nh := h * m / w
-		if nh < 1 {
-			nh = 1
-		}
+		nh := max(h*m/w, 1)
 		return m, nh
 	}
-	nw := w * m / h
-	if nw < 1 {
-		nw = 1
-	}
+	nw := max(w*m/h, 1)
 	return nw, m
 }

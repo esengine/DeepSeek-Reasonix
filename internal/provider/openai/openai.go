@@ -26,8 +26,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -227,7 +229,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// output. Preserve an explicit user budget in either mode, but leave a
 	// thinking-disabled request uncapped unless the user configured one.
 	if maxOutputTokens == 0 && officialDeepSeek && thinkingType != "disabled" {
-		maxOutputTokens = provider.DefaultReasoningOutputTokens
+		maxOutputTokens = provider.DefaultHighOutputTokens // DeepSeek supports up to 384K; 128K is a safe default for reasoning
 	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
@@ -519,7 +521,10 @@ func (c *client) openStream(ctx context.Context, targetURL string, wireReq chatR
 	c.authed.Store(true)
 
 	out := make(chan provider.Chunk)
-	go c.streamWithReconnect(requestCtx, resp, newReq, out)
+	// Body-phase stream cuts surface as StreamInterruptedError so the Agent
+	// can replay the exact frozen request. Connection+header retries stay in
+	// SendWithRetry; providers must not stack a second body-retry budget.
+	go c.streamOnce(requestCtx, resp, out)
 	return out, nil
 }
 
@@ -626,6 +631,8 @@ func mergeUsage(total, next *provider.Usage, countRequests bool) *provider.Usage
 	total.TotalTokens += next.TotalTokens
 	total.CacheHitTokens += next.CacheHitTokens
 	total.CacheMissTokens += next.CacheMissTokens
+	total.CacheWriteTokens += next.CacheWriteTokens
+	total.CacheWriteBilledTokens += next.CacheWriteBilledTokens
 	total.ReasoningTokens += next.ReasoningTokens
 	if countRequests {
 		total.RequestCount = totalRequests + nextRequests
@@ -645,41 +652,24 @@ func usageRequestCount(usage *provider.Usage) int {
 	return 1
 }
 
-// maxStreamReconnects bounds how many times a mid-stream connection drop is
-// replayed from scratch before the error is surfaced — each replay re-runs the
-// whole request (cheap under prompt caching, but not free).
-const maxStreamReconnects = 3
-
-// streamWithReconnect drives readStream and, when the connection is cut before
-// any model output has been forwarded, replays the request rather than failing
-// the turn. Once a token (reasoning/text/tool-call) has been emitted, a replay
-// would duplicate output, so the error is surfaced instead.
-func (c *client) streamWithReconnect(ctx context.Context, resp *http.Response, newReq func(context.Context) (*http.Request, error), out chan<- provider.Chunk) {
+// streamOnce drives a single body read. Mid-stream transport cuts become
+// StreamInterruptedError so the Agent can commit-or-replay; providers no longer
+// replay the body themselves (that would stack retry budgets with the Agent).
+func (c *client) streamOnce(ctx context.Context, resp *http.Response, out chan<- provider.Chunk) {
 	defer close(out)
-	for attempt := 0; ; attempt++ {
-		emitted, err := c.readStream(ctx, resp, out)
-		if err == nil {
-			return
-		}
-		if !provider.IsConnReset(err) {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
-			return
-		}
-		if emitted {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{Err: err}})
-			return
-		}
-		if attempt >= maxStreamReconnects {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
-			return
-		}
-		next, rerr := provider.SendWithRetry(ctx, c.http, c.sendOpts(), newReq)
-		if rerr != nil {
-			sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: rerr})
-			return
-		}
-		resp = next
+	_, err := c.readStream(ctx, resp, out)
+	if err == nil {
+		return
 	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
+		return
+	}
+	if provider.IsConnReset(err) {
+		sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: provider.StreamInterrupt(err, provider.ClassifyStreamInterrupt(err))})
+		return
+	}
+	sendChunk(ctx, out, provider.Chunk{Type: provider.ChunkError, Err: err})
 }
 
 func sendChunk(ctx context.Context, out chan<- provider.Chunk, chunk provider.Chunk) bool {
@@ -1083,12 +1073,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 		return emitted, err
 	}
 	if stalled.Load() {
-		// Wrap io.ErrUnexpectedEOF so streamWithReconnect treats a half-open
-		// stall — a proxy that drops silently mid-stream with no FIN/RST, the
-		// watchdog's primary target — as recoverable, identical to the clean-FIN
-		// idle-close just below. Without it the stall bypasses reconnect and
-		// hard-fails the turn instead of replaying (pre-output) or surfacing a
-		// retryable StreamInterruptedError (post-output).
+		// Idle stall is a body-phase cut: wrap so the Agent can replay the
+		// frozen request. Providers no longer reconnect here.
 		return emitted, fmt.Errorf("%s: stream stalled — no data for %s, connection likely dropped: %w", c.name, idleTimeout, io.ErrUnexpectedEOF)
 	}
 	if err := scanner.Err(); err != nil {
@@ -1096,7 +1082,8 @@ func (c *client) readStream(ctx context.Context, resp *http.Response, out chan<-
 	}
 	// A proxy that idle-closes with a clean FIN ends the scan with no error. Without
 	// this check the turn would be committed as complete — including half-streamed
-	// tool-call arguments, which then 400 on every replay (#3953).
+	// tool-call arguments, which then 400 on every replay (#3953). OpenAI Chat
+	// accepts either [DONE] or a legal finish_reason as a complete terminal.
 	if !sawDone && lastFinishReason == "" {
 		return emitted, fmt.Errorf("%s: stream ended before completion: %w", c.name, io.ErrUnexpectedEOF)
 	}
@@ -1188,7 +1175,7 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 	}
 }
 
-// --- OpenAI-compatible wire protocol ---
+// OpenAI-compatible wire protocol
 
 type chatRequest struct {
 	Model               string         `json:"model"`
@@ -1239,9 +1226,7 @@ func (r chatRequest) MarshalJSON() ([]byte, error) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
-	for key, value := range cleanExtraBody(r.ExtraBody) {
-		body[key] = value
-	}
+	maps.Copy(body, cleanExtraBody(r.ExtraBody))
 	return json.Marshal(body)
 }
 

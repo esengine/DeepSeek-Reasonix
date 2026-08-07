@@ -43,12 +43,10 @@ func TestTaskControlConcurrentInitializationReturnsOneService(t *testing.T) {
 	const callers = 16
 	services := make(chan *taskmonitor.ControlService, callers)
 	var wg sync.WaitGroup
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			services <- app.taskControl()
-		}()
+		})
 	}
 	wg.Wait()
 	close(services)
