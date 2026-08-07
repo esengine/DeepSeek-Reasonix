@@ -731,7 +731,7 @@ export const zh: Record<DictKey, string> = {
   "composer.contentReferenceSessionsDesc": "将最近会话加入当前上下文",
   "composer.contentUseCommands": "使用命令或 Skill",
   "composer.contentUseCommandsDesc": "浏览可用命令和技能",
-  "composer.contentUseCommandsEmptyOnly": "输入框为空时可用——命令会构成整条消息",
+  "composer.contentUseCommandsInline": "在光标处插入命令或技能——随时可用",
   "composer.contentCloseSessions": "关闭历史会话",
   "composer.pastChatsLoading": "正在加载历史会话…",
   "composer.pastChatsEmpty": "暂无历史会话",
