@@ -1147,3 +1147,28 @@ func TestVendorTableMaxOutputTokens(t *testing.T) {
 		t.Fatalf("deepseek budget must come from vendor table, got %#v", got)
 	}
 }
+
+func TestMiMoEmitsSummaryModeEvenWhenEffortEmpty(t *testing.T) {
+	// Copilot #7644 finding: MiMo's default effort is "auto" (normalized to
+	// empty), so the reasoning object must still be emitted when
+	// caps.summaryMode is set — otherwise summaryMode="none" is dropped and
+	// the server falls back to emitting reasoning summaries (truncation root
+	// cause: MiMo folds the summary back into context).
+	c := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com", Model: "mimo-v2.5"}).(*client)
+	if c.caps.summaryMode != "none" {
+		t.Fatalf("mimo summaryMode = %q, want none", c.caps.summaryMode)
+	}
+	body, _, _ := c.buildRequestBody(provider.Request{
+		Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}},
+	})
+	reasoning, ok := body["reasoning"].(map[string]any)
+	if !ok {
+		t.Fatalf("mimo with empty effort must still send reasoning object (summaryMode set), body=%v", body)
+	}
+	if got := reasoning["summary"]; got != "none" {
+		t.Fatalf("reasoning.summary = %#v, want none (must be sent even with empty effort)", got)
+	}
+	if _, hasEffort := reasoning["effort"]; hasEffort {
+		t.Fatalf("reasoning.effort should be omitted for empty effort, got %#v", reasoning)
+	}
+}

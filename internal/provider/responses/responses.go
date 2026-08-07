@@ -187,18 +187,11 @@ func (c *client) MissingToolCallReasoningWarningIdentity() string {
 // without reasoning only for vendors whose endpoint reliably emits it.
 // DeepSeek's official API emits tool-call reasoning for its pro-tier models,
 // so a missing chain-of-thought there is a real degradation worth one warning.
-// MiMo documents reasoning alongside tool calls but does not guarantee it on
-// every round (observed: mimo-v2.5-pro tool-call turn with empty reasoning),
-// so a missing chain-of-thought is endpoint-conditional, not a degradation
-// signal — silence the warning. This mirrors openai.go's model-scoped gate.
-//
-// Vendor-scoped (2026-08-07, MiMo-Code alignment):
-// MiMo preserves reasoning on replay but does not guarantee it every
-// round (observed: mimo-v2.5-pro tool-call turn with empty reasoning),
-// so a missing chain-of-thought is endpoint-conditional, not a
-// degradation worth a warning. toolCallReasoning=false vendors
-// (DashScope) never warn — no round-trip contract. Only DeepSeek
-// warns, scoped to non-flash models.
+// MiMo preserves reasoning on replay but does not guarantee it every round
+// (observed: mimo-v2.5-pro tool-call turn with empty reasoning), so a missing
+// chain-of-thought is endpoint-conditional, not a degradation signal — silence
+// the warning. toolCallReasoning=false vendors (DashScope) never warn — no
+// round-trip contract. This mirrors openai.go's model-scoped gate.
 func (c *client) WarnOnMissingToolCallReasoning() bool {
 	if !c.caps.toolCallReasoning {
 		return false
@@ -291,8 +284,17 @@ func (c *client) buildRequestBody(req provider.Request) (map[string]any, bool, [
 	case "disabled", "off":
 		effort = "none"
 	}
-	if effort != "" {
-		reasoning := map[string]any{"effort": effort}
+	// Send the reasoning object whenever EITHER an effort is configured OR the
+	// vendor caps require reasoning.summary. MiMo's default effort is "auto"
+	// (normalized to empty here); omitting the object would drop
+	// summaryMode="none" and let the server fall back to emitting reasoning
+	// summaries — the output-truncation root cause (MiMo folds the summary
+	// back into context, doubling thinking each turn). Copilot #7644 finding.
+	if effort != "" || c.caps.summaryMode != "" {
+		reasoning := map[string]any{}
+		if effort != "" {
+			reasoning["effort"] = effort
+		}
 		if c.caps.summaryMode != "" {
 			reasoning["summary"] = c.caps.summaryMode
 		}
