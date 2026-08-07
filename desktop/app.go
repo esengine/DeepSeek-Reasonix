@@ -2229,6 +2229,8 @@ func (a *App) assignFreshSessionTopic(tab *WorkspaceTab) {
 	a.mu.Lock()
 	scope := tab.Scope
 	workspaceRoot := tabLogicalProjectRoot(tab)
+	prevTopicID := strings.TrimSpace(tab.TopicID)
+	sourceRoot := strings.TrimSpace(tab.SourceRoot)
 	tab.TopicID = topicID
 	tab.TopicTitle = defaultTopicTitle
 	tab.topicTitleSource = topicTitleSourceAuto
@@ -2247,6 +2249,9 @@ func (a *App) assignFreshSessionTopic(tab *WorkspaceTab) {
 	// "new session failed" error to the frontend.
 	_ = ensureTopicIndexed(scope, workspaceRoot, topicID, defaultTopicTitle, topicTitleSourceAuto)
 	_ = setTopicCreatedAt(topicTitleRoot(scope, workspaceRoot), topicID, time.Now().UnixMilli())
+	if sourceRoot != "" {
+		inheritTopicWorktreeBinding(sourceRoot, prevTopicID, topicID)
+	}
 }
 
 func (a *App) ensureTabTopicIndexedForUserTurn(tab *WorkspaceTab) {
@@ -2961,7 +2966,13 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 	ctrl = sourceTab.Ctrl
 	scope := sourceTab.Scope
 	workspaceRoot := sourceTab.WorkspaceRoot
+	sourceRoot := strings.TrimSpace(sourceTab.SourceRoot)
+	logicalRoot := workspaceRoot
+	if sourceRoot != "" {
+		logicalRoot = sourceRoot
+	}
 	sourceTitle := sourceTab.TopicTitle
+	sourceTopicID := strings.TrimSpace(sourceTab.TopicID)
 	model := sourceTab.model
 	effort := cloneStringPtr(sourceTab.effort)
 	mode := currentTabMode(sourceTab)
@@ -2976,16 +2987,19 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 	}
 	topicID := newTopicID()
 	topicTitle := a.forkTopicTitle(sourceTitle)
-	titleRoot := workspaceRoot
+	titleRoot := logicalRoot
 	if scope == "global" {
 		titleRoot = ""
 	}
 	if err := setTopicTitle(titleRoot, topicID, topicTitle); err != nil {
 		return TabMeta{}, err
 	}
+	if sourceRoot != "" {
+		inheritTopicWorktreeBinding(sourceRoot, sourceTopicID, topicID)
+	}
 	m, _ := agent.EnsureBranchMeta(newPath)
 	m.Scope = scope
-	m.WorkspaceRoot = workspaceRoot
+	m.WorkspaceRoot = logicalRoot
 	m.TopicID = topicID
 	m.TopicTitle = topicTitle
 	if err := agent.SaveBranchMeta(newPath, m); err != nil {
@@ -2999,6 +3013,7 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 		ID:               newTabID,
 		Scope:            scope,
 		WorkspaceRoot:    workspaceRoot,
+		SourceRoot:       sourceRoot,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
 		topicTitleSource: topicTitleSourceManual,
@@ -3480,7 +3495,7 @@ func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSe
 			continue
 		}
 		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID}
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tabLogicalProjectRoot(tab), topicID: tab.TopicID}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, dir, sessionPath))
 		a.markTabRemovedLocked(tab)
@@ -3495,7 +3510,7 @@ func (a *App) removeSessionRuntimeBindings(dir, sessionPath string) ([]removedSe
 			continue
 		}
 		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, topicID: tab.TopicID}
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tabLogicalProjectRoot(tab), topicID: tab.TopicID}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, dir, sessionPath))
 		a.markTabRemovedLocked(tab)
@@ -3537,7 +3552,7 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 		sessionDir := tabRuntimeSessionDir(tab)
 		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
 		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tabLogicalProjectRoot(tab)}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
 		a.markTabRemovedLocked(tab)
@@ -3554,7 +3569,7 @@ func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntim
 		sessionDir := tabRuntimeSessionDir(tab)
 		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
 		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
+			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tabLogicalProjectRoot(tab)}
 		}
 		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
 		a.markTabRemovedLocked(tab)

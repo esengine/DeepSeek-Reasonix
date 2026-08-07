@@ -279,6 +279,25 @@ func topicHasWorktreeBinding(sourceRoot, topicID string) bool {
 	return ok
 }
 
+// inheritTopicWorktreeBinding copies an existing isolation binding onto a new
+// topic id so Fork / NewSession keep the managed worktree and survive reclaim
+// while any sibling topic still references it.
+func inheritTopicWorktreeBinding(sourceRoot, fromTopicID, toTopicID string) {
+	sourceRoot = normalizeProjectRoot(sourceRoot)
+	fromTopicID = strings.TrimSpace(fromTopicID)
+	toTopicID = strings.TrimSpace(toTopicID)
+	if sourceRoot == "" || fromTopicID == "" || toTopicID == "" || fromTopicID == toTopicID {
+		return
+	}
+	binding, ok := loadTopicWorktreeBinding(sourceRoot, fromTopicID)
+	if !ok {
+		return
+	}
+	binding.TopicID = toTopicID
+	binding.CreatedAt = time.Now().UnixMilli()
+	_ = saveTopicWorktreeBinding(sourceRoot, binding)
+}
+
 func removeTopicWorktreeBinding(sourceRoot, topicID string) error {
 	sourceRoot = normalizeProjectRoot(sourceRoot)
 	topicID = strings.TrimSpace(topicID)
@@ -364,23 +383,43 @@ func sourceRootForManagedTopicWorktree(managedRoot, topicID string) string {
 	return ""
 }
 
-const topicWorktreeCreatedHeadFile = ".reasonix-topic-created-head"
+const topicWorktreeCreatedHeadSuffix = ".reasonix-created-head"
+
+func topicWorktreeCreatedHeadPath(worktreeRoot string) string {
+	worktreeRoot = strings.TrimSpace(worktreeRoot)
+	if worktreeRoot == "" {
+		return ""
+	}
+	// Sidecar next to the worktree directory — never inside it — so the marker
+	// cannot make `git status` dirty and block orphan reclaim.
+	return worktreeRoot + topicWorktreeCreatedHeadSuffix
+}
 
 func writeTopicWorktreeCreatedHead(worktreeRoot, head string) {
-	worktreeRoot = strings.TrimSpace(worktreeRoot)
+	path := topicWorktreeCreatedHeadPath(worktreeRoot)
 	head = strings.TrimSpace(head)
-	if worktreeRoot == "" || head == "" {
+	if path == "" || head == "" {
 		return
 	}
-	_ = os.WriteFile(filepath.Join(worktreeRoot, topicWorktreeCreatedHeadFile), []byte(head+"\n"), 0o644)
+	_ = os.WriteFile(path, []byte(head+"\n"), 0o644)
 }
 
 func readTopicWorktreeCreatedHead(worktreeRoot string) string {
-	raw, err := os.ReadFile(filepath.Join(worktreeRoot, topicWorktreeCreatedHeadFile))
+	raw, err := os.ReadFile(topicWorktreeCreatedHeadPath(worktreeRoot))
 	if err != nil {
-		return ""
+		// Compat: older builds wrote the marker inside the worktree.
+		legacy := filepath.Join(strings.TrimSpace(worktreeRoot), ".reasonix-topic-created-head")
+		raw, err = os.ReadFile(legacy)
+		if err != nil {
+			return ""
+		}
 	}
 	return strings.TrimSpace(string(raw))
+}
+
+func clearTopicWorktreeCreatedHead(worktreeRoot string) {
+	_ = os.Remove(topicWorktreeCreatedHeadPath(worktreeRoot))
+	_ = os.Remove(filepath.Join(strings.TrimSpace(worktreeRoot), ".reasonix-topic-created-head"))
 }
 
 // reclaimOrphanTopicWorktrees removes managed topic worktrees that are no
@@ -420,6 +459,13 @@ func (a *App) reclaimOrphanTopicWorktrees() {
 		if createdHead == "" {
 			return filepath.SkipDir
 		}
+		// Migrate legacy in-tree markers out before status inspection so they
+		// cannot make a pristine tree look dirty.
+		legacyMarker := filepath.Join(path, ".reasonix-topic-created-head")
+		if _, err := os.Stat(legacyMarker); err == nil {
+			writeTopicWorktreeCreatedHead(path, createdHead)
+			_ = os.Remove(legacyMarker)
+		}
 		common, _, sourceErr := worktree.RunGit(a.bootContext(), path, "rev-parse", "--git-common-dir")
 		if sourceErr != nil {
 			return filepath.SkipDir
@@ -434,6 +480,9 @@ func (a *App) reclaimOrphanTopicWorktrees() {
 			source = filepath.Dir(source)
 		}
 		_ = removePristineTopicWorktree(a.bootContext(), source, path, createdHead)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			clearTopicWorktreeCreatedHead(path)
+		}
 		return filepath.SkipDir
 	})
 }
