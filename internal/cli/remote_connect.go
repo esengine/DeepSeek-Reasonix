@@ -722,14 +722,20 @@ func remoteFSPut(args []string) int {
 	})
 }
 
-func openInBrowser(url string) error {
+// openInBrowser launches the OS default browser for a URL without blocking.
+// It is a variable (not a function) so tests can stub it, mirroring
+// writeNativeClipboardText.
+var openInBrowser = func(url string) error {
 	var cmd string
 	var args []string
 	switch runtime.GOOS {
 	case "darwin":
 		cmd, args = "open", []string{url}
 	case "windows":
-		cmd, args = "rundll32", []string{"url.dll,FileProtocolHandler", url}
+		// explorer.exe is the most reliable way to hand a URL to the default
+		// browser on Windows: rundll32 url.dll,FileProtocolHandler is silently
+		// blocked by some security policies and newer Windows 11 builds.
+		cmd, args = "explorer.exe", []string{url}
 	default:
 		cmd, args = "xdg-open", []string{url}
 	}

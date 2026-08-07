@@ -260,6 +260,8 @@ type Messages struct {
 	CmdExport           string // /export
 	SlashCopyDone       string // "/copy" succeeded
 	SlashCopyEmpty      string // no assistant response to copy
+	LinkOpenDoneFmt     string // Ctrl+Click opened a link, %s = url
+	LinkOpenFailedFmt   string // Ctrl+Click link failed, %s = error
 	SlashCopyListHeader string // header shown before the numbered list
 	SlashExportDoneFmt  string // "/export" succeeded, %s = file path
 	SlashExportEmpty    string // no messages to export

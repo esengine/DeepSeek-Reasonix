@@ -243,6 +243,17 @@ const (
 	copyMathStartPrefix = "\x1b]1337;reasonix-copy-math="
 	copyMathEndPrefix   = "\x1b]1337;reasonix-copy-math-end="
 	copyMathTerminator  = "\x07"
+
+	// linkStartPrefix/linkEndPrefix are zero-width OSC-style markers that
+	// bracket every clickable link in the rendered transcript. They mirror the
+	// copyMath marker scheme so the display wrapping and the click hit-testing
+	// share one source of truth: markers survive ansi/lipgloss wrapping and are
+	// stripped from copied text, while the wrapped line text stays byte-for-byte
+	// identical to what the viewport shows. The URL payload is base64-encoded
+	// so arbitrary link destinations can never forge a marker boundary.
+	linkStartPrefix = "\x1b]1337;reasonix-link="
+	linkEndPrefix   = "\x1b]1337;reasonix-link-end="
+	linkTerminator  = "\x07"
 )
 
 func copyMathStartMarker(id, source string) string {
@@ -252,6 +263,124 @@ func copyMathStartMarker(id, source string) string {
 
 func copyMathEndMarker(id string) string {
 	return copyMathEndPrefix + id + copyMathTerminator
+}
+
+func linkStartMarker(id, url string) string {
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(url))
+	return linkStartPrefix + id + ";" + encoded + linkTerminator
+}
+
+func linkEndMarker(id string) string {
+	return linkEndPrefix + id + linkTerminator
+}
+
+// linkSpan is one clickable range within a single wrapped transcript line.
+// start/end are visible-column offsets (ansi width, zero-based, end exclusive).
+type linkSpan struct {
+	start, end int
+	url        string
+}
+
+// openLink tracks a link whose marker opened on an earlier wrapped line and is
+// still open when the current line ends (a long URL wrapped across rows). start
+// is the column where the link opened on the current line, or -1 when the link
+// carried over from a previous line and therefore covers the line from column 0.
+type openLink struct {
+	id    string
+	url   string
+	start int
+}
+
+// parseLinkSpansInLine scans one wrapped line for the zero-width link markers
+// emitted by the markdown renderer and returns every clickable range fully
+// visible on that line, including the tail of a link that wraps onto the next
+// line. open carries a link in progress from the previous line; the returned
+// open state must be passed to the next line's call. ok is false only when the
+// markers are corrupted (an unmatched close, a nested open, or a truncated
+// payload) — the renderer always emits balanced markers, so this is a canary
+// for internal bugs rather than a user-facing path.
+func parseLinkSpansInLine(raw string, open *openLink) (spans []linkSpan, next *openLink, ok bool) {
+	active := open
+	column := 0
+	position := 0
+
+	for position < len(raw) {
+		startAt := strings.Index(raw[position:], linkStartPrefix)
+		endAt := strings.Index(raw[position:], linkEndPrefix)
+		if startAt >= 0 {
+			startAt += position
+		}
+		if endAt >= 0 {
+			endAt += position
+		}
+
+		markerAt := -1
+		isStart := false
+		switch {
+		case startAt >= 0 && (endAt < 0 || startAt < endAt):
+			markerAt, isStart = startAt, true
+		case endAt >= 0:
+			markerAt = endAt
+		}
+		if markerAt < 0 {
+			column += ansi.StringWidth(raw[position:])
+			break
+		}
+
+		chunk := raw[position:markerAt]
+		column += ansi.StringWidth(chunk)
+
+		prefix := linkEndPrefix
+		if isStart {
+			prefix = linkStartPrefix
+		}
+		payloadStart := markerAt + len(prefix)
+		terminatorAt := strings.Index(raw[payloadStart:], linkTerminator)
+		if terminatorAt < 0 {
+			return nil, nil, false
+		}
+		terminatorAt += payloadStart
+		payload := raw[payloadStart:terminatorAt]
+		position = terminatorAt + len(linkTerminator)
+
+		if isStart {
+			if active != nil {
+				return nil, nil, false
+			}
+			parts := strings.SplitN(payload, ";", 2)
+			if len(parts) != 2 {
+				return nil, nil, false
+			}
+			decoded, err := base64.RawURLEncoding.DecodeString(parts[1])
+			if err != nil {
+				return nil, nil, false
+			}
+			active = &openLink{id: parts[0], url: string(decoded), start: column}
+			continue
+		}
+		if active == nil || payload != active.id {
+			return nil, nil, false
+		}
+		start := active.start
+		if start < 0 {
+			start = 0
+		}
+		spans = append(spans, linkSpan{start: start, end: column, url: active.url})
+		active = nil
+	}
+
+	if active != nil {
+		// The link continues onto the next line; everything from its start to
+		// the end of this line is still clickable.
+		start := active.start
+		if start < 0 {
+			start = 0
+		}
+		spans = append(spans, linkSpan{start: start, end: column, url: active.url})
+		active.start = -1
+		return spans, active, true
+	}
+	return spans, nil, true
 }
 
 // buildCopyTranscript renders semantic Markdown only when a copy is requested.
@@ -277,7 +406,12 @@ func (m chatTUI) buildCopyTranscript(contentWidth int) (string, int, bool) {
 			markers += strings.Count(rendered, copyMathStartPrefix)
 			b.WriteString(rendered)
 		default:
-			b.WriteString(m.transcript[i])
+			// Fixed blocks carry display-only zero-width sequences (OSC 8
+			// hyperlinks and click markers for user bubbles). Strip them so a
+			// copied selection pastes as clean text; ansi.Strip removes whole
+			// OSC sequences including their payload, and SGR codes, with zero
+			// width impact, so column accounting stays identical.
+			b.WriteString(ansi.Strip(m.transcript[i]))
 		}
 	}
 	return b.String(), markers, true
@@ -787,4 +921,30 @@ func (m chatTUI) transcriptCaret(x, y int) selPos {
 		x = cw
 	}
 	return selPos{line: m.viewport.YOffset() + y, col: x}
+}
+
+// linkSpanAt returns the clickable URL under the wrapped-line cell (lineIdx,
+// col), if any. Lines above the click are scanned so a link that wraps across
+// rows is hit-testable on every one of its rows; the scan is bounded by the
+// wrapped line cache and only runs on an explicit modifier-click, so the O(n)
+// walk is fine for interactive use.
+func (m chatTUI) linkSpanAt(lineIdx, col int) (string, bool) {
+	if lineIdx < 0 || lineIdx >= len(m.wrappedLines) {
+		return "", false
+	}
+	var active *openLink
+	var spans []linkSpan
+	for i := 0; i <= lineIdx; i++ {
+		var ok bool
+		spans, active, ok = parseLinkSpansInLine(m.wrappedLines[i], active)
+		if !ok {
+			return "", false
+		}
+	}
+	for _, s := range spans {
+		if col >= s.start && col < s.end {
+			return s.url, true
+		}
+	}
+	return "", false
 }
