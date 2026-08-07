@@ -273,8 +273,8 @@ func validateWindowsUpdateHelper(data []byte, goarch string) error {
 	if !ok {
 		return fmt.Errorf("unsupported Windows architecture %q", goarch)
 	}
-	if f.FileHeader.Machine != want {
-		return fmt.Errorf("PE machine 0x%x does not match %s", f.FileHeader.Machine, goarch)
+	if f.Machine != want {
+		return fmt.Errorf("PE machine 0x%x does not match %s", f.Machine, goarch)
 	}
 	return nil
 }
