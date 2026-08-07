@@ -191,6 +191,10 @@ type Tool struct {
 	ReadOnly     bool
 	Truncated    bool  // ToolResult: Output was head+tailed before display/model
 	DurationMs   int64 // ToolResult: wall-clock execution time in milliseconds
+	// StartedAt/EndedAt are unix-millisecond execution bounds (ToolResult).
+	// Zero when the call never ran (dependency-skipped, cancelled, synthetic).
+	StartedAt int64
+	EndedAt   int64
 	// Partial marks an early ToolDispatch emitted when a call begins (ID/Name set,
 	// Args still streaming) so a frontend can show the card immediately; a second,
 	// full ToolDispatch (Partial false, Args set) follows when the call completes.

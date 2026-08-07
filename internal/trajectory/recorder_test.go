@@ -1,0 +1,155 @@
+package trajectory
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"reasonix/internal/event"
+	"reasonix/internal/evidence"
+)
+
+type capabilitySink struct {
+	events     []event.Event
+	readiness  []evidence.ReadinessAudit
+	recoveries []event.ProtocolRecoveryAudit
+	turns      int
+}
+
+func (s *capabilitySink) Emit(e event.Event) { s.events = append(s.events, e) }
+func (s *capabilitySink) RecordReadinessAudit(a evidence.ReadinessAudit) {
+	s.readiness = append(s.readiness, a)
+}
+func (s *capabilitySink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
+	s.recoveries = append(s.recoveries, a)
+}
+func (s *capabilitySink) RecordTurnCompletion() { s.turns++ }
+
+func readRecords(t *testing.T, path string) []Record {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read trajectory: %v", err)
+	}
+	var out []Record
+	for line := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
+		var r Record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("bad record %q: %v", line, err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+func TestRecorderAppendsOrderedTimestampedRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.trajectory.jsonl")
+	inner := &capabilitySink{}
+	now := time.UnixMilli(1754500000000)
+	r, err := New(inner, path, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "c1", Name: "bash", Args: `{"command":"ls"}`}})
+	now = now.Add(120 * time.Millisecond)
+	r.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{
+		ID: "c1", Name: "bash", Output: "ok", DurationMs: 100,
+		StartedAt: 1754500000010, EndedAt: 1754500000110,
+	}})
+	r.Emit(event.Event{Kind: event.Reasoning, Text: "thinking about the next step"})
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	recs := readRecords(t, path)
+	if len(recs) != 3 {
+		t.Fatalf("got %d records, want 3", len(recs))
+	}
+	for i, rec := range recs {
+		if rec.Seq != uint64(i+1) {
+			t.Errorf("record %d seq = %d, want %d", i, rec.Seq, i+1)
+		}
+		if rec.SchemaVersion != SchemaVersion {
+			t.Errorf("record %d schema = %d, want %d", i, rec.SchemaVersion, SchemaVersion)
+		}
+		if rec.Event == nil {
+			t.Fatalf("record %d has no event payload", i)
+		}
+	}
+	if recs[0].TS != 1754500000000 || recs[1].TS != 1754500000120 {
+		t.Errorf("timestamps = %d, %d, want recorder-clock values", recs[0].TS, recs[1].TS)
+	}
+	if recs[1].Event.Tool == nil || recs[1].Event.Tool.StartedAt != 1754500000010 || recs[1].Event.Tool.EndedAt != 1754500000110 {
+		t.Errorf("tool result record lost execution bounds: %+v", recs[1].Event.Tool)
+	}
+	if recs[2].Event.Kind != "reasoning" || recs[2].Event.Text != "thinking about the next step" {
+		t.Errorf("reasoning record = %+v", recs[2].Event)
+	}
+	if len(inner.events) != 3 {
+		t.Errorf("inner sink saw %d events, want 3", len(inner.events))
+	}
+}
+
+func TestRecorderRecordsAndForwardsOptionalCapabilities(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.trajectory.jsonl")
+	inner := &capabilitySink{}
+	r, err := New(inner, path, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	r.RecordReadinessAudit(evidence.ReadinessAudit{Result: evidence.ReadinessBlocked, MissingVerification: 2})
+	r.RecordProtocolRecovery(event.ProtocolRecoveryAudit{Kind: event.ProtocolRecoveryMissingReasoningDetected})
+	r.RecordTurnCompletion()
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	recs := readRecords(t, path)
+	if len(recs) != 3 {
+		t.Fatalf("got %d records, want 3", len(recs))
+	}
+	if recs[0].ReadinessAudit == nil || recs[0].ReadinessAudit.Result != "blocked" || recs[0].ReadinessAudit.MissingVerification != 2 {
+		t.Errorf("readiness record = %+v", recs[0].ReadinessAudit)
+	}
+	if recs[1].ProtocolRecovery != string(event.ProtocolRecoveryMissingReasoningDetected) {
+		t.Errorf("protocol recovery record = %q", recs[1].ProtocolRecovery)
+	}
+	if !recs[2].TurnCompletion {
+		t.Errorf("turn completion record = %+v", recs[2])
+	}
+	if len(inner.readiness) != 1 || len(inner.recoveries) != 1 || inner.turns != 1 {
+		t.Errorf("inner capabilities = %d/%d/%d, want 1/1/1", len(inner.readiness), len(inner.recoveries), inner.turns)
+	}
+}
+
+func TestRecorderForwardsAfterCloseWithoutRecording(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.trajectory.jsonl")
+	inner := &capabilitySink{}
+	r, err := New(inner, path, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	r.Emit(event.Event{Kind: event.Text, Text: "before"})
+	if err := r.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	r.Emit(event.Event{Kind: event.Text, Text: "after"})
+
+	if len(readRecords(t, path)) != 1 {
+		t.Fatalf("post-close event must not be recorded")
+	}
+	if len(inner.events) != 2 {
+		t.Fatalf("inner sink saw %d events, want 2 (forwarding survives Close)", len(inner.events))
+	}
+}
+
+func TestNewFailsOnUnwritablePath(t *testing.T) {
+	if _, err := New(event.Discard, filepath.Join(t.TempDir(), "missing", "run.jsonl"), nil); err == nil {
+		t.Fatal("New must fail when the parent directory does not exist")
+	}
+}

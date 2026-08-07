@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 // because they cannot make unchanged stale write arguments valid.
 const repeatFailureBreakThreshold = 2
 
-func (a *Agent) repeatedFailureBlock(call provider.ToolCall, t tool.Tool) (string, bool) {
+func (a *Agent) repeatedFailureBlock(ctx context.Context, call provider.ToolCall, t tool.Tool) (string, bool) {
 	sig, _, ok := a.repeatFailureSignature(call, t)
 	if !ok || a.repeatFailureCounts == nil {
 		return "", false
@@ -27,7 +28,7 @@ func (a *Agent) repeatedFailureBlock(call provider.ToolCall, t tool.Tool) (strin
 	}
 	if repeatFailurePreviewRechecksState(call.Name, record.errClass) {
 		if previewer, ok := t.(tool.Previewer); ok {
-			_, err := previewer.Preview(json.RawMessage(call.Arguments))
+			_, err := previewer.Preview(ctx, json.RawMessage(call.Arguments))
 			if err == nil || repeatFailureErrorClass(call.Name, err) != record.errClass {
 				delete(a.repeatFailureCounts, sig)
 				return "", false

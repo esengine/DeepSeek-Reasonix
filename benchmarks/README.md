@@ -46,6 +46,7 @@ decoder. The task ID is the directory name; tasks run in sorted ID order.
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
 | `prompt` | string | yes | The task instruction handed to the agent. |
+| `class` | string | no | Task class label (e.g. `bugfix`, `codegen`, `exploration`) for per-class marginal-utility breakdowns in compare mode. |
 | `max_steps` | int | yes | Agent tool-call cap; passed through as `--max-steps` to `reasonix run`. |
 | `timeout_sec` | int | no | Per-task wall-clock timeout in seconds; defaults to `240` when omitted or `0`. |
 
@@ -113,6 +114,8 @@ own outcome).
 | `-ablate` | *(none)* | Ablation arm: comma-separated subsystems to switch off — `evidence`, `planner`, `subagent`, `retrieval`, `compaction`; `none` \| `all`. |
 | `-out` | *(stdout)* | Write the markdown report here. |
 | `-json` | *(none)* | Write the JSON report here (optional). |
+| `-trajectories` | *(none)* | Suite mode: write one `<task-id>.trajectory.jsonl` per task into this directory (the agent's full event stream with timestamps — see `reasonix run --trajectory`). The report gains a time-attribution line (tools vs. model) and each JSON result a `trajectory` digest. |
+| `-force-planner` | `false` | Suite mode: prefix each prompt with a plan-first directive so the two-model turn engages regardless of the planner gate. Use for the "with planner" arm of an A/B; results carry `plan_forced` so arms are only comparable with equal forcing. |
 | `-budget` | `800000` | Abort once total tokens cross this (`0` = no cap). Remaining tasks are reported as skipped. |
 
 Diff-mode flags:
@@ -125,6 +128,22 @@ Diff-mode flags:
 | `-max-steps` | `80` | Agent tool-call cap for the diff task. |
 | `-timeout` | `1200` | Agent timeout in seconds (diff mode). |
 | `-attempts` | `1` | Diff mode: retry up to N times until a run passes (stochastic agent). |
+
+## A/B compare mode
+
+Run the same suite twice and let the harness judge the trade:
+
+```sh
+go run ./cmd/e2ebench -force-planner -trajectories t-a -json with.json
+go run ./cmd/e2ebench -ablate planner -trajectories t-b -json without.json
+go run ./cmd/e2ebench -mode compare with.json without.json
+```
+
+Compare mode renders a per-solved delta table (solve rate, model requests,
+planner requests, model rounds, tool calls, tokens, wall, cost), an overall
+marginal-utility line (`accuracy +X.Xpp · wall/task +Y.Ys`), and — when tasks
+carry `class` labels — a per-class breakdown, so a subsystem's uplift and
+latency cost can be judged per task class instead of globally.
 
 ## SWE-bench Verified mode
 

@@ -273,7 +273,7 @@ func (a *Agent) interceptToolBefore(ctx context.Context, plan *toolCallPlan) (to
 	}
 	plan.call.Name = payload.Name
 	plan.call.Arguments = payload.Arguments
-	if blocked, early := a.parseToolCall(plan); early {
+	if blocked, early := a.parseToolCall(ctx, plan); early {
 		return blocked, true
 	}
 	return toolOutcome{}, false

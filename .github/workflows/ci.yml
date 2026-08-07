@@ -506,24 +506,6 @@ jobs:
             echo "::endgroup::"
           done
 
-      # Report-only complexity monitor for internal/agent. Does not duplicate the
-      # main lint/test/race gates; funlen+cyclop run with issues-exit-code=0 so
-      # the baseline is visible as a CI summary/artifact without blocking merges.
-      - name: agent complexity report
-        if: always()
-        run: |
-          # Reuse the golangci-lint binary installed by the previous step.
-          bash scripts/agent-complexity-report.sh
-
-      - name: upload agent complexity report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: agent-complexity-report
-          path: agent-complexity-report.txt
-          if-no-files-found: ignore
-          retention-days: 14
-
       - name: release workflow contracts
         run: |
           go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 \

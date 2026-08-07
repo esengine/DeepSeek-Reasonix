@@ -62,6 +62,23 @@ func AtomicCreateFile(path string, data []byte, perm os.FileMode) error {
 	return nil
 }
 
+// AtomicOverwriteFile replaces an existing file's contents atomically while
+// keeping the two properties a bare rename drops: the file's current permission
+// bits (an executable script must not come back 0644) and the symlink target
+// (a link must be written through, not replaced by a regular file). defaultPerm
+// applies only when path does not exist yet.
+func AtomicOverwriteFile(path string, data []byte, defaultPerm os.FileMode) error {
+	target := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		target = resolved
+	}
+	perm := defaultPerm
+	if info, err := os.Stat(target); err == nil {
+		perm = info.Mode().Perm()
+	}
+	return AtomicWriteFile(target, data, perm)
+}
+
 func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error) {
 	dir := filepath.Dir(path)
 	dirPerm := os.FileMode(0o755)

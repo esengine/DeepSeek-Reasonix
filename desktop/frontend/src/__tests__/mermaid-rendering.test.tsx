@@ -9,7 +9,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
-import { splitStableMarkdownSections, streamingMarkdownCommitInterval, useRenderedMarkdownText } from "../components/Markdown";
+import { splitStableMarkdownSections, streamingCommitTarget, streamingMarkdownCommitInterval, useRenderedMarkdownText } from "../components/Markdown";
 import MermaidDiagram from "../components/MermaidDiagram";
 import {
   __setMermaidPanZoomFactoryForTest,
@@ -194,6 +194,16 @@ console.log("\nmermaid rendering");
   eq(streamingMarkdownCommitInterval(1_000), 50, "short streaming Markdown uses the 50ms parse budget");
   eq(streamingMarkdownCommitInterval(8_000), 150, "medium streaming Markdown uses the 150ms parse budget");
   eq(streamingMarkdownCommitInterval(32_000), 300, "long streaming Markdown uses the 300ms parse budget");
+
+  eq(streamingCommitTarget("intro\n\npartial paragraph"), "intro\n\n", "commit target stops at the last completed block");
+  eq(streamingCommitTarget("no blank line yet"), "", "no completed block means nothing to parse yet");
+  eq(streamingCommitTarget("done\n\nalso done\n\n"), "done\n\nalso done\n\n", "trailing boundary commits everything");
+  eq(streamingCommitTarget("t\n\n```js\nstreaming code"), "t\n\n```js\nstreaming code", "an open fence keeps the whole text parsed for live highlighting");
+  eq(streamingCommitTarget("t\n\n$$\n\\int_0^1"), "t\n\n$$\n\\int_0^1", "open display math keeps the whole text parsed");
+  eq(streamingCommitTarget("t\n\n```\nc\n```\nafter"), "t\n\n```\nc\n```\n", "a closed fence promotes immediately without waiting for a blank line");
+  eq(streamingCommitTarget("t\n\n$$\nx\n$$\nafter"), "t\n\n$$\nx\n$$\n", "closed display math promotes immediately");
+  eq(streamingCommitTarget("para\n## Next sec"), "para\n", "a partial heading line completes the paragraph before it");
+  eq(streamingCommitTarget("para\n## Done\ntail"), "para\n## Done\n", "a terminated heading promotes itself as a complete block");
 }
 
 {
@@ -226,20 +236,26 @@ console.log("\nmermaid rendering");
     root.render(<MarkdownTextProbe text="start middle end" streaming />);
     await new Promise((resolve) => setTimeout(resolve, 60));
   });
-  eq(rootEl.textContent, "start", "streaming Markdown holds intermediate text until the animation frame");
+  eq(pendingFrame, undefined, "an in-progress block never schedules a parse commit");
+  eq(rootEl.textContent, "start", "the growing block rides the tail, not the parsed prefix");
+
+  await act(async () => {
+    root.render(<MarkdownTextProbe text={"start middle end\n\nnext block"} streaming />);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  });
   const frame = pendingFrame;
   await act(async () => {
     frame?.(performance.now());
     await flushTimers();
   });
-  eq(rootEl.textContent, "start middle end", "one animation frame commits the latest streamed text");
+  eq(rootEl.textContent, "start middle end\n\n", "a completed block commits up to its boundary");
 
   pendingFrame = undefined;
   await act(async () => {
-    root.render(<MarkdownTextProbe text="start middle end later" streaming />);
+    root.render(<MarkdownTextProbe text={"start middle end\n\nnext block grows"} streaming />);
     await flushTimers();
   });
-  eq(pendingFrame, undefined, "streaming Markdown waits for a fresh budget after the previous DOM commit");
+  eq(pendingFrame, undefined, "tail growth alone schedules no further parse");
 
   await act(async () => {
     root.render(<MarkdownTextProbe text="complete" streaming={false} />);

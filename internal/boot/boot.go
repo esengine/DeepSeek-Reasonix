@@ -267,12 +267,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		sink = flywheel.NewSink(sink, filepath.Join(fwDir, "flywheel", "events"), "")
 	}
 	// Goal token-budget accounting: the controller detects this tee and
-	// attributes billable usage events to the active goal turn's recorder, so
-	// executor/planner/subagent/compaction/classifier/router/reviewer/evaluator
-	// calls under one Goal scope accumulate into its observational token total.
-	// The tee must
-	// sit on the shared sink the agents emit into.
-	sink = control.NewGoalUsageTee(sink)
+	// attributes billable usage to the active goal turn's recorder. Both the
+	// tee and the delta coalescer must ride the shared sink agents emit into
+	// directly — wrapping only the controller's reference would leave the
+	// executor's per-chunk Text/Reasoning stream uncoalesced.
+	sink = control.NewGoalUsageTee(event.Coalesce(sink, event.DefaultStreamDeltaWindow))
 
 	// Extension preflight (stages 5b/7): start the installed, enabled v1 runtime
 	// packages ONCE, here, before model resolution, so plugin-namespaced refs
