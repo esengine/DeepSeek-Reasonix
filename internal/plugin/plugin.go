@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"reasonix/internal/event"
+	"reasonix/internal/flywheel"
 	"reasonix/internal/mcplaunch"
 	"reasonix/internal/provider"
 	"reasonix/internal/sandbox"
@@ -593,6 +594,11 @@ type Client struct {
 	t    transport
 	spec Spec
 
+	// mcpRecorder is an optional data-flywheel MCP recorder (docs/DATA_FLYWHEEL.md
+	// §2.2, gen-ai/mcp schema). Set via SetMCPRecorder before any tool call; nil
+	// disables recording.
+	mcpRecorder *flywheel.MCPRecorder
+
 	// Capabilities advertised by the server at initialize. prompts/list and
 	// resources/list are only called when advertised, so we never provoke a
 	// "method not found" on a tools-only server.
@@ -618,6 +624,14 @@ type Client struct {
 	toolAdapters []tool.Tool
 	progressID   atomic.Uint64
 }
+
+// SetMCPRecorder installs the data-flywheel MCP recorder. It must be called
+// before any tools/call dispatch; concurrent calls read the field after the
+// single assignment at startup. Nil disables recording.
+func (c *Client) SetMCPRecorder(r *flywheel.MCPRecorder) { c.mcpRecorder = r }
+
+// MCPRecorder returns the installed recorder (nil if none).
+func (c *Client) MCPRecorder() *flywheel.MCPRecorder { return c.mcpRecorder }
 
 func (c *Client) auxiliaryClient(ctx context.Context) (*Client, context.Context, context.CancelFunc, error) {
 	auxCtx, cancel := context.WithTimeout(ctx, defaultStartTimeout)
@@ -1503,6 +1517,7 @@ func newTransport(ctx context.Context, s Spec) (transport, error) {
 }
 
 func (c *Client) call(ctx context.Context, method string, params any) (json.RawMessage, error) {
+	start := time.Now()
 	params, unregisterProgress := c.withProgress(ctx, method, params)
 	defer unregisterProgress()
 
@@ -1512,6 +1527,22 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 	}
 
 	res, err := c.callTransport(callCtx, method, params)
+	// Flywheel 采集层 §2.2: record tool calls for the data flywheel.
+	if c.mcpRecorder != nil && method == "tools/call" {
+		argsDigest := ""
+		if params != nil {
+			if b, merr := json.Marshal(params); merr == nil {
+				argsDigest = string(b)
+			}
+		}
+		resultDigest := string(res)
+		errCode := ""
+		if err != nil {
+			errCode = flywheel.ErrCode(err.Error())
+		}
+		c.mcpRecorder.Record(c.name, rawToolNameFromCallParams(params), argsDigest, resultDigest,
+			time.Since(start), errCode)
+	}
 	if timeout > 0 && errors.Is(err, context.DeadlineExceeded) && callCtx.Err() == context.DeadlineExceeded && ctx.Err() == nil {
 		slog.Warn("plugin: MCP call timed out",
 			"server", c.name, "method", method, "tool", rawToolNameFromCallParams(params), "timeout", timeout)
