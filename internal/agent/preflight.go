@@ -25,7 +25,7 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 	cacheKey := a.currentPromptCacheKey()
 	est := estimateMessagesTokens(provider.ModelMessages(msgs))
 	_, _, high := a.compactThresholds()
-	force := max(int(float64(a.contextWindow)*a.compactForceRatio), high)
+	force := max(a.forceThreshold(), high)
 
 	// Prefer an existing valid projection when it still covers the pressure.
 	if st := a.compactionState; projectionValid(st, msgs, version, cacheKey) {

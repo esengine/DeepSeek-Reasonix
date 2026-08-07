@@ -3490,6 +3490,14 @@ func (c *Controller) Resume(s *agent.Session, path string) {
 	c.recoverCheckpointTransactions()
 	c.recoverInterruptedTurn(path)
 	c.maybeColdResumePrune(path)
+	// Budget-aware resume gate: a resumed session whose prompt cannot fit
+	// inside the provider's shared context window (or a cold cache with a
+	// prompt past the force mark) is compacted before the first send, so the
+	// request can never be rejected with HTTP 400 for input + output exceeding
+	// the window. Warm small resumes stay untouched (cached prefix survives).
+	if c.executor != nil {
+		c.executor.MaybeCompactOnResume(context.Background())
+	}
 	// session.load: Resume has no failure channel, so the session_policy
 	// strategy is advisory this stage — a required-class failure is surfaced
 	// as a warning and the load stands. The event still carries the final

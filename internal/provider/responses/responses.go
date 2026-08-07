@@ -171,6 +171,13 @@ func responsesReasoningDisabled(effort string) bool {
 
 func (c *client) Name() string { return c.name }
 
+// OutputBudget reports the total output budget the client will request.
+func (c *client) OutputBudget() int { return c.maxOutputTokens }
+
+// SharesContextWindow reports whether max_output_tokens competes with the
+// prompt input for the same context window (DeepSeek Responses API).
+func (c *client) SharesContextWindow() bool { return c.vendor == "deepseek" }
+
 // RequiresToolCallReasoning tells the agent to preserve stateless vendors'
 // reasoning on assistant tool-call turns so the follow-up can replay it.
 // DeepSeek and MiMo document this requirement for multi-turn tool calls.
