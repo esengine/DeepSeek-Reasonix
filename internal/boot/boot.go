@@ -32,6 +32,7 @@ import (
 	"reasonix/internal/cosplay"
 	"reasonix/internal/environment"
 	"reasonix/internal/event"
+	"reasonix/internal/flywheel"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
 	"reasonix/internal/extension/protocol"
@@ -257,6 +258,13 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// this frontend's StatsSource so the panel can split totals by entry point.
 	if source := strings.TrimSpace(opts.StatsSource); source != "" {
 		sink = stats.NewRecorder(sink, config.StatsDir(), source)
+	}
+	// Data-flywheel capture (docs/DATA_FLYWHEEL.md, ring 1): snapshot the agent
+	// event stream (tool calls, usage, compaction, turns) into gen_ai JSONL
+	// assets under the user state root. Pure observer — never alters the stream.
+	// The sink is nil-safe: when the state dir can't resolve, capture is skipped.
+	if fwDir := config.StatsDir(); fwDir != "" {
+		sink = flywheel.NewSink(sink, filepath.Join(fwDir, "flywheel", "events"), "")
 	}
 	// Goal token-budget accounting: the controller detects this tee and
 	// attributes billable usage events to the active goal turn's recorder, so
