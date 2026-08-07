@@ -61,7 +61,13 @@ func runBounded(ctx context.Context, name string, args ...string) (string, error
 	select {
 	case <-ctx.Done():
 		killProcessTree(cmd)
-		<-done // reap before returning
+		// The kill is best-effort (a child may have detached); never let the
+		// wait block forever — reap with a bounded grace period so the
+		// AutoVerifier goroutine and its semaphore slot are always released.
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+		}
 		return cap.buf.String(), ctx.Err()
 	case err := <-done:
 		return cap.buf.String(), err
