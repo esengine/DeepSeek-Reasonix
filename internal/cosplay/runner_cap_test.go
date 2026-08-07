@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -73,6 +74,9 @@ func TestLimitedBufferConcurrentWrites(t *testing.T) {
 // more than maxCaptureBytes is not misjudged as failed (the old short-write
 // bug turned over-cap output into io.ErrShortWrite → test failure).
 func TestRunBoundedDropsOverflowWithoutFailing(t *testing.T) {
+	if _, err := exec.LookPath("python"); err != nil {
+		t.Skip("python not available")
+	}
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main.py")
 	// Emit 2 MiB of noise then the PASS marker — over cap, but a valid smoke.
