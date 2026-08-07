@@ -476,6 +476,16 @@ func shutdownNow() tea.Msg { return tuiShutdownMsg{} }
 // Ns" counter in the status line.
 type elapsedTickMsg struct{}
 
+// balanceRefreshInterval paces the periodic wallet-balance refresh. The BAL
+// readout otherwise updates only at startup, turn end, and model switch — a
+// missed TurnDone (or a long delivery turn with no turn boundary) would freeze
+// it at the startup value for the rest of the session.
+const balanceRefreshInterval = 60 * time.Second
+
+// balanceTickMsg fires balanceRefreshInterval after the last refresh, keeping
+// the wallet-balance readout current without depending on event delivery.
+type balanceTickMsg struct{}
+
 // balanceMsg carries the result of an async wallet-balance fetch; text is the
 // formatted readout ("" when none/failed).
 type balanceMsg struct{ text string }
@@ -865,6 +875,7 @@ func (m chatTUI) Init() tea.Cmd {
 		textarea.Blink,
 		waitForAgentEvent(m.eventCh),
 		fetchBalance(m.ctrl),
+		balanceRefreshTick(),
 		m.runStatusline(), // nil (no-op) unless a custom status line is configured
 		m.refreshGitStatus(),
 	)
@@ -1793,6 +1804,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case balanceMsg:
 		m.balance = msg.text
+
+	case balanceTickMsg:
+		cmds = append(cmds, m.balanceRefreshCmds()...)
 
 	case statuslineMsg:
 		m.statuslineOut = msg.out
@@ -4521,6 +4535,23 @@ func waitForAgentEvent(ch chan event.Event) tea.Cmd {
 
 func elapsedTick() tea.Cmd {
 	return tea.Tick(time.Second, func(_ time.Time) tea.Msg { return elapsedTickMsg{} })
+}
+
+// balanceRefreshTick re-arms the periodic wallet-balance refresh so the BAL
+// readout stays current during long delivery turns or when a TurnDone is
+// missed (no turn boundary resets the display).
+func balanceRefreshTick() tea.Cmd {
+	return tea.Tick(balanceRefreshInterval, func(_ time.Time) tea.Msg { return balanceTickMsg{} })
+}
+
+// balanceRefreshCmds is the work a balance tick performs: a fresh wallet-balance
+// fetch plus a re-armed periodic timer. Split from the Update case so tests can
+// drive the fetch without waiting out the timer.
+func (m chatTUI) balanceRefreshCmds() []tea.Cmd {
+	if m.ctrl == nil {
+		return []tea.Cmd{balanceRefreshTick()}
+	}
+	return []tea.Cmd{fetchBalance(m.ctrl), balanceRefreshTick()}
 }
 
 // runSlashCommand handles "/<cmd> <args>" input. Local commands queue their
