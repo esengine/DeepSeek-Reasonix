@@ -74,3 +74,6 @@ scripts/official-theme-art/__pycache__/
 agent-complexity-report.txt
 site/.generated/
 websearch-smoke
+
+# Committed pointer at REASONIX.md; overrides a global CLAUDE.md ignore rule.
+!/CLAUDE.md

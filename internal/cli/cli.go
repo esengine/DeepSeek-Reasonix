@@ -1273,6 +1273,7 @@ func chatREPL(args []string, version string) int {
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
 	m.diagnostics = diagnostics
+	m.updateWatchdogStatusProvider()
 	m.planMode = permissions.plan
 	m.leases = leases
 	if cfg != nil {

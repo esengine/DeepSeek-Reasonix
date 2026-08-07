@@ -458,9 +458,11 @@ jobs:
         timeout-minutes: 20
         run: ../scripts/desktop-build.sh windows/amd64 v0.0.0-ci canary
 
+  # repolint scans desktop/ and sdk/ too, so this job also runs for diffs the
+  # `code` filter would otherwise skip.
   lint:
     needs: changes
-    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false')
+    if: always() && (github.event_name != 'pull_request' || needs.changes.outputs.code != 'false' || needs.changes.outputs.desktop != 'false' || needs.changes.outputs.sdk != 'false')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -469,6 +471,9 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+
+      - name: repo standards
+        run: go run ./tools/repolint
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9

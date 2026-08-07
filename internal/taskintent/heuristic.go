@@ -1,4 +1,4 @@
-package agent
+package taskintent
 
 import (
 	"strings"
@@ -8,7 +8,7 @@ import (
 // heuristicInputIsTask reports whether a user input reads as an actionable
 // task rather than conversational chat. The delivery evidence gate uses it to
 // decide when a turn should be held to acceptance-criteria expectations
-// (deliveryTaskNeedsEvidence); greetings and acknowledgements must not arm the
+// (NeedsEvidence); greetings and acknowledgements must not arm the
 // delivery gates.
 func heuristicInputIsTask(input string) bool {
 	trimmed := strings.TrimSpace(input)
@@ -76,7 +76,7 @@ func heuristicInputHasStrongTaskSignal(input string) bool {
 	// Mutation intent has a richer, negation-aware vocabulary than this generic
 	// task heuristic. Reuse it so short requests such as "push the branch" do not
 	// bypass delivery gates merely because the two keyword lists drift apart.
-	if deliveryTaskHasMutationIntent(normalized) || deliveryTaskNeedsPersistentAction(normalized) {
+	if deliveryTaskHasMutationIntent(normalized) || NeedsPersistentAction(normalized) {
 		return true
 	}
 

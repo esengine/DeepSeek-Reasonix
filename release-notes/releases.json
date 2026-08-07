@@ -2,6 +2,111 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.21.1",
+      "date": "2026-08-07",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.21.1",
+        "zh": "Reasonix 1.21.1"
+      },
+      "summary": {
+        "en": "Fixes a permanent updater deadlock on Windows/macOS and a TUI watchdog false-kill issue, plus internal refactors for maintainability.",
+        "zh": "修复了 Windows/macOS 上永久性的更新器死锁和 TUI 看门狗误杀问题，并进行了内部重构以提高可维护性。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Updater deadlock on Windows and macOS resolved",
+            "zh": "修复了 Windows 和 macOS 上的更新器死锁问题"
+          },
+          "body": {
+            "en": "Fixed an issue where the updater would permanently fail with \"update recovery: could not safely finish the previous update\" after an install layout change. The stale pending-update marker is now automatically quarantined, allowing future updates to proceed without manual intervention.",
+            "zh": "修复了安装布局更改后更新器永久失败并提示“update recovery: could not safely finish the previous update”的问题。现在过时的待处理更新标记会被自动隔离，无需手动干预即可继续后续更新。"
+          },
+          "refs": [
+            7431
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "TUI watchdog false kills and stall recovery",
+            "zh": "TUI 看门狗误杀和卡顿恢复"
+          },
+          "body": {
+            "en": "Fixed the TUI watchdog lifecycle to prevent false goroutine dumps, cancellations, and process kills when idle. Active stalls now escalate gracefully through dump, cancellation, and hard-kill fallback, with heartbeats limited to actual work events.",
+            "zh": "修复了 TUI 看门狗生命周期，防止空闲时出现错误的 goroutine 转储、取消和进程终止。活动卡顿现在会通过转储、取消和强制终止回退逐步升级，心跳仅限于实际工作事件。"
+          },
+          "refs": [
+            7832
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "title": {
+              "en": "Internal refactors for maintainability",
+              "zh": "内部重构以提高可维护性"
+            },
+            "body": {
+              "en": "Several internal subsystems were reorganized to reduce complexity and improve code health, including agent state management, task intent classification, controller decomposition, and evidence context handling. No user-facing behavior changes.",
+              "zh": "对多个内部子系统进行了重组，以降低复杂性并改善代码健康状况，包括代理状态管理、任务意图分类、控制器分解和证据上下文处理。无面向用户的行为变化。"
+            },
+            "refs": [
+              7786,
+              7788,
+              7795,
+              7796,
+              7797,
+              7787
+            ]
+          },
+          {
+            "title": {
+              "en": "Enforced code standards with repolint",
+              "zh": "通过 repolint 强制执行代码规范"
+            },
+            "body": {
+              "en": "Introduced machine-enforced rules for comment length, file size, and layering to prevent regressions. Existing violations are recorded in a baseline and new ones are blocked.",
+              "zh": "引入了机器强制执行的注释长度、文件大小和分层规则，以防止回归。现有违规记录在基线中，新的违规将被阻止。"
+            },
+            "refs": [
+              7806
+            ]
+          }
+        ],
+        "fixed": []
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "Lxiny-zy",
+        "SivanCola",
+        "esengine"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.21.1",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.21.0...desktop-v1.21.1",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.21.1",
+      "baseVersion": "1.21.1",
+      "status": "reviewed",
+      "previousRelease": "1.21.0",
+      "builds": {
+        "cli": "v1.21.1",
+        "desktop": "v1.21.1",
+        "npm": "1.21.1"
+      }
+    },
+    {
       "version": "1.21.0",
       "date": "2026-08-06",
       "channel": "stable",

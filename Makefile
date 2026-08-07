@@ -7,7 +7,7 @@ LDFLAGS := -s -w \
 	-X main.buildTimeUTC=$(BUILD_TIME_UTC)
 GOEXE := $(shell go env GOEXE)
 
-.PHONY: build vet fmt test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean
+.PHONY: build vet fmt lint lint-update test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
@@ -18,6 +18,12 @@ vet:
 
 fmt:
 	gofmt -w .
+
+lint:
+	go run ./tools/repolint
+
+lint-update:
+	go run ./tools/repolint -update
 
 test:
 	go test ./...

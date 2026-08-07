@@ -6,14 +6,36 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 
 ## Conventions
 
-- Go kernel under `internal/`; each package owns one concern and documents it in a
-  package comment. Match the surrounding comment density and idiom when editing.
+- Go kernel under `internal/`; each package owns one concern. A package's long
+  explanation belongs in its `doc.go`, not spread across implementation files.
 - One transport-agnostic `control.Controller` sits behind every frontend (chat
   TUI, HTTP/SSE serve, Wails desktop). Add behavior to the controller, not a
   frontend, so all three inherit it.
+- Layering (enforced): utility packages import nothing under `reasonix/`; only
+  the frontends `cli`, `serve`, `acp`, `bot`, `botruntime`, `boot` and the hosts
+  `cmd/`, `desktop/` may import `control`; nothing below a frontend may import
+  one. The declared sets live in `tools/repolint/layers.go`.
 - Cache-first: the system-prompt prefix (base prompt + tools + memory) must stay
   byte-stable across turns so DeepSeek's automatic prefix cache stays warm. Never
   mutate it mid-session — ride the turn tail instead (see `control.Compose`).
+
+## Comments
+
+Default is none — the code is the truth. Write one only when the **why** is
+non-obvious: a hidden constraint, a workaround anchored to something verifiable,
+an invariant the type system cannot express, or an external-protocol quirk.
+
+- Declaration doc: ≤5 lines. Package comment: ≤8 lines, or ≤40 in a `doc.go`.
+- Every other comment: ≤3 lines. Struct-field and trailing `//`: 1 line.
+- Never: restatements of the code, phase/stage narrative, incident or
+  conversation history, section banners, commented-out code, `@param` lists.
+- `TODO(#nnn):` and `HACK(#nnn):` need the issue anchor. `FIXME` is banned.
+- One responsibility per file; 800 lines is the ceiling.
+
+`go run ./tools/repolint` enforces all of it against a ratchet baseline: recorded
+debt is tolerated, anything new fails CI. Never widen the baseline to land a
+change — fix the code. `-update` exists for carrying debt through a rename or an
+extraction, and that diff must be justified in the PR.
 
 ## Memory
 
@@ -40,6 +62,7 @@ Run these **before every commit** to catch the fastest CI failures locally:
 ```bash
 gofmt -w .                          # catches gofmt (saves ~13s CI)
 go vet ./...                        # catches vet warnings (saves ~52s CI/lint)
+go run ./tools/repolint             # catches comment/size/layering regressions
 go test ./internal/tool/builtin/ ./internal/boot/  # catches tool/boot test breaks
 ```
 

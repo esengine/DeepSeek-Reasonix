@@ -164,14 +164,14 @@ func TestStreamReturnsRequestOnlyUsageOnProviderFailure(t *testing.T) {
 	sink := event.FuncSink(func(e event.Event) { events = append(events, e) })
 	a := New(failedRequestProvider{}, tool.NewRegistry(), NewSession(""), Options{ModelRef: "failed/model"}, sink)
 
-	_, _, _, _, _, _, _, usage, _, _, _, _, err := a.stream(context.Background(), 1, sink)
-	if err == nil {
+	st := a.stream(context.Background(), 1, sink)
+	if st.err == nil {
 		t.Fatal("expected provider failure")
 	}
-	if usage == nil || usage.TotalTokens != 0 || usage.RequestCount != 1 {
-		t.Fatalf("failed stream usage = %+v, want tokens=0 requests=1", usage)
+	if st.usage == nil || st.usage.TotalTokens != 0 || st.usage.RequestCount != 1 {
+		t.Fatalf("failed stream usage = %+v, want tokens=0 requests=1", st.usage)
 	}
-	a.emitTurnUsage(usage, nil)
+	a.emitTurnUsage(st.usage, nil)
 	if len(events) != 1 || events[0].Kind != event.Usage || events[0].Usage.RequestCount != 1 {
 		t.Fatalf("request-only usage event = %+v", events)
 	}

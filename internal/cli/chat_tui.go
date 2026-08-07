@@ -874,10 +874,11 @@ func suspendWithMouseReset() tea.Cmd {
 }
 
 func (m chatTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// Feed the startup/stall watchdog so freezes leave a goroutine dump and
-	// recover the terminal instead of a zero-byte log (#7435).
+	// Confirm booting → idle on the first Update. User input (keys/mouse/focus)
+	// must NOT refresh the active-turn heartbeat; only elapsedTick and work
+	// events do, so interaction cannot mask a stuck event loop (#7809).
 	if m.diagnostics != nil {
-		m.diagnostics.markProgress()
+		m.diagnostics.NoteBooted()
 	}
 	logFirstFrame := false
 	if m.diagnostics != nil && !m.firstFrameLogged {
@@ -1491,6 +1492,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if !m.ctrl.Running() {
 					m.state = tuiIdle
 					m.confirmBubbleSent()
+					m.noteWatchdogIdle()
 				}
 			default:
 				// Idle (any mode): a double-Esc on an empty composer opens the
@@ -1690,6 +1692,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.bubblePending = true
 				m.turnDiscarded = false
 				m.confirmBubbleSent() // shell events arrive instantly
+				m.noteWatchdogRunning()
 				m.ctrl.RunShell(cmd)
 				return m, tea.Batch(m.spinner.Tick, elapsedTick())
 			}
@@ -1730,6 +1733,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case agentEventMsg:
 		e := event.Event(msg)
+		// Agent/shell/controller work events prove the event loop is servicing
+		// the active turn. Record before ingest so TurnDone still counts.
+		m.noteWatchdogHeartbeat(watchdogAgentSource(e.Kind))
 		m.ingestEvent(e)
 		turnDone := e.Kind == event.TurnDone
 		gitMaybeChanged := e.Kind == event.ToolResult && !e.Tool.ReadOnly
@@ -1743,6 +1749,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for drained := 0; drained < maxEventDrain; drained++ {
 			select {
 			case e2 := <-m.eventCh:
+				m.noteWatchdogHeartbeat(watchdogAgentSource(e2.Kind))
 				m.ingestEvent(e2)
 				if e2.Kind == event.TurnDone {
 					turnDone = true
@@ -1822,6 +1829,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.followSessionLease()
 		} else {
 			m.ctrl = msg.ctrl
+			m.updateWatchdogStatusProvider()
 			m.label = msg.label
 			m.commands = msg.commands
 			m.skills = msg.skills
@@ -1970,6 +1978,9 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case elapsedTickMsg:
 		if m.state == tuiRunning {
+			// elapsedTick is the primary active-turn heartbeat: long turns that
+			// emit no agent events still prove the Bubble Tea loop is alive.
+			m.noteWatchdogHeartbeat("elapsed_tick")
 			m.elapsed = int(time.Since(m.runStart).Seconds())
 			m.tickToolRunning()
 			m.tickSubagentProgress()
@@ -4210,6 +4221,7 @@ func (m *chatTUI) startControllerTurn(displayed, restore string, start func()) t
 	m.turnTokens = 0
 	// The controller owns the run goroutine, its context, and cancellation; it
 	// streams events to eventCh and emits TurnDone when the turn settles.
+	m.noteWatchdogRunning()
 	start()
 	return tea.Batch(m.spinner.Tick, elapsedTick())
 }
@@ -4275,6 +4287,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		if e.Kind == event.TurnDone {
 			m.turnDiscarded = false
 			m.state = tuiIdle
+			m.noteWatchdogIdle()
 		}
 		return
 	}
@@ -4508,6 +4521,7 @@ func (m *chatTUI) ingestEvent(e event.Event) {
 		// just clear the un-sendable flag.
 		m.confirmBubbleSent()
 		m.state = tuiIdle
+		m.noteWatchdogIdle()
 		m.queueEditCursor = -1
 		m.queueEditDraft = ""
 		m.clearSubmittedPastes()

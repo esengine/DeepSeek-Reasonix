@@ -17,6 +17,7 @@ import (
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/goaleval"
 	"reasonix/internal/store"
+	"reasonix/internal/taskintent"
 	"reasonix/internal/tool"
 )
 
@@ -72,7 +73,7 @@ func budgetClassFor(goal string, researchMode GoalResearchMode) string {
 	if shouldUseAutoResearch(goal, researchMode) {
 		return budgetClassResearch
 	}
-	if agent.GoalTaskNeedsWriteBudget(goal) {
+	if taskintent.GoalNeedsWriteBudget(goal) {
 		return budgetClassWrite
 	}
 	return budgetClassSimple
