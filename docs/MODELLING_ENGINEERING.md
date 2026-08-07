@@ -52,6 +52,8 @@
 - agent 接线：关键步骤（tool 批次完成/compaction/会话边界）写 checkpoint；启动时检测崩溃残留 → 恢复。
 - 测试：20 步任务中途 kill → 重启 → 状态一致（精确重放断言）。
 
+**阶段 A 状态（2026-08 审计）**：机制已完整——①turn 级 `SaveSnapshot`（controller.snapshot）；②mid-turn 30s 自动快照（`autosaveWhileRunning`，间隔可配）；③崩溃/关机恢复分支（`SaveShutdownRecoveryBranch`）；④精确重放（`flywheel.Replay`，事件流重建会话轨迹，可审计）；⑤恢复测试（TestSnapshotRecoversDivergedControllerTranscript 等）。turn 内工具级 checkpoint 涉及 executeBatch 核心路径改造（高风险）——按交付原则**不交付**，以 mid-turn 快照 + 事件重放覆盖。
+
 ## 5. 轨迹数据（Co-training 基础，借鉴 Muse Spark 1.2）
 
 - flywheel Trajectory（task→verify→judge）已沉淀工具调用/验证轨迹 + Judge 质量标签。
