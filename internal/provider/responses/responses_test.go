@@ -105,8 +105,8 @@ func TestRequestUsesOnlySafeProviderOutputDefaults(t *testing.T) {
 
 	deepseek := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
 	deepseekBody, _, _ := deepseek.buildRequestBody(provider.Request{Messages: message})
-	if got := deepseekBody["max_output_tokens"]; got != provider.DefaultReasoningOutputTokens {
-		t.Fatalf("DeepSeek max_output_tokens = %#v, want %d", got, provider.DefaultReasoningOutputTokens)
+	if got := deepseekBody["max_output_tokens"]; got != 131072 {
+		t.Fatalf("DeepSeek max_output_tokens = %#v, want 131072", got)
 	}
 
 	for _, effort := range []string{"none", "disabled", "off", " NONE "} {
@@ -1126,21 +1126,21 @@ func TestReasoningMetaChunkEndToEnd(t *testing.T) {
 }
 
 // TestVendorTableMaxOutputTokens：默认输出预算完全由 vendor 表驱动——
-// mimo 65536（长思考不截断）、deepseek 32K、unknown 不设。
+// mimo 128000（长思考不截断）、deepseek 128K、unknown 不设。
 func TestVendorTableMaxOutputTokens(t *testing.T) {
 	msg := []provider.Message{{Role: provider.RoleUser, Content: "hi"}}
 
-	// mimo：表默认 65536（思考模式不设会顶到服务端 32768 截断）
+	// mimo：表默认 128000（思考模式不设会顶到服务端 32768 截断）
 	mimo := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro"}).(*client)
 	body, _, _ := mimo.buildRequestBody(provider.Request{Messages: msg})
-	if got := body["max_output_tokens"]; got != 65536 {
-		t.Fatalf("mimo max_output_tokens = %#v, want 65536 (vendor table)", got)
+	if got := body["max_output_tokens"]; got != 128000 {
+		t.Fatalf("mimo max_output_tokens = %#v, want 128000 (vendor table)", got)
 	}
-	// mimo 思考禁用也设 65536（mimo 无 thinking-disabled 豁免——表无条件）
+	// mimo 思考禁用也设 128000（mimo 无 thinking-disabled 豁免——表无条件）
 	noThinking := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5-pro", Effort: "none"}).(*client)
 	nb, _, _ := noThinking.buildRequestBody(provider.Request{Messages: msg})
-	if nb["max_output_tokens"] != 65536 {
-		t.Fatalf("mimo thinking-disabled budget = %#v, want 65536", nb["max_output_tokens"])
+	if nb["max_output_tokens"] != 128000 {
+		t.Fatalf("mimo thinking-disabled budget = %#v, want 128000", nb["max_output_tokens"])
 	}
 	// deepseek 值来自表（非硬编码常量）
 	ds := New(Config{Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro"}).(*client)

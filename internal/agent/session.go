@@ -246,6 +246,19 @@ func (s *Session) DrainContentRewriteReasons() []string {
 	return reasons
 }
 
+// NoteContentRewrite queues a provider-visible prefix-change reason without
+// mutating Messages. Projection installs use this so cache diagnostics still
+// attribute the next request's miss to compaction while the canonical
+// transcript stays intact.
+func (s *Session) NoteContentRewrite(reason string) {
+	if s == nil || reason == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingContentReasons = append(s.pendingContentReasons, reason)
+}
+
 // Snapshot returns a copy of the messages, safe to read from another goroutine
 // while a turn appends. Frontends (History, Save) use it instead of touching the
 // live slice.
@@ -328,6 +341,21 @@ func (s *Session) snapshotWithVersion() ([]provider.Message, uint64, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]provider.Message(nil), s.Messages...), s.version, s.rewriteVersion
+}
+
+// snapshotMessagesVersion returns a copy of the messages with the transcript
+// version, for projection validity checks that do not need rewriteVersion.
+func (s *Session) snapshotMessagesVersion() ([]provider.Message, uint64) {
+	msgs, version, _ := s.snapshotWithVersion()
+	return msgs, version
+}
+
+// TranscriptVersion returns the current append/rewrite counter used by
+// context-projection validity checks.
+func (s *Session) TranscriptVersion() uint64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.version
 }
 
 // RewriteVersion returns the current rewrite version.

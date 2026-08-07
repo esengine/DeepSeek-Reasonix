@@ -153,6 +153,35 @@ func TestConfiguredMaxOutputTokensRespectsMandatoryAnthropicFallback(t *testing.
 	}
 }
 
+func TestNewSelectsMaxOutputTokenDefaultByEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		baseURL string
+		extra   map[string]any
+		want    int
+	}{
+		{name: "native anthropic", want: provider.DefaultReasoningOutputTokens},
+		{name: "unknown compatible gateway", baseURL: "https://proxy.example.com/anthropic", want: provider.DefaultReasoningOutputTokens},
+		{name: "official deepseek", baseURL: "https://api.deepseek.com/anthropic", want: provider.DefaultHighOutputTokens},
+		{name: "explicit override", baseURL: "https://api.deepseek.com/anthropic", extra: map[string]any{"max_output_tokens": 8192}, want: 8192},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p, err := New(provider.Config{
+				Name:    "test",
+				BaseURL: tc.baseURL,
+				Model:   "model",
+				Extra:   tc.extra,
+			})
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if got := p.(*client).defaultMaxTokens; got != tc.want {
+				t.Fatalf("defaultMaxTokens = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestStreamAnnotatesIndexedToolSchemaError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)

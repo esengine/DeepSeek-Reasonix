@@ -295,3 +295,45 @@ func TestGoBuildUnderSandbox(t *testing.T) {
 		t.Errorf("build output missing: %v", err)
 	}
 }
+
+// fakeSandboxExec writes an executable named sandbox-exec into a fresh temp
+// dir, prepends that dir to PATH, and returns the binary's path. The probe
+// resolves the binary via PATH, so the fake shadows any real sandbox-exec on
+// the host.
+func fakeSandboxExec(t *testing.T, exitCode string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sandbox-exec")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit "+exitCode+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return path
+}
+
+// TestAvailableFalseWhenSandboxExecUnusable covers the macOS 10.14+ case where
+// sandbox-exec is installed but sandbox_apply is refused (exit 71): the probe
+// must report unavailable so enforce mode fails loudly at boot instead of
+// silently on every command.
+func TestAvailableFalseWhenSandboxExecUnusable(t *testing.T) {
+	path := fakeSandboxExec(t, "71")
+	sandboxExecUsability.Delete(path) // the fake is fresh per test; re-probe it
+	if Available() {
+		t.Fatal("Available() = true, want false: sandbox-exec on PATH but unusable (exit 71)")
+	}
+}
+
+func TestAvailableTrueWhenSandboxExecUsable(t *testing.T) {
+	path := fakeSandboxExec(t, "0")
+	sandboxExecUsability.Delete(path)
+	if !Available() {
+		t.Fatal("Available() = false, want true: working sandbox-exec")
+	}
+}
+
+func TestAvailableFalseWhenSandboxExecMissing(t *testing.T) {
+	t.Setenv("PATH", t.TempDir()) // no sandbox-exec anywhere on PATH
+	if Available() {
+		t.Fatal("Available() = true, want false: sandbox-exec not on PATH")
+	}
+}

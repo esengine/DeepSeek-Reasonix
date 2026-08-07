@@ -262,9 +262,10 @@ Process Q3 expense reimbursement across 3 systems.
 		t.Fatalf("compact failed: %v", err)
 	}
 
-	// Verify the summary was inserted into the session
+	// Verify the summary is visible in the model-visible messages (the
+	// projection, since upstream compactions no longer rewrite the session).
 	var summaryContent string
-	for _, msg := range sess.Messages {
+	for _, msg := range a.modelVisibleMessages() {
 		if strings.Contains(msg.Content, "compaction-summary") {
 			summaryContent = msg.Content
 			break

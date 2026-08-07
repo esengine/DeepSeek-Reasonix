@@ -95,11 +95,12 @@ func NewSession(prov provider.Provider, readOnlyReg *tool.Registry, policyPrompt
 		RequireVisibleFinal: true, // each review must produce its own parseable verdict
 		// Use the shared context window so the guardian session can compact
 		// itself when it grows too large across many reviews.
-		ContextWindow:       100_000,
-		CompactRatio:        0.8,
-		SoftCompactRatio:    0.5,
-		ToolResultSnipRatio: 0.6,
-		CompactForceRatio:   0.9,
+		ContextWindow:          100_000,
+		CompactRatio:           0.8,
+		SoftCompactRatio:       0.5,
+		ToolResultSnipRatio:    0.6,
+		CompactForceRatio:      0.9,
+		StrictAlternatingRoles: true,
 		// Guardian's own sink drops everything — the audit line (emitTo) is the
 		// only user-visible output. Usage events are captured internally for
 		// per-review cost reporting.

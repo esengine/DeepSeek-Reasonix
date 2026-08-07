@@ -367,7 +367,7 @@ func appendPluginHooks(out *[]ResolvedHook, reasonixHomeDir, projectRoot string)
 						Command:       execution.Command,
 						Argv:          execution.Argv,
 						ExecutionMode: execution.ExecutionMode,
-						Shell:         h.Shell,
+						Shell:         execution.Shell,
 						ContextFile:   contextFile,
 						Description:   h.Description,
 						Timeout:       h.Timeout,
@@ -397,32 +397,7 @@ func pluginHookExecutionConfigForPlatform(h pluginpkg.Hook, root, goos string) H
 	case h.ShellCommand:
 		mode = ExecutionShell
 	}
-	expansionRoot := root
-	if goos == "windows" && mode == ExecutionShell && strings.EqualFold(strings.TrimSpace(h.Shell), "bash") {
-		expansionRoot = strings.ReplaceAll(root, `\`, "/")
-	}
-	command := expandPluginRoot(h.Command, expansionRoot)
-	resolveFromPluginRoot := mode != ExecutionShell &&
-		!(mode == ExecutionExec && h.PayloadFormat == "claude")
-	if command != "" && resolveFromPluginRoot && !filepath.IsAbs(command) {
-		command = filepath.Join(root, filepath.FromSlash(command))
-	}
-	if mode == ExecutionLegacy {
-		command = NormalizeCommand(command)
-	}
-	var argv []string
-	if h.ArgsSet {
-		argv = make([]string, 0, len(h.Args))
-	}
-	for _, arg := range h.Args {
-		argv = append(argv, expandPluginRoot(arg, root))
-	}
-	return HookConfig{
-		Command:       command,
-		Argv:          argv,
-		ExecutionMode: mode,
-		Shell:         h.Shell,
-	}
+	return completePluginHookExecutionConfig(h, root, goos, mode)
 }
 
 func expandPluginRoot(value, root string) string {
@@ -1297,6 +1272,7 @@ func NewDefaultSpawner(options RuntimeOptions) Spawner {
 }
 
 func defaultSpawner(ctx context.Context, in SpawnInput, options RuntimeOptions) SpawnResult {
+	in = normalizeWindowsHookSpawnInputForPlatform(in, runtime.GOOS)
 	cctx, cancel := context.WithTimeout(ctx, in.Timeout)
 	defer cancel()
 
@@ -1491,20 +1467,7 @@ func checkRuntimeForPlatform(config HookConfig, options RuntimeOptions, goos str
 }
 
 func requiresWindowsBash(config HookConfig) bool {
-	switch config.ExecutionMode {
-	case ExecutionShell:
-		return strings.EqualFold(strings.TrimSpace(config.Shell), "bash")
-	case ExecutionExec:
-		return isBarePOSIXShellWord(config.Command) && hasCommandStringFlag(config.Argv)
-	case ExecutionLegacy:
-		if config.Argv != nil {
-			return isBarePOSIXShellWord(config.Command) && hasCommandStringFlag(config.Argv)
-		}
-		fields, _, _, ok := parseSimpleHookCommandFields(config.Command)
-		return ok && len(fields) >= 3 && isBarePOSIXShellWord(fields[0]) && hasCommandStringFlag(fields[1:])
-	default:
-		return false
-	}
+	return requiresWindowsBashForHook(config)
 }
 
 func rawShellCommand(ctx context.Context, sh sandbox.Shell, command string) (*exec.Cmd, error) {

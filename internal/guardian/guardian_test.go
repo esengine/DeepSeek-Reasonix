@@ -476,15 +476,6 @@ func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
 	}
 
 	msgs := gs.sess.Snapshot()
-	var hasDigest bool
-	for _, m := range msgs {
-		if agent.IsCompactionSummary(m) {
-			hasDigest = true
-		}
-	}
-	if !hasDigest {
-		t.Fatal("test setup: guardian compaction did not fold anything, the digest adjacency is not exercised")
-	}
 	events := sink.guardianEvents()
 	if len(events) != compactEvery {
 		t.Fatalf("guardian events = %d, want %d", len(events), compactEvery)
@@ -497,5 +488,30 @@ func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
 		if msgs[i].Role == msgs[i-1].Role {
 			t.Fatalf("guardian session has consecutive %s messages at indexes %d/%d of %d", msgs[i].Role, i-1, i, len(msgs))
 		}
+	}
+
+	// Projection compaction leaves the canonical transcript untouched. The next
+	// review must nevertheless send the compacted view, with the digest and tail
+	// coalesced so strict-alternation providers do not receive adjacent users.
+	parent.Add(provider.Message{Role: provider.RoleUser, Content: "post-compaction review"})
+	if allow, _, err := gs.Review(context.Background(), "write_file", json.RawMessage(`{"file_path":"a.txt"}`), parent); err != nil || !allow {
+		t.Fatalf("post-compaction review = allow %v err %v, want allow nil", allow, err)
+	}
+	reqs := prov.requestsSnapshot()
+	if len(reqs) <= compactEvery {
+		t.Fatalf("provider requests = %d, want a request after projection compaction", len(reqs))
+	}
+	last := reqs[len(reqs)-1]
+	hasDigest := false
+	for i, m := range last.Messages {
+		if agent.IsCompactionSummary(m) {
+			hasDigest = true
+		}
+		if i > 0 && m.Role == provider.RoleUser && last.Messages[i-1].Role == provider.RoleUser {
+			t.Fatalf("post-compaction request carries consecutive user messages at index %d", i)
+		}
+	}
+	if !hasDigest {
+		t.Fatal("post-compaction request did not use the digest projection")
 	}
 }

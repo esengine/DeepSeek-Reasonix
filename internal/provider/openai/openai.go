@@ -229,7 +229,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	// output. Preserve an explicit user budget in either mode, but leave a
 	// thinking-disabled request uncapped unless the user configured one.
 	if maxOutputTokens == 0 && officialDeepSeek && thinkingType != "disabled" {
-		maxOutputTokens = provider.DefaultReasoningOutputTokens
+		maxOutputTokens = provider.DefaultHighOutputTokens // DeepSeek supports up to 384K; 128K is a safe default for reasoning
 	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {

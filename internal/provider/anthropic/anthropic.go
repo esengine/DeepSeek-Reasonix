@@ -51,10 +51,14 @@ const (
 	// defaultBaseURL is the first-party endpoint; config may override it (e.g. a
 	// gateway). Bedrock/Vertex use a different request shape and are out of scope.
 	defaultBaseURL = "https://api.anthropic.com"
-	// defaultMaxTokens is the output ceiling used when neither the provider config
-	// nor the request supplies one. Anthropic requires max_tokens, so unlike the
-	// optional OpenAI-compatible budget it cannot be omitted.
-	defaultMaxTokens = 32768
+	// defaultMaxTokens is the conservative output ceiling used when neither the
+	// provider config nor the request supplies one. Anthropic requires max_tokens,
+	// but support is model-specific, so native Anthropic and unknown compatible
+	// gateways must not inherit a universal 128K request.
+	defaultMaxTokens = provider.DefaultReasoningOutputTokens
+	// deepSeekDefaultMaxTokens is safe only for the official DeepSeek Anthropic-
+	// compatible endpoint, whose reasoning models support the higher ceiling.
+	deepSeekDefaultMaxTokens = provider.DefaultHighOutputTokens
 )
 
 func init() {
@@ -74,6 +78,22 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
+	// Anthropic's API surface is at {root}/v1/messages, so c.baseURL stores
+	// the *root* -- without any trailing /v1. The setup wizard, however, lets
+	// users paste a full OpenAI-compatible URL (e.g.
+	// "https://proxy.example.com/v1") because that's what /models probes
+	// expect. Stripping the trailing /v1 here makes both forms land on the
+	// same endpoint without forcing users to remember Anthropic's quirky
+	// root-vs-versioned split. Without this, a user pasting
+	// "https://proxy.example.com/v1" would probe /v1/models successfully
+	// but get the chat client concatenating onto
+	// "https://proxy.example.com/v1/v1/messages" -- a 404.
+	root := strings.TrimRight(baseURL, "/")
+	root = strings.TrimSuffix(root, "/v1")
+	if root == "" {
+		root = defaultBaseURL
+	}
+	officialDeepSeek := openai.IsDeepSeek(root)
 	keyEnv, _ := cfg.Extra["api_key_env"].(string) // for actionable auth errors
 	keySource, _ := cfg.Extra["api_key_source"].(string)
 	thinking, _ := cfg.Extra["thinking"].(string)
@@ -89,25 +109,13 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		// Messages requires max_tokens, so an optional-budget disable request
 		// falls back to the provider's stable mandatory default.
 		maxOutputTokens = defaultMaxTokens
+		if officialDeepSeek {
+			maxOutputTokens = deepSeekDefaultMaxTokens
+		}
 	}
 	httpClient, err := newHTTPClient(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: network: %w", err)
-	}
-	// Anthropic's API surface is at {root}/v1/messages, so c.baseURL stores
-	// the *root* — without any trailing /v1. The setup wizard, however, lets
-	// users paste a full OpenAI-compatible URL (e.g.
-	// "https://proxy.example.com/v1") because that's what /models probes
-	// expect. Stripping the trailing /v1 here makes both forms land on the
-	// same endpoint without forcing users to remember Anthropic's quirky
-	// root-vs-versioned split. Without this, a user pasting
-	// "https://proxy.example.com/v1" would probe /v1/models successfully
-	// but get the chat client concatenating onto
-	// "https://proxy.example.com/v1/v1/messages" — a 404.
-	root := strings.TrimRight(baseURL, "/")
-	root = strings.TrimSuffix(root, "/v1")
-	if root == "" {
-		root = defaultBaseURL
 	}
 	return &client{
 		name:             name,
@@ -117,7 +125,7 @@ func New(cfg provider.Config) (provider.Provider, error) {
 		baseURL:          root,
 		model:            cfg.Model,
 		nativeAnthropic:  strings.EqualFold(root, defaultBaseURL),
-		deepseek:         openai.IsDeepSeek(root),
+		deepseek:         officialDeepSeek,
 		thinking:         thinking,
 		effort:           effort,
 		vision:           vision,

@@ -181,9 +181,10 @@ func TestCompactionHealthyWindowNeverLoops(t *testing.T) {
 }
 
 // TestPruneKeepsToolHeavySessionBounded: when growth comes from tool results,
-// pruning alone keeps the prompt under the trigger for the whole session — the
-// paid summarize call never happens and the stuck guard never trips. 20 turns of
-// ~3k-token blobs would otherwise cross 0.8×40000 around turn 11.
+// projection-only pruning is the primary pressure valve. Occasional force-ratio
+// summary folds may still fire when the recent tail alone is huge, but they must
+// stay rare and must never trip the stuck guard. 20 turns of ~3k-token blobs
+// would otherwise cross 0.8×40000 around turn 11 without maintenance.
 func TestPruneKeepsToolHeavySessionBounded(t *testing.T) {
 	perTurn, paused, prunes := compactionsPerTurn(t, 40000, strings.Repeat("file line. ", 1100), "", 20)
 
@@ -193,8 +194,8 @@ func TestPruneKeepsToolHeavySessionBounded(t *testing.T) {
 	}
 	t.Logf("compactions per turn: %v (total %d), paused=%v, prunes=%d", perTurn, total, paused, prunes)
 
-	if total != 0 {
-		t.Errorf("compaction fired %d times; pruning should keep a tool-heavy session bounded without folding", total)
+	if total > 3 {
+		t.Errorf("compaction fired %d times; pruning should keep folds rare on a tool-heavy session", total)
 	}
 	if paused {
 		t.Errorf("auto-compaction paused; pruning should have prevented the stuck loop entirely")

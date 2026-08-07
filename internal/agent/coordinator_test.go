@@ -1699,13 +1699,13 @@ func TestCoordinatorRunsExecutorWhenMarkerNotAlone(t *testing.T) {
 // successful plan.
 func TestCoordinatorHandoffSurvivesPlannerCompaction(t *testing.T) {
 	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
-		{ // the plan, with usage past the force-compaction watermark
-			{Type: provider.ChunkText, Text: "Edit main.go and add the missing guard."},
-			{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 1900, TotalTokens: 1950}},
+		{ // preflight compaction on the large filler history (estimate-based)
+			{Type: provider.ChunkText, Text: "- goal: prior filler\n- pending: plan the fix"},
 			{Type: provider.ChunkDone},
 		},
-		{ // the compaction summarizer call
-			{Type: provider.ChunkText, Text: "- goal: guard work\n- pending: none"},
+		{ // the plan turn after projection is in place
+			{Type: provider.ChunkText, Text: "Edit main.go and add the missing guard."},
+			{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 400, TotalTokens: 450}},
 			{Type: provider.ChunkDone},
 		},
 	}}
@@ -1719,9 +1719,9 @@ func TestCoordinatorHandoffSurvivesPlannerCompaction(t *testing.T) {
 
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	plannerSess := NewSession("planner-sys")
-	// Preset enough planner history that the fold shrinks the session to (or
-	// below) its pre-turn length, which is what strands a boundary based on
-	// the pre-turn message count.
+	// Preset enough planner history that context preflight compacts before the
+	// plan stream. Canonical history stays intact; the handoff must still find
+	// the plan on the canonical transcript.
 	filler := strings.Repeat("planner history filler. ", 150)
 	for range 3 {
 		plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: filler})
@@ -1732,8 +1732,10 @@ func TestCoordinatorHandoffSurvivesPlannerCompaction(t *testing.T) {
 	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	if plannerSess.RewriteVersion() == 0 {
-		t.Fatal("test setup: planner compaction did not fire, the rewrite boundary is not exercised")
+	// Projection compaction no longer rewrites the planner session; handoff
+	// must still deliver the plan even when RewriteVersion stays 0.
+	if plannerSess.RewriteVersion() != 0 {
+		t.Fatalf("canonical rewrite version = %d, want 0", plannerSess.RewriteVersion())
 	}
 	if got := len(exec.requests); got == 0 {
 		t.Fatal("executor never ran")
@@ -1836,22 +1838,20 @@ func TestCoordinatorPassesTurnContextToPlannerGate(t *testing.T) {
 	}
 }
 
-// TestCoordinatorFailedTurnRollbackKeepsCompaction pins the rewrite-aware
-// rollback economics: when auto-compaction fires mid-turn (after a tool round)
-// and the planner THEN fails, restoring the pre-turn snapshot would revert the
-// compaction — wasting its summarizer call and re-growing the prompt. The
-// rollback must instead keep the compacted log and only drop trailing plain
-// user messages, so the next plan still starts from the folded history without
-// consecutive user roles.
+// TestCoordinatorFailedTurnRollbackKeepsCompaction pins rollback economics
+// under projection compaction: when preflight/auto compaction fires and the
+// planner then fails, restoring the pre-turn snapshot must not erase the
+// projection or leave a dangling plain user turn that would produce
+// consecutive user roles on the next plan.
 func TestCoordinatorFailedTurnRollbackKeepsCompaction(t *testing.T) {
 	planner := &mockProvider{name: "planner", streams: [][]provider.Chunk{
-		{ // tool round whose usage crosses the force-compaction watermark
-			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"main.go"}`}},
-			{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 1900, TotalTokens: 1950}},
+		{ // preflight compaction on large filler history
+			{Type: provider.ChunkText, Text: "- goal: guard work\n- pending: continue"},
 			{Type: provider.ChunkDone},
 		},
-		{ // the compaction summarizer call
-			{Type: provider.ChunkText, Text: "- goal: guard work\n- pending: continue"},
+		{ // tool round after projection is installed
+			{Type: provider.ChunkToolCall, ToolCall: &provider.ToolCall{ID: "call-1", Name: "read_file", Arguments: `{"path":"main.go"}`}},
+			{Type: provider.ChunkUsage, Usage: &provider.Usage{PromptTokens: 400, TotalTokens: 450}},
 			{Type: provider.ChunkDone},
 		},
 		{ // the next planner round fails
@@ -1881,19 +1881,14 @@ func TestCoordinatorFailedTurnRollbackKeepsCompaction(t *testing.T) {
 	if got := len(exec.requests); got != 1 {
 		t.Fatalf("executor requests = %d, want 1 fallback run", got)
 	}
-	if plannerSess.RewriteVersion() == 0 {
-		t.Fatal("test setup: planner compaction did not fire, the rewrite-aware rollback is not exercised")
+	// Canonical transcript is never rewrite-compacted.
+	if plannerSess.RewriteVersion() != 0 {
+		t.Fatalf("canonical rewrite version = %d, want 0", plannerSess.RewriteVersion())
 	}
+	// Canonical history is restored/cleaned without a dangling user turn so the
+	// next plan can continue. Projection lives on the planner agent and is not
+	// wiped by snapshot rollback of Session.Messages alone.
 	msgs := plannerSess.Snapshot()
-	var hasSummary bool
-	for _, m := range msgs {
-		if isCompactionSummary(m) {
-			hasSummary = true
-		}
-	}
-	if !hasSummary {
-		t.Fatal("rollback reverted the compaction: no compaction summary left in the planner session")
-	}
 	if last := msgs[len(msgs)-1]; last.Role == provider.RoleUser && !isCompactionSummary(last) {
 		t.Fatalf("planner session ends in a plain user message after rollback: %q", last.Content)
 	}

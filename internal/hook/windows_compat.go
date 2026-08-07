@@ -3,6 +3,7 @@ package hook
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -119,6 +120,39 @@ func normalizeWindowsBatchExecutable(executable string) string {
 func isWindowsBatchExecutable(executable string) bool {
 	lower := strings.ToLower(executable)
 	return strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat")
+}
+
+func isPOSIXShellScriptFile(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" || isWindowsBatchExecutable(path) {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	body, readErr := io.ReadAll(io.LimitReader(file, 512))
+	closeErr := file.Close()
+	if readErr != nil || closeErr != nil || len(body) < 3 || body[0] != '#' || body[1] != '!' {
+		return false
+	}
+	line := strings.TrimSpace(strings.SplitN(string(body[2:]), "\n", 2)[0])
+	if line == "" {
+		return false
+	}
+	for field := range strings.FieldsSeq(line) {
+		field = strings.Trim(strings.ToLower(field), `"'`)
+		field = strings.TrimSuffix(filepath.Base(filepath.ToSlash(field)), ".exe")
+		switch field {
+		case "sh", "bash", "dash", "zsh", "ksh":
+			return true
+		}
+	}
+	return false
 }
 
 func isSimpleWindowsBatchTail(tail string) bool {

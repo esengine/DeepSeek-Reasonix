@@ -2,12 +2,12 @@
   "limits": {
     "banner": 0,
     "commented-code": 0,
-    "essay": 4111,
-    "file-size": 73726,
+    "essay": 4115,
+    "file-size": 73588,
     "layering": 1,
     "marker": 0,
     "narrative": 66,
-    "test-file-size": 64896
+    "test-file-size": 64726
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -15,9 +15,6 @@
     },
     "cmd/e2ebench/mutation.go": {
       "essay": 1
-    },
-    "cmd/e2ebench/swebench_run.go": {
-      "essay": 2
     },
     "cmd/reasonix-legacy-migrator/main.go": {
       "essay": 1
@@ -301,8 +298,8 @@
       "essay": 7
     },
     "internal/agent/agent.go": {
-      "essay": 128,
-      "file-size": 3270
+      "essay": 127,
+      "file-size": 3201
     },
     "internal/agent/ask.go": {
       "essay": 4
@@ -326,20 +323,19 @@
       "essay": 1
     },
     "internal/agent/compact.go": {
-      "essay": 19,
-      "file-size": 59
+      "essay": 27
     },
     "internal/agent/compact_test.go": {
-      "essay": 3,
-      "test-file-size": 202
+      "essay": 4,
+      "test-file-size": 8
     },
     "internal/agent/coordinator.go": {
       "essay": 20,
       "file-size": 292
     },
     "internal/agent/coordinator_test.go": {
-      "essay": 5,
-      "test-file-size": 1244
+      "essay": 3,
+      "test-file-size": 1239
     },
     "internal/agent/delivery_hardening_test.go": {
       "essay": 5
@@ -784,7 +780,7 @@
     },
     "internal/config/config.go": {
       "essay": 56,
-      "file-size": 1489,
+      "file-size": 1481,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -874,7 +870,7 @@
     },
     "internal/control/controller.go": {
       "essay": 180,
-      "file-size": 5367,
+      "file-size": 5348,
       "narrative": 4
     },
     "internal/control/controller_test.go": {
@@ -1313,11 +1309,11 @@
     },
     "internal/provider/anthropic/anthropic.go": {
       "essay": 36,
-      "file-size": 100
+      "file-size": 108
     },
     "internal/provider/anthropic/anthropic_test.go": {
       "essay": 1,
-      "test-file-size": 221
+      "test-file-size": 250
     },
     "internal/provider/openai/host.go": {
       "essay": 8
@@ -1334,12 +1330,12 @@
       "essay": 7
     },
     "internal/provider/provider.go": {
-      "essay": 50,
-      "file-size": 345
+      "essay": 51,
+      "file-size": 353
     },
     "internal/provider/responses/responses.go": {
-      "essay": 26,
-      "file-size": 78
+      "essay": 25,
+      "file-size": 79
     },
     "internal/provider/responses/responses_test.go": {
       "essay": 6,

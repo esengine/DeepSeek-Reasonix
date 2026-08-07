@@ -236,6 +236,14 @@ type ResponseFormat struct {
 // inheriting this value merely because they implement an OpenAI-shaped wire.
 const DefaultReasoningOutputTokens = 32 * 1024
 
+// DefaultHighOutputTokens is the raised output budget for reasoning APIs whose
+// documented contract safely accepts 128K-class ceilings (DeepSeek Responses
+// API allows up to 384K; MiMo allows up to 131072). Long reasoning turns
+// truncate under 32K, forcing many small write→test→fix iterations; a 128K
+// budget lets the model finish in one pass. Kept in one place so the three
+// protocols (Responses / Chat Completions / Anthropic) cannot drift apart.
+const DefaultHighOutputTokens = 128 * 1024
+
 // TemperaturePtr wraps v in a pointer so callers that explicitly want a
 // specific temperature, including 0 for deterministic output, can distinguish
 // that intent from "not set, use the provider default".
