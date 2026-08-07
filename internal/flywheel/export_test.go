@@ -88,3 +88,36 @@ func TestExportFiltersAndManifest(t *testing.T) {
 		t.Errorf("g1 judge lost: %+v", tr.Judge)
 	}
 }
+
+func TestContextHints(t *testing.T) {
+	s, _ := NewStore(filepath.Join(t.TempDir(), "fw"))
+	_ = s.SaveTrajectory(&Trajectory{ID: "h1", Task: "fix go build failure in agent package",
+		Verify: &Verify{Kind: "go_test", OK: true}})
+	_ = s.SaveTrajectory(&Trajectory{ID: "h2", Task: "add godot smoke test"})
+
+	// 命中相关轨迹 → 提示块包含 id 与 task 片段。
+	hint, err := s.ContextHints("go build failure", 3)
+	if err != nil {
+		t.Fatalf("ContextHints: %v", err)
+	}
+	if !strings.Contains(hint, "<context-hints>") || !strings.Contains(hint, "h1") ||
+		!strings.Contains(hint, "go build failure") {
+		t.Errorf("hint missing expected content: %q", hint)
+	}
+	if strings.Contains(hint, "h2") {
+		t.Errorf("irrelevant traj should not appear: %q", hint)
+	}
+
+	// 无命中 → 空串（调用方跳过注入）。
+	empty, err := s.ContextHints("zzz no such task", 3)
+	if err != nil || empty != "" {
+		t.Errorf("no-hit want empty, got %q err=%v", empty, err)
+	}
+
+	// 空库 → 空串。
+	s2, _ := NewStore(filepath.Join(t.TempDir(), "fw2"))
+	e2, err := s2.ContextHints("anything", 3)
+	if err != nil || e2 != "" {
+		t.Errorf("empty store want empty, got %q err=%v", e2, err)
+	}
+}

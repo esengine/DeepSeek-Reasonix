@@ -101,3 +101,48 @@ func writeExportTrajectory(dir string, t *Trajectory) error {
 	}
 	return os.WriteFile(filepath.Join(dir, t.ID+".jsonl"), append(b, '\n'), 0o644)
 }
+
+// ---------------------------------------------------------------------------
+// ContextHints（轻量模式上下文裁剪，docs/MODELLING_ENGINEERING.md §3/§6）
+//
+// 给定当前任务 query，从轨迹库检索 top-N 相关轨迹并组装为可注入的摘要提示
+// （含 id/task/judge 标签 + 失败教训引用）。轻量模式用它替代"全量历史"注入，
+// 只带相关片段 → 省 token。独立纯函数，不侵入 agent 核心路径。
+// ---------------------------------------------------------------------------
+
+// ContextHints returns a compact injection-ready hint block for query.
+// limit ≤0 defaults to 3. Empty store → empty string (caller skips injection).
+func (s *Store) ContextHints(query string, limit int) (string, error) {
+	hits, err := s.SearchTrajectories(query, limit)
+	if err != nil {
+		return "", err
+	}
+	if len(hits) == 0 {
+		return "", nil
+	}
+	var b strings.Builder
+	b.WriteString("<context-hints>\n")
+	for _, h := range hits {
+		t := h.Trajectory
+		label := ""
+		if t.Judge != nil {
+			label = t.Judge.Name
+		}
+		b.WriteString("- traj ")
+		b.WriteString(t.ID)
+		b.WriteString(" (")
+		b.WriteString(label)
+		b.WriteString("): ")
+		b.WriteString(truncateHint(t.Task, 120))
+		b.WriteByte('\n')
+	}
+	b.WriteString("</context-hints>")
+	return b.String(), nil
+}
+
+func truncateHint(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
