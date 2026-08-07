@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,21 +18,28 @@ import (
 const maxCaptureBytes = 1 << 20 // 1 MiB
 
 // limitedBuffer caps captured output at max bytes, dropping the excess.
+// It is safe for concurrent use: os/exec copies stdout and stderr from
+// separate goroutines into the same writer.
 type limitedBuffer struct {
+	mu  sync.Mutex
 	buf bytes.Buffer
 	max int
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.buf.Len() >= b.max {
-		return len(p), nil
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	orig := len(p)
+	if avail := b.max - b.buf.Len(); avail > 0 {
+		if len(p) > avail {
+			p = p[:avail]
+		}
+		_, _ = b.buf.Write(p)
 	}
-	avail := b.max - b.buf.Len()
-	if len(p) > avail {
-		p = p[:avail]
-	}
-	_, _ = b.buf.Write(p)
-	return len(p), nil
+	// Always report the full length: over-cap bytes are deliberately dropped
+	// (see maxCaptureBytes), not an error — returning a short write would make
+	// io.Copy treat the capture as failed and cmd.Wait() as a run error.
+	return orig, nil
 }
 
 // runBounded starts the command in its own process group, captures stdout and
