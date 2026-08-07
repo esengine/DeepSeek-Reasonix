@@ -264,3 +264,91 @@ func summarizeScript(s string) string {
 	}
 	return s
 }
+
+// ---------------------------------------------------------------------------
+// Heavy modelling primitives (Blender backend): retopology and UV unwrap.
+// Both import a mesh, apply the operation, and save back to the same path
+// (backed up as <path>.bak by the caller). Pure-Go ops live in
+// internal/modeling/meshparse; these need Blender's geometry kernels.
+// ---------------------------------------------------------------------------
+
+// Retopo retopologizes a mesh at an approximate target face count using
+// Blender's voxel remesh. The file at srcPath is rewritten in place.
+// targetFaces is a hint: voxel remesh derives size from the mesh's bounding
+// box, so the result is approximate (documented in the returned summary).
+func Retopo(ctx context.Context, srcPath string, targetFaces int, timeout time.Duration) (*Result, error) {
+	if BlenderPath() == "" {
+		return nil, fmt.Errorf("blender: not found (required for retopo)")
+	}
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	script := fmt.Sprintf(`
+import bpy, math
+bpy.ops.wm.obj_import(filepath=%q)
+bpy.ops.object.select_all(action="DESELECT")
+sel = [o for o in bpy.data.objects if o.type == "MESH"]
+for o in sel:
+    o.select_set(True)
+if not sel:
+    raise SystemExit("no mesh to retopo")
+bpy.context.view_layer.objects.active = sel[0]
+# Voxel size from bounding box: max_dim / cbrt(2 * target)
+dims = []
+for o in sel:
+    dims.append(max(o.dimensions))
+max_dim = max(dims) if dims else 1.0
+target = max(100, %d)
+vsize = max_dim / math.pow(2.0 * target, 1.0/3.0)
+bpy.ops.object.modifier_add(type="REMESH")
+mod = bpy.context.object.modifiers[-1]
+mod.mode = "VOXEL"
+mod.voxel_size = vsize
+mod.adaptivity = 0.0
+bpy.ops.object.modifier_apply(modifier=mod.name)
+bpy.ops.wm.obj_export(filepath=%q)
+print(f"BLENDER_RETOPO_OK target_approx={target}")
+`, srcPath, targetFaces, srcPath)
+	out, err := runBlender(ctx, "", script, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := findMarker(out, "BLENDER_RETOPO_OK"); !ok {
+		return nil, fmt.Errorf("blender: retopo failed (output %d bytes)", len(out))
+	}
+	return &Result{Script: fmt.Sprintf("retopo target~%d", targetFaces), Output: capOut(out), OK: true}, nil
+}
+
+// Unwrap unwraps UVs of all mesh objects in the file (smart UV project).
+func Unwrap(ctx context.Context, srcPath string, timeout time.Duration) (*Result, error) {
+	if BlenderPath() == "" {
+		return nil, fmt.Errorf("blender: not found (required for unwrap)")
+	}
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	script := fmt.Sprintf(`
+import bpy
+bpy.ops.wm.obj_import(filepath=%q)
+bpy.ops.object.select_all(action="DESELECT")
+for o in bpy.data.objects:
+    if o.type == "MESH":
+        o.select_set(True)
+if bpy.context.selected_objects:
+    bpy.context.view_layer.objects.active = bpy.context.selected_objects[0]
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=66, island_margin=0.02)
+    bpy.ops.object.mode_set(mode="OBJECT")
+bpy.ops.wm.obj_export(filepath=%q)
+print("BLENDER_UNWRAP_OK")
+`, srcPath, srcPath)
+	out, err := runBlender(ctx, "", script, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := findMarker(out, "BLENDER_UNWRAP_OK"); !ok {
+		return nil, fmt.Errorf("blender: unwrap failed (output %d bytes)", len(out))
+	}
+	return &Result{Script: "unwrap", Output: capOut(out), OK: true}, nil
+}

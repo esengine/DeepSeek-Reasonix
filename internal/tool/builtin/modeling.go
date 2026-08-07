@@ -105,7 +105,7 @@ func (modelingOptimize) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "path":{"type":"string","description":"Mesh file path (.obj/.stl/.ply)."},
-  "op":{"type":"string","enum":["cleanup","triangulate","merge","decimate"],"description":"Operation to apply."},
+  "op":{"type":"string","enum":["cleanup","triangulate","merge","decimate","retopo","unwrap"],"description":"Operation to apply (retopo/unwrap require Blender)."},
   "eps":{"type":"number","description":"Weld/merge epsilon (cleanup/merge); default 0 (no weld)."},
   "target_faces":{"type":"integer","description":"Target face count for decimate."}
 },
@@ -153,6 +153,31 @@ func (modelingOptimize) Execute(ctx context.Context, args json.RawMessage) (stri
 			return "", fmt.Errorf("modeling_optimize: decimate requires target_faces>0")
 		}
 		out, res = meshparse.Decimate(m, a.TargetFaces)
+	case "retopo":
+		// Blender-heavy op: operates on the file directly (with .bak backup).
+		if err := copyFile(a.Path, a.Path+".bak"); err != nil {
+			return "", fmt.Errorf("modeling_optimize: backup: %w", err)
+		}
+		_, err := blender.Retopo(ctx, a.Path, a.TargetFaces, 0)
+		if err != nil {
+			return "", fmt.Errorf("modeling_optimize retopo: %w", err)
+		}
+		after, perr := meshparse.Parse(a.Path)
+		if perr != nil {
+			return "", fmt.Errorf("modeling_optimize: verify retopo: %w", perr)
+		}
+		res = meshparse.OpResult{Op: "retopo", VertsBefore: len(m.Verts), FacesBefore: len(m.Faces),
+			VertsAfter: len(after.Verts), FacesAfter: len(after.Faces)}
+		b, _ := json.Marshal(res)
+		return string(b), nil
+	case "unwrap":
+		if err := copyFile(a.Path, a.Path+".bak"); err != nil {
+			return "", fmt.Errorf("modeling_optimize: backup: %w", err)
+		}
+		if _, err := blender.Unwrap(ctx, a.Path, 0); err != nil {
+			return "", fmt.Errorf("modeling_optimize unwrap: %w", err)
+		}
+		return `{"op":"unwrap"}`, nil
 	default:
 		return "", fmt.Errorf("modeling_optimize: unknown op %q", a.Op)
 	}

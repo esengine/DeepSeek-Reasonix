@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/blender"
+	"reasonix/internal/modeling/meshparse"
 )
 
 const modelingCubeOBJ = `v 0 0 0
@@ -172,5 +173,53 @@ func TestModelingConvertToGLBWithBlender(t *testing.T) {
 	}
 	if info.Size() < 100 {
 		t.Errorf("glb suspiciously small: %d bytes", info.Size())
+	}
+}
+
+func TestModelingOptimizeRetopoWithBlender(t *testing.T) {
+	if blender.BlenderPath() == "" {
+		t.Skip("Blender not installed")
+	}
+	p := writeCube(t)
+	args, _ := json.Marshal(map[string]any{"path": p, "op": "retopo", "target_faces": 200})
+	out, err := modelingOptimize{}.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("retopo: %v", err)
+	}
+	var res struct {
+		Op          string `json:"op"`
+		FacesBefore int    `json:"faces_before"`
+		FacesAfter  int    `json:"faces_after"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatalf("retopo output not JSON: %s", out)
+	}
+	if res.Op != "retopo" {
+		t.Errorf("op = %q, want retopo", res.Op)
+	}
+	if _, err := os.Stat(p + ".bak"); err != nil {
+		t.Errorf("backup missing: %v", err)
+	}
+	// Result must be parseable back.
+	if _, err := meshparse.Parse(p); err != nil {
+		t.Errorf("retopo result unparseable: %v", err)
+	}
+}
+
+func TestModelingOptimizeUnwrapWithBlender(t *testing.T) {
+	if blender.BlenderPath() == "" {
+		t.Skip("Blender not installed")
+	}
+	p := writeCube(t)
+	args, _ := json.Marshal(map[string]any{"path": p, "op": "unwrap"})
+	out, err := modelingOptimize{}.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("unwrap: %v", err)
+	}
+	if !strings.Contains(out, `"op":"unwrap"`) {
+		t.Errorf("unwrap output = %s", out)
+	}
+	if _, err := os.Stat(p + ".bak"); err != nil {
+		t.Errorf("backup missing: %v", err)
 	}
 }
