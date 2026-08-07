@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- SanitizeToolPairing ---
+// SanitizeToolPairing
 
 // toolIDsAnswered reports whether every assistant tool_call id has a following
 // tool message answering it — the contract the OpenAI/DeepSeek API enforces.
@@ -125,6 +125,74 @@ func TestModelMessagesAndSanitizeDropLocalOnlyInterruptedOutput(t *testing.T) {
 	session := NormalizeSessionMessages(in)
 	if len(session) != len(in) || !session[1].LocalOnly || session[1].Content != local.Content {
 		t.Fatalf("session normalization did not preserve local display: %+v", session)
+	}
+}
+
+func TestDecisionReceiptIsDurableButProviderExcluded(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "write_file", Subject: "src/app.go", Outcome: "allow_once"}
+	in := []Message{
+		{Role: RoleUser, Content: "edit the app"},
+		{Role: RoleAssistant, LocalOnly: true, DecisionReceipt: receipt},
+		{Role: RoleAssistant, Content: "done"},
+	}
+	model := ModelMessages(in)
+	if len(model) != 2 || model[0].Content != "edit the app" || model[1].Content != "done" {
+		t.Fatalf("provider messages leaked decision receipt: %+v", model)
+	}
+	if len(in) != 3 || in[1].DecisionReceipt != receipt || !in[1].LocalOnly {
+		t.Fatalf("stored receipt was not preserved: %+v", in)
+	}
+}
+
+func TestAttachedDecisionReceiptPreservesCurrentAndLegacyToolPairing(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+	stored := []Message{
+		{Role: RoleUser, Content: "run it"},
+		{
+			Role:             RoleAssistant,
+			ToolCalls:        []ToolCall{{Name: "bash", Arguments: `{}`}},
+			DecisionReceipts: []*DecisionReceipt{receipt},
+		},
+		{Role: RoleTool, Name: "bash", Content: "ok"},
+	}
+
+	current := SanitizeToolPairing(ModelMessages(stored))
+	if len(current) != 3 || current[2].Content != "ok" {
+		t.Fatalf("current reader changed the valid tool turn: %+v", current)
+	}
+	if len(current[1].DecisionReceipts) != 0 {
+		t.Fatalf("provider-visible message leaked local decision metadata: %+v", current[1])
+	}
+
+	// Older binaries ignore the new metadata field. The remaining legacy view
+	// must still contain the same adjacent assistant/result pair, including the
+	// positional pairing used by providers that omit tool-call IDs.
+	legacy := append([]Message(nil), stored...)
+	legacy[1].DecisionReceipts = nil
+	legacy = SanitizeToolPairing(legacy)
+	if len(legacy) != 3 || legacy[1].Role != RoleAssistant || legacy[2].Role != RoleTool || legacy[2].Content != "ok" {
+		t.Fatalf("legacy reader lost the actual tool result: %+v", legacy)
+	}
+}
+
+func TestNormalizeSessionMessagesMigratesInterleavedDecisionReceipt(t *testing.T) {
+	receipt := &DecisionReceipt{ID: "approval-1", Kind: "tool", Tool: "bash", Outcome: "allow_once"}
+	old := []Message{
+		{Role: RoleUser, Content: "run it"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Name: "bash", Arguments: `{}`}}},
+		{Role: RoleAssistant, LocalOnly: true, DecisionReceipt: receipt},
+		{Role: RoleTool, ToolCallID: "call-1", Name: "bash", Content: "actual result"},
+	}
+
+	got := NormalizeSessionMessages(old)
+	if len(got) != 3 {
+		t.Fatalf("migrated messages = %d, want receipt folded into assistant: %+v", len(got), got)
+	}
+	if len(got[1].DecisionReceipts) != 1 || got[1].DecisionReceipts[0] != receipt {
+		t.Fatalf("migrated assistant receipt = %+v, want original receipt", got[1].DecisionReceipts)
+	}
+	if got[2].Role != RoleTool || got[2].Content != "actual result" || strings.Contains(got[2].Content, "interrupted") {
+		t.Fatalf("migrated tool result = %+v, want the actual result without a placeholder", got[2])
 	}
 }
 
@@ -323,7 +391,7 @@ func TestSanitizeToolPairingBackfillsMissingToolResultName(t *testing.T) {
 	}
 }
 
-// --- Pricing.Cost ---
+// Pricing.Cost
 
 func TestPricingCostNil(t *testing.T) {
 	var p *Pricing
@@ -365,6 +433,34 @@ func TestPricingCostCalculation(t *testing.T) {
 	}
 }
 
+func TestPricingCostUsesCacheWriteBillingTier(t *testing.T) {
+	p := &Pricing{Input: 2.0}
+	u := &Usage{
+		CacheMissTokens:        500_000,
+		CacheWriteTokens:       100_000,
+		CacheWriteBilledTokens: 200_000, // 1h write at 2x input
+	}
+	// 400K ordinary misses + 100K cache writes billed as 200K input units.
+	if got := p.Cost(u); got != 1.2 {
+		t.Errorf("Cost = %f, want 1.2", got)
+	}
+}
+
+func TestPricingCostCacheWriteFieldsAreBackwardCompatible(t *testing.T) {
+	p := &Pricing{Input: 2.0}
+
+	// Old usage records have neither cache-write field and retain the original
+	// one-input-rate calculation.
+	if got := p.Cost(&Usage{CacheMissTokens: 500_000}); got != 1.0 {
+		t.Errorf("legacy Cost = %f, want 1.0", got)
+	}
+	// A producer that reports raw write tokens without a billing tier also
+	// falls back to the ordinary input rate instead of making writes free.
+	if got := p.Cost(&Usage{CacheMissTokens: 500_000, CacheWriteTokens: 100_000}); got != 1.0 {
+		t.Errorf("unpriced write Cost = %f, want 1.0", got)
+	}
+}
+
 func TestPricingCostFallsBackToPromptTokensAsMiss(t *testing.T) {
 	p := &Pricing{Input: 2.0, Output: 10.0}
 	u := &Usage{PromptTokens: 500_000, CompletionTokens: 100_000}
@@ -381,7 +477,7 @@ func TestPricingCostZeroTokens(t *testing.T) {
 	}
 }
 
-// --- Pricing.Symbol ---
+// Pricing.Symbol
 
 func TestPricingSymbolDefault(t *testing.T) {
 	p := &Pricing{}
@@ -428,7 +524,7 @@ func TestPricingSymbolNormalizesCurrencyCodes(t *testing.T) {
 	}
 }
 
-// --- AuthError ---
+// AuthError
 
 func TestAuthErrorWithKeyEnv(t *testing.T) {
 	e := &AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", Status: 401}
@@ -471,7 +567,7 @@ func TestAuthErrorImplementsError(t *testing.T) {
 	}
 }
 
-// --- Registry ---
+// Registry
 
 func TestRegistryKindsSorted(t *testing.T) {
 	// The openai package self-registers via init(); we can't control that here
@@ -519,7 +615,7 @@ func TestNewRejectsTypedNilProvider(t *testing.T) {
 	}
 }
 
-// --- Role constants ---
+// Role constants
 
 func TestRoleConstants(t *testing.T) {
 	if RoleSystem != "system" {
@@ -567,7 +663,7 @@ func TestMessageResponsesItemsRemainBackwardCompatible(t *testing.T) {
 	}
 }
 
-// --- ChunkType constants ---
+// ChunkType constants
 
 func TestChunkTypeConstants(t *testing.T) {
 	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem}
@@ -578,7 +674,7 @@ func TestChunkTypeConstants(t *testing.T) {
 	}
 }
 
-// --- ToolSchema ---
+// ToolSchema
 
 func TestToolSchemaJSON(t *testing.T) {
 	ts := ToolSchema{

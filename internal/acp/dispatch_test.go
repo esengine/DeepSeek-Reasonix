@@ -705,3 +705,28 @@ func TestUpdateSinkReplayStripsInjectedWrappers(t *testing.T) {
 		t.Fatalf("replayed assistant text = %v, want goal marker stripped", content["text"])
 	}
 }
+
+// TestUpdateSinkDropsSubagentProgress locks the ACP policy for the reserved
+// sub-agent progress ToolProgress channels: every body stays out of ACP
+// notifications, exactly like ordinary ToolProgress (which has no handler).
+func TestUpdateSinkDropsSubagentProgress(t *testing.T) {
+	fn := &fakeNotifier{}
+	sink := newUpdateSink(fn, "sess-1")
+
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressStatusName, Output: "running",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressReasoningName, Output: "thinking",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressTextName, Output: "answer preview",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressNoticeName, Output: "heads up",
+		Truncated: true,
+	}})
+	if got := len(fn.notifs); got != 0 {
+		t.Fatalf("sub-agent progress produced %d notifications, want 0", got)
+	}
+}

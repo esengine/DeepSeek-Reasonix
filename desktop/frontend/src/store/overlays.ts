@@ -15,7 +15,7 @@ import { create } from "zustand";
 
 import type { SettingsInitialFocus } from "../components/SettingsPanel";
 import { shouldShowStartupSplash } from "../components/StartupSplash";
-import type { SessionMeta, SettingsTab } from "../lib/types";
+import type { ExtensionActionView, SessionMeta, SettingsTab } from "../lib/types";
 
 import { applySetState } from "./setState";
 
@@ -24,6 +24,9 @@ export type OverlayState = {
   settingsFocus: SettingsInitialFocus | null;
   paletteOpen: boolean;
   paletteSessions: SessionMeta[];
+  // Extension actions snapshotted when the palette opens (same staleness
+  // contract as paletteSessions).
+  paletteExtensionActions: ExtensionActionView[];
   shortcutsOpen: boolean;
   heartbeatOpen: boolean;
   topicExportOpen: boolean;
@@ -36,6 +39,7 @@ export type OverlayState = {
   setSettingsFocus: Dispatch<SetStateAction<SettingsInitialFocus | null>>;
   setPaletteOpen: Dispatch<SetStateAction<boolean>>;
   setPaletteSessions: Dispatch<SetStateAction<SessionMeta[]>>;
+  setPaletteExtensionActions: Dispatch<SetStateAction<ExtensionActionView[]>>;
   setShortcutsOpen: Dispatch<SetStateAction<boolean>>;
   setHeartbeatOpen: Dispatch<SetStateAction<boolean>>;
   setTopicExportOpen: Dispatch<SetStateAction<boolean>>;
@@ -51,6 +55,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   settingsFocus: null,
   paletteOpen: false,
   paletteSessions: [],
+  paletteExtensionActions: [],
   shortcutsOpen: false,
   heartbeatOpen: false,
   topicExportOpen: false,
@@ -63,6 +68,7 @@ export const useOverlayStore = create<OverlayState>((set) => ({
   setSettingsFocus: (update) => set((s) => ({ settingsFocus: applySetState(s.settingsFocus, update) })),
   setPaletteOpen: (update) => set((s) => ({ paletteOpen: applySetState(s.paletteOpen, update) })),
   setPaletteSessions: (update) => set((s) => ({ paletteSessions: applySetState(s.paletteSessions, update) })),
+  setPaletteExtensionActions: (update) => set((s) => ({ paletteExtensionActions: applySetState(s.paletteExtensionActions, update) })),
   setShortcutsOpen: (update) => set((s) => ({ shortcutsOpen: applySetState(s.shortcutsOpen, update) })),
   setHeartbeatOpen: (update) => set((s) => ({ heartbeatOpen: applySetState(s.heartbeatOpen, update) })),
   setTopicExportOpen: (update) => set((s) => ({ topicExportOpen: applySetState(s.topicExportOpen, update) })),

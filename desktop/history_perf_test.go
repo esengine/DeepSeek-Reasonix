@@ -23,7 +23,7 @@ func syntheticHistoryMessages(turns, outputSize int, toolName string, failed boo
 	if failed {
 		output = "error: " + output
 	}
-	for i := 0; i < turns; i++ {
+	for i := range turns {
 		callID := fmt.Sprintf("call_%d", i)
 		msgs = append(msgs,
 			provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("prompt %d", i)},
@@ -66,7 +66,7 @@ func BenchmarkHistoryMessagesSynthetic(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(inputBytes)
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				got := historyMessages(msgs, func(content string) string { return content })
 				if len(got) == 0 {
 					b.Fatal("empty history")
@@ -84,7 +84,7 @@ func BenchmarkHistoryMessagesMarshalSynthetic(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(inputBytes)
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				got := historyMessages(msgs, func(content string) string { return content })
 				encoded, err := json.Marshal(got)
 				if err != nil {

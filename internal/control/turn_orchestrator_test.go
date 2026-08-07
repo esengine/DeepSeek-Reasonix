@@ -336,53 +336,6 @@ type deliveryScopeErrorRunner struct {
 	scopes []agent.DeliveryExecutionScope
 }
 
-type requestBudgetErrorRunner struct{}
-
-func (requestBudgetErrorRunner) Run(context.Context, string) error {
-	return &provider.RequestBudgetError{Used: 190, Limit: 200, Remaining: 10, EstimatedInput: 25}
-}
-
-func TestGoalRequestBudgetErrorPausesWithoutAnotherContinuation(t *testing.T) {
-	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{Runner: requestBudgetErrorRunner{}, Executor: executor})
-	c.SetGoal("stay within budget")
-	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", ""); err != nil {
-		t.Fatalf("budget admission error should be absorbed by Goal FSM: %v", err)
-	}
-	runtime := c.GoalRuntime()
-	if c.GoalStatus() != GoalStatusBlocked || runtime.StopCause != stopCauseBudgetTokens {
-		t.Fatalf("runtime = %+v, want blocked budget_tokens", runtime)
-	}
-	block := c.goals.capture().block
-	if !strings.Contains(block, "cannot admit another provider request") {
-		t.Fatalf("block reason = %q", block)
-	}
-}
-
-func TestSubagentSkillGoalBudgetErrorPausesThroughFSM(t *testing.T) {
-	executor := agent.New(nil, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{Executor: executor})
-	c.SetGoal("stay within subagent budget")
-	runner := func(context.Context, skill.Skill, string, skill.SubagentRunOptions) (string, error) {
-		return "", &provider.RequestBudgetError{Used: 190, Limit: 200, Remaining: 10, EstimatedInput: 25}
-	}
-	err := newTurnOrchestrator(c).runSubagentSkillTurnsGoalLoop(
-		context.Background(),
-		[]skill.Skill{{Name: "inspect", Body: "inspect", RunAs: skill.RunSubagent}},
-		"inspect", "inspect", "", runner, false,
-	)
-	if err != nil {
-		t.Fatalf("subagent budget admission error should be absorbed by Goal FSM: %v", err)
-	}
-	runtime := c.GoalRuntime()
-	if c.GoalStatus() != GoalStatusBlocked || runtime.StopCause != stopCauseBudgetTokens {
-		t.Fatalf("runtime = %+v, want blocked budget_tokens", runtime)
-	}
-	if c.goalUsageTee.activeRecorder() != nil {
-		t.Fatal("subagent Goal recorder remained active after budget pause")
-	}
-}
-
 func (r *deliveryScopeErrorRunner) Run(ctx context.Context, _ string) error {
 	if scope, ok := agent.DeliveryExecutionScopeFromContext(ctx); ok {
 		r.scopes = append(r.scopes, scope)
@@ -744,6 +697,46 @@ func TestTurnOrchestratorCheckpointBoundaryPrecedesUserMessage(t *testing.T) {
 	}
 }
 
+// TestTurnOrchestratorCheckpointPromptIsRawUserInput verifies the rewind picker
+// label records the user's own text, not the composed provider input. compose()
+// prefixes the turn with transient blocks (<response-language>,
+// <reasoning-language>, plan marker, memory, hook context, …); storing that
+// string as checkpoint.Prompt made the Esc-Esc picker show a wall of prefab
+// prompt text instead of the user's messages.
+func TestTurnOrchestratorCheckpointPromptIsRawUserInput(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	runner := &recordingSessionRunner{session: sess}
+	c := New(Options{
+		Runner:            runner,
+		Executor:          exec,
+		SessionDir:        dir,
+		SessionPath:       path,
+		Label:             "test",
+		ResponseLanguage:  "zh",
+		ReasoningLanguage: "en",
+	})
+	o := newTurnOrchestrator(c)
+	const raw = "fix the parser"
+	if err := o.runTurnWithRawDisplay(context.Background(), raw, raw, ""); err != nil {
+		t.Fatal(err)
+	}
+	cps := c.Checkpoints()
+	if len(cps) != 1 {
+		t.Fatalf("checkpoints = %+v, want exactly one", cps)
+	}
+	if got := cps[0].Prompt; got != raw {
+		t.Fatalf("checkpoint prompt = %q, want raw user input %q (composed text leaked into the rewind picker)", got, raw)
+	}
+	for _, prefab := range []string{"<response-language>", "<reasoning-language>"} {
+		if strings.Contains(cps[0].Prompt, prefab) {
+			t.Fatalf("checkpoint prompt contains %q: %q", prefab, cps[0].Prompt)
+		}
+	}
+}
+
 func TestTurnOrchestratorSyntheticTurnDoesNotCreateCheckpoint(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "session.jsonl")
@@ -804,7 +797,7 @@ func TestTurnOrchestratorStopFailureHookCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	o := newTurnOrchestrator(c)
-	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && err != context.Canceled {
+	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if stopCalls != 1 {
@@ -928,7 +921,7 @@ func TestTurnOrchestratorInterruptedAfterCompactionRelocatesVisibleTurn(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sess := agent.NewSession("system")
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				sess.Add(provider.Message{Role: provider.RoleUser, Content: "old task"})
 				sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "old answer"})
 			}

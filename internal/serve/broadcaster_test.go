@@ -67,7 +67,7 @@ func TestBroadcasterDropsSlowSubscriber(t *testing.T) {
 	ch, cancel := b.Subscribe()
 	defer cancel()
 	// Overfill far past the 64-slot buffer without reading; Emit must not block.
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		b.Emit(event.Event{Kind: event.Text, Text: "x"})
 	}
 	if len(ch) == 0 {

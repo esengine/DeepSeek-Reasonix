@@ -12,6 +12,7 @@ theme = "auto"   # auto|dark|light; controls CLI colors only; REASONIX_THEME can
 # theme_style = "graphite"   # graphite|aurora|slate|carbon|nocturne|amber and legacy aliases
 # shortcut_layout = "desktop"   # classic|desktop; compatibility setting; Shift+Tab toggles Plan, Ctrl+Y toggles YOLO
 # cursor_shape = "bar"   # block|underline|bar; text input cursor shape; slim default avoids covering CJK characters
+show_turn_usage = true   # CLI/TUI: show per-request token and cost receipts in transcript scrollback
 
 [desktop]
 # language = "auto"   # auto|en|zh; auto follows the browser/OS locale
@@ -114,6 +115,7 @@ effort         = "high"
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tools into the prompt
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # optional trusted executable path; workspace-local paths are not auto-executed
 

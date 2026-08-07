@@ -259,7 +259,7 @@ func (a *App) RemovePlugin(name string) error {
 	if tab == nil || a.ctx == nil {
 		return nil
 	}
-	if err := a.rebuildSettingTurnLocked("plugins", tab, true); err != nil {
+	if err := a.rebuildSettingTurnLocked("plugins", tab, true, false); err != nil {
 		if _, ok := a.deferredRebuildWarning("plugins", err); ok {
 			return nil
 		}

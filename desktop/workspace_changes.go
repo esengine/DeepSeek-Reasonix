@@ -16,7 +16,6 @@ import (
 	"reasonix/internal/control"
 	"reasonix/internal/diff"
 	"reasonix/internal/gitcmd"
-	"reasonix/internal/remote/protocol"
 )
 
 type gitStatusEntry struct {
@@ -52,30 +51,6 @@ var workspaceGitBranchCache = struct {
 var workspaceGitBranchForMetaProbe = workspaceGitBranch
 
 func (a *App) WorkspaceChanges(tabID string) WorkspaceChangesView {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodWorkspaceChanges, protocol.WorkspaceChangesParams{})
-		if err != nil {
-			return WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitErr: err.Error()}
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodWorkspaceChanges, raw)
-		if err != nil {
-			return WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitErr: err.Error()}
-		}
-		result := decoded.(protocol.WorkspaceChangesResult)
-		out := WorkspaceChangesView{Files: make([]WorkspaceChangeView, 0, len(result.Files)), GitAvailable: result.GitAvailable, GitBranch: result.GitBranch}
-		for _, file := range result.Files {
-			sources := make([]string, 0, len(file.Sources))
-			for _, source := range file.Sources {
-				sources = append(sources, string(source))
-			}
-			view := WorkspaceChangeView{Path: file.Path, OldPath: file.OldPath, Sources: sources, GitStatus: file.GitStatus, Turns: append([]int(nil), file.Turns...), LatestPrompt: file.LatestPrompt}
-			if file.LatestTimeMs != nil {
-				view.LatestTime = *file.LatestTimeMs
-			}
-			out.Files = append(out.Files, view)
-		}
-		return out
-	}
 	out := WorkspaceChangesView{Files: []WorkspaceChangeView{}, GitAvailable: true}
 	tabID = strings.TrimSpace(tabID)
 
@@ -197,25 +172,6 @@ func (a *App) workspaceBaseForTab(tabID string) (string, error) {
 // includes both staged and unstaged edits. Session checkpoints provide a
 // git-free fallback and cover files edited by Reasonix before Git notices them.
 func (a *App) WorkspaceChangeDetail(tabID, path string) (WorkspaceChangeDetailView, error) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodWorkspaceChangeDetail, protocol.WorkspaceChangeDetailParams{Path: path})
-		if err != nil {
-			return WorkspaceChangeDetailView{}, err
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodWorkspaceChangeDetail, raw)
-		if err != nil {
-			return WorkspaceChangeDetailView{}, err
-		}
-		result := decoded.(protocol.WorkspaceChangeDetailResult)
-		out := WorkspaceChangeDetailView{
-			Diff: result.Diff, Added: result.Added, Removed: result.Removed,
-			Binary: result.Binary, Truncated: result.Truncated,
-		}
-		if result.Source != nil {
-			out.Source = string(*result.Source)
-		}
-		return out, nil
-	}
 	workspaceRoot, ctrl, ok := a.workspaceChangesTarget(strings.TrimSpace(tabID))
 	if !ok {
 		return WorkspaceChangeDetailView{}, fmt.Errorf("tab %q not found", tabID)
@@ -395,7 +351,7 @@ func workspaceCurrentText(path string) (string, bool, bool, error) {
 
 func tallyUnifiedPatch(patch string) (added, removed int) {
 	inHunk := false
-	for _, line := range strings.Split(patch, "\n") {
+	for line := range strings.SplitSeq(patch, "\n") {
 		switch {
 		case strings.HasPrefix(line, "@@"):
 			inHunk = true
@@ -590,9 +546,6 @@ func workspaceGitBranch(base string) string {
 
 // GitBranches returns all local git branches for the active workspace's repo.
 func (a *App) GitBranches() ([]string, error) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return nil, fmt.Errorf("CAPABILITY_UNAVAILABLE: Remote Workbench does not expose Git branch mutation")
-	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return nil, err
@@ -609,9 +562,6 @@ func (a *App) GitBranches() ([]string, error) {
 // GitCheckout switches the active workspace's git branch and returns the
 // current branch name, or an error when git is unavailable.
 func (a *App) GitCheckout(branch string) error {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return fmt.Errorf("CAPABILITY_UNAVAILABLE: Remote Workbench does not expose Git branch mutation")
-	}
 	base, err := a.activeWorkspaceBase()
 	if err != nil {
 		return err
@@ -640,22 +590,6 @@ type GitCommitDetailView struct {
 }
 
 func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, error) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		raw, err := a.workbenchRequest(protocol.MethodGitHistory, protocol.GitHistoryParams{Path: filepath.ToSlash(strings.TrimSpace(path))})
-		if err != nil {
-			return nil, err
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodGitHistory, raw)
-		if err != nil {
-			return nil, err
-		}
-		result := decoded.(protocol.GitHistoryResult)
-		out := make([]GitCommitView, 0, len(result.Commits))
-		for _, commit := range result.Commits {
-			out = append(out, GitCommitView{Hash: commit.Hash, Author: commit.Author, Date: commit.Date, Message: commit.Message})
-		}
-		return out, nil
-	}
 	base, err := a.workspaceBaseForTab(tabID)
 	if err != nil {
 		return nil, err
@@ -687,30 +621,6 @@ func (a *App) WorkspaceGitHistory(tabID string, path string) ([]GitCommitView, e
 }
 
 func (a *App) WorkspaceGitCommitDetail(tabID string, hash string, path string) (GitCommitDetailView, error) {
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		limit := protocol.PageMaxItems
-		raw, err := a.workbenchRequest(protocol.MethodGitCommitDetail, protocol.GitCommitDetailParams{
-			Hash: strings.TrimSpace(hash), Path: filepath.ToSlash(strings.TrimSpace(path)), Limit: &limit,
-		})
-		if err != nil {
-			return GitCommitDetailView{}, err
-		}
-		decoded, err := protocol.DecodeResult(protocol.MethodGitCommitDetail, raw)
-		if err != nil {
-			return GitCommitDetailView{}, err
-		}
-		result := decoded.(protocol.GitCommitDetailResult)
-		if result.Kind == protocol.GitDetailPatch {
-			return GitCommitDetailView{Diff: result.Body}, nil
-		}
-		files := make([]string, 0)
-		if result.Files != nil {
-			for _, file := range *result.Files {
-				files = append(files, file.Path)
-			}
-		}
-		return GitCommitDetailView{Files: files}, nil
-	}
 	base, err := a.workspaceBaseForTab(tabID)
 	if err != nil {
 		return GitCommitDetailView{}, err

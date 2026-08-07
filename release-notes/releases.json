@@ -2,6 +2,945 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.21.1",
+      "date": "2026-08-07",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.21.1",
+        "zh": "Reasonix 1.21.1"
+      },
+      "summary": {
+        "en": "Fixes a permanent updater deadlock on Windows/macOS and a TUI watchdog false-kill issue, plus internal refactors for maintainability.",
+        "zh": "修复了 Windows/macOS 上永久性的更新器死锁和 TUI 看门狗误杀问题，并进行了内部重构以提高可维护性。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Updater deadlock on Windows and macOS resolved",
+            "zh": "修复了 Windows 和 macOS 上的更新器死锁问题"
+          },
+          "body": {
+            "en": "Fixed an issue where the updater would permanently fail with \"update recovery: could not safely finish the previous update\" after an install layout change. The stale pending-update marker is now automatically quarantined, allowing future updates to proceed without manual intervention.",
+            "zh": "修复了安装布局更改后更新器永久失败并提示“update recovery: could not safely finish the previous update”的问题。现在过时的待处理更新标记会被自动隔离，无需手动干预即可继续后续更新。"
+          },
+          "refs": [
+            7431
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "TUI watchdog false kills and stall recovery",
+            "zh": "TUI 看门狗误杀和卡顿恢复"
+          },
+          "body": {
+            "en": "Fixed the TUI watchdog lifecycle to prevent false goroutine dumps, cancellations, and process kills when idle. Active stalls now escalate gracefully through dump, cancellation, and hard-kill fallback, with heartbeats limited to actual work events.",
+            "zh": "修复了 TUI 看门狗生命周期，防止空闲时出现错误的 goroutine 转储、取消和进程终止。活动卡顿现在会通过转储、取消和强制终止回退逐步升级，心跳仅限于实际工作事件。"
+          },
+          "refs": [
+            7832
+          ]
+        }
+      ],
+      "changes": {
+        "new": [],
+        "improved": [
+          {
+            "title": {
+              "en": "Internal refactors for maintainability",
+              "zh": "内部重构以提高可维护性"
+            },
+            "body": {
+              "en": "Several internal subsystems were reorganized to reduce complexity and improve code health, including agent state management, task intent classification, controller decomposition, and evidence context handling. No user-facing behavior changes.",
+              "zh": "对多个内部子系统进行了重组，以降低复杂性并改善代码健康状况，包括代理状态管理、任务意图分类、控制器分解和证据上下文处理。无面向用户的行为变化。"
+            },
+            "refs": [
+              7786,
+              7788,
+              7795,
+              7796,
+              7797,
+              7787
+            ]
+          },
+          {
+            "title": {
+              "en": "Enforced code standards with repolint",
+              "zh": "通过 repolint 强制执行代码规范"
+            },
+            "body": {
+              "en": "Introduced machine-enforced rules for comment length, file size, and layering to prevent regressions. Existing violations are recorded in a baseline and new ones are blocked.",
+              "zh": "引入了机器强制执行的注释长度、文件大小和分层规则，以防止回归。现有违规记录在基线中，新的违规将被阻止。"
+            },
+            "refs": [
+              7806
+            ]
+          }
+        ],
+        "fixed": []
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "Lxiny-zy",
+        "SivanCola",
+        "esengine"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.21.1",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.21.0...desktop-v1.21.1",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.21.1",
+      "baseVersion": "1.21.1",
+      "status": "reviewed",
+      "previousRelease": "1.21.0",
+      "builds": {
+        "cli": "v1.21.1",
+        "desktop": "v1.21.1",
+        "npm": "1.21.1"
+      }
+    },
+    {
+      "version": "1.21.0",
+      "date": "2026-08-06",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.21.0: Shell Execution Contract, Cache Accuracy, and CLI Polish",
+        "zh": "Reasonix 1.21.0：Shell 执行契约、缓存精度与 CLI 打磨"
+      },
+      "summary": {
+        "en": "This release introduces a structured shell execution contract with phase-aware error reporting, improves prompt-cache hit rates and cost accounting, and delivers a wave of CLI and desktop refinements — including stream recovery, session temp persistence, and a refreshed website.",
+        "zh": "此版本引入了结构化的 Shell 执行契约与分阶段错误报告，提升了提示缓存命中率与成本核算精度，并带来一系列 CLI 与桌面端改进——包括流恢复、会话临时文件持久化以及焕新的官网。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Shell Execution Contract",
+            "zh": "Shell 执行契约"
+          },
+          "body": {
+            "en": "Learn how Reasonix now reports shell identity, exit phase, and verification status for every command.",
+            "zh": "了解 Reasonix 如何为每条命令报告 Shell 身份、退出阶段与验证状态。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a44361deba5de2e5450fc9ef63c382dafe585b48/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "Session Temporary Files",
+            "zh": "会话临时文件"
+          },
+          "body": {
+            "en": "Bash temporary files now persist across commands within a session, with automatic cleanup.",
+            "zh": "Bash 临时文件现在在会话内的多条命令间持久保留，并自动清理。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a44361deba5de2e5450fc9ef63c382dafe585b48/docs/GUIDE.md"
+        },
+        {
+          "title": {
+            "en": "CLI Usage Receipts",
+            "zh": "CLI 用量回执"
+          },
+          "body": {
+            "en": "You can now hide per-turn token/cost receipts in the TUI while keeping usage accounting active.",
+            "zh": "现在可以在 TUI 中隐藏每轮 token/费用回执，同时保持用量统计活跃。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/a44361deba5de2e5450fc9ef63c382dafe585b48/docs/CONFIG_PATHS.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Structured Shell Execution with Phase-Aware Errors",
+            "zh": "结构化 Shell 执行与分阶段错误报告"
+          },
+          "body": {
+            "en": "Shell commands now carry internal metadata (shell identity, platform, exit code, failure phase, mutation risk, verification status) for accurate error presentation across Desktop, CLI, and ACP. The provider-visible tool schema remains unchanged.",
+            "zh": "Shell 命令现在携带内部元数据（Shell 身份、平台、退出码、失败阶段、变更风险、验证状态），在桌面端、CLI 和 ACP 中准确呈现错误。Provider 可见的工具 schema 保持不变。"
+          },
+          "refs": [
+            7757
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Prompt-Cache Hit Rate and Cost Accuracy",
+            "zh": "提示缓存命中率与成本精度提升"
+          },
+          "body": {
+            "en": "Adaptive Anthropic cache TTL extends the cache window after idle periods, reducing unnecessary rewrites. Cache diagnostics now correctly attribute changes, and cost accounting includes cache-write premiums for accurate billing.",
+            "zh": "自适应 Anthropic 缓存 TTL 在空闲后延长缓存窗口，减少不必要的重写。缓存诊断现在正确归因变更，成本核算包含缓存写入溢价以实现准确计费。"
+          },
+          "refs": [
+            7724,
+            7751
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Stream Interruption Recovery",
+            "zh": "流中断恢复"
+          },
+          "body": {
+            "en": "Interrupted provider streams are now replayed atomically up to five times, preventing partial tool execution. Desktop, CLI, and ACP surfaces roll back speculative output until a clean terminal event is received.",
+            "zh": "中断的 Provider 流现在可原子重放最多五次，防止部分工具执行。桌面端、CLI 和 ACP 界面会回滚推测性输出，直到收到干净的终止事件。"
+          },
+          "refs": [
+            7737
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Session-Wide Bash Temporary Files",
+            "zh": "会话级 Bash 临时文件持久化"
+          },
+          "body": {
+            "en": "Bash temporary files now persist across commands within a session via a private session directory, while per-command sandboxing is preserved. Automatic rotation and cleanup prevent leaks.",
+            "zh": "Bash 临时文件现在通过私有会话目录在会话内的多条命令间持久保留，同时保持每条命令的沙箱隔离。自动轮换与清理防止泄漏。"
+          },
+          "refs": [
+            7664
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "CLI Polish: Scrolling, Completions, and Keyboard",
+            "zh": "CLI 打磨：滚动、补全与键盘操作"
+          },
+          "body": {
+            "en": "Transcript scrolling now follows output correctly, slash-command completions are cached for responsiveness, and keyboard shortcuts are refined: Ctrl+Backspace deletes words, while Ctrl+Insert/Shift+Insert handle clipboard operations.",
+            "zh": "对话滚动现在正确跟随输出，斜杠命令补全被缓存以提升响应速度，键盘快捷键得到优化：Ctrl+Backspace 删除单词，Ctrl+Insert/Shift+Insert 处理剪贴板操作。"
+          },
+          "refs": [
+            7706,
+            7690,
+            7656
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop: Blank Session Provider, Todo Panel, and Windows Shortcuts",
+            "zh": "桌面端：空白会话 Provider、待办面板与 Windows 快捷方式修复"
+          },
+          "body": {
+            "en": "Reused blank sessions now respect the default provider. The todo panel updates live from todo_write events. Windows shortcuts broken by versioned upgrades are automatically repaired.",
+            "zh": "复用的空白会话现在遵循默认 Provider。待办面板根据 todo_write 事件实时更新。因版本化升级而损坏的 Windows 快捷方式会被自动修复。"
+          },
+          "refs": [
+            7736,
+            7709,
+            7752
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Goal Token Limits Removed",
+            "zh": "移除 Goal token 硬上限"
+          },
+          "body": {
+            "en": "Per-Goal token hard limits and request-admission middleware have been removed, preventing premature work pauses. Turn quotas and no-progress protection remain active.",
+            "zh": "移除了每个 Goal 的 token 硬上限与请求准入中间件，防止工作提前暂停。轮次配额与无进展保护仍然有效。"
+          },
+          "refs": [
+            7725
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "SWE-bench Verified Evaluation Mode",
+            "zh": "SWE-bench Verified 评估模式"
+          },
+          "body": {
+            "en": "e2ebench now supports SWE-bench Verified, running the agent inside official evaluation images with restricted egress for honest, auditable scores.",
+            "zh": "e2ebench 现在支持 SWE-bench Verified，在官方评估镜像内运行 Agent 并限制网络出口，以获得诚实、可审计的分数。"
+          },
+          "refs": [
+            7733
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Website Refreshed with Agent-First Messaging",
+            "zh": "官网焕新：以 Agent 能力为先"
+          },
+          "body": {
+            "en": "The landing page now leads with what the agent can do, featuring a real task replay, updated feature cards, and a new Surfaces section showing all four front ends.",
+            "zh": "着陆页现在以 Agent 的能力为先，展示真实任务回放、更新的功能卡片以及展示全部四种前端界面的新 Surfaces 区块。"
+          },
+          "refs": [
+            7759
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "CLI: Hide per-turn usage receipts",
+              "zh": "CLI：隐藏每轮用量回执"
+            },
+            "body": {
+              "en": "Added `[ui].show_turn_usage` config to hide token/cost receipts in the TUI while keeping accounting active.",
+              "zh": "新增 `[ui].show_turn_usage` 配置，可在 TUI 中隐藏 token/费用回执，同时保持用量统计活跃。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: Version metadata and shell completion",
+              "zh": "CLI：版本元信息与 Shell 补全"
+            },
+            "body": {
+              "en": "`reasonix version --verbose/--json` shows commit and build time. Shell completion registry aligned with real parsers.",
+              "zh": "`reasonix version --verbose/--json` 显示提交与构建时间。Shell 补全注册表与实际解析器对齐。"
+            },
+            "refs": [
+              7740
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: Ctrl+Insert copy and Shift+Insert paste",
+              "zh": "CLI：Ctrl+Insert 复制与 Shift+Insert 粘贴"
+            },
+            "body": {
+              "en": "Added classic terminal clipboard keys: Ctrl+Insert copies selection, Shift+Insert pastes via native clipboard.",
+              "zh": "新增经典终端剪贴板快捷键：Ctrl+Insert 复制选中内容，Shift+Insert 通过原生剪贴板粘贴。"
+            },
+            "refs": [
+              7656
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "CLI: Rewind picker shows real user prompts and scrolls",
+              "zh": "CLI：回退选择器显示真实用户提示并可滚动"
+            },
+            "body": {
+              "en": "The rewind picker now displays the user's original input instead of composed provider prompts, and scrolls within a viewport for long sessions.",
+              "zh": "回退选择器现在显示用户的原始输入而非组合后的 Provider 提示，并在长会话中于视口内滚动。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: `run --resume` accepts machine session IDs",
+              "zh": "CLI：`run --resume` 接受机器会话 ID"
+            },
+            "body": {
+              "en": "One-shot `run --resume` now resolves opaque machine session IDs in addition to filesystem paths.",
+              "zh": "一次性 `run --resume` 现在除了文件系统路径外，还能解析不透明的机器会话 ID。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: `--profile` flag routes to interactive session",
+              "zh": "CLI：`--profile` 标志路由至交互式会话"
+            },
+            "body": {
+              "en": "Bare `reasonix --profile …` now correctly dispatches to the interactive session path as documented.",
+              "zh": "无子命令的 `reasonix --profile …` 现在按文档正确路由至交互式会话路径。"
+            },
+            "refs": [
+              7656
+            ]
+          },
+          {
+            "title": {
+              "en": "CLI: Diagnostics, keyring migration, and Reasonix-home hardening",
+              "zh": "CLI：诊断、密钥环迁移与 Reasonix-home 加固"
+            },
+            "body": {
+              "en": "Startup diagnostics now expose progress and bounded recovery signals, keyring migration fails closed under timeout or error, and CLI tooling consistently uses the exact Reasonix home while redacting paths in reports.",
+              "zh": "启动诊断现在提供进度与有界恢复信号；密钥环迁移在超时或错误时安全停止；CLI 工具统一使用准确的 Reasonix home，并在报告中隐藏路径。"
+            },
+            "refs": [
+              7663
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop: macOS workbench sidebar titlebar zoom",
+              "zh": "桌面端：macOS 工作台侧边栏标题栏缩放"
+            },
+            "body": {
+              "en": "Double-clicking the empty titlebar strip above the workbench sidebar on macOS now triggers native window zoom.",
+              "zh": "在 macOS 上双击工作台侧边栏上方的空白标题栏区域现在会触发原生窗口缩放。"
+            },
+            "refs": [
+              4754
+            ]
+          },
+          {
+            "title": {
+              "en": "Serve: Replay pending prompts for late SSE clients",
+              "zh": "Serve：为迟到的 SSE 客户端重放待处理提示"
+            },
+            "body": {
+              "en": "When a browser attaches to `reasonix serve` after a confirm-gated tool is queued, the pending approval prompt is now replayed.",
+              "zh": "当浏览器在确认门控工具排队后连接到 `reasonix serve` 时，现在会重放待处理的批准提示。"
+            },
+            "refs": [
+              7708
+            ]
+          },
+          {
+            "title": {
+              "en": "Documentation and i18n consolidation",
+              "zh": "文档与国际化整合"
+            },
+            "body": {
+              "en": "Consolidated documentation updates including Simplified Chinese reasoning-provider reference, removed unused i18n keys, and completed locale translations.",
+              "zh": "整合文档更新，包括简体中文推理 Provider 参考、移除未使用的 i18n 键以及完成语言环境翻译。"
+            },
+            "refs": [
+              7764
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Desktop: Repair Windows uninstall registration",
+              "zh": "桌面端：修复 Windows 卸载注册项"
+            },
+            "body": {
+              "en": "Upgrades from legacy Tauri installs no longer leave stale uninstall entries that could remove the current installation.",
+              "zh": "从旧版 Tauri 安装升级不再留下可能删除当前安装的过期卸载条目。"
+            },
+            "refs": [
+              7729
+            ]
+          },
+          {
+            "title": {
+              "en": "Release: Tolerate npm registry visibility lag",
+              "zh": "发布：容忍 npm 注册表可见性延迟"
+            },
+            "body": {
+              "en": "Extended the npm registry visibility window to 5 minutes to prevent publication stalls.",
+              "zh": "将 npm 注册表可见性窗口延长至 5 分钟，防止发布停滞。"
+            },
+            "refs": [
+              7629
+            ]
+          }
+        ]
+      },
+      "upgrade": [
+        {
+          "level": "info",
+          "title": {
+            "en": "No manual migration is required",
+            "zh": "无需手动迁移"
+          },
+          "body": {
+            "en": "Upgrade to v1.21.0 normally; existing configuration and sessions remain compatible.",
+            "zh": "可直接升级到 v1.21.0；现有配置与会话保持兼容。"
+          },
+          "refs": [
+            7773,
+            7780
+          ]
+        }
+      ],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "skyzhao1223",
+        "esengine",
+        "Nontee22",
+        "elonwoo",
+        "weikengchen",
+        "Hezi-crypto",
+        "azhonglee",
+        "rixzkiye",
+        "rongbc",
+        "mife-user"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.21.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.20.0...desktop-v1.21.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.21.0",
+      "baseVersion": "1.21.0",
+      "status": "reviewed",
+      "previousRelease": "1.20.0",
+      "builds": {
+        "cli": "v1.21.0",
+        "desktop": "v1.21.0",
+        "npm": "1.21.0"
+      }
+    },
+    {
+      "version": "1.20.0",
+      "date": "2026-08-05",
+      "channel": "stable",
+      "title": {
+        "en": "Extension kernel, Task Monitor, and safer Goal completion",
+        "zh": "扩展内核、任务监视器与更安全的 Goal 完成"
+      },
+      "summary": {
+        "en": "Compact decision surfaces, local decision receipts, unified extension kernel, native Task Monitor, bounded sub-agent progress, Goal fail-closed completion, MiMo and DashScope Responses fixes, SSH remote access simplification, and multiple Desktop stability improvements.",
+        "zh": "压缩决策弹窗、本地决策回执、统一扩展内核、原生任务监视器、有界子代理进度、Goal 安全完成、MiMo 与 DashScope Responses 修复、SSH 远程访问简化，以及多项桌面稳定性改进。"
+      },
+      "surfaces": [
+        "agent",
+        "cli",
+        "config",
+        "desktop",
+        "plugin",
+        "provider",
+        "recovery",
+        "remote",
+        "serve",
+        "site",
+        "updates"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Extension Protocol v1",
+            "zh": "Extension Protocol v1"
+          },
+          "body": {
+            "en": "Learn about the stable JSON-RPC sidecar protocol, Plugin Manifest v1, and the Go SDK.",
+            "zh": "了解稳定的 JSON-RPC 边车协议、Plugin Manifest v1 和 Go SDK。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/73bc4e0c1a8fd859b2b1c648d1f2c019e4a5c448/docs/EXTENSION_PROTOCOL.md"
+        },
+        {
+          "title": {
+            "en": "Goal Enforcement (Chinese)",
+            "zh": "Goal 强制执行"
+          },
+          "body": {
+            "en": "Read the Chinese guide to the new update_goal tool and fail-closed completion flow.",
+            "zh": "新的 update_goal 工具与安全停止完成机制如何工作。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/73bc4e0c1a8fd859b2b1c648d1f2c019e4a5c448/docs/GOAL_ENFORCEMENT.zh-CN.md"
+        },
+        {
+          "title": {
+            "en": "Sub-agent Progress",
+            "zh": "子代理进度"
+          },
+          "body": {
+            "en": "Bounded progress forwarding for task, parallel_tasks, and fleet.",
+            "zh": "task、parallel_tasks 和 fleet 的有界进度转发。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/73bc4e0c1a8fd859b2b1c648d1f2c019e4a5c448/docs/SUBAGENT_PROGRESS.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Unified Extension Kernel and Extension Protocol v1",
+            "zh": "统一扩展内核与 Extension Protocol v1"
+          },
+          "body": {
+            "en": "Immutable runtime snapshots, fail-atomic reload, Plugin Manifest v1 (prompts, themes, full-trust code runtimes), stable JSON-RPC sidecar protocol, interceptor dispatch, streaming provider adapter, structured UI, and Go SDK.",
+            "zh": "不可变运行时快照、故障原子重载、Plugin Manifest v1（提示词、主题、完全信任代码运行时）、稳定的 JSON-RPC 边车协议、拦截器调度、流式提供者适配器、结构化 UI 和 Go SDK。"
+          },
+          "refs": [
+            7373
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Native Task Monitor",
+            "zh": "原生任务监视器"
+          },
+          "body": {
+            "en": "Monitor agent tasks natively in CLI and Desktop with lifecycle semantics and session-scoped summary view.",
+            "zh": "在 CLI 和桌面端原生监控代理任务，提供生命周期语义和会话范围摘要视图。"
+          },
+          "refs": [
+            6998
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Bounded Sub-agent Progress Forwarding",
+            "zh": "有界子代理进度转发"
+          },
+          "body": {
+            "en": "Forward structured progress for task, parallel_tasks, and fleet without flooding the parent stream. Renders nested lifecycle cards in Desktop and stable per-child transcript slots in CLI.",
+            "zh": "转发 task、parallel_tasks 和 fleet 的结构化进度，不淹没父流。在桌面端渲染嵌套生命周期卡片，在 CLI 中提供稳定的子进程记录槽。"
+          },
+          "refs": [
+            7372
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Goal Completion Fail-Closed",
+            "zh": "Goal 完成安全停止"
+          },
+          "body": {
+            "en": "Replace free-form Goal footer markers with a stable update_goal tool and epoch-scoped per-turn reports. Centralized completion logic with bounded evaluator, progress-aware budgets, and pause/resume controls.",
+            "zh": "用稳定的 update_goal 工具和纪元范围的每轮报告替换自由格式的 Goal 页脚标记。集中完成逻辑，带有界评估器、进度感知预算和暂停/恢复控制。"
+          },
+          "refs": [
+            7519
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Compact Decision Surfaces and Local Receipts",
+            "zh": "压缩决策弹窗与本地回执"
+          },
+          "body": {
+            "en": "Compact footer decision-card layout with bounded scroll, dense action rows, and overflow disclosure. Record bounded Ask, approval, and recovery decisions as local transcript receipts.",
+            "zh": "压缩页脚决策卡片布局，带有界滚动、密集操作行和溢出展示。将有界的 Ask、批准和恢复决策记录为本地记录回执。"
+          },
+          "refs": [
+            7576
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Simplified SSH Remote Access",
+            "zh": "简化 SSH 远程访问"
+          },
+          "body": {
+            "en": "Remove Remote Workbench protocol and stacks; reuse CLI/Serve remote model. Desktop opens per-host native web child windows via SSH. Keyless remote Serve setup with loopback-only page.",
+            "zh": "移除 Remote Workbench 协议和堆栈；重用 CLI/Serve 远程模型。桌面端通过 SSH 打开每主机原生 Web 子窗口。无密钥远程 Serve 设置，提供仅回环页面。"
+          },
+          "refs": [
+            7528
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Model Usage Charts with Primer Palette",
+            "zh": "使用 Primer 配色的模型用量图表"
+          },
+          "body": {
+            "en": "Replace monochrome accent ramp with GitHub Primer data-viz two-set categorical palette. Fix donut overflow on hover and keyboard accessibility.",
+            "zh": "用 GitHub Primer 数据可视化双套分类调色板替换单色渐变。修复悬停时环形图溢出和键盘可访问性。"
+          },
+          "refs": [
+            7503
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Cross-platform Extension and Task Monitor Reliability",
+            "zh": "Extension 与任务监视器跨平台可靠性"
+          },
+          "body": {
+            "en": "Make content-reference eviction deterministic, reject Unix and Windows absolute plugin paths consistently, stabilize parallel-task cancellation, and restore reliable Windows validation for Task Monitor and remote provider setup.",
+            "zh": "让内容引用淘汰顺序保持确定，一致拒绝 Unix 与 Windows 绝对插件路径，稳定并行任务取消流程，并恢复任务监视器与远程提供者设置的可靠 Windows 验证。"
+          },
+          "refs": [
+            7625
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "MiMo and DashScope Responses Wire Alignment",
+            "zh": "MiMo 与 DashScope Responses 协议对齐"
+          },
+          "body": {
+            "en": "Fix multi-turn tool loops, reasoning round-trip, JSON output for MiMo; fix DashScope second-turn 400 error, all-zero usage suppression, and vendor-aware cache TTL.",
+            "zh": "修复 MiMo 的多轮工具循环、推理往返、JSON 输出；修复 DashScope 第二轮 400 错误、全零用量抑制和供应商感知缓存 TTL。"
+          },
+          "refs": [
+            7566,
+            7234,
+            7168
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop Stability Fixes",
+            "zh": "桌面稳定性修复"
+          },
+          "body": {
+            "en": "Recover stuck updates and legacy WebKit, contain macOS alias repair startup crashes, keep composer overflow stacks readable, and harden account verification and community flows.",
+            "zh": "修复更新卡死与旧版 WebKit、遏制 macOS 别名修复启动崩溃、保持输入区溢出列表可读，并加固账号验证与社区流程。"
+          },
+          "refs": [
+            7615,
+            7610,
+            7590,
+            7589
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Remote Web Recovery After SSH Drops",
+            "zh": "SSH 断开后远程 Web 恢复"
+          },
+          "body": {
+            "en": "Add integration regression test for SSH drop, forward recovery, and window reload. Document transient outage behavior.",
+            "zh": "添加 SSH 断开、转发恢复和窗口重载的集成回归测试。记录瞬态中断行为。"
+          },
+          "refs": [
+            7368
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Unified Extension Kernel and Extension Protocol v1",
+              "zh": "统一扩展内核与 Extension Protocol v1"
+            },
+            "body": {
+              "en": "Immutable runtime snapshots, fail-atomic reload, Plugin Manifest v1, stable JSON-RPC sidecar protocol, interceptor dispatch, streaming provider adapter, structured UI, and Go SDK.",
+              "zh": "不可变运行时快照、故障原子重载、Plugin Manifest v1、稳定的 JSON-RPC 边车协议、拦截器调度、流式提供者适配器、结构化 UI 和 Go SDK。"
+            },
+            "refs": [
+              7373
+            ]
+          },
+          {
+            "title": {
+              "en": "Native Task Monitor",
+              "zh": "原生任务监视器"
+            },
+            "body": {
+              "en": "Monitor agent tasks natively in CLI and Desktop with lifecycle semantics and session-scoped summary view.",
+              "zh": "在 CLI 和桌面端原生监控代理任务，提供生命周期语义和会话范围摘要视图。"
+            },
+            "refs": [
+              6998
+            ]
+          },
+          {
+            "title": {
+              "en": "Bounded Sub-agent Progress Forwarding",
+              "zh": "有界子代理进度转发"
+            },
+            "body": {
+              "en": "Forward structured progress for task, parallel_tasks, and fleet without flooding the parent stream. Renders nested lifecycle cards in Desktop and stable per-child transcript slots in CLI.",
+              "zh": "转发 task、parallel_tasks 和 fleet 的结构化进度，不淹没父流。在桌面端渲染嵌套生命周期卡片，在 CLI 中提供稳定的子进程记录槽。"
+            },
+            "refs": [
+              7372
+            ]
+          },
+          {
+            "title": {
+              "en": "Goal Completion Fail-Closed",
+              "zh": "Goal 完成安全停止"
+            },
+            "body": {
+              "en": "Replace free-form Goal footer markers with a stable update_goal tool and epoch-scoped per-turn reports. Centralized completion logic with bounded evaluator, progress-aware budgets, and pause/resume controls.",
+              "zh": "用稳定的 update_goal 工具和纪元范围的每轮报告替换自由格式的 Goal 页脚标记。集中完成逻辑，带有界评估器、进度感知预算和暂停/恢复控制。"
+            },
+            "refs": [
+              7519
+            ]
+          },
+          {
+            "title": {
+              "en": "Ablation Subsystem Switches",
+              "zh": "消融子系统开关"
+            },
+            "body": {
+              "en": "Switch subsystems off behind one shared vocabulary for controlled experiments. Includes planner, subagent, retrieval, evidence, and compaction.",
+              "zh": "通过共享词汇关闭子系统以进行受控实验。包括规划器、子代理、检索、证据和压缩。"
+            },
+            "refs": [
+              7550
+            ]
+          },
+          {
+            "title": {
+              "en": "Benchmark Cost per Solved Task",
+              "zh": "基准测试每个已解决任务的成本"
+            },
+            "body": {
+              "en": "Report cost per solved task, tokens per solved, median wall time, and failure-class breakdown in e2e reports.",
+              "zh": "在端到端报告中报告每个已解决任务的成本、每个已解决任务的令牌数、中位墙钟时间和失败类别细分。"
+            },
+            "refs": [
+              7546
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Compact Decision Surfaces and Local Receipts",
+              "zh": "压缩决策弹窗与本地回执"
+            },
+            "body": {
+              "en": "Compact footer decision-card layout with bounded scroll, dense action rows, and overflow disclosure. Record bounded Ask, approval, and recovery decisions as local transcript receipts.",
+              "zh": "压缩页脚决策卡片布局，带有界滚动、密集操作行和溢出展示。将有界的 Ask、批准和恢复决策记录为本地记录回执。"
+            },
+            "refs": [
+              7576
+            ]
+          },
+          {
+            "title": {
+              "en": "Simplified SSH Remote Access",
+              "zh": "简化 SSH 远程访问"
+            },
+            "body": {
+              "en": "Remove Remote Workbench protocol and stacks; reuse CLI/Serve remote model. Desktop opens per-host native web child windows via SSH. Keyless remote Serve setup with loopback-only page.",
+              "zh": "移除 Remote Workbench 协议和堆栈；重用 CLI/Serve 远程模型。桌面端通过 SSH 打开每主机原生 Web 子窗口。无密钥远程 Serve 设置，提供仅回环页面。"
+            },
+            "refs": [
+              7528
+            ]
+          },
+          {
+            "title": {
+              "en": "Model Usage Charts with Primer Palette",
+              "zh": "使用 Primer 配色的模型用量图表"
+            },
+            "body": {
+              "en": "Replace monochrome accent ramp with GitHub Primer data-viz two-set categorical palette. Fix donut overflow on hover and keyboard accessibility.",
+              "zh": "用 GitHub Primer 数据可视化双套分类调色板替换单色渐变。修复悬停时环形图溢出和键盘可访问性。"
+            },
+            "refs": [
+              7503
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Cross-platform Extension and Task Monitor Reliability",
+              "zh": "Extension 与任务监视器跨平台可靠性"
+            },
+            "body": {
+              "en": "Make content-reference eviction deterministic, reject Unix and Windows absolute plugin paths consistently, stabilize parallel-task cancellation, and restore reliable Windows validation for Task Monitor and remote provider setup.",
+              "zh": "让内容引用淘汰顺序保持确定，一致拒绝 Unix 与 Windows 绝对插件路径，稳定并行任务取消流程，并恢复任务监视器与远程提供者设置的可靠 Windows 验证。"
+            },
+            "refs": [
+              7625
+            ]
+          },
+          {
+            "title": {
+              "en": "MiMo and DashScope Responses Wire Alignment",
+              "zh": "MiMo 与 DashScope Responses 协议对齐"
+            },
+            "body": {
+              "en": "Fix multi-turn tool loops, reasoning round-trip, JSON output for MiMo; fix DashScope second-turn 400 error, all-zero usage suppression, and vendor-aware cache TTL.",
+              "zh": "修复 MiMo 的多轮工具循环、推理往返、JSON 输出；修复 DashScope 第二轮 400 错误、全零用量抑制和供应商感知缓存 TTL。"
+            },
+            "refs": [
+              7566,
+              7234,
+              7168
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop Stability Fixes",
+              "zh": "桌面稳定性修复"
+            },
+            "body": {
+              "en": "Recover stuck updates and legacy WebKit, contain macOS alias repair startup crashes, keep composer overflow stacks readable, and harden account verification and community flows.",
+              "zh": "修复更新卡死与旧版 WebKit、遏制 macOS 别名修复启动崩溃、保持输入区溢出列表可读，并加固账号验证与社区流程。"
+            },
+            "refs": [
+              7615,
+              7610,
+              7590,
+              7589
+            ]
+          },
+          {
+            "title": {
+              "en": "Remote Web Recovery After SSH Drops",
+              "zh": "SSH 断开后远程 Web 恢复"
+            },
+            "body": {
+              "en": "Add integration regression test for SSH drop, forward recovery, and window reload. Document transient outage behavior.",
+              "zh": "添加 SSH 断开、转发恢复和窗口重载的集成回归测试。记录瞬态中断行为。"
+            },
+            "refs": [
+              7368
+            ]
+          },
+          {
+            "title": {
+              "en": "CI: Auto-minimize Activity-Farming Spam Comments",
+              "zh": "CI：自动最小化活动农场垃圾评论"
+            },
+            "body": {
+              "en": "Detect and minimize template spam comments from non-contributor accounts based on structural signals.",
+              "zh": "根据结构信号检测并最小化非贡献者账户的模板垃圾评论。"
+            },
+            "refs": [
+              7560
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "mchenziyi",
+        "clearnature",
+        "Akashmdshetty",
+        "esengine",
+        "HaoyueQin"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.20.0",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.19.7...desktop-v1.20.0",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.20.0",
+      "baseVersion": "1.20.0",
+      "status": "reviewed",
+      "previousRelease": "1.19.7",
+      "builds": {
+        "cli": "v1.20.0",
+        "desktop": "v1.20.0",
+        "npm": "1.20.0"
+      }
+    },
+    {
       "version": "1.19.7",
       "date": "2026-08-05",
       "channel": "stable",

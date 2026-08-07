@@ -7,6 +7,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -232,7 +233,7 @@ type SnipHinter interface {
 	SnipHint() SnipHint
 }
 
-// --- process-global built-in set (populated by builtin subpackage init) ---
+// process-global built-in set (populated by builtin subpackage init)
 
 var builtins = map[string]Tool{}
 
@@ -266,7 +267,7 @@ func LookupBuiltin(name string) (Tool, bool) {
 	return t, ok
 }
 
-// --- per-run registry instance ---
+// per-run registry instance
 
 // Registry is a per-run set of tools: enabled built-ins plus plugin tools.
 type Registry struct {
@@ -414,11 +415,8 @@ func (r *Registry) ResolveCall(name string) (resolved Tool, canonical string, ca
 		if !ok {
 			continue
 		}
-		for _, alias := range mcpBindingAliases(b) {
-			if name == alias {
-				matches[canonicalName] = t
-				break
-			}
+		if slices.Contains(mcpBindingAliases(b), name) {
+			matches[canonicalName] = t
 		}
 	}
 	if len(matches) == 1 {

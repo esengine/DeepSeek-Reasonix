@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -330,9 +331,7 @@ func cloneMCPSpec(in plugin.Spec) plugin.Spec {
 	out.Headers = cloneStringMap(in.Headers)
 	if in.ToolTimeouts != nil {
 		out.ToolTimeouts = make(map[string]time.Duration, len(in.ToolTimeouts))
-		for name, timeout := range in.ToolTimeouts {
-			out.ToolTimeouts[name] = timeout
-		}
+		maps.Copy(out.ToolTimeouts, in.ToolTimeouts)
 	}
 	return out
 }
@@ -342,9 +341,7 @@ func cloneStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
+	maps.Copy(out, in)
 	return out
 }
 

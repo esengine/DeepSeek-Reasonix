@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -32,12 +33,14 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/extension/providerext"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/provider/openai"
 	"reasonix/internal/serve"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/stats"
 	"reasonix/internal/telemetry"
 
@@ -52,7 +55,16 @@ var (
 )
 
 // Run is the CLI entry point; it returns a process exit code.
+// Prefer RunWithBuildInfo when git commit / build time are available from ldflags.
 func Run(args []string, version string) int {
+	return RunWithBuildInfo(args, BuildInfo{Version: version})
+}
+
+// RunWithBuildInfo is the full CLI entry with optional build metadata for
+// `reasonix version --verbose` / `--json`.
+func RunWithBuildInfo(args []string, info BuildInfo) int {
+	info = info.withDefaults()
+	version := info.Version
 	// Usage recording is asynchronous so provider/UI paths never wait on disk.
 	// Drain records accepted by this process before a normal CLI exit.
 	defer func() {
@@ -167,9 +179,14 @@ func Run(args []string, version string) int {
 	case "upgrade", "update":
 		configureCLIThemeFromConfig()
 		return upgradeCommand(rest, version)
-	case "version", "--version", "-v":
-		fmt.Println("reasonix", version)
-		return 0
+	case "version":
+		// Detailed identity: version --verbose / --json. Top-level --version/-v
+		// stay single-line for script compatibility (Integration D/E).
+		return versionCommand(rest, info, true)
+	case "--version", "-v":
+		return versionCommand(nil, info, false)
+	case "completion":
+		return completionCommand(rest)
 	case "docs-manifest":
 		return docsManifestCommand(rest, version)
 	case "help", "--help", "-h":
@@ -188,7 +205,7 @@ func isDoctorRepairCommand(args []string) bool {
 
 func isDefaultInteractiveFlag(arg string) bool {
 	switch arg {
-	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools":
+	case "--model", "--max-steps", "--continue", "-c", "--resume", "-r", "--copy", "--dangerously-skip-permissions", "--yolo", "--permission-mode", "--effort", "--dir", "--add-dir", "--allowed-tools", "--allowedTools", "--profile":
 		return true
 	}
 	if name, _, ok := strings.Cut(arg, "="); ok && isDefaultInteractiveFlag(name) {
@@ -264,6 +281,20 @@ type cliBuildOverrides struct {
 	Stderr               io.Writer
 	OnSessionRecovered   func(control.SessionRecoveryInfo) error
 	Ablation             ablation.Set
+	// SessionTemp carries the previous Controller's private temporary directory
+	// manager across model/profile rebuilds so temporary files survive.
+	SessionTemp *sessiontemp.Manager
+}
+
+// sessionTempFromCLIController returns the logical-session private temporary
+// directory manager for a same-session CLI controller rebuild. Nil keeps fresh
+// builds on control.New's normal new-manager path.
+func sessionTempFromCLIController(ctrl control.SessionAPI) *sessiontemp.Manager {
+	prev, ok := ctrl.(*control.Controller)
+	if !ok || prev == nil {
+		return nil
+	}
+	return prev.SessionTemp()
 }
 
 func setupProfileWithOverrides(ctx context.Context, modelName string, maxStepsOverride int, requireKey bool, sink event.Sink, profile string, overrides cliBuildOverrides) (*control.Controller, error) {
@@ -290,6 +321,7 @@ func cliProfileBuildOptions(modelName string, maxStepsOverride int, requireKey b
 		Stderr:               overrides.Stderr,
 		OnSessionRecovered:   overrides.OnSessionRecovered,
 		Ablation:             overrides.Ablation,
+		SessionTemp:          overrides.SessionTemp,
 	}
 }
 
@@ -470,7 +502,7 @@ func runAgent(args []string, version string) int {
 	ablateFlag := fs.String("ablate", "", "benchmark arm: comma-separated subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	cont := registerContinueFlag(fs)
-	resume := fs.String("resume", "", "resume a specific session file (non-interactive; takes precedence over --continue)")
+	resume := fs.String("resume", "", "resume by session file path, session ID, or machine session ID (takes precedence over --continue)")
 	copySession := fs.Bool("copy", false, "with --resume/--continue: duplicate the session and continue in the copy (escape hatch when the original is held by another Reasonix process)")
 	effort := fs.String("effort", "", "session reasoning effort override")
 	permissionMode := fs.String("permission-mode", "ask", "permission mode: manual | ask | auto | acceptEdits | dontAsk | plan | bypassPermissions")
@@ -559,8 +591,17 @@ func runAgent(args []string, version string) int {
 
 	// Resolve the resume target up front so --copy and the session lease can be
 	// handled before any heavy assembly. --resume takes precedence over
-	// --continue, matching the Resume call below.
+	// --continue, matching the Resume call below. Accept file paths, branch
+	// IDs, preview text, and opaque machine session IDs (#7429).
 	resumePath := strings.TrimSpace(*resume)
+	if resumePath != "" {
+		resolved, err := resolveSessionQuery(resolveCLISessionDir(), resumePath)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		resumePath = resolved
+	}
 	if resumePath == "" && *cont {
 		sessionDir := resolveCLISessionDir()
 		reclaimCLIRecoveryBranches(sessionDir)
@@ -647,7 +688,11 @@ func runAgent(args []string, version string) int {
 	}
 	var metrics *metricsSink
 	if *metricsPath != "" {
-		metrics = &metricsSink{inner: sink}
+		metrics = &metricsSink{
+			inner:         sink,
+			partialPath:   partialMetricsPath(*metricsPath),
+			snapshotEvery: 2 * time.Second,
+		}
 		sink = metrics
 	}
 	sink = withNotifications(sink, cfg)
@@ -690,6 +735,7 @@ func runAgent(args []string, version string) int {
 		return 1
 	}
 	defer ctrl.Close()
+	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 	ctrl.ApplyHeadlessApprovalMode(permissions.approval)
 
 	// --resume: load a specific session file (non-interactive, meant for
@@ -721,13 +767,16 @@ func runAgent(args []string, version string) int {
 		})
 	}
 	if metrics != nil {
-		metrics.m.DurationMs = time.Since(started).Milliseconds()
-		metrics.m.Outcome = completion.class
-		metrics.m.Arm = ablated.Arm()
+		// Snapshot under the sink's lock: a background job can still be emitting
+		// into it while this goroutine assembles the final record.
+		final := metrics.Snapshot()
+		final.DurationMs = time.Since(started).Milliseconds()
+		final.Outcome = completion.class
+		final.Arm = ablated.Arm()
 		if exec := ctrl.Executor(); exec != nil {
 			if audit := exec.CapabilityAudit(); audit != nil {
 				snap := audit.Snapshot()
-				metrics.m.MergeCapabilityAuditCounters(
+				final.MergeCapabilityAuditCounters(
 					snap.Routes, snap.RoutedCandidates, snap.RoutedRequire, snap.RoutedPrefer, snap.RoutedSuggest, snap.Declines,
 					snap.SemanticRoutes, snap.SemanticFallbacks,
 					snap.RequireMissing, snap.RequireRecovered, snap.PreferMissing, snap.PreferRecovered,
@@ -739,7 +788,7 @@ func runAgent(args []string, version string) int {
 				)
 			}
 		}
-		if err := writeMetrics(*metricsPath, metrics.m); err != nil {
+		if err := writeMetrics(*metricsPath, final); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
 	}
@@ -879,7 +928,10 @@ func runServe(args []string) int {
 	// ignoring project-level default_model overrides. Explicit flags and
 	// resumable session models remain strict and are preserved verbatim.
 	*model = resolveServeModel(*model)
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, true, bc, profile, cliBuildOverrides{
+	// Keep the browser reachable when the selected provider has no saved key.
+	// The loopback-only provider setup surface stores the missing credential and
+	// rebuilds this controller in place before the normal web UI is exposed.
+	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, bc, profile, cliBuildOverrides{
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	})
 	if err != nil {
@@ -887,6 +939,7 @@ func runServe(args []string) int {
 		return 1
 	}
 	defer ctrl.Close()
+	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 
 	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
 	if *resume != "" {
@@ -933,6 +986,7 @@ func runServe(args []string) int {
 		}
 		defer os.Remove(*pidFile)
 	}
+	srv.EnableProviderSetupForListener(displayAddr)
 
 	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), displayAddr)
 	if srv.AuthMode() == "token" {
@@ -953,14 +1007,18 @@ func runServe(args []string) int {
 	if warning := serve.PlainHTTPAuthWarning(serveCfg, displayAddr); warning != "" {
 		fmt.Fprintf(os.Stderr, "  %s\n", warning)
 	}
-	// Diagnostic: check whether balance endpoint is reachable
-	if b, err := ctrl.Balance(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "  balance: error — %v\n", err)
-	} else if b == nil {
-		fmt.Fprintf(os.Stderr, "  balance: not configured (no balance_url for this provider)\n")
-	} else {
-		fmt.Printf("  balance: %s\n", b.Display())
-	}
+	// Balance is diagnostics, not readiness. Run it off the serving path so a
+	// slow or unauthenticated Provider endpoint cannot leave a published port
+	// file pointing at a listener whose HTTP accept loop has not started yet.
+	go func() {
+		if b, err := ctrl.Balance(context.Background()); err != nil {
+			fmt.Fprintf(os.Stderr, "  balance: error — %v\n", err)
+		} else if b == nil {
+			fmt.Fprintf(os.Stderr, "  balance: not configured (no balance_url for this provider)\n")
+		} else {
+			fmt.Printf("  balance: %s\n", b.Display())
+		}
+	}()
 
 	// Use graceful shutdown so SIGINT/SIGTERM drain active connections.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -1029,16 +1087,18 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	// Bubble Tea owns the terminal from the resume picker through controller
+	// shutdown. Start diagnostics before config/controller work so hangs leave a
+	// non-zero log with milestones (#7435, #7507).
+	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
+	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_begin")
 	cfg, err := config.Load()
 	if err == nil {
 		configureCLIThemeWithStyle(cfg.UITheme(), cfg.UIThemeStyle())
 		cliCursorShape = cfg.UICursorShape()
 	}
-	// Bubble Tea owns the terminal from the resume picker through controller
-	// shutdown. Route process logs and plugin stderr to a private, bounded file
-	// for that whole lifetime; user-facing warnings arrive as typed TUI events.
-	diagnostics := startTUIDiagnostics(config.ReasonixHomeDir())
-	defer diagnostics.Close()
+	diagnostics.Milestone("config_load_done")
 
 	// Decide whether we're starting fresh or resuming. --resume opens an
 	// interactive picker; --continue / -c jumps straight into the newest.
@@ -1134,6 +1194,7 @@ func chatREPL(args []string, version string) int {
 		Stderr:             diagnostics.Writer(),
 		OnSessionRecovered: cliSessionRecoveredHandler(leases),
 	}
+	diagnostics.Milestone("controller_build_begin")
 	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, sink, profile, overrides)
 	if err != nil && errors.Is(err, boot.ErrUnknownModel) && isInteractive() && config.SourcePath() == "" {
 		// True first run whose default model can't resolve: guide setup, then retry.
@@ -1149,6 +1210,7 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
 	}
+	diagnostics.Milestone("controller_build_done")
 
 	// Decide where this conversation's auto-save lands. A resume reuses the
 	// file so closing/reopening keeps appending to the same history; a fresh
@@ -1182,6 +1244,9 @@ func chatREPL(args []string, version string) int {
 		switch {
 		case err != nil:
 			missing = err.Error()
+		case name != "" && providerext.PluginRefOwner(name) != "":
+			// Plugin-namespaced refs hold no config credential; boot's merged
+			// resolver already gated them, and there is no key env to warn about.
 		case name != "":
 			if vErr := cfg.Validate(name); vErr != nil {
 				missing = vErr.Error()
@@ -1208,12 +1273,15 @@ func chatREPL(args []string, version string) int {
 	}
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
+	m.diagnostics = diagnostics
+	m.updateWatchdogStatusProvider()
 	m.planMode = permissions.plan
 	m.leases = leases
-	if cfg, err := config.Load(); err == nil {
+	if cfg != nil {
 		m.outputStyle = cfg.Agent.OutputStyle    // shown as the active entry in /output-style
 		m.statuslineCmd = cfg.Statusline.Command // custom status-line command, "" = built-in row
 		m.showReasoning = cfg.UI.ShowReasoning   // /verbose persistence: start with config default
+		m.showTurnUsage = cfg.UI.ShowTurnUsage   // retain usage accounting even when transcript receipts are hidden
 		m.cfg = cfg
 	}
 
@@ -1226,6 +1294,9 @@ func chatREPL(args []string, version string) int {
 		if spec.EffortOverride != nil {
 			effectiveOverrides.Effort = spec.EffortOverride
 		}
+		// Keep the logical-session private temporary directory across model /
+		// profile switches (Issue #7575).
+		effectiveOverrides.SessionTemp = sessionTempFromCLIController(oldCtrl)
 		c, err := setupQuietProfile(ctx, spec.ModelRef, *maxSteps, false, sink, spec.RuntimeProfile, effectiveOverrides)
 		if err != nil {
 			return nil, err
@@ -1247,6 +1318,30 @@ func chatREPL(args []string, version string) int {
 		}
 		return c, nil
 	}
+	// /reload support: rebuild the runtime through boot.Rebuild so tools,
+	// skills, commands, hooks, MCP servers, and providers are discovered fresh
+	// while the boot layer migrates the session (history, approval grants,
+	// goal/recovery state, lifecycle). Same construction inputs as
+	// buildController so the replacement matches this session's launch wiring;
+	// the CLI holds no SharedHost, so each rebuild owns its plugin host.
+	m.rebuildRuntime = func(ctx context.Context, spec controllerBuildSpec, old *control.Controller) (*boot.BuildResult, error) {
+		effectiveOverrides := overrides
+		if spec.EffortOverride != nil {
+			effectiveOverrides.Effort = spec.EffortOverride
+		}
+		res, err := boot.Rebuild(ctx, old, cliProfileBuildOptions(spec.ModelRef, *maxSteps, false, sink, spec.RuntimeProfile, effectiveOverrides))
+		if err != nil {
+			return nil, err
+		}
+		// The interactive approval gate and the --yolo posture are frontend
+		// wiring boot.Rebuild deliberately leaves to the caller (it carries
+		// the Ask/Auto/Yolo tool-approval mode, not the launch flag).
+		res.Controller.EnableInteractiveApproval()
+		if *yolo {
+			res.Controller.SetAutoApproveTools(true)
+		}
+		return res, nil
+	}
 	m.runtimeProfile = profile
 	if effortOverride != nil {
 		m.effortLevel = *effortOverride
@@ -1262,7 +1357,9 @@ func chatREPL(args []string, version string) int {
 	// Non-Termux terminals use an alt-screen transcript viewport. Termux stays
 	// in the normal buffer so native touch scrollback and soft-keyboard focus
 	// keep working; finalized transcript lines are emitted via tea.Println.
+	diagnostics.Milestone("terminal_takeover_begin")
 	p := tea.NewProgram(m)
+	diagnostics.StartWatchdog(p)
 	// SSH drop (SIGHUP) or service stop (SIGTERM): persist the conversation
 	// before the terminal goes away, then unwind through the normal close path
 	// so resume picks up the interrupted session (#3772).
@@ -1275,6 +1372,7 @@ func chatREPL(args []string, version string) int {
 	}()
 	final, runErr := p.Run()
 	signal.Stop(hangup)
+	diagnostics.Milestone("terminal_released")
 	// Close the active controller plus any retired ones from /model switches.
 	// Retired controllers were stashed rather than closed at switch time
 	// because Controller.Close() runs SessionEnd hooks and kills plugin
@@ -1349,7 +1447,7 @@ func prepareNativeScrollback(w io.Writer, rows int) {
 }
 
 func reserveNativeScrollbackFrame(w io.Writer, rows int) {
-	for i := 0; i < rows; i++ {
+	for range rows {
 		fmt.Fprintln(w)
 	}
 }
@@ -1686,12 +1784,7 @@ func buildFamilyEntry(probe config.ProviderEntry, selected []string) config.Prov
 }
 
 func containsString(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, v)
 }
 
 // filterStaleCustomEntries drops the wizard's own magic-name entries
@@ -2220,7 +2313,7 @@ func appendEnv(path string, lines []string) error {
 
 	var kept []string
 	if data, err := fileencoding.ReadFileUTF8(path); err == nil {
-		for _, raw := range strings.Split(string(data), "\n") {
+		for raw := range strings.SplitSeq(string(data), "\n") {
 			trimmed := strings.TrimSpace(raw)
 			check := strings.TrimPrefix(trimmed, "export ")
 			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {
@@ -2269,6 +2362,15 @@ func readStdin() string {
 
 func usage() {
 	fmt.Print(i18n.M.UsageBody)
+}
+
+type ctrlKillerAdapter struct{ ctrl *control.Controller }
+
+func (a ctrlKillerAdapter) Kill(sessionID, id string) bool {
+	if sessionID != "" && agent.BranchID(a.ctrl.SessionPath()) != sessionID {
+		return false
+	}
+	return a.ctrl.CancelJob(id)
 }
 
 func configCommand(args []string) int {

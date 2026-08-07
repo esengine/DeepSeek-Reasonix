@@ -26,7 +26,7 @@ type PrefixShape struct {
 // every call site, while still assigning to event.Event.CacheDiagnostics.
 type CacheDiagnostics = event.CacheDiagnostics
 
-func shortHash(v interface{}) string {
+func shortHash(v any) string {
 	b, _ := json.Marshal(v)
 	h := sha256.Sum256(b)
 	return fmt.Sprintf("%x", h[:8])
@@ -39,7 +39,7 @@ func CaptureShape(systemPrompt string, schemas []provider.ToolSchema, rewriteVer
 	return PrefixShape{
 		SystemHash: shortHash(systemPrompt),
 		ToolsHash:  shortHash(string(toolsJSON)),
-		PrefixHash: shortHash(map[string]interface{}{
+		PrefixHash: shortHash(map[string]any{
 			"system": systemPrompt,
 			"tools":  string(toolsJSON),
 		}),
@@ -64,7 +64,14 @@ func normalizeToolSchemas(schemas []provider.ToolSchema) []provider.ToolSchema {
 }
 
 // CompareShape returns diagnostics describing what changed between two shapes.
-func CompareShape(prev, cur PrefixShape, usage *provider.Usage) CacheDiagnostics {
+// contentReasons is the set of provider-visible rewrite reasons (e.g.
+// "compact_auto", "snip", "rewind_truncate") drained from the Session since
+// prev was captured — see Session.DrainContentRewriteReasons. It is the sole
+// source of rewrite-caused reasons: a bare LogRewriteVersion change with no
+// drained reason means only local-only metadata was touched (a decision
+// receipt, tool-call preview/resolution, or an Edited-message replace), which
+// never reaches the provider and so must not be reported as a cache change.
+func CompareShape(prev, cur PrefixShape, usage *provider.Usage, contentReasons []string) CacheDiagnostics {
 	reasons := []string{}
 	if prev.SystemHash != "" && prev.SystemHash != cur.SystemHash {
 		reasons = append(reasons, "system")
@@ -72,9 +79,7 @@ func CompareShape(prev, cur PrefixShape, usage *provider.Usage) CacheDiagnostics
 	if prev.ToolsHash != "" && prev.ToolsHash != cur.ToolsHash {
 		reasons = append(reasons, "tools")
 	}
-	if prev.LogRewriteVersion != cur.LogRewriteVersion {
-		reasons = append(reasons, "log_rewrite")
-	}
+	reasons = append(reasons, contentReasons...)
 	var miss, hit int
 	if usage != nil {
 		miss = usage.CacheMissTokens

@@ -457,7 +457,7 @@ func publishRecoveryTrashStage(dir, key, stageDir string) (string, error) {
 	root := filepath.Join(dir, recoveryTrashDir)
 	stem := strings.TrimSuffix(key, filepath.Ext(key))
 	stamp := time.Now().UTC().UnixMilli()
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		name := key
 		if i > 0 {
 			name = fmt.Sprintf("%s-recovery-%d-%d", stem, stamp, i)
@@ -523,7 +523,7 @@ func reserveRecoveryTrashItemDir(dir, key string) (string, string, error) {
 		return "", "", err
 	}
 	stem := strings.TrimSuffix(key, filepath.Ext(key))
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		name := key
 		if i > 0 {
 			name = fmt.Sprintf("%s-recovery-%d-%d", stem, time.Now().UTC().UnixMilli(), i)

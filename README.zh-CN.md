@@ -11,6 +11,8 @@
   &nbsp;·&nbsp;
   <a href="./docs/ACP.zh-CN.md">ACP</a>
   &nbsp;·&nbsp;
+  <a href="./docs/EXTENSIONS.zh-CN.md">扩展开发</a>
+  &nbsp;·&nbsp;
   <a href="./docs/SPEC.zh-CN.md">规格</a>
   &nbsp;·&nbsp;
   <a href="https://esengine.github.io/DeepSeek-Reasonix/">官方网站</a>
@@ -51,12 +53,12 @@
   内核无硬编码模型。
 - **多模型 · 可组合**：DeepSeek 作为预设内置；任何 OpenAI 兼容
   端点都只是一条配置。可选让两个模型协同（执行器 + 规划器），各自独立、缓存稳定的 session。
-- **插件驱动**：外部工具以子进程形式运行，通过 stdio JSON-RPC 通信（MCP 兼容）；
-  内置工具在编译期自注册。
+- **插件驱动**：MCP server 提供工具、提示词和资源；Extension Protocol v1
+  Sidecar 还可以拦截运行时事件、提供 Provider 与结构化 UI，并通过版本化插件包分发。
 - **缓存友好的上下文维护**：启动时注入稳定的环境摘要；旧工具输出会先 snip/prune，
   再进入摘要 compaction；内置工具 schema 合约有文档和回归测试保护。
 - **零摩擦分发**：`CGO_ENABLED=0` 单二进制；一条命令交叉编译到六个目标平台。
-  唯一依赖是一个 TOML 解析库。
+  产物是完全自包含的静态二进制——目标机器上除二进制本身外无需安装任何东西。
 
 ## 安装
 
@@ -145,6 +147,10 @@ CLI 进阶用法和详细配置见 **[CLI 命令参考](./docs/CLI.zh-CN.md)**�
   [任务合约与暂停策略](./docs/TASK_CONTRACT.zh-CN.md) ·
   [工具合约](./docs/TOOL_CONTRACT.zh-CN.md) ·
   [从 0.x 迁移](./docs/MIGRATING.zh-CN.md)
+- **扩展开发：** [扩展概览](./docs/EXTENSIONS.zh-CN.md) ·
+  [插件包与 Manifest v1](./docs/PLUGIN_PACKAGES.zh-CN.md) ·
+  [Extension Protocol](./docs/EXTENSION_PROTOCOL.zh-CN.md) ·
+  [Go SDK 与 starter](./sdk/go/README.md)
 
 ## Star 趋势
 

@@ -292,10 +292,10 @@ func escapeHookContext(s string) string {
 }
 
 func (c *Controller) autoResearchRuntimeBlock(taskID string) string {
-	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+	if !c.autoResearch.enabled() || strings.TrimSpace(taskID) == "" {
 		return ""
 	}
-	summary, err := c.autoResearch.Summary(taskID)
+	summary, err := c.autoResearch.summary(taskID)
 	if err != nil {
 		return "<autoresearch-runtime>\nstatus: invalid\nerror: " + strings.ReplaceAll(err.Error(), autoResearchRuntimeClose, "<\\/autoresearch-runtime>") + "\n</autoresearch-runtime>"
 	}

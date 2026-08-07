@@ -57,6 +57,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting
 # cursor_shape = "bar"             # block|underline|bar; CLI/TUI text cursor
+show_turn_usage = false             # hide per-request token/cost receipts in the TUI; default true
 
 [agent]
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
@@ -85,6 +86,7 @@ mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool 
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tools
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # optional explicit trusted path; workspace-local paths are not auto-executed
 
@@ -242,9 +244,21 @@ behind_proxy = true    # only behind a trusted reverse proxy
 
 The web UI exposes chat, tool approvals, session history, rewind/fork/summarize,
 model and reasoning-effort controls, Goal, a live todo panel fed by the
-`todo_write` tool, and provider balance when configured. Use `--model`,
+`todo_write` tool, extension status/card/form/notification surfaces, and
+provider balance when configured. Extension-hosted providers appear in the
+model picker. Run `/reload` while idle to fail-atomically reload extension
+sidecars and the runtime generation without restarting Serve. Use `--model`,
 `--max-steps`, or `--resume` for one-off launches; otherwise `serve` uses the
 user-global `default_model`.
+
+If the selected Provider has no saved API key, a loopback-bound Serve still
+starts and shows a Provider setup page instead of failing before the browser can
+connect. After authentication, enter the key there; Reasonix writes it to this
+host's global credential file with restricted permissions, rebuilds the active
+controller in the same process, and opens the normal UI. The credential-writing
+endpoint is disabled for non-loopback listeners. For a remote SSH window,
+"this host" means the remote host reached through the SSH tunnel; the key is
+not copied from the desktop machine.
 
 ## Editor integrations over ACP
 
@@ -325,7 +339,15 @@ files over SFTP, manage port forwards, and start/open the remote workspace.
 Opening a workspace creates a separate native Reasonix window, similar to a
 VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
 window is an isolated, lightweight shell and does not restore or acquire local
-conversation sessions.
+conversation sessions. The remote web page uses the provider configuration and
+API keys on the **remote** host — the desktop never exposes its own providers
+to a remote host. If that host is missing the selected Provider's API key, the
+window shows the authenticated setup page first, saves the key only in the
+remote Reasonix credential file, and activates the Provider without restarting
+the remote Serve process. A transient SSH outage keeps the remote window open;
+the desktop reconnects in the background, re-attaches its loopback forward, and
+reloads the window against the recovered Serve. An authentication or host-key
+failure is terminal and closes the unusable remote window instead.
 
 ## Custom OpenAI-compatible providers
 
@@ -669,6 +691,42 @@ Reasonix always removes saved provider and bot credential variables from tool
 subprocess environments and automatically adds its global credential `.env` to
 the runtime read-deny boundary. Project `.env` files keep their existing
 workspace-scoped behavior.
+
+**Session-private temporary directory.** Within one logical chat session, Bash
+commands share a private temporary directory so consecutive calls can exchange
+files through `$TMPDIR` (and, on Linux under bubblewrap, through literal
+`/tmp`). No user setup is required: Reasonix automatically exports `TMPDIR`,
+`TMP`, and `TEMP` for Bash and client-owned ACP terminals. The directory is
+created lazily, is never the host public temporary root, and is rotated on
+`/new`, `/clear`, resume of another session, and branch switches.
+Model/settings hot rebuilds keep the same directory. Temporary files are not
+durable storage: resume across process restarts does not restore them, and
+scripts that need long-lived data should write into the workspace or a
+user-specified path.
+
+Reasonix-generated and project scripts should use the standard temporary
+environment variables rather than hard-coding `/tmp`; users should not set
+these variables themselves. For example:
+
+```sh
+tmp_file="${TMPDIR:?}/result.json"
+```
+
+```powershell
+$tmpFile = Join-Path $env:TEMP "result.json"
+```
+
+| Platform | `$TMPDIR` / `$TMP` / `$TEMP` | Literal `/tmp` |
+| --- | --- | --- |
+| Linux + bubblewrap | Virtual `/tmp` (bound to the private dir) | Shared for the session (not a fresh empty tmpfs each call) |
+| macOS Seatbelt | Host path of the private dir (allowed by policy) | Host macOS temporary directory; scripts should use `$TMPDIR` |
+| Windows (no OS Bash sandbox) | Host path of the private dir | Not promised to match (e.g. Git Bash `/tmp`) |
+
+Independent sandboxes such as MCP servers keep their own isolation and do not
+inherit the chat session's temporary directory. An approved sandbox-escape
+command still receives the private temp environment variables, but on Linux its
+literal `/tmp` is no longer mapped by bubblewrap.
+
 **Windows note:** Reasonix does not ship an OS-level Bash sandbox on Windows.
 The effective mode is fixed to `off`; even an older config containing
 `bash = "enforce"` resolves to `off`, `reasonix doctor` flags the ignored value,
@@ -1022,17 +1080,21 @@ skill in Settings -> Skills or the slash menu. Ordinary chat never changes the
 collaboration mode implicitly; choose Goal in the composer or use `/goal` to
 start a long-running objective.
 
-Goal runs under a per-class budget: simple goals get 10 turns / 200k tokens,
-write goals 20 turns / 400k tokens, and AutoResearch goals 40 turns / 800k
-tokens; four consecutive turns without host-verifiable progress pause the goal.
-A paused goal keeps its todos, Delivery checkpoint, and budget history — use
-`/goal resume` to continue (budget pauses add one more slice of the same
-class), or `/goal pause` to pause a running goal manually. `/goal status`
-shows the full runtime summary. At the end of every goal turn the model reports
-its disposition through the structured `update_goal` tool (continue/complete/
-blocked); when no report arrives, an independent bounded evaluator judges the
-turn once, and any evaluator failure pauses the goal instead of continuing
-silently.
+Goal runs under a per-class **turn** budget: simple goals get 10 turns, write
+goals 20 turns, and AutoResearch goals 40 turns; four consecutive turns without
+host-verifiable progress pause the goal. Cumulative token usage is still tracked
+and shown for diagnostics, but there is **no token hard limit** and no
+pre-provider request admission. In Goal mode, a bare bug/crash/exception
+statement defaults to the write turn class unless the user asks only for
+analysis/explanation or forbids changes. A paused goal keeps its todos, Delivery
+checkpoint, and runtime history — use `/goal resume` to continue (turn-budget
+pauses add one more slice of turns of the same class), or `/goal pause` to pause
+a running goal manually. `/goal status` shows the full runtime summary (turns
+used/limit, tokens used, no-progress, extensions). At the end of every goal turn
+the model reports its disposition through the structured `update_goal` tool
+(continue/complete/blocked); when no report arrives, an independent bounded
+evaluator judges the turn once, and any evaluator failure pauses the goal
+instead of continuing silently.
 
 For complex work, write the objective as a
 [task contract](./TASK_CONTRACT.md): Context, Request, Output format,

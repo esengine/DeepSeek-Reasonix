@@ -219,8 +219,18 @@ func (m chatTUI) renderRewind() string {
 	var b strings.Builder
 	if r.stage == 0 {
 		b.WriteString(accent(i18n.M.RewindPickTitle) + "\n")
-		for i, meta := range r.metas {
+		// Long sessions list one row per turn; window it like quickPicker so
+		// the overlay never outgrows the terminal (no scrolling viewport).
+		start, end := quickPickerWindow(len(r.metas), r.sel)
+		if start > 0 {
+			b.WriteString(dim("  ↑ more") + "\n")
+		}
+		for i := start; i < end; i++ {
+			meta := r.metas[i]
 			b.WriteString(rowLine(i == r.sel, meta.Turn+1, "", turnLabel(meta, w), false) + "\n")
+		}
+		if end < len(r.metas) {
+			b.WriteString(dim("  ↓ more") + "\n")
 		}
 		b.WriteString(dim(i18n.M.RewindPickHint))
 		return choicePanelStyle.Width(w).Render(b.String())

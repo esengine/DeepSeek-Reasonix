@@ -62,7 +62,7 @@ func (m chatTUI) connectSelectedMCP(v mcpServerView) (tea.Model, tea.Cmd) {
 	if m.mcpDisabled != nil {
 		delete(m.mcpDisabled, v.Name)
 	}
-	m.host = m.ctrl.Host()
+	m.refreshHostAndInvalidateSlashCatalog()
 	m.refreshMCPManager()
 	if m.mcp != nil {
 		m.mcp.stage = mcpStageDetail
@@ -83,7 +83,7 @@ func (m chatTUI) disableSelectedMCP(v mcpServerView) (tea.Model, tea.Cmd) {
 	}
 	m.mcpDisabled[v.Name] = true
 	m.ctrl.DisconnectMCPServer(v.Name)
-	m.host = m.ctrl.Host()
+	m.refreshHostAndInvalidateSlashCatalog()
 	m.refreshMCPManager()
 	if m.mcp != nil {
 		m.mcp.stage = mcpStageDetail
@@ -116,7 +116,7 @@ func (m chatTUI) removeSelectedMCP() (tea.Model, tea.Cmd) {
 	if m.mcpDisabled != nil {
 		delete(m.mcpDisabled, v.Name)
 	}
-	m.host = m.ctrl.Host()
+	m.refreshHostAndInvalidateSlashCatalog()
 	m.refreshMCPManager()
 	if m.mcp != nil {
 		m.mcp.stage = mcpStageList
@@ -170,7 +170,7 @@ func (m chatTUI) applyMCPMode(tier string) (tea.Model, tea.Cmd) {
 			recordMCPModePluginFailure(m.ctrl, selected, err)
 			m.notice("saved connection mode, but connect failed: " + err.Error())
 		}
-		m.host = m.ctrl.Host()
+		m.refreshHostAndInvalidateSlashCatalog()
 	}
 	m.refreshMCPManager()
 	if m.mcp != nil {
@@ -261,7 +261,7 @@ func (m chatTUI) clearMCPAuthentication(v mcpServerView) (tea.Model, tea.Cmd) {
 		if h := m.ctrl.Host(); h != nil {
 			h.ClearFailure(v.Name)
 		}
-		m.host = m.ctrl.Host()
+		m.refreshHostAndInvalidateSlashCatalog()
 	}
 	m.refreshMCPManager()
 	if m.mcp != nil {

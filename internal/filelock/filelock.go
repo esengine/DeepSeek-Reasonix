@@ -18,8 +18,13 @@ const retryInterval = 20 * time.Millisecond
 // Callers normally see their context error after Acquire's bounded retry loop.
 var ErrHeld = errors.New("file lock held")
 
+// localLock serializes goroutines in this process for one canonical path.
+// refs counts acquirers currently between registry entry and release/timeout
+// so the registry can reclaim entries when no one is waiting or holding —
+// important for short-lived paths such as session-temp owner locks.
 type localLock struct {
 	token chan struct{}
+	refs  int
 }
 
 var localRegistry = struct {
@@ -38,21 +43,11 @@ func Acquire(ctx context.Context, path string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
-	localRegistry.Lock()
-	local := localRegistry.locks[key]
-	if local == nil {
-		local = &localLock{token: make(chan struct{}, 1)}
-		local.token <- struct{}{}
-		localRegistry.locks[key] = local
+	local, releaseLocal, err := acquireLocal(ctx, key)
+	if err != nil {
+		return nil, err
 	}
-	localRegistry.Unlock()
-
-	select {
-	case <-local.token:
-	case <-ctx.Done():
-		return nil, fmt.Errorf("acquire file lock: %w", ctx.Err())
-	}
-	releaseLocal := func() { local.token <- struct{}{} }
+	_ = local
 
 	for {
 		releaseFile, err := tryLockFile(key)
@@ -83,6 +78,108 @@ func Acquire(ctx context.Context, path string) (func(), error) {
 			return nil, fmt.Errorf("acquire file lock: %w", ctx.Err())
 		}
 	}
+}
+
+// TryAcquire attempts a non-blocking exclusive lock. It returns ErrHeld when
+// another holder (in this process or another) currently owns the lock.
+func TryAcquire(path string) (func(), error) {
+	key, err := canonicalLockPath(path)
+	if err != nil {
+		return nil, err
+	}
+	local, releaseLocal, ok := tryAcquireLocal(key)
+	if !ok {
+		return nil, ErrHeld
+	}
+	_ = local
+
+	releaseFile, err := tryLockFile(key)
+	if err != nil {
+		releaseLocal()
+		if errors.Is(err, ErrHeld) {
+			return nil, ErrHeld
+		}
+		return nil, fmt.Errorf("try acquire file lock: %w", err)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			releaseFile()
+			releaseLocal()
+		})
+	}, nil
+}
+
+func acquireLocal(ctx context.Context, key string) (*localLock, func(), error) {
+	localRegistry.Lock()
+	local := localRegistry.locks[key]
+	if local == nil {
+		local = &localLock{token: make(chan struct{}, 1)}
+		local.token <- struct{}{}
+		localRegistry.locks[key] = local
+	}
+	local.refs++
+	localRegistry.Unlock()
+
+	select {
+	case <-local.token:
+		return local, releaseLocalFunc(key, local), nil
+	case <-ctx.Done():
+		localRegistry.Lock()
+		local.refs--
+		if local.refs == 0 {
+			delete(localRegistry.locks, key)
+		}
+		localRegistry.Unlock()
+		return nil, nil, fmt.Errorf("acquire file lock: %w", ctx.Err())
+	}
+}
+
+func tryAcquireLocal(key string) (*localLock, func(), bool) {
+	localRegistry.Lock()
+	defer localRegistry.Unlock()
+
+	local := localRegistry.locks[key]
+	if local == nil {
+		local = &localLock{token: make(chan struct{}, 1)}
+		local.token <- struct{}{}
+		localRegistry.locks[key] = local
+	}
+	select {
+	case <-local.token:
+		local.refs++
+		return local, releaseLocalFunc(key, local), true
+	default:
+		// A newly created entry always succeeds above while the registry lock
+		// is held, so this is an existing lock held by another goroutine.
+		return nil, nil, false
+	}
+}
+
+func releaseLocalFunc(key string, local *localLock) func() {
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			localRegistry.Lock()
+			select {
+			case local.token <- struct{}{}:
+			default:
+			}
+			local.refs--
+			if local.refs <= 0 {
+				local.refs = 0
+				delete(localRegistry.locks, key)
+			}
+			localRegistry.Unlock()
+		})
+	}
+}
+
+// RegistrySizeForTest returns the number of live local-lock entries (tests).
+func RegistrySizeForTest() int {
+	localRegistry.Lock()
+	defer localRegistry.Unlock()
+	return len(localRegistry.locks)
 }
 
 func canonicalLockPath(path string) (string, error) {

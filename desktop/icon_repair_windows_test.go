@@ -95,3 +95,57 @@ func TestReasonixWindowsStaleIconOnlyMatchesVersionedDesktop(t *testing.T) {
 		})
 	}
 }
+
+func TestReasonixWindowsVersionedTarget(t *testing.T) {
+	root := filepath.Join(`C:\Program Files`, "Reasonix")
+	launcher := filepath.Join(root, "reasonix-launcher.exe")
+	tests := []struct {
+		name   string
+		target string
+		want   bool
+	}{
+		{name: "versioned desktop", target: filepath.Join(root, "versions", "v1.19.3", "reasonix-desktop.exe"), want: true},
+		{name: "case-insensitive", target: filepath.Join(root, "Versions", "V1.19.3", "Reasonix-Desktop.exe"), want: true},
+		{name: "launcher", target: launcher, want: false},
+		{name: "launcher alias", target: filepath.Join(root, "Reasonix.exe"), want: false},
+		{name: "flat desktop", target: filepath.Join(root, "reasonix-desktop.exe"), want: false},
+		{name: "deeper versioned path", target: filepath.Join(root, "versions", "v1.19.3", "sub", "reasonix-desktop.exe"), want: false},
+		{name: "wrong binary in versions", target: filepath.Join(root, "versions", "v1.19.3", "reasonix-cli.exe"), want: false},
+		{name: "other install", target: filepath.Join(`D:\Apps`, "Reasonix", "versions", "v1.19.3", "reasonix-desktop.exe"), want: false},
+		{name: "empty", target: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := reasonixWindowsVersionedTarget(tt.target, launcher); got != tt.want {
+				t.Fatalf("reasonixWindowsVersionedTarget(%q, %q) = %v, want %v", tt.target, launcher, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRepairWindowsShortcutPlan(t *testing.T) {
+	root := filepath.Join(`C:\Program Files`, "Reasonix")
+	launcher := filepath.Join(root, "reasonix-launcher.exe")
+	versioned := filepath.Join(root, "versions", "v1.19.3", "reasonix-desktop.exe")
+	tests := []struct {
+		name        string
+		target      string
+		icon        string
+		wantRepoint bool
+		wantFixIcon bool
+	}{
+		{name: "versioned target + versioned icon", target: versioned, icon: versioned + ",0", wantRepoint: true, wantFixIcon: true},
+		{name: "versioned target + clean icon", target: versioned, icon: launcher + ",0", wantRepoint: true, wantFixIcon: false},
+		{name: "stable target + versioned icon", target: launcher, icon: versioned + ",0", wantRepoint: false, wantFixIcon: true},
+		{name: "stable target + clean icon", target: launcher, icon: launcher + ",0", wantRepoint: false, wantFixIcon: false},
+		{name: "custom target + custom icon", target: filepath.Join(root, "custom.ico"), icon: filepath.Join(root, "custom.ico") + ",0", wantRepoint: false, wantFixIcon: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoint, fixIcon := repairWindowsShortcutPlan(tt.target, tt.icon, launcher)
+			if repoint != tt.wantRepoint || fixIcon != tt.wantFixIcon {
+				t.Fatalf("repairWindowsShortcutPlan(%q, %q) = (%v, %v), want (%v, %v)", tt.target, tt.icon, repoint, fixIcon, tt.wantRepoint, tt.wantFixIcon)
+			}
+		})
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -38,6 +39,47 @@ import (
 type typedNilControllerSink struct{}
 
 func (*typedNilControllerSink) Emit(event.Event) {}
+
+func TestResolvePlanDecisionRecordsDistinctOutcomes(t *testing.T) {
+	tests := []struct {
+		action PlanDecisionAction
+		allow  bool
+	}{
+		{action: PlanDecisionStartExecution, allow: true},
+		{action: PlanDecisionRevisePlan, allow: false},
+		{action: PlanDecisionExitPlan, allow: false},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.action), func(t *testing.T) {
+			session := agent.NewSession("sys")
+			session.Add(provider.Message{Role: provider.RoleAssistant, Content: "proposed plan"})
+			exec := agent.New(nil, nil, session, agent.Options{}, event.Discard)
+			c := New(Options{Executor: exec})
+			id, reply := c.approval.registerDecisionKind(planApprovalTool, "", "", true, false, "plan", nil)
+
+			if err := c.ResolvePlanDecision(id, tt.action); err != nil {
+				t.Fatalf("ResolvePlanDecision: %v", err)
+			}
+			select {
+			case got := <-reply:
+				if got.allow != tt.allow {
+					t.Fatalf("reply allow = %v, want %v", got.allow, tt.allow)
+				}
+			default:
+				t.Fatal("plan decision did not unblock the approval waiter")
+			}
+
+			messages := session.Snapshot()
+			if len(messages) != 2 || len(messages[1].DecisionReceipts) != 1 {
+				t.Fatalf("persisted messages = %+v, want receipt attached to plan answer", messages)
+			}
+			receipt := messages[1].DecisionReceipts[0]
+			if receipt.Kind != "plan" || receipt.Outcome != string(tt.action) {
+				t.Fatalf("receipt = %+v, want plan/%s", receipt, tt.action)
+			}
+		})
+	}
+}
 
 func isolateControlConfigHome(t *testing.T) string {
 	t.Helper()
@@ -232,9 +274,9 @@ func requestMessagesText(messages []provider.Message) string {
 }
 
 func lastUserMessage(messages []provider.Message) string {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == provider.RoleUser {
-			return messages[i].Content
+	for _, v := range slices.Backward(messages) {
+		if v.Role == provider.RoleUser {
+			return v.Content
 		}
 	}
 	return ""
@@ -981,7 +1023,7 @@ func TestRecoverInterruptedTurnAfterCompactionRelocatesVisibleTurn(t *testing.T)
 	path := filepath.Join(dir, "compacted-crash.jsonl")
 
 	orig := agent.NewSession("sys")
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		orig.Add(provider.Message{Role: provider.RoleUser, Content: "old task"})
 		orig.Add(provider.Message{Role: provider.RoleAssistant, Content: "old answer"})
 	}
@@ -1306,12 +1348,10 @@ func TestConcurrentSnapshotsShareSingleRecoveryHandoff(t *testing.T) {
 	const racingSnapshots = 8
 	var wg sync.WaitGroup
 	errs := make(chan error, racingSnapshots)
-	for i := 0; i < racingSnapshots; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range racingSnapshots {
+		wg.Go(func() {
 			errs <- c.Snapshot()
-		}()
+		})
 	}
 
 	select {
@@ -1623,7 +1663,7 @@ func TestSnapshotConflictAdoptionResetsRewriteBaseline(t *testing.T) {
 	c := New(Options{Executor: exec, SessionDir: dir, SessionPath: path, Label: "test"})
 	// Rewrites the stale controller never persisted before it noticed the
 	// newer transcript; adoption must discard this counter with the session.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		stale.IncrementRewrite()
 	}
 
@@ -1682,9 +1722,7 @@ func TestConcurrentCompactionAndAutosaveNeverBranch(t *testing.T) {
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -1694,7 +1732,7 @@ func TestConcurrentCompactionAndAutosaveNeverBranch(t *testing.T) {
 				_ = c.SnapshotActivity()
 			}
 		}
-	}()
+	})
 	for i := 1; i <= 40; i++ {
 		sess.Add(provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("turn-%d", i)})
 		if i%4 == 0 {
@@ -2036,9 +2074,9 @@ func (s *noticeSink) notices() []string {
 func (s *noticeSink) lastNotice() (event.Event, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for i := len(s.events) - 1; i >= 0; i-- {
-		if s.events[i].Kind == event.Notice {
-			return s.events[i], true
+	for _, v := range slices.Backward(s.events) {
+		if v.Kind == event.Notice {
+			return v, true
 		}
 	}
 	return event.Event{}, false
@@ -2940,12 +2978,12 @@ func TestConnectConfiguredProjectMCPIsTrustedByDefault(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), []byte(fmt.Sprintf(`
+	if err := os.WriteFile(filepath.Join(workspace, "reasonix.toml"), fmt.Appendf(nil, `
 [[plugins]]
 name = "project-docs"
 type = "http"
 url = %q
-`, server.URL)), 0o644); err != nil {
+`, server.URL), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -4055,7 +4093,7 @@ func TestApprovalPersistenceFailureKeepsSessionGrant(t *testing.T) {
 		c.Approve(<-ids, true, true, true)
 	}()
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		allow, remember, err := gateApprover{c}.Approve(context.Background(), "bash", "go test ./...", nil)
 		if err != nil || !allow || remember {
 			t.Fatalf("Approve call %d = (%v,%v,%v), want session-allowed despite persistence failure", i, allow, remember, err)
@@ -4405,10 +4443,10 @@ func TestRunGuardedParksReplacementUntilTurnDoneReturns(t *testing.T) {
 	releaseTurnDone := make(chan struct{})
 	firstBodyDone := make(chan struct{})
 	secondBodyRan := make(chan struct{}, 2)
-	var turnDones int32
+	var turnDones atomic.Int32
 	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
 		if e.Kind == event.TurnDone {
-			if atomic.AddInt32(&turnDones, 1) == 1 {
+			if turnDones.Add(1) == 1 {
 				close(firstTurnDone)
 				<-releaseTurnDone
 			}
@@ -4455,7 +4493,7 @@ func TestRunGuardedParksReplacementUntilTurnDoneReturns(t *testing.T) {
 	if c.Running() {
 		t.Fatal("controller remained busy after the parked turn completed")
 	}
-	if got := atomic.LoadInt32(&turnDones); got != 2 {
+	if got := turnDones.Load(); got != 2 {
 		t.Fatalf("TurnDone emitted %d times, want 2 (one per turn)", got)
 	}
 	select {
@@ -4467,13 +4505,13 @@ func TestRunGuardedParksReplacementUntilTurnDoneReturns(t *testing.T) {
 
 func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
 	sess := agent.NewSession("sys")
-	var count int32
+	var count atomic.Int32
 	events := make(chan event.Event, 8)
 	c := New(Options{
 		Runner: appendingRunner{session: sess},
 		Sink: event.FuncSink(func(e event.Event) {
 			if e.Kind == event.TurnDone {
-				atomic.AddInt32(&count, 1)
+				count.Add(1)
 			}
 			events <- e
 		}),
@@ -4489,10 +4527,10 @@ func TestRunGuardedPanicDoesNotDoubleEmitTurnDone(t *testing.T) {
 	for {
 		select {
 		case <-events:
-			n := atomic.LoadInt32(&count)
+			n := count.Load()
 			if n >= 1 {
 				time.Sleep(50 * time.Millisecond)
-				n2 := atomic.LoadInt32(&count)
+				n2 := count.Load()
 				if n2 > 1 {
 					t.Fatalf("TurnDone emitted %d times, expected 1", n2)
 				}
@@ -4526,7 +4564,7 @@ func TestRunTurnReportsErrTurnRunning(t *testing.T) {
 	}()
 	waitForRunning(t, c)
 
-	if err := c.RunTurn(context.Background(), "second"); err != ErrTurnRunning {
+	if err := c.RunTurn(context.Background(), "second"); !errors.Is(err, ErrTurnRunning) {
 		t.Fatalf("RunTurn while running error = %v, want ErrTurnRunning", err)
 	}
 
@@ -5254,4 +5292,22 @@ func cmdNames(cmds []command.Command) []string {
 		names[i] = c.Name
 	}
 	return names
+}
+
+// TestCacheColdAfterFailureFallsBackTo24h：配置加载失败/模型解析失败时
+// 保守回退 24h（评审 #7168 第 4 点）——不得用 10m 提前触发 prune。
+func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
+	c := New(Options{})
+	orig := c.workspaceRoot
+	c.workspaceRoot = "/nonexistent/definitely-missing-root"
+	defer func() { c.workspaceRoot = orig }()
+	if got := c.cacheColdAfter(); got != 24*time.Hour {
+		t.Fatalf("load failure must fall back to 24h, got %v", got)
+	}
+	// 未知模型同样 24h
+	c2 := New(Options{})
+	c2.modelRef = "definitely-not-a-real-model-xyz"
+	if got := c2.cacheColdAfter(); got != 24*time.Hour {
+		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
+	}
 }

@@ -50,16 +50,11 @@ func openTargetAllowed(path string, isDir bool) bool {
 // OpenLocalPath opens an arbitrary local absolute path (file or directory)
 // with the OS default application. It backs clicking a local path rendered in
 // chat markdown (issue #7426) — Windows drive paths, UNC paths and file:///
-// URLs included. Remote workspaces are rejected: their paths live on another
-// machine and cannot be opened by this desktop app (mirrors
-// RevealWorkspacePathForTab).
+// URLs included.
 func (a *App) OpenLocalPath(path string) error {
 	path, err := normalizeLocalOpenPath(path)
 	if err != nil {
 		return err
-	}
-	if _, _, _, _, ok := a.activeRemoteWorkbench(); ok {
-		return fmt.Errorf("CAPABILITY_UNAVAILABLE: Remote workspace paths cannot be opened by the Desktop file manager")
 	}
 	info, err := os.Stat(path)
 	if err != nil {

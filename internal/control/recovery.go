@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -65,6 +66,14 @@ func (c *Controller) ResolveRecovery(id string, action agent.RecoveryAction, fee
 	// and ReplayPending do not keep a stale prompt.
 	pending := c.approval.resolve(id)
 	if pending.reply != nil {
+		outcome := "recovery_revise"
+		switch action {
+		case agent.RecoveryActionContinue:
+			outcome = "recovery_continue"
+		case agent.RecoveryActionContinueTask:
+			outcome = "recovery_continue_task"
+		}
+		c.recordDecisionReceipt(pending, outcome)
 		switch action {
 		case agent.RecoveryActionContinue, agent.RecoveryActionContinueTask:
 			pending.reply <- approvalReply{allow: true}
@@ -109,9 +118,9 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 				return ""
 			}
 			msgs := c.executor.Session().Snapshot()
-			for i := len(msgs) - 1; i >= 0; i-- {
-				if string(msgs[i].Role) == "user" && strings.TrimSpace(msgs[i].Content) != "" {
-					text := agent.UserMessageText(msgs[i])
+			for _, v := range slices.Backward(msgs) {
+				if string(v.Role) == "user" && strings.TrimSpace(v.Content) != "" {
+					text := agent.UserMessageText(v)
 					if len(text) > 800 {
 						return text[:800] + "…"
 					}
@@ -191,6 +200,29 @@ func (c *Controller) carryRecoveryState(path string) {
 	c.saveRecoveryState(path)
 }
 
+// CarryRecoveryFrom moves prev's in-memory recovery checkpoint into c across
+// a same-session controller rebuild (boot.Rebuild). Live approval channels
+// never cross the boundary — pending recovery prompts are cleared, not
+// transferred, matching the in-session carry above. Call it only when no
+// persisted sidecar was restored (the outgoing controller never pinned a
+// session path); a sidecar restored by Resume is the authoritative state.
+func (c *Controller) CarryRecoveryFrom(prev *Controller) {
+	if c == nil || prev == nil {
+		return
+	}
+	c.approval.clearKind(recovery.ApprovalKindRecovery)
+	prev.mu.Lock()
+	prevGate := prev.recoveryGate
+	prev.mu.Unlock()
+	c.mu.Lock()
+	gate := c.recoveryGate
+	c.mu.Unlock()
+	if gate == nil || prevGate == nil {
+		return
+	}
+	gate.Restore(prevGate.Snapshot())
+}
+
 func (c *Controller) flushRecoveryPersistence(path string) {
 	if c == nil {
 		return
@@ -266,6 +298,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 	// Strict fresh decision: never session/persist grants, never auto-drain on
 	// mode switch.
 	c.approval.promptMu.Lock()
+	c.approval.promptEmitMu.Lock()
 	// Hold promptMu for the duration of registration+emit only; waiting happens
 	// in the recovery gate on its own channel. We deliberately do not block here
 	// on the approval reply — ResolveRecovery unblocks the gate.
@@ -299,6 +332,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 	}()
 
 	c.sink.Emit(c.approvalRequestEvent(ev))
+	c.approval.promptEmitMu.Unlock()
 	c.approval.promptMu.Unlock()
 
 	if c.hooks != nil {

@@ -22,7 +22,21 @@ export type EventKind =
   | "mcp_surface_ready"
   | "retrying"
   | "steer"
-  | "guardian_assessment";
+  | "guardian_assessment"
+  | "extension_surface"
+  | "extension_status"
+  | "stream_attempt";
+
+export type StreamAttemptAction = "begin" | "discard" | "commit";
+
+export interface WireStreamAttempt {
+  id: string;
+  action: StreamAttemptAction;
+  attempt?: number;
+  max?: number;
+  /** Fixed enum only: connection_reset | premature_eof | idle_timeout */
+  reason?: string;
+}
 
 export interface WireCompaction {
   trigger?: string; // "auto" | "manual"
@@ -34,6 +48,21 @@ export interface WireCompaction {
 export interface WireProfile {
   model?: string;
   effort?: string;
+}
+
+export interface WireShellExecution {
+  kind?: string;
+  shell?: string;
+  shellVersion?: string;
+  platform?: string;
+  supportsAndAnd?: boolean;
+  state?: string;
+  failurePhase?: string;
+  exitCode?: number;
+  outputTail?: string;
+  mutationRisk?: string;
+  verification?: string;
+  durationMs?: number;
 }
 
 export interface WireTool {
@@ -51,10 +80,13 @@ export interface WireTool {
   argChars?: number; // partial only: cumulative argument chars streamed so far
   refreshed?: boolean; // same-ID full dispatch with a preview recomputed after an earlier write
   parentId?: string; // set on a sub-agent's calls — the parent `task` call's id
+  /** Host-local stream_attempt id for speculative parent partials only. */
+  attemptId?: string;
   diff?: string;
   added?: number;
   removed?: number;
   profile?: WireProfile; // subagent model/effort resolved for this call
+  execution?: WireShellExecution; // local shell metadata; never provider-visible
 }
 
 export interface WireCacheDiagnostics {
@@ -83,6 +115,12 @@ export interface WireUsage {
   // hit-rate (Σhit/Σ(hit+miss)), steadier than the single-turn cacheHitTokens.
   sessionCacheHitTokens: number;
   sessionCacheMissTokens: number;
+  /** Latest single-request shape for context gauges; omit → use billable totals. */
+  contextPromptTokens?: number;
+  contextCompletionTokens?: number;
+  contextReasoningTokens?: number;
+  contextCacheHitTokens?: number;
+  contextCacheMissTokens?: number;
   cost?: number;
   currency?: string;
   // Deprecated compatibility alias. Prefer cost + currency.
@@ -127,6 +165,14 @@ export interface WireGuardian {
   usage?: WireUsage;
 }
 
+export interface WireDecisionReceipt {
+  id: string;
+  kind: string;
+  tool?: string;
+  subject?: string;
+  outcome: string;
+}
+
 export interface WireAskOption {
   label: string;
   description?: string;
@@ -143,6 +189,78 @@ export interface WireAskQuestion {
 export interface WireAsk {
   id: string;
   questions: WireAskQuestion[];
+}
+
+// Extension UI surfaces (stage 8a) — structured-only documents published by
+// extension sidecars through the host UI hub. Exactly one sub-struct is set,
+// selected by `kind`.
+export interface WireExtensionStatus {
+  label: string;
+  detail?: string;
+  severity?: string; // "info" | "warn" | "error"
+  progress?: number;
+}
+
+export interface WireExtensionKeyValue {
+  key: string;
+  value: string;
+}
+
+export interface WireExtensionActionRef {
+  actionId: string;
+  label: string;
+}
+
+export interface WireExtensionCard {
+  title?: string;
+  markdown?: string;
+  text?: string;
+  fields?: WireExtensionKeyValue[];
+  progress?: number;
+  actions?: WireExtensionActionRef[];
+}
+
+export interface WireExtensionFormField {
+  key: string;
+  label?: string;
+  kind?: string; // "confirm" | "input" | "select" | "multiselect"
+  options?: string[];
+  default?: unknown;
+  required?: boolean;
+}
+
+export interface WireExtensionForm {
+  title?: string;
+  message?: string;
+  fields: WireExtensionFormField[];
+}
+
+export interface WireExtensionNotification {
+  title: string;
+  body?: string;
+  severity?: string; // "info" | "warn" | "error"
+}
+
+export interface WireExtensionSurface {
+  pluginId: string;
+  surfaceId: string;
+  sessionId?: string;
+  generation?: number;
+  kind: string; // "status" | "card" | "form" | "notification"
+  status?: WireExtensionStatus;
+  card?: WireExtensionCard;
+  form?: WireExtensionForm;
+  notification?: WireExtensionNotification;
+}
+
+// ExtensionActionView is one handshake-declared extension UI action, the JSON
+// twin of desktop's ExtensionActionView (stage 8b2). Slash is the public
+// invocation name, "/<plugin>:<action>".
+export interface ExtensionActionView {
+  plugin: string;
+  action: string;
+  slash: string;
+  description?: string;
 }
 
 // QuestionAnswer is the reply for one question, sent back via AnswerQuestion.
@@ -175,11 +293,16 @@ export interface WireEvent {
   ask?: WireAsk;
   compaction?: WireCompaction;
   guardian?: WireGuardian;
+  decisionReceipt?: WireDecisionReceipt;
+  extension?: WireExtensionSurface;
   err?: string;
   outcome?: "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
   retryMax?: number;
+  /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
+  retryScope?: "headers" | "stream";
+  streamAttempt?: WireStreamAttempt;
   // Tab routing: set by the Go-side tabEventSink so multi-tab frontends
   // route each event to the correct per-tab reducer.
   tabId?: string;
@@ -419,11 +542,13 @@ export interface HistoryMessage {
   toolName?: string;
   toolResultArchived?: boolean;
   toolResultError?: string;
+  execution?: WireShellExecution;
   pending?: boolean;
   trigger?: string;
   messages?: number;
   summary?: string;
   archive?: string;
+  decisionReceipt?: WireDecisionReceipt;
 }
 
 export interface HistoryToolCall {
@@ -609,6 +734,7 @@ export interface GoalRuntime {
   turnsUsed: number;
   turnsLimit: number;
   tokensUsed: number;
+  /** @deprecated Goal has no hard token limit; retained as 0 for old hosts/clients. */
   tokensLimit: number;
   noProgressTurns: number;
   noProgressLimit: number;
@@ -1328,6 +1454,13 @@ export interface RemoteServerView {
   error?: string;
 }
 
+/** Path-free summary of files left behind by the removed Remote Workbench. */
+export interface RemoteLegacyWorkbenchData {
+  mirrorCount: number;
+  mirrorBytes: number;
+  trustFile: boolean;
+}
+
 export interface RemoteForwardsEvent {
   hostId: string;
   forwards: RemoteForwardView[];
@@ -1652,7 +1785,6 @@ export interface AgentView {
   compactRatio?: number; // Advanced global default; older backends omit it.
   effectiveCompactRatio?: number; // Active local session after project overrides.
   compactRatioOverridden?: boolean;
-  compactRatioRemote?: boolean; // Active session is owned by the remote host.
 }
 
 export interface BotAllowlistView {
@@ -1967,4 +2099,57 @@ export interface UpdateProgress {
   received: number;
   total: number;
   err?: string;
+}
+
+// Task Monitor panel types (internal/taskmonitor).
+
+export type TaskState =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "stale"
+  | string; // forward-compat
+
+export type RuntimeState = "unknown" | "alive" | "exited" | string;
+
+export interface TaskSnapshot {
+  schema_version: number;
+  task_id: string;
+  job_id?: string; // jobs.Manager-local runtime identifier
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState; // absent in snapshots written before this field existed
+  version: number;
+  created_at: string; // ISO 8601
+  updated_at: string; // ISO 8601
+  error_code?: string;
+  error_summary?: string;
+}
+
+export interface ControlResult {
+  schema_version: number;
+  command: string;
+  task_id: string;
+  session_id?: string;
+  state?: TaskState;
+  runtime_state?: RuntimeState;
+  version?: number;
+  accepted: boolean;
+  idempotent: boolean;
+  error?: { code: string; message: string };
+}
+
+export interface TaskEvent {
+  sequence: number;
+  timestamp: string; // ISO 8601
+  event_type: string;
+  task_id: string;
+  session_id: string;
+  state: TaskState;
+  runtime_state?: RuntimeState;
+  error_code?: string;
+  error_summary?: string;
 }

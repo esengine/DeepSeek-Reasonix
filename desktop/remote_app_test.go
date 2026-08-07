@@ -11,8 +11,6 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/remote"
-	workbenchclient "reasonix/internal/remote/workbench/client"
-	"reasonix/internal/remote/workbench/target"
 )
 
 // fakeRemoteKernel implements remoteKernel for binding-layer tests.
@@ -167,7 +165,7 @@ func TestConfirmRemoteSecretDelegatesWithoutPersisting(t *testing.T) {
 func TestRemoteStatusBridgesToAsyncEmitter(t *testing.T) {
 	a := &App{ctx: context.Background()}
 	events := make(chan runtimeEventEnvelope, 4)
-	a.runtimeEvents.emit = func(ctx context.Context, name string, payload ...interface{}) {
+	a.runtimeEvents.emit = func(ctx context.Context, name string, payload ...any) {
 		events <- runtimeEventEnvelope{ctx: ctx, name: name, payload: payload}
 	}
 	a.onStatus(RemoteConnectionStatusView{HostID: "box", State: "connected"})
@@ -488,184 +486,5 @@ func TestOpenRemoteWorkspacePersistsLastWorkspace(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(config.MemoryUserDir(), "desktop-remote.json")); err != nil {
 		t.Fatalf("desktop-remote.json not written: %v", err)
-	}
-}
-
-func TestWorkbenchSwitchLocalAndHint(t *testing.T) {
-	a := &App{ctx: context.Background()}
-	active := a.WorkbenchActiveTarget()
-	if active["kind"] != "local" {
-		t.Fatalf("active = %+v", active)
-	}
-	a.workbench().targets.RememberRemote(target.RemoteHint{HostID: "lab", Workspace: "/w"})
-	hint := a.WorkbenchLastRemoteHint()
-	if hint["hostId"] != "lab" || hint["workspace"] != "/w" {
-		t.Fatalf("hint = %+v", hint)
-	}
-	switched := a.WorkbenchSwitchLocal()
-	if switched["kind"] != "local" {
-		t.Fatalf("switch = %+v", switched)
-	}
-}
-
-func TestWorkbenchSwitchLocalEmitsUnifiedTargetState(t *testing.T) {
-	events := make(chan WorkbenchTargetStateView, 1)
-	rebuilt := make(chan []interface{}, 1)
-	a := NewApp()
-	a.ctx = context.Background()
-	a.readyHook = func() {}
-	tab := &WorkspaceTab{ID: "tab-a", Scope: "global", Ready: true, disabledMCP: map[string]ServerView{}}
-	a.tabs[tab.ID] = tab
-	a.tabOrder = []string{tab.ID}
-	a.activeTabID = tab.ID
-	a.mu.Lock()
-	runtimeEpoch := a.newSessionRuntimeLocked(tab, "").Epoch
-	a.mu.Unlock()
-	k := a.workbench()
-	_, generation, err := k.targets.BeginRemoteConnect("remote-host", "/srv/app")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := k.targets.MarkRemoteConnected(generation); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := k.targets.ActivateRemote(generation); err != nil {
-		t.Fatal(err)
-	}
-	k.mu.Lock()
-	k.remote = &workbenchclient.Client{}
-	k.remoteGen = generation
-	k.remoteTabID = tab.ID
-	k.mu.Unlock()
-	a.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
-		switch name {
-		case workbenchTargetEvent:
-			if len(payload) == 1 {
-				if view, ok := payload[0].(WorkbenchTargetStateView); ok {
-					events <- view
-				}
-			}
-		case "runtime:rebuilt":
-			rebuilt <- payload
-		}
-	}
-	result := a.WorkbenchSwitchLocal()
-	select {
-	case event := <-events:
-		if event.State != "disconnected" || event.Kind != target.KindLocal || event.IdentityGen != result["identityGen"] {
-			t.Fatalf("target event = %+v, result = %+v", event, result)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for remote:workbench-target")
-	}
-	assertLocalRuntime := func(step string) {
-		t.Helper()
-		select {
-		case payload := <-rebuilt:
-			if len(payload) != 2 || payload[0] != tab.ID || payload[1] != runtimeEpoch {
-				t.Fatalf("%s runtime rebuild payload = %#v, want [%q %q]", step, payload, tab.ID, runtimeEpoch)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("timed out waiting for Local runtime authority after %s", step)
-		}
-	}
-	assertLocalRuntime("switch")
-	if err := a.WorkbenchDisconnectRemote(); err != nil {
-		t.Fatal(err)
-	}
-	assertLocalRuntime("disconnect")
-}
-
-func TestWorkbenchConnectFailureKeepsEventsOnCommittedLocalTarget(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("REASONIX_HOME", home)
-	t.Setenv("HOME", home)
-	events := make(chan WorkbenchTargetStateView, 2)
-	a := &App{ctx: context.Background()}
-	a.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
-		if name != workbenchTargetEvent || len(payload) != 1 {
-			return
-		}
-		if view, ok := payload[0].(WorkbenchTargetStateView); ok {
-			events <- view
-		}
-	}
-	err := a.WorkbenchConnectRemote("missing-host", "/srv/work")
-	if err == nil || !strings.Contains(err.Error(), "unknown remote host") {
-		t.Fatalf("connect error = %v", err)
-	}
-	connecting := <-events
-	restored := <-events
-	if connecting.State != "connecting" || connecting.Kind != target.KindLocal || connecting.HostID != "" || connecting.Workspace != "" {
-		t.Fatalf("connecting event exposed candidate as active: %+v", connecting)
-	}
-	if restored.State != "disconnected" || restored.Kind != target.KindLocal || restored.Error != err.Error() {
-		t.Fatalf("restored event = %+v", restored)
-	}
-	if restored.IdentityGen != connecting.IdentityGen || restored.RequestSeq != connecting.RequestSeq {
-		t.Fatalf("failed candidate changed active fencing: connecting=%+v restored=%+v", connecting, restored)
-	}
-}
-
-func TestWorkbenchReplacementFailureRestoresCommittedRemoteEvent(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("REASONIX_HOME", home)
-	t.Setenv("HOME", home)
-	events := make(chan WorkbenchTargetStateView, 2)
-	a := &App{ctx: context.Background()}
-	_, generation, err := a.workbench().targets.BeginRemoteConnect("host-a", "/workspace-a")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := a.workbench().targets.MarkRemoteConnected(generation); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, _, err := a.workbench().targets.ActivateRemote(generation); err != nil {
-		t.Fatal(err)
-	}
-	a.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
-		if name == workbenchTargetEvent && len(payload) == 1 {
-			if view, ok := payload[0].(WorkbenchTargetStateView); ok {
-				events <- view
-			}
-		}
-	}
-	err = a.WorkbenchConnectRemote("missing-host", "/workspace-b")
-	if err == nil {
-		t.Fatal("replacement unexpectedly succeeded")
-	}
-	connecting := <-events
-	restored := <-events
-	if connecting.State != "connecting" || connecting.Kind != target.KindRemote || connecting.HostID != "host-a" || connecting.Workspace != "/workspace-a" {
-		t.Fatalf("connecting event = %+v", connecting)
-	}
-	if restored.State != "connected" || restored.Kind != target.KindRemote || restored.HostID != "host-a" || restored.Error != err.Error() {
-		t.Fatalf("restored event = %+v", restored)
-	}
-}
-
-func TestWorkbenchSubmitFailsClosedDuringTargetConnect(t *testing.T) {
-	a := &App{ctx: context.Background()}
-	if _, _, err := a.workbench().targets.BeginRemoteConnect("lab", "/srv/work"); err != nil {
-		t.Fatal(err)
-	}
-	handled, err := a.workbenchSubmit("hello", "hello", "", nil, false)
-	if !handled || err == nil || !strings.Contains(err.Error(), "target is connecting") {
-		t.Fatalf("submit handled=%v err=%v", handled, err)
-	}
-}
-
-func TestWorkbenchActiveTargetIncludesPersistedReconnectHint(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("REASONIX_HOME", home)
-	t.Setenv("HOME", home)
-	first := &App{ctx: context.Background()}
-	first.saveLastRemoteWorkspace("persisted-host", "/srv/work")
-
-	restarted := &App{ctx: context.Background()}
-	active := restarted.WorkbenchActiveTarget()
-	reconnect, ok := active["reconnect"].(map[string]string)
-	if !ok || reconnect["hostId"] != "persisted-host" || reconnect["workspace"] != "/srv/work" {
-		t.Fatalf("active reconnect = %#v", active["reconnect"])
 	}
 }

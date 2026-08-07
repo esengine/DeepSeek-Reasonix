@@ -106,8 +106,8 @@ func MemoryCommandText(api MemoryControl, input string) string {
 
 func parseMemoryCommand(input string) (subcommand, rest string) {
 	input = strings.TrimSpace(input)
-	if strings.HasPrefix(input, "/memory") {
-		input = strings.TrimSpace(strings.TrimPrefix(input, "/memory"))
+	if after, ok := strings.CutPrefix(input, "/memory"); ok {
+		input = strings.TrimSpace(after)
 	}
 	if input == "" {
 		return "", ""

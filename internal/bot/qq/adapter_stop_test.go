@@ -33,9 +33,7 @@ func TestStopClosesTrackedConnAndWaitsForLoop(t *testing.T) {
 	a.cancel = cancel
 	tracked := make(chan struct{})
 	decodeReturned := make(chan struct{})
-	a.loopWG.Add(1)
-	go func() {
-		defer a.loopWG.Done()
+	a.loopWG.Go(func() {
 		if !a.trackConn(ctx, conn) {
 			conn.Close()
 			return
@@ -45,7 +43,7 @@ func TestStopClosesTrackedConnAndWaitsForLoop(t *testing.T) {
 		var payload gatewayPayload
 		_ = json.NewDecoder(conn).Decode(&payload) // blocks like connectGateway's reads
 		close(decodeReturned)
-	}()
+	})
 	select {
 	case <-tracked:
 	case <-time.After(time.Second):
@@ -101,15 +99,13 @@ func TestStopUnblocksStalledHandshakeDial(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a.cancel = cancel
 	dialErr := make(chan error, 1)
-	a.loopWG.Add(1)
-	go func() {
-		defer a.loopWG.Done()
+	a.loopWG.Go(func() {
 		conn, err := a.dialGateway(ctx, "ws://"+ln.Addr().String(), "test-token")
 		if err == nil {
 			conn.Close()
 		}
 		dialErr <- err
-	}()
+	})
 
 	var srvConn net.Conn
 	select {

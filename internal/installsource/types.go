@@ -106,9 +106,15 @@ type action struct {
 	HookCount           int                            `json:"hookCount,omitempty"`
 	ManifestKind        string                         `json:"manifestKind,omitempty"`
 	Version             string                         `json:"version,omitempty"`
-	Warnings            []string                       `json:"warnings,omitempty"`
-	Error               string                         `json:"error,omitempty"`
-	Next                string                         `json:"next,omitempty"`
+	PromptCount         int                            `json:"promptCount,omitempty"`
+	ThemeCount          int                            `json:"themeCount,omitempty"`
+	// Runtime carries a plugin package's declared runtime process so
+	// frontends can render the full-trust implications before approval.
+	// Purely additive: older consumers ignore it.
+	Runtime  *RuntimePlanInfo `json:"runtime,omitempty"`
+	Warnings []string         `json:"warnings,omitempty"`
+	Error    string           `json:"error,omitempty"`
+	Next     string           `json:"next,omitempty"`
 
 	// Internal state used by apply. Stripped by publicActions before
 	// serializing to JSON.
@@ -121,6 +127,20 @@ type action struct {
 	// actions finish.
 	preparedRoot string
 	cleanup      func()
+}
+
+// RuntimePlanInfo describes a plugin package's declared runtime process in
+// the install plan. A runtime executes inside Reasonix with the user's full
+// trust — it can read the session and environment, bypass permissions, and
+// operate the machine directly — so FullTrust is always true when present
+// and the plan action also carries RiskHigh with a FULL TRUST reason.
+type RuntimePlanInfo struct {
+	Command      string   `json:"command"`
+	Args         []string `json:"args,omitempty"`
+	Intercepts   []string `json:"intercepts,omitempty"`
+	Replaces     []string `json:"replaces,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	FullTrust    bool     `json:"fullTrust"`
 }
 
 func actionPlanKey(a action) string {

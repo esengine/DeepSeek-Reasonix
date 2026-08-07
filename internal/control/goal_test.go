@@ -480,7 +480,7 @@ func TestResearchGoalTurnAppendsAutoResearchHeartbeats(t *testing.T) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		t.Fatalf("unmarshal goal state: %v", err)
 	}
-	heartbeats, err := c.autoResearch.Heartbeats(state.AutoResearchTaskID, 10)
+	heartbeats, err := c.autoResearch.store.Heartbeats(state.AutoResearchTaskID, 10)
 	if err != nil {
 		t.Fatalf("Heartbeats: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestResearchGoalTurnUpdatesAutoResearchStaleProgress(t *testing.T) {
 	if err := json.Unmarshal(data, &state); err != nil {
 		t.Fatalf("unmarshal goal state: %v", err)
 	}
-	summary, err := c.autoResearch.Summary(state.AutoResearchTaskID)
+	summary, err := c.autoResearch.store.Summary(state.AutoResearchTaskID)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -619,7 +619,7 @@ func TestControllerRecordsAutoResearchEvidence(t *testing.T) {
 		t.Fatalf("RecordAutoResearchEvidence verification: %v", err)
 	}
 
-	report, err := c.autoResearch.Readiness(taskID)
+	report, err := c.autoResearch.store.Readiness(taskID)
 	if err != nil {
 		t.Fatalf("Readiness: %v", err)
 	}
@@ -687,7 +687,7 @@ func TestResearchGoalCompletionMarksAutoResearchTaskComplete(t *testing.T) {
 		t.Fatalf("runGoalLoopWithRawDisplay: %v", err)
 	}
 
-	summary, err := c.autoResearch.Summary(taskID)
+	summary, err := c.autoResearch.store.Summary(taskID)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -697,7 +697,7 @@ func TestResearchGoalCompletionMarksAutoResearchTaskComplete(t *testing.T) {
 	if summary.StaleCount != 0 {
 		t.Fatalf("AutoResearch stale_count = %d, want 0 after accepted evidence", summary.StaleCount)
 	}
-	findings, err := c.autoResearch.Findings(taskID, 0)
+	findings, err := c.autoResearch.store.Findings(taskID, 0)
 	if err != nil {
 		t.Fatalf("Findings: %v", err)
 	}
@@ -741,7 +741,7 @@ func TestResearchGoalBlockedMarksAutoResearchTaskBlocked(t *testing.T) {
 		t.Fatalf("runGoalLoopWithRawDisplay: %v", err)
 	}
 
-	summary, err := c.autoResearch.Summary(taskID)
+	summary, err := c.autoResearch.store.Summary(taskID)
 	if err != nil {
 		t.Fatalf("Summary: %v", err)
 	}
@@ -835,7 +835,7 @@ func TestGoalRepeatedBlockedStopsAfterThreeTurns(t *testing.T) {
 // no intercept.
 func TestGoalBlockedReportTransitionsImmediately(t *testing.T) {
 	g := &goalMachine{goal: "wait for user review", status: GoalStatusRunning}
-	g.turnsLimit, g.tokensLimit = 10, 200_000
+	g.turnsLimit = 10
 	g.noProgressLimit = defaultNoProgressLimit
 
 	res := g.advance(goalAdvanceInput{
@@ -1213,7 +1213,7 @@ func TestRepeatedCompleteWithIncompleteTodosPausesOnBudget(t *testing.T) {
 	// The write-class budget is 20 turns; give the scripted provider a full
 	// pair per turn so the model keeps reporting complete each time.
 	turns := flattenTurns()
-	for i := 0; i < 21; i++ {
+	for range 21 {
 		turns = append(turns, goalToolTurn(GoalStatusComplete, "", "")...)
 	}
 	prov := &scriptedTurns{turns: turns}

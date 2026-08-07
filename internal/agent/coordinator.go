@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -521,17 +522,17 @@ func plannerPlanRequestsApproval(plan string) bool {
 	}
 	// Match per line so a nearby negation ("无需等待用户批准", "no need to wait
 	// for approval") exempts only its own phrase, not the whole plan.
-	for _, rawLine := range strings.Split(lower, "\n") {
+	for rawLine := range strings.SplitSeq(lower, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if line == "" {
 			continue
 		}
 		for _, phrase := range plannerApprovalPhrases {
-			idx := strings.Index(line, phrase)
-			if idx < 0 {
+			before, _, ok := strings.Cut(line, phrase)
+			if !ok {
 				continue
 			}
-			if approvalMentionNegated(line[:idx]) {
+			if approvalMentionNegated(before) {
 				continue
 			}
 			return true
@@ -633,7 +634,7 @@ func parsePlannerAskBlock(plan string) (event.AskQuestion, bool) {
 	block := plan[start+len(plannerAskStartMarker) : end]
 	var question string
 	var options []event.AskOption
-	for _, raw := range strings.Split(block, "\n") {
+	for raw := range strings.SplitSeq(block, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -671,8 +672,8 @@ func parsePlannerAskBlock(plan string) (event.AskQuestion, bool) {
 
 func plannerQuestionPrompt(plan string) string {
 	lines := strings.Split(plan, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(strings.Trim(lines[i], "-* \t"))
+	for _, v := range slices.Backward(lines) {
+		line := strings.TrimSpace(strings.Trim(v, "-* \t"))
 		if line == "" {
 			continue
 		}
@@ -780,8 +781,8 @@ func isNoOpPlan(plan string) bool {
 
 func lastNonEmptyLine(s string) string {
 	lines := strings.Split(s, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if t := strings.TrimSpace(lines[i]); t != "" {
+	for _, v := range slices.Backward(lines) {
+		if t := strings.TrimSpace(v); t != "" {
 			return t
 		}
 	}
@@ -832,7 +833,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		}
 	}()
 
-	ch, err := provider.StreamWithRequestBudget(ctx, c.planner, provider.Request{
+	ch, err := c.planner.Stream(ctx, provider.Request{
 		Messages:    provider.ModelMessages(c.plannerSess.Messages),
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})
@@ -899,34 +900,6 @@ func (c *Coordinator) planWithTools(ctx context.Context, input string) (string, 
 	// does not leave the planner session ending in a user message.
 	c.rollbackPlannerTurn(before, rewriteBefore)
 	return "", fmt.Errorf("planner finished without producing a plan")
-}
-
-// rollbackPlannerTurn discards a failed planning turn from the planner session.
-// Without a mid-turn rewrite the pre-turn snapshot is restored exactly. When
-// auto-compaction rewrote the log during the turn, restoring the snapshot would
-// also revert the compaction — wasting its summarizer call and re-growing the
-// prompt the fold just paid to shrink — so only the trailing plain user
-// messages are dropped (the dangling turn input plus any steer/nudge messages):
-// those are what would produce consecutive user roles on the next plan, while
-// completed tool rounds and the compaction digest stay coherent history.
-func (c *Coordinator) rollbackPlannerTurn(before []provider.Message, rewriteBefore int) {
-	if c.plannerSess.RewriteVersion() == rewriteBefore {
-		c.plannerSess.Replace(before)
-		return
-	}
-	msgs := c.plannerSess.Snapshot()
-	for len(msgs) > 0 {
-		last := msgs[len(msgs)-1]
-		if last.Role == provider.RoleAssistant && len(last.ToolCalls) > 0 {
-			msgs = msgs[:len(msgs)-1]
-			continue
-		}
-		if last.Role != provider.RoleUser || isCompactionSummary(last) {
-			break
-		}
-		msgs = msgs[:len(msgs)-1]
-	}
-	c.plannerSess.Replace(msgs)
 }
 
 func plannerResearchPauseDetail(err error) string {
@@ -1076,11 +1049,11 @@ func HandoffTask(s string) string {
 		return s
 	}
 	const header = "Original task:\n"
-	i := strings.Index(trimmed, header)
-	if i < 0 {
+	_, after, ok := strings.Cut(trimmed, header)
+	if !ok {
 		return s
 	}
-	rest := trimmed[i+len(header):]
+	rest := after
 	if j := strings.Index(rest, "\n\nPlanner output:"); j >= 0 {
 		rest = rest[:j]
 	}

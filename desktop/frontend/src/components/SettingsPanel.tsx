@@ -1389,7 +1389,6 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     ? Number(agent.effectiveCompactRatio)
     : agent.compactRatio;
   agent.compactRatioOverridden = Boolean(agent.compactRatioOverridden);
-  agent.compactRatioRemote = Boolean(agent.compactRatioRemote);
   return {
     ...view,
     providers: asArray(view.providers).map(normalizeProviderView),
@@ -4515,7 +4514,6 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
               </div>
             </SettingsField>
             {compactRatioOverrideHint && <div className="provider-fetch-banner provider-fetch-banner--warn">{compactRatioOverrideHint}</div>}
-            {agent.compactRatioRemote && <div className="provider-fetch-banner provider-fetch-banner--warn">{t("settings.compactRatioRemote")}</div>}
           </SettingsSection>
         </>
       ) : subtab === "access" ? (
@@ -7191,7 +7189,7 @@ function UpdatesSection({
   applySettings: (fn: () => Promise<void>) => Promise<boolean>;
 }) {
   const t = useT();
-  const { status, check, apply: applyUpdate, openDownload } = useUpdater();
+  const { status, check, apply: applyUpdate, openDownload, abandonPending } = useUpdater();
   const [version, setVersion] = useState("");
   useEffect(() => {
     app.Version().then(setVersion).catch(() => {});
@@ -7334,6 +7332,16 @@ function UpdatesSection({
             )}
           </div>
           <span className="banner__spacer" />
+          {status.disposition === "recovery" && (
+            <button
+              className="btn btn--small"
+              type="button"
+              disabled={settingsBusy || updaterBusy}
+              onClick={() => void abandonPending()}
+            >
+              {t("updater.discardPrevious")}
+            </button>
+          )}
           {downloadIsPrimary && (
             <button className="btn btn--primary btn--small" type="button" onClick={openDownload}>
               {t("updater.officialDownload")}

@@ -18,7 +18,7 @@ export function UpdateBanner({
   onShowReleaseNotes?: (version: string) => void;
 }) {
   const t = useT();
-  const { status, check, apply, openDownload, reset } = useUpdater();
+  const { status, check, apply, openDownload, abandonPending, reset } = useUpdater();
   const [dismissed, setDismissed] = useState<string | null>(null);
 
   useEffect(() => {
@@ -91,13 +91,23 @@ export function UpdateBanner({
             {failedMessage}
           </span>
           <span className="banner__spacer" />
+          {status.disposition === "recovery" && (
+            <button
+              className="btn btn--small"
+              type="button"
+              onClick={() => void abandonPending()}
+            >
+              {t("updater.discardPrevious")}
+            </button>
+          )}
           {downloadFirst && (
-            <button className="btn btn--small btn--primary" onClick={openDownload}>
+            <button className="btn btn--small btn--primary" type="button" onClick={openDownload}>
               {t("updater.officialDownload")}
             </button>
           )}
           <button
             className={`btn btn--small${downloadFirst ? "" : " btn--primary"}`}
+            type="button"
             onClick={() => {
               if (status.info) apply(status.info);
               else void check();

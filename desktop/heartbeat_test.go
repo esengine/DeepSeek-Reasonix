@@ -155,7 +155,7 @@ func TestHeartbeatExecuteTaskPersistsFreshConversationTopicID(t *testing.T) {
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	engine := &HeartbeatEngine{
 		app:           app,
 		pendingTopics: map[string]heartbeatPendingTopic{},
@@ -236,7 +236,7 @@ func TestHeartbeatExecuteTaskSkipsPendingPrompt(t *testing.T) {
 	app := NewApp()
 	app.ctx = context.Background()
 	app.readyHook = func() {}
-	app.runtimeEvents.emit = func(context.Context, string, ...interface{}) {}
+	app.runtimeEvents.emit = func(context.Context, string, ...any) {}
 	engine := &HeartbeatEngine{
 		app:           app,
 		pendingTopics: map[string]heartbeatPendingTopic{},

@@ -253,7 +253,7 @@ func TestRenderSinkLimitsProgressMessages(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
 	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
-	for i := 0; i < renderMaxProgressMessages+2; i++ {
+	for range renderMaxProgressMessages + 2 {
 		sink.lastProgress = time.Now().Add(-renderProgressMinInterval)
 		sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "tool", Name: "bash"}})
 	}
@@ -521,5 +521,37 @@ func TestRenderSinkSuppressesOperatorNoticesWithoutHidingUserWarnings(t *testing
 	}
 	if sent[0].Text != "⚠️ please resend your message" {
 		t.Fatalf("sent text = %q, want the ordinary user warning", sent[0].Text)
+	}
+}
+
+// TestRenderSinkIgnoresSubagentProgress locks the bot policy for the reserved
+// sub-agent progress ToolProgress channels: streaming previews must never leak
+// into IM channels, exactly like ordinary tool output.
+func TestRenderSinkIgnoresSubagentProgress(t *testing.T) {
+	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
+	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
+
+	sink.Emit(event.Event{Kind: event.TurnStarted})
+	sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "task-1", Name: "task"}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressStatusName, Output: "reasoning",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressReasoningName, Output: "thinking out loud",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolProgress, Tool: event.Tool{
+		ID: "task-1", Name: event.SubagentProgressTextName, Output: "answer preview",
+	}})
+	sink.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: "task-1", Name: "task", Output: "final"}})
+	sink.Emit(event.Event{Kind: event.TurnDone})
+
+	sent := adapter.sentMessages()
+	if len(sent) != 1 {
+		t.Fatalf("sent count = %d, want only the dispatch status: %+v", len(sent), sent)
+	}
+	for i, m := range sent {
+		if strings.Contains(m.Text, "thinking out loud") || strings.Contains(m.Text, "answer preview") {
+			t.Fatalf("sub-agent preview leaked into IM message %d: %+v", i, m)
+		}
 	}
 }

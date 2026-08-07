@@ -22,7 +22,7 @@ test("primary site pages share the same header component", async () => {
 test("the shared header owns the complete global navigation", async () => {
   const header = await source("../components/SiteHeader.astro");
 
-  for (const id of ["features", "how", "skills", "community", "docs", "changelog"]) {
+  for (const id of ["features", "surfaces", "skills", "community", "docs", "changelog"]) {
     assert.match(header, new RegExp(`id: '${id}'`));
   }
 

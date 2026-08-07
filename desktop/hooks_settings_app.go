@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -127,12 +128,7 @@ func hookEventNames() []string {
 }
 
 func validHookEvent(event hook.Event) bool {
-	for _, e := range hook.Events {
-		if event == e {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(hook.Events, event)
 }
 
 func hookConfigView(event hook.Event, cfg hook.HookConfig) HookConfigView {

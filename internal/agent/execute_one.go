@@ -86,6 +86,12 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	if blocked, early := a.parseToolCall(plan); early {
 		return blocked
 	}
+	// tool.before: extensions rule on the parsed call before any policy or
+	// permission check. A valid replacement is re-parsed so every later stage
+	// sees the call that will actually execute.
+	if blocked, early := a.interceptToolBefore(ctx, plan); early {
+		return blocked
+	}
 	if blocked, early := a.resolveToolPolicy(ctx, plan); early {
 		return blocked
 	}
@@ -167,10 +173,55 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, plan *toolCallPlan) (tool
 	if blocked, early := a.applyDeliveryPolicyGates(plan); early {
 		return blocked, true
 	}
+	// After proxy resolution, re-apply the batch mutation barrier using the
+	// real target classification. Provider-visible proxies such as
+	// use_capability advertise ReadOnly()==true before resolution and would
+	// otherwise slip past the pre-run skip pass.
+	if blocked, early := a.applyMutationDependencyBarrier(plan); early {
+		return blocked, true
+	}
 	if blocked, early := a.applyRecoveryAndPermission(ctx, plan); early {
 		return blocked, true
 	}
 	return toolOutcome{}, false
+}
+
+// applyMutationDependencyBarrier blocks later mutations and verifications in the
+// same provider batch after an earlier modification failed. Host-proven
+// read-only diagnosis (resolved ReadOnly with no verification classification)
+// still runs.
+func (a *Agent) applyMutationDependencyBarrier(plan *toolCallPlan) (toolOutcome, bool) {
+	if a == nil || plan == nil || !a.mutationDependencyBarrier.Load() {
+		return toolOutcome{}, false
+	}
+	verification := plan.evidenceName == "bash" && evidence.IsDeliveryVerificationCommand(bashCommandFromArgs(plan.evidenceArgs))
+	// Prefer the post-gate mutates flag; fall back to !readOnly so a resolved
+	// writer proxy cannot claim non-mutation by skipping ToolCallMutates.
+	mutates := plan.mutates || !plan.readOnly
+	if !mutates && !verification {
+		return toolOutcome{}, false
+	}
+	msg := "blocked: skipped because an earlier modification in this tool batch failed or was blocked. " +
+		"Fix or re-run the failed change first; verification was not executed."
+	var ex *tool.ShellExecution
+	// Structured shell metadata only for bash cards; other tools keep plain text.
+	if plan.evidenceName == "bash" || plan.call.Name == "bash" {
+		ex = shellPreflightExecution(plan, verification)
+		if ex != nil {
+			ex.FailurePhase = tool.ShellPhaseDependency
+			ex.State = tool.ShellStateNotRun
+			ex.MutationRisk = tool.ShellMutationNotStarted
+			if verification {
+				ex.Verification = tool.ShellVerificationNotRun
+			}
+		}
+	}
+	return toolOutcome{
+		output:    msg,
+		blocked:   true,
+		errMsg:    firstLine(msg),
+		execution: ex,
+	}, true
 }
 
 // applyPlanModeAndProxy handles initial Plan mode, proxy resolution / skip path,
@@ -292,28 +343,67 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 	return toolOutcome{}, false
 }
 
-// applyDeliveryPolicyGates enforces delivery-profile bash and criteria rules and
-// classifies whether the call mutates workspace state.
+// applyDeliveryPolicyGates enforces global deterministic shell contracts plus
+// delivery-profile-only criteria rules, and classifies mutation/verification.
 func (a *Agent) applyDeliveryPolicyGates(plan *toolCallPlan) (toolOutcome, bool) {
-	if a.deliveryProfile && plan.evidenceName == "bash" && evidence.BashToolCallMasksVerificationExit(plan.evidenceArgs) {
-		return toolOutcome{
-			output:  "blocked: the trailing echo/printf of $? masks the verifier's exit status, so this command would look successful even when the check failed. Run the verifier or read-only extraction pipeline by itself and let its exit status be the tool result; for example: tail ... | head ... | node --check -",
-			blocked: true,
-			errMsg:  "blocked: verification exit status masked",
-		}, true
+	// Global deterministic shell contract (ordinary + Delivery). PowerShell 5.1
+	// &&/|| is enforced inside the bash tool itself so descriptor and error text
+	// stay shell-accurate; the agent layers apply command-shape protections.
+	// Delivery keeps its longer recovery copy so existing delivery guidance tests
+	// and model recovery prompts stay stable.
+	//
+	// Ordinary mode blocks only shapes where a later segment can actually hide an
+	// earlier failure. Delivery keeps the broader classifier because a mutation
+	// invalidates the verification receipt even when the exit status is honest.
+	// Without that split, `go build ./... && go test ./...`, `npm install &&
+	// npm test`, and every other short-circuit chain would be rejected for every
+	// user, though bash already reports the failing step's status for them.
+	if plan.evidenceName == "bash" {
+		if evidence.BashToolCallMasksVerificationExit(plan.evidenceArgs) {
+			msg := evidence.ShellContractPreflightMessage("mask_exit")
+			if a.deliveryProfile {
+				msg = "blocked: the trailing echo/printf of $? masks the verifier's exit status, so this command would look successful even when the check failed. Run the verifier or read-only extraction pipeline by itself and let its exit status be the tool result; for example: tail ... | head ... | node --check -"
+			}
+			return toolOutcome{
+				output:    msg,
+				blocked:   true,
+				errMsg:    "blocked: verification exit status masked",
+				execution: shellPreflightExecution(plan, true),
+			}, true
+		}
+		mixed := evidence.BashToolCallMixesMutationAndMaskableVerification
+		if a.deliveryProfile {
+			mixed = evidence.BashToolCallMixesMutationAndVerification
+		}
+		if mixed(plan.evidenceArgs) {
+			msg := evidence.ShellContractPreflightMessage("mixed")
+			if a.deliveryProfile {
+				msg = "blocked: this command mixes a verification check with a segment that may write state. Run the state-changing preparation separately while a todo is in_progress, then run a read-only verification command. For generated input, prefer a host-recognized read-only pipeline into the verifier (for example: tail ... | head ... | node --check -) instead of writing a temporary file."
+			}
+			return toolOutcome{
+				output:    msg,
+				blocked:   true,
+				errMsg:    "blocked: mixed mutation and verification command",
+				execution: shellPreflightExecution(plan, true),
+			}, true
+		}
+		if evidence.BashToolCallUsesNonTerminalInlineInterpreter(plan.evidenceArgs) {
+			msg := evidence.ShellContractPreflightMessage("inline_nonterminal")
+			return toolOutcome{
+				output:    msg,
+				blocked:   true,
+				errMsg:    "blocked: non-terminal inline interpreter command",
+				execution: shellPreflightExecution(plan, false),
+			}, true
+		}
 	}
-	if a.deliveryProfile && plan.evidenceName == "bash" && evidence.BashToolCallMixesMutationAndVerification(plan.evidenceArgs) {
-		return toolOutcome{
-			output:  "blocked: this command mixes a verification check with a segment that may write state. Run the state-changing preparation separately while a todo is in_progress, then run a read-only verification command. For generated input, prefer a host-recognized read-only pipeline into the verifier (for example: tail ... | head ... | node --check -) instead of writing a temporary file.",
-			blocked: true,
-			errMsg:  "blocked: mixed mutation and verification command",
-		}, true
-	}
+	// Delivery-only: any opaque inline interpreter is unauditable as evidence.
 	if a.deliveryProfile && plan.evidenceName == "bash" && evidence.BashToolCallUsesOpaqueInlineInterpreter(plan.evidenceArgs) {
 		return toolOutcome{
-			output:  "blocked: delivery mode cannot audit inline interpreter source such as node -e or python -c, so executing it would become an opaque mutation and invalidate prior verification. For inspection, use read_file/grep or another host-proven read-only command. For validation, use a conventional verifier such as node --check, a project test/check/lint command, or a read-only extraction pipeline into the verifier. For an intentional state change, use a file tool or a script file under the current in_progress todo. " + evidence.VerificationCommandSummary(),
-			blocked: true,
-			errMsg:  "blocked: opaque inline interpreter command",
+			output:    "blocked: delivery mode cannot audit inline interpreter source such as node -e or python -c, so executing it would become an opaque mutation and invalidate prior verification. For inspection, use read_file/grep or another host-proven read-only command. For validation, use a conventional verifier such as node --check, a project test/check/lint command, or a read-only extraction pipeline into the verifier. For an intentional state change, use a file tool or a script file under the current in_progress todo. " + evidence.VerificationCommandSummary(),
+			blocked:   true,
+			errMsg:    "blocked: opaque inline interpreter command",
+			execution: shellPreflightExecution(plan, false),
 		}, true
 	}
 
@@ -445,6 +535,12 @@ func (a *Agent) applyRecoveryAndPermission(ctx context.Context, plan *toolCallPl
 				errMsg:  fmt.Sprintf("blocked: %v", err),
 			}, true
 		}
+		// permission.decision: the host verdict is computed first; the
+		// extension ruling may override it in either direction (an allow
+		// overriding a host deny is the full-trust contract and is audited).
+		if blocked, early := a.interceptExtensionPermission(ctx, plan, &allow); early {
+			return blocked, true
+		}
 		if !allow {
 			return toolOutcome{
 				output:  "blocked: " + reason,
@@ -538,7 +634,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
-		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot())
+		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot)
 		if a.deliveryProfile {
 			cctx = evidence.WithDeliveryProfile(cctx)
 		}
@@ -629,11 +725,37 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	if a.plannerMCPExecution && isMCPExecutionTarget(runTool, permName) && mcpServerAuthorized(runTool) && !mcpDestructiveHint(runTool) {
 		cctx = tool.WithNonDestructiveMCPExecutionIntent(cctx)
 	}
-	if it, ok := runTool.(tool.ImageTool); ok {
+	var execution *tool.ShellExecution
+	if de, ok := runTool.(tool.DetailedExecutor); ok {
+		var detailed tool.DetailedResult
+		detailed, err = de.ExecuteDetailed(cctx, runArgs)
+		result, images, execution = detailed.Output, detailed.Images, detailed.Execution
+		// Annotate verification outcome when the host classified this call as a verifier.
+		if execution != nil && plan.verification {
+			switch {
+			case err != nil:
+				execution.Verification = tool.ShellVerificationFailed
+			default:
+				execution.Verification = tool.ShellVerificationPassed
+			}
+		} else if execution != nil && execution.Verification == "" {
+			execution.Verification = tool.ShellVerificationNotVerification
+		}
+		// Sole opaque inline interpreters are allowed outside Delivery but cannot
+		// prove mutation completeness.
+		if execution != nil && evidence.BashCommandMayBeOpaqueMutation(runArgs) &&
+			execution.MutationRisk == tool.ShellMutationMayHaveCompleted {
+			execution.MutationRisk = tool.ShellMutationUnknown
+		}
+	} else if it, ok := runTool.(tool.ImageTool); ok {
 		result, images, err = it.ExecuteWithImages(cctx, runArgs)
 	} else {
 		result, err = runTool.Execute(cctx, runArgs)
 	}
+	// tool.after: extensions rule on the executed result (success or error)
+	// before evidence, hooks, and recovery observation, so every downstream
+	// consumer sees the final (possibly replaced) outcome.
+	result, err = a.interceptToolAfter(ctx, call, result, err)
 	if a.evidence != nil {
 		// Always record the model-visible call for audit, then the real target
 		// attributes for mutation/read classification when they differ.
@@ -690,7 +812,10 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 		}
 		a.recordRepeatFailure(call, t, err)
 		body, truncMsg := truncateToolOutput(fmt.Sprintf("error: %v\n%s", err, detail))
-		return toolOutcome{output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg, recoveryGeneration: recoveryGen}
+		return toolOutcome{
+			output: body, errMsg: firstLine(err.Error()), truncated: truncMsg != "", truncMsg: truncMsg,
+			execution: execution, recoveryGeneration: recoveryGen,
+		}
 	}
 	if mutates {
 		a.clearRepeatFailuresAfterMutation(evidenceName, evidenceArgs, readOnly)
@@ -703,7 +828,35 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 		a.hooks.SubagentStop(ctx, result)
 	}
 	body, truncMsg := truncateToolOutput(result)
-	return toolOutcome{output: body, images: images, truncated: truncMsg != "", truncMsg: truncMsg, recoveryGeneration: recoveryGen}
+	return toolOutcome{
+		output: body, images: images, truncated: truncMsg != "", truncMsg: truncMsg,
+		execution: execution, recoveryGeneration: recoveryGen,
+	}
+}
+
+// shellPreflightExecution builds not_run/preflight metadata for a blocked bash call.
+func shellPreflightExecution(plan *toolCallPlan, hasVerification bool) *tool.ShellExecution {
+	ex := &tool.ShellExecution{
+		Kind:         "shell",
+		State:        tool.ShellStateNotRun,
+		FailurePhase: tool.ShellPhasePreflight,
+		MutationRisk: tool.ShellMutationNotStarted,
+		Verification: tool.ShellVerificationNotVerification,
+	}
+	if hasVerification {
+		ex.Verification = tool.ShellVerificationNotRun
+	}
+	if plan != nil {
+		if de, ok := plan.execTool.(tool.DetailedExecutor); ok {
+			if desc := de.ExecutionDescriptor(plan.execArgs); desc != nil {
+				ex.Shell = desc.Shell
+				ex.ShellVersion = desc.ShellVersion
+				ex.Platform = desc.Platform
+				ex.SupportsAndAnd = desc.SupportsAndAnd
+			}
+		}
+	}
+	return ex
 }
 
 // observeBeforeMutation captures preimages for Previewable writers and records

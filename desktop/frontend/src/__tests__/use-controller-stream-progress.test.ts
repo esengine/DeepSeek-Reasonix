@@ -106,6 +106,48 @@ function ev(s: typeof initialState, e: WireEvent) {
   eq(only?.kind === "tool" ? only.id : "", "c1", "surviving card carries the real call ID");
 }
 
+// --- 1c. stream_attempt discard rolls back partial tool cards and text ---
+{
+  let s = { ...initialState, running: true, turnActive: true };
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-1", action: "begin", attempt: 1, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "text", text: "partial half" } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c1", name: "edit_file", readOnly: false, partial: true, argChars: 6000, attemptId: "sa-1" } } as WireEvent);
+  // Concurrent background sub-agent tool must not be journaled.
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "child-1", name: "read_file", readOnly: true, partial: true, parentId: "task-1", attemptId: "sa-1" } } as WireEvent);
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c1").length, 1, "partial edit_file card appears during attempt");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "sub-agent partial is still shown");
+  eq(s.live?.text, "partial half", "partial text is live during attempt");
+  eq(s.turnArgChars, 6000, "arg progress tracked during attempt");
+
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-1", action: "discard", attempt: 1, max: 6, reason: "premature_eof" } } as WireEvent);
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c1").length, 0, "discard removes uncommitted parent tool card");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "discard keeps concurrent sub-agent tool card");
+  eq(s.live?.text ?? "", "", "discard clears attempt text (not concatenate)");
+  eq(s.turnArgChars, 0, "discard restores turnArgChars baseline");
+
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-2", action: "begin", attempt: 2, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "text", text: "full answer" } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c2", name: "edit_file", readOnly: false, partial: true, argChars: 12000, attemptId: "sa-2" } } as WireEvent);
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-2", action: "commit", attempt: 2, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c2", name: "edit_file", args: '{"path":"a"}', readOnly: false } } as WireEvent);
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c2").length, 1, "final success has committed parent tool card");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "child-1").length, 1, "sub-agent card still present after commit");
+  eq(s.live?.text, "full answer", "final text is the committed attempt only");
+}
+
+// --- 1d. stale discard must not clear a newer attempt journal ---
+{
+  let s = { ...initialState, running: true, turnActive: true };
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-new", action: "begin", attempt: 2, max: 6 } } as WireEvent);
+  s = ev(s, { kind: "tool_dispatch", tool: { id: "c-new", name: "edit_file", readOnly: false, partial: true, attemptId: "sa-new" } } as WireEvent);
+  eq(s.streamAttemptJournal?.id, "sa-new", "journal tracks current attempt");
+  s = ev(s, { kind: "stream_attempt", streamAttempt: { id: "sa-old", action: "discard", attempt: 1, max: 6, reason: "premature_eof" } } as WireEvent);
+  eq(s.streamAttemptJournal?.id, "sa-new", "stale discard leaves current journal");
+  eq(s.items.filter((it) => it.kind === "tool" && it.id === "c-new").length, 1, "stale discard does not remove current partial card");
+  s = ev(s, { kind: "turn_done" } as WireEvent);
+  eq(s.streamAttemptJournal, undefined, "turn_done clears stream attempt journal");
+}
+
 // --- 2. usageSeq bumps for every source ---
 {
   let s = { ...initialState, running: true, turnActive: true };

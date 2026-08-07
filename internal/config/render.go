@@ -87,6 +87,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		} else {
 			b.WriteString("# show_reasoning = true   # CLI: show thinking text by default; false = collapsed (toggle with Ctrl+O)\n")
 		}
+		fmt.Fprintf(&b, "show_turn_usage = %v   # CLI/TUI: show per-request token and cost receipts in the transcript\n", c.UI.ShowTurnUsage)
 		b.WriteString("\n")
 	}
 
@@ -852,6 +853,9 @@ func RenderTOMLProjectDelta(c *Config) string {
 		if c.UI.ShowReasoning != d.UI.ShowReasoning {
 			fmt.Fprintf(&b, "show_reasoning = %v\n", c.UI.ShowReasoning)
 		}
+		if c.UI.ShowTurnUsage != d.UI.ShowTurnUsage {
+			fmt.Fprintf(&b, "show_turn_usage = %v\n", c.UI.ShowTurnUsage)
+		}
 		b.WriteString("\n")
 	}
 
@@ -1314,7 +1318,7 @@ func renderEnvironmentConfig(b *strings.Builder, cfg EnvironmentConfig) {
 	if cfg.Enabled != nil {
 		enabled = *cfg.Enabled
 	}
-	fmt.Fprintf(b, "enabled = %v   # inject a stable startup environment summary into the model prompt\n", enabled)
+	fmt.Fprintf(b, "enabled = %v   # inject a stable startup environment summary into the model prompt\noffline = %v   # declare that outbound network access is unavailable; prevents futile retries\n", enabled, cfg.Offline)
 	if len(cfg.Tools) == 0 {
 		b.WriteString("# [environment.tools]\n")
 		b.WriteString("# go = \"/opt/homebrew/bin/go\"   # trusted executable path; workspace-local paths are not auto-executed\n\n")

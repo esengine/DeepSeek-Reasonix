@@ -59,7 +59,7 @@ func TestStormBreakerEscalatesRepeatedFailure(t *testing.T) {
 
 	args := []string{`{"content":"Mountains are`, `{"path":"n.txt","content":"Peaks rise`, `{}`}
 	var last string
-	for i := 0; i < stormBreakThreshold; i++ {
+	for i := range stormBreakThreshold {
 		call := provider.ToolCall{Name: "write_file", Arguments: args[i]}
 		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
@@ -97,7 +97,7 @@ func TestStormBreakerEscalatesRepeatedBlockedPermission(t *testing.T) {
 		`{"command":"ls -la"}`,
 	}
 	var last string
-	for i := 0; i < stormBreakThreshold; i++ {
+	for i := range stormBreakThreshold {
 		call := provider.ToolCall{Name: "bash", Arguments: args[i]}
 		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
@@ -191,7 +191,7 @@ func TestStormBreakerEscalatesRepeatedBatch(t *testing.T) {
 		{Name: "write_b", Arguments: `{"content":"y`},
 	}
 	var first string
-	for i := 0; i < stormBreakThreshold; i++ {
+	for range stormBreakThreshold {
 		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
@@ -221,7 +221,7 @@ func TestStormBreakerBatchResetsOnPartialSuccess(t *testing.T) {
 		{Name: "read_file", Arguments: `{"path":"x"}`},
 	}
 	var first string
-	for i := 0; i < stormBreakThreshold+2; i++ {
+	for range stormBreakThreshold + 2 {
 		first = executeBatchOutputs(a, context.Background(), batch)[0]
 	}
 
@@ -243,7 +243,7 @@ func TestStormBreakerSilentBelowThreshold(t *testing.T) {
 
 	call := provider.ToolCall{Name: "write_file", Arguments: `{"content":"x`}
 	var last string
-	for i := 0; i < stormBreakThreshold-1; i++ {
+	for range stormBreakThreshold - 1 {
 		last = executeBatchOutputs(a, context.Background(), []provider.ToolCall{call})[0]
 	}
 

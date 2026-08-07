@@ -104,7 +104,7 @@ func TestEmptyFinalNotice(t *testing.T) {
 	}
 }
 
-// --- parallel-dispatch tests ---
+// parallel-dispatch tests
 
 // fakeTool is a minimal Tool stand-in for dispatch tests; ReadOnly is
 // configurable and Execute sleeps a fixed duration so we can measure
