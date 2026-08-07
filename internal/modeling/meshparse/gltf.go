@@ -49,6 +49,36 @@ func ParseGLTF(path string) (*Mesh, error) {
 	if err := json.Unmarshal(data, &g); err != nil {
 		return nil, fmt.Errorf("gltf: invalid JSON: %w", err)
 	}
+	buffers, err := loadGLTFBuffers(path, g)
+	if err != nil {
+		return nil, err
+	}
+	return parseGLTFJSON(&g, buffers, "gltf")
+}
+
+// loadGLTFBuffers resolves every buffer (embedded base64 data URI or external
+// .bin relative to the glTF file).
+func loadGLTFBuffers(path string, g gltfJSON) ([][]byte, error) {
+	buffers := make([][]byte, len(g.Buffers))
+	for i, b := range g.Buffers {
+		if b.URI == "" {
+			return nil, fmt.Errorf("gltf buffer %d: no uri (binary glTF must use a BIN chunk)", i)
+		}
+		raw, err := loadGLTFBuffer(path, b.URI)
+		if err != nil {
+			return nil, fmt.Errorf("gltf buffer %d: %w", i, err)
+		}
+		if len(raw) < b.ByteLength {
+			return nil, fmt.Errorf("gltf buffer %d: %d bytes, need %d", i, len(raw), b.ByteLength)
+		}
+		buffers[i] = raw
+	}
+	return buffers, nil
+}
+
+// parseGLTFJSON decodes a glTF JSON document into a normalized Mesh given
+// resolved buffers. Shared by .gltf and .glb paths.
+func parseGLTFJSON(g *gltfJSON, buffers [][]byte, format string) (*Mesh, error) {
 	if g.Asset.Version == "" {
 		return nil, errors.New("gltf: missing asset.version")
 	}
@@ -62,20 +92,7 @@ func ParseGLTF(path string) (*Mesh, error) {
 	}
 	pos := g.Accessors[posAcc]
 
-	// Load buffers.
-	buffers := make([][]byte, len(g.Buffers))
-	for i, b := range g.Buffers {
-		raw, err := loadGLTFBuffer(path, b.URI)
-		if err != nil {
-			return nil, fmt.Errorf("gltf buffer %d: %w", i, err)
-		}
-		if len(raw) < b.ByteLength {
-			return nil, fmt.Errorf("gltf buffer %d: %d bytes, need %d", i, len(raw), b.ByteLength)
-		}
-		buffers[i] = raw
-	}
-
-	m := &Mesh{Format: "gltf"}
+	m := &Mesh{Format: format}
 
 	// POSITION accessor → verts.
 	if pos.Type != "VEC3" {

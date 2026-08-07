@@ -74,6 +74,8 @@ func Parse(path string) (*Mesh, error) {
 		return ParsePLY(f)
 	case ".gltf":
 		return ParseGLTF(path)
+	case ".glb":
+		return ParseGLB(path)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, filepath.Ext(path))
 	}
