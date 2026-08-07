@@ -182,7 +182,7 @@ func TestRemoteMarkdownImageTraversesConfiguredSOCKSProxyWithVettedIP(t *testing
 		}
 		requestHeader := make([]byte, 4)
 		if _, err := io.ReadFull(reader, requestHeader); err != nil || requestHeader[0] != 5 || requestHeader[1] != 1 || requestHeader[3] != 1 {
-			proxyResult <- fmt.Errorf("SOCKS target was not an IPv4 CONNECT: header=%v err=%v", requestHeader, err)
+			proxyResult <- fmt.Errorf("SOCKS target was not an IPv4 CONNECT: header=%v err=%w", requestHeader, err)
 			return
 		}
 		ipBytes := make([]byte, net.IPv4len)

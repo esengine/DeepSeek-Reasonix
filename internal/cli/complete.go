@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -144,8 +145,8 @@ func renameSlashItem(items []compItem, oldLabel, newLabel string) []compItem {
 			continue
 		}
 		items[i].label = newLabel
-		if strings.HasPrefix(items[i].insert, oldLabel) {
-			items[i].insert = newLabel + strings.TrimPrefix(items[i].insert, oldLabel)
+		if after, ok := strings.CutPrefix(items[i].insert, oldLabel); ok {
+			items[i].insert = newLabel + after
 		}
 		break
 	}
@@ -225,10 +226,7 @@ func (m *chatTUI) inputCursorByteOffset() int {
 					// cur.X is screen-relative and includes the "❯ " prompt
 					// gutter (composerPromptWidth columns). Subtract it so
 					// we measure content columns only.
-					col := cur.X - composerPromptWidth
-					if col < 0 {
-						col = 0
-					}
+					col := max(cur.X-composerPromptWidth, 0)
 					visual := 0
 					for _, cell := range row.cells {
 						w := rw.RuneWidth(cell.r)
@@ -505,13 +503,7 @@ func activeAtToken(val string, cursor int) (at, end int, query string, ok bool) 
 		case '@':
 			if i == 0 || val[i-1] == ' ' || val[i-1] == '\t' || val[i-1] == '\n' {
 				end = tokenEnd(val, i+1)
-				queryEnd := cursor
-				if queryEnd < i+1 {
-					queryEnd = i + 1
-				}
-				if queryEnd > end {
-					queryEnd = end
-				}
+				queryEnd := min(max(cursor, i+1), end)
 				return i, end, val[i+1 : queryEnd], true
 			}
 			return 0, 0, "", false
@@ -608,10 +600,7 @@ func (m *chatTUI) fileItems(token string) []compItem {
 		for _, it := range items {
 			seen[strings.TrimPrefix(it.insert, "@")] = true
 		}
-		remaining := maxCompItems - len(items)
-		if remaining > maxFileSearchItems {
-			remaining = maxFileSearchItems
-		}
+		remaining := min(maxCompItems-len(items), maxFileSearchItems)
 		results := m.searchFileRefs(fsFrag)
 		if len(results) > remaining {
 			results = results[:remaining]
@@ -669,12 +658,7 @@ func (m *chatTUI) isMCPServer(name string) bool {
 	if m.host == nil {
 		return false
 	}
-	for _, s := range m.host.ServerNames() {
-		if s == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.host.ServerNames(), name)
 }
 
 // resourceItems lists MCP resources as @server:uri completions. When server is
@@ -835,18 +819,9 @@ func (m chatTUI) renderCompletion() string {
 	items := m.completion.items
 	start := 0
 	if len(items) > maxCompRows {
-		start = m.completion.sel - maxCompRows/2
-		if start < 0 {
-			start = 0
-		}
-		if start > len(items)-maxCompRows {
-			start = len(items) - maxCompRows
-		}
+		start = min(max(m.completion.sel-maxCompRows/2, 0), len(items)-maxCompRows)
 	}
-	end := start + maxCompRows
-	if end > len(items) {
-		end = len(items)
-	}
+	end := min(start+maxCompRows, len(items))
 
 	var b strings.Builder
 	for i := start; i < end; i++ {

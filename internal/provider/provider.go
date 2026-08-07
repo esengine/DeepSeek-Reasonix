@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -285,6 +286,14 @@ func JSONSchemaFormat(name string, schema map[string]any) *ResponseFormat {
 // Unknown compatible gateways must opt in through configuration instead of
 // inheriting this value merely because they implement an OpenAI-shaped wire.
 const DefaultReasoningOutputTokens = 32 * 1024
+
+// DefaultHighOutputTokens is the raised output budget for reasoning APIs whose
+// documented contract safely accepts 128K-class ceilings (DeepSeek Responses
+// API allows up to 384K; MiMo allows up to 131072). Long reasoning turns
+// truncate under 32K, forcing many small write→test→fix iterations; a 128K
+// budget lets the model finish in one pass. Kept in one place so the three
+// protocols (Responses / Chat Completions / Anthropic) cannot drift apart.
+const DefaultHighOutputTokens = 128 * 1024
 
 // TemperaturePtr wraps v in a pointer so callers that explicitly want a
 // specific temperature, including 0 for deterministic output, can distinguish
@@ -566,7 +575,7 @@ func repairToolCallArgs(m Message) Message {
 func closeTruncatedJSON(s string) string {
 	var stack []byte
 	inStr, esc := false, false
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if inStr {
 			switch {
@@ -606,8 +615,8 @@ func closeTruncatedJSON(s string) string {
 	case strings.HasSuffix(trimmed, ":"):
 		out = trimmed + "null"
 	}
-	for i := len(stack) - 1; i >= 0; i-- {
-		out += string(stack[i])
+	for _, v := range slices.Backward(stack) {
+		out += string(v)
 	}
 	if !json.Valid([]byte(out)) {
 		return "{}"
@@ -864,13 +873,7 @@ func (p *Pricing) Cost(u *Usage) float64 {
 	// writes or 2x 1-hour writes). Older providers leave both fields at zero and
 	// keep the legacy one-input-rate behavior. A write count without billed
 	// units also falls back to 1x for backward compatibility.
-	write := u.CacheWriteTokens
-	if write < 0 {
-		write = 0
-	}
-	if write > miss {
-		write = miss
-	}
+	write := min(max(u.CacheWriteTokens, 0), miss)
 	billedWrite := 0.0
 	if write > 0 {
 		billedWrite = u.CacheWriteBilledTokens

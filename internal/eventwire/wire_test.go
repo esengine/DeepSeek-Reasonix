@@ -96,7 +96,7 @@ func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
 }
 
 func TestKindNamesComplete(t *testing.T) {
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
 			t.Fatalf("kind %d has no wire name", k)
 		}
@@ -105,7 +105,7 @@ func TestKindNamesComplete(t *testing.T) {
 
 func TestDesktopWireEventKindTypeCoversSharedKinds(t *testing.T) {
 	ts := readDesktopTypes(t)
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		kind := ToWire(event.Event{Kind: k}).Kind
 		if !strings.Contains(ts, `"`+kind+`"`) {
 			t.Fatalf("desktop WireEvent EventKind is missing %q", kind)

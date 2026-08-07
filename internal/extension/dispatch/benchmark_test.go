@@ -3,7 +3,7 @@ package dispatch
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -37,7 +37,6 @@ func BenchmarkDispatchLatency(b *testing.B) {
 		})
 	})
 	for _, count := range []int{1, 4} {
-		count := count
 		b.Run("Turn/NoopInterceptors"+strconv.Itoa(count), func(b *testing.B) {
 			d := benchmarkDispatcher(extension.PointInputReceive, count)
 			payload := InputPayload{Text: "hello"}
@@ -60,7 +59,7 @@ func BenchmarkDispatchLatency(b *testing.B) {
 func benchmarkDispatcher(point extension.InterceptorPoint, count int) *Dispatcher {
 	chain := make([]extension.Contribution, 0, count)
 	clients := make(map[string]Client, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		pluginID := string(rune('a' + i))
 		chain = append(chain, extension.Contribution{
 			Kind: extension.KindInterceptor, ID: string(point),
@@ -87,7 +86,7 @@ func benchmarkLatency(b *testing.B, fn func() error) {
 		}
 	}
 	b.StopTimer()
-	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	slices.Sort(samples)
 	if len(samples) == 0 {
 		return
 	}

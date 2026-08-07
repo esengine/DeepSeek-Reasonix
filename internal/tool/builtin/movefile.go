@@ -123,13 +123,13 @@ func renameSameFileDestination(src, dst string) error {
 	}
 	if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
 		if restoreErr := renameFile(tmpName, src); restoreErr != nil {
-			return fmt.Errorf("%w; restore %s: %v", err, src, restoreErr)
+			return fmt.Errorf("%w; restore %s: %w", err, src, restoreErr)
 		}
 		return err
 	}
 	if err := renameFile(tmpName, dst); err != nil {
 		if restoreErr := renameFile(tmpName, src); restoreErr != nil {
-			return fmt.Errorf("%w; restore %s: %v", err, src, restoreErr)
+			return fmt.Errorf("%w; restore %s: %w", err, src, restoreErr)
 		}
 		return err
 	}

@@ -179,14 +179,12 @@ func TestSessionLeaseConcurrentReclaimSingleWinner(t *testing.T) {
 	leases := make(chan *SessionLease, attempts)
 	start := make(chan struct{})
 	for range attempts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 			if lease, err := TryReclaimCurrentProcessSessionLease(userPath); err == nil && lease != nil {
 				leases <- lease
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

@@ -139,6 +139,29 @@ func TestCaptureAndCommitPendingUpdateHealthUsesExactStartupIdentity(t *testing.
 	}
 }
 
+func TestCapturePendingUpdateHealthAcceptsVersionPrefixMismatch(t *testing.T) {
+	originalRead := readPendingUpdateForHealth
+	originalVersion := version
+	t.Cleanup(func() {
+		readPendingUpdateForHealth = originalRead
+		version = originalVersion
+	})
+	version = "1.21.0"
+	readPendingUpdateForHealth = func() (*repair.UpdateTransaction, error) {
+		return &repair.UpdateTransaction{
+			ToVersion:  "v1.21.0",
+			CreatedAt:  "2026-08-07T00:00:00Z",
+			TargetKind: "file",
+		}, nil
+	}
+	app := &App{}
+	capturePendingUpdateHealthIdentity(app)
+	if app.healthyUpdateCreatedAt == "" || app.healthyUpdateTransactionID == "" {
+		t.Fatalf("expected health identity for v-prefix mismatch, got createdAt=%q id=%q",
+			app.healthyUpdateCreatedAt, app.healthyUpdateTransactionID)
+	}
+}
+
 func TestCapturePendingUpdateHealthRejectsDifferentTargetVersion(t *testing.T) {
 	originalRead := readPendingUpdateForHealth
 	t.Cleanup(func() { readPendingUpdateForHealth = originalRead })

@@ -211,7 +211,7 @@ func TestStartLoadedPackagesBoundsParallelismAndSharesCancellation(t *testing.T)
 		done <- startResult{manager: manager, warnings: warnings, err: err}
 	}()
 
-	for i := 0; i < maxConcurrentPackageStarts; i++ {
+	for i := range maxConcurrentPackageStarts {
 		select {
 		case <-entered:
 		case <-time.After(5 * time.Second):

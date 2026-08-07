@@ -87,10 +87,7 @@ func writeMCPServer(b *strings.Builder, width int, s plugin.ServerStatus, prompt
 	}
 	if len(invalidTools) > 0 {
 		b.WriteString(viewSubhead("    unavailable tools") + "\n")
-		limit := len(invalidTools)
-		if limit > mcpMaxItemsPerSection {
-			limit = mcpMaxItemsPerSection
-		}
+		limit := min(len(invalidTools), mcpMaxItemsPerSection)
 		for _, t := range invalidTools[:limit] {
 			writeMCPItem(b, width, "      ", sanitizeExternalDisplayText(t.Name), sanitizeExternalDisplayText(t.SchemaError))
 		}
@@ -109,10 +106,7 @@ func writeMCPToolList(b *strings.Builder, width int, s plugin.ServerStatus, tool
 		return
 	}
 	b.WriteString(viewSubhead("    tools") + "\n")
-	limit := len(tools)
-	if limit > mcpMaxItemsPerSection {
-		limit = mcpMaxItemsPerSection
-	}
+	limit := min(len(tools), mcpMaxItemsPerSection)
 	src := sanitizeExternalDisplayText(s.ConfigSource)
 	for _, t := range tools[:limit] {
 		detail := sanitizeExternalDisplayText(t.Description)
@@ -162,10 +156,7 @@ func writeMCPFailure(b *strings.Builder, width int, f plugin.Failure) {
 
 func writeMCPPromptList(b *strings.Builder, width int, prompts []plugin.Prompt) {
 	b.WriteString(viewSubhead("    prompts") + "\n")
-	limit := len(prompts)
-	if limit > mcpMaxItemsPerSection {
-		limit = mcpMaxItemsPerSection
-	}
+	limit := min(len(prompts), mcpMaxItemsPerSection)
 	for _, p := range prompts[:limit] {
 		writeMCPItem(b, width, "      ", "/"+sanitizeExternalDisplayText(p.Name), sanitizeExternalDisplayText(p.Description))
 	}
@@ -176,10 +167,7 @@ func writeMCPPromptList(b *strings.Builder, width int, prompts []plugin.Prompt) 
 
 func writeMCPResourceList(b *strings.Builder, width int, resources []plugin.Resource) {
 	b.WriteString(viewSubhead("    resources") + "\n")
-	limit := len(resources)
-	if limit > mcpMaxItemsPerSection {
-		limit = mcpMaxItemsPerSection
-	}
+	limit := min(len(resources), mcpMaxItemsPerSection)
 	for _, r := range resources[:limit] {
 		label := sanitizeExternalDisplayText(r.Name)
 		if label == "" {

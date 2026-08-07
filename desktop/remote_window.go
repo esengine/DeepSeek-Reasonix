@@ -574,8 +574,8 @@ func (a *App) domReadyRemoteWindow() {
 func (a *App) secondInstanceRemoteWindow(data options.SecondInstanceData) {
 	ticket := ""
 	for _, arg := range data.Args {
-		if strings.HasPrefix(arg, remoteWindowTicketArgPrefix) {
-			ticket = strings.TrimPrefix(arg, remoteWindowTicketArgPrefix)
+		if after, ok := strings.CutPrefix(arg, remoteWindowTicketArgPrefix); ok {
+			ticket = after
 			break
 		}
 	}

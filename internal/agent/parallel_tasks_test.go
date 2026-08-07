@@ -377,9 +377,9 @@ func (parallelLongResultProvider) Stream(_ context.Context, req provider.Request
 
 func subagentRefsFromText(text string) []string {
 	var refs []string
-	for _, line := range strings.Split(text, "\n") {
-		if strings.HasPrefix(line, "Subagent reference: ") {
-			refs = append(refs, strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: ")))
+	for line := range strings.SplitSeq(text, "\n") {
+		if after, ok := strings.CutPrefix(line, "Subagent reference: "); ok {
+			refs = append(refs, strings.TrimSpace(after))
 		}
 	}
 	return refs

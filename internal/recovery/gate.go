@@ -1179,7 +1179,7 @@ func (g *Gate) RecordDiagnosis(taskID, note string) {
 	}
 }
 
-// --- internals ---
+// internals
 
 func (g *Gate) activeMode() bool {
 	mode := strings.ToLower(strings.TrimSpace(g.opts.Mode()))

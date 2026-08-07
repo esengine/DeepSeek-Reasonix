@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent"
@@ -140,11 +141,11 @@ func TestPlanTodosJSONAlwaysSatisfiesSerialContract(t *testing.T) {
 }
 
 func TestParsePlanTodosCapsAtTwenty(t *testing.T) {
-	plan := ""
-	for i := 0; i < 30; i++ {
-		plan += "- item\n"
+	var plan strings.Builder
+	for range 30 {
+		plan.WriteString("- item\n")
 	}
-	if got := parsePlanTodos(plan); len(got) != 20 {
+	if got := parsePlanTodos(plan.String()); len(got) != 20 {
 		t.Fatalf("got %d todos, want cap of 20", len(got))
 	}
 }

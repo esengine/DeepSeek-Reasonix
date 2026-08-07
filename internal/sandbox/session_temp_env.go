@@ -35,7 +35,7 @@ func SessionTempEnvMap(sessionTemp string, linuxSandboxed bool) map[string]strin
 	}
 	out := make(map[string]string, len(pairs))
 	for _, kv := range pairs {
-		for i := 0; i < len(kv); i++ {
+		for i := range len(kv) {
 			if kv[i] == '=' {
 				out[kv[:i]] = kv[i+1:]
 				break

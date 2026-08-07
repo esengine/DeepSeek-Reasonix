@@ -251,7 +251,7 @@ func TestRunProbesCacheSeparatesOverrides(t *testing.T) {
 func TestFormatSectionLimitsToolOutput(t *testing.T) {
 	overrides := map[string]string{}
 	var results []ProbeResult
-	for i := 0; i < maxRenderedTools+2; i++ {
+	for i := range maxRenderedTools + 2 {
 		name := fmt.Sprintf("tool%02d", i)
 		overrides[name] = "/bin/" + name
 		results = append(results, ProbeResult{Binary: name, Found: true, Output: "ok"})

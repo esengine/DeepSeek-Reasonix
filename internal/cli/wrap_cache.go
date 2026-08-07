@@ -63,7 +63,7 @@ func (m *chatTUI) rebuildWrappedLinesFull(contentW int) bool {
 	}
 	n := len(m.transcript)
 	m.wrapBlockLines = make([][]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		m.wrapBlockLines[i] = wrapBlockLines(m.transcript[i], contentW)
 	}
 	// Prefer per-block flatten over join-then-wrap so streaming suffix rebuilds

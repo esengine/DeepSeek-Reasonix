@@ -224,10 +224,10 @@ func TestProjectTreeShowsBackgroundJobStatus(t *testing.T) {
 func TestBackgroundJobNoticeForcesProjectTreeRefresh(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
-	var refreshes int32
+	var refreshes atomic.Int32
 	app := NewApp()
 	app.projectTreeChangedHook = func() {
-		atomic.AddInt32(&refreshes, 1)
+		refreshes.Add(1)
 	}
 	app.tabs["job"] = &WorkspaceTab{
 		ID:          "job",
@@ -239,7 +239,7 @@ func TestBackgroundJobNoticeForcesProjectTreeRefresh(t *testing.T) {
 	sink := &tabEventSink{tabID: "job", app: app}
 
 	sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "background bash finished: bash-1"})
-	if got := atomic.LoadInt32(&refreshes); got != 1 {
+	if got := refreshes.Load(); got != 1 {
 		t.Fatalf("project-tree refreshes = %d, want 1 for background job finish notice", got)
 	}
 }

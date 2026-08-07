@@ -302,10 +302,7 @@ func MarkSessionInFlightTurn(sessionPath string, startMessageIndex int, preserve
 // what lets crash recovery relocate the turn after an in-turn compaction has
 // rewritten its original message index.
 func SetSessionInFlightTurn(sessionPath string, marker InFlightTurnMeta) error {
-	startMessageIndex := marker.StartMessageIndex
-	if startMessageIndex < 0 {
-		startMessageIndex = 0
-	}
+	startMessageIndex := max(marker.StartMessageIndex, 0)
 	// The sidecar is read-modify-write; the per-path save lock keeps concurrent
 	// writers (autosave's UpdateSessionMeta, listing backfill) from dropping
 	// each other's fields.

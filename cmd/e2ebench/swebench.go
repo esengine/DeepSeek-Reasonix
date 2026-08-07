@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"reasonix/internal/ablation"
@@ -137,30 +138,20 @@ func swebenchReportPath(model, runID string) string {
 // taxonomy. An id the grader never mentions is reported as unknown rather than
 // silently counted as unsolved.
 func (r swebenchReport) gradedClass(instanceID string) string {
-	for _, id := range r.ResolvedIDs {
-		if id == instanceID {
-			return "solved"
-		}
+	if slices.Contains(r.ResolvedIDs, instanceID) {
+		return "solved"
 	}
-	for _, id := range r.EmptyPatchIDs {
-		if id == instanceID {
-			return "no_patch"
-		}
+	if slices.Contains(r.EmptyPatchIDs, instanceID) {
+		return "no_patch"
 	}
-	for _, id := range r.ErrorIDs {
-		if id == instanceID {
-			return "grader_error"
-		}
+	if slices.Contains(r.ErrorIDs, instanceID) {
+		return "grader_error"
 	}
-	for _, id := range r.IncompleteIDs {
-		if id == instanceID {
-			return "eval_timeout"
-		}
+	if slices.Contains(r.IncompleteIDs, instanceID) {
+		return "eval_timeout"
 	}
-	for _, id := range r.UnresolvedIDs {
-		if id == instanceID {
-			return "wrong_patch"
-		}
+	if slices.Contains(r.UnresolvedIDs, instanceID) {
+		return "wrong_patch"
 	}
 	return "ungraded"
 }

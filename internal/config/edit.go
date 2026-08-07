@@ -676,10 +676,8 @@ func (c *Config) AddPermissionRule(list, rule string) error {
 	if _, ok := permission.ParseRule(rule); !ok {
 		return fmt.Errorf("invalid permission rule %q (want \"ToolName\" or \"ToolName(glob)\")", rule)
 	}
-	for _, existing := range *target {
-		if existing == rule {
-			return nil // already present
-		}
+	if slices.Contains(*target, rule) {
+		return nil // already present
 	}
 	*target = append(*target, rule)
 	return nil
@@ -1704,7 +1702,7 @@ func mergeTOMLDelta(body, delta string) string {
 }
 
 func mergeTOMLTopLevelFields(body, fields string) string {
-	for _, line := range strings.Split(fields, "\n") {
+	for line := range strings.SplitSeq(fields, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

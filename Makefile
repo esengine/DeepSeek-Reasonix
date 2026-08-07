@@ -7,7 +7,7 @@ LDFLAGS := -s -w \
 	-X main.buildTimeUTC=$(BUILD_TIME_UTC)
 GOEXE := $(shell go env GOEXE)
 
-.PHONY: build vet fmt lint lint-update test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean
+.PHONY: build vet fmt lint lint-cross lint-update test desktop-test desktop-test-short desktop-test-times sdk-test sdk-test-race hooks cross clean
 
 build:
 	CGO_ENABLED=0 go build -ldflags "$(LDFLAGS)" -o bin/reasonix$(GOEXE) ./cmd/reasonix
@@ -24,6 +24,14 @@ lint:
 
 lint-update:
 	go run ./tools/repolint -update
+
+# Linting one GOOS leaves every //go:build windows and darwin file unchecked.
+lint-cross:
+	@for t in "linux ." "darwin ." "windows ." "linux desktop" "windows desktop"; do \
+		set -- $$t; \
+		echo "== golangci-lint GOOS=$$1 ($$2)"; \
+		(cd $$2 && GOOS=$$1 golangci-lint run --timeout=5m ./...) || exit 1; \
+	done
 
 test:
 	go test ./...

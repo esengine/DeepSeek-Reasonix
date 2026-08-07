@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,10 +15,8 @@ import (
 
 func hasModel(c *Config, model string) *ProviderEntry {
 	for i := range c.Providers {
-		for _, m := range c.Providers[i].ModelList() {
-			if m == model {
-				return &c.Providers[i]
-			}
+		if slices.Contains(c.Providers[i].ModelList(), model) {
+			return &c.Providers[i]
 		}
 	}
 	return nil
@@ -572,7 +571,7 @@ func TestNormalizeLegacyKimiK3CatalogMigratesOnlyOfficialUntouchedPresets(t *tes
 	if !normalizeLegacyKimiK3Catalog(c) {
 		t.Fatal("legacy Kimi direct catalogs did not report a change")
 	}
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		got := &c.Providers[i]
 		if !got.HasModel("kimi-k3") || !got.HasVisionModel("kimi-k3") {
 			t.Fatalf("migrated Kimi provider %d = %+v, want K3 with vision", i, got)

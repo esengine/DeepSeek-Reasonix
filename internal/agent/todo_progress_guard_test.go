@@ -21,7 +21,7 @@ func TestTodoProgressGuardPausesSemanticToolDrift(t *testing.T) {
 		Arguments: `{"todos":[{"content":"finish the task","status":"in_progress"}]}`,
 	}}}}
 	// The first unique read renews the lease; exact repeats after it do not.
-	for i := 0; i < maxTodoStallRounds+1; i++ {
+	for i := range maxTodoStallRounds + 1 {
 		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
 			ID: fmt.Sprintf("read-%d", i), Name: "inspect", Arguments: `{"path":"same"}`,
 		}}})
@@ -51,7 +51,7 @@ func TestTodoProgressGuardRenewsOnUniqueHostWork(t *testing.T) {
 		ID: "todo", Name: "todo_write",
 		Arguments: `{"todos":[{"content":"finish the task","status":"in_progress"}]}`,
 	}}}}
-	for i := 0; i < todoProgressNudgeRounds-1; i++ {
+	for i := range todoProgressNudgeRounds - 1 {
 		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
 			ID: fmt.Sprintf("read-a-%d", i), Name: "inspect", Arguments: `{"path":"same"}`,
 		}}})
@@ -59,7 +59,7 @@ func TestTodoProgressGuardRenewsOnUniqueHostWork(t *testing.T) {
 	turns = append(turns,
 		testutil.Turn{ToolCalls: []provider.ToolCall{{ID: "write", Name: "write_file", Arguments: `{"path":"result.txt","content":"done"}`}}},
 	)
-	for i := 0; i < todoProgressNudgeRounds-1; i++ {
+	for i := range todoProgressNudgeRounds - 1 {
 		turns = append(turns, testutil.Turn{ToolCalls: []provider.ToolCall{{
 			ID: fmt.Sprintf("read-b-%d", i), Name: "inspect", Arguments: `{"path":"same"}`,
 		}}})

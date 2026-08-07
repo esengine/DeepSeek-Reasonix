@@ -390,7 +390,8 @@ Reasonix 的对应实现，并不代表导入 Hook 的每一种运行时决策�
   进程前展开 `${CLAUDE_PLUGIN_ROOT}` 和 `${REASONIX_PLUGIN_ROOT}`，也兼容不带花括号的
   `$NAME` 与 Windows `%NAME%` 写法，因此插件相对路径不再依赖目标 shell 的环境变量
   语法。Windows 上未显式指定 Shell 的 shell-form Hook 会和 Reasonix Shell 工具一样，
-  优先选择 Git Bash，找不到时回退 PowerShell。显式 Bash Hook 以及旧式裸
+  优先选择 Git Bash，找不到时回退 PowerShell；指向带 POSIX shebang 的脚本文件时，
+  宿主会把 Windows 路径转换为 Bash 可用形式。显式 Bash Hook 以及旧式裸
   `sh -c`/`bash -c` Hook 会复用 Git for Windows Bash 探测，即使 Bash 不在
   `cmd.exe` 的 `PATH` 中也能执行；带目录的显式解释器路径保持
   不变。如果机器确实没有可用 Bash，hook 会返回清晰的依赖提示，而不是本地化的

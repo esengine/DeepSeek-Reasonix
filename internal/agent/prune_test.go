@@ -98,7 +98,7 @@ func TestPruneNeverRewritesLocalInterruptedDisplay(t *testing.T) {
 
 func TestSnipStaleToolResults(t *testing.T) {
 	var lines []string
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		lines = append(lines, "line")
 	}
 	big := strings.Join(lines, "\n")
@@ -186,8 +186,19 @@ func TestMaybeCompactPruneAvoidsFold(t *testing.T) {
 	if prov.got != nil {
 		t.Fatal("summarizer was called although pruning cleared the trigger")
 	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, prunedMarker) {
-		t.Errorf("tool result not pruned: %.60q", got)
+	// Canonical stays intact; prune lands only in the projection view.
+	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, "xxx") {
+		t.Errorf("canonical tool result rewritten: %.60q", got)
+	}
+	proj := visibleContext(a)
+	found := false
+	for _, m := range proj {
+		if m.Role == provider.RoleTool && strings.HasPrefix(m.Content, prunedMarker) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("tool result not pruned in projection: %+v", proj)
 	}
 }
 
@@ -201,8 +212,18 @@ func TestMaybeCompactSnipsAtSnipRatioWithoutFold(t *testing.T) {
 	if prov.got != nil {
 		t.Fatal("summarizer was called at snip ratio")
 	}
-	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, snippedMarker) {
-		t.Errorf("tool result not snipped at snip ratio: %.80q", got)
+	if got := sess.Snapshot()[3].Content; !strings.HasPrefix(got, "line") {
+		t.Errorf("canonical tool result rewritten at snip ratio: %.80q", got)
+	}
+	proj := visibleContext(a)
+	found := false
+	for _, m := range proj {
+		if m.Role == provider.RoleTool && strings.HasPrefix(m.Content, snippedMarker) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("tool result not snipped in projection: %+v", proj)
 	}
 }
 
@@ -225,15 +246,8 @@ func TestMaybeCompactPruneFallsThroughWhenStillOverThreshold(t *testing.T) {
 	if prov.got == nil {
 		t.Fatal("summarizer was not called although pruning still left prompt above compact threshold")
 	}
-	foundSummary := false
-	for _, m := range sess.Snapshot() {
-		if strings.Contains(m.Content, summaryTagOpen) {
-			foundSummary = true
-			break
-		}
-	}
-	if !foundSummary {
-		t.Fatal("summary compaction did not update the session")
+	if !hasCompactionSummary(visibleContext(a)) {
+		t.Fatal("summary compaction did not install a projection")
 	}
 }
 
@@ -260,16 +274,10 @@ func TestMaybeCompactForceRatioStillFolds(t *testing.T) {
 		t.Fatal("force ratio crossed but summarizer never called")
 	}
 	if got := sess.Snapshot()[1].Content; got != "task" {
-		t.Errorf("first user turn not pinned verbatim: %.40q", got)
+		t.Errorf("first user turn not pinned verbatim in canonical: %.40q", got)
 	}
-	found := false
-	for _, m := range sess.Snapshot() {
-		if strings.Contains(m.Content, summaryTagOpen) {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("no compaction summary in session after forced fold")
+	if !hasCompactionSummary(visibleContext(a)) {
+		t.Error("no compaction summary in projection after forced fold")
 	}
 }
 
@@ -376,7 +384,7 @@ func TestSnipUsesRegisteredToolHint(t *testing.T) {
 	// 600 numbered lines; a SnipHinter keeping head=3, tail=2 must yield exactly
 	// those boundary lines, which no default geometry would produce.
 	var lines []string
-	for i := 0; i < 600; i++ {
+	for i := range 600 {
 		lines = append(lines, fmt.Sprintf("L%d", i))
 	}
 	content := strings.Join(lines, "\n")
@@ -403,7 +411,7 @@ func TestSnipUsesRegisteredToolHint(t *testing.T) {
 
 func TestSnipFallsBackByReadOnlyTier(t *testing.T) {
 	var lines []string
-	for i := 0; i < 600; i++ {
+	for i := range 600 {
 		lines = append(lines, fmt.Sprintf("L%d", i))
 	}
 	content := strings.Join(lines, "\n")

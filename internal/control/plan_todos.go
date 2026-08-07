@@ -5,6 +5,7 @@ package control
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"reasonix/internal/event"
@@ -134,7 +135,7 @@ func completedPlanTodosJSON(args string) string {
 // todo_write calls as it executes.
 func parsePlanTodos(plan string) []seedTodo {
 	var todos []seedTodo
-	for _, raw := range strings.Split(plan, "\n") {
+	for raw := range strings.SplitSeq(plan, "\n") {
 		item, level, ok := listItem(raw)
 		if !ok {
 			continue
@@ -189,8 +190,8 @@ func (c *Controller) hasTodoUpdateSince(start int) bool {
 
 func latestTodoArgsSince(msgs []provider.Message, start int) (string, bool) {
 	for i := len(msgs) - 1; i >= start; i-- {
-		for j := len(msgs[i].ToolCalls) - 1; j >= 0; j-- {
-			tc := msgs[i].ToolCalls[j]
+		for _, v := range slices.Backward(msgs[i].ToolCalls) {
+			tc := v
 			if tc.Name == "todo_write" {
 				return tc.Arguments, true
 			}

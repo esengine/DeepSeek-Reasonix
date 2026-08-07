@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -106,8 +105,7 @@ func TestRecoveryGCFirstSweepWaitsForTabRestore(t *testing.T) {
 	}
 	_, branchPath := forkCoveredRecoveryBranch(t, dir, "startup")
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	app := &App{
 		ctx:          ctx,
 		tabs:         map[string]*WorkspaceTab{},

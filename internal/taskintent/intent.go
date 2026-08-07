@@ -406,8 +406,8 @@ func deliveryTaskStartsWithMutation(input string) bool {
 	for {
 		stripped := false
 		for _, prefix := range []string{"please ", "can you ", "could you ", "would you ", "you should ", "帮我", "请你", "直接", "继续", "再"} {
-			if strings.HasPrefix(input, prefix) {
-				input = strings.TrimSpace(strings.TrimPrefix(input, prefix))
+			if after, ok := strings.CutPrefix(input, prefix); ok {
+				input = strings.TrimSpace(after)
 				stripped = true
 				break
 			}

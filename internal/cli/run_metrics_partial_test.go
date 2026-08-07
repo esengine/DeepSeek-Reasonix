@@ -89,7 +89,7 @@ func TestSnapshotsAreThrottled(t *testing.T) {
 		snapshotEvery: time.Minute,
 		clock:         func() time.Time { return now },
 	}
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		s.Emit(usageEvent(event.UsageSourceExecutor, 10, 1))
 	}
 	raw, err := os.ReadFile(s.partialPath)
@@ -189,26 +189,22 @@ func TestConcurrentEmitAndSnapshotAreRaceFree(t *testing.T) {
 	const emitters, each = 8, 50
 
 	var wg sync.WaitGroup
-	for i := 0; i < emitters; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < each; j++ {
+	for range emitters {
+		wg.Go(func() {
+			for range each {
 				s.Emit(usageEventWithCacheReason("compact_auto"))
 				s.Emit(event.Event{Kind: event.ToolResult, Tool: event.Tool{Name: "bash"}})
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 200; i++ {
+	wg.Go(func() {
+		for range 200 {
 			if _, err := json.Marshal(s.Snapshot()); err != nil {
 				t.Errorf("marshal snapshot: %v", err)
 				return
 			}
 		}
-	}()
+	})
 	wg.Wait()
 
 	m := s.Snapshot()

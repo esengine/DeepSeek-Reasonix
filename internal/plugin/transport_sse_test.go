@@ -258,7 +258,7 @@ func TestLegacySSEBoundsConcurrentServerRequestReplies(t *testing.T) {
 	transport.mu.Lock()
 	transport.pending[7] = waiting
 	transport.mu.Unlock()
-	for i := 0; i < 2*sseReplyQueueBound; i++ {
+	for i := range 2 * sseReplyQueueBound {
 		events <- fmt.Sprintf("event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"srv-%d\",\"method\":\"ping\"}\n\n", i)
 	}
 	events <- "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n"

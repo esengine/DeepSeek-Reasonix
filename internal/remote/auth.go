@@ -3,9 +3,11 @@ package remote
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -134,12 +136,7 @@ func publicKeyAuthCallback(methods []ssh.AuthMethod) ssh.ClientAuthCallback {
 }
 
 func containsAuthMethod(methods []string, want string) bool {
-	for _, method := range methods {
-		if method == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(methods, want)
 }
 
 func agentAuth(identityFiles []string, identitiesOnly bool) (ssh.AuthMethod, func()) {
@@ -231,7 +228,7 @@ func identityPublicKeys(path string) []ssh.PublicKey {
 			continue
 		} else {
 			var missing *ssh.PassphraseMissingError
-			if isPassphraseMissing(err, &missing) && missing.PublicKey != nil {
+			if errors.As(err, &missing) && missing.PublicKey != nil {
 				key := missing.PublicKey
 				id := string(normalizePublicKey(key).Marshal())
 				if !seen[id] {
@@ -277,7 +274,7 @@ func keyAuth(ctx context.Context, h ResolvedHost, opts *AuthOptions, path string
 		return nil, nil
 	}
 	var missing *ssh.PassphraseMissingError
-	if !isPassphraseMissing(err, &missing) {
+	if !errors.As(err, &missing) {
 		return nil, fmt.Errorf("parse key %s: %w", path, err)
 	}
 	// Encrypted key: return a lazy method so the passphrase is only resolved
@@ -401,12 +398,4 @@ func defaultIdentityFiles() []string {
 		out = append(out, filepath.Join(home, ".ssh", n))
 	}
 	return out
-}
-
-func isPassphraseMissing(err error, target **ssh.PassphraseMissingError) bool {
-	if pe, ok := err.(*ssh.PassphraseMissingError); ok {
-		*target = pe
-		return true
-	}
-	return false
 }

@@ -1213,7 +1213,7 @@ func TestRepeatedCompleteWithIncompleteTodosPausesOnBudget(t *testing.T) {
 	// The write-class budget is 20 turns; give the scripted provider a full
 	// pair per turn so the model keeps reporting complete each time.
 	turns := flattenTurns()
-	for i := 0; i < 21; i++ {
+	for range 21 {
 		turns = append(turns, goalToolTurn(GoalStatusComplete, "", "")...)
 	}
 	prov := &scriptedTurns{turns: turns}

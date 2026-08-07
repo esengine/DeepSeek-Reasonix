@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -547,7 +548,7 @@ func TestTranscriptResizeRerendersCommittedMarkdownAtNewWidth(t *testing.T) {
 	newLines := strings.Count(newRendered, "\n") + 1
 
 	ruleWidth := 0
-	for _, line := range strings.Split(newRendered, "\n") {
+	for line := range strings.SplitSeq(newRendered, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" && strings.Trim(trimmed, "─") == "" {
 			ruleWidth = visibleWidth(trimmed)
@@ -988,7 +989,7 @@ func TestRewindPickerWindowsLongSession(t *testing.T) {
 	if strings.Contains(card, "more") {
 		t.Fatalf("short session must not show more markers: %q", card)
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		if !strings.Contains(card, fmt.Sprintf("turn %d", i)) {
 			t.Fatalf("short session row %d missing: %q", i, card)
 		}
@@ -1497,13 +1498,7 @@ func TestInsertNewlineKeyBinding(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	keys := m.input.KeyMap.InsertNewline.Keys()
-	found := false
-	for _, k := range keys {
-		if k == "shift+enter" {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(keys, "shift+enter")
 	if !found {
 		t.Errorf("newChatTUI InsertNewline should include shift+enter, got %v", keys)
 	}
@@ -1519,7 +1514,7 @@ func TestCtrlHomeEndScrollKeyBindings(t *testing.T) {
 	}
 
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		cur = adv(cur, notice)
 	}
 	// Viewport should be at the bottom after output.
@@ -1550,7 +1545,7 @@ func TestMouseWheelAndPageKeysScrollTranscript(t *testing.T) {
 	}
 
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		cur = adv(cur, notice)
 	}
 	if !cur.viewport.AtBottom() {
@@ -1593,7 +1588,7 @@ func TestRunningStreamPreservesScrolledReadingPosition(t *testing.T) {
 	}
 
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		cur = adv(cur, notice)
 	}
 	cur.state = tuiRunning
@@ -1630,7 +1625,7 @@ func TestTranscriptScrollbarClickAndDrag(t *testing.T) {
 	}
 
 	cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		cur = adv(cur, notice)
 	}
 	cur.viewport.GotoTop()
@@ -3028,7 +3023,7 @@ func TestTranscriptTailFollow(t *testing.T) {
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
 
 	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ { // overflow the short viewport so there's room to scroll
+	for range 12 { // overflow the short viewport so there's room to scroll
 		cur = adv(cur, notice)
 	}
 	if !cur.viewport.AtBottom() {
@@ -3058,10 +3053,10 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		return n.(chatTUI)
 	}
 
-	// --- idle state ---
+	// idle state
 	t.Run("idle", func(t *testing.T) {
 		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			cur = adv(cur, notice)
 		}
 		// Scroll up to leave the bottom.
@@ -3076,10 +3071,10 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		}
 	})
 
-	// --- running state ---
+	// running state
 	t.Run("running", func(t *testing.T) {
 		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-		for i := 0; i < 12; i++ {
+		for range 12 {
 			cur = adv(cur, notice)
 		}
 		cur.state = tuiRunning
@@ -3110,7 +3105,7 @@ func TestForceGotoBottomScrollsWithoutTranscriptChange(t *testing.T) {
 	}
 
 	cur := next(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		cur = next(cur, notice)
 	}
 	if !cur.viewport.AtBottom() {
@@ -3151,7 +3146,7 @@ func TestSessionSwitchSuppressesOneClearScreen(t *testing.T) {
 	}
 
 	cur := next(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
-	for i := 0; i < 12; i++ {
+	for range 12 {
 		cur = next(cur, notice)
 	}
 	cur = next(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
@@ -4062,10 +4057,7 @@ func TestTruncateSubject(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := truncateSubject(tc.input, tc.width)
-			wantMax := tc.width - 28
-			if wantMax < 16 {
-				wantMax = 16
-			}
+			wantMax := max(tc.width-28, 16)
 			w := ansi.StringWidth(got)
 			if w > wantMax {
 				t.Errorf("truncateSubject(%q, %d) = %q (width %d), want visible width <= %d", tc.input, tc.width, got, w, wantMax)

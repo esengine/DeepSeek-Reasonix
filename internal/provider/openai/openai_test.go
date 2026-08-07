@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1244,7 +1245,7 @@ func TestBuildRequestUsesProviderSpecificOutputBudget(t *testing.T) {
 	}
 
 	deepseek := newClient(t, "https://api.deepseek.com", "deepseek-v4-flash", 0).buildRequest(provider.Request{})
-	if deepseek.MaxTokens != provider.DefaultReasoningOutputTokens || deepseek.MaxCompletionTokens != 0 {
+	if deepseek.MaxTokens != 131072 || deepseek.MaxCompletionTokens != 0 {
 		t.Fatalf("DeepSeek output budget = max_tokens %d, max_completion_tokens %d", deepseek.MaxTokens, deepseek.MaxCompletionTokens)
 	}
 
@@ -1677,9 +1678,7 @@ func withEffort(c provider.Config, effort string) provider.Config {
 		extra = map[string]any{}
 	} else {
 		cp := make(map[string]any, len(extra)+1)
-		for k, v := range extra {
-			cp[k] = v
-		}
+		maps.Copy(cp, extra)
 		extra = cp
 	}
 	extra["effort"] = effort
