@@ -130,7 +130,7 @@ type fakeTerminal struct {
 	called []string
 }
 
-func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.Duration) (string, bool, error) {
+func (f *fakeTerminal) RunCommand(_ context.Context, command, _ string, _ time.Duration, _ map[string]string) (string, bool, error) {
 	f.called = append(f.called, command)
 	return f.out, f.ok, f.err
 }

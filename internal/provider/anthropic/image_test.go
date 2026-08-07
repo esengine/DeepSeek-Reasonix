@@ -1,6 +1,7 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -9,7 +10,7 @@ import (
 
 func TestBuildRequestEmbedsImageBlockForVisionModel(t *testing.T) {
 	c := &client{model: "claude-opus-4-8", vision: true}
-	req := c.buildRequest(provider.Request{
+	req := c.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/jpeg;base64,ZZZZ"}},
 		},
@@ -26,7 +27,7 @@ func TestBuildRequestEmbedsImageBlockForVisionModel(t *testing.T) {
 
 func TestBuildRequestSkipsImageBlockWithoutVision(t *testing.T) {
 	c := &client{model: "claude-opus-4-8"} // vision unset
-	req := c.buildRequest(provider.Request{
+	req := c.buildRequest(context.Background(), provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/jpeg;base64,ZZZZ"}},
 		},
@@ -49,7 +50,7 @@ func toolMessages(images []string) []provider.Message {
 
 func TestBuildRequestEmbedsToolResultImagesForVisionModel(t *testing.T) {
 	c := &client{model: "claude-opus-4-8", vision: true}
-	req := c.buildRequest(provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
+	req := c.buildRequest(context.Background(), provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
 	last := req.Messages[len(req.Messages)-1]
 	if last.Role != "user" || len(last.Content) != 1 || last.Content[0].Type != "tool_result" {
 		t.Fatalf("last message = %+v, want a single tool_result block", last)
@@ -72,7 +73,7 @@ func TestBuildRequestEmbedsToolResultImagesForVisionModel(t *testing.T) {
 
 func TestBuildRequestDropsToolResultImagesWithoutVision(t *testing.T) {
 	c := &client{model: "claude-opus-4-8"} // vision unset
-	req := c.buildRequest(provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
+	req := c.buildRequest(context.Background(), provider.Request{Messages: toolMessages([]string{"data:image/png;base64,QUFB"})})
 	last := req.Messages[len(req.Messages)-1]
 	if s, ok := last.Content[0].Content.(string); !ok || s != "[image: image/png]" {
 		t.Fatalf("non-vision tool_result content = %#v, want the plain placeholder string", last.Content[0].Content)
@@ -90,7 +91,7 @@ func TestBuildRequestToolResultTextOnlyKeepsStringContent(t *testing.T) {
 	// and takes the cache breakpoint, so the tool_result block keeps its
 	// pre-image-channel bytes.
 	msgs = append(msgs, provider.Message{Role: provider.RoleUser, Content: "next"})
-	req := c.buildRequest(provider.Request{Messages: msgs})
+	req := c.buildRequest(context.Background(), provider.Request{Messages: msgs})
 	last := req.Messages[len(req.Messages)-1]
 	if len(last.Content) != 2 || last.Content[0].Type != "tool_result" {
 		t.Fatalf("last message blocks = %+v, want [tool_result, text]", last.Content)

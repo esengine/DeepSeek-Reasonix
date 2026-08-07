@@ -21,9 +21,20 @@ import (
 	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
+	"reasonix/internal/sessiontemp"
 	"reasonix/internal/tool"
 	"reasonix/internal/workspacelease"
 )
+
+// withSubagentSessionTemp installs a fresh session-private temporary directory
+// Manager for one sub-agent run. The returned release must be deferred by the
+// caller so the directory is retired when the run ends (including background
+// sub-agent completion).
+func withSubagentSessionTemp(ctx context.Context) (context.Context, func()) {
+	m := sessiontemp.New()
+	m.Retain()
+	return sessiontemp.WithManager(ctx, m), m.Release
+}
 
 // DefaultTaskSystemPrompt steers a sub-agent toward focused, terse delivery —
 // it doesn't see the parent's conversation so it must self-contain.
@@ -1854,10 +1865,18 @@ func reviewReportNudgePrompt(kind evidence.ReviewKind) string {
 // RunSubAgentWithSession continues an existing sub-agent session with prompt and
 // returns the latest final assistant answer. Fresh sub-agents pass a newly-created
 // session; continued sub-agents pass a loaded transcript session.
+//
+// Each call installs an independent session-private temporary directory Manager
+// so parent, sibling, and nested sub-agents never share temporary files.
+// continue_from restores conversation history only — a new run still gets a
+// fresh temporary directory.
 func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *tool.Registry, sess *Session, prompt string, opts Options, sink event.Sink) (string, error) {
 	if sess == nil {
 		return "", fmt.Errorf("sub-agent session is nil")
 	}
+	// Isolate temporary files for this run before any tool execution.
+	ctx, releaseTemp := withSubagentSessionTemp(ctx)
+	defer releaseTemp()
 	if opts.SubagentDepth > 0 {
 		ctx = WithSubagentDepth(ctx, opts.SubagentDepth)
 	}

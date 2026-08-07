@@ -647,11 +647,15 @@ type ToolInfo struct {
 type ServerStatus struct {
 	Name      string
 	Transport string
-	Tools     int
-	Prompts   int
-	Resources int
-	HasTools  bool
-	ToolList  []ToolInfo
+	// ConfigSource is the config plane that registered this server
+	// (user_config, project_config, workspace, built-in, …). Empty when unknown.
+	// Surfaced in /mcp status so operators can tell where a tool came from (#6578).
+	ConfigSource string
+	Tools        int
+	Prompts      int
+	Resources    int
+	HasTools     bool
+	ToolList     []ToolInfo
 }
 
 // AuthorizeSpecLaunch records durable consent for an explicitly user-installed
@@ -741,10 +745,11 @@ func (h *Host) Servers() []ServerStatus {
 	out := make([]ServerStatus, 0, len(h.clients))
 	for _, c := range h.clients {
 		s := ServerStatus{
-			Name:      c.name,
-			Transport: c.transport,
-			Tools:     c.toolCount,
-			HasTools:  c.hasTools,
+			Name:         c.name,
+			Transport:    c.transport,
+			ConfigSource: strings.TrimSpace(c.spec.ConfigSource),
+			Tools:        c.toolCount,
+			HasTools:     c.hasTools,
 		}
 		c.toolsMu.Lock()
 		s.ToolList = append([]ToolInfo(nil), c.tools...)

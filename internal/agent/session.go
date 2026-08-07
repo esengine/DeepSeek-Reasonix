@@ -43,6 +43,15 @@ type Session struct {
 	// what is actually on disk, and the repaired view no longer represents
 	// those bytes — a session that kept running extends the raw transcript.
 	rawMessages []provider.Message
+	// pendingContentReasons accumulates a reason string each time Rewrite()
+	// actually replaces provider-visible message bytes (compact, prune/snip,
+	// summarize, rewind, guardian merge). ReplaceLocalMetadata bumps
+	// rewriteVersion for the same save-path (NeedsRewriteSave) purpose without
+	// appending here, because ModelMessages strips or never serializes the
+	// local-only metadata it changes — so that path must never report a
+	// cache-prefix change. DrainContentRewriteReasons (run_loop.go, once per
+	// provider request) is the sole consumer.
+	pendingContentReasons []string
 }
 
 // NewSession initializes a session with an optional system prompt.
@@ -190,12 +199,48 @@ func (s *Session) Replace(msgs []provider.Message) {
 // atomic classification matters when a periodic snapshot races compaction,
 // pruning, or local metadata edits: a later autosave must use owned-rewrite
 // conflict checks instead of mistaking the modified prefix for another writer.
-func (s *Session) Rewrite(msgs []provider.Message) {
+//
+// reason names the provider-visible change (e.g. "compact_auto", "snip",
+// "rewind_truncate") and is queued for the next DrainContentRewriteReasons
+// call, which feeds cache-diagnostics attribution. Callers whose msgs only
+// change local-only display metadata (never serialized to the provider) must
+// use ReplaceLocalMetadata instead, so they don't misreport a cache-prefix
+// change that never happened.
+func (s *Session) Rewrite(msgs []provider.Message, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Messages = msgs
 	s.rewriteVersion++
 	s.version++
+	if reason != "" {
+		s.pendingContentReasons = append(s.pendingContentReasons, reason)
+	}
+}
+
+// ReplaceLocalMetadata atomically replaces the message log exactly like
+// Rewrite (including the rewriteVersion bump that forces the next save to use
+// owned-rewrite conflict checks), for callers that only changed local-only
+// display metadata (e.g. marking a resubmitted message Edited) rather than any
+// provider-visible byte. Unlike Rewrite, it never queues a cache-prefix-change
+// reason, since ModelMessages strips or never serializes what changed.
+func (s *Session) ReplaceLocalMetadata(msgs []provider.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Messages = msgs
+	s.rewriteVersion++
+	s.version++
+}
+
+// DrainContentRewriteReasons returns and clears the reasons queued by Rewrite
+// since the last drain. Called once per provider request (run_loop.go) so
+// CompareShape can attribute a cache-prefix change to the operation that
+// actually caused it.
+func (s *Session) DrainContentRewriteReasons() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reasons := s.pendingContentReasons
+	s.pendingContentReasons = nil
+	return reasons
 }
 
 // Snapshot returns a copy of the messages, safe to read from another goroutine
@@ -239,6 +284,7 @@ func (s *Session) CloneWithMessages(msgs []provider.Message) *Session {
 		persisted:               s.persisted,
 		normalizedDirty:         s.normalizedDirty,
 		eventLogDamaged:         s.eventLogDamaged,
+		pendingContentReasons:   append([]string(nil), s.pendingContentReasons...),
 	}
 }
 
@@ -267,6 +313,7 @@ func (s *Session) CloneWithMessagesIfCompatible(msgs []provider.Message) (*Sessi
 		persisted:               s.persisted,
 		normalizedDirty:         s.normalizedDirty,
 		eventLogDamaged:         s.eventLogDamaged,
+		pendingContentReasons:   append([]string(nil), s.pendingContentReasons...),
 	}, true
 }
 

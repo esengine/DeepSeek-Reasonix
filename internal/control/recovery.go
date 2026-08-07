@@ -297,6 +297,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 	// Strict fresh decision: never session/persist grants, never auto-drain on
 	// mode switch.
 	c.approval.promptMu.Lock()
+	c.approval.promptEmitMu.Lock()
 	// Hold promptMu for the duration of registration+emit only; waiting happens
 	// in the recovery gate on its own channel. We deliberately do not block here
 	// on the approval reply — ResolveRecovery unblocks the gate.
@@ -330,6 +331,7 @@ func (c *Controller) emitRecoveryPrompt(ctx context.Context, taskID string, pend
 	}()
 
 	c.sink.Emit(c.approvalRequestEvent(ev))
+	c.approval.promptEmitMu.Unlock()
 	c.approval.promptMu.Unlock()
 
 	if c.hooks != nil {

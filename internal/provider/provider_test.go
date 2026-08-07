@@ -433,6 +433,34 @@ func TestPricingCostCalculation(t *testing.T) {
 	}
 }
 
+func TestPricingCostUsesCacheWriteBillingTier(t *testing.T) {
+	p := &Pricing{Input: 2.0}
+	u := &Usage{
+		CacheMissTokens:        500_000,
+		CacheWriteTokens:       100_000,
+		CacheWriteBilledTokens: 200_000, // 1h write at 2x input
+	}
+	// 400K ordinary misses + 100K cache writes billed as 200K input units.
+	if got := p.Cost(u); got != 1.2 {
+		t.Errorf("Cost = %f, want 1.2", got)
+	}
+}
+
+func TestPricingCostCacheWriteFieldsAreBackwardCompatible(t *testing.T) {
+	p := &Pricing{Input: 2.0}
+
+	// Old usage records have neither cache-write field and retain the original
+	// one-input-rate calculation.
+	if got := p.Cost(&Usage{CacheMissTokens: 500_000}); got != 1.0 {
+		t.Errorf("legacy Cost = %f, want 1.0", got)
+	}
+	// A producer that reports raw write tokens without a billing tier also
+	// falls back to the ordinary input rate instead of making writes free.
+	if got := p.Cost(&Usage{CacheMissTokens: 500_000, CacheWriteTokens: 100_000}); got != 1.0 {
+		t.Errorf("unpriced write Cost = %f, want 1.0", got)
+	}
+}
+
 func TestPricingCostFallsBackToPromptTokensAsMiss(t *testing.T) {
 	p := &Pricing{Input: 2.0, Output: 10.0}
 	u := &Usage{PromptTokens: 500_000, CompletionTokens: 100_000}

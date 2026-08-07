@@ -13,6 +13,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/provider"
+	"reasonix/internal/taskintent"
 	"reasonix/internal/tool"
 )
 
@@ -577,7 +578,7 @@ func TestDeliveryTaskNeedsEvidenceSkipsDiagnosticConversations(t *testing.T) {
 		"这软件打不开了，怎么回事",
 	}
 	for _, input := range diagnostic {
-		if deliveryTaskNeedsEvidence(input) {
+		if taskintent.NeedsEvidence(input) {
 			t.Errorf("diagnostic input %q incorrectly classified as needing evidence", input)
 		}
 	}
@@ -598,7 +599,7 @@ func TestDeliveryTaskNeedsEvidenceSkipsDiagnosticConversations(t *testing.T) {
 		"谢谢你，请继续修改配置",
 	}
 	for _, input := range taskInputs {
-		if !deliveryTaskNeedsEvidence(input) {
+		if !taskintent.NeedsEvidence(input) {
 			t.Errorf("mutation task %q incorrectly classified as NOT needing evidence", input)
 		}
 	}
@@ -622,10 +623,10 @@ func TestDeliveryTaskNeedsEvidenceKeepsReadOnlyTechnicalWork(t *testing.T) {
 		"诊断当前项目的数据库连接失败原因",
 	}
 	for _, input := range inputs {
-		if !deliveryTaskNeedsEvidence(input) {
+		if !taskintent.NeedsEvidence(input) {
 			t.Errorf("read-only technical task %q did not require host-observable evidence", input)
 		}
-		if deliveryTaskNeedsMutation(input) {
+		if taskintent.NeedsMutation(input) {
 			t.Errorf("read-only technical task %q incorrectly required a mutation", input)
 		}
 	}
@@ -653,7 +654,7 @@ func TestDeliveryTaskNeedsMutationHandlesMixedIntent(t *testing.T) {
 		"替换旧接口",
 	}
 	for _, input := range mutationInputs {
-		if !deliveryTaskNeedsMutation(input) {
+		if !taskintent.NeedsMutation(input) {
 			t.Errorf("mixed-intent input %q did not require a mutation", input)
 		}
 	}
@@ -674,7 +675,7 @@ func TestDeliveryTaskNeedsMutationHandlesMixedIntent(t *testing.T) {
 		"为什么zotero连接不上，我不敢重新安装",
 	}
 	for _, input := range readOnlyInputs {
-		if deliveryTaskNeedsMutation(input) {
+		if taskintent.NeedsMutation(input) {
 			t.Errorf("read-only input %q incorrectly required a mutation", input)
 		}
 	}

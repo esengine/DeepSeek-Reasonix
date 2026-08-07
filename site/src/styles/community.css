@@ -1,6 +1,6 @@
 /* Reasonix Community — self-hosted fonts + the reasonix.io token values, so the
    forum shares the site's visual language without depending on its marketing CSS. */
-@import "@fontsource-variable/outfit";
+@import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
 
 :root {
@@ -12,21 +12,21 @@
   --bg: #ffffff;
   --bg-soft: oklch(0.977 0.0025 247);
   --card: #ffffff;
-  --ink: oklch(0.25 0.006 260);
-  --ink-2: oklch(0.47 0.008 260);
-  --ink-3: oklch(0.62 0.008 260);
-  --line: oklch(0.925 0.004 247);
+  --ink: oklch(0.21 0.006 260);
+  --ink-2: oklch(0.45 0.008 260);
+  --ink-3: oklch(0.6 0.008 260);
+  --line: oklch(0.905 0.004 247);
   --ok: oklch(0.6 0.14 155);
   --ok-soft: color-mix(in oklch, var(--ok) 12%, var(--bg));
   --err: oklch(0.5 0.19 25);
   --warm: oklch(0.72 0.13 66);
   --violet: oklch(0.58 0.17 300);
   --rose: oklch(0.62 0.19 15);
-  --radius: 20px;
-  --radius-sm: 12px;
-  --shadow-1: 0 1px 2px oklch(0.4 0.02 260 / 0.16), 0 1px 3px 1px oklch(0.4 0.02 260 / 0.07);
-  --shadow-2: 0 2px 6px oklch(0.4 0.02 260 / 0.12), 0 12px 30px -6px oklch(0.4 0.02 260 / 0.18);
-  --font-sans: "Outfit Variable", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --radius: 13px;
+  --radius-sm: 9px;
+  --shadow-1: 0 1px 2px oklch(0.4 0.02 260 / 0.08);
+  --shadow-2: 0 1px 2px oklch(0.4 0.02 260 / 0.06), 0 12px 32px -16px oklch(0.4 0.02 260 / 0.24);
+  --font-sans: "Inter Variable", "Inter", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "JetBrains Mono Variable", "SF Mono", Menlo, monospace;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -38,14 +38,14 @@
   --accent-soft: color-mix(in oklch, var(--accent) 16%, var(--bg));
   --bg: oklch(0.19 0.006 260);
   --bg-soft: oklch(0.225 0.008 260);
-  --card: oklch(0.255 0.009 260);
+  --card: oklch(0.222 0.008 260);
   --ink: oklch(0.93 0.004 260);
   --ink-2: oklch(0.78 0.008 260);
   --ink-3: oklch(0.63 0.008 260);
-  --line: oklch(0.33 0.008 260);
+  --line: oklch(0.31 0.008 260);
   --ok-soft: color-mix(in oklch, var(--ok) 18%, var(--bg));
-  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.42), 0 1px 3px 1px oklch(0 0 0 / 0.24);
-  --shadow-2: 0 2px 6px oklch(0 0 0 / 0.35), 0 12px 30px -6px oklch(0 0 0 / 0.5);
+  --shadow-1: 0 1px 2px oklch(0 0 0 / 0.3);
+  --shadow-2: 0 1px 2px oklch(0 0 0 / 0.28), 0 12px 32px -16px oklch(0 0 0 / 0.6);
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -59,8 +59,8 @@ a { color: inherit; text-decoration: none; }
 /* bilingual toggle — mirrors the main site (shared reasonix-lang choice) */
 body[data-lang="en"] .l-zh { display: none !important; }
 body[data-lang="zh"] .l-en { display: none !important; }
-.lang-switch, .theme-switch { display: inline-flex; gap: 2px; padding: 3px; background: var(--bg-soft); border-radius: 999px; }
-.lang-switch button, .theme-switch button { font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; color: var(--ink-2); background: transparent; border: none; cursor: pointer; padding: 6px 12px; border-radius: 999px; transition: background 0.2s, color 0.2s, box-shadow 0.2s; }
+.lang-switch, .theme-switch { display: inline-flex; gap: 2px; padding: 3px; background: var(--bg-soft); border-radius: 9px; }
+.lang-switch button, .theme-switch button { font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; color: var(--ink-2); background: transparent; border: none; cursor: pointer; padding: 6px 12px; border-radius: 6px; transition: background 0.2s, color 0.2s, box-shadow 0.2s; }
 .lang-switch button:hover, .theme-switch button:hover { color: var(--ink); }
 .lang-switch button.active, .theme-switch button.active { background: var(--card); color: var(--accent); box-shadow: var(--shadow-1); }
 .theme-switch button { display: inline-flex; align-items: center; justify-content: center; }
@@ -72,16 +72,16 @@ body[data-lang="zh"] .l-en { display: none !important; }
 .brand .mark { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: linear-gradient(140deg, var(--accent), var(--violet)); color: #fff; font-weight: 700; font-size: 15px; }
 .brand .ctag { font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px; }
 .nav-links { display: flex; gap: 4px; margin-left: 12px; }
-.nav-links a { color: var(--ink-2); font-size: 14.5px; font-weight: 500; padding: 8px 14px; border-radius: 999px; transition: color 0.2s, background 0.2s; }
+.nav-links a { color: var(--ink-2); font-size: 14.5px; font-weight: 500; padding: 8px 14px; border-radius: 7px; transition: color 0.2s, background 0.2s; }
 .nav-links a:hover { color: var(--ink); background: var(--bg-soft); }
 .nav-links a.here { color: var(--accent); background: var(--accent-soft); }
 .nav-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.nav-search { display: flex; align-items: center; gap: 8px; background: var(--bg-soft); border: 1px solid transparent; border-radius: 999px; padding: 8px 14px; width: 220px; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; }
+.nav-search { display: flex; align-items: center; gap: 8px; background: var(--bg-soft); border: 1px solid transparent; border-radius: 9px; padding: 8px 14px; width: 220px; transition: border-color 0.2s, background 0.2s, box-shadow 0.2s; }
 .nav-search:focus-within { background: var(--card); border-color: var(--accent-line); box-shadow: 0 0 0 4px var(--accent-soft); }
 .nav-search input { border: none; outline: none; background: none; font-family: var(--font-sans); font-size: 14px; color: var(--ink); width: 100%; }
 .nav-search .ico { color: var(--ink-3); }
 
-.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--font-sans); font-size: 14.5px; font-weight: 600; white-space: nowrap; padding: 10px 20px; border-radius: 999px; border: none; cursor: pointer; transition: background 0.2s, box-shadow 0.25s, color 0.2s, border-color 0.2s, transform 0.15s var(--ease); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--font-sans); font-size: 14.5px; font-weight: 600; white-space: nowrap; padding: 10px 20px; border-radius: 9px; border: none; cursor: pointer; transition: background 0.2s, box-shadow 0.25s, color 0.2s, border-color 0.2s, transform 0.15s var(--ease); }
 .btn:active { transform: translateY(1px); }
 .btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover { background: var(--accent-deep); box-shadow: var(--shadow-1); }
@@ -114,8 +114,8 @@ a.tag:hover { color: var(--accent); background: var(--accent-soft); }
 .side { position: sticky; top: 88px; display: flex; flex-direction: column; gap: 18px; }
 .sec-title { display: flex; align-items: center; justify-content: space-between; margin: 4px 2px 14px; }
 .sec-title h2 { font-size: 15px; font-weight: 600; }
-.tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--bg-soft); border-radius: 999px; }
-.tabs button { font-family: var(--font-sans); font-size: 13.5px; font-weight: 500; color: var(--ink-2); background: none; border: none; cursor: pointer; padding: 7px 15px; border-radius: 999px; transition: background 0.2s, color 0.2s, box-shadow 0.2s; }
+.tabs { display: inline-flex; gap: 2px; padding: 3px; background: var(--bg-soft); border-radius: 9px; }
+.tabs button { font-family: var(--font-sans); font-size: 13.5px; font-weight: 500; color: var(--ink-2); background: none; border: none; cursor: pointer; padding: 7px 15px; border-radius: 6px; transition: background 0.2s, color 0.2s, box-shadow 0.2s; }
 .tabs button.on { background: var(--card); color: var(--accent); box-shadow: var(--shadow-1); }
 .tabs button:hover:not(.on) { color: var(--ink); }
 
@@ -183,10 +183,10 @@ a.tag:hover { color: var(--accent); background: var(--accent-soft); }
 .post .body code { font-family: var(--font-mono); font-size: 13px; background: var(--bg-soft); padding: 2px 7px; border-radius: 6px; }
 .post .body pre { background: oklch(0.25 0.006 260); color: oklch(0.9 0.004 260); border-radius: var(--radius-sm); padding: 16px 18px; overflow-x: auto; font-family: var(--font-mono); font-size: 13px; line-height: 1.7; margin: 4px 0 12px; }
 .post .actions { display: flex; align-items: center; gap: 6px; margin-top: 16px; }
-.react { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--ink-2); background: var(--bg-soft); border: 1px solid transparent; border-radius: 999px; padding: 6px 13px; cursor: pointer; transition: background 0.2s, border-color 0.2s, color 0.2s; }
+.react { display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--ink-2); background: var(--bg-soft); border: 1px solid transparent; border-radius: 7px; padding: 6px 13px; cursor: pointer; transition: background 0.2s, border-color 0.2s, color 0.2s; }
 .react:hover { border-color: var(--accent-line); color: var(--accent); }
 .react.on { background: var(--accent-soft); color: var(--accent); }
-.link-act { font-size: 13px; font-weight: 500; color: var(--ink-3); padding: 6px 10px; border-radius: 999px; cursor: pointer; background: none; border: none; font-family: var(--font-sans); }
+.link-act { font-size: 13px; font-weight: 500; color: var(--ink-3); padding: 6px 10px; border-radius: 7px; cursor: pointer; background: none; border: none; font-family: var(--font-sans); }
 .link-act:hover { color: var(--accent); background: var(--accent-soft); }
 
 .composer { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; margin-top: 24px; background: var(--card); transition: border-color 0.2s, box-shadow 0.2s; }
@@ -195,7 +195,7 @@ a.tag:hover { color: var(--accent); background: var(--accent-soft); }
 .composer textarea { width: 100%; border: none; outline: none; resize: vertical; min-height: 96px; padding: 12px 14px; font-family: var(--font-sans); font-size: 15px; color: var(--ink); background: none; line-height: 1.6; }
 .composer .foot { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 6px; gap: 12px; flex-wrap: wrap; }
 .composer .foot .hint { font-size: 12px; color: var(--ink-3); }
-.composer select { font-family: var(--font-sans); font-size: 13px; color: var(--ink-2); background: var(--bg-soft); border: none; border-radius: 999px; padding: 8px 12px; cursor: pointer; }
+.composer select { font-family: var(--font-sans); font-size: 13px; color: var(--ink-2); background: var(--bg-soft); border: none; border-radius: 7px; padding: 8px 12px; cursor: pointer; }
 .gate { text-align: center; padding: 22px; }
 .gate p { font-size: 14px; color: var(--ink-2); margin-bottom: 14px; }
 
@@ -208,7 +208,7 @@ a.tag:hover { color: var(--accent); background: var(--accent-soft); }
 .foot { border-top: 1px solid var(--line); }
 .foot-inner { max-width: 1180px; margin: 0 auto; padding: 28px 32px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap; font-size: 13.5px; color: var(--ink-3); }
 .foot-inner .links { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
-.foot-inner .links a { padding: 6px 12px; border-radius: 999px; color: var(--ink-2); font-weight: 500; transition: background 0.2s, color 0.2s; }
+.foot-inner .links a { padding: 6px 12px; border-radius: 7px; color: var(--ink-2); font-weight: 500; transition: background 0.2s, color 0.2s; }
 .foot-inner .links a:hover { background: var(--bg-soft); color: var(--ink); }
 
 @media (max-width: 940px) {

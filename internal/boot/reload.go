@@ -62,6 +62,11 @@ func Rebuild(ctx context.Context, old *control.Controller, opts Options) (*Build
 		goal:             old.Goal(),
 		goalRunning:      old.GoalStatus() == control.GoalStatusRunning,
 	}
+	// Reuse the previous Controller's session-private temporary directory so
+	// model/settings hot rebuilds do not wipe temporary files mid-session.
+	if opts.SessionTemp == nil {
+		opts.SessionTemp = old.SessionTemp()
+	}
 	res, err := BuildRuntime(ctx, opts)
 	if err != nil {
 		return nil, err

@@ -126,18 +126,39 @@ func repairWindowsShortcut(shortcutPath, launcher string) (bool, error) {
 	}
 	iconLocation := iconValue.ToString()
 	_ = iconValue.Clear()
-	if !reasonixWindowsStaleIcon(iconLocation, launcher) {
+	repointTarget, fixIcon := repairWindowsShortcutPlan(target, iconLocation, launcher)
+	if !repointTarget && !fixIcon {
 		return false, nil
 	}
-
-	result, err := oleutil.PutProperty(shortcut, "IconLocation", launcher+",0")
-	if result != nil {
-		_ = result.Clear()
+	if repointTarget {
+		// A version-scoped target points into versions/<v>/reasonix-desktop.exe,
+		// which the updater deletes when it switches or prunes versions. Repoint
+		// it at the stable launcher so the shortcut survives updates.
+		result, err := oleutil.PutProperty(shortcut, "TargetPath", launcher)
+		if result != nil {
+			_ = result.Clear()
+		}
+		if err != nil {
+			return false, fmt.Errorf("set TargetPath: %w", err)
+		}
+		result, err = oleutil.PutProperty(shortcut, "WorkingDirectory", filepath.Dir(launcher))
+		if result != nil {
+			_ = result.Clear()
+		}
+		if err != nil {
+			return false, fmt.Errorf("set WorkingDirectory: %w", err)
+		}
 	}
-	if err != nil {
-		return false, fmt.Errorf("set IconLocation: %w", err)
+	if fixIcon {
+		result, err := oleutil.PutProperty(shortcut, "IconLocation", launcher+",0")
+		if result != nil {
+			_ = result.Clear()
+		}
+		if err != nil {
+			return false, fmt.Errorf("set IconLocation: %w", err)
+		}
 	}
-	result, err = oleutil.CallMethod(shortcut, "Save")
+	result, err := oleutil.CallMethod(shortcut, "Save")
 	if result != nil {
 		_ = result.Clear()
 	}
@@ -160,13 +181,30 @@ func reasonixWindowsShortcutTarget(target, launcher string) bool {
 			return true
 		}
 	}
-	rel, err := filepath.Rel(root, target)
+	return reasonixWindowsVersionedTarget(target, launcher)
+}
+
+// reasonixWindowsVersionedTarget reports whether target points into this
+// install's versions/<version>/reasonix-desktop.exe, a version-scoped path
+// that the updater deletes when it switches or prunes versions. Such targets
+// dangle after an update, so repair must repoint them at the stable launcher.
+func reasonixWindowsVersionedTarget(target, launcher string) bool {
+	root := filepath.Dir(filepath.Clean(strings.TrimSpace(launcher)))
+	rel, err := filepath.Rel(root, filepath.Clean(strings.TrimSpace(target)))
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
 	return len(parts) == 3 && strings.EqualFold(parts[0], "versions") &&
 		strings.EqualFold(parts[2], "reasonix-desktop.exe")
+}
+
+// repairWindowsShortcutPlan decides which owned-shortcut properties need
+// rewriting. repointTarget is true when TargetPath points into a versioned
+// directory the updater can delete; fixIcon is true when IconLocation points
+// at the versioned desktop binary instead of the stable launcher.
+func repairWindowsShortcutPlan(target, iconLocation, launcher string) (repointTarget, fixIcon bool) {
+	return reasonixWindowsVersionedTarget(target, launcher), reasonixWindowsStaleIcon(iconLocation, launcher)
 }
 
 func reasonixWindowsStaleIcon(iconLocation, launcher string) bool {

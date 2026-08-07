@@ -138,7 +138,7 @@ echo "explain this code" | reasonix run
 
 `reasonix run` keeps the normal streamed terminal presentation unless `-p` or a
 structured output format is selected. It also accepts `--model`, `--profile`,
-`--max-steps`, `--effort`, `--dir`, `--add-dir`, `--continue`, `--resume PATH`,
+`--max-steps`, `--effort`, `--dir`, `--add-dir`, `--continue`, `--resume QUERY`,
 `--copy`, `--allowed-tools`, `--permission-mode`, and `--auto` / `-y` (an alias
 for `--permission-mode auto`).
 
@@ -286,9 +286,10 @@ reasonix --resume provider-config --copy
 - `--copy` leaves the original transcript untouched and continues in a new
   writable session. Use it when another Reasonix process owns the original.
 
-For one-shot runs, `reasonix run --resume PATH "task"` accepts a session file
-path. Session leases prevent the desktop app and CLI from writing the same
-transcript concurrently.
+For one-shot runs, `reasonix run --resume QUERY "task"` accepts a session file
+path, a session ID, or an opaque machine session ID from `--events-jsonl` /
+`reasonix session show --json`. Session leases prevent the desktop app and CLI
+from writing the same transcript concurrently.
 
 ## Permissions
 

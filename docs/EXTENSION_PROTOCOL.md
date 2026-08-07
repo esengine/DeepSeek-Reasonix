@@ -137,8 +137,9 @@ Within major version 1, the only permitted evolutions are: new optional
 fields, new enum values, and new methods. Existing required fields,
 directions, limits, error reasons, and semantics never change. The canonical
 schema and its SHA-256 hash are produced by `cmd/extension-protocol-gen`;
-CI runs it with `-check` so any drift — including an accidental semantic
-change — fails the build.
+CI's `go test ./...` enforces this via the deterministic-generation test
+(`TestGeneratedArtifactsAreDeterministicAndCommitted`), so any drift —
+including an accidental semantic change — fails the build.
 
 ## Security model
 

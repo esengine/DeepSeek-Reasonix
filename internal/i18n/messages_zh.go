@@ -4,26 +4,10 @@ package i18n
 // as English unless a phrase genuinely demands re-ordering — call sites pass
 // arguments positionally and won't reshuffle.
 var Chinese = Messages{
-	Subtitle:        "配置与插件驱动的 coding agent",
 	WelcomeTitleFmt: "欢迎使用 %s",
 	NoConfigYet:     "还没有配置 — 现在来设置一下吧。",
-	StartingChatFmt: "正在启动 %s…",
-	SetKeyHint:      "设置好 API key 后运行 `reasonix`。",
-	ConfigLabel:     "配置",
-	ModelsLabel:     "模型",
-	ConfigNotFound:  "未找到 — 使用内置默认值",
-	ConfigErrorFmt:  "%s — 错误：%v",
-	NoKey:           "未设置 key",
-	Ready:           "已就绪",
-	GetStarted:      "开始使用",
-	StepScaffold:    "生成 reasonix.toml",
-	StepSetKey:      "设置 API key",
 
-	InitHint:       "项目记忆（AGENTS.md）在会话内由模型生成：运行 `reasonix`，然后 `/init` —— 模型会分析代码库并写入。配置请用 `reasonix setup`。",
-	StepSetKeyHint: "运行 `reasonix setup`，或 export DEEPSEEK_API_KEY=…",
-	StepChatDesc:   "交互式会话",
-	StepRunDesc:    "执行单次任务",
-	HelpFooter:     "reasonix help · 查看全部命令",
+	InitHint: "项目记忆（AGENTS.md）在会话内由模型生成：运行 `reasonix`，然后 `/init` —— 模型会分析代码库并写入。配置请用 `reasonix setup`。",
 
 	ChatTip:             "对话上下文将跨轮保留。输入 'exit' 或按 Ctrl-D 退出。",
 	TurnCancelled:       "已取消 — 回到提示符",
@@ -33,7 +17,6 @@ var Chinese = Messages{
 	ResumeRequiresTTY:   "--resume 需要交互式终端；用 --continue 直接恢复最近一次",
 	PickSessionLabel:    "恢复哪个会话？",
 
-	ResumeListHeader:    "会话（/resume <n> 切换）",
 	ResumeBusy:          "请先完成或取消当前这一轮再恢复会话",
 	ResumeBadIndexFmt:   "请选择 1–%d 的会话（用 /resume 查看列表）",
 	ResumeAlreadyActive: "已在该会话中",
@@ -146,8 +129,6 @@ var Chinese = Messages{
 	DiffFoldDisabled:                       "diff 已展开 — 显示全部行（/diff-fold 折叠）",
 
 	OutputStyleNone:           "没有可用的输出风格",
-	OutputStyleHeader:         "输出风格：",
-	OutputStyleHint:           "在 reasonix.toml 设置 agent.output_style 即可启用（下次会话生效）",
 	ThemeHeader:               "主题：",
 	ThemeHint:                 "使用 /theme <auto|light|dark|style> 切换",
 	ThemeChangedFmt:           "已切换主题为 %s / %s",
@@ -169,7 +150,6 @@ var Chinese = Messages{
 
 	ExtFormFieldsHint:         "字段将通过逐项提问收集",
 	ExtRunActionFmt:           "运行 %s",
-	SlashCompactDone:          "已压缩 — 旧的中段换成一段摘要，最近几轮保留原样",
 	SlashCompactFailed:        "压缩失败",
 	SlashNewDone:              "已开启新会话 — 之前的对话已存档",
 	SlashNewFailed:            "新建会话失败",
@@ -177,19 +157,15 @@ var Chinese = Messages{
 	SlashClearDone:            "已清空当前上下文",
 	SlashClearFailed:          "清空当前上下文失败",
 	SlashClsDone:              "已清屏（LLM 上下文保留）",
-	SlashUnavailable:          "当前构建不支持该命令",
 	SlashUnknown:              "未知命令",
 	SlashUnknownSentAsMessage: "已作为普通消息发送",
 	SlashTodoCleared:          "已清除任务清单",
-	SlashHelp:                 "命令：/compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model（切换模型）· /effort · /theme · /language · /mcp · /skills · /plugins · /hooks · /paste-image · /docs · /memory · /migrate · /goal · /remember · /quit · /help · 以及 skills（/init、/explore …）",
 
-	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d 个可用",
 	SkillPickerMatchingFmt:       "%d 个匹配 · 共 %d 个",
 	SkillPickerHint:              "↑↓ 移动 · Space 开关 · Enter 保存 · / 搜索 · s 来源 · r 重新扫描 · Esc 取消",
 	SkillPickerDetailHint:        "↑↓ 移动 · Enter 选择 · Space 开关 · Esc 返回",
 	SkillPickerSearchEmpty:       "没有匹配的 skill",
-	SkillPickerSearchPrompt:      "搜索: ",
 	SkillPickerSearchPlaceholder: "搜索 skills...",
 	SkillPickerSourceTitle:       "来源",
 	SkillPickerSourceActiveFmt:   "%d 个有效",
@@ -295,13 +271,11 @@ var Chinese = Messages{
 	SlashCopyListHeader: "选择要复制的回复：",
 	SlashExportDoneFmt:  "会话已导出到 %s",
 	SlashExportEmpty:    "没有可导出的消息",
-	ArgSkillList:        "列出 skills",
 	ArgSkillShow:        "查看 skill 内容",
 	ArgSkillNew:         "新建一个 skill",
 	ArgSkillPaths:       "显示发现路径",
 	ArgMcpAdd:           "连接一个服务器",
 	ArgMcpRemove:        "断开一个服务器",
-	ArgMcpList:          "显示已配置的服务器",
 	ArgMcpConnected:     "已连接",
 	ArgHooksList:        "列出生效的 hooks",
 	ArgModelCurrent:     "当前",
@@ -318,7 +292,6 @@ var Chinese = Messages{
 
 	ListModelsHeaderFmt: "模型（当前：%s）",
 	ListModelsHint:      "用底部的模型切换器，或输入 /model <provider/model>",
-	ListMemoryHeader:    "记忆文件",
 	ListMemorySaved:     "保存的记忆",
 	ListMemoryArchived:  "归档的记忆",
 	ListMemoryNone:      "暂无记忆 — 用 “/remember <内容>” 添加，或运行 /init 生成 AGENTS.md",
@@ -329,10 +302,6 @@ var Chinese = Messages{
 	ListMcpHeader:       "MCP 服务器",
 	ListMcpNone:         "未连接 MCP 服务器 — 在 reasonix.toml（[[plugins]]）或项目 .mcp.json 中添加",
 
-	MemoryNone:                   "还没有加载任何记忆 — 输入 “/remember 内容” 可快速记录，也可以在项目根目录创建 REASONIX.md",
-	MemoryLoaded:                 "当前已加载的记忆：",
-	MemorySavedHeader:            "  已记录的条目（用 “/forget <name>” 归档）：",
-	MemoryStoredUnderFmt:         "  存放于 %s",
 	MemoryEditHint:               "可直接编辑记忆文档，或输入 “/remember 内容” 快速记录；文档改动会在下次会话生效",
 	ForgetUsage:                  "用法：/forget <name> — name 是 /memory 中显示的条目标识",
 	ForgetDoneFmt:                "已归档记忆：%s",
@@ -347,8 +316,8 @@ var Chinese = Messages{
 	GoalPaused:                   "目标已暂停 — /goal resume 可继续",
 	GoalPausedReason:             "用户手动暂停",
 	GoalPausedFmt:                "目标已暂停（%s）— 使用 /goal resume 继续",
-	GoalBudgetExtended:           "目标已恢复 — 追加了一档预算额度",
-	GoalRuntimeFmt:               "运行状态：轮次 %d/%d，token %d/%d，无进展 %d/%d，预算追加 %d 次",
+	GoalBudgetExtended:           "目标已恢复 — 追加了一档轮次数",
+	GoalRuntimeFmt:               "运行状态：轮次 %d/%d，token %d，无进展 %d/%d，追加 %d",
 	GoalRuntimeLastReason:        "最近原因",
 	ModelSwitchUnavailable:       "本会话不支持切换模型",
 	ModelSwitchBusy:              "请先完成或取消当前工作，并停止后台任务后再切换模型",
@@ -359,7 +328,7 @@ var Chinese = Messages{
 	RuntimeSwitchPending:         "请等待当前运行时切换完成",
 	RuntimeReloadQueued:          "已加入重载队列——当前工作完成后执行",
 	RuntimeReloaded:              "运行时已重载",
-	RuntimeReloadedGenerationFmt: "运行时已重载（generation %d）",
+	RuntimeReloadedGenerationFmt: "运行时已重载（构建代号 %d）",
 	WorkModeStatusFmt:            "工作 %s",
 	WorkModeListHeaderFmt:        "工作模式（当前：%s）",
 	WorkModeListHint:             "使用 /work-mode economy|balanced|delivery 切换（/profile 为兼容别名）",
@@ -392,16 +361,13 @@ var Chinese = Messages{
 	RewindUnavailableFmt:         "无法回滚：%s",
 	RewindEmpty:                  "(空)",
 
-	SelectProvidersLabel:     "选择要启用的 provider",
 	EnterAPIKeysHeader:       "输入 API key（回车跳过、稍后再设）：",
-	MissingKeyIntro:          "reasonix.toml 已配置好 — 只差一个 API key 就可以开始。",
 	WroteFileFmt:             "已写入 %s",
 	SetupComplete:            "设置完成。",
 	SetupCancelled:           "设置已取消。",
 	TryHintFmt:               "试试: %s",
 	NextHint:                 "下一步：设置 API key（运行 `reasonix setup` 或 export DEEPSEEK_API_KEY=...），然后运行 `reasonix run \"你的任务\"`。",
 	ConfirmReconfigureFmt:    "%s 已存在。重新配置并覆盖？",
-	KeepingExisting:          "保留原配置不变。",
 	NotOverwritingFmt:        "%s 已存在，不覆盖",
 	SetupManagerTitle:        "供应商配置",
 	SetupAddOpenAI:           "添加 OpenAI 兼容供应商",
@@ -442,19 +408,15 @@ var Chinese = Messages{
 	FetchModelsSuccessFmt:      "发现 %d 个 %s 模型",
 	FetchModelsFailedFmt:       "获取 %s 模型失败: %v",
 	FetchModelsUsingPresetsFmt: "无法在线获取 %s 的模型，使用预设列表",
-	FamilyKeyPromptFmt:         "输入 %s 的 API key 以获取可用模型（回车跳过）：",
 	SelectModelsLabel:          "选择要启用的 %s 模型",
-	NoModelsAvailableFmt:       "%s: 没有可用模型，跳过",
 	CustomFetchEmpty:           "/models 返回为空，回退到手动输入",
 	AnthropicFetchEmpty:        "/models 返回为空 — Anthropic 兼容服务通常不提供此端点，回退到手动输入",
-	SkipStaleCustomEntryFmt:    "跳过 reasonix.toml 里的旧 %q 条目（指向 %s）— 请手动从 [[providers]] 里删除",
 	APIKeyAlreadySetFmt:        "复用已设置的 %s",
 	APIKeyResetPromptFmt:       "重新输入 %s？",
 	InvalidAPIKeyEnvFmt:        "%q 不是有效的 API Key 变量名。只能使用字母、数字和下划线（例如 MY_PROVIDER_API_KEY）；这里不要填写模型名。",
 	RepairedAPIKeyEnvFmt:       "provider %s：已将无效的 API Key 变量名 %q 修复为 %q",
 
 	// custom provider
-	CustomProviderLabel:  "自定义模型",
 	CustomProviderDesc:   "添加第三方 OpenAI 兼容模型",
 	CustomAddMethodLabel: "添加第三方 OpenAI 兼容模型 - 选择添加方式",
 	CustomMethodManual:   "手动输入模型名称",
@@ -466,7 +428,6 @@ var Chinese = Messages{
 	CustomAddedFmt:       "已添加自定义模型: %s",
 
 	// Anthropic 兼容 provider
-	AnthropicProviderLabel:         "自定义模型2",
 	AnthropicProviderDesc:          "添加第三方 Anthropic 兼容模型",
 	AnthropicAddMethodLabel:        "添加第三方 Anthropic 兼容模型 - 选择添加方式",
 	AnthropicMethodManual:          "手动输入模型名称",
@@ -483,15 +444,15 @@ var Chinese = Messages{
 
 	RemoteConnectingFmt:       "正在连接 %s…",
 	RemoteConnectedFmt:        "已连接到 %s",
-	RemoteReconnectingFmt:     "正在重连 %s(第 %d 次)…",
-	RemoteDegradedFmt:         "已连接到 %s,但部分端口转发未建立",
-	RemoteDisconnected:        "已断开(远端 serve 仍在运行)",
-	RemoteServeReadyFmt:       "远端 serve 就绪:%s",
-	RemoteHostKeyPromptFmt:    "未知的主机密钥 %s\n  类型:  %s\n  指纹:  %s",
-	RemotePassphrasePromptFmt: "%s 的密钥口令:",
-	RemotePasswordPromptFmt:   "%s 的登录密码:",
-	RemoteBootstrapStepFmt:    "远端 serve:%s %s",
-	RemoteNoHostsHint:         "尚未配置远程主机;用 `reasonix remote add <名称> [user@]host` 添加",
+	RemoteReconnectingFmt:     "正在重连 %s（第 %d 次）…",
+	RemoteDegradedFmt:         "已连接到 %s，但部分端口转发未建立",
+	RemoteDisconnected:        "已断开（远端 serve 仍在运行）",
+	RemoteServeReadyFmt:       "远端 serve 就绪：%s",
+	RemoteHostKeyPromptFmt:    "未知的主机密钥 %s\n  类型：%s\n  指纹：%s",
+	RemotePassphrasePromptFmt: "%s 的密钥口令：",
+	RemotePasswordPromptFmt:   "%s 的登录密码：",
+	RemoteBootstrapStepFmt:    "远端 serve：%s %s",
+	RemoteNoHostsHint:         "尚未配置远程主机；用 `reasonix remote add <名称> [user@]host` 添加",
 
 	UnknownCommandFmt:         "未知命令 %q",
 	UsageRunHint:              "用法：reasonix -p [--model NAME] <task>",
@@ -594,10 +555,13 @@ var Chinese = Messages{
   reasonix session show|status <machine-session-id> --json [--dir PATH]  查询单个脱敏会话
   reasonix session recovery [<machine-session-id>] --json [--dir PATH]  查询脱敏恢复状态
   reasonix hook list|status --json [--dir PATH]         查看脱敏 Hook 状态
-  reasonix task list|show --json [--dir PATH]           查看脱敏 Task 状态
+  reasonix task list|show|status|events|stop|cancel|monitor|tmux --json [--dir PATH]
+                                                         查看或控制脱敏 Task
   reasonix bot start|doctor|weixin-login                多渠道 IM bot 网关
   reasonix upgrade [--check] [--force]                   更新到最新正式版（别名：reasonix update）
-  reasonix version
+  reasonix completion bash|zsh|fish                     打印 shell 补全脚本到 stdout
+  reasonix version [--verbose|--json]                   打印版本（单行）或构建元信息
+  reasonix --version | -v                               单行版本（脚本安全）
   reasonix help
 
 示例：

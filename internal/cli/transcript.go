@@ -56,6 +56,7 @@ func (m *chatTUI) appendTranscriptBlock(rendered string, source transcriptSource
 	m.ensureTranscriptSources()
 	m.transcript = append(m.transcript, rendered)
 	m.transcriptSources = append(m.transcriptSources, source)
+	// Wrap cache extends on next Update via append-only path.
 }
 
 func (m *chatTUI) setTranscriptBlock(index int, rendered string, source transcriptSource) {
@@ -65,6 +66,9 @@ func (m *chatTUI) setTranscriptBlock(index int, rendered string, source transcri
 	m.ensureTranscriptSources()
 	m.transcript[index] = rendered
 	m.transcriptSources[index] = source
+	// In-place rewrite: drop wrap from this block onward so the next sync
+	// re-wraps the mutated block and everything after it.
+	m.invalidateWrapFrom(index)
 }
 
 func (m *chatTUI) removeTranscriptBlock(index int) {
@@ -74,6 +78,7 @@ func (m *chatTUI) removeTranscriptBlock(index int) {
 	m.ensureTranscriptSources()
 	m.transcript = append(m.transcript[:index], m.transcript[index+1:]...)
 	m.transcriptSources = append(m.transcriptSources[:index], m.transcriptSources[index+1:]...)
+	m.invalidateWrapFrom(index)
 }
 
 func (m *chatTUI) truncateTranscriptBlocks(length int) {
@@ -81,6 +86,7 @@ func (m *chatTUI) truncateTranscriptBlocks(length int) {
 	m.ensureTranscriptSources()
 	m.transcript = m.transcript[:length]
 	m.transcriptSources = m.transcriptSources[:length]
+	m.invalidateWrapFrom(length)
 }
 
 func (m *chatTUI) renderTranscriptSource(source transcriptSource, terminalWidth int) string {
@@ -771,6 +777,9 @@ func (m chatTUI) scrollbarGrabRowOffset(row int) int {
 
 func (m *chatTUI) dragScrollbar(row int) {
 	m.viewport.SetYOffset(scrollbarYOffset(m.viewport.Height(), row, len(m.wrappedLines), m.scrollbarGrabOffset))
+	// Sync immediately so a streaming event between drag motions cannot see a
+	// stale followTail and yank the reader back to the bottom (#6430/#6978).
+	m.syncScrollModeAfterGesture()
 }
 
 // transcriptCaret maps a screen cell (x, y) in the transcript region to an

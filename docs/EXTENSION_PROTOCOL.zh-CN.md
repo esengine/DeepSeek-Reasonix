@@ -113,8 +113,10 @@ retryable、action）；`protocol_error`、`unknown_method`、
 
 major v1 内只允许：新增 optional 字段、新增枚举值、新增方法。既有
 必填字段、方向、限额、错误 reason 与语义永不改变。canonical Schema
-及其 SHA-256 hash 由 `cmd/extension-protocol-gen` 产生；CI 以
-`-check` 运行，任何漂移——包括意外语义变更——都会令构建失败。
+及其 SHA-256 hash 由 `cmd/extension-protocol-gen` 产生；CI 的
+`go test ./...` 会运行确定性生成测试（
+`TestGeneratedArtifactsAreDeterministicAndCommitted`），任何漂移——包括
+意外语义变更——都会令构建失败。
 
 ## 安全模型
 

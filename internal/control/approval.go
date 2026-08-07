@@ -57,6 +57,10 @@ type approvalManager struct {
 	// requestApproval): Sink implementations must not block and must not call
 	// back into Ask or the tool-approval chain, or they deadlock the prompt.
 	promptMu sync.Mutex
+	// promptEmitMu serializes prompt registration and emission with an SSE
+	// attach handoff. It is separate from promptMu because promptMu remains
+	// held while waiting for the user's answer.
+	promptEmitMu sync.Mutex
 }
 
 func newApprovalManager(policy permission.Policy, mode string, timeout time.Duration) approvalManager {

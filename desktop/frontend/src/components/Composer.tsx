@@ -3898,7 +3898,6 @@ export function Composer({
                       turnsUsed: goalRuntime.turnsUsed,
                       turnsLimit: goalRuntime.turnsLimit,
                       tokensUsed: formatTokens(goalRuntime.tokensUsed),
-                      tokensLimit: formatTokens(goalRuntime.tokensLimit),
                       noProgressTurns: goalRuntime.noProgressTurns,
                       noProgressLimit: goalRuntime.noProgressLimit,
                       extensions: goalRuntime.budgetExtensions,

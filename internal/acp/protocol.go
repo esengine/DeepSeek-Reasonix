@@ -667,12 +667,16 @@ type FSWriteTextFileParams struct {
 // --- terminal/* (agent → client requests) ---
 
 // TerminalCreateParams starts a command in a client-owned terminal.
+// Env follows ACP v1's official EnvVariable[] shape (same as MCP env): only
+// the overrides Reasonix owns (typically TMPDIR/TMP/TEMP) are sent — never a
+// full host environment dump.
 type TerminalCreateParams struct {
-	SessionID       string   `json:"sessionId"`
-	Command         string   `json:"command"`
-	Args            []string `json:"args,omitempty"`
-	Cwd             string   `json:"cwd,omitempty"`
-	OutputByteLimit int      `json:"outputByteLimit,omitempty"`
+	SessionID       string        `json:"sessionId"`
+	Command         string        `json:"command"`
+	Args            []string      `json:"args,omitempty"`
+	Cwd             string        `json:"cwd,omitempty"`
+	Env             []EnvVariable `json:"env,omitempty"`
+	OutputByteLimit int           `json:"outputByteLimit,omitempty"`
 }
 
 // TerminalCreateResult returns the id used by the other terminal methods.
