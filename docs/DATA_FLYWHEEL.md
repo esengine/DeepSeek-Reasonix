@@ -135,3 +135,28 @@
 - **体积控制**：tool_input/output 截断；compaction 摘要限长（≤8KB）；记忆目录按项目独立。
 - **不引外部依赖**：本轮零新依赖（JSONL + 标准库 + 已有 BM25），Langfuse/向量库等为 P1 可选。
 - **飞轮有效性**：判据 = 失败轨迹回流数 > 0 且复用后同类失败率下降（人工抽查）。
+
+## 7. Agent 层缓存命中（建模工程化，2026-08 增补）
+
+> 方向：不是模型层 KV cache，而是 **agent 工作流/工具调用/上下文组装** 层的缓存命中。
+
+### 7.1 工具结果缓存（已实现 internal/agent/toolcache.go）
+- 幂等只读工具（read_file/grep/glob/ls/code_index/纯函数白名单）按
+  `sha256(tool + canonicalizeArgs)` 缓存结果，TTL 30s + 512 上限（最旧淘汰）。
+- `canonicalizeArgs`：JSON 键排序 + 剥离动态噪音键（`_ts/timestamp/session_id/seed/…`）
+  + 数字规范化（1 vs 1.0）+ 空白统一；非 JSON 参数保守原样（宁可 miss 不可错）。
+- 命中短路于 `executeBatch`（跳过真实执行，durations=0）；写工具/bash/webfetch 一律不缓存。
+- 可观测：命中/未命中计数随 `CacheDiagnostics.ToolCacheHits/Misses` 进 Usage 事件
+  （与 provider 前缀命中率并列展示）。
+
+### 7.2 前缀稳定性（既有资产，已确认完备）
+- system prompt 全静态常量（DefaultTaskSystemPrompt 等）；工具 schema 排序稳定
+  （normalizeToolSchemas）；sampling_request 有 cache 契约（no schema reorder）。
+- 命中追踪：CaptureShape/PrefixShape + CacheDiagnostics + sessCacheHit/Miss 聚合
+  + prompt_cache_proactive_warmer 预热器。
+- 测试：TestCacheHitPrefixStable（前缀 bytes 稳定 e2e）、TestCaptureShapeNormalizesToolSchemaOrder、
+  TestSessionAggregateCacheRate。
+
+### 7.3 语义意图缓存（未实现，预留）
+- 语义聚类（embedding/BM25）把相似请求路由到同一 plan 属后续工程；
+  当前以"参数归一化 + 工具缓存"覆盖最高频的重复调用场景。

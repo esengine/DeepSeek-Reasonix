@@ -447,6 +447,8 @@ type CacheDiagnostics struct {
 	ToolSchemaTokens    int
 	CacheMissTokens     int
 	CacheHitTokens      int
+	ToolCacheHits       int // agent 层工具结果缓存命中（toolcache.go）
+	ToolCacheMisses     int
 }
 
 // FinalReadiness carries machine-readable recovery requirements on TurnDone.

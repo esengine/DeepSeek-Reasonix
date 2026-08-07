@@ -77,7 +77,24 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			results[i] = output
 			return
 		}
+		// Tool-result cache: idempotent read-only tools with canonicalized args
+		// short-circuit on a live hit (toolcache.go) — skip real execution.
+		if tc := a.toolCache; tc != nil && !writer && cachedToolNames[calls[i].Name] {
+			key := tc.Key(calls[i].Name, calls[i].Arguments)
+			if hit, ok := tc.Get(key); ok {
+				outcomes[i] = toolOutcome{output: hit}
+				a.toolCacheHits.Add(1)
+				durations[i] = 0
+				results[i] = hit
+				return
+			}
+			a.toolCacheMisses.Add(1)
+		}
 		outcomes[i] = a.executeOne(ctx, calls[i])
+		// Store the result for later repeat calls (miss path).
+		if tc := a.toolCache; tc != nil && !writer && cachedToolNames[calls[i].Name] && outcomes[i].errMsg == "" && outcomes[i].output != "" {
+			tc.Put(tc.Key(calls[i].Name, calls[i].Arguments), outcomes[i].output)
+		}
 		if outcomes[i].resolved {
 			readOnly := outcomes[i].resolvedReadOnly
 			calls[i].ResolvedName = outcomes[i].resolvedName
