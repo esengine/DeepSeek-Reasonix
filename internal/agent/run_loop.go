@@ -884,6 +884,12 @@ func (a *Agent) emitTurnUsage(usage *provider.Usage, cacheDiagnostics *CacheDiag
 				Detail: fmt.Sprintf("turn used %d tokens, over capacity", rep.ObservedTokens)})
 		}
 	}
+	// Tool-result cache counters ride along on the same diagnostics so the
+	// frontend sees the agent-layer hit rate next to provider prefix cache.
+	if cacheDiagnostics != nil {
+		cacheDiagnostics.ToolCacheHits = int(a.toolCacheHits.Load())
+		cacheDiagnostics.ToolCacheMisses = int(a.toolCacheMisses.Load())
+	}
 	a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing,
 		UsageSource:      a.usageSource,
 		CacheDiagnostics: cacheDiagnostics,

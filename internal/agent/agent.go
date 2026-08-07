@@ -298,6 +298,12 @@ type Agent struct {
 	sessCacheHit  atomic.Int64
 	sessCacheMiss atomic.Int64
 
+	// toolCache caches idempotent read-only tool results (toolcache.go).
+	// toolCacheHits/Misses accumulate across the session for diagnostics.
+	toolCache      *ToolCache
+	toolCacheHits  atomic.Int64
+	toolCacheMisses atomic.Int64
+
 	// lastPrefixShape records the previous provider request's cacheable prefix
 	// so usage events can explain prefix churn on the next request.
 	lastPrefixShape     PrefixShape
@@ -812,6 +818,9 @@ func (a *Agent) SetSession(s *Session) {
 	a.sessMu.Unlock()
 	a.sessCacheHit.Store(0)
 	a.sessCacheMiss.Store(0)
+	// Tool-result cache defaults on (30s TTL, 512 entries); tests may override
+	// a.toolCache directly before the first batch.
+	a.toolCache = NewToolCache(30*time.Second, 512)
 	a.warnedMissingToolCallReasoning = false
 	a.missingReasoningWarnStateChecked = false
 	a.missingReasoningHealthyStreak = 0
@@ -2785,7 +2794,24 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 			results[i] = output
 			return
 		}
+		// Tool-result cache: idempotent read-only tools with canonicalized args
+		// short-circuit on a live hit (toolcache.go) — skip real execution.
+		if tc := a.toolCache; tc != nil && !writer && cachedToolNames[calls[i].Name] {
+			key := tc.Key(calls[i].Name, calls[i].Arguments)
+			if hit, ok := tc.Get(key); ok {
+				outcomes[i] = toolOutcome{output: hit}
+				a.toolCacheHits.Add(1)
+				durations[i] = 0
+				results[i] = hit
+				return
+			}
+			a.toolCacheMisses.Add(1)
+		}
 		outcomes[i] = a.executeOne(ctx, calls[i])
+		// Store the result for later repeat calls (miss path).
+		if tc := a.toolCache; tc != nil && !writer && cachedToolNames[calls[i].Name] && outcomes[i].errMsg == "" && outcomes[i].output != "" {
+			tc.Put(tc.Key(calls[i].Name, calls[i].Arguments), outcomes[i].output)
+		}
 		if outcomes[i].resolved {
 			readOnly := outcomes[i].resolvedReadOnly
 			calls[i].ResolvedName = outcomes[i].resolvedName
