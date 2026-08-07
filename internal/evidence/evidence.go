@@ -1511,18 +1511,24 @@ func DeliveryProfileFromContext(ctx context.Context) bool {
 	return enabled
 }
 
-// WithSessionMessages attaches the full conversation history so verifyStepEvidence
-// can fall back to scanning the transcript when the per-turn ledger misses a
-// command (cross-turn references, non-bash tool calls, truncated command strings).
-func WithSessionMessages(ctx context.Context, msgs []provider.Message) context.Context {
-	return context.WithValue(ctx, sessionMessagesKey{}, msgs)
+// WithSessionMessages attaches a lazy transcript accessor so verifyStepEvidence
+// can fall back to scanning the conversation when the per-turn ledger misses a
+// command (cross-turn references, non-bash tool calls, truncated command
+// strings). The context carries the capability, not the data: snapshot is
+// called only when a consumer (complete_step) actually needs the history, so
+// ordinary tool calls never pay for a full transcript copy.
+func WithSessionMessages(ctx context.Context, snapshot func() []provider.Message) context.Context {
+	return context.WithValue(ctx, sessionMessagesKey{}, snapshot)
 }
 
-// SessionMessagesFromContext retrieves the conversation history attached by
-// WithSessionMessages.
+// SessionMessagesFromContext resolves the transcript accessor attached by
+// WithSessionMessages, taking the snapshot at call time.
 func SessionMessagesFromContext(ctx context.Context) ([]provider.Message, bool) {
-	msgs, ok := ctx.Value(sessionMessagesKey{}).([]provider.Message)
-	return msgs, ok
+	snapshot, ok := ctx.Value(sessionMessagesKey{}).(func() []provider.Message)
+	if !ok || snapshot == nil {
+		return nil, false
+	}
+	return snapshot(), true
 }
 
 // WithTodoState attaches the host's canonical task list to a tool call. The
