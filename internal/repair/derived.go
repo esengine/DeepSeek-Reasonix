@@ -92,7 +92,7 @@ func rebuildDerivedStateBoundUnlocked(
 		if expected := expectedStates[path]; expected != "" {
 			if err := verifyRepairPlanStateIDFor(quarantine, path, expected); err != nil {
 				if restoreErr := restoreRepairNodeIfAbsent(quarantine, path); restoreErr != nil {
-					return applied, fmt.Errorf("derived state changed after confirmation and restore failed: %v: %w", restoreErr, err)
+					return applied, fmt.Errorf("derived state changed after confirmation and restore failed: %w: %w", restoreErr, err)
 				}
 				return applied, err
 			}
@@ -103,7 +103,7 @@ func rebuildDerivedStateBoundUnlocked(
 			}
 			restoreErr := restoreRepairNodeIfAbsent(quarantine, path)
 			if restoreErr != nil {
-				return applied, fmt.Errorf("commit derived-state undo state: %w; confirmed state retained at %s: %v", err, quarantine, restoreErr)
+				return applied, fmt.Errorf("commit derived-state undo state: %w; confirmed state retained at %s: %w", err, quarantine, restoreErr)
 			}
 			return applied, fmt.Errorf("commit derived-state undo state: %w", err)
 		}

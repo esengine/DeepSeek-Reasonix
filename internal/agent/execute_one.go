@@ -634,7 +634,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)
-		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot())
+		cctx = evidence.WithSessionMessages(cctx, a.session.Snapshot)
 		if a.deliveryProfile {
 			cctx = evidence.WithDeliveryProfile(cctx)
 		}

@@ -123,7 +123,7 @@ func isWindowsBatchExecutable(executable string) bool {
 
 func isSimpleWindowsBatchTail(tail string) bool {
 	quoted := false
-	for i := 0; i < len(tail); i++ {
+	for i := range len(tail) {
 		switch tail[i] {
 		case '\r', '\n':
 			return false
@@ -166,8 +166,8 @@ func hasCommandStringFlag(args []string) bool {
 		if arg == "-" || arg == "--" || !strings.HasPrefix(arg, "-") {
 			return false
 		}
-		if strings.HasPrefix(arg, "--") {
-			name, _, hasInlineValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+		if after, ok := strings.CutPrefix(arg, "--"); ok {
+			name, _, hasInlineValue := strings.Cut(after, "=")
 			if !hasInlineValue && bashLongOptionNeedsOperand(name) {
 				if i+1 >= len(args) {
 					return false

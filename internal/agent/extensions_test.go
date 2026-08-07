@@ -201,7 +201,7 @@ func requestContents(req provider.Request) string {
 	return b.String()
 }
 
-// --- agent.before_start ---
+// agent.before_start
 
 func TestAgentBeforeStartContinue(t *testing.T) {
 	client := &fakeDispatchClient{}
@@ -325,7 +325,7 @@ func TestSetExtensionsInstallsAfterConstruction(t *testing.T) {
 	}
 }
 
-// --- context.prepare ---
+// context.prepare
 
 func TestContextPrepareReplaceIsEphemeral(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
@@ -417,7 +417,7 @@ func TestContextPrepareFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- provider.request ---
+// provider.request
 
 func TestProviderRequestReplace(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, payload json.RawMessage) (protocol.InterceptResult, error) {
@@ -567,7 +567,7 @@ func TestProviderRequestReplacementCacheEphemerality(t *testing.T) {
 	}
 }
 
-// --- provider.response ---
+// provider.response
 
 func TestProviderResponseReplaceIsTranscript(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
@@ -680,7 +680,7 @@ func TestProviderResponseFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- tool.before ---
+// tool.before
 
 func TestToolBeforeContinue(t *testing.T) {
 	client := &fakeDispatchClient{}
@@ -860,7 +860,7 @@ func TestToolBeforeFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- permission.decision ---
+// permission.decision
 
 func TestPermissionDecisionExtensionAllowOverridesHostDeny(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, payload json.RawMessage) (protocol.InterceptResult, error) {
@@ -995,7 +995,7 @@ func TestPermissionDecisionBlockAndFailure(t *testing.T) {
 	})
 }
 
-// --- tool.after ---
+// tool.after
 
 func TestToolAfterReplaceResult(t *testing.T) {
 	client := &fakeDispatchClient{interceptFn: func(ev protocol.InterceptEvent, _ json.RawMessage) (protocol.InterceptResult, error) {
@@ -1103,7 +1103,7 @@ func TestToolAfterFailurePolicy(t *testing.T) {
 	})
 }
 
-// --- compaction.prepare / compaction.complete ---
+// compaction.prepare / compaction.complete
 
 // newCompactionAgent builds an agent whose session has a foldable middle
 // (large assistant turns) so CompactNow always finds a region, with the

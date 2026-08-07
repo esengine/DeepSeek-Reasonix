@@ -16,7 +16,7 @@ const SchemaDraft202012 = "https://json-schema.org/draft/2020-12/schema"
 // SchemaTitle is the generated document's human title.
 const SchemaTitle = "Reasonix Extension Protocol v1"
 
-var rawMessageType = reflect.TypeOf(json.RawMessage{})
+var rawMessageType = reflect.TypeFor[json.RawMessage]()
 
 // BuildSchemaDocument reflection-walks the frozen registry and produces the
 // canonical JSON Schema (draft 2020-12) document: one methods object keyed by
@@ -162,7 +162,7 @@ func buildJSONSchema(defs map[string]any, typ reflect.Type) (any, error) {
 func buildObjectSchema(defs map[string]any, typ reflect.Type) (map[string]any, error) {
 	properties := map[string]any{}
 	var required []string
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		field := typ.Field(i)
 		if field.PkgPath != "" {
 			continue
@@ -215,7 +215,7 @@ func applyFieldTags(schema any, field reflect.StructField) any {
 		}
 		return schema
 	}
-	for _, tag := range strings.Split(field.Tag.Get("validate"), ",") {
+	for tag := range strings.SplitSeq(field.Tag.Get("validate"), ",") {
 		switch {
 		case tag == "nonempty":
 			if object["type"] == "string" {

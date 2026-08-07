@@ -18,7 +18,7 @@ func TestSlashCatalogCachesAcrossKeystrokes(t *testing.T) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	m.skills = make([]skill.Skill, 0, 50)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		m.skills = append(m.skills, skill.Skill{
 			Name:        fmt.Sprintf("skill-%03d", i),
 			Description: strings.Repeat("description text for catalog build ", 20),
@@ -221,7 +221,7 @@ func BenchmarkSlashCompletionKeystroke(b *testing.B) {
 	ctrl := control.New(control.Options{})
 	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 80)
 	m.skills = make([]skill.Skill, 0, 1000)
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		m.skills = append(m.skills, skill.Skill{
 			Name:        fmt.Sprintf("bench-skill-%04d", i),
 			Description: "benchmark skill description " + strings.Repeat("x", 80),
@@ -230,7 +230,7 @@ func BenchmarkSlashCompletionKeystroke(b *testing.B) {
 	_ = m.slashItems() // warm catalog once
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		m.input.SetValue("/be")
 		m.updateCompletion()
 		if !m.completion.active {

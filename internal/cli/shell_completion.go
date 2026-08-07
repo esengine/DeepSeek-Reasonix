@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -448,10 +449,7 @@ func cliCompletionCandidatesWithValues(root cliCompletionSpec, cword int, words 
 	if cword < len(words) {
 		current = words[cword]
 	}
-	limit := cword
-	if limit > len(words) {
-		limit = len(words)
-	}
+	limit := min(cword, len(words))
 
 	ctx := &root
 	positionalSeen := false
@@ -537,10 +535,8 @@ func cliCompletionLookupFlag(spec *cliCompletionSpec, token string) (*cliComplet
 		inline = true
 	}
 	for i := range spec.flags {
-		for _, candidate := range spec.flags[i].names {
-			if candidate == name {
-				return &spec.flags[i], inline
-			}
+		if slices.Contains(spec.flags[i].names, name) {
+			return &spec.flags[i], inline
 		}
 	}
 	return nil, inline
@@ -552,10 +548,8 @@ func cliCompletionLookupSubcommand(spec *cliCompletionSpec, token string) *cliCo
 		if child.name == token {
 			return child
 		}
-		for _, alias := range child.aliases {
-			if alias == token {
-				return child
-			}
+		if slices.Contains(child.aliases, token) {
+			return child
 		}
 	}
 	return nil

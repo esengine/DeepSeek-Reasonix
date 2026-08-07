@@ -430,7 +430,7 @@ func TestRenderMCPStatusGroupsAndCompactsResources(t *testing.T) {
 
 func TestRenderMCPStatusCapsLongSections(t *testing.T) {
 	var resources []plugin.Resource
-	for i := 0; i < mcpMaxItemsPerSection+2; i++ {
+	for range mcpMaxItemsPerSection + 2 {
 		resources = append(resources, plugin.Resource{Server: "fs", URI: "file:///tmp/resource.md"})
 	}
 	got := renderMCPStatus(80,
@@ -648,7 +648,7 @@ func TestRenderMCPManagerListCompactsLongNames(t *testing.T) {
 		{Name: "@modelcontextprotocol/server-sequential-thinking", Transport: "stdio", Status: "deferred", Configured: true, Tier: "background"},
 	}}}
 	got := p.renderList(80)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if visibleWidth(line) > 80 {
 			t.Fatalf("line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
 		}
@@ -790,7 +790,7 @@ func TestRenderMCPManagerDetailCompactsConfigPath(t *testing.T) {
 		},
 	}
 	got := p.renderDetail(80)
-	for _, line := range strings.Split(got, "\n") {
+	for line := range strings.SplitSeq(got, "\n") {
 		if visibleWidth(line) > 80 {
 			t.Fatalf("detail line exceeds width 80 (%d): %q\n%s", visibleWidth(line), line, got)
 		}

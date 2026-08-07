@@ -86,6 +86,7 @@ mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool 
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tools
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # optional explicit trusted path; workspace-local paths are not auto-executed
 

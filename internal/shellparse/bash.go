@@ -297,7 +297,7 @@ func wordHasUnescapedBrace(word *syntax.Word) bool {
 
 func hasUnescapedMeta(value, meta string) bool {
 	escaped := false
-	for i := 0; i < len(value); i++ {
+	for i := range len(value) {
 		if escaped {
 			escaped = false
 			continue
@@ -547,7 +547,7 @@ func IsAssignment(word string) bool {
 	if !ok || name == "" {
 		return false
 	}
-	for i := 0; i < len(name); i++ {
+	for i := range len(name) {
 		c := name[i]
 		if i == 0 {
 			if c != '_' && (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') {

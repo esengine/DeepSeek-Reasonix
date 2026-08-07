@@ -86,6 +86,7 @@ func (s *Session) AddDecisionReceipt(receipt *provider.DecisionReceipt) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
 	for i := len(s.Messages) - 1; i >= 0; i-- {
 		if s.Messages[i].Role == provider.RoleUser && !s.Messages[i].LocalOnly {
 			break
@@ -123,6 +124,7 @@ func (s *Session) UpdateToolCallPreview(call provider.ToolCall) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
 	for i := len(s.Messages) - 1; i >= 0; i-- {
 		if s.Messages[i].Role != provider.RoleAssistant {
 			continue
@@ -159,6 +161,7 @@ func (s *Session) UpdateToolCallResolution(call provider.ToolCall) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	//nolint:modernize // slices.Backward yields element copies; this body writes through the index.
 	for i := len(s.Messages) - 1; i >= 0; i-- {
 		if s.Messages[i].Role != provider.RoleAssistant {
 			continue

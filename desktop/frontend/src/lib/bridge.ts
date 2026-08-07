@@ -514,6 +514,8 @@ export interface AppBindings {
   CheckUpdate(channel: string): Promise<UpdateInfo | null>;
   /** v1.20+ single-action update: download, verify, install, relaunch. */
   ApplyUpdateRequest(channel: string, expectedVersion: string, requestId: string): Promise<void>;
+  /** Discard a stuck previous update transaction so the next install can proceed. */
+  AbandonPendingUpdate?(): Promise<void>;
   OpenDownloadPage(): Promise<void>;
   OpenUserConfigPath?(): Promise<void>;
   ReloadUserConfig?(): Promise<{ configWarnings?: string[]; configPath?: string } | null>;
@@ -4668,6 +4670,7 @@ function makeMockApp(): AppBindings {
       await delay(300);
       emitUpdater({ requestId, version: expectedVersion, channel: selectedChannel, phase: "relaunching", received: 0, total: 0 });
     },
+    async AbandonPendingUpdate() {},
     async OpenDownloadPage() {
       if (typeof window !== "undefined") {
         window.open("https://reasonix.io/?download=desktop#start", "_blank", "noopener");

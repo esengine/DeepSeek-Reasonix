@@ -35,7 +35,7 @@ func TestCarriedRebuildsKeepOneSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		prevPath := ctrl.SessionPath()
 		carried := ctrl.History()
 		ctrl.Close()

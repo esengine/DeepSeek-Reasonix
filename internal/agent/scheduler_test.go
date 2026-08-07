@@ -16,10 +16,8 @@ func TestSchedulerTotalConcurrencyQueues(t *testing.T) {
 	var wg sync.WaitGroup
 	barrier := make(chan struct{})
 
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			release, err := s.Acquire(context.Background(), AcquireRequest{Writer: false})
 			if err != nil {
 				t.Errorf("acquire: %v", err)
@@ -35,7 +33,7 @@ func TestSchedulerTotalConcurrencyQueues(t *testing.T) {
 			<-barrier
 			started.Add(-1)
 			release()
-		}()
+		})
 	}
 
 	// Wait until at least 2 are running, then release them.

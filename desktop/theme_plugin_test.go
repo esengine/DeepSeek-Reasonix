@@ -45,8 +45,8 @@ func testPluginThemeManifest(id, name string) *ThemePackManifest {
 func testPNGBytes(t *testing.T) []byte {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 8, 8))
-	for y := 0; y < 8; y++ {
-		for x := 0; x < 8; x++ {
+	for y := range 8 {
+		for x := range 8 {
 			img.Set(x, y, color.RGBA{R: uint8(x * 30), G: uint8(y * 30), B: 40, A: 255})
 		}
 	}

@@ -708,6 +708,7 @@ max_output_tokens = 32768  # total visible + reasoning + tool-call output; 0 = p
 
 [environment]
 enabled = true   # inject a stable startup summary of OS, shell, and common tool versions
+offline = false  # set true when outbound network access is unavailable; prevents futile retries
 
 # Optional trusted executable paths shown to the model when PATH probing is not enough.
 # Workspace-local paths are listed but not auto-executed during startup probing.

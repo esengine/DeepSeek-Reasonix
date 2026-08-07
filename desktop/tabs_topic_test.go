@@ -3971,18 +3971,16 @@ func TestLegacyMigrationConcurrentRunsHaveNoLostUpdates(t *testing.T) {
 	}
 	const n = 8
 	want := make(map[string]bool, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		p := writeLegacySession(t, dir, fmt.Sprintf("legacy-%d.jsonl", i), "hi", time.Now())
 		want[legacySessionTopicID(p)] = true
 	}
 
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			migrateLegacySessionsIntoGlobalTopics(dir)
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -4148,17 +4146,15 @@ func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) 
 	const n = 12
 	start := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for i := range n {
+
+		wg.Go(func() {
 			<-start
 			topicID := fmt.Sprintf("topic_recovered_%02d", i)
 			if err := ensureTopicIndexed("project", projectRoot, topicID, fmt.Sprintf("Recovered %02d", i), topicTitleSourceManual); err != nil {
 				t.Errorf("ensure topic indexed: %v", err)
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()
@@ -4171,7 +4167,7 @@ func TestEnsureTopicIndexedConcurrentRunsHaveNoLostProjectUpdates(t *testing.T) 
 	for _, child := range nodes[0].Children {
 		got[child.TopicID] = true
 	}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		topicID := fmt.Sprintf("topic_recovered_%02d", i)
 		if !got[topicID] {
 			t.Fatalf("concurrent topic index recovery lost %q; children=%#v", topicID, nodes[0].Children)

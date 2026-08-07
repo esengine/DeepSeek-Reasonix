@@ -147,8 +147,8 @@ func TestStoreEnforcesObjectCap(t *testing.T) {
 func TestStoreEvictsOldestBeyondCapacity(t *testing.T) {
 	store := NewStore()
 	refs := make([]string, 0, storeMaxEntries+1)
-	for i := 0; i < storeMaxEntries+1; i++ {
-		ref, _, _, err := store.Put([]byte(fmt.Sprintf("object-%03d", i)))
+	for i := range storeMaxEntries + 1 {
+		ref, _, _, err := store.Put(fmt.Appendf(nil, "object-%03d", i))
 		if err != nil {
 			t.Fatalf("Put %d: %v", i, err)
 		}

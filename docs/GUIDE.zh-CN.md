@@ -80,6 +80,7 @@ mcp_call_timeout_seconds = 300   # MCP 调用默认安全上限；可用 plugin/
 
 [environment]
 enabled = true   # 启动时把 OS、shell 和常见工具摘要稳定注入 prompt
+offline = false  # 无出站网络时设为 true，避免 agent 无效重试网络请求
 # [environment.tools]
 # go = "/opt/homebrew/bin/go"   # 可选：显式可信路径；workspace 内路径不会在启动时自动执行
 

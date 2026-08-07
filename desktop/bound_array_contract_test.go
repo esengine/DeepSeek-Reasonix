@@ -114,12 +114,12 @@ func assertRequiredJSONSlicesNonNil(t *testing.T, path string, value reflect.Val
 		if value.Kind() == reflect.Slice && value.IsNil() {
 			t.Fatalf("%s is a nil slice; JSON contract requires []", path)
 		}
-		for i := 0; i < value.Len(); i++ {
+		for i := range value.Len() {
 			assertRequiredJSONSlicesNonNil(t, path, value.Index(i))
 		}
 	case reflect.Struct:
 		typ := value.Type()
-		for i := 0; i < value.NumField(); i++ {
+		for i := range value.NumField() {
 			fieldType := typ.Field(i)
 			if fieldType.PkgPath != "" {
 				continue

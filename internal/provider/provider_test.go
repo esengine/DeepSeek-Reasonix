@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// --- SanitizeToolPairing ---
+// SanitizeToolPairing
 
 // toolIDsAnswered reports whether every assistant tool_call id has a following
 // tool message answering it — the contract the OpenAI/DeepSeek API enforces.
@@ -391,7 +391,7 @@ func TestSanitizeToolPairingBackfillsMissingToolResultName(t *testing.T) {
 	}
 }
 
-// --- Pricing.Cost ---
+// Pricing.Cost
 
 func TestPricingCostNil(t *testing.T) {
 	var p *Pricing
@@ -477,7 +477,7 @@ func TestPricingCostZeroTokens(t *testing.T) {
 	}
 }
 
-// --- Pricing.Symbol ---
+// Pricing.Symbol
 
 func TestPricingSymbolDefault(t *testing.T) {
 	p := &Pricing{}
@@ -524,7 +524,7 @@ func TestPricingSymbolNormalizesCurrencyCodes(t *testing.T) {
 	}
 }
 
-// --- AuthError ---
+// AuthError
 
 func TestAuthErrorWithKeyEnv(t *testing.T) {
 	e := &AuthError{Provider: "deepseek", KeyEnv: "DEEPSEEK_API_KEY", Status: 401}
@@ -567,7 +567,7 @@ func TestAuthErrorImplementsError(t *testing.T) {
 	}
 }
 
-// --- Registry ---
+// Registry
 
 func TestRegistryKindsSorted(t *testing.T) {
 	// The openai package self-registers via init(); we can't control that here
@@ -615,7 +615,7 @@ func TestNewRejectsTypedNilProvider(t *testing.T) {
 	}
 }
 
-// --- Role constants ---
+// Role constants
 
 func TestRoleConstants(t *testing.T) {
 	if RoleSystem != "system" {
@@ -663,7 +663,7 @@ func TestMessageResponsesItemsRemainBackwardCompatible(t *testing.T) {
 	}
 }
 
-// --- ChunkType constants ---
+// ChunkType constants
 
 func TestChunkTypeConstants(t *testing.T) {
 	types := []ChunkType{ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallArgsDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError, ChunkResponsesItem}
@@ -674,7 +674,7 @@ func TestChunkTypeConstants(t *testing.T) {
 	}
 }
 
-// --- ToolSchema ---
+// ToolSchema
 
 func TestToolSchemaJSON(t *testing.T) {
 	ts := ToolSchema{

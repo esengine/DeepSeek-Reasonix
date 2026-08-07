@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -1273,6 +1274,7 @@ func chatREPL(args []string, version string) int {
 
 	m := newChatTUI(ctrl, missing, eventCh, termW)
 	m.diagnostics = diagnostics
+	m.updateWatchdogStatusProvider()
 	m.planMode = permissions.plan
 	m.leases = leases
 	if cfg != nil {
@@ -1445,7 +1447,7 @@ func prepareNativeScrollback(w io.Writer, rows int) {
 }
 
 func reserveNativeScrollbackFrame(w io.Writer, rows int) {
-	for i := 0; i < rows; i++ {
+	for range rows {
 		fmt.Fprintln(w)
 	}
 }
@@ -1782,12 +1784,7 @@ func buildFamilyEntry(probe config.ProviderEntry, selected []string) config.Prov
 }
 
 func containsString(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, v)
 }
 
 // filterStaleCustomEntries drops the wizard's own magic-name entries
@@ -2316,7 +2313,7 @@ func appendEnv(path string, lines []string) error {
 
 	var kept []string
 	if data, err := fileencoding.ReadFileUTF8(path); err == nil {
-		for _, raw := range strings.Split(string(data), "\n") {
+		for raw := range strings.SplitSeq(string(data), "\n") {
 			trimmed := strings.TrimSpace(raw)
 			check := strings.TrimPrefix(trimmed, "export ")
 			if k, _, ok := strings.Cut(check, "="); ok && target[strings.TrimSpace(k)] {

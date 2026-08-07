@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -670,12 +671,8 @@ func mergeEnv(base, overlay map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(base)+len(overlay))
-	for k, v := range base {
-		out[k] = v
-	}
-	for k, v := range overlay {
-		out[k] = v
-	}
+	maps.Copy(out, base)
+	maps.Copy(out, overlay)
 	return out
 }
 

@@ -1666,7 +1666,7 @@ func TestMCPCapabilityRuntimeConcurrentUpdatesAndSnapshots(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			entry.URL = fmt.Sprintf("http://127.0.0.1:%d", 10000+i)
 			runtime.UpsertServer(entry, plugin.Spec{Name: "race", Type: "http", URL: entry.URL, Authorized: true}, true)
 			runtime.state.setLiveTools("race", []plugin.CachedTool{{Name: "query", ReadOnly: true}})
@@ -1678,7 +1678,7 @@ func TestMCPCapabilityRuntimeConcurrentUpdatesAndSnapshots(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			_, _ = frontend.Execute(context.Background(), json.RawMessage(`{"action":"list"}`))
 			_, _, _, _, _ = runtime.CapabilityCatalogState()
 		}

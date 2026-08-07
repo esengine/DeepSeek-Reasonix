@@ -198,7 +198,7 @@ func looksLikeMachineSessionID(query string) bool {
 	if len(hexPart) != 32 {
 		return false
 	}
-	for i := 0; i < len(hexPart); i++ {
+	for i := range len(hexPart) {
 		c := hexPart[i]
 		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			return false

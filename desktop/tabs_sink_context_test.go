@@ -19,7 +19,7 @@ func TestTabEventSinkClearContextStopsEmission(t *testing.T) {
 	var mu sync.Mutex
 	var emitted int
 	s := &tabEventSink{tabID: "t"}
-	s.runtimeEvents.emit = func(context.Context, string, ...interface{}) {
+	s.runtimeEvents.emit = func(context.Context, string, ...any) {
 		mu.Lock()
 		emitted++
 		mu.Unlock()

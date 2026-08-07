@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -670,10 +671,7 @@ func (t *TaskTool) childMaxSteps(requested int) int {
 	if t.maxSteps <= 0 {
 		return 0
 	}
-	half := t.maxSteps / 2
-	if half < 5 {
-		half = 5
-	}
+	half := max(t.maxSteps/2, 5)
 	return half
 }
 
@@ -1896,6 +1894,9 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	if kind := opts.RequireReviewReportKind; kind != "" {
 		prompt = prompt + "\n\n" + reviewReportTaskContract(kind)
 	}
+	// Nested reasoning stays isolated; the parent consumes only final Content.
+	// Require it so a reasoning-only stop cannot fall back to older tool text.
+	opts.RequireVisibleFinal = true
 	sub := New(prov, reg, sess, opts, sink)
 	sub.SetPlanMode(planWorkflow)
 	if err := sub.Run(ctx, prompt); err != nil {
@@ -1962,6 +1963,9 @@ func NewReadOnlyAgent(prov provider.Provider, reg *tool.Registry, sess *Session,
 func NewPlannerAgent(prov provider.Provider, reg *tool.Registry, sess *Session, opts Options, sink event.Sink) *Agent {
 	opts.ReadOnlyExecution = true
 	opts.PlannerMCPExecution = true
+	// The coordinator needs visible plan text to hand off to the executor;
+	// reasoning shown in a frontend is not a substitute for that contract.
+	opts.RequireVisibleFinal = true
 	// Keep construction-time filter for ordinary tools; use_capability stays
 	// because it is ReadOnly. Direct mcp__* tools are already excluded by
 	// PlannerToolRegistry. Dynamic MCP targets are re-checked after resolve.
@@ -2045,49 +2049,13 @@ func latestAssistantAnswer(sess *Session) string {
 	if sess == nil {
 		return ""
 	}
-	for i := len(sess.Messages) - 1; i >= 0; i-- {
-		m := sess.Messages[i]
+	for _, v := range slices.Backward(sess.Messages) {
+		m := v
 		if m.Role == provider.RoleAssistant && strings.TrimSpace(m.Content) != "" {
 			return m.Content
 		}
 	}
 	return ""
-}
-
-// salvageReadinessExhaustedAnswer degrades a sub-agent's readiness exhaustion
-// from a hard failure to an explicitly unverified result. The gate exists to
-// stop unverified *claims*, not to discard finished *work*: when the child has
-// a real successful mutation on disk and a visible answer, failing the whole
-// run makes the parent believe the work is broken and spawn repair tasks for
-// changes that already landed — the failure cascade users see as a wall of
-// "background task failed" notices. The child's receipts were already merged
-// into the parent ledger, so the parent's own delivery gates still require
-// verification and review of those writes before it can final-answer.
-//
-// Salvage is refused when the child produced no successful mutation (an
-// unbacked "done" claim must keep failing, e.g. a spoofed or lazy run) and for
-// report-required review sub-agents, whose contract is the typed review_report
-// rather than prose.
-func salvageReadinessExhaustedAnswer(sub *Agent, sess *Session, opts Options, err error) (string, bool) {
-	var readinessErr *FinalReadinessError
-	if !errors.As(err, &readinessErr) {
-		return "", false
-	}
-	if opts.RequireReviewReportKind != "" {
-		return "", false
-	}
-	if sub == nil || !sub.EvidenceSummary().HasMutation() {
-		return "", false
-	}
-	answer := latestAssistantAnswer(sess)
-	if answer == "" {
-		return "", false
-	}
-	return "[unverified] The sub-agent finished its work but exhausted the host delivery sign-off checks before reporting (" +
-		readinessErr.Reason +
-		"). Its successful writes are already on disk and its receipts were merged into this turn's evidence. " +
-		"Inspect the diff and run the relevant checks before relying on the result below; do not re-run or \"fix\" the same work without first checking what already changed.\n\nSub-agent answer:\n" +
-		answer, true
 }
 
 // dumpFailedSubagentSession best-effort persists a failed report-required

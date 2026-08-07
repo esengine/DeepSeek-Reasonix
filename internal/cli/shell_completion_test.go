@@ -5,6 +5,7 @@ import (
 	"go/parser"
 	"go/token"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -296,12 +297,7 @@ func TestCLICompletionPathFlagReturnsEmptyForShellFallback(t *testing.T) {
 }
 
 func containsCompletionValue(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, target)
 }
 
 func completionRegistryKnowsRootToken(root *cliCompletionSpec, token string) bool {

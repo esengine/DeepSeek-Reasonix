@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -129,11 +130,11 @@ func recoverOrphanedPasteLabelsFromHistory(sent string, knownBlocks []pastedBloc
 		var recovered string
 		found := false
 		ambiguous := false
-		for i := len(history) - 1; i >= 0; i-- {
-			if history[i].Role != provider.RoleUser {
+		for _, v := range slices.Backward(history) {
+			if v.Role != provider.RoleUser {
 				continue
 			}
-			for _, body := range expandedPasteBodies(history[i].Content, label) {
+			for _, body := range expandedPasteBodies(v.Content, label) {
 				if !found {
 					recovered = body
 					found = true
@@ -246,10 +247,7 @@ func (m *chatTUI) takeNextPasteID() int {
 	if m.ctrl != nil {
 		m.syncPasteIDStateFromHistory(m.ctrl.History())
 	}
-	candidate := m.nextPasteID
-	if candidate < 1 {
-		candidate = 1
-	}
+	candidate := max(m.nextPasteID, 1)
 	if m.usedPasteIDs == nil {
 		m.usedPasteIDs = make(map[int]struct{})
 	}
@@ -519,7 +517,7 @@ func splitPastePathTokens(s string) []string {
 			b.Reset()
 		}
 	}
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		ch := s[i]
 		switch {
 		case escaped:
@@ -548,7 +546,7 @@ func splitPastePathTokens(s string) []string {
 
 func nonEmptyPasteLines(text string) []string {
 	var out []string
-	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+	for line := range strings.SplitSeq(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
 		line = strings.TrimSpace(line)
 		if line != "" {
 			out = append(out, line)
@@ -629,7 +627,7 @@ func pastedImagePathForOS(src, goos string) (string, bool) {
 
 func hasUnescapedPathWhitespace(s string) bool {
 	escaped := false
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		ch := s[i]
 		if escaped {
 			escaped = false

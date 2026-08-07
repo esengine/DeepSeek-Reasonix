@@ -134,7 +134,7 @@ func (s WritePathSet) Overlaps(other WritePathSet) bool {
 // ValidateNonOverlappingWriteClaims fails if any pair of claims overlaps.
 // Used by fleet preflight so no task starts when path division is invalid.
 func ValidateNonOverlappingWriteClaims(claims []WritePathSet) error {
-	for i := 0; i < len(claims); i++ {
+	for i := range claims {
 		if claims[i].Empty() {
 			continue
 		}

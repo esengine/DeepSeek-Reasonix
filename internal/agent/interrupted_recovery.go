@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"html"
+	"slices"
 	"strings"
 
 	"reasonix/internal/provider"
@@ -24,8 +25,8 @@ func (a *Agent) pendingInterruptedRecovery() *provider.InterruptedTurnRecovery {
 		return nil
 	}
 	msgs := a.session.Snapshot()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		m := msgs[i]
+	for _, v := range slices.Backward(msgs) {
+		m := v
 		if m.LocalOnly && m.InterruptedTurn != nil && m.InterruptedTurn.Pending {
 			copy := *m.InterruptedTurn
 			copy.CompletedTools = append([]provider.InterruptedToolSummary(nil), copy.CompletedTools...)

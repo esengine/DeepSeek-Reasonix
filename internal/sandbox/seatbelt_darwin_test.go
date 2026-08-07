@@ -4,11 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// --- sbplString ---
+// sbplString
 
 func TestSbplString(t *testing.T) {
 	cases := []struct {
@@ -29,7 +30,7 @@ func TestSbplString(t *testing.T) {
 	}
 }
 
-// --- writeAllowDirs ---
+// writeAllowDirs
 
 func TestWriteAllowDirsDeduplication(t *testing.T) {
 	dirs := writeAllowDirs([]string{"/tmp", "/tmp", "/tmp"})
@@ -62,13 +63,7 @@ func TestWriteAllowDirsIncludesTemp(t *testing.T) {
 	dirs := writeAllowDirs(nil)
 	tmpDir := os.TempDir()
 	realTmp, _ := filepath.EvalSymlinks(tmpDir)
-	found := false
-	for _, d := range dirs {
-		if d == realTmp {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(dirs, realTmp)
 	if !found {
 		t.Errorf("writeAllowDirs should include temp dir %s, got %v", tmpDir, dirs)
 	}
@@ -78,13 +73,7 @@ func TestWriteAllowDirsIncludesSessionTemp(t *testing.T) {
 	private := t.TempDir()
 	dirs := writeAllowDirsForSpec(Spec{SessionTemp: private, MinimalWrites: true})
 	real, _ := filepath.EvalSymlinks(private)
-	found := false
-	for _, d := range dirs {
-		if d == real {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(dirs, real)
 	if !found {
 		t.Fatalf("SessionTemp must be allowed under Seatbelt even with MinimalWrites: %v", dirs)
 	}
@@ -111,7 +100,7 @@ func TestWriteAllowDirsNoDuplicates(t *testing.T) {
 	}
 }
 
-// --- seatbeltProfile ---
+// seatbeltProfile
 
 func TestSeatbeltProfileDeniesNetwork(t *testing.T) {
 	spec := Spec{Mode: "enforce", Network: false, WriteRoots: []string{"/workspace"}}
@@ -176,12 +165,7 @@ func containsDarwinPath(paths []string, want string) bool {
 	if real, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = real
 	}
-	for _, path := range paths {
-		if path == abs {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, abs)
 }
 
 func TestCommandUnwrappedWhenOff(t *testing.T) {

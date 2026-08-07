@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -240,8 +241,8 @@ func (s Store) findActive(ref string) (Memory, string, bool) {
 	if parsed.qualified {
 		return s.findActiveInDir(s.DirFor(parsed.scope), parsed.raw)
 	}
-	for i := len(s.dirs()) - 1; i >= 0; i-- {
-		dir := s.dirs()[i]
+	for _, v := range slices.Backward(s.dirs()) {
+		dir := v
 		if memory, path, ok := s.findActiveInDir(dir, parsed.raw); ok {
 			return memory, path, true
 		}

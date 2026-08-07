@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"reasonix/internal/provider/openai"
@@ -477,12 +478,7 @@ func effortNotConfigurableError(e *ProviderEntry) error {
 }
 
 func containsString(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(haystack, needle)
 }
 
 func normalizeEffortLevel(s string) string {

@@ -59,14 +59,14 @@ func TestRuntimeRebuildsEmitRuntimeRebuiltForTab(t *testing.T) {
 	// The App-level queue must stay silent: ordering against the tab's agent
 	// events only holds when the notice rides the tab sink's own queue, so a
 	// notice showing up here means the routing regressed to the fallback.
-	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...interface{}) {
+	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...any) {
 		if name == "runtime:rebuilt" {
 			mu.Lock()
 			rebuilt = append(rebuilt, "VIA-APP-QUEUE")
 			mu.Unlock()
 		}
 	}
-	sinkEmit := func(_ context.Context, name string, payload ...interface{}) {
+	sinkEmit := func(_ context.Context, name string, payload ...any) {
 		if name != "runtime:rebuilt" {
 			return
 		}

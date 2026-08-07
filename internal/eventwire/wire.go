@@ -451,7 +451,7 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 // generator; callers receive a copy and may sort it without mutating eventwire.
 func KindNames() []string {
 	names := make([]string, 0, int(event.KindCount))
-	for kind := event.Kind(0); kind < event.KindCount; kind++ {
+	for kind := range event.KindCount {
 		if name, ok := kindNames[kind]; ok {
 			names = append(names, name)
 		}

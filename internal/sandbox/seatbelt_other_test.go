@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -122,10 +123,5 @@ func containsPath(paths []string, want string) bool {
 	if err != nil {
 		return false
 	}
-	for _, p := range paths {
-		if p == absWant {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, absWant)
 }

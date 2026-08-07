@@ -109,7 +109,7 @@ func compactionsPerTurn(t *testing.T, windowTok int, blob, finalText string, tur
 	})
 
 	perTurn = make([]int, turns)
-	for i := 0; i < turns; i++ {
+	for i := range turns {
 		before := started
 		if err := a.Run(context.Background(), fmt.Sprintf("turn %d: keep going, continue the work", i)); err != nil {
 			t.Fatalf("Run %d: %v", i, err)

@@ -4,6 +4,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"reasonix/internal/provider/openai"
@@ -125,13 +126,7 @@ func uniqueStrings(in []string) []string {
 		if s == "" {
 			continue
 		}
-		seen := false
-		for _, existing := range out {
-			if existing == s {
-				seen = true
-				break
-			}
-		}
+		seen := slices.Contains(out, s)
 		if !seen {
 			out = append(out, s)
 		}

@@ -29,6 +29,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strings"
@@ -1174,7 +1175,7 @@ func normaliseUsage(u *wireUsage) *provider.Usage {
 	}
 }
 
-// --- OpenAI-compatible wire protocol ---
+// OpenAI-compatible wire protocol
 
 type chatRequest struct {
 	Model               string         `json:"model"`
@@ -1225,9 +1226,7 @@ func (r chatRequest) MarshalJSON() ([]byte, error) {
 	if err := json.Unmarshal(raw, &body); err != nil {
 		return nil, err
 	}
-	for key, value := range cleanExtraBody(r.ExtraBody) {
-		body[key] = value
-	}
+	maps.Copy(body, cleanExtraBody(r.ExtraBody))
 	return json.Marshal(body)
 }
 

@@ -34,7 +34,7 @@ func TestPluginGitCommandDisablesLineEndingConversion(t *testing.T) {
 	}
 }
 
-// --- shared helpers ---------------------------------------------------------
+// shared helpers
 
 // execInstall marshals args, calls Execute, and unmarshals the response.
 // Failures in Execute bubble up as t.Fatal; the response is returned so the
@@ -103,7 +103,7 @@ func (s *stubConnector) connector() MCPConnector {
 	}
 }
 
-// --- apply: skill paths -----------------------------------------------------
+// apply: skill paths
 
 func TestApplyLocalSkillRootRegistersPath(t *testing.T) {
 	project := t.TempDir()
@@ -594,7 +594,7 @@ func TestApplyStrictFalseWarnsWhenDescriptionMissing(t *testing.T) {
 	}
 }
 
-// --- plan / apply: MCP paths -----------------------------------------------
+// plan / apply: MCP paths
 
 func TestPlanLocalMCPJSON(t *testing.T) {
 	project := t.TempDir()
@@ -1389,7 +1389,7 @@ func TestPlanMarkdownSkillURL(t *testing.T) {
 	}
 }
 
-// --- uninstall --------------------------------------------------------------
+// uninstall
 
 func TestUninstallRemovesSkillByName(t *testing.T) {
 	project := t.TempDir()
@@ -1577,7 +1577,7 @@ func TestUninstallRequiresName(t *testing.T) {
 	}
 }
 
-// --- approval hook ----------------------------------------------------------
+// approval hook
 
 func TestApprovalHookDeniesApply(t *testing.T) {
 	project := t.TempDir()
@@ -1649,7 +1649,7 @@ func TestPlanIDIncludesActionDetails(t *testing.T) {
 	}
 }
 
-// --- sanitizers / parsers ---------------------------------------------------
+// sanitizers / parsers
 
 func TestSanitizeNameEdges(t *testing.T) {
 	cases := map[string]string{
@@ -1735,7 +1735,7 @@ func TestPlanIDUsesResolvedActionScope(t *testing.T) {
 	}
 }
 
-// --- local executable -------------------------------------------------------
+// local executable
 
 func TestPlanLocalExecutableDetected(t *testing.T) {
 	project := t.TempDir()
@@ -1818,7 +1818,7 @@ func writeLocalExecutable(t *testing.T, dir, name string) string {
 	return path
 }
 
-// --- plan-only: RiskLevel surfacing -----------------------------------------
+// plan-only: RiskLevel surfacing
 
 func TestLinkRiskIsMedium(t *testing.T) {
 	if level, _ := skillActionRisk("link", skillCandidate{SourcePath: "x"}); level != RiskMedium {
@@ -1836,7 +1836,7 @@ func TestEagerTierEscalatesRisk(t *testing.T) {
 	}
 }
 
-// --- helpers ----------------------------------------------------------------
+// helpers
 
 // ExampleNewTool is a godoc example that exercises the public surface
 // without touching the filesystem. It also serves as smoke coverage that

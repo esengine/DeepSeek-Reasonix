@@ -253,7 +253,7 @@ func TestRenderSinkLimitsProgressMessages(t *testing.T) {
 	adapter := newFakeAdapter(PlatformWeixin, "fake-weixin")
 	sink := newRenderSink(context.Background(), adapter, "weixin-weixin", "weixin", "chat-1", ChatDM, "user-1", "msg-1", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil)
 
-	for i := 0; i < renderMaxProgressMessages+2; i++ {
+	for range renderMaxProgressMessages + 2 {
 		sink.lastProgress = time.Now().Add(-renderProgressMinInterval)
 		sink.Emit(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "tool", Name: "bash"}})
 	}

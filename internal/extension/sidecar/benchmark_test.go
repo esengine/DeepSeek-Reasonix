@@ -2,7 +2,7 @@ package sidecar
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -47,7 +47,6 @@ func BenchmarkExtensionSidecarStartup(b *testing.B) {
 // latency instead of only the dispatcher's in-process overhead.
 func BenchmarkExtensionSidecarDispatchLatency(b *testing.B) {
 	for _, count := range []int{1, 4} {
-		count := count
 		b.Run("Turn/NoopSidecars"+strconv.Itoa(count), func(b *testing.B) {
 			d := benchmarkSidecarDispatcher(b, extension.PointInputReceive, count)
 			payload := dispatch.InputPayload{Text: "hello"}
@@ -71,7 +70,7 @@ func benchmarkSidecarDispatcher(b *testing.B, point extension.InterceptorPoint, 
 	b.Helper()
 	chain := make([]extension.Contribution, 0, count)
 	clients := make(map[string]*Client, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		pluginID := "benchmark-" + strconv.Itoa(i)
 		client := startFakeClient(b, func(rt *pluginpkg.RuntimeSpec) {
 			rt.Intercepts = []string{string(point)}
@@ -110,7 +109,7 @@ func benchmarkSidecarLatency(b *testing.B, fn func() error) {
 
 func reportSidecarPercentiles(b *testing.B, samples []int64) {
 	b.Helper()
-	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	slices.Sort(samples)
 	if len(samples) == 0 {
 		return
 	}

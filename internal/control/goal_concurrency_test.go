@@ -26,9 +26,7 @@ func TestGoalStateWritesAreConcurrencySafe(t *testing.T) {
 
 	stop := make(chan struct{})
 	var readers sync.WaitGroup
-	readers.Add(1)
-	go func() {
-		defer readers.Done()
+	readers.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -40,7 +38,7 @@ func TestGoalStateWritesAreConcurrencySafe(t *testing.T) {
 				_ = c.GoalStatus()    // takes c.mu
 			}
 		}
-	}()
+	})
 
 	var writers sync.WaitGroup
 	for w := range 8 {

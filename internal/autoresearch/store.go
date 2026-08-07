@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -823,10 +824,7 @@ func tailJSONLLines(root *os.Root, path string, limit int) ([][]byte, error) {
 		off = info.Size()
 	)
 	for off > 0 {
-		readLen := int64(chunkSize)
-		if off < readLen {
-			readLen = off
-		}
+		readLen := min(off, int64(chunkSize))
 		off -= readLen
 		chunk := make([]byte, readLen)
 		if _, err := f.ReadAt(chunk, off); err != nil {
@@ -923,12 +921,7 @@ func validateHeartbeat(h Heartbeat) error {
 }
 
 func stringSliceContains(values []string, want string) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, want)
 }
 
 func cloneCriteria(in []SuccessCriterion) []SuccessCriterion {

@@ -154,11 +154,11 @@ func TestServeEndpoints(t *testing.T) {
 	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
 	defer srv.Close()
 
-	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != 200 {
+	if resp, err := http.Get(srv.URL + "/history"); err != nil || resp.StatusCode != http.StatusOK {
 		t.Fatalf("history = %v / %v", resp, err)
 	}
 
-	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != 200 {
+	if resp, _ := http.Get(srv.URL + "/context"); resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 
@@ -405,7 +405,7 @@ func TestServeIndexPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Errorf("index status = %d", resp.StatusCode)
 	}
 	ct := resp.Header.Get("Content-Type")
@@ -985,7 +985,7 @@ func TestServeContextEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		t.Errorf("context status = %d", resp.StatusCode)
 	}
 	var body map[string]int

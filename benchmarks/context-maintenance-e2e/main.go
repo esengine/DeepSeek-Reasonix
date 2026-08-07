@@ -55,7 +55,7 @@ func fakeGoFile(nonce string, i, size int) string {
 func seedSession(nonce string) *agent.Session {
 	s := agent.NewSession("You are a terse coding agent reviewing a Go codebase.")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "Review every file in module " + nonce + " one by one. Keep notes short."})
-	for i := 0; i < fatResults; i++ {
+	for i := range fatResults {
 		id := fmt.Sprintf("c%02d", i)
 		name := fmt.Sprintf("src/file%02d.go", i)
 		s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: id, Name: "read_file", Arguments: fmt.Sprintf(`{"path":%q}`, name)}}})
@@ -180,7 +180,7 @@ func resume(dir string) {
 func comprehension(trials int) {
 	p := prov()
 	pass := 0
-	for t := 0; t < trials; t++ {
+	for t := range trials {
 		dir, err := os.MkdirTemp("", "cm-e2e-")
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -198,7 +198,7 @@ func comprehension(trials int) {
 		s.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "r1", Name: "read_file", Arguments: `{"path":"config.go"}`}}})
 		s.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "r1", Name: "read_file", Content: content})
 		s.Add(provider.Message{Role: provider.RoleAssistant, Content: "Noted the constants in config.go."})
-		for i := 0; i < 4; i++ {
+		for i := range 4 {
 			s.Add(provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("ack %d", i)})
 			s.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
 		}

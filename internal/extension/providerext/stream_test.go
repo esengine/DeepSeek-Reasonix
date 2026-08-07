@@ -669,7 +669,7 @@ func TestConcurrentStreamsOnOneSidecar(t *testing.T) {
 		id  string
 	}
 	handles := make([]handle, 0, streamCount)
-	for i := 0; i < streamCount; i++ {
+	for i := range streamCount {
 		p, err := r.Resolve(provider.Selection{Ref: "plugin/demo/fake/x"})
 		if err != nil {
 			t.Fatalf("Resolve: %v", err)

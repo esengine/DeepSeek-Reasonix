@@ -26,7 +26,7 @@ type PrefixShape struct {
 // every call site, while still assigning to event.Event.CacheDiagnostics.
 type CacheDiagnostics = event.CacheDiagnostics
 
-func shortHash(v interface{}) string {
+func shortHash(v any) string {
 	b, _ := json.Marshal(v)
 	h := sha256.Sum256(b)
 	return fmt.Sprintf("%x", h[:8])
@@ -39,7 +39,7 @@ func CaptureShape(systemPrompt string, schemas []provider.ToolSchema, rewriteVer
 	return PrefixShape{
 		SystemHash: shortHash(systemPrompt),
 		ToolsHash:  shortHash(string(toolsJSON)),
-		PrefixHash: shortHash(map[string]interface{}{
+		PrefixHash: shortHash(map[string]any{
 			"system": systemPrompt,
 			"tools":  string(toolsJSON),
 		}),

@@ -28,7 +28,7 @@ func waitForHTTP(t *testing.T, addr string) {
 	t.Helper()
 	client := &http.Client{Timeout: 2 * time.Second}
 	var lastErr error
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := client.Get("http://" + addr + "/assets/logo-wordmark.svg")
 		if err == nil {
 			resp.Body.Close()

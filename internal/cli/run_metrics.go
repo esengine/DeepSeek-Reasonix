@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -154,9 +155,7 @@ func cloneCounts(in map[string]int) map[string]int {
 		return nil
 	}
 	out := make(map[string]int, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -165,9 +164,7 @@ func cloneSourceUsage(in map[string]SourceUsage) map[string]SourceUsage {
 		return nil
 	}
 	out := make(map[string]SourceUsage, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 

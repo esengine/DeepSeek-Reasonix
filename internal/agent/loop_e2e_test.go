@@ -417,7 +417,7 @@ func TestRunStreamRetryRequestCountIsLinearNotTriangular(t *testing.T) {
 func TestRunExhaustedStreamRetriesPersistPendingLocalOnly(t *testing.T) {
 	interrupted := &provider.StreamInterruptedError{Err: errors.New("eof"), Reason: provider.StreamInterruptPrematureEOF}
 	turns := make([]testutil.Turn, 0, maxSamplingAttempts)
-	for i := 0; i < maxSamplingAttempts; i++ {
+	for range maxSamplingAttempts {
 		turns = append(turns, testutil.Turn{Text: "half", ChunkError: interrupted})
 	}
 	mp := testutil.NewMock("m", turns...)
@@ -1026,7 +1026,7 @@ func TestHealthyToolCallReasoningRetriesTransientStateWriteFailure(t *testing.T)
 		t.Fatal(err)
 	}
 	permissionsRestored = true
-	for healthy := 0; healthy < missingReasoningHealthyResolveStreak-1; healthy++ {
+	for healthy := range missingReasoningHealthyResolveStreak - 1 {
 		if missing, retry := a.observeMissingToolCallReasoning(calls, "healthy reasoning"); missing || retry {
 			t.Fatalf("healthy recovery observation %d = missing:%v retry:%v, want false/false", healthy+1, missing, retry)
 		}

@@ -510,7 +510,7 @@ func BenchmarkRestoreGB18030Encoding(b *testing.B) {
 	b.SetBytes(int64(len(originalRaw)))
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if err := os.WriteFile(a, editedRaw, 0o644); err != nil {
 			b.Fatal(err)
 		}
