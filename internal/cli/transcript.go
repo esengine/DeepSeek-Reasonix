@@ -317,7 +317,7 @@ func (a transcriptResizeAnchor) yOffset(blocks []string, width int) int {
 	}
 	block := min(max(a.block, 0), len(blocks)-1)
 	offset := 0
-	for i := 0; i < block; i++ {
+	for i := range block {
 		offset += transcriptBlockLineCount(blocks[i], width)
 	}
 	lines := transcriptBlockLineCount(blocks[block], width)
@@ -473,7 +473,7 @@ func (m chatTUI) renderTranscript() string {
 
 	rows := make([]string, h)
 	bar := make([]string, h)
-	for r := 0; r < h; r++ {
+	for r := range h {
 		idx := yoff + r
 		line := blank // off-content rows fill to width
 		if idx >= 0 && idx < total {
@@ -717,15 +717,9 @@ func scrollbarThumb(height, yoff, total int) (start, size int) {
 	if total <= height {
 		return 0, 0 // no overflow → no thumb
 	}
-	size = height * height / total
-	if size < 1 {
-		size = 1
-	}
+	size = max(height*height/total, 1)
 	maxYoff := total - height
-	start = yoff * (height - size) / maxYoff
-	if start > height-size {
-		start = height - size
-	}
+	start = min(yoff*(height-size)/maxYoff, height-size)
 	return start, size
 }
 
@@ -738,13 +732,7 @@ func scrollbarYOffset(height, row, total, grabOffset int) int {
 	if maxTop <= 0 {
 		return 0
 	}
-	top := row - grabOffset
-	if top < 0 {
-		top = 0
-	}
-	if top > maxTop {
-		top = maxTop
-	}
+	top := min(max(row-grabOffset, 0), maxTop)
 	maxYoff := total - height
 	return (top*maxYoff + maxTop/2) / maxTop
 }

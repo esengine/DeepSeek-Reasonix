@@ -85,7 +85,7 @@ func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, err
 		repoBase = "repository"
 	}
 
-	for attempt := 0; attempt < 5; attempt++ {
+	for range 5 {
 		id, randomErr := randomID()
 		if randomErr != nil {
 			return Result{}, randomErr

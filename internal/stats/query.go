@@ -1,6 +1,7 @@
 package stats
 
 import (
+	"maps"
 	"sort"
 	"strings"
 	"time"
@@ -144,9 +145,7 @@ func (w *Writer) Query(f SourceFilter) (RangeStats, error) {
 		// timeline; inactive days carry zero totals. The frontend trims the
 		// left side of the chart on narrow containers instead of hiding days.
 		byModel := make(map[string]int64, len(dayTotals))
-		for k, v := range dayTotals {
-			byModel[k] = v
-		}
+		maps.Copy(byModel, dayTotals)
 		byProvider := map[string]int64{}
 		for m, v := range dayTotals {
 			byProvider[providerOf(m)] += v

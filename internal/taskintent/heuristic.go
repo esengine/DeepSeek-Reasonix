@@ -1,6 +1,7 @@
 package taskintent
 
 import (
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -28,10 +29,8 @@ func heuristicInputIsTask(input string) bool {
 
 	words := strings.Fields(normalized)
 	if len(words) <= 3 {
-		for _, greeting := range shortGreetings {
-			if normalized == greeting {
-				return false
-			}
+		if slices.Contains(shortGreetings, normalized) {
+			return false
 		}
 	}
 
@@ -43,17 +42,17 @@ func heuristicInputIsTask(input string) bool {
 		"谢谢你", "辛苦了",
 	}
 	for _, phrase := range chatPhrases {
-		index := strings.Index(normalized, phrase)
-		if index < 0 {
+		before, after, ok := strings.Cut(normalized, phrase)
+		if !ok {
 			continue
 		}
 		// Acknowledgement wording only short-circuits a purely conversational
 		// turn. Preserve a real task before it or after an explicit transition,
 		// e.g. "thanks for fixing that; now update the tests".
-		if prefix := strings.TrimSpace(normalized[:index]); prefix != "" && heuristicInputHasStrongTaskSignal(prefix) {
+		if prefix := strings.TrimSpace(before); prefix != "" && heuristicInputHasStrongTaskSignal(prefix) {
 			return true
 		}
-		if deliveryTaskHasFollowUpAfterChat(normalized[index+len(phrase):]) {
+		if deliveryTaskHasFollowUpAfterChat(after) {
 			return true
 		}
 		return false
@@ -155,14 +154,9 @@ func containsTaskNeedle(input, needle string) bool {
 	if containsNonASCII(needle) || strings.Contains(needle, " ") {
 		return strings.Contains(input, needle)
 	}
-	for _, word := range strings.FieldsFunc(input, func(r rune) bool {
+	return slices.Contains(strings.FieldsFunc(input, func(r rune) bool {
 		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_'
-	}) {
-		if word == needle {
-			return true
-		}
-	}
-	return false
+	}), needle)
 }
 
 func containsNonASCII(s string) bool {

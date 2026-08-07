@@ -356,7 +356,7 @@ func TestFleetParallelDisjointWriters(t *testing.T) {
 	f := NewFleetTool(task)
 
 	tasks := make([]map[string]any, 0, 4)
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		path := filepath.Join("docs", "f"+string(rune('0'+i))+".md")
 		tasks = append(tasks, map[string]any{
 			"prompt":      "handle " + path,

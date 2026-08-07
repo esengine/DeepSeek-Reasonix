@@ -166,13 +166,13 @@ func TestSelectedTextRestoresMathWithoutReusingRawColumns(t *testing.T) {
 	}
 
 	plain := ansi.Strip(m.wrappedLines[lineIndex])
-	formulaByte := strings.Index(plain, "α")
-	afterByte := strings.Index(plain, "after")
-	if formulaByte < 0 || afterByte < 0 {
+	before, _, ok := strings.Cut(plain, "α")
+	before0, _, ok0 := strings.Cut(plain, "after")
+	if !ok || !ok0 {
 		t.Fatalf("math line = %q", plain)
 	}
-	formulaCol := ansi.StringWidth(plain[:formulaByte])
-	afterCol := ansi.StringWidth(plain[:afterByte])
+	formulaCol := ansi.StringWidth(before)
+	afterCol := ansi.StringWidth(before0)
 
 	m.sel = selection{
 		active: true,
@@ -218,12 +218,12 @@ func TestSelectedTextRestoresMathFromReplayBundle(t *testing.T) {
 	formulaCol := -1
 	for i, line := range m.wrappedLines {
 		plain := ansi.Strip(line)
-		formulaByte := strings.Index(plain, "α")
-		if formulaByte < 0 {
+		before, _, ok := strings.Cut(plain, "α")
+		if !ok {
 			continue
 		}
 		lineIndex = i
-		formulaCol = ansi.StringWidth(plain[:formulaByte])
+		formulaCol = ansi.StringWidth(before)
 		break
 	}
 	if lineIndex < 0 {
@@ -283,12 +283,12 @@ func TestSelectedTextPreservesProseAroundMath(t *testing.T) {
 
 	for i, line := range m.wrappedLines {
 		plain := ansi.Strip(line)
-		startByte := strings.Index(plain, "before")
+		before, _, ok := strings.Cut(plain, "before")
 		endByte := strings.Index(plain, " after")
-		if startByte < 0 || endByte < 0 {
+		if !ok || endByte < 0 {
 			continue
 		}
-		startCol := ansi.StringWidth(plain[:startByte])
+		startCol := ansi.StringWidth(before)
 		endCol := ansi.StringWidth(plain[:endByte+len(" after")])
 		m.sel = selection{
 			active: true,

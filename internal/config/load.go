@@ -3,9 +3,11 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -278,9 +280,7 @@ func cloneStringMap(in map[string]string) map[string]string {
 		return nil
 	}
 	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[k] = v
-	}
+	maps.Copy(out, in)
 	return out
 }
 
@@ -1946,15 +1946,11 @@ func mergeModelLists(primary, extra []string) []string {
 
 func firstKnownModel(current string, models []string, fallback string) string {
 	current = strings.TrimSpace(current)
-	for _, model := range models {
-		if model == current {
-			return current
-		}
+	if slices.Contains(models, current) {
+		return current
 	}
-	for _, model := range models {
-		if model == fallback {
-			return fallback
-		}
+	if slices.Contains(models, fallback) {
+		return fallback
 	}
 	if len(models) > 0 {
 		return models[0]

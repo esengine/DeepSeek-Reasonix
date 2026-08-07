@@ -52,7 +52,7 @@ func TestPostWriteReceiptLargeSpanAllocationIsBounded(t *testing.T) {
 	receipts := []editReplacementReceipt{{matched: large, replacement: large, occurrences: 1}}
 	var got string
 	result := testing.Benchmark(func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			got = withActualPostWriteReceipts("edited large.txt", receipts)
 		}
 	})

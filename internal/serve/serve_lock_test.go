@@ -3,6 +3,7 @@ package serve
 import (
 	"context"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
@@ -266,7 +267,7 @@ func TestSubmitWaitsForExtensionReloadAndTargetsReplacement(t *testing.T) {
 
 	submitDone := make(chan int, 1)
 	go func() {
-		req := httptest.NewRequest("POST", "/submit", strings.NewReader(`{"input":"hello"}`))
+		req := httptest.NewRequest(http.MethodPost, "/submit", strings.NewReader(`{"input":"hello"}`))
 		rec := httptest.NewRecorder()
 		s.submit(rec, req)
 		submitDone <- rec.Code

@@ -18,7 +18,7 @@ func TestReadFileStreamsLargeGB18030(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "big.gbk")
 	var sb strings.Builder
-	for i := 0; i < 20000; i++ {
+	for range 20000 {
 		sb.WriteString("第一行中文 line one 你好世界\n")
 	}
 	sb.WriteString("终点标记 THE-END\n")
@@ -45,7 +45,7 @@ func TestReadFileLargeBoundedMemory(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "big.txt")
 	var sb strings.Builder
-	for i := 0; i < 130000; i++ { // ~8 MB, no NUL
+	for range 130000 { // ~8 MB, no NUL
 		sb.WriteString("a line of perfectly ordinary text in a large utf-8 file\n")
 	}
 	if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {

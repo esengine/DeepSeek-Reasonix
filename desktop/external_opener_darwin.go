@@ -48,7 +48,7 @@ func darwinInstalledApplicationIndex() map[string]string {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "/usr/bin/mdfind", "kMDItemContentType == 'com.apple.application-bundle'").Output()
 	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
+		for line := range strings.SplitSeq(string(out), "\n") {
 			add(line)
 		}
 	}

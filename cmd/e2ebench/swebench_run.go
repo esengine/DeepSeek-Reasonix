@@ -30,18 +30,13 @@ type swebenchOpts struct {
 	timeoutSec int
 	workers    int
 	keepImages bool
-	// network is the docker network agent containers join. It must have no
-	// route off-box; proxyURL is the only way out, and it allowlists the model
-	// API. Without this the agent finds the upstream fix on GitHub — SWE-bench
-	// instance ids are PR numbers and the issue text searches straight to the
-	// patch — and every solve is unearned.
+	// network is the isolated Docker network; proxyURL is the allowlisted API path.
 	network  string
 	proxyURL string
 }
 
-// The agent runs unconfined inside the instance container: the container is
-// already the isolation boundary, and Reasonix refuses to run bash at all when
-// it cannot find bubblewrap, which the official images do not ship.
+// The only benchmark config is sandbox.bash=off, required because official
+// images do not ship bubblewrap. Network facts are intentionally not injected.
 const swebenchAgentConfig = "[sandbox]\nbash = \"off\"\n"
 
 func loadSwebenchSubset(path string) ([]swebenchInstance, error) {
@@ -137,13 +132,101 @@ func runSwebenchInstance(o swebenchOpts, inst swebenchInstance) (result, string)
 		r.Note = "agent: " + runErr.Error()
 	}
 
-	patch, err := dockerOutput("exec", container, "bash", "-lc",
-		"cd /testbed && git add -A >/dev/null 2>&1; git diff --cached")
+	patch, err := extractTestbedPatch(container)
 	if err != nil {
-		r.Note = strings.TrimSpace(r.Note + " | diff: " + firstLine(patch))
+		r.Note = strings.TrimSpace(r.Note + " | diff: " + err.Error())
 		return r, ""
 	}
 	return r, patch
+}
+
+const patchArgBudget = 16 << 10
+
+// extractTestbedPatch drops only binary entries, which git apply cannot carry;
+// all text files are retained and paths are passed as argv.
+func extractTestbedPatch(container string) (string, error) {
+	if out, err := dockerOutput("exec", container, "git", "-C", "/testbed", "add", "-A"); err != nil {
+		return "", fmt.Errorf("add: %s", firstLine(out))
+	}
+	numstat, err := dockerOutput("exec", container, "git", "-C", "/testbed",
+		"diff", "--cached", "--no-renames", "--numstat", "-z")
+	if err != nil {
+		return "", fmt.Errorf("numstat: %s", firstLine(numstat))
+	}
+	files := patchFileList(numstat)
+	if len(files) == 0 {
+		return "", nil
+	}
+	batches, err := patchFileBatches(container, files)
+	if err != nil {
+		return "", fmt.Errorf("diff args: %w", err)
+	}
+	var patch strings.Builder
+	for _, batch := range batches {
+		out, err := dockerOutput(testbedPatchDiffArgs(container, batch)...)
+		if err != nil {
+			return "", fmt.Errorf("diff: %s", firstLine(out))
+		}
+		patch.WriteString(out)
+	}
+	return patch.String(), nil
+}
+
+func testbedPatchDiffArgs(container string, files []string) []string {
+	return append([]string{"exec", container, "git", "--literal-pathspecs", "-C", "/testbed",
+		"diff", "--cached", "--no-renames", "--"}, files...)
+}
+
+func patchFileBatches(container string, files []string) ([][]string, error) {
+	baseBytes := argvBytes(testbedPatchDiffArgs(container, nil))
+	var batches [][]string
+	current := make([]string, 0)
+	currentBytes := baseBytes
+	for _, path := range files {
+		pathBytes := len(path) + 1
+		if baseBytes+pathBytes > patchArgBudget {
+			return nil, fmt.Errorf("path %q exceeds the %d-byte argv budget", path, patchArgBudget)
+		}
+		if len(current) > 0 && currentBytes+pathBytes > patchArgBudget {
+			batches = append(batches, current)
+			current = make([]string, 0)
+			currentBytes = baseBytes
+		}
+		current = append(current, path)
+		currentBytes += pathBytes
+	}
+	if len(current) > 0 {
+		batches = append(batches, current)
+	}
+	return batches, nil
+}
+
+func argvBytes(args []string) int {
+	total := 0
+	for _, arg := range args {
+		total += len(arg) + 1
+	}
+	return total
+}
+
+// patchFileList returns every text path from numstat, excluding binary entries.
+func patchFileList(numstat string) []string {
+	var files []string
+	for entry := range strings.SplitSeq(numstat, "\x00") {
+		if entry == "" {
+			continue
+		}
+		fields := strings.SplitN(entry, "\t", 3)
+		if len(fields) != 3 {
+			continue
+		}
+		added, deleted, path := fields[0], fields[1], fields[2]
+		if added == "-" || deleted == "-" || path == "" {
+			continue // binary: not representable in an appliable text diff
+		}
+		files = append(files, path)
+	}
+	return files
 }
 
 // provisionAgent copies the binary and a credential-free home into the
@@ -296,8 +379,8 @@ func proxyEnv(url string) []string {
 }
 
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return strings.TrimSpace(s[:i])
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return strings.TrimSpace(before)
 	}
 	return strings.TrimSpace(s)
 }

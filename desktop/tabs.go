@@ -9,8 +9,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -34,7 +36,7 @@ import (
 	"reasonix/internal/worktree"
 )
 
-// --- WorkspaceTab -----------------------------------------------------------
+// WorkspaceTab
 
 // tabDisplayState follows one live runtime across visible, detached, and
 // reattached WorkspaceTab wrappers. Keeping one shared state pointer closes the
@@ -308,15 +310,11 @@ func cloneSessionUsageStats(in sessionUsageStats) sessionUsageStats {
 	out := in
 	if len(in.Sources) > 0 {
 		out.Sources = make(map[string]usageSourceStats, len(in.Sources))
-		for source, stats := range in.Sources {
-			out.Sources[source] = stats
-		}
+		maps.Copy(out.Sources, in.Sources)
 	}
 	if len(in.sourceSessionCache) > 0 {
 		out.sourceSessionCache = make(map[string]sourceSessionCacheCounters, len(in.sourceSessionCache))
-		for source, counters := range in.sourceSessionCache {
-			out.sourceSessionCache[source] = counters
-		}
+		maps.Copy(out.sourceSessionCache, in.sourceSessionCache)
 	}
 	return out
 }
@@ -1197,9 +1195,7 @@ func (t *WorkspaceTab) telemetrySnapshot() tabTelemetrySnapshot {
 	}
 	if len(t.usageTelemetry.Sources) > 0 {
 		usage.Sources = make(map[string]usageSourceStats, len(t.usageTelemetry.Sources))
-		for source, stats := range t.usageTelemetry.Sources {
-			usage.Sources[source] = stats
-		}
+		maps.Copy(usage.Sources, t.usageTelemetry.Sources)
 	}
 	usage.activeTurnStartedAt = 0
 	usage.sourceSessionCache = nil
@@ -1408,9 +1404,9 @@ func updateBufferedHistoryToolCallSummary(messages []*bufferedHistoryMessage, ca
 	if callID == "" {
 		return
 	}
-	for i := len(messages) - 1; i >= 0; i-- {
-		for j := range messages[i].message.ToolCalls {
-			call := &messages[i].message.ToolCalls[j]
+	for _, v := range slices.Backward(messages) {
+		for j := range v.message.ToolCalls {
+			call := &v.message.ToolCalls[j]
 			if call.ID != callID {
 				continue
 			}
@@ -1737,7 +1733,7 @@ func (s *tabEventSink) context() context.Context {
 	return s.ctx
 }
 
-func (s *tabEventSink) emitRuntimeEvent(name string, payload ...interface{}) {
+func (s *tabEventSink) emitRuntimeEvent(name string, payload ...any) {
 	if s == nil {
 		return
 	}
@@ -1748,12 +1744,12 @@ func (s *tabEventSink) emitRuntimeEvent(name string, payload ...interface{}) {
 	s.runtimeEvents.Emit(ctx, name, payload...)
 }
 
-type runtimeEventEmitFunc func(context.Context, string, ...interface{})
+type runtimeEventEmitFunc func(context.Context, string, ...any)
 
 type runtimeEventEnvelope struct {
 	ctx     context.Context
 	name    string
-	payload []interface{}
+	payload []any
 }
 
 // asyncRuntimeEmitter decouples Wails' runtime event bridge from agent
@@ -1775,14 +1771,14 @@ type asyncRuntimeEmitter struct {
 	running bool
 }
 
-func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...interface{}) {
+func (e *asyncRuntimeEmitter) Emit(ctx context.Context, name string, payload ...any) {
 	if ctx == nil {
 		return
 	}
 	item := runtimeEventEnvelope{
 		ctx:     ctx,
 		name:    name,
-		payload: append([]interface{}(nil), payload...),
+		payload: append([]any(nil), payload...),
 	}
 	e.mu.Lock()
 	e.queue = append(e.queue, item)
@@ -2077,8 +2073,8 @@ func lastHistoryMessageIsUser(history []provider.Message) bool {
 }
 
 func hasPendingInterruptedRecovery(history []provider.Message) bool {
-	for i := len(history) - 1; i >= 0; i-- {
-		m := history[i]
+	for _, v := range slices.Backward(history) {
+		m := v
 		if m.LocalOnly && m.InterruptedTurn != nil {
 			return m.InterruptedTurn.Pending
 		}
@@ -2104,9 +2100,9 @@ func (s *tabEventSink) eventTabAndController() (*WorkspaceTab, control.SessionAP
 }
 
 func lastUserMessageContent(msgs []provider.Message) string {
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == provider.RoleUser {
-			return agent.UserMessageText(msgs[i])
+	for _, v := range slices.Backward(msgs) {
+		if v.Role == provider.RoleUser {
+			return agent.UserMessageText(v)
 		}
 	}
 	return ""
@@ -2137,7 +2133,7 @@ func (s *tabEventSink) telemetryTab() (*WorkspaceTab, string) {
 	return tab, sp
 }
 
-// --- wire event with tab ----------------------------------------------------
+// wire event with tab
 
 func toWireTab(e event.Event, tabID string, runtimeEpoch ...string) wireEventTab {
 	w := eventwire.ToWire(e)
@@ -2174,7 +2170,7 @@ type wireEventTab struct {
 	SessionCostUsd float64 `json:"sessionCostUsd,omitempty"`
 }
 
-// --- Tab management on App --------------------------------------------------
+// Tab management on App
 
 // TabMeta is the frontend-facing shape of one tab.
 type TabMeta struct {
@@ -2892,7 +2888,7 @@ func createEmptySessionFile(dir, model string) (string, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		path := agent.NewSessionPath(dir, model)
 		f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644)
 		if err == nil {
@@ -3232,10 +3228,7 @@ func (a *App) closeTab(tabID string, allowDetach bool) error {
 	if wasActive {
 		a.activeTabID = ""
 		if len(a.tabOrder) > 0 {
-			nextIndex := closedIndex
-			if nextIndex < 0 {
-				nextIndex = 0
-			}
+			nextIndex := max(closedIndex, 0)
 			if nextIndex >= len(a.tabOrder) {
 				nextIndex = len(a.tabOrder) - 1
 			}
@@ -4388,7 +4381,7 @@ func sessionBindingFromMeta(path string, meta agent.BranchMeta) (sessionBinding,
 	}, true
 }
 
-// --- active tab helpers -----------------------------------------------------
+// active tab helpers
 
 // activeTab returns the currently active tab (nil when there are no tabs).
 // Self-locking; safe to call from any goroutine without external lock.
@@ -4451,7 +4444,7 @@ func (a *App) ctrlByTabID(tabID string) control.SessionAPI {
 	return tab.Ctrl
 }
 
-// --- autosave per tab -------------------------------------------------------
+// autosave per tab
 
 const maxTabSnapshotFailureRetries = 2
 
@@ -4673,7 +4666,7 @@ func autoTopicTitleProposalFromSession(path string) autoTopicTitleProposal {
 	if title == "" {
 		return autoTopicTitleProposal{}
 	}
-	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s", stage, strings.Join(basis, "\x00"))))
+	sum := sha256.Sum256(fmt.Appendf(nil, "%d\x00%s", stage, strings.Join(basis, "\x00")))
 	return autoTopicTitleProposal{
 		Title:     title,
 		Stage:     stage,
@@ -4799,10 +4792,7 @@ func topicTitleFromUserTurns(users []string) string {
 			continue
 		}
 		runes := len([]rune(title))
-		score := runes
-		if score > 24 {
-			score = 24
-		}
+		score := min(runes, 24)
 		if i == 0 {
 			score += 3
 		}
@@ -4854,7 +4844,7 @@ func topicTitleFromText(text string) string {
 	return text
 }
 
-// --- persistence: desktop-projects.json -------------------------------------
+// persistence: desktop-projects.json
 
 const desktopProjectsFile = "desktop-projects.json"
 const tabsFileName = "desktop-tabs.json"
@@ -5443,12 +5433,7 @@ func containsDesktopString(values []string, value string) bool {
 	if value == "" {
 		return false
 	}
-	for _, item := range uniqueStrings(values) {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(uniqueStrings(values), value)
 }
 
 func pinnedTopicIDs(topicIDs []string, pinned []string) []string {
@@ -5717,7 +5702,7 @@ func removeProject(root string) error {
 	})
 }
 
-// --- topic helpers ----------------------------------------------------------
+// topic helpers
 
 const (
 	topicTitlesFile        = "desktop-topic-titles.json"
@@ -6395,7 +6380,7 @@ func ensureTopicIndexed(scope, workspaceRoot, topicID, title, source string) err
 	return prependTopicInProjectsFile(workspaceRoot, topicID, true)
 }
 
-// --- telemetry --------------------------------------------------------------
+// telemetry
 
 func saveTelemetry(path string, snapshot tabTelemetrySnapshot) error {
 	if snapshot.Version == 0 {
@@ -6437,7 +6422,7 @@ func loadTelemetry(path string) tabTelemetrySnapshot {
 	return tabTelemetrySnapshot{Version: 1, ReadFiles: records}
 }
 
-// --- project tree -----------------------------------------------------------
+// project tree
 
 // ProjectNode is one node in the sidebar project tree (a project folder or a
 // topic leaf).
@@ -7484,7 +7469,7 @@ func (a *App) emitProjectTreeChangedEvent() {
 	a.emitRuntimeEvent("project-tree:changed")
 }
 
-func (a *App) emitRuntimeEvent(name string, payload ...interface{}) {
+func (a *App) emitRuntimeEvent(name string, payload ...any) {
 	if a == nil || a.ctx == nil {
 		return
 	}
@@ -7875,7 +7860,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 			continue
 		}
 		pendingLoads++
-		dir := dir // capture
+		// capture
 		cacheToken := projectSessionCache.versionToken(dir)
 		go func() {
 			result := sessionDirLoadResult{dir: dir}
@@ -8078,17 +8063,14 @@ func (a *App) ListProjectTree() []ProjectNode {
 	projectTopicResults := make([]projectTopics, len(f.Projects))
 	var topicLoadWg sync.WaitGroup
 	for i, p := range f.Projects {
-		i, p := i, p
-		topicLoadWg.Add(1)
-		go func() {
-			defer topicLoadWg.Done()
+		topicLoadWg.Go(func() {
 			projectTopicResults[i] = projectTopics{
 				project:    p,
 				titles:     loadTopicTitles(p.Root),
 				sources:    loadTopicTitleSources(p.Root),
 				createdAts: loadTopicCreatedAts(p.Root),
 			}
-		}()
+		})
 	}
 	topicLoadWg.Wait()
 	for _, loaded := range projectTopicResults {
@@ -8327,7 +8309,7 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 	return info
 }
 
-// --- utility ----------------------------------------------------------------
+// utility
 
 func (a *App) newUniqueTabIDLocked() string {
 	for {

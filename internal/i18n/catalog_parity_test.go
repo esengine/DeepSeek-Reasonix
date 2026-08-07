@@ -35,7 +35,7 @@ func TestCatalogsAgreeOnCodeTokens(t *testing.T) {
 
 	en := reflect.ValueOf(English)
 	typ := en.Type()
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		name := typ.Field(i).Name
 		if excluded[name] {
 			continue
@@ -57,7 +57,7 @@ func TestCatalogsAgreeOnCodeTokens(t *testing.T) {
 	}
 }
 
-// --- token extraction -------------------------------------------------
+// token extraction
 
 var (
 	reBacktick = regexp.MustCompile("`([^`]+)`")

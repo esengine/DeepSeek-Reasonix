@@ -66,7 +66,7 @@ func extensionNotification[P any](name Method, class OperationClass) MethodSpec 
 	return MethodSpec{name, DirectionExtensionToHostNotification, class, typeOf[P](), typeOf[NoResult]()}
 }
 
-func typeOf[T any]() reflect.Type { return reflect.TypeOf((*T)(nil)).Elem() }
+func typeOf[T any]() reflect.Type { return reflect.TypeFor[T]() }
 
 // frozenRegistry is the Extension Protocol v1 method set. Adding, renaming,
 // or redirecting a method is a conscious protocol change: ValidateRegistry

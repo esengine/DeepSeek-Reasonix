@@ -61,8 +61,8 @@ func marshalReloadParams(t *testing.T, sessionID string) json.RawMessage {
 func TestSessionReloadExtensionsUnknownSession(t *testing.T) {
 	svc := &service{factory: &configurableFactory{}, sessions: map[string]*acpSession{}}
 	_, err := svc.sessionReloadExtensions(context.Background(), marshalReloadParams(t, "nope"))
-	rpcErr, ok := err.(*RPCError)
-	if !ok {
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
 		t.Fatalf("err = %T %v, want *RPCError", err, err)
 	}
 	if rpcErr.Code != ErrInvalidParams {
@@ -81,8 +81,8 @@ func TestSessionReloadExtensionsUnavailableWithoutRebuilder(t *testing.T) {
 	sess := reloadExtensionsSession(t, "sess-reload-noseam", control.New(control.Options{}), notifier)
 	svc := &service{factory: &configurableFactory{}, sessions: map[string]*acpSession{sess.id: sess}}
 	_, err := svc.sessionReloadExtensions(context.Background(), marshalReloadParams(t, sess.id))
-	rpcErr, ok := err.(*RPCError)
-	if !ok {
+	var rpcErr *RPCError
+	if !errors.As(err, &rpcErr) {
 		t.Fatalf("err = %T %v, want *RPCError", err, err)
 	}
 	if rpcErr.Code != ErrInvalidRequest {

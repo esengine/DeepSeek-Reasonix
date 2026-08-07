@@ -165,7 +165,7 @@ func TestConfirmRemoteSecretDelegatesWithoutPersisting(t *testing.T) {
 func TestRemoteStatusBridgesToAsyncEmitter(t *testing.T) {
 	a := &App{ctx: context.Background()}
 	events := make(chan runtimeEventEnvelope, 4)
-	a.runtimeEvents.emit = func(ctx context.Context, name string, payload ...interface{}) {
+	a.runtimeEvents.emit = func(ctx context.Context, name string, payload ...any) {
 		events <- runtimeEventEnvelope{ctx: ctx, name: name, payload: payload}
 	}
 	a.onStatus(RemoteConnectionStatusView{HostID: "box", State: "connected"})

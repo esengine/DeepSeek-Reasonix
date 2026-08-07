@@ -303,7 +303,7 @@ func TestRepeatGuardRetainsStaleEditFailuresAcrossGoalScope(t *testing.T) {
 		TaskText: "fix prompt.txt",
 	})
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := a.Run(ctx, "continue goal"); err != nil {
 			t.Fatalf("Run %d: %v", i+1, err)
 		}
@@ -335,7 +335,7 @@ func TestRepeatGuardClearsOrdinaryWriteFailureAcrossGoalRuns(t *testing.T) {
 		TaskText: "fix prompt.txt",
 	})
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if err := a.Run(ctx, "continue goal"); err != nil {
 			t.Fatalf("Run %d: %v", i+1, err)
 		}

@@ -24,10 +24,7 @@ var (
 )
 
 func recordMainThreadHeartbeat(t time.Time) {
-	elapsed := t.Sub(mainThreadClockBase)
-	if elapsed < 0 {
-		elapsed = 0
-	}
+	elapsed := max(t.Sub(mainThreadClockBase), 0)
 	mainThreadLastHeartbeatElapsed.Store(int64(elapsed))
 	mainThreadLastHeartbeatWall.Store(t.UnixNano())
 }
@@ -38,10 +35,7 @@ func mainThreadHeartbeatAge(now time.Time) (time.Duration, time.Time, bool) {
 	if lastWall <= 0 {
 		return 0, time.Time{}, false
 	}
-	age := now.Sub(mainThreadClockBase) - lastElapsed
-	if age < 0 {
-		age = 0
-	}
+	age := max(now.Sub(mainThreadClockBase)-lastElapsed, 0)
 	return age, time.Unix(0, lastWall), true
 }
 

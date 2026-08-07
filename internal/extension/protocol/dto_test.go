@@ -319,11 +319,11 @@ func TestExternalizableFieldsAcceptNullPlaceholder(t *testing.T) {
 		[]byte(`{"surfaceId":"s","sessionId":"s","generation":0,"kind":"card","payload":null}`)); err == nil {
 		t.Fatal("non-externalizable payload accepted null")
 	}
-	pointers := ExternalizablePointers(reflect.TypeOf(InterceptParams{}))
+	pointers := ExternalizablePointers(reflect.TypeFor[InterceptParams]())
 	if !reflect.DeepEqual(pointers, []string{"/payload"}) {
 		t.Fatalf("ExternalizablePointers(InterceptParams) = %v", pointers)
 	}
-	pointers = ExternalizablePointers(reflect.TypeOf(ProviderRequest{}))
+	pointers = ExternalizablePointers(reflect.TypeFor[ProviderRequest]())
 	if !reflect.DeepEqual(pointers, []string{"/messages/*/content"}) {
 		t.Fatalf("ExternalizablePointers(ProviderRequest) = %v", pointers)
 	}

@@ -3,6 +3,7 @@ package hook
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -121,9 +122,42 @@ func isWindowsBatchExecutable(executable string) bool {
 	return strings.HasSuffix(lower, ".cmd") || strings.HasSuffix(lower, ".bat")
 }
 
+func isPOSIXShellScriptFile(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" || isWindowsBatchExecutable(path) {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	body, readErr := io.ReadAll(io.LimitReader(file, 512))
+	closeErr := file.Close()
+	if readErr != nil || closeErr != nil || len(body) < 3 || body[0] != '#' || body[1] != '!' {
+		return false
+	}
+	line := strings.TrimSpace(strings.SplitN(string(body[2:]), "\n", 2)[0])
+	if line == "" {
+		return false
+	}
+	for field := range strings.FieldsSeq(line) {
+		field = strings.Trim(strings.ToLower(field), `"'`)
+		field = strings.TrimSuffix(filepath.Base(filepath.ToSlash(field)), ".exe")
+		switch field {
+		case "sh", "bash", "dash", "zsh", "ksh":
+			return true
+		}
+	}
+	return false
+}
+
 func isSimpleWindowsBatchTail(tail string) bool {
 	quoted := false
-	for i := 0; i < len(tail); i++ {
+	for i := range len(tail) {
 		switch tail[i] {
 		case '\r', '\n':
 			return false
@@ -166,8 +200,8 @@ func hasCommandStringFlag(args []string) bool {
 		if arg == "-" || arg == "--" || !strings.HasPrefix(arg, "-") {
 			return false
 		}
-		if strings.HasPrefix(arg, "--") {
-			name, _, hasInlineValue := strings.Cut(strings.TrimPrefix(arg, "--"), "=")
+		if after, ok := strings.CutPrefix(arg, "--"); ok {
+			name, _, hasInlineValue := strings.Cut(after, "=")
 			if !hasInlineValue && bashLongOptionNeedsOperand(name) {
 				if i+1 >= len(args) {
 					return false

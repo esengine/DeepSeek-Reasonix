@@ -428,10 +428,7 @@ func visibleRange(total, sel, limit int) (int, int) {
 	if sel >= total {
 		sel = total - 1
 	}
-	start := sel - limit/2
-	if start < 0 {
-		start = 0
-	}
+	start := max(sel-limit/2, 0)
 	if start+limit > total {
 		start = total - limit
 	}

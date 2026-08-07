@@ -323,7 +323,7 @@ func parseAutoResearchEvidenceBlocks(text string) []autoResearchEvidenceBlock {
 
 func autoResearchDirectionSummary(text string) string {
 	text = agent.StripAutoResearchEvidenceBlocks(text)
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		line = strings.TrimSpace(line)
 		lower := strings.ToLower(line)
 		if line == "" || strings.HasPrefix(lower, "[goal:") {

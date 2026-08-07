@@ -451,7 +451,9 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   unbraced `$NAME` and Windows `%NAME%` spellings), so plugin-relative paths
   do not depend on the target shell's environment-variable syntax. On Windows,
   shell-form hooks without an explicit shell use the same Git Bash-first,
-  PowerShell-fallback selection as Reasonix's shell tool. Explicit Bash hooks
+  PowerShell-fallback selection as Reasonix's shell tool; when a hook points to
+  a POSIX-shebang script file, the host also converts Windows paths to a Bash-
+  compatible form. Explicit Bash hooks
   and legacy bare `sh -c`/`bash -c` hooks are routed through a discovered Git
   for Windows Bash even when it is not on `cmd.exe`'s `PATH`; an explicit
   interpreter path remains untouched. If no usable Bash is installed, the hook

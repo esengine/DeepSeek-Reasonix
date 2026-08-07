@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -509,10 +510,7 @@ func (c *Client) Exited() bool {
 // context, and compaction family).
 func (c *Client) TimeoutFor(point extension.InterceptorPoint) time.Duration {
 	if c.rt.TimeoutMillis > 0 {
-		timeout := time.Duration(c.rt.TimeoutMillis) * time.Millisecond
-		if timeout > maxInterceptTimeout {
-			timeout = maxInterceptTimeout
-		}
+		timeout := min(time.Duration(c.rt.TimeoutMillis)*time.Millisecond, maxInterceptTimeout)
 		return timeout
 	}
 	switch point {
@@ -790,10 +788,5 @@ func mapRequestError(err error) error {
 }
 
 func containsString(items []string, value string) bool {
-	for _, item := range items {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, value)
 }

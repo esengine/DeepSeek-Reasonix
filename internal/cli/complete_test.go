@@ -367,7 +367,7 @@ func TestFileItemsSearchRespectsMenuCap(t *testing.T) {
 	defer os.Chdir(orig)
 
 	dir := t.TempDir()
-	for i := 0; i < maxCompItems; i++ {
+	for i := range maxCompItems {
 		writeAt(t, dir, filepath.Join("aa-dir-"+fmt.Sprintf("%03d", i), "file.txt"), "x")
 	}
 	writeAt(t, dir, "nested/aa-deep.js", "y")
@@ -649,7 +649,7 @@ func hasLabel(items []compItem, label string) bool {
 	return false
 }
 
-// --- fuzzy matching for / completion ---
+// fuzzy matching for / completion
 
 // TestFuzzyFilterSlashSubsequence proves the slash-menu fuzzy filter matches
 // command labels whose letters appear in order, even when they are not a

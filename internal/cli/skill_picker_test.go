@@ -202,7 +202,7 @@ func TestSkillPickerRenderDialogStyle(t *testing.T) {
 	t.Cleanup(func() { i18n.DetectLanguage("en") })
 
 	var skills []skill.Skill
-	for i := 0; i < 24; i++ {
+	for i := range 24 {
 		skills = append(skills, skill.Skill{
 			Name:        "skill-" + strings.Repeat("x", i%4) + string(rune('a'+i)),
 			Description: "this long description should stay out of the default picker list",

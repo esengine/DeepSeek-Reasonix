@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -177,9 +178,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			},
 		})
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			modelRef, effortRef := p.taskTool.effectiveProfile(t.Model, t.Effort)
 			itemCtx := withCallContext(ctx, subID, subSinkFor(subID, sink), nil, PlanModeFromContext(ctx))
 			// Route through TaskTool's unified runner so persisted parent sessions
@@ -221,7 +220,7 @@ func (p *ParallelTasksTool) Execute(ctx context.Context, args json.RawMessage) (
 			})
 			answer, ref := splitSubagentRunResult(output)
 			doneCh <- subResult{index: idx, output: answer, ref: ref}
-		}()
+		})
 	}
 
 	markCancelled := func(err error) {
@@ -300,10 +299,8 @@ func parallelGroupTerminalPhase(ctx context.Context, err error, statuses []paral
 	if ctx.Err() != nil {
 		return subagentPhaseCancelled
 	}
-	for _, st := range statuses {
-		if st == parallelTaskFailed {
-			return subagentPhaseFailed
-		}
+	if slices.Contains(statuses, parallelTaskFailed) {
+		return subagentPhaseFailed
 	}
 	if err != nil {
 		return subagentPhaseFailed

@@ -19,9 +19,9 @@ func splitList(s string) []string {
 func parseProxyList(list, scheme string) *url.URL {
 	var fallback string
 	for _, f := range splitList(list) {
-		if i := strings.IndexByte(f, '='); i >= 0 {
-			if strings.EqualFold(f[:i], scheme) {
-				return hostProxyURL(f[i+1:])
+		if before, after, ok := strings.Cut(f, "="); ok {
+			if strings.EqualFold(before, scheme) {
+				return hostProxyURL(after)
 			}
 			continue
 		}

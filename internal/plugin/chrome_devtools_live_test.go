@@ -35,8 +35,7 @@ func TestChromeDevtoolsMCPLive(t *testing.T) {
 	stdioShellPATH = func(context.Context) string { return os.Getenv("PATH") }
 	t.Cleanup(func() { stdioShellPATH = oldShellPATH })
 
-	lifeCtx, lifeCancel := context.WithCancel(context.Background())
-	defer lifeCancel()
+	lifeCtx := t.Context()
 	callCtx, callCancel := context.WithTimeout(lifeCtx, 2*time.Minute)
 	defer callCancel()
 

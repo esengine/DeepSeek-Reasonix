@@ -110,7 +110,7 @@ func TestTabEventSinkDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 	var calls atomic.Int32
 
 	sink := &tabEventSink{tabID: "tab", ctx: context.Background()}
-	sink.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
+	sink.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
 		if name != eventChannel {
 			t.Errorf("event name = %q, want %q", name, eventChannel)
 		}
@@ -170,7 +170,7 @@ func TestEmitProjectTreeChangedDoesNotBlockOnRuntimeEventsEmit(t *testing.T) {
 	var calls atomic.Int32
 
 	app := &App{ctx: context.Background()}
-	app.runtimeEvents.emit = func(_ context.Context, name string, payload ...interface{}) {
+	app.runtimeEvents.emit = func(_ context.Context, name string, payload ...any) {
 		if name != "project-tree:changed" {
 			t.Errorf("event name = %q, want project-tree:changed", name)
 		}
@@ -221,7 +221,7 @@ func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
 	var calls atomic.Int32
 
 	emitter := &asyncRuntimeEmitter{}
-	emitter.emit = func(_ context.Context, _ string, payload ...interface{}) {
+	emitter.emit = func(_ context.Context, _ string, payload ...any) {
 		if len(payload) != 1 {
 			t.Errorf("payload count = %d, want 1", len(payload))
 			return
@@ -239,7 +239,7 @@ func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	for i := 0; i < backlog; i++ {
+	for i := range backlog {
 		emitter.Emit(ctx, "agent:event", strconv.Itoa(i))
 	}
 
@@ -250,7 +250,7 @@ func TestAsyncRuntimeEmitterDrainsBacklogInOrder(t *testing.T) {
 	}
 	close(release)
 
-	for i := 0; i < backlog; i++ {
+	for i := range backlog {
 		select {
 		case got := <-delivered:
 			if want := strconv.Itoa(i); got != want {

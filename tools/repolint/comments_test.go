@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func rules(t *testing.T, rel, src string) []string {
 	t.Helper()
@@ -57,14 +60,15 @@ func TestEssayWeightIsTheExcessOverTheLimit(t *testing.T) {
 
 func TestDocGoCarriesTheLongPackageExplanation(t *testing.T) {
 	long := "package p\n"
-	doc := "// Package p explains itself.\n"
+	var doc strings.Builder
+	doc.WriteString("// Package p explains itself.\n")
 	for range capPackageDoc + 2 {
-		doc += "//\n// more prose\n"
+		doc.WriteString("//\n// more prose\n")
 	}
-	if got := rules(t, "sub/doc.go", doc+long); len(got) != 0 {
+	if got := rules(t, "sub/doc.go", doc.String()+long); len(got) != 0 {
 		t.Fatalf("doc.go package comment flagged: %v", got)
 	}
-	if got := rules(t, "sub/other.go", doc+long); len(got) == 0 {
+	if got := rules(t, "sub/other.go", doc.String()+long); len(got) == 0 {
 		t.Fatal("same package comment outside doc.go should be flagged")
 	}
 }

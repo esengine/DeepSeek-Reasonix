@@ -107,20 +107,72 @@ var ErrPendingUpdateAwaitingHealth = errors.New("previous update is awaiting sta
 
 var errPendingUpdateForeignInstall = errors.New("pending update belongs to a different installation")
 
+// pendingUpdateHealthStaleAfter bounds how long Reconcile waits for startup
+// health before auto-committing a still-running probationary target.
+var pendingUpdateHealthStaleAfter = 24 * time.Hour
+
 // PendingUpdateReconcileResult describes the safe transition performed before
-// startup or a new install. Cleared means a pre-publish transaction was
-// cancelled while every original target still matched its prepared state.
-// RolledBack means replacement had started and the verified previous release
-// unit was restored.
+// startup or a new install. Cleared = pre-publish cancel; RolledBack = verified
+// restore; Healthy = probationary target committed after install evidence.
 type PendingUpdateReconcileResult struct {
 	Pending        bool   `json:"pending"`
 	Cleared        bool   `json:"cleared,omitempty"`
 	RolledBack     bool   `json:"rolledBack,omitempty"`
 	MixedInstall   bool   `json:"mixedInstall,omitempty"`
 	AwaitingHealth bool   `json:"awaitingHealth,omitempty"`
+	Healthy        bool   `json:"healthy,omitempty"`
 	FromVersion    string `json:"fromVersion,omitempty"`
 	ToVersion      string `json:"toVersion,omitempty"`
 	TargetPath     string `json:"targetPath,omitempty"`
+}
+
+// UpdateVersionsEqual reports whether two release version strings name the same
+// release, normalizing an optional leading "v"/"V" prefix.
+func UpdateVersionsEqual(a, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	if a == b {
+		return true
+	}
+	return normalizeUpdateVersion(a) == normalizeUpdateVersion(b)
+}
+
+func normalizeUpdateVersion(v string) string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return ""
+	}
+	if !strings.HasPrefix(v, "v") && !strings.HasPrefix(v, "V") {
+		return "v" + v
+	}
+	return "v" + strings.TrimPrefix(strings.TrimPrefix(v, "v"), "V")
+}
+
+// pendingUpdateHealthIsStaleOverride forces the stale decision in tests without
+// rewriting CreatedAt (part of transaction identity).
+var pendingUpdateHealthIsStaleOverride func(*UpdateTransaction) bool
+
+func pendingUpdateHealthIsStale(tx *UpdateTransaction) bool {
+	if tx == nil {
+		return false
+	}
+	if pendingUpdateHealthIsStaleOverride != nil {
+		return pendingUpdateHealthIsStaleOverride(tx)
+	}
+	if pendingUpdateHealthStaleAfter <= 0 {
+		return false
+	}
+	created, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(tx.CreatedAt))
+	if err != nil {
+		created, err = time.Parse(time.RFC3339, strings.TrimSpace(tx.CreatedAt))
+	}
+	if err != nil {
+		return false
+	}
+	return time.Since(created) >= pendingUpdateHealthStaleAfter
 }
 
 // UpdateTransactionID returns a stable, opaque identity for the complete
@@ -763,7 +815,7 @@ func PublishClaimedFileUpdateMemberExact(
 		fileUpdateAfterRetain(member.TargetPath, retained)
 		if err := verifyRepairPlanReleaseNodeStateFor(retained, member.TargetPath, preparedState); err != nil {
 			if restoreErr := restoreRepairNodeIfAbsent(retained, member.TargetPath); restoreErr != nil {
-				return FileUpdateInstallReceipt{}, fmt.Errorf("%w; verified prior release file retained at %s: %v", err, retained, restoreErr)
+				return FileUpdateInstallReceipt{}, fmt.Errorf("%w; verified prior release file retained at %s: %w", err, retained, restoreErr)
 			}
 			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: prepared release file changed during retain: %w", err)
 		}
@@ -771,7 +823,7 @@ func PublishClaimedFileUpdateMemberExact(
 	if err := renameRepairNodeNoReplace(stage, member.TargetPath); err != nil {
 		if retained != "" {
 			if restoreErr := restoreRepairNodeIfAbsent(retained, member.TargetPath); restoreErr != nil {
-				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: publish %s: %w; verified prior release file retained at %s: %v", filepath.Base(member.TargetPath), err, retained, restoreErr)
+				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: publish %s: %w; verified prior release file retained at %s: %w", filepath.Base(member.TargetPath), err, retained, restoreErr)
 			}
 		}
 		return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: publish %s: %w", filepath.Base(member.TargetPath), err)
@@ -781,7 +833,7 @@ func PublishClaimedFileUpdateMemberExact(
 		rejected, retainErr := moveRepairNodeToUniqueCleanup(member.TargetPath)
 		if retainErr != nil || rejected == "" {
 			if retainErr != nil {
-				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; retain rejected file: %v", filepath.Base(member.TargetPath), err, retainErr)
+				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; retain rejected file: %w", filepath.Base(member.TargetPath), err, retainErr)
 			}
 			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file disappeared before compensation", filepath.Base(member.TargetPath), err)
 		}
@@ -789,10 +841,10 @@ func PublishClaimedFileUpdateMemberExact(
 			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s", filepath.Base(member.TargetPath), err, rejected)
 		}
 		if verifyErr := verifyRepairPlanReleaseNodeStateFor(retained, member.TargetPath, preparedState); verifyErr != nil {
-			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; prepared file changed at %s: %v", filepath.Base(member.TargetPath), err, rejected, retained, verifyErr)
+			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; prepared file changed at %s: %w", filepath.Base(member.TargetPath), err, rejected, retained, verifyErr)
 		}
 		if restoreErr := restoreRepairNodeIfAbsent(retained, member.TargetPath); restoreErr != nil {
-			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; restore prepared file: %v", filepath.Base(member.TargetPath), err, rejected, restoreErr)
+			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; restore prepared file: %w", filepath.Base(member.TargetPath), err, rejected, restoreErr)
 		}
 		return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s and prepared file restored", filepath.Base(member.TargetPath), err, rejected)
 	}
@@ -1457,7 +1509,7 @@ func quarantineExistingAppBundleUpdateBackup(tx *UpdateTransaction) (string, str
 	if err != nil {
 		return "", "", fmt.Errorf("read existing handoff backup digest: %w", err)
 	}
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		quarantine := fmt.Sprintf(
 			"%s.reasonix-orphaned-%d-%d",
 			tx.BackupPath,
@@ -1476,10 +1528,10 @@ func quarantineExistingAppBundleUpdateBackup(tx *UpdateTransaction) (string, str
 			if _, statErr := os.Lstat(tx.BackupPath); statErr == nil {
 				return fmt.Errorf("%w; preserved quarantined backup at %s because the public path was recreated", cause, quarantine)
 			} else if !os.IsNotExist(statErr) {
-				return fmt.Errorf("%w; inspect recreated handoff backup: %v", cause, statErr)
+				return fmt.Errorf("%w; inspect recreated handoff backup: %w", cause, statErr)
 			}
 			if restoreErr := renameRepairNodeNoReplace(quarantine, tx.BackupPath); restoreErr != nil {
-				return fmt.Errorf("%w; preserved quarantined backup at %s: %v", cause, quarantine, restoreErr)
+				return fmt.Errorf("%w; preserved quarantined backup at %s: %w", cause, quarantine, restoreErr)
 			}
 			return cause
 		}
@@ -1648,7 +1700,7 @@ func removePendingUpdateExactVerified(expected *UpdateTransaction, verify func()
 	updateCleanupAfterRename(path, cleanup)
 	restore := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(cleanup, path); restoreErr != nil {
-			return fmt.Errorf("%w; pending transaction retained at %s: %v", cause, cleanup, restoreErr)
+			return fmt.Errorf("%w; pending transaction retained at %s: %w", cause, cleanup, restoreErr)
 		}
 		return cause
 	}
@@ -2004,8 +2056,20 @@ func ReconcilePendingUpdate(runningVersion string) (PendingUpdateReconcileResult
 		ToVersion:   tx.ToVersion,
 		TargetPath:  tx.TargetPath,
 	}
-	if strings.TrimSpace(runningVersion) == strings.TrimSpace(tx.ToVersion) &&
+	if UpdateVersionsEqual(runningVersion, tx.ToVersion) &&
 		pendingUpdateInstalledForHealth(tx) {
+		// After the stale window, auto-commit a still-running probationary target.
+		if pendingUpdateHealthIsStale(tx) {
+			if healErr := MarkUpdateHealthy(runningVersion); healErr == nil && !PendingUpdateExists() {
+				result.Pending = false
+				result.Healthy = true
+				result.Cleared = true
+				return result, nil
+			} else if healErr != nil {
+				slog.Warn("repair: stale probationary update could not be committed automatically",
+					"toVersion", tx.ToVersion, "err", healErr)
+			}
+		}
 		result.AwaitingHealth = true
 		return result, ErrPendingUpdateAwaitingHealth
 	}
@@ -2050,6 +2114,141 @@ func ReconcilePendingUpdate(runningVersion string) (PendingUpdateReconcileResult
 	result.RolledBack = true
 	cleanupPendingUpdateStaging(tx)
 	return result, nil
+}
+
+// CommitProbationaryPendingUpdate commits a still-running probationary update
+// when install evidence matches. Returns true when the marker is gone.
+func CommitProbationaryPendingUpdate(runningVersion string) (bool, error) {
+	if strings.TrimSpace(runningVersion) == "" {
+		return false, nil
+	}
+	tx, err := ReadPendingUpdate()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if !UpdateVersionsEqual(runningVersion, tx.ToVersion) || !pendingUpdateInstalledForHealth(tx) {
+		return false, nil
+	}
+	if err := MarkUpdateHealthy(runningVersion); err != nil {
+		return false, err
+	}
+	return !PendingUpdateExists(), nil
+}
+
+// AbandonPendingUpdate is the user-initiated recovery path for a stuck
+// transaction: commit if possible, else reconcile, else force-retire.
+func AbandonPendingUpdate(runningVersion string) (PendingUpdateReconcileResult, error) {
+	committed, commitErr := CommitProbationaryPendingUpdate(runningVersion)
+	if commitErr == nil && committed {
+		return PendingUpdateReconcileResult{Cleared: true, Healthy: true}, nil
+	}
+	if commitErr != nil {
+		// Keep going: a drifted backup must not block explicit discard.
+		slog.Debug("repair: probationary commit during abandon failed; continuing",
+			"err", commitErr)
+	}
+	result, reconcileErr := ReconcilePendingUpdate(runningVersion)
+	if reconcileErr == nil {
+		return result, nil
+	}
+	// Force-retire when still AwaitingHealth with the live target installed.
+	if errors.Is(reconcileErr, ErrPendingUpdateAwaitingHealth) {
+		if retired, retireErr := forceRetireProbationaryPendingUpdate(runningVersion); retireErr != nil {
+			return result, fmt.Errorf("abandon pending update: %w", retireErr)
+		} else if retired {
+			result.Pending = false
+			result.AwaitingHealth = false
+			result.Healthy = true
+			result.Cleared = true
+			return result, nil
+		}
+	}
+	if commitErr != nil && reconcileErr != nil {
+		return result, fmt.Errorf("abandon pending update: %w", errors.Join(reconcileErr, commitErr))
+	}
+	return result, reconcileErr
+}
+
+// forceRetireProbationaryPendingUpdate retires a probationary marker when the
+// live target is installed but MarkUpdateHealthy cannot finish (e.g. bad backup).
+func forceRetireProbationaryPendingUpdate(runningVersion string) (bool, error) {
+	tx, err := ReadPendingUpdate()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	// Target-only evidence: broken rollback backups must not block discard.
+	if !UpdateVersionsEqual(runningVersion, tx.ToVersion) || !pendingUpdateTargetInstalled(tx) {
+		return false, nil
+	}
+	unlock, err := acquirePendingUpdateLock()
+	if err != nil {
+		return false, fmt.Errorf("force retire probationary update: lock pending transaction: %w", err)
+	}
+	defer unlock()
+	current, err := ReadPendingUpdate()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if UpdateTransactionID(current) != UpdateTransactionID(tx) {
+		return false, fmt.Errorf("force retire probationary update: pending transaction changed")
+	}
+	if !UpdateVersionsEqual(runningVersion, current.ToVersion) || !pendingUpdateTargetInstalled(current) {
+		return false, nil
+	}
+	unlockTargets, lockErr := lockRepairMutations(pendingUpdateTargetPaths(current)...)
+	if lockErr != nil {
+		return false, fmt.Errorf("force retire probationary update: lock targets: %w", lockErr)
+	}
+	defer unlockTargets()
+	recheck, err := ReadPendingUpdate()
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	if !reflect.DeepEqual(current, recheck) {
+		return false, fmt.Errorf("force retire probationary update: pending transaction changed while waiting")
+	}
+	verifyInstalled := func() error {
+		if !pendingUpdateTargetInstalled(recheck) {
+			return fmt.Errorf("installed target no longer matches the pending transaction")
+		}
+		return nil
+	}
+	if err := removePendingUpdateExactVerified(recheck, verifyInstalled); err != nil {
+		return false, err
+	}
+	removeUpdateBackups(recheck)
+	slog.Warn("repair: force-retired a probationary pending update after explicit abandon",
+		"toVersion", recheck.ToVersion, "target", recheck.TargetPath)
+	return true, nil
+}
+
+// pendingUpdateTargetInstalled reports live replacement install evidence only
+// (no rollback backup requirement). Used by force-retire on explicit abandon.
+func pendingUpdateTargetInstalled(tx *UpdateTransaction) bool {
+	if tx == nil {
+		return false
+	}
+	switch tx.TargetKind {
+	case "app-bundle":
+		return VerifyAppBundleUpdateHandoffTarget(tx) == nil
+	case "file":
+		_, bound, err := installedFileUpdateTargets(tx, true)
+		return err == nil && bound
+	default:
+		return false
+	}
 }
 
 // pendingUpdateInstalledForHealth requires transaction-bound evidence for the
@@ -2129,7 +2328,7 @@ func markUpdateHealthyInvocation(runningVersion, expectedCreatedAt, expectedTran
 		}
 		return err
 	}
-	if strings.TrimSpace(runningVersion) != strings.TrimSpace(tx.ToVersion) {
+	if !UpdateVersionsEqual(runningVersion, tx.ToVersion) {
 		return nil
 	}
 	if expected := strings.TrimSpace(expectedCreatedAt); expected != "" && expected != strings.TrimSpace(tx.CreatedAt) {
@@ -2159,7 +2358,7 @@ func markUpdateHealthyMatching(runningVersion, expectedCreatedAt, expectedTransa
 		}
 		return err
 	}
-	if strings.TrimSpace(runningVersion) != strings.TrimSpace(tx.ToVersion) {
+	if !UpdateVersionsEqual(runningVersion, tx.ToVersion) {
 		return nil
 	}
 	if expected := strings.TrimSpace(expectedCreatedAt); expected != "" && expected != strings.TrimSpace(tx.CreatedAt) {
@@ -2428,7 +2627,7 @@ func removeUpdateNodeMatching(path string, verify func(string) error, directory 
 	updateCleanupAfterRename(path, cleanup)
 	restore := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(cleanup, path); restoreErr != nil {
-			return fmt.Errorf("%w; changed update node retained at %s: %v", cause, cleanup, restoreErr)
+			return fmt.Errorf("%w; changed update node retained at %s: %w", cause, cleanup, restoreErr)
 		}
 		return cause
 	}
@@ -2696,7 +2895,7 @@ func rollbackPendingUpdateMatchingLocked(
 			if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, retainedFailedState); verifyErr != nil {
 				if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 					result.MixedInstall = true
-					return result, fmt.Errorf("%w; preserve moved live bundle at %s: %v", verifyErr, failed, restoreErr)
+					return result, fmt.Errorf("%w; preserve moved live bundle at %s: %w", verifyErr, failed, restoreErr)
 				}
 				return result, verifyErr
 			}
@@ -2707,7 +2906,7 @@ func rollbackPendingUpdateMatchingLocked(
 				if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, expected); verifyErr != nil {
 					if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 						result.MixedInstall = true
-						return result, fmt.Errorf("%w; preserve moved live bundle at %s: %v", verifyErr, failed, restoreErr)
+						return result, fmt.Errorf("%w; preserve moved live bundle at %s: %w", verifyErr, failed, restoreErr)
 					}
 					return result, verifyErr
 				}
@@ -2727,11 +2926,11 @@ func rollbackPendingUpdateMatchingLocked(
 			if retainedFailed {
 				if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, retainedFailedState); verifyErr != nil {
 					result.MixedInstall = true
-					return result, fmt.Errorf("rollback update: restore bundle: %w (retained live bundle changed at %s: %v)", err, failed, verifyErr)
+					return result, fmt.Errorf("rollback update: restore bundle: %w (retained live bundle changed at %s: %w)", err, failed, verifyErr)
 				}
 				if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 					result.MixedInstall = true
-					return result, fmt.Errorf("rollback update: restore bundle: %w (preserve replacement at %s: %v)", err, failed, restoreErr)
+					return result, fmt.Errorf("rollback update: restore bundle: %w (preserve replacement at %s: %w)", err, failed, restoreErr)
 				}
 			}
 			return result, fmt.Errorf("rollback update: restore bundle: %w", err)
@@ -2753,7 +2952,7 @@ func rollbackPendingUpdateMatchingLocked(
 			if moveErr != nil || rejected == "" {
 				result.MixedInstall = true
 				if moveErr != nil {
-					return result, fmt.Errorf("%w; retain rejected bundle: %v", mismatchErr, moveErr)
+					return result, fmt.Errorf("%w; retain rejected bundle: %w", mismatchErr, moveErr)
 				}
 				return result, fmt.Errorf("%w; rejected bundle disappeared before compensation", mismatchErr)
 			}
@@ -2763,15 +2962,15 @@ func rollbackPendingUpdateMatchingLocked(
 			}
 			if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, retainedFailedState); verifyErr != nil {
 				result.MixedInstall = true
-				return result, fmt.Errorf("%w; rejected bundle retained at %s; prior live bundle changed at %s: %v", mismatchErr, rejected, failed, verifyErr)
+				return result, fmt.Errorf("%w; rejected bundle retained at %s; prior live bundle changed at %s: %w", mismatchErr, rejected, failed, verifyErr)
 			}
 			if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 				result.MixedInstall = true
-				return result, fmt.Errorf("%w; rejected bundle retained at %s; restore prior live bundle: %v", mismatchErr, rejected, restoreErr)
+				return result, fmt.Errorf("%w; rejected bundle retained at %s; restore prior live bundle: %w", mismatchErr, rejected, restoreErr)
 			}
 			if verifyErr := verifyRepairPlanReleaseNodeStateFor(tx.TargetPath, tx.TargetPath, retainedFailedState); verifyErr != nil {
 				result.MixedInstall = true
-				return result, fmt.Errorf("%w; rejected bundle retained at %s; restored prior live bundle changed: %v", mismatchErr, rejected, verifyErr)
+				return result, fmt.Errorf("%w; rejected bundle retained at %s; restored prior live bundle changed: %w", mismatchErr, rejected, verifyErr)
 			}
 			return result, fmt.Errorf("%w; rejected bundle retained at %s and prior live bundle restored", mismatchErr, rejected)
 		}
@@ -2807,7 +3006,7 @@ func rollbackPendingUpdateMatchingLocked(
 }
 
 func retainUpdateRollbackNode(path, suffix string) (string, error) {
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		retained := fmt.Sprintf(
 			"%s.%s-%d-%d",
 			path,
@@ -2988,7 +3187,7 @@ func restoreReleaseUnit(
 				swapErr = verifyErr
 				if restoreErr := restoreRepairNodeIfAbsent(aside, f.TargetPath); restoreErr != nil {
 					preserveAside[i] = true
-					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %v", verifyErr, aside, restoreErr)
+					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %w", verifyErr, aside, restoreErr)
 				} else {
 					asides[i] = ""
 				}
@@ -3001,7 +3200,7 @@ func restoreReleaseUnit(
 					swapErr = fmt.Errorf("installed release file %s changed before rollback: %w", filepath.Base(f.TargetPath), verifyErr)
 					if restoreErr := restoreRepairNodeIfAbsent(aside, f.TargetPath); restoreErr != nil {
 						preserveAside[i] = true
-						swapErr = fmt.Errorf("%w; preserve moved live target at %s: %v", swapErr, aside, restoreErr)
+						swapErr = fmt.Errorf("%w; preserve moved live target at %s: %w", swapErr, aside, restoreErr)
 					} else {
 						asides[i] = ""
 					}
@@ -3016,7 +3215,7 @@ func restoreReleaseUnit(
 				swapErr = verifyErr
 				if restoreErr := restoreRepairNodeIfAbsent(aside, f.TargetPath); restoreErr != nil {
 					preserveAside[i] = true
-					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %v", verifyErr, aside, restoreErr)
+					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %w", verifyErr, aside, restoreErr)
 				} else {
 					asides[i] = ""
 				}
@@ -3161,7 +3360,7 @@ func stageUpdateRollbackBackup(
 	file UpdateTransactionFile,
 	mode os.FileMode,
 ) (string, string, error) {
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		stage := fmt.Sprintf(
 			"%s.reasonix-rollback-stage-%d-%d",
 			file.TargetPath,

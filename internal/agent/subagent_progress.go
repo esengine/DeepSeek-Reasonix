@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -376,7 +377,7 @@ func (m *subagentProgressMerger) stepLocked() bool {
 		return false
 	}
 	now := m.clock.Now()
-	for i := 0; i < n; i++ {
+	for i := range n {
 		idx := (m.rr + i) % n
 		childID := m.order[idx]
 		if m.tokens < 1 {
@@ -548,10 +549,8 @@ func (m *subagentProgressMerger) pendingBytesLocked(childID string) int {
 }
 
 func (m *subagentProgressMerger) ensureOrderLocked(childID string) {
-	for _, id := range m.order {
-		if id == childID {
-			return
-		}
+	if slices.Contains(m.order, childID) {
+		return
 	}
 	m.order = append(m.order, childID)
 }

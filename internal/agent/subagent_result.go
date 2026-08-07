@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -91,10 +92,7 @@ func (t *SubagentResultTool) Execute(ctx context.Context, args json.RawMessage) 
 	if p.OffsetBytes < len(answer) && !utf8.RuneStart(answer[p.OffsetBytes]) {
 		return "", fmt.Errorf("offset_bytes %d is not at a UTF-8 character boundary; use next_offset_bytes from the previous page", p.OffsetBytes)
 	}
-	end := p.OffsetBytes + p.LimitBytes
-	if end > len(answer) {
-		end = len(answer)
-	}
+	end := min(p.OffsetBytes+p.LimitBytes, len(answer))
 	for end > p.OffsetBytes && end < len(answer) && !utf8.RuneStart(answer[end]) {
 		end--
 	}
@@ -154,9 +152,9 @@ func (s *SubagentStore) ReadFinalAnswer(ref, parentSession, workspaceRoot string
 		return "", meta.Status, fmt.Errorf("load subagent transcript %q: %w", ref, err)
 	}
 	msgs := sess.Snapshot()
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == provider.RoleAssistant && strings.TrimSpace(msgs[i].Content) != "" {
-			return msgs[i].Content, meta.Status, nil
+	for _, v := range slices.Backward(msgs) {
+		if v.Role == provider.RoleAssistant && strings.TrimSpace(v.Content) != "" {
+			return v.Content, meta.Status, nil
 		}
 	}
 	return "", meta.Status, fmt.Errorf("subagent reference %q has no final assistant answer", ref)
@@ -183,10 +181,7 @@ func formatBoundedSubagentAggregate(prefix string, items []subagentAggregateItem
 			completed++
 		}
 	}
-	available := subagentAggregateBudgetBytes - baseBytes
-	if available < 0 {
-		available = 0
-	}
+	available := max(subagentAggregateBudgetBytes-baseBytes, 0)
 	perAnswer := 0
 	if completed > 0 {
 		perAnswer = available / completed
@@ -280,8 +275,8 @@ func splitSubagentRunResult(output string) (answer, ref string) {
 		return strings.TrimSpace(output), ""
 	}
 	const marker = "\n\nFinal answer:\n"
-	if idx := strings.Index(output, marker); idx >= 0 {
-		return strings.TrimSpace(output[idx+len(marker):]), ref
+	if _, after, ok := strings.Cut(output, marker); ok {
+		return strings.TrimSpace(after), ref
 	}
 	return strings.TrimSpace(output), ref
 }

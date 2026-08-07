@@ -8,7 +8,7 @@ import (
 	"reasonix/internal/provider"
 )
 
-// --- Kind constants ---
+// Kind constants
 
 func TestKindConstants(t *testing.T) {
 	// Verify the iota sequence is stable and sequential.
@@ -23,7 +23,7 @@ func TestKindConstants(t *testing.T) {
 	}
 }
 
-// --- Level constants ---
+// Level constants
 
 func TestLevelConstants(t *testing.T) {
 	if LevelInfo != 0 {
@@ -43,7 +43,7 @@ func TestNoticeAudienceConstants(t *testing.T) {
 	}
 }
 
-// --- FuncSink ---
+// FuncSink
 
 func TestFuncSinkEmit(t *testing.T) {
 	var received Event
@@ -126,7 +126,7 @@ func TestSyncForwardsProtocolRecoveryWithoutEmittingUIEvent(t *testing.T) {
 	}
 }
 
-// --- Discard ---
+// Discard
 
 func TestDiscardSink(t *testing.T) {
 	// Discard should accept any event without panic.
@@ -135,7 +135,7 @@ func TestDiscardSink(t *testing.T) {
 	Discard.Emit(Event{Kind: TurnDone})
 }
 
-// --- Event struct field access ---
+// Event struct field access
 
 func TestEventFields(t *testing.T) {
 	usage := &provider.Usage{PromptTokens: 100, CompletionTokens: 50}
@@ -162,7 +162,7 @@ func TestEventFields(t *testing.T) {
 	}
 }
 
-// --- Tool struct ---
+// Tool struct
 
 func TestToolStruct(t *testing.T) {
 	tool := Tool{
@@ -195,7 +195,7 @@ func TestToolStruct(t *testing.T) {
 	}
 }
 
-// --- Approval struct ---
+// Approval struct
 
 func TestApprovalStruct(t *testing.T) {
 	a := Approval{ID: "42", Tool: "bash", Subject: "rm -rf /"}
@@ -204,7 +204,7 @@ func TestApprovalStruct(t *testing.T) {
 	}
 }
 
-// --- Ask / AskQuestion / AskOption / AskAnswer ---
+// Ask / AskQuestion / AskOption / AskAnswer
 
 func TestAskStructs(t *testing.T) {
 	q := AskQuestion{
@@ -234,7 +234,7 @@ func TestAskStructs(t *testing.T) {
 	}
 }
 
-// --- Multiple Emit via channel-backed sink ---
+// Multiple Emit via channel-backed sink
 
 func TestChannelBackedSink(t *testing.T) {
 	ch := make(chan Event, 8)
@@ -264,7 +264,7 @@ func TestChannelBackedSink(t *testing.T) {
 	}
 }
 
-// --- FuncSink forwards every concurrent Emit exactly once ---
+// FuncSink forwards every concurrent Emit exactly once
 
 // FuncSink.Emit forwards to the wrapped func with no synchronization of its own,
 // so a concurrency-safe callback is the caller's responsibility (here a
@@ -280,12 +280,10 @@ func TestFuncSinkForwardsEachConcurrentEmit(t *testing.T) {
 		mu.Unlock()
 	})
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			sink.Emit(Event{Kind: Text})
-		}()
+		})
 	}
 	wg.Wait()
 	mu.Lock()

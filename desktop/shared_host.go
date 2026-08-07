@@ -73,7 +73,7 @@ func (a *App) reapOrphanCodeGraph() {
 	ours := map[int]bool{}
 	out, err := exec.Command("pgrep", "-P", strconv.Itoa(myPID)).Output()
 	if err == nil {
-		for _, f := range strings.Fields(string(out)) {
+		for f := range strings.FieldsSeq(string(out)) {
 			if pid, err := strconv.Atoi(f); err == nil {
 				ours[pid] = true
 			}
@@ -85,7 +85,7 @@ func (a *App) reapOrphanCodeGraph() {
 	if err != nil {
 		return
 	}
-	for _, f := range strings.Fields(string(out)) {
+	for f := range strings.FieldsSeq(string(out)) {
 		pid, err := strconv.Atoi(f)
 		if err != nil || pid == myPID || ours[pid] {
 			continue

@@ -238,7 +238,7 @@ func TestWorkspaceReadToolsResolveExternalReadRoots(t *testing.T) {
 	assertExternalToolError(t, tools["glob"], map[string]any{"pattern": token + "/missing/**/*.go"}, token+"/missing/**/*.go", external)
 }
 
-// --- helpers ---
+// helpers
 
 func byName(tools []tool.Tool) map[string]tool.Tool {
 	m := make(map[string]tool.Tool, len(tools))
