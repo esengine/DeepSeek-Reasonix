@@ -115,12 +115,14 @@ func TestRunVersionedLayoutDoesNotReadOrClaimLegacyPending(t *testing.T) {
 	originalClaim := claimPendingFileUpdateFn
 	originalStageInstaller := stageInstallerFn
 	originalClaimInstallerExecution := claimInstallerExecutionFn
+	originalReconcileUninstall := reconcileWindowsUninstallRegistrationFn
 	t.Cleanup(func() {
 		runInstallerFn = originalInstaller
 		startRelaunchFn = originalRelaunch
 		claimPendingFileUpdateFn = originalClaim
 		stageInstallerFn = originalStageInstaller
 		claimInstallerExecutionFn = originalClaimInstallerExecution
+		reconcileWindowsUninstallRegistrationFn = originalReconcileUninstall
 	})
 	legacyClaimed := false
 	claimPendingFileUpdateFn = func(string, string, string, string, []string, time.Duration) (*repair.UpdateTransaction, func(), error) {
@@ -131,6 +133,14 @@ func TestRunVersionedLayoutDoesNotReadOrClaimLegacyPending(t *testing.T) {
 		return path, func() error { return nil }, nil
 	}
 	claimInstallerExecutionFn = func(string, string) (func(), error) { return func() {}, nil }
+	reconciledVersion := ""
+	reconcileWindowsUninstallRegistrationFn = func(root, targetVersion string) (bool, error) {
+		if root != installDir {
+			t.Fatalf("reconcile root = %q, want %q", root, installDir)
+		}
+		reconciledVersion = targetVersion
+		return true, nil
+	}
 	runInstallerFn = func(_ string, staging string) error {
 		for _, name := range []string{"reasonix-desktop.exe", "reasonix-cli.exe", "reasonix-update-helper.exe", "reasonix-launcher.exe"} {
 			if err := os.WriteFile(filepath.Join(staging, name), []byte("new-"+name), 0o700); err != nil {
@@ -157,6 +167,9 @@ func TestRunVersionedLayoutDoesNotReadOrClaimLegacyPending(t *testing.T) {
 	}
 	if !relaunched {
 		t.Fatal("versioned update did not relaunch")
+	}
+	if reconciledVersion != "v1.20.1" {
+		t.Fatalf("reconciled version = %q, want v1.20.1", reconciledVersion)
 	}
 	ptr, err := installlayout.ReadCurrent(installDir)
 	if err != nil || ptr.ActiveVersion != "v1.20.1" {

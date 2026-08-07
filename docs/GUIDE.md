@@ -57,6 +57,7 @@ default_model = "deepseek-flash"   # executor; set [agent].planner_model to add 
 [ui]
 # shortcut_layout = "desktop"      # classic|desktop; compatibility setting
 # cursor_shape = "bar"             # block|underline|bar; CLI/TUI text cursor
+show_turn_usage = false             # hide per-request token/cost receipts in the TUI; default true
 
 [agent]
 reasoning_language = "auto"      # visible reasoning text: auto|zh|en
@@ -689,6 +690,42 @@ Reasonix always removes saved provider and bot credential variables from tool
 subprocess environments and automatically adds its global credential `.env` to
 the runtime read-deny boundary. Project `.env` files keep their existing
 workspace-scoped behavior.
+
+**Session-private temporary directory.** Within one logical chat session, Bash
+commands share a private temporary directory so consecutive calls can exchange
+files through `$TMPDIR` (and, on Linux under bubblewrap, through literal
+`/tmp`). No user setup is required: Reasonix automatically exports `TMPDIR`,
+`TMP`, and `TEMP` for Bash and client-owned ACP terminals. The directory is
+created lazily, is never the host public temporary root, and is rotated on
+`/new`, `/clear`, resume of another session, and branch switches.
+Model/settings hot rebuilds keep the same directory. Temporary files are not
+durable storage: resume across process restarts does not restore them, and
+scripts that need long-lived data should write into the workspace or a
+user-specified path.
+
+Reasonix-generated and project scripts should use the standard temporary
+environment variables rather than hard-coding `/tmp`; users should not set
+these variables themselves. For example:
+
+```sh
+tmp_file="${TMPDIR:?}/result.json"
+```
+
+```powershell
+$tmpFile = Join-Path $env:TEMP "result.json"
+```
+
+| Platform | `$TMPDIR` / `$TMP` / `$TEMP` | Literal `/tmp` |
+| --- | --- | --- |
+| Linux + bubblewrap | Virtual `/tmp` (bound to the private dir) | Shared for the session (not a fresh empty tmpfs each call) |
+| macOS Seatbelt | Host path of the private dir (allowed by policy) | Host macOS temporary directory; scripts should use `$TMPDIR` |
+| Windows (no OS Bash sandbox) | Host path of the private dir | Not promised to match (e.g. Git Bash `/tmp`) |
+
+Independent sandboxes such as MCP servers keep their own isolation and do not
+inherit the chat session's temporary directory. An approved sandbox-escape
+command still receives the private temp environment variables, but on Linux its
+literal `/tmp` is no longer mapped by bubblewrap.
+
 **Windows note:** Reasonix does not ship an OS-level Bash sandbox on Windows.
 The effective mode is fixed to `off`; even an older config containing
 `bash = "enforce"` resolves to `off`, `reasonix doctor` flags the ignored value,
@@ -1042,17 +1079,21 @@ skill in Settings -> Skills or the slash menu. Ordinary chat never changes the
 collaboration mode implicitly; choose Goal in the composer or use `/goal` to
 start a long-running objective.
 
-Goal runs under a per-class budget: simple goals get 10 turns / 200k tokens,
-write goals 20 turns / 400k tokens, and AutoResearch goals 40 turns / 800k
-tokens; four consecutive turns without host-verifiable progress pause the goal.
-A paused goal keeps its todos, Delivery checkpoint, and budget history — use
-`/goal resume` to continue (budget pauses add one more slice of the same
-class), or `/goal pause` to pause a running goal manually. `/goal status`
-shows the full runtime summary. At the end of every goal turn the model reports
-its disposition through the structured `update_goal` tool (continue/complete/
-blocked); when no report arrives, an independent bounded evaluator judges the
-turn once, and any evaluator failure pauses the goal instead of continuing
-silently.
+Goal runs under a per-class **turn** budget: simple goals get 10 turns, write
+goals 20 turns, and AutoResearch goals 40 turns; four consecutive turns without
+host-verifiable progress pause the goal. Cumulative token usage is still tracked
+and shown for diagnostics, but there is **no token hard limit** and no
+pre-provider request admission. In Goal mode, a bare bug/crash/exception
+statement defaults to the write turn class unless the user asks only for
+analysis/explanation or forbids changes. A paused goal keeps its todos, Delivery
+checkpoint, and runtime history — use `/goal resume` to continue (turn-budget
+pauses add one more slice of turns of the same class), or `/goal pause` to pause
+a running goal manually. `/goal status` shows the full runtime summary (turns
+used/limit, tokens used, no-progress, extensions). At the end of every goal turn
+the model reports its disposition through the structured `update_goal` tool
+(continue/complete/blocked); when no report arrives, an independent bounded
+evaluator judges the turn once, and any evaluator failure pauses the goal
+instead of continuing silently.
 
 For complex work, write the objective as a
 [task contract](./TASK_CONTRACT.md): Context, Request, Output format,

@@ -90,15 +90,11 @@ func (o *turnOrchestrator) runSubagentSkillTurnsGoalLoop(ctx context.Context, sk
 	if scopeID, _, ok := o.c.goals.deliveryScope(); ok {
 		recorder := o.c.goals.newTurnRecorder(scopeID, o.c.goals.continuationToken())
 		o.c.goalUsageTee.setActiveRecorder(recorder)
-		ctx = provider.WithRequestBudget(ctx, recorder)
 	}
 	if err := o.runSubagentSkillTurns(ctx, skills, task, raw, display, runner, planMode); err != nil {
 		if ctx.Err() != nil {
 			o.c.goalUsageTee.setActiveRecorder(nil)
 			o.c.stopGoal(GoalStatusStopped)
-		}
-		if errors.Is(err, provider.ErrRequestBudgetExhausted) && o.c.goals.active() {
-			return o.continueGoal(ctx, expectedContinuationEpoch, err)
 		}
 		o.c.goalUsageTee.setActiveRecorder(nil)
 		return err
@@ -125,7 +121,11 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 	startMessages := c.messageCount()
 	defer c.snapshotActivityIfChanged(startMessages)
 	defer c.recordDisplayForNewUser(startMessages, display)
-	c.beginCheckpoint(input)
+	// The checkpoint prompt labels the turn in the rewind picker (and is
+	// prefilled into the composer after a conversation rewind), so it must be
+	// the user's own text — never the composed provider input with its
+	// transient <response-language>/<reasoning-language>/memory/hook blocks.
+	c.beginCheckpoint(firstNonEmpty(raw, task))
 	if c.guardianSess != nil {
 		c.guardianSess.ResetTurn()
 	}
@@ -235,9 +235,12 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	// appended, so the recorded message boundary precedes it and pre-edit
 	// snapshots land here. Synthetic continuations stay attached to the visible
 	// turn that spawned them; otherwise hidden user-role messages would advance
-	// backend checkpoint turns without a matching frontend turn.
+	// backend checkpoint turns without a matching frontend turn. The label is
+	// the user's own text (raw, falling back to the expanded input) — the
+	// composed provider input carries transient prefab blocks that must never
+	// surface in the rewind picker or be prefilled into the composer.
 	if !turn.synthetic {
-		c.beginCheckpoint(input)
+		c.beginCheckpoint(firstNonEmpty(turn.raw, turn.input))
 	}
 	if c.guardianSess != nil {
 		c.guardianSess.ResetTurn()
@@ -262,8 +265,8 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	} else {
 		autoResearchTaskID = c.goals.currentAutoResearchTaskID()
 	}
-	autoResearchAcceptedBefore := c.autoResearchAcceptedEvidenceIDs(autoResearchTaskID)
-	c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
+	autoResearchAcceptedBefore := c.autoResearch.acceptedEvidenceIDs(autoResearchTaskID)
+	c.autoResearch.heartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
 	if continuation != nil {
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{
 			ID:       continuation.scopeID,
@@ -274,7 +277,7 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	}
 	// Goal turns get a per-turn recorder bound to the goal scope+epoch: the
 	// update_goal tool records its candidate report here, and billable usage
-	// events during the turn fold into the goal's token budget. The span stays
+	// events during the turn fold into the goal's observational token total. The span stays
 	// active until the FSM commits (advanceGoalAfterTurn) so evaluator usage
 	// also counts; error paths that skip the FSM clear it explicitly.
 	if goalScopeID, ok := c.goals.goalScopeIDForTurn(continuation); ok {
@@ -283,7 +286,6 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 			recorder.setProgressBefore(c.executor.HostProgressSignature())
 		}
 		ctx = tool.WithGoalTurnRecorder(ctx, recorder)
-		ctx = provider.WithRequestBudget(ctx, recorder)
 		c.goalUsageTee.setActiveRecorder(recorder)
 	}
 	modelInput := input
@@ -300,12 +302,13 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	err = c.runner.Run(ctx, modelInput)
 	c.persistGoalDeliveryCheckpoint()
 	if err == nil {
-		c.recordAutoResearchEvidenceFromAssistant(autoResearchTaskID, lastAssistantText(c.History()))
-		c.recordAutoResearchTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore)
-		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatTurnDone, "")
+		assistantText := lastAssistantText(c.History())
+		c.autoResearch.recordEvidenceFromAssistant(autoResearchTaskID, assistantText)
+		c.autoResearch.recordTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore, assistantText)
+		c.autoResearch.heartbeat(autoResearchTaskID, autoresearch.HeartbeatTurnDone, "")
 		c.clearInFlightTurn()
 	} else {
-		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatWarning, err.Error())
+		c.autoResearch.heartbeat(autoResearchTaskID, autoresearch.HeartbeatWarning, err.Error())
 		// When the user explicitly cancels, keep the real prompt and any fully
 		// paired tool work. Partial reasoning/output remains durable for display
 		// but is marked local-only, and a bounded recovery summary is folded into
@@ -396,7 +399,7 @@ func (o *turnOrchestrator) runGoalLoopWithRawDisplay(ctx context.Context, input,
 			return err
 		}
 		var readinessErr *agent.FinalReadinessError
-		if (!errors.As(err, &readinessErr) && !errors.Is(err, provider.ErrRequestBudgetExhausted)) || !o.c.goals.active() {
+		if !errors.As(err, &readinessErr) || !o.c.goals.active() {
 			// Terminal provider/host error (or a plain non-Goal Delivery
 			// readiness failure): stop auto-continue. With no active Goal the
 			// error surfaces the recovery card; with a Goal it stays running so
@@ -420,7 +423,7 @@ func (o *turnOrchestrator) runEditedGoalLoopWithRawDisplay(ctx context.Context, 
 			return err
 		}
 		var readinessErr *agent.FinalReadinessError
-		if (!errors.As(err, &readinessErr) && !errors.Is(err, provider.ErrRequestBudgetExhausted)) || !o.c.goals.active() {
+		if !errors.As(err, &readinessErr) || !o.c.goals.active() {
 			o.c.goalUsageTee.setActiveRecorder(nil)
 			return err
 		}
@@ -462,7 +465,7 @@ func (o *turnOrchestrator) continueGoal(ctx context.Context, expectedContinuatio
 				return err
 			}
 			var readinessErr *agent.FinalReadinessError
-			if !errors.As(err, &readinessErr) && !errors.Is(err, provider.ErrRequestBudgetExhausted) {
+			if !errors.As(err, &readinessErr) {
 				// Terminal provider/host error: stop auto-continue; the Goal
 				// stays running for the next user turn.
 				c.goalUsageTee.setActiveRecorder(nil)
@@ -498,12 +501,7 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 
 	var readiness agent.ReadinessResult
 	var readinessErr *agent.FinalReadinessError
-	var budgetErr *provider.RequestBudgetError
-	budgetRequestBlocked := ""
-	if errors.As(turnErr, &budgetErr) {
-		budgetRequestBlocked = fmt.Sprintf("token budget cannot admit another provider request (%d/%d tokens used, %d remaining; next input estimate %d)",
-			budgetErr.Used, budgetErr.Limit, budgetErr.Remaining, budgetErr.EstimatedInput)
-	} else if errors.As(turnErr, &readinessErr) {
+	if errors.As(turnErr, &readinessErr) {
 		readiness = agent.ReadinessResult{
 			Ready:       false,
 			Missing:     append([]string(nil), readinessErr.Missing...),
@@ -535,15 +533,11 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 	}
 
 	// The bounded evaluator runs once, only when the model gave no report and
-	// readiness has no definite missing list; never past an exhausted budget
-	// (no new model requests may start beyond the limit). Failures fail closed
-	// in the FSM.
+	// readiness has no definite missing list; never past an exhausted turn
+	// budget. Failures fail closed in the FSM.
 	var evaluator *goalEvaluatorVerdict
 	var evaluatorFailed string
-	if budgetRequestBlocked == "" && report == nil && len(readiness.Missing) == 0 && !c.goals.budgetExhausted() {
-		if recorder != nil {
-			ctx = provider.WithRequestBudget(ctx, recorder)
-		}
+	if report == nil && len(readiness.Missing) == 0 && !c.goals.budgetExhausted() {
 		if c.evaluator == nil {
 			evaluatorFailed = "goal evaluator unavailable"
 		} else if verdict, err := c.evaluator.Evaluate(ctx, c.goalEvaluatorEvidence()); err != nil {
@@ -562,15 +556,14 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 	}
 
 	res := c.goals.advance(goalAdvanceInput{
-		report:               report,
-		readiness:            readiness,
-		evaluator:            evaluator,
-		evaluatorFailed:      evaluatorFailed,
-		budgetRequestBlocked: budgetRequestBlocked,
-		todos:                c.goalTodos(),
-		progressBefore:       progressBefore,
-		progressAfter:        progressAfter,
-		expectedEpoch:        &expectedContinuationEpoch,
+		report:          report,
+		readiness:       readiness,
+		evaluator:       evaluator,
+		evaluatorFailed: evaluatorFailed,
+		todos:           c.goalTodos(),
+		progressBefore:  progressBefore,
+		progressAfter:   progressAfter,
+		expectedEpoch:   &expectedContinuationEpoch,
 	})
 	c.persistGoalState(res.path, res.data, res.ok)
 	if res.notice != "" {
@@ -584,13 +577,13 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 }
 
 func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {
-	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+	if !c.autoResearch.enabled() || strings.TrimSpace(taskID) == "" {
 		return
 	}
 	switch {
 	case notice == goalCompleteNotice:
 		status := autoresearch.StatusComplete
-		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status}); err != nil {
+		if err := c.autoResearch.updateProgress(taskID, autoresearch.ProgressPatch{Status: &status}); err != nil {
 			c.noticeDetail("AutoResearch status update failed.", "autoresearch task completion update failed: "+err.Error())
 			return
 		}
@@ -601,7 +594,7 @@ func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {
 		if reason == "" {
 			reason = notice
 		}
-		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status, BlockedReason: &reason}); err != nil {
+		if err := c.autoResearch.updateProgress(taskID, autoresearch.ProgressPatch{Status: &status, BlockedReason: &reason}); err != nil {
 			c.noticeDetail("AutoResearch status update failed.", "autoresearch task blocked update failed: "+err.Error())
 			return
 		}

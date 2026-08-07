@@ -74,6 +74,22 @@ func TestWriteAllowDirsIncludesTemp(t *testing.T) {
 	}
 }
 
+func TestWriteAllowDirsIncludesSessionTemp(t *testing.T) {
+	private := t.TempDir()
+	dirs := writeAllowDirsForSpec(Spec{SessionTemp: private, MinimalWrites: true})
+	real, _ := filepath.EvalSymlinks(private)
+	found := false
+	for _, d := range dirs {
+		if d == real {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("SessionTemp must be allowed under Seatbelt even with MinimalWrites: %v", dirs)
+	}
+}
+
 func TestWriteAllowDirsSkipsEmpty(t *testing.T) {
 	dirs := writeAllowDirs([]string{"", "", ""})
 	for _, d := range dirs {

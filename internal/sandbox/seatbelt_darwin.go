@@ -75,6 +75,11 @@ func writeAllowDirsForSpec(spec Spec) []string {
 	roots := spec.WriteRoots
 	dirs := append([]string{}, roots...)
 	dirs = append(dirs, "/dev")
+	if dir := strings.TrimSpace(spec.SessionTemp); dir != "" {
+		// Session-private temporary directory must be writable under Seatbelt
+		// even when MinimalWrites omits the broad host temp allowances.
+		dirs = append(dirs, dir)
+	}
 	if !spec.MinimalWrites {
 		dirs = append(dirs, "/tmp", "/private/tmp", "/private/var/folders", os.TempDir())
 	}

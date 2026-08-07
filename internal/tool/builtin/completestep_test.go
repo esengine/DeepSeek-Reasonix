@@ -637,7 +637,7 @@ func TestCompleteStepSessionFallbackUsesNormalizedMatching(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "c1", Name: "bash", Content: "ok\nPASS"},
 	}
 	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
-	ctx = evidence.WithSessionMessages(ctx, msgs)
+	ctx = evidence.WithSessionMessages(ctx, func() []provider.Message { return msgs })
 
 	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
 		"step":"x","result":"y",
@@ -654,7 +654,7 @@ func TestCompleteStepSessionFallbackSkipsFailedCalls(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "c1", Name: "bash", Content: "error: command exited: exit status 1\nFAIL"},
 	}
 	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
-	ctx = evidence.WithSessionMessages(ctx, msgs)
+	ctx = evidence.WithSessionMessages(ctx, func() []provider.Message { return msgs })
 
 	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
 		"step":"x","result":"y",
@@ -695,7 +695,7 @@ func TestCompleteStepSessionFallbackResolvesDiffPaths(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "w1", Name: "write_file", Content: "wrote 10 lines"},
 	}
 	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
-	ctx = evidence.WithSessionMessages(ctx, msgs)
+	ctx = evidence.WithSessionMessages(ctx, func() []provider.Message { return msgs })
 
 	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
 		"step":"x","result":"y",
@@ -712,7 +712,7 @@ func TestCompleteStepSessionFallbackSkipsFailedWrite(t *testing.T) {
 		{Role: provider.RoleTool, ToolCallID: "w1", Name: "write_file", Content: "error: permission denied"},
 	}
 	ctx := evidence.WithLedger(context.Background(), evidence.NewLedger())
-	ctx = evidence.WithSessionMessages(ctx, msgs)
+	ctx = evidence.WithSessionMessages(ctx, func() []provider.Message { return msgs })
 
 	if _, err := (completeStep{}).Execute(ctx, json.RawMessage(`{
 		"step":"x","result":"y",

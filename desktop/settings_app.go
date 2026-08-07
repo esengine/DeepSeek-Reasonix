@@ -1948,6 +1948,11 @@ func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRunti
 		}
 		return ctrl, restoredRuntime, path, nil
 	}
+	// Same-session rebuild without the full boot.Rebuild path still must keep
+	// the private temporary directory (Issue #7575).
+	if old, ok := oldCtrl.(*control.Controller); ok && old != nil && opts.SessionTemp == nil {
+		opts.SessionTemp = old.SessionTemp()
+	}
 	ctrl, err := boot.Build(a.bootContext(), opts)
 	if err != nil {
 		return nil, normalizedTabRuntime{}, "", err

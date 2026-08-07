@@ -96,8 +96,39 @@ func (s *TextSink) Emit(e event.Event) {
 			name := e.Tool.Name
 			if e.Tool.Name == "use_capability" {
 				name = textSinkToolHead(e.Tool.Name, e.Tool.Args)
+			} else if e.Tool.Name == "bash" && e.Tool.Execution != nil && e.Tool.Execution.Shell != "" {
+				name = e.Tool.Execution.Shell
+				switch e.Tool.Execution.Shell {
+				case "powershell":
+					name = "Windows PowerShell"
+				case "pwsh":
+					name = "PowerShell 7+"
+				case "git-bash":
+					name = "Git Bash"
+				}
 			}
-			fmt.Fprintf(s.out, "  ⊘ %s %s\n", name, e.Tool.Err)
+			errText := e.Tool.Err
+			if e.Tool.Execution != nil {
+				var parts []string
+				if e.Tool.Execution.ExitCode != nil {
+					parts = append(parts, fmt.Sprintf("exit %d", *e.Tool.Execution.ExitCode))
+				}
+				if e.Tool.Execution.FailurePhase != "" {
+					parts = append(parts, e.Tool.Execution.FailurePhase)
+				}
+				switch e.Tool.Execution.FailurePhase {
+				case "preflight", "authorization", "dependency", "launch":
+					parts = append(parts, "not executed")
+				default:
+					if e.Tool.Execution.MutationRisk == "may_be_partial" {
+						parts = append(parts, "may be partial")
+					}
+				}
+				if len(parts) > 0 {
+					errText = strings.Join(parts, " · ") + " · " + errText
+				}
+			}
+			fmt.Fprintf(s.out, "  ⊘ %s %s\n", name, errText)
 			s.wroteAnything = true
 		}
 

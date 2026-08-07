@@ -1024,6 +1024,23 @@ func TestReasonixHomeOverridesGlobalHookPaths(t *testing.T) {
 	}
 }
 
+func TestLoadOptionsReasonixHomeDirUsesExactGlobalHookPath(t *testing.T) {
+	home := t.TempDir()
+	reasonixHome := filepath.Join(home, "AppData", "Roaming", "reasonix")
+	settingsPath := filepath.Join(reasonixHome, SettingsFilename)
+	if err := os.MkdirAll(reasonixHome, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(settingsPath, []byte(`{"hooks":{"Stop":[{"command":"echo exact"}]}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	hooks := Load(LoadOptions{HomeDir: home, ReasonixHomeDir: reasonixHome})
+	if len(hooks) != 1 || hooks[0].Command != "echo exact" || hooks[0].Source != settingsPath {
+		t.Fatalf("Load hooks = %+v, want exact Reasonix home hook", hooks)
+	}
+}
+
 func TestReasonixHomeDoesNotFallBackToLegacyWhenIsolated(t *testing.T) {
 	home := t.TempDir()
 	reasonixHome := filepath.Join(t.TempDir(), "rx-home")

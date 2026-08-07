@@ -832,7 +832,7 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		}
 	}()
 
-	ch, err := provider.StreamWithRequestBudget(ctx, c.planner, provider.Request{
+	ch, err := c.planner.Stream(ctx, provider.Request{
 		Messages:    provider.ModelMessages(c.plannerSess.Messages),
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})

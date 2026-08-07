@@ -39,14 +39,27 @@ const activeTodos = [
 ];
 
 assert.deepEqual(
-  resolveTodoPanelTodos([], activeTodos),
+  resolveTodoPanelTodos([], undefined),
   [],
-  "an authoritative empty canonical list clears the transcript fallback",
+  "an authoritative empty canonical list with no live tool clears the panel",
+);
+assert.deepEqual(
+  resolveTodoPanelTodos(
+    [{ content: "Inspect the report", status: "in_progress" }, { content: "Ship the fix", status: "pending" }],
+    [{ content: "Inspect the report", status: "completed" }, { content: "Ship the fix", status: "in_progress" }],
+  ),
+  [{ content: "Inspect the report", status: "completed" }, { content: "Ship the fix", status: "in_progress" }],
+  "a live todo_write snapshot advances mid-turn status past a stale meta snapshot",
 );
 assert.deepEqual(
   resolveTodoPanelTodos(undefined, activeTodos),
   activeTodos,
   "an unavailable canonical list falls back to the transcript snapshot",
+);
+assert.deepEqual(
+  resolveTodoPanelTodos(activeTodos, undefined),
+  activeTodos,
+  "without a live tool the panel keeps the meta snapshot",
 );
 assert.equal(
   sameTodoList(activeTodos, activeTodos.map((todo) => ({ ...todo }))),

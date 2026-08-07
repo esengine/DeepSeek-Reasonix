@@ -1,6 +1,8 @@
 // Run: tsx src/__tests__/use-controller-meta.test.ts
 
-import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText } from "../lib/useController";
+import { currentTurnWaitMs, effortSwitchNoticeText, foregroundRunningFromRuntimeMeta, historyMessagesToItems, initialState, localizedBackendNoticeText, localizedNoticeText, metaFromTab, modelSwitchNoticeText, reducer, sameMeta, shouldReconcileStaleTurn, tokenModeSwitchNoticeText, type Item } from "../lib/useController";
+import { parseTodos } from "../lib/tools";
+import { resolveTodoPanelTodos } from "../lib/todoVisibility";
 import type { HistoryMessage, Meta, TabMeta, WireUsage } from "../lib/types";
 
 type LooseTabMeta = Omit<TabMeta, "toolApprovalMode"> & { toolApprovalMode?: TabMeta["toolApprovalMode"] | "" };
@@ -412,6 +414,54 @@ console.log("\nuse controller meta");
 
   const cleared = reducer(reset, { type: "meta", meta: meta({ canonicalTodos: [] }) });
   eq(cleared.meta?.canonicalTodos?.length, 0, "authoritative empty canonical todos survive meta refresh");
+}
+
+{
+  const delayedLiveMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  const hydrated = reducer({ ...initialState, meta: delayedLiveMeta }, { type: "meta", meta: delayedLiveMeta });
+  const noLiveTodo = hydrated.items.find(
+    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
+  );
+  eq(
+    resolveTodoPanelTodos(hydrated.meta?.canonicalTodos, noLiveTodo ? parseTodos(noLiveTodo.args) : undefined),
+    delayedLiveMeta.canonicalTodos,
+    "panel uses fresh Meta todos while the live todo_write event is delayed",
+  );
+
+  const staleMeta = meta({
+    canonicalTodos: [
+      { content: "Inspect the report", status: "in_progress" },
+      { content: "Ship the fix", status: "pending" },
+    ],
+  });
+  const liveArgs = JSON.stringify({
+    todos: [
+      { content: "Inspect the report", status: "completed" },
+      { content: "Ship the fix", status: "in_progress" },
+    ],
+  });
+  let liveState = reducer({ ...initialState, meta: staleMeta }, { type: "event", e: { kind: "turn_started" } });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_dispatch", tool: { id: "todo-live", name: "todo_write", args: liveArgs, readOnly: true } },
+  });
+  liveState = reducer(liveState, {
+    type: "event",
+    e: { kind: "tool_result", tool: { id: "todo-live", name: "todo_write", readOnly: true, output: "Todos updated" } },
+  });
+  const liveTodo = liveState.items.find(
+    (item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool" && item.name === "todo_write",
+  );
+  eq(
+    JSON.stringify(resolveTodoPanelTodos(liveState.meta?.canonicalTodos, liveTodo ? parseTodos(liveTodo.args) : undefined)),
+    JSON.stringify(JSON.parse(liveArgs).todos),
+    "panel switches to the live todo_write snapshot after it arrives",
+  );
 }
 
 {
