@@ -3,3 +3,4 @@
 # Full tests run in CI; vet is the fast, cross-platform local check.
 set -e
 go vet ./...
+go run ./tools/repolint
