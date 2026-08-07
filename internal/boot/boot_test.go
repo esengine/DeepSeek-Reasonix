@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -5047,13 +5048,15 @@ func TestHelperProcess(t *testing.T) {
 
 	in := bufio.NewReader(os.Stdin)
 	for {
-		line, err := in.ReadBytes('\n')
+		line, err := readTestHelperFrame(in)
+		if len(line) == 0 {
+			if err != nil {
+				return
+			}
+			continue
+		}
 		if err != nil {
 			return
-		}
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
 		}
 
 		var req struct {
@@ -5105,6 +5108,50 @@ func TestHelperProcess(t *testing.T) {
 		resp := map[string]any{"jsonrpc": "2.0", "id": *req.ID, "result": result}
 		b, _ := json.Marshal(resp)
 		os.Stdout.Write(append(b, '\n'))
+	}
+}
+
+// readTestHelperFrame reads one JSON-RPC message from a plugin's stdin,
+// accepting the standard MCP/LSP Content-Length framing (what internal/plugin
+// now writes) as well as legacy newline-delimited JSON.
+func readTestHelperFrame(r *bufio.Reader) ([]byte, error) {
+	for {
+		line, err := r.ReadBytes('\n')
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if line[0] == '{' {
+			return line, err
+		}
+		if !strings.HasPrefix(strings.ToLower(string(line)), "content-length:") {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		value := strings.TrimSpace(string(line[len("content-length:"):]))
+		n, perr := strconv.Atoi(value)
+		if perr != nil || n < 0 {
+			return nil, fmt.Errorf("malformed Content-Length %q", value)
+		}
+		for {
+			h, herr := r.ReadBytes('\n')
+			if len(bytes.TrimSpace(h)) == 0 {
+				break
+			}
+			if herr != nil {
+				return nil, herr
+			}
+		}
+		body := make([]byte, n)
+		if _, err := io.ReadFull(r, body); err != nil {
+			return nil, err
+		}
+		return bytes.TrimSpace(body), nil
 	}
 }
 

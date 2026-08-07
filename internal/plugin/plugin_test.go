@@ -1292,13 +1292,15 @@ func TestHelperProcess(t *testing.T) {
 
 	in := bufio.NewReader(os.Stdin)
 	for {
-		line, err := in.ReadBytes('\n')
+		line, err := readStdioFrame(in)
+		if len(line) == 0 {
+			if err != nil {
+				return
+			}
+			continue
+		}
 		if err != nil {
 			return
-		}
-		line = bytes.TrimSpace(line)
-		if len(line) == 0 {
-			continue
 		}
 
 		var req struct {

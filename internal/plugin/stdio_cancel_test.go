@@ -17,6 +17,17 @@ type discardWriteCloser struct{}
 func (discardWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
 func (discardWriteCloser) Close() error                { return nil }
 
+// decodeServerMessage reads one message the client sent over the fake server's
+// stdin pipe, accepting the same framings as the transport (standard
+// Content-Length frames plus legacy NDJSON).
+func decodeServerMessage(br *bufio.Reader, v any) error {
+	payload, err := readStdioFrame(br)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(payload, v)
+}
+
 // TestStdioCallReturnsOnContextCancel pins that a stdio call unblocks when its
 // context is cancelled even though the server never replies. The stdio child is
 // bound to the session, not the turn, so without this a hung server would hang a
@@ -130,7 +141,7 @@ func TestStdioInitializeHandlesNotificationsAndServerPing(t *testing.T) {
 
 	serverDone := make(chan error, 1)
 	go func() {
-		dec := json.NewDecoder(serverReads)
+		br := bufio.NewReader(serverReads)
 		enc := json.NewEncoder(serverWrites)
 		var initialize struct {
 			ID     int    `json:"id"`
@@ -139,7 +150,7 @@ func TestStdioInitializeHandlesNotificationsAndServerPing(t *testing.T) {
 				Capabilities map[string]json.RawMessage `json:"capabilities"`
 			} `json:"params"`
 		}
-		if err := dec.Decode(&initialize); err != nil {
+		if err := decodeServerMessage(br, &initialize); err != nil {
 			serverDone <- fmt.Errorf("decode initialize: %w", err)
 			return
 		}
@@ -167,7 +178,7 @@ func TestStdioInitializeHandlesNotificationsAndServerPing(t *testing.T) {
 				Roots []mcpRoot `json:"roots"`
 			} `json:"result"`
 		}
-		if err := dec.Decode(&rootsResponse); err != nil {
+		if err := decodeServerMessage(br, &rootsResponse); err != nil {
 			serverDone <- fmt.Errorf("decode roots/list response: %w", err)
 			return
 		}
@@ -184,7 +195,7 @@ func TestStdioInitializeHandlesNotificationsAndServerPing(t *testing.T) {
 			ID     string         `json:"id"`
 			Result map[string]any `json:"result"`
 		}
-		if err := dec.Decode(&pingResponse); err != nil {
+		if err := decodeServerMessage(br, &pingResponse); err != nil {
 			serverDone <- fmt.Errorf("decode ping response: %w", err)
 			return
 		}
@@ -207,7 +218,7 @@ func TestStdioInitializeHandlesNotificationsAndServerPing(t *testing.T) {
 		var initialized struct {
 			Method string `json:"method"`
 		}
-		if err := dec.Decode(&initialized); err != nil {
+		if err := decodeServerMessage(br, &initialized); err != nil {
 			serverDone <- fmt.Errorf("decode initialized notification: %w", err)
 			return
 		}
@@ -255,7 +266,7 @@ func TestStdioToolCallRoutesProgressNotification(t *testing.T) {
 
 	serverDone := make(chan error, 1)
 	go func() {
-		dec := json.NewDecoder(serverReads)
+		br := bufio.NewReader(serverReads)
 		enc := json.NewEncoder(serverWrites)
 		var request struct {
 			ID     int    `json:"id"`
@@ -264,7 +275,7 @@ func TestStdioToolCallRoutesProgressNotification(t *testing.T) {
 				Meta map[string]any `json:"_meta"`
 			} `json:"params"`
 		}
-		if err := dec.Decode(&request); err != nil {
+		if err := decodeServerMessage(br, &request); err != nil {
 			serverDone <- err
 			return
 		}
