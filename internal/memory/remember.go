@@ -103,7 +103,7 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 		factScope = t.store.scopeForPath(path)
 	}
 	if q, ok := QueueFromContext(ctx); ok {
-		q.QueueMemory("Saved memory \"" + result.Memory.Name + "\" (" + string(factScope) + "): " + oneLine(result.Memory.Description) + "\n" + strings.TrimSpace(result.Memory.Body))
+		q.QueueMemory("Saved memory \"" + result.Memory.Name + "\" (" + string(factScope) + "): " + oneLine(result.Memory.Description) + "\n" + TrimMemoryNoteBody(result.Memory.Body))
 	}
 	return fmt.Sprintf("Saved memory id=%s revision=%d (%s background) as %s (it applies now and its derived index loads automatically in future sessions).", result.Memory.ID, result.Memory.Revision, factScope, providerMemoryReference(result.Memory)), nil
 }

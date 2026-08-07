@@ -74,6 +74,42 @@ func TestSaveMemoryQueuesFullBodyForCurrentSession(t *testing.T) {
 	}
 }
 
+func TestSaveMemoryTrimsOversizedBodyForCurrentSession(t *testing.T) {
+	root := t.TempDir()
+	userDir := filepath.Join(root, "user")
+	cwd := filepath.Join(root, "project")
+	if err := os.MkdirAll(cwd, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := New(Options{Memory: memory.Load(memory.Options{CWD: cwd, UserDir: userDir})})
+
+	// A max-size body must not ride the next turn in full: the note keeps a
+	// capped prefix plus ellipsis, and the full content stays one memory read
+	// away. Only oversized bodies are trimmed — short ones keep the legacy
+	// full-body behavior (see TestSaveMemoryQueuesFullBodyForCurrentSession).
+	body := strings.Repeat("数据", 300) // 600 runes, well over the 400-rune cap
+	if _, err := c.SaveMemory(memory.Memory{
+		Name:        "big-fact",
+		Description: "a large fact",
+		Type:        memory.TypeProject,
+		Scope:       memory.FactScopeProject,
+		Body:        body,
+	}); err != nil {
+		t.Fatalf("SaveMemory: %v", err)
+	}
+
+	composed := c.Compose("hello")
+	if !strings.Contains(composed, "Saved memory \"big-fact\"") {
+		t.Fatalf("saved memory name should ride the next turn:\n%s", composed)
+	}
+	if strings.Contains(composed, body) {
+		t.Fatal("oversized body must not ride the turn in full")
+	}
+	if !strings.Contains(composed, "…") {
+		t.Fatalf("trimmed body should end with ellipsis:\n%s", composed)
+	}
+}
+
 func TestForgetMemoryRevokesLoadedGlobalGuidanceForCurrentSession(t *testing.T) {
 	root := t.TempDir()
 	userDir := filepath.Join(root, "user")

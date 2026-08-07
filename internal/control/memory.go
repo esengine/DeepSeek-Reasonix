@@ -199,7 +199,7 @@ func (m *memoryManager) saveMemory(fact memory.Memory) (string, error) {
 		return "", err
 	}
 	m.applyWrite(mem,
-		"Saved memory \""+fact.Name+"\": "+strings.Join(strings.Fields(fact.Description), " ")+"\n"+strings.TrimSpace(fact.Body))
+		"Saved memory \""+fact.Name+"\": "+strings.Join(strings.Fields(fact.Description), " ")+"\n"+memory.TrimMemoryNoteBody(fact.Body))
 	return path, nil
 }
 

@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"strings"
 )
 
 // Queue receives a one-line note about a memory change a tool just made, so the
@@ -11,6 +12,25 @@ import (
 // read it from their call context the same way background tools read the job
 // manager.
 type Queue interface{ QueueMemory(note string) }
+
+// maxNoteBodyRunes caps how much of a fact's body may ride the turn tail inside
+// <memory-update> after a save. The body is already visible to the model as the
+// content it just wrote (remember tool) or is one `memory` read away (desktop
+// save), so beyond this point the note only needs enough to identify the fact.
+// Short bodies are kept whole — the pre-existing behavior — so this only trims
+// the pathological case where a max-size auto-memory (6000 runes) would
+// otherwise inflate the next user turn by thousands of tokens.
+const maxNoteBodyRunes = 400
+
+// TrimMemoryNoteBody returns the portion of a fact body safe to embed in a
+// turn-tail memory note. Rune-safe for CJK and other multi-byte text.
+func TrimMemoryNoteBody(body string) string {
+	runes := []rune(strings.TrimSpace(body))
+	if len(runes) <= maxNoteBodyRunes {
+		return string(runes)
+	}
+	return string(runes[:maxNoteBodyRunes]) + "…"
+}
 
 type autoMemoryWriteClaimer interface {
 	ClaimAutoMemoryWrite(args json.RawMessage) bool
