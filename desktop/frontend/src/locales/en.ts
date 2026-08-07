@@ -730,7 +730,7 @@ export const en = {
   "composer.contentReferenceSessionsDesc": "Add a recent session to this context",
   "composer.contentUseCommands": "Use command or Skill",
   "composer.contentUseCommandsDesc": "Browse available commands and skills",
-  "composer.contentUseCommandsEmptyOnly": "Available when the input is empty — commands replace the whole message",
+  "composer.contentUseCommandsInline": "Insert a command or skill at the cursor — available anytime",
   "composer.contentCloseSessions": "Close recent sessions",
   "composer.pastChatsLoading": "Loading recent sessions…",
   "composer.pastChatsEmpty": "No recent sessions",

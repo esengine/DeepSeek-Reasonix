@@ -3816,13 +3816,11 @@ export function Composer({
             role="menuitem"
             className="composer-access-menu__item composer-content-menu__item"
             onClick={() => insertContentTrigger("/")}
-            disabled={text.trim().length > 0}
-            title={text.trim().length > 0 ? t("composer.contentUseCommandsEmptyOnly") : undefined}
           >
             <span className="composer-content-menu__trigger-icon" aria-hidden="true">/</span>
             <span className="composer-access-menu__copy">
               <span className="composer-access-menu__title">{t("composer.contentUseCommands")}</span>
-              <span className="composer-access-menu__desc">{text.trim().length > 0 ? t("composer.contentUseCommandsEmptyOnly") : t("composer.contentUseCommandsDesc")}</span>
+              <span className="composer-access-menu__desc">{t("composer.contentUseCommandsInline")}</span>
             </span>
           </button>
         </div>
