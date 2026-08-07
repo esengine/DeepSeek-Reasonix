@@ -47,7 +47,7 @@ var sdkInitialisms = map[string]string{
 	"ui": "UI", "tui": "TUI", "acp": "ACP", "utf8": "UTF8",
 }
 
-var rawMessageType = reflect.TypeOf(json.RawMessage{})
+var rawMessageType = reflect.TypeFor[json.RawMessage]()
 
 // sdkTypeWalk is the deterministic first-visit record of every named wire
 // type reachable from the frozen registry (plus the extra roots below).
@@ -77,11 +77,11 @@ func walkSDKTypes() (*sdkTypeWalk, error) {
 		}
 	}
 	roots = append(roots,
-		reflect.TypeOf(protocol.UIStatusPayload{}),
-		reflect.TypeOf(protocol.UICardPayload{}),
-		reflect.TypeOf(protocol.UIFormPayload{}),
-		reflect.TypeOf(protocol.UINotificationPayload{}),
-		reflect.TypeOf(protocol.ProtocolErrorData{}),
+		reflect.TypeFor[protocol.UIStatusPayload](),
+		reflect.TypeFor[protocol.UICardPayload](),
+		reflect.TypeFor[protocol.UIFormPayload](),
+		reflect.TypeFor[protocol.UINotificationPayload](),
+		reflect.TypeFor[protocol.ProtocolErrorData](),
 	)
 	for _, root := range roots {
 		if err := w.visit(root); err != nil {
@@ -109,7 +109,7 @@ func (w *sdkTypeWalk) visit(typ reflect.Type) error {
 		w.seen[typ] = true
 		w.order = append(w.order, typ)
 		w.kinds[typ] = "struct"
-		for i := 0; i < typ.NumField(); i++ {
+		for i := range typ.NumField() {
 			field := typ.Field(i)
 			if field.PkgPath != "" {
 				continue
@@ -298,7 +298,7 @@ func emitSDKStruct(out *strings.Builder, typ reflect.Type) error {
 	fmt.Fprintf(out, "// %s is a generated Extension Protocol v1 wire DTO.\n", typ.Name())
 	fields := 0
 	var body strings.Builder
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		field := typ.Field(i)
 		if field.PkgPath != "" {
 			continue

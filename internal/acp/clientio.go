@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"reasonix/internal/tool/builtin"
 )
 
 // requester is the slice of Conn that clientIO drives: agent → client requests.
@@ -136,11 +138,14 @@ func (c *clientIO) RunCommand(ctx context.Context, command, cwd string, timeout 
 	case ctx.Err() != nil:
 		return output, true, ctx.Err()
 	case timedOut:
-		return output, true, fmt.Errorf("command timed out after %s (terminal killed)", timeout)
+		// Typed timeout so bash.ExecuteDetailed can set state=timed_out /
+		// failurePhase=timeout instead of a generic failed/execution.
+		return output, true, builtin.TerminalTimeoutError{Timeout: timeout}
 	case waitErr != nil:
 		return output, true, waitErr
 	case exit != nil && exit.ExitCode != nil && *exit.ExitCode != 0:
-		return output, true, fmt.Errorf("exit status %d", *exit.ExitCode)
+		// Preserve the real exit code on ShellExecution via TerminalExitError.
+		return output, true, builtin.TerminalExitError{Code: *exit.ExitCode}
 	case exit != nil && exit.Signal != nil && *exit.Signal != "":
 		return output, true, fmt.Errorf("terminated by signal %s", *exit.Signal)
 	}

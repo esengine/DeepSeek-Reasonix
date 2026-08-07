@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -54,9 +55,7 @@ func installProviderFake(t *testing.T, home, name string, extraEnv map[string]st
 		bootFakeEnvPluginName: name,
 		bootFakeEnvProvider:   "1",
 	}
-	for k, v := range extraEnv {
-		env[k] = v
-	}
+	maps.Copy(env, extraEnv)
 	installBootFakePlugin(t, home, name, map[string]any{
 		"capabilities": []string{"providers"},
 		"env":          env,

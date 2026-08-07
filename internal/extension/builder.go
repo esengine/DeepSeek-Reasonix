@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"reasonix/internal/provider"
@@ -408,9 +409,7 @@ func (b *Builder) assemble(resolved []Contribution, replacements map[Slot]Contri
 	}
 
 	repl := make(map[Slot]ContributionSource, len(replacements))
-	for slot, owner := range replacements {
-		repl[slot] = owner
-	}
+	maps.Copy(repl, replacements)
 
 	diagnostics := make([]string, 0, len(conflicts))
 	for i := range conflicts {

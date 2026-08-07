@@ -2,7 +2,7 @@ package extension
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 )
@@ -17,7 +17,7 @@ func BenchmarkExtensionKernelStartup(b *testing.B) {
 	})
 
 	contributions := make([]Contribution, 0, 64)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		contributions = append(contributions, Contribution{
 			Kind: KindInterceptor,
 			ID:   string(PointToolBefore),
@@ -61,7 +61,7 @@ func benchmarkBuildLatency(b *testing.B, builder *Builder) {
 		}
 	}
 	b.StopTimer()
-	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
+	slices.Sort(samples)
 	if len(samples) == 0 {
 		return
 	}

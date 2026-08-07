@@ -489,11 +489,11 @@ func (ag *authGate) verifySession(token string) bool {
 	}
 
 	// Check expiry (format: "unix_timestamp|base64nonce").
-	pipe := strings.IndexByte(payload, '|')
-	if pipe < 0 {
+	before, _, ok := strings.Cut(payload, "|")
+	if !ok {
 		return false
 	}
-	expiry, err := strconv.ParseInt(payload[:pipe], 10, 64)
+	expiry, err := strconv.ParseInt(before, 10, 64)
 	if err != nil {
 		return false
 	}
@@ -531,7 +531,7 @@ func generateToken() string {
 
 // acceptsHTML reports whether the request's Accept header prefers text/html.
 func acceptsHTML(r *http.Request) bool {
-	for _, h := range strings.Fields(r.Header.Get("Accept")) {
+	for h := range strings.FieldsSeq(r.Header.Get("Accept")) {
 		if strings.HasPrefix(h, "text/html") {
 			return true
 		}
@@ -546,8 +546,8 @@ func acceptsHTML(r *http.Request) bool {
 func (ag *authGate) clientIP(r *http.Request) string {
 	if ag.behindProxy {
 		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-			if i := strings.IndexByte(fwd, ','); i >= 0 {
-				return strings.TrimSpace(fwd[:i])
+			if before, _, ok := strings.Cut(fwd, ","); ok {
+				return strings.TrimSpace(before)
 			}
 			return strings.TrimSpace(fwd)
 		}

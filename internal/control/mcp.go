@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -173,12 +174,7 @@ func (m *mcpManager) serverNames() []string {
 
 // hasServer reports whether a server is live.
 func (m *mcpManager) hasServer(name string) bool {
-	for _, n := range m.serverNames() {
-		if n == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(m.serverNames(), name)
 }
 
 // prompts lists the live MCP prompts (nil when no host is connected).

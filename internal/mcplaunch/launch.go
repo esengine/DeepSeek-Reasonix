@@ -424,7 +424,7 @@ func acquireFileLock(path string, wait time.Duration) (func(), error) {
 	if _, err := rand.Read(token); err != nil {
 		return nil, fmt.Errorf("generate MCP authorization lock owner: %w", err)
 	}
-	owner := []byte(fmt.Sprintf("%d %s\n", os.Getpid(), hex.EncodeToString(token)))
+	owner := fmt.Appendf(nil, "%d %s\n", os.Getpid(), hex.EncodeToString(token))
 	deadline := time.Now().Add(wait)
 	for {
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {

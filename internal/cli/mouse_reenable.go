@@ -52,10 +52,7 @@ func (m *chatTUI) armMouseReenableTimer(now time.Time) tea.Cmd {
 	if m.mouseReenableTimerArmed {
 		return nil
 	}
-	wait := mouseReenableMinInterval - now.Sub(m.lastMouseReenable)
-	if wait < 0 {
-		wait = 0
-	}
+	wait := max(mouseReenableMinInterval-now.Sub(m.lastMouseReenable), 0)
 	m.mouseReenableTimerArmed = true
 	return tea.Tick(wait, func(time.Time) tea.Msg {
 		return mouseReenableMsg{}

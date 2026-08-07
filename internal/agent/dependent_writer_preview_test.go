@@ -109,7 +109,11 @@ func TestDependentSameBatchEditRefreshesPreviewBeforeExecution(t *testing.T) {
 	}
 }
 
-func TestDependentPreviewRefreshesAfterFailedWriterSideEffect(t *testing.T) {
+func TestDependentMutationSkippedAfterFailedWriterInBatch(t *testing.T) {
+	// Shell execution contract: after any mutating call fails or is blocked,
+	// later mutations (and verifications) in the same provider batch are not
+	// executed. The first tool may still have written to disk; the second must
+	// return not_run/dependency rather than apply a follow-up edit.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "task.txt")
 	if err := os.WriteFile(path, []byte("status=\"draft\"\n"), 0o600); err != nil {
@@ -128,13 +132,7 @@ func TestDependentPreviewRefreshesAfterFailedWriterSideEffect(t *testing.T) {
 		},
 		{{Type: provider.ChunkText, Text: "done"}, {Type: provider.ChunkDone}},
 	}}
-	var refreshed bool
-	a := New(prov, reg, NewSession(""), Options{}, event.FuncSink(func(e event.Event) {
-		if e.Kind == event.ToolDispatch && e.Tool.ID == "c2" && e.Tool.Refreshed &&
-			strings.Contains(e.Tool.Diff, `-status="ready"`) && strings.Contains(e.Tool.Diff, `+status="done"`) {
-			refreshed = true
-		}
-	}))
+	a := New(prov, reg, NewSession(""), Options{}, event.Discard)
 	if err := a.Run(context.Background(), "run dependent edit after a partial failure"); err != nil {
 		t.Fatal(err)
 	}
@@ -142,10 +140,11 @@ func TestDependentPreviewRefreshesAfterFailedWriterSideEffect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(data) != "status=\"done\"\n" {
-		t.Fatalf("final file = %q", data)
+	// First tool wrote "ready" then failed; second edit must not run.
+	if string(data) != "status=\"ready\"\n" {
+		t.Fatalf("final file = %q, want partial first write preserved", data)
 	}
-	if !refreshed {
-		t.Fatal("dependent preview was not refreshed after a failed writer changed disk")
+	if got := toolResultByID(a.session, "c2"); !strings.Contains(got, "earlier modification") {
+		t.Fatalf("second edit result = %q, want dependency skip", got)
 	}
 }

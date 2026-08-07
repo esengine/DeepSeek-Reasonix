@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -29,8 +30,13 @@ func TestAcquireSharesGeneration(t *testing.T) {
 	if err != nil || !info.IsDir() {
 		t.Fatalf("dir stat: %v", err)
 	}
-	if perm := info.Mode().Perm(); perm != 0o700 {
-		t.Fatalf("dir perm = %o, want 0700", perm)
+	// Windows does not expose POSIX directory permission bits. The
+	// cross-platform contract is that the manager creates a private directory;
+	// the exact 0700 mode is meaningful only on Unix-like systems.
+	if runtime.GOOS != "windows" {
+		if perm := info.Mode().Perm(); perm != 0o700 {
+			t.Fatalf("dir perm = %o, want 0700", perm)
+		}
 	}
 	a.Release()
 	b.Release()
@@ -220,11 +226,9 @@ func TestConcurrentAcquireRotateReleaseRace(t *testing.T) {
 	defer m.Release()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 50; j++ {
+	for range 32 {
+		wg.Go(func() {
+			for j := range 50 {
 				lease, err := m.Acquire()
 				if err != nil {
 					t.Errorf("acquire: %v", err)
@@ -236,7 +240,7 @@ func TestConcurrentAcquireRotateReleaseRace(t *testing.T) {
 				}
 				lease.Release()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

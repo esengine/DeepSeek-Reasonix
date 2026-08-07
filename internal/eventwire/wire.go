@@ -76,6 +76,9 @@ func ToWire(e event.Event) Event {
 		if e.Tool.Profile != nil {
 			wt.Profile = &Profile{Model: e.Tool.Profile.Model, Effort: e.Tool.Profile.Effort}
 		}
+		if e.Tool.Execution != nil {
+			wt.Execution = toWireShellExecution(e.Tool.Execution)
+		}
 		w.Tool = wt
 	case event.Usage:
 		if u := e.Usage; u != nil {
@@ -249,25 +252,60 @@ type Profile struct {
 
 // Tool is the JSON form of an event.Tool.
 type Tool struct {
-	ID           string   `json:"id,omitempty"`
-	Name         string   `json:"name"`
-	Args         string   `json:"args,omitempty" externalizable:"true"`
-	ResolvedName string   `json:"resolvedName,omitempty"`
-	CapabilityID string   `json:"capabilityId,omitempty"`
-	Output       string   `json:"output,omitempty" externalizable:"true"`
-	Err          string   `json:"err,omitempty" externalizable:"true"`
-	ReadOnly     bool     `json:"readOnly"`
-	Truncated    bool     `json:"truncated,omitempty"`
-	DurationMs   int64    `json:"durationMs,omitempty"`
-	Partial      bool     `json:"partial,omitempty"`
-	ArgChars     int      `json:"argChars,omitempty"`
-	Refreshed    bool     `json:"refreshed,omitempty"`
-	ParentID     string   `json:"parentId,omitempty"`
-	AttemptID    string   `json:"attemptId,omitempty"` // host-local stream_attempt id for speculative partials
-	Diff         string   `json:"diff,omitempty" externalizable:"true"`
-	Added        int      `json:"added,omitempty"`
-	Removed      int      `json:"removed,omitempty"`
-	Profile      *Profile `json:"profile,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Name         string          `json:"name"`
+	Args         string          `json:"args,omitempty" externalizable:"true"`
+	ResolvedName string          `json:"resolvedName,omitempty"`
+	CapabilityID string          `json:"capabilityId,omitempty"`
+	Output       string          `json:"output,omitempty" externalizable:"true"`
+	Err          string          `json:"err,omitempty" externalizable:"true"`
+	ReadOnly     bool            `json:"readOnly"`
+	Truncated    bool            `json:"truncated,omitempty"`
+	DurationMs   int64           `json:"durationMs,omitempty"`
+	Partial      bool            `json:"partial,omitempty"`
+	ArgChars     int             `json:"argChars,omitempty"`
+	Refreshed    bool            `json:"refreshed,omitempty"`
+	ParentID     string          `json:"parentId,omitempty"`
+	AttemptID    string          `json:"attemptId,omitempty"` // host-local stream_attempt id for speculative partials
+	Diff         string          `json:"diff,omitempty" externalizable:"true"`
+	Added        int             `json:"added,omitempty"`
+	Removed      int             `json:"removed,omitempty"`
+	Profile      *Profile        `json:"profile,omitempty"`
+	Execution    *ShellExecution `json:"execution,omitempty"`
+}
+
+// ShellExecution is the JSON form of event.ShellExecution (local UI metadata).
+type ShellExecution struct {
+	Kind           string `json:"kind,omitempty"`
+	Shell          string `json:"shell,omitempty"`
+	ShellVersion   string `json:"shellVersion,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	SupportsAndAnd bool   `json:"supportsAndAnd"`
+	State          string `json:"state,omitempty"`
+	FailurePhase   string `json:"failurePhase,omitempty"`
+	ExitCode       *int   `json:"exitCode,omitempty"`
+	OutputTail     string `json:"outputTail,omitempty"`
+	MutationRisk   string `json:"mutationRisk,omitempty"`
+	Verification   string `json:"verification,omitempty"`
+	DurationMs     int64  `json:"durationMs,omitempty"`
+}
+
+func toWireShellExecution(in *event.ShellExecution) *ShellExecution {
+	if in == nil {
+		return nil
+	}
+	out := &ShellExecution{
+		Kind: in.Kind, Shell: in.Shell, ShellVersion: in.ShellVersion,
+		Platform: in.Platform, SupportsAndAnd: in.SupportsAndAnd,
+		State: in.State, FailurePhase: in.FailurePhase,
+		OutputTail: in.OutputTail, MutationRisk: in.MutationRisk,
+		Verification: in.Verification, DurationMs: in.DurationMs,
+	}
+	if in.ExitCode != nil {
+		code := *in.ExitCode
+		out.ExitCode = &code
+	}
+	return out
 }
 
 // Usage is the JSON form of provider usage telemetry.
@@ -413,7 +451,7 @@ func ToWireCacheDiagnostics(d *event.CacheDiagnostics) *CacheDiagnostics {
 // generator; callers receive a copy and may sort it without mutating eventwire.
 func KindNames() []string {
 	names := make([]string, 0, int(event.KindCount))
-	for kind := event.Kind(0); kind < event.KindCount; kind++ {
+	for kind := range event.KindCount {
 		if name, ok := kindNames[kind]; ok {
 			names = append(names, name)
 		}

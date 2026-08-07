@@ -50,6 +50,21 @@ export interface WireProfile {
   effort?: string;
 }
 
+export interface WireShellExecution {
+  kind?: string;
+  shell?: string;
+  shellVersion?: string;
+  platform?: string;
+  supportsAndAnd?: boolean;
+  state?: string;
+  failurePhase?: string;
+  exitCode?: number;
+  outputTail?: string;
+  mutationRisk?: string;
+  verification?: string;
+  durationMs?: number;
+}
+
 export interface WireTool {
   id?: string;
   name: string;
@@ -71,6 +86,7 @@ export interface WireTool {
   added?: number;
   removed?: number;
   profile?: WireProfile; // subagent model/effort resolved for this call
+  execution?: WireShellExecution; // local shell metadata; never provider-visible
 }
 
 export interface WireCacheDiagnostics {
@@ -526,6 +542,7 @@ export interface HistoryMessage {
   toolName?: string;
   toolResultArchived?: boolean;
   toolResultError?: string;
+  execution?: WireShellExecution;
   pending?: boolean;
   trigger?: string;
   messages?: number;

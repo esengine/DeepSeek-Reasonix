@@ -2,6 +2,7 @@ package permission
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"reasonix/internal/shellsafe"
@@ -123,10 +124,8 @@ func hasArgWithPrefix(args []string, prefix string) bool {
 
 func hasAnyArg(args []string, unsafe ...string) bool {
 	for _, arg := range args {
-		for _, candidate := range unsafe {
-			if arg == candidate {
-				return true
-			}
+		if slices.Contains(unsafe, arg) {
+			return true
 		}
 	}
 	return false

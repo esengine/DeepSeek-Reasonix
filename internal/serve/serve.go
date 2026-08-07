@@ -653,7 +653,16 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	ch, unsubscribe := s.bc.Subscribe()
+	var ch <-chan []byte
+	var unsubscribe func()
+	// Subscribe and replay as one handoff. Prompt producers are serialized with
+	// this operation, so no original event can land between the two steps.
+	s.ctl().ReplayPendingPromptsWith(func() event.Sink {
+		ch, unsubscribe = s.bc.Subscribe()
+		return event.FuncSink(func(e event.Event) {
+			s.bc.EmitTo(ch, e)
+		})
+	})
 	defer unsubscribe()
 
 	fmt.Fprint(w, ": connected\n\n") // open the stream immediately

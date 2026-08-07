@@ -128,7 +128,7 @@ func (completeStep) Execute(ctx context.Context, args json.RawMessage) (string, 
 	hostVerified, manualUnverified, err := verifyStepEvidence(ctx, p.Evidence)
 	if err != nil {
 		if hasTodo && todoMatch.Status == "in_progress" {
-			return "", fmt.Errorf("%v; todo %d %q remains in_progress — repair the evidence and retry this step before moving on", err, todoMatch.Index, todoMatch.Content)
+			return "", fmt.Errorf("%w; todo %d %q remains in_progress — repair the evidence and retry this step before moving on", err, todoMatch.Index, todoMatch.Content)
 		}
 		return "", err
 	}

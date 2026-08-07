@@ -211,7 +211,7 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 
 	t.Run("turn budget pauses", func(t *testing.T) {
 		g := newMachine()
-		for i := 0; i < g.turnsLimit; i++ {
+		for i := range g.turnsLimit {
 			// Progress changes every turn so only the turn budget can fire.
 			res := g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "keep going"}, "s", "s"+fmt.Sprint(i)))
 			if res.cont && i == g.turnsLimit-1 {
@@ -238,7 +238,7 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 
 	t.Run("no-progress pauses", func(t *testing.T) {
 		g := newMachine()
-		for i := 0; i < g.noProgressLimit; i++ {
+		for range g.noProgressLimit {
 			g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "still working"}, "sig", "sig"))
 		}
 		if g.status != GoalStatusBlocked || g.stopCause != stopCauseNoProgress {
@@ -248,7 +248,7 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 
 	t.Run("host-verifiable progress resets no-progress", func(t *testing.T) {
 		g := newMachine()
-		for i := 0; i < g.noProgressLimit-1; i++ {
+		for range g.noProgressLimit - 1 {
 			g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "still working"}, "sig", "sig"))
 		}
 		res := g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "progress!"}, "sig", "sig2"))
@@ -262,7 +262,7 @@ func TestTurnTokenNoProgressPausesAndResumeExtendsBudget(t *testing.T) {
 
 	t.Run("resume extends turn budget once", func(t *testing.T) {
 		g := newMachine()
-		for i := 0; i < g.turnsLimit; i++ {
+		for range g.turnsLimit {
 			g.advance(in(&goalTurnReport{status: GoalStatusRunning, reason: "keep going"}, "s", "s"))
 		}
 		beforeLimit := g.turnsLimit

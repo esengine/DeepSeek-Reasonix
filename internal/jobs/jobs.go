@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -1452,9 +1453,9 @@ func rebaseArtifactMigrationJobs(jobs []artifactMigrationJob, dir string) {
 }
 
 func unlockArtifactMigrationJobs(jobs []artifactMigrationJob) {
-	for i := len(jobs) - 1; i >= 0; i-- {
-		if jobs[i].job != nil {
-			jobs[i].job.mu.Unlock()
+	for _, v := range slices.Backward(jobs) {
+		if v.job != nil {
+			v.job.mu.Unlock()
 		}
 	}
 }
@@ -1905,7 +1906,7 @@ func jobKey(parentSession, id string) string {
 	return strings.TrimSpace(parentSession) + "\x00" + strings.TrimSpace(id)
 }
 
-// --- call-context injection (mirrors agent.CallContext) ---
+// call-context injection (mirrors agent.CallContext)
 
 type ctxKey struct{}
 type sessionCtxKey struct{}

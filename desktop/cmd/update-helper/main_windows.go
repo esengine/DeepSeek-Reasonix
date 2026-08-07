@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -499,7 +500,7 @@ func newLogger() *log.Logger {
 func waitForProcessExit(pid uint32, timeout time.Duration) error {
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
 	if err != nil {
-		if err == windows.ERROR_INVALID_PARAMETER {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return nil
 		}
 		return err
@@ -533,7 +534,7 @@ func cleanupOwnedWindowsUpdateDirectory(path string, owner os.FileInfo) error {
 	if path == "" || owner == nil || !owner.IsDir() {
 		return fmt.Errorf("Windows update cleanup identity is incomplete")
 	}
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
 		from, err := windows.UTF16PtrFromString(path)
 		if err != nil {

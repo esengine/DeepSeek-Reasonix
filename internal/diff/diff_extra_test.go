@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// --- splitLines ---
+// splitLines
 
 func TestSplitLinesEmpty(t *testing.T) {
 	lines, eol := splitLines("")
@@ -60,7 +60,7 @@ func TestSplitLinesSingleLineWithNewline(t *testing.T) {
 	}
 }
 
-// --- isBinary ---
+// isBinary
 
 func TestIsBinaryEmpty(t *testing.T) {
 	if isBinary("") {
@@ -86,7 +86,7 @@ func TestIsBinaryNULAtEnd(t *testing.T) {
 	}
 }
 
-// --- Build edge cases ---
+// Build edge cases
 
 func TestBuildBothEmpty(t *testing.T) {
 	c := Build("empty.txt", "", "", Modify)
@@ -134,7 +134,7 @@ func TestBuildWhitespaceOnly(t *testing.T) {
 func TestBuildLargeFile(t *testing.T) {
 	// Build a large file with one changed line in the middle.
 	var oldB, newB strings.Builder
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		oldB.WriteString("line\n")
 		if i == 500 {
 			newB.WriteString("CHANGED\n")
@@ -148,7 +148,7 @@ func TestBuildLargeFile(t *testing.T) {
 	}
 }
 
-// --- Kind constants ---
+// Kind constants
 
 func TestKindConstants(t *testing.T) {
 	if Create != "create" {
@@ -162,7 +162,7 @@ func TestKindConstants(t *testing.T) {
 	}
 }
 
-// --- itoa ---
+// itoa
 
 func TestItoa(t *testing.T) {
 	cases := []struct {

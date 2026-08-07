@@ -3,6 +3,7 @@ package extension
 import (
 	"errors"
 	"io"
+	"slices"
 	"sync"
 )
 
@@ -73,8 +74,8 @@ func (s *RuntimeSet) Close() error {
 	s.mu.Unlock()
 
 	var errs []error
-	for i := len(closers) - 1; i >= 0; i-- {
-		if err := closers[i].Close(); err != nil {
+	for _, v := range slices.Backward(closers) {
+		if err := v.Close(); err != nil {
 			errs = append(errs, err)
 		}
 	}

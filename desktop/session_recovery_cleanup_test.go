@@ -17,7 +17,7 @@ import (
 func saveSnapshotTurns(t *testing.T, path string, turns int) *agent.Session {
 	t.Helper()
 	s := agent.NewSession("sys")
-	for i := 0; i < turns; i++ {
+	for i := range turns {
 		s.Add(provider.Message{Role: provider.RoleUser, Content: "prompt " + string(rune('a'+i))})
 		s.Add(provider.Message{Role: provider.RoleAssistant, Content: "reply"})
 		if err := s.SaveSnapshot(path); err != nil {

@@ -5,6 +5,7 @@ package config
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	dbus "github.com/godbus/dbus/v5"
@@ -185,10 +186,8 @@ func ssResolveLoginCollection(ctx context.Context, svc dbus.BusObject) (dbus.Obj
 		return dbus.ObjectPath(ssLoginAlias), nil
 	}
 	paths, _ := val.Value().([]dbus.ObjectPath)
-	for _, p := range paths {
-		if p == path {
-			return path, nil
-		}
+	if slices.Contains(paths, path) {
+		return path, nil
 	}
 	return dbus.ObjectPath(ssLoginAlias), nil
 }

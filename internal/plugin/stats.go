@@ -16,7 +16,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"time"
 
 	"reasonix/internal/config"
@@ -93,10 +93,7 @@ func RecordStartup(name string, dur time.Duration) error {
 	}
 	stats.Name = name
 
-	ms := dur.Milliseconds()
-	if ms < 0 {
-		ms = 0
-	}
+	ms := max(dur.Milliseconds(), 0)
 	stats.SamplesMs = append(stats.SamplesMs, ms)
 	if len(stats.SamplesMs) > maxSamples {
 		// Trim from the front: oldest samples leave first.
@@ -278,13 +275,10 @@ func p99(samples []int64) time.Duration {
 		return 0
 	}
 	sorted := append([]int64(nil), samples...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 	// Use ceil(0.99 * n) - 1 so that for n=1..100 we always pick the last
 	// element; for larger n it's the index at the 99% boundary.
-	idx := int(float64(len(sorted))*0.99+0.9999999) - 1
-	if idx < 0 {
-		idx = 0
-	}
+	idx := max(int(float64(len(sorted))*0.99+0.9999999)-1, 0)
 	if idx >= len(sorted) {
 		idx = len(sorted) - 1
 	}

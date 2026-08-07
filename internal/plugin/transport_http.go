@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -47,9 +48,7 @@ func newHTTPTransport(s Spec) (*httpTransport, error) {
 		return nil, fmt.Errorf("http plugin %q: url is required", s.Name)
 	}
 	headers := make(map[string]string, len(s.Headers))
-	for key, value := range s.Headers {
-		headers[key] = value
-	}
+	maps.Copy(headers, s.Headers)
 	return &httpTransport{
 		name:    s.Name,
 		url:     s.URL,

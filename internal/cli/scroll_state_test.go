@@ -24,7 +24,7 @@ func TestModalOpenDoesNotDisableTailFollow(t *testing.T) {
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
 
 	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 12})
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		cur = adv(cur, notice)
 	}
 	if !cur.shouldFollowTail() || !cur.viewport.AtBottom() {
@@ -56,7 +56,7 @@ func TestUserScrollBreaksAndEmptyEnterRestoresFollow(t *testing.T) {
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
 
 	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		cur = adv(cur, notice)
 	}
 	cur = adv(cur, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
@@ -83,7 +83,7 @@ func TestScrollbarDragMotionSyncsBeforeRelease(t *testing.T) {
 	}
 	notice := agentEventMsg(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "line"})
 	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 10})
-	for i := 0; i < 40; i++ {
+	for range 40 {
 		cur = adv(cur, notice)
 	}
 	if !cur.shouldFollowTail() {
@@ -118,7 +118,7 @@ func TestWrapCacheAppendOnlyMatchesFullRebuild(t *testing.T) {
 	m := newTestChatTUI()
 	m.width = 40
 	cw := 40
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m.transcript = append(m.transcript, fmt.Sprintf("block-%d %s", i, strings.Repeat("word ", 20)))
 	}
 	m.rebuildWrappedLinesFull(cw)
@@ -126,7 +126,7 @@ func TestWrapCacheAppendOnlyMatchesFullRebuild(t *testing.T) {
 
 	m2 := newTestChatTUI()
 	m2.width = 40
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		m2.transcript = append(m2.transcript, m.transcript[i])
 		m2.syncWrappedLines(cw, i == 0)
 	}
@@ -150,7 +150,7 @@ func TestStreamAnswerSuffixInvalidationNotFullRebuild(t *testing.T) {
 	}
 	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 20})
 	// Seed history blocks.
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		cur = adv(cur, agentEventMsg(event.Event{
 			Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("hist-%d %s", i, strings.Repeat("x", 30)),
@@ -279,14 +279,14 @@ func TestLongTranscriptStreamAnswerScalesSuffixOnly(t *testing.T) {
 	}
 	cur := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 20})
 	const hist = 1000
-	for i := 0; i < hist; i++ {
+	for i := range hist {
 		cur = adv(cur, agentEventMsg(event.Event{
 			Kind: event.Notice, Level: event.LevelInfo,
 			Text: fmt.Sprintf("h-%d-%s", i, strings.Repeat("y", 40)),
 		}))
 	}
 	cur.state = tuiRunning
-	for i := 0; i < 30; i++ {
+	for i := range 30 {
 		cur = adv(cur, agentEventMsg(event.Event{
 			Kind: event.Text,
 			Text: fmt.Sprintf("stream paragraph %d with enough text to flush.\n\n", i),
@@ -311,7 +311,7 @@ func BenchmarkStreamAnswerSuffixWrap(b *testing.B) {
 				return n.(chatTUI)
 			}
 			base := adv(newChatTUI(ctrl, "", make(chan event.Event, 1), 80), tea.WindowSizeMsg{Width: 80, Height: 24})
-			for i := 0; i < hist; i++ {
+			for i := range hist {
 				base = adv(base, agentEventMsg(event.Event{
 					Kind: event.Notice, Level: event.LevelInfo,
 					Text: fmt.Sprintf("h-%d-%s", i, strings.Repeat("z", 48)),
@@ -319,7 +319,7 @@ func BenchmarkStreamAnswerSuffixWrap(b *testing.B) {
 			}
 			b.ReportAllocs()
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for i := range b.N {
 				m := base // copy model value (shallow; OK for bench of Update path)
 				m.state = tuiRunning
 				m.pending = &strings.Builder{}

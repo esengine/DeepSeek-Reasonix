@@ -157,8 +157,8 @@ func sessionRedactionLeaseHeld(sessionPath string) bool {
 	if agent.SessionLeaseHeld(sessionPath) {
 		return true
 	}
-	if strings.HasSuffix(sessionPath, ".guardian.jsonl") {
-		parent := strings.TrimSuffix(sessionPath, ".guardian.jsonl") + ".jsonl"
+	if before, ok := strings.CutSuffix(sessionPath, ".guardian.jsonl"); ok {
+		parent := before + ".jsonl"
 		return agent.SessionLeaseHeld(parent)
 	}
 	return false

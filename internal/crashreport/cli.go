@@ -321,7 +321,7 @@ func sanitizeStack(stack string) string {
 func topFrame(stack string) string {
 	fallback := ""
 	functionName := ""
-	for _, line := range strings.Split(stack, "\n") {
+	for line := range strings.SplitSeq(stack, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "<path>/") && strings.Contains(line, ".go:") {
 			frame := line
@@ -337,8 +337,8 @@ func topFrame(stack string) string {
 			functionName = ""
 			continue
 		}
-		if strings.HasSuffix(line, "(...)") {
-			functionName = strings.TrimSpace(strings.TrimSuffix(line, "(...)"))
+		if before, ok := strings.CutSuffix(line, "(...)"); ok {
+			functionName = strings.TrimSpace(before)
 		}
 	}
 	return clip(fallback, 300)

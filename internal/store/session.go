@@ -38,6 +38,17 @@ func SessionRecoveryState(sessionPath string) string {
 	return sessionStem(sessionPath) + ".recovery.json"
 }
 
+// SessionContext is the context-projection / compaction-state sidecar
+// (<id>.context.json). It holds the model-visible projection and cache
+// telemetry; the primary .jsonl remains the canonical transcript.
+func SessionContext(sessionPath string) string {
+	sessionPath = strings.TrimSpace(sessionPath)
+	if sessionPath == "" {
+		return ""
+	}
+	return sessionStem(sessionPath) + ".context.json"
+}
+
 // sessionStem strips the .jsonl suffix so a sidecar sits beside the session as
 // <id>.<kind> rather than <id>.jsonl.<kind>.
 func sessionStem(sessionPath string) string {
@@ -173,5 +184,6 @@ func SessionSidecarFiles(sessionPath string) []string {
 		SessionEventIndex(sessionPath),
 		SessionConflictLog(sessionPath),
 		SessionRecoveryState(sessionPath),
+		SessionContext(sessionPath),
 	}
 }

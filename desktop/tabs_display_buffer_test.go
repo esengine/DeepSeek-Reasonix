@@ -57,9 +57,9 @@ func TestDisplayTurnBufferStreamingAllocationsStayNearLinear(t *testing.T) {
 	chunk := strings.Repeat("x", chunkSize)
 	result := testing.Benchmark(func(b *testing.B) {
 		b.ReportAllocs()
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			var buffer displayTurnBuffer
-			for part := 0; part < chunks; part++ {
+			for range chunks {
 				recordHistoryDisplayEvent(&buffer, event.Event{Kind: event.Text, Text: chunk})
 			}
 			messages := buffer.materialize()

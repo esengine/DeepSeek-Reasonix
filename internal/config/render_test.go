@@ -736,7 +736,7 @@ extensions = [".cc", ".cpp", ".hpp"]
 func BenchmarkRenderTOMLWithLSPServers(b *testing.B) {
 	cfg := Default()
 	cfg.LSP.Servers = make(map[string]LSPServer, 64)
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		lang := "lang" + strconv.Itoa(i)
 		cfg.LSP.Servers[lang] = LSPServer{
 			Command:     "server-" + strconv.Itoa(i),
@@ -749,7 +749,7 @@ func BenchmarkRenderTOMLWithLSPServers(b *testing.B) {
 	}
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		rendered := RenderTOML(cfg)
 		if len(rendered) == 0 {
 			b.Fatal("empty render")
@@ -1304,7 +1304,7 @@ func TestRenderTOMLWindowsSandboxDefaultAndExplicitEnforceDisabled(t *testing.T)
 func extractSectionLines(toml, section string) []string {
 	var lines []string
 	inSection := false
-	for _, line := range strings.Split(toml, "\n") {
+	for line := range strings.SplitSeq(toml, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, section) {
 			inSection = true

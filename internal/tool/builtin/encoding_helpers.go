@@ -3,6 +3,7 @@ package builtin
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	fileenc "reasonix/internal/fileutil/encoding"
@@ -353,8 +354,8 @@ func stripReadFileLinePrefix(line string) (string, bool) {
 
 func replaceEditRanges(content string, ranges []editRange, replacement string) string {
 	updated := content
-	for i := len(ranges) - 1; i >= 0; i-- {
-		r := ranges[i]
+	for _, v := range slices.Backward(ranges) {
+		r := v
 		updated = updated[:r.start] + replacement + updated[r.end:]
 	}
 	return updated
@@ -433,11 +434,8 @@ func firstNonEmptyLine(s string) string {
 }
 
 func commonPrefixLen(a, b string) int {
-	n := len(a)
-	if len(b) < n {
-		n = len(b)
-	}
-	for i := 0; i < n; i++ {
+	n := min(len(b), len(a))
+	for i := range n {
 		if a[i] != b[i] {
 			return i
 		}

@@ -15,7 +15,7 @@ func TestHostConcurrentAccess(t *testing.T) {
 	h := &Host{}
 	// Seed a few "connected" servers so the read paths have data to walk. These
 	// methods only read name/transport/toolCount, never the (nil) transport.
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		h.clients = append(h.clients, &Client{name: fmt.Sprintf("srv-%d", i), transport: "stdio", toolCount: i})
 		h.prompts = append(h.prompts, Prompt{Server: fmt.Sprintf("srv-%d", i), Name: "p"})
 	}
@@ -23,10 +23,10 @@ func TestHostConcurrentAccess(t *testing.T) {
 	const workers = 24
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < 500; i++ {
+			for i := range 500 {
 				switch (w + i) % 6 {
 				case 0:
 					h.RecordFailure(Spec{Name: fmt.Sprintf("bad-%d", i%8), Type: "stdio"}, errors.New("boom"))

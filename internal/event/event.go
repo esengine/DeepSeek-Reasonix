@@ -215,6 +215,26 @@ type Tool struct {
 	AttemptID string
 	FileDiff
 	Profile *Profile // ToolDispatch: subagent model/effort (set for task/skill calls)
+	// Execution is optional local shell metadata (ToolResult). Never sent to
+	// model providers; omitempty keeps old wire readers compatible.
+	Execution *ShellExecution
+}
+
+// ShellExecution mirrors tool.ShellExecution for event sinks without importing
+// the tool package (event is a lower-level dependency of tool consumers).
+type ShellExecution struct {
+	Kind           string `json:"kind,omitempty"`
+	Shell          string `json:"shell,omitempty"`
+	ShellVersion   string `json:"shellVersion,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	SupportsAndAnd bool   `json:"supportsAndAnd"`
+	State          string `json:"state,omitempty"`
+	FailurePhase   string `json:"failurePhase,omitempty"`
+	ExitCode       *int   `json:"exitCode,omitempty"`
+	OutputTail     string `json:"outputTail,omitempty"`
+	MutationRisk   string `json:"mutationRisk,omitempty"`
+	Verification   string `json:"verification,omitempty"`
+	DurationMs     int64  `json:"durationMs,omitempty"`
 }
 
 // FileDiff is a previewed change carried on a writer tool's full ToolDispatch

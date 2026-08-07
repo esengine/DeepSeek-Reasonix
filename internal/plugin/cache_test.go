@@ -266,7 +266,7 @@ func TestSchemaCacheKeyStable(t *testing.T) {
 	// but a fresh map can incidentally iterate the same way, so we run a few
 	// iterations to give the runtime a chance to shuffle).
 	reordered := spec
-	for i := 0; i < 32; i++ {
+	for range 32 {
 		reordered.Env = map[string]string{"BAR": "2", "FOO": "1"}
 		if got := SchemaCacheKey(reordered); got != h1 {
 			t.Fatalf("SchemaCacheKey changed when env was rebuilt: %q vs %q", got, h1)

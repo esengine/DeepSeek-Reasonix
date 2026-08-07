@@ -265,8 +265,8 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	} else {
 		autoResearchTaskID = c.goals.currentAutoResearchTaskID()
 	}
-	autoResearchAcceptedBefore := c.autoResearchAcceptedEvidenceIDs(autoResearchTaskID)
-	c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
+	autoResearchAcceptedBefore := c.autoResearch.acceptedEvidenceIDs(autoResearchTaskID)
+	c.autoResearch.heartbeat(autoResearchTaskID, autoresearch.HeartbeatStartingTurn, "")
 	if continuation != nil {
 		ctx = agent.WithDeliveryExecutionScope(ctx, agent.DeliveryExecutionScope{
 			ID:       continuation.scopeID,
@@ -302,12 +302,13 @@ func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchest
 	err = c.runner.Run(ctx, modelInput)
 	c.persistGoalDeliveryCheckpoint()
 	if err == nil {
-		c.recordAutoResearchEvidenceFromAssistant(autoResearchTaskID, lastAssistantText(c.History()))
-		c.recordAutoResearchTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore)
-		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatTurnDone, "")
+		assistantText := lastAssistantText(c.History())
+		c.autoResearch.recordEvidenceFromAssistant(autoResearchTaskID, assistantText)
+		c.autoResearch.recordTurnProgress(autoResearchTaskID, autoResearchAcceptedBefore, assistantText)
+		c.autoResearch.heartbeat(autoResearchTaskID, autoresearch.HeartbeatTurnDone, "")
 		c.clearInFlightTurn()
 	} else {
-		c.appendAutoResearchHeartbeat(autoResearchTaskID, autoresearch.HeartbeatWarning, err.Error())
+		c.autoResearch.heartbeat(autoResearchTaskID, autoresearch.HeartbeatWarning, err.Error())
 		// When the user explicitly cancels, keep the real prompt and any fully
 		// paired tool work. Partial reasoning/output remains durable for display
 		// but is marked local-only, and a bounded recovery summary is folded into
@@ -576,13 +577,13 @@ func (o *turnOrchestrator) advanceGoalAfterTurn(ctx context.Context, expectedCon
 }
 
 func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {
-	if c.autoResearch == nil || strings.TrimSpace(taskID) == "" {
+	if !c.autoResearch.enabled() || strings.TrimSpace(taskID) == "" {
 		return
 	}
 	switch {
 	case notice == goalCompleteNotice:
 		status := autoresearch.StatusComplete
-		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status}); err != nil {
+		if err := c.autoResearch.updateProgress(taskID, autoresearch.ProgressPatch{Status: &status}); err != nil {
 			c.noticeDetail("AutoResearch status update failed.", "autoresearch task completion update failed: "+err.Error())
 			return
 		}
@@ -593,7 +594,7 @@ func (c *Controller) finalizeAutoResearchTask(taskID, notice string) {
 		if reason == "" {
 			reason = notice
 		}
-		if _, err := c.autoResearch.UpdateProgress(taskID, autoresearch.ProgressPatch{Status: &status, BlockedReason: &reason}); err != nil {
+		if err := c.autoResearch.updateProgress(taskID, autoresearch.ProgressPatch{Status: &status, BlockedReason: &reason}); err != nil {
 			c.noticeDetail("AutoResearch status update failed.", "autoresearch task blocked update failed: "+err.Error())
 			return
 		}

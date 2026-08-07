@@ -1128,16 +1128,40 @@ function renderToolDispatch(tool) {
   if(copy)copy.onclick=async e=>{e.stopPropagation();const ok=await copyText(body.textContent||card.dataset.toolArgs||'');copy.title=ok?__('tool_copied'):__('tool_copy');setTimeout(()=>{copy.title=__('tool_copy');},1200);};
   card.appendChild(head);card.appendChild(body);log.appendChild(card);toolCards[tool.id]=card;scrollDown();
 }
+function shellDisplayName(ex){
+  if(!ex||!ex.shell)return 'bash';
+  if(ex.shell==='git-bash')return 'Git Bash';
+  if(ex.shell==='powershell')return 'Windows PowerShell';
+  if(ex.shell==='pwsh')return 'PowerShell 7+';
+  return ex.shell;
+}
 function renderToolResult(tool) {
   const card=toolCards[tool.id]; if(!card)return;
   const elapsed=Math.max(0,Date.now()-Number(card.dataset.startedAt||Date.now()));
+  const ex=tool.execution||null;
+  if(ex&&tool.name==='bash'){
+    const title=card.querySelector('.card-title .name');
+    if(title)title.textContent=shellDisplayName(ex);
+  }
   setToolStatus(card,tool.err?'danger':'success',tool.err?__('tool_failed'):__('tool_done'));
-  if(tool.err){card.appendChild(el('div','err-body',tool.err));updateToolMeta(card,fmtElapsed(elapsed));}
-  else {
+  let meta=fmtElapsed(elapsed);
+  if(ex){
+    const bits=[];
+    if(typeof ex.exitCode==='number')bits.push('exit '+ex.exitCode);
+    if(ex.failurePhase)bits.push(ex.failurePhase);
+    if(ex.verification&&ex.verification!=='not_verification')bits.push(ex.verification);
+    if(bits.length)meta=bits.join(' · ')+' · '+meta;
+  }
+  if(tool.err){
+    const err=el('div','err-body',tool.err);
+    if(ex&&ex.outputTail){const pre=el('pre','err-stderr',ex.outputTail.slice(0,16000));err.appendChild(pre);}
+    card.appendChild(err);
+    updateToolMeta(card,meta);
+  } else {
     const body=card.querySelector('.card-body');
     const output=String(tool.output||'');
     if(body)body.textContent=output?output.slice(0,2000)+(tool.truncated?'\n...[truncated]':''):__('tool_no_output');
-    updateToolMeta(card,fmtElapsed(elapsed)+' · '+lineCount(output)+' '+__('tool_lines'));
+    updateToolMeta(card,meta+' · '+lineCount(output)+' '+__('tool_lines'));
   }
   scrollDown();
 }

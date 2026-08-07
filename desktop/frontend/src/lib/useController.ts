@@ -44,6 +44,7 @@ import type {
   WireFinalReadiness,
   WireTool,
   WireUsage,
+  WireShellExecution,
 } from "./types";
 
 export type ToolStatus = "running" | "done" | "error" | "stopped";
@@ -255,7 +256,8 @@ export type Item =
       subject?: string; // stable collapsed subject from archived history payloads
       summary?: string; // stable collapsed readout kept even after args/output archive
       fileDiff?: ToolFileDiff; // previewed whole-file diff from writer dispatch
-      isShell?: boolean; // true for !-prefix shell commands (controls default expand)
+      isShell?: boolean; // bash tool or !command — structured shell card presentation
+      execution?: WireShellExecution; // local shell metadata
       parentId?: string; // a sub-agent call nests under the `task` call with this id
       profile?: { model?: string; effort?: string }; // subagent model/effort from tool event
       argChars?: number; // args still streaming from the model: cumulative chars received
@@ -863,7 +865,8 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
           subject: tc.subject,
           summary: summarizeFileDiff(fileDiff) || tc.summary,
           fileDiff,
-          isShell: (tc.id || "").startsWith("shell-"),
+          isShell: tc.name === "bash" || (tc.id || "").startsWith("shell-"),
+          execution: result?.execution,
         });
         seq++;
       }
@@ -883,7 +886,8 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
         output,
         error,
         dataArchived: m.toolResultArchived || undefined,
-        isShell: (m.toolCallId || "").startsWith("shell-"),
+        isShell: (m.toolName || "") === "bash" || (m.toolCallId || "").startsWith("shell-"),
+        execution: m.execution,
       });
       seq++;
       continue;
@@ -1437,7 +1441,7 @@ function applyEvent(s: State, e: WireEvent): State {
       }
       const args = t.args ?? "";
       const fileDiff = fileDiffFromWire(t);
-      const created: ToolItem = { kind: "tool", id, name: t.name, args, readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", summary: summarizeFileDiff(fileDiff) || summarize(t.name, args), fileDiff, isShell: id.startsWith("shell-"), parentId: t.parentId, profile: t.profile, subagentProgress: SUBAGENT_PROGRESS_TOOLS.has(t.name) ? freshSubagentProgress() : undefined };
+      const created: ToolItem = { kind: "tool", id, name: t.name, args, readOnly: t.readOnly, resolvedName: t.resolvedName, capabilityId: t.capabilityId, status: "running", summary: summarizeFileDiff(fileDiff) || summarize(t.name, args), fileDiff, isShell: t.name === "bash" || id.startsWith("shell-"), execution: t.execution, parentId: t.parentId, profile: t.profile, subagentProgress: SUBAGENT_PROGRESS_TOOLS.has(t.name) ? freshSubagentProgress() : undefined };
       const items = [...s.items, created];
       // A sub-agent call nested under a task card refreshes that card's
       // recent activity and switches its phase to "tool".
@@ -1497,6 +1501,8 @@ function applyEvent(s: State, e: WireEvent): State {
             truncated: t.truncated,
             durationMs: t.durationMs,
             summary,
+            isShell: existing.isShell || existing.name === "bash" || t.name === "bash",
+            execution: t.execution ?? existing.execution,
           };
         }
       }
