@@ -66,7 +66,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 	plan := &toolCallPlan{call: call}
 	defer func() {
 		if plan.mutationObserved && !plan.mutationAfterDone {
-			a.observeAfterMutation(plan)
+			a.observeAfterMutation(ctx, plan)
 		}
 		if plan.releaseMutationWrite != nil {
 			plan.releaseMutationWrite()
@@ -796,7 +796,7 @@ func (a *Agent) finishToolExecution(ctx context.Context, plan *toolCallPlan) too
 	}
 	// Always re-read after post hooks — partial writes and hook side effects can
 	// change the previewed path even when the concrete tool returned an error.
-	a.observeAfterMutation(plan)
+	a.observeAfterMutation(ctx, plan)
 	plan.mutationAfterDone = true
 	if a.recoveryGate != nil {
 		a.observeRecoveryResult(ctx, evidenceName, evidenceArgs, readOnly, mutates, result, err, false, false, recoveryGen)
@@ -905,8 +905,10 @@ func (a *Agent) observeBeforeMutation(plan *toolCallPlan) {
 // known before execution, regardless of tool success or failure. When the
 // cosplay auto_on_mutation verifier is installed, it also kicks off an
 // asynchronous bounded verification of the mutated file (results surface as
-// Notice events; never blocks the run loop).
-func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
+// Notice events; never blocks the run loop). The verification goroutine is
+// bound to ctx — when the run ends the verification is cancelled, so it
+// cannot outlive the agent or race a closing sink.
+func (a *Agent) observeAfterMutation(ctx context.Context, plan *toolCallPlan) {
 	if a == nil || plan == nil || plan.mutationPath == "" || a.mutationObserver == nil {
 		return
 	}
@@ -916,7 +918,8 @@ func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
 	}
 	a.mutationObserver.AfterMutation(plan.mutationPath, toolName)
 	if a.cosplayAuto != nil {
-		a.cosplayAuto.MaybeVerify(context.Background(), plan.mutationPath, func(summary string) {
+		a.cosplayAuto.MaybeVerify(ctx, plan.mutationPath, func(summary string) {
+			defer func() { _ = recover() }() // never let a closed sink panic the goroutine
 			a.sink.Emit(event.Event{
 				Kind:   event.Notice,
 				Level:  event.LevelInfo,

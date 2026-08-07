@@ -1,6 +1,7 @@
 package cosplay
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -9,6 +10,55 @@ import (
 	"strings"
 	"time"
 )
+
+// maxCaptureBytes bounds captured command output per run so a runaway
+// candidate (infinite loop printing output) cannot exhaust memory. Excess
+// output is discarded after this point.
+const maxCaptureBytes = 1 << 20 // 1 MiB
+
+// limitedBuffer caps captured output at max bytes, dropping the excess.
+type limitedBuffer struct {
+	buf bytes.Buffer
+	max int
+}
+
+func (b *limitedBuffer) Write(p []byte) (int, error) {
+	if b.buf.Len() >= b.max {
+		return len(p), nil
+	}
+	avail := b.max - b.buf.Len()
+	if len(p) > avail {
+		p = p[:avail]
+	}
+	_, _ = b.buf.Write(p)
+	return len(p), nil
+}
+
+// runBounded starts the command in its own process group, captures stdout and
+// stderr with a byte cap, and on ctx expiry kills the entire process tree
+// (not just the direct child — go run compiles a binary that outlives the
+// wrapper, python can spawn grandchildren).
+func runBounded(ctx context.Context, name string, args ...string) (string, error) {
+	cmd := exec.Command(name, args...)
+	configureProcessGroup(cmd)
+	var cap limitedBuffer
+	cap.max = maxCaptureBytes
+	cmd.Stdout = &cap
+	cmd.Stderr = &cap
+	if err := cmd.Start(); err != nil {
+		return "", err
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-ctx.Done():
+		killProcessTree(cmd)
+		<-done // reap before returning
+		return cap.buf.String(), ctx.Err()
+	case err := <-done:
+		return cap.buf.String(), err
+	}
+}
 
 // ProcessRunner executes candidate+test cells with a local interpreter or
 // compiler. It writes a combined source file to a temp dir and runs it,
@@ -69,12 +119,11 @@ func (r *ProcessRunner) runGo(ctx context.Context, cand Candidate, test TestCase
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, cmdName, "run", file)
-	out, err := cmd.CombinedOutput()
+	out, err := runBounded(runCtx, cmdName, "run", file)
 	if err != nil {
-		return false, "", string(out), nil // compile/run failure = test failed
+		return false, "", out, nil // compile/run failure (or deadline) = test failed
 	}
-	return judge(string(out))
+	return judge(out)
 }
 
 func (r *ProcessRunner) runPython(ctx context.Context, cand Candidate, test TestCase, timeout time.Duration) (bool, string, string, error) {
@@ -97,12 +146,11 @@ func (r *ProcessRunner) runPython(ctx context.Context, cand Candidate, test Test
 	}
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, cmdName, file)
-	out, err := cmd.CombinedOutput()
+	out, err := runBounded(runCtx, cmdName, file)
 	if err != nil {
-		return false, "", string(out), nil
+		return false, "", out, nil
 	}
-	return judge(string(out))
+	return judge(out)
 }
 
 // judge interprets the GOT/EXPECTED/PASS markers the template tests emit.

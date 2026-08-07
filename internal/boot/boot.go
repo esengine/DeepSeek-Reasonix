@@ -1173,10 +1173,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 				verifyTool.Repair = cosplay.ModelRepairer{Backend: backend}
 			}
 		}
-		// Auto-on-mutation verification: when [agent.cosplay] auto_on_mutation
-		// is set, mutated source files get an asynchronous bounded CoSPlay
-		// round after every file mutation (results as Notice events).
-		if cp := cfg.Agent.Cosplay; cp != nil && cp.AutoOnMutation {
+		// Auto-on-mutation verification: when [agent.cosplay] enabled AND
+		// auto_on_mutation are set, mutated source files get an asynchronous
+		// bounded CoSPlay round after every file mutation (results as Notice
+		// events).
+		if cp := cfg.Agent.Cosplay; cp != nil && cp.Enabled && cp.AutoOnMutation {
 			cosplayAutoVerifier = cosplay.NewAutoVerifier(cosplay.AutoConfig{
 				NumTests:    cp.AutoNumTests,
 				MaxRounds:   cp.AutoMaxRounds,

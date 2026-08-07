@@ -2384,16 +2384,22 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	}
 	// OSWorld 2.0 "dead light under the lamp" defense: drain the navigator's
 	// background environment watch (downloads finishing, notifications
-	// arriving, background processes appearing) into the current turn's last
-	// user message. The injection is ephemeral — the session log is untouched,
-	// so the next request's prompt-cache prefix stays stable.
+	// arriving, background processes appearing) into the current turn's
+	// prompt. The injection is ephemeral — the session log is untouched, so
+	// the prompt-cache prefix stays stable. When the last message is the
+	// current turn's user input it is extended in place (nothing follows it,
+	// so the prefix above it is untouched); on pure tool turns we append a
+	// fresh user turn instead of rewriting an older user message (rewriting
+	// history would invalidate the cache prefix after that message).
 	if a.longHorizon && !nilutil.IsNil(a.navigator) {
 		if lines := a.navigator.PendingWatchEvents(); len(lines) > 0 {
 			envText := "Environment updates noticed since the last turn:\n" + strings.Join(lines, "\n")
-			for i := len(requestMessages) - 1; i >= 0; i-- {
-				if requestMessages[i].Role == provider.RoleUser {
-					requestMessages[i].Content += "\n\n" + envText
-					break
+			if n := len(requestMessages); n > 0 {
+				last := &requestMessages[n-1]
+				if last.Role == provider.RoleUser {
+					last.Content += "\n\n" + envText
+				} else {
+					requestMessages = append(requestMessages, provider.Message{Role: provider.RoleUser, Content: envText})
 				}
 			}
 		}
