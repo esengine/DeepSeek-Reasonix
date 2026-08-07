@@ -33,11 +33,11 @@ var safeAttachmentExt = regexp.MustCompile(`^\.[a-z0-9]{1,12}$`)
 // origName supplies only the extension; the stored name is generated.
 func SaveAttachmentDataURL(origName, dataURL string) (string, error) {
 	const marker = ";base64,"
-	i := strings.Index(dataURL, marker)
-	if !strings.HasPrefix(dataURL, "data:") || i < 0 {
+	_, after, ok := strings.Cut(dataURL, marker)
+	if !strings.HasPrefix(dataURL, "data:") || !ok {
 		return "", fmt.Errorf("unsupported pasted file")
 	}
-	raw, err := base64.StdEncoding.DecodeString(dataURL[i+len(marker):])
+	raw, err := base64.StdEncoding.DecodeString(after)
 	if err != nil {
 		return "", fmt.Errorf("decode pasted file: %w", err)
 	}
@@ -373,7 +373,7 @@ func rejectSymlinkComponents(path, root string) error {
 		return fmt.Errorf("attachment path is outside .reasonix/attachments")
 	}
 	cur := root
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}

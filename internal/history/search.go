@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -247,10 +248,7 @@ func (s *Searcher) Around(ctx context.Context, req AroundRequest) ([]MessageCont
 	}
 	before := clamp(req.Before, defaultAround, maxAround)
 	after := clamp(req.After, defaultAround, maxAround)
-	start := req.MessageIndex - before
-	if start < 0 {
-		start = 0
-	}
+	start := max(req.MessageIndex-before, 0)
 	remainingAfter := len(msgs) - req.MessageIndex - 1
 	end := len(msgs)
 	if after < remainingAfter {
@@ -277,9 +275,7 @@ func normalizeScope(scope string) (string, error) {
 func normalizeKinds(kinds []Kind) (map[Kind]bool, error) {
 	if len(kinds) == 0 {
 		out := make(map[Kind]bool, len(defaultKinds))
-		for k, v := range defaultKinds {
-			out[k] = v
-		}
+		maps.Copy(out, defaultKinds)
 		return out, nil
 	}
 	out := map[Kind]bool{}

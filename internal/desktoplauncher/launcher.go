@@ -152,7 +152,7 @@ func siblingDesktop(installRoot string) string {
 func StripLegacyLaunchArgs(args []string) []string {
 	out := make([]string, 0, len(args))
 	skipNext := false
-	for i := 0; i < len(args); i++ {
+	for i := range args {
 		if skipNext {
 			skipNext = false
 			continue

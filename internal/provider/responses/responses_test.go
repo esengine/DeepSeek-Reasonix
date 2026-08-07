@@ -251,18 +251,18 @@ func TestStreamDoesNotDuplicateDoneText(t *testing.T) {
 	defer server.Close()
 
 	chunks := collect(t, New(Config{Name: "test", APIKey: "key", BaseURL: server.URL, Model: "m", Mode: "stateless"}), provider.Request{Messages: []provider.Message{{Role: provider.RoleUser, Content: "hi"}}})
-	var text string
+	var text strings.Builder
 	var usage *provider.Usage
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkText {
-			text += chunk.Text
+			text.WriteString(chunk.Text)
 		}
 		if chunk.Type == provider.ChunkUsage {
 			usage = chunk.Usage
 		}
 	}
-	if text != "hello" {
-		t.Fatalf("streamed text = %q, want one copy", text)
+	if text.String() != "hello" {
+		t.Fatalf("streamed text = %q, want one copy", text.String())
 	}
 	if usage == nil || usage.CacheHitTokens != 2 || usage.CacheMissTokens != 1 || usage.ReasoningTokens != 1 || usage.RequestCount != 1 {
 		t.Fatalf("usage = %+v", usage)
@@ -287,16 +287,16 @@ func TestStreamToleratesWebSearchLifecycleEvents(t *testing.T) {
 	chunks := collect(t, New(Config{Name: "deepseek", APIKey: "key", BaseURL: server.URL, Model: "deepseek-v4-flash", Mode: "stateless", WebSearch: true}), provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "search"}},
 	})
-	var text string
+	var text strings.Builder
 	for _, chunk := range chunks {
 		if chunk.Type == provider.ChunkText {
-			text += chunk.Text
+			text.WriteString(chunk.Text)
 		}
 		if chunk.Type == provider.ChunkError {
 			t.Fatalf("unexpected stream error: %v", chunk.Err)
 		}
 	}
-	if text != "found it" || chunks[len(chunks)-1].Type != provider.ChunkDone {
+	if text.String() != "found it" || chunks[len(chunks)-1].Type != provider.ChunkDone {
 		t.Fatalf("chunks = %#v, want searched answer followed by done", chunks)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reasonix/internal/event"
+	"slices"
 	"strings"
 	"testing"
 
@@ -43,9 +44,9 @@ func (m *mockProvider) Stream(ctx context.Context, req provider.Request) (<-chan
 }
 
 func lastUser(req provider.Request) string {
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == provider.RoleUser {
-			return req.Messages[i].Content
+	for _, v := range slices.Backward(req.Messages) {
+		if v.Role == provider.RoleUser {
+			return v.Content
 		}
 	}
 	return ""
@@ -1274,17 +1275,12 @@ func toolSchemaNames(schemas []provider.ToolSchema) []string {
 }
 
 func contains(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, want)
 }
 
 func BenchmarkPlannerToolRegistry(b *testing.B) {
 	parentReg := tool.NewRegistry()
-	for i := 0; i < 200; i++ {
+	for i := range 200 {
 		parentReg.Add(coordinatorTestTool{
 			name:     fmt.Sprintf("tool_%03d", i),
 			readOnly: i%3 != 0,
@@ -1294,7 +1290,7 @@ func BenchmarkPlannerToolRegistry(b *testing.B) {
 	parentReg.Add(coordinatorTestTool{name: "write_file", readOnly: false})
 
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		reg := PlannerToolRegistry(parentReg)
 		if reg.Len() == 0 {
 			b.Fatal("planner registry should retain read-only research tools")
@@ -1727,7 +1723,7 @@ func TestCoordinatorHandoffSurvivesPlannerCompaction(t *testing.T) {
 	// below) its pre-turn length, which is what strands a boundary based on
 	// the pre-turn message count.
 	filler := strings.Repeat("planner history filler. ", 150)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: filler})
 		plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: filler})
 	}
@@ -1873,7 +1869,7 @@ func TestCoordinatorFailedTurnRollbackKeepsCompaction(t *testing.T) {
 	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, event.Discard)
 	plannerSess := NewSession("planner-sys")
 	filler := strings.Repeat("planner history filler. ", 150)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		plannerSess.Add(provider.Message{Role: provider.RoleUser, Content: filler})
 		plannerSess.Add(provider.Message{Role: provider.RoleAssistant, Content: filler})
 	}

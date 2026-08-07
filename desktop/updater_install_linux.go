@@ -112,7 +112,7 @@ func isDpkgOwnedReasonix(absPath string) bool {
 		return false
 	}
 	// dpkg-query may return multiple lines for diversions; require an exact package hit.
-	for _, raw := range strings.Split(line, "\n") {
+	for raw := range strings.SplitSeq(line, "\n") {
 		raw = strings.TrimSpace(raw)
 		pkg, path, ok := strings.Cut(raw, ":")
 		if !ok {

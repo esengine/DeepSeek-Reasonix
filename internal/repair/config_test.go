@@ -270,7 +270,7 @@ func TestConfigSnapshotsRotateAndVerifyHash(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
 	path := filepath.Join(home, "config.toml")
-	for i := 0; i < configSnapshotRetention+2; i++ {
+	for i := range configSnapshotRetention + 2 {
 		content := []byte("default_model = \"model-" + string(rune('a'+i)) + "\"\n")
 		if err := os.WriteFile(path, content, 0o600); err != nil {
 			t.Fatal(err)
@@ -468,7 +468,7 @@ func TestPruneConfigSnapshotPreservesRecreatedMetadata(t *testing.T) {
 
 func recordConfigSnapshotSeries(t *testing.T, count int) []ConfigSnapshot {
 	t.Helper()
-	for i := 0; i < count; i++ {
+	for i := range count {
 		content := []byte("default_model = \"model-" + string(rune('a'+i)) + "\"\n")
 		now := time.Date(2026, time.July, 29, 0, 0, i, 0, time.UTC)
 		if err := recordConfigSnapshot(config.UserConfigPath(), content, "v1", now); err != nil {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -108,7 +109,7 @@ func TestParseAssessmentRejectsUnknownEnum(t *testing.T) {
 
 func TestTranscriptRenderKeepsFirstAndLastUserAnchors(t *testing.T) {
 	entries := []TranscriptEntry{{Kind: "user", Text: "first task"}}
-	for i := 0; i < maxRecentEntries+5; i++ {
+	for range maxRecentEntries + 5 {
 		entries = append(entries, TranscriptEntry{Kind: "assistant", Text: "assistant detail"})
 	}
 	entries = append(entries, TranscriptEntry{Kind: "user", Text: "latest instruction"})
@@ -249,7 +250,7 @@ func TestGuardianReviewTurnsAlternateRoles(t *testing.T) {
 	parent := agent.NewSession("sys")
 	parent.Add(provider.Message{Role: provider.RoleUser, Content: "do the thing"})
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if allow, _, err := gs.Review(context.Background(), "write_file", json.RawMessage(`{"file_path":"a.txt"}`), parent); err != nil || !allow {
 			t.Fatalf("review %d = allow %v err %v, want allow nil", i+1, allow, err)
 		}
@@ -270,9 +271,9 @@ func TestGuardianReviewTurnsAlternateRoles(t *testing.T) {
 	// The combined message must still carry the evidence boundary and the action.
 	msgs := reqs[len(reqs)-1].Messages
 	var review string
-	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role == provider.RoleUser {
-			review = msgs[i].Content
+	for _, v := range slices.Backward(msgs) {
+		if v.Role == provider.RoleUser {
+			review = v.Content
 			break
 		}
 	}
@@ -355,7 +356,7 @@ func TestGuardianSessionAlternatesAfterCompaction(t *testing.T) {
 	parent := agent.NewSession("sys")
 
 	filler := strings.Repeat("parent transcript filler. ", 160)
-	for i := 0; i < compactEvery; i++ {
+	for i := range compactEvery {
 		parent.Add(provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("turn %d: %s", i, filler)})
 		if allow, _, err := gs.Review(context.Background(), "write_file", json.RawMessage(`{"file_path":"a.txt"}`), parent); err != nil || !allow {
 			t.Fatalf("review %d = allow %v err %v, want allow nil", i+1, allow, err)

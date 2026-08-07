@@ -17,7 +17,7 @@ func TestCreateOrRefreshPairingRequestConcurrent(t *testing.T) {
 	const workers = 8
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
-	for i := 0; i < workers; i++ {
+	for i := range workers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -27,7 +27,7 @@ func TestCreateOrRefreshPairingRequestConcurrent(t *testing.T) {
 				ChatID:   fmt.Sprintf("chat-%d", i),
 				UserID:   fmt.Sprintf("user-%d", i),
 			}
-			for j := 0; j < 5; j++ {
+			for range 5 {
 				if _, _, err := CreateOrRefreshPairingRequest(msg, cfg); err != nil {
 					errs <- err
 					return

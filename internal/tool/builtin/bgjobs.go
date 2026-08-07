@@ -85,7 +85,7 @@ func filterLines(s, re string) (string, error) {
 		return "", fmt.Errorf("invalid filter regexp: %w", err)
 	}
 	var keep []string
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		if rx.MatchString(line) {
 			keep = append(keep, line)
 		}

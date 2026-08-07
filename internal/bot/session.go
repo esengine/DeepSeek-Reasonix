@@ -319,11 +319,8 @@ func (sm *SessionManager) consumeDroppedPrefixLocked(key, text string) string {
 	fmt.Fprintf(&b, "[Queue note: %d older pending message(s) were dropped because this bot session reached its queue cap.", len(dropped))
 	if len(dropped) > 0 {
 		b.WriteString(" Dropped summaries:")
-		limit := len(dropped)
-		if limit > 3 {
-			limit = 3
-		}
-		for i := 0; i < limit; i++ {
+		limit := min(len(dropped), 3)
+		for i := range limit {
 			fmt.Fprintf(&b, "\n- %s", dropped[i])
 		}
 		if len(dropped) > limit {

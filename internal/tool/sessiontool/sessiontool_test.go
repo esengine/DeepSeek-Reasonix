@@ -187,7 +187,7 @@ func TestReadSession_RespectsMaxTurns(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
 	var msgs []provider.Message
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		msgs = append(msgs,
 			provider.Message{Role: provider.RoleUser, Content: "turn"},
 			provider.Message{Role: provider.RoleAssistant, Content: "answer"},
@@ -210,7 +210,7 @@ func TestReadSession_MaxTurnsZeroNoLimit(t *testing.T) {
 	dir := t.TempDir()
 	sessionPath := filepath.Join(dir, "session.jsonl")
 	var msgs []provider.Message
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		msgs = append(msgs,
 			provider.Message{Role: provider.RoleUser, Content: "turn"},
 			provider.Message{Role: provider.RoleAssistant, Content: "answer"},

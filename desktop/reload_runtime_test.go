@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -77,7 +78,7 @@ func TestReloadRuntimeSwapsAndClosesOldAfterSwap(t *testing.T) {
 	app.readyHook = func() {}
 	var fenceMu sync.Mutex
 	var fenceNames []string
-	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...interface{}) {
+	app.runtimeEvents.emit = func(_ context.Context, name string, _ ...any) {
 		fenceMu.Lock()
 		fenceNames = append(fenceNames, name)
 		fenceMu.Unlock()
@@ -131,13 +132,7 @@ func TestReloadRuntimeSwapsAndClosesOldAfterSwap(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
 		fenceMu.Lock()
-		found := false
-		for _, name := range fenceNames {
-			if name == "runtime:rebuilt" {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(fenceNames, "runtime:rebuilt")
 		fenceMu.Unlock()
 		if found {
 			break

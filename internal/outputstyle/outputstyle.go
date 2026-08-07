@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -67,13 +68,13 @@ func Dirs() []string {
 	var dirs []string
 	if os.Getenv("REASONIX_HOME") == "" {
 		if home, err := os.UserHomeDir(); err == nil {
-			for i := len(conventionDirs) - 1; i >= 0; i-- {
-				dirs = append(dirs, filepath.Join(home, conventionDirs[i], "output-styles"))
+			for _, v := range slices.Backward(conventionDirs) {
+				dirs = append(dirs, filepath.Join(home, v, "output-styles"))
 			}
 		}
 	}
-	for i := len(conventionDirs) - 1; i >= 0; i-- {
-		dirs = append(dirs, filepath.Join(".", conventionDirs[i], "output-styles"))
+	for _, v := range slices.Backward(conventionDirs) {
+		dirs = append(dirs, filepath.Join(".", v, "output-styles"))
 	}
 	return dirs
 }

@@ -207,7 +207,7 @@ func bwrapExecutableMountArgs(args []string) []string {
 	}
 	out := make([]string, 0, 2*strings.Count(rel, string(filepath.Separator))+4)
 	current := "/tmp"
-	for _, part := range strings.Split(rel, string(filepath.Separator)) {
+	for part := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		if part == "" || part == "." {
 			continue
 		}

@@ -98,7 +98,7 @@ func TestPruneNeverRewritesLocalInterruptedDisplay(t *testing.T) {
 
 func TestSnipStaleToolResults(t *testing.T) {
 	var lines []string
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		lines = append(lines, "line")
 	}
 	big := strings.Join(lines, "\n")
@@ -376,7 +376,7 @@ func TestSnipUsesRegisteredToolHint(t *testing.T) {
 	// 600 numbered lines; a SnipHinter keeping head=3, tail=2 must yield exactly
 	// those boundary lines, which no default geometry would produce.
 	var lines []string
-	for i := 0; i < 600; i++ {
+	for i := range 600 {
 		lines = append(lines, fmt.Sprintf("L%d", i))
 	}
 	content := strings.Join(lines, "\n")
@@ -403,7 +403,7 @@ func TestSnipUsesRegisteredToolHint(t *testing.T) {
 
 func TestSnipFallsBackByReadOnlyTier(t *testing.T) {
 	var lines []string
-	for i := 0; i < 600; i++ {
+	for i := range 600 {
 		lines = append(lines, fmt.Sprintf("L%d", i))
 	}
 	content := strings.Join(lines, "\n")

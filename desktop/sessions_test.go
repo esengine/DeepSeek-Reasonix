@@ -30,7 +30,7 @@ func occupyReadFileWithTimeoutSlots(t *testing.T) func() {
 			return
 		}
 		released = true
-		for i := 0; i < filled; i++ {
+		for range filled {
 			<-readFileWithTimeoutSlots
 		}
 	}
@@ -1208,7 +1208,7 @@ func TestRecordSessionPlannerDisplayConcurrentPreservesEverySession(t *testing.T
 	start := make(chan struct{})
 	errs := make(chan error, writers)
 	var wg sync.WaitGroup
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -1232,7 +1232,7 @@ func TestRecordSessionPlannerDisplayConcurrentPreservesEverySession(t *testing.T
 	if len(got) != writers {
 		t.Fatalf("planner display sessions = %d, want %d", len(got), writers)
 	}
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		key := fmt.Sprintf("session-%02d.jsonl", i)
 		if len(got[key]) != 1 || len(got[key][0].Messages) != 1 || got[key][0].Messages[0].Content != fmt.Sprintf("answer-%02d", i) {
 			t.Fatalf("planner display %s = %+v", key, got[key])
@@ -1504,7 +1504,7 @@ func TestRecordSessionDisplaySerializesConcurrentTabs(t *testing.T) {
 	const tabs = 32
 	errs := make(chan error, tabs)
 	var wg sync.WaitGroup
-	for i := 0; i < tabs; i++ {
+	for i := range tabs {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -1523,7 +1523,7 @@ func TestRecordSessionDisplaySerializesConcurrentTabs(t *testing.T) {
 	}
 
 	got := loadSessionDisplays(dir)
-	for i := 0; i < tabs; i++ {
+	for i := range tabs {
 		key := fmt.Sprintf("tab-%02d.jsonl", i)
 		content := fmt.Sprintf("expanded-%02d", i)
 		if display := got[key][messageDisplayKey(content)]; display != fmt.Sprintf("display-%02d", i) {

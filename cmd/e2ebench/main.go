@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -526,7 +527,7 @@ func median(ms []int64) int64 {
 		return 0
 	}
 	sorted := append([]int64(nil), ms...)
-	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	slices.Sort(sorted)
 	return sorted[len(sorted)/2]
 }
 

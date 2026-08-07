@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 
 	"reasonix/internal/config"
@@ -84,11 +85,8 @@ func (t *installSourceTool) applySkillRoot(req request, act *action) error {
 		}
 	}
 	for _, listed := range store.List() {
-		for _, name := range act.Skills {
-			if listed.Name == name {
-				act.Indexed = true
-				break
-			}
+		if slices.Contains(act.Skills, listed.Name) {
+			act.Indexed = true
 		}
 	}
 	act.Target = act.Source

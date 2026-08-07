@@ -488,7 +488,7 @@ func TestTodoPanelKeepsLastSuccessfulTodoWrite(t *testing.T) {
 func TestToolProgressTailCap(t *testing.T) {
 	m := newTestChatTUI()
 	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: "b1", Name: "bash", Args: `{"command":"x"}`}})
-	for i := 0; i < toolStreamTailLines+5; i++ {
+	for i := range toolStreamTailLines + 5 {
 		m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: "b1", Output: "line" + string(rune('A'+i)) + "\n"}})
 	}
 	block := m.transcript[m.toolStreamIdx]
@@ -504,7 +504,7 @@ func TestToolProgressTailCap(t *testing.T) {
 // long stream — the fix for the O(n²)/multi-GB re-render of the full thought.
 func TestReasoningViewBounded(t *testing.T) {
 	m := newTestChatTUI()
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		m.ingestEvent(event.Event{Kind: event.Reasoning, Text: "some thinking text token "})
 	}
 	if len(m.reasoningView) > reasoningViewMax {

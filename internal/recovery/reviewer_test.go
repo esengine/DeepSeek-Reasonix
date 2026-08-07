@@ -228,7 +228,7 @@ func TestReviewerOutputBudgetAborts(t *testing.T) {
 			go func() {
 				defer close(ch)
 				// Stream more than 4 KiB of text.
-				for i := 0; i < 20; i++ {
+				for range 20 {
 					select {
 					case <-ctx.Done():
 						return

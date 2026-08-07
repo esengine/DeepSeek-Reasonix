@@ -116,7 +116,7 @@ func TestNewSessionID(t *testing.T) {
 
 func TestNewSessionIDUnique(t *testing.T) {
 	seen := map[string]bool{}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		id, err := newSessionID()
 		if err != nil {
 			t.Fatalf("newSessionID: %v", err)

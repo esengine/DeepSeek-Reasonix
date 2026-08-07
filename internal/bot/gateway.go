@@ -442,11 +442,9 @@ func (gw *BotGateway) Start(ctx context.Context) (err error) {
 
 	// 合并所有适配器的消息通道
 	for _, binding := range gw.adapters {
-		gw.gatewayWG.Add(1)
-		go func() {
-			defer gw.gatewayWG.Done()
+		gw.gatewayWG.Go(func() {
 			gw.dispatchLoop(runCtx, binding)
-		}()
+		})
 	}
 
 	return nil
@@ -836,11 +834,9 @@ func (gw *BotGateway) handleMessage(ctx context.Context, binding AdapterBinding,
 	// would unblock it: the session wedges until restart (#4701, #4863, #4402).
 	// Per-session serialization is still held by the session lock (active[key]),
 	// which the deferred Release inside runTurn clears.
-	gw.turnWG.Add(1)
-	go func() {
-		defer gw.turnWG.Done()
+	gw.turnWG.Go(func() {
 		gw.runTurn(ctx, binding.Adapter, key, msg, cleanup)
-	}()
+	})
 }
 
 func (gw *BotGateway) queueMode(key string, msg InboundMessage) string {
@@ -2801,7 +2797,7 @@ func parseAskAnswers(questions []event.AskQuestion, raw string) []event.AskAnswe
 	}
 	answerMap := make(map[string][]string, len(questions))
 	if strings.Contains(raw, "=") {
-		for _, part := range strings.Split(raw, ";") {
+		for part := range strings.SplitSeq(raw, ";") {
 			k, v, ok := strings.Cut(part, "=")
 			if !ok {
 				continue

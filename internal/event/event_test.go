@@ -280,12 +280,10 @@ func TestFuncSinkForwardsEachConcurrentEmit(t *testing.T) {
 		mu.Unlock()
 	})
 	var wg sync.WaitGroup
-	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 100 {
+		wg.Go(func() {
 			sink.Emit(Event{Kind: Text})
-		}()
+		})
 	}
 	wg.Wait()
 	mu.Lock()

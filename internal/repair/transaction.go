@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"time"
 
@@ -548,8 +549,8 @@ func UndoLastRepair() (*RepairTransaction, error) {
 		tx.Changes[i].Undone = true
 		return persistRepairTransaction(tx)
 	}
-	for i := len(tx.Changes) - 1; i >= 0; i-- {
-		change := tx.Changes[i]
+	for i, v := range slices.Backward(tx.Changes) {
+		change := v
 		if change.Undone {
 			// Progress was persisted but the backup removal may have been cut
 			// short by a crash; finish the cleanup the completed step owed.

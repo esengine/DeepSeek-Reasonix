@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -1677,9 +1678,7 @@ func withEffort(c provider.Config, effort string) provider.Config {
 		extra = map[string]any{}
 	} else {
 		cp := make(map[string]any, len(extra)+1)
-		for k, v := range extra {
-			cp[k] = v
-		}
+		maps.Copy(cp, extra)
 		extra = cp
 	}
 	extra["effort"] = effort

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"os"
 	"strings"
@@ -888,24 +889,22 @@ func (a *adapter) AddPendingReaction(ctx context.Context, messageID string) (fun
 func (a *adapter) sendCard(ctx context.Context, msg bot.OutboundMessage) (bot.SendResult, error) {
 	card := msg.Card
 
-	elements := make([]map[string]interface{}, 0)
+	elements := make([]map[string]any, 0)
 	for _, el := range card.Elements {
-		item := map[string]interface{}{"tag": el.Tag}
+		item := map[string]any{"tag": el.Tag}
 		if el.Content != "" {
 			item["content"] = el.Content
 		}
 		if actions, ok := el.Extra["actions"]; ok && el.Tag == "action" {
 			item["actions"] = actions
 		} else {
-			for k, v := range el.Extra {
-				item[k] = v
-			}
+			maps.Copy(item, el.Extra)
 		}
 		elements = append(elements, item)
 	}
 
-	cardPayload := map[string]interface{}{
-		"header": map[string]interface{}{
+	cardPayload := map[string]any{
+		"header": map[string]any{
 			"title": map[string]string{
 				"tag":     "plain_text",
 				"content": card.Header,
@@ -954,7 +953,7 @@ func (a *adapter) runWebhook(ctx context.Context) {
 	mux.HandleFunc("/feishu/event", func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1024*1024))
 		if err != nil {
-			http.Error(w, "bad request", 400)
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 		var challenge struct {
@@ -977,7 +976,7 @@ func (a *adapter) runWebhook(ctx context.Context) {
 
 		var evt feishuEvent
 		if err := json.Unmarshal(body, &evt); err != nil {
-			http.Error(w, "bad request", 400)
+			http.Error(w, "bad request", http.StatusBadRequest)
 			return
 		}
 		if !a.verificationTokenValid(evt.Header.Token) {
@@ -989,7 +988,7 @@ func (a *adapter) runWebhook(ctx context.Context) {
 			raw, _ := json.Marshal(evt)
 			a.handleWSEvent(ctx, raw)
 		}
-		w.WriteHeader(200)
+		w.WriteHeader(http.StatusOK)
 	})
 
 	server := &http.Server{

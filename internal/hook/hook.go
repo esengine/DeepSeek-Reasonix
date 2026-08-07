@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -483,12 +484,7 @@ func isShellVariableNameByte(c byte) bool {
 }
 
 func validEvent(event Event) bool {
-	for _, e := range Events {
-		if e == event {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(Events, event)
 }
 
 func cloneEnv(in map[string]string) map[string]string {
@@ -519,12 +515,7 @@ func MatchesTool(h ResolvedHook, toolName string) bool {
 	if h.PayloadFormat != "claude" {
 		return re.MatchString(toolName)
 	}
-	for _, candidate := range claudeMatchNames(toolName) {
-		if re.MatchString(candidate) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(claudeMatchNames(toolName), re.MatchString)
 }
 
 // claudeAgentSpawningTools are every Reasonix tool that spawns a subagent and

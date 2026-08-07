@@ -611,7 +611,7 @@ func completeMacHandoffHandshake(cfg macUpdateHandoffConfig) error {
 }
 
 func retainMacHandoffNode(path, suffix string) (string, error) {
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		retained := fmt.Sprintf(
 			"%s.%s-%d-%d",
 			path,
@@ -636,7 +636,7 @@ func cleanupOwnedMacUpdateDirectory(path string, owner os.FileInfo) error {
 	if strings.TrimSpace(path) == "" || owner == nil || !owner.IsDir() {
 		return fmt.Errorf("macOS update cleanup identity is incomplete")
 	}
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		cleanup := fmt.Sprintf("%s.reasonix-cleanup-%d-%d", path, time.Now().UTC().UnixNano(), attempt)
 		err := unix.RenameatxNp(unix.AT_FDCWD, path, unix.AT_FDCWD, cleanup, unix.RENAME_EXCL)
 		if err != nil {

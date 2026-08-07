@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 
 	fileencoding "reasonix/internal/fileutil/encoding"
@@ -1492,12 +1493,7 @@ func (e *ProviderEntry) DefaultModel() string {
 
 // HasModel reports whether m is one of the provider's models.
 func (e *ProviderEntry) HasModel(m string) bool {
-	for _, x := range e.ModelList() {
-		if x == m {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(e.ModelList(), m)
 }
 
 // PriceForModel returns the configured per-1M-token price for model. Per-model

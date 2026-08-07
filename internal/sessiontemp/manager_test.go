@@ -226,11 +226,9 @@ func TestConcurrentAcquireRotateReleaseRace(t *testing.T) {
 	defer m.Release()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 50; j++ {
+	for range 32 {
+		wg.Go(func() {
+			for j := range 50 {
 				lease, err := m.Acquire()
 				if err != nil {
 					t.Errorf("acquire: %v", err)
@@ -242,7 +240,7 @@ func TestConcurrentAcquireRotateReleaseRace(t *testing.T) {
 				}
 				lease.Release()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }

@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -247,8 +248,8 @@ func normalizePlannerText(text string) string {
 func hasLeadingDirective(lower string, directives []string) bool {
 	lower = strings.TrimSpace(lower)
 	for _, polite := range []string{"please ", "please, ", "请", "请先", "麻烦", "麻烦先"} {
-		if strings.HasPrefix(lower, polite) {
-			lower = strings.TrimSpace(strings.TrimPrefix(lower, polite))
+		if after, ok := strings.CutPrefix(lower, polite); ok {
+			lower = strings.TrimSpace(after)
 			break
 		}
 	}
@@ -582,14 +583,9 @@ func containsLexicalTerm(s, term string) bool {
 	if containsNonASCII(term) || strings.ContainsAny(term, " -_/") {
 		return strings.Contains(s, term)
 	}
-	for _, token := range strings.FieldsFunc(s, func(r rune) bool {
+	return slices.Contains(strings.FieldsFunc(s, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_'
-	}) {
-		if token == term {
-			return true
-		}
-	}
-	return false
+	}), term)
 }
 
 func containsNonASCII(s string) bool {

@@ -351,7 +351,7 @@ func workspaceCurrentText(path string) (string, bool, bool, error) {
 
 func tallyUnifiedPatch(patch string) (added, removed int) {
 	inHunk := false
-	for _, line := range strings.Split(patch, "\n") {
+	for line := range strings.SplitSeq(patch, "\n") {
 		switch {
 		case strings.HasPrefix(line, "@@"):
 			inHunk = true

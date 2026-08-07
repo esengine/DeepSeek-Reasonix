@@ -145,7 +145,7 @@ func helperErrorMessage(stdout, stderr []byte) string {
 	}
 	// Strip protocol lines from stderr diagnostics.
 	var kept []string
-	for _, line := range strings.Split(string(stderr), "\n") {
+	for line := range strings.SplitSeq(string(stderr), "\n") {
 		if _, ok := parseHelperPhaseLine(line); ok {
 			continue
 		}

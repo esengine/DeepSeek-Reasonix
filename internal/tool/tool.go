@@ -7,6 +7,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -414,11 +415,8 @@ func (r *Registry) ResolveCall(name string) (resolved Tool, canonical string, ca
 		if !ok {
 			continue
 		}
-		for _, alias := range mcpBindingAliases(b) {
-			if name == alias {
-				matches[canonicalName] = t
-				break
-			}
+		if slices.Contains(mcpBindingAliases(b), name) {
+			matches[canonicalName] = t
 		}
 	}
 	if len(matches) == 1 {

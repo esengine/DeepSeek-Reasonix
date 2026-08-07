@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -135,12 +136,7 @@ func publicKeyAuthCallback(methods []ssh.AuthMethod) ssh.ClientAuthCallback {
 }
 
 func containsAuthMethod(methods []string, want string) bool {
-	for _, method := range methods {
-		if method == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(methods, want)
 }
 
 func agentAuth(identityFiles []string, identitiesOnly bool) (ssh.AuthMethod, func()) {

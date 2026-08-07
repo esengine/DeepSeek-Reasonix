@@ -106,8 +106,7 @@ func TestBuildRequestKeepsDefaultCacheControlBytesStable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal first request: %v", err)
 	}
-	requestCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	requestCtx := t.Context()
 	got, err := json.Marshal(c.buildRequest(requestCtx, req))
 	if err != nil {
 		t.Fatalf("marshal second request: %v", err)

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -162,7 +163,7 @@ func appendInspectEntries(out *Inspection, s *Settings, scope Scope, source stri
 			unknown = append(unknown, event)
 		}
 	}
-	sort.Slice(unknown, func(i, j int) bool { return unknown[i] < unknown[j] })
+	slices.Sort(unknown)
 	for _, event := range unknown {
 		for _, cfg := range s.Hooks[event] {
 			out.Entries = append(out.Entries, Entry{

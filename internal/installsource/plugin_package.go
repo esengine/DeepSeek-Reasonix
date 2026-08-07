@@ -500,8 +500,8 @@ func (t *installSourceTool) applyInstallPluginPackage(ctx context.Context, req r
 
 func (t *installSourceTool) preparePluginSource(ctx context.Context, source, mode string) (string, string, func(), error) {
 	source = strings.TrimSpace(source)
-	if strings.HasPrefix(source, "git:github.com/") {
-		source = "https://github.com/" + strings.TrimPrefix(source, "git:github.com/")
+	if after, ok := strings.CutPrefix(source, "git:github.com/"); ok {
+		source = "https://github.com/" + after
 	}
 	if isURL(source) {
 		src, ok := parseGitHubRepoSource(source)

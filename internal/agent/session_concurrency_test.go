@@ -26,26 +26,22 @@ func TestSessionConcurrentAddAndRead(t *testing.T) {
 
 	var wg sync.WaitGroup
 	// One writer mimicking the turn goroutine.
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < appends; i++ {
+	wg.Go(func() {
+		for range appends {
 			s.Add(provider.Message{Role: provider.RoleUser, Content: "msg"})
 		}
-	}()
+	})
 	// Many readers mimicking frontends polling history.
-	for r := 0; r < readers; r++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < reads; i++ {
+	for range readers {
+		wg.Go(func() {
+			for range reads {
 				snap := s.Snapshot()
 				for _, m := range snap { // iterate the copy: must never tear
 					_ = m.Content
 				}
 				_ = s.HasContent()
 			}
-		}()
+		})
 	}
 	wg.Wait()
 

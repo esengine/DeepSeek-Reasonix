@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -670,10 +671,7 @@ func (t *TaskTool) childMaxSteps(requested int) int {
 	if t.maxSteps <= 0 {
 		return 0
 	}
-	half := t.maxSteps / 2
-	if half < 5 {
-		half = 5
-	}
+	half := max(t.maxSteps/2, 5)
 	return half
 }
 
@@ -2045,8 +2043,8 @@ func latestAssistantAnswer(sess *Session) string {
 	if sess == nil {
 		return ""
 	}
-	for i := len(sess.Messages) - 1; i >= 0; i-- {
-		m := sess.Messages[i]
+	for _, v := range slices.Backward(sess.Messages) {
+		m := v
 		if m.Role == provider.RoleAssistant && strings.TrimSpace(m.Content) != "" {
 			return m.Content
 		}

@@ -131,12 +131,12 @@ func decodeDataURLImage(dataURL string) (filename string, data []byte, err error
 	}
 	// data:[<mediatype>][;base64],<data>
 	rest := dataURL[len(prefix):]
-	comma := strings.IndexByte(rest, ',')
-	if comma < 0 {
+	before, after, ok := strings.Cut(rest, ",")
+	if !ok {
 		return "", nil, fmt.Errorf("invalid data URL")
 	}
-	meta := rest[:comma]
-	payload := rest[comma+1:]
+	meta := before
+	payload := after
 	parts := strings.Split(meta, ";")
 	mime := strings.TrimSpace(parts[0])
 	base64Enc := false

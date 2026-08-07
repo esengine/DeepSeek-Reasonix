@@ -208,18 +208,14 @@ func (c *Conn) dispatch(ctx context.Context, line []byte) {
 	hasID := len(in.ID) > 0
 	switch {
 	case in.Method != "" && hasID:
-		c.wg.Add(1)
-		go func() {
-			defer c.wg.Done()
+		c.wg.Go(func() {
 			c.serveRequest(ctx, in.ID, in.Method, in.Params)
-		}()
+		})
 	case in.Method != "" && !hasID:
 		if h := c.notH[in.Method]; h != nil {
-			c.wg.Add(1)
-			go func() {
-				defer c.wg.Done()
+			c.wg.Go(func() {
 				h(ctx, in.Params)
-			}()
+			})
 		}
 	case in.Method == "" && hasID:
 		c.resolve(in)

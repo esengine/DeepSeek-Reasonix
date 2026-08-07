@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -521,17 +522,17 @@ func plannerPlanRequestsApproval(plan string) bool {
 	}
 	// Match per line so a nearby negation ("无需等待用户批准", "no need to wait
 	// for approval") exempts only its own phrase, not the whole plan.
-	for _, rawLine := range strings.Split(lower, "\n") {
+	for rawLine := range strings.SplitSeq(lower, "\n") {
 		line := strings.TrimSpace(rawLine)
 		if line == "" {
 			continue
 		}
 		for _, phrase := range plannerApprovalPhrases {
-			idx := strings.Index(line, phrase)
-			if idx < 0 {
+			before, _, ok := strings.Cut(line, phrase)
+			if !ok {
 				continue
 			}
-			if approvalMentionNegated(line[:idx]) {
+			if approvalMentionNegated(before) {
 				continue
 			}
 			return true
@@ -633,7 +634,7 @@ func parsePlannerAskBlock(plan string) (event.AskQuestion, bool) {
 	block := plan[start+len(plannerAskStartMarker) : end]
 	var question string
 	var options []event.AskOption
-	for _, raw := range strings.Split(block, "\n") {
+	for raw := range strings.SplitSeq(block, "\n") {
 		line := strings.TrimSpace(raw)
 		if line == "" {
 			continue
@@ -671,8 +672,8 @@ func parsePlannerAskBlock(plan string) (event.AskQuestion, bool) {
 
 func plannerQuestionPrompt(plan string) string {
 	lines := strings.Split(plan, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(strings.Trim(lines[i], "-* \t"))
+	for _, v := range slices.Backward(lines) {
+		line := strings.TrimSpace(strings.Trim(v, "-* \t"))
 		if line == "" {
 			continue
 		}
@@ -780,8 +781,8 @@ func isNoOpPlan(plan string) bool {
 
 func lastNonEmptyLine(s string) string {
 	lines := strings.Split(s, "\n")
-	for i := len(lines) - 1; i >= 0; i-- {
-		if t := strings.TrimSpace(lines[i]); t != "" {
+	for _, v := range slices.Backward(lines) {
+		if t := strings.TrimSpace(v); t != "" {
 			return t
 		}
 	}
@@ -1076,11 +1077,11 @@ func HandoffTask(s string) string {
 		return s
 	}
 	const header = "Original task:\n"
-	i := strings.Index(trimmed, header)
-	if i < 0 {
+	_, after, ok := strings.Cut(trimmed, header)
+	if !ok {
 		return s
 	}
-	rest := trimmed[i+len(header):]
+	rest := after
 	if j := strings.Index(rest, "\n\nPlanner output:"); j >= 0 {
 		rest = rest[:j]
 	}

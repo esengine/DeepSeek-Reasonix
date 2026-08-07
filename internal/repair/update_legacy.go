@@ -188,7 +188,7 @@ func archiveSupersededAppBundleBackup(tx *UpdateTransaction, transactionID strin
 		shortID = shortID[:16]
 	}
 	base := fmt.Sprintf("%s.reasonix-retired-%s-%s", tx.BackupPath, shortID, time.Now().UTC().Format("20060102T150405.000000000Z"))
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		archive := fmt.Sprintf("%s-%d", base, attempt)
 		if err := renameRepairNodeNoReplace(tx.BackupPath, archive); err != nil {
 			if os.IsExist(err) {
@@ -223,7 +223,7 @@ func archiveSupersededPendingMarker(tx *UpdateTransaction, transactionID, kind s
 		shortID = shortID[:16]
 	}
 	base := filepath.Join(archiveDir, fmt.Sprintf("%s-%s-%s", time.Now().UTC().Format("20060102T150405.000000000Z"), shortID, kind))
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		archivePath := fmt.Sprintf("%s-%d.json", base, attempt)
 		if err := renameRepairNodeNoReplace(pendingPath, archivePath); err != nil {
 			if os.IsExist(err) {
@@ -306,7 +306,7 @@ func ArchiveSupersededPendingFileUpdate(runningVersion, installRoot string) (boo
 	}
 	archiveBase := filepath.Join(archiveDir, fmt.Sprintf("%s-%s", time.Now().UTC().Format("20060102T150405.000000000Z"), shortID))
 	supersededUpdateBeforeArchive(pendingPath)
-	for attempt := 0; attempt < 16; attempt++ {
+	for attempt := range 16 {
 		archivePath := fmt.Sprintf("%s-%d.json", archiveBase, attempt)
 		if err := renameRepairNodeNoReplace(pendingPath, archivePath); err != nil {
 			if os.IsExist(err) {

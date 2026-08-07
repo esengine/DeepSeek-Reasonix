@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -896,10 +897,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		cleanup = func() { prev(); lspMgr.Close() }
 	}
 
-	maxSteps := 0
-	if opts.MaxSteps > 0 {
-		maxSteps = opts.MaxSteps
-	}
+	maxSteps := max(opts.MaxSteps, 0)
 	subagentStore, err := newSubagentStore(sessionDir, opts.SubagentParentLive)
 	if err != nil {
 		return nil, err
@@ -1407,7 +1405,6 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		var slashEntries []command.SlashEntry
 		if includeSkills {
 			for _, sk := range skillStore.SlashList() {
-				sk := sk
 				slashEntries = append(slashEntries, command.SlashEntry{
 					Name:        sk.SlashName(),
 					Description: sk.Description,
@@ -1419,7 +1416,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			if cmd.Hidden {
 				continue
 			}
-			cmd := cmd
+
 			slashEntries = append(slashEntries, command.SlashEntry{
 				Name:        cmd.Name,
 				Description: cmd.Description,
@@ -2349,13 +2346,7 @@ func SubagentModelKeys(name string) []string {
 		if alias == "" {
 			continue
 		}
-		seen := false
-		for _, key := range keys {
-			if key == alias {
-				seen = true
-				break
-			}
-		}
+		seen := slices.Contains(keys, alias)
 		if !seen {
 			keys = append(keys, alias)
 		}

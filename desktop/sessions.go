@@ -354,7 +354,7 @@ func reserveUniqueSessionTrashItemDir(dir, key string) (string, error) {
 		return "", err
 	}
 	stem := strings.TrimSuffix(key, ".jsonl")
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		name := fmt.Sprintf("%s.jsonl-deleted-%d-%02d", stem, time.Now().UnixNano(), i)
 		itemDir := filepath.Join(root, name)
 		if err := os.Mkdir(itemDir, 0o755); err == nil {

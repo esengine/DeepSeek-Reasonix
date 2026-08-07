@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -515,7 +516,7 @@ func repairToolCallArgs(m Message) Message {
 func closeTruncatedJSON(s string) string {
 	var stack []byte
 	inStr, esc := false, false
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if inStr {
 			switch {
@@ -555,8 +556,8 @@ func closeTruncatedJSON(s string) string {
 	case strings.HasSuffix(trimmed, ":"):
 		out = trimmed + "null"
 	}
-	for i := len(stack) - 1; i >= 0; i-- {
-		out += string(stack[i])
+	for _, v := range slices.Backward(stack) {
+		out += string(v)
 	}
 	if !json.Valid([]byte(out)) {
 		return "{}"
@@ -789,13 +790,7 @@ func (p *Pricing) Cost(u *Usage) float64 {
 	// writes or 2x 1-hour writes). Older providers leave both fields at zero and
 	// keep the legacy one-input-rate behavior. A write count without billed
 	// units also falls back to 1x for backward compatibility.
-	write := u.CacheWriteTokens
-	if write < 0 {
-		write = 0
-	}
-	if write > miss {
-		write = miss
-	}
+	write := min(max(u.CacheWriteTokens, 0), miss)
 	billedWrite := 0.0
 	if write > 0 {
 		billedWrite = u.CacheWriteBilledTokens

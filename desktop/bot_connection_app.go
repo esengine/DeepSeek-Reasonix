@@ -693,7 +693,7 @@ func postFeishuInstallFormResult(base string, body map[string]string) (map[strin
 	for k, v := range body {
 		reqBody.Set(k, v)
 	}
-	req, err := http.NewRequestWithContext(ctx, "POST", strings.TrimRight(base, "/")+"/oauth/v1/app/registration", strings.NewReader(reqBody.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+"/oauth/v1/app/registration", strings.NewReader(reqBody.Encode()))
 	if err != nil {
 		return nil, 0, err
 	}

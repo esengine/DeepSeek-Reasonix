@@ -339,12 +339,10 @@ func TestStoreV2RestoreArchivedIsConcurrencySafe(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	for range 2 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, restoreErr := store.RestoreArchived(archivePath)
 			errs <- restoreErr
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

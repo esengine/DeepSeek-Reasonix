@@ -16,9 +16,9 @@ import (
 // deterministically open so tests can place submits inside it. Later
 // TurnDones pass through unblocked.
 func holdFinishingWindow(release <-chan struct{}, entered chan<- struct{}, events chan<- event.Event) event.Sink {
-	var first int32
+	var first atomic.Int32
 	return event.FuncSink(func(e event.Event) {
-		if e.Kind == event.TurnDone && atomic.AddInt32(&first, 1) == 1 {
+		if e.Kind == event.TurnDone && first.Add(1) == 1 {
 			entered <- struct{}{}
 			<-release
 		}
@@ -44,7 +44,7 @@ func TestParkedTurnsRunFIFO(t *testing.T) {
 	var order []int
 	ran := make(chan int, 3)
 	for i := 1; i <= 3; i++ {
-		i := i
+
 		if got := c.runGuarded(func(context.Context) error {
 			ran <- i
 			return nil
@@ -117,10 +117,10 @@ func TestSubmitDuringRotationEmitsNotice(t *testing.T) {
 // opportunistic callers rely on the quiet no-op.
 func TestSubmitWhileRunningStaysSilentNoOp(t *testing.T) {
 	block := make(chan struct{})
-	var notices int32
+	var notices atomic.Int32
 	c := New(Options{Sink: event.FuncSink(func(e event.Event) {
 		if e.Kind == event.Notice {
-			atomic.AddInt32(&notices, 1)
+			notices.Add(1)
 		}
 	})})
 
@@ -135,7 +135,7 @@ func TestSubmitWhileRunningStaysSilentNoOp(t *testing.T) {
 	if got := c.runGuarded(func(context.Context) error { return nil }); got != turnDroppedRunning {
 		t.Fatalf("admission while running = %v, want turnDroppedRunning", got)
 	}
-	if n := atomic.LoadInt32(&notices); n != 0 {
+	if n := notices.Load(); n != 0 {
 		t.Fatalf("running drop should stay silent, got %d notices", n)
 	}
 	close(block)

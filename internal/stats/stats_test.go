@@ -388,12 +388,12 @@ func TestConcurrentWritersAppendWholeRecords(t *testing.T) {
 	const writers = 8
 	const perWriter = 40
 	var wg sync.WaitGroup
-	for i := 0; i < writers; i++ {
+	for i := range writers {
 		wg.Add(1)
 		go func(model int) {
 			defer wg.Done()
 			w := NewWriter(dir)
-			for j := 0; j < perWriter; j++ {
+			for range perWriter {
 				if err := w.Append(record{Timestamp: now, ModelRef: fmt.Sprintf("provider/model-%d", model), Total: 1}); err != nil {
 					t.Errorf("append: %v", err)
 					return

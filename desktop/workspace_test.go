@@ -568,7 +568,7 @@ func BenchmarkDesktopSessionDir(b *testing.B) {
 		b.Fatal(err)
 	}
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		if desktopSessionDir(root) == "" {
 			b.Fatal("empty session dir")
 		}
@@ -950,7 +950,7 @@ func TestMediaTokenMaxEviction(t *testing.T) {
 
 	// Fill beyond max to trigger eviction of oldest.
 	var oldestToken string
-	for i := 0; i < mediaTokenMax+1; i++ {
+	for i := range mediaTokenMax + 1 {
 		tok := store.create(dir+"/test.png", "test.png", "image/png", "image", 4, time.Time{})
 		if i == 0 {
 			oldestToken = tok

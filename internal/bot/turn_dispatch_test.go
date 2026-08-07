@@ -89,8 +89,7 @@ func TestGatewayApprovalReplyUnblocksTurnOffDispatchGoroutine(t *testing.T) {
 	// building a real one via boot.Build.
 	gw.controllers[key] = &sessionState{ctrl: ctrl, sink: &sessionEventSink{}}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go gw.dispatchLoop(ctx, binding)
 
 	// First message: a normal turn that will block on approval inside RunTurn.

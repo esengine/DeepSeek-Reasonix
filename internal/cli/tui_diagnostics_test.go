@@ -200,7 +200,7 @@ func TestWatchdogIdleNeverEscalates(t *testing.T) {
 		t.Fatalf("phase = %s, want idle", d.phaseForTest())
 	}
 	// Idle for well over the stall threshold.
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		clock.now = clock.now.Add(time.Second)
 		d.onTick(clock.now)
 	}
@@ -244,7 +244,7 @@ func TestWatchdogRunningElapsedHeartbeatPreventsKill(t *testing.T) {
 	d.NoteBooted()
 	d.NoteRunning(func() {})
 	// Simulate a long turn with a heartbeat every second.
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		clock.now = clock.now.Add(time.Second)
 		d.NoteActiveHeartbeat("elapsed_tick")
 		d.onTick(clock.now)

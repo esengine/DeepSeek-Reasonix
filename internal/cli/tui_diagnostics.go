@@ -290,11 +290,9 @@ func (d *tuiDiagnostics) StartWatchdog(p *tea.Program) {
 			d.lastHeartbeatSource = "watchdog_armed"
 		}
 		d.mu.Unlock()
-		d.watchWG.Add(1)
-		go func() {
-			defer d.watchWG.Done()
+		d.watchWG.Go(func() {
 			d.watch()
-		}()
+		})
 	})
 }
 

@@ -212,14 +212,14 @@ func truncateRunes(s string, max int) string {
 func modelFromPath(path string) string {
 	name := filepath.Base(path)
 	name = strings.TrimSuffix(name, ".jsonl")
-	firstDash := strings.Index(name, "-")
-	if firstDash < 0 {
+	_, after, ok := strings.Cut(name, "-")
+	if !ok {
 		return "(unknown)"
 	}
-	rest := name[firstDash+1:]
-	secondDash := strings.Index(rest, "-")
-	if secondDash < 0 {
+	rest := after
+	_, after0, ok0 := strings.Cut(rest, "-")
+	if !ok0 {
 		return rest
 	}
-	return rest[secondDash+1:]
+	return after0
 }

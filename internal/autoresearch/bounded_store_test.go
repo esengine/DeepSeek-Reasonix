@@ -157,7 +157,7 @@ func TestTailJSONLLinesMatchesFullScan(t *testing.T) {
 	}
 	// Write enough heartbeats that the log exceeds one 64KiB chunk.
 	long := strings.Repeat("x", 700)
-	for i := 0; i < 150; i++ {
+	for i := range 150 {
 		if err := store.AppendHeartbeat(task.ID, Heartbeat{
 			Status:    HeartbeatTurnDone,
 			Iteration: i + 1,
@@ -211,7 +211,7 @@ func TestFindingsBoundedTailMatchesFullScan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		if err := store.AppendFinding(task.ID, Finding{
 			ID:        fmt.Sprintf("f%03d", i),
 			Kind:      FindingKindManual,

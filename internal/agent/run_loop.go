@@ -435,10 +435,7 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		before := provider.RequestAttemptCount(ctx)
 		result := a.streamWithFrozen(ctx, turn, sink, &frozen, attemptID)
 		after := provider.RequestAttemptCount(ctx)
-		delta := after - before
-		if delta < 0 {
-			delta = 0
-		}
+		delta := max(after-before, 0)
 		// httpRequests=0 means the provider does not use SendWithRetry
 		// (extension/custom), or it failed before issuing an HTTP request.
 		// Only overwrite RequestCount when the built-in counter observed POSTs;
@@ -581,13 +578,7 @@ var streamRetrySleep = sleepStreamRetryBackoff
 // Returns false when ctx is cancelled during the wait.
 func sleepStreamRetryBackoff(ctx context.Context, attempt int) bool {
 	// attempt is 1-based for the failed attempt about to be retried.
-	shift := attempt - 1
-	if shift < 0 {
-		shift = 0
-	}
-	if shift > 4 {
-		shift = 4
-	}
+	shift := min(max(attempt-1, 0), 4)
 	base := time.Duration(1<<shift) * 500 * time.Millisecond
 	jitter := time.Duration(rand.Intn(250)) * time.Millisecond
 	timer := time.NewTimer(base + jitter)

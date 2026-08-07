@@ -64,7 +64,7 @@ func TestMain(m *testing.M) {
 	// contexts tests use, killing the process from any emitting code path.
 	// Tests that assert on runtime events install their own capture through
 	// the per-instance runtimeEvents.emit hook, which takes precedence.
-	runtimeEventsEmitFallback = func(context.Context, string, ...interface{}) {}
+	runtimeEventsEmitFallback = func(context.Context, string, ...any) {}
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

@@ -529,7 +529,7 @@ func fetchLatestRelease(c *http.Client, channel cliReleaseChannel) (*ghRelease, 
 		return pointerRelease, nil
 	}
 
-	req, err := http.NewRequest("GET", ghAPIReleases, nil)
+	req, err := http.NewRequest(http.MethodGet, ghAPIReleases, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +560,7 @@ func fetchLatestRelease(c *http.Client, channel cliReleaseChannel) (*ghRelease, 
 }
 
 func fetchCLIReleasePointer(c *http.Client, pointerURL string, channel cliReleaseChannel) (*ghRelease, error) {
-	req, err := http.NewRequest("GET", pointerURL, nil)
+	req, err := http.NewRequest(http.MethodGet, pointerURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -617,7 +617,7 @@ func verifyChecksum(data []byte, fileName string, checksumFile []byte) error {
 	sum := sha256.Sum256(data)
 	got := hex.EncodeToString(sum[:])
 
-	for _, line := range strings.Split(strings.TrimSpace(string(checksumFile)), "\n") {
+	for line := range strings.SplitSeq(strings.TrimSpace(string(checksumFile)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue

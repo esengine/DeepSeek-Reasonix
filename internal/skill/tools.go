@@ -659,7 +659,7 @@ func cleanSkillName(raw string) string {
 		return ""
 	}
 	stripped := strings.TrimSpace(bracketTagRe.ReplaceAllString(raw, " "))
-	for _, tok := range strings.Fields(stripped) {
+	for tok := range strings.FieldsSeq(stripped) {
 		if c := tok[0]; (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
 			return tok
 		}

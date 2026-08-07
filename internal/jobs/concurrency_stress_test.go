@@ -19,10 +19,10 @@ func TestManagerConcurrentAccess(t *testing.T) {
 	const workers = 24
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for w := 0; w < workers; w++ {
+	for w := range workers {
 		go func(w int) {
 			defer wg.Done()
-			for i := 0; i < 200; i++ {
+			for i := range 200 {
 				switch (w + i) % 6 {
 				case 0:
 					j := m.Start("bash", "x", func(ctx context.Context, out io.Writer) (string, error) {

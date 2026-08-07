@@ -631,7 +631,7 @@ func promptOptionalAPIKeyEnvName(in *bufio.Scanner, w io.Writer, label, def stri
 func splitModels(raw string) []string {
 	seen := map[string]bool{}
 	var models []string
-	for _, model := range strings.Split(raw, ",") {
+	for model := range strings.SplitSeq(raw, ",") {
 		model = strings.TrimSpace(model)
 		if model != "" && !seen[model] {
 			seen[model] = true

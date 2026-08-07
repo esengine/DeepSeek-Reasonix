@@ -120,7 +120,7 @@ func TestReserveStartForSessionIsAtomic(t *testing.T) {
 	start := make(chan struct{})
 	releases := make(chan func(), callers)
 	results := make(chan bool, callers)
-	for i := 0; i < callers; i++ {
+	for range callers {
 		go func() {
 			<-start
 			release, _, ok := m.ReserveStartForSession("session-a", "task", 3)
@@ -132,7 +132,7 @@ func TestReserveStartForSessionIsAtomic(t *testing.T) {
 	}
 	close(start)
 	reserved := 0
-	for i := 0; i < callers; i++ {
+	for range callers {
 		if <-results {
 			reserved++
 		}
@@ -140,7 +140,7 @@ func TestReserveStartForSessionIsAtomic(t *testing.T) {
 	if reserved != 3 {
 		t.Fatalf("concurrent reservations = %d, want exactly 3", reserved)
 	}
-	for i := 0; i < reserved; i++ {
+	for range reserved {
 		(<-releases)()
 	}
 	if release, running, ok := m.ReserveStartForSession("session-a", "task", 3); !ok || running != 0 {

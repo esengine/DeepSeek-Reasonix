@@ -56,11 +56,11 @@ func StripAutoResearchEvidenceBlocks(text string) string {
 		}
 		b.WriteString(rest[:start])
 		afterOpen := rest[start+len(autoResearchEvidenceOpen):]
-		end := strings.Index(afterOpen, autoResearchEvidenceClose)
-		if end < 0 {
+		_, after, ok := strings.Cut(afterOpen, autoResearchEvidenceClose)
+		if !ok {
 			return strings.TrimSpace(b.String())
 		}
-		rest = afterOpen[end+len(autoResearchEvidenceClose):]
+		rest = after
 	}
 }
 

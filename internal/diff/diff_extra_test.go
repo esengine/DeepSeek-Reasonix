@@ -134,7 +134,7 @@ func TestBuildWhitespaceOnly(t *testing.T) {
 func TestBuildLargeFile(t *testing.T) {
 	// Build a large file with one changed line in the middle.
 	var oldB, newB strings.Builder
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		oldB.WriteString("line\n")
 		if i == 500 {
 			newB.WriteString("CHANGED\n")

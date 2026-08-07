@@ -8,6 +8,7 @@ import (
 	"io"
 	"reflect"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,19 +30,19 @@ var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // The strict decoder rejects anything outside these sets; the schema
 // generator emits them as JSON Schema enums.
 var enumTypes = map[reflect.Type][]string{
-	reflect.TypeOf(Direction("")):         values(DirectionHostToExtensionRequest, DirectionExtensionToHostRequest, DirectionHostToExtensionNotification, DirectionExtensionToHostNotification),
-	reflect.TypeOf(OperationClass("")):    values(ClassLifecycle, ClassIntercept, ClassObservation, ClassProvider, ClassUI, ClassContent),
-	reflect.TypeOf(InterceptEvent("")):    interceptEventValues(),
-	reflect.TypeOf(InterceptDecision("")): values(DecisionContinue, DecisionBlock, DecisionReplace, DecisionAllow, DecisionDeny),
-	reflect.TypeOf(UIHostKind("")):        values(UIHostTUI, UIHostDesktop, UIHostACP, UIHostHeadless),
-	reflect.TypeOf(UISurfaceKind("")):     values(UISurfaceStatus, UISurfaceCard, UISurfaceForm, UISurfaceNotification),
-	reflect.TypeOf(UIRequestKind("")):     values(UIRequestConfirm, UIRequestInput, UIRequestSelect, UIRequestMultiselect),
-	reflect.TypeOf(UIFieldKind("")):       values(UIFieldConfirm, UIFieldInput, UIFieldSelect, UIFieldMultiselect),
-	reflect.TypeOf(UISeverity("")):        values(UISeverityInfo, UISeverityWarn, UISeverityError),
-	reflect.TypeOf(ProviderRole("")):      values(ProviderRoleSystem, ProviderRoleUser, ProviderRoleAssistant, ProviderRoleTool),
-	reflect.TypeOf(ProviderChunkType("")): values(ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError),
-	reflect.TypeOf(ProviderErrorCode("")): values(ProviderFailed, ProviderInterrupted),
-	reflect.TypeOf(ContentEncoding("")):   values(ContentUTF8),
+	reflect.TypeFor[Direction]():         values(DirectionHostToExtensionRequest, DirectionExtensionToHostRequest, DirectionHostToExtensionNotification, DirectionExtensionToHostNotification),
+	reflect.TypeFor[OperationClass]():    values(ClassLifecycle, ClassIntercept, ClassObservation, ClassProvider, ClassUI, ClassContent),
+	reflect.TypeFor[InterceptEvent]():    interceptEventValues(),
+	reflect.TypeFor[InterceptDecision](): values(DecisionContinue, DecisionBlock, DecisionReplace, DecisionAllow, DecisionDeny),
+	reflect.TypeFor[UIHostKind]():        values(UIHostTUI, UIHostDesktop, UIHostACP, UIHostHeadless),
+	reflect.TypeFor[UISurfaceKind]():     values(UISurfaceStatus, UISurfaceCard, UISurfaceForm, UISurfaceNotification),
+	reflect.TypeFor[UIRequestKind]():     values(UIRequestConfirm, UIRequestInput, UIRequestSelect, UIRequestMultiselect),
+	reflect.TypeFor[UIFieldKind]():       values(UIFieldConfirm, UIFieldInput, UIFieldSelect, UIFieldMultiselect),
+	reflect.TypeFor[UISeverity]():        values(UISeverityInfo, UISeverityWarn, UISeverityError),
+	reflect.TypeFor[ProviderRole]():      values(ProviderRoleSystem, ProviderRoleUser, ProviderRoleAssistant, ProviderRoleTool),
+	reflect.TypeFor[ProviderChunkType](): values(ChunkText, ChunkReasoning, ChunkToolCallStart, ChunkToolCallDelta, ChunkToolCall, ChunkUsage, ChunkDone, ChunkError),
+	reflect.TypeFor[ProviderErrorCode](): values(ProviderFailed, ProviderInterrupted),
+	reflect.TypeFor[ContentEncoding]():   values(ContentUTF8),
 }
 
 func init() {
@@ -50,7 +51,7 @@ func init() {
 	for i := range contracts {
 		reasons[i] = string(contracts[i].Reason)
 	}
-	enumTypes[reflect.TypeOf(ErrorReason(""))] = reasons
+	enumTypes[reflect.TypeFor[ErrorReason]()] = reasons
 }
 
 // EnumValues returns the frozen wire values of every string enum DTO type,
@@ -133,7 +134,7 @@ func validateRequiredJSON(raw json.RawMessage, typ reflect.Type, at string) erro
 }
 
 func validateRequiredObject(object map[string]json.RawMessage, typ reflect.Type, at string) error {
-	for i := 0; i < typ.NumField(); i++ {
+	for i := range typ.NumField() {
 		field := typ.Field(i)
 		if field.PkgPath != "" {
 			continue
@@ -172,7 +173,7 @@ func validateNestedRequired(raw json.RawMessage, typ reflect.Type, at string) er
 	for typ.Kind() == reflect.Pointer {
 		typ = typ.Elem()
 	}
-	if typ == reflect.TypeOf(json.RawMessage{}) {
+	if typ == reflect.TypeFor[json.RawMessage]() {
 		if len(bytes.TrimSpace(raw)) == 0 || !json.Valid(raw) {
 			return validationError(at + " must contain valid JSON")
 		}
@@ -219,7 +220,7 @@ func validateValue(value reflect.Value, at string, omitEmpty bool) error {
 		return validateValue(value.Elem(), at, false)
 	}
 	typ := value.Type()
-	if typ == reflect.TypeOf(json.RawMessage{}) {
+	if typ == reflect.TypeFor[json.RawMessage]() {
 		raw := value.Interface().(json.RawMessage)
 		if len(bytes.TrimSpace(raw)) == 0 {
 			// An empty RawMessage is the zero value of an omitempty field and
@@ -242,7 +243,7 @@ func validateValue(value reflect.Value, at string, omitEmpty bool) error {
 	}
 	switch value.Kind() {
 	case reflect.Struct:
-		for i := 0; i < value.NumField(); i++ {
+		for i := range value.NumField() {
 			field := typ.Field(i)
 			if field.PkgPath != "" {
 				continue
@@ -277,7 +278,7 @@ func validateValue(value reflect.Value, at string, omitEmpty bool) error {
 			}
 		}
 	case reflect.Slice, reflect.Array:
-		for i := 0; i < value.Len(); i++ {
+		for i := range value.Len() {
 			if err := validateValue(value.Index(i), fmt.Sprintf("%s[%d]", at, i), false); err != nil {
 				return err
 			}
@@ -309,7 +310,7 @@ func validateTag(value reflect.Value, tags, at string, omitEmpty bool) error {
 		}
 		value = value.Elem()
 	}
-	for _, tag := range strings.Split(tags, ",") {
+	for tag := range strings.SplitSeq(tags, ",") {
 		switch {
 		case tag == "nonempty":
 			if value.Kind() == reflect.String && strings.TrimSpace(value.String()) == "" {
@@ -347,12 +348,7 @@ func numericValue(value reflect.Value) float64 {
 }
 
 func contains(items []string, value string) bool {
-	for _, item := range items {
-		if item == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, value)
 }
 
 func jsonField(field reflect.StructField) (name string, omitEmpty, skip bool) {
@@ -393,7 +389,7 @@ func collectExternalizablePointers(typ reflect.Type, prefix string, out *[]strin
 	}
 	switch typ.Kind() {
 	case reflect.Struct:
-		for i := 0; i < typ.NumField(); i++ {
+		for i := range typ.NumField() {
 			field := typ.Field(i)
 			if field.PkgPath != "" {
 				continue

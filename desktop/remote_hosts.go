@@ -194,7 +194,7 @@ func canonicalRemoteSSHHost(host string) (string, error) {
 	if trimmed == "" || len(trimmed) > 253 {
 		return "", errors.New("remote SSH host is invalid")
 	}
-	for _, label := range strings.Split(trimmed, ".") {
+	for label := range strings.SplitSeq(trimmed, ".") {
 		if !remoteDNSLabelPattern.MatchString(label) {
 			return "", errors.New("remote SSH host is invalid")
 		}

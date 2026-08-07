@@ -137,7 +137,7 @@ func EscapeRefPath(path string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(path) + 8)
-	for i := 0; i < len(path); i++ {
+	for i := range len(path) {
 		if path[i] == ' ' || path[i] == '\t' {
 			b.WriteByte('\\')
 		}
@@ -154,7 +154,7 @@ func UnescapeRefPath(path string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(path))
-	for i := 0; i < len(path); i++ {
+	for i := range len(path) {
 		if path[i] == '\\' && i+1 < len(path) && (path[i+1] == ' ' || path[i+1] == '\t') {
 			continue
 		}
