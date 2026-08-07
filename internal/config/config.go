@@ -1311,6 +1311,15 @@ type CosplayConfig struct {
 	MaxRounds      int  `toml:"max_rounds"`
 	NumTests       int  `toml:"num_tests"`
 	TimeoutSeconds int  `toml:"timeout_seconds"`
+	// AutoOnMutation verifies mutated source files after every file mutation
+	// (asynchronously, bounded round, results as Notice events). Requires
+	// Enabled. Off by default — it spawns subprocesses on every edit.
+	AutoOnMutation bool `toml:"auto_on_mutation"`
+	// AutoNumTests / AutoMaxRounds / AutoTimeoutSeconds bound the automatic
+	// round. Defaults: 1 test, 1 repair round, 20s timeout.
+	AutoNumTests       int `toml:"auto_num_tests"`
+	AutoMaxRounds      int `toml:"auto_max_rounds"`
+	AutoTimeoutSeconds int `toml:"auto_timeout_seconds"`
 }
 
 // TokenGovernanceConfig parameterizes the OPT-261~265 token-management

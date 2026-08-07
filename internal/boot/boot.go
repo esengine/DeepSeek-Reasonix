@@ -1125,6 +1125,11 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			WithBashSandboxEnforced(bashSandboxEnforced).
 			WithCapabilityRuntime(capRuntime)
 	}
+	// cosplayAutoVerifier is assigned by the task-tool setup closure below
+	// when [agent.cosplay] auto_on_mutation is enabled; consumed by the
+	// executor Options.
+	var cosplayAutoVerifier *cosplay.AutoVerifier
+
 	addTaskTool := func() string {
 		if opts.Ablation.Off(ablation.Subagent) {
 			return "task tool is disabled for this run."
@@ -1158,6 +1163,27 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 			}
 		}
 		reg.Add(verifyTool)
+		// Model-backed generation/repair: when cosplay is enabled and a
+		// provider is available, the verifier uses the model to generate
+		// discriminating tests and repair fixes instead of the offline
+		// templates (which remain the parse-failure fallback).
+		if cp := cfg.Agent.Cosplay; cp != nil && cp.Enabled {
+			if backend := newModelBackend(execProv, provider.Request{}); backend != nil {
+				verifyTool.Gen = cosplay.ModelGenerator{Backend: backend}
+				verifyTool.Repair = cosplay.ModelRepairer{Backend: backend}
+			}
+		}
+		// Auto-on-mutation verification: when [agent.cosplay] auto_on_mutation
+		// is set, mutated source files get an asynchronous bounded CoSPlay
+		// round after every file mutation (results as Notice events).
+		if cp := cfg.Agent.Cosplay; cp != nil && cp.AutoOnMutation {
+			cosplayAutoVerifier = cosplay.NewAutoVerifier(cosplay.AutoConfig{
+				NumTests:    cp.AutoNumTests,
+				MaxRounds:   cp.AutoMaxRounds,
+				Timeout:     time.Duration(cp.AutoTimeoutSeconds) * time.Second,
+				Concurrency: 1,
+			})
+		}
 		return "enabled task."
 	}
 	addReadOnlyTaskTool := func() string {
@@ -1940,6 +1966,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Hooks:                hookRunner,
 		StateTracker:         stateTracker,
 		Navigator:            agent.NewNavigatorBridge(navKernel),
+		CosplayAuto:          cosplayAutoVerifier,
 		LongHorizon:          longHorizonMode,
 		VerificationInterval: cfg.Agent.VerificationInterval,
 		TokenGovernance:      tokenGovernance,

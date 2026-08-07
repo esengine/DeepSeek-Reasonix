@@ -83,6 +83,11 @@ type NavigatorKernel interface {
 	// should apply. ErrAskHost (wrapped) is returned when the kernel asks the
 	// host to stop and consult the user.
 	EndAction(ctx context.Context, verb, args string, output string, toolErr error) (CorrectionBrief, error)
+
+	// PendingWatchEvents drains the background environment watch's correlated
+	// events as text lines, for the host to inject into the model's prompt.
+	// Empty when nothing was observed since the last drain.
+	PendingWatchEvents() []string
 }
 
 // CorrectionBrief is the agent-facing verdict of one navigator observation.

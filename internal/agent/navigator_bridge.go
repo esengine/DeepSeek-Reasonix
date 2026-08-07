@@ -32,6 +32,10 @@ func (b *navigatorBridge) ImplicitStateDigest() string {
 	return b.inner.ImplicitStateDigest()
 }
 
+func (b *navigatorBridge) PendingWatchEvents() []string {
+	return b.inner.PendingWatchEvents()
+}
+
 func (b *navigatorBridge) BeginAction(ctx context.Context, verb, args string) error {
 	_, err := b.inner.BeginAction(ctx, navigator.HostAction{Verb: verb, Args: args})
 	return err

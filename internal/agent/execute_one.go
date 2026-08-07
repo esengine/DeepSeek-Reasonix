@@ -902,7 +902,10 @@ func (a *Agent) observeBeforeMutation(plan *toolCallPlan) {
 }
 
 // observeAfterMutation records the after fingerprint when a concrete path was
-// known before execution, regardless of tool success or failure.
+// known before execution, regardless of tool success or failure. When the
+// cosplay auto_on_mutation verifier is installed, it also kicks off an
+// asynchronous bounded verification of the mutated file (results surface as
+// Notice events; never blocks the run loop).
 func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
 	if a == nil || plan == nil || plan.mutationPath == "" || a.mutationObserver == nil {
 		return
@@ -912,4 +915,14 @@ func (a *Agent) observeAfterMutation(plan *toolCallPlan) {
 		toolName = plan.call.Name
 	}
 	a.mutationObserver.AfterMutation(plan.mutationPath, toolName)
+	if a.cosplayAuto != nil {
+		a.cosplayAuto.MaybeVerify(context.Background(), plan.mutationPath, func(summary string) {
+			a.sink.Emit(event.Event{
+				Kind:   event.Notice,
+				Level:  event.LevelInfo,
+				Text:   summary,
+				Detail: "auto verification from [agent.cosplay] auto_on_mutation; the manual /code_verify tool remains available",
+			})
+		})
+	}
 }

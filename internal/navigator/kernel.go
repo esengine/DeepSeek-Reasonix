@@ -437,6 +437,24 @@ func (n *Navigator) StartBackgroundWatch(ctx context.Context, interval time.Dura
 // that never flush between long stretches of background-only sampling.
 const maxPendingEvents = 512
 
+// PendingWatchEvents drains the background environment watch's correlated
+// event buffer as short text lines (one per event), for the host to inject
+// into the model's prompt. Returns empty when nothing was observed since the
+// last drain — the OSWorld 2.0 "dead light under the lamp" defense: changes
+// that happened outside tool calls (a download finishing, a notification
+// arriving) become visible to the agent instead of being lost.
+func (n *Navigator) PendingWatchEvents() []string {
+	var out []string
+	for _, e := range n.sensor.FlushEvents() {
+		line := fmt.Sprintf("[env %s] %s %s", e.Source, e.Kind, e.Subject)
+		if e.Detail != "" {
+			line += " " + e.Detail
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 // ImplicitStateDigest returns the accumulated implicit facts as a text digest,
 // for the host to inject into compaction summaries. This is the bridge between
 // the navigator's continuous state and the host's prompt-level state.

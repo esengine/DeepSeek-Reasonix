@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/ablation"
 	"reasonix/internal/capability"
 	"reasonix/internal/checkpoint"
+	"reasonix/internal/cosplay"
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -399,6 +400,8 @@ type Agent struct {
 	// stateTracker: provides closed-loop correction + env sensing on top of
 	// implicit-state tracking. nil falls back to stateTracker alone.
 	navigator NavigatorKernel
+	// cosplayAuto asynchronously verifies mutated files (auto_on_mutation).
+	cosplayAuto *cosplay.AutoVerifier
 
 	// longHorizon mirrors Options.LongHorizon: enables the 10-section compaction
 	// prompt and implicit-state injection. verificationInterval mirrors
@@ -1082,6 +1085,12 @@ type Options struct {
 	// internal/navigator and is host-agnostic; boot wires a ReasonixAdapter.
 	Navigator NavigatorKernel
 
+	// CosplayAuto verifies mutated files after every file mutation when the
+	// [agent.cosplay] auto_on_mutation option is enabled. nil disables
+	// automatic verification (the manual code_verify tool still works).
+	// The verifier is asynchronous — it never blocks the run loop.
+	CosplayAuto *cosplay.AutoVerifier
+
 	// LongHorizon enables the OSWorld 2.0 long-horizon adjustments: earlier
 	// compaction triggers, the 10-section compaction prompt with implicit-state
 	// sections, StateTracker/Navigator wiring, and verification nudges. false
@@ -1303,6 +1312,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		hooks:                     hooks,
 		stateTracker:              opts.StateTracker,
 		navigator:                 opts.Navigator,
+		cosplayAuto:               opts.CosplayAuto,
 		longHorizon:               opts.LongHorizon,
 		verificationInterval:      opts.VerificationInterval,
 		tokenGovernance:           opts.TokenGovernance,
@@ -2371,6 +2381,22 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	requestMessages, err := a.interceptContextPrepare(ctx, requestMessages)
 	if err != nil {
 		return samplingRequest{}, err
+	}
+	// OSWorld 2.0 "dead light under the lamp" defense: drain the navigator's
+	// background environment watch (downloads finishing, notifications
+	// arriving, background processes appearing) into the current turn's last
+	// user message. The injection is ephemeral — the session log is untouched,
+	// so the next request's prompt-cache prefix stays stable.
+	if a.longHorizon && !nilutil.IsNil(a.navigator) {
+		if lines := a.navigator.PendingWatchEvents(); len(lines) > 0 {
+			envText := "Environment updates noticed since the last turn:\n" + strings.Join(lines, "\n")
+			for i := len(requestMessages) - 1; i >= 0; i-- {
+				if requestMessages[i].Role == provider.RoleUser {
+					requestMessages[i].Content += "\n\n" + envText
+					break
+				}
+			}
+		}
 	}
 	req := provider.Request{
 		Messages:       requestMessages,

@@ -71,6 +71,11 @@ compact_force_ratio = 0.9   # force compacting at this high-water mark
 # max_rounds = 2        # repair rounds per verification
 # num_tests = 4         # generated tests per round
 # timeout_seconds = 10  # per-test process timeout
+# auto_on_mutation = true      # verify mutated files after every edit
+#                              # (async, bounded round, Notice events)
+# auto_num_tests = 1           # auto-round test budget (default 1)
+# auto_max_rounds = 1          # auto-round repair budget (default 1)
+# auto_timeout_seconds = 20    # auto-round timeout (default 20)
 
 # A provider is a vendor endpoint (one base_url + key) that offers one or more
 # models. Use `models = [...]` to expose several under a single entry — switching
