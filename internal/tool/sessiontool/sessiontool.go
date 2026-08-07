@@ -17,7 +17,7 @@ import (
 	"reasonix/internal/textutil"
 )
 
-// ---- list_sessions tool -----------------------------------------------------
+// list_sessions tool
 
 type listSessionsTool struct {
 	sessionDir string
@@ -63,7 +63,7 @@ func (t *listSessionsTool) Execute(_ context.Context, _ json.RawMessage) (string
 	return b.String(), nil
 }
 
-// ---- read_session tool ------------------------------------------------------
+// read_session tool
 
 type readSessionTool struct {
 	sessionDir string
@@ -198,7 +198,7 @@ loop:
 	return b.String(), nil
 }
 
-// ---- helpers ----------------------------------------------------------------
+// helpers
 
 // truncateRunes preserves the historical name but truncates by grapheme
 // clusters so previews do not split combined emoji or other visible characters.

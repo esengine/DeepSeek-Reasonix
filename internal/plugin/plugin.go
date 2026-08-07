@@ -1898,7 +1898,7 @@ func summarizeFailureError(err error) string {
 	return msg
 }
 
-// --- JSON-RPC message types (shared by every transport) ---
+// JSON-RPC message types (shared by every transport)
 
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
@@ -1921,7 +1921,7 @@ type rpcError struct {
 
 func (e *rpcError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
 
-// --- remote tool adapter ---
+// remote tool adapter
 
 type remoteTool struct {
 	client           *Client

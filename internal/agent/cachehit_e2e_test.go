@@ -570,7 +570,7 @@ func newAgent(t *testing.T, url string, reg *tool.Registry, contextWindow, recen
 	return a, sink
 }
 
-// --- request inspection helpers ---
+// request inspection helpers
 
 func decodeMessages(body []byte) []json.RawMessage {
 	var req struct {
@@ -609,7 +609,7 @@ func charsOf(msgs []json.RawMessage) int {
 	return total
 }
 
-// --- SSE chunk builders matching the streamResponse shape the provider parses ---
+// SSE chunk builders matching the streamResponse shape the provider parses
 
 type sseDelta struct {
 	Content          string        `json:"content,omitempty"`

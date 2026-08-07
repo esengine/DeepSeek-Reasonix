@@ -41,7 +41,7 @@ func runTool(t *testing.T, tl interface {
 	return out
 }
 
-// ---- list_sessions tests ----------------------------------------------------
+// list_sessions tests
 
 func TestListSessions_EmptyDir(t *testing.T) {
 	dir := t.TempDir()
@@ -109,7 +109,7 @@ func TestListSessions_SingleSession(t *testing.T) {
 	}
 }
 
-// ---- read_session tests -----------------------------------------------------
+// read_session tests
 
 func TestReadSession_ValidSession(t *testing.T) {
 	dir := t.TempDir()
@@ -307,7 +307,7 @@ func TestReadSession_ToolResultsWithOptIn(t *testing.T) {
 	}
 }
 
-// ---- helper tests -----------------------------------------------------------
+// helper tests
 
 func TestModelFromPath(t *testing.T) {
 	tests := []struct {

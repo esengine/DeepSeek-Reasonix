@@ -232,7 +232,7 @@ type SnipHinter interface {
 	SnipHint() SnipHint
 }
 
-// --- process-global built-in set (populated by builtin subpackage init) ---
+// process-global built-in set (populated by builtin subpackage init)
 
 var builtins = map[string]Tool{}
 
@@ -266,7 +266,7 @@ func LookupBuiltin(name string) (Tool, bool) {
 	return t, ok
 }
 
-// --- per-run registry instance ---
+// per-run registry instance
 
 // Registry is a per-run set of tools: enabled built-ins plus plugin tools.
 type Registry struct {

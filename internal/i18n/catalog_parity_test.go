@@ -57,7 +57,7 @@ func TestCatalogsAgreeOnCodeTokens(t *testing.T) {
 	}
 }
 
-// --- token extraction -------------------------------------------------
+// token extraction
 
 var (
 	reBacktick = regexp.MustCompile("`([^`]+)`")

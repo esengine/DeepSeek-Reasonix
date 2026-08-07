@@ -447,7 +447,7 @@ func TestProviderSplit(t *testing.T) {
 	}
 }
 
-// --- test helpers ---
+// test helpers
 
 func dailyJSONLFiles(t *testing.T, dir string) []os.DirEntry {
 	t.Helper()

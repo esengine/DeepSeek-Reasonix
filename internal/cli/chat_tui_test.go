@@ -3058,7 +3058,7 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		return n.(chatTUI)
 	}
 
-	// --- idle state ---
+	// idle state
 	t.Run("idle", func(t *testing.T) {
 		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
 		for i := 0; i < 12; i++ {
@@ -3076,7 +3076,7 @@ func TestEmptyEnterScrollsToBottom(t *testing.T) {
 		}
 	})
 
-	// --- running state ---
+	// running state
 	t.Run("running", func(t *testing.T) {
 		cur := adv(newChatTUI(ctrl, "", ch, 80), tea.WindowSizeMsg{Width: 80, Height: 8})
 		for i := 0; i < 12; i++ {

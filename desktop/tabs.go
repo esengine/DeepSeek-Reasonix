@@ -34,7 +34,7 @@ import (
 	"reasonix/internal/worktree"
 )
 
-// --- WorkspaceTab -----------------------------------------------------------
+// WorkspaceTab
 
 // tabDisplayState follows one live runtime across visible, detached, and
 // reattached WorkspaceTab wrappers. Keeping one shared state pointer closes the
@@ -2137,7 +2137,7 @@ func (s *tabEventSink) telemetryTab() (*WorkspaceTab, string) {
 	return tab, sp
 }
 
-// --- wire event with tab ----------------------------------------------------
+// wire event with tab
 
 func toWireTab(e event.Event, tabID string, runtimeEpoch ...string) wireEventTab {
 	w := eventwire.ToWire(e)
@@ -2174,7 +2174,7 @@ type wireEventTab struct {
 	SessionCostUsd float64 `json:"sessionCostUsd,omitempty"`
 }
 
-// --- Tab management on App --------------------------------------------------
+// Tab management on App
 
 // TabMeta is the frontend-facing shape of one tab.
 type TabMeta struct {
@@ -4388,7 +4388,7 @@ func sessionBindingFromMeta(path string, meta agent.BranchMeta) (sessionBinding,
 	}, true
 }
 
-// --- active tab helpers -----------------------------------------------------
+// active tab helpers
 
 // activeTab returns the currently active tab (nil when there are no tabs).
 // Self-locking; safe to call from any goroutine without external lock.
@@ -4451,7 +4451,7 @@ func (a *App) ctrlByTabID(tabID string) control.SessionAPI {
 	return tab.Ctrl
 }
 
-// --- autosave per tab -------------------------------------------------------
+// autosave per tab
 
 const maxTabSnapshotFailureRetries = 2
 
@@ -4854,7 +4854,7 @@ func topicTitleFromText(text string) string {
 	return text
 }
 
-// --- persistence: desktop-projects.json -------------------------------------
+// persistence: desktop-projects.json
 
 const desktopProjectsFile = "desktop-projects.json"
 const tabsFileName = "desktop-tabs.json"
@@ -5717,7 +5717,7 @@ func removeProject(root string) error {
 	})
 }
 
-// --- topic helpers ----------------------------------------------------------
+// topic helpers
 
 const (
 	topicTitlesFile        = "desktop-topic-titles.json"
@@ -6395,7 +6395,7 @@ func ensureTopicIndexed(scope, workspaceRoot, topicID, title, source string) err
 	return prependTopicInProjectsFile(workspaceRoot, topicID, true)
 }
 
-// --- telemetry --------------------------------------------------------------
+// telemetry
 
 func saveTelemetry(path string, snapshot tabTelemetrySnapshot) error {
 	if snapshot.Version == 0 {
@@ -6437,7 +6437,7 @@ func loadTelemetry(path string) tabTelemetrySnapshot {
 	return tabTelemetrySnapshot{Version: 1, ReadFiles: records}
 }
 
-// --- project tree -----------------------------------------------------------
+// project tree
 
 // ProjectNode is one node in the sidebar project tree (a project folder or a
 // topic leaf).
@@ -8327,7 +8327,7 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 	return info
 }
 
-// --- utility ----------------------------------------------------------------
+// utility
 
 func (a *App) newUniqueTabIDLocked() string {
 	for {

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// --- sbplString ---
+// sbplString
 
 func TestSbplString(t *testing.T) {
 	cases := []struct {
@@ -29,7 +29,7 @@ func TestSbplString(t *testing.T) {
 	}
 }
 
-// --- writeAllowDirs ---
+// writeAllowDirs
 
 func TestWriteAllowDirsDeduplication(t *testing.T) {
 	dirs := writeAllowDirs([]string{"/tmp", "/tmp", "/tmp"})
@@ -111,7 +111,7 @@ func TestWriteAllowDirsNoDuplicates(t *testing.T) {
 	}
 }
 
-// --- seatbeltProfile ---
+// seatbeltProfile
 
 func TestSeatbeltProfileDeniesNetwork(t *testing.T) {
 	spec := Spec{Mode: "enforce", Network: false, WriteRoots: []string{"/workspace"}}

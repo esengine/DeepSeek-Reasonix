@@ -390,7 +390,7 @@ func TestUnconfinedWriterWritesAnywhere(t *testing.T) {
 	}
 }
 
-// --- confineRead & ConfineReaders ---
+// confineRead & ConfineReaders
 
 func TestConfineReadEmpty(t *testing.T) {
 	if confineRead(nil, "/anywhere") {
@@ -534,7 +534,7 @@ func TestGlobFiltersSensitiveMatchesWhenProtected(t *testing.T) {
 	}
 }
 
-// --- grep forbid-read ---
+// grep forbid-read
 
 func TestConfineReadBlocksGrepFile(t *testing.T) {
 	forbidDir := t.TempDir()

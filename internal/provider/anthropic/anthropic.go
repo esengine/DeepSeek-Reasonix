@@ -772,7 +772,7 @@ func formatWebSearchResults(raw json.RawMessage) string {
 	return "\n" + b.String() + "\n"
 }
 
-// --- Messages API wire protocol ---
+// Messages API wire protocol
 
 const cacheWrite5MinuteInputMultiplier = 1.25
 

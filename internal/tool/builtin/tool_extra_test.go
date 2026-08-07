@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// --- read_file extended tests ---
+// read_file extended tests
 
 func TestReadFileMissing(t *testing.T) {
 	_, err := readFile{}.Execute(context.Background(), argsJSON(t, map[string]any{"path": "/nonexistent/file.txt"}))
@@ -74,7 +74,7 @@ func TestReadFileInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- ls extended tests ---
+// ls extended tests
 
 func TestLsEmptyDir(t *testing.T) {
 	dir := t.TempDir()
@@ -106,7 +106,7 @@ func TestLsInvalidArgs(t *testing.T) {
 	}
 }
 
-// --- grep extended tests ---
+// grep extended tests
 
 func TestGrepSingleFile(t *testing.T) {
 	dir := t.TempDir()
@@ -183,7 +183,7 @@ func TestGrepTruncation(t *testing.T) {
 	}
 }
 
-// --- glob extended tests ---
+// glob extended tests
 
 func TestGlobEmptyPattern(t *testing.T) {
 	_, err := globTool{}.Execute(context.Background(), argsJSON(t, map[string]any{"pattern": ""}))

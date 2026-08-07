@@ -26,7 +26,7 @@ func init() {
 	tool.RegisterBuiltin(waitJob{})
 }
 
-// --- bash_output: poll a background job's new output (non-blocking) ---
+// bash_output: poll a background job's new output (non-blocking)
 
 type bashOutput struct{}
 
@@ -93,7 +93,7 @@ func filterLines(s, re string) (string, error) {
 	return strings.Join(keep, "\n"), nil
 }
 
-// --- kill_shell: terminate a running background job ---
+// kill_shell: terminate a running background job
 
 type killShell struct{}
 
@@ -129,7 +129,7 @@ func (killShell) Execute(ctx context.Context, args json.RawMessage) (string, err
 	return fmt.Sprintf("Background job %q was not running (already finished or unknown).", p.JobID), nil
 }
 
-// --- wait: block until background jobs finish, then return their results ---
+// wait: block until background jobs finish, then return their results
 
 type waitJob struct{}
 

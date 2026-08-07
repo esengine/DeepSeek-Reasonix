@@ -38,7 +38,7 @@ func occupyReadFileWithTimeoutSlots(t *testing.T) func() {
 	return release
 }
 
-// --- loadSessionTitles ---
+// loadSessionTitles
 
 func TestLoadSessionTitlesMissing(t *testing.T) {
 	dir := t.TempDir()
@@ -68,7 +68,7 @@ func TestLoadSessionTitlesValid(t *testing.T) {
 	}
 }
 
-// --- saveSessionTitles ---
+// saveSessionTitles
 
 func TestSaveSessionTitlesCreatesDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "nested", "sessions")
@@ -102,7 +102,7 @@ func TestSaveSessionTitlesRoundTrip(t *testing.T) {
 	}
 }
 
-// --- setSessionTitle ---
+// setSessionTitle
 
 func TestSetSessionTitle(t *testing.T) {
 	dir := t.TempDir()
@@ -160,7 +160,7 @@ func TestSetSessionTitlePreservesExistingTitlesWhenTimedReadSlotsFull(t *testing
 	}
 }
 
-// --- deleteSessionFile ---
+// deleteSessionFile
 
 func TestDeleteSessionFile(t *testing.T) {
 	dir := t.TempDir()
@@ -1176,7 +1176,7 @@ func writeSubagentArtifact(t *testing.T, dir, ref, parentSession string) {
 	}
 }
 
-// --- sessionTitlesPath ---
+// sessionTitlesPath
 
 func TestSessionTitlesPath(t *testing.T) {
 	got := sessionTitlesPath("/sessions")

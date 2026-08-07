@@ -400,7 +400,7 @@ func truncateForBridge(s string, limit int) string {
 	return string(runes[:limit]) + "…"
 }
 
-// ---- bot.DesktopBridge 实现 ----
+// bot.DesktopBridge 实现
 
 func (h *botBridgeHub) Sessions() []bot.DesktopSessionInfo {
 	if h.sessions == nil {
@@ -555,7 +555,7 @@ func (h *botBridgeHub) Answer(askID string, answers []event.AskAnswer) (string, 
 	return fmt.Sprintf("已提交「%s」的回答。桌面端若已先处理，以先到者为准。", h.tabLabel(p.tabID)), nil
 }
 
-// ---- 显式接管 ----
+// 显式接管
 
 func (h *botBridgeHub) Takeover(route bot.DesktopWatchRoute, tabID string) (string, error) {
 	tabID = strings.TrimSpace(tabID)

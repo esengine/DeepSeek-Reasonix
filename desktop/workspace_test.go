@@ -20,7 +20,7 @@ import (
 	"reasonix/internal/control"
 )
 
-// --- workspaceStatePath ---
+// workspaceStatePath
 
 func TestWorkspaceStatePath(t *testing.T) {
 	// workspaceStatePath depends on config.MemoryUserDir() which needs a
@@ -35,7 +35,7 @@ func TestWorkspaceStatePath(t *testing.T) {
 	}
 }
 
-// --- saveWorkspace / loadWorkspace round-trip ---
+// saveWorkspace / loadWorkspace round-trip
 
 func TestSaveLoadWorkspaceRoundTrip(t *testing.T) {
 	// workspaceStatePath() resolves via os.UserConfigDir() (HOME on unix,
@@ -575,7 +575,7 @@ func BenchmarkDesktopSessionDir(b *testing.B) {
 	}
 }
 
-// --- cwdWritable ---
+// cwdWritable
 
 func TestCwdWritable(t *testing.T) {
 	// In a normal test environment, cwd should be writable.
@@ -1048,7 +1048,7 @@ func TestReadFileGB18030(t *testing.T) {
 	}
 }
 
-// --- RemoveWorkspace cleanup of active pointer ---
+// RemoveWorkspace cleanup of active pointer
 
 func TestRemoveWorkspaceClearsActivePointerWhenRemovingCurrentWorkspace(t *testing.T) {
 	isolateDesktopUserDirs(t)
@@ -1115,7 +1115,7 @@ func TestClearWorkspace(t *testing.T) {
 	}
 }
 
-// --- OpenProjectTab updates active workspace pointer ---
+// OpenProjectTab updates active workspace pointer
 
 func TestOpenProjectTabUpdatesActiveWorkspacePointer(t *testing.T) {
 	isolateDesktopUserDirs(t)
@@ -1812,7 +1812,7 @@ func gitOutput(t *testing.T, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// --- settings_app.go helpers ---
+// settings_app.go helpers
 // These are unexported but in the same package, so we can test them.
 
 func TestOrDefault(t *testing.T) {

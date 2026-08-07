@@ -1093,7 +1093,7 @@ func (a *App) commitPendingUpdateHealth() error {
 	)
 }
 
-// --- bound command surface (frontend → controller) ---
+// bound command surface (frontend → controller)
 // Each method guards on a nil controller so a pre-startup or failed-build call is
 // a no-op, never a panic.
 
@@ -11552,7 +11552,7 @@ func workspaceRelativeIn(path, workspaceRoot string) (string, bool) {
 	return filepath.ToSlash(rel), true
 }
 
-// --- memory panel (frontend ⇄ controller) ---
+// memory panel (frontend ⇄ controller)
 
 type MemoryImport struct {
 	Path       string `json:"path"`

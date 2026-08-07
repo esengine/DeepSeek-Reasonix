@@ -649,7 +649,7 @@ func hasLabel(items []compItem, label string) bool {
 	return false
 }
 
-// --- fuzzy matching for / completion ---
+// fuzzy matching for / completion
 
 // TestFuzzyFilterSlashSubsequence proves the slash-menu fuzzy filter matches
 // command labels whose letters appear in order, even when they are not a

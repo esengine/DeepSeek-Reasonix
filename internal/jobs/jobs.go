@@ -1905,7 +1905,7 @@ func jobKey(parentSession, id string) string {
 	return strings.TrimSpace(parentSession) + "\x00" + strings.TrimSpace(id)
 }
 
-// --- call-context injection (mirrors agent.CallContext) ---
+// call-context injection (mirrors agent.CallContext)
 
 type ctxKey struct{}
 type sessionCtxKey struct{}

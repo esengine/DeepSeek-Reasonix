@@ -833,7 +833,7 @@ func (c *Controller) beginCheckpoint(input string) {
 	c.checkpoints.beginWithObserver(input, len(c.executor.Session().Messages), c.mutationObserver)
 }
 
-// --- commands (frontend → controller) ---
+// commands (frontend → controller)
 
 // admissionResult classifies what runGuarded did with a turn body.
 type admissionResult int
@@ -5612,7 +5612,7 @@ func (c *Controller) Bypass() bool {
 	return c.AutoApproveTools()
 }
 
-// --- memory ---
+// memory
 //
 // The memory snapshot, the pending turn-tail notes queue, and write serialization
 // live in c.memory (a memoryManager) behind its own locks, off c.mu — so a
@@ -5681,7 +5681,7 @@ func (c *Controller) Memory() *memory.Set {
 	return c.memory.current()
 }
 
-// --- approval bridge (agent gate → events) ---
+// approval bridge (agent gate → events)
 
 // gateApprover adapts the Controller to permission.Approver. It is distinct
 // from the public Approve command (different signature, different direction).

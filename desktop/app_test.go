@@ -10326,7 +10326,7 @@ func TestSessionActionsWithoutControllerReturnError(t *testing.T) {
 	}
 }
 
-// --- Prompt history scanning tests ------------------------------------------
+// Prompt history scanning tests
 
 func identityPromptDisplay(text string) string { return text }
 

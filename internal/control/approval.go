@@ -484,7 +484,7 @@ func normalizePlanModeReadOnlyCommandPrefix(prefix string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(prefix)), " ")
 }
 
-// --- decision helpers (caller holds a.mu) ---
+// decision helpers (caller holds a.mu)
 
 func (a *approvalManager) bypassAllowsLocked(tool, subject string, args json.RawMessage) bool {
 	if requiresFreshApprovalTool(tool) {
@@ -553,7 +553,7 @@ func (a *approvalManager) drainLocked(includeExplicitAsk bool) []drainedApproval
 	return pending
 }
 
-// --- pure approval helpers ---
+// pure approval helpers
 
 func normalizeToolApprovalMode(mode string) string {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
