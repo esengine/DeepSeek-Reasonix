@@ -201,3 +201,62 @@ func recallTestWrite(t *testing.T, dir string, memory Memory) {
 		t.Fatal(err)
 	}
 }
+
+// The recall-doc cache is package-level and keyed by the store directory pair,
+// so every test below uses its own temp store (recallTestStore) and never
+// collides. Each test asserts that the cached preprocessing is invalidated by
+// in-place edits, additions, and removals of fact files.
+
+func TestAutoRecallCacheReflectsEditedFact(t *testing.T) {
+	store := recallTestStore(t)
+	recallTestWrite(t, store.Dir, Memory{
+		ID: "mem-cache-1", Name: "cache-fact", Title: "Cache fact",
+		Description: "original description", Type: TypeProject,
+		Scope: FactScopeProject, Body: "The deployment target is the legacy cluster.",
+	})
+	first := AutoRecall(store, "deployment target", RecallOptions{})
+	if len(first.Hits) != 1 {
+		t.Fatalf("first recall expected 1 hit, got %d", len(first.Hits))
+	}
+	// Edit the fact body in place: the fingerprint must invalidate the cache.
+	recallTestWrite(t, store.Dir, Memory{
+		ID: "mem-cache-1", Name: "cache-fact", Title: "Cache fact",
+		Description: "edited description", Type: TypeProject,
+		Scope: FactScopeProject, Body: "The staging environment is the new deployment target.",
+	})
+	second := AutoRecall(store, "staging environment", RecallOptions{})
+	if len(second.Hits) != 1 {
+		t.Fatalf("recall after edit expected 1 hit, got %d (cache not invalidated?)", len(second.Hits))
+	}
+	if !strings.Contains(second.Hits[0].Memory.Body, "staging") {
+		t.Fatalf("recall after edit should see the new body, got %q", second.Hits[0].Memory.Body)
+	}
+}
+
+func TestAutoRecallCacheReflectsAddedAndRemovedFacts(t *testing.T) {
+	store := recallTestStore(t)
+	recallTestWrite(t, store.Dir, Memory{
+		ID: "mem-cache-a", Name: "fact-a", Title: "Fact A",
+		Description: "fact a", Type: TypeProject,
+		Scope: FactScopeProject, Body: "Alpha is the primary component.",
+	})
+	if got := AutoRecall(store, "alpha component", RecallOptions{}); len(got.Hits) != 1 {
+		t.Fatalf("expected 1 hit for alpha, got %d", len(got.Hits))
+	}
+	// Adding a fact must invalidate the cache so the new fact becomes recallable.
+	recallTestWrite(t, store.Dir, Memory{
+		ID: "mem-cache-b", Name: "fact-b", Title: "Fact B",
+		Description: "fact b", Type: TypeProject,
+		Scope: FactScopeProject, Body: "Beta is the secondary module.",
+	})
+	if got := AutoRecall(store, "beta module", RecallOptions{}); len(got.Hits) != 1 {
+		t.Fatalf("recall after add expected 1 hit for beta, got %d (cache not invalidated?)", len(got.Hits))
+	}
+	// Removing a fact must invalidate the cache too.
+	if err := os.Remove(filepath.Join(store.Dir, "fact-b.md")); err != nil {
+		t.Fatal(err)
+	}
+	if got := AutoRecall(store, "beta module", RecallOptions{}); len(got.Hits) != 0 {
+		t.Fatalf("recall after remove expected 0 hits, got %d (cache not invalidated?)", len(got.Hits))
+	}
+}

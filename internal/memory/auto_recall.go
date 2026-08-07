@@ -3,9 +3,12 @@ package memory
 import (
 	"fmt"
 	"html"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -126,6 +129,104 @@ type autoRecallDoc struct {
 	length int
 }
 
+// recallDocsCache caches the query-independent document preprocessing per store
+// directory pair. AutoRecall runs on every real user turn; reading every fact
+// file, parsing frontmatter, and tokenizing/counting terms costs the same no
+// matter what the query is, so a store whose files are unchanged can reuse the
+// previous preprocessing. The cache is keyed by the store's directory pair and
+// invalidated by a file-level fingerprint (name, size, mtime) — ReadDir plus
+// stat per fact file, which is far cheaper than re-reading and re-tokenizing
+// every body. In-place edits change a file's mtime/size, so the fingerprint
+// catches them even though a directory mtime would not.
+var recallDocsCache sync.Map // "Dir\x00GlobalDir" -> *recallDocsEntry
+
+type recallDocsEntry struct {
+	sigs     map[string]fileSig
+	docs     []autoRecallDoc
+	totalLen int
+}
+
+type fileSig struct {
+	size  int64
+	mtime time.Time
+}
+
+// recallDocsFor returns the preprocessed recall documents for store, reusing
+// the cached build when no fact file changed since it was computed.
+func recallDocsFor(store Store) ([]autoRecallDoc, int) {
+	sigs := currentFactSigs(store)
+	key := store.Dir + "\x00" + store.GlobalDir
+	if cached, ok := recallDocsCache.Load(key); ok {
+		entry := cached.(*recallDocsEntry)
+		if sigsEqual(sigs, entry.sigs) {
+			return entry.docs, entry.totalLen
+		}
+	}
+	docs, totalLen := buildRecallDocs(store)
+	recallDocsCache.Store(key, &recallDocsEntry{sigs: sigs, docs: docs, totalLen: totalLen})
+	return docs, totalLen
+}
+
+func buildRecallDocs(store Store) ([]autoRecallDoc, int) {
+	memories := recallMemories(store.ListAll())
+	docs := make([]autoRecallDoc, 0, len(memories))
+	totalLen := 0
+	for _, memory := range memories {
+		text := autoRecallSearchText(memory)
+		terms := retrieval.Tokens(text)
+		if len(terms) == 0 {
+			continue
+		}
+		docs = append(docs, autoRecallDoc{
+			memory: memory,
+			text:   text,
+			counts: retrieval.Counts(terms),
+			length: len(terms),
+		})
+		totalLen += len(terms)
+	}
+	return docs, totalLen
+}
+
+// currentFactSigs fingerprints every active fact file the same way ListAll
+// selects them: top-level .md files that are not the MEMORY.md index. The
+// fingerprint drives cache invalidation without reading file contents.
+func currentFactSigs(store Store) map[string]fileSig {
+	sigs := make(map[string]fileSig)
+	for _, dir := range store.dirs() {
+		if dir == "" {
+			continue
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if entry.IsDir() || entry.Name() == indexFile || !strings.HasSuffix(entry.Name(), ".md") {
+				continue
+			}
+			info, err := entry.Info()
+			if err != nil {
+				continue
+			}
+			sigs[filepath.Join(dir, entry.Name())] = fileSig{size: info.Size(), mtime: info.ModTime()}
+		}
+	}
+	return sigs
+}
+
+func sigsEqual(a, b map[string]fileSig) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, va := range a {
+		if vb, ok := b[k]; !ok || va != vb {
+			return false
+		}
+	}
+	return true
+}
+
 // AutoRecall conservatively selects saved facts for a real user turn. It is
 // intentionally stricter than the explicit memory search tool: generic prompts
 // and one-common-word matches return no block rather than spending context.
@@ -141,31 +242,15 @@ func AutoRecall(store Store, query string, opts RecallOptions) RecallResult {
 		return result
 	}
 
-	memories := recallMemories(store.ListAll())
-	docs := make([]autoRecallDoc, 0, len(memories))
-	for _, memory := range memories {
-		text := autoRecallSearchText(memory)
-		terms := retrieval.Tokens(text)
-		if len(terms) == 0 {
-			continue
-		}
-		docs = append(docs, autoRecallDoc{
-			memory: memory,
-			text:   text,
-			counts: retrieval.Counts(terms),
-			length: len(terms),
-		})
-	}
+	docs, totalLen := recallDocsFor(store)
 	if len(docs) == 0 {
 		result.Suppressed = "memory store is empty"
 		return result
 	}
 
 	counts := make([]map[string]int, 0, len(docs))
-	totalLen := 0
 	for _, doc := range docs {
 		counts = append(counts, doc.counts)
-		totalLen += doc.length
 	}
 	df := retrieval.DocumentFrequency(counts)
 	avgLen := float64(totalLen) / float64(len(docs))
