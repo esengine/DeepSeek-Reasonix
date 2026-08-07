@@ -893,6 +893,7 @@ export const zhTW: Record<DictKey, string> = {
 
   // 提問卡片
   "ask.title": "需要你決定",
+  "ask.multiSelectBadge": "可多選",
   "ask.questionProgress": "問題 {progress}",
   "ask.details": "詳情",
   "ask.hideDetails": "收起",

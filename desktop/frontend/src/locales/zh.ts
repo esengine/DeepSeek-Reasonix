@@ -1128,6 +1128,7 @@ export const zh: Record<DictKey, string> = {
 
   // 提问卡片
   "ask.title": "需要你决定",
+  "ask.multiSelectBadge": "可多选",
   "ask.questionProgress": "问题 {progress}",
   "ask.details": "详情",
   "ask.hideDetails": "收起",

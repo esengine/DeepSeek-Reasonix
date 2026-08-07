@@ -1127,6 +1127,7 @@ export const en = {
 
   // ask card
   "ask.title": "Need your decision",
+  "ask.multiSelectBadge": "Multi-select",
   "ask.questionProgress": "Question {progress}",
   "ask.details": "Details",
   "ask.hideDetails": "Hide",

@@ -31,7 +31,7 @@
   "Tools": [
     {
       "name": "ask",
-      "description": "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect` when more than one may apply.",
+      "description": "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect`: set to `true` when the question allows MULTIPLE picks (e.g. 'select all that apply', 'which ones'), `false` for a single exclusive choice. **Critical:** omitting `multiSelect: true` on a multi-choice question silently restricts the user to one pick — each selection replaces the last — so always set it correctly.",
       "parameters": {
         "properties": {
           "questions": {
@@ -43,7 +43,7 @@
                   "type": "string"
                 },
                 "multiSelect": {
-                  "description": "Allow selecting more than one option.",
+                  "description": "Whether the user may pick several options. Set to 'true' for multi-pick questions (e.g. \"choose all that apply\"), 'false' for single exclusive choice. Setting 'false' or omitting this on a multi-answer question replaces every pick — only the last survives — so always set 'true' when more than one answer is valid.",
                   "type": "boolean"
                 },
                 "options": {
@@ -75,6 +75,7 @@
               },
               "required": [
                 "header",
+                "multiSelect",
                 "options",
                 "question"
               ],
@@ -93,7 +94,7 @@
     },
     {
       "name": "bash",
-      "description": "Execute a command in the shell and return combined stdout/stderr. Use for builds, tests, git, package managers, etc. To search/read/list/edit/move files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file, move_file) over shell grep/cat/ls/find/sed/mv/Move-Item — they behave identically on every OS. For symbol search or architecture questions, prefer LSP/read tools and targeted grep before shell commands.",
+      "description": "Execute a command in the shell and return combined stdout/stderr. NOTE: bash is not available on this host — commands run under Windows PowerShell, so write PowerShell, not bash:\n  - chaining: ';' runs both regardless; 'if ($?) { ... }' is conditional. '\u0026\u0026' and '||' are NOT parsed.\n  - redirect/vars: $null not /dev/null; $env:VAR not $VAR; '2\u003e$null' drops stderr.\n  - file ops: Get-ChildItem (ls), Get-Content (cat), Remove-Item -Recurse -Force (rm -rf), Copy-Item (cp), Select-String (grep).\n  - no head/tail/which/touch: use Select-Object -First/-Last N, (Get-Command x).Source, New-Item.\n  - multi-line text to a native exe (e.g. git commit -m): use a single-quoted here-string @'...'@ (closing '@ at column 0). Use for builds, tests, git, package managers, etc. To search/read/list/edit/move files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file, move_file) over shell grep/cat/ls/find/sed/mv/Move-Item — they behave identically on every OS. For symbol search or architecture questions, prefer LSP/read tools and targeted grep before shell commands.",
       "parameters": {
         "properties": {
           "command": {

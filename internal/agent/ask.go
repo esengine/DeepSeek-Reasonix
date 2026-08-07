@@ -25,7 +25,7 @@ func NewAskTool() *AskTool { return &AskTool{} }
 func (*AskTool) Name() string { return "ask" }
 
 func (*AskTool) Description() string {
-	return "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect` when more than one may apply."
+	return "Ask the user one or more multiple-choice questions when you hit a decision that is genuinely theirs to make — one you can't resolve from the request, the code, or sensible defaults. The frontend shows the options for the user to pick; their choices are returned to you. Prefer this over asking in prose for any real fork (which approach, which library, scope). Don't use it for decisions with an obvious default — pick the sensible option and proceed. Tool-approval modes such as YOLO do not answer these questions for the user. Each question has a short `header` (a tab label), the `question` text, 2-4 `options` (each a `label` and optional `description`; put any recommended option first), and `multiSelect`: set to `true` when the question allows MULTIPLE picks (e.g. 'select all that apply', 'which ones'), `false` for a single exclusive choice. **Critical:** omitting `multiSelect: true` on a multi-choice question silently restricts the user to one pick — each selection replaces the last — so always set it correctly."
 }
 
 func (*AskTool) Schema() json.RawMessage {
@@ -54,9 +54,9 @@ func (*AskTool) Schema() json.RawMessage {
             "required":["label"]
           }
         },
-        "multiSelect":{"type":"boolean","description":"Allow selecting more than one option."}
+        "multiSelect":{"type":"boolean","description":"Whether the user may pick several options. Set to 'true' for multi-pick questions (e.g. \"choose all that apply\"), 'false' for single exclusive choice. Setting 'false' or omitting this on a multi-answer question replaces every pick — only the last survives — so always set 'true' when more than one answer is valid."}
       },
-      "required":["question","header","options"]
+      "required":["question","header","options","multiSelect"]
     }
   }
 },

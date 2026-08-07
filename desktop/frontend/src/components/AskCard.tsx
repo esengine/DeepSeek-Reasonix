@@ -256,6 +256,7 @@ export function AskCard({
       badges={
         <span className="ask-shelf__header-meta">
           {q.header && <span className="ask-shelf__header-text">{q.header}</span>}
+          {q.multi && <span className="ask-shelf__header-text ask-shelf__header-text--multi">{t("ask.multiSelectBadge")}</span>}
           {hasMultipleQuestions && (
             <span className="ask-shelf__header-text ask-shelf__header-text--progress">
               {t("ask.questionProgress", { progress })}
