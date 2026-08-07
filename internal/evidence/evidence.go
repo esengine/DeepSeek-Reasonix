@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -765,10 +766,7 @@ func (l *Ledger) HasSuccessfulCommandAfter(command string, after int) bool {
 	if l == nil || command == "" {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -785,10 +783,7 @@ func (l *Ledger) HasSuccessfulCompleteStepAfter(after int) bool {
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -810,10 +805,7 @@ func (l *Ledger) HasSuccessfulDeliverySignoffAfter(after int) bool {
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	receipts := append([]Receipt(nil), l.receipts...)
@@ -851,10 +843,7 @@ func (l *Ledger) HasSuccessfulReviewAfter(after int) bool {
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	receipts := append([]Receipt(nil), l.receipts...)
@@ -875,10 +864,7 @@ func (l *Ledger) HasHostReviewCoverageAfter(after int, requiredPaths []string) b
 	if l == nil {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 	l.mu.Lock()
 	receipts := append([]Receipt(nil), l.receipts...)
 	l.mu.Unlock()
@@ -1036,8 +1022,8 @@ func (l *Ledger) IncompleteLatestTodos() ([]TodoStepMatch, bool) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for i := len(l.receipts) - 1; i >= 0; i-- {
-		r := l.receipts[i]
+	for _, v := range slices.Backward(l.receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
@@ -1251,10 +1237,7 @@ func (l *Ledger) HasSuccessfulAnchorRefreshReadAfter(paths []string, after int) 
 	if l == nil || len(wanted) == 0 {
 		return false
 	}
-	start := after + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(after+1, 0)
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -1331,8 +1314,8 @@ func (l *Ledger) MatchLatestTodoStep(step string) (TodoStepMatch, bool) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for i := len(l.receipts) - 1; i >= 0; i-- {
-		r := l.receipts[i]
+	for _, v := range slices.Backward(l.receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
@@ -1348,8 +1331,8 @@ func (l *Ledger) LatestTodos() ([]TodoItem, bool) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	for i := len(l.receipts) - 1; i >= 0; i-- {
-		r := l.receipts[i]
+	for _, v := range slices.Backward(l.receipts) {
+		r := v
 		if r.Success && r.ToolName == "todo_write" {
 			return append([]TodoItem(nil), r.Todos...), true
 		}
@@ -1374,8 +1357,8 @@ func (l *Ledger) UnverifiedCompletedTodos(current []TodoItem) (missing []TodoSte
 
 	var previous []TodoItem
 	baseline := -1
-	for i := len(receipts) - 1; i >= 0; i-- {
-		r := receipts[i]
+	for i, v := range slices.Backward(receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}
@@ -1444,10 +1427,7 @@ func hasFailedCompleteStepRecoveryForTodo(receipts []Receipt, baseline int, inde
 // Recovery only trusts progress that happened before the failed sign-off.
 // Later unrelated work must not retroactively authorize an earlier completion.
 func hasSuccessfulProgressBeforeReceipt(receipts []Receipt, baseline int, before int) bool {
-	start := baseline + 1
-	if start < 0 {
-		start = 0
-	}
+	start := max(baseline+1, 0)
 	for i := start; i < before && i < len(receipts); i++ {
 		r := receipts[i]
 		if !r.Success || r.ToolName == "todo_write" || r.ToolName == "complete_step" || r.Read {
@@ -1811,12 +1791,7 @@ func bashCommandUsesOpaqueInlineInterpreter(command string) bool {
 	if !ok {
 		return false
 	}
-	for _, segment := range segments {
-		if bashSegmentUsesOpaqueInlineInterpreter(segment) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(segments, bashSegmentUsesOpaqueInlineInterpreter)
 }
 
 func bashSegmentUsesOpaqueInlineInterpreter(segment string) bool {
@@ -2018,12 +1993,7 @@ func bashSegmentIsVerification(fields []string) bool {
 			return true
 		}
 		if args[0] == "test" {
-			for _, arg := range args[1:] {
-				if goTestFlagWritesFile(arg) {
-					return false
-				}
-			}
-			return true
+			return !slices.ContainsFunc(args[1:], goTestFlagWritesFile)
 		}
 		// A package pattern can expand to one main package, so even `go build
 		// ./...` may write a workspace binary. Package expansion and inherited
@@ -2037,12 +2007,7 @@ func bashSegmentIsVerification(fields []string) bool {
 	case "tsc":
 		return tscSegmentIsVerification(args)
 	case "mypy":
-		for _, arg := range args {
-			if mypyFlagWritesReport(arg) {
-				return false
-			}
-		}
-		return true
+		return !slices.ContainsFunc(args, mypyFlagWritesReport)
 	case "npm", "pnpm", "yarn", "bun", "cargo":
 		if len(args) > 0 && hasCommandArg(args[:1], "test", "check", "lint", "clippy") {
 			return true
@@ -2241,12 +2206,7 @@ func nodeSegmentIsVerification(args []string) bool {
 	case "--test":
 		// Match the repository's treatment of other conventional test runners,
 		// but fail closed on test-runner and Node runtime flags that write files.
-		for _, arg := range args[1:] {
-			if nodeTestFlagWritesFile(arg) {
-				return false
-			}
-		}
-		return true
+		return !slices.ContainsFunc(args[1:], nodeTestFlagWritesFile)
 	default:
 		return false
 	}
@@ -2541,8 +2501,8 @@ func argNamesPath(arg, needle string) bool {
 	if tok == needle || strings.HasSuffix(tok, "/"+needle) {
 		return true
 	}
-	if i := strings.Index(tok, ":"); i >= 0 {
-		rest := tok[i+1:]
+	if _, after, ok := strings.Cut(tok, ":"); ok {
+		rest := after
 		if rest == needle || strings.HasSuffix(rest, "/"+needle) {
 			return true
 		}
@@ -2788,8 +2748,8 @@ func hasSuccessfulCompleteStepForTodo(receipts []Receipt, index int, current []T
 }
 
 func latestTodoStep(step string, receipts []Receipt) TodoStepMatch {
-	for i := len(receipts) - 1; i >= 0; i-- {
-		r := receipts[i]
+	for _, v := range slices.Backward(receipts) {
+		r := v
 		if !r.Success || r.ToolName != "todo_write" {
 			continue
 		}

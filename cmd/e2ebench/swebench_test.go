@@ -6,7 +6,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BurntSushi/toml"
+
 	"reasonix/internal/ablation"
+	"reasonix/internal/config"
 )
 
 // The harness prints an unmangled local image key but pulls a mangled one; the
@@ -160,5 +163,110 @@ func TestPermissionPostureIsTheOnlyDifferenceBetweenArms(t *testing.T) {
 	}
 	if _, err := permissionFlag("bypass"); err == nil {
 		t.Fatal("an unknown posture must fail loudly rather than silently running unattended")
+	}
+}
+
+// The benchmark config must remain a default install, except for the required
+// bash sandbox override; decode it with the real config type to pin the keys.
+func TestSwebenchAgentConfigTunesNothingInTheAgentsFavor(t *testing.T) {
+	var cfg config.Config
+	meta, err := toml.Decode(swebenchAgentConfig, &cfg)
+	if err != nil {
+		t.Fatalf("container config must be valid TOML: %v", err)
+	}
+	if cfg.Sandbox.Bash != "off" {
+		t.Errorf("sandbox.bash = %q, want \"off\": bubblewrap is absent from the official images", cfg.Sandbox.Bash)
+	}
+	// Do not configure the benchmark's blocked network as an agent fact.
+	if cfg.Environment.Offline {
+		t.Error("the benchmark must not declare the environment offline: that configures the agent better than a default install")
+	}
+	for _, key := range meta.Keys() {
+		if meta.Type(key...) == "Hash" {
+			continue // table header, not a setting
+		}
+		if got := key.String(); got != "sandbox.bash" {
+			t.Errorf("unexpected benchmark-only setting %q: the container must run a default install", got)
+		}
+	}
+}
+
+// Binary entries are omitted because their placeholder is not applicable;
+// every text entry, including generated files, must remain in the patch.
+func TestPatchFileListDropsBinariesAndNothingElse(t *testing.T) {
+	numstat := strings.Join([]string{
+		"12\t4\tsphinx/directives/other.py",                // the actual fix
+		"0\t9\tsphinx/old_helper.py",                       // text deletion
+		"-\t-\t_repro/_build/.doctrees/environment.pickle", // binary: drop
+		"-\t-\timg/probe.png",                              // new binary: drop
+		"3\t0\t_repro/_build/_static/basic.css",            // build output the agent left: keep
+		"2\t0\tsklearn.egg-info/PKG-INFO",                  // packaging metadata: keep
+		"1\t0\tpkg/__pycache__/note.txt",                   // cache tree: keep
+		"5\t1\trepro.py",                                   // agent scratch: keep
+	}, "\x00") + "\x00"
+	got := patchFileList(numstat)
+	want := []string{
+		"sphinx/directives/other.py",
+		"sphinx/old_helper.py",
+		"_repro/_build/_static/basic.css",
+		"sklearn.egg-info/PKG-INFO",
+		"pkg/__pycache__/note.txt",
+		"repro.py",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("patchFileList = %v, want %v", got, want)
+	}
+}
+
+func TestPatchFileListToleratesEmptyAndMalformedInput(t *testing.T) {
+	if got := patchFileList(""); got != nil {
+		t.Fatalf("empty numstat = %v, want nil", got)
+	}
+	if got := patchFileList("garbage-without-tabs\x00\x00"); got != nil {
+		t.Fatalf("malformed numstat = %v, want nil", got)
+	}
+}
+
+func TestTestbedPatchDiffArgsTreatPathsLiterally(t *testing.T) {
+	got := testbedPatchDiffArgs("agent-123", []string{"source.py", ":(exclude)*"})
+	want := []string{
+		"exec", "agent-123", "git", "--literal-pathspecs", "-C", "/testbed",
+		"diff", "--cached", "--no-renames", "--", "source.py", ":(exclude)*",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("patch diff args = %v, want %v", got, want)
+	}
+}
+
+func TestPatchFileBatchesBoundArgBytesAndPreserveOrder(t *testing.T) {
+	files := make([]string, 2000)
+	for i := range files {
+		files[i] = "generated.txt"
+	}
+
+	batches, err := patchFileBatches("agent-123", files)
+	if err != nil {
+		t.Fatalf("patchFileBatches: %v", err)
+	}
+	if len(batches) < 2 {
+		t.Fatalf("batches = %d, want multiple batches", len(batches))
+	}
+
+	var got []string
+	for _, batch := range batches {
+		if bytes := argvBytes(testbedPatchDiffArgs("agent-123", batch)); bytes > patchArgBudget {
+			t.Fatalf("batch argv bytes = %d, budget = %d", bytes, patchArgBudget)
+		}
+		got = append(got, batch...)
+	}
+	if !reflect.DeepEqual(got, files) {
+		t.Fatalf("batched paths changed: got %d paths, want %d", len(got), len(files))
+	}
+}
+
+func TestPatchFileBatchesRejectOversizedPath(t *testing.T) {
+	path := strings.Repeat("x", patchArgBudget)
+	if _, err := patchFileBatches("agent-123", []string{path}); err == nil {
+		t.Fatal("oversized path must be rejected")
 	}
 }

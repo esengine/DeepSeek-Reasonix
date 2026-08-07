@@ -797,7 +797,7 @@ func TestTurnOrchestratorStopFailureHookCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	o := newTurnOrchestrator(c)
-	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && err != context.Canceled {
+	if err := o.runTurnWithRawDisplay(ctx, "test", "test", ""); err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 	if stopCalls != 1 {
@@ -921,7 +921,7 @@ func TestTurnOrchestratorInterruptedAfterCompactionRelocatesVisibleTurn(t *testi
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sess := agent.NewSession("system")
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				sess.Add(provider.Message{Role: provider.RoleUser, Content: "old task"})
 				sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "old answer"})
 			}

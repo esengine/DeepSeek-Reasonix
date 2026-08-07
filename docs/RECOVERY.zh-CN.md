@@ -47,6 +47,17 @@ InstallRoot/
 
 正式恢复路径**不要求**手工删除 `pending-update.json`、锁文件或 AppData。
 
+## 应用内更新卡住
+
+若「设置 → 更新」或顶部横幅提示上次更新尚未完成（含 `pending update already exists`、
+`awaiting startup health`、`handoff backup` 等错误）：
+
+1. 在横幅或设置里点 **「放弃上次更新」**，再点 **「重试」**。
+2. 若没有该按钮或操作失败：完全退出 Reasonix 后重新启动一次（让启动路径提交或清理试用事务），再试应用内更新。
+3. 若仍失败：从官方下载页获取最新签名安装包，**直接覆盖安装**当前版本，不要先卸载。
+4. macOS 还需在「系统设置 → 隐私与安全性 → App 管理」中允许 Reasonix；若
+   `Reasonix.app.reasonix-update-backup` 因 TCC 无法删除，请改走官方安装包覆盖路径。
+
 如果 Windows 安装器显示 `Reasonix layout activation failed`，请展开安装详情并复制
 `Reasonix layout activator output:` 下方的内容。当前安装器会保留 activator 的具体错误，
 不再只显示 exit code 1。

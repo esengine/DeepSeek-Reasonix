@@ -147,13 +147,13 @@ func DecodeUIPublishPayload(kind UISurfaceKind, raw json.RawMessage) (any, error
 	var typ reflect.Type
 	switch kind {
 	case UISurfaceStatus:
-		typ = reflect.TypeOf(UIStatusPayload{})
+		typ = reflect.TypeFor[UIStatusPayload]()
 	case UISurfaceCard:
-		typ = reflect.TypeOf(UICardPayload{})
+		typ = reflect.TypeFor[UICardPayload]()
 	case UISurfaceForm:
-		typ = reflect.TypeOf(UIFormPayload{})
+		typ = reflect.TypeFor[UIFormPayload]()
 	case UISurfaceNotification:
-		typ = reflect.TypeOf(UINotificationPayload{})
+		typ = reflect.TypeFor[UINotificationPayload]()
 	default:
 		return nil, fmt.Errorf("protocol: unknown UI surface kind %q", kind)
 	}
@@ -167,7 +167,7 @@ func DecodeUIPublishPayload(kind UISurfaceKind, raw json.RawMessage) (any, error
 func DecodeUIRequestPayload(kind UIRequestKind, raw json.RawMessage) (any, error) {
 	switch kind {
 	case UIRequestConfirm, UIRequestInput, UIRequestSelect, UIRequestMultiselect:
-		return decodeAndValidate(raw, reflect.TypeOf(UIFormPayload{}))
+		return decodeAndValidate(raw, reflect.TypeFor[UIFormPayload]())
 	default:
 		return nil, fmt.Errorf("protocol: unknown UI request kind %q", kind)
 	}

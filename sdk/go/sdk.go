@@ -38,9 +38,7 @@ import (
 	"time"
 )
 
-// ---------------------------------------------------------------------------
 // Public callback types
-// ---------------------------------------------------------------------------
 
 // Handler is the one mandatory extension hook. Initialize is called once and
 // completes before any other callback. Return the sidecar's declaration
@@ -161,9 +159,7 @@ type Options struct {
 	Logger *log.Logger
 }
 
-// ---------------------------------------------------------------------------
 // Sentinel errors
-// ---------------------------------------------------------------------------
 
 // ErrNotReady reports an Extension → Host call made before the handshake
 // barrier opened: the sidecar must not send requests or notifications before
@@ -180,9 +176,7 @@ var ErrNoConnection = errors.New("extension: no host connection in context (use 
 // this sentinel.
 var ErrUICancelled = errors.New("extension: the user dismissed the prompt")
 
-// ---------------------------------------------------------------------------
 // InterceptResult helpers
-// ---------------------------------------------------------------------------
 
 // Continue lets the event proceed unchanged.
 func Continue() *InterceptResult { return &InterceptResult{Decision: DecisionContinue} }
@@ -224,9 +218,7 @@ func Deny(reason string) *InterceptResult {
 	return &InterceptResult{Decision: DecisionDeny, Reason: reason}
 }
 
-// ---------------------------------------------------------------------------
 // Serve
-// ---------------------------------------------------------------------------
 
 type serverState uint8
 
@@ -328,9 +320,7 @@ func (s *server) withConnNotification(f notificationHandler) notificationHandler
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Handshake barrier
-// ---------------------------------------------------------------------------
 
 // gateRequest runs on the read loop before dispatch: the host must open with
 // extension/initialize, and until its extension/initialized notification
@@ -390,9 +380,7 @@ func (s *server) checkReady() error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Lifecycle handlers
-// ---------------------------------------------------------------------------
 
 // fatalError marks handler failures that must end the connection after the
 // error response is written (a failed handshake leaves nothing to serve).
@@ -495,9 +483,7 @@ func (s *server) handleShutdown(ctx context.Context, raw json.RawMessage) (any, 
 	}, nil
 }
 
-// ---------------------------------------------------------------------------
 // Intercept and observation
-// ---------------------------------------------------------------------------
 
 func (s *server) handleIntercept(ctx context.Context, raw json.RawMessage) (any, error) {
 	var p InterceptParams
@@ -569,9 +555,7 @@ func (s *server) handleResourcesChanged(ctx context.Context, raw json.RawMessage
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Provider broker
-// ---------------------------------------------------------------------------
 
 func (s *server) handleProviderCatalog(ctx context.Context, raw json.RawMessage) (any, error) {
 	if s.opts.Provider == nil {
@@ -725,9 +709,7 @@ func (s *server) sendStreamEnd(end *StreamEndParams) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // UI handlers (Host → Extension)
-// ---------------------------------------------------------------------------
 
 func (s *server) handleUIAction(ctx context.Context, raw json.RawMessage) (any, error) {
 	if s.opts.UI.Action == nil {
@@ -759,9 +741,7 @@ func (s *server) handleUISubmit(ctx context.Context, raw json.RawMessage) (any, 
 	return UISubmitResult{Accepted: true}, nil
 }
 
-// ---------------------------------------------------------------------------
 // HostUI: Extension → Host UI client
-// ---------------------------------------------------------------------------
 
 // HostUI is the sidecar's client for the host's structured UI surfaces. The
 // zero value is ready to use; every method takes the context of an SDK
@@ -1013,9 +993,7 @@ func validateFormPayload(p UIFormPayload) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Content refs (Extension → Host)
-// ---------------------------------------------------------------------------
 
 // ReadContentRef pages one whole content ref back from the host in
 // ContentRefChunkBytes chunks, verifies the reassembled byte count and
@@ -1131,9 +1109,7 @@ func resolveExternalized(ctx context.Context, raw json.RawMessage, externalized 
 	return data, nil
 }
 
-// ---------------------------------------------------------------------------
 // shared helpers
-// ---------------------------------------------------------------------------
 
 // callHost issues one Extension → Host request behind the handshake barrier
 // and maps a structured wire error back to a *ProtocolError.

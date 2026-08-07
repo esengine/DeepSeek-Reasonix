@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -679,14 +680,12 @@ func (s *Session) saveRecoveryBranch(opts RecoveryBranchOptions, shutdown bool) 
 		return RecoveryBranchInfo{}, fmt.Errorf("%w: %s is already %d recovery forks deep",
 			ErrSessionRecoveryDepthExceeded, originalPath, parentDepth)
 	}
-	recoveryDepth := parentDepth + 1
-	if recoveryDepth > SessionRecoveryMaxDepth {
+	recoveryDepth := min(parentDepth+1,
 		// A shutdown copy is allowed even when the ordinary conflict chain is
 		// capped because losing the only in-memory transcript is worse than one
 		// additional branch. Keep the saturated depth so later ordinary saves
 		// still enforce the existing anti-cascade policy.
-		recoveryDepth = SessionRecoveryMaxDepth
-	}
+		SessionRecoveryMaxDepth)
 
 	recoveryPath := recoverySessionPath(originalPath, digest)
 	if shutdown {
@@ -808,8 +807,8 @@ func recoveryParentStem(parent string) string {
 		return "session"
 	}
 	sum := sha256.Sum256([]byte(parent))
-	if idx := strings.Index(parent, "-recovery-"); idx >= 0 {
-		base := strings.Trim(parent[:idx], "-_. ")
+	if before, _, ok := strings.Cut(parent, "-recovery-"); ok {
+		base := strings.Trim(before, "-_. ")
 		if base == "" {
 			base = "session"
 		}
@@ -1265,8 +1264,8 @@ func resolvePathThroughExistingAncestor(path string) string {
 	missing := make([]string, 0, 4)
 	for {
 		if resolved, err := filepath.EvalSymlinks(current); err == nil {
-			for i := len(missing) - 1; i >= 0; i-- {
-				resolved = filepath.Join(resolved, missing[i])
+			for _, v := range slices.Backward(missing) {
+				resolved = filepath.Join(resolved, v)
 			}
 			return resolved
 		}

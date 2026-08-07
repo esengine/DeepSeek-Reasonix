@@ -124,12 +124,10 @@ func TestScheduleSnapshotCoalesces(t *testing.T) {
 	_ = a
 
 	var wg sync.WaitGroup
-	for i := 0; i < 64; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 64 {
+		wg.Go(func() {
 			tab.sink.Emit(event.Event{Kind: event.TurnDone})
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -335,11 +333,11 @@ func TestDesktopSnapshotConflictRecoveryRequiresRecoveryLease(t *testing.T) {
 		detachedSessions: map[string]*WorkspaceTab{},
 		activeTabID:      "recovery_tab",
 	}
-	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...interface{}) {
+	app.runtimeEvents.emit = func(ctx context.Context, name string, payload ...any) {
 		runtimeEvents <- runtimeEventEnvelope{
 			ctx:     ctx,
 			name:    name,
-			payload: append([]interface{}(nil), payload...),
+			payload: append([]any(nil), payload...),
 		}
 	}
 	tab := &WorkspaceTab{

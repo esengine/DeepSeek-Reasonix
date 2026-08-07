@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// --- symbol ---
+// symbol
 
 func TestSymbolCNY(t *testing.T) {
 	if got := symbol("CNY"); got != "¥" {
@@ -47,7 +47,7 @@ func TestSymbolLowercase(t *testing.T) {
 	}
 }
 
-// --- Display ---
+// Display
 
 func TestDisplayNil(t *testing.T) {
 	var b *Balance
@@ -82,7 +82,7 @@ func TestDisplayFallsBackToFirst(t *testing.T) {
 	}
 }
 
-// --- Fetch edge cases ---
+// Fetch edge cases
 
 func TestFetchContextCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

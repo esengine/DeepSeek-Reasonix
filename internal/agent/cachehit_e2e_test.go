@@ -199,7 +199,7 @@ func TestCacheHitClimbsWithoutCompaction(t *testing.T) {
 	a, sink := newAgent(t, srv.URL, mock.tools(), 0 /*no compaction*/, 0)
 
 	const turns = 14
-	for i := 0; i < turns; i++ {
+	for i := range turns {
 		userMsg := "Turn " + fmt.Sprint(i) + ": " + strings.Repeat("please consider this requirement. ", 6)
 		if err := a.Run(context.Background(), userMsg); err != nil {
 			t.Fatalf("Run %d: %v", i, err)
@@ -286,7 +286,7 @@ func TestReasoningRoundTripCost(t *testing.T) {
 		defer srv.Close()
 		a, sink := newAgent(t, srv.URL, mock.tools(), 0, 0)
 		const turns = 12
-		for i := 0; i < turns; i++ {
+		for i := range turns {
 			if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); err != nil {
 				t.Fatalf("Run %d: %v", i, err)
 			}
@@ -329,7 +329,7 @@ func TestSessionAggregateCacheRate(t *testing.T) {
 
 	a, sink := newAgent(t, srv.URL, mock.tools(), 0, 0)
 	const turns = 8
-	for i := 0; i < turns; i++ {
+	for i := range turns {
 		if err := a.Run(context.Background(), strings.Repeat("please consider this requirement. ", 6)); err != nil {
 			t.Fatalf("Run %d: %v", i, err)
 		}
@@ -409,7 +409,7 @@ func TestReleaseCacheHitGuard(t *testing.T) {
 			name: "mixed-message-sizes",
 			run: func(t *testing.T) []int {
 				msgs := make([]string, 0, 20)
-				for i := 0; i < 20; i++ {
+				for i := range 20 {
 					repeats := 4
 					if i%3 == 2 {
 						repeats = 20
@@ -482,7 +482,7 @@ func cacheCurve(t *testing.T, mock *mockDeepSeek, turns int) []int {
 
 func repeatedMessages(turns, repeats int) []string {
 	msgs := make([]string, 0, turns)
-	for i := 0; i < turns; i++ {
+	for i := range turns {
 		msgs = append(msgs, "Turn "+fmt.Sprint(i)+": "+strings.Repeat("please consider this requirement. ", repeats))
 	}
 	return msgs
@@ -570,7 +570,7 @@ func newAgent(t *testing.T, url string, reg *tool.Registry, contextWindow, recen
 	return a, sink
 }
 
-// --- request inspection helpers ---
+// request inspection helpers
 
 func decodeMessages(body []byte) []json.RawMessage {
 	var req struct {
@@ -609,7 +609,7 @@ func charsOf(msgs []json.RawMessage) int {
 	return total
 }
 
-// --- SSE chunk builders matching the streamResponse shape the provider parses ---
+// SSE chunk builders matching the streamResponse shape the provider parses
 
 type sseDelta struct {
 	Content          string        `json:"content,omitempty"`

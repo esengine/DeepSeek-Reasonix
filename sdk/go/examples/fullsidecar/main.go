@@ -129,9 +129,7 @@ func (p *plugin) Initialize(_ context.Context, params extension.InitializeParams
 	}, nil
 }
 
-// ---------------------------------------------------------------------------
 // Interceptors
-// ---------------------------------------------------------------------------
 
 // interceptInput rewrites any input that starts with the "/fs " trigger.
 func (p *plugin) interceptInput(ctx context.Context, payload json.RawMessage) (*extension.InterceptResult, error) {
@@ -204,9 +202,7 @@ func (p *plugin) interceptSystemPrompt(_ context.Context, payload json.RawMessag
 	return extension.Replace(map[string]string{"prompt": owned, "workspaceRoot": in.WorkspaceRoot})
 }
 
-// ---------------------------------------------------------------------------
 // Observation and UI
-// ---------------------------------------------------------------------------
 
 // observe publishes the extension's status line and demo card when the
 // session starts.
@@ -286,9 +282,7 @@ func (p *plugin) submit(ctx context.Context, surfaceID string, values map[string
 	})
 }
 
-// ---------------------------------------------------------------------------
 // Fake streaming provider
-// ---------------------------------------------------------------------------
 
 func fakeRef(pluginID string) string { return "plugin/" + pluginID + "/fake/" + fakeModel }
 

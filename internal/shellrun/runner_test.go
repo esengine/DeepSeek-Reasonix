@@ -224,7 +224,7 @@ func TestRunForegroundPreservesInterleaving(t *testing.T) {
 	}
 	argv := shellArgvWith(sh, "for i in 1 2 3 4 5 6 7 8; do echo out$i; echo err$i 1>&2; done")
 	// Repeat: two pipes reorder probabilistically, so one run can pass by luck.
-	for run := 0; run < 10; run++ {
+	for run := range 10 {
 		res := RunForeground(context.Background(), Request{Argv: argv, Timeout: 30 * time.Second})
 		if res.Combined != want.String() {
 			t.Fatalf("run %d lost child write order:\ngot  %q\nwant %q", run, res.Combined, want.String())

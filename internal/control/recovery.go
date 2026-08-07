@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -117,9 +118,9 @@ func (c *Controller) initRecoveryGate(reviewer recovery.Reviewer, headless bool)
 				return ""
 			}
 			msgs := c.executor.Session().Snapshot()
-			for i := len(msgs) - 1; i >= 0; i-- {
-				if string(msgs[i].Role) == "user" && strings.TrimSpace(msgs[i].Content) != "" {
-					text := agent.UserMessageText(msgs[i])
+			for _, v := range slices.Backward(msgs) {
+				if string(v.Role) == "user" && strings.TrimSpace(v.Content) != "" {
+					text := agent.UserMessageText(v)
 					if len(text) > 800 {
 						return text[:800] + "…"
 					}

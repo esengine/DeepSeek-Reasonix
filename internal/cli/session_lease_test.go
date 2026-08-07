@@ -69,6 +69,7 @@ func TestRunCopyRequiresResumeTarget(t *testing.T) {
 // JSON object (the copy notice used to pollute it).
 func TestRunResumeCopyJSONKeepsStdoutClean(t *testing.T) {
 	isolateCLIConfigHome(t)
+	pinProviderOffline(t)
 
 	dir := t.TempDir()
 	src := filepath.Join(dir, "held-src.jsonl")
@@ -101,6 +102,7 @@ func TestRunResumeCopyJSONKeepsStdoutClean(t *testing.T) {
 
 func TestRunResumeCopyContinuesInDuplicate(t *testing.T) {
 	isolateCLIConfigHome(t)
+	pinProviderOffline(t)
 
 	dir := t.TempDir()
 	src := filepath.Join(dir, "held-src.jsonl")
@@ -167,6 +169,7 @@ func TestRunResumeCopyContinuesInDuplicate(t *testing.T) {
 
 func TestRunResumeReleasesLeaseOnExit(t *testing.T) {
 	isolateCLIConfigHome(t)
+	pinProviderOffline(t)
 
 	path := filepath.Join(t.TempDir(), "release-run.jsonl")
 	saveTestSession(t, path, "resume me")

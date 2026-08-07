@@ -178,17 +178,11 @@ func snippetAround(text string, byteIdx, maxRunes int) string {
 	}
 	runes := []rune(text)
 	pos := utf8.RuneCountInString(text[:byteIdx])
-	start := pos - maxRunes/2
-	if start < 0 {
-		start = 0
-	}
+	start := max(pos-maxRunes/2, 0)
 	end := start + maxRunes
 	if end > len(runes) {
 		end = len(runes)
-		start = end - maxRunes
-		if start < 0 {
-			start = 0
-		}
+		start = max(end-maxRunes, 0)
 	}
 	prefix := ""
 	suffix := ""

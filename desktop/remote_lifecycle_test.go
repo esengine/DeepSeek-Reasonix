@@ -373,15 +373,13 @@ func TestHostKeyPromptsAreSerializedForGlobalDialog(t *testing.T) {
 		prompts = append(prompts, pendingPrompt{hostID: hostID, prompt: mgr.hostKeyPrompt(hostID, mh)})
 	}
 	for _, pending := range prompts {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _ = pending.prompt(ctx, remote.HostKeyQuestion{
 				Address:     pending.hostID + ":22",
 				KeyType:     "ssh-ed25519",
 				Fingerprint: pending.hostID,
 			})
-		}()
+		})
 	}
 
 	first := <-sink.statuses

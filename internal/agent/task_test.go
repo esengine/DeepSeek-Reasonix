@@ -825,7 +825,7 @@ func TestTaskToolBackgroundCapRefusesFanOut(t *testing.T) {
 	// Saturate the cap with still-running task jobs owned by this session.
 	release := make(chan struct{})
 	var ids []string
-	for i := 0; i < maxConcurrentBackgroundTasks; i++ {
+	for range maxConcurrentBackgroundTasks {
 		j := jm.StartForSession("parent-session", "task", "busy", func(jctx context.Context, _ io.Writer) (string, error) {
 			select {
 			case <-release:
@@ -1124,9 +1124,9 @@ func extractJobID(msg string) string {
 
 func subagentRefFromOutput(t *testing.T, out string) string {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "Subagent reference: ") {
-			return strings.TrimSpace(strings.TrimPrefix(line, "Subagent reference: "))
+	for line := range strings.SplitSeq(out, "\n") {
+		if after, ok := strings.CutPrefix(line, "Subagent reference: "); ok {
+			return strings.TrimSpace(after)
 		}
 	}
 	t.Fatalf("no subagent reference in output:\n%s", out)

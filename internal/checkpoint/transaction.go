@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -971,8 +972,8 @@ func (s *Store) publishTarget(t *TransactionTarget) error {
 
 func (s *Store) compensatePublished(targets []TransactionTarget, stages []FileStage) error {
 	var first error
-	for i := len(targets) - 1; i >= 0; i-- {
-		t := targets[i]
+	for _, v := range slices.Backward(targets) {
+		t := v
 		if !t.Published {
 			if t.PublishTmp != "" {
 				_ = secureRemove(s.root, t.PublishTmp)
@@ -1519,7 +1520,7 @@ func (s *Store) restoreCheckpointBackup(backup []byte) error {
 }
 
 func newID(prefix string) string {
-	return fmt.Sprintf("%s-%d-%s", prefix, time.Now().UnixNano(), Digest([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))[:8])
+	return fmt.Sprintf("%s-%d-%s", prefix, time.Now().UnixNano(), Digest(fmt.Appendf(nil, "%d", time.Now().UnixNano()))[:8])
 }
 
 // RestoreCheckpointBackupPublic reloads backed-up checkpoints after an undo.

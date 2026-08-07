@@ -16,7 +16,7 @@ import (
 func sessionWithTurns(t *testing.T, path string, turns int) *Session {
 	t.Helper()
 	s := NewSession("sys")
-	for i := 0; i < turns; i++ {
+	for i := range turns {
 		s.Add(provider.Message{Role: provider.RoleUser, Content: "prompt " + strings.Repeat("x", 8)})
 		s.Add(provider.Message{Role: provider.RoleAssistant, Content: "reply"})
 		if err := s.SaveSnapshot(path); err != nil {
@@ -566,7 +566,7 @@ func TestEventLogCompactionBoundsGrowth(t *testing.T) {
 	filler := strings.Repeat("y", 8<<10)
 	// Repeated rewrites (each a full replace event) must not grow the log
 	// without bound: once past the threshold the log folds to one event.
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		s.Replace([]provider.Message{
 			{Role: provider.RoleSystem, Content: "sys"},
 			{Role: provider.RoleUser, Content: filler},
@@ -642,7 +642,7 @@ func TestConcurrentLoadDuringAppendsStaysConsistent(t *testing.T) {
 			}
 		}
 	}()
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		s.Add(provider.Message{Role: provider.RoleAssistant, Content: strings.Repeat("a", 512)})
 		if err := s.SaveSnapshot(path); err != nil {
 			t.Fatalf("SaveSnapshot %d: %v", i, err)

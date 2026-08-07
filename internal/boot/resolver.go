@@ -222,8 +222,8 @@ func syntheticEntryFromResolver(r provider.Resolver, ref string) *config.Provide
 
 func splitProviderRef(ref string) (string, string) {
 	ref = strings.TrimSpace(ref)
-	if i := strings.IndexByte(ref, '/'); i >= 0 {
-		return ref[:i], ref[i+1:]
+	if before, after, ok := strings.Cut(ref, "/"); ok {
+		return before, after
 	}
 	return ref, ""
 }

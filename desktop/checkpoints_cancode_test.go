@@ -230,7 +230,7 @@ func TestCheckpointsForTabLimitsCumulativeFilePreview(t *testing.T) {
 	}
 	content := "old"
 	files := make([]checkpoint.FileSnap, 0, checkpointFilePreviewLimit+5)
-	for i := 0; i < checkpointFilePreviewLimit+5; i++ {
+	for i := range checkpointFilePreviewLimit + 5 {
 		files = append(files, checkpoint.FileSnap{Path: "file-" + strconv.Itoa(1000+i) + ".txt", Content: &content})
 	}
 	now := time.Now()

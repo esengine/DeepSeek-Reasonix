@@ -82,7 +82,7 @@ func UnavailableRemediation() string {
 	case "linux":
 		return "Install bubblewrap (`bwrap`) or set [sandbox] bash = \"off\" in config.toml / Settings -> Sandbox to restore pre-1.16 unconfined shell execution."
 	case "darwin":
-		return "Ensure `sandbox-exec` is available on PATH or set [sandbox] bash = \"off\" in config.toml / Settings -> Sandbox to restore pre-1.16 unconfined shell execution."
+		return "Ensure `sandbox-exec` is installed and usable (the host must allow `sandbox_apply`), or set [sandbox] bash = \"off\" in config.toml / Settings -> Sandbox to restore pre-1.16 unconfined shell execution."
 	case "windows":
 		return "Windows does not currently provide a Reasonix OS-level Bash sandbox; the effective setting is fixed to \"off\" and shell commands run unconfined."
 	default:
@@ -97,7 +97,7 @@ func BackendUnavailableReason() string {
 	case "linux":
 		return "bubblewrap (bwrap) is unavailable on PATH"
 	case "darwin":
-		return "sandbox-exec is unavailable on PATH"
+		return "sandbox-exec is missing from PATH or unusable (sandbox_apply is restricted)"
 	case "windows":
 		return "the AppContainer helper or required Windows sandbox APIs are unavailable"
 	default:

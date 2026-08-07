@@ -82,7 +82,7 @@ func TestExtensionFakeSidecarHelperProcess(t *testing.T) {
 
 func runBootFakeSidecar(stdin io.Reader, stdout io.Writer) {
 	if pidFile := strings.TrimSpace(os.Getenv(bootFakeEnvPIDFile)); pidFile != "" {
-		_ = os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0o644)
+		_ = os.WriteFile(pidFile, fmt.Appendf(nil, "%d", os.Getpid()), 0o644)
 	}
 	if os.Getenv(bootFakeEnvExitImmediately) == "1" {
 		os.Exit(0)

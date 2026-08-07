@@ -33,7 +33,7 @@ func testAppWithOrderedTabs(t *testing.T, active string, ids ...string) *App {
 }
 
 func installNoopRuntimeEvents(app *App, sinks ...*tabEventSink) {
-	emit := func(context.Context, string, ...interface{}) {}
+	emit := func(context.Context, string, ...any) {}
 	if app != nil {
 		app.runtimeEvents.emit = emit
 	}
@@ -664,18 +664,16 @@ func TestListTabsRepairsStaleOrderWithoutRacing(t *testing.T) {
 	if testing.Short() {
 		iterations = 5
 	}
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			<-start
-			for j := 0; j < iterations; j++ {
+			for range iterations {
 				if got := strings.Join(tabIDs(app.ListTabs()), ","); got != "a,b,c" {
 					errs <- got
 					return
 				}
 			}
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

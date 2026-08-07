@@ -160,9 +160,7 @@ func TestMemoryWritesConcurrencySafe(t *testing.T) {
 
 	stop := make(chan struct{})
 	var readers sync.WaitGroup
-	readers.Add(1)
-	go func() {
-		defer readers.Done()
+	readers.Go(func() {
 		for {
 			select {
 			case <-stop:
@@ -173,7 +171,7 @@ func TestMemoryWritesConcurrencySafe(t *testing.T) {
 				_ = c.Memory()        // takes c.mu, returns the snapshot pointer
 			}
 		}
-	}()
+	})
 
 	var writersWG sync.WaitGroup
 	for w := range writers {

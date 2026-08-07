@@ -166,7 +166,7 @@ func (s *TextSink) Emit(e event.Event) {
 			break // aborted pass — the caller's Notice already explained why
 		}
 		fmt.Fprintln(s.out, dimText(fmt.Sprintf("  ⋯ compacted %d messages (%s)", c.Messages, c.Trigger)))
-		for _, ln := range strings.Split(strings.TrimRight(c.Summary, "\n"), "\n") {
+		for ln := range strings.SplitSeq(strings.TrimRight(c.Summary, "\n"), "\n") {
 			fmt.Fprintln(s.out, dimText("    "+ln))
 		}
 		s.wroteAnything = true

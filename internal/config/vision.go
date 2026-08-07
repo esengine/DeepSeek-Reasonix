@@ -2,6 +2,7 @@ package config
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 
 	"reasonix/internal/provider/openai"
@@ -39,10 +40,8 @@ func IsLikelyVisionModel(model string) bool {
 		return true
 	}
 	tokens := strings.FieldsFunc(lower, modelTokenSeparator)
-	for _, token := range tokens {
-		if token == "audio" {
-			return false
-		}
+	if slices.Contains(tokens, "audio") {
+		return false
 	}
 	if strings.HasPrefix(lower, "gpt-4o") {
 		return true

@@ -1047,7 +1047,7 @@ func extractLinuxReleaseUnit(targz []byte) (map[string][]byte, error) {
 	tr := tar.NewReader(gz)
 	for {
 		h, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
@@ -1293,11 +1293,19 @@ func capturePendingUpdateHealthIdentity(app *App) {
 		return
 	}
 	tx, err := readPendingUpdateForHealth()
-	if err != nil || tx == nil || strings.TrimSpace(tx.ToVersion) != strings.TrimSpace(version) {
+	if err != nil || tx == nil || !repair.UpdateVersionsEqual(tx.ToVersion, version) {
 		return
 	}
 	app.healthyUpdateCreatedAt = tx.CreatedAt
 	app.healthyUpdateTransactionID = repair.UpdateTransactionID(tx)
+}
+
+// refreshPendingUpdateHealthIdentity re-reads the current probationary
+// transaction so a user-initiated update can commit health even when the
+// process started without a matching identity (for example a historical
+// version-prefix mismatch).
+func refreshPendingUpdateHealthIdentity(app *App) {
+	capturePendingUpdateHealthIdentity(app)
 }
 
 // updateSiblingArtifacts lists the packaged binaries an update replaces beside

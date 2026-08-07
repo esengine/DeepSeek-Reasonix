@@ -1353,8 +1353,7 @@ func TestGatewayApprovalReplyUnblocksWedgedTurn(t *testing.T) {
 		pendingAsks:      make(map[string][]event.AskQuestion),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go gw.dispatchLoop(ctx, binding)
 
 	adapter.msgCh <- msg
@@ -1408,8 +1407,7 @@ func TestGatewayAskReplyUnblocksWedgedTurn(t *testing.T) {
 		pendingAsks:      make(map[string][]event.AskQuestion),
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	go gw.dispatchLoop(ctx, binding)
 
 	adapter.msgCh <- msg

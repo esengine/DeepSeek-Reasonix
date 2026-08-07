@@ -83,7 +83,7 @@ func readVerifiedWindowsStagedPayload(path string) ([]byte, error) {
 	)
 	if verifyErr != nil {
 		if closeErr != nil {
-			return nil, fmt.Errorf("Authenticode verification failed: %v (release trust state: %w)", verifyErr, closeErr)
+			return nil, fmt.Errorf("Authenticode verification failed: %w (release trust state: %w)", verifyErr, closeErr)
 		}
 		return nil, fmt.Errorf("Authenticode verification failed: %w", verifyErr)
 	}

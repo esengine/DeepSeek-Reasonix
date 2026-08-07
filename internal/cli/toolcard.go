@@ -24,11 +24,12 @@ func connectorBlock(lines []string) string {
 		return ""
 	}
 	indent := strings.Repeat(" ", len([]rune(connector)))
-	out := dim(connector) + lines[0]
+	var out strings.Builder
+	out.WriteString(dim(connector) + lines[0])
 	for _, ln := range lines[1:] {
-		out += "\n" + indent + ln
+		out.WriteString("\n" + indent + ln)
 	}
-	return out
+	return out.String()
 }
 
 // toolVerb maps a tool's snake_case id to the verb shown in its card.

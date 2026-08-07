@@ -779,8 +779,7 @@ func TestStdioFailureCapturesStderr(t *testing.T) {
 }
 
 func TestStartupFailureReportsStageElapsedAndRedactedStderr(t *testing.T) {
-	lifeCtx, cancelLife := context.WithCancel(context.Background())
-	defer cancelLife()
+	lifeCtx := t.Context()
 	startupCtx, cancelStartup := context.WithTimeout(lifeCtx, 40*time.Millisecond)
 	defer cancelStartup()
 
@@ -828,8 +827,7 @@ func TestFailureSummaryRedactsCredentials(t *testing.T) {
 }
 
 func TestEnsureConnectedInBackgroundSurvivesShortCallerWait(t *testing.T) {
-	lifeCtx, cancelLife := context.WithCancel(context.Background())
-	defer cancelLife()
+	lifeCtx := t.Context()
 	host := NewHost()
 	defer host.Close()
 	spec := Spec{
@@ -863,8 +861,7 @@ func TestEnsureConnectedInBackgroundSurvivesShortCallerWait(t *testing.T) {
 }
 
 func TestEnsureConnectedInBackgroundRemoveDoesNotResurrectServer(t *testing.T) {
-	lifeCtx, cancelLife := context.WithCancel(context.Background())
-	defer cancelLife()
+	lifeCtx := t.Context()
 	host := NewHost()
 	defer host.Close()
 	spec := Spec{
@@ -1129,7 +1126,7 @@ func TestStartRecordsTimeoutStats(t *testing.T) {
 			"GO_WANT_HELPER_INIT_MS": "300",
 		},
 	}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		host, _, err := Start(ctx, []Spec{slow}, StartPolicy{
 			PerPluginTimeout: 50 * time.Millisecond,
 			Concurrency:      1,

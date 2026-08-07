@@ -397,6 +397,16 @@ jobs:
       - name: Test integrated terminal and PTY lifecycle
         run: go test -race -run 'Test(ResolveTerminal|Terminal|EmptyTerminal|UnixTerminalProcess)' .
 
+      # desktop/*_darwin.go is the one build-tag set the lint job cannot reach:
+      # the main-thread watchdog is cgo, so it only type-checks with a real
+      # macOS toolchain.
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: desktop
+          args: --timeout=5m
+
   # Desktop project-root matching is case-insensitive only on Windows
   # (sameDesktopPath folds case when os.PathSeparator is '\'), so the
   # regression tests for that contract are named *OnWindows and can never
@@ -480,6 +490,21 @@ jobs:
         with:
           version: v2.12.2
           args: --timeout=5m
+
+      # The step above only type-checks the linux/amd64 build, so every
+      # //go:build windows and //go:build darwin file in the tree went unlinted.
+      # Both modules cross-check without a toolchain; desktop under darwin does
+      # not, because its watchdog is cgo, so that leg lives in desktop-macos.
+      - name: golangci-lint (cross-platform build tags)
+        run: |
+          set -euo pipefail
+          command -v golangci-lint
+          for target in "darwin ." "windows ." "windows desktop"; do
+            set -- $target
+            echo "::group::golangci-lint GOOS=$1 ($2)"
+            (cd "$2" && GOOS="$1" golangci-lint run --timeout=5m ./...)
+            echo "::endgroup::"
+          done
 
       # Report-only complexity monitor for internal/agent. Does not duplicate the
       # main lint/test/race gates; funlen+cyclop run with issues-exit-code=0 so

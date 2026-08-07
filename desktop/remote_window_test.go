@@ -289,8 +289,7 @@ func TestRemoteWindowOwnerWaitDetectsParentExit(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	exited := make(chan bool, 1)
 	go func() { exited <- waitForRemoteWindowOwnerExit(ctx, cmd.Process.Pid) }()
 	if err := cmd.Process.Kill(); err != nil {
