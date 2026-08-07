@@ -18,6 +18,12 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 - Cache-first: the system-prompt prefix (base prompt + tools + memory) must stay
   byte-stable across turns so DeepSeek's automatic prefix cache stays warm. Never
   mutate it mid-session — ride the turn tail instead (see `control.Compose`).
+- Cache-safety (delivery gate): cache/optimization work must never trade
+  correctness for hit rate. Deliver only what is provably safe and genuinely
+  saves tokens under engineering conditions; skip anything with correctness
+  risk (e.g. semantic-intent caching via embedding clustering) unless the user
+  explicitly asks. "宁可 miss 不可错" — a wrong cached result is a bug, a miss
+  is only a slower call.
 
 ## Comments
 
