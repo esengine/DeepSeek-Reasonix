@@ -84,6 +84,37 @@ func TestCoordinatorHandsPlanToExecutor(t *testing.T) {
 	}
 }
 
+func TestCoordinatorDoesNotStreamPlannerTextToSink(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "planner-only plan"},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "executor final"},
+		{Type: provider.ChunkDone},
+	}}
+
+	var visible []string
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Text {
+			visible = append(visible, e.Text)
+		}
+	})
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, sink)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, sink, nil)
+
+	if err := coord.Run(context.Background(), "fix the bug"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	joined := strings.Join(visible, "")
+	if strings.Contains(joined, "planner-only plan") {
+		t.Fatalf("planner text leaked to visible sink: %q", joined)
+	}
+	if !strings.Contains(joined, "executor final") {
+		t.Fatalf("executor answer missing from visible sink: %q", joined)
+	}
+}
+
 type coordinatorApprovalGate struct {
 	calls int
 	allow bool
@@ -355,6 +386,10 @@ func TestCoordinatorPassesHostUserDecisionToExecutor(t *testing.T) {
 func TestHandoffTaskRecoversOriginalInput(t *testing.T) {
 	if got := HandoffTask(formatHandoff("修复登录页的 bug", "1. read login.go")); got != "修复登录页的 bug" {
 		t.Errorf("HandoffTask(handoff) = %q, want the original task", got)
+	}
+	prefixed := "<reasoning-language>\nuse Chinese\n</reasoning-language>\n\n" + formatHandoff("你好", "plan")
+	if got := HandoffTask(prefixed); got != "你好" {
+		t.Errorf("HandoffTask(prefixed handoff) = %q, want original task", got)
 	}
 	multi := "fix the bug\n\nsteps:\n- a\n- b"
 	if got := HandoffTask(formatHandoff(multi, "plan")); got != multi {
@@ -1122,6 +1157,66 @@ func TestCoordinatorSkipsExecutorWhenPlannerConcludesNoChanges(t *testing.T) {
 	}
 	if got := messages[2].Content; !strings.Contains(got, "No changes are needed") {
 		t.Fatalf("persisted executor assistant message = %q, want no-op planner conclusion", got)
+	}
+}
+
+func TestCoordinatorNoOpPlannerConclusionIsVisible(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "No changes are needed; the current implementation already handles this.\n[no_changes]"},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Should not run."},
+		{Type: provider.ChunkDone},
+	}}
+
+	var visible []string
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Text {
+			visible = append(visible, e.Text)
+		}
+	})
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, sink)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, sink, nil)
+
+	if err := coord.Run(context.Background(), "check whether the fix is already present"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 0 {
+		t.Fatalf("executor requests = %d, want skip after no-op planner conclusion", got)
+	}
+	if joined := strings.Join(visible, ""); !strings.Contains(joined, "[no_changes]") {
+		t.Fatalf("no-op planner conclusion should be visible as final answer: %q", joined)
+	}
+}
+
+func TestCoordinatorSkipsExecutorForGreetingPlannerNoTask(t *testing.T) {
+	planner := &mockProvider{name: "planner", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "你好！我很高兴，随时告诉我有什么需要我帮忙。"},
+		{Type: provider.ChunkDone},
+	}}
+	exec := &mockProvider{name: "executor", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "Should not run."},
+		{Type: provider.ChunkDone},
+	}}
+
+	var visible []string
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Text {
+			visible = append(visible, e.Text)
+		}
+	})
+	executor := New(exec, tool.NewRegistry(), NewSession("exec-sys"), Options{}, sink)
+	coord := NewCoordinator(planner, NewSession("planner-sys"), nil, nil, Options{}, executor, 0, sink, nil)
+
+	if err := coord.Run(context.Background(), "你好"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if got := len(exec.requests); got != 0 {
+		t.Fatalf("executor requests = %d, want skip after no-task greeting", got)
+	}
+	if joined := strings.Join(visible, ""); !strings.Contains(joined, "随时告诉我") {
+		t.Fatalf("planner greeting should be visible as final answer: %q", joined)
 	}
 }
 
