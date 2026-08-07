@@ -609,7 +609,7 @@ func TestControllerRecordsAutoResearchEvidence(t *testing.T) {
 	}
 	err = c.RecordAutoResearchEvidence("verification", AutoResearchEvidenceInput{
 		ID:       "f-verification",
-		Kind:     "test",
+		Kind:     "verification", // 协议 kind（曾导致 validateFinding 拒绝 → 死循环，67fc30a5 修复）
 		Summary:  "go test passed",
 		Source:   "command",
 		Command:  "go test ./internal/control",
