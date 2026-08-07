@@ -23,14 +23,16 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 	}
 	msgs, version := a.session.snapshotMessagesVersion()
 	cacheKey := a.currentPromptCacheKey()
-	est := estimateMessagesTokens(provider.ModelMessages(msgs))
+	// Conservative estimate: the fixed estimator under-counts CJK-heavy
+	// transcripts (~1.8x), so the overflow guard uses the calibrated value.
+	est := a.estimatedPromptTokens(msgs)
 	_, _, high := a.compactThresholds()
 	force := max(a.forceThreshold(), high)
 
 	// Prefer an existing valid projection when it still covers the pressure.
 	if st := a.compactionState; projectionValid(st, msgs, version, cacheKey) {
 		visible := modelVisibleFromProjection(st.Projection, msgs)
-		projEst := estimateMessagesTokens(provider.ModelMessages(visible))
+		projEst := a.estimatedPromptTokens(visible)
 		if projEst < high || projEst < est {
 			return nil
 		}
@@ -44,7 +46,7 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 	pruned, pst := a.applyToolResultMaintenanceView(msgs, toolResultPrune)
 	if pst.Results > 0 {
 		if err := a.installPruneProjection(pruned, pst); err == nil {
-			projEst := estimateMessagesTokens(provider.ModelMessages(pruned))
+			projEst := a.estimatedPromptTokens(pruned)
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
 				"pruned %d stale tool results (~%d tokens est.) before request", pst.Results, est-projEst)})
 			if projEst < high {
