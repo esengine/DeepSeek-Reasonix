@@ -2,13 +2,23 @@ version: "2"
 
 linters:
   enable:
+    - copyloopvar
     - errcheck
     - errorlint
     - govet
     - ineffassign
+    - intrange
+    - modernize
     - staticcheck
     - unused
+    - usestdlibvars
   settings:
+    modernize:
+      # omitempty -> omitzero changes which fields are written for nested
+      # structs. That is a wire-format change to session files and the
+      # extension protocol, not a refactor, so it lands on its own.
+      disable:
+        - omitzero
     errcheck:
       check-type-assertions: false
       exclude-functions:
