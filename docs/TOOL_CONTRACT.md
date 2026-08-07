@@ -149,3 +149,22 @@ reader and writer calls use the same Permissions/Sandbox path as Standard mode.
 `todo_write`; `complete_step` joins on a fresh `workflow` connect after plan
 approval. Use `bash` for listing and search until the dedicated `search` source
 is needed.
+
+## Capability Boundary: MCP vs Built-in
+
+The responsibility split between external MCP plugins and built-in tools is
+documented in `docs/AGENT_ARCHITECTURE.md` (§3) and mirrored in
+`reasonix.example.toml`. In short:
+
+- **MCP plugins = external capabilities**: third-party services (GitHub, OCR,
+  browser, game engines), cross-language executables (Python/Node/Rust tools),
+  and anything independently reusable across projects.
+- **Built-in tools = kernel logic**: state management (StateTracker/Navigator),
+  control flow (turn/steer/subagent/goal/jobs), model context (prompt assembly,
+  cache prefix), security boundaries (permission gates, sandbox, write
+  approval), and model-coupled verification (code_verify/cosplay).
+
+Rule of thumb for new tools: a capability that is a pure in-process function
+does not belong in MCP — inline it as a built-in tool to avoid the process
+round-trip. `code_verify` (CoSPlay), `task`/`fleet` (subagents), and the
+navigator family are built-in for exactly this reason.

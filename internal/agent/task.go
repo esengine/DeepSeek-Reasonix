@@ -1697,6 +1697,7 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
+	wireSubagentSteer(ctx, &opts)
 	prompt = t.withWorkspaceContext(prompt)
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
@@ -1707,8 +1708,19 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 	// Capture the pristine task before host framing is prepended: delivery
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
+	wireSubagentSteer(ctx, &opts)
 	prompt = t.withWorkspaceContext(prompt)
 	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
+}
+
+// wireSubagentSteer connects a background sub-agent job's guidance-injection
+// channel: when this sub-session runs inside a job (background task/fleet),
+// the job's steer callback forwards user guidance into the child Agent's next
+// turn. Foreground sub-sessions (no job in ctx) leave the option unset.
+func wireSubagentSteer(ctx context.Context, opts *Options) {
+	if j := jobs.JobFromContext(ctx); j != nil {
+		opts.OnAgentCreated = func(sub *Agent) { j.SetSteer(sub.Steer) }
+	}
 }
 
 // subagentOptions is the single construction point for the run options every
@@ -1898,6 +1910,9 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	// Require it so a reasoning-only stop cannot fall back to older tool text.
 	opts.RequireVisibleFinal = true
 	sub := New(prov, reg, sess, opts, sink)
+	if opts.OnAgentCreated != nil {
+		opts.OnAgentCreated(sub)
+	}
 	sub.SetPlanMode(planWorkflow)
 	if err := sub.Run(ctx, prompt); err != nil {
 		// Still merge any partial child evidence so parent gates see real writes.
