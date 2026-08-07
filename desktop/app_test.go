@@ -11237,3 +11237,34 @@ func TestScanPromptHistoryCacheIsScopedBySessionPath(t *testing.T) {
 		t.Fatalf("second entries = %+v, want session B followed by session A", second.Entries)
 	}
 }
+
+func TestRedactDeepLinkValue(t *testing.T) {
+	raw := "reasonix://new?workspace=/Users/x&prompt=shipping+api+key+abc123"
+	got := redactDeepLinkValue(raw)
+	if got == raw {
+		t.Fatalf("redactDeepLinkValue left sensitive URL intact: %q", got)
+	}
+	if strings.Contains(got, "shipping") || strings.Contains(got, "abc123") || strings.Contains(got, "workspace=") {
+		t.Fatalf("redactDeepLinkValue leaked query content: %q", got)
+	}
+	if !strings.Contains(got, "reasonix://new") {
+		t.Fatalf("redactDeepLinkValue dropped the scheme/host: %q", got)
+	}
+	// Non-URL diagnostic values pass through unchanged.
+	if got := redactDeepLinkValue("topic_20260808_abc"); got != "topic_20260808_abc" {
+		t.Fatalf("non-URL value was altered: %q", got)
+	}
+}
+
+func TestQueueAndDrainPendingDeepLinks(t *testing.T) {
+	app := NewApp()
+	app.queueDeepLink("reasonix://threads/one")
+	app.queueDeepLink("reasonix://threads/two")
+	pending := app.DrainPendingDeepLinks()
+	if len(pending) != 2 || pending[0] != "reasonix://threads/one" || pending[1] != "reasonix://threads/two" {
+		t.Fatalf("drain = %#v, want both queued links in order", pending)
+	}
+	if rest := app.DrainPendingDeepLinks(); len(rest) != 0 {
+		t.Fatalf("second drain = %#v, want empty after first drain", rest)
+	}
+}

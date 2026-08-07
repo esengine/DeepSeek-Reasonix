@@ -612,10 +612,12 @@ export interface AppBindings extends SessionCatalogBindings, ProjectTreeOrganiza
   OpenTopicSession(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
   EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
   ActivateTopic(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
-  // Two-phase ticketed topic activation (supersedes ActivateTopic for topic
+// Two-phase ticketed topic activation (supersedes ActivateTopic for topic
   // navigation): returns a ticket after the surface switch; completion lands
   // on the "topic:activation" channel.
   StartTopicActivation(req: TopicActivationRequest): Promise<TopicActivationTicket>;
+  MarkFrontendReady(): Promise<void>;
+  DrainPendingDeepLinks(): Promise<string[]>;
   EnsureBlankSurface(scope: string, workspaceRoot: string): Promise<TabMeta>;
   SetActiveTab(tabID: string): Promise<void>;
   ReorderTabs(tabIDs: string[]): Promise<void>;
@@ -5212,7 +5214,7 @@ function makeMockApp(): AppBindings {
       pruneMockTabsTo(tab.id);
       return { ...mockTabs[0] };
     },
-    async StartTopicActivation(req: TopicActivationRequest): Promise<TopicActivationTicket> {
+async StartTopicActivation(req: TopicActivationRequest): Promise<TopicActivationTicket> {
       // Mirror the real two-phase contract: the surface switches synchronously
       // (same open + single-tab prune as ActivateTopic), the terminal event
       // lands asynchronously on the mock "topic:activation" listeners, and a
@@ -5237,6 +5239,10 @@ function makeMockApp(): AppBindings {
         __emitMockTopicActivation({ requestId, tabId: tab.id, phase: "ready" });
       }, 0);
       return { requestId, tabId: tab.id, meta };
+    },
+    async MarkFrontendReady() {},
+    async DrainPendingDeepLinks() {
+      return [];
     },
     async EnsureBlankSurface(scope: string, workspaceRoot: string) {
       const tab = await this.EnsureBlankTab(scope, workspaceRoot);

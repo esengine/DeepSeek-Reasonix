@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"strings"
 
 	"github.com/wailsapp/wails/v2/pkg/options"
 )
@@ -14,8 +15,18 @@ func singleInstanceLock(app *App) *options.SingleInstanceLock {
 	}
 	return &options.SingleInstanceLock{
 		UniqueId: singleInstanceID(),
-		OnSecondInstanceLaunch: func(options.SecondInstanceData) {
+		OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
 			app.secondInstanceLaunch()
+			// Windows delivers a second deep-link click as a second-instance
+			// launch with the URL in Args (the scheme's "%1" argument). Forward
+			// it to the already-running app the same way a first-launch argv
+			// deep link is handled.
+			for _, arg := range data.Args {
+				if strings.HasPrefix(strings.ToLower(arg), "reasonix://") {
+					app.queueDeepLink(arg)
+					return
+				}
+			}
 		},
 	}
 }
