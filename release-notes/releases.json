@@ -26,7 +26,7 @@
             "en": "Learn how to use the Agent Communication Protocol for editor integration.",
             "zh": "了解如何使用 Agent 通信协议进行编辑器集成。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/ACP.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/ACP.md"
         },
         {
           "title": {
@@ -37,7 +37,7 @@
             "en": "Chinese version of the ACP guide.",
             "zh": "ACP 指南的中文版本。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/ACP.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/ACP.zh-CN.md"
         },
         {
           "title": {
@@ -48,7 +48,7 @@
             "en": "Guide for configuring and using desktop hooks.",
             "zh": "配置和使用桌面钩子的指南。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/DESKTOP_HOOKS.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/DESKTOP_HOOKS.zh-CN.md"
         },
         {
           "title": {
@@ -59,7 +59,7 @@
             "en": "Comprehensive guide to using Reasonix.",
             "zh": "使用 Reasonix 的综合指南。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/GUIDE.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/GUIDE.md"
         },
         {
           "title": {
@@ -70,7 +70,7 @@
             "en": "Chinese version of the user guide.",
             "zh": "用户指南的中文版本。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/GUIDE.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/GUIDE.zh-CN.md"
         },
         {
           "title": {
@@ -81,7 +81,7 @@
             "en": "Documentation for creating and managing plugin packages.",
             "zh": "创建和管理插件包的文档。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/PLUGIN_PACKAGES.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/PLUGIN_PACKAGES.md"
         },
         {
           "title": {
@@ -92,7 +92,7 @@
             "en": "Chinese version of the plugin packages documentation.",
             "zh": "插件包文档的中文版本。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/PLUGIN_PACKAGES.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/PLUGIN_PACKAGES.zh-CN.md"
         },
         {
           "title": {
@@ -103,7 +103,7 @@
             "en": "Steps to recover from stuck updates and other issues.",
             "zh": "从卡住的更新和其他问题中恢复的步骤。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/RECOVERY.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/RECOVERY.md"
         },
         {
           "title": {
@@ -114,7 +114,7 @@
             "en": "Chinese version of the recovery guide.",
             "zh": "恢复指南的中文版本。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/RECOVERY.zh-CN.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/RECOVERY.zh-CN.md"
         },
         {
           "title": {
@@ -125,7 +125,7 @@
             "en": "Technical specification for Reasonix.",
             "zh": "Reasonix 的技术规范。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/SPEC.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/SPEC.md"
         },
         {
           "title": {
@@ -136,33 +136,33 @@
             "en": "Research document on cache-aware context projection.",
             "zh": "关于缓存感知上下文投影的研究文档。"
           },
-          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/4dc05143d8a17c0b357a937a2843028358733ffc/docs/research/cache-aware-compaction-design.md"
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/c2526217b992c31bbbbeac4506d70c3153d65ac3/docs/research/cache-aware-compaction-design.md"
         }
       ],
       "highlights": [
         {
           "kind": "new",
           "title": {
-            "en": "128K Output Budgets and Cache-Aware Context Projection",
-            "zh": "128K 输出预算与缓存感知上下文投影"
+            "en": "Raised output budgets to 128K with cache-aware context projection",
+            "zh": "输出预算提升至 128K，并引入缓存感知上下文投影"
           },
           "body": {
-            "en": "Provider output budgets are raised to 128K for supported models. History management now uses cache-aware context projection, keeping the canonical transcript intact and only adjusting the model-visible prefix based on token pressure and cache state.",
-            "zh": "支持的模型输出预算提升至 128K。历史管理采用缓存感知上下文投影，保持完整记录不变，仅根据 token 压力和缓存状态调整模型可见前缀。"
+            "en": "Provider-scoped output budgets now support 128K-class reasoning ceilings for compatible providers. Cache-aware context projection separates durable history from the model-visible request, preserving the canonical transcript and using cache state only for cost strategy. Cold/warm/unknown resume no longer rewrites history.",
+            "zh": "支持 provider 的默认输出预算提升至 128K。缓存感知上下文投影将持久历史与模型可见请求分离，保留完整 canonical transcript，缓存状态仅用于成本策略。冷/热/未知恢复不再重写历史。"
           },
           "refs": [
             7839
           ]
         },
         {
-          "kind": "improved",
+          "kind": "new",
           "title": {
-            "en": "Agent Hardening with Work-Practice Policy",
-            "zh": "通过工作实践策略加固 Agent"
+            "en": "Work-practice policy hardens agent behavior",
+            "zh": "工作实践策略加固 Agent 行为"
           },
           "body": {
-            "en": "A new work-practice policy is appended to every system prompt, ensuring the agent implements the requested approach exactly, keeps scratch files out of the repository, and reviews the final diff before declaring completion.",
-            "zh": "新增工作实践策略，附加到每个系统提示中，确保 Agent 严格按指定方法实施、不将临时文件留在仓库中，并在声明完成前检查最终差异。"
+            "en": "A new work-practice policy is appended to every system prompt, ensuring the agent implements the requested approach exactly, keeps scratch out of the repo, and scales verification to the change size. This applies to all runs, not just benchmarks.",
+            "zh": "新增工作实践策略，附加到每个系统提示中，确保 Agent 严格实现所请求的方法、不将临时文件留在仓库中，并根据变更规模调整验证范围。适用于所有运行，而非仅基准测试。"
           },
           "refs": [
             7779
@@ -171,12 +171,12 @@
         {
           "kind": "improved",
           "title": {
-            "en": "Streaming Performance: Coalesced Deltas and Block-Level Parsing",
-            "zh": "流式性能提升：合并增量与块级解析"
+            "en": "Streaming performance: coalesced deltas and per-block Markdown parsing",
+            "zh": "流式性能提升：合并增量与按块解析 Markdown"
           },
           "body": {
-            "en": "Streaming deltas are now coalesced in the Go backend and merged into a single reducer pass per frame in the frontend. Markdown parsing advances only on completed blocks, drastically reducing parse frequency for small answers.",
-            "zh": "流式增量现在在 Go 后端合并，并在前端每帧合并为一次 reducer 处理。Markdown 解析仅在完整块上推进，大幅减少小回答的解析频率。"
+            "en": "Streaming deltas are now coalesced before reaching the frontend, reducing IPC overhead. Markdown is parsed per completed block instead of per tick, cutting parse count dramatically for typical answers. Frame deltas are folded into one reducer pass per tab, lowering UI thread load.",
+            "zh": "流式增量在到达前端前合并，减少 IPC 开销。Markdown 按已完成块解析而非每次 tick 解析，大幅降低典型回答的解析次数。每帧增量合并为每个标签页一次 reducer 处理，降低 UI 线程负载。"
           },
           "refs": [
             7889,
@@ -187,12 +187,12 @@
         {
           "kind": "fixed",
           "title": {
-            "en": "File Tools Now Route Through FileOverlay and Write Atomically",
-            "zh": "文件工具通过 FileOverlay 路由并原子写入"
+            "en": "File tools now route through FileOverlay and writes are atomic",
+            "zh": "文件工具通过 FileOverlay 路由，写入操作原子化"
           },
           "body": {
-            "en": "All file-editing tools now respect the host's FileOverlay, preventing overwrites of unsaved editor buffers. File writes are atomic, avoiding corruption on interruption.",
-            "zh": "所有文件编辑工具现在遵循主机的 FileOverlay，防止覆盖未保存的编辑器缓冲区。文件写入为原子操作，避免中断时损坏。"
+            "en": "All file-editing tools (edit_file, multi_edit, delete_range, etc.) now respect the host FileOverlay, preventing overwrites of unsaved editor buffers. File writes are atomic, using temp-file-and-rename to avoid corruption on crash.",
+            "zh": "所有文件编辑工具（edit_file、multi_edit、delete_range 等）现在遵循宿主 FileOverlay，防止覆盖未保存的编辑器缓冲区。文件写入采用临时文件加重命名的原子操作，避免崩溃时损坏。"
           },
           "refs": [
             7872
@@ -201,26 +201,12 @@
         {
           "kind": "fixed",
           "title": {
-            "en": "Self-Healing Stuck Updates and Discard Option",
-            "zh": "自愈卡住的更新与放弃选项"
+            "en": "Sandbox detection probes usability, not just PATH presence",
+            "zh": "沙箱检测探测可用性，而非仅检查 PATH 存在"
           },
           "body": {
-            "en": "Stuck pending updates now auto-commit after 24 hours if install evidence is intact. A new 'Discard previous update' button allows users to clear a stuck transaction manually.",
-            "zh": "卡住的待更新事务在安装证据完整时 24 小时后自动提交。新增“放弃上次更新”按钮，允许用户手动清除卡住的事务。"
-          },
-          "refs": [
-            7820
-          ]
-        },
-        {
-          "kind": "fixed",
-          "title": {
-            "en": "Sandbox Detection on macOS Now Probes Usability",
-            "zh": "macOS 沙箱检测现在探测可用性"
-          },
-          "body": {
-            "en": "On macOS, sandbox availability is now determined by actually probing sandbox-exec, not just checking PATH. This prevents silent failures on restricted hosts.",
-            "zh": "在 macOS 上，沙箱可用性现在通过实际探测 sandbox-exec 确定，而非仅检查 PATH，防止在受限主机上静默失败。"
+            "en": "On macOS, sandbox-exec availability is now probed with a minimal profile, correctly reporting unavailability on restricted systems where it exists but cannot apply sandboxing. This prevents silent enforcement failures.",
+            "zh": "在 macOS 上，现在通过最小配置文件探测 sandbox-exec 的可用性，正确报告在受限系统上不可用的情况（存在但无法应用沙箱），防止静默执行失败。"
           },
           "refs": [
             7807
@@ -229,12 +215,40 @@
         {
           "kind": "fixed",
           "title": {
-            "en": "Windows Hook POSIX Script Normalization",
-            "zh": "Windows 钩子 POSIX 脚本规范化"
+            "en": "Self-healing stuck pending updates and version normalization",
+            "zh": "自愈卡住的待更新事务与版本号归一化"
           },
           "body": {
-            "en": "POSIX shebang scripts in hooks are now detected and routed through Git Bash on Windows, with path normalization for compatibility.",
-            "zh": "钩子中的 POSIX shebang 脚本现在在 Windows 上被检测并通过 Git Bash 执行，并进行路径规范化以确保兼容性。"
+            "en": "Stuck in-app updates now self-heal: stale probationary updates auto-commit after 24h, version comparison normalizes leading 'v', and a new 'Discard previous update' button allows manual recovery. Recovery docs updated.",
+            "zh": "卡住的应用内更新现在可自愈：过期的试用更新在 24 小时后自动提交，版本比较归一化前导 'v'，新增「放弃上次更新」按钮允许手动恢复。更新了恢复文档。"
+          },
+          "refs": [
+            7820
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Prevent stale results after reasoning-only stops",
+            "zh": "防止仅推理停止后出现陈旧结果"
+          },
+          "body": {
+            "en": "Internal consumers like sub-agents and planners now require a visible final answer. Reasoning-only stops trigger a bounded retry, and cleanup is compaction-aware, preserving completed evidence. Guardian reviews fail closed after empty finals.",
+            "zh": "子代理和规划器等内部消费者现在要求可见的最终答案。仅推理停止会触发有限重试，清理操作感知压缩，保留已完成的证据。Guardian 审查在空最终结果后安全关闭。"
+          },
+          "refs": [
+            7817
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Windows POSIX hook scripts normalized across sources",
+            "zh": "Windows 多来源 Hook 的 POSIX 脚本执行归一化"
+          },
+          "body": {
+            "en": "POSIX shebang scripts from plugins, projects, and global hooks on Windows are now detected and routed through Git Bash. Paths are normalized, and Bash dependencies are visible to diagnostics.",
+            "zh": "Windows 上来自插件、项目和全局钩子的 POSIX shebang 脚本现在被检测并通过 Git Bash 执行。路径已归一化，Bash 依赖项对诊断可见。"
           },
           "refs": [
             7863
@@ -245,54 +259,70 @@
         "new": [
           {
             "title": {
-              "en": "Trajectory Recording for Runs",
-              "zh": "运行轨迹记录"
+              "en": "UI latency telemetry with performance budgets",
+              "zh": "带性能预算的 UI 延迟遥测"
             },
             "body": {
-              "en": "CLI runs can now record a full event trajectory with --trajectory, enabling offline analysis of tool selection, timing, and decisions.",
-              "zh": "CLI 运行现在可通过 --trajectory 记录完整事件轨迹，支持离线分析工具选择、时序和决策。"
+              "en": "Desktop now records UI latency metrics (frame duration, input latency, markdown parse time, etc.) via anonymous counters, with documented performance budgets. No message content is collected.",
+              "zh": "桌面版现在通过匿名计数器记录 UI 延迟指标（帧持续时间、输入延迟、Markdown 解析时间等），并附有文档化的性能预算。不收集消息内容。"
             },
             "refs": [
+              7895
+            ]
+          },
+          {
+            "title": {
+              "en": "Per-task trajectory recording and wall-time attribution",
+              "zh": "按任务轨迹记录与耗时归因"
+            },
+            "body": {
+              "en": "The CLI and benchmark harness can now record per-task event trajectories (--trajectory) and attribute wall time to tools vs. model thinking. Reports include time attribution when trajectories are recorded.",
+              "zh": "CLI 和基准测试工具现在可以记录每个任务的事件轨迹（--trajectory），并将耗时归因于工具执行与模型思考。记录轨迹时，报告包含时间归因。"
+            },
+            "refs": [
+              7885,
               7886
             ]
           },
           {
             "title": {
-              "en": "Benchmark Trajectory and Time Attribution",
-              "zh": "基准测试轨迹与时间归因"
+              "en": "Tool result timestamps for time attribution",
+              "zh": "工具结果时间戳用于耗时归因"
             },
             "body": {
-              "en": "The E2E benchmark suite can record per-task trajectories and attribute wall time to tools vs. model thinking.",
-              "zh": "端到端基准测试套件可记录每个任务的轨迹，并将实际耗时归因于工具执行与模型思考。"
+              "en": "Tool results now carry absolute start/end timestamps, enabling reconstruction of where a turn's time went. Cancelled or skipped calls carry zero timestamps.",
+              "zh": "工具结果现在携带绝对开始/结束时间戳，可重建回合时间分配。已取消或跳过的调用时间戳为零。"
             },
             "refs": [
-              7885
+              7882
             ]
           }
         ],
         "improved": [
           {
             "title": {
-              "en": "Modern Go Idioms and Linting Across All Platforms",
-              "zh": "现代 Go 惯用法与全平台代码检查"
+              "en": "Linting and code quality gates expanded",
+              "zh": "代码检查与质量门禁扩展"
             },
             "body": {
-              "en": "Codebase updated to modern Go idioms (range over int, slices.Contains, etc.) and linting now covers all build tags, not just linux/amd64.",
-              "zh": "代码库更新至现代 Go 惯用法（如 range over int、slices.Contains 等），代码检查现在覆盖所有构建标签，而非仅 linux/amd64。"
+              "en": "Function size and complexity are now gated in CI. File-size ceiling extended to TypeScript. All build tags are linted across platforms. Modern Go idioms adopted and enforced.",
+              "zh": "函数大小和复杂度现在在 CI 中设限。文件大小上限扩展到 TypeScript。所有构建标签跨平台检查。采用并强制执行现代 Go 惯用法。"
             },
             "refs": [
-              7831,
-              7837
+              7862,
+              7879,
+              7837,
+              7831
             ]
           },
           {
             "title": {
-              "en": "Error Handling Standardization",
-              "zh": "错误处理标准化"
+              "en": "Error comparison hardened",
+              "zh": "错误比较加固"
             },
             "body": {
-              "en": "Error comparisons now use errors.Is/As throughout, and custom unwrap helpers are replaced with standard library functions.",
-              "zh": "错误比较现在统一使用 errors.Is/As，自定义解包辅助函数替换为标准库函数。"
+              "en": "All error comparisons now use errors.Is/As through the unwrap chain, preventing silent breakage when errors are wrapped. Hand-rolled unwrap helpers removed.",
+              "zh": "所有错误比较现在通过解包链使用 errors.Is/As，防止包装错误时静默失效。移除了手动解包辅助函数。"
             },
             "refs": [
               7834
@@ -300,53 +330,27 @@
           },
           {
             "title": {
-              "en": "Function Size and Complexity Gating",
-              "zh": "函数大小与复杂度门禁"
+              "en": "Comment style cleaned up",
+              "zh": "注释风格清理"
             },
             "body": {
-              "en": "Function size and cyclomatic complexity are now enforced as CI gates, preventing growth in already-large functions.",
-              "zh": "函数大小和圈复杂度现在作为 CI 门禁强制执行，防止已大型函数继续增长。"
+              "en": "Section-banner decorations removed from comments across the codebase, with a zero-tolerance gate in repolint.",
+              "zh": "代码库中注释的分节横幅装饰已移除，repolint 中设为零容忍门禁。"
             },
             "refs": [
-              7862
-            ]
-          },
-          {
-            "title": {
-              "en": "File Size Ceiling Extended to TypeScript",
-              "zh": "文件大小上限扩展至 TypeScript"
-            },
-            "body": {
-              "en": "The 800-line file size ceiling now applies to TypeScript files, with locale tables exempted.",
-              "zh": "800 行文件大小上限现在适用于 TypeScript 文件，本地化表格除外。"
-            },
-            "refs": [
-              7879
+              7840
             ]
           }
         ],
         "fixed": [
           {
             "title": {
-              "en": "Prevent Stale Results After Reasoning-Only Stops",
-              "zh": "防止仅推理停止后的过时结果"
+              "en": "CLI metrics sink double-forwarding fixed",
+              "zh": "修复 CLI 指标接收器重复转发"
             },
             "body": {
-              "en": "Internal consumers now require a visible final answer, with bounded retries for reasoning-only stops, preventing stale text from being used.",
-              "zh": "内部消费者现在要求可见的最终回答，对仅推理停止进行有限重试，防止使用过时文本。"
-            },
-            "refs": [
-              7817
-            ]
-          },
-          {
-            "title": {
-              "en": "CLI Metrics Sink Double-Forwarding",
-              "zh": "CLI 指标接收器重复转发"
-            },
-            "body": {
-              "en": "Fixed a bug where the metrics sink forwarded every event twice, doubling output and notifications.",
-              "zh": "修复了指标接收器重复转发每个事件导致输出和通知翻倍的错误。"
+              "en": "A bug where every event was forwarded twice on --metrics runs has been fixed, restoring single-forward behavior.",
+              "zh": "修复了 --metrics 运行时每个事件被转发两次的错误，恢复单次转发行为。"
             },
             "refs": [
               7883
@@ -354,12 +358,12 @@
           },
           {
             "title": {
-              "en": "Session Concurrency Test Budget",
-              "zh": "会话并发测试预算"
+              "en": "Session concurrency test stays within race budget",
+              "zh": "会话并发测试保持在竞态预算内"
             },
             "body": {
-              "en": "Reduced the scale of the session concurrency test to stay within the race detector's time budget.",
-              "zh": "缩减会话并发测试规模，以保持在竞态检测器的时间预算内。"
+              "en": "Reduced the volume of the session concurrency test to avoid timeout under the race detector, while maintaining overlap coverage.",
+              "zh": "减少会话并发测试的规模，避免在竞态检测器下超时，同时保持重叠覆盖。"
             },
             "refs": [
               7821
@@ -367,20 +371,48 @@
           },
           {
             "title": {
-              "en": "CLI and SSH Test Isolation",
-              "zh": "CLI 与 SSH 测试隔离"
+              "en": "CLI and SSH tests no longer reach the outside world",
+              "zh": "CLI 和 SSH 测试不再访问外部网络"
             },
             "body": {
-              "en": "CLI and SSH tests no longer make real network calls, ensuring deterministic results.",
-              "zh": "CLI 和 SSH 测试不再进行真实网络调用，确保结果确定性。"
+              "en": "Tests that were inadvertently making real API calls or shelling out to host SSH are now properly isolated.",
+              "zh": "无意中进行真实 API 调用或调用主机 SSH 的测试现已正确隔离。"
             },
             "refs": [
               7856
             ]
+          },
+          {
+            "title": {
+              "en": "PR metadata gate rules documented and corrected",
+              "zh": "PR 元数据门禁规则文档化并修正"
+            },
+            "body": {
+              "en": "The Documentation-impact gate is now documented, and the rejected-values line was corrected to match actual enforcement.",
+              "zh": "Documentation-impact 门禁现已文档化，并修正了拒绝值行以匹配实际执行。"
+            },
+            "refs": [
+              7876
+            ]
           }
         ]
       },
-      "upgrade": [],
+      "upgrade": [
+        {
+          "level": "info",
+          "title": {
+            "en": "Stuck updates self-heal",
+            "zh": "卡住的更新自愈"
+          },
+          "body": {
+            "en": "If you have a stuck pending update, it will auto-commit after 24 hours if install evidence holds. You can also discard it from Settings.",
+            "zh": "如果您有卡住的待更新事务，若安装证据有效，将在 24 小时后自动提交。您也可以从设置中放弃它。"
+          },
+          "refs": [
+            7820
+          ]
+        }
+      ],
       "risks": [],
       "contributors": [
         "esengine",
