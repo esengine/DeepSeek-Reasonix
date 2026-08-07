@@ -499,6 +499,7 @@ func runAgent(args []string, version string) int {
 	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
 	showThinking := fs.Bool("show-thinking", false, "show thinking text instead of the collapsed thinking marker")
 	metricsPath := fs.String("metrics", "", "write a JSON token/cache/cost summary of the run to this path")
+	trajectoryPath := fs.String("trajectory", "", "append a timestamped JSONL trajectory of the run's full event stream (tool calls, reasoning, decisions) to this path")
 	ablateFlag := fs.String("ablate", "", "benchmark arm: comma-separated subsystems to switch off (evidence, planner, subagent, retrieval, compaction; none|all)")
 	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
 	cont := registerContinueFlag(fs)
@@ -665,38 +666,12 @@ func runAgent(args []string, version string) int {
 	defer stop()
 	started := time.Now()
 
-	// Live run: render the agent's event stream to stdout. Markdown post-stream
-	// redraw (cursor moves) is enabled only on a TTY; piped / captured output
-	// keeps the raw stream.
-	var sink event.Sink
-	var resultOutput *runOutputSink
-	if *printOnly || format != runOutputText {
-		resultOutput = newRunOutputSink(os.Stdout, format)
-		sink = resultOutput
-	} else {
-		var renderer agent.Renderer
-		termW := 80
-		if isTTY(os.Stdout) {
-			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-				termW = w
-			}
-			renderer = newMarkdownRenderer(termW)
-		}
-		textSink := agent.NewTextSink(os.Stdout, renderer, termW)
-		textSink.SetShowReasoning(*showThinking)
-		sink = textSink
+	chain, err := buildRunSink(format, *printOnly, *showThinking, *metricsPath, *trajectoryPath, cfg, reporter)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
 	}
-	var metrics *metricsSink
-	if *metricsPath != "" {
-		metrics = &metricsSink{
-			inner:         sink,
-			partialPath:   partialMetricsPath(*metricsPath),
-			snapshotEvery: 2 * time.Second,
-		}
-		sink = metrics
-	}
-	sink = withNotifications(sink, cfg)
-	sink = reporter.Wrap(sink)
+	sink, resultOutput, metrics := chain.sink, chain.resultOutput, chain.metrics
 	if resumePath != "" {
 		*model = modelForResumePath(*model, resumePath, cfg)
 	}
@@ -789,6 +764,11 @@ func runAgent(args []string, version string) int {
 			}
 		}
 		if err := writeMetrics(*metricsPath, final); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		}
+	}
+	if chain.trajectory != nil {
+		if err := chain.trajectory.Close(); err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		}
 	}
