@@ -892,7 +892,7 @@ func validateFinding(f Finding) error {
 		return errors.New("autoresearch: finding id is required")
 	}
 	switch f.Kind {
-	case FindingKindCommand, FindingKindFile, FindingKindTest, FindingKindBenchmark, FindingKindManual, FindingKindReview:
+	case FindingKindCommand, FindingKindFile, FindingKindTest, FindingKindBenchmark, FindingKindManual, FindingKindReview, FindingKindVerification:
 	default:
 		return fmt.Errorf("autoresearch: finding kind %q is invalid", f.Kind)
 	}

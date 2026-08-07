@@ -71,6 +71,11 @@ const (
 	FindingKindBenchmark = "benchmark"
 	FindingKindManual    = "manual"
 	FindingKindReview    = "review"
+	// FindingKindVerification accepts the protocol's kind:"verification"
+	// evidence blocks (README/agent protocol uses verification for command-run
+	// results). Without it, validateFinding rejects the block and the criterion
+	// stays forever missing → goal-complete readiness check loops forever.
+	FindingKindVerification = "verification"
 )
 
 const (
