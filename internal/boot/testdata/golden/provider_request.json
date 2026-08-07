@@ -1018,6 +1018,108 @@
       }
     },
     {
+      "name": "modeling_analyze",
+      "description": "Compute a compact geometric descriptor of a mesh file (obj/stl/ply) or voxel file (.vox) — ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens.",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "Mesh (.obj/.stl/.ply) or voxel (.vox) file path.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "modeling_convert",
+      "description": "Convert a mesh/voxel file to another format (pure Go). Supported: obj/stl/ply/vox. Output path default = input with new extension.",
+      "parameters": {
+        "properties": {
+          "format": {
+            "description": "Target format (extension).",
+            "enum": [
+              "obj",
+              "stl",
+              "ply",
+              "vox"
+            ],
+            "type": "string"
+          },
+          "out": {
+            "description": "Optional output path (default: input with new extension).",
+            "type": "string"
+          },
+          "path": {
+            "description": "Source file.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "format",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "modeling_optimize",
+      "description": "Apply a deterministic mesh operation (cleanup/triangulate/merge/decimate) to a mesh file (obj/stl/ply). The file is backed up to \u003cpath\u003e.bak first; returns the before/after stat delta (token-minimal verification). decimate target is the desired face count.",
+      "parameters": {
+        "properties": {
+          "eps": {
+            "description": "Weld/merge epsilon (cleanup/merge); default 0 (no weld).",
+            "type": "number"
+          },
+          "op": {
+            "description": "Operation to apply.",
+            "enum": [
+              "cleanup",
+              "triangulate",
+              "merge",
+              "decimate"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Mesh file path (.obj/.stl/.ply).",
+            "type": "string"
+          },
+          "target_faces": {
+            "description": "Target face count for decimate.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "op",
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "modeling_voxel",
+      "description": "Voxelize a closed mesh into a .vox model at the given resolution (longest axis, 4..512). Writes \u003cpath\u003e.vox and returns the voxel descriptor (size/filled/colors/components/solidity).",
+      "parameters": {
+        "properties": {
+          "path": {
+            "description": "Mesh file path (.obj/.stl/.ply).",
+            "type": "string"
+          },
+          "resolution": {
+            "description": "Voxel grid resolution along the longest axis (default 64, range 4..512).",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "move_file",
       "description": "Move or rename a file from source_path to destination_path. Creates the destination parent directory as needed. Use instead of shell mv, Move-Item, or ren for file moves so workspace confinement and file-edit permissions apply.",
       "parameters": {
