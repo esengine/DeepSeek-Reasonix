@@ -170,7 +170,7 @@ func readLine(br *bufio.Reader) ([]byte, error) {
 		if len(buf) > maxMessageBytes {
 			return nil, errors.New("acp: message exceeds size limit")
 		}
-		if err == bufio.ErrBufferFull {
+		if errors.Is(err, bufio.ErrBufferFull) {
 			continue
 		}
 		// Trim the trailing newline (and CR) if present.

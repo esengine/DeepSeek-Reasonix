@@ -243,7 +243,7 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 		if err != nil {
 			if oldDisconnected {
 				if rbErr := t.restoreMCP(previous); rbErr != nil {
-					return fmt.Errorf("%w; reconnect previous server failed: %v", err, rbErr)
+					return fmt.Errorf("%w; reconnect previous server failed: %w", err, rbErr)
 				}
 			}
 			return err
@@ -257,7 +257,7 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 	probe := config.Default()
 	if err := probe.UpsertPlugin(act.entry); err != nil {
 		if rbErr := t.rollbackMCPReplace(act, previous, oldDisconnected, connected); rbErr != nil {
-			return fmt.Errorf("%w; rollback failed: %v", err, rbErr)
+			return fmt.Errorf("%w; rollback failed: %w", err, rbErr)
 		}
 		return err
 	}
@@ -274,7 +274,7 @@ func (t *installSourceTool) applyInstallMCP(ctx context.Context, req request, ac
 		return fresh.UpsertPlugin(act.entry)
 	}); err != nil {
 		if rbErr := t.rollbackMCPReplace(act, previous, oldDisconnected, connected); rbErr != nil {
-			return fmt.Errorf("%w; rollback failed: %v", err, rbErr)
+			return fmt.Errorf("%w; rollback failed: %w", err, rbErr)
 		}
 		return err
 	}

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -255,7 +256,7 @@ func (g grepTool) runNative(ctx context.Context, pattern, path string, info os.F
 			if ig.skip(path, d.Name(), false) {
 				return nil
 			}
-			if searchFile(path) == io.EOF {
+			if errors.Is(searchFile(path), io.EOF) {
 				return filepath.SkipAll
 			}
 			return nil

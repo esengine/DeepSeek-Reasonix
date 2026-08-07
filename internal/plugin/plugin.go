@@ -1565,7 +1565,7 @@ func (c *Client) callTransport(ctx context.Context, method string, params any) (
 		return res, err
 	}
 	if initErr := c.initializeSession(ctx, false); initErr != nil {
-		return nil, fmt.Errorf("%w; reinitialize failed: %v", err, initErr)
+		return nil, fmt.Errorf("%w; reinitialize failed: %w", err, initErr)
 	}
 	return c.t.call(ctx, method, params)
 }

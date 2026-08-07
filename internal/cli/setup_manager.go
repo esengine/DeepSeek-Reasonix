@@ -539,7 +539,7 @@ func addProviderToSession(s *providerSetupSession, anthropic bool) bool {
 		result, err = promptCustomProvider()
 	}
 	if err != nil {
-		if err != errCancelled {
+		if !errors.Is(err, errCancelled) {
 			fmt.Fprintln(os.Stderr, err)
 		}
 		return false

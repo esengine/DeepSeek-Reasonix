@@ -3,6 +3,7 @@ package builtin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -442,7 +443,8 @@ func TestConfineReadBlocksReadFile(t *testing.T) {
 	if err == nil {
 		t.Error("read_file should refuse a forbid-read path")
 	}
-	if _, ok := err.(*os.PathError); !ok {
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
 		t.Errorf("read_file forbid-read error should be *os.PathError, got %T: %v", err, err)
 	}
 	// Unconfined (nil forbidRoots) should work.
@@ -549,7 +551,8 @@ func TestConfineReadBlocksGrepFile(t *testing.T) {
 	if err == nil {
 		t.Error("grep on a forbid-read file should error, not return (no matches)")
 	}
-	if _, ok := err.(*os.PathError); !ok {
+	var pathErr *os.PathError
+	if !errors.As(err, &pathErr) {
 		t.Errorf("grep forbid-read error should be *os.PathError, got %T: %v", err, err)
 	}
 	// Unconfined (nil forbidRoots) should work.

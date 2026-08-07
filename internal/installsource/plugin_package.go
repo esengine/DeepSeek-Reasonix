@@ -598,11 +598,11 @@ func verifyCopiedCapabilities(src pluginpkg.Package, target string) error {
 func checkoutPluginCommit(ctx context.Context, cloneRoot, commit string) error {
 	fetch := pluginGitCommand(ctx, "-C", cloneRoot, "fetch", "--depth=1", "origin", commit)
 	if out, err := fetch.CombinedOutput(); err != nil {
-		return fmt.Errorf("fetch approved commit %s: %v: %s", commit, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("fetch approved commit %s: %w: %s", commit, err, strings.TrimSpace(string(out)))
 	}
 	co := pluginGitCommand(ctx, "-C", cloneRoot, "checkout", "--detach", commit)
 	if out, err := co.CombinedOutput(); err != nil {
-		return fmt.Errorf("checkout approved commit %s: %v: %s", commit, err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("checkout approved commit %s: %w: %s", commit, err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

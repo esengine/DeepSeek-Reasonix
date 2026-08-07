@@ -545,7 +545,7 @@ func fetchLatestRelease(c *http.Client, channel cliReleaseChannel) (*ghRelease, 
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("release gateway: %v; GitHub API: %s%s", pointerErr, resp.Status, githubRateLimitHint(resp))
+		return nil, fmt.Errorf("release gateway: %w; GitHub API: %s%s", pointerErr, resp.Status, githubRateLimitHint(resp))
 	}
 
 	var rels []ghRelease
@@ -556,7 +556,7 @@ func fetchLatestRelease(c *http.Client, channel cliReleaseChannel) (*ghRelease, 
 	if rel := pickCLIRelease(rels, channel); rel != nil {
 		return rel, nil
 	}
-	return nil, fmt.Errorf("release gateway: %v; no %s CLI release found in recent GitHub releases", pointerErr, channel)
+	return nil, fmt.Errorf("release gateway: %w; no %s CLI release found in recent GitHub releases", pointerErr, channel)
 }
 
 func fetchCLIReleasePointer(c *http.Client, pointerURL string, channel cliReleaseChannel) (*ghRelease, error) {
@@ -746,7 +746,7 @@ func commitWindows(target, newPath, base, dir string) error {
 	if err := os.Rename(newPath, target); err != nil {
 		// Rollback: try to restore the old binary.
 		if rerr := os.Rename(oldPath, target); rerr != nil {
-			return fmt.Errorf("replace failed (%v); rollback also failed: %w", err, rerr)
+			return fmt.Errorf("replace failed (%w); rollback also failed: %w", err, rerr)
 		}
 		return fmt.Errorf("rename new binary: %w", err)
 	}

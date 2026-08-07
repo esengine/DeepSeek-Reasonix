@@ -217,7 +217,7 @@ func clearPreparedRepairTransaction(expected *RepairTransaction) error {
 	repairPendingAfterMove(path, cleanup)
 	restoreUnknown := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(cleanup, path); restoreErr != nil {
-			return fmt.Errorf("%w; displaced pending repair retained at %s: %v", cause, cleanup, restoreErr)
+			return fmt.Errorf("%w; displaced pending repair retained at %s: %w", cause, cleanup, restoreErr)
 		}
 		return cause
 	}
@@ -685,7 +685,7 @@ func UndoLastRepair() (*RepairTransaction, error) {
 		if restoreErr != nil {
 			if redo != "" {
 				if compensateErr := restoreRepairNodeIfAbsent(redo, change.TargetPath); compensateErr != nil {
-					return nil, fmt.Errorf("undo repair: restore %s: %w (current state retained at %s: %v)", change.TargetPath, restoreErr, redo, compensateErr)
+					return nil, fmt.Errorf("undo repair: restore %s: %w (current state retained at %s: %w)", change.TargetPath, restoreErr, redo, compensateErr)
 				}
 			}
 			return nil, fmt.Errorf("undo repair: restore %s: %w", change.TargetPath, restoreErr)

@@ -763,7 +763,7 @@ func PublishClaimedFileUpdateMemberExact(
 		fileUpdateAfterRetain(member.TargetPath, retained)
 		if err := verifyRepairPlanReleaseNodeStateFor(retained, member.TargetPath, preparedState); err != nil {
 			if restoreErr := restoreRepairNodeIfAbsent(retained, member.TargetPath); restoreErr != nil {
-				return FileUpdateInstallReceipt{}, fmt.Errorf("%w; verified prior release file retained at %s: %v", err, retained, restoreErr)
+				return FileUpdateInstallReceipt{}, fmt.Errorf("%w; verified prior release file retained at %s: %w", err, retained, restoreErr)
 			}
 			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: prepared release file changed during retain: %w", err)
 		}
@@ -771,7 +771,7 @@ func PublishClaimedFileUpdateMemberExact(
 	if err := renameRepairNodeNoReplace(stage, member.TargetPath); err != nil {
 		if retained != "" {
 			if restoreErr := restoreRepairNodeIfAbsent(retained, member.TargetPath); restoreErr != nil {
-				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: publish %s: %w; verified prior release file retained at %s: %v", filepath.Base(member.TargetPath), err, retained, restoreErr)
+				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: publish %s: %w; verified prior release file retained at %s: %w", filepath.Base(member.TargetPath), err, retained, restoreErr)
 			}
 		}
 		return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: publish %s: %w", filepath.Base(member.TargetPath), err)
@@ -781,7 +781,7 @@ func PublishClaimedFileUpdateMemberExact(
 		rejected, retainErr := moveRepairNodeToUniqueCleanup(member.TargetPath)
 		if retainErr != nil || rejected == "" {
 			if retainErr != nil {
-				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; retain rejected file: %v", filepath.Base(member.TargetPath), err, retainErr)
+				return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; retain rejected file: %w", filepath.Base(member.TargetPath), err, retainErr)
 			}
 			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file disappeared before compensation", filepath.Base(member.TargetPath), err)
 		}
@@ -789,10 +789,10 @@ func PublishClaimedFileUpdateMemberExact(
 			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s", filepath.Base(member.TargetPath), err, rejected)
 		}
 		if verifyErr := verifyRepairPlanReleaseNodeStateFor(retained, member.TargetPath, preparedState); verifyErr != nil {
-			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; prepared file changed at %s: %v", filepath.Base(member.TargetPath), err, rejected, retained, verifyErr)
+			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; prepared file changed at %s: %w", filepath.Base(member.TargetPath), err, rejected, retained, verifyErr)
 		}
 		if restoreErr := restoreRepairNodeIfAbsent(retained, member.TargetPath); restoreErr != nil {
-			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; restore prepared file: %v", filepath.Base(member.TargetPath), err, rejected, restoreErr)
+			return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s; restore prepared file: %w", filepath.Base(member.TargetPath), err, rejected, restoreErr)
 		}
 		return FileUpdateInstallReceipt{}, fmt.Errorf("publish file update: installed %s changed: %w; rejected file retained at %s and prepared file restored", filepath.Base(member.TargetPath), err, rejected)
 	}
@@ -1476,10 +1476,10 @@ func quarantineExistingAppBundleUpdateBackup(tx *UpdateTransaction) (string, str
 			if _, statErr := os.Lstat(tx.BackupPath); statErr == nil {
 				return fmt.Errorf("%w; preserved quarantined backup at %s because the public path was recreated", cause, quarantine)
 			} else if !os.IsNotExist(statErr) {
-				return fmt.Errorf("%w; inspect recreated handoff backup: %v", cause, statErr)
+				return fmt.Errorf("%w; inspect recreated handoff backup: %w", cause, statErr)
 			}
 			if restoreErr := renameRepairNodeNoReplace(quarantine, tx.BackupPath); restoreErr != nil {
-				return fmt.Errorf("%w; preserved quarantined backup at %s: %v", cause, quarantine, restoreErr)
+				return fmt.Errorf("%w; preserved quarantined backup at %s: %w", cause, quarantine, restoreErr)
 			}
 			return cause
 		}
@@ -1648,7 +1648,7 @@ func removePendingUpdateExactVerified(expected *UpdateTransaction, verify func()
 	updateCleanupAfterRename(path, cleanup)
 	restore := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(cleanup, path); restoreErr != nil {
-			return fmt.Errorf("%w; pending transaction retained at %s: %v", cause, cleanup, restoreErr)
+			return fmt.Errorf("%w; pending transaction retained at %s: %w", cause, cleanup, restoreErr)
 		}
 		return cause
 	}
@@ -2428,7 +2428,7 @@ func removeUpdateNodeMatching(path string, verify func(string) error, directory 
 	updateCleanupAfterRename(path, cleanup)
 	restore := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(cleanup, path); restoreErr != nil {
-			return fmt.Errorf("%w; changed update node retained at %s: %v", cause, cleanup, restoreErr)
+			return fmt.Errorf("%w; changed update node retained at %s: %w", cause, cleanup, restoreErr)
 		}
 		return cause
 	}
@@ -2696,7 +2696,7 @@ func rollbackPendingUpdateMatchingLocked(
 			if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, retainedFailedState); verifyErr != nil {
 				if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 					result.MixedInstall = true
-					return result, fmt.Errorf("%w; preserve moved live bundle at %s: %v", verifyErr, failed, restoreErr)
+					return result, fmt.Errorf("%w; preserve moved live bundle at %s: %w", verifyErr, failed, restoreErr)
 				}
 				return result, verifyErr
 			}
@@ -2707,7 +2707,7 @@ func rollbackPendingUpdateMatchingLocked(
 				if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, expected); verifyErr != nil {
 					if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 						result.MixedInstall = true
-						return result, fmt.Errorf("%w; preserve moved live bundle at %s: %v", verifyErr, failed, restoreErr)
+						return result, fmt.Errorf("%w; preserve moved live bundle at %s: %w", verifyErr, failed, restoreErr)
 					}
 					return result, verifyErr
 				}
@@ -2727,11 +2727,11 @@ func rollbackPendingUpdateMatchingLocked(
 			if retainedFailed {
 				if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, retainedFailedState); verifyErr != nil {
 					result.MixedInstall = true
-					return result, fmt.Errorf("rollback update: restore bundle: %w (retained live bundle changed at %s: %v)", err, failed, verifyErr)
+					return result, fmt.Errorf("rollback update: restore bundle: %w (retained live bundle changed at %s: %w)", err, failed, verifyErr)
 				}
 				if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 					result.MixedInstall = true
-					return result, fmt.Errorf("rollback update: restore bundle: %w (preserve replacement at %s: %v)", err, failed, restoreErr)
+					return result, fmt.Errorf("rollback update: restore bundle: %w (preserve replacement at %s: %w)", err, failed, restoreErr)
 				}
 			}
 			return result, fmt.Errorf("rollback update: restore bundle: %w", err)
@@ -2753,7 +2753,7 @@ func rollbackPendingUpdateMatchingLocked(
 			if moveErr != nil || rejected == "" {
 				result.MixedInstall = true
 				if moveErr != nil {
-					return result, fmt.Errorf("%w; retain rejected bundle: %v", mismatchErr, moveErr)
+					return result, fmt.Errorf("%w; retain rejected bundle: %w", mismatchErr, moveErr)
 				}
 				return result, fmt.Errorf("%w; rejected bundle disappeared before compensation", mismatchErr)
 			}
@@ -2763,15 +2763,15 @@ func rollbackPendingUpdateMatchingLocked(
 			}
 			if verifyErr := verifyRepairPlanReleaseNodeStateFor(failed, tx.TargetPath, retainedFailedState); verifyErr != nil {
 				result.MixedInstall = true
-				return result, fmt.Errorf("%w; rejected bundle retained at %s; prior live bundle changed at %s: %v", mismatchErr, rejected, failed, verifyErr)
+				return result, fmt.Errorf("%w; rejected bundle retained at %s; prior live bundle changed at %s: %w", mismatchErr, rejected, failed, verifyErr)
 			}
 			if restoreErr := rollbackSwapRename(failed, tx.TargetPath); restoreErr != nil {
 				result.MixedInstall = true
-				return result, fmt.Errorf("%w; rejected bundle retained at %s; restore prior live bundle: %v", mismatchErr, rejected, restoreErr)
+				return result, fmt.Errorf("%w; rejected bundle retained at %s; restore prior live bundle: %w", mismatchErr, rejected, restoreErr)
 			}
 			if verifyErr := verifyRepairPlanReleaseNodeStateFor(tx.TargetPath, tx.TargetPath, retainedFailedState); verifyErr != nil {
 				result.MixedInstall = true
-				return result, fmt.Errorf("%w; rejected bundle retained at %s; restored prior live bundle changed: %v", mismatchErr, rejected, verifyErr)
+				return result, fmt.Errorf("%w; rejected bundle retained at %s; restored prior live bundle changed: %w", mismatchErr, rejected, verifyErr)
 			}
 			return result, fmt.Errorf("%w; rejected bundle retained at %s and prior live bundle restored", mismatchErr, rejected)
 		}
@@ -2988,7 +2988,7 @@ func restoreReleaseUnit(
 				swapErr = verifyErr
 				if restoreErr := restoreRepairNodeIfAbsent(aside, f.TargetPath); restoreErr != nil {
 					preserveAside[i] = true
-					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %v", verifyErr, aside, restoreErr)
+					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %w", verifyErr, aside, restoreErr)
 				} else {
 					asides[i] = ""
 				}
@@ -3001,7 +3001,7 @@ func restoreReleaseUnit(
 					swapErr = fmt.Errorf("installed release file %s changed before rollback: %w", filepath.Base(f.TargetPath), verifyErr)
 					if restoreErr := restoreRepairNodeIfAbsent(aside, f.TargetPath); restoreErr != nil {
 						preserveAside[i] = true
-						swapErr = fmt.Errorf("%w; preserve moved live target at %s: %v", swapErr, aside, restoreErr)
+						swapErr = fmt.Errorf("%w; preserve moved live target at %s: %w", swapErr, aside, restoreErr)
 					} else {
 						asides[i] = ""
 					}
@@ -3016,7 +3016,7 @@ func restoreReleaseUnit(
 				swapErr = verifyErr
 				if restoreErr := restoreRepairNodeIfAbsent(aside, f.TargetPath); restoreErr != nil {
 					preserveAside[i] = true
-					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %v", verifyErr, aside, restoreErr)
+					swapErr = fmt.Errorf("%w; preserve moved live target at %s: %w", verifyErr, aside, restoreErr)
 				} else {
 					asides[i] = ""
 				}

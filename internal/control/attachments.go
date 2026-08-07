@@ -2,6 +2,7 @@ package control
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -250,7 +251,8 @@ $img.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
 	proc.HideWindow(cmd)
 	out, err := cmd.Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && len(ee.Stderr) > 0 {
 			return "", fmt.Errorf("read clipboard image: %s", strings.TrimSpace(string(ee.Stderr)))
 		}
 		return "", fmt.Errorf("read clipboard image: %w", err)

@@ -1047,7 +1047,7 @@ func extractLinuxReleaseUnit(targz []byte) (map[string][]byte, error) {
 	tr := tar.NewReader(gz)
 	for {
 		h, err := tr.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

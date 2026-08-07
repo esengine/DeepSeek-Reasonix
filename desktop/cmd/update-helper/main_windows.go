@@ -5,6 +5,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -499,7 +500,7 @@ func newLogger() *log.Logger {
 func waitForProcessExit(pid uint32, timeout time.Duration) error {
 	h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
 	if err != nil {
-		if err == windows.ERROR_INVALID_PARAMETER {
+		if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
 			return nil
 		}
 		return err

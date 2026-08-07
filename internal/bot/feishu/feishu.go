@@ -999,7 +999,7 @@ func (a *adapter) runWebhook(ctx context.Context) {
 
 	go func() {
 		<-ctx.Done()
-		if err := server.Shutdown(context.Background()); err != nil && err != http.ErrServerClosed {
+		if err := server.Shutdown(context.Background()); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			a.logger.Error("feishu webhook shutdown error", "err", err)
 		}
 	}()

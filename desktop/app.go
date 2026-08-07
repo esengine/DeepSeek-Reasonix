@@ -10888,7 +10888,7 @@ func (a *App) ReadFileForTab(tabID, rel string) FilePreview {
 
 	buf := make([]byte, filePreviewLimit+1)
 	n, err := f.Read(buf)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		out.Err = err.Error()
 		return out
 	}
@@ -11422,7 +11422,7 @@ func removeExportFileIfSame(path string, created os.FileInfo) {
 func exportOperationError(operation, path string, err error) error {
 	var pathErr *os.PathError
 	if errors.As(err, &pathErr) {
-		return fmt.Errorf("%s %s: %v", operation, filepath.Base(path), pathErr.Err)
+		return fmt.Errorf("%s %s: %w", operation, filepath.Base(path), pathErr.Err)
 	}
 	return fmt.Errorf("%s %s: %w", operation, filepath.Base(path), err)
 }

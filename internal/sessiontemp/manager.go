@@ -270,17 +270,17 @@ func (m *Manager) createGenerationLocked() (*generation, error) {
 	}
 	dir, err := mk(parent)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if err := os.Chmod(dir, 0o700); err != nil {
 		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("%w: chmod: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: chmod: %w", ErrUnavailable, err)
 	}
 	lockPath := filepath.Join(dir, ownerLockName)
 	release, err := filelock.Acquire(nilContext(), lockPath)
 	if err != nil {
 		_ = os.RemoveAll(dir)
-		return nil, fmt.Errorf("%w: owner lock: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: owner lock: %w", ErrUnavailable, err)
 	}
 	return &generation{
 		id:           nextGenID.Add(1),

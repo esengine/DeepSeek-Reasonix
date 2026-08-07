@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -215,7 +216,7 @@ func TestRunTurnRefusedDuringFinishingWindow(t *testing.T) {
 	go func() { errCh <- c.RunTurn(context.Background(), "sync input") }()
 	select {
 	case err := <-errCh:
-		if err != ErrTurnRunning {
+		if !errors.Is(err, ErrTurnRunning) {
 			t.Fatalf("RunTurn during finishing window = %v, want ErrTurnRunning", err)
 		}
 	case <-time.After(time.Second):
@@ -230,7 +231,7 @@ func TestRunTurnRefusedDuringFinishingWindow(t *testing.T) {
 func TestRunTurnRefusedAfterClose(t *testing.T) {
 	c := New(Options{})
 	c.Close()
-	if err := c.RunTurn(context.Background(), "late"); err != ErrTurnRunning {
+	if err := c.RunTurn(context.Background(), "late"); !errors.Is(err, ErrTurnRunning) {
 		t.Fatalf("RunTurn after Close = %v, want ErrTurnRunning", err)
 	}
 }

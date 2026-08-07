@@ -353,10 +353,10 @@ func (s *RemoteHostStore) loadLocked() ([]RemoteHostEntry, error) {
 	decoder.DisallowUnknownFields()
 	var document remoteHostStoreDocument
 	if err := decoder.Decode(&document); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRemoteHostStoreCorrupt, err)
+		return nil, fmt.Errorf("%w: %w", ErrRemoteHostStoreCorrupt, err)
 	}
 	if err := requireJSONEOF(decoder); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrRemoteHostStoreCorrupt, err)
+		return nil, fmt.Errorf("%w: %w", ErrRemoteHostStoreCorrupt, err)
 	}
 	if document.Version != remoteHostStoreVersion && document.Version != remoteHostStoreVersion1 {
 		return nil, fmt.Errorf("%w: unsupported version %d", ErrRemoteHostStoreCorrupt, document.Version)
@@ -373,7 +373,7 @@ func (s *RemoteHostStore) loadLocked() ([]RemoteHostEntry, error) {
 	seenConnections := make(map[string]struct{}, len(document.Hosts))
 	for _, host := range document.Hosts {
 		if err := validateRemoteHostEntry(host); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrRemoteHostStoreCorrupt, err)
+			return nil, fmt.Errorf("%w: %w", ErrRemoteHostStoreCorrupt, err)
 		}
 		if _, exists := seenIDs[host.ID]; exists {
 			return nil, fmt.Errorf("%w: duplicate Host entry id %q", ErrRemoteHostStoreCorrupt, host.ID)

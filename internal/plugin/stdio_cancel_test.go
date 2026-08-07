@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -95,7 +96,7 @@ func TestStdioCallCancelReturnsContextCanceled(t *testing.T) {
 		if err == nil {
 			t.Fatal("cancelled call returned nil error")
 		}
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("expected context.Canceled, got: %v", err)
 		}
 	case <-time.After(2 * time.Second):

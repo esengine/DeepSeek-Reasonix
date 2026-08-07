@@ -675,14 +675,14 @@ func validateV1Paths(root string, m *Manifest) ([]string, error) {
 func checkThemeFile(resolvedRoot, abs, pattern string) error {
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return fmt.Errorf("theme %q cannot be resolved: %v", pattern, err)
+		return fmt.Errorf("theme %q cannot be resolved: %w", pattern, err)
 	}
 	if !pathWithinRoot(resolvedRoot, resolved) {
 		return fmt.Errorf("theme %q escapes the plugin root through a symlink", pattern)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
-		return fmt.Errorf("theme %q is not readable: %v", pattern, err)
+		return fmt.Errorf("theme %q is not readable: %w", pattern, err)
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("theme %q is not a regular file", pattern)
@@ -708,7 +708,7 @@ func globThemePattern(root, pattern string) ([]string, error) {
 	for _, seg := range segs {
 		if hasGlobMeta(seg) {
 			if _, err := path.Match(seg, ""); err != nil {
-				return nil, fmt.Errorf("invalid theme glob %q: %v", pattern, err)
+				return nil, fmt.Errorf("invalid theme glob %q: %w", pattern, err)
 			}
 		}
 	}

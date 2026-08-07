@@ -660,7 +660,7 @@ func (h *botBridgeHub) DriveInput(route bot.DesktopWatchRoute, text string) (str
 		if errors.Is(err, errDriveBusy) {
 			return "", h.busyError(tabID)
 		}
-		return "", fmt.Errorf("驱动失败: %v", err)
+		return "", fmt.Errorf("驱动失败: %w", err)
 	}
 	return "", nil
 }

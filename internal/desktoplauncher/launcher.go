@@ -3,6 +3,7 @@
 package desktoplauncher
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -54,7 +55,8 @@ func Run(args []string, buildVersion string) int {
 		return 0
 	}
 	if err := cmd.Run(); err != nil {
-		if exit, ok := err.(*exec.ExitError); ok {
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
 			return exit.ExitCode()
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)

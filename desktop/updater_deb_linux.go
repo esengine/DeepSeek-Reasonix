@@ -58,7 +58,7 @@ func applyDebLinux(packagePath, signaturePath string, onPhase func(phase string)
 
 	if err := cmd.Start(); err != nil {
 		_ = stderrW.Close()
-		return fmt.Errorf("%w: %v", errUpdateAuthFailed, err)
+		return fmt.Errorf("%w: %w", errUpdateAuthFailed, err)
 	}
 
 	// Drain stderr concurrently so phase lines arrive while apt still runs.

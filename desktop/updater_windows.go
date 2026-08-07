@@ -331,7 +331,7 @@ func windowsUpdateHelperStartError(err error) error {
 	}
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
-		return fmt.Errorf("start Windows update helper: Windows error %d (%s)", errno, errno.Error())
+		return fmt.Errorf("start Windows update helper: Windows error %w (%s)", errno, errno.Error())
 	}
 	return fmt.Errorf("start Windows update helper: process creation failed")
 }

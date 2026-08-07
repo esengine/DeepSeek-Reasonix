@@ -85,10 +85,10 @@ func ArchiveSupersededPendingAppBundleUpdate(runningVersion string) (bool, error
 		if _, statErr := os.Lstat(tx.BackupPath); statErr == nil {
 			return fmt.Errorf("%w; preserved archived backup at %s because the public path was recreated", cause, backupArchive)
 		} else if !os.IsNotExist(statErr) {
-			return fmt.Errorf("%w; inspect backup restore path: %v", cause, statErr)
+			return fmt.Errorf("%w; inspect backup restore path: %w", cause, statErr)
 		}
 		if restoreErr := renameRepairNodeNoReplace(backupArchive, tx.BackupPath); restoreErr != nil {
-			return fmt.Errorf("%w; preserved archived backup at %s: %v", cause, backupArchive, restoreErr)
+			return fmt.Errorf("%w; preserved archived backup at %s: %w", cause, backupArchive, restoreErr)
 		}
 		return cause
 	}
@@ -107,7 +107,7 @@ func ArchiveSupersededPendingAppBundleUpdate(runningVersion string) (bool, error
 	}
 	restoreMarker := func(cause error) error {
 		if restoreErr := renameRepairNodeNoReplace(archivePath, PendingUpdatePath()); restoreErr != nil {
-			cause = fmt.Errorf("%w; preserved moved transaction at %s: %v", cause, archivePath, restoreErr)
+			cause = fmt.Errorf("%w; preserved moved transaction at %s: %w", cause, archivePath, restoreErr)
 		}
 		return restoreBackup(cause)
 	}
@@ -202,7 +202,7 @@ func archiveSupersededAppBundleBackup(tx *UpdateTransaction, transactionID strin
 		}
 		cause := fmt.Errorf("archive superseded app update: rollback backup changed during archival")
 		if restoreErr := renameRepairNodeNoReplace(archive, tx.BackupPath); restoreErr != nil {
-			return "", "", fmt.Errorf("%w; preserved moved backup at %s: %v", cause, archive, restoreErr)
+			return "", "", fmt.Errorf("%w; preserved moved backup at %s: %w", cause, archive, restoreErr)
 		}
 		return "", "", cause
 	}
@@ -233,7 +233,7 @@ func archiveSupersededPendingMarker(tx *UpdateTransaction, transactionID, kind s
 		}
 		restore := func(cause error) error {
 			if restoreErr := renameRepairNodeNoReplace(archivePath, pendingPath); restoreErr != nil {
-				return fmt.Errorf("%w; preserved moved transaction at %s: %v", cause, archivePath, restoreErr)
+				return fmt.Errorf("%w; preserved moved transaction at %s: %w", cause, archivePath, restoreErr)
 			}
 			return cause
 		}
@@ -316,7 +316,7 @@ func ArchiveSupersededPendingFileUpdate(runningVersion, installRoot string) (boo
 		}
 		restore := func(cause error) error {
 			if restoreErr := renameRepairNodeNoReplace(archivePath, pendingPath); restoreErr != nil {
-				return fmt.Errorf("%w; preserved moved transaction at %s: %v", cause, archivePath, restoreErr)
+				return fmt.Errorf("%w; preserved moved transaction at %s: %w", cause, archivePath, restoreErr)
 			}
 			return cause
 		}

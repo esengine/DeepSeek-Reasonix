@@ -3,11 +3,11 @@
     "banner": 0,
     "commented-code": 0,
     "essay": 4111,
-    "file-size": 73751,
+    "file-size": 73754,
     "layering": 1,
     "marker": 0,
     "narrative": 66,
-    "test-file-size": 64805
+    "test-file-size": 64807
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -156,7 +156,7 @@
     },
     "desktop/sessions.go": {
       "essay": 5,
-      "file-size": 509
+      "file-size": 511
     },
     "desktop/sessions_lease_guard_test.go": {
       "essay": 3
@@ -940,7 +940,7 @@
     },
     "internal/control/refs.go": {
       "essay": 5,
-      "file-size": 560
+      "file-size": 561
     },
     "internal/control/refs_test.go": {
       "test-file-size": 141
@@ -1344,7 +1344,7 @@
     },
     "internal/provider/responses/responses_test.go": {
       "essay": 6,
-      "test-file-size": 349
+      "test-file-size": 351
     },
     "internal/provider/responses/vendor.go": {
       "essay": 21
