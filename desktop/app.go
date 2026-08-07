@@ -6746,9 +6746,13 @@ func (a *App) BalanceForTab(tabID string) BalanceInfo {
 	// fall back to the largest reported balance (an overseas Chinese user
 	// recharges USD but uses a zh UI — language must not force CNY). Only when
 	// the provider reports no usable balance does the UI pricing currency win.
-	currency := a.balanceDisplayCurrency()
+	// Load the desktop config ONCE and reuse it for both the effective pricing
+	// currency and the auto-currency check (avoids a second disk/stat + TOML
+	// parse on every balance refresh).
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	currency := a.balanceDisplayCurrency(cfg, err)
 	if actual := b.PrimaryCurrency(); actual != "" {
-		if cfg, _, err := a.loadDesktopUserConfigForView(); err == nil && cfg != nil && cfg.DesktopCurrency() == "" {
+		if err == nil && cfg != nil && cfg.DesktopCurrency() == "" {
 			currency = actual
 		}
 	}
@@ -6758,9 +6762,8 @@ func (a *App) BalanceForTab(tabID string) BalanceInfo {
 // balanceDisplayCurrency mirrors the effective pricing currency selected in
 // Settings. Auto resolves through the current desktop locale, matching the
 // controller rebuild path used by cost telemetry.
-func (a *App) balanceDisplayCurrency() string {
-	cfg, _, err := a.loadDesktopUserConfigForView()
-	if err != nil {
+func (a *App) balanceDisplayCurrency(cfg *config.Config, err error) string {
+	if err != nil || cfg == nil {
 		return ""
 	}
 	return a.desktopEffectivePricingCurrency(cfg)

@@ -160,11 +160,18 @@ func applyDeepSeekOfficialDefaultPricingWithOverride(c *Config, overridePersiste
 			continue
 		}
 		// Provider-wide `price` fallback: p.Model may be empty when the entry
-		// uses a `models` list (e.g. deepseek-responses). Match against the
-		// resolved model list like completeDeepSeekOfficialPricingCurrency
-		// does, so a USD default gets replaced by the selected CNY table.
-		if models := p.ModelList(); len(models) > 0 && isKnownDeepSeekOfficialPricing(models[0], p.Price) && (overridePersisted || p.persistedOfficialCurrency == "") {
-			p.Price = deepSeekV4PriceForModel(currency, models[0])
+		// uses a `models` list (e.g. deepseek-responses). Scan the resolved
+		// model list — not just models[0] — so the override applies whenever
+		// ANY listed model carries the recognized official default price;
+		// otherwise a multi-model entry whose first model is not a known
+		// official pricing model keeps the wrong currency table.
+		if models := p.ModelList(); len(models) > 0 && (overridePersisted || p.persistedOfficialCurrency == "") {
+			for _, model := range models {
+				if isKnownDeepSeekOfficialPricing(model, p.Price) {
+					p.Price = deepSeekV4PriceForModel(currency, model)
+					break
+				}
+			}
 		}
 		for model, price := range p.Prices {
 			if isKnownDeepSeekOfficialPricing(model, price) && (overridePersisted || p.persistedOfficialCurrency == "") {
