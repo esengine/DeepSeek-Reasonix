@@ -4,12 +4,13 @@ import { Command, Search } from "lucide-react";
 import { useT } from "../lib/i18n";
 import { useMountTransition } from "../lib/useMountTransition";
 
-// CommandPalette is a ⌘K / Ctrl+K modal that surfaces the desktop app's
-// long-tail navigation surface. Tabs through sessions, slash-commands, and
-// recent files via a single fuzzy search. The list of items is provided by
-// the caller (App) so the palette stays decoupled from the controller — the
-// same component will work for skills, MCP servers, and future surfaces
-// once a buildItems() helper is added for them.
+// CommandPalette is an F1 modal (every platform, matching VSCode's command
+// palette) that surfaces the desktop app's long-tail navigation surface. Tabs
+// through sessions, slash-commands, and recent files via a single fuzzy
+// search. The list of items is provided by the caller (App) so the palette
+// stays decoupled from the controller — the same component will work for
+// skills, MCP servers, and future surfaces once a buildItems() helper is
+// added for them.
 //
 // Interaction model:
 //   - Input is auto-focused on open; the first match is highlighted.

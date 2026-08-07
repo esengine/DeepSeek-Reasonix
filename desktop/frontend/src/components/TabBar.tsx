@@ -6,6 +6,7 @@ import { FileText, Plus, Search, X } from "lucide-react";
 import { normalizeCollaborationMode, normalizeMode, normalizeToolApprovalMode, type Mode, type TabMeta } from "../lib/types";
 import { projectColorValue } from "../lib/projectColors";
 import { useT } from "../lib/i18n";
+import { useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { Tooltip } from "./Tooltip";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
 import { WorktreeBadge } from "./WorktreeBadge";
@@ -55,6 +56,7 @@ function projectAccentStyle(color?: string): CSSProperties | undefined {
 
 export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose, onTabsReorder, onNewTab, onOpenPalette, commandCompact = false, revealActiveSignal = 0 }: TabBarProps) {
   const t = useT();
+  const paletteShortcut = useShortcutComboLabel("commandPalette.open");
   const [draggingTabId, setDraggingTabId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; side: DropSide } | null>(null);
   const [menuTabId, setMenuTabId] = useState<string | null>(null);
@@ -297,7 +299,7 @@ export function TabBar({ tabs, activeTabId, onTabChange, onTabClose, onTabsClose
             <>
               <span className="tabbar__command-text tabbar__command-text--full">{t("tabBar.commandSearch")}</span>
               <span className="tabbar__command-text tabbar__command-text--compact">{t("tabBar.commandSearchCompact")}</span>
-              <kbd className="tabbar__command-kbd">⌘K</kbd>
+              <kbd className="tabbar__command-kbd">{paletteShortcut}</kbd>
             </>
           )}
         </button>
