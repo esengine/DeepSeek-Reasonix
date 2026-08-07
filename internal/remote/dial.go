@@ -61,15 +61,18 @@ func dialSSH(ctx context.Context, cfg dialConfig) (*ssh.Client, []*ssh.Client, e
 	}
 
 	var hops []*ssh.Client
-	// dialThrough dials addr using either the base transport (first hop) or the
+	// dialThrough dials a host using either the base transport (first hop) or the
 	// previous SSH hop's context-aware Dial.
-	dialThrough := func(prev *ssh.Client, addr string) (net.Conn, error) {
+	dialThrough := func(prev *ssh.Client, host ResolvedHost) (net.Conn, error) {
 		dctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 		if prev == nil {
-			return base.DialContext(dctx, "tcp", addr)
+			if host.ProxyCommand != "" {
+				return dialProxyCommand(dctx, host)
+			}
+			return base.DialContext(dctx, "tcp", host.Addr())
 		}
-		return prev.DialContext(dctx, "tcp", addr)
+		return prev.DialContext(dctx, "tcp", host.Addr())
 	}
 
 	var prev *ssh.Client
@@ -80,7 +83,7 @@ func dialSSH(ctx context.Context, cfg dialConfig) (*ssh.Client, []*ssh.Client, e
 			closeAll(hops)
 			return nil, nil, fmt.Errorf("proxy jump %q: %w", jump, err)
 		}
-		conn, derr := dialThrough(prev, hop.Addr())
+		conn, derr := dialThrough(prev, hop)
 		if derr != nil {
 			closeAll(hops)
 			return nil, nil, fmt.Errorf("proxy jump %d (%s): %w", i+1, hop.Label(), derr)
@@ -96,7 +99,7 @@ func dialSSH(ctx context.Context, cfg dialConfig) (*ssh.Client, []*ssh.Client, e
 		prev = client
 	}
 
-	conn, err := dialThrough(prev, cfg.host.Addr())
+	conn, err := dialThrough(prev, cfg.host)
 	if err != nil {
 		closeAll(hops)
 		return nil, nil, fmt.Errorf("dial %s: %w", cfg.host.Label(), err)
@@ -161,8 +164,9 @@ func newSSHClient(ctx context.Context, conn net.Conn, host ResolvedHost, auth *A
 	<-watchDone
 	cancel()
 	if err != nil {
+		err = proxyCommandHandshakeError(conn, classifyDialError(err))
 		conn.Close()
-		return nil, classifyDialError(err)
+		return nil, err
 	}
 	_ = conn.SetDeadline(time.Time{})
 	return ssh.NewClient(c, chans, reqs), nil
