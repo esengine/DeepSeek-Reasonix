@@ -1,6 +1,6 @@
 // Run: tsx src/__tests__/message-pasted-blocks.test.ts
 
-import { parsePastedBlocks, parseSelectedTextBlocks } from "../components/Message";
+import { buildBlockSegments, expandCopyText, parsePastedBlocks, parseSelectedTextBlocks } from "../components/Message";
 import { formatSelectedTextContext, formatSelectionLabel, type SelectedTextReference } from "../lib/selectedTextContext";
 
 let passed = 0;
@@ -71,6 +71,87 @@ eq(
   "unterminated label-shaped prose cannot consume the exact trailing selection labels",
 );
 eq(parsePastedBlocks(labels.join(" "), formatSelectedTextContext(selections)), [], "selection labels no longer use pasted-text marker parsing");
+
+console.log("\nbubble copy expands folded blocks to their full text");
+
+const pasteLabel = "[已粘贴文本 #1 · 2 行]";
+const pasteDisplay = `check this ${pasteLabel}`;
+const pasteSubmit = `${pasteLabel}\n\n--- Begin ${pasteLabel} ---\nline 1\nline 2\n--- End ${pasteLabel} ---`;
+eq(
+  expandCopyText(pasteDisplay, parsePastedBlocks(pasteDisplay, pasteSubmit), parseSelectedTextBlocks(pasteDisplay, pasteSubmit)),
+  "check this line 1\nline 2\n",
+  "copy expands the folded paste label to its full text without the Begin/End framing",
+);
+
+const chatSelection: SelectedTextReference[] = [{ id: "chat-1", text: "市场是动态加载的" }];
+const chatSubmit = formatSelectedTextContext(chatSelection);
+const chatLabel = formatSelectionLabel(chatSelection[0]);
+const chatDisplay = `参考这段 ${chatLabel}`;
+eq(
+  expandCopyText(chatDisplay, parsePastedBlocks(chatDisplay, chatSubmit), parseSelectedTextBlocks(chatDisplay, chatSubmit)),
+  "参考这段 市场是动态加载的",
+  "copy expands the chat selection label to the full selected text",
+);
+
+const codeSelection: SelectedTextReference[] = [{ id: "code-1", path: "src/main.go", text: "func main() {}" }];
+const codeSubmit = formatSelectedTextContext(codeSelection);
+const codeLabel = formatSelectionLabel(codeSelection[0]);
+const codeDisplay = `go ${codeLabel}`;
+eq(
+  expandCopyText(codeDisplay, parsePastedBlocks(codeDisplay, codeSubmit), parseSelectedTextBlocks(codeDisplay, codeSubmit)),
+  "go func main() {}",
+  "copy expands the code selection label to the full selected text",
+);
+
+const multiPasteDisplay = `one ${pasteLabel} two [已粘贴文本 #2 · 1 行]`;
+const multiPasteSubmit = `${pasteLabel}\n\n--- Begin ${pasteLabel} ---\nline 1\nline 2\n--- End ${pasteLabel} ---\n\n[已粘贴文本 #2 · 1 行]\n\n--- Begin [已粘贴文本 #2 · 1 行] ---\nline 3\n--- End [已粘贴文本 #2 · 1 行] ---`;
+eq(
+  expandCopyText(multiPasteDisplay, parsePastedBlocks(multiPasteDisplay, multiPasteSubmit), parseSelectedTextBlocks(multiPasteDisplay, multiPasteSubmit)),
+  "one line 1\nline 2\n two line 3\n",
+  "copy expands multiple paste blocks in order",
+);
+
+eq(
+  expandCopyText("plain message", [], []),
+  "plain message",
+  "copy without folded blocks returns the display text unchanged",
+);
+
+eq(
+  expandCopyText(pasteDisplay, parsePastedBlocks(pasteDisplay, undefined), parseSelectedTextBlocks(pasteDisplay, undefined)),
+  pasteDisplay,
+  "copy without submit text keeps the display label",
+);
+
+console.log("\nblock segments interleave text and cards for bubbles and steers");
+
+const segPasteSubmit = `${pasteLabel}\n\n--- Begin ${pasteLabel} ---\nline 1\nline 2\n--- End ${pasteLabel} ---`;
+eq(
+  buildBlockSegments(`before\n${pasteLabel}\nafter`, parsePastedBlocks(`before\n${pasteLabel}\nafter`, segPasteSubmit), []).map(({ type, content, block }) => type === "text" ? { type, content } : { type, block: block.label }),
+  [
+    { type: "text", content: "before" },
+    { type: "block", block: pasteLabel },
+    { type: "text", content: "after" },
+  ],
+  "segments place the paste card between the surrounding text",
+);
+
+eq(
+  buildBlockSegments("plain message", [], []),
+  [{ type: "text", content: "plain message" }],
+  "segments without blocks return the display text as a single segment",
+);
+
+const segSelDisplay = `参考这段 ${chatLabel}`;
+const segSelSegments = buildBlockSegments(segSelDisplay, [], parseSelectedTextBlocks(segSelDisplay, chatSubmit));
+eq(
+  segSelSegments.map(({ type, content, block }) => type === "text" ? { type, content } : { type, block: block.label }),
+  [
+    { type: "text", content: "参考这段 " },
+    { type: "block", block: chatLabel },
+  ],
+  "segments place the selection card after the leading text",
+);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

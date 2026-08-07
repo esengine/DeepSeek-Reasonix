@@ -281,6 +281,8 @@ export interface MemoryCitation {
 export interface WireEvent {
   kind: EventKind;
   text?: string;
+  /** Steer: full provider-facing submit form for expandable card display. */
+  submitText?: string;
   detail?: string;
   // Stable notice id for localization; empty/absent = localize by text match.
   code?: string;

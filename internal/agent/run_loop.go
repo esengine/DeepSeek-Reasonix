@@ -335,7 +335,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// steer is unavoidable — the model must see the new instruction.
 		if text, ok := a.consumeSteer(); ok {
 			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(midTurnSteerMessage(text))})
-			a.sink.Emit(event.Event{Kind: event.Steer, Text: text})
+			a.sink.Emit(event.Event{Kind: event.Steer, Text: RecoverSteerDisplay(text), SubmitText: text})
 		}
 		schemas := a.tools.Schemas()
 		prefixShape := a.capturePrefixShape(schemas)

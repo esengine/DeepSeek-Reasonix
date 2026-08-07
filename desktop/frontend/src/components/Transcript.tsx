@@ -3,7 +3,7 @@ import type { ControllerLiveStore, ExtensionItem, Item, LiveStream } from "../li
 import type { CheckpointMeta } from "../lib/types";
 import type { InvocationMetadataMap } from "../lib/invocationDisplay";
 import { useT } from "../lib/i18n";
-import { AssistantMessage, InvocationMetadataContext, TurnActions, UserMessage } from "./Message";
+import { AssistantMessage, InvocationMetadataContext, PastedBlockCard, TurnActions, UserMessage, buildBlockSegments, parsePastedBlocks, parseSelectedTextBlocks } from "./Message";
 import { ProcessBrainIcon, ProcessCompactIcon, ProcessPhaseIcon } from "./ProcessCard";
 import { ToolCard } from "./ToolCard";
 import { ExtensionCard } from "./ExtensionCard";
@@ -834,7 +834,7 @@ export function Transcript({
           }
           if (item.kind === "notice") {
             if (isSteerNoticeText(item.text)) {
-              out.push(<SteerCard key={item.id} text={item.text} />);
+              out.push(<SteerCard key={item.id} text={item.text} submitText={item.submitText} />);
               continue;
             }
             out.push(
@@ -1237,7 +1237,7 @@ function WarmTurnItems({
       }
       if (item.kind === "notice") {
         if (isSteerNoticeText(item.text)) {
-          nodes.push(<SteerCard key={item.id} text={item.text} />);
+          nodes.push(<SteerCard key={item.id} text={item.text} submitText={item.submitText} />);
           continue;
         }
         nodes.push(
@@ -1688,15 +1688,39 @@ function PhaseCard({ text }: { text: string }) {
 }
 
 // A mid-turn steer is the user's own message, so it renders on the user side
-// of the transcript instead of disappearing into the work fold.
-function SteerCard({ text }: { text: string }) {
+// of the transcript instead of disappearing into the work fold. Folded paste
+// and selection blocks render as the same inline expandable cards as a regular
+// user bubble when the submit form is available.
+function SteerCard({ text, submitText }: { text: string; submitText?: string }) {
   const t = useT();
   const body = text.startsWith(STEER_NOTICE_PREFIX) ? text.slice(STEER_NOTICE_PREFIX.length) : text;
+  const pasteBlocks = useMemo(() => parsePastedBlocks(body, submitText), [body, submitText]);
+  const selectedTextBlocks = useMemo(() => parseSelectedTextBlocks(body, submitText), [body, submitText]);
+  const segments = useMemo(
+    () => buildBlockSegments(body, pasteBlocks, selectedTextBlocks),
+    [body, pasteBlocks, selectedTextBlocks],
+  );
+  const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
+  const toggleBlock = (key: string) => setExpandedKeys((prev) => ({ ...prev, [key]: !prev[key] }));
   return (
     <div className="steer-line" data-entrance="true">
       <div className="steer-line__bubble" title={t("transcript.steer")}>
         <span className="steer-line__icon" aria-hidden="true">↪</span>
-        <span className="steer-line__text">{body}</span>
+        <div className="steer-line__content">
+          {segments.map((seg, i) => (
+            seg.type === "text"
+              ? <span className="steer-line__text" key={`t${i}`}>{seg.content}</span>
+              : (
+                <PastedBlockCard
+                  key={seg.key}
+                  block={seg.block}
+                  kind={seg.kind}
+                  expanded={Boolean(expandedKeys[seg.key])}
+                  onToggle={() => toggleBlock(seg.key)}
+                />
+              )
+          ))}
+        </div>
       </div>
     </div>
   );
