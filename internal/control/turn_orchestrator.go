@@ -191,6 +191,20 @@ func (o *turnOrchestrator) runSubagentSkillTurns(ctx context.Context, skills []s
 
 func (o *turnOrchestrator) runOrchestratedTurn(ctx context.Context, turn orchestratedTurn) (err error) {
 	c := o.c
+	// zcode-style auto-forwarding: while a sub-agent runs in the background,
+	// a user input carrying an explicit forward marker (→ / 注入： / inject:)
+	// is routed into the running sub-agent's next turn instead of starting a
+	// main-conversation turn. Synthetic turns (goal auto-continue) never
+	// forward — only real user input. On any failure (no running sub-agent,
+	// injection rejected) the input falls through to a normal turn.
+	if !turn.synthetic && agent.HasForwardMarker(turn.input) {
+		if f := agent.NewSteerForwarder(c.jobs); f.Forward(c.parentSessionID(), turn.input) {
+			c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
+				Text:   "guidance forwarded to the running sub-agent",
+				Detail: "The input carried a forward marker (→ / 注入： / inject:) and a running sub-agent accepted it; it was not processed as a main-conversation turn."})
+			return nil
+		}
+	}
 	c.maybeSessionStart(ctx)
 	parentSession := c.parentSessionID()
 	ctx = agent.WithParentSession(ctx, parentSession)

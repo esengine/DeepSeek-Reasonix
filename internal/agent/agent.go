@@ -1087,6 +1087,11 @@ type Options struct {
 	// dressed up as framing cannot disarm them.
 	ClassifierTaskText string
 
+	// OnAgentCreated, when non-nil, is invoked with the sub-agent's Agent
+	// right after construction and before Run. Spawners use it to wire
+	// mid-run guidance injection (jobs.Job.SetSteer) or observe the child.
+	OnAgentCreated func(*Agent)
+
 	// CapabilityLedger is the optional turn-scoped capability route ledger for
 	// Delivery require/prefer gates. Nil disables capability gates.
 	CapabilityLedger *capability.Ledger

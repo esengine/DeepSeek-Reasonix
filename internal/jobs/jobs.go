@@ -137,6 +137,12 @@ type Job struct {
 	done        chan struct{}
 	stalled     bool
 
+	// steer is the mid-run guidance injection for subagent jobs: it forwards
+	// a user steer text into the running sub-agent's next turn (Agent.Steer).
+	// nil when the job is not a subagent or has finished. Guarded by mu; the
+	// finish path clears it so a completed job can never accept steers.
+	steer func(string) bool
+
 	artifactPath     string
 	artifactMetaPath string
 	artifactFile     *os.File
@@ -241,9 +247,52 @@ func WithTaskRecorder(r TaskRecorder) Option {
 // SetTaskRecorder installs (or clears, with nil) the lifecycle recorder after
 // construction. Controllers that assemble their job manager before the
 // recorder's dependencies (workspace root, session id) are known use this.
-func (m *Manager) SetTaskRecorder(r TaskRecorder) { m.taskRecorder = r }
+func (m *Manager) SetTaskRecorder(r TaskRecorder) { m.taskRecorder = r }// TeardownGrace reports the manager's configured close/destroy wait window.
+// SetSteer installs the mid-run guidance injection callback for a subagent
+// job (wired by the task tool once the sub-agent's Agent exists). Setting a
+// nil callback clears it. Safe for concurrent use.
+func (j *Job) SetSteer(fn func(string) bool) {
+	j.mu.Lock()
+	j.steer = fn
+	j.mu.Unlock()
+}
 
-// TeardownGrace reports the manager's configured close/destroy wait window.
+// WithJob attaches the running job to a context so the job's own run callback
+// can resolve its *Job (e.g. to wire a steer callback once the sub-agent's
+// Agent exists). The StartForSession goroutine already stamps ctx with the
+// job (jobCtxKey); this is an explicit alias for the same key.
+func WithJob(ctx context.Context, j *Job) context.Context {
+	return context.WithValue(ctx, jobCtxKey{}, j)
+}
+
+// JobFromContext returns the job attached to the context (by StartForSession
+// or WithJob), or nil.
+func JobFromContext(ctx context.Context) *Job {
+	j, _ := ctx.Value(jobCtxKey{}).(*Job)
+	return j
+}
+
+// SteerJob forwards a user steer text into the running sub-agent of the given
+// job. It returns true only when the job exists, is still Running, and its
+// steer callback accepted the text; on any failure the caller must fall back
+// to treating the text as a normal main-conversation turn.
+func (m *Manager) SteerJob(parentSession, id, text string) bool {
+	m.mu.Lock()
+	j := m.findJobLocked(parentSession, id)
+	m.mu.Unlock()
+	if j == nil {
+		return false
+	}
+	j.mu.Lock()
+	steer := j.steer
+	running := j.status == Running && !j.runReturned
+	j.mu.Unlock()
+	if !running || steer == nil {
+		return false
+	}
+	return steer(text)
+}
+
 func (m *Manager) TeardownGrace() time.Duration { return m.teardownGrace }
 
 // NewManager returns a Manager whose jobs run under a fresh session-scoped
@@ -472,6 +521,7 @@ func (m *Manager) StartForSession(parentSession, kind, label string, run func(ct
 		result, err := runRecovered(ctx, jobWriter{j}, run)
 		j.mu.Lock()
 		j.runReturned = true
+		j.steer = nil // a finished subagent can no longer accept guidance
 		j.mu.Unlock()
 
 		var st Status
