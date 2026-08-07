@@ -4342,6 +4342,13 @@ a[href] {
   font-weight: 450;
   line-height: 1.65;
 }
+.msg--user .msg__text a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.msg--user .msg__text a:hover {
+  text-decoration: underline;
+}
 .msg--im-source .msg__body {
   min-width: min(520px, 82%);
   max-width: min(760px, 82%);
