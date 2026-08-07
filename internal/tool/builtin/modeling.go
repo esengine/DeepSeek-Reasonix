@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"reasonix/internal/blender"
 	"reasonix/internal/modeling/meshparse"
 	"reasonix/internal/tool"
 )
@@ -185,7 +186,7 @@ func (modelingConvert) Schema() json.RawMessage {
 "type":"object",
 "properties":{
   "path":{"type":"string","description":"Source file."},
-  "format":{"type":"string","enum":["obj","stl","ply","vox"],"description":"Target format (extension)."},
+  "format":{"type":"string","enum":["obj","stl","ply","vox","gltf","glb","fbx"],"description":"Target format (extension). gltf/glb/fbx require Blender."},
   "out":{"type":"string","description":"Optional output path (default: input with new extension)."}
 },
 "required":["path","format"]
@@ -239,6 +240,13 @@ func (modelingConvert) Execute(ctx context.Context, args json.RawMessage) (strin
 		if err := writeMeshFormat(outPath, m, a.Format); err != nil {
 			return "", fmt.Errorf("modeling_convert: %w", err)
 		}
+	case "gltf", "glb", "fbx":
+		// Heavy formats need Blender as the import/export backend.
+		res, err := blender.ConvertMesh(ctx, a.Path, outPath, a.Format, 0)
+		if err != nil {
+			return "", fmt.Errorf("modeling_convert (%s): %w", a.Format, err)
+		}
+		_ = res
 	default:
 		return "", fmt.Errorf("modeling_convert: unsupported target format %q", a.Format)
 	}

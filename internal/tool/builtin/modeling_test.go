@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"reasonix/internal/blender"
 )
 
 const modelingCubeOBJ = `v 0 0 0
@@ -141,5 +143,34 @@ func TestModelingVoxelTool(t *testing.T) {
 	}
 	if !strings.Contains(ao, `"format":"vox"`) {
 		t.Errorf("analyze vox output: %s", ao)
+	}
+}
+
+func TestModelingConvertToGLBWithBlender(t *testing.T) {
+	if blender.BlenderPath() == "" {
+		t.Skip("Blender not installed")
+	}
+	p := writeCube(t)
+	args, _ := json.Marshal(map[string]any{"path": p, "format": "glb"})
+	out, err := modelingConvert{}.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("convert glb: %v", err)
+	}
+	glb := strings.TrimSuffix(p, ".obj") + ".glb"
+	var r struct {
+		Out string `json:"out"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatalf("convert output not JSON: %s", out)
+	}
+	if r.Out != glb {
+		t.Errorf("glb out = %q, want %q", r.Out, glb)
+	}
+	info, err := os.Stat(glb)
+	if err != nil {
+		t.Fatalf("glb missing: %v", err)
+	}
+	if info.Size() < 100 {
+		t.Errorf("glb suspiciously small: %d bytes", info.Size())
 	}
 }

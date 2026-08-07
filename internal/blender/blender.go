@@ -109,6 +109,56 @@ func RunScript(ctx context.Context, blendPath, script string, save bool, timeout
 	return &Result{Script: summarizeScript(script), Output: capOut(out), OK: true}, nil
 }
 
+// ConvertMesh imports a mesh file (obj/stl/ply) into Blender and exports it to
+// outPath in the given format (gltf/glb/fbx/obj/stl). Uses the local Blender;
+// returns an error when Blender is unavailable.
+func ConvertMesh(ctx context.Context, srcPath, outPath, format string, timeout time.Duration) (*Result, error) {
+	if BlenderPath() == "" {
+		return nil, fmt.Errorf("blender: not found (required for %s conversion)", format)
+	}
+	if timeout <= 0 {
+		timeout = 90 * time.Second
+	}
+	ext := strings.ToLower(filepath.Ext(srcPath))
+	importOp := map[string]string{
+		".obj": "bpy.ops.wm.obj_import(filepath=%q)",
+		".stl": "bpy.ops.wm.stl_import(filepath=%q)",
+		".ply": "bpy.ops.wm.ply_import(filepath=%q)",
+	}[ext]
+	if importOp == "" {
+		return nil, fmt.Errorf("blender: unsupported source format %q", ext)
+	}
+	export := map[string]string{
+		"gltf": `bpy.ops.export_scene.gltf(filepath=%q, export_format="GLTF_SEPARATE")`,
+		"glb":  `bpy.ops.export_scene.gltf(filepath=%q, export_format="GLB")`,
+		"fbx":  `bpy.ops.export_scene.fbx(filepath=%q)`,
+		"obj":  `bpy.ops.wm.obj_export(filepath=%q)`,
+		"stl":  `bpy.ops.wm.stl_export(filepath=%q)`,
+	}[format]
+	if export == "" {
+		return nil, fmt.Errorf("blender: unsupported target format %q", format)
+	}
+	script := fmt.Sprintf(`
+import bpy
+`+importOp+`
+bpy.ops.object.select_all(action="DESELECT")
+for o in bpy.data.objects:
+    if o.type == "MESH":
+        o.select_set(True)
+out = %q
+`+export+`
+print("BLENDER_CONVERT_OK " + out)
+`, srcPath, outPath, outPath)
+	out, err := runBlender(ctx, "", script, timeout)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := findMarker(out, "BLENDER_CONVERT_OK"); !ok {
+		return nil, fmt.Errorf("blender: convert failed (output %d bytes)", len(out))
+	}
+	return &Result{Script: "convert " + format, Output: capOut(out), OK: true}, nil
+}
+
 // Convert exports blendPath to outPath in the given format (gltf/glb/fbx/obj/stl).
 func Convert(ctx context.Context, blendPath, outPath, format string, timeout time.Duration) (*Result, error) {
 	if timeout <= 0 {

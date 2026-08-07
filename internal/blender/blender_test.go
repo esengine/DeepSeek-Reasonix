@@ -82,3 +82,29 @@ func TestBackup(t *testing.T) {
 		t.Errorf("backup content: %q err=%v", b, err)
 	}
 }
+
+func TestConvertMeshGLB(t *testing.T) {
+	if BlenderPath() == "" {
+		t.Skip("Blender not installed")
+	}
+	dir := t.TempDir()
+	src := filepath.Join(dir, "cube.obj")
+	if err := os.WriteFile(src, []byte("v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf 1 2 3 4\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "cube.glb")
+	res, err := ConvertMesh(context.Background(), src, out, "glb", 90*time.Second)
+	if err != nil {
+		t.Fatalf("ConvertMesh glb: %v", err)
+	}
+	if !res.OK {
+		t.Errorf("ConvertMesh not OK: %+v", res)
+	}
+	info, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("glb missing: %v", err)
+	}
+	if info.Size() < 100 {
+		t.Errorf("glb too small: %d", info.Size())
+	}
+}
