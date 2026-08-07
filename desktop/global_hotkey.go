@@ -25,7 +25,28 @@ var (
 	// registerGlobalHotkeyBinding is replaced in tests. It must cancel via
 	// ctx and invoke waitUnregister after Unregister completes.
 	registerGlobalHotkeyBinding = platformRegisterGlobalHotkey
+
+	lastGlobalHotkeyErrorMu sync.Mutex
+	lastGlobalHotkeyError   string
 )
+
+func lastGlobalHotkeyErrorMessage() string {
+	lastGlobalHotkeyErrorMu.Lock()
+	defer lastGlobalHotkeyErrorMu.Unlock()
+	return lastGlobalHotkeyError
+}
+
+func clearLastGlobalHotkeyError() {
+	lastGlobalHotkeyErrorMu.Lock()
+	lastGlobalHotkeyError = ""
+	lastGlobalHotkeyErrorMu.Unlock()
+}
+
+func rememberGlobalHotkeyError(message string) {
+	lastGlobalHotkeyErrorMu.Lock()
+	lastGlobalHotkeyError = strings.TrimSpace(message)
+	lastGlobalHotkeyErrorMu.Unlock()
+}
 
 func (a *App) startGlobalHotkey() {
 	if a == nil || a.remoteWindowTicket != "" {
@@ -64,6 +85,7 @@ func (a *App) rebindGlobalHotkey(binding string) error {
 	defer globalHotkeyMu.Unlock()
 	stopActiveGlobalHotkeyLocked()
 	if binding == "" {
+		clearLastGlobalHotkeyError()
 		return nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -75,6 +97,7 @@ func (a *App) rebindGlobalHotkey(binding string) error {
 		cancel()
 		return err
 	}
+	clearLastGlobalHotkeyError()
 	globalHotkeyActive = &globalHotkeyHolder{
 		binding:        binding,
 		cancel:         cancel,
@@ -84,7 +107,11 @@ func (a *App) rebindGlobalHotkey(binding string) error {
 }
 
 func (a *App) emitGlobalHotkeyError(err error) {
-	if a == nil || a.ctx == nil || err == nil {
+	if err == nil {
+		return
+	}
+	rememberGlobalHotkeyError(err.Error())
+	if a == nil || a.ctx == nil {
 		return
 	}
 	runtime.EventsEmit(a.ctx, "desktop:global-hotkey-error", map[string]string{

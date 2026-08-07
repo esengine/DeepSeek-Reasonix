@@ -297,6 +297,7 @@ type SettingsView struct {
 	DesktopTerminalTheme    string               `json:"desktopTerminalTheme,omitempty"`
 	CloseBehavior           string               `json:"closeBehavior"`
 	GlobalHotkey            string               `json:"globalHotkey"`
+	GlobalHotkeyError       string               `json:"globalHotkeyError,omitempty"`
 	DisplayMode             string               `json:"displayMode"`
 	StatusBarStyle          string               `json:"statusBarStyle"`
 	StatusBarItems          []string             `json:"statusBarItems"`
@@ -1086,6 +1087,7 @@ func (a *App) Settings() SettingsView {
 		DesktopTerminalTheme:    cfg.DesktopTerminalTheme(),
 		CloseBehavior:           cfg.DesktopCloseBehavior(),
 		GlobalHotkey:            cfg.DesktopGlobalHotkeySetting(),
+		GlobalHotkeyError:       lastGlobalHotkeyErrorMessage(),
 		DisplayMode:             cfg.DesktopDisplayMode(),
 		StatusBarStyle:          cfg.DesktopStatusBarStyle(),
 		StatusBarItems:          cfg.DesktopStatusBarItems(),
@@ -3490,6 +3492,7 @@ func (a *App) SetDesktopGlobalHotkey(binding string) error {
 		a.emitGlobalHotkeyError(err)
 		return err
 	}
+	clearLastGlobalHotkeyError()
 	return nil
 }
 

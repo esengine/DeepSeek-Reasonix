@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -128,5 +129,22 @@ func TestRebindGlobalHotkeyWaitsForUnregisterBeforeNextRegister(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("order = %v, want %v", got, want)
 		}
+	}
+}
+
+func TestEmitGlobalHotkeyErrorPersistsForSettings(t *testing.T) {
+	clearLastGlobalHotkeyError()
+	t.Cleanup(clearLastGlobalHotkeyError)
+	app := NewApp()
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+	app.emitGlobalHotkeyError(fmt.Errorf("grant Accessibility permission"))
+	if got := lastGlobalHotkeyErrorMessage(); got != "grant Accessibility permission" {
+		t.Fatalf("persisted error = %q", got)
+	}
+	if err := app.rebindGlobalHotkey(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := lastGlobalHotkeyErrorMessage(); got != "" {
+		t.Fatalf("error should clear on disable, got %q", got)
 	}
 }

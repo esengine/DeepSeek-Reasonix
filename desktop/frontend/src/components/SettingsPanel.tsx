@@ -339,7 +339,7 @@ export function SettingsPanel({
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MemorySettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
                 {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
-                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection globalHotkey={s?.globalHotkey} onGlobalHotkeyChange={async () => { await reload(); }} /></SettingsPageShell>}
+                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection globalHotkey={s?.globalHotkey} globalHotkeyError={s?.globalHotkeyError} onGlobalHotkeyChange={async () => { await reload(); }} /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -653,9 +653,11 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
 
 export function ShortcutsSection({
   globalHotkey,
+  globalHotkeyError,
   onGlobalHotkeyChange,
 }: {
   globalHotkey?: string;
+  globalHotkeyError?: string;
   onGlobalHotkeyChange?: () => void | Promise<void>;
 }) {
   const t = useT();
@@ -664,9 +666,13 @@ export function ShortcutsSection({
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
   const [unsupportedAction, setUnsupportedAction] = useState<ShortcutAction | null>(null);
-  const [osConflict, setOsConflict] = useState<string | null>(null);
+  const [osConflict, setOsConflict] = useState<string | null>(() => globalHotkeyError?.trim() || null);
 
   useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+  useEffect(() => {
+    const next = globalHotkeyError?.trim() || null;
+    setOsConflict(next);
+  }, [globalHotkeyError]);
   useEffect(() => {
     const runtime = typeof window !== "undefined" ? window.runtime : undefined;
     if (!runtime?.EventsOn) return;
@@ -1526,6 +1532,7 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopTerminalTheme: normalizeTerminalThemePreference(view.desktopTerminalTheme),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
     globalHotkey: typeof view.globalHotkey === "string" ? view.globalHotkey : undefined,
+    globalHotkeyError: typeof view.globalHotkeyError === "string" ? view.globalHotkeyError : undefined,
     displayMode: normalizeDisplayMode(view.displayMode),
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),

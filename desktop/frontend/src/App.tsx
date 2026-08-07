@@ -1580,6 +1580,18 @@ export default function App() {
     });
   }, [closeTransientOverlays]);
   useEffect(() => {
+    if (typeof window === "undefined" || !window.runtime?.EventsOn) return;
+    return window.runtime.EventsOn("desktop:global-hotkey-error", (payload?: unknown) => {
+      const message =
+        payload && typeof payload === "object" && "message" in payload && typeof (payload as { message: unknown }).message === "string"
+          ? (payload as { message: string }).message
+          : typeof payload === "string"
+            ? payload
+            : "unknown error";
+      showToast(t("settings.shortcutsOsConflict", { message }), "error", { durationMs: 8000 });
+    });
+  }, [showToast, t]);
+  useEffect(() => {
     if (typeof window === "undefined") return;
     const onResize = () => {
       setViewportWidth(window.innerWidth);
