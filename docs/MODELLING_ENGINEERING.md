@@ -62,6 +62,8 @@
   - 中期：`export` 工具导出标准化轨迹集（JSONL schema 固定）→ 供微调/RL 数据（对应 Muse Code 的"工具调用和多智能体协作轨迹融入训练"）。
 - 交付：`flywheel.Export(dir, filter)`（按 judge 标签/任务域导出）+ schema 版本化。
 
+**阶段 B 状态（2026-08）**：①`flywheel.Export(dir, filter)`——轨迹导出（MinScore/Repo/Task/Label 过滤 + manifest，Co-training 素材，29b7a8b1）；②`flywheel.ContextHints(query, limit)`——轻量模式上下文裁剪（BM25 检索→`<context-hints>` 摘要块，独立纯函数不侵入核心路径，3ce8c637）。agent 接线点（轻量模式注入 hint）留待后续，低风险可选。
+
 ## 6. 实施路线（文档先行）
 
 1. **阶段 A（低风险，可直接做）**：事件溯源闭环——checkpoint + replay（§4）+ 审批事件记录；全仓测试守护。
