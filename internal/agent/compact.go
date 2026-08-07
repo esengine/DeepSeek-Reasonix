@@ -239,6 +239,29 @@ func estimateTextTokens(s string) int {
 	return byBytes
 }
 
+// estimatedPromptTokens returns a conservative prompt-token estimate for the
+// overflow-guard paths (preflight force, resume gate, shared-window budget
+// clipping). The fixed estimator under-counts CJK-heavy transcripts (measured
+// ~1.8x on a real 4.3K-message session: estimated 681K vs 1.24M actual), so
+// without usage data it applies the safety factor; once a turn reports real
+// usage, tokPerChar calibrates the estimate instead.
+func (a *Agent) estimatedPromptTokens(msgs []provider.Message) int {
+	est := estimateMessagesTokens(provider.ModelMessages(msgs))
+	if est <= 0 {
+		return 0
+	}
+	tpc := a.tokPerChar()
+	if tpc > 0 && tpc != fallbackTokPerChar {
+		return int(float64(est) * tpc / fallbackTokPerChar)
+	}
+	return est * promptEstimateSafetyFactor
+}
+
+// promptEstimateSafetyFactor is the measured under-count of the fixed CJK
+// estimator before any usage calibrates it (~1.8x real, rounded up so the
+// overflow guards stay inside the provider window).
+const promptEstimateSafetyFactor = 2
+
 // SummarizeFrom replaces the messages from fromIdx onward with a single summary,
 // keeping everything before it verbatim ("summarize from here"). fromIdx is a turn
 // boundary (a user message), so the split never severs a tool_call/result pair —
@@ -648,7 +671,7 @@ func (a *Agent) effectiveOutputBudget(msgs []provider.Message) (int, bool) {
 	if budget <= 0 {
 		return 0, false
 	}
-	est := estimateMessagesTokens(provider.ModelMessages(msgs))
+	est := a.estimatedPromptTokens(msgs)
 	if a.session != nil {
 		est += estimateTextTokens(a.systemPrompt())
 	}
@@ -690,7 +713,7 @@ func (a *Agent) MaybeCompactOnResume(ctx context.Context) {
 		return
 	}
 	msgs, _ := a.session.snapshotMessagesVersion()
-	est := estimateMessagesTokens(provider.ModelMessages(msgs))
+	est := a.estimatedPromptTokens(msgs)
 	budget := a.outputBudget
 	if a.maxOutputTokens > 0 {
 		budget = a.maxOutputTokens
