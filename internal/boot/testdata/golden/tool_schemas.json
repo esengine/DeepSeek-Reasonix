@@ -1370,6 +1370,31 @@
     }
   },
   {
+    "Name": "retrieve_info",
+    "Description": "查询本地知识缓存（此前 web_search 蒸馏并落盘的检索结果）。零成本、不联网。命中返回缓存摘要与来源；未命中且系统已配置 deepseek-responses 时自动走该管道联网检索并落盘（复用系统 API 凭据，无需单独提供）；未配置时返回 needs_grant 标志，此时应使用 ask 工具询问用户是否允许联网检索。避免重复联网查询已检索过的事实。**返回的来源（Sources）含 URL——如需对单一来源深度阅读，可对 URL 调用 web_fetch 工具接续抓取原文。**",
+    "ReadOnly": true,
+    "Schema": {
+      "properties": {
+        "budget_override": {
+          "description": "人工确认：小时预算超限后用户明确要继续检索（费用由用户确认），默认 false",
+          "type": "boolean"
+        },
+        "hourly_budget": {
+          "description": "本次调用的小时预算覆盖（默认 30 次/小时；调高需谨慎——付费按次计量）",
+          "type": "integer"
+        },
+        "query": {
+          "description": "要查询的问题（与之前的检索问题相同或语义相近）",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "Name": "review",
     "Description": "Review the pending changes (current branch diff) in an isolated subagent — flags correctness / security / missing-tests / hidden behavior per file:line. Read-only; you decide what to act on. Use before suggesting a PR-shaped change or after finishing a multi-step edit.",
     "ReadOnly": false,
