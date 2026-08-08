@@ -773,10 +773,10 @@
       "essay": 15
     },
     "internal/cli/chat_tui.go": {
-      "complexity": 301,
+      "complexity": 302,
       "essay": 111,
-      "file-size": 4558,
-      "function-size": 1203
+      "file-size": 4589,
+      "function-size": 1206
     },
     "internal/cli/chat_tui_paste.go": {
       "essay": 9

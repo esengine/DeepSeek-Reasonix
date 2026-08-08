@@ -2,6 +2,9 @@ package cli
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -260,6 +263,66 @@ func TestStatuslineShowsWorkModeAndBalanceInPersistentFooter(t *testing.T) {
 	}
 	if !strings.Contains(lines[2], "BAL ¥12.34") {
 		t.Fatalf("telemetry row should show balance:\n%s", strings.Join(lines, "\n"))
+	}
+}
+
+// TestBalancePeriodicRefresh covers the BAL readout's periodic refresh. The
+// readout only used to update at startup, turn end, and model switch — a missed
+// TurnDone (or a delivery turn with no turn boundary) froze it at the startup
+// value. A balance tick must fetch a fresh balance and re-arm the timer.
+func TestBalancePeriodicRefresh(t *testing.T) {
+	i18n.DetectLanguage("en")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"is_available":true,"balance_infos":[{"currency":"CNY","total_balance":"88.00"}]}`)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctrl := control.New(control.Options{BalanceURL: srv.URL, BalanceClient: srv.Client()})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+
+	cmds := m.balanceRefreshCmds()
+	if len(cmds) != 2 {
+		t.Fatalf("balance tick work = %d commands, want fetch + re-arm", len(cmds))
+	}
+	// First command performs the fetch; running it must not block.
+	msg := cmds[0]()
+	bm, ok := msg.(balanceMsg)
+	if !ok {
+		t.Fatalf("balance tick fetch returned %T, want balanceMsg", msg)
+	}
+	if bm.text != "¥88.00" {
+		t.Fatalf("periodic refresh fetched balance = %q, want ¥88.00", bm.text)
+	}
+	if cmds[1] == nil {
+		t.Fatal("balance tick must re-arm the periodic timer")
+	}
+
+	// The fetched readout lands on the model when its balanceMsg is processed.
+	next, _ := m.Update(balanceMsg{text: bm.text})
+	if next.(chatTUI).balance != "¥88.00" {
+		t.Fatalf("processed balanceMsg balance = %q, want ¥88.00", next.(chatTUI).balance)
+	}
+}
+
+// TestBalanceTickSchedulesRefresh pins the Update wiring: a balanceTickMsg must
+// schedule the fetch + re-arm work rather than being swallowed.
+func TestBalanceTickSchedulesRefresh(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+	_, cmd := m.Update(balanceTickMsg{})
+	if cmd == nil {
+		t.Fatal("a balance tick must schedule the periodic refresh work")
+	}
+}
+
+// TestBalancePeriodicRefreshArmedAtStartup ensures Init arms the periodic
+// refresh so the readout never depends solely on turn_done.
+func TestBalancePeriodicRefreshArmedAtStartup(t *testing.T) {
+	ctrl := control.New(control.Options{})
+	m := newChatTUI(ctrl, "", make(chan event.Event, 1), 120)
+	if cmd := m.Init(); cmd == nil {
+		t.Fatal("Init must schedule commands including the periodic balance refresh")
 	}
 }
 
