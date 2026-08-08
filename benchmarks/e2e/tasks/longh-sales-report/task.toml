@@ -1,0 +1,8 @@
+prompt = """Implement sales_report.py so that `python3 sales_report.py sales.csv summary.json` produces a per-region summary:
+- sales.csv has a header `region,product,units,unit_price`; revenue of a row is units * unit_price
+- for each region compute `total` (sum of row revenues, rounded to 2 decimals) and `top` (the product with the highest summed revenue in that region; ties go to the alphabetically first product)
+- write summary.json as a JSON object mapping each region to {"total": ..., "top": ...}, keys sorted
+- the script must work for any file in this format, not just the sample"""
+class = "long-horizon"
+max_steps = 30
+timeout_sec = 600

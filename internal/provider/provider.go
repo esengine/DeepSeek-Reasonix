@@ -758,9 +758,9 @@ func (u *Usage) ContextFillTokens() int {
 	return u.PromptTokens + u.CompletionTokens
 }
 
-// ContextPromptForGauge returns the latest-attempt prompt size for context
-// displays. Falls back to PromptTokens when ContextPromptTokens is unset.
-func (u *Usage) ContextPromptForGauge() int {
+// LatestPromptTokens returns the latest-attempt prompt size for context-aware
+// runtime decisions. Falls back to PromptTokens for single-attempt legacy usage.
+func (u *Usage) LatestPromptTokens() int {
 	if u == nil {
 		return 0
 	}

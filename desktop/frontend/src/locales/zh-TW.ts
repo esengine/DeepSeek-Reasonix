@@ -1817,6 +1817,7 @@ export const zhTW: Record<DictKey, string> = {
 	  "settings.reasoningProtocol.auto": "自動識別（推薦）",
 	  "settings.reasoningProtocol.deepseek": "DeepSeek 思考（thinking + 深度）",
 	  "settings.reasoningProtocol.glm": "GLM 思考（開啟 / 關閉）",
+	  "settings.reasoningProtocol.kimiK3": "Kimi K3 推理（low / high / max）",
 	  "settings.reasoningProtocol.openai": "OpenAI reasoning（reasoning_effort）",
 	  "settings.reasoningProtocol.none": "普通聊天（不傳送思考參數）",
 	  "settings.reasoningProtocolHint": "預設自動識別。只有代理不相容，或你確定模型需要特定 reasoning 格式時再切換。",

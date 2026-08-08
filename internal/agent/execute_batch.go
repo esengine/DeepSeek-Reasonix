@@ -325,7 +325,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		}
 	}
 	if !cancelled {
-		a.applyStormBreaker(calls, outcomes, results, receiptMark)
+		a.applyBatchGuards(calls, outcomes, results, receiptMark)
 	}
 	images := make([][]string, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))

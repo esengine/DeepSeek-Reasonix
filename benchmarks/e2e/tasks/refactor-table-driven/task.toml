@@ -1,0 +1,7 @@
+prompt = """statuscodes.py repeats the same code→label chain in two functions. Refactor:
+- define the mapping once as a LABELS dict in statuscodes.py
+- label_for and summary must both read from it
+- behavior stays identical, including the Unknown fallback"""
+class = "refactor"
+max_steps = 20
+timeout_sec = 300

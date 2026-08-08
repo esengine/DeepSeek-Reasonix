@@ -18,6 +18,10 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 - Cache-first: the system-prompt prefix (base prompt + tools + memory) must stay
   byte-stable across turns so DeepSeek's automatic prefix cache stays warm. Never
   mutate it mid-session — ride the turn tail instead (see `control.Compose`).
+- Performance features land with an effect test at their final boundary
+  (`internal/boot/effect_test.go` pattern): assert what actually reaches the
+  provider request, frontend sink, or trajectory through the real `boot.Build`
+  assembly. Component correctness is not system effectiveness.
 
 ## Comments
 

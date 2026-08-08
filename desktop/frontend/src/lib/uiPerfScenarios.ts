@@ -11,6 +11,7 @@ export interface UIPerfScenario {
   title: string;
   chunksPerSec: number;
   reasoningChars: number;
+  reasoningVisible: boolean;
   textChars: number;
   paragraphs: number;
   codeFences: number;
@@ -26,6 +27,7 @@ export const UI_PERF_SCENARIOS: UIPerfScenario[] = [
     title: "normal answer: 2KB markdown prose",
     chunksPerSec: 80,
     reasoningChars: 0,
+    reasoningVisible: false,
     textChars: 2_000,
     paragraphs: 8,
     codeFences: 0,
@@ -36,6 +38,7 @@ export const UI_PERF_SCENARIOS: UIPerfScenario[] = [
     title: "DeepSeek reasoning: 16KB reasoning + 8KB answer",
     chunksPerSec: 150,
     reasoningChars: 16_000,
+    reasoningVisible: true,
     textChars: 8_000,
     paragraphs: 16,
     codeFences: 0,
@@ -46,6 +49,7 @@ export const UI_PERF_SCENARIOS: UIPerfScenario[] = [
     title: "code heavy: 10 fences in 20KB markdown",
     chunksPerSec: 120,
     reasoningChars: 0,
+    reasoningVisible: false,
     textChars: 20_000,
     paragraphs: 10,
     codeFences: 10,
@@ -56,6 +60,7 @@ export const UI_PERF_SCENARIOS: UIPerfScenario[] = [
     title: "interaction under streaming: typing, wheel, selection, tool cards",
     chunksPerSec: 150,
     reasoningChars: 8_000,
+    reasoningVisible: true,
     textChars: 8_000,
     paragraphs: 12,
     codeFences: 2,
@@ -67,6 +72,7 @@ export const UI_PERF_SCENARIOS: UIPerfScenario[] = [
     title: "long session: 100 turns, 30 tool calls, diffs and code",
     chunksPerSec: 100,
     reasoningChars: 0,
+    reasoningVisible: false,
     textChars: 4_000,
     paragraphs: 10,
     codeFences: 2,
@@ -78,6 +84,7 @@ export const UI_PERF_SCENARIOS: UIPerfScenario[] = [
     title: "background agent: tab A streams while tab B is active",
     chunksPerSec: 150,
     reasoningChars: 4_000,
+    reasoningVisible: false,
     textChars: 4_000,
     paragraphs: 8,
     codeFences: 0,
