@@ -2098,6 +2098,7 @@ export interface SettingsView {
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
   conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
+  aiSessionTitle?: boolean; // generate sidebar session titles with one short LLM request per new session; absent = off
 }
 
 export interface DesktopStartupSettingsView {

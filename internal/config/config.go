@@ -299,6 +299,7 @@ type DesktopConfig struct {
 	ProviderAccess    []string `toml:"provider_access"`    // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking    bool     `toml:"expand_thinking"`    // true = show reasoning text expanded by default; false = collapsed
 	ConversationWidth string   `toml:"conversation_width"` // standard|full; max transcript width; empty = standard
+	AISessionTitle    bool     `toml:"ai_session_title"`   // generate sidebar session titles with one short LLM request per new session; off by default
 }
 
 // DesktopExternalOpener returns the user-selected external opener id. The

@@ -33,6 +33,7 @@ import (
 	"reasonix/internal/notify"
 	"reasonix/internal/provider"
 	"reasonix/internal/store"
+	"reasonix/internal/title"
 	"reasonix/internal/worktree"
 )
 
@@ -219,6 +220,10 @@ type WorkspaceTab struct {
 	// persisted into its sidecar (#5850).
 	telemetrySessionKey string
 	telemMu             sync.Mutex
+
+	// aiTitleInFlight serializes the LLM session-title request: at most one per
+	// tab, so repeated snapshots cannot duplicate requests or token spend.
+	aiTitleInFlight atomic.Bool
 
 	// Display-only output belongs to the live runtime, not a particular visible
 	// tab wrapper. detach/reattach paths share this state before rebinding the
@@ -4659,17 +4664,159 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 		return false
 	}
 	nextTitle, updated := autoTitleTopicFromSession(titleRoot, topicID, sessionPath)
-	if !updated {
-		return false
+	if updated {
+		a.updateOpenTopicTitle(topicID, nextTitle, topicTitleSourceAuto)
+		changedDirs := a.updateTopicSessionTitles(topicID, nextTitle)
+		if len(changedDirs) > 0 {
+			a.emitProjectTreeChangedForSessionDirs(changedDirs...)
+		} else {
+			a.emitProjectTreeMetadataChanged()
+		}
 	}
-	a.updateOpenTopicTitle(topicID, nextTitle, topicTitleSourceAuto)
-	changedDirs := a.updateTopicSessionTitles(topicID, nextTitle)
+	// Optional LLM title: when enabled, replace the truncated preview with a
+	// short model summary. Runs after the text path so a title always exists,
+	// and async so a slow provider never blocks the autosave goroutine.
+	a.maybeGenerateAISessionTitle(tab, titleRoot, topicID, sessionPath)
+	return updated
+}
+
+// maybeGenerateAISessionTitle derives the title basis from the persisted
+// session (snapshot-time fallback for turns that did not come through
+// SubmitToTab, e.g. bot or recovery turns) and hands it to the shared entry
+// point. The basis hash is normalized the same way as the submit-time path so
+// both entry points agree on "already attempted".
+func (a *App) maybeGenerateAISessionTitle(tab *WorkspaceTab, titleRoot, topicID, sessionPath string) {
+	users := topicTitleUserTurnsFromSession(sessionPath)
+	if len(users) == 0 {
+		return
+	}
+	a.maybeGenerateAISessionTitleWithBasis(context.Background(), tab, titleRoot, topicID, sessionPath, users[0], aiTitleSnapshotBudget)
+}
+
+// maybeGenerateAISessionTitleWithBasis starts one best-effort LLM session-title
+// request when enabled. It runs in a background goroutine: failures stay
+// silent (the truncated preview already provided a title), an in-flight flag
+// plus the attempt fingerprint prevent duplicate requests and token spend,
+// and manual renames keep winning via the source guard.
+func (a *App) maybeGenerateAISessionTitleWithBasis(parent context.Context, tab *WorkspaceTab, titleRoot, topicID, sessionPath, basis string, budget time.Duration) {
+	if tab == nil || !tab.aiTitleInFlight.CompareAndSwap(false, true) {
+		return
+	}
+	// All guards and file IO run on the background goroutine: the submit-time
+	// caller sits inside the turn admission, so any synchronous config or
+	// sidecar read here would stall message submission on slow disks or
+	// antivirus scans. The ctx is derived inside the goroutine so a caller-side
+	// cancel can never kill the request mid-flight.
+	go func() {
+		defer tab.aiTitleInFlight.Store(false)
+		ctx, cancel := context.WithTimeout(parent, budget)
+		defer cancel()
+		a.generateAISessionTitleGuarded(ctx, tab, titleRoot, topicID, sessionPath, basis)
+	}()
+}
+
+// generateAISessionTitleGuarded runs the optional-title guards (toggle,
+// manual-rename precedence, attempt fingerprint, model ref) and then the
+// request itself, entirely off the caller's goroutine.
+func (a *App) generateAISessionTitleGuarded(ctx context.Context, tab *WorkspaceTab, titleRoot, topicID, sessionPath, basis string) {
+	cfg, err := config.LoadForRootReadOnly(titleRoot)
+	if err != nil || !cfg.Desktop.AISessionTitle {
+		return
+	}
+	if source := loadTopicTitleSource(titleRoot, topicID); source != topicTitleSourceAuto {
+		return
+	}
+	basis = title.Source(basis)
+	if basis == "" {
+		return
+	}
+	if meta := loadTopicAutoTitleMeta(titleRoot)[topicID]; meta.AIBasisHash == aiTitleBasisHash(basis) {
+		// Already attempted for this basis (success or failure): never retry,
+		// so a failed request does not keep spending tokens on every snapshot.
+		return
+	}
+	a.mu.RLock()
+	modelRef := tab.model
+	a.mu.RUnlock()
+	if strings.TrimSpace(modelRef) == "" {
+		return
+	}
+	a.generateAISessionTitle(ctx, tab, titleRoot, topicID, sessionPath, basis, modelRef)
+}
+
+// generateAISessionTitle sends the shared title request with the session's
+// own model and, on success, writes the summary as an auto title. A failure
+// only records the attempt fingerprint so the next snapshot does not retry
+// and burn more tokens; the text-derived title stays in place.
+func (a *App) generateAISessionTitle(ctx context.Context, tab *WorkspaceTab, titleRoot, topicID, sessionPath, basis, modelRef string) {
+	// Read-only load: the title path must never trigger config migration
+	// writes that could contend with the main session's config access.
+	cfg, err := config.LoadForRootReadOnly(titleRoot)
+	if err != nil {
+		return
+	}
+	entry, ok := cfg.ResolveModel(modelRef)
+	if !ok {
+		return
+	}
+	prov, err := provider.New(entry.Kind, title.ProviderConfig(entry))
+	if err != nil {
+		return
+	}
+	titleText, usage := title.Generate(ctx, prov, basis)
+	if usage != nil {
+		tab.recordUsage(event.Event{Kind: event.Usage, UsageSource: event.UsageSourceTitle, Usage: usage})
+	}
+	if titleText == "" {
+		a.recordAISessionTitleAttempt(titleRoot, topicID, basis, false)
+		return
+	}
+	// Re-check the guards raced against by the async window: the user may have
+	// renamed the topic or the session while the request was in flight.
+	if source := loadTopicTitleSource(titleRoot, topicID); source != topicTitleSourceAuto {
+		slog.Info("desktop: AI title skipped: topic source changed", "topic", topicID, "source", source)
+		return
+	}
+	if sessionHasManualDisplayTitle(sessionPath) {
+		slog.Info("desktop: AI title skipped: manual title present", "topic", topicID, "session", sessionPath)
+		return
+	}
+	if err := setTopicTitleWithSource(titleRoot, topicID, titleText, topicTitleSourceAuto); err != nil {
+		slog.Warn("desktop: AI title write failed", "topic", topicID, "err", err)
+		return
+	}
+	a.recordAISessionTitleAttempt(titleRoot, topicID, basis, true)
+	a.updateOpenTopicTitle(topicID, titleText, topicTitleSourceAuto)
+	changedDirs := a.updateTopicSessionTitles(topicID, titleText)
 	if len(changedDirs) > 0 {
 		a.emitProjectTreeChangedForSessionDirs(changedDirs...)
 	} else {
 		a.emitProjectTreeMetadataChanged()
 	}
-	return true
+}
+
+// recordAISessionTitleAttempt persists the first-message fingerprint of an LLM
+// title attempt (success or failure) into the topic auto-title meta, and marks
+// successful generations so text-derived upgrades never overwrite them.
+func (a *App) recordAISessionTitleAttempt(titleRoot, topicID, basis string, generated bool) {
+	if strings.TrimSpace(topicID) == "" {
+		return
+	}
+	m, err := loadTopicAutoTitleMetaForUpdate(titleRoot)
+	if err != nil {
+		return
+	}
+	meta := m[topicID]
+	meta.AIBasisHash = aiTitleBasisHash(basis)
+	meta.AIGenerated = generated
+	meta.UpdatedAt = time.Now().UnixMilli()
+	m[topicID] = meta
+	_ = saveTopicAutoTitleMeta(titleRoot, m)
+}
+
+func aiTitleBasisHash(first string) string {
+	sum := sha256.Sum256([]byte(first))
+	return hex.EncodeToString(sum[:8])
 }
 
 func autoTitleTopicFromSession(workspaceRoot, topicID, sessionPath string) (string, bool) {
@@ -4736,6 +4883,11 @@ func shouldApplyAutoTopicTitle(workspaceRoot, topicID string, proposal autoTopic
 		return false
 	}
 	meta := loadTopicAutoTitleMeta(workspaceRoot)[topicID]
+	if meta.AIGenerated {
+		// The LLM summary already replaced the truncated preview; text-derived
+		// upgrades must not overwrite it (the user can still rename manually).
+		return false
+	}
 	if meta.Stage > proposal.Stage {
 		return false
 	}
@@ -5761,11 +5913,16 @@ func removeProject(root string) error {
 // topic helpers
 
 const (
-	topicTitlesFile        = "desktop-topic-titles.json"
-	topicTitleSourcesFile  = "desktop-topic-title-sources.json"
-	topicCreatedAtsFile    = "desktop-topic-created-at.json"
-	topicAutoTitlesFile    = "desktop-topic-auto-title-meta.json"
-	defaultTopicTitle      = "新的会话"
+	topicTitlesFile       = "desktop-topic-titles.json"
+	topicTitleSourcesFile = "desktop-topic-title-sources.json"
+	topicCreatedAtsFile   = "desktop-topic-created-at.json"
+	topicAutoTitlesFile   = "desktop-topic-auto-title-meta.json"
+	defaultTopicTitle     = "新的会话"
+	// aiTitleSnapshotBudget bounds the async title request (both the
+	// submit-time and snapshot-time paths); it must cover Generate's retries
+	// (3 attempts) on a slow network — measured 1.8-2.6s per attempt against
+	// SenseNova, so a retrying request needs ~8s.
+	aiTitleSnapshotBudget  = 30 * time.Second
 	defaultTopicTitleEn    = "New session"
 	defaultTopicTitleZhTW  = "新的會話"
 	topicTitleSourceAuto   = "auto"
@@ -5930,7 +6087,12 @@ type topicAutoTitleMeta struct {
 	Stage     int    `json:"stage,omitempty"`
 	UserTurns int    `json:"userTurns,omitempty"`
 	BasisHash string `json:"basisHash,omitempty"`
-	UpdatedAt int64  `json:"updatedAt,omitempty"`
+	// AIBasisHash fingerprints the first message the LLM title request was
+	// already attempted for (success or failure), so the same basis never
+	// retries; AIGenerated freezes the title against text-derived upgrades.
+	AIBasisHash string `json:"aiBasisHash,omitempty"`
+	AIGenerated bool   `json:"aiGenerated,omitempty"`
+	UpdatedAt   int64  `json:"updatedAt,omitempty"`
 }
 
 func loadTopicAutoTitleMeta(workspaceRoot string) map[string]topicAutoTitleMeta {
@@ -6354,12 +6516,12 @@ func recordTopicAutoTitleMeta(workspaceRoot, topicID string, proposal autoTopicT
 	if err != nil {
 		return err
 	}
-	m[topicID] = topicAutoTitleMeta{
-		Stage:     proposal.Stage,
-		UserTurns: proposal.UserTurns,
-		BasisHash: proposal.BasisHash,
-		UpdatedAt: time.Now().UnixMilli(),
-	}
+	meta := m[topicID]
+	meta.Stage = proposal.Stage
+	meta.UserTurns = proposal.UserTurns
+	meta.BasisHash = proposal.BasisHash
+	meta.UpdatedAt = time.Now().UnixMilli()
+	m[topicID] = meta
 	return saveTopicAutoTitleMeta(workspaceRoot, m)
 }
 

@@ -25,12 +25,6 @@ import (
 	"reasonix/internal/tool"
 )
 
-func TestTitlePromptRequiresUserMessageLanguage(t *testing.T) {
-	if !strings.Contains(titlePrompt, "same language as the user's message") {
-		t.Fatalf("title prompt does not preserve the user's language: %q", titlePrompt)
-	}
-}
-
 type titleUsageProvider struct{}
 
 func (titleUsageProvider) Name() string { return "title" }

@@ -312,6 +312,7 @@ type SettingsView struct {
 	Metrics           bool   `json:"metrics"`
 	ExpandThinking    bool   `json:"expandThinking"`
 	ConversationWidth string `json:"conversationWidth,omitempty"`
+	AISessionTitle    bool   `json:"aiSessionTitle"`
 	ConfigPath        string `json:"configPath"`
 	// ShadowedByPath is the workspace reasonix.toml that outranks the file this
 	// panel writes, so an edit here can be overridden with nothing on screen to
@@ -1016,6 +1017,7 @@ func (a *App) Settings() SettingsView {
 			Metrics:                 true,
 			ExpandThinking:          false,
 			ConversationWidth:       "standard",
+			AISessionTitle:          false,
 		}
 	}
 	ctrl := a.activeCtrl()
@@ -1095,6 +1097,7 @@ func (a *App) Settings() SettingsView {
 		Metrics:                 cfg.DesktopMetrics(),
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
 		ConversationWidth:       cfg.DesktopConversationWidth(),
+		AISessionTitle:          cfg.Desktop.AISessionTitle,
 		ConfigPath:              cfgPath,
 		ShadowedByPath:          shadowingConfigPath(cfgPath, root),
 		ProviderKinds:           nonNil(provider.Kinds()),
@@ -3320,6 +3323,12 @@ func (a *App) SetDisplayMode(mode string) error {
 // no rebuild needed.
 func (a *App) SetStatusBarStyle(style string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopStatusBarStyle(style) })
+}
+
+// SetAISessionTitle enables or disables LLM-generated session titles for the
+// sidebar. UI-only, no rebuild needed.
+func (a *App) SetAISessionTitle(enabled bool) error {
+	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAISessionTitle(enabled) })
 }
 
 // SetStatusBarItems updates the ordered visible desktop status bar items.

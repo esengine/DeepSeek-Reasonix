@@ -1277,6 +1277,35 @@ func TestRenderTOMLConversationWidthRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRenderTOMLAISessionTitleRoundTrip(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopAISessionTitle(true); err != nil {
+		t.Fatalf("SetDesktopAISessionTitle: %v", err)
+	}
+	rendered := RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(rendered, "ai_session_title = true") {
+		t.Fatalf("rendered user config missing ai_session_title:\n%s", rendered)
+	}
+	if project := RenderTOMLForScope(c, RenderScopeProject); strings.Contains(project, "ai_session_title") {
+		t.Fatalf("project config leaked user-only ai_session_title:\n%s", project)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
+	}
+	if !got.Desktop.AISessionTitle {
+		t.Fatal("ai_session_title after round trip = false, want true")
+	}
+
+	if err := c.SetDesktopAISessionTitle(false); err != nil {
+		t.Fatalf("reset ai session title: %v", err)
+	}
+	if rendered := RenderTOMLForScope(c, RenderScopeUser); strings.Contains(rendered, "ai_session_title") {
+		t.Fatalf("default ai_session_title should be omitted:\n%s", rendered)
+	}
+}
+
 func TestRenderTOMLDefaultStepsOmitted(t *testing.T) {
 	isolateUserConfigHome(t)
 	out := RenderTOML(Default())

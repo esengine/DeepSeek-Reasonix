@@ -1853,6 +1853,13 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.aiSessionTitle")} hint={t("settings.aiSessionTitleHint")}>
+        <ToggleSegment
+          value={s.aiSessionTitle === true}
+          disabled={busy}
+          onChange={(enabled) => void apply(() => app.SetAISessionTitle(enabled))}
+        />
+      </SettingsField>
       <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")}>
         <div className="set-seg">
           {(["auto", "expanded"] as const).map((pref) => (

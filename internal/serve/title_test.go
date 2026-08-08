@@ -6,6 +6,7 @@ import (
 
 	"reasonix/internal/config"
 	"reasonix/internal/provider"
+	"reasonix/internal/title"
 )
 
 type recordingTitleProvider struct {
@@ -24,7 +25,7 @@ func (p *recordingTitleProvider) Stream(_ context.Context, req provider.Request)
 }
 
 func TestTitleProviderDisablesReasoning(t *testing.T) {
-	cfg := titleProviderConfig(&config.ProviderEntry{
+	cfg := title.ProviderConfig(&config.ProviderEntry{
 		Name:    "deepseek-flash",
 		Kind:    "openai",
 		BaseURL: "https://api.deepseek.com",
@@ -46,10 +47,10 @@ func TestGenerateTitleStripsPasteLabelAndUsesShortBudget(t *testing.T) {
 		t.Fatalf("requests = %d, want 1", len(prov.requests))
 	}
 	req := prov.requests[0]
-	if req.MaxTokens != 60 {
-		t.Fatalf("MaxTokens = %d, want 60", req.MaxTokens)
+	if req.MaxTokens != 0 {
+		t.Fatalf("MaxTokens = %d, want 0 (no cap; content-only extraction bounds the title)", req.MaxTokens)
 	}
-	if req.Messages[0].Content != titlePrompt || req.Messages[1].Content != "fix the login loop" {
+	if req.Messages[0].Content != title.Prompt || req.Messages[1].Content != "fix the login loop" {
 		t.Fatalf("title messages = %+v", req.Messages)
 	}
 }

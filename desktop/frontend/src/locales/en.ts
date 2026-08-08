@@ -1661,6 +1661,8 @@ export const en = {
   "settings.displayMode": "Transcript display mode",
   "settings.displayMode.standard": "Standard",
   "settings.displayMode.compact": "Compact",
+  "settings.aiSessionTitle": "Auto-generate session titles",
+  "settings.aiSessionTitleHint": "Generate a short LLM summary title per new session instead of truncating the first message; may cost a few extra tokens, falling back to the truncated message on failure.",
   "settings.processFold": "Work process fold",
   "settings.processFoldHint": "Whether the reasoning and tool-call fold auto-collapses when a turn completes",
   "settings.processFold.auto": "Auto-collapse",

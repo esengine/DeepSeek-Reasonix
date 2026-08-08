@@ -1260,8 +1260,36 @@ func (a *App) submitToTab(tabID, input string, fromBridge bool, submissionID ...
 	tab := admission.tab
 	a.ensureTabTopicIndexedForUserTurn(tab)
 	ctrl.SubmitDisplay(input, input)
+	// Fire the optional LLM session-title request right after the main turn is
+	// submitted, without waiting: the sidebar title becomes ready as soon as
+	// the short title request returns. Low-concurrency providers may reject
+	// one of the two simultaneous requests — the title side falls back to the
+	// snapshot-time path, the main turn retries at the agent layer.
+	a.submitTimeAISessionTitle(tab, ctrl, input)
 	admission.finish(ctrl)
 	return nil
+}
+
+// submitTimeAISessionTitle fires the optional LLM session-title request with
+// the submitted message as the basis, skipping the disk round-trip that the
+// snapshot-time path needs. Guards (in-flight, manual rename, already
+// attempted) live in maybeGenerateAISessionTitleWithBasis; the snapshot-time
+// path stays as a fallback for turns that did not come through SubmitToTab.
+func (a *App) submitTimeAISessionTitle(tab *WorkspaceTab, ctrl control.SessionAPI, input string) {
+	if tab == nil || ctrl == nil {
+		return
+	}
+	a.mu.RLock()
+	topicID := strings.TrimSpace(tab.TopicID)
+	titleRoot := tab.WorkspaceRoot
+	if tab.Scope == "global" {
+		titleRoot = ""
+	}
+	a.mu.RUnlock()
+	if topicID == "" {
+		return
+	}
+	a.maybeGenerateAISessionTitleWithBasis(context.Background(), tab, titleRoot, topicID, ctrl.SessionPath(), input, aiTitleSnapshotBudget)
 }
 
 func (a *App) submitUserTurnToTabWithSink(tabID, input string, forwarder event.Sink) bool {

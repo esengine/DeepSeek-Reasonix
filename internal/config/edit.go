@@ -396,6 +396,15 @@ func (c *Config) SetDesktopCheckUpdates(enabled bool) error {
 	return nil
 }
 
+// SetDesktopAISessionTitle enables or disables LLM-generated session titles
+// in the desktop sidebar. UI-only; it must not affect model prompts or
+// provider-visible request data. When enabled, each new session's first user
+// message triggers one short title request (~300-600 tokens).
+func (c *Config) SetDesktopAISessionTitle(enabled bool) error {
+	c.Desktop.AISessionTitle = enabled
+	return nil
+}
+
 // SetDesktopUpdateChannel is retained for pre-single-channel Wails clients.
 // Clearing the legacy field keeps the next canonical write channel-free.
 func (c *Config) SetDesktopUpdateChannel(_ string) error {

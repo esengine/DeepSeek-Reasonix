@@ -2606,6 +2606,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.botConnectionCount": "{n} 個連線",
   "settings.botDisabledWithConnections": "機器人關閉 · {n} 個連線",
   "settings.displayMode": "會話展示模式",
+  "settings.aiSessionTitle": "自動生成會話標題",
+  "settings.aiSessionTitleHint": "每次新會話由模型產生簡短標題，取代截斷首條訊息；可能增加少量 token 消耗，失敗時自動回退為截斷首條訊息。",
   "settings.displayMode.standard": "標準",
   "settings.displayMode.compact": "緊湊",
   "settings.processFold": "工作過程摺疊",

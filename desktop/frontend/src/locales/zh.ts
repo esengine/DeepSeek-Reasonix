@@ -1661,6 +1661,8 @@ export const zh: Record<DictKey, string> = {
   "settings.desktopLayoutStyle.workbench": "工作台",
   "settings.desktopLayoutStyle.creation": "创作",
   "settings.displayMode": "会话展示模式",
+  "settings.aiSessionTitle": "自动生成会话标题",
+  "settings.aiSessionTitleHint": "每次新会话由模型生成简短标题，替代截断首条消息；可能增加少量 token 消耗，失败时自动回退为截断首条消息。",
   "settings.displayMode.standard": "标准",
   "settings.displayMode.compact": "紧凑",
   "settings.processFold": "工作过程折叠",

@@ -134,6 +134,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if width := c.DesktopConversationWidth(); width == "full" {
 			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", width)
 		}
+		if c.Desktop.AISessionTitle {
+			b.WriteString("ai_session_title = true   # desktop: generate session titles with one short LLM request per new session\n")
+		}
 		b.WriteString("\n")
 	} else if c.Desktop.ProviderAccess != nil {
 		// provider_access is intentionally mergeable across user and project
