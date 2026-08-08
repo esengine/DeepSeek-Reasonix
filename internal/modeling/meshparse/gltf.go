@@ -291,7 +291,13 @@ func loadGLTFBuffer(gltfPath, uri string) ([]byte, error) {
 	if fi.Size() > maxBufferBytes {
 		return nil, fmt.Errorf("gltf: external buffer %q is %d bytes, exceeds limit %d", uri, fi.Size(), maxBufferBytes)
 	}
-	return os.ReadFile(binPath)
+	data, err := os.ReadFile(binPath)
+	if err != nil {
+		// Same fixed message as the stat/symlink branches: the resolved
+		// absolute path must never leak into tool/LLM-facing errors.
+		return nil, fmt.Errorf("gltf: external buffer %q not readable", uri)
+	}
+	return data, nil
 }
 
 // gltfJSONBufferView / gltfJSONAccessor are aliases for the embedded structs.

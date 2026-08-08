@@ -230,11 +230,12 @@ func Voxelize(m *Mesh, resolution int) (*VoxelModel, error) {
 	// same exit/enter classification, so double-counting cannot flip parity.
 	tris := triangulate(m)
 	// Workload cap: cells × tris must stay bounded (512³ × millions of faces
-	// would pin a core for minutes). ~1B ray tests ≈ 10-20s; sizes beyond that
-	// should use a lower resolution or a simplified mesh.
+	// would pin a core for minutes). ~500M ray tests ≈ 5-10s of busy CPU with
+	// no cancellation point — keep the ceiling conservative; beyond it use a
+	// lower resolution or a simplified mesh.
 	cells := w * h * d
-	if cells > 0 && len(tris) > 0 && cells*len(tris) > 1_000_000_000 {
-		return nil, fmt.Errorf("meshparse: voxelize workload %d cells × %d tris exceeds cap 1B (lower resolution or simplify mesh)", cells, len(tris))
+	if cells > 0 && len(tris) > 0 && cells*len(tris) > 500_000_000 {
+		return nil, fmt.Errorf("meshparse: voxelize workload %d cells × %d tris exceeds cap 500M (lower resolution or simplify mesh)", cells, len(tris))
 	}
 	vm := &VoxelModel{Size: [3]int{w, h, d}}
 	inside := make([]bool, w*h*d)
