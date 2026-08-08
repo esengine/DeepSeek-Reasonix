@@ -687,6 +687,9 @@ func (a *Agent) snipToProjection(ctx context.Context) error {
 // installPruneProjection stores a projection whose messages are a snipped/pruned
 // view of the canonical transcript (no summarizer call).
 func (a *Agent) installPruneProjection(view []provider.Message, st PruneStats) error {
+	// Let the response-side cache-break detector know the prefix intentionally
+	// shrank (snip/prune) — without this, hit-token drops would be misreported.
+	a.session.NoteContentRewrite("snip")
 	msgs, version := a.session.snapshotMessagesVersion()
 	view = provider.ModelMessages(view)
 	src := estimateMessagesTokens(provider.ModelMessages(msgs))

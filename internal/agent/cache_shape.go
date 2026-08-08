@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sort"
 
 	"reasonix/internal/event"
@@ -136,8 +137,18 @@ func detectResponseCacheMiss(a *Agent, hit int, contentReasons []string) bool {
 		return false
 	}
 	if len(contentReasons) > 0 {
+		slog.Debug("agent: cache miss drop suppressed (prefix rewrite)", "reasons", contentReasons)
 		return false
 	}
 	drop := prev - hit
-	return drop >= 2000 && float64(hit) < float64(prev)*0.95
+	miss := drop >= 2000 && float64(hit) < float64(prev)*0.95
+	if miss {
+		slog.Info("agent: cache miss drop detected",
+			"prev_hit", prev,
+			"current_hit", hit,
+			"drop_tokens", drop,
+			"drop_pct", int((1-float64(hit)/float64(prev))*100),
+		)
+	}
+	return miss
 }
