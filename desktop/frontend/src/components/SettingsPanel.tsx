@@ -1815,6 +1815,15 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           onChange={(enabled) => void apply(() => app.SetDesktopSTTAutoStop(enabled))}
         />
       </SettingsField>
+      <SettingsField label={t("settings.sttAutoStopOnSwitch")} hint={t("settings.sttAutoStopOnSwitchHint")}>
+        <ToggleSegment
+          value={s.desktopSTTAutoStopOnSwitch === true}
+          disabled={busy}
+          onLabel={t("settings.toggleOn")}
+          offLabel={t("settings.toggleOff")}
+          onChange={(enabled) => void apply(() => app.SetDesktopSTTAutoStopOnSwitch(enabled))}
+        />
+      </SettingsField>
       <SettingsField label={t("settings.sttAutoStopSeconds")} hint={t("settings.sttAutoStopSecondsHint")}>
         <input
           type="number"

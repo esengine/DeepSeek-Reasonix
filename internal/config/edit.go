@@ -246,6 +246,13 @@ func (c *Config) SetDesktopSTTAutoStop(enabled bool) error {
 	return nil
 }
 
+// SetDesktopSTTAutoStopOnSwitch toggles auto-stopping recognition when the
+// user switches to another conversation window/tab.
+func (c *Config) SetDesktopSTTAutoStopOnSwitch(enabled bool) error {
+	c.Desktop.STTAutoStopOnSwitch = enabled
+	return nil
+}
+
 // SetDesktopSTTAutoStopSeconds sets the silence timeout before auto-stop.
 // Clamped to [3, 300]; 0 resets to the default (10s).
 func (c *Config) SetDesktopSTTAutoStopSeconds(seconds int) error {

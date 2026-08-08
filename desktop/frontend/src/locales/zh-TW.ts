@@ -1824,6 +1824,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.sttShowPageHint": "辨識時顯示 Edge 辨識視窗；關閉後在背景隱藏執行。",
   "settings.sttAutoStop": "不說話自動停止",
   "settings.sttAutoStopHint": "靜默一段時間後自動停止辨識，避免浪費 tokens。",
+  "settings.sttAutoStopOnSwitch": "切換視窗時自動停止",
+  "settings.sttAutoStopOnSwitchHint": "切換到其他對話視窗時自動停止語音辨識。",
   "settings.sttAutoStopSeconds": "靜默逾時（秒）",
   "settings.sttAutoStopSecondsHint": "連續靜默這麼多秒後自動停止辨識（3–300）。",
   "settings.sttHotkeyStart": "開始辨識快速鍵",

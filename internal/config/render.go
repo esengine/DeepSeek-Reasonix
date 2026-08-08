@@ -132,6 +132,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		fmt.Fprintf(&b, "stt_enabled = %v   # desktop: enable the voice-to-text (Edge Web Speech API bridge) mic button; false = hidden\n", c.Desktop.STTEnabled)
 		fmt.Fprintf(&b, "stt_show_page = %v   # desktop: show the Edge recognition page while listening; false = hidden background run\n", c.Desktop.STTShowPage)
 		fmt.Fprintf(&b, "stt_auto_stop = %v   # desktop: auto-stop recognition after silence\n", c.Desktop.STTAutoStop)
+		fmt.Fprintf(&b, "stt_auto_stop_on_switch = %v   # desktop: auto-stop recognition when switching conversation window\n", c.Desktop.STTAutoStopOnSwitch)
 		if secs := c.Desktop.STTAutoStopSeconds; secs > 0 {
 			fmt.Fprintf(&b, "stt_auto_stop_seconds = %d   # desktop: silence timeout (s) before auto-stop\n", secs)
 		} else {

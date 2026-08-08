@@ -2682,6 +2682,8 @@ export const zh: Record<DictKey, string> = {
   "settings.sttShowPageHint": "识别时显示 Edge 识别窗口；关闭后在后台隐藏运行。",
   "settings.sttAutoStop": "不说话自动停止",
   "settings.sttAutoStopHint": "静默一段时间后自动停止识别，避免浪费 tokens。",
+  "settings.sttAutoStopOnSwitch": "切换窗口时自动停止",
+  "settings.sttAutoStopOnSwitchHint": "切换到其他对话窗口时自动停止语音识别。",
   "settings.sttAutoStopSeconds": "静默超时（秒）",
   "settings.sttAutoStopSecondsHint": "连续静默这么多秒后自动停止识别（3–300）。",
   "settings.sttHotkeyStart": "开始识别快捷键",

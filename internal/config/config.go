@@ -281,6 +281,10 @@ type DesktopConfig struct {
 	// STTAutoStop enables auto-stopping recognition after a silent period
 	// (STTAutoStopSeconds). Mirrors edge-stt-bridge's auto-stop behaviour.
 	STTAutoStop bool `toml:"stt_auto_stop"`
+	// STTAutoStopOnSwitch stops recognition automatically when the user switches
+	// to another conversation window/tab. false = keep listening (transcript
+	// follows the visible window).
+	STTAutoStopOnSwitch bool `toml:"stt_auto_stop_on_switch"`
 	// STTAutoStopSeconds is the silence timeout before auto-stop (3-300s).
 	STTAutoStopSeconds int `toml:"stt_auto_stop_seconds"`
 	// STTHotkeyStart/STTHotkeyStop are optional global hotkeys for voice input

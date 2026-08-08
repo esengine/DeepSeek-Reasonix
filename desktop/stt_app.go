@@ -136,6 +136,19 @@ func (a *App) SetDesktopSTTAutoStop(enabled bool) error {
 	return nil
 }
 
+// SetDesktopSTTAutoStopOnSwitch 持久化"切换对话窗口时自动停止识别"
+// （[desktop] stt_auto_stop_on_switch）。
+func (a *App) SetDesktopSTTAutoStopOnSwitch(enabled bool) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		return c.SetDesktopSTTAutoStopOnSwitch(enabled)
+	})
+	if err != nil {
+		return err
+	}
+	a.applySTTSettingsToBridge()
+	return nil
+}
+
 // SetDesktopSTTAutoStopSeconds 持久化静默超时秒数（[desktop] stt_auto_stop_seconds）。
 func (a *App) SetDesktopSTTAutoStopSeconds(seconds int) error {
 	err := a.applyConfigOnly(func(c *config.Config) error {

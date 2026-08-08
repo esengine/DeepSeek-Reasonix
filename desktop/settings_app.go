@@ -315,6 +315,9 @@ type SettingsView struct {
 	DesktopSTTShowPage bool `json:"desktopSTTShowPage"`
 	// DesktopSTTAutoStop mirrors [desktop] stt_auto_stop (auto-stop on silence).
 	DesktopSTTAutoStop bool `json:"desktopSTTAutoStop"`
+	// DesktopSTTAutoStopOnSwitch mirrors [desktop] stt_auto_stop_on_switch
+	// (auto-stop recognition when switching conversation window).
+	DesktopSTTAutoStopOnSwitch bool `json:"desktopSTTAutoStopOnSwitch"`
 	// DesktopSTTAutoStopSeconds mirrors [desktop] stt_auto_stop_seconds.
 	DesktopSTTAutoStopSeconds int `json:"desktopSTTAutoStopSeconds"`
 	// DesktopSTTHotkeyStart/Stop mirror [desktop] stt_hotkey_start/stop.
@@ -1109,6 +1112,7 @@ func (a *App) Settings() SettingsView {
 		DesktopSTTEnabled:       cfg.Desktop.STTEnabled,
 		DesktopSTTShowPage:      cfg.Desktop.STTShowPage,
 		DesktopSTTAutoStop:      cfg.Desktop.STTAutoStop,
+		DesktopSTTAutoStopOnSwitch: cfg.Desktop.STTAutoStopOnSwitch,
 		DesktopSTTAutoStopSeconds: cfg.Desktop.STTAutoStopSeconds,
 		DesktopSTTHotkeyStart:   cfg.Desktop.STTHotkeyStart,
 		DesktopSTTHotkeyStop:    cfg.Desktop.STTHotkeyStop,

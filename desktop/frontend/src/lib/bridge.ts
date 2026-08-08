@@ -490,6 +490,8 @@ export interface AppBindings {
   SetDesktopSTTEnabled(enabled: boolean): Promise<void>;
   SetDesktopSTTShowPage(show: boolean): Promise<void>;
   SetDesktopSTTAutoStop(enabled: boolean): Promise<void>;
+  // 切换对话窗口时自动停止语音识别（默认关）。
+  SetDesktopSTTAutoStopOnSwitch(enabled: boolean): Promise<void>;
   SetDesktopSTTAutoStopSeconds(seconds: number): Promise<void>;
   SetDesktopSTTHotkeyStart(hotkey: string): Promise<void>;
   SetDesktopSTTHotkeyStop(hotkey: string): Promise<void>;
@@ -1752,6 +1754,7 @@ function makeMockApp(): AppBindings {
     desktopSTTEnabled: false,
     desktopSTTShowPage: true,
     desktopSTTAutoStop: true,
+    desktopSTTAutoStopOnSwitch: false,
     desktopSTTAutoStopSeconds: 10,
     desktopSTTHotkeyStart: "",
     desktopSTTHotkeyStop: "",
@@ -4461,6 +4464,9 @@ function makeMockApp(): AppBindings {
         },
         async SetDesktopSTTAutoStop(enabled: boolean) {
           settings.desktopSTTAutoStop = enabled;
+        },
+        async SetDesktopSTTAutoStopOnSwitch(enabled: boolean) {
+          settings.desktopSTTAutoStopOnSwitch = enabled;
         },
         async SetDesktopSTTAutoStopSeconds(seconds: number) {
           settings.desktopSTTAutoStopSeconds = seconds;

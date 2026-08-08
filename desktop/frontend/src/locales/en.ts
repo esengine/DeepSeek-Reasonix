@@ -2679,6 +2679,8 @@ export const en = {
   "settings.sttShowPageHint": "Show the Edge recognition window while listening. Turn off to run hidden in the background.",
   "settings.sttAutoStop": "Auto-stop when silent",
   "settings.sttAutoStopHint": "Stop recognition automatically after a silent period to avoid wasting tokens.",
+  "settings.sttAutoStopOnSwitch": "Auto-stop when switching window",
+  "settings.sttAutoStopOnSwitchHint": "Stop voice recognition automatically when you switch to another conversation window.",
   "settings.sttAutoStopSeconds": "Silence timeout (seconds)",
   "settings.sttAutoStopSecondsHint": "Stop recognition after this many seconds of silence (3–300).",
   "settings.sttHotkeyStart": "Start voice input hotkey",

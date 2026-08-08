@@ -730,6 +730,8 @@ export function Composer({
   // 已配置的开始/停止全局快捷键（设置面板保存后刷新），用于麦克风按钮悬浮提示。
   const [sttHotkeyStart, setSttHotkeyStart] = useState("");
   const [sttHotkeyStop, setSttHotkeyStop] = useState("");
+  // 切换对话窗口时自动停止语音识别（[desktop] stt_auto_stop_on_switch）。
+  const [sttAutoStopOnSwitch, setSttAutoStopOnSwitch] = useState(false);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
   // Use refs for values read inside async closures to avoid stale captures
@@ -1269,6 +1271,7 @@ export function Composer({
           setSttEnabled(Boolean(s.desktopSTTEnabled));
           setSttHotkeyStart(s.desktopSTTHotkeyStart ?? "");
           setSttHotkeyStop(s.desktopSTTHotkeyStop ?? "");
+          setSttAutoStopOnSwitch(Boolean(s.desktopSTTAutoStopOnSwitch));
         })
         .catch(() => {});
     };
@@ -1303,6 +1306,14 @@ export function Composer({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // 切换对话窗口时自动停止识别（设置开启时）：tabId 变化且正在识别则停止。
+  useEffect(() => {
+    if (!sttAutoStopOnSwitch || !sttListening) return;
+    void app.STTStop()
+      .then(() => setSttListening(false))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabId]);
   const slashCommandDisabled = useCallback(
     (command: CommandInfo) => !commandAvailableAtSlashPosition(command, slashCommandAtStart),
     [slashCommandAtStart],
