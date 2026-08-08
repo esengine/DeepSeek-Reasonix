@@ -21,14 +21,16 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 	if a == nil || a.session == nil || a.contextWindow <= 0 {
 		return nil
 	}
-	// Paused sessions keep sending under the existing projection: re-firing
-	// compaction every turn (each attempt doomed in a too-small window, each
-	// fold over-budget in an oversized one) only craters the cache for no gain.
-	if a.compactStuck {
-		return nil
-	}
 	msgs, version := a.session.snapshotMessagesVersion()
 	cacheKey := a.currentPromptCacheKey()
+	// Paused sessions with a projection keep sending under it: re-firing
+	// compaction every turn only craters the cache for no gain. Without a
+	// projection, fall through so the force guard refuses the send.
+	if a.compactStuck {
+		if st := a.compactionState; projectionValid(st, msgs, version, cacheKey) {
+			return nil
+		}
+	}
 	// Conservative estimate: the fixed estimator under-counts CJK-heavy
 	// transcripts (~1.8x), so the overflow guard uses the calibrated value.
 	est := a.estimatedPromptTokens(msgs)

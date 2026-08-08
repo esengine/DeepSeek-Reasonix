@@ -24,10 +24,10 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (CompactionOutcome, error) {
 	msgs, transcriptVersion := a.session.snapshotMessagesVersion()
 	// Incremental fold: with a valid projection, fold only the appended
-	// messages and append the digest — prior bytes keep hitting. Manual/
-	// overflow or an oversized projection degrades to a full re-fold.
-	if base, head, start, ok := a.incrementalFoldTarget(msgs, transcriptVersion, trigger); ok {
-		return a.compactIncremental(ctx, trigger, instructions, force, base, msgs, transcriptVersion, head, start)
+	// messages and append the digest — prior bytes keep hitting; otherwise a
+	// full re-fold (digest merge) is a rare prefix rewrite.
+	if outcome, err := a.tryIncrementalFold(ctx, trigger, instructions, force, msgs, transcriptVersion); err != nil || outcome != CompactionNoop {
+		return outcome, err
 	}
 	head, start, ok := a.planCompaction(msgs, minCompactMessages)
 	if !ok {
@@ -149,6 +149,27 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	return CompactionInstalled, nil
 }
 
+// tryIncrementalFold runs the incremental path when a valid projection covers
+// the earlier history. Returns CompactionNoop when no incremental fold applies.
+func (a *Agent) tryIncrementalFold(ctx context.Context, trigger, instructions string, force bool, msgs []provider.Message, transcriptVersion uint64) (CompactionOutcome, error) {
+	base, head, start, ok := a.incrementalFoldTarget(msgs, transcriptVersion, trigger)
+	if !ok {
+		return CompactionNoop, nil
+	}
+	outcome, err := a.compactIncremental(ctx, trigger, instructions, force, base, msgs, transcriptVersion, head, start)
+	if err != nil || outcome != CompactionInstalled {
+		return outcome, err
+	}
+	// The incremental fold keeps prior bytes (prefix hit) but may leave the
+	// projection too close to the trigger; converge with one full re-fold (the
+	// recursive call takes the full path — the new projection covers all).
+	_, _, high := a.compactThresholds()
+	if a.estimatedPromptTokens(a.compactionState.Projection.Messages) >= high-a.compactionTailBudget() {
+		return a.compactToProjection(ctx, trigger, instructions, force)
+	}
+	return CompactionInstalled, nil
+}
+
 // incrementalFoldTarget picks the incremental path (append to the existing
 // projection) over a full re-fold: a valid projection with un-covered messages
 // under the projection budget, not a manual/overflow trigger, and no trailing
@@ -162,7 +183,7 @@ func (a *Agent) incrementalFoldTarget(msgs []provider.Message, transcriptVersion
 	if covered <= 0 || covered >= len(msgs) {
 		return ContextProjection{}, 0, 0, false
 	}
-	if st.Projection.ProjectionTokens >= a.projectionCompactBudget() {
+	if a.estimatedPromptTokens(st.Projection.Messages) >= a.projectionCompactBudget() {
 		return ContextProjection{}, 0, 0, false
 	}
 	if trigger == CompactionTriggerManual || trigger == CompactionTriggerOverflow {
@@ -185,10 +206,12 @@ func (a *Agent) incrementalFoldTarget(msgs []provider.Message, transcriptVersion
 // begins with an orphan tool result. ok is false when there is nothing new.
 func (a *Agent) incrementalFoldRange(msgs []provider.Message, covered int) (head, start int, ok bool) {
 	head = covered
-	for head < len(msgs) && msgs[head].Role == provider.RoleTool {
+	for head >= 0 && head < len(msgs) && msgs[head].Role == provider.RoleTool {
 		head--
 	}
-	if head < covered-4 || head < 0 {
+	// A tool result at the boundary belongs to a pre-covered turn; folding it
+	// would duplicate base content, so degrade and let the caller use full.
+	if head < covered {
 		return covered, covered, false
 	}
 	start = tailStart(msgs, head, a.compactionTailBudget(), a.tokPerChar(), a.tailFloor())
@@ -246,7 +269,7 @@ func (a *Agent) buildCompactionState(projMsgs []provider.Message, msgs []provide
 // rewritten; dropped originals are archived as in the full path.
 func (a *Agent) compactIncremental(ctx context.Context, trigger, instructions string, force bool, baseProj ContextProjection, msgs []provider.Message, transcriptVersion uint64, head, start int) (CompactionOutcome, error) {
 	region := msgs[head:start]
-	kept, fold := a.partitionFoldForProjection(region)
+	kept, fold := a.partitionFoldForProjectionIncremental(region)
 	if len(fold) == 0 {
 		return CompactionNoop, nil
 	}
@@ -357,6 +380,18 @@ func (a *Agent) compactIncremental(ctx context.Context, trigger, instructions st
 // turns are excluded from both kept and fold — the caller re-inserts them from
 // the full transcript so their bytes stay position-stable.
 func (a *Agent) partitionFoldForProjection(region []provider.Message) (kept, fold []provider.Message) {
+	return a.partitionFoldForProjectionMode(region, true)
+}
+
+// partitionFoldForProjectionIncremental is the incremental-path variant: the
+// fixed early-window skip is disabled because the fold region starts at the
+// covered boundary — there is no early user prefix to re-insert, and skipping
+// would silently drop freshly appended small user turns from the projection.
+func (a *Agent) partitionFoldForProjectionIncremental(region []provider.Message) (kept, fold []provider.Message) {
+	return a.partitionFoldForProjectionMode(region, false)
+}
+
+func (a *Agent) partitionFoldForProjectionMode(region []provider.Message, skipEarly bool) (kept, fold []provider.Message) {
 	policyKeep := keepIndexes(region, a.keepPolicy)
 	earlySeen := 0
 	const maxEarly = 3
@@ -366,7 +401,7 @@ func (a *Agent) partitionFoldForProjection(region []provider.Message) (kept, fol
 		}
 		// Skip the fixed early small user turns — they are re-added from the
 		// full transcript after the summary so the prefix stays byte-stable.
-		if m.Role == provider.RoleUser && !isCompactionSummary(m) && a.fixedPinnableUserTurn(m) && earlySeen < maxEarly {
+		if skipEarly && m.Role == provider.RoleUser && !isCompactionSummary(m) && a.fixedPinnableUserTurn(m) && earlySeen < maxEarly {
 			earlySeen++
 			continue
 		}

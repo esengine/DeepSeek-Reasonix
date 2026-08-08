@@ -37,13 +37,77 @@ func TestIncrementalFoldRangeBoundsFoldToAppendedMessages(t *testing.T) {
 	if fold := msgs[head:start]; len(fold) == 0 {
 		t.Fatal("fold is empty")
 	}
-	// An orphan tool message at the boundary is skipped backward, never folded.
+	// An orphan tool result at the boundary belongs to a turn whose tool_calls
+	// live before covered; folding it would duplicate base content, so the
+	// incremental range must decline and let the caller fall back to full.
 	withTool := append(append([]provider.Message(nil), msgs[:5]...),
 		provider.Message{Role: provider.RoleTool, Content: "orphan result"})
 	withTool = append(withTool, msgs[5:]...)
-	head, _, ok = a.incrementalFoldRange(withTool, 5)
-	if ok && head > 5 {
-		t.Fatalf("orphan tool at boundary not skipped: head=%d", head)
+	if _, _, ok := a.incrementalFoldRange(withTool, 5); ok {
+		t.Fatal("orphan tool at the covered boundary must degrade, not fold")
+	}
+	// Degenerate transcripts: a tool run at the very front must degrade
+	// (no panic, head clamped), while a single appended message after covered
+	// is still a valid one-message fold.
+	allTool := []provider.Message{
+		{Role: provider.RoleTool, Content: "t1"},
+		{Role: provider.RoleTool, Content: "t2"},
+		{Role: provider.RoleUser, Content: "u"},
+	}
+	if _, _, ok := a.incrementalFoldRange(allTool, 0); ok {
+		t.Fatal("tool run at the very front must degrade")
+	}
+	if _, _, ok := a.incrementalFoldRange(allTool, 2); !ok {
+		t.Fatal("single appended message after covered must be foldable")
+	}
+}
+
+func TestIncrementalFoldKeepsAppendedSmallUserTurns(t *testing.T) {
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("a ", 500)},
+		{Role: provider.RoleAssistant, Content: "b"},
+		{Role: provider.RoleUser, Content: "c"},
+		{Role: provider.RoleAssistant, Content: "d"},
+		{Role: provider.RoleUser, Content: "e"},
+		{Role: provider.RoleAssistant, Content: "f"},
+	}}
+	ctx := context.Background()
+	prov := &fakeProvider{reply: "s"}
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: 20000,
+		RecentKeep:    2,
+		ArchiveDir:    t.TempDir(),
+	}, event.Discard)
+	if _, err := a.compactToProjection(ctx, CompactionTriggerManual, "", true); err != nil {
+		t.Fatalf("first compact: %v", err)
+	}
+	proj1 := a.compactionState.Projection
+
+	// Append large content (needs a fold) followed by a small user turn that
+	// lands in the recent tail; it must survive into the projection, and the
+	// incremental path must not skip appended turns like full-path early ones.
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("x ", 5000)})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "a2"})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("y ", 5000)})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "b2"})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "important fact"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "z"})
+
+	if _, err := a.compactToProjection(ctx, CompactionTriggerPressure, "", false); err != nil {
+		t.Fatalf("incremental compact: %v", err)
+	}
+	proj2 := a.compactionState.Projection
+	if len(proj2.Messages) <= len(proj1.Messages) {
+		t.Fatalf("incremental projection did not grow: %d -> %d", len(proj1.Messages), len(proj2.Messages))
+	}
+	var contents []string
+	for _, m := range proj2.Messages {
+		contents = append(contents, m.Content)
+	}
+	joined := strings.Join(contents, "|")
+	if !strings.Contains(joined, "important fact") {
+		t.Fatalf("appended small user turn was dropped from the projection: %s", joined[:min(len(joined), 200)])
 	}
 }
 
