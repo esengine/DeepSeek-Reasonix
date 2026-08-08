@@ -286,6 +286,10 @@ type Agent struct {
 	// the CLI can expose a context gauge without re-scraping the usage line. The
 	// run loop writes it while a frontend's status line reads it, so it is atomic.
 	lastUsage atomic.Pointer[provider.Usage]
+	// lastSentChars is the character count of the last sent request, used in
+	// tokPerChar calibration to keep the ratio honest when a projection shrinks
+	// the prompt far below the full canonical transcript.
+	lastSentChars atomic.Int64
 
 	// sessCacheHit/sessCacheMiss accumulate cache tokens across every API call
 	// this session, so frontends can show the aggregate hit-rate (Σhit/Σ(hit+miss))

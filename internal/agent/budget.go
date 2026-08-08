@@ -212,7 +212,7 @@ func (a *Agent) tokPerChar() float64 {
 	if u := a.lastUsage.Load(); u != nil && u.LatestPromptTokens() > 0 {
 		// LatestPromptTokens keeps calibration on the latest single-request
 		// shape: retry aggregates would over-estimate and compact too early.
-		if c := charsOfMessages(a.session.Messages); c > 0 {
+		if c := int(a.lastSentChars.Load()); c > 0 {
 			if r := float64(u.LatestPromptTokens()) / float64(c); r > 0.05 && r < 2 {
 				return r
 			}
