@@ -164,6 +164,46 @@ func TestContextSnapshotIncludesCompletionTokens(t *testing.T) {
 	}
 }
 
+// TestContextSnapshotSurvivesExecutorRebuild guards the context gauge against
+// the cancelled-turn path: after a turn completes, an interrupted turn or an
+// executor rebuild can leave LastUsage nil, and the gauge must keep showing the
+// last observed footprint instead of dropping to 0%. A session bind resets the
+// fallback so a fresh session still hides the gauge.
+func TestContextSnapshotSurvivesExecutorRebuild(t *testing.T) {
+	prov := &scriptedTurns{turns: [][]provider.Chunk{{
+		{Type: provider.ChunkText, Text: "ok"},
+		{Type: provider.ChunkUsage, Usage: &provider.Usage{
+			PromptTokens:     6840,
+			CompletionTokens: 48,
+			TotalTokens:      6888,
+		}},
+		{Type: provider.ChunkDone},
+	}}}
+	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{ContextWindow: 1_000_000}, event.Discard)
+	c := New(Options{Runner: ag, Executor: ag})
+	if err := c.Run(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	if used, _ := c.ContextSnapshot(); used != 6888 {
+		t.Fatalf("ContextSnapshot after run = %d, want 6888", used)
+	}
+
+	// Interrupted/cancelled turn path: the executor's LastUsage is nil (a
+	// rebuilt agent has no telemetry yet). The gauge must not collapse to 0%.
+	fresh := agent.New(prov, tool.NewRegistry(), agent.NewSession("sys"), agent.Options{ContextWindow: 1_000_000}, event.Discard)
+	c.executor = fresh
+	if used, window := c.ContextSnapshot(); used != 6888 || window != 1_000_000 {
+		t.Fatalf("ContextSnapshot after rebuild = (%d, %d), want (6888, 1000000)", used, window)
+	}
+
+	// A session bind starts a fresh lineage: the fallback is dropped, so a
+	// brand-new session hides the gauge instead of borrowing the old footprint.
+	c.bindExecutorProjection(filepath.Join(t.TempDir(), "s.jsonl"), false)
+	if used, _ := c.ContextSnapshot(); used != 0 {
+		t.Fatalf("ContextSnapshot after bind = %d, want 0 (fresh lineage)", used)
+	}
+}
+
 type fakeControlTool struct{ name string }
 
 func (t fakeControlTool) Name() string { return t.name }

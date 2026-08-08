@@ -16,6 +16,9 @@ func (c *Controller) bindExecutorProjection(path string, loadSidecar bool) {
 	if c == nil || c.executor == nil {
 		return
 	}
+	// A session bind is a fresh lineage for the gauge: drop the fallback so a
+	// brand-new session hides instead of borrowing the previous footprint.
+	c.lastContextTokens.Store(0)
 	c.executor.BindSessionPath(path, loadSidecar)
 }
 

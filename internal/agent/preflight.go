@@ -21,6 +21,12 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 	if a == nil || a.session == nil || a.contextWindow <= 0 {
 		return nil
 	}
+	// Paused sessions keep sending under the existing projection: re-firing
+	// compaction every turn (each attempt doomed in a too-small window, each
+	// fold over-budget in an oversized one) only craters the cache for no gain.
+	if a.compactStuck {
+		return nil
+	}
 	msgs, version := a.session.snapshotMessagesVersion()
 	cacheKey := a.currentPromptCacheKey()
 	// Conservative estimate: the fixed estimator under-counts CJK-heavy
@@ -29,11 +35,13 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 	_, _, high := a.compactThresholds()
 	force := max(a.forceThreshold(), high)
 
-	// Prefer an existing valid projection when it still covers the pressure.
+	// A valid projection below the high-water mark passes; the old
+	// projection<canonical comparison was a tautology that disabled the force
+	// guard below.
 	if st := a.compactionState; projectionValid(st, msgs, version, cacheKey) {
 		visible := modelVisibleFromProjection(st.Projection, msgs)
 		projEst := a.estimatedPromptTokens(visible)
-		if projEst < high || projEst < est {
+		if projEst < high {
 			return nil
 		}
 	}

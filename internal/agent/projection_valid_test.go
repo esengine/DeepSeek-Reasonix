@@ -160,6 +160,51 @@ func TestLoadProjectionSidecarDropsForeignCacheKey(t *testing.T) {
 	}
 }
 
+// TestPreflightCompactsWhenProjectionExceedsHighWaterMark verifies the force
+// guard is not silently disabled by a valid projection: an existing projection
+// whose visible size still clears the high-water mark must be re-folded, not
+// waved through on the old "projection < canonical" tautology.
+func TestPreflightCompactsWhenProjectionExceedsHighWaterMark(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("big turn ", 500)},
+		{Role: provider.RoleAssistant, Content: "done"},
+	}
+	// Window 100 with compactRatio 0.5 → high = 50. The projection below is
+	// itself above 50 tokens, so it must not pass preflight on size alone.
+	a := New(&fakeProvider{reply: "s"}, tool.NewRegistry(), &Session{Messages: msgs}, Options{
+		ContextWindow:     100,
+		CompactRatio:      0.5,
+		CompactForceRatio: 0.6,
+		RecentKeep:        2,
+	}, event.Discard)
+	st := CompactionState{
+		TranscriptVersion: 3,
+		PromptCacheKey:    a.currentPromptCacheKey(),
+		Projection: ContextProjection{
+			Messages: []provider.Message{
+				{Role: provider.RoleSystem, Content: "sys"},
+				{Role: provider.RoleUser, Content: strings.Repeat("proj ", 200)},
+			},
+			TranscriptVersion: 3,
+			CoveredCount:      2,
+			CoveredPrefixHash: coveredPrefixHash(msgs, 2),
+			ProjectionTokens:  800,
+		},
+	}
+	if err := a.installProjection(st); err != nil {
+		t.Fatalf("installProjection: %v", err)
+	}
+	// Paused sessions are exempt (the stuck guard owns them); unpaused ones
+	// must re-fold rather than ride a stale projection.
+	if err := a.contextPreflight(context.Background(), CompactionTriggerPressure); err != nil {
+		t.Fatalf("preflight under pressure: %v", err)
+	}
+	if !hasCompactionSummary(visibleContext(a)) {
+		t.Fatal("preflight should have re-folded a projection above the high-water mark")
+	}
+}
+
 func TestForceThresholdNoopReturnsCompactionRequired(t *testing.T) {
 	// Huge tool result is entirely in the recent tail → no fold region, but
 	// estimate exceeds force; preflight must refuse (not mid-turn).

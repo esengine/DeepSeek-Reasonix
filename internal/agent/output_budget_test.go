@@ -252,6 +252,32 @@ func TestMaybeCompactOnResumeWarmSmallPromptUntouched(t *testing.T) {
 	}
 }
 
+// TestMaybeCompactOnResumeWarmMidPromptUntouched guards the resume gate against
+// the overflow-guard safety factor: the real-shape estimate (~49% of the
+// window) must NOT be doubled into an apparent ~98% that folds a warm cached
+// prefix. Over-estimating here destroys the server prefix cache of a healthy
+// session; under-estimating only defers compaction to the request path.
+func TestMaybeCompactOnResumeWarmMidPromptUntouched(t *testing.T) {
+	sink := &recordSink{}
+	a := &Agent{
+		prov:          &sharedWindowBudgetProvider{budget: 128 * 1024},
+		contextWindow: 100_000,
+		outputBudget:  128 * 1024,
+		cacheState:    CacheStateWarm,
+		sink:          sink,
+	}
+	// ~49K tokens real shape (ASCII: 1 rune ≈ 1 token), well inside the
+	// 100K - 8K - 8K = 83.6K resume threshold.
+	a.session = newSessionWithMsgs([]provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("a", 49_000)},
+	})
+	a.MaybeCompactOnResume(context.Background())
+	if got := len(sink.kinds(event.CompactionStarted)); got != 0 {
+		t.Fatalf("warm resume at ~49%% of the window compacted (%d starts), want none", got)
+	}
+}
+
 // capturingBudgetProvider embeds sharedFakeProvider and records the MaxTokens
 // of the last streamed request plus how many streams ran.
 type capturingBudgetProvider struct {

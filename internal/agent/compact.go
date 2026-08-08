@@ -498,11 +498,7 @@ func toolCallIDs(m provider.Message) map[string]bool {
 func (a *Agent) planCompaction(msgs []provider.Message, min int) (head, start int, ok bool) {
 	head = a.pinnedPrefixLen(msgs)
 	if a.contextWindow > 0 {
-		budget := defaultTailTokens
-		if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
-			budget = maxByWin
-		}
-		start = tailStart(msgs, head, budget, a.tokPerChar(), a.tailFloor())
+		start = tailStart(msgs, head, a.compactionTailBudget(), a.tokPerChar(), a.tailFloor())
 	} else {
 		// No window to budget against (manual /compact on an unconfigured
 		// provider): keep a fixed count of recent messages, aligned off any tool.
@@ -525,6 +521,16 @@ func (a *Agent) tailFloor() int {
 		return a.recentKeep
 	}
 	return minRecentKeep
+}
+
+// compactionTailBudget is the token budget for the verbatim recent tail kept
+// out of a fold. Shared by the full and incremental compaction paths.
+func (a *Agent) compactionTailBudget() int {
+	budget := defaultTailTokens
+	if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
+		budget = maxByWin
+	}
+	return budget
 }
 
 // tailStart walks newest→oldest, growing the verbatim tail until the next

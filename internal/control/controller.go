@@ -112,6 +112,8 @@ type Controller struct {
 	systemPrompt string
 	sessionDir   string
 	commands     atomic.Pointer[[]command.Command]
+	// lastContextTokens is the last observed non-zero gauge footprint (reset on session bind).
+	lastContextTokens atomic.Int64
 	// skills owns the session's discovered skills (enabled subset, full set, and
 	// the reloadable stores) — the skills slice of the Capabilities concern. See
 	// skill.go.
@@ -4680,11 +4682,21 @@ func (c *Controller) ContextSnapshot() (int, int) {
 	if c.executor == nil {
 		return 0, 0
 	}
+	window := c.executor.ContextWindow()
 	u := c.executor.LastUsage()
-	if u == nil {
-		return 0, c.executor.ContextWindow()
+	if u != nil {
+		used := u.PromptTokens + u.CompletionTokens
+		if used > 0 {
+			c.lastContextTokens.Store(int64(used))
+		}
+		return used, window
 	}
-	return u.PromptTokens + u.CompletionTokens, c.executor.ContextWindow()
+	// A cancelled/interrupted turn can leave LastUsage nil; keep the gauge on
+	// the last observed footprint instead of dropping to 0%.
+	if used := int(c.lastContextTokens.Load()); used > 0 {
+		return used, window
+	}
+	return 0, window
 }
 
 // CompactRatio returns the auto-compaction threshold as a fraction of the window
