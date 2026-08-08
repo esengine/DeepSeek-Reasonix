@@ -968,7 +968,6 @@ func (a *App) shutdown(context.Context) {
 	// Close every shared plugin host before releasing the lifecycle barrier,
 	// even if a tab cleanup panics.
 	defer a.closeAllSharedHosts()
-
 	a.mu.RLock()
 	tabs := a.runtimeTabsLocked()
 	type shutdownItem struct {
@@ -988,6 +987,7 @@ func (a *App) shutdown(context.Context) {
 			if err := it.ctrl.SnapshotForShutdown(); err != nil {
 				slog.Warn("desktop: shutdown snapshot failed", "tab", it.tab.ID, "err", err)
 			}
+			it.tab.checkpointTelemetryForShutdown(it.ctrl.SessionPath())
 		}
 		it.ctrl.Close()
 		it.tab.releaseSessionLease()
