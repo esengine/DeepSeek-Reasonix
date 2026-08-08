@@ -528,6 +528,8 @@ func copyFile(src, dst string) error {
 type modelingAtomic struct {
 	workDir     string
 	forbidRoots []string
+	roots       []string
+	guard       SessionDataGuard
 }
 
 func (r modelingAtomic) Name() string { return "modeling_atomic" }
@@ -575,7 +577,12 @@ func (r modelingAtomic) Execute(ctx context.Context, args json.RawMessage) (stri
 	if err != nil {
 		return "", fmt.Errorf("modeling_atomic %s: %w", a.Op, err)
 	}
-	return fmt.Sprintf(`{"op":%q,"ok":true,"objects":%s}`, a.Op, trimOutput(res.Output)), nil
+	b, _ := json.Marshal(struct {
+		Op  string `json:"op"`
+		OK  bool   `json:"ok"`
+		Out string `json:"output,omitempty"`
+	}{Op: a.Op, OK: true, Out: trimOutput(res.Output)})
+	return string(b), nil
 }
 
 func opNames() string {
