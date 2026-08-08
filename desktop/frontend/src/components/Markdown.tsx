@@ -191,6 +191,13 @@ export function useRenderedMarkdownText(text: string, streaming: boolean): strin
       cancelFinalizationRef.current?.();
       cancelFinalizationRef.current = null;
       finalizingTextRef.current = null;
+      // A bounded live preview occasionally advances its window and drops an
+      // old prefix. Discard the stale parsed tree before paint; the complete
+      // replacement stays visible through StreamingMarkdownTail and is parsed
+      // later under the normal adaptive budget.
+      if (renderedText !== "" && !text.startsWith(renderedText)) {
+        setRenderedText("");
+      }
       return;
     }
     lastCommitAtRef.current = 0;

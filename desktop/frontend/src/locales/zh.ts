@@ -2636,6 +2636,7 @@ export const zh: Record<DictKey, string> = {
 	  "settings.reasoningProtocol.auto": "自动识别（推荐）",
 	  "settings.reasoningProtocol.deepseek": "DeepSeek 思考（thinking + 深度）",
 	  "settings.reasoningProtocol.glm": "GLM 思考（开启 / 关闭）",
+	  "settings.reasoningProtocol.kimiK3": "Kimi K3 推理（low / high / max）",
 	  "settings.reasoningProtocol.openai": "OpenAI reasoning（reasoning_effort）",
 	  "settings.reasoningProtocol.none": "普通聊天（不发送思考参数）",
 	  "settings.reasoningProtocolHint": "默认自动识别。只有代理不兼容，或你确定模型需要特定 reasoning 格式时再切换。",

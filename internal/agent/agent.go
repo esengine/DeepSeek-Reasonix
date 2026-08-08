@@ -560,6 +560,10 @@ type Agent struct {
 	stormSig   string
 	stormCount int
 
+	// progress escalates adaptively on consecutive zero-evidence-gain rounds
+	// (see progress_guard.go); reset with the evidence ledger each turn.
+	progress progressGuard
+
 	// repeatFailureCounts tracks semantically identical write-like calls that
 	// keep failing with the same failure class. Unlike stormSig, successful
 	// reads do not blindly clear this state: re-reading a file and then
@@ -1811,34 +1815,6 @@ func (a *Agent) deliveryMutationCheckpointReady() bool {
 		a.evidence.HasSuccessfulDeliverySignoffAfter(mutation) &&
 		a.evidence.HasSuccessfulReviewAfter(mutation) &&
 		a.deliveryReviewGateFailure() == ""
-}
-
-// armLoopGuardPass records that a loop guard fired this user turn.
-// receiptMark is the evidence-ledger receipt count from just before the
-// guarded batch ran, so a successful write or command receipt recorded after
-// it counts as real progress and revokes the pass (see loopGuardAllowsFinal).
-func (a *Agent) armLoopGuardPass(receiptMark int) {
-	a.loopGuardArmed = true
-	a.loopGuardReceiptMark = receiptMark
-}
-
-// loopGuardAllowsFinal reports whether final readiness should stand down: a
-// loop guard fired this user turn and no host-observable progress — a
-// successful write or command receipt — has landed since. In that state the
-// missing receipts are exactly what the blocker prevents, so demanding them
-// would restart the retry loop the guard just broke; the model must be free to
-// report the blocker instead. The bookkeeping the guard recommends (ask,
-// todo_write, complete_step) produces neither write nor command receipts, so
-// it keeps the pass; real progress revokes it because receipts are obtainable
-// again and readiness should resume enforcing them.
-func (a *Agent) loopGuardAllowsFinal() bool {
-	if a == nil || !a.loopGuardArmed {
-		return false
-	}
-	if a.evidence == nil {
-		return true
-	}
-	return !a.evidence.HasWriteOrCommandSince(a.loopGuardReceiptMark)
 }
 
 func finalReadinessIncompleteTodos(items []evidence.TodoStepMatch) string {

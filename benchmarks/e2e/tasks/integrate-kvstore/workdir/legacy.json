@@ -1,0 +1,6 @@
+{
+  "harbor": 12,
+  "lantern": {"lit": true, "wicks": 2},
+  "mill": [3, 5, 8],
+  "quay": "stone"
+}

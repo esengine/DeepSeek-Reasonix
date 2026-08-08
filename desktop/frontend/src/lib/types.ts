@@ -1589,7 +1589,7 @@ export interface ProviderView {
   keySourcePath?: string;
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
-  reasoningProtocol: string; // auto|deepseek|glm|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|deepseek|glm|kimi-k3|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
   webSearch?: boolean; // expose a provider-executed web search tool when supported
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default

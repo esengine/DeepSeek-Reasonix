@@ -1,0 +1,7 @@
+prompt = """handlers.py duplicates the same request-validation block in three handlers. Refactor it:
+- create validation.py with a single validate_request(req) function holding that logic
+- all three handlers must call it instead of their inline copies
+- behavior must stay identical: the same requests are accepted/rejected with the same error messages"""
+class = "refactor"
+max_steps = 20
+timeout_sec = 300

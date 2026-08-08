@@ -4963,6 +4963,25 @@ a[href] {
   line-height: 1.72;
   white-space: pre-wrap;
 }
+.reasoning__body > .md,
+.turn-collapse__inline-reasoning > .md,
+.tool__subagent-preview-text--markdown > .md {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+}
+.reasoning__body > .md p,
+.turn-collapse__inline-reasoning > .md p,
+.tool__subagent-preview-text--markdown > .md p {
+  margin-bottom: 8px;
+}
+.reasoning__body > .md :where(h1, h2, h3, h4),
+.turn-collapse__inline-reasoning > .md :where(h1, h2, h3, h4),
+.tool__subagent-preview-text--markdown > .md :where(h1, h2, h3, h4) {
+  margin: 12px 0 6px;
+  font-size: 1em;
+}
 /* ── markdown prose ──────────────────────────────────────────────────────── */
 .md {
   font-family: var(--font-content-family);

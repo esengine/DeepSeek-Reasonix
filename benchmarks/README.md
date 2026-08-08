@@ -16,12 +16,7 @@ SWE-bench Verified mode:
 ```text
 benchmarks/
 ├── e2e/
-│   └── tasks/
-│       ├── compaction/            # task.toml + verify.sh + workdir/ seed
-│       ├── fix-add-bug/
-│       ├── fizzbuzz/
-│       ├── palindrome/
-│       └── subagent-delegation/
+│   └── tasks/                     # one dir per task: task.toml + verify.sh + workdir/ seed
 ├── swebench/
 │   ├── select_subset.py         # helper for choosing evaluation instances
 │   └── subset.json               # committed SWE-bench Verified subset
@@ -29,6 +24,29 @@ benchmarks/
     ├── main.go
     └── run/                       # state dir written by seed/resume (default)
 ```
+
+## Task corpus stratification
+
+The suite is stratified by real coding-agent workload classes, not toy-task
+convenience — the classes are what the per-class compare tables and marginal-
+utility readouts key on. Current coverage vs. target:
+
+| Class | Target | Committed | Notes |
+| --- | ---: | ---: | --- |
+| `atomic-bugfix` | 8 | 8 | short anchored fixes; routes ExecutorOnly by design |
+| `repo-exploration` | 6 | 6 | multi-file reading, invented-token answers so they can't be guessed |
+| `multi-file-bugfix` | 8 | 8 | one bug spanning ≥2 files; naturally engages the planner gate |
+| `refactor` | 6 | 6 | behavior-preserving restructuring, structure asserted |
+| `failing-test-diagnosis` | 6 | 6 | unittest suite red → fix source; tests checksummed |
+| `api-integration` | 4 | 4 | use a provided local package per its README |
+| `ambiguous` | 4 | 4 | underspecified ask; grader accepts the defensible core |
+| `long-horizon` | 4 | 4 | multi-requirement specs; planner-depth full |
+| `codegen` / `delegation` | — | 3 | legacy smoke tasks (fizzbuzz, palindrome, subagent-delegation) |
+
+Grader authoring rule: every task must fail `verify.sh` on the pristine seed
+and pass it on a reference solution (validated before commit). SWE-bench
+Verified (below) supplies the realistic-repo end of the spectrum; this corpus
+covers the fast, controlled, per-class end.
 
 Each task under `e2e/tasks/<id>/` contains:
 
@@ -75,6 +93,12 @@ lowercase) and compares it to the expected `aldermoor-verrin`;
 `fizzbuzz/verify.sh` imports the generated module and asserts on
 `fizzbuzz(3)`, `fizzbuzz(5)`, `fizzbuzz(15)`, `fizzbuzz(7)`.
 
+Python graders must start with
+`export PYTHONPYCACHEPREFIX="$(mktemp -d)"`: macOS system Python caches
+bytecode centrally keyed by absolute path, so an agent edit that keeps a
+file's size within the same mtime second would otherwise execute stale
+bytecode while tracebacks display the new source.
+
 ## Running the e2e suite
 
 Prerequisites: a `reasonix` binary (or `go run ./cmd/reasonix` …) with a
@@ -106,16 +130,19 @@ own outcome).
 
 | Flag | Default | Purpose |
 | --- | --- | --- |
-| `-mode` | `suite` | `suite` \| `diff` \| `swebench` (`diff` generates tests for the PR diff; `swebench` runs the official per-instance evaluation) |
+| `-mode` | `suite` | `suite` \| `diff` \| `swebench` \| `compare` \| `traj` (`diff` generates tests for the PR diff; `swebench` runs the official per-instance evaluation; `compare` renders KPI/Pareto readouts from 2+ `-json` reports; `traj` re-digests recorded trajectory files without spending tokens). |
 | `-suite` | `benchmarks/e2e` | Suite root (must contain `tasks/<id>/`). |
+| `-task` | *(all)* | Suite mode: run only these comma-separated task IDs (e.g. `-task fix-add-bug`); unknown IDs fail with the available list. |
+| `-attempts` | `1` | Suite and diff modes: retry a task until an attempt passes, up to N; enables the `Pass@≤N` KPI, and TTCS charges a retried solve with its failed attempts' wall. |
 | `-bin` | `reasonix` | Path to the reasonix binary. |
 | `-model` | *(config default)* | Provider/model name. |
-| `-profile` | `baseline` | Prompt profile: `baseline` \| `delivery`. `delivery` appends `--profile delivery` to the agent invocation. |
+| `-profile` | `baseline` | Tool-surface/runtime tier: `baseline` \| `economy` \| `balanced` \| `delivery`. All but `baseline` append `--profile <tier>` to the agent invocation; `baseline` passes no flag (byte-identical legacy control, behaviorally `balanced`). Economy starts with the core tool set and pays `connect_tool_source` rounds plus prefix resets to grow it — the report's Tool surface line prices that trade. |
 | `-ablate` | *(none)* | Ablation arm: comma-separated subsystems to switch off — `evidence`, `planner`, `subagent`, `retrieval`, `compaction`; `none` \| `all`. |
 | `-out` | *(stdout)* | Write the markdown report here. |
 | `-json` | *(none)* | Write the JSON report here (optional). |
 | `-trajectories` | *(none)* | Suite mode: write one `<task-id>.trajectory.jsonl` per task into this directory (the agent's full event stream with timestamps — see `reasonix run --trajectory`). The report gains a time-attribution line (tools vs. model) and each JSON result a `trajectory` digest. |
 | `-force-planner` | `false` | Suite mode: prefix each prompt with a plan-first directive so the two-model turn engages regardless of the planner gate. Use for the "with planner" arm of an A/B; results carry `plan_forced` so arms are only comparable with equal forcing. |
+| `-cache` | `cold` | Suite mode: `cold` runs each task as a fresh session (the fair cross-agent comparison arm); `warm` primes the provider prefix cache with a one-step run in the same workdir first, measuring the long-lived-session steady state. Never mix arms in one report — compare them with `-mode compare cold.json warm.json`. |
 | `-budget` | `800000` | Abort once total tokens cross this (`0` = no cap). Remaining tasks are reported as skipped. |
 
 Diff-mode flags:
@@ -128,6 +155,17 @@ Diff-mode flags:
 | `-max-steps` | `80` | Agent tool-call cap for the diff task. |
 | `-timeout` | `1200` | Agent timeout in seconds (diff mode). |
 | `-attempts` | `1` | Diff mode: retry up to N times until a run passes (stochastic agent). |
+
+## Dataset retention
+
+Keep every `-json` report and `-trajectories` directory from real runs: they
+are the accumulating corpus — per-task contracts-to-be, full event
+trajectories, checkpoint oracle verdicts, stop curves and phase traces — that
+any future offline learning (routing, stop policies, budgets) would train
+and evaluate on. The control plane stays deterministic and interpretable
+until that corpus reaches a scale where learned policies can be judged
+against the same oracles that produced it; nothing learned lands before it
+beats the deterministic baseline on these numbers.
 
 ## A/B compare mode
 
@@ -173,16 +211,11 @@ writer.
 4. Write `verify.sh`: `set -e`, exit 0 iff the agent's artifacts are correct.
    Keep the expected answer out of the prompt and seed; the script runs in the
    work dir and may validate anything the agent produced.
-5. Run the suite. Since `e2ebench` has no single-task filter, iterate against a
-   scratch suite root:
+5. Iterate on just that task with the single-task filter, then commit:
 
    ```sh
-   mkdir -p scratch/tasks/<task-id>
-   cp -r benchmarks/e2e/tasks/<task-id>/* scratch/tasks/<task-id>/
-   go run ./cmd/e2ebench -suite scratch
+   go run ./cmd/e2ebench -task <task-id>
    ```
-
-   When it passes, remove the scratch dir and commit the task.
 
 ## context-maintenance-e2e
 
