@@ -238,8 +238,10 @@ func TestModelingToolsRespectWorkspaceConfinement(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("s3cr3t"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// Sensitive forbid-read root (like session temp).
-	sensitive := filepath.Join(dir, "session-temp")
+	// Sensitive forbid-read root (like session temp) — inside workDir so the
+	// forbid-root rejection is genuinely reached (rel check would otherwise
+	// reject first and never exercise confineRead).
+	sensitive := filepath.Join(root, "session-temp")
 	if err := os.MkdirAll(sensitive, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -296,9 +298,12 @@ f 2 6 7 3
 		b[8] = byte(kids); b[9] = byte(kids >> 8); b[10] = byte(kids >> 16); b[11] = byte(kids >> 24)
 		return b
 	}
-	xyz := []byte{1, 0, 0, 0, 0, 0, 0, 0} // XYZI: 1 voxel at (0,0,0), color 0
+	sizeBody := []byte{1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0} // SIZE: 1x1x1
+	xyz := []byte{1, 0, 0, 0, 0, 0, 0, 0}                     // XYZI: 1 voxel at (0,0,0), color 0
 	xyzBody := append([]byte{1, 0, 0, 0}, xyz...)
-	minVox = append(minVox, hdr("MAIN", 0, uint32(len(xyzBody)+12))...)
+	minVox = append(minVox, hdr("MAIN", 0, 0)...) // children live flat after MAIN (matches WriteVox)
+	minVox = append(minVox, hdr("SIZE", uint32(len(sizeBody)), 0)...)
+	minVox = append(minVox, sizeBody...)
 	minVox = append(minVox, hdr("XYZI", uint32(len(xyzBody)), 0)...)
 	minVox = append(minVox, xyzBody...)
 	if err := os.WriteFile(filepath.Join(root, "src.vox"), minVox, 0o644); err != nil {
@@ -315,6 +320,11 @@ f 2 6 7 3
 	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"src.vox","format":"vox","out":"`+secret+`"}`))
 	if err == nil {
 		t.Fatal("convert vox branch out outside roots must fail")
+	}
+	// In-root vox→vox copy succeeds — proves the escape case above is rejected
+	// by the guard, not by a parse error (not a false positive).
+	if _, err := cv.Execute(context.Background(), json.RawMessage(`{"path":"src.vox","format":"vox","out":"copy.vox"}`)); err != nil {
+		t.Fatalf("in-root vox copy should succeed: %v", err)
 	}
 	// In-root output still works (sanity: the guard is not over-eager).
 	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"cube.obj","format":"stl","out":"cube.stl"}`))

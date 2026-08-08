@@ -56,6 +56,15 @@ func modelingGuardRead(workDir string, forbidRoots []string, path string) error 
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
 		}
+		// Symlink escape: a link inside workDir may point outside it. Resolve
+		// when the file exists (parse would read it) and require the resolved
+		// path to stay inside workDir, mirroring confine's realPath handling.
+		if real, err := filepath.EvalSymlinks(path); err == nil {
+			rrel, rerr := filepath.Rel(workDir, real)
+			if rerr != nil || rrel == ".." || strings.HasPrefix(rrel, ".."+string(os.PathSeparator)) {
+				return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+			}
+		}
 	}
 	if confineRead(forbidRoots, path) {
 		return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
