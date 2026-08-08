@@ -2459,9 +2459,16 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 		_ = setTopicTitleWithSource(workspaceRoot, topicID, t, source)
 	}
 
+	// Match createTabEntry / New Session: seed the configured desktop default
+	// model before the async controller build. Heartbeat and other inactive
+	// openers previously left tab.model empty, so the first build fell through
+	// session-meta / provider-access fallbacks and could stamp the official
+	// DeepSeek flash ref instead of the user's default_model (#7481).
+	defaultModel, _ := desktopNewSessionDefaults(scope, actualRoot)
+
 	if sessionPath == "" {
 		var err error
-		sessionPath, err = createEmptySessionFile(desktopSessionDir(actualRoot), "")
+		sessionPath, err = createEmptySessionFile(desktopSessionDir(actualRoot), defaultModel)
 		if err != nil {
 			a.mu.Unlock()
 			return TabMeta{}, err
@@ -2480,6 +2487,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 		TopicTitle:       topicTitle,
 		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID),
 		SessionPath:      sessionPath,
+		model:            defaultModel,
 		disabledMCP:      map[string]ServerView{},
 	}
 	applyTabSessionProfile(tab, profile)

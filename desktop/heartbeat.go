@@ -351,6 +351,10 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 	t.ApprovalMode = mode
 	e.app.SetToolApprovalModeForTab(tabMeta.ID, mode)
 
+	// Automation should follow the user's configured default_model, not a
+	// sticky session/provider-access fallback left on a reused topic (#7481).
+	e.app.applyHeartbeatDefaultModel(tabMeta.ID, scope, workspaceRoot)
+
 	// Attach bot event forwarding if the bot runtime is active and has
 	// session-mapped targets. The forwarder is set on the tab's event sink
 	// so AI output events are streamed to connected bot channels in
@@ -383,6 +387,46 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 		t.CreatedAt = t.LastRunAt
 	}
 	return t
+}
+
+// applyHeartbeatDefaultModel switches the tab onto the configured desktop
+// default_model before a scheduled prompt runs. Reused heartbeat topics can
+// otherwise keep a stale session model (often the built-in DeepSeek flash ref)
+// from an earlier build that never saw tab.model seeded (#7481).
+func (a *App) applyHeartbeatDefaultModel(tabID, scope, workspaceRoot string) {
+	if a == nil {
+		return
+	}
+	want, _ := desktopNewSessionDefaults(scope, workspaceRoot)
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return
+	}
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return
+	}
+	a.mu.RLock()
+	current := strings.TrimSpace(tab.model)
+	removed := tab.removed
+	a.mu.RUnlock()
+	if current == want {
+		return
+	}
+	// Live desktop runtime: rebuild the controller onto the default. Tests that
+	// inject stub controllers mark the tab removed and only need tab.model.
+	if a.ctx != nil && !removed {
+		if err := a.SetModelForTab(tabID, want); err != nil {
+			log.Printf("[heartbeat] SetModelForTab(%q): %s", want, secrets.RedactError(err))
+		}
+		return
+	}
+	a.mu.Lock()
+	if tab := a.tabs[tabID]; tab != nil {
+		tab.model = want
+		tab.Label = want
+	}
+	a.mu.Unlock()
 }
 
 // ListTasks returns a copy of the current tasks (in-memory).
