@@ -55,6 +55,7 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	if err != nil {
 		return samplingRequest{}, err
 	}
+	a.lastSentChars.Store(int64(charsOfMessages(req.Messages)))
 	return samplingRequest{req: freezeProviderRequest(req)}, nil
 }
 
