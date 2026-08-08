@@ -278,6 +278,50 @@ func TestMaybeCompactOnResumeWarmMidPromptUntouched(t *testing.T) {
 	}
 }
 
+// TestMaybeCompactOnResumeProjectionSmallCanonicalHugeUntouched guards the
+// resume gate against the canonical transcript: a valid projection plus tail
+// is the exact sent shape, so a huge canonical history behind a small
+// projection must NOT trigger the gate (Copilot review 8/8: "estimate the
+// model-visible messages instead").
+func TestMaybeCompactOnResumeProjectionSmallCanonicalHugeUntouched(t *testing.T) {
+	sink := &recordSink{}
+	a := &Agent{
+		prov:          &sharedWindowBudgetProvider{budget: 128 * 1024},
+		contextWindow: 100_000,
+		outputBudget:  128 * 1024,
+		cacheState:    CacheStateWarm,
+		sink:          sink,
+		workspaceID:   "ws",
+		sessionPath:   "sess.jsonl",
+		modelRef:      "model",
+	}
+	// Canonical history alone (~90K ASCII) exceeds the 100K - 8K - 8K gate.
+	canonical := []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("a", 90_000)},
+	}
+	a.session = newSessionWithMsgs(canonical)
+	msgs, version := a.session.snapshotMessagesVersion()
+	// A valid projection keeps the model-visible shape tiny.
+	a.compactionState = CompactionState{
+		TranscriptVersion: version,
+		PromptCacheKey:    "ws|sess|model",
+		Projection: ContextProjection{
+			Messages: []provider.Message{
+				{Role: provider.RoleSystem, Content: "sys"},
+				{Role: provider.RoleUser, Content: "summary"},
+			},
+			TranscriptVersion: version,
+			CoveredCount:      len(msgs),
+			CoveredPrefixHash: coveredPrefixHash(msgs, len(msgs)),
+		},
+	}
+	a.MaybeCompactOnResume(context.Background())
+	if got := len(sink.kinds(event.CompactionStarted)); got != 0 {
+		t.Fatalf("resume with a small valid projection compacted (%d starts), want none", got)
+	}
+}
+
 // capturingBudgetProvider embeds sharedFakeProvider and records the MaxTokens
 // of the last streamed request plus how many streams ran.
 type capturingBudgetProvider struct {
