@@ -368,17 +368,20 @@ func TestModelingAtomicAddCube(t *testing.T) {
 func TestModelingAtomicWriteGuard(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "ws")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
+	subRoot := filepath.Join(root, "data") // write roots are NARROWER than workDir
+	for _, d := range []string{root, subRoot} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	at := modelingAtomic{workDir: root, forbidRoots: []string{}, roots: []string{root}}
-	// path resolves inside root but the file may not exist; write guard should
-	// still run BEFORE RunAtomic — unknown op is irrelevant, we just need the
-	// guard to fire on an escaping path.
-	if _, err := at.Execute(context.Background(), json.RawMessage(`{"op":"add_cube","path":"../escape.blend"}`)); err == nil {
-		t.Fatal("modeling_atomic write outside roots must fail")
+	at := modelingAtomic{workDir: root, forbidRoots: []string{}, roots: []string{subRoot}}
+	// Path inside workDir but OUTSIDE the write roots: the read guard passes
+	// (workDir rel check), the write guard must reject — this genuinely hits
+	// modelingGuardWrite (a ../ escape would die in the read guard instead).
+	if _, err := at.Execute(context.Background(), json.RawMessage(`{"op":"add_cube","path":"escape.blend"}`)); err == nil {
+		t.Fatal("modeling_atomic write outside write roots must fail")
 	}
-	// Guard must not over-block in-root paths (parse/exec error is fine, not a confinement error).
+	// Unknown op is rejected before any file operation (no guard needed).
 	if _, err := at.Execute(context.Background(), json.RawMessage(`{"op":"nope","path":"in.blend"}`)); err == nil {
 		t.Fatal("unknown op must fail")
 	}
