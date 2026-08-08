@@ -708,10 +708,12 @@ const minOutputBudget = 8 * 1024
 // MaybeCompactOnResume compacts a freshly resumed session before the first
 // send when the prompt cannot fit inside the provider's shared context window
 // alongside the output budget (DeepSeek rejects input + max_output_tokens >
-// context_window with HTTP 400), or when the cache is cold and the prompt has
-// grown past the budget-aware force mark. Warm resumes with a small prompt are
-// left untouched so the cached prefix survives. Never rewrites the canonical
-// transcript; only the model-visible projection changes.
+// context_window with HTTP 400). Warm resumes and cold resumes within the
+// input allowance are left untouched so the cached prefix survives — matching
+// the deferred-compaction policy upstream: cold-cache replay pays the miss
+// price once, which is cheaper than rewriting the prefix on every resume.
+// Never rewrites the canonical transcript; only the model-visible projection
+// changes.
 func (a *Agent) MaybeCompactOnResume(ctx context.Context) {
 	if a == nil || a.session == nil || a.contextWindow <= 0 {
 		return
@@ -721,26 +723,12 @@ func (a *Agent) MaybeCompactOnResume(ctx context.Context) {
 	}
 	msgs, _ := a.session.snapshotMessagesVersion()
 	est := a.estimatedPromptTokens(msgs)
-	budget := a.outputBudget
-	if a.maxOutputTokens > 0 {
-		budget = a.maxOutputTokens
-	}
 	// The prompt alone already leaves no room for output: any request would be
 	// rejected regardless of cache state. Compact unconditionally.
 	if est >= a.contextWindow-minOutputBudget-outputBudgetReserve {
 		if err := a.CompactNow(ctx, ""); err == nil {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
 				"resumed session prompt ~%d tokens est. exceeds the shared context window's input allowance — compacted before first send", est)})
-		}
-		return
-	}
-	// Cold cache + prompt past the budget-aware force mark: a full-history
-	// replay would pay the miss price on the whole prefix. Compact once so the
-	// first send is a small, stable, cacheable prefix.
-	if budget > 0 && a.cacheState == CacheStateCold && est >= a.forceThreshold() {
-		if err := a.CompactNow(ctx, ""); err == nil {
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
-				"resumed after provider-cache expiry with ~%d tokens est. — compacted before first send (cold replay would pay full price)", est)})
 		}
 	}
 }
