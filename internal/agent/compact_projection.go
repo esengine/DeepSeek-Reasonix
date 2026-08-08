@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"reasonix/internal/event"
@@ -607,8 +608,25 @@ func (a *Agent) installPruneProjection(view []provider.Message, st PruneStats) e
 }
 
 // emitCompactionTelemetry records structured compaction observability without
-// logging sensitive transcript content.
+// logging sensitive transcript content. The slog record persists to the
+// session's log file (CLI binds the default logger to ~/.reasonix/logs), so a
+// later cache-miss window can be attributed to a specific compaction.
 func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
+	attrs := []any{
+		"trigger", t.Trigger, "mode", t.Mode, "cache", t.CacheState,
+		"src", t.SourceTokens, "proj", t.ProjectionTokens,
+		"in", t.InputTokens, "out", t.OutputTokens,
+		"hit", t.CacheHitTokens, "miss", t.CacheMissTokens,
+		"write", t.CacheWriteTokens, "reqs", t.RequestCount,
+	}
+	if t.ProviderRequestID != "" {
+		attrs = append(attrs, "provider_request_id", t.ProviderRequestID)
+	}
+	if t.Error != "" {
+		slog.Warn("agent: compaction", append(attrs, "err", t.Error)...)
+	} else {
+		slog.Info("agent: compaction", attrs...)
+	}
 	detail := fmt.Sprintf("trigger=%s mode=%s cache=%s src=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d",
 		t.Trigger, t.Mode, t.CacheState, t.SourceTokens, t.ProjectionTokens,
 		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount)
