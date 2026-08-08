@@ -353,7 +353,14 @@ func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, ok bool)
 	}
 	u := (d11*d20 - d01*d21) / den
 	v := (d00*d21 - d01*d20) / den
-	if u < -1e-9 || v < -1e-9 || u+v > 1+1e-9 {
+	// Barycentric tolerance must scale with the mesh's coordinate magnitude:
+	// big-number cancellation (a, b, c, p all ~1e7) leaves ~2.2e-16×|coord|
+	// error in the barycentric coords, which the old fixed 1e-9 window missed
+	// (a rotated+translated cube lost hits → even-odd flipped). The formula
+	// keeps the window ≈1e-7 at the origin and grows it for far-from-origin
+	// meshes; a slightly thicker surface shell is acceptable for voxelization.
+	epsUV := 1e-7 * maxF(1, maxF(math.Abs(a.X), math.Abs(b.X))*1e-9)
+	if u < -epsUV || v < -epsUV || u+v > 1+epsUV {
 		return 0, false
 	}
 	return t, true

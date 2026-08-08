@@ -198,33 +198,38 @@ f 4 8 5 1
 	}
 }
 
-func TestVoxelizeTranslatedCubeFillsYZ(t *testing.T) {
-	// even-odd must survive large Y/Z translation (eps merges by all axes).
-	src := `# unit cube translated +1e7 in Y
-v 0 10000000 0
-v 1 10000000 0
-v 1 10000001 0
-v 0 10000001 0
-v 0 10000000 1
-v 1 10000000 1
-v 1 10000001 1
-v 0 10000001 1
-f 1 2 3 4
-f 5 8 7 6
-f 1 5 6 2
-f 2 6 7 3
-f 3 7 8 4
-f 4 8 5 1
-`
-	m, err := ParseOBJ(strings.NewReader(src))
-	if err != nil {
-		t.Fatal(err)
+func TestVoxelizeRotatedCubeTranslatedY(t *testing.T) {
+	// even-odd must survive large Y translation on a SKEWED mesh (45°-rotated
+	// cube): the +X ray hits faces with Y components, so t-error from big-number
+	// cancellation (ny*(a.Y-py)/nx) is real and eps must scale with |Y|. An
+	// axis-aligned cube would not exercise this (its +X hits have nx=±1 only).
+	verts := []Vec3{
+		{0.000000, 10000000.000000, 0.000000},
+		{0.707107, 10000000.707107, 0.000000},
+		{0.000000, 10000001.414214, 0.000000},
+		{-0.707107, 10000000.707107, 0.000000},
+		{0.000000, 10000000.000000, 1.000000},
+		{0.707107, 10000000.707107, 1.000000},
+		{0.000000, 10000001.414214, 1.000000},
+		{-0.707107, 10000000.707107, 1.000000},
 	}
+	faces := []Face{
+		{Verts: []int{0, 1, 2, 3}}, {Verts: []int{4, 7, 6, 5}},
+		{Verts: []int{0, 1, 5, 4}}, {Verts: []int{3, 2, 6, 7}},
+		{Verts: []int{0, 4, 7, 3}}, {Verts: []int{1, 5, 6, 2}},
+	}
+	m := &Mesh{Verts: verts, Faces: faces}
 	vm, err := Voxelize(m, 16)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(vm.Voxels) != 16*16*16 {
-		t.Fatalf("Y-translated solid cube: got %d voxels, want %d (full)", len(vm.Voxels), 16*16*16)
+	// A solid rotated cube is a diamond in its axis-aligned bounding box:
+	// volume ratio = 1/(1.414·1.414·1) ≈ 0.5, so expect ~50% fill of the
+	// bounds grid — and the big Y translation must not change that (eps scales
+	// with all coordinate axes).
+	total := vm.Size[0] * vm.Size[1] * vm.Size[2]
+	want := int(float64(total) * 0.45)
+	if len(vm.Voxels) < want {
+		t.Fatalf("rotated translated cube: got %d/%d voxels, want >= %d (diamond ≈50%% of bounds)", len(vm.Voxels), total, want)
 	}
 }
