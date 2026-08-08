@@ -1,0 +1,4 @@
+prompt = "Read the code and determine which theme name main.active() actually returns. Write only that theme name to answer.txt."
+class = "repo-exploration"
+max_steps = 25
+timeout_sec = 420

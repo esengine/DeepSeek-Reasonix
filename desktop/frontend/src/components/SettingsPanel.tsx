@@ -836,7 +836,7 @@ const COMPACT_RATIO_PRESETS = [
   [0.8, "settings.compactRatioPreset.80"],
   [0.85, "settings.compactRatioPreset.85"],
 ] as const;
-const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "openai", "none"];
+const REASONING_PROTOCOLS: readonly string[] = ["", "deepseek", "glm", "kimi-k3", "openai", "none"];
 const THINKING_MODES: readonly string[] = ["", "enabled", "disabled", "adaptive"];
 const PROXY_TYPES = ["http", "https", "socks5", "socks5h"] as const;
 const LANGUAGE_PREFS: LangPref[] = ["", "zh", "en"];
@@ -1544,8 +1544,8 @@ function reasoningProtocolLabel(protocol: string, t: ReturnType<typeof useT>): s
   switch (protocol) {
     case "deepseek":
       return t("settings.reasoningProtocol.deepseek");
-    case "glm":
-      return t("settings.reasoningProtocol.glm");
+    case "glm": return t("settings.reasoningProtocol.glm");
+    case "kimi-k3": return t("settings.reasoningProtocol.kimiK3");
     case "openai":
       return t("settings.reasoningProtocol.openai");
     case "none":

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -43,17 +44,21 @@ func requestsBySourceLine(bySource map[string]sourceUsage) string {
 // accounting conventions as renderBody: spend totals cover accounted runs
 // (failures included) and per-solved figures divide by accounted solves.
 type armStats struct {
-	Ran, Solved, AccountedSolved       int
-	Steps, Tools, Rounds, PlannerCalls int
-	Tokens                             int
-	Cost                               float64
-	WallMs                             int64
-	ByClass                            map[string]classStats
+	Ran, Pass1, Solved, AccountedSolved int
+	Steps, Tools, Rounds, PlannerCalls  int
+	Tokens, Hit, Miss                   int
+	Cost                                float64
+	WallMs                              int64
+	FirstHit, FirstMiss                 int64
+	Damaged, WithCorrect                int
+	TTCS, TTFT                          []int64
+	ByClass                             map[string]classStats
 }
 
 type classStats struct {
 	Ran, Solved int
 	WallMs      int64
+	TTCS        []int64
 }
 
 func aggregateArm(results []result) armStats {
@@ -62,18 +67,37 @@ func aggregateArm(results []result) armStats {
 		if r.Skipped {
 			continue
 		}
-		s.Ran++
+		// Retry entries share their task's denominator: only first attempts
+		// count into Ran, matching renderBody's task-not-attempt convention.
+		if r.Attempt <= 1 {
+			s.Ran++
+			if r.Passed {
+				s.Pass1++
+			}
+		}
 		if r.Passed {
 			s.Solved++
+			if r.TTCSMs > 0 {
+				s.TTCS = append(s.TTCS, r.TTCSMs)
+			} else {
+				s.TTCS = append(s.TTCS, r.WallMs)
+			}
 		}
 		label := r.Class
 		if label == "" {
 			label = "unclassified"
 		}
 		c := s.ByClass[label]
-		c.Ran++
+		if r.Attempt <= 1 {
+			c.Ran++
+		}
 		if r.Passed {
 			c.Solved++
+			if r.TTCSMs > 0 {
+				c.TTCS = append(c.TTCS, r.TTCSMs)
+			} else {
+				c.TTCS = append(c.TTCS, r.WallMs)
+			}
 		}
 		c.WallMs += r.WallMs
 		s.ByClass[label] = c
@@ -86,11 +110,24 @@ func aggregateArm(results []result) armStats {
 		s.Steps += r.Steps
 		s.Tools += r.ToolCalls
 		s.Tokens += r.PromptTokens + r.CompletionTokens
+		s.Hit += r.CacheHitTokens
+		s.Miss += r.CacheMissTokens
 		s.Cost += r.Cost
 		s.WallMs += r.WallMs
 		s.PlannerCalls += r.UsageBySource["planner"].Calls
 		if r.Trajectory != nil {
 			s.Rounds += r.Trajectory.ModelRounds
+			if r.Trajectory.TTFTMs > 0 {
+				s.TTFT = append(s.TTFT, r.Trajectory.TTFTMs)
+			}
+			s.FirstHit += r.Trajectory.FirstReqCacheHitTokens
+			s.FirstMiss += r.Trajectory.FirstReqCacheMissTokens
+		}
+		if r.FirstCorrectMs > 0 {
+			s.WithCorrect++
+			if r.RegressedAfterCorrect {
+				s.Damaged++
+			}
 		}
 	}
 	return s
@@ -104,16 +141,125 @@ func perSolved(total float64, solved int) string {
 }
 
 func runCompareMode(outMD string) {
-	if flag.NArg() != 2 {
-		fmt.Fprintln(os.Stderr, "compare mode wants two -json report files: e2ebench -mode compare a.json b.json")
+	if flag.NArg() < 2 {
+		fmt.Fprintln(os.Stderr, "compare mode wants two or more -json report files: e2ebench -mode compare a.json b.json [c.json ...]")
 		os.Exit(2)
 	}
-	report, err := compareReports(flag.Arg(0), flag.Arg(1))
+	var report string
+	var err error
+	if flag.NArg() == 2 {
+		report, err = compareReports(flag.Arg(0), flag.Arg(1))
+	} else {
+		report, err = multiCompareReport(flag.Args())
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "compare:", err)
 		os.Exit(1)
 	}
 	emit(report, outMD, "")
+}
+
+func loadArm(path string) (armStats, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return armStats{}, err
+	}
+	var results []result
+	if err := json.Unmarshal(data, &results); err != nil {
+		return armStats{}, fmt.Errorf("%s: %w", path, err)
+	}
+	return aggregateArm(results), nil
+}
+
+// multiCompareReport is the N-arm readout: one KPI row per arm, then the
+// Pareto section — the question for a lineup is frontier position, not
+// pairwise deltas.
+func multiCompareReport(paths []string) (string, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## e2ebench comparison: %d arms\n\n", len(paths))
+	b.WriteString("| Arm | Pass@1 | Solved | TTFT | TTCS median | TTCS p90 | Solved/hour | 1st-req cache | Requests/solved | Tokens/solved | Cost/solved |\n")
+	b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n")
+	points := make([]paretoPoint, 0, len(paths))
+	arms := make([]armStats, 0, len(paths))
+	for _, path := range paths {
+		s, err := loadArm(path)
+		if err != nil {
+			return "", err
+		}
+		arms = append(arms, s)
+		p := newParetoPoint(path, s)
+		points = append(points, p)
+		solvedPerHour := "—"
+		if s.WallMs > 0 {
+			solvedPerHour = fmt.Sprintf("%.1f", float64(s.Solved)*3_600_000/float64(s.WallMs))
+		}
+		cost := "—"
+		if s.AccountedSolved > 0 {
+			cost = fmt.Sprintf("%.4f", s.Cost/float64(s.AccountedSolved))
+		}
+		fmt.Fprintf(&b, "| `%s` | %s | %d/%d | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			p.label, pct(s.Pass1, s.Ran), s.Solved, s.Ran, durMs(median(s.TTFT)),
+			dur(median(s.TTCS)), dur(pctile(s.TTCS, 90)), solvedPerHour,
+			pct(int(s.FirstHit), int(s.FirstHit+s.FirstMiss)),
+			perSolved(float64(s.Steps), s.AccountedSolved),
+			tokensPerSolved(s.Tokens, s.AccountedSolved), cost)
+	}
+	b.WriteString("\n" + paretoSection(points))
+	b.WriteString(perClassWinners(paths, arms))
+	b.WriteString("<sub>Per-solved figures divide each arm's accounted totals (failures included) by its accounted solves; TTCS charges a retried solve with its failed attempts' wall.</sub>\n")
+	return b.String(), nil
+}
+
+// perClassWinners is the routing readout: per task class, each arm's solve
+// rate and TTCS median, and the winner (best solve rate, ties to the faster
+// arm). A global default hides exactly this — the class that a leaner arm
+// wins outright is a host-side routing opportunity, no classifier call needed.
+func perClassWinners(paths []string, arms []armStats) string {
+	classes := map[string]bool{}
+	for _, a := range arms {
+		for class := range a.ByClass {
+			if class != "unclassified" {
+				classes[class] = true
+			}
+		}
+	}
+	if len(classes) == 0 || len(arms) < 2 {
+		return ""
+	}
+	names := make([]string, 0, len(classes))
+	for class := range classes {
+		names = append(names, class)
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	b.WriteString("### Per-class winners\n\n| Class |")
+	labels := make([]string, len(paths))
+	for i, path := range paths {
+		labels[i] = strings.TrimSuffix(filepath.Base(path), ".json")
+		fmt.Fprintf(&b, " `%s` |", labels[i])
+	}
+	b.WriteString(" Winner |\n|---|")
+	b.WriteString(strings.Repeat("---:|", len(paths)) + "---|\n")
+	for _, class := range names {
+		fmt.Fprintf(&b, "| %s |", class)
+		winner, bestSolve, bestTTCS := "—", -1.0, int64(0)
+		for i, a := range arms {
+			c := a.ByClass[class]
+			if c.Ran == 0 {
+				b.WriteString(" — |")
+				continue
+			}
+			ttcs := median(c.TTCS)
+			fmt.Fprintf(&b, " %s · %s |", pct(c.Solved, c.Ran), dur(ttcs))
+			solve := float64(c.Solved) / float64(c.Ran)
+			if solve > bestSolve || (solve == bestSolve && c.Solved > 0 && ttcs < bestTTCS) {
+				winner, bestSolve, bestTTCS = labels[i], solve, ttcs
+			}
+		}
+		fmt.Fprintf(&b, " %s |\n", winner)
+	}
+	return b.String() + "\n"
 }
 
 // accumulateSources folds one run's per-origin usage into the suite totals.
@@ -132,23 +278,25 @@ func accumulateSources(total map[string]sourceUsage, run map[string]sourceUsage)
 // the readout for an ablation experiment (e.g. control vs -ablate planner).
 func compareReports(pathA, pathB string) (string, error) {
 	arms := make([]armStats, 0, 2)
-	labels := []string{pathA, pathB}
-	for _, path := range labels {
-		data, err := os.ReadFile(path)
+	for _, path := range []string{pathA, pathB} {
+		s, err := loadArm(path)
 		if err != nil {
 			return "", err
 		}
-		var results []result
-		if err := json.Unmarshal(data, &results); err != nil {
-			return "", fmt.Errorf("%s: %w", path, err)
-		}
-		arms = append(arms, aggregateArm(results))
+		arms = append(arms, s)
 	}
 	a, bStats := arms[0], arms[1]
 	var b strings.Builder
 	fmt.Fprintf(&b, "## e2ebench A/B: `%s` vs `%s`\n\n", pathA, pathB)
 	fmt.Fprintf(&b, "| Metric | A | B |\n|---|---:|---:|\n")
 	fmt.Fprintf(&b, "| Solved | %d/%d (%s) | %d/%d (%s) |\n", a.Solved, a.Ran, pct(a.Solved, a.Ran), bStats.Solved, bStats.Ran, pct(bStats.Solved, bStats.Ran))
+	fmt.Fprintf(&b, "| Pass@1 | %s | %s |\n", pct(a.Pass1, a.Ran), pct(bStats.Pass1, bStats.Ran))
+	fmt.Fprintf(&b, "| TTFT median | %s | %s |\n", durMs(median(a.TTFT)), durMs(median(bStats.TTFT)))
+	fmt.Fprintf(&b, "| TTCS median | %s | %s |\n", dur(median(a.TTCS)), dur(median(bStats.TTCS)))
+	fmt.Fprintf(&b, "| TTCS p90 | %s | %s |\n", dur(pctile(a.TTCS, 90)), dur(pctile(bStats.TTCS, 90)))
+	fmt.Fprintf(&b, "| Cache hit | %s | %s |\n", pct(a.Hit, a.Hit+a.Miss), pct(bStats.Hit, bStats.Hit+bStats.Miss))
+	fmt.Fprintf(&b, "| First-request cache hit | %s | %s |\n", pct(int(a.FirstHit), int(a.FirstHit+a.FirstMiss)), pct(int(bStats.FirstHit), int(bStats.FirstHit+bStats.FirstMiss)))
+	fmt.Fprintf(&b, "| Overthinking damage | %s | %s |\n", pct(a.Damaged, a.WithCorrect), pct(bStats.Damaged, bStats.WithCorrect))
 	fmt.Fprintf(&b, "| Model requests / solved | %s | %s |\n", perSolved(float64(a.Steps), a.AccountedSolved), perSolved(float64(bStats.Steps), bStats.AccountedSolved))
 	fmt.Fprintf(&b, "| Planner requests / solved | %s | %s |\n", perSolved(float64(a.PlannerCalls), a.AccountedSolved), perSolved(float64(bStats.PlannerCalls), bStats.AccountedSolved))
 	fmt.Fprintf(&b, "| Model rounds / solved | %s | %s |\n", perSolved(float64(a.Rounds), a.AccountedSolved), perSolved(float64(bStats.Rounds), bStats.AccountedSolved))
@@ -157,7 +305,8 @@ func compareReports(pathA, pathB string) (string, error) {
 	fmt.Fprintf(&b, "| Wall seconds / solved | %s | %s |\n", perSolved(float64(a.WallMs)/1000, a.AccountedSolved), perSolved(float64(bStats.WallMs)/1000, bStats.AccountedSolved))
 	fmt.Fprintf(&b, "| Cost / solved | %s | %s |\n", perSolved(a.Cost, a.AccountedSolved), perSolved(bStats.Cost, bStats.AccountedSolved))
 	b.WriteString(marginalUtilitySection(a, bStats))
-	b.WriteString("\n<sub>Per-solved figures divide each arm's accounted totals (failures included) by its accounted solves.</sub>\n")
+	b.WriteString("\n" + paretoSection([]paretoPoint{newParetoPoint(pathA, a), newParetoPoint(pathB, bStats)}))
+	b.WriteString("<sub>Per-solved figures divide each arm's accounted totals (failures included) by its accounted solves.</sub>\n")
 	return b.String(), nil
 }
 

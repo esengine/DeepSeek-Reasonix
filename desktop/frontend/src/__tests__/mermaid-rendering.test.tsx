@@ -258,6 +258,12 @@ console.log("\nmermaid rendering");
   eq(pendingFrame, undefined, "tail growth alone schedules no further parse");
 
   await act(async () => {
+    root.render(<MarkdownTextProbe text={"...\nreplacement window"} streaming />);
+    await flushTimers();
+  });
+  eq(rootEl.textContent, "", "a rolling Markdown window drops its stale parsed prefix before paint");
+
+  await act(async () => {
     root.render(<MarkdownTextProbe text="complete" streaming={false} />);
   });
   eq(rootEl.textContent, "complete", "short stream finalization still commits immediately");

@@ -1,10 +1,20 @@
 // Run: tsx src/__tests__/message-reasoning-panel.test.tsx
 
 import { JSDOM } from "jsdom";
+import { registerHooks } from "node:module";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { LocaleProvider } from "../lib/i18n";
 import { AssistantMessage } from "../components/Message";
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.endsWith(".css")) {
+      return nextResolve("./asset-stub-for-tests.ts", { ...context, parentURL: import.meta.url });
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 let passed = 0;
 let failed = 0;
@@ -30,6 +40,7 @@ globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: { ...dom.window.navigator, language: "en-US" } });
 globalThis.Node = dom.window.Node;
+globalThis.Element = dom.window.Element;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.Event = dom.window.Event;
 globalThis.MouseEvent = dom.window.MouseEvent;
@@ -49,7 +60,7 @@ await act(async () => {
           kind: "assistant",
           id: "a1",
           text: "",
-          reasoning: "line one\nline two",
+          reasoning: "**important trace**\n\n- line one\n- line two\n\n`inline code`",
           streaming: false,
           reasoningComplete: true,
           reasoningDurationMs: 2_600,
@@ -67,9 +78,13 @@ ok(!document.querySelector(".reasoning__body"), "completed reasoning is collapse
 
 await act(async () => {
   header?.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
 });
 
 ok(document.querySelector(".reasoning__body")?.textContent?.includes("line two") ?? false, "clicking the header expands the reasoning body");
+ok(document.querySelector(".reasoning__body strong")?.textContent === "important trace", "reasoning renders Markdown emphasis");
+ok(document.querySelectorAll(".reasoning__body li").length === 2, "reasoning renders Markdown lists");
+ok(document.querySelector(".reasoning__body .md-code")?.textContent === "inline code", "reasoning renders Markdown inline code");
 
 await act(async () => {
   root.unmount();

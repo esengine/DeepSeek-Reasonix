@@ -32,7 +32,8 @@ const FRAME_MS = 1000 / 60;
 interface SimResult {
   frames: number;
   commits: number;
-  markdownParses: number;
+  answerMarkdownParses: number;
+  reasoningMarkdownParses: number;
   itemsIdentityBreaks: number;
   bumpSkipViolations: number;
   state: typeof initialState;
@@ -49,15 +50,20 @@ function simulate(spec: UIPerfScenario, base?: typeof initialState): SimResult {
 
   let frames = 0;
   let commits = 0;
-  let markdownParses = 0;
+  let answerMarkdownParses = 0;
+  let reasoningMarkdownParses = 0;
   let itemsIdentityBreaks = 0;
   let bumpSkipViolations = 0;
   let text = "";
-  let renderedLen = 0;
-  let lastParseAt = -Infinity;
+  let reasoning = "";
+  let answerRenderedLen = 0;
+  let reasoningRenderedLen = 0;
+  let lastAnswerParseAt = -Infinity;
+  let lastReasoningParseAt = -Infinity;
   let pendingChunks = 0;
   let index = 0;
   let firstBatch = true;
+  let reasoningFinalized = false;
 
   while (index < chunks.length) {
     frames += 1;
@@ -68,6 +74,7 @@ function simulate(spec: UIPerfScenario, base?: typeof initialState): SimResult {
       index += 1;
       pendingChunks -= 1;
       if (chunk.kind === "text") text += chunk.delta;
+      else reasoning += chunk.delta;
       batch.push({ tabId: "a", e: { kind: chunk.kind, text: chunk.delta } as WireEvent });
     }
     if (batch.length === 0) continue;
@@ -85,17 +92,31 @@ function simulate(spec: UIPerfScenario, base?: typeof initialState): SimResult {
       firstBatch = false;
     }
     const nowMs = frames * FRAME_MS;
-    if (nowMs - lastParseAt >= streamingMarkdownCommitInterval(text.length)) {
+    if (spec.reasoningVisible && reasoning.length > 0 && text.length > 0 && !reasoningFinalized) {
+      reasoningMarkdownParses += 1;
+      reasoningRenderedLen = reasoning.length;
+      reasoningFinalized = true;
+    }
+    if (spec.reasoningVisible && !reasoningFinalized && nowMs - lastReasoningParseAt >= streamingMarkdownCommitInterval(reasoning.length)) {
+      const target = streamingCommitTarget(reasoning);
+      if (target.length > reasoningRenderedLen) {
+        reasoningMarkdownParses += 1;
+        reasoningRenderedLen = target.length;
+        lastReasoningParseAt = nowMs;
+      }
+    }
+    if (nowMs - lastAnswerParseAt >= streamingMarkdownCommitInterval(text.length)) {
       const target = streamingCommitTarget(text);
-      if (target.length > renderedLen) {
-        markdownParses += 1;
-        renderedLen = target.length;
-        lastParseAt = nowMs;
+      if (target.length > answerRenderedLen) {
+        answerMarkdownParses += 1;
+        answerRenderedLen = target.length;
+        lastAnswerParseAt = nowMs;
       }
     }
   }
-  markdownParses += 1; // end-of-stream finalization parse
-  return { frames, commits, markdownParses, itemsIdentityBreaks, bumpSkipViolations, state };
+  if (text.length > answerRenderedLen) answerMarkdownParses += 1;
+  if (spec.reasoningVisible && reasoning.length > reasoningRenderedLen) reasoningMarkdownParses += 1;
+  return { frames, commits, answerMarkdownParses, reasoningMarkdownParses, itemsIdentityBreaks, bumpSkipViolations, state };
 }
 
 const byId = new Map(UI_PERF_SCENARIOS.map((s) => [s.id, s]));
@@ -111,8 +132,8 @@ const scenario = (id: string): UIPerfScenario => {
   const r = simulate(spec);
   ok(r.commits <= r.frames + 1, `01: one reducer pass per frame at most (${r.commits} commits / ${r.frames} frames)`);
   ok(
-    r.markdownParses <= spec.paragraphs + 3,
-    `01: markdown parses bounded by blocks, not ticks (${r.markdownParses} for ${spec.paragraphs} paragraphs)`,
+    r.answerMarkdownParses <= spec.paragraphs + 3,
+    `01: markdown parses bounded by blocks, not ticks (${r.answerMarkdownParses} for ${spec.paragraphs} paragraphs)`,
   );
   ok(r.state.live !== undefined && r.state.live.text.length >= spec.textChars, "01: full answer reached the live stream");
 }
@@ -123,7 +144,8 @@ const scenario = (id: string): UIPerfScenario => {
   const r = simulate(spec);
   const seconds = r.frames / 60;
   ok(r.commits / seconds <= 61, `02: state commits stay at or under display FPS (${(r.commits / seconds).toFixed(1)}/s)`);
-  ok(r.markdownParses <= spec.paragraphs + 3, `02: reasoning stream causes no markdown parses (${r.markdownParses})`);
+  ok(r.reasoningMarkdownParses <= 2, `02: visible reasoning Markdown stays within its parse budget (${r.reasoningMarkdownParses})`);
+  ok(r.answerMarkdownParses <= spec.paragraphs + 3, `02: answer Markdown keeps its existing parse budget (${r.answerMarkdownParses})`);
   ok(r.state.live !== undefined && r.state.live.reasoning.length >= spec.reasoningChars, "02: full reasoning reached the live stream");
   eq(r.state.live?.reasoningComplete, true, "02: answer text after reasoning completed it");
 }
@@ -134,12 +156,12 @@ const scenario = (id: string): UIPerfScenario => {
   const r = simulate(spec);
   ok(r.commits <= r.frames + 1, `03: commits bounded by frames (${r.commits}/${r.frames})`);
   ok(
-    r.markdownParses >= spec.codeFences,
-    `03: open fences keep committing so streamed code stays highlighted (${r.markdownParses} parses)`,
+    r.answerMarkdownParses >= spec.codeFences,
+    `03: open fences keep committing so streamed code stays highlighted (${r.answerMarkdownParses} parses)`,
   );
   ok(
-    r.markdownParses <= Math.ceil(r.frames / 3) + spec.paragraphs + spec.codeFences,
-    `03: parse cadence capped by the 50ms tier even inside fences (${r.markdownParses} parses / ${r.frames} frames)`,
+    r.answerMarkdownParses <= Math.ceil(r.frames / 3) + spec.paragraphs + spec.codeFences,
+    `03: parse cadence capped by the 50ms tier even inside fences (${r.answerMarkdownParses} parses / ${r.frames} frames)`,
   );
 }
 
@@ -168,6 +190,7 @@ const scenario = (id: string): UIPerfScenario => {
 {
   const r = simulate(scenario("UI-PERF-06"));
   eq(r.bumpSkipViolations, 0, "06: background streaming never trips the whole-App bump — liveStore only");
+  eq(r.reasoningMarkdownParses, 0, "06: background reasoning performs no Markdown parsing");
 }
 
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
