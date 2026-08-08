@@ -225,8 +225,14 @@ func (a *Agent) MaybeCompactOnResume(ctx context.Context) {
 	if !sharesContextWindow(a.prov) {
 		return
 	}
-	msgs, _ := a.session.snapshotMessagesVersion()
-	est := a.estimatedPromptTokens(msgs)
+	// Model-visible shape, not the canonical transcript: a large history with
+	// a small valid projection sends exactly projection + tail, so the gate
+	// must not fold a cached prefix on canonical bulk it never transmits.
+	msgs := a.modelVisibleMessages()
+	// Real-shape estimate without the overflow-guard safety factor: the resume
+	// gate must not fold a warm cached prefix on an estimate miss; under-
+	// estimating only defers compaction to the request path.
+	est := estimateMessagesTokens(provider.ModelMessages(msgs))
 	// The prompt alone already leaves no room for output: any request would be
 	// rejected regardless of cache state. Compact unconditionally.
 	if est >= a.contextWindow-minOutputBudget-outputBudgetReserve {
