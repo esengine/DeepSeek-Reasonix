@@ -87,8 +87,9 @@ func estimateTextTokens(s string) int {
 
 // estimatedPromptTokens returns a conservative prompt-token estimate for the
 // overflow-guard paths (preflight force, resume gate, shared-window budget
-// clipping): the fixed estimator under-counts CJK transcripts (~1.8x measured),
-// so the safety factor applies before usage, tokPerChar calibration after.
+// clipping). With real usage, tokPerChar calibration replaces the fixed
+// factor; before that, only the CJK share is scaled (the fixed estimator
+// under-counts CJK ~1.8x; a blanket 2x would compact at ~40% occupancy).
 func (a *Agent) estimatedPromptTokens(msgs []provider.Message) int {
 	est := estimateMessagesTokens(provider.ModelMessages(msgs))
 	if est <= 0 {
@@ -100,13 +101,45 @@ func (a *Agent) estimatedPromptTokens(msgs []provider.Message) int {
 		// factor is the measured ratio itself; tpc/fallback would inflate it ~4x.
 		return int(float64(est) * tpc)
 	}
-	return est * promptEstimateSafetyFactor
+	// est already counts the CJK runes at 1 rune/token; doubling only that
+	// share (×2) recovers the measured under-count while leaving the
+	// English/code portion unscaled.
+	return est + cjkRunesInMessages(msgs)
 }
 
-// promptEstimateSafetyFactor is the measured under-count of the fixed CJK
-// estimator before any usage calibrates it (~1.8x real, rounded up so the
-// overflow guards stay inside the provider window).
-const promptEstimateSafetyFactor = 2
+// cjkRunesInMessages counts the CJK runes across the provider-visible text of
+// a message list, mirroring the fields estimateMessagesTokens counts.
+func cjkRunesInMessages(msgs []provider.Message) int {
+	n := 0
+	for _, m := range msgs {
+		if m.LocalOnly {
+			continue
+		}
+		n += cjkRunesIn(m.Content) + cjkRunesIn(m.ReasoningContent)
+		n += cjkRunesIn(m.Name) + cjkRunesIn(m.ToolCallID)
+		for _, tc := range m.ToolCalls {
+			n += cjkRunesIn(tc.ID) + cjkRunesIn(tc.Name) + cjkRunesIn(tc.Arguments)
+		}
+		for _, item := range m.ResponsesItems {
+			n += cjkRunesIn(string(item))
+		}
+	}
+	return n
+}
+
+// cjkRunesIn counts CJK ideographs, kana, and hangul runes in a string.
+func cjkRunesIn(s string) int {
+	n := 0
+	for _, r := range s {
+		if (r >= 0x4E00 && r <= 0x9FFF) || // CJK unified ideographs
+			(r >= 0x3400 && r <= 0x4DBF) || // extension A
+			(r >= 0x3040 && r <= 0x30FF) || // hiragana + katakana
+			(r >= 0xAC00 && r <= 0xD7AF) { // hangul syllables
+			n++
+		}
+	}
+	return n
+}
 
 // outputBudgetOf reads the provider's total output budget so compaction force
 // thresholds can stay inside the real input allowance (context_window - output).
