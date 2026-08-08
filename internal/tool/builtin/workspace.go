@@ -81,9 +81,9 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"grep":          grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp},
 		"web_fetch":         webFetch{proxySpec: w.ProxySpec},
 		"modeling_analyze":  modelingAnalyze{workDir: w.Dir, forbidRoots: forbidRoots},
-		"modeling_optimize": modelingOptimize{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots},
-		"modeling_convert":  modelingConvert{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots},
-		"modeling_voxel":    modelingVoxel{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots},
+		"modeling_optimize": modelingOptimize{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots, guard: w.SessionGuard},
+		"modeling_convert":  modelingConvert{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots, guard: w.SessionGuard},
+		"modeling_voxel":    modelingVoxel{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots, guard: w.SessionGuard},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {

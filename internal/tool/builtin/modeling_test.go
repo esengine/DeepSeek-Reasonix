@@ -266,4 +266,23 @@ func TestModelingToolsRespectWorkspaceConfinement(t *testing.T) {
 	if err == nil {
 		t.Fatal("convert write outside roots must fail")
 	}
+	// convert .vox early-return branch must also guard its out path (review blocking).
+	if err := os.WriteFile(filepath.Join(root, "src.vox"), []byte("VOX "), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"src.vox","format":"vox","out":"`+secret+`"}`))
+	if err == nil {
+		t.Fatal("convert vox branch write outside roots must fail")
+	}
+	// optimize must not write outside roots (in-place).
+	op := modelingOptimize{workDir: root, forbidRoots: []string{root}, roots: []string{root}}
+	_, err = op.Execute(context.Background(), json.RawMessage(`{"path":"../x.obj","op":"cleanup"}`))
+	if err == nil {
+		t.Fatal("optimize write outside roots must fail")
+	}
+	// voxel must not write its .vox output outside roots.
+	_, err = vx.Execute(context.Background(), json.RawMessage(`{"path":"../y.obj","resolution":8}`))
+	if err == nil {
+		t.Fatal("voxel output write outside roots must fail")
+	}
 }

@@ -56,12 +56,14 @@ func modelingGuardRead(forbidRoots []string, path string) error {
 	return nil
 }
 
-// modelingGuardWrite rejects writes outside the workspace write roots.
-func modelingGuardWrite(roots []string, target string) error {
+// modelingGuardWrite rejects writes outside the workspace write roots and
+// applies the session data guard (same as write_file): modeling tools must not
+// overwrite session/agent-owned data even inside the write root.
+func modelingGuardWrite(roots []string, guard SessionDataGuard, target string) error {
 	if err := confine(roots, target); err != nil {
 		return err
 	}
-	return nil
+	return guard.Check(target)
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +134,7 @@ type modelingOptimize struct {
 	workDir     string
 	forbidRoots []string
 	roots       []string
+	guard       SessionDataGuard
 }
 
 func (modelingOptimize) Name() string { return "modeling_optimize" }
@@ -172,7 +175,7 @@ func (r modelingOptimize) Execute(ctx context.Context, args json.RawMessage) (st
 	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
 		return "", err
 	}
-	if err := modelingGuardWrite(r.roots, a.Path); err != nil {
+	if err := modelingGuardWrite(r.roots, r.guard, a.Path); err != nil {
 		return "", err
 	}
 	m, err := meshparse.Parse(a.Path)
@@ -249,6 +252,7 @@ type modelingConvert struct {
 	workDir     string
 	forbidRoots []string
 	roots       []string
+	guard       SessionDataGuard
 }
 
 func (modelingConvert) Name() string { return "modeling_convert" }
@@ -297,6 +301,10 @@ func (r modelingConvert) Execute(ctx context.Context, args json.RawMessage) (str
 		if outPath == "" {
 			outPath = strings.TrimSuffix(a.Path, ext) + "." + a.Format
 		}
+		outPath = modelingResolvePath(r.workDir, outPath)
+		if err := modelingGuardWrite(r.roots, r.guard, outPath); err != nil {
+			return "", err
+		}
 		switch a.Format {
 		case "vox":
 			if err := vm.WriteVox(outPath); err != nil {
@@ -316,7 +324,7 @@ func (r modelingConvert) Execute(ctx context.Context, args json.RawMessage) (str
 		outPath = strings.TrimSuffix(a.Path, ext) + "." + a.Format
 	}
 	outPath = modelingResolvePath(r.workDir, outPath)
-	if err := modelingGuardWrite(r.roots, outPath); err != nil {
+	if err := modelingGuardWrite(r.roots, r.guard, outPath); err != nil {
 		return "", err
 	}
 	switch a.Format {
@@ -345,6 +353,7 @@ type modelingVoxel struct {
 	workDir     string
 	forbidRoots []string
 	roots       []string
+	guard       SessionDataGuard
 }
 
 func (modelingVoxel) Name() string { return "modeling_voxel" }
@@ -393,7 +402,7 @@ func (r modelingVoxel) Execute(ctx context.Context, args json.RawMessage) (strin
 		return "", fmt.Errorf("modeling_voxel: %w", err)
 	}
 	outPath := modelingResolvePath(r.workDir, a.Path+".vox")
-	if err := modelingGuardWrite(r.roots, outPath); err != nil {
+	if err := modelingGuardWrite(r.roots, r.guard, outPath); err != nil {
 		return "", err
 	}
 	if err := vm.WriteVox(outPath); err != nil {
