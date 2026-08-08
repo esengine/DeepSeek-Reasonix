@@ -498,6 +498,7 @@ const (
 type Event struct {
 	Kind             Kind
 	Text             string                    // Reasoning / Text / Message / Notice / Phase
+	SubmitText       string                    // Steer: full provider-facing submit form for expandable display
 	ModelRef         string                    // Usage: canonical "provider/model" ref that produced this usage
 	Detail           string                    // Notice: optional diagnostic text for expandable details
 	Code             string                    // Notice: stable id for frontend localization; empty = unmapped

@@ -980,7 +980,7 @@ func (a *Agent) RecordUnappliedSteer(text string) {
 		Kind:  event.Notice,
 		Level: event.LevelWarn,
 		Code:  event.NoticeCodeUnappliedSteer,
-		Text:  UnappliedSteerNotice(text),
+		Text:  UnappliedSteerNotice(RecoverSteerDisplay(text)),
 	})
 }
 

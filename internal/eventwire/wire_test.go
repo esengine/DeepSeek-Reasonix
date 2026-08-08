@@ -117,6 +117,7 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	ts := readDesktopTypes(t)
 	for _, want := range []string{
 		"detail?: string;",
+		"submitText?: string;",
 		`outcome?: "final_readiness" | "recovery_paused";`,
 		"retryAttempt?: number;",
 		"retryMax?: number;",
@@ -398,5 +399,21 @@ func TestToWireInteractionAndLifecyclePayloads(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestToWireSteerCarriesSubmitText(t *testing.T) {
+	w := ToWire(event.Event{Kind: event.Steer, Text: "compact display", SubmitText: "full submit form"})
+	if w.Kind != "steer" || w.Text != "compact display" || w.SubmitText != "full submit form" {
+		t.Fatalf("wire steer = %+v", w)
+	}
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	for _, want := range []string{`"kind":"steer"`, `"text":"compact display"`, `"submitText":"full submit form"`} {
+		if !strings.Contains(string(b), want) {
+			t.Fatalf("steer JSON = %s, want it to contain %s", string(b), want)
+		}
 	}
 }

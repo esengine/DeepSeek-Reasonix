@@ -3759,6 +3759,16 @@ a[href] {
   white-space: pre-wrap;
 }
 
+/* Steer text and inline block cards live in a block container so cards sit on
+   their own line in document order (matching user bubbles) instead of being
+   laid out as flex items next to the text. */
+.steer-line__content {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* ── ReadOnly batch (parent fold for read/search tools) ────────────── */
 .readonly-batch {
   margin: 2px auto;

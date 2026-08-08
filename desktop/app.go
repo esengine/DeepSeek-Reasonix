@@ -19,7 +19,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	goruntime "runtime"
 	"slices"
 	"sort"
@@ -5768,54 +5767,10 @@ func (a *App) HistoryCheckpointTurnsForTab(tabID string) []int {
 	)
 }
 
-var pastedTextDisplayLabelPattern = regexp.MustCompile(`^\[(?:已粘贴文本|已貼上文字|Pasted text) #[0-9]+ · [0-9]+ (?:行|lines)\]$`)
-
 // historyReplayUserContent keeps only user-authored replay data. Provider-facing
 // capability, goal, hook, and resolved-reference context must not be resubmitted.
 func historyReplayUserContent(content string) string {
 	return control.StripReferencedContextPrefix(control.StripComposePrefixes(content))
-}
-
-// collapseLegacyExpandedPasteDisplay repairs sessions whose user-authored replay
-// source still contains an expanded pasted-text block. This includes transcripts
-// written before RawContent existed. The expanded block remains in SubmitText so
-// edit replay can still reconstruct the card and recover its full payload.
-func collapseLegacyExpandedPasteDisplay(content string) string {
-	const beginPrefix = "--- Begin "
-	for scan := 0; scan < len(content); {
-		beginOffset := strings.Index(content[scan:], beginPrefix)
-		if beginOffset < 0 {
-			break
-		}
-		begin := scan + beginOffset
-		labelStart := begin + len(beginPrefix)
-		labelEndOffset := strings.Index(content[labelStart:], " ---")
-		if labelEndOffset < 0 {
-			break
-		}
-		labelEnd := labelStart + labelEndOffset
-		label := content[labelStart:labelEnd]
-		beginEnd := labelEnd + len(" ---")
-		if !pastedTextDisplayLabelPattern.MatchString(label) {
-			scan = beginEnd
-			continue
-		}
-		endMarker := "--- End " + label + " ---"
-		endOffset := strings.Index(content[beginEnd:], endMarker)
-		if endOffset < 0 {
-			scan = beginEnd
-			continue
-		}
-		labelCopy := strings.LastIndex(content[:begin], label)
-		if labelCopy < 0 || strings.TrimSpace(content[labelCopy+len(label):begin]) != "" {
-			scan = beginEnd
-			continue
-		}
-		end := beginEnd + endOffset + len(endMarker)
-		content = content[:labelCopy+len(label)] + content[end:]
-		scan = labelCopy + len(label)
-	}
-	return strings.TrimSpace(content)
 }
 
 // historyUserDisplayContent prefers a persisted display sidecar when one exists.
@@ -5831,7 +5786,7 @@ func historyUserDisplayContent(msg provider.Message, resolveUserContent func(str
 	if msg.RawContent == "" {
 		replaySource = fallback
 	}
-	return collapseLegacyExpandedPasteDisplay(replaySource)
+	return agent.CollapseLegacyExpandedPasteDisplay(replaySource)
 }
 
 func historyCheckpointTurns(msgs []provider.Message, resolveUserContent func(string) string, checkpointTurns map[int]int) []int {
@@ -5892,7 +5847,7 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 			if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
 				out = append(out, HistoryMessage{
 					Role:    "notice",
-					Content: agent.UnappliedSteerNotice(steerText),
+					Content: agent.UnappliedSteerNotice(agent.RecoverSteerDisplay(steerText)),
 					Code:    event.NoticeCodeUnappliedSteer,
 					Level:   "warn",
 				})
@@ -5915,7 +5870,7 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 			// Check against the raw m.Content: resolveUserContent applies
 			// StripComposePrefixes which trims trailing whitespace.
 			if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
-				out = append(out, HistoryMessage{Role: "notice", Content: "↪ " + steerText})
+				out = append(out, HistoryMessage{Role: "notice", Content: "↪ " + agent.RecoverSteerDisplay(steerText), SubmitText: steerText})
 				continue
 			}
 			content = historyUserDisplayContent(m, resolveUserContent)

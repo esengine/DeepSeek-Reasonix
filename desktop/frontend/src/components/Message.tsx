@@ -113,6 +113,116 @@ export function parsePastedBlocks(text: string, submitText?: string): PastedBloc
   return blocks;
 }
 
+// expandCopyText reconstructs the user's actual content for the bubble copy
+// button: each folded paste label and selection label expands back into its
+// full text. Transport framing (--- Begin / End --- and the selected-context
+// JSON wrapper) is provider-visible only and never copied.
+export function expandCopyText(
+  displayText: string,
+  pasteBlocks: PastedBlockInfo[],
+  selectedTextBlocks: SelectedTextBlockInfo[],
+): string {
+  let out = displayText;
+  for (const block of pasteBlocks) {
+    if (out.includes(block.label)) out = out.split(block.label).join(block.content);
+  }
+  for (const block of selectedTextBlocks) {
+    if (out.includes(block.label)) out = out.split(block.label).join(block.content);
+  }
+  return out;
+}
+
+export type BlockSegment =
+  | { type: "text"; content: string }
+  | { type: "block"; key: string; block: PastedBlockInfo; kind: "paste" }
+  | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" };
+
+// buildBlockSegments interleaves a display text with its folded paste and
+// selection cards in document order. Shared by user bubbles and steer notices
+// so both render the same inline expandable cards.
+export function buildBlockSegments(
+  displayText: string,
+  pasteBlocks: PastedBlockInfo[],
+  selectedTextBlocks: SelectedTextBlockInfo[],
+): BlockSegment[] {
+  if (pasteBlocks.length === 0 && selectedTextBlocks.length === 0) return [{ type: "text", content: displayText }];
+  const segments: BlockSegment[] = [];
+  const ordered: Array<
+    | { block: PastedBlockInfo; start: number; end: number; kind: "paste" }
+    | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" }
+  > = [
+    ...pasteBlocks.map((block) => {
+      const start = displayText.indexOf(block.label);
+      return { block, start, end: start + block.label.length, kind: "paste" as const };
+    }),
+    ...selectedTextBlocks.map((block) => ({ block, start: block.start, end: block.end, kind: block.kind })),
+  ].filter((block) => block.start >= 0).sort((a, b) => a.start - b.start);
+  let cursor = 0;
+  for (const item of ordered) {
+    if (item.start < cursor) continue;
+    // Text before the label: strip the trailing newline that separated the
+    // label from the preceding line so the card sits tight against the text.
+    if (item.start > cursor) {
+      let before = displayText.slice(cursor, item.start);
+      before = before.replace(/\n$/, "");
+      if (before) segments.push({ type: "text", content: before });
+    }
+    const key = `${item.kind}:${item.start}:${item.block.label}`;
+    if (item.kind === "paste") {
+      segments.push({ type: "block", key, block: item.block, kind: item.kind });
+    } else {
+      segments.push({ type: "block", key, block: item.block, kind: item.kind });
+    }
+    cursor = item.end;
+  }
+  // Strip the leading newline that followed the label.
+  const remaining = displayText.slice(cursor).replace(/^\n/, "");
+  if (remaining.trim()) segments.push({ type: "text", content: remaining });
+  return segments.length > 0 ? segments : [{ type: "text", content: displayText }];
+}
+
+// PastedBlockCard renders one folded paste or selection block as the inline
+// expandable card shared by user bubbles and steer notices.
+export function PastedBlockCard({
+  block,
+  kind,
+  expanded,
+  onToggle,
+}: {
+  block: PastedBlockInfo | SelectedTextBlockInfo;
+  kind: "paste" | "chat" | "code";
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="msg-pasted">
+      <div className="msg-pasted-block">
+        <div className="msg-pasted-head">
+          {kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
+          <span className="msg-pasted-label">{block.label}</span>
+          <div className="msg-pasted-actions">
+            <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
+              <button type="button" onClick={onToggle}>
+                {expanded ? t("common.collapse") : t("composer.pastedExpand")}
+              </button>
+            </Tooltip>
+          </div>
+        </div>
+        {expanded && (
+          <div className="msg-pasted-expanded">
+            {kind === "chat"
+              ? <Markdown text={block.content} />
+              : kind === "code"
+                ? <CodeViewer value={block.content} language={languageFor((block as SelectedTextBlockInfo).path ?? "")} maxHeight={360} />
+                : block.content}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export type SelectedTextBlockInfo = {
   label: string;
   content: string;
@@ -274,49 +384,19 @@ export function UserMessage({
 
   const pasteBlocks = useMemo(() => parsePastedBlocks(displayText, submitText), [displayText, submitText]);
   const selectedTextBlocks = useMemo(() => parseSelectedTextBlocks(displayText, submitText), [displayText, submitText]);
+  // Copying the bubble must yield the user's actual content, not the compact
+  // display labels: fold each paste label and selection label back into its
+  // full text (without the --- Begin / End --- transport framing).
+  const copyText = useMemo(
+    () => expandCopyText(actionText, pasteBlocks, selectedTextBlocks),
+    [actionText, pasteBlocks, selectedTextBlocks],
+  );
   const [expandedBlockKeys, setExpandedBlockKeys] = useState<Record<string, boolean>>({});
 
-  type DisplaySegment =
-    | { type: "text"; content: string }
-    | { type: "block"; key: string; block: PastedBlockInfo; kind: "paste" }
-    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" };
-
-  const displaySegments = useMemo((): DisplaySegment[] => {
-    if (pasteBlocks.length === 0 && selectedTextBlocks.length === 0) return [{ type: "text", content: displayText }];
-    const segments: DisplaySegment[] = [];
-    const ordered: Array<
-      | { block: PastedBlockInfo; start: number; end: number; kind: "paste" }
-      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" }
-    > = [
-      ...pasteBlocks.map((block) => {
-        const start = displayText.indexOf(block.label);
-        return { block, start, end: start + block.label.length, kind: "paste" as const };
-      }),
-      ...selectedTextBlocks.map((block) => ({ block, start: block.start, end: block.end, kind: block.kind })),
-    ].filter((block) => block.start >= 0).sort((a, b) => a.start - b.start);
-    let cursor = 0;
-    for (const item of ordered) {
-      if (item.start < cursor) continue;
-      // Text before the label: strip the trailing newline that separated the
-      // label from the preceding line so the card sits tight against the text.
-      if (item.start > cursor) {
-        let before = displayText.slice(cursor, item.start);
-        before = before.replace(/\n$/, "");
-        if (before) segments.push({ type: "text", content: before });
-      }
-      const key = `${item.kind}:${item.start}:${item.block.label}`;
-      if (item.kind === "paste") {
-        segments.push({ type: "block", key, block: item.block, kind: item.kind });
-      } else {
-        segments.push({ type: "block", key, block: item.block, kind: item.kind });
-      }
-      cursor = item.end;
-    }
-    // Strip the leading newline that followed the label.
-    const remaining = displayText.slice(cursor).replace(/^\n/, "");
-    if (remaining.trim()) segments.push({ type: "text", content: remaining });
-    return segments.length > 0 ? segments : [{ type: "text", content: displayText }];
-  }, [displayText, pasteBlocks, selectedTextBlocks]);
+  const displaySegments = useMemo(
+    () => buildBlockSegments(displayText, pasteBlocks, selectedTextBlocks),
+    [displayText, pasteBlocks, selectedTextBlocks],
+  );
 
   const toggleBlockExpand = (key: string) => {
     setExpandedBlockKeys((prev) => ({
@@ -518,32 +598,14 @@ export function UserMessage({
               if (seg.type === "text") {
                 return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
               }
-              const expanded = Boolean(expandedBlockKeys[seg.key]);
               return (
-                <div className="msg-pasted" key={seg.key}>
-                  <div className="msg-pasted-block">
-                    <div className="msg-pasted-head">
-                      {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
-                      <span className="msg-pasted-label">{seg.block.label}</span>
-                      <div className="msg-pasted-actions">
-                        <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
-                          <button type="button" onClick={() => toggleBlockExpand(seg.key)}>
-                            {expanded ? t("common.collapse") : t("composer.pastedExpand")}
-                          </button>
-                        </Tooltip>
-                      </div>
-                    </div>
-                    {expanded && (
-                      <div className="msg-pasted-expanded">
-                        {seg.kind === "chat"
-                          ? <Markdown text={seg.block.content} />
-                          : seg.kind === "code"
-                            ? <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
-                            : seg.block.content}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                <PastedBlockCard
+                  key={seg.key}
+                  block={seg.block}
+                  kind={seg.kind}
+                  expanded={Boolean(expandedBlockKeys[seg.key])}
+                  onToggle={() => toggleBlockExpand(seg.key)}
+                />
               );
             })}
           </>
@@ -606,7 +668,7 @@ export function UserMessage({
               <BrainCircuit size={14} />
             </span>
           )}
-          <CopyButton text={actionText} label={t("msg.copy")} showInlineLabel={false} className="msg-meta__btn msg-meta__copy" />
+          <CopyButton text={copyText} label={t("msg.copy")} showInlineLabel={false} className="msg-meta__btn msg-meta__copy" />
           {onEdit && (
             <button
               className="msg-meta__btn"

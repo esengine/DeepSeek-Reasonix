@@ -233,7 +233,7 @@ export type Item =
   | { kind: "user"; id: string; text: string; submitText?: string; failed?: boolean; createdAt?: number; checkpointTurn?: number }
   | { kind: "assistant"; id: string; text: string; reasoning: string; streaming: boolean; reasoningComplete?: boolean; reasoningDurationMs?: number; workDurationMs?: number; memoryCitations?: MemoryCitation[] }
   | { kind: "phase"; id: string; text: string }
-  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery"; action?: "continue_delivery"; decisionReceipt?: WireDecisionReceipt }
+  | { kind: "notice"; id: string; level: "info" | "warn"; text: string; detail?: string; title?: string; variant?: "delivery"; action?: "continue_delivery"; decisionReceipt?: WireDecisionReceipt; submitText?: string }
   | {
       kind: "compaction";
       id: string;
@@ -840,7 +840,7 @@ export function historyMessagesToItems(messages: HistoryMessage[], idPrefix: str
     }
     if (m.role === "notice") {
       if (m.content.trim() !== "" || m.decisionReceipt) {
-        const next = appendNoticeItem(items, seq, `${idPrefix}${seq}`, m.level === "warn" ? "warn" : "info", m.content, m.detail, m.code, m.decisionReceipt);
+        const next = appendNoticeItem(items, seq, `${idPrefix}${seq}`, m.level === "warn" ? "warn" : "info", m.content, m.detail, m.code, m.decisionReceipt, m.submitText);
         items = next.items;
         seq = next.seq;
       }
@@ -1667,7 +1667,7 @@ function applyEvent(s: State, e: WireEvent): State {
       return { ...s, running: s.turnActive ? s.running : false, seq: s.seq + 1, items };
     }
     case "steer":
-      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `${STEER_NOTICE_PREFIX}${e.text ?? ""}` }] };
+      return { ...s, seq: s.seq + 1, items: [...s.items, { kind: "notice", id: `s${s.seq}`, level: "info", text: `${STEER_NOTICE_PREFIX}${e.text ?? ""}`, ...(e.submitText ? { submitText: e.submitText } : {}) }] };
     case "approval_request": {
       if (s.cancelRequested) return s;
       // A delayed re-delivery of a prompt the user already answered locally
@@ -2376,7 +2376,7 @@ function quietTranscriptNoticeKey(text: string, code?: string): string {
   return "";
 }
 
-function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string, detail?: string, code?: string, decisionReceipt?: WireDecisionReceipt): { items: Item[]; seq: number } {
+function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" | "warn", rawText: string, detail?: string, code?: string, decisionReceipt?: WireDecisionReceipt, submitText?: string): { items: Item[]; seq: number } {
   if (quietTranscriptNoticeKey(rawText, code)) {
     return { items, seq };
   }
@@ -2385,7 +2385,7 @@ function appendNoticeItem(items: Item[], seq: number, id: string, level: "info" 
     return { items, seq };
   }
   const trimmedDetail = detail?.trim();
-  return { items: [...items, { kind: "notice", id, level, text, ...(trimmedDetail ? { detail: trimmedDetail } : {}), ...(decisionReceipt ? { decisionReceipt } : {}) }], seq: seq + 1 };
+  return { items: [...items, { kind: "notice", id, level, text, ...(trimmedDetail ? { detail: trimmedDetail } : {}), ...(decisionReceipt ? { decisionReceipt } : {}), ...(submitText ? { submitText } : {}) }], seq: seq + 1 };
 }
 
 function appendNoticeToState(s: State, level: "info" | "warn", text: string, detail?: string, code?: string, decisionReceipt?: WireDecisionReceipt): State {
