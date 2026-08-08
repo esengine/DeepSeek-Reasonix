@@ -1282,21 +1282,16 @@ export function Composer({
   }, []);
 
   useEffect(() => {
+    // 用 ref 持有最新插入函数：onSTTTranscript 订阅回调在首帧闭包中创建，
+    // 直接引用 insertSTTTextAtCaret 会拿到首帧版本（draft/selection 绑定
+    // 陈旧，切换会话后转录可能写入旧 draft、"能识别但不输入"）。经 ref
+    // 中转始终调用最新实现，插入当前可见窗口输入框。
+    const insertRef = { current: insertSTTTextAtCaret };
     const unsubscribe = onSTTTranscript((payload) => {
       if (!payload.isFinal || !payload.text.trim()) return;
-      // 独立绑定：转录事件携带发起识别的标签页（payload.tabID），
-      // 只把它插入发起窗口的输入框；切到其他窗口时转录不污染当前窗口。
-      if (payload.tabID && payload.tabID !== tabId) {
-        // 转录属于其他窗口：写入该窗口的 draft（切回时可见），不插入当前输入框。
-        const draft = cloneComposerDraft(draftsBySessionRef.current[payload.tabID] ?? emptyComposerDraft());
-        draft.text = (draft.text ? draft.text + " " : "") + payload.text.trim();
-        draftsBySessionRef.current[payload.tabID] = draft;
-        return;
-      }
-      // 语音转录连续插入光标处（不产生段落空行）。
-      // insertSTTTextAtCaret 内部只访问 refs（textRef/invocationsRef/…），
-      // 不捕获本渲染期的变量，因此首帧捕获的回调始终可用。
-      insertSTTTextAtCaret(payload.text);
+      // 全局麦克风转录：Composer 单实例（仅当前激活窗口渲染），
+      // 转录始终插入当前可见窗口的输入框——语音内容属于用户当前交互窗口。
+      insertRef.current(payload.text);
     });
     // 识别状态实时同步：Edge 页自动停止/出错/恢复时，麦克风按钮随之变化。
     const unsubscribeState = onSTTState((payload) => {
