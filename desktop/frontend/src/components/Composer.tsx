@@ -4031,7 +4031,7 @@ export function Composer({
         />
       )}
       {menuMode === "slasharg" && argRes && (
-        <ArgMenu items={argRes.items} activeIndex={active} onPick={pickArg} onHover={setActive} />
+        <ArgMenu items={argRes.items} commandName={slashText.slice(1).split(/\s/, 1)[0]} activeIndex={active} onPick={pickArg} onHover={setActive} />
       )}
       {(menuMode === "at" || menuMode === "pastChats") && (
         showPastChats ? (

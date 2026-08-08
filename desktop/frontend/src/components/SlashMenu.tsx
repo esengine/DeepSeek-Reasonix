@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useT, type Translator } from "../lib/i18n";
+import { localizedCommandDescription } from "../lib/slashI18n";
 import type { CommandInfo } from "../lib/types";
 import { VirtualMenu } from "./VirtualMenu";
 
@@ -114,7 +115,7 @@ export function SlashMenu({
           <span className="slashmenu__name">/{row.command.name}</span>
           {row.command.hint && <span className="slashmenu__hint">{row.command.hint}</span>}
           <span className="slashmenu__desc">
-            {isDisabled?.(row.command) ? disabledReason : row.command.description}
+            {isDisabled?.(row.command) ? disabledReason : localizedCommandDescription(row.command, t)}
           </span>
           {slashCommandKindTag(row.command, t) && <span className="slashmenu__kind">{slashCommandKindTag(row.command, t)}</span>}
         </button>
