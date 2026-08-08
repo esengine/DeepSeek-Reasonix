@@ -473,12 +473,16 @@ func (a *adapter) handleCardAction(raw []byte) bool {
 		return true
 	}
 	chatType := cardActionChatType(payload.Event.Action.Value["chat_type"])
+	// 优先取 open_id：与 handleSDKMessage 的身份解析保持一致，也匹配
+	// access/allowlist 里通常以 open_id 记录的用户名单。此前 union_id
+	// 排在最前，当飞书回调同时携带 union_id 与 open_id 时，会拿 union_id
+	// 去匹配 open_id 名单导致准入失败，进而误触发配对码。
 	operatorID := firstNonEmpty(
-		payload.Event.Operator.OperatorID.UnionID,
 		payload.Event.Operator.OperatorID.OpenID,
+		payload.Event.Operator.OperatorID.UnionID,
 		payload.Event.Operator.OperatorID.UserID,
-		payload.Event.Operator.UnionID,
 		payload.Event.Operator.OpenID,
+		payload.Event.Operator.UnionID,
 		payload.Event.Operator.UserID,
 	)
 	routeUserID := firstNonEmpty(payload.Event.Action.Value["user_id"], operatorID)
