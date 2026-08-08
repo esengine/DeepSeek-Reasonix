@@ -44,3 +44,16 @@
 1. **token 效率（最快收益）**：SuperVoxelGPT 式自适应体素 token（降 87%）+ MeshAnalyzer 部件级描述符（3D-PLOT-LLM）——纯 Go 可做，无外部依赖
 2. **精准操作**：L3GO 原子 API（bpy 层禁裸脚本）+ SceneCraft 库学习 + PairCoder++ 双 agent（meshparse 做校验 oracle，Reasonix 差异化）
 3. **可选接入**：MeshAnything/Meshy T2/TRELLIS 三个开源项目评估接入 optimize/convert 工具链（有外部依赖，按缓存/依赖原则需评估）
+
+## 优先级 3 评估结论（生成式减面后端——外部依赖）
+
+| 项目 | 依赖 | 评估 |
+|---|---|---|
+| **MeshAnything** ⭐ | PyTorch 模型权重（~GB）+ 推理耗时 | 按"缓存/依赖原则"（正确性优先、有风险不交付）：生成式减面**输出拓扑不可预测**（不同输入同参数不同结果），与 QEM 减面的确定性契约冲突；推理慢（秒级）破坏 tool 实时性。**不接入**，保留为可选离线增强（用户显式启用时）。 |
+| **Meshy T2** ⭐ | API/模型权重 | 商业 API 有配额/成本；本地权重未开源（vertex-set VAE）。**不接入**。 |
+| **TRELLIS** | PyTorch + 稀疏卷积 | 面向生成（文本/图→3D），与"agent 精准操作现有模型"目标不符。**不接入**。 |
+| **SuperVoxelGPT 自适应体素** | 纯 Go 可实现 | ✅ **已落地**（VoxelTokens 紧凑 token，下一步自适应分辨率） |
+| **L3GO 原子 API** | 纯本地 bpy | ✅ **已落地**（modeling_atomic 工具，6 原子操作） |
+| **BlenderRAG（bpy 文档 RAG）** | 本地文档 | 低成本高收益——原子 API 注册表（AtomicOpSchema）+ docs/BLENDER_MODELING.md 已是"库学习"形态；完整 bpy 文档 RAG 列为可选（需检索依赖评估） |
+
+**结论**：优先级 1/2 已落地（纯 Go/本地，零外部依赖）；优先级 3 生成式后端按原则**评估不接入**（外部依赖 + 正确性风险），标注为可选增强。

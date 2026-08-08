@@ -30,6 +30,7 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `modeling_analyze` | true | Compute a compact geometric descriptor of a mesh file (obj/stl/ply) or voxel file (.vox) - ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens. |
 | `modeling_optimize` | false | Apply a deterministic mesh operation (cleanup/triangulate/merge/decimate) to a mesh file (obj/stl/ply). The file is backed up to <path>.bak first; returns the before/after stat delta (token-minimal verification). decimate target is the desired face count. |
 | `modeling_convert` | false | Convert a mesh/voxel file to another format (pure Go). Supported: obj/stl/ply/vox. Output path default = input with new extension. |
+| `modeling_atomic` | Runs a deterministic Blender atomic operation (add_cube/sphere/cylinder/boolean/bevel/delete) — low-token alternative to raw bpy. |
 | `modeling_voxel` | false | Voxelize a closed mesh into a .vox model at the given resolution (longest axis, 4..512). Writes <path>.vox and returns the voxel descriptor (size/filled/colors/components/solidity). |
 
 ## Schema Snapshot

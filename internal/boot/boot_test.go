@@ -2207,6 +2207,7 @@ func defaultFullBootToolNames() []string {
 		"lsp_references",
 		"memory",
 		"modeling_analyze",
+		"modeling_atomic",
 		"modeling_convert",
 		"modeling_optimize",
 		"modeling_voxel",

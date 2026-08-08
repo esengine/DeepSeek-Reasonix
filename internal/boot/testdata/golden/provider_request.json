@@ -1034,6 +1034,30 @@
       }
     },
     {
+      "name": "modeling_atomic",
+      "description": "Run a deterministic Blender atomic operation (add_cube/add_uv_sphere/add_cylinder/boolean/bevel/delete_object) on the default scene or a .blend file. Ops are parameterized bpy snippets — precise and low-token. Args: op (name), args (object of op parameters), path (optional .blend).",
+      "parameters": {
+        "properties": {
+          "args": {
+            "description": "Op parameters (see modeling_atomic_ops for the full registry)",
+            "type": "object"
+          },
+          "op": {
+            "description": "Atomic op name: add_cube, add_uv_sphere, add_cylinder, boolean, bevel, delete_object",
+            "type": "string"
+          },
+          "path": {
+            "description": "Optional .blend path (default: default scene)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "op"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "modeling_convert",
       "description": "Convert a mesh/voxel file to another format (pure Go). Supported: obj/stl/ply/vox. Output path default = input with new extension.",
       "parameters": {
