@@ -18,7 +18,6 @@ import (
 	"reasonix/internal/ablation"
 	"reasonix/internal/capability"
 	"reasonix/internal/checkpoint"
-	"reasonix/internal/cosplay"
 	"reasonix/internal/diff"
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
@@ -406,7 +405,9 @@ type Agent struct {
 	// implicit-state tracking. nil falls back to stateTracker alone.
 	navigator NavigatorKernel
 	// cosplayAuto asynchronously verifies mutated files (auto_on_mutation).
-	cosplayAuto *cosplay.AutoVerifier
+	// Interface (CodeVerifier) so the agent package does not import cosplay —
+	// domain boundaries stay clean; boot wires the concrete verifier.
+	cosplayAuto CodeVerifier
 
 	// longHorizon mirrors Options.LongHorizon: enables the 10-section compaction
 	// prompt and implicit-state injection. verificationInterval mirrors
@@ -1109,7 +1110,7 @@ type Options struct {
 	// [agent.cosplay] auto_on_mutation option is enabled. nil disables
 	// automatic verification (the manual code_verify tool still works).
 	// The verifier is asynchronous — it never blocks the run loop.
-	CosplayAuto *cosplay.AutoVerifier
+	CosplayAuto CodeVerifier
 
 	// LongHorizon enables the OSWorld 2.0 long-horizon adjustments: earlier
 	// compaction triggers, the 10-section compaction prompt with implicit-state
