@@ -173,6 +173,9 @@ const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body>
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.window = dom.window as unknown as Window & typeof globalThis;
 globalThis.document = dom.window.document;
+// Node's built-in navigator reflects the machine's ICU locale; pin jsdom's
+// en-US one so English-string assertions hold on zh-locale machines.
+Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 globalThis.Node = dom.window.Node;
 globalThis.Element = dom.window.Element;
 globalThis.HTMLElement = dom.window.HTMLElement;

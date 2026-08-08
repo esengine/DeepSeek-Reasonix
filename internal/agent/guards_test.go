@@ -267,6 +267,55 @@ func TestExecuteBatchParallelReadOnly(t *testing.T) {
 	}
 }
 
+func TestExecuteBatchStampsToolResultTimestamps(t *testing.T) {
+	const delay = 30 * time.Millisecond
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "a", readOnly: true, delay: delay})
+
+	sink := &recordSink{}
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+
+	before := time.Now().UnixMilli()
+	a.executeBatch(context.Background(), []provider.ToolCall{{Name: "a"}})
+	after := time.Now().UnixMilli()
+
+	results := sink.kinds(event.ToolResult)
+	if len(results) != 1 {
+		t.Fatalf("got %d tool results, want 1", len(results))
+	}
+	tr := results[0].Tool
+	if tr.StartedAt < before || tr.StartedAt > after {
+		t.Errorf("StartedAt = %d, want within [%d, %d]", tr.StartedAt, before, after)
+	}
+	if tr.EndedAt != tr.StartedAt+tr.DurationMs {
+		t.Errorf("EndedAt = %d, want StartedAt+DurationMs = %d", tr.EndedAt, tr.StartedAt+tr.DurationMs)
+	}
+	if tr.DurationMs < delay.Milliseconds() {
+		t.Errorf("DurationMs = %d, want >= %d", tr.DurationMs, delay.Milliseconds())
+	}
+}
+
+func TestExecuteBatchCancelledCallsCarryNoTimestamps(t *testing.T) {
+	reg := tool.NewRegistry()
+	reg.Add(fakeTool{name: "a", readOnly: true})
+
+	sink := &recordSink{}
+	a := New(nil, reg, NewSession(""), Options{}, sink)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	a.executeBatch(ctx, []provider.ToolCall{{Name: "a"}})
+
+	results := sink.kinds(event.ToolResult)
+	if len(results) != 1 {
+		t.Fatalf("got %d tool results, want 1", len(results))
+	}
+	tr := results[0].Tool
+	if tr.StartedAt != 0 || tr.EndedAt != 0 {
+		t.Errorf("never-ran call has StartedAt=%d EndedAt=%d, want both zero", tr.StartedAt, tr.EndedAt)
+	}
+}
+
 // TestExecuteBatchSegmentsAroundWrites ensures a write call only serializes its
 // own position in the provider-ordered batch: read-only runs before and after it
 // may still parallelise within their contiguous segments.

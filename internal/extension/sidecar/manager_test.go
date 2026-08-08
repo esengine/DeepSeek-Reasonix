@@ -27,7 +27,7 @@ func installFakePlugin(t *testing.T, home, name string, configure func(rt *plugi
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	manifest := map[string]any{
-		"apiVersion": pluginpkg.ManifestAPIVersionV1,
+		"apiVersion": pluginpkg.ManifestAPIVersionV2,
 		"name":       name,
 		"version":    "1.0.0",
 		"runtime":    rt,
@@ -56,7 +56,7 @@ func TestManagerStartsEnabledRuntimePackages(t *testing.T) {
 		rt.Intercepts = []string{"input.receive"}
 		rt.Replaces = []string{"compaction"}
 		rt.Capabilities = []string{"providers", "ui"}
-		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"1","name":"alpha","version":"1.0.0",` +
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"alpha","version":"1.0.0",` +
 			`"subscriptions":["input.receive"],"replaces":["compaction"],` +
 			`"providers":[{"ref":"plugin/alpha/openai/gpt-5"}],` +
 			`"uiActions":[{"actionId":"act1"}],"stateSchemaVersion":0}`
@@ -123,7 +123,8 @@ func TestManagerRequiredFailureFailsEverything(t *testing.T) {
 	installFakePlugin(t, home, "good-optional", nil)
 	installFakePlugin(t, home, "bad-required", func(rt *pluginpkg.RuntimeSpec) {
 		rt.Required = true
-		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"bad","version":"1","stateSchemaVersion":0}`
+		// v1 protocol is rejected by the v2 host.
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"1","name":"bad","version":"1","stateSchemaVersion":0}`
 	})
 	manager, _, err := StartPackages(context.Background(), home, testSessionContext(), nil)
 	if err == nil {
@@ -144,7 +145,7 @@ func TestManagerRequiredFailureFailsEverything(t *testing.T) {
 func TestManagerOptionalFailureWarnsAndContinues(t *testing.T) {
 	home := t.TempDir()
 	installFakePlugin(t, home, "bad-optional", func(rt *pluginpkg.RuntimeSpec) {
-		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"2","name":"bad","version":"1","stateSchemaVersion":0}`
+		rt.Env[fakeEnvInitResult] = `{"protocolVersion":"1","name":"bad","version":"1","stateSchemaVersion":0}`
 	})
 	installFakePlugin(t, home, "good-optional", nil)
 	manager, warnings, err := StartPackages(context.Background(), home, testSessionContext(), nil)

@@ -232,16 +232,25 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
 - 既未声明 `args` 也未声明 `shell` 的已有原生 Hook 继续使用 Reasonix
   历史 Shell 命令行为；`shellCommand: true` 仍作为 shell form 的旧写法兼容。
 
-## Manifest v1（扩展）
+## Manifest v2（扩展）
 
-插件可以通过声明 `apiVersion` 启用 v1 Manifest：
+Reasonix 原生扩展使用精确的 v2 `apiVersion`：
 
 ```json
 {
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "example",
   "version": "1.0.0",
   "description": "Example extension",
+  "requires": [],
+  "provides": [
+    {
+      "namespace": "plugin/example",
+      "kind": "interceptors",
+      "id": "default",
+      "version": "1.0.0"
+    }
+  ],
   "contributes": {
     "skills": ["skills"],
     "agents": ["agents"],
@@ -258,20 +267,24 @@ Reasonix 原生插件在根目录声明 `reasonix-plugin.json`：
     "required": true,
     "priority": 0,
     "intercepts": ["input.receive", "tool.before"],
-    "replaces": ["system_prompt"],
-    "capabilities": ["interceptors", "strategies", "providers", "ui"]
+    "replaces": [],
+    "capabilities": ["interceptors"]
   }
 }
 ```
 
 解析规则：
 
-- **没有** `apiVersion` 的 Manifest 继续按旧格式解析，行为不变（旧格式
-  忽略未知字段）。
-- v1 是严格的：根对象或 `contributes`/`runtime` 下的任何未知字段都会
+- 原生 `reasonix-plugin.json` 必须声明精确值 `reasonix.io/plugin/v2`。
+  v1 与缺失版本都会被拒绝；不提供 v1 双读或自动迁移路径。
+- v2 是严格的：根对象或 `contributes`/`runtime` 下的任何未知字段都会
   报错并指明字段路径，避免拼写错误静默失效。
-- 未知 major version（如 `reasonix.io/plugin/v2`）直接拒绝加载。
-- v1 可以同时使用旧顶层字段（`skills`、`hooks`、`mcpServers` 等）与
+- minor 别名（如 `reasonix.io/plugin/v2.0`、`v2.1`）及未知 major version
+  都会被拒绝。
+- `requires` 与 `provides` 声明依赖约束和能力上限；Sidecar handshake
+  不能超出该上限。
+- v2 可以同时使用受支持的顶层资源字段（`skills`、`hooks`、
+  `mcpServers` 等）与
   `contributes`：完全相同的路径去重；同名但定义不同的条目报 Manifest
   错误并指明键名。
 - 所有相对路径与 glob 必须位于插件根目录内：拒绝路径穿越、绝对路径、

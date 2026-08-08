@@ -1,0 +1,4 @@
+prompt = "This directory contains a backoff/ package with a README describing next_delay. Create schedule.py with retry_times(start, attempts) returning the list of absolute retry timestamps: each retry k (0-based) happens next_delay(k) seconds after the previous attempt, starting from start. Use the package — do not reimplement the schedule."
+class = "api-integration"
+max_steps = 20
+timeout_sec = 300

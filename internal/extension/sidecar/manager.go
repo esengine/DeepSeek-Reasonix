@@ -51,7 +51,7 @@ func (e *RequiredStartError) Error() string {
 func (e *RequiredStartError) Unwrap() error { return e.Err }
 
 // LoadRuntimePackages returns the installed, ENABLED packages that declare a
-// v1 runtime. This is the only enumeration the Manager ever launches from —
+// native runtime. This is the only enumeration the Manager ever launches from —
 // see the package doc for the authorization invariant.
 func LoadRuntimePackages(home string) ([]pluginpkg.InstalledPackage, []string) {
 	installed, warnings := pluginpkg.LoadInstalled(home)
@@ -72,25 +72,16 @@ type Manager struct {
 	mu      sync.Mutex
 	clients map[string]*Client
 	closed  bool
+	// planAdopted records clients moved from a previous manager during
+	// StartPackagesWithPlan (Unchanged). RollbackPlanStart reattaches only
+	// these; newly started Added/Reloaded clients are closed by m.Close().
+	planAdopted map[string]*Client
 }
 
-// StartPackages loads the installed enabled v1 runtime packages from home and
-// spawns each one, running the initialize handshake against sessionCtx. A
-// package whose manifest marks the runtime Required fails the whole call:
-// everything started so far is shut down and the error is a
-// *RequiredStartError. An optional package's failure is collected as a
-// warning string and startup continues.
-//
-// The ui handler serves every client's host/ui/* calls. A handler that also
-// implements UIBinder (the stage-8 UI hub) receives a per-plugin binding and
-// crash notifications instead of sharing one unbound handler.
+// StartPackages starts every installed runtime package (cold start). Prefer
+// StartPackagesWithPlan when a RuntimePlan can adopt unchanged packages.
 func StartPackages(ctx context.Context, home string, sessionCtx protocol.SessionContext, ui UIHandler) (*Manager, []string, error) {
-	packages, warnings := LoadRuntimePackages(home)
-	startupCtx, cancel := context.WithTimeout(ctx, packageStartupBudget)
-	defer cancel()
-	m, runtimeWarnings, err := startLoadedPackages(startupCtx, packages, sessionCtx, ui, StartClient)
-	warnings = append(warnings, runtimeWarnings...)
-	return m, warnings, err
+	return StartPackagesWithPlan(ctx, home, sessionCtx, ui, nil, nil)
 }
 
 // startLoadedPackages starts a previously discovered, deterministically ordered
@@ -207,6 +198,8 @@ func (m *Manager) Close() error {
 	for _, client := range m.clients {
 		clients = append(clients, client)
 	}
+	m.clients = nil
+	m.planAdopted = nil
 	m.mu.Unlock()
 
 	var wg sync.WaitGroup

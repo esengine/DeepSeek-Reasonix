@@ -153,7 +153,7 @@ body {
 
 .release-hero {
   position: relative;
-  padding: 58px 62px 52px;
+  padding: 48px 62px 44px;
   background:
     radial-gradient(circle at 90% 5%, color-mix(in oklch, var(--accent) 14%, transparent), transparent 28%),
     linear-gradient(180deg, color-mix(in oklch, var(--card) 88%, transparent), color-mix(in oklch, var(--release-paper) 92%, transparent));
@@ -182,15 +182,14 @@ body {
   text-transform: uppercase;
 }
 .release-channel__dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 14%, transparent); }
-.release-hero__version { margin: 50px 0 10px; font-family: var(--font-mono); color: var(--release-blue); font-size: 13px; }
 .release-hero h1 {
   max-width: 15em;
-  margin: 0;
+  margin: 28px 0 0;
   color: var(--release-ink);
-  font-size: clamp(38px, 5vw, 62px);
+  font-size: clamp(32px, 4vw, 46px);
   font-weight: 600;
   letter-spacing: -.032em;
-  line-height: 1.04;
+  line-height: 1.08;
   text-wrap: balance;
 }
 
@@ -205,23 +204,7 @@ body {
   font-weight: 600;
 }
 
-.release-hero blockquote {
-  margin: 34px 0 0;
-  padding: 20px 24px;
-  border-left: 3px solid var(--release-blue);
-  border-radius: 0 12px 12px 0;
-  background: color-mix(in oklch, var(--accent) 5.5%, transparent);
-  color: var(--ink-2);
-  font-size: 17px;
-  line-height: 1.72;
-}
-
-.release-hero__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
-
-/* compact hero for patch releases whose title is just the version */
-.release-hero--compact { padding: 42px 62px 38px; }
-.release-hero--compact h1 { margin-top: 22px; font-size: clamp(30px, 3.6vw, 42px); }
-.release-lede { margin: 22px 0 0; max-width: 640px; color: var(--ink-2); font-size: 16.5px; line-height: 1.7; }
+.release-lede { margin: 28px 0 0; max-width: 720px; color: var(--ink-2); font-size: 16.5px; line-height: 1.75; }
 
 .release-section { padding: 52px 62px 0; scroll-margin-top: 100px; }
 .release-section__head { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; }
@@ -390,17 +373,14 @@ body {
   .release-mobile-switcher select { min-width: 130px; padding: 7px 28px 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-soft); color: var(--ink); font: inherit; }
   .release-paper { width: min(720px, 100%); margin: 0 auto; border-radius: 15px; }
   .release-hero { padding: 38px 28px 34px; }
-  .release-hero--compact { padding: 30px 28px 28px; }
   .release-hero::after { left: 28px; right: 28px; }
-  .release-hero__version { margin-top: 36px; }
   .release-section { padding: 40px 28px 0; }
   .release-guide-grid, .release-change-list { grid-template-columns: 1fr; }
   .release-download { margin: 44px 28px 28px; padding: 26px; flex-direction: column; align-items: flex-start; }
 }
 
 @media (max-width: 560px) {
-  .release-hero h1 { font-size: 36px; }
-  .release-hero blockquote { padding: 17px 18px; font-size: 15px; }
+  .release-hero h1 { font-size: 34px; }
   .release-highlight { grid-template-columns: 1fr; gap: 8px; padding: 20px; }
   .release-highlight__index { display: none; }
   .release-section h2 { font-size: 23px; }

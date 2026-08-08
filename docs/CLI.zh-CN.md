@@ -141,6 +141,20 @@ reasonix run --ablate evidence,planner --metrics run.json "修复失败的测试
 
 这是测量工具，不是调优开关：关掉某个子系统只会让 Reasonix 在它本来负责的工作上变差。
 
+### 轨迹记录
+
+`--trajectory PATH` 会把整次运行的完整事件流——带绝对起止时间的工具调用与结果、
+思考内容、重试、就绪与恢复决策——按每个事件一行的方式追加为带时间戳和序号的
+JSONL 记录，便于离线回放并归因时间去向（工具执行 vs. 两次调用之间的模型思考）。
+记录复用共享的 `eventwire` JSON 契约（放在 `event` 键下），外层包
+`schema_version`、`seq` 和 `ts`（unix 毫秒）。运行被杀死时已写完的行全部保留。
+与 `--events-jsonl` 不同，该文件包含提示词、工具参数和思考内容：请像对待会话
+转录一样谨慎处理。
+
+```sh
+reasonix run --metrics run.json --trajectory run.trajectory.jsonl "修复失败的测试"
+```
+
 ### 输出格式
 
 | 格式 | 行为 |

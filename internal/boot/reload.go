@@ -6,9 +6,36 @@ import (
 	"strings"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/extension"
 	"reasonix/internal/provider"
 )
+
+// RebuildFrom is Rebuild using previous BuildResult for incremental sidecars
+// and subgraph-classified assembly (no-op / interceptor-only / UI-only, …).
+func RebuildFrom(ctx context.Context, previous *BuildResult, opts Options) (*BuildResult, error) {
+	if previous == nil || previous.Controller == nil {
+		return nil, fmt.Errorf("boot: RebuildFrom requires the BuildResult being replaced")
+	}
+	if previous.Extensions != nil {
+		opts.Extensions = previous.Extensions
+	}
+	if previous.Plan != nil && previous.Plan.Graph != nil {
+		opts.Graph = previous.Plan.Graph
+	}
+	if previous.Snapshot != nil {
+		opts.Generation = previous.Snapshot.Generation()
+		opts.PreviousSnapshot = previous.Snapshot
+	}
+	if previous.Dispatcher != nil {
+		opts.PreviousDispatcher = previous.Dispatcher
+	}
+	if previous.Owner != nil {
+		opts.Owner = previous.Owner
+	}
+	return rebuildWithPrevious(ctx, previous.Controller, previous, opts)
+}
 
 // Rebuild builds a replacement runtime for old, migrating session state.
 // On any failure the partially built runtime is closed and old keeps working.
@@ -48,8 +75,15 @@ import (
 //     before publishing; desktop persists after the swap);
 //   - session-lease coordination across the rebuild (desktop).
 func Rebuild(ctx context.Context, old *control.Controller, opts Options) (*BuildResult, error) {
+	return rebuildWithPrevious(ctx, old, nil, opts)
+}
+
+func rebuildWithPrevious(ctx context.Context, old *control.Controller, previous *BuildResult, opts Options) (*BuildResult, error) {
 	if old == nil {
 		return nil, fmt.Errorf("boot: Rebuild requires the controller being replaced")
+	}
+	if opts.Owner == nil {
+		opts.Owner = old.RuntimeOwner()
 	}
 	// Capture migratable state before building: every accessor returns a
 	// copy, so a slow build cannot observe a half-appended turn.
@@ -67,23 +101,69 @@ func Rebuild(ctx context.Context, old *control.Controller, opts Options) (*Build
 	if opts.SessionTemp == nil {
 		opts.SessionTemp = old.SessionTemp()
 	}
+
+	home := config.ReasonixHomeDir()
+	// fromGraph must be the PREVIOUS generation's graph when available.
+	// Building "current disk" for both from and to collapses every plan to no-op.
+	var fromGraph *extension.DependencyGraph
+	if previous != nil && previous.Plan != nil && previous.Plan.Graph != nil {
+		fromGraph = previous.Plan.Graph
+	} else if g, err := buildRuntimeGraph(home, nil); err == nil {
+		fromGraph = g
+	}
+	opts.Graph = fromGraph
+
+	// Prefer subgraph-classified rebuild when previous assembly is available.
+	if previous != nil {
+		if res, handled, err := tryRebuildSubgraph(ctx, old, previous, opts, m); handled {
+			return res, err
+		}
+	}
+
+	extension.DefaultLifecycleMetrics.FullRebuilds.Add(1)
+	opts.deferPublish = true
 	res, err := BuildRuntime(ctx, opts)
 	if err != nil {
+		// Activation failure: new generation never published; old keeps serving.
 		return nil, err
 	}
+
+	var toGraph *extension.DependencyGraph
+	if g, err := buildRuntimeGraph(home, nil); err == nil {
+		toGraph = g
+	}
+	var previousSnapshot *extension.RuntimeSnapshot
+	if previous != nil {
+		previousSnapshot = previous.Snapshot
+	}
+	attachPlanAndStatus(res, fromGraph, toGraph, opts.Generation, previousSnapshot)
+
 	if err := migrateRuntimeState(res.Controller, old, m); err != nil {
-		// Fail-atomic: nothing was published, so release the replacement
-		// without firing SessionEnd (the session logically continues on old)
-		// and close its runtime set — empty in stage 3a — so stage-5
-		// resources can never leak through this path. old is never closed
-		// here; its runtime set stays the caller's to release after a
-		// successful swap.
+		// Fail-atomic: release the replacement; old keeps serving.
+		// Activation never reached Active publish.
+		if res.Snapshot != nil {
+			res.Owner.Gate.BeginDrain(res.Snapshot.Generation())
+		}
 		res.Controller.ReleaseResources()
 		if res.Runtime != nil {
 			_ = res.Runtime.Close()
 		}
 		return nil, err
 	}
+	if prevGen := old.RuntimeGeneration(); prevGen != 0 && (res.Snapshot == nil || prevGen != res.Snapshot.Generation()) {
+		registerControllerDrainCancel(res.Owner, prevGen, old)
+		if host := old.Host(); host != nil {
+			h := host
+			res.Owner.Gate.RegisterDrainCancel(prevGen, func() { h.CancelInFlightMCP() })
+		}
+	}
+	// Publish new generation only after Active + state migration. Then drain
+	// Removed/Reloaded clients still held by the previous Manager.
+	publishBuildResult(res)
+	if opts.Extensions != nil && res.Plan != nil {
+		opts.Extensions.DrainPlan(res.Plan)
+	}
+	// SessionEnd is not fired on ordinary rebuild.
 	return res, nil
 }
 
@@ -101,32 +181,23 @@ type runtimeMigration struct {
 
 // migrateRuntimeState applies the captured state to the freshly built
 // controller. Every step today is an infallible public control call; the
-// error return is the fail-atomic seam for steps that gain failure modes
-// (for example persisting the migrated transcript), so Rebuild's cleanup
-// path is real rather than assumed.
+// error return is the fail-atomic seam for steps that gain failure modes.
 func migrateRuntimeState(ctrl, old *control.Controller, m runtimeMigration) error {
 	carried := spliceFreshSystemPrompt(m.carried, ctrl.History())
 	path := agent.ContinueSessionPath(m.prevPath, ctrl.SessionDir(), ctrl.Label())
 	ctrl.AdoptHistory(carried, path)
 
-	// Re-apply the session axes a rebuild must not reset (mirrors the ACP
-	// session-config switch). The Goal sidecar restored by the Resume above
-	// is authoritative; the in-memory Goal is seeded only when nothing was
-	// restored (the outgoing controller never pinned a session path).
+	// Re-apply session axes a rebuild must not reset.
 	ctrl.SetToolApprovalMode(m.toolApprovalMode)
 	ctrl.SetPlanMode(m.planMode)
 	if m.goalRunning && strings.TrimSpace(m.goal) != "" && strings.TrimSpace(ctrl.Goal()) == "" {
 		ctrl.SetGoal(m.goal)
 	}
 	if m.prevPath == "" {
-		// No persisted recovery sidecar could have been restored, so carry
-		// the live in-memory checkpoint across the boundary.
+		// No persisted recovery sidecar; carry the live checkpoint.
 		ctrl.CarryRecoveryFrom(old)
 	}
 
-	// Same-session lifecycle and grants: the replacement keeps the turn
-	// counter / started-once flag and every "Allow for this session" and
-	// Plan-mode read-only trust grant the user already made.
 	ctrl.InheritLifecycleFrom(old)
 	ctrl.RestoreSessionAuthorizations(m.authorizations)
 	return nil

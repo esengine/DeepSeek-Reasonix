@@ -109,7 +109,7 @@ func TestExtensionDeveloperGuidesAreEmbeddedAndSearchable(t *testing.T) {
 	}
 
 	tool := &docsTool{catalog: c}
-	english, err := tool.search(context.Background(), "sidecar Manifest v1 runtime Go SDK", "en", "all", 10)
+	english, err := tool.search(context.Background(), "sidecar Manifest v2 runtime Go SDK", "en", "all", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +117,7 @@ func TestExtensionDeveloperGuidesAreEmbeddedAndSearchable(t *testing.T) {
 		t.Fatalf("English extension search did not expose the overview and manifest reference:\n%s", english)
 	}
 
-	chinese, err := tool.search(context.Background(), "Sidecar 插件 Manifest v1 扩展开发", "zh-CN", "all", 10)
+	chinese, err := tool.search(context.Background(), "Sidecar 插件 Manifest v2 扩展开发", "zh-CN", "all", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

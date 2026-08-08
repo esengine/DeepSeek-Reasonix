@@ -78,6 +78,67 @@ func TestStreamRouterReceivesWireNotifications(t *testing.T) {
 	}
 }
 
+// TestRollbackAfterStageKeepsOldRouterConsumingRealStream pins the fail-atomic
+// Unchanged-sidecar contract: after a narrow-reload stage adopts a live client
+// and then fails before commit (no SetStreamRouter / installSidecarStreamRouters),
+// RollbackPlanStart reattaches the client and the pre-stage StreamRouter still
+// receives real wire stream/chunk and stream/end notifications.
+func TestRollbackAfterStageKeepsOldRouterConsumingRealStream(t *testing.T) {
+	old := &recordingRouter{}
+	client := startFakeClient(t, func(rt *pluginpkg.RuntimeSpec) {
+		rt.Env[fakeEnvMode] = "provider_stream"
+	}, func(opts *ClientOptions) {
+		opts.Streams = old
+	})
+
+	prev := &Manager{}
+	if err := prev.Adopt("fakeplugin", client); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stage: Unchanged adopt into next (as StartPackagesWithPlan). Deliberately
+	// do not install a next-gen router — that only happens on commit.
+	next := &Manager{planAdopted: map[string]*Client{}}
+	if c := prev.Detach("fakeplugin"); c == nil {
+		t.Fatal("expected live client on previous manager")
+	} else {
+		if err := next.Adopt("fakeplugin", c); err != nil {
+			t.Fatal(err)
+		}
+		next.planAdopted["fakeplugin"] = c
+	}
+	discarded := &recordingRouter{} // would be next-gen resolver if wrongly installed
+	if client.streamRouter() != old {
+		t.Fatal("stage adopt must not rewrite StreamRouter")
+	}
+
+	next.RollbackPlanStart(prev)
+	if prev.Client("fakeplugin") != client {
+		t.Fatal("client must be reattached to previous manager")
+	}
+	if client.streamRouter() != old {
+		t.Fatal("after rollback StreamRouter must still be the old generation")
+	}
+
+	openProviderStream(t, client, "es_after_rollback")
+	waitFor(t, "old router receives chunk and end after rollback", 5*time.Second, func() bool {
+		chunks, ends := old.counts()
+		return chunks == 1 && ends == 1
+	})
+	if chunks, ends := discarded.counts(); chunks != 0 || ends != 0 {
+		t.Fatalf("discarded next-gen router saw traffic: chunks=%d ends=%d", chunks, ends)
+	}
+	old.mu.Lock()
+	defer old.mu.Unlock()
+	if old.chunks[0].StreamID != "es_after_rollback" || old.chunks[0].Seq != 1 ||
+		old.chunks[0].Chunk.Type != protocol.ChunkText || old.chunks[0].Chunk.Text != "wired" {
+		t.Fatalf("routed chunk after rollback = %+v", old.chunks[0])
+	}
+	if old.ends[0].StreamID != "es_after_rollback" || old.ends[0].LastSeq != 1 {
+		t.Fatalf("routed end after rollback = %+v", old.ends[0])
+	}
+}
+
 // TestSetStreamRouterSwapsMidFlight: a router installed after start receives
 // later notifications; the replaced one stops seeing them.
 func TestSetStreamRouterSwapsMidFlight(t *testing.T) {

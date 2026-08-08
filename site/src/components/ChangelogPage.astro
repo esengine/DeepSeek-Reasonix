@@ -3,7 +3,6 @@ import Base from '../layouts/Base.astro';
 import SiteHeader from './SiteHeader.astro';
 import type { ReleaseItem, ReleaseRecord } from '../data/releases';
 import { releasePath } from '../data/releases';
-import { isThematicTitle } from '../scripts/release-title.js';
 import '../styles/changelog.css';
 
 const { release, releases, canonical } = Astro.props as {
@@ -15,10 +14,6 @@ const base = import.meta.env.BASE_URL.replace(/\/$/, '');
 const repo = 'https://github.com/esengine/DeepSeek-Reasonix';
 const prHref = (ref: number) => `${repo}/pull/${ref}`;
 
-/* A title that is exactly the version string ("Reasonix 1.17.14") means a
-   patch release — it gets the compact hero; anything else (including
-   "Reasonix 1.18.0 — Better agents") keeps the full hero. */
-const isThematic = isThematicTitle(release.title.en, release.version);
 const isPreview = release.channel === 'prerelease';
 const latestForChannel = releases[0];
 const downloadHref = isPreview ? 'https://reasonix.io/?download=desktop#start' : release.links.download;
@@ -122,13 +117,12 @@ const description = release.summary.en;
       </aside>
 
       <article class="release-paper">
-        <header class:list={["release-hero", { "release-hero--compact": !isThematic }]}>
+        <header class="release-hero">
           <div class="release-hero__meta">
             {isPreview && <span class="release-channel release-channel--preview"><span class="release-channel__dot"></span><span class="l-en">Historical archive</span><span class="l-zh">历史归档</span></span>}
             <time datetime={release.date}>{release.date}</time>
           </div>
-          {isThematic && <p class="release-hero__version">Reasonix / v{release.version}</p>}
-          <h1><span class="l-en">{release.title.en}</span><span class="l-zh">{release.title.zh}</span></h1>
+          <h1>Reasonix v{release.version}</h1>
           <div class="release-surfaces">
             {release.surfaces.map((surface) => {
               const label = surfaceLabel(surface);
@@ -142,17 +136,7 @@ const description = release.summary.en;
               <span><strong>npm</strong> {release.builds.npm}</span>
             </div>
           )}
-          {isThematic ? (
-            <blockquote><span class="l-en">{release.summary.en}</span><span class="l-zh">{release.summary.zh}</span></blockquote>
-          ) : (
-            <p class="release-lede"><span class="l-en">{release.summary.en}</span><span class="l-zh">{release.summary.zh}</span></p>
-          )}
-          {isThematic && (
-            <div class="release-hero__actions">
-              <a class="btn btn-dark" href={downloadHref}><span class="l-en">Download current release</span><span class="l-zh">下载当前正式版</span></a>
-              <a class="btn btn-ghost" href={release.links.github}><span class="l-en">View on GitHub ↗</span><span class="l-zh">在 GitHub 查看 ↗</span></a>
-            </div>
-          )}
+          <p class="release-lede"><span class="l-en">{release.summary.en}</span><span class="l-zh">{release.summary.zh}</span></p>
         </header>
 
         {release.guides.length > 0 && (

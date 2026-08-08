@@ -9,6 +9,8 @@ import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
 import type { Translator } from "../lib/i18n";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
+import { Markdown } from "./Markdown";
+import { ReasoningSummary } from "./ReasoningSummary";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -214,6 +216,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   openRef.current = open;
   const [showAll, setShowAll] = useState(false);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
+  // The sub-agent reasoning preview opens as a one-line summary; the full
+  // Markdown only mounts after the user expands the reasoning section.
+  const [subagentReasoningOpen, setSubagentReasoningOpen] = useState(false);
   // Lazy-load full tool data from the backend when the card is expanded and
   // the in-memory copy was archived for memory efficiency.
   const [fullData, setFullData] = useState<{ args: string; output?: string; execution?: ToolItem["execution"] } | null>(null);
@@ -352,12 +357,29 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           ))
         )}
 
-        {hasSubagentPreview && sp && (
+        {open && hasSubagentPreview && sp && (
           <div className="tool__subagent-preview">
             {sp.reasoning && (
               <div className="tool__subagent-preview-section">
-                <div className="tool__subagent-preview-label">{t("subagent.preview.reasoning")}</div>
-                <pre className="tool__subagent-preview-text">{sp.reasoning}</pre>
+                <button
+                  type="button"
+                  className="tool__subagent-preview-label tool__subagent-preview-label--toggle"
+                  onClick={() => setSubagentReasoningOpen((v) => !v)}
+                  aria-expanded={subagentReasoningOpen}
+                >
+                  {t("subagent.preview.reasoning")}
+                </button>
+                {subagentReasoningOpen ? (
+                  <div className="tool__subagent-preview-text tool__subagent-preview-text--markdown">
+                    <Markdown text={sp.reasoning} streaming={sp.phase === "reasoning"} />
+                  </div>
+                ) : (
+                  <ReasoningSummary
+                    text={sp.reasoning}
+                    streaming={sp.phase === "reasoning"}
+                    onOpen={() => setSubagentReasoningOpen(true)}
+                  />
+                )}
               </div>
             )}
             {sp.text && (

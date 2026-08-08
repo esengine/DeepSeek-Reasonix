@@ -256,16 +256,25 @@ Plugin hook execution is explicit:
   Reasonix shell-command behavior. `shellCommand: true` remains supported as
   the legacy spelling of shell form.
 
-## Manifest v1 (Extensions)
+## Manifest v2 (Extensions)
 
-A plugin can opt into the v1 manifest by declaring an `apiVersion`:
+Native Reasonix extensions use the exact v2 `apiVersion`:
 
 ```json
 {
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "example",
   "version": "1.0.0",
   "description": "Example extension",
+  "requires": [],
+  "provides": [
+    {
+      "namespace": "plugin/example",
+      "kind": "interceptors",
+      "id": "default",
+      "version": "1.0.0"
+    }
+  ],
   "contributes": {
     "skills": ["skills"],
     "agents": ["agents"],
@@ -282,21 +291,26 @@ A plugin can opt into the v1 manifest by declaring an `apiVersion`:
     "required": true,
     "priority": 0,
     "intercepts": ["input.receive", "tool.before"],
-    "replaces": ["system_prompt"],
-    "capabilities": ["interceptors", "strategies", "providers", "ui"]
+    "replaces": [],
+    "capabilities": ["interceptors"]
   }
 }
 ```
 
 Parsing rules:
 
-- Manifests **without** `apiVersion` parse exactly as before (legacy format,
-  unknown fields ignored).
-- v1 is strict: any unknown field — at the root or nested under
+- Native `reasonix-plugin.json` manifests must declare the exact
+  `reasonix.io/plugin/v2` value. v1 and missing versions are rejected; there
+  is no v1 dual-read or automatic migration path.
+- v2 is strict: any unknown field — at the root or nested under
   `contributes`/`runtime` — is an error naming the field path, so typos fail
   loudly instead of silently disabling a capability.
-- Unknown major versions (`reasonix.io/plugin/v2`, …) are rejected.
-- v1 may mix legacy top-level fields (`skills`, `hooks`, `mcpServers`, …)
+- Minor aliases (`reasonix.io/plugin/v2.0`, `v2.1`, …) and unknown major
+  versions are rejected.
+- `requires` and `provides` declare dependency constraints and the capability
+  ceiling enforced against the Sidecar handshake.
+- v2 may mix the supported top-level resource fields (`skills`, `hooks`,
+  `mcpServers`, …)
   with `contributes`: identical paths are deduplicated; the same key with two
   different definitions is a manifest error naming the key.
 - All relative paths and globs must stay inside the plugin root: traversal,

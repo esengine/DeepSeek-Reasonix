@@ -183,7 +183,6 @@ type WorkspaceTab struct {
 
 	ActivityStatus string // transient project-tree status for the in-flight turn
 
-	// Per-turn autosave per tab.
 	saveMu       sync.Mutex
 	saving       bool
 	saveAgain    bool
@@ -228,6 +227,7 @@ type WorkspaceTab struct {
 	toolApprovalMode string
 	disabledMCP      map[string]ServerView
 	mcpOrder         []string
+	lastBuildResult  *boot.BuildResult // incremental extension reload
 }
 
 const (

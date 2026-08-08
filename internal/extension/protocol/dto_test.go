@@ -16,7 +16,7 @@ var methodFixtures = map[Method]struct {
 }{
 	MethodExtensionInitialize: {
 		params: InitializeParams{
-			ProtocolVersion: "1",
+			ProtocolVersion: "2",
 			ProtocolID:      ProtocolID,
 			Manifest: ManifestExpectation{
 				Intercepts:   []string{"tool.before"},
@@ -26,10 +26,10 @@ var methodFixtures = map[Method]struct {
 				Capabilities: []string{"content_refs"},
 			},
 			Session:      SessionContext{SessionID: "s-1", WorkspaceRoot: "/repo", Generation: 3},
-			Capabilities: HostCapabilities{ContentRefs: true, UIHost: UIHostDesktop, ProtocolVersion: "1"},
+			Capabilities: HostCapabilities{ContentRefs: true, UIHost: UIHostDesktop, ProtocolVersion: "2"},
 		},
 		result: InitializeResult{
-			ProtocolVersion: "1", Name: "acme", Version: "1.2.3",
+			ProtocolVersion: "2", Name: "acme", Version: "1.2.3",
 			Subscriptions: []string{"tool.before"},
 			Replaces:      []string{"tool:bash"},
 			Providers: []ProviderDescriptor{{

@@ -4658,6 +4658,45 @@ a[href] {
   transform: rotate(90deg);
 }
 
+/* One-line plain-text preview shown while a reasoning block is collapsed. */
+.reasoning-summary {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  margin: 2px 0 6px 8px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 82%, transparent);
+  padding: 0 0 0 12px;
+  color: color-mix(in srgb, var(--fg-dim) 78%, transparent);
+  font-family: var(--font-content-family);
+  font-size: var(--font-control);
+  line-height: 1.72;
+  text-align: left;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* While streaming the summary scrolls to the line tail, where a trailing
+   ellipsis would sit on top of the live text. */
+.reasoning-summary[data-follow-end] {
+  text-overflow: clip;
+}
+button.reasoning-summary {
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0;
+  background: none;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+button.reasoning-summary:hover {
+  color: var(--fg);
+}
+button.reasoning-summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 52%, transparent);
+  outline-offset: 2px;
+}
+
 .turn-collapse__reasoning-phase {
   display: flex;
   flex-direction: column;
@@ -4962,6 +5001,25 @@ a[href] {
   font-style: normal;
   line-height: 1.72;
   white-space: pre-wrap;
+}
+.reasoning__body > .md,
+.turn-collapse__inline-reasoning > .md,
+.tool__subagent-preview-text--markdown > .md {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  white-space: normal;
+}
+.reasoning__body > .md p,
+.turn-collapse__inline-reasoning > .md p,
+.tool__subagent-preview-text--markdown > .md p {
+  margin-bottom: 8px;
+}
+.reasoning__body > .md :where(h1, h2, h3, h4),
+.turn-collapse__inline-reasoning > .md :where(h1, h2, h3, h4),
+.tool__subagent-preview-text--markdown > .md :where(h1, h2, h3, h4) {
+  margin: 12px 0 6px;
+  font-size: 1em;
 }
 /* ── markdown prose ──────────────────────────────────────────────────────── */
 .md {
@@ -6027,6 +6085,26 @@ body > .mermaid-diagram--fullscreen {
   font-weight: 600;
   color: var(--fg-dim);
   margin-bottom: 2px;
+}
+.tool__subagent-preview-label--toggle {
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+.tool__subagent-preview-label--toggle:hover {
+  color: var(--fg);
+}
+/* The collapsed reasoning preview matches the plain-text preview blocks. */
+.tool__subagent-preview .reasoning-summary {
+  margin: 0;
+  border-left: none;
+  padding-left: 0;
+  font-family: var(--font-code-family);
+  font-size: var(--font-caption);
+  line-height: 1.5;
 }
 .tool__subagent-preview-text {
   margin: 0;
@@ -14565,7 +14643,6 @@ body > .mermaid-diagram--fullscreen {
 .cap-switch input:disabled + .cap-switch__track {
   opacity: 0.5;
 }
-
 /* ── management modals: shared shell for settings, history, and trash ───────── */
 .management-modal-backdrop {
   --wails-draggable: no-drag;

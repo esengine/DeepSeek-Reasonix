@@ -1,4 +1,4 @@
-# Reasonix Extension Protocol v1
+# Reasonix Extension Protocol v2
 
 The Extension Protocol is the stable wire contract between Reasonix (the
 **host**) and code extensions running as out-of-process **sidecars**. It is
@@ -6,7 +6,7 @@ how an installed plugin with a `runtime` block intercepts runtime events,
 owns replacement strategies, contributes streaming model providers, and
 publishes structured UI — without ever linking into the host binary.
 
-- Protocol ID: `reasonix.extension.v1`
+- Protocol ID: `reasonix.extension.v2`
 - Machine-readable schema: `internal/extension/protocol/schema.generated.json`
 - Method/event/limit/error index: `docs/EXTENSION_PROTOCOL.generated.md`
   (generated, drift-checked in CI)
@@ -133,7 +133,7 @@ reason table lives in the generated index.
 
 ## Stability contract
 
-Within major version 1, the only permitted evolutions are: new optional
+Within major version 2, the only permitted evolutions are: new optional
 fields, new enum values, and new methods. Existing required fields,
 directions, limits, error reasons, and semantics never change. The canonical
 schema and its SHA-256 hash are produced by `cmd/extension-protocol-gen`;

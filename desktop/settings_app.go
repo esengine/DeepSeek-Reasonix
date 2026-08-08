@@ -1877,7 +1877,8 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	a.supersedeTabBuildLocked(tab)
 	a.saveTabsLocked()
 	a.mu.Unlock()
-	if oldCtrl != nil {
+	// True subgraph rebuilds reuse the same controller pointer — never Close it.
+	if oldCtrl != nil && oldCtrl != ctrl {
 		oldCtrl.Close()
 	}
 	a.persistTabSessionPath(tab, path)
@@ -1921,12 +1922,10 @@ func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRunti
 		if !ok {
 			return nil, normalizedTabRuntime{}, "", fmt.Errorf("reload runtime: controller is %T, want *control.Controller", oldCtrl)
 		}
-		res, err := boot.Rebuild(a.bootContext(), old, opts)
+		res, err := rebuildTabRuntime(a, tab, old, opts)
 		if err != nil {
 			return nil, normalizedTabRuntime{}, "", err
 		}
-		// The stage-3a runtime set is always empty; when stage 5 binds
-		// sidecar processes it must retire with the controller it belongs to.
 		ctrl := res.Controller
 		a.bindControllerDisplayRecorder(ctrl)
 		// boot.Rebuild migrated history (same session file, fresh system

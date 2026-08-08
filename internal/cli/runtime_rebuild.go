@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/boot"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/i18n"
 )
 
@@ -214,4 +215,30 @@ func (m *chatTUI) scheduleCurrentControllerRebuild(reason, successNotice string)
 		}
 	}
 	return m.pendingModelSwitch
+}
+
+func (m *chatTUI) bindRuntimeRebuilder(maxSteps int, sink event.Sink, yolo bool, overrides cliBuildOverrides, buildOpts func(string, int, bool, event.Sink, string, cliBuildOverrides) boot.Options) {
+	m.rebuildRuntime = func(ctx context.Context, spec controllerBuildSpec, old *control.Controller) (*boot.BuildResult, error) {
+		effectiveOverrides := overrides
+		if spec.EffortOverride != nil {
+			effectiveOverrides.Effort = spec.EffortOverride
+		}
+		opts := buildOpts(spec.ModelRef, maxSteps, false, sink, spec.RuntimeProfile, effectiveOverrides)
+		var res *boot.BuildResult
+		var err error
+		if m.lastBuildResult != nil {
+			res, err = boot.RebuildFrom(ctx, m.lastBuildResult, opts)
+		} else {
+			res, err = boot.Rebuild(ctx, old, opts)
+		}
+		if err != nil {
+			return nil, err
+		}
+		m.lastBuildResult = res
+		res.Controller.EnableInteractiveApproval()
+		if yolo {
+			res.Controller.SetAutoApproveTools(true)
+		}
+		return res, nil
+	}
 }

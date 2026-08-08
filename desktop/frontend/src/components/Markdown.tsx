@@ -130,6 +130,46 @@ export function streamingMarkdownCommitInterval(textLength: number): number {
   return 50;
 }
 
+// streamingCommitTarget returns the prefix worth parsing while a stream is
+// live: everything up to the last completed block — a blank line, a closed
+// fence, closed display math, or the start of a heading, all on terminated
+// lines. The in-progress block rides the plain-text tail instead, so Markdown
+// re-parses once per completed block rather than once per commit interval. An
+// unclosed fence or $$ keeps the whole text parsed for live code highlighting.
+export function streamingCommitTarget(text: string): string {
+  let lineStart = 0;
+  let fence: { marker: string; length: number } | null = null;
+  let displayMath = false;
+  let boundary = 0;
+  while (lineStart < text.length) {
+    const newline = text.indexOf("\n", lineStart);
+    const lineEnd = newline === -1 ? text.length : newline + 1;
+    const line = text.slice(lineStart, newline === -1 ? text.length : newline).replace(/\r$/, "");
+    const terminated = newline !== -1;
+    if (fence) {
+      if (new RegExp(`^ {0,3}${fence.marker}{${fence.length},}[ \\t]*$`).test(line)) {
+        fence = null;
+        if (terminated) boundary = lineEnd;
+      }
+    } else if (displayMath) {
+      if (line.trim() === "$$") {
+        displayMath = false;
+        if (terminated) boundary = lineEnd;
+      }
+    } else {
+      const fenceMatch = /^ {0,3}(`{3,}|~{3,})/.exec(line);
+      if (fenceMatch) fence = { marker: fenceMatch[1][0], length: fenceMatch[1].length };
+      else if (line.trim() === "$$") displayMath = true;
+      else if (terminated && line.trim() === "") boundary = lineEnd;
+      // A heading interrupts a paragraph, so a partial heading line already
+      // completes everything before it; a terminated one is itself complete.
+      else if (/^ {0,3}#{1,6}[ \t]+/.test(line)) boundary = terminated ? lineEnd : lineStart;
+    }
+    lineStart = lineEnd;
+  }
+  return fence || displayMath ? text : text.slice(0, boundary);
+}
+
 export function useRenderedMarkdownText(text: string, streaming: boolean): string {
   const [renderedText, setRenderedText] = useState(text);
   const latestTextRef = useRef(text);
@@ -151,6 +191,13 @@ export function useRenderedMarkdownText(text: string, streaming: boolean): strin
       cancelFinalizationRef.current?.();
       cancelFinalizationRef.current = null;
       finalizingTextRef.current = null;
+      // A bounded live preview occasionally advances its window and drops an
+      // old prefix. Discard the stale parsed tree before paint; the complete
+      // replacement stays visible through StreamingMarkdownTail and is parsed
+      // later under the normal adaptive budget.
+      if (renderedText !== "" && !text.startsWith(renderedText)) {
+        setRenderedText("");
+      }
       return;
     }
     lastCommitAtRef.current = 0;
@@ -206,12 +253,15 @@ export function useRenderedMarkdownText(text: string, streaming: boolean): strin
   }, [renderedText, streaming]);
 
   useEffect(() => {
-    if (!streaming || renderedText === text || frameRef.current !== null || timeoutRef.current !== null) return;
+    if (!streaming || frameRef.current !== null || timeoutRef.current !== null) return;
+    if (streamingCommitTarget(text).length <= renderedText.length) return;
     const commit = () => {
       timeoutRef.current = null;
       frameRef.current = requestAnimationFrame(() => {
         frameRef.current = null;
-        setRenderedText(latestTextRef.current);
+        // Recompute at commit time: only ever advance to a newer boundary.
+        const target = streamingCommitTarget(latestTextRef.current);
+        setRenderedText((prev) => (target.length > prev.length ? target : prev));
       });
     };
     const now = performance.now();
@@ -261,7 +311,7 @@ export const Markdown = memo(function Markdown({
 }) {
   const renderedText = useRenderedMarkdownText(text, streaming);
   const sections = useMemo(() => splitStableMarkdownSections(renderedText), [renderedText]);
-  const pendingText = text.length >= STREAMING_TAIL_THRESHOLD && text.startsWith(renderedText)
+  const pendingText = (streaming || text.length >= STREAMING_TAIL_THRESHOLD) && text.startsWith(renderedText)
     ? text.slice(renderedText.length)
     : "";
   return (

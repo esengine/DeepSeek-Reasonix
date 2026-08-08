@@ -100,7 +100,11 @@ func (a *Agent) compactThresholds() (soft, snip, high int) {
 // the canonical transcript. No-op when compaction is disabled or usage is
 // unavailable.
 func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
-	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
+	if a.contextWindow <= 0 || u == nil {
+		return
+	}
+	promptTokens := u.LatestPromptTokens()
+	if promptTokens == 0 {
 		return
 	}
 	soft, snip, high := a.compactThresholds()
@@ -111,32 +115,32 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	// leaving a stale run count behind there would latch the *next* compaction as
 	// "the window is too small" and silently disable auto-compaction for the rest
 	// of the session.
-	if u.PromptTokens < high {
+	if promptTokens < high {
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
 	}
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
-	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {
+	if promptTokens >= soft && promptTokens < snip && !a.softCompactNoticed {
 		a.softCompactNoticed = true
 		detail := fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context is getting large; preserving cache until cleanup is needed.", Detail: detail})
 		return
 	}
-	if u.PromptTokens >= snip && u.PromptTokens < high {
+	if promptTokens >= snip && promptTokens < high {
 		// Snip only into a projection view — never rewrite the canonical log.
 		if err := a.snipToProjection(ctx); err != nil {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context snip skipped for now.", Detail: err.Error()})
 		}
 		return
 	}
-	if u.PromptTokens < high {
+	if promptTokens < high {
 		return // the latch was already cleared above
 	}
 	if a.compactStuck {
 		return
 	}
-	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
+	force := promptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
 	// Projection-only prune before folding. Install the pruned view first so the
 	// next request (and its real usage) can measure whether a paid summarize is
 	// still needed — never rewrite the canonical transcript.
@@ -640,6 +644,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 			a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
 		}
 	}()
+	defer trackPublishedHostStream(ctx, cancel)()
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: sys},
@@ -651,6 +656,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 		return "", usage, err
 	}
 
+	// Unblock on timeout if the stream stalls while open.
 	var b strings.Builder
 	for {
 		select {

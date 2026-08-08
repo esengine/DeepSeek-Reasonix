@@ -192,6 +192,10 @@ type Host struct {
 	spawningMu sync.Mutex
 	spawning   map[string]*spawnAttempt
 
+	// proxies holds stable per-server backends for rolling replacement without
+	// changing provider-visible tool prefixes (spatiotemporal composability).
+	proxies map[string]*serverProxy
+
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
 	bgWrites sync.WaitGroup
@@ -490,11 +494,17 @@ func (h *Host) Close() {
 	}
 	h.deferredWG.Wait()
 
-	h.mu.RLock()
-	clients := append([]*Client(nil), h.clients...) // snapshot; close outside the lock
-	h.mu.RUnlock()
+	h.mu.Lock()
+	clients := append([]*Client(nil), h.clients...)
+	proxies := h.proxies
+	h.proxies = nil
+	h.clients = nil
+	h.mu.Unlock()
+	closeServerProxies(proxies)
 	for _, c := range clients {
-		c.close()
+		if c != nil && c.t != nil {
+			c.close()
+		}
 	}
 	h.bgWrites.Wait() // drain detached stats/schema writers before returning
 }
@@ -1171,17 +1181,7 @@ func nonEmptyDurationMap(in map[string]time.Duration) map[string]time.Duration {
 	return in
 }
 
-// client returns the named connected client, or nil.
-func (h *Host) client(name string) *Client {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for _, c := range h.clients {
-		if c.name == name {
-			return c
-		}
-	}
-	return nil
-}
+func (h *Host) client(name string) *Client { return h.lookupClient(name) }
 
 // Add connects one server live: it performs the MCP handshake, discovers the
 // server's tools (and prompts/resources when advertised), appends it to the

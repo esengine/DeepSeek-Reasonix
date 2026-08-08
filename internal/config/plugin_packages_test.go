@@ -13,6 +13,7 @@ func TestLoadMergesInstalledPluginSkillRootsAndMCP(t *testing.T) {
 	t.Setenv("REASONIX_HOME", home)
 	root := filepath.Join(home, "plugins", "superpowers")
 	writeConfigTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "superpowers",
   "version": "1.0.0",
   "skills": "skills",

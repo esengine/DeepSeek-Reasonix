@@ -41,5 +41,17 @@ eq(
   "can opt out of streaming truncation",
 );
 
+eq(
+  displayReasoningText("abcdefgh", { streaming: true, maxChars: 4, maxLines: 10, stableWindowChars: 3 }),
+  "...\ndefgh",
+  "keeps a stable append-only character window between coarse rebases",
+);
+
+eq(
+  displayReasoningText("a\nb\nc\nd\ne", { streaming: true, maxChars: 100, maxLines: 2, stableWindowLines: 2 }),
+  "...\nc\nd\ne",
+  "keeps a stable append-only line window between coarse rebases",
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

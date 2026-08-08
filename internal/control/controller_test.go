@@ -3237,13 +3237,7 @@ func TestRemoveMCPServerRejectsPluginManagedTools(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{
-  "name": "superpowers",
-  "version": "1.0.0",
-  "mcpServers": {
-    "helper": { "command": "bin/helper" }
-  }
-}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{"apiVersion":"reasonix.io/plugin/v2","name":"superpowers","version":"1.0.0","mcpServers":{"helper":{"command":"bin/helper"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{

@@ -23,12 +23,14 @@ console.log("\ntranscript process fold");
 
 let displayMode = "standard";
 let processFoldPref = "auto";
+let reasoningSummaryPref = true;
 Object.defineProperty(globalThis, "localStorage", {
   configurable: true,
   value: {
     getItem(key: string) {
       if (key === "reasonix-display-mode") return displayMode;
       if (key === "reasonix-process-fold") return processFoldPref;
+      if (key === "reasonix-reasoning-summary") return reasoningSummaryPref ? "1" : "0";
       return null;
     },
     setItem() {},
@@ -49,9 +51,10 @@ try {
   const { Transcript } = await server.ssrLoadModule("/src/components/Transcript.tsx");
   const { LocaleProvider } = await server.ssrLoadModule("/src/lib/i18n.tsx");
 
-  function render(items: Item[], options: { mode?: "standard" | "compact"; running?: boolean; turnStartAt?: number; foldPref?: "auto" | "expanded" } = {}) {
+  function render(items: Item[], options: { mode?: "standard" | "compact"; running?: boolean; turnStartAt?: number; foldPref?: "auto" | "expanded"; summaryEnabled?: boolean } = {}) {
     displayMode = options.mode ?? "standard";
     processFoldPref = options.foldPref ?? "auto";
+    reasoningSummaryPref = options.summaryEnabled ?? true;
     const markup = renderToStaticMarkup(
       React.createElement(
         LocaleProvider,
@@ -204,6 +207,15 @@ try {
     { kind: "assistant", id: "a8", text: "", reasoning: "got cut off", streaming: false, workDurationMs: 3_000 },
   ]);
   ok(aloneDoc.querySelector(".turn-collapse--open"), "fold with nothing outside stays expanded");
+  const aloneSummary = aloneDoc.querySelector(".turn-collapse--open .reasoning-summary");
+  ok(aloneSummary?.textContent === "got cut off", "an open fold still shows reasoning as a summary by default");
+  ok(!aloneDoc.querySelector(".turn-collapse--open .md"), "an open fold mounts no reasoning Markdown until the segment expands");
+  const noSummaryDoc = render([
+    { kind: "user", id: "u5b", text: "cancelled" },
+    { kind: "assistant", id: "a8b", text: "", reasoning: "got cut off", streaming: false, workDurationMs: 3_000 },
+  ], { summaryEnabled: false });
+  ok(!noSummaryDoc.querySelector(".turn-collapse .reasoning-summary"), "disabling reasoning summaries hides inline fold previews");
+  ok(!noSummaryDoc.querySelector(".turn-collapse .md"), "disabled inline previews keep Markdown lazy");
   const answeredDoc = render([
     { kind: "user", id: "u6", text: "ask" },
     { kind: "assistant", id: "a9", text: "answered", reasoning: "quick", streaming: false, workDurationMs: 3_000 },
@@ -217,11 +229,93 @@ try {
   ], { foldPref: "expanded" });
   ok(expandedDoc.querySelector(".turn-collapse--open"), "keep-expanded preference leaves the fold open");
 
-  // Each reasoning segment inside the fold is independently collapsible (#6340).
+  // Each reasoning segment inside the fold is independently collapsible (#6340)
+  // and now defaults to a one-line plain-text summary; the full Markdown body
+  // only mounts after the segment is expanded.
   const segmentDoc = render(warningTurn);
   const segmentHeads = segmentDoc.querySelectorAll("button.turn-collapse__reasoning-head");
   ok(segmentHeads.length === 3, "every reasoning segment gets its own toggle");
-  ok(Array.from(segmentHeads).every((head) => head.getAttribute("aria-expanded") === "true"), "reasoning segments default to expanded");
+  ok(Array.from(segmentHeads).every((head) => head.getAttribute("aria-expanded") === "false"), "reasoning segments default to collapsed");
+  const segmentSummaries = Array.from(segmentDoc.querySelectorAll(".turn-collapse .reasoning-summary"));
+  ok(segmentSummaries.length === 3, "collapsed reasoning segments render summaries");
+  ok(segmentSummaries[0]?.textContent === "first thought", "segment summary is the first non-blank line");
+  ok(segmentDoc.querySelectorAll(".turn-collapse .md").length === 0, "unexpanded segments mount no Markdown");
+  ok(segmentDoc.querySelectorAll(".turn-collapse .turn-collapse__inline-reasoning").length === 0, "a closed fold mounts no reasoning Markdown body");
+
+  // Interactive: clicking a segment summary or head mounts the full Markdown.
+  const liveDom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
+    pretendToBeVisual: true,
+    url: "http://localhost/",
+  });
+  (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  globalThis.window = liveDom.window as unknown as Window & typeof globalThis;
+  globalThis.document = liveDom.window.document;
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: liveDom.window.navigator });
+  globalThis.Node = liveDom.window.Node;
+  globalThis.Element = liveDom.window.Element;
+  globalThis.HTMLElement = liveDom.window.HTMLElement;
+  globalThis.Event = liveDom.window.Event;
+  globalThis.MouseEvent = liveDom.window.MouseEvent;
+  globalThis.requestAnimationFrame = liveDom.window.requestAnimationFrame.bind(liveDom.window);
+  globalThis.cancelAnimationFrame = liveDom.window.cancelAnimationFrame.bind(liveDom.window);
+
+  const { act } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const liveRootEl = document.getElementById("root");
+  if (!liveRootEl) throw new Error("missing root");
+  const liveRoot = createRoot(liveRootEl);
+  displayMode = "standard";
+  processFoldPref = "auto";
+  await act(async () => {
+    liveRoot.render(
+      React.createElement(
+        LocaleProvider,
+        null,
+        React.createElement(Transcript, {
+          items: [
+            { kind: "user", id: "iu1", text: "cancelled" },
+            { kind: "assistant", id: "ia1", text: "", reasoning: "**got cut off**\n\n- tail detail", streaming: false, workDurationMs: 3_000 },
+          ],
+          onPrompt: () => {},
+          questionNavigator: false,
+          running: false,
+        }),
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  const liveFold = document.querySelector(".turn-collapse--open");
+  ok(Boolean(liveFold), "interactive fold with nothing outside stays expanded");
+  const liveSummary = document.querySelector<HTMLButtonElement>(".turn-collapse .reasoning-summary");
+  ok(liveSummary?.textContent === "**got cut off**", "interactive segment shows the plain-text summary");
+  ok(!document.querySelector(".turn-collapse .md"), "interactive segment mounts no Markdown while collapsed");
+
+  const liveClick = async (el: Element | null | undefined, until?: () => boolean) => {
+    await act(async () => {
+      el?.dispatchEvent(new liveDom.window.MouseEvent("click", { bubbles: true }));
+      // The Markdown renderer lazy-loads; flush macrotasks until it lands.
+      for (let i = 0; i < 500; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (until?.()) break;
+      }
+    });
+  };
+
+  await liveClick(liveSummary, () => Boolean(document.querySelector(".turn-collapse .md strong")));
+  ok(document.querySelector(".turn-collapse .md strong")?.textContent === "got cut off", "clicking the summary mounts the full Markdown");
+  ok(document.querySelector(".turn-collapse .md li")?.textContent === "tail detail", "expanded segment renders Markdown lists");
+  ok(document.querySelector(".turn-collapse__reasoning-head")?.getAttribute("aria-expanded") === "true", "segment head reflects the expanded state");
+
+  await liveClick(document.querySelector(".turn-collapse__reasoning-head"));
+  ok(!document.querySelector(".turn-collapse .md"), "clicking the segment head collapses back to the summary");
+  await liveClick(document.querySelector(".turn-collapse__reasoning-head"));
+  ok(document.querySelector(".turn-collapse .md strong")?.textContent === "got cut off", "clicking the segment head expands the full Markdown");
+
+  await act(async () => {
+    liveRoot.unmount();
+  });
+  liveDom.window.close();
 } finally {
   await server?.close();
   delete (globalThis as { localStorage?: Storage }).localStorage;

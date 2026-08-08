@@ -83,7 +83,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 		out.resolvedReadOnly = plan.resolvedMeta.ReadOnly
 	}()
 
-	if blocked, early := a.parseToolCall(plan); early {
+	if blocked, early := a.parseToolCall(ctx, plan); early {
 		return blocked
 	}
 	// tool.before: extensions rule on the parsed call before any policy or
@@ -103,7 +103,7 @@ func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out too
 
 // parseToolCall resolves the canonical tool, rejects ambiguity/unknown tools,
 // and applies repeat-success and stale-anchor guards.
-func (a *Agent) parseToolCall(plan *toolCallPlan) (toolOutcome, bool) {
+func (a *Agent) parseToolCall(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
 	t, canonicalName, ambiguous := a.tools.ResolveCall(plan.call.Name)
 	if len(ambiguous) > 0 {
 		msg := fmt.Sprintf("ambiguous MCP tool reference %q; use one of: %s", plan.call.Name, strings.Join(ambiguous, ", "))
@@ -130,7 +130,7 @@ func (a *Agent) parseToolCall(plan *toolCallPlan) (toolOutcome, bool) {
 			errMsg:  loopGuardBlockErrMsg,
 		}, true
 	}
-	if out, blocked := a.repeatedFailureBlock(plan.call, t); blocked {
+	if out, blocked := a.repeatedFailureBlock(ctx, plan.call, t); blocked {
 		return toolOutcome{
 			output:  out,
 			blocked: true,
@@ -611,7 +611,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 	// Previewers get precise paths (complete coverage). Bash / opaque MCP
 	// writers record explicit coverage gaps instead of guessing targets.
 	if !plan.readOnly {
-		a.observeBeforeMutation(plan)
+		a.observeBeforeMutation(ctx, plan)
 		plan.mutationObserved = plan.mutationPath != ""
 		if toolHooksMayMutateWorkspace(a.hooks) && a.mutationObserver != nil {
 			a.mutationObserver.RecordGap(checkpoint.CoverageGap{Reason: checkpoint.GapHookWrite, Tool: plan.evidenceName, Detail: "tool hook may write paths that are not declared by the tool"})
@@ -861,7 +861,7 @@ func shellPreflightExecution(plan *toolCallPlan, hasVerification bool) *tool.She
 
 // observeBeforeMutation captures preimages for Previewable writers and records
 // explicit coverage gaps for bash / opaque MCP tools. Host-internal only.
-func (a *Agent) observeBeforeMutation(plan *toolCallPlan) {
+func (a *Agent) observeBeforeMutation(ctx context.Context, plan *toolCallPlan) {
 	if a == nil || plan == nil {
 		return
 	}
@@ -872,7 +872,7 @@ func (a *Agent) observeBeforeMutation(plan *toolCallPlan) {
 	obs := a.mutationObserver
 	if obs != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
-			if change, perr := pv.Preview(plan.execArgs); perr == nil && change.Path != "" {
+			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil && change.Path != "" {
 				obs.BeforeMutationFromChange(change, toolName)
 				plan.mutationPath = change.Path
 				return
@@ -893,7 +893,7 @@ func (a *Agent) observeBeforeMutation(plan *toolCallPlan) {
 	// Legacy onPreEdit path.
 	if a.onPreEdit != nil {
 		if pv, ok := plan.execTool.(tool.Previewer); ok {
-			if change, perr := pv.Preview(plan.execArgs); perr == nil {
+			if change, perr := pv.Preview(ctx, plan.execArgs); perr == nil {
 				a.onPreEdit(change)
 				plan.mutationPath = change.Path
 			}

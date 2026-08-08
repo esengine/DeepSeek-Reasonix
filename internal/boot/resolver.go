@@ -80,15 +80,11 @@ func resolveProvider(resolver provider.Resolver, cfg *config.Config, proxy netcl
 }
 
 // mergeSidecarProviders wraps the build's resolver with the extension-hosted
-// provider adapter (stage 7) whenever a started sidecar declared providers in
-// its handshake. The base resolver — the caller-owned broker when
-// opts.ProviderResolver is set, the local config-backed one otherwise — keeps
-// serving every non-plugin ref; plugin providers are additive on top of it,
-// and an exact-ref collision without the plugin's provider:<ref> claim is a
-// *providerext.ConflictError (fatal at the call site). The merged Resolver is
-// also the sidecar clients' stream router, installed here so inbound
-// stream/chunk and stream/end notifications reach the buffered streams.
-func mergeSidecarProviders(base provider.Resolver, mgr *sidecar.Manager, claims map[extension.Slot]extension.ContributionSource) (provider.Resolver, error) {
+// provider adapter (stage 7) whenever a started sidecar declared providers.
+// It does not install stream routers — call installSidecarStreamRouters after
+// commit so failed narrow rebuilds never leave adopted clients on a discarded
+// generation resolver.
+func mergeSidecarProviders(base provider.Resolver, mgr *sidecar.Manager, claims map[extension.Slot]extension.ContributionSource, owners ...*extension.RuntimeOwner) (provider.Resolver, error) {
 	if mgr == nil {
 		return base, nil
 	}
@@ -110,14 +106,22 @@ func mergeSidecarProviders(base provider.Resolver, mgr *sidecar.Manager, claims 
 		}
 		return out
 	}
-	merged, err := providerext.New(base, clientsFn, claims)
-	if err != nil {
-		return nil, err
+	return providerext.New(base, clientsFn, claims, owners...)
+}
+
+// installSidecarStreamRouters binds merged as the stream router on every live
+// client. Call only after cold-start success or narrow-rebuild commit.
+func installSidecarStreamRouters(mgr *sidecar.Manager, merged provider.Resolver) {
+	if mgr == nil || merged == nil {
+		return
+	}
+	router, ok := merged.(sidecar.StreamRouter)
+	if !ok {
+		return
 	}
 	for _, client := range mgr.Clients() {
-		client.SetStreamRouter(merged)
+		client.SetStreamRouter(router)
 	}
-	return merged, nil
 }
 
 func modelRefFromEntry(e *config.ProviderEntry) string {

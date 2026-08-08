@@ -60,6 +60,7 @@ func TestReasonixWindowsShortcutTargetRequiresCurrentInstall(t *testing.T) {
 		{name: "launcher alias", target: filepath.Join(root, "Reasonix.exe"), want: true},
 		{name: "versioned desktop", target: filepath.Join(root, "versions", "v1.19.3", "reasonix-desktop.exe"), want: true},
 		{name: "other install", target: filepath.Join(`D:\Apps`, "Reasonix", "reasonix-launcher.exe"), want: false},
+		{name: "separate 0.53 install", target: filepath.Join(`D:\Legacy`, "Reasonix", "reasonix-desktop.exe"), want: false},
 		{name: "unrelated app", target: filepath.Join(root, "other.exe"), want: false},
 		{name: "empty", target: "", want: false},
 	}

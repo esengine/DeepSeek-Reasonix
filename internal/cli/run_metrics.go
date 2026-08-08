@@ -234,7 +234,6 @@ func (s *metricsSink) record(e event.Event) {
 	if e.Kind == event.Retrying {
 		s.m.Retries++
 	}
-	s.inner.Emit(e)
 }
 
 // recordSource buckets one model call by its origin. An empty source means the

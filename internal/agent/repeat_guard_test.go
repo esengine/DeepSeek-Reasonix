@@ -58,7 +58,7 @@ func (f previewSuccessFailWriterTool) Execute(context.Context, json.RawMessage) 
 	}
 	return "", errors.New("write prompt.txt: permission denied")
 }
-func (f previewSuccessFailWriterTool) Preview(json.RawMessage) (diff.Change, error) {
+func (f previewSuccessFailWriterTool) Preview(context.Context, json.RawMessage) (diff.Change, error) {
 	return diff.Change{Path: "prompt.txt"}, nil
 }
 
@@ -75,7 +75,7 @@ func (f stateAwareWriterTool) Execute(context.Context, json.RawMessage) (string,
 	}
 	return "", errors.New("old_string not found in prompt.txt")
 }
-func (f stateAwareWriterTool) Preview(json.RawMessage) (diff.Change, error) {
+func (f stateAwareWriterTool) Preview(context.Context, json.RawMessage) (diff.Change, error) {
 	if f.valid != nil && f.valid.Load() {
 		return diff.Change{Path: "prompt.txt"}, nil
 	}

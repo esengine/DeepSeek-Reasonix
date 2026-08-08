@@ -71,7 +71,6 @@ temp/
 # Official theme art intermediate outputs / caches
 scripts/official-theme-art/out/
 scripts/official-theme-art/__pycache__/
-agent-complexity-report.txt
 site/.generated/
 
 # Committed pointer at REASONIX.md; overrides a global CLAUDE.md ignore rule.

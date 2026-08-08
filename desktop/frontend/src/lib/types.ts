@@ -1309,7 +1309,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
 
 // ── Remote SSH module (mirrors desktop/remote_app.go view structs) ──
 
@@ -1466,6 +1466,20 @@ export interface RemoteForwardsEvent {
   forwards: RemoteForwardView[];
 }
 
+/** Extension runtime doctor report from App.RuntimeDoctor. */
+export interface RuntimeDoctorReport {
+  text: string;
+  publishedGeneration: number;
+  allowResume: boolean;
+  cleanRollback: boolean;
+  hasIrreversible: boolean;
+  noOpRebuilds: number;
+  fullRebuilds: number;
+  subgraphRebuilds: number;
+  staleDrops: number;
+  admissionRejected: number; runtimeOwnerFallbacks: number;
+}
+
 /** Capability diagnostics report from App.CapabilityDiagnostics (capdiag.Report). */
 export interface CapabilityDiagnosticsReport {
   schema_version: number;
@@ -1589,7 +1603,7 @@ export interface ProviderView {
   keySourcePath?: string;
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
-  reasoningProtocol: string; // auto|deepseek|glm|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|deepseek|glm|kimi-k3|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
   webSearch?: boolean; // expose a provider-executed web search tool when supported
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
