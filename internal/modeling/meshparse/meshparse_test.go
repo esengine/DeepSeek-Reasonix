@@ -233,3 +233,27 @@ func TestVoxelizeRotatedCubeTranslatedY(t *testing.T) {
 		t.Fatalf("rotated translated cube: got %d/%d voxels, want >= %d (diamond ≈50%% of bounds)", len(vm.Voxels), total, want)
 	}
 }
+
+func TestVoxelizeRotatedCubeTranslatedXLarge(t *testing.T) {
+	// epsUV's scaling branch must actually engage: translate far on X (where
+	// |a.X| itself is ~1e9), unlike the Y test whose a.X stays ~0.7. A rotated
+	// cube at +1e9 X should still fill its diamond (~45% of bounds).
+	verts := []Vec3{
+		{1000000000, 0, 0}, {1000000000.707107, 0.707107, 0}, {1000000000, 1.414214, 0}, {999999999.292893, 0.707107, 0},
+		{1000000000, 0, 1}, {1000000000.707107, 0.707107, 1}, {1000000000, 1.414214, 1}, {999999999.292893, 0.707107, 1},
+	}
+	faces := []Face{
+		{Verts: []int{0, 1, 2, 3}}, {Verts: []int{4, 7, 6, 5}},
+		{Verts: []int{0, 1, 5, 4}}, {Verts: []int{3, 2, 6, 7}},
+		{Verts: []int{0, 4, 7, 3}}, {Verts: []int{1, 5, 6, 2}},
+	}
+	vm, err := Voxelize(&Mesh{Verts: verts, Faces: faces}, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := vm.Size[0] * vm.Size[1] * vm.Size[2]
+	want := int(float64(total) * 0.45)
+	if len(vm.Voxels) < want {
+		t.Fatalf("X-large rotated cube: got %d/%d, want >= %d", len(vm.Voxels), total, want)
+	}
+}

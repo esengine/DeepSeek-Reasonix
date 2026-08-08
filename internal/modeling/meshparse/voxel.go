@@ -353,13 +353,22 @@ func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, ok bool)
 	}
 	u := (d11*d20 - d01*d21) / den
 	v := (d00*d21 - d01*d20) / den
-	// Barycentric tolerance must scale with the mesh's coordinate magnitude:
-	// big-number cancellation (a, b, c, p all ~1e7) leaves ~2.2e-16×|coord|
-	// error in the barycentric coords, which the old fixed 1e-9 window missed
-	// (a rotated+translated cube lost hits → even-odd flipped). The formula
-	// keeps the window ≈1e-7 at the origin and grows it for far-from-origin
-	// meshes; a slightly thicker surface shell is acceptable for voxelization.
-	epsUV := 1e-7 * maxF(1, maxF(math.Abs(a.X), math.Abs(b.X))*1e-9)
+	// Barycentric tolerance must scale with the mesh's coordinate magnitude on
+	// ALL axes of ALL triangle vertices: big-number cancellation (a, b, c, p
+	// all ~1e7) leaves ~2.2e-16×|coord| error in the barycentric coords, which
+	// a fixed window misses (a rotated+translated cube lost hits → even-odd
+	// flipped). epsUV keeps a ~1e-7 floor at the origin and grows for
+	// far-from-origin meshes; a slightly thicker surface shell is acceptable
+	// for voxelization.
+	maxAbs := maxF(math.Abs(a.X), math.Abs(a.Y))
+	maxAbs = maxF(maxAbs, math.Abs(a.Z))
+	maxAbs = maxF(maxAbs, math.Abs(b.X))
+	maxAbs = maxF(maxAbs, math.Abs(b.Y))
+	maxAbs = maxF(maxAbs, math.Abs(b.Z))
+	maxAbs = maxF(maxAbs, math.Abs(c.X))
+	maxAbs = maxF(maxAbs, math.Abs(c.Y))
+	maxAbs = maxF(maxAbs, math.Abs(c.Z))
+	epsUV := 1e-7 * maxF(1, maxAbs*1e-9)
 	if u < -epsUV || v < -epsUV || u+v > 1+epsUV {
 		return 0, false
 	}
