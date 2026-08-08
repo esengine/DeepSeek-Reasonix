@@ -23,8 +23,8 @@
       "essay": 19
     },
     "desktop/app.go": {
-      "essay": 90,
-      "file-size": 11538
+      "essay": 95,
+      "file-size": 11577
     },
     "desktop/app_autosave_test.go": {
       "essay": 1
@@ -163,7 +163,7 @@
     },
     "desktop/settings_app.go": {
       "essay": 28,
-      "file-size": 3013,
+      "file-size": 3014,
       "narrative": 1
     },
     "desktop/settings_app_test.go": {
@@ -173,7 +173,7 @@
       "essay": 1
     },
     "desktop/startup_lease_contention_test.go": {
-      "essay": 3
+      "essay": 6
     },
     "desktop/subagents_app.go": {
       "essay": 33
@@ -187,7 +187,7 @@
     },
     "desktop/tabs.go": {
       "essay": 123,
-      "file-size": 8804
+      "file-size": 8805
     },
     "desktop/tabs_order_test.go": {
       "test-file-size": 395
@@ -512,8 +512,8 @@
       "file-size": 216
     },
     "internal/boot/boot.go": {
-      "essay": 110,
-      "file-size": 2194,
+      "essay": 113,
+      "file-size": 2211,
       "narrative": 4
     },
     "internal/boot/boot_test.go": {
