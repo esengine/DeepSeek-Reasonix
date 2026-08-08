@@ -52,15 +52,25 @@ func modelingResolvePath(workDir, path string) string {
 // (session temp etc.) — a mesh path cannot smuggle arbitrary files.
 func modelingGuardRead(workDir string, forbidRoots []string, path string) error {
 	if workDir != "" {
-		rel, err := filepath.Rel(workDir, path)
+		// Compare against a symlink-free baseline: on macOS /var is a system
+		// symlink to /private/var, so TempDir() under /var/folders resolves
+		// elsewhere — comparing the resolved path against a raw workDir would
+		// falsely reject every in-root read there. realPath (same helper the
+		// write side uses) resolves the deepest existing ancestor + tail.
+		realWork, err := realPath(workDir)
+		if err != nil {
+			realWork = workDir
+		}
+		rel, err := filepath.Rel(realWork, path)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 			return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
 		}
 		// Symlink escape: a link inside workDir may point outside it. Resolve
 		// when the file exists (parse would read it) and require the resolved
-		// path to stay inside workDir, mirroring confine's realPath handling.
+		// path to stay inside the symlink-free baseline, mirroring confine's
+		// realPath handling.
 		if real, err := filepath.EvalSymlinks(path); err == nil {
-			rrel, rerr := filepath.Rel(workDir, real)
+			rrel, rerr := filepath.Rel(realWork, real)
 			if rerr != nil || rrel == ".." || strings.HasPrefix(rrel, ".."+string(os.PathSeparator)) {
 				return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
 			}
