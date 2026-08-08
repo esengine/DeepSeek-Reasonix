@@ -190,6 +190,38 @@ Rules:
 - Don't fabricate conventions the code doesn't demonstrate.
 - After writing, summarize in one or two lines what you captured and tell the user to review and edit it.`
 
+const builtinEvolveBody = `This skill is INLINED — you run in the parent loop. The user invoked /evolve: learn from recent project sessions, propose durable improvements with evidence, and apply only after they confirm. Default landing is L0 background memory (remember); promote to L1 standing instructions (AGENTS.md Conventions/Notes) only for short rules that must load every session.
+
+Phases (user may jump in mid-flow):
+1. Learn — search recent history; do NOT write yet.
+2. Propose — number proposals with tier, title, why, how_to_apply, evidence.
+3. Diff — for L1, show the minimal standing-doc patch text before writing.
+4. Apply — only when the user says apply / 应用 for specific ids; then write.
+
+Learn (history evidence required):
+- Use the history tool (operation=search) on project scope. Prefer kinds user_text, tool_error, assistant_text, tool_input.
+- Query for corrections and failures (e.g. wrong, don't, instead, failed, error, 不要, 应该, 再试, force-push, wrong command).
+- For each useful hit, call history operation=around with session_path + message_index.
+- Window: recent project sessions (roughly last 7 days / last ~8 non-empty sessions). Cap exploration (~12 tool calls).
+- Read existing AGENTS.md / REASONIX.md / CLAUDE.md and the memory index; skip lessons already covered.
+- If evidence is thin, say so and stop — do not invent rules.
+
+Propose (no writes):
+- Emit at most 5 numbered proposals. Default tier L0 (memory). Use L1 only when the rule is short (≤5 lines) and must be standing every session.
+- Never use L1 for one-off facts, secrets, preferences that may go stale, or full Project/Commands rewrites (those are /init).
+- Each proposal MUST include: id (e.g. 1), tier (L0|L1), title, why, how_to_apply, evidence[{session_path, message_index, quote≤200 chars}].
+- BEFORE the user says apply: do NOT call remember, write_file, edit_file, or multi_edit on standing docs or memory. Read-only tools only.
+
+Apply (user confirmed ids only):
+- L0: remember with type feedback or project, scope project. Body MUST include **Why:** and **How to apply:** lines (and optional Evidence). Prefer reusing an existing memory name when updating the same lesson.
+- L1: minimal edit_file/write_file on the existing standing doc (same filename if AGENTS.md/REASONIX.md/CLAUDE.md exists). Insert a short bullet under ## Conventions, else ## Notes; never rewrite Project/Commands wholesale.
+- After apply: one-line summary; tell the user full effect loads in the next session (this session may only get a turn-tail note — do not claim the system prompt already reloaded).
+- Refuse apply when evidence is missing, the L1 body exceeds 5 lines, or content looks sensitive (keys, tokens, emails, private keys).
+
+Discard: if the user discards an id, acknowledge and do not write it.
+
+Opposite of /init: /init bootstraps structure from the codebase; /evolve mines session lessons. Do not clobber /init skeleton sections.`
+
 // CodeGraphReadTools returns read-only tool names that look like an installed
 // codegraph MCP surface. Writable or untrusted tools stay out of subagents.
 func CodeGraphReadTools(reg *tool.Registry) []string {
@@ -295,6 +327,16 @@ func builtinSkills() []Skill {
 			Path:        "(builtin)",
 			RunAs:       RunInline,
 			Triggers:    []string{"agents.md", "initialize project", "bootstrap project", "初始化项目", "项目记忆", "生成 agents.md"},
+			AutoUse:     "suggest",
+		},
+		{
+			Name:        "evolve",
+			Description: "Learn from recent project sessions via history, propose evidence-backed L0 memory / L1 AGENTS.md improvements, apply only after confirm. Inlined — no pre-apply writes; default L0.",
+			Body:        builtinEvolveBody,
+			Scope:       ScopeBuiltin,
+			Path:        "(builtin)",
+			RunAs:       RunInline,
+			Triggers:    []string{"evolve", "learn from sessions", "learn from my recent sessions", "session learning", "improve agents.md from history", "学习近期会话", "从会话提炼", "进化 agents", "会话经验"},
 			AutoUse:     "suggest",
 		},
 		{

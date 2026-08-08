@@ -1438,7 +1438,7 @@
   },
   {
     "Name": "slash_command",
-    "Description": "Invoke a project slash command (a reusable prompt template or skill) by name. Returns the command's expanded prompt text for you to act on in this turn — it does not run on its own. Call with an empty command (or \"list\") to see what's available. Available: explore, init, install-capability, reasonix-guide, research, review, security-review, test.",
+    "Description": "Invoke a project slash command (a reusable prompt template or skill) by name. Returns the command's expanded prompt text for you to act on in this turn — it does not run on its own. Call with an empty command (or \"list\") to see what's available. Available: evolve, explore, init, install-capability, reasonix-guide, research, review, security-review, test.",
     "ReadOnly": true,
     "Schema": {
       "properties": {
