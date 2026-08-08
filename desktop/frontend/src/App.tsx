@@ -45,7 +45,7 @@ import { asArray } from "./lib/array";
 import { createBoundedRefreshCoordinator, sameTabMetaLists, shouldRefreshTabMetaForEvent, TAB_META_MAX_IN_FLIGHT, tabMetaFallbackDelay } from "./lib/tabMetaRefresh";
 import { clearLegacyLangPref, normalizeLangPref, readLegacyLangPref, t, useI18n, useT, type Translator } from "./lib/i18n";
 import { localizedNoticeText, useController, type Item, type LiveStream } from "./lib/useController";
-import { app, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered, openExternal } from "./lib/bridge";
+import { app, isElectronServeShell, onEvent, onProjectTreeChanged, onReady, onRuntimeRebuilt, onSessionRecovered, openExternal } from "./lib/bridge";
 import { generativeMusic, isGenerativeMusicEnabled } from "./lib/generative-music";
 import { clearAttentionChimeKeys, playAttentionChime, playSuccessChime, shouldPlayAttentionChimeForEvent } from "./lib/sound";
 import { NoticeCard, Transcript } from "./components/Transcript";
@@ -1165,7 +1165,13 @@ export default function App() {
   const settingsFocus = useOverlayStore((s) => s.settingsFocus);
   const setSettingsFocus = useOverlayStore((s) => s.setSettingsFocus);
   const [desktopLayoutStyle, setDesktopLayoutStyle] = useState<DesktopLayoutStyle>("workbench");
-  const singleSurfaceLayout = desktopLayoutStyle === "workbench" || desktopLayoutStyle === "creation";
+  // Electron multi-tab host keeps one Controller per project tab. Workbench/
+  // creation "single surface" mode would route sidebar clicks through
+  // activateTopic, which prunes every other tab's transcript cache and can leave
+  // the previous conversation on screen. Keep multi-surface navigation there.
+  const singleSurfaceLayout =
+    !isElectronServeShell() &&
+    (desktopLayoutStyle === "workbench" || desktopLayoutStyle === "creation");
   const [configLoadWarnings, setConfigLoadWarnings] = useState<string[]>([]);
   const [startupUpdateChecksEnabled, setStartupUpdateChecksEnabled] = useState<boolean | null>(null);
   const [histView, setHistView] = useState<HistoryViewState | null>(null);
@@ -1345,7 +1351,7 @@ export default function App() {
 
   const refreshBackgroundRuntimes = useCallback(async () => {
     try {
-      setBackgroundRuntimes(await app.BackgroundRuntimes());
+      setBackgroundRuntimes(asArray(await app.BackgroundRuntimes()));
     } catch {
       // The global recovery entry is supplementary; the active-tab job list
       // remains available even when the detached-runtime list is unavailable.
@@ -2652,12 +2658,12 @@ export default function App() {
     let cancelled = false;
     void app.RemoteHosts()
       .then((hosts) => {
-        if (!cancelled) setRemoteHosts(hosts);
+        if (!cancelled) setRemoteHosts(asArray(hosts));
       })
       .catch(() => {});
     void app.RemoteConnectionStatuses()
       .then((statuses) => {
-        if (!cancelled) hydrateRemoteStatuses(statuses);
+        if (!cancelled) hydrateRemoteStatuses(asArray(statuses));
       })
       .catch(() => {});
     return () => {
@@ -4208,13 +4214,18 @@ export default function App() {
   // Workspace: open the folder chooser and switch projects. The hook resets the
   // transcript and refreshes meta on a pick. A cancel is a no-op.
   const switchFolder = useCallback(async (path?: string) => {
-    const picked = path === undefined ? await pickWorkspace() : await switchWorkspace(path);
-    if (picked) {
-      setProjectRevision((value) => value + 1);
-      await refreshTabMetas(undefined, { afterMutation: true });
+    try {
+      const picked = path === undefined ? await pickWorkspace() : await switchWorkspace(path);
+      if (picked) {
+        setProjectRevision((value) => value + 1);
+        await refreshTabMetas(undefined, { afterMutation: true });
+      }
+      return picked;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error");
+      return "";
     }
-    return picked;
-  }, [pickWorkspace, switchWorkspace, refreshTabMetas]);
+  }, [pickWorkspace, switchWorkspace, refreshTabMetas, showToast]);
 
   const refreshProjectsAndTabs = useCallback(async () => {
     setProjectRevision((value) => value + 1);

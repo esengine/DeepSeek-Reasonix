@@ -17,6 +17,7 @@ var frontends = []string{
 	"internal/botruntime",
 	"internal/cli",
 	"internal/serve",
+	"internal/tabhost", // multi-Controller session host for serve/Electron (route C)
 }
 
 // Utility layer: these packages carry no knowledge of the kernel and must

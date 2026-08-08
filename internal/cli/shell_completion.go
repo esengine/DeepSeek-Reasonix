@@ -118,7 +118,7 @@ func cliCompletionRootSpec() cliCompletionSpec {
 			// not branch IDs (SessionValue would complete IDs that fail at runtime).
 			completionFlag("--resume", cliCompletionPathValue),
 			completionFlag("--auth", cliCompletionStaticValue, "none", "token", "password"),
-			completionFlag("--token --password --port-file --token-file --pid-file", cliCompletionStaticValue),
+			completionFlag("--token --password --port-file --token-file --pid-file --multi-tab", cliCompletionStaticValue),
 			completionFlag("--hash-password --behind-proxy", cliCompletionNoValue), help,
 		}),
 		completionSpec("setup", []cliCompletionFlag{completionFlag("--local -l", cliCompletionNoValue), help}),

@@ -1,0 +1,29 @@
+{
+  "name": "reasonix-electron-serve-poc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Experimental Electron shell over loopback reasonix serve (PoC, not the official desktop).",
+  "type": "module",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "postinstall": "node scripts/ensure-electron.mjs || true",
+    "ensure-electron": "node scripts/ensure-electron.mjs",
+    "build:ui": "node scripts/build-desktop-ui.mjs",
+    "start": "node scripts/ensure-electron.mjs && node scripts/build-desktop-ui.mjs --if-missing && electron .",
+    "start:fast": "node scripts/ensure-electron.mjs && electron .",
+    "test": "node --test test/*.test.mjs",
+    "smoke:http": "node scripts/http-sse-smoke.mjs",
+    "smoke:launch": "node scripts/dual-launch-smoke.mjs",
+    "smoke:dual-project": "node scripts/dual-project-smoke.mjs",
+    "smoke:all": "node scripts/http-sse-smoke.mjs && node scripts/dual-launch-smoke.mjs && node scripts/dual-project-smoke.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
+  },
+  "allowScripts": {
+    "electron@37.2.0": true
+  }
+}

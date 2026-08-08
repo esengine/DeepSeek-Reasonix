@@ -1,0 +1,22 @@
+{
+  "id": "tab_example_01",
+  "scope": "project",
+  "workspaceRoot": "/tmp/example-project",
+  "workspaceName": "example-project",
+  "workspacePath": "/tmp/example-project",
+  "topicId": "main",
+  "topicTitle": "Session",
+  "label": "model",
+  "ready": true,
+  "runtime": {
+    "phase": "ready"
+  },
+  "running": false,
+  "cancellable": false,
+  "mode": "agent",
+  "collaborationMode": "default",
+  "toolApprovalMode": "ask",
+  "tokenMode": "auto",
+  "active": true,
+  "cwd": "/tmp/example-project"
+}

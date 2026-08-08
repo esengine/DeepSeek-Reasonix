@@ -17,6 +17,7 @@ import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems } from "./statusBarIt
 import { registerTrustedThemeBackgroundURLs } from "./themePack";
 import { modeHasAutoApproveTools, modeWithAutoApproveTools, modeWithPlan, normalizeCollaborationMode, normalizeMode, normalizeTokenMode, normalizeToolApprovalMode } from "./types";
 import { decisionSurfaceMockFromInput, isLongDecisionOptionsMockInput } from "./decisionSurfaceMock";
+import { createElectronHttpAppBundle, type ElectronHttpAppBundle } from "./host/electronAppBindings";
 
 import type {
   AutoResearchFindingView,
@@ -613,6 +614,8 @@ export type _CheckGenToApp = AssertNever<
 
 interface WailsRuntime {
   EventsOn(name: string, cb: (...data: unknown[]) => void): () => void;
+  EventsOff?(name?: string, ...additional: unknown[]): void;
+  EventsEmit?(name: string, ...data: unknown[]): void;
   BrowserOpenURL(url: string): void;
   WindowSetSystemDefaultTheme?(): void;
   WindowSetLightTheme?(): void;
@@ -632,6 +635,34 @@ declare global {
   interface Window {
     runtime?: WailsRuntime;
     go?: { main?: { App?: AppBindings } };
+    reasonixPoc?: {
+      getEndpoint: () => Promise<{
+        baseUrl: string;
+        token: string;
+        uiUrl?: string;
+        port?: number;
+        logFile?: string;
+        workspace?: string;
+      } | null>;
+      getEndpointSync?: () => {
+        baseUrl: string;
+        token: string;
+        uiUrl?: string;
+        port?: number;
+        logFile?: string;
+        workspace?: string;
+      } | null;
+      getCapabilities?: () => Promise<unknown>;
+      pickWorkspace?: () => Promise<{ workspace?: string; baseUrl?: string } | null>;
+      openLog?: () => Promise<boolean>;
+      restartServe?: () => Promise<unknown>;
+      onServeRestarted?: (cb: (payload: unknown) => void) => () => void;
+    };
+    __REASONIX_SERVE__?: {
+      baseUrl: string;
+      token: string;
+      workspace?: string;
+    };
   }
 }
 
@@ -647,7 +678,71 @@ const WAILS_IPC_NULL_SEND_RE = /Cannot read properties of null \(reading 'send'\
 // runtime can inject window.go AFTER this module first evaluates, so snapshotting
 // once would pin the browser mock for the whole session (and show fake data — the
 // dev mock's model list leaking into the real app was exactly this bug).
+
+let electronBundle: ElectronHttpAppBundle | null = null;
+
+/** True when running inside the Electron + serve PoC shell. */
+export function isElectronServeShell(): boolean {
+  if (typeof window === "undefined") return false;
+  if (window.reasonixPoc) return true;
+  if (window.__REASONIX_SERVE__?.baseUrl && window.__REASONIX_SERVE__?.token) return true;
+  return false;
+}
+
+function resolveElectronEndpoint(): { baseUrl: string; token: string; workspace?: string } | null {
+  if (typeof window === "undefined") return null;
+  if (window.__REASONIX_SERVE__?.baseUrl && window.__REASONIX_SERVE__?.token) {
+    return window.__REASONIX_SERVE__;
+  }
+  if (window.reasonixPoc?.getEndpointSync) {
+    const ep = window.reasonixPoc.getEndpointSync();
+    if (ep?.baseUrl && ep?.token) return ep;
+  }
+  // Query injection (desktop shell proxy may stamp these)
+  try {
+    const q = new URLSearchParams(window.location.search);
+    const baseUrl = q.get("rx_base") || q.get("baseUrl");
+    const token = q.get("rx_token") || q.get("token");
+    if (baseUrl && token) return { baseUrl, token, workspace: q.get("workspace") || undefined };
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function ensureElectronBundle(): ElectronHttpAppBundle | null {
+  if (electronBundle) return electronBundle;
+  const ep = resolveElectronEndpoint();
+  if (!ep) return null;
+  electronBundle = createElectronHttpAppBundle(ep);
+  // Install a minimal runtime so code paths checking window.runtime still work
+  // (context menu suppression, etc.) without Wails.
+  if (typeof window !== "undefined" && !window.runtime) {
+    const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+    window.runtime = {
+      EventsOn(channel: string, callback: (...data: unknown[]) => void) {
+        if (!listeners.has(channel)) listeners.set(channel, new Set());
+        listeners.get(channel)!.add(callback);
+        return () => listeners.get(channel)?.delete(callback);
+      },
+      EventsOff() {},
+      EventsEmit(channel: string, ...data: unknown[]) {
+        for (const cb of listeners.get(channel) ?? []) cb(...data);
+      },
+    } as WailsRuntime;
+    // Fan host SSE into the same agent:event channel the desktop UI expects.
+    electronBundle.host.onEvent((e) => {
+      window.runtime?.EventsEmit?.(EVENT_CHANNEL, e);
+    });
+  }
+  return electronBundle;
+}
+
 function realApp(): AppBindings | undefined {
+  if (isElectronServeShell()) {
+    const bundle = ensureElectronBundle();
+    if (bundle) return bundle.app;
+  }
   return typeof window !== "undefined" ? window.go?.main?.App : undefined;
 }
 
@@ -659,6 +754,12 @@ function getMock(): AppBindings {
 
 // onEvent subscribes to the agent's typed event stream; returns an unsubscribe.
 export function onEvent(cb: (e: WireEvent) => void): () => void {
+  if (isElectronServeShell()) {
+    const bundle = ensureElectronBundle();
+    if (bundle) {
+      return bundle.host.onEvent((e) => cb(e as unknown as WireEvent));
+    }
+  }
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn(EVENT_CHANNEL, (payload) => cb(payload as WireEvent));
   }
@@ -850,6 +951,12 @@ export function onRuntimeRebuilt(cb: (tabId?: string, runtimeEpoch?: string) => 
 }
 
 export function onReady(cb: (tabId?: string) => void): () => void {
+  // Electron+serve: host is ready as soon as the endpoint is known.
+  if (isElectronServeShell()) {
+    ensureElectronBundle();
+    queueMicrotask(() => cb("serve-main"));
+    return () => {};
+  }
   if (realApp() && typeof window !== "undefined" && window.runtime) {
     return window.runtime.EventsOn("agent:ready", (tabId?: unknown) => cb(typeof tabId === "string" ? tabId : undefined));
   }

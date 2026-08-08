@@ -31,6 +31,7 @@ import (
 	"reasonix/internal/provider"
 	"reasonix/internal/stats"
 	"reasonix/internal/store"
+	"reasonix/internal/tabhost"
 )
 
 //go:embed index.html
@@ -75,6 +76,9 @@ type Server struct {
 	// already holds the startup session's lease; nil (tests, embedded use)
 	// disables lease gating.
 	leases *control.SessionLeaseKeeper
+	// tabs is set in multi-tab mode (opt-in --multi-tab). Each tab owns an
+	// independent Controller; legacy routes target the active tab.
+	tabs *tabhost.Host
 }
 
 // New builds a Server. bc must be the controller's event sink.
@@ -92,10 +96,20 @@ func New(ctrl control.SessionAPI, bc *Broadcaster, serveCfg config.ServeConfig) 
 
 // ctl returns the current controller. Handlers must read it through here, never
 // the field directly, because switchModel replaces it under the write lock.
+// In multi-tab mode this is the active tab's controller (legacy route target).
 func (s *Server) ctl() control.SessionAPI {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.ctrl
+	h := s.tabs
+	legacy := s.ctrl
+	s.mu.RUnlock()
+	if h != nil {
+		if id := h.ActiveTabID(); id != "" {
+			if c, _, err := h.Get(id); err == nil {
+				return c
+			}
+		}
+	}
+	return legacy
 }
 
 // SetSessionLeases hands the server the session-lease keeper that guards its
@@ -521,6 +535,10 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /skills", s.skills)
 	mux.HandleFunc("GET /todos", s.todos)
 	mux.HandleFunc("POST /delete-session", s.deleteSession)
+	s.registerDesktopAPIRoutes(mux)
+	if s.tabHost() != nil {
+		s.registerMultiTabRoutes(mux)
+	}
 	return logMiddleware(s.auth.middleware(csrfGuard(mux)))
 }
 
@@ -558,7 +576,17 @@ func csrfGuard(next http.Handler) http.Handler {
 // Run serves until the process is killed. Interactive approval is enabled so
 // "ask" decisions surface as approval_request events answered via POST /approve.
 func (s *Server) Run(addr string) error {
-	s.ctl().EnableInteractiveApproval()
+	if h := s.tabHost(); h != nil {
+		for _, meta := range h.ListTabs() {
+			if ctrl, _, err := h.Get(meta.ID); err == nil {
+				if c, ok := ctrl.(*control.Controller); ok {
+					c.EnableInteractiveApproval()
+				}
+			}
+		}
+	} else {
+		s.ctl().EnableInteractiveApproval()
+	}
 	return http.ListenAndServe(addr, s.Handler())
 }
 
@@ -643,6 +671,7 @@ const sseKeepaliveInterval = 15 * time.Second
 
 // events streams the controller's event flow as SSE until the client
 // disconnects. Each event is one `data:` frame of the JSON wire form.
+// In multi-tab mode, frames come from tabhost.Bus (already stamped with tabId).
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -655,14 +684,24 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 	var ch <-chan []byte
 	var unsubscribe func()
-	// Subscribe and replay as one handoff. Prompt producers are serialized with
-	// this operation, so no original event can land between the two steps.
-	s.ctl().ReplayPendingPromptsWith(func() event.Sink {
-		ch, unsubscribe = s.bc.Subscribe()
-		return event.FuncSink(func(e event.Event) {
-			s.bc.EmitTo(ch, e)
+	if h := s.tabHost(); h != nil {
+		ch, unsubscribe = h.Bus().Subscribe()
+		// Replay pending prompts on every open tab so late SSE clients recover gates.
+		for _, meta := range h.ListTabs() {
+			if ctrl, _, err := h.Get(meta.ID); err == nil {
+				ctrl.ReplayPendingPrompts()
+			}
+		}
+	} else {
+		// Subscribe and replay as one handoff. Prompt producers are serialized with
+		// this operation, so no original event can land between the two steps.
+		s.ctl().ReplayPendingPromptsWith(func() event.Sink {
+			ch, unsubscribe = s.bc.Subscribe()
+			return event.FuncSink(func(e event.Event) {
+				s.bc.EmitTo(ch, e)
+			})
 		})
-	})
+	}
 	defer unsubscribe()
 
 	fmt.Fprint(w, ": connected\n\n") // open the stream immediately

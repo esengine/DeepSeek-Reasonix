@@ -42,6 +42,7 @@ import (
 	"reasonix/internal/serve"
 	"reasonix/internal/sessiontemp"
 	"reasonix/internal/stats"
+	"reasonix/internal/tabhost"
 	"reasonix/internal/telemetry"
 
 	tea "charm.land/bubbletea/v2"
@@ -813,6 +814,7 @@ func runServe(args []string) int {
 	portFile := fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding")
 	tokenFile := fs.String("token-file", "", "read the auth=token pre-shared token from this file (overrides --token; keeps the secret out of argv)")
 	pidFile := fs.String("pid-file", "", "write the server process id to this file")
+	multiTab := fs.Bool("multi-tab", false, "enable multi-Controller tabs (GET/POST /tabs; events include tabId)")
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
 	}
@@ -908,33 +910,84 @@ func runServe(args []string) int {
 	// ignoring project-level default_model overrides. Explicit flags and
 	// resumable session models remain strict and are preserved verbatim.
 	*model = resolveServeModel(*model)
-	// Keep the browser reachable when the selected provider has no saved key.
-	// The loopback-only provider setup surface stores the missing credential and
-	// rebuilds this controller in place before the normal web UI is exposed.
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, bc, profile, cliBuildOverrides{
-		OnSessionRecovered: cliSessionRecoveredHandler(leases),
-	})
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 1
-	}
-	defer ctrl.Close()
-	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 
-	// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
-	if *resume != "" {
-		ctrl.Resume(resumeSession, *resume)
-	}
-	ctrl.EnsureSessionPath()
-	// Fresh sessions take the lease too (defensive: the path is brand new); a
-	// resumed path is already held, making this a no-op.
-	if err := leases.Rebind(ctrl.SessionPath()); err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
-		return 1
+	var (
+		ctrl *control.Controller
+		th   *tabhost.Host
+	)
+	if *multiTab {
+		// Multi-tab: tabhost owns Controllers and per-tab leases. The legacy
+		// single leases keeper is unused for path binding (tabhost holds them).
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		th = tabhost.New(tabhost.DefaultBuilder(tabhost.BootBuilderOptions{
+			Model:       *model,
+			RequireKey:  false,
+			StatsSource: "serve",
+			Context:     ctx,
+		}))
+		defer th.CloseAll()
+		meta, err := th.CreateTab(tabhost.CreateTabOpts{
+			Scope:         tabhost.ScopeProject,
+			WorkspaceRoot: cwd,
+			SessionPath:   *resume,
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		api, _, err := th.Get(meta.ID)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		var ok bool
+		ctrl, ok = api.(*control.Controller)
+		if !ok {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "tabhost did not return a Controller")
+			return 1
+		}
+		// resumeSession path: DefaultBuilder does not auto-Resume; if --resume set,
+		// SessionPath was passed into CreateTab opts and leased there when possible.
+		_ = resumeSession
+		SetTaskJobKiller(ctrlKillerAdapter{ctrl})
+	} else {
+		// Keep the browser reachable when the selected provider has no saved key.
+		// The loopback-only provider setup surface stores the missing credential and
+		// rebuilds this controller in place before the normal web UI is exposed.
+		var err error
+		ctrl, err = setupProfileWithOverrides(ctx, *model, *maxSteps, false, bc, profile, cliBuildOverrides{
+			OnSessionRecovered: cliSessionRecoveredHandler(leases),
+		})
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
+		defer ctrl.Close()
+		SetTaskJobKiller(ctrlKillerAdapter{ctrl})
+
+		// Auto-save target: reuse the resumed file, else a fresh one — same as chat.
+		if *resume != "" {
+			ctrl.Resume(resumeSession, *resume)
+		}
+		ctrl.EnsureSessionPath()
+		// Fresh sessions take the lease too (defensive: the path is brand new); a
+		// resumed path is already held, making this a no-op.
+		if err := leases.Rebind(ctrl.SessionPath()); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
+			return 1
+		}
 	}
 
 	srv := serve.New(ctrl, bc, serveCfg)
-	srv.SetSessionLeases(leases)
+	if th != nil {
+		srv.SetTabHost(th)
+	} else {
+		srv.SetSessionLeases(leases)
+	}
 
 	// With --port-file the supervisor needs the real bound port (--addr may be
 	// 127.0.0.1:0), so listen first, record the address, then serve on the
@@ -968,7 +1021,11 @@ func runServe(args []string) int {
 	}
 	srv.EnableProviderSetupForListener(displayAddr)
 
-	fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), displayAddr)
+	if th != nil {
+		fmt.Printf("reasonix serve — multi-tab (%d tab) on http://%s\n", len(th.ListTabs()), displayAddr)
+	} else {
+		fmt.Printf("reasonix serve — %s on http://%s\n", ctrl.Label(), displayAddr)
+	}
 	if srv.AuthMode() == "token" {
 		fmt.Printf("  auth: token\n")
 		// Under --port-file the process is supervised (e.g. remote bootstrap):

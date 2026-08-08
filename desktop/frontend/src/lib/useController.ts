@@ -2783,6 +2783,15 @@ export function useController() {
         if (reason === "switch-tab") {
           addBreadcrumb("tab.switch", `history-done ${tabId} skipped ms=${Date.now() - historyStartedAt}`);
         }
+      } else if (!skipHistory && historyPage === undefined) {
+        // History fetch failed. Clear any cross-tab placeholder so the UI does
+        // not keep showing the previous project's transcript under this tab id.
+        dispatchTo(tabId, {
+          type: "history_page",
+          page: { messages: [], startTurn: 0, endTurn: 0, totalTurns: 0, hasOlder: false },
+          mode: "replace",
+        });
+        addBreadcrumb("tab.hydrate", `history missing ${tabId} cleared-placeholder ms=${Date.now() - historyStartedAt}`);
       }
 
       dispatchTo(tabId, { type: "hydrate_done" });
@@ -3743,12 +3752,14 @@ export function useController() {
 
   const pickWorkspace = useCallback(async (): Promise<string> => {
     beginActiveNavigation();
-    const path = await app.PickWorkspace().catch(() => "");
+    // Do not swallow errors: Electron open-project failures must surface to the UI
+    // (silent catch made "添加新项目" look like a no-op after the folder dialog).
+    const path = await app.PickWorkspace();
     return refreshWorkspaceState(path);
   }, [beginActiveNavigation, refreshWorkspaceState]);
   const switchWorkspace = useCallback(async (path: string): Promise<string> => {
     beginActiveNavigation();
-    const next = await app.SwitchWorkspace(path).catch(() => "");
+    const next = await app.SwitchWorkspace(path);
     return refreshWorkspaceState(next);
   }, [beginActiveNavigation, refreshWorkspaceState]);
 
@@ -4047,9 +4058,12 @@ export function useController() {
         if (!activated || !isNavigationIntentCurrent(navigationSeq)) return undefined;
         const tabs = await reconcileTabRuntime(tabId, { hydrateSessionData: false });
         if (!isNavigationIntentCurrent(navigationSeq)) return tabs;
+        // Only skip history when this tab already has a live in-flight turn.
+        // Reusing another project's transcript as "cached" made multi-tab look
+        // stuck on the first conversation after a sidebar/project click.
         void loadSessionDataForTab(tabId, false, "switch-tab", {
           skipHistory: hasCachedLiveTurn(statesRef.current.get(tabId)),
-          preserveCachedHistory,
+          preserveCachedHistory: Boolean(targetSessionPath?.trim()) && preserveCachedHistory,
           sessionPath: targetSessionPath,
         });
         return tabs;
@@ -4071,18 +4085,27 @@ export function useController() {
       await reassertVisibleTabAfterStaleNavigation("tab.open-project", meta.id);
       return meta;
     }
-    const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
+    const prevTabId = activeTabIdRef.current;
     const prevState = statesRef.current.get(meta.id);
     const isNewTab = !prevState;
+    // Only reuse the previous transcript as a loading placeholder when we stay
+    // on the same tab id (true re-open). Cross-project multi-tab must not paint
+    // project A's messages under project B while history loads.
+    const prevItems =
+      isNewTab && prevTabId && prevTabId === meta.id
+        ? statesRef.current.get(prevTabId)?.items
+        : undefined;
     const preserveCachedHistory = hasReusableCachedTranscript(prevState, meta.sessionPath);
     setActiveTabId(meta.id);
     activeTabIdRef.current = meta.id;
     confirmBackendActiveTab(meta.id);
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
+    // Always force a history read when switching to an existing multi-tab
+    // controller so the transcript cannot stay stuck on the previous project.
     const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic", {
-      placeholderItems: isNewTab ? prevItems : undefined,
-      preserveCachedHistory,
+      placeholderItems: prevItems,
+      preserveCachedHistory: isNewTab ? false : preserveCachedHistory,
       sessionPath: meta.sessionPath,
     });
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
@@ -4098,7 +4121,6 @@ export function useController() {
       await reassertVisibleTabAfterStaleNavigation("tab.open-global", meta.id);
       return meta;
     }
-    const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
     const isNewTab = !prevState;
     const preserveCachedHistory = hasReusableCachedTranscript(prevState, meta.sessionPath);
@@ -4108,8 +4130,7 @@ export function useController() {
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
     const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic", {
-      placeholderItems: isNewTab ? prevItems : undefined,
-      preserveCachedHistory,
+      preserveCachedHistory: isNewTab ? false : preserveCachedHistory,
       sessionPath: meta.sessionPath,
     });
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
@@ -4125,7 +4146,6 @@ export function useController() {
       await reassertVisibleTabAfterStaleNavigation("tab.open-session", meta.id);
       return meta;
     }
-    const prevItems = activeTabIdRef.current ? statesRef.current.get(activeTabIdRef.current)?.items : undefined;
     const prevState = statesRef.current.get(meta.id);
     const isNewTab = !prevState;
     const preserveCachedHistory = hasReusableCachedTranscript(prevState, meta.sessionPath);
@@ -4135,8 +4155,7 @@ export function useController() {
     dispatchTo(meta.id, { type: "optimistic_meta", meta: metaFromTab(meta, statesRef.current.get(meta.id)?.meta) });
     dispatchRuntimeStatusForTab(meta.id, meta, snapshotAt);
     const load = loadSessionDataForTab(meta.id, isNewTab, "open-topic", {
-      placeholderItems: isNewTab ? prevItems : undefined,
-      preserveCachedHistory,
+      preserveCachedHistory: isNewTab ? false : preserveCachedHistory,
       sessionPath: meta.sessionPath,
     });
     if (isNewTab) void load.then(() => reconcileTabRuntime(meta.id, { hydrateSessionData: false })).catch(() => {});
