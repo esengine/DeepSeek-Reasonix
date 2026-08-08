@@ -33,17 +33,18 @@ func (a *App) stopSTTOnClose() {
 	}
 }
 
-// STTStart 开始语音识别：惰性启动本地服务与 Edge 识别页，再向浏览器发送
-// 开始命令。返回错误时前端用 toast 提示（如 Edge 未安装/未连接）。
+// STTStart 开始语音识别：惰性启动本地服务与 Edge 识别页，等待浏览器连上后
+// 自动开始录音。首次点击时 Edge 页面加载需要几秒，StartWithWait 会等待连接，
+// 一次点击即生效（无需再点第二次）。
 func (a *App) STTStart() error {
 	if !a.desktopSTTEnabled() {
 		return fmt.Errorf("语音转文字未启用，请在设置中开启")
 	}
+	// 每次启动都同步一次设置（识别页显示/自动停止/快捷键），
+	// 保证设置面板的修改即时生效。
+	a.applySTTSettingsToBridge()
 	b := a.sttBridgeFor()
-	if err := b.Start(); err != nil {
-		return err
-	}
-	return b.StartListening()
+	return b.StartWithWait(0)
 }
 
 // STTStop 停止语音识别（浏览器停止录音；本地服务与 Edge 保持，便于再次开始）。
@@ -81,7 +82,89 @@ func (a *App) SetDesktopSTTEnabled(enabled bool) error {
 	}
 	if !enabled {
 		a.stopSTTOnClose()
+	} else {
+		a.applySTTSettingsToBridge()
 	}
+	return nil
+}
+
+// applySTTSettingsToBridge 把当前配置的语音输入选项同步到 sttBridge
+// （识别页显示/自动停止/快捷键），使设置即时生效。
+// 惰性创建 bridge：应用重启后 a.stt 为空，但热键是启动服务的入口，
+// 必须在此处先创建 bridge 并注册热键，否则按热键无效。
+func (a *App) applySTTSettingsToBridge() {
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	if err != nil {
+		return
+	}
+	b := a.sttBridgeFor()
+	b.SetOptions(
+		cfg.Desktop.STTShowPage,
+		cfg.Desktop.STTAutoStop,
+		cfg.Desktop.STTAutoStopSeconds,
+		cfg.Desktop.STTHotkeyStart,
+		cfg.Desktop.STTHotkeyStop,
+	)
+}
+
+// SetDesktopSTTShowPage 持久化"识别页是否显示"（[desktop] stt_show_page）。
+// false = Edge 识别页后台运行（窗口隐藏）。
+func (a *App) SetDesktopSTTShowPage(show bool) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		return c.SetDesktopSTTShowPage(show)
+	})
+	if err != nil {
+		return err
+	}
+	a.applySTTSettingsToBridge()
+	return nil
+}
+
+// SetDesktopSTTAutoStop 持久化"不说话自动停止"（[desktop] stt_auto_stop）。
+func (a *App) SetDesktopSTTAutoStop(enabled bool) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		return c.SetDesktopSTTAutoStop(enabled)
+	})
+	if err != nil {
+		return err
+	}
+	a.applySTTSettingsToBridge()
+	return nil
+}
+
+// SetDesktopSTTAutoStopSeconds 持久化静默超时秒数（[desktop] stt_auto_stop_seconds）。
+func (a *App) SetDesktopSTTAutoStopSeconds(seconds int) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		return c.SetDesktopSTTAutoStopSeconds(seconds)
+	})
+	if err != nil {
+		return err
+	}
+	a.applySTTSettingsToBridge()
+	return nil
+}
+
+// SetDesktopSTTHotkeyStart 持久化开始识别的全局快捷键（空串禁用）。
+func (a *App) SetDesktopSTTHotkeyStart(hotkey string) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		return c.SetDesktopSTTHotkeyStart(hotkey)
+	})
+	if err != nil {
+		return err
+	}
+	a.applySTTSettingsToBridge()
+	return nil
+}
+
+// SetDesktopSTTHotkeyStop 持久化停止识别的全局快捷键（空串禁用）。
+func (a *App) SetDesktopSTTHotkeyStop(hotkey string) error {
+	err := a.applyConfigOnly(func(c *config.Config) error {
+		return c.SetDesktopSTTHotkeyStop(hotkey)
+	})
+	if err != nil {
+		return err
+	}
+	a.applySTTSettingsToBridge()
 	return nil
 }
 

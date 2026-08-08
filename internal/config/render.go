@@ -130,6 +130,23 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		}
 		fmt.Fprintf(&b, "expand_thinking = %v   # desktop: show reasoning text expanded by default; false = collapsed\n", c.Desktop.ExpandThinking)
 		fmt.Fprintf(&b, "stt_enabled = %v   # desktop: enable the voice-to-text (Edge Web Speech API bridge) mic button; false = hidden\n", c.Desktop.STTEnabled)
+		fmt.Fprintf(&b, "stt_show_page = %v   # desktop: show the Edge recognition page while listening; false = hidden background run\n", c.Desktop.STTShowPage)
+		fmt.Fprintf(&b, "stt_auto_stop = %v   # desktop: auto-stop recognition after silence\n", c.Desktop.STTAutoStop)
+		if secs := c.Desktop.STTAutoStopSeconds; secs > 0 {
+			fmt.Fprintf(&b, "stt_auto_stop_seconds = %d   # desktop: silence timeout (s) before auto-stop\n", secs)
+		} else {
+			b.WriteString("# stt_auto_stop_seconds = 10   # desktop: silence timeout (s) before auto-stop\n")
+		}
+		if hk := c.Desktop.STTHotkeyStart; hk != "" {
+			fmt.Fprintf(&b, "stt_hotkey_start = %q   # desktop: global hotkey to start voice input\n", hk)
+		} else {
+			b.WriteString("# stt_hotkey_start = \"alt+s\"   # desktop: global hotkey to start voice input\n")
+		}
+		if hk := c.Desktop.STTHotkeyStop; hk != "" {
+			fmt.Fprintf(&b, "stt_hotkey_stop = %q   # desktop: global hotkey to stop voice input\n", hk)
+		} else {
+			b.WriteString("# stt_hotkey_stop = \"alt+w\"   # desktop: global hotkey to stop voice input\n")
+		}
 		fmt.Fprintf(&b, "display_mode = %q   # desktop: standard|compact transcript display mode\n", c.DesktopDisplayMode())
 		if width := c.DesktopConversationWidth(); width == "full" {
 			fmt.Fprintf(&b, "conversation_width = %q   # desktop: standard|full transcript width; empty = standard\n", width)

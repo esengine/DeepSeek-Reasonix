@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Mic, MicOff, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, Loader2, MessageSquare, Mic, MicOff, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, Undo2, Wand2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
-import { app, onFilesDropped, onSTTTranscript } from "../lib/bridge";
+import { app, onFilesDropped, onSTTState, onSTTTranscript } from "../lib/bridge";
 import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
@@ -727,6 +727,9 @@ export function Composer({
   const [sttEnabled, setSttEnabled] = useState(false);
   const [sttListening, setSttListening] = useState(false);
   const [sttBusy, setSttBusy] = useState(false);
+  // 已配置的开始/停止全局快捷键（设置面板保存后刷新），用于麦克风按钮悬浮提示。
+  const [sttHotkeyStart, setSttHotkeyStart] = useState("");
+  const [sttHotkeyStop, setSttHotkeyStop] = useState("");
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
   // Use refs for values read inside async closures to avoid stale captures
@@ -1262,7 +1265,10 @@ export function Composer({
     const refresh = () => {
       app.Settings()
         .then((s) => {
-          if (live) setSttEnabled(Boolean(s.desktopSTTEnabled));
+          if (!live) return;
+          setSttEnabled(Boolean(s.desktopSTTEnabled));
+          setSttHotkeyStart(s.desktopSTTHotkeyStart ?? "");
+          setSttHotkeyStop(s.desktopSTTHotkeyStop ?? "");
         })
         .catch(() => {});
     };
@@ -1278,12 +1284,19 @@ export function Composer({
   useEffect(() => {
     const unsubscribe = onSTTTranscript((payload) => {
       if (!payload.isFinal || !payload.text.trim()) return;
-      // 转录插入光标处（复用段落粘贴逻辑，保证与撤销/历史一致）。
-      // insertTextAtCaret 内部只访问 refs（textRef/invocationsRef/…），
+      // 语音转录连续插入光标处（不产生段落空行）。
+      // insertSTTTextAtCaret 内部只访问 refs（textRef/invocationsRef/…），
       // 不捕获本渲染期的变量，因此首帧捕获的回调始终可用。
-      insertTextAtCaret(payload.text);
+      insertSTTTextAtCaret(payload.text);
     });
-    return unsubscribe;
+    // 识别状态实时同步：Edge 页自动停止/出错/恢复时，麦克风按钮随之变化。
+    const unsubscribeState = onSTTState((payload) => {
+      setSttListening(Boolean(payload.listening));
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeState();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const slashCommandDisabled = useCallback(
@@ -1717,6 +1730,39 @@ export function Composer({
     );
   };
 
+  // STT 语音转录专用插入：直接在光标处连续追加文本，不加段落空行/双换行
+  // （insertTextAtCaret 是段落粘贴语义，会在前后补 \n\n，不适合逐句语音输入）。
+  // 只在"前一句以标点/空格结尾但下一句紧跟"的场景保持连续，必要时补一个空格
+  // 分隔，避免句号后直接粘连。
+  const insertSTTTextAtCaret = (snippet: string) => {
+    const selection = getComposerSelection();
+    const targetDraftKey = activeDraftKeyRef.current;
+    const beforeEdit = composerEditSnapshot(targetDraftKey, selection);
+    const start = selection.start;
+    const end = selection.end;
+    const current = textRef.current;
+    const body = snippet.trim();
+    if (!body) return;
+    const before = current.slice(0, start);
+    const after = current.slice(end);
+    // 前面已有内容且不以空白结尾时补一个空格，避免粘连；否则直接连续。
+    const needsSpace = before.length > 0 && !/\s$/.test(before);
+    const inserted = (needsSpace ? " " : "") + body;
+    const pos = start + inserted.length;
+    const updated = replaceInvocationTextRange(current, invocationsRef.current, start, end, inserted);
+    textRef.current = updated.text;
+    invocationsRef.current = updated.invocations;
+    setText(updated.text);
+    setInvocations(updated.invocations);
+    setComposerSelection(pos);
+    recordComposerEdit(
+      targetDraftKey,
+      beforeEdit,
+      composerEditSnapshot(targetDraftKey, { start: pos, end: pos }),
+    );
+    void after;
+  };
+
   // 麦克风按钮：开始/停止语音识别。禁用时按钮隐藏（由 sttEnabled 控制）。
   const toggleSTT = useCallback(async () => {
     if (sttBusy || disabled || readOnly) return;
@@ -1748,6 +1794,48 @@ export function Composer({
       live = false;
     };
   }, []);
+
+  // --- 增强提示词（输入框右侧按钮）：调用大模型润色当前输入 ---
+  const [enhancing, setEnhancing] = useState(false);
+  // 增强前的原文（用于退回还原）；null = 当前文本就是原文。
+  const [enhancedOriginal, setEnhancedOriginal] = useState<string | null>(null);
+  // 最近一次增强的结果：用于判断用户是否在增强后又修改了输入（此时可二次增强）。
+  const [enhancedResult, setEnhancedResult] = useState<string | null>(null);
+  const enhancePrompt = useCallback(async () => {
+    const current = textRef.current.trim();
+    if (!current) {
+      showToast(t("composer.enhanceEmpty"), "warn");
+      return;
+    }
+    if (enhancing) return;
+    setEnhancing(true);
+    try {
+      const enhanced = await app.EnhancePrompt(current);
+      if (enhanced && enhanced.trim()) {
+        setEnhancedOriginal(textRef.current); // 记住增强前文本，供退回
+        setEnhancedResult(enhanced.trim());   // 记录增强结果，供二次增强判断
+        replaceComposerText(enhanced.trim());
+        showToast(t("composer.enhanceDone"), "info");
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "warn");
+    } finally {
+      setEnhancing(false);
+    }
+  }, [enhancing, showToast, t]);
+  const revertEnhancedPrompt = useCallback(() => {
+    if (enhancedOriginal == null) return;
+    replaceComposerText(enhancedOriginal);
+    setEnhancedOriginal(null);
+    setEnhancedResult(null);
+    showToast(t("composer.enhanceReverted"), "info");
+  }, [enhancedOriginal, showToast, t]);
+  // 转圈时点击取消：终止进行中的增强（Go 端 CancelTrySubagentProfile）。
+  const cancelEnhancePrompt = useCallback(() => {
+    setEnhancing(false); // 立即恢复按钮，后台取消由 Go 端 context 处理
+    void app.CancelTrySubagentProfile().catch(() => {});
+    showToast(t("composer.enhanceCancelled"), "info");
+  }, [showToast, t]);
 
   const replaceComposerText = (next: string) => {
     clearComposerEditHistory(activeDraftKeyRef.current);
@@ -2193,6 +2281,11 @@ export function Composer({
       }
       await onSend(displayText, submitText, submitTabId, structured);
       clearSubmittedDraft(submitDraftKey);
+      // 增强后的提示词已发送：完整重置增强状态（原文+结果+运行中），
+      // 按钮恢复为魔法棒（不再显示"还原"/叉叉），后续可再次增强。
+      setEnhancedOriginal(null);
+      setEnhancedResult(null);
+      setEnhancing(false);
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "warn");
     } finally {
@@ -4578,7 +4671,19 @@ export function Composer({
               </Tooltip>
             )}
             {sttEnabled && (
-              <Tooltip label={sttListening ? t("composer.sttStop") : t("composer.sttStart")}>
+              <Tooltip label={
+                <span className="composer-stt-tooltip">
+                  <span className="composer-stt-tooltip__action">
+                    {sttListening ? t("composer.sttStop") : t("composer.sttStart")}
+                  </span>
+                  {(sttHotkeyStart || sttHotkeyStop) && (
+                    <span className="composer-stt-tooltip__hotkeys">
+                      {sttHotkeyStart && <span>{t("composer.sttHotkeyStartLabel")} {sttHotkeyStart}</span>}
+                      {sttHotkeyStop && <span>{t("composer.sttHotkeyStopLabel")} {sttHotkeyStop}</span>}
+                    </span>
+                  )}
+                </span>
+              }>
                 <button
                   className={`composer__btn composer__btn--stt${sttListening ? " composer__btn--stt-active" : ""}${sttBusy ? " composer__btn--disabled" : ""}`}
                   type="button"
@@ -4591,6 +4696,39 @@ export function Composer({
                 </button>
               </Tooltip>
             )}
+            <Tooltip label={enhancedOriginal != null ? t("composer.enhanceRevert") : t("composer.enhance")}>
+              <button
+                className={`composer__btn composer__btn--enhance${enhancedOriginal != null ? " composer__btn--enhance-active" : ""}${enhancing ? " composer__btn--disabled" : ""}`}
+                type="button"
+                onClick={() => {
+                  if (enhancing) {
+                    void cancelEnhancePrompt(); // 转圈中点击 = 取消
+                  } else if (enhancedOriginal != null && textRef.current.trim() === (enhancedResult ?? "").trim()) {
+                    void revertEnhancedPrompt(); // 增强后未修改 = 还原原文
+                  } else {
+                    void enhancePrompt(); // 未增强 / 增强后又补充了内容 = （再次）增强
+                  }
+                }}
+                disabled={disabled || readOnly}
+                aria-label={
+                  enhancing
+                    ? t("composer.enhanceCancel")
+                    : (enhancedOriginal != null && textRef.current.trim() === (enhancedResult ?? "").trim())
+                      ? t("composer.enhanceRevert")
+                      : t("composer.enhance")
+                }
+              >
+                {enhancing ? (
+                  // 运行中默认转圈；鼠标悬停（hover）时切换为叉叉，提示可取消。
+                  <span className="composer__btn--enhance-status">
+                    <Loader2 size={15} className="composer__btn--spinning" />
+                    <X size={15} className="composer__btn--enhance-cancel" />
+                  </span>
+                ) : (enhancedOriginal != null && textRef.current.trim() === (enhancedResult ?? "").trim())
+                  ? <Undo2 size={15} />
+                  : <Wand2 size={15} />}
+              </button>
+            </Tooltip>
             <Tooltip label={submitTooltip}>
               <button
                 className={`composer__btn composer__btn--send${running ? " composer__btn--steer" : ""}`}

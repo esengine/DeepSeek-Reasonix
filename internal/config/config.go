@@ -275,6 +275,18 @@ type DesktopConfig struct {
 	// STTEnabled enables the desktop voice-to-text (Edge Web Speech API bridge)
 	// mic button in the composer. Default false — users opt in from Settings.
 	STTEnabled bool `toml:"stt_enabled"`
+	// STTShowPage controls whether the Edge recognition page is visible while
+	// listening. true = show the page; false = run hidden in the background.
+	STTShowPage bool `toml:"stt_show_page"`
+	// STTAutoStop enables auto-stopping recognition after a silent period
+	// (STTAutoStopSeconds). Mirrors edge-stt-bridge's auto-stop behaviour.
+	STTAutoStop bool `toml:"stt_auto_stop"`
+	// STTAutoStopSeconds is the silence timeout before auto-stop (3-300s).
+	STTAutoStopSeconds int `toml:"stt_auto_stop_seconds"`
+	// STTHotkeyStart/STTHotkeyStop are optional global hotkeys for voice input
+	// (e.g. "alt+s" / "alt+w"); empty disables the hotkey.
+	STTHotkeyStart string `toml:"stt_hotkey_start"`
+	STTHotkeyStop  string `toml:"stt_hotkey_stop"`
 }
 
 // DesktopExternalOpener returns the user-selected external opener id. The

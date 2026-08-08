@@ -483,7 +483,14 @@ export interface AppBindings {
   STTStop(): Promise<void>;
   STTStatus(): Promise<Record<string, unknown>>;
   STTSetLang(lang: string): Promise<void>;
+  // EnhancePrompt 用大模型增强用户当前输入，返回增强后的提示词文本。
+  EnhancePrompt(text: string): Promise<string>;
   SetDesktopSTTEnabled(enabled: boolean): Promise<void>;
+  SetDesktopSTTShowPage(show: boolean): Promise<void>;
+  SetDesktopSTTAutoStop(enabled: boolean): Promise<void>;
+  SetDesktopSTTAutoStopSeconds(seconds: number): Promise<void>;
+  SetDesktopSTTHotkeyStart(hotkey: string): Promise<void>;
+  SetDesktopSTTHotkeyStop(hotkey: string): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
   // Runtime-only.
@@ -1066,6 +1073,36 @@ export function onSTTTranscript(cb: (p: STTTranscriptPayload) => void): () => vo
 // onSTTTranscript so the composer mic flow can be exercised without Edge.
 export function __emitMockSTT(p: STTTranscriptPayload): void {
   emitSTT(p);
+}
+
+// STTStatePayload is the listening-state event pushed from the Go bridge
+// (desktop/stt_bridge.go sttStateEvent "stt:state"). Lets the composer mic
+// button stay in sync with the Edge recognition page (auto-stop, errors…).
+export interface STTStatePayload {
+  listening: boolean;
+}
+
+const sttStateListeners = new Set<(p: STTStatePayload) => void>();
+
+function emitSTTState(p: STTStatePayload) {
+  sttStateListeners.forEach((l) => l(p));
+}
+
+// onSTTState subscribes to voice-to-text listening-state events; returns an
+// unsubscribe. Must match the event name emitted in desktop/stt_bridge.go.
+export function onSTTState(cb: (p: STTStatePayload) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("stt:state", (p) => cb(p as STTStatePayload));
+  }
+  sttStateListeners.add(cb);
+  return () => {
+    sttStateListeners.delete(cb);
+  };
+}
+
+// Test seam for the browser-dev STT mock: pushes a fake state change.
+export function __emitMockSTTState(p: STTStatePayload): void {
+  emitSTTState(p);
 }
 
 function emitUpdater(p: UpdateProgress) {
@@ -1707,6 +1744,11 @@ function makeMockApp(): AppBindings {
     telemetry: true,
     metrics: true,
     desktopSTTEnabled: false,
+    desktopSTTShowPage: true,
+    desktopSTTAutoStop: true,
+    desktopSTTAutoStopSeconds: 10,
+    desktopSTTHotkeyStart: "",
+    desktopSTTHotkeyStop: "",
     configPath: "~/.reasonix/config.toml",
     shadowedByPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai", "anthropic"],
@@ -4399,9 +4441,28 @@ function makeMockApp(): AppBindings {
         async STTSetLang(lang: string) {
           mockSTT.lang = lang || "zh-CN";
         },
+        async EnhancePrompt(text: string) {
+          // 浏览器 mock：无 Go 后端，直接返回原文（增强逻辑仅真实 Wails 可用）。
+          return text;
+        },
         async SetDesktopSTTEnabled(enabled: boolean) {
           settings.desktopSTTEnabled = enabled;
           if (!enabled) mockSTT.listening = false;
+        },
+        async SetDesktopSTTShowPage(show: boolean) {
+          settings.desktopSTTShowPage = show;
+        },
+        async SetDesktopSTTAutoStop(enabled: boolean) {
+          settings.desktopSTTAutoStop = enabled;
+        },
+        async SetDesktopSTTAutoStopSeconds(seconds: number) {
+          settings.desktopSTTAutoStopSeconds = seconds;
+        },
+        async SetDesktopSTTHotkeyStart(hotkey: string) {
+          settings.desktopSTTHotkeyStart = hotkey;
+        },
+        async SetDesktopSTTHotkeyStop(hotkey: string) {
+          settings.desktopSTTHotkeyStop = hotkey;
         },
         async SetDesktopCurrency(currency: string) {
           settings.desktopCurrency = currency === "CNY" || currency === "USD" ? currency : "";

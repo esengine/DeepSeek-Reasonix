@@ -295,11 +295,13 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 	// One try run at a time, cancellable from the settings page and aborted
 	// with the app context on shutdown — a runaway model loop must not burn
 	// through all 12 steps with no way to stop it.
+	// 增加硬超时：模型调用慢/卡住时（如网络异常、模型不返回）不能无限等待，
+	// 否则前端"增强提示词"会一直转圈。超时后返回错误，前端可停止并提示。
 	base := a.ctx
 	if base == nil {
 		base = context.Background()
 	}
-	runCtx, cancel := context.WithCancel(base)
+	runCtx, cancel := context.WithTimeout(base, 90*time.Second)
 	a.tryRunMu.Lock()
 	if a.tryRunCancel != nil {
 		a.tryRunMu.Unlock()
@@ -375,6 +377,32 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 		return "", err
 	}
 	return result, nil
+}
+
+// EnhancePrompt 用大模型增强用户当前输入（提示词润色/补全），返回增强后的
+// 文本。复用 TrySubagentProfile 的 headless 只读 subagent 机制，不产生会话。
+// 前端输入框右侧"增强提示词"按钮调用它，并保留原文以便退回。
+// 使用当前活动会话选择的模型（而非默认模型），无需单独配置。
+func (a *App) EnhancePrompt(text string) (string, error) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", fmt.Errorf("请输入要增强的提示词")
+	}
+	// 取当前活动 tab 的模型 ref，让增强走用户当前选择的模型。
+	a.mu.RLock()
+	model := ""
+	if tab := a.activeTabLocked(); tab != nil {
+		model = tab.model
+	}
+	a.mu.RUnlock()
+	input := SubagentProfileInput{
+		Name:         "prompt-enhancer",
+		Description:  "Enhance the user prompt",
+		SystemPrompt: "You are a prompt engineering expert. Rewrite and enhance the user's prompt to be clearer, more specific, and better structured while preserving the original intent and language. Output only the enhanced prompt, no commentary, no quotes around it.",
+		Model:        model,
+		ReadOnly:     true,
+	}
+	return a.TrySubagentProfile(input, text)
 }
 
 // trySubagentPermissionGate pins the settings-page try runner to an explicit

@@ -1898,6 +1898,11 @@ export interface SettingsView {
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
   desktopSTTEnabled?: boolean; // voice-to-text mic button enabled ([desktop] stt_enabled); absent from older payloads
+  desktopSTTShowPage?: boolean; // show the Edge recognition page while listening ([desktop] stt_show_page)
+  desktopSTTAutoStop?: boolean; // auto-stop recognition after silence ([desktop] stt_auto_stop)
+  desktopSTTAutoStopSeconds?: number; // silence timeout (s) before auto-stop ([desktop] stt_auto_stop_seconds)
+  desktopSTTHotkeyStart?: string; // global hotkey to start voice input ([desktop] stt_hotkey_start)
+  desktopSTTHotkeyStop?: string; // global hotkey to stop voice input ([desktop] stt_hotkey_stop)
   conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
 }
 

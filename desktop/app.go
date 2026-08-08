@@ -490,6 +490,9 @@ func (a *App) startup(ctx context.Context) {
 	a.startWindowsWebView2StartupFallback(ctx)
 	installSystemQuitHook()
 	a.startTray()
+	// 启动即注册语音输入全局快捷键（若有配置）：热键按下时才会拉起 STT 服务，
+	// 不必先手动点一次输入框麦克风按钮。
+	a.applySTTSettingsToBridge()
 	a.enableDeferredRebuildRetry()
 	a.goSafe("repairDesktopIconIntegration", func() {
 		if err := repairDesktopIconIntegration(); err != nil {

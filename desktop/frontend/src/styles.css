@@ -6600,6 +6600,74 @@ body > .mermaid-diagram--fullscreen {
 .composer__btn--stt.composer__btn--disabled {
   opacity: 0.6;
 }
+/* 增强提示词按钮（输入框右侧，麦克风按钮旁） */
+.composer__btn--enhance {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.composer__btn--enhance:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.composer__btn--enhance:not(:disabled):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.composer__btn--enhance.composer__btn--enhance-active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev-2));
+  color: var(--accent);
+}
+.composer__btn--enhance.composer__btn--disabled {
+  opacity: 0.6;
+}
+.composer__btn--spinning {
+  animation: composer-stt-spin 0.9s linear infinite;
+}
+@keyframes composer-stt-spin {
+  to { transform: rotate(360deg); }
+}
+/* 增强运行中：默认显示转圈，鼠标悬停时切换为叉叉（提示可取消） */
+.composer__btn--enhance-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.composer__btn--enhance-status .composer__btn--enhance-cancel {
+  display: none;
+}
+.composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--spinning {
+  display: none;
+}
+.composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--enhance-cancel {
+  display: inline-flex;
+  color: var(--err);
+}
+/* 语音输入按钮悬浮提示：动作 + 已配置的开始/停止快捷键 */
+.composer-stt-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.composer-stt-tooltip__action {
+  font-weight: 650;
+  color: var(--text);
+}
+.composer-stt-tooltip__hotkeys {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+}
+.composer-stt-tooltip__hotkeys span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 @keyframes composer-stt-pulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent); }
   50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent); }
@@ -11228,6 +11296,36 @@ body > .mermaid-diagram--fullscreen {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
+}
+/* 语音输入（STT）设置：静默秒数 + 快捷键输入框 */
+.settings-stt-seconds,
+.settings-stt-hotkey {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  color: var(--fg);
+  font-size: var(--font-control);
+  padding: 6px 8px;
+  min-width: 0;
+}
+.settings-stt-seconds {
+  width: 90px;
+}
+.settings-stt-hotkey {
+  flex: 1;
+  font-family: var(--font-mono, monospace);
+  text-transform: lowercase;
+}
+.settings-stt-seconds:focus,
+.settings-stt-hotkey:focus {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.settings-stt-seconds:disabled,
+.settings-stt-hotkey:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .mem-input {
   flex: 1;

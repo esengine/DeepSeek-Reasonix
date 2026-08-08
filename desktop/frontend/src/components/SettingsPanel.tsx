@@ -1797,6 +1797,57 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           onChange={(enabled) => void apply(() => app.SetDesktopSTTEnabled(enabled))}
         />
       </SettingsField>
+      <SettingsField label={t("settings.sttShowPage")} hint={t("settings.sttShowPageHint")}>
+        <ToggleSegment
+          value={s.desktopSTTShowPage !== false}
+          disabled={busy}
+          onLabel={t("settings.toggleOn")}
+          offLabel={t("settings.toggleOff")}
+          onChange={(show) => void apply(() => app.SetDesktopSTTShowPage(show))}
+        />
+      </SettingsField>
+      <SettingsField label={t("settings.sttAutoStop")} hint={t("settings.sttAutoStopHint")}>
+        <ToggleSegment
+          value={s.desktopSTTAutoStop !== false}
+          disabled={busy}
+          onLabel={t("settings.toggleOn")}
+          offLabel={t("settings.toggleOff")}
+          onChange={(enabled) => void apply(() => app.SetDesktopSTTAutoStop(enabled))}
+        />
+      </SettingsField>
+      <SettingsField label={t("settings.sttAutoStopSeconds")} hint={t("settings.sttAutoStopSecondsHint")}>
+        <input
+          type="number"
+          min={3}
+          max={300}
+          step={1}
+          className="settings-stt-seconds"
+          value={s.desktopSTTAutoStopSeconds ? s.desktopSTTAutoStopSeconds : 10}
+          disabled={busy}
+          onChange={(e) => {
+            const v = Number.parseInt(e.target.value, 10);
+            if (Number.isFinite(v) && v >= 3 && v <= 300) {
+              void apply(() => app.SetDesktopSTTAutoStopSeconds(v));
+            }
+          }}
+        />
+      </SettingsField>
+      <SettingsField label={t("settings.sttHotkeyStart")} hint={t("settings.sttHotkeyStartHint")}>
+        <HotkeyCaptureInput
+          value={s.desktopSTTHotkeyStart ?? ""}
+          disabled={busy}
+          placeholder="alt+s"
+          onChange={(v) => void apply(() => app.SetDesktopSTTHotkeyStart(v))}
+        />
+      </SettingsField>
+      <SettingsField label={t("settings.sttHotkeyStop")} hint={t("settings.sttHotkeyStopHint")}>
+        <HotkeyCaptureInput
+          value={s.desktopSTTHotkeyStop ?? ""}
+          disabled={busy}
+          placeholder="alt+w"
+          onChange={(v) => void apply(() => app.SetDesktopSTTHotkeyStop(v))}
+        />
+      </SettingsField>
       <SettingsField label={t("settings.closeBehavior")}>
         <div className="set-seg">
           {(["background", "quit"] as const).map((mode) => (
@@ -3972,6 +4023,79 @@ function ToggleSegment({
         {offLabel ?? t("settings.toggleOff")}
       </button>
     </div>
+  );
+}
+
+// HotkeyCaptureInput 是录制式快捷键输入框：点击进入录制态，按下组合键自动填入
+// （如 "alt+s"）并立即保存。避免手动输入拼写错误（如 "ATL+S"）。
+function HotkeyCaptureInput({
+  value,
+  disabled,
+  placeholder,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  placeholder?: string;
+  onChange: (v: string) => void;
+}) {
+  const t = useT();
+  const [capturing, setCapturing] = useState(false);
+  const [pending, setPending] = useState<string | null>(null);
+
+  const formatCombo = (e: ReactKeyboardEvent<HTMLInputElement>): string => {
+    const parts: string[] = [];
+    if (e.metaKey) parts.push("win");
+    if (e.ctrlKey) parts.push("ctrl");
+    if (e.altKey) parts.push("alt");
+    if (e.shiftKey) parts.push("shift");
+    const key = e.key;
+    // 修饰键本身不算按键
+    if (key === "Alt" || key === "Control" || key === "Shift" || key === "Meta" || key === "Win") {
+      return "";
+    }
+    let k = key.toLowerCase();
+    if (k === " ") k = "space";
+    if (k === "arrowup") k = "up";
+    if (k === "arrowdown") k = "down";
+    if (k === "arrowleft") k = "left";
+    if (k === "arrowright") k = "right";
+    parts.push(k);
+    return parts.join("+");
+  };
+
+  return (
+    <input
+      type="text"
+      className="settings-stt-hotkey"
+      value={capturing && pending !== null ? pending : (capturing ? "" : value)}
+      placeholder={capturing ? (t("settings.sttHotkeyCapture") ?? "按下组合键…") : placeholder}
+      disabled={disabled}
+      readOnly
+      onFocus={() => {
+        setCapturing(true);
+        setPending(null);
+      }}
+      onBlur={() => {
+        setCapturing(false);
+        setPending(null);
+      }}
+      onKeyDown={(e) => {
+        if (!capturing) return;
+        e.preventDefault();
+        if (e.key === "Escape" || e.key === "Backspace") {
+          setCapturing(false);
+          setPending(null);
+          onChange("");
+          return;
+        }
+        const combo = formatCombo(e);
+        if (!combo) return; // 纯修饰键，继续等待
+        setPending(combo);
+        setCapturing(false);
+        onChange(combo);
+      }}
+    />
   );
 }
 
