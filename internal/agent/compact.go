@@ -44,7 +44,7 @@ const (
 
 // summaryTimeout bounds one summarizer call so a stalled stream surfaces a clear
 // failure (then a mechanical fold) instead of hanging compaction indefinitely.
-const summaryTimeout = 90 * time.Second
+const summaryTimeout = 180 * time.Second
 
 // summarySystemPrompt steers the executor to distill older history into a
 // structured briefing it can keep relying on after the originals are dropped.

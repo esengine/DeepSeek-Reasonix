@@ -22,11 +22,20 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 // installed (nothing to fold); callers at the force threshold must treat that
 // as a hard failure rather than sending the oversized canonical prompt.
 func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (CompactionOutcome, error) {
-	msgs, transcriptVersion := a.session.snapshotMessagesVersion()
+	canonical, transcriptVersion := a.session.snapshotMessagesVersion()
+	// Fold against the current model-visible view when a projection is valid:
+	// an installed prune/snip projection already collapsed stale tool results.
+	// Coverage still maps to the canonical transcript below.
+	msgs := canonical
+	if st := a.compactionState; projectionValid(st, canonical, transcriptVersion, a.currentPromptCacheKey()) {
+		if visible := modelVisibleFromProjection(st.Projection, canonical); len(visible) > 0 {
+			msgs = visible
+		}
+	}
 	// Incremental fold: with a valid projection, fold only the appended
 	// messages and append the digest — prior bytes keep hitting; otherwise a
 	// full re-fold (digest merge) is a rare prefix rewrite.
-	if outcome, err := a.tryIncrementalFold(ctx, trigger, instructions, force, msgs, transcriptVersion); err != nil || outcome != CompactionNoop {
+	if outcome, err := a.tryIncrementalFold(ctx, trigger, instructions, force, canonical, transcriptVersion); err != nil || outcome != CompactionNoop {
 		return outcome, err
 	}
 	head, start, kept, fold, ok := a.planFold(msgs, force)
@@ -119,7 +128,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	a.emitCompactionTelemetry(tele)
 
 	projVersion := a.compactionState.Projection.ProjectionVersion + 1
-	st := a.buildCompactionState(projMsgs, msgs, transcriptVersion, summary, mode, usage, sourceTokens, projTokens, projVersion, trigger)
+	st := a.buildCompactionState(projMsgs, canonical, transcriptVersion, summary, mode, usage, sourceTokens, projTokens, projVersion, trigger)
 	if err := a.installProjection(st); err != nil {
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, fmt.Errorf("persist projection: %w", err)
@@ -253,6 +262,14 @@ func (a *Agent) buildCompactionState(projMsgs []provider.Message, msgs []provide
 func (a *Agent) compactIncremental(ctx context.Context, trigger, instructions string, force bool, baseProj ContextProjection, msgs []provider.Message, transcriptVersion uint64, head, start int) (CompactionOutcome, error) {
 	region := msgs[head:start]
 	kept, fold := a.partitionFoldForProjectionIncremental(region)
+	if len(fold) == 0 {
+		return CompactionNoop, nil
+	}
+	// Same bound as the full path: a huge appended block must not make one
+	// summarize call blow past summaryTimeout or overflow the window.
+	headTokens := estimateMessagesTokens(provider.ModelMessages(msgs[:head]))
+	tailTokens := estimateMessagesTokens(provider.ModelMessages(msgs[start:]))
+	fold, kept = a.fitFoldToWindow(fold, kept, headTokens, tailTokens)
 	if len(fold) == 0 {
 		return CompactionNoop, nil
 	}
@@ -427,7 +444,9 @@ func (a *Agent) planFold(msgs []provider.Message, force bool) (head, start int, 
 	}
 	region := msgs[head:start]
 	kept, fold = a.partitionFoldForProjection(region)
-	fold, kept = a.fitFoldToWindow(fold, kept)
+	headTokens := estimateMessagesTokens(provider.ModelMessages(msgs[:head]))
+	tailTokens := estimateMessagesTokens(provider.ModelMessages(msgs[start:]))
+	fold, kept = a.fitFoldToWindow(fold, kept, headTokens, tailTokens)
 	if len(fold) == 0 {
 		return 0, 0, nil, nil, false
 	}
@@ -437,42 +456,61 @@ func (a *Agent) planFold(msgs []provider.Message, force bool) (head, start int, 
 	return head, start, kept, fold, true
 }
 
-// fitFoldToWindow shrinks the fold from its newer end when the summarize
-// request would overflow the shared window: a rebuild on an invalidated
-// sidecar starts from canonical (possibly far over the window), so the first
-// fold must still succeed. The conservative message-level estimate guarantees
-// the exact transcript estimate inside summarize is strictly smaller.
-func (a *Agent) fitFoldToWindow(fold, kept []provider.Message) ([]provider.Message, []provider.Message) {
+// maxCompactFoldTokens caps one summarizer fold so a single call finishes
+// within summaryTimeout. The effective cap is the smaller of this and the
+// projection budget (window - head - tail - kept - summary).
+const maxCompactFoldTokens = 600_000
+
+// summaryTokensBudget reserves space for the distilled summary inside the new
+// projection, so the fold budget keeps the projection inside the window.
+const summaryTokensBudget = 12_000
+
+// fitFoldToWindow bounds the fold so the rebuilt projection (head + summary +
+// kept + tail) fits the shared window: fold at least foldTokens - avail but no
+// more than maxCompactFoldTokens per call; the deferred tail folds later.
+func (a *Agent) fitFoldToWindow(fold, kept []provider.Message, headTokens, tailTokens int) ([]provider.Message, []provider.Message) {
 	if a.contextWindow <= minOutputBudget || !sharesContextWindow(a.prov) || len(fold) == 0 {
 		return fold, kept
 	}
-	limit := a.contextWindow - minOutputBudget - estimateTextTokens(summarySystemPrompt)
-	if limit <= 0 {
-		return fold, kept
+	keptTokens := estimateMessagesTokens(provider.ModelMessages(kept))
+	foldTokens := estimateMessagesTokens(provider.ModelMessages(fold))
+	avail := a.contextWindow - minOutputBudget - headTokens - tailTokens - keptTokens - summaryTokensBudget
+	minFold := foldTokens - avail
+	if minFold <= 0 {
+		return fold, kept // the projection already fits; nothing to trim
 	}
+	if minFold > maxCompactFoldTokens {
+		minFold = maxCompactFoldTokens // single-round limit; the rest folds later
+	}
+	// Move the newer tail back into kept until the remaining fold fits the
+	// projection budget; when even maxCompactFoldTokens cannot reach it, fold
+	// the cap and defer the rest to later turns (window may exceed this round).
 	sizes := make([]int, len(fold))
-	total := 0
-	for i, m := range fold {
-		sizes[i] = estimateMessagesTokens([]provider.Message{m})
-		total += sizes[i]
-	}
-	if total < limit {
-		return fold, kept
-	}
-	acc := 0
-	cut := 0
-	for i, s := range sizes {
-		if acc+s >= limit {
-			cut = i
+	remaining := foldTokens
+	cut := len(fold)
+	for i := len(fold) - 1; i >= 0; i-- {
+		sizes[i] = estimateMessagesTokens([]provider.Message{fold[i]})
+		remaining -= sizes[i]
+		cut = i
+		if remaining <= avail {
 			break
 		}
-		acc += s
 	}
-	if cut == 0 {
-		return fold, kept // even one message overflows; let summarize reject
+	if cut == len(fold) || cut == 0 {
+		return fold, kept // nothing to move, or a single message exceeds the budget
 	}
-	moved := append([]provider.Message(nil), fold[cut:]...)
-	return fold[:cut], append(moved, kept...)
+	if folded := foldTokens - remaining; folded > maxCompactFoldTokens {
+		for i := cut - 1; i >= 0; i-- {
+			sizes[i] = estimateMessagesTokens([]provider.Message{fold[i]})
+			remaining -= sizes[i]
+			cut = i
+			if foldTokens-remaining <= maxCompactFoldTokens || cut == 0 {
+				break
+			}
+		}
+	}
+	movedMsgs := append([]provider.Message(nil), fold[cut:]...)
+	return fold[:cut], append(movedMsgs, kept...)
 }
 
 // runCompactionSummary tries native compaction first, then summarizeWithRetry.

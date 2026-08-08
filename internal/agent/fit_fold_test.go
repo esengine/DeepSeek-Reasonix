@@ -33,7 +33,7 @@ func TestFitFoldToWindowShrinksOversizedFold(t *testing.T) {
 			estimateMessagesTokens(provider.ModelMessages(fold)), limit)
 	}
 
-	gotFold, gotKept := a.fitFoldToWindow(fold, kept)
+	gotFold, gotKept := a.fitFoldToWindow(fold, kept, 0, 0)
 	if len(gotFold) == 0 {
 		t.Fatal("fold must not be emptied by fitting")
 	}
@@ -63,7 +63,7 @@ func TestFitFoldToWindowUnderLimitUntouched(t *testing.T) {
 	}
 	fold := []provider.Message{{Role: provider.RoleUser, Content: strings.Repeat("字", 1000)}}
 	kept := []provider.Message{{Role: provider.RoleUser, Content: "tail"}}
-	gotFold, gotKept := a.fitFoldToWindow(fold, kept)
+	gotFold, gotKept := a.fitFoldToWindow(fold, kept, 0, 0)
 	if len(gotFold) != 1 || len(gotKept) != 1 {
 		t.Fatalf("small fold must pass through untouched: fold=%d kept=%d", len(gotFold), len(gotKept))
 	}
