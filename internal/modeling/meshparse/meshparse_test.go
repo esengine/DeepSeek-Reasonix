@@ -197,3 +197,34 @@ f 4 8 5 1
 		t.Fatalf("translated solid cube: got %d voxels, want %d (full)", len(vm.Voxels), 16*16*16)
 	}
 }
+
+func TestVoxelizeTranslatedCubeFillsYZ(t *testing.T) {
+	// even-odd must survive large Y/Z translation (eps merges by all axes).
+	src := `# unit cube translated +1e7 in Y
+v 0 10000000 0
+v 1 10000000 0
+v 1 10000001 0
+v 0 10000001 0
+v 0 10000000 1
+v 1 10000000 1
+v 1 10000001 1
+v 0 10000001 1
+f 1 2 3 4
+f 5 8 7 6
+f 1 5 6 2
+f 2 6 7 3
+f 3 7 8 4
+f 4 8 5 1
+`
+	m, err := ParseOBJ(strings.NewReader(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	vm, err := Voxelize(m, 16)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vm.Voxels) != 16*16*16 {
+		t.Fatalf("Y-translated solid cube: got %d voxels, want %d (full)", len(vm.Voxels), 16*16*16)
+	}
+}
