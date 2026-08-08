@@ -262,10 +262,14 @@ func Voxelize(m *Mesh, resolution int) (*VoxelModel, error) {
 				nHits := 0
 				if len(hits) > 0 {
 					sort.Float64s(hits)
+					// Epsilon scales with t AND mesh coordinate magnitude: float64
+					// error in t is ~2.2e-16 × |coord|, so far-from-origin meshes
+					// need a wider merge window for shared-edge hits.
+					eps := 1e-9 * maxF(1, maxF(math.Abs(minV.X), math.Abs(maxV.X)))
 					prev := hits[0]
 					nHits = 1
 					for _, h := range hits[1:] {
-						if h-prev > 1e-9*maxF(1, h) {
+						if h-prev > eps*maxF(1, h) {
 							nHits++
 							prev = h
 						}
