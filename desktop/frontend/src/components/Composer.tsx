@@ -1259,13 +1259,19 @@ export function Composer({
   // --- 语音转文字（STT）：读取设置开关并订阅转录事件 ---
   useEffect(() => {
     let live = true;
-    app.Settings()
-      .then((s) => {
-        if (live) setSttEnabled(Boolean(s.desktopSTTEnabled));
-      })
-      .catch(() => {});
+    const refresh = () => {
+      app.Settings()
+        .then((s) => {
+          if (live) setSttEnabled(Boolean(s.desktopSTTEnabled));
+        })
+        .catch(() => {});
+    };
+    refresh();
+    // 设置面板保存后（如语音输入开关切换）重新读取，保证麦克风按钮即时出现/消失。
+    window.addEventListener("reasonix:desktop-settings-changed", refresh);
     return () => {
       live = false;
+      window.removeEventListener("reasonix:desktop-settings-changed", refresh);
     };
   }, []);
 

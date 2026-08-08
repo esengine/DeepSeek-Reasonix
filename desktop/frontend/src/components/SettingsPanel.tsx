@@ -202,6 +202,8 @@ export function SettingsPanel({
       const next = await reload();
       onChanged(next);
       window.dispatchEvent(new Event("reasonix:model-catalog-changed"));
+      // 设置保存后通知其他组件（如 Composer 的语音输入开关）重新读取设置。
+      window.dispatchEvent(new Event("reasonix:desktop-settings-changed"));
       if (typeof result === "string" && result.trim()) {
         setWarning(result.trim());
       }

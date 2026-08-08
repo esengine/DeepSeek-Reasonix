@@ -17168,6 +17168,11 @@ body > .mermaid-diagram--fullscreen {
   padding: 5px 13px;
   text-transform: capitalize;
   white-space: nowrap;
+  cursor: pointer;
+}
+.set-seg__btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 .set-seg__btn--on {
   background: var(--accent-soft);
