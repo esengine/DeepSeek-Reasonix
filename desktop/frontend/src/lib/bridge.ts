@@ -478,8 +478,9 @@ export interface AppBindings {
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
   // Voice-to-text (Edge Web Speech API bridge): mic button in the composer.
   // STTStatus returns {running, listening, connected, lang, port}. Transcripts
-  // arrive via onSTTTranscript.
-  STTStart(): Promise<void>;
+  // arrive via onSTTTranscript. tabID 为发起识别的标签页，转录事件携带它，
+  // 前端据此把转录插入正确的窗口输入框（多窗口独立绑定不错乱）。
+  STTStart(tabID?: string): Promise<void>;
   STTStop(): Promise<void>;
   STTStatus(): Promise<Record<string, unknown>>;
   STTSetLang(lang: string): Promise<void>;
@@ -1039,16 +1040,20 @@ export interface STTTranscriptPayload {
   text: string;
   isFinal: boolean;
   error?: string;
+  // tabID 是发起识别的标签页（Go sttTranscriptPayload.TabID）：前端据此
+  // 只把转录插入发起窗口的输入框，避免多窗口交叉错乱。
+  tabID?: string;
 }
 
 // mockSTT drives the browser-dev STT mock (no Go backend). The real Wails build
 // ignores it and talks to App.STT* directly.
-const mockSTT: { running: boolean; listening: boolean; connected: boolean; lang: string; port: number } = {
+const mockSTT: { running: boolean; listening: boolean; connected: boolean; lang: string; port: number; tabID: string } = {
   running: false,
   listening: false,
   connected: false,
   lang: "zh-CN",
   port: 0,
+  tabID: "",
 };
 
 const sttListeners = new Set<(p: STTTranscriptPayload) => void>();
@@ -4429,9 +4434,10 @@ function makeMockApp(): AppBindings {
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
         },
-        async STTStart() {
+        async STTStart(tabID?: string) {
           mockSTT.listening = true;
-          emitSTT({ text: "", isFinal: false });
+          mockSTT.tabID = tabID ?? "";
+          emitSTT({ text: "", isFinal: false, tabID: mockSTT.tabID });
         },
         async STTStop() {
           mockSTT.listening = false;

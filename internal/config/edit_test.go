@@ -2992,3 +2992,94 @@ func TestBrokenProjectConfigSymlinkFailsLoadAndSave(t *testing.T) {
 		t.Fatal("failed operations replaced the broken project config symlink")
 	}
 }
+
+func TestSetDesktopSTTSetters(t *testing.T) {
+	c := Default()
+	// 开关
+	if err := c.SetDesktopSTTEnabled(true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if !c.Desktop.STTEnabled {
+		t.Fatal("STTEnabled = false, want true")
+	}
+	// 识别页显示
+	if err := c.SetDesktopSTTShowPage(false); err != nil {
+		t.Fatalf("show page: %v", err)
+	}
+	if c.Desktop.STTShowPage {
+		t.Fatal("STTShowPage = true, want false")
+	}
+	// 静默自动停止
+	if err := c.SetDesktopSTTAutoStop(false); err != nil {
+		t.Fatalf("auto stop: %v", err)
+	}
+	if c.Desktop.STTAutoStop {
+		t.Fatal("STTAutoStop = true, want false")
+	}
+	// 超时秒数：0→默认10，<3→3，>300→300
+	cases := []struct{ in, want int }{
+		{0, 10}, {1, 3}, {2, 3}, {3, 3}, {10, 10}, {299, 299}, {300, 300}, {301, 300}, {9999, 300},
+	}
+	for _, tc := range cases {
+		if err := c.SetDesktopSTTAutoStopSeconds(tc.in); err != nil {
+			t.Fatalf("SetDesktopSTTAutoStopSeconds(%d): %v", tc.in, err)
+		}
+		if c.Desktop.STTAutoStopSeconds != tc.want {
+			t.Fatalf("AutoStopSeconds(%d) = %d, want %d", tc.in, c.Desktop.STTAutoStopSeconds, tc.want)
+		}
+	}
+	// 快捷键：trim 空格，空串禁用
+	if err := c.SetDesktopSTTHotkeyStart("  alt+s  "); err != nil {
+		t.Fatalf("hotkey start: %v", err)
+	}
+	if c.Desktop.STTHotkeyStart != "alt+s" {
+		t.Fatalf("hotkey start = %q, want alt+s", c.Desktop.STTHotkeyStart)
+	}
+	if err := c.SetDesktopSTTHotkeyStop(""); err != nil {
+		t.Fatalf("hotkey stop empty: %v", err)
+	}
+	if c.Desktop.STTHotkeyStop != "" {
+		t.Fatalf("hotkey stop = %q, want empty", c.Desktop.STTHotkeyStop)
+	}
+	// 默认值：未改动前为默认配置
+	d := Default()
+	if d.Desktop.STTAutoStopSeconds != 10 {
+		t.Fatalf("default auto stop seconds = %d, want 10", d.Desktop.STTAutoStopSeconds)
+	}
+}
+
+func TestSetDesktopSTTPersistsTOMLRoundtrip(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	c := Default()
+	if err := c.SetDesktopSTTEnabled(true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetDesktopSTTAutoStopSeconds(45); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetDesktopSTTHotkeyStart("alt+s"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SaveTo(path); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	for _, want := range []string{"stt_enabled = true", "stt_auto_stop_seconds = 45", `stt_hotkey_start = "alt+s"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("persisted config missing %q:\n%s", want, body)
+		}
+	}
+	re, err := LoadForRoot(dir)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if !re.Desktop.STTEnabled || re.Desktop.STTAutoStopSeconds != 45 || re.Desktop.STTHotkeyStart != "alt+s" {
+		t.Fatalf("roundtrip fields = enabled=%v seconds=%d start=%q",
+			re.Desktop.STTEnabled, re.Desktop.STTAutoStopSeconds, re.Desktop.STTHotkeyStart)
+	}
+}

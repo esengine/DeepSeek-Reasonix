@@ -35,8 +35,9 @@ func (a *App) stopSTTOnClose() {
 
 // STTStart 开始语音识别：惰性启动本地服务与 Edge 识别页，等待浏览器连上后
 // 自动开始录音。首次点击时 Edge 页面加载需要几秒，StartWithWait 会等待连接，
-// 一次点击即生效（无需再点第二次）。
-func (a *App) STTStart() error {
+// 一次点击即生效（无需再点第二次）。tabID 为发起识别的标签页，转录事件
+// 携带它，前端据此把转录插入正确的窗口输入框（多窗口独立绑定不错乱）。
+func (a *App) STTStart(tabID string) error {
 	if !a.desktopSTTEnabled() {
 		return fmt.Errorf("语音转文字未启用，请在设置中开启")
 	}
@@ -44,6 +45,9 @@ func (a *App) STTStart() error {
 	// 保证设置面板的修改即时生效。
 	a.applySTTSettingsToBridge()
 	b := a.sttBridgeFor()
+	b.mu.Lock()
+	b.tabID = tabID
+	b.mu.Unlock()
 	return b.StartWithWait(0)
 }
 
@@ -186,5 +190,5 @@ func normalizeSTTLang(lang string) string {
 	if strings.HasPrefix(l, "en") {
 		return "en-US"
 	}
-	return lang
+	return strings.TrimSpace(lang)
 }

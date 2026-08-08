@@ -1284,6 +1284,15 @@ export function Composer({
   useEffect(() => {
     const unsubscribe = onSTTTranscript((payload) => {
       if (!payload.isFinal || !payload.text.trim()) return;
+      // 独立绑定：转录事件携带发起识别的标签页（payload.tabID），
+      // 只把它插入发起窗口的输入框；切到其他窗口时转录不污染当前窗口。
+      if (payload.tabID && payload.tabID !== tabId) {
+        // 转录属于其他窗口：写入该窗口的 draft（切回时可见），不插入当前输入框。
+        const draft = cloneComposerDraft(draftsBySessionRef.current[payload.tabID] ?? emptyComposerDraft());
+        draft.text = (draft.text ? draft.text + " " : "") + payload.text.trim();
+        draftsBySessionRef.current[payload.tabID] = draft;
+        return;
+      }
       // 语音转录连续插入光标处（不产生段落空行）。
       // insertSTTTextAtCaret 内部只访问 refs（textRef/invocationsRef/…），
       // 不捕获本渲染期的变量，因此首帧捕获的回调始终可用。
@@ -1772,7 +1781,9 @@ export function Composer({
         await app.STTStop();
         setSttListening(false);
       } else {
-        await app.STTStart();
+        // 传入发起识别的 tabId：转录事件携带它，前端只插入本窗口输入框
+        // （多窗口独立绑定，不交叉错乱）。
+        await app.STTStart(tabId);
         setSttListening(true);
       }
     } catch (error) {

@@ -4,11 +4,62 @@ import { useEffect, useId, useRef } from "react";
 // 不能用 <img src="logo-wordmark.svg">：img 加载的 SVG 不播放动画，
 // 且 url(#…) 渐变引用在 img 静态上下文不可靠（实测显示白色）。
 // 流动动画用 requestAnimationFrame 直接驱动 linearGradient 的
-// gradientTransform（SVGMatrix 平移循环）——SMIL <animateTransform> 与
+// gradientTransform（SVGTransform 平移循环）——SMIL <animateTransform> 与
 // CSS transform 映射在 WebView2 中均不可靠（实测不播放/不变化），
 // JS 直接设置属性兼容性最好，且不随系统"减少动画"设置禁用（按需求必须实现）。
+//
+// 跑马灯式流动：渐变在 2×viewBox 宽度内铺两遍完整色环（每遍 7 色，
+// 末 stop = 首 stop 闭合）。translate 平移一个视口宽（= 一个完整色环周期）
+// 后，窗口内的色段与初始完全一致 → 无缝循环，任意时刻窗口里都是连续
+// 完整彩虹，不会出现"整体变黄/瞬间跳色"。
+//
+// 流畅性设计（消除"停一下/顿挫"感）：
+//  1. 所有实例共享同一个模块级 rAF 循环（flowTargets），多 logo 同时存在
+//     时只有一个 timer，不会互相抢占 tick 导致丢帧；
+//  2. 每帧直接更新已创建的 SVGTransform 对象（setTranslate），而不是
+//     setAttribute 重建字符串再解析——后者在 WebView2 中每帧都有字符串
+//     分配 + 样式重算，高负载下容易被 GC/重排打断成"卡一下"；
+//  3. 色环选亮度均匀的颜色：紫 #a06bff / 品红 #ff5fe0 比默认色的感知
+//     亮度更高，7 段流动速度观感一致，不会"走到那一段像停住"。
 const FLOW_DURATION_MS = 2800;
-const FLOW_DISTANCE = 1692.66; // 与 viewBox 宽一致：平移一个周期无缝循环
+const FLOW_DISTANCE = 1692.66; // 一个色环周期 = viewBox 宽
+
+// 7 色环铺两遍（14 段 → 15 个 stop，offset 等分 0%..100%，覆盖 3385.32）。
+const STT_RAINBOW = ["#ff2f70", "#ff9f1c", "#f7f24a", "#25f36b", "#18d9ff", "#a06bff", "#ff5fe0"];
+const FLOW_STOPS = Array.from({ length: 15 }, (_, i) => ({
+  offset: `${(i / 14) * 100}%`,
+  color: STT_RAINBOW[i % 7],
+}));
+
+// ── 共享单一 rAF 循环 ─────────────────────────────────────────────
+// 每个实例把"推进自己渐变"的方式注册为 FlowTarget，由一个模块级 rAF
+// 统一驱动。零多实例、零重复 timer，WebView2 下观感最顺。
+type FlowTarget = { apply(phase: number): void };
+
+const flowTargets = new Set<FlowTarget>();
+let flowRaf = 0;
+let flowStart = 0;
+
+function flowTick(t: number) {
+  if (flowStart === 0) flowStart = t;
+  const phase = ((t - flowStart) % FLOW_DURATION_MS) / FLOW_DURATION_MS;
+  for (const target of flowTargets) target.apply(phase);
+  flowRaf = requestAnimationFrame(flowTick);
+}
+
+function subscribeFlow(target: FlowTarget) {
+  flowTargets.add(target);
+  if (flowRaf === 0) flowRaf = requestAnimationFrame(flowTick);
+}
+
+function unsubscribeFlow(target: FlowTarget) {
+  flowTargets.delete(target);
+  if (flowTargets.size === 0 && flowRaf !== 0) {
+    cancelAnimationFrame(flowRaf);
+    flowRaf = 0;
+    flowStart = 0;
+  }
+}
 
 export function BrandLogo({ className, alt = "Reasonix" }: { className?: string; alt?: string }) {
   const gradId = "rainbow-" + useId().replace(/[^a-zA-Z0-9]/g, "");
@@ -16,32 +67,31 @@ export function BrandLogo({ className, alt = "Reasonix" }: { className?: string;
   const gradRef = useRef<SVGLinearGradientElement | null>(null);
 
   useEffect(() => {
-    const grad = gradRef.current;
-    if (!grad) return;
-    let raf = 0;
-    const step = (t: number) => {
-      // 0 → FLOW_DISTANCE 循环；渐变定义宽 2×（x2=3385.32），平移半周期无缝循环
-      const phase = (t % FLOW_DURATION_MS) / FLOW_DURATION_MS;
-      const x = phase * FLOW_DISTANCE;
-      grad.setAttribute("gradientTransform", `translate(-${x} 0)`);
-      raf = requestAnimationFrame(step);
-    };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
-  }, []);
+      const grad = gradRef.current;
+      if (!grad || !grad.ownerSVGElement) return;
+      // 创建一次 SVGTransform 挂进 baseVal，之后每帧只 setTranslate，
+      // 不重建对象、不解析字符串。createSVGTransform 是 SVGSVGElement 的
+      // 标准方法（SVGTransformList 自身没有 create* 方法）。
+      const svg = grad.ownerSVGElement;
+      const list = grad.gradientTransform.baseVal;
+      const transform = svg.createSVGTransform();
+      list.insertItemBefore(transform, 0);
+      const target: FlowTarget = {
+        apply(phase: number) {
+          transform.setTranslate(-phase * FLOW_DISTANCE, 0);
+        },
+      };
+      subscribeFlow(target);
+      return () => unsubscribeFlow(target);
+    }, []);
 
   return (
     <svg viewBox="0 0 1692.66 392.25" className={className} role="img" aria-label={alt}>
       <defs>
         <linearGradient ref={gradRef} id={gradId} x1="0" y1="0" x2="3385.32" y2="0" gradientUnits="userSpaceOnUse">
-          <stop offset="0%" stopColor="#ff2f70" />
-          <stop offset="14.2857%" stopColor="#ff9f1c" />
-          <stop offset="28.5714%" stopColor="#f7f24a" />
-          <stop offset="42.8571%" stopColor="#25f36b" />
-          <stop offset="57.1429%" stopColor="#18d9ff" />
-          <stop offset="71.4286%" stopColor="#7a5cff" />
-          <stop offset="85.7143%" stopColor="#ff4fe3" />
-          <stop offset="100%" stopColor="#ff2f70" />
+          {FLOW_STOPS.map((s, i) => (
+            <stop key={i} offset={s.offset} stopColor={s.color} />
+          ))}
         </linearGradient>
       </defs>
       <path fill={fill} d="M767.26,303.68c-12.37,1.71-24.96.46-38.13.63l-1.23-16.27c-12.87,14.9-29.84,21.97-49.07,19.87-24.58-2.69-44.41-19.38-53.2-42.6-7.32-19.32-6.99-40.86.81-60.12,9.5-23.46,30.72-40.21,55.73-42.02,18.41-1.33,34.33,4.84,45.96,18.54l1.13-15.37,37.63-.22.36,137.56ZM729.95,235.53c0-19.82-16.06-35.88-35.88-35.88s-35.88,16.06-35.88,35.88,16.06,35.88,35.88,35.88,35.88-16.06,35.88-35.88Z" />

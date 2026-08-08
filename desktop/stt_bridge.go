@@ -70,6 +70,9 @@ type sttTranscriptPayload struct {
 	Text    string `json:"text"`
 	IsFinal bool   `json:"isFinal"`
 	Error   string `json:"error,omitempty"`
+	// TabID 是发起这次语音识别的标签页（STTStart 传入）。前端据此把转录
+	// 插入正确的窗口输入框，避免多窗口交叉错乱。
+	TabID string `json:"tabID,omitempty"`
 }
 
 // sttBridge 管理一次桌面 STT 会话：本地 HTTP+WebSocket 服务、Edge 识别页进程、
@@ -107,6 +110,8 @@ type sttBridge struct {
 	hotkeyStop  string
 	// hotkeys 管理全局热键注册（Windows RegisterHotKey；其他平台空实现）。
 	hotkeys *sttHotkeyManager
+	// tabID 是发起本次语音识别的标签页；转录事件携带它供前端独立绑定窗口。
+	tabID string
 }
 
 // newSTTBridge 创建桥接服务。homeDir 是 Reasonix 用户数据目录（Edge 专用
@@ -507,7 +512,10 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 			b.lastSpeechTime = time.Now()
 			b.mu.Unlock()
 			if b.emit != nil {
-				b.emit(sttTranscriptEvent, sttTranscriptPayload{Text: text, IsFinal: isFinal})
+				b.mu.Lock()
+				tabID := b.tabID
+				b.mu.Unlock()
+				b.emit(sttTranscriptEvent, sttTranscriptPayload{Text: text, IsFinal: isFinal, TabID: tabID})
 			} else {
 				fmt.Printf("[STT] transcript(final=%v): %s\n", isFinal, text)
 			}
