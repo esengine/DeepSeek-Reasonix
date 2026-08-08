@@ -375,9 +375,9 @@ func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, ok bool)
 	maxAbs = maxF(maxAbs, math.Abs(c.Y))
 	maxAbs = maxF(maxAbs, math.Abs(c.Z))
 	// epsUV must exceed the barycentric error, which scales as ~2.2e-16 ×
-	// maxAbs × conditioning. 1e-13 × max(1, maxAbs) keeps a tight ~1e-13
+	// maxAbs × conditioning. 1e-14 × max(1, maxAbs) keeps a tight ~1e-14
 	// floor at the origin and a ≥100× margin over ulp at large coordinates
-	// (1e7 → 1e-6, 1e9 → 1e-4); a slightly thicker surface shell is
+	// (1e7 → 1e-7, 1e9 → 1e-5); a slightly thicker surface shell is
 	// acceptable for voxelization.
 	epsUV := 1e-14 * maxF(1, maxAbs)
 	if u < -epsUV || v < -epsUV || u+v > 1+epsUV {

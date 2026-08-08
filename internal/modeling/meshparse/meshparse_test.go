@@ -256,4 +256,7 @@ func TestVoxelizeRotatedCubeTranslatedXLarge(t *testing.T) {
 	if len(vm.Voxels) < want {
 		t.Fatalf("X-large rotated cube: got %d/%d, want >= %d", len(vm.Voxels), total, want)
 	}
+	if len(vm.Voxels) > int(float64(total)*0.60) {
+		t.Fatalf("X-large rotated cube: got %d/%d, want <= %d (over-fill regression)", len(vm.Voxels), total, int(float64(total)*0.60))
+	}
 }
