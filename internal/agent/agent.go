@@ -307,6 +307,10 @@ type Agent struct {
 	// the CLI can expose a context gauge without re-scraping the usage line. The
 	// run loop writes it while a frontend's status line reads it, so it is atomic.
 	lastUsage atomic.Pointer[provider.Usage]
+	// lastResponseHitTokens stores the previous turn's CacheHitTokens so the
+	// response-side cache-break detector can compare the current hit count
+	// against the last known baseline.
+	lastResponseHitTokens atomic.Int64
 	// lastSentChars is the character count of the last sent request, used in
 	// tokPerChar calibration to keep the ratio honest when a projection shrinks
 	// the prompt far below the full canonical transcript.

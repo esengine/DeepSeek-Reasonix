@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"reasonix/internal/event"
@@ -87,5 +88,62 @@ func TestRunPopulatesCacheDiagnosticsOnUsageEvents(t *testing.T) {
 	}
 	if first.ToolsHash == second.ToolsHash {
 		t.Fatalf("tool hash should change after registering a tool: %q", first.ToolsHash)
+	}
+}
+
+// TestCacheMissDropFirstTurnSkips verifies the first turn (no previous baseline)
+// never reports a miss drop regardless of the hit token count.
+func TestCacheMissDropFirstTurnSkips(t *testing.T) {
+	a := &Agent{lastResponseHitTokens: atomic.Int64{}}
+	if detectResponseCacheMiss(a, 8000, nil) {
+		t.Fatal("first turn should never report cache miss drop")
+	}
+	// Baseline must be stored.
+	if a.lastResponseHitTokens.Load() != 8000 {
+		t.Fatalf("baseline not stored: got %d", a.lastResponseHitTokens.Load())
+	}
+}
+
+// TestCacheMissDropStableHitDoesNotFire verifies a stable or growing hit count
+// (within 5%) does not trigger the drop detector.
+func TestCacheMissDropStableHitDoesNotFire(t *testing.T) {
+	a := &Agent{lastResponseHitTokens: atomic.Int64{}}
+	a.lastResponseHitTokens.Store(10000)
+	if detectResponseCacheMiss(a, 10100, nil) {
+		t.Fatal("+1% change should not trigger flush")
+	}
+	if detectResponseCacheMiss(a, 9600, nil) {
+		t.Fatal("4% drop should not trigger flush (<5% threshold)")
+	}
+}
+
+// TestCacheMissDropSignificantDropFires verifies a drop >5% AND >=2000 tokens
+// triggers the missed-cache detection.
+func TestCacheMissDropSignificantDropFires(t *testing.T) {
+	a := &Agent{lastResponseHitTokens: atomic.Int64{}}
+	a.lastResponseHitTokens.Store(10000)
+	if !detectResponseCacheMiss(a, 7900, nil) {
+		t.Fatal("21% drop of 10000 → 7900 should trigger miss; threshold is 5% + 2000 tokens")
+	}
+	// Verify baseline was updated to the new (lower) count so a second
+	// identical drop does not re-trigger.
+	if detectResponseCacheMiss(a, 7900, nil) {
+		t.Fatal("baseline not updated — second identical count should not re-trigger")
+	}
+}
+
+// TestCacheMissDropCompactionResets verifies that contentReasons (compaction/snip)
+// suppress the drop detector because the prefix legitimately shrank.
+func TestCacheMissDropCompactionResets(t *testing.T) {
+	a := &Agent{lastResponseHitTokens: atomic.Int64{}}
+	a.lastResponseHitTokens.Store(10000)
+	reasons := []string{"compact_auto"}
+	if detectResponseCacheMiss(a, 5000, reasons) {
+		t.Fatal("compaction-caused hit drop must not be reported as cache miss")
+	}
+	// Baseline must be reset to the post-compaction count so the next
+	// legitimate cache eviction can still be detected.
+	if a.lastResponseHitTokens.Load() != 5000 {
+		t.Fatalf("baseline not reset after compaction: got %d", a.lastResponseHitTokens.Load())
 	}
 }
