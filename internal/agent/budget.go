@@ -243,3 +243,23 @@ func charsOfMessages(msgs []provider.Message) int {
 	}
 	return n
 }
+
+// maybePredictOverflow emits a record-only notice when the estimated prompt
+// leaves less than minOutputBudget of headroom for the output: the next turn
+// may overflow the shared context window. Compaction is not triggered — this
+// is a diagnostic signal, not a pressure gate.
+func (a *Agent) maybePredictOverflow(est, maxTokens int) {
+	if a == nil || a.sink == nil || a.contextWindow <= 0 || maxTokens <= 0 {
+		return
+	}
+	headroom := a.contextWindow - est - maxTokens
+	if headroom < minOutputBudget {
+		a.sink.Emit(event.Event{
+			Kind:  event.Notice,
+			Level: event.LevelInfo,
+			Text:  "context window nearly full",
+			Detail: fmt.Sprintf("estimated prompt %d tokens, max output %d, headroom %d — next turn may overflow",
+				est, maxTokens, max(headroom, 0)),
+		})
+	}
+}
