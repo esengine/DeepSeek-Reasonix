@@ -1810,7 +1810,9 @@ export function Composer({
     if (enhancing) return;
     setEnhancing(true);
     try {
-      const enhanced = await app.EnhancePrompt(current);
+      // 传入当前 tabId：增强按发起请求的 tab 的模型执行，
+      // 切换窗口后不会用错模型/错位。
+      const enhanced = await app.EnhancePrompt(current, tabId);
       if (enhanced && enhanced.trim()) {
         setEnhancedOriginal(textRef.current); // 记住增强前文本，供退回
         setEnhancedResult(enhanced.trim());   // 记录增强结果，供二次增强判断

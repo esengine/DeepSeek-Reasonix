@@ -484,7 +484,8 @@ export interface AppBindings {
   STTStatus(): Promise<Record<string, unknown>>;
   STTSetLang(lang: string): Promise<void>;
   // EnhancePrompt 用大模型增强用户当前输入，返回增强后的提示词文本。
-  EnhancePrompt(text: string): Promise<string>;
+  // tabID 为发起增强的标签页（用于按该 tab 的模型执行，避免切换窗口错位）。
+  EnhancePrompt(text: string, tabID?: string): Promise<string>;
   SetDesktopSTTEnabled(enabled: boolean): Promise<void>;
   SetDesktopSTTShowPage(show: boolean): Promise<void>;
   SetDesktopSTTAutoStop(enabled: boolean): Promise<void>;

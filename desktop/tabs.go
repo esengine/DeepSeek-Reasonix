@@ -8159,6 +8159,16 @@ func (a *App) ContextPanel(tabID string) ContextPanelInfo {
 		used, window := ctrl.ContextSnapshot()
 		info.UsedTokens = used
 		info.WindowTokens = window
+		// ContextSnapshot 在 executor 未就绪（会话未开始/刚重建）时返回 window=0，
+		// 前端进度条分母为 0 会恒显示 0%。兜底：用当前 tab 模型的配置上下文窗口，
+		// 保证进度条始终有有效分母。
+		if window <= 0 {
+			if cfg, err := config.LoadForRoot(tab.WorkspaceRoot); err == nil {
+				if entry, ok := cfg.ResolveModel(tab.model); ok && entry.ContextWindow > 0 {
+					info.WindowTokens = entry.ContextWindow
+				}
+			}
+		}
 		// Session rebind rebuilds the controller: the fresh executor has no
 		// per-turn usage yet, so ContextSnapshot reports used=0. Fall back to
 		// the telemetry-persisted last-used value from the most recent turn.

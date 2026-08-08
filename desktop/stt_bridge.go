@@ -326,6 +326,20 @@ func (b *sttBridge) Stop() {
 		_ = proc.Process.Kill()
 		_, _ = proc.Process.Wait()
 	}
+	// proc.Process.Kill() 只杀主进程；Edge 是多进程架构，渲染/GPU 等子进程
+	// 会残留不退出。按专用 profile 目录定向清掉所有本 STT 拉起的 msedge 进程
+	// （不误杀用户自己的 Edge，edge-stt-bridge 同样做法）。
+	killEdgeProfileProcesses(b.homeDir)
+}
+
+// killEdgeProfileProcesses 按 CommandLine 匹配本 STT 专用 profile 目录，
+// 杀掉所有相关 msedge 进程（含子进程）。非 Windows/失败静默忽略。
+func killEdgeProfileProcesses(homeDir string) {
+	profileDir := filepath.Join(homeDir, sttEdgeProfileDirName)
+	ps := "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+		"Where-Object { $_.CommandLine -like '*" + profileDir + "*' } | " +
+		"ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+	_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).Run()
 }
 
 // StartListening 向浏览器发送开始识别命令，并启动自动停止监控。

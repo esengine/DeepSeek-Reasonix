@@ -291,6 +291,7 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 	if prompt == "" {
 		return "", fmt.Errorf("system prompt is required")
 	}
+	fmt.Printf("[subagent-try] start: profile=%s model=%s task_len=%d\n", input.Name, input.Model, len(task))
 
 	// One try run at a time, cancellable from the settings page and aborted
 	// with the app context on shutdown — a runaway model loop must not burn
@@ -306,7 +307,8 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 	if a.tryRunCancel != nil {
 		a.tryRunMu.Unlock()
 		cancel()
-		return "", fmt.Errorf("another try run is still in progress — cancel it or wait for it to finish")
+		fmt.Printf("[subagent-try] conflict: another try run is still in progress\n")
+		return "", fmt.Errorf("另一个增强/试运行正在进行中，请稍候或先取消")
 	}
 	a.tryRunCancel = cancel
 	a.tryRunMu.Unlock()
@@ -382,16 +384,19 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 // EnhancePrompt 用大模型增强用户当前输入（提示词润色/补全），返回增强后的
 // 文本。复用 TrySubagentProfile 的 headless 只读 subagent 机制，不产生会话。
 // 前端输入框右侧"增强提示词"按钮调用它，并保留原文以便退回。
-// 使用当前活动会话选择的模型（而非默认模型），无需单独配置。
-func (a *App) EnhancePrompt(text string) (string, error) {
+// 使用发起增强请求的 tab（tabID）选择的模型，而非请求到达时的活动 tab——
+// 用户点增强后切到其他窗口时，不会用错模型（修复"切换窗口增强错位"）。
+func (a *App) EnhancePrompt(text, tabID string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return "", fmt.Errorf("请输入要增强的提示词")
 	}
-	// 取当前活动 tab 的模型 ref，让增强走用户当前选择的模型。
+	// 按发起请求的 tabID 取模型；查不到（tab 已关闭等）回退当前活动 tab。
 	a.mu.RLock()
 	model := ""
-	if tab := a.activeTabLocked(); tab != nil {
+	if tab := a.tabByIDLocked(tabID); tab != nil {
+		model = tab.model
+	} else if tab := a.activeTabLocked(); tab != nil {
 		model = tab.model
 	}
 	a.mu.RUnlock()
