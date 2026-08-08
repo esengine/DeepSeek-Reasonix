@@ -1,30 +1,39 @@
-import { useId } from "react";
+import { useEffect, useId, useRef } from "react";
 
 // BrandLogo 内联渲染 Reasonix wordmark（彩虹渐变 + 流动动画）。
 // 不能用 <img src="logo-wordmark.svg">：img 加载的 SVG 不播放动画，
 // 且 url(#…) 渐变引用在 img 静态上下文不可靠（实测显示白色）。
-// 流动动画用 CSS transform 驱动 linearGradient（gradientTransform 是
-// presentation attribute，CSS transform 可映射驱动）；SMIL <animateTransform>
-// 经 React 渲染后不可靠（实测不播放）。
+// 流动动画用 requestAnimationFrame 直接驱动 linearGradient 的
+// gradientTransform（SVGMatrix 平移循环）——SMIL <animateTransform> 与
+// CSS transform 映射在 WebView2 中均不可靠（实测不播放/不变化），
+// JS 直接设置属性兼容性最好，且不随系统"减少动画"设置禁用（按需求必须实现）。
+const FLOW_DURATION_MS = 2800;
+const FLOW_DISTANCE = 1692.66; // 与 viewBox 宽一致：平移一个周期无缝循环
+
 export function BrandLogo({ className, alt = "Reasonix" }: { className?: string; alt?: string }) {
   const gradId = "rainbow-" + useId().replace(/[^a-zA-Z0-9]/g, "");
   const fill = `url(#${gradId})`;
+  const gradRef = useRef<SVGLinearGradientElement | null>(null);
+
+  useEffect(() => {
+    const grad = gradRef.current;
+    if (!grad) return;
+    let raf = 0;
+    const step = (t: number) => {
+      // 0 → FLOW_DISTANCE 循环；渐变定义宽 2×（x2=3385.32），平移半周期无缝循环
+      const phase = (t % FLOW_DURATION_MS) / FLOW_DURATION_MS;
+      const x = phase * FLOW_DISTANCE;
+      grad.setAttribute("gradientTransform", `translate(-${x} 0)`);
+      raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
     <svg viewBox="0 0 1692.66 392.25" className={className} role="img" aria-label={alt}>
       <defs>
-        <style>{`
-          @keyframes brand-logo-rainbow-flow {
-            from { transform: translateX(0); }
-            to   { transform: translateX(-1692.66px); }
-          }
-          .brand-logo-gradient {
-            animation: brand-logo-rainbow-flow 2.8s linear infinite;
-          }
-          @media (prefers-reduced-motion: reduce) {
-            .brand-logo-gradient { animation: none; }
-          }
-        `}</style>
-        <linearGradient id={gradId} x1="0" y1="0" x2="3385.32" y2="0" gradientUnits="userSpaceOnUse" className="brand-logo-gradient">
+        <linearGradient ref={gradRef} id={gradId} x1="0" y1="0" x2="3385.32" y2="0" gradientUnits="userSpaceOnUse">
           <stop offset="0%" stopColor="#ff2f70" />
           <stop offset="14.2857%" stopColor="#ff9f1c" />
           <stop offset="28.5714%" stopColor="#f7f24a" />
