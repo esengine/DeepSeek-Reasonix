@@ -533,7 +533,7 @@ type modelingAtomic struct {
 func (r modelingAtomic) Name() string { return "modeling_atomic" }
 
 func (r modelingAtomic) Description() string {
-	return "Run a deterministic Blender atomic operation (add_cube/add_uv_sphere/add_cylinder/boolean/bevel/delete_object) on the default scene or a .blend file. Ops are parameterized bpy snippets — precise and low-token. Args: op (name), args (object of op parameters), path (optional .blend)."
+	return "Run a deterministic Blender atomic operation (add_cube/add_uv_sphere/add_cylinder/boolean/bevel/delete_object) on the default scene or a .blend file. Ops are parameterized bpy snippets — precise and low-token. Args: op (name), args (object of op parameters), path (optional .blend). NOT ReadOnly: mutates the Blender scene (or saves the .blend when a path is given)."
 }
 
 func (r modelingAtomic) Schema() json.RawMessage {

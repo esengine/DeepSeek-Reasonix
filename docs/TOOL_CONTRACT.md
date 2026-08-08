@@ -31,6 +31,7 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `modeling_optimize` | false | Apply a deterministic mesh operation (cleanup/triangulate/merge/decimate) to a mesh file (obj/stl/ply). The file is backed up to <path>.bak first; returns the before/after stat delta (token-minimal verification). decimate target is the desired face count. |
 | `modeling_convert` | false | Convert a mesh/voxel file to another format (pure Go). Supported: obj/stl/ply/vox. Output path default = input with new extension. |
 | `modeling_atomic` | Runs a deterministic Blender atomic operation (add_cube/sphere/cylinder/boolean/bevel/delete) — low-token alternative to raw bpy. |
+| `modeling_atomic` | false | Run a deterministic Blender atomic operation (add_cube/add_uv_sphere/add_cylinder/boolean/bevel/delete_object) — parameterized bpy snippets, low-token. Mutates the scene. |
 | `modeling_voxel` | false | Voxelize a closed mesh into a .vox model at the given resolution (longest axis, 4..512). Writes <path>.vox and returns the voxel descriptor (size/filled/colors/components/solidity). |
 
 ## Schema Snapshot

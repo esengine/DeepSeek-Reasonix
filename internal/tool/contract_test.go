@@ -68,6 +68,7 @@ var acceptsDefaultSnip = map[string]bool{
 	"modeling_convert":  true, // short JSON result
 	"modeling_optimize": true, // short JSON delta
 	"modeling_voxel":    true, // short JSON descriptor
+	"modeling_atomic":   true, // short JSON result
 	"move_file":         true,
 	"multi_edit":        true,
 	"notebook_edit":     true,
