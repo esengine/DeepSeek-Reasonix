@@ -11,6 +11,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 	"testing"
 
 	"reasonix/internal/event"
@@ -62,6 +64,7 @@ func (s *collectSink) Emit(e event.Event) {
 // client keeps its request prefix turn over turn. ---
 
 type mockDeepSeek struct {
+	mu           sync.Mutex
 	t            *testing.T
 	prevMessages []json.RawMessage // last conversation request's messages
 	reqChars     []int             // total prompt chars per conversation request
@@ -69,9 +72,36 @@ type mockDeepSeek struct {
 	withTools    bool              // advertise the echo tool (and emit tool calls)
 	reasoning    string            // chain-of-thought echoed every turn (round-tripped)
 	toolRounds   int               // remaining tool-call rounds before a final answer
+	delay        time.Duration     // optional per-request delay (steer test needs an injection window)
+}
+
+// requestCount reports how many conversation requests have been served (safe
+// for concurrent readers while the mock server is still serving).
+func (m *mockDeepSeek) requestCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.reqChars)
+}
+
+// reqCharCounts returns the per-request prompt char counts (safe for
+// concurrent readers once the run has finished and no more requests arrive).
+func (m *mockDeepSeek) reqCharCounts() []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]int(nil), m.reqChars...)
+}
+
+// hitCharCounts returns the per-request cached-prefix char counts.
+func (m *mockDeepSeek) hitCharCounts() []int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]int(nil), m.hitChars...)
 }
 
 func (m *mockDeepSeek) handler(w http.ResponseWriter, r *http.Request) {
+	if m.delay > 0 {
+		time.Sleep(m.delay)
+	}
 	body, _ := io.ReadAll(r.Body)
 
 	// Compaction issues a tool-less summarize request whose system prompt is the
@@ -90,9 +120,11 @@ func (m *mockDeepSeek) handler(w http.ResponseWriter, r *http.Request) {
 	common := commonPrefixMsgs(m.prevMessages, msgs)
 	hitChars := charsOf(msgs[:common])
 	totalChars := charsOf(msgs)
+	m.mu.Lock()
 	m.prevMessages = msgs
 	m.reqChars = append(m.reqChars, totalChars)
 	m.hitChars = append(m.hitChars, hitChars)
+	m.mu.Unlock()
 
 	promptTok := totalChars / 4
 	hitTok := hitChars / 4
@@ -682,4 +714,50 @@ func writeSSE(w http.ResponseWriter, t *testing.T, chunks ...sseResp) {
 	}
 	fmt.Fprint(w, "data: [DONE]\n\n")
 	f.Flush()
+}
+
+// TestCacheHitSteerPreservesPrefix drives a multi-round run and injects a
+// mid-turn steer (PR #7912 guidance injection). The steer must be appended as
+// a fresh user message — never spliced into the middle of history — so the
+// prompt-cache prefix (the ENTIRE prior request) keeps hitting. This is the
+// regression guard for "steer injection must not break cache hits".
+func TestCacheHitSteerPreservesPrefix(t *testing.T) {
+	mock := &mockDeepSeek{t: t, withTools: true, reasoning: longReasoning, toolRounds: 6, delay: 150 * time.Millisecond}
+	srv := httptest.NewServer(http.HandlerFunc(mock.handler))
+	defer srv.Close()
+
+	a, _ := newAgent(t, srv.URL, mock.tools(), 0 /*no compaction*/, 0)
+	done := make(chan error, 1)
+	go func() {
+		done <- a.Run(context.Background(), "echo alpha, bravo, charlie then finish")
+	}()
+
+	// Wait for the first request, then inject steer while the run is active.
+	deadline := time.Now().Add(5 * time.Second)
+	for mock.requestCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if mock.requestCount() == 0 {
+		t.Fatal("no request seen before steer injection")
+	}
+	if !a.Steer("guidance: keep the echoed text on one line") {
+		t.Fatal("steer not accepted — run finished before the injection window (raise delay/toolRounds)")
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	reqs := mock.reqCharCounts()
+	hits := mock.hitCharCounts()
+	if len(reqs) < 3 {
+		t.Fatalf("expected a multi-request conversation, got %d requests", len(reqs))
+	}
+	for i := 1; i < len(reqs); i++ {
+		// On request i the cached prefix should be the ENTIRE request i-1.
+		if hits[i] != reqs[i-1] {
+			t.Errorf("PREFIX BROKEN at req %d: cached %d chars but the full prior request was %d chars",
+				i, hits[i], reqs[i-1])
+		}
+	}
+	t.Logf("prefix STABLE across %d requests WITH a mid-turn steer — steer appends, never splices", len(reqs))
 }
