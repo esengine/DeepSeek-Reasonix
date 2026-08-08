@@ -72,6 +72,8 @@ import { SoundSelect } from "./SoundSelect";
 import { getSuccessPreference, setSuccessPreference, getAttentionPreference, setAttentionPreference, playSuccessChime, playAttentionChime, type SoundWavPref } from "../lib/sound";
 import { ModalCloseButton } from "./ModalCloseButton";
 import { ShortcutComboDisplay } from "./ShortcutComboDisplay";
+import { useConfirmDialog } from "./ConfirmDialog";
+import { useOverlayStore, EMPTY_PROVIDER_DRAFT, type ProviderModelDraft } from "../store/overlays";
 
 const SETTINGS_TABS: SettingsTab[] = ["general", "models", "bots", "mcp", "remote", "skills", "subagents", "plugins", "memory", "hooks", "diagnostics", "shortcuts", "permissions", "sandbox", "network", "appearance", "storage", "updates"];
 export type SettingsInitialFocus =
@@ -143,6 +145,31 @@ export function SettingsPanel({
   if (!terminalThemeSaveQueue.current) {
     terminalThemeSaveQueue.current = createTerminalThemeSaveQueue((next) => app.SetDesktopTerminalTheme(next));
   }
+
+  // Dirty-close guard: when a provider draft has unsaved edits, intercept
+  // backdrop click / Esc and show a confirmation dialog instead of closing.
+  // Reads draft from the store via getState() so it doesn't re-subscribe on
+  // every keystroke in the provider editor.
+  const { confirm, dialog: confirmDialog } = useConfirmDialog();
+
+  const guardedClose = useCallback(async () => {
+    const draft = useOverlayStore.getState().settingsDrafts.provider;
+    if (draft && JSON.stringify(draft) !== JSON.stringify(EMPTY_PROVIDER_DRAFT)) {
+      const discard = await confirm({
+        title: t("settings.discardProviderDraftTitle"),
+        message: t("settings.discardProviderDraftMessage"),
+        confirmLabel: t("settings.discardDraft"),
+        cancelLabel: t("settings.keepEditing"),
+        tone: "danger",
+      });
+      if (!discard) return;
+      useOverlayStore.getState().setSettingsDrafts((prev) => ({
+        ...prev,
+        provider: null,
+      }));
+    }
+    requestClose();
+  }, [requestClose, confirm]);
 
   const reload = useCallback(async () => {
     setLoadingSettings(true);
@@ -274,18 +301,18 @@ export function SettingsPanel({
   // Close on Esc
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !document.querySelector("[data-anchored-popover='active']")) requestClose();
+      if (e.key === "Escape" && !document.querySelector("[data-anchored-popover='active']")) guardedClose();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [requestClose]);
+  }, [guardedClose]);
 
   // These pages need SettingsView; capability pages load their own data.
   const needsSettings = tab === "general" || tab === "models" || tab === "bots" || tab === "subagents" || tab === "network" || tab === "permissions" || tab === "sandbox" || tab === "appearance" || tab === "updates";
   const lazySettingsPageFallback = <div className="empty">{t("settings.loading")}</div>;
 
   return (
-    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) requestClose(); }}>
+    <div className="management-modal-backdrop settings-modal-backdrop" data-state={status} onMouseDown={(e) => { if (e.target === e.currentTarget) guardedClose(); }}>
       <div className="management-modal settings-modal" data-state={status}>
         <header className="management-modal__head settings-modal__head">
           <div className="management-modal__title settings-modal__title">{t("settings.title")}</div>
@@ -413,6 +440,7 @@ export function SettingsPanel({
           </main>
         </div>
       </div>
+      {confirmDialog}
     </div>
   );
 }
@@ -4773,11 +4801,12 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   const t = useT();
   const defaultProvider = toRef(s.defaultModel, s).split("/")[0];
   const [editing, setEditing] = useState<string | null>(null);
-  const [adding, setAdding] = useState<AddProviderMode>(null);
   const [revealedProvider, setRevealedProvider] = useState<string | null>(null);
   const [fetchingProvider, setFetchingProvider] = useState<string | null>(null);
   const [fetchResults, setFetchResults] = useState<Record<string, ProviderFetchResult>>({});
-  const [modelDrafts, setModelDrafts] = useState<Record<string, ProviderModelDraft>>({});
+  const modelDrafts = useOverlayStore((store) => store.settingsDrafts.providerModelDrafts);
+  const setSettingsDrafts = useOverlayStore((store) => store.setSettingsDrafts);
+  const adding = useOverlayStore((store) => store.settingsDrafts.addProviderMode);
   const visibleProviders = useMemo(() => s.providers.filter((p) => p.added || p.name === revealedProvider), [s.providers, revealedProvider]);
   const groups = useMemo(() => providerAccessGroups(visibleProviders, t), [visibleProviders, t]);
 
@@ -4798,12 +4827,20 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   };
 
   const setGroupModelDraft = (groupID: string, draft: ProviderModelDraft | null) => {
-    setModelDrafts((prev) => {
-      const next = { ...prev };
+    setSettingsDrafts((prev) => {
+      const next = { ...prev.providerModelDrafts };
       if (draft) next[groupID] = draft;
       else delete next[groupID];
-      return next;
+      return { ...prev, providerModelDrafts: next };
     });
+  };
+
+  const setAddProviderMode = (mode: AddProviderMode) => {
+    setSettingsDrafts((prev) => ({ ...prev, addProviderMode: mode }));
+  };
+
+  const clearProviderDraftInStore = () => {
+    setSettingsDrafts((prev) => ({ ...prev, provider: null }));
   };
 
   const modelDraftForFetch = (p: ProviderView, fetched: string[]): ProviderModelDraft => {
@@ -4823,31 +4860,37 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
   };
 
   const updateModelDraftSelection = (groupID: string, nextSelected: (draft: ProviderModelDraft) => string[]) => {
-    setModelDrafts((prev) => {
-      const draft = prev[groupID];
+    setSettingsDrafts((prev) => {
+      const draft = prev.providerModelDrafts[groupID];
       if (!draft) return prev;
       const selectedSet = new Set(nextSelected(draft));
       return {
         ...prev,
-        [groupID]: {
-          ...draft,
-          selected: draft.candidates.filter((model) => selectedSet.has(model)),
+        providerModelDrafts: {
+          ...prev.providerModelDrafts,
+          [groupID]: {
+            ...draft,
+            selected: draft.candidates.filter((model) => selectedSet.has(model)),
+          },
         },
       };
     });
   };
 
   const toggleModelDraftVision = (groupID: string, model: string) => {
-    setModelDrafts((prev) => {
-      const draft = prev[groupID];
+    setSettingsDrafts((prev) => {
+      const draft = prev.providerModelDrafts[groupID];
       if (!draft) return prev;
       return {
         ...prev,
-        [groupID]: {
-          ...draft,
-          visionModels: draft.visionModels.includes(model)
-            ? draft.visionModels.filter((candidate) => candidate !== model)
-            : draft.candidates.filter((candidate) => candidate === model || draft.visionModels.includes(candidate)),
+        providerModelDrafts: {
+          ...prev.providerModelDrafts,
+          [groupID]: {
+            ...draft,
+            visionModels: draft.visionModels.includes(model)
+              ? draft.visionModels.filter((candidate) => candidate !== model)
+              : draft.candidates.filter((candidate) => candidate === model || draft.visionModels.includes(candidate)),
+          },
         },
       };
     });
@@ -4989,7 +5032,7 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
       title={t("settings.providerAccess")}
       description={t("settings.providerAccessHint")}
       actions={
-        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAdding("official")}>
+        <button className="btn btn--small" disabled={busy || adding !== null} onClick={() => setAddProviderMode("official")}>
           {t("settings.addProvider")}
         </button>
       }
@@ -5000,10 +5043,10 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             <strong>{t("settings.providerAccessEmptyTitle")}</strong>
             <span>{t("settings.providerAccessEmptyHint")}</span>
             <div className="provider-empty__actions">
-              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAdding("official")}>
+              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAddProviderMode("official")}>
                 {t("settings.addProvider.officialChoice")}
               </button>
-              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAdding("custom")}>
+              <button type="button" className="btn btn--small" disabled={busy} onClick={() => setAddProviderMode("custom")}>
                 {t("settings.addProvider.customChoice")}
               </button>
             </div>
@@ -5015,17 +5058,17 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             kinds={s.providerKinds}
             providerPresets={s.providerPresets}
             busy={busy}
-            onMode={setAdding}
-            onCancel={() => setAdding(null)}
-            onAddOfficial={(kind, key) => apply(() => app.AddOfficialProviderAccess(kind, key)).then(() => setAdding(null))}
-            onAddPreset={(id, key) => apply(() => app.AddProviderPresetAccess(id, key)).then(() => setAdding(null))}
+            onMode={setAddProviderMode}
+            onCancel={() => { setAddProviderMode(null); clearProviderDraftInStore(); }}
+            onAddOfficial={(kind, key) => apply(() => app.AddOfficialProviderAccess(kind, key)).then(() => setAddProviderMode(null))}
+            onAddPreset={(id, key) => apply(() => app.AddProviderPresetAccess(id, key)).then(() => setAddProviderMode(null))}
             onViewPresetConflict={(providerName) => {
               setRevealedProvider(providerName);
               setEditing(providerName);
-              setAdding(null);
+              setAddProviderMode(null);
             }}
-            onResetPreset={(id) => apply(() => app.ResetProviderPresetAccess(id)).then(() => setAdding(null))}
-            onAddCustom={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then(() => setAdding(null))}
+            onResetPreset={(id) => apply(() => app.ResetProviderPresetAccess(id)).then(() => setAddProviderMode(null))}
+            onAddCustom={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then((ok) => { if (!ok) return; setAddProviderMode(null); clearProviderDraftInStore(); })}
           />
         )}
         {adding === null && groups.map((group) => (
@@ -5040,10 +5083,12 @@ function ProvidersSection({ s, busy, apply }: SectionProps) {
             editing={editing}
             kinds={s.providerKinds}
             onEdit={setEditing}
-            onCancelEdit={() => setEditing(null)}
-            onSave={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then(() => {
+            onCancelEdit={() => { setEditing(null); clearProviderDraftInStore(); }}
+            onSave={(pv, key) => apply(() => saveProvider(pv, key ?? "")).then((ok) => {
+              if (!ok) return;
               setEditing(null);
               setGroupModelDraft(group.id, null);
+              clearProviderDraftInStore();
             })}
             onRefresh={() => void refreshGroup(group)}
             onToggleDraftModel={(model) => updateModelDraftSelection(group.id, (draft) => (
@@ -5098,13 +5143,6 @@ type ProviderFetchResult = {
   text: string;
 };
 
-type ProviderModelDraft = {
-  providerName: string;
-  candidates: string[];
-  selected: string[];
-  visionModels: string[];
-  visionCapability: ProviderVisionCapability;
-};
 
 type AddProviderMode = null | "official" | "custom";
 type OfficialProviderKind = "deepseek";
@@ -6143,39 +6181,100 @@ export function ProviderEditor({
   onClearKey?: (apiKeyEnv: string) => Promise<void>;
 }) {
   const t = useT();
-  const [name, setName] = useState(initial?.name ?? "");
-  const [kind, setKind] = useState(initial?.kind ?? "openai");
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl ?? "");
-  const [chatUrl, setChatUrl] = useState(initial?.chatUrl ?? "");
-  const [fullChatUrl, setFullChatUrl] = useState(Boolean((initial?.chatUrl ?? "").trim()));
-  const [models, setModels] = useState((initial?.models ?? []).join(", "));
-  const [modelCandidates, setModelCandidates] = useState<string[]>(initial?.models ?? []);
-  const [visionModels, setVisionModels] = useState((initial?.visionModels ?? []).join(", "));
-  const [visionModelsConfigured, setVisionModelsConfigured] = useState(
-    Boolean(initial?.visionModelsConfigured ?? ((initial?.visionModels ?? []).length > 0)),
-  );
-  const [modelsUrl, setModelsUrl] = useState(initial?.modelsUrl ?? "");
-  const [apiKeyEnv, setApiKeyEnv] = useState(initial?.apiKeyEnv ?? "");
-  const [headersDraft, setHeadersDraft] = useState(formatProviderHeaders(initial?.headers));
-  const [extraBodyDraft, setExtraBodyDraft] = useState(formatProviderExtraBody(initial?.extraBody));
-  const [authHeader, setAuthHeader] = useState(Boolean(initial?.authHeader));
-  const [keyDraft, setKeyDraft] = useState("");
-  const [balanceUrl, setBalanceUrl] = useState(initial?.balanceUrl ?? "");
-  // Empty when unset so the placeholder (and its "0 = disabled" hint) reads instead
-  // of a bare "0"; saved back as 0.
-  const [ctx, setCtx] = useState(initial?.contextWindow ? String(initial.contextWindow) : "");
-  const [modelContextWindows, setModelContextWindows] = useState<Record<string, string>>(
-    () => providerModelContextWindowDrafts(initial?.modelOverrides),
-  );
-  const [reasoningProtocol, setReasoningProtocol] = useState(normalizeReasoningProtocol(initial?.reasoningProtocol));
-  const [thinking, setThinking] = useState(normalizeThinkingMode(initial?.thinking));
-  const [webSearch, setWebSearch] = useState(Boolean(initial?.webSearch));
+  const setSettingsDrafts = useOverlayStore((store) => store.setSettingsDrafts);
+  const storeProviderDraft = useOverlayStore((store) => store.settingsDrafts.provider);
+
+  // Build the initial draft from the store (if it matches) or from the initial prop.
+  const editingProviderName = initial?.name ?? null;
+  const resolvedDraft = storeProviderDraft?.editingProviderName === editingProviderName ? storeProviderDraft : null;
+
+  // Derive initial values: store draft takes precedence over initial prop.
+  const initName = resolvedDraft?.name ?? initial?.name ?? "";
+  const initKind = resolvedDraft?.kind ?? initial?.kind ?? "openai";
+  const initBaseUrl = resolvedDraft?.baseUrl ?? initial?.baseUrl ?? "";
+  const initChatUrl = resolvedDraft?.chatUrl ?? initial?.chatUrl ?? "";
+  const initFullChatUrl = resolvedDraft?.fullChatUrl ?? Boolean((initial?.chatUrl ?? "").trim());
+  const initModels = resolvedDraft?.modelCandidates !== undefined && resolvedDraft.modelCandidates.length > 0
+    ? resolvedDraft.modelCandidates.join(", ")
+    : (initial?.models ?? []).join(", ");
+  const initModelCandidates = resolvedDraft?.modelCandidates ?? initial?.models ?? [];
+  const initVisionModels = resolvedDraft?.visionModels ?? (initial?.visionModels ?? []).join(", ");
+  const initVisionModelsConfigured = resolvedDraft?.visionModelsConfigured
+    ?? Boolean(initial?.visionModelsConfigured ?? ((initial?.visionModels ?? []).length > 0));
+  const initModelsUrl = resolvedDraft?.modelsUrl ?? initial?.modelsUrl ?? "";
+  const initApiKeyEnv = resolvedDraft?.apiKeyEnv ?? initial?.apiKeyEnv ?? "";
+  const initHeadersDraft = resolvedDraft?.headersDraft ?? formatProviderHeaders(initial?.headers);
+  const initExtraBodyDraft = resolvedDraft?.extraBodyDraft ?? formatProviderExtraBody(initial?.extraBody);
+  const initAuthHeader = resolvedDraft?.authHeader ?? Boolean(initial?.authHeader);
+  const initKeyDraft = resolvedDraft?.keyDraft ?? "";
+  const initBalanceUrl = resolvedDraft?.balanceUrl ?? initial?.balanceUrl ?? "";
+  const initCtx = resolvedDraft?.contextWindow ?? (initial?.contextWindow ? String(initial.contextWindow) : "");
+  const initModelContextWindows = resolvedDraft?.modelContextWindows ?? providerModelContextWindowDrafts(initial?.modelOverrides);
+  const initReasoningProtocol = resolvedDraft?.reasoningProtocol
+    ? resolvedDraft.reasoningProtocol
+    : normalizeReasoningProtocol(initial?.reasoningProtocol);
+  const initThinking = resolvedDraft?.thinking ?? normalizeThinkingMode(initial?.thinking);
+  const initWebSearch = resolvedDraft?.webSearch ?? Boolean(initial?.webSearch);
+
+  const [name, setName] = useState(initName);
+  const [kind, setKind] = useState(initKind);
+  const [baseUrl, setBaseUrl] = useState(initBaseUrl);
+  const [chatUrl, setChatUrl] = useState(initChatUrl);
+  const [fullChatUrl, setFullChatUrl] = useState(initFullChatUrl);
+  const [models, setModels] = useState(initModels);
+  const [modelCandidates, setModelCandidates] = useState<string[]>(initModelCandidates);
+  const [visionModels, setVisionModels] = useState(initVisionModels);
+  const [visionModelsConfigured, setVisionModelsConfigured] = useState(initVisionModelsConfigured);
+  const [modelsUrl, setModelsUrl] = useState(initModelsUrl);
+  const [apiKeyEnv, setApiKeyEnv] = useState(initApiKeyEnv);
+  const [headersDraft, setHeadersDraft] = useState(initHeadersDraft);
+  const [extraBodyDraft, setExtraBodyDraft] = useState(initExtraBodyDraft);
+  const [authHeader, setAuthHeader] = useState(initAuthHeader);
+  const [keyDraft, setKeyDraft] = useState(initKeyDraft);
+  const [balanceUrl, setBalanceUrl] = useState(initBalanceUrl);
+  const [ctx, setCtx] = useState(initCtx);
+  const [modelContextWindows, setModelContextWindows] = useState<Record<string, string>>(initModelContextWindows);
+  const [reasoningProtocol, setReasoningProtocol] = useState(initReasoningProtocol);
+  const [thinking, setThinking] = useState(initThinking);
+  const [webSearch, setWebSearch] = useState(initWebSearch);
   const [supportedEfforts] = useState<string[]>(initial?.supportedEfforts ?? []);
   const [defaultEffort] = useState(initial?.defaultEffort ?? "");
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchStatus, setFetchStatus] = useState<string | null>(null);
   const [fetchFallback, setFetchFallback] = useState<string | null>(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+
+  // Sync every field to the Zustand store so the draft survives panel unmount.
+  useEffect(() => {
+    setSettingsDrafts((prev) => ({
+      ...prev,
+      provider: {
+        name,
+        kind,
+        baseUrl,
+        chatUrl,
+        fullChatUrl,
+        models,
+        modelCandidates,
+        visionModels,
+        visionModelsConfigured,
+        modelsUrl,
+        apiKeyEnv,
+        keyDraft,
+        balanceUrl,
+        contextWindow: ctx,
+        headersDraft,
+        extraBodyDraft,
+        authHeader,
+        modelContextWindows,
+        reasoningProtocol,
+        thinking,
+        webSearch,
+        editingProviderName,
+      },
+    }));
+  }, [setSettingsDrafts, name, kind, baseUrl, chatUrl, fullChatUrl, models, modelCandidates, visionModels, visionModelsConfigured, modelsUrl, apiKeyEnv, keyDraft, balanceUrl, ctx, headersDraft, extraBodyDraft, authHeader, modelContextWindows, reasoningProtocol, thinking, webSearch, editingProviderName]);
+
   const builtIn = initial?.builtIn ?? false;
   const isNewCustomProvider = !initial;
   const providerKindChoices = useMemo(() => {
@@ -6321,6 +6420,9 @@ export function ProviderEditor({
     };
     try {
       await onSave(provider, keyDraft.trim() || undefined);
+      // Draft clearing is the caller's responsibility — onSave wraps apply()
+      // which swallows errors, so we can't distinguish success here. Callers
+      // clear the draft in their .then() chain which only fires on success.
     } catch (e) {
       setFetchFallback(String((e as Error)?.message ?? e));
     }
