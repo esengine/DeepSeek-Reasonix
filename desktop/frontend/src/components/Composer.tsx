@@ -1808,15 +1808,26 @@ export function Composer({
       return;
     }
     if (enhancing) return;
+    // 绑定发起增强时的 draft（独立绑定）：await 期间用户可能切到其他窗口，
+    // 结果必须写回发起窗口的输入框，而非"当前激活"的输入框（否则串窗口）。
+    const originDraftKey = activeDraftKeyRef.current;
     setEnhancing(true);
     try {
       // 传入当前 tabId：增强按发起请求的 tab 的模型执行，
       // 切换窗口后不会用错模型/错位。
       const enhanced = await app.EnhancePrompt(current, tabId);
       if (enhanced && enhanced.trim()) {
-        setEnhancedOriginal(textRef.current); // 记住增强前文本，供退回
-        setEnhancedResult(enhanced.trim());   // 记录增强结果，供二次增强判断
-        replaceComposerText(enhanced.trim());
+        setEnhancedOriginal(current);       // 记住增强前文本（发起时的），供退回
+        setEnhancedResult(enhanced.trim()); // 记录增强结果，供二次增强判断
+        if (activeDraftKeyRef.current === originDraftKey) {
+          replaceComposerText(enhanced.trim());
+        } else {
+          // 用户已切到其他窗口：把增强结果写回发起 tab 的 draft，
+          // 切回该窗口时输入框可见（不污染当前窗口）。
+          const draft = cloneComposerDraft(draftsBySessionRef.current[originDraftKey] ?? emptyComposerDraft());
+          draft.text = enhanced.trim();
+          draftsBySessionRef.current[originDraftKey] = draft;
+        }
         showToast(t("composer.enhanceDone"), "info");
       }
     } catch (error) {
