@@ -3851,20 +3851,21 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 	sink := a.desktopControllerSink(buildSink, cfg.Notifications)
 
 	ctrl, err := boot.Build(buildCtx, boot.Options{
-		Model:                    model,
-		RequireKey:               false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     sink,
-		WorkspaceRoot:            root,
-		SessionDir:               sessionDir,
-		EffortOverride:           cloneStringPtr(buildEffort),
-		TokenMode:                buildTokenMode,
-		SharedHost:               sharedHost,
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		Model:                     model,
+		RequireKey:                false,
+		AutoPricingCurrency:       a.desktopAutoPricingCurrency(),
+		StatsSource:               "desktop",
+		Sink:                      sink,
+		WorkspaceRoot:             root,
+		SessionDir:                sessionDir,
+		EffortOverride:            cloneStringPtr(buildEffort),
+		TokenMode:                 buildTokenMode,
+		SharedHost:                sharedHost,
+		CleanupPendingReconciler:  reconcileDesktopCleanupPending,
+		SubagentParentLive:        a.subagentParentProbeForBuild(tab),
+		SubagentCleanupSerialized: a.serializedSubagentCleanup,
+		SessionRecoveryMeta:       a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:        a.handleTabSessionRecovered(tab),
 	})
 	if err != nil {
 		leaseHeld := false

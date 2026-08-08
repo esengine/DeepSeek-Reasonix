@@ -3,8 +3,8 @@
     "banner": 0,
     "commented-code": 0,
     "complexity": 2056,
-    "essay": 4028,
-    "file-size": 108286,
+    "essay": 4034,
+    "file-size": 108319,
     "function-size": 9127,
     "layering": 1,
     "marker": 0,
@@ -27,9 +27,9 @@
     },
     "desktop/app.go": {
       "complexity": 64,
-      "essay": 90,
-      "file-size": 11538,
-      "function-size": 361
+      "essay": 95,
+      "file-size": 11577,
+      "function-size": 365
     },
     "desktop/app_autosave_test.go": {
       "essay": 1
@@ -257,7 +257,7 @@
     "desktop/settings_app.go": {
       "complexity": 25,
       "essay": 28,
-      "file-size": 3012,
+      "file-size": 3013,
       "function-size": 50
     },
     "desktop/settings_app_test.go": {
@@ -267,7 +267,7 @@
       "essay": 1
     },
     "desktop/startup_lease_contention_test.go": {
-      "essay": 3
+      "essay": 6
     },
     "desktop/subagents_app.go": {
       "essay": 33
@@ -282,8 +282,8 @@
     "desktop/tabs.go": {
       "complexity": 71,
       "essay": 123,
-      "file-size": 8804,
-      "function-size": 620
+      "file-size": 8805,
+      "function-size": 621
     },
     "desktop/tabs_order_test.go": {
       "test-file-size": 395
@@ -638,8 +638,8 @@
     },
     "internal/boot/boot.go": {
       "complexity": 287,
-      "essay": 102,
-      "file-size": 2204,
+      "essay": 105,
+      "file-size": 2221,
       "function-size": 1818,
       "narrative": 3
     },

@@ -1,6 +1,7 @@
 package boot
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -48,13 +49,13 @@ func TestNewSubagentStoreCleansStaleRunningOnEveryBuild(t *testing.T) {
 	sessionDir := t.TempDir()
 
 	firstRef := prepareRunningSubagent(t, sessionDir)
-	if _, err := newSubagentStore(sessionDir, nil); err != nil {
+	if _, err := newSubagentStore(sessionDir, nil, nil); err != nil {
 		t.Fatalf("newSubagentStore (first): %v", err)
 	}
 	requireSubagentStatus(t, sessionDir, firstRef, agent.SubagentInterrupted)
 
 	secondRef := prepareRunningSubagent(t, sessionDir)
-	if _, err := newSubagentStore(sessionDir, nil); err != nil {
+	if _, err := newSubagentStore(sessionDir, nil, nil); err != nil {
 		t.Fatalf("newSubagentStore (second): %v", err)
 	}
 	requireSubagentStatus(t, sessionDir, secondRef, agent.SubagentInterrupted)
@@ -67,12 +68,12 @@ func TestNewSubagentStoreParentProbeDefersThenRecovers(t *testing.T) {
 
 	if _, err := newSubagentStore(sessionDir, func(path string) bool {
 		return filepath.Clean(path) == filepath.Clean(parentPath)
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("newSubagentStore (live parent): %v", err)
 	}
 	requireSubagentStatus(t, sessionDir, ref, agent.SubagentRunning)
 
-	if _, err := newSubagentStore(sessionDir, func(string) bool { return false }); err != nil {
+	if _, err := newSubagentStore(sessionDir, func(string) bool { return false }, nil); err != nil {
 		t.Fatalf("newSubagentStore (dead parent): %v", err)
 	}
 	requireSubagentStatus(t, sessionDir, ref, agent.SubagentInterrupted)
@@ -85,8 +86,54 @@ func TestNewSubagentStoreNeverCachesCleanupError(t *testing.T) {
 	}
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		if _, err := newSubagentStore(sessionDir, nil); err == nil {
+		if _, err := newSubagentStore(sessionDir, nil, nil); err == nil {
 			t.Fatalf("newSubagentStore attempt %d unexpectedly succeeded", attempt)
 		}
+	}
+}
+
+func TestNewSubagentStoreRunsCleanupInsideSerializedCoordinator(t *testing.T) {
+	sessionDir := t.TempDir()
+	ref := prepareRunningSubagent(t, sessionDir)
+
+	inside := false
+	coordinated := false
+	coordinator := func(fn func() error) error {
+		coordinated = true
+		// The coordinator must be the only lease-active region while cleanup
+		// runs: verify cleanup is invoked (and can re-enter) inside it.
+		inside = true
+		err := fn()
+		inside = false
+		return err
+	}
+	store, err := newSubagentStore(sessionDir, nil, coordinator)
+	if err != nil {
+		t.Fatalf("newSubagentStore (serialized): %v", err)
+	}
+	if store == nil {
+		t.Fatal("newSubagentStore returned nil store")
+	}
+	if !coordinated {
+		t.Fatal("serialized coordinator was not invoked")
+	}
+	if inside {
+		t.Fatal("cleanup did not finish before the coordinator returned")
+	}
+	requireSubagentStatus(t, sessionDir, ref, agent.SubagentInterrupted)
+}
+
+func TestNewSubagentStoreSerializedCoordinatorErrorPropagates(t *testing.T) {
+	sessionDir := t.TempDir()
+	prepareRunningSubagent(t, sessionDir)
+	coordErr := errors.New("coordinator refused")
+	_, err := newSubagentStore(sessionDir, nil, func(fn func() error) error {
+		return coordErr
+	})
+	if err == nil {
+		t.Fatal("newSubagentStore unexpectedly succeeded despite coordinator error")
+	}
+	if !errors.Is(err, coordErr) {
+		t.Fatalf("coordinator error not propagated: %v", err)
 	}
 }

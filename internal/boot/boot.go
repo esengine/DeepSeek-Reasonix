@@ -171,6 +171,13 @@ type Options struct {
 	// building the parent session. Desktop uses it to avoid probing a live tab's
 	// lease during stale-subagent cleanup. Nil preserves lease-only cleanup.
 	SubagentParentLive func(sessionPath string) bool
+	// SubagentCleanupSerialized runs the stale-subagent cleanup pass while
+	// holding the caller's coordination lock. Desktop passes a process-local
+	// mutex it also holds around its own session-lease binds, so cleanup's
+	// transient parent-session lease probes can never race a concurrent tab
+	// build's startup bind (spurious "already open in another Reasonix window"
+	// errors, #7399/#7627). Nil runs cleanup without coordination.
+	SubagentCleanupSerialized func(fn func() error) error
 	// FileOverlay and TerminalRunner let a host transport (ACP) serve file
 	// content from editor buffers and run foreground bash in a host terminal.
 	// Both only change where tool I/O happens — tool names, descriptions, and
@@ -904,7 +911,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 
 	maxSteps := max(opts.MaxSteps, 0)
-	subagentStore, err := newSubagentStore(sessionDir, opts.SubagentParentLive)
+	subagentStore, err := newSubagentStore(sessionDir, opts.SubagentParentLive, opts.SubagentCleanupSerialized)
 	if err != nil {
 		return nil, err
 	}
@@ -2510,13 +2517,23 @@ func isGitMarker(path string) bool {
 	return err == nil && (fi.IsDir() || fi.Mode().IsRegular())
 }
 
-func newSubagentStore(sessionDir string, parentLive func(sessionPath string) bool) (*agent.SubagentStore, error) {
+func newSubagentStore(sessionDir string, parentLive func(sessionPath string) bool, serialized func(fn func() error) error) (*agent.SubagentStore, error) {
 	sessionDir = strings.TrimSpace(sessionDir)
 	if sessionDir == "" {
 		return nil, nil
 	}
 	store := agent.NewSubagentStore(filepath.Join(sessionDir, "subagents")).WithParentSessionProbe(parentLive)
-	if _, err := store.CleanupStaleRunning(); err != nil {
+	cleanup := func() error {
+		_, err := store.CleanupStaleRunning()
+		return err
+	}
+	if serialized != nil {
+		if err := serialized(cleanup); err != nil {
+			return nil, fmt.Errorf("cleanup stale subagents: %w", err)
+		}
+		return store, nil
+	}
+	if err := cleanup(); err != nil {
 		return nil, fmt.Errorf("cleanup stale subagents: %w", err)
 	}
 	return store, nil

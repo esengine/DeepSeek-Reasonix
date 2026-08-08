@@ -167,6 +167,18 @@ type App struct {
 	// another navigation is still activating.
 	singleSurfaceMu sync.Mutex
 
+	// sessionLeaseCoordinationMu serializes session-lease binds against the
+	// stale-subagent cleanup pass that runs inside every controller build
+	// (boot.Build → CleanupStaleRunning). That cleanup briefly probes each
+	// stale subagent's parent-session lease while rewriting metadata; without
+	// this lock a parallel tab build could hit the transient holder and
+	// surface a spurious "already open in another Reasonix window" error
+	// (#7399, #7627). Lock order: sessionLeaseCoordinationMu → a.mu/tab locks
+	// → agent lease internals; nothing held here is acquired while waiting on
+	// it, so there is no cycle. Cross-process holders (CLI, serve) remain
+	// covered by withSessionLeaseContentionRetry.
+	sessionLeaseCoordinationMu sync.Mutex
+
 	// sessionRemovalMu serializes operations that remove visible or detached
 	// session bindings. Those operations may snapshot controllers before
 	// deletion; keep that snapshot outside a.mu, but do not let DeleteSession or
@@ -2398,20 +2410,21 @@ func (a *App) clearActiveSessionRuntime(tab *WorkspaceTab, oldCtrl control.Sessi
 	newSink := &tabEventSink{tabID: tab.ID, app: a, ctx: a.ctx}
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
-		Model:                    snap.model,
-		RequireKey:               false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     newSink,
-		WorkspaceRoot:            snap.workspaceRoot,
-		SessionDir:               sessionDirForSnapshot(snap),
-		EffortOverride:           cloneStringPtr(snap.effort),
-		TokenMode:                snap.currentTokenMode(),
-		SharedHost:               sharedHost,
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		Model:                     snap.model,
+		RequireKey:                false,
+		AutoPricingCurrency:       a.desktopAutoPricingCurrency(),
+		StatsSource:               "desktop",
+		Sink:                      newSink,
+		WorkspaceRoot:             snap.workspaceRoot,
+		SessionDir:                sessionDirForSnapshot(snap),
+		EffortOverride:            cloneStringPtr(snap.effort),
+		TokenMode:                 snap.currentTokenMode(),
+		SharedHost:                sharedHost,
+		CleanupPendingReconciler:  reconcileDesktopCleanupPending,
+		SubagentParentLive:        a.subagentParentProbeForBuild(tab),
+		SubagentCleanupSerialized: a.serializedSubagentCleanup,
+		SessionRecoveryMeta:       a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:        a.handleTabSessionRecovered(tab),
 	})
 	if err != nil {
 		if teardownTimedOut {
@@ -4612,20 +4625,21 @@ func (a *App) buildSessionRebindCandidate(
 		ownsSharedHostRef = true
 	}
 	ctrl, err := boot.Build(a.bootContext(), boot.Options{
-		Model:                    model,
-		RequireKey:               false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     a.desktopControllerSink(sink, cfg.Notifications),
-		WorkspaceRoot:            root,
-		SessionDir:               sessionDir,
-		EffortOverride:           cloneStringPtr(source.effort),
-		TokenMode:                runtimeProfile.tokenMode,
-		SharedHost:               sharedHost,
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		Model:                     model,
+		RequireKey:                false,
+		AutoPricingCurrency:       a.desktopAutoPricingCurrency(),
+		StatsSource:               "desktop",
+		Sink:                      a.desktopControllerSink(sink, cfg.Notifications),
+		WorkspaceRoot:             root,
+		SessionDir:                sessionDir,
+		EffortOverride:            cloneStringPtr(source.effort),
+		TokenMode:                 runtimeProfile.tokenMode,
+		SharedHost:                sharedHost,
+		CleanupPendingReconciler:  reconcileDesktopCleanupPending,
+		SubagentParentLive:        a.subagentParentProbeForBuild(tab),
+		SubagentCleanupSerialized: a.serializedSubagentCleanup,
+		SessionRecoveryMeta:       a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:        a.handleTabSessionRecovered(tab),
 	})
 	if err != nil {
 		sink.clearContext()
@@ -4660,18 +4674,20 @@ func (a *App) buildSessionRebindCandidate(
 
 func (a *App) acquireCandidateSessionLease(tab *WorkspaceTab, path string) (*agent.SessionLease, error) {
 	lease, err := withSessionLeaseContentionRetry(func() (*agent.SessionLease, error) {
-		lease, err := agent.TryAcquireSessionLease(path)
-		if err == nil {
-			return lease, nil
-		}
-		if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
-			if reclaimed, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
-				return reclaimed, nil
-			} else {
-				err = reclaimErr
+		return withSessionLeaseCoordination(a, func() (*agent.SessionLease, error) {
+			lease, err := agent.TryAcquireSessionLease(path)
+			if err == nil {
+				return lease, nil
 			}
-		}
-		return nil, err
+			if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
+				if reclaimed, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
+					return reclaimed, nil
+				} else {
+					err = reclaimErr
+				}
+			}
+			return nil, err
+		})
 	})
 	if err != nil {
 		return nil, userFacingSessionLeaseError("", err)
@@ -9836,21 +9852,19 @@ func sessionPathAfterSnapshot(ctrl control.SessionAPI, fallback string) string {
 var (
 	// sessionLeaseContentionRetryInterval and sessionLeaseContentionRetryAttempts
 	// bound the retry window for startup session-lease binds that hit a
-	// transient in-process holder. CleanupStaleRunning probes a running
-	// sub-agent's parent session lease inside every controller build, holding
-	// it only for the duration of a metadata rewrite (sub-millisecond); a
-	// concurrent tab build that races that probe must not surface a spurious
-	// "already open in another Reasonix window" error for a lease that is
-	// genuinely free once the probe releases it. A lease held by another
-	// window or process stays held for its whole lifetime, so the bounded
-	// retry still fails fast there.
-	sessionLeaseContentionRetryInterval = 50 * time.Millisecond
-	sessionLeaseContentionRetryAttempts = 2
+	// transient holder. In-process holders (the stale-subagent cleanup probe)
+	// are already serialized away by sessionLeaseCoordinationMu, so this retry
+	// is the defense for cross-process transient holders — another process's
+	// (CLI/serve) cleanup pass briefly probing the same session directory.
+	// A lease genuinely held by another window or process stays held for its
+	// whole lifetime, so the bounded retry still fails fast there.
+	sessionLeaseContentionRetryInterval = 100 * time.Millisecond
+	sessionLeaseContentionRetryAttempts = 10
 )
 
 // withSessionLeaseContentionRetry retries acquire while it fails with
-// agent.ErrSessionLeaseHeld, absorbing sub-second contention windows created
-// by transient in-process lease probes. Any other error is returned
+// agent.ErrSessionLeaseHeld, absorbing transient contention windows created
+// by short-lived lease probes in other processes. Any other error is returned
 // immediately, and a lease that remains held after the bounded retries is
 // reported as-is.
 func withSessionLeaseContentionRetry[T any](acquire func() (T, error)) (T, error) {
@@ -9867,24 +9881,46 @@ func withSessionLeaseContentionRetry[T any](acquire func() (T, error)) (T, error
 	}
 }
 
+// withSessionLeaseCoordination runs fn while holding the process-local
+// session-lease coordination lock, so the acquire cannot interleave with the
+// stale-subagent cleanup pass of a concurrent controller build (which probes
+// the same lease files). See sessionLeaseCoordinationMu.
+func withSessionLeaseCoordination[T any](a *App, fn func() (T, error)) (T, error) {
+	a.sessionLeaseCoordinationMu.Lock()
+	defer a.sessionLeaseCoordinationMu.Unlock()
+	return fn()
+}
+
+// serializedSubagentCleanup runs the stale-subagent cleanup pass while
+// holding the session-lease coordination lock. boot.Build invokes it through
+// Options.SubagentCleanupSerialized so cleanup's parent-session lease probes
+// can never race this process's own session-lease binds.
+func (a *App) serializedSubagentCleanup(fn func() error) error {
+	a.sessionLeaseCoordinationMu.Lock()
+	defer a.sessionLeaseCoordinationMu.Unlock()
+	return fn()
+}
+
 func (a *App) ensureTabSessionLeaseForRebuild(tab *WorkspaceTab, path, setting string) error {
 	transition, reserveErr := a.reserveSessionRuntimePath(tab, path)
 	if reserveErr != nil {
 		return userFacingSessionLeaseError(setting, reserveErr)
 	}
 	if _, err := withSessionLeaseContentionRetry(func() (struct{}, error) {
-		if err := tab.ensureSessionLease(path); err != nil {
-			if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
-				if lease, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
-					tab.adoptSessionLease(lease)
-					return struct{}{}, nil
-				} else {
-					err = reclaimErr
+		return withSessionLeaseCoordination(a, func() (struct{}, error) {
+			if err := tab.ensureSessionLease(path); err != nil {
+				if a.canReclaimCurrentProcessSessionLease(tab, path, err) {
+					if lease, reclaimErr := agent.TryReclaimCurrentProcessSessionLease(path); reclaimErr == nil {
+						tab.adoptSessionLease(lease)
+						return struct{}{}, nil
+					} else {
+						err = reclaimErr
+					}
 				}
+				return struct{}{}, err
 			}
-			return struct{}{}, err
-		}
-		return struct{}{}, nil
+			return struct{}{}, nil
+		})
 	}); err != nil {
 		a.rollbackSessionRuntimePath(transition)
 		return userFacingSessionLeaseError(setting, err)
@@ -10126,20 +10162,21 @@ func (a *App) SetModelForTab(tabID, name string) (retErr error) {
 
 	stageStarted = time.Now()
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
-		Model:                    name,
-		RequireKey:               false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     snap.sink,
-		WorkspaceRoot:            snap.workspaceRoot,
-		SessionDir:               sessionDirForSnapshot(snap),
-		EffortOverride:           cloneStringPtr(effortOverride),
-		TokenMode:                runtime.tokenMode,
-		SharedHost:               sharedHost,
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		Model:                     name,
+		RequireKey:                false,
+		AutoPricingCurrency:       a.desktopAutoPricingCurrency(),
+		StatsSource:               "desktop",
+		Sink:                      snap.sink,
+		WorkspaceRoot:             snap.workspaceRoot,
+		SessionDir:                sessionDirForSnapshot(snap),
+		EffortOverride:            cloneStringPtr(effortOverride),
+		TokenMode:                 runtime.tokenMode,
+		SharedHost:                sharedHost,
+		CleanupPendingReconciler:  reconcileDesktopCleanupPending,
+		SubagentParentLive:        a.subagentParentProbeForBuild(tab),
+		SubagentCleanupSerialized: a.serializedSubagentCleanup,
+		SessionRecoveryMeta:       a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:        a.handleTabSessionRecovered(tab),
 		// Same logical session: keep the private temporary directory across
 		// model switches (Issue #7575).
 		SessionTemp: sessionTempFromController(oldCtrl),
@@ -10309,20 +10346,21 @@ func (a *App) SetEffortForTab(tabID, level string) error {
 	}
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
-		Model:                    modelRef,
-		RequireKey:               false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     snap.sink,
-		WorkspaceRoot:            snap.workspaceRoot,
-		SessionDir:               sessionDirForSnapshot(snap),
-		EffortOverride:           &effort,
-		TokenMode:                runtime.tokenMode,
-		SharedHost:               sharedHost,
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		Model:                     modelRef,
+		RequireKey:                false,
+		AutoPricingCurrency:       a.desktopAutoPricingCurrency(),
+		StatsSource:               "desktop",
+		Sink:                      snap.sink,
+		WorkspaceRoot:             snap.workspaceRoot,
+		SessionDir:                sessionDirForSnapshot(snap),
+		EffortOverride:            &effort,
+		TokenMode:                 runtime.tokenMode,
+		SharedHost:                sharedHost,
+		CleanupPendingReconciler:  reconcileDesktopCleanupPending,
+		SubagentParentLive:        a.subagentParentProbeForBuild(tab),
+		SubagentCleanupSerialized: a.serializedSubagentCleanup,
+		SessionRecoveryMeta:       a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:        a.handleTabSessionRecovered(tab),
 		// Same logical session: keep the private temporary directory across
 		// effort switches (Issue #7575).
 		SessionTemp: sessionTempFromController(oldCtrl),
@@ -10449,20 +10487,21 @@ func (a *App) SetTokenModeForTab(tabID, mode string) error {
 	}
 	sharedHost := a.lookupSharedHost(snap.sharedHostKey)
 	newCtrl, err := boot.Build(a.bootContext(), boot.Options{
-		Model:                    modelRef,
-		RequireKey:               false,
-		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
-		StatsSource:              "desktop",
-		Sink:                     snap.sink,
-		WorkspaceRoot:            snap.workspaceRoot,
-		SessionDir:               sessionDirForSnapshot(snap),
-		EffortOverride:           cloneStringPtr(snap.effort),
-		TokenMode:                mode,
-		SharedHost:               sharedHost,
-		CleanupPendingReconciler: reconcileDesktopCleanupPending,
-		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
-		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
+		Model:                     modelRef,
+		RequireKey:                false,
+		AutoPricingCurrency:       a.desktopAutoPricingCurrency(),
+		StatsSource:               "desktop",
+		Sink:                      snap.sink,
+		WorkspaceRoot:             snap.workspaceRoot,
+		SessionDir:                sessionDirForSnapshot(snap),
+		EffortOverride:            cloneStringPtr(snap.effort),
+		TokenMode:                 mode,
+		SharedHost:                sharedHost,
+		CleanupPendingReconciler:  reconcileDesktopCleanupPending,
+		SubagentParentLive:        a.subagentParentProbeForBuild(tab),
+		SubagentCleanupSerialized: a.serializedSubagentCleanup,
+		SessionRecoveryMeta:       a.tabSessionRecoveryMeta(tab),
+		OnSessionRecovered:        a.handleTabSessionRecovered(tab),
 		// Same logical session: keep the private temporary directory across
 		// token-mode switches (Issue #7575).
 		SessionTemp: sessionTempFromController(oldCtrl),

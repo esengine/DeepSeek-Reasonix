@@ -79,3 +79,82 @@ func TestEnsureTabSessionLeaseForRebuildSurvivesTransientHolder(t *testing.T) {
 		t.Fatalf("tab lease key = %q, want %q", key, sessionRuntimeKey(path))
 	}
 }
+
+// TestEnsureTabSessionLeaseForRebuildWaitsForSerializedCleanup verifies the
+// session-lease coordination lock: while a stale-subagent cleanup pass holds
+// the coordination lock and the parent-session lease for longer than the
+// startup retry budget (multi-parent cleanup on slow Windows storage), a
+// concurrent startup bind must wait for cleanup to finish instead of
+// surfacing a spurious "already open in another Reasonix window" error
+// (#7627). Without the coordination lock this test fails: the bind exhausts
+// withSessionLeaseContentionRetry while the probe is still holding.
+func TestEnsureTabSessionLeaseForRebuildWaitsForSerializedCleanup(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir sessions: %v", err)
+	}
+	path := filepath.Join(dir, "coordinated-session.jsonl")
+	key := sessionRuntimeKey(path)
+
+	tab := &WorkspaceTab{ID: "tab", Scope: "global", Ready: true, SessionPath: path}
+	app := &App{
+		tabs:     map[string]*WorkspaceTab{tab.ID: tab},
+		tabOrder: []string{tab.ID},
+	}
+	t.Cleanup(tab.releaseSessionLease)
+
+	// Simulate a stale-subagent cleanup pass holding the parent-session lease
+	// (and the coordination lock) longer than the startup retry window.
+	cleanupHeld := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	cleanupDone := make(chan struct{})
+	go func() {
+		defer close(cleanupDone)
+		err := app.serializedSubagentCleanup(func() error {
+			lease, err := agent.TryAcquireSessionLease(key)
+			if err != nil {
+				t.Errorf("cleanup probe lease acquire: %v", err)
+				return err
+			}
+			defer lease.Release()
+			close(cleanupHeld)
+			<-releaseCleanup
+			return nil
+		})
+		if err != nil {
+			t.Errorf("serialized cleanup: %v", err)
+		}
+	}()
+
+	<-cleanupHeld // cleanup now holds the coordination lock and the OS lease
+
+	bindErr := make(chan error, 1)
+	go func() {
+		bindErr <- app.ensureTabSessionLeaseForRebuild(tab, path, "")
+	}()
+
+	// The bind must be waiting on the coordination lock. Give it more than
+	// the full retry budget so a missing lock would already have failed.
+	select {
+	case err := <-bindErr:
+		t.Fatalf("bind failed or completed while cleanup held the lease: %v", err)
+	case <-time.After(sessionLeaseContentionRetryInterval*time.Duration(sessionLeaseContentionRetryAttempts) + 300*time.Millisecond):
+	}
+
+	close(releaseCleanup)
+	<-cleanupDone
+
+	select {
+	case err := <-bindErr:
+		if err != nil {
+			t.Fatalf("startup bind failed after cleanup released: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup bind did not complete after cleanup released")
+	}
+
+	if key := tab.sessionLeaseRuntimeKey(); key != sessionRuntimeKey(path) {
+		t.Fatalf("tab lease key = %q, want %q", key, sessionRuntimeKey(path))
+	}
+}
