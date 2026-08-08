@@ -38,7 +38,9 @@ func (o okTool) Execute(context.Context, json.RawMessage) (string, error) { retu
 func noticeRecorder() (event.Sink, *[]string) {
 	var notices []string
 	sink := event.FuncSink(func(e event.Event) {
-		if e.Kind == event.Notice {
+		// Storm tests assert on the storm breaker's own notices; the adaptive
+		// progress guard has its own code and cadence (progress_guard_test.go).
+		if e.Kind == event.Notice && e.Code == event.NoticeCodeLoopGuard {
 			notices = append(notices, e.Text)
 		}
 	})

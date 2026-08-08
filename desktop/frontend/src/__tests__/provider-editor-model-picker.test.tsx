@@ -165,6 +165,7 @@ try {
 
 ok(!editorThrew, "provider editor can switch from built-in to custom without changing hook order");
 ok(rootEl.textContent?.includes("OpenAI-compatible") === true, "provider editor renders the custom provider fields after the switch");
+ok(rootEl.textContent?.includes("Kimi K3 reasoning (low / high / max)") === true, "custom provider editor exposes the explicit Kimi K3 reasoning protocol");
 
 await act(async () => {
   root.render(<div />);

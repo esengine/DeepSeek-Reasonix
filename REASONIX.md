@@ -24,6 +24,10 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
   risk (e.g. semantic-intent caching via embedding clustering) unless the user
   explicitly asks. "宁可 miss 不可错" — a wrong cached result is a bug, a miss
   is only a slower call.
+- Performance features land with an effect test at their final boundary
+  (`internal/boot/effect_test.go` pattern): assert what actually reaches the
+  provider request, frontend sink, or trajectory through the real `boot.Build`
+  assembly. Component correctness is not system effectiveness.
 
 ## Comments
 

@@ -159,3 +159,10 @@ func (c *coalescer) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
 	c.drainAndUnlock()
 	RecordProtocolRecovery(c.inner, a)
 }
+
+func (c *coalescer) RecordContractShadow(a ContractShadowAudit) {
+	c.mu.Lock()
+	c.enqueueFlushLocked()
+	c.drainAndUnlock()
+	RecordContractShadow(c.inner, a)
+}

@@ -2633,6 +2633,7 @@ export const en = {
 	  "settings.reasoningProtocol.auto": "Auto-detect (recommended)",
 	  "settings.reasoningProtocol.deepseek": "DeepSeek thinking (thinking + depth)",
 	  "settings.reasoningProtocol.glm": "GLM thinking (enabled / disabled)",
+	  "settings.reasoningProtocol.kimiK3": "Kimi K3 reasoning (low / high / max)",
 	  "settings.reasoningProtocol.openai": "OpenAI reasoning (reasoning_effort)",
 	  "settings.reasoningProtocol.none": "Plain chat (no reasoning fields)",
 	  "settings.reasoningProtocolHint": "Auto-detect is best for most gateways. Switch only when a proxy is incompatible or the model documentation requires a specific reasoning shape.",

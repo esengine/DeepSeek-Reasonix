@@ -5,6 +5,7 @@
 // response preview / notices), including the terminal phase visuals.
 
 import { JSDOM } from "jsdom";
+import { registerHooks } from "node:module";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -12,6 +13,15 @@ import gsap from "gsap";
 import { ToolCard } from "../components/ToolCard";
 import { LocaleProvider } from "../lib/i18n";
 import type { Item, SubagentProgress } from "../lib/useController";
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.endsWith(".css")) {
+      return nextResolve("./asset-stub-for-tests.ts", { ...context, parentURL: import.meta.url });
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -94,7 +104,7 @@ function makeItem(phase: SubagentProgress["phase"], over: Partial<SubagentProgre
     status: phase === "completed" || phase === "failed" ? "done" : phase === "cancelled" ? "stopped" : "running",
     subagentProgress: {
       phase,
-      reasoning: "thinking step by step",
+      reasoning: "**thinking** step by step\n\n- inspect\n- verify",
       text: "draft answer preview",
       notice: "heads up",
       lastActivityAt: now - 3_000,
@@ -131,6 +141,7 @@ console.log("\nsubagent progress card");
   // Expanded body shows reasoning / response / notices without ordinary output.
   const head = document.querySelector(".tool__head") as HTMLButtonElement | null;
   ok(!!head, "card head renders");
+  ok(!document.querySelector(".tool__subagent-preview-text .md"), "collapsed reasoning preview skips Markdown rendering");
   await act(async () => {
     head?.click();
     await flushTimers();
@@ -138,6 +149,8 @@ console.log("\nsubagent progress card");
   ok(!!document.querySelector(".tool__subagent-preview"), "expanded body renders the preview block");
   ok(document.querySelector(".tool__subagent-preview-label")?.textContent === "Reasoning", "reasoning section label");
   ok(document.body.textContent?.includes("thinking step by step"), "reasoning preview text visible");
+  ok(document.querySelector(".tool__subagent-preview-text strong")?.textContent === "thinking", "reasoning preview renders Markdown emphasis");
+  ok(document.querySelectorAll(".tool__subagent-preview-text li").length === 2, "reasoning preview renders Markdown lists");
   ok(document.body.textContent?.includes("draft answer preview"), "response preview text visible");
   ok(document.body.textContent?.includes("heads up"), "notice preview text visible");
 

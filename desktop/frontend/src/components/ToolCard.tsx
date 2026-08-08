@@ -9,6 +9,7 @@ import { useGSAPCollapse } from "../lib/useGSAPCollapse";
 import { isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
 import type { Translator } from "../lib/i18n";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
+import { Markdown } from "./Markdown";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -357,7 +358,13 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
             {sp.reasoning && (
               <div className="tool__subagent-preview-section">
                 <div className="tool__subagent-preview-label">{t("subagent.preview.reasoning")}</div>
-                <pre className="tool__subagent-preview-text">{sp.reasoning}</pre>
+                {open ? (
+                  <div className="tool__subagent-preview-text tool__subagent-preview-text--markdown">
+                    <Markdown text={sp.reasoning} streaming={sp.phase === "reasoning"} />
+                  </div>
+                ) : (
+                  <pre className="tool__subagent-preview-text">{sp.reasoning}</pre>
+                )}
               </div>
             )}
             {sp.text && (
