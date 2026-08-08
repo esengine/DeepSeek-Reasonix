@@ -130,7 +130,10 @@ eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "min-height"), "44px
 eq(finalDeclaration(".compact-ratio-presets .set-seg__btn", "white-space"), "normal", "compaction labels do not depend on ellipsis for their meaning");
 
 eq(finalDeclaration(".statusbar", "white-space"), "nowrap", "status bar keeps metrics on one row");
-eq(finalDeclaration(".statusbar", "overflow"), "hidden", "status bar clips instead of overflowing");
+eq(finalDeclaration(".statusbar", "overflow-x"), "auto", "status bar can scroll to reveal all metrics");
+eq(finalDeclaration(".statusbar", "overflow-y"), "hidden", "status bar stays one-line vertically");
+eq(finalDeclaration(".chat-pane", "overflow-y"), "auto", "chat pane scrolls when the window is too short");
+eq(finalDeclaration(".sidebar", "overflow-y"), "auto", "sidebar scrolls when the window is too short");
 clipsSingleLine(".statusbar__model");
 
 for (const selector of [
