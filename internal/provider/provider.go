@@ -1012,9 +1012,9 @@ type OutputBudgetProvider interface {
 // SharedWindowOutputProvider is optionally implemented by providers whose
 // max_output_tokens shares the model context window with the prompt input
 // (DeepSeek: input + max_output_tokens must stay under context_window).
-// Independent-ceiling providers (OpenAI, MiMo) do not implement it. The agent
-// clips the requested budget as the prompt grows so the sum never exceeds the
-// window, which DeepSeek otherwise rejects with HTTP 400.
+// Implementers return false when the window is NOT shared (e.g. the OpenAI and
+// Anthropic clients implement it to report false in non-DeepSeek modes); the
+// agent only reserves the output budget when SharesContextWindow is true.
 type SharedWindowOutputProvider interface {
 	SharesContextWindow() bool
 }

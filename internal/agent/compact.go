@@ -98,17 +98,25 @@ func (a *Agent) compactThresholds() (soft, snip, high int) {
 
 // forceThreshold is the prompt-token high-water mark that forces compaction.
 // It never exceeds the provider's real input allowance: when the provider
-// requests a total output budget, the window's tail is reserved for it, so a
-// request below this threshold can never be rejected for exceeding the model
-// context length (DeepSeek rejects messages+completion > context_window). The
-// 8K reserve absorbs per-message estimate drift against the real tokenizer.
-// The more conservative of the ratio mark and the budget-aware mark wins.
+// shares its context window with the output (DeepSeek), the window's tail is
+// reserved for the output budget so a request below this threshold can never
+// be rejected for exceeding the model context length (DeepSeek rejects
+// messages+completion > context_window). Independent-ceiling providers keep
+// the plain ratio mark. The 8K reserve absorbs per-message estimate drift
+// against the real tokenizer. The more conservative of the ratio mark and the
+// budget-aware mark wins.
 func (a *Agent) forceThreshold() int {
 	force := int(float64(a.contextWindow) * a.compactForceRatio)
-	if a.outputBudget > 0 {
-		budgetAware := a.contextWindow - a.outputBudget - 8192
-		if budgetAware < force {
-			force = budgetAware
+	if sharesContextWindow(a.prov) {
+		budget := a.outputBudget
+		if a.maxOutputTokens > 0 {
+			budget = a.maxOutputTokens
+		}
+		if budget > 0 {
+			budgetAware := a.contextWindow - budget - 8192
+			if budgetAware < force {
+				force = budgetAware
+			}
 		}
 	}
 	return force
@@ -671,10 +679,9 @@ func (a *Agent) effectiveOutputBudget(msgs []provider.Message) (int, bool) {
 	if budget <= 0 {
 		return 0, false
 	}
+	// msgs already carries the system prompt (modelVisibleMessages includes
+	// system messages), so only tool schemas are added on top.
 	est := a.estimatedPromptTokens(msgs)
-	if a.session != nil {
-		est += estimateTextTokens(a.systemPrompt())
-	}
 	if a.tools != nil {
 		for _, s := range a.tools.Schemas() {
 			est += estimateTextTokens(s.Name) + estimateTextTokens(s.Description) + estimateTextTokens(string(s.Parameters))
