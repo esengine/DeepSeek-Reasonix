@@ -158,7 +158,8 @@ func (b *displayTurnBuffer) materialize() []HistoryMessage {
 type WorkspaceTab struct {
 	ID                  string             // stable random id
 	Scope               string             // "project" | "global"
-	WorkspaceRoot       string             // project root dir (empty for global)
+	WorkspaceRoot       string             // runtime project root dir (may be a topic worktree)
+	SourceRoot          string             // logical sidebar project root when WorkspaceRoot is isolated
 	SharedHostKey       string             // opaque key for the shared plugin host (set by buildTabController)
 	TopicID             string             // topic within the project
 	TopicTitle          string             // display title
@@ -641,6 +642,7 @@ func cloneDetachedRuntimeTab(tab *WorkspaceTab, key, path string) *WorkspaceTab 
 		ID:                  detachedRuntimeTabID(key),
 		Scope:               tab.Scope,
 		WorkspaceRoot:       tab.WorkspaceRoot,
+		SourceRoot:          tab.SourceRoot,
 		SharedHostKey:       tab.SharedHostKey,
 		TopicID:             tab.TopicID,
 		TopicTitle:          tab.TopicTitle,
@@ -2177,6 +2179,7 @@ type TabMeta struct {
 	ID                string                   `json:"id"`
 	Scope             string                   `json:"scope"`
 	WorkspaceRoot     string                   `json:"workspaceRoot"`
+	SourceRoot        string                   `json:"sourceRoot,omitempty"`
 	WorkspaceName     string                   `json:"workspaceName"`
 	WorkspacePath     string                   `json:"workspacePath,omitempty"`
 	GitBranch         string                   `json:"gitBranch,omitempty"`
@@ -2233,7 +2236,8 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		ID:                tab.ID,
 		Scope:             tab.Scope,
 		WorkspaceRoot:     tab.WorkspaceRoot,
-		WorkspaceName:     workspaceName(tab.WorkspaceRoot),
+		SourceRoot:        strings.TrimSpace(tab.SourceRoot),
+		WorkspaceName:     workspaceName(tabLogicalProjectRoot(tab)),
 		WorkspacePath:     tab.WorkspaceRoot,
 		TopicID:           tab.TopicID,
 		TopicTitle:        a.localizedTopicTitle(tab.TopicTitle, tab.topicTitleSource),
@@ -2259,7 +2263,7 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		m.ProjectColor = globalProjectColor()
 		m.WorkspaceName = globalProjectTitle()
 	case "project":
-		m.ProjectColor = projectColor(tab.WorkspaceRoot)
+		m.ProjectColor = projectColor(tabLogicalProjectRoot(tab))
 	}
 	if tab.Ctrl != nil {
 		status := tab.Ctrl.RuntimeStatus()
@@ -2320,6 +2324,12 @@ func (a *App) syncTabWorkspaceRootSpellings() {
 		if tab == nil || tab.Scope != "project" {
 			continue
 		}
+		if root := strings.TrimSpace(tab.SourceRoot); root != "" {
+			if i := projectIndexByRoot(projects, root); i >= 0 && root != projects[i].Root {
+				tab.SourceRoot = projects[i].Root
+				changed = true
+			}
+		}
 		i := projectIndexByRoot(projects, tab.WorkspaceRoot)
 		if i < 0 || tab.WorkspaceRoot == projects[i].Root {
 			continue
@@ -2338,9 +2348,45 @@ func (a *App) syncTabWorkspaceRootSpellings() {
 
 // registerProjectRoot indexes workspaceRoot in the project registry and
 // realigns open tabs when the registry adopted a new spelling of the root.
+// Topic-isolation managed worktrees are never registered as sidebar projects
+// (#4304); delivery worktrees remain first-class projects.
 func (a *App) registerProjectRoot(workspaceRoot string) {
+	workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	if workspaceRoot == "" {
+		return
+	}
+	if worktree.IsManagedPath(workspaceRoot, config.DeliveryWorktreeDir()) {
+		if sourceRootForManagedTopicWorktree(workspaceRoot, "") != "" {
+			return
+		}
+	}
 	_ = addProject(workspaceRoot, "")
 	a.syncTabWorkspaceRootSpellings()
+}
+
+// resolveProjectOpenRoots maps a caller-supplied project path + topic to the
+// logical sidebar root and agent runtime root. Managed worktree paths resolve
+// back to their source project when a topic binding exists.
+func resolveProjectOpenRoots(workspaceRoot, topicID string) (logicalRoot, runtimeRoot string) {
+	workspaceRoot = normalizeProjectRoot(workspaceRoot)
+	topicID = strings.TrimSpace(topicID)
+	if workspaceRoot == "" {
+		return "", ""
+	}
+	if !worktree.IsManagedPath(workspaceRoot, config.DeliveryWorktreeDir()) {
+		runtime, source := resolveTopicRuntimeRoot(workspaceRoot, topicID)
+		return source, runtime
+	}
+	if source := sourceRootForManagedTopicWorktree(workspaceRoot, topicID); source != "" {
+		runtime, _ := resolveTopicRuntimeRoot(source, topicID)
+		if runtime == "" {
+			runtime = workspaceRoot
+		}
+		return source, runtime
+	}
+	// Delivery worktrees are first-class projects; topic isolation never
+	// reaches here without a binding.
+	return workspaceRoot, workspaceRoot
 }
 
 // OpenProjectTab builds a controller scoped to workspaceRoot and opens the
@@ -2357,11 +2403,12 @@ func (a *App) openProjectTab(workspaceRoot, topicID string) (TabMeta, error) {
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
-	saveWorkspace(workspaceRoot)
-	a.registerProjectRoot(workspaceRoot)
+	logicalRoot, runtimeRoot := resolveProjectOpenRoots(workspaceRoot, topicID)
+	saveWorkspace(logicalRoot)
+	a.registerProjectRoot(logicalRoot)
 
-	sessionPath, _ := a.findTopicSessionForTarget("project", workspaceRoot, topicID)
-	return a.openTopicTab("project", workspaceRoot, topicID, sessionPath)
+	sessionPath, _ := a.findTopicSessionForTarget("project", logicalRoot, topicID)
+	return a.openTopicTabWithRoots("project", logicalRoot, runtimeRoot, topicID, sessionPath, true)
 }
 
 func (a *App) openTopicTab(scope, workspaceRoot, topicID, sessionPath string) (TabMeta, error) {
@@ -2375,10 +2422,11 @@ func (a *App) openProjectTabInactive(workspaceRoot, topicID string) (TabMeta, er
 	if abs, err := filepath.Abs(workspaceRoot); err == nil {
 		workspaceRoot = abs
 	}
-	a.registerProjectRoot(workspaceRoot)
+	logicalRoot, runtimeRoot := resolveProjectOpenRoots(workspaceRoot, topicID)
+	a.registerProjectRoot(logicalRoot)
 
-	sessionPath, _ := a.findTopicSessionForTarget("project", workspaceRoot, topicID)
-	return a.openTopicTabWithActivation("project", workspaceRoot, topicID, sessionPath, false)
+	sessionPath, _ := a.findTopicSessionForTarget("project", logicalRoot, topicID)
+	return a.openTopicTabWithRoots("project", logicalRoot, runtimeRoot, topicID, sessionPath, false)
 }
 
 func (a *App) openGlobalTabInactive(topicID string) (TabMeta, error) {
@@ -2392,9 +2440,27 @@ func (a *App) openGlobalTabInactive(topicID string) (TabMeta, error) {
 }
 
 func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionPath string, activate bool) (TabMeta, error) {
-	actualRoot := workspaceRoot
+	return a.openTopicTabWithRoots(scope, workspaceRoot, workspaceRoot, topicID, sessionPath, activate)
+}
+
+func (a *App) openTopicTabWithRoots(scope, sourceRoot, runtimeRoot, topicID, sessionPath string, activate bool) (TabMeta, error) {
+	logicalRoot := sourceRoot
+	actualRoot := runtimeRoot
 	if scope == "global" {
+		logicalRoot = ""
 		actualRoot = globalWorkspaceRoot()
+	}
+	if scope == "project" {
+		if strings.TrimSpace(logicalRoot) == "" {
+			logicalRoot = actualRoot
+		}
+		if strings.TrimSpace(actualRoot) == "" {
+			actualRoot = logicalRoot
+		}
+	}
+	sessionHome := logicalRoot
+	if scope == "global" {
+		sessionHome = actualRoot
 	}
 	targetKey := sessionRuntimeKey(sessionPath)
 
@@ -2417,7 +2483,7 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 	}
 
 	for _, tab := range a.tabs {
-		if tabMatchesTopicTarget(tab, scope, workspaceRoot, topicID) {
+		if tabMatchesTopicTarget(tab, scope, logicalRoot, topicID) {
 			if activate {
 				a.activeTabID = tab.ID
 			}
@@ -2439,32 +2505,37 @@ func (a *App) openTopicTabWithActivation(scope, workspaceRoot, topicID, sessionP
 	}
 
 	tabID := a.newUniqueTabIDLocked()
-	topicTitle := topicTitleForTab(scope, workspaceRoot, topicID)
-	if t, source, ok := topicTitleFallbackForOpen(workspaceRoot, topicID, sessionPath); ok {
+	topicTitle := topicTitleForTab(scope, logicalRoot, topicID)
+	if t, source, ok := topicTitleFallbackForOpen(logicalRoot, topicID, sessionPath); ok {
 		topicTitle = t
-		_ = setTopicTitleWithSource(workspaceRoot, topicID, t, source)
+		_ = setTopicTitleWithSource(logicalRoot, topicID, t, source)
 	}
 
 	if sessionPath == "" {
 		var err error
-		sessionPath, err = createEmptySessionFile(desktopSessionDir(actualRoot), "")
+		sessionPath, err = createEmptySessionFile(desktopSessionDir(sessionHome), "")
 		if err != nil {
 			a.mu.Unlock()
 			return TabMeta{}, err
 		}
-		if err := pinNewEmptySessionBranchMeta(sessionPath, scope, actualRoot, topicID, topicTitle); err != nil {
+		if err := pinNewEmptySessionBranchMeta(sessionPath, scope, logicalRoot, topicID, topicTitle); err != nil {
 			a.mu.Unlock()
 			return TabMeta{}, err
 		}
 	}
 	profile := loadTabSessionProfile(sessionPath)
+	sourceForTab := ""
+	if scope == "project" && !sameProjectRoot(logicalRoot, actualRoot) {
+		sourceForTab = logicalRoot
+	}
 	tab := &WorkspaceTab{
 		ID:               tabID,
 		Scope:            scope,
 		WorkspaceRoot:    actualRoot,
+		SourceRoot:       sourceForTab,
 		TopicID:          topicID,
 		TopicTitle:       topicTitle,
-		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID),
+		topicTitleSource: loadTopicTitleSource(topicTitleRoot(scope, logicalRoot), topicID),
 		SessionPath:      sessionPath,
 		disabledMCP:      map[string]ServerView{},
 	}
@@ -2521,8 +2592,14 @@ func (a *App) openTopicSession(scope, workspaceRoot, topicID, sessionPath string
 		if workspaceRoot == "" {
 			return TabMeta{}, fmt.Errorf("workspaceRoot is required")
 		}
-		saveWorkspace(workspaceRoot)
-		a.registerProjectRoot(workspaceRoot)
+		logicalRoot, runtimeRoot := resolveProjectOpenRoots(workspaceRoot, topicID)
+		saveWorkspace(logicalRoot)
+		a.registerProjectRoot(logicalRoot)
+		_, validPath, err := a.sessionDirForPath(sessionPath)
+		if err != nil {
+			return TabMeta{}, err
+		}
+		return a.openTopicTabWithRoots("project", logicalRoot, runtimeRoot, topicID, validPath, true)
 	}
 	_, validPath, err := a.sessionDirForPath(sessionPath)
 	if err != nil {
@@ -2579,13 +2656,13 @@ func tabMatchesTopicTarget(tab *WorkspaceTab, scope, workspaceRoot, topicID stri
 	if scope == "global" {
 		return true
 	}
-	return sameProjectRoot(tab.WorkspaceRoot, workspaceRoot)
+	return sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot)
 }
 
 func tabInWorkspace(tab *WorkspaceTab, workspaceRoot string) bool {
 	return tab != nil &&
 		tab.Scope == "project" &&
-		sameProjectRoot(tab.WorkspaceRoot, workspaceRoot)
+		sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot)
 }
 
 // EnsureBlankTab activates the existing blank tab for the target scope, or
@@ -2868,7 +2945,7 @@ func (a *App) blankTabMatchesTargetLocked(tab *WorkspaceTab, scope, workspaceRoo
 	if tab == nil || tab.Scope != scope {
 		return false
 	}
-	if scope == "project" && !sameProjectRoot(tab.WorkspaceRoot, workspaceRoot) {
+	if scope == "project" && !sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot) {
 		return false
 	}
 	if tab.Ctrl == nil {
@@ -3032,7 +3109,7 @@ func (a *App) indexedBlankTopicIDLocked(scope, workspaceRoot string) string {
 		if tab == nil || tab.Scope != scope || strings.TrimSpace(tab.TopicID) == "" {
 			continue
 		}
-		if scope == "project" && !sameProjectRoot(tab.WorkspaceRoot, workspaceRoot) {
+		if scope == "project" && !sameProjectRoot(tabLogicalProjectRoot(tab), workspaceRoot) {
 			continue
 		}
 		openTopics[tab.TopicID] = true
@@ -3705,6 +3782,7 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 	// under the lock while this goroutine builds.
 	a.mu.RLock()
 	tabWorkspaceRoot := tab.WorkspaceRoot
+	tabSourceRoot := strings.TrimSpace(tab.SourceRoot)
 	tabScope := tab.Scope
 	tabTopicID := tab.TopicID
 	tabSessionPath := tab.SessionPath
@@ -3734,7 +3812,13 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 		tabSink.setContext(wailsCtx)
 	}
 
-	sessionDir := desktopSessionDir(root)
+	// Topic worktrees keep transcripts under the source project identity even
+	// when the agent cwd is the managed worktree (#4304).
+	sessionLookupRoot := root
+	if tabSourceRoot != "" {
+		sessionLookupRoot = tabSourceRoot
+	}
+	sessionDir := desktopSessionDir(sessionLookupRoot)
 	topicID := strings.TrimSpace(tabTopicID)
 
 	// Assign Global topics to legacy sessions in the global session dir so
@@ -3764,7 +3848,7 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 		a.mu.Unlock()
 	}
 	if topicID != "" {
-		if _, dir := a.findTopicSessionForTarget(tabScope, tabWorkspaceRoot, topicID); dir != "" {
+		if _, dir := a.findTopicSessionForTarget(tabScope, sessionLookupRoot, topicID); dir != "" {
 			sessionDir = dir
 		}
 	}
@@ -4075,7 +4159,7 @@ func (a *App) buildTabControllerWithContextAdmissionHeld(tab *WorkspaceTab, load
 			a.persistTabSessionPath(tab, path)
 			a.mu.RLock()
 			indexScope := tab.Scope
-			indexRoot := tab.WorkspaceRoot
+			indexRoot := tabLogicalProjectRoot(tab)
 			indexTopicID := strings.TrimSpace(tab.TopicID)
 			indexTopicTitle := tab.TopicTitle
 			a.mu.RUnlock()
@@ -4186,6 +4270,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	reopenTerminalGate := false
 	scope := binding.scope
 	workspaceRoot := binding.workspaceRoot
+	sourceRoot := ""
 	if scope == "" {
 		scope = "global"
 	}
@@ -4194,19 +4279,55 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 		if workspaceRoot == "" {
 			return
 		}
-		a.registerProjectRoot(workspaceRoot)
+		// Topic worktree sessions (#4304) live under the source project's session
+		// dir, so dir-based binding resolves to the source root. BranchMeta may
+		// still name either the source (current) or the managed worktree
+		// (legacy). Prefer an explicit runtime/source split from the topic
+		// binding so reopen keeps the agent in the worktree.
+		if binding.hasMeta {
+			if metaRoot := normalizeProjectRoot(binding.meta.WorkspaceRoot); metaRoot != "" && !sameProjectRoot(metaRoot, workspaceRoot) {
+				sourceRoot = workspaceRoot
+				workspaceRoot = metaRoot
+			}
+		}
+		if sourceRoot == "" {
+			if topicID := strings.TrimSpace(binding.topicID); topicID != "" {
+				runtime, source := resolveTopicRuntimeRoot(workspaceRoot, topicID)
+				if source != "" && runtime != "" && !sameProjectRoot(runtime, source) {
+					sourceRoot = source
+					workspaceRoot = runtime
+				}
+			}
+		}
+		if sourceRoot == "" {
+			existingSource := strings.TrimSpace(tab.SourceRoot)
+			existingRuntime := strings.TrimSpace(tab.WorkspaceRoot)
+			if existingSource != "" && sameProjectRoot(workspaceRoot, existingSource) && existingRuntime != "" && !sameProjectRoot(existingRuntime, existingSource) {
+				sourceRoot = existingSource
+				workspaceRoot = existingRuntime
+			}
+		}
+		registerRoot := workspaceRoot
+		if sourceRoot != "" {
+			registerRoot = sourceRoot
+		}
+		a.registerProjectRoot(registerRoot)
 	} else {
 		scope = "global"
 		workspaceRoot = globalTabWorkspaceRoot()
 	}
+	titleRoot := workspaceRoot
+	if sourceRoot != "" {
+		titleRoot = sourceRoot
+	}
 	topicID := strings.TrimSpace(binding.topicID)
 	topicTitle := strings.TrimSpace(binding.topicTitle)
 	if topicTitle == "" && topicID != "" {
-		topicTitle = topicTitleForTab(scope, workspaceRoot, topicID)
+		topicTitle = topicTitleForTab(scope, titleRoot, topicID)
 	}
 	topicSource := ""
 	if topicID != "" {
-		topicSource = loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID)
+		topicSource = loadTopicTitleSource(topicTitleRoot(scope, titleRoot), topicID)
 	}
 
 	a.mu.Lock()
@@ -4219,6 +4340,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	oldWorkspaceRoot := tab.WorkspaceRoot
 	changed := tab.Scope != scope ||
 		tab.WorkspaceRoot != workspaceRoot ||
+		tab.SourceRoot != sourceRoot ||
 		canonicalTabSessionPath(tab.SessionPath) != canonicalTabSessionPath(binding.path)
 	// Spelling-only root updates still persist above, but an equivalent root is
 	// the same workspace — do not warn the user about a switch.
@@ -4233,6 +4355,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	}
 	tab.Scope = scope
 	tab.WorkspaceRoot = workspaceRoot
+	tab.SourceRoot = sourceRoot
 	tab.SessionPath = canonicalTabSessionPath(binding.path)
 	if topicID != "" {
 		changed = changed || tab.TopicID != topicID
@@ -4583,7 +4706,7 @@ func (a *App) maybeAutoTitleTopic(tab *WorkspaceTab) bool {
 	// written under a.mu by session switches and recovery.
 	a.mu.RLock()
 	topicID := strings.TrimSpace(tab.TopicID)
-	titleRoot := tab.WorkspaceRoot
+	titleRoot := tabLogicalProjectRoot(tab)
 	if tab.Scope == "global" {
 		titleRoot = ""
 	}
@@ -4876,6 +4999,7 @@ type desktopTabEntry struct {
 	ID               string  `json:"id"`
 	Scope            string  `json:"scope"`
 	WorkspaceRoot    string  `json:"workspaceRoot"`
+	SourceRoot       string  `json:"sourceRoot,omitempty"`
 	TopicID          string  `json:"topicId"`
 	SessionPath      string  `json:"sessionPath,omitempty"`
 	ReadOnly         bool    `json:"readOnly,omitempty"`
@@ -4939,6 +5063,7 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 				ID:               tab.ID,
 				Scope:            tab.Scope,
 				WorkspaceRoot:    tab.WorkspaceRoot,
+				SourceRoot:       strings.TrimSpace(tab.SourceRoot),
 				TopicID:          tab.TopicID,
 				SessionPath:      tab.currentSessionPath(),
 				ReadOnly:         tab.ReadOnly,
@@ -6127,7 +6252,7 @@ func (a *App) tabSessionRecoveryMeta(tab *WorkspaceTab) func(control.SessionReco
 		a.mu.RLock()
 		ctrl := tab.Ctrl
 		scope := strings.TrimSpace(tab.Scope)
-		workspaceRoot := strings.TrimSpace(tab.WorkspaceRoot)
+		workspaceRoot := strings.TrimSpace(tabLogicalProjectRoot(tab))
 		topicID := tab.TopicID
 		topicTitle := tab.TopicTitle
 		model := strings.TrimSpace(tab.model)
@@ -7349,7 +7474,7 @@ func (a *App) findTopicLocation(topicID string) (string, string, bool) {
 			continue
 		}
 		scope := tab.Scope
-		workspaceRoot := tab.WorkspaceRoot
+		workspaceRoot := tabLogicalProjectRoot(tab)
 		a.mu.RUnlock()
 		if scope == "global" {
 			return "global", "", true
@@ -7547,6 +7672,12 @@ func (a *App) deleteTopic(topicID string) error {
 	}
 	if err := removeTopicFromProjectsFile(topicID); err != nil {
 		return err
+	}
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		_ = removeTopicWorktreeBinding(root, topicID)
 	}
 	a.emitProjectTreeMetadataChanged()
 	return nil
@@ -7927,7 +8058,7 @@ func (a *App) ListProjectTree() []ProjectNode {
 			runtimeStatus = tab.Ctrl.RuntimeStatus()
 		}
 		running := status != "" || runtimeStatus.Running || runtimeStatus.PendingPrompt || runtimeStatus.BackgroundJobs > 0
-		runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)] = append(runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tab.WorkspaceRoot, tab.TopicID)], runtimeSessionStatus{
+		runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tabLogicalProjectRoot(tab), tab.TopicID)] = append(runtimeSessionsByTopic[topicSummaryKey(tab.Scope, tabLogicalProjectRoot(tab), tab.TopicID)], runtimeSessionStatus{
 			sessionPath:      sessionPath,
 			label:            label,
 			titleSource:      titleSource,
@@ -8111,20 +8242,21 @@ func (a *App) ListProjectTree() []ProjectNode {
 				continue
 			}
 			children = append(children, ProjectNode{
-				Key:            "topic_" + tid,
-				Kind:           "topic",
-				Label:          topicTitle,
-				Root:           p.Root,
-				TopicID:        tid,
-				ProjectColor:   p.Color,
-				Turns:          summary.displayTurns(),
-				CreatedAt:      topicCreatedAtForTree(createdMap, tid),
-				LastActivityAt: summary.lastActivityAt,
-				Open:           open,
-				Running:        running,
-				Status:         status,
-				Pinned:         pinned,
-				Children:       runtimeSessionNodes("project", p.Root, tid, p.Color),
+				Key:              "topic_" + tid,
+				Kind:             "topic",
+				Label:            topicTitle,
+				Root:             p.Root,
+				TopicID:          tid,
+				ProjectColor:     p.Color,
+				Turns:            summary.displayTurns(),
+				CreatedAt:        topicCreatedAtForTree(createdMap, tid),
+				LastActivityAt:   summary.lastActivityAt,
+				Open:             open,
+				Running:          running,
+				Status:           status,
+				Pinned:           pinned,
+				IsolatedWorktree: topicHasWorktreeBinding(p.Root, tid),
+				Children:         runtimeSessionNodes("project", p.Root, tid, p.Color),
 			})
 		}
 		node.Label = title
@@ -8784,7 +8916,7 @@ func (a *App) saveTabSessionMeta(tab *WorkspaceTab, path string) error {
 	snap := tabSessionMetaSnapshot{
 		path:             path,
 		scope:            tab.Scope,
-		workspaceRoot:    tab.WorkspaceRoot,
+		workspaceRoot:    tabLogicalProjectRoot(tab),
 		topicID:          tab.TopicID,
 		topicTitle:       tab.TopicTitle,
 		tokenMode:        boot.NormalizeTokenMode(tab.tokenMode),
@@ -8838,7 +8970,7 @@ func (a *App) tabSessionMetaSnapshotForCurrentSession(tab *WorkspaceTab) (tabSes
 	ctrl := tab.Ctrl
 	storedPath := strings.TrimSpace(tab.SessionPath)
 	scope := tab.Scope
-	workspaceRoot := tab.WorkspaceRoot
+	workspaceRoot := tabLogicalProjectRoot(tab)
 	topicID := tab.TopicID
 	topicTitle := tab.TopicTitle
 	tokenMode := boot.NormalizeTokenMode(tab.tokenMode)
@@ -9139,9 +9271,27 @@ func (a *App) knownSessionDirs() []string {
 	return out
 }
 
-func topicSessionMatchMatchesTarget(match topicSessionMatch, scope, workspaceRoot string) bool {
+func topicSessionMatchMatchesTarget(match topicSessionMatch, scope, workspaceRoot, topicID string) bool {
 	if scope == "project" {
-		return match.scope == "project" && sameProjectRoot(match.workspaceRoot, workspaceRoot)
+		if match.scope != "project" {
+			return false
+		}
+		if sameProjectRoot(match.workspaceRoot, workspaceRoot) {
+			return true
+		}
+		// Sessions created before the source-root pin may still name the
+		// managed worktree in BranchMeta; accept them when the topic binding
+		// under the source project points at that runtime.
+		topicID = strings.TrimSpace(topicID)
+		if topicID == "" {
+			return false
+		}
+		binding, ok := loadTopicWorktreeBinding(workspaceRoot, topicID)
+		if !ok {
+			return false
+		}
+		return sameProjectRoot(match.workspaceRoot, binding.WorkspaceRoot) ||
+			sameProjectRoot(match.workspaceRoot, binding.WorktreeRoot)
 	}
 	return match.scope == "" || match.scope == "global"
 }
@@ -9166,7 +9316,7 @@ func (a *App) findTopicSessionForTargetByContent(scope, workspaceRoot, topicID s
 	var candidates []candidate
 	for _, dir := range a.knownSessionDirs() {
 		for _, match := range topicSessionMatches(dir, topicID) {
-			if !topicSessionMatchMatchesTarget(match, scope, workspaceRoot) {
+			if !topicSessionMatchMatchesTarget(match, scope, workspaceRoot, topicID) {
 				continue
 			}
 			candidates = append(candidates, candidate{match: match, dir: dir})

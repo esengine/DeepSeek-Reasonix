@@ -32,6 +32,7 @@ interface ProjectTreeProps {
   onAddProject: () => Promise<void>;
   onCreateTopic?: (scope: string, workspaceRoot: string) => Promise<void> | void;
   onCreateDeliveryWorktree?: (workspaceRoot: string) => Promise<void> | void;
+  onCreateTopicWorktree?: (workspaceRoot: string) => Promise<void> | void;
   onRenameTopic?: (topicId: string, title: string) => Promise<void> | void;
   onTopicsChanged?: () => Promise<void> | void;
   refreshSignal?: number;
@@ -600,6 +601,7 @@ export function ProjectTree({
   onAddProject,
   onCreateTopic,
   onCreateDeliveryWorktree,
+  onCreateTopicWorktree,
   onRenameTopic,
   onTopicsChanged,
   refreshSignal,
@@ -990,6 +992,21 @@ export function ProjectTree({
     closeMenu();
     try {
       await onCreateDeliveryWorktree?.(workspaceRoot);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
+    } finally {
+      setIsolatingProject(null);
+    }
+  };
+
+  const handleCreateTopicWorktree = async (workspaceRoot: string) => {
+    if (!workspaceRoot || isolatingProject) return;
+    setIsolatingProject(workspaceRoot);
+    closeMenu();
+    try {
+      await onCreateTopicWorktree?.(workspaceRoot);
+      await refresh();
+      await onTopicsChanged?.();
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", { durationMs: 6000 });
     } finally {
@@ -1645,17 +1662,30 @@ export function ProjectTree({
     };
     const isolationAvailability = worktreeAvailability[projectRoot];
     const isolatedWorkspaceItems: ContextMenuItem[] = scope === "project"
-      ? [{
-          key: "isolated-delivery-workspace",
-          icon: <GitBranch size={13} />,
-          label: (
-            <span title={isolationAvailability?.reason || t("projectTree.createWorktreeHint")}>
-              {isolatingProject === projectRoot ? t("projectTree.creatingWorktree") : t("projectTree.createWorktree")}
-            </span>
-          ),
-          disabled: isolatingProject !== null || isolationAvailability?.available === false,
-          onSelect: () => { void handleCreateDeliveryWorktree(projectRoot); },
-        }]
+      ? [
+          {
+            key: "topic-worktree",
+            icon: <GitBranch size={13} />,
+            label: (
+              <span title={isolationAvailability?.reason || t("projectTree.createTopicWorktreeHint")}>
+                {isolatingProject === projectRoot ? t("projectTree.creatingTopicWorktree") : t("projectTree.createTopicWorktree")}
+              </span>
+            ),
+            disabled: isolatingProject !== null || isolationAvailability?.available === false,
+            onSelect: () => { void handleCreateTopicWorktree(projectRoot); },
+          },
+          {
+            key: "isolated-delivery-workspace",
+            icon: <GitBranch size={13} />,
+            label: (
+              <span title={isolationAvailability?.reason || t("projectTree.createWorktreeHint")}>
+                {isolatingProject === projectRoot ? t("projectTree.creatingWorktree") : t("projectTree.createWorktree")}
+              </span>
+            ),
+            disabled: isolatingProject !== null || isolationAvailability?.available === false,
+            onSelect: () => { void handleCreateDeliveryWorktree(projectRoot); },
+          },
+        ]
       : [];
     const projectMenuItems: ContextMenuItem[] = [
       {

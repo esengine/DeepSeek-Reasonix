@@ -60,12 +60,24 @@ func Inspect(ctx context.Context, workspaceRoot string) Availability {
 	return info.Availability
 }
 
-// Create makes a new branch and linked worktree at managedRoot, based on the
-// source repository's committed HEAD. Uncommitted source changes are reported
-// but never copied or modified. When workspaceRoot names a repository
-// subdirectory, Result.WorkspaceRoot points at the corresponding subdirectory
-// in the new worktree.
+const (
+	// BranchKindDelivery is the historical Delivery isolation prefix.
+	BranchKindDelivery = "delivery"
+	// BranchKindTopic is opt-in per-topic isolation (#4304).
+	BranchKindTopic = "topic"
+)
+
+// Create makes a new Delivery branch and linked worktree at managedRoot.
 func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, error) {
+	return CreateKind(ctx, workspaceRoot, managedRoot, BranchKindDelivery)
+}
+
+// CreateKind makes a new branch and linked worktree at managedRoot, based on
+// the source repository's committed HEAD. Uncommitted source changes are
+// reported but never copied or modified. When workspaceRoot names a repository
+// subdirectory, Result.WorkspaceRoot points at the corresponding subdirectory
+// in the new worktree. kind selects the reasonix/<kind>-… branch prefix.
+func CreateKind(ctx context.Context, workspaceRoot, managedRoot, kind string) (Result, error) {
 	info, err := inspect(ctx, workspaceRoot)
 	if err != nil {
 		return Result{}, err
@@ -73,6 +85,14 @@ func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, err
 	managedRoot = strings.TrimSpace(managedRoot)
 	if managedRoot == "" {
 		return Result{}, errors.New("Reasonix worktree storage is unavailable")
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = BranchKindDelivery
+	}
+	kind = safePathComponent(kind)
+	if kind == "" {
+		return Result{}, errors.New("worktree kind is invalid")
 	}
 	if err := os.MkdirAll(managedRoot, 0o700); err != nil {
 		return Result{}, fmt.Errorf("create Reasonix worktree storage: %w", err)
@@ -90,7 +110,7 @@ func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, err
 		if randomErr != nil {
 			return Result{}, randomErr
 		}
-		branch := fmt.Sprintf("reasonix/delivery-%s-%s", time.Now().Format("20060102-150405"), id)
+		branch := fmt.Sprintf("reasonix/%s-%s-%s", kind, time.Now().Format("20060102-150405"), id)
 		worktreeRoot := filepath.Join(managedRoot, repoKey, id, repoBase)
 		if _, statErr := os.Stat(worktreeRoot); statErr == nil {
 			continue
@@ -129,7 +149,50 @@ func Create(ctx context.Context, workspaceRoot, managedRoot string) (Result, err
 			SourceDirty:   info.SourceDirty,
 		}, nil
 	}
-	return Result{}, errors.New("could not allocate a unique Delivery worktree")
+	return Result{}, fmt.Errorf("could not allocate a unique %s worktree", kind)
+}
+
+// RemovePristine deletes a managed worktree only when its working tree is clean
+// and HEAD still matches createdHead. Dirty trees and advanced branches are
+// left untouched so user work is never discarded (#4304 orphan reclaim).
+func RemovePristine(ctx context.Context, sourceRoot, worktreeRoot, createdHead string) error {
+	sourceRoot = strings.TrimSpace(sourceRoot)
+	worktreeRoot = strings.TrimSpace(worktreeRoot)
+	createdHead = strings.TrimSpace(createdHead)
+	if sourceRoot == "" || worktreeRoot == "" {
+		return errors.New("source and worktree roots are required")
+	}
+	st, err := os.Stat(worktreeRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("inspect worktree: %w", err)
+	}
+	if !st.IsDir() {
+		return errors.New("worktree path is not a directory")
+	}
+	status, stderr, err := runGit(ctx, worktreeRoot, "status", "--porcelain=v1", "--untracked-files=normal")
+	if err != nil {
+		return fmt.Errorf("inspect worktree status%s: %w", stderrSuffix(stderr), err)
+	}
+	if strings.TrimSpace(status) != "" {
+		return errors.New("worktree has local changes; refusing to remove")
+	}
+	if createdHead != "" {
+		head, stderr, err := runGit(ctx, worktreeRoot, "rev-parse", "--verify", "HEAD")
+		if err != nil {
+			return fmt.Errorf("inspect worktree HEAD%s: %w", stderrSuffix(stderr), err)
+		}
+		if strings.TrimSpace(head) != createdHead {
+			return errors.New("worktree branch advanced; refusing to remove")
+		}
+	}
+	_, stderr, err = runGit(ctx, sourceRoot, "worktree", "remove", "--force", worktreeRoot)
+	if err != nil {
+		return fmt.Errorf("remove Git worktree%s: %w", stderrSuffix(stderr), err)
+	}
+	return nil
 }
 
 // IsManagedPath reports whether path belongs to Reasonix's durable worktree
@@ -224,6 +287,12 @@ func inspect(ctx context.Context, workspaceRoot string) (inspection, error) {
 		prefix:    prefix,
 		commonDir: commonDir,
 	}, nil
+}
+
+// RunGit executes a git command in dir. Desktop reclaim helpers use this to
+// inspect managed worktrees without duplicating the timeout/env wiring.
+func RunGit(parent context.Context, dir string, args ...string) (stdout, stderr string, err error) {
+	return runGit(parent, dir, args...)
 }
 
 func runGit(parent context.Context, dir string, args ...string) (stdout, stderr string, err error) {

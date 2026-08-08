@@ -53,6 +53,7 @@ import type {
   DesktopStartupSettingsView,
   DeliveryWorktreeAvailability,
   DeliveryWorktreeOpenResult,
+  TopicWorktreeOpenResult,
   DroppedItem,
   EffortInfo,
   ExtensionActionView,
@@ -533,6 +534,8 @@ export interface AppBindings {
   OpenProjectTab(workspaceRoot: string, topicID: string): Promise<TabMeta>;
   DeliveryWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
   CreateDeliveryWorktree(workspaceRoot: string): Promise<DeliveryWorktreeOpenResult>;
+  TopicWorktreeAvailability(workspaceRoot: string): Promise<DeliveryWorktreeAvailability>;
+  CreateTopicWorktree(workspaceRoot: string): Promise<TopicWorktreeOpenResult>;
   OpenGlobalTab(topicID: string): Promise<TabMeta>;
   OpenTopicSession(scope: string, workspaceRoot: string, topicID: string, sessionPath: string): Promise<TabMeta>;
   EnsureBlankTab(scope: string, workspaceRoot: string): Promise<TabMeta>;
@@ -936,7 +939,7 @@ function bridgeBreadcrumb(method: string): string {
   if (/^(AddSkillPath|RemoveSkillPath|RefreshSkills|SetSkillEnabled|AcceptSkillSuggestion|AvailableSubagentTools|CreateSubagentProfile|UpdateSubagentProfile|DeleteSubagentProfile|SetSubagentProfileModel|SetSubagentProfileEffort|TrySubagentProfile|CancelTrySubagentProfile)/.test(method))
     return `skill ${method}`;
   if (/^(MinimiseMainWindow|ToggleMaximiseMainWindow|IsMainWindowMaximised|CloseMainWindow)$/.test(method)) return `window ${method}`;
-  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|DeliveryWorktreeAvailability|CreateDeliveryWorktree)/.test(method))
+  if (/^(OpenProjectTab|OpenGlobalTab|OpenTopicSession|EnsureBlankTab|ActivateTopic|EnsureBlankSurface|SetActiveTab|CloseTab|ReorderTabs|CreateTopic|RenameTopic|DeleteTopic|TrashTopic|RenameProject|RemoveWorkspace|SwitchWorkspace|PickWorkspace|DeliveryWorktreeAvailability|CreateDeliveryWorktree|TopicWorktreeAvailability|CreateTopicWorktree)/.test(method))
     return `nav ${method}`;
   return "";
 }
@@ -4766,6 +4769,30 @@ function makeMockApp(): AppBindings {
         workspaceRoot: isolatedRoot,
         worktreeRoot: isolatedRoot,
         sourceRoot: workspaceRoot,
+        branch: tab.gitBranch,
+        sourceDirty: false,
+        tab,
+      };
+    },
+    async TopicWorktreeAvailability(workspaceRoot: string) {
+      return this.DeliveryWorktreeAvailability(workspaceRoot);
+    },
+    async CreateTopicWorktree(workspaceRoot: string) {
+      if (!workspaceRoot) throw new Error("project folder is required");
+      const suffix = Date.now().toString(36);
+      const isolatedRoot = `/mock/reasonix-topic-worktrees/${suffix}/${workspaceRoot.split("/").filter(Boolean).pop() ?? "project"}`;
+      const topic = await this.CreateTopic("project", workspaceRoot, "");
+      const tab = await this.OpenProjectTab(workspaceRoot, topic.id);
+      tab.workspaceRoot = isolatedRoot;
+      tab.sourceRoot = workspaceRoot;
+      tab.isolatedWorktree = true;
+      tab.gitBranch = `reasonix/topic-${suffix}`;
+      mockTabs = mockTabs.map((candidate) => candidate.id === tab.id ? { ...tab } : candidate);
+      return {
+        topicId: topic.id,
+        sourceRoot: workspaceRoot,
+        workspaceRoot: isolatedRoot,
+        worktreeRoot: isolatedRoot,
         branch: tab.gitBranch,
         sourceDirty: false,
         tab,

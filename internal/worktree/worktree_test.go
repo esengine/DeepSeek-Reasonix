@@ -287,3 +287,39 @@ func TestCreateSupportsPathsWithSpaces(t *testing.T) {
 		t.Fatalf("unexpected worktree root %q", result.WorktreeRoot)
 	}
 }
+
+func TestCreateKindTopicUsesDistinctBranchPrefix(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	result, err := CreateKind(context.Background(), repo, t.TempDir(), BranchKindTopic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(result.Branch, "reasonix/topic-") {
+		t.Fatalf("branch = %q", result.Branch)
+	}
+}
+
+func TestRemovePristineSkipsDirtyAndRemovesClean(t *testing.T) {
+	requireGit(t)
+	repo := initRepo(t)
+	result, err := CreateKind(context.Background(), repo, t.TempDir(), BranchKindTopic)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(result.WorktreeRoot, "dirty.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemovePristine(context.Background(), repo, result.WorktreeRoot, result.Head); err == nil {
+		t.Fatal("expected dirty worktree to be refused")
+	}
+	if err := os.Remove(filepath.Join(result.WorktreeRoot, "dirty.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := RemovePristine(context.Background(), repo, result.WorktreeRoot, result.Head); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(result.WorktreeRoot); !os.IsNotExist(err) {
+		t.Fatalf("worktree still present: %v", err)
+	}
+}
