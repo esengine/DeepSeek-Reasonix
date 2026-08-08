@@ -25,11 +25,11 @@ import (
 
 	"reasonix/internal/ablation"
 	"reasonix/internal/agent"
+	"reasonix/internal/cosplayhook"
 	"reasonix/internal/capability"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
-	"reasonix/internal/cosplay"
 	"reasonix/internal/environment"
 	"reasonix/internal/event"
 	"reasonix/internal/flywheel"
@@ -1135,7 +1135,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	// cosplayAutoVerifier is assigned by the task-tool setup closure below
 	// when [agent.cosplay] auto_on_mutation is enabled; consumed by the
 	// executor Options.
-	var cosplayAutoVerifier *cosplay.AutoVerifier
+	var cosplayAutoVerifier agent.CodeVerifier
 
 	addTaskTool := func() string {
 		if opts.Ablation.Off(ablation.Subagent) {
@@ -1155,42 +1155,18 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		reg.Add(agent.NewParallelTasksTool(taskTool, reg))
 		reg.Add(agent.NewFleetTool(taskTool))
 		reg.Add(agent.NewSubagentResultTool(taskTool))
-		// CoSPlay co-evolution code verification (manual tool; always
-		// registered, parameters tuned from config when present).
-		verifyTool := cosplay.NewCodeVerifyTool()
-		if cp := cfg.Agent.Cosplay; cp != nil {
-			if cp.MaxRounds > 0 {
-				verifyTool.MaxRounds = cp.MaxRounds
-			}
-			if cp.NumTests > 0 {
-				verifyTool.NumTests = cp.NumTests
-			}
-			if cp.TimeoutSeconds > 0 {
-				verifyTool.Timeout = cp.TimeoutSeconds
+		// CoSPlay co-evolution code verification: pluggable via cosplayhook.
+		// When the cosplay package is present (main builds) the /code_verify
+		// tool and auto-verifier are wired here; builds without cosplay (e.g.
+		// a stripped PR branch) simply skip them.
+		if cp := cfg.Agent.Cosplay; cosplayhook.H.BuildCodeVerifyTool != nil {
+			if verifyTool := cosplayhook.H.BuildCodeVerifyTool(cp, execProv, provider.Request{}); verifyTool != nil {
+				reg.Add(verifyTool)
 			}
 		}
-		reg.Add(verifyTool)
-		// Model-backed generation/repair: when cosplay is enabled and a
-		// provider is available, the verifier uses the model to generate
-		// discriminating tests and repair fixes instead of the offline
-		// templates (which remain the parse-failure fallback).
-		if cp := cfg.Agent.Cosplay; cp != nil && cp.Enabled {
-			if backend := newModelBackend(execProv, provider.Request{}); backend != nil {
-				verifyTool.Gen = cosplay.ModelGenerator{Backend: backend}
-				verifyTool.Repair = cosplay.ModelRepairer{Backend: backend}
-			}
-		}
-		// Auto-on-mutation verification: when [agent.cosplay] enabled AND
-		// auto_on_mutation are set, mutated source files get an asynchronous
-		// bounded CoSPlay round after every file mutation (results as Notice
-		// events).
-		if cp := cfg.Agent.Cosplay; cp != nil && cp.Enabled && cp.AutoOnMutation {
-			cosplayAutoVerifier = cosplay.NewAutoVerifier(cosplay.AutoConfig{
-				NumTests:    cp.AutoNumTests,
-				MaxRounds:   cp.AutoMaxRounds,
-				Timeout:     time.Duration(cp.AutoTimeoutSeconds) * time.Second,
-				Concurrency: 1,
-			})
+		if cp := cfg.Agent.Cosplay; cp != nil && cp.Enabled && cp.AutoOnMutation &&
+			cosplayhook.H.BuildAutoVerifier != nil {
+			cosplayAutoVerifier = cosplayhook.H.BuildAutoVerifier(cp)
 		}
 		return "enabled task."
 	}

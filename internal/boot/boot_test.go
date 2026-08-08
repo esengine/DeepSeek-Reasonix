@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	_ "reasonix/internal/cosplay" // register cosplay hooks in tests
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
 	"reasonix/internal/config"

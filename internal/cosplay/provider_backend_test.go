@@ -1,4 +1,4 @@
-package boot
+package cosplay
 
 import (
 	"context"
@@ -44,8 +44,8 @@ func TestProviderBackendComplete(t *testing.T) {
 }
 
 func TestNewModelBackendNilProvider(t *testing.T) {
-	if b := newModelBackend(nil, provider.Request{}); b != nil {
-		t.Errorf("newModelBackend(nil) = %v, want nil", b)
+	if b := NewModelBackend(nil, provider.Request{}); b != nil {
+		t.Errorf("NewModelBackend(nil) = %v, want nil", b)
 	}
 }
 

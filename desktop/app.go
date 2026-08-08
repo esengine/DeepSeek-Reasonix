@@ -35,6 +35,7 @@ import (
 	"reasonix/internal/agent"
 	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
+	_ "reasonix/internal/cosplay" // registers cosplayhook.H for boot
 	"reasonix/internal/boot"
 	"reasonix/internal/botruntime"
 	"reasonix/internal/checkpoint"
