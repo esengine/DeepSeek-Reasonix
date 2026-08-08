@@ -207,7 +207,10 @@ func TestMaybeCompactOnResumeOversizedPromptCompacts(t *testing.T) {
 	}
 }
 
-func TestMaybeCompactOnResumeColdLargePromptCompacts(t *testing.T) {
+func TestMaybeCompactOnResumeColdLargePromptUntouched(t *testing.T) {
+	// Deferred compaction: a cold cache with a large-but-fitting prompt is left
+	// untouched — replay pays the miss price once, cheaper than rewriting the
+	// prefix on every resume. Only an input-overflow (would-400) prompt compacts.
 	fp := &fakeProvider{reply: "GOAL: cold replay avoided"}
 	sess := NewSession("sys")
 	for i := 0; i < 20; i++ {
@@ -228,8 +231,8 @@ func TestMaybeCompactOnResumeColdLargePromptCompacts(t *testing.T) {
 	a.cacheState = CacheStateCold
 
 	a.MaybeCompactOnResume(context.Background())
-	if len(a.compactionState.Projection.Messages) == 0 {
-		t.Fatal("cold cache + large prompt must compact on resume")
+	if st := a.compactionState; len(st.Projection.Messages) != 0 {
+		t.Fatal("cold cache + fitting prompt must NOT compact on resume (deferred policy)")
 	}
 }
 
