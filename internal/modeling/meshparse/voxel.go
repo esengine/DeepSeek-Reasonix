@@ -393,6 +393,13 @@ func maxF(a, b float64) float64 {
 	return b
 }
 
+func minF(a, b float64) float64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func dot(a, b Vec3) float64 { return a.X*b.X + a.Y*b.Y + a.Z*b.Z }
 
 func max(a, b int) int {

@@ -1,6 +1,7 @@
 package meshparse
 
 import (
+	"fmt"
 	"math"
 	"sort"
 )
@@ -231,4 +232,113 @@ func SortVertsForStableDescriptor(m *Mesh) []int {
 		return va.Z < vb.Z
 	})
 	return idx
+}
+
+// ---------------------------------------------------------------------------
+// Part-level descriptors (3D-PLOT-LLM pattern): instead of addressing "verts
+// 100-200", the agent addresses "<part_2>" — each connected component gets a
+// marker + cheap stats. Pure Go, read-only, adds a handful of tokens.
+// ---------------------------------------------------------------------------
+
+// PartDescriptor is one connected component's compact summary.
+type PartDescriptor struct {
+	Idx    int     `json:"idx"`    // marker index (<part_k>)
+	Verts  int     `json:"verts"`  // vertices in this part
+	Faces  int     `json:"faces"`  // faces in this part
+	Bounds Bounds  `json:"bounds"` // part-local AABB
+	Frac   float64 `json:"frac"`   // verts share of the whole mesh (0..1)
+}
+
+// PartDescriptors groups the mesh into connected components and returns a
+// per-part descriptor (marker + stats) so the agent can address a part by its
+// marker instead of a vertex range. Returns a single part when the mesh is one
+// component or has no faces.
+func PartDescriptors(m *Mesh) []PartDescriptor {
+	n := len(m.Verts)
+	if n == 0 {
+		return nil
+	}
+	parent := make([]int, n)
+	for i := range parent {
+		parent[i] = i
+	}
+	var find func(int) int
+	find = func(x int) int {
+		for parent[x] != x {
+			parent[x] = parent[parent[x]]
+			x = parent[x]
+		}
+		return x
+	}
+	union := func(a, b int) {
+		ra, rb := find(a), find(b)
+		if ra != rb {
+			parent[ra] = rb
+		}
+	}
+	for _, f := range m.Faces {
+		for i := 0; i < len(f.Verts); i++ {
+			union(f.Verts[i], f.Verts[(i+1)%len(f.Verts)])
+		}
+	}
+	// Group vertex indices by root (preserve first-seen order for stable idx).
+	order := []int{}
+	groups := map[int][]int{}
+	for i := 0; i < n; i++ {
+		r := find(i)
+		if _, ok := groups[r]; !ok {
+			order = append(order, r)
+		}
+		groups[r] = append(groups[r], i)
+	}
+	vertsInPart := map[int]bool{}
+	parts := make([]PartDescriptor, 0, len(order))
+	for k, root := range order {
+		verts := groups[root]
+		p := PartDescriptor{Idx: k, Verts: len(verts)}
+		// Face membership: a face belongs to the part of its first vertex.
+		for _, f := range m.Faces {
+			if len(f.Verts) == 0 {
+				continue
+			}
+			if find(f.Verts[0]) == root {
+				p.Faces++
+			}
+		}
+		// Part-local bounds.
+		var minV, maxV Vec3
+		for i, vi := range verts {
+			v := m.Verts[vi]
+			if i == 0 {
+				minV, maxV = v, v
+				continue
+			}
+			minV = Vec3{minF(minV.X, v.X), minF(minV.Y, v.Y), minF(minV.Z, v.Z)}
+			maxV = Vec3{maxF(minV.X, v.X), maxF(minV.Y, v.Y), maxF(minV.Z, v.Z)}
+		}
+		_ = vertsInPart
+		p.Bounds = Bounds{
+			Min: [3]float64{minV.X, minV.Y, minV.Z},
+			Max: [3]float64{maxV.X, maxV.Y, maxV.Z},
+			Size: [3]float64{
+				maxV.X - minV.X, maxV.Y - minV.Y, maxV.Z - minV.Z,
+			},
+		}
+		p.Bounds.Diameter = math.Sqrt(p.Bounds.Size[0]*p.Bounds.Size[0] + p.Bounds.Size[1]*p.Bounds.Size[1] + p.Bounds.Size[2]*p.Bounds.Size[2])
+		p.Frac = float64(len(verts)) / float64(n)
+		parts = append(parts, p)
+	}
+	return parts
+}
+
+// VoxelTokens renders the voxel model as a compact token sequence
+// ("x,y,z;c" per voxel, index-0 base) — SuperVoxelGPT-style: the agent reads
+// tokens, not raw grid coordinates. The 0-colour terminator makes the stream
+// self-terminating for generation back-ends.
+func VoxelTokens(vm *VoxelModel) []string {
+	toks := make([]string, 0, len(vm.Voxels))
+	for _, v := range vm.Voxels {
+		toks = append(toks, fmt.Sprintf("%d,%d,%d;%d", v.X, v.Y, v.Z, v.Color))
+	}
+	return toks
 }
