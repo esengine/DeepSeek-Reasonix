@@ -269,7 +269,13 @@ func Voxelize(m *Mesh, resolution int) (*VoxelModel, error) {
 					maxCoord := maxF(math.Abs(minV.X), math.Abs(maxV.X))
 					maxCoord = maxF(maxCoord, maxF(math.Abs(minV.Y), math.Abs(maxV.Y)))
 					maxCoord = maxF(maxCoord, maxF(math.Abs(minV.Z), math.Abs(maxV.Z)))
-					eps := 1e-9 * maxF(1, maxCoord)
+					// Shared-edge hit parameters differ by ~ulp of the
+					// intermediate magnitudes (~2.2e-16 x |coord| x
+					// conditioning). 1e-14 x max(1,maxCoord) covers that while
+					// staying far below real surface spacing (1e9 -> 1e-5
+					// window vs ~1e-1 cell size); the old 1e-9 x maxCoord grew
+					// to ~1.0 at 1e9 and merged genuinely separate surfaces.
+					eps := 1e-14 * maxF(1, maxCoord)
 					prev := hits[0]
 					nHits = 1
 					for _, h := range hits[1:] {
@@ -368,7 +374,12 @@ func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, ok bool)
 	maxAbs = maxF(maxAbs, math.Abs(c.X))
 	maxAbs = maxF(maxAbs, math.Abs(c.Y))
 	maxAbs = maxF(maxAbs, math.Abs(c.Z))
-	epsUV := 1e-7 * maxF(1, maxAbs*1e-9)
+	// epsUV must exceed the barycentric error, which scales as ~2.2e-16 ×
+	// maxAbs × conditioning. 1e-13 × max(1, maxAbs) keeps a tight ~1e-13
+	// floor at the origin and a ≥100× margin over ulp at large coordinates
+	// (1e7 → 1e-6, 1e9 → 1e-4); a slightly thicker surface shell is
+	// acceptable for voxelization.
+	epsUV := 1e-14 * maxF(1, maxAbs)
 	if u < -epsUV || v < -epsUV || u+v > 1+epsUV {
 		return 0, false
 	}
