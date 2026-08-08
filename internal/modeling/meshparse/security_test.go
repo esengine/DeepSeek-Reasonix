@@ -39,8 +39,6 @@ func TestParseObjNegativeResolvesWithinBounds(t *testing.T) {
 func TestGltfTraversalURIRejected(t *testing.T) {
 	dir := t.TempDir()
 	// glTF referencing ../../etc/passwd as an external buffer.
-	gltf := `{"asset":{"version":"2.0"},"buffers":[{"uri":"..%s","byteLength":4}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":4}],"accessors":[],"meshes":[{"primitives":[]}]}`
-	// Use a literal traversal (no %s in the JSON file).
 	bad := `{"asset":{"version":"2.0"},"buffers":[{"uri":"../../secret.bin","byteLength":4}],"meshes":[]}`
 	p := filepath.Join(dir, "evil.gltf")
 	if err := os.WriteFile(p, []byte(bad), 0o644); err != nil {
@@ -49,7 +47,6 @@ func TestGltfTraversalURIRejected(t *testing.T) {
 	if _, err := Parse(p); err == nil || !strings.Contains(err.Error(), "escapes") && !strings.Contains(err.Error(), "relative") {
 		t.Fatalf("traversal URI: want rejection, got %v", err)
 	}
-	_ = gltf
 }
 
 func TestGltfAccessorOutOfRange(t *testing.T) {
@@ -84,12 +81,14 @@ func TestVoxChunkTooLargeRejected(t *testing.T) {
 }
 
 func TestGltfNegativeByteOffsetRejected(t *testing.T) {
-	bad := `{"asset":{"version":"2.0"},"buffers":[{"byteLength":12}],"bufferViews":[{"buffer":0,"byteOffset":-5,"byteLength":12}],"accessors":[{"bufferView":0,"byteOffset":0,"componentType":5126,"count":1,"type":"VEC3"}],"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}]}`
-	// parseGLTFJSON path requires buffers to be loaded; simulate via sliceAccessor directly.
+	// bufferView negative offset.
 	if _, err := sliceAccessor([][]byte{make([]byte, 12)}, []gltfJSONBufferView{{Buffer: 0, ByteOffset: -5, ByteLength: 12}}, gltfJSONAccessor{BufferView: 0}); err == nil {
 		t.Fatalf("negative bufferView offset: want error")
 	}
-	_ = bad
+	// accessor negative offset (separate branch of the same guard).
+	if _, err := sliceAccessor([][]byte{make([]byte, 12)}, []gltfJSONBufferView{{Buffer: 0, ByteOffset: 0, ByteLength: 12}}, gltfJSONAccessor{BufferView: 0, ByteOffset: -5}); err == nil {
+		t.Fatalf("negative accessor offset: want error")
+	}
 }
 
 func TestGltfEmptyPrimitivesRejected(t *testing.T) {

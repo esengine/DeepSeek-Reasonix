@@ -284,7 +284,9 @@ func loadGLTFBuffer(gltfPath, uri string) ([]byte, error) {
 	}
 	fi, err := os.Stat(binPath)
 	if err != nil {
-		return nil, fmt.Errorf("gltf: external buffer %q: %w", uri, err)
+		// No path in the error (TOCTOU/stat race must not leak the resolved
+		// server path either) — same style as the EvalSymlinks branch above.
+		return nil, fmt.Errorf("gltf: external buffer %q not found or not readable", uri)
 	}
 	if fi.Size() > maxBufferBytes {
 		return nil, fmt.Errorf("gltf: external buffer %q is %d bytes, exceeds limit %d", uri, fi.Size(), maxBufferBytes)
