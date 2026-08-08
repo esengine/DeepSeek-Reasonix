@@ -14,7 +14,7 @@ import (
 	"reasonix/internal/tool"
 )
 
-// Golden baseline for the unified extension kernel / Extension Protocol v1
+// Golden baseline for the unified extension kernel / Extension Protocol v2
 // refactor. The kernel rebuilds runtime assembly (tools, skills, commands,
 // hooks, MCP, providers) behind a Builder that freezes an immutable
 // RuntimeSnapshot. The hard product contract is: with no v1 extension

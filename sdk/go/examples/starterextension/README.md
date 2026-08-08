@@ -1,6 +1,6 @@
 # Starter Extension
 
-This directory is a complete, installable Extension Protocol v1 plugin. Its
+This directory is a complete, installable Extension Protocol v2 plugin. Its
 sidecar intercepts `input.receive`; text beginning with `starter: ` is passed to
 the model with ` [rewritten by starter-extension]` appended.
 
@@ -49,7 +49,7 @@ the manifest or binary fails validation.
 - [`../../../../docs/EXTENSIONS.md`](../../../../docs/EXTENSIONS.md) explains
   reload, performance, cache behavior, compatibility, and trust.
 - [`../../../../docs/PLUGIN_PACKAGES.md`](../../../../docs/PLUGIN_PACKAGES.md)
-  defines every Manifest v1 field.
+  defines every Manifest v2 field.
 - [`../../../../docs/EXTENSION_PROTOCOL.md`](../../../../docs/EXTENSION_PROTOCOL.md)
   is the wire-protocol reference.
 - [`../fullsidecar/main.go`](../fullsidecar/main.go) demonstrates providers,

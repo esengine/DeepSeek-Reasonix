@@ -32,6 +32,7 @@ WINDOWS_CLINAME="reasonix-cli" # Windows cannot store Reasonix.exe and reasonix.
 GUARDNAME="reasonix-guard"
 LAUNCHERNAME="reasonix-launcher"
 windows_resource_tool_dir=""
+windows_host_include=""
 
 # desktop/ is a nested Go module, so the Go toolchain cannot discover the
 # repository VCS revision for the Wails binary. Link the same source identity
@@ -51,6 +52,9 @@ cli_identity_ldflags="-X main.version=$VERSION -X main.gitCommit=$GIT_COMMIT -X 
 cleanup() {
 	if [ -n "$windows_resource_tool_dir" ]; then
 		rm -rf "$windows_resource_tool_dir"
+	fi
+	if [ -n "$windows_host_include" ]; then
+		rm -f "$windows_host_include"
 	fi
 }
 trap cleanup EXIT
@@ -116,6 +120,15 @@ ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $product_docs_ldflags
 UPDATE_HELPER="reasonix-update-helper.exe"
 if [ "$os" = windows ]; then
 	windows_resource_tool_dir=$(mktemp -d)
+	windows_host_include="$ROOT/desktop/build/windows/installer/reasonix_host.nsh"
+	case "$(uname -s 2>/dev/null || printf '%s' unknown)" in
+		Darwin* | Linux* | FreeBSD*)
+			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''/bin/cp -f "%1" "reasonix-uninstall.exe"'\''' >"$windows_host_include"
+			;;
+		*)
+			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'\''' >"$windows_host_include"
+			;;
+	esac
 	windows_resource_tool="$windows_resource_tool_dir/reasonix-windows-resource.exe"
 	echo "==> build Windows resource stamper"
 	go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource

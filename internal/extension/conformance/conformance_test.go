@@ -29,7 +29,10 @@ import (
 )
 
 // examplePath is the built fullsidecar binary, shared by every test.
-var examplePath string
+var (
+	examplePath string
+	exampleRoot string
+)
 
 // TestMain builds the SDK example once for the whole run. The suite skips
 // cleanly when no go toolchain is available (minimal test environments); a
@@ -45,6 +48,7 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	sdkDir := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "sdk", "go")
+	exampleRoot = filepath.Join(sdkDir, "examples", "fullsidecar")
 	dir, err := os.MkdirTemp("", "fullsidecar-conformance-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "conformance: MkdirTemp:", err)
@@ -67,8 +71,10 @@ func TestMain(m *testing.M) {
 // Host client fixture
 
 const (
-	testPluginID = "conformance-ext"
-	testProvider = "plugin/conformance-ext/fake/echo"
+	testPluginID              = "full-sidecar"
+	testProvider              = "plugin/full-sidecar/fake/echo"
+	fixtureProviderSchemaHash = "sha256:416af537aeb7edd2ff0b96fd2ecb385bc10f900e8b320292857c5279cb5bce50"
+	fixtureUIActionSchemaHash = "sha256:8532d24af25d5aaeb763c35d8c9d3283d8604a3473f8ddd06a4c910565b86aeb"
 )
 
 // startExample launches the example under the real host sidecar client with a
@@ -76,25 +82,13 @@ const (
 // runtime spec (env, under-declared manifests); opts tunes ClientOptions.
 func startExample(t *testing.T, mutate func(rt *pluginpkg.RuntimeSpec), opts func(*sidecar.ClientOptions)) *sidecar.Client {
 	t.Helper()
-	rt := &pluginpkg.RuntimeSpec{
-		Command:      examplePath,
-		Intercepts:   []string{"input.receive", "tool.before", "system_prompt.build", "session.start"},
-		Replaces:     []string{"system_prompt"},
-		Capabilities: []string{"providers", "ui"},
-	}
+	_, item := installExamplePackage(t)
 	if mutate != nil {
-		mutate(rt)
+		mutate(item.Package.Manifest.Runtime)
 	}
-	root := t.TempDir()
-	pkg := pluginpkg.Package{
-		Root:         root,
-		ManifestKind: "reasonix",
-		Manifest:     pluginpkg.Manifest{Name: testPluginID, Version: "1.0.0", Runtime: rt},
-	}
-	installed := pluginpkg.InstalledPlugin{Name: testPluginID, Version: "1.0.0", Enabled: true, Root: root}
 	clientOpts := sidecar.ClientOptions{
-		Package:   pkg,
-		Installed: installed,
+		Package:   item.Package,
+		Installed: item.Installed,
 		Session:   protocol.SessionContext{SessionID: "sess-conf", WorkspaceRoot: "/ws", Generation: 1},
 	}
 	if opts != nil {
@@ -268,28 +262,32 @@ func TestHandshakeAccepted(t *testing.T) {
 	if len(h.UIActions) != 1 || h.UIActions[0].ActionID != "demo" {
 		t.Fatalf("uiActions = %+v", h.UIActions)
 	}
+	if len(h.Provides) != 4 {
+		t.Fatalf("provides = %+v", h.Provides)
+	}
+	wantProvides := map[string]string{
+		"plugin/full-sidecar/interceptors/default":     "",
+		"plugin/full-sidecar/strategies/system_prompt": "",
+		"plugin/full-sidecar/provider/fake/echo":       fixtureProviderSchemaHash,
+		"plugin/full-sidecar/uiaction/demo":            fixtureUIActionSchemaHash,
+	}
+	for _, provided := range h.Provides {
+		key := provided.Namespace + "/" + provided.Kind + "/" + provided.ID
+		if want, ok := wantProvides[key]; !ok || provided.SchemaHash != want {
+			t.Fatalf("handshake provided capability %q has schemaHash %q", key, provided.SchemaHash)
+		}
+	}
 }
 
 // TestHandshakeUnderDeclaredRejected proves the manifest contract: an
 // extension activating a capability its manifest did not declare is refused
 // with capability_not_declared.
 func TestHandshakeUnderDeclaredRejected(t *testing.T) {
-	rt := &pluginpkg.RuntimeSpec{
-		Command:      examplePath,
-		Intercepts:   []string{"input.receive", "tool.before", "system_prompt.build", "session.start"},
-		Replaces:     []string{"system_prompt"},
-		Capabilities: []string{"ui"}, // no "providers": the example still declares one
-	}
-	root := t.TempDir()
-	pkg := pluginpkg.Package{
-		Root:         root,
-		ManifestKind: "reasonix",
-		Manifest:     pluginpkg.Manifest{Name: testPluginID, Version: "1.0.0", Runtime: rt},
-	}
-	installed := pluginpkg.InstalledPlugin{Name: testPluginID, Version: "1.0.0", Enabled: true, Root: root}
+	_, item := installExamplePackage(t)
+	item.Package.Manifest.Runtime.Capabilities = []string{"ui"} // no "providers": the example still declares one
 	_, err := sidecar.StartClient(context.Background(), sidecar.ClientOptions{
-		Package:   pkg,
-		Installed: installed,
+		Package:   item.Package,
+		Installed: item.Installed,
 		Session:   protocol.SessionContext{SessionID: "sess-conf", WorkspaceRoot: "/ws", Generation: 1},
 	})
 	if err == nil {

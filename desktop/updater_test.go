@@ -1092,8 +1092,8 @@ func TestExtractLinuxReleaseUnitRejectsAmbiguousMembers(t *testing.T) {
 }
 
 func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
-	root := t.TempDir()
-	source := t.TempDir()
+	root := robustTempDir(t)
+	source := robustTempDir(t)
 	for _, name := range []string{installlayout.DesktopBinaryName(), installlayout.CLIBinaryName()} {
 		if err := os.WriteFile(filepath.Join(source, name), []byte("old-"+name), 0o700); err != nil {
 			t.Fatal(err)
@@ -1161,8 +1161,8 @@ func TestApplyLinuxVersionedActivatesWithoutPersistingGuard(t *testing.T) {
 }
 
 func TestApplyLinuxHoldsReleaseUnitLockDuringReplace(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("REASONIX_HOME", t.TempDir())
+	dir := robustTempDir(t)
+	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	exe := filepath.Join(dir, "reasonix-desktop")
 	releasePaths := releaseUnitPathsFor(dir, "linux")
 	for _, path := range releasePaths {

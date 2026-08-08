@@ -1,0 +1,9 @@
+prompt = """Build a word-frequency CLI in wordfreq.py, runnable as `python3 wordfreq.py INPUT [--top N] [--stopwords FILE]`:
+- tokens are maximal runs of ASCII letters, lowercased; everything else separates tokens
+- count token frequencies in INPUT
+- if --stopwords FILE is given, ignore tokens listed in that file (one per line)
+- print the top N tokens (default 10), one per line as `word count`, sorted by count descending, ties broken alphabetically ascending
+- print nothing else"""
+class = "long-horizon"
+max_steps = 30
+timeout_sec = 600

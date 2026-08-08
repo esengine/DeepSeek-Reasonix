@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -18,7 +19,7 @@ func TestCompactionStateAtomicSaveLoad(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sess.jsonl")
 	st := CompactionState{
-		SchemaVersion:     compactionStateSchemaV1,
+		SchemaVersion:     compactionStateSchemaCurrent,
 		TranscriptVersion: 3,
 		Projection: ContextProjection{
 			Messages: []provider.Message{
@@ -44,12 +45,83 @@ func TestCompactionStateAtomicSaveLoad(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("load: ok=%v err=%v", ok, err)
 	}
-	if got.TranscriptVersion != 3 || got.LastMode != CompactionModeSummarized {
+	if got.SchemaVersion != compactionStateSchemaCurrent || got.TranscriptVersion != 3 || got.LastMode != CompactionModeSummarized {
 		t.Fatalf("loaded state = %+v", got)
 	}
 	if len(got.Projection.Messages) != 2 || got.Projection.CoveredCount != 10 {
 		t.Fatalf("projection = %+v", got.Projection)
 	}
+}
+
+func TestLoadCompactionStateAcceptsLegacyV1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.jsonl")
+	legacy := CompactionState{
+		SchemaVersion:     compactionStateSchemaV1,
+		TranscriptVersion: 2,
+		Projection: ContextProjection{
+			Messages:          []provider.Message{{Role: provider.RoleUser, Content: "legacy summary"}},
+			TranscriptVersion: 2,
+			ProjectionVersion: 1,
+			CoveredCount:      3,
+		},
+		LastTrigger: CompactionTriggerManual,
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ContextStatePath(path), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := LoadCompactionState(path)
+	if err != nil || !ok {
+		t.Fatalf("load legacy V1: ok=%v err=%v", ok, err)
+	}
+	if got.SchemaVersion != compactionStateSchemaV1 || got.Projection.Messages[0].Content != "legacy summary" {
+		t.Fatalf("legacy state changed: %+v", got)
+	}
+}
+
+func TestSaveCompactionStateCreatesPreviousReaderBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "current.jsonl")
+	if err := SaveCompactionState(path, CompactionState{
+		Projection: ContextProjection{
+			Messages:     []provider.Message{{Role: provider.RoleUser, Content: "logical summary"}, {Role: provider.RoleUser, Content: "retained anchor"}},
+			CoveredCount: 2,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(ContextStatePath(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var header struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		t.Fatal(err)
+	}
+	if header.SchemaVersion != compactionStateSchemaCurrent {
+		t.Fatalf("written schema = %d, want %d", header.SchemaVersion, compactionStateSchemaCurrent)
+	}
+	if previousCompactionReaderAccepts(raw) {
+		t.Fatal("V1-only reader would accept a sidecar with V2 logical message invariants")
+	}
+	if _, ok, err := LoadCompactionState(path); err != nil || !ok {
+		t.Fatalf("current reader rejected V2 sidecar: ok=%v err=%v", ok, err)
+	}
+}
+
+func previousCompactionReaderAccepts(raw []byte) bool {
+	var header struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	if json.Unmarshal(raw, &header) != nil {
+		return false
+	}
+	return header.SchemaVersion == 0 || header.SchemaVersion == compactionStateSchemaV1
 }
 
 func TestCompactToProjectionLeavesCanonicalIntact(t *testing.T) {

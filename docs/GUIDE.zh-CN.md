@@ -632,6 +632,17 @@ Reasonix 是一个 MCP 客户端。`[[plugins]]` 的 `type` 选择传输：`stdi
 `headers`（`${VAR}` / `${VAR:-default}` 从环境展开，密钥不入文件）。
 `sse` 则兼容仍使用持久 GET 与 server 公布 POST endpoint 的旧版远程 server。
 
+远程 HTTP server 未配置静态 `Authorization` header 时，认证要求会显示为 **登录**。
+CLI 可运行 `reasonix mcp auth <name>`，桌面端则在 MCP 面板点击该 server 的 **登录**。
+Reasonix 会执行 OAuth 元数据发现、动态客户端注册、PKCE S256 授权与
+refresh token 轮换；发现和 token 请求与 MCP 连接使用相同的 Reasonix 网络代理设置。
+
+OAuth client 与 token 状态保存在工作区之外、该 server 私有的 Reasonix 状态目录中，文件权限
+为 `0600`，并绑定完整的 resource URL。显式静态 `Authorization` header 始终优先。
+**清除认证** 只删除 Reasonix 本地 OAuth 状态，不会退出第三方浏览器会话。Reasonix 仅在用户
+主动点击或运行登录命令后打开浏览器，不会因后台工具调用失败而自动弹出浏览器。删除 MCP server
+也会删除其本地 OAuth 状态；若删除后有同一 resource 的低优先级声明生效，则保留该状态。
+
 可在 **设置 → MCP 服务器 → 浏览市场** 打开官方 MCP Registry，也可使用
 `reasonix mcp browse [query]` 与 `reasonix mcp install <registry-name>`。Registry
 只在用户显式浏览或安装时联网，不进入启动路径。需要 secret 或必填参数的条目只显示为手动配置，

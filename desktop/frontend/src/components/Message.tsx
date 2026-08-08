@@ -13,7 +13,9 @@ import { useT } from "../lib/i18n";
 import { ImageViewer } from "./ImageViewer";
 import { Tooltip } from "./Tooltip";
 import { useGSAPCollapse } from "../lib/useGSAPCollapse";
-import { displayReasoningText } from "../lib/reasoningDisplay";
+import { displayReasoningText, STREAMING_REASONING_WINDOW_STEP_CHARS, STREAMING_REASONING_WINDOW_STEP_LINES } from "../lib/reasoningDisplay";
+import { ReasoningSummary } from "./ReasoningSummary";
+import { historyEntryIdForItemId } from "../lib/transcriptRows";
 import { stripMemoryCompilerExecution } from "../lib/memoryCompilerDisplay";
 import { visibleTranscriptMemoryCitations } from "../lib/memoryCitationVisibility";
 import { invocationSegmentsFromMessage, type InvocationMetadataMap } from "../lib/invocationDisplay";
@@ -148,12 +150,10 @@ export function parseSelectedTextBlocks(text: string, submitText?: string): Sele
 
 function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
   const t = useT();
-  const bodyRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const clean = visibleTranscriptMemoryCitations(citations)
     .filter((citation) => (citation.source ?? citation.id ?? citation.note ?? "").trim() !== "")
     .slice(0, 5);
-  useGSAPCollapse(bodyRef, open);
   if (clean.length === 0) return null;
   return (
     <div className="msg-memory-citations">
@@ -167,7 +167,7 @@ function MemoryCitations({ citations }: { citations?: MemoryCitation[] }) {
         <span>{t("msg.memoryCompilerCitationsCount", { n: clean.length })}</span>
       </button>
       {open && (
-        <div ref={bodyRef} className="msg-memory-citations__body">
+        <div className="msg-memory-citations__body">
           {clean.map((citation, index) => {
             const lines = memoryCitationLines(citation, t);
             return (
@@ -786,7 +786,7 @@ export function TurnActions({
             className={`turn-actions__btn${confirmScope === "fork" ? " turn-actions__btn--confirm" : ""}`}
             type="button"
             disabled={Boolean(forkDisabledReason)}
-            title={forkDisabledReason || undefined}
+            title={forkDisabledReason || t("rewind.forkTooltip")}
             onClick={() => selectRewind("fork")}
           >
             <GitBranch size={13} />
@@ -867,14 +867,13 @@ function ReasoningPanel({
   truncateStreamingReasoning: boolean;
 }) {
   const t = useT();
-  const reasoningBodyRef = useRef<HTMLDivElement>(null);
   // Thinking streams in before the answer — show it live while the model is still
   // working, then it stays available behind the toggle once the answer arrives.
   const [reasoningOpen, setReasoningOpen] = useState((expandWhileStreaming && item.streaming) || defaultExpanded);
+  const reasoningBodyRef = useRef<HTMLDivElement>(null);
   const userOverridden = useRef(false);
   const prevStreamingRef = useRef(item.streaming);
   const prevReasoningCompleteRef = useRef(item.reasoningComplete ?? false);
-  useGSAPCollapse(reasoningBodyRef, reasoningOpen);
 
   // Follow the current display mode while streaming unless the user manually
   // toggled this message; auto-close at stream end for untouched messages.
@@ -914,12 +913,13 @@ function ReasoningPanel({
   const isReasoningRunning = item.streaming && !item.reasoningComplete;
   const visibleReasoning = reasoningOpen
     ? displayReasoningText(item.reasoning, {
-        streaming: item.streaming,
-        truncateStreaming: truncateStreamingReasoning,
+        streaming: isReasoningRunning,
+        truncateStreaming: truncateStreamingReasoning, stableWindowChars: STREAMING_REASONING_WINDOW_STEP_CHARS, stableWindowLines: STREAMING_REASONING_WINDOW_STEP_LINES,
       })
     : "";
   const label = isReasoningRunning ? t("msg.thinkingRunning") : t("msg.thinking");
   const meta = isReasoningRunning ? "" : reasoningDurationLabel(item.reasoningDurationMs, t);
+  useGSAPCollapse(reasoningBodyRef, reasoningOpen);
 
   return (
     <div className="reasoning">
@@ -935,9 +935,8 @@ function ReasoningPanel({
         {meta && <span className="reasoning__meta">{meta}</span>}
         <ChevronRight className={`reasoning__chevron${reasoningOpen ? " reasoning__chevron--open" : ""}`} size={12} />
       </button>
-      {reasoningOpen && (
-        <div ref={reasoningBodyRef} className="reasoning__body">{visibleReasoning}</div>
-      )}
+      {reasoningOpen ? <div ref={reasoningBodyRef} className="reasoning__body"><Markdown text={visibleReasoning} streaming={isReasoningRunning} /></div>
+        : <ReasoningSummary text={item.reasoning} streaming={isReasoningRunning} onOpen={toggleReasoning} />}
     </div>
   );
 }
@@ -945,7 +944,7 @@ function ReasoningPanel({
 export const AssistantMessage = memo(function AssistantMessage({
   item,
   defaultExpanded = false,
-  expandWhileStreaming = true,
+  expandWhileStreaming = false,
   truncateStreamingReasoning = false,
   creationMode = false,
 }: {
@@ -972,7 +971,12 @@ export const AssistantMessage = memo(function AssistantMessage({
       )}
       {hasText && (
         <div className="msg__body">
-          <Markdown text={item.text} plainStatusBlocks={creationMode} streaming={item.streaming} />
+          <Markdown
+            text={item.text}
+            plainStatusBlocks={creationMode}
+            streaming={item.streaming}
+            entryId={historyEntryIdForItemId(item.id)}
+          />
         </div>
       )}
       <MemoryCitations citations={item.memoryCitations} />

@@ -1,5 +1,5 @@
 // Package extension is the Go SDK for Reasonix extension sidecars speaking
-// Extension Protocol v1 over stdio. An extension is a separate process: the
+// Extension Protocol v2 over stdio. An extension is a separate process: the
 // Reasonix host launches it, sends extension/initialize first, drives
 // intercepts, events, provider streams, and UI calls, and finally asks it to
 // stop with extension/shutdown.

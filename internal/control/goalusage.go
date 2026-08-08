@@ -74,6 +74,24 @@ func (t *goalUsageTee) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	}
 }
 
+// RecordOutcomeProgress forwards the shadow outcome sample unchanged.
+func (t *goalUsageTee) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	event.RecordOutcomeProgress(t.inner, sample)
+}
+
+// RecordDelegationAdmission forwards the shadow admission verdict unchanged.
+func (t *goalUsageTee) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
+	event.RecordDelegationAdmission(t.inner, a)
+}
+
+// RecordContractShadow forwards the shadow contract audit unchanged.
+func (t *goalUsageTee) RecordContractShadow(a event.ContractShadowAudit) {
+	if t == nil || t.inner == nil {
+		return
+	}
+	event.RecordContractShadow(t.inner, a)
+}
+
 // setActiveRecorder binds the current goal turn's recorder (nil clears it).
 func (t *goalUsageTee) setActiveRecorder(rec *goalTurnRecorder) {
 	if t == nil {

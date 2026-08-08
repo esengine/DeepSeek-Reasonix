@@ -1,5 +1,5 @@
 // Package dispatch is the host-side interceptor dispatcher for Extension
-// Protocol v1 (stage 6a). It walks the kernel's frozen interceptor chain in
+// Protocol v2 (stage 6a). It walks the kernel's frozen interceptor chain in
 // order, applies each extension's ruling (continue / block / replace, plus
 // allow / deny at permission.decision only), and runs the single-owner
 // strategy replacements for the system_prompt, context, compaction, and

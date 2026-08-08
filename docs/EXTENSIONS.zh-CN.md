@@ -8,7 +8,7 @@ prompts 和主题——全部基于稳定、带版本号的契约。
 
 - **声明式**（任意插件包）：skills、agents、commands、prompts、hooks、
   MCP servers 和主题。它们是文件与配置，按宿主正常权限运行。
-- **代码型 Runtime**（Manifest v1 的 `runtime` 块）：通过 Extension
+- **代码型 Runtime**（Manifest v2 的 `runtime` 块）：通过 Extension
   Protocol 驱动的 Sidecar 进程。代码型扩展是**完全信任（full trust）**
   的——安装前请务必阅读下文安全章节。
 
@@ -99,9 +99,9 @@ go test ./internal/extension/... -run '^$' -bench 'Extension|Dispatch' -benchmem
 拦截效果放在同一目录。标准开发流程是：
 
 1. 在 `reasonix-plugin.json` 中加入
-   `apiVersion: "reasonix.io/plugin/v1"`，声明 `contributes` 与
+   `apiVersion: "reasonix.io/plugin/v2"`，声明 `contributes` 与
    （可选的）`runtime`——见
-   [插件包文档](./PLUGIN_PACKAGES.zh-CN.md#manifest-v1扩展)。
+   [插件包文档](./PLUGIN_PACKAGES.zh-CN.md#manifest-v2扩展)。
 2. 实现 Sidecar。[Go SDK](../sdk/go/README.md)（仅依赖标准库）已经处理传输、
    握手、序号、content ref 与关闭；语言无关的参考见
    [线协议](./EXTENSION_PROTOCOL.zh-CN.md)和
@@ -118,7 +118,9 @@ SDK 使用不可变的 `sdk/go/vX.Y.Z` 标签发布，首个公开版本为
 
 ## 兼容性
 
-- 没有 `apiVersion` 的 Manifest 继续按旧格式解析。
+- 原生 `reasonix-plugin.json` 必须声明精确版本
+  `reasonix.io/plugin/v2`。扩展 Manifest v1 从未公开发布，因此不提供
+  v1 双读或自动迁移路径。
 - 旧版本 Reasonix 会忽略扩展专有状态：会话级
   `<session>.extensions.json` sidecar 文件、`plugin/...` 模型 ref
   （仅报告模型不可用），以及 `extension_surface`/`extension_status`

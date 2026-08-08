@@ -101,6 +101,21 @@ ok(
   "GLM reasoning protocol is localized in every supported locale",
 );
 ok(
+  settingsSource.includes('settings.reasoningSummary') &&
+    settingsSource.includes('settings.reasoningSummary.on') &&
+    settingsSource.includes('setReasoningSummaryEnabled(enabled)'),
+  "General settings exposes live reasoning-summary options",
+);
+ok(
+  [enLocaleSource, zhLocaleSource, zhTWLocaleSource].every((source) =>
+    source.includes('"settings.reasoningSummary"') &&
+    source.includes('"settings.reasoningSummaryHint"') &&
+    source.includes('"settings.reasoningSummary.on"') &&
+    source.includes('"settings.reasoningSummary.off"'),
+  ),
+  "reasoning-summary switch labels are localized in every supported locale",
+);
+ok(
   /mockPreset\("deepseek-anthropic",\s*"DeepSeek Anthropic"/.test(bridgeSource),
   "browser mock exposes the DeepSeek Anthropic preset",
 );

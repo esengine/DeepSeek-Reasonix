@@ -18,20 +18,20 @@ func jsonText(v any) string {
 	return string(b)
 }
 
-// writeV1Plugin writes a Manifest v1 plugin tree: the manifest plus the
+// writeV2Plugin writes a Manifest v2 plugin tree: the manifest plus the
 // on-disk assets its paths refer to.
-func writeV1Plugin(t *testing.T, root, manifest string) {
+func writeV2Plugin(t *testing.T, root, manifest string) {
 	t.Helper()
 	writeTestFile(t, filepath.Join(root, NativeManifest), manifest)
 }
 
-// v1ExampleManifest is the canonical Manifest v1 example: contributes with
+// v2ExampleManifest is the canonical Manifest v2 example: contributes with
 // every path-list kind plus a full runtime declaration.
-const v1ExampleManifest = `{
-  "apiVersion": "reasonix.io/plugin/v1",
+const v2ExampleManifest = `{
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "example",
   "version": "1.0.0",
-  "description": "Example v1 plugin",
+  "description": "Example v2 plugin",
   "contributes": {
     "skills": ["skills"],
     "agents": ["agents"],
@@ -51,8 +51,8 @@ const v1ExampleManifest = `{
   }
 }`
 
-// writeV1ExampleAssets materializes every path the example manifest declares.
-func writeV1ExampleAssets(t *testing.T, root string) {
+// writeV2ExampleAssets materializes every path the example manifest declares.
+func writeV2ExampleAssets(t *testing.T, root string) {
 	t.Helper()
 	writeTestFile(t, filepath.Join(root, "skills", "demo", "SKILL.md"), "---\ndescription: demo skill\n---\nDemo")
 	writeTestFile(t, filepath.Join(root, "agents", "reviewer.md"), "---\ndescription: reviews\n---\nReview")
@@ -62,14 +62,14 @@ func writeV1ExampleAssets(t *testing.T, root string) {
 	writeTestFile(t, filepath.Join(root, "bin", "example"), "#!/bin/sh\n")
 }
 
-func TestManifestV1FullParse(t *testing.T) {
+func TestManifestV2FullParse(t *testing.T) {
 	root := t.TempDir()
-	writeV1Plugin(t, root, v1ExampleManifest)
-	writeV1ExampleAssets(t, root)
+	writeV2Plugin(t, root, v2ExampleManifest)
+	writeV2ExampleAssets(t, root)
 
 	pkg, warnings, err := ParseDir(root)
 	if err != nil {
-		t.Fatalf("ParseDir v1 manifest: %v", err)
+		t.Fatalf("ParseDir v2 manifest: %v", err)
 	}
 	if len(warnings) != 0 {
 		t.Fatalf("unexpected warnings: %v", warnings)
@@ -78,7 +78,7 @@ func TestManifestV1FullParse(t *testing.T) {
 		t.Fatalf("ManifestKind = %q, want reasonix", pkg.ManifestKind)
 	}
 	m := pkg.Manifest
-	if m.Name != "example" || m.Version != "1.0.0" || m.Description != "Example v1 plugin" {
+	if m.Name != "example" || m.Version != "1.0.0" || m.Description != "Example v2 plugin" {
 		t.Fatalf("identity fields: %+v", m)
 	}
 	if !reflect.DeepEqual(m.Skills, []string{"skills"}) {
@@ -132,9 +132,9 @@ func TestManifestV1FullParse(t *testing.T) {
 	}
 }
 
-func TestManifestV1RejectsUnknownFieldsWithPath(t *testing.T) {
+func TestManifestV2RejectsUnknownFieldsWithPath(t *testing.T) {
 	base := `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "strict-demo",
   "contributes": {"skills": ["skills"]},
   "hooks": {"PreToolUse": [{"match": "Bash", "command": "./pre.sh"}]},
@@ -175,7 +175,7 @@ func TestManifestV1RejectsUnknownFieldsWithPath(t *testing.T) {
 			}
 			tc.mutate(doc)
 			root := t.TempDir()
-			writeV1Plugin(t, root, jsonText(doc))
+			writeV2Plugin(t, root, jsonText(doc))
 			writeTestFile(t, filepath.Join(root, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nS")
 			_, _, err := ParseDir(root)
 			if err == nil {
@@ -188,28 +188,28 @@ func TestManifestV1RejectsUnknownFieldsWithPath(t *testing.T) {
 	}
 }
 
-func TestManifestV1APIVersionGating(t *testing.T) {
+func TestManifestAPIVersionV2Gating(t *testing.T) {
 	cases := []struct {
 		apiVersion any
 		wantErr    string
 	}{
-		{"reasonix.io/plugin/v2", `unsupported apiVersion "reasonix.io/plugin/v2" (this Reasonix supports reasonix.io/plugin/v1)`},
+		{"reasonix.io/plugin/v2", ""},
+		{"reasonix.io/plugin/v1", `unsupported apiVersion`},
 		{"reasonix.io/plugin/v0", `unsupported apiVersion`},
 		{"reasonix.io/plugin/v10.2", `unsupported apiVersion`},
-		{"v1", `invalid apiVersion "v1"`},
-		{"reasonix.io/plugin/vX", `invalid apiVersion`},
-		{"foo", `invalid apiVersion "foo"`},
+		{"v1", `unsupported apiVersion`},
+		{"reasonix.io/plugin/vX", `unsupported apiVersion`},
+		{"foo", `unsupported apiVersion`},
 		{42, `apiVersion must be a string`},
-		// A known major with a minor parses as v1: strict field rejection is
-		// what guards against fields the minor revision added.
-		{"reasonix.io/plugin/v1.1", ""},
-		{"reasonix.io/plugin/v1.0", ""},
+		// Exact v2 only — v2.x minor aliases are rejected by design.
+		{"reasonix.io/plugin/v2.1", `unsupported apiVersion`},
+		{"reasonix.io/plugin/v2.0", `unsupported apiVersion`},
 	}
 	for _, tc := range cases {
 		t.Run(strings.ReplaceAll(strings.TrimSpace(jsonText(tc.apiVersion)), `"`, ""), func(t *testing.T) {
 			root := t.TempDir()
 			manifest := `{"apiVersion": ` + jsonText(tc.apiVersion) + `, "name": "ver-demo"}`
-			writeV1Plugin(t, root, manifest)
+			writeV2Plugin(t, root, manifest)
 			_, _, err := ParseDir(root)
 			if tc.wantErr == "" {
 				if err != nil {
@@ -224,10 +224,10 @@ func TestManifestV1APIVersionGating(t *testing.T) {
 	}
 }
 
-func TestManifestV1LegacyFieldsMergeWithContributes(t *testing.T) {
+func TestManifestV2LegacyFieldsMergeWithContributes(t *testing.T) {
 	root := t.TempDir()
-	writeV1Plugin(t, root, `{
-  "apiVersion": "reasonix.io/plugin/v1",
+	writeV2Plugin(t, root, `{
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "merge-demo",
   "skills": ["legacy-skills", "shared"],
   "commands": "legacy-commands",
@@ -282,20 +282,20 @@ func TestManifestV1LegacyFieldsMergeWithContributes(t *testing.T) {
 	}
 }
 
-func TestManifestV1MergeConflictsFail(t *testing.T) {
+func TestManifestV2MergeConflictsFail(t *testing.T) {
 	cases := []struct {
 		name     string
 		manifest string
 		wantErr  string
 	}{
 		{"hook redefined", `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "conflict-demo",
   "hooks": {"SessionStart": [{"command": "./start.sh", "timeout": 5000}]},
   "contributes": {"hooks": {"SessionStart": [{"command": "./start.sh", "timeout": 9000}]}}
 }`, `hook "./start.sh" (event SessionStart) is defined differently`},
 		{"mcp server redefined", `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "conflict-demo",
   "mcpServers": {"srv": {"type": "stdio", "command": "./a"}},
   "contributes": {"mcpServers": {"srv": {"type": "stdio", "command": "./b"}}}
@@ -304,7 +304,7 @@ func TestManifestV1MergeConflictsFail(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeV1Plugin(t, root, tc.manifest)
+			writeV2Plugin(t, root, tc.manifest)
 			_, _, err := ParseDir(root)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
@@ -313,10 +313,10 @@ func TestManifestV1MergeConflictsFail(t *testing.T) {
 	}
 }
 
-func TestManifestV1PromptsAndCommandsStaySeparateSets(t *testing.T) {
+func TestManifestV2PromptsAndCommandsStaySeparateSets(t *testing.T) {
 	root := t.TempDir()
-	writeV1Plugin(t, root, `{
-  "apiVersion": "reasonix.io/plugin/v1",
+	writeV2Plugin(t, root, `{
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "dual-demo",
   "contributes": {
     "commands": ["shared"],
@@ -339,7 +339,7 @@ func TestManifestV1PromptsAndCommandsStaySeparateSets(t *testing.T) {
 	}
 }
 
-func TestManifestV1RuntimeValidation(t *testing.T) {
+func TestManifestV2RuntimeValidation(t *testing.T) {
 	cases := []struct {
 		name    string
 		runtime string
@@ -360,7 +360,7 @@ func TestManifestV1RuntimeValidation(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			writeV1Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v1", "name": "rt-demo", "runtime": `+tc.runtime+`}`)
+			writeV2Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v2", "name": "rt-demo", "runtime": `+tc.runtime+`}`)
 			_, _, err := ParseDir(root)
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("error = %v, want it to contain %q", err, tc.wantErr)
@@ -369,10 +369,10 @@ func TestManifestV1RuntimeValidation(t *testing.T) {
 	}
 }
 
-func TestManifestV1RuntimeAcceptsBoundaryValues(t *testing.T) {
+func TestManifestV2RuntimeAcceptsBoundaryValues(t *testing.T) {
 	root := t.TempDir()
-	writeV1Plugin(t, root, `{
-  "apiVersion": "reasonix.io/plugin/v1",
+	writeV2Plugin(t, root, `{
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "rt-ok",
   "runtime": {
     "command": "plugin-runtime",
@@ -390,10 +390,10 @@ func TestManifestV1RuntimeAcceptsBoundaryValues(t *testing.T) {
 	}
 }
 
-func TestManifestV1PathSafety(t *testing.T) {
+func TestManifestV2PathSafety(t *testing.T) {
 	t.Run("dot-dot escape rejected", func(t *testing.T) {
 		root := t.TempDir()
-		writeV1Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v1", "name": "esc", "contributes": {"skills": ["../outside"]}}`)
+		writeV2Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v2", "name": "esc", "contributes": {"skills": ["../outside"]}}`)
 		if _, _, err := ParseDir(root); err == nil || !strings.Contains(err.Error(), "must be relative and stay inside the plugin root") {
 			t.Fatalf("error = %v, want the traversal refusal", err)
 		}
@@ -405,8 +405,8 @@ func TestManifestV1PathSafety(t *testing.T) {
 	} {
 		t.Run(name+" absolute path rejected", func(t *testing.T) {
 			root := t.TempDir()
-			writeV1Plugin(t, root, jsonText(map[string]any{
-				"apiVersion": ManifestAPIVersionV1,
+			writeV2Plugin(t, root, jsonText(map[string]any{
+				"apiVersion": ManifestAPIVersionV2,
 				"name":       "abs",
 				"contributes": map[string]any{
 					"prompts": []string{absolute},
@@ -421,7 +421,7 @@ func TestManifestV1PathSafety(t *testing.T) {
 		outside := t.TempDir()
 		writeTestFile(t, filepath.Join(outside, "evil.md"), "evil")
 		root := t.TempDir()
-		writeV1Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v1", "name": "linkesc", "contributes": {"skills": ["skills-link"]}}`)
+		writeV2Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v2", "name": "linkesc", "contributes": {"skills": ["skills-link"]}}`)
 		if err := os.Symlink(outside, filepath.Join(root, "skills-link")); err != nil {
 			t.Skipf("symlinks unavailable: %v", err)
 		}
@@ -431,7 +431,7 @@ func TestManifestV1PathSafety(t *testing.T) {
 	})
 	t.Run("in-root symlink accepted", func(t *testing.T) {
 		root := t.TempDir()
-		writeV1Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v1", "name": "linkok", "contributes": {"skills": ["skills-link"]}}`)
+		writeV2Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v2", "name": "linkok", "contributes": {"skills": ["skills-link"]}}`)
 		writeTestFile(t, filepath.Join(root, "real-skills", "s", "SKILL.md"), "---\ndescription: s\n---\nS")
 		if err := os.Symlink(filepath.Join(root, "real-skills"), filepath.Join(root, "skills-link")); err != nil {
 			t.Skipf("symlinks unavailable: %v", err)
@@ -444,7 +444,7 @@ func TestManifestV1PathSafety(t *testing.T) {
 		outside := t.TempDir()
 		writeTestFile(t, filepath.Join(outside, "evil.reasonix-theme"), "evil")
 		root := t.TempDir()
-		writeV1Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v1", "name": "themesc", "contributes": {"themes": ["themes/*.reasonix-theme"]}}`)
+		writeV2Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v2", "name": "themesc", "contributes": {"themes": ["themes/*.reasonix-theme"]}}`)
 		if err := os.MkdirAll(filepath.Join(root, "themes"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -457,7 +457,7 @@ func TestManifestV1PathSafety(t *testing.T) {
 	})
 	t.Run("non-regular theme rejected", func(t *testing.T) {
 		root := t.TempDir()
-		writeV1Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v1", "name": "themedir", "contributes": {"themes": ["themes"]}}`)
+		writeV2Plugin(t, root, `{"apiVersion": "reasonix.io/plugin/v2", "name": "themedir", "contributes": {"themes": ["themes"]}}`)
 		if err := os.MkdirAll(filepath.Join(root, "themes"), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -467,8 +467,8 @@ func TestManifestV1PathSafety(t *testing.T) {
 	})
 	t.Run("missing paths are warnings not failures", func(t *testing.T) {
 		root := t.TempDir()
-		writeV1Plugin(t, root, `{
-  "apiVersion": "reasonix.io/plugin/v1",
+		writeV2Plugin(t, root, `{
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "missing-demo",
   "contributes": {
     "skills": ["no-such-skills"],
@@ -492,11 +492,11 @@ func TestManifestV1PathSafety(t *testing.T) {
 	})
 }
 
-func TestManifestV1DescribeRendersPromptsThemesRuntime(t *testing.T) {
+func TestManifestV2DescribeRendersPromptsThemesRuntime(t *testing.T) {
 	home := t.TempDir()
 	root := filepath.Join(home, "plugins", "example")
-	writeV1Plugin(t, root, v1ExampleManifest)
-	writeV1ExampleAssets(t, root)
+	writeV2Plugin(t, root, v2ExampleManifest)
+	writeV2ExampleAssets(t, root)
 	if err := Upsert(home, InstalledPlugin{Name: "example", Root: "plugins/example", Version: "1.0.0", ManifestKind: "reasonix", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}

@@ -69,6 +69,7 @@ func ToWire(e event.Event) Event {
 			Output: e.Tool.Output, Err: e.Tool.Err,
 			ReadOnly: e.Tool.ReadOnly, Truncated: e.Tool.Truncated,
 			DurationMs: e.Tool.DurationMs, Partial: e.Tool.Partial,
+			StartedAt: e.Tool.StartedAt, EndedAt: e.Tool.EndedAt,
 			ArgChars: e.Tool.ArgChars, Refreshed: e.Tool.Refreshed,
 			ParentID: e.Tool.ParentID, AttemptID: e.Tool.AttemptID,
 			Diff: e.Tool.Diff, Added: e.Tool.Added, Removed: e.Tool.Removed,
@@ -262,6 +263,8 @@ type Tool struct {
 	ReadOnly     bool            `json:"readOnly"`
 	Truncated    bool            `json:"truncated,omitempty"`
 	DurationMs   int64           `json:"durationMs,omitempty"`
+	StartedAt    int64           `json:"startedAt,omitempty"` // unix ms; zero when the call never ran
+	EndedAt      int64           `json:"endedAt,omitempty"`
 	Partial      bool            `json:"partial,omitempty"`
 	ArgChars     int             `json:"argChars,omitempty"`
 	Refreshed    bool            `json:"refreshed,omitempty"`

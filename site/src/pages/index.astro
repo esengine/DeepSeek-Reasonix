@@ -11,9 +11,6 @@ const vscodeMarketplace = 'https://marketplace.visualstudio.com/items?itemName=S
 const openVsx = 'https://open-vsx.org/extension/SivanLiu/reasonix-agent';
 const vscodeExtensionRepo = 'https://github.com/SivanCola/reasonix-vscode';
 
-// Release versions are resolved in the browser from the live channel pointers.
-// Static markup says "latest" and uses durable fallbacks instead of baking a
-// stale version into every link when a build-time network request fails.
 const goVer = 'latest';
 
 const fmtN = (n) => Number(n).toLocaleString('en-US');
@@ -60,15 +57,16 @@ const ld = {
       </p>
       <div class="hero-install reveal" style="--d:0.18s" aria-label="Reasonix install options">
         <div class="install-option install-option--desktop">
+          <canvas class="particle-canvas"></canvas>
           <span class="install-kicker"><span class="l-en">Desktop app</span><span class="l-zh">桌面端</span></span>
           <strong><span class="l-en">Visual workspace for sessions, settings, approvals, and updates.</span><span class="l-zh">可视化管理会话、设置、审批与自动更新。</span></strong>
           <a class="btn btn-dark" data-os-dl data-goto="desktop" href="#start"><span class="l-en">Download desktop</span><span class="l-zh">下载桌面版</span></a>
         </div>
         <div class="install-option install-option--cli">
+          <canvas class="particle-canvas"></canvas>
           <span class="install-kicker"><span class="l-en">CLI / TUI</span><span class="l-zh">CLI / TUI</span></span>
           <strong><span class="l-en">Terminal-native agent with the same local Reasonix engine.</span><span class="l-zh">终端原生入口,使用同一套本地 Reasonix 引擎。</span></strong>
-          <span class="install"><span class="ps1">$</span>npm i -g reasonix<button data-copy="npm i -g reasonix">Copy</button></span>
-          <a class="install-option__more" href="?download=cli#start" data-goto="cli"><span class="l-en">Native archives →</span><span class="l-zh">原生安装包 →</span></a>
+          <span class="install"><span class="ps1">$</span><span class="install-command">npm i -g reasonix</span><button data-copy="npm i -g reasonix">Copy</button></span>
         </div>
       </div>
       <nav class="also reveal" style="--d:0.22s" aria-label="More ways to use Reasonix / 更多使用方式">
@@ -428,4 +426,69 @@ const ld = {
       <span class="ver"><span class="rxv">{goVer}</span> · official</span>
     </div>
   </footer>
+
+  <script>
+
+    if (!matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.querySelectorAll('.install-option').forEach((col) => {
+        const canvas = col.querySelector('.particle-canvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        let particles = [];
+        let rafId = null;
+
+        canvas.style.willChange = 'transform';
+
+        function resize() {
+          const r = col.getBoundingClientRect();
+          canvas.width = Math.max(1, Math.round(r.width * devicePixelRatio));
+          canvas.height = Math.max(1, Math.round(r.height * devicePixelRatio));
+          ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+        }
+        resize();
+
+        function loop() {
+          const r = col.getBoundingClientRect();
+          const isDark = document.documentElement.dataset.theme === 'dark';
+          const base = isDark ? '255,255,255' : '0,0,0';
+          ctx.clearRect(0, 0, r.width, r.height);
+          particles = particles.filter((p) => p.life > 0);
+          particles.forEach((p) => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.vy += 0.01;
+            p.life -= p.decay;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${base},${(p.life * 0.28).toFixed(3)})`;
+            ctx.fill();
+          });
+          rafId = particles.length ? requestAnimationFrame(loop) : null;
+        }
+
+        col.addEventListener('mousemove', (e) => {
+          const r = col.getBoundingClientRect();
+          const mx = e.clientX - r.left;
+          const my = e.clientY - r.top;
+
+          if (particles.length > 80) return;
+
+          for (let i = 0; i < 2; i++) {
+            particles.push({
+              x: mx + (Math.random() - 0.5) * 20,
+              y: my + (Math.random() - 0.5) * 20,
+              vx: (Math.random() - 0.5) * 1.2,
+              vy: (Math.random() - 0.5) * 1.2 - 0.3,
+              life: 1,
+              decay: 0.015 + Math.random() * 0.015,
+              size: 1.2 + Math.random() * 1.8,
+            });
+          }
+          if (!rafId) loop();
+        });
+
+        window.addEventListener('resize', resize);
+      });
+    }
+  </script>
 </Base>

@@ -16,6 +16,7 @@ import (
 	"github.com/go-ole/go-ole/oleutil"
 	"golang.org/x/sys/windows"
 
+	"reasonix/internal/appidentity"
 	"reasonix/internal/installlayout"
 )
 
@@ -42,7 +43,10 @@ func repairDesktopIconIntegration() error {
 	if err != nil {
 		return err
 	}
-	return repairExistingWindowsShortcuts(paths, launcher, windowsRepairShortcut)
+	return errors.Join(
+		repairExistingWindowsShortcuts(paths, launcher, windowsRepairShortcut),
+		appidentity.RepairOwnedShortcuts(installRoot),
+	)
 }
 
 func reasonixWindowsShortcutPaths() ([]string, error) {

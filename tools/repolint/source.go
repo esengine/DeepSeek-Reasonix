@@ -62,7 +62,7 @@ func collect(root string) ([]string, error) {
 			}
 			return nil
 		}
-		if !strings.HasSuffix(name, ".go") || strings.Contains(name, "_generated.") {
+		if !lintable(name) || strings.Contains(name, "_generated.") {
 			return nil
 		}
 		rel, err := filepath.Rel(root, path)
@@ -84,21 +84,39 @@ func parseSource(root, rel string) (*sourceFile, error) {
 	return parseBytes(rel, data), nil
 }
 
+// lintable reports whether repolint reads this file at all. Go files take every
+// rule; TypeScript files take only the ones expressed on raw lines, since the
+// rest are written against the Go AST.
+func lintable(name string) bool {
+	return strings.HasSuffix(name, ".go") ||
+		strings.HasSuffix(name, ".ts") ||
+		strings.HasSuffix(name, ".tsx")
+}
+
 func parseBytes(rel string, data []byte) *sourceFile {
 	if isGenerated(data) {
 		return nil
+	}
+	lines := splitLines(data)
+	if !strings.HasSuffix(rel, ".go") {
+		// No fset/file: run() gives these the line-based rules only.
+		return &sourceFile{rel: rel, src: lines, lines: len(lines)}
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, rel, data, parser.ParseComments|parser.SkipObjectResolution)
 	if err != nil {
 		return nil
 	}
+	return &sourceFile{rel: rel, fset: fset, file: file, src: lines, lines: len(lines)}
+}
+
+func splitLines(data []byte) []string {
 	text := strings.ReplaceAll(string(data), "\r\n", "\n")
 	lines := strings.Split(text, "\n")
 	if n := len(lines); n > 0 && lines[n-1] == "" {
 		lines = lines[:n-1]
 	}
-	return &sourceFile{rel: rel, fset: fset, file: file, src: lines, lines: len(lines)}
+	return lines
 }
 
 func isGenerated(data []byte) bool {
@@ -113,7 +131,12 @@ func isGenerated(data []byte) bool {
 	return false
 }
 
-func (s *sourceFile) isTest() bool { return strings.HasSuffix(s.rel, "_test.go") }
+func (s *sourceFile) isTest() bool {
+	return strings.HasSuffix(s.rel, "_test.go") ||
+		strings.Contains(s.rel, "/__tests__/") ||
+		strings.Contains(s.rel, ".test.") ||
+		strings.Contains(s.rel, ".spec.")
+}
 
 func (s *sourceFile) line(p token.Pos) int { return s.fset.Position(p).Line }
 
@@ -123,7 +146,7 @@ type importRef struct {
 }
 
 func (s *sourceFile) importRefs() []importRef {
-	if s.isTest() {
+	if s.isTest() || s.file == nil {
 		return nil
 	}
 	out := make([]importRef, 0, len(s.file.Imports))

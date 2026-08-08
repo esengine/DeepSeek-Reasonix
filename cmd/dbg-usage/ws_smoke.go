@@ -48,33 +48,53 @@ func main() {
 
 	// 4. 真实管道（deepseek-responses web_search）
 	cfg, err := config.LoadForRootReadOnly("")
-	if err != nil { fmt.Println("config err:", err); os.Exit(1) }
+	if err != nil {
+		fmt.Println("config err:", err)
+		os.Exit(1)
+	}
 	var baseURL, apiKey, model string
 	for _, pe := range cfg.Providers {
 		if pe.Kind == "responses" && contains(pe.BaseURL, "api.deepseek.com") {
 			baseURL, apiKey = pe.BaseURL, pe.APIKey()
 			model = pe.Model
-			if model == "" && len(pe.Models) > 0 { model = pe.Models[0] }
+			if model == "" && len(pe.Models) > 0 {
+				model = pe.Models[0]
+			}
 			break
 		}
 	}
-	if baseURL == "" || apiKey == "" { fmt.Println("SKIP: 无 deepseek-responses"); return }
+	if baseURL == "" || apiKey == "" {
+		fmt.Println("SKIP: 无 deepseek-responses")
+		return
+	}
 	c := responses.New(responses.Config{Name: "smoke", APIKey: apiKey, BaseURL: baseURL, Model: model, Effort: "low", WebSearch: true})
 	req := provider.Request{
 		Messages: []provider.Message{{Role: provider.RoleUser, Content: "今日北京天气"}},
 	}
 	ch, err := c.Stream(context.Background(), req)
-	if err != nil { fmt.Println("FAIL stream:", err); os.Exit(1) }
+	if err != nil {
+		fmt.Println("FAIL stream:", err)
+		os.Exit(1)
+	}
 	text := ""
 	for ck := range ch {
-		if ck.Type == provider.ChunkText { text += ck.Text }
+		if ck.Type == provider.ChunkText {
+			text += ck.Text
+		}
 	}
-	if len(text) < 20 { fmt.Println("FAIL: 真实管道无输出"); os.Exit(1) }
+	if len(text) < 20 {
+		fmt.Println("FAIL: 真实管道无输出")
+		os.Exit(1)
+	}
 	fmt.Printf("[4] 真实 web_search ✅（%d 字）\n", len(text))
 	fmt.Println("SMOKE ALL PASS")
 }
 
 func contains(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ { if s[i:i+len(sub)] == sub { return true } }
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
 	return false
 }

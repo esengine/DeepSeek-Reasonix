@@ -1,0 +1,4 @@
+prompt = "Round-tripping records through writer.py dump() and reader.py load() corrupts the data — the two files disagree about the on-disk format. Make dump() and load() consistent so a dump/load round-trip returns the original records unchanged."
+class = "multi-file-bugfix"
+max_steps = 15
+timeout_sec = 240

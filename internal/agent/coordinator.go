@@ -833,7 +833,10 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		}
 	}()
 
-	ch, err := c.planner.Stream(ctx, provider.Request{
+	planCtx, planCancel := context.WithCancel(ctx)
+	defer planCancel()
+	defer trackPublishedHostStream(planCtx, planCancel)()
+	ch, err := c.planner.Stream(planCtx, provider.Request{
 		Messages:    provider.ModelMessages(c.plannerSess.Messages),
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})

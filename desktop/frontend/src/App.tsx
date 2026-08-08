@@ -1,11 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ShellExpandProvider, useShellExpand } from "./lib/shellExpand";
-import gsap from "gsap";
-import { useGSAP } from "@gsap/react";
-import { Flip } from "gsap/Flip";
-import { ScrollToPlugin } from "gsap/ScrollToPlugin";
-gsap.registerPlugin(useGSAP, Flip, ScrollToPlugin);
 import {
   Activity,
   CircleHelp,
@@ -5221,6 +5216,11 @@ export default function App() {
               turnWaitAccumMs={state.turnWaitAccumMs}
               promptWaitStartedAt={state.promptWaitStartedAt}
               turnTokens={state.turnTokens}
+              turnOutputTokens={state.turnOutputTokens}
+              turnOutputCharsAtUsage={state.turnOutputCharsAtUsage}
+              turnModelActiveAt={state.turnModelActiveAt}
+              turnModelActiveMs={state.turnModelActiveMs}
+              liveStore={liveStore}
               turnArgChars={state.turnArgChars}
               retry={state.retry}
               suspendedByDecision={Boolean(decisionSurface)}
@@ -5425,6 +5425,9 @@ export default function App() {
             sessionTurns={sessionTurns}
             sessionTokens={state.sessionTokens}
             turnTokens={state.turnTotalTokens}
+            lastTurnOutputTokens={state.lastTurnOutputTokens}
+            lastTurnModelMs={state.lastTurnModelMs}
+            lastTurnOutputEstimated={state.lastTurnOutputEstimated}
             turnCost={state.turnCost}
             cost={state.sessionCost}
             currency={state.sessionCurrency}
@@ -5473,6 +5476,7 @@ export default function App() {
             initialFocus={settingsFocus ?? undefined}
             agentRunning={state.running}
             desktopPlatform={desktopPlatform}
+            activeWorkspaceKey={`${activeTab?.id ?? activeTabId ?? ""}\u0000${activeTab?.workspaceRoot ?? activeTab?.cwd ?? state.meta?.cwd ?? ""}`}
             onUseSubagent={prefillSubagentCommand}
             onClose={() => {
               setSettingsFocus(null);

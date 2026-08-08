@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
 import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
@@ -22,6 +22,7 @@ import {
   type StructuredInvocationSubmit,
 } from "../lib/invocationDisplay";
 import { formatTokens } from "../lib/format";
+import type { ControllerLiveStore } from "../lib/useController";
 import { clearLayoutSize, loadOptionalLayoutSize, saveLayoutSize } from "../lib/layoutPreferences";
 import { createRafResizeUpdater } from "../lib/resizeDrag";
 import { observeComposerMenuViewport } from "../lib/composerMenuViewport";
@@ -559,6 +560,11 @@ export function Composer({
   turnWaitAccumMs = 0,
   promptWaitStartedAt,
   turnTokens,
+  turnOutputTokens,
+  turnOutputCharsAtUsage,
+  turnModelActiveAt,
+  turnModelActiveMs = 0,
+  liveStore,
   turnArgChars = 0,
   retry,
   suspendedByDecision = false,
@@ -627,6 +633,20 @@ export function Composer({
   turnWaitAccumMs?: number;
   promptWaitStartedAt?: number;
   turnTokens?: number;
+  // Completion + reasoning tokens accumulated this turn — feeds the streaming
+  // TPS readout in the run ticker (composer-run-strip).
+  turnOutputTokens?: number;
+  // Live text+reasoning characters already covered by turnOutputTokens.
+  turnOutputCharsAtUsage?: number;
+  // Active provider-output time for the current turn; excludes tool gaps.
+  turnModelActiveAt?: number;
+  turnModelActiveMs?: number;
+  // Live-stream subscription for the character-count TPS fallback (chars ÷ 4)
+  // when the provider does not emit per-chunk usage events with token counts
+  // during streaming. Subscribing here keeps text deltas off the main state
+  // tree — only the composer re-renders, matching the controller's live-store
+  // contract (pure stream deltas must not re-render the controller owner).
+  liveStore?: ControllerLiveStore;
   // Streaming tool-call argument chars (no usage event yet) — folded into the
   // pill as an estimated-token tail so a long write_file body reads as
   // progress, not a stall.
@@ -3651,6 +3671,24 @@ export function Composer({
     closeProfileMenu();
     closeMoreMenu();
   }, [suspendedByDecision, closeIntentMenu, closeProfileMenu, closeMoreMenu]);
+  // Live text+reasoning character count for the run-strip TPS fallback. Reads
+  // through the live store's own subscription so stream deltas re-render only
+  // this component — the controller's bump path stays text-delta-free.
+  const subscribeLiveText = useCallback(
+    (cb: () => void) => liveStore?.subscribe(tabId, cb) ?? (() => {}),
+    [liveStore, tabId],
+  );
+  const liveTextChars = useSyncExternalStore(
+    subscribeLiveText,
+    () => {
+      const live = liveStore?.getSnapshot(tabId);
+      return live ? live.text.length + live.reasoning.length : 0;
+    },
+  );
+  const liveModelActiveAt = useSyncExternalStore(
+    subscribeLiveText,
+    () => liveStore?.getModelActiveAt?.(tabId),
+  );
   const runStateText = retry
     ? t("status.retrying", { attempt: retry.attempt, max: retry.max })
     : waitingPrompt === "approval"
@@ -3665,9 +3703,21 @@ export function Composer({
         const elapsedMs = Math.max(0, now - turnStartAt - waitAccumMs);
         const words = SPINNER_WORDS[locale];
         const word = words[Math.floor(elapsedMs / 3000) % words.length];
-        const liveTokens = (turnTokens ?? 0) + Math.round((turnArgChars ?? 0) / 4);
+        const usageTokens = turnTokens ?? 0;
+        // Include streaming tool-call args in the estimate so TPS stays
+        // meaningful while the model streams a write_file / long tool body.
+        const inFlightChars = Math.max(0, liveTextChars - (turnOutputCharsAtUsage ?? 0)) + (turnArgChars ?? 0);
+        const estimatedChars = Math.round(inFlightChars / 4);
+        const liveTokens = usageTokens + estimatedChars;
         const tok = liveTokens > 0 ? ` · ↓ ${formatTokens(liveTokens)} ${t("status.tokens")}` : "";
-        return `${word}… ${fmtElapsed(elapsedMs)}${tok}`;
+        const outTok: number = (turnOutputTokens ?? 0) + estimatedChars;
+        const modelActiveAt = liveModelActiveAt ?? turnModelActiveAt;
+        const modelElapsedMs = Math.max(0, turnModelActiveMs + (modelActiveAt && modelActiveAt > 0 ? Math.max(0, now - modelActiveAt) : 0));
+        const tps = outTok > 0 && modelElapsedMs >= 500 ? Math.round(outTok / (modelElapsedMs / 1000)) : null;
+        const tpsStr = tps !== null ? ` · ${tps} tokens/s` : "";
+        const suffix = `${tpsStr}${tok}`;
+        const prefix = `${word}… ${fmtElapsed(elapsedMs)}`;
+        return { prefix, suffix: suffix || null };
       })()
     : null;
   const submitEmpty = !text.trim() && attachments.length === 0 && workspaceRefs.length === 0 &&
@@ -4367,11 +4417,20 @@ export function Composer({
         {runStateText && (
           <div className={`composer-run-strip${waitingPrompt ? " composer-run-strip--waiting" : ""}`}>
             <span className="composer-run-strip__dot" aria-hidden="true" />
-            {/* The ticker re-renders every second; keep it out of the accessibility
-                tree and announce only the stable state text via the live region. */}
-            <span className="composer-run-strip__text" aria-hidden={runTicker ? true : undefined}>
-              {runTicker ?? runStateText}
-            </span>
+            {runTicker ? (
+              <>
+                <span className="composer-run-strip__text" aria-hidden="true">{runTicker.prefix}</span>
+                {runTicker.suffix && (
+                  <Tooltip label={t("composer.runStripEstimateHint")}>
+                    <span className="composer-run-strip__text" aria-hidden="true">{runTicker.suffix}</span>
+                  </Tooltip>
+                )}
+              </>
+            ) : (
+              <span className="composer-run-strip__text">
+                {runStateText}
+              </span>
+            )}
             <span className="sr-only" role="status">{runStateText}</span>
           </div>
         )}

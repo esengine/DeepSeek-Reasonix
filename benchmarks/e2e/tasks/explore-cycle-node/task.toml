@@ -1,0 +1,4 @@
+prompt = "The registry package declares module dependencies. Exactly one dependency cycle exists. Find it and write the alphabetically first module name in that cycle to answer.txt — nothing else."
+class = "repo-exploration"
+max_steps = 25
+timeout_sec = 420

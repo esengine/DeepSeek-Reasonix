@@ -8,10 +8,12 @@ import {
   releaseVersionLabel,
 } from "./release-channels.js";
 import { initTheme } from "./theme.js";
+import { initMobileNav } from "./mobile-nav.js";
 
 // Reasonix site — vanilla interactions
 (function () {
   initTheme();
+  initMobileNav();
   const motionOK = () =>
     document.body.dataset.motion === "rich" &&
     !window.matchMedia("(prefers-reduced-motion: reduce)").matches;

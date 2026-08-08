@@ -2183,7 +2183,7 @@ func defaultFullBootToolNames() []string {
 		"bash",
 		"bash_output",
 		"code_index",
-		"complete_step",
+		"complete_step", "compress",
 		"delete_range",
 		"delete_symbol",
 		"docs",
@@ -2234,7 +2234,7 @@ func economyBootToolNames() []string {
 	return []string{
 		"ask",
 		"bash",
-		"bash_output",
+		"bash_output", "compress",
 		"connect_tool_source",
 		"edit_file",
 		"kill_shell",
@@ -2286,7 +2286,7 @@ command = "reasonix-missing-mockmcp"
 	wantTools := []string{
 		"ask",
 		"bash",
-		"bash_output",
+		"bash_output", "compress",
 		"connect_tool_source",
 		"edit_file",
 		"kill_shell",
@@ -2298,7 +2298,7 @@ command = "reasonix-missing-mockmcp"
 	if got := toolSchemaNames(req.Tools); !reflect.DeepEqual(got, wantTools) {
 		t.Fatalf("economy first request tool order changed\ngot  %v\nwant %v", got, wantTools)
 	}
-	for _, want := range []string{"connect_tool_source", "read_file", "edit_file", "write_file", "bash", "ask"} {
+	for _, want := range []string{"compress", "connect_tool_source", "read_file", "edit_file", "write_file", "bash", "ask"} {
 		if !requestHasTool(req, want) {
 			t.Fatalf("economy first request missing tool %q; tools=%v", want, toolSchemaNames(req.Tools))
 		}
@@ -3209,7 +3209,7 @@ model = "x"
 func TestAddBuiltinsWithWorkspaceRootKeepsSessionTools(t *testing.T) {
 	reg := tool.NewRegistry()
 	var stderr bytes.Buffer
-	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{}, nil, nil, builtin.SessionDataGuard{}, builtin.ManagedConfigPaths{}, nil, nil, nil)
+	addBuiltins(reg, nil, []string{robustTempDir(t)}, sandbox.Spec{}, 120*time.Second, builtin.SearchSpec{}, &stderr, robustTempDir(t), netclient.ProxySpec{}, nil, nil, builtin.SessionDataGuard{}, builtin.ManagedConfigPaths{}, nil, nil, nil, nil)
 	for _, name := range []string{
 		"todo_write",
 		"complete_step",

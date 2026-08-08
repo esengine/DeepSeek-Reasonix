@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -282,6 +283,7 @@ func TestSchemaCacheKeyIgnoresHostLocalAuthorizationAndIsolation(t *testing.T) {
 	changed.Package = "figma"
 	changed.Sandbox = sandbox.Spec{Mode: "enforce", Network: true, WriteRoots: []string{"/workspace"}, MinimalWrites: true}
 	changed.StateDir = "/host/state"
+	changed.OAuthHTTPClient = &http.Client{}
 	if got, want := SchemaCacheKey(changed), SchemaCacheKey(base); got != want {
 		t.Fatalf("host-local security state changed schema cache key: %q != %q", got, want)
 	}

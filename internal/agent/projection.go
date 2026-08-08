@@ -18,7 +18,9 @@ import (
 // Context-projection schema versions. Readers accept any known version;
 // writers always emit the current schema.
 const (
-	compactionStateSchemaV1 = 1
+	compactionStateSchemaV1      = 1
+	compactionStateSchemaV2      = 2
+	compactionStateSchemaCurrent = compactionStateSchemaV2
 )
 
 // Cache state labels for resume/preflight telemetry. They never enter the
@@ -35,6 +37,7 @@ const (
 	CompactionTriggerManual   = "manual"
 	CompactionTriggerOverflow = "overflow"
 	CompactionTriggerSnip     = "snip"
+	CompactionTriggerTool     = "tool"
 )
 
 // Compaction mode labels.
@@ -130,7 +133,7 @@ func LoadCompactionState(sessionPath string) (CompactionState, bool, error) {
 	if err := json.Unmarshal(b, &st); err != nil {
 		return CompactionState{}, false, fmt.Errorf("decode context state %s: %w", path, err)
 	}
-	if st.SchemaVersion != 0 && st.SchemaVersion != compactionStateSchemaV1 {
+	if st.SchemaVersion != 0 && st.SchemaVersion != compactionStateSchemaV1 && st.SchemaVersion != compactionStateSchemaV2 {
 		return CompactionState{}, false, fmt.Errorf("unsupported context schema version %d", st.SchemaVersion)
 	}
 	if st.SchemaVersion == 0 {
@@ -145,7 +148,10 @@ func SaveCompactionState(sessionPath string, st CompactionState) error {
 	if path == "" {
 		return fmt.Errorf("empty session path")
 	}
-	st.SchemaVersion = compactionStateSchemaV1
+	// V2 preserves logical user-turn boundaries and coalesces roles only on
+	// outbound copies. Previous readers reject this boundary and fall back to
+	// canonical history instead of misreading the changed V1 invariant.
+	st.SchemaVersion = compactionStateSchemaCurrent
 	if st.UpdatedAt.IsZero() {
 		st.UpdatedAt = time.Now().UTC()
 	}
@@ -319,11 +325,10 @@ func modelVisibleFromProjection(proj ContextProjection, canonical []provider.Mes
 	return out
 }
 
-// coalesceProjectionUserRuns keeps provider-visible projections compatible
-// with providers that require strict user/assistant alternation. Compaction
-// inserts its digest as a user message, and the retained tail can begin with a
-// user message; merging the run in the projection preserves the digest prefix
-// while leaving the canonical transcript untouched.
+// coalesceProjectionUserRuns keeps provider request copies compatible with
+// providers that require strict user/assistant alternation. Projection
+// sidecars retain logical user-turn boundaries; only the outbound copy is
+// merged, leaving canonical history and range anchors untouched.
 func coalesceProjectionUserRuns(msgs []provider.Message) []provider.Message {
 	if len(msgs) < 2 {
 		return msgs

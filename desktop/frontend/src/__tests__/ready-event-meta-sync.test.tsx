@@ -5,7 +5,8 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import type { AppBindings } from "../lib/bridge";
 import { useController } from "../lib/useController";
-import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, JobView, Meta, TabMeta } from "../lib/types";
+import { historySliceFromMessages } from "./mockHistorySlice";
+import type { BalanceInfo, CheckpointMeta, ContextInfo, EffortInfo, HistoryMessage, HistorySliceRequest, JobView, Meta, TabMeta } from "../lib/types";
 
 let passed = 0;
 let failed = 0;
@@ -154,6 +155,10 @@ window.go = {
         historyCalls += 1;
         const messages = await historyGate.promise;
         return { messages, startTurn: 0, endTurn: messages.filter((message) => message.role === "user").length, totalTurns: messages.filter((message) => message.role === "user").length, hasOlder: false };
+      },
+      HistorySliceForTab: async (tabId: string, req: HistorySliceRequest) => {
+        historyCalls += 1;
+        return historySliceFromMessages(tabId, await historyGate.promise, req);
       },
       HistoryCheckpointTurnsForTab: async () => [],
       ReplayPendingPrompts: async () => {},

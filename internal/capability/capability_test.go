@@ -124,6 +124,23 @@ func TestRoutePrefersGitHubMCPForIssueLookup(t *testing.T) {
 	}
 }
 
+func TestRouteDoesNotPreferFailedCachedMCPTool(t *testing.T) {
+	entries := []Entry{{
+		ID:            "mcp-tool:github/search_issues",
+		Kind:          KindMCPTool,
+		Name:          "github/search_issues",
+		Source:        "github",
+		Status:        StatusFailed,
+		ConnectSource: "mcp",
+		ConnectName:   "github",
+	}}
+
+	decision := Route("查一下 GitHub issue 里有没有相关反馈", entries)
+	if len(decision.Candidates) != 0 {
+		t.Fatalf("failed cached MCP tool was still routed: %+v", decision.Candidates)
+	}
+}
+
 func TestRenderTransientBlockMentionsConnectSource(t *testing.T) {
 	decision := RouteDecision{Candidates: []RouteCandidate{{
 		Entry: Entry{

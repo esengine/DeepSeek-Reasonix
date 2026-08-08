@@ -37,6 +37,11 @@ func CommandArgs(spec Spec, args []string) ([]string, bool) {
 // repeated Available() calls stay O(1) after the first check.
 var sandboxExecUsability sync.Map // resolved executable path -> bool
 
+const (
+	sandboxExecProbeTimeout = 10 * time.Second
+	sandboxExecProbeCommand = "/usr/bin/true"
+)
+
 // usableSandboxExec distinguishes an installed sandbox-exec from a usable
 // Seatbelt backend. On restricted macOS hosts, sandbox-exec can be on PATH
 // while sandbox_apply fails with exit 71. Probe that operation directly with a
@@ -46,12 +51,25 @@ func usableSandboxExec() bool {
 	if err != nil {
 		return false
 	}
+	return usableSandboxExecPath(path)
+}
+
+func usableSandboxExecPath(path string) bool {
+	if path == "" {
+		return false
+	}
 	if cached, ok := sandboxExecUsability.Load(path); ok {
 		return cached.(bool)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), sandboxExecProbeTimeout)
 	defer cancel()
-	err = exec.CommandContext(ctx, path, "-p", "(version 1)(allow default)", "true").Run()
+	err := exec.CommandContext(ctx, path, "-p", "(version 1)(allow default)", sandboxExecProbeCommand).Run()
+	// A slow host should not permanently poison the process-local cache with a
+	// transient timeout. Definitive probe failures (including exit 71) remain
+	// cached so every command does not pay the failed probe cost.
+	if ctx.Err() != nil {
+		return false
+	}
 	usable := err == nil
 	actual, _ := sandboxExecUsability.LoadOrStore(path, usable)
 	return actual.(bool)

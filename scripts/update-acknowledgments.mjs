@@ -33,12 +33,12 @@ const top = contributors.slice(0, 20).map((c, index) => ({
   commits: Number(c.contributions) || 0,
 }));
 
-await updateReadme('README.md', renderTable(top, 'en'));
-await updateReadme('README.zh-CN.md', renderTable(top, 'zh'));
+await updateReadme('README.md', renderTable(top));
+await updateReadme('README.zh-CN.md', renderTable(top));
 
-function renderTable(rows, locale) {
+function renderTable(rows) {
   const header = '| Contributor | Contributor | Contributor | Contributor |\n| --- | --- | --- | --- |';
-  const cells = rows.map((row) => renderContributor(row, locale));
+  const cells = rows.map((row) => renderContributor(row));
   const tableRows = [];
   for (let i = 0; i < cells.length; i += 4) {
     tableRows.push(`| ${cells.slice(i, i + 4).join(' | ')} |`);
@@ -51,14 +51,13 @@ function renderTable(rows, locale) {
   ].join('\n');
 }
 
-function renderContributor(row, locale) {
+function renderContributor(row) {
   const label = row.login || row.name || `anonymous-${row.rank}`;
   const escaped = escapeMarkdown(label);
   if (row.url) {
     return `[**${escaped}**](${row.url})`;
   }
-  const anonymous = locale === 'zh' ? '（anonymous）' : ' (anonymous)';
-  return `**${escaped}**${anonymous}`;
+  return `**${escaped}**`;
 }
 
 async function updateReadme(path, replacement) {

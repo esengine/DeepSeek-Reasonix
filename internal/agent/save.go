@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -182,8 +183,8 @@ type RecoveryBranchInfo struct {
 }
 
 // Save persists the session using an append-only event log beside path. The
-// .jsonl file remains as a compatibility checkpoint and discovery anchor; the
-// event log is the authoritative transcript once present.
+// event log is authoritative once present; the .jsonl file is also maintained
+// as a compatibility checkpoint and random-read model for history paging.
 func (s *Session) Save(path string) error {
 	return s.save(path, sessionSaveForce)
 }
@@ -280,11 +281,23 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 				if err != nil {
 					return err
 				}
+				displayModelCurrent := true
+				if err := writeSessionMessages(path, msgs); err != nil {
+					displayModelCurrent = false
+					slog.Warn("session: keeping save after display read-model repair failure", "path", path, "err", err)
+				}
 				if probe.native {
 					if err := writeSessionEventIndex(path, msgs, digest, revision); err != nil {
 						// See the append path below: index loss must not fail a
 						// save whose transcript and revision already landed.
 						slog.Warn("session: keeping save after event index write failure", "path", path, "err", err)
+					}
+				}
+				if displayModelCurrent {
+					if err := refreshSessionDisplayIndex(path, msgs, digest, revision, -1); err != nil {
+						// Warn-only like the event index above: the display index
+						// is a pure derived sidecar and must never fail a save.
+						slog.Warn("session: keeping save after display index write failure", "path", path, "err", err)
 					}
 				}
 				s.markPersisted(path, digest, version, revision, rewriteVersion)
@@ -295,25 +308,31 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 		}
 		if decision.appendOnly && probe.native {
 			logSize := sessionEventLogSize(path)
+			displayModelCurrent := false
 			switch {
 			case logSize == 0:
 				if err := appendSessionReplaceEvent(path, msgs, digest, decision.revision, "snapshot"); err != nil {
 					return err
 				}
+				displayModelCurrent, err = appendSessionDisplayReadModel(path, msgs, decision.appendFrom, decision.revision)
 			case sessionEventLogOversized(logSize, contentBytes):
-				// Checkpoint: fold history into one replace event and refresh
-				// the .jsonl anchor so direct readers and older binaries stay
-				// bounded-stale instead of frozen at first save.
+				// Fold history into one replace event and refresh the random-read
+				// model atomically. Normal appends keep it current below too.
 				if err := compactSessionEventLog(path, msgs, digest, decision.revision, "compact"); err != nil {
 					return err
 				}
 				if err := writeSessionMessages(path, msgs); err != nil {
 					return err
 				}
+				displayModelCurrent = true
 			default:
 				if err := appendSessionAppendEvent(path, decision.appendFrom, msgs[decision.appendFrom:], digest, decision.revision); err != nil {
 					return err
 				}
+				displayModelCurrent, err = appendSessionDisplayReadModel(path, msgs, decision.appendFrom, decision.revision)
+			}
+			if err != nil {
+				slog.Warn("session: keeping save after display read-model append failure", "path", path, "err", err)
 			}
 			revision, err := recordSessionContentRevision(path, digest, decision.revision)
 			if err != nil {
@@ -326,6 +345,14 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 				// behind the disk state it just wrote, misreading the next save
 				// as a stale-runtime conflict.
 				slog.Warn("session: keeping save after event index write failure", "path", path, "err", err)
+			}
+			if displayModelCurrent {
+				if err := refreshSessionDisplayIndex(path, msgs, digest, revision, decision.appendFrom); err != nil {
+					// Same warn-only rule as the event index; the append decision
+					// boundary lets the refresh extend the previous index instead
+					// of re-encoding the whole transcript.
+					slog.Warn("session: keeping save after display index write failure", "path", path, "err", err)
+				}
 			}
 			s.markPersisted(path, digest, version, revision, rewriteVersion)
 			return nil
@@ -388,6 +415,11 @@ func (s *Session) save(path string, mode sessionSaveMode) error {
 			// transcript and revision already landed.
 			slog.Warn("session: keeping save after event index write failure", "path", path, "err", err)
 		}
+	}
+	if err := refreshSessionDisplayIndex(path, msgs, digest, revision, -1); err != nil {
+		// Warn-only like the event index above: the display index is a pure
+		// derived sidecar and must never fail a save.
+		slog.Warn("session: keeping save after display index write failure", "path", path, "err", err)
 	}
 	s.markPersisted(path, digest, version, revision, rewriteVersion)
 	return nil
@@ -916,6 +948,83 @@ func (s *Session) persistState(path string) sessionPersistState {
 		return s.persisted
 	}
 	return sessionPersistState{}
+}
+
+// PersistedState is a read-only view of the baseline the session last
+// persisted to (or loaded from) its transcript path. History paging uses it to
+// validate a display-index sidecar against the live session without touching
+// disk: an index built at the same revision with the same content digest
+// describes exactly the persisted prefix of the in-memory log.
+type PersistedState struct {
+	// Digest is the content digest of the persisted transcript.
+	Digest [sha256.Size]byte
+	// DigestHex is Digest in the hex form sidecars store.
+	DigestHex string
+	// Revision is the CAS ledger revision of the persisted transcript. It is
+	// meaningful only when RevisionKnown is true.
+	Revision      int64
+	RevisionKnown bool
+	// RewriteEpoch is the highest rewriteVersion that has reached disk. It
+	// changes only when a content rewrite (compaction, rewind, …) is saved, so
+	// it doubles as a stable epoch token for history entry IDs: append-only
+	// saves keep it, rewrites bump it.
+	RewriteEpoch int
+	// AppendOnlyTail reports that no rewrite landed after the baseline, so the
+	// persisted transcript is still a prefix of the in-memory log (the tail,
+	// if any, is unsaved appends).
+	AppendOnlyTail bool
+	// UnchangedSincePersisted reports that the in-memory log is exactly the
+	// persisted transcript (no appends, no rewrites since the baseline).
+	UnchangedSincePersisted bool
+}
+
+// PersistedState returns the session's persistence baseline for path, or
+// false when the session has never persisted to (or loaded from) that path.
+func (s *Session) PersistedState(path string) (PersistedState, bool) {
+	key := canonicalSessionSavePath(path)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.persisted.ok || s.persisted.path != key {
+		return PersistedState{}, false
+	}
+	return PersistedState{
+		Digest:                  s.persisted.digest,
+		DigestHex:               digestString(s.persisted.digest),
+		Revision:                s.persisted.revision,
+		RevisionKnown:           s.persisted.revisionKnown,
+		RewriteEpoch:            s.persistedRewriteVersion,
+		AppendOnlyTail:          s.rewriteVersion == s.persistedRewriteVersion,
+		UnchangedSincePersisted: s.persisted.version == s.version,
+	}, true
+}
+
+// SessionContentIdentity returns the ledger identity of the authoritative
+// persisted transcript without loading its message bodies. It is intended for
+// derived sidecars such as the desktop display index: a matching checkpoint
+// size alone cannot prove that offsets still describe the event-log-backed
+// transcript. The bool is false for legacy sessions that have no digest in
+// their branch metadata; callers must then validate against the transcript
+// bytes directly.
+func SessionContentIdentity(path string) (PersistedState, bool, error) {
+	revision, digestHex, err := sessionContentRevision(path)
+	if err != nil {
+		return PersistedState{}, false, err
+	}
+	if digestHex == "" {
+		return PersistedState{}, false, nil
+	}
+	var digest [sha256.Size]byte
+	decoded, err := hex.DecodeString(digestHex)
+	if err != nil || len(decoded) != len(digest) {
+		return PersistedState{}, false, fmt.Errorf("invalid session content digest")
+	}
+	copy(digest[:], decoded)
+	return PersistedState{
+		Digest:        digest,
+		DigestHex:     digestString(digest),
+		Revision:      revision,
+		RevisionKnown: true,
+	}, true, nil
 }
 
 func (s *Session) markPersisted(path string, digest [sha256.Size]byte, version uint64, revision int64, rewriteVersion int) {

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
-import gsap from "gsap";
-import { DUR_SLOW, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
+import { DUR_SLOW, prefersReducedMotion } from "./gsapAnimations";
+
+const CSS_EASE_OUT = "cubic-bezier(0.2, 0.72, 0.2, 1)";
 
 // Animates each data-entrance element in once. First mount (and every
 // resetKey change) pre-seeds the seen set so restored history never animates;
@@ -13,6 +14,7 @@ export function useEntranceAnimation<T extends HTMLElement>(
   const ref = useRef<T | null>(null);
   const seen = useRef(new Set<string>());
   const timerRef = useRef<number | null>(null);
+  const timerAnimations = useRef<Animation[]>([]);
   const firstRun = useRef(true);
   const prevResetKey = useRef(resetKey);
 
@@ -54,7 +56,10 @@ export function useEntranceAnimation<T extends HTMLElement>(
 
     const reduced = prefersReducedMotion();
     if (reduced) {
-      gsap.set(entries, { opacity: 1, clearProps: "transform" });
+      for (const entry of entries) {
+        entry.style.opacity = "1";
+        entry.style.transform = "";
+      }
       return;
     }
 
@@ -62,22 +67,36 @@ export function useEntranceAnimation<T extends HTMLElement>(
     if (timerRef.current !== null) clearTimeout(timerRef.current);
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
-      gsap.fromTo(
-        entries,
-        { opacity: 0, y: 12 },
-        {
-          opacity: 1,
-          y: 0,
-          duration: DUR_SLOW,
-          ease: EASE_OUT,
-          stagger: itemsStagger(entries.length),
-          clearProps: "transform",
-        },
-      );
+      const animations = entries.map((entry, index) => {
+        if (typeof entry.animate !== "function") {
+          entry.style.opacity = "1";
+          entry.style.transform = "";
+          return null;
+        }
+        const animation = entry.animate(
+          [
+            { opacity: 0, transform: "translateY(12px)" },
+            { opacity: 1, transform: "translateY(0)" },
+          ],
+          {
+            duration: DUR_SLOW * 1000,
+            easing: CSS_EASE_OUT,
+            delay: index * itemsStagger(entries.length) * 1000,
+          },
+        );
+        animation.onfinish = () => {
+          entry.style.opacity = "1";
+          entry.style.transform = "";
+        };
+        return animation;
+      });
+      timerAnimations.current = animations.filter((animation): animation is Animation => animation !== null);
     }, 16);
 
     return () => {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
+      for (const animation of timerAnimations.current) animation.cancel();
+      timerAnimations.current = [];
     };
     // Only re-scan when deps change — NOT on every render.
   }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -43,6 +43,42 @@ const canonical = new URL(Astro.url.pathname, Astro.site).href;
         </div>
         <span id="nav-account"></span>
       </div>
+      <button
+        class="nav-menu-toggle"
+        type="button"
+        data-mobile-nav-toggle
+        aria-controls="community-mobile-nav"
+        aria-expanded="false"
+        aria-label="Open navigation"
+        title="Open navigation"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
+      </button>
+    </div>
+    <div class="mobile-nav" id="community-mobile-nav" data-mobile-nav hidden>
+      <button class="mobile-nav-backdrop" type="button" data-mobile-nav-close aria-label="Close navigation"></button>
+      <aside class="mobile-nav-panel" role="dialog" aria-modal="true" aria-labelledby="community-mobile-nav-title">
+        <div class="mobile-nav-head">
+          <span id="community-mobile-nav-title"><span class="l-en">Navigation</span><span class="l-zh">导航</span></span>
+          <button class="mobile-nav-close" type="button" data-mobile-nav-close aria-label="Close navigation" title="Close navigation">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>
+          </button>
+        </div>
+        <nav class="mobile-nav-links" aria-label="Mobile community navigation">
+          <a class:list={[{ here: active === "discussions" }]} href="/community/"><span class="l-en">Discussions</span><span class="l-zh">讨论</span></a>
+          <a href="/community/?category=skills"><span class="l-en">Skills</span><span class="l-zh">技能</span></a>
+          <a href="/community/?category=show"><span class="l-en">Showcase</span><span class="l-zh">展示</span></a>
+          <a href="/docs/"><span class="l-en">Docs ↗</span><span class="l-zh">文档 ↗</span></a>
+        </nav>
+        <div class="mobile-nav-actions">
+          <a class="mobile-nav-github" href="https://github.com/esengine/DeepSeek-Reasonix" target="_blank" rel="noreferrer">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .7a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.3c-3.3.7-4-1.4-4-1.4-.5-1.4-1.3-1.8-1.3-1.8-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.6-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.6.3 2.8.1 3.1.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .7Z" /></svg>
+            GitHub
+          </a>
+          <span id="mobile-nav-account"></span>
+          <a class="btn btn-primary" href="/community/new/"><span class="l-en">New topic</span><span class="l-zh">发起话题</span></a>
+        </div>
+      </aside>
     </div>
   </header>
 

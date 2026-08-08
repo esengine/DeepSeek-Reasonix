@@ -155,6 +155,7 @@ func sessionTrashArtifacts(sessionPath, key string) []sessionTrashArtifact {
 		{src: store.SessionEventLog(sessionPath), name: stem + ".events.jsonl"},
 		{src: store.SessionEventLogDamaged(sessionPath), name: stem + ".events.jsonl.damaged"},
 		{src: store.SessionEventIndex(sessionPath), name: stem + ".event-index.json"},
+		{src: store.SessionDisplayIndex(sessionPath), name: stem + ".display-index.json"},
 		{src: store.SessionConflictLog(sessionPath), name: stem + ".conflicts.jsonl"},
 		{src: store.SessionRecoveryState(sessionPath), name: stem + ".recovery.json"},
 		{src: sessionTelemetryPath(sessionPath), name: key + ".telemetry.json"},

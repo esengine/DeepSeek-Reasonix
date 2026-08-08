@@ -145,7 +145,7 @@ jobs:
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -505,24 +505,6 @@ jobs:
             (cd "$2" && GOOS="$1" golangci-lint run --timeout=5m ./...)
             echo "::endgroup::"
           done
-
-      # Report-only complexity monitor for internal/agent. Does not duplicate the
-      # main lint/test/race gates; funlen+cyclop run with issues-exit-code=0 so
-      # the baseline is visible as a CI summary/artifact without blocking merges.
-      - name: agent complexity report
-        if: always()
-        run: |
-          # Reuse the golangci-lint binary installed by the previous step.
-          bash scripts/agent-complexity-report.sh
-
-      - name: upload agent complexity report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: agent-complexity-report
-          path: agent-complexity-report.txt
-          if-no-files-found: ignore
-          retention-days: 14
 
       - name: release workflow contracts
         run: |
