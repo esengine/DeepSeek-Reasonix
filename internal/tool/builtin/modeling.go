@@ -47,9 +47,16 @@ func modelingResolvePath(workDir, path string) string {
 	return filepath.Clean(path)
 }
 
-// modelingGuardRead rejects reads outside the workspace read roots (same
-// confinement as read_file, so a mesh path cannot smuggle arbitrary files).
-func modelingGuardRead(forbidRoots []string, path string) error {
+// modelingGuardRead confines mesh reads to the workspace: the resolved path
+// must stay inside workDir (when bound) and outside the forbid-read roots
+// (session temp etc.) — a mesh path cannot smuggle arbitrary files.
+func modelingGuardRead(workDir string, forbidRoots []string, path string) error {
+	if workDir != "" {
+		rel, err := filepath.Rel(workDir, path)
+		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
+			return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+		}
+	}
 	if confineRead(forbidRoots, path) {
 		return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
 	}
@@ -104,7 +111,7 @@ func (r modelingAnalyze) Execute(ctx context.Context, args json.RawMessage) (str
 		return "", fmt.Errorf("modeling_analyze: path required")
 	}
 	a.Path = modelingResolvePath(r.workDir, a.Path)
-	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+	if err := modelingGuardRead(r.workDir, r.forbidRoots, a.Path); err != nil {
 		return "", err
 	}
 	ext := strings.ToLower(filepath.Ext(a.Path))
@@ -172,7 +179,7 @@ func (r modelingOptimize) Execute(ctx context.Context, args json.RawMessage) (st
 		return "", fmt.Errorf("modeling_optimize: path required")
 	}
 	a.Path = modelingResolvePath(r.workDir, a.Path)
-	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+	if err := modelingGuardRead(r.workDir, r.forbidRoots, a.Path); err != nil {
 		return "", err
 	}
 	if err := modelingGuardWrite(r.roots, r.guard, a.Path); err != nil {
@@ -288,7 +295,7 @@ func (r modelingConvert) Execute(ctx context.Context, args json.RawMessage) (str
 		return "", fmt.Errorf("modeling_convert: path required")
 	}
 	a.Path = modelingResolvePath(r.workDir, a.Path)
-	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+	if err := modelingGuardRead(r.workDir, r.forbidRoots, a.Path); err != nil {
 		return "", err
 	}
 	ext := strings.ToLower(filepath.Ext(a.Path))
@@ -390,7 +397,7 @@ func (r modelingVoxel) Execute(ctx context.Context, args json.RawMessage) (strin
 		a.Resolution = 64
 	}
 	a.Path = modelingResolvePath(r.workDir, a.Path)
-	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+	if err := modelingGuardRead(r.workDir, r.forbidRoots, a.Path); err != nil {
 		return "", err
 	}
 	m, err := meshparse.Parse(a.Path)

@@ -238,15 +238,28 @@ func TestModelingToolsRespectWorkspaceConfinement(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("s3cr3t"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	// Read confinement: analyze must not read outside forbidRoots.
-	an := modelingAnalyze{workDir: root, forbidRoots: []string{root}}
-	if _, err := an.Execute(context.Background(), json.RawMessage(`{"path":"../secret.bin"}`)); err == nil {
-		t.Fatal("analyze read outside forbidRoots must fail")
+	// Sensitive forbid-read root (like session temp).
+	sensitive := filepath.Join(dir, "session-temp")
+	if err := os.MkdirAll(sensitive, 0o755); err != nil {
+		t.Fatal(err)
 	}
-	anAbs := modelingAnalyze{workDir: root, forbidRoots: []string{root}}
+
+	// Read confinement: analyze must not read outside the workspace (workDir)
+	// nor from forbid roots.
+	an := modelingAnalyze{workDir: root, forbidRoots: []string{sensitive}}
+	if _, err := an.Execute(context.Background(), json.RawMessage(`{"path":"../secret.bin"}`)); err == nil {
+		t.Fatal("analyze read outside workDir must fail")
+	}
+	anAbs := modelingAnalyze{workDir: root, forbidRoots: []string{sensitive}}
 	if _, err := anAbs.Execute(context.Background(), json.RawMessage(`{"path":"`+secret+`"}`)); err == nil {
-		t.Fatal("analyze absolute read outside forbidRoots must fail")
+		t.Fatal("analyze absolute read outside workDir must fail")
+	}
+	// Forbid-root read is rejected even inside workDir.
+	if err := os.WriteFile(filepath.Join(root, "sensitive.bin"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (modelingAnalyze{workDir: root, forbidRoots: []string{sensitive}}).Execute(context.Background(), json.RawMessage(`{"path":"`+sensitive+`"}`)); err == nil {
+		t.Fatal("analyze read from forbid root must fail")
 	}
 	// In-root read is allowed (missing file → parse error, not confinement error).
 	_, err := an.Execute(context.Background(), json.RawMessage(`{"path":"inroot.obj"}`))
@@ -254,35 +267,68 @@ func TestModelingToolsRespectWorkspaceConfinement(t *testing.T) {
 		t.Fatal("in-root missing file should still error (parse), not be allowed silently")
 	}
 
-	// Write confinement: voxel must not write outside roots.
-	vx := modelingVoxel{workDir: root, forbidRoots: []string{root}, roots: []string{root}}
-	_, err = vx.Execute(context.Background(), json.RawMessage(`{"path":"../x.obj","resolution":8}`))
-	if err == nil {
-		t.Fatal("voxel read outside forbidRoots must fail")
-	}
-	// convert must not write outside roots.
-	cv := modelingConvert{workDir: root, forbidRoots: []string{root}, roots: []string{root}}
-	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"../x.stl","format":"obj","out":"../out.obj"}`))
-	if err == nil {
-		t.Fatal("convert write outside roots must fail")
-	}
-	// convert .vox early-return branch must also guard its out path (review blocking).
-	if err := os.WriteFile(filepath.Join(root, "src.vox"), []byte("VOX "), 0o644); err != nil {
+	// --- Write confinement: valid in-root input + escaping output target, so
+	// the guard under test (modelingGuardWrite) is actually reached. ---
+	// A tiny valid cube in .obj.
+	cubeOBJ := `v 0 0 0
+v 1 0 0
+v 1 1 0
+v 0 1 0
+v 0 0 1
+v 1 0 1
+v 1 1 1
+v 0 1 1
+f 1 2 3 4
+f 5 8 7 6
+f 1 5 6 2
+f 4 3 7 8
+f 1 4 8 5
+f 2 6 7 3
+`
+	if err := os.WriteFile(filepath.Join(root, "cube.obj"), []byte(cubeOBJ), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A valid minimal .vox (VOX + version + MAIN with XYZI child, one voxel).
+	minVox := append([]byte("VOX "), 0x96, 0x00, 0x00, 0x00) // version 150
+	hdr := func(id string, content, kids uint32) []byte {
+		b := append([]byte(id), 0, 0, 0, 0, 0, 0, 0, 0)
+		b[4] = byte(content); b[5] = byte(content >> 8); b[6] = byte(content >> 16); b[7] = byte(content >> 24)
+		b[8] = byte(kids); b[9] = byte(kids >> 8); b[10] = byte(kids >> 16); b[11] = byte(kids >> 24)
+		return b
+	}
+	xyz := []byte{1, 0, 0, 0, 0, 0, 0, 0} // XYZI: 1 voxel at (0,0,0), color 0
+	xyzBody := append([]byte{1, 0, 0, 0}, xyz...)
+	minVox = append(minVox, hdr("MAIN", 0, uint32(len(xyzBody)+12))...)
+	minVox = append(minVox, hdr("XYZI", uint32(len(xyzBody)), 0)...)
+	minVox = append(minVox, xyzBody...)
+	if err := os.WriteFile(filepath.Join(root, "src.vox"), minVox, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// convert (non-vox) must reject out escaping the write roots — parse succeeds first.
+	cv := modelingConvert{workDir: root, forbidRoots: []string{sensitive}, roots: []string{root}}
+	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"cube.obj","format":"stl","out":"`+secret+`"}`))
+	if err == nil {
+		t.Fatal("convert out outside roots must fail")
+	}
+	// convert .vox early-return branch must reject out escaping (review blocking).
 	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"src.vox","format":"vox","out":"`+secret+`"}`))
 	if err == nil {
-		t.Fatal("convert vox branch write outside roots must fail")
+		t.Fatal("convert vox branch out outside roots must fail")
 	}
-	// optimize must not write outside roots (in-place).
-	op := modelingOptimize{workDir: root, forbidRoots: []string{root}, roots: []string{root}}
-	_, err = op.Execute(context.Background(), json.RawMessage(`{"path":"../x.obj","op":"cleanup"}`))
-	if err == nil {
-		t.Fatal("optimize write outside roots must fail")
+	// In-root output still works (sanity: the guard is not over-eager).
+	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"cube.obj","format":"stl","out":"cube.stl"}`))
+	if err != nil {
+		t.Fatalf("in-root convert should succeed: %v", err)
 	}
-	// voxel must not write its .vox output outside roots.
-	_, err = vx.Execute(context.Background(), json.RawMessage(`{"path":"../y.obj","resolution":8}`))
-	if err == nil {
-		t.Fatal("voxel output write outside roots must fail")
+	// voxel/optimize escape their own derivation (output = input+.vox, in-place):
+	// their write guard is only reachable via modelingGuardWrite directly.
+	op := modelingOptimize{workDir: root, forbidRoots: []string{sensitive}, roots: []string{root}}
+	if err := modelingGuardWrite([]string{root}, op.guard, filepath.Join(dir, "escape.obj")); err == nil {
+		t.Fatal("modelingGuardWrite must reject outside roots")
+	}
+	vx := modelingVoxel{workDir: root, forbidRoots: []string{sensitive}, roots: []string{root}}
+	if err := modelingGuardWrite([]string{root}, vx.guard, filepath.Join(dir, "escape.vox")); err == nil {
+		t.Fatal("modelingGuardWrite must reject outside roots")
 	}
 }
