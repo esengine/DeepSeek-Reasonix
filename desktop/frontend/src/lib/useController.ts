@@ -3,7 +3,7 @@
 // states, and approvals when the user switches away and back. The active tab's state
 // is what components render.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
 import { addBreadcrumb } from "./breadcrumbs";
 import { app, onEvent, onReady, onRuntimeRebuilt } from "./bridge";
@@ -2567,6 +2567,17 @@ export function useController() {
     }
   }, [bump, notifyLiveListeners]);
 
+  // Hydration/loading dispatches that render large history trees (up to
+  // HISTORY_PAGE_TURNS turns of messages) must not block the main thread:
+  // a synchronous commit of thousands of markdown-rendered message nodes
+  // shows up as a multi-second long task (e.g. 1502ms while opening a
+  // 60-turn / 2874-message topic). startTransition makes those commits
+  // interruptible low-priority work, so the UI stays responsive while the
+  // transcript renders in idle time slices.
+  const dispatchDeferred = useCallback((tabId: string, action: Action) => {
+    startTransition(() => dispatchTo(tabId, action));
+  }, [dispatchTo]);
+
   const clearBalanceForTab = useCallback((tabId: string): void => {
     const seq = (balanceRefreshSeqByTab.current.get(tabId) ?? 0) + 1;
     balanceRefreshSeqByTab.current.set(tabId, seq);
@@ -2766,7 +2777,7 @@ export function useController() {
       if (!stillCurrent()) return;
       if (!skipHistory && historyPage !== undefined) {
         const messages = asArray(historyPage.messages);
-        dispatchTo(tabId, { type: "history_page", page: historyPage, mode: "replace" });
+        dispatchDeferred(tabId, { type: "history_page", page: historyPage, mode: "replace" });
         addBreadcrumb(
           "tab.hydrate",
           `history page ${tabId} messages=${messages.length} turns=${historyPage.startTurn}-${historyPage.endTurn}/${historyPage.totalTurns} ms=${Date.now() - historyStartedAt}`,
@@ -2785,7 +2796,7 @@ export function useController() {
         }
       }
 
-      dispatchTo(tabId, { type: "hydrate_done" });
+      dispatchDeferred(tabId, { type: "hydrate_done" });
       addBreadcrumb("tab.hydrate", `done ${reason} ${tabId} ms=${Date.now() - hydrateStartedAt}`);
 
       // Phase 2: local ancillary data. It stays inside the same in-flight
@@ -2804,7 +2815,7 @@ export function useController() {
         addBreadcrumb("tab.hydrate", `meta ignored inactive ${reason} ${tabId}`);
         return;
       }
-      if (meta !== undefined) dispatchTo(tabId, { type: "meta", meta });
+      if (meta !== undefined) dispatchDeferred(tabId, { type: "meta", meta });
       const ancillaryStartedAt = Date.now();
       const loadAncillary = async <T,>(label: string, load: () => Promise<T>): Promise<T | undefined> => {
         return loadTimed(`ancillary ${label}`, load);
@@ -2815,14 +2826,14 @@ export function useController() {
         loadAncillary("context", () => app.ContextUsageForTab(tabId)),
       ]);
       if (!stillCurrent()) return;
-      if (effort !== undefined) dispatchTo(tabId, { type: "effort", effort });
-      if (jobs !== undefined) dispatchTo(tabId, { type: "jobs", jobs: asArray(jobs) });
-      if (context !== undefined) dispatchTo(tabId, { type: "context", context });
+      if (effort !== undefined) dispatchDeferred(tabId, { type: "effort", effort });
+      if (jobs !== undefined) dispatchDeferred(tabId, { type: "jobs", jobs: asArray(jobs) });
+      if (context !== undefined) dispatchDeferred(tabId, { type: "context", context });
       // Signal ContextPanel to re-fetch now that ancillary data (context,
       // effort, jobs) has landed. Without this, the right-side panel keeps
       // stale RequestCount / ElapsedMs / SessionCost from before a session
       // rebind because its refreshKey (dockRefreshKey) only bumps on turn_done.
-      dispatchTo(tabId, { type: "context_panel_refresh" });
+      dispatchDeferred(tabId, { type: "context_panel_refresh" });
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       if (!stillCurrent()) return;
       if (!stillVisible()) {
@@ -2835,7 +2846,7 @@ export function useController() {
         addBreadcrumb("tab.hydrate", `checkpoints ignored inactive ${reason} ${tabId}`);
         return;
       }
-      if (checkpoints !== undefined) dispatchTo(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
+      if (checkpoints !== undefined) dispatchDeferred(tabId, { type: "checkpoints", checkpoints: asArray(checkpoints) });
       addBreadcrumb("tab.hydrate", `ancillary ${reason} ${tabId} ms=${Date.now() - ancillaryStartedAt}`);
       void refreshBalanceForTab(tabId, {
         apply: () => sessionLoadCurrent(tabId, seq) && stillVisible(),
@@ -2851,7 +2862,7 @@ export function useController() {
         sessionLoadInFlight.current.delete(tabId);
       }
     }
-  }, [bumpSessionLoadSeq, dispatchTo, loadMetaForTab, refreshBalanceForTab, sessionLoadCurrent]);
+  }, [bumpSessionLoadSeq, dispatchDeferred, dispatchTo, loadMetaForTab, refreshBalanceForTab, sessionLoadCurrent]);
 
   const loadOlderHistory = useCallback(async (tabId?: string): Promise<void> => {
     const targetTabId = tabId || activeTabIdRef.current;
@@ -2869,7 +2880,7 @@ export function useController() {
         dispatchTo(targetTabId, { type: "history_older_error" });
         return;
       }
-      dispatchTo(targetTabId, { type: "history_page", page, mode: "prepend" });
+      dispatchDeferred(targetTabId, { type: "history_page", page, mode: "prepend" });
       addBreadcrumb(
         "tab.hydrate",
         `history older ${targetTabId} messages=${asArray(page.messages).length} turns=${page.startTurn}-${page.endTurn}/${page.totalTurns} ms=${Date.now() - startedAt}`,
@@ -2878,7 +2889,7 @@ export function useController() {
       dispatchTo(targetTabId, { type: "history_older_error" });
       addBreadcrumb("tab.hydrate", `history older failed ${targetTabId}: ${errorMessage(err)}`);
     }
-  }, [dispatchTo]);
+  }, [dispatchDeferred, dispatchTo]);
 
   const activeTabFromBackend = useCallback(async (): Promise<TabMeta | undefined> => {
     const tabs = asArray(await app.ListTabs().catch(() => [] as TabMeta[]));
@@ -3690,13 +3701,13 @@ export function useController() {
     }
     if (!navigationCompletionCurrent(navigationSeq, "session.resume", targetTabId) || !sessionLoadCurrent(targetTabId, seq)) return;
     dispatchTo(targetTabId, { type: "reset" });
-    dispatchTo(targetTabId, { type: "history_page", page, mode: "replace" });
-    dispatchTo(targetTabId, { type: "hydrate_done" });
+    dispatchDeferred(targetTabId, { type: "history_page", page, mode: "replace" });
+    dispatchDeferred(targetTabId, { type: "hydrate_done" });
     await refreshMetaOnlyForTab(targetTabId);
     if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(targetTabId, seq)) return;
-    app.ContextUsageForTab(targetTabId).then((context) => dispatchTo(targetTabId, { type: "context", context })).catch(() => {});
+    app.ContextUsageForTab(targetTabId).then((context) => dispatchDeferred(targetTabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(targetTabId);
-  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
+  }, [activeTabId, beginActiveNavigation, bumpSessionLoadSeq, dispatchDeferred, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForBackendActiveTab, waitForTabReady]);
 
   const openChannelSession = useCallback(async (path: string, tabId: string, navigationIntentSeq?: number) => {
     if (!tabId) return;
@@ -3717,13 +3728,13 @@ export function useController() {
     }
     if (!navigationCompletionCurrent(navigationSeq, "session.channel", tabId) || !sessionLoadCurrent(tabId, seq)) return;
     dispatchTo(tabId, { type: "reset" });
-    dispatchTo(tabId, { type: "history_page", page, mode: "replace" });
-    dispatchTo(tabId, { type: "hydrate_done" });
+    dispatchDeferred(tabId, { type: "history_page", page, mode: "replace" });
+    dispatchDeferred(tabId, { type: "hydrate_done" });
     await refreshMetaOnlyForTab(tabId);
     if (!isNavigationIntentCurrent(navigationSeq) || !sessionLoadCurrent(tabId, seq)) return;
-    app.ContextUsageForTab(tabId).then((context) => dispatchTo(tabId, { type: "context", context })).catch(() => {});
+    app.ContextUsageForTab(tabId).then((context) => dispatchDeferred(tabId, { type: "context", context })).catch(() => {});
     void refreshCheckpoints(tabId);
-  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForTabReady]);
+  }, [beginActiveNavigation, bumpSessionLoadSeq, dispatchDeferred, dispatchTo, isNavigationIntentCurrent, navigationCompletionCurrent, refreshCheckpoints, refreshMetaOnlyForTab, sessionLoadCurrent, waitForTabReady]);
 
   const previewSession = useCallback(async (path: string): Promise<HistoryMessage[]> => asArray<HistoryMessage>(await app.PreviewSession(path).catch(() => [])), []);
   const deleteSession = useCallback((path: string) => app.DeleteSession(path).finally(() => invalidateCache()), []);
