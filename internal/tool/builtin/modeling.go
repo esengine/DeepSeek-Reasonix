@@ -35,11 +35,43 @@ const (
 	modelingMaxFaces    = 5_000_000
 )
 
+// modelingResolvePath resolves a possibly-relative mesh path against the
+// workspace dir and cleans it; empty workDir keeps the path as-is.
+func modelingResolvePath(workDir, path string) string {
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) && workDir != "" {
+		path = filepath.Join(workDir, path)
+	}
+	return filepath.Clean(path)
+}
+
+// modelingGuardRead rejects reads outside the workspace read roots (same
+// confinement as read_file, so a mesh path cannot smuggle arbitrary files).
+func modelingGuardRead(forbidRoots []string, path string) error {
+	if confineRead(forbidRoots, path) {
+		return &os.PathError{Op: "open", Path: path, Err: os.ErrNotExist}
+	}
+	return nil
+}
+
+// modelingGuardWrite rejects writes outside the workspace write roots.
+func modelingGuardWrite(roots []string, target string) error {
+	if err := confine(roots, target); err != nil {
+		return err
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // modeling_analyze
 // ---------------------------------------------------------------------------
 
-type modelingAnalyze struct{}
+type modelingAnalyze struct {
+	workDir     string
+	forbidRoots []string
+}
 
 func (modelingAnalyze) Name() string { return "modeling_analyze" }
 
@@ -59,7 +91,7 @@ func (modelingAnalyze) Schema() json.RawMessage {
 
 func (modelingAnalyze) ReadOnly() bool { return true }
 
-func (modelingAnalyze) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (r modelingAnalyze) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		Path string `json:"path"`
 	}
@@ -68,6 +100,10 @@ func (modelingAnalyze) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 	if a.Path == "" {
 		return "", fmt.Errorf("modeling_analyze: path required")
+	}
+	a.Path = modelingResolvePath(r.workDir, a.Path)
+	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+		return "", err
 	}
 	ext := strings.ToLower(filepath.Ext(a.Path))
 	if ext == ".vox" {
@@ -92,7 +128,11 @@ func (modelingAnalyze) Execute(ctx context.Context, args json.RawMessage) (strin
 // modeling_optimize
 // ---------------------------------------------------------------------------
 
-type modelingOptimize struct{}
+type modelingOptimize struct {
+	workDir     string
+	forbidRoots []string
+	roots       []string
+}
 
 func (modelingOptimize) Name() string { return "modeling_optimize" }
 
@@ -115,7 +155,7 @@ func (modelingOptimize) Schema() json.RawMessage {
 
 func (modelingOptimize) ReadOnly() bool { return false }
 
-func (modelingOptimize) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (r modelingOptimize) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		Path        string  `json:"path"`
 		Op          string  `json:"op"`
@@ -127,6 +167,13 @@ func (modelingOptimize) Execute(ctx context.Context, args json.RawMessage) (stri
 	}
 	if a.Path == "" {
 		return "", fmt.Errorf("modeling_optimize: path required")
+	}
+	a.Path = modelingResolvePath(r.workDir, a.Path)
+	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+		return "", err
+	}
+	if err := modelingGuardWrite(r.roots, a.Path); err != nil {
+		return "", err
 	}
 	m, err := meshparse.Parse(a.Path)
 	if err != nil {
@@ -198,7 +245,11 @@ func (modelingOptimize) Execute(ctx context.Context, args json.RawMessage) (stri
 // modeling_convert
 // ---------------------------------------------------------------------------
 
-type modelingConvert struct{}
+type modelingConvert struct {
+	workDir     string
+	forbidRoots []string
+	roots       []string
+}
 
 func (modelingConvert) Name() string { return "modeling_convert" }
 
@@ -220,7 +271,7 @@ func (modelingConvert) Schema() json.RawMessage {
 
 func (modelingConvert) ReadOnly() bool { return false }
 
-func (modelingConvert) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (r modelingConvert) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		Path   string `json:"path"`
 		Format string `json:"format"`
@@ -231,6 +282,10 @@ func (modelingConvert) Execute(ctx context.Context, args json.RawMessage) (strin
 	}
 	if a.Path == "" {
 		return "", fmt.Errorf("modeling_convert: path required")
+	}
+	a.Path = modelingResolvePath(r.workDir, a.Path)
+	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+		return "", err
 	}
 	ext := strings.ToLower(filepath.Ext(a.Path))
 	if ext == ".vox" {
@@ -260,6 +315,10 @@ func (modelingConvert) Execute(ctx context.Context, args json.RawMessage) (strin
 	if outPath == "" {
 		outPath = strings.TrimSuffix(a.Path, ext) + "." + a.Format
 	}
+	outPath = modelingResolvePath(r.workDir, outPath)
+	if err := modelingGuardWrite(r.roots, outPath); err != nil {
+		return "", err
+	}
 	switch a.Format {
 	case "obj", "stl", "ply":
 		if err := writeMeshFormat(outPath, m, a.Format); err != nil {
@@ -282,7 +341,11 @@ func (modelingConvert) Execute(ctx context.Context, args json.RawMessage) (strin
 // modeling_voxel
 // ---------------------------------------------------------------------------
 
-type modelingVoxel struct{}
+type modelingVoxel struct {
+	workDir     string
+	forbidRoots []string
+	roots       []string
+}
 
 func (modelingVoxel) Name() string { return "modeling_voxel" }
 
@@ -303,7 +366,7 @@ func (modelingVoxel) Schema() json.RawMessage {
 
 func (modelingVoxel) ReadOnly() bool { return false }
 
-func (modelingVoxel) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+func (r modelingVoxel) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var a struct {
 		Path       string `json:"path"`
 		Resolution int    `json:"resolution"`
@@ -317,6 +380,10 @@ func (modelingVoxel) Execute(ctx context.Context, args json.RawMessage) (string,
 	if a.Resolution == 0 {
 		a.Resolution = 64
 	}
+	a.Path = modelingResolvePath(r.workDir, a.Path)
+	if err := modelingGuardRead(r.forbidRoots, a.Path); err != nil {
+		return "", err
+	}
 	m, err := meshparse.Parse(a.Path)
 	if err != nil {
 		return "", fmt.Errorf("modeling_voxel: %w", err)
@@ -325,7 +392,10 @@ func (modelingVoxel) Execute(ctx context.Context, args json.RawMessage) (string,
 	if err != nil {
 		return "", fmt.Errorf("modeling_voxel: %w", err)
 	}
-	outPath := a.Path + ".vox"
+	outPath := modelingResolvePath(r.workDir, a.Path+".vox")
+	if err := modelingGuardWrite(r.roots, outPath); err != nil {
+		return "", err
+	}
 	if err := vm.WriteVox(outPath); err != nil {
 		return "", fmt.Errorf("modeling_voxel: %w", err)
 	}

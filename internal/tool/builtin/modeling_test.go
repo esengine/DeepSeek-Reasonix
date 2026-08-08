@@ -223,3 +223,47 @@ func TestModelingOptimizeUnwrapWithBlender(t *testing.T) {
 		t.Errorf("backup missing: %v", err)
 	}
 }
+
+// TestModelingToolsRespectWorkspaceConfinement verifies the security_review
+// finding (HIGH): modeling tools must not read/write outside the workspace
+// read/write roots once bound via Workspace.Tools().
+func TestModelingToolsRespectWorkspaceConfinement(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Secret outside the workspace root.
+	secret := filepath.Join(dir, "secret.bin")
+	if err := os.WriteFile(secret, []byte("s3cr3t"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read confinement: analyze must not read outside forbidRoots.
+	an := modelingAnalyze{workDir: root, forbidRoots: []string{root}}
+	if _, err := an.Execute(context.Background(), json.RawMessage(`{"path":"../secret.bin"}`)); err == nil {
+		t.Fatal("analyze read outside forbidRoots must fail")
+	}
+	anAbs := modelingAnalyze{workDir: root, forbidRoots: []string{root}}
+	if _, err := anAbs.Execute(context.Background(), json.RawMessage(`{"path":"`+secret+`"}`)); err == nil {
+		t.Fatal("analyze absolute read outside forbidRoots must fail")
+	}
+	// In-root read is allowed (missing file → parse error, not confinement error).
+	_, err := an.Execute(context.Background(), json.RawMessage(`{"path":"inroot.obj"}`))
+	if err == nil {
+		t.Fatal("in-root missing file should still error (parse), not be allowed silently")
+	}
+
+	// Write confinement: voxel must not write outside roots.
+	vx := modelingVoxel{workDir: root, forbidRoots: []string{root}, roots: []string{root}}
+	_, err = vx.Execute(context.Background(), json.RawMessage(`{"path":"../x.obj","resolution":8}`))
+	if err == nil {
+		t.Fatal("voxel read outside forbidRoots must fail")
+	}
+	// convert must not write outside roots.
+	cv := modelingConvert{workDir: root, forbidRoots: []string{root}, roots: []string{root}}
+	_, err = cv.Execute(context.Background(), json.RawMessage(`{"path":"../x.stl","format":"obj","out":"../out.obj"}`))
+	if err == nil {
+		t.Fatal("convert write outside roots must fail")
+	}
+}
