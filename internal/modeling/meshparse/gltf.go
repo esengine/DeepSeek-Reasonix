@@ -90,6 +90,9 @@ func parseGLTFJSON(g *gltfJSON, buffers [][]byte, format string) (*Mesh, error) 
 	if !ok {
 		return nil, errors.New("gltf: primitive has no POSITION attribute")
 	}
+	if posAcc < 0 || posAcc >= len(g.Accessors) {
+		return nil, fmt.Errorf("gltf: POSITION accessor %d out of range (have %d)", posAcc, len(g.Accessors))
+	}
 	pos := g.Accessors[posAcc]
 
 	m := &Mesh{Format: format}
@@ -151,7 +154,14 @@ func sliceAccessor(buffers [][]byte, views []gltfJSONBufferView, a gltfJSONAcces
 		return nil, fmt.Errorf("gltf: bufferView buffer %d out of range", bv.Buffer)
 	}
 	start := bv.ByteOffset + a.ByteOffset
-	end := start + a.length()
+	if bv.ByteOffset < 0 || a.ByteOffset < 0 {
+		return nil, fmt.Errorf("gltf: negative byte offsets (bufferView %d, accessor %d)", bv.ByteOffset, a.ByteOffset)
+	}
+	l := a.length()
+	if l < 0 || start > int(^uint(0)>>1)-l {
+		return nil, fmt.Errorf("gltf: accessor slice overflows (start %d, len %d)", start, l)
+	}
+	end := start + l
 	if end > len(buffers[bv.Buffer]) {
 		return nil, fmt.Errorf("gltf: accessor slice [%d:%d] exceeds buffer (%d)", start, end, len(buffers[bv.Buffer]))
 	}
@@ -224,7 +234,8 @@ func compSize(comp int) int {
 }
 
 // loadGLTFBuffer resolves a buffer URI: embedded base64 data URI or external
-// file relative to the glTF.
+// file relative to the glTF. External files must resolve inside the glTF's own
+// directory (no traversal / absolute paths) and are size-capped.
 func loadGLTFBuffer(gltfPath, uri string) ([]byte, error) {
 	if strings.HasPrefix(uri, "data:") {
 		comma := strings.IndexByte(uri, ',')
@@ -235,11 +246,37 @@ func loadGLTFBuffer(gltfPath, uri string) ([]byte, error) {
 		if !strings.Contains(meta, "base64") {
 			return nil, errors.New("gltf: non-base64 data URI unsupported")
 		}
-		return base64.StdEncoding.DecodeString(uri[comma+1:])
+		dec, err := base64.StdEncoding.DecodeString(uri[comma+1:])
+		if err != nil {
+			return nil, fmt.Errorf("gltf: bad base64 buffer: %w", err)
+		}
+		if len(dec) > maxBufferBytes {
+			return nil, fmt.Errorf("gltf: embedded buffer %d bytes exceeds limit %d", len(dec), maxBufferBytes)
+		}
+		return dec, nil
 	}
-	binPath := uri
-	if !filepath.IsAbs(binPath) {
-		binPath = filepath.Join(filepath.Dir(gltfPath), binPath)
+	if filepath.IsAbs(uri) || strings.Contains(uri, "..") {
+		return nil, fmt.Errorf("gltf: external buffer path %q must be relative and inside the glTF directory", uri)
+	}
+	binPath := filepath.Join(filepath.Dir(gltfPath), uri)
+	// Resolve symlinks and require the result stays inside the glTF directory.
+	dir, err := filepath.EvalSymlinks(filepath.Dir(gltfPath))
+	if err != nil {
+		dir = filepath.Dir(gltfPath)
+	}
+	resolved, err := filepath.EvalSymlinks(binPath)
+	if err != nil {
+		return nil, fmt.Errorf("gltf: external buffer %q: %w", uri, err)
+	}
+	if !strings.HasPrefix(filepath.Clean(resolved), filepath.Clean(dir)+string(filepath.Separator)) {
+		return nil, fmt.Errorf("gltf: external buffer %q escapes the glTF directory", uri)
+	}
+	fi, err := os.Stat(binPath)
+	if err != nil {
+		return nil, fmt.Errorf("gltf: external buffer %q: %w", uri, err)
+	}
+	if fi.Size() > maxBufferBytes {
+		return nil, fmt.Errorf("gltf: external buffer %q is %d bytes, exceeds limit %d", uri, fi.Size(), maxBufferBytes)
 	}
 	return os.ReadFile(binPath)
 }
@@ -265,6 +302,9 @@ type gltfJSONAccessor struct {
 func (a gltfJSONAccessor) length() int {
 	if a.ByteLength > 0 {
 		return a.ByteLength
+	}
+	if a.ByteLength < 0 {
+		return -1
 	}
 	arity := 1
 	switch a.Type {

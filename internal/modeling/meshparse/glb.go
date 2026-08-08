@@ -86,6 +86,9 @@ func ParseGLB(path string) (*Mesh, error) {
 			if binBytes == nil {
 				return nil, errors.New("glb: missing BIN chunk for buffer 0")
 			}
+			if b.ByteLength < 0 {
+				return nil, fmt.Errorf("glb buffer 0: negative byteLength %d", b.ByteLength)
+			}
 			if len(binBytes) < b.ByteLength {
 				return nil, fmt.Errorf("glb buffer 0: %d bytes, need %d", len(binBytes), b.ByteLength)
 			}

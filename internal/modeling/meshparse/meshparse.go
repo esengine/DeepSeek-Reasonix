@@ -59,7 +59,19 @@ func (m *Mesh) Bounds() (min, max Vec3) {
 // Parse reads and parses a mesh file by extension. Supported: .obj, .stl,
 // .ply, .vox (voxels — see voxel.go). Returns ErrUnsupportedFormat for
 // unknown extensions.
+// maxFileBytes caps the mesh file size read at Parse entry (256 MiB) so a
+// hostile file cannot force multi-GiB allocations (e.g. a huge STL triangle
+// count). Tools may impose tighter caps on top of this.
+const maxFileBytes = 256 << 20
+
 func Parse(path string) (*Mesh, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if fi.Size() > maxFileBytes {
+		return nil, fmt.Errorf("meshparse: file %d bytes exceeds limit %d", fi.Size(), maxFileBytes)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -67,22 +79,69 @@ func Parse(path string) (*Mesh, error) {
 	defer f.Close()
 	switch strings.ToLower(filepath.Ext(path)) {
 	case ".obj":
-		return ParseOBJ(f)
+		m, err := ParseOBJ(f)
+		if err != nil {
+			return nil, err
+		}
+		return m, validateIndices(m)
 	case ".stl":
-		return ParseSTL(f)
+		m, err := ParseSTL(f)
+		if err != nil {
+			return nil, err
+		}
+		return m, validateIndices(m)
 	case ".ply":
-		return ParsePLY(f)
+		m, err := ParsePLY(f)
+		if err != nil {
+			return nil, err
+		}
+		return m, validateIndices(m)
 	case ".gltf":
-		return ParseGLTF(path)
+		m, err := ParseGLTF(path)
+		if err != nil {
+			return nil, err
+		}
+		return m, validateIndices(m)
 	case ".glb":
-		return ParseGLB(path)
+		m, err := ParseGLB(path)
+		if err != nil {
+			return nil, err
+		}
+		return m, validateIndices(m)
 	default:
 		return nil, fmt.Errorf("%w: %s", ErrUnsupportedFormat, filepath.Ext(path))
 	}
 }
 
+// validateIndices rejects face vertex indices outside [0, len(Verts)) — a
+// malformed/hostile mesh must fail cleanly with an error, never panic in
+// downstream analyzers/operators.
+func validateIndices(m *Mesh) error {
+	n := len(m.Verts)
+	if n == 0 {
+		for _, f := range m.Faces {
+			if len(f.Verts) > 0 {
+				return fmt.Errorf("meshparse: faces reference vertices but mesh has none")
+			}
+		}
+		return nil
+	}
+	for fi, f := range m.Faces {
+		for _, vi := range f.Verts {
+			if vi < 0 || vi >= n {
+				return fmt.Errorf("meshparse: face %d vertex index %d out of range (have %d verts)", fi, vi, n)
+			}
+		}
+	}
+	return nil
+}
+
 // ErrUnsupportedFormat is returned when the file extension is not supported.
 var ErrUnsupportedFormat = errors.New("meshparse: unsupported format")
+
+// maxBufferBytes caps external/embedded glTF buffers (64 MiB) so a hostile
+// glTF cannot force arbitrary-size reads or allocations.
+const maxBufferBytes = 64 << 20
 
 // ---------------------------------------------------------------------------
 // OBJ (Wavefront). Handles v/vn/vt/f with n-gons and vertex indices.

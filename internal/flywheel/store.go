@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"errors"
 	"strings"
 	"time"
 
@@ -75,10 +76,30 @@ func NewStore(root string) (*Store, error) {
 // Root returns the store root directory.
 func (s *Store) Root() string { return s.root }
 
+// validateStoredID rejects IDs that could escape the store root via path
+// traversal (path separators, "..", NUL, drive colon).
+func validateStoredID(id string) error {
+	if id == "" {
+		return errors.New("flywheel: empty id")
+	}
+	for _, r := range id {
+		if r == '/' || r == '\\' || r == '\x00' || r == ':' {
+			return fmt.Errorf("flywheel: id %q contains path-unsafe characters", id)
+		}
+	}
+	if strings.Contains(id, "..") {
+		return fmt.Errorf("flywheel: id %q contains '..'", id)
+	}
+	return nil
+}
+
 // SaveTrajectory writes one trajectory (append-only, one JSON line).
 func (s *Store) SaveTrajectory(t *Trajectory) error {
 	if t.ID == "" {
 		t.ID = fmt.Sprintf("traj_%d", time.Now().UnixNano())
+	}
+	if err := validateStoredID(t.ID); err != nil {
+		return err
 	}
 	if t.TS == "" {
 		t.TS = time.Now().UTC().Format(time.RFC3339)
@@ -155,6 +176,9 @@ func (s *Store) ReadNotes() (string, error) {
 func (s *Store) SaveFailure(t *Trajectory) error {
 	if t.Judge == nil {
 		t.Judge = &Label{Score: 0, Name: "failed", Reason: "no judge label"}
+	}
+	if err := validateStoredID(t.ID); err != nil {
+		return err
 	}
 	body := fmt.Sprintf("# Failure: %s\n\n- task: %s\n- session: %s\n- ts: %s\n- label: %s (%0.2f)\n- reason: %s\n\n## lesson\n\n(记录教训：什么失败、为什么、下次如何避免)\n",
 		t.ID, t.Task, t.Session, t.TS, t.Judge.Name, t.Judge.Score, t.Judge.Reason)

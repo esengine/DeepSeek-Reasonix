@@ -124,6 +124,12 @@ func readVoxChunk(r io.Reader) (id string, content []byte, children []byte, err 
 	id = string(hdr[0:4])
 	cs := binary.LittleEndian.Uint32(hdr[4:8])
 	kids := binary.LittleEndian.Uint32(hdr[8:12])
+	// Cap chunk sizes (16 MiB each) so a hostile .vox cannot force a 4 GiB
+	// allocation from attacker-declared lengths.
+	const maxVoxChunk = 16 << 20
+	if cs > maxVoxChunk || kids > maxVoxChunk {
+		return "", nil, nil, fmt.Errorf("vox: chunk size too large (content %d, children %d)", cs, kids)
+	}
 	content = make([]byte, cs)
 	if _, err = io.ReadFull(r, content); err != nil {
 		return "", nil, nil, err
