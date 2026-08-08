@@ -357,6 +357,11 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		text, reasoning, signature, calls, responsesItems, usage := streamed.text, streamed.reasoning, streamed.signature, streamed.calls, streamed.responsesItems, streamed.usage
 		partialCalls, err := streamed.partialCalls, streamed.err
 		cacheDiagnostics := CompareShape(prevPrefixShape, prefixShape, usage, contentReasons)
+		// 9a: Response-side cache-break detection (record-only, no alerts).
+		// The hit count usually grows turn-over-turn as the prefix lengthens;
+		// a significant drop without a compaction/snip rewrite signals that
+		// the server-side prefix cache was evicted between turns.
+		cacheDiagnostics.CacheMissDrop = detectResponseCacheMiss(a, cacheDiagnostics.CacheHitTokens, contentReasons)
 		if err != nil {
 			a.emitTurnUsage(usage, &cacheDiagnostics)
 			if msg, ok := finishReasonMessage(usage); ok {

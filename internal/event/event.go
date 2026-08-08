@@ -447,6 +447,10 @@ type CacheDiagnostics struct {
 	ToolSchemaTokens    int
 	CacheMissTokens     int
 	CacheHitTokens      int
+	// CacheMissDrop is true when the hit count dropped ≥5% and ≥2000 tokens
+	// from the previous turn without a compaction/snip rewrite — a sign that
+	// the server-side prefix cache was evicted between turns.
+	CacheMissDrop bool
 }
 
 // FinalReadiness carries machine-readable recovery requirements on TurnDone.

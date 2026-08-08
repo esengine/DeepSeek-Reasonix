@@ -124,3 +124,20 @@ type ToolSchemaCost struct {
 	Name   string
 	Tokens int
 }
+
+// detectResponseCacheMiss returns true when the current hit count is ≥5% and
+// ≥2000 tokens below the previous turn's baseline AND no compaction/snip was
+// in play (those legitimately shrink the prefix). Always updates the baseline
+// (or resets it after compaction) for the next turn.
+func detectResponseCacheMiss(a *Agent, hit int, contentReasons []string) bool {
+	prev := int(a.lastResponseHitTokens.Load())
+	defer func() { a.lastResponseHitTokens.Store(int64(hit)) }()
+	if prev <= 0 {
+		return false
+	}
+	if len(contentReasons) > 0 {
+		return false
+	}
+	drop := prev - hit
+	return drop >= 2000 && float64(hit) < float64(prev)*0.95
+}
