@@ -127,3 +127,18 @@ func TestParsePLYShortHeaderLineRejected(t *testing.T) {
 		t.Fatalf("short element line: want error, got %v", err)
 	}
 }
+
+func TestVoxelizeWorkloadCapRejected(t *testing.T) {
+	// resolution=512 → cells=134M; a 4-triangle mesh would need ~537M ray
+	// tests → must be rejected by the cap, not silently run for minutes.
+	verts := []Vec3{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {1, 1, 1}}
+	faces := []Face{
+		{Verts: []int{0, 1, 2}},
+		{Verts: []int{0, 2, 3}},
+		{Verts: []int{0, 3, 1}},
+		{Verts: []int{1, 3, 2}},
+	}
+	if _, err := Voxelize(&Mesh{Verts: verts, Faces: faces}, 512); err == nil || !strings.Contains(err.Error(), "workload") {
+		t.Fatalf("512³×4 tris: want workload-cap rejection, got %v", err)
+	}
+}
