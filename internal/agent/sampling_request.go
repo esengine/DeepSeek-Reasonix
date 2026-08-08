@@ -41,6 +41,10 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	if clipped, ok := a.effectiveOutputBudget(requestMessages); ok {
 		maxTokens = clipped
 	}
+	// 1a: Predict overflow before the request goes on the wire. When the
+	// estimated prompt alone leaves almost no room for output, surface a
+	// record-only notice — no compaction is triggered, only a diagnostic.
+	a.maybePredictOverflow(a.estimatedPromptTokens(requestMessages), maxTokens)
 	req := provider.Request{
 		Messages:       requestMessages,
 		Tools:          a.tools.Schemas(),

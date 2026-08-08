@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -248,5 +249,158 @@ func TestMaybeCompactOnResumeWarmSmallPromptUntouched(t *testing.T) {
 	a.MaybeCompactOnResume(context.Background())
 	if st := a.compactionState; len(st.Projection.Messages) != 0 {
 		t.Fatal("warm small resume must keep the cached prefix untouched")
+	}
+}
+
+// capturingBudgetProvider embeds sharedFakeProvider and records the MaxTokens
+// of the last streamed request plus how many streams ran.
+type capturingBudgetProvider struct {
+	sharedFakeProvider
+	maxTokens int
+	streams   int
+}
+
+func (p *capturingBudgetProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
+	p.maxTokens = req.MaxTokens
+	p.streams++
+	return p.sharedFakeProvider.Stream(ctx, req)
+}
+
+var _ provider.Provider = (*capturingBudgetProvider)(nil)
+var _ provider.OutputBudgetProvider = (*capturingBudgetProvider)(nil)
+var _ provider.SharedWindowOutputProvider = (*capturingBudgetProvider)(nil)
+
+// TestSummarizeClipsSharedWindowBudget verifies the compaction summarizer clips
+// its own MaxTokens for a shared-window vendor: an unclipped default made
+// compaction itself fail with HTTP 400 near the window edge.
+func TestSummarizeClipsSharedWindowBudget(t *testing.T) {
+	cap := &capturingBudgetProvider{}
+	cap.fakeProvider = &fakeProvider{reply: "SUMMARY"}
+	cap.budget = 128 * 1024
+	a := &Agent{
+		prov:          cap,
+		contextWindow: 1_048_576,
+		outputBudget:  128 * 1024,
+		sink:          event.Discard,
+	}
+	// Region near the window edge: input alone estimates past the allowance.
+	region := []provider.Message{{Role: provider.RoleUser, Content: bigTokenString(900_000)}}
+	summary, _, err := a.summarize(context.Background(), region, "")
+	if err != nil {
+		t.Fatalf("summarize: %v", err)
+	}
+	if summary != "SUMMARY" {
+		t.Fatalf("summary = %q, want %q", summary, "SUMMARY")
+	}
+	if cap.maxTokens == 0 || cap.maxTokens >= 128*1024 {
+		t.Fatalf("MaxTokens = %d, want a clipped value under the 128K default", cap.maxTokens)
+	}
+}
+
+// TestSummarizeRejectsTooLargeInput verifies the summarizer refuses a fold
+// that cannot fit beside a usable output budget: the request would 400 again
+// and retrying it every turn just re-runs the failure.
+func TestSummarizeRejectsTooLargeInput(t *testing.T) {
+	cap := &capturingBudgetProvider{}
+	cap.fakeProvider = &fakeProvider{reply: "SUMMARY"}
+	cap.budget = 128 * 1024
+	a := &Agent{
+		prov:          cap,
+		contextWindow: 500_000,
+		outputBudget:  128 * 1024,
+		sink:          event.Discard,
+	}
+	// Fold larger than window - minOutputBudget: the rendered transcript
+	// estimates ~500K tokens.
+	region := []provider.Message{{Role: provider.RoleUser, Content: bigTokenString(500_000)}}
+	_, _, err := a.summarize(context.Background(), region, "")
+	if !errors.Is(err, ErrCompactionInputTooLarge) {
+		t.Fatalf("summarize err = %v, want ErrCompactionInputTooLarge", err)
+	}
+	if cap.streams != 0 {
+		t.Fatalf("summarize streamed %d requests; a too-large fold must be rejected before sending", cap.streams)
+	}
+}
+
+// TestMaybeCompactPausesOnTooLargeInput verifies auto-compaction stops retrying
+// when the fold cannot fit the window: compactStuck latches and a warn notice
+// explains why, instead of re-running a doomed summarize every turn.
+func TestMaybeCompactPausesOnTooLargeInput(t *testing.T) {
+	cap := &capturingBudgetProvider{}
+	cap.fakeProvider = &fakeProvider{reply: "SUMMARY"}
+	cap.budget = 128 * 1024
+	var notices []string
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})
+	sess := NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: bigTokenString(500_000)})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "ok"})
+	a := &Agent{
+		prov:              cap,
+		contextWindow:     500_000,
+		outputBudget:      128 * 1024,
+		compactRatio:      0.8,
+		compactForceRatio: 0.9,
+		sink:              sink,
+	}
+	a.session = sess
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 500_000})
+	if !a.compactStuck {
+		t.Fatal("too-large fold must latch compactStuck to stop auto-retry")
+	}
+	found := false
+	for _, n := range notices {
+		if strings.Contains(n, "too large to compact") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a 'too large to compact' notice, got %v", notices)
+	}
+}
+
+// TestMaybePredictOverflowFires verifies a record-only notice when the
+// estimated prompt + max output leaves less than 8K of headroom.
+func TestMaybePredictOverflowFires(t *testing.T) {
+	var notices []string
+	sink := event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e.Text)
+		}
+	})
+	a := &Agent{
+		contextWindow: 1_048_576,
+		sink:          sink,
+	}
+	// est 1M, max 128K → headroom = 1M - 1M - 128K = -128K < 8K → fires.
+	a.maybePredictOverflow(1_048_576, 131_072)
+	found := false
+	for _, n := range notices {
+		if n == "context window nearly full" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected overflow notice, got %v", notices)
+	}
+}
+
+// TestMaybePredictOverflowDoesNotFire when there is adequate headroom.
+func TestMaybePredictOverflowDoesNotFire(t *testing.T) {
+	count := 0
+	sink := event.FuncSink(func(e event.Event) {
+		count++
+	})
+	a := &Agent{
+		contextWindow: 1_048_576,
+		sink:          sink,
+	}
+	// est 100K, max 128K → headroom = 1M - 100K - 128K = ~820K >> 8K → no fire.
+	a.maybePredictOverflow(100_000, 131_072)
+	if count > 0 {
+		t.Fatalf("overflow predicted on a small prompt (%d events)", count)
 	}
 }
