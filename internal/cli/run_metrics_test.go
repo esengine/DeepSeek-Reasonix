@@ -11,6 +11,15 @@ import (
 	"reasonix/internal/provider"
 )
 
+func TestMetricsSinkForwardsEachEventOnce(t *testing.T) {
+	forwarded := 0
+	s := &metricsSink{inner: event.FuncSink(func(event.Event) { forwarded++ })}
+	s.Emit(event.Event{Kind: event.Text, Text: "x"})
+	if forwarded != 1 {
+		t.Fatalf("inner sink saw %d emissions for one event, want 1", forwarded)
+	}
+}
+
 func TestMetricsSinkUsesProviderCacheWriteCost(t *testing.T) {
 	s := &metricsSink{inner: event.Discard}
 	s.Emit(event.Event{

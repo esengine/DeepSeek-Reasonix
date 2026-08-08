@@ -48,7 +48,6 @@ import (
 	"reasonix/internal/i18n"
 	"reasonix/internal/jobs"
 	"reasonix/internal/mcpdiag"
-	"reasonix/internal/mcplaunch"
 	"reasonix/internal/mcpregistry"
 	"reasonix/internal/memory"
 	"reasonix/internal/notify"
@@ -143,6 +142,26 @@ type App struct {
 	activeTabID string
 	readyHook   func()
 
+	// Ticketed topic activation bookkeeping (StartTopicActivation). Guarded by
+	// mu. activationGen bumps on every activation-or-supersede so a background
+	// completion can tell whether it still owns publication; the pending
+	// request/tab pair identifies the in-flight ticketed activation whose
+	// completion may still prune and emit "ready".
+	activationGen             uint64
+	latestActivationRequestID string
+	pendingActivationTabID    string
+	// activationEventHook is test-only: when set it replaces the
+	// "topic:activation" runtime event emission so tests capture events
+	// synchronously. Set before starting concurrent work, never mutate after.
+	activationEventHook func(TopicActivationEvent)
+	// tabBuildStartHook is test-only: called at the top of every tab
+	// controller build (even already-superseded ones) so ordering tests can
+	// gate builds. Same set-before-concurrency rule.
+	tabBuildStartHook func(tabID string)
+	// configLoadForRootHook is test-only: called from the background meta
+	// extras refresh so tests can prove MetaForTab itself never loads config.
+	configLoadForRootHook func(root string)
+
 	// runtimeByID/runtimeBySessionKey form the process-local ownership registry.
 	// App.mu guards both maps and every desktopSessionRuntime field.
 	runtimeByID         map[string]*desktopSessionRuntime
@@ -217,6 +236,15 @@ type App struct {
 	// deferredRebuild tracks tabs whose settings were saved but whose runtime
 	// could not refresh because the session lease was held by another process.
 	deferredRebuild deferredRebuildState
+
+	// historySliceMu guards the windowed-history background bookkeeping:
+	// single-flight display-index rebuilds for live sessions and the startup
+	// index-migration worker's cancel handle. Never held while calling
+	// controller or session methods.
+	historySliceMu              sync.Mutex
+	historyIndexRebuilds        map[string]struct{}
+	historyIndexMigrationCancel context.CancelFunc
+	historyDerived              historyDerivedCache
 
 	// detachedSessions keeps live session runtimes whose visible tab was closed.
 	// It is process-local by design: shutdown closes every detached controller.
@@ -547,6 +575,7 @@ func (a *App) startup(ctx context.Context) {
 	installSystemQuitHook()
 	a.startTray()
 	a.enableDeferredRebuildRetry()
+	a.startHistoryIndexMigration()
 	a.goSafe("repairDesktopIconIntegration", func() {
 		if err := repairDesktopIconIntegration(); err != nil {
 			slog.Debug("desktop: repair native icon integration", "err", err)
@@ -942,6 +971,7 @@ func (a *App) shutdown(context.Context) {
 		_ = stats.Flush(flushCtx, config.StatsDir())
 	}()
 	a.stopDeferredRebuildRetry()
+	a.stopHistoryIndexMigration()
 	a.stopMainThreadWatchdog()
 	if a.heartbeat != nil {
 		a.heartbeat.Stop()
@@ -3030,9 +3060,8 @@ func (a *App) ForkForTab(tabID string, turn int) (TabMeta, error) {
 	return meta, nil
 }
 
-// SummarizeFrom / SummarizeUpTo compress the conversation from / up to the start
-// of turn into one summary (Claude Code's "summarize from/up to here"), keeping
-// code intact. The frontend re-reads History after this resolves.
+// SummarizeFrom / SummarizeUpTo compress model context after / before the start
+// of a selected turn. Visible history and checkpoints remain unchanged.
 func (a *App) SummarizeFrom(turn int) error {
 	return a.SummarizeFromForTab("", turn)
 }
@@ -5868,6 +5897,20 @@ func historyMessagesWithPlannerDisplays(msgs []provider.Message, resolveUserCont
 	return historyMessagesWithPlannerDisplaysAndLookups(msgs, resolveUserContent, plannerTurns, checkpointTurns, replayedTodoArgs, toolResults)
 }
 
+// historyMessageConvertState carries the cross-message state of a provider→
+// HistoryMessage conversion pass: the planner-display queue (consumed in order
+// per user-text hash) and the canonical-turn suppression a planner interrupt
+// notice arms. Keeping it explicit lets the windowed history slice API convert
+// one message at a time with exactly the same semantics as a full pass.
+type historyMessageConvertState struct {
+	plannerByUserHash     map[string][]plannerDisplayTurn
+	suppressCanonicalTurn bool
+}
+
+func newHistoryMessageConvertState(plannerTurns []plannerDisplayTurn) *historyMessageConvertState {
+	return &historyMessageConvertState{plannerByUserHash: plannerTurnsByUserHash(plannerTurns)}
+}
+
 func historyMessagesWithPlannerDisplaysAndLookups(
 	msgs []provider.Message,
 	resolveUserContent func(string) string,
@@ -5877,131 +5920,178 @@ func historyMessagesWithPlannerDisplaysAndLookups(
 	toolResults map[string]provider.Message,
 ) []HistoryMessage {
 	out := make([]HistoryMessage, 0, len(msgs))
-	plannerByUserHash := plannerTurnsByUserHash(plannerTurns)
-	suppressCanonicalTurn := false
+	state := newHistoryMessageConvertState(plannerTurns)
 	for index, m := range msgs {
-		if m.DecisionReceipt != nil {
-			out = append(out, HistoryMessage{
-				Role:            "notice",
-				Code:            event.NoticeCodeDecisionReceipt,
-				Level:           "info",
-				DecisionReceipt: cloneDecisionReceipt(m.DecisionReceipt),
+		out = append(out, state.convertHistoryMessage(index, m, resolveUserContent, checkpointTurns, replayedTodoArgs, toolResults)...)
+	}
+	return out
+}
+
+// convertHistoryMessage converts one provider message into its 0..n history
+// rows. index is the message's position in the coordinate system of
+// checkpointTurns (window-relative for the legacy full-pass callers, absolute
+// for the windowed slice API).
+func (state *historyMessageConvertState) convertHistoryMessage(
+	index int,
+	m provider.Message,
+	resolveUserContent func(string) string,
+	checkpointTurns map[int]int,
+	replayedTodoArgs map[string]string,
+	toolResults map[string]provider.Message,
+) []HistoryMessage {
+	var out []HistoryMessage
+	if m.DecisionReceipt != nil {
+		return append(out, HistoryMessage{
+			Role:            "notice",
+			Code:            event.NoticeCodeDecisionReceipt,
+			Level:           "info",
+			DecisionReceipt: cloneDecisionReceipt(m.DecisionReceipt),
+		})
+	}
+	if m.LocalOnly {
+		if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
+			return append(out, HistoryMessage{
+				Role:    "notice",
+				Content: agent.UnappliedSteerNotice(steerText),
+				Code:    event.NoticeCodeUnappliedSteer,
+				Level:   "warn",
 			})
-			continue
 		}
-		if m.LocalOnly {
-			if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
-				out = append(out, HistoryMessage{
-					Role:    "notice",
-					Content: agent.UnappliedSteerNotice(steerText),
-					Code:    event.NoticeCodeUnappliedSteer,
-					Level:   "warn",
-				})
-				continue
-			}
+	}
+	if state.suppressCanonicalTurn {
+		if m.Role != provider.RoleUser || !agent.IsUserAuthoredTurn(agent.UserMessageText(m)) {
+			return out
 		}
-		if suppressCanonicalTurn {
-			if m.Role != provider.RoleUser || !agent.IsUserAuthoredTurn(agent.UserMessageText(m)) {
-				continue
-			}
-			suppressCanonicalTurn = false
+		state.suppressCanonicalTurn = false
+	}
+	content := m.Content
+	var checkpointTurn *int
+	if m.Role == provider.RoleUser {
+		// Mid-turn steer messages are persisted in the session so they
+		// survive tab switches. They are surfaced as a notice (↪ text)
+		// — matching the live Steer event look — rather than as a
+		// regular user bubble or being filtered as synthetic (#4044).
+		// Check against the raw m.Content: resolveUserContent applies
+		// StripComposePrefixes which trims trailing whitespace.
+		if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
+			return append(out, HistoryMessage{Role: "notice", Content: "↪ " + steerText})
 		}
-		content := m.Content
-		var checkpointTurn *int
-		if m.Role == provider.RoleUser {
-			// Mid-turn steer messages are persisted in the session so they
-			// survive tab switches. They are surfaced as a notice (↪ text)
-			// — matching the live Steer event look — rather than as a
-			// regular user bubble or being filtered as synthetic (#4044).
-			// Check against the raw m.Content: resolveUserContent applies
-			// StripComposePrefixes which trims trailing whitespace.
-			if steerText, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
-				out = append(out, HistoryMessage{Role: "notice", Content: "↪ " + steerText})
-				continue
-			}
-			content = historyUserDisplayContent(m, resolveUserContent)
-			if control.IsSyntheticUserMessage(content) {
-				continue
-			}
-			if turn, ok := checkpointTurns[index]; ok {
-				turnCopy := turn
-				checkpointTurn = &turnCopy
-			}
+		content = historyUserDisplayContent(m, resolveUserContent)
+		if control.IsSyntheticUserMessage(content) {
+			return out
 		}
-		reasoning := ""
-		if m.Role == provider.RoleAssistant || m.LocalOnly {
-			reasoning = m.ReasoningContent
+		if turn, ok := checkpointTurns[index]; ok {
+			turnCopy := turn
+			checkpointTurn = &turnCopy
 		}
-		displayRole := string(m.Role)
-		if m.LocalOnly {
-			displayRole = "assistant"
-		}
-		hm := HistoryMessage{Role: displayRole, Content: content, CheckpointTurn: checkpointTurn, CreatedAt: m.CreatedAt, Reasoning: reasoning, WorkDurationMs: m.WorkDurationMs}
-		if m.Role == provider.RoleAssistant && len(m.MemoryCitations) > 0 {
-			hm.MemoryCitations = append([]provider.MemoryCitation(nil), m.MemoryCitations...)
-		}
-		if m.Role == provider.RoleUser && content != m.Content {
-			replay := historyReplayUserContent(m.Content)
-			if agent.ContainsMemoryCompilerExecution(m.Content) {
-				// Never expose the compiler contract itself. A safely unwrapped
-				// slash invocation is useful display metadata, though: it lets the
-				// frontend restore the selected skill/subagent in history and trash.
-				if strings.HasPrefix(strings.TrimSpace(replay), "/") && replay != content {
-					hm.SubmitText = replay
-				}
-			} else if replay != content {
+	}
+	reasoning := ""
+	if m.Role == provider.RoleAssistant || m.LocalOnly {
+		reasoning = m.ReasoningContent
+	}
+	displayRole := string(m.Role)
+	if m.LocalOnly {
+		displayRole = "assistant"
+	}
+	hm := HistoryMessage{Role: displayRole, Content: content, CheckpointTurn: checkpointTurn, CreatedAt: m.CreatedAt, Reasoning: reasoning, WorkDurationMs: m.WorkDurationMs}
+	if m.Role == provider.RoleAssistant && len(m.MemoryCitations) > 0 {
+		hm.MemoryCitations = append([]provider.MemoryCitation(nil), m.MemoryCitations...)
+	}
+	if m.Role == provider.RoleUser && content != m.Content {
+		replay := historyReplayUserContent(m.Content)
+		if agent.ContainsMemoryCompilerExecution(m.Content) {
+			// Never expose the compiler contract itself. A safely unwrapped
+			// slash invocation is useful display metadata, though: it lets the
+			// frontend restore the selected skill/subagent in history and trash.
+			if strings.HasPrefix(strings.TrimSpace(replay), "/") && replay != content {
 				hm.SubmitText = replay
 			}
+		} else if replay != content {
+			hm.SubmitText = replay
 		}
-		if (m.Role == provider.RoleAssistant || m.LocalOnly) && len(m.ToolCalls) > 0 {
-			hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
-			for i, tc := range m.ToolCalls {
-				args := tc.Arguments
-				if tc.Name == "todo_write" {
-					if replayed, ok := replayedTodoArgs[tc.ID]; ok {
-						args = replayed
-					}
+	}
+	if (m.Role == provider.RoleAssistant || m.LocalOnly) && len(m.ToolCalls) > 0 {
+		hm.ToolCalls = make([]HistoryToolCall, len(m.ToolCalls))
+		for i, tc := range m.ToolCalls {
+			args := tc.Arguments
+			if tc.Name == "todo_write" {
+				if replayed, ok := replayedTodoArgs[tc.ID]; ok {
+					args = replayed
 				}
-				hm.ToolCalls[i] = historyToolCall(tc, args, toolResults[tc.ID])
 			}
+			hm.ToolCalls[i] = historyToolCall(tc, args, toolResults[tc.ID])
 		}
-		if m.Role == provider.RoleTool && !m.LocalOnly {
-			hm.ToolCallID = m.ToolCallID
-			hm.ToolName = m.Name
-			hm.Content, hm.ToolResultArchived, hm.ToolResultError = historyToolResultContent(m.Content, m.ToolCallID != "")
-			hm.Execution = m.ToolExecution
+	}
+	if m.Role == provider.RoleTool && !m.LocalOnly {
+		hm.ToolCallID = m.ToolCallID
+		hm.ToolName = m.Name
+		hm.Content, hm.ToolResultArchived, hm.ToolResultError = historyToolResultContent(m.Content, m.ToolCallID != "")
+		hm.Execution = m.ToolExecution
+	}
+	hasVisibleLocalContent := strings.TrimSpace(hm.Content) != "" || strings.TrimSpace(hm.Reasoning) != "" || len(hm.ToolCalls) > 0 || (!m.LocalOnly && m.Role == provider.RoleTool)
+	if !m.LocalOnly || hasVisibleLocalContent {
+		out = append(out, hm)
+	}
+	for _, receipt := range m.DecisionReceipts {
+		if receipt == nil {
+			continue
 		}
-		hasVisibleLocalContent := strings.TrimSpace(hm.Content) != "" || strings.TrimSpace(hm.Reasoning) != "" || len(hm.ToolCalls) > 0 || (!m.LocalOnly && m.Role == provider.RoleTool)
-		if !m.LocalOnly || hasVisibleLocalContent {
-			out = append(out, hm)
-		}
-		for _, receipt := range m.DecisionReceipts {
-			if receipt == nil {
-				continue
-			}
-			out = append(out, HistoryMessage{
-				Role:            "notice",
-				Code:            event.NoticeCodeDecisionReceipt,
-				Level:           "info",
-				DecisionReceipt: cloneDecisionReceipt(receipt),
-			})
-		}
-		if m.LocalOnly && m.InterruptedTurn != nil {
-			out = append(out, HistoryMessage{
-				Role: "notice", Level: "info", Code: event.NoticeCodeCancelledTurn,
-				Content: "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes.",
-			})
-		}
-		if m.Role == provider.RoleUser {
-			key := messageDisplayKey(agent.UserMessageText(m))
-			if turns := plannerByUserHash[key]; len(turns) > 0 {
-				out = append(out, cloneHistoryMessages(turns[0].Messages)...)
-				suppressCanonicalTurn = plannerDisplaySuppressesCanonical(turns[0])
-				plannerByUserHash[key] = turns[1:]
-			}
+		out = append(out, HistoryMessage{
+			Role:            "notice",
+			Code:            event.NoticeCodeDecisionReceipt,
+			Level:           "info",
+			DecisionReceipt: cloneDecisionReceipt(receipt),
+		})
+	}
+	if m.LocalOnly && m.InterruptedTurn != nil {
+		out = append(out, HistoryMessage{
+			Role: "notice", Level: "info", Code: event.NoticeCodeCancelledTurn,
+			Content: "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes.",
+		})
+	}
+	if m.Role == provider.RoleUser {
+		key := messageDisplayKey(agent.UserMessageText(m))
+		if turns := state.plannerByUserHash[key]; len(turns) > 0 {
+			out = append(out, cloneHistoryMessages(turns[0].Messages)...)
+			state.suppressCanonicalTurn = plannerDisplaySuppressesCanonical(turns[0])
+			state.plannerByUserHash[key] = turns[1:]
 		}
 	}
 	return out
+}
+
+// consumeHistoryPlannerState advances only the cross-message planner state.
+// Windowed pages call it for the prefix they do not render, so repeated user
+// text and a planner interrupt at a page boundary behave exactly as one full
+// conversion pass. Keep the early returns in lock-step with
+// convertHistoryMessage: those rows never reach the planner attachment at its
+// tail.
+func (state *historyMessageConvertState) consumeHistoryPlannerState(m provider.Message, resolveUserContent func(string) string) {
+	if m.DecisionReceipt != nil {
+		return
+	}
+	if m.LocalOnly {
+		if _, isSteer := agent.SteerText(agent.UserMessageText(m)); isSteer {
+			return
+		}
+	}
+	if state.suppressCanonicalTurn {
+		if m.Role != provider.RoleUser || !agent.IsUserAuthoredTurn(agent.UserMessageText(m)) {
+			return
+		}
+		state.suppressCanonicalTurn = false
+	}
+	if m.Role != provider.RoleUser {
+		return
+	}
+	if control.IsSyntheticUserMessage(historyUserDisplayContent(m, resolveUserContent)) {
+		return
+	}
+	key := messageDisplayKey(agent.UserMessageText(m))
+	if turns := state.plannerByUserHash[key]; len(turns) > 0 {
+		state.suppressCanonicalTurn = plannerDisplaySuppressesCanonical(turns[0])
+		state.plannerByUserHash[key] = turns[1:]
+	}
 }
 
 func cloneDecisionReceipt(in *provider.DecisionReceipt) *provider.DecisionReceipt {
@@ -6354,41 +6444,57 @@ func clipStringBytes(s string, max int) string {
 
 func historyTodoArgsWithCompleteSteps(msgs []provider.Message) map[string]string {
 	successful := successfulHistoryToolCallIDs(msgs)
-	out := map[string]string{}
-	var todos []evidence.TodoItem
-	latestTodoID := ""
+	state := newHistoryTodoArgsState(successful)
 	for _, m := range msgs {
-		for _, tc := range m.ToolCalls {
-			if tc.ID == "" || !successful[tc.ID] {
+		state.consume(m)
+	}
+	return state.out
+}
+
+// historyTodoArgsState retains only the derived todo state needed to render a
+// todo_write call. It lets windowed history compute the same result as the
+// legacy full conversion while streaming messages in bounded chunks.
+type historyTodoArgsState struct {
+	successful   map[string]bool
+	out          map[string]string
+	todos        []evidence.TodoItem
+	latestTodoID string
+}
+
+func newHistoryTodoArgsState(successful map[string]bool) *historyTodoArgsState {
+	return &historyTodoArgsState{successful: successful, out: map[string]string{}}
+}
+
+func (state *historyTodoArgsState) consume(m provider.Message) {
+	for _, tc := range m.ToolCalls {
+		if tc.ID == "" || !state.successful[tc.ID] {
+			continue
+		}
+		switch tc.Name {
+		case "todo_write":
+			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+			if len(rec.Todos) == 0 {
 				continue
 			}
-			switch tc.Name {
-			case "todo_write":
-				rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
-				if len(rec.Todos) == 0 {
-					continue
-				}
-				todos = evidence.NormalizeSerialTodos(rec.Todos)
-				latestTodoID = tc.ID
-				if args, ok := todoArgsJSON(todos); ok {
-					out[latestTodoID] = args
-				}
-			case "complete_step":
-				if latestTodoID == "" || len(todos) == 0 {
-					continue
-				}
-				rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
-				match, ok := evidence.MatchStep(rec.Step, todos)
-				if !ok || !evidence.AdvanceSerialTodo(todos, match.Index-1) {
-					continue
-				}
-				if args, ok := todoArgsJSON(todos); ok {
-					out[latestTodoID] = args
-				}
+			state.todos = evidence.NormalizeSerialTodos(rec.Todos)
+			state.latestTodoID = tc.ID
+			if args, ok := todoArgsJSON(state.todos); ok {
+				state.out[state.latestTodoID] = args
+			}
+		case "complete_step":
+			if state.latestTodoID == "" || len(state.todos) == 0 {
+				continue
+			}
+			rec := evidence.ReceiptFromToolCall(tc.Name, json.RawMessage(tc.Arguments), true, true)
+			match, ok := evidence.MatchStep(rec.Step, state.todos)
+			if !ok || !evidence.AdvanceSerialTodo(state.todos, match.Index-1) {
+				continue
+			}
+			if args, ok := todoArgsJSON(state.todos); ok {
+				state.out[state.latestTodoID] = args
 			}
 		}
 	}
-	return out
 }
 
 func successfulHistoryToolCallIDs(msgs []provider.Message) map[string]bool {
@@ -6950,17 +7056,14 @@ func (a *App) Meta() Meta {
 	return a.MetaForTab("")
 }
 
-func (a *App) imageInputEnabledForTab(tabID string) bool {
-	a.mu.RLock()
-	tab := a.tabByIDLocked(tabID)
-	var ref, root string
-	if tab != nil {
-		ref = tab.model
-		root = tab.WorkspaceRoot
-	}
-	a.mu.RUnlock()
-	if tab == nil {
-		return false
+// imageInputEnabledForRootModel reports whether the resolved model supports
+// image input. EXPENSIVE: it loads the workspace config and resolves the model
+// catalog. Never call it on a bound-method request path — MetaForTab serves
+// the cached tabMetaExtras instead, and only refreshTabMetaExtras (background)
+// calls this.
+func (a *App) imageInputEnabledForRootModel(root, ref string) bool {
+	if hook := a.configLoadForRootHook; hook != nil {
+		hook(root)
 	}
 	cfg, err := config.LoadForRoot(root)
 	if err == nil && ref == "" {
@@ -6986,6 +7089,15 @@ func (a *App) MetaForTab(tabID string) Meta {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
+	// Git branch and image-input capability come from the per-tab cache
+	// refreshed in the background (refreshTabMetaExtras); computing them here
+	// put a config load + model resolution on every meta request. A miss or
+	// stale entry schedules a refresh and serves the last known values (empty
+	// on the very first call; the "tab:meta" event delivers the refresh).
+	extras, refreshExtras := tabMetaExtrasFor(tab, cwd, snap.model)
+	if refreshExtras {
+		a.scheduleTabMetaExtrasRefresh(tab.ID)
+	}
 	autoApproveTools := snap.ctrl != nil && snap.ctrl.AutoApproveTools()
 	collaborationMode := snap.collaborationMode()
 	toolApprovalMode := snap.currentToolApprovalMode()
@@ -7002,8 +7114,8 @@ func (a *App) MetaForTab(tabID string) Meta {
 		WorkspaceRoot:     cwd,
 		WorkspaceName:     tabWorkspaceNameForScope(snap.scope, cwd),
 		WorkspacePath:     cwd,
-		GitBranch:         workspaceGitBranchForMeta(cwd),
-		ImageInputEnabled: a.imageInputEnabledForTab(tabID),
+		GitBranch:         extras.gitBranch,
+		ImageInputEnabled: extras.imageInputEnabled,
 		AutoApproveTools:  autoApproveTools,
 		Bypass:            autoApproveTools,
 		CollaborationMode: collaborationMode,
@@ -7514,8 +7626,9 @@ type CapabilitiesView struct {
 // SkillsSettingsView is the skills management page's data, split from MCP
 // status so opening MCP settings does not scan skill roots.
 type SkillsSettingsView struct {
-	Skills     []SkillView     `json:"skills"`
-	SkillRoots []SkillRootView `json:"skillRoots"`
+	Skills                  []SkillView     `json:"skills"`
+	SkillRoots              []SkillRootView `json:"skillRoots"`
+	AllowImplicitInvocation bool            `json:"allowImplicitInvocation"`
 }
 
 // ServerView is one MCP server for the drawer. Status is "connected" (with
@@ -7578,6 +7691,7 @@ type SkillView struct {
 	Name         string   `json:"name"`
 	Description  string   `json:"description"`
 	Scope        string   `json:"scope"`
+	SourceDir    string   `json:"sourceDir,omitempty"`
 	RunAs        string   `json:"runAs"`
 	Enabled      bool     `json:"enabled"`
 	Plugin       string   `json:"plugin,omitempty"`
@@ -7623,6 +7737,7 @@ type SkillRootView struct {
 	Scope      string               `json:"scope"`
 	Priority   int                  `json:"priority"`
 	Status     string               `json:"status"`
+	Enabled    bool                 `json:"enabled"`
 	Configured bool                 `json:"configured"`
 	Removable  bool                 `json:"removable"`
 	Skills     int                  `json:"skills"`
@@ -8025,54 +8140,18 @@ func (a *App) disconnectMCPServerAllRuntimes(serverName string) bool {
 	return disconnected
 }
 
-func (a *App) mcpLaunchSpec(root, name string) (plugin.Spec, error) {
-	cfg, err := config.LoadForRoot(root)
-	if err != nil {
-		return plugin.Spec{}, err
-	}
-	var entry *config.PluginEntry
-	for i := range cfg.Plugins {
-		if cfg.Plugins[i].Name == name {
-			entry = &cfg.Plugins[i]
-			break
-		}
-	}
-	if entry == nil {
-		return plugin.Spec{}, fmt.Errorf("no configured MCP server named %q", name)
-	}
-	return a.mcpLaunchSpecForEntryWithConfig(root, *entry, cfg)
-}
-
-func (a *App) mcpLaunchSpecForEntry(root string, entry config.PluginEntry) (plugin.Spec, error) {
-	cfg, err := config.LoadForRoot(root)
-	if err != nil {
-		return plugin.Spec{}, err
-	}
-	return a.mcpLaunchSpecForEntryWithConfig(root, entry, cfg)
-}
-
-func (a *App) mcpLaunchSpecForEntryWithConfig(root string, entry config.PluginEntry, cfg *config.Config) (plugin.Spec, error) {
-	specs := boot.PluginSpecsForRootWithOptions([]config.PluginEntry{entry}, root, boot.PluginSpecOptions{
-		DefaultCallTimeout: time.Duration(cfg.MCPCallTimeoutSeconds()) * time.Second,
-		LaunchManager:      mcplaunch.ForWorkspace(config.ReasonixHomeDir(), root),
-		ConfigSource:       "workspace_config", StateHome: config.ReasonixHomeDir(),
-		WriterRoots: cfg.WriteRootsForRoot(root), ForbidReadRoots: boot.RuntimeForbidReadRoots(cfg, root),
-		Network: cfg.Sandbox.Network,
-	})
-	if len(specs) != 1 {
-		return plugin.Spec{}, fmt.Errorf("failed to build MCP server %q", entry.Name)
-	}
-	return specs[0], nil
-}
-
 // SkillsSettings returns the skills management snapshot without MCP status.
 func (a *App) SkillsSettings() SkillsSettingsView {
-	out := SkillsSettingsView{Skills: []SkillView{}, SkillRoots: []SkillRootView{}}
+	out := SkillsSettingsView{Skills: []SkillView{}, SkillRoots: []SkillRootView{}, AllowImplicitInvocation: true}
 	a.mu.RLock()
 	tab := a.activeTabLocked()
 	var ctrl control.SessionAPI
+	workspaceRoot := "."
 	if tab != nil {
 		ctrl = tab.Ctrl
+		if strings.TrimSpace(tab.WorkspaceRoot) != "" {
+			workspaceRoot = tab.WorkspaceRoot
+		}
 	}
 	a.mu.RUnlock()
 	if ctrl == nil {
@@ -8081,7 +8160,8 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 
 	disabled := map[string]bool{}
 	var configuredModels, configuredEfforts map[string]string
-	if cfg, err := config.Load(); err == nil {
+	if cfg, err := config.LoadForRootReadOnly(workspaceRoot); err == nil {
+		out.AllowImplicitInvocation = cfg.ImplicitSkillInvocationEnabled()
 		for _, name := range cfg.Skills.DisabledSkills {
 			if key := config.SkillNameKey(name); key != "" {
 				disabled[key] = true
@@ -8090,10 +8170,11 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 		configuredModels = cfg.Agent.SubagentModels
 		configuredEfforts = cfg.Agent.SubagentEfforts
 	}
+	out.SkillRoots = a.cachedSkillRootsView(workspaceRoot)
 	for _, s := range ctrl.AllSkills() {
 		view := SkillView{
 			Name: s.Name, Description: s.Description,
-			Scope: string(s.Scope), RunAs: string(s.RunAs),
+			Scope: string(s.Scope), SourceDir: skillSourceDir(s, out.SkillRoots), RunAs: string(s.RunAs),
 			Enabled:          !disabled[config.SkillNameKey(s.Name)],
 			Plugin:           s.Plugin,
 			Model:            s.Model,
@@ -8115,8 +8196,21 @@ func (a *App) SkillsSettings() SkillsSettingsView {
 		}
 		out.Skills = append(out.Skills, view)
 	}
-	out.SkillRoots = a.cachedSkillRootsView()
 	return out
+}
+
+// SetSkillImplicitInvocation persists whether the model may discover and
+// invoke skills automatically, then rebuilds the active runtime. Explicit
+// /skill invocation and skill management remain available in either mode.
+func (a *App) SetSkillImplicitInvocation(enabled bool) error {
+	err := a.applySkillConfigChange("disable_implicit_invocation", "skills policy", func(c *config.Config) error {
+		c.SetSkillImplicitInvocation(enabled)
+		return nil
+	})
+	if err == nil {
+		a.invalidateSkillRootsCache()
+	}
+	return err
 }
 
 // subagentOverrideFor resolves a per-name subagent override with the same
@@ -8474,11 +8568,15 @@ func mcpServerSource(source config.MCPConfigSource) (kind, configSource string) 
 
 const skillRootsCacheTTL = 10 * time.Second
 
-func (a *App) cachedSkillRootsView() []SkillRootView {
-	cwd, _ := os.Getwd()
-	cfg, _ := config.Load()
+func (a *App) cachedSkillRootsView(workspaceRoots ...string) []SkillRootView {
+	workspaceRoot := "."
+	if len(workspaceRoots) > 0 {
+		workspaceRoot = workspaceRoots[0]
+	}
+	workspaceRoot = normalizeWorkspaceRoot(workspaceRoot)
+	cfg, _ := config.LoadForRootReadOnly(workspaceRoot)
 	userCfg := config.LoadForEdit(config.UserConfigPath())
-	key := skillRootsCacheKey(cwd, cfg, userCfg)
+	key := skillRootsCacheKey(workspaceRoot, cfg, userCfg)
 
 	now := time.Now()
 	a.skillRootsMu.Lock()
@@ -8489,7 +8587,7 @@ func (a *App) cachedSkillRootsView() []SkillRootView {
 	}
 	a.skillRootsMu.Unlock()
 
-	roots := skillRootsViewFrom(cwd, cfg, userCfg)
+	roots := skillRootsViewFrom(workspaceRoot, cfg, userCfg)
 
 	a.skillRootsMu.Lock()
 	a.skillRootsCache = skillRootsCache{
@@ -8514,7 +8612,8 @@ func skillRootsView() []SkillRootView {
 	return skillRootsViewFrom(cwd, cfg, userCfg)
 }
 
-func skillRootsViewFrom(cwd string, cfg, userCfg *config.Config) []SkillRootView {
+func skillRootsViewFrom(workspaceRoot string, cfg, userCfg *config.Config) []SkillRootView {
+	workspaceRoot = normalizeWorkspaceRoot(workspaceRoot)
 	var custom []string
 	var excluded []string
 	maxDepth := 3
@@ -8529,7 +8628,7 @@ func skillRootsViewFrom(cwd string, cfg, userCfg *config.Config) []SkillRootView
 		pluginPaths = cfg.PluginPackageSkillOwners()
 		pluginAgentPaths = cfg.PluginPackageAgentOwners()
 	}
-	st := skill.New(skill.Options{ProjectRoot: cwd, CustomPaths: custom, PluginPaths: pluginPaths, PluginAgentPaths: pluginAgentPaths, ExcludedPaths: excluded, MaxDepth: maxDepth, DisableBuiltins: true, Stderr: io.Discard})
+	st := skill.New(skill.Options{ProjectRoot: workspaceRoot, CustomPaths: custom, PluginPaths: pluginPaths, PluginAgentPaths: pluginAgentPaths, ExcludedPaths: excluded, MaxDepth: maxDepth, DisableBuiltins: true, Stderr: io.Discard})
 	counts := map[string]int{}
 	skillItems := map[string][]SkillRootSkillView{}
 	roots := st.Roots()
@@ -8557,19 +8656,30 @@ func skillRootsViewFrom(cwd string, cfg, userCfg *config.Config) []SkillRootView
 	userConfigured := map[string]bool{}
 	if userCfg != nil {
 		for _, p := range userCfg.Skills.Paths {
-			userConfigured[config.CanonicalSkillPath(p)] = true
+			userConfigured[canonicalSkillPathForRoot(p, workspaceRoot)] = true
+		}
+	}
+	effectiveConfigured := map[string]bool{}
+	effectiveExcluded := map[string]bool{}
+	if cfg != nil {
+		for _, p := range cfg.Skills.Paths {
+			effectiveConfigured[canonicalSkillPathForRoot(p, workspaceRoot)] = true
+		}
+		for _, p := range cfg.Skills.ExcludedPaths {
+			effectiveExcluded[canonicalSkillPathForRoot(p, workspaceRoot)] = true
 		}
 	}
 	out := []SkillRootView{}
 	seenRoots := map[string]int{}
 	for _, r := range roots {
-		dir := config.CanonicalSkillPath(r.Dir)
+		dir := canonicalSkillPathForRoot(r.Dir, workspaceRoot)
 		view := SkillRootView{
 			Dir:        r.Dir,
 			Scope:      string(r.Scope),
 			Priority:   r.Priority + 1,
 			Status:     string(r.Status),
-			Configured: r.Scope == skill.ScopeCustom && userConfigured[dir],
+			Enabled:    true,
+			Configured: r.Scope == skill.ScopeCustom && (userConfigured[dir] || effectiveConfigured[dir]),
 			Removable:  true,
 			Skills:     counts[dir],
 			SkillItems: skillItems[dir],
@@ -8581,22 +8691,84 @@ func skillRootsViewFrom(cwd string, cfg, userCfg *config.Config) []SkillRootView
 		seenRoots[dir] = len(out)
 		out = append(out, view)
 	}
-	if userCfg != nil {
-		for _, p := range userCfg.Skills.Paths {
-			if rootActive(out, p) {
+	if cfg != nil {
+		for _, p := range cfg.Skills.Paths {
+			if rootActive(out, p, workspaceRoot) {
 				continue
 			}
-			out = append(out, SkillRootView{
-				Dir:        p,
+			dir := canonicalSkillPathForRoot(p, workspaceRoot)
+			enabled := !effectiveExcluded[dir]
+			status := "inactive"
+			warning := "configured in project/user config but not active in this workspace"
+			if !enabled {
+				status = "disabled"
+				warning = ""
+			}
+			appendSkillRootView(&out, &seenRoots, SkillRootView{
+				Dir: dir, Scope: string(skill.ScopeCustom), Status: status, Enabled: enabled,
+				Configured: true, Removable: true, Warning: warning,
+			}, workspaceRoot)
+		}
+		for _, p := range cfg.Skills.ExcludedPaths {
+			if rootActive(out, p, workspaceRoot) {
+				continue
+			}
+			dir := canonicalSkillPathForRoot(p, workspaceRoot)
+			scope := skillRootScopeForPath(p, workspaceRoot)
+			appendSkillRootView(&out, &seenRoots, SkillRootView{
+				Dir: dir, Scope: string(scope), Status: "disabled", Enabled: false,
+				Configured: scope == skill.ScopeCustom || effectiveConfigured[dir], Removable: true,
+			}, workspaceRoot)
+		}
+	}
+	if userCfg != nil {
+		userExcluded := map[string]bool{}
+		for _, p := range userCfg.Skills.ExcludedPaths {
+			userExcluded[canonicalSkillPathForRoot(p, workspaceRoot)] = true
+		}
+		for _, p := range userCfg.Skills.Paths {
+			if rootActive(out, p, workspaceRoot) {
+				continue
+			}
+			enabled := !userExcluded[canonicalSkillPathForRoot(p, workspaceRoot)]
+			status := "inactive"
+			warning := "configured in user config but not active in this workspace; project [skills].paths may override it"
+			if !enabled {
+				status = "disabled"
+				warning = ""
+			}
+			appendSkillRootView(&out, &seenRoots, SkillRootView{
+				Dir:        canonicalSkillPathForRoot(p, workspaceRoot),
 				Scope:      string(skill.ScopeCustom),
-				Status:     "inactive",
+				Status:     status,
+				Enabled:    enabled,
 				Configured: true,
 				Removable:  true,
-				Warning:    "configured in user config but not active in this workspace; project [skills].paths may override it",
-			})
+				Warning:    warning,
+			}, workspaceRoot)
+		}
+		for _, p := range userCfg.Skills.ExcludedPaths {
+			if rootActive(out, p, workspaceRoot) || userConfigured[canonicalSkillPathForRoot(p, workspaceRoot)] {
+				continue
+			}
+			scope := skillRootScopeForPath(p, workspaceRoot)
+			appendSkillRootView(&out, &seenRoots, SkillRootView{
+				Dir: canonicalSkillPathForRoot(p, workspaceRoot), Scope: string(scope), Status: "disabled", Enabled: false,
+				Configured: scope == skill.ScopeCustom, Removable: true,
+			}, workspaceRoot)
 		}
 	}
 	return out
+}
+
+func appendSkillRootView(out *[]SkillRootView, seen *map[string]int, view SkillRootView, workspaceRoot string) {
+	dir := canonicalSkillPathForRoot(view.Dir, workspaceRoot)
+	if idx, ok := (*seen)[dir]; ok {
+		(*out)[idx] = mergeDuplicateSkillRootView((*out)[idx], view)
+		return
+	}
+	(*seen)[dir] = len(*out)
+	*out = append(*out, view)
 }
 
 func mergeDuplicateSkillRootView(existing, duplicate SkillRootView) SkillRootView {
@@ -8604,6 +8776,7 @@ func mergeDuplicateSkillRootView(existing, duplicate SkillRootView) SkillRootVie
 	existing.Removable = existing.Removable || duplicate.Removable
 	if existing.Status != "ok" && duplicate.Status == "ok" {
 		existing.Status = duplicate.Status
+		existing.Enabled = duplicate.Enabled
 	}
 	if existing.Skills == 0 && duplicate.Skills > 0 {
 		existing.Skills = duplicate.Skills
@@ -8615,7 +8788,7 @@ func mergeDuplicateSkillRootView(existing, duplicate SkillRootView) SkillRootVie
 	return existing
 }
 
-func skillRootsCacheKey(cwd string, cfg, userCfg *config.Config) string {
+func skillRootsCacheKey(workspaceRoot string, cfg, userCfg *config.Config) string {
 	type cacheKey struct {
 		CWD       string   `json:"cwd"`
 		Custom    []string `json:"custom"`
@@ -8624,20 +8797,21 @@ func skillRootsCacheKey(cwd string, cfg, userCfg *config.Config) string {
 		MaxDepth  int      `json:"maxDepth"`
 		UserPaths []string `json:"userPaths"`
 	}
-	key := cacheKey{CWD: config.CanonicalSkillPath(cwd), MaxDepth: 3}
+	workspaceRoot = normalizeWorkspaceRoot(workspaceRoot)
+	key := cacheKey{CWD: canonicalSkillPathForRoot(workspaceRoot, workspaceRoot), MaxDepth: 3}
 	if cfg != nil {
-		key.Custom = canonicalSkillPaths(cfg.SkillCustomPaths())
+		key.Custom = canonicalSkillPathsForRoot(cfg.SkillCustomPaths(), workspaceRoot)
 		for path, owners := range cfg.PluginPackageSkillOwners() {
 			for _, owner := range owners {
-				key.Plugins = append(key.Plugins, config.CanonicalSkillPath(path)+"\x00"+owner)
+				key.Plugins = append(key.Plugins, canonicalSkillPathForRoot(path, workspaceRoot)+"\x00"+owner)
 			}
 		}
 		sort.Strings(key.Plugins)
-		key.Excluded = canonicalSkillPaths(cfg.SkillExcludedPaths())
+		key.Excluded = canonicalSkillPathsForRoot(cfg.SkillExcludedPaths(), workspaceRoot)
 		key.MaxDepth = cfg.SkillMaxDepth()
 	}
 	if userCfg != nil {
-		key.UserPaths = canonicalSkillPaths(userCfg.Skills.Paths)
+		key.UserPaths = canonicalSkillPathsForRoot(userCfg.Skills.Paths, workspaceRoot)
 	}
 	b, err := json.Marshal(key)
 	if err != nil {
@@ -8646,13 +8820,50 @@ func skillRootsCacheKey(cwd string, cfg, userCfg *config.Config) string {
 	return string(b)
 }
 
-func canonicalSkillPaths(paths []string) []string {
+func canonicalSkillPathsForRoot(paths []string, workspaceRoot string) []string {
 	out := make([]string, 0, len(paths))
 	for _, p := range paths {
-		out = append(out, config.CanonicalSkillPath(p))
+		out = append(out, canonicalSkillPathForRoot(p, workspaceRoot))
 	}
 	sort.Strings(out)
 	return out
+}
+
+func normalizeWorkspaceRoot(root string) string {
+	root = strings.TrimSpace(root)
+	if root == "" || root == "." {
+		if cwd, err := os.Getwd(); err == nil {
+			return filepath.Clean(cwd)
+		}
+		return "."
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		return filepath.Clean(abs)
+	}
+	return filepath.Clean(root)
+}
+
+// canonicalSkillPathForRoot mirrors skill.Store's path resolution while keeping
+// comparisons independent of the desktop process CWD. Config may intentionally
+// contain relative paths; those are relative to the active workspace.
+func canonicalSkillPathForRoot(path, workspaceRoot string) string {
+	path = config.ExpandVars(strings.TrimSpace(path))
+	if path == "" {
+		return ""
+	}
+	if path == "~" || strings.HasPrefix(path, "~/") || strings.HasPrefix(path, `~\`) {
+		if home, err := os.UserHomeDir(); err == nil {
+			if path == "~" {
+				path = home
+			} else {
+				path = filepath.Join(home, path[2:])
+			}
+		}
+	}
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(normalizeWorkspaceRoot(workspaceRoot), path)
+	}
+	return config.CanonicalSkillPath(path)
 }
 
 func cloneSkillRootViews(in []SkillRootView) []SkillRootView {
@@ -8664,10 +8875,14 @@ func cloneSkillRootViews(in []SkillRootView) []SkillRootView {
 	return out
 }
 
-func rootActive(roots []SkillRootView, path string) bool {
-	want := config.CanonicalSkillPath(path)
+func rootActive(roots []SkillRootView, path string, workspaceRoots ...string) bool {
+	workspaceRoot := "."
+	if len(workspaceRoots) > 0 {
+		workspaceRoot = workspaceRoots[0]
+	}
+	want := canonicalSkillPathForRoot(path, workspaceRoot)
 	for _, r := range roots {
-		if config.CanonicalSkillPath(r.Dir) == want {
+		if canonicalSkillPathForRoot(r.Dir, workspaceRoot) == want {
 			return true
 		}
 	}
@@ -8717,7 +8932,11 @@ func (a *App) PickPluginFolder() (string, error) {
 func (a *App) AddSkillPath(path string) error {
 	path = normalizeSkillPath(path)
 	workspaceRoot := a.activeWorkspaceRoot()
-	err := a.applyConfigChange(func(c *config.Config) error {
+	field := "paths"
+	if isConventionSkillRoot(path, workspaceRoot) {
+		field = "excluded_paths"
+	}
+	err := a.applySkillConfigChange(field, "skills source", func(c *config.Config) error {
 		if isConventionSkillRoot(path, workspaceRoot) {
 			return c.RestoreSkillPath(path)
 		}
@@ -8733,12 +8952,35 @@ func (a *App) AddSkillPath(path string) error {
 // convention roots, it records a pseudo-delete in excluded_paths.
 func (a *App) RemoveSkillPath(path string) error {
 	path = normalizeSkillPath(path)
-	err := a.applyConfigChange(func(c *config.Config) error {
+	workspaceRoot := a.activeWorkspaceRoot()
+	field := "paths"
+	if isConventionSkillRoot(path, workspaceRoot) {
+		field = "excluded_paths"
+	}
+	err := a.applySkillConfigChange(field, "skills source", func(c *config.Config) error {
 		removed, err := c.RemoveSkillPath(path)
 		if err != nil || removed {
 			return err
 		}
 		return c.ExcludeSkillPath(path)
+	})
+	if err == nil {
+		a.invalidateSkillRootsCache()
+	}
+	return err
+}
+
+// SetSkillPathEnabled persists a reversible source toggle and rebuilds the
+// controller so the source is immediately included or excluded from discovery.
+func (a *App) SetSkillPathEnabled(path string, enabled bool) error {
+	path = normalizeSkillPath(path)
+	workspaceRoot := a.activeWorkspaceRoot()
+	field := "paths"
+	if isConventionSkillRoot(path, workspaceRoot) {
+		field = "excluded_paths"
+	}
+	err := a.applySkillConfigChange(field, "skills source", func(c *config.Config) error {
+		return c.SetSkillPathEnabled(path, enabled)
 	})
 	if err == nil {
 		a.invalidateSkillRootsCache()
@@ -8780,7 +9022,7 @@ func (a *App) ReloadCommands() error {
 // SetSkillEnabled persists a skill toggle and rebuilds the controller so the
 // prompt index, slash menu, and skill tools reflect it immediately.
 func (a *App) SetSkillEnabled(name string, enabled bool) error {
-	err := a.applyConfigChange(func(c *config.Config) error {
+	err := a.applySkillConfigChange("disabled_skills", "skill", func(c *config.Config) error {
 		return c.SetSkillEnabled(name, enabled)
 	})
 	if err == nil {
@@ -8825,11 +9067,11 @@ func normalizeSkillPath(path string) string {
 }
 
 func isConventionSkillRoot(path, workspaceRoot string) bool {
-	want := config.CanonicalSkillPath(path)
+	want := canonicalSkillPathForRoot(path, workspaceRoot)
 	if want == "" {
 		return false
 	}
-	bases := []string{workspaceRoot}
+	bases := []string{normalizeWorkspaceRoot(workspaceRoot)}
 	if home, err := os.UserHomeDir(); err == nil {
 		bases = append(bases, home)
 	}
@@ -8839,12 +9081,27 @@ func isConventionSkillRoot(path, workspaceRoot string) bool {
 			continue
 		}
 		for _, dir := range config.ConventionDirs {
-			if want == config.CanonicalSkillPath(filepath.Join(base, dir, skill.SkillsDirname)) {
+			if want == canonicalSkillPathForRoot(filepath.Join(base, dir, skill.SkillsDirname), workspaceRoot) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func skillRootScopeForPath(path, workspaceRoot string) skill.Scope {
+	want := canonicalSkillPathForRoot(path, workspaceRoot)
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, dir := range config.ConventionDirs {
+			if want == canonicalSkillPathForRoot(filepath.Join(home, dir, skill.SkillsDirname), workspaceRoot) {
+				return skill.ScopeGlobal
+			}
+		}
+	}
+	if isConventionSkillRoot(path, workspaceRoot) {
+		return skill.ScopeProject
+	}
+	return skill.ScopeCustom
 }
 
 func skillRootPath(path string) string {
@@ -8867,6 +9124,37 @@ func skillDisplayRoot(sk skill.Skill, roots []skill.Root) string {
 		}
 	}
 	return config.CanonicalSkillPath(filepath.Dir(skillRootPath(sk.Path)))
+}
+
+func skillSourceDir(sk skill.Skill, roots []SkillRootView) string {
+	path := strings.TrimSpace(sk.Path)
+	if path == "" || strings.HasPrefix(path, "(builtin") {
+		return ""
+	}
+	cleanPath := config.CanonicalSkillPath(path)
+	bestDir := ""
+	bestLen := -1
+	for _, root := range roots {
+		if root.Scope != "" && root.Scope != string(sk.Scope) {
+			continue
+		}
+		cleanRoot := config.CanonicalSkillPath(root.Dir)
+		if cleanRoot == "" {
+			continue
+		}
+		prefix := cleanRoot + string(filepath.Separator)
+		if cleanPath != cleanRoot && !strings.HasPrefix(cleanPath, prefix) {
+			continue
+		}
+		if len(cleanRoot) > bestLen {
+			bestDir = root.Dir
+			bestLen = len(cleanRoot)
+		}
+	}
+	if bestDir != "" {
+		return bestDir
+	}
+	return config.CanonicalSkillPath(filepath.Dir(skillRootPath(path)))
 }
 
 // MCPServerInput is the drawer's "add server" form. Transport is "stdio" (Command
@@ -9119,13 +9407,14 @@ func (a *App) RemoveMCPServer(name string) error {
 	if hasEntry {
 		_ = config.DefaultMCPActivationStore().ClearServer(entry, root)
 	}
+	authCleanupErr := reconcileRemovedMCPAuthentication(name, a.mcpWorkspaceRoots(root))
 	disconnectMCPServerControllers(name, ctrl, controllers)
 	if host != nil {
 		host.ClearFailure(name)
 	}
 	restoreMCPServerFallbacks(name, controllers)
 	a.clearMCPServerTabState(name, controllers)
-	return nil
+	return authCleanupErr
 }
 
 // restoreMCPServerFallbacks makes a lower-priority declaration immediately
@@ -9188,35 +9477,6 @@ func (a *App) ReconnectMCPServer(name string) error {
 	a.mu.Lock()
 	delete(tab.disabledMCP, name)
 	a.mu.Unlock()
-	return nil
-}
-
-// ClearMCPServerAuthentication removes local auth-like config for one MCP and
-// clears the current session's cached connection failure. It does not remove the
-// server itself or try to sign the user out of the third-party browser session.
-func (a *App) ClearMCPServerAuthentication(name string) error {
-	defer a.lockMCPMutation("clear-auth")()
-
-	tab, ctrl, root := a.activeMCPRuntime()
-	if tab == nil || ctrl == nil {
-		return fmt.Errorf("no active session")
-	}
-	host, releaseGates, err := a.lockMCPHostTurnGates("MCP server", ctrl)
-	if err != nil {
-		return err
-	}
-	defer releaseGates()
-	controllers := a.mcpControllersSharingHost(host, name, ctrl)
-	if err := ensureMCPServerDirectlyWritable(root, name); err != nil {
-		return err
-	}
-	if _, _, _, err := config.ClearPluginAuthenticationInSourceForRoot(root, name); err != nil {
-		return err
-	}
-	disconnectMCPServerControllers(name, ctrl, controllers)
-	if host != nil {
-		host.ClearFailure(name)
-	}
 	return nil
 }
 

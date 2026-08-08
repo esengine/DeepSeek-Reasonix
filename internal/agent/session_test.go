@@ -601,3 +601,69 @@ func TestRewriteBaselineStaysWithClones(t *testing.T) {
 		t.Fatal("saving the source must not mark the clone's rewrite persisted")
 	}
 }
+
+// TestMessageRangeReturnsClampedCopy: the window is clamped to the log bounds
+// and detached from the live slice.
+func TestMessageRangeReturnsClampedCopy(t *testing.T) {
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "a"})
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "b"})
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "c"})
+
+	got := s.MessageRange(1, 3)
+	if len(got) != 2 || got[0].Content != "a" || got[1].Content != "b" {
+		t.Fatalf("MessageRange(1,3) = %+v", got)
+	}
+	if got := s.MessageRange(-5, 99); len(got) != 4 {
+		t.Fatalf("clamped MessageRange = %d messages, want 4", len(got))
+	}
+	if got := s.MessageRange(3, 3); len(got) != 0 {
+		t.Fatalf("empty MessageRange = %d messages, want 0", len(got))
+	}
+	got[0].Content = "mutated"
+	if s.Messages[1].Content != "a" {
+		t.Fatal("MessageRange must return a copy")
+	}
+}
+
+// TestPersistedStateTracksBaseline: the exported baseline view follows saves,
+// appends, and rewrites.
+func TestPersistedStateTracksBaseline(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	s := NewSession("sys")
+	s.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+
+	if _, ok := s.PersistedState(path); ok {
+		t.Fatal("PersistedState before any save should not be anchored")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	ps, ok := s.PersistedState(path)
+	if !ok {
+		t.Fatal("PersistedState after save should be anchored")
+	}
+	if !ps.RevisionKnown || ps.Revision != 1 {
+		t.Fatalf("revision = %d known=%v, want 1/true", ps.Revision, ps.RevisionKnown)
+	}
+	if ps.DigestHex == "" {
+		t.Fatal("DigestHex should be populated")
+	}
+	if !ps.AppendOnlyTail || !ps.UnchangedSincePersisted {
+		t.Fatalf("right after save: AppendOnlyTail=%v Unchanged=%v, want true/true", ps.AppendOnlyTail, ps.UnchangedSincePersisted)
+	}
+
+	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "there"})
+	ps, _ = s.PersistedState(path)
+	if !ps.AppendOnlyTail || ps.UnchangedSincePersisted {
+		t.Fatalf("after append: AppendOnlyTail=%v Unchanged=%v, want true/false", ps.AppendOnlyTail, ps.UnchangedSincePersisted)
+	}
+
+	msgs := s.Snapshot()
+	s.Rewrite(msgs[:1], "compact")
+	ps, _ = s.PersistedState(path)
+	if ps.AppendOnlyTail {
+		t.Fatal("after rewrite: AppendOnlyTail should be false")
+	}
+}

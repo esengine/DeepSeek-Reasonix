@@ -19,6 +19,7 @@ type multiEdit struct {
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 // editStep is one edit in a multi_edit operation. Mirrors edit_file's args
@@ -82,10 +83,11 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		return "", err
 	}
 
-	content, enc, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, m.overlay, p.Path)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	content := src.content
 
 	// Apply edits in order against the running in-memory buffer. Any failure
 	// returns before the write, leaving the file untouched — that's the
@@ -112,7 +114,7 @@ func (m multiEdit) Execute(ctx context.Context, args json.RawMessage) (string, e
 		}
 	}
 
-	if err := writeFileEncoded(p.Path, content, enc); err != nil {
+	if err := src.write(ctx, m.overlay, p.Path, content); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
 	summary := fmt.Sprintf("multi_edit %s: %d edits applied (%d total replacements)", p.Path, len(p.Edits), applied)

@@ -334,6 +334,19 @@ func ConfigFileDefinesCompactRatio(path string) bool {
 	return tomlFileDefinesKey(path, "agent", "compact_ratio")
 }
 
+// ConfigFileDefinesSkillKey reports whether a project or user TOML file
+// explicitly owns one of the supported [skills] settings. Desktop settings use
+// this narrow provenance check to edit the file that wins at runtime instead
+// of persisting a shadowed value to the global config.
+func ConfigFileDefinesSkillKey(path, key string) bool {
+	switch strings.TrimSpace(key) {
+	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth":
+		return tomlFileDefinesKey(path, "skills", key)
+	default:
+		return false
+	}
+}
+
 // backfillDeepSeekPro restores deepseek-pro for configs the pre-fix setup wizard
 // wrote with only deepseek-v4-flash: a keyless /models probe used to drop the Pro
 // SKU, leaving users unable to switch to it. In-memory only — the user's file is
@@ -735,9 +748,11 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 		loadDotEnvForEditPath(path)
 	}
 	cfg := Default()
-	if err := mergeFile(cfg, path); err != nil {
+	meta, err := mergeFileSnapshot(cfg, path)
+	if err != nil {
 		return nil, err
 	}
+	markExplicitDefaultProjectSkillKeys(cfg, path, meta)
 	changed := normalizeConfigForEdit(cfg)
 	if persistMigrations && changed && strings.TrimSpace(path) != "" {
 		if _, err := os.Stat(path); err == nil {
@@ -747,6 +762,25 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 		}
 	}
 	return cfg, nil
+}
+
+// markExplicitDefaultProjectSkillKeys preserves project skill fields that are
+// explicitly present in a file but equal the built-in default. Without this
+// transient provenance, saving an unrelated project setting would mistake an
+// intentional `false`/empty override for a stale delta and remove it.
+func markExplicitDefaultProjectSkillKeys(c *Config, path string, meta toml.MetaData) {
+	if c == nil || isUserConfigPath(path) {
+		return
+	}
+	for _, key := range projectSkillKeys {
+		if !meta.IsDefined("skills", key) || !projectSkillKeyIsDefault(c, key) {
+			continue
+		}
+		if c.explicitProjectSkillKeys == nil {
+			c.explicitProjectSkillKeys = make(map[string]bool)
+		}
+		c.explicitProjectSkillKeys[key] = true
+	}
 }
 
 func normalizeConfigForEdit(cfg *Config) bool {

@@ -16,3 +16,7 @@ package.json.md5
 
 # This project uses pnpm (see wails.json `frontend:install`); reject the npm lockfile.
 package-lock.json
+
+# Playwright browsers for the real-DOM bench (kept inside the repo; see bench/).
+.pw-browsers
+bench/results.json

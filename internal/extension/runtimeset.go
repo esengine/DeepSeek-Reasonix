@@ -1,61 +1,80 @@
 package extension
 
 import (
-	"errors"
+	"context"
+	"fmt"
 	"io"
-	"slices"
 	"sync"
 )
 
-// RuntimeSet tracks the closable resources bound to one RuntimeSnapshot —
-// MCP sidecar processes, watchers, temp files. It exists separately from the
-// snapshot because a snapshot is immutable value state while its resources
-// have a lifecycle: when a newer snapshot activates, the old RuntimeSet is
-// closed exactly once, and CloseIfGeneration makes sure a stale cleanup path
-// can never close resources that now belong to a newer runtime.
+// RuntimeSet tracks live resources bound to one RuntimeSnapshot generation.
+// It is separate from the immutable snapshot and holds an EffectScope so
+// activation, receipts, and typed dispose share one owner. CloseIfGeneration
+// keeps stale cleanup from closing a newer runtime's resources.
 type RuntimeSet struct {
-	mu         sync.Mutex
-	generation uint64
-	closers    []io.Closer
-	closed     bool
+	mu    sync.Mutex
+	scope *LiveScope
+	// nextCloser sequences auto-generated closer ids for Add.
+	nextCloser int
 }
 
 // NewRuntimeSet returns an empty set bound to a snapshot generation.
 func NewRuntimeSet(generation uint64) *RuntimeSet {
-	return &RuntimeSet{generation: generation}
+	return &RuntimeSet{scope: NewEffectScope(generation)}
+}
+
+// Scope returns the underlying EffectScope for typed effect registration.
+func (s *RuntimeSet) Scope() EffectScope {
+	if s == nil || s.scope == nil {
+		return nil
+	}
+	return s.scope
 }
 
 // Generation returns the snapshot generation this set is bound to.
-func (s *RuntimeSet) Generation() uint64 { return s.generation }
+func (s *RuntimeSet) Generation() uint64 {
+	if s == nil || s.scope == nil {
+		return 0
+	}
+	return s.scope.Generation()
+}
 
-// Add registers closers. A closer added to an already-closed set is closed
-// immediately — the alternative (silently leaking it because the owner went
-// away between activation and registration) is how sidecar processes outlive
-// their session.
+// Add registers closers as reversible effects. A closer added to an already
+// closed set is closed immediately — the alternative (silently leaking it
+// because the owner went away between activation and registration) is how
+// sidecar processes outlive their session.
 func (s *RuntimeSet) Add(closers ...io.Closer) {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
-		for _, c := range closers {
-			if c != nil {
-				_ = c.Close()
-			}
-		}
+	if s == nil {
 		return
 	}
 	for _, c := range closers {
-		if c != nil {
-			s.closers = append(s.closers, c)
+		if c == nil {
+			continue
 		}
+		s.mu.Lock()
+		s.nextCloser++
+		id := fmt.Sprintf("closer-%d", s.nextCloser)
+		s.mu.Unlock()
+		_ = s.scope.TrackCloser(id, c)
 	}
-	s.mu.Unlock()
 }
 
-// Len returns the number of registered closers.
+// Track registers a typed effect on the set's scope.
+func (s *RuntimeSet) Track(e Effect) error {
+	if s == nil || s.scope == nil {
+		return fmt.Errorf("extension: nil RuntimeSet")
+	}
+	return s.scope.Track(e)
+}
+
+// Len returns the number of registered effects that have not yet been disposed.
 func (s *RuntimeSet) Len() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.closers)
+	if s == nil || s.scope == nil {
+		return 0
+	}
+	s.scope.mu.Lock()
+	defer s.scope.mu.Unlock()
+	return len(s.scope.effects)
 }
 
 // Close releases every registered resource, in reverse registration order
@@ -63,36 +82,19 @@ func (s *RuntimeSet) Len() int {
 // or repeated calls after the first return nil without re-closing, because
 // most closers are not safe to invoke twice.
 func (s *RuntimeSet) Close() error {
-	s.mu.Lock()
-	if s.closed {
-		s.mu.Unlock()
+	if s == nil || s.scope == nil {
 		return nil
 	}
-	s.closed = true
-	closers := s.closers
-	s.closers = nil
-	s.mu.Unlock()
-
-	var errs []error
-	for _, v := range slices.Backward(closers) {
-		if err := v.Close(); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Join(errs...)
+	return s.scope.Dispose(context.Background())
 }
 
-// CloseIfGeneration closes the set only when gen matches the generation it
-// was built for, and reports whether the close ran. A wrong generation means
-// the caller's snapshot is stale and these resources already belong to a
-// newer runtime, so they are left untouched. Close errors are intentionally
-// collapsed into the bool: this is the fire-and-forget cleanup path — callers
-// that need error detail call Close themselves.
+// CloseIfGeneration closes only when gen matches; wrong generations leave
+// resources untouched. Errors collapse to the bool (fire-and-forget cleanup).
 func (s *RuntimeSet) CloseIfGeneration(gen uint64) bool {
-	s.mu.Lock()
-	matched := gen == s.generation
-	s.mu.Unlock()
-	if !matched {
+	if s == nil || s.scope == nil {
+		return false
+	}
+	if gen != s.scope.Generation() {
 		return false
 	}
 	_ = s.Close()
@@ -101,7 +103,16 @@ func (s *RuntimeSet) CloseIfGeneration(gen uint64) bool {
 
 // Closed reports whether Close has run.
 func (s *RuntimeSet) Closed() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.closed
+	if s == nil || s.scope == nil {
+		return true
+	}
+	return s.scope.Closed()
+}
+
+// Receipts returns effect receipts recorded by this generation.
+func (s *RuntimeSet) Receipts() []EffectReceipt {
+	if s == nil || s.scope == nil {
+		return nil
+	}
+	return s.scope.Receipts()
 }

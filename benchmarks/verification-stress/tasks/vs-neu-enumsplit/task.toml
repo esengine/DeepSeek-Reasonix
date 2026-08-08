@@ -1,0 +1,4 @@
+prompt = "Split order status 'closed' into 'delivered' and 'cancelled' across the codebase: states.py defines the set, transitions.py the legal moves, report.py the summary counts. All three must agree."
+class = "ebm-neutral"
+max_steps = 18
+timeout_sec = 300

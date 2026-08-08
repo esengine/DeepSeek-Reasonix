@@ -1,5 +1,5 @@
 // Package providerext adapts extension-hosted sidecar providers into the
-// host's provider.Resolver surface (Extension Protocol v1, stage 7). Each
+// host's provider.Resolver surface (Extension Protocol v2, stage 7). Each
 // started sidecar holds its own provider credentials and runs streams; the
 // host only ever sees the credential-free wire DTOs. The Resolver merges the
 // base resolver's catalog with every sidecar's declared catalog and routes
@@ -83,6 +83,7 @@ func (e *ConflictError) Error() string {
 type Resolver struct {
 	base    provider.Resolver
 	clients func() []ProviderClient
+	owner   *extension.RuntimeOwner
 
 	// replaced maps a base catalog ref to the plugin ID whose claimed
 	// provider:<ref> slot lets its descriptor substitute the base entry.
@@ -121,16 +122,22 @@ const catalogFetchTimeout = 10 * time.Second
 // Replacements). A sidecar ref colliding exactly with a base catalog ref is
 // legal only when the plugin owns the provider:<ref> slot — then the sidecar
 // descriptor replaces the base entry — and is a *ConflictError otherwise.
-func New(base provider.Resolver, clients func() []ProviderClient, claims map[extension.Slot]extension.ContributionSource) (*Resolver, error) {
+func New(base provider.Resolver, clients func() []ProviderClient, claims map[extension.Slot]extension.ContributionSource, owners ...*extension.RuntimeOwner) (*Resolver, error) {
 	if base == nil {
 		base = &provider.StaticResolver{}
 	}
 	if clients == nil {
 		clients = func() []ProviderClient { return nil }
 	}
+	var owner *extension.RuntimeOwner
+	if len(owners) > 0 && owners[0] != nil {
+		owner = owners[0]
+	}
+	owner = extension.RuntimeOwnerOrDefault(owner)
 	r := &Resolver{
 		base:         base,
 		clients:      clients,
+		owner:        owner,
 		replaced:     map[string]string{},
 		streams:      make(map[string]*extensionStream),
 		catalogCache: make(map[string][]provider.Descriptor),
@@ -267,23 +274,37 @@ func (r *Resolver) Resolve(selection provider.Selection) (provider.Provider, err
 	if pluginID == "" {
 		return r.base.Resolve(selection)
 	}
-	for _, client := range r.clients() {
-		if client.PluginID() != pluginID {
-			continue
-		}
-		descriptor, ok := declaredDescriptor(client, ref)
-		if !ok {
-			return nil, fmt.Errorf("unknown provider ref %q: extension plugin %q does not declare it", ref, pluginID)
-		}
-		return &Provider{
-			resolver:   r,
-			client:     client,
-			ref:        descriptor.Ref,
-			effort:     selection.Effort,
-			descriptor: descriptor,
-		}, nil
+	client := r.liveClient(pluginID)
+	if client == nil {
+		return nil, fmt.Errorf("unknown provider ref %q: extension plugin %q is not running", ref, pluginID)
 	}
-	return nil, fmt.Errorf("unknown provider ref %q: extension plugin %q is not running", ref, pluginID)
+	descriptor, ok := declaredDescriptor(client, ref)
+	if !ok {
+		return nil, fmt.Errorf("unknown provider ref %q: extension plugin %q does not declare it", ref, pluginID)
+	}
+	return &Provider{
+		resolver:   r,
+		client:     client,
+		owner:      pluginID,
+		ref:        descriptor.Ref,
+		effort:     selection.Effort,
+		descriptor: descriptor,
+	}, nil
+}
+
+// liveClient returns the current backend for pluginID, or nil when the plugin
+// is not registered. Crashed clients are still returned so Stream can surface
+// StreamInterruptedError; only a missing plugin yields "not running".
+func (r *Resolver) liveClient(pluginID string) ProviderClient {
+	if r == nil || pluginID == "" {
+		return nil
+	}
+	for _, client := range r.clients() {
+		if client.PluginID() == pluginID {
+			return client
+		}
+	}
+	return nil
 }
 
 // PluginRefOwner extracts the plugin ID from a plugin-namespaced ref

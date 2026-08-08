@@ -141,13 +141,15 @@ type ProviderError struct {
 
 // ProviderChunk is one chunk of an extension-hosted provider stream.
 type ProviderChunk struct {
-	Type      ProviderChunkType `json:"type"`
-	Text      string            `json:"text,omitempty"`
-	Signature string            `json:"signature,omitempty"`
-	ToolCall  *ProviderToolCall `json:"toolCall,omitempty"`
-	ArgChars  int               `json:"argChars,omitempty" validate:"min=0"`
-	Usage     *ProviderUsage    `json:"usage,omitempty"`
-	Error     *ProviderError    `json:"error,omitempty"`
+	Type       ProviderChunkType `json:"type"`
+	Text       string            `json:"text,omitempty"`
+	Signature  string            `json:"signature,omitempty"`
+	ToolCall   *ProviderToolCall `json:"toolCall,omitempty"`
+	ArgChars   int               `json:"argChars,omitempty" validate:"min=0"`
+	Usage      *ProviderUsage    `json:"usage,omitempty"`
+	Error      *ProviderError    `json:"error,omitempty"`
+	Generation uint64            `json:"generation,omitempty"`
+	Epoch      string            `json:"epoch,omitempty"`
 }
 
 // Validate enforces chunk invariants the tags cannot express.
@@ -185,6 +187,8 @@ type StreamOpenParams struct {
 	Effort      string          `json:"effort,omitempty"`
 	Request     ProviderRequest `json:"request"`
 	SeqBase     int             `json:"seqBase" validate:"min=0"`
+	Generation  uint64          `json:"generation,omitempty"`
+	Epoch       string          `json:"epoch,omitempty"`
 }
 
 // Validate enforces required identifiers plus the request invariants.
@@ -212,9 +216,11 @@ type StreamCancelResult struct {
 
 // StreamChunkParams is one provider chunk, Extension → Host.
 type StreamChunkParams struct {
-	StreamID string        `json:"streamId" validate:"nonempty"`
-	Seq      int64         `json:"seq" validate:"min=1"`
-	Chunk    ProviderChunk `json:"chunk"`
+	StreamID   string        `json:"streamId" validate:"nonempty"`
+	Seq        int64         `json:"seq" validate:"min=1"`
+	Chunk      ProviderChunk `json:"chunk"`
+	Generation uint64        `json:"generation,omitempty"`
+	Epoch      string        `json:"epoch,omitempty"`
 }
 
 // Validate enforces stream ordering preconditions and chunk invariants.

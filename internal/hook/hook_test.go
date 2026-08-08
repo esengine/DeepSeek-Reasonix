@@ -687,7 +687,7 @@ func TestLoadPluginHooksPreservesExecutionContract(t *testing.T) {
 	reasonixHome := filepath.Join(home, ".reasonix")
 	root := filepath.Join(reasonixHome, "plugins", "hook-contract")
 	writeHookTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "name": "hook-contract",
+  "apiVersion": "reasonix.io/plugin/v2", "name": "hook-contract",
   "hooks": {
     "SessionStart": [
       {"command":"bin/check","args":[],"shellCommand":true},
@@ -726,7 +726,7 @@ func TestLoadExpandsReasonixPluginRootBeforeShellLaunch(t *testing.T) {
 	root := filepath.Join(reasonixHome, "plugins", "impeccable")
 	projectRoot := filepath.Join(home, "$CLAUDE_PLUGIN_ROOT-project")
 	writeHookTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "name": "impeccable",
+  "apiVersion": "reasonix.io/plugin/v2", "name": "impeccable",
   "version": "3.9.1",
   "hooks": {
     "PostToolUse": [{

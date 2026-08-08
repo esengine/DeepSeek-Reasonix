@@ -120,7 +120,7 @@ func TestWorkspacePreviewBinds(t *testing.T) {
 	if !ok {
 		t.Fatal("write_file should be a Previewer")
 	}
-	change, err := p.Preview(argsJSON(t, map[string]any{"path": "new.txt", "content": "a\n"}))
+	change, err := p.Preview(context.Background(), argsJSON(t, map[string]any{"path": "new.txt", "content": "a\n"}))
 	if err != nil {
 		t.Fatalf("preview: %v", err)
 	}

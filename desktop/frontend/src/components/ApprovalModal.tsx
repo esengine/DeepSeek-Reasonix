@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import gsap from "gsap";
 import { useT, type Translator } from "../lib/i18n";
 import type { ComposerInsertRequest, DirEntry, ToolApprovalMode, WireApproval } from "../lib/types";
 import {
@@ -23,11 +22,18 @@ function animateShelfExit(
   el: HTMLDivElement,
   options: { opacity: number; y: number; duration: number; ease: string; onComplete: () => void },
 ) {
-  const animator = typeof gsap.to === "function"
-    ? gsap
-    : (gsap as unknown as { default?: typeof gsap }).default;
-  if (animator && typeof animator.to === "function") {
-    animator.to(el, options);
+  if (typeof el.animate === "function") {
+    const animation = el.animate(
+      [
+        { opacity: 1, transform: "translateY(0)" },
+        { opacity: options.opacity, transform: `translateY(${options.y}px)` },
+      ],
+      {
+        duration: options.duration * 1000,
+        easing: options.ease === "power2.out" ? "cubic-bezier(0.2, 0.72, 0.2, 1)" : options.ease,
+      },
+    );
+    animation.onfinish = options.onComplete;
     return;
   }
   options.onComplete();

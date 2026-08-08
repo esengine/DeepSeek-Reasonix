@@ -173,6 +173,34 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	}
 }
 
+func TestWindowsInstallerUsesPreviousDirectoryAsManualInstallDefault(t *testing.T) {
+	data, err := os.ReadFile("build/windows/installer/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, want := range []string{
+		`InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"`,
+		`InstallDir "${REASONIX_DEFAULT_INSTALLDIR}"`,
+		`!insertmacro MUI_PAGE_DIRECTORY`,
+		`!define MUI_PAGE_CUSTOMFUNCTION_PRE reasonix.skipSetupPageForUpdate`,
+		`StrCmp $ReasonixUpdateMode "1" 0 reasonix_show_setup_page`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("project.nsi missing manual-install path contract %q", want)
+		}
+	}
+	page := strings.Index(script, "!insertmacro MUI_PAGE_DIRECTORY")
+	pageHook := strings.Index(script, "!define MUI_PAGE_CUSTOMFUNCTION_PRE reasonix.skipSetupPageForUpdate\n!insertmacro MUI_PAGE_DIRECTORY")
+	if page < 0 || pageHook < 0 || pageHook > page {
+		t.Fatal("directory selection page must remain available for manual installs")
+	}
+	if strings.Contains(script, `StrCpy $ReasonixUpdateMode "1"
+	Goto reasonix_show_setup_page`) {
+		t.Fatal("automatic updates must not reopen the manual directory selection page")
+	}
+}
+
 func TestDesktopBuildScriptCompilesAndPackagesWindowsUpdateHelper(t *testing.T) {
 	data, err := os.ReadFile("../scripts/desktop-build.sh")
 	if err != nil {

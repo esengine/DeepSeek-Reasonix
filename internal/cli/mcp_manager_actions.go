@@ -219,19 +219,44 @@ func (m chatTUI) openMCPConfig(v mcpServerView) (tea.Model, tea.Cmd) {
 }
 
 func (m chatTUI) authenticateMCP(v mcpServerView) (tea.Model, tea.Cmd) {
-	u := mcpAuthURL(v)
-	if u == "" {
-		m.notice("mcp auth: no authorization URL was returned; view logs for details")
+	if mcpAuthStatus(v) != mcpdiag.AuthRequired {
+		m.notice("mcp auth: this server is not requesting OAuth authorization")
 		return m, nil
 	}
-	cmd, err := mcpOpenCommand(u)
+	executable, err := os.Executable()
 	if err != nil {
 		m.notice("mcp auth: " + err.Error())
 		return m, nil
 	}
+	cmd := exec.Command(executable, "mcp", "auth", v.Name)
+	cmd.Dir = m.mcpWorkspaceRoot()
 	return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return mcpExternalDoneMsg{label: "authorization page", target: u, err: err}
+		return mcpExternalDoneMsg{label: "MCP authorization", target: v.Name, server: v.Name, err: err}
 	})
+}
+
+func (m *chatTUI) handleMCPExternalDone(msg mcpExternalDoneMsg) {
+	if msg.err != nil {
+		m.notice(msg.label + ": " + msg.err.Error())
+		return
+	}
+	if msg.server == "" || m.ctrl == nil {
+		if msg.target != "" {
+			m.notice(msg.label + ": " + msg.target)
+		}
+		return
+	}
+	n, err := m.ctrl.ConnectConfiguredMCPServer(msg.server)
+	if err != nil {
+		m.notice("MCP authorization saved, but reconnect failed: " + err.Error())
+		return
+	}
+	if m.host != nil {
+		m.host.ClearFailure(msg.server)
+	}
+	m.refreshHostAndInvalidateSlashCatalog()
+	m.refreshMCPManager()
+	m.notice(fmt.Sprintf("authorized and connected %s — %d tools (available next message)", msg.server, n))
 }
 
 func (m chatTUI) clearSelectedMCPAuthentication() (tea.Model, tea.Cmd) {
@@ -251,7 +276,15 @@ func (m chatTUI) clearMCPAuthentication(v mcpServerView) (tea.Model, tea.Cmd) {
 		m.notice("managed MCP servers do not store authentication")
 		return m, nil
 	}
-	_, changed, _, err := config.ClearPluginAuthenticationInSourceForRoot(m.mcpWorkspaceRoot(), v.Name)
+	workspace := m.mcpWorkspaceRoot()
+	if _, err := plugin.ClearHTTPMCPOAuth(plugin.Spec{
+		Name:     v.Name,
+		StateDir: plugin.MCPStateDir(config.ReasonixHomeDir(), workspace, v.Name),
+	}); err != nil {
+		m.notice("clear authentication: " + err.Error())
+		return m, nil
+	}
+	_, changed, _, err := config.ClearPluginAuthenticationInSourceForRoot(workspace, v.Name)
 	if err != nil {
 		m.notice("clear authentication: " + err.Error())
 		return m, nil
@@ -371,23 +404,21 @@ func mcpOpenCommand(target string) (*exec.Cmd, error) {
 	}
 }
 
-func mcpAuthURL(v mcpServerView) string {
-	auth := mcpAuthDiagnosis(v)
-	if auth.Status != mcpdiag.AuthRequired {
-		return ""
-	}
-	return strings.TrimSpace(auth.URL)
-}
-
 func mcpAuthStatus(v mcpServerView) string {
 	return mcpAuthDiagnosis(v).Status
 }
 
 func mcpAuthDiagnosis(v mcpServerView) mcpdiag.AuthDiagnosis {
+	var diagnosis mcpdiag.AuthDiagnosis
 	if v.AuthStatus != "" {
-		return mcpdiag.AuthDiagnosis{Status: v.AuthStatus, URL: v.AuthURL}
+		diagnosis = mcpdiag.AuthDiagnosis{Status: v.AuthStatus, URL: v.AuthURL}
+	} else {
+		diagnosis = mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.authConfigured)
 	}
-	return mcpdiag.DiagnoseAuth(v.Transport, v.Status, v.Error, v.URL, v.authConfigured)
+	if diagnosis.Status != mcpdiag.AuthNone && !mcpdiag.CanUseHTTPMCPOAuth(v.Transport, v.URL, v.authConfigured) {
+		return mcpdiag.AuthDiagnosis{Status: mcpdiag.AuthNone}
+	}
+	return diagnosis
 }
 
 func mcpCanClearAuth(v mcpServerView) bool {

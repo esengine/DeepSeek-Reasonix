@@ -1,0 +1,4 @@
+prompt = "in_window misjudges date ranges: the end day is treated as outside the range, and ISO dates parse with day and month swapped. 2024-03-31 must count as inside 2024-03-01..2024-03-31."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

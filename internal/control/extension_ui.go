@@ -10,12 +10,12 @@ import (
 	"reasonix/internal/extension/uihub"
 )
 
-// Extension UI hub wiring (Extension Protocol v1, stage 8a). The hub is the
+// Extension UI hub wiring (Extension Protocol v2, stage 8a). The hub is the
 // host side of the extension structured-UI surface: sidecar publications
 // arrive as events through EmitExtensionEvent, blocking prompts ride the
 // ordinary Ask channel, and handshake-declared actions are exposed to
 // frontends through the Capabilities port as /<plugin>:<action> names. Every
-// wiring point is nil-safe: with no hub installed (no v1 runtime packages)
+// wiring point is nil-safe: with no hub installed (no v2 runtime packages)
 // the controller behaves exactly as before.
 
 // ExtensionActionView is one handshake-declared extension UI action for

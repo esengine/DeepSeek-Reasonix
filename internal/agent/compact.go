@@ -100,7 +100,11 @@ func (a *Agent) compactThresholds() (soft, snip, high int) {
 // the canonical transcript. No-op when compaction is disabled or usage is
 // unavailable.
 func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
-	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
+	if a.contextWindow <= 0 || u == nil {
+		return
+	}
+	promptTokens := u.LatestPromptTokens()
+	if promptTokens == 0 {
 		return
 	}
 	soft, snip, high := a.compactThresholds()
@@ -111,32 +115,32 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	// leaving a stale run count behind there would latch the *next* compaction as
 	// "the window is too small" and silently disable auto-compaction for the rest
 	// of the session.
-	if u.PromptTokens < high {
+	if promptTokens < high {
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
 	}
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
-	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {
+	if promptTokens >= soft && promptTokens < snip && !a.softCompactNoticed {
 		a.softCompactNoticed = true
 		detail := fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context is getting large; preserving cache until cleanup is needed.", Detail: detail})
 		return
 	}
-	if u.PromptTokens >= snip && u.PromptTokens < high {
+	if promptTokens >= snip && promptTokens < high {
 		// Snip only into a projection view — never rewrite the canonical log.
 		if err := a.snipToProjection(ctx); err != nil {
 			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context snip skipped for now.", Detail: err.Error()})
 		}
 		return
 	}
-	if u.PromptTokens < high {
+	if promptTokens < high {
 		return // the latch was already cleared above
 	}
 	if a.compactStuck {
 		return
 	}
-	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
+	force := promptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
 	// Projection-only prune before folding. Install the pruned view first so the
 	// next request (and its real usage) can measure whether a paid summarize is
 	// still needed — never rewrite the canonical transcript.
@@ -220,76 +224,57 @@ func estimateTextTokens(s string) int {
 	return byBytes
 }
 
-// SummarizeFrom replaces the messages from fromIdx onward with a single summary,
-// keeping everything before it verbatim ("summarize from here"). fromIdx is a turn
-// boundary (a user message), so the split never severs a tool_call/result pair —
-// those live within one turn. A no-op when the region is empty.
+// SummarizeFrom keeps the compatibility index contract while installing a
+// projection that compresses from that user-turn boundary onward.
 func (a *Agent) SummarizeFrom(ctx context.Context, fromIdx int) error {
-	msgs := a.session.Messages
-	if fromIdx < 0 || fromIdx >= len(msgs) {
-		return nil
-	}
-	region, localOnly := splitLocalOnlyMessages(msgs[fromIdx:])
-	if len(region) == 0 {
-		return nil
-	}
-	if a.archiveDir != "" {
-		_, _ = archiveMessages(a.archiveDir, region) // best-effort traceability
-	}
-	summary, _, err := a.summarize(ctx, region, "")
-	if err != nil {
-		return err
-	}
-	next := make([]provider.Message, 0, fromIdx+1+len(localOnly))
-	next = append(next, msgs[:fromIdx]...)
-	next = append(next, provider.Message{
-		Role:    provider.RoleUser,
-		Content: "Summary of the later conversation (compacted from here on):\n" + summary,
-	})
-	next = append(next, localOnly...)
-	a.session.Rewrite(next, "summarize_from")
-	// Explicit range rewrites change lineage; drop any prior projection.
-	a.InvalidateProjection()
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-		Text: fmt.Sprintf("summarized %d later messages → summary", len(region))})
-	return nil
+	return a.summarizeAtProjectionBoundary(ctx, fromIdx, "after")
 }
 
-// SummarizeUpTo replaces the messages before toIdx (after the system prompt) with
-// a single summary, keeping toIdx onward verbatim ("summarize up to here"). toIdx
-// is a turn boundary, so no tool pair is split. A no-op when the region is empty.
+// SummarizeUpTo keeps the compatibility index contract while installing a
+// projection that compresses everything before that user-turn boundary.
 func (a *Agent) SummarizeUpTo(ctx context.Context, toIdx int) error {
-	msgs := a.session.Messages
-	head := 0
-	if len(msgs) > 0 && msgs[0].Role == provider.RoleSystem {
-		head = 1
-	}
-	if toIdx <= head || toIdx > len(msgs) {
+	return a.summarizeAtProjectionBoundary(ctx, toIdx, "before")
+}
+
+func (a *Agent) summarizeAtProjectionBoundary(ctx context.Context, canonicalIndex int, direction string) error {
+	snap := a.snapshotExplicitCompression()
+	if canonicalIndex < 0 || canonicalIndex >= len(snap.canonical) {
 		return nil
 	}
-	region, localOnly := splitLocalOnlyMessages(msgs[head:toIdx])
-	if len(region) == 0 {
+	anchor := snap.canonical[canonicalIndex]
+	if !compressAnchorCandidate(anchor) {
 		return nil
 	}
-	if a.archiveDir != "" {
-		_, _ = archiveMessages(a.archiveDir, region)
+	visibleIndex := -1
+	for i, msg := range snap.visible {
+		if !compressAnchorCandidate(msg) {
+			continue
+		}
+		if anchor.CreatedAt != 0 && msg.CreatedAt == anchor.CreatedAt {
+			visibleIndex = i
+			break
+		}
+		if anchor.CreatedAt == 0 && UserMessageText(msg) == UserMessageText(anchor) {
+			if visibleIndex >= 0 {
+				return fmt.Errorf("summarize boundary is ambiguous in the current model context")
+			}
+			visibleIndex = i
+		}
 	}
-	summary, _, err := a.summarize(ctx, region, "")
+	if visibleIndex < 0 {
+		return fmt.Errorf("context compression unavailable: selected turn is no longer present in the model context")
+	}
+	result, err := a.compressVisibleRange(ctx, snap, CompactionTriggerManual, direction, visibleIndex, anchorPreview(UserMessageText(anchor)), "")
 	if err != nil {
 		return err
 	}
-	next := make([]provider.Message, 0, head+1+len(localOnly)+len(msgs)-toIdx)
-	next = append(next, msgs[:head]...)
-	next = append(next, provider.Message{
-		Role:    provider.RoleUser,
-		Content: "Summary of earlier conversation (compacted up to here):\n" + summary,
-	})
-	next = append(next, localOnly...)
-	next = append(next, msgs[toIdx:]...)
-	a.session.Rewrite(next, "summarize_up_to")
-	a.InvalidateProjection()
-	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo,
-		Text: fmt.Sprintf("summarized %d earlier messages → summary", len(region))})
+	if result.Status != "ok" {
+		reason := strings.TrimSpace(result.Reason)
+		if reason == "" {
+			reason = "selected range did not reduce the model context"
+		}
+		return fmt.Errorf("context compression skipped: %s", reason)
+	}
 	return nil
 }
 
@@ -310,21 +295,6 @@ func (a *Agent) activeTurnStart(msgs []provider.Message) int {
 		}
 	}
 	return -1
-}
-
-// splitLocalOnlyMessages removes display-only interrupted output from the
-// summarizer/archive input while returning it in transcript order for durable
-// reattachment. Explicit range summaries are user-requested rewrites, but they
-// must not erase visible output or expose private partial reasoning to a model.
-func splitLocalOnlyMessages(msgs []provider.Message) (model, localOnly []provider.Message) {
-	for _, m := range msgs {
-		if m.LocalOnly {
-			localOnly = append(localOnly, m)
-			continue
-		}
-		model = append(model, m)
-	}
-	return model, localOnly
 }
 
 // isCompactionSummary reports whether m is a rolling summary from a prior fold.
@@ -640,6 +610,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 			a.sink.Emit(event.Event{Kind: event.Usage, ModelRef: a.modelRef, Usage: usage, Pricing: a.pricing, UsageSource: event.UsageSourceCompaction})
 		}
 	}()
+	defer trackPublishedHostStream(ctx, cancel)()
 	ch, err := a.prov.Stream(ctx, provider.Request{
 		Messages: []provider.Message{
 			{Role: provider.RoleSystem, Content: sys},
@@ -651,6 +622,7 @@ func (a *Agent) summarize(ctx context.Context, region []provider.Message, instru
 		return "", usage, err
 	}
 
+	// Unblock on timeout if the stream stalls while open.
 	var b strings.Builder
 	for {
 		select {

@@ -14,7 +14,7 @@ import (
 const SchemaDraft202012 = "https://json-schema.org/draft/2020-12/schema"
 
 // SchemaTitle is the generated document's human title.
-const SchemaTitle = "Reasonix Extension Protocol v1"
+const SchemaTitle = "Reasonix Extension Protocol v2"
 
 var rawMessageType = reflect.TypeFor[json.RawMessage]()
 

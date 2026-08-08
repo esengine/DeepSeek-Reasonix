@@ -1,0 +1,4 @@
+prompt = "Billing overcharges every customer: overage_units returns the full usage instead of only the excess over the plan's included units, and exactly 100 units lands in the wrong tier."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

@@ -10,7 +10,7 @@ import (
 	"reasonix/internal/i18n"
 )
 
-// Extension structured-UI rendering (Extension Protocol v1, stage 8b1). The
+// Extension structured-UI rendering (Extension Protocol v2). The
 // sidecar's publish calls arrive as ExtensionSurface / ExtensionStatus events
 // carrying an already-redacted ExtensionSurfacePayload; these helpers map the
 // payload onto the transcript idioms the rest of the TUI uses — notice-style

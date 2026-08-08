@@ -49,7 +49,7 @@ func TestParseCodexSuperpowersManifest(t *testing.T) {
 
 func TestParseDirDecodesGB18030Manifest(t *testing.T) {
 	root := t.TempDir()
-	manifest := `{"name":"cn-plugin","version":"1.0.0","description":"中文插件"}`
+	manifest := `{"apiVersion":"reasonix.io/plugin/v2","name":"cn-plugin","version":"1.0.0","description":"中文插件"}`
 	path := filepath.Join(root, NativeManifest)
 	if err := os.WriteFile(path, fileencoding.Encode(manifest, fileencoding.GB18030), 0o644); err != nil {
 		t.Fatal(err)
@@ -175,6 +175,7 @@ func TestParseCodexWithoutSessionStartHookDoesNotWarn(t *testing.T) {
 func TestRejectsEscapingSkillPath(t *testing.T) {
 	root := t.TempDir()
 	writeTestFile(t, filepath.Join(root, NativeManifest), `{
+	  "apiVersion": "reasonix.io/plugin/v2",
 	  "name": "bad",
 	  "skills": "../skills"
 	}`)
@@ -742,7 +743,7 @@ func TestParseClaudePluginMapsCommandsDir(t *testing.T) {
 // reasonix-plugin.json, including path validation.
 func TestNativeManifestCommandsField(t *testing.T) {
 	root := t.TempDir()
-	writeTestFile(t, filepath.Join(root, NativeManifest), `{"name": "native-pack", "commands": ["cmds"]}`)
+	writeTestFile(t, filepath.Join(root, NativeManifest), `{"apiVersion":"reasonix.io/plugin/v2","name": "native-pack", "commands": ["cmds"]}`)
 	writeTestFile(t, filepath.Join(root, "cmds", "ship.md"), "---\ndescription: ship it\n---\nShip $1")
 
 	pkg, _, err := ParseDir(root)
@@ -758,7 +759,7 @@ func TestNativeManifestCommandsField(t *testing.T) {
 	}
 
 	rootBad := t.TempDir()
-	writeTestFile(t, filepath.Join(rootBad, NativeManifest), `{"name": "bad-pack", "commands": ["../escape"]}`)
+	writeTestFile(t, filepath.Join(rootBad, NativeManifest), `{"apiVersion":"reasonix.io/plugin/v2","name": "bad-pack", "commands": ["../escape"]}`)
 	if _, _, err := ParseDir(rootBad); err == nil {
 		t.Fatal("ParseDir must reject a commands path escaping the plugin root")
 	}
@@ -852,7 +853,6 @@ func TestParseClaudePluginAdoptsDeeplyNestedCommands(t *testing.T) {
 	writeTestFile(t, filepath.Join(root, ClaudeManifest), `{"name": "deep-pack"}`)
 	writeTestFile(t, filepath.Join(root, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nbody")
 	writeTestFile(t, filepath.Join(root, "commands", "a", "b", "c", "d", "e", "commit.md"), "---\ndescription: deep commit\n---\nCommit")
-
 	pkg, _, err := ParseDir(root)
 	if err != nil {
 		t.Fatalf("ParseDir: %v", err)

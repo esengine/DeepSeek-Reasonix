@@ -190,6 +190,23 @@ console.log("\nstatus bar workspace");
 }
 
 {
+  const exact = renderStatusBar({
+    items: ["turn_tps"],
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+  });
+  ok(exact.includes("20 t/s"), "completed TPS uses provider-output time");
+
+  const estimated = renderStatusBar({
+    items: ["turn_tps"],
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+    lastTurnOutputEstimated: true,
+  });
+  ok(estimated.includes("≈20 t/s"), "fallback TPS is visibly marked as estimated");
+}
+
+{
   const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", {
     pretendToBeVisual: true,
     url: "http://localhost/",
@@ -197,6 +214,9 @@ console.log("\nstatus bar workspace");
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   globalThis.window = dom.window as unknown as Window & typeof globalThis;
   globalThis.document = dom.window.document;
+  // Node's built-in navigator reflects the machine's ICU locale; pin jsdom's
+  // en-US one so English-string assertions hold on zh-locale machines.
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
   globalThis.Node = dom.window.Node;
   globalThis.HTMLElement = dom.window.HTMLElement;
   globalThis.HTMLButtonElement = dom.window.HTMLButtonElement;

@@ -179,7 +179,7 @@ rebuild controller，也不会 snapshot 会话。
 顶层字段：`schema_version`、`root`、`live`、`summary`、
 `instructions` / `skills` / `commands` / `hooks` / `plugins` / `mcp`、`issues`。
 
-插件包条目对 Manifest v1 是增量扩展：声明了代码型 Runtime 的插件还会
+插件包条目对 Manifest v2 是增量扩展：声明了代码型 Runtime 的插件还会
 报告 `prompts` 与 `themes` 计数和 `runtime` 标记（见
 <a href="./PLUGIN_PACKAGES.zh-CN.md">插件包</a>）。旧读者可以忽略这些
 字段；`schema_version` 保持 `1`。

@@ -1,0 +1,4 @@
+prompt = "Running `python3 -m unittest discover -s tests` in this directory fails. Diagnose the root cause and fix the source code so the suite passes. Do not modify anything under tests/."
+class = "failing-test-diagnosis"
+max_steps = 20
+timeout_sec = 300

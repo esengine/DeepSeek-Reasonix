@@ -18,6 +18,7 @@ type deleteRange struct {
 	guard   SessionDataGuard
 	managed ManagedConfigPaths
 	workDir string
+	overlay FileOverlay
 }
 
 func (deleteRange) Name() string { return "delete_range" }
@@ -42,32 +43,29 @@ func (deleteRange) Schema() json.RawMessage {
 func (deleteRange) ReadOnly() bool { return false }
 
 func (d deleteRange) Execute(ctx context.Context, args json.RawMessage) (string, error) {
-	change, err := d.preview(args)
+	change, src, err := d.preview(ctx, args)
 	if err != nil {
 		return "", err
 	}
-	// preview ran the ctx-less boundary check; the actual write needs the full
-	// one, which can gate a Reasonix-managed config target on user approval.
+	// preview ran the non-approving boundary check; the actual write needs the
+	// full one, which can gate a Reasonix-managed config target on user approval.
 	if err := confineWrite(ctx, d.roots, d.guard, d.managed, change.Path); err != nil {
 		return "", err
 	}
-	// Re-detect the file's encoding so the rewrite preserves it (GBK/UTF-16/BOM)
-	// rather than forcing UTF-8 and corrupting a non-UTF-8 file.
-	_, enc, err := readFileEncoded(change.Path)
-	if err != nil {
-		return "", fmt.Errorf("read %s: %w", change.Path, err)
-	}
-	if err := writeFileEncoded(change.Path, change.NewText, enc); err != nil {
+	// src carries the route and encoding the read came from, so the rewrite
+	// returns to the same place and preserves GBK/UTF-16/BOM.
+	if err := src.write(ctx, d.overlay, change.Path, change.NewText); err != nil {
 		return "", fmt.Errorf("write %s: %w", change.Path, err)
 	}
 	return change.Diff, nil
 }
 
-func (d deleteRange) Preview(args json.RawMessage) (diff.Change, error) {
-	return d.preview(args)
+func (d deleteRange) Preview(ctx context.Context, args json.RawMessage) (diff.Change, error) {
+	change, _, err := d.preview(ctx, args)
+	return change, err
 }
 
-func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
+func (d deleteRange) preview(ctx context.Context, args json.RawMessage) (diff.Change, editSource, error) {
 	var p struct {
 		Path        string `json:"path"`
 		StartAnchor string `json:"start_anchor"`
@@ -75,16 +73,16 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 		Inclusive   *bool  `json:"inclusive"`
 	}
 	if err := json.Unmarshal(args, &p); err != nil {
-		return diff.Change{}, fmt.Errorf("invalid args: %w", err)
+		return diff.Change{}, editSource{}, fmt.Errorf("invalid args: %w", err)
 	}
 	if p.Path == "" {
-		return diff.Change{}, fmt.Errorf("path is required")
+		return diff.Change{}, editSource{}, fmt.Errorf("path is required")
 	}
 	if p.StartAnchor == "" {
-		return diff.Change{}, fmt.Errorf("start_anchor is required")
+		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor is required")
 	}
 	if p.EndAnchor == "" {
-		return diff.Change{}, fmt.Errorf("end_anchor is required")
+		return diff.Change{}, editSource{}, fmt.Errorf("end_anchor is required")
 	}
 
 	inclusive := true
@@ -94,13 +92,14 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 
 	p.Path = resolveIn(d.workDir, p.Path)
 	if err := confinePreview(d.roots, d.guard, d.managed, p.Path); err != nil {
-		return diff.Change{}, err
+		return diff.Change{}, editSource{}, err
 	}
 
-	original, _, err := readFileEncoded(p.Path)
+	src, err := readEditSource(ctx, d.overlay, p.Path)
 	if err != nil {
-		return diff.Change{}, fmt.Errorf("read %s: %w", p.Path, err)
+		return diff.Change{}, editSource{}, fmt.Errorf("read %s: %w", p.Path, err)
 	}
+	original := src.content
 
 	// Detect line ending style so we can preserve it on write.
 	lineSep := "\n"
@@ -112,28 +111,28 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 	lines := strings.Split(strings.ReplaceAll(original, "\r", ""), "\n")
 	startLine := findUniqueLine(lines, p.StartAnchor)
 	if startLine == -2 {
-		return diff.Change{}, fmt.Errorf("start_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.StartAnchor, 5))
+		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.StartAnchor, 5))
 	}
 	if startLine == -1 {
-		return diff.Change{}, fmt.Errorf("start_anchor not found in %s", p.Path)
+		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor not found in %s", p.Path)
 	}
 	endLine := findUniqueLine(lines, p.EndAnchor)
 	if endLine == -2 {
-		return diff.Change{}, fmt.Errorf("end_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.EndAnchor, 5))
+		return diff.Change{}, editSource{}, fmt.Errorf("end_anchor is not unique in %s%s; add nearby unique code, not just repeated separator lines", p.Path, lineMatchSummary(lines, p.EndAnchor, 5))
 	}
 	if endLine == -1 {
-		return diff.Change{}, fmt.Errorf("end_anchor not found in %s", p.Path)
+		return diff.Change{}, editSource{}, fmt.Errorf("end_anchor not found in %s", p.Path)
 	}
 	if startLine > endLine {
-		return diff.Change{}, fmt.Errorf("start_anchor appears after end_anchor (lines %d and %d)", startLine+1, endLine+1)
+		return diff.Change{}, editSource{}, fmt.Errorf("start_anchor appears after end_anchor (lines %d and %d)", startLine+1, endLine+1)
 	}
 	deleteStart, deleteEnd, deletesLines, err := deletionLineInterval(startLine, endLine, inclusive, p.Path)
 	if err != nil {
-		return diff.Change{}, err
+		return diff.Change{}, editSource{}, err
 	}
 	if deletesLines && shouldValidateBraceCompleteDeletion(p.Path) {
 		if err := validateBraceCompleteDeletion(lines, deleteStart, deleteEnd, p.Path); err != nil {
-			return diff.Change{}, err
+			return diff.Change{}, editSource{}, err
 		}
 	}
 
@@ -147,7 +146,7 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 		// that line and duplicate it. There is nothing strictly between a line and
 		// itself, so the exclusive deletion is contradictory — reject it.
 		if startLine == endLine {
-			return diff.Change{}, fmt.Errorf("start_anchor and end_anchor match the same line in %s; with inclusive=false there is nothing between them to delete", p.Path)
+			return diff.Change{}, editSource{}, fmt.Errorf("start_anchor and end_anchor match the same line in %s; with inclusive=false there is nothing between them to delete", p.Path)
 		}
 		keep = append(keep, lines[:startLine+1]...)
 		keep = append(keep, lines[endLine:]...)
@@ -158,7 +157,7 @@ func (d deleteRange) preview(args json.RawMessage) (diff.Change, error) {
 		newContent += lineSep
 	}
 
-	return diff.Build(p.Path, original, newContent, diff.Modify), nil
+	return diff.Build(p.Path, original, newContent, diff.Modify), src, nil
 }
 
 // findUniqueLine returns the index of the line that equals target.

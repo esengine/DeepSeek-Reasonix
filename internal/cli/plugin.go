@@ -35,6 +35,8 @@ func pluginCommand(args []string) int {
 		return pluginSetEnabledCommand(args[1:], false)
 	case "doctor":
 		return pluginDoctorCommand(args[1:])
+	case "migrate":
+		return pluginMigrateCommand(args[1:])
 	case "help", "--help", "-h":
 		pluginUsage()
 		return 0
@@ -53,7 +55,8 @@ func pluginUsage() {
   reasonix plugin enable <name>
   reasonix plugin disable <name>
   reasonix plugin remove <name>
-  reasonix plugin doctor <name>`)
+  reasonix plugin doctor <name>
+  reasonix plugin migrate <name> --to-v2`)
 }
 
 func pluginInstallCommand(args []string) int {
@@ -326,6 +329,57 @@ func printPluginInventory(pluginName string, inv pluginpkg.Inventory) {
 	}
 }
 
+func pluginMigrateCommand(args []string) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "plugin migrate requires a plugin name")
+		return 2
+	}
+	name := args[0]
+	toV2 := false
+	for _, a := range args[1:] {
+		if a == "--to-v2" {
+			toV2 = true
+		} else {
+			fmt.Fprintf(os.Stderr, "unknown plugin migrate flag %q\n", a)
+			return 2
+		}
+	}
+	if !toV2 {
+		fmt.Fprintln(os.Stderr, "plugin migrate requires --to-v2")
+		return 2
+	}
+	p, ok, err := findInstalledPlugin(name)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if !ok {
+		fmt.Fprintf(os.Stderr, "plugin %q is not installed\n", name)
+		return 1
+	}
+	root := pluginpkg.ResolveRoot(config.ReasonixHomeDir(), p.Root)
+	pkg, _, err := pluginpkg.ParseNativeForMigrate(root)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "migrate parse:", err)
+		return 1
+	}
+	data, err := pluginpkg.MigrateManifestToV2(pkg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "migrate:", err)
+		return 1
+	}
+	if err := pluginpkg.WriteMigratedManifestV2(root, data); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	if _, _, err := pluginpkg.ParseDir(root); err != nil {
+		fmt.Fprintln(os.Stderr, "migrated manifest failed validation:", err)
+		return 1
+	}
+	fmt.Printf("migrated %s to %s (backup: %s.bak)\n", name, pluginpkg.ManifestAPIVersionV2, pluginpkg.NativeManifest)
+	return 0
+}
+
 func pluginDoctorCommand(args []string) int {
 	if len(args) != 1 {
 		fmt.Fprintln(os.Stderr, "plugin doctor requires a plugin name")
@@ -344,7 +398,26 @@ func pluginDoctorCommand(args []string) int {
 	pkg, warnings, err := pluginpkg.ParseDir(root)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "invalid:", err)
+		if strings.Contains(err.Error(), "missing apiVersion") {
+			fmt.Fprintf(os.Stderr, "remediation: reasonix plugin migrate %s --to-v2\n", args[0])
+		}
 		return 1
+	}
+	if len(pkg.Manifest.Requires) > 0 {
+		fmt.Println("requires:")
+		for _, r := range pkg.Manifest.Requires {
+			opt := ""
+			if r.Optional {
+				opt = " (optional)"
+			}
+			fmt.Printf("  %s/%s/%s range=%s%s\n", r.Namespace, r.Kind, r.ID, r.VersionRange, opt)
+		}
+	}
+	if len(pkg.Manifest.Provides) > 0 {
+		fmt.Println("provides:")
+		for _, c := range pkg.Manifest.Provides {
+			fmt.Printf("  %s/%s/%s@%s\n", c.Namespace, c.Kind, c.ID, c.Version)
+		}
 	}
 	for _, skillRoot := range pkg.SkillRoots() {
 		if st, err := os.Stat(skillRoot); err != nil || !st.IsDir() {
@@ -392,7 +465,7 @@ func pluginDoctorCommand(args []string) int {
 	return 0
 }
 
-// checkRuntimeCommand verifies a Manifest v1 runtime command resolves to
+// checkRuntimeCommand verifies a Manifest v2 runtime command resolves to
 // something runnable. ${REASONIX_PLUGIN_ROOT} expands to the installed root;
 // other relative path forms resolve against the plugin root. Bare executable
 // names are looked up on PATH (a miss is a warning, not a failure — PATH

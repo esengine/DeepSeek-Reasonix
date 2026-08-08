@@ -202,7 +202,7 @@ func (a *Agent) SetCacheState(state string) {
 	}
 	a.cacheState = state
 	if a.compactionState.SchemaVersion == 0 && len(a.compactionState.Projection.Messages) == 0 {
-		a.compactionState.SchemaVersion = compactionStateSchemaV1
+		a.compactionState.SchemaVersion = compactionStateSchemaCurrent
 	}
 	a.compactionState.LastCacheState = state
 	a.compactionState.UpdatedAt = time.Now().UTC()

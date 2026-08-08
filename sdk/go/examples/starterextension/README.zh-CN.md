@@ -1,6 +1,6 @@
 # Starter Extension
 
-该目录是一个完整、可安装的 Extension Protocol v1 插件。它的 Sidecar
+该目录是一个完整、可安装的 Extension Protocol v2 插件。它的 Sidecar
 拦截 `input.receive`；以 `starter: ` 开头的文本会在送入模型前追加
 ` [rewritten by starter-extension]`。
 
@@ -46,7 +46,7 @@ starter: 解释 Extension Protocol Sidecar 的作用
 - [`../../../../docs/EXTENSIONS.zh-CN.md`](../../../../docs/EXTENSIONS.zh-CN.md)
   说明重载、性能、缓存、兼容性与信任模型。
 - [`../../../../docs/PLUGIN_PACKAGES.zh-CN.md`](../../../../docs/PLUGIN_PACKAGES.zh-CN.md)
-  定义 Manifest v1 的全部字段。
+  定义 Manifest v2 的全部字段。
 - [`../../../../docs/EXTENSION_PROTOCOL.zh-CN.md`](../../../../docs/EXTENSION_PROTOCOL.zh-CN.md)
   是线上协议参考。
 - [`../fullsidecar/main.go`](../fullsidecar/main.go) 展示 Provider、结构化 UI、

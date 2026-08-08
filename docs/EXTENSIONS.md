@@ -10,7 +10,7 @@ Two kinds of plugin capabilities exist:
 - **Declarative** (any plugin package): skills, agents, commands, prompts,
   hooks, MCP servers, and themes. These are files and configuration; they
   run with the host's normal permissions.
-- **Code runtime** (Manifest v1 `runtime` block): a sidecar process speaking
+- **Code runtime** (Manifest v2 `runtime` block): a sidecar process speaking
   the Extension Protocol. Code extensions are **full trust** — see the
   security section below before installing one.
 
@@ -113,9 +113,9 @@ It keeps the manifest, Sidecar source, cross-platform build commands, linked
 installation, and first observable intercept in one directory. The normal
 development loop is:
 
-1. Add `apiVersion: "reasonix.io/plugin/v1"` to `reasonix-plugin.json` and
+1. Add `apiVersion: "reasonix.io/plugin/v2"` to `reasonix-plugin.json` and
    declare `contributes` and (optionally) `runtime` — see
-   [Plugin Packages](./PLUGIN_PACKAGES.md#manifest-v1-extensions).
+   [Plugin Packages](./PLUGIN_PACKAGES.md#manifest-v2-extensions).
 2. Implement the Sidecar. The [Go SDK](../sdk/go/README.md) (standard library
    only) handles transport, handshake, sequencing, content references, and
    shutdown; the [wire contract](./EXTENSION_PROTOCOL.md) and
@@ -133,7 +133,9 @@ instead of relying on an unversioned module.
 
 ## Compatibility
 
-- Manifests without `apiVersion` parse exactly as before.
+- Native `reasonix-plugin.json` manifests must declare the exact
+  `reasonix.io/plugin/v2` API version. There is no v1 dual-read or automatic
+  migration path because extension manifests were not publicly released on v1.
 - Older Reasonix versions ignore extension-only state: the per-session
   `<session>.extensions.json` sidecar file, `plugin/...` model refs (they
   simply resolve as unavailable models), and the `extension_surface` /

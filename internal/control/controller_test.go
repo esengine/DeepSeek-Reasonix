@@ -3159,7 +3159,7 @@ func TestRemoveMCPServerRemovesUnconnectedLazyPlaceholder(t *testing.T) {
 name = "mock"
 command = "mock-mcp"
 tier = "lazy"
-`), 0o644); err != nil {
+	`), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 
@@ -3170,7 +3170,7 @@ tier = "lazy"
 	spec := plugin.Spec{Name: "mock", Command: "mock-mcp", Authorized: true}
 	runtime := agent.NewMCPCapabilityRuntime(context.Background(), host, []plugin.Spec{spec}, reg, nil)
 	runtime.ConfigureServers([]config.PluginEntry{{Name: "mock", Command: "mock-mcp"}}, []plugin.Spec{spec}, map[string]bool{"mock": true})
-	c := New(Options{Host: host, Registry: reg, CapabilityRuntime: runtime})
+	c := New(Options{Host: host, Registry: reg, CapabilityRuntime: runtime, WorkspaceRoot: dir})
 
 	disconnected, err := c.RemoveMCPServer("mock")
 	if err != nil {
@@ -3237,13 +3237,7 @@ func TestRemoveMCPServerRejectsPluginManagedTools(t *testing.T) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{
-  "name": "superpowers",
-  "version": "1.0.0",
-  "mcpServers": {
-    "helper": { "command": "bin/helper" }
-  }
-}`), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(`{"apiVersion":"reasonix.io/plugin/v2","name":"superpowers","version":"1.0.0","mcpServers":{"helper":{"command":"bin/helper"}}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{

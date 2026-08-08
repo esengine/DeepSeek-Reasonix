@@ -41,7 +41,7 @@ Reasonix 桌面端原生主题包。主题是**受控皮肤**：语义颜色令�
 | **基础风格** | 六种视觉方向（Graphite、Aurora、Slate、Carbon、Nocturne、Amber），无令牌覆盖 | 否（需先复制） | 否 | 否 |
 | **官方主题** | 安装包内嵌的八款只读主题（清单 + 原创背景 + 缩略图，MIT） | 否（需先复制） | 否 | 否 |
 | **我的主题** | 编辑器新建、复制，或导入 `.reasonix-theme` | 是 | 是 | 是 |
-| **插件主题** | 已启用插件贡献的 `.reasonix-theme`（Manifest v1 `contributes.themes`），直接从插件目录读取——从不拷入用户库 | 否 | 否（禁用或卸载插件） | 否 |
+| **插件主题** | 已启用插件贡献的 `.reasonix-theme`（Manifest v2 `contributes.themes`），直接从插件目录读取——从不拷入用户库 | 否 | 否（禁用或卸载插件） | 否 |
 
 - 14 个内置 id（6 基础 + 8 官方）均为**保留名**：保存、导入、覆盖复制与删除都会拒绝冲突。
 - 激活官方主题时，仅把其 id 写入 `desktop-theme-state.json`；资源在运行时从嵌入副本读取。

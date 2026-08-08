@@ -18,6 +18,10 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 - Cache-first: the system-prompt prefix (base prompt + tools + memory) must stay
   byte-stable across turns so DeepSeek's automatic prefix cache stays warm. Never
   mutate it mid-session — ride the turn tail instead (see `control.Compose`).
+- Performance features land with an effect test at their final boundary
+  (`internal/boot/effect_test.go` pattern): assert what actually reaches the
+  provider request, frontend sink, or trajectory through the real `boot.Build`
+  assembly. Component correctness is not system effectiveness.
 
 ## Comments
 
@@ -84,19 +88,32 @@ Use `go test ./path/to/target/` to detect cycles **before** pushing. A `[setup f
 - **Keep the PR diff minimal.** Only the files relevant to the PR's purpose — no stray changes from other branches.
 - **Amend, don't add commits, for review feedback** — keeps the commit history clean.
 
-## Cache-impact PR metadata
+## PR metadata gates
 
-When PR changes touch files under `internal/boot/`, `internal/tool/`, `internal/provider/`, or other cache-sensitive paths (listed in `scripts/check-cache-impact.sh`), the PR body MUST include these lines at the end:
+Two CI guards read the PR body. The scripts are the source of truth and both
+run locally: `scripts/check-cache-impact.sh`, `scripts/check-docs-impact.sh`.
+Separators must be an ASCII `-` or `:` — an em dash fails the docs guard.
+
+Cache-sensitive diffs (`internal/tool/`, `internal/provider/`,
+`internal/boot/`, `internal/agent/agent.go`, and the rest of the list in the
+script) require:
 
 ```
-Cache-impact: <none|low|medium|high> — <reason>
+Cache-impact: <none|low|medium|high> - <reason>
 Cache-guard: <focused guard test/command or existing guard rationale>
 ```
 
-If the PR also touches files under `internal/config/`, `internal/memory/`, `internal/outputstyle/`, `internal/skill/`, or `internal/boot/`, add:
+`none` is a legitimate impact when the provider-visible prefix stays
+byte-identical; only an empty value, `todo`, or `tbd` is rejected. If the diff
+also touches `internal/config/`, `internal/memory/`, `internal/outputstyle/`,
+`internal/skill/`, or `internal/boot/`, add `System-prompt-review: <note>` —
+that field additionally rejects `none` and `n/a`, so it must name a reviewer.
+
+User-visible diffs (`cmd/reasonix/`, `desktop/`, `npm/`, and most of
+`internal/`; tests and lockfiles are exempt) require one of these, chosen by
+whether the same PR edited `docs/*.md`:
 
 ```
-System-prompt-review: <reviewer/approval note>
+Documentation-impact: updated - <what changed>            # docs/*.md edited
+Documentation-impact: none - <why the docs stay correct>  # not edited
 ```
-
-Values `n/a`, `none`, `todo`, `tbd` are rejected — use a descriptive reason instead.

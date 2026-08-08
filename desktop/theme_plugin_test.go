@@ -91,7 +91,7 @@ func installPluginThemeFixture(t *testing.T, home, pluginName string, enabled bo
 	}
 	manifestJSON := fmt.Sprintf(
 		`{"apiVersion":%q,"name":%q,"version":"1.0.0","contributes":{"themes":["themes/*.reasonix-theme"]}}`,
-		pluginpkg.ManifestAPIVersionV1, pluginName,
+		pluginpkg.ManifestAPIVersionV2, pluginName,
 	)
 	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), []byte(manifestJSON), 0o644); err != nil {
 		t.Fatal(err)

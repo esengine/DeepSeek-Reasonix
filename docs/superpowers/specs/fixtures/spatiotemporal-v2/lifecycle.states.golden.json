@@ -1,0 +1,12 @@
+{
+  "states": ["Inactive", "Preparing", "Active", "Draining", "Failed"],
+  "transitions": [
+    {"from": "Inactive", "to": "Preparing", "when": "activate begins"},
+    {"from": "Preparing", "to": "Active", "when": "required dependencies satisfied and resources ready"},
+    {"from": "Preparing", "to": "Failed", "when": "activation error"},
+    {"from": "Active", "to": "Draining", "when": "newer generation published"},
+    {"from": "Draining", "to": "Inactive", "when": "in-flight work complete and scope disposed"},
+    {"from": "Active", "to": "Failed", "when": "cleanup failure after dispose errors recorded"}
+  ],
+  "effectClasses": ["Reversible", "Cancelable", "Compensatable", "Irreversible"]
+}

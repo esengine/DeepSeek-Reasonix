@@ -1,0 +1,48 @@
+package builtin
+
+import (
+	"context"
+	"path/filepath"
+
+	fileenc "reasonix/internal/fileutil/encoding"
+)
+
+// editSource is the file state a read-modify-write tool works against, plus the
+// route its write must take back. Read and write must stay paired: content read
+// from the host's unsaved buffer has to return there, and content read from disk
+// has to return to disk. Mixing the two silently drops one side's changes.
+type editSource struct {
+	content string
+	enc     fileenc.Kind
+	overlay bool
+}
+
+// readEditSource resolves path the way Execute and Preview must both see it:
+// the host's unsaved editor buffer when the overlay can serve it, otherwise the
+// decoded disk content. A non-UTF-8 file always stays on the disk route — the
+// overlay contract is text-only, so routing GBK or UTF-16 through it would
+// rewrite the file as UTF-8.
+func readEditSource(ctx context.Context, overlay FileOverlay, path string) (editSource, error) {
+	content, enc, err := readFileEncoded(path)
+	if err != nil {
+		return editSource{}, err
+	}
+	if overlay != nil && enc == fileenc.UTF8 && filepath.IsAbs(path) {
+		if buffered, ok := overlay.ReadTextFile(ctx, path); ok {
+			return editSource{content: buffered, enc: enc, overlay: true}, nil
+		}
+	}
+	return editSource{content: content, enc: enc}, nil
+}
+
+// write persists content on the same route the source was read from. An overlay
+// that declines the write (ok=false) falls back to disk, which is safe because
+// the content already carries whatever the buffer held.
+func (s editSource) write(ctx context.Context, overlay FileOverlay, path, content string) error {
+	if s.overlay && overlay != nil {
+		if ok, err := overlay.WriteTextFile(ctx, path, content); ok {
+			return err
+		}
+	}
+	return writeFileEncoded(path, content, s.enc)
+}

@@ -991,16 +991,16 @@ func TestSaveSnapshotAppendsWithoutReplacingPrefixFile(t *testing.T) {
 	}
 }
 
-func TestSaveSnapshotAppendsToEventLogWithoutChangingCheckpoint(t *testing.T) {
+func TestSaveSnapshotAppendsEventLogAndDisplayReadModel(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	base := NewSession("sys")
 	base.Add(provider.Message{Role: provider.RoleUser, Content: "first"})
 	if err := base.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot base: %v", err)
 	}
-	checkpointBefore, err := os.ReadFile(path)
+	checkpointBefore, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("ReadFile checkpoint before append: %v", err)
+		t.Fatalf("Stat checkpoint before append: %v", err)
 	}
 
 	next, err := LoadSession(path)
@@ -1012,12 +1012,19 @@ func TestSaveSnapshotAppendsToEventLogWithoutChangingCheckpoint(t *testing.T) {
 		t.Fatalf("SaveSnapshot append: %v", err)
 	}
 
-	checkpointAfter, err := os.ReadFile(path)
+	checkpointAfter, err := os.Stat(path)
 	if err != nil {
-		t.Fatalf("ReadFile checkpoint after append: %v", err)
+		t.Fatalf("Stat checkpoint after append: %v", err)
 	}
-	if string(checkpointAfter) != string(checkpointBefore) {
-		t.Fatalf("checkpoint changed after append-only snapshot:\nbefore=%s\nafter=%s", checkpointBefore, checkpointAfter)
+	if !os.SameFile(checkpointBefore, checkpointAfter) {
+		t.Fatal("append-only snapshot replaced the display read model")
+	}
+	checkpoint, err := loadSessionMessagesFromJSONL(path)
+	if err != nil {
+		t.Fatalf("read display read model: %v", err)
+	}
+	if len(checkpoint) != 3 || checkpoint[2].Role != provider.RoleAssistant || checkpoint[2].Content != "one" {
+		t.Fatalf("display read model = %+v, want appended assistant message", checkpoint)
 	}
 	events := readSessionEventsForTest(t, path)
 	if len(events) != 2 {
@@ -1035,6 +1042,17 @@ func TestSaveSnapshotAppendsToEventLogWithoutChangingCheckpoint(t *testing.T) {
 	}
 	if got := loaded.Messages[len(loaded.Messages)-1].Content; got != "one" {
 		t.Fatalf("loaded tail = %q, want one", got)
+	}
+	identity, known, err := SessionContentIdentity(path)
+	if err != nil || !known {
+		t.Fatalf("SessionContentIdentity = (%+v, %v, %v)", identity, known, err)
+	}
+	idx, err := LoadSessionDisplayIndex(store.SessionDisplayIndex(path))
+	if err != nil {
+		t.Fatalf("LoadSessionDisplayIndex: %v", err)
+	}
+	if !ValidateSessionDisplayIndex(idx, identity.Revision, identity.RevisionKnown, identity.Digest, checkpointAfter.Size()) {
+		t.Fatalf("display index does not describe appended read model: %+v", idx)
 	}
 }
 

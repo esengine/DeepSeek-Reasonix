@@ -12,38 +12,33 @@ import (
 	"reasonix/internal/extension/dispatch"
 )
 
-// Extension dispatch wiring (Extension Protocol v1, stage 6b1). The
-// dispatcher is the frozen, immutable view of the installed extensions for
-// one controller generation; every wiring point here is nil-safe: with no
-// dispatcher installed (no v1 runtime packages, or a degraded snapshot) each
-// helper returns immediately and the controller behaves byte-identically to
-// the pre-dispatch path.
-//
-// Session payload surface: SessionPayload carries only the session transcript
-// path and the phase. Transcript path and metadata decisions stay host-side —
-// a session_policy owner's replace ruling adjusts the payload observing
-// extensions receive, never which file the host writes, loads, or rotates to.
+// Extension dispatch wiring (stage 6b1). Nil dispatcher is a no-op.
+// SessionPayload carries only path + phase; the host owns file decisions.
 
-// extensionSessionEvent broadcasts one session.* point to observing
-// extensions, fire-and-forget. session.start and session.end are
-// observation-only: no strategy runs at them.
+// extensionSessionEvent broadcasts one session.* point fire-and-forget.
 func (c *Controller) extensionSessionEvent(point extension.InterceptorPoint, phase, path string) {
 	c.extensionSessionPayloadEvent(point, dispatch.SessionPayload{SessionPath: path, Phase: phase})
 }
 
-// interceptInputReceive runs one composed input text through the extension
-// chain at input.receive before it enters the session. The returned text is
-// what the turn must use (a replace ruling rewrites it); blocked reports an
-// extension's block ruling, with the redacted reason already surfaced as a
-// user-visible notice by this helper. A required-class extension failure is
-// returned as the error. With no dispatcher installed the input passes
-// through untouched.
+// loadExtensions returns the dispatcher under c.mu (safe vs ReplaceExtensions).
+func (c *Controller) loadExtensions() *dispatch.Dispatcher {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	d := c.extensions
+	c.mu.Unlock()
+	return d
+}
+
+// interceptInputReceive runs input.receive; blocked surfaces a notice.
 func (c *Controller) interceptInputReceive(ctx context.Context, input string) (text string, blocked bool, err error) {
-	if c.extensions == nil {
+	d := c.loadExtensions()
+	if d == nil {
 		return input, false, nil
 	}
 	payload := dispatch.InputPayload{Text: input}
-	result, err := c.extensions.Intercept(ctx, extension.PointInputReceive, &payload)
+	result, err := d.Intercept(ctx, extension.PointInputReceive, &payload)
 	if err != nil {
 		return input, false, err
 	}
@@ -57,10 +52,11 @@ func (c *Controller) interceptInputReceive(ctx context.Context, input string) (t
 // extensionSessionPayloadEvent broadcasts one session.* point with an
 // already-settled (possibly owner-adjusted) payload.
 func (c *Controller) extensionSessionPayloadEvent(point extension.InterceptorPoint, payload dispatch.SessionPayload) {
-	if c.extensions == nil {
+	d := c.loadExtensions()
+	if d == nil {
 		return
 	}
-	c.extensions.Event(point, payload)
+	d.Event(point, payload)
 }
 
 // extensionSessionStrategy runs only the strategy half of a session.* point
@@ -69,11 +65,12 @@ func (c *Controller) extensionSessionPayloadEvent(point extension.InterceptorPoi
 // impending write but observes the completed one) use this half directly.
 func (c *Controller) extensionSessionStrategy(ctx context.Context, point extension.InterceptorPoint, phase, path string) (dispatch.SessionPayload, error) {
 	payload := dispatch.SessionPayload{SessionPath: path, Phase: phase}
-	if c.extensions == nil {
+	d := c.loadExtensions()
+	if d == nil {
 		return payload, nil
 	}
-	if _, owned := c.extensions.Strategy(extension.SlotSessionPolicy); owned {
-		if err := c.extensions.RunStrategy(ctx, extension.SlotSessionPolicy, point, &payload); err != nil {
+	if _, owned := d.Strategy(extension.SlotSessionPolicy); owned {
+		if err := d.RunStrategy(ctx, extension.SlotSessionPolicy, point, &payload); err != nil {
 			return payload, err
 		}
 	}
@@ -88,7 +85,7 @@ func (c *Controller) extensionSessionStrategy(ctx context.Context, point extensi
 // session.load the caller degrades to a warning because Controller.Resume has
 // no failure channel this stage.
 func (c *Controller) extensionSessionPhase(ctx context.Context, point extension.InterceptorPoint, phase, path string) error {
-	if c.extensions == nil {
+	if c.loadExtensions() == nil {
 		return nil
 	}
 	payload, err := c.extensionSessionStrategy(ctx, point, phase, path)
@@ -123,6 +120,15 @@ func newFrontendEventSink(inner event.Sink, d *dispatch.Dispatcher) *frontendEve
 	return &frontendEventSink{inner: inner, d: d, warned: map[string]bool{}}
 }
 
+func (s *frontendEventSink) setDispatcher(d *dispatch.Dispatcher) {
+	if s == nil || d == nil {
+		return
+	}
+	s.warnMu.Lock()
+	s.d = d
+	s.warnMu.Unlock()
+}
+
 // Emit observes and rules on one controller event before forwarding it. The
 // strategy runs synchronously (the frontend_events owner is required-class):
 // an explicit block ruling suppresses the event, but an owner malfunction
@@ -135,10 +141,13 @@ func (s *frontendEventSink) Emit(ev event.Event) {
 		s.inner.Emit(ev)
 		return
 	}
+	s.warnMu.Lock()
+	d := s.d
+	s.warnMu.Unlock()
 	payload := dispatch.FrontendEventPayload{Kind: name, Text: ev.Text, Detail: ev.Detail}
-	if _, owned := s.d.Strategy(extension.SlotFrontendEvents); owned {
+	if _, owned := d.Strategy(extension.SlotFrontendEvents); owned {
 		before := payload
-		if err := s.d.RunStrategy(context.Background(), extension.SlotFrontendEvents, extension.PointFrontendEvent, &payload); err != nil {
+		if err := d.RunStrategy(context.Background(), extension.SlotFrontendEvents, extension.PointFrontendEvent, &payload); err != nil {
 			var blockErr *dispatch.BlockError
 			if errors.As(err, &blockErr) {
 				s.warnOnce("block|"+blockErr.Plugin, "extension frontend event suppressed: "+blockErr.Error())
