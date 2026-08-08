@@ -4,6 +4,7 @@ import type { Components } from "react-markdown";
 import "katex/dist/katex.min.css";
 import { CodeViewer } from "./CodeViewer";
 import { RichMarkdownLink } from "./githubLink";
+import { linkifyPlainText } from "./plainTextLinks";
 import { normalizeMath } from "./mathNormalize";
 import { reasonixRehypePlugins, reasonixRemarkPlugins } from "./markdownRemarkPlugins";
 import { markdownImageSource } from "../lib/markdownImage";
@@ -112,7 +113,10 @@ function createComponents(plainStatusBlocks: boolean): Components {
         if (!match && plainStatusBlocks) return <PlainMarkdownBlock text={text.replace(/\n$/, "")} />;
         return <CodeViewer value={value} language={lang} maxHeight={360} />;
       }
-      return <code className="md-code">{children}</code>;
+      // Inline code keeps its styled look, but bare http(s) URLs inside it
+      // become clickable links (models often wrap a destination in backticks,
+      // which would otherwise render it as dead "boxed" text).
+      return <code className="md-code">{linkifyPlainText(text)}</code>;
     },
     a: ({ href, children }) => <RichMarkdownLink href={href}>{children}</RichMarkdownLink>,
     img: ({ src, alt, title }) => (

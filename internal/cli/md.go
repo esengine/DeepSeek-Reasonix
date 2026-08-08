@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -27,6 +29,8 @@ type mdRenderer struct {
 	copyMath       bool
 	copyMathPrefix string
 	nextCopyMathID int
+	links          bool
+	nextLinkID     int
 }
 
 func newMarkdownRenderer(width int) *mdRenderer {
@@ -37,7 +41,10 @@ func newMarkdownRenderer(width int) *mdRenderer {
 	// a Table node rather than falling through as a literal text block.
 	return &mdRenderer{
 		md: goldmark.New(
-			goldmark.WithExtensions(extension.Table),
+			// Table turns | header | rows | into a Table node instead of a
+			// literal text block; Linkify turns bare URLs and email addresses
+			// into AutoLink nodes so they render as clickable hyperlinks too.
+			goldmark.WithExtensions(extension.Table, extension.Linkify),
 			goldmark.WithParserOptions(
 				parser.WithInlineParsers(util.Prioritized(&mathParser{}, 150)),
 			),
@@ -64,7 +71,10 @@ func (r *mdRenderer) Render(input string) string {
 	src := []byte(input)
 	doc := r.md.Parser().Parse(text.NewReader(src))
 	var buf strings.Builder
+	r.links = true
+	r.nextLinkID = 0
 	r.renderBlocks(&buf, doc, src, 0)
+	r.links = false
 	out := strings.TrimRight(buf.String(), "\n")
 	if out == "" {
 		return ""
@@ -359,14 +369,32 @@ func (r *mdRenderer) appendInline(b *strings.Builder, n ast.Node, src []byte) {
 		case *ast.CodeSpan:
 			var inner strings.Builder
 			r.appendInline(&inner, v, src)
-			b.WriteString(accent(inner.String()))
+			text := inner.String()
+			if r.links {
+				text = r.linkifyCodeSpan(text)
+			}
+			b.WriteString(accent(text))
 		case *ast.Link:
 			var inner strings.Builder
 			r.appendInline(&inner, v, src)
-			b.WriteString(inner.String())
-			b.WriteString(dim(" (" + string(v.Destination) + ")"))
+			display := inner.String()
+			dest := stripControlChars(string(v.Destination))
+			if display == "" {
+				display = dest
+			}
+			if r.links {
+				r.linkify(b, display+dim(" ("+dest+")"), dest)
+			} else {
+				b.WriteString(display)
+				b.WriteString(dim(" (" + dest + ")"))
+			}
 		case *ast.AutoLink:
-			b.WriteString(string(v.URL(src)))
+			url := string(v.URL(src))
+			if r.links {
+				r.linkify(b, url, url)
+			} else {
+				b.WriteString(url)
+			}
 		case *ast.RawHTML:
 			// drop — rare in chat output and would print as literal escapes
 		case *mathNode:
@@ -390,6 +418,84 @@ func (r *mdRenderer) appendInline(b *strings.Builder, n ast.Node, src []byte) {
 			r.appendInline(b, c, src)
 		}
 	}
+}
+
+// linkify wraps display text in an OSC 8 hyperlink plus the zero-width marker
+// pair the TUI uses to hit-test clicks (see parseLinkSpansInLine). The visible
+// text is untouched; both sequences are zero-width and survive lipgloss
+// wrapping, which rebalances the OSC 8 pair across lines. Destinations that
+// fail sanitizeLinkURL fall back to plain text so hostile or malformed URLs
+// can never inject terminal sequences or marker forgeries.
+func (r *mdRenderer) linkify(b *strings.Builder, display, url string) {
+	writeLink(b, display, url, r.nextLinkID)
+	r.nextLinkID++
+}
+
+// linkifyCodeSpan turns bare http(s) URLs inside a code span into clickable
+// hyperlinks. Markdown parsers never autolink inside code, yet models commonly
+// wrap a destination in backticks to highlight it — without this, such a link
+// renders with the code styling (the "boxed" look from the issue) but stays
+// dead text. The rest of the span keeps its literal code rendering.
+func (r *mdRenderer) linkifyCodeSpan(s string) string {
+	return plainURLRe.ReplaceAllStringFunc(s, func(match string) string {
+		url := strings.TrimRight(match, trimTrailingURLPunct)
+		if url == "" {
+			return match
+		}
+		var b strings.Builder
+		writeLink(&b, match, url, r.nextLinkID)
+		r.nextLinkID++
+		return b.String()
+	})
+}
+
+// writeLink renders display as an OSC 8 hyperlink to url, bracketed by the
+// zero-width marker pair the TUI hit-tests against (parseLinkSpansInLine).
+// id must be unique within the surrounding render so markers stay paired.
+func writeLink(b *strings.Builder, display, url string, id int) {
+	url = sanitizeLinkURL(url)
+	if url == "" {
+		b.WriteString(display)
+		return
+	}
+	b.WriteString(ansi.SetHyperlink(url))
+	b.WriteString(linkStartMarker(strconv.Itoa(id), url))
+	b.WriteString(display)
+	b.WriteString(linkEndMarker(strconv.Itoa(id)))
+	b.WriteString(ansi.ResetHyperlink())
+}
+
+// safeLinkSchemeRe admits only schemes the open-in-browser path will actually
+// handle. Anything else (javascript:, data:, file:, bare words) renders as
+// plain text instead of a clickable link.
+var safeLinkSchemeRe = regexp.MustCompile(`^(https?|mailto):`)
+
+// stripControlChars removes C0/C1 control characters, DEL and the OSC/ST
+// bytes (0x9c/0x9d) from arbitrary text. It is byte-wise so invalid UTF-8
+// passes through untouched instead of being rewritten to U+FFFD.
+func stripControlChars(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c < 0x20 || c == 0x7f || c == 0x9c || c == 0x9d {
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+// sanitizeLinkURL returns url only when it is non-empty, uses a safe scheme
+// and contains no control characters. Control characters — ESC, BEL, ST, OSC
+// and friends — are stripped defensively so a model-supplied destination can
+// never smuggle ANSI sequences into the rendered hyperlink or forge marker
+// boundaries in the surrounding transcript.
+func sanitizeLinkURL(url string) string {
+	if url == "" || !safeLinkSchemeRe.MatchString(url) {
+		return ""
+	}
+	return stripControlChars(url)
 }
 
 // renderTable lays out a GFM table as terminal columns separated by dim

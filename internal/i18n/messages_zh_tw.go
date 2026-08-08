@@ -254,6 +254,8 @@ var ChineseTraditional = Messages{
 	CmdExport:           "將會話匯出為 Markdown",
 	SlashCopyDone:       "已複製到剪貼簿",
 	SlashCopyEmpty:      "沒有可複製的助手回覆",
+	LinkOpenDoneFmt:     "已開啟 %s",
+	LinkOpenFailedFmt:   "開啟連結失敗：%s",
 	SlashCopyListHeader: "選擇要複製的回覆：",
 	SlashExportDoneFmt:  "會話已匯出到 %s",
 	SlashExportEmpty:    "沒有可匯出的訊息",

@@ -268,6 +268,8 @@ var Chinese = Messages{
 	CmdExport:           "将会话导出为 Markdown",
 	SlashCopyDone:       "已复制到剪贴板",
 	SlashCopyEmpty:      "没有可复制的助手回复",
+	LinkOpenDoneFmt:     "已打开 %s",
+	LinkOpenFailedFmt:   "打开链接失败：%s",
 	SlashCopyListHeader: "选择要复制的回复：",
 	SlashExportDoneFmt:  "会话已导出到 %s",
 	SlashExportEmpty:    "没有可导出的消息",

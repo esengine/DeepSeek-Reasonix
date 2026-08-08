@@ -267,6 +267,8 @@ var English = Messages{
 	CmdExport:           "export session as markdown",
 	SlashCopyDone:       "copied response to clipboard",
 	SlashCopyEmpty:      "no assistant response to copy",
+	LinkOpenDoneFmt:     "opened %s",
+	LinkOpenFailedFmt:   "failed to open link: %s",
 	SlashCopyListHeader: "pick a response to copy:",
 	SlashExportDoneFmt:  "session exported to %s",
 	SlashExportEmpty:    "no messages to export",

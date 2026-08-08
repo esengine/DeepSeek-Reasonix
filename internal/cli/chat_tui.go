@@ -244,6 +244,12 @@ type chatTUI struct {
 	wantMouseReenable bool
 	viewport          viewport.Model
 	sel               selection
+	// lastLinkClickAt/lastLinkClickURL implement double-click-to-open for
+	// clickable links: the first click on a link records its time and URL, and
+	// a second click on the same URL within doubleClickWindow opens it in the
+	// browser. A single click still starts a selection as usual.
+	lastLinkClickAt time.Time
+	lastLinkClickURL string
 	// autoScroll drives edge-drag scrolling: -1 up, +1 down, 0 off. dragX is the
 	// column the drag is held at, so the ticker can extend the selection head.
 	autoScroll int
@@ -423,6 +429,11 @@ const (
 	tuiIdle tuiState = iota
 	tuiRunning
 )
+
+// doubleClickWindow is the max gap between two left-clicks on the same link
+// that counts as a double-click (and opens the link). 500ms matches the
+// Windows default double-click speed.
+const doubleClickWindow = 500 * time.Millisecond
 
 type controllerBuildSpec struct {
 	ModelRef         string
@@ -1115,6 +1126,25 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if strings.Contains(clicked, "more lines") && strings.Contains(clicked, "Ctrl+B") {
 					m.toggleShellOutput()
 					return m, finalize(m, cmds)
+				}
+				// Double-click on a clickable link opens it in the browser
+				// instead of starting a selection; a single click still
+				// selects, so text selection keeps working and only a
+				// deliberate second click on the same link triggers the open.
+				if url, ok := m.linkSpanAt(lineIdx, msg.X); ok {
+					now := time.Now()
+					if !m.lastLinkClickAt.IsZero() &&
+						now.Sub(m.lastLinkClickAt) <= doubleClickWindow &&
+						url == m.lastLinkClickURL {
+						m.lastLinkClickAt = time.Time{}
+						m.lastLinkClickURL = ""
+						m.sel = selection{}
+						m.autoScroll = 0
+						m.openLink(url)
+						return m, finalize(m, cmds)
+					}
+					m.lastLinkClickAt = now
+					m.lastLinkClickURL = url
 				}
 			}
 			at := m.transcriptCaret(msg.X, msg.Y)
@@ -5181,6 +5211,22 @@ func (m *chatTUI) notice(note string) {
 	m.commitLine(dim("  · " + note))
 }
 
+// openLink launches the system browser for a Ctrl+Clicked URL and reports the
+// outcome in the transcript notice area. openInBrowser is non-blocking
+// (exec.Start), so the TUI keeps running while the OS opens the browser. The
+// destination is re-validated here (not just at render time) so a forged
+// marker in the transcript can never reach the browser with an unsafe scheme.
+func (m *chatTUI) openLink(url string) {
+	if sanitizeLinkURL(url) == "" {
+		return
+	}
+	if err := openInBrowser(url); err != nil {
+		m.notice(fmt.Sprintf(i18n.M.LinkOpenFailedFmt, err))
+		return
+	}
+	m.notice(fmt.Sprintf(i18n.M.LinkOpenDoneFmt, url))
+}
+
 // showRemoteHosts renders a read-only summary of configured remote hosts. The
 // remote session lives in a `reasonix serve` on the remote host, so connecting
 // happens from a terminal (`reasonix remote connect`), not inside this chat.
@@ -5324,6 +5370,7 @@ func wrapForViewport(text string, width int, fg cliColor) string {
 // look like it has a second input box in the transcript.
 func renderUserBubble(line string, width int, planMode bool) string {
 	line = displayLineForImageRefs(line)
+	line = linkifyPlainURLs(line)
 	prefix := "› "
 	if planMode {
 		prefix = "› [plan] "
@@ -5332,6 +5379,31 @@ func renderUserBubble(line string, width int, planMode bool) string {
 		return "│ " + prefix + line
 	}
 	return "  " + accent(prefix+line)
+}
+
+// plainURLRe matches bare http(s) URLs in plain, non-markdown text such as the
+// user bubble. Trailing sentence punctuation is trimmed by
+// trimTrailingURLPunct so "https://x.com." does not swallow the period.
+var plainURLRe = regexp.MustCompile(`https?://[^\s<>"'` + "`" + `]+`)
+
+const trimTrailingURLPunct = ".!,;:?)]}>”’」』】》，。；：！？）］｝"
+
+// linkifyPlainURLs turns bare http(s) URLs in a plain-text line into OSC 8
+// hyperlinks bracketed by the zero-width click markers, exactly like the
+// markdown renderer does for [text](url) and autolinks. The visible text is
+// unchanged; sanitizeLinkURL still guards the destination.
+func linkifyPlainURLs(s string) string {
+	nextID := 0
+	return plainURLRe.ReplaceAllStringFunc(s, func(match string) string {
+		url := strings.TrimRight(match, trimTrailingURLPunct)
+		if url == "" {
+			return match
+		}
+		var b strings.Builder
+		writeLink(&b, match, url, nextID)
+		nextID++
+		return b.String()
+	})
 }
 
 var cliImageRefRe = regexp.MustCompile(`(?:^|\s)@\.reasonix/attachments/clipboard-\d{8}-\d{6}\.\d+(?:-(?:\d{6}|[a-f0-9]{8}))?\.(?:png|jpg|jpeg|gif|webp)`)

@@ -2,6 +2,7 @@ import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRe
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
 import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
 import { Markdown } from "./Markdown";
+import { linkifyPlainText } from "./plainTextLinks";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
 import { ComposerContextCard } from "./ComposerContextCard";
@@ -504,7 +505,7 @@ export function UserMessage({
             {hasInvocationSegments && pasteBlocks.length === 0 && selectedTextBlocks.length === 0 ? (
               <div className="msg__text msg__rich-text">
                 {invocationSegments.map((segment, index) => segment.type === "text"
-                  ? <span key={`text:${segment.start}:${index}`}>{segment.content}</span>
+                  ? <span key={`text:${segment.start}:${index}`}>{linkifyPlainText(segment.content)}</span>
                   : (
                     <InvocationBadge
                       key={`invocation:${segment.invocation.name}:${segment.offset}:${index}`}
@@ -516,7 +517,9 @@ export function UserMessage({
               </div>
             ) : displaySegments.map((seg, i) => {
               if (seg.type === "text") {
-                return seg.content ? <div className="msg__text" key={`s${i}`}>{seg.content}</div> : null;
+                return seg.content ? (
+                  <div className="msg__text" key={`s${i}`}>{linkifyPlainText(seg.content)}</div>
+                ) : null;
               }
               const expanded = Boolean(expandedBlockKeys[seg.key]);
               return (
