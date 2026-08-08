@@ -90,6 +90,7 @@ func (a *App) showMainWindowFrom(source string) {
 	if a.ctx == nil {
 		return
 	}
+	a.backgroundHidden.Store(false)
 	if !windowRestoreDiagnosticsSupported() {
 		showFromBackground(a.ctx, a.backgroundMaximised.Swap(false))
 		a.kickDeferredRebuildRetry()

@@ -297,6 +297,8 @@ type SettingsView struct {
 	DesktopThemeStyle       string               `json:"desktopThemeStyle"`
 	DesktopTerminalTheme    string               `json:"desktopTerminalTheme,omitempty"`
 	CloseBehavior           string               `json:"closeBehavior"`
+	GlobalHotkey            string               `json:"globalHotkey"`
+	GlobalHotkeyError       string               `json:"globalHotkeyError,omitempty"`
 	DisplayMode             string               `json:"displayMode"`
 	StatusBarStyle          string               `json:"statusBarStyle"`
 	StatusBarItems          []string             `json:"statusBarItems"`
@@ -1005,6 +1007,7 @@ func (a *App) Settings() SettingsView {
 			DesktopThemeStyle:       "graphite",
 			DesktopTerminalTheme:    "auto",
 			CloseBehavior:           "background",
+			GlobalHotkey:            config.Default().DesktopGlobalHotkey(),
 			DisplayMode:             "standard",
 			StatusBarStyle:          "text",
 			StatusBarItems:          config.DefaultDesktopStatusBarItems(),
@@ -1084,6 +1087,8 @@ func (a *App) Settings() SettingsView {
 		DesktopThemeStyle:       cfg.DesktopThemeStyle(),
 		DesktopTerminalTheme:    cfg.DesktopTerminalTheme(),
 		CloseBehavior:           cfg.DesktopCloseBehavior(),
+		GlobalHotkey:            cfg.DesktopGlobalHotkeySetting(),
+		GlobalHotkeyError:       lastGlobalHotkeyErrorMessage(),
 		DisplayMode:             cfg.DesktopDisplayMode(),
 		StatusBarStyle:          cfg.DesktopStatusBarStyle(),
 		StatusBarItems:          cfg.DesktopStatusBarItems(),
@@ -3453,6 +3458,40 @@ func (a *App) ClearBotSecret(envName string) error {
 // the active controller. It must stay out of provider-visible prompt/request data.
 func (a *App) SetCloseBehavior(mode string) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopCloseBehavior(mode) })
+}
+
+// SetDesktopGlobalHotkey updates the OS-level window summon/hide binding and
+// rebinds the live registration. Empty restores the platform default; "off"
+// disables. Registration failures roll the saved value back and are returned
+// so Settings can show a conflict.
+func (a *App) SetDesktopGlobalHotkey(binding string) error {
+	prevRaw := ""
+	if prev, _, err := a.loadDesktopUserConfigForView(); err == nil && prev != nil {
+		prevRaw = strings.TrimSpace(prev.Desktop.GlobalHotkey)
+	}
+	if err := a.applyConfigOnly(func(c *config.Config) error {
+		return c.SetDesktopGlobalHotkey(binding)
+	}); err != nil {
+		return err
+	}
+	cfg, _, err := a.loadDesktopUserConfigForView()
+	if err != nil {
+		cfg = config.LoadForEdit(config.UserConfigPath())
+	}
+	if err := a.rebindGlobalHotkey(cfg.DesktopGlobalHotkey()); err != nil {
+		_ = a.applyConfigOnly(func(c *config.Config) error {
+			return c.SetDesktopGlobalHotkey(prevRaw)
+		})
+		rollback, _, loadErr := a.loadDesktopUserConfigForView()
+		if loadErr != nil {
+			rollback = config.LoadForEdit(config.UserConfigPath())
+		}
+		_ = a.rebindGlobalHotkey(rollback.DesktopGlobalHotkey())
+		a.emitGlobalHotkeyError(err)
+		return err
+	}
+	clearLastGlobalHotkeyError()
+	return nil
 }
 
 // SetDisplayMode updates the transcript display mode. UI-only, no rebuild needed.

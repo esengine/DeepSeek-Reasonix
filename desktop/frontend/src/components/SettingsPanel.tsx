@@ -50,14 +50,18 @@ import { DEFAULT_STATUS_BAR_ITEMS, normalizeStatusBarItems, type StatusBarItemId
 import { normalizeToolApprovalMode } from "../lib/types";
 import {
   comboFromKeyboardEvent,
+  defaultShortcutCombo,
   detectShortcutPlatform,
   formatShortcutCombo,
   onShortcutsChanged,
+  parseShortcutComboBinding,
   resetCustomShortcuts,
   resolvedShortcutCombo,
   saveCustomShortcut,
+  serializeShortcutCombo,
   shortcutAcceptsCombo,
   shortcutConflict,
+  shortcutDefinition,
   shortcutDefinitions,
   type ShortcutAction,
 } from "../lib/keyboardShortcuts";
@@ -332,7 +336,7 @@ export function SettingsPanel({
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MemorySettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
                 {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
-                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
+                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection globalHotkey={s?.globalHotkey} globalHotkeyError={s?.globalHotkeyError} onGlobalHotkeyChange={async () => { await reload(); }} /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -645,37 +649,59 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
   return t("settings.botConnectionCount", { n: connections });
 }
 
-export function ShortcutsSection() {
+export function ShortcutsSection({
+  globalHotkey,
+  globalHotkeyError,
+  onGlobalHotkeyChange,
+}: {
+  globalHotkey?: string;
+  globalHotkeyError?: string;
+  onGlobalHotkeyChange?: () => void | Promise<void>;
+}) {
   const t = useT();
   const [platform] = useState(() => detectShortcutPlatform());
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
   const [unsupportedAction, setUnsupportedAction] = useState<ShortcutAction | null>(null);
+  const [osConflict, setOsConflict] = useState<string | null>(() => globalHotkeyError?.trim() || null);
 
   useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
+  useEffect(() => {
+    const next = globalHotkeyError?.trim() || null;
+    setOsConflict(next);
+  }, [globalHotkeyError]);
+  useEffect(() => {
+    const runtime = typeof window !== "undefined" ? window.runtime : undefined;
+    if (!runtime?.EventsOn) return;
+    return runtime.EventsOn("desktop:global-hotkey-error", (payload?: unknown) => {
+      const message =
+        payload && typeof payload === "object" && "message" in payload && typeof (payload as { message: unknown }).message === "string"
+          ? (payload as { message: string }).message
+          : typeof payload === "string"
+            ? payload
+            : "unknown error";
+      setOsConflict(message);
+    });
+  }, []);
 
   const definitions = shortcutDefinitions();
-  const commitShortcut = (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
+  const commitShortcut = async (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
       setConflict(null);
       setUnsupportedAction(null);
+      setOsConflict(null);
       setRecording(null);
       return;
     }
     const combo = comboFromKeyboardEvent(event.nativeEvent);
     if (!combo) return;
     if (!shortcutAcceptsCombo(action, combo)) {
-      // Let the browser move focus before onBlur cancels recording. Updating
-      // recording state synchronously here can keep focus on the re-rendered
-      // button in WebKit.
       if (event.key === "Tab") {
         const recorder = event.currentTarget;
         queueMicrotask(() => {
-          // Native Tab normally moves focus first. If this WebView does not,
-          // release focus so the recorder cannot become a keyboard trap.
           if (document.activeElement === recorder) recorder.blur();
         });
         return;
@@ -683,18 +709,34 @@ export function ShortcutsSection() {
       event.preventDefault();
       event.stopPropagation();
       setConflict(null);
+      setOsConflict(null);
       setUnsupportedAction(action);
       return;
     }
     event.preventDefault();
     event.stopPropagation();
+    const definition = shortcutDefinition(action);
     const conflictDefinition = shortcutConflict(action, combo, platform);
     if (conflictDefinition) {
       setUnsupportedAction(null);
+      setOsConflict(null);
       setConflict({ action, conflictAction: conflictDefinition.action });
       return;
     }
-    saveCustomShortcut(action, combo);
+    if (definition.osLevel) {
+      try {
+        await app.SetDesktopGlobalHotkey(serializeShortcutCombo(combo));
+        setOsConflict(null);
+        await onGlobalHotkeyChange?.();
+      } catch (err) {
+        setConflict(null);
+        setUnsupportedAction(null);
+        setOsConflict(err instanceof Error ? err.message : String(err));
+        return;
+      }
+    } else {
+      saveCustomShortcut(action, combo);
+    }
     setConflict(null);
     setUnsupportedAction(null);
     setRecording(null);
@@ -712,11 +754,20 @@ export function ShortcutsSection() {
           title={t("settings.shortcutsResetAll")}
           aria-label={t("settings.shortcutsResetAll")}
           onClick={() => {
-            resetCustomShortcuts();
-            setConflict(null);
-            setUnsupportedAction(null);
-            setRecording(null);
-            setRevision((value) => value + 1);
+            void (async () => {
+              resetCustomShortcuts();
+              try {
+                await app.SetDesktopGlobalHotkey("");
+                await onGlobalHotkeyChange?.();
+              } catch {
+                /* soft-fail: in-app shortcuts still reset */
+              }
+              setConflict(null);
+              setUnsupportedAction(null);
+              setOsConflict(null);
+              setRecording(null);
+              setRevision((value) => value + 1);
+            })();
           }}
         >
           <RefreshCw size={14} />
@@ -739,11 +790,26 @@ export function ShortcutsSection() {
             })}
           </div>
         )}
+        {osConflict && (
+          <div className="shortcuts-settings__conflict" role="alert">
+            {t("settings.shortcutsOsConflict", { message: osConflict })}
+          </div>
+        )}
         {definitions.map((definition) => {
-          const resolved = resolvedShortcutCombo(definition.action, platform);
+          const rawHotkey = (globalHotkey ?? "").trim().toLowerCase();
+          const osDisabled = Boolean(
+            definition.osLevel && (rawHotkey === "off" || rawHotkey === "none" || rawHotkey === "disabled" || rawHotkey === "-"),
+          );
+          const resolved = definition.osLevel
+            ? (osDisabled ? null : (parseShortcutComboBinding(globalHotkey) ?? defaultShortcutCombo(definition.action, platform)))
+            : resolvedShortcutCombo(definition.action, platform);
           const defaultCombo = definition.defaults[platform];
-          const display = formatShortcutCombo(resolved, platform);
-          const isCustom = formatShortcutCombo(resolved, platform) !== formatShortcutCombo(defaultCombo, platform);
+          const display = osDisabled
+            ? t("settings.shortcutsDisabled")
+            : formatShortcutCombo(resolved!, platform);
+          const isCustom = definition.osLevel
+            ? osDisabled || formatShortcutCombo(resolved!, platform) !== formatShortcutCombo(defaultCombo, platform)
+            : formatShortcutCombo(resolved!, platform) !== formatShortcutCombo(defaultCombo, platform);
           const isRecording = recording === definition.action;
           return (
             <div className="shortcuts-settings__row" key={definition.action}>
@@ -763,9 +829,7 @@ export function ShortcutsSection() {
                     setRecording(definition.action);
                     setConflict(null);
                     setUnsupportedAction(null);
-                    // WebKit (the desktop WKWebView) does not focus buttons on
-                    // click, and the recorder listens for keys on the button —
-                    // without this the recorder never receives any keydown.
+                    setOsConflict(null);
                     event.currentTarget.focus();
                   }}
                   onBlur={() => {
@@ -774,20 +838,62 @@ export function ShortcutsSection() {
                     setUnsupportedAction(null);
                     setRecording(null);
                   }}
-                  onKeyDown={(event) => isRecording && commitShortcut(definition.action, event)}
+                  onKeyDown={(event) => { if (isRecording) void commitShortcut(definition.action, event); }}
                 >
-                  {isRecording ? t("settings.shortcutsRecording") : <ShortcutComboDisplay combo={resolved} platform={platform} />}
+                  {isRecording
+                    ? t("settings.shortcutsRecording")
+                    : osDisabled
+                      ? t("settings.shortcutsDisabled")
+                      : <ShortcutComboDisplay combo={resolved!} platform={platform} />}
                 </button>
+                {definition.osLevel && (
+                  <button
+                    className="chip"
+                    type="button"
+                    disabled={osDisabled}
+                    onClick={() => {
+                      void (async () => {
+                        try {
+                          await app.SetDesktopGlobalHotkey("off");
+                          await onGlobalHotkeyChange?.();
+                          setOsConflict(null);
+                        } catch (err) {
+                          setOsConflict(err instanceof Error ? err.message : String(err));
+                          return;
+                        }
+                        setConflict(null);
+                        setUnsupportedAction(null);
+                        setRecording(null);
+                        setRevision((value) => value + 1);
+                      })();
+                    }}
+                  >
+                    {t("settings.shortcutsDisable")}
+                  </button>
+                )}
                 <button
                   className="chip"
                   type="button"
                   disabled={!isCustom}
                   onClick={() => {
-                    saveCustomShortcut(definition.action, null);
-                    setConflict(null);
-                    setUnsupportedAction(null);
-                    setRecording(null);
-                    setRevision((value) => value + 1);
+                    void (async () => {
+                      if (definition.osLevel) {
+                        try {
+                          await app.SetDesktopGlobalHotkey("");
+                          await onGlobalHotkeyChange?.();
+                          setOsConflict(null);
+                        } catch (err) {
+                          setOsConflict(err instanceof Error ? err.message : String(err));
+                          return;
+                        }
+                      } else {
+                        saveCustomShortcut(definition.action, null);
+                      }
+                      setConflict(null);
+                      setUnsupportedAction(null);
+                      setRecording(null);
+                      setRevision((value) => value + 1);
+                    })();
                   }}
                 >
                   {t("settings.shortcutsReset")}
@@ -1423,6 +1529,8 @@ function normalizeSettingsView(view: SettingsView | null | undefined): SettingsV
     desktopThemeStyle: normalizeThemeStyleForTheme(view.desktopThemeStyle, normalizeThemePreference(view.desktopTheme)),
     desktopTerminalTheme: normalizeTerminalThemePreference(view.desktopTerminalTheme),
     closeBehavior: normalizeCloseBehavior(view.closeBehavior),
+    globalHotkey: typeof view.globalHotkey === "string" ? view.globalHotkey : undefined,
+    globalHotkeyError: typeof view.globalHotkeyError === "string" ? view.globalHotkeyError : undefined,
     displayMode: normalizeDisplayMode(view.displayMode),
     statusBarStyle: normalizeStatusBarStyle(view.statusBarStyle),
     statusBarItems: normalizeStatusBarItems(view.statusBarItems),

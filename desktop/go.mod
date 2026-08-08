@@ -21,6 +21,7 @@ require (
 	github.com/tc-hib/winres v0.3.1
 	github.com/wailsapp/go-webview2 v1.0.23
 	github.com/wailsapp/wails/v2 v2.12.0
+	golang.design/x/hotkey v0.6.1
 	golang.org/x/image v0.43.0
 	golang.org/x/mod v0.37.0
 	golang.org/x/sync v0.22.0

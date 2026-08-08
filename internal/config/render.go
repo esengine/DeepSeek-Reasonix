@@ -117,6 +117,11 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 			b.WriteString("# external_opener = \"vscode\"   # desktop Open control: installed application id\n")
 		}
 		fmt.Fprintf(&b, "close_behavior = %q   # desktop: quit|background when the window close button is clicked\n", c.DesktopCloseBehavior())
+		if c.DesktopGlobalHotkeyConfigured() {
+			fmt.Fprintf(&b, "global_hotkey = %q   # desktop: OS-level show/hide toggle; off disables; empty uses platform default\n", strings.TrimSpace(c.Desktop.GlobalHotkey))
+		} else {
+			b.WriteString("# global_hotkey = \"ctrl+shift+space\"   # desktop: OS-level show/hide toggle; off disables; empty uses platform default\n")
+		}
 		fmt.Fprintf(&b, "status_bar_style = %q   # desktop: icon|text metric labels in the bottom status bar\n", c.DesktopStatusBarStyle())
 		fmt.Fprintf(&b, "status_bar_items = %s   # desktop: ordered visible bottom status bar items\n", renderStringArray(c.DesktopStatusBarItems()))
 		fmt.Fprintf(&b, "default_tool_approval_mode = %q   # desktop: Ask/Auto/YOLO default for newly-created sessions\n", c.DesktopDefaultToolApprovalMode())

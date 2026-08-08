@@ -261,6 +261,7 @@ type DesktopConfig struct {
 	TerminalTheme           string   `toml:"terminal_theme"`             // auto|dark|light; auto follows the desktop app theme
 	ExternalOpener          string   `toml:"external_opener"`            // preferred installed app used by the desktop Open control
 	CloseBehavior           string   `toml:"close_behavior"`             // quit|background; desktop window close behavior
+	GlobalHotkey            string   `toml:"global_hotkey"`              // OS-level summon toggle; empty = platform default, "off" = disabled
 	DisplayMode             string   `toml:"display_mode"`               // standard|compact (legacy "minimal" maps to compact); transcript display mode
 	StatusBarStyle          string   `toml:"status_bar_style"`           // icon|text; desktop status bar metric labels
 	StatusBarItems          []string `toml:"status_bar_items"`           // ordered visible desktop status bar items
@@ -458,6 +459,105 @@ func (c *Config) DesktopCloseBehavior() string {
 		return normalizeCloseBehavior(c.Desktop.CloseBehavior)
 	}
 	return normalizeCloseBehavior(c.UI.CloseBehavior)
+}
+
+// DesktopGlobalHotkey returns the OS-level window-toggle binding used for
+// registration. Empty config uses a platform default; the sentinel "off"
+// disables registration (returns "").
+func (c *Config) DesktopGlobalHotkey() string {
+	raw := ""
+	if c != nil {
+		raw = strings.TrimSpace(c.Desktop.GlobalHotkey)
+	}
+	switch strings.ToLower(raw) {
+	case "off", "none", "disabled", "-":
+		return ""
+	case "":
+		return defaultDesktopGlobalHotkey()
+	default:
+		return normalizeDesktopGlobalHotkey(raw)
+	}
+}
+
+// DesktopGlobalHotkeySetting returns the value Settings should display.
+// Unlike DesktopGlobalHotkey, the explicit "off" sentinel stays "off" so the
+// UI does not collapse disabled into the platform default.
+func (c *Config) DesktopGlobalHotkeySetting() string {
+	raw := ""
+	if c != nil {
+		raw = strings.TrimSpace(c.Desktop.GlobalHotkey)
+	}
+	switch strings.ToLower(raw) {
+	case "off", "none", "disabled", "-":
+		return "off"
+	case "":
+		return defaultDesktopGlobalHotkey()
+	default:
+		return normalizeDesktopGlobalHotkey(raw)
+	}
+}
+
+// DesktopGlobalHotkeyConfigured reports whether [desktop].global_hotkey is set
+// (including the explicit "off" sentinel).
+func (c *Config) DesktopGlobalHotkeyConfigured() bool {
+	return c != nil && strings.TrimSpace(c.Desktop.GlobalHotkey) != ""
+}
+
+func defaultDesktopGlobalHotkey() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return "meta+shift+space"
+	default:
+		return "ctrl+shift+space"
+	}
+}
+
+func normalizeDesktopGlobalHotkey(raw string) string {
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(raw)), func(r rune) bool {
+		return r == '+' || r == '-' || r == ' ' || r == '_'
+	})
+	var ctrl, meta, alt, shift bool
+	key := ""
+	for _, part := range parts {
+		switch part {
+		case "ctrl", "control", "controlkey":
+			ctrl = true
+		case "cmd", "command", "meta", "super", "win", "windows":
+			meta = true
+		case "alt", "option", "opt":
+			alt = true
+		case "shift":
+			shift = true
+		case "mod", "primary":
+			if runtime.GOOS == "darwin" {
+				meta = true
+			} else {
+				ctrl = true
+			}
+		default:
+			if part != "" {
+				key = part
+			}
+		}
+	}
+	if key == "" {
+		return ""
+	}
+	var out []string
+	if ctrl {
+		out = append(out, "ctrl")
+	}
+	if meta {
+		out = append(out, "meta")
+	}
+	if alt {
+		out = append(out, "alt")
+	}
+	if shift {
+		out = append(out, "shift")
+	}
+	out = append(out, key)
+	return strings.Join(out, "+")
 }
 
 // UICloseBehavior is the legacy name for DesktopCloseBehavior.

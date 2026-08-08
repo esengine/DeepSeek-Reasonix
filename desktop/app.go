@@ -235,6 +235,7 @@ type App struct {
 
 	forceQuit           atomic.Bool
 	backgroundMaximised atomic.Bool
+	backgroundHidden    atomic.Bool
 	desktopLocale       atomic.Int32
 	trayReady           bool
 	tray                *desktopTray
@@ -545,6 +546,7 @@ func (a *App) startup(ctx context.Context) {
 	}
 	installSystemQuitHook()
 	a.startTray()
+	a.startGlobalHotkey()
 	a.enableDeferredRebuildRetry()
 	a.goSafe("repairDesktopIconIntegration", func() {
 		if err := repairDesktopIconIntegration(); err != nil {
@@ -600,6 +602,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		a.backgroundMaximised.Store(a.lastKnownMaximised())
 		a.saveWindowStateSync()
 		a.snapshotAllTabs()
+		a.backgroundHidden.Store(true)
 		hideForBackground(ctx)
 		return true
 	}
@@ -947,6 +950,7 @@ func (a *App) shutdown(context.Context) {
 	}
 	a.stopBotRuntime()
 	a.stopRemoteRuntime()
+	a.stopGlobalHotkey()
 	a.stopTray()
 	// Terminal process shutdown is independent from controller teardown. Do it
 	// before acquiring runtime lifecycle locks so a slow PTY cannot delay while

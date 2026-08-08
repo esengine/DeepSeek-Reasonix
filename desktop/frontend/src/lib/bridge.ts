@@ -472,6 +472,7 @@ export interface AppBindings {
   DiagnoseBotConnection(id: string): Promise<BotConnectionDiagnostic>;
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
+  SetDesktopGlobalHotkey(binding: string): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
   SetStatusBarStyle(style: string): Promise<void>;
   SetStatusBarItems(items: string[]): Promise<void>;
@@ -1658,6 +1659,7 @@ function makeMockApp(): AppBindings {
     desktopTerminalTheme: "auto",
     conversationWidth: "standard",
     closeBehavior: "background",
+    globalHotkey: "ctrl+shift+space",
     displayMode: "compact",
     statusBarStyle: "text",
     statusBarItems: [...DEFAULT_STATUS_BAR_ITEMS],
@@ -4428,6 +4430,14 @@ function makeMockApp(): AppBindings {
         },
         async SetCloseBehavior(mode: string) {
           settings.closeBehavior = mode === "quit" ? "quit" : "background";
+        },
+        async SetDesktopGlobalHotkey(binding: string) {
+          const raw = binding.trim().toLowerCase();
+          if (!raw || raw === "off" || raw === "none" || raw === "disabled" || raw === "-") {
+            settings.globalHotkey = raw === "" ? "ctrl+shift+space" : "";
+            return;
+          }
+          settings.globalHotkey = raw;
         },
         async SetDisplayMode(mode: string) {
           settings.displayMode = mode;
