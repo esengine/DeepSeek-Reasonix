@@ -29,25 +29,8 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	if outcome, err := a.tryIncrementalFold(ctx, trigger, instructions, force, msgs, transcriptVersion); err != nil || outcome != CompactionNoop {
 		return outcome, err
 	}
-	head, start, ok := a.planCompaction(msgs, minCompactMessages)
+	head, start, kept, fold, ok := a.planFold(msgs, force)
 	if !ok {
-		head, start, ok = a.planCompaction(msgs, 1)
-	}
-	if !ok {
-		return CompactionNoop, nil
-	}
-	if active := a.activeTurnStart(msgs); active >= head && active < start {
-		start = active
-		if start <= head {
-			return CompactionNoop, nil
-		}
-	}
-	region := msgs[head:start]
-	kept, fold := a.partitionFoldForProjection(region)
-	if len(fold) == 0 {
-		return CompactionNoop, nil
-	}
-	if !force && !foldEconomics(fold) {
 		return CompactionNoop, nil
 	}
 
@@ -422,6 +405,74 @@ func (a *Agent) partitionFoldForProjectionMode(region []provider.Message, skipEa
 		fold = append(fold, m)
 	}
 	return kept, fold
+}
+
+// planFold picks the fold region and applies bounded folding: when the fold
+// alone cannot fit the shared window (an invalidated sidecar rebuild starts
+// from canonical, possibly far over the window), the newer tail drops back
+// into kept instead of failing — later turns fold it.
+func (a *Agent) planFold(msgs []provider.Message, force bool) (head, start int, kept, fold []provider.Message, ok bool) {
+	head, start, ok = a.planCompaction(msgs, minCompactMessages)
+	if !ok {
+		head, start, ok = a.planCompaction(msgs, 1)
+	}
+	if !ok {
+		return 0, 0, nil, nil, false
+	}
+	if active := a.activeTurnStart(msgs); active >= head && active < start {
+		start = active
+		if start <= head {
+			return 0, 0, nil, nil, false
+		}
+	}
+	region := msgs[head:start]
+	kept, fold = a.partitionFoldForProjection(region)
+	fold, kept = a.fitFoldToWindow(fold, kept)
+	if len(fold) == 0 {
+		return 0, 0, nil, nil, false
+	}
+	if !force && !foldEconomics(fold) {
+		return 0, 0, nil, nil, false
+	}
+	return head, start, kept, fold, true
+}
+
+// fitFoldToWindow shrinks the fold from its newer end when the summarize
+// request would overflow the shared window: a rebuild on an invalidated
+// sidecar starts from canonical (possibly far over the window), so the first
+// fold must still succeed. The conservative message-level estimate guarantees
+// the exact transcript estimate inside summarize is strictly smaller.
+func (a *Agent) fitFoldToWindow(fold, kept []provider.Message) ([]provider.Message, []provider.Message) {
+	if a.contextWindow <= minOutputBudget || !sharesContextWindow(a.prov) || len(fold) == 0 {
+		return fold, kept
+	}
+	limit := a.contextWindow - minOutputBudget - estimateTextTokens(summarySystemPrompt)
+	if limit <= 0 {
+		return fold, kept
+	}
+	sizes := make([]int, len(fold))
+	total := 0
+	for i, m := range fold {
+		sizes[i] = estimateMessagesTokens([]provider.Message{m})
+		total += sizes[i]
+	}
+	if total < limit {
+		return fold, kept
+	}
+	acc := 0
+	cut := 0
+	for i, s := range sizes {
+		if acc+s >= limit {
+			cut = i
+			break
+		}
+		acc += s
+	}
+	if cut == 0 {
+		return fold, kept // even one message overflows; let summarize reject
+	}
+	moved := append([]provider.Message(nil), fold[cut:]...)
+	return fold[:cut], append(moved, kept...)
 }
 
 // runCompactionSummary tries native compaction first, then summarizeWithRetry.

@@ -160,10 +160,14 @@ func (a *Agent) LoadProjectionSidecar(sessionPath string) {
 	// Fail closed: known lineage requires an exact stored key (including
 	// rejecting blank keys on early sidecars written before this field).
 	if key := a.currentPromptCacheKey(); key != "" && st.PromptCacheKey != key {
+		slog.Info("agent: projection sidecar lineage mismatch — projection dropped",
+			"path", sessionPath, "stored_key", st.PromptCacheKey, "current_key", key)
 		a.compactionState = CompactionState{}
 		return
 	}
 	if st.Projection.CoveredPrefixHash == "" {
+		slog.Info("agent: projection sidecar lacks covered-prefix hash — projection dropped",
+			"path", sessionPath, "schema", st.SchemaVersion)
 		a.compactionState = CompactionState{}
 		return
 	}
