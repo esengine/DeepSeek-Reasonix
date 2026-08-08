@@ -26,6 +26,10 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `wait` | true | Block until background jobs finish, then return each job's status and final output/answer. Use to collect the result of a task(run_in_background) or bash(run_in_background) before continuing. Omit job_ids to wait for every running job. |
 | `web_fetch` | true | Fetch a URL over HTTPS/HTTP and return its text content. HTML pages are reduced to readable text; JSON / plain text / markdown bodies come back verbatim. Use to read documentation pages, API responses, or source files hosted somewhere the local filesystem can't reach. |
 | `write_file` | false | Write content to a file at the given path (overwriting existing content). Creates parent directories as needed. |
+| `modeling_analyze` | true | Compute a compact geometric descriptor of a mesh file (obj/stl/ply) or voxel file (.vox) - ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens. |
+| `modeling_optimize` | false | Apply a deterministic mesh operation (cleanup/triangulate/merge/decimate) to a mesh file (obj/stl/ply). The file is backed up to <path>.bak first; returns the before/after stat delta (token-minimal verification). decimate target is the desired face count. |
+| `modeling_convert` | false | Convert a mesh/voxel file to another format (pure Go). Supported: obj/stl/ply/vox. Output path default = input with new extension. |
+| `modeling_voxel` | false | Voxelize a closed mesh into a .vox model at the given resolution (longest axis, 4..512). Writes <path>.vox and returns the voxel descriptor (size/filled/colors/components/solidity). |
 
 ## Schema Snapshot
 
