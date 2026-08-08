@@ -528,17 +528,19 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	shell := sandbox.ResolveShell(cfg.Tools.Shell.Prefer, cfg.Tools.Shell.Path, stderr)
 
-	sysPrompt, err := cfg.ResolveSystemPromptForRoot(root)
+	layered, err := cfg.ResolveLayeredSystemPromptForRoot(root)
 	if err != nil {
-		if !config.IsMissingSystemPromptFile(err) {
-			return nil, err
-		}
-		// A stale missing prompt file must not block startup: warn and fall back
-		// to the inline (or built-in default) system prompt. Other read failures
-		// stay fatal so Reasonix never runs without explicitly configured policy.
-		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: err.Error() + "; falling back to inline/default system prompt"})
-		sysPrompt = cfg.InlineSystemPrompt()
+		return nil, err
 	}
+	// A stale missing user-level prompt file must not block startup: warn and
+	// fall back to the inline (or built-in default) system prompt. Other read
+	// failures stay fatal so Reasonix never runs without explicitly configured
+	// policy. A project-level file missing from the workspace is skipped
+	// silently inside the layered resolution.
+	if layered.UserFileMissing != nil {
+		sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: layered.UserFileMissing.Error() + "; falling back to inline/default system prompt"})
+	}
+	sysPrompt := layered.Prompt
 	// Output style: fold the selected persona/tone block into the base prompt
 	// before language/memory/skills append, so a "replace" style (keep-coding
 	// false) still keeps those. Applied once, into the cache-stable prefix.

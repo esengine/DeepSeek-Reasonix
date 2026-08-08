@@ -58,6 +58,7 @@ func LoadUserConfigReadOnly() (*Config, error) {
 		}
 		if meta.IsDefined("agent", "system_prompt_file") {
 			cfg.systemPromptFileSource = promptFileSourceUser
+			cfg.systemPromptFileUserValue = cfg.Agent.SystemPromptFile
 		}
 	}
 	normalizeConfigForEdit(cfg)
@@ -125,6 +126,9 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 	if cfg.systemPromptFileSource == promptFileSourceUnknown && cfg.Agent.SystemPromptFile != "" {
 		cfg.systemPromptFileSource = promptFileSourceUser
 	}
+	if cfg.systemPromptFileSource == promptFileSourceUser {
+		cfg.systemPromptFileUserValue = cfg.Agent.SystemPromptFile
+	}
 	userDefaultModel := cfg.DefaultModel
 	globalCLI := cfg.CLI
 	globalSecrets := cfg.Secrets
@@ -147,6 +151,7 @@ func loadForRoot(root string, migrateOnDisk bool) (*Config, error) {
 		tomlSources = tomlSources[:len(tomlSources)-1]
 	} else if projectMeta.IsDefined("agent", "system_prompt_file") {
 		cfg.systemPromptFileSource = promptFileSourceProject
+		cfg.systemPromptFileProjectValue = cfg.Agent.SystemPromptFile
 	}
 	// The native CLI update channel controls the one user-installed binary.
 	// A repository-local reasonix.toml must never switch that global choice.

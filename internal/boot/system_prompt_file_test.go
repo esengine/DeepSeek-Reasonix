@@ -10,11 +10,37 @@ import (
 	"reasonix/internal/event"
 )
 
-func TestBuildMissingSystemPromptFileFallsBackToInlinePrompt(t *testing.T) {
+func TestBuildMissingProjectSystemPromptFileSkipsSilently(t *testing.T) {
 	isolateConfigHome(t)
 	root := robustTempDir(t)
 	t.Setenv("REASONIX_HOME", robustTempDir(t))
 	writeFile(t, root, "reasonix.toml", systemPromptFileTestConfig("prompts/missing.md"))
+
+	ctrl, err := Build(context.Background(), Options{
+		WorkspaceRoot: root,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice && e.Level == event.LevelWarn &&
+				strings.Contains(e.Text, "falling back to inline/default system prompt") {
+				t.Fatalf("project-scope missing prompt file must skip silently, got warning: %s", e.Text)
+			}
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	defer ctrl.Close()
+	// The inline default remains the prompt: the absent project layer is skipped.
+	if got := systemMessage(ctrl.History()); !strings.Contains(got, "INLINE FALLBACK") {
+		t.Fatalf("system prompt did not use inline fallback:\n%s", got)
+	}
+}
+
+func TestBuildMissingUserSystemPromptFileWarnsAndFallsBack(t *testing.T) {
+	isolateConfigHome(t)
+	userHome := robustTempDir(t)
+	t.Setenv("REASONIX_HOME", userHome)
+	writeFile(t, userHome, "config.toml", systemPromptFileTestConfig("prompts/missing.md"))
+	root := robustTempDir(t) // no project reasonix.toml
 
 	var notices []event.Event
 	ctrl, err := Build(context.Background(), Options{
