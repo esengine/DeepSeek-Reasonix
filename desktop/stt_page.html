@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0F172A">
+<title>Reasonix 语音识别</title>
+<style>
+  :root {
+    --bg: #0F172A; --panel: #1E293B; --text: #E2E8F0; --muted: #94A3B8;
+    --accent: #4F8CFF; --ok: #34D399; --err: #F87171; --warn: #FBBF24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Inter", "Microsoft YaHei", system-ui, sans-serif; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+  .app { width: 100%; max-width: 420px; padding: 20px; }
+  .status-bar { display: flex; gap: 16px; justify-content: center; margin-bottom: 24px; font-size: 13px; color: var(--muted); }
+  .status-item { display: flex; align-items: center; gap: 6px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; }
+  .dot.gray { background: #475569; } .dot.green { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot.yellow { background: var(--warn); } .dot.red { background: var(--err); }
+  .visualizer { height: 90px; display: flex; align-items: center; justify-content: center; gap: 3px; margin-bottom: 20px; }
+  .visualizer .bar { width: 5px; height: 12px; border-radius: 3px; background: var(--accent); opacity: 0.5; transition: height 120ms ease; }
+  .visualizer.active .bar { opacity: 1; }
+  .allow-btn { display: block; margin: 0 auto 20px; padding: 10px 22px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 14px; cursor: pointer; }
+  .allow-btn:hover { filter: brightness(1.1); }
+  .transcript { min-height: 120px; background: var(--panel); border-radius: 12px; padding: 16px; font-size: 15px; line-height: 1.7; }
+  .empty-hint { color: var(--muted); }
+  .interim { color: var(--muted); }
+  .error-banner { display: none; margin-bottom: 16px; padding: 10px 14px; border-radius: 8px; background: rgba(248,113,113,0.12); color: var(--err); font-size: 13px; }
+  .error-banner.show { display: block; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <div class="status-bar" role="status">
+      <div class="status-item"><span class="dot gray" id="wsDot"></span><span id="wsLabel">WebSocket: 未连接</span></div>
+      <div class="status-item"><span class="dot gray" id="micDot"></span><span id="micLabel">麦克风: 空闲</span></div>
+    </div>
+    <div class="error-banner" id="errorBanner" role="alert"><span id="errorText"></span></div>
+    <div class="visualizer" id="visualizer" aria-hidden="true"></div>
+    <button class="allow-btn" id="btnAllow" onclick="requestMicAndStart()">允许麦克风并开始</button>
+    <div class="transcript" id="transcriptBox" aria-live="polite"><div class="empty-hint">等待语音命令...</div></div>
+  </div>
+
+<script>
+// ============================================================
+// 配置（协议与 edge-stt-bridge 保持一致）
+// ============================================================
+const WS_URL = `ws://${location.host}/ws`;
+const browserLang = (navigator.language || navigator.userLanguage || "zh-CN");
+const LANG = browserLang.startsWith("zh") ? "zh-CN" : "en-US";
+
+let ws = null;
+let recognition = null;
+let isListening = false;
+let sessionActive = false;
+let currentLang = LANG;
+let micPermissionGranted = false;
+
+// 幻影/回声结果过滤：识别引擎连续模式下会把上一段残留音频重放成新的 final
+// （Chromium 已知问题），导致不说话时也反复上报同一句话。三个字段抑制这类结果。
+let suppressFinalUntil = 0; // 该时间点之前到达的 final 视为重启回声，丢弃
+let lastFinalText = "";     // 上一次已上报的 final 文本，用于去重
+let lastFinalTime = 0;      // 上一次已上报 final 的时间戳
+
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+// ============================================================
+// UI 状态
+// ============================================================
+function setWsStatus(s) {
+  const dot = document.getElementById("wsDot");
+  const label = document.getElementById("wsLabel");
+  if (s === "connected") { dot.className = "dot green"; label.textContent = "WebSocket: 已连接"; }
+  else if (s === "error") { dot.className = "dot red"; label.textContent = "WebSocket: 错误"; }
+  else { dot.className = "dot gray"; label.textContent = "WebSocket: 未连接"; }
+}
+function setMicStatus(s) {
+  const dot = document.getElementById("micDot");
+  const label = document.getElementById("micLabel");
+  const viz = document.getElementById("visualizer");
+  if (s === "listening") {
+    dot.className = "dot green"; label.textContent = "麦克风: 识别中";
+    viz.classList.add("active");
+  } else if (s === "error") {
+    dot.className = "dot red"; label.textContent = "麦克风: 错误";
+    viz.classList.remove("active");
+  } else {
+    dot.className = "dot gray"; label.textContent = "麦克风: 空闲";
+    viz.classList.remove("active");
+  }
+}
+function showError(msg) {
+  const banner = document.getElementById("errorBanner");
+  document.getElementById("errorText").textContent = msg;
+  banner.classList.add("show");
+}
+function hideError() {
+  document.getElementById("errorBanner").classList.remove("show");
+}
+function renderTranscript(finalText, interimText) {
+  const box = document.getElementById("transcriptBox");
+  box.innerHTML = "";
+  if (finalText) {
+    const div = document.createElement("div");
+    div.textContent = finalText;
+    box.appendChild(div);
+  }
+  if (interimText) {
+    const div = document.createElement("div");
+    div.className = "interim";
+    div.textContent = interimText;
+    box.appendChild(div);
+  }
+  if (!finalText && !interimText) {
+    const div = document.createElement("div");
+    div.className = "empty-hint";
+    div.textContent = "等待语音命令...";
+    box.appendChild(div);
+  }
+}
+
+// 简易音频可视化（识别中随机跳动，纯装饰）
+function startVisualizer() {
+  const viz = document.getElementById("visualizer");
+  viz.innerHTML = "";
+  for (let i = 0; i < 18; i++) {
+    const bar = document.createElement("span");
+    bar.className = "bar";
+    viz.appendChild(bar);
+  }
+  viz._timer = setInterval(() => {
+    if (!document.getElementById("visualizer").classList.contains("active")) return;
+    document.querySelectorAll("#visualizer .bar").forEach((b) => {
+      b.style.height = (8 + Math.random() * 60) + "px";
+    });
+  }, 120);
+}
+function stopVisualizer() {
+  const viz = document.getElementById("visualizer");
+  if (viz._timer) { clearInterval(viz._timer); viz._timer = null; }
+  document.querySelectorAll("#visualizer .bar").forEach((b) => { b.style.height = "12px"; });
+}
+startVisualizer();
+
+// ============================================================
+// WebSocket 连接（断开后 3 秒自动重连）
+// ============================================================
+function connectWS() {
+  if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    setWsStatus("connected");
+    hideError();
+    sendToServer({ type: "connected" });
+  };
+  ws.onclose = () => {
+    setWsStatus("disconnected");
+    setTimeout(connectWS, 3000);
+  };
+  ws.onerror = () => {
+    setWsStatus("error");
+    // onerror 之后不一定触发 onclose，主动关闭让 onclose 里的重连接管
+    if (ws && ws.readyState !== WebSocket.CLOSED) { try { ws.close(); } catch (e) {} }
+  };
+  ws.onmessage = (event) => {
+    try { handleServerCommand(JSON.parse(event.data)); } catch (e) {}
+  };
+}
+
+function sendToServer(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify(obj));
+  }
+}
+
+// 隐藏窗口时后台标签页定时器被节流，回到前台立即重连
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && (!ws || ws.readyState !== WebSocket.OPEN)) connectWS();
+});
+
+// ============================================================
+// 服务端命令
+// ============================================================
+function handleServerCommand(msg) {
+  if (msg.cmd === "start") {
+    sessionActive = true;
+    startWithMicPermission(msg.lang || currentLang);
+  } else if (msg.cmd === "stop") {
+    // 先标记非识别中，避免 onend 自动重启
+    isListening = false;
+    sessionActive = false;
+    stopRecognition();
+  } else if (msg.cmd === "setLang") {
+    const wasListening = isListening;
+    if (wasListening) { isListening = false; stopRecognition(); }
+    currentLang = msg.lang || currentLang;
+    if (wasListening) startWithMicPermission(currentLang);
+  } else if (msg.cmd === "display") {
+    // 保留字段：嵌入桌面端时始终显示
+  }
+}
+
+// ============================================================
+// 语音识别（协议不变：transcript/status）
+// ============================================================
+function initRecognition(lang) {
+  if (!SpeechRecognition) {
+    showError("当前浏览器不支持 Web Speech API，请使用 Edge 或 Chrome。");
+    return null;
+  }
+  const recog = new SpeechRecognition();
+  recog.lang = lang;
+  recog.continuous = true;
+  recog.interimResults = true;
+  recog.maxAlternatives = 1;
+
+  recog.onstart = () => {
+    // 过期实例回调一律丢弃（见 onend 注释），否则 isListening 被卡成 true
+    if (recognition !== recog) return;
+    // 重启回声抑制：每次 start 后约 1 秒内重放的残留音频 final 一律丢弃
+    suppressFinalUntil = Date.now() + 1000;
+    isListening = true;
+    setMicStatus("listening");
+    hideError();
+    // 保持服务端会话；引擎重启不会重置自动停止计时
+    sendToServer({ type: "status", state: "listening" });
+  };
+
+  recog.onresult = (e) => {
+    if (recognition !== recog) return;
+    let finalText = "";
+    let interimText = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const item = e.results[i][0];
+      if (e.results[i].isFinal) {
+        const text = item.transcript.trim();
+        const now = Date.now();
+        // 幻影结果过滤：空串 / 重启 1 秒内回声 / 2 秒内完全相同的重复文本
+        if (!text || now < suppressFinalUntil
+            || (text === lastFinalText && now - lastFinalTime < 2000)) {
+          continue;
+        }
+        lastFinalText = text;
+        lastFinalTime = now;
+        finalText += text;
+        sendToServer({
+          type: "transcript",
+          text: text,
+          isFinal: true,
+          timestamp: now,
+        });
+      } else {
+        interimText = item.transcript;
+        sendToServer({
+          type: "transcript",
+          text: interimText,
+          current: interimText,
+          isFinal: false,
+          timestamp: Date.now(),
+        });
+      }
+    }
+    renderTranscript(finalText, interimText);
+  };
+
+  recog.onerror = (e) => {
+    if (recognition !== recog) return;
+    const errorMap = {
+      "not-allowed": "麦克风权限被拒绝，请允许麦克风访问。",
+      "network": "网络错误：Web Speech API 需要联网。",
+      "no-speech": "未检测到语音，请重试。",
+      "audio-capture": "未找到麦克风，请连接麦克风。",
+      "service-not-allowed": "语音识别服务不可用。",
+    };
+    const msg = errorMap[e.error] || `识别错误: ${e.error}`;
+    const fatal = (e.error === "not-allowed" || e.error === "audio-capture" || e.error === "service-not-allowed");
+    if (fatal) {
+      sessionActive = false;
+      isListening = false;
+      showError(msg);
+      setMicStatus("error");
+      micPermissionGranted = false;
+      sendToServer({ type: "status", state: "error", error: msg, fatal: true });
+    } else {
+      // 瞬时错误（no-speech / network）交给 onend 自动重启处理
+      sendToServer({ type: "status", state: "error", error: msg, fatal: false });
+    }
+  };
+
+  recog.onend = () => {
+    if (recognition !== recog) return;
+    // 仍应识别时自动重启
+    if (sessionActive && isListening) {
+      try { recog.start(); } catch (e) {}
+      return;
+    }
+    isListening = false;
+    setMicStatus("idle");
+    sendToServer({ type: "status", state: "idle" });
+  };
+
+  return recog;
+}
+
+function startWithMicPermission(lang) {
+  if (!SpeechRecognition) { showError("当前浏览器不支持 Web Speech API，请使用 Edge 或 Chrome。"); return; }
+  if (isListening) return;
+  // 先请求麦克风权限（用户手势内），再启动识别
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then((stream) => {
+      // 权限已授予；停止临时流，交给 SpeechRecognition 使用
+      stream.getTracks().forEach((t) => t.stop());
+      micPermissionGranted = true;
+      hideError();
+      recognition = initRecognition(lang);
+      if (recognition) {
+        try { recognition.start(); } catch (e) {}
+      }
+    })
+    .catch((err) => {
+      micPermissionGranted = false;
+      const msg = err && err.name === "NotAllowedError"
+        ? "麦克风权限被拒绝，请允许麦克风访问。"
+        : "无法访问麦克风。";
+      showError(msg);
+      setMicStatus("error");
+      sendToServer({ type: "status", state: "error", error: msg, fatal: true });
+    });
+}
+
+function stopRecognition() {
+  if (recognition) {
+    try { recognition.stop(); } catch (e) {}
+  }
+  isListening = false;
+  setMicStatus("idle");
+}
+
+// 页面按钮：用户手势内请求麦克风权限并开始
+function requestMicAndStart() {
+  if (isListening) { stopRecognition(); return; }
+  sessionActive = true;
+  startWithMicPermission(currentLang);
+}
+
+connectWS();
+</script>
+</body>
+</html>

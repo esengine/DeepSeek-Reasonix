@@ -1786,6 +1786,15 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
+      <SettingsField label={t("settings.sttEnabled")} hint={t("settings.sttEnabledHint")}>
+        <ToggleSegment
+          value={s.desktopSTTEnabled === true}
+          disabled={busy}
+          onLabel={t("settings.toggleOn")}
+          offLabel={t("settings.toggleOff")}
+          onChange={(enabled) => void apply(() => app.SetDesktopSTTEnabled(enabled))}
+        />
+      </SettingsField>
       <SettingsField label={t("settings.closeBehavior")}>
         <div className="set-seg">
           {(["background", "quit"] as const).map((mode) => (

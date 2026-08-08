@@ -226,6 +226,13 @@ func (c *Config) SetDesktopLanguage(lang string) error {
 	return nil
 }
 
+// SetDesktopSTTEnabled toggles the desktop voice-to-text (Edge Web Speech API
+// bridge) mic button. It only affects the desktop UI; CLI sessions ignore it.
+func (c *Config) SetDesktopSTTEnabled(enabled bool) error {
+	c.Desktop.STTEnabled = enabled
+	return nil
+}
+
 // SetDesktopCurrency pins the user-global official pricing region independently
 // from language. The name is retained for persisted-schema compatibility.
 // Empty/auto follows the language preference.

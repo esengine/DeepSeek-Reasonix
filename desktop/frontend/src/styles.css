@@ -6579,6 +6579,31 @@ body > .mermaid-diagram--fullscreen {
   flex-shrink: 0;
   transition: color 0.12s, background 0.12s, box-shadow 0.12s, transform 0.12s;
 }
+.composer__btn--stt {
+  background: transparent;
+  color: var(--text-secondary);
+}
+.composer__btn--stt:not(:disabled):hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  transform: translateY(-1px);
+}
+.composer__btn--stt:not(:disabled):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.composer__btn--stt.composer__btn--stt-active {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev-2));
+  color: var(--accent);
+  animation: composer-stt-pulse 1.6s ease-in-out infinite;
+}
+.composer__btn--stt.composer__btn--disabled {
+  opacity: 0.6;
+}
+@keyframes composer-stt-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent); }
+}
 .composer__btn--send {
   background: var(--control-primary-bg);
   color: var(--control-primary-fg);

@@ -272,6 +272,9 @@ type DesktopConfig struct {
 	ProviderAccess    []string `toml:"provider_access"`    // desktop-only list of provider entries shown in Settings > Model > Access
 	ExpandThinking    bool     `toml:"expand_thinking"`    // true = show reasoning text expanded by default; false = collapsed
 	ConversationWidth string   `toml:"conversation_width"` // standard|full; max transcript width; empty = standard
+	// STTEnabled enables the desktop voice-to-text (Edge Web Speech API bridge)
+	// mic button in the composer. Default false — users opt in from Settings.
+	STTEnabled bool `toml:"stt_enabled"`
 }
 
 // DesktopExternalOpener returns the user-selected external opener id. The

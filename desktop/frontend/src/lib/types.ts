@@ -1897,6 +1897,7 @@ export interface SettingsView {
   providerKinds: string[]; // provider implementations the kernel registered (for the kind picker)
   autoApproveTools: boolean;
   bypass: boolean; // legacy JSON key for live YOLO/full-access tool auto-approval
+  desktopSTTEnabled?: boolean; // voice-to-text mic button enabled ([desktop] stt_enabled); absent from older payloads
   conversationWidth?: string; // "standard" | "full"; absent from older Wails payloads
 }
 

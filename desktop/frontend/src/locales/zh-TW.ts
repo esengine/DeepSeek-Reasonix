@@ -530,6 +530,8 @@ export const zhTW: Record<DictKey, string> = {
   "composer.guidanceMore": "更多引導選項",
   "composer.stop": "停止（Esc）",
   "composer.stopShort": "停止",
+  "composer.sttStart": "開始語音輸入",
+  "composer.sttStop": "停止語音輸入",
   "composer.pastedLabel": "[已貼上文字 #{id} · {lines} 行]",
   "composer.pastedShowPreview": "預覽貼上文字",
   "composer.pastedHidePreview": "收起貼上文字預覽",
@@ -1807,6 +1809,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.langAuto": "自動（跟隨系統）",
   "settings.currency": "計價幣別",
   "settings.currencyAuto": "自動（跟隨語言）",
+  "settings.sttEnabled": "語音輸入",
+  "settings.sttEnabledHint": "在輸入框中顯示麥克風按鈕，透過 Edge 語音辨識服務把語音轉成文字（需要連網）。",
   "settings.config": "設定檔：{path}",
   "settings.configShadowed": "被工作區設定覆蓋：{path}（這裡的修改可能不會生效）",
 

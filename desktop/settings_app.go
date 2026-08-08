@@ -308,6 +308,9 @@ type SettingsView struct {
 	Metrics           bool   `json:"metrics"`
 	ExpandThinking    bool   `json:"expandThinking"`
 	ConversationWidth string `json:"conversationWidth,omitempty"`
+	// DesktopSTTEnabled shows whether the desktop voice-to-text (Edge Web Speech
+	// API bridge) mic button is enabled. Mirrors [desktop] stt_enabled.
+	DesktopSTTEnabled bool `json:"desktopSTTEnabled"`
 	ConfigPath        string `json:"configPath"`
 	// ShadowedByPath is the workspace reasonix.toml that outranks the file this
 	// panel writes, so an edit here can be overridden with nothing on screen to
@@ -1094,6 +1097,7 @@ func (a *App) Settings() SettingsView {
 		Metrics:                 cfg.DesktopMetrics(),
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
 		ConversationWidth:       cfg.DesktopConversationWidth(),
+		DesktopSTTEnabled:       cfg.Desktop.STTEnabled,
 		ConfigPath:              cfgPath,
 		ShadowedByPath:          shadowingConfigPath(cfgPath, root),
 		ProviderKinds:           nonNil(provider.Kinds()),

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ClipboardEvent, DragEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
+import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpDown, CornerDownRight, Equal, Eye, FilePlus2, FileText, Flag, Folder, Gauge, Hash, List, MessageSquare, Mic, MicOff, Plus, Search, Shield, ShieldAlert, ShieldCheck, Square, Target, Trash2, X } from "lucide-react";
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
-import { app, onFilesDropped } from "../lib/bridge";
+import { app, onFilesDropped, onSTTTranscript } from "../lib/bridge";
 import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
@@ -722,6 +722,11 @@ export function Composer({
   const [loadingPastChats, setLoadingPastChats] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [inputMenuPoint, setInputMenuPoint] = useState<ContextMenuPoint | null>(null);
+
+  // --- 语音转文字（STT）---
+  const [sttEnabled, setSttEnabled] = useState(false);
+  const [sttListening, setSttListening] = useState(false);
+  const [sttBusy, setSttBusy] = useState(false);
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
   // Use refs for values read inside async closures to avoid stale captures
@@ -1250,6 +1255,31 @@ export function Composer({
     && invocations.length === 0
     && slashText.slice(0, activeSlashQuery.from).trim() === "",
   );
+
+  // --- 语音转文字（STT）：读取设置开关并订阅转录事件 ---
+  useEffect(() => {
+    let live = true;
+    app.Settings()
+      .then((s) => {
+        if (live) setSttEnabled(Boolean(s.desktopSTTEnabled));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onSTTTranscript((payload) => {
+      if (!payload.isFinal || !payload.text.trim()) return;
+      // 转录插入光标处（复用段落粘贴逻辑，保证与撤销/历史一致）。
+      // insertTextAtCaret 内部只访问 refs（textRef/invocationsRef/…），
+      // 不捕获本渲染期的变量，因此首帧捕获的回调始终可用。
+      insertTextAtCaret(payload.text);
+    });
+    return unsubscribe;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const slashCommandDisabled = useCallback(
     (command: CommandInfo) => !commandAvailableAtSlashPosition(command, slashCommandAtStart),
     [slashCommandAtStart],
@@ -1680,6 +1710,38 @@ export function Composer({
       composerEditSnapshot(targetDraftKey, { start: pos, end: pos }),
     );
   };
+
+  // 麦克风按钮：开始/停止语音识别。禁用时按钮隐藏（由 sttEnabled 控制）。
+  const toggleSTT = useCallback(async () => {
+    if (sttBusy || disabled || readOnly) return;
+    setSttBusy(true);
+    try {
+      if (sttListening) {
+        await app.STTStop();
+        setSttListening(false);
+      } else {
+        await app.STTStart();
+        setSttListening(true);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "warn");
+      setSttListening(false);
+    } finally {
+      setSttBusy(false);
+    }
+  }, [sttBusy, sttListening, disabled, readOnly, showToast]);
+  // 服务端/浏览器主动结束识别（如自动停止）时同步按钮状态。
+  useEffect(() => {
+    let live = true;
+    app.STTStatus()
+      .then((s) => {
+        if (live) setSttListening(Boolean(s.listening));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
 
   const replaceComposerText = (next: string) => {
     clearComposerEditHistory(activeDraftKeyRef.current);
@@ -4506,6 +4568,20 @@ export function Composer({
                   aria-label={t("composer.stop")}
                 >
                   <Square size={12} fill="currentColor" />
+                </button>
+              </Tooltip>
+            )}
+            {sttEnabled && (
+              <Tooltip label={sttListening ? t("composer.sttStop") : t("composer.sttStart")}>
+                <button
+                  className={`composer__btn composer__btn--stt${sttListening ? " composer__btn--stt-active" : ""}${sttBusy ? " composer__btn--disabled" : ""}`}
+                  type="button"
+                  onClick={() => void toggleSTT()}
+                  disabled={sttBusy || disabled || readOnly}
+                  aria-label={sttListening ? t("composer.sttStop") : t("composer.sttStart")}
+                  aria-pressed={sttListening}
+                >
+                  {sttListening ? <Mic size={15} fill="currentColor" /> : <MicOff size={15} />}
                 </button>
               </Tooltip>
             )}

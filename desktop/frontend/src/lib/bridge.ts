@@ -476,6 +476,14 @@ export interface AppBindings {
   SetCompactRatio(ratio: number): Promise<void>;
   SetReasoningLanguage(lang: string): Promise<void>;
   SetTrayLocale(locale: "en" | "zh" | "zh-TW"): Promise<void>;
+  // Voice-to-text (Edge Web Speech API bridge): mic button in the composer.
+  // STTStatus returns {running, listening, connected, lang, port}. Transcripts
+  // arrive via onSTTTranscript.
+  STTStart(): Promise<void>;
+  STTStop(): Promise<void>;
+  STTStatus(): Promise<Record<string, unknown>>;
+  STTSetLang(lang: string): Promise<void>;
+  SetDesktopSTTEnabled(enabled: boolean): Promise<void>;
   // SetBypass is the legacy Wails name for YOLO/full-access tool auto-approval
   // (ask questions and plan approvals still wait; deny rules still apply).
   // Runtime-only.
@@ -1014,6 +1022,51 @@ async function withMockTabScope<T>(tabId: string, fn: () => Promise<T>): Promise
 // Updater progress has its own listener set so the browser dev mock can stream a
 // fake download/install flow through onUpdaterProgress.
 const updaterListeners = new Set<(p: UpdateProgress) => void>();
+
+// ---- voice-to-text (STT) ----
+// STTTranscriptPayload is the transcript event payload pushed from the Go bridge
+// (desktop/stt_bridge.go sttTranscriptPayload). isFinal=true means the frontend
+// should insert the text at the composer caret.
+export interface STTTranscriptPayload {
+  text: string;
+  isFinal: boolean;
+  error?: string;
+}
+
+// mockSTT drives the browser-dev STT mock (no Go backend). The real Wails build
+// ignores it and talks to App.STT* directly.
+const mockSTT: { running: boolean; listening: boolean; connected: boolean; lang: string; port: number } = {
+  running: false,
+  listening: false,
+  connected: false,
+  lang: "zh-CN",
+  port: 0,
+};
+
+const sttListeners = new Set<(p: STTTranscriptPayload) => void>();
+
+function emitSTT(p: STTTranscriptPayload) {
+  sttListeners.forEach((l) => l(p));
+}
+
+// onSTTTranscript subscribes to voice-to-text transcript events (a separate
+// channel from the agent stream); returns an unsubscribe. Must match the event
+// name emitted in desktop/stt_bridge.go (stt:transcript).
+export function onSTTTranscript(cb: (p: STTTranscriptPayload) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("stt:transcript", (p) => cb(p as STTTranscriptPayload));
+  }
+  sttListeners.add(cb);
+  return () => {
+    sttListeners.delete(cb);
+  };
+}
+
+// Test seam for the browser-dev STT mock: pushes a fake transcript through
+// onSTTTranscript so the composer mic flow can be exercised without Edge.
+export function __emitMockSTT(p: STTTranscriptPayload): void {
+  emitSTT(p);
+}
 
 function emitUpdater(p: UpdateProgress) {
   updaterListeners.forEach((l) => l(p));
@@ -1653,6 +1706,7 @@ function makeMockApp(): AppBindings {
     updateChannel: "stable",
     telemetry: true,
     metrics: true,
+    desktopSTTEnabled: false,
     configPath: "~/.reasonix/config.toml",
     shadowedByPath: "~/projects/reasonix/reasonix.toml",
     providerKinds: ["openai", "anthropic"],
@@ -4331,6 +4385,23 @@ function makeMockApp(): AppBindings {
         },
         async SetDesktopLanguage(lang: string) {
           settings.desktopLanguage = lang === "en" || lang === "zh" ? lang : "";
+        },
+        async STTStart() {
+          mockSTT.listening = true;
+          emitSTT({ text: "", isFinal: false });
+        },
+        async STTStop() {
+          mockSTT.listening = false;
+        },
+        async STTStatus() {
+          return { ...mockSTT };
+        },
+        async STTSetLang(lang: string) {
+          mockSTT.lang = lang || "zh-CN";
+        },
+        async SetDesktopSTTEnabled(enabled: boolean) {
+          settings.desktopSTTEnabled = enabled;
+          if (!enabled) mockSTT.listening = false;
         },
         async SetDesktopCurrency(currency: string) {
           settings.desktopCurrency = currency === "CNY" || currency === "USD" ? currency : "";

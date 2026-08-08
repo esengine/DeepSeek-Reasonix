@@ -116,6 +116,10 @@ type PromptHistoryResult struct {
 type App struct {
 	ctx context.Context
 
+	// stt holds the desktop voice-to-text (Edge Web Speech API bridge) service.
+	// Lazily created on first mic use; Stop on app close.
+	stt *sttBridge
+
 	// mu protects the tab map, tabOrder, activeTabID, and per-tab fields that are read
 	// from bound methods. All bound methods that touch a controller use activeCtrl().
 	mu          sync.RWMutex
@@ -538,6 +542,8 @@ func (a *App) beforeClose(ctx context.Context) bool {
 		hideForBackground(ctx)
 		return true
 	}
+	// 真正退出（非后台驻留）：停止语音识别、关闭本地服务并终止 Edge 进程。
+	a.stopSTTOnClose()
 	return false
 }
 
