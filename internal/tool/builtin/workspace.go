@@ -84,6 +84,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		"modeling_optimize": modelingOptimize{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots, guard: w.SessionGuard},
 		"modeling_convert":  modelingConvert{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots, guard: w.SessionGuard},
 		"modeling_voxel":    modelingVoxel{workDir: w.Dir, forbidRoots: forbidRoots, roots: roots, guard: w.SessionGuard},
+		"modeling_atomic":  modelingAtomic{workDir: w.Dir, forbidRoots: forbidRoots},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {

@@ -9,6 +9,7 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `bash` | false | Execute a command in the shell and return combined stdout/stderr. Use for builds, tests, git, package managers, etc. To search/read/list/edit/move files, prefer the dedicated tools (grep, read_file, ls, glob, edit_file, move_file) over shell grep/cat/ls/find/sed/mv/Move-Item - they behave identically on every OS. For symbol search or architecture questions, prefer LSP/read tools and targeted grep before shell commands. |
 | `bash_output` | true | Read new output from a background job started with bash(run_in_background=true) or task(run_in_background=true). Returns the output produced since the last bash_output call for that job, plus its status (running/done/failed/killed). Does not block. |
 | `code_index` | true | Lightweight built-in code symbol index. Prefer lsp_* for language semantics and installed code graph MCP tools for call graph, impact, and architecture relationships; use this as the local fallback for file outlines and symbol definition candidates, then verify with read_file or grep. |
+| `code_verify` | true | Runs CoSPlay co-evolution verification on code without ground-truth data: generates discriminating tests, executes a code×test matrix over repair rounds, and returns the consensus best result. Pass language, code (or file), a task description, and optional input/expected examples. |
 | `complete_step` | true | Record the evidence-backed completion of ONE step of an approved plan. Call it as you finish each step instead of silently moving on: it signs the step off with PROOF it is done - the verification you ran (command + result), the diff/files you changed, or a manual check. A completion with no evidence is REJECTED, so don't claim a step is done until you can show why. The host advances the task list for you when you sign off - it marks this step completed and moves the next to in_progress, so you don't need a separate todo_write to mark completions. Fields: `step` (which step - its title or number, matching the task list), `result` (what is now true/changed), `evidence` (>=1 item, each with `kind` = verification\|diff\|files\|manual and a `summary`, plus optional `command`/`paths`), and optional `notes`. |
 | `delete_range` | false | Delete a contiguous text range from a file using exact start/end text anchors. Each anchor must match exactly one line. Returns unified diff on success. Use for large deletions - smaller changes should use edit_file. |
 | `delete_symbol` | false | Delete a named symbol (function, method, type, interface, const, var) from a Go source file using AST parsing. For non-Go files, use delete_range with manual anchors. |
@@ -29,6 +30,8 @@ This document records the provider-visible contract for Reasonix compile-time bu
 | `modeling_analyze` | true | Compute a compact geometric descriptor of a mesh file (obj/stl/ply) or voxel file (.vox) - ~40 token summary (verts/faces/tris/components/manifold/watertight/bounds/quality). Raw geometry is never returned; use this to perceive a model precisely with minimal tokens. |
 | `modeling_optimize` | false | Apply a deterministic mesh operation (cleanup/triangulate/merge/decimate) to a mesh file (obj/stl/ply). The file is backed up to <path>.bak first; returns the before/after stat delta (token-minimal verification). decimate target is the desired face count. |
 | `modeling_convert` | false | Convert a mesh/voxel file to another format (pure Go). Supported: obj/stl/ply/vox. Output path default = input with new extension. |
+| `modeling_atomic` | Runs a deterministic Blender atomic operation (add_cube/sphere/cylinder/boolean/bevel/delete) — low-token alternative to raw bpy. |
+| `modeling_atomic` | false | Run a deterministic Blender atomic operation (add_cube/add_uv_sphere/add_cylinder/boolean/bevel/delete_object) — parameterized bpy snippets, low-token. Mutates the scene. |
 | `modeling_voxel` | false | Voxelize a closed mesh into a .vox model at the given resolution (longest axis, 4..512). Writes <path>.vox and returns the voxel descriptor (size/filled/colors/components/solidity). |
 
 ## Schema Snapshot
@@ -99,6 +102,16 @@ not change when MCP inventory changes. Balanced Executor deliberately retains
 its direct `mcp__*` tools, so its overall provider prefix may still change when
 those direct tools are installed, connected, or refreshed.
 
+Configured MCP exposure is selected automatically at session boot; it adds no
+user-facing setting. A small server surface with a matching schema cache stays
+direct for the lower-latency concrete tool call. When the cached surface is
+large (at least 16 tools or an estimated schema payload at or above 16 KiB, scaled
+to the model context window), or any configured server has a missing/stale
+schema cache, Reasonix exposes only the stable `use_capability` proxy for that
+configured MCP set. The choice is frozen for the session, so a background
+handshake cannot change the provider-visible tool prefix. Explicit
+host-session MCP servers remain direct and scoped to that session.
+
 `ask`, `docs`, `explore`, `fleet`, `forget`, `history`, `install_skill`, `install_source`,
 `list_sessions`, `lsp_definition`, `lsp_diagnostics`, `lsp_hover`,
 `lsp_references`, `memory`, `parallel_tasks`, `read_only_skill`,
@@ -142,3 +155,22 @@ reader and writer calls use the same Permissions/Sandbox path as Standard mode.
 `todo_write`; `complete_step` joins on a fresh `workflow` connect after plan
 approval. Use `bash` for listing and search until the dedicated `search` source
 is needed.
+
+## Capability Boundary: MCP vs Built-in
+
+The responsibility split between external MCP plugins and built-in tools is
+documented in `docs/AGENT_ARCHITECTURE.md` (§3) and mirrored in
+`reasonix.example.toml`. In short:
+
+- **MCP plugins = external capabilities**: third-party services (GitHub, OCR,
+  browser, game engines), cross-language executables (Python/Node/Rust tools),
+  and anything independently reusable across projects.
+- **Built-in tools = kernel logic**: state management (StateTracker/Navigator),
+  control flow (turn/steer/subagent/goal/jobs), model context (prompt assembly,
+  cache prefix), security boundaries (permission gates, sandbox, write
+  approval), and model-coupled verification (code_verify/cosplay).
+
+Rule of thumb for new tools: a capability that is a pure in-process function
+does not belong in MCP — inline it as a built-in tool to avoid the process
+round-trip. `code_verify` (CoSPlay), `task`/`fleet` (subagents), and the
+navigator family are built-in for exactly this reason.

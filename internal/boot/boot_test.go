@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	_ "reasonix/internal/cosplay" // register cosplay hooks in tests
 	"reasonix/internal/agent"
 	"reasonix/internal/agent/testutil"
 	"reasonix/internal/config"
@@ -2183,6 +2184,7 @@ func defaultFullBootToolNames() []string {
 		"bash",
 		"bash_output",
 		"code_index",
+		"code_verify",
 		"complete_step",
 		"delete_range",
 		"delete_symbol",
@@ -2205,6 +2207,7 @@ func defaultFullBootToolNames() []string {
 		"lsp_references",
 		"memory",
 		"modeling_analyze",
+		"modeling_atomic",
 		"modeling_convert",
 		"modeling_optimize",
 		"modeling_voxel",

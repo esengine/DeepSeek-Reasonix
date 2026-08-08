@@ -12,6 +12,7 @@ import (
 	"reasonix/internal/blender"
 	"reasonix/internal/modeling/meshparse"
 	"reasonix/internal/tool"
+	"time"
 )
 
 // ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ func init() {
 	tool.RegisterBuiltin(modelingOptimize{})
 	tool.RegisterBuiltin(modelingConvert{})
 	tool.RegisterBuiltin(modelingVoxel{})
+	tool.RegisterBuiltin(modelingAtomic{})
 }
 
 const (
@@ -516,4 +518,78 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return os.WriteFile(dst, data, 0o644)
+}
+
+// ---------------------------------------------------------------------------
+// modeling_atomic — L3GO-style deterministic atomic ops (docs/MODELLING_AGENT_
+// RESEARCH.md §③): the agent picks an op + args instead of writing raw bpy.
+// ---------------------------------------------------------------------------
+
+type modelingAtomic struct {
+	workDir     string
+	forbidRoots []string
+}
+
+func (r modelingAtomic) Name() string { return "modeling_atomic" }
+
+func (r modelingAtomic) Description() string {
+	return "Run a deterministic Blender atomic operation (add_cube/add_uv_sphere/add_cylinder/boolean/bevel/delete_object) on the default scene or a .blend file. Ops are parameterized bpy snippets — precise and low-token. Args: op (name), args (object of op parameters), path (optional .blend). NOT ReadOnly: mutates the Blender scene (or saves the .blend when a path is given)."
+}
+
+func (r modelingAtomic) Schema() json.RawMessage {
+	return json.RawMessage(`{
+"type":"object",
+"properties":{
+  "op":{"type":"string","description":"Atomic op name: add_cube, add_uv_sphere, add_cylinder, boolean, bevel, delete_object"},
+  "args":{"type":"object","description":"Op parameters (see modeling_atomic_ops for the full registry)"},
+  "path":{"type":"string","description":"Optional .blend path (default: default scene)"}
+},
+"required":["op"]
+}`)
+}
+
+func (r modelingAtomic) ReadOnly() bool { return false }
+
+func (r modelingAtomic) Execute(ctx context.Context, args json.RawMessage) (string, error) {
+	var a struct {
+		Op   string         `json:"op"`
+		Args map[string]any `json:"args"`
+		Path string         `json:"path"`
+	}
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("modeling_atomic: %w", err)
+	}
+	if a.Op == "" {
+		return "", fmt.Errorf("modeling_atomic: op required")
+	}
+	if _, ok := blender.FindAtomicOp(a.Op); !ok {
+		return "", fmt.Errorf("modeling_atomic: unknown op %q (registry: %s)", a.Op, opNames())
+	}
+	if a.Path != "" {
+		a.Path = modelingResolvePath(r.workDir, a.Path)
+		if err := modelingGuardRead(r.workDir, r.forbidRoots, a.Path); err != nil {
+			return "", err
+		}
+	}
+	res, err := blender.RunAtomic(ctx, a.Path, a.Op, a.Args, a.Path != "", 120*time.Second)
+	if err != nil {
+		return "", fmt.Errorf("modeling_atomic %s: %w", a.Op, err)
+	}
+	return fmt.Sprintf(`{"op":%q,"ok":true,"objects":%s}`, a.Op, trimOutput(res.Output)), nil
+}
+
+func opNames() string {
+	names := make([]string, 0, len(blender.AtomicOps))
+	for _, o := range blender.AtomicOps {
+		names = append(names, o.Name)
+	}
+	return strings.Join(names, ", ")
+}
+
+func trimOutput(out string) string {
+	out = strings.TrimSpace(out)
+	if len(out) > 300 {
+		out = out[:300] + "..."
+	}
+	return out
 }

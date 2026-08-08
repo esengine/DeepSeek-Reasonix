@@ -342,3 +342,23 @@ f 2 6 7 3
 		t.Fatal("modelingGuardWrite must reject outside roots")
 	}
 }
+
+// TestModelingAtomicAddCube drives modeling_atomic through a real Blender
+// run: add_cube then analyze the default scene for a mesh.
+func TestModelingAtomicAddCube(t *testing.T) {
+	if blender.BlenderPath() == "" {
+		t.Skip("blender not installed")
+	}
+	at := modelingAtomic{}
+	res, err := at.Execute(context.Background(), json.RawMessage(`{"op":"add_cube","args":{"size":2}}`))
+	if err != nil {
+		t.Fatalf("add_cube: %v", err)
+	}
+	if !strings.Contains(res, `"ok":true`) {
+		t.Errorf("expected ok result, got %q", res)
+	}
+	// Unknown op is rejected.
+	if _, err := at.Execute(context.Background(), json.RawMessage(`{"op":"nope"}`)); err == nil {
+		t.Error("unknown op must fail")
+	}
+}
