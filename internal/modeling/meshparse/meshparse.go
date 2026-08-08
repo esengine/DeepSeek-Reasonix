@@ -320,8 +320,14 @@ func ParsePLY(r io.Reader) (*Mesh, error) {
 		}
 		switch f[0] {
 		case "format":
+			if len(f) < 2 {
+				return nil, fmt.Errorf("meshparse: ply format line %d missing value", lineNo)
+			}
 			format = f[1] // ascii | binary_little_endian | binary_big_endian
 		case "element":
+			if len(f) < 3 {
+				return nil, fmt.Errorf("meshparse: ply element line %d missing name/count", lineNo)
+			}
 			switch f[1] {
 			case "vertex":
 				elemVertex = true

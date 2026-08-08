@@ -168,22 +168,29 @@ func AnalyzeVox(vm *VoxelModel) VoxelDescriptor {
 	}
 	seen := map[[3]int]struct{}{}
 	dirs := [6][3]int{{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}}
-	var flood func(p [3]int)
-	flood = func(p [3]int) {
-		seen[p] = struct{}{}
-		for _, d := range dirs {
-			q := [3]int{p[0] + d[0], p[1] + d[1], p[2] + d[2]}
-			if _, ok := occ[q]; ok {
-				if _, s := seen[q]; !s {
-					flood(q)
+	// Iterative flood fill (explicit stack) — recursive DFS over millions of
+	// connected voxels would overflow the goroutine stack (unrecoverable).
+	for p := range occ {
+		if _, s := seen[p]; s {
+			continue
+		}
+		d.Comps++
+		stack := [][3]int{p}
+		for len(stack) > 0 {
+			cur := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if _, s := seen[cur]; s {
+				continue
+			}
+			seen[cur] = struct{}{}
+			for _, dd := range dirs {
+				q := [3]int{cur[0] + dd[0], cur[1] + dd[1], cur[2] + dd[2]}
+				if _, o := occ[q]; o {
+					if _, s := seen[q]; !s {
+						stack = append(stack, q)
+					}
 				}
 			}
-		}
-	}
-	for p := range occ {
-		if _, s := seen[p]; !s {
-			d.Comps++
-			flood(p)
 		}
 	}
 	// Hole heuristic: interior empty cells adjacent to ≥3 occupied neighbors.
@@ -222,6 +229,12 @@ func Voxelize(m *Mesh, resolution int) (*VoxelModel, error) {
 	// Shared edges (diagonals) are hit by two triangles at ≈same t with the
 	// same exit/enter classification, so double-counting cannot flip parity.
 	tris := triangulate(m)
+	// Workload cap: cells × tris must stay bounded (512³ × millions of faces
+	// would pin a core for minutes). ~200M ray tests ≈ a few seconds.
+	cells := w * h * d
+	if cells > 0 && len(tris) > 0 && cells*len(tris) > 200_000_000 {
+		return nil, fmt.Errorf("meshparse: voxelize workload %d cells × %d tris exceeds cap 200M (lower resolution or simplify mesh)", cells, len(tris))
+	}
 	vm := &VoxelModel{Size: [3]int{w, h, d}}
 	inside := make([]bool, w*h*d)
 	for x := 0; x < w; x++ {

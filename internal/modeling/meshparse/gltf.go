@@ -85,6 +85,9 @@ func parseGLTFJSON(g *gltfJSON, buffers [][]byte, format string) (*Mesh, error) 
 	if len(g.Meshes) == 0 {
 		return nil, errors.New("gltf: no meshes")
 	}
+	if len(g.Meshes[0].Primitives) == 0 {
+		return nil, errors.New("gltf: mesh has no primitives")
+	}
 	prim := g.Meshes[0].Primitives[0]
 	posAcc, ok := prim.Attributes["POSITION"]
 	if !ok {
@@ -153,10 +156,16 @@ func sliceAccessor(buffers [][]byte, views []gltfJSONBufferView, a gltfJSONAcces
 	if bv.Buffer < 0 || bv.Buffer >= len(buffers) {
 		return nil, fmt.Errorf("gltf: bufferView buffer %d out of range", bv.Buffer)
 	}
-	start := bv.ByteOffset + a.ByteOffset
+	// Check both offsets non-negative BEFORE adding — the sum can overflow
+	// (wrap negative) even when each operand is valid, which would defeat the
+	// bounds checks below and panic on a negative slice index.
 	if bv.ByteOffset < 0 || a.ByteOffset < 0 {
 		return nil, fmt.Errorf("gltf: negative byte offsets (bufferView %d, accessor %d)", bv.ByteOffset, a.ByteOffset)
 	}
+	if a.ByteOffset > int(^uint(0)>>1)-bv.ByteOffset {
+		return nil, fmt.Errorf("gltf: accessor byte offset overflows (bufferView %d + accessor %d)", bv.ByteOffset, a.ByteOffset)
+	}
+	start := bv.ByteOffset + a.ByteOffset
 	l := a.length()
 	if l < 0 || start > int(^uint(0)>>1)-l {
 		return nil, fmt.Errorf("gltf: accessor slice overflows (start %d, len %d)", start, l)
@@ -266,7 +275,9 @@ func loadGLTFBuffer(gltfPath, uri string) ([]byte, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(binPath)
 	if err != nil {
-		return nil, fmt.Errorf("gltf: external buffer %q: %w", uri, err)
+		// No path in the error: the resolved absolute path could leak server
+		// layout to the LLM/user via the tool layer.
+		return nil, fmt.Errorf("gltf: external buffer %q not found or not readable", uri)
 	}
 	if !strings.HasPrefix(filepath.Clean(resolved), filepath.Clean(dir)+string(filepath.Separator)) {
 		return nil, fmt.Errorf("gltf: external buffer %q escapes the glTF directory", uri)

@@ -1,6 +1,7 @@
 package meshparse
 
 import (
+	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
@@ -53,11 +54,19 @@ func TestGltfTraversalURIRejected(t *testing.T) {
 
 func TestGltfAccessorOutOfRange(t *testing.T) {
 	// POSITION accessor index 7 with only 1 accessor → must error, not panic.
-	bad := `{"asset":{"version":"2.0"},"buffers":[{"byteLength":12}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":12}],"accessors":[{"bufferView":0,"componentType":5126,"count":1,"type":"VEC3"}],"meshes":[{"primitives":[{"attributes":{"POSITION":7}}]}]}`
-	if _, err := parseGLTFJSON(&gltfJSON{}, nil, "gltf"); err == nil {
-		t.Fatalf("POSITION accessor 7 out of range: want error")
+	// Go through the real Parse path (embedded base64 POSITION data) so the
+	// accessor-range guard is actually exercised.
+	dir := t.TempDir()
+	pos := make([]byte, 12) // 1 float32 VEC3, zeroed
+	enc := base64.StdEncoding.EncodeToString(pos)
+	bad := `{"asset":{"version":"2.0"},"buffers":[{"uri":"data:application/octet-stream;base64,` + enc + `","byteLength":12}],"bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":12}],"accessors":[{"bufferView":0,"componentType":5126,"count":1,"type":"VEC3"}],"meshes":[{"primitives":[{"attributes":{"POSITION":7}}]}]}`
+	p := filepath.Join(dir, "bad.gltf")
+	if err := os.WriteFile(p, []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	_ = bad
+	if _, err := Parse(p); err == nil || !strings.Contains(err.Error(), "POSITION accessor") {
+		t.Fatalf("POSITION accessor 7 out of range: want accessor error, got %v", err)
+	}
 }
 
 func TestVoxChunkTooLargeRejected(t *testing.T) {
@@ -81,4 +90,41 @@ func TestGltfNegativeByteOffsetRejected(t *testing.T) {
 		t.Fatalf("negative bufferView offset: want error")
 	}
 	_ = bad
+}
+
+func TestGltfEmptyPrimitivesRejected(t *testing.T) {
+	dir := t.TempDir()
+	bad := `{"asset":{"version":"2.0"},"meshes":[{"primitives":[]}]}`
+	p := filepath.Join(dir, "empty.gltf")
+	if err := os.WriteFile(p, []byte(bad), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(p); err == nil || !strings.Contains(err.Error(), "no primitives") {
+		t.Fatalf("empty primitives: want error, got %v", err)
+	}
+}
+
+func TestSliceAccessorOffsetOverflowRejected(t *testing.T) {
+	// Two huge non-negative offsets whose sum wraps negative — must be caught
+	// before the negative slice index panics.
+	buf := make([]byte, 64)
+	big := int(int64(1) << 62) // 2^62 — two of these sum past MaxInt64
+	_, err := sliceAccessor([][]byte{buf},
+		[]gltfJSONBufferView{{Buffer: 0, ByteOffset: big, ByteLength: 8}},
+		gltfJSONAccessor{BufferView: 0, ByteOffset: big})
+	if err == nil || !strings.Contains(err.Error(), "overflows") {
+		t.Fatalf("offset overflow: want overflow error, got %v", err)
+	}
+}
+
+func TestParsePLYShortHeaderLineRejected(t *testing.T) {
+	// A bare "format" line (no value) previously indexed f[1] → panic.
+	src := "ply\nformat\nend_header\n"
+	if _, err := ParsePLY(strings.NewReader(src)); err == nil || !strings.Contains(err.Error(), "missing value") {
+		t.Fatalf("short format line: want error, got %v", err)
+	}
+	src2 := "ply\nformat ascii 1.0\nelement\nend_header\n"
+	if _, err := ParsePLY(strings.NewReader(src2)); err == nil || !strings.Contains(err.Error(), "missing name/count") {
+		t.Fatalf("short element line: want error, got %v", err)
+	}
 }

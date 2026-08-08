@@ -95,6 +95,9 @@ func matchesFilter(t *Trajectory, f ExportFilter) bool {
 }
 
 func writeExportTrajectory(dir string, t *Trajectory) error {
+	if err := validateStoredID(t.ID); err != nil {
+		return err
+	}
 	b, err := json.Marshal(t)
 	if err != nil {
 		return err
