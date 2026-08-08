@@ -45,8 +45,11 @@ const (
 	CompactionModeSnip       = "snip"
 )
 
-// ContextProjection is the model-visible view of a session. The canonical
+// ContextProjection is the model-visible view of a session; the canonical
 // transcript in Session.Messages is never replaced by this structure.
+// Lossy irreversible projection (Sovereign Projection/Binary.agda): canonical
+// is the only reversible source; using it without its Context is undefined,
+// so projectionValid fails closed and CoveredCount advances monotonically.
 type ContextProjection struct {
 	Messages          []provider.Message `json:"messages"`
 	TranscriptVersion uint64             `json:"transcript_version"`

@@ -153,6 +153,12 @@ func (a *Agent) tryIncrementalFold(ctx context.Context, trigger, instructions st
 	if err != nil || outcome != CompactionInstalled {
 		return outcome, err
 	}
+	// Chain invariant: an incremental step must strictly advance coverage. A
+	// projection that does not move is a stale chain link — fail closed rather
+	// than keep riding it (Sovereign chainAssoc analog: every step well-defined).
+	if got := a.compactionState.Projection.CoveredCount; got <= base.CoveredCount {
+		return CompactionNoop, fmt.Errorf("incremental fold did not advance coverage (%d → %d)", base.CoveredCount, got)
+	}
 	// The incremental fold keeps prior bytes (prefix hit) but may leave the
 	// projection too close to the trigger; converge with one full re-fold (the
 	// recursive call takes the full path — the new projection covers all).
@@ -214,9 +220,10 @@ func (a *Agent) incrementalFoldRange(msgs []provider.Message, covered int) (head
 	return head, start, true
 }
 
-// projectionCompactBudget is the projection-size ceiling. A projection above
-// this stops being extended incrementally and is re-folded wholesale instead,
-// so the digest chain is merged (A1) rather than grown unbounded.
+// projectionCompactBudget is the projection-size ceiling before a wholesale
+// re-fold (digest merge): below it the incremental path extends the projection,
+// at or above it only the full path applies. Half the window keeps the view
+// comfortably under the 80% fold trigger even with a fresh tail.
 func (a *Agent) projectionCompactBudget() int {
 	if a.contextWindow <= 0 {
 		return 0
