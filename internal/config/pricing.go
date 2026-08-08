@@ -229,15 +229,15 @@ func completeDeepSeekOfficialPricingCurrency(p *ProviderEntry) string {
 }
 
 func mimoV25ProPrice() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥"}
+	return &provider.Pricing{CacheHit: 0.025, Input: 3, Output: 6, Currency: "¥", Estimated: true}
 }
 
 func mimoV25Price() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥"}
+	return &provider.Pricing{CacheHit: 0.02, Input: 1, Output: 2, Currency: "¥", Estimated: true}
 }
 
 func mimoV2FlashPrice() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.07, Input: 0.70, Output: 2.10, Currency: "¥"}
+	return &provider.Pricing{CacheHit: 0.07, Input: 0.70, Output: 2.10, Currency: "¥", Estimated: true}
 }
 
 func mimoDomesticPrices(models []string) map[string]*provider.Pricing {
@@ -256,7 +256,7 @@ func mimoDomesticPrices(models []string) map[string]*provider.Pricing {
 }
 
 func longCat20Price() *provider.Pricing {
-	return &provider.Pricing{CacheHit: 0.04, Input: 2, Output: 8, Currency: "¥"}
+	return &provider.Pricing{CacheHit: 0.04, Input: 2, Output: 8, Currency: "¥", Estimated: true}
 }
 
 func longCat20Prices(models []string) map[string]*provider.Pricing {

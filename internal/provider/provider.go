@@ -777,6 +777,11 @@ type Pricing struct {
 	Input    float64 `toml:"input"`     // per 1M uncached prompt tokens
 	Output   float64 `toml:"output"`    // per 1M completion tokens
 	Currency string  `toml:"currency"`
+	// Estimated marks a price that comes from a third-party estimate rather
+	// than an official provider API. It has no TOML key — the label is
+	// set by presets and displayed in the TUI so users know the cost figure
+	// may be off by the vendor's actual pricing.
+	Estimated bool `toml:"-"`
 }
 
 // Cost estimates the spend for a usage record.
