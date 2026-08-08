@@ -9,6 +9,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -223,11 +224,13 @@ func Voxelize(m *Mesh, resolution int) (*VoxelModel, error) {
 	h := max(1, int(math.Round(size.Y*scale)))
 	d := max(1, int(math.Round(size.Z*scale)))
 
-	// Even-odd ray casting: for each cell center, cast ray +X, count crossings.
-	// Robust variant: use the NEAREST triangle intersection (t>0); the cell is
-	// inside iff that nearest hit is an exit face (face normal · ray < 0).
-	// Shared edges (diagonals) are hit by two triangles at ≈same t with the
-	// same exit/enter classification, so double-counting cannot flip parity.
+	// Even-odd ray casting: for each cell center, cast ray +X and count the
+	// number of triangle intersections with t>0. The cell is inside iff that
+	// count is odd. This is direction-agnostic (works for inward OR outward
+	// face winding) — a direction-dependent "exit face" test misclassifies
+	// whole solids when a mesh's normals point inward (e.g. cubeOBJ).
+	// Shared edges are hit by two triangles at ≈same t; hits are deduped by t
+	// so double-counting cannot flip the parity.
 	tris := triangulate(m)
 	// Workload cap: cells × tris must stay bounded (512³ × millions of faces
 	// would pin a core for minutes). ~500M ray tests ≈ 5-10s of busy CPU with
@@ -241,31 +244,48 @@ func Voxelize(m *Mesh, resolution int) (*VoxelModel, error) {
 	}
 	vm := &VoxelModel{Size: [3]int{w, h, d}}
 	inside := make([]bool, w*h*d)
+	hitsBuf := make([]float64, 0, 64)
 	for x := 0; x < w; x++ {
 		cx := minV.X + (float64(x)+0.5)/scale
 		for y := 0; y < h; y++ {
 			cy := minV.Y + (float64(y)+0.5)/scale
 			for z := 0; z < d; z++ {
 				cz := minV.Z + (float64(z)+0.5)/scale
-				best := math.Inf(1)
-				bestExit := false
-				for _, t := range tris {
-					tHit, exit, ok := rayTriangleNearest(cx, cy, cz, t)
-					if !ok || tHit >= best {
-						continue
+				// Collect all hit parameters (t>0), dedupe by t, parity = inside.
+				hits := hitsBuf[:0]
+				for _, tr := range tris {
+					tHit, ok := rayTriangleNearest(cx, cy, cz, tr)
+					if ok {
+						hits = append(hits, tHit)
 					}
-					best = tHit
-					bestExit = exit
 				}
-				inside[x+w*(y+h*z)] = bestExit
+				nHits := 0
+				if len(hits) > 0 {
+					sort.Float64s(hits)
+					prev := hits[0]
+					nHits = 1
+					for _, h := range hits[1:] {
+						if h-prev > 1e-9*maxF(1, h) {
+							nHits++
+							prev = h
+						}
+					}
+				}
+				inside[x+w*(y+h*z)] = nHits%2 == 1
 			}
 		}
 	}
+	// Output cap: a nearly-solid 512³ grid would emit ~134M voxels (~2-4GB).
+	// The workload cap bounds CPU time; this bounds output memory too.
+	const maxVoxelOutput = 10_000_000
 	for x := 0; x < w; x++ {
 		for y := 0; y < h; y++ {
 			for z := 0; z < d; z++ {
 				if inside[x+w*(y+h*z)] {
 					vm.Voxels = append(vm.Voxels, Voxel{X: x, Y: y, Z: z, Color: 1})
+					if len(vm.Voxels) > maxVoxelOutput {
+						return nil, fmt.Errorf("meshparse: voxelize output %d voxels exceeds cap %d (lower resolution or simplify mesh)", maxVoxelOutput+1, maxVoxelOutput)
+					}
 				}
 			}
 		}
@@ -292,9 +312,10 @@ func triangulate(m *Mesh) [][3]Vec3 {
 }
 
 // rayTriangleNearest returns the ray parameter t of the +X ray from p hitting
-// the triangle (t>0), whether that hit is an exit face (face normal · ray < 0),
-// and ok=false if the ray misses or hits edge-on.
-func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, exit, ok bool) {
+// the triangle (t>0), and ok=false if the ray misses or hits edge-on.
+// The caller applies even-odd parity over deduped hits, so no direction or
+// normal is needed here.
+func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, ok bool) {
 	a, b, c := tri[0], tri[1], tri[2]
 	e1 := Vec3{b.X - a.X, b.Y - a.Y, b.Z - a.Z}
 	e2 := Vec3{c.X - a.X, c.Y - a.Y, c.Z - a.Z}
@@ -304,11 +325,11 @@ func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, exit, ok
 	nz := e1.X*e2.Y - e1.Y*e2.X
 	denom := nx // ray dir = (1,0,0)
 	if math.Abs(denom) < 1e-12 {
-		return 0, false, false // edge-on: skip
+		return 0, false // edge-on: skip
 	}
 	t := (nx*(a.X-px) + ny*(a.Y-py) + nz*(a.Z-pz)) / denom
 	if t <= 1e-9 {
-		return 0, false, false
+		return 0, false
 	}
 	ix, iy, iz := px+t, py, pz
 	// Barycentric (a as origin, b and c as basis).
@@ -320,14 +341,21 @@ func rayTriangleNearest(px, py, pz float64, tri [3]Vec3) (tHit float64, exit, ok
 	d21 := dot(v2, e1)
 	den := d00*d11 - d01*d01
 	if math.Abs(den) < 1e-12 {
-		return 0, false, false
+		return 0, false
 	}
 	u := (d11*d20 - d01*d21) / den
 	v := (d00*d21 - d01*d20) / den
 	if u < -1e-9 || v < -1e-9 || u+v > 1+1e-9 {
-		return 0, false, false
+		return 0, false
 	}
-	return t, denom < 0, true
+	return t, true
+}
+
+func maxF(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func dot(a, b Vec3) float64 { return a.X*b.X + a.Y*b.Y + a.Z*b.Z }

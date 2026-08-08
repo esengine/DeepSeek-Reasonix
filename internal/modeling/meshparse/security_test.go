@@ -142,3 +142,18 @@ func TestVoxelizeWorkloadCapRejected(t *testing.T) {
 		t.Fatalf("512³×4 tris: want workload-cap rejection, got %v", err)
 	}
 }
+
+func TestVoxelizeOutputCapRejected(t *testing.T) {
+	// A solid cube at resolution 240 (13.8M cells, fully inside) would emit
+	// ~13.8M voxels > 10M cap → must error, not allocate ~2GB.
+	// Cube vertices: 0(0,0,0) 1(1,0,0) 2(0,1,0) 3(0,0,1) 4(1,1,0) 5(1,0,1) 6(0,1,1) 7(1,1,1)
+	verts := []Vec3{{0, 0, 0}, {1, 0, 0}, {0, 1, 0}, {0, 0, 1}, {1, 1, 0}, {1, 0, 1}, {0, 1, 1}, {1, 1, 1}}
+	faces := []Face{
+		{Verts: []int{0, 1, 4, 2}}, {Verts: []int{3, 5, 7, 6}}, // bottom z=0, top z=1
+		{Verts: []int{0, 1, 5, 3}}, {Verts: []int{2, 4, 7, 6}}, // front y=0, back y=1
+		{Verts: []int{0, 3, 6, 2}}, {Verts: []int{1, 4, 7, 5}}, // left x=0, right x=1
+	}
+	if _, err := Voxelize(&Mesh{Verts: verts, Faces: faces}, 240); err == nil || !strings.Contains(err.Error(), "output") {
+		t.Fatalf("solid 240³: want output-cap rejection, got %v", err)
+	}
+}
