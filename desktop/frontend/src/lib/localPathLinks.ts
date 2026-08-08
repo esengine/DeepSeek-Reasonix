@@ -1,14 +1,15 @@
 // Local-path linkification for chat markdown (issue #7426).
 //
-// AI replies frequently print local file paths as plain text (Windows drive
-// paths, UNC paths, file:/// URLs). GFM autolink literals only recognize
-// http(s)/www/email, so these render as inert text. This module rewrites
-// matching text nodes into markdown links whose href is a file:/// URL; the
-// link click handler (RichMarkdownLink) routes those to the native
-// OpenLocalPath binding instead of the system browser.
+// AI replies frequently print local file paths as plain text or inside
+// backtick code spans (Windows drive paths, UNC paths, file:/// URLs). GFM
+// autolink literals only recognize http(s)/www/email, so these render as
+// inert text. This module rewrites matching text nodes (and code spans whose
+// entire content is exactly one path) into markdown links whose href is a
+// file:/// URL; the link click handler (RichMarkdownLink) routes those to
+// the native OpenLocalPath binding instead of the system browser.
 
 import { visit } from "unist-util-visit";
-import type { Parent, Link, Root, Text } from "mdast";
+import type { Parent, Link, Root, Text, InlineCode } from "mdast";
 import { unescapeRefPath } from "./refToken";
 
 // Sentence punctuation is excluded from path characters: Windows forbids `：`
@@ -72,6 +73,19 @@ function stripTrailingClosers(raw: string): string {
   }
   return stripped;
 }
+
+// Code-span content is literal: backslashes and spaces are real characters
+// and markdown text-node unescaping must NOT run here. A code span is
+// converted when its entire content is exactly one path — drive path,
+// file:/// URL or UNC share (literal `\\` prefix) — with trailing sentence
+// punctuation trimmed the same way the text-node matcher does. Windows-
+// illegal characters (`<>"|?*`) are excluded, and spaces are kept
+// (unambiguous inside a code span), which is what makes `D:\a\b c.md`
+// clickable — the backtick form is the documented workaround for paths
+// with spaces (#7426).
+const CODE_SPAN_PATH_RE = new RegExp(
+  String.raw`^(?:[A-Za-z]:[\\/][^\n<>"|?*]+|file:///[^\n<>"|?*]+|\\\\[^\\\s]+\\[^\n<>"|?*]+)$`,
+);
 
 export interface LocalPathSegment {
   /** Raw text to render (keeps the original spelling, escapes intact). */
@@ -149,14 +163,16 @@ export function localPathHref(path: string): string {
 /**
  * Remark plugin: rewrites plain-text nodes containing local paths into link
  * nodes (text + link alternation), so the markdown renderer hands them to
- * RichMarkdownLink which routes them to the native opener.
+ * RichMarkdownLink which routes them to the native opener. Code spans whose
+ * entire content is exactly one local path are wrapped in a link the same
+ * way — AI replies often quote paths in backticks.
  *
  * Collection and replacement are separate passes: replacing during the visit
  * would re-visit the freshly inserted link children and nest anchors.
  */
 export function remarkLocalPathLinks() {
   return (tree: Root) => {
-    const plan: Array<{ parent: Parent; index: number; nodes: Array<Text | Link> }> = [];
+    const plan: Array<{ parent: Parent; index: number; nodes: Array<Text | Link | InlineCode> }> = [];
     visit(tree, "text", (node: Text, index: number | undefined, parent) => {
       if (parent === undefined || parent === null || index === undefined || index === null) return;
       // Skip link internals: rewriting their text would nest <a> elements
@@ -177,6 +193,38 @@ export function remarkLocalPathLinks() {
               }
             : { type: "text", value: seg.text },
         ),
+      });
+    });
+    visit(tree, "inlineCode", (node: InlineCode, index: number | undefined, parent) => {
+      if (parent === undefined || parent === null || index === undefined || index === null) return;
+      if (parent.type === "link" || parent.type === "linkReference") return;
+      // A literal `\ ` pair is the escaped-space spelling leaking into code
+      // and never resolves to a real file name — leave those spans alone.
+      if (/\\[ \t]/.test(node.value)) return;
+      // Trim trailing sentence punctuation, then a whole trailing full-width
+      // paren group (`D:\x\y.md（已生成）`), then closers with the same
+      // paren-balance rule the text-node matcher uses.
+      const cleaned = stripTrailingClosers(
+        node.value
+          .replace(/[，。；、！？,;!?]+$/, "")
+          .replace(/（[^（）]*）$/, "")
+          .trimEnd(),
+      );
+      if (!CODE_SPAN_PATH_RE.test(cleaned)) return;
+      plan.push({
+        parent,
+        index,
+        nodes: [
+          {
+            type: "link",
+            url: localPathHref(cleaned),
+            title: null,
+            // Keep the code span as the link label so the path still looks
+            // like a literal path (and stays selectable) — renders as
+            // <a><code>D:\x\y.md</code></a>.
+            children: [node],
+          },
+        ],
       });
     });
     // Back-to-front keeps earlier indices valid within the same parent.
