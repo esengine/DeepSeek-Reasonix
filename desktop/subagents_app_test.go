@@ -893,7 +893,7 @@ func TestTrySubagentProfileCancelAbortsRunAndIsSingleFlight(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("try run never reached the provider")
 	}
-	if _, err := a.TrySubagentProfile(SubagentProfileInput{SystemPrompt: "p"}, "task"); err == nil || !strings.Contains(err.Error(), "in progress") {
+	if _, err := a.TrySubagentProfile(SubagentProfileInput{SystemPrompt: "p"}, "task"); err == nil || (!strings.Contains(err.Error(), "in progress") && !strings.Contains(err.Error(), "进行中")) {
 		t.Fatalf("concurrent try error = %v, want the single-flight refusal", err)
 	}
 
@@ -912,7 +912,7 @@ func TestTrySubagentProfileCancelAbortsRunAndIsSingleFlight(t *testing.T) {
 	// fast on the invalid empty response instead of blocking on the hang.
 	releaseAll()
 	a.CancelTrySubagentProfile()
-	if _, err := a.TrySubagentProfile(SubagentProfileInput{SystemPrompt: "p"}, "task"); err != nil && strings.Contains(err.Error(), "in progress") {
+	if _, err := a.TrySubagentProfile(SubagentProfileInput{SystemPrompt: "p"}, "task"); err != nil && (strings.Contains(err.Error(), "in progress") || strings.Contains(err.Error(), "进行中")) {
 		t.Fatalf("slot did not free after cancel: %v", err)
 	}
 }

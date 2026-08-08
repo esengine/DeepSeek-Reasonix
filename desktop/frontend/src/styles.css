@@ -3301,6 +3301,23 @@ a[href] {
   line-height: 1.1;
   color: var(--fg);
 }
+/* 启动画面品牌名：彩虹渐变文字 + 流动动画（与 logo 渐变色一致） */
+.startup-splash__name--rainbow {
+  background: linear-gradient(
+    90deg,
+    #ff2f70, #ff9f1c, #f7f24a, #25f36b,
+    #18d9ff, #7a5cff, #ff4fe3, #ff2f70
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: startup-splash-rainbow-flow 2.8s linear infinite;
+}
+@keyframes startup-splash-rainbow-flow {
+  from { background-position: 0% 50%; }
+  to   { background-position: 200% 50%; }
+}
 .startup-splash__sub {
   margin-top: 9px;
   font-size: 13px;
@@ -3805,15 +3822,18 @@ a[href] {
   object-fit: contain;
 }
 
-:root[data-theme="dark"] .sidebar__brand-logo,
-:root[data-theme="dark"] .welcome__brand-logo {
+/* BrandLogo 现在渲染为内联渐变 SVG（彩虹 + 流动动画），渐变颜色已按深浅
+   主题取足够对比度，不能再全局反色（brightness(0) invert(1) 会把渐变抹成
+   纯色块）。此规则仅保留给仍用 <img> 载入静态 logo 的旧路径。 */
+:root[data-theme="dark"] img.sidebar__brand-logo,
+:root[data-theme="dark"] img.welcome__brand-logo {
   filter: brightness(0) invert(1);
   opacity: 0.94;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .sidebar__brand-logo,
-  :root:not([data-theme]) .welcome__brand-logo {
+  :root:not([data-theme]) img.sidebar__brand-logo,
+  :root:not([data-theme]) img.welcome__brand-logo {
     filter: brightness(0) invert(1);
     opacity: 0.94;
   }
