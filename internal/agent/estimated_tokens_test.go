@@ -40,11 +40,8 @@ func TestEstimatedPromptTokensCalibratesWithUsage(t *testing.T) {
 		t.Fatalf("calibrated = %d must exceed raw %d (CJK under-count)", calibrated, raw)
 	}
 	// Both the calibration path and the safety-factor path are conservative;
-	// calibration is allowed to land above the fixed 2x when the real ratio
-	// is tighter than 4 chars/token.
-	if calibrated < raw {
-		t.Fatalf("calibrated = %d must stay positive and above raw %d", calibrated, raw)
-	}
+	// calibration may land above the fixed 2x when the real ratio is tighter
+	// than 4 chars/token — that is still a safe, conservative clip.
 }
 
 // TestEstimatedPromptTokensEmptyIsZero guards the zero-input edge.

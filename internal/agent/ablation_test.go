@@ -46,8 +46,9 @@ func TestCompactionAblationCollapsesTheCachePreservingDeferral(t *testing.T) {
 
 func TestForceThresholdReservesOutputBudget(t *testing.T) {
 	// 1M window, 0.9 ratio: naive force = 900K, but the 128K output budget
-	// leaves only 917K-8K input allowance. The force mark must shrink.
-	a := &Agent{contextWindow: 1_048_576, compactForceRatio: 0.9, outputBudget: 131_072}
+	// leaves only 917K-8K input allowance. The force mark must shrink — only
+	// for shared-window providers (DeepSeek).
+	a := &Agent{prov: &sharedWindowBudgetProvider{budget: 131_072}, contextWindow: 1_048_576, compactForceRatio: 0.9, outputBudget: 131_072}
 	got := a.forceThreshold()
 	if want := 1_048_576 - 131_072 - 8192; got != want {
 		t.Fatalf("forceThreshold = %d, want %d (window minus output budget minus reserve)", got, want)
@@ -56,13 +57,18 @@ func TestForceThresholdReservesOutputBudget(t *testing.T) {
 	if got+131_072 >= a.contextWindow {
 		t.Fatalf("threshold %d + budget %d >= window %d: request would be rejected", got, 131_072, a.contextWindow)
 	}
+	// Independent-ceiling vendors keep the plain ratio mark (no budget reserve).
+	indep := &Agent{prov: &independentBudgetProvider{budget: 131_072}, contextWindow: 1_048_576, compactForceRatio: 0.9, outputBudget: 131_072}
+	if got := indep.forceThreshold(); got != 943_718 {
+		t.Fatalf("independent-window forceThreshold = %d, want 943718 (ratio mark)", got)
+	}
 	// Without a provider budget the legacy ratio stands.
 	b := &Agent{contextWindow: 1_048_576, compactForceRatio: 0.9}
 	if got := b.forceThreshold(); got != 943_718 {
 		t.Fatalf("no-budget forceThreshold = %d, want 943718", got)
 	}
 	// A small budget that stays under the ratio must not be overridden.
-	c := &Agent{contextWindow: 1_048_576, compactForceRatio: 0.5, outputBudget: 131_072}
+	c := &Agent{prov: &sharedWindowBudgetProvider{budget: 131_072}, contextWindow: 1_048_576, compactForceRatio: 0.5, outputBudget: 131_072}
 	if got := c.forceThreshold(); got != 524_288 {
 		t.Fatalf("small-budget forceThreshold = %d, want 524288", got)
 	}
