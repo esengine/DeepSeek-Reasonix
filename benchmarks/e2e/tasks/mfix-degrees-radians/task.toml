@@ -1,0 +1,4 @@
+prompt = "render.py produces nonsense heights: geometry.py speaks degrees while render.py feeds the value straight into math.sin, which expects radians. Fix the unit mismatch; elevation_deg() must keep returning degrees."
+class = "multi-file-bugfix"
+max_steps = 15
+timeout_sec = 240

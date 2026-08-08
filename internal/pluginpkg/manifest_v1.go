@@ -10,28 +10,17 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 )
 
-// ManifestAPIVersionV1 is the only plugin manifest apiVersion this Reasonix
-// parses. A native manifest (reasonix-plugin.json) WITHOUT an apiVersion
-// takes the legacy path and parses exactly as it always has; any manifest
-// that declares one is routed here.
-const ManifestAPIVersionV1 = "reasonix.io/plugin/v1"
-
-// PluginRootEnvVar is the variable a v1 runtime command may use to address
+// PluginRootEnvVar is the variable a runtime command may use to address
 // files inside its own installed package. It expands at launch time, never
 // through a shell.
 const PluginRootEnvVar = "${REASONIX_PLUGIN_ROOT}"
 
-// apiVersionPattern matches reasonix.io/plugin/v<major>[.<minor>].
-var apiVersionPattern = regexp.MustCompile(`^reasonix\.io/plugin/v([0-9]+)(?:\.([0-9]+))?$`)
-
-// RuntimeSpec declares a plugin-owned runtime process (Manifest v1). The
+// RuntimeSpec declares a plugin-owned runtime process (Manifest v2). The
 // command is exec form only: Reasonix never runs it through a shell, so
 // pipes, && and ; carry no special meaning. Command may start with
 // ${REASONIX_PLUGIN_ROOT} to address a binary inside the installed package;
@@ -53,7 +42,7 @@ type RuntimeSpec struct {
 }
 
 // sniffManifestAPIVersion extracts just the apiVersion field so parseNative
-// can route between the legacy parser (absent) and the v1 parser (present)
+// can distinguish pre-extension manifests (absent) from versioned manifests
 // without a full decode.
 func sniffManifestAPIVersion(b []byte) (string, error) {
 	var sniff struct {
@@ -72,24 +61,6 @@ func sniffManifestAPIVersion(b []byte) (string, error) {
 	return strings.TrimSpace(v), nil
 }
 
-// checkAPIVersion gates the v1 parser. The exact v1 string parses; a known
-// major with a minor (v1.1) also parses as v1 — strict field rejection fails
-// loudly on anything the minor revision actually added. An unknown major is
-// unsupported; anything not matching the version shape is malformed.
-func checkAPIVersion(v string) error {
-	if v == ManifestAPIVersionV1 {
-		return nil
-	}
-	m := apiVersionPattern.FindStringSubmatch(v)
-	if m == nil {
-		return fmt.Errorf("%s: invalid apiVersion %q: want reasonix.io/plugin/v<major>[.<minor>] (this Reasonix supports %s)", NativeManifest, v, ManifestAPIVersionV1)
-	}
-	if major, _ := strconv.Atoi(m[1]); major != 1 {
-		return fmt.Errorf("%s: unsupported apiVersion %q (this Reasonix supports %s)", NativeManifest, v, ManifestAPIVersionV1)
-	}
-	return nil
-}
-
 // strictDecode decodes one manifest object with unknown-field rejection
 // (json.Decoder.DisallowUnknownFields). path prefixes the error so a typo
 // names where it happened — root keys report under the manifest name,
@@ -104,27 +75,9 @@ func strictDecode(data []byte, v any, path string) error {
 	return nil
 }
 
-// v1Root is the strict-decoded shape of a Manifest v1 document. Nested
-// objects stay raw at this level so each one can be decoded with its own
-// field-path context.
-type v1Root struct {
-	APIVersion  string          `json:"apiVersion"`
-	Name        string          `json:"name"`
-	Version     string          `json:"version"`
-	Description string          `json:"description"`
-	Homepage    string          `json:"homepage"`
-	Repository  string          `json:"repository"`
-	Contributes json.RawMessage `json:"contributes"`
-	Runtime     json.RawMessage `json:"runtime"`
-	// Legacy top-level fields, unioned with their contributes counterparts.
-	Skills     json.RawMessage              `json:"skills"`
-	Commands   json.RawMessage              `json:"commands"`
-	Hooks      map[string][]json.RawMessage `json:"hooks"`
-	MCPServers map[string]json.RawMessage   `json:"mcpServers"`
-}
-
-// v1Contributes is the strict-decoded contributes object. Agents, prompts,
-// and themes exist ONLY here — the legacy top level has no such keys.
+// v1Contributes is the shared strict-decoded contributes object used by the v2
+// parser. Agents, prompts, and themes exist ONLY here — the legacy top level
+// has no such keys.
 type v1Contributes struct {
 	Skills     json.RawMessage              `json:"skills"`
 	Agents     json.RawMessage              `json:"agents"`
@@ -135,111 +88,7 @@ type v1Contributes struct {
 	MCPServers map[string]json.RawMessage   `json:"mcpServers"`
 }
 
-func parseNativeV1(b []byte, root, apiVersion string) (Package, []string, error) {
-	if err := checkAPIVersion(apiVersion); err != nil {
-		return Package{}, nil, err
-	}
-	var raw v1Root
-	if err := strictDecode(b, &raw, NativeManifest); err != nil {
-		return Package{}, nil, err
-	}
-	var contrib v1Contributes
-	if len(raw.Contributes) > 0 && string(raw.Contributes) != "null" {
-		if err := strictDecode(raw.Contributes, &contrib, "contributes"); err != nil {
-			return Package{}, nil, err
-		}
-	}
-
-	legacySkills, err := parseV1PathList(raw.Skills, "skills")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	legacyCommands, err := parseV1PathList(raw.Commands, "commands")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	contribSkills, err := parseV1PathList(contrib.Skills, "contributes.skills")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	contribAgents, err := parseV1PathList(contrib.Agents, "contributes.agents")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	contribCommands, err := parseV1PathList(contrib.Commands, "contributes.commands")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	contribPrompts, err := parseV1PathList(contrib.Prompts, "contributes.prompts")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	contribThemes, err := parseV1PathList(contrib.Themes, "contributes.themes")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	legacyHooks, err := parseV1HookMap(raw.Hooks, "hooks")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	contribHooks, err := parseV1HookMap(contrib.Hooks, "contributes.hooks")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	legacyMCP, err := parseV1MCPServerMap(raw.MCPServers, "mcpServers")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	contribMCP, err := parseV1MCPServerMap(contrib.MCPServers, "contributes.mcpServers")
-	if err != nil {
-		return Package{}, nil, err
-	}
-	hooks, err := mergeV1Hooks(legacyHooks, contribHooks)
-	if err != nil {
-		return Package{}, nil, err
-	}
-	mcpServers, err := mergeV1MCPServers(legacyMCP, contribMCP)
-	if err != nil {
-		return Package{}, nil, err
-	}
-	runtime, err := parseV1Runtime(raw.Runtime)
-	if err != nil {
-		return Package{}, nil, err
-	}
-
-	manifest := Manifest{
-		Name:        strings.TrimSpace(raw.Name),
-		Version:     strings.TrimSpace(raw.Version),
-		Description: strings.TrimSpace(raw.Description),
-		Homepage:    strings.TrimSpace(raw.Homepage),
-		Repository:  strings.TrimSpace(raw.Repository),
-		Skills:      unionPathLists(legacySkills, contribSkills),
-		Commands:    unionPathLists(legacyCommands, contribCommands),
-		Agents:      contribAgents,
-		Prompts:     contribPrompts,
-		Themes:      contribThemes,
-		Hooks:       hooks,
-		MCPServers:  mcpServers,
-		Runtime:     runtime,
-	}
-	if err := validateManifest(root, &manifest); err != nil {
-		return Package{}, nil, err
-	}
-	warnings, issues := applyClaudeCompatibility(root, &manifest)
-	if err := validateManifest(root, &manifest); err != nil {
-		return Package{}, warnings, err
-	}
-	v1Warnings, err := validateV1Paths(root, &manifest)
-	warnings = append(warnings, v1Warnings...)
-	if err != nil {
-		return Package{}, warnings, err
-	}
-	pkg := Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}
-	pkg.Compatibility = compatibilityFor(pkg, issues)
-	return pkg, warnings, nil
-}
-
-// parseV1PathList parses a v1 path list. The flexible string | []string |
+// parseV1PathList parses a native path list. The flexible string | []string |
 // [{path}] forms are kept from the legacy parser, but unknown keys inside
 // the object form are rejected — a typo like {"paht": "skills"} must fail,
 // not silently contribute nothing.
@@ -297,7 +146,7 @@ func parseV1HookMap(raw map[string][]json.RawMessage, path string) (map[string][
 // parseV1Hook strict-decodes one hook entry, preserving the args presence
 // bit exactly like Hook.UnmarshalJSON (exec form vs shell form depends on
 // it). Decoding goes through a method-free alias so the lenient legacy
-// unmarshaler cannot weaken v1 strictness.
+// unmarshaler cannot weaken v2 strictness.
 func parseV1Hook(data json.RawMessage, path string) (Hook, error) {
 	type hookJSON Hook
 	var decoded hookJSON
@@ -581,7 +430,7 @@ func parseV1Runtime(raw json.RawMessage) (*RuntimeSpec, error) {
 	return &rt, nil
 }
 
-// validateV1Paths enforces the v1 on-disk path contract — stronger than the
+// validateV1Paths enforces the v2 on-disk path contract — stronger than the
 // legacy lexical checks. Every contributed path that EXISTS must resolve
 // inside the plugin root, so a symlink cannot smuggle outside content into
 // the session; theme paths must be regular files. Missing paths (and

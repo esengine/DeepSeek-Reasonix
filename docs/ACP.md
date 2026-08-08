@@ -71,8 +71,12 @@ the following capability shape (irrelevant fields omitted):
 When the client advertises `fs.readTextFile`, `fs.writeTextFile`, or
 `terminal`, Reasonix routes eligible file operations through the editor's
 unsaved buffers and eligible foreground commands through a client-owned
-terminal. Without those client capabilities, the normal workspace tools run
-locally inside the Reasonix process.
+terminal. Every file tool takes part — reads, edits and writes alike — so an
+edit applies to what the editor currently shows instead of to the last saved
+copy on disk. A non-UTF-8 file is not eligible: the ACP file methods are
+text-only, so it stays on the local encoding-preserving path and keeps its
+original charset. Without those client capabilities, the normal workspace
+tools run locally inside the Reasonix process.
 
 ## Session lifecycle
 

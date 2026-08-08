@@ -1,0 +1,4 @@
+prompt = "Two small fixes in metrics.py (p95 index off by one; rate() divides by zero on empty windows). The repo's only check is check.sh, which runs the full 45-second soak — there is no faster oracle."
+class = "ebm-negative"
+max_steps = 14
+timeout_sec = 240

@@ -793,6 +793,24 @@ Reasonix is an MCP client. A `[[plugins]]` entry's `type` selects the transport:
 of the file); `sse` connects to servers that still use the legacy persistent
 GET + announced POST endpoint transport.
 
+For a remote HTTP server without a static `Authorization` header, an
+authentication challenge is shown as **Sign in**. Run
+`reasonix mcp auth <name>` in the CLI, or click **Sign in** for that server in
+the Desktop MCP panel. Reasonix performs OAuth metadata discovery, dynamic
+client registration, PKCE S256 authorization, and refresh-token
+rotation. Discovery and token requests use the same Reasonix network-proxy
+settings as the MCP connection.
+
+OAuth client and token state is kept outside the workspace in the server's
+private Reasonix state directory, written with mode `0600`, and bound to the
+full configured resource URL. An explicit static `Authorization` header always
+takes precedence. **Clear authentication** removes only Reasonix's local OAuth
+state; it does not sign out the third-party browser session. Reasonix opens the
+browser only after an explicit sign-in action, never automatically from a
+background tool-call failure. Removing the MCP server also removes its local
+OAuth state unless a lower-priority declaration for the same resource becomes
+effective.
+
 Browse the official MCP Registry from **Settings → MCP servers → Browse
 registry**, or use `reasonix mcp browse [query]` and
 `reasonix mcp install <registry-name>`. Registry access is explicit and never

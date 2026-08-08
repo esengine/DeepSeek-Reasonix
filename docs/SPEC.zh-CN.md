@@ -97,7 +97,7 @@ type Tool interface {
 外部插件是配置中声明的 MCP server。协议统一为 JSON-RPC 2.0，传输由 `transport` 接口抽象：
 
 - `stdio`：本地持久子进程，每行一条 JSON 消息。
-- `http` / `streamable-http`：向远程 `url` POST，支持 `application/json` 和 SSE 响应，并复用 `Mcp-Session-Id`。
+- `http` / `streamable-http`：向远程 `url` POST，支持 `application/json` 和 SSE 响应，并复用 `Mcp-Session-Id`。未配置静态 `Authorization` header 时，用户可发起 OAuth：客户端按 Protected Resource Metadata / Authorization Server Metadata 发现端点，使用动态客户端注册、PKCE S256、loopback callback、resource indicator 与 refresh token 轮换。客户端凭据和 token 以 `0600` 权限保存在工作区之外的 Reasonix 私有 MCP 状态目录，并绑定到配置的 resource URL；URL 改变后不会复用旧 token。OAuth 发现、注册和 token 请求遵守 Reasonix 解析后的网络代理设置。删除声明时会清理该状态；若之后生效的 fallback 使用同一 OAuth resource，则保留该状态。
 - `sse`：兼容旧版 2024-11-05 HTTP+SSE；持久 GET 接收 server 公布的相对 POST endpoint、JSON-RPC 响应与 server 消息。为避免静态 header 泄漏，会拒绝跨域 endpoint。
 
 `${VAR}` 与 `${VAR:-default}` 可用于 `command`、`args`、`env`、`url` 和 `headers`，使 secret 留在环境中。生命周期为 `initialize` → `notifications/initialized` → `tools/list`，调用使用 `tools/call`。
@@ -303,6 +303,6 @@ MCP 启动与单次工具调用使用不同生命周期。调用方只短暂等�
 ## 9. 路线图（当前范围之外）
 
 - 完成 Sandbox Phase 1 的 escape prompt：检测 sandbox 不可用或拒绝时，提供一次明确、受权限控制的非 sandbox 重试。
-- MCP long tail：OAuth 2.0、`headersHelper`、更多 `.mcp.json` scope、tool-search 延迟加载、`list_changed`、channel、elicitation、root，以及可提供 provider 的插件。
+- MCP long tail：`headersHelper`、更多 `.mcp.json` scope、tool-search 延迟加载、`list_changed`、channel、elicitation、root，以及可提供 provider 的插件。
 - 增加 Anthropic-native provider kind，用于验证 registry 不依赖单一 wire format，并支持原生 prompt cache control。
 - 把“始终允许”规则持久化到项目配置，以及为 `reasonix run` 提供 session 级权限覆盖。

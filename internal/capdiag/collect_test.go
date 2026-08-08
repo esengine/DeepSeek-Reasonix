@@ -299,6 +299,7 @@ func TestCollectRejectsNonRegularPluginContextFile(t *testing.T) {
 
 	pluginRoot := filepath.Join(reasonixHome, "plugins", "demo")
 	write(t, filepath.Join(pluginRoot, pluginpkg.NativeManifest), `{
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "demo",
   "hooks": {
     "SessionStart": [{"contextFile": "CLAUDE.md"}]
@@ -332,7 +333,7 @@ func TestPluginPackageCommandsAreReported(t *testing.T) {
 	t.Setenv("REASONIX_HOME", reasonixHome)
 
 	pluginRoot := filepath.Join(reasonixHome, "plugins", "demo")
-	write(t, filepath.Join(pluginRoot, pluginpkg.NativeManifest), `{"name":"demo","commands":["commands"]}`)
+	write(t, filepath.Join(pluginRoot, pluginpkg.NativeManifest), `{"apiVersion":"reasonix.io/plugin/v2","name":"demo","commands":["commands"]}`)
 	write(t, filepath.Join(pluginRoot, "commands", "ship.md"), "---\ndescription: ship it\n---\nShip $ARGUMENTS\n")
 	if err := pluginpkg.Upsert(reasonixHome, pluginpkg.InstalledPlugin{
 		Name: "demo", Root: "plugins/demo", ManifestKind: "reasonix", Enabled: true,

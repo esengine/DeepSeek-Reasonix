@@ -26,6 +26,7 @@ Reasonix 只暴露一个 `/effort` 开关（以及 provider 级的 `effort` / `t
 | Provider/模型              | Base URL                                   | 推理控制                                      | `/effort` 档位                | 备注 |
 |----------------------------|--------------------------------------------|-----------------------------------------------|-------------------------------|-------|
 | Kimi CN/Global `kimi-k3`   | `api.moonshot.cn/v1`、`api.moonshot.ai/v1` | `reasoning_effort`                            | `low`、`high`、`max`          | 始终思考；默认 `max`。Reasonix 会回放完整的 assistant 消息、使用 `max_completion_tokens`，并省略 K3 固定的采样字段。 |
+| 自定义 Kimi K3 网关        | 任意 OpenAI-compatible K3 端点             | `reasoning_effort`                            | `low`、`high`、`max`          | 设置 `reasoning_protocol = "kimi-k3"`，显式启用 K3 的完整消息回放与请求形态。 |
 | OpenCode Go `kimi-k3`      | `opencode.ai/zen/go/v1`                    | `reasoning_effort`                            | `high`、`max`                 | 中转站专属档位；默认 `max`，并保留中转站标准的 OpenAI-compatible 请求形态。 |
 | Token Rhythm DeepSeek V4   | `tokenrhythm.studio/v1`                    | DeepSeek `thinking.type` + `reasoning_effort` | 模型专属的 DeepSeek 档位      | 通过预设的模型覆盖选择，与网关主机无关。 |
 | Token Rhythm GLM 5/5.1/5.2 | `tokenrhythm.studio/v1`                    | GLM `thinking.type`（`enabled`\|`disabled`）  | `auto`、`enabled`、`disabled` | 通过预设的模型覆盖选择；`reasoning_effort` 会被省略。 |
@@ -36,6 +37,26 @@ Reasonix 只暴露一个 `/effort` 开关（以及 provider 级的 `effort` / `t
 仍可在一个 `model_overrides` 条目中显式设置 `reasoning_protocol = "glm"`。
 GLM 思考开启时，Reasonix 会按 GLM 交错与保留思考的要求，在后续历史中原样保留
 并返回原始 `reasoning_content`。
+
+如果自定义网关提供 Kimi K3，可在 provider 编辑器的高级设置中将推理协议选择为
+**Kimi K3 推理**，或直接配置：
+
+```toml
+[[providers]]
+name               = "my-kimi-gateway"
+kind               = "openai"
+base_url           = "https://my-gateway.example.com/v1"
+model              = "kimi-k3"
+api_key_env        = "MY_KIMI_API_KEY"
+reasoning_protocol = "kimi-k3"
+```
+
+当网关域名无法被安全自动识别时，需要这个显式协议。它会在后续 assistant 历史中
+保留 `reasoning_content`、使用 `max_completion_tokens`，并省略 K3 固定的采样字段。
+不要把它加到精选的 OpenCode Go 预设中：该中转站有自己的 `high`/`max` 档位，
+并且有意保持标准 OpenAI-compatible 请求形态。
+启用该协议后，Reasonix 固定展示 K3 的 `auto`/`low`/`high`/`max` 档位，协议默认值
+为 `max`；已有的 `supported_efforts` 配置仍会保留，但不会覆盖 K3 协议档位。
 
 ## DeepSeek Anthropic-compatible 端点
 

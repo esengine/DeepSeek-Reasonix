@@ -462,6 +462,70 @@ func TestRequestStaleGenerationAnsweredCancelled(t *testing.T) {
 	}
 }
 
+// TestStageHoldsOldGenerationUntilCommit documents the narrow-rebuild UI policy:
+// stage reuses the previous UI hub and does not call BindGeneration. A sidecar
+// that emits host/ui/publish or host/ui/request with the staged (next)
+// generation during handshake/ready is dropped as stale. Only commit binds the
+// new generation; plugins must not rely on UI visibility before then.
+func TestStageHoldsOldGenerationUntilCommit(t *testing.T) {
+	rec := &eventRecorder{}
+	h := newTestHub(rec) // bound to sess-1 / generation 7
+	handler := h.HandlerFor("alpha")
+
+	// Live generation remains valid for the whole stage window.
+	if r := publishRaw(t, h, "alpha", protocol.UIPublishParams{
+		SurfaceID: "s1", SessionID: "sess-1", Generation: 7, Kind: protocol.UISurfaceStatus,
+		Payload: mustRaw(t, protocol.UIStatusPayload{Label: "live"}),
+	}); !r.Accepted {
+		t.Fatal("current generation must still publish during stage")
+	}
+
+	// Staged next generation is not bound yet — silent drop.
+	if r := publishRaw(t, h, "alpha", protocol.UIPublishParams{
+		SurfaceID: "s1", SessionID: "sess-1", Generation: 8, Kind: protocol.UISurfaceStatus,
+		Payload: mustRaw(t, protocol.UIStatusPayload{Label: "premature"}),
+	}); r.Accepted {
+		t.Fatal("staged next-generation publish must be dropped before BindGeneration")
+	}
+
+	req, err := handler.Request(context.Background(), protocol.UIRequestParams{
+		SurfaceID: "r1", SessionID: "sess-1", Generation: 8, Kind: protocol.UIRequestConfirm,
+		Payload: mustRaw(t, protocol.UIFormPayload{Message: "proceed?", Fields: []protocol.UIFormField{}}),
+	})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if !req.Cancelled {
+		t.Fatalf("staged next-generation request = %+v, want cancelled", req)
+	}
+
+	// Commit binds the new generation (see boot.commitControllerExtPatch).
+	h.BindGeneration("sess-1", 8)
+	if r := publishRaw(t, h, "alpha", protocol.UIPublishParams{
+		SurfaceID: "s1", SessionID: "sess-1", Generation: 8, Kind: protocol.UISurfaceStatus,
+		Payload: mustRaw(t, protocol.UIStatusPayload{Label: "committed"}),
+	}); !r.Accepted {
+		t.Fatal("post-commit generation must publish")
+	}
+	if r := publishRaw(t, h, "alpha", protocol.UIPublishParams{
+		SurfaceID: "s1", SessionID: "sess-1", Generation: 7, Kind: protocol.UISurfaceStatus,
+		Payload: mustRaw(t, protocol.UIStatusPayload{Label: "old"}),
+	}); r.Accepted {
+		t.Fatal("pre-commit generation must drop after BindGeneration")
+	}
+
+	events := rec.all()
+	if len(events) != 2 {
+		t.Fatalf("emitted %d events, want 2 (live + committed; premature/old dropped)", len(events))
+	}
+	if events[0].Extension == nil || events[0].Extension.Status == nil || events[0].Extension.Status.Label != "live" {
+		t.Fatalf("first event = %+v, want live", events[0].Extension)
+	}
+	if events[1].Extension == nil || events[1].Extension.Status == nil || events[1].Extension.Status.Label != "committed" {
+		t.Fatalf("second event = %+v, want committed", events[1].Extension)
+	}
+}
+
 func TestRebindDropsOldGeneration(t *testing.T) {
 	rec := &eventRecorder{}
 	h := newTestHub(rec)

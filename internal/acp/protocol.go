@@ -118,7 +118,7 @@ const (
 )
 
 // ExtensionSurfaceCapability advertises that a participant renders structured
-// extension-UI surfaces (Extension Protocol v1) natively.
+// extension-UI surfaces (Extension Protocol v2) natively.
 type ExtensionSurfaceCapability struct {
 	Supported     bool `json:"supported"`
 	SchemaVersion int  `json:"schemaVersion"`

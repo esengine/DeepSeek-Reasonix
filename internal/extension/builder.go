@@ -69,7 +69,7 @@ type ConflictPolicy int
 
 const (
 	// ConflictFail is the default: a disputed ID aborts the build with a
-	// ConflictError. v1 extensions use it — a package must never silently
+	// ConflictError. v2 extensions use it — a package must never silently
 	// override another package's capability.
 	ConflictFail ConflictPolicy = iota
 	// ConflictCollect keeps the deterministic winner (highest tier, then

@@ -11,6 +11,15 @@ test("historical changelog styling remains readable", () => {
   assert.match(css, /\.release-channel\s*\{/);
 });
 
+test("every release uses the version-ledger hero", () => {
+  assert.doesNotMatch(component, /isThematicTitle|isThematic/);
+  assert.doesNotMatch(component, /release-hero--compact|release-hero__actions|<blockquote>/);
+  assert.match(component, /<header class="release-hero">/);
+  assert.match(component, /<h1>Reasonix v\{release\.version\}<\/h1>/);
+  assert.match(component, /<p class="release-lede">/);
+  assert.doesNotMatch(css, /\.release-hero--compact|\.release-hero__actions|\.release-hero blockquote/);
+});
+
 test("changelog has one official navigation and marks archives noindex", () => {
   assert.doesNotMatch(component, /release-channel-tabs/);
   assert.match(component, /Historical archive/);

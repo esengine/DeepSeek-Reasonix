@@ -574,6 +574,95 @@ export interface HistoryPage {
   hasOlder: boolean;
 }
 
+// ── Windowed history paging (desktop/history_slice.go) ──────────────────────
+// HistorySliceForTab pages toward older history with an opaque cursor; the
+// first call uses cursor "" for the newest page. Entry IDs are stable for the
+// life of a session revision (s<file>:r<epoch>:m<msgIndex>:o<subOrder>).
+
+export interface HistorySliceRequest {
+  cursor: string; // "" = newest page; pass nextCursor to page older
+  turns?: number;
+  entries?: number;
+  bytes?: number;
+}
+
+// HistoryContentRef marks a string field replaced inline by a ≤4KiB preview;
+// the full value is fetchable in chunks via HistoryContentForTab.
+export interface HistoryContentRef {
+  entryId: string;
+  field: string; // content|reasoning|submitText|detail|code|summary|archive|toolResultError|toolArguments|toolSubject|toolSummary|toolDiff
+  size: number;
+  chunks: number;
+  toolCallId?: string;
+  revision: number;
+  revKnown?: boolean;
+  digest: string;
+}
+
+export interface HistoryEntry {
+  entryId: string;
+  turn: number; // 1-based visible turn (0 = before the first turn)
+  order: number; // absolute provider-message index
+  message: HistoryMessage;
+  refs: HistoryContentRef[];
+}
+
+export interface HistorySlice {
+  entries: HistoryEntry[];
+  nextCursor: string; // toward older; empty when none
+  hasOlder: boolean;
+  totalTurns: number;
+  startTurn: number;
+  endTurn: number;
+  stale: boolean; // cursor bound to an older session revision: discard + reload
+  revision: number;
+  // Diagnostic read path: index|scan|event-log|live-index|live-fallback (empty when the
+  // backend predates the field or no session was readable).
+  source?: string;
+}
+
+export interface HistoryContentChunk {
+  entryId: string;
+  field: string;
+  chunk: number;
+  chunks: number;
+  data: string;
+  done: boolean;
+  stale: boolean;
+}
+
+// ── Two-phase topic activation (desktop/topic_activation.go) ────────────────
+
+export interface TopicActivationRequest {
+  scope: string;
+  workspaceRoot: string;
+  topicId: string;
+  sessionPath: string;
+  requestId?: string;
+}
+
+export interface TopicActivationTicket {
+  requestId: string;
+  tabId: string;
+  meta: TabMeta;
+}
+
+export type TopicActivationPhase = "starting" | "ready" | "failed" | "cancelled";
+
+export interface TopicActivationEvent {
+  requestId: string;
+  tabId: string;
+  phase: TopicActivationPhase;
+  error?: string;
+}
+
+// tab:meta channel: a full refreshed Meta pushed after the background refresh
+// of the expensive MetaForTab fields (git branch, image-input capability).
+export interface TabMetaRefreshEvent {
+  tabId: string;
+  meta: Meta;
+}
+
 export interface PromptHistoryEntry {
   text: string;
   at: number;          // unix ms
@@ -988,6 +1077,7 @@ export interface SkillView {
   name: string;
   description: string;
   scope: string;
+  sourceDir?: string;
   runAs: string;
   enabled: boolean;
   plugin?: string;
@@ -1019,6 +1109,7 @@ export interface SkillRootView {
   scope: string;
   priority: number;
   status: string;
+  enabled: boolean;
   configured: boolean;
   removable: boolean;
   skills: number;
@@ -1030,10 +1121,12 @@ export interface CapabilitiesView {
   skills: SkillView[];
   skillRoots: SkillRootView[];
   plugins: PluginView[];
+  allowImplicitInvocation?: boolean;
 }
 export interface SkillsSettingsView {
   skills: SkillView[];
   skillRoots: SkillRootView[];
+  allowImplicitInvocation?: boolean;
 }
 export interface SubagentProfileInput {
   name: string;
@@ -1309,7 +1402,7 @@ export interface MemoryView {
 }
 
 // SettingsTab is the top-level navigation item in the Settings Centre modal.
-export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "updates";
+export type SettingsTab = "general" | "models" | "providers" | "bots" | "mcp" | "remote" | "skills" | "subagents" | "plugins" | "memory" | "hooks" | "diagnostics" | "shortcuts" | "permissions" | "sandbox" | "network" | "appearance" | "storage" | "updates";
 
 // ── Remote SSH module (mirrors desktop/remote_app.go view structs) ──
 
@@ -1466,6 +1559,20 @@ export interface RemoteForwardsEvent {
   forwards: RemoteForwardView[];
 }
 
+/** Extension runtime doctor report from App.RuntimeDoctor. */
+export interface RuntimeDoctorReport {
+  text: string;
+  publishedGeneration: number;
+  allowResume: boolean;
+  cleanRollback: boolean;
+  hasIrreversible: boolean;
+  noOpRebuilds: number;
+  fullRebuilds: number;
+  subgraphRebuilds: number;
+  staleDrops: number;
+  admissionRejected: number; runtimeOwnerFallbacks: number;
+}
+
 /** Capability diagnostics report from App.CapabilityDiagnostics (capdiag.Report). */
 export interface CapabilityDiagnosticsReport {
   schema_version: number;
@@ -1589,7 +1696,7 @@ export interface ProviderView {
   keySourcePath?: string;
   balanceUrl: string; // optional wallet-balance endpoint; "" disables the readout
   contextWindow: number;
-  reasoningProtocol: string; // auto|deepseek|glm|openai|none; empty = auto/model registry
+  reasoningProtocol: string; // auto|deepseek|glm|kimi-k3|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
   webSearch?: boolean; // expose a provider-executed web search tool when supported
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default

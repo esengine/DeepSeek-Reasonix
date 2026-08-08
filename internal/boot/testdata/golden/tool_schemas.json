@@ -218,6 +218,40 @@
     }
   },
   {
+    "Name": "compress",
+    "Description": "Compress a selected part of the current model-visible conversation without deleting visible history. Use only when the user explicitly asks for context compression. Choose `before` to summarize everything before the uniquely matched user turn while keeping that turn and later context, or `after` to summarize from that turn through the last completed turn while keeping the active turn. The anchor must be an exact, unique excerpt from a real user message; use a longer excerpt if the tool reports multiple matches.",
+    "ReadOnly": true,
+    "Schema": {
+      "additionalProperties": false,
+      "properties": {
+        "anchor": {
+          "description": "An exact, unique excerpt from one real user message in the current model-visible conversation.",
+          "maxLength": 512,
+          "minLength": 1,
+          "type": "string"
+        },
+        "direction": {
+          "description": "Which side of the anchor user turn to compress.",
+          "enum": [
+            "before",
+            "after"
+          ],
+          "type": "string"
+        },
+        "focus": {
+          "description": "Optional guidance about facts or decisions the summary must preserve.",
+          "maxLength": 2000,
+          "type": "string"
+        }
+      },
+      "required": [
+        "anchor",
+        "direction"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "Name": "delete_range",
     "Description": "Delete a contiguous text range from a file using exact start/end text anchors. Each anchor must match exactly one line. Returns unified diff on success. Use for large deletions — smaller changes should use edit_file.",
     "ReadOnly": false,

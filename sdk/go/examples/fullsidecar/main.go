@@ -1,5 +1,5 @@
 // Command fullsidecar is the reference Reasonix extension sidecar: one small
-// program that exercises every Extension Protocol v1 contribution kind —
+// program that exercises every Extension Protocol v2 contribution kind —
 // input rewriting, tool interception, system-prompt strategy replacement, an
 // extension-hosted streaming provider, structured UI surfaces and prompts,
 // and a clean bounded shutdown. It is the example third parties copy.
@@ -126,6 +126,7 @@ func (p *plugin) Initialize(_ context.Context, params extension.InitializeParams
 		Replaces:      []string{"system_prompt"},
 		Providers:     []extension.ProviderDescriptor{fakeDescriptor(p.id)},
 		UIActions:     []extension.UIActionDecl{{ActionID: "demo", Label: "Run the fullsidecar demo"}},
+		Provides:      append([]extension.CapabilityWire(nil), params.Manifest.Provides...),
 	}, nil
 }
 

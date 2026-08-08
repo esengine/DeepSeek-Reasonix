@@ -274,6 +274,25 @@ func (s *Session) Len() int {
 	return len(s.Messages)
 }
 
+// MessageRange returns a copy of the messages in [start, end), clamped to the
+// current log bounds, safe to read from another goroutine while a turn
+// appends. Paging frontends use it to fetch a display window without paying
+// for a Snapshot of the whole history.
+func (s *Session) MessageRange(start, end int) []provider.Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if start < 0 {
+		start = 0
+	}
+	if end > len(s.Messages) {
+		end = len(s.Messages)
+	}
+	if start >= end {
+		return []provider.Message{}
+	}
+	return append([]provider.Message(nil), s.Messages[start:end]...)
+}
+
 // CloneWithMessages returns a fresh Session carrying msgs while preserving the
 // persistence baseline of the source session. Resume paths use this when they
 // need to adjust loaded history before a rewrite; dropping persisted would make

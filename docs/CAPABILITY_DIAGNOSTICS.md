@@ -194,7 +194,7 @@ Top-level fields:
 - `instructions`, `skills`, `commands`, `hooks`, `plugins`, `mcp`
 - `issues[]` — ordered list of findings
 
-Plugin package entries are additive for Manifest v1: each package also
+Plugin package entries are additive for Manifest v2: each package also
 reports `prompts` and `themes` counts and a `runtime` flag when the plugin
 declares a code runtime (see
 <a href="./PLUGIN_PACKAGES.md">Plugin packages</a>). Older readers can ignore

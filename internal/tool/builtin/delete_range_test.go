@@ -289,7 +289,7 @@ func TestDeleteRangePreview(t *testing.T) {
 	body := "line1\nline2\nline3\nline4\nline5\n"
 	os.WriteFile(f, []byte(body), 0o644)
 
-	change, err := deleteRange{}.Preview(argsJSON(t, map[string]any{
+	change, err := deleteRange{}.Preview(context.Background(), argsJSON(t, map[string]any{
 		"path": f, "start_anchor": "line2", "end_anchor": "line4",
 	}))
 	if err != nil {

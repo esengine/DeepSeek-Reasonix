@@ -1311,6 +1311,60 @@ func (a *App) applyConfigChange(mutate func(*config.Config) error) error {
 	return err
 }
 
+// applySkillConfigChange edits the config file that owns the selected [skills]
+// field. Project skill settings shadow the global setting at runtime, so
+// writing only the user config would make the UI appear to save while the
+// active project continued using its old value.
+func (a *App) applySkillConfigChange(field, setting string, mutate func(*config.Config) error) error {
+	return a.applySkillConfigChangeForFields([]string{field}, setting, mutate)
+}
+
+func (a *App) applySkillConfigChangeForFields(fields []string, setting string, mutate func(*config.Config) error) error {
+	workspaceRoot := a.activeWorkspaceRoot()
+	projectPath := config.SourcePathForRoot(workspaceRoot)
+	projectOwned := strings.TrimSpace(projectPath) != "" && !config.IsUserConfigPath(projectPath)
+	if projectOwned {
+		projectOwned = slices.ContainsFunc(fields, func(field string) bool {
+			return config.ConfigFileDefinesSkillKey(projectPath, field)
+		})
+	}
+	if !projectOwned {
+		return a.applyConfigChange(mutate)
+	}
+	if err := a.ensureActiveTabRebuildAllowed(setting); err != nil {
+		return err
+	}
+	if err := func() error {
+		unlock, err := config.LockConfigFileEdits(projectPath)
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		cfg, err := config.LoadForEditWithoutCredentialsReadOnlyStrict(projectPath)
+		if err != nil {
+			return err
+		}
+		if err := mutate(cfg); err != nil {
+			return err
+		}
+		for _, field := range fields {
+			if err := cfg.KeepProjectSkillKey(field); err != nil {
+				return err
+			}
+		}
+		return cfg.SaveTo(projectPath)
+	}(); err != nil {
+		return err
+	}
+	if err := a.rebuildSetting(setting); err != nil {
+		if _, ok := a.deferredRebuildWarning(setting, err); ok {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func (a *App) applyConfigChangeWithWarning(setting string, mutate func(*config.Config) error) (string, error) {
 	if err := a.ensureActiveTabRebuildAllowed(setting); err != nil {
 		return "", err
@@ -1877,7 +1931,8 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 	a.supersedeTabBuildLocked(tab)
 	a.saveTabsLocked()
 	a.mu.Unlock()
-	if oldCtrl != nil {
+	// True subgraph rebuilds reuse the same controller pointer — never Close it.
+	if oldCtrl != nil && oldCtrl != ctrl {
 		oldCtrl.Close()
 	}
 	a.persistTabSessionPath(tab, path)
@@ -1902,6 +1957,7 @@ func (a *App) rebuildSettingTurnLocked(setting string, tab *WorkspaceTab, admiss
 func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRuntimeSnapshot, runtime normalizedTabRuntime, model, prevPath, setting string, oldCtrl control.SessionAPI, carried []provider.Message, reload bool) (control.SessionAPI, normalizedTabRuntime, string, error) {
 	opts := boot.Options{
 		Model: model, RequireKey: false,
+		RuntimeReload:            boot.RuntimeReload{ForceFullRebuild: reload},
 		AutoPricingCurrency:      a.desktopAutoPricingCurrency(),
 		StatsSource:              "desktop",
 		Sink:                     snap.sink,
@@ -1920,12 +1976,10 @@ func (a *App) buildSettingReplacementController(tab *WorkspaceTab, snap tabRunti
 		if !ok {
 			return nil, normalizedTabRuntime{}, "", fmt.Errorf("reload runtime: controller is %T, want *control.Controller", oldCtrl)
 		}
-		res, err := boot.Rebuild(a.bootContext(), old, opts)
+		res, err := rebuildTabRuntime(a, tab, old, opts)
 		if err != nil {
 			return nil, normalizedTabRuntime{}, "", err
 		}
-		// The stage-3a runtime set is always empty; when stage 5 binds
-		// sidecar processes it must retire with the controller it belongs to.
 		ctrl := res.Controller
 		a.bindControllerDisplayRecorder(ctrl)
 		// boot.Rebuild migrated history (same session file, fresh system

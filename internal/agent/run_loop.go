@@ -59,7 +59,6 @@ type perTurnState struct {
 	deliveryMutationExpected    bool
 	deliveryPersistentExpected  bool
 	deliveryScopeActive         bool
-
 	// readinessRecovered marks a run that started with evidence preserved from
 	// (or a pending recovery of) a prior readiness failure, so the final
 	// allowed audit can report Recovered=true.
@@ -210,7 +209,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 		case scoped && a.deliveryScopeID == scope.ID:
 			a.evidence.ResetBackgroundLeases()
 		default:
-			a.evidence.Reset()
+			a.resetTurnEvidence()
 		}
 	}
 	a.preserveEvidenceOnce = false
@@ -380,7 +379,7 @@ func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 		// Keep reasoning_content on the assistant turn for display and session
 		// archive. Most OpenAI-compatible backends do not replay it; providers
 		// with an explicit round-trip contract retain the raw provider text.
-		calls = a.withPreviewFileDiffs(calls)
+		calls = a.withPreviewFileDiffs(ctx, calls)
 		a.session.Add(provider.Message{
 			Role:               provider.RoleAssistant,
 			Content:            text,
@@ -938,6 +937,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 	if readiness.applies {
 		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, a.readinessRecovered))
 	}
+	a.emitContractShadow(state.input)
 	if !a.closeSteerIntakeIfIdle() {
 		return true, nil
 	}

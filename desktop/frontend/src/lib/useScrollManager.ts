@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from "react";
-import gsap from "gsap";
-import { DUR_FAST, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
+import { DUR_FAST, prefersReducedMotion } from "./gsapAnimations";
 import { isEditableTarget } from "./keyboardShortcuts";
-
-type GsapModule = typeof gsap & { gsap?: typeof gsap };
 
 const BOTTOM_THRESHOLD_PX = 80;
 const TOUCH_SCROLL_THRESHOLD_PX = 2;
@@ -29,25 +26,20 @@ function isScrollable(el: HTMLElement): boolean {
   return el.scrollHeight - el.clientHeight > 1;
 }
 
-const gsapApi = typeof gsap.killTweensOf === "function"
-  ? gsap
-  : ((gsap as GsapModule).gsap ?? gsap);
-
 /**
- * useScrollManager — GSAP-driven auto-scroll for the transcript container.
+ * useScrollManager — frame-batched auto-scroll for the transcript container.
  *
  * - Auto-pins to the bottom when content is near the edge.
  * - Smooth scroll for jump-to-question navigation.
- * - Uses gsap.scrollTo for layout-safe scrolling (avoids layout thrashing).
- * - Batches ResizeObserver callbacks into a single GSAP tween.
+ * - Batches ResizeObserver callbacks into a single animation frame.
  */
 export function useScrollManager() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const gsapCtx = useRef<gsap.Context | null>(null);
   const prevQuestionsLen = useRef(0);
   const resizeFrame = useRef<number | null>(null);
   const repinFrame = useRef<number | null>(null);
+  const smoothScrollTimer = useRef<number | null>(null);
   const pendingRepinHeightDelta = useRef(0);
   const layoutScrollFrames = useRef<number[]>([]);
   const touchStartY = useRef<number | null>(null);
@@ -55,12 +47,11 @@ export function useScrollManager() {
   const lastFooterHeight = useRef<number | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
-  // Kill any lingering tweens on unmount.
   useEffect(() => {
     return () => {
-      gsapCtx.current?.revert();
       if (resizeFrame.current !== null) cancelAnimationFrame(resizeFrame.current);
       if (repinFrame.current !== null) cancelAnimationFrame(repinFrame.current);
+      if (smoothScrollTimer.current !== null) clearTimeout(smoothScrollTimer.current);
       for (const frame of layoutScrollFrames.current) cancelAnimationFrame(frame);
       layoutScrollFrames.current = [];
     };
@@ -89,7 +80,12 @@ export function useScrollManager() {
 
   const releaseAutoScroll = useCallback(() => {
     const el = scrollRef.current;
-    if (el) gsapApi.killTweensOf(el);
+    if (smoothScrollTimer.current !== null) {
+      clearTimeout(smoothScrollTimer.current);
+      smoothScrollTimer.current = null;
+    }
+    // A same-position instant scroll cancels an in-flight native smooth scroll.
+    if (el && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollTop, behavior: "auto" });
     cancelPendingBottomScroll();
     stick.current = false;
     setIsAtBottom(false);
@@ -160,12 +156,17 @@ export function useScrollManager() {
     const containerRect = el.getBoundingClientRect();
     const top = el.scrollTop + rect.top - containerRect.top - offset;
     const reduced = prefersReducedMotion();
-    gsapApi.to(el, {
-      scrollTo: { y: Math.max(0, top) },
-      duration: reduced ? 0.001 : DUR_FAST * 2,
-      ease: EASE_OUT,
-      onComplete: () => updateBottomState(el),
-    });
+    const target = Math.max(0, top);
+    if (typeof el.scrollTo === "function") el.scrollTo({ top: target, behavior: reduced ? "auto" : "smooth" });
+    else el.scrollTop = target;
+    if (smoothScrollTimer.current !== null) clearTimeout(smoothScrollTimer.current);
+    if (reduced) updateBottomState(el);
+    else {
+      smoothScrollTimer.current = window.setTimeout(() => {
+        smoothScrollTimer.current = null;
+        updateBottomState(el);
+      }, DUR_FAST * 2 * 1000);
+    }
   }, [updateBottomState]);
 
   /** Force-scroll to the bottom — used when a new question is sent. */
@@ -188,17 +189,11 @@ export function useScrollManager() {
         stick.current = true;
         setIsAtBottom(true);
       }
-      const reduced = prefersReducedMotion();
-      gsapApi.to(el, {
-        scrollTo: { y: "max" },
-        duration: reduced ? 0.001 : DUR_FAST,
-        ease: "none",
-        overwrite: "auto",
-        onComplete: () => {
-          stick.current = true;
-          setIsAtBottom(true);
-        },
-      });
+      // Streaming tail-follow should settle in one frame. Smooth tweens queue
+      // behind token/layout updates and are a common source of WebView jank.
+      el.scrollTop = el.scrollHeight;
+      stick.current = true;
+      setIsAtBottom(true);
     });
   }, []);
 
@@ -209,7 +204,10 @@ export function useScrollManager() {
       cancelAnimationFrame(resizeFrame.current);
       resizeFrame.current = null;
     }
-    gsapApi.killTweensOf(el);
+    if (smoothScrollTimer.current !== null) {
+      clearTimeout(smoothScrollTimer.current);
+      smoothScrollTimer.current = null;
+    }
     stick.current = true;
     el.scrollTop = el.scrollHeight;
     setIsAtBottom(true);

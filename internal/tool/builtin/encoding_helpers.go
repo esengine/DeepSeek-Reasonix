@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"reasonix/internal/fileutil"
 	fileenc "reasonix/internal/fileutil/encoding"
 )
 
@@ -22,8 +23,11 @@ func readFileEncoded(path string) (content string, enc fileenc.Kind, err error) 
 }
 
 // writeFileEncoded encodes content back to the given encoding and writes it.
+// The write is atomic: a truncating write that fails midway (a Windows filter
+// driver holding a transient lock, a full disk) would leave the user's source
+// file empty or half-written.
 func writeFileEncoded(path string, content string, enc fileenc.Kind) error {
-	return os.WriteFile(path, fileenc.Encode(content, enc), 0o644)
+	return fileutil.AtomicOverwriteFile(path, fileenc.Encode(content, enc), 0o644)
 }
 
 // matchLineEndings adapts an edit's old/new text to a CRLF file when the literal

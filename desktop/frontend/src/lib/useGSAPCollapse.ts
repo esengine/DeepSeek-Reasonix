@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef } from "react";
-import gsap from "gsap";
-import { DUR_BASE, EASE_OUT, prefersReducedMotion } from "./gsapAnimations";
+import { DUR_BASE, prefersReducedMotion } from "./gsapAnimations";
+
+const CSS_EASE_OUT = "cubic-bezier(0.2, 0.72, 0.2, 1)";
 
 /**
  * useGSAPCollapse — animate a container's height between 0 and its
@@ -32,6 +33,7 @@ export function useGSAPCollapse(
   },
 ) {
   const prevOpen = useRef<boolean | null>(null);
+  const animationRef = useRef<Animation | null>(null);
   const onOpenRef = useRef(opts?.onOpenComplete);
   const onCloseRef = useRef(opts?.onCloseComplete);
   onOpenRef.current = opts?.onOpenComplete;
@@ -57,46 +59,41 @@ export function useGSAPCollapse(
 
     const reduced = prefersReducedMotion();
     const dur = reduced ? 0.001 : (opts?.duration ?? DUR_BASE);
-    const ease = opts?.ease ?? EASE_OUT;
+    const ease = opts?.ease && opts.ease !== "power2.out" ? opts.ease : CSS_EASE_OUT;
+    animationRef.current?.cancel();
+    animationRef.current = null;
 
-    // Kill any in-flight GSAP animations on this element so we always
-    // start from the current rendered height.
-    gsap.killTweensOf(el);
+    const finish = () => {
+      el.style.height = open ? "auto" : "0px";
+      if (open) onOpenRef.current?.();
+      else onCloseRef.current?.();
+    };
+    if (reduced || typeof el.animate !== "function") {
+      finish();
+      return;
+    }
 
     if (open) {
-      // Phase 1 — measure the target (auto) height without visible change.
-      gsap.set(el, { height: "auto" });
       const targetHeight = el.scrollHeight;
-      // Phase 2 — animate from current (which is 0 or whatever the kill
-      // left us at) to the measured target height; then clear the inline
-      // style so the element returns to `height: auto` / CSS-driven flow.
-      gsap.fromTo(
-        el,
-        { height: 0 },
-        {
-          height: targetHeight,
-          duration: dur,
-          ease,
-          clearProps: "height",
-          onComplete: () => onOpenRef.current?.(),
-        },
+      const animation = el.animate(
+        [{ height: "0px" }, { height: `${targetHeight}px` }],
+        { duration: dur * 1000, easing: ease },
       );
+      animationRef.current = animation;
+      animation.onfinish = finish;
     } else {
       // Close: if caller provided a pre-swap height use it as the start,
       // otherwise measure the current (already-swapped) scrollHeight.
       const startHeight = opts?.prevHeight && opts.prevHeight > 0
         ? opts.prevHeight
-        : (gsap.set(el, { height: "auto" }), el.scrollHeight);
-      gsap.fromTo(
-        el,
-        { height: startHeight },
-        {
-          height: 0,
-          duration: dur,
-          ease,
-          onComplete: () => onCloseRef.current?.(),
-        },
+        : Math.max(el.getBoundingClientRect().height, el.scrollHeight);
+      const animation = el.animate(
+        [{ height: `${startHeight}px` }, { height: "0px" }],
+        { duration: dur * 1000, easing: ease },
       );
+      animationRef.current = animation;
+      animation.onfinish = finish;
     }
+    return () => animationRef.current?.cancel();
   }, [open, ref]);
 }

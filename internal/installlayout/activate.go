@@ -365,9 +365,17 @@ func copyFileRegular(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	closed := false
+	closeOut := func() error {
+		if closed {
+			return nil
+		}
+		closed = true
+		return out.Close()
+	}
 	ok := false
 	defer func() {
-		_ = out.Close()
+		_ = closeOut()
 		if !ok {
 			_ = os.Remove(dst)
 		}
@@ -378,7 +386,7 @@ func copyFileRegular(src, dst string, mode os.FileMode) error {
 	if err := out.Sync(); err != nil {
 		return err
 	}
-	if err := out.Close(); err != nil {
+	if err := closeOut(); err != nil {
 		return err
 	}
 	ok = true

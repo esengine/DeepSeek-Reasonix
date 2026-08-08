@@ -1,0 +1,4 @@
+prompt = "overlaps(a, b) in intervals.py misjudges some interval pairs. Fix it so half-open intervals [start, end) are compared correctly."
+class = "atomic-bugfix"
+max_steps = 12
+timeout_sec = 180

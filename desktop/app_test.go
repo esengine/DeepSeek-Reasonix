@@ -5639,9 +5639,24 @@ func TestMetaForTabReportsImageInputCapability(t *testing.T) {
 	if err := app.SetModel("custom/vision-pro"); err != nil {
 		t.Fatalf("SetModel(custom/vision-pro): %v", err)
 	}
-	if got := app.Meta().ImageInputEnabled; !got {
-		t.Fatal("vision model meta should enable image input")
+	// ImageInputEnabled is served from the per-tab cache; the model change
+	// invalidates it and a background refresh repopulates it (tab:meta).
+	waitForMetaImageInput(t, app, true)
+}
+
+// waitForMetaImageInput polls until the cached image-input capability reaches
+// the expected value. MetaForTab serves the background-refreshed cache, so the
+// value flips asynchronously after a model/settings change.
+func waitForMetaImageInput(t *testing.T, app *App, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if app.Meta().ImageInputEnabled == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
+	t.Fatalf("Meta().ImageInputEnabled did not become %v", want)
 }
 
 func TestMetaForTabImageInputCapabilityUsesCurrentRef(t *testing.T) {
@@ -8302,7 +8317,7 @@ func installGatedTestPluginPackage(t *testing.T, mcpServerName string) string {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{"apiVersion": "reasonix.io/plugin/v2",
   "name": "review-helper",
   "version": "1.0.0",
   "mcpServers": {
@@ -9079,7 +9094,7 @@ func TestRemoveMCPServerRejectsPluginManagedServerWithoutDisconnecting(t *testin
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{
+	if err := os.WriteFile(filepath.Join(root, pluginpkg.NativeManifest), fmt.Appendf(nil, `{"apiVersion": "reasonix.io/plugin/v2",
   "name": "superpowers",
   "version": "1.0.0",
   "mcpServers": {

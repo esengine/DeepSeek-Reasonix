@@ -158,6 +158,11 @@ console.log("\ntranscript selection menu");
   const addButton = document.querySelector(".transcript-selection-action button") as HTMLButtonElement | null;
   eq(addButton?.textContent?.includes("Add to Chat"), true, "pointer selection exposes Add to Chat");
   await act(async () => {
+    addButton?.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    await flushTimers();
+  });
+  eq(document.getSelection()?.isCollapsed, false, "clicking Add to Chat keeps the captured selection until activation");
+  await act(async () => {
     addButton?.click();
     await flushTimers();
   });
@@ -202,6 +207,22 @@ console.log("\ntranscript selection menu");
     await drainFrame();
   });
   ok(document.querySelector(".transcript-selection-action") != null, "a fresh pointer gesture re-opens the dismissed action");
+
+  // A new left-click must release the previous browser range before the
+  // WebView's selectionchange event arrives. This keeps a stale selection from
+  // surviving a click elsewhere in the chat area.
+  selectNodeText(msgBody.firstChild as Node);
+  await act(async () => {
+    document.dispatchEvent(new window.MouseEvent("pointerdown", { bubbles: true, button: 0 }));
+    await flushTimers();
+  });
+  eq(document.getSelection()?.isCollapsed, true, "a new left-click clears the previous transcript selection");
+  eq(document.querySelector(".transcript-selection-action"), null, "clearing the selection closes the floating action");
+  selectNodeText(msgBody.firstChild as Node);
+  await act(async () => {
+    msgBody.dispatchEvent(new window.MouseEvent("pointerup", { bubbles: true, button: 0 }));
+    await drainFrame();
+  });
 
   // Rebinding selection.addToChat through the shared shortcut registry remaps
   // both the handler and the visible hint; the old combo stops firing.
@@ -249,6 +270,7 @@ console.log("\ntranscript selection menu");
     await flushTimers();
   });
   eq(document.querySelector(".transcript-selection-action"), null, "a tab switch discards the captured selection action");
+  eq(document.getSelection()?.isCollapsed, true, "a tab switch clears the native transcript selection");
   await act(async () => {
     root.render(
       <LocaleProvider>
@@ -262,6 +284,10 @@ console.log("\ntranscript selection menu");
     await drainFrame();
   });
   eq(document.querySelector(".transcript-selection-action"), null, "keyup over a hydration placeholder cannot re-summon the action");
+  selectNodeText(msgBody.firstChild as Node);
+  const disabledContextEvent = await dispatchContextMenu(msgBody);
+  eq(disabledContextEvent.defaultPrevented, false, "disabled selection handling leaves the native context menu alone");
+  eq(document.querySelector(".context-menu"), null, "disabled selection handling does not open a copy menu");
 
   selectNodeText(msgBody.firstChild as Node);
   await act(async () => {
@@ -274,6 +300,15 @@ console.log("\ntranscript selection menu");
   });
   await dispatchContextMenu(msgBody);
   ok(document.querySelector(".context-menu") != null, "the copy menu opens before a tab switch");
+  await act(async () => {
+    root.render(
+      <LocaleProvider>
+        <TranscriptSelectionMenu onAddToChat={(text) => additions.push(text)} resetKey="tab-b" enabled={false} />
+      </LocaleProvider>,
+    );
+    await flushTimers();
+  });
+  eq(document.querySelector(".context-menu"), null, "disabling selection handling closes an already-open copy menu");
   await act(async () => {
     root.render(
       <LocaleProvider>

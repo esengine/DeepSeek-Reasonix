@@ -23,6 +23,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/boot"
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
@@ -112,7 +113,6 @@ type chatTUI struct {
 	// Persists across turns until the work completes or a new session starts.
 	todoArgs string
 
-	// planMode mirrors the agent's plan-first workflow (Shift+Tab toggles it). The
 	// marker rides in outgoing user messages so the cache-stable prompt prefix is
 	// left untouched.
 	planMode bool
@@ -360,7 +360,8 @@ type chatTUI struct {
 	// migrates inside the boot layer. Set by chatREPL (it must NOT touch
 	// this model — the swap happens on the running copy); nil disables
 	// /reload.
-	rebuildRuntime runtimeRebuilder
+	rebuildRuntime  runtimeRebuilder
+	lastBuildResult *boot.BuildResult
 	// pendingReload coalesces /reload requests made while a turn or a runtime
 	// switch is in flight; the TurnDone drain runs it once the TUI is idle.
 	pendingReload  bool
@@ -710,7 +711,6 @@ func configureChatTextarea(ti *textarea.Model) {
 	// Linux terminals send Ctrl+arrows for the same intent.
 	ti.KeyMap.WordForward = key.NewBinding(key.WithKeys("alt+right", "alt+f", "ctrl+right"))
 	ti.KeyMap.WordBackward = key.NewBinding(key.WithKeys("alt+left", "alt+b", "ctrl+left"))
-	// mirrors the word-motion convention: macOS uses Alt+Backspace, Windows and
 	// Linux terminals send Ctrl+Backspace to delete the word behind the cursor.
 	ti.KeyMap.DeleteWordBackward = key.NewBinding(key.WithKeys("alt+backspace", "ctrl+w", "ctrl+backspace"))
 	ti.Focus()
@@ -1840,11 +1840,8 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.runtimeProfile = msg.profile
 			}
 			m.refreshEffortStatus()
-			// Stash the old controller for cleanup at exit. It cannot be
-			// closed here or in the build goroutine — Close() runs
-			// SessionEnd hooks and kills plugin subprocesses, both of
-			// which corrupt bubbletea's terminal raw mode.
-			if msg.oldCtrl != nil {
+			// Defer Close to exit; skip when subgraph rebuild reused the pointer.
+			if msg.oldCtrl != nil && msg.oldCtrl != msg.ctrl {
 				m.oldControllers = append(m.oldControllers, msg.oldCtrl)
 			}
 			// The lease follows the controller's session file. Normally a
@@ -1893,11 +1890,7 @@ func (m chatTUI) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case mcpExternalDoneMsg:
-		if msg.err != nil {
-			m.notice(msg.label + ": " + msg.err.Error())
-		} else if msg.target != "" {
-			m.notice(msg.label + ": " + msg.target)
-		}
+		m.handleMCPExternalDone(msg)
 
 	case refsResolvedMsg:
 		for _, e := range msg.errs {

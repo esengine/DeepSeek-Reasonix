@@ -32,6 +32,27 @@ func TestWriteFileOverwrites(t *testing.T) {
 	}
 }
 
+func TestWriteFileRecordsLocalPrior(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "receipt.txt")
+	if err := os.WriteFile(f, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var gotPath string
+	var gotPrior []byte
+	var gotHadPrior bool
+	w := writeFile{receipt: func(path string, hadPrior bool, prior []byte) {
+		gotPath = path
+		gotHadPrior = hadPrior
+		gotPrior = append([]byte(nil), prior...)
+	}}
+	if _, err := w.Execute(context.Background(), argsJSON(t, map[string]any{"path": f, "content": "new"})); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != f || !gotHadPrior || string(gotPrior) != "old" {
+		t.Fatalf("receipt = path:%q hadPrior:%v prior:%q", gotPath, gotHadPrior, gotPrior)
+	}
+}
+
 func TestWriteFileSameContentNoOp(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "x.txt")
 	os.WriteFile(f, []byte("same"), 0o644)

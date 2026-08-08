@@ -3,6 +3,7 @@
 // Bilingual like the rest of the site: static labels via .l-en/.l-zh spans that the
 // shared `reasonix-lang` choice toggles; plain-text strings pick the current lang.
 import { initTheme } from "./theme.js";
+import { initMobileNav } from "./mobile-nav.js";
 
 const FORUM = (import.meta.env.PUBLIC_FORUM_API || "https://forum.reasonix.io").replace(/\/$/, "");
 const ACCOUNTS = (import.meta.env.PUBLIC_ACCOUNTS_API || "https://id.reasonix.io").replace(/\/$/, "");
@@ -127,12 +128,11 @@ const loginUrl = () => `/login/?next=${encodeURIComponent(location.pathname + lo
 let account = null;
 async function loadAccount() {
   try { account = (await api(ACCOUNTS, "/me")).user; } catch { account = null; }
-  const slot = el("nav-account");
-  if (slot) {
+  document.querySelectorAll("#nav-account, #mobile-nav-account").forEach((slot) => {
     slot.innerHTML = account
       ? `<a href="/account/" title="${esc(account.email)}">${avatar(account.handle)}</a>`
       : `<a class="btn btn-ghost sm" href="${loginUrl()}">${L("Sign in", "登录")}</a>`;
-  }
+  });
 }
 
 /* ── home ─────────────────────────────────────────── */
@@ -327,6 +327,7 @@ async function renderNew() {
 
 (async function () {
   initTheme();
+  initMobileNav();
   initLang();
   await loadAccount();
   if (el("topic-list")) renderHome();

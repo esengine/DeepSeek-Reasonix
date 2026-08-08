@@ -14,13 +14,12 @@ import (
 // orchestration (truncating the session, restoring code, emitting events) that
 // needs its other collaborators.
 //
-// turn is decoupled from the store so it never collides after a log restructure;
+// turn is decoupled from the store so it remains monotonic across session work;
 // bound[turn] records len(Session.Messages) at that turn's start — the truncation
 // boundary for a conversation rewind/fork. Boundaries are persisted in each
 // checkpoint and rebuilt from the store on resume (so a reopened session can still
-// rewind conversation / fork), but dropped after a summarize restructures the log
-// so those operations report "unavailable" rather than mis-truncating; code
-// rewind (file-based) is unaffected. Every store call does its disk I/O off mu —
+// rewind conversation / fork). Context compression never changes the transcript,
+// so it leaves these boundaries intact. Every store call does its disk I/O off mu —
 // mu is taken only to read/swap the store pointer and mutate turn/bound.
 type checkpointManager struct {
 	// mu guards store, turn, and bound; every critical section under it is short
@@ -153,15 +152,6 @@ func (m *checkpointManager) truncateFrom(turn int) error {
 	}
 	m.mu.Unlock()
 	return nil
-}
-
-// clearBounds drops every boundary after a summarize restructures the log (so
-// conversation rewind degrades to "unavailable" until fresh turns rebuild them)
-// while keeping turn monotonic so new turns don't collide with the store.
-func (m *checkpointManager) clearBounds() {
-	m.mu.Lock()
-	m.bound = map[int]int{}
-	m.mu.Unlock()
 }
 
 // storeRef returns the live store pointer without holding mu across caller work.

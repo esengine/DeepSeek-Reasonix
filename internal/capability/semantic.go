@@ -248,7 +248,7 @@ func mergeSemanticIDs(decision RouteDecision, catalog Catalog, ids []string, rea
 			continue
 		}
 		e, ok := catalog.Lookup(id)
-		if !ok {
+		if !ok || e.Status == StatusFailed || e.Status == StatusDisabled {
 			continue
 		}
 		decision.Candidates = append(decision.Candidates, RouteCandidate{

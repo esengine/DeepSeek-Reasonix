@@ -1,0 +1,4 @@
+prompt = "Read the code in this directory and determine which pipeline stage actually runs last when main.py's run() executes. Write only that stage's name to answer.txt — nothing else."
+class = "repo-exploration"
+max_steps = 25
+timeout_sec = 420

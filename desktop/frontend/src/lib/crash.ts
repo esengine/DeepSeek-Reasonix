@@ -4,6 +4,7 @@
 import { addBreadcrumb, dumpBreadcrumbs, snapshotBreadcrumbs, type Breadcrumb } from "./breadcrumbs";
 import { writeClipboardText } from "./clipboard";
 import { t } from "./i18n";
+import { sessionPipelineDiagnostics, type SessionPipelineDiagnostics } from "./sessionDiagnostics";
 
 declare const __BUILD_COMMIT__: string;
 declare const __BUILD_CHANNEL__: string;
@@ -43,6 +44,11 @@ export type PerformanceSnapshot = {
     rttMs?: number;
     saveData?: boolean;
   };
+  // Session-switch/history pipeline diagnostics (Phase F): last activation
+  // timings, last HistorySlice page stats with index hit/miss, virtual mounted
+  // rows, markdown worker counters, transcript cache weights. All optional —
+  // absent before the first switch/page or when a provider never registered.
+  sessionPipeline?: SessionPipelineDiagnostics;
 };
 
 export type CrashPayload = {
@@ -365,6 +371,7 @@ function networkSnapshot(): PerformanceSnapshot["connection"] {
 function performanceSnapshot(reason: string, currentLagMs = 0): PerformanceSnapshot {
   const nav = typeof navigator === "undefined" ? undefined : (navigator as BrowserNavigator);
   const doc = typeof document === "undefined" ? undefined : document;
+  const pipeline = sessionPipelineDiagnostics();
   return {
     reason,
     uptimeMs: typeof performance !== "undefined" ? performance.now() : 0,
@@ -377,6 +384,7 @@ function performanceSnapshot(reason: string, currentLagMs = 0): PerformanceSnaps
     eventLoopLag: eventLoopLagSummary(currentLagMs),
     longTasks: typeof performance !== "undefined" ? longTaskSummary() : undefined,
     connection: networkSnapshot(),
+    sessionPipeline: Object.keys(pipeline).length > 0 ? pipeline : undefined,
   };
 }
 
@@ -426,6 +434,44 @@ export function formatPerformanceContext(snapshot: PerformanceSnapshot): string 
       snapshot.connection.saveData !== undefined ? `saveData ${snapshot.connection.saveData ? "true" : "false"}` : "",
     ].filter(Boolean);
     if (parts.length) lines.push(`connection: ${parts.join(", ")}`);
+  }
+  const pipeline = snapshot.sessionPipeline;
+  if (pipeline?.activation) {
+    const a = pipeline.activation;
+    const parts = [`request ${a.requestId}`];
+    if (a.tabId) parts.push(`tab ${a.tabId}`);
+    if (a.ticketToStartingMs !== undefined) parts.push(`ticket→starting ${fmtNumber(a.ticketToStartingMs)}ms`);
+    if (a.startingToReadyMs !== undefined) parts.push(`starting→ready ${fmtNumber(a.startingToReadyMs)}ms`);
+    if (a.totalMs !== undefined) parts.push(`total ${fmtNumber(a.totalMs)}ms`);
+    if (a.outcome) parts.push(`outcome ${a.outcome}`);
+    if (a.failureClass) parts.push(`failure ${a.failureClass}`);
+    lines.push(`activation: ${parts.join(", ")}`);
+  }
+  if (pipeline?.history) {
+    const h = pipeline.history;
+    lines.push(
+      `history page: ${h.entries} entries, ${fmtNumber(h.inlineBytes / 1024, 1)} KiB inline, ${fmtNumber(h.durationMs)}ms, source ${h.source || "unknown"}${h.stale ? ", stale" : ""} ` +
+        `(pages ${h.pages}, stale ${h.staleCount}, index hits ${h.indexHits}, misses ${h.indexMisses})`,
+    );
+  }
+  if (pipeline?.mountedRows) {
+    lines.push(`mounted rows: ${pipeline.mountedRows.mounted} of ${pipeline.mountedRows.total}`);
+  }
+  if (pipeline?.markdownWorker) {
+    const w = pipeline.markdownWorker;
+    lines.push(
+      `markdown worker: ${w.pending} pending, ${w.completed} parsed, avg ${fmtNumber(w.avgParseMs, 1)}ms, max ${fmtNumber(w.maxParseMs)}ms` +
+        `${w.fallbackActive ? ", fallback active" : ""}${w.workerFailures > 0 ? `, ${w.workerFailures} worker failures` : ""}`,
+    );
+  }
+  if (pipeline?.transcriptCache) {
+    const c = pipeline.transcriptCache;
+    lines.push(
+      `transcript cache: ${c.residentSessions}/${c.maxResidentSessions} resident sessions, ` +
+        `bodies ${fmtMb(c.bodyBytes / 1048576)} of ${fmtMb(c.bodyBudgetBytes / 1048576)}, ` +
+        `markdown ${fmtMb(c.markdownBytes / 1048576)} of ${fmtMb(c.markdownBudgetBytes / 1048576)}, ` +
+        `evictions ${c.historyEvictions} history + ${c.markdownEvictions} markdown`,
+    );
   }
   return lines.join("\n");
 }
