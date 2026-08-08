@@ -572,6 +572,11 @@ func (r modelingAtomic) Execute(ctx context.Context, args json.RawMessage) (stri
 		if err := modelingGuardRead(r.workDir, r.forbidRoots, a.Path); err != nil {
 			return "", err
 		}
+		// save=true writes the .blend back — guard the write the same way the
+		// other modeling tools do (roots + session data).
+		if err := modelingGuardWrite(r.roots, r.guard, a.Path); err != nil {
+			return "", err
+		}
 	}
 	res, err := blender.RunAtomic(ctx, a.Path, a.Op, a.Args, a.Path != "", 120*time.Second)
 	if err != nil {

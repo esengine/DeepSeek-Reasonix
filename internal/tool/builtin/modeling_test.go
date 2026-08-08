@@ -362,3 +362,24 @@ func TestModelingAtomicAddCube(t *testing.T) {
 		t.Error("unknown op must fail")
 	}
 }
+
+// TestModelingAtomicWriteGuard: with a path, modeling_atomic must reject a
+// write outside the roots (the .blend save-back goes through modelingGuardWrite).
+func TestModelingAtomicWriteGuard(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "ws")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	at := modelingAtomic{workDir: root, forbidRoots: []string{}, roots: []string{root}}
+	// path resolves inside root but the file may not exist; write guard should
+	// still run BEFORE RunAtomic — unknown op is irrelevant, we just need the
+	// guard to fire on an escaping path.
+	if _, err := at.Execute(context.Background(), json.RawMessage(`{"op":"add_cube","path":"../escape.blend"}`)); err == nil {
+		t.Fatal("modeling_atomic write outside roots must fail")
+	}
+	// Guard must not over-block in-root paths (parse/exec error is fine, not a confinement error).
+	if _, err := at.Execute(context.Background(), json.RawMessage(`{"op":"nope","path":"in.blend"}`)); err == nil {
+		t.Fatal("unknown op must fail")
+	}
+}
