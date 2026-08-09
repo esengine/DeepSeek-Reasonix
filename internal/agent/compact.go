@@ -107,10 +107,16 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		return
 	}
 	soft, snip, high := a.compactThresholds()
-	// Clearing the latch before the soft/snip returns keeps a settled prompt
-	// from being counted against the next turn; a too-small-window session
-	// otherwise latches and disables auto-compaction for the session.
+	// Clearing the latch keeps a settled prompt from counting against the
+	// next turn; keep it while the projection cannot fit the window with a
+	// usable output budget — clearing would re-fire the doomed fold.
 	if promptTokens < high {
+		msgs, ver := a.session.snapshotMessagesVersion()
+		if st := a.compactionState; projectionValid(st, msgs, ver, a.currentPromptCacheKey()) {
+			if a.estimatedPromptTokens(modelVisibleFromProjection(st.Projection, msgs))+minOutputBudget > a.contextWindow {
+				return
+			}
+		}
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
 	}

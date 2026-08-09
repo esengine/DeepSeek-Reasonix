@@ -245,8 +245,9 @@ func (a *Agent) MaybeCompactOnResume(ctx context.Context) {
 
 // tokPerChar derives a tokens-per-character ratio from the last turn's real
 // usage so per-message estimates track the provider's tokenizer without a
-// local one. Reasoning is excluded from the char count to match the prompt
-// sent; absurd ratios fall back to ~4 chars/token.
+// local one. Reasoning rides the wire as a reasoning item on shared-window
+// vendors and is counted in prompt tokens, so it stays in the char count
+// (msgChars) to keep numerator and denominator aligned.
 func (a *Agent) tokPerChar() float64 {
 	if u := a.lastUsage.Load(); u != nil && u.LatestPromptTokens() > 0 {
 		// LatestPromptTokens keeps calibration on the latest single-request
@@ -261,14 +262,15 @@ func (a *Agent) tokPerChar() float64 {
 }
 
 // msgChars counts the runes that ride to the provider for one message —
-// content plus tool-call names and arguments, but not reasoning (stripped on
-// send). Runes, not bytes: estimateTextTokens is also rune-based, so token
-// ratios and estimates share one unit regardless of script.
+// content plus reasoning (sent as a reasoning item on shared-window vendors
+// and counted in prompt tokens) plus tool-call names and arguments. Runes,
+// not bytes: estimateTextTokens is also rune-based, so token ratios and
+// estimates share one unit regardless of script.
 func msgChars(m provider.Message) int {
 	if m.LocalOnly {
 		return 0
 	}
-	n := utf8.RuneCountInString(m.Content)
+	n := utf8.RuneCountInString(m.Content) + utf8.RuneCountInString(m.ReasoningContent)
 	for _, tc := range m.ToolCalls {
 		n += utf8.RuneCountInString(tc.Name) + utf8.RuneCountInString(tc.Arguments)
 	}

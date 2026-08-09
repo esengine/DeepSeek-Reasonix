@@ -74,12 +74,12 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 		})
 		return nil
 	}
-	// Force must converge: a projection still at or above the trigger means
-	// the kept tail alone cannot fit the window — pause so the force path does
-	// not re-fire on consecutive turns (the same pause maybeCompact uses).
+	// Force must converge: a projection that cannot fit the window beside a
+	// usable output budget means compaction cannot make progress — pause so
+	// the force path does not re-fire on consecutive turns.
 	if forceCompact && outcome == CompactionInstalled {
 		if st := a.compactionState; projectionValid(st, msgs, version, cacheKey) {
-			if a.estimatedPromptTokens(modelVisibleFromProjection(st.Projection, msgs)) >= high {
+			if a.estimatedPromptTokens(modelVisibleFromProjection(st.Projection, msgs))+minOutputBudget > a.contextWindow {
 				a.compactStuck = true
 				a.consecutiveCompacts++
 				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Automatic context cleanup paused because the context window is too small.", Detail: fmt.Sprintf(
