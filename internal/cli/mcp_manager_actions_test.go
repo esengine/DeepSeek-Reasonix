@@ -11,6 +11,11 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/event"
 	"reasonix/internal/plugin"
+
+	// Match the production registration graph (cmd/reasonix blank-imports it);
+	// boot default presets use kind "anthropic", so without this the tests
+	// hit "unknown kind" for presets the real binary always registers.
+	_ "reasonix/internal/provider/anthropic"
 )
 
 func TestSplitEditorCommandUsesStaticShellWords(t *testing.T) {
