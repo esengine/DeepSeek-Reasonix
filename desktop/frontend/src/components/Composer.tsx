@@ -1338,6 +1338,8 @@ export function Composer({
       setSttListening(Boolean(payload.listening));
       // starting 显式携带时同步加载态；未携带（旧 payload）则不动。
       if (payload.starting !== undefined) setSttStarting(payload.starting);
+      // 兼容不带 starting 的旧事件：确认成功（listening=true）即结束启动态。
+      else if (payload.listening) setSttStarting(false);
     });
     return () => {
       unsubscribe();
@@ -1845,8 +1847,9 @@ export function Composer({
         // 传入发起识别的 tabId：转录事件携带它，前端只插入本窗口输入框
         // （多窗口独立绑定，不交叉错乱）。
         await app.STTStart(tabId);
-        setSttListening(true);
-        setSttStarting(false);
+        // 不在此处点亮录音态：由 stt:state 事件（listening=true +
+        // starting=false）确认后才点亮，确认窗口期内保持"启动中"提示，
+        // 避免 Edge/Web Speech 服务未就绪时按钮误显示为可用/录音中。
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "warn");
@@ -4792,7 +4795,7 @@ export function Composer({
               <Tooltip label={
                 <span className="composer-stt-tooltip">
                   <span className="composer-stt-tooltip__action">
-                    {sttListening ? t("composer.sttStop") : t("composer.sttStart")}
+                    {sttStarting ? t("composer.sttStarting") : (sttListening ? t("composer.sttStop") : t("composer.sttStart"))}
                   </span>
                   {sttInterimText && (
                     <span className="composer-stt-tooltip__interim">

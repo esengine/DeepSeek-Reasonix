@@ -155,6 +155,14 @@ func IsLongCat(baseURL string) bool {
 	return matchesVendorHost(baseURL, "longcat.chat", "api.longcat.chat")
 }
 
+// IsOpencode reports whether baseURL points at the opencode.ai gateway
+// (opencode.ai/zen/...). It exposes OpenAI-compatible chat but gates thinking
+// with thinking.type enabled|disabled (see openai.go's thinking escape hatch),
+// so effort is surfaced as a binary knob like Zhipu/LongCat.
+func IsOpencode(baseURL string) bool {
+	return matchesVendorHost(baseURL, "opencode.ai", "opencode.ai")
+}
+
 // IsKimiAPI reports whether baseURL is one of Moonshot's official Kimi direct
 // API endpoints. Gate Kimi-specific wire compatibility on the exact API hosts
 // so OpenAI-compatible relays carrying the same model ID remain untouched.

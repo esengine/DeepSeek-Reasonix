@@ -108,6 +108,11 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		// LongCat exposes the same binary thinking vocabulary on its
 		// OpenAI-compatible endpoint and documents no reasoning_effort depth scale.
 		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
+	case isOpencodeEntry(e):
+		// opencode.ai gates thinking with thinking.type enabled|disabled (no
+		// reasoning_effort depth scale), so surface the same binary knob as
+		// LongCat/Zhipu instead of treating the model as effort-incapable.
+		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
 	case isOllamaCloudEntry(e):
 		// Ollama Cloud accepts top-level reasoning_effort values low|medium|
 		// high|max. "none" means omit the field so the hosted model runs without
@@ -209,6 +214,18 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	case isLongCatEntry(e):
 		// LongCat's knob is binary (enabled|disabled); depth-like aliases mean
 		// thinking on, while the legacy off spellings disable it.
+		switch level {
+		case "enabled", "disabled":
+			return level, nil
+		case "off":
+			return "disabled", nil
+		case "low", "medium", "high", "xhigh", "max":
+			return "enabled", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
+		}
+	case isOpencodeEntry(e):
+		// opencode.ai uses the same binary thinking knob as LongCat.
 		switch level {
 		case "enabled", "disabled":
 			return level, nil
@@ -384,6 +401,14 @@ func isTokenRhythmGLMEntry(e *ProviderEntry) bool {
 // endpoint. See openai.IsLongCat for the host-matching rule.
 func isLongCatEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && openai.IsLongCat(e.BaseURL)
+}
+
+// isOpencodeEntry reports whether the entry points at the opencode.ai gateway
+// (opencode.ai/zen/...). It exposes OpenAI-compatible chat and gates thinking
+// with thinking.type enabled|disabled, so effort is surfaced as a binary knob
+// like Zhipu/LongCat rather than the generic reasoning_effort depth scale.
+func isOpencodeEntry(e *ProviderEntry) bool {
+	return e != nil && e.Kind == "openai" && openai.IsOpencode(e.BaseURL)
 }
 
 // isOllamaCloudEntry reports whether the entry points at hosted Ollama Cloud,

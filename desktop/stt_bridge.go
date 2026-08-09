@@ -159,7 +159,11 @@ func (b *sttBridge) SetOptions(showPage, autoStop bool, autoStopSeconds int, hot
 	showPageChanged := b.showPage != showPage
 	b.showPage = showPage
 	b.autoStop = autoStop
-	if autoStopSeconds < 3 {
+	// 未配置（0）时使用默认 6s——与设置 UI 的显示 fallback（SettingsPanel 在
+	// 0 时显示 6）保持一致；显式配置的 1-2s 是非法值，钳制到最小 3s。
+	if autoStopSeconds <= 0 {
+		autoStopSeconds = 6
+	} else if autoStopSeconds < 3 {
 		autoStopSeconds = 3
 	}
 	if autoStopSeconds > 300 {
@@ -328,7 +332,11 @@ func (b *sttBridge) startAutoStopMonitor() {
 				return
 			case <-ticker.C:
 				b.mu.Lock()
-				active := b.listening && b.browserConn != nil && b.autoStop
+				// 启动确认期（页面尚未回传 listening，startPending 非 nil）不触发
+				// 自动停止：首次点击时 Edge 冷启动/Web Speech 服务初始化可能超过
+				// 静默阈值（日志里"静默 3 秒自动停止"先于"启动确认超时"出现，
+				// 就是 autoStop 在确认窗口内抢先发 cmd:stop 打断了页面启动）。
+				active := b.listening && b.browserConn != nil && b.autoStop && b.startPending == nil
 				since := time.Since(b.lastSpeechTime)
 				conn := b.browserConn
 				b.mu.Unlock()
@@ -459,33 +467,80 @@ func (b *sttBridge) StartListening() error {
 		b.cancelStartPending(pending)
 		return fmt.Errorf("stt: 发送开始命令失败: %w", err)
 	}
+	// 不提前置 listening=true：保持"启动中"直到页面回传 status:listening
+	// （handleWS 收到后置 true 并 emit listening=true + starting=false）。
+	// 若这里提前置 true，handleWS 的 changed 判断会变成 false 而跳过 emit，
+	// 前端永远收不到 listening:true、按钮一直转圈（即使识别已在进行）。
 	b.mu.Lock()
-	b.listening = true
 	b.lastSpeechTime = time.Now()
 	b.mu.Unlock()
 	b.startAutoStopMonitor()
+	// 保持"启动中"：等页面回传 status:listening（handleWS 会 emit
+	// listening=true + starting=false）才点亮录音态。这里不提前 emit
+	// listening=true，避免服务未就绪时按钮误显示"可用/录音中"。
+	// （首次冷启动 Edge 页面 + Web Speech 服务初始化可能数秒，确认窗口
+	// 相应放宽到 8s，超时仍未确认才回退。）
 	if b.emit != nil {
-		b.emit(sttStateEvent, map[string]any{"listening": true})
+		b.emit(sttStateEvent, map[string]any{"listening": false, "starting": true})
 	}
-	// 确认 goroutine：等待页面回传（handleWS 在 status 时关闭 pending 通道）
-	// 或超时。未确认则回退状态，前端按钮复原并看到错误提示。
+	// 确认 goroutine：等待页面回传（handleWS 在 status 时关闭 pending 通道）。
+	// 首次冷启动时 Edge 页面 + Web Speech 服务初始化可能数秒，单次窗口超时
+	// 后自动重发 cmd:start 并重新等待（最多重试若干轮），期间保持
+	// "启动中"状态、前端按钮继续转圈提示，避免用户反复手动点击；
+	// 全部轮次仍失败才回退状态并结束启动态。
 	go func() {
-		timer := time.NewTimer(3500 * time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-pending:
-			// 页面已确认（listening 或 error 均关闭通道），无需处理。
-		case <-timer.C:
-			b.mu.Lock()
-			stillPending := b.startPending == pending
-			b.listening = false
-			b.startPending = nil
-			b.mu.Unlock()
-			if stillPending {
-				fmt.Println("[STT] 启动确认超时：Edge 识别页未回传 listening 状态")
-				if b.emit != nil {
-					b.emit(sttStateEvent, map[string]any{"listening": false})
+		const (
+			confirmWindow   = 8 * time.Second
+			maxStartRetries = 3
+			retryDelay      = 1200 * time.Millisecond
+		)
+		for attempt := 0; attempt <= maxStartRetries; attempt++ {
+			timer := time.NewTimer(confirmWindow)
+			select {
+			case <-pending:
+				// 页面已确认（listening 或 error 均关闭通道），无需处理。
+				timer.Stop()
+				return
+			case <-timer.C:
+				timer.Stop()
+				b.mu.Lock()
+				stillPending := b.startPending == pending
+				conn := b.browserConn
+				b.mu.Unlock()
+				if !stillPending || conn == nil {
+					return // 已被停止/取消/断连
 				}
+				if attempt >= maxStartRetries {
+					b.mu.Lock()
+					b.listening = false
+					b.startPending = nil
+					b.mu.Unlock()
+					fmt.Println("[STT] 启动确认超时：Edge 识别页未回传 listening 状态")
+					if b.emit != nil {
+						b.emit(sttStateEvent, map[string]any{"listening": false, "starting": false})
+					}
+					return
+				}
+				// 自动重试：重新发 cmd:start 并开启新一轮确认窗口。
+				fmt.Printf("[STT] 启动确认超时（第 %d/%d 轮），自动重试…\n", attempt+1, maxStartRetries)
+				time.Sleep(retryDelay)
+				b.mu.Lock()
+				if b.startPending == pending {
+					close(pending)
+					b.startPending = nil
+				}
+				conn = b.browserConn
+				b.mu.Unlock()
+				if conn == nil {
+					return
+				}
+				if err := conn.WriteJSON(map[string]string{"cmd": "start", "lang": b.lang}); err != nil {
+					return
+				}
+				pending = make(chan struct{})
+				b.mu.Lock()
+				b.startPending = pending
+				b.mu.Unlock()
 			}
 		}
 	}()
@@ -603,10 +658,11 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = prev.Close() // 单客户端：新连接覆盖旧连接
 	}
 	fmt.Println("[STT] Edge 识别页已连接")
-	// 连接已建立，结束"启动中"加载态（按钮转圈复原），等待 cmd:start
-	// 后页面回传 listening 才会点亮录音态。
+	// 连接已建立，但页面 Web Speech 服务可能尚未就绪（冷启动初始化/权限
+	// 探活），保持"启动中"状态；由 cmd:start 的确认结果（页面回传
+	// listening / 超时）决定最终点亮还是复原，避免按钮提前显示"可用"。
 	if b.emit != nil {
-		b.emit(sttStateEvent, map[string]any{"listening": false, "starting": false})
+		b.emit(sttStateEvent, map[string]any{"listening": false, "starting": true})
 	}
 	// 浏览器已连上说明识别页窗口必然已创建：若配置为后台隐藏，这里立即
 	// 强制隐藏，杜绝窗口闪现（launchEdge 的定时隐藏是兜底重试）。
@@ -661,6 +717,8 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 			state, _ := msg["state"].(string)
 			b.mu.Lock()
 			changed := false
+			confirmed := false // 本次消息是否结束了启动确认窗口
+			needPermission := state == "need-permission"
 			if state == "listening" {
 				changed = !b.listening
 				b.listening = true
@@ -671,22 +729,40 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 				if b.startPending != nil {
 					close(b.startPending)
 					b.startPending = nil
+					confirmed = true
 				}
-			} else if state == "idle" || state == "error" {
+			} else if state == "idle" || state == "error" || needPermission {
 				changed = b.listening
 				b.listening = false
-				// 页面空闲/报错：同样完成确认窗口（成功或失败均结束等待），
-				// 避免 3.5s 超时后再回退一次状态造成重复事件。
+				// 页面空闲/报错/需要授权：同样完成确认窗口（成功或失败均
+				// 结束等待），避免超时后再回退一次状态造成重复事件。
 				if b.startPending != nil {
 					close(b.startPending)
 					b.startPending = nil
+					confirmed = true
 				}
 			}
+			// 首次启用需要授权：即使配置为后台隐藏，也显示识别页窗口让
+			// 用户看到授权卡并点击"允许"；授权成功（listening）后再按
+			// 配置恢复隐藏。窗口操作在锁外进行（Win32 枚举/置顶较慢）。
+			proc := b.edgeProc
+			hiddenByConfig := !b.showPage
 			listening := b.listening
 			b.mu.Unlock()
-			// 识别状态变化时同步给前端（输入框麦克风按钮高亮/复原）。
-			if changed && b.emit != nil {
-				b.emit(sttStateEvent, map[string]any{"listening": listening})
+			if proc != nil && proc.Process != nil {
+				pid := uint32(proc.Process.Pid)
+				if needPermission {
+					sttShowWindowsForPID(pid)
+				} else if state == "listening" && hiddenByConfig {
+					sttHideWindowsForPID(pid)
+				}
+			}
+			// 识别状态变化，或确认窗口因本次消息结束（页面回传 listening /
+			// error / idle / need-permission）时，都同步给前端。显式携带
+			// starting:false：页面一旦确认（成功或失败），前端必须结束
+			// "启动中"转圈——否则首次权限 prompt 时前端按钮会一直转圈。
+			if (changed || confirmed) && b.emit != nil {
+				b.emit(sttStateEvent, map[string]any{"listening": listening, "starting": false})
 			}
 		}
 	}

@@ -125,6 +125,14 @@ func (m *sttHotkeyManager) start(startHotkey, stopHotkey string) error {
 				0, 0, 0,
 			)
 			if ret == 0 { // WM_QUIT
+				// 显式注销热键：RegisterHotKey 以 hwnd=0 注册到"当前线程"，
+				// Windows 只在注册线程退出时释放热键。本 goroutine 退出后
+				// Go 会复用该 OS 线程而不终止它，热键会被旧线程继续持有，
+				// 导致 stop() 后重新 start() 注册同一组合键失败
+				// （ERROR_HOTKEY_ALREADY_REGISTERED，日志"组合键被占用"）。
+				// 必须在同一线程内先 UnregisterHotKey 再退出。
+				unregisterHotKey(0, m.startID)
+				unregisterHotKey(0, m.stopID)
 				return
 			}
 			if msgVal.message == wmHotKey {

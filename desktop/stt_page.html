@@ -319,34 +319,48 @@ function tryStart() {
       hidePerm();
       startRecognition();
     } else if (state === "prompt") {
-      // 浏览器要求用户手势才能授权：显示紧凑授权卡，点击一次即永久记住（profile）
+      // 浏览器要求用户手势才能授权：显示紧凑授权卡，点击一次即永久记住（profile）。
+      // 上报 Go 端"需要授权"：Go 端会显示识别页窗口（即使配置为后台隐藏）
+      // 让用户看到授权卡并点击允许；授权成功开始识别后再自动隐藏。
       showPerm();
+      sendToServer({ type: "status", state: "need-permission", error: "需要麦克风权限，请在识别页点击允许" });
     } else {
       showError("麦克风权限已被拒绝，请在浏览器地址栏重新授权。");
+      sendToServer({ type: "status", state: "error", error: "麦克风权限已被拒绝", fatal: true });
     }
   });
 }
 
 // 权限检测：granted | prompt | denied
+// Edge 以 --use-fake-ui-for-media-stream 启动，浏览器已自动接受麦克风授权
+// （仍使用真实设备），正常不会弹授权提示。但冷启动/隐藏窗口下 getUserMedia
+// 探活可能迟迟不 resolve，这里加超时兜底：3s 未出结果视为已授权直接开始
+// 识别（startRecognition 的 onerror 仍会兜住真正的设备错误），避免首次启用
+// 因探活挂起而空等确认窗口（日志"启动确认超时"反复出现）。
 function checkMicPermission() {
   return new Promise((resolve) => {
+    let settled = false;
+    const done = (state) => {
+      if (settled) return;
+      settled = true;
+      resolve(state);
+    };
+    const timeout = setTimeout(() => done("granted"), 3000);
+    const probe = () => {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then((stream) => { stream.getTracks().forEach((t) => t.stop()); done("granted"); })
+        .catch(() => done("prompt"));
+    };
     if (navigator.permissions && navigator.permissions.query) {
       navigator.permissions.query({ name: "microphone" })
         .then((status) => {
-          if (status.state === "granted") resolve("granted");
-          else if (status.state === "denied") resolve("denied");
-          else {
-            // "prompt"：尝试 getUserMedia 探活，浏览器可能直接给授权
-            navigator.mediaDevices.getUserMedia({ audio: true })
-              .then((stream) => { stream.getTracks().forEach((t) => t.stop()); resolve("granted"); })
-              .catch(() => resolve("prompt"));
-          }
+          if (status.state === "granted") done("granted");
+          else if (status.state === "denied") done("denied");
+          else probe();
         })
-        .catch(() => resolve("prompt"));
+        .catch(() => probe());
     } else {
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then((stream) => { stream.getTracks().forEach((t) => t.stop()); resolve("granted"); })
-        .catch(() => resolve("prompt"));
+      probe();
     }
   });
 }

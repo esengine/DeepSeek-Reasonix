@@ -7310,17 +7310,6 @@ body > .mermaid-diagram--fullscreen {
     gap: 3px;
     padding-inline: 3px;
   }
-
-  .composer-meta__control--effort {
-    display: none;
-  }
-
-  .composer-meta__control--more {
-    display: inline-flex;
-    flex: 0 0 86px;
-    width: 86px;
-    max-width: 86px;
-  }
 }
 
 @container (max-width: 560px) {
@@ -7386,10 +7375,6 @@ body > .mermaid-diagram--fullscreen {
   }
 
   .composer-profile-trigger > svg:last-child {
-    display: none;
-  }
-
-  .composer-meta__control--effort {
     display: none;
   }
 
