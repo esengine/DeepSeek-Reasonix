@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronsUpDown, Gauge } from "lucide-react";
 import { asArray } from "../lib/array";
 import type { EffortInfo } from "../lib/types";
+import { useT, type DictKey } from "../lib/i18n";
 import { ANCHORED_POPOVER_CLOSE_MS, AnchoredPopover } from "./AnchoredPopover";
 
 export function EffortSwitcher({
@@ -13,12 +14,19 @@ export function EffortSwitcher({
   disabled: boolean;
   onPick: (level: string) => void;
 }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [closing, setClosing] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeTimerRef = useRef<number | null>(null);
   const levels = asArray(effort?.levels);
   const current = effort?.current || "auto";
+  // 思考模式级别按界面语言显示（如 auto→自动、high→高、max→最高）；
+  // 未定义键时回退原始英文值（兼容自定义级别）。
+  const effortLabel = (level: string) => {
+    const localized = t(`effort.${level}` as DictKey);
+    return localized && localized !== `effort.${level}` ? localized : level;
+  };
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current === null) return;
@@ -65,7 +73,7 @@ export function EffortSwitcher({
         onClick={() => (open || closing ? closeMenu() : openMenu())}
       >
         <Gauge size={14} className="modelsw__kind" />
-        <span className="modelsw__label">{current}</span>
+        <span className="modelsw__label">{effortLabel(current)}</span>
         <ChevronsUpDown size={11} />
       </button>
       <AnchoredPopover
@@ -86,7 +94,7 @@ export function EffortSwitcher({
               className={`modelsw__item ${level === current ? "modelsw__item--current" : ""}`}
               onClick={() => pick(level)}
             >
-              <span className="modelsw__model">{level}</span>
+              <span className="modelsw__model">{effortLabel(level)}</span>
               {level === current && <Check size={13} className="modelsw__check" />}
             </button>
           ))}

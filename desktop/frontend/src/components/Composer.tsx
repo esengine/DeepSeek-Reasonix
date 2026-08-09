@@ -7,7 +7,7 @@ import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped, onSTTState, onSTTTranscript } from "../lib/bridge";
 import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
-import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
+import { SPINNER_WORDS, useI18n, type DictKey, type Translator } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
 import { fallbackCopyText } from "../lib/clipboard";
 import {
@@ -727,6 +727,9 @@ export function Composer({
   const [sttEnabled, setSttEnabled] = useState(false);
   const [sttListening, setSttListening] = useState(false);
   const [sttBusy, setSttBusy] = useState(false);
+  // 识别页正在启动（Edge 拉起中/重连中）：按钮显示加载动画，给用户即时
+  // 反馈，避免点击后半天无响应、误以为没功能而重复点击造成多窗口。
+  const [sttStarting, setSttStarting] = useState(false);
   // 已配置的开始/停止全局快捷键（设置面板保存后刷新），用于麦克风按钮悬浮提示。
   const [sttHotkeyStart, setSttHotkeyStart] = useState("");
   const [sttHotkeyStop, setSttHotkeyStop] = useState("");
@@ -1307,6 +1310,8 @@ export function Composer({
     // 识别状态实时同步：Edge 页自动停止/出错/恢复时，麦克风按钮随之变化。
     const unsubscribeState = onSTTState((payload) => {
       setSttListening(Boolean(payload.listening));
+      // starting 显式携带时同步加载态；未携带（旧 payload）则不动。
+      if (payload.starting !== undefined) setSttStarting(payload.starting);
     });
     return () => {
       unsubscribe();
@@ -3795,9 +3800,14 @@ export function Composer({
   });
   const effortLevels = asArray(effort?.levels);
   const currentEffort = effort?.current || "auto";
+  // 思考模式级别按界面语言显示（与 EffortSwitcher 一致）；未定义键回退原始值。
+  const effortLabel = (level: string) => {
+    const localized = t(`effort.${level}` as DictKey);
+    return localized && localized !== `effort.${level}` ? localized : level;
+  };
   const compactEffortTitle = currentEffort === "auto"
     ? t("status.effortAutoTitle", { def: effort?.default || "auto" })
-    : `${t("status.effortTitle")}: ${currentEffort}`;
+    : `${t("status.effortTitle")}: ${effortLabel(currentEffort)}`;
   const hasEffort = Boolean(effort?.supported && effortLevels.length > 0);
   const chooseEffortLevel = (level: string) => {
     closeMoreMenu(() => {
