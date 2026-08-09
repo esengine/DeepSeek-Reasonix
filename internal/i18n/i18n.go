@@ -77,6 +77,7 @@ type Messages struct {
 	ChatStatusCycleHint                    string // plan-toggle shortcut hint shown when no modal prompt owns the status row
 	ChatStatusCycleHintCompact             string // readable shortcut hint used by the persistent footer
 	ChatTurnReceiptLabel                   string // compact per-turn usage receipt attached to the completed assistant response
+	EstimatedCostSuffix                    string // appended to the per-turn cost when the price is a third-party estimate
 	ChatStatusModelLabel                   string
 	ChatStatusEffortLabel                  string
 	ChatStatusWorkLabel                    string

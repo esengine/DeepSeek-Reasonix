@@ -48,6 +48,7 @@ var ChineseTraditional = Messages{
 	ChatStatusCycleHint:                    "Shift+Tab 循環詢問/自動/計畫 · Ctrl+Y YOLO",
 	ChatStatusCycleHintCompact:             "Shift+Tab 詢問/自動/計畫 · Ctrl+Y YOLO",
 	ChatTurnReceiptLabel:                   "本輪",
+	EstimatedCostSuffix:                    " (估算)",
 	ChatStatusModelLabel:                   "模型",
 	ChatStatusEffortLabel:                  "強度",
 	ChatStatusWorkLabel:                    "模式",

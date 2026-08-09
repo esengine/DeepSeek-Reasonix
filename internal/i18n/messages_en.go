@@ -51,6 +51,7 @@ var English = Messages{
 	ChatStatusCycleHint:                    "Shift+Tab ask/auto/plan · Ctrl+Y YOLO",
 	ChatStatusCycleHintCompact:             "Shift+Tab ask/auto/plan · Ctrl+Y YOLO",
 	ChatTurnReceiptLabel:                   "TURN",
+	EstimatedCostSuffix:                    " (estimated)",
 	ChatStatusModelLabel:                   "MODEL",
 	ChatStatusEffortLabel:                  "EFFORT",
 	ChatStatusWorkLabel:                    "WORK",

@@ -60,6 +60,10 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 	outcome, err := a.compactToProjection(ctx, trigger, "", forceCompact)
 	if err != nil {
 		if est >= force {
+			// At the force mark, a failed fold cannot be retried usefully —
+			// latch the pause so the preflight stops re-running the doomed
+			// compaction every turn (mirrors maybeCompact's too-large pause).
+			a.compactStuck = true
 			return fmt.Errorf("%w", errors.Join(ErrCompactionRequired, err))
 		}
 		a.sink.Emit(event.Event{
@@ -69,6 +73,19 @@ func (a *Agent) contextPreflight(ctx context.Context, trigger string) error {
 			Detail: fmt.Sprintf("compaction failed under soft threshold: %v", err),
 		})
 		return nil
+	}
+	// Force must converge: a projection still at or above the trigger means
+	// the kept tail alone cannot fit the window — pause so the force path does
+	// not re-fire on consecutive turns (the same pause maybeCompact uses).
+	if forceCompact && outcome == CompactionInstalled {
+		if st := a.compactionState; projectionValid(st, msgs, version, cacheKey) {
+			if a.estimatedPromptTokens(modelVisibleFromProjection(st.Projection, msgs)) >= high {
+				a.compactStuck = true
+				a.consecutiveCompacts++
+				a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Automatic context cleanup paused because the context window is too small.", Detail: fmt.Sprintf(
+					"context_window=%d cannot hold the projection after compaction; raise context_window or shrink tool output. Auto-compaction paused until the prompt drops.", a.contextWindow)})
+			}
+		}
 	}
 	// Force + Noop: refuse outside a tool loop; mid-turn is deferred.
 	if forceCompact && outcome == CompactionNoop {
