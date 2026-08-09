@@ -44,8 +44,8 @@ func annotateWriteLockError(path string, err error) error {
 	if lock, ok := officeLockFile(path); ok {
 		return fmt.Errorf("%w; the file appears to be locked by an Office app (lock file %s found) — close the document in Word/Excel/PowerPoint and retry", err, lock)
 	}
-	if isWindowsSharingViolation(err) {
-		return fmt.Errorf("%w; the file is locked by another process — close the program using it and retry", err)
+	if isWindowsFileLocked(err) {
+		return fmt.Errorf("%w; the file is in use by another process or not writable — close the program holding it and retry", err)
 	}
 	return err
 }
