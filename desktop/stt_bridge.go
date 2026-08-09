@@ -545,6 +545,10 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 // launchEdge 查找 Edge 并用专用 profile 打开识别页。showPage=false 时把窗口
 // 移出屏幕（后台运行），识别照常进行但不打扰用户。
 func (b *sttBridge) launchEdge() error {
+	// 先清理残留的本 STT Edge 实例：dev 热更新/多次启用后，旧实例可能连旧
+	// 端口残留（累积占内存、识别页连旧端口导致转录失效）。按 profile 定向
+	// 清理，不误杀用户自己的 Edge。
+	killEdgeProfileProcesses(b.homeDir)
 	edge := b.findEdge()
 	if edge == "" {
 		return fmt.Errorf("未找到 Microsoft Edge，请确认已安装（或设置 EDGE_PATH 环境变量）")

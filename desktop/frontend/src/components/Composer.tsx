@@ -1292,45 +1292,16 @@ export function Composer({
     // 陈旧，切换会话后转录可能写入旧 draft、"能识别但不输入"）。经 ref
     // 中转始终调用最新实现，插入当前可见窗口输入框。
     const insertRef = { current: insertSTTTextAtCaret };
-    // 未提交的 interim（临时识别）占位：interim 实时上屏（删旧插新替换），
-    // final 到达时先移除占位再正式插入，避免"等断句才出字"的延迟。
-    const pendingInterimRef = { current: "" };
-    // 停顿自动提交后记住"已上屏的 interim 句"，final 到达时用它去重，
-    // 防止 final 与已上屏文本重复插入（重复 bug 根因：停顿提交清空占位
-    // 后 prev 丢失，final 全文再次插入）。
-    const committedInterimRef = { current: "" };
-    // 停顿自动提交：interim 停止更新 N 毫秒后，把当前 interim 当作一句已确认
-    // 文本固定下来（清空占位）——"说完一句停顿了就输入"，不等引擎 final
-    // （引擎 final 需更长静音+网络往返，可能几秒后才到）。
-    const COMMIT_INTERIM_MS = 1200;
-    let interimTimer = 0;
+    // 实时识别预览：interim（临时识别）只显示在麦克风按钮上方，不插入输入框
+    // （避免 interim/final 交替导致的重复输入）；final 才插入输入框——
+    // 输入框内容只有 final，天然无重复。
     const unsubscribe = onSTTTranscript((payload) => {
       if (!payload.text.trim()) return;
       if (payload.isFinal) {
-        window.clearTimeout(interimTimer);
-        // prev 优先取未提交占位；若已停顿提交，则取已提交句去重：
-        // final 与已上屏文本相同/近似时删旧插新，结果不变（不重复）。
-        const prev = pendingInterimRef.current || committedInterimRef.current;
-        pendingInterimRef.current = "";
-        committedInterimRef.current = "";
         setSttInterimText(""); // final 提交后清空预览
-        insertRef.current(payload.text, prev);
+        insertRef.current(payload.text); // 正常插入输入框
       } else {
-        window.clearTimeout(interimTimer);
-        const prev = pendingInterimRef.current || committedInterimRef.current;
-        pendingInterimRef.current = payload.text;
-        committedInterimRef.current = ""; // 新 interim 开始：清除旧的已提交句标记
-        setSttInterimText(payload.text); // 实时预览
-        insertRef.current(payload.text, prev);
-        // 停顿 1.2s 无新 interim：把当前句固定（后续 final 用 committedInterimRef
-        // 去重，不会重复上屏）。
-        interimTimer = window.setTimeout(() => {
-          if (pendingInterimRef.current) {
-            committedInterimRef.current = pendingInterimRef.current;
-          }
-          pendingInterimRef.current = "";
-          setSttInterimText("");
-        }, COMMIT_INTERIM_MS);
+        setSttInterimText(payload.text); // 实时预览（按钮上方）
       }
     });
     // 识别状态实时同步：Edge 页自动停止/出错/恢复时，麦克风按钮随之变化。
