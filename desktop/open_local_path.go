@@ -30,8 +30,16 @@ func normalizeLocalOpenPath(path string) (string, error) {
 		if host == "." || host == "?" {
 			return "", fmt.Errorf("unsafe local file URL authority %q", host)
 		}
-		if strings.EqualFold(host, "localhost") {
-			host = ""
+		// UNC hosts other than loopback are refused outright: file:// URLs in
+		// chat content are AI-generated/injected, and emote\share paths
+		// would trigger an SMB connection (Net-NTLM credential negotiation)
+		// to an attacker-controlled host on click. Loopback stays allowed for
+		// localhost-style references.
+		if host != "" {
+			if !isLoopbackHost(host) {
+				return "", fmt.Errorf("remote file URL authority %q is not allowed (SMB credential leak risk)", host)
+			}
+			host = "" // loopback: drop the authority, keep the local path
 		}
 		if host != "" {
 			decoded = "//" + host + decoded
@@ -51,6 +59,14 @@ func normalizeLocalOpenPath(path string) (string, error) {
 		return "", fmt.Errorf("path is not absolute: %q", path)
 	}
 	return path, nil
+}
+
+// isLoopbackHost reports whether a file-URL host is this machine's loopback
+// (localhost / 127.0.0.1 / ::1). Any other host would become a UNC path and
+// trigger a network (SMB) connection.
+func isLoopbackHost(host string) bool {
+	h := strings.ToLower(host)
+	return h == "localhost" || h == "127.0.0.1" || h == "::1" || h == "[::1]"
 }
 
 func isASCIILetter(value byte) bool {
@@ -103,6 +119,11 @@ var executableOpenSuffixes = map[string]bool{
 	".ps1":     true, ".vbs": true, ".jse": true, ".js": true,
 	".lnk": true, ".url": true, ".scr": true, ".msi": true,
 	".reg": true, ".pif": true, ".hta": true, ".wsf": true,
+	// Additional executable/code-bearing suffixes: double-clicking these can
+	// run code (jar via javaw, ClickOnce .application, mmc scripts, .cpl
+	// control-panel applets, PowerShell scripts beyond .ps1).
+	".jar": true, ".application": true, ".msc": true, ".cpl": true,
+	".ps1xml": true, ".msh": true, ".msh1": true, ".msh2": true, ".mshxml": true,
 }
 
 func openTargetAllowed(path string, isDir bool, mode os.FileMode) bool {

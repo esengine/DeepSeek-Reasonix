@@ -45,14 +45,44 @@ func TestNormalizeLocalOpenPath(t *testing.T) {
 	}
 }
 
-func TestNormalizeLocalOpenPathAuthorityUNC(t *testing.T) {
-	want := filepath.FromSlash("//server/share/docs/report.md")
-	got, err := normalizeLocalOpenPath("file://server/share/docs/report.md")
+func TestNormalizeLocalOpenPathRejectsRemoteAuthority(t *testing.T) {
+	// A remote host would become a UNC path and trigger an SMB connection
+	// (Net-NTLM credential negotiation) on click — must be refused.
+	for _, u := range []string{
+		"file://attacker.example/share/evil.bat",
+		"file://192.168.1.50/share/x.txt",
+	} {
+		if _, err := normalizeLocalOpenPath(u); err == nil {
+			t.Errorf("normalizeLocalOpenPath(%q): want rejection (remote authority), got nil", u)
+		}
+	}
+	// Loopback authorities stay allowed and resolve to the local path.
+	got, err := normalizeLocalOpenPath("file://localhost/C:/x.txt")
 	if err != nil {
-		t.Fatalf("authority-form UNC URL rejected: %v", err)
+		t.Fatalf("file://localhost: %v", err)
+	}
+	if !strings.Contains(got, "C:") {
+		t.Errorf("file://localhost: want drive path, got %q", got)
+	}
+	if _, err := normalizeLocalOpenPath("file://127.0.0.1/C:/x.txt"); err != nil {
+		t.Errorf("file://127.0.0.1 should be allowed: %v", err)
+	}
+}
+
+func TestNormalizeLocalOpenPathAuthorityUNC(t *testing.T) {
+	// Remote file:// URLs are refused (SMB credential-leak risk on AI-injected
+	// chat content); plain \server\share paths still work — the UNC form
+	// stays available for users who type or render it explicitly.
+	if _, err := normalizeLocalOpenPath("file://server/share/docs/report.md"); err == nil {
+		t.Fatal("remote file:// URL must be rejected (SMB leak risk)")
+	}
+	want := filepath.FromSlash("//server/share/docs/report.md")
+	got, err := normalizeLocalOpenPath("\\\\server\\share\\docs\\report.md")
+	if err != nil {
+		t.Fatalf("plain UNC path rejected: %v", err)
 	}
 	if got != want {
-		t.Fatalf("authority-form UNC URL = %q, want %q", got, want)
+		t.Fatalf("plain UNC path = %q, want %q", got, want)
 	}
 }
 
