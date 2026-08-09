@@ -121,6 +121,10 @@ eq(localPathFromHref("file:///D:/a%20b.txt"), "D:/a b.txt", "decoded %20 becomes
 eq(localPathFromHref("file:///D:/x/y.md"), "D:/x/y.md", "decodes plain path");
 eq(localPathFromHref("file:///Users/liangkang/notes/readme.md"), "/Users/liangkang/notes/readme.md", "preserves the leading slash for Unix paths");
 eq(localPathFromHref("file://nas/share/report.md"), null, "rejects remote authority (SMB credential leak — backend rule parity)");
+eq(localPathFromHref("file://127.0.0.1//nas/share/x.txt"), null, "rejects loopback + double-slash path (backend parity)");
+eq(localPathFromHref("file://localhost/C:/x.txt"), "C:/x.txt", "loopback drive path still opens");
+eq(localPathFromHref("file:///%5c%5cnas%5cshare%5cdocs%5creport.md"), "//nas/share/docs/report.md", "lowercase %5c spelling handled");
+eq(localPathFromHref("file://[::1]/C:/x.txt"), "C:/x.txt", "IPv6 loopback drive path opens");
 eq(localPathFromHref("file:////nas/share/report.md"), null, "rejects four-slash UNC (empty authority — remote SMB leak)");
 eq(localPathFromHref("file://///nas/share/report.md"), null, "rejects five-slash UNC (empty authority — remote SMB leak)");
 eq(localPathFromHref("file://./PhysicalDrive0"), null, "rejects device-namespace authority");
