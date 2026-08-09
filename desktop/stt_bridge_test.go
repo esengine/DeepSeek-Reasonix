@@ -118,7 +118,11 @@ func TestSTTBridgeForwardsTranscriptAndState(t *testing.T) {
 // 空 transcript 过滤：Web Speech 偶发空 final 不上报，避免光标处插入空内容。
 func TestSTTBridgeSkipsEmptyFinalTranscript(t *testing.T) {
 	n := 0
-	emit := func(name string, data ...interface{}) { n++ }
+	emit := func(name string, data ...interface{}) {
+		if name == sttTranscriptEvent {
+			n++
+		}
+	}
 	b := newSTTBridge(t.TempDir(), emit)
 	srv := runBridgeOnServer(t, b)
 	defer srv.Close()
