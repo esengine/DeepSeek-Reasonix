@@ -4,7 +4,7 @@ import { ArrowRight, ArrowUp, AtSign, Check, ChevronDown, ChevronUp, ChevronsUpD
 import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
-import { app, onFilesDropped, onSTTState, onSTTTranscript } from "../lib/bridge";
+import { app, onEnhanceProgress, onFilesDropped, onSTTState, onSTTTranscript } from "../lib/bridge";
 import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n, type DictKey, type Translator } from "../lib/i18n";
@@ -1849,6 +1849,11 @@ export function Composer({
   const [enhancedOriginal, setEnhancedOriginal] = useState<string | null>(null);
   // 最近一次增强的结果：用于判断用户是否在增强后又修改了输入（此时可二次增强）。
   const [enhancedResult, setEnhancedResult] = useState<string | null>(null);
+  // 增强进行中的重试进度（Go 端 enhance:progress 事件）：非 null = provider
+  // 正在限流/网络重试，显示"重试中(n/m)"，避免转圈无反馈被误以为卡死。
+  const [enhanceRetry, setEnhanceRetry] = useState<{ attempt: number; max: number } | null>(null);
+  // 增强已等待秒数：转圈时每秒 +1 显示在按钮内，让"转好久"可见可预期。
+  const [enhanceElapsed, setEnhanceElapsed] = useState(0);
   const enhancePrompt = useCallback(async () => {
     const current = textRef.current.trim();
     if (!current) {
@@ -1897,6 +1902,27 @@ export function Composer({
     void app.CancelTrySubagentProfile().catch(() => {});
     showToast(t("composer.enhanceCancelled"), "info");
   }, [showToast, t]);
+  // 增强进行中的进度反馈：转圈秒数 + 重试状态（enhance:progress 事件）。
+  // 消除"转好久无反馈"的焦虑：用户能看到已等待秒数与是否在重试。
+  useEffect(() => {
+    if (!enhancing) {
+      setEnhanceElapsed(0);
+      setEnhanceRetry(null);
+      return;
+    }
+    setEnhanceElapsed(0);
+    setEnhanceRetry(null);
+    const timer = window.setInterval(() => {
+      setEnhanceElapsed((s) => s + 1);
+    }, 1000);
+    const unsubscribe = onEnhanceProgress((p) => {
+      setEnhanceRetry({ attempt: p.attempt, max: p.max });
+    });
+    return () => {
+      window.clearInterval(timer);
+      unsubscribe();
+    };
+  }, [enhancing]);
 
   const replaceComposerText = (next: string) => {
     clearComposerEditHistory(activeDraftKeyRef.current);
@@ -4798,9 +4824,18 @@ export function Composer({
               >
                 {enhancing ? (
                   // 运行中默认转圈；鼠标悬停（hover）时切换为叉叉，提示可取消。
+                  // 进度文本（已等待秒数 / 重试中 n/m）实时可见，消除"转好久
+                  // 无反馈"的焦虑；hover 时隐藏以免与取消提示抢空间。
                   <span className="composer__btn--enhance-status">
                     <Loader2 size={15} className="composer__btn--spinning" />
                     <X size={15} className="composer__btn--enhance-cancel" />
+                    {(enhanceRetry || enhanceElapsed > 0) && (
+                      <span className="composer__btn--enhance-progress">
+                        {enhanceRetry
+                          ? t("composer.enhanceRetrying", { n: enhanceRetry.attempt, m: enhanceRetry.max })
+                          : `${enhanceElapsed}s`}
+                      </span>
+                    )}
                   </span>
                 ) : (enhancedOriginal != null && textRef.current.trim() === (enhancedResult ?? "").trim())
                   ? <Undo2 size={15} />

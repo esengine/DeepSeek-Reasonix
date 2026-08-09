@@ -6624,6 +6624,11 @@ body > .mermaid-diagram--fullscreen {
 .composer__btn--enhance {
   background: transparent;
   color: var(--text-secondary);
+  /* 运行中要容纳进度文本（已等待秒数 / 重试中 n/m），允许内容撑宽；
+     非运行状态保持 32px 图标按钮。 */
+  width: auto;
+  min-width: 32px;
+  padding: 0 6px;
 }
 .composer__btn--enhance:not(:disabled):hover {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
@@ -6656,7 +6661,17 @@ body > .mermaid-diagram--fullscreen {
 .composer__btn--enhance-status .composer__btn--enhance-cancel {
   display: none;
 }
+.composer__btn--enhance-status .composer__btn--enhance-progress {
+  font-size: 10px;
+  line-height: 1;
+  margin-left: 4px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
 .composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--spinning {
+  display: none;
+}
+.composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--enhance-progress {
   display: none;
 }
 .composer__btn--enhance:not(:disabled):hover .composer__btn--enhance-status .composer__btn--enhance-cancel {

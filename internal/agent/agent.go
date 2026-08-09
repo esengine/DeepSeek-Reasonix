@@ -2837,7 +2837,7 @@ func streamRecoveryMessage(hasPartialText, hadPartialTool bool) string {
 // reasoning on the next turn.
 func (a *Agent) stream(ctx context.Context, turn int, sink event.Sink) (string, string, string, []provider.ToolCall, []json.RawMessage, *provider.Usage, bool, bool, []provider.ToolCall, error) {
 	ctx = provider.WithRetryNotify(ctx, func(info provider.RetryInfo) {
-		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max})
+		sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: info.Attempt, RetryMax: info.Max, RetryDelay: info.Delay, Err: info.Err})
 	})
 	ctx = provider.WithRequestAttemptCounter(ctx)
 	// A stream can terminate locally before the provider channel closes (for

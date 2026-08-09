@@ -744,6 +744,7 @@ export const zh: Record<DictKey, string> = {
   "composer.enhanceDone": "提示词已增强",
   "composer.enhanceCancelled": "已取消增强",
   "composer.enhanceReverted": "已还原为原始提示词",
+  "composer.enhanceRetrying": "重试中 {n}/{m}",
   "composer.pastedLabel": "[已粘贴文本 #{id} · {lines} 行]",
   "composer.pastedShowPreview": "预览粘贴文本",
   "composer.pastedHidePreview": "收起粘贴文本预览",

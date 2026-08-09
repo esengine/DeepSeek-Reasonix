@@ -542,6 +542,7 @@ export const zhTW: Record<DictKey, string> = {
   "composer.enhanceDone": "提示詞已增強",
   "composer.enhanceCancelled": "已取消增強",
   "composer.enhanceReverted": "已還原為原始提示詞",
+  "composer.enhanceRetrying": "重試中 {n}/{m}",
   "composer.pastedLabel": "[已貼上文字 #{id} · {lines} 行]",
   "composer.pastedShowPreview": "預覽貼上文字",
   "composer.pastedHidePreview": "收起貼上文字預覽",

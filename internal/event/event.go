@@ -13,6 +13,7 @@ package event
 
 import (
 	"encoding/json"
+	"time"
 
 	"reasonix/internal/evidence"
 	"reasonix/internal/nilutil"
@@ -356,14 +357,15 @@ type Event struct {
 	Audience     NoticeAudience  // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
 	Approval     Approval        // ApprovalRequest
 	Ask          Ask             // AskRequest
-	Err          error           // TurnDone: non-nil on failure
+	Err          error           // TurnDone: non-nil on failure; Retrying: error that triggered the retry
 	Cancelled    bool            // TurnDone: Cancel was requested while the turn was active
 	Outcome      string          // TurnDone: optional machine-readable recoverable outcome
 	Readiness    *FinalReadiness // TurnDone: structured final-readiness recovery state
 	Compaction   Compaction      // Compaction
 	Guardian     GuardianResult
-	RetryAttempt int // Retrying: 1-based attempt about to be made
-	RetryMax     int // Retrying: total attempts before giving up
+	RetryAttempt int           // Retrying: 1-based attempt about to be made
+	RetryMax     int           // Retrying: total attempts before giving up
+	RetryDelay   time.Duration // Retrying: backoff delay before this attempt (0 = unknown)
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care

@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/command"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
+	"reasonix/internal/event"
 	"reasonix/internal/permission"
 	"reasonix/internal/skill"
 )
@@ -948,5 +949,32 @@ func TestSkillsSettingsBodyOnlyForSubagentSkills(t *testing.T) {
 	}
 	if !sawProfile || !sawInline {
 		t.Fatalf("views missing: profile=%v inline=%v", sawProfile, sawInline)
+	}
+}
+
+func TestTryRunEventSinkRetryingLogsAndEmits(t *testing.T) {
+	a := &App{ctx: context.Background()}
+	// asyncRuntimeEmitter 异步入队（goroutine 消费），用带缓冲 channel 收集事件。
+	emitted := make(chan string, 4)
+	a.runtimeEvents = asyncRuntimeEmitter{emit: func(_ context.Context, name string, _ ...interface{}) {
+		emitted <- name
+	}}
+	sink := a.tryRunEventSink()
+	// 非 Retrying 事件应被静默丢弃（headless 无 UI），且不触发 emit。
+	sink.Emit(event.Event{Kind: event.Text, Text: "noise"})
+	select {
+	case name := <-emitted:
+		t.Fatalf("non-retrying event emitted %q, want none", name)
+	case <-time.After(200 * time.Millisecond):
+	}
+	// Retrying 事件：打印日志并 emit enhance:progress 供前端显示"重试中(n/m)"。
+	sink.Emit(event.Event{Kind: event.Retrying, RetryAttempt: 2, RetryMax: 10, RetryDelay: 500 * time.Millisecond})
+	select {
+	case name := <-emitted:
+		if name != enhanceProgressEvent {
+			t.Fatalf("Retrying emit = %q, want %s", name, enhanceProgressEvent)
+		}
+	case <-time.After(1 * time.Second):
+		t.Fatal("Retrying event did not emit enhance:progress")
 	}
 }

@@ -1116,6 +1116,37 @@ export function __emitMockSTTState(p: STTStatePayload): void {
   emitSTTState(p);
 }
 
+// EnhanceProgressPayload 是增强提示词/试运行的 provider 重试进度事件
+// （Go 侧 desktop/subagents_app.go enhanceProgressEvent "enhance:progress"）。
+// 增强按钮转圈期间前端据此显示"重试中(n/m)"，避免无反馈长转。
+export interface EnhanceProgressPayload {
+  attempt: number;
+  max: number;
+}
+
+const enhanceProgressListeners = new Set<(p: EnhanceProgressPayload) => void>();
+
+function emitEnhanceProgress(p: EnhanceProgressPayload) {
+  enhanceProgressListeners.forEach((l) => l(p));
+}
+
+// onEnhanceProgress 订阅增强/试运行重试进度事件；返回取消订阅函数。
+// 事件名必须与 desktop/subagents_app.go 的 enhanceProgressEvent 一致。
+export function onEnhanceProgress(cb: (p: EnhanceProgressPayload) => void): () => void {
+  if (realApp() && typeof window !== "undefined" && window.runtime) {
+    return window.runtime.EventsOn("enhance:progress", (p) => cb(p as EnhanceProgressPayload));
+  }
+  enhanceProgressListeners.add(cb);
+  return () => {
+    enhanceProgressListeners.delete(cb);
+  };
+}
+
+// Test seam for the browser-dev mock: pushes a fake retry progress event.
+export function __emitMockEnhanceProgress(p: EnhanceProgressPayload): void {
+  emitEnhanceProgress(p);
+}
+
 function emitUpdater(p: UpdateProgress) {
   updaterListeners.forEach((l) => l(p));
 }

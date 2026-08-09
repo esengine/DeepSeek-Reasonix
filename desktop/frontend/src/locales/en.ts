@@ -743,6 +743,7 @@ export const en = {
   "composer.enhanceDone": "Prompt enhanced",
   "composer.enhanceCancelled": "Enhancing cancelled",
   "composer.enhanceReverted": "Reverted to original prompt",
+  "composer.enhanceRetrying": "retrying {n}/{m}",
   "composer.pastedLabel": "[Pasted text #{id} · {lines} lines]",
   "composer.pastedShowPreview": "Preview pasted text",
   "composer.pastedHidePreview": "Hide pasted text preview",

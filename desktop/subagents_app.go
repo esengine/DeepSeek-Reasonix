@@ -361,6 +361,10 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 	if err != nil {
 		return "", err
 	}
+	// 分段计时：模型解析 + provider 构建完成。若这里耗时大，说明问题在
+	// 配置/凭据解析或代理探测，而非模型生成；多数情况下应 <1s。
+	fmt.Printf("[subagent-try] ready(%.2fs): model=%s effort=%q\n",
+		time.Since(start).Seconds(), modelRef, me.Effort)
 
 	reg := trySubagentToolRegistry(cfg, root, input.AllowedTools)
 
@@ -375,13 +379,52 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 		Pricing:       me.Price,
 		ContextWindow: me.ContextWindow,
 		Gate:          trySubagentPermissionGate(policy),
-	}, event.Discard)
+	}, a.tryRunEventSink())
 	if err != nil {
 		fmt.Printf("[subagent-try] done(%.2fs): err=%v\n", time.Since(start).Seconds(), err)
 		return "", err
 	}
 	fmt.Printf("[subagent-try] done(%.2fs): ok len=%d\n", time.Since(start).Seconds(), len(result))
 	return result, nil
+}
+
+// enhanceProgressEvent 是增强/试运行重试进度事件名，推给前端显示
+// "重试中(n/m)"，避免转圈期间无任何反馈。前端在 lib/bridge.ts 订阅。
+const enhanceProgressEvent = "enhance:progress"
+
+// tryRunEventSink 转发增强/试运行中的 provider 重试事件：打控制台日志，
+// 并经 "enhance:progress" 事件推给前端（按钮旁显示"重试中 n/m"）。
+// 其余事件丢弃（headless 运行无 UI）。此前用 event.Discard，重试被静默
+// 吞掉——前端只看到转圈，无法区分"模型正常生成中"与"API 限流/网络重试中"。
+// dev 控制台据此可确认"转好久"的成因：有 retry 行=重试耗时，无 retry 行=
+// 纯生成耗时（模型慢）。
+func (a *App) tryRunEventSink() event.Sink {
+	var last time.Time
+	return event.FuncSink(func(ev event.Event) {
+		if ev.Kind != event.Retrying {
+			return
+		}
+		now := time.Now()
+		since := 0.0
+		if !last.IsZero() {
+			since = now.Sub(last).Seconds()
+		}
+		last = now
+		delay := ev.RetryDelay.Seconds()
+		if ev.RetryDelay <= 0 {
+			delay = since
+		}
+		reason := ""
+		if ev.Err != nil {
+			reason = " err=" + ev.Err.Error()
+		}
+		fmt.Printf("[subagent-try] retry %d/%d delay=%.1fs (%.1fs since last)%s\n",
+			ev.RetryAttempt, ev.RetryMax, delay, since, reason)
+		a.emitRuntimeEvent(enhanceProgressEvent, map[string]any{
+			"attempt": ev.RetryAttempt,
+			"max":     ev.RetryMax,
+		})
+	})
 }
 
 // EnhancePrompt 用大模型增强用户当前输入（提示词润色/补全），返回增强后的
