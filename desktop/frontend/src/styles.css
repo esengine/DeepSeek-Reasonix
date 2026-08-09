@@ -11344,9 +11344,8 @@ body > .mermaid-diagram--fullscreen {
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-/* 语音输入（STT）设置：静默秒数 + 快捷键输入框 */
-.settings-stt-seconds,
-.settings-stt-hotkey {
+/* 语音输入（STT）设置：静默秒数 */
+.settings-stt-seconds {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -11354,32 +11353,14 @@ body > .mermaid-diagram--fullscreen {
   font-size: var(--font-control);
   padding: 6px 8px;
   min-width: 0;
-}
-.settings-stt-seconds {
   width: 90px;
 }
-.settings-stt-hotkey {
-  flex: 1;
-  font-family: var(--font-mono, monospace);
-  text-transform: lowercase;
-}
-/* STT 热键行：输入框 + 独立重置按钮（参照快捷键设置页 .shortcuts-settings__control） */
-.stt-hotkey-control {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-}
-.settings-stt-seconds:focus,
-.settings-stt-hotkey:focus {
+.settings-stt-seconds:focus {
   border-color: var(--accent);
   outline: none;
   box-shadow: 0 0 0 2px var(--accent-soft);
 }
-.settings-stt-seconds:disabled,
-.settings-stt-hotkey:disabled {
+.settings-stt-seconds:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }

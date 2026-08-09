@@ -59,6 +59,7 @@ import {
   shortcutConflict,
   shortcutDefinitions,
   type ShortcutAction,
+  type ShortcutCombo,
 } from "../lib/keyboardShortcuts";
 import type { BotAccessView, BotAllowlistView, BotConnectionDiagnostic, BotConnectionView, BotInstallStartResult, BotRouteView, BotSettingsView, HookConfigView, HooksSettingsView, NetworkView, ProviderModelCatalogUpdate, ProviderPresetView, ProviderView, SettingsTab, SettingsView } from "../lib/types";
 import { AppearanceOverview } from "./AppearanceOverview";
@@ -336,7 +337,7 @@ export function SettingsPanel({
                 {tab === "memory" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><MemorySettingsPage /></Suspense></SettingsPageShell>}
                 {tab === "hooks" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><HooksSection onChanged={onChanged} /></SettingsPageShell>}
                 {tab === "diagnostics" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><Suspense fallback={lazySettingsPageFallback}><DiagnosticsSettingsPage onNavigate={setTab} /></Suspense></SettingsPageShell>}
-                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection /></SettingsPageShell>}
+                {tab === "shortcuts" && <SettingsPageShell key={tab} s={s} tab={tab} busy={false} apply={apply}><ShortcutsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "permissions" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><PermissionsSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
                 {tab === "sandbox" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><SandboxSection s={s} busy={busy} apply={apply} windows={desktopPlatform === "windows"} /></SettingsPageShell>}
                 {tab === "network" && s && <SettingsPageShell key={tab} s={s} tab={tab} busy={busy} apply={apply}><NetworkSection s={s} busy={busy} apply={apply} /></SettingsPageShell>}
@@ -648,17 +649,52 @@ function botSettingsMeta(bot: BotSettingsView, t: ReturnType<typeof useT>): stri
   return t("settings.botConnectionCount", { n: connections });
 }
 
-export function ShortcutsSection() {
+export function ShortcutsSection({
+  s = null,
+  busy = false,
+  apply,
+}: {
+  s?: SettingsView | null;
+  busy?: boolean;
+  apply?: (fn: () => Promise<unknown>) => Promise<boolean>;
+}) {
   const t = useT();
   const [platform] = useState(() => detectShortcutPlatform());
   const [revision, setRevision] = useState(0);
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
+  const [sttRecording, setSttRecording] = useState<"start" | "stop" | null>(null);
   const [conflict, setConflict] = useState<{ action: ShortcutAction; conflictAction: ShortcutAction } | null>(null);
   const [unsupportedAction, setUnsupportedAction] = useState<ShortcutAction | null>(null);
 
   useEffect(() => onShortcutsChanged(() => setRevision((value) => value + 1)), []);
 
   const definitions = shortcutDefinitions();
+  // STT 全局热键行：与内置快捷键行同构（录制式 key 按钮 + 重置恢复默认 alt+s/alt+w）。
+  const sttRows: {
+    which: "start" | "stop";
+    labelKey: DictKey;
+    hintKey: DictKey;
+    value: string;
+    defaultValue: string;
+    save: (v: string) => Promise<unknown>;
+  }[] = s && apply ? [
+    {
+      which: "start" as const,
+      labelKey: "settings.sttHotkeyStart",
+      hintKey: "settings.sttHotkeyStartHint",
+      value: s.desktopSTTHotkeyStart ?? "",
+      defaultValue: "alt+s",
+      save: (v: string) => app.SetDesktopSTTHotkeyStart(v),
+    },
+    {
+      which: "stop" as const,
+      labelKey: "settings.sttHotkeyStop",
+      hintKey: "settings.sttHotkeyStopHint",
+      value: s.desktopSTTHotkeyStop ?? "",
+      defaultValue: "alt+w",
+      save: (v: string) => app.SetDesktopSTTHotkeyStop(v),
+    },
+  ] : [];
   const commitShortcut = (action: ShortcutAction, event: ReactKeyboardEvent<HTMLButtonElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
@@ -702,6 +738,42 @@ export function ShortcutsSection() {
     setUnsupportedAction(null);
     setRecording(null);
     setRevision((value) => value + 1);
+  };
+
+  // commitSttHotkey 录制 STT 全局热键：按下组合键保存为后端存储格式（如 "alt+s"），
+  // Backspace 清空（留空禁用），Escape 取消录制。
+  const commitSttHotkey = (
+    save: (v: string) => Promise<unknown>,
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+  ) => {
+    if (!apply) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setSttRecording(null);
+      return;
+    }
+    if (event.key === "Backspace") {
+      event.preventDefault();
+      event.stopPropagation();
+      setSttRecording(null);
+      void apply(() => save(""));
+      return;
+    }
+    if (event.key === "Tab") {
+      // 让浏览器先移动焦点，避免录制按钮成为键盘陷阱（同 commitShortcut）。
+      const recorder = event.currentTarget;
+      queueMicrotask(() => {
+        if (document.activeElement === recorder) recorder.blur();
+      });
+      return;
+    }
+    const combo = comboFromKeyboardEvent(event.nativeEvent);
+    if (!combo) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setSttRecording(null);
+    void apply(() => save(comboToHotkeyString(combo)));
   };
 
   return (
@@ -799,6 +871,49 @@ export function ShortcutsSection() {
             </div>
           );
         })}
+        {sttRows.map(({ which, labelKey, hintKey, value, defaultValue, save }) => {
+              const isRecording = sttRecording === which;
+              const isCustom = value !== defaultValue;
+              return (
+                <div className="shortcuts-settings__row" key={which}>
+                  <div className="shortcuts-settings__copy">
+                    <div className="shortcuts-settings__label">{t(labelKey)}</div>
+                    <div className="shortcuts-settings__desc">{t(hintKey)}</div>
+                  </div>
+                  <div className="shortcuts-settings__control">
+                    <button
+                      className={`shortcuts-settings__key${isRecording ? " shortcuts-settings__key--recording" : ""}`}
+                      type="button"
+                      disabled={busy}
+                      aria-label={isRecording ? t("settings.shortcutsRecording") : formatShortcutCombo(parseHotkeyCombo(value || defaultValue), platform)}
+                      aria-pressed={isRecording}
+                      onClick={(event) => {
+                        setSttRecording(which);
+                        event.currentTarget.focus();
+                      }}
+                      onBlur={() => {
+                        if (!isRecording) return;
+                        setSttRecording(null);
+                      }}
+                      onKeyDown={(event) => isRecording && commitSttHotkey(save, event)}
+                    >
+                      {isRecording ? t("settings.shortcutsRecording") : <ShortcutComboDisplay combo={parseHotkeyCombo(value || defaultValue)} platform={platform} />}
+                    </button>
+                    <button
+                      className="chip"
+                      type="button"
+                      disabled={!isCustom || busy}
+                      onClick={() => {
+                        setSttRecording(null);
+                        if (apply) void apply(() => save(defaultValue));
+                      }}
+                    >
+                      {t("settings.shortcutsReset")}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
       </div>
     </SettingsSection>
   );
@@ -1839,22 +1954,6 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
               void apply(() => app.SetDesktopSTTAutoStopSeconds(v));
             }
           }}
-        />
-      </SettingsField>
-      <SettingsField label={t("settings.sttHotkeyStart")} hint={t("settings.sttHotkeyStartHint")}>
-        <HotkeyCaptureInput
-          value={s.desktopSTTHotkeyStart ?? ""}
-          disabled={busy}
-          placeholder="alt+s"
-          onChange={(v) => void apply(() => app.SetDesktopSTTHotkeyStart(v))}
-        />
-      </SettingsField>
-      <SettingsField label={t("settings.sttHotkeyStop")} hint={t("settings.sttHotkeyStopHint")}>
-        <HotkeyCaptureInput
-          value={s.desktopSTTHotkeyStop ?? ""}
-          disabled={busy}
-          placeholder="alt+w"
-          onChange={(v) => void apply(() => app.SetDesktopSTTHotkeyStop(v))}
         />
       </SettingsField>
       <SettingsField label={t("settings.closeBehavior")}>
@@ -4035,91 +4134,35 @@ function ToggleSegment({
   );
 }
 
-// HotkeyCaptureInput 是录制式快捷键输入框：点击进入录制态，按下组合键自动填入
-// （如 "alt+s"）并立即保存。避免手动输入拼写错误（如 "ATL+S"）。
-function HotkeyCaptureInput({
-  value,
-  disabled,
-  placeholder,
-  onChange,
-}: {
-  value: string;
-  disabled: boolean;
-  placeholder?: string;
-  onChange: (v: string) => void;
-}) {
-  const t = useT();
-  const [capturing, setCapturing] = useState(false);
-  const [pending, setPending] = useState<string | null>(null);
+// comboToHotkeyString 把录制的组合键格式化为后端存储的小写格式（如 "alt+s"），
+// 与 STT 热键的保存/展示格式保持一致。
+function comboToHotkeyString(combo: ShortcutCombo): string {
+  const parts: string[] = [];
+  if (combo.meta) parts.push("win");
+  if (combo.ctrl) parts.push("ctrl");
+  if (combo.alt) parts.push("alt");
+  if (combo.shift) parts.push("shift");
+  let k = combo.key.toLowerCase();
+  if (k === " ") k = "space";
+  if (k === "arrowup") k = "up";
+  if (k === "arrowdown") k = "down";
+  if (k === "arrowleft") k = "left";
+  if (k === "arrowright") k = "right";
+  parts.push(k);
+  return parts.join("+");
+}
 
-  const formatCombo = (e: ReactKeyboardEvent<HTMLInputElement>): string => {
-    const parts: string[] = [];
-    if (e.metaKey) parts.push("win");
-    if (e.ctrlKey) parts.push("ctrl");
-    if (e.altKey) parts.push("alt");
-    if (e.shiftKey) parts.push("shift");
-    const key = e.key;
-    // 修饰键本身不算按键
-    if (key === "Alt" || key === "Control" || key === "Shift" || key === "Meta" || key === "Win") {
-      return "";
-    }
-    let k = key.toLowerCase();
-    if (k === " ") k = "space";
-    if (k === "arrowup") k = "up";
-    if (k === "arrowdown") k = "down";
-    if (k === "arrowleft") k = "left";
-    if (k === "arrowright") k = "right";
-    parts.push(k);
-    return parts.join("+");
-  };
-
-  return (
-    <div className="stt-hotkey-control">
-      <input
-        type="text"
-        className="settings-stt-hotkey"
-        value={capturing && pending !== null ? pending : (capturing ? "" : value)}
-        placeholder={capturing ? (t("settings.sttHotkeyCapture") ?? "按下组合键…") : placeholder}
-        disabled={disabled}
-        readOnly
-        onFocus={() => {
-          setCapturing(true);
-          setPending(null);
-        }}
-        onBlur={() => {
-          setCapturing(false);
-          setPending(null);
-        }}
-        onKeyDown={(e) => {
-          if (!capturing) return;
-          e.preventDefault();
-          if (e.key === "Escape" || e.key === "Backspace") {
-            setCapturing(false);
-            setPending(null);
-            onChange("");
-            return;
-          }
-          const combo = formatCombo(e);
-          if (!combo) return; // 纯修饰键，继续等待
-          setPending(combo);
-          setCapturing(false);
-          onChange(combo);
-        }}
-      />
-      <button
-        type="button"
-        className="chip"
-        disabled={disabled || !value}
-        onClick={() => {
-          setCapturing(false);
-          setPending(null);
-          onChange("");
-        }}
-      >
-        {t("settings.shortcutsReset")}
-      </button>
-    </div>
-  );
+// parseHotkeyCombo 把 STT 热键字符串（如 "alt+s"）解析回 ShortcutCombo，供 key 按钮展示。
+function parseHotkeyCombo(text: string): ShortcutCombo {
+  const combo: ShortcutCombo = { key: "" };
+  for (const part of text.split("+")) {
+    if (part === "win") combo.meta = true;
+    else if (part === "ctrl") combo.ctrl = true;
+    else if (part === "alt") combo.alt = true;
+    else if (part === "shift") combo.shift = true;
+    else combo.key = part;
+  }
+  return combo;
 }
 
 function BotListInput({
