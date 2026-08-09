@@ -1789,7 +1789,7 @@ function makeMockApp(): AppBindings {
     desktopSTTShowPage: true,
     desktopSTTAutoStop: true,
     desktopSTTAutoStopOnSwitch: false,
-    desktopSTTAutoStopSeconds: 10,
+    desktopSTTAutoStopSeconds: 6,
     desktopSTTHotkeyStart: "",
     desktopSTTHotkeyStop: "",
     configPath: "~/.reasonix/config.toml",

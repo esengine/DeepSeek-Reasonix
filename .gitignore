@@ -34,6 +34,8 @@ mem.prof
 .env
 .env.local
 *.local
+# 本地个人 AI 指令（AGENTS.local.md 不提交；AGENTS.md 提交共享）
+AGENTS.local.md
 /reasonix.toml
 /desktop/.env
 /desktop/reasonix.toml

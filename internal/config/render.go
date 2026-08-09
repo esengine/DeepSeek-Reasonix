@@ -136,7 +136,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if secs := c.Desktop.STTAutoStopSeconds; secs > 0 {
 			fmt.Fprintf(&b, "stt_auto_stop_seconds = %d   # desktop: silence timeout (s) before auto-stop\n", secs)
 		} else {
-			b.WriteString("# stt_auto_stop_seconds = 10   # desktop: silence timeout (s) before auto-stop\n")
+			b.WriteString("# stt_auto_stop_seconds = 6   # desktop: silence timeout (s) before auto-stop\n")
 		}
 		if hk := c.Desktop.STTHotkeyStart; hk != "" {
 			fmt.Fprintf(&b, "stt_hotkey_start = %q   # desktop: global hotkey to start voice input\n", hk)

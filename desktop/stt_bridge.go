@@ -31,6 +31,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -133,7 +134,7 @@ func newSTTBridge(homeDir string, emit func(name string, data ...interface{})) *
 		homeDir:         homeDir,
 		showPage:        true,
 		autoStop:        true,
-		autoStopSeconds: 10,
+		autoStopSeconds: 6,
 	}
 	// 热键回调：开始/停止识别。桥接层自身负责向浏览器发命令。
 	// 开始热键按下时服务可能尚未启动（用户还没点过麦克风按钮），
@@ -400,13 +401,37 @@ func (b *sttBridge) Stop() {
 }
 
 // killEdgeProfileProcesses 按 CommandLine 匹配本 STT 专用 profile 目录，
-// 杀掉所有相关 msedge 进程（含子进程）。非 Windows/失败静默忽略。
+// 杀掉所有相关 msedge 进程（含子进程），并等待它们全部退出。
+// 非 Windows/失败静默忽略。
+// 为什么要等待：Chromium 对相同 --user-data-dir（profile）有单实例锁——
+// 旧实例未完全退出时，新实例要么起不来、要么把请求转发给旧实例。dev
+// 热重载/多次启用后若旧子进程残留，新识别页会连不上或连错端口，表现
+// 为"刷新后录不出声音"。杀掉后轮询确认全部退出再启动，才能彻底避免
+// 新旧进程抢麦克风/抢 profile 的竞态。
 func killEdgeProfileProcesses(homeDir string) {
 	profileDir := filepath.Join(homeDir, sttEdgeProfileDirName)
-	ps := "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+	killPS := "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
 		"Where-Object { $_.CommandLine -like '*" + profileDir + "*' } | " +
 		"ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-	_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps).Run()
+	_ = exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", killPS).Run()
+
+	// 等待该 profile 的所有 msedge 进程退出（最多 ~5s，50ms 间隔轮询）。
+	// 避免"杀完立即启动"时旧进程尚未释放 profile 锁/麦克风设备。
+	countPS := "Get-CimInstance Win32_Process -Filter \"Name='msedge.exe'\" | " +
+		"Where-Object { $_.CommandLine -like '*" + profileDir + "*' } | Measure-Object | Select-Object -ExpandProperty Count"
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		out, err := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", countPS).Output()
+		remaining := 0
+		if err == nil {
+			remaining, _ = strconv.Atoi(strings.TrimSpace(string(out)))
+		}
+		if remaining <= 0 {
+			return // 全部退出
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	fmt.Println("[STT] Edge profile 进程等待退出超时（继续启动）")
 }
 
 // StartListening 向浏览器发送开始识别命令，并启动自动停止监控。
@@ -621,13 +646,16 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 			b.mu.Lock()
 			b.lastSpeechTime = time.Now()
 			b.mu.Unlock()
+			// 无条件打印 transcript 到达日志（interim/final 都打，含时间戳），
+			// 便于在 dev 窗口直接观察"停下说话 → 文本到达"的延迟。
+			// 之前 emit != nil 时全不打印，导致日志里看不到识别明细。
+			fmt.Printf("[STT] transcript t=%s final=%v len=%d: %s\n",
+				time.Now().Format("15:04:05.000"), isFinal, len(text), text)
 			if b.emit != nil {
 				b.mu.Lock()
 				tabID := b.tabID
 				b.mu.Unlock()
 				b.emit(sttTranscriptEvent, sttTranscriptPayload{Text: text, IsFinal: isFinal, TabID: tabID})
-			} else {
-				fmt.Printf("[STT] transcript(final=%v): %s\n", isFinal, text)
 			}
 		case "status":
 			state, _ := msg["state"].(string)

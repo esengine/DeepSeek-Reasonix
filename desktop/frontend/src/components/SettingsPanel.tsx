@@ -1831,7 +1831,7 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           max={300}
           step={1}
           className="settings-stt-seconds"
-          value={s.desktopSTTAutoStopSeconds ? s.desktopSTTAutoStopSeconds : 10}
+          value={s.desktopSTTAutoStopSeconds ? s.desktopSTTAutoStopSeconds : 6}
           disabled={busy}
           onChange={(e) => {
             const v = Number.parseInt(e.target.value, 10);
@@ -4074,37 +4074,51 @@ function HotkeyCaptureInput({
   };
 
   return (
-    <input
-      type="text"
-      className="settings-stt-hotkey"
-      value={capturing && pending !== null ? pending : (capturing ? "" : value)}
-      placeholder={capturing ? (t("settings.sttHotkeyCapture") ?? "按下组合键…") : placeholder}
-      disabled={disabled}
-      readOnly
-      onFocus={() => {
-        setCapturing(true);
-        setPending(null);
-      }}
-      onBlur={() => {
-        setCapturing(false);
-        setPending(null);
-      }}
-      onKeyDown={(e) => {
-        if (!capturing) return;
-        e.preventDefault();
-        if (e.key === "Escape" || e.key === "Backspace") {
+    <div className="stt-hotkey-control">
+      <input
+        type="text"
+        className="settings-stt-hotkey"
+        value={capturing && pending !== null ? pending : (capturing ? "" : value)}
+        placeholder={capturing ? (t("settings.sttHotkeyCapture") ?? "按下组合键…") : placeholder}
+        disabled={disabled}
+        readOnly
+        onFocus={() => {
+          setCapturing(true);
+          setPending(null);
+        }}
+        onBlur={() => {
+          setCapturing(false);
+          setPending(null);
+        }}
+        onKeyDown={(e) => {
+          if (!capturing) return;
+          e.preventDefault();
+          if (e.key === "Escape" || e.key === "Backspace") {
+            setCapturing(false);
+            setPending(null);
+            onChange("");
+            return;
+          }
+          const combo = formatCombo(e);
+          if (!combo) return; // 纯修饰键，继续等待
+          setPending(combo);
+          setCapturing(false);
+          onChange(combo);
+        }}
+      />
+      <button
+        type="button"
+        className="chip"
+        disabled={disabled || !value}
+        onClick={() => {
           setCapturing(false);
           setPending(null);
           onChange("");
-          return;
-        }
-        const combo = formatCombo(e);
-        if (!combo) return; // 纯修饰键，继续等待
-        setPending(combo);
-        setCapturing(false);
-        onChange(combo);
-      }}
-    />
+        }}
+      >
+        {t("settings.shortcutsReset")}
+      </button>
+    </div>
   );
 }
 

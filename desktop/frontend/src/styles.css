@@ -11363,6 +11363,15 @@ body > .mermaid-diagram--fullscreen {
   font-family: var(--font-mono, monospace);
   text-transform: lowercase;
 }
+/* STT 热键行：输入框 + 独立重置按钮（参照快捷键设置页 .shortcuts-settings__control） */
+.stt-hotkey-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
 .settings-stt-seconds:focus,
 .settings-stt-hotkey:focus {
   border-color: var(--accent);
