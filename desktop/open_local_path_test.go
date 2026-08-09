@@ -65,6 +65,10 @@ func TestNormalizeLocalOpenPathRejectsRemoteAuthority(t *testing.T) {
 		// backslash normalization.
 		"file:///\\evil.example\\share\\x.txt",
 		"file://127.0.0.1/\\evil.example\\share\\x.txt",
+		// Case variants of the scheme: FILE:// must be refused too (defense
+		// in depth — Windows shell resolves file: scheme case-insensitively).
+		"FILE://attacker.example/share/x.txt",
+		"File://attacker.example/share/x.txt",
 	} {
 		if _, err := normalizeLocalOpenPath(u); err == nil {
 			t.Errorf("normalizeLocalOpenPath(%q): want rejection (remote authority), got nil", u)
