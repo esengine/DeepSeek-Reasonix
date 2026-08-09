@@ -192,6 +192,8 @@ func TestOpenTargetAllowed(t *testing.T) {
 	for _, name := range []string{
 		"evil.bat", "evil.cmd", "evil.exe", "evil.exe.", "evil.exe ", "evil.ps1", "evil.lnk", "evil.url",
 		"evil.msi", "run.BAT", "EVIL.Scr", "launcher.desktop",
+		"evil.jar", "evil.application", "evil.msc", "evil.cpl", "evil.vbe", "evil.wsh",
+		"evil.appref-ms", "evil.ps1xml", "evil.msh", "evil.msh1", "evil.msh2",
 	} {
 		if openTargetAllowed(filepath.Join("C:", "temp", name), false, 0o644) {
 			t.Fatalf("executable target %q should be refused", name)

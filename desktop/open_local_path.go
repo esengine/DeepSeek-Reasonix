@@ -35,7 +35,7 @@ func normalizeLocalOpenPath(path string) (string, error) {
 			return "", fmt.Errorf("unsafe local file URL authority %q", host)
 		}
 		// UNC hosts other than loopback are refused outright: file:// URLs in
-		// chat content are AI-generated/injected, and emote\share paths
+		// chat content are AI-generated/injected, and remote\share paths
 		// would trigger an SMB connection (Net-NTLM credential negotiation)
 		// to an attacker-controlled host on click. Loopback stays allowed for
 		// localhost-style references.
