@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,7 +11,7 @@ import (
 
 func TestShellOpenCommandFolder(t *testing.T) {
 	dir := t.TempDir()
-	verb, target := shellOpenCommand(dir)
+	verb, target := shellOpenCommand(dir, true)
 	if verb != "explore" {
 		t.Fatalf("shellOpenCommand(folder %q) verb = %q, want explore", dir, verb)
 	}
@@ -24,17 +25,24 @@ func TestShellOpenCommandFile(t *testing.T) {
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verb, target := shellOpenCommand(file)
+	verb, target := shellOpenCommand(file, false)
 	if verb != "open" || target != file {
 		t.Fatalf("shellOpenCommand(file) = (%q, %q), want (open, %q)", verb, target, file)
 	}
 }
 
-func TestShellOpenCommandMissingPath(t *testing.T) {
+func TestOpenWorkspacePathMissingPath(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing")
-	verb, target := shellOpenCommand(missing)
-	if verb != "open" || target != missing {
-		t.Fatalf("shellOpenCommand(missing) = (%q, %q), want (open, %q)", verb, target, missing)
+	if err := openWorkspacePath(missing); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("openWorkspacePath(missing) error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestShellOpenCommandFolderWithTrailingSeparator(t *testing.T) {
+	dir := t.TempDir() + string(os.PathSeparator)
+	verb, target := shellOpenCommand(dir, true)
+	if verb != "explore" || target != dir {
+		t.Fatalf("shellOpenCommand(folder with separator) = (%q, %q), want (explore, %q)", verb, target, dir)
 	}
 }
 
@@ -49,7 +57,7 @@ func TestShellOpenCommandFolderWithSiblingLnk(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "app.lnk"), []byte("shortcut"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	verb, target := shellOpenCommand(folder)
+	verb, target := shellOpenCommand(folder, true)
 	if verb != "explore" {
 		t.Fatalf("shellOpenCommand(folder with sibling .lnk %q) verb = %q, want explore", folder, verb)
 	}

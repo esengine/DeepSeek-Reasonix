@@ -150,5 +150,5 @@ func (a *App) OpenLocalPath(path string) error {
 	if !openTargetPathAllowed(path, info) {
 		return fmt.Errorf("refusing to open executable target %q", path)
 	}
-	return openWorkspacePath(path)
+	return openWorkspacePathWithType(path, info.IsDir())
 }

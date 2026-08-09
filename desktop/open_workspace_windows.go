@@ -9,7 +9,15 @@ import (
 )
 
 func openWorkspacePath(path string) error {
-	verb, target := shellOpenCommand(path)
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	return openWorkspacePathWithType(path, info.IsDir())
+}
+
+func openWorkspacePathWithType(path string, isDir bool) error {
+	verb, target := shellOpenCommand(path, isDir)
 	verbPtr, err := windows.UTF16PtrFromString(verb)
 	if err != nil {
 		return err
@@ -22,14 +30,16 @@ func openWorkspacePath(path string) error {
 }
 
 // shellOpenCommand returns the ShellExecute verb and target used to open path.
-// Folders use the "explore" verb with a trailing separator: both force the
-// shell to treat the target as a directory, so a sibling "<folder>.lnk" with
-// the same base name can never hijack the open and launch the shortcut's
-// target instead of Explorer (#7851). Files keep the "open" verb and the path
-// unchanged.
-func shellOpenCommand(path string) (verb, target string) {
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		return "explore", path + string(os.PathSeparator)
+// Folders use "explore" and a trailing separator so the shell cannot confuse
+// them with a sibling "<folder>.lnk" and launch its target (#7851). Files keep
+// the "open" verb and their original path.
+func shellOpenCommand(path string, isDir bool) (verb, target string) {
+	if isDir {
+		target = path
+		if target == "" || !os.IsPathSeparator(target[len(target)-1]) {
+			target += string(os.PathSeparator)
+		}
+		return "explore", target
 	}
 	return "open", path
 }
