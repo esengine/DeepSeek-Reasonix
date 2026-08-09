@@ -76,5 +76,9 @@
   },
   "overrides": {
     "mdast-util-gfm-autolink-literal": "2.0.0"
+  },
+  "engines": {
+    "node": ">=24",
+    "pnpm": ">=10 <11"
   }
 }

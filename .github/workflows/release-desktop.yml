@@ -310,7 +310,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
       - uses: pnpm/action-setup@v6.0.9
         with:
           version: 10
@@ -594,7 +594,7 @@ jobs:
 
       - uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
 
       - uses: actions/download-artifact@v8
         with:

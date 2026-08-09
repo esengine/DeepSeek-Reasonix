@@ -34,7 +34,7 @@ vet / test ./...` skip this directory, while the import path stays under
 ## Prerequisites
 
 - Go (matches the parent module).
-- Node + **pnpm** (`npm i -g pnpm`).
+- Node 24+ and **pnpm 10** (`npm install -g pnpm@10`).
 - Wails CLI matching the library: run `make wails-install` from the repository
   root. The target reads the shared `.wails-version` pin.
 - Platform webview libs: macOS ships WebKit; Windows needs the Edge **WebView2**
