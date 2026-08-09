@@ -6676,6 +6676,18 @@ body > .mermaid-diagram--fullscreen {
   font-weight: 650;
   color: var(--text);
 }
+/* 实时识别文字预览（interim）：语音按钮上方显示识别中的文字 */
+.composer-stt-tooltip__interim {
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.4;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-left: 2px solid var(--accent);
+  padding-left: 6px;
+}
 .composer-stt-tooltip__hotkeys {
   display: flex;
   flex-direction: column;

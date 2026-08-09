@@ -732,6 +732,8 @@ export function Composer({
   const [sttHotkeyStop, setSttHotkeyStop] = useState("");
   // 切换对话窗口时自动停止语音识别（[desktop] stt_auto_stop_on_switch）。
   const [sttAutoStopOnSwitch, setSttAutoStopOnSwitch] = useState(false);
+  // 实时识别文字（interim 预览）：识别中显示在麦克风按钮上方，供即时反馈。
+  const [sttInterimText, setSttInterimText] = useState("");
   const [composerPrompt, setComposerPrompt] = useState<string | null>(null);
   // Prompt history navigation (plain ↑/↓)
   // Use refs for values read inside async closures to avoid stale captures
@@ -1293,6 +1295,10 @@ export function Composer({
     // 未提交的 interim（临时识别）占位：interim 实时上屏（删旧插新替换），
     // final 到达时先移除占位再正式插入，避免"等断句才出字"的延迟。
     const pendingInterimRef = { current: "" };
+    // 停顿自动提交后记住"已上屏的 interim 句"，final 到达时用它去重，
+    // 防止 final 与已上屏文本重复插入（重复 bug 根因：停顿提交清空占位
+    // 后 prev 丢失，final 全文再次插入）。
+    const committedInterimRef = { current: "" };
     // 停顿自动提交：interim 停止更新 N 毫秒后，把当前 interim 当作一句已确认
     // 文本固定下来（清空占位）——"说完一句停顿了就输入"，不等引擎 final
     // （引擎 final 需更长静音+网络往返，可能几秒后才到）。
@@ -1302,18 +1308,28 @@ export function Composer({
       if (!payload.text.trim()) return;
       if (payload.isFinal) {
         window.clearTimeout(interimTimer);
-        const prev = pendingInterimRef.current;
+        // prev 优先取未提交占位；若已停顿提交，则取已提交句去重：
+        // final 与已上屏文本相同/近似时删旧插新，结果不变（不重复）。
+        const prev = pendingInterimRef.current || committedInterimRef.current;
         pendingInterimRef.current = "";
+        committedInterimRef.current = "";
+        setSttInterimText(""); // final 提交后清空预览
         insertRef.current(payload.text, prev);
       } else {
         window.clearTimeout(interimTimer);
-        const prev = pendingInterimRef.current;
+        const prev = pendingInterimRef.current || committedInterimRef.current;
         pendingInterimRef.current = payload.text;
+        committedInterimRef.current = ""; // 新 interim 开始：清除旧的已提交句标记
+        setSttInterimText(payload.text); // 实时预览
         insertRef.current(payload.text, prev);
-        // 停顿 1.2s 无新 interim：把当前句固定（后续 final 若同文则被
-        // insertSTTTextAtCaret 的 prev 替换逻辑去重，不会重复上屏）。
+        // 停顿 1.2s 无新 interim：把当前句固定（后续 final 用 committedInterimRef
+        // 去重，不会重复上屏）。
         interimTimer = window.setTimeout(() => {
+          if (pendingInterimRef.current) {
+            committedInterimRef.current = pendingInterimRef.current;
+          }
           pendingInterimRef.current = "";
+          setSttInterimText("");
         }, COMMIT_INTERIM_MS);
       }
     });
@@ -4739,6 +4755,11 @@ export function Composer({
                   <span className="composer-stt-tooltip__action">
                     {sttListening ? t("composer.sttStop") : t("composer.sttStart")}
                   </span>
+                  {sttInterimText && (
+                    <span className="composer-stt-tooltip__interim">
+                      {sttInterimText}
+                    </span>
+                  )}
                   {(sttHotkeyStart || sttHotkeyStop) && (
                     <span className="composer-stt-tooltip__hotkeys">
                       {sttHotkeyStart && <span>{t("composer.sttHotkeyStartLabel")} {sttHotkeyStart}</span>}
