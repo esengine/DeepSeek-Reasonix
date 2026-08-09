@@ -11020,9 +11020,9 @@ func (a *App) RevealPath(path string) error {
 	// independently because Wails methods are callable without the frontend.
 	// Without this, an XSS-compromised frontend could drive explorer to a
 	// remote UNC (\\evil.com\share) and trigger SMB/NTLM credential
-	// negotiation. normalizeLocalOpenPath refuses remote file:// authorities,
-	// empty-authority UNC forms and unsafe syntax; plain UNC paths remain
-	// allowed by design (local network shares).
+	// negotiation. normalizeLocalOpenPath refuses remote file:// authorities
+	// and empty-authority UNC spellings; plain UNC paths and local drives
+	// remain allowed by design (local network shares and file manager use).
 	normalized, err := normalizeLocalOpenPath(path)
 	if err != nil {
 		return err
