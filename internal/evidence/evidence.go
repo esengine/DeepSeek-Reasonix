@@ -1626,7 +1626,15 @@ func ToolCallMutates(toolName string, args json.RawMessage, readOnly bool) bool 
 		if err := json.Unmarshal(args, &fields); err != nil {
 			return true
 		}
-		return bashMayMutate(stringField(fields, "command"))
+		command := stringField(fields, "command")
+		// gitCommitOnlyCements：纯 `git commit -m …` 只移动 HEAD（固化已 staged 内容），
+		// 不改变工作区内容——未审内容在 commit 前已被"内容 mutation → review"覆盖，
+		// 从 delivery mutation 判定中排除可避免每轮提交后被要求重复 review（碎片提交循环）。
+		// 组合命令（git add && git commit 等）与 -a/-am/--amend 等合并内容形态保持 mutation。
+		if gitCommitOnlyCements(command) {
+			return false
+		}
+		return bashMayMutate(command)
 	default:
 		return true
 	}
@@ -1854,6 +1862,34 @@ func bashContainsVerificationSegment(command string) bool {
 		}
 	}
 	return false
+}
+
+// gitCommitOnlyCements reports whether command is a bare `git commit -m …`
+// (no -a/-am/--amend/--fixup/--squash/-i, no shell combinators) that only
+// cements already-staged content. Permission-layer read-only classification
+// is intentionally untouched (git commit still requires approval); this only
+// exempts pure cements from the delivery mutation ledger so a commit of
+// already-reviewed changes does not demand a fresh review pass. Pre-commit
+// hooks that modify the workspace surface as the next content mutation and
+// are checked normally.
+func gitCommitOnlyCements(command string) bool {
+	fields, malformed := shellparse.StaticFields(strings.TrimSpace(command))
+	if malformed != "" || len(fields) < 3 || fields[0] != "git" || fields[1] != "commit" {
+		return false
+	}
+	for _, arg := range fields[2:] {
+		switch {
+		case arg == "&&" || arg == ";" || arg == "|" || arg == "||":
+			return false // 组合命令——其他段可能变更内容
+		case arg == "-a" || arg == "-am" || strings.HasPrefix(arg, "--all"):
+			return false // -a/--all 合并未 staged 修改
+		case arg == "--amend" || arg == "--fixup" || arg == "--squash":
+			return false // 改写历史/合并提交
+		case arg == "-i" || arg == "--interactive" || arg == "--patch" || arg == "-p":
+			return false // 交互挑选内容
+		}
+	}
+	return true
 }
 
 func bashMayMutate(command string) bool {
