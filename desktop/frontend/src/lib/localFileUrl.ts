@@ -38,7 +38,7 @@ function hasDisallowedRawFileUrlSyntax(href: string): boolean {
 // refused before it reaches OpenLocalPath.
 function isLoopbackHostname(host: string): boolean {
   const h = host.toLowerCase();
-  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+  return h === "localhost" || h === "127.0.0.1" || h === "::1" || h === "[::1]";
 }
 
 export function localPathFromHref(href?: string): string | null {
@@ -60,7 +60,9 @@ export function localPathFromHref(href?: string): string | null {
   }
   // Linkified UNC hrefs are %5C-encoded by localPathHref so markdown URL
   // normalization cannot fold backslashes into extra slashes; decode back.
-  if (href.startsWith("file:///%5C")) {
+  // Case-insensitive (%5c also matches) so lowercase spellings cannot dodge
+  // the branch and fall through to the URL parser.
+  if (/^file:\/\/\/%5[cC]/i.test(href)) {
     const decoded = decodeURIComponent(href.slice("file:///".length)); // \\nas\share\...
     if (hasDisallowedWindowsPathSyntax(decoded)) return null;
     return decoded.replace(/\\/g, "/"); // //nas/share/...
@@ -89,11 +91,15 @@ export function localPathFromHref(href?: string): string | null {
       // click. Loopback hosts are dropped like the backend does.
       if (!isLoopbackHostname(url.hostname)) return null;
     }
+    // Loopback authority with a double-slash path (file://127.0.0.1//nas/…):
+    // the backend refuses this exact form (open_local_path.go), so the
+    // frontend must too — otherwise the folded //nas/share would reach
+    // OpenLocalPath as a plain UNC while the backend rejects the URL.
+    if (path.startsWith("//")) return null;
 
     // file:///D:/... has a URL root slash that is not part of the Windows
     // drive path. Multiple leading slashes are the slash-form UNC variant.
     if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);
-    if (path.startsWith("//")) path = `//${path.replace(/^\/+/, "")}`;
     if (hasDisallowedWindowsPathSyntax(path)) return null;
     if (/^[A-Za-z]:\//.test(path)) return path;
     if (!path.startsWith("/")) return null;
