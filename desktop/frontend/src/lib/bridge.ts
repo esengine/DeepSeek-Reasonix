@@ -1088,6 +1088,9 @@ export function __emitMockSTT(p: STTTranscriptPayload): void {
 // button stay in sync with the Edge recognition page (auto-stop, errors…).
 export interface STTStatePayload {
   listening: boolean;
+  /** 识别正在启动（Edge 页拉起中/重连中）。按钮显示加载动画，防止
+   *  用户误以为没反应而重复点击造成多窗口。true=转圈，false/缺省=取消。 */
+  starting?: boolean;
 }
 
 const sttStateListeners = new Set<(p: STTStatePayload) => void>();

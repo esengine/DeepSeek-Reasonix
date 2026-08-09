@@ -160,6 +160,13 @@ let suppressFinalUntil = 0;
 let lastFinalText = "";
 let lastFinalTime = 0;
 
+// 首启识别失败重试：冷启动时 Web Speech 服务可能未就绪，start() 抛瞬时
+// 异常（如 InvalidStateError/NotAllowedError 时序），自动重试最多 3 次，
+// 避免"首次点击只录音不识别"需二次操作才生效。
+let recognitionStartRetries = 0;
+const RECOGNITION_START_MAX_RETRIES = 3;
+const RECOGNITION_START_RETRY_DELAY_MS = 400;
+
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 // ============================================================
@@ -175,6 +182,9 @@ function setMicStatus(s) {
   } else if (s === "error") {
     dot.className = "dot err"; label.className = "state-text err";
     label.textContent = "错误"; viz.classList.remove("live");
+  } else if (s === "retrying") {
+    dot.className = "dot live"; label.className = "state-text live";
+    label.textContent = "重试中…"; viz.classList.add("live");
   } else {
     dot.className = "dot idle"; label.className = "state-text idle";
     label.textContent = "空闲"; viz.classList.remove("live");
@@ -414,7 +424,28 @@ function initRecognition(lang) {
   recog.onend = () => {
     if (recognition !== recog) return;
     if (sessionActive && isListening) {
-      try { recog.start(); } catch (e) {}
+      // 连续模式：尝试重启同一实例。失败（冷启动/服务瞬时不可用）时
+      // 走有限重试与上报，避免静默掉线造成"录音中但无识别"。
+      try {
+        recog.start();
+        recognitionStartRetries = 0;
+      } catch (e) {
+        if (recognitionStartRetries < RECOGNITION_START_MAX_RETRIES) {
+          recognitionStartRetries += 1;
+          const attempt = recognitionStartRetries;
+          sendToServer({ type: "status", state: "error", error: `识别重启失败，自动重试(${attempt}/${RECOGNITION_START_MAX_RETRIES}): ${e && e.name ? e.name : e}`, fatal: false });
+          setTimeout(() => {
+            if (recognition === recog && sessionActive && isListening) {
+              try { recog.start(); recognitionStartRetries = 0; } catch (e2) {}
+            }
+          }, RECOGNITION_START_RETRY_DELAY_MS);
+        } else {
+          recognitionStartRetries = 0;
+          isListening = false;
+          setMicStatus("error");
+          sendToServer({ type: "status", state: "error", error: `识别重启失败（已重试 ${RECOGNITION_START_MAX_RETRIES} 次）: ${e && e.name ? e.name : e}`, fatal: true });
+        }
+      }
       return;
     }
     isListening = false;
@@ -428,8 +459,31 @@ function initRecognition(lang) {
 function startRecognition() {
   if (isListening) return;
   recognition = initRecognition(currentLang);
-  if (recognition) {
-    try { recognition.start(); } catch (e) {}
+  if (!recognition) {
+    sendToServer({ type: "status", state: "error", error: "SpeechRecognition 不可用", fatal: true });
+    return;
+  }
+  try {
+    recognition.start();
+    // 启动成功：重置重试计数。
+    recognitionStartRetries = 0;
+  } catch (e) {
+    // 冷启动瞬时失败：有限自动重试，失败信息上报 Go 侧与标题栏，避免
+    // "录音中但永无识别"的静默僵尸态。
+    if (recognitionStartRetries < RECOGNITION_START_MAX_RETRIES) {
+      recognitionStartRetries += 1;
+      const attempt = recognitionStartRetries;
+      setMicStatus("retrying");
+      sendToServer({ type: "status", state: "error", error: `识别启动失败，自动重试(${attempt}/${RECOGNITION_START_MAX_RETRIES}): ${e && e.name ? e.name : e}`, fatal: false });
+      setTimeout(() => {
+        if (!isListening && sessionActive) startRecognition();
+      }, RECOGNITION_START_RETRY_DELAY_MS);
+    } else {
+      recognitionStartRetries = 0;
+      sendToServer({ type: "status", state: "error", error: `识别启动失败（已重试 ${RECOGNITION_START_MAX_RETRIES} 次）: ${e && e.name ? e.name : e}`, fatal: true });
+      showError("识别启动失败，请重试。");
+      setMicStatus("error");
+    }
   }
 }
 
@@ -438,6 +492,7 @@ function stopRecognition() {
     try { recognition.stop(); } catch (e) {}
   }
   isListening = false;
+  recognitionStartRetries = 0;
   setMicStatus("idle");
 }
 

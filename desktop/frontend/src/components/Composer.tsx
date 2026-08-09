@@ -1805,25 +1805,31 @@ export function Composer({
 
   // 麦克风按钮：开始/停止语音识别。禁用时按钮隐藏（由 sttEnabled 控制）。
   const toggleSTT = useCallback(async () => {
-    if (sttBusy || disabled || readOnly) return;
+    if (sttBusy || sttStarting || disabled || readOnly) return;
     setSttBusy(true);
     try {
       if (sttListening) {
         await app.STTStop();
         setSttListening(false);
+        setSttStarting(false);
       } else {
+        // 点击瞬间即进入加载态（转圈），不等 Go 事件——首次启动 Edge
+        // 需要几秒，立即反馈避免误以为没反应而重复点击造成多窗口。
+        setSttStarting(true);
         // 传入发起识别的 tabId：转录事件携带它，前端只插入本窗口输入框
         // （多窗口独立绑定，不交叉错乱）。
         await app.STTStart(tabId);
         setSttListening(true);
+        setSttStarting(false);
       }
     } catch (error) {
       showToast(error instanceof Error ? error.message : String(error), "warn");
       setSttListening(false);
+      setSttStarting(false);
     } finally {
       setSttBusy(false);
     }
-  }, [sttBusy, sttListening, disabled, readOnly, showToast]);
+  }, [sttBusy, sttStarting, sttListening, disabled, readOnly, showToast]);
   // 服务端/浏览器主动结束识别（如自动停止）时同步按钮状态。
   useEffect(() => {
     let live = true;
@@ -4750,14 +4756,21 @@ export function Composer({
                 </span>
               }>
                 <button
-                  className={`composer__btn composer__btn--stt${sttListening ? " composer__btn--stt-active" : ""}${sttBusy ? " composer__btn--disabled" : ""}`}
+                  className={`composer__btn composer__btn--stt${sttListening ? " composer__btn--stt-active" : ""}${sttBusy || sttStarting ? " composer__btn--disabled" : ""}`}
                   type="button"
                   onClick={() => void toggleSTT()}
-                  disabled={sttBusy || disabled || readOnly}
-                  aria-label={sttListening ? t("composer.sttStop") : t("composer.sttStart")}
+                  disabled={sttBusy || sttStarting || disabled || readOnly}
+                  aria-label={sttStarting ? t("composer.sttStarting") : (sttListening ? t("composer.sttStop") : t("composer.sttStart"))}
                   aria-pressed={sttListening}
                 >
-                  {sttListening ? <Mic size={15} fill="currentColor" /> : <MicOff size={15} />}
+                  {sttStarting ? (
+                    // 启动中：加载动画反馈，避免用户以为没功能而重复点击。
+                    <Loader2 size={15} className="composer__btn--spinning" />
+                  ) : sttListening ? (
+                    <Mic size={15} fill="currentColor" />
+                  ) : (
+                    <MicOff size={15} />
+                  )}
                 </button>
               </Tooltip>
             )}

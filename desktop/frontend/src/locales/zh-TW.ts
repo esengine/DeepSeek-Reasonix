@@ -532,6 +532,7 @@ export const zhTW: Record<DictKey, string> = {
   "composer.stopShort": "停止",
   "composer.sttStart": "開始語音輸入",
   "composer.sttStop": "停止語音輸入",
+  "composer.sttStarting": "正在啟動語音辨識…",
   "composer.sttHotkeyStartLabel": "開始：",
   "composer.sttHotkeyStopLabel": "停止：",
   "composer.enhance": "增強提示詞",

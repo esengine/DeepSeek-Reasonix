@@ -104,6 +104,16 @@ type sttBridge struct {
 	lastSpeechTime time.Time
 	// stopDone 关闭自动停止监控 goroutine。
 	stopDone chan struct{}
+	// startPending 记录"等待 Edge 页确认开始识别"的通道。StartListening
+	// 发 cmd:start 后开启确认窗口：页面回传 status:listening 时交由
+	// handleWS 关闭此通道确认成功；长时间未确认则回退 listening=false
+	// 并上报错误，避免"录音中但实际未识别"的假状态。nil 表示无待确认。
+	startPending chan struct{}
+	// launching 标记 Edge 识别页正在被拉起（首次启动/重连中）。防止
+	// Start() 在 browserConn 尚未建立时被多次调用（重复点击/热键连按）
+	// 而重复 launchEdge → 每拉起一次都会先杀旧进程，导致页面闪烁、
+	// 连接中断、识别"重复出现两次"失效。
+	launching bool
 
 	// 全局快捷键（如 "alt+s" / "alt+w"），空串表示禁用。
 	hotkeyStart string
@@ -198,17 +208,50 @@ func (b *sttBridge) Start() error {
 	if b.server != nil {
 		// 服务已在：若浏览器连接丢失（用户手动关了识别页），重新拉起页面。
 		if b.browserConn == nil {
+			// 防重入：Edge 正在被拉起（首次启动或重连中）时再次调用
+			// Start()（重复点击麦克风/连按热键）直接返回，不重复 launch。
+			// launchEdge 内部会先杀旧进程再开新进程，重复调用会导致
+			// 识别页闪烁、连接中断，识别"重复出现两次"而不生效。
+			if b.launching {
+				b.mu.Unlock()
+				return nil
+			}
+			b.launching = true
 			b.mu.Unlock()
+			// 重连中：通知前端"正在启动"（按钮转圈），避免无反馈。
+			if b.emit != nil {
+				b.emit(sttStateEvent, map[string]any{"listening": false, "starting": true})
+			}
 			if err := b.launchEdge(); err != nil {
+				b.mu.Lock()
+				b.launching = false
+				b.mu.Unlock()
+				// Edge 重启失败：结束加载态，前端可再次点击重试。
+				if b.emit != nil {
+					b.emit(sttStateEvent, map[string]any{"listening": false, "starting": false})
+				}
 				return err
 			}
+			b.mu.Lock()
+			b.launching = false
+			b.mu.Unlock()
 			return nil
 		}
 		b.mu.Unlock()
 		return nil
 	}
+	// 防重入：首次启动（server 尚未建立）时若已被并发调用占用（重复点击
+	// 麦克风/连按热键），直接等待已有启动完成——避免双开 HTTP 服务与
+	// 两个 Edge 页面（launchEdge 每轮先杀旧进程，双开会导致页面反复
+	// 闪烁重载、连接中断、识别"重复出现两次"）。
+	if b.launching {
+		b.mu.Unlock()
+		return nil
+	}
+	b.launching = true
 	ln, err := net.Listen("tcp", "127.0.0.1:0") // 随机端口，避免固定端口冲突
 	if err != nil {
+		b.launching = false
 		b.mu.Unlock()
 		return fmt.Errorf("stt: listen failed: %w", err)
 	}
@@ -223,12 +266,25 @@ func (b *sttBridge) Start() error {
 		_ = b.server.Serve(ln) // 随应用退出而停止
 	}()
 
+	// 通知前端"正在启动识别"（按钮转圈/加载态），给用户即时反馈，
+	// 避免点击后半天无响应、误以为没功能而重复点击造成多窗口。
+	if b.emit != nil {
+		b.emit(sttStateEvent, map[string]any{"listening": false, "starting": true})
+	}
+
 	// 拉起 Edge 识别页（首次点击麦克风按钮时才会走到这里）。
 	if err := b.launchEdge(); err != nil {
 		// 服务已起但 Edge 失败：不致命，前端会收到浏览器未连接状态，
 		// 用户可重试。这里只记录，不把服务一起回滚。
 		fmt.Printf("[STT] Edge launch failed: %v\n", err)
+		// Edge 启动失败：结束加载态，前端按钮复原并可再次点击重试。
+		if b.emit != nil {
+			b.emit(sttStateEvent, map[string]any{"listening": false, "starting": false})
+		}
 	}
+	b.mu.Lock()
+	b.launching = false
+	b.mu.Unlock()
 	// 注册全局快捷键（start/stop）。热键只有在服务启动后才注册——
 	// 若设置面板里配置快捷键时服务尚未启动，这里补上注册。
 	b.registerHotkeysIfNeeded()
@@ -314,6 +370,12 @@ func (b *sttBridge) Stop() {
 	b.browserConn = nil
 	b.listening = false
 	b.edgeProc = nil
+	// 取消未完成的启动确认：停止后无需再等页面回传，超时 goroutine
+	// 也不会在 3.5s 后误回退状态。
+	if b.startPending != nil {
+		close(b.startPending)
+		b.startPending = nil
+	}
 	b.mu.Unlock()
 
 	b.stopAutoStopMonitor()
@@ -350,15 +412,26 @@ func killEdgeProfileProcesses(homeDir string) {
 // StartListening 向浏览器发送开始识别命令，并启动自动停止监控。
 // 主动推送 listening=true 状态给前端（输入框麦克风按钮高亮），
 // 不依赖浏览器回传 status——热键启动时按钮也能即时同步。
+// 但为避免"发 cmd:start 后页面实际未启动（冷启动失败/授权卡住）却显示
+// 录音中"的假状态，发送后开启确认窗口：等页面 status:listening 回传
+// 确认；3.5s 未确认则回退 listening=false 并 emit 错误状态。
 func (b *sttBridge) StartListening() error {
 	b.mu.Lock()
 	if b.browserConn == nil {
 		b.mu.Unlock()
 		return fmt.Errorf("stt: 浏览器未连接，请重试")
 	}
+	// 取消上一轮未确认的确认窗口，避免并发超时误回退。
+	if b.startPending != nil {
+		close(b.startPending)
+		b.startPending = nil
+	}
+	pending := make(chan struct{})
+	b.startPending = pending
 	conn := b.browserConn
 	b.mu.Unlock()
 	if err := conn.WriteJSON(map[string]string{"cmd": "start", "lang": b.lang}); err != nil {
+		b.cancelStartPending(pending)
 		return fmt.Errorf("stt: 发送开始命令失败: %w", err)
 	}
 	b.mu.Lock()
@@ -369,7 +442,39 @@ func (b *sttBridge) StartListening() error {
 	if b.emit != nil {
 		b.emit(sttStateEvent, map[string]any{"listening": true})
 	}
+	// 确认 goroutine：等待页面回传（handleWS 在 status 时关闭 pending 通道）
+	// 或超时。未确认则回退状态，前端按钮复原并看到错误提示。
+	go func() {
+		timer := time.NewTimer(3500 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-pending:
+			// 页面已确认（listening 或 error 均关闭通道），无需处理。
+		case <-timer.C:
+			b.mu.Lock()
+			stillPending := b.startPending == pending
+			b.listening = false
+			b.startPending = nil
+			b.mu.Unlock()
+			if stillPending {
+				fmt.Println("[STT] 启动确认超时：Edge 识别页未回传 listening 状态")
+				if b.emit != nil {
+					b.emit(sttStateEvent, map[string]any{"listening": false})
+				}
+			}
+		}
+	}()
 	return nil
+}
+
+// cancelStartPending 发送失败/停止时取消待确认（若仍等待该通道）。
+func (b *sttBridge) cancelStartPending(pending chan struct{}) {
+	b.mu.Lock()
+	if b.startPending == pending {
+		close(pending)
+		b.startPending = nil
+	}
+	b.mu.Unlock()
 }
 
 // StartWithWait 启动服务（含 Edge 识别页）并等待浏览器 WebSocket 连上后自动
@@ -473,6 +578,11 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 		_ = prev.Close() // 单客户端：新连接覆盖旧连接
 	}
 	fmt.Println("[STT] Edge 识别页已连接")
+	// 连接已建立，结束"启动中"加载态（按钮转圈复原），等待 cmd:start
+	// 后页面回传 listening 才会点亮录音态。
+	if b.emit != nil {
+		b.emit(sttStateEvent, map[string]any{"listening": false, "starting": false})
+	}
 	// 浏览器已连上说明识别页窗口必然已创建：若配置为后台隐藏，这里立即
 	// 强制隐藏，杜绝窗口闪现（launchEdge 的定时隐藏是兜底重试）。
 	b.mu.Lock()
@@ -528,9 +638,21 @@ func (b *sttBridge) handleWS(w http.ResponseWriter, r *http.Request) {
 				b.listening = true
 				// 开始识别时重置自动停止计时。
 				b.lastSpeechTime = time.Now()
+				// 页面回传 listening：确认 start 成功，关闭确认通道，
+				// 超时 goroutine 不再回退状态（确认闭环）。
+				if b.startPending != nil {
+					close(b.startPending)
+					b.startPending = nil
+				}
 			} else if state == "idle" || state == "error" {
 				changed = b.listening
 				b.listening = false
+				// 页面空闲/报错：同样完成确认窗口（成功或失败均结束等待），
+				// 避免 3.5s 超时后再回退一次状态造成重复事件。
+				if b.startPending != nil {
+					close(b.startPending)
+					b.startPending = nil
+				}
 			}
 			listening := b.listening
 			b.mu.Unlock()

@@ -733,6 +733,7 @@ export const en = {
   "composer.stopShort": "Stop",
   "composer.sttStart": "Start voice input",
   "composer.sttStop": "Stop voice input",
+  "composer.sttStarting": "Starting voice input…",
   "composer.sttHotkeyStartLabel": "Start:",
   "composer.sttHotkeyStopLabel": "Stop:",
   "composer.enhance": "Enhance prompt",

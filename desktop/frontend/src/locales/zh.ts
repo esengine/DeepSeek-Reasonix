@@ -734,6 +734,7 @@ export const zh: Record<DictKey, string> = {
   "composer.stopShort": "停止",
   "composer.sttStart": "开始语音输入",
   "composer.sttStop": "停止语音输入",
+  "composer.sttStarting": "正在启动语音识别…",
   "composer.sttHotkeyStartLabel": "开始：",
   "composer.sttHotkeyStopLabel": "停止：",
   "composer.enhance": "增强提示词",
