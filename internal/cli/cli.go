@@ -418,6 +418,34 @@ func parseRuntimeProfile(value string) (string, error) {
 	}
 }
 
+// stdFlagChanged reports whether name was explicitly set on a stdlib flag set.
+// The stdlib flag package has no Changed method, so Visit — which only visits
+// flags that were explicitly set — is the equivalent.
+func stdFlagChanged(fs *flag.FlagSet, name string) bool {
+	changed := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			changed = true
+		}
+	})
+	return changed
+}
+
+// resolveRuntimeProfile resolves the session runtime profile with
+// flag > config > default precedence: an explicit --profile wins, otherwise the
+// top-level default_work_mode config key (economy|balanced|delivery) applies,
+// otherwise the historical "balanced" default. A configured value that is not a
+// valid profile fails exactly like an invalid --profile value.
+func resolveRuntimeProfile(changed bool, profileFlag *string) (string, error) {
+	value := *profileFlag
+	if !changed {
+		if cfg, err := config.Load(); err == nil && cfg.DefaultWorkMode != "" {
+			value = cfg.DefaultWorkMode
+		}
+	}
+	return parseRuntimeProfile(value)
+}
+
 // chdirTo honours --dir: it switches the working directory before anything reads
 // it, so config discovery, the sandbox root, and file tools all resolve from the
 // chosen project root. Returns 2 (already reported) on failure, 0 otherwise.
@@ -542,11 +570,6 @@ func runAgent(args []string, version string) int {
 		}
 		format = runOutputEventsJSONL
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 2
-	}
 	ablated, err := ablation.Parse(*ablateFlag)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -569,6 +592,13 @@ func runAgent(args []string, version string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
+	}
+	// Resolve the runtime profile after chdirTo so config discovery for
+	// default_work_mode follows the --dir project root.
+	profile, err := resolveRuntimeProfile(fs.Changed("profile"), profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
 	}
 	cfg, _ := config.Load()
 	configureCLIThemeFromConfigForTTYOutput()
@@ -816,11 +846,6 @@ func runServe(args []string) int {
 	if code, ok := parseCommandFlags(fs, args); !ok {
 		return code
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 2
-	}
 
 	// --hash-password: generate a bcrypt hash and exit.
 	if *hashPassword {
@@ -835,6 +860,14 @@ func runServe(args []string) int {
 		}
 		fmt.Println(h)
 		return 0
+	}
+
+	// Resolve the runtime profile before building the controller; config
+	// discovery for default_work_mode runs from the current working directory.
+	profile, err := resolveRuntimeProfile(stdFlagChanged(fs, "profile"), profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
 	}
 
 	ctx := context.Background()
@@ -1048,11 +1081,6 @@ func chatREPL(args []string, version string) int {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	profile, err := parseRuntimeProfile(*profileFlag)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 2
-	}
 	permissions, err := parsePermissionMode(*permissionMode)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
@@ -1066,6 +1094,13 @@ func chatREPL(args []string, version string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 1
+	}
+	// Resolve the runtime profile after chdirTo so config discovery for
+	// default_work_mode follows the --dir project root.
+	profile, err := resolveRuntimeProfile(fs.Changed("profile"), profileFlag)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 2
 	}
 	// Bubble Tea owns the terminal from the resume picker through controller
 	// shutdown. Start diagnostics before config/controller work so hangs leave a

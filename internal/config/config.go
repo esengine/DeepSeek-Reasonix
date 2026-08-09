@@ -44,7 +44,8 @@ func SkillNameKey(name string) string {
 type Config struct {
 	ConfigVersion    int                 `toml:"config_version"`
 	DefaultModel     string              `toml:"default_model"`
-	Language         string              `toml:"language"` // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
+	DefaultWorkMode  string              `toml:"default_work_mode"` // economy|balanced|delivery; used when no --profile flag is passed
+	Language         string              `toml:"language"`          // ui/model language tag (e.g. "zh"); empty = auto-detect from $LANG / $REASONIX_LANG
 	CredentialsStore string              `toml:"credentials_store"`
 	UI               UIConfig            `toml:"ui"`
 	CLI              CLIConfig           `toml:"cli"`
