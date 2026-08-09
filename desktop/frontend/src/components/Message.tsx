@@ -1,6 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText } from "lucide-react";
+import { BrainCircuit, ChevronDown, ChevronRight, FileText, Folder, GitBranch, Image, MessageSquare, Pencil, RotateCcw, ScrollText, TerminalSquare } from "lucide-react";
 import { Markdown } from "./Markdown";
 import { CopyButton } from "./CopyButton";
 import { ProcessBrainIcon } from "./ProcessCard";
@@ -120,7 +120,7 @@ export type SelectedTextBlockInfo = {
   path?: string;
   start: number;
   end: number;
-  kind: "chat" | "code";
+  kind: "chat" | "code" | "terminal";
 };
 
 export function parseSelectedTextBlocks(text: string, submitText?: string): SelectedTextBlockInfo[] {
@@ -134,7 +134,7 @@ export function parseSelectedTextBlocks(text: string, submitText?: string): Sele
   let start = text.length - suffix.length;
   return entries.map((entry) => {
     const label = formatSelectionLabels([entry]);
-    const kind = entry.path ? "code" : "chat";
+    const kind = entry.path ? "code" : entry.source === "terminal" ? "terminal" : "chat";
     const block = {
       label,
       content: entry.text,
@@ -278,14 +278,14 @@ export function UserMessage({
   type DisplaySegment =
     | { type: "text"; content: string }
     | { type: "block"; key: string; block: PastedBlockInfo; kind: "paste" }
-    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" };
+    | { type: "block"; key: string; block: SelectedTextBlockInfo; kind: "chat" | "code" | "terminal" };
 
   const displaySegments = useMemo((): DisplaySegment[] => {
     if (pasteBlocks.length === 0 && selectedTextBlocks.length === 0) return [{ type: "text", content: displayText }];
     const segments: DisplaySegment[] = [];
     const ordered: Array<
       | { block: PastedBlockInfo; start: number; end: number; kind: "paste" }
-      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" }
+      | { block: SelectedTextBlockInfo; start: number; end: number; kind: "chat" | "code" | "terminal" }
     > = [
       ...pasteBlocks.map((block) => {
         const start = displayText.indexOf(block.label);
@@ -522,7 +522,11 @@ export function UserMessage({
                 <div className="msg-pasted" key={seg.key}>
                   <div className="msg-pasted-block">
                     <div className="msg-pasted-head">
-                      {seg.kind === "chat" ? <MessageSquare size={15} /> : <FileText size={15} />}
+                      {seg.kind === "chat"
+                        ? <MessageSquare size={15} />
+                        : seg.kind === "terminal"
+                          ? <TerminalSquare size={15} />
+                          : <FileText size={15} />}
                       <span className="msg-pasted-label">{seg.block.label}</span>
                       <div className="msg-pasted-actions">
                         <Tooltip label={t(expanded ? "msg.pastedCollapseTooltip" : "msg.pastedExpandTooltip")}>
@@ -536,8 +540,8 @@ export function UserMessage({
                       <div className="msg-pasted-expanded">
                         {seg.kind === "chat"
                           ? <Markdown text={seg.block.content} />
-                          : seg.kind === "code"
-                            ? <CodeViewer value={seg.block.content} language={languageFor(seg.block.path ?? "")} maxHeight={360} />
+                          : seg.kind === "code" || seg.kind === "terminal"
+                            ? <CodeViewer value={seg.block.content} language={seg.kind === "terminal" ? "console" : languageFor(seg.block.path ?? "")} maxHeight={360} />
                             : seg.block.content}
                       </div>
                     )}

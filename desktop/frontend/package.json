@@ -12,7 +12,7 @@
     "lint:hooks": "eslint \"src/**/*.{ts,tsx}\"",
     "test:todo-visibility": "node scripts/test-todo-visibility.mjs",
     "typecheck": "tsc --noEmit",
-    "test:terminal": "tsx src/__tests__/terminal-events.test.ts && tsx src/__tests__/terminal-store.test.ts && tsx src/__tests__/terminal-output.test.ts && tsx src/__tests__/terminal-theme.test.ts && tsx src/__tests__/workspace-layout.test.ts",
+    "test:terminal": "tsx src/__tests__/terminal-events.test.ts && tsx src/__tests__/terminal-store.test.ts && tsx src/__tests__/terminal-output.test.ts && tsx src/__tests__/terminal-selection.test.ts && tsx src/__tests__/terminal-theme.test.ts && tsx src/__tests__/workspace-layout.test.ts",
     "test:usage-stats": "tsx src/__tests__/usage-stats-format.test.ts && tsx src/__tests__/usage-stats-panel.test.tsx",
     "test:task-monitor": "tsx src/components/TaskMonitorPanel.test.tsx && tsx src/__tests__/task-monitor-navigation.test.ts",
     "test:settings-responsive": "tsx src/__tests__/settings-responsive-layout.test.ts",
