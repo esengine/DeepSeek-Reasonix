@@ -37,6 +37,15 @@ var modelReasoningCapabilities = map[string]modelReasoningCapability{
 		Default:  "high",
 		Aliases:  map[string]string{"xhigh": "high"},
 	},
+	// free 档模型同样走 DeepSeek thinking 协议：缺少该表项会让网关上的
+	// deepseek-v4-flash-free 被误判为非 deepseek（base_url 不是
+	// *.deepseek.com），tool_calls 轮不回传 reasoning_content，
+	// DeepSeek API 会 400 "reasoning_content must be passed back"。
+	"deepseek-v4-flash-free": {
+		Protocol: ReasoningProtocolDeepSeek,
+		Levels:   []string{"disabled", "high", "max"},
+		Default:  "high",
+	},
 	"deepseek-v4-pro": {Protocol: ReasoningProtocolDeepSeek, Levels: []string{"disabled", "high", "max"}, Default: "high"},
 }
 

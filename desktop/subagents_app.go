@@ -394,15 +394,21 @@ func (a *App) EnhancePrompt(text, tabID string) (string, error) {
 	if text == "" {
 		return "", fmt.Errorf("请输入要增强的提示词")
 	}
-	// 按发起请求的 tabID 取模型；查不到（tab 已关闭等）回退当前活动 tab。
+	// 按发起请求的 tabID 取模型与最近对话上下文；查不到（tab 已关闭等）
+	// 回退当前活动 tab。
 	a.mu.RLock()
 	model := ""
+	history := []HistoryMessage(nil)
 	if tab := a.tabByIDLocked(tabID); tab != nil {
 		model = tab.model
 	} else if tab := a.activeTabLocked(); tab != nil {
 		model = tab.model
 	}
 	a.mu.RUnlock()
+	// 锁外取会话历史：HistoryForTab 内部会重新拿锁，不能在持锁状态下调用。
+	if model != "" {
+		history = a.HistoryForTab(tabID)
+	}
 	input := SubagentProfileInput{
 		Name:         "prompt-enhancer",
 		Description:  "Enhance the user prompt",
@@ -410,7 +416,46 @@ func (a *App) EnhancePrompt(text, tabID string) (string, error) {
 		Model:        model,
 		ReadOnly:     true,
 	}
-	return a.TrySubagentProfile(input, text)
+	// 携带最近对话作为意图参考：增强模型据此补全省略的主语/目标/约束，
+	// 产出更贴合用户当前上下文的提示词。只取最近的 user/assistant 文本轮，
+	// 跳过工具调用与系统噪声。
+	task := text
+	if ctx := recentConversationContext(history, 6); ctx != "" {
+		task = "参考以下最近的对话背景来理解意图，并增强这条用户输入：\n\n【最近对话】\n" + ctx + "\n\n【用户要增强的输入】\n" + text
+	}
+	return a.TrySubagentProfile(input, task)
+}
+
+// recentConversationContext 把最近 maxRounds 轮 user/assistant 文本对话
+// 折叠成易读的上下文块。工具调用轮（仅 tool 消息）跳过；assistant 的
+// 推理内容不注入（避免把内部思考暴露给增强模型）。
+func recentConversationContext(history []HistoryMessage, maxRounds int) string {
+	if len(history) == 0 || maxRounds <= 0 {
+		return ""
+	}
+	var parts []string
+	rounds := 0
+	for i := len(history) - 1; i >= 0 && rounds < maxRounds; i-- {
+		m := history[i]
+		if m.Role != "user" && m.Role != "assistant" {
+			continue
+		}
+		content := strings.TrimSpace(m.Content)
+		if content == "" {
+			continue
+		}
+		label := "用户"
+		if m.Role == "assistant" {
+			label = "助手"
+		}
+		parts = append(parts, label+"："+content)
+		rounds++
+	}
+	// 倒序收集的，翻转恢复时间顺序。
+	for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
+		parts[i], parts[j] = parts[j], parts[i]
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 // trySubagentPermissionGate pins the settings-page try runner to an explicit

@@ -3079,12 +3079,30 @@ func TestSetDesktopSTTPersistsTOMLRoundtrip(t *testing.T) {
 			t.Fatalf("persisted config missing %q:\n%s", want, body)
 		}
 	}
-	re, err := LoadForRoot(dir)
-	if err != nil {
-		t.Fatalf("reload: %v", err)
+	re := LoadForEdit(path)
+	if re == nil {
+		t.Fatal("reload returned nil config")
 	}
 	if !re.Desktop.STTEnabled || re.Desktop.STTAutoStopSeconds != 45 || re.Desktop.STTHotkeyStart != "alt+s" {
 		t.Fatalf("roundtrip fields = enabled=%v seconds=%d start=%q",
 			re.Desktop.STTEnabled, re.Desktop.STTAutoStopSeconds, re.Desktop.STTHotkeyStart)
+	}
+}
+
+func TestReasoningProtocolForEntryDeepSeekFlashFree(t *testing.T) {
+	// 网关型 base_url（非 api.deepseek.com）+ flash-free 模型名，必须判为
+	// DeepSeek 协议，否则 sub-agent 的 tool_calls 轮不回传 reasoning_content，
+	// DeepSeek API 400 "reasoning_content must be passed back"（增强提示词偶发失败）。
+	e := Default().Providers[0]
+	cpy := e
+	cpy.Kind = "openai"
+	cpy.BaseURL = "https://opencode.ai/zen/v1"
+	cpy.Model = "deepseek-v4-flash-free"
+	if got := ReasoningProtocolForEntry(&cpy); got != ReasoningProtocolDeepSeek {
+		t.Fatalf("flash-free protocol = %q, want deepseek", got)
+	}
+	cap := EffortCapabilityForEntry(&cpy)
+	if !cap.Supported || !containsString(cap.Levels, "high") {
+		t.Fatalf("flash-free effort capability = %+v, want high supported", cap)
 	}
 }
