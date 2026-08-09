@@ -10,7 +10,7 @@ import {
   PromptHeaderAction,
   PromptShelf,
 } from "./PromptShelf";
-import { DUR_FAST } from "../lib/gsapAnimations";
+import { DUR_FAST, toCssEasing } from "../lib/gsapAnimations";
 import {
   FileReferenceMenu,
   insertTextAtSelection,
@@ -30,7 +30,7 @@ function animateShelfExit(
       ],
       {
         duration: options.duration * 1000,
-        easing: options.ease === "power2.out" ? "cubic-bezier(0.2, 0.72, 0.2, 1)" : options.ease,
+        easing: toCssEasing(options.ease),
       },
     );
     animation.onfinish = options.onComplete;

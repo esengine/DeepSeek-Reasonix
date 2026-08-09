@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import { DUR_BASE, prefersReducedMotion } from "./gsapAnimations";
+import { DUR_BASE, prefersReducedMotion, toCssEasing } from "./gsapAnimations";
 
 const CSS_EASE_OUT = "cubic-bezier(0.2, 0.72, 0.2, 1)";
 
@@ -59,7 +59,7 @@ export function useGSAPCollapse(
 
     const reduced = prefersReducedMotion();
     const dur = reduced ? 0.001 : (opts?.duration ?? DUR_BASE);
-    const ease = opts?.ease && opts.ease !== "power2.out" ? opts.ease : CSS_EASE_OUT;
+    const ease = toCssEasing(opts?.ease ?? CSS_EASE_OUT);
     animationRef.current?.cancel();
     animationRef.current = null;
 
