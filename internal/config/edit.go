@@ -405,6 +405,23 @@ func (c *Config) SetDesktopAISessionTitle(enabled bool) error {
 	return nil
 }
 
+// SetDesktopAISessionTitleModel sets (or, with "", clears) the model used for
+// desktop session-title requests. A non-empty name must resolve to a
+// configured model; an empty name makes title requests follow the session's
+// current model.
+func (c *Config) SetDesktopAISessionTitleModel(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		c.Desktop.AISessionTitleModel = ""
+		return nil
+	}
+	if _, ok := c.ResolveModel(name); !ok && protocol.PluginRefOwner(name) == "" {
+		return fmt.Errorf("set title model: no such model %q (configured: %s)", name, c.providerNames())
+	}
+	c.Desktop.AISessionTitleModel = name
+	return nil
+}
+
 // SetDesktopUpdateChannel is retained for pre-single-channel Wails clients.
 // Clearing the legacy field keeps the next canonical write channel-free.
 func (c *Config) SetDesktopUpdateChannel(_ string) error {
@@ -567,7 +584,8 @@ func (c *Config) modelRefTargetsProvider(ref, name string) bool {
 // RemoveProvider deletes the named provider. References to the removed provider
 // are migrated to the first remaining configured provider when possible. The
 // default model is required, so removal is refused when no fallback exists;
-// optional planner/subagent refs are cleared instead of being left dangling.
+// optional planner/subagent/title refs are cleared instead of being left
+// dangling.
 func (c *Config) RemoveProvider(name string) error {
 	name = strings.TrimSpace(name)
 	idx := -1
@@ -584,6 +602,7 @@ func (c *Config) RemoveProvider(name string) error {
 	defaultRefsProvider := c.modelRefTargetsProvider(c.DefaultModel, name)
 	plannerRefsProvider := c.modelRefTargetsProvider(c.Agent.PlannerModel, name)
 	subagentRefsProvider := c.modelRefTargetsProvider(c.Agent.SubagentModel, name)
+	titleModelRefsProvider := c.modelRefTargetsProvider(c.Desktop.AISessionTitleModel, name)
 	subagentModelRefsProvider := map[string]bool{}
 	for skill, ref := range c.Agent.SubagentModels {
 		if c.modelRefTargetsProvider(ref, name) {
@@ -592,7 +611,7 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 
 	fallback := ""
-	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || len(subagentModelRefsProvider) > 0 {
+	if defaultRefsProvider || plannerRefsProvider || subagentRefsProvider || titleModelRefsProvider || len(subagentModelRefsProvider) > 0 {
 		fallback = c.providerRemovalFallback(name)
 	}
 	if defaultRefsProvider && fallback == "" {
@@ -609,6 +628,9 @@ func (c *Config) RemoveProvider(name string) error {
 	}
 	if subagentRefsProvider {
 		c.Agent.SubagentModel = fallback
+	}
+	if titleModelRefsProvider {
+		c.Desktop.AISessionTitleModel = fallback
 	}
 	for skill := range subagentModelRefsProvider {
 		if fallback != "" {

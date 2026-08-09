@@ -488,6 +488,7 @@ export interface AppBindings {
   TestBotConnection(id: string, target?: string): Promise<BotConnectionDiagnostic>;
   SetCloseBehavior(mode: string): Promise<void>;
   SetAISessionTitle(enabled: boolean): Promise<void>;
+  SetAISessionTitleModel(ref: string): Promise<void>;
   SetDisplayMode(mode: string): Promise<void>;
   SetStatusBarStyle(style: string): Promise<void>;
   SetStatusBarItems(items: string[]): Promise<void>;
@@ -4622,6 +4623,9 @@ function makeMockApp(): AppBindings {
         },
         async SetAISessionTitle(enabled: boolean) {
           settings.aiSessionTitle = enabled;
+        },
+        async SetAISessionTitleModel(ref: string) {
+          settings.aiSessionTitleModel = ref;
         },
         async SetDisplayMode(mode: string) {
           settings.displayMode = mode;

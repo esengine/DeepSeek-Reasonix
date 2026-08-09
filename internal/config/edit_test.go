@@ -426,6 +426,28 @@ func TestSetPlannerModel(t *testing.T) {
 	}
 }
 
+func TestSetDesktopAISessionTitleModel(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopAISessionTitleModel("deepseek-pro"); err != nil {
+		t.Fatalf("set title model: %v", err)
+	}
+	if c.Desktop.AISessionTitleModel != "deepseek-pro" {
+		t.Errorf("title model = %q", c.Desktop.AISessionTitleModel)
+	}
+	if err := c.SetDesktopAISessionTitleModel("deepseek-pro/deepseek-v4-pro"); err != nil {
+		t.Fatalf("set title model with provider/model ref: %v", err)
+	}
+	if c.Desktop.AISessionTitleModel != "deepseek-pro/deepseek-v4-pro" {
+		t.Errorf("title model = %q, want provider/model ref", c.Desktop.AISessionTitleModel)
+	}
+	if err := c.SetDesktopAISessionTitleModel(""); err != nil || c.Desktop.AISessionTitleModel != "" {
+		t.Errorf("clearing title model failed: err=%v model=%q", err, c.Desktop.AISessionTitleModel)
+	}
+	if err := c.SetDesktopAISessionTitleModel("ghost"); err == nil {
+		t.Error("expected error for unknown title model")
+	}
+}
+
 func TestSetAutoPlanRejectsRetiredModes(t *testing.T) {
 	c := Default()
 	if err := c.SetAutoPlan("off"); err != nil {

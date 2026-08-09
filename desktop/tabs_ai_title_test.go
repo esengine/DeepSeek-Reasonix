@@ -12,7 +12,10 @@ import (
 	"testing"
 	"time"
 
+	"reasonix/internal/agent"
 	"reasonix/internal/config"
+	"reasonix/internal/control"
+	"reasonix/internal/event"
 )
 
 // aiTitleFixture wires an isolated user config with ai_session_title on and a
@@ -199,5 +202,245 @@ func TestAIGeneratedTitleBlocksTextUpgrade(t *testing.T) {
 	proposal := autoTopicTitleProposal{Stage: 3, UserTurns: 5, BasisHash: "something-else"}
 	if shouldApplyAutoTopicTitle(root, "topic_ai_2", proposal) {
 		t.Fatal("text-derived stage-3 upgrade applied over an AI-generated title")
+	}
+}
+
+// aiTitleDualProviderFixture is aiTitleFixture with a second provider the
+// configured title model can point at. The session stub answers "Session model
+// title", the title stub "Cheap title", so tests can tell which provider
+// served the request.
+func aiTitleDualProviderFixture(t *testing.T) (*App, *WorkspaceTab, string, *atomic.Int32, *atomic.Int32) {
+	t.Helper()
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "TEST_MODEL_KEY", "sk-test")
+
+	var sessionReqs, titleReqs atomic.Int32
+	sessionStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		sessionReqs.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Session model title\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(sessionStub.Close)
+	titleStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		titleReqs.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Cheap title\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(titleStub.Close)
+
+	cfg := config.Default()
+	cfg.DefaultModel = "test/test-model"
+	cfg.Desktop.AISessionTitle = true
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "test", Kind: "openai", BaseURL: sessionStub.URL, Model: "test-model", APIKeyEnv: "TEST_MODEL_KEY"},
+		{Name: "cheap", Kind: "openai", BaseURL: titleStub.URL, Model: "cheap-model", APIKeyEnv: "TEST_MODEL_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	root := t.TempDir()
+	sessionDir := filepath.Join(root, ".reasonix", "sessions")
+	if err := os.MkdirAll(sessionDir, 0o755); err != nil {
+		t.Fatalf("make session dir: %v", err)
+	}
+	sessionPath := writeTopicSessionWithPrompt(t, sessionDir, "session-a.jsonl", "topic_ai_1", "topic title", root, "fix the login loop", time.Now())
+
+	tab := &WorkspaceTab{
+		ID:            "t1",
+		Scope:         "project",
+		WorkspaceRoot: root,
+		TopicID:       "topic_ai_1",
+		TopicTitle:    "topic title",
+		Ready:         true,
+		model:         "test/test-model",
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := &App{tabs: map[string]*WorkspaceTab{tab.ID: tab}, tabOrder: []string{tab.ID}, activeTabID: tab.ID}
+	installNoopRuntimeEvents(app)
+	if err := setTopicTitleWithSource(root, "topic_ai_1", "topic title", topicTitleSourceAuto); err != nil {
+		t.Fatalf("seed topic title: %v", err)
+	}
+	return app, tab, sessionPath, &sessionReqs, &titleReqs
+}
+
+func TestGenerateAISessionTitlePrefersConfiguredTitleModel(t *testing.T) {
+	app, tab, sessionPath, sessionReqs, titleReqs := aiTitleDualProviderFixture(t)
+	cfg, err := config.LoadForRootReadOnly(tab.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if err := cfg.SetDesktopAISessionTitleModel("cheap/cheap-model"); err != nil {
+		t.Fatalf("set title model: %v", err)
+	}
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app.maybeGenerateAISessionTitle(tab, tab.WorkspaceRoot, tab.TopicID, sessionPath)
+	waitForAITitle(t, app, tab, "Cheap title")
+	if titleReqs.Load() != 1 {
+		t.Fatalf("title requests = %d, want 1 (configured model)", titleReqs.Load())
+	}
+	if sessionReqs.Load() != 0 {
+		t.Fatalf("session-model requests = %d, want 0", sessionReqs.Load())
+	}
+}
+
+func TestGenerateAISessionTitleFallsBackToSessionModelWhenTitleModelStale(t *testing.T) {
+	app, tab, sessionPath, sessionReqs, titleReqs := aiTitleDualProviderFixture(t)
+	// A stale ref cannot be written through the setter (it validates), but a
+	// hand-edited config can still carry one — the runtime must fall back to
+	// the session's model instead of silently skipping the title.
+	cfg, err := config.LoadForRootReadOnly(tab.WorkspaceRoot)
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	cfg.Desktop.AISessionTitleModel = "ghost/ghost-model"
+	if err := cfg.Save(); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	app.maybeGenerateAISessionTitle(tab, tab.WorkspaceRoot, tab.TopicID, sessionPath)
+	waitForAITitle(t, app, tab, "Session model title")
+	if sessionReqs.Load() != 1 {
+		t.Fatalf("session-model requests = %d, want 1 (stale title model fell back)", sessionReqs.Load())
+	}
+	if titleReqs.Load() != 0 {
+		t.Fatalf("title-model requests = %d, want 0", titleReqs.Load())
+	}
+}
+
+// TestGenerateAISessionTitleSnapshotPathWithGoalCommand reproduces the
+// Goal-mode first turn: the persisted user message carries the /goal command
+// wrapper. The snapshot-time fallback must still derive a title basis from it
+// (the submit-time path never fires for Goal turns, which go through
+// submitInitialGoalToLocalTab instead of submitToTab).
+func TestGenerateAISessionTitleSnapshotPathWithGoalCommand(t *testing.T) {
+	app, tab, sessionPath, requests := aiTitleFixture(t, "Debug login loop", false)
+	// Rewrite the session's first message as the /goal-wrapped text the Goal
+	// submit path persists.
+	dir := filepath.Dir(sessionPath)
+	sessionPath = writeTopicSessionWithPrompt(t, dir, "session-a.jsonl", "topic_ai_1", "topic title", tab.WorkspaceRoot, "/goal fix the login loop", time.Now())
+
+	app.maybeGenerateAISessionTitle(tab, tab.WorkspaceRoot, tab.TopicID, sessionPath)
+	waitForAITitle(t, app, tab, "Debug login loop")
+	if requests.Load() != 1 {
+		t.Fatalf("title requests = %d, want 1", requests.Load())
+	}
+}
+
+// TestAISessionTitleGeneratedOnGoalFirstTurn drives the real Goal submit path
+// and asserts the title is generated without waiting for a TurnDone snapshot:
+// Goal loops emit no TurnDone until the whole goal finishes, so the
+// submit-time trigger must fire with the goal text as the basis.
+// waitForAITitleIdle polls until the async title request has fully finished
+// (title written, attempt recorded, in-flight flag released).
+func waitForAITitleIdle(t *testing.T, tab *WorkspaceTab) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !tab.aiTitleInFlight.Load() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("title request still in flight")
+}
+
+// TestGenerateAISessionTitleFrozenAfterSuccess pins the freeze: once a title
+// was generated, neither a later message (new basis) nor a snapshot revisit
+// (first-message basis) may fire another request or overwrite it.
+func TestGenerateAISessionTitleFrozenAfterSuccess(t *testing.T) {
+	app, tab, sessionPath, requests := aiTitleFixture(t, "Debug login loop", false)
+	app.maybeGenerateAISessionTitle(tab, tab.WorkspaceRoot, tab.TopicID, sessionPath)
+	waitForAITitle(t, app, tab, "Debug login loop")
+	waitForAITitleIdle(t, tab)
+	if requests.Load() != 1 {
+		t.Fatalf("title requests = %d, want 1", requests.Load())
+	}
+
+	// A later user message goes through the submit-time path with a new basis.
+	app.maybeGenerateAISessionTitleWithBasis(context.Background(), tab, tab.WorkspaceRoot, tab.TopicID, "", "fix the logout loop", aiTitleSnapshotBudget)
+	waitForAITitleIdle(t, tab)
+	if requests.Load() != 1 {
+		t.Fatalf("title requests = %d, want 1 after a new message basis", requests.Load())
+	}
+	if got := loadTopicTitle(tab.WorkspaceRoot, tab.TopicID); got != "Debug login loop" {
+		t.Fatalf("frozen title was overwritten to %q", got)
+	}
+
+	// A later snapshot revisit goes back to the first-message basis.
+	app.maybeGenerateAISessionTitle(tab, tab.WorkspaceRoot, tab.TopicID, sessionPath)
+	waitForAITitleIdle(t, tab)
+	if requests.Load() != 1 {
+		t.Fatalf("title requests = %d, want 1 after a snapshot revisit", requests.Load())
+	}
+}
+
+func TestAISessionTitleGeneratedOnGoalFirstTurn(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "TEST_MODEL_KEY", "sk-test")
+
+	var requests atomic.Int32
+	providerStub := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"Ship the fix\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	t.Cleanup(providerStub.Close)
+
+	cfg := config.Default()
+	cfg.DefaultModel = "test/test-model"
+	cfg.Desktop.AISessionTitle = true
+	cfg.Providers = []config.ProviderEntry{
+		{Name: "test", Kind: "openai", BaseURL: providerStub.URL, Model: "test-model", APIKeyEnv: "TEST_MODEL_KEY"},
+	}
+	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	root := t.TempDir()
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := agent.NewSessionPath(dir, "goal-title")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	runner := &appendingDesktopRunner{session: sess, started: make(chan string, 1)}
+	ctrl := control.New(control.Options{
+		Runner:      runner,
+		Executor:    exec,
+		Sink:        event.Discard,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+	})
+	defer ctrl.Close()
+
+	tab := &WorkspaceTab{
+		ID:            "test",
+		Scope:         "project",
+		WorkspaceRoot: root,
+		Ready:         true,
+		disabledMCP:   map[string]ServerView{},
+	}
+	app := NewApp()
+	app.tabs = map[string]*WorkspaceTab{"test": tab}
+	app.activeTabID = "test"
+	tab.Ctrl = ctrl
+	tab.model = "test/test-model"
+	installNoopRuntimeEvents(app)
+
+	if _, err := app.SubmitInitialGoalToTab("test", "fix the login loop", "fix the login loop", "/goal fix the login loop", nil, "normal", "ask"); err != nil {
+		t.Fatal(err)
+	}
+	waitForAITitle(t, app, tab, "Ship the fix")
+	if requests.Load() != 1 {
+		t.Fatalf("title requests = %d, want 1", requests.Load())
 	}
 }

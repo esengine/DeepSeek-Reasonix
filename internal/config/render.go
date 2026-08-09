@@ -137,6 +137,9 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 		if c.Desktop.AISessionTitle {
 			b.WriteString("ai_session_title = true   # desktop: generate session titles with one short LLM request per new session\n")
 		}
+		if c.Desktop.AISessionTitleModel != "" {
+			fmt.Fprintf(&b, "ai_session_title_model = %q   # desktop: model ref for title requests; empty = follow the session's current model\n", c.Desktop.AISessionTitleModel)
+		}
 		b.WriteString("\n")
 	} else if c.Desktop.ProviderAccess != nil {
 		// provider_access is intentionally mergeable across user and project

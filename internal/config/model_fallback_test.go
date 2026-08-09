@@ -253,6 +253,7 @@ func TestRemoveProviderMigratesDanglingRefs(t *testing.T) {
 		"bare":    "model-a1",
 		"explore": "prov-b/model-b1",
 	}
+	c.Desktop.AISessionTitleModel = "prov-a/model-a1"
 
 	if err := c.RemoveProvider("prov-a"); err != nil {
 		t.Fatalf("RemoveProvider: %v", err)
@@ -268,6 +269,9 @@ func TestRemoveProviderMigratesDanglingRefs(t *testing.T) {
 	}
 	if c.Agent.SubagentModel != "prov-b" {
 		t.Fatalf("subagent_model = %q, want prov-b", c.Agent.SubagentModel)
+	}
+	if c.Desktop.AISessionTitleModel != "prov-b" {
+		t.Fatalf("ai_session_title_model = %q, want prov-b", c.Desktop.AISessionTitleModel)
 	}
 	if c.Agent.SubagentModels["review"] != "prov-b" {
 		t.Fatalf("subagent_models.review = %q, want prov-b", c.Agent.SubagentModels["review"])
@@ -304,6 +308,7 @@ func TestRemoveProviderClearsOptionalRefsWithoutFallback(t *testing.T) {
 	c.Agent.PlannerModel = "prov-a/model-a1"
 	c.Agent.SubagentModel = "prov-a"
 	c.Agent.SubagentModels = map[string]string{"review": "prov-a/model-a2"}
+	c.Desktop.AISessionTitleModel = "prov-a"
 	c.Providers[1].APIKeyEnv = "REASONIX_TEST_EMPTY"
 	c.Providers[1].resolvedAPIKey = ""
 
@@ -318,5 +323,8 @@ func TestRemoveProviderClearsOptionalRefsWithoutFallback(t *testing.T) {
 	}
 	if _, ok := c.Agent.SubagentModels["review"]; ok {
 		t.Fatal("subagent_models.review should be removed")
+	}
+	if c.Desktop.AISessionTitleModel != "" {
+		t.Fatalf("ai_session_title_model = %q, want cleared", c.Desktop.AISessionTitleModel)
 	}
 }

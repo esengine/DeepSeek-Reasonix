@@ -1413,6 +1413,10 @@ func (a *App) submitInitialGoalToLocalTab(
 	} else {
 		ctrl.SubmitDisplay(display, input)
 	}
+	// Fire the optional LLM session-title request right after the first goal
+	// turn: Goal loops emit no TurnDone until the whole goal finishes, so the
+	// snapshot fallback alone would leave the title untitled for the run.
+	a.submitTimeAISessionTitle(tab, ctrl, goal)
 	admission.finish(ctrl)
 	return drained, nil
 }

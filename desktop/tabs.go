@@ -4730,14 +4730,20 @@ func (a *App) generateAISessionTitleGuarded(ctx context.Context, tab *WorkspaceT
 	if basis == "" {
 		return
 	}
-	if meta := loadTopicAutoTitleMeta(titleRoot)[topicID]; meta.AIBasisHash == aiTitleBasisHash(basis) {
-		// Already attempted for this basis (success or failure): never retry,
-		// so a failed request does not keep spending tokens on every snapshot.
+	if meta := loadTopicAutoTitleMeta(titleRoot)[topicID]; meta.AIGenerated || meta.AIBasisHash == aiTitleBasisHash(basis) {
+		// A generated title is frozen (later messages must not re-run and
+		// flip it); an attempted basis is never retried, so a failed request
+		// does not keep spending tokens on every snapshot.
 		return
 	}
 	a.mu.RLock()
 	modelRef := tab.model
 	a.mu.RUnlock()
+	// A configured title model wins over the session's current model; empty
+	// (or unresolvable, handled in generateAISessionTitle) falls back to it.
+	if configured := strings.TrimSpace(cfg.Desktop.AISessionTitleModel); configured != "" {
+		modelRef = configured
+	}
 	if strings.TrimSpace(modelRef) == "" {
 		return
 	}
@@ -4757,7 +4763,16 @@ func (a *App) generateAISessionTitle(ctx context.Context, tab *WorkspaceTab, tit
 	}
 	entry, ok := cfg.ResolveModel(modelRef)
 	if !ok {
-		return
+		// A stale configured title model (provider removed without config
+		// cleanup) falls back to the session's current model; skip when neither
+		// resolves.
+		a.mu.RLock()
+		modelRef = tab.model
+		a.mu.RUnlock()
+		entry, ok = cfg.ResolveModel(modelRef)
+		if !ok {
+			return
+		}
 	}
 	prov, err := provider.New(entry.Kind, title.ProviderConfig(entry))
 	if err != nil {

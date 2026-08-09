@@ -1306,6 +1306,35 @@ func TestRenderTOMLAISessionTitleRoundTrip(t *testing.T) {
 	}
 }
 
+func TestRenderTOMLAISessionTitleModelRoundTrip(t *testing.T) {
+	c := Default()
+	if err := c.SetDesktopAISessionTitleModel("deepseek-pro"); err != nil {
+		t.Fatalf("SetDesktopAISessionTitleModel: %v", err)
+	}
+	rendered := RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(rendered, `ai_session_title_model = "deepseek-pro"`) {
+		t.Fatalf("rendered user config missing ai_session_title_model:\n%s", rendered)
+	}
+	if project := RenderTOMLForScope(c, RenderScopeProject); strings.Contains(project, "ai_session_title_model") {
+		t.Fatalf("project config leaked user-only ai_session_title_model:\n%s", project)
+	}
+
+	var got Config
+	if _, err := toml.Decode(rendered, &got); err != nil {
+		t.Fatalf("rendered TOML does not parse: %v\n---\n%s", err, rendered)
+	}
+	if got.Desktop.AISessionTitleModel != "deepseek-pro" {
+		t.Fatalf("ai_session_title_model after round trip = %q, want deepseek-pro", got.Desktop.AISessionTitleModel)
+	}
+
+	if err := c.SetDesktopAISessionTitleModel(""); err != nil {
+		t.Fatalf("clear ai session title model: %v", err)
+	}
+	if rendered := RenderTOMLForScope(c, RenderScopeUser); strings.Contains(rendered, "ai_session_title_model") {
+		t.Fatalf("default ai_session_title_model should be omitted:\n%s", rendered)
+	}
+}
+
 func TestRenderTOMLDefaultStepsOmitted(t *testing.T) {
 	isolateUserConfigHome(t)
 	out := RenderTOML(Default())

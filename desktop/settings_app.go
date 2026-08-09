@@ -306,14 +306,15 @@ type SettingsView struct {
 	StatusBarItems          []string             `json:"statusBarItems"`
 	DefaultToolApprovalMode string               `json:"defaultToolApprovalMode"`
 
-	CheckUpdates      bool   `json:"checkUpdates"`
-	UpdateChannel     string `json:"updateChannel"`
-	Telemetry         bool   `json:"telemetry"`
-	Metrics           bool   `json:"metrics"`
-	ExpandThinking    bool   `json:"expandThinking"`
-	ConversationWidth string `json:"conversationWidth,omitempty"`
-	AISessionTitle    bool   `json:"aiSessionTitle"`
-	ConfigPath        string `json:"configPath"`
+	CheckUpdates        bool   `json:"checkUpdates"`
+	UpdateChannel       string `json:"updateChannel"`
+	Telemetry           bool   `json:"telemetry"`
+	Metrics             bool   `json:"metrics"`
+	ExpandThinking      bool   `json:"expandThinking"`
+	ConversationWidth   string `json:"conversationWidth,omitempty"`
+	AISessionTitle      bool   `json:"aiSessionTitle"`
+	AISessionTitleModel string `json:"aiSessionTitleModel,omitempty"` // model ref for title requests; empty = follow the session's current model
+	ConfigPath          string `json:"configPath"`
 	// ShadowedByPath is the workspace reasonix.toml that outranks the file this
 	// panel writes, so an edit here can be overridden with nothing on screen to
 	// explain it (#4333). Empty when the panel's file is the one in effect.
@@ -1098,6 +1099,7 @@ func (a *App) Settings() SettingsView {
 		ExpandThinking:          cfg.Desktop.ExpandThinking,
 		ConversationWidth:       cfg.DesktopConversationWidth(),
 		AISessionTitle:          cfg.Desktop.AISessionTitle,
+		AISessionTitleModel:     cfg.Desktop.AISessionTitleModel,
 		ConfigPath:              cfgPath,
 		ShadowedByPath:          shadowingConfigPath(cfgPath, root),
 		ProviderKinds:           nonNil(provider.Kinds()),
@@ -3329,6 +3331,22 @@ func (a *App) SetStatusBarStyle(style string) error {
 // sidebar. UI-only, no rebuild needed.
 func (a *App) SetAISessionTitle(enabled bool) error {
 	return a.applyConfigOnly(func(c *config.Config) error { return c.SetDesktopAISessionTitle(enabled) })
+}
+
+// SetAISessionTitleModel sets the model used for sidebar title requests; an
+// empty ref makes title requests follow each session's current model.
+// UI-only, no rebuild needed.
+func (a *App) SetAISessionTitleModel(ref string) error {
+	return a.applyConfigOnly(func(c *config.Config) error {
+		if ref != "" {
+			resolved, err := selectableDesktopModelRef(c, ref)
+			if err != nil {
+				return err
+			}
+			ref = resolved
+		}
+		return c.SetDesktopAISessionTitleModel(ref)
+	})
 }
 
 // SetStatusBarItems updates the ordered visible desktop status bar items.

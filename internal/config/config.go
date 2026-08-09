@@ -293,13 +293,14 @@ type DesktopConfig struct {
 	CheckUpdates            *bool    `toml:"check_updates"`              // startup update checks; nil keeps the default enabled
 	// UpdateChannel is a legacy compatibility field. It is accepted on read but
 	// ignored and omitted from future canonical writes.
-	UpdateChannel     string   `toml:"update_channel"`
-	Telemetry         *bool    `toml:"telemetry"`          // anonymous launch ping plus scrubbed next-launch native crash diagnostics; nil keeps the default enabled
-	Metrics           *bool    `toml:"metrics"`            // aggregate desktop metrics (anonymous signal/bucket counts, including lifecycle health; no content); nil keeps the default enabled
-	ProviderAccess    []string `toml:"provider_access"`    // desktop-only list of provider entries shown in Settings > Model > Access
-	ExpandThinking    bool     `toml:"expand_thinking"`    // true = show reasoning text expanded by default; false = collapsed
-	ConversationWidth string   `toml:"conversation_width"` // standard|full; max transcript width; empty = standard
-	AISessionTitle    bool     `toml:"ai_session_title"`   // generate sidebar session titles with one short LLM request per new session; off by default
+	UpdateChannel       string   `toml:"update_channel"`
+	Telemetry           *bool    `toml:"telemetry"`              // anonymous launch ping plus scrubbed next-launch native crash diagnostics; nil keeps the default enabled
+	Metrics             *bool    `toml:"metrics"`                // aggregate desktop metrics (anonymous signal/bucket counts, including lifecycle health; no content); nil keeps the default enabled
+	ProviderAccess      []string `toml:"provider_access"`        // desktop-only list of provider entries shown in Settings > Model > Access
+	ExpandThinking      bool     `toml:"expand_thinking"`        // true = show reasoning text expanded by default; false = collapsed
+	ConversationWidth   string   `toml:"conversation_width"`     // standard|full; max transcript width; empty = standard
+	AISessionTitle      bool     `toml:"ai_session_title"`       // generate sidebar session titles with one short LLM request per new session; off by default
+	AISessionTitleModel string   `toml:"ai_session_title_model"` // model ref for title requests; empty = follow the session's current model
 }
 
 // DesktopExternalOpener returns the user-selected external opener id. The

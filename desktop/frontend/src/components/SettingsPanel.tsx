@@ -1853,13 +1853,6 @@ function GeneralSection({ s, busy, apply, agentRunning }: SectionProps & { agent
           ))}
         </div>
       </SettingsField>
-      <SettingsField label={t("settings.aiSessionTitle")} hint={t("settings.aiSessionTitleHint")}>
-        <ToggleSegment
-          value={s.aiSessionTitle === true}
-          disabled={busy}
-          onChange={(enabled) => void apply(() => app.SetAISessionTitle(enabled))}
-        />
-      </SettingsField>
       <SettingsField label={t("settings.processFold")} hint={t("settings.processFoldHint")}>
         <div className="set-seg">
           {(["auto", "expanded"] as const).map((pref) => (
@@ -4151,6 +4144,7 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
   const defaultRef = toRef(s.defaultModel, s);
   const plannerRef = toRef(s.plannerModel, s);
   const subagentRef = toRef(s.subagentModel, s);
+  const titleModelRef = toRef(s.aiSessionTitleModel ?? "", s);
   const plannerSelectRef = plannerRef === defaultRef ? "" : plannerRef;
   const [defaultProvider] = defaultRef.split("/");
   const defaultProviderView = s.providers.find((p) => p.name === defaultProvider);
@@ -4440,6 +4434,28 @@ function ModelsSection({ s, busy, apply, backgroundApply, initialFocus }: Models
                 }}
               />
             </SettingsField>
+
+            <SettingsField label={t("settings.aiSessionTitle")} hint={t("settings.aiSessionTitleHint")}>
+              <ToggleSegment
+                value={s.aiSessionTitle === true}
+                disabled={busy}
+                onChange={(enabled) => void apply(() => app.SetAISessionTitle(enabled))}
+              />
+            </SettingsField>
+
+            {s.aiSessionTitle === true && (
+              <SettingsField label={t("settings.aiSessionTitleModel")} hint={t("settings.aiSessionTitleModelHint")}>
+                <ModelPicker
+                  s={s}
+                  refs={refs}
+                  value={titleModelRef}
+                  disabled={busy}
+                  emptyOptionLabel={t("settings.aiSessionTitleModelFollowSession")}
+                  emptyOptionHint={t("common.auto")}
+                  onPick={(ref) => void apply(() => app.SetAISessionTitleModel(ref))}
+                />
+              </SettingsField>
+            )}
 
             {modelIssue && <div className="provider-fetch-banner provider-fetch-banner--warn">{modelIssue}</div>}
           </SettingsSection>

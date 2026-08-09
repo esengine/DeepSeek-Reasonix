@@ -2,14 +2,14 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2081,
-    "essay": 4132,
-    "file-size": 111435,
-    "function-size": 9175,
+    "complexity": 2083,
+    "essay": 4136,
+    "file-size": 111587,
+    "function-size": 9180,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "test-file-size": 70180
+    "test-file-size": 70211
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -27,8 +27,8 @@
     },
     "desktop/app.go": {
       "complexity": 63,
-      "essay": 96,
-      "file-size": 11590,
+      "essay": 98,
+      "file-size": 11622,
       "function-size": 381
     },
     "desktop/app_autosave_test.go": {
@@ -138,7 +138,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 6961
+      "file-size": 6983
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 23
@@ -162,7 +162,7 @@
       "file-size": 415
     },
     "desktop/frontend/src/lib/bridge.ts": {
-      "file-size": 4671
+      "file-size": 4679
     },
     "desktop/frontend/src/lib/crash.ts": {
       "file-size": 225
@@ -171,7 +171,7 @@
       "file-size": 307
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1423
+      "file-size": 1425
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 3916
@@ -287,8 +287,8 @@
     "desktop/settings_app.go": {
       "complexity": 22,
       "essay": 26,
-      "file-size": 2910,
-      "function-size": 25
+      "file-size": 2895,
+      "function-size": 28
     },
     "desktop/settings_app_test.go": {
       "test-file-size": 1857
@@ -311,8 +311,8 @@
     },
     "desktop/tabs.go": {
       "complexity": 74,
-      "essay": 133,
-      "file-size": 8872,
+      "essay": 135,
+      "file-size": 9049,
       "function-size": 630
     },
     "desktop/tabs_order_test.go": {
@@ -978,7 +978,7 @@
     },
     "internal/config/config.go": {
       "essay": 59,
-      "file-size": 1538,
+      "file-size": 1540,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -999,10 +999,10 @@
     },
     "internal/config/edit.go": {
       "essay": 15,
-      "file-size": 1681
+      "file-size": 1712
     },
     "internal/config/edit_test.go": {
-      "test-file-size": 2418
+      "test-file-size": 2440
     },
     "internal/config/effort.go": {
       "complexity": 9,
@@ -1050,13 +1050,13 @@
       "file-size": 282
     },
     "internal/config/render.go": {
-      "complexity": 249,
+      "complexity": 251,
       "essay": 2,
-      "file-size": 1008,
-      "function-size": 960
+      "file-size": 1014,
+      "function-size": 966
     },
     "internal/config/render_test.go": {
-      "test-file-size": 761
+      "test-file-size": 819
     },
     "internal/config/vision.go": {
       "essay": 1
@@ -1714,7 +1714,7 @@
     },
     "internal/serve/serve.go": {
       "essay": 27,
-      "file-size": 856
+      "file-size": 792
     },
     "internal/serve/serve_lease_test.go": {
       "essay": 3
@@ -1723,7 +1723,7 @@
       "essay": 1
     },
     "internal/serve/serve_test.go": {
-      "test-file-size": 442
+      "test-file-size": 436
     },
     "internal/serve/switch_recovery_test.go": {
       "essay": 2
@@ -1903,6 +1903,12 @@
     },
     "workers/crash-report/src/stats.ts": {
       "file-size": 183
+    },
+    "desktop/tabs_ai_title_test.go": {
+      "essay": 1
+    },
+    "internal/title/title.go": {
+      "essay": 18
     }
   }
 }
