@@ -37,6 +37,20 @@ func IsDeepSeek(baseURL string) bool {
 	return matchesVendorHost(baseURL, "deepseek.com", "api.deepseek.com")
 }
 
+// IsOfficialDeepSeekTextOnlyModel reports whether the model ID is one of the
+// official DeepSeek models whose API currently accepts text message content
+// only. The endpoint-level guard is intentionally model-scoped so a future
+// official multimodal model can opt in explicitly instead of waiting for a
+// code change.
+func IsOfficialDeepSeekTextOnlyModel(model string) bool {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "deepseek-v4-flash", "deepseek-v4-pro":
+		return true
+	default:
+		return false
+	}
+}
+
 // IsOpenAI reports whether baseURL points at OpenAI's official API host. Keep
 // this exact-host so a compatible gateway under another openai.com subdomain
 // cannot accidentally receive the official max_completion_tokens wire shape.

@@ -21,6 +21,7 @@ import (
 
 	"reasonix/internal/netclient"
 	"reasonix/internal/provider"
+	"reasonix/internal/provider/openai"
 )
 
 const (
@@ -140,10 +141,10 @@ func New(cfg Config) provider.Provider {
 		sessionCache = *cfg.SessionCache
 	}
 	vision, _ := cfg.Extra["vision"].(bool)
-	// Official DeepSeek APIs accept text message content only; keep the
-	// provider-boundary guard even though config capability resolution
-	// normally prevents image attachments from reaching this layer.
-	if vendor == "deepseek" {
+	// Official DeepSeek's current text-only models accept text message content
+	// only; keep the provider-boundary guard even though config capability
+	// resolution normally prevents image attachments from reaching this layer.
+	if vendor == "deepseek" && openai.IsOfficialDeepSeekTextOnlyModel(cfg.Model) {
 		vision = false
 	}
 	httpClient := &http.Client{Timeout: 300 * time.Second}

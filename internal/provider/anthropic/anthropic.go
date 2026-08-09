@@ -101,10 +101,10 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	effort, _ := cfg.Extra["effort"].(string)
 	effort = strings.ToLower(strings.TrimSpace(effort))
 	vision, _ := cfg.Extra["vision"].(bool)
-	// Official DeepSeek APIs accept text message content only; keep the
-	// provider-boundary guard even though config capability resolution
-	// normally prevents image attachments from reaching this layer.
-	vision = vision && !officialDeepSeek
+	// Official DeepSeek's current text-only models accept text message content
+	// only; keep the provider-boundary guard even though config capability
+	// resolution normally prevents image attachments from reaching this layer.
+	vision = vision && !(officialDeepSeek && openai.IsOfficialDeepSeekTextOnlyModel(cfg.Model))
 	webSearch, _ := cfg.Extra["web_search"].(bool)
 	headers, _ := cfg.Extra["headers"].(map[string]string)
 	authHeader, _ := cfg.Extra["auth_header"].(bool)

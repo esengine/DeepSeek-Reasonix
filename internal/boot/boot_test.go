@@ -1533,8 +1533,8 @@ func TestNewProviderOfficialDeepSeekDropsExplicitVisionImages(t *testing.T) {
 		Kind:         "openai",
 		BaseURL:      "https://api.deepseek.com",
 		ChatURL:      srv.URL,
-		Model:        "deepseek-v5-vision",
-		VisionModels: []string{"deepseek-v5-vision"},
+		Model:        "deepseek-v4-flash",
+		VisionModels: []string{"deepseek-v4-flash"},
 	})
 	if err != nil {
 		t.Fatalf("NewProvider: %v", err)

@@ -60,13 +60,14 @@ func modelTokenSeparator(r rune) bool {
 }
 
 // CanConfigureVision reports whether user-supplied vision metadata may enable
-// image input for this endpoint. Official DeepSeek APIs currently accept text
-// message content only, so their protocol constraint is authoritative over
-// persisted provider-wide flags, vision_models, and model overrides. Custom
-// DeepSeek-compatible gateways remain configurable because they may implement
-// their own multimodal translation layer.
+// image input for this model. Official DeepSeek's current text-only models
+// accept text message content only, so their protocol constraint is
+// authoritative over persisted provider-wide flags, vision_models, and model
+// overrides. Other official models and custom DeepSeek-compatible gateways
+// remain configurable so a future multimodal model can opt in explicitly.
 func CanConfigureVision(e *ProviderEntry) bool {
-	return e != nil && !openai.IsDeepSeek(e.BaseURL)
+	return e != nil &&
+		!(openai.IsDeepSeek(e.BaseURL) && openai.IsOfficialDeepSeekTextOnlyModel(e.Model))
 }
 
 // EffectiveVision resolves whether the selected model accepts image input.

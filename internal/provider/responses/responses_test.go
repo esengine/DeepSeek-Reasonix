@@ -968,6 +968,21 @@ func TestOfficialDeepSeekResponsesStaysTextOnlyWithVision(t *testing.T) {
 	}
 }
 
+func TestOfficialDeepSeekResponsesFutureVisionUsesInputImageParts(t *testing.T) {
+	c := New(Config{Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v5-vision", Extra: map[string]any{"vision": true}}).(*client)
+	if !c.vision {
+		t.Fatal("future official DeepSeek multimodal model must keep vision enabled")
+	}
+	body, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{
+		{Role: provider.RoleUser, Content: "what is this", Images: []string{"data:image/png;base64,AAAA"}},
+	}})
+	items := body["input"].([]map[string]any)
+	parts, ok := items[0]["content"].([]map[string]string)
+	if !ok || len(parts) != 2 || parts[1]["type"] != "input_image" {
+		t.Fatalf("future DeepSeek user content = %#v, want [input_text, input_image]", items[0]["content"])
+	}
+}
+
 func TestResponseFormatJSONObjectOnWire(t *testing.T) {
 	// text.format.type=json_object must be serialized when requested, and
 	// the request body must stay byte-identical without it (cache stability).

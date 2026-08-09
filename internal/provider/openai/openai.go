@@ -91,10 +91,11 @@ func New(cfg provider.Config) (provider.Provider, error) {
 	extraBody, _ := cfg.Extra["extra_body"].(map[string]any)
 	vision, _ := cfg.Extra["vision"].(bool)
 	officialDeepSeek := IsDeepSeek(cfg.BaseURL)
-	// DeepSeek's official chat API accepts string message content only. Keep
-	// this provider-boundary guard even though config capability resolution
-	// normally prevents image attachments from reaching this layer.
-	vision = vision && !officialDeepSeek
+	// DeepSeek's official chat API accepts string message content only for its
+	// current text-only models. Keep this provider-boundary guard even though
+	// config capability resolution normally prevents image attachments from
+	// reaching this layer.
+	vision = vision && !(officialDeepSeek && IsOfficialDeepSeekTextOnlyModel(cfg.Model))
 	visionDetail, _ := cfg.Extra["vision_detail"].(string)
 	visionDetail = strings.ToLower(strings.TrimSpace(visionDetail))
 	if visionDetail != "low" && visionDetail != "high" {

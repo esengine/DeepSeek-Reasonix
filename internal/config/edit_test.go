@@ -552,7 +552,7 @@ func TestUpsertProvider(t *testing.T) {
 	}
 }
 
-func TestUpsertProviderRejectsVisionOnOfficialDeepSeek(t *testing.T) {
+func TestUpsertProviderRejectsVisionOnOfficialDeepSeekTextOnlyModels(t *testing.T) {
 	visionOn := true
 	for _, tc := range []struct {
 		name string
@@ -592,6 +592,18 @@ func TestUpsertProviderRejectsVisionOnOfficialDeepSeek(t *testing.T) {
 		Default: "deepseek-v4-flash",
 	}); err != nil {
 		t.Fatalf("plain official DeepSeek provider: %v", err)
+	}
+
+	// Official DeepSeek future multimodal models may still opt in explicitly.
+	if err := c.UpsertProvider(ProviderEntry{
+		Name:         "deepseek-future",
+		Kind:         "openai",
+		BaseURL:      "https://api.deepseek.com",
+		Models:       []string{"deepseek-v5-vision"},
+		Default:      "deepseek-v5-vision",
+		VisionModels: []string{"deepseek-v5-vision"},
+	}); err != nil {
+		t.Fatalf("future official DeepSeek vision model: %v", err)
 	}
 
 	// Custom DeepSeek-compatible gateways may still opt in.
@@ -815,7 +827,7 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	}
 }
 
-func TestEffectiveVisionOfficialDeepSeekNeverAllowsExplicitModels(t *testing.T) {
+func TestEffectiveVisionOfficialDeepSeekBlocksCurrentTextOnlyModels(t *testing.T) {
 	for _, endpoint := range []struct {
 		kind    string
 		baseURL string
@@ -834,14 +846,25 @@ func TestEffectiveVisionOfficialDeepSeekNeverAllowsExplicitModels(t *testing.T) 
 			ReasoningProtocol: ReasoningProtocolDeepSeek,
 		}
 		if EffectiveVision(official) {
-			t.Fatalf("official DeepSeek endpoint %q must remain text-only", endpoint.baseURL)
+			t.Fatalf("official DeepSeek endpoint %q must remain text-only for deepseek-v4-pro", endpoint.baseURL)
 		}
 		if ExplicitModelVision(official) {
 			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", endpoint.baseURL)
 		}
 		if CanConfigureVision(official) {
-			t.Fatalf("official DeepSeek endpoint %q must not be vision-configurable", endpoint.baseURL)
+			t.Fatalf("official DeepSeek endpoint %q must not be vision-configurable for deepseek-v4-pro", endpoint.baseURL)
 		}
+	}
+
+	flash := &ProviderEntry{
+		Name:         "deepseek",
+		Kind:         "openai",
+		BaseURL:      "https://api.deepseek.com",
+		Model:        "deepseek-v4-flash",
+		VisionModels: []string{"deepseek-v4-flash"},
+	}
+	if EffectiveVision(flash) || ExplicitModelVision(flash) || CanConfigureVision(flash) {
+		t.Fatal("official DeepSeek deepseek-v4-flash must ignore explicit vision_models")
 	}
 
 	future := &ProviderEntry{
@@ -851,8 +874,8 @@ func TestEffectiveVisionOfficialDeepSeekNeverAllowsExplicitModels(t *testing.T) 
 		Model:        "deepseek-v5-vision",
 		VisionModels: []string{"deepseek-v5-vision"},
 	}
-	if EffectiveVision(future) || ExplicitModelVision(future) || CanConfigureVision(future) {
-		t.Fatal("official DeepSeek endpoint must ignore explicit vision_models")
+	if !EffectiveVision(future) || !ExplicitModelVision(future) || !CanConfigureVision(future) {
+		t.Fatal("official DeepSeek future multimodal model must opt in through vision_models")
 	}
 
 	visionOn := true
@@ -869,8 +892,8 @@ func TestEffectiveVisionOfficialDeepSeekNeverAllowsExplicitModels(t *testing.T) 
 	if !ok {
 		t.Fatal("ResolveModel did not find explicit future DeepSeek model")
 	}
-	if EffectiveVision(overridden) || ExplicitModelVision(overridden) {
-		t.Fatal("official DeepSeek endpoint must ignore model_overrides vision=true")
+	if !EffectiveVision(overridden) || !ExplicitModelVision(overridden) {
+		t.Fatal("official DeepSeek future multimodal model must opt in through model_overrides vision=true")
 	}
 
 	custom := &ProviderEntry{

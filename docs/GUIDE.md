@@ -359,10 +359,11 @@ For common providers, choose **Add model service -> Recommended preset** instead
 The official DeepSeek service continues to use its specially adapted OpenAI Chat
 Completions path by default; add the optional **DeepSeek Anthropic** preset only
 when Anthropic Messages compatibility is needed. The two entries do not replace
-each other. Official DeepSeek APIs currently accept text-only message content,
-so Reasonix rejects `vision = true`, `vision_models`, and per-model `vision`
-overrides on `*.deepseek.com` endpoints with a clear error; custom
-DeepSeek-compatible gateways remain configurable. Reasonix can prefill editable
+each other. Official DeepSeek's current text-only models (`deepseek-v4-flash`
+and `deepseek-v4-pro`) accept text message content only, so Reasonix rejects
+`vision = true`, `vision_models`, and per-model `vision` overrides for them with
+a clear error. Future official multimodal models and custom DeepSeek-compatible
+gateways can still opt in explicitly. Reasonix can prefill editable
 custom-provider entries for Kimi CN,
 Kimi Global,
 Kimi Coding Plan, MiMo API, MiMo Anthropic, MiMo Token Plan CN/SGP/AMS and their

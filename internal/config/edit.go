@@ -625,6 +625,7 @@ func (c *Config) providerRemovalFallback(name string) string {
 
 // validateProvider checks the fields a provider can't function without.
 func validateProvider(e ProviderEntry) error {
+	conflicts := officialDeepSeekTextOnlyVisionModels(e)
 	switch {
 	case strings.TrimSpace(e.Name) == "":
 		return fmt.Errorf("provider: name is required")
@@ -634,8 +635,8 @@ func validateProvider(e ProviderEntry) error {
 		return fmt.Errorf("provider %q: base_url is required", e.Name)
 	case !providerHasAnyModel(e):
 		return fmt.Errorf("provider %q: model is required", e.Name)
-	case openai.IsDeepSeek(e.BaseURL) && providerDeclaresVision(e):
-		return fmt.Errorf("provider %q: official DeepSeek endpoints are text-only and do not accept image input; remove vision=true, vision_models, or model_overrides vision", e.Name)
+	case len(conflicts) > 0:
+		return fmt.Errorf("provider %q: official DeepSeek model(s) %s are text-only and do not accept image input; remove vision=true, vision_models, or model_overrides vision for them", e.Name, strings.Join(conflicts, ", "))
 	case strings.TrimSpace(e.APIKeyEnv) != "" && !IsValidCredentialKey(e.APIKeyEnv):
 		return fmt.Errorf("provider %q: api_key_env %q is not a valid environment variable name", e.Name, e.APIKeyEnv)
 	}
@@ -654,11 +655,36 @@ func providerHasAnyModel(e ProviderEntry) bool {
 	return false
 }
 
-func providerDeclaresVision(e ProviderEntry) bool {
-	if e.Vision || len(e.VisionModels) > 0 {
+func officialDeepSeekTextOnlyVisionModels(e ProviderEntry) []string {
+	if !openai.IsDeepSeek(e.BaseURL) {
+		return nil
+	}
+	models := make([]string, 0, len(e.Models)+1)
+	models = append(models, e.Models...)
+	if strings.TrimSpace(e.Model) != "" {
+		models = append(models, e.Model)
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" || seen[model] || !openai.IsOfficialDeepSeekTextOnlyModel(model) {
+			continue
+		}
+		if !modelDeclaresVision(e, model) {
+			continue
+		}
+		seen[model] = true
+		out = append(out, model)
+	}
+	return out
+}
+
+func modelDeclaresVision(e ProviderEntry, model string) bool {
+	if e.Vision || e.HasVisionModel(model) {
 		return true
 	}
-	for _, override := range e.ModelOverrides {
+	if override, ok := e.ModelOverrides[model]; ok {
 		if override.Vision != nil && *override.Vision {
 			return true
 		}
