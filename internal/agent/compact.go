@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"reasonix/internal/ablation"
 	"reasonix/internal/event"
@@ -45,7 +46,7 @@ const (
 
 // summaryTimeout bounds one summarizer call so a stalled stream surfaces a clear
 // failure (then a mechanical fold) instead of hanging compaction indefinitely.
-const summaryTimeout = 90 * time.Second
+const summaryTimeout = 180 * time.Second
 
 // summarySystemPrompt steers the executor to distill older history into a
 // structured briefing it can keep relying on after the originals are dropped.
@@ -107,16 +108,14 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		return
 	}
 	soft, snip, high := a.compactThresholds()
-	// Clearing the latch keeps a settled prompt from counting against the
-	// next turn; keep it while the projection cannot fit the window with a
-	// usable output budget — clearing would re-fire the doomed fold.
+	// A turn that sits under the trigger is the breathing room a healthy
+	// compaction buys; it clears the stuck latch and the run counter. This has to
+	// happen before the soft/snip branches return, because a compaction that
+	// settles the prompt anywhere in [snip, high) is working exactly as intended:
+	// leaving a stale run count behind there would latch the *next* compaction as
+	// "the window is too small" and silently disable auto-compaction for the rest
+	// of the session.
 	if promptTokens < high {
-		msgs, ver := a.session.snapshotMessagesVersion()
-		if st := a.compactionState; projectionValid(st, msgs, ver, a.currentPromptCacheKey()) {
-			if a.estimatedPromptTokens(modelVisibleFromProjection(st.Projection, msgs))+minOutputBudget > a.contextWindow {
-				return
-			}
-		}
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
 	}
@@ -141,7 +140,7 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	if a.compactStuck {
 		return
 	}
-	force := promptTokens >= a.forceThreshold()
+	force := promptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
 	// Projection-only prune before folding. Install the pruned view first so the
 	// next request (and its real usage) can measure whether a paid summarize is
 	// still needed — never rewrite the canonical transcript.
@@ -160,14 +159,6 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		}
 	}
 	if _, err := a.compactToProjection(ctx, "auto", "", force); err != nil {
-		if errors.Is(err, ErrCompactionInputTooLarge) {
-			// The fold alone exceeds what the window can hold, so compaction
-			// cannot help; pausing avoids re-running the doomed request every
-			// turn (it would 400 on the provider side each time).
-			a.compactStuck = true
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelWarn, Text: "Automatic context cleanup paused: context too large to compact.", Detail: err.Error()})
-			return
-		}
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context cleanup skipped for now.", Detail: fmt.Sprintf("compaction skipped: %v", err)})
 		return
 	}
@@ -192,6 +183,45 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 func foldEconomics(region []provider.Message) bool {
 	const minFoldTokens = 400
 	return estimateMessagesTokens(region) >= minFoldTokens
+}
+
+func estimateMessagesTokens(msgs []provider.Message) int {
+	total := 0
+	for _, m := range msgs {
+		if m.LocalOnly {
+			continue
+		}
+		total += 4 // chat-message framing overhead
+		total += estimateTextTokens(m.Content)
+		total += estimateTextTokens(m.ReasoningContent)
+		total += estimateTextTokens(m.Name)
+		total += estimateTextTokens(m.ToolCallID)
+		for _, tc := range m.ToolCalls {
+			total += 8
+			total += estimateTextTokens(tc.ID)
+			total += estimateTextTokens(tc.Name)
+			total += estimateTextTokens(tc.Arguments)
+		}
+		for _, item := range m.ResponsesItems {
+			total += estimateTextTokens(string(item))
+		}
+	}
+	return total
+}
+
+func estimateTextTokens(s string) int {
+	if s == "" {
+		return 0
+	}
+	// A conservative cross-language approximation: English-ish text trends near
+	// four bytes per token, while CJK-heavy text is closer to one rune per token.
+	bytes := len(s)
+	runes := utf8.RuneCountInString(s)
+	byBytes := (bytes + 3) / 4
+	if runes > byBytes {
+		return runes
+	}
+	return byBytes
 }
 
 // SummarizeFrom keeps the compatibility index contract while installing a
@@ -413,11 +443,7 @@ func toolCallIDs(m provider.Message) map[string]bool {
 func (a *Agent) planCompaction(msgs []provider.Message, min int) (head, start int, ok bool) {
 	head = a.pinnedPrefixLen(msgs)
 	if a.contextWindow > 0 {
-		budget := defaultTailTokens
-		if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
-			budget = maxByWin
-		}
-		start = tailStart(msgs, head, budget, a.tokPerChar(), a.tailFloor())
+		start = tailStart(msgs, head, a.compactionTailBudget(), a.tokPerChar(), a.tailFloor())
 	} else {
 		// No window to budget against (manual /compact on an unconfigured
 		// provider): keep a fixed count of recent messages, aligned off any tool.
@@ -440,6 +466,16 @@ func (a *Agent) tailFloor() int {
 		return a.recentKeep
 	}
 	return minRecentKeep
+}
+
+// compactionTailBudget is the token budget for the verbatim recent tail kept
+// out of a fold. Shared by the full and incremental compaction paths.
+func (a *Agent) compactionTailBudget() int {
+	budget := defaultTailTokens
+	if maxByWin := int(float64(a.contextWindow) * defaultCompactTarget); maxByWin < budget {
+		budget = maxByWin
+	}
+	return budget
 }
 
 // tailStart walks newest→oldest, growing the verbatim tail until the next
@@ -627,4 +663,23 @@ func archiveMessages(dir string, msgs []provider.Message) (string, error) {
 		}
 	}
 	return path, nil
+}
+
+// silentCompactionTelemetry builds the telemetry record for a compaction pass
+// that folded nothing: the status distinguishes "nothing to fold" (noop) from
+// a pass aborted by an error, so every exit lands in the stats file.
+func (a *Agent) silentCompactionTelemetry(trigger string, canonical []provider.Message, err error) CompactionTelemetry {
+	tele := CompactionTelemetry{
+		Trigger:      trigger,
+		CacheState:   a.CacheState(),
+		Mode:         CompactionModeSummarized,
+		SourceTokens: a.estimatedPromptTokens(canonical),
+	}
+	if err != nil {
+		tele.Status = CompactionStatusAborted
+		tele.Error = err.Error()
+	} else {
+		tele.Status = CompactionStatusNoop
+	}
+	return tele
 }
