@@ -1005,6 +1005,14 @@ func TestToolCallMutatesForDeliveryProfile(t *testing.T) {
 		{name: "jest output file stays opaque", toolName: "bash", args: `{"command":"npm test -- --json --outputFile=result.json"}`, want: true},
 		{name: "mypy report stays opaque", toolName: "bash", args: `{"command":"mypy --txt-report reports src/"}`, want: true},
 		{name: "plain pytest", toolName: "bash", args: `{"command":"pytest"}`},
+		// git commit 纯固化（gitCommitOnlyCements）：只移动 HEAD 不算 content mutation；
+		// 合并内容/改写历史/组合命令保持 mutation。
+		{name: "git commit -m cements content", toolName: "bash", args: `{"command":"git commit -m \"fix interaction.rs\""}`},
+		{name: "git commit -q -m cements content", toolName: "bash", args: `{"command":"git commit -q -m \"docs update\""}`},
+		{name: "git commit -a merges tracked changes", toolName: "bash", args: `{"command":"git commit -am \"x\""}`, want: true},
+		{name: "git commit --amend rewrites history", toolName: "bash", args: `{"command":"git commit --amend -m \"x\""}`, want: true},
+		{name: "git commit -i interactive pick", toolName: "bash", args: `{"command":"git commit -i -m \"x\""}`, want: true},
+		{name: "git add + commit compound", toolName: "bash", args: `{"command":"git add -A && git commit -m \"x\""}`, want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
