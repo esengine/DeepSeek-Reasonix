@@ -38,6 +38,31 @@ func TestBuildRequestSkipsImageBlockWithoutVision(t *testing.T) {
 	}
 }
 
+func TestOfficialDeepSeekAnthropicStaysTextOnlyWithVision(t *testing.T) {
+	p, err := New(provider.Config{
+		Name:    "deepseek",
+		BaseURL: "https://api.deepseek.com/anthropic",
+		Model:   "deepseek-v4-flash",
+		Extra:   map[string]any{"vision": true},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	c := p.(*client)
+	if c.vision {
+		t.Fatal("official DeepSeek Anthropic endpoint must ignore vision=true")
+	}
+	req := c.buildRequest(context.Background(), provider.Request{
+		Messages: []provider.Message{
+			{Role: provider.RoleUser, Content: "describe", Images: []string{"data:image/jpeg;base64,ZZZZ"}},
+		},
+	})
+	blocks := req.Messages[0].Content
+	if len(blocks) != 1 || blocks[0].Type != "text" {
+		t.Fatalf("official DeepSeek blocks = %+v, want [text] only", blocks)
+	}
+}
+
 // toolMessages is a paired history whose tool result carries an image: the
 // shape parseToolResult produces for an MCP screenshot tool.
 func toolMessages(images []string) []provider.Message {

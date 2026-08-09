@@ -59,24 +59,26 @@ func modelTokenSeparator(r rune) bool {
 	return r == '-' || r == '_' || r == '.' || r == '/' || r == ':'
 }
 
+// CanConfigureVision reports whether user-supplied vision metadata may enable
+// image input for this endpoint. Official DeepSeek APIs currently accept text
+// message content only, so their protocol constraint is authoritative over
+// persisted provider-wide flags, vision_models, and model overrides. Custom
+// DeepSeek-compatible gateways remain configurable because they may implement
+// their own multimodal translation layer.
+func CanConfigureVision(e *ProviderEntry) bool {
+	return e != nil && !openai.IsDeepSeek(e.BaseURL)
+}
+
 // EffectiveVision resolves whether the selected model accepts image input.
 // Explicit provider vision still wins for custom vision-capable gateways; the
 // MiMo endpoint heuristic is deliberately limited to known MiMo endpoints so
 // arbitrary OpenAI-compatible proxies do not get image payloads unexpectedly.
 func EffectiveVision(e *ProviderEntry) bool {
-	if e == nil {
+	if !CanConfigureVision(e) {
 		return false
 	}
 	if enabled, explicit := explicitModelVision(e); explicit {
 		return enabled
-	}
-	// DeepSeek's official APIs currently accept text message content only. Treat
-	// current official models as text-only when only the legacy provider-wide
-	// vision flag is set, so stale configs cannot make requests 400. A concrete
-	// model can still opt in through vision_models or a model override when
-	// DeepSeek documents a future multimodal request shape.
-	if openai.IsDeepSeek(e.BaseURL) {
-		return false
 	}
 	if e.Vision {
 		return true
@@ -89,6 +91,9 @@ func EffectiveVision(e *ProviderEntry) bool {
 // provenance to distinguish a deliberate future-model opt-in from a stale
 // provider-wide vision=true setting.
 func ExplicitModelVision(e *ProviderEntry) bool {
+	if !CanConfigureVision(e) {
+		return false
+	}
 	enabled, explicit := explicitModelVision(e)
 	return explicit && enabled
 }

@@ -307,7 +307,10 @@ Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭
 
 常用服务优先使用 **添加模型服务 -> 推荐预设**。DeepSeek 官方服务默认继续使用经过专项适配的
 OpenAI Chat Completions；需要 Anthropic Messages 兼容时，可单独添加 **DeepSeek Anthropic**
-可选预设，两者不会互相替换。Reasonix 还可以预填以下可编辑的自定义 provider：
+可选预设，两者不会互相替换。官方 DeepSeek API 目前仅接受纯文本消息，Reasonix
+会拒绝在 `*.deepseek.com` 端点配置 `vision = true`、`vision_models` 或逐模型
+`vision` 覆盖并给出明确报错；自定义 DeepSeek 兼容网关不受影响。Reasonix 还可以
+预填以下可编辑的自定义 provider：
 Kimi CN、Kimi Global、Kimi Coding Plan、MiMo API、MiMo Anthropic、MiMo Token Plan
 CN/SGP/AMS 及其 Anthropic-compatible 变体、MiniMax CN/Global API、MiniMax
 CN/Global Anthropic、GLM CN、Z.AI Global、GLM/Z.AI Coding Plan 的

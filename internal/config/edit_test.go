@@ -552,6 +552,60 @@ func TestUpsertProvider(t *testing.T) {
 	}
 }
 
+func TestUpsertProviderRejectsVisionOnOfficialDeepSeek(t *testing.T) {
+	visionOn := true
+	for _, tc := range []struct {
+		name string
+		edit func(*ProviderEntry)
+	}{
+		{name: "provider-wide vision", edit: func(e *ProviderEntry) { e.Vision = true }},
+		{name: "vision_models", edit: func(e *ProviderEntry) { e.VisionModels = []string{"deepseek-v4-flash"} }},
+		{name: "model override vision", edit: func(e *ProviderEntry) {
+			e.ModelOverrides = map[string]ProviderModelOverride{"deepseek-v4-flash": {Vision: &visionOn}}
+		}},
+	} {
+		c := Default()
+		entry := ProviderEntry{
+			Name:    "deepseek",
+			Kind:    "openai",
+			BaseURL: "https://api.deepseek.com",
+			Models:  []string{"deepseek-v4-flash"},
+			Default: "deepseek-v4-flash",
+		}
+		tc.edit(&entry)
+		err := c.UpsertProvider(entry)
+		if err == nil {
+			t.Fatalf("%s: expected official DeepSeek vision configuration to be rejected", tc.name)
+		}
+		if !strings.Contains(err.Error(), "text-only") {
+			t.Fatalf("%s: error = %v, want clear text-only message", tc.name, err)
+		}
+	}
+
+	// Plain official DeepSeek entries remain valid.
+	c := Default()
+	if err := c.UpsertProvider(ProviderEntry{
+		Name:    "deepseek",
+		Kind:    "openai",
+		BaseURL: "https://api.deepseek.com",
+		Models:  []string{"deepseek-v4-flash"},
+		Default: "deepseek-v4-flash",
+	}); err != nil {
+		t.Fatalf("plain official DeepSeek provider: %v", err)
+	}
+
+	// Custom DeepSeek-compatible gateways may still opt in.
+	if err := c.UpsertProvider(ProviderEntry{
+		Name:    "deepseek-gateway",
+		Kind:    "openai",
+		BaseURL: "https://gateway.example/v1",
+		Model:   "deepseek-v4-pro",
+		Vision:  true,
+	}); err != nil {
+		t.Fatalf("custom gateway with vision: %v", err)
+	}
+}
+
 func TestSetProviderEffort(t *testing.T) {
 	c := Default()
 	if err := c.SetProviderEffort("deepseek-flash", "MAX"); err != nil {
@@ -761,7 +815,7 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	}
 }
 
-func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModels(t *testing.T) {
+func TestEffectiveVisionOfficialDeepSeekNeverAllowsExplicitModels(t *testing.T) {
 	for _, endpoint := range []struct {
 		kind    string
 		baseURL string
@@ -785,6 +839,9 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		if ExplicitModelVision(official) {
 			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", endpoint.baseURL)
 		}
+		if CanConfigureVision(official) {
+			t.Fatalf("official DeepSeek endpoint %q must not be vision-configurable", endpoint.baseURL)
+		}
 	}
 
 	future := &ProviderEntry{
@@ -794,8 +851,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Model:        "deepseek-v5-vision",
 		VisionModels: []string{"deepseek-v5-vision"},
 	}
-	if !EffectiveVision(future) || !ExplicitModelVision(future) {
-		t.Fatal("model listed in vision_models must opt in on the official DeepSeek endpoint")
+	if EffectiveVision(future) || ExplicitModelVision(future) || CanConfigureVision(future) {
+		t.Fatal("official DeepSeek endpoint must ignore explicit vision_models")
 	}
 
 	visionOn := true
@@ -812,8 +869,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 	if !ok {
 		t.Fatal("ResolveModel did not find explicit future DeepSeek model")
 	}
-	if !EffectiveVision(overridden) || !ExplicitModelVision(overridden) {
-		t.Fatal("model_overrides vision=true must opt in on the official DeepSeek endpoint")
+	if EffectiveVision(overridden) || ExplicitModelVision(overridden) {
+		t.Fatal("official DeepSeek endpoint must ignore model_overrides vision=true")
 	}
 
 	custom := &ProviderEntry{
@@ -824,7 +881,7 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Vision:            true,
 		ReasoningProtocol: ReasoningProtocolDeepSeek,
 	}
-	if !EffectiveVision(custom) {
+	if !CanConfigureVision(custom) || !EffectiveVision(custom) {
 		t.Fatal("explicit vision=true must remain available for custom DeepSeek gateways")
 	}
 }

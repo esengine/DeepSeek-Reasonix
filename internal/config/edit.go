@@ -21,6 +21,7 @@ import (
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/netclient"
 	"reasonix/internal/permission"
+	"reasonix/internal/provider/openai"
 )
 
 var validDesktopExternalOpenerID = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -633,6 +634,8 @@ func validateProvider(e ProviderEntry) error {
 		return fmt.Errorf("provider %q: base_url is required", e.Name)
 	case !providerHasAnyModel(e):
 		return fmt.Errorf("provider %q: model is required", e.Name)
+	case openai.IsDeepSeek(e.BaseURL) && providerDeclaresVision(e):
+		return fmt.Errorf("provider %q: official DeepSeek endpoints are text-only and do not accept image input; remove vision=true, vision_models, or model_overrides vision", e.Name)
 	case strings.TrimSpace(e.APIKeyEnv) != "" && !IsValidCredentialKey(e.APIKeyEnv):
 		return fmt.Errorf("provider %q: api_key_env %q is not a valid environment variable name", e.Name, e.APIKeyEnv)
 	}
@@ -645,6 +648,18 @@ func providerHasAnyModel(e ProviderEntry) bool {
 	}
 	for _, m := range e.Models {
 		if strings.TrimSpace(m) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func providerDeclaresVision(e ProviderEntry) bool {
+	if e.Vision || len(e.VisionModels) > 0 {
+		return true
+	}
+	for _, override := range e.ModelOverrides {
+		if override.Vision != nil && *override.Vision {
 			return true
 		}
 	}

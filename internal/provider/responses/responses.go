@@ -140,6 +140,12 @@ func New(cfg Config) provider.Provider {
 		sessionCache = *cfg.SessionCache
 	}
 	vision, _ := cfg.Extra["vision"].(bool)
+	// Official DeepSeek APIs accept text message content only; keep the
+	// provider-boundary guard even though config capability resolution
+	// normally prevents image attachments from reaching this layer.
+	if vendor == "deepseek" {
+		vision = false
+	}
 	httpClient := &http.Client{Timeout: 300 * time.Second}
 	if built, err := netclient.NewHTTPClient(cfg.Proxy, netclient.TransportOptions{
 		DialTimeout: 30 * time.Second, KeepAlive: 30 * time.Second,

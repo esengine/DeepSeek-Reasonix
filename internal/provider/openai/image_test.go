@@ -79,11 +79,11 @@ func TestOfficialDeepSeekProviderWideVisionInputMatchesTextOnlyRequest(t *testin
 	}
 }
 
-func TestOfficialDeepSeekExplicitFutureVisionInputUsesImageParts(t *testing.T) {
+func TestOfficialDeepSeekExplicitVisionInputStaysTextOnly(t *testing.T) {
 	p, err := New(provider.Config{
 		Name:    "deepseek",
 		BaseURL: "https://api.deepseek.com",
-		Model:   "deepseek-v5-vision",
+		Model:   "deepseek-v4-flash",
 		Extra: map[string]any{
 			"vision":                true,
 			"vision_model_explicit": true,
@@ -93,17 +93,23 @@ func TestOfficialDeepSeekExplicitFutureVisionInputUsesImageParts(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	c := p.(*client)
-	if !c.vision {
-		t.Fatal("explicit model-scoped vision must remain enabled on the official DeepSeek endpoint")
+	if c.vision {
+		t.Fatal("official DeepSeek endpoint must ignore explicit model-scoped vision")
 	}
 
 	req := c.buildRequest(provider.Request{Messages: []provider.Message{{
 		Role: provider.RoleUser, Content: "describe",
 		Images: []string{"data:image/png;base64,AAAA"},
 	}}})
-	parts, ok := req.Messages[0].Content.([]chatContentPart)
-	if !ok || len(parts) != 2 || parts[1].ImageURL == nil {
-		t.Fatalf("explicit future DeepSeek content = %#v, want [text, image_url]", req.Messages[0].Content)
+	if content, ok := req.Messages[0].Content.(string); !ok || content != "describe" {
+		t.Fatalf("official DeepSeek content = %#v, want plain string", req.Messages[0].Content)
+	}
+	body, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if strings.Contains(string(body), "image_url") || strings.Contains(string(body), "base64,AAAA") {
+		t.Fatalf("official DeepSeek request leaked explicit image payload: %s", body)
 	}
 }
 

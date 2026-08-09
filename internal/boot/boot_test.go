@@ -1517,7 +1517,7 @@ func TestNewProviderBuildsDeepSeekAnthropicPreset(t *testing.T) {
 	}
 }
 
-func TestNewProviderAllowsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
+func TestNewProviderOfficialDeepSeekDropsExplicitVisionImages(t *testing.T) {
 	var gotReq map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := json.NewDecoder(r.Body).Decode(&gotReq); err != nil {
@@ -1562,13 +1562,16 @@ func TestNewProviderAllowsExplicitOfficialDeepSeekVisionModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("message = %#v, want object", messages[0])
 	}
-	parts, ok := message["content"].([]any)
-	if !ok || len(parts) != 2 {
-		t.Fatalf("content = %#v, want [text, image_url]", message["content"])
+	content, ok := message["content"].(string)
+	if !ok || content != "describe" {
+		t.Fatalf("content = %#v, want plain text", message["content"])
 	}
-	imagePart, ok := parts[1].(map[string]any)
-	if !ok || imagePart["type"] != "image_url" {
-		t.Fatalf("image part = %#v, want image_url", parts[1])
+	raw, err := json.Marshal(gotReq)
+	if err != nil {
+		t.Fatalf("marshal request: %v", err)
+	}
+	if strings.Contains(string(raw), "image_url") || strings.Contains(string(raw), "base64,AAAA") {
+		t.Fatalf("official DeepSeek request leaked explicit image payload: %s", raw)
 	}
 }
 
