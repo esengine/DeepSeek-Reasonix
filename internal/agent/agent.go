@@ -278,14 +278,15 @@ type ToolHooks interface {
 // Agent drives a single task: a Provider, a tool Registry, and a Session wired
 // into the main loop.
 type Agent struct {
-	prov               provider.Provider
-	tools              *tool.Registry
-	session            *Session
-	sessMu             sync.Mutex // guards the session pointer for external Session()/SetSession
-	maxSteps           int
-	maxStepsKey        string
-	reasoningByteLimit int
-	maxOutputTokens    int
+	prov                provider.Provider
+	tools               *tool.Registry
+	session             *Session
+	sessMu              sync.Mutex // guards the session pointer for external Session()/SetSession
+	maxSteps            int
+	maxStepsKey         string
+	reasoningByteLimit  int
+	repetitionTripLimit int
+	maxOutputTokens     int
 	// executorHandoffGuard is enabled by Coordinator for the executor agent. The
 	// per-turn marker check in Run keeps ordinary single-model turns unaffected.
 	executorHandoffGuard bool
@@ -1034,6 +1035,10 @@ type Options struct {
 	// uses the default guard; a negative value disables only this client guard.
 	// Provider output budgets are a separate protocol/model capability.
 	ReasoningByteLimit int
+	// RepetitionTripLimit is how many identical output segments the recent
+	// stream window tolerates before the client repetition guard aborts the
+	// attempt. Zero uses the default guard; a negative value disables it.
+	RepetitionTripLimit int
 	// MaxOutputTokens overrides the provider's configured/default total output
 	// budget. Zero delegates to the provider; a negative value asks optional
 	// protocols to omit the budget (Anthropic still requires max_tokens).
@@ -1251,6 +1256,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		maxSteps:                  opts.MaxSteps,
 		maxStepsKey:               maxStepsKey,
 		reasoningByteLimit:        reasoningByteLimit,
+		repetitionTripLimit:       resolveRepetitionTripLimit(opts.RepetitionTripLimit),
 		maxOutputTokens:           opts.MaxOutputTokens,
 		temperature:               opts.Temperature,
 		pricing:                   opts.Pricing,
@@ -2337,6 +2343,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 	if err != nil {
 		return streamedTurn{usage: provider.UsageWithRequestAttemptCount(ctx, nil), err: err}
 	}
+	repetition := newRepetitionDetector(a.repetitionTripLimit)
 
 	// A PostLLMCall hook rewrites the whole reasoning block, so when one is wired
 	// up we buffer reasoning silently and emit the transformed text once after the
@@ -2436,7 +2443,7 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 					partialCalls: partialCalls, maxArgChars: maxArgChars,
 				}
 			}
-			chunk = c
+			chunk = repetition.filter(c)
 		}
 		switch chunk.Type {
 		case provider.ChunkReasoning:
