@@ -1373,10 +1373,19 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 			// Cache gate: rewriting tool results changes the wire prefix, so
 			// every byte from the first elided result onward misses the
 			// server-side cache. Only do that when the cache is already cold
-			// (idle past the vendor TTL); a warm cache rewrite is pure cost.
+			// (idle past the vendor TTL) — unless the transcript is already
+			// past the compact trigger, where a projection rewrite is
+			// imminent anyway; a cache miss then beats re-folding the same
+			// region twice.
+			warm := false
 			if last := c.executor.LastAPICallAt(); !last.IsZero() && time.Since(last) < c.cacheColdAfter() {
+				warm = true
+			}
+			overflow := c.executor.PromptOverflow()
+			if warm && !overflow {
+				c.emitFastCompressTelemetry("warm", 0, 0, "refused")
 				c.noticeDetail("fast compression refused",
-					fmt.Sprintf("provider cache still warm (last call %s ago, TTL %s); rewriting would punch a hole in every hit from the first elided result. Retry after idle, or use /compact (AI summarize) instead.", time.Since(last).Round(time.Minute), c.cacheColdAfter().Round(time.Minute)))
+					fmt.Sprintf("provider cache still warm (last call %s ago, TTL %s); rewriting would punch a hole in every hit from the first elided result. Retry after idle, or use /compact (AI summarize) instead.", time.Since(c.executor.LastAPICallAt()).Round(time.Minute), c.cacheColdAfter().Round(time.Minute)))
 				return
 			}
 			// Backup the whole transcript before the rewrite so a prune
@@ -1391,9 +1400,11 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				return
 			}
 			if stats.Results == 0 {
+				c.emitFastCompressTelemetry(fastCompressCacheLabel(warm, overflow), 0, 0, "noop")
 				c.notice("no stale tool results to compress")
 				return
 			}
+			c.emitFastCompressTelemetry(fastCompressCacheLabel(warm, overflow), stats.Results, stats.SavedChars, "")
 			c.noticeDetail("fast-compressed",
 				fmt.Sprintf("elided %d stale tool results, saved ~%d chars", stats.Results, stats.SavedChars))
 			if err := c.SnapshotRewrite(); err != nil {
@@ -3662,6 +3673,33 @@ func (c *Controller) SnapshotActivity() error {
 // controllers cannot overwrite a newer transcript.
 func (c *Controller) SnapshotRewrite() error {
 	return c.snapshot(false, true, false)
+}
+
+// emitFastCompressTelemetry records a /compress-fast pass in the stats file
+// through the compaction telemetry channel (mode=prune), so a user can verify
+// from logs alone that the rewrite ran, against what cache state, and what it
+// saved. The Recorder intercepts "compaction telemetry" notices and persists
+// the structured detail line.
+func (c *Controller) emitFastCompressTelemetry(cache string, results, savedChars int, status string) {
+	detail := fmt.Sprintf("trigger=manual mode=prune cache=%s results=%d saved_chars=%d", cache, results, savedChars)
+	if status != "" {
+		detail += " status=" + status
+	}
+	c.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
+}
+
+// fastCompressCacheLabel renders the gate decision as a single stats token so
+// the key=value parser keeps it intact: cold, warm, or warm_over_window (the
+// overflow bypass runs despite a warm cache).
+func fastCompressCacheLabel(warm, overflow bool) string {
+	switch {
+	case warm && overflow:
+		return "warm_over_window"
+	case warm:
+		return "warm"
+	default:
+		return "cold"
+	}
 }
 
 // backupSessionBeforeRewrite copies the current transcript file to a .bak

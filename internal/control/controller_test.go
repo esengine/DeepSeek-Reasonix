@@ -5542,12 +5542,7 @@ func TestFastCompressCommandNoopWithoutStaleResults(t *testing.T) {
 		}),
 	})
 	c.Submit("/compress-fast")
-	select {
-	case got := <-notices:
-		if got != "no stale tool results to compress" {
-			t.Fatalf("noop notice = %q", got)
-		}
-	case <-time.After(5 * time.Second):
+	if got := waitForNotice(t, notices, "no stale tool results to compress"); got == "" {
 		t.Fatal("no noop notice within 5s")
 	}
 }
@@ -5590,7 +5585,7 @@ func TestFastCompressCommandRefusedWhileCacheWarm(t *testing.T) {
 	sess.Add(provider.Message{Role: provider.RoleUser, Content: "read"})
 	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}})
 	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: big})
-	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 1000, RecentKeep: 1}, event.Discard)
+	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 100_000, RecentKeep: 1}, event.Discard)
 	notices := make(chan string, 4)
 	c := New(Options{
 		Executor: exec,
@@ -5605,13 +5600,8 @@ func TestFastCompressCommandRefusedWhileCacheWarm(t *testing.T) {
 	c.testCacheColdAfter = 24 * time.Hour
 
 	c.Submit("/compress-fast")
-	select {
-	case got := <-notices:
-		if !strings.Contains(got, "refused") {
-			t.Fatalf("warm cache must refuse fast compression, got %q", got)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no refusal notice within 5s")
+	if got := waitForNotice(t, notices, "refused"); got == "" {
+		t.Fatal("warm cache must refuse fast compression")
 	}
 	// Nothing rewritten: no backup, no rewrite version bump.
 	if rw := exec.Session().RewriteVersion(); rw != 0 {
@@ -5673,4 +5663,64 @@ func TestFastCompressCommandBacksUpBeforeRewrite(t *testing.T) {
 		t.Fatal("prune did not rewrite the session")
 	}
 }
->>>>>>> d69614f3e (feat(control): gate /compress-fast on warm cache, back up before rewrite)
+
+// waitForNotice reads notices until one contains want, or times out. Commands
+// emit both a telemetry notice and a user-facing one, so single reads can see
+// the wrong message first.
+func waitForNotice(t *testing.T, ch <-chan string, want string) string {
+	t.Helper()
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case got := <-ch:
+			if strings.Contains(got, want) {
+				return got
+			}
+		case <-deadline:
+			return ""
+		}
+	}
+}
+
+func TestFastCompressCommandAllowsOverflowDespiteWarmCache(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	// Two tool results, small window: transcript is over the high-water mark
+	// even before prune, so the warm-cache refusal must yield (a 400 would
+	// cost more than a cache miss).
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: strings.Repeat("grow ", 200)})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: strings.Repeat("x", 5000)})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "more"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "2", Name: "read_file", Arguments: "{}"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: strings.Repeat("y", 5000)})
+	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 800, RecentKeep: 1, ArchiveDir: dir}, event.Discard)
+	notices := make(chan string, 8)
+	c := New(Options{
+		Executor:    exec,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices <- e.Text
+			}
+		}),
+	})
+	exec.RecordAPICallForTest(time.Now())
+	c.testCacheColdAfter = 24 * time.Hour // warm cache
+	if !exec.PromptOverflow() {
+		t.Fatal("fixture must be over the window for this test to be meaningful")
+	}
+
+	c.Submit("/compress-fast")
+	// Telemetry notice is emitted before the user-facing one.
+	if got := waitForNotice(t, notices, "compaction telemetry"); got == "" {
+		t.Fatal("no telemetry notice")
+	}
+	if got := waitForNotice(t, notices, "fast-compressed"); got == "" {
+		t.Fatal("over-window session must compress despite warm cache")
+	}
+}
+>>>>>>> 3aee33e46 (feat(control): /compress-fast logs telemetry and bypasses gate on overflow)

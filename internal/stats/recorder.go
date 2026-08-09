@@ -135,6 +135,95 @@ func (r *Recorder) Emit(e event.Event) {
 		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage)
 	} else if r != nil && r.writer != nil && e.Kind == event.TurnDone {
 		r.RecordTurnCompletion()
+	case e.Kind == event.Notice && isCompactionTelemetry(e.Text):
+		r.recordCompaction(e)
+	}
+}
+
+// isCompactionTelemetry matches the agent's compaction telemetry notices, so
+// every pass (success or failure, from any trigger) lands in the stats file
+// for post-hoc diagnosis even when the frontend swallows the notice.
+func isCompactionTelemetry(text string) bool {
+	return text == "compaction telemetry" || text == "compaction failed"
+}
+
+// recordCompaction parses the agent's compaction telemetry detail line
+// (trigger/mode/cache/src/proj/in/out/hit/miss/write/reqs[/err_type]) into a
+// structured record so a compaction problem can be pinned from the stats file
+// alone. Parsing is best-effort and never interrupts the event stream.
+func (r *Recorder) recordCompaction(e event.Event) {
+	if r == nil || r.dispatcher == nil {
+		return
+	}
+	rec := CompactionRecord{Trigger: "unknown", Mode: "unknown"}
+	for _, tok := range strings.Fields(e.Detail) {
+		k, v, ok := strings.Cut(tok, "=")
+		if !ok {
+			continue
+		}
+		switch k {
+		case "trigger":
+			rec.Trigger = v
+		case "mode":
+			rec.Mode = v
+		case "cache":
+			rec.Cache = v
+		case "provider_request_id":
+			rec.RequestID = v
+		case "err_type":
+			// err may contain spaces; the detail line puts it last, so take
+			// everything after the marker verbatim.
+			if i := strings.Index(e.Detail, "err_type="); i >= 0 {
+				rec.Error = strings.TrimSpace(e.Detail[i+len("err_type="):])
+			}
+			r.dispatcher.enqueue(record{
+				Timestamp:  time.Now(),
+				ModelRef:   e.ModelRef,
+				Source:     r.source,
+				Compaction: &rec,
+			})
+			return
+		case "status":
+			rec.Status = v
+		default:
+			setCompactionInt(&rec, k, v)
+		}
+	}
+	r.dispatcher.enqueue(record{
+		Timestamp:  time.Now(),
+		ModelRef:   e.ModelRef,
+		Source:     r.source,
+		Compaction: &rec,
+	})
+}
+
+func setCompactionInt(rec *CompactionRecord, key, val string) {
+	n, err := strconv.Atoi(val)
+	if err != nil {
+		return
+	}
+	switch key {
+	case "src":
+		rec.SourceTok = n
+	case "proj":
+		rec.ProjTok = n
+	case "in":
+		rec.InputTok = n
+	case "out":
+		rec.OutTok = n
+	case "hit":
+		rec.HitTok = n
+	case "miss":
+		rec.MissTok = n
+	case "write":
+		rec.WriteTok = n
+	case "reqs":
+		rec.Reqs = n
+	case "results":
+		rec.Results = n
+	case "saved_chars":
+		rec.SavedChars = n
+>>>>>>> 3aee33e46 (feat(control): /compress-fast logs telemetry and bypasses gate on overflow)
 	}
 }
 

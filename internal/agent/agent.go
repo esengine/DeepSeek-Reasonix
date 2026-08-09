@@ -1074,6 +1074,21 @@ func (a *Agent) steerQueueLen() int {
 // fires (e.g. 0.8). The status line uses it to show headroom to the next compact.
 func (a *Agent) CompactRatio() float64 { return a.compactRatio }
 
+// PromptOverflow reports whether the current transcript estimate is at or
+// above the compact trigger (high-water). /compress-fast uses it to bypass
+// its warm-cache refusal: an over-window session will 400 on the next request,
+// which is more expensive than a cache miss, so the rewrite is allowed.
+func (a *Agent) PromptOverflow() bool {
+	if a == nil || a.contextWindow <= 0 {
+		return false
+	}
+	_, _, high := a.compactThresholds()
+	if high <= 0 {
+		return false
+	}
+	return a.estimatedPromptTokens(a.session.Snapshot()) >= high
+}
+
 // CompactNow forces one projection compaction (canonical transcript untouched).
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
 	_, err := a.compactToProjection(ctx, "manual", instructions, true)
