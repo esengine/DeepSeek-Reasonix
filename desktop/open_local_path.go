@@ -39,10 +39,18 @@ func normalizeLocalOpenPath(path string) (string, error) {
 			if !isLoopbackHost(host) {
 				return "", fmt.Errorf("remote file URL authority %q is not allowed (SMB credential leak risk)", host)
 			}
-			host = "" // loopback: drop the authority, keep the local path
-		}
-		if host != "" {
-			decoded = "//" + host + decoded
+			// Loopback authority: drop it and keep the local path
+			// (//localhost/C:/x.txt would otherwise fail the device-colon
+			// check as a UNC remainder).
+			host = ""
+		} else if strings.HasPrefix(decoded, "//") {
+			// file:////host/share (4+ slashes) parses with an EMPTY authority
+			// and a path already starting with "//" — url.Parse would let the
+			// remote host through as a UNC path. Refuse any file URL whose
+			// decoded path starts with "//": file:///C:/x.txt (3 slashes) is
+			// unaffected, and "//C:/" device forms are rejected by the
+			// colon check below.
+			return "", fmt.Errorf("remote file URL authority is not allowed (SMB credential leak risk)")
 		}
 		if len(decoded) >= 4 && decoded[0] == '/' && isASCIILetter(decoded[1]) && decoded[2] == ':' && decoded[3] == '/' {
 			decoded = decoded[1:]
@@ -124,6 +132,7 @@ var executableOpenSuffixes = map[string]bool{
 	// control-panel applets, PowerShell scripts beyond .ps1).
 	".jar": true, ".application": true, ".msc": true, ".cpl": true,
 	".ps1xml": true, ".msh": true, ".msh1": true, ".msh2": true, ".mshxml": true,
+	".vbe": true, ".wsh": true, ".appref-ms": true,
 }
 
 func openTargetAllowed(path string, isDir bool, mode os.FileMode) bool {

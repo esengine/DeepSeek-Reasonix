@@ -51,6 +51,10 @@ func TestNormalizeLocalOpenPathRejectsRemoteAuthority(t *testing.T) {
 	for _, u := range []string{
 		"file://attacker.example/share/evil.bat",
 		"file://192.168.1.50/share/x.txt",
+		// 4+ slashes parse with an empty authority — must still be refused
+		// (they normalize to a remote UNC path).
+		"file:////attacker.example/share/x.txt",
+		"file://///attacker.example/share/x.txt",
 	} {
 		if _, err := normalizeLocalOpenPath(u); err == nil {
 			t.Errorf("normalizeLocalOpenPath(%q): want rejection (remote authority), got nil", u)
