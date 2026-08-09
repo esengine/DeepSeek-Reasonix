@@ -52,3 +52,40 @@ gh pr view <当前分支> --json url   # 查已有 PR
 
 - 推送前运行：`gofmt -w . && go vet ./... && go test ./internal/tool/builtin/ ./internal/boot/`（仓库既有 CI 前置规则）。
 - PR 创建后确认：`gh pr view --json url` 或 GitHub 网页可见。
+
+## 发布与签名（v1.21.5 起）
+
+桌面端 release 发布流程与本仓库签名约定：
+
+- **版本号**：语义化版本，tag 命名 `desktop-v<semver>`（如 `desktop-v1.21.5`）。当前基线版本 v1.21.5。
+- **更新源可注入**：`desktop/updater.go` 的 `githubManifestFallback` 是 `var`（非 const），构建时用
+  `-ldflags "-X main.githubManifestFallback=https://github.com/<owner>/<repo>/releases/latest/download/latest.json"` 覆盖为自己的仓库。
+- **签名密钥**（minisign）：
+  - 私钥：`desktop/build/signkey/reasonix.key`（加密，密码 `reasonix-release-2026`，**务必备份，丢失无法再签名**）
+  - 公钥：`RWTh+5VH/HnH1Ieqfn2AH4rY0N87a8ae8QD3JfS038PfN4pHsWFnQ+ru`（key ID `D4C779FC4795FBE1`）
+  - 公钥已嵌入 `desktop/internal/update/verify.go` 的 `publicKey` 常量——更换密钥时必须同步更新此处与 CI secret。
+- **签名命令**：`MINISIGN_PASSWORD=... MINISIGN_PRIVATE_KEY="$(cat build/signkey/reasonix.key)" go run ./cmd/sign sign <exe>`
+- **NSIS 安装器**：需先安装 NSIS（makensis，位于 `C:\Program Files (x86)\NSIS`），
+  并构建辅助二进制到 `build/windows/installer/`（reasonix-guard/launcher/update-helper/cli，见 `scripts/desktop-build.sh`）。
+  `project.nsi` 含中文，makensis 需 UTF-8 BOM 或 `-DARG_WAILS_AMD64_BINARY=...` 参数。
+- **manifest**：`GITHUB_REPOSITORY=<owner>/<repo> go run ./cmd/sign manifest dist <version> <tag>` 生成 `latest.json`，
+  产物命名须匹配平台 key（如 `Reasonix-windows-amd64-installer.exe`）。
+- **发布**：推 tag `desktop-v<semver>` + `gh release create` 上传 exe/安装器/`.minisig`/`latest.json`。
+
+## 语音输入（STT）关键约定
+
+- **首次启用授权**：Edge 以 `--use-fake-ui-for-media-stream` 启动自动接受麦克风授权（仍用真实设备）。
+  权限 prompt 时页面上报 `state:"need-permission"`，Go 端显示识别页窗口让用户点允许，授权后自动隐藏。
+- **启动确认**：`StartListening` 发 `cmd:start` 后不提前置 `listening=true`（否则 handleWS 的 `changed`
+  判断会跳过 emit，前端按钮一直转圈）。页面回传状态（listening/error/idle/need-permission）时无条件
+  emit `{listening, starting:false}`；确认窗口 8s，超时自动重试最多 3 轮。
+- **静默超时默认值**：未配置（0）时使用默认 6s（与设置 UI fallback 一致），不要钳到 3s；显式配置 1-2s 钳到 3s。
+- **热键注销**：`sttHotkeyManager.stop()` 后 Go 复用 OS 线程不终止，热键仍被旧线程持有；
+  WM_QUIT 分支必须显式 `UnregisterHotKey`，否则重新注册返回"组合键被占用"。
+
+## 思考级别（effort）约定
+
+- opencode.ai 网关（`openai.IsOpencode`）走 binary thinking knob（auto/enabled/disabled），
+  `EffortCapabilityForEntry`/`NormalizeEffort` 已支持，big-pickle 等模型可显示思考模式下拉框。
+- 窄容器 CSS 断点（`@container` 760px/560px）已移除对 `.composer-meta__control--effort` 的 `display:none`，
+  思考模式下拉框始终显示。

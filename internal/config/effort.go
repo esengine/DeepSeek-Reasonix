@@ -78,6 +78,14 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 	case ReasoningProtocolOpenAI:
 		return openAIEffortCapability()
 	}
+	// Gateway-scoped capability wins over the per-model registry: opencode.ai
+	// relays DeepSeek/GLM/etc. model IDs, so those models must not inherit the
+	// official DeepSeek scale (disabled/high/max) — the opencode gateway only
+	// accepts the generic reasoning_effort depth scale (low/medium/high) in its
+	// OpenAI-compatible chat shape (see provider/openai default branch).
+	if isOpencodeEntry(e) {
+		return openAIEffortCapability()
+	}
 	if cap, ok := resolvedModelReasoningCapability(e); ok {
 		return effortCapabilityFromModel(cap)
 	}
@@ -109,10 +117,12 @@ func EffortCapabilityForEntry(e *ProviderEntry) EffortCapability {
 		// OpenAI-compatible endpoint and documents no reasoning_effort depth scale.
 		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
 	case isOpencodeEntry(e):
-		// opencode.ai gates thinking with thinking.type enabled|disabled (no
-		// reasoning_effort depth scale), so surface the same binary knob as
-		// LongCat/Zhipu instead of treating the model as effort-incapable.
-		return EffortCapability{Supported: true, Levels: []string{"auto", "enabled", "disabled"}, Default: "enabled"}
+		// opencode.ai's OpenAI-compatible gateway accepts the standard
+		// reasoning_effort depth scale (low|medium|high) — the provider layer
+		// (openai.go default branch) rejects thinking.type binary values with
+		// "effort must be low, medium, or high". Surface the same depth levels
+		// as OpenAI instead of a binary knob.
+		return openAIEffortCapability()
 	case isOllamaCloudEntry(e):
 		// Ollama Cloud accepts top-level reasoning_effort values low|medium|
 		// high|max. "none" means omit the field so the hosted model runs without
@@ -149,6 +159,23 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 	// V4 Flash 0731 added a real low depth. Keep this model-scoped: Pro and
 	// generic DeepSeek-compatible endpoints still normalize low to high unless
 	// they explicitly advertise a different supported_efforts list.
+	if isOpencodeEntry(e) {
+		// opencode.ai relays DeepSeek/GLM/etc. model IDs but only accepts the
+		// generic reasoning_effort depth scale (low|medium|high) in its
+		// OpenAI-compatible chat shape. The gateway wins over the per-model
+		// registry so a DeepSeek model on opencode normalizes like OpenAI
+		// instead of surfacing the official disabled/high/max scale.
+		switch level {
+		case "low", "medium", "high":
+			return level, nil
+		case "max", "xhigh":
+			return "high", nil
+		case "off":
+			return "low", nil
+		default:
+			return "", fmt.Errorf("usage: /effort auto|low|medium|high")
+		}
+	}
 	if cap, ok := resolvedModelReasoningCapability(e); ok {
 		explicit := explicitReasoningProtocol(e)
 		if explicit == "" || explicit == cap.Protocol {
@@ -225,16 +252,19 @@ func NormalizeEffort(e *ProviderEntry, raw string) (string, error) {
 			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
 		}
 	case isOpencodeEntry(e):
-		// opencode.ai uses the same binary thinking knob as LongCat.
+		// opencode.ai accepts the standard reasoning_effort depth scale
+		// (low|medium|high), mirroring OpenAI. Legacy depth aliases keep working.
 		switch level {
-		case "enabled", "disabled":
+		case "low", "medium", "high":
 			return level, nil
+		case "max":
+			return "high", nil
+		case "xhigh":
+			return "high", nil
 		case "off":
-			return "disabled", nil
-		case "low", "medium", "high", "xhigh", "max":
-			return "enabled", nil
+			return "low", nil
 		default:
-			return "", fmt.Errorf("usage: /effort auto|enabled|disabled")
+			return "", fmt.Errorf("usage: /effort auto|low|medium|high")
 		}
 	case isOllamaCloudEntry(e):
 		switch level {
@@ -404,9 +434,10 @@ func isLongCatEntry(e *ProviderEntry) bool {
 }
 
 // isOpencodeEntry reports whether the entry points at the opencode.ai gateway
-// (opencode.ai/zen/...). It exposes OpenAI-compatible chat and gates thinking
-// with thinking.type enabled|disabled, so effort is surfaced as a binary knob
-// like Zhipu/LongCat rather than the generic reasoning_effort depth scale.
+// (opencode.ai/zen/...). It exposes an OpenAI-compatible chat shape and accepts
+// the generic reasoning_effort depth scale (low|medium|high), so effort is
+// surfaced as OpenAI-style depth levels (see openAIEffortCapability) rather
+// than a binary thinking.type knob.
 func isOpencodeEntry(e *ProviderEntry) bool {
 	return e != nil && e.Kind == "openai" && openai.IsOpencode(e.BaseURL)
 }

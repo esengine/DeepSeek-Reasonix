@@ -345,6 +345,83 @@ func TestNormalizeEffortLongCat(t *testing.T) {
 	}
 }
 
+func TestNormalizeEffortOpencode(t *testing.T) {
+	// opencode.ai relays DeepSeek model IDs but only accepts the generic
+	// reasoning_effort depth scale (low|medium|high) — the gateway must win
+	// over the official DeepSeek registry so "disabled"/"max" normalize onto
+	// the opencode vocabulary instead of being rejected at request build.
+	e := &ProviderEntry{Kind: "openai", BaseURL: "https://opencode.ai/zen/v1", Model: "deepseek-v4-pro"}
+	cases := []struct {
+		in, want string
+		wantErr  bool
+	}{
+		{"auto", "", false}, // auto == leave to provider default == empty
+		{"low", "low", false},
+		{"medium", "medium", false},
+		{"high", "high", false},
+		{"HIGH", "high", false},  // case-insensitive
+		{"max", "high", false},   // opencode has no max depth; clamp to high
+		{"xhigh", "high", false}, // legacy alias → high
+		{"off", "low", false},    // retired "no thinking" → lowest depth
+		{"disabled", "", true},   // opencode does not support disabled; reject
+		{"enabled", "", true},    // binary knob value is not part of the depth scale
+	}
+	for _, tc := range cases {
+		got, err := NormalizeEffort(e, tc.in)
+		if tc.wantErr && err == nil {
+			t.Errorf("NormalizeEffort(%q) expected error, got %q", tc.in, got)
+			continue
+		}
+		if !tc.wantErr && err != nil {
+			t.Errorf("NormalizeEffort(%q) returned error: %v", tc.in, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("NormalizeEffort(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestEffortCapabilityOpencode(t *testing.T) {
+	// DeepSeek model IDs on the opencode gateway must surface the generic
+	// OpenAI depth scale, not the official DeepSeek disabled/high/max scale.
+	e := &ProviderEntry{Kind: "openai", BaseURL: "https://opencode.ai/zen/v1", Model: "deepseek-v4-pro"}
+	cap := EffortCapabilityForEntry(e)
+	if !cap.Supported {
+		t.Fatalf("opencode entry should expose /effort, got %+v", cap)
+	}
+	wantLevels := []string{"auto", "low", "medium", "high"}
+	if len(cap.Levels) != len(wantLevels) {
+		t.Fatalf("levels = %v, want %v", cap.Levels, wantLevels)
+	}
+	for i, l := range wantLevels {
+		if cap.Levels[i] != l {
+			t.Errorf("levels[%d] = %q, want %q", i, cap.Levels[i], l)
+		}
+	}
+	if cap.Default != "auto" {
+		t.Errorf("default = %q, want auto", cap.Default)
+	}
+}
+
+func TestIsOpencodeEntry(t *testing.T) {
+	for _, tc := range []struct {
+		baseURL string
+		want    bool
+	}{
+		{"https://opencode.ai/zen/v1", true},
+		{"https://opencode.ai/zen/go/v1", true},
+		{"https://api.deepseek.com", false},
+		{"https://api.longcat.chat/openai/v1", false},
+		{"", false},
+	} {
+		e := &ProviderEntry{Kind: "openai", BaseURL: tc.baseURL}
+		if got := isOpencodeEntry(e); got != tc.want {
+			t.Errorf("baseURL=%q: isOpencodeEntry=%v, want %v", tc.baseURL, got, tc.want)
+		}
+	}
+}
+
 func TestEffortCapabilityMiniMax(t *testing.T) {
 	e := &ProviderEntry{Kind: "openai", BaseURL: "https://api.minimaxi.com/v1", Model: "MiniMax-M3"}
 	cap := EffortCapabilityForEntry(e)
