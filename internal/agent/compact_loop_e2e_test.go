@@ -119,6 +119,18 @@ func compactionsPerTurn(t *testing.T, windowTok int, blob, finalText string, tur
 	return perTurn, paused, prunes
 }
 
+// variedAnalysisText grows assistant text like a real answer: same volume as
+// the old repeated-filler blob (~20 chars per sentence), but with distinct
+// sentences so the client repetition guard (correctly) does not read it as a
+// degenerate loop.
+func variedAnalysisText(sentences int) string {
+	var b strings.Builder
+	for i := range sentences {
+		fmt.Fprintf(&b, "analysis part %04d. ", i)
+	}
+	return b.String()
+}
+
 func consecutiveCompactingTurns(perTurn []int) int {
 	worst, run := 0, 0
 	for _, n := range perTurn {
@@ -161,7 +173,7 @@ func TestCompactionPausesWhenWindowTooSmall(t *testing.T) {
 // session grows but reclaims enough headroom that it never fires on consecutive
 // turns and never trips the stuck guard.
 func TestCompactionHealthyWindowNeverLoops(t *testing.T) {
-	perTurn, paused, _ := compactionsPerTurn(t, 40000, "small tool output", strings.Repeat("analysis paragraph. ", 600), 20)
+	perTurn, paused, _ := compactionsPerTurn(t, 40000, "small tool output", variedAnalysisText(600), 20)
 
 	total := 0
 	for _, n := range perTurn {

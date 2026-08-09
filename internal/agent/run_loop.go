@@ -420,12 +420,11 @@ func (a *Agent) streamWithSamplingRecovery(ctx context.Context, turn int) stream
 		last.usage = finalizeSamplingUsage(billable, result.usage)
 
 		if result.err != nil {
-			if provider.IsStreamInterrupted(result.err) && attempt < maxSamplingAttempts {
+			if reason, retryMax, retryable := samplingRetryPlan(result.err, attempt); retryable {
 				streamSink.Discard()
-				reason := provider.StreamInterruptReason(result.err)
 				a.emitStreamAttempt(attemptID, event.StreamAttemptDiscard, attempt, reason, result.err)
 				a.sink.Emit(event.Event{
-					Kind: event.Retrying, RetryAttempt: attempt, RetryMax: maxStreamRecoveries,
+					Kind: event.Retrying, RetryAttempt: attempt, RetryMax: retryMax,
 					RetryScope: event.RetryScopeStream,
 				})
 				if !streamRetrySleep(ctx, attempt) {
