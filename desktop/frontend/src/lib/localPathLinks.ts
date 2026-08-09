@@ -158,6 +158,16 @@ export function linkifyLocalPaths(text: string): LocalPathSegment[] {
  */
 export function localPathHref(path: string): string {
   if (isLocalFileHref(path)) return path;
+  // Remote-authority file:// URLs (file://nas/...) must not be turned into
+  // clickable hrefs — localPathFromHref refuses them, so a generated link
+  // would be inert at best and confusing at worst. Keep the literal text.
+  if (/^file:\/\/[^/]/.test(path)) return path;
+  // UNC paths: percent-encode backslashes so markdown/WHATWG URL
+  // normalization cannot fold them into extra slashes (file:///\\nas would
+  // render as file://///nas and trip the empty-authority guard).
+  if (path.startsWith("\\\\") || path.startsWith("//")) {
+    return "file:///" + path.replace(/\\/g, "%5C").replace(/#/g, "%23");
+  }
   if (path.startsWith("file:///")) {
     try {
       path = decodeURIComponent(path.slice("file:///".length));

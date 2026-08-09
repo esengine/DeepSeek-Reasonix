@@ -142,23 +142,26 @@ console.log("\nheadless click-to-open e2e");
   ok(opened[1] === "//nas/share/docs/report.md", `UNC path forwarded as slash form (${opened[1]})`);
 }
 
-// 3. Canonical authority-form UNC markdown links use the same native path.
+// 3. Remote file:// authorities are refused (SMB credential-leak parity with
+//    the backend) — the click must not open anything.
 {
   const anchors = await renderClick("[共享盘](file://nas/share/docs/report.md)");
-  ok(anchors.length === 1, "canonical UNC markdown link renders an anchor");
+  ok(anchors.length === 1, "remote-authority markdown link still renders an anchor");
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
-  ok(opened[2] === "//nas/share/docs/report.md", `canonical UNC path forwarded correctly (${opened[2]})`);
+  ok(opened[2] === undefined, `remote file:// must NOT open (got ${opened[2]})`);
 }
 
 // 4. Explicit markdown link to a local file keeps working through the same path.
 {
   const anchors = await renderClick("[验收单](file:///D:/docs/acceptance.md)");
+  const openedBefore = opened.length;
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
-  ok(opened[3] === "D:/docs/acceptance.md", "explicit file:/// markdown link opens locally");
+  ok(opened.length === openedBefore + 1 && opened[opened.length - 1] === "D:/docs/acceptance.md",
+    "explicit file:/// markdown link opens locally");
 
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 40 }));
@@ -239,6 +242,7 @@ console.log("\nheadless click-to-open e2e");
 {
   const anchors = await renderClick("见 https://example.com/page 文档");
   const browsedBefore = browsed.length;
+  const openedBefore = opened.length;
   await act(async () => {
     anchors[0].dispatchEvent(new window.MouseEvent("auxclick", { button: 2, bubbles: true, cancelable: true }));
   });
@@ -247,7 +251,7 @@ console.log("\nheadless click-to-open e2e");
     anchors[0].dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
   });
   ok(browsed.length === 1 && browsed[0] === "https://example.com/page", "http link went to the system browser");
-  ok(opened.length === 4, "OpenLocalPath was not called for the http link");
+  ok(opened.length === openedBefore, "OpenLocalPath was not called for the http link");
 }
 
 // 9. Non-path text renders no anchors and no clicks.

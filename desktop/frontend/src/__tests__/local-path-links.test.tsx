@@ -61,8 +61,8 @@ eq(firstPath("see file:///D:/Project/report/05-final.md"), "file:///D:/Project/r
 eq(firstPath("见 file:///D:/Project/中停时分析/05-静态验收.md"), "file:///D:/Project/中停时分析/05-静态验收.md",
   "file URL with CJK dirs");
 eq(firstPath("see file:///D:/x/y.md. done"), "file:///D:/x/y.md", "file URL trailing period stripped");
-eq(firstPath("see file://nas/share/report.md"), "file://nas/share/report.md",
-  "authority-form UNC text becomes a local link");
+eq(firstPath("see file://nas/share/report.md"), undefined,
+  "remote-authority file URL is NOT linkified (SMB parity with backend)");
 eq(pathCount("see file:///D:/x/%zz"), 0, "malformed file URL is not linkified");
 eq(pathCount("see file://./PhysicalDrive0"), 0, "device-authority file URL is not linkified");
 eq(pathCount("see file:///C:/safe.txt:payload"), 0, "alternate data stream file URL is not linkified");
@@ -113,14 +113,14 @@ eq(localPathHref("D:\\a\\b#c.md"), "file:///D:/a/b%23c.md", "hash escaped for UR
 eq(localPathHref("file:///C:/a/b.txt"), "file:///C:/a/b.txt", "already-absolute file URL is not double-prefixed");
 eq(localPathHref("file:///D:/a%20b.txt"), "file:///D:/a%20b.txt", "literal %xx in a file URL is not double-encoded");
 eq(localPathHref("file://nas/share/report.md"), "file://nas/share/report.md",
-  "authority-form UNC URL is preserved");
+  "remote-authority file URL is kept literal (not linkified)");
 eq(localPathHref("file:////nas/share/report.md"), "file:////nas/share/report.md",
   "slash-form UNC URL is preserved");
 eq(localPathFromHref("file:///D:/a%20b.txt"), "D:/a b.txt", "decoded %20 becomes a real space");
 
 eq(localPathFromHref("file:///D:/x/y.md"), "D:/x/y.md", "decodes plain path");
 eq(localPathFromHref("file:///Users/liangkang/notes/readme.md"), "/Users/liangkang/notes/readme.md", "preserves the leading slash for Unix paths");
-eq(localPathFromHref("file://nas/share/report.md"), "//nas/share/report.md", "parses authority-form UNC URLs");
+eq(localPathFromHref("file://nas/share/report.md"), null, "rejects remote authority (SMB credential leak — backend rule parity)");
 eq(localPathFromHref("file:////nas/share/report.md"), null, "rejects four-slash UNC (empty authority — remote SMB leak)");
 eq(localPathFromHref("file://///nas/share/report.md"), null, "rejects five-slash UNC (empty authority — remote SMB leak)");
 eq(localPathFromHref("file://./PhysicalDrive0"), null, "rejects device-namespace authority");
@@ -174,7 +174,7 @@ const unc = renderToStaticMarkup(
     {"[共享盘](file://nas/share/report.md)"}
   </ReactMarkdown>,
 );
-ok(unc.includes('href="file://nas/share/report.md"'), "authority-form UNC link survives URL sanitization");
+ok(!unc.includes('href="file://nas/share/report.md"'), "remote-authority UNC is NOT rendered as a link (SMB parity)");
 
 const plain = renderToStaticMarkup(
   <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>

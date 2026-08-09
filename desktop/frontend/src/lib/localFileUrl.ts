@@ -33,9 +33,38 @@ function hasDisallowedRawFileUrlSyntax(href: string): boolean {
  * The scheme check is intentionally case-sensitive so `FILE:` cannot bypass
  * the Markdown URL allowlist and reach a browser or native opener.
  */
+// isLoopbackHostname mirrors the backend's loopback set (localhost / 127.0.0.1
+// / ::1). Any other file:// host decodes to a remote UNC path and must be
+// refused before it reaches OpenLocalPath.
+function isLoopbackHostname(host: string): boolean {
+  const h = host.toLowerCase();
+  return h === "localhost" || h === "127.0.0.1" || h === "::1";
+}
+
 export function localPathFromHref(href?: string): string | null {
   if (!href || !href.startsWith("file://")) return null;
   if (hasDisallowedRawFileUrlSyntax(href)) return null;
+
+  // Plain-UNC linkification (linkifyLocalPaths → localPathHref) emits
+  // file:///\nas\share\... hrefs (three slashes then a backslash). WHATWG
+  // URL normalization would turn the backslash into a fourth slash, making
+  // it look like the empty-authority remote-UNC form that is refused below.
+  // Recognize the literal spelling and hand the UNC path through directly —
+  // this matches the product rule that plain UNC paths (\\host\share) open
+  // normally. The remote-authority and 4+-slash attack spellings do NOT
+  // match (they have "/" where this regex requires "\") and stay refused.
+  if (/^file:\/\/\/\\/.test(href)) {
+    const unc = "\\" + href.slice("file:///".length); // \nas\... → \\nas\...
+    if (hasDisallowedWindowsPathSyntax(unc)) return null;
+    return unc.replace(/\\/g, "/"); // //nas/share/... (backend FromSlash form)
+  }
+  // Linkified UNC hrefs are %5C-encoded by localPathHref so markdown URL
+  // normalization cannot fold backslashes into extra slashes; decode back.
+  if (href.startsWith("file:///%5C")) {
+    const decoded = decodeURIComponent(href.slice("file:///".length)); // \\nas\share\...
+    if (hasDisallowedWindowsPathSyntax(decoded)) return null;
+    return decoded.replace(/\\/g, "/"); // //nas/share/...
+  }
 
   try {
     const url = new URL(href);
@@ -51,7 +80,15 @@ export function localPathFromHref(href?: string): string | null {
     // trigger an SMB connection on click. Refuse like the backend does;
     // file:///C:/x.txt (3 slashes) is unaffected.
     if (url.hostname === "" && path.startsWith("//")) return null;
-    if (url.hostname) path = `//${url.hostname}${path}`;
+    if (url.hostname) {
+      // Remote authorities are refused outright — same rule as the backend
+      // (open_local_path.go). localPathFromHref decodes file:// URLs into
+      // plain UNC paths, which OpenLocalPath legitimately allows; letting a
+      // non-loopback host through would hand the remote UNC to the OS opener
+      // and trigger an SMB connection (Net-NTLM credential negotiation) on
+      // click. Loopback hosts are dropped like the backend does.
+      if (!isLoopbackHostname(url.hostname)) return null;
+    }
 
     // file:///D:/... has a URL root slash that is not part of the Windows
     // drive path. Multiple leading slashes are the slash-form UNC variant.
