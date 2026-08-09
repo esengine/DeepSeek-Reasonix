@@ -292,6 +292,7 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 		return "", fmt.Errorf("system prompt is required")
 	}
 	fmt.Printf("[subagent-try] start: profile=%s model=%s task_len=%d\n", input.Name, input.Model, len(task))
+	start := time.Now()
 
 	// One try run at a time, cancellable from the settings page and aborted
 	// with the app context on shutdown — a runaway model loop must not burn
@@ -376,8 +377,10 @@ func (a *App) TrySubagentProfile(input SubagentProfileInput, task string) (strin
 		Gate:          trySubagentPermissionGate(policy),
 	}, event.Discard)
 	if err != nil {
+		fmt.Printf("[subagent-try] done(%.2fs): err=%v\n", time.Since(start).Seconds(), err)
 		return "", err
 	}
+	fmt.Printf("[subagent-try] done(%.2fs): ok len=%d\n", time.Since(start).Seconds(), len(result))
 	return result, nil
 }
 

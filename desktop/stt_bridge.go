@@ -564,6 +564,13 @@ func (b *sttBridge) launchEdge() error {
 		"--disable-extensions",
 		fmt.Sprintf("--lang=%s", b.lang),
 		fmt.Sprintf("--user-data-dir=%s", profileDir),
+		// 加速首次冷启动（"首次启动识别慢"主因是 Edge 启动+页面加载）：
+		// 跳过首次运行初始化与后台组件/同步检查，减少无谓等待。
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--disable-background-networking",
+		"--disable-component-update",
+		"--disable-sync",
 	}
 	b.mu.Lock()
 	hidden := !b.showPage
