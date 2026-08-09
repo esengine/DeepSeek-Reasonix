@@ -17,7 +17,11 @@ func normalizeLocalOpenPath(path string) (string, error) {
 	if path == "" {
 		return "", os.ErrInvalid
 	}
-	if strings.HasPrefix(path, "file://") {
+	// Case-insensitive scheme prefix: FILE://evil.com/share must enter the
+	// file-URL branch where url.Parse rejects it (Scheme "FILE" != "file"),
+	// instead of falling through as a plain path that Windows shell would
+	// still resolve as a file: URL (SMB credential negotiation).
+	if len(path) >= len("file://") && strings.EqualFold(path[:len("file://")], "file://") {
 		parsed, err := url.Parse(path)
 		if err != nil || parsed.Scheme != "file" || parsed.Opaque != "" || parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
 			return "", fmt.Errorf("invalid local file URL %q", path)
