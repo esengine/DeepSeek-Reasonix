@@ -11016,10 +11016,18 @@ func (a *App) RevealPath(path string) error {
 	if path == "" {
 		return os.ErrInvalid
 	}
-	if abs, err := filepath.Abs(path); err == nil {
-		path = abs
+	// Same boundary as OpenLocalPath: the native boundary must validate
+	// independently because Wails methods are callable without the frontend.
+	// Without this, an XSS-compromised frontend could drive explorer to a
+	// remote UNC (\\evil.com\share) and trigger SMB/NTLM credential
+	// negotiation. normalizeLocalOpenPath refuses remote file:// authorities,
+	// empty-authority UNC forms and unsafe syntax; plain UNC paths remain
+	// allowed by design (local network shares).
+	normalized, err := normalizeLocalOpenPath(path)
+	if err != nil {
+		return err
 	}
-	return revealPath(path)
+	return revealPath(normalized)
 }
 
 var revealPath = defaultRevealPath
