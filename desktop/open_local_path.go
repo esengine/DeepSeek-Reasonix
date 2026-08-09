@@ -44,6 +44,12 @@ func normalizeLocalOpenPath(path string) (string, error) {
 			// check as a UNC remainder).
 			host = ""
 		}
+		// url.Parse does NOT normalize backslashes (unlike WHATWG URL), so a
+		// file:///\evil.example\share\x.txt decodes with a leading backslash
+		// and would evade the slash check below before the Windows-syntax
+		// check folds backslashes into a valid remote UNC. Normalize first so
+		// the "//" prefix test catches both spellings.
+		decoded = strings.ReplaceAll(decoded, "\\", "/")
 		if strings.HasPrefix(decoded, "//") {
 			// Unified rejection AFTER the host branch so loopback hosts get
 			// the same guard: file:////host/share (4+ slashes, empty
