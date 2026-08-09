@@ -404,6 +404,18 @@ func TestRepeatedShellCommandDoesNotAccumulateOutput(t *testing.T) {
 	}
 }
 
+func TestShellResultReplacesCappedLiveProgress(t *testing.T) {
+	m := newTestChatTUI()
+	const id = "shell-build"
+	const final = "build started\n...[truncated]...\nfinal compiler error\n"
+	m.ingestEvent(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{ID: id, Name: "bash", Args: `{"command":"build"}`}})
+	m.ingestEvent(event.Event{Kind: event.ToolProgress, Tool: event.Tool{ID: id, Output: "build started\n...[live capped]...\n"}})
+	m.ingestEvent(event.Event{Kind: event.ToolResult, Tool: event.Tool{ID: id, Name: "bash", Output: final}})
+	if got := m.shellOutputs[id]; got != final {
+		t.Fatalf("shellOutputs[%q] = %q, want bounded final result %q", id, got, final)
+	}
+}
+
 func TestCollapsedShellHintUsesKeyboardShortcutOnly(t *testing.T) {
 	m := newTestChatTUI()
 	const id = "shell-long"

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -220,8 +221,13 @@ func TestAuthorizeHTTPMCPUsesDiscoveryPKCEAndPersistsPrivateToken(t *testing.T) 
 	if err != nil {
 		t.Fatalf("stat token state: %v", err)
 	}
-	if got := info.Mode().Perm(); got != 0o600 {
-		t.Fatalf("token state mode = %o, want 600", got)
+	// Windows has no Unix permission bits: os.WriteFile's 0600 intent is
+	// unobservable there (mode reports 0666), so the permission contract is
+	// asserted only where it exists.
+	if runtime.GOOS != "windows" {
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Fatalf("token state mode = %o, want 600", got)
+		}
 	}
 
 	transport, err := newHTTPTransport(spec)

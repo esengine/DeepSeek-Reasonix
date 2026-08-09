@@ -160,6 +160,22 @@ const keys = (rows: TranscriptRow[]) => rows.map((row) => row.key).join(",");
   eq(kinds(rows), "notice,user,answer,turn-actions", "prelude notices render without a synthetic user row");
 }
 
+{
+  const models = buildTurnModels([
+    { kind: "user", id: "u1", text: "cancelled before output" },
+  ]);
+  const withoutCheckpoint = buildTranscriptRows(models, rowOptions(EMPTY_FOLDS));
+  eq(kinds(withoutCheckpoint), "user", "textless turns do not expose actions without a checkpoint");
+
+  const withCheckpoint = buildTranscriptRows(models, {
+    ...rowOptions(EMPTY_FOLDS),
+    hasCheckpointForTurn: (turn) => turn === 0,
+  });
+  eq(kinds(withCheckpoint), "user,turn-actions", "checkpoint-only cancelled turns keep rewind actions visible");
+  const action = withCheckpoint.find((row) => row.kind === "turn-actions");
+  eq(action?.kind === "turn-actions" ? action.text : "missing", "", "checkpoint-only actions carry no empty copy payload");
+}
+
 // ── Fold reconciliation ───────────────────────────────────────────────────────
 
 {

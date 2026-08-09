@@ -135,12 +135,20 @@ func (s *sink) RecordContractShadow(a event.ContractShadowAudit) {
 	event.RecordContractShadow(s.inner, a)
 }
 
+func (s *sink) RecordCompletionReport(a event.CompletionReportAudit) {
+	event.RecordCompletionReport(s.inner, a)
+}
+
 func (s *sink) RecordOutcomeProgress(sample evidence.OutcomeSample) {
 	event.RecordOutcomeProgress(s.inner, sample)
 }
 
 func (s *sink) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
 	event.RecordDelegationAdmission(s.inner, a)
+}
+
+func (s *sink) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(s.inner, a)
 }
 
 func (s *sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {

@@ -525,6 +525,8 @@ type Event struct {
 	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
 	Outcome         string                   // TurnDone: optional machine-readable recoverable outcome
 	Readiness       *FinalReadiness          // TurnDone: structured final-readiness recovery state
+	Receipt         *CompletionReceipt       // TurnDone: what the host verified, and what it could not
+	CheckpointTurn  *int                     // TurnDone: authoritative checkpoint for this turn's visible user message
 	Compaction      Compaction               // Compaction
 	Guardian        GuardianResult
 	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
@@ -617,6 +619,82 @@ func RecordContractShadow(s Sink, a ContractShadowAudit) {
 	}
 	if cs, ok := s.(ContractShadowAuditSink); ok {
 		cs.RecordContractShadow(a)
+	}
+}
+
+// CompletionReportAudit is the host-authored completion report's end-of-turn
+// summary: counts, enums, and gap kinds only, never paths or command text.
+// The gap counters carry the point — what the turn left unproven.
+type CompletionReportAudit struct {
+	Verdict             string
+	Risk                string
+	Criteria            int
+	CriteriaSatisfied   int
+	Changes             int
+	ChangesUnreviewed   int
+	Verifications       int
+	VerificationsFailed int
+	VerificationsStale  int
+	Gaps                int
+	GapKinds            []string
+	// ClaimsVerified counts the turn's own asserted verifications;
+	// ClaimsUnbacked is how many of them the ledger did not support.
+	ClaimsVerified int
+	ClaimsUnbacked int
+}
+
+// CompletionReportAuditSink is an optional sink capability; implementations
+// must keep it content-free, like every other audit channel.
+type CompletionReportAuditSink interface {
+	RecordCompletionReport(CompletionReportAudit)
+}
+
+// RecordCompletionReport forwards the completion summary only to sinks that
+// explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordCompletionReport(s Sink, a CompletionReportAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if cs, ok := s.(CompletionReportAuditSink); ok {
+		cs.RecordCompletionReport(a)
+	}
+}
+
+// MemoryRecallAudit summarizes one automatic-recall decision: identifiers,
+// scores, and budget numbers only — never the query or fact text.
+type MemoryRecallAudit struct {
+	Hits       []MemoryRecallHit
+	UsedChars  int
+	Omitted    int
+	Suppressed string // reason recall stayed silent; "" when hits were injected
+	// Shadow is the Retrieval V2 ranking (telemetry only, never served).
+	Shadow []MemoryRecallHit
+}
+
+// MemoryRecallHit is one recalled fact's content-free fingerprint.
+type MemoryRecallHit struct {
+	ID        string
+	Revision  int
+	Scope     string
+	Type      string
+	Freshness string
+	Score     float64
+}
+
+// MemoryRecallSink is an optional sink capability; implementations must keep
+// it content-free, like every other audit channel.
+type MemoryRecallSink interface {
+	RecordMemoryRecall(MemoryRecallAudit)
+}
+
+// RecordMemoryRecall forwards a recall decision only to sinks that explicitly
+// opt in. Ordinary UI sinks receive nothing.
+func RecordMemoryRecall(s Sink, a MemoryRecallAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if mr, ok := s.(MemoryRecallSink); ok {
+		mr.RecordMemoryRecall(a)
 	}
 }
 

@@ -73,6 +73,8 @@ export interface TranscriptProjection {
   totalTurns: number;
   hasOlder: boolean;
   revision: number;
+  revisionKnown: boolean;
+  digest: string;
 }
 
 export interface LoadOlderResult extends TranscriptProjection {
@@ -142,6 +144,8 @@ interface SessionTranscript {
   startTurn: number;
   endTurn: number;
   revision: number;
+  revisionKnown: boolean;
+  digest: string;
   generation: number;
   bodyBytes: number;
   olderInFlight: boolean;
@@ -154,6 +158,12 @@ const DEFAULT_MARKDOWN_BUDGET = 16 << 20;
 
 function sessionKeyFor(tabId: string, sessionPath: string): string {
   return `${tabId}\n${sessionPath}`;
+}
+
+function sliceRevisionKnown(slice: Pick<HistorySlice, "revision" | "revisionKnown">): boolean {
+  // Compatibility with the first HistorySlice contract: positive revisions
+  // were already canonical, but revisionKnown was not exposed yet.
+  return slice.revisionKnown ?? (slice.revision ?? 0) > 0;
 }
 
 function compareRecords(a: Pick<TranscriptRecord, "order" | "entryId">, b: Pick<TranscriptRecord, "order" | "entryId">): number {
@@ -460,6 +470,8 @@ export class TranscriptStore {
       startTurn: 0,
       endTurn: 0,
       revision: 0,
+      revisionKnown: false,
+      digest: "",
       generation: 0,
       bodyBytes: 0,
       olderInFlight: false,
@@ -558,6 +570,8 @@ export class TranscriptStore {
       totalTurns: session.totalTurns,
       hasOlder: session.hasOlder,
       revision: session.revision,
+      revisionKnown: session.revisionKnown,
+      digest: session.digest,
     };
   }
 
@@ -794,11 +808,12 @@ export class TranscriptStore {
   async loadLatest(
     tabId: string,
     sessionPath: string,
-    options: { turns?: number; preferResident?: boolean } = {},
+    options: { turns?: number; preferResident?: boolean; expectedRevision?: number; expectedDigest?: string } = {},
   ): Promise<TranscriptProjection | undefined> {
     const key = sessionKeyFor(tabId, sessionPath);
     const existing = this.sessions.get(key);
-    if (options.preferResident && existing && existing.records.length > 0) {
+    if (options.preferResident && existing && existing.records.length > 0 &&
+      this.matchesExpectedFingerprint(existing, options.expectedRevision, options.expectedDigest)) {
       this.touch(existing);
       return this.projectionOf(existing);
     }
@@ -827,6 +842,8 @@ export class TranscriptStore {
     session.startTurn = slice.startTurn ?? 0;
     session.endTurn = slice.endTurn ?? 0;
     session.revision = slice.revision ?? 0;
+    session.revisionKnown = sliceRevisionKnown(slice);
+    session.digest = slice.digest ?? "";
     this.autoFetchRefs(session);
     this.enforceBudgets();
     if (this.sessions.get(key) !== session) return undefined; // evicted by the budget
@@ -860,18 +877,45 @@ export class TranscriptStore {
         const projection = await this.loadLatest(tabId, sessionPath, options);
         return projection ? { ...projection, kind: "reload", prependItems: [], removeIds: [] } : undefined;
       }
+      if (!this.sameFingerprint(session, slice)) {
+        // A backend that raced a rewrite may return a fresh page instead of a
+        // stale marker. Never prepend rows from a different canonical state.
+        const projection = await this.loadLatest(tabId, sessionPath, options);
+        return projection ? { ...projection, kind: "reload", prependItems: [], removeIds: [] } : undefined;
+      }
       const { items, removeIds } = this.prependRecords(session, asArray<HistoryEntry>(slice.entries));
       session.nextCursor = slice.nextCursor ?? "";
       session.hasOlder = Boolean(slice.hasOlder);
       session.totalTurns = slice.totalTurns ?? session.totalTurns;
       session.startTurn = slice.startTurn ?? session.startTurn;
       session.revision = slice.revision ?? session.revision;
+      session.revisionKnown = sliceRevisionKnown(slice);
+      session.digest = slice.digest ?? session.digest;
       this.enforceBudgets();
       if (this.sessions.get(key) !== session) return undefined;
       return { ...this.projectionOf(session), kind: "prepend", prependItems: items, removeIds };
     } finally {
       session.olderInFlight = false;
     }
+  }
+
+  private matchesExpectedFingerprint(session: SessionTranscript, expectedRevision?: number, expectedDigest?: string): boolean {
+    const digest = (expectedDigest ?? "").trim();
+    const revisionKnown = typeof expectedRevision === "number" && expectedRevision > 0;
+    if (digest !== "" && session.digest !== digest) return false;
+    if (revisionKnown && (!session.revisionKnown || session.revision !== expectedRevision)) return false;
+    if (!revisionKnown && digest === "") {
+      // Metadata identity temporarily missing cannot prove a known resident
+      // projection is current. A backend round trip is the safe fallback.
+      return !session.revisionKnown && session.digest === "";
+    }
+    return true;
+  }
+
+  private sameFingerprint(session: SessionTranscript, slice: HistorySlice): boolean {
+    return session.revision === (slice.revision ?? 0) &&
+      session.revisionKnown === sliceRevisionKnown(slice) &&
+      session.digest === (slice.digest ?? "");
   }
 
   // ── lazy content ──────────────────────────────────────────────────────────

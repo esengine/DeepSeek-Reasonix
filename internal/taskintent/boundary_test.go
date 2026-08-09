@@ -19,14 +19,17 @@ var allowedExports = map[string]bool{
 	"ObservableRead": true, "Mutation": true, "PersistentAction": true,
 	"Classify": true, "NeedsEvidence": true, "NeedsMutation": true,
 	"NeedsPersistentAction": true, "GoalNeedsWriteBudget": true,
+	"BudgetClassSimple": true, "BudgetClassWrite": true, "BudgetClassResearch": true,
+	"BudgetTurns": true, "ClassifyGoalBudget": true,
 }
 
 // lineBudgets caps the heuristic files: vocabulary growth must displace
 // something or justify a deliberate budget bump in review.
 var lineBudgets = map[string]int{
-	"intent.go":      620,
-	"heuristic.go":   180,
-	"goal_budget.go": 140,
+	"intent.go":               620,
+	"heuristic.go":            180,
+	"goal_budget.go":          140,
+	"goal_research_budget.go": 120,
 }
 
 func TestExportSurfaceIsFrozen(t *testing.T) {

@@ -14,6 +14,22 @@ func TestDefaultReasoningLanguageAuto(t *testing.T) {
 	}
 }
 
+func TestDefaultDeepSeekUsesAnthropicWebSearch(t *testing.T) {
+	cfg := Default()
+	for _, name := range []string{"deepseek-flash", "deepseek-pro"} {
+		provider, ok := cfg.Provider(name)
+		if !ok {
+			t.Fatalf("default provider %q is missing", name)
+		}
+		if provider.Kind != "anthropic" || provider.BaseURL != deepSeekAnthropicBaseURL {
+			t.Fatalf("default provider %q = kind %q base_url %q, want anthropic %q", name, provider.Kind, provider.BaseURL, deepSeekAnthropicBaseURL)
+		}
+		if !EffectiveWebSearch(provider) {
+			t.Fatalf("default provider %q web_search = false, want true", name)
+		}
+	}
+}
+
 func TestDefaultDesktopAppearanceAutoGraphite(t *testing.T) {
 	cfg := Default()
 	if got := cfg.DesktopTheme(); got != "auto" {

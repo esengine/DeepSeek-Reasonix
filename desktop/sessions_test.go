@@ -1243,7 +1243,7 @@ func TestRecordSessionPlannerDisplayConcurrentPreservesEverySession(t *testing.T
 func TestRecordSessionPlannerDisplayCrossProcessPreservesEverySession(t *testing.T) {
 	if role := os.Getenv("REASONIX_PLANNER_DISPLAY_HELPER"); role != "" {
 		dir := os.Getenv("REASONIX_PLANNER_DISPLAY_DIR")
-		sessionPlannerDisplayLockTimeout = 5 * time.Second
+		sessionPlannerDisplayExternalLockTimeout = 5 * time.Second
 		attempted := filepath.Join(dir, role+".attempted")
 		loaded := filepath.Join(dir, role+".loaded")
 		release := filepath.Join(dir, role+".release")

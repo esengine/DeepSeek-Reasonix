@@ -33,6 +33,14 @@ type Tool interface {
 	ReadOnly() bool
 }
 
+// ContextualTool is an execution-time availability contract for tools whose
+// ownership depends on the active workflow context. Provider schemas remain
+// static for cache stability; the host must still consult this contract before
+// permissions, hooks, leases, or Execute so stale transcripts fail closed.
+type ContextualTool interface {
+	ProviderVisible(context.Context) bool
+}
+
 // Previewer is an optional capability a writer Tool may implement: given the
 // same raw JSON args Execute would receive, compute the file change the call
 // *would* make — without touching disk. ctx must be Execute's, so the preview
@@ -537,6 +545,43 @@ func (r *Registry) Schemas() []provider.ToolSchema {
 			Description: t.Description(),
 			Parameters:  r.canon[name],
 		})
+	}
+	return out
+}
+
+// SchemasForContext returns the contextual projection for host metadata and
+// diagnostics. Provider requests intentionally use Schemas so phase changes do
+// not churn the cache-stable tool contract.
+func (r *Registry) SchemasForContext(ctx context.Context) []provider.ToolSchema {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.mu.RLock()
+	names := append([]string(nil), r.order...)
+	entries := make(map[string]struct {
+		t    Tool
+		data json.RawMessage
+	}, len(names))
+	for _, name := range names {
+		if t := r.tools[name]; t != nil {
+			entries[name] = struct {
+				t    Tool
+				data json.RawMessage
+			}{t: t, data: r.canon[name]}
+		}
+	}
+	r.mu.RUnlock()
+	sort.Strings(names)
+	out := make([]provider.ToolSchema, 0, len(names))
+	for _, name := range names {
+		entry, ok := entries[name]
+		if !ok || entry.t == nil {
+			continue
+		}
+		if contextual, ok := entry.t.(ContextualTool); ok && !contextual.ProviderVisible(ctx) {
+			continue
+		}
+		out = append(out, provider.ToolSchema{Name: entry.t.Name(), Description: entry.t.Description(), Parameters: entry.data})
 	}
 	return out
 }

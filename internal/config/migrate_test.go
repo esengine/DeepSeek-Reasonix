@@ -971,9 +971,36 @@ func TestMigrateCustomBaseURLWarns(t *testing.T) {
 	}
 	for _, name := range []string{"deepseek-flash", "deepseek-pro"} {
 		p, ok := cfg.Provider(name)
-		if !ok || p.BaseURL != "https://my-proxy.example/v1" {
+		if !ok || p.Kind != "openai" || p.BaseURL != "https://my-proxy.example/v1" ||
+			p.Thinking != "" || p.WebSearch != nil || len(p.SupportedEfforts) != 0 || p.DefaultEffort != "" {
 			t.Fatalf("%s base_url was not migrated: %+v", name, p)
 		}
+	}
+}
+
+func TestMigrateOfficialLegacyBaseURLUsesAnthropicEndpoint(t *testing.T) {
+	for _, baseURL := range []string{
+		"https://api.deepseek.com",
+		"https://api.deepseek.com/v1/",
+	} {
+		t.Run(baseURL, func(t *testing.T) {
+			src, _, _ := legacyHome(t)
+			writeLegacy(t, src, `{"apiKey":"sk-official","baseUrl":"`+baseURL+`"}`)
+
+			if _, err := MigrateLegacyIfNeeded(); err != nil {
+				t.Fatalf("migrate: %v", err)
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("load migrated config: %v", err)
+			}
+			for _, name := range []string{"deepseek-flash", "deepseek-pro"} {
+				p, ok := cfg.Provider(name)
+				if !ok || p.Kind != "anthropic" || p.BaseURL != deepSeekAnthropicBaseURL || !EffectiveWebSearch(p) {
+					t.Fatalf("%s official migration = %+v, want Anthropic endpoint with web search", name, p)
+				}
+			}
+		})
 	}
 }
 

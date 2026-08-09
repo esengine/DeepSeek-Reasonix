@@ -84,12 +84,25 @@ func (t *goalUsageTee) RecordDelegationAdmission(a event.DelegationAdmissionAudi
 	event.RecordDelegationAdmission(t.inner, a)
 }
 
+// RecordMemoryRecall forwards the recall audit unchanged.
+func (t *goalUsageTee) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(t.inner, a)
+}
+
 // RecordContractShadow forwards the shadow contract audit unchanged.
 func (t *goalUsageTee) RecordContractShadow(a event.ContractShadowAudit) {
 	if t == nil || t.inner == nil {
 		return
 	}
 	event.RecordContractShadow(t.inner, a)
+}
+
+// RecordCompletionReport forwards the completion report audit unchanged.
+func (t *goalUsageTee) RecordCompletionReport(a event.CompletionReportAudit) {
+	if t == nil || t.inner == nil {
+		return
+	}
+	event.RecordCompletionReport(t.inner, a)
 }
 
 // setActiveRecorder binds the current goal turn's recorder (nil clears it).

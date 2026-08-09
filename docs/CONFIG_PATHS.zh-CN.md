@@ -69,11 +69,12 @@ provider_access = ["deepseek"]
 
 [[providers]]
 name        = "deepseek"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 models      = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default     = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 
 [[plugins]]
 name    = "example"

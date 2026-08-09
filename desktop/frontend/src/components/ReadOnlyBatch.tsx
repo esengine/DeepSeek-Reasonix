@@ -1,7 +1,7 @@
 import { memo, useRef, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { useT } from "../lib/i18n";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
+import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import type { Item } from "../lib/useController";
 import { ToolCard } from "./ToolCard";
 
@@ -17,7 +17,7 @@ export const ReadOnlyBatch = memo(function ReadOnlyBatch({ items, subcalls, tabI
   const t = useT();
   const [open, setOpen] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
-  useGSAPCollapse(bodyRef, open);
+  useCollapseAnimation(bodyRef, open);
 
   const readCount = items.filter((it) => it.name === "read_file" || it.name === "ls").length;
   const searchCount = items.filter((it) => it.name === "grep" || it.name === "glob" || it.name === "web_fetch").length;

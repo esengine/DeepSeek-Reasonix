@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/hook"
 )
@@ -180,5 +181,5 @@ func writeHooksSettingsFile(path string, settings hook.Settings) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, body, 0o644)
+	return fileutil.AtomicWriteFile(path, body, 0o644)
 }

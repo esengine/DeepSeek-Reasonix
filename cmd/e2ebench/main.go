@@ -31,7 +31,17 @@ type task struct {
 	Class      string `toml:"class" json:"class,omitempty"`
 	MaxSteps   int    `toml:"max_steps"`
 	TimeoutSec int    `toml:"timeout_sec"`
-	dir        string
+	// NoSolution declares that no reachable solution exists: the task leaves
+	// every accuracy denominator and is scored on honesty instead, and its
+	// verify.sh grades the inverse contract. See benchmarks/README.md.
+	NoSolution bool `toml:"no_solution" json:"no_solution,omitempty"`
+	// MemoryMarkers are unique tokens planted in seeded fact bodies; a marker
+	// found in tool args or answer text after a recall proves point of use.
+	MemoryMarkers []string `toml:"memory_markers" json:"memory_markers,omitempty"`
+	// MemoryMarkersPrefix marks tasks whose seeded facts are pinned: their
+	// bodies arrive via the stable prefix, so markers count from turn one.
+	MemoryMarkersPrefix bool `toml:"memory_markers_prefix" json:"memory_markers_prefix,omitempty"`
+	dir                 string
 }
 
 type runMetrics struct {
@@ -94,6 +104,14 @@ type result struct {
 	Passed  bool
 	Skipped bool
 	Note    string
+	// Memory shadow: recall decisions and point-of-use evidence extracted from
+	// the trajectory (see memorybench.go). Zero for suites without seeds.
+	MemoryRecallEvents int `json:"memory_recall_events,omitempty"`
+	MemoryRecallHits   int `json:"memory_recall_hits,omitempty"`
+	MemoryRecallChars  int `json:"memory_recall_chars,omitempty"`
+	MemorySuppressed   int `json:"memory_suppressed,omitempty"`
+	MemoryMarkersUsed  int `json:"memory_markers_used,omitempty"`
+	MemoryShadowAgree  int `json:"memory_shadow_agree,omitempty"`
 	// WallMs is the harness's own clock, not the agent's self-report, so the
 	// number stays comparable when the same suite runs against another harness.
 	WallMs int64 `json:"wall_ms"`
@@ -102,10 +120,17 @@ type result struct {
 	// and token aggregates instead of being averaged in as zero, which would
 	// quietly understate every published per-task figure.
 	Unaccounted bool `json:"unaccounted"`
+	// Segments is how many resumed legs the run was split into (1 = a single
+	// leg). Above 1 the trajectory digest covers only the last leg.
+	Segments int `json:"segments,omitempty"`
 	// Partial marks accounting recovered from an in-flight snapshot after the
 	// agent was killed. The numbers are real but stop at the last snapshot, so
 	// they are counted as lower bounds rather than dropped.
 	Partial bool `json:"partial"`
+	// Meter is what the neutral proxy observed for this run, when metering was
+	// on. It is the authority for cross-harness spend; runMetrics is the
+	// harness's own account, kept only to be checked against it.
+	Meter *meterUsage `json:"meter,omitempty"`
 	// Trajectory is the digest of the run's recorded event trajectory; nil
 	// unless the harness ran with -trajectories.
 	Trajectory *trajectorySummary `json:"trajectory,omitempty"`
@@ -205,7 +230,8 @@ func main() {
 	cacheArm := flag.String("cache", "cold", "suite mode: cold (fresh session per task) | warm (prefix-warming one-step run in the same workdir before the graded run)")
 	effort := flag.String("effort", "", "reasoning effort override passed to the agent (model-specific levels, e.g. disabled|low|high|max); empty = model default")
 	checkpoints := flag.Bool("checkpoints", false, "suite mode: snapshot the workdir on every change and grade each snapshot offline after the run, yielding first_correct_ms (TTFCS) and post_solve_waste_ms")
-	policyFlag := flag.String("policy", "", "suite mode: experiment arm — empty (baseline) | ebm (evidence-before-more-mutation nudge) | governor (exploration-phase reasoning governor)")
+	pressure := registerPressureFlags()
+	policyFlag := flag.String("policy", "", "suite mode: experiment arm — empty (baseline) | ebm (evidence-before-more-mutation nudge) | governor (exploration-phase reasoning governor) | memory-off (hide the memory store: MemoryBench counterfactual arm)")
 	forkCapture := flag.String("fork-capture", "", "suite mode: capture a fork bundle per task at first EBM eligibility into <dir>/<task-id>")
 	bundles := flag.String("bundles", "", "fork mode: directory of captured bundles (<task-id>/bundle.json)")
 	forkArms := flag.String("arm", "control,treatment", "fork mode: comma-separated continuation arms (control | treatment)")
@@ -287,11 +313,12 @@ func main() {
 		return
 	}
 
+	meterSource, faults, segments, steers := pressure.settings()
 	runSuiteMode(suiteConfig{
 		bin: *bin, model: *model, profile: profile, arm: arm, budget: *budget,
 		trajDir: *trajDir, forcePlanner: *forcePlanner, attempts: *attempts,
 		cacheArm: cache, effort: *effort, checkpoints: *checkpoints, policy: *policyFlag,
-		forkCapture: *forkCapture,
+		forkCapture: *forkCapture, meterConfig: meterSource, meterFaults: faults, segments: segments, steers: steers,
 	}, *suite, *taskFilter, *outMD, *outJSON)
 }
 
@@ -427,6 +454,14 @@ type suiteConfig struct {
 	trajDir                               string
 	forcePlanner, checkpoints             bool
 	attempts, budget                      int
+	// meterConfig is the real config.toml whose provider endpoint each run is
+	// redirected through the neutral meter; empty leaves runs unmetered.
+	meterConfig string
+	meterFaults faultScript
+	// segments splits each task into that many resumed legs; steers delivers a
+	// user turn at a leg boundary. Both are LongRun pressure, not defaults.
+	segments int
+	steers   map[int]string
 }
 
 // runSuite runs each task in order until the token budget is exhausted;
@@ -474,13 +509,15 @@ func runTask(cfg suiteConfig, t task) result {
 		r.PlanForced = true
 	}
 
+	// The per-leg file names are decided in runSegments; only the directory has
+	// to exist before the first child starts, and the digest below reads the
+	// last leg's file.
 	trajPath := ""
 	if cfg.trajDir != "" {
 		if err := os.MkdirAll(cfg.trajDir, 0o755); err != nil {
 			r.Note = "trajectory dir: " + err.Error()
 			return r
 		}
-		trajPath = filepath.Join(cfg.trajDir, t.ID+".trajectory.jsonl")
 	}
 
 	work, err := os.MkdirTemp("", "e2ebench-"+t.ID+"-")
@@ -504,50 +541,29 @@ func runTask(cfg suiteConfig, t task) result {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(t.TimeoutSec)*time.Second)
 	defer cancel()
 
-	metricsPath := filepath.Join(work, ".run-metrics.json")
-	args := buildRunTaskArgs(cfg, metricsPath, trajPath, t.MaxSteps, t.Prompt)
-
-	cmd := exec.CommandContext(ctx, cfg.bin, args...)
-	cmd.Dir = work
-	if cfg.policy != "" || cfg.forkCapture != "" {
-		env := os.Environ()
-		switch cfg.policy {
-		case "ebm":
-			env = append(env, "REASONIX_EXPERIMENT_EBM=1")
-		case "governor":
-			env = append(env, "REASONIX_EXPERIMENT_GOVERNOR=1")
-		}
-		if cfg.forkCapture != "" {
-			env = append(env, "REASONIX_EXPERIMENT_FORK_CAPTURE_DIR="+filepath.Join(cfg.forkCapture, t.ID))
-		}
-		cmd.Env = env
+	extraEnv, seedNote := taskExperimentEnv(cfg, t, work)
+	if seedNote != "" {
+		r.Note = seedNote
 	}
-	cmd.Stdout = os.Stderr // stream the run to the job log, keep stdout clean for the report
-	cmd.Stderr = os.Stderr
-	cmd.WaitDelay = 10 * time.Second // bound the wait for a stuck child after ctx timeout
+	mtr := attachMeter(cfg, &r)
+	defer mtr.close()
+	extraEnv = append(extraEnv, mtr.env...)
 	startedAt := time.Now()
-	var snap *snapshotter
-	if cfg.checkpoints {
-		snapDir, err := os.MkdirTemp("", "e2ebench-cp-"+t.ID+"-")
-		if err == nil {
-			defer os.RemoveAll(snapDir)
-			snap = startSnapshotter(work, snapDir, startedAt)
-		}
-	}
-	runErr := cmd.Run()
+	snap, dropSnapshots := attachSnapshotter(cfg, t, work, startedAt)
+	defer dropSnapshots()
+	runErr := runSegments(ctx, cfg, t, work, cfg.trajDir, extraEnv, &r)
 	r.WallMs = time.Since(startedAt).Milliseconds()
 	var taken []checkpoint
 	if snap != nil {
 		taken = snap.halt()
 	}
 
-	if m, err := readMetrics(metricsPath); err == nil {
-		r.runMetrics = m
-	}
-	if trajPath != "" {
+	mtr.record(&r)
+	if trajPath = lastSegmentTrajectory(cfg.trajDir, t.ID, r.Segments); trajPath != "" {
 		if summary, err := summarizeTrajectory(trajPath); err == nil {
 			r.Trajectory = summary
 		}
+		applyMemoryStats(&r, trajPath, t)
 	}
 	// A killed child never writes metrics, so the deadline is the only place
 	// this failure mode is still observable.
@@ -611,6 +627,18 @@ func buildRunTaskArgs(cfg suiteConfig, metricsPath, trajectoryPath string, maxSt
 		args = append(args, "--ablate", cfg.arm.String())
 	}
 	return append(args, prompt)
+}
+
+// buildSegmentArgs is buildRunTaskArgs for one leg: a resumed leg adds
+// --continue, which is unambiguous because each task runs in its own home and
+// therefore its own session directory.
+func buildSegmentArgs(cfg suiteConfig, seg segment, metricsPath, trajectoryPath string) []string {
+	args := buildRunTaskArgs(cfg, metricsPath, trajectoryPath, seg.maxSteps, seg.prompt)
+	if !seg.resume {
+		return args
+	}
+	// The prompt is the last argument; --continue must precede it.
+	return append(args[:len(args)-1:len(args)-1], "--continue", args[len(args)-1])
 }
 
 // warmPrefix primes the provider prefix cache for work's session shape with a

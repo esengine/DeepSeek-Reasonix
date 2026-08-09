@@ -78,8 +78,8 @@ for (const path of localeChunks) {
 
 const rawInitialBytes = [...initialJS, ...initialCSS, ...appShellCSS]
   .reduce((total, path) => total + statSync(path).size, 0);
-// Native Web Animations and frame-batched scrolling keep GSAP out of the eager
-// graph. Preserve the resulting startup headroom instead of letting the shell
+// Native Web Animations and frame-batched scrolling avoid an eager animation
+// runtime. Preserve the resulting startup headroom instead of letting the shell
 // drift back to the previous 2.27 MiB / 295 KiB-gzip edge.
 assertBudget("initial raw JavaScript and CSS", rawInitialBytes, 2_200 * 1024);
 assertBudget("largest initial JavaScript chunk raw", largestInitialJSRaw, 1_000 * 1024);

@@ -143,7 +143,7 @@ window.go = {
             : tab,
         );
       },
-      SubmitInitialGoalToTab: async (
+      SubmitInitialGoalToTabWithID: async (
         tabID: string,
         goal: string,
         display: string,
@@ -151,6 +151,7 @@ window.go = {
         invocations: { name: string }[],
         collaborationMode: string,
         toolApprovalMode: string,
+        _submissionID: string,
       ): Promise<string[]> => {
         await goalGate;
         initialGoalCalls.push(
@@ -166,8 +167,14 @@ window.go = {
       SubmitInvocationsToTab: async () => {
         throw new Error("split SubmitInvocationsToTab must not be used for initial Goals");
       },
+      SubmitInvocationsToTabWithID: async () => {
+        throw new Error("split SubmitInvocationsToTabWithID must not be used for initial Goals");
+      },
       SubmitToTab: async () => {
         throw new Error("plain SubmitToTab must not be used for structured first Goal turns");
+      },
+      SubmitToTabWithID: async () => {
+        throw new Error("plain SubmitToTabWithID must not be used for structured first Goal turns");
       },
     } as Partial<AppBindings> as AppBindings,
   },
@@ -238,7 +245,7 @@ eq(initialGoalCalls.length, 1, "atomic Goal submit ran once");
 // structured submit.
 const failedInitialGoalCalls: string[] = [];
 const failInvokeCalls: string[] = [];
-(window.go.main.App as AppBindings).SubmitInitialGoalToTab = async (tabID: string) => {
+(window.go.main.App as AppBindings).SubmitInitialGoalToTabWithID = async (tabID: string) => {
   failedInitialGoalCalls.push(tabID);
   throw new Error("workbench target changed");
 };

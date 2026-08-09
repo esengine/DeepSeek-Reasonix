@@ -1,6 +1,7 @@
 package responses
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -920,7 +921,7 @@ func TestMessagesToInputTextOnlyStaysStringShape(t *testing.T) {
 }
 
 func TestMessagesToInputEmbedsImagesAsInputImageParts(t *testing.T) {
-	c := New(Config{Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", Extra: map[string]any{"vision": true}}).(*client)
+	c := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5", Extra: map[string]any{"vision": true}}).(*client)
 	body, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "what is this", Images: []string{"data:image/png;base64,AAAA", "data:image/jpeg;base64,BBBB"}},
 	}})
@@ -944,13 +945,38 @@ func TestMessagesToInputEmbedsImagesAsInputImageParts(t *testing.T) {
 		}
 	}
 	// Vision disabled: images are ignored, content stays a string.
-	plain := New(Config{Name: "test", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash"}).(*client)
+	plain := New(Config{Name: "mimo", BaseURL: "https://api.xiaomimimo.com/v1", Model: "mimo-v2.5"}).(*client)
 	body2, _, _ := plain.buildRequestBody(provider.Request{Messages: []provider.Message{
 		{Role: provider.RoleUser, Content: "what is this", Images: []string{"data:image/png;base64,AAAA"}},
 	}})
 	items2 := body2["input"].([]map[string]any)
 	if got, ok := items2[0]["content"].(string); !ok || got != "what is this" {
 		t.Fatalf("vision-off user content = %#v, want string", items2[0]["content"])
+	}
+}
+
+func TestOfficialDeepSeekResponsesIgnoresVisionMetadata(t *testing.T) {
+	c := New(Config{
+		Name: "deepseek", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash",
+		Extra: map[string]any{"vision": true},
+	}).(*client)
+	if c.vision {
+		t.Fatal("official DeepSeek Responses endpoint must ignore vision metadata")
+	}
+	body, _, _ := c.buildRequestBody(provider.Request{Messages: []provider.Message{{
+		Role: provider.RoleUser, Content: "what is this",
+		Images: []string{"data:image/png;base64,AAAA"},
+	}}})
+	items := body["input"].([]map[string]any)
+	if got, ok := items[0]["content"].(string); !ok || got != "what is this" {
+		t.Fatalf("official DeepSeek content = %#v, want plain text", items[0]["content"])
+	}
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+	if bytes.Contains(encoded, []byte("input_image")) || bytes.Contains(encoded, []byte("base64,AAAA")) {
+		t.Fatalf("official DeepSeek Responses request leaked image payload: %s", encoded)
 	}
 }
 

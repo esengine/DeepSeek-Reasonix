@@ -174,3 +174,70 @@ func renderContractShadow(results []result) string {
 	return fmt.Sprintf("**Contract shadow**: verdicts %s · **agreement with grader** %s (%d/%d)\n\n",
 		strings.Join(parts, " · "), pct(agree, agree+disagree), agree, agree+disagree)
 }
+
+// renderCompletionReport prices the host-authored receipt against the hidden
+// grader. Overclaim — "done" on a task the grader failed — is the number this
+// whole mechanism exists to drive down; caught is its counterpart, the share
+// of failed runs whose receipt already named a gap.
+func renderCompletionReport(results []result) string {
+	verdicts := map[string]int{}
+	kinds := map[string]int{}
+	recorded, done, overclaim, failed, caught := 0, 0, 0, 0, 0
+	claimed, unbacked := 0, 0
+	for _, r := range results {
+		t := r.Trajectory
+		if t == nil || t.CompletionVerdict == "" {
+			continue
+		}
+		recorded++
+		claimed += t.ClaimsVerified
+		unbacked += t.ClaimsUnbacked
+		verdicts[t.CompletionVerdict]++
+		for _, kind := range t.CompletionGapKinds {
+			kinds[kind]++
+		}
+		if t.CompletionVerdict == "done" {
+			done++
+			if !r.Passed {
+				overclaim++
+			}
+		}
+		if !r.Passed {
+			failed++
+			if t.CompletionGaps > 0 {
+				caught++
+			}
+		}
+	}
+	if recorded == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(verdicts))
+	for _, v := range []string{"done", "partial", "incomplete", "unknown"} {
+		if verdicts[v] > 0 {
+			parts = append(parts, fmt.Sprintf("%s ×%d", v, verdicts[v]))
+		}
+	}
+	line := fmt.Sprintf("**Completion report**: verdicts %s · **overclaim** %s (%d/%d done runs the grader failed)",
+		strings.Join(parts, " · "), pct(overclaim, done), overclaim, done)
+	if failed > 0 {
+		line += fmt.Sprintf(" · **caught** %s (%d/%d failed runs declared a gap)", pct(caught, failed), caught, failed)
+	}
+	if claimed > 0 {
+		line += fmt.Sprintf(" · **unbacked claims** %s (%d/%d asserted verifications the ledger denied)", pct(unbacked, claimed), unbacked, claimed)
+	}
+	if census := gapCensus(kinds); census != "" {
+		line += " · gaps " + census
+	}
+	return line + "\n\n"
+}
+
+func gapCensus(kinds map[string]int) string {
+	var parts []string
+	for _, kind := range []string{"unproven_criterion", "missing_check", "failed_verification", "stale_verification", "unverified_change", "unreviewed_change"} {
+		if kinds[kind] > 0 {
+			parts = append(parts, fmt.Sprintf("%s ×%d", kind, kinds[kind]))
+		}
+	}
+	return strings.Join(parts, " · ")
+}

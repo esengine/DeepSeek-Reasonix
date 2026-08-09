@@ -198,17 +198,14 @@ func parseNativeV2(b []byte, root, apiVersion string) (Package, []string, error)
 	if err := validateV2Capabilities(&manifest); err != nil {
 		return Package{}, nil, err
 	}
-	warnings, issues := applyClaudeCompatibility(root, &manifest)
-	if err := validateManifest(root, &manifest); err != nil {
-		return Package{}, warnings, err
-	}
+	var warnings []string
 	pathWarnings, err := validateV1Paths(root, &manifest)
 	warnings = append(warnings, pathWarnings...)
 	if err != nil {
 		return Package{}, warnings, err
 	}
 	pkg := Package{Root: root, ManifestKind: "reasonix", Manifest: manifest}
-	pkg.Compatibility = compatibilityFor(pkg, issues)
+	pkg.Compatibility = compatibilityFor(pkg, nil)
 	return pkg, warnings, nil
 }
 

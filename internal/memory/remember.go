@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"reasonix/internal/tool"
 )
@@ -23,6 +24,12 @@ type rememberRequest struct {
 	Description      string `json:"description"`
 	Type             string `json:"type"`
 	Scope            string `json:"scope"`
+	Activation       string `json:"activation"`
+	Volatility       string `json:"volatility"`
+	SubjectKey       string `json:"subject_key"`
+	ExpiresAt        string `json:"expires_at"`
+	Verified         bool   `json:"verified"`
+	Keywords         string `json:"keywords"`
 	Body             string `json:"body"`
 }
 
@@ -59,6 +66,12 @@ func (rememberTool) Schema() json.RawMessage {
 			"description": {"type": "string", "description": "One-line hook shown in the index — the phrase a future session reads to decide whether to open this memory. Make it specific."},
 			"type": {"type": "string", "enum": ["user", "feedback", "project", "reference"], "description": "Category of the fact."},
 			"scope": {"type": "string", "enum": ["project", "global"], "description": "Where the fact applies. For a new fact, omit for the safe default, project. When updating an existing name, omit to preserve its current scope. Use global only when it should affect every workspace."},
+			"activation": {"type": "string", "enum": ["relevant", "pinned"], "description": "How the fact reaches the model: relevant (the default) is retrieval-only; pinned loads the body into every session's stable prefix. Use pinned ONLY when the user explicitly asks for an always-available fact — pinned space is budget-limited, and rules that must always hold belong in REASONIX.md/AGENTS.md instructions instead. Omit on update to preserve the current choice."},
+			"volatility": {"type": "string", "enum": ["evergreen", "stable", "volatile"], "description": "How fast the fact ages, independent of type: volatile for facts that die in days (a current release branch, this week's task), stable for slow-changing ones, evergreen for facts that never age (a README location, a fixed preference). Omit to use the type default, or on update to preserve the current choice."},
+			"subject_key": {"type": "string", "description": "Dotted key naming the question this fact answers, e.g. project.package_manager, project.release_branch, user.response_style. One active value per scope+subject: saving a new fact for a held subject is rejected with the holder's id — update that id so the change becomes a revision, not a contradiction. Search existing memories first and reuse their keys; omit for narrative facts that are not a single-valued answer."},
+			"expires_at": {"type": "string", "description": "Hard expiry as RFC3339 or YYYY-MM-DD. Past this moment the fact stops being auto-recalled entirely. Set it when the fact has a known end of life. Omit on update to preserve; \"never\" clears an existing expiry."},
+			"verified": {"type": "boolean", "description": "Set true only when you have JUST re-confirmed the fact still holds (checked the file, ran the command). Renews the freshness clock without changing the meaning of updated_at."},
+			"keywords": {"type": "string", "description": "Space-separated search aliases a future query might use where the body's own words would miss: synonyms, translations of key terms (recall matching is lexical, so give Chinese facts English aliases and vice versa), related command or tool names. Omit when the body already carries the likely query words. When updating, omit to preserve existing keywords."},
 			"body": {"type": "string", "description": "The fact itself (Markdown). For feedback/project, include a \"**Why:**\" line and a \"**How to apply:**\" line; link related memories with [[their-name]]."}
 		},
 		"required": ["description", "body"]
@@ -80,18 +93,41 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 	factScope := FactScope(scope)
 	name := rememberRequestName(in)
 	autoCreate := ClaimAutoMemoryWriteFromContext(ctx, args)
+	activation := NormalizeActivation(in.Activation)
+	if strings.TrimSpace(in.Activation) != "" && activation == "" {
+		return "", fmt.Errorf("activation must be one of relevant, pinned")
+	}
+	volatility := NormalizeVolatility(in.Volatility)
+	if strings.TrimSpace(in.Volatility) != "" && volatility == "" {
+		return "", fmt.Errorf("volatility must be one of evergreen, stable, volatile")
+	}
+	expiresAt, clearExpiry, err := parseExpiry(in.ExpiresAt)
+	if err != nil {
+		return "", err
+	}
+	var verifiedAt time.Time
+	if in.Verified {
+		verifiedAt = time.Now().UTC()
+	}
 	result, err := t.store.SaveWithOptions(Memory{
-		ID:          in.ID,
-		Name:        name,
-		Title:       in.Title,
-		Description: in.Description,
-		Type:        NormalizeType(in.Type),
-		Scope:       factScope,
-		Body:        in.Body,
+		ID:             in.ID,
+		Name:           name,
+		Title:          in.Title,
+		Description:    in.Description,
+		Type:           NormalizeType(in.Type),
+		Scope:          factScope,
+		Activation:     activation,
+		Volatility:     volatility,
+		SubjectKey:     NormalizeSubjectKey(in.SubjectKey),
+		ExpiresAt:      expiresAt,
+		LastVerifiedAt: verifiedAt,
+		Keywords:       in.Keywords,
+		Body:           in.Body,
 	}, SaveOptions{
 		ExpectedRevision:        in.ExpectedRevision,
 		RequireExpectedRevision: in.ExpectedRevision > 0,
 		RequireCreate:           autoCreate,
+		ClearExpiry:             clearExpiry,
 	})
 	if err != nil {
 		return "", err
@@ -109,6 +145,24 @@ func (t rememberTool) Execute(ctx context.Context, args json.RawMessage) (string
 }
 
 func (rememberTool) ReadOnly() bool { return false }
+
+// parseExpiry accepts RFC3339, a bare date, or "never"/"none" to clear an
+// inherited expiry on update.
+func parseExpiry(value string) (expires time.Time, clear bool, err error) {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "":
+		return time.Time{}, false, nil
+	case "never", "none":
+		return time.Time{}, true, nil
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02"} {
+		if when, perr := time.Parse(layout, value); perr == nil {
+			return when.UTC(), false, nil
+		}
+	}
+	return time.Time{}, false, fmt.Errorf("expires_at must be RFC3339, YYYY-MM-DD, or \"never\"")
+}
 
 func parseRememberRequest(args json.RawMessage) (rememberRequest, error) {
 	var in rememberRequest

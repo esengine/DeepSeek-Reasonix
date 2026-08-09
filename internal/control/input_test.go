@@ -844,30 +844,24 @@ func TestGoalAutoResearchTriggersForLongHorizonGoals(t *testing.T) {
 	c.SetGoal("持续排查这个线上卡顿直到根因明确，并验证修复")
 
 	got := c.Compose("next step?")
-	for _, want := range []string{
-		"AutoResearch protocol",
-		"<autoresearch-runtime>",
-		"task_id:",
-		"pivot_required:",
-		"stale_count >= 2",
-		"durable strategy for this Goal",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("AutoResearch goal block missing %q:\n%s", want, got)
-		}
+	if !strings.Contains(got, "<active-goal>") || strings.Contains(strings.ToLower(got), "autoresearch") {
+		t.Fatalf("unified research Goal prompt = %q", got)
+	}
+	if c.GoalRuntime().TurnsLimit != 40 {
+		t.Fatalf("research budget = %+v", c.GoalRuntime())
 	}
 }
 
 func TestGoalAutoResearchCanBeForcedOrDisabled(t *testing.T) {
 	c := New(Options{})
 	c.SetGoalWithResearchMode("fix the typo and add a test", GoalResearchOn)
-	if got := c.Compose("start"); !strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("forced research goal should include AutoResearch protocol:\n%s", got)
+	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.GoalRuntime().TurnsLimit != 40 {
+		t.Fatalf("forced research Goal should use hidden 40-turn budget: %q %+v", got, c.GoalRuntime())
 	}
 
 	c.SetGoalWithResearchMode("持续排查这个线上卡顿直到根因明确", GoalResearchOff)
-	if got := c.Compose("start"); strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("simple override should suppress AutoResearch protocol:\n%s", got)
+	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.GoalRuntime().TurnsLimit == 40 {
+		t.Fatalf("simple override should use non-research budget: %q %+v", got, c.GoalRuntime())
 	}
 }
 
@@ -876,27 +870,27 @@ func TestGoalCommandPreservesResearchModeFlags(t *testing.T) {
 	if !c.applyGoalCommand("/goal --research fix the typo", "") {
 		t.Fatal("goal command was not parsed")
 	}
-	if got := c.Compose("start"); !strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("/goal --research should force AutoResearch through command dispatch:\n%s", got)
+	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.GoalRuntime().TurnsLimit != 40 {
+		t.Fatalf("/goal --research should select research budget: %q %+v", got, c.GoalRuntime())
 	}
 
 	c = New(Options{})
 	if !c.applyGoalCommand("/goal --simple 持续排查这个线上卡顿直到根因明确", "") {
 		t.Fatal("goal command was not parsed")
 	}
-	if got := c.Compose("start"); strings.Contains(got, "AutoResearch protocol") {
-		t.Fatalf("/goal --simple should suppress AutoResearch through command dispatch:\n%s", got)
+	if got := c.Compose("start"); strings.Contains(strings.ToLower(got), "autoresearch") || c.GoalRuntime().TurnsLimit == 40 {
+		t.Fatalf("/goal --simple should suppress research budget: %q %+v", got, c.GoalRuntime())
 	}
 }
 
 func TestParseGoalCommandResearchFlags(t *testing.T) {
 	cmd, ok := ParseGoalCommand("/goal --research fix the typo")
-	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "fix the typo" || cmd.ResearchMode != GoalResearchOn {
+	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "fix the typo" || cmd.ResearchMode != GoalResearchOn || !cmd.DeprecatedBudgetFlag {
 		t.Fatalf("ParseGoalCommand --research = %+v ok=%v", cmd, ok)
 	}
 
 	cmd, ok = ParseGoalCommand("/goal --simple 持续排查直到根因明确")
-	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "持续排查直到根因明确" || cmd.ResearchMode != GoalResearchOff {
+	if !ok || cmd.Action != GoalCommandSet || cmd.Text != "持续排查直到根因明确" || cmd.ResearchMode != GoalResearchOff || !cmd.DeprecatedBudgetFlag {
 		t.Fatalf("ParseGoalCommand --simple = %+v ok=%v", cmd, ok)
 	}
 }

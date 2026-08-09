@@ -5,7 +5,7 @@ import { asArray } from "../lib/array";
 import { filterAtMatches } from "../lib/atMatches";
 import { DedupIndex, sha256 } from "../lib/attachDedup";
 import { app, onFilesDropped } from "../lib/bridge";
-import { canUsePromptHistory, composerEnterAction, insertComposerNewline, isFnKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
+import { canUsePromptHistory, composerEnterAction, composerEscapeAction, composerMenuKeyAction, insertComposerNewline, isFnKeyEvent, isImeKeyEvent, promptHistoryDirectionFromEvent } from "../lib/composerKeyboard";
 import { cacheGeneration, loadOlder } from "../lib/composerHistory";
 import { SPINNER_WORDS, useI18n, type Translator } from "../lib/i18n";
 import { detectShortcutPlatform, formatShortcutCombo, isReservedComposerHistoryShortcut, matchesShortcut, useShortcutComboLabel } from "../lib/keyboardShortcuts";
@@ -93,10 +93,6 @@ const COMPOSER_RUN_STRIP_RESERVED = 30;
 const COMPOSER_MAX_VIEWPORT_RATIO = 0.4;
 const COMPOSER_AUTO_RESERVED_HEIGHT = 58;
 const PROMPT_HISTORY_PREFETCH_REMAINING = 3;
-// Grace after compositionend to swallow a confirm-Enter that lands just after
-// it; the real gap is a few ms, so keep it short or a deliberate quick second
-// Enter (submit) gets eaten too.
-const IME_CONFIRM_GRACE_MS = 100;
 const FILE_REF_SEARCH_CACHE_TTL_MS = 5000;
 
 type PastedBlock = {
@@ -419,23 +415,6 @@ function useTick(on: boolean): number {
     return () => window.clearInterval(id);
   }, [on]);
   return Date.now();
-}
-
-function isImeKeyEvent(
-  e: KeyboardEvent<HTMLElement>,
-  composing: boolean,
-  lastCompositionEndAt: number,
-): boolean {
-  const native = e.nativeEvent as globalThis.KeyboardEvent & {
-    isComposing?: boolean;
-    keyCode?: number;
-  };
-  return (
-    composing ||
-    native.isComposing === true ||
-    native.keyCode === 229 ||
-    Date.now() - lastCompositionEndAt < IME_CONFIRM_GRACE_MS
-  );
 }
 
 // --- past:chats session reference → prompt context (PR-B) ---
@@ -775,6 +754,8 @@ export function Composer({
   const wasRunningByDraftRef = useRef<Record<string, boolean>>({ [draftKey]: running });
   const composingRef = useRef(false);
   const lastCompositionEndAt = useRef(0);
+  const pastChatSearchComposingRef = useRef(false);
+  const pastChatSearchLastCompositionEndAt = useRef(0);
   const lastSelectionRef = useRef({ start: 0, end: 0 });
   const consumedInsertIdByDraftRef = useRef<Record<string, number>>({});
   const consumedSelectedTextIdByDraftRef = useRef<Record<string, number>>({});
@@ -3246,7 +3227,7 @@ export function Composer({
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement | HTMLDivElement>) => {
-    const composing = isImeKeyEvent(e, composingRef.current, lastCompositionEndAt.current);
+    const composing = isImeKeyEvent(e.nativeEvent, composingRef.current, lastCompositionEndAt.current);
     const native = e.nativeEvent as globalThis.KeyboardEvent & {
       keyCode?: number;
       which?: number;
@@ -3445,7 +3426,7 @@ export function Composer({
     }
     // Esc interrupts the in-flight turn (matches the Stop button's hint), and
     // restores the text if the server hadn't replied yet.
-    if (e.key === "Escape" && running) {
+    if (composerEscapeAction(e.nativeEvent, running, composing) === "cancel") {
       e.preventDefault();
       handleCancel();
     }
@@ -3508,7 +3489,12 @@ export function Composer({
   // menu logic. Regular typing keys (letters, Backspace, etc.) pass through
   // so the user can type a search query.
   const onPastChatSearchKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === "Tab" || e.key === "Escape") {
+    const composing = isImeKeyEvent(
+      e.nativeEvent,
+      pastChatSearchComposingRef.current,
+      pastChatSearchLastCompositionEndAt.current,
+    );
+    if (composerMenuKeyAction(e.nativeEvent, composing) === "handle") {
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "ArrowDown" && count > 0) {
@@ -4113,6 +4099,16 @@ export function Composer({
                       setPastChatQuery(ev.target.value);
                       setActive(0);
                     }}
+                    onCompositionStart={() => {
+                      pastChatSearchComposingRef.current = true;
+                    }}
+                    onCompositionEnd={() => {
+                      pastChatSearchComposingRef.current = false;
+                      pastChatSearchLastCompositionEndAt.current = Date.now();
+                    }}
+                    onBlur={() => {
+                      pastChatSearchComposingRef.current = false;
+                    }}
                     onKeyDown={onPastChatSearchKeyDown}
                   />
                 </div>
@@ -4507,7 +4503,7 @@ export function Composer({
                   id="composer-input"
                   ref={taRef}
                   className="composer__input"
-                  aria-label={t("composer.placeholder")}
+                  aria-label={t("composer.placeholder")} spellCheck={false} autoCorrect="off" autoCapitalize="off"
                   value={text}
                   onInputCapture={(e) => {
                     pendingNativeInputTypeRef.current = (e.nativeEvent as InputEvent).inputType;

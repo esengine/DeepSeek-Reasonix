@@ -66,7 +66,7 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
   Object.defineProperty(dom.window, "matchMedia", {
     configurable: true,
     value: () => ({
-      matches: true, // prefers-reduced-motion: keep GSAP tweens out of the assertions
+      matches: true, // prefers-reduced-motion: keep visual transitions out of the assertions
       media: "(prefers-reduced-motion: reduce)",
       onchange: null,
       addEventListener() {},
@@ -90,6 +90,8 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
   });
 
   const proto = dom.window.HTMLElement.prototype;
+  Object.defineProperty(proto, "attachEvent", { configurable: true, value: () => {} });
+  Object.defineProperty(proto, "detachEvent", { configurable: true, value: () => {} });
   Object.defineProperty(proto, "offsetHeight", {
     configurable: true,
     get(this: HTMLElement) {
@@ -135,27 +137,10 @@ export async function createTranscriptHarness(options: TranscriptHarnessOptions 
     }
   };
 
-  // GSAP's CSS plugin cannot run against jsdom; the assertions are about
-  // state-driven DOM, so the animation hooks are stubbed out.
   const server = await createServer({
     appType: "custom",
     logLevel: "silent",
     server: { middlewareMode: true },
-    plugins: [
-      {
-        name: "stub-animation-hooks",
-        enforce: "pre",
-        load(id) {
-          if (id.endsWith("/src/lib/useGSAPCollapse.ts")) {
-            return "export function useGSAPCollapse() {}";
-          }
-          if (id.endsWith("/src/lib/useEntranceAnimation.ts")) {
-            return "export function useEntranceAnimation() { return { current: null }; }";
-          }
-          return undefined;
-        },
-      },
-    ],
   });
   const { Transcript } = await server.ssrLoadModule("/src/components/Transcript.tsx");
   const { LocaleProvider } = await server.ssrLoadModule("/src/lib/i18n.tsx");

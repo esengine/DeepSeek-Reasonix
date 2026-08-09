@@ -581,6 +581,9 @@ func TestHistorySliceCursorStaleOnRevisionBump(t *testing.T) {
 	if !page1.HasOlder || page1.NextCursor == "" {
 		t.Fatalf("page 1 HasOlder=%v cursor=%q", page1.HasOlder, page1.NextCursor)
 	}
+	if !page1.RevisionKnown || page1.Revision <= 0 || page1.Digest == "" {
+		t.Fatalf("page 1 identity = known:%v revision:%d digest:%q, want canonical fingerprint", page1.RevisionKnown, page1.Revision, page1.Digest)
+	}
 
 	sess.Add(historySliceUser(20, "q20"))
 	sess.Add(historySliceAssistant(20, "a20"))
@@ -593,6 +596,9 @@ func TestHistorySliceCursorStaleOnRevisionBump(t *testing.T) {
 	}
 	if page2.Entries == nil || len(page2.Entries) != 0 {
 		t.Fatalf("stale page entries = %v, want empty non-nil", page2.Entries)
+	}
+	if !page2.RevisionKnown || page2.Revision <= page1.Revision || page2.Digest == "" || page2.Digest == page1.Digest {
+		t.Fatalf("stale page identity = known:%v revision:%d digest:%q, want advanced canonical fingerprint", page2.RevisionKnown, page2.Revision, page2.Digest)
 	}
 	encoded, _ := json.Marshal(page2)
 	if !strings.Contains(string(encoded), `"entries":[]`) {
@@ -685,6 +691,10 @@ func TestHistorySliceColdTabSizeGuard(t *testing.T) {
 	}
 	_, path := saveHistorySliceSession(t, dir, "cold-size.jsonl", msgs)
 	tab.SessionPath = path
+	// Model a pre-WAL checkpoint. Once a native event log exists it is the
+	// canonical transcript, so direct edits to the compatibility JSONL anchor
+	// must not supersede it.
+	removeHistorySliceNativeState(t, path)
 
 	// Append a message line directly to the .jsonl: the index TranscriptSize
 	// no longer matches the file size and must be treated as stale — the page
@@ -743,36 +753,6 @@ func TestHistorySliceColdUsesAuthoritativeEventLogTail(t *testing.T) {
 	}
 	if len(page.Entries) == 0 || page.Entries[len(page.Entries)-1].Message.Content != "new answer" {
 		t.Fatalf("latest cold entry = %+v, want event-log tail", page.Entries)
-	}
-}
-
-func TestHistorySliceColdDetectsSameSizeAnchorRewrite(t *testing.T) {
-	app := historySliceTestApp(t)
-	tab := newColdHistoryTab(t, app)
-	dir := tabSessionDir(tab)
-	_, path := saveHistorySliceSession(t, dir, "cold-same-size.jsonl", []provider.Message{
-		historySliceUser(0, "old question"), historySliceAssistant(0, "old answer"),
-	})
-	tab.SessionPath = path
-	before, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Replace only equal-length content. A size-only guard would keep serving
-	// the old offsets/index; digest validation must force a scan.
-	rewritten := strings.Replace(string(before), "old answer", "new answer", 1)
-	if len(rewritten) != len(before) {
-		t.Fatalf("test fixture rewrite changed size: %d -> %d", len(before), len(rewritten))
-	}
-	if err := os.WriteFile(path, []byte(rewritten), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	page := app.HistorySliceForTab("cold", HistorySliceRequest{Turns: 12})
-	if page.Source != "scan" {
-		t.Fatalf("Source = %q, want scan after same-size rewrite", page.Source)
-	}
-	if len(page.Entries) == 0 || page.Entries[len(page.Entries)-1].Message.Content != "new answer" {
-		t.Fatalf("latest entry = %+v, want rewritten content", page.Entries)
 	}
 }
 
@@ -1067,7 +1047,7 @@ func TestHistorySliceArraysNeverNull(t *testing.T) {
 	if !strings.Contains(string(encoded), `"entries":[]`) {
 		t.Fatalf("zero HistorySlice must encode entries as []: %s", encoded)
 	}
-	encoded, err = json.Marshal(staleHistorySlice(3))
+	encoded, err = json.Marshal(staleHistorySlice(3, true, "digest"))
 	if err != nil {
 		t.Fatal(err)
 	}

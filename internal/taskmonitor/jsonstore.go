@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"reasonix/internal/fileutil"
 )
 
 // FileStore is a Store backed by a JSON file tree under a project-local
@@ -568,6 +570,21 @@ func (s *FileStore) idempotencyPaths(projectDir, key string) (string, string, st
 	return dir, target, lock, nil
 }
 
+// quarantineCorruptIdempotency moves an unreadable record out of the active
+// key path without deleting it. A corrupt record cannot safely describe either
+// a pending or finalized operation; keeping it as evidence prevents it from
+// permanently blocking future claims while preserving forensic data.
+func quarantineCorruptIdempotency(target string) error {
+	backup := fmt.Sprintf("%s.corrupt-%d", target, timeNow().UnixNano())
+	if err := os.Rename(target, backup); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *FileStore) ClaimIdempotency(ctx context.Context, projectDir string, r IdempotencyRecord) (*IdempotencyRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -590,9 +607,11 @@ func (s *FileStore) ClaimIdempotency(ctx context.Context, projectDir string, r I
 	if err == nil {
 		var existing IdempotencyRecord
 		if jsonErr := json.Unmarshal(data, &existing); jsonErr != nil {
-			return nil, fmt.Errorf("idempotency claim: parse existing record: %w", jsonErr)
-		}
-		if existing.Pending && timeNow().Sub(existing.ClaimedAt) > 5*time.Minute {
+			if quarantineErr := quarantineCorruptIdempotency(target); quarantineErr != nil {
+				return nil, fmt.Errorf("idempotency claim: parse existing record: %w (quarantine: %w)", jsonErr, quarantineErr)
+			}
+			// Continue with a fresh claim after preserving the corrupt record.
+		} else if existing.Pending && timeNow().Sub(existing.ClaimedAt) > 5*time.Minute {
 			_ = os.Remove(target)
 		} else {
 			return &existing, nil
@@ -608,7 +627,7 @@ func (s *FileStore) ClaimIdempotency(ctx context.Context, projectDir string, r I
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(target, data, 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(target, data, 0o600); err != nil {
 		return nil, err
 	}
 	_ = os.Chmod(target, 0o600)
@@ -648,7 +667,7 @@ func (s *FileStore) FinalizeIdempotency(ctx context.Context, projectDir string, 
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(target, data, 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(target, data, 0o600); err != nil {
 		return err
 	}
 	_ = os.Chmod(target, 0o600)
@@ -717,30 +736,23 @@ func (s *FileStore) RecordIdempotency(ctx context.Context, projectDir string, r 
 	if err := rejectSymlink(target); err != nil {
 		return err
 	}
-	// Atomic claim via O_EXCL: fail if file already exists
-	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if os.IsExist(err) {
-			// File exists — read and compare
-			existing, rdErr := os.ReadFile(target)
-			if rdErr != nil {
-				return fmt.Errorf("idempotency conflict: cannot read existing record: %w", rdErr)
-			}
-			var prev IdempotencyRecord
-			if err := json.Unmarshal(existing, &prev); err != nil {
-				return fmt.Errorf("idempotency conflict: cannot parse existing record: %w", err)
-			}
-			if prev.Op != r.Op || prev.TaskID != r.TaskID || prev.Version != r.Version {
-				return fmt.Errorf("idempotency key conflict: different params")
-			}
-			return nil // idempotent
-		}
+	// Publish the complete record only when the key is still absent. A crash
+	// during the old direct write could leave a permanently unparsable record.
+	if err := fileutil.AtomicCreateFile(target, data, 0o600); err == nil {
+		return nil
+	} else if !os.IsExist(err) {
 		return err
 	}
-	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(target)
-		return err
+	existing, rdErr := os.ReadFile(target)
+	if rdErr != nil {
+		return fmt.Errorf("idempotency conflict: cannot read existing record: %w", rdErr)
 	}
-	return f.Close()
+	var prev IdempotencyRecord
+	if err := json.Unmarshal(existing, &prev); err != nil {
+		return fmt.Errorf("idempotency conflict: cannot parse existing record: %w", err)
+	}
+	if prev.Op != r.Op || prev.TaskID != r.TaskID || prev.Version != r.Version {
+		return fmt.Errorf("idempotency key conflict: different params")
+	}
+	return nil // idempotent
 }

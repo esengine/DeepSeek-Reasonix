@@ -40,7 +40,8 @@ func SessionRecoveryState(sessionPath string) string {
 
 // SessionContext is the context-projection / compaction-state sidecar
 // (<id>.context.json). It holds the model-visible projection and cache
-// telemetry; the primary .jsonl remains the canonical transcript.
+// telemetry; transcript authority remains with the native event log once one
+// exists, with the primary .jsonl retained as its compatibility checkpoint.
 func SessionContext(sessionPath string) string {
 	sessionPath = strings.TrimSpace(sessionPath)
 	if sessionPath == "" {

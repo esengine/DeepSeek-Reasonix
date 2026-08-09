@@ -139,6 +139,11 @@ type HistorySlice struct {
 	EndTurn    int            `json:"endTurn"`   // newest visible turn in the page (0 when none)
 	Stale      bool           `json:"stale"`     // cursor bound to an older session revision
 	Revision   int64          `json:"revision"`  // session revision the page was cut from (0 when unknown)
+	// RevisionKnown and Digest expose the complete canonical identity already
+	// carried by cursors. They let same-path resident frontend projections be
+	// invalidated after another process advances or rewrites the session.
+	RevisionKnown bool   `json:"revisionKnown,omitempty"`
+	Digest        string `json:"digest,omitempty"`
 	// Source names the read path that produced the page, for diagnostics:
 	// "index" (cold, display-index hit), "scan" (cold, streaming rebuild or
 	// legacy event-format decode), "live-index" (live controller + index), or
@@ -181,8 +186,14 @@ func emptyHistorySlice() HistorySlice {
 	return HistorySlice{Entries: []HistoryEntry{}}
 }
 
-func staleHistorySlice(revision int64) HistorySlice {
-	return HistorySlice{Entries: []HistoryEntry{}, Stale: true, Revision: revision}
+func staleHistorySlice(revision int64, revisionKnown bool, digest string) HistorySlice {
+	return HistorySlice{
+		Entries:       []HistoryEntry{},
+		Stale:         true,
+		Revision:      revision,
+		RevisionKnown: revisionKnown,
+		Digest:        digest,
+	}
 }
 
 func normalizeHistorySliceRequest(req HistorySliceRequest) HistorySliceRequest {
@@ -857,16 +868,18 @@ func (a *App) pageHistorySliceSource(src *historySliceSource, req HistorySliceRe
 	// An undecodable cursor is treated like a request for the latest page.
 	hasCursor := req.Cursor != "" && err == nil
 	if hasCursor && !src.identityMatches(cursor.Revision, cursor.RevKnown, cursor.Digest) {
-		return staleHistorySlice(src.revision), nil
+		return staleHistorySlice(src.revision, src.revKnown, src.digest), nil
 	}
 	hi := src.total
 	if hasCursor && cursor.Before < hi {
 		hi = cursor.Before
 	}
 	page := HistorySlice{
-		Entries:    []HistoryEntry{},
-		TotalTurns: src.totalTurns,
-		Revision:   src.revision,
+		Entries:       []HistoryEntry{},
+		TotalTurns:    src.totalTurns,
+		Revision:      src.revision,
+		RevisionKnown: src.revKnown,
+		Digest:        src.digest,
 	}
 	if hi <= 0 || src.total == 0 {
 		return page, nil
@@ -1536,7 +1549,7 @@ func pageHistoryEventRows(src *historySliceSource, rows []HistoryMessage, req Hi
 	cursor, err := decodeHistorySliceCursor(req.Cursor)
 	hasCursor := req.Cursor != "" && err == nil
 	if hasCursor && src.digest != cursor.Digest {
-		return staleHistorySlice(0)
+		return staleHistorySlice(0, false, src.digest)
 	}
 	hi := len(rows)
 	if hasCursor && cursor.Before < hi {
@@ -1554,7 +1567,7 @@ func pageHistoryEventRows(src *historySliceSource, rows []HistoryMessage, req Hi
 	src.turns = turns
 	src.totalTurns = turn
 	src.total = len(rows)
-	page := HistorySlice{Entries: []HistoryEntry{}, TotalTurns: turn}
+	page := HistorySlice{Entries: []HistoryEntry{}, TotalTurns: turn, Digest: src.digest}
 	if hi <= 0 {
 		return page
 	}

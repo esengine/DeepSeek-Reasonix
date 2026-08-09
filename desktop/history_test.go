@@ -296,6 +296,26 @@ func TestHistoryPageFromMessagesWindowsByUserTurn(t *testing.T) {
 	}
 }
 
+func TestHistoryPageWithFingerprintBindsRevisionToExactContentDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := agent.SaveBranchMeta(path, agent.BranchMeta{
+		Revision:      7,
+		ContentDigest: "digest-v7",
+	}); err != nil {
+		t.Fatalf("save branch metadata: %v", err)
+	}
+
+	page := historyPageWithFingerprint(HistoryPage{Messages: []HistoryMessage{{Role: "user", Content: "hello"}}}, path, "digest-v7")
+	if page.Revision != 7 || page.Digest != "digest-v7" {
+		t.Fatalf("history fingerprint = revision %d digest %q, want revision 7 digest-v7", page.Revision, page.Digest)
+	}
+
+	stale := historyPageWithFingerprint(HistoryPage{Messages: []HistoryMessage{{Role: "user", Content: "older"}}}, path, "digest-v6")
+	if stale.Revision != 0 || stale.Digest != "digest-v6" {
+		t.Fatalf("stale page fingerprint = revision %d digest %q, want content digest without mismatched revision", stale.Revision, stale.Digest)
+	}
+}
+
 func TestHistoryPageFromProviderMessagesWindowsVisibleUsers(t *testing.T) {
 	msgs := []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},

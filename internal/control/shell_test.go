@@ -69,6 +69,9 @@ func TestRunShell_EmitsEvents(t *testing.T) {
 	if td.Kind != event.TurnDone {
 		t.Errorf("last event: want TurnDone, got %v", td.Kind)
 	}
+	if td.CheckpointTurn != nil {
+		t.Errorf("shell TurnDone checkpoint = %d, want nil", *td.CheckpointTurn)
+	}
 
 	// Penultimate event: ToolResult
 	last := (*events)[len(*events)-2]

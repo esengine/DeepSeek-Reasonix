@@ -59,6 +59,50 @@ func TestManifestV2ProviderRequiresSchemaHash(t *testing.T) {
 	}
 }
 
+func TestManifestV2LoadsOnlyExplicitlyDeclaredResources(t *testing.T) {
+	root := t.TempDir()
+	writeV2Plugin(t, root, `{
+  "apiVersion": "reasonix.io/plugin/v2",
+  "name": "explicit-only",
+  "contributes": {
+    "skills": ["skills"],
+    "commands": ["commands"],
+    "agents": ["agents"]
+  }
+}`)
+	writeTestFile(t, filepath.Join(root, "skills", "plan", "SKILL.md"), "---\ndescription: plan work\n---\nPlan carefully.")
+	writeTestFile(t, filepath.Join(root, "commands", "spec.md"), "---\ndescription: write a spec\n---\nWrite a spec.")
+	writeTestFile(t, filepath.Join(root, "agents", "reviewer.md"), "---\nname: reviewer\ndescription: review changes\n---\nReview carefully.")
+
+	// These Claude compatibility sidecars are present in many multi-host
+	// packages, but a native v2 manifest is an explicit capability boundary.
+	writeTestFile(t, filepath.Join(root, "CLAUDE.md"), "Repository maintenance instructions.")
+	writeTestFile(t, filepath.Join(root, "hooks", "hooks.json"), `{
+  "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "bin/start"}]}]}
+}`)
+	writeTestFile(t, filepath.Join(root, ".mcp.json"), `{
+  "mcpServers": {"helper": {"command": "bin/helper"}}
+}`)
+
+	pkg, warnings, err := ParseDir(root)
+	if err != nil {
+		t.Fatalf("ParseDir: %v", err)
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", warnings)
+	}
+	inv := pkg.Inventory()
+	if len(inv.Skills) != 1 || len(inv.Commands) != 1 || len(inv.Agents) != 1 {
+		t.Fatalf("inventory skills/commands/agents = %d/%d/%d, want 1/1/1", len(inv.Skills), len(inv.Commands), len(inv.Agents))
+	}
+	if len(pkg.Manifest.Hooks) != 0 {
+		t.Fatalf("hooks = %+v, want only explicitly declared resources", pkg.Manifest.Hooks)
+	}
+	if len(pkg.Manifest.MCPServers) != 0 {
+		t.Fatalf("MCP servers = %+v, want only explicitly declared resources", pkg.Manifest.MCPServers)
+	}
+}
+
 func TestMigrateLegacyManifestToV2(t *testing.T) {
 	root := t.TempDir()
 	legacy := `{

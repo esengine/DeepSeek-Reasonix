@@ -362,5 +362,133 @@ function ev(s: typeof initialState, e: WireEvent) {
   }
 }
 
+// --- 7. lastRequestTps pairs the closed interval with the usage tokens ---
+{
+  const originalNow = Date.now;
+  let now = 50_000;
+  Date.now = () => now;
+  try {
+    let s = ev({ ...initialState }, { kind: "turn_started" } as WireEvent);
+    now = 50_100;
+    s = ev(s, { kind: "text", text: "abcd" } as WireEvent);
+    now = 51_100;
+    // The message event closes the interval BEFORE the usage event arrives.
+    s = ev(s, { kind: "message", text: "abcd" } as WireEvent);
+    now = 51_200;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 130, completionTokens: 30, totalTokens: 160,
+      contextPromptTokens: 100, contextCompletionTokens: 20,
+      cacheHitTokens: 0, cacheMissTokens: 100, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 20, "sampling recovery pairs the interval with latest-attempt tokens");
+
+    now = 52_000;
+    s = ev(s, { kind: "text", text: "more" } as WireEvent);
+    now = 52_050;
+    s = ev(s, { kind: "message", text: "more" } as WireEvent);
+    now = 52_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 5, completionTokens: 50, totalTokens: 55,
+      cacheHitTokens: 0, cacheMissTokens: 5, source: "subagent",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 20, "non-executor usage neither computes nor consumes the pending interval");
+    now = 52_300;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, null, "intervals under the 500ms gate clear stale request TPS");
+
+    now = 53_000;
+    s = ev(s, { kind: "text", text: "second" } as WireEvent);
+    now = 54_000;
+    s = ev(s, { kind: "message", text: "second" } as WireEvent);
+    now = 54_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 30, "a later executor usage refreshes the request TPS");
+
+    now = 55_000;
+    s = ev(s, { kind: "text", text: "direct" } as WireEvent);
+    now = 56_000;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 40, totalTokens: 50,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 40, "usage measures an interval still open at arrival");
+
+    now = 57_000;
+    s = ev(s, { kind: "turn_done" } as WireEvent);
+    eq(s.lastRequestTps, 40, "request TPS persists across turn boundaries");
+
+    now = 58_000;
+    s = ev(s, { kind: "turn_started" } as WireEvent);
+    now = 58_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 8, totalTokens: 18,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, null, "usage without a provider interval clears stale request TPS");
+    now = 58_200;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "final-only", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+    eq(s.lastRequestTps, null, "a final-only tool dispatch after usage cannot resurrect stale TPS");
+
+    now = 59_000;
+    s = ev(s, { kind: "text", text: "toolcall" } as WireEvent);
+    now = 60_000;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t1", name: "read_file", args: "{}", readOnly: true } } as WireEvent);
+    now = 60_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 25, totalTokens: 35,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 25, "tool_dispatch closes the interval the next executor usage pairs with");
+
+    now = 61_000;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t2", name: "write_file", readOnly: false, partial: true, argChars: 600 } } as WireEvent);
+    now = 62_000;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 30, "usage closes the interval started by a partial tool dispatch");
+    now = 62_100;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t2", name: "write_file", args: "{}", readOnly: false } } as WireEvent);
+    eq(s.lastRequestTps, 30, "the later full tool dispatch preserves the measured request TPS");
+
+    now = 63_000;
+    s = ev(s, { kind: "text", text: "closing" } as WireEvent);
+    now = 64_000;
+    s = ev(s, { kind: "message", text: "closing" } as WireEvent);
+    now = 64_100;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t3", name: "write_file", readOnly: false, partial: true, argChars: 300 } } as WireEvent);
+    now = 64_700;
+    s = ev(s, { kind: "tool_dispatch", tool: { id: "t3", name: "write_file", args: "{}", readOnly: false } } as WireEvent);
+    now = 64_800;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 30, totalTokens: 40,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    // The partial restart begins a new interval; the full dispatch closes it
+    // and overwrites the message-stashed pending with its own (≥500ms) tail.
+    eq(s.lastRequestTps, 50, "a full dispatch overwrites a message-stashed pending with its own tail close");
+
+    now = 65_000;
+    s = ev(s, { kind: "text", text: "slow" } as WireEvent);
+    now = 68_000;
+    s = ev(s, { kind: "message", text: "slow" } as WireEvent);
+    now = 68_100;
+    s = ev(s, { kind: "usage", usage: {
+      promptTokens: 10, completionTokens: 1, totalTokens: 11,
+      cacheHitTokens: 0, cacheMissTokens: 10, source: "executor",
+    } } as WireEvent);
+    eq(s.lastRequestTps, 1 / 3, "slow measurable requests retain their raw sub-one TPS");
+  } finally {
+    Date.now = originalNow;
+  }
+}
+
 process.stdout.write(`\n${passed} passed, ${failed} failed\n`);
 if (failed > 0) process.exit(1);

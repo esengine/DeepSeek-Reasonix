@@ -10,7 +10,12 @@
 import type { HistorySlice, HistorySliceRequest } from "../lib/types";
 import type { HistoryMessage } from "../lib/types";
 
-export function historySliceFromMessages(tabID: string, messages: HistoryMessage[], req: HistorySliceRequest): HistorySlice {
+export function historySliceFromMessages(
+  tabID: string,
+  messages: HistoryMessage[],
+  req: HistorySliceRequest,
+  identity: { revision?: number; digest?: string } = {},
+): HistorySlice {
   const turnsOf: number[] = [];
   let turn = 0;
   for (const message of messages) {
@@ -24,7 +29,9 @@ export function historySliceFromMessages(tabID: string, messages: HistoryMessage
       if (typeof decoded.before === "number" && decoded.before >= 0 && decoded.before < before) before = decoded.before;
     } catch { /* unknown cursor: serve the latest page */ }
   }
-  const empty: HistorySlice = { entries: [], nextCursor: "", hasOlder: false, totalTurns: turn, startTurn: 0, endTurn: 0, stale: false, revision: 0 };
+  const revision = identity.revision ?? 0;
+  const digest = identity.digest ?? "";
+  const empty: HistorySlice = { entries: [], nextCursor: "", hasOlder: false, totalTurns: turn, startTurn: 0, endTurn: 0, stale: false, revision, revisionKnown: revision > 0, digest };
   if (before <= 0 || messages.length === 0) return empty;
   const turns = Math.max(1, Math.floor(req.turns || 12));
   const newestTurn = turnsOf[before - 1];
@@ -52,6 +59,8 @@ export function historySliceFromMessages(tabID: string, messages: HistoryMessage
     startTurn: visibleTurns.length > 0 ? Math.min(...visibleTurns) : 0,
     endTurn: visibleTurns.length > 0 ? Math.max(...visibleTurns) : 0,
     stale: false,
-    revision: 0,
+    revision,
+    revisionKnown: revision > 0,
+    digest,
   };
 }

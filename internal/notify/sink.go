@@ -53,12 +53,20 @@ func (s *Sink) RecordContractShadow(a event.ContractShadowAudit) {
 	event.RecordContractShadow(s.inner, a)
 }
 
+func (s *Sink) RecordCompletionReport(a event.CompletionReportAudit) {
+	event.RecordCompletionReport(s.inner, a)
+}
+
 func (s *Sink) RecordOutcomeProgress(sample evidence.OutcomeSample) {
 	event.RecordOutcomeProgress(s.inner, sample)
 }
 
 func (s *Sink) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
 	event.RecordDelegationAdmission(s.inner, a)
+}
+
+func (s *Sink) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(s.inner, a)
 }
 
 // SendEvent applies the same notification rules for paths that do not emit through Sink.

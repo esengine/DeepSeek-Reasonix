@@ -8,6 +8,7 @@ import (
 
 	"reasonix/internal/event"
 	"reasonix/internal/eventwire"
+	"reasonix/internal/evidence"
 	"reasonix/internal/extension"
 	"reasonix/internal/extension/dispatch"
 )
@@ -192,4 +193,40 @@ func extensionFailurePlugin(err error) string {
 		return violationErr.Plugin
 	}
 	return "unknown"
+}
+
+// The audit capabilities pass through untouched: extension rulings apply to
+// user-facing events, never to the content-free telemetry channels — without
+// these, enabling extensions severed every audit from the recorder.
+
+func (s *frontendEventSink) RecordReadinessAudit(a evidence.ReadinessAudit) {
+	event.RecordReadinessAudit(s.inner, a)
+}
+
+func (s *frontendEventSink) RecordContractShadow(a event.ContractShadowAudit) {
+	event.RecordContractShadow(s.inner, a)
+}
+
+func (s *frontendEventSink) RecordCompletionReport(a event.CompletionReportAudit) {
+	event.RecordCompletionReport(s.inner, a)
+}
+
+func (s *frontendEventSink) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	event.RecordOutcomeProgress(s.inner, sample)
+}
+
+func (s *frontendEventSink) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
+	event.RecordDelegationAdmission(s.inner, a)
+}
+
+func (s *frontendEventSink) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(s.inner, a)
+}
+
+func (s *frontendEventSink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
+	event.RecordProtocolRecovery(s.inner, a)
+}
+
+func (s *frontendEventSink) RecordTurnCompletion() {
+	event.RecordTurnCompletion(s.inner)
 }
