@@ -45,6 +45,12 @@ export function localPathFromHref(href?: string): string | null {
     if (url.hostname === "." || url.hostname === "?") return null;
 
     let path = decodeURIComponent(url.pathname);
+    // file:////host/share (4+ slashes) parses with an EMPTY hostname and a
+    // path already starting with "//" — collapsing it would hand the remote
+    // UNC to OpenLocalPath, which legitimately allows plain UNC paths, and
+    // trigger an SMB connection on click. Refuse like the backend does;
+    // file:///C:/x.txt (3 slashes) is unaffected.
+    if (url.hostname === "" && path.startsWith("//")) return null;
     if (url.hostname) path = `//${url.hostname}${path}`;
 
     // file:///D:/... has a URL root slash that is not part of the Windows

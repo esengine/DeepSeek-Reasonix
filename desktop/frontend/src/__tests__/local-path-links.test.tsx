@@ -121,8 +121,8 @@ eq(localPathFromHref("file:///D:/a%20b.txt"), "D:/a b.txt", "decoded %20 becomes
 eq(localPathFromHref("file:///D:/x/y.md"), "D:/x/y.md", "decodes plain path");
 eq(localPathFromHref("file:///Users/liangkang/notes/readme.md"), "/Users/liangkang/notes/readme.md", "preserves the leading slash for Unix paths");
 eq(localPathFromHref("file://nas/share/report.md"), "//nas/share/report.md", "parses authority-form UNC URLs");
-eq(localPathFromHref("file:////nas/share/report.md"), "//nas/share/report.md", "normalizes four-slash UNC URLs");
-eq(localPathFromHref("file://///nas/share/report.md"), "//nas/share/report.md", "normalizes generated five-slash UNC URLs");
+eq(localPathFromHref("file:////nas/share/report.md"), null, "rejects four-slash UNC (empty authority — remote SMB leak)");
+eq(localPathFromHref("file://///nas/share/report.md"), null, "rejects five-slash UNC (empty authority — remote SMB leak)");
 eq(localPathFromHref("file://./PhysicalDrive0"), null, "rejects device-namespace authority");
 eq(localPathFromHref("file:////./PhysicalDrive0"), null, "rejects slash-form device namespace");
 eq(localPathFromHref("file:////%2E/PhysicalDrive0"), null, "rejects encoded slash-form device namespace");

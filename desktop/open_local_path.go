@@ -43,13 +43,16 @@ func normalizeLocalOpenPath(path string) (string, error) {
 			// (//localhost/C:/x.txt would otherwise fail the device-colon
 			// check as a UNC remainder).
 			host = ""
-		} else if strings.HasPrefix(decoded, "//") {
-			// file:////host/share (4+ slashes) parses with an EMPTY authority
-			// and a path already starting with "//" — url.Parse would let the
-			// remote host through as a UNC path. Refuse any file URL whose
-			// decoded path starts with "//": file:///C:/x.txt (3 slashes) is
-			// unaffected, and "//C:/" device forms are rejected by the
-			// colon check below.
+		}
+		if strings.HasPrefix(decoded, "//") {
+			// Unified rejection AFTER the host branch so loopback hosts get
+			// the same guard: file:////host/share (4+ slashes, empty
+			// authority) and file://127.0.0.1//host/share both decode to a
+			// path starting with "//" — a remote UNC path that would trigger
+			// an SMB connection (Net-NTLM credential negotiation). Safe
+			// forms unaffected: file:///C:/x.txt (3 slashes) and
+			// file://localhost/C:/x.txt decode without the "//" prefix;
+			// "//C:/" device forms are also rejected by the colon check.
 			return "", fmt.Errorf("remote file URL authority is not allowed (SMB credential leak risk)")
 		}
 		if len(decoded) >= 4 && decoded[0] == '/' && isASCIILetter(decoded[1]) && decoded[2] == ':' && decoded[3] == '/' {
