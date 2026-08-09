@@ -15168,6 +15168,16 @@ body > .mermaid-diagram--fullscreen {
   font-family: inherit;
 }
 
+.settings-nav-search {
+  margin-bottom: 8px;
+}
+
+.settings-nav-empty {
+  padding: 10px 12px;
+  color: var(--fg-dim);
+  font-size: var(--text-xs);
+}
+
 .settings-center__content {
   min-width: 0;
   overflow-x: hidden;

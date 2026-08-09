@@ -1869,6 +1869,8 @@ export const zhTW: Record<DictKey, string> = {
   "settings.currency": "計價幣別",
   "settings.currencyAuto": "自動（跟隨語言）",
   "settings.config": "設定檔：{path}",
+  "settings.searchPlaceholder": "篩選設定…",
+  "settings.noSectionMatch": "沒有符合 “{q}” 的設定。",
   "settings.configShadowed": "被工作區設定覆蓋：{path}（這裡的修改可能不會生效）",
 
   // 待辦欄
