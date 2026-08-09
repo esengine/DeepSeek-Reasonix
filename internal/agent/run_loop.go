@@ -16,34 +16,6 @@ import (
 	"reasonix/internal/tool"
 )
 
-// runLoopState holds per-Run loop counters and flags. It is package-private and
-// not shared across goroutines; the first extraction keeps the existing lock
-// model and only structures the sequential turn state machine.
-type runLoopState struct {
-	runMaxSteps       int
-	runMaxStepsKey    string
-	runLimitHostOwned bool
-
-	emptyFinalBlocks   int
-	handoffNudges      int
-	usedAnyTool        bool
-	contextToolRepairs int
-	graceRound         bool
-	recoveryGraceRound bool
-
-	todoProgress         int
-	trackingTodoProgress bool
-	todoStallRounds      int
-	seenTodoProgress     map[string]struct{}
-
-	executorHandoff bool
-	// input is the user turn text after withTurnPreferences (used by handoff
-	// nudges that inspect the original request wording).
-	input string
-
-	workDurationMs func() int64
-}
-
 // perTurnState is the host state valid for exactly one Agent.Run, embedded in
 // Agent so field access stays flat while the lifetime is explicit. beginRunTurn
 // zeroes it in a single assignment before computing the new turn's values; a
@@ -96,27 +68,6 @@ type perTurnState struct {
 	// stormSig: a model keeps doing the same successful write, so there is no
 	// error for the failure-only storm breaker to see.
 	repeatSuccessCounts map[string]int
-}
-
-// streamedTurn is one provider completion collected by stream. Keeping the
-// result together makes the missing-reasoning recovery path explicit: the
-// first, malformed completion is never committed before a safe replacement is
-// available, and a failed recovery can still fall back to the complete first
-// response without re-running any tool.
-type streamedTurn struct {
-	text               string
-	reasoning          string
-	signature          string
-	reasoningID        string
-	reasoningStatus    string
-	calls              []provider.ToolCall
-	responsesItems     []json.RawMessage
-	usage              *provider.Usage
-	interrupted        bool
-	partialToolStarted bool
-	partialCalls       []provider.ToolCall
-	maxArgChars        int // peak streaming tool-arg size for failed-attempt estimates
-	err                error
 }
 
 // deferredStreamSink keeps selected stream events local until the caller
@@ -305,15 +256,16 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 	})
 
 	state = &runLoopState{
-		emptyFinalBlocks:   0,
-		handoffNudges:      0,
-		usedAnyTool:        false,
-		graceRound:         false,
-		recoveryGraceRound: false,
-		todoStallRounds:    0,
-		seenTodoProgress:   make(map[string]struct{}),
-		executorHandoff:    a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker),
-		input:              input,
+		emptyFinalBlocks:    0,
+		requireVisibleFinal: a.requireVisibleFinal || visibleFinalRequiredFromContext(ctx),
+		handoffNudges:       0,
+		usedAnyTool:         false,
+		graceRound:          false,
+		recoveryGraceRound:  false,
+		todoStallRounds:     0,
+		seenTodoProgress:    make(map[string]struct{}),
+		executorHandoff:     a.executorHandoffGuard && strings.Contains(input, executorHandoffMarker),
+		input:               input,
 	}
 	state.todoProgress, state.trackingTodoProgress = a.canonicalTodoProgress()
 	if a.evidence != nil {
@@ -328,7 +280,8 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 // assistant turn into final-response or tool-round handling.
 func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
 	ctx = a.withAgentContext(ctx)
-	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
+	for step := 0; state.shouldSample(step); step++ {
+		state.beginSamplingRound()
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
 		// guidance (with a prefix), not a new task. One cache miss per
@@ -908,25 +861,8 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 		a.deliveryRecoveryPending = true
 		return false, &FinalReadinessError{Attempts: 1, Reason: readiness.reason, Missing: readiness.missingIDs()}
 	}
-	if !hasVisibleFinalAnswer(text) {
-		// DeepSeek thinking mode can stream a long reasoning_content and
-		// then finish with finish_reason="stop" but an empty content
-		// block: the model has explicitly signalled completion and its
-		// reasoning was already streamed to the user. Retrying here overrides
-		// that stop signal and forces another expensive thinking round (the
-		// "still thinking after the task is done" symptom), so honour the
-		// stop when reasoning carried the substance of the answer and treat
-		// the turn as a final answer instead of retrying.
-		if a.requireVisibleFinal || !reasoningOnlyFinishHonoured(a.prov, usage, reasoning) {
-			state.emptyFinalBlocks++
-			if state.emptyFinalBlocks >= maxEmptyFinalBlocks {
-				return false, fmt.Errorf("model finished without a visible final answer %d times", state.emptyFinalBlocks)
-			}
-			a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Code: event.NoticeCodeEmptyFinal, Text: emptyFinalNotice(), Detail: emptyFinalNoticeDetail(a.prov.Name(), usage, len(reasoning))})
-			a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(emptyFinalRetryMessage())})
-			a.maybeCompact(ctx, usage)
-			return true, nil
-		}
+	if handled, next, finalErr := a.handleVisibleFinalContract(ctx, state, text, reasoning, usage); handled {
+		return next, finalErr
 	}
 	if state.executorHandoff && !state.usedAnyTool && state.handoffNudges < maxExecutorHandoffNudges && shouldNudgeExecutorHandoff(state.input, text) {
 		state.handoffNudges++
@@ -954,21 +890,9 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 // max-steps grace round. cont=true continues the tool loop; cont=false returns
 // err from Run.
 func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
-	state.emptyFinalBlocks = 0
-	state.usedAnyTool = true
-	unavailableContextTools := a.unavailableContextualToolCalls(ctx, calls)
-	if len(unavailableContextTools) > 0 && state.contextToolRepairs > 0 {
-		msg := fmt.Sprintf("blocked: context-unavailable tools were called again after the repair instruction: %s", strings.Join(unavailableContextTools, ", "))
-		for _, call := range calls {
-			a.session.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
-		}
-		if hasVisibleFinalAnswer(text) {
-			return a.handleFinalResponse(ctx, state, text, reasoning, usage)
-		}
-		if len(unavailableContextTools) == 1 && unavailableContextTools[0] == "update_goal" {
-			return false, fmt.Errorf("model repeatedly called update_goal outside Goal mode without a visible answer")
-		}
-		return false, fmt.Errorf("model repeatedly called context-unavailable tools without a visible answer: %s", strings.Join(unavailableContextTools, ", "))
+	unavailableContextTools, handled, next, preflightErr := a.preflightToolRound(ctx, state, text, reasoning, calls, usage)
+	if handled {
+		return next, preflightErr
 	}
 
 	// Grace round guard: if we already gave the model one extra response

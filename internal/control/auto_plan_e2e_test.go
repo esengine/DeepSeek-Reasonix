@@ -96,7 +96,7 @@ func TestPlanGateEndToEnd(t *testing.T) {
 	if !seeded {
 		t.Fatal("approved plan should seed the task list")
 	}
-	if got := lastAssistantText(msgs); got != "Done — implemented the plan." {
+	if got := latestAssistantTextForTest(msgs); got != "Done — implemented the plan." {
 		t.Fatalf("last assistant text = %q, want the execution turn's answer", got)
 	}
 	if prov.call != 2 {

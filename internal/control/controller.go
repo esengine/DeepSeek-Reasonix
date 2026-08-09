@@ -1096,17 +1096,6 @@ func (c *Controller) stopGoal(status string) {
 	c.persistGoalState(path, data, ok)
 }
 
-// lastAssistantText returns the content of the most recent assistant message with
-// non-empty text — the model's final answer for the turn (its plan, in plan mode).
-func lastAssistantText(msgs []provider.Message) string {
-	for _, msg := range slices.Backward(msgs) {
-		if msg.Role == provider.RoleAssistant && strings.TrimSpace(msg.Content) != "" {
-			return msg.Content
-		}
-	}
-	return ""
-}
-
 // Submit is the one-call entry for a simple frontend: it takes raw user input
 // and does everything — slash-command dispatch, @-reference expansion, plan-mode
 // composition — emitting all output as events. The HTTP/SSE server uses this so
@@ -1904,6 +1893,7 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 		return nil
 	}
 	startMessages := c.messageCount()
+	finalBoundary := c.captureTurnFinalBoundary()
 	var marker agent.InFlightTurnMeta
 	defer func() { c.finishInFlightTurn(startMessages, marker) }()
 	c.beginCheckpoint(ctx, input)
@@ -1918,7 +1908,7 @@ func (c *Controller) Run(ctx context.Context, input string) (err error) {
 		if block, _ := c.hooks.PromptSubmit(ctx, input, turn); block {
 			return nil
 		}
-		defer func() { c.hooks.StopResult(context.Background(), lastAssistantText(c.History()), turn, err) }()
+		defer func() { c.hooks.StopResult(context.Background(), finalBoundary.currentAssistantText(c), turn, err) }()
 	}
 	marker = c.markInFlightTurn(startMessages, true)
 	ctx = c.withPlannerTurnMetadata(ctx, rawInput, false, startMessages)
@@ -2771,14 +2761,14 @@ func (c *Controller) GoalRuntime() GoalRuntimeView {
 // contract, the current assistant final, a todo/readiness summary,
 // turn/budget state, and the last
 // continuation reason. Every field is treated as untrusted by the evaluator.
-func (c *Controller) goalEvaluatorEvidence() goaleval.GoalEvidence {
+func (c *Controller) goalEvaluatorEvidence(assistantFinal string) goaleval.GoalEvidence {
 	goal, _ := c.goals.snapshot()
 	ev := goaleval.GoalEvidence{
 		GoalContract:           goal,
 		LastContinuationReason: c.goals.lastContinuationReasonText(),
 	}
 	if c.executor != nil {
-		ev.AssistantFinal = lastAssistantText(c.History())
+		ev.AssistantFinal = assistantFinal
 		todos := c.goalTodos()
 		incomplete := 0
 		for _, t := range todos {

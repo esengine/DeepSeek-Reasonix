@@ -316,7 +316,7 @@ func TestAssistantEvidenceBlockIsIgnoredByUnifiedGoal(t *testing.T) {
 	if got := c.GoalStatus(); got != GoalStatusComplete {
 		t.Fatalf("GoalStatus = %q, want complete", got)
 	}
-	if got := lastAssistantText(c.History()); !strings.Contains(got, evidenceBlock) {
+	if got := latestAssistantTextForTest(c.History()); !strings.Contains(got, evidenceBlock) {
 		t.Fatalf("legacy evidence block was interpreted instead of retained as transcript text: %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(root, ".reasonix", "autoresearch")); !os.IsNotExist(err) {
