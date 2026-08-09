@@ -1290,11 +1290,20 @@ export function Composer({
     // 陈旧，切换会话后转录可能写入旧 draft、"能识别但不输入"）。经 ref
     // 中转始终调用最新实现，插入当前可见窗口输入框。
     const insertRef = { current: insertSTTTextAtCaret };
+    // 未提交的 interim（临时识别）占位：interim 实时上屏（删旧插新替换），
+    // final 到达时先移除占位再正式插入，避免"等断句才出字"的延迟。
+    const pendingInterimRef = { current: "" };
     const unsubscribe = onSTTTranscript((payload) => {
-      if (!payload.isFinal || !payload.text.trim()) return;
-      // 全局麦克风转录：Composer 单实例（仅当前激活窗口渲染），
-      // 转录始终插入当前可见窗口的输入框——语音内容属于用户当前交互窗口。
-      insertRef.current(payload.text);
+      if (!payload.text.trim()) return;
+      if (payload.isFinal) {
+        const prev = pendingInterimRef.current;
+        pendingInterimRef.current = "";
+        insertRef.current(payload.text, prev);
+      } else {
+        const prev = pendingInterimRef.current;
+        pendingInterimRef.current = payload.text;
+        insertRef.current(payload.text, prev);
+      }
     });
     // 识别状态实时同步：Edge 页自动停止/出错/恢复时，麦克风按钮随之变化。
     const unsubscribeState = onSTTState((payload) => {
@@ -1749,7 +1758,7 @@ export function Composer({
   // （insertTextAtCaret 是段落粘贴语义，会在前后补 \n\n，不适合逐句语音输入）。
   // 只在"前一句以标点/空格结尾但下一句紧跟"的场景保持连续，必要时补一个空格
   // 分隔，避免句号后直接粘连。
-  const insertSTTTextAtCaret = (snippet: string) => {
+  const insertSTTTextAtCaret = (snippet: string, prevSnippet?: string) => {
     const selection = getComposerSelection();
     const targetDraftKey = activeDraftKeyRef.current;
     const beforeEdit = composerEditSnapshot(targetDraftKey, selection);
@@ -1758,13 +1767,25 @@ export function Composer({
     const current = textRef.current;
     const body = snippet.trim();
     if (!body) return;
-    const before = current.slice(0, start);
-    const after = current.slice(end);
+    // interim 替换：先移除上一次未提交的 interim 占位（通常位于输入末尾），
+    // 再插入新文本，实现"实时上屏、删旧插新"而不重复堆积。
+    let base = current;
+    let insertStart = start;
+    const prev = prevSnippet?.trim();
+    if (prev) {
+      const tail = base.slice(insertStart - prev.length, insertStart);
+      if (tail === prev) {
+        base = base.slice(0, insertStart - prev.length) + base.slice(insertStart);
+        insertStart -= prev.length;
+      }
+    }
+    const before = base.slice(0, insertStart);
+    const after = base.slice(end);
     // 前面已有内容且不以空白结尾时补一个空格，避免粘连；否则直接连续。
     const needsSpace = before.length > 0 && !/\s$/.test(before);
     const inserted = (needsSpace ? " " : "") + body;
-    const pos = start + inserted.length;
-    const updated = replaceInvocationTextRange(current, invocationsRef.current, start, end, inserted);
+    const pos = insertStart + inserted.length;
+    const updated = replaceInvocationTextRange(base, invocationsRef.current, insertStart, end, inserted);
     textRef.current = updated.text;
     invocationsRef.current = updated.invocations;
     setText(updated.text);

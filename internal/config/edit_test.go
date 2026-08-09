@@ -3041,10 +3041,12 @@ func TestSetDesktopSTTSetters(t *testing.T) {
 	if c.Desktop.STTHotkeyStop != "" {
 		t.Fatalf("hotkey stop = %q, want empty", c.Desktop.STTHotkeyStop)
 	}
-	// 默认值：未改动前为默认配置
+	// 默认值：未改动前字段为零值（0 = 沿用桥接层默认 10s，
+	// 见 sttBridge.autoStopSeconds 构造默认）。setter 的 0→10 归一化
+	// 已在上面的用例里断言。
 	d := Default()
-	if d.Desktop.STTAutoStopSeconds != 10 {
-		t.Fatalf("default auto stop seconds = %d, want 10", d.Desktop.STTAutoStopSeconds)
+	if d.Desktop.STTAutoStopSeconds != 0 {
+		t.Fatalf("default auto stop seconds = %d, want 0 (bridge default)", d.Desktop.STTAutoStopSeconds)
 	}
 }
 
@@ -3061,7 +3063,10 @@ func TestSetDesktopSTTPersistsTOMLRoundtrip(t *testing.T) {
 	if err := c.SetDesktopSTTHotkeyStart("alt+s"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.SaveTo(path); err != nil {
+	// temp 路径会被 renderScopeForPath 判为 project scope（增量保存，不落
+	// desktop 键），因此显式用 RenderScopeUser 全量渲染，等价于设置面板
+	// 保存用户配置的路径。
+	if err := c.SaveToScope(path, RenderScopeUser); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 	raw, err := os.ReadFile(path)
