@@ -1293,16 +1293,28 @@ export function Composer({
     // 未提交的 interim（临时识别）占位：interim 实时上屏（删旧插新替换），
     // final 到达时先移除占位再正式插入，避免"等断句才出字"的延迟。
     const pendingInterimRef = { current: "" };
+    // 停顿自动提交：interim 停止更新 N 毫秒后，把当前 interim 当作一句已确认
+    // 文本固定下来（清空占位）——"说完一句停顿了就输入"，不等引擎 final
+    // （引擎 final 需更长静音+网络往返，可能几秒后才到）。
+    const COMMIT_INTERIM_MS = 1200;
+    let interimTimer = 0;
     const unsubscribe = onSTTTranscript((payload) => {
       if (!payload.text.trim()) return;
       if (payload.isFinal) {
+        window.clearTimeout(interimTimer);
         const prev = pendingInterimRef.current;
         pendingInterimRef.current = "";
         insertRef.current(payload.text, prev);
       } else {
+        window.clearTimeout(interimTimer);
         const prev = pendingInterimRef.current;
         pendingInterimRef.current = payload.text;
         insertRef.current(payload.text, prev);
+        // 停顿 1.2s 无新 interim：把当前句固定（后续 final 若同文则被
+        // insertSTTTextAtCaret 的 prev 替换逻辑去重，不会重复上屏）。
+        interimTimer = window.setTimeout(() => {
+          pendingInterimRef.current = "";
+        }, COMMIT_INTERIM_MS);
       }
     });
     // 识别状态实时同步：Edge 页自动停止/出错/恢复时，麦克风按钮随之变化。
