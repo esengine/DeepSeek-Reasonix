@@ -714,6 +714,7 @@ func appendSessionEvent(sessionPath string, rec sessionEventRecord, sync bool) e
 	if path == "" {
 		return fmt.Errorf("empty session event log path")
 	}
+	fileutil.Crash("wal-append", path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
@@ -838,7 +839,7 @@ func writeSessionEventIndex(path string, msgs []provider.Message, digest [sha256
 	if err != nil {
 		if os.IsNotExist(err) {
 			// No log means nothing for the index to describe; drop a stale
-			// index (e.g. after a force save folded the log away).
+			// index left by migration or manual sidecar cleanup.
 			if err := os.Remove(indexPath); err != nil && !os.IsNotExist(err) {
 				return err
 			}

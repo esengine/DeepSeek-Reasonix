@@ -60,6 +60,22 @@ assert.equal(
   "filtered:data:image/png;base64,iVBORw0KGgo=",
 );
 assert.equal(
+  transformExportMarkdownUrl("file://nas/share/report.md", "href", fallbackUrlTransform),
+  "file://nas/share/report.md",
+);
+assert.equal(
+  transformExportMarkdownUrl("file://./PhysicalDrive0", "href", fallbackUrlTransform),
+  "filtered:file://./PhysicalDrive0",
+);
+assert.equal(
+  transformExportMarkdownUrl("file:///C:/safe.txt:payload", "href", fallbackUrlTransform),
+  "filtered:file:///C:/safe.txt:payload",
+);
+assert.equal(
+  transformExportMarkdownUrl("file:///tmp/report.md?download=1", "href", fallbackUrlTransform),
+  "filtered:file:///tmp/report.md?download=1",
+);
+assert.equal(
   transformExportMarkdownUrl("https://example.com/image.png", "src", fallbackUrlTransform),
   "filtered:https://example.com/image.png",
 );

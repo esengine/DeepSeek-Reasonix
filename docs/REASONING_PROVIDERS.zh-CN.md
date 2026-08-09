@@ -60,9 +60,9 @@ reasoning_protocol = "kimi-k3"
 
 ## DeepSeek Anthropic-compatible 端点
 
-可选的 `deepseek-anthropic` 预设指向 `https://api.deepseek.com/anthropic`。
-Reasonix 默认仍使用官方 Chat Completions provider，但它为兼容性测试和面向
-Anthropic 的客户端提供了一条原生 Messages API 路径。Reasonix 会发送
+默认官方 DeepSeek provider 指向 `https://api.deepseek.com/anthropic`。
+新建的官方条目使用原生 Messages API 路径并开启 provider 侧 `web_search`；已有显式
+provider（包括旧的 `deepseek-anthropic` 条目）保留其原协议。Reasonix 会发送
 `thinking.type=enabled|disabled` 与 `output_config.effort`，回放历史工具调用轮次
 中未签名的 DeepSeek 思考块，省略不支持的图片，并依赖 DeepSeek 的自动前缀缓存，
 而不是被忽略的 `cache_control` 标记。

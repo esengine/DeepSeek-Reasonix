@@ -1911,11 +1911,18 @@ func jobKey(parentSession, id string) string {
 type ctxKey struct{}
 type sessionCtxKey struct{}
 type jobCtxKey struct{}
+type noManager struct{}
 
 // WithManager stamps ctx with the job manager so tools can reach it via
 // FromContext. The agent sets this on every tool call's context.
 func WithManager(ctx context.Context, m *Manager) context.Context {
 	return context.WithValue(ctx, ctxKey{}, m)
+}
+
+// WithoutManager shadows an ancestor manager. Child agents without an owned
+// Jobs manager must not operate the parent's background jobs by inheritance.
+func WithoutManager(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxKey{}, noManager{})
 }
 
 // FromContext returns the job manager set by the agent, if any. ok is false for a

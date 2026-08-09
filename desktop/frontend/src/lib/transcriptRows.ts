@@ -458,6 +458,8 @@ export interface BuildRowsOptions {
   creationMode: boolean;
   /** Checkpoint-aware turn number for a user item (questionTurnsById). */
   turnForUser: (item: UserItem) => number | undefined;
+  /** A checkpoint may make a turn actionable even without assistant text. */
+  hasCheckpointForTurn?: (turn: number) => boolean;
 }
 
 export function buildTranscriptRows(models: readonly TurnModel[], options: BuildRowsOptions): TranscriptRow[] {
@@ -492,7 +494,12 @@ export function buildTranscriptRows(models: readonly TurnModel[], options: Build
     // The active turn's actions appear only once it settles — mid-turn there is
     // nothing final to copy or rewind to. The row key follows the user item id
     // (turn NUMBERS shift when older history pages prepend; ids don't).
-    if (!model.isActive && turn != null && model.actionText.trim() && user) {
+    if (
+      !model.isActive &&
+      turn != null &&
+      (model.actionText.trim() || options.hasCheckpointForTurn?.(turn)) &&
+      user
+    ) {
       rows.push({ kind: "turn-actions", key: `ta:${user.id}`, turn, text: model.actionText });
     }
   }

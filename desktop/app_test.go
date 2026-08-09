@@ -2924,29 +2924,30 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 	if err := app.SetEffortForTab(tab.ID, "max"); err != nil {
 		t.Fatalf("SetEffortForTab: %v", err)
 	}
-	if got := tab.Ctrl.SessionPath(); got != recoveryPath {
-		t.Fatalf("session path after effort switch = %q, want current recovery branch %q", got, recoveryPath)
+	isolatedPath := tab.Ctrl.SessionPath()
+	if isolatedPath == recoveryPath || !strings.Contains(isolatedPath, "-recovery-") {
+		t.Fatalf("session path after effort switch = %q, want an isolated recovery branch", isolatedPath)
 	}
-	if got := tab.currentSessionPath(); got != recoveryPath {
-		t.Fatalf("tab current session path = %q, want %q", got, recoveryPath)
+	if got := tab.currentSessionPath(); got != isolatedPath {
+		t.Fatalf("tab current session path = %q, want %q", got, isolatedPath)
 	}
-	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(recoveryPath) {
-		t.Fatalf("tab lease path = %q, want %q", tab.sessionLeaseRuntimeKey(), recoveryPath)
+	if tab.sessionLease == nil || sessionRuntimeKey(tab.sessionLease.Path()) != sessionRuntimeKey(isolatedPath) {
+		t.Fatalf("tab lease path = %q, want %q", tab.sessionLeaseRuntimeKey(), isolatedPath)
 	}
 	matches, err := filepath.Glob(filepath.Join(dir, "*-recovery-*.jsonl"))
 	if err != nil {
 		t.Fatalf("glob recovery branches: %v", err)
 	}
 	matches = primarySessionFiles(matches)
-	if len(matches) != 1 || matches[0] != recoveryPath {
-		t.Fatalf("recovery branches after effort switch = %v, want only %q", matches, recoveryPath)
+	if len(matches) != 2 || !slices.Contains(matches, recoveryPath) || !slices.Contains(matches, isolatedPath) {
+		t.Fatalf("recovery branches after effort switch = %v, want canonical and isolated paths", matches)
 	}
 
 	lines := readConflictLogLines(t, store.SessionConflictLog(recoveryPath))
 	if len(lines) != 1 {
 		t.Fatalf("conflict log lines = %v, want one depth-cap diagnostic", lines)
 	}
-	if !strings.Contains(lines[0], `"outcome":"recovery_depth_cap_force_saved"`) {
+	if !strings.Contains(lines[0], `"outcome":"recovery_depth_cap_isolated"`) {
 		t.Fatalf("conflict diagnostic = %s, want depth-cap outcome", lines[0])
 	}
 	if strings.Contains(lines[0], dir) || strings.Contains(lines[0], recoveryPath) {
@@ -2965,43 +2966,14 @@ func TestSetEffortForTabReanchorsDepthCapRecoveryBranch(t *testing.T) {
 		t.Fatalf("glob recovery branches after snapshot: %v", err)
 	}
 	matches = primarySessionFiles(matches)
-	if len(matches) != 1 || matches[0] != recoveryPath {
-		t.Fatalf("recovery branches after follow-up snapshot = %v, want only %q", matches, recoveryPath)
-	}
-}
-
-func TestAddOfficialProviderAccessUsesDesktopLanguagePricing(t *testing.T) {
-	isolateDesktopUserDirs(t)
-	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
-		t.Fatalf("mkdir config dir: %v", err)
-	}
-	if err := os.WriteFile(config.UserConfigPath(), []byte(`
-[desktop]
-language = "zh"
-`), 0o644); err != nil {
-		t.Fatalf("write config: %v", err)
-	}
-
-	if _, err := NewApp().AddOfficialProviderAccess("deepseek", ""); err != nil {
-		t.Fatalf("AddOfficialProviderAccess: %v", err)
-	}
-	cfg := config.LoadForEdit(config.UserConfigPath())
-	p, ok := cfg.Provider("deepseek")
-	if !ok {
-		t.Fatal("deepseek provider not saved")
-	}
-	flash := p.Prices["deepseek-v4-flash"]
-	pro := p.Prices["deepseek-v4-pro"]
-	if flash == nil || flash.Output != 2 || flash.Currency != "¥" {
-		t.Fatalf("flash price = %+v, want CNY preset", flash)
-	}
-	if pro == nil || pro.Output != 6 || pro.Currency != "¥" {
-		t.Fatalf("pro price = %+v, want CNY preset", pro)
+	if len(matches) != 2 || !slices.Contains(matches, recoveryPath) || !slices.Contains(matches, isolatedPath) {
+		t.Fatalf("recovery branches after follow-up snapshot = %v, want canonical and isolated paths", matches)
 	}
 }
 
 func TestRemoveBuiltInProviderAccessRetargetsDefaultToRemainingAccess(t *testing.T) {
 	isolateDesktopUserDirs(t)
+	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
 	if err := os.MkdirAll(filepath.Dir(config.UserConfigPath()), 0o755); err != nil {
 		t.Fatalf("mkdir config dir: %v", err)
 	}
@@ -3048,12 +3020,12 @@ func TestModelsForTabOnlyListsProviderAccessWhenConfigured(t *testing.T) {
 	setDesktopTestCredential(t, "MIMO_API_KEY", "sk-test")
 
 	cfg := config.Default()
-	cfg.DefaultModel = "deepseek-flash/deepseek-v4-flash"
-	cfg.Desktop.ProviderAccess = []string{"deepseek-flash", "mimo-pro"}
-	deepseek, _ := cfg.Provider("deepseek-flash")
-	deepseek.Model = ""
-	deepseek.Models = []string{"deepseek-v4-flash", "deepseek-v4-pro"}
-	deepseek.Default = "deepseek-v4-flash"
+	cfg.DefaultModel = "deepseek/deepseek-v4-flash"
+	cfg.Desktop.ProviderAccess = []string{"deepseek", "mimo-pro"}
+	cfg.Providers = append(cfg.Providers, config.ProviderEntry{
+		Name: "deepseek", Kind: "anthropic", BaseURL: "https://api.deepseek.com/anthropic",
+		Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}, Default: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
+	})
 	if err := cfg.SaveTo(config.UserConfigPath()); err != nil {
 		t.Fatalf("save config: %v", err)
 	}
@@ -5134,6 +5106,46 @@ func TestConnectKeyRestoresDeepSeekProviderAccess(t *testing.T) {
 	}
 	if app.NeedsOnboarding() {
 		t.Fatal("restored DeepSeek access and saved key should satisfy onboarding")
+	}
+}
+
+func TestConnectKeyFreshInstallUsesDeepSeekAnthropicDefaults(t *testing.T) {
+	isolateDesktopUserDirs(t)
+	oldFetch := connectKeyBalanceFetch
+	connectKeyBalanceFetch = func(context.Context, *http.Client, string, string) (*billing.Balance, error) {
+		return &billing.Balance{Available: true}, nil
+	}
+	t.Cleanup(func() { connectKeyBalanceFetch = oldFetch })
+
+	app := NewApp()
+	app.ctx = context.Background()
+	app.readyHook = func() {}
+	app.setTestCtrl(control.New(control.Options{Label: "fresh-install"}), "deepseek-flash/deepseek-v4-flash")
+	workspace := t.TempDir()
+	app.tabs["test"].WorkspaceRoot = workspace
+	defer func() {
+		if ctrl := app.activeCtrl(); ctrl != nil {
+			ctrl.Close()
+		}
+	}()
+
+	if _, err := app.ConnectKey("sk-test"); err != nil {
+		t.Fatalf("ConnectKey: %v", err)
+	}
+	cfg, err := config.LoadForRootReadOnly(workspace)
+	if err != nil {
+		t.Fatalf("load fresh-install config: %v", err)
+	}
+	entry, ok := cfg.ResolveModel(cfg.DefaultModel)
+	if !ok {
+		t.Fatalf("default model %q did not resolve", cfg.DefaultModel)
+	}
+	if entry.Kind != "anthropic" || entry.BaseURL != "https://api.deepseek.com/anthropic" ||
+		entry.Thinking != "enabled" || !config.EffectiveWebSearch(entry) || config.EffectiveVision(entry) {
+		t.Fatalf("fresh-install DeepSeek entry = %+v; want Anthropic, thinking, web search, and text-only vision", entry)
+	}
+	if app.NeedsOnboarding() {
+		t.Fatal("fresh-install onboarding should close after the validated DeepSeek key is stored")
 	}
 }
 

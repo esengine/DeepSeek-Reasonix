@@ -60,6 +60,7 @@ import { workspaceGitStatusLabel } from "../lib/workspaceChanges";
 import { formatWorkspaceReference, WORKSPACE_REF_DRAG_TYPE } from "../lib/workspaceDrag";
 import { formatSelectionReference, languageFor } from "../lib/selectedTextContext";
 import { cleanGitDiff } from "../lib/diff";
+import { WORKSPACE_CONTEXT_MENU_FILE_HEIGHT, WORKSPACE_CONTEXT_MENU_REF_HEIGHT, workspacePathCopyMenuItems } from "../lib/workspacePathCopyMenuItems";
 import { CodeViewer } from "./CodeViewer";
 import { DiffView } from "./DiffView";
 import { ContextMenu, contextMenuPointFromEvent, type ContextMenuItem, type ContextMenuPoint } from "./ContextMenu";
@@ -75,8 +76,6 @@ const WORKSPACE_TREE_RAIL_WIDTH = 44;
 const WORKSPACE_PREVIEW_MIN_WIDTH = 140;
 const WORKSPACE_PREVIEW_TARGET_WIDTH = 360;
 const WORKSPACE_DUAL_PANEL_TARGET_WIDTH = WORKSPACE_TREE_DEFAULT_WIDTH + WORKSPACE_PREVIEW_TARGET_WIDTH;
-const WORKSPACE_CONTEXT_MENU_FILE_HEIGHT = 136;
-const WORKSPACE_CONTEXT_MENU_REF_HEIGHT = 92;
 const WORKSPACE_CONTEXT_MENU_SELECTION_HEIGHT = 48;
 const WORKSPACE_MAX_PREVIEW_TABS = 5;
 
@@ -2123,6 +2122,7 @@ export function WorkspacePanel({
                       onSelect: () => void addTreeFileToChat(),
                     },
                   ]),
+              ...workspacePathCopyMenuItems({ path: treeMenu.path, resolveAbsolutePath: () => app.ResolveWorkspacePathForTab(workspaceTabId, treeMenu.path), isScopeCurrent: () => currentWorkspaceScopeKeyRef.current === workspaceScopeKey, close: () => setTreeMenu(null), relativeLabel: t("workspace.copyRelativePath"), absoluteLabel: t("workspace.copyAbsolutePath") }),
               {
                 icon: <FolderOpen size={14} />,
                 label: t("workspace.revealInFileManager"),

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/autoresearch"
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/evidence"
@@ -333,9 +332,6 @@ func (c *activationStubController) GoalStatus() string       { return "" }
 func (c *activationStubController) Turn() int                { return 0 }
 func (c *activationStubController) GoalRuntime() control.GoalRuntimeView {
 	return control.GoalRuntimeView{}
-}
-func (c *activationStubController) AutoResearchSummary() (*autoresearch.Summary, bool) {
-	return nil, false
 }
 func (c *activationStubController) Todos() []evidence.TodoItem { return nil }
 func (c *activationStubController) SnapshotForShutdown() error { return nil }

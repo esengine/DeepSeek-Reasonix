@@ -80,11 +80,11 @@ func TestLoadIncludesStableGlobalPreferencesAndFeedback(t *testing.T) {
 	}
 
 	set := Load(Options{CWD: proj, UserDir: user})
-	if len(set.GlobalGuidance) != 2 {
-		t.Fatalf("global guidance = %+v, want user + feedback only", set.GlobalGuidance)
+	if len(set.PinnedGuidance) != 2 {
+		t.Fatalf("global guidance = %+v, want user + feedback only", set.PinnedGuidance)
 	}
 	block := set.Block()
-	for _, want := range []string{"## Global preferences and feedback", "GLOBAL USER BODY", "GLOBAL FEEDBACK BODY"} {
+	for _, want := range []string{"## Pinned preferences and feedback", "GLOBAL USER BODY", "GLOBAL FEEDBACK BODY"} {
 		if !strings.Contains(block, want) {
 			t.Fatalf("Block() missing %q:\n%s", want, block)
 		}
@@ -94,10 +94,10 @@ func TestLoadIncludesStableGlobalPreferencesAndFeedback(t *testing.T) {
 			t.Fatalf("Block() promoted non-guidance body %q:\n%s", excluded, block)
 		}
 	}
-	if strings.Index(block, "GLOBAL USER BODY") > strings.Index(block, "GLOBAL FEEDBACK BODY") {
-		t.Fatalf("global guidance is not deterministically sorted by name:\n%s", block)
+	if strings.Index(block, "GLOBAL FEEDBACK BODY") > strings.Index(block, "GLOBAL USER BODY") {
+		t.Fatalf("pinned guidance must sort most-recently-updated first:\n%s", block)
 	}
-	if strings.Index(block, "## Global preferences and feedback") > strings.Index(block, "# Instructions") && strings.Contains(block, "# Instructions") {
+	if strings.Index(block, "## Pinned preferences and feedback") > strings.Index(block, "# Instructions") && strings.Contains(block, "# Instructions") {
 		t.Fatalf("lower-priority global guidance must precede standing instructions:\n%s", block)
 	}
 	if again := set.Block(); again != block {
@@ -131,8 +131,8 @@ func TestLoadProjectFactSuppressesEquivalentGlobalGuidance(t *testing.T) {
 	}
 
 	set := Load(Options{CWD: proj, UserDir: user})
-	if len(set.GlobalGuidance) != 1 || set.GlobalGuidance[0].Name != "language" {
-		t.Fatalf("global guidance = %+v, want only unshadowed language preference", set.GlobalGuidance)
+	if len(set.PinnedGuidance) != 1 || set.PinnedGuidance[0].Name != "language" {
+		t.Fatalf("global guidance = %+v, want only unshadowed language preference", set.PinnedGuidance)
 	}
 	block := set.Block()
 	if strings.Contains(block, "Always be verbose.") {
@@ -317,5 +317,29 @@ func TestImportDiamondAndCycle(t *testing.T) {
 	bodyCycle := setCycle.Docs[0].Body
 	if !strings.Contains(bodyCycle, "skipped: import cycle") {
 		t.Errorf("expected import cycle to be detected and reported. Body:\n%s", bodyCycle)
+	}
+}
+
+func TestLoadHidesMemoryUnderExperimentEnv(t *testing.T) {
+	root := t.TempDir()
+	user := filepath.Join(root, "user")
+	proj := filepath.Join(root, "project")
+	mustMkdir(t, filepath.Join(proj, ".git"))
+	mustWrite(t, filepath.Join(proj, "AGENTS.md"), "STANDING INSTRUCTION BODY")
+	store := StoreFor(user, proj)
+	if _, err := store.Save(Memory{Name: "pinned-pref", Description: "always on", Activation: ActivationPinned, Body: "PINNED BODY"}); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REASONIX_EXPERIMENT_NO_MEMORY", "1")
+	set := Load(Options{CWD: proj, UserDir: user})
+	if len(set.PinnedGuidance) != 0 || strings.TrimSpace(set.Index) != "" || set.Store.Dir != "" {
+		t.Fatalf("memory-off arm leaked store state: %+v", set)
+	}
+	if !strings.Contains(set.Block(), "STANDING INSTRUCTION BODY") {
+		t.Fatal("instruction docs must survive the memory-off arm")
+	}
+	if AutoRecall(set.Store, "always on pinned pref", RecallOptions{}).Hits != nil {
+		t.Fatal("a zero store must not recall")
 	}
 }

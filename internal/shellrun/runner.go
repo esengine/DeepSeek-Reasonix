@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,22 @@ import (
 
 // DefaultWaitDelay mirrors the bash tool's child-process wait grace.
 const DefaultWaitDelay = 5 * time.Second
+
+const (
+	// combinedOutputMaxBytes bounds the foreground output retained in memory.
+	// Tool-result truncation happens only after the process exits, so it cannot
+	// protect the host from a command that prints forever (#6473, #6528).
+	combinedOutputMaxBytes = 10 << 20
+	// Keep the final diagnostics as well as the command's opening context after
+	// the cap is crossed. Build and test failures are commonly printed last.
+	combinedOutputTailBytes = 64 << 10
+	combinedOutputTruncated = "\n\n...[shell output truncated at 10 MiB; showing the final 64 KiB]...\n\n"
+	// Live progress crosses async UI queues and append-only reducers before the
+	// final bounded result replaces it. Keep that transient path small too, or a
+	// never-ending command can still exhaust memory while Combined stays bounded.
+	progressOutputMaxBytes  = 64 << 10
+	progressOutputTruncated = "\n\n...[live shell output capped at 64 KiB; final diagnostics will appear when the command exits]...\n\n"
+)
 
 var errForegroundTimeout = errors.New("shell foreground timeout")
 
@@ -86,11 +103,11 @@ func RunForeground(ctx context.Context, req Request) Result {
 	cmd.Env = req.Env
 	cmd.WaitDelay = waitDelay
 
-	collector := newOutputCollector(tool.OutputTailMaxBytes)
+	collector := newOutputCollector(combinedOutputMaxBytes, tool.OutputTailMaxBytes)
 	var writers []io.Writer
 	writers = append(writers, collector.combined, collector.tail)
 	if req.Progress != nil {
-		writers = append(writers, &progressWriter{emit: req.Progress})
+		writers = append(writers, newProgressWriter(req.Progress, progressOutputMaxBytes, progressOutputTruncated))
 	}
 	// Stdout and Stderr must stay the *same* writer value: os/exec then hands the
 	// child a single pipe, so the two streams interleave in the order the child
@@ -212,13 +229,18 @@ func isCanceledWait(err error) bool {
 // on the Buffer.
 type outputCollector struct {
 	mu       sync.Mutex
-	combined *lockedBuffer
+	combined *boundedBuffer
 	tail     *tailWriter
 }
 
-func newOutputCollector(tailLimit int) *outputCollector {
+func newOutputCollector(combinedLimit, tailLimit int) *outputCollector {
 	c := &outputCollector{}
-	c.combined = &lockedBuffer{mu: &c.mu}
+	c.combined = &boundedBuffer{
+		mu:        &c.mu,
+		limit:     combinedLimit,
+		tailLimit: combinedOutputTailBytes,
+		marker:    combinedOutputTruncated,
+	}
 	c.tail = &tailWriter{mu: &c.mu, limit: tailLimit}
 	return c
 }
@@ -229,23 +251,69 @@ func (c *outputCollector) tailString() string {
 	return string(c.tail.buf)
 }
 
-// lockedBuffer is a bytes.Buffer guarded by an external mutex so MultiWriter
-// concurrent writes from stdout and stderr stay race-free.
-type lockedBuffer struct {
-	mu  *sync.Mutex
-	buf bytes.Buffer
+// boundedBuffer keeps complete output up to limit. Once output crosses the
+// limit it retains a head plus a rolling tail separated by marker. Write always
+// reports the full input consumed so a safety cap never changes child-process
+// behavior into an artificial short-write failure.
+type boundedBuffer struct {
+	mu        *sync.Mutex
+	buf       bytes.Buffer
+	tail      []byte
+	limit     int
+	tailLimit int
+	marker    string
+	truncated bool
 }
 
-func (b *lockedBuffer) Write(p []byte) (int, error) {
+func (b *boundedBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	if len(p) == 0 {
+		return 0, nil
+	}
+	if !b.truncated && (b.limit <= 0 || b.buf.Len()+len(p) <= b.limit) {
+		_, err := b.buf.Write(p)
+		return len(p), err
+	}
+	if !b.truncated {
+		b.truncated = true
+		headLimit := max(0, b.limit-b.tailLimit-len(b.marker))
+		previous := b.buf.Bytes()
+		b.tail = appendBoundedTail(b.tail, previous, b.tailLimit)
+		if b.buf.Len() > headLimit {
+			b.buf.Truncate(headLimit)
+		}
+	}
+	b.tail = appendBoundedTail(b.tail, p, b.tailLimit)
+	return len(p), nil
 }
 
-func (b *lockedBuffer) String() string {
+func (b *boundedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.String()
+	if !b.truncated {
+		return b.buf.String()
+	}
+	var out strings.Builder
+	out.Grow(b.buf.Len() + len(b.marker) + len(b.tail))
+	out.Write(b.buf.Bytes())
+	out.WriteString(b.marker)
+	out.Write(b.tail)
+	return out.String()
+}
+
+func appendBoundedTail(dst, p []byte, limit int) []byte {
+	if limit <= 0 || len(p) >= limit {
+		if limit <= 0 {
+			return nil
+		}
+		return append(dst[:0], p[len(p)-limit:]...)
+	}
+	if overflow := len(dst) + len(p) - limit; overflow > 0 {
+		copy(dst, dst[overflow:])
+		dst = dst[:len(dst)-overflow]
+	}
+	return append(dst, p...)
 }
 
 type tailWriter struct {
@@ -264,11 +332,39 @@ func (w *tailWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-type progressWriter struct{ emit func(string) }
+type progressWriter struct {
+	mu        sync.Mutex
+	emit      func(string)
+	limit     int
+	forwarded int
+	marker    string
+	truncated bool
+}
+
+func newProgressWriter(emit func(string), limit int, marker string) *progressWriter {
+	return &progressWriter{emit: emit, limit: max(0, limit), marker: marker}
+}
 
 func (w *progressWriter) Write(p []byte) (int, error) {
-	if w.emit != nil && len(p) > 0 {
-		w.emit(string(p))
+	if len(p) == 0 {
+		return 0, nil
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.emit == nil || w.truncated {
+		return len(p), nil
+	}
+	remaining := max(0, w.limit-w.forwarded)
+	forward := min(len(p), remaining)
+	if forward > 0 {
+		w.emit(string(p[:forward]))
+		w.forwarded += forward
+	}
+	if forward < len(p) {
+		w.truncated = true
+		if w.marker != "" {
+			w.emit(w.marker)
+		}
 	}
 	return len(p), nil
 }

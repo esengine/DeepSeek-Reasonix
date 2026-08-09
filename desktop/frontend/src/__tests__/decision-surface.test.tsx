@@ -8,7 +8,6 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import gsap from "gsap";
 import { ApprovalModal } from "../components/ApprovalModal";
 import { ClearContextCard } from "../components/ClearContextCard";
 import { RuntimeDecisionCard } from "../components/RuntimeDecisionCard";
@@ -25,17 +24,6 @@ const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
 let passed = 0;
 let failed = 0;
-
-type GsapToOptions = { onComplete?: () => void };
-const gsapForTests = (typeof gsap.to === "function" ? gsap : (gsap as unknown as { default?: typeof gsap }).default) as unknown as {
-  to?: (target: unknown, vars: GsapToOptions) => unknown;
-};
-if (typeof gsapForTests.to === "function") {
-  gsapForTests.to = (_target: unknown, vars: GsapToOptions) => {
-    vars.onComplete?.();
-    return {};
-  };
-}
 
 function ok(value: boolean, label: string) {
   if (value) {

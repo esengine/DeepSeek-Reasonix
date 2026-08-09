@@ -169,7 +169,7 @@ const scenario = (id: string): UIPerfScenario => {
 {
   let long = reducer({ ...initialState }, { type: "event", e: { kind: "turn_started" } as WireEvent });
   for (let turn = 0; turn < 100; turn += 1) {
-    long = reducer(long, { type: "user", text: `question ${turn}`, seq: long.seq });
+    long = reducer(long, { type: "user", text: `question ${turn}`, seq: long.seq, submissionId: `perf-${turn}` });
     if (turn < 30) {
       const id = `tool-${turn}`;
       long = reducer(long, { type: "event", e: { kind: "tool_dispatch", tool: { id, name: "edit_file", readOnly: false, args: "{}" } } as WireEvent });

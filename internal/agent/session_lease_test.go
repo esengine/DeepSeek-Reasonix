@@ -387,14 +387,12 @@ func TestSessionLeaseReleaseRevokesRepairAuthorizationBeforeUnlock(t *testing.T)
 	if err != nil {
 		t.Fatalf("TryAcquireSessionLease: %v", err)
 	}
-	unlock := lease.unlock
 	checked := false
-	lease.unlock = func() {
+	lease.beforeReleaseLock = func() {
 		checked = true
 		if SessionLeaseHeldByCurrentRuntime(userPath) {
 			t.Error("release kept repair authorization active while unlocking the OS lease")
 		}
-		unlock()
 	}
 
 	lease.Release()

@@ -27,7 +27,7 @@ type runLoopState struct {
 	emptyFinalBlocks   int
 	handoffNudges      int
 	usedAnyTool        bool
-	goalToolRepairs    int
+	contextToolRepairs int
 	graceRound         bool
 	recoveryGraceRound bool
 
@@ -42,60 +42,6 @@ type runLoopState struct {
 	input string
 
 	workDurationMs func() int64
-}
-
-// perTurnState is the host state valid for exactly one Agent.Run, embedded in
-// Agent so field access stays flat while the lifetime is explicit. beginRunTurn
-// zeroes it in a single assignment before computing the new turn's values; a
-// field added here can never be forgotten in the reset. Anything that must
-// survive turns (delivery checkpoint/scope, failure budgets, storm counters)
-// stays directly on Agent.
-type perTurnState struct {
-	// Delivery expectations classified from the task text (see taskintent).
-	// deliveryCriteriaEstablished may inherit an unfinished canonical task
-	// list on continuation, but the flag itself is recomputed every turn.
-	deliveryCriteriaEstablished bool
-	deliveryTaskExpected        bool
-	deliveryMutationExpected    bool
-	deliveryPersistentExpected  bool
-	deliveryScopeActive         bool
-	// readinessRecovered marks a run that started with evidence preserved from
-	// (or a pending recovery of) a prior readiness failure, so the final
-	// allowed audit can report Recovered=true.
-	readinessRecovered bool
-
-	// recoveryTaskSummary is the bounded task text for this Agent.Run. It lets
-	// a shared recovery gate review sub-agent mutations against the child
-	// task, rather than the root controller transcript.
-	recoveryTaskSummary string
-
-	// blockedTurnStreak counts consecutive turns in which every tool call was
-	// blocked by the host (permission, plan mode, hook, or loop guard).
-	// stormSig catches a model fixated on one call shape; this catches a model
-	// rotating between blocked shapes — alternating tools, reordering a batch,
-	// or blockers whose text varies per attempt — which is zero progress all
-	// the same. Reset by any turn containing a non-blocked outcome and at the
-	// start of each user turn. See applyStormBreaker.
-	blockedTurnStreak int
-
-	// loopGuardArmed / loopGuardReceiptMark let final readiness stand down
-	// after a loop guard fired this user turn: once the host has told the model
-	// to stop retrying and report the blocker, demanding the receipts that the
-	// blocker prevents would restart the loop the guard just broke. The mark is
-	// the evidence-ledger receipt count from just before the guarded batch, so
-	// real progress — a successful write or command receipt landing after it —
-	// revokes the pass, while the bookkeeping the guard itself recommends
-	// (ask, todo_write, complete_step) keeps it. Host state, not message text:
-	// tool output that merely quotes "[loop guard]" must not unlock readiness.
-	// See loopGuardAllowsFinal.
-	loopGuardArmed       bool
-	loopGuardReceiptMark int
-
-	// repeatSuccessCounts tracks write-like tool calls that have already
-	// succeeded in this user turn. This catches the complementary loop shape to
-	// stormSig: a model keeps doing the same successful write, so there is no
-	// error for the failure-only storm breaker to see.
-	repeatSuccessCounts map[string]int
 }
 
 // streamedTurn is one provider completion collected by stream. Keeping the
@@ -327,6 +273,7 @@ func (a *Agent) beginRunTurn(ctx context.Context, input string) (rawInput string
 // runToolLoop owns the main tool-round budget and dispatches each streamed
 // assistant turn into final-response or tool-round handling.
 func (a *Agent) runToolLoop(ctx context.Context, state *runLoopState) error {
+	ctx = a.withAgentContext(ctx)
 	for step := 0; state.runMaxSteps <= 0 || step < state.runMaxSteps || state.graceRound || state.recoveryGraceRound; step++ {
 		// Consume a queued steer and persist it to the session so it
 		// survives tab switches and history replay. The model sees it as
@@ -773,9 +720,7 @@ func mergeSamplingUsage(acc, attempt *provider.Usage) *provider.Usage {
 	return &merged
 }
 
-// storeLatestRequestUsage records the most recent single-request usage for
-// ContextSnapshot and compaction. It must never receive a multi-attempt
-// billable aggregate.
+// storeLatestRequestUsage records single-request usage, never a billable aggregate.
 func (a *Agent) storeLatestRequestUsage(attempt *provider.Usage) {
 	if a == nil || attempt == nil {
 		return
@@ -785,8 +730,9 @@ func (a *Agent) storeLatestRequestUsage(attempt *provider.Usage) {
 		return
 	}
 	clone := *attempt
-	// RequestCount on lastUsage is not used for context; keep per-attempt value.
+	// Keep the per-attempt RequestCount; context calculations do not use it.
 	a.lastUsage.Store(&clone)
+	a.setPromptTokenCalibrationFromUsage(&clone)
 }
 
 // finalizeSamplingUsage builds the Usage event payload for consumers that
@@ -937,7 +883,7 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 	if readiness.applies {
 		event.RecordReadinessAudit(a.sink, readiness.audit(evidence.ReadinessAllowed, a.readinessRecovered))
 	}
-	a.emitContractShadow(state.input)
+	a.emitTurnShadows(state.input)
 	if !a.closeSteerIntakeIfIdle() {
 		return true, nil
 	}
@@ -955,7 +901,20 @@ func (a *Agent) handleFinalResponse(ctx context.Context, state *runLoopState, te
 func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step int, text, reasoning string, calls []provider.ToolCall, usage *provider.Usage) (cont bool, err error) {
 	state.emptyFinalBlocks = 0
 	state.usedAnyTool = true
-	outOfContextGoalOnly := toolCallsAreOutOfContextGoalReports(ctx, calls)
+	unavailableContextTools := a.unavailableContextualToolCalls(ctx, calls)
+	if len(unavailableContextTools) > 0 && state.contextToolRepairs > 0 {
+		msg := fmt.Sprintf("blocked: context-unavailable tools were called again after the repair instruction: %s", strings.Join(unavailableContextTools, ", "))
+		for _, call := range calls {
+			a.session.Add(provider.Message{Role: provider.RoleTool, Content: msg, ToolCallID: call.ID, Name: call.Name})
+		}
+		if hasVisibleFinalAnswer(text) {
+			return a.handleFinalResponse(ctx, state, text, reasoning, usage)
+		}
+		if len(unavailableContextTools) == 1 && unavailableContextTools[0] == "update_goal" {
+			return false, fmt.Errorf("model repeatedly called update_goal outside Goal mode without a visible answer")
+		}
+		return false, fmt.Errorf("model repeatedly called context-unavailable tools without a visible answer: %s", strings.Join(unavailableContextTools, ", "))
+	}
 
 	// Grace round guard: if we already gave the model one extra response
 	// and it still wants to call tools, stop here.
@@ -1012,17 +971,15 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 		a.recordInterruptedDisplay("", "", nil, true, state.workDurationMs())
 		return false, ctx.Err()
 	}
-	if outOfContextGoalOnly {
+	if len(unavailableContextTools) > 0 {
 		if hasVisibleFinalAnswer(text) {
 			// Keep the assistant tool call and host error paired in the transcript,
-			// but accept the co-streamed answer instead of spending another model
-			// request repairing harmless Goal bookkeeping outside Goal mode.
+			// but accept a co-streamed answer without another repair request.
 			return a.handleFinalResponse(ctx, state, text, reasoning, usage)
 		}
-		state.goalToolRepairs++
-		if state.goalToolRepairs > 1 {
-			return false, fmt.Errorf("model repeatedly called update_goal outside Goal mode without a visible answer")
-		}
+		state.contextToolRepairs++
+		nudge := fmt.Sprintf("The following tools are unavailable in the current workflow phase: %s. Do not call them again. Respond to the user's request with visible answer text now; call a different tool only if it is still needed to complete the request.", strings.Join(unavailableContextTools, ", "))
+		a.session.Add(provider.Message{Role: provider.RoleUser, Content: a.withTurnPreferences(nudge)})
 	}
 	if !a.planMode.Load() {
 		nextProgress, nextTracking := a.canonicalTodoProgress()
@@ -1095,17 +1052,29 @@ func (a *Agent) handleToolRound(ctx context.Context, state *runLoopState, step i
 	return true, nil
 }
 
-func toolCallsAreOutOfContextGoalReports(ctx context.Context, calls []provider.ToolCall) bool {
+func (a *Agent) unavailableContextualToolCalls(ctx context.Context, calls []provider.ToolCall) []string {
 	if len(calls) == 0 {
-		return false
+		return nil
 	}
-	if _, ok := tool.GoalTurnRecorderFromContext(ctx); ok {
-		return false
+	if a == nil || a.tools == nil {
+		return nil
 	}
+	names := make([]string, 0, len(calls))
+	seen := make(map[string]struct{}, len(calls))
 	for _, call := range calls {
-		if call.Name != "update_goal" {
-			return false
+		t, canonical, ambiguous := a.tools.ResolveCall(call.Name)
+		if t == nil || len(ambiguous) > 0 {
+			continue
 		}
+		contextual, ok := t.(tool.ContextualTool)
+		if !ok || contextual.ProviderVisible(ctx) {
+			continue
+		}
+		if _, ok := seen[canonical]; ok {
+			continue
+		}
+		seen[canonical] = struct{}{}
+		names = append(names, canonical)
 	}
-	return true
+	return names
 }

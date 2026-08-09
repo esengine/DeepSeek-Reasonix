@@ -33,6 +33,7 @@ import {
   extractLargePlainMarkdownTables,
   type VirtualMarkdownTableData,
 } from "./largeMarkdownTable";
+import { isLocalFileHref } from "./localFileUrl";
 
 export type { HastRoot, HastRootContent };
 
@@ -72,11 +73,11 @@ export function defaultMarkdownUrlTransform(value: string): string {
   return "";
 }
 
-// file:/// hrefs come from local-path linkification (remarkLocalPathLinks)
-// and must survive URL sanitisation, which would otherwise blank them along
-// with javascript: and friends.
+// Local file hrefs come from local-path linkification (remarkLocalPathLinks)
+// or explicit Markdown links and must survive URL sanitisation, which would
+// otherwise blank them along with javascript: and friends.
 export function markdownUrlTransform(value: string): string {
-  return value.startsWith("file:///") ? value : defaultMarkdownUrlTransform(value);
+  return isLocalFileHref(value) ? value : defaultMarkdownUrlTransform(value);
 }
 
 // The same transform react-markdown applies between the rehype plugins and

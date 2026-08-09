@@ -169,10 +169,11 @@ func platformExternalOpenerIconDataURL(spec externalOpenerSpec) string {
 }
 
 func darwinExternalOpenerCommand(spec externalOpenerSpec, path string) *exec.Cmd {
+	launchPath := externalOpenerLaunchPath(spec, path)
 	if spec.LaunchMode == "ghostty" {
-		return exec.Command("/usr/bin/open", "-na", spec.Target, "--args", "--working-directory="+path)
+		return exec.Command("/usr/bin/open", "-na", spec.Target, "--args", "--working-directory="+launchPath)
 	}
-	return exec.Command("/usr/bin/open", "-a", spec.Target, path)
+	return exec.Command("/usr/bin/open", "-a", spec.Target, launchPath)
 }
 
 func launchPlatformExternalOpener(spec externalOpenerSpec, path string) error {

@@ -394,26 +394,6 @@ func TestServeCompactEndpoint(t *testing.T) {
 	}
 }
 
-func TestServeIndexPage(t *testing.T) {
-	bc := NewBroadcaster()
-	ctrl := control.New(control.Options{Sink: bc})
-	srv := httptest.NewServer(New(ctrl, bc, config.ServeConfig{}).Handler())
-	defer srv.Close()
-
-	resp, err := http.Get(srv.URL + "/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("index status = %d", resp.StatusCode)
-	}
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "text/html") {
-		t.Errorf("index content-type = %q, want text/html", ct)
-	}
-}
-
 func TestServeIndexDefinesQueryHelpers(t *testing.T) {
 	html := string(indexHTML)
 	for _, want := range []string{

@@ -19,6 +19,7 @@ import (
 	"reasonix/internal/event"
 	"reasonix/internal/evidence"
 	"reasonix/internal/jobs"
+	"reasonix/internal/memory"
 	"reasonix/internal/permission"
 	"reasonix/internal/planmode"
 	"reasonix/internal/provider"
@@ -873,7 +874,7 @@ func (t *TaskTool) RunProfileSpec(ctx context.Context, spec ProfileExecSpec) (re
 	modelRef, effortRef := spec.Model, spec.Effort
 	usageModelRef := t.usageModelRef(modelRef, effortRef)
 	parentID, _, _, _ := CallContext(ctx)
-	run, err := t.prepareTranscriptRunWithPrompt(subReg, modelRef, effortRef, ParentSession(ctx), parentID, spec.ContinueFrom, spec.ForkFrom, spec.SystemPrompt, spec.Kind, spec.Name)
+	run, err := t.prepareTranscriptRunWithPrompt(ctx, subReg, modelRef, effortRef, ParentSession(ctx), parentID, spec.ContinueFrom, spec.ForkFrom, spec.SystemPrompt, spec.Kind, spec.Name)
 	if err != nil {
 		return "", err
 	}
@@ -1055,7 +1056,7 @@ func (t *TaskTool) bashCanEnforceWriteRoots() bool {
 	return false
 }
 
-func (t *TaskTool) prepareTranscriptRunWithPrompt(subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, legacyForkFrom, systemPrompt, kind, name string) (*SubagentRun, error) {
+func (t *TaskTool) prepareTranscriptRunWithPrompt(ctx context.Context, subReg *tool.Registry, modelRef, effortRef, parentSession, parentID, continueFrom, legacyForkFrom, systemPrompt, kind, name string) (*SubagentRun, error) {
 	continueFrom = strings.TrimSpace(continueFrom)
 	legacyForkFrom = strings.TrimSpace(legacyForkFrom)
 	parentSession = strings.TrimSpace(parentSession)
@@ -1089,6 +1090,7 @@ func (t *TaskTool) prepareTranscriptRunWithPrompt(subReg *tool.Registry, modelRe
 		ParentToolCallID: parentID,
 		SystemPrompt:     systemPrompt,
 		Registry:         subReg,
+		ToolContext:      childToolIdentityContext(ctx),
 		Model:            identityModel,
 		Effort:           identityEffort,
 	}
@@ -1099,6 +1101,13 @@ func (t *TaskTool) prepareTranscriptRunWithPrompt(subReg *tool.Registry, modelRe
 		return t.transcripts.PrepareLegacyForkFrom(legacyForkFrom, spec)
 	}
 	return t.transcripts.PrepareFresh(spec)
+}
+
+func childToolIdentityContext(ctx context.Context) context.Context {
+	ctx = tool.WithoutGoalTurnRecorder(ctx)
+	ctx = memory.WithoutQueue(ctx)
+	ctx = jobs.WithoutManager(ctx)
+	return planmode.WithActive(ctx, PlanModeFromContext(ctx))
 }
 
 func (t *TaskTool) effectiveIdentity(modelRef, effort string) (string, string) {
@@ -1501,50 +1510,6 @@ func allowlistRequestsUnrestrictedProxy(names []string) bool {
 	return false
 }
 
-var plannerNonResearchTools = []string{
-	"ask",
-	"bash_output",
-	"complete_step",
-	"slash_command",
-	"todo_write",
-	"wait",
-}
-
-// PlannerToolRegistry returns the tool set exposed to the two-model planner:
-// built-in read-only research tools plus the stable use_capability proxy. Direct
-// mcp__* schemas are excluded so MCP connect/disconnect/tool-list churn never
-// changes the Planner provider-visible tool prefix. Workflow/meta tools that are
-// technically read-only but can prompt the user, update visible task state, wait
-// on jobs, or expand commands are also excluded.
-func PlannerToolRegistry(parent *tool.Registry) *tool.Registry {
-	exclude := append(SubagentMetaTools(), plannerNonResearchTools...)
-	base := FilterReadOnlyRegistry(parent, exclude...)
-	sub := tool.NewRegistry()
-	if base != nil {
-		for _, name := range base.Names() {
-			// Never copy the parent proxy or direct MCP: Delivery would share
-			// Executor ledger/audit; MCP schemas are proxy-only for the planner.
-			if name == "use_capability" || strings.HasPrefix(name, tool.MCPNamePrefix) {
-				continue
-			}
-			if tl, ok := base.Get(name); ok {
-				sub.Add(tl)
-			}
-		}
-	}
-	// Always install an isolated frontend (independent ledger/audit; shared Host).
-	if parent != nil {
-		if tl, ok := parent.Get("use_capability"); ok {
-			if uc, ok := tl.(*UseCapabilityTool); ok {
-				sub.Add(uc.CloneForAgent(nil, nil))
-			} else {
-				sub.Add(tl)
-			}
-		}
-	}
-	return sub
-}
-
 // ReadOnlySubagentToolRegistry returns the tool set exposed to read-only
 // sub-agents: read-only research tools plus a bash wrapper that enforces the
 // permission-layer read-only command policy at execution time. Workflow/meta tools are
@@ -1698,6 +1663,9 @@ func (t *TaskTool) runSubSession(ctx context.Context, prompt string, subReg *too
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
 	prompt = t.withWorkspaceContext(prompt)
+	// The child provider owns the final vision decision. Text-only providers
+	// retain the attachment metadata but omit image parts during serialization.
+	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
 	return RunSubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
@@ -1708,6 +1676,7 @@ func (t *TaskTool) runReadOnlySubSession(ctx context.Context, prompt string, sub
 	// intent classification must judge the task, not the wrapper.
 	opts.ClassifierTaskText = prompt
 	prompt = t.withWorkspaceContext(prompt)
+	ctx = WithUserImages(ctx, SubagentImageCandidates(ctx))
 	return RunReadOnlySubAgentWithSession(ctx, prov, subReg, sess, prompt, opts, sink)
 }
 
@@ -1873,6 +1842,15 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 		return "", fmt.Errorf("sub-agent session is nil")
 	}
 	// Isolate temporary files for this run before any tool execution.
+	ctx = tool.WithoutGoalTurnRecorder(ctx)
+	if opts.MemoryQueue != nil {
+		ctx = memory.WithQueue(ctx, opts.MemoryQueue)
+	} else {
+		ctx = memory.WithoutQueue(ctx)
+	}
+	if opts.Jobs == nil {
+		ctx = jobs.WithoutManager(ctx)
+	}
 	ctx, releaseTemp := withSubagentSessionTemp(ctx)
 	defer releaseTemp()
 	if opts.SubagentDepth > 0 {

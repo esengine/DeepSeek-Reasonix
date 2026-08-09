@@ -2,6 +2,8 @@ package taskmonitor
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -424,6 +426,32 @@ func TestInMemoryStore_IdempotencyClaimIsPendingUntilFinalized(t *testing.T) {
 	final, err := store.ClaimIdempotency(context.Background(), "/p", r)
 	if err != nil || final == nil || final.Pending {
 		t.Fatalf("final claim = %+v, err=%v; want finalized record", final, err)
+	}
+}
+
+func TestFileStore_IdempotencyClaimQuarantinesCorruptRecord(t *testing.T) {
+	root := t.TempDir()
+	store := NewFileStore(filepath.Join(".reasonix", "tasks"))
+	key := "broken-key"
+	idemDir := filepath.Join(root, ".reasonix", "tasks", ".idempotency")
+	if err := os.MkdirAll(idemDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(idemDir, key+".json")
+	if err := os.WriteFile(target, []byte(`{"pending":`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := IdempotencyRecord{Key: key, Op: "stop", TaskID: "t1", Version: 1}
+	claimed, err := store.ClaimIdempotency(context.Background(), root, rec)
+	if err != nil || claimed != nil {
+		t.Fatalf("claim = %+v, err=%v; want fresh claim", claimed, err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("fresh claim was not published: %v", err)
+	}
+	backups, err := filepath.Glob(target + ".corrupt-*")
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("corrupt record backups = %v, err=%v; want one quarantined record", backups, err)
 	}
 }
 

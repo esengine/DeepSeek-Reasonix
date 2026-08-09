@@ -36,6 +36,21 @@ var localRegistry = struct {
 // function is called. It serializes both goroutines in this process and other
 // Reasonix processes, and never waits past ctx's deadline.
 func Acquire(ctx context.Context, path string) (func(), error) {
+	return acquire(ctx, path, 0)
+}
+
+// AcquireWithExternalTimeout obtains an exclusive lock while keeping the
+// in-process queue and cross-process file-lock budgets separate. ctx bounds
+// only the wait for another goroutine in this process; externalTimeout starts
+// after that queue is acquired and bounds retries against other processes.
+func AcquireWithExternalTimeout(ctx context.Context, path string, externalTimeout time.Duration) (func(), error) {
+	if externalTimeout <= 0 {
+		return nil, errors.New("external file lock timeout must be positive")
+	}
+	return acquire(ctx, path, externalTimeout)
+}
+
+func acquire(ctx context.Context, path string, externalTimeout time.Duration) (func(), error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -48,6 +63,12 @@ func Acquire(ctx context.Context, path string) (func(), error) {
 		return nil, err
 	}
 	_ = local
+	fileCtx := ctx
+	cancel := func() {}
+	if externalTimeout > 0 {
+		fileCtx, cancel = context.WithTimeout(context.Background(), externalTimeout)
+	}
+	defer cancel()
 
 	for {
 		releaseFile, err := tryLockFile(key)
@@ -67,7 +88,7 @@ func Acquire(ctx context.Context, path string) (func(), error) {
 		timer := time.NewTimer(retryInterval)
 		select {
 		case <-timer.C:
-		case <-ctx.Done():
+		case <-fileCtx.Done():
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -75,7 +96,7 @@ func Acquire(ctx context.Context, path string) (func(), error) {
 				}
 			}
 			releaseLocal()
-			return nil, fmt.Errorf("acquire file lock: %w", ctx.Err())
+			return nil, fmt.Errorf("acquire file lock: %w", fileCtx.Err())
 		}
 	}
 }

@@ -27,6 +27,7 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/config"
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 )
 
@@ -283,7 +284,7 @@ func (a *adapter) saveContextTokens() {
 	if err != nil {
 		return
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, data, 0o600); err != nil {
 		a.logger.Warn("failed to save weixin context tokens", "err", err)
 	}
 }

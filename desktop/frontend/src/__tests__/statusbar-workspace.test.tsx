@@ -52,7 +52,9 @@ console.log("\nstatus bar workspace");
     { id: "demo", label: "demo", host: "192.0.2.10", port: 22, user: "dev", identityFile: "", proxyJump: "", defaultWorkspace: "~/app", serveInstall: "auto", useSSHConfig: false },
   ];
   const stopped = renderStatusBar({ workspacePath: "/workspace/repo", workspaceName: "repo", remoteHosts });
-  ok(stopped.includes("SSH · Disconnected"), "configured SSH entry remains visible while disconnected");
+  ok(stopped.includes("SSH · Disconnected"), "disconnected SSH entry keeps its full accessible status");
+  ok(stopped.includes('statusbar__remote--idle'), "disconnected SSH entry uses the compact idle treatment");
+  ok(stopped.includes('<span class="statusbar__remote-label">SSH</span>'), "disconnected SSH entry renders only the compact SSH label");
   ok(stopped.indexOf("SSH · Disconnected") < stopped.indexOf("workspace/repo"), "window-level SSH entry leads the status bar");
 
   const connected = renderStatusBar({
@@ -62,6 +64,8 @@ console.log("\nstatus bar workspace");
     remoteStatuses: { demo: { hostId: "demo", state: "connected" } },
   });
   ok(connected.includes("demo · Connected"), "SSH entry includes host and connected state text");
+  ok(connected.includes('statusbar__remote-state-dot'), "connected SSH entry renders a state dot");
+  ok(connected.includes('<span class="statusbar__remote-label">demo</span>'), "connected SSH entry renders the host without redundant state text");
 
   const failed = renderStatusBar({
     workspacePath: "/workspace/repo",
@@ -69,6 +73,7 @@ console.log("\nstatus bar workspace");
     remoteStatuses: { demo: { hostId: "demo", state: "stopped", error: "handshake failed" } },
   });
   ok(failed.includes("demo · Connection failed"), "SSH entry keeps a recoverable failure summary visible");
+  ok(failed.includes('<span class="statusbar__remote-label">demo · Connection failed</span>'), "failed SSH entry keeps the failure visible in the status bar");
   ok(!failed.includes("handshake failed"), "status entry keeps raw connection diagnostics out of primary chrome");
 
   const degraded = renderStatusBar({
@@ -204,6 +209,24 @@ console.log("\nstatus bar workspace");
     lastTurnOutputEstimated: true,
   });
   ok(estimated.includes("≈20 t/s"), "fallback TPS is visibly marked as estimated");
+
+  const perRequest = renderStatusBar({
+    items: ["turn_tps"],
+    lastRequestTps: 35,
+    lastTurnOutputTokens: 100,
+    lastTurnModelMs: 5_000,
+  });
+  ok(perRequest.includes("35 t/s"), "per-request TPS wins over the completed turn value");
+
+  const slowRequest = renderStatusBar({
+    items: ["turn_tps"], lastRequestTps: 1 / 3, lastTurnOutputTokens: 100, lastTurnModelMs: 5_000,
+  });
+  ok(slowRequest.includes("&lt;1 t/s") && !slowRequest.includes("20 t/s"), "sub-one request TPS replaces the stale turn fallback");
+
+  const unavailable = renderStatusBar({
+    items: ["turn_tps"], lastRequestTps: null, lastTurnOutputTokens: 100, lastTurnModelMs: 5_000,
+  });
+  ok(unavailable.includes('stat__value--empty">-</b>') && !unavailable.includes("20 t/s"), "unmeasured latest requests clear the stale turn fallback");
 }
 
 {

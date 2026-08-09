@@ -223,7 +223,7 @@ func redactSessionTranscript(path string, dryRun bool) (int64, int64, error) {
 	// The replayed view alone is not enough: a replace event supersedes
 	// earlier records without erasing them, so a raw secret can survive in a
 	// stale event while the current messages are already clean. Scan every
-	// record; Session.Save compacts the whole log into a single clean replace
+	// record; SaveRewriteCompact folds the whole log into one clean replace
 	// event, which erases the stale bytes.
 	if !messagesNeedRedaction(s.Messages) && !(eventLogExists && eventLogNeedsRedaction(eventLog)) {
 		return 0, 0, nil
@@ -232,7 +232,11 @@ func redactSessionTranscript(path string, dryRun bool) (int64, int64, error) {
 		return files, redactedEncodedSize(s.Messages), nil
 	}
 	s.Replace(secrets.RedactMessages(s.Messages))
-	if err := s.Save(path); err != nil {
+	// Redaction is an intentional rewrite, but it must still be CAS-protected:
+	// the loaded transcript may have gone stale while the doctor inspected it.
+	// SaveRewrite preserves the newer external transcript and reports a conflict
+	// instead of force-replacing it with an older pre-redaction snapshot.
+	if err := s.SaveRewriteCompact(path); err != nil {
 		return 0, 0, err
 	}
 	var rewritten int64
@@ -300,7 +304,10 @@ func redactedEncodedSize(msgs []provider.Message) int64 {
 // (preview, titles, goal, recovery reason) through the typed load/save pair so
 // revisions, digests, and timestamps survive untouched.
 func redactBranchMeta(sessionPath string, dryRun bool) (int64, int64, error) {
-	unlock := agent.LockSessionMetaPath(sessionPath)
+	unlock, err := agent.LockSessionMetaPath(sessionPath)
+	if err != nil {
+		return 0, 0, err
+	}
 	defer unlock()
 	meta, ok, err := agent.LoadBranchMeta(sessionPath)
 	if err != nil || !ok {
@@ -319,7 +326,7 @@ func redactBranchMeta(sessionPath string, dryRun bool) (int64, int64, error) {
 	if dryRun {
 		return 1, 0, nil
 	}
-	if err := agent.SaveBranchMetaPreserveUpdated(sessionPath, meta); err != nil {
+	if err := agent.SaveBranchMetaPreserveUpdatedLocked(sessionPath, meta); err != nil {
 		return 0, 0, err
 	}
 	var rewritten int64

@@ -37,7 +37,7 @@ func TestCompatibilityRewindRequiresConfirmationForPartialCoverage(t *testing.T)
 		WorkspaceRoot: root,
 		Sink:          event.Discard,
 	})
-	c.beginCheckpoint("edit partial.txt")
+	c.beginCheckpoint(context.Background(), "edit partial.txt")
 	c.mutationObserver.BeforeMutation("partial.txt", "write_file", checkpoint.CaptureBeforeMutation)
 	if err := os.WriteFile(path, []byte("after"), 0o644); err != nil {
 		t.Fatal(err)

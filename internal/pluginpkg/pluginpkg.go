@@ -533,7 +533,16 @@ func parseCodexLike(path, root, kind string, includeCodexSessionStartHook bool) 
 	if kind == "claude" {
 		warnings = append(warnings, applyClaudeConventionDirs(root, &manifest)...)
 	}
-	compatWarnings, compatIssues := applyClaudeCompatibility(root, &manifest)
+	var compatWarnings []string
+	var compatIssues []CompatibilityIssue
+	if kind == "claude" {
+		// Claude Code does not treat a plugin-root CLAUDE.md as project
+		// context. Keep its supported hook and MCP conventions without
+		// synthesizing an extra SessionStart context hook.
+		compatWarnings, compatIssues = appendClaudeCompatibility(root, &manifest)
+	} else {
+		compatWarnings, compatIssues = applyClaudeCompatibility(root, &manifest)
+	}
 	warnings = append(warnings, compatWarnings...)
 	issues = append(issues, compatIssues...)
 	if err := validateManifest(root, &manifest); err != nil {
@@ -644,27 +653,6 @@ func ManifestPath(kind string) string {
 
 func ManifestPaths() []string {
 	return []string{NativeManifest, CodexManifest, ClaudeManifest}
-}
-
-func applyClaudeCompatibility(root string, manifest *Manifest) ([]string, []CompatibilityIssue) {
-	appendRootClaudeInstructions(root, manifest)
-	return appendClaudeCompatibility(root, manifest)
-}
-
-func appendRootClaudeInstructions(root string, manifest *Manifest) {
-	path := filepath.Join(root, claudeInstructions)
-	info, err := os.Stat(path)
-	if err != nil || !info.Mode().IsRegular() {
-		return
-	}
-	if manifest.Hooks == nil {
-		manifest.Hooks = map[string][]Hook{}
-	}
-	manifest.Hooks["SessionStart"] = append(manifest.Hooks["SessionStart"], Hook{
-		ContextFile: claudeInstructions,
-		Cwd:         ".",
-		Description: "Plugin CLAUDE.md startup context from " + manifest.Name,
-	})
 }
 
 func claudeTimeoutMillis(seconds int) int {

@@ -50,10 +50,13 @@ func forkDesktopRecoveryBranch(t *testing.T, dir, name string) (parentPath, bran
 
 func coverDesktopRecoveryParent(t *testing.T, parentPath string, branchMsgs []provider.Message) {
 	t.Helper()
-	parent := agent.NewSession("")
-	parent.Messages = append([]provider.Message(nil), branchMsgs...)
+	parent, err := agent.LoadSession(parentPath)
+	if err != nil {
+		t.Fatalf("Load covering recovery parent: %v", err)
+	}
+	parent.Replace(append([]provider.Message(nil), branchMsgs...))
 	parent.Add(provider.Message{Role: provider.RoleAssistant, Content: "parent kept the recovery content"})
-	if err := parent.Save(parentPath); err != nil {
+	if err := parent.SaveRewrite(parentPath); err != nil {
 		t.Fatalf("Save covering recovery parent: %v", err)
 	}
 }

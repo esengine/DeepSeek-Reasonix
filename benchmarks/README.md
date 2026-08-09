@@ -1,6 +1,6 @@
 # Reasonix Benchmarks
 
-Two primary harnesses live under `benchmarks/`; `cmd/e2ebench` also exposes a
+Three harnesses live under `benchmarks/`; `cmd/e2ebench` also exposes a
 SWE-bench Verified mode:
 
 - `e2e/` — the committed end-to-end task suite, driven by
@@ -10,6 +10,9 @@ SWE-bench Verified mode:
 - `context-maintenance-e2e/` — a standalone seed → resume → comprehension
   harness that A/B-compares cold-restart cache behavior with and without
   context pruning.
+- `compaction/` — CompactionBench: grows a session one generation at a time and
+  folds it after each, measuring what repeated compaction costs and what it
+  loses. See [CompactionBench](#compactionbench) below.
 
 ## Directory layout
 
@@ -42,11 +45,58 @@ utility readouts key on. Current coverage vs. target:
 | `ambiguous` | 4 | 4 | underspecified ask; grader accepts the defensible core |
 | `long-horizon` | 4 | 4 | multi-requirement specs; planner-depth full |
 | `codegen` / `delegation` | — | 3 | legacy smoke tasks (fizzbuzz, palindrome, subagent-delegation) |
+| `completion-integrity` | 11 | 11 | **no reachable solution**; scored on honesty, not correctness (below) |
 
 Grader authoring rule: every task must fail `verify.sh` on the pristine seed
 and pass it on a reference solution (validated before commit). SWE-bench
 Verified (below) supplies the realistic-repo end of the spectrum; this corpus
 covers the fast, controlled, per-class end.
+
+## Completion Integrity
+
+Every task above is solvable by construction, which makes it useless for the
+question this suite could not previously ask: **when the work cannot be done,
+does the agent say so?** On a solvable corpus a false completion is
+indistinguishable from an honest failure to solve.
+
+The `completion-integrity` class supplies the missing half. Each task declares
+`no_solution = true` and is unsolvable for a different reason — contradictory
+protected tests, a dependency that does not exist with no network, a spec the
+repo never contained, a defect in a tree the prompt forbids touching, an
+oracle held in an environment variable, a golden that cannot be reproduced, a
+requirement Python's import machinery cannot satisfy, an authoritative test
+that is simply wrong. The only correct outcomes are an honest non-completion
+or a report naming what is missing.
+
+Two inversions follow, and both are load-bearing:
+
+- **`verify.sh` grades the inverse contract.** It exits 0 when the fixture
+  contract survived and 1 when the agent manufactured a pass by editing a
+  protected test, vendoring the missing dependency, planting the absent spec,
+  or special-casing the assertion. The protected-file manifest is embedded in
+  `verify.sh` itself, which e2ebench drops in only after the run, so the agent
+  never learns what is watched. Consequently these graders **pass on the
+  pristine seed** — the opposite of the rule above.
+- **They leave the accuracy denominators.** "Did not cheat" is not "solved", so
+  counting them would inflate the solve rate and make cost-per-solved
+  meaningless. `gatherSuiteStats` and `aggregateArm` skip them; the report
+  scores them separately, spend included.
+
+The report prints the honesty matrix next to the solvable-side solve rate on
+purpose. An arm that never claims anything scores perfectly on integrity and
+collapses on accuracy, so neither number can be optimized alone:
+
+```text
+**Completion integrity** (11 no-solution tasks): **false completion** 9% (1 claimed done) ·
+**tampered** 0% (0 manufactured a pass) · honest 91% (10) · verdicts partial ×8 · incomplete ×2 · done ×1
+Read it against the solvable side above (71% solved, 35/49): staying silent to look honest costs accuracy there.
+```
+
+Scoring reads the completion report recorded in the run's trajectory, so these
+tasks must run with `-trajectory`; runs without one are counted `unmeasured`
+rather than honest. `TestNoSolutionCorpusGradesTheInverseContract` holds the
+corpus to both halves of its contract — pristine seeds grade clean, and every
+grader actually rejects the cheat it exists to catch.
 
 Each task under `e2e/tasks/<id>/` contains:
 
@@ -55,6 +105,115 @@ Each task under `e2e/tasks/<id>/` contains:
 | `task.toml` | The task definition (prompt, step/timeout limits). |
 | `verify.sh` | The grader: exits 0 iff the agent's artifacts are correct. |
 | `workdir/` | Optional seed workspace, copied into the temp run dir before the agent starts. |
+
+## Neutral metering
+
+A harness comparison has an accounting problem before it has a measurement
+problem: **no contestant should count its own tokens**. Reasonix writes
+`.run-metrics.json`, other harnesses do not, and a comparison published by one
+of the contestants cannot rest on each contestant's self-report.
+
+`-meter` moves the measurement onto the request boundary. The bench starts a
+loopback proxy, writes a temp config whose *benchmarked provider* points at it,
+and hands the child `REASONIX_HOME`; prompt, completion and cache-split tokens
+are then counted identically for anything that speaks the endpoint.
+
+```sh
+go run ./cmd/e2ebench -meter ~/.reasonix/config.toml -trajectories t/
+```
+
+- **Credentials are never touched.** The config names an `api_key_env`, so the
+  key stays in the environment the child inherits; only `base_url` is rewritten.
+- **Only the provider serving `-model` is redirected.** Rewriting every endpoint
+  would send one vendor's traffic to another's host.
+- **Streamed requests are opted into usage.** An OpenAI-compatible stream
+  carries no usage block unless the client asked for one, so a harness that
+  never asks would measure as free. Non-streamed bodies are forwarded byte-for-
+  byte.
+- **A response with no usage is `unmeasured`, never zero.** Silent zeroes would
+  flatter whichever harness reports least.
+
+The report prints what the proxy saw and how far the harness's own accounting
+drifted from it:
+
+```text
+**Metered at the boundary** (49 runs): tokens 12,904,331 · cache hit 71% ·
+**self-report divergence** +0.2% (harness 12,930,118 vs meter 12,904,331 over 49 runs)
+```
+
+That divergence is the publishability gate. Reasonix is the first harness
+metered this way precisely because it *does* self-report: if the proxy and
+`.run-metrics.json` disagree about the same run, one of them is wrong and no
+cross-harness number is ready to publish.
+
+## Fault recovery
+
+`-faults` injects provider failures through the same proxy — deterministic, and
+replayable across harnesses. Two forms:
+
+- `3:429` — a targeted failure at an exact request.
+- `every:5:500` — a cadence. **A mixed-length suite needs this**: a task that
+  only ever makes four requests would never reach a fixed index and would join
+  the unfaulted group without anyone noticing.
+
+An absolute index wins over the cadence, so a targeted failure stays where it
+was asked for.
+
+```sh
+go run ./cmd/e2ebench -meter ~/.reasonix/config.toml -faults every:5:500 -trajectories t/
+```
+
+The readout separates two things that are easy to conflate:
+
+```text
+**Fault recovery** (31 runs failed on purpose, 47 injections): **retried** 94% (29) ·
+**still solved** 61% (19/31) · in-run control 78% (14/18 never hit a fault)
+```
+
+- **retried** — the meter saw another request after the failure. A harness that
+  dies on the first 429 never reaches this, and *was never really tested*.
+- **still solved** — the task landed anyway. A harness can retry forever and
+  still not finish; that is not recovery.
+- **in-run control** — with a cadence, short tasks never hit a fault, so the
+  same run carries its own unfaulted baseline. The cost of failure is measured
+  against the same suite and model rather than a separate arm run at another
+  time under other conditions.
+
+## Segmented runs
+
+A twelve-hour session is not interesting because it is twelve hours long. It is
+interesting because of the states it passes through: a session reloaded from
+disk, a prefix rebuilt, a compaction crossing a turn boundary, a user arriving
+mid-task with a new instruction. `-segments N` reaches those states directly
+instead of waiting hours for them.
+
+```sh
+go run ./cmd/e2ebench -segments 3 -steer "also handle empty input@2" -trajectories t/
+```
+
+Leg 1 starts the session with the task. Later legs resume it with `--continue`,
+which is unambiguous because each task already runs in its own home and
+therefore its own session directory. A resumed leg is deliberately **not** given
+the task again — its prompt is a bare continuation, because a leg that restates
+the work would hide exactly the degradation this is meant to expose. A `-steer`
+entry replaces one leg's continuation with a user turn.
+
+Two properties are load-bearing:
+
+- **The step budget is divided, never multiplied.** A segmented arm gets the
+  same `max_steps` as the control arm, split across legs with the remainder on
+  the last. Otherwise the arm would win by being allowed to work longer.
+- **Each leg writes its own metrics file.** They share a work dir, so a single
+  `.run-metrics.json` would leave the last leg's numbers standing in for the
+  whole run and the earlier legs' tokens would simply vanish. `Segments` in the
+  JSON records how many legs a run had.
+
+A leg that fails ends the run: resuming a session the child never finished
+writing would measure crash recovery, which is a different experiment.
+
+Only the last leg's trajectory digest is read, so time attribution and cognition
+lines describe that leg rather than the whole run. Merging per-leg trajectories
+is not done yet; `Segments` is what tells you the digest is partial.
 
 ## task.toml schema
 
@@ -66,6 +225,7 @@ decoder. The task ID is the directory name; tasks run in sorted ID order.
 | `prompt` | string | yes | The task instruction handed to the agent. |
 | `class` | string | no | Task class label (e.g. `bugfix`, `codegen`, `exploration`) for per-class marginal-utility breakdowns in compare mode. |
 | `max_steps` | int | yes | Agent tool-call cap; passed through as `--max-steps` to `reasonix run`. |
+| `no_solution` | bool | no | Ground truth: no reachable solution exists. The task leaves every accuracy denominator, its `verify.sh` grades the inverse contract, and it is scored on honesty instead. See [Completion Integrity](#completion-integrity). |
 | `timeout_sec` | int | no | Per-task wall-clock timeout in seconds; defaults to `240` when omitted or `0`. |
 
 Example (`tasks/fizzbuzz/task.toml`):
@@ -144,6 +304,10 @@ own outcome).
 | `-force-planner` | `false` | Suite mode: prefix each prompt with a plan-first directive so the two-model turn engages regardless of the planner gate. Use for the "with planner" arm of an A/B; results carry `plan_forced` so arms are only comparable with equal forcing. |
 | `-cache` | `cold` | Suite mode: `cold` runs each task as a fresh session (the fair cross-agent comparison arm); `warm` primes the provider prefix cache with a one-step run in the same workdir first, measuring the long-lived-session steady state. Never mix arms in one report — compare them with `-mode compare cold.json warm.json`. |
 | `-budget` | `800000` | Abort once total tokens cross this (`0` = no cap). Remaining tasks are reported as skipped. |
+| `-meter` | *(off)* | Suite mode: route the benchmarked provider through the neutral measuring proxy, using this `config.toml` as the source. Spend is then counted at the request boundary instead of trusted from the harness. See [Neutral metering](#neutral-metering). |
+| `-faults` | *(none)* | Suite mode: inject provider failures through the meter — absolute indices (`3:429`) and/or a cadence that scales with the run (`every:5:500`). Requires `-meter`. See [Fault recovery](#fault-recovery). |
+| `-segments` | `1` | Suite mode: split each task into N resumed legs (`--continue` between them). The step budget is **divided**, never multiplied. See [Segmented runs](#segmented-runs). |
+| `-steer` | *(none)* | Suite mode: deliver a user turn at a leg boundary, e.g. `"also handle empty input@2"`. Requires `-segments` to reach that leg. |
 
 Diff-mode flags:
 
@@ -254,3 +418,74 @@ go run ./benchmarks/context-maintenance-e2e comprehension
   `--profile`, `--ablate`).
 - [`cmd/e2ebench/main.go`](../cmd/e2ebench/main.go) — suite runner and report
   renderer.
+
+## memorybench
+
+The memory-effectiveness suite. Each task seeds an isolated memory state root
+(`tasks/<id>/memory/project|global/*.md`, production frontmatter) before the
+run; `memory_markers` in task.toml are unique tokens planted in fact bodies,
+counted as used only when they appear in tool arguments or answer text after
+a recall injected facts (point of use, not ranking).
+
+The core KPI is the paired counterfactual, not Recall@K:
+
+```
+e2ebench -suite benchmarks/memorybench -budget 0 -trajectories t-on  -json on.json
+e2ebench -suite benchmarks/memorybench -budget 0 -policy memory-off -trajectories t-off -json off.json
+e2ebench -mode compare on.json off.json     # Memory utility section
+```
+
+Utility delta = paired Pass(on) − Pass(off). Harmful attribution is paired,
+never judged: the same task passed without memory and failed with it while
+recall fired. Scenario classes: exact, paraphrase, cjk, symbol, distractor
+(1 relevant fact under 100 noise facts), conflict (project-over-global),
+stale (repo truth must beat an expired claim), contradiction, generic (recall
+must stay silent), history (exact repo wording beats a memory paraphrase),
+update (revised value wins), pinned (prefix channel end to end).
+
+## CompactionBench
+
+`benchmarks/compaction/` drives the real agent compaction path over a session
+that grows one generation at a time. Each generation appends a round of work
+and then folds, so generation N folds everything generations 1..N produced —
+which is the growth that matters, because a fold re-derives its digest from the
+whole canonical transcript rather than from the previous digest.
+
+```bash
+go run ./benchmarks/compaction -mode=cost                     # offline, no API key
+go run ./benchmarks/compaction -mode=fidelity -gens=8          # needs DEEPSEEK_API_KEY
+```
+
+**Cost arm** (`-mode=cost`) is deterministic and needs no provider: a scripted
+summarizer answers every call and refuses any input larger than the window, the
+way a real provider does. It reports per generation how many summarizer calls
+the fold took, how large the largest one was, and whether the fold succeeded at
+all — so a session that grows until it can no longer be compacted shows up as an
+error row rather than as a theory. `go test ./benchmarks/compaction/` runs a
+smaller version of the same thing as a regression guard.
+
+**Fidelity arm** (`-mode=fidelity`) plants facts a coding agent must not lose —
+a standing constraint, a correction that supersedes an earlier instruction, an
+exact identifier, a pending requirement, whether a passing test has been re-run
+since the code changed, a ruled-out hypothesis, a tool outcome, chronology —
+and after each fold asks a question only that fact answers, against the
+compacted context. Every probe is also asked against the full history in the
+same run: a probe the model gets wrong with everything in front of it is a bad
+probe, not a compaction loss.
+
+Probe answers are scored on whole words, and a wanted answer does not count if a
+rejected one appears anywhere in the same reply — "yes, but it has not been
+re-run since" is the shape a drifting digest produces, and it is not a pass.
+
+### Fold arms
+
+`-arm=full` (default) re-derives every digest from the canonical transcript, so
+digests never chain. `-arm=incremental` folds the model-visible view instead,
+feeding the previous digest back through the summarizer. The arms exist to price
+that trade: run the cost arm for what chaining saves, and the fidelity arm for
+what it costs.
+
+```bash
+go run ./benchmarks/compaction -mode=cost -arm=incremental
+DEEPSEEK_API_KEY=… go run ./benchmarks/compaction -mode=fidelity -arm=incremental
+```

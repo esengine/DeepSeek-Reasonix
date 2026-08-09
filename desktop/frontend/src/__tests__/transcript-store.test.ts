@@ -54,6 +54,7 @@ class FakeBackend {
   contentGate: ReturnType<typeof deferred<HistoryContentChunk>> | undefined;
   staleNextCursor = false;
   revision = 1;
+  digest = "digest-1";
 
   constructor(
     private readonly messages: HistoryMessage[],
@@ -98,6 +99,8 @@ class FakeBackend {
       endTurn: turns.length > 0 ? Math.max(...turns) : 0,
       stale: false,
       revision: this.revision,
+      revisionKnown: true,
+      digest: this.digest,
     };
   }
 
@@ -111,7 +114,7 @@ class FakeBackend {
     }
     let before = this.messages.length;
     if (req.cursor) {
-      if (this.staleNextCursor) return { entries: [], nextCursor: "", hasOlder: false, totalTurns: 0, startTurn: 0, endTurn: 0, stale: true, revision: this.revision };
+      if (this.staleNextCursor) return { entries: [], nextCursor: "", hasOlder: false, totalTurns: 0, startTurn: 0, endTurn: 0, stale: true, revision: this.revision, revisionKnown: true, digest: this.digest };
       const decoded = JSON.parse(atob(req.cursor)) as { before?: number };
       before = Math.min(before, decoded.before ?? before);
     }
@@ -442,6 +445,39 @@ console.log("\ntranscript store");
   const older = await store.loadOlder("tab-r", "/s/r.jsonl", { turns: 10 });
   eq(older?.kind, "prepend", "paging resumes after the reload");
   eq(older?.prependItems.length, 20, "older page prepends after reload");
+}
+
+// ── same-path resident identity ────────────────────────────────────────────
+{
+  const backend = new FakeBackend([{ role: "user", content: "u" }, { role: "assistant", content: "a" }]);
+  const store = new TranscriptStore(backend);
+  await store.loadLatest("tab-fp", "/s/fp.jsonl", { expectedRevision: 1, expectedDigest: "digest-1" });
+  const callsAfterFirstLoad = backend.sliceCalls.length;
+  const resident = await store.loadLatest("tab-fp", "/s/fp.jsonl", {
+    preferResident: true,
+    expectedRevision: 1,
+    expectedDigest: "digest-1",
+  });
+  eq(backend.sliceCalls.length, callsAfterFirstLoad, "matching canonical fingerprint reuses the resident projection");
+  eq(resident?.revision, 1, "resident projection retains its canonical revision");
+
+  backend.revision = 2;
+  backend.digest = "digest-2";
+  const refreshed = await store.loadLatest("tab-fp", "/s/fp.jsonl", {
+    preferResident: true,
+    expectedRevision: 2,
+    expectedDigest: "digest-2",
+  });
+  eq(backend.sliceCalls.length, callsAfterFirstLoad + 1, "changed same-path fingerprint bypasses the resident projection");
+  eq(refreshed?.digest, "digest-2", "fresh projection adopts the advanced canonical digest");
+
+  backend.HistorySliceForTab = async () => ({ ...backend.slice(0, 2), revision: 3, revisionKnown: undefined, digest: "digest-3" });
+  const compatible = await store.loadLatest("tab-fp", "/s/fp.jsonl", {
+    preferResident: true,
+    expectedRevision: 3,
+    expectedDigest: "digest-3",
+  });
+  eq(compatible?.revisionKnown, true, "positive legacy slice revision implies a known canonical identity");
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

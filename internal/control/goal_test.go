@@ -130,7 +130,7 @@ func toolCallChunk(id, name, args string) provider.Chunk {
 }
 
 func TestActiveGoalBlockCarriesTaskContractAndPausePolicy(t *testing.T) {
-	block := activeGoalBlock("fix the parser", GoalResearchOff)
+	block := activeGoalBlock("fix the parser")
 	for _, want := range []string{
 		"Treat the user's goal as a task contract",
 		"Context, Request, Output format, Constraints",
@@ -226,530 +226,205 @@ func TestPlainInputWithStrongResearchSignalPreservesRefsWithoutStartingGoal(t *t
 	}
 }
 
-func TestPlainAutoResearchTaskPathDoesNotResumeGoal(t *testing.T) {
+func TestResearchGoalUsesUnifiedGoalBudgetWithoutArchive(t *testing.T) {
 	root := t.TempDir()
-	prov := &scriptedTurns{turns: [][]provider.Chunk{
-		textTurn("Handled as an ordinary turn."),
-	}}
-	ag := agent.New(prov, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	events := make(chan event.Event, 8)
-	c := New(Options{
-		WorkspaceRoot: root,
-		Runner:        ag,
-		Executor:      ag,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.TurnDone || e.Kind == event.Notice {
-				events <- e
-			}
-		}),
-	})
-	defer c.Close()
-	c.SetGoalWithResearchMode("seed resumable task", GoalResearchOn)
-	taskID := c.goals.currentAutoResearchTaskID()
-	if taskID == "" {
-		t.Fatal("expected seeded AutoResearch task")
-	}
-	c.ClearGoal()
-
-	input := "继续 .reasonix/autoresearch/" + taskID + "/ 这个任务"
-	c.Submit(input)
-	waitForTurnDone(t, events)
-
-	if prov.call != 1 {
-		t.Fatalf("provider calls = %d, want 1", prov.call)
-	}
-	first := firstUserMessage(ag.Session().Messages)
-	if !strings.HasSuffix(first, input) {
-		t.Fatalf("ordinary task path should preserve the original prompt suffix: %q", first)
-	}
-	if strings.Contains(first, "<active-goal>") || strings.Contains(first, "AutoResearch protocol") {
-		t.Fatalf("ordinary task path should not enter Goal or AutoResearch:\n%s", first)
-	}
-	if got := c.Goal(); got != "" {
-		t.Fatalf("ordinary task path should not resume Goal, got %q", got)
-	}
-	if got := c.GoalStatus(); got != GoalStatusStopped {
-		t.Fatalf("GoalStatus() = %q, want stopped", got)
-	}
-}
-
-func TestResearchGoalCreatesHostManagedAutoResearchTask(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
 	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
-	ag := agent.New(&scriptedTurns{}, tool.NewRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	c := New(Options{WorkspaceRoot: root, SessionPath: sessionPath, Runner: ag, Executor: ag})
-
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{WorkspaceRoot: root, SessionDir: root, Executor: exec})
+	c.Resume(sess, sessionPath)
 	c.SetGoalWithResearchMode("fix the typo and add a test", GoalResearchOn)
+	defer c.Close()
+	if got := c.GoalRuntime().TurnsLimit; got != 40 {
+		t.Fatalf("research Goal turns limit = %d, want 40", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".reasonix", "autoresearch")); !os.IsNotExist(err) {
+		t.Fatalf("research Goal created legacy archive: %v", err)
+	}
+	if composed := c.Compose("continue"); strings.Contains(composed, "AutoResearch") || strings.Contains(composed, "autoresearch") {
+		t.Fatalf("Goal prompt exposes removed AutoResearch protocol:\n%s", composed)
+	}
+}
 
-	data, err := os.ReadFile(goalStatePath(sessionPath))
+func TestLegacyGoalSidecarMigratesToResearchBudgetWithoutTaskID(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeLegacyGoalArchive(t, root, "old-task", "archive fallback should not replace sidecar goal")
+	if err := os.WriteFile(goalStatePath(sessionPath), []byte(`{"goal":"investigate runtime","status":"running","researchMode":1,"autoResearchTaskID":"old-task"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{WorkspaceRoot: root, SessionDir: root, Executor: exec})
+	c.Resume(sess, sessionPath)
+	defer c.Close()
+	if got := c.GoalRuntime().TurnsLimit; got != 40 {
+		t.Fatalf("migrated Goal turns limit = %d, want 40", got)
+	}
+	if got := c.Goal(); got != "investigate runtime" {
+		t.Fatalf("migrated Goal = %q, want sidecar goal", got)
+	}
+	raw, err := os.ReadFile(goalStatePath(sessionPath))
 	if err != nil {
-		t.Fatalf("read goal state: %v", err)
+		t.Fatal(err)
 	}
 	var state goalState
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("unmarshal goal state: %v", err)
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatal(err)
 	}
-	if state.AutoResearchTaskID == "" {
-		t.Fatalf("AutoResearchTaskID was empty in persisted goal state: %+v", state)
-	}
-	for _, rel := range []string{
-		"state/task_spec.json",
-		"state/progress.json",
-		"state/findings.jsonl",
-		"logs/heartbeat.jsonl",
-	} {
-		path := filepath.Join(root, ".reasonix", "autoresearch", state.AutoResearchTaskID, rel)
-		if _, err := os.Stat(path); err != nil {
-			t.Fatalf("expected autoresearch file %s: %v", rel, err)
-		}
-	}
-	var spec struct {
-		SuccessCriteria []struct {
-			ID       string `json:"id"`
-			Required bool   `json:"required"`
-		} `json:"success_criteria"`
-	}
-	readJSONFileForTest(t, filepath.Join(root, ".reasonix", "autoresearch", state.AutoResearchTaskID, "state", "task_spec.json"), &spec)
-	if len(spec.SuccessCriteria) != 2 || spec.SuccessCriteria[0].ID != "objective_evidence" || spec.SuccessCriteria[1].ID != "verification" {
-		t.Fatalf("default success criteria = %+v, want objective_evidence and verification", spec.SuccessCriteria)
-	}
-	for _, criterion := range spec.SuccessCriteria {
-		if !criterion.Required {
-			t.Fatalf("default criterion %+v was not required", criterion)
-		}
-	}
-
-	composed := c.Compose("continue")
-	if !strings.Contains(composed, "<autoresearch-runtime>") || !strings.Contains(composed, "task_id: "+state.AutoResearchTaskID) || !strings.Contains(composed, "objective_evidence") {
-		t.Fatalf("Compose missing runtime summary for task %q:\n%s", state.AutoResearchTaskID, composed)
+	if state.AutoResearchTaskID != "" {
+		t.Fatalf("migrated sidecar retained old task id: %q", state.AutoResearchTaskID)
 	}
 }
 
-func TestResearchGoalCreatedEmitsLifecycleNotice(t *testing.T) {
+func TestMissingExplicitLegacyTaskBlocksWithoutCreatingArchive(t *testing.T) {
 	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	events := make(chan event.Event, 4)
-	c := New(Options{
-		WorkspaceRoot: root,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				events <- e
-			}
-		}),
-	})
-
-	c.SetGoalWithResearchMode("investigate lifecycle notice", GoalResearchOn)
-
-	select {
-	case e := <-events:
-		if !strings.Contains(e.Text, "autoresearch task created") {
-			t.Fatalf("notice = %q, want autoresearch task created", e.Text)
-		}
-	default:
-		t.Fatal("expected autoresearch lifecycle notice")
-	}
-}
-
-func TestResearchGoalRepeatedSetReusesAutoResearchTask(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	events := make(chan event.Event, 8)
-	c := New(Options{
-		WorkspaceRoot: root,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				events <- e
-			}
-		}),
-	})
-
-	goal := "请持续研究当前项目的 AutoResearch 状态栏展示链路，验证任务创建、状态刷新、右侧 Context 面板展示、状态栏 chip 展示是否一致。不要只看表面现象，需要找到根因、记录 evidence，并在完成前确认所有验证步骤通过。不要修改文件"
-	c.SetGoalWithResearchMode(goal, GoalResearchOn)
-	_, _, _, firstTaskID := c.goals.snapshot()
-	if firstTaskID == "" {
-		t.Fatal("first AutoResearch task id was empty")
-	}
-
-	c.SetGoalWithResearchMode(goal, GoalResearchOn)
-	c.SetGoal(goal)
-	_, _, _, repeatedTaskID := c.goals.snapshot()
-	if repeatedTaskID != firstTaskID {
-		t.Fatalf("repeated SetGoal created a new task: got %q, want %q", repeatedTaskID, firstTaskID)
-	}
-
-	entries, err := os.ReadDir(filepath.Join(root, ".reasonix", "autoresearch"))
-	if err != nil {
-		t.Fatalf("read autoresearch dir: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("autoresearch task count = %d, want 1", len(entries))
-	}
-
-	createdNotices := 0
-	for {
-		select {
-		case e := <-events:
-			if strings.Contains(e.Text, "autoresearch task created") {
-				createdNotices++
-			}
-		default:
-			if createdNotices != 1 {
-				t.Fatalf("created notices = %d, want 1", createdNotices)
-			}
-			return
-		}
-	}
-}
-
-func TestResearchGoalMissingExplicitTaskBlocksInsteadOfCreatingNewTask(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
-	var notices []string
-	c := New(Options{
-		WorkspaceRoot: root,
-		SessionPath:   sessionPath,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
-		}),
-	})
-
+	c := New(Options{WorkspaceRoot: root})
+	defer c.Close()
 	c.SetGoalWithResearchMode("resume .reasonix/autoresearch/missing-task/", GoalResearchOn)
-
 	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus() = %q, want blocked for missing explicit AutoResearch task", got)
+		t.Fatalf("GoalStatus = %q, want blocked", got)
 	}
-	if got := c.goals.currentAutoResearchTaskID(); got != "" {
-		t.Fatalf("current AutoResearch task id = %q, want none for missing explicit task", got)
-	}
-	entries, err := os.ReadDir(filepath.Join(root, ".reasonix", "autoresearch"))
-	if err != nil && !os.IsNotExist(err) {
-		t.Fatalf("ReadDir autoresearch root: %v", err)
-	}
-	if len(entries) != 0 {
-		t.Fatalf("created tasks for missing explicit resume: %+v", entries)
-	}
-	if !containsNotice(notices, "autoresearch resume failed") || !containsNotice(notices, "missing-task") {
-		t.Fatalf("notices = %+v, want explicit resume failure", notices)
-	}
-}
-
-func TestResearchGoalTurnAppendsAutoResearchHeartbeats(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
-	prov := &scriptedTurns{turns: flattenTurns(
-		goalToolTurn(GoalStatusComplete, "", ""),
-		goalToolTurn(GoalStatusBlocked, "needs a repro trace", ""),
-	)}
-	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	events := make(chan event.Event, 4)
-	c := New(Options{
-		WorkspaceRoot: root,
-		SessionPath:   sessionPath,
-		Runner:        ag,
-		Executor:      ag,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.TurnDone || e.Kind == event.Notice {
-				events <- e
-			}
-		}),
-	})
-
-	c.Submit("/goal --research fix the typo and add a test")
-	waitForTurnDone(t, events)
-
-	data, err := os.ReadFile(goalStatePath(sessionPath))
-	if err != nil {
-		t.Fatalf("read goal state: %v", err)
-	}
-	var state goalState
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("unmarshal goal state: %v", err)
-	}
-	heartbeats, err := c.autoResearch.store.Heartbeats(state.AutoResearchTaskID, 10)
-	if err != nil {
-		t.Fatalf("Heartbeats: %v", err)
-	}
-	if len(heartbeats) < 2 {
-		t.Fatalf("heartbeats = %+v, want at least starting and done", heartbeats)
-	}
-	if heartbeats[0].Status != "starting_turn" || heartbeats[len(heartbeats)-1].Status != "turn_done" {
-		t.Fatalf("heartbeats = %+v, want starting_turn then turn_done", heartbeats)
-	}
-}
-
-func TestResearchGoalTurnUpdatesAutoResearchStaleProgress(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
-	prov := &scriptedTurns{turns: flattenTurns(
-		goalToolTurn(GoalStatusRunning, "still investigating", ""),
-		goalToolTurn(GoalStatusBlocked, "needs a repro trace", ""),
-	)}
-	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	events := make(chan event.Event, 8)
-	c := New(Options{
-		WorkspaceRoot: root,
-		SessionPath:   sessionPath,
-		Runner:        ag,
-		Executor:      ag,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.TurnDone || e.Kind == event.Notice {
-				events <- e
-			}
-		}),
-	})
-
-	c.Submit("/goal --research investigate stale progress")
-	waitForTurnDone(t, events)
-
-	data, err := os.ReadFile(goalStatePath(sessionPath))
-	if err != nil {
-		t.Fatalf("read goal state: %v", err)
-	}
-	var state goalState
-	if err := json.Unmarshal(data, &state); err != nil {
-		t.Fatalf("unmarshal goal state: %v", err)
-	}
-	summary, err := c.autoResearch.store.Summary(state.AutoResearchTaskID)
-	if err != nil {
-		t.Fatalf("Summary: %v", err)
-	}
-	if summary.Iteration < 2 || summary.StaleCount != summary.Iteration || !summary.PivotRequired || summary.PivotCount != 1 {
-		t.Fatalf("summary = %+v, want stale progress for every no-evidence turn and pivot required", summary)
-	}
-}
-
-func TestResearchGoalCompletionIsInterceptedWhenReadinessFails(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
-	prov := &scriptedTurns{turns: flattenTurns(
-		goalToolTurn(GoalStatusComplete, "", ""),
-		goalToolTurn(GoalStatusBlocked, "missing evidence", ""),
-	)}
-	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	events := make(chan event.Event, 8)
-	var notices []string
-	c := New(Options{
-		WorkspaceRoot: root,
-		SessionPath:   sessionPath,
-		Runner:        ag,
-		Executor:      ag,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
-			if e.Kind == event.TurnDone || e.Kind == event.Notice {
-				events <- e
-			}
-		}),
-	})
-
-	c.SetGoalWithResearchMode("identify the root cause", GoalResearchOn)
-
-	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "start"); err != nil {
-		t.Fatalf("runGoalLoopWithRawDisplay: %v", err)
+	if _, err := os.Stat(filepath.Join(root, ".reasonix", "autoresearch")); !os.IsNotExist(err) {
+		t.Fatalf("missing legacy task created archive: %v", err)
 	}
 
+	c.SetGoal("resume .reasonix/autoresearch/missing-task/../../escape")
 	if got := c.GoalStatus(); got != GoalStatusBlocked {
-		t.Fatalf("GoalStatus() = %q, want blocked after the readiness intercept and a blocked report", got)
+		t.Fatalf("unsafe legacy path status = %q, want blocked", got)
 	}
-	if prov.call != 4 {
-		t.Fatalf("provider calls = %d, want complete-intercepted + blocked turns (2 provider calls each)", prov.call)
-	}
-	if !sessionContainsUserText(ag.Session().Messages, "AutoResearch readiness check failed", "objective_evidence", "verification") {
-		t.Fatalf("transcript missing readiness intercept; last user:\n%s", lastUserMessage(ag.Session().Messages))
-	}
-	if !containsNotice(notices, "Goal is not ready to complete yet; continuing the remaining work.") {
-		t.Fatalf("notices = %+v, want readiness continuation notice", notices)
+	if got := c.Goal(); got != "resume .reasonix/autoresearch/missing-task/../../escape" {
+		t.Fatalf("unsafe legacy path silently resumed a truncated task: %q", got)
 	}
 }
 
-func TestControllerRecordsAutoResearchEvidence(t *testing.T) {
+func TestAssistantEvidenceBlockIsIgnoredByUnifiedGoal(t *testing.T) {
+	root := t.TempDir()
+	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
+	turns := goalToolTurn(GoalStatusComplete, "", "")
+	const evidenceBlock = `<autoresearch-evidence>{"id":"legacy-evidence","kind":"verification","summary":"must remain ordinary assistant text"}</autoresearch-evidence>`
+	turns[len(turns)-1] = textTurn("worked on the goal\n" + evidenceBlock)
+	prov := &scriptedTurns{turns: flattenTurns(turns)}
+	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
+	c := New(Options{WorkspaceRoot: root, SessionPath: sessionPath, Runner: ag, Executor: ag})
+	defer c.Close()
+	c.SetGoalWithResearchMode("verify the fix", GoalResearchOn)
+	_ = newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "start")
+	if got := c.GoalStatus(); got != GoalStatusComplete {
+		t.Fatalf("GoalStatus = %q, want complete", got)
+	}
+	if got := lastAssistantText(c.History()); !strings.Contains(got, evidenceBlock) {
+		t.Fatalf("legacy evidence block was interpreted instead of retained as transcript text: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".reasonix", "autoresearch")); !os.IsNotExist(err) {
+		t.Fatalf("assistant evidence created archive: %v", err)
+	}
+}
+
+func TestExplicitLegacyTaskPathRestoresOriginalGoal(t *testing.T) {
 	root := t.TempDir()
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
+	}
+	taskID := "20260630-original-goal"
+	taskRoot := filepath.Join(root, ".reasonix", "autoresearch", taskID)
+	if err := os.MkdirAll(filepath.Join(taskRoot, "state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(taskRoot, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	spec := `{"task_id":"` + taskID + `","goal":"find the original root cause","allowed_operations":{"write":true},"success_criteria":[]}`
+	progress := `{"status":"running","iteration":2,"updated_at":"2026-06-30T10:00:00Z"}`
+	for name, body := range map[string]string{
+		"state/task_spec.json":        spec,
+		"state/progress.json":         progress,
+		"state/directions_tried.json": "[]\n",
+		"state/findings.jsonl":        "",
+		"state/iteration_log.jsonl":   "",
+		"logs/heartbeat.jsonl":        "",
+	} {
+		if err := os.WriteFile(filepath.Join(taskRoot, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, err := os.ReadFile(filepath.Join(taskRoot, "state", "task_spec.json"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	c := New(Options{WorkspaceRoot: root})
-	c.SetGoalWithResearchMode("verify the fix", GoalResearchOn)
-	taskID := c.goals.currentAutoResearchTaskID()
-	if taskID == "" {
-		t.Fatal("expected autoresearch task id")
+	defer c.Close()
+	c.SetGoalWithResearchMode("resume .reasonix/autoresearch/"+taskID+"/", GoalResearchAuto)
+	if got := c.Goal(); got != "find the original root cause" {
+		t.Fatalf("Goal() = %q, want original archive goal", got)
 	}
-
-	err := c.RecordAutoResearchEvidence("objective_evidence", AutoResearchEvidenceInput{
-		ID:       "f-objective",
-		Kind:     "file",
-		Summary:  "implementation inspected",
-		Source:   "file",
-		Paths:    []string{"internal/control/controller.go"},
-		Accepted: true,
-	})
+	if got := c.GoalRuntime().TurnsLimit; got != 40 {
+		t.Fatalf("turns limit = %d, want research budget", got)
+	}
+	if got := c.GoalStatus(); got != GoalStatusRunning {
+		t.Fatalf("status = %q", got)
+	}
+	after, err := os.ReadFile(filepath.Join(taskRoot, "state", "task_spec.json"))
 	if err != nil {
-		t.Fatalf("RecordAutoResearchEvidence objective_evidence: %v", err)
+		t.Fatal(err)
 	}
-	err = c.RecordAutoResearchEvidence("verification", AutoResearchEvidenceInput{
-		ID:       "f-verification",
-		Kind:     "test",
-		Summary:  "go test passed",
-		Source:   "command",
-		Command:  "go test ./internal/control",
-		Accepted: true,
-	})
-	if err != nil {
-		t.Fatalf("RecordAutoResearchEvidence verification: %v", err)
-	}
-
-	report, err := c.autoResearch.store.Readiness(taskID)
-	if err != nil {
-		t.Fatalf("Readiness: %v", err)
-	}
-	if !report.Ready {
-		t.Fatalf("readiness = %+v, want ready", report)
+	if string(before) != string(after) {
+		t.Fatal("archive task_spec mutated during resume")
 	}
 }
 
-func TestAutoResearchEvidenceDoesNotChangeDefaultToolSurface(t *testing.T) {
+func TestLegacySidecarEmptyGoalFilledFromArchive(t *testing.T) {
 	root := t.TempDir()
 	if resolved, err := filepath.EvalSymlinks(root); err == nil {
 		root = resolved
 	}
-	reg := tool.NewRegistry()
-	New(Options{WorkspaceRoot: root, Registry: reg})
-	if _, ok := reg.Get("autoresearch_record_evidence"); ok {
-		t.Fatalf("autoresearch_record_evidence should not be registered in the default provider-visible tool surface; tools=%v", reg.Names())
+	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
+	if err := os.MkdirAll(filepath.Dir(sessionPath), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for _, schema := range reg.Schemas() {
-		if schema.Name == "autoresearch_record_evidence" {
-			t.Fatalf("autoresearch_record_evidence should not appear in provider schemas: %+v", reg.Schemas())
+	taskID := "fill-from-archive"
+	taskRoot := filepath.Join(root, ".reasonix", "autoresearch", taskID)
+	if err := os.MkdirAll(filepath.Join(taskRoot, "state"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(taskRoot, "logs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, body := range map[string]string{
+		"state/task_spec.json":        `{"task_id":"` + taskID + `","goal":"recover me from archive","allowed_operations":{"write":true},"success_criteria":[]}`,
+		"state/progress.json":         `{"status":"running","updated_at":"2026-06-30T10:00:00Z"}`,
+		"state/directions_tried.json": "[]\n",
+		"state/findings.jsonl":        "",
+		"state/iteration_log.jsonl":   "",
+		"logs/heartbeat.jsonl":        "",
+	} {
+		if err := os.WriteFile(filepath.Join(taskRoot, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
 		}
 	}
-}
-
-func TestResearchGoalCompletionMarksAutoResearchTaskComplete(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
+	if err := os.WriteFile(goalStatePath(sessionPath), []byte(`{"status":"running","researchMode":1,"autoResearchTaskID":"`+taskID+`","turnsUsed":3,"turnsLimit":40}`), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
-	prov := &scriptedTurns{turns: flattenTurns(
-		[][]provider.Chunk{
-			{toolCallChunk("ug1", "update_goal", `{"status":"complete","reason":""}`), {Type: provider.ChunkDone}},
-			textTurn(`Done.
-
-<autoresearch-evidence>
-{"criterion_id":"objective_evidence","id":"f-objective","kind":"file","summary":"The implementation state was inspected directly.","source":"file","paths":["internal/control/controller.go"],"accepted":true}
-</autoresearch-evidence>
-<autoresearch-evidence>
-{"criterion_id":"verification","id":"f-verification","kind":"test","summary":"The focused AutoResearch tests passed.","source":"command","command":"go test ./internal/control","accepted":true}
-</autoresearch-evidence>`),
-		},
-	)}
-	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	var notices []string
-	c := New(Options{
-		WorkspaceRoot: root,
-		SessionPath:   sessionPath,
-		Runner:        ag,
-		Executor:      ag,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
-		}),
-	})
-	c.SetGoalWithResearchMode("verify completion lifecycle", GoalResearchOn)
-	taskID := c.goals.currentAutoResearchTaskID()
-	if taskID == "" {
-		t.Fatal("expected autoresearch task id")
+	sess := agent.NewSession("sys")
+	exec := agent.New(nil, nil, sess, agent.Options{}, event.Discard)
+	c := New(Options{WorkspaceRoot: root, SessionDir: root, Executor: exec})
+	c.Resume(sess, sessionPath)
+	defer c.Close()
+	if got := c.Goal(); got != "recover me from archive" {
+		t.Fatalf("Goal() = %q", got)
 	}
-
-	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "start"); err != nil {
-		t.Fatalf("runGoalLoopWithRawDisplay: %v", err)
+	if got := c.GoalRuntime().TurnsUsed; got != 3 {
+		t.Fatalf("turns used = %d, want preserved 3", got)
 	}
-
-	summary, err := c.autoResearch.store.Summary(taskID)
+	raw, err := os.ReadFile(goalStatePath(sessionPath))
 	if err != nil {
-		t.Fatalf("Summary: %v", err)
+		t.Fatal(err)
 	}
-	if summary.Status != "complete" {
-		t.Fatalf("AutoResearch status = %q, want complete", summary.Status)
-	}
-	if summary.StaleCount != 0 {
-		t.Fatalf("AutoResearch stale_count = %d, want 0 after accepted evidence", summary.StaleCount)
-	}
-	findings, err := c.autoResearch.store.Findings(taskID, 0)
-	if err != nil {
-		t.Fatalf("Findings: %v", err)
-	}
-	if len(findings) != 2 {
-		t.Fatalf("findings = %+v, want two assistant evidence records", findings)
-	}
-	if !containsNotice(notices, "autoresearch task completed") {
-		t.Fatalf("notices = %+v, want autoresearch task completed", notices)
-	}
-}
-
-func TestResearchGoalBlockedMarksAutoResearchTaskBlocked(t *testing.T) {
-	root := t.TempDir()
-	if resolved, err := filepath.EvalSymlinks(root); err == nil {
-		root = resolved
-	}
-	sessionPath := filepath.Join(root, "sessions", "s.jsonl")
-	prov := &scriptedTurns{turns: flattenTurns(
-		goalToolTurn(GoalStatusBlocked, "needs credentials", ""),
-	)}
-	ag := agent.New(prov, goalRegistry(), agent.NewSession(""), agent.Options{}, event.Discard)
-	var notices []string
-	c := New(Options{
-		WorkspaceRoot: root,
-		SessionPath:   sessionPath,
-		Runner:        ag,
-		Executor:      ag,
-		Sink: event.FuncSink(func(e event.Event) {
-			if e.Kind == event.Notice {
-				notices = append(notices, e.Text)
-			}
-		}),
-	})
-	c.SetGoalWithResearchMode("verify blocked lifecycle", GoalResearchOn)
-	taskID := c.goals.currentAutoResearchTaskID()
-	if taskID == "" {
-		t.Fatal("expected autoresearch task id")
-	}
-
-	if err := newTurnOrchestrator(c).runGoalLoopWithRawDisplay(context.Background(), "start", "start", "start"); err != nil {
-		t.Fatalf("runGoalLoopWithRawDisplay: %v", err)
-	}
-
-	summary, err := c.autoResearch.store.Summary(taskID)
-	if err != nil {
-		t.Fatalf("Summary: %v", err)
-	}
-	if summary.Status != "blocked" || !strings.Contains(summary.Blocker, "needs credentials") {
-		t.Fatalf("AutoResearch summary = %+v, want blocked with reason", summary)
-	}
-	if !containsNotice(notices, "AutoResearch task marked blocked.") {
-		t.Fatalf("notices = %+v, want autoresearch blocked notice", notices)
+	if strings.Contains(string(raw), "autoResearchTaskID") {
+		t.Fatalf("sidecar retained task id: %s", raw)
 	}
 }
 
@@ -1009,7 +684,7 @@ func TestGoalInterceptsCompleteWithIncompleteTodos(t *testing.T) {
 func TestGoalAdvanceResultCannotCrossGoalLifecycle(t *testing.T) {
 	newResult := func(t *testing.T, g *goalMachine) goalAdvanceResult {
 		t.Helper()
-		g.set("old goal", GoalResearchAuto, "", nil)
+		g.set("old goal", "", nil)
 		res := g.advance(goalAdvanceInput{
 			report: &goalTurnReport{status: GoalStatusComplete, reason: ""},
 			todos: []evidence.TodoItem{{
@@ -1034,7 +709,7 @@ func TestGoalAdvanceResultCannotCrossGoalLifecycle(t *testing.T) {
 	t.Run("replacement goal invalidates result", func(t *testing.T) {
 		var g goalMachine
 		res := newResult(t, &g)
-		g.set("replacement goal", GoalResearchAuto, "", nil)
+		g.set("replacement goal", "", nil)
 		if got, ok := g.acceptContinuation(res); ok {
 			t.Fatalf("replacement goal accepted stale intercept %q", got)
 		}
@@ -1249,45 +924,6 @@ func TestRepeatedCompleteWithIncompleteTodosPausesOnBudget(t *testing.T) {
 	if rt.TurnsUsed != rt.TurnsLimit {
 		t.Fatalf("turn budget was not enforced: %d/%d", rt.TurnsUsed, rt.TurnsLimit)
 	}
-}
-
-func readJSONFileForTest(t *testing.T, path string, out any) {
-	t.Helper()
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("ReadFile(%s): %v", path, err)
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		t.Fatalf("Unmarshal(%s): %v", path, err)
-	}
-}
-
-func sessionContainsUserText(messages []provider.Message, needles ...string) bool {
-	for _, msg := range messages {
-		if msg.Role != provider.RoleUser {
-			continue
-		}
-		ok := true
-		for _, needle := range needles {
-			if !strings.Contains(msg.Content, needle) {
-				ok = false
-				break
-			}
-		}
-		if ok {
-			return true
-		}
-	}
-	return false
-}
-
-func containsNotice(notices []string, needle string) bool {
-	for _, notice := range notices {
-		if strings.Contains(notice, needle) {
-			return true
-		}
-	}
-	return false
 }
 
 // TestSessionRotationClearsActiveGoal pins the /new & /clear goal semantics:

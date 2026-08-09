@@ -9,32 +9,12 @@ import { JSDOM } from "jsdom";
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import gsap from "gsap";
 import { ToolCard } from "../components/ToolCard";
 import { LocaleProvider } from "../lib/i18n";
 import { historyMessagesToItems, initialState, reducer, type Item } from "../lib/useController";
 import type { HistoryMessage, WireShellExecution } from "../lib/types";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
-
-// jsdom has no layout engine: stub GSAP the same way as subagent-progress-card.
-type GsapToOptions = { onComplete?: () => void };
-const gsapForTests = gsap as unknown as {
-  to: (target: unknown, vars: GsapToOptions) => unknown;
-  fromTo: (target: unknown, from: unknown, vars: GsapToOptions) => unknown;
-  set: (target: unknown, vars: unknown) => unknown;
-  killTweensOf: (target: unknown) => void;
-};
-gsapForTests.to = (_target: unknown, vars: GsapToOptions) => {
-  vars.onComplete?.();
-  return {};
-};
-gsapForTests.fromTo = (_target: unknown, _from: unknown, vars: GsapToOptions) => {
-  vars.onComplete?.();
-  return {};
-};
-gsapForTests.set = () => ({});
-gsapForTests.killTweensOf = () => {};
 
 let passed = 0;
 let failed = 0;

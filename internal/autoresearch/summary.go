@@ -73,3 +73,23 @@ func nextRequiredAction(progress Progress) string {
 	}
 	return "continue with the next evidence-producing step"
 }
+
+func acceptedFindingIDs(findings []Finding) map[string]bool {
+	accepted := make(map[string]bool, len(findings))
+	for _, finding := range findings {
+		if finding.Accepted {
+			accepted[finding.ID] = true
+		}
+	}
+	return accepted
+}
+
+func countAcceptedEvidence(ids []string, accepted map[string]bool) int {
+	count := 0
+	for _, id := range ids {
+		if accepted[id] {
+			count++
+		}
+	}
+	return count
+}

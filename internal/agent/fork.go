@@ -82,6 +82,14 @@ type forkCaptureProvider struct {
 
 func (p *forkCaptureProvider) Name() string { return p.inner.Name() }
 
+func (p *forkCaptureProvider) OutputBudget() int { return outputBudgetOf(p.inner) }
+
+func (p *forkCaptureProvider) SharesContextWindow() bool { return sharesContextWindow(p.inner) }
+
+func (p *forkCaptureProvider) SharedWindowInputPolicy() provider.SharedWindowInputPolicy {
+	return sharedWindowInputPolicyOf(p.inner)
+}
+
 func (p *forkCaptureProvider) Stream(ctx context.Context, req provider.Request) (<-chan provider.Chunk, error) {
 	a := p.a
 	if a.ebm.captureArmed && !a.ebm.captured {

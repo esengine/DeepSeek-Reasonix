@@ -42,6 +42,11 @@ func (bashOutput) Schema() json.RawMessage {
 
 func (bashOutput) ReadOnly() bool { return true }
 
+func (bashOutput) ProviderVisible(ctx context.Context) bool {
+	_, ok := jobs.FromContext(ctx)
+	return ok
+}
+
 func (bashOutput) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		JobID  string `json:"job_id"`
@@ -109,6 +114,11 @@ func (killShell) Schema() json.RawMessage {
 
 func (killShell) ReadOnly() bool { return false }
 
+func (killShell) ProviderVisible(ctx context.Context) bool {
+	_, ok := jobs.FromContext(ctx)
+	return ok
+}
+
 func (killShell) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
 		JobID string `json:"job_id"`
@@ -144,6 +154,11 @@ func (waitJob) Schema() json.RawMessage {
 }
 
 func (waitJob) ReadOnly() bool { return true }
+
+func (waitJob) ProviderVisible(ctx context.Context) bool {
+	_, ok := jobs.FromContext(ctx)
+	return ok
+}
 
 func (waitJob) Execute(ctx context.Context, args json.RawMessage) (string, error) {
 	var p struct {
