@@ -1358,6 +1358,49 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				}
 			}
 		}()
+	case trimmed == "/compress-fast" || strings.HasPrefix(trimmed, "/compress-fast "):
+		// No-AI fast compression (qwen-code analog): elide stale tool results
+		// to short placeholders without a summarizer call; never drops a
+		// message and keeps tool_call/result pairing intact.
+		go func() {
+			// The rotation gate keeps a running turn from racing the session
+			// rewrite (prune reads then replaces the whole log, TOCTOU).
+			if err := c.beginRotation(); err != nil {
+				c.notice("fast compression failed: " + err.Error())
+				return
+			}
+			defer c.endRotation()
+			stats, err := c.executor.PruneStaleToolResults()
+			if err != nil {
+				c.notice("fast compression failed: " + err.Error())
+				return
+			}
+			if stats.Results == 0 {
+				c.notice("no stale tool results to compress")
+				return
+			}
+			c.noticeDetail("fast-compressed",
+				fmt.Sprintf("elided %d stale tool results, saved ~%d chars", stats.Results, stats.SavedChars))
+			if err := c.SnapshotRewrite(); err != nil {
+				slog.Warn("controller: snapshot after fast compression", "err", err)
+			}
+		}()
+	case trimmed == "/dream" || strings.HasPrefix(trimmed, "/dream "):
+		// Dream consolidation (P1): a reflective pass that distills recent
+		// session knowledge into durable memory files. The four-phase prompt
+		// (Orient → Gather → Consolidate → Prune) is injected as a normal
+		// turn; the model uses the existing remember/forget tools plus the
+		// knowledge cache populated by the P2 compaction bridge.
+		extra := strings.TrimSpace(strings.TrimPrefix(trimmed, "/dream"))
+		go func() {
+			prompt := dreamConsolidationPrompt(c, extra)
+			if err := runGoalLoop(context.Background(), prompt, prompt, prompt); err != nil {
+				c.notice("dream failed: " + err.Error())
+			} else {
+				c.notice("dream consolidation complete")
+			}
+		}()
+>>>>>>> dbf79c482 (feat(control): add /compress-fast — no-AI stale tool-result compression)
 	case trimmed == "/new":
 		go func() {
 			if err := c.NewSession(); err != nil {

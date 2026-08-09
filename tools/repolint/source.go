@@ -20,6 +20,7 @@ var skipDirs = map[string]bool{
 	"testdata":     true,
 	"dist":         true,
 	"bin":          true,
+	"wailsjs":      true, // wails build 生成物（desktop/frontend/wailsjs/），gitignore 且每次构建重写
 }
 
 var generatedRe = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)

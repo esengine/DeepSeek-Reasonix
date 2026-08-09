@@ -5469,3 +5469,118 @@ func TestCacheColdAfterFailureFallsBackTo24h(t *testing.T) {
 		t.Fatalf("ResolveModel failure must fall back to 24h, got %v", got)
 	}
 }
+func TestFastCompressCommandElidesStaleToolResults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	big := strings.Repeat("x", 5000)
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "read the file"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "", ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{\"file_path\":\"/tmp/a\"}"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: big})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "also check"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "", ToolCalls: []provider.ToolCall{{ID: "2", Name: "read_file", Arguments: "{\"file_path\":\"/tmp/b\"}"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: strings.Repeat("y", 3000)})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "done"})
+	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 1000, RecentKeep: 1, ArchiveDir: dir}, event.Discard)
+
+	notices := make(chan string, 4)
+	c := New(Options{
+		Executor:    exec,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices <- e.Text
+			}
+		}),
+	})
+	c.Submit("/compress-fast")
+
+	var got string
+	select {
+	case got = <-notices:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no fast-compress notice within 5s")
+	}
+	if got == "fast compression failed: " || strings.Contains(got, "failed") {
+		t.Fatalf("fast compression failed: %s", got)
+	}
+	msgs := sess.Snapshot()
+	if len(msgs) != 8 {
+		t.Fatalf("message count changed: %d, want 8 (never drop messages)", len(msgs))
+	}
+	// The protected recent tail (last 1) keeps the newest tool result.
+	if strings.Contains(msgs[6].Content, "[elided") {
+		t.Error("recent tool result must stay verbatim in the protected tail")
+	}
+	// The stale result older than the tail is elided to a placeholder.
+	if !strings.Contains(msgs[3].Content, "[elided tool result — ") {
+		t.Errorf("stale tool result not elided: %.80q", msgs[3].Content)
+	}
+	// tool_call pairing preserved.
+	if len(msgs[2].ToolCalls) != 1 || msgs[2].ToolCalls[0].ID != "1" {
+		t.Error("assistant tool_call pairing touched")
+	}
+	if msgs[3].ToolCallID != "1" || msgs[3].Name != "read_file" || msgs[3].Role != provider.RoleTool {
+		t.Error("tool result identity fields touched")
+	}
+}
+
+func TestFastCompressCommandNoopWithoutStaleResults(t *testing.T) {
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hello"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 1000}, event.Discard)
+	notices := make(chan string, 4)
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices <- e.Text
+			}
+		}),
+	})
+	c.Submit("/compress-fast")
+	select {
+	case got := <-notices:
+		if got != "no stale tool results to compress" {
+			t.Fatalf("noop notice = %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no noop notice within 5s")
+	}
+}
+
+func TestFastCompressCommandRefusedWhileTurnRunning(t *testing.T) {
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "hi"})
+	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 1000}, event.Discard)
+	notices := make(chan string, 4)
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices <- e.Text
+			}
+		}),
+	})
+	c.mu.Lock()
+	c.running = true
+	c.mu.Unlock()
+
+	c.Submit("/compress-fast")
+	select {
+	case got := <-notices:
+		if !strings.Contains(got, "failed") {
+			t.Fatalf("running turn must refuse fast compression, got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no refusal notice within 5s")
+	}
+	// The session must be untouched: no rewrite happened behind a running turn.
+	if rw := exec.Session().RewriteVersion(); rw != 0 {
+		t.Fatalf("rewrite behind running turn: version %d", rw)
+	}
+}
+>>>>>>> dbf79c482 (feat(control): add /compress-fast — no-AI stale tool-result compression)
