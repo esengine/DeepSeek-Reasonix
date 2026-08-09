@@ -5033,12 +5033,12 @@ export function Composer({
               )}
               <ModelSwitcher label={modelLabel} tabId={tabId} onPick={onSwitchModel} />
             </div>
-            {!heroMode && hasEffort && (
+            {hasEffort && (
               <div className="composer-meta__control composer-meta__control--effort">
                 <EffortSwitcher effort={effort} disabled={running} onPick={onSetEffort} />
               </div>
             )}
-            {!heroMode && hasEffort && (
+            {hasEffort && (
               <div className="composer-meta__control composer-meta__control--more">
                 <Tooltip label={compactEffortTitle} disabled={moreMenuOpen || moreMenuClosing}>
                   <button
