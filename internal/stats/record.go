@@ -78,7 +78,6 @@ type CompactionRecord struct {
 	Status     string `json:"status,omitempty"`
 	RequestID  string `json:"provider_request_id,omitempty"`
 	Error      string `json:"err_type,omitempty"`
->>>>>>> 3aee33e46 (feat(control): /compress-fast logs telemetry and bypasses gate on overflow)
 }
 
 // Writer appends records to the daily stats file for a given stats dir.

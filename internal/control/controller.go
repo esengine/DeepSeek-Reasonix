@@ -1411,22 +1411,6 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				slog.Warn("controller: snapshot after fast compression", "err", err)
 			}
 		}()
-	case trimmed == "/dream" || strings.HasPrefix(trimmed, "/dream "):
-		// Dream consolidation (P1): a reflective pass that distills recent
-		// session knowledge into durable memory files. The four-phase prompt
-		// (Orient → Gather → Consolidate → Prune) is injected as a normal
-		// turn; the model uses the existing remember/forget tools plus the
-		// knowledge cache populated by the P2 compaction bridge.
-		extra := strings.TrimSpace(strings.TrimPrefix(trimmed, "/dream"))
-		go func() {
-			prompt := dreamConsolidationPrompt(c, extra)
-			if err := runGoalLoop(context.Background(), prompt, prompt, prompt); err != nil {
-				c.notice("dream failed: " + err.Error())
-			} else {
-				c.notice("dream consolidation complete")
-			}
-		}()
->>>>>>> dbf79c482 (feat(control): add /compress-fast — no-AI stale tool-result compression)
 	case trimmed == "/new":
 		go func() {
 			if err := c.NewSession(); err != nil {

@@ -2,6 +2,7 @@ package stats
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -135,7 +136,7 @@ func (r *Recorder) Emit(e event.Event) {
 		r.recordProviderUsage(e.ModelRef, e.Guardian.Usage)
 	} else if r != nil && r.writer != nil && e.Kind == event.TurnDone {
 		r.RecordTurnCompletion()
-	case e.Kind == event.Notice && isCompactionTelemetry(e.Text):
+	} else if r != nil && r.writer != nil && e.Kind == event.Notice && isCompactionTelemetry(e.Text) {
 		r.recordCompaction(e)
 	}
 }
@@ -223,7 +224,6 @@ func setCompactionInt(rec *CompactionRecord, key, val string) {
 		rec.Results = n
 	case "saved_chars":
 		rec.SavedChars = n
->>>>>>> 3aee33e46 (feat(control): /compress-fast logs telemetry and bypasses gate on overflow)
 	}
 }
 

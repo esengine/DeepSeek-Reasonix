@@ -610,4 +610,3 @@ func TestRecorderParsesOverflowCacheToken(t *testing.T) {
 		t.Fatalf("row numbers: results=%d saved_chars=%d", rows[0].Results, rows[0].SavedChars)
 	}
 }
->>>>>>> 3aee33e46 (feat(control): /compress-fast logs telemetry and bypasses gate on overflow)

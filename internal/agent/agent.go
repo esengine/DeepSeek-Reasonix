@@ -336,21 +336,7 @@ type Agent struct {
 	// stability. Atomic because /compress-fast reads it from a command
 	// goroutine while the run loop writes it.
 	lastAPICallAt atomic.Int64
-<<<<<<< HEAD
-=======
-	// cacheDeferCompacts counts consecutive turns where compaction was deferred
-	// because the cache hit rate was high. Capped at 3 to avoid unbounded growth.
-	cacheDeferCompacts int
 
-	// lastAPICallAt records when the last provider API call completed. Used to
-	// detect vendor cache-TTL expiry (DashScope 5m, Anthropic 5m, DeepSeek
-	// 24h): if the gap between turns exceeds the TTL, the server-side cache is
-	// cold and the next turn pays full input price regardless of prefix
-	// stability. Atomic because /compress-fast reads it from a command
-	// goroutine while the run loop writes it.
-	lastAPICallAt atomic.Int64
-
->>>>>>> d69614f3e (feat(control): gate /compress-fast on warm cache, back up before rewrite)
 	// lastPrefixShape records the previous provider request's cacheable prefix
 	// so usage events can explain prefix churn on the next request.
 	lastPrefixShape     PrefixShape
@@ -2584,10 +2570,6 @@ func (a *Agent) streamWithFrozen(ctx context.Context, turn int, sink event.Sink,
 			a.sessCacheHit.Add(int64(chunk.Usage.CacheHitTokens))
 			a.sessCacheMiss.Add(int64(chunk.Usage.CacheMissTokens))
 			a.lastAPICallAt.Store(time.Now().UnixNano())
-<<<<<<< HEAD
-=======
-			a.lastAPICallAt.Store(time.Now().UnixNano())
->>>>>>> d69614f3e (feat(control): gate /compress-fast on warm cache, back up before rewrite)
 		case provider.ChunkError:
 			if provider.IsStreamInterrupted(chunk.Err) {
 				stored, _ := finishReasoning()

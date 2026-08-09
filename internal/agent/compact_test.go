@@ -675,3 +675,39 @@ func TestCompactRollsOldDigestsIntoNew(t *testing.T) {
 		t.Fatalf("generated rolling summary missing from projection: %+v", projection)
 	}
 }
+
+// TestMaybeCompactFoldsWhenPruneCannotRelievePressure pins the dead window
+// between high (80%) and force (86%): when large user content dominates,
+// pruning cannot drop the shape under high, but the old code deferred to
+// force — session sat at 800k+ for minutes with zero compactions (measured
+// 802k→837k, 142 requests). Folding must proceed in that case.
+func TestMaybeCompactFoldsWhenPruneCannotRelievePressure(t *testing.T) {
+	cap := &capturingBudgetProvider{}
+	cap.fakeProvider = &fakeProvider{reply: "SUMMARY"}
+	cap.budget = 128 * 1024
+	msgs := []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: bigTokenString(790_000)},
+		{Role: provider.RoleAssistant, Content: "step 1 done"},
+	}
+	for i := 0; i < 20; i++ {
+		id := string(rune('a' + i))
+		msgs = append(msgs,
+			provider.Message{Role: provider.RoleAssistant, Content: "", ToolCalls: []provider.ToolCall{{ID: id, Name: "read_file", Arguments: "{}"}}},
+			provider.Message{Role: provider.RoleTool, ToolCallID: id, Name: "read_file", Content: bigTokenString(5000)},
+		)
+	}
+	a := &Agent{
+		prov:              cap,
+		contextWindow:     1_000_000,
+		outputBudget:      128 * 1024,
+		compactRatio:      0.8,
+		compactForceRatio: 0.9,
+		sink:              event.Discard,
+	}
+	a.session = &Session{Messages: msgs}
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 830_000})
+	if cap.streams == 0 {
+		t.Fatal("summarizer not called: prune deferred despite projection still over trigger")
+	}
+}

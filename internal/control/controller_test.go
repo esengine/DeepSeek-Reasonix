@@ -5722,5 +5722,7 @@ func TestFastCompressCommandAllowsOverflowDespiteWarmCache(t *testing.T) {
 	if got := waitForNotice(t, notices, "fast-compressed"); got == "" {
 		t.Fatal("over-window session must compress despite warm cache")
 	}
+	// SnapshotRewrite runs after the notice inside the command goroutine; give
+	// it a beat so t.TempDir cleanup does not race the session file write.
+	time.Sleep(200 * time.Millisecond)
 }
->>>>>>> 3aee33e46 (feat(control): /compress-fast logs telemetry and bypasses gate on overflow)

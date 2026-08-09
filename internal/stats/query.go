@@ -235,3 +235,39 @@ func providersSorted(totals map[string]int64) []ProviderUsage {
 	})
 	return out
 }
+
+type CompactionRecordRow struct {
+	Timestamp time.Time `json:"ts"`
+	Source    string    `json:"source,omitempty"`
+	CompactionRecord
+}
+
+// QueryCompactions returns the persisted compaction passes for a source
+// (empty = all), newest first. A user reporting "compaction misbehaved" can be
+// diagnosed from these rows alone: trigger/mode/cache reveal the path, src vs
+// proj show whether the fold shrank, and Error pins provider or estimator
+// failures (e.g. the 400 over-window rejection).
+func (w *Writer) QueryCompactions(source string, from, to time.Time) []CompactionRecordRow {
+	if w == nil || w.dir == "" {
+		return nil
+	}
+	var out []CompactionRecordRow
+	for _, day := range daysInRange(from, to) {
+		recs, err := readDaily(w.dir, day)
+		if err != nil {
+			continue
+		}
+		for _, rec := range recs {
+			if rec.Compaction == nil || !matchesSource(rec.Source, source) {
+				continue
+			}
+			out = append(out, CompactionRecordRow{
+				Timestamp:        rec.Timestamp,
+				Source:           rec.Source,
+				CompactionRecord: *rec.Compaction,
+			})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Timestamp.After(out[j].Timestamp) })
+	return out
+}

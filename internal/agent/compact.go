@@ -152,9 +152,13 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 			"pruned %d stale tool results (~%d tokens est.) before compaction", pst.Results, saved)})
 		_ = a.installPruneProjection(pruned, pst)
 		if !force {
-			// Defer summarization until a later turn still reports pressure under
-			// the pruned projection. Force-ratio turns still fold immediately.
-			return
+			// Defer only when the pruned view really drops under the trigger
+			// (un-calibrated estimate): otherwise folding must proceed now,
+			// or [high, force) never folds (prompt stuck at 800k+ minutes).
+			projEst := estimateMessagesTokens(provider.ModelMessages(pruned))
+			if projEst < high {
+				return
+			}
 		}
 	}
 	if _, err := a.compactToProjection(ctx, "auto", "", force); err != nil {

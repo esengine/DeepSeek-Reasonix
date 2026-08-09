@@ -2,14 +2,14 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2081,
-    "essay": 4118,
-    "file-size": 116504,
-    "function-size": 9171,
+    "complexity": 2092,
+    "essay": 4132,
+    "file-size": 111564,
+    "function-size": 9235,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "test-file-size": 70137
+    "test-file-size": 70394
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -28,7 +28,7 @@
     "desktop/app.go": {
       "complexity": 63,
       "essay": 96,
-      "file-size": 11590,
+      "file-size": 11591,
       "function-size": 381
     },
     "desktop/app_autosave_test.go": {
@@ -175,12 +175,6 @@
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 3916
-    },
-    "desktop/frontend/wailsjs/go/main/App.d.ts": {
-      "file-size": 22
-    },
-    "desktop/frontend/wailsjs/go/models.ts": {
-      "file-size": 5072
     },
     "desktop/heartbeat.go": {
       "essay": 20,
@@ -443,9 +437,9 @@
     },
     "internal/agent/agent.go": {
       "complexity": 61,
-      "essay": 109,
-      "file-size": 2753,
-      "function-size": 124
+      "essay": 112,
+      "file-size": 2802,
+      "function-size": 125
     },
     "internal/agent/ask.go": {
       "essay": 4
@@ -460,7 +454,7 @@
       "essay": 1
     },
     "internal/agent/cachehit_e2e_test.go": {
-      "essay": 2
+      "essay": 4
     },
     "internal/agent/capability_gate.go": {
       "essay": 7
@@ -469,7 +463,10 @@
       "essay": 1
     },
     "internal/agent/compact.go": {
-      "essay": 9
+      "essay": 13
+    },
+    "internal/agent/compact_projection.go": {
+      "function-size": 10
     },
     "internal/agent/compact_test.go": {
       "essay": 3
@@ -1068,15 +1065,15 @@
       "essay": 9
     },
     "internal/control/controller.go": {
-      "complexity": 11,
-      "essay": 167,
-      "file-size": 5461,
-      "function-size": 78,
+      "complexity": 22,
+      "essay": 171,
+      "file-size": 5565,
+      "function-size": 131,
       "narrative": 4
     },
     "internal/control/controller_test.go": {
       "essay": 10,
-      "test-file-size": 4671
+      "test-file-size": 4928
     },
     "internal/control/errmsg.go": {
       "essay": 2
@@ -1767,7 +1764,7 @@
       "essay": 2
     },
     "internal/stats/record.go": {
-      "essay": 7
+      "essay": 8
     },
     "internal/stats/recorder.go": {
       "essay": 1
