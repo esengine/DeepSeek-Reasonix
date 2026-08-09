@@ -7241,6 +7241,7 @@ func (a *App) Commands() []CommandInfo {
 		{Name: "new", Description: i18n.M.CmdNew, Kind: "builtin", Group: "actions"},
 		{Name: "clear", Description: i18n.M.CmdClear, Kind: "builtin", Group: "actions"},
 		{Name: "compact", Description: i18n.M.CmdCompact, Kind: "builtin", Group: "actions"},
+		{Name: "compress-fast", Description: i18n.M.CmdCompressFast, Kind: "builtin", Group: "actions"},
 		{Name: "model", Description: i18n.M.CmdModel, Kind: "builtin", Group: "actions"},
 		{Name: "provider", Description: i18n.M.CmdProvider, Kind: "builtin", Group: "management"},
 		{Name: "effort", Description: i18n.M.CmdEffort, Kind: "builtin", Group: "actions"},

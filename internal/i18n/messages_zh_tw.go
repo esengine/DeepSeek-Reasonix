@@ -218,6 +218,7 @@ var ChineseTraditional = Messages{
 	CmdNew:              "清空上下文並儲存歷史",
 	CmdCls:              "清除畫面（保留 LLM 上下文）",
 	CmdCompact:          "壓縮上下文",
+	CmdCompressFast:     "快速壓縮（無 AI）",
 	CmdRewind:           "回滾到更早的一輪",
 	CmdTree:             "檢視對話分支樹",
 	CmdBranch:           "建立對話分支",
