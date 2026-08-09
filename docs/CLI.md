@@ -447,6 +447,8 @@ the displayed list matches the commands the TUI accepts.
 | `/rewind` | Restore conversation and/or code to an earlier turn. |
 | `/tree`, `/branch`, `/switch` | Inspect or navigate conversation branches. |
 | `/reload` | Reload the agent runtime (extensions, tools, skills, commands, hooks, providers) while keeping the session. Queued once while a turn runs, then fail-atomic: a failed rebuild keeps the current runtime. |
+| `/compact [focus]` | Fold the session's middle history into an AI summary — requires the provider's summarizer. This is the normal path for reclaiming context. |
+| `/compress-fast` | **Local, no-AI context compression** for model-compatibility development: elides stale tool results to short placeholders with zero provider calls, never drops a message, and keeps tool_call/result pairing intact. Backs up the transcript first (`*.jsonl.bak`). Use it when the provider's summarize path is unavailable, misbehaves, or you want to free context without spending tokens. |
 
 Switching model, effort, or work mode rebuilds the runtime while preserving the
 active conversation, session-scoped permission overrides, additional directory

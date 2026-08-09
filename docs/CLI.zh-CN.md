@@ -388,6 +388,8 @@ SSH 下远端进程无法读取本机剪贴板，请使用终端粘贴快捷键�
 | `/rewind` | 把对话和/或代码恢复到更早的 turn。 |
 | `/tree`、`/branch`、`/switch` | 查看或切换会话分支。 |
 | `/reload` | 重载 agent 运行时（扩展、工具、skills、commands、hooks、providers），保留当前会话。回合运行中只排队一次；失败原子——重建失败时当前运行时不受影响。 |
+| `/compact [focus]` | 把会话中间历史折叠为 AI 摘要——依赖 provider 的 summarizer。这是回收上下文空间的常规路径。 |
+| `/compress-fast` | **本地、无 AI 的上下文压缩**，用于模型兼容性开发：把过期 tool 结果 elide 为短占位符，零 provider 调用、不丢任何消息、保持 tool_call/result 配对完整。改写前先备份转录（`*.jsonl.bak`）。当 provider 的 summarize 路径不可用/异常，或想不花 token 释放上下文时使用。 |
 
 切换模型、effort 或工作模式会重建运行时，同时保留当前对话、会话级权限覆盖、附加目录
 访问权限和 session ownership。`/reload` 使用同一套失败原子重建语义。
