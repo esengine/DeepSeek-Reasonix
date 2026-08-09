@@ -63,9 +63,6 @@ func TestNormalizeLocalOpenPathRejectsRemoteAuthority(t *testing.T) {
 		// Backslash spellings: url.Parse does not normalize "\", so the
 		// decoded path starts with "/\" — must still be refused after
 		// backslash normalization.
-		// Backslash spellings: url.Parse does not normalize "\", so the
-		// decoded path starts with "/\" — must still be refused after
-		// backslash normalization.
 		"file:///\\evil.example\\share\\x.txt",
 		"file://127.0.0.1/\\evil.example\\share\\x.txt",
 	} {
