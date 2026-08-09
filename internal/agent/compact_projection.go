@@ -401,8 +401,22 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 // bypasses the fold-economics skip. CompactionNoop means no projection was
 // installed (nothing to fold); callers at the force threshold must treat that
 // as a hard failure rather than sending the oversized canonical prompt.
-func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (CompactionOutcome, error) {
+func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (outcome CompactionOutcome, err error) {
 	canonical, transcriptVersion := a.session.snapshotMessagesVersion()
+	// Silent exits (Noop/aborted) must still land in the stats file: a fold
+	// that found nothing is the "compacted but nothing happened" case that
+	// was invisible until 2026-08-09. Success paths emit inside.
+	emitted := false
+	emit := func(t CompactionTelemetry) {
+		a.emitCompactionTelemetry(t)
+		emitted = true
+	}
+	defer func() {
+		if outcome != CompactionNoop || emitted {
+			return
+		}
+		emit(a.silentCompactionTelemetry(trigger, canonical, err))
+	}()
 	msgs := a.foldSource(canonical)
 	head, start, ok := a.planFoldRegion(msgs)
 	if !ok {
@@ -428,7 +442,6 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 		}
 	}
 
-	var err error
 	fold, instructions, err = a.interceptCompactionPrepare(ctx, fold, instructions)
 	if err != nil {
 		a.emitCompactionAborted(trigger)
@@ -455,7 +468,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, res)
 	if err != nil {
 		tele.Error = err.Error()
-		a.emitCompactionTelemetry(tele)
+		emit(tele)
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
@@ -463,7 +476,7 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	summary, err = a.interceptCompactionComplete(ctx, summary)
 	if err != nil {
 		tele.Error = err.Error()
-		a.emitCompactionTelemetry(tele)
+		emit(tele)
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
@@ -479,7 +492,8 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 
 	projTokens := a.estimatedPromptTokens(a.providerProjectionMessages(projMsgs))
 	tele.ProjectionTokens = projTokens
-	a.emitCompactionTelemetry(tele)
+	tele.Status = CompactionStatusInstalled
+	emit(tele)
 
 	projVersion := a.compactionState.Projection.ProjectionVersion + 1
 	st := CompactionState{
@@ -723,8 +737,8 @@ func (a *Agent) installPruneProjection(view []provider.Message, st PruneStats) e
 // emitCompactionTelemetry records structured compaction observability without
 // logging sensitive transcript content.
 func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
-	detail := fmt.Sprintf("trigger=%s mode=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d",
-		t.Trigger, t.Mode, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
+	detail := fmt.Sprintf("trigger=%s mode=%s status=%s cache=%s src=%d fold=%d spans=%d proj=%d in=%d out=%d hit=%d miss=%d write=%d reqs=%d",
+		t.Trigger, t.Mode, t.Status, t.CacheState, t.SourceTokens, t.FoldTokens, t.Spans, t.ProjectionTokens,
 		t.InputTokens, t.OutputTokens, t.CacheHitTokens, t.CacheMissTokens, t.CacheWriteTokens, t.RequestCount)
 	if t.ProviderRequestID != "" {
 		detail += " provider_request_id=" + t.ProviderRequestID

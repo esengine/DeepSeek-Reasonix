@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"reasonix/internal/ablation"
 	"reasonix/internal/event"
@@ -183,45 +182,6 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 func foldEconomics(region []provider.Message) bool {
 	const minFoldTokens = 400
 	return estimateMessagesTokens(region) >= minFoldTokens
-}
-
-func estimateMessagesTokens(msgs []provider.Message) int {
-	total := 0
-	for _, m := range msgs {
-		if m.LocalOnly {
-			continue
-		}
-		total += 4 // chat-message framing overhead
-		total += estimateTextTokens(m.Content)
-		total += estimateTextTokens(m.ReasoningContent)
-		total += estimateTextTokens(m.Name)
-		total += estimateTextTokens(m.ToolCallID)
-		for _, tc := range m.ToolCalls {
-			total += 8
-			total += estimateTextTokens(tc.ID)
-			total += estimateTextTokens(tc.Name)
-			total += estimateTextTokens(tc.Arguments)
-		}
-		for _, item := range m.ResponsesItems {
-			total += estimateTextTokens(string(item))
-		}
-	}
-	return total
-}
-
-func estimateTextTokens(s string) int {
-	if s == "" {
-		return 0
-	}
-	// A conservative cross-language approximation: English-ish text trends near
-	// four bytes per token, while CJK-heavy text is closer to one rune per token.
-	bytes := len(s)
-	runes := utf8.RuneCountInString(s)
-	byBytes := (bytes + 3) / 4
-	if runes > byBytes {
-		return runes
-	}
-	return byBytes
 }
 
 // SummarizeFrom keeps the compatibility index contract while installing a

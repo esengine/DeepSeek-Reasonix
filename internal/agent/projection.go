@@ -48,6 +48,13 @@ const (
 	CompactionModeSnip       = "snip"
 )
 
+// Compaction telemetry status labels.
+const (
+	CompactionStatusInstalled = "installed"
+	CompactionStatusNoop      = "noop"
+	CompactionStatusAborted   = "aborted"
+)
+
 // ContextProjection is the model-visible view of a session. The canonical
 // transcript in Session.Messages is never replaced by this structure.
 type ContextProjection struct {
@@ -108,6 +115,7 @@ type CompactionTelemetry struct {
 	CacheMissTokens   int    `json:"cache_miss_tokens"`
 	CacheWriteTokens  int    `json:"cache_write_tokens"`
 	RequestCount      int    `json:"request_count"`
+	Status            string `json:"status,omitempty"` // installed | noop | aborted; "" on legacy paths
 	ProviderRequestID string `json:"provider_request_id,omitempty"`
 	Error             string `json:"error,omitempty"`
 }
