@@ -55,6 +55,11 @@ func TestNormalizeLocalOpenPathRejectsRemoteAuthority(t *testing.T) {
 		// (they normalize to a remote UNC path).
 		"file:////attacker.example/share/x.txt",
 		"file://///attacker.example/share/x.txt",
+		// Loopback authority with a double-slash path: host is dropped, the
+		// remaining path still starts with "//" → refused (regression guard
+		// for the unconditional check).
+		"file://127.0.0.1//attacker.example/share/x.txt",
+		"file://localhost//attacker.example/share/x.txt",
 	} {
 		if _, err := normalizeLocalOpenPath(u); err == nil {
 			t.Errorf("normalizeLocalOpenPath(%q): want rejection (remote authority), got nil", u)
