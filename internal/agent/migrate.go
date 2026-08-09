@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/provider"
 )
@@ -549,7 +550,7 @@ func transformAndCopyJsonl(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".session.*.tmp")
+	tmp, err := os.CreateTemp(fileutil.TempDirFor(filepath.Dir(dst)), ".session.*.tmp")
 	if err != nil {
 		return err
 	}
@@ -622,7 +623,7 @@ func transformAndCopyJsonl(src, dst string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpPath, dst); err != nil {
+	if err := fileutil.ReplaceFile(tmpPath, dst); err != nil {
 		return err
 	}
 	ok = true
@@ -690,11 +691,7 @@ func recordImportedTitle(destDir, base, summary string) {
 	if err != nil {
 		return
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, path)
+	_ = fileutil.AtomicWriteFile(path, b, 0o644)
 }
 
 func importMarkerExists(destDir, marker string) bool {
@@ -850,7 +847,7 @@ func copyBranchMetaSidecar(srcPath, dstPath string) {
 	if err := os.MkdirAll(filepath.Dir(dstMeta), 0o755); err != nil {
 		return
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dstMeta), ".branch.*.tmp")
+	tmp, err := os.CreateTemp(fileutil.TempDirFor(filepath.Dir(dstMeta)), ".branch.*.tmp")
 	if err != nil {
 		return
 	}
@@ -864,7 +861,7 @@ func copyBranchMetaSidecar(srcPath, dstPath string) {
 		os.Remove(tmpPath)
 		return
 	}
-	if err := os.Rename(tmpPath, dstMeta); err != nil {
+	if err := fileutil.ReplaceFile(tmpPath, dstMeta); err != nil {
 		os.Remove(tmpPath)
 	}
 }
@@ -912,7 +909,7 @@ func copyFileIfExists(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".subagent.*.tmp")
+	tmp, err := os.CreateTemp(fileutil.TempDirFor(filepath.Dir(dst)), ".subagent.*.tmp")
 	if err != nil {
 		return err
 	}
@@ -926,7 +923,7 @@ func copyFileIfExists(src, dst string) error {
 		os.Remove(tmpPath)
 		return err
 	}
-	if err := os.Rename(tmpPath, dst); err != nil {
+	if err := fileutil.ReplaceFile(tmpPath, dst); err != nil {
 		os.Remove(tmpPath)
 		return err
 	}

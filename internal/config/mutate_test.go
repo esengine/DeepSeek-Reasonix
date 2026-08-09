@@ -147,6 +147,13 @@ func TestConcurrentBotAndSettingsWritersKeepBothFields(t *testing.T) {
 }
 
 func TestLockUserConfigEditsSerializesAcrossProcessesWithDifferentTempDirs(t *testing.T) {
+	// This test verifies config-lock serialization is invariant across TMPDIR
+	// overrides, which only works when the OS-wide /tmp is writable. When it
+	// isn't (read-only containers, etc.), the fallback to per-process TMPDIR
+	// naturally splits the lock registry and serialization cannot be tested.
+	if !dirWritable(string(filepath.Separator) + "tmp") {
+		t.Skip("/tmp is not writable; lock-dir invariance across TMPDIR cannot hold")
+	}
 	home := t.TempDir()
 	assertUserConfigLockSerializesAcrossProcesses(
 		t,
@@ -419,14 +426,14 @@ func TestConfigEditLockCanonicalizesAliasesAndIgnoresCacheOverrides(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first != third {
+	if first != third && dirWritable(string(filepath.Separator)+"tmp") {
 		t.Fatalf("HOME/profile/TMPDIR override split config lock: %q != %q", first, third)
 	}
 	wantDir, err := configEditLockRegistryDir()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if filepath.Dir(first) != wantDir {
+	if filepath.Dir(first) != wantDir && dirWritable(string(filepath.Separator)+"tmp") {
 		t.Fatalf("lock dir = %q, want OS-user registry %q", filepath.Dir(first), wantDir)
 	}
 }
