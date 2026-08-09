@@ -1920,6 +1920,35 @@ func bashMayMutate(command string) bool {
 	return false
 }
 
+// stripLeadingEnvPrefix strips leading `KEY=VALUE` and `env KEY=VALUE` tokens
+// from a command string for classification purposes only. shellparse refuses
+// `VAR=value cmd` as shell control syntax; env-prefixed toolchains
+// (`GOROOT=/x go test ./…`, `CARGO_HOME=/y cargo test`) are common, so the
+// verification classifier retries with the real command word. This is a
+// read-only text split (whitespace + quote-aware scanning via StaticFields on
+// the remainder); it never executes anything and never touches the
+// permission layer's fail-closed classification.
+func stripLeadingEnvPrefix(command string) []string {
+	fields, malformed := shellparse.StaticFields(strings.TrimSpace(command))
+	if malformed == "" && len(fields) > 0 {
+		return fields
+	}
+	// 手工按空白切（env 前缀不含引号场景）；失败返回 nil 由调用方拒绝。
+	raw := strings.Fields(strings.TrimSpace(command))
+	i := 0
+	for i < len(raw) && (raw[i] == "env" || (strings.Contains(raw[i], "=") && !strings.HasPrefix(raw[i], "-"))) {
+		i++
+	}
+	if i == 0 || i >= len(raw) {
+		return nil
+	}
+	rest, m2 := shellparse.StaticFields(strings.Join(raw[i:], " "))
+	if m2 != "" {
+		return nil
+	}
+	return rest
+}
+
 func bashCommandIsVerification(command string) bool {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -1937,7 +1966,13 @@ func bashCommandIsVerification(command string) bool {
 		}
 		fields, malformed := shellparse.StaticFields(normalized)
 		if malformed != "" || len(fields) == 0 {
-			return false
+			// shellparse 保守拒绝前导 env 赋值（`GOROOT=/x go test ./…` 报
+			// "shell control syntax"）——这是工具链路径定制的常见形态。手工剥离
+			// 前导 KEY=VALUE（仅 verification 分类用途；不执行、无权限含义）。
+			fields = stripLeadingEnvPrefix(normalized)
+			if len(fields) == 0 {
+				return false
+			}
 		}
 		if bashSegmentIsVerification(fields) {
 			found = true
@@ -2012,6 +2047,19 @@ func bashSegmentIsVerification(fields []string) bool {
 	if len(fields) == 0 {
 		return false
 	}
+	// 剥离前导 env 前缀（KEY=VALUE 与 `env KEY=VALUE`）——工具链路径定制
+	// （GOROOT/CARGO_HOME/LLVM_PATH/…）是常见用法：`GOROOT=/x go test ./…` 的
+	// fields[0] 是 `GOROOT=/x`，不剥离会把真实命令词误判为未知命令。只影响
+	// verification 分类（无权限含义）；permission 层 fail-closed 不动（env 前缀
+	// 可重定义 PATH 等，执行权仍需审批）。`--flag=v` 形态不是 env 前缀（以 - 开头）。
+	i := 0
+	for i < len(fields) && (fields[i] == "env" || (strings.Contains(fields[i], "=") && !strings.HasPrefix(fields[i], "-"))) {
+		i++
+	}
+	if i >= len(fields) {
+		return false
+	}
+	fields = fields[i:]
 	base := strings.ToLower(filepath.Base(fields[0]))
 	args := fields[1:]
 	if hasCommandArg(args, "--fix", "--write", "-w", "--update", "-u") {
