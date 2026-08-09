@@ -8,32 +8,39 @@ import (
 	"testing"
 )
 
-func TestShellOpenVerbFolder(t *testing.T) {
+func TestShellOpenCommandFolder(t *testing.T) {
 	dir := t.TempDir()
-	if got := shellOpenVerb(dir); got != "explore" {
-		t.Fatalf("shellOpenVerb(folder %q) = %q, want explore", dir, got)
+	verb, target := shellOpenCommand(dir)
+	if verb != "explore" {
+		t.Fatalf("shellOpenCommand(folder %q) verb = %q, want explore", dir, verb)
+	}
+	if target != dir+string(os.PathSeparator) {
+		t.Fatalf("shellOpenCommand(folder %q) target = %q, want trailing separator", dir, target)
 	}
 }
 
-func TestShellOpenVerbFile(t *testing.T) {
+func TestShellOpenCommandFile(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "notes.md")
 	if err := os.WriteFile(file, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := shellOpenVerb(file); got != "open" {
-		t.Fatalf("shellOpenVerb(file %q) = %q, want open", file, got)
+	verb, target := shellOpenCommand(file)
+	if verb != "open" || target != file {
+		t.Fatalf("shellOpenCommand(file) = (%q, %q), want (open, %q)", verb, target, file)
 	}
 }
 
-func TestShellOpenVerbMissingPath(t *testing.T) {
-	if got := shellOpenVerb(filepath.Join(t.TempDir(), "missing")); got != "open" {
-		t.Fatalf("shellOpenVerb(missing) = %q, want open fallback", got)
+func TestShellOpenCommandMissingPath(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	verb, target := shellOpenCommand(missing)
+	if verb != "open" || target != missing {
+		t.Fatalf("shellOpenCommand(missing) = (%q, %q), want (open, %q)", verb, target, missing)
 	}
 }
 
-func TestShellOpenVerbFolderWithSiblingLnk(t *testing.T) {
+func TestShellOpenCommandFolderWithSiblingLnk(t *testing.T) {
 	// The reported regression: a folder whose base name also exists as a .lnk
-	// shortcut must still open in Explorer, not launch the shortcut's target.
+	// shortcut must open in Explorer, not launch the shortcut's target.
 	dir := t.TempDir()
 	folder := filepath.Join(dir, "app")
 	if err := os.Mkdir(folder, 0o755); err != nil {
@@ -42,7 +49,11 @@ func TestShellOpenVerbFolderWithSiblingLnk(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "app.lnk"), []byte("shortcut"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := shellOpenVerb(folder); got != "explore" {
-		t.Fatalf("shellOpenVerb(folder with sibling .lnk %q) = %q, want explore", folder, got)
+	verb, target := shellOpenCommand(folder)
+	if verb != "explore" {
+		t.Fatalf("shellOpenCommand(folder with sibling .lnk %q) verb = %q, want explore", folder, verb)
+	}
+	if target != folder+string(os.PathSeparator) {
+		t.Fatalf("shellOpenCommand(folder with sibling .lnk %q) target = %q, want trailing separator", folder, target)
 	}
 }
