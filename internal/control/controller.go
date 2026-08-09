@@ -1370,6 +1370,21 @@ func (c *Controller) submitCommandOrTurn(trimmed, input, display string, scopedR
 				return
 			}
 			defer c.endRotation()
+			// Cache gate: rewriting tool results changes the wire prefix, so
+			// every byte from the first elided result onward misses the
+			// server-side cache. Only do that when the cache is already cold
+			// (idle past the vendor TTL); a warm cache rewrite is pure cost.
+			if last := c.executor.LastAPICallAt(); !last.IsZero() && time.Since(last) < c.cacheColdAfter() {
+				c.noticeDetail("fast compression refused",
+					fmt.Sprintf("provider cache still warm (last call %s ago, TTL %s); rewriting would punch a hole in every hit from the first elided result. Retry after idle, or use /compact (AI summarize) instead.", time.Since(last).Round(time.Minute), c.cacheColdAfter().Round(time.Minute)))
+				return
+			}
+			// Backup the whole transcript before the rewrite so a prune
+			// regression can be reverted (Codex compress-fast .bak analog).
+			if err := c.backupSessionBeforeRewrite(); err != nil {
+				c.notice("fast compression failed: backup: " + err.Error())
+				return
+			}
 			stats, err := c.executor.PruneStaleToolResults()
 			if err != nil {
 				c.notice("fast compression failed: " + err.Error())
@@ -3647,6 +3662,30 @@ func (c *Controller) SnapshotActivity() error {
 // controllers cannot overwrite a newer transcript.
 func (c *Controller) SnapshotRewrite() error {
 	return c.snapshot(false, true, false)
+}
+
+// backupSessionBeforeRewrite copies the current transcript file to a .bak
+// sibling before a history rewrite (compress-fast analog of Codex's .bak),
+// so a prune regression can be reverted. No-op when there is no session path
+// or the file does not exist yet.
+func (c *Controller) backupSessionBeforeRewrite() error {
+	path := c.SessionPath()
+	if path == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	bak := path + ".bak"
+	if err := os.WriteFile(bak, raw, 0o600); err != nil {
+		return err
+	}
+	slog.Info("controller: backed up session before fast compression", "path", path, "backup", bak)
+	return nil
 }
 
 func (c *Controller) snapshot(markActivity, forceRewrite, shutdownRecovery bool) error {

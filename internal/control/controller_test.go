@@ -5583,4 +5583,94 @@ func TestFastCompressCommandRefusedWhileTurnRunning(t *testing.T) {
 		t.Fatalf("rewrite behind running turn: version %d", rw)
 	}
 }
->>>>>>> dbf79c482 (feat(control): add /compress-fast — no-AI stale tool-result compression)
+
+func TestFastCompressCommandRefusedWhileCacheWarm(t *testing.T) {
+	big := strings.Repeat("x", 5000)
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "read"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: big})
+	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 1000, RecentKeep: 1}, event.Discard)
+	notices := make(chan string, 4)
+	c := New(Options{
+		Executor: exec,
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices <- e.Text
+			}
+		}),
+	})
+	// Warm cache: last API call is recent, TTL is long -> refuse.
+	exec.RecordAPICallForTest(time.Now())
+	c.testCacheColdAfter = 24 * time.Hour
+
+	c.Submit("/compress-fast")
+	select {
+	case got := <-notices:
+		if !strings.Contains(got, "refused") {
+			t.Fatalf("warm cache must refuse fast compression, got %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no refusal notice within 5s")
+	}
+	// Nothing rewritten: no backup, no rewrite version bump.
+	if rw := exec.Session().RewriteVersion(); rw != 0 {
+		t.Fatalf("rewrite behind warm cache: version %d", rw)
+	}
+}
+
+func TestFastCompressCommandBacksUpBeforeRewrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "session.jsonl")
+	big := strings.Repeat("x", 5000)
+	sess := agent.NewSession("sys")
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "read"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "1", Name: "read_file", Arguments: "{}"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "1", Name: "read_file", Content: big})
+	sess.Add(provider.Message{Role: provider.RoleUser, Content: "also"})
+	sess.Add(provider.Message{Role: provider.RoleAssistant, ToolCalls: []provider.ToolCall{{ID: "2", Name: "read_file", Arguments: "{}"}}})
+	sess.Add(provider.Message{Role: provider.RoleTool, ToolCallID: "2", Name: "read_file", Content: strings.Repeat("y", 3000)})
+	exec := agent.New(nil, nil, sess, agent.Options{ContextWindow: 1000, RecentKeep: 1, ArchiveDir: dir}, event.Discard)
+	notices := make(chan string, 4)
+	c := New(Options{
+		Executor:    exec,
+		SessionDir:  dir,
+		SessionPath: path,
+		Label:       "test",
+		Sink: event.FuncSink(func(e event.Event) {
+			if e.Kind == event.Notice {
+				notices <- e.Text
+			}
+		}),
+	})
+	// Persist a baseline transcript so the backup has content to copy.
+	if err := c.SnapshotRewrite(); err != nil {
+		t.Fatalf("baseline snapshot: %v", err)
+	}
+	c.testCacheColdAfter = -1 // force cold so the gate passes
+
+	c.Submit("/compress-fast")
+	select {
+	case got := <-notices:
+		if strings.Contains(got, "failed") || strings.Contains(got, "no stale") {
+			t.Fatalf("unexpected notice: %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no fast-compress notice within 5s")
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("backup not created: %v", err)
+	}
+	// The backup must contain the original (unpruned) tool output.
+	raw, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		t.Fatalf("read backup: %v", err)
+	}
+	if !strings.Contains(string(raw), big[:64]) {
+		t.Error("backup does not contain the original tool output")
+	}
+	if rw := exec.Session().RewriteVersion(); rw == 0 {
+		t.Fatal("prune did not rewrite the session")
+	}
+}
+>>>>>>> d69614f3e (feat(control): gate /compress-fast on warm cache, back up before rewrite)
