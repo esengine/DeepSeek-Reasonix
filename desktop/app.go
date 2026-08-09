@@ -33,7 +33,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
 	"reasonix/internal/boot"
 	"reasonix/internal/botruntime"
@@ -46,7 +45,6 @@ import (
 	"reasonix/internal/fileref"
 	fileenc "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/i18n"
-	"reasonix/internal/jobs"
 	"reasonix/internal/mcpdiag"
 	"reasonix/internal/mcpregistry"
 	"reasonix/internal/memory"
@@ -796,6 +794,9 @@ func (a *App) restoreOrBuildTabs() {
 	// freshly written config (including the user's default_model) is
 	// picked up by Load instead of falling back to built-in defaults.
 	_, _ = config.MigrateLegacyIfNeeded()
+	if err := reconcileTopicArchiveMetadataPending(a.deleteTopic); err != nil {
+		slog.Warn("desktop: topic archive metadata reconciliation remains pending")
+	}
 	f := loadTabsFile()
 	_, _ = recoverLegacyProjectSidebarRoots(f)
 	_, _ = config.ApplyUserConfigUpgradesOnStartup(config.UserConfigPath())
@@ -1187,7 +1188,7 @@ func (admission *tabTurnAdmission) abort() {
 
 // beginTabTurn locks the tab's foreground-turn admission gate and reserves the
 // event sink until TurnDone has completed all of its fan-out.
-func (a *App) beginTabTurn(tabID string, reclaim bool) (*tabTurnAdmission, control.SessionAPI, error) {
+func (a *App) beginTabTurn(tabID string, reclaim bool, submissionID ...string) (*tabTurnAdmission, control.SessionAPI, error) {
 	tab, ctrl := a.tabAndCtrlByID(tabID)
 	if a.tabIsReadOnly(tab) {
 		return nil, nil, readOnlyChannelErr()
@@ -1227,7 +1228,7 @@ func (a *App) beginTabTurn(tabID string, reclaim bool) (*tabTurnAdmission, contr
 		abort()
 		return nil, nil, err
 	}
-	if ctrl.RuntimeStatus().Running || (tab.sink != nil && !tab.sink.tryBeginTurn()) {
+	if ctrl.RuntimeStatus().Running || (tab.sink != nil && !tab.sink.tryBeginTurn(submissionID...)) {
 		abort()
 		return nil, nil, control.ErrTurnRunning
 	}
@@ -1237,7 +1238,7 @@ func (a *App) beginTabTurn(tabID string, reclaim bool) (*tabTurnAdmission, contr
 // submitToTab is the shared submit body. fromBridge marks submissions driven
 // by the IM takeover bridge; local (frontend) submissions on a taken-over tab
 // reclaim remote control first — typing locally is the grab-back gesture.
-func (a *App) submitToTab(tabID, input string, fromBridge bool) error {
+func (a *App) submitToTab(tabID, input string, fromBridge bool, submissionID ...string) error {
 	trimmed := strings.TrimSpace(input)
 	if trimmed == "/effort" || strings.HasPrefix(trimmed, "/effort ") {
 		tab, _ := a.tabAndCtrlByID(tabID)
@@ -1253,7 +1254,7 @@ func (a *App) submitToTab(tabID, input string, fromBridge bool) error {
 		a.runEffortCommandForTab(tabID, trimmed)
 		return nil
 	}
-	admission, ctrl, err := a.beginTabTurn(tabID, !fromBridge)
+	admission, ctrl, err := a.beginTabTurn(tabID, !fromBridge, submissionID...)
 	if err != nil {
 		return err
 	}
@@ -1311,35 +1312,11 @@ func (a *App) SubmitDisplay(display, input string) error {
 }
 
 func (a *App) SubmitDisplayToTab(tabID, display, input string) error {
-	if err := validateTurnInput(input); err != nil {
-		return err
-	}
-	admission, ctrl, err := a.beginTabTurn(tabID, true)
-	if err != nil {
-		return err
-	}
-	defer admission.abort()
-	tab := admission.tab
-	a.ensureTabTopicIndexedForUserTurn(tab)
-	ctrl.SubmitDisplay(display, input)
-	admission.finish(ctrl)
-	return nil
+	return a.submitDisplayToTab(tabID, display, input, "")
 }
 
 func (a *App) SubmitDeliveryRecoveryToTab(tabID, display, input string) error {
-	if err := validateTurnInput(input); err != nil {
-		return err
-	}
-	admission, ctrl, err := a.beginTabTurn(tabID, true)
-	if err != nil {
-		return err
-	}
-	defer admission.abort()
-	tab := admission.tab
-	a.ensureTabTopicIndexedForUserTurn(tab)
-	ctrl.SubmitDeliveryRecovery(display, input)
-	admission.finish(ctrl)
-	return nil
+	return a.submitDeliveryRecoveryToTab(tabID, display, input, "")
 }
 
 // InvocationRequest is the Wails-bound form of a composer invocation entity.
@@ -1360,19 +1337,7 @@ func controlInvocationRequests(invocations []InvocationRequest) []control.Invoca
 }
 
 func (a *App) SubmitInvocationsToTab(tabID, display, input string, invocations []InvocationRequest) error {
-	if err := validateInvocationTurnInput(input, invocations); err != nil {
-		return err
-	}
-	admission, ctrl, err := a.beginTabTurn(tabID, true)
-	if err != nil {
-		return err
-	}
-	defer admission.abort()
-	tab := admission.tab
-	a.ensureTabTopicIndexedForUserTurn(tab)
-	ctrl.SubmitInvocationDisplay(display, input, controlInvocationRequests(invocations))
-	admission.finish(ctrl)
-	return nil
+	return a.submitInvocationsToTab(tabID, display, input, invocations, "")
 }
 
 func validateInvocationTurnInput(input string, invocations []InvocationRequest) error {
@@ -1388,8 +1353,9 @@ func validateInvocationTurnInput(input string, invocations []InvocationRequest) 
 func (a *App) submitInitialGoalToLocalTab(
 	tabID, toolApprovalMode, goal, display, input string,
 	invocations []InvocationRequest,
+	submissionID ...string,
 ) ([]string, error) {
-	admission, ctrl, err := a.beginTabTurn(tabID, true)
+	admission, ctrl, err := a.beginTabTurn(tabID, true, submissionID...)
 	if err != nil {
 		return []string{}, err
 	}
@@ -1441,19 +1407,7 @@ func (a *App) SubmitInitialGoalToTab(
 }
 
 func (a *App) SubmitEditedDisplayToTab(tabID, display, input, original string) error {
-	if err := validateTurnInput(input); err != nil {
-		return err
-	}
-	admission, ctrl, err := a.beginTabTurn(tabID, true)
-	if err != nil {
-		return err
-	}
-	defer admission.abort()
-	tab := admission.tab
-	a.ensureTabTopicIndexedForUserTurn(tab)
-	ctrl.SubmitEditedDisplay(display, input, original)
-	admission.finish(ctrl)
-	return nil
+	return a.submitEditedDisplayToTab(tabID, display, input, original, "")
 }
 
 func (a *App) bindControllerDisplayRecorder(ctrl control.SessionAPI) {
@@ -2528,32 +2482,7 @@ func removeDesktopSessionArtifacts(path string) error {
 	if err != nil {
 		return err
 	}
-	defer guard.Release()
-	if err := invalidateTopicDirMarkers(filepath.Dir(path)); err != nil {
-		return err
-	}
-	defer invalidateTopicSessionIndexForPath(path)
-	for _, p := range sessionOwnedArtifactPaths(path) {
-		if strings.TrimSpace(p) == "" {
-			continue
-		}
-		if err := os.RemoveAll(p); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	if err := guard.RemoveSidecarsAndRelease(); err != nil {
-		return err
-	}
-	if err := removeSessionDisplay(filepath.Dir(path), path); err != nil {
-		return err
-	}
-	if err := removeSessionPlannerDisplay(filepath.Dir(path), path); err != nil {
-		return err
-	}
-	if err := agent.DeleteSubagentsByParent(filepath.Dir(path), agent.BranchID(path)); err != nil {
-		return err
-	}
-	return agent.ClearCleanupPending(path)
+	return removeDesktopSessionArtifactsWithGuard(path, guard)
 }
 
 // CheckpointMeta summarises one rewind point (a user turn) for the desktop.
@@ -3558,53 +3487,6 @@ func (a *App) sessionDeleteFallbackTarget(target fallbackRuntimeTarget) fallback
 	return target
 }
 
-func (a *App) removeTopicRuntimeBindings(topicID string) ([]removedSessionRuntime, fallbackRuntimeTarget) {
-	var removed []removedSessionRuntime
-	var fallback fallbackRuntimeTarget
-
-	a.mu.Lock()
-	for id, tab := range a.tabs {
-		if tab == nil || tab.TopicID != topicID {
-			continue
-		}
-		sessionDir := tabRuntimeSessionDir(tab)
-		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
-		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
-		}
-		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
-		a.markTabRemovedLocked(tab)
-		delete(a.tabs, id)
-		a.removeTabOrderLocked(id)
-		if a.activeTabID == id {
-			a.activeTabID = ""
-		}
-	}
-	for key, tab := range a.detachedSessions {
-		if tab == nil || tab.TopicID != topicID {
-			continue
-		}
-		sessionDir := tabRuntimeSessionDir(tab)
-		sessionPath := canonicalTabSessionPath(tab.currentSessionPath())
-		if len(removed) == 0 {
-			fallback = fallbackRuntimeTarget{scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot}
-		}
-		removed = append(removed, removedRuntimeFromTab(tab, sessionDir, sessionPath))
-		a.markTabRemovedLocked(tab)
-		delete(a.detachedSessions, key)
-	}
-	if a.activeTabID == "" && len(a.tabOrder) > 0 {
-		a.activeTabID = a.tabOrder[0]
-	}
-	fallback.needs = len(removed) > 0 && len(a.tabs) == 0
-	dir, entries, activeID, version := a.saveTabsCollectLocked()
-	a.mu.Unlock()
-
-	a.saveTabsWrite(dir, entries, activeID, version)
-
-	return removed, fallback
-}
-
 func removedRuntimeFromTab(tab *WorkspaceTab, dir, sessionPath string) removedSessionRuntime {
 	return removedSessionRuntime{
 		tab:           tab,
@@ -3684,28 +3566,6 @@ func (a *App) destroyHandlesForSession(dir, sessionPath string, removed []remove
 		destroys = append(destroys, item.ctrl.BeginDestroySession(sessionPath))
 	}
 	return destroys
-}
-
-func waitDestroyHandles(destroys []control.SessionDestroyHandle) bool {
-	results := make(chan jobs.TeardownResult, len(destroys))
-	waits := 0
-	for _, destroy := range destroys {
-		if destroy.Wait == nil {
-			continue
-		}
-		waits++
-		go func(wait func() jobs.TeardownResult) {
-			results <- wait()
-		}(destroy.Wait)
-	}
-
-	timedOut := false
-	for range waits {
-		if (<-results).HasTimedOut() {
-			timedOut = true
-		}
-	}
-	return timedOut
 }
 
 func waitAllDestroyHandles(destroys []control.SessionDestroyHandle) {
@@ -5607,6 +5467,8 @@ type HistoryPage struct {
 	EndTurn    int              `json:"endTurn"`
 	TotalTurns int              `json:"totalTurns"`
 	HasOlder   bool             `json:"hasOlder"`
+	Revision   int64            `json:"revision,omitempty"`
+	Digest     string           `json:"digest,omitempty"`
 }
 
 // historyProviderMessagesWithPersistedTimes overlays legacy event-record
@@ -5681,8 +5543,17 @@ func (a *App) HistoryPageForTab(tabID string, beforeTurn, limit int) HistoryPage
 	}
 	dir := controllerSessionDir(ctrl)
 	path := ctrl.SessionPath()
-	msgs := historyProviderMessagesWithPersistedTimes(ctrl.History(), path)
-	return historyPageFromProviderMessages(
+	msgs := ctrl.History()
+	status := ctrl.RuntimeStatus()
+	if !status.Running && !status.PendingPrompt && !ctrl.SessionHasUnsavedChanges() && strings.TrimSpace(path) != "" {
+		// Once the foreground turn is idle, the durable event log is the source
+		// of truth. Re-reading it prevents a stale controller snapshot from
+		// hiding an assistant/tool suffix after restart or cross-runtime recovery.
+		if loaded, err := agent.LoadSession(path); err == nil && loaded != nil {
+			msgs = loaded.Snapshot()
+		}
+	}
+	page := historyPageFromProviderMessages(
 		msgs,
 		sessionDisplayResolver(dir, path),
 		sessionPlannerDisplayTurns(dir, path),
@@ -5690,6 +5561,24 @@ func (a *App) HistoryPageForTab(tabID string, beforeTurn, limit int) HistoryPage
 		beforeTurn,
 		limit,
 	)
+	digest, _ := agent.ContentDigestForMessages(msgs)
+	return historyPageWithFingerprint(page, path, digest)
+}
+
+func historyPageWithFingerprint(page HistoryPage, sessionPath, contentDigest string) HistoryPage {
+	contentDigest = strings.TrimSpace(contentDigest)
+	if strings.TrimSpace(sessionPath) == "" || contentDigest == "" {
+		return page
+	}
+	// Digest is derived from the exact full transcript used to build the page.
+	// Never copy a newer sidecar digest onto older page content.
+	page.Digest = contentDigest
+	if meta, ok, err := agent.LoadBranchMeta(sessionPath); err == nil && ok {
+		if strings.TrimSpace(meta.ContentDigest) == contentDigest {
+			page.Revision = meta.Revision
+		}
+	}
+	return page
 }
 
 func normalizeHistoryPageLimit(limit int) int {
@@ -6561,14 +6450,16 @@ func previewSessionPage(sessionDir, path string, beforeTurn, limit int) (History
 	if err != nil {
 		return HistoryPage{}, err
 	}
-	return historyPageFromProviderMessages(
-		historyProviderMessagesWithPersistedTimes(loaded.Snapshot(), sessionPath),
+	msgs := loaded.Snapshot()
+	digest, _ := agent.ContentDigestForMessages(msgs)
+	return historyPageWithFingerprint(historyPageFromProviderMessages(
+		historyProviderMessagesWithPersistedTimes(msgs, sessionPath),
 		sessionDisplayResolver(sessionDir, sessionPath),
 		sessionPlannerDisplayTurns(sessionDir, sessionPath),
 		nil,
 		beforeTurn,
 		limit,
-	), nil
+	), sessionPath, digest), nil
 }
 
 type previewEventRecord struct {
@@ -6939,26 +6830,28 @@ func (a *App) jobsForCtrl(ctrl control.SessionAPI, out []JobView) []JobView {
 
 // Meta describes the session for the frontend's header and status line.
 type Meta struct {
-	Label             string                   `json:"label"`
-	Ready             bool                     `json:"ready"`
-	Runtime           SessionRuntimeView       `json:"runtime"`
-	StartupErr        string                   `json:"startupErr,omitempty"`
-	EventChannel      string                   `json:"eventChannel"`
-	Cwd               string                   `json:"cwd"`
-	WorkspaceRoot     string                   `json:"workspaceRoot,omitempty"`
-	WorkspaceName     string                   `json:"workspaceName,omitempty"`
-	WorkspacePath     string                   `json:"workspacePath,omitempty"`
-	GitBranch         string                   `json:"gitBranch,omitempty"`
-	ImageInputEnabled bool                     `json:"imageInputEnabled"`
-	AutoApproveTools  bool                     `json:"autoApproveTools"`
-	Bypass            bool                     `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
-	CollaborationMode string                   `json:"collaborationMode"`
-	ToolApprovalMode  string                   `json:"toolApprovalMode"`
-	TokenMode         string                   `json:"tokenMode"`
-	Goal              string                   `json:"goal,omitempty"`
-	GoalStatus        string                   `json:"goalStatus,omitempty"`
-	GoalRuntime       *GoalRuntimeView         `json:"goalRuntime,omitempty"`
-	AutoResearch      *AutoResearchCompactView `json:"autoResearch,omitempty"`
+	Label             string             `json:"label"`
+	Ready             bool               `json:"ready"`
+	Runtime           SessionRuntimeView `json:"runtime"`
+	StartupErr        string             `json:"startupErr,omitempty"`
+	EventChannel      string             `json:"eventChannel"`
+	SessionPath       string             `json:"sessionPath,omitempty"`
+	SessionRevision   int64              `json:"sessionRevision,omitempty"`
+	SessionDigest     string             `json:"sessionDigest,omitempty"`
+	Cwd               string             `json:"cwd"`
+	WorkspaceRoot     string             `json:"workspaceRoot,omitempty"`
+	WorkspaceName     string             `json:"workspaceName,omitempty"`
+	WorkspacePath     string             `json:"workspacePath,omitempty"`
+	GitBranch         string             `json:"gitBranch,omitempty"`
+	ImageInputEnabled bool               `json:"imageInputEnabled"`
+	AutoApproveTools  bool               `json:"autoApproveTools"`
+	Bypass            bool               `json:"bypass"` // legacy JSON key for YOLO/full-access tool auto-approval
+	CollaborationMode string             `json:"collaborationMode"`
+	ToolApprovalMode  string             `json:"toolApprovalMode"`
+	TokenMode         string             `json:"tokenMode"`
+	Goal              string             `json:"goal,omitempty"`
+	GoalStatus        string             `json:"goalStatus,omitempty"`
+	GoalRuntime       *GoalRuntimeView   `json:"goalRuntime,omitempty"`
 	// A nil pointer means the controller cannot provide an authoritative snapshot;
 	// a non-nil pointer preserves an empty list as an explicit panel clear.
 	CanonicalTodos *[]evidence.TodoItem `json:"canonicalTodos,omitempty"`
@@ -6993,60 +6886,6 @@ func goalRuntimeViewFromController(ctrl control.SessionAPI) *GoalRuntimeView {
 		StopCause:        rt.StopCause,
 		BudgetExtensions: rt.BudgetExtensions,
 	}
-}
-
-type AutoResearchCompactView struct {
-	TaskID        string `json:"taskId"`
-	Status        string `json:"status"`
-	Iteration     int    `json:"iteration"`
-	PivotRequired bool   `json:"pivotRequired"`
-	StaleCount    int    `json:"staleCount"`
-}
-
-type AutoResearchCriterionView struct {
-	ID            string `json:"id"`
-	Description   string `json:"description"`
-	Required      bool   `json:"required"`
-	EvidenceCount int    `json:"evidenceCount"`
-	Status        string `json:"status"`
-}
-
-type AutoResearchStatusView struct {
-	TaskID             string                      `json:"taskId"`
-	Goal               string                      `json:"goal"`
-	Status             string                      `json:"status"`
-	Iteration          int                         `json:"iteration"`
-	CurrentDirection   string                      `json:"currentDirection"`
-	StaleCount         int                         `json:"staleCount"`
-	PivotCount         int                         `json:"pivotCount"`
-	PivotRequired      bool                        `json:"pivotRequired"`
-	LastHeartbeatAt    string                      `json:"lastHeartbeatAt"`
-	FindingCount       int                         `json:"findingCount"`
-	OpenCriteria       []AutoResearchCriterionView `json:"openCriteria"`
-	Blocker            string                      `json:"blocker"`
-	TaskPath           string                      `json:"taskPath"`
-	NextRequiredAction string                      `json:"nextRequiredAction"`
-}
-
-type AutoResearchFindingView struct {
-	ID        string   `json:"id"`
-	Kind      string   `json:"kind"`
-	Summary   string   `json:"summary"`
-	Source    string   `json:"source"`
-	Command   string   `json:"command,omitempty"`
-	Paths     []string `json:"paths,omitempty"`
-	Accepted  bool     `json:"accepted"`
-	CreatedAt string   `json:"createdAt"`
-}
-
-type AutoResearchEvidenceView struct {
-	ID       string   `json:"id"`
-	Kind     string   `json:"kind"`
-	Summary  string   `json:"summary"`
-	Source   string   `json:"source"`
-	Command  string   `json:"command,omitempty"`
-	Paths    []string `json:"paths,omitempty"`
-	Accepted bool     `json:"accepted"`
 }
 
 // Meta reports the model label, readiness, any startup error, the working
@@ -7104,12 +6943,22 @@ func (a *App) MetaForTab(tabID string) Meta {
 	tokenMode := snap.currentTokenMode()
 	goal := snap.currentGoal()
 	goalStatus := snap.currentGoalStatus()
+	sessionPath := strings.TrimSpace(snap.sessionPath)
+	var sessionRevision int64
+	var sessionDigest string
+	if branchMeta, ok, err := agent.LoadBranchMeta(sessionPath); err == nil && ok {
+		sessionRevision = branchMeta.Revision
+		sessionDigest = branchMeta.ContentDigest
+	}
 	return Meta{
 		Label:             snap.label,
 		Ready:             runtimeView.Phase == sessionRuntimeReady && snap.ctrl != nil,
 		Runtime:           runtimeView,
 		StartupErr:        snap.startupErr,
 		EventChannel:      eventChannel,
+		SessionPath:       sessionPath,
+		SessionRevision:   sessionRevision,
+		SessionDigest:     sessionDigest,
 		Cwd:               cwd,
 		WorkspaceRoot:     cwd,
 		WorkspaceName:     tabWorkspaceNameForScope(snap.scope, cwd),
@@ -7124,26 +6973,7 @@ func (a *App) MetaForTab(tabID string) Meta {
 		Goal:              goal,
 		GoalStatus:        goalStatus,
 		GoalRuntime:       goalRuntimeViewFromController(snap.ctrl),
-		AutoResearch:      compactAutoResearchFromController(snap.ctrl),
 		CanonicalTodos:    ctrlTodos(snap.ctrl),
-	}
-}
-
-func compactAutoResearchFromController(ctrl control.SessionAPI) *AutoResearchCompactView {
-	if ctrl == nil {
-		return nil
-	}
-
-	summary, ok := ctrl.AutoResearchSummary()
-	if !ok || summary == nil || summary.TaskID == "" {
-		return nil
-	}
-	return &AutoResearchCompactView{
-		TaskID:        summary.TaskID,
-		Status:        summary.Status,
-		Iteration:     summary.Iteration,
-		PivotRequired: summary.PivotRequired,
-		StaleCount:    summary.StaleCount,
 	}
 }
 
@@ -7159,136 +6989,6 @@ func ctrlTodos(ctrl control.SessionAPI) *[]evidence.TodoItem {
 		todos = []evidence.TodoItem{}
 	}
 	return &todos
-}
-
-func compactAutoResearch(tab *WorkspaceTab) *AutoResearchCompactView {
-	if tab == nil || tab.Ctrl == nil {
-		return nil
-	}
-	summary, ok := tab.Ctrl.AutoResearchSummary()
-	if !ok || summary == nil || summary.TaskID == "" {
-		return nil
-	}
-	return &AutoResearchCompactView{
-		TaskID:        summary.TaskID,
-		Status:        summary.Status,
-		Iteration:     summary.Iteration,
-		PivotRequired: summary.PivotRequired,
-		StaleCount:    summary.StaleCount,
-	}
-}
-
-func autoResearchStatusView(summary *autoresearch.Summary) AutoResearchStatusView {
-	if summary == nil {
-		return AutoResearchStatusView{OpenCriteria: []AutoResearchCriterionView{}}
-	}
-	open := make([]AutoResearchCriterionView, 0, len(summary.OpenCriteria))
-	for _, criterion := range summary.OpenCriteria {
-		open = append(open, AutoResearchCriterionView{
-			ID:            criterion.ID,
-			Description:   criterion.Description,
-			Required:      criterion.Required,
-			EvidenceCount: criterion.EvidenceCount,
-			Status:        criterion.Status,
-		})
-	}
-	return AutoResearchStatusView{
-		TaskID:             summary.TaskID,
-		Goal:               summary.Goal,
-		Status:             summary.Status,
-		Iteration:          summary.Iteration,
-		CurrentDirection:   summary.CurrentDirection,
-		StaleCount:         summary.StaleCount,
-		PivotCount:         summary.PivotCount,
-		PivotRequired:      summary.PivotRequired,
-		LastHeartbeatAt:    summary.LastHeartbeatAt.Format(time.RFC3339),
-		FindingCount:       summary.FindingCount,
-		OpenCriteria:       open,
-		Blocker:            summary.Blocker,
-		TaskPath:           summary.TaskPath,
-		NextRequiredAction: summary.NextRequiredAction,
-	}
-}
-
-func (a *App) AutoResearchCurrent() AutoResearchStatusView {
-	return a.AutoResearchStatus("")
-}
-
-func (a *App) AutoResearchStatus(tabID string) AutoResearchStatusView {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil {
-		return AutoResearchStatusView{OpenCriteria: []AutoResearchCriterionView{}}
-	}
-	summary, ok := ctrl.AutoResearchSummary()
-	if !ok {
-		return AutoResearchStatusView{OpenCriteria: []AutoResearchCriterionView{}}
-	}
-	return autoResearchStatusView(summary)
-}
-
-func (a *App) AutoResearchList(tabID string) []AutoResearchStatusView {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil {
-		return []AutoResearchStatusView{}
-	}
-	summaries, ok := ctrl.AutoResearchList()
-	if !ok {
-		return []AutoResearchStatusView{}
-	}
-	out := make([]AutoResearchStatusView, 0, len(summaries))
-	for i := range summaries {
-		out = append(out, autoResearchStatusView(&summaries[i]))
-	}
-	return out
-}
-
-func (a *App) AutoResearchFindings(tabID string, limit int) []AutoResearchFindingView {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil {
-		return []AutoResearchFindingView{}
-	}
-	findings, ok := ctrl.AutoResearchFindings(limit)
-	if !ok {
-		return []AutoResearchFindingView{}
-	}
-	out := make([]AutoResearchFindingView, 0, len(findings))
-	for _, finding := range findings {
-		out = append(out, AutoResearchFindingView{
-			ID:        finding.ID,
-			Kind:      finding.Kind,
-			Summary:   finding.Summary,
-			Source:    finding.Source,
-			Command:   finding.Command,
-			Paths:     append([]string(nil), finding.Paths...),
-			Accepted:  finding.Accepted,
-			CreatedAt: finding.CreatedAt.Format(time.RFC3339),
-		})
-	}
-	return out
-}
-
-func (a *App) AutoResearchOpenTask(tabID string) error {
-	status := a.AutoResearchStatus(tabID)
-	if strings.TrimSpace(status.TaskPath) == "" {
-		return os.ErrInvalid
-	}
-	return a.RevealPath(status.TaskPath)
-}
-
-func (a *App) AutoResearchRecordEvidence(tabID, criterionID string, input AutoResearchEvidenceView) error {
-	ctrl := a.ctrlByTabID(tabID)
-	if ctrl == nil {
-		return os.ErrInvalid
-	}
-	return ctrl.RecordAutoResearchEvidence(criterionID, control.AutoResearchEvidenceInput{
-		ID:       input.ID,
-		Kind:     input.Kind,
-		Summary:  input.Summary,
-		Source:   input.Source,
-		Command:  input.Command,
-		Paths:    append([]string(nil), input.Paths...),
-		Accepted: input.Accepted,
-	})
 }
 
 func (a *App) SetGoal(goal string) error {

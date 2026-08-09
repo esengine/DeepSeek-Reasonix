@@ -17,6 +17,18 @@ var (
 	renameFile = os.Rename
 )
 
+// CrashPoint, when non-nil, runs before every durable write/replace. Tests use
+// it to inject a process-crash panic at persistence boundaries; production
+// leaves it nil.
+var CrashPoint func(op, path string)
+
+// Crash invokes the optional crash-consistency fault-injection hook.
+func Crash(op, path string) {
+	if CrashPoint != nil {
+		CrashPoint(op, path)
+	}
+}
+
 // AtomicWriteFile writes data to a sibling temporary file, fsyncs it, then
 // publishes it via ReplaceFile. On filesystems that support replacement rename,
 // readers see either the old file or the complete new file. ReplaceFile retains
@@ -36,6 +48,7 @@ func AtomicWriteFileStrict(path string, data []byte, perm os.FileMode) error {
 }
 
 func atomicWriteFile(path string, data []byte, perm os.FileMode, allowCrossDeviceCopy bool) error {
+	Crash("atomic-write", path)
 	tmpPath, err := writeAtomicTemp(path, data, perm)
 	if err != nil {
 		return err
@@ -150,6 +163,7 @@ func writeAtomicTemp(path string, data []byte, perm os.FileMode) (string, error)
 //
 // A missing tmp means the write itself failed and no retry can help.
 func ReplaceFile(tmp, dest string) error {
+	Crash("replace", dest)
 	return replaceFile(tmp, dest, true)
 }
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, TouchEvent as ReactTouchEvent, WheelEvent as ReactWheelEvent } from "react";
-import { DUR_FAST, prefersReducedMotion } from "./gsapAnimations";
+import { DUR_FAST, prefersReducedMotion } from "./motion";
 import { isEditableTarget } from "./keyboardShortcuts";
 
 const BOTTOM_THRESHOLD_PX = 80;

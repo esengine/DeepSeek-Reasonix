@@ -119,10 +119,13 @@ func TestRunResumeKeepsCompletedIndexStableAcrossRecoveryGC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("save recovery branch: %v", err)
 	}
-	covered := agent.NewSession("")
-	covered.Messages = append([]provider.Message(nil), stale.Snapshot()...)
+	covered, err := agent.LoadSession(parentPath)
+	if err != nil {
+		t.Fatalf("load recovery parent: %v", err)
+	}
+	covered.Replace(append([]provider.Message(nil), stale.Snapshot()...))
 	covered.Add(provider.Message{Role: provider.RoleUser, Content: "later parent turn"})
-	if err := covered.Save(parentPath); err != nil {
+	if err := covered.SaveRewrite(parentPath); err != nil {
 		t.Fatalf("cover recovery branch in parent: %v", err)
 	}
 	recoveryMeta, ok, err := agent.LoadBranchMeta(recovery.Path)

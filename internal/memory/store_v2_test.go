@@ -45,7 +45,7 @@ func TestStoreV2IndexIsDerivedFromFacts(t *testing.T) {
 	}
 
 	index := store.Index()
-	if !strings.Contains(index, "[Source of truth](source-of-truth.md)") || strings.Contains(index, "Ghost") {
+	if !strings.Contains(index, "[Source of truth](project/source-of-truth.md)") || strings.Contains(index, "Ghost") {
 		t.Fatalf("derived index used stale MEMORY.md:\n%s", index)
 	}
 }

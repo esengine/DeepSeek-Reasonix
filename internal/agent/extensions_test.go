@@ -1141,12 +1141,10 @@ func TestCompactionPrepareReplaceGuidance(t *testing.T) {
 	if err := a.CompactNow(context.Background(), ""); err != nil {
 		t.Fatalf("CompactNow: %v", err)
 	}
-	if len(mp.requests) != 1 {
-		t.Fatalf("summarizer requests = %d, want 1", len(mp.requests))
-	}
-	sys := mp.requests[0].Messages[0].Content
-	if !strings.Contains(sys, "EXTENSION GUIDANCE") {
-		t.Fatalf("summarizer system prompt missing the replaced guidance:\n%.200q", sys)
+	for i, req := range mp.requests { // a fold too large for one call is summarized in parts
+		if sys := req.Messages[0].Content; !strings.Contains(sys, "EXTENSION GUIDANCE") {
+			t.Fatalf("summarizer call %d of %d missing the replaced guidance:\n%.200q", i+1, len(mp.requests), sys)
+		}
 	}
 	if sc := joinContents(visibleContext(a)); !strings.Contains(sc, "SUMMARY TEXT") {
 		t.Fatalf("projection missing the summary:\n%.200q", sc)

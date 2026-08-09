@@ -761,7 +761,7 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	}
 }
 
-func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModels(t *testing.T) {
+func TestEffectiveVisionRejectsOfficialDeepSeekOverridesButPreservesCustomGateways(t *testing.T) {
 	for _, endpoint := range []struct {
 		kind    string
 		baseURL string
@@ -771,19 +771,28 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		{kind: "openai", baseURL: "https://eu.deepseek.com/v1"},
 		{kind: "anthropic", baseURL: "https://api.deepseek.com/anthropic"},
 	} {
+		visionOn := true
 		official := &ProviderEntry{
 			Name:              "deepseek",
 			Kind:              endpoint.kind,
 			BaseURL:           endpoint.baseURL,
 			Model:             "deepseek-v4-pro",
 			Vision:            true,
+			VisionModels:      []string{"deepseek-v4-pro"},
+			visionOverride:    &visionOn,
 			ReasoningProtocol: ReasoningProtocolDeepSeek,
+		}
+		if CanConfigureVision(official) {
+			t.Fatalf("official DeepSeek endpoint %q must not allow vision configuration", endpoint.baseURL)
 		}
 		if EffectiveVision(official) {
 			t.Fatalf("official DeepSeek endpoint %q must remain text-only", endpoint.baseURL)
 		}
 		if ExplicitModelVision(official) {
-			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", endpoint.baseURL)
+			t.Fatalf("official DeepSeek endpoint %q must not expose ignored vision metadata as usable", endpoint.baseURL)
+		}
+		if !official.HasVisionModel("deepseek-v4-pro") {
+			t.Fatalf("official DeepSeek endpoint %q lost persisted vision metadata instead of ignoring it", endpoint.baseURL)
 		}
 	}
 
@@ -794,8 +803,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Model:        "deepseek-v5-vision",
 		VisionModels: []string{"deepseek-v5-vision"},
 	}
-	if !EffectiveVision(future) || !ExplicitModelVision(future) {
-		t.Fatal("model listed in vision_models must opt in on the official DeepSeek endpoint")
+	if EffectiveVision(future) {
+		t.Fatal("a future model name must not bypass the official DeepSeek wire constraint")
 	}
 
 	visionOn := true
@@ -812,8 +821,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 	if !ok {
 		t.Fatal("ResolveModel did not find explicit future DeepSeek model")
 	}
-	if !EffectiveVision(overridden) || !ExplicitModelVision(overridden) {
-		t.Fatal("model_overrides vision=true must opt in on the official DeepSeek endpoint")
+	if EffectiveVision(overridden) {
+		t.Fatal("model_overrides vision=true must not bypass the official DeepSeek wire constraint")
 	}
 
 	custom := &ProviderEntry{
@@ -824,8 +833,13 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Vision:            true,
 		ReasoningProtocol: ReasoningProtocolDeepSeek,
 	}
-	if !EffectiveVision(custom) {
+	if !CanConfigureVision(custom) || !EffectiveVision(custom) {
 		t.Fatal("explicit vision=true must remain available for custom DeepSeek gateways")
+	}
+	custom.Vision = false
+	custom.VisionModels = []string{"deepseek-v4-pro"}
+	if !ExplicitModelVision(custom) {
+		t.Fatal("custom DeepSeek gateway must expose positive model-scoped vision metadata")
 	}
 }
 

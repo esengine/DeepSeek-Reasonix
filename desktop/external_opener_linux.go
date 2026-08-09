@@ -260,6 +260,7 @@ func platformExternalOpenerIconDataURL(spec externalOpenerSpec) string {
 
 func linuxExternalOpenerCommand(spec externalOpenerSpec, path string) (*exec.Cmd, error) {
 	target := spec.Target
+	launchPath := externalOpenerLaunchPath(spec, path)
 	var args []string
 	switch spec.LaunchMode {
 	case "path":
@@ -268,19 +269,19 @@ func linuxExternalOpenerCommand(spec externalOpenerSpec, path string) (*exec.Cmd
 		args = []string{"launch", spec.Target, path}
 		target = linuxExecutable("gio")
 	case "ghostty", "gnome-terminal":
-		args = []string{"--working-directory=" + path}
+		args = []string{"--working-directory=" + launchPath}
 	case "konsole":
-		args = []string{"--workdir", path}
+		args = []string{"--workdir", launchPath}
 	case "kitty":
-		args = []string{"--directory", path}
+		args = []string{"--directory", launchPath}
 	case "alacritty":
-		args = []string{"--working-directory", path}
+		args = []string{"--working-directory", launchPath}
 	}
 	if target == "" {
 		return nil, os.ErrNotExist
 	}
 	cmd := exec.Command(target, args...)
-	cmd.Dir = path
+	cmd.Dir = externalOpenerWorkingDirectory(path)
 	return cmd, nil
 }
 

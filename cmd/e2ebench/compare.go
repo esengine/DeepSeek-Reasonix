@@ -64,7 +64,9 @@ type classStats struct {
 func aggregateArm(results []result) armStats {
 	s := armStats{ByClass: map[string]classStats{}}
 	for _, r := range results {
-		if r.Skipped {
+		// No-solution tasks never enter an accuracy comparison; see
+		// gatherSuiteStats.
+		if r.Skipped || r.NoSolution {
 			continue
 		}
 		// Retry entries share their task's denominator: only first attempts
@@ -305,6 +307,7 @@ func compareReports(pathA, pathB string) (string, error) {
 	fmt.Fprintf(&b, "| Wall seconds / solved | %s | %s |\n", perSolved(float64(a.WallMs)/1000, a.AccountedSolved), perSolved(float64(bStats.WallMs)/1000, bStats.AccountedSolved))
 	fmt.Fprintf(&b, "| Cost / solved | %s | %s |\n", perSolved(a.Cost, a.AccountedSolved), perSolved(bStats.Cost, bStats.AccountedSolved))
 	b.WriteString(marginalUtilitySection(a, bStats))
+	b.WriteString(memoryUtilitySection(pathA, pathB))
 	b.WriteString("\n" + paretoSection([]paretoPoint{newParetoPoint(pathA, a), newParetoPoint(pathB, bStats)}))
 	b.WriteString("<sub>Per-solved figures divide each arm's accounted totals (failures included) by its accounted solves.</sub>\n")
 	return b.String(), nil

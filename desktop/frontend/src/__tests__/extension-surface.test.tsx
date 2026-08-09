@@ -148,7 +148,7 @@ ok(acceptsExtensionGeneration(5, undefined), "events without a generation always
 
 {
   let s: ControllerState = { ...initialState };
-  s = reducer(s, { type: "user", text: "hello", seq: 0 });
+  s = reducer(s, { type: "user", text: "hello", seq: 0, submissionId: "extension-submit" });
   ok(s.pendingUser === "hello", "optimistic user bubble pending");
   s = reducer(s, { type: "event", e: surfaceEvent({ kind: "card", card: { title: "bg" } }) });
   ok(s.pendingUser === "hello", "extension events never flush the optimistic user bubble");

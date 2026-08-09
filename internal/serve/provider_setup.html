@@ -40,6 +40,16 @@ const copy=zh?{
   badge:'远端',title:'配置远端 Provider',intro:'Reasonix Serve 已可访问，但这台主机尚未保存当前 Provider 的 API Key。',provider:'Provider',model:'模型',credential:'凭据变量',apiKey:'API Key',hint:'密钥只会保存到这台远端主机的 Reasonix 凭据文件。',pendingHint:'API Key 已安全保存。现在只需重试激活 Provider。',save:'保存并打开 Reasonix',retry:'重试激活',saving:'正在保存…',activating:'正在激活…',failed:'保存失败，请重试。'
 }:{badge:'Remote',title:'Configure the remote Provider',intro:'This Reasonix Serve is ready, but its selected Provider has no saved API key on this host.',provider:'Provider',model:'Model',credential:'Credential',apiKey:'API Key',hint:"The key is stored only in this remote host's Reasonix credential file.",pendingHint:'The API key is safely stored. Retry Provider activation without entering it again.',save:'Save and open Reasonix',retry:'Retry activation',saving:'Saving…',activating:'Activating…',failed:'Setup failed. Try again.'};
 const $=id=>document.getElementById(id);
+const __nativeFetch=window.fetch.bind(window);
+function bootstrapFragmentToken(){
+  const fragment=new URLSearchParams(window.location.hash.slice(1)),token=fragment.get('token');
+  if(!token)return Promise.resolve();
+  fragment.delete('token');const cleanHash=fragment.toString();
+  window.history.replaceState(null,'',window.location.pathname+window.location.search+(cleanHash?'#'+cleanHash:''));
+  return __nativeFetch('/auth/token',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({token})}).then(response=>{if(!response.ok)throw new Error(copy.failed);});
+}
+const __authReady=bootstrapFragmentToken();
+window.fetch=(...args)=>__authReady.then(()=>__nativeFetch(...args));
 $('remote-badge').textContent=copy.badge;$('title').textContent=copy.title;$('intro').textContent=copy.intro;$('provider-label').textContent=copy.provider;$('model-label').textContent=copy.model;$('key-label').textContent=copy.credential;$('api-key-label').textContent=copy.apiKey;$('hint').textContent=copy.hint;$('save').textContent=copy.save;
 let activationPending=false;
 async function load(){

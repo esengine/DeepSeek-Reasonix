@@ -1905,9 +1905,25 @@ func Default() *Config {
 			Feishu:             FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
 			Weixin:             WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
+		// New installs use DeepSeek's Anthropic-compatible Messages endpoint so
+		// provider-executed web search is available by default. Existing explicit
+		// provider entries are merged on top of these defaults and keep their
+		// configured protocol unchanged.
 		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD()},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD()},
+			{
+				Name: "deepseek-flash", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
+				Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD(),
+			},
+			{
+				Name: "deepseek-pro", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
+				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
+			},
 		},
 	}
 }
@@ -1945,6 +1961,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		return nil, false
 	}
 	if access := desktopProviderAccessMap(c.Desktop.ProviderAccess); len(access) > 0 {
+		if access["deepseek"] && !canCanonicalizeLegacyDeepSeekProviders(c) {
+			delete(access, "deepseek")
+		}
 		ref = retargetDesktopOfficialRef(ref, access)
 	}
 	// "provider/model"

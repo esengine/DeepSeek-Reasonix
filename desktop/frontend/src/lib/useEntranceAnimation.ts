@@ -1,7 +1,5 @@
-import { useEffect, useRef } from "react";
-import { DUR_SLOW, prefersReducedMotion } from "./gsapAnimations";
-
-const CSS_EASE_OUT = "cubic-bezier(0.2, 0.72, 0.2, 1)";
+import { useEffect, useMemo, useRef } from "react";
+import { CSS_EASE_OUT, DUR_SLOW, prefersReducedMotion } from "./motion";
 
 // Animates each data-entrance element in once. First mount (and every
 // resetKey change) pre-seeds the seen set so restored history never animates;
@@ -10,9 +8,18 @@ export function useEntranceAnimation<T extends HTMLElement>(
   resetKey?: unknown,
   deps?: unknown,
   selector = "[data-entrance]",
+  seedIds: readonly string[] = [],
 ) {
   const ref = useRef<T | null>(null);
+  // Virtualized history rows may mount after the first DOM scan. Seed their
+  // model IDs up front so a later append never mistakes restored rows for new
+  // content and animates the whole viewport.
   const seen = useRef(new Set<string>());
+  const seeded = useRef(false);
+  if (!seeded.current) {
+    seen.current = new Set(seedIds);
+    seeded.current = true;
+  }
   const timerRef = useRef<number | null>(null);
   const timerAnimations = useRef<Animation[]>([]);
   const firstRun = useRef(true);
@@ -21,7 +28,7 @@ export function useEntranceAnimation<T extends HTMLElement>(
   // Reset on session switch.
   if (prevResetKey.current !== resetKey) {
     prevResetKey.current = resetKey;
-    seen.current = new Set();
+    seen.current = new Set(seedIds);
     firstRun.current = true;
     if (timerRef.current !== null) {
       clearTimeout(timerRef.current);
@@ -68,26 +75,35 @@ export function useEntranceAnimation<T extends HTMLElement>(
     timerRef.current = window.setTimeout(() => {
       timerRef.current = null;
       const animations = entries.map((entry, index) => {
-        if (typeof entry.animate !== "function") {
-          entry.style.opacity = "1";
-          entry.style.transform = "";
-          return null;
-        }
-        const animation = entry.animate(
-          [
-            { opacity: 0, transform: "translateY(12px)" },
-            { opacity: 1, transform: "translateY(0)" },
-          ],
-          {
-            duration: DUR_SLOW * 1000,
-            easing: CSS_EASE_OUT,
-            delay: index * itemsStagger(entries.length) * 1000,
-          },
-        );
-        animation.onfinish = () => {
+        const settle = () => {
           entry.style.opacity = "1";
           entry.style.transform = "";
         };
+        if (typeof entry.animate !== "function") {
+          settle();
+          return null;
+        }
+        let animation: Animation;
+        try {
+          animation = entry.animate(
+            [
+              { opacity: 0, transform: "translateY(12px)" },
+              { opacity: 1, transform: "translateY(0)" },
+            ],
+            {
+              duration: DUR_SLOW * 1000,
+              easing: CSS_EASE_OUT,
+              delay: index * itemsStagger(entries.length) * 1000,
+            },
+          );
+        } catch {
+          // Entrance motion is cosmetic. Keep later entries running and expose
+          // this entry immediately if a WebView rejects the animation.
+          settle();
+          return null;
+        }
+        animation.onfinish = settle;
+        animation.oncancel = settle;
         return animation;
       });
       timerAnimations.current = animations.filter((animation): animation is Animation => animation !== null);
@@ -95,13 +111,31 @@ export function useEntranceAnimation<T extends HTMLElement>(
 
     return () => {
       if (timerRef.current !== null) clearTimeout(timerRef.current);
-      for (const animation of timerAnimations.current) animation.cancel();
+      for (const animation of timerAnimations.current) {
+        try {
+          animation.cancel();
+        } catch {
+          // Cancellation is cleanup-only; each entry already has a final style.
+        }
+      }
       timerAnimations.current = [];
     };
     // Only re-scan when deps change — NOT on every render.
   }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return ref;
+}
+
+export function useTranscriptEntranceAnimation<T extends HTMLElement>(
+  tabId: string | undefined,
+  revealSignal: unknown,
+  items: readonly { id: string }[],
+) {
+  const seedIds = useMemo(() => items.map((item) => item.id), [items]);
+  // A tail append preserves this key; a surface switch, reveal, or history
+  // prepend resets it and pre-seeds every model ID before virtual rows mount.
+  const resetKey = `${tabId ?? ""}|${String(revealSignal)}|${items[0]?.id ?? ""}`;
+  return useEntranceAnimation<T>(resetKey, items.length, "[data-entrance]", seedIds);
 }
 
 function itemsStagger(count: number): number {

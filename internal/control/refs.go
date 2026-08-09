@@ -556,6 +556,13 @@ func (c *Controller) inputImages(line string) []string {
 	if !c.imageInputEnabled() {
 		return nil
 	}
+	return c.resolveInputImageCandidates(line)
+}
+
+// resolveInputImageCandidates resolves authorized image references without
+// consulting the active model capability. The parent controller uses this only
+// to hand candidates to a child; the child decides whether to embed them.
+func (c *Controller) resolveInputImageCandidates(line string) []string {
 	var urls []string
 	for _, r := range c.detectRefs(line) {
 		baseDir := c.workspaceRoot

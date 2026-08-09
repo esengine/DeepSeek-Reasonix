@@ -1,9 +1,9 @@
-// Package taskintent answers exactly one question from task text: is this
-// obviously chat, a read, a mutation, or a persistent action. That is its
-// whole charter. It must not grow into complexity, risk, planner depth,
-// verification depth, completion, budget, or tool-surface decisions —
-// those belong to runtime evidence (see internal/taskcontract), where a
-// receipt outranks any keyword.
+// Package taskintent answers classification questions from task text: is this
+// obviously chat, a read, a mutation, or a persistent action, and which Goal
+// turn-budget class (simple/write/research) the objective should start on.
+// It must not grow into complexity, risk, planner depth, verification depth,
+// completion, or tool-surface decisions — those belong to runtime evidence
+// (see internal/taskcontract), where a receipt outranks any keyword.
 //
 // The vocabulary is a liability, not an asset: every added keyword, negation
 // rule, or language case moves this package toward an unowned NLP parser.

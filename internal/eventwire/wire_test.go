@@ -118,6 +118,7 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	for _, want := range []string{
 		"detail?: string;",
 		`outcome?: "final_readiness" | "recovery_paused";`,
+		"checkpointTurn?: number;",
 		"retryAttempt?: number;",
 		"retryMax?: number;",
 		"retryScope?:",
@@ -204,6 +205,25 @@ func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	}
 	if strings.Contains(string(ordinary), `"outcome"`) {
 		t.Fatalf("ordinary error JSON must omit outcome: %s", ordinary)
+	}
+}
+
+func TestToWireTurnDoneCheckpointTurnPreservesZeroAndOmitsNil(t *testing.T) {
+	turn := 0
+	withCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone, CheckpointTurn: &turn}))
+	if err != nil {
+		t.Fatalf("marshal checkpoint turn: %v", err)
+	}
+	if !strings.Contains(string(withCheckpoint), `"checkpointTurn":0`) {
+		t.Fatalf("checkpoint JSON = %s, want turn zero", withCheckpoint)
+	}
+
+	withoutCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone}))
+	if err != nil {
+		t.Fatalf("marshal empty TurnDone: %v", err)
+	}
+	if strings.Contains(string(withoutCheckpoint), `"checkpointTurn"`) {
+		t.Fatalf("empty TurnDone JSON must omit checkpointTurn: %s", withoutCheckpoint)
 	}
 }
 

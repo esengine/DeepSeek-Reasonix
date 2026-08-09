@@ -11,6 +11,10 @@ import (
 
 func TestNormalizeLocalOpenPath(t *testing.T) {
 	abs := filepath.Join(t.TempDir(), "report.md")
+	fileURL := "file://" + filepath.ToSlash(abs)
+	if runtime.GOOS == "windows" {
+		fileURL = "file:///" + filepath.ToSlash(abs)
+	}
 
 	tests := []struct {
 		name string
@@ -20,7 +24,7 @@ func TestNormalizeLocalOpenPath(t *testing.T) {
 		{"empty", "", ""},
 		{"blank", "   ", ""},
 		{"plain absolute", abs, abs},
-		{"file URL", "file:///" + filepath.ToSlash(abs), abs},
+		{"file URL", fileURL, abs},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,8 +45,56 @@ func TestNormalizeLocalOpenPath(t *testing.T) {
 	}
 }
 
+func TestNormalizeLocalOpenPathAuthorityUNC(t *testing.T) {
+	want := filepath.FromSlash("//server/share/docs/report.md")
+	got, err := normalizeLocalOpenPath("file://server/share/docs/report.md")
+	if err != nil {
+		t.Fatalf("authority-form UNC URL rejected: %v", err)
+	}
+	if got != want {
+		t.Fatalf("authority-form UNC URL = %q, want %q", got, want)
+	}
+}
+
+func TestNormalizeLocalOpenPathRejectsUnsafeWindowsSyntax(t *testing.T) {
+	unsafePaths := []string{
+		`\\.\PhysicalDrive0`,
+		`\\?\C:\Windows\System32`,
+		`//./PhysicalDrive0`,
+		`//?/C:/Windows/System32`,
+		`C:/safe.txt:payload`,
+		`C:/docs/NUL.txt`,
+		`C:/docs/COM1.log`,
+		`//server/share/CON.md`,
+		"C:/safe.txt\x00payload",
+	}
+	for _, path := range unsafePaths {
+		if !hasDisallowedWindowsPathSyntax(path) {
+			t.Errorf("hasDisallowedWindowsPathSyntax(%q) = false, want true", path)
+		}
+	}
+
+	unsafeURLs := []string{
+		"file://./PhysicalDrive0",
+		"file:////./PhysicalDrive0",
+		"file:////?/C:/Windows/System32",
+		"file:////%3F/C:/Windows/System32",
+		"file:///C:/safe.txt:payload",
+		"file:///C:/safe.txt%3Apayload",
+		"file://user@server/share/report.md",
+		"file://server:445/share/report.md",
+		"file:///tmp/report.md?download=1",
+		"file:///tmp/report.md#section",
+	}
+	for _, value := range unsafeURLs {
+		if got, err := normalizeLocalOpenPath(value); err == nil {
+			t.Errorf("normalizeLocalOpenPath(%q) = %q, want error", value, got)
+		}
+	}
+}
+
 func TestNormalizeLocalOpenPathRejectsRelative(t *testing.T) {
-	for _, in := range []string{"report.md", "dir/report.md", "file:///report.md", "file:///dir/report.md"} {
+	for _, in := range []string{"report.md", "dir/report.md"} {
 		if _, err := normalizeLocalOpenPath(in); err == nil || !strings.Contains(err.Error(), "not absolute") {
 			t.Fatalf("normalizeLocalOpenPath(%q) err = %v, want not-absolute error", in, err)
 		}
@@ -81,16 +133,30 @@ func TestOpenLocalPathRejectsRelativeAndEmpty(t *testing.T) {
 }
 
 func TestOpenTargetAllowed(t *testing.T) {
-	if !openTargetAllowed(filepath.Join("C:", "docs", "report.md"), false) {
-		t.Fatal("markdown document should be openable")
+	for _, name := range []string{"report.md", "report.docx", "report.pdf", "diagram.png"} {
+		if !openTargetAllowed(filepath.Join("C:", "docs", name), false, 0o644) {
+			t.Fatalf("document %q should be openable", name)
+		}
 	}
-	if !openTargetAllowed(filepath.Join("C:", "docs"), true) {
+	if !openTargetAllowed(filepath.Join("C:", "docs"), true, os.ModeDir|0o755) {
 		t.Fatal("directory should be openable")
 	}
-	for _, name := range []string{"evil.bat", "evil.cmd", "evil.exe", "evil.ps1", "evil.lnk", "evil.url", "evil.msi", "run.BAT", "EVIL.Scr"} {
-		if openTargetAllowed(filepath.Join("C:", "temp", name), false) {
+	for _, name := range []string{
+		"evil.bat", "evil.cmd", "evil.exe", "evil.exe.", "evil.exe ", "evil.ps1", "evil.lnk", "evil.url",
+		"evil.msi", "run.BAT", "EVIL.Scr", "launcher.desktop",
+	} {
+		if openTargetAllowed(filepath.Join("C:", "temp", name), false, 0o644) {
 			t.Fatalf("executable target %q should be refused", name)
 		}
+	}
+	if openTargetAllowed(filepath.Join("Applications", "Unsafe.app"), true, os.ModeDir|0o755) {
+		t.Fatal("macOS application bundle should be refused")
+	}
+	if openTargetAllowed(filepath.Join("Applications", "Unsafe.app")+string(filepath.Separator), true, os.ModeDir|0o755) {
+		t.Fatal("macOS application bundle with trailing separator should be refused")
+	}
+	if openTargetAllowed(filepath.Join("tmp", "script"), false, 0o755) {
+		t.Fatal("executable-mode regular file should be refused")
 	}
 }
 

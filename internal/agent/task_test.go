@@ -153,6 +153,27 @@ func TestTaskToolInheritsReasoningLanguageFromContext(t *testing.T) {
 	}
 }
 
+func TestTaskToolPropagatesSubagentImageCandidates(t *testing.T) {
+	sub := &mockProvider{name: "sub", chunks: []provider.Chunk{
+		{Type: provider.ChunkText, Text: "image received"},
+		{Type: provider.ChunkDone},
+	}}
+	task := newTestTaskTool(t, sub, tool.NewRegistry(), "sys", "", "", nil)
+	ctx := WithSubagentImageCandidates(testTaskContext(), []string{"data:image/png;base64,AAAA"})
+	if _, err := task.Execute(ctx, []byte(`{"prompt":"inspect the attached image"}`)); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var images []string
+	for _, msg := range sub.lastReq.Messages {
+		if msg.Role == provider.RoleUser {
+			images = msg.Images
+		}
+	}
+	if len(images) != 1 || images[0] != "data:image/png;base64,AAAA" {
+		t.Fatalf("sub-agent images = %v, want the parent candidate", images)
+	}
+}
+
 // TestTaskToolFiltersTools verifies the whitelist behaviour: when the caller
 // names a subset of tools, the sub-agent's registry contains exactly that set
 // with recursive delegation tools available while max_subagent_depth leaves one

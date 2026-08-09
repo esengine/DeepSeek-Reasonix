@@ -14,7 +14,7 @@
 - [配置](#配置)
 - [CLI 命令参考](./CLI.zh-CN.md)
 - [环境变量](#环境变量)
-- [Serve Web 前端](#serve-web-前端)
+- [Web 前端](#web-前端)
 - [配置路径](./CONFIG_PATHS.zh-CN.md)
 - [思考语言](./REASONING_LANGUAGE.zh-CN.md)
 - [任务合约与暂停策略](./TASK_CONTRACT.zh-CN.md)
@@ -66,10 +66,11 @@ tool_result_snip_ratio = 0.6       # 在摘要 compaction 前先缩短旧工具�
 
 [[providers]]
 name        = "deepseek-flash"
-kind        = "openai"
-base_url    = "https://api.deepseek.com"
+kind        = "anthropic"
+base_url    = "https://api.deepseek.com/anthropic"
 model       = "deepseek-v4-flash"
 api_key_env = "DEEPSEEK_API_KEY"
+web_search  = true
 # 还有预设：deepseek-pro
 
 [tools]
@@ -183,19 +184,33 @@ reasonix report delete [ID]     # 不发送，直接删除
 需要单独审阅的报告。Go 无法恢复 runtime fatal throw、操作系统强制终止，以及未包装
 后台 goroutine 中的 panic，因此这些情况不会生成本地报告。
 
-## Serve Web 前端
+## Web 前端
 
-`reasonix serve` 会用同一个本地 Reasonix 引擎启动浏览器 UI。适合不安装桌面端但想用可视化界面、
-在远程开发机上通过 tunnel 使用，或把当前会话临时共享给浏览器查看的场景。
+本机使用时，`reasonix web` 会启动浏览器 UI，并自动用默认浏览器打开。也可以在 CLI 交互会话中
+执行 `/web`：Reasonix 会保存当前会话、恢复终端，然后打开明确的
+`/sessions/<id>#token=...` 深链。即使会话尚未产生第一轮消息，也会延续已预留的 Session ID，
+同时继续保持“空会话不提前写 transcript”的惰性落盘行为。
 
 ```bash
 cd your-project
-reasonix serve
-# 打开 http://127.0.0.1:8787
+reasonix web
 ```
 
-默认监听 `127.0.0.1:8787`，认证模式是 `auth_mode = "none"`。这个默认值只适合本机使用。
-如果要绑定到非 loopback 地址、通过 tunnel 暴露，或放到反向代理后面，请先开启认证再分享 URL：
+如果想启动前台 Web 服务并打印地址、但不自动新开浏览器标签页，可使用
+`reasonix web --no-open`。底层的 `reasonix serve`
+默认不会打开浏览器，继续用于远程开发机、进程托管、tunnel、反向代理和需要认证分享的场景。
+
+`reasonix web` 从 `127.0.0.1:8787` 开始监听；端口占用时会依次尝试 8788、8789……，
+最多递增重试 100 次。它默认启用自动生成的 Token，即使配置中的 `[serve].auth_mode`
+是 `none` 也一样。每个运行实例都会在 `<Reasonix home>/server/instances/` 下写入自己的
+单写者 heartbeat 文件；正常退出时只删除自己的文件，新实例则会惰性清理已确认进程死亡的记录。
+因此多个 Web 实例可以共用同一个 Reasonix home，而不会相互覆盖登记状态。服务保持在前台运行，
+按 Ctrl-C 停止。
+
+显式传入 `reasonix web --auth none` 可以关闭默认 Token，只应在监听地址确定可信时使用。
+`reasonix serve` 则保持向后兼容：默认监听 `127.0.0.1:8787`，认证模式仍由配置决定，空配置为
+`auth_mode = "none"`。如果要绑定到非 loopback 地址、通过 tunnel 暴露，或放到反向代理后面，
+请先开启认证再分享 URL：
 
 ```bash
 reasonix serve --auth token
@@ -203,7 +218,9 @@ reasonix serve --addr 0.0.0.0:8787 --auth token
 reasonix serve --auth password --password 'temporary-password'
 ```
 
-Token 模式会在终端打印带 `?token=...` 的分享链接；可通过 `--token` 或 `[serve].token`
+Token 模式会在终端打印带 `#token=...` 的分享链接；Web 页面会先将 fragment 换成
+HttpOnly Cookie，再启动 API 与 SSE 请求，从而避免 Token 进入请求 URL、浏览器历史、
+Referrer 和访问日志。可通过 `--token` 或 `[serve].token`
 复用固定 token。Password 模式必须在启动时传 `--password`，或在配置里保存 bcrypt hash：
 
 ```bash
@@ -305,9 +322,13 @@ Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭
 在桌面端打开 **设置 -> 模型 -> 接入 -> 添加模型服务 -> 自定义供应商**，用于接入代理、
 聚合平台或自建 OpenAI-compatible chat API / Anthropic-compatible Messages API 服务。
 
-常用服务优先使用 **添加模型服务 -> 推荐预设**。DeepSeek 官方服务默认继续使用经过专项适配的
-OpenAI Chat Completions；需要 Anthropic Messages 兼容时，可单独添加 **DeepSeek Anthropic**
-可选预设，两者不会互相替换。Reasonix 还可以预填以下可编辑的自定义 provider：
+常用服务优先使用 **添加模型服务 -> 推荐预设**。新建的官方 DeepSeek provider 默认使用
+Anthropic-compatible Messages 端点，并开启 provider 侧 `web_search`；两种协议都复用同一个
+`DEEPSEEK_API_KEY`。启动时，Reasonix 会自动升级仍使用官方端点、标准密钥和标准模型设置且
+未修改过的旧 `deepseek-flash` / `deepseek-pro` 条目。修改过的官方 Chat Completions 配置保持
+原样，设置页会提供 **升级到推荐协议** 操作。代理地址、自定义 Headers、模型列表和能力覆盖
+都不会自动迁移。已有单独命名的 `deepseek-anthropic` 条目继续兼容，但新增
+接入不再展示这个重复预设。Reasonix 还可以预填以下可编辑的自定义 provider：
 Kimi CN、Kimi Global、Kimi Coding Plan、MiMo API、MiMo Anthropic、MiMo Token Plan
 CN/SGP/AMS 及其 Anthropic-compatible 变体、MiniMax CN/Global API、MiniMax
 CN/Global Anthropic、GLM CN、Z.AI Global、GLM/Z.AI Coding Plan 的
@@ -503,7 +524,7 @@ CLI/TUI 文本输入可通过 `[ui].cursor_shape` 设置光标形状，支持 `u
 | `/theme [auto|light|dark|style]` | 查看或切换 CLI 主题 | 不带参数会列出背景模式和命名配色。选择会保存到用户配置；单次运行可用 `REASONIX_THEME` 和 `REASONIX_THEME_STYLE` 覆盖。 |
 | `Ctrl+O` | 切换详细 reasoning 显示 | 也可通过 `/verbose` 使用。 |
 | `Ctrl+B` | 展开或收起较长 shell 输出 | 较长 shell 输出的提示行也可点击；全屏 TUI 开启鼠标接管时，文本选区由应用内处理。 |
-| `/goal <目标>`、`/goal --research <目标>`、`/goal --simple <目标>`、`/goal status`、`/goal clear` | 启动、查看或清除 Goal | Goal 不进入任何快捷键循环；显式启动 Goal 后，明显长周期目标会自动启用 AutoResearch。 |
+| `/goal <目标>`、`/goal status`、`/goal pause`、`/goal resume`、`/goal clear` | 启动、查看、暂停、恢复或清除 Goal | Goal 自动选择简单、写入或研究轮次预算。 |
 | `/migrate`、`/migrate --from <旧目录>` | 重试旧数据迁移，或从指定 v0.x 来源导入 sessions | Windows v0.52 自定义安装/数据目录用 `--from`；该形式只导入 sessions。详见[配置路径](./CONFIG_PATHS.zh-CN.md)。 |
 
 选择器与审批：
@@ -856,15 +877,12 @@ Skill 别名会继续拥有 `/docs`；发生冲突时，CLI 与桌面端通常�
 如果 Pull Request 修改了用户可见的 CLI、桌面端、配置、Provider、权限或工具行为，必须声明
 是否已同步更新内置文档；如果无需更新，则必须说明现有的版本匹配说明为何仍然正确。
 
-## Goal 与 AutoResearch
+## Goal
 
-Goal 是长期目标的统一运行机制。普通 `/goal` 继续走轻量 Goal：Reasonix 会持续推进，直到
-完成、阻塞、暂停或被清除。对于明显长周期的目标，Goal 会自动进入 AutoResearch 策略，而不是
-要求用户单独运行 `/auto-research` skill；`auto-research` 也不会作为独立 builtin skill 出现在
-Settings -> Skills 或斜杠菜单里。普通聊天不会隐式改变协作模式；需要长目标时，请在输入框中
-明确选择 Goal，或使用 `/goal` 启动。
+Goal 是长期目标的统一运行机制。Reasonix 会持续推进，直到完成、阻塞、暂停或被清除。
+普通聊天不会隐式改变协作模式；需要长目标时，请在输入框中明确选择 Goal，或使用 `/goal` 启动。
 
-Goal 按类别运行在**轮次**预算内：简单目标 10 轮，写入型 20 轮，AutoResearch 40 轮；
+Goal 按类别运行在**轮次**预算内：简单目标 10 轮，写入型 20 轮，研究型 40 轮；
 连续 4 轮没有宿主可验证进展会暂停。累计 token 仍会统计并展示（便于诊断），但**没有
 token 硬上限**，也不会在 provider 请求前做 token 准入拦截。Goal 中只陈述 BUG/崩溃/异常
 且未要求分析或禁止修改时，默认按写入型轮数类别。暂停会保留 Goal、todo、Delivery
@@ -878,27 +896,11 @@ continue/complete/blocked；没有报告时由独立的有界 evaluator 判定�
 Output format、Constraints 和 Pause policy。Goal 模式会把这些部分当作自主执行的边界；
 除非下一步需要不可逆或对外可见操作、任务范围变化，或必须由用户提供信息，否则会继续采用合理默认值推进，并在最后汇报假设与结果。
 
-AutoResearch 会在这些目标里自动启用：包含“持续”“长期”“彻底”“直到根因明确”“多轮排查”
-“不要原地打转”“完整方案”“跑实验”“反复验证”“系统性研究”等强信号；或者目标同时包含
-研究/排查、实现/修复、验证/测试、优化/文档/发布等多个阶段；或者用户明确给出
-`.reasonix/autoresearch/<task-id>/` 任务目录。高级用户可以用
-`/goal --research <目标>` 强制启用，也可以用 `/goal --simple <目标>` 强制保持轻量 Goal。
-未显式启动 Goal 时，这些信号只作为普通聊天文本处理，不会创建持久化 AutoResearch 任务。
-
-进入 AutoResearch 后，agent 会把目标当成有状态的研究循环，而不是只靠聊天上下文续写。
-它会创建或复用项目级 `.reasonix/autoresearch/<task-id>/` 目录。新任务默认使用
-`YYYYMMDD-HHMMSS-slug` 作为 id，例如 `20260618-224530-cache-audit`；创建前会先检查
-当前项目目录，只有同名已存在时才追加 `-2`、`-3` 等后缀。任务状态包括
-`task_spec.md`、`progress.json`、`findings.jsonl`、`directions_tried.json` 和
-`iteration_log.jsonl`，记录每轮方向、证据、验证结果和卡住原因，并用 `stale_count` 判断
-是否在低质量重复。连续停滞时，它会要求结构性 pivot，例如换证据源、入口、测试 oracle、
-拆解方式、benchmark 或 worker 策略，而不是继续重复同一种尝试。
-
-worker/subagent 可以独立探索，但 canonical state 由 orchestrator 负责写入。完成前必须
-对照 `task_spec.md` 的 success criteria 做逐项证据审计；窄范围检查通过不能证明宽范围需求
-完成。动态运行态只写进 `.reasonix/autoresearch/...`，不写入 `REASONIX.md`、`AGENTS.md`、
-project memory、tool schema 或 cache-stable system prompt。公开发布、破坏性操作、凭证、
-付款和外部通知仍然遵守正常的 approval、privacy 与 cache gate。
+带有明显长周期信号或多个独立阶段的目标会自动获得研究型预算，不需要配置单独的研究模式或
+运行时。Goal 状态只保存在普通会话 sidecar；进展只来自宿主工具 receipt、canonical todo、
+`complete_step`、review 与 Delivery checkpoint，最终由 Delivery readiness 和有界 Goal
+evaluator 判定。旧 `.reasonix/autoresearch/<task-id>/` 目录保持只读：显式引用旧路径时可恢复为
+普通 Goal，但新版本不会创建或改写这些目录。旧预算 flags 仅为兼容继续接受，不再出现在帮助和补全中。
 
 ## @ 引用
 

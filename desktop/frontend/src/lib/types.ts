@@ -296,6 +296,8 @@ export interface WireEvent {
   decisionReceipt?: WireDecisionReceipt;
   extension?: WireExtensionSurface;
   err?: string;
+  checkpointTurn?: number; // Authoritative TurnDone rewind target; zero is valid.
+  submissionId?: string; // Opaque correlation for the exact optimistic user submission.
   outcome?: "final_readiness" | "recovery_paused";
   readiness?: WireFinalReadiness;
   retryAttempt?: number;
@@ -303,9 +305,7 @@ export interface WireEvent {
   /** Optional: "headers" | "stream". Older clients ignore unknown fields. */
   retryScope?: "headers" | "stream";
   streamAttempt?: WireStreamAttempt;
-  // Tab routing: set by the Go-side tabEventSink so multi-tab frontends
-  // route each event to the correct per-tab reducer.
-  tabId?: string;
+  tabId?: string; // Go's tabEventSink tags events for the correct per-tab reducer.
   runtimeEpoch?: string;
   sessionHitTokens?: number;
   sessionMissTokens?: number;
@@ -350,6 +350,8 @@ export interface TabMeta {
   topicId: string;
   topicTitle: string;
   sessionPath?: string;
+  sessionRevision?: number;
+  sessionDigest?: string;
   readOnly?: boolean;
   filePath?: string;
   projectColor?: string;
@@ -367,7 +369,6 @@ export interface TabMeta {
   tokenMode?: TokenMode;
   goal?: string;
   goalStatus?: GoalStatus;
-  autoResearch?: AutoResearchCompactView;
   recovered?: boolean;
   recoveryReason?: string;
   recoveryDigest?: string;
@@ -572,6 +573,8 @@ export interface HistoryPage {
   endTurn: number;
   totalTurns: number;
   hasOlder: boolean;
+  revision?: number;
+  digest?: string;
 }
 
 // ── Windowed history paging (desktop/history_slice.go) ──────────────────────
@@ -616,6 +619,8 @@ export interface HistorySlice {
   endTurn: number;
   stale: boolean; // cursor bound to an older session revision: discard + reload
   revision: number;
+  revisionKnown?: boolean;
+  digest?: string;
   // Diagnostic read path: index|scan|event-log|live-index|live-fallback (empty when the
   // backend predates the field or no session was readable).
   source?: string;
@@ -792,11 +797,13 @@ export interface Meta {
   runtime?: SessionRuntimeView;
   startupErr?: string;
   eventChannel: string;
+  sessionPath?: string;
+  sessionRevision?: number;
+  sessionDigest?: string;
   cwd: string;
   workspaceRoot?: string;
   workspaceName?: string;
   workspacePath?: string;
-  sessionPath?: string;
   gitBranch?: string;
   imageInputEnabled?: boolean;
   autoApproveTools?: boolean;
@@ -807,7 +814,6 @@ export interface Meta {
   goal?: string;
   goalStatus?: GoalStatus;
   goalRuntime?: GoalRuntime;
-  autoResearch?: AutoResearchCompactView;
   canonicalTodos?: Todo[];
 }
 
@@ -830,55 +836,6 @@ export interface GoalRuntime {
   lastReason?: string;
   stopCause?: string;
   budgetExtensions: number;
-}
-
-export interface AutoResearchCompactView {
-  taskId: string;
-  status: "running" | "blocked" | "complete" | "stopped" | "invalid";
-  iteration: number;
-  pivotRequired: boolean;
-  staleCount: number;
-}
-
-export interface AutoResearchCriterionView {
-  id: string;
-  description: string;
-  required: boolean;
-  evidenceCount: number;
-  status: string;
-}
-
-export interface AutoResearchStatusView extends AutoResearchCompactView {
-  goal: string;
-  currentDirection: string;
-  pivotCount: number;
-  lastHeartbeatAt: string;
-  findingCount: number;
-  openCriteria: AutoResearchCriterionView[];
-  blocker: string;
-  taskPath: string;
-  nextRequiredAction: string;
-}
-
-export interface AutoResearchFindingView {
-  id: string;
-  kind: string;
-  summary: string;
-  source: string;
-  command?: string;
-  paths?: string[];
-  accepted: boolean;
-  createdAt: string;
-}
-
-export interface AutoResearchEvidenceView {
-  id: string;
-  kind: string;
-  summary: string;
-  source: string;
-  command?: string;
-  paths?: string[];
-  accepted: boolean;
 }
 
 export function normalizeCollaborationMode(mode?: string, goal?: string, legacyMode?: Mode): CollaborationMode {
@@ -1683,6 +1640,7 @@ export interface ProviderView {
   models: string[];
   visionModels: string[]; // subset of models that accepts image input
   visionModelsConfigured: boolean; // true when an empty list is an explicit choice
+  visionCapability?: "configurable" | "unsupported"; // backend authority; absent on older Wails payloads
   modelsUrl: string; // optional override for model discovery; empty derives from baseUrl
   default: string;
   apiKeyEnv: string;
@@ -1699,9 +1657,11 @@ export interface ProviderView {
   reasoningProtocol: string; // auto|deepseek|glm|kimi-k3|openai|none; empty = auto/model registry
   thinking: string; // provider-specific thinking override: ""|enabled|disabled|adaptive
   webSearch?: boolean; // expose a provider-executed web search tool when supported
+  serverWebSearchCapability?: boolean; // backend-verified provider capability; absent on older Wails payloads
   supportedEfforts: string[]; // custom /effort levels; empty = use built-in Kind/BaseURL default
   defaultEffort: string; // /effort level when user picks "auto" or unset; "" = supportedEfforts[0]
   modelOverrides?: ProviderModelOverrideView[] | null;
+  recommendedUpgradeAvailable?: boolean; // official legacy OpenAI entry can switch to recommended Anthropic access
   modelCatalogFingerprint?: string; // opaque compare-and-apply token for background model discovery
 }
 
@@ -1737,6 +1697,7 @@ export interface ProviderModelOverrideView {
   defaultEffort: string;
   vision?: boolean | null;
   contextWindow?: number;
+  maxOutputTokens?: number;
 }
 
 // BalanceInfo is the wallet-balance readout (desktop/app.go Balance). available
@@ -2167,7 +2128,7 @@ export interface ExternalOpenerView {
 
 export interface ExternalOpenersView {
   openers: ExternalOpenerView[];
-  preferred: string;
+  preferred: string; workspaceOpenable?: boolean;
 }
 
 // Auto-updater payloads (desktop/updater.go). UpdateInfo drives the update banner;

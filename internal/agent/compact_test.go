@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"reasonix/internal/event"
 	"strings"
 	"testing"
@@ -477,16 +476,19 @@ func TestRenderTranscriptRedactsToolCallArgs(t *testing.T) {
 	}
 }
 
-func TestInterruptedDisplayStaysVerbatimAndOutOfCompactionPrompt(t *testing.T) {
+// Display-only output stays verbatim in the canonical transcript by construction
+// (compaction only writes a projection); this pins the other half: it must never
+// reach the summarizer or the model-visible projection.
+func TestInterruptedDisplayStaysOutOfCompactionPromptAndProjection(t *testing.T) {
 	local := provider.Message{
 		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
 		LocalOnly: true, Content: "partial visible answer", ReasoningContent: "private partial reasoning",
 		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
 	}
 	a := &Agent{}
-	kept, fold := a.partitionFold([]provider.Message{local})
-	if len(kept) != 1 || !kept[0].LocalOnly || len(fold) != 0 {
-		t.Fatalf("compaction partition kept=%+v fold=%+v, want local display kept verbatim", kept, fold)
+	early, carried, kept, fold := a.partitionFoldForProjection([]provider.Message{local})
+	if len(early) != 0 || len(carried) != 0 || len(kept) != 0 || len(fold) != 0 {
+		t.Fatalf("compaction partition early=%+v carried=%+v kept=%+v fold=%+v, want display-only output in none of them", early, carried, kept, fold)
 	}
 	if transcript := renderTranscript([]provider.Message{local}); transcript != "" {
 		t.Fatalf("local interrupted output leaked into compaction prompt: %q", transcript)
@@ -617,55 +619,6 @@ func TestMaybeCompactStillLatchesWhenPromptStaysAboveTrigger(t *testing.T) {
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000})
 	if !a.compactStuck {
 		t.Fatalf("two consecutive over-trigger compactions must still latch: consecutiveCompacts=%d", a.consecutiveCompacts)
-	}
-}
-
-func TestPartitionFoldSmallTurnWindowIsPositionFixed(t *testing.T) {
-	// 25 small user turns in the region: the first 20 must be kept verbatim,
-	// the last 5 must fold. The window is position-fixed (first N), never
-	// "the most recent N" — a dynamic tail would rewrite the kept prefix on
-	// every compaction and crater the server-side prefix cache.
-	a := &Agent{}
-	var region []provider.Message
-	for i := range 25 {
-		region = append(region, provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("small turn %d", i)})
-	}
-	kept, fold := a.partitionFold(region)
-	if len(kept) != maxKeepSmallUserTurns {
-		t.Fatalf("kept %d small user turns, want %d (position-fixed window)", len(kept), maxKeepSmallUserTurns)
-	}
-	if len(fold) != 5 {
-		t.Fatalf("folded %d turns, want 5 (turns beyond the fixed window)", len(fold))
-	}
-	// The kept turns must be the FIRST ones in order (positions 0..19).
-	for i := range maxKeepSmallUserTurns {
-		want := fmt.Sprintf("small turn %d", i)
-		if got := UserMessageText(kept[i]); got != want {
-			t.Fatalf("kept[%d]=%q, want %q — keep window must be the leading turns", i, got, want)
-		}
-	}
-	// Folded turns are the oldest beyond the window (positions 20..24).
-	for i, m := range fold {
-		want := fmt.Sprintf("small turn %d", 20+i)
-		if got := UserMessageText(m); got != want {
-			t.Fatalf("fold[%d]=%q, want %q", i, got, want)
-		}
-	}
-}
-
-func TestPartitionFoldLargeTurnsStillFold(t *testing.T) {
-	// Large user turns are not pinnable regardless of window position.
-	a := &Agent{}
-	region := []provider.Message{
-		{Role: provider.RoleUser, Content: strings.Repeat("big", 4000)}, // 12000 chars ×0.25 = 3000 > 1500 → not pinnable
-		{Role: provider.RoleUser, Content: "small"},
-	}
-	kept, fold := a.partitionFold(region)
-	if len(kept) != 1 || UserMessageText(kept[0]) != "small" {
-		t.Fatalf("kept=%+v, want only the small turn", kept)
-	}
-	if len(fold) != 1 {
-		t.Fatalf("fold=%d, want the large turn folded", len(fold))
 	}
 }
 

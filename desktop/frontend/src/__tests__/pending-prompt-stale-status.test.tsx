@@ -278,7 +278,7 @@ eq(replayed.promptArrivedId, "plan-1", "same-id replay keeps the anchor id");
 {
   const armed = reducer({ ...initialState }, { type: "event", e: planApprovalEvent });
   const answeredEarly = reducer(armed, { type: "clearApproval" });
-  const nextTurn = reducer(answeredEarly, { type: "user", text: "continue", seq: 0 });
+  const nextTurn = reducer(answeredEarly, { type: "user", text: "continue", seq: 0, submissionId: "pending-prompt-next-turn" });
   eq(nextTurn.promptArrivedId, undefined, "a new user message drops the prompt anchor id");
   eq(nextTurn.promptArrivedAt, undefined, "a new user message drops the prompt arrival time");
 }

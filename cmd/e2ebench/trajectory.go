@@ -105,6 +105,14 @@ type trajectorySummary struct {
 	ShadowVerdict  string `json:"shadow_verdict,omitempty"`
 	ShadowComplete bool   `json:"shadow_complete,omitempty"`
 
+	// Completion report (last of the turn): the host-authored receipt's
+	// verdict and the gaps it refused to hide, priced against the grader.
+	CompletionVerdict  string   `json:"completion_verdict,omitempty"`
+	CompletionGaps     int      `json:"completion_gaps,omitempty"`
+	CompletionGapKinds []string `json:"completion_gap_kinds,omitempty"`
+	ClaimsVerified     int      `json:"claims_verified,omitempty"`
+	ClaimsUnbacked     int      `json:"claims_unbacked,omitempty"`
+
 	// Outcome shadow: the runtime outcome scorer's per-round series condensed,
 	// or a verification-receipt backfill for recordings that predate it.
 	Outcome *outcomeSummary `json:"outcome,omitempty"`
@@ -143,6 +151,13 @@ type trajectoryRecord struct {
 		Verdict  string `json:"verdict"`
 		Complete bool   `json:"complete"`
 	} `json:"contract_shadow"`
+	CompletionReport *struct {
+		Verdict        string   `json:"verdict"`
+		Gaps           int      `json:"gaps"`
+		GapKinds       []string `json:"gap_kinds"`
+		ClaimsVerified int      `json:"claims_verified"`
+		ClaimsUnbacked int      `json:"claims_unbacked"`
+	} `json:"completion_report"`
 	OutcomeProgress *struct {
 		Exploration      int  `json:"exploration"`
 		Verification     int  `json:"verification"`
@@ -355,6 +370,13 @@ func (t *trajScan) record(rec trajectoryRecord) {
 		t.s.ShadowIntent = cs.Intent
 		t.s.ShadowVerdict = cs.Verdict
 		t.s.ShadowComplete = cs.Complete
+	}
+	if cr := rec.CompletionReport; cr != nil {
+		t.s.CompletionVerdict = cr.Verdict
+		t.s.CompletionGaps = cr.Gaps
+		t.s.CompletionGapKinds = cr.GapKinds
+		t.s.ClaimsVerified = cr.ClaimsVerified
+		t.s.ClaimsUnbacked = cr.ClaimsUnbacked
 	}
 	if op := rec.OutcomeProgress; op != nil {
 		t.outcomePoints = append(t.outcomePoints, outcomePoint{

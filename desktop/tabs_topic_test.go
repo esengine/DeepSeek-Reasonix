@@ -3140,6 +3140,9 @@ func TestTrashTopicMovesOpenSessionToTrash(t *testing.T) {
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("open topic session should be moved to trash: %v", err)
 	}
+	if agent.IsCleanupPending(sessionPath) {
+		t.Fatal("completed topic archive left a cleanup-pending marker")
+	}
 	trashed := app.ListTrashedSessions()
 	if len(trashed) != 1 || trashed[0].Path != trashPath {
 		t.Fatalf("trashed sessions = %#v, want %q", trashed, trashPath)
@@ -3288,7 +3291,7 @@ func TestTrashTopicRejectsRunningDetachedRuntime(t *testing.T) {
 	}
 }
 
-func TestTrashTopicWaitsForConcurrentTurnAdmission(t *testing.T) {
+func TestTrashTopicRejectsConcurrentTurnAdmissionWithoutWaiting(t *testing.T) {
 	isolateDesktopUserDirs(t)
 
 	topicID := "topic_concurrent_turn_trash"
@@ -3344,31 +3347,12 @@ func TestTrashTopicWaitsForConcurrentTurnAdmission(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	trashEntered := make(chan struct{})
-	var trashEnteredOnce sync.Once
-	app.runtimeMutationBeforeLockHook = func(operation string) {
-		if operation == "trash-topic" {
-			trashEnteredOnce.Do(func() { close(trashEntered) })
-		}
+	started := time.Now()
+	if err := app.TrashTopic(topicID); !errors.Is(err, errTopicArchiveBusy) {
+		t.Fatalf("concurrent TrashTopic error = %v, want %v", err, errTopicArchiveBusy)
 	}
-	trashDone := make(chan error, 1)
-	go func() { trashDone <- app.TrashTopic(topicID) }()
-	select {
-	case <-trashEntered:
-	case <-time.After(5 * time.Second):
-		t.Fatal("TrashTopic did not reach the runtime mutation barrier")
-	}
-
-	// Wait until TrashTopic owns runtimeRebuildMu and is queued on the admission
-	// writer. Releasing the turn gate now must let SubmitToTab publish Running
-	// before TrashTopic can re-check active work.
-	deadline = time.Now().Add(5 * time.Second)
-	for app.runtimeRebuildMu.TryLock() {
-		app.runtimeRebuildMu.Unlock()
-		if time.Now().After(deadline) {
-			t.Fatal("TrashTopic never acquired the runtime rebuild lock")
-		}
-		time.Sleep(time.Millisecond)
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("concurrent TrashTopic waited %s instead of returning busy", elapsed)
 	}
 	tab.turnStartMu.Unlock()
 	turnGateHeld = false
@@ -3377,9 +3361,6 @@ func TestTrashTopicWaitsForConcurrentTurnAdmission(t *testing.T) {
 		t.Fatalf("SubmitToTab: %v", err)
 	}
 	<-runner.started
-	if err := <-trashDone; !errors.Is(err, errTopicHasActiveWork) {
-		t.Fatalf("concurrent TrashTopic error = %v, want %v", err, errTopicHasActiveWork)
-	}
 	if !ctrl.Running() {
 		t.Fatal("rejected archive should leave the concurrently admitted turn running")
 	}
@@ -3842,6 +3823,13 @@ func TestTrashTopicValidTrashRemovesEmptyLiveStub(t *testing.T) {
 	}
 	if _, err := os.Stat(trashPath); err != nil {
 		t.Fatalf("existing trash should remain authoritative: %v", err)
+	}
+	trashed, err := listTrashedSessionFiles(dir)
+	if err != nil {
+		t.Fatalf("listTrashedSessionFiles: %v", err)
+	}
+	if len(trashed) != 1 || !sameDesktopPath(trashed[0], trashPath) {
+		t.Fatalf("trashed sessions = %v, want only authoritative copy %q", trashed, trashPath)
 	}
 }
 

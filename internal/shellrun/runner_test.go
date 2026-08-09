@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -184,6 +186,106 @@ func TestRunForegroundOutputTailBounded(t *testing.T) {
 	}
 	if !strings.Contains(res.Combined, "中文") && !strings.Contains(res.OutputTail, "中文") {
 		t.Fatalf("UTF-8 Chinese lost: combined=%q tail=%q", trim(res.Combined, 80), trim(res.OutputTail, 80))
+	}
+}
+
+func TestRunForegroundCombinedOutputBounded(t *testing.T) {
+	head := strings.Repeat("H", combinedOutputMaxBytes)
+	tail := strings.Repeat("T", combinedOutputTailBytes)
+	res := RunForeground(context.Background(), Request{
+		Argv: []string{"irrelevant"},
+		Run: func(_ context.Context, cmd *exec.Cmd, _ proc.RunOptions) (*proc.TrackedCommand, error) {
+			if _, err := io.WriteString(cmd.Stdout, head); err != nil {
+				return nil, err
+			}
+			if _, err := io.WriteString(cmd.Stdout, tail); err != nil {
+				return nil, err
+			}
+			return nil, nil
+		},
+	})
+	if res.Err != nil {
+		t.Fatalf("RunForeground: %v", res.Err)
+	}
+	if len(res.Combined) > combinedOutputMaxBytes {
+		t.Fatalf("combined output bytes = %d, want <= %d", len(res.Combined), combinedOutputMaxBytes)
+	}
+	if !strings.HasPrefix(res.Combined, "HHHH") {
+		t.Fatal("combined output lost its opening context")
+	}
+	if !strings.Contains(res.Combined, combinedOutputTruncated) {
+		t.Fatal("combined output omitted the truncation notice")
+	}
+	if !strings.HasSuffix(res.Combined, tail) {
+		t.Fatal("combined output lost its final diagnostics")
+	}
+}
+
+func TestRunForegroundProgressBounded(t *testing.T) {
+	payload := strings.Repeat("x", progressOutputMaxBytes+(1<<20))
+	var progress strings.Builder
+	res := RunForeground(context.Background(), Request{
+		Argv:     []string{"irrelevant"},
+		Progress: func(chunk string) { progress.WriteString(chunk) },
+		Run: func(_ context.Context, cmd *exec.Cmd, _ proc.RunOptions) (*proc.TrackedCommand, error) {
+			_, err := io.WriteString(cmd.Stdout, payload)
+			return nil, err
+		},
+	})
+	if res.Err != nil {
+		t.Fatalf("RunForeground: %v", res.Err)
+	}
+	if got, max := progress.Len(), progressOutputMaxBytes+len(progressOutputTruncated); got > max {
+		t.Fatalf("progress bytes = %d, want <= %d", got, max)
+	}
+	if !strings.Contains(progress.String(), progressOutputTruncated) {
+		t.Fatal("progress omitted the truncation notice")
+	}
+	if len(res.Combined) != len(payload) {
+		t.Fatalf("progress cap changed final output: got %d bytes, want %d", len(res.Combined), len(payload))
+	}
+}
+
+func TestRunForegroundCombinedOutputCapIsConcurrentSafe(t *testing.T) {
+	chunk := strings.Repeat("x", 128<<10)
+	var progressMu sync.Mutex
+	progressBytes := 0
+	progressMarkers := 0
+	res := RunForeground(context.Background(), Request{
+		Argv: []string{"irrelevant"},
+		Progress: func(chunk string) {
+			progressMu.Lock()
+			defer progressMu.Unlock()
+			progressBytes += len(chunk)
+			progressMarkers += strings.Count(chunk, progressOutputTruncated)
+		},
+		Run: func(_ context.Context, cmd *exec.Cmd, _ proc.RunOptions) (*proc.TrackedCommand, error) {
+			var wg sync.WaitGroup
+			for range 4 {
+				wg.Go(func() {
+					for range 32 {
+						_, _ = io.WriteString(cmd.Stdout, chunk)
+					}
+				})
+			}
+			wg.Wait()
+			return nil, nil
+		},
+	})
+	if res.Err != nil {
+		t.Fatalf("RunForeground: %v", res.Err)
+	}
+	if len(res.Combined) > combinedOutputMaxBytes {
+		t.Fatalf("combined output bytes = %d, want <= %d", len(res.Combined), combinedOutputMaxBytes)
+	}
+	if !strings.Contains(res.Combined, combinedOutputTruncated) {
+		t.Fatal("combined output omitted the truncation notice")
+	}
+	if max := progressOutputMaxBytes + len(progressOutputTruncated); progressBytes > max {
+		t.Fatalf("progress bytes = %d, want <= %d", progressBytes, max)
+	}
+	if progressMarkers != 1 {
+		t.Fatalf("progress truncation markers = %d, want 1", progressMarkers)
 	}
 }
 
