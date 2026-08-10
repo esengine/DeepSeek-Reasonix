@@ -13,6 +13,7 @@ Astro product shell
        -> double-credential redacted Wiki share adapter
        -> SQLite workspace, job, publication, Wiki version, member, share and audit adapter
        -> rebuildable IP asset-node, relationship, alias and evidence projection
+       -> bounded IP task agent (task contract, read-only domain tools, evidence delivery gate)
        -> retained uploads for explicit interrupted-job retry
   -> deterministic domain state (retained offline acceptance adapter)
   -> Reasonix controller / agent runtime (preserved upstream kernel)
@@ -21,6 +22,12 @@ Astro product shell
 ```
 
 The web surface is transport-agnostic and calls only same-origin APIs. In SMB mode the gateway verifies an opaque session, enforces a four-level workspace role, validates file signatures and provider-controlled URLs, streams no secrets to the browser, and normalizes all model output before it reaches the DOM. SQLite supplies transactional single-node state and explicit restart recovery; the deterministic adapter remains available for offline CI. A multi-instance rollout replaces the storage and identity adapters without duplicating business behavior inside individual views.
+
+### Bounded IP task agent
+
+The product exposes Reasonix-style task contracts, planner/executor separation, step receipts, failure budgets and delivery readiness through a domain-specific orchestrator in the same-origin gateway. DeepSeek may propose only validated IP/Wiki intents and server-owned domain tool calls. The executor has no shell, source-code, filesystem, arbitrary network, messaging, member-management, sharing, publication, relationship-confirmation or Wiki-save capability. Tools re-evaluate the current workspace role on every call and reuse the publication registry's visibility filtering.
+
+Agent results are drafts and evidence-grounded analysis packages, never system-of-record mutations. Every factual finding must reference an ID returned by the current task's authorized tool calls; unsupported references are downgraded to uncertainty by a deterministic delivery gate. Tasks and step receipts are persisted in SQLite, while interrupted tasks are never automatically replayed after restart. See ADR-0003 and `docs/plans/2026-08-10-bounded-ip-agent-design.md`.
 
 ### Real provider flow
 
