@@ -47,6 +47,41 @@ type record struct {
 	Total      int       `json:"total,omitempty"`
 	Requests   int       `json:"requests,omitempty"` // provider requests represented by this row
 	Turn       bool      `json:"turn,omitempty"`     // true for TurnDone marker rows
+	// Compaction records one context-compaction pass (agent compaction
+	// telemetry). Nil on usage/turn rows; Query aggregation skips them.
+	Compaction *CompactionRecord `json:"compaction,omitempty"`
+}
+
+// CompactionRecord is the structured form of the agent's compaction telemetry
+// detail line (trigger/mode/cache/src/proj/in/out/hit/miss/write/reqs),
+// persisted so a misbehaving compaction can be diagnosed from the stats file
+// alone. Error carries the full provider/estimator failure when the pass
+// failed; RequestID links to provider logs when present.
+type CompactionRecord struct {
+	Trigger   string `json:"trigger,omitempty"`
+	Mode      string `json:"mode,omitempty"`
+	Cache     string `json:"cache,omitempty"`
+	SourceTok int    `json:"src,omitempty"`
+	ProjTok   int    `json:"proj,omitempty"`
+	InputTok  int    `json:"in,omitempty"`
+	OutTok    int    `json:"out,omitempty"`
+	HitTok    int    `json:"hit,omitempty"`
+	MissTok   int    `json:"miss,omitempty"`
+	WriteTok  int    `json:"write,omitempty"`
+	Reqs      int    `json:"reqs,omitempty"`
+	// Results/SavedChars describe a no-AI fast compression pass (mode=prune):
+	// how many stale tool results were elided and roughly how many characters
+	// were saved. Summarize passes leave them zero. Status records the gate
+	// outcome (refused/noop) for passes that did not rewrite.
+	Results    int    `json:"results,omitempty"`
+	SavedChars int    `json:"saved_chars,omitempty"`
+	Status     string `json:"status,omitempty"`
+	// TokPerChar is the usage-calibrated token/char factor at fold time
+	// (0 until a turn reports usage). It makes src/proj values verifiable:
+	// src ≈ chars × tpc. Fast-compress (prune) passes leave it zero.
+	TokPerChar float64 `json:"tpc,omitempty"`
+	RequestID  string  `json:"provider_request_id,omitempty"`
+	Error      string  `json:"err_type,omitempty"`
 }
 
 // Writer appends records to the daily stats file for a given stats dir.
