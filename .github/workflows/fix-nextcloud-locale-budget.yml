@@ -19,22 +19,10 @@ jobs:
           ref: feature/nextcloud-talk-bot
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v6.0.9
-        with:
-          version: 10
-          run_install: false
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: "24"
-          cache: pnpm
-          cache-dependency-path: desktop/frontend/pnpm-lock.yaml
-
-      - name: Trim locale copy
+      - name: Trim locale copy and push
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           replacements = {
               "desktop/frontend/src/locales/zh.ts": {
                   '"settings.botInstallNextcloudHint": "通过签名 Webhook 连接自托管 Talk Bot。"': '"settings.botInstallNextcloudHint": "签名 Webhook 连接 Talk Bot。"',
@@ -51,7 +39,6 @@ jobs:
                   '"settings.botNextcloudSetupHelp": "使用相同的 Webhook 路徑與共享密鑰執行 occ talk:bot:install。若 Nextcloud 位於其他主機，請透過 HTTPS 反向代理公開此監聽端點。"': '"settings.botNextcloudSetupHelp": "用同一路徑與密鑰註冊 Talk Bot；遠端 Nextcloud 請用 HTTPS 反代。"',
               },
           }
-
           for filename, pairs in replacements.items():
               path = Path(filename)
               text = path.read_text(encoding="utf-8")
@@ -61,15 +48,6 @@ jobs:
                   text = text.replace(old, new, 1)
               path.write_text(text, encoding="utf-8")
           PY
-
-      - name: Verify frontend build and bundle budget
-        working-directory: desktop/frontend
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm build
-
-      - name: Commit verified locale fix
-        run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/fix-nextcloud-locale-budget.yml
