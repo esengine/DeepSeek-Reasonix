@@ -2,14 +2,14 @@
   "limits": {
     "banner": 15,
     "commented-code": 0,
-    "complexity": 2080,
+    "complexity": 2084,
     "essay": 4099,
-    "file-size": 110691,
+    "file-size": 110944,
     "function-size": 9129,
     "layering": 1,
     "marker": 0,
     "narrative": 64,
-    "test-file-size": 70093
+    "test-file-size": 70092
   },
   "files": {
     "cmd/e2ebench/main.go": {
@@ -42,7 +42,7 @@
       "essay": 11
     },
     "desktop/bot_connection_app.go": {
-      "file-size": 182
+      "file-size": 221
     },
     "desktop/bot_event_sink.go": {
       "essay": 2
@@ -84,7 +84,7 @@
       "essay": 2
     },
     "desktop/frontend/src/App.tsx": {
-      "file-size": 4749
+      "file-size": 4754
     },
     "desktop/frontend/src/__tests__/app-chrome-tabs.test.ts": {
       "test-file-size": 19
@@ -138,7 +138,7 @@
       "file-size": 141
     },
     "desktop/frontend/src/components/SettingsPanel.tsx": {
-      "file-size": 6960
+      "file-size": 7162
     },
     "desktop/frontend/src/components/StatusBar.tsx": {
       "file-size": 20
@@ -171,7 +171,7 @@
       "file-size": 307
     },
     "desktop/frontend/src/lib/types.ts": {
-      "file-size": 1428
+      "file-size": 1432
     },
     "desktop/frontend/src/lib/useController.ts": {
       "file-size": 3925
@@ -794,8 +794,8 @@
       "function-size": 15
     },
     "internal/cli/bot.go": {
-      "complexity": 18,
-      "function-size": 113
+      "complexity": 24,
+      "function-size": 128
     },
     "internal/cli/branch.go": {
       "essay": 2
@@ -807,10 +807,10 @@
       "essay": 15
     },
     "internal/cli/chat_tui.go": {
-      "complexity": 300,
+      "complexity": 299,
       "essay": 110,
-      "file-size": 4546,
-      "function-size": 1195
+      "file-size": 4541,
+      "function-size": 1190
     },
     "internal/cli/chat_tui_paste.go": {
       "essay": 9
@@ -834,7 +834,7 @@
       "file-size": 49
     },
     "internal/cli/complete_test.go": {
-      "test-file-size": 15
+      "test-file-size": 14
     },
     "internal/cli/composer_selection.go": {
       "essay": 1
@@ -975,7 +975,7 @@
     },
     "internal/config/config.go": {
       "essay": 50,
-      "file-size": 1500,
+      "file-size": 1506,
       "narrative": 2
     },
     "internal/config/credentials.go": {
@@ -1052,7 +1052,7 @@
     "internal/config/render.go": {
       "complexity": 250,
       "essay": 2,
-      "file-size": 1015,
+      "file-size": 1027,
       "function-size": 967
     },
     "internal/config/render_test.go": {
@@ -1068,10 +1068,10 @@
       "essay": 9
     },
     "internal/control/controller.go": {
-      "complexity": 11,
+      "complexity": 10,
       "essay": 165,
-      "file-size": 5408,
-      "function-size": 78,
+      "file-size": 5398,
+      "function-size": 68,
       "narrative": 4
     },
     "internal/control/controller_test.go": {
