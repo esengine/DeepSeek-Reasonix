@@ -370,7 +370,7 @@ func compactionTelemetryFromSummary(trigger, cacheState string, sourceTokens int
 
 // compact writes a context projection; trigger stays "auto"/"manual" for UI cards.
 func (a *Agent) compact(ctx context.Context, trigger, instructions string, force bool) error {
-	_, err := a.compactToProjection(ctx, trigger, instructions, force)
+	_, err := a.compactToProjection(ctx, trigger, instructions, force, false)
 	return err
 }
 
@@ -378,7 +378,8 @@ func (a *Agent) compact(ctx context.Context, trigger, instructions string, force
 // stable prefix + one structured digest + recent verbatim tail.
 // The canonical transcript is never rewritten. CompactionNoop means nothing
 // was foldable; callers at physical overflow must treat that as hard failure.
-func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force bool) (CompactionOutcome, error) {
+// mustFree marks the fold the caller cannot proceed without.
+func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions string, force, mustFree bool) (CompactionOutcome, error) {
 	a.compactionRunMu.Lock()
 	defer a.compactionRunMu.Unlock()
 	activeTurn := a.activeTurnCreatedAt.Load()
@@ -430,16 +431,13 @@ func (a *Agent) compactToProjection(ctx context.Context, trigger, instructions s
 	}
 
 	sourceTokens := a.estimatedPromptTokens(msgs)
-	res, err := a.foldToSummary(ctx, fold, instructions)
-	summary := res.Text
-	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), sourceTokens, res)
+	res, tele, err := a.foldOrDegrade(ctx, trigger, mustFree, fold, instructions, sourceTokens)
 	if err != nil {
-		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)
 		a.emitCompactionAborted(trigger)
 		return CompactionNoop, err
 	}
-	summary, err = a.interceptCompactionComplete(ctx, summary)
+	summary, err := a.interceptCompactionComplete(ctx, res.Text)
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)

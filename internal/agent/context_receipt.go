@@ -130,8 +130,13 @@ func (a *Agent) emitCompactionTelemetry(t CompactionTelemetry) {
 		detail += " provider_request_id=" + t.ProviderRequestID
 	}
 	if t.Error != "" {
-		slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
-		return
+		// A degraded fold carries the summarizer's error but still freed the
+		// context, so it is a notice with a cause rather than a failure.
+		if t.Mode != CompactionModeDegraded {
+			slog.Warn("agent: compaction failed", "detail", detail+" err_type="+t.Error)
+			return
+		}
+		detail += " err_type=" + t.Error
 	}
 	a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "compaction telemetry", Detail: detail})
 }

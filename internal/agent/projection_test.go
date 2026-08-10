@@ -441,10 +441,10 @@ func TestCompactReplacesHistory(t *testing.T) {
 	}
 }
 
-func TestCompactFallsBackToMechanicalFoldWhenSummaryFails(t *testing.T) {
-	// Projection compaction must not rewrite history or install a mechanical
-	// marker when the summarizer fails. The error is returned so the caller
-	// can retry or report it.
+func TestManualCompactReportsSummarizerFailure(t *testing.T) {
+	// Manual compaction must not rewrite history or degrade to a mechanical
+	// fold when the summarizer fails. The error is returned so the caller,
+	// who is present, can retry or report it.
 	prov := &fakeProvider{streamErr: errors.New("provider down")}
 	sess := &Session{Messages: []provider.Message{
 		{Role: provider.RoleSystem, Content: "sys"},
