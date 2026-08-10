@@ -1,0 +1,85 @@
+name: vuln-scan
+
+# 自动漏洞扫描（常态挖漏洞 · GitHub 端）
+# 与本地 scripts/vuln-scan.mjs 双端闭环：每次 push/PR 自动跑静态漏洞扫描，
+# 覆盖 Go(gosec+vet)、Python(bandit)、前端(eslint+npm audit)。
+# docs/release-notes/root-Markdown 变更无分析代码，跳过（与 codeql.yml 一致）。
+
+on:
+  push:
+    branches: ["main-v2"]
+    paths-ignore:
+      - 'docs/**'
+      - 'release-notes/**'
+      - '*.md'
+  pull_request:
+    branches: ["main-v2"]
+    paths-ignore:
+      - 'docs/**'
+      - 'release-notes/**'
+      - '*.md'
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  go:
+    name: Go (gosec + vet)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [".", "desktop"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: |
+            go.sum
+            desktop/go.sum
+      - name: go vet
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+      - name: gosec
+        working-directory: ${{ matrix.module }}
+        run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.22.1
+          "$(go env GOPATH)/bin/gosec" -quiet -fmt sarif -out gosec.sarif ./...
+        continue-on-error: false
+
+  python:
+    name: Python (bandit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: bandit
+        run: |
+          pip install bandit==1.8.3
+          bandit -q -r . -x tests,docs,scripts,release-notes -f sarif -o bandit.sarif
+
+  frontend:
+    name: Frontend (eslint + audit)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop/frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: npm ci
+        run: npm ci --no-audit --no-fund
+      - name: eslint
+        run: npx eslint . --max-warnings=0
+      - name: npm audit
+        run: npm audit --audit-level=high
