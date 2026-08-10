@@ -47,6 +47,14 @@ const (
 // failure (then a mechanical fold) instead of hanging compaction indefinitely.
 const summaryTimeout = 90 * time.Second
 
+// defaultAutoCompactBudget bounds the whole auto-compaction pass (summarizer
+// retries + PreCompact hook + compaction extension intercepts all run serially
+// inside the run loop), so a stuck extension or slow summarizer surfaces as a
+// bounded wait followed by a mechanical fold instead of minutes of
+// "compacting…" placeholder (issue #8148). Manual /compact keeps the longer
+// per-call timeouts.
+const defaultAutoCompactBudget = 45 * time.Second
+
 // summarySystemPrompt steers the executor to distill older history into a
 // structured briefing it can keep relying on after the originals are dropped.
 // The section layout mirrors what a coding agent actually needs to resume work
@@ -98,7 +106,19 @@ func (a *Agent) compactThresholds() (soft, snip, high int) {
 // configured fraction of the context window. It is a no-op when compaction is
 // disabled (no window) or usage is unavailable.
 func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
-	if a.contextWindow <= 0 || u == nil || u.PromptTokens == 0 {
+	if a.contextWindow <= 0 || u == nil {
+		return
+	}
+	// Threshold decisions use the latest single-request prompt size: billable
+	// PromptTokens sums every streaming-replay attempt, so a retried request
+	// would look 2–5× larger than the actual context occupancy and trigger
+	// compaction early (issue #8148). ContextPromptTokens carries the latest
+	// attempt's shape; fall back to PromptTokens when absent.
+	prompt := u.PromptTokens
+	if u.ContextPromptTokens > 0 {
+		prompt = u.ContextPromptTokens
+	}
+	if prompt == 0 {
 		return
 	}
 	soft, snip, high := a.compactThresholds()
@@ -109,19 +129,19 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 	// leaving a stale run count behind there would latch the *next* compaction as
 	// "the window is too small" and silently disable auto-compaction for the rest
 	// of the session.
-	if u.PromptTokens < high {
+	if prompt < high {
 		a.consecutiveCompacts = 0
 		a.compactStuck = false
 	}
 	// Between the soft ratio and the trigger, report growing context once without
 	// rewriting the prefix — a compaction here would needlessly crater the cache.
-	if u.PromptTokens >= soft && u.PromptTokens < snip && !a.softCompactNoticed {
+	if prompt >= soft && prompt < snip && !a.softCompactNoticed {
 		a.softCompactNoticed = true
 		detail := fmt.Sprintf("context reached %.0f%% of window; keeping cache-first prefix until compact threshold %.0f%%", a.softCompactRatio*100, a.compactRatio*100)
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context is getting large; preserving cache until cleanup is needed.", Detail: detail})
 		return
 	}
-	if u.PromptTokens >= snip && u.PromptTokens < high {
+	if prompt >= snip && prompt < high {
 		ratio := a.tokPerChar()
 		if st, err := a.SnipStaleToolResults(); err == nil && st.Results > 0 {
 			saved := int(float64(st.SavedChars) * ratio)
@@ -130,13 +150,13 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		}
 		return
 	}
-	if u.PromptTokens < high {
+	if prompt < high {
 		return // the latch was already cleared above
 	}
 	if a.compactStuck {
 		return
 	}
-	force := u.PromptTokens >= int(float64(a.contextWindow)*a.compactForceRatio)
+	force := prompt >= int(float64(a.contextWindow)*a.compactForceRatio)
 	// Prune before folding: when eliding stale tool results alone clears the
 	// trigger, this turn's (paid) summarize call is skipped entirely.
 	ratio := a.tokPerChar()
@@ -144,11 +164,20 @@ func (a *Agent) maybeCompact(ctx context.Context, u *provider.Usage) {
 		saved := int(float64(st.SavedChars) * ratio)
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: fmt.Sprintf(
 			"pruned %d stale tool results (~%d tokens est.) before compaction", st.Results, saved)})
-		if !force && u.PromptTokens-saved < high {
+		if !force && prompt-saved < high {
 			return
 		}
 	}
-	if err := a.compact(ctx, "auto", "", force); err != nil {
+	// Auto-compaction gets one bounded budget for the whole pass; force (the
+	// 0.9-window high-water mark) keeps the longer per-call timeouts so a
+	// genuinely overfull window is always reclaimed.
+	compactCtx := ctx
+	if !force && a.autoCompactBudget > 0 {
+		var cancel context.CancelFunc
+		compactCtx, cancel = context.WithTimeout(ctx, a.autoCompactBudget)
+		defer cancel()
+	}
+	if err := a.compact(compactCtx, "auto", "", force); err != nil {
 		a.sink.Emit(event.Event{Kind: event.Notice, Level: event.LevelInfo, Text: "Context cleanup skipped for now.", Detail: fmt.Sprintf("compaction skipped: %v", err)})
 		return
 	}

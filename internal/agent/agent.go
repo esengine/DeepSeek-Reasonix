@@ -531,6 +531,7 @@ type Agent struct {
 	toolResultSnipRatio float64
 	compactRatio        float64
 	compactForceRatio   float64
+	autoCompactBudget   time.Duration // whole-pass timeout for auto-compaction; manual /compact ignores it
 	softCompactNoticed  bool
 	recentKeep          int
 	archiveDir          string
@@ -1031,6 +1032,7 @@ type Options struct {
 	ToolResultSnipRatio float64
 	CompactRatio        float64
 	CompactForceRatio   float64
+	AutoCompactBudget   time.Duration // total budget for one auto-compaction pass; 0 uses the default
 	RecentKeep          int
 	ArchiveDir          string
 	KeepPolicy          KeepPolicy
@@ -1151,6 +1153,9 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 	if opts.CompactForceRatio <= 0 {
 		opts.CompactForceRatio = defaultCompactForceRatio
 	}
+	if opts.AutoCompactBudget <= 0 {
+		opts.AutoCompactBudget = defaultAutoCompactBudget
+	}
 	if opts.RecentKeep <= 0 {
 		opts.RecentKeep = minRecentKeep
 	}
@@ -1236,6 +1241,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 		toolResultSnipRatio:       opts.ToolResultSnipRatio,
 		compactRatio:              opts.CompactRatio,
 		compactForceRatio:         opts.CompactForceRatio,
+		autoCompactBudget:         opts.AutoCompactBudget,
 		recentKeep:                opts.RecentKeep,
 		archiveDir:                opts.ArchiveDir,
 		keepPolicy:                opts.KeepPolicy,

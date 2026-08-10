@@ -8,6 +8,7 @@ import (
 	"reasonix/internal/event"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/provider"
 	"reasonix/internal/tool"
@@ -622,6 +623,88 @@ func TestCompactSkipsSingleSmallMessage(t *testing.T) {
 	}
 	if len(prov.got) != 0 {
 		t.Fatalf("summarizer was called for tiny region: %+v", prov.got)
+	}
+}
+
+// TestMaybeCompactUsesSingleRequestPrompt pins the issue #8148 fix: threshold
+// decisions use the latest single-request prompt (ContextPromptTokens), not the
+// billable aggregate PromptTokens that sums streaming-replay attempts and would
+// trigger compaction early.
+func TestMaybeCompactUsesSingleRequestPrompt(t *testing.T) {
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("a ", 500)},
+		{Role: provider.RoleAssistant, Content: "b"},
+		{Role: provider.RoleUser, Content: "c"},
+	}}
+	prov := &fakeProvider{reply: "- summary"}
+	a := New(prov, tool.NewRegistry(), sess, Options{ContextWindow: 20000}, event.Discard)
+
+	// PromptTokens is a 2.5× replay-aggregated 40000; the real single-request
+	// context is 15000 (< 0.8×20000 = 16000). No compaction should trigger.
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 40000, ContextPromptTokens: 15000})
+	if a.consecutiveCompacts != 0 {
+		t.Fatalf("aggregated prompt must not trigger compaction: consecutiveCompacts=%d", a.consecutiveCompacts)
+	}
+	if len(prov.got) != 0 {
+		t.Fatalf("summarizer called despite single-request prompt under the trigger")
+	}
+
+	// Same aggregate, but the real single-request context crossed the trigger:
+	// compacts.
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 40000, ContextPromptTokens: 17000})
+	if a.consecutiveCompacts != 1 {
+		t.Fatalf("single-request prompt over the trigger must compact: consecutiveCompacts=%d", a.consecutiveCompacts)
+	}
+}
+
+// TestAutoCompactBoundedByBudget pins the issue #8148 fix: auto-compaction gets
+// one bounded whole-pass budget, so a stalled summarizer surfaces as a bounded
+// wait plus a mechanical fold instead of pinning the run loop.
+func TestAutoCompactBoundedByBudget(t *testing.T) {
+	prov := &fakeProvider{hang: true} // stream never sends or closes
+	sess := &Session{Messages: []provider.Message{
+		{Role: provider.RoleSystem, Content: "sys"},
+		{Role: provider.RoleUser, Content: strings.Repeat("a ", 1000)}, // ≈500 tok, beyond the 15-tok keep cap at window 100 → real fold
+		{Role: provider.RoleAssistant, Content: "step one"},
+		{Role: provider.RoleUser, Content: "more"},
+		{Role: provider.RoleAssistant, Content: "step two"},
+		{Role: provider.RoleUser, Content: "next"},
+		{Role: provider.RoleAssistant, Content: "ok"},
+	}}
+	var notices []event.Event
+	a := New(prov, tool.NewRegistry(), sess, Options{
+		ContextWindow: 100, AutoCompactBudget: 50 * time.Millisecond, RecentKeep: 2, ArchiveDir: t.TempDir(),
+	}, event.FuncSink(func(e event.Event) {
+		if e.Kind == event.Notice {
+			notices = append(notices, e)
+		}
+	}))
+
+	start := time.Now()
+	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 80}) // trigger (0.8×100)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("auto-compaction took %v with a 50ms budget; must not hang", elapsed)
+	}
+	folded := false
+	for _, n := range notices {
+		if strings.Contains(n.Text, "folded mechanically") || strings.Contains(n.Detail, "folded mechanically") {
+			folded = true
+		}
+	}
+	if !folded {
+		t.Fatalf("expected a mechanical-fold notice after the budget expired: %+v", notices)
+	}
+}
+
+// TestMaybeCompactNilUsageNoPanic guards the nil-usage path: finalizeSamplingUsage
+// returns nil when a provider emits no usage chunk, and maybeCompact must no-op
+// (issue #8148 regression guard for the ContextPromptTokens reorder).
+func TestMaybeCompactNilUsageNoPanic(t *testing.T) {
+	a := New(&fakeProvider{reply: "- summary"}, tool.NewRegistry(), &Session{Messages: []provider.Message{{Role: provider.RoleSystem, Content: "sys"}}}, Options{ContextWindow: 100}, event.Discard)
+	a.maybeCompact(context.Background(), nil)
+	if a.consecutiveCompacts != 0 {
+		t.Fatalf("nil usage must not trigger compaction")
 	}
 }
 
