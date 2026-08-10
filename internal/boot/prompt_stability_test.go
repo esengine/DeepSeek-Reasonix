@@ -61,25 +61,13 @@ api_key_env = "REASONIX_TEST_KEY_UNSET"
 // firstDivergence returns a small window around the first differing byte so a
 // failure names the drifting prompt section instead of dumping both prompts.
 func firstDivergence(a, b string) string {
-	limit := len(a)
-	if len(b) < limit {
-		limit = len(b)
-	}
+	limit := min(len(b), len(a))
 	i := 0
 	for i < limit && a[i] == b[i] {
 		i++
 	}
-	start := i - 40
-	if start < 0 {
-		start = 0
-	}
-	endA := i + 40
-	if endA > len(a) {
-		endA = len(a)
-	}
-	endB := i + 40
-	if endB > len(b) {
-		endB = len(b)
-	}
+	start := max(i-40, 0)
+	endA := min(i+40, len(a))
+	endB := min(i+40, len(b))
 	return "..." + a[start:endA] + "... vs ..." + b[start:endB] + "..."
 }

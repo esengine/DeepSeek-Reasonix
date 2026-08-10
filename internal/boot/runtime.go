@@ -24,14 +24,18 @@ import (
 // controller plus the extension kernel's frozen view of the same assembly.
 // Snapshot is nil when kernel assembly failed — boot behavior is never
 // allowed to depend on it (see build). Runtime is the snapshot's bound
-// closable set; it holds the extension sidecar Manager when any v1 runtime
+// closable set; it holds the extension sidecar Manager when any v2 runtime
 // package is installed, and its Close is chained into the controller's
 // cleanup so sidecars die with their controller generation.
 type BuildResult struct {
 	Controller *control.Controller
 	Snapshot   *extension.RuntimeSnapshot
 	Runtime    *extension.RuntimeSet
-	// Extensions is the started extension sidecar Manager (nil when no v1
+	// Owner is the session-lineage lifecycle owner. Independent builds receive
+	// independent owners; RebuildFrom reuses the previous owner so only that
+	// lineage's old generation drains.
+	Owner *extension.RuntimeOwner
+	// Extensions is the started extension sidecar Manager (nil when no v2
 	// runtime package is installed). Its lifecycle belongs to Runtime; the
 	// field exists so later stages (and tests) can reach the live clients.
 	Extensions *sidecar.Manager
@@ -52,6 +56,23 @@ type BuildResult struct {
 	// sidecar providers (stage 7). Plugin-namespaced refs route to the owning
 	// sidecar; every other ref resolves through the base resolver.
 	ProviderResolver provider.Resolver
+	// BaseProviderResolver is the pre-sidecar catalog used to re-merge after
+	// a narrow rebuild replaces the Manager (must not re-merge already-merged).
+	BaseProviderResolver provider.Resolver
+	// Plan is the RuntimePlan for this generation (from the previous graph
+	// when Rebuild supplies one; cold start when nil previous).
+	Plan *extension.RuntimePlan
+	// Status is the diagnostic component status snapshot for doctor/UI.
+	Status *extension.RuntimeStatus
+	// Lifecycle tracks component state transitions for this generation.
+	Lifecycle *extension.LifecycleRegistry
+	// Assembly is retained so a subsequent RebuildFrom can skip rediscovery
+	// when the RuntimePlan is no-op or interceptor/UI-only.
+	Assembly *ReusedAssembly
+	// ReusedController is true when a true subgraph rebuild kept the previous
+	// controller pointer (no control.New / BuildRuntime). Callers must not
+	// Close the "old" controller when it is the same pointer as Controller.
+	ReusedController bool
 }
 
 // runtimeGeneration is the process-wide build generation counter. The first
@@ -113,6 +134,11 @@ type extensionBoot struct {
 	session   protocol.SessionContext
 	onWarning func(string)
 	ui        *uihub.Hub
+	// skipPromptStrategy skips system_prompt.build strategy when the RuntimePlan
+	// is a no-op (or does not affect cache), preserving the previous prompt.
+	skipPromptStrategy bool
+	// previousDispatcher reuses an interceptor chain when the plan is no-op.
+	previousDispatcher *dispatch.Dispatcher
 }
 
 func (p extensionBoot) warn(msg string) {
@@ -121,32 +147,20 @@ func (p extensionBoot) warn(msg string) {
 	}
 }
 
-// startExtensionPackages is the one sidecar launch path a build uses (a
-// package-level seam so tests can prove each build starts its packages exactly
-// once — preflight starts them and snapshot assembly reuses the same Manager).
-var startExtensionPackages = sidecar.StartPackages
+// startExtensionPackages is the sidecar launch seam (tests override it).
+// previous+plan adopt Unchanged packages without respawn.
+var startExtensionPackages = sidecar.StartPackagesWithPlan
 
-// preflightExtensionRuntimes starts the installed, enabled v1 runtime packages
-// BEFORE the build resolves its model, so the extension-hosted providers their
-// handshakes declare can serve first-boot model resolution, the executor, the
-// planner, the guardian, and every sub-agent — not just the post-assembly
-// resolver merge. It returns nil (and emits the installed-state warnings, the
-// same ones StartPackages has always surfaced) when no runtime package is
-// installed, keeping the no-extension path byte-identical. A required
-// package's start failure is fatal (*sidecar.RequiredStartError); an optional
-// failure degrades to warnings. When every started package was optional and
-// failed, the empty Manager is retired here and nil is returned — again the
-// pre-sidecar path.
-//
-// The caller owns the returned Manager until the RuntimeSet takes it over (or
-// must close it on every error path in between).
-func preflightExtensionRuntimes(ctx context.Context, home string, ext extensionBoot) (*sidecar.Manager, error) {
+// preflightExtensionRuntimes starts enabled runtime packages before model
+// resolution. Required failures are fatal; optional failures warn. With
+// prev+plan, only Added/Reloaded start and Unchanged are adopted.
+func preflightExtensionRuntimes(ctx context.Context, home string, ext extensionBoot, prev *sidecar.Manager, plan *extension.RuntimePlan) (*sidecar.Manager, error) {
 	if strings.TrimSpace(home) == "" {
 		return nil, nil
 	}
 	packages, loadWarnings := sidecar.LoadRuntimePackages(home)
 	if len(packages) == 0 {
-		// No v1 runtime packages: surface the installed-state warnings exactly
+		// No v2 runtime packages: surface the installed-state warnings exactly
 		// as the in-assembly StartPackages call did, and take the untouched
 		// pre-sidecar path (no processes, no Manager).
 		for _, warning := range loadWarnings {
@@ -161,7 +175,7 @@ func preflightExtensionRuntimes(ctx context.Context, home string, ext extensionB
 	if ext.ui != nil {
 		ui = ext.ui
 	}
-	mgr, warnings, err := startExtensionPackages(ctx, home, ext.session, ui)
+	mgr, warnings, err := startExtensionPackages(ctx, home, ext.session, ui, prev, plan)
 	for _, warning := range warnings {
 		ext.warn(warning)
 	}
@@ -238,9 +252,39 @@ func assembleLegacySnapshot(ctx context.Context, in legacyAssembly, generation u
 				return sidecarContribs, nil
 			},
 		})
-		b.WithActivator(func(_ context.Context, snap *extension.RuntimeSnapshot) (*extension.RuntimeSet, error) {
+		b.WithActivator(func(actx context.Context, snap *extension.RuntimeSnapshot) (*extension.RuntimeSet, error) {
 			rs := extension.NewRuntimeSet(snap.Generation())
-			rs.Add(managed)
+			// Track the sidecar manager as a cancelable generation effect so
+			// mid-activation failure and drain share one EffectScope owner.
+			if err := rs.Track(extension.Effect{
+				ID:        "sidecar-manager",
+				Owner:     "boot",
+				Component: "extension-runtimes",
+				Class:     extension.Cancelable,
+				Dispose: func(ctx context.Context) error {
+					_ = ctx
+					return managed.Close()
+				},
+			}); err != nil {
+				_ = managed.Close()
+				return nil, err
+			}
+			// UI hub binding is a reversible generation effect (rebind is free).
+			if err := extension.TrackUIHub(rs.Scope(), snap.Generation()); err != nil {
+				_ = rs.Close()
+				return nil, err
+			}
+			// Per-client MCP/process handles stay under the manager dispose above;
+			// track an event-subscription style teardown for each live client so
+			// EffectScope inventory matches the live process set for doctor.
+			for _, client := range managed.Clients() {
+				pluginID := client.PluginID()
+				_ = extension.TrackEventSubscription(rs.Scope(), "sidecar:"+pluginID, func() error {
+					// Manager.Close already tears down clients; this is inventory.
+					return nil
+				})
+			}
+			_ = actx
 			return rs, nil
 		})
 
@@ -257,21 +301,26 @@ func assembleLegacySnapshot(ctx context.Context, in legacyAssembly, generation u
 		clients := sidecarClientResolver(managed)
 		dispatchOpts := dispatch.Options{Warn: ext.warn}
 		// system_prompt.build strategy: the slot's owner rules on the
-		// composed prompt before the snapshot freezes. The dispatcher used
-		// here needs no chain — RunStrategy consults only the replacements
-		// and clients.
-		if _, owned := claims[extension.SlotSystemPrompt]; owned {
-			strategyDispatcher := dispatch.New(nil, claims, clients, required, dispatchOpts)
-			payload := dispatch.SystemPromptPayload{Prompt: prompt, WorkspaceRoot: ext.session.WorkspaceRoot}
-			if err := strategyDispatcher.RunStrategy(ctx, extension.SlotSystemPrompt, extension.PointSystemPromptBuild, &payload); err != nil {
-				_ = managed.Close()
-				return nil, nil, nil, err
+		// composed prompt before the snapshot freezes. Skipped on no-op plans
+		// so CacheHash stays stable across rebuilds.
+		if !ext.skipPromptStrategy {
+			if _, owned := claims[extension.SlotSystemPrompt]; owned {
+				strategyDispatcher := dispatch.New(nil, claims, clients, required, dispatchOpts)
+				payload := dispatch.SystemPromptPayload{Prompt: prompt, WorkspaceRoot: ext.session.WorkspaceRoot}
+				if err := strategyDispatcher.RunStrategy(ctx, extension.SlotSystemPrompt, extension.PointSystemPromptBuild, &payload); err != nil {
+					_ = managed.Close()
+					return nil, nil, nil, err
+				}
+				prompt = payload.Prompt
 			}
-			prompt = payload.Prompt
 		}
 
 		postFreeze = func(snap *extension.RuntimeSnapshot) {
-			dispatcher = dispatch.New(snap.InterceptorChain(), snap.Replacements(), clients, required, dispatchOpts)
+			if ext.previousDispatcher != nil && ext.skipPromptStrategy {
+				dispatcher = ext.previousDispatcher
+			} else {
+				dispatcher = dispatch.New(snap.InterceptorChain(), snap.Replacements(), clients, required, dispatchOpts)
+			}
 			dispatcher.Event(extension.PointSystemPromptBuild, dispatch.SystemPromptPayload{
 				Prompt: prompt, WorkspaceRoot: ext.session.WorkspaceRoot,
 			})
@@ -426,7 +475,7 @@ func legacyContributions(in legacyAssembly) []extension.Contribution {
 			// The kernel keys providers on <name>/<model> refs; legacy
 			// catalogs can carry a bare provider name or a model that itself
 			// contains a slash. Those entries stay resolvable through the
-			// ordinary provider path but cannot be catalogued in a v1
+			// ordinary provider path but cannot be catalogued in a v2
 			// snapshot.
 			continue
 		}

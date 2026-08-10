@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"reasonix/internal/plugin"
 )
@@ -63,12 +66,19 @@ func writeMCPServer(b *strings.Builder, width int, s plugin.ServerStatus, prompt
 		transport = "unknown"
 	}
 	meta := fmt.Sprintf("(%s)  %s · %s · %s", transport, countText(s.Tools, "tool"), countText(len(prompts), "prompt"), countText(len(resources), "resource"))
+	if src := sanitizeExternalDisplayText(s.ConfigSource); src != "" {
+		meta += " · source=" + src
+	}
 	invalidTools := invalidMCPTools(s.ToolList)
+	availableTools := validMCPTools(s.ToolList)
 	if len(invalidTools) > 0 {
 		meta += " · " + countText(len(invalidTools), "unavailable tool")
 	}
-	name := viewCompactText(s.Name, viewBudget(width, 4+2+1+visibleWidth(meta)))
+	name := viewCompactText(sanitizeExternalDisplayText(s.Name), viewBudget(width, 4+2+1+visibleWidth(meta)))
 	fmt.Fprintf(b, "    %s %s %s\n", accent("✓"), bold(name), viewMeta(meta))
+	if len(availableTools) > 0 {
+		writeMCPToolList(b, width, s, availableTools)
+	}
 	if len(prompts) > 0 {
 		writeMCPPromptList(b, width, prompts)
 	}
@@ -77,16 +87,40 @@ func writeMCPServer(b *strings.Builder, width int, s plugin.ServerStatus, prompt
 	}
 	if len(invalidTools) > 0 {
 		b.WriteString(viewSubhead("    unavailable tools") + "\n")
-		limit := len(invalidTools)
-		if limit > mcpMaxItemsPerSection {
-			limit = mcpMaxItemsPerSection
-		}
+		limit := min(len(invalidTools), mcpMaxItemsPerSection)
 		for _, t := range invalidTools[:limit] {
-			writeMCPItem(b, width, "      ", t.Name, t.SchemaError)
+			writeMCPItem(b, width, "      ", sanitizeExternalDisplayText(t.Name), sanitizeExternalDisplayText(t.SchemaError))
 		}
 		if extra := len(invalidTools) - limit; extra > 0 {
 			fmt.Fprintf(b, "    %s\n", viewMore(extra, "unavailable tools"))
 		}
+	}
+}
+
+// writeMCPToolList lists valid connected tools under the server, tagging the
+// config-plane source when known so operators can trace a tool back to its
+// registration (#6578 / Integration D/E). Callers pass pre-filtered tools
+// (SchemaError == "") so quarantined tools only appear under unavailable.
+func writeMCPToolList(b *strings.Builder, width int, s plugin.ServerStatus, tools []plugin.ToolInfo) {
+	if len(tools) == 0 {
+		return
+	}
+	b.WriteString(viewSubhead("    tools") + "\n")
+	limit := min(len(tools), mcpMaxItemsPerSection)
+	src := sanitizeExternalDisplayText(s.ConfigSource)
+	for _, t := range tools[:limit] {
+		detail := sanitizeExternalDisplayText(t.Description)
+		if src != "" {
+			if detail != "" {
+				detail = detail + " · source=" + src
+			} else {
+				detail = "source=" + src
+			}
+		}
+		writeMCPItem(b, width, "      ", sanitizeExternalDisplayText(t.Name), detail)
+	}
+	if extra := len(tools) - limit; extra > 0 {
+		fmt.Fprintf(b, "    %s\n", viewMore(extra, "tools"))
 	}
 }
 
@@ -100,24 +134,31 @@ func invalidMCPTools(tools []plugin.ToolInfo) []plugin.ToolInfo {
 	return out
 }
 
+func validMCPTools(tools []plugin.ToolInfo) []plugin.ToolInfo {
+	out := make([]plugin.ToolInfo, 0, len(tools))
+	for _, t := range tools {
+		if t.SchemaError == "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 func writeMCPFailure(b *strings.Builder, width int, f plugin.Failure) {
 	transport := f.Transport
 	if transport == "" {
 		transport = "unknown"
 	}
-	meta := fmt.Sprintf("(%s)  %s", transport, oneLineText(f.Error))
-	name := viewCompactText(f.Name, viewBudget(width, 4+2+1+visibleWidth(meta)))
+	meta := fmt.Sprintf("(%s)  %s", transport, sanitizeExternalDisplayText(f.Error))
+	name := viewCompactText(sanitizeExternalDisplayText(f.Name), viewBudget(width, 4+2+1+visibleWidth(meta)))
 	fmt.Fprintf(b, "    %s %s %s\n", yellow("!"), bold(name), viewMeta(viewCompactText(meta, viewBudget(width, 10+visibleWidth(name)))))
 }
 
 func writeMCPPromptList(b *strings.Builder, width int, prompts []plugin.Prompt) {
 	b.WriteString(viewSubhead("    prompts") + "\n")
-	limit := len(prompts)
-	if limit > mcpMaxItemsPerSection {
-		limit = mcpMaxItemsPerSection
-	}
+	limit := min(len(prompts), mcpMaxItemsPerSection)
 	for _, p := range prompts[:limit] {
-		writeMCPItem(b, width, "      ", "/"+p.Name, p.Description)
+		writeMCPItem(b, width, "      ", "/"+sanitizeExternalDisplayText(p.Name), sanitizeExternalDisplayText(p.Description))
 	}
 	if extra := len(prompts) - limit; extra > 0 {
 		fmt.Fprintf(b, "    %s\n", viewMore(extra, "prompts"))
@@ -126,23 +167,21 @@ func writeMCPPromptList(b *strings.Builder, width int, prompts []plugin.Prompt) 
 
 func writeMCPResourceList(b *strings.Builder, width int, resources []plugin.Resource) {
 	b.WriteString(viewSubhead("    resources") + "\n")
-	limit := len(resources)
-	if limit > mcpMaxItemsPerSection {
-		limit = mcpMaxItemsPerSection
-	}
+	limit := min(len(resources), mcpMaxItemsPerSection)
 	for _, r := range resources[:limit] {
-		label := strings.TrimSpace(r.Name)
+		label := sanitizeExternalDisplayText(r.Name)
 		if label == "" {
-			label = strings.TrimSpace(r.Description)
+			label = sanitizeExternalDisplayText(r.Description)
 		}
 		if r.MimeType != "" {
+			mime := sanitizeExternalDisplayText(r.MimeType)
 			if label == "" {
-				label = r.MimeType
+				label = mime
 			} else {
-				label += " [" + r.MimeType + "]"
+				label += " [" + mime + "]"
 			}
 		}
-		writeMCPItem(b, width, "      ", "@"+r.Server+":"+r.URI, label)
+		writeMCPItem(b, width, "      ", "@"+sanitizeExternalDisplayText(r.Server)+":"+sanitizeExternalDisplayText(r.URI), label)
 	}
 	if extra := len(resources) - limit; extra > 0 {
 		fmt.Fprintf(b, "    %s\n", viewMore(extra, "resources"))
@@ -150,8 +189,8 @@ func writeMCPResourceList(b *strings.Builder, width int, resources []plugin.Reso
 }
 
 func writeMCPItem(b *strings.Builder, width int, indent, ref, desc string) {
-	desc = oneLineText(desc)
-	ref = oneLineText(ref)
+	desc = sanitizeExternalDisplayText(desc)
+	ref = sanitizeExternalDisplayText(ref)
 	available := viewBudget(width, visibleWidth(indent))
 	if desc == "" || available < 30 {
 		b.WriteString(indent + compactMiddle(ref, available))
@@ -172,8 +211,34 @@ func writeMCPItem(b *strings.Builder, width int, indent, ref, desc string) {
 	b.WriteByte('\n')
 }
 
+// sanitizeExternalDisplayText strips ANSI/OSC/C0 control sequences from text
+// that originated outside Reasonix (MCP tool/prompt/resource fields, source
+// labels, failure messages) before it is rendered into the TUI. TrimSpace and
+// Fields alone leave CSI sequences intact and would let a malicious MCP rewrite
+// the terminal, spoof chrome, or poke the clipboard.
+func sanitizeExternalDisplayText(s string) string {
+	s = ansi.Strip(s)
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\t' || r == '\n' || r == '\r':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// Drop remaining C0 controls and DEL.
+		case r >= 0x80 && r <= 0x9f:
+			// Drop C1 controls (including after partial decode).
+		case unicode.Is(unicode.Cc, r):
+			// Other control categories.
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
 func oneLineText(s string) string {
-	return strings.Join(strings.Fields(s), " ")
+	return sanitizeExternalDisplayText(s)
 }
 
 func countText(n int, noun string) string {

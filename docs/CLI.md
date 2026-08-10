@@ -138,7 +138,7 @@ echo "explain this code" | reasonix run
 
 `reasonix run` keeps the normal streamed terminal presentation unless `-p` or a
 structured output format is selected. It also accepts `--model`, `--profile`,
-`--max-steps`, `--effort`, `--dir`, `--add-dir`, `--continue`, `--resume PATH`,
+`--max-steps`, `--effort`, `--dir`, `--add-dir`, `--continue`, `--resume QUERY`,
 `--copy`, `--allowed-tools`, `--permission-mode`, and `--auto` / `-y` (an alias
 for `--permission-mode auto`).
 
@@ -156,6 +156,22 @@ reasonix run --ablate evidence,planner --metrics run.json "fix the failing test"
 
 This is a measurement tool, not a tuning knob: switching a subsystem off makes
 Reasonix worse at the work it was added for.
+
+### Trajectory recording
+
+`--trajectory PATH` appends the run's full event stream — tool dispatches and
+results with absolute start/end times, reasoning, retries, readiness and
+recovery decisions — as one timestamped, sequenced JSONL record per event, so
+a run can be replayed and its time attributed offline (tool execution vs. the
+model thinking between calls). Records reuse the shared `eventwire` JSON
+contract under an `event` key, wrapped in `schema_version`, `seq`, and `ts`
+(unix ms). Every completed line survives a killed run. Unlike `--events-jsonl`,
+the file contains prompts, tool arguments, and reasoning: treat it with the
+same care as a session transcript.
+
+```sh
+reasonix run --metrics run.json --trajectory run.trajectory.jsonl "fix the failing test"
+```
 
 ### Output formats
 
@@ -286,9 +302,10 @@ reasonix --resume provider-config --copy
 - `--copy` leaves the original transcript untouched and continues in a new
   writable session. Use it when another Reasonix process owns the original.
 
-For one-shot runs, `reasonix run --resume PATH "task"` accepts a session file
-path. Session leases prevent the desktop app and CLI from writing the same
-transcript concurrently.
+For one-shot runs, `reasonix run --resume QUERY "task"` accepts a session file
+path, a session ID, or an opaque machine session ID from `--events-jsonl` /
+`reasonix session show --json`. Session leases prevent the desktop app and CLI
+from writing the same transcript concurrently.
 
 ## Permissions
 

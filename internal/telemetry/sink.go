@@ -6,6 +6,7 @@ import (
 	"net"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,6 +131,26 @@ func (s *sink) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	event.RecordReadinessAudit(s.inner, a)
 }
 
+func (s *sink) RecordContractShadow(a event.ContractShadowAudit) {
+	event.RecordContractShadow(s.inner, a)
+}
+
+func (s *sink) RecordCompletionReport(a event.CompletionReportAudit) {
+	event.RecordCompletionReport(s.inner, a)
+}
+
+func (s *sink) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	event.RecordOutcomeProgress(s.inner, sample)
+}
+
+func (s *sink) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
+	event.RecordDelegationAdmission(s.inner, a)
+}
+
+func (s *sink) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(s.inner, a)
+}
+
 func (s *sink) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 	add(s.counts, "tool_call_reasoning_recovery", string(a.Kind), 1)
 	event.RecordProtocolRecovery(s.inner, a)
@@ -217,10 +238,8 @@ func safeBucket(value, fallback string) string {
 
 func enumBucket(value string, allowed ...string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
-	for _, item := range allowed {
-		if value == item {
-			return value
-		}
+	if slices.Contains(allowed, value) {
+		return value
 	}
 	return "other"
 }

@@ -1,0 +1,4 @@
+prompt = "Each module under clients/ computes a retry budget from policies.py. Determine which client ends up with the LARGEST budget and write only that client's module name (without .py) to answer.txt."
+class = "repo-exploration"
+max_steps = 25
+timeout_sec = 420

@@ -804,8 +804,15 @@ ok(
   "title-bar double click zooms on macOS as well as frameless Windows",
 );
 ok(
-  /handleChromeTitlebarDoubleClick[\s\S]{0,400}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
+  /handleChromeTitlebarDoubleClick[\s\S]{0,700}?closest\("button, input, textarea, select, a, \[role='button'\], \[role='tab'\], \.windows-window-controls"\)/.test(appSource),
   "title-bar double click still ignores interactive controls",
+);
+ok(
+  /function isMacOSWorkbenchSidebarTitlebar[\s\S]{0,500}?closest\("\.sidebar--workbench"\)[\s\S]{0,500}?MACOS_WORKBENCH_TITLEBAR_HEIGHT/.test(appSource) &&
+    /handleChromeTitlebarDoubleClick[\s\S]{0,400}?isMacOSWorkbenchSidebarTitlebar\(target, event\.clientY, desktopPlatform\)/.test(appSource) &&
+    !appSource.includes("window.runtime?.WindowToggleMaximise") &&
+    !bridgeSource.includes("WindowToggleMaximise?(): void;"),
+  "macOS workbench sidebar titlebar reuses the centralized zoom path",
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

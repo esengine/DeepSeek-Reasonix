@@ -55,6 +55,49 @@ func TestRenderLeadsWithCostPerSolvedAndFailureClasses(t *testing.T) {
 	}
 }
 
+// A killed agent writes no metrics. Counting that run as a zero-cost solve
+// would make every published per-task figure cheaper than the truth.
+func TestUnaccountedSolvesDoNotDeflateCostPerSolved(t *testing.T) {
+	results := []result{
+		{task: task{ID: "accounted"}, Passed: true, WallMs: 1000,
+			runMetrics: runMetrics{Outcome: "success", Cost: 0.02, Currency: "$", PromptTokens: 1000}},
+		{task: task{ID: "killed"}, Passed: true, WallMs: 1800000, Unaccounted: true,
+			runMetrics: runMetrics{Outcome: "timeout"}},
+	}
+	out := renderBody(results)
+
+	if !strings.Contains(out, "**Solved:** 2/2") {
+		t.Error("both solves must still count toward the solve rate")
+	}
+	if !strings.Contains(out, "**Cost per solved:** $ 0.0200") {
+		t.Errorf("cost per solved must divide by accounted solves only:\n%s", out)
+	}
+	if !strings.Contains(out, "Accounting incomplete for 1 of 2 instances") {
+		t.Errorf("the gap must be disclosed, not hidden:\n%s", out)
+	}
+}
+
+func TestRenderShowsCacheResetsByCause(t *testing.T) {
+	out := render([]result{
+		{task: task{ID: "a"}, Passed: true, WallMs: 1000,
+			runMetrics: runMetrics{Outcome: "success", PrefixChangeReasonCounts: map[string]int{"compact_auto": 1, "tools": 2}}},
+		{task: task{ID: "b"}, Passed: true, WallMs: 1000,
+			runMetrics: runMetrics{Outcome: "success", PrefixChangeReasonCounts: map[string]int{"snip": 3}}},
+	})
+	if want := "**Cache resets by cause:** compact_auto ×1 · snip ×3 · tools ×2"; !strings.Contains(out, want) {
+		t.Errorf("report missing %q:\n%s", want, out)
+	}
+}
+
+func TestRenderOmitsCacheResetsLineWhenNoReasonsReported(t *testing.T) {
+	out := render([]result{
+		{task: task{ID: "a"}, Passed: true, WallMs: 1000, runMetrics: runMetrics{Outcome: "success"}},
+	})
+	if strings.Contains(out, "Cache resets by cause") {
+		t.Errorf("report should omit the cache-resets line when no run reported any reasons:\n%s", out)
+	}
+}
+
 func TestDurFormatsSubMinuteAndMinuteScale(t *testing.T) {
 	if got := dur(4500); got != "4.5s" {
 		t.Errorf("dur(4500) = %q, want 4.5s", got)

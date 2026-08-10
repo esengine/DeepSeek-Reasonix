@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"reasonix/internal/agent"
-	"reasonix/internal/autoresearch"
 	"reasonix/internal/billing"
 	"reasonix/internal/checkpoint"
 	"reasonix/internal/command"
@@ -83,6 +82,8 @@ type Approvals interface {
 	AnswerQuestion(id string, answers []event.AskAnswer)
 	Ask(ctx context.Context, questions []event.AskQuestion) ([]event.AskAnswer, error)
 	ReplayPendingPrompts()
+	ReplayPendingPromptsTo(sink event.Sink)
+	ReplayPendingPromptsWith(sinkFactory func() event.Sink)
 	PendingPrompt() bool
 	EnableInteractiveApproval()
 	ToolApprovalMode() string
@@ -99,16 +100,14 @@ type Goals interface {
 	Goal() string
 	GoalStatus() string
 	SetGoal(goal string)
+	// SetGoalWithResearchMode is retained for deprecated CLI budget flags. The
+	// mode is translated at the boundary and is not stored in the Goal runtime.
 	SetGoalWithResearchMode(goal string, researchMode GoalResearchMode)
 	ResumeGoal() bool
 	PauseGoal() bool
 	GoalRuntime() GoalRuntimeView
 	GoalStrict(strict bool)
 	ClearGoal()
-	AutoResearchSummary() (*autoresearch.Summary, bool)
-	AutoResearchList() ([]autoresearch.Summary, bool)
-	AutoResearchFindings(limit int) ([]autoresearch.Finding, bool)
-	RecordAutoResearchEvidence(criterionID string, input AutoResearchEvidenceInput) error
 	ResetPlannerSession()
 	PlanMode() bool
 	SetPlanMode(v bool)
@@ -210,6 +209,10 @@ type SessionPersistence interface {
 	Snapshot() error
 	SnapshotForShutdown() error
 	SnapshotActivity() error
+	// SessionHasUnsavedChanges reports whether the in-memory transcript is
+	// newer than the durable session file. Frontends use this to avoid
+	// replacing a failed/contended save with stale disk history.
+	SessionHasUnsavedChanges() bool
 	SessionCache() (hit, miss int)
 	BeginDestroySession(sessionPath string) SessionDestroyHandle
 	CloseAfterDestroy()

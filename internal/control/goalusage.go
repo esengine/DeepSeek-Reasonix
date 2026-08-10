@@ -11,10 +11,10 @@ import (
 // goalUsageTee wraps the controller's event sink and attributes billable usage
 // events to the active goal turn's recorder, so every model request under the
 // same Goal scope — executor, planner, subagent, compaction, classifier,
-// capability router, recovery reviewer, and goal evaluator — counts against the
-// goal's token budget. Title generation and unrelated background calls are
-// excluded. The tee forwards every event unchanged, so frontends see the same
-// stream they would without accounting.
+// capability router, recovery reviewer, and goal evaluator — accumulates into
+// the goal's observational token total. There is no token hard limit; the
+// total is for display and diagnostics only. Title generation and unrelated
+// background calls are excluded. The tee forwards every event unchanged.
 type goalUsageTee struct {
 	inner event.Sink
 	mu    sync.Mutex
@@ -39,7 +39,7 @@ func (t *goalUsageTee) Emit(e event.Event) {
 	if t == nil {
 		return
 	}
-	if e.Kind == event.Usage && e.Usage != nil && !e.Usage.BudgetAccounted && e.UsageSource != event.UsageSourceTitle {
+	if e.Kind == event.Usage && e.Usage != nil && e.UsageSource != event.UsageSourceTitle {
 		t.mu.Lock()
 		rec := t.active
 		t.mu.Unlock()
@@ -72,6 +72,37 @@ func (t *goalUsageTee) RecordReadinessAudit(a evidence.ReadinessAudit) {
 	if rs, ok := t.inner.(event.ReadinessAuditSink); ok {
 		rs.RecordReadinessAudit(a)
 	}
+}
+
+// RecordOutcomeProgress forwards the shadow outcome sample unchanged.
+func (t *goalUsageTee) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	event.RecordOutcomeProgress(t.inner, sample)
+}
+
+// RecordDelegationAdmission forwards the shadow admission verdict unchanged.
+func (t *goalUsageTee) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
+	event.RecordDelegationAdmission(t.inner, a)
+}
+
+// RecordMemoryRecall forwards the recall audit unchanged.
+func (t *goalUsageTee) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(t.inner, a)
+}
+
+// RecordContractShadow forwards the shadow contract audit unchanged.
+func (t *goalUsageTee) RecordContractShadow(a event.ContractShadowAudit) {
+	if t == nil || t.inner == nil {
+		return
+	}
+	event.RecordContractShadow(t.inner, a)
+}
+
+// RecordCompletionReport forwards the completion report audit unchanged.
+func (t *goalUsageTee) RecordCompletionReport(a event.CompletionReportAudit) {
+	if t == nil || t.inner == nil {
+		return
+	}
+	event.RecordCompletionReport(t.inner, a)
 }
 
 // setActiveRecorder binds the current goal turn's recorder (nil clears it).

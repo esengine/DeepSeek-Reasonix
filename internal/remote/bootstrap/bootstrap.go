@@ -387,8 +387,8 @@ func resolveWorkspace(ctx context.Context, fs *sftpfs.FS, workspace, home string
 	if workspace == "~" {
 		return home, nil
 	}
-	if strings.HasPrefix(workspace, "~/") {
-		return strings.TrimRight(home, "/") + "/" + strings.TrimPrefix(workspace, "~/"), nil
+	if after, ok0 := strings.CutPrefix(workspace, "~/"); ok0 {
+		return strings.TrimRight(home, "/") + "/" + after, nil
 	}
 	if strings.HasPrefix(workspace, "/") {
 		return workspace, nil

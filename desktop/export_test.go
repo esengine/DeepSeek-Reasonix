@@ -81,7 +81,6 @@ func TestExportErrorsDoNotExposeSelectedDirectory(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		test := test
 		t.Run(test.name, func(t *testing.T) {
 			err := test.run(test.path)
 			if err == nil {
@@ -290,7 +289,6 @@ func TestConcurrentMultipartExportsHaveSingleCompleteWinner(t *testing.T) {
 	var ready sync.WaitGroup
 	ready.Add(len(batches))
 	for _, batch := range batches {
-		batch := batch
 		go func() {
 			ready.Done()
 			<-start

@@ -17,7 +17,7 @@ import (
 	"reasonix/internal/textutil"
 )
 
-// ---- list_sessions tool -----------------------------------------------------
+// list_sessions tool
 
 type listSessionsTool struct {
 	sessionDir string
@@ -63,7 +63,7 @@ func (t *listSessionsTool) Execute(_ context.Context, _ json.RawMessage) (string
 	return b.String(), nil
 }
 
-// ---- read_session tool ------------------------------------------------------
+// read_session tool
 
 type readSessionTool struct {
 	sessionDir string
@@ -198,7 +198,7 @@ loop:
 	return b.String(), nil
 }
 
-// ---- helpers ----------------------------------------------------------------
+// helpers
 
 // truncateRunes preserves the historical name but truncates by grapheme
 // clusters so previews do not split combined emoji or other visible characters.
@@ -212,14 +212,14 @@ func truncateRunes(s string, max int) string {
 func modelFromPath(path string) string {
 	name := filepath.Base(path)
 	name = strings.TrimSuffix(name, ".jsonl")
-	firstDash := strings.Index(name, "-")
-	if firstDash < 0 {
+	_, after, ok := strings.Cut(name, "-")
+	if !ok {
 		return "(unknown)"
 	}
-	rest := name[firstDash+1:]
-	secondDash := strings.Index(rest, "-")
-	if secondDash < 0 {
+	rest := after
+	_, after0, ok0 := strings.Cut(rest, "-")
+	if !ok0 {
 		return rest
 	}
-	return rest[secondDash+1:]
+	return after0
 }

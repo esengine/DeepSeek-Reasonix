@@ -558,7 +558,6 @@ console.log("capabilities panel MCP actions");
   await refreshStatus();
   await waitFor("sign-in action", () => Boolean(findButton("Sign in")));
   ok(!findButton("Review changes"), "OAuth failure does not expose a removed change-review action");
-
   servers = servers.map((item) => ({
     ...item,
     status: "failed",

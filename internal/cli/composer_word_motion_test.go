@@ -19,6 +19,7 @@ func TestComposerWordMotionAcceptsCtrlArrows(t *testing.T) {
 	}{
 		{"forward", ti.KeyMap.WordForward.Keys(), "ctrl+right", "alt+right"},
 		{"backward", ti.KeyMap.WordBackward.Keys(), "ctrl+left", "alt+left"},
+		{"delete-backward", ti.KeyMap.DeleteWordBackward.Keys(), "ctrl+backspace", "alt+backspace"},
 	} {
 		if !slices.Contains(tc.keys, tc.ctrl) {
 			t.Errorf("word %s is missing %s: %v", tc.motion, tc.ctrl, tc.keys)

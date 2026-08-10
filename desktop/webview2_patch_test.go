@@ -98,4 +98,65 @@ func TestWebView2PatchWiring(t *testing.T) {
 	if !proxyIsolationArgDefined || !proxyIsolationArgApplied {
 		t.Fatal("patched WebView2 must pass --no-proxy-server to the browser process")
 	}
+
+	recoveryPolicyDefined := false
+	recoveryPolicyApplied := false
+	nativeReloadApplied := false
+	for _, declaration := range parsed.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if fn.Name.Name == "shouldReloadFailedRenderer" {
+			recoveryPolicyDefined = true
+		}
+		if fn.Name.Name != "ProcessFailed" || fn.Body == nil {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			selector, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			switch selector.Sel.Name {
+			case "shouldReloadFailedRenderer":
+				recoveryPolicyApplied = true
+			case "Reload":
+				nativeReloadApplied = true
+			}
+			return true
+		})
+	}
+	if !recoveryPolicyDefined || !recoveryPolicyApplied || !nativeReloadApplied {
+		t.Fatal("patched WebView2 must throttle and natively reload failed main renderers")
+	}
+
+	coreFile := filepath.Join("third_party", "go-webview2", "pkg", "edge", "corewebview2.go")
+	coreParsed, err := parser.ParseFile(token.NewFileSet(), coreFile, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloadWrapperDefined := false
+	reloadVTableApplied := false
+	for _, declaration := range coreParsed.Decls {
+		fn, ok := declaration.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "Reload" || fn.Recv == nil || fn.Body == nil {
+			continue
+		}
+		reloadWrapperDefined = true
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			selector, ok := node.(*ast.SelectorExpr)
+			if ok && selector.Sel.Name == "Reload" {
+				reloadVTableApplied = true
+			}
+			return true
+		})
+	}
+	if !reloadWrapperDefined || !reloadVTableApplied {
+		t.Fatal("patched WebView2 must expose ICoreWebView2.Reload through the native COM vtable")
+	}
 }

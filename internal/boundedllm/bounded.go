@@ -126,7 +126,7 @@ func Call(ctx context.Context, cfg Config, system, evidence string) (string, err
 		}
 	}()
 
-	ch, err := provider.StreamWithRequestBudget(callCtx, cfg.Provider, req)
+	ch, err := cfg.Provider.Stream(callCtx, req)
 	if err != nil {
 		return "", err
 	}

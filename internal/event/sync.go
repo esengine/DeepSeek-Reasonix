@@ -55,3 +55,43 @@ func (s *syncSink) RecordProtocolRecovery(a ProtocolRecoveryAudit) {
 		rs.RecordProtocolRecovery(a)
 	}
 }
+
+func (s *syncSink) RecordContractShadow(a ContractShadowAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rs, ok := s.inner.(ContractShadowAuditSink); ok {
+		rs.RecordContractShadow(a)
+	}
+}
+
+func (s *syncSink) RecordCompletionReport(a CompletionReportAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if rs, ok := s.inner.(CompletionReportAuditSink); ok {
+		rs.RecordCompletionReport(a)
+	}
+}
+
+func (s *syncSink) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if op, ok := s.inner.(OutcomeProgressSink); ok {
+		op.RecordOutcomeProgress(sample)
+	}
+}
+
+func (s *syncSink) RecordMemoryRecall(a MemoryRecallAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if mr, ok := s.inner.(MemoryRecallSink); ok {
+		mr.RecordMemoryRecall(a)
+	}
+}
+
+func (s *syncSink) RecordDelegationAdmission(a DelegationAdmissionAudit) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if da, ok := s.inner.(DelegationAdmissionSink); ok {
+		da.RecordDelegationAdmission(a)
+	}
+}

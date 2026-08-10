@@ -15,6 +15,8 @@ import (
 	"hash/fnv"
 	"io"
 	"log/slog"
+	"maps"
+	"net/http"
 	"reflect"
 	"regexp"
 	"sort"
@@ -130,16 +132,15 @@ type Spec struct {
 	LauncherLocator         string
 	LauncherResolvedVersion string
 	LauncherDigest          string
-	// ProcessMode selects how an authorized stdio MCP process is launched.
-	// Empty defaults to host (trusted host process, no command sandbox).
-	// confined is reserved for internal managed deployments and tests; it is
-	// never exposed in common settings and never used as an automatic fallback.
+	// ProcessMode selects host mode (default) or confined mode, which is reserved
+	// for internal managed deployments and tests, never an automatic fallback.
 	ProcessMode MCPProcessMode
 	// Sandbox is only applied when ProcessMode is confined. Host-mode servers
 	// keep private state/cache/temp dirs without wrapping the process in the
 	// agent command sandbox.
-	Sandbox  sandbox.Spec
-	StateDir string
+	Sandbox         sandbox.Spec
+	StateDir        string
+	OAuthHTTPClient *http.Client
 	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
 	// raw name before namespacing. For example, StripRawPrefix="server_" turns
 	// "server_search" into "search", yielding "mcp__search__search" instead of
@@ -190,6 +191,10 @@ type Host struct {
 	// discovered tools without issuing concurrent tools/list calls.
 	spawningMu sync.Mutex
 	spawning   map[string]*spawnAttempt
+
+	// proxies holds stable per-server backends for rolling replacement without
+	// changing provider-visible tool prefixes (spatiotemporal composability).
+	proxies map[string]*serverProxy
 
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
@@ -390,8 +395,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				phaseADur := recordedPhaseADur()
 				cancelStartup()
 				if !p.SkipPersistence {
-					h.bgWrites.Add(1)
-					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+					h.bgWrites.Go(func() { ; _ = RecordStartup(spec.Name, phaseADur) })
 				}
 				ch <- result{idx: idx, spec: spec, err: fmt.Errorf("start plugin %q: %w", spec.Name, err)}
 				return
@@ -402,8 +406,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 				phaseADur := recordedPhaseADur()
 				cancelStartup()
 				if !p.SkipPersistence {
-					h.bgWrites.Add(1)
-					go func() { defer h.bgWrites.Done(); _ = RecordStartup(spec.Name, phaseADur) }()
+					h.bgWrites.Go(func() { ; _ = RecordStartup(spec.Name, phaseADur) })
 				}
 				c.close()
 				err = newStartupFailure("tools/list", phaseAStart, c.startupStderr(), err)
@@ -418,9 +421,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 			phaseADur := recordedPhaseADur()
 			cancelStartup()
 			if !p.SkipPersistence {
-				h.bgWrites.Add(1)
-				go func() {
-					defer h.bgWrites.Done()
+				h.bgWrites.Go(func() {
 					_ = RecordStartup(spec.Name, phaseADur)
 					_ = SaveCachedSchema(spec.Name, CachedSchema{
 						CacheKey: SchemaCacheKey(spec),
@@ -431,7 +432,7 @@ func Start(ctx context.Context, specs []Spec, p StartPolicy) (*Host, []tool.Tool
 						},
 						Tools: cacheableToolsOf(ts),
 					})
-				}()
+				})
 			}
 
 			// Prompts and resources are deferred to StartPhaseB so the boot path
@@ -493,11 +494,17 @@ func (h *Host) Close() {
 	}
 	h.deferredWG.Wait()
 
-	h.mu.RLock()
-	clients := append([]*Client(nil), h.clients...) // snapshot; close outside the lock
-	h.mu.RUnlock()
+	h.mu.Lock()
+	clients := append([]*Client(nil), h.clients...)
+	proxies := h.proxies
+	h.proxies = nil
+	h.clients = nil
+	h.mu.Unlock()
+	closeServerProxies(proxies)
 	for _, c := range clients {
-		c.close()
+		if c != nil && c.t != nil {
+			c.close()
+		}
 	}
 	h.bgWrites.Wait() // drain detached stats/schema writers before returning
 }
@@ -506,11 +513,9 @@ func (h *Host) Close() {
 // Callers must enqueue before their Close-drained startup owner completes, so
 // Close cannot begin waiting before the WaitGroup increment is visible.
 func (h *Host) queueBackgroundWrite(write func()) {
-	h.bgWrites.Add(1)
-	go func() {
-		defer h.bgWrites.Done()
+	h.bgWrites.Go(func() {
 		write()
-	}()
+	})
 }
 
 // StartPhaseB asynchronously fetches the auxiliary surfaces (prompts and
@@ -647,11 +652,15 @@ type ToolInfo struct {
 type ServerStatus struct {
 	Name      string
 	Transport string
-	Tools     int
-	Prompts   int
-	Resources int
-	HasTools  bool
-	ToolList  []ToolInfo
+	// ConfigSource is the config plane that registered this server
+	// (user_config, project_config, workspace, built-in, …). Empty when unknown.
+	// Surfaced in /mcp status so operators can tell where a tool came from (#6578).
+	ConfigSource string
+	Tools        int
+	Prompts      int
+	Resources    int
+	HasTools     bool
+	ToolList     []ToolInfo
 }
 
 // AuthorizeSpecLaunch records durable consent for an explicitly user-installed
@@ -741,10 +750,11 @@ func (h *Host) Servers() []ServerStatus {
 	out := make([]ServerStatus, 0, len(h.clients))
 	for _, c := range h.clients {
 		s := ServerStatus{
-			Name:      c.name,
-			Transport: c.transport,
-			Tools:     c.toolCount,
-			HasTools:  c.hasTools,
+			Name:         c.name,
+			Transport:    c.transport,
+			ConfigSource: strings.TrimSpace(c.spec.ConfigSource),
+			Tools:        c.toolCount,
+			HasTools:     c.hasTools,
 		}
 		c.toolsMu.Lock()
 		s.ToolList = append([]ToolInfo(nil), c.tools...)
@@ -1171,17 +1181,7 @@ func nonEmptyDurationMap(in map[string]time.Duration) map[string]time.Duration {
 	return in
 }
 
-// client returns the named connected client, or nil.
-func (h *Host) client(name string) *Client {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for _, c := range h.clients {
-		if c.name == name {
-			return c
-		}
-	}
-	return nil
-}
+func (h *Host) client(name string) *Client { return h.lookupClient(name) }
 
 // Add connects one server live: it performs the MCP handshake, discovers the
 // server's tools (and prompts/resources when advertised), appends it to the
@@ -1539,14 +1539,10 @@ func (c *Client) withProgress(ctx context.Context, method string, params any) (a
 
 	token := fmt.Sprintf("reasonix-%d", c.progressID.Add(1))
 	copyParams := make(map[string]any, len(callParams))
-	for key, value := range callParams {
-		copyParams[key] = value
-	}
+	maps.Copy(copyParams, callParams)
 	meta := map[string]any{}
 	if existing, ok := callParams["_meta"].(map[string]any); ok {
-		for key, value := range existing {
-			meta[key] = value
-		}
+		maps.Copy(meta, existing)
 	}
 	meta["progressToken"] = token
 	copyParams["_meta"] = meta
@@ -1560,7 +1556,7 @@ func (c *Client) callTransport(ctx context.Context, method string, params any) (
 		return res, err
 	}
 	if initErr := c.initializeSession(ctx, false); initErr != nil {
-		return nil, fmt.Errorf("%w; reinitialize failed: %v", err, initErr)
+		return nil, fmt.Errorf("%w; reinitialize failed: %w", err, initErr)
 	}
 	return c.t.call(ctx, method, params)
 }
@@ -1893,7 +1889,7 @@ func summarizeFailureError(err error) string {
 	return msg
 }
 
-// --- JSON-RPC message types (shared by every transport) ---
+// JSON-RPC message types (shared by every transport)
 
 type rpcRequest struct {
 	JSONRPC string `json:"jsonrpc"`
@@ -1916,7 +1912,7 @@ type rpcError struct {
 
 func (e *rpcError) Error() string { return fmt.Sprintf("rpc error %d: %s", e.Code, e.Message) }
 
-// --- remote tool adapter ---
+// remote tool adapter
 
 type remoteTool struct {
 	client           *Client

@@ -63,6 +63,14 @@ go_bin_dir() {
 	printf '%s' "$gobin"
 }
 
+installed_wails_version() {
+	local output
+	if ! output="$(wails version 2>/dev/null)"; then
+		return 1
+	fi
+	awk 'match($0, /v[0-9]+\.[0-9]+\.[0-9]+/) { print substr($0, RSTART, RLENGTH); exit }' <<<"$output"
+}
+
 sanitize_semver_id() {
 	local value="$1"
 	value="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^0-9A-Za-z]+/-/g; s/^-+//; s/-+$//; s/-+/-/g')"
@@ -127,9 +135,11 @@ default_version() {
 }
 
 install_or_check_tools() {
-	local os install_tools
+	local os install_tools wails_pin wails_version
 	os="${1%/*}"
 	install_tools="${PROD_TEST_INSTALL_TOOLS:-1}"
+	wails_pin="$(tr -d '[:space:]' < "$ROOT/.wails-version")"
+	[[ -n "$wails_pin" ]] || fail ".wails-version is empty"
 
 	need_cmd git
 	need_cmd go
@@ -151,14 +161,21 @@ install_or_check_tools() {
 		fi
 	fi
 
-	if ! command -v wails >/dev/null 2>&1; then
+	wails_version=""
+	if command -v wails >/dev/null 2>&1; then
+		wails_version="$(installed_wails_version || true)"
+	fi
+	if [[ "$wails_version" != "$wails_pin" ]]; then
 		if [[ "$install_tools" == "1" ]]; then
-			echo "==> installing Wails CLI"
-			go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+			echo "==> installing Wails CLI $wails_pin (found ${wails_version:-none})"
+			go install "github.com/wailsapp/wails/v2/cmd/wails@$wails_pin"
+			hash -r
 		else
-			fail "wails not found. Install with: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0"
+			fail "Wails CLI ${wails_version:-not found} does not match .wails-version $wails_pin. Run: make wails-install"
 		fi
 	fi
+	wails_version="$(installed_wails_version || true)"
+	[[ "$wails_version" == "$wails_pin" ]] || fail "Wails CLI ${wails_version:-not found} does not match .wails-version $wails_pin after installation"
 
 	case "$os" in
 	darwin)

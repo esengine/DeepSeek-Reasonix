@@ -102,10 +102,43 @@ const (
 	// extension sidecar (Extension payload with Status set). Appended last to
 	// keep the Kind values before it wire-stable.
 	ExtensionStatus
+	// StreamAttempt marks the local lifecycle of one sampling attempt within a
+	// model round (StreamAttempt payload: begin | discard | commit). IDs are
+	// host-local only — never persisted or sent to the model. Appended last to
+	// keep earlier Kind values wire-stable; older clients ignore unknown kinds.
+	StreamAttempt
 	// KindCount is a sentinel one past the last real Kind. New event kinds must
 	// be inserted above it so completeness tests cover them automatically.
 	KindCount
 )
+
+// StreamAttemptAction is the lifecycle phase of a local sampling attempt.
+type StreamAttemptAction string
+
+const (
+	StreamAttemptBegin   StreamAttemptAction = "begin"
+	StreamAttemptDiscard StreamAttemptAction = "discard"
+	StreamAttemptCommit  StreamAttemptAction = "commit"
+)
+
+// RetryScope distinguishes connection+header retries from body-phase stream
+// retries. Older clients ignore the empty/unknown value.
+type RetryScope string
+
+const (
+	RetryScopeHeaders RetryScope = "headers"
+	RetryScopeStream  RetryScope = "stream"
+)
+
+// StreamAttemptInfo carries host-local bookkeeping for one sampling attempt.
+// Reason is a fixed enum (connection_reset | premature_eof | idle_timeout).
+type StreamAttemptInfo struct {
+	ID      string
+	Action  StreamAttemptAction
+	Attempt int // 1-based attempt number
+	Max     int // total attempts including the first (typically 6)
+	Reason  string
+}
 
 const TurnOutcomeFinalReadiness = "final_readiness"
 
@@ -158,6 +191,10 @@ type Tool struct {
 	ReadOnly     bool
 	Truncated    bool  // ToolResult: Output was head+tailed before display/model
 	DurationMs   int64 // ToolResult: wall-clock execution time in milliseconds
+	// StartedAt/EndedAt are unix-millisecond execution bounds (ToolResult).
+	// Zero when the call never ran (dependency-skipped, cancelled, synthetic).
+	StartedAt int64
+	EndedAt   int64
 	// Partial marks an early ToolDispatch emitted when a call begins (ID/Name set,
 	// Args still streaming) so a frontend can show the card immediately; a second,
 	// full ToolDispatch (Partial false, Args set) follows when the call completes.
@@ -175,8 +212,33 @@ type Tool struct {
 	// sub-agent's calls carry the parent `task` call's ID so a frontend can nest
 	// them under it. Empty for top-level calls.
 	ParentID string
+	// AttemptID is the host-local stream_attempt id that produced a speculative
+	// partial ToolDispatch. Empty for committed/full dispatches and for nested
+	// sub-agent tools. Frontends must only journal partial events whose
+	// AttemptID matches the active stream_attempt begin.
+	AttemptID string
 	FileDiff
 	Profile *Profile // ToolDispatch: subagent model/effort (set for task/skill calls)
+	// Execution is optional local shell metadata (ToolResult). Never sent to
+	// model providers; omitempty keeps old wire readers compatible.
+	Execution *ShellExecution
+}
+
+// ShellExecution mirrors tool.ShellExecution for event sinks without importing
+// the tool package (event is a lower-level dependency of tool consumers).
+type ShellExecution struct {
+	Kind           string `json:"kind,omitempty"`
+	Shell          string `json:"shell,omitempty"`
+	ShellVersion   string `json:"shellVersion,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	SupportsAndAnd bool   `json:"supportsAndAnd"`
+	State          string `json:"state,omitempty"`
+	FailurePhase   string `json:"failurePhase,omitempty"`
+	ExitCode       *int   `json:"exitCode,omitempty"`
+	OutputTail     string `json:"outputTail,omitempty"`
+	MutationRisk   string `json:"mutationRisk,omitempty"`
+	Verification   string `json:"verification,omitempty"`
+	DurationMs     int64  `json:"durationMs,omitempty"`
 }
 
 // FileDiff is a previewed change carried on a writer tool's full ToolDispatch
@@ -263,7 +325,7 @@ const (
 
 // ExtensionSurfacePayload carries one extension sidecar's structured UI
 // contribution for the ExtensionSurface / ExtensionStatus kinds. The structs
-// mirror the Extension Protocol v1 UI payload DTOs field-for-field so any
+// mirror the Extension Protocol v2 UI payload DTOs field-for-field so any
 // frontend can render them with native widgets; the protocol stays
 // structured-only (no HTML/CSS/JS/URLs). All user-visible strings are already
 // credential-redacted by the host UI hub before the event is emitted. Exactly
@@ -420,6 +482,9 @@ const (
 	NoticeCodeExecutorHandoff               = "executor_handoff"
 	NoticeCodeToolBudget                    = "tool_budget"
 	NoticeCodeLoopGuard                     = "loop_guard"
+	NoticeCodeProgressGuard                 = "progress_guard"
+	NoticeCodeEvidenceNudge                 = "evidence_nudge"
+	NoticeCodeReasoningGovernor             = "reasoning_governor"
 	NoticeCodeWorkspaceLease                = "workspace_lease"
 	NoticeCodeCancelledTurn                 = "cancelled_turn_display"
 	NoticeCodeUnappliedSteer                = "unapplied_steer"
@@ -460,11 +525,15 @@ type Event struct {
 	Cancelled       bool                     // TurnDone: Cancel was requested while the turn was active
 	Outcome         string                   // TurnDone: optional machine-readable recoverable outcome
 	Readiness       *FinalReadiness          // TurnDone: structured final-readiness recovery state
+	Receipt         *CompletionReceipt       // TurnDone: what the host verified, and what it could not
+	CheckpointTurn  *int                     // TurnDone: authoritative checkpoint for this turn's visible user message
 	Compaction      Compaction               // Compaction
 	Guardian        GuardianResult
 	DecisionReceipt *provider.DecisionReceipt // Notice: durable user decision receipt
 	RetryAttempt    int                       // Retrying: 1-based attempt about to be made
 	RetryMax        int                       // Retrying: total attempts before giving up
+	RetryScope      RetryScope                // Retrying: optional "headers" | "stream"; empty for older emitters
+	StreamAttempt   StreamAttemptInfo         // StreamAttempt lifecycle
 }
 
 // ReadinessAuditSink is an optional sink capability. Sinks that do not care
@@ -519,6 +588,159 @@ const (
 
 type ProtocolRecoveryAudit struct {
 	Kind ProtocolRecoveryKind
+}
+
+// ContractShadowAudit is the shadow task-contract's end-of-turn summary:
+// counts and enums only, never requirement text. Shadow means observed, not
+// enforced — the old control logic still decides behavior.
+type ContractShadowAudit struct {
+	Intent                string
+	Requirements          int
+	RequirementsSatisfied int
+	Checks                int
+	ChecksSatisfied       int
+	Epoch                 uint64
+	Verdict               string
+	Complete              bool
+	ReadyToFinalize       bool
+}
+
+// ContractShadowAuditSink is an optional sink capability; implementations
+// must keep it content-free, like every other audit channel.
+type ContractShadowAuditSink interface {
+	RecordContractShadow(ContractShadowAudit)
+}
+
+// RecordContractShadow forwards the shadow contract summary only to sinks
+// that explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordContractShadow(s Sink, a ContractShadowAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if cs, ok := s.(ContractShadowAuditSink); ok {
+		cs.RecordContractShadow(a)
+	}
+}
+
+// CompletionReportAudit is the host-authored completion report's end-of-turn
+// summary: counts, enums, and gap kinds only, never paths or command text.
+// The gap counters carry the point — what the turn left unproven.
+type CompletionReportAudit struct {
+	Verdict             string
+	Risk                string
+	Criteria            int
+	CriteriaSatisfied   int
+	Changes             int
+	ChangesUnreviewed   int
+	Verifications       int
+	VerificationsFailed int
+	VerificationsStale  int
+	Gaps                int
+	GapKinds            []string
+	// ClaimsVerified counts the turn's own asserted verifications;
+	// ClaimsUnbacked is how many of them the ledger did not support.
+	ClaimsVerified int
+	ClaimsUnbacked int
+}
+
+// CompletionReportAuditSink is an optional sink capability; implementations
+// must keep it content-free, like every other audit channel.
+type CompletionReportAuditSink interface {
+	RecordCompletionReport(CompletionReportAudit)
+}
+
+// RecordCompletionReport forwards the completion summary only to sinks that
+// explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordCompletionReport(s Sink, a CompletionReportAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if cs, ok := s.(CompletionReportAuditSink); ok {
+		cs.RecordCompletionReport(a)
+	}
+}
+
+// MemoryRecallAudit summarizes one automatic-recall decision: identifiers,
+// scores, and budget numbers only — never the query or fact text.
+type MemoryRecallAudit struct {
+	Hits       []MemoryRecallHit
+	UsedChars  int
+	Omitted    int
+	Suppressed string // reason recall stayed silent; "" when hits were injected
+	// Shadow is the Retrieval V2 ranking (telemetry only, never served).
+	Shadow []MemoryRecallHit
+}
+
+// MemoryRecallHit is one recalled fact's content-free fingerprint.
+type MemoryRecallHit struct {
+	ID        string
+	Revision  int
+	Scope     string
+	Type      string
+	Freshness string
+	Score     float64
+}
+
+// MemoryRecallSink is an optional sink capability; implementations must keep
+// it content-free, like every other audit channel.
+type MemoryRecallSink interface {
+	RecordMemoryRecall(MemoryRecallAudit)
+}
+
+// RecordMemoryRecall forwards a recall decision only to sinks that explicitly
+// opt in. Ordinary UI sinks receive nothing.
+func RecordMemoryRecall(s Sink, a MemoryRecallAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if mr, ok := s.(MemoryRecallSink); ok {
+		mr.RecordMemoryRecall(a)
+	}
+}
+
+// DelegationAdmissionAudit is the shadow admission verdict for one expensive
+// delegation call: tool name and enums only, never the query or prompt text.
+// Shadow means observed, not enforced — no call is blocked.
+type DelegationAdmissionAudit struct {
+	Tool    string
+	Verdict string // "allow" | "deny"
+	Reason  string // e.g. "local_fix_no_external_need"
+	Intent  string // taskintent class of the turn
+}
+
+// DelegationAdmissionSink is an optional sink capability; implementations
+// must keep it content-free, like every other audit channel.
+type DelegationAdmissionSink interface {
+	RecordDelegationAdmission(DelegationAdmissionAudit)
+}
+
+// RecordDelegationAdmission forwards a shadow admission verdict only to sinks
+// that explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordDelegationAdmission(s Sink, a DelegationAdmissionAudit) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if da, ok := s.(DelegationAdmissionSink); ok {
+		da.RecordDelegationAdmission(a)
+	}
+}
+
+// OutcomeProgressSink is an optional sink capability for the shadow outcome
+// scorer's per-round samples: counts only, never paths or commands. Shadow
+// means observed, not enforced — the novelty guard still decides behavior.
+type OutcomeProgressSink interface {
+	RecordOutcomeProgress(evidence.OutcomeSample)
+}
+
+// RecordOutcomeProgress forwards a shadow outcome sample only to sinks that
+// explicitly opt in. Ordinary UI sinks receive nothing.
+func RecordOutcomeProgress(s Sink, sample evidence.OutcomeSample) {
+	if nilutil.IsNil(s) {
+		return
+	}
+	if op, ok := s.(OutcomeProgressSink); ok {
+		op.RecordOutcomeProgress(sample)
+	}
 }
 
 // ProtocolRecoveryAuditSink is an optional sink capability. Implementations

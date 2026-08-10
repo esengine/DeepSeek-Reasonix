@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -239,8 +240,8 @@ func publishRootEntries(installRoot, stagingRoot string, members []Member) (roll
 	replacements := make([]replacement, 0, len(members))
 	rollbackFn := func() error {
 		var rollbackErr error
-		for i := len(replacements) - 1; i >= 0; i-- {
-			r := replacements[i]
+		for _, v := range slices.Backward(replacements) {
+			r := v
 			if err := os.Remove(r.destination); err != nil && !os.IsNotExist(err) {
 				rollbackErr = errors.Join(rollbackErr, err)
 			}
@@ -364,9 +365,17 @@ func copyFileRegular(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
+	closed := false
+	closeOut := func() error {
+		if closed {
+			return nil
+		}
+		closed = true
+		return out.Close()
+	}
 	ok := false
 	defer func() {
-		_ = out.Close()
+		_ = closeOut()
 		if !ok {
 			_ = os.Remove(dst)
 		}
@@ -377,7 +386,7 @@ func copyFileRegular(src, dst string, mode os.FileMode) error {
 	if err := out.Sync(); err != nil {
 		return err
 	}
-	if err := out.Close(); err != nil {
+	if err := closeOut(); err != nil {
 		return err
 	}
 	ok = true

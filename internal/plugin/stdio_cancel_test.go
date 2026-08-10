@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -95,7 +96,7 @@ func TestStdioCallCancelReturnsContextCanceled(t *testing.T) {
 		if err == nil {
 			t.Fatal("cancelled call returned nil error")
 		}
-		if err != context.Canceled {
+		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("expected context.Canceled, got: %v", err)
 		}
 	case <-time.After(2 * time.Second):
@@ -342,7 +343,7 @@ func TestStdioReadLoopStaysLiveWhenReplyWriterIsBlocked(t *testing.T) {
 	// run off the test goroutine so a deadlocked readLoop fails the timeout
 	// below instead of hanging the whole package; Cleanup unblocks the writer.
 	go func() {
-		for i := 0; i < 2*stdioReplyQueueBound; i++ {
+		for i := range 2 * stdioReplyQueueBound {
 			line := fmt.Sprintf(`{"jsonrpc":"2.0","id":"srv-%d","method":"ping"}`+"\n", i)
 			if _, err := io.WriteString(stdoutWrites, line); err != nil {
 				return

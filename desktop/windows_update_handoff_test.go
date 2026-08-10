@@ -81,6 +81,8 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	}
 	script := string(data)
 	for _, want := range []string{
+		`!define REASONIX_LEGACY_UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Reasonix"`,
+		`!define REASONIX_LEGACY_PRODUCT_KEY "Software\reasonix\Reasonix"`,
 		`!define REASONIX_UPDATE_HELPER "reasonix-update-helper.exe"`,
 		`!define REASONIX_GUARD "reasonix-guard.exe"`,
 		`!define REASONIX_LAUNCHER "reasonix-launcher.exe"`,
@@ -125,6 +127,8 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 		`File "/oname=${REASONIX_PAYLOAD_SIGNATURE}" "${REASONIX_PAYLOAD_SIGNATURE}"`,
 		`Delete "$INSTDIR\${REASONIX_UPDATE_HELPER}"`,
 		`Delete "$INSTDIR\${REASONIX_CLI}"`,
+		`DeleteRegValue HKCU "${REASONIX_LEGACY_PRODUCT_KEY}" ""`,
+		`!insertmacro reasonix.deleteLegacyInstallerStateIfOwned`,
 	} {
 		if !strings.Contains(script, want) {
 			t.Fatalf("project.nsi missing %q", want)
@@ -150,11 +154,50 @@ func TestWindowsInstallerScriptWaitsBeforeCopyingExecutable(t *testing.T) {
 	if strings.Contains(script, `FileOpen $0 "$INSTDIR\current.json" w`) {
 		t.Fatal("normal installer must delegate the current.json commit to the atomic Go activator")
 	}
+	writeCurrent := strings.Index(script, `!insertmacro reasonix.writeUninstaller`)
+	deleteLegacy := strings.Index(script, `!insertmacro reasonix.deleteLegacyInstallerStateIfOwned`)
+	if writeCurrent < 0 || deleteLegacy < 0 || writeCurrent > deleteLegacy {
+		t.Fatalf("installer must write the current uninstall entry before reconciling owned legacy state (write=%d delete=%d)", writeCurrent, deleteLegacy)
+	}
+	legacyMacro := script[strings.Index(script, `!macro reasonix.deleteLegacyInstallerStateIfOwned`):strings.Index(script, `!macro reasonix.deleteUninstaller`)]
+	deleteLegacyLocation := strings.Index(legacyMacro, `DeleteRegValue HKCU "${REASONIX_LEGACY_PRODUCT_KEY}" ""`)
+	deleteLegacyAlias := strings.Index(legacyMacro, `DeleteRegKey HKCU "${REASONIX_LEGACY_UNINST_KEY}"`)
+	if deleteLegacyLocation < 0 || deleteLegacyAlias < 0 || deleteLegacyLocation > deleteLegacyAlias {
+		t.Fatalf("installer must clear the same-root Tauri install-location breadcrumb before deleting its uninstall alias (location=%d alias=%d)", deleteLegacyLocation, deleteLegacyAlias)
+	}
 	metadataBranch := strings.Index(script, `reasonix_stage_payload:`)
 	metadataFile := strings.Index(script, `File "/oname=${REASONIX_PAYLOAD_MANIFEST}"`)
 	normalInstall := strings.Index(script, `reasonix_normal_install:`)
 	if metadataBranch < 0 || metadataFile < 0 || normalInstall < 0 || metadataBranch > metadataFile || metadataFile > normalInstall {
 		t.Fatalf("payload manifest must be extracted only in staging mode (branch=%d file=%d)", metadataBranch, metadataFile)
+	}
+}
+
+func TestWindowsInstallerUsesPreviousDirectoryAsManualInstallDefault(t *testing.T) {
+	data, err := os.ReadFile("build/windows/installer/project.nsi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := string(data)
+	for _, want := range []string{
+		`InstallDirRegKey HKCU "${UNINST_KEY}" "InstallLocation"`,
+		`InstallDir "${REASONIX_DEFAULT_INSTALLDIR}"`,
+		`!insertmacro MUI_PAGE_DIRECTORY`,
+		`!define MUI_PAGE_CUSTOMFUNCTION_PRE reasonix.skipSetupPageForUpdate`,
+		`StrCmp $ReasonixUpdateMode "1" 0 reasonix_show_setup_page`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("project.nsi missing manual-install path contract %q", want)
+		}
+	}
+	page := strings.Index(script, "!insertmacro MUI_PAGE_DIRECTORY")
+	pageHook := strings.Index(script, "!define MUI_PAGE_CUSTOMFUNCTION_PRE reasonix.skipSetupPageForUpdate\n!insertmacro MUI_PAGE_DIRECTORY")
+	if page < 0 || pageHook < 0 || pageHook > page {
+		t.Fatal("directory selection page must remain available for manual installs")
+	}
+	if strings.Contains(script, `StrCpy $ReasonixUpdateMode "1"
+	Goto reasonix_show_setup_page`) {
+		t.Fatal("automatic updates must not reopen the manual directory selection page")
 	}
 }
 
@@ -214,6 +257,9 @@ func TestWindowsUpdateRequiresObservedHelperHandoff(t *testing.T) {
 		t.Fatal(err)
 	}
 	helperSource := string(helperData)
+	if !strings.Contains(helperSource, "reconcileWindowsUninstallRegistrationFn(installDir, toVersion)") {
+		t.Fatal("versioned Windows activation must refresh its managed uninstall registration")
+	}
 	if strings.Contains(helperSource, "installerCommandLine(installer, installDir), HideWindow: true") {
 		t.Fatal("update helper still hides the NSIS progress window")
 	}

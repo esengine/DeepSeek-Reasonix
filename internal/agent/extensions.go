@@ -14,7 +14,7 @@ import (
 	"reasonix/internal/provider"
 )
 
-// Extension Protocol v1 agent-side wiring (stage 6b2). The agent consults the
+// Extension Protocol v2 agent-side wiring. The agent consults the
 // frozen dispatcher at the nine agent-loop intercept points:
 //
 //	agent.before_start   Run, before the turn is appended (block aborts the run)
@@ -40,7 +40,7 @@ import (
 //
 // Error policy follows the dispatcher: a required extension's failure fails
 // the local operation; an optional extension's failure is warned about once
-// and skipped. A nil dispatcher (no v1 runtime packages installed) passes
+// and skipped. A nil dispatcher (no runtime packages installed) passes
 // every point through untouched, so behavior stays byte-identical to the
 // pre-dispatch path.
 //
@@ -111,9 +111,10 @@ func (a *Agent) interceptAgentStart(ctx context.Context) error {
 	if d == nil {
 		return nil
 	}
+	providerCtx := a.withAgentContext(ctx)
 	payload := dispatch.AgentStartPayload{
 		Model:     a.prov.Name(),
-		ToolCount: len(a.tools.Schemas()),
+		ToolCount: len(a.tools.SchemasForContext(providerCtx)),
 		SessionID: ParentSession(ctx),
 	}
 	result, err := d.Intercept(ctx, extension.PointAgentBeforeStart, &payload)
@@ -273,7 +274,7 @@ func (a *Agent) interceptToolBefore(ctx context.Context, plan *toolCallPlan) (to
 	}
 	plan.call.Name = payload.Name
 	plan.call.Arguments = payload.Arguments
-	if blocked, early := a.parseToolCall(plan); early {
+	if blocked, early := a.parseToolCall(ctx, plan); early {
 		return blocked, true
 	}
 	return toolOutcome{}, false

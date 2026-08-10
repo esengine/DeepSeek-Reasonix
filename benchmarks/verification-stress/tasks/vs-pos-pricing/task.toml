@@ -1,0 +1,4 @@
+prompt = "Cart totals are wrong. The documented rule: apply the percentage discount first, then subtract the flat coupon, floor at zero, round to cents. final_price in pricing.py does not follow it."
+class = "ebm-positive"
+max_steps = 18
+timeout_sec = 300

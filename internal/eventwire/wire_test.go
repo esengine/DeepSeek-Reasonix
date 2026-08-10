@@ -14,15 +14,34 @@ import (
 )
 
 func TestToWireRetryingJSON(t *testing.T) {
-	w := ToWire(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10})
+	w := ToWire(event.Event{Kind: event.Retrying, RetryAttempt: 3, RetryMax: 10, RetryScope: event.RetryScopeStream})
 	b, err := json.Marshal(w)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	s := string(b)
-	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`} {
+	for _, want := range []string{`"kind":"retrying"`, `"retryAttempt":3`, `"retryMax":10`, `"retryScope":"stream"`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("retrying JSON = %s, want it to contain %s", s, want)
+		}
+	}
+}
+
+func TestToWireStreamAttemptJSON(t *testing.T) {
+	w := ToWire(event.Event{
+		Kind: event.StreamAttempt,
+		StreamAttempt: event.StreamAttemptInfo{
+			ID: "sa-1", Action: event.StreamAttemptDiscard, Attempt: 2, Max: 6, Reason: "connection_reset",
+		},
+	})
+	b, err := json.Marshal(w)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	s := string(b)
+	for _, want := range []string{`"kind":"stream_attempt"`, `"id":"sa-1"`, `"action":"discard"`, `"attempt":2`, `"max":6`, `"reason":"connection_reset"`} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("stream_attempt JSON = %s, want it to contain %s", s, want)
 		}
 	}
 }
@@ -77,7 +96,7 @@ func TestToWireNoticeCarriesDecisionReceipt(t *testing.T) {
 }
 
 func TestKindNamesComplete(t *testing.T) {
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		if ToWire(event.Event{Kind: k}).Kind == "" {
 			t.Fatalf("kind %d has no wire name", k)
 		}
@@ -86,7 +105,7 @@ func TestKindNamesComplete(t *testing.T) {
 
 func TestDesktopWireEventKindTypeCoversSharedKinds(t *testing.T) {
 	ts := readDesktopTypes(t)
-	for k := event.Kind(0); k < event.KindCount; k++ {
+	for k := range event.KindCount {
 		kind := ToWire(event.Event{Kind: k}).Kind
 		if !strings.Contains(ts, `"`+kind+`"`) {
 			t.Fatalf("desktop WireEvent EventKind is missing %q", kind)
@@ -99,8 +118,15 @@ func TestDesktopWireEventTypeCoversSharedPayloadFields(t *testing.T) {
 	for _, want := range []string{
 		"detail?: string;",
 		`outcome?: "final_readiness" | "recovery_paused";`,
+		"checkpointTurn?: number;",
 		"retryAttempt?: number;",
 		"retryMax?: number;",
+		"retryScope?:",
+		"streamAttempt?: WireStreamAttempt;",
+		"export interface WireStreamAttempt",
+		"attemptId?: string;",
+		"contextPromptTokens?: number;",
+		"contextCompletionTokens?: number;",
 		"memoryCitations?: MemoryCitation[];",
 		"export interface MemoryCitation",
 		"resolvedName?: string;",
@@ -182,6 +208,25 @@ func TestToWireTurnOutcomeIsOptionalAndMachineReadable(t *testing.T) {
 	}
 }
 
+func TestToWireTurnDoneCheckpointTurnPreservesZeroAndOmitsNil(t *testing.T) {
+	turn := 0
+	withCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone, CheckpointTurn: &turn}))
+	if err != nil {
+		t.Fatalf("marshal checkpoint turn: %v", err)
+	}
+	if !strings.Contains(string(withCheckpoint), `"checkpointTurn":0`) {
+		t.Fatalf("checkpoint JSON = %s, want turn zero", withCheckpoint)
+	}
+
+	withoutCheckpoint, err := json.Marshal(ToWire(event.Event{Kind: event.TurnDone}))
+	if err != nil {
+		t.Fatalf("marshal empty TurnDone: %v", err)
+	}
+	if strings.Contains(string(withoutCheckpoint), `"checkpointTurn"`) {
+		t.Fatalf("empty TurnDone JSON must omit checkpointTurn: %s", withoutCheckpoint)
+	}
+}
+
 func TestToWireMessageMemoryCitations(t *testing.T) {
 	w := ToWire(event.Event{
 		Kind: event.Message,
@@ -229,6 +274,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 	w := ToWire(event.Event{Kind: event.ToolDispatch, Tool: event.Tool{
 		ID: "call-1", Name: "task", Args: `{"prompt":"x"}`, Output: "ignored",
 		Err: "blocked", ReadOnly: true, Truncated: true, DurationMs: 522,
+		StartedAt: 1754500000000, EndedAt: 1754500000522,
 		Partial: true, Refreshed: true, ParentID: "parent-1",
 		FileDiff: event.FileDiff{Diff: "@@ -1 +1 @@\n-old\n+new\n", Added: 1, Removed: 1},
 		Profile:  &event.Profile{Model: "deepseek-pro", Effort: "max"},
@@ -242,6 +288,7 @@ func TestToWireToolPayloadJSON(t *testing.T) {
 		`"kind":"tool_dispatch"`, `"id":"call-1"`, `"name":"task"`,
 		`"args":"{\"prompt\":\"x\"}"`, `"output":"ignored"`, `"err":"blocked"`,
 		`"readOnly":true`, `"truncated":true`, `"durationMs":522`, `"partial":true`, `"refreshed":true`,
+		`"startedAt":1754500000000`, `"endedAt":1754500000522`,
 		`"parentId":"parent-1"`, `"diff":"@@ -1 +1 @@\n-old\n+new\n"`,
 		`"added":1`, `"removed":1`, `"profile":{"model":"deepseek-pro","effort":"max"}`,
 	} {

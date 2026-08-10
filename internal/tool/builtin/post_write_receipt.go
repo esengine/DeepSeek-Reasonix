@@ -37,13 +37,7 @@ func renderPostWriteReceipts(receipts []editReplacementReceipt) string {
 	// Share the bounded body between the selected first/last receipts and their
 	// matched/replacement fields. The final clip below remains a defensive cap
 	// for unusually large counts or labels.
-	fieldBudget := (maxPostWriteReceiptBytes - 256) / (2 * len(indexes))
-	if fieldBudget < 128 {
-		fieldBudget = 128
-	}
-	if fieldBudget > maxCapturedReceiptSpanBytes {
-		fieldBudget = maxCapturedReceiptSpanBytes
-	}
+	fieldBudget := min(max((maxPostWriteReceiptBytes-256)/(2*len(indexes)), 128), maxCapturedReceiptSpanBytes)
 
 	var b strings.Builder
 	b.Grow(maxPostWriteReceiptBytes)

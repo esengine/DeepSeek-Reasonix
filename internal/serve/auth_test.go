@@ -118,7 +118,7 @@ func TestTokenModeValidCookie(t *testing.T) {
 	})))
 	defer ts.Close()
 
-	req, _ := http.NewRequest("GET", ts.URL+"/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/status", nil)
 	req.AddCookie(&http.Cookie{Name: cookieToken, Value: "secret"})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -137,7 +137,7 @@ func TestTokenModeInvalidCookie(t *testing.T) {
 	})))
 	defer ts.Close()
 
-	req, _ := http.NewRequest("GET", ts.URL+"/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/status", nil)
 	req.AddCookie(&http.Cookie{Name: cookieToken, Value: "wrong"})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -227,7 +227,7 @@ func TestTokenModeNonLoopbackCookieAllowsPlainHTTP(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	req, _ := http.NewRequest("GET", ts.URL+"/?token=secret", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/?token=secret", nil)
 	req.Host = "192.0.2.10:8787"
 	resp, err := client.Do(req)
 	if err != nil {
@@ -305,7 +305,7 @@ func TestPasswordModeNoSessionRedirects(t *testing.T) {
 			return http.ErrUseLastResponse
 		},
 	}
-	req, _ := http.NewRequest("GET", ts.URL+"/", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/", nil)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml")
 	resp, err := client.Do(req)
 	if err != nil {
@@ -329,7 +329,7 @@ func TestPasswordModeAPIWithoutSessionReturns401(t *testing.T) {
 	defer ts.Close()
 
 	// Simulate a non-browser (fetch) request by not setting Accept: text/html.
-	req, _ := http.NewRequest("GET", ts.URL+"/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/status", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -376,7 +376,7 @@ func TestPasswordModeValidLogin(t *testing.T) {
 	}
 
 	// Use the session cookie to access a protected page.
-	req, _ := http.NewRequest("GET", ts.URL+"/status", nil)
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/status", nil)
 	req.AddCookie(sessionCookie)
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -401,7 +401,7 @@ func TestPasswordModeNonLoopbackHTTPLoginCookieIsUsable(t *testing.T) {
 		},
 	}
 	form := url.Values{"password": {"correct"}}
-	req, _ := http.NewRequest("POST", ts.URL+"/login", strings.NewReader(form.Encode()))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/login", strings.NewReader(form.Encode()))
 	req.Host = "192.0.2.10:8787"
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	resp, err := client.Do(req)
@@ -418,7 +418,7 @@ func TestPasswordModeNonLoopbackHTTPLoginCookieIsUsable(t *testing.T) {
 		t.Fatal("plain HTTP password session cookie should stay usable without Secure")
 	}
 
-	req, _ = http.NewRequest("GET", ts.URL+"/status", nil)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL+"/status", nil)
 	req.Host = "192.0.2.10:8787"
 	req.AddCookie(sessionCookie)
 	resp, err = http.DefaultClient.Do(req)
@@ -444,7 +444,7 @@ func TestPasswordModeSanitizesRedirectCookie(t *testing.T) {
 		},
 	}
 	form := url.Values{"password": {"correct"}}
-	req, _ := http.NewRequest("POST", ts.URL+"/login", strings.NewReader(form.Encode()))
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/login", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: cookieRedirect, Value: "//evil.example/path"})
 
@@ -601,7 +601,7 @@ func TestRateLimiterAllowsFiveThenBlocks(t *testing.T) {
 	rl := newRateLimit()
 	ip := "192.0.2.1"
 
-	for i := 0; i < rateLimitMax; i++ {
+	for i := range rateLimitMax {
 		if !rl.allow(ip) {
 			t.Fatalf("attempt %d should be allowed", i+1)
 		}
@@ -616,7 +616,7 @@ func TestRateLimiterResetsAfterWindow(t *testing.T) {
 	ip := "192.0.2.2"
 
 	// Exhaust the limit.
-	for i := 0; i < rateLimitMax; i++ {
+	for range rateLimitMax {
 		rl.allow(ip)
 	}
 	if rl.allow(ip) {
@@ -640,7 +640,7 @@ func TestRateLimiterResetsAfterWindow(t *testing.T) {
 func TestRateLimiterDifferentIPs(t *testing.T) {
 	rl := newRateLimit()
 	// Exhaust one IP.
-	for i := 0; i < rateLimitMax; i++ {
+	for range rateLimitMax {
 		rl.allow("192.0.2.1")
 	}
 	// Another IP should still be allowed.
@@ -653,7 +653,7 @@ func TestRateLimiterDifferentIPs(t *testing.T) {
 
 func TestClientIPRemoteAddr(t *testing.T) {
 	ag := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x"})
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.0.2.42:12345"
 	if got := ag.clientIP(req); got != "192.0.2.42" {
 		t.Errorf("clientIP = %q, want 192.0.2.42", got)
@@ -662,7 +662,7 @@ func TestClientIPRemoteAddr(t *testing.T) {
 
 func TestClientIPIgnoresXForwardedForWithoutProxy(t *testing.T) {
 	ag := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x"})
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "192.0.2.1:12345"
 	req.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")
 	if got := ag.clientIP(req); got != "192.0.2.1" {
@@ -672,7 +672,7 @@ func TestClientIPIgnoresXForwardedForWithoutProxy(t *testing.T) {
 
 func TestClientIPTrustsXForwardedForWithProxy(t *testing.T) {
 	ag := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x", BehindProxy: true})
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.RemoteAddr = "10.0.0.99:12345"
 	req.Header.Set("X-Forwarded-For", "192.0.2.42, 10.0.0.1")
 	if got := ag.clientIP(req); got != "192.0.2.42" {
@@ -684,7 +684,7 @@ func TestClientIPTrustsXForwardedForWithProxy(t *testing.T) {
 
 func TestIsTLS(t *testing.T) {
 	ag := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x"})
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	if ag.isTLS(req) {
 		t.Error("plain request should not be TLS")
 	}
@@ -692,7 +692,7 @@ func TestIsTLS(t *testing.T) {
 
 func TestIsTLSIgnoresForwardedProtoWithoutProxy(t *testing.T) {
 	ag := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x"})
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	if ag.isTLS(req) {
 		t.Error("should ignore X-Forwarded-Proto without behind_proxy")
@@ -701,7 +701,7 @@ func TestIsTLSIgnoresForwardedProtoWithoutProxy(t *testing.T) {
 
 func TestIsTLSTrustsForwardedProtoWithProxy(t *testing.T) {
 	ag := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x", BehindProxy: true})
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	if !ag.isTLS(req) {
 		t.Error("should trust X-Forwarded-Proto with behind_proxy")
@@ -711,19 +711,19 @@ func TestIsTLSTrustsForwardedProtoWithProxy(t *testing.T) {
 func TestAuthCookieSecurePolicy(t *testing.T) {
 	ag := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x"})
 	for _, host := range []string{"localhost:8787", "127.0.0.1:8787", "[::1]:8787"} {
-		req, _ := http.NewRequest("GET", "http://"+host+"/", nil)
+		req, _ := http.NewRequest(http.MethodGet, "http://"+host+"/", nil)
 		if ag.authCookieSecure(req) {
 			t.Errorf("loopback host %s should allow local HTTP cookies", host)
 		}
 	}
 
-	req, _ := http.NewRequest("GET", "http://192.0.2.10:8787/", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://192.0.2.10:8787/", nil)
 	if ag.authCookieSecure(req) {
 		t.Fatal("plain HTTP cookies should stay usable without Secure")
 	}
 
 	proxy := newAuthGate(config.ServeConfig{AuthMode: "token", Token: "x", BehindProxy: true})
-	req, _ = http.NewRequest("GET", "http://example.test/", nil)
+	req, _ = http.NewRequest(http.MethodGet, "http://example.test/", nil)
 	req.Header.Set("X-Forwarded-Proto", "https")
 	if !proxy.authCookieSecure(req) {
 		t.Fatal("trusted forwarded HTTPS should mark cookies Secure")

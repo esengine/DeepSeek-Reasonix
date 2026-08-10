@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/hook"
 )
@@ -127,12 +129,7 @@ func hookEventNames() []string {
 }
 
 func validHookEvent(event hook.Event) bool {
-	for _, e := range hook.Events {
-		if event == e {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(hook.Events, event)
 }
 
 func hookConfigView(event hook.Event, cfg hook.HookConfig) HookConfigView {
@@ -184,5 +181,5 @@ func writeHooksSettingsFile(path string, settings hook.Settings) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, body, 0o644)
+	return fileutil.AtomicWriteFile(path, body, 0o644)
 }

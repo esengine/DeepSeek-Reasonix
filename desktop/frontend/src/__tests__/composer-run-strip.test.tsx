@@ -515,6 +515,35 @@ console.log("\ncomposer run strip");
   dom.window.close();
 }
 
+// Streaming TPS combines completed usage with only the current request's live
+// character estimate, and divides by provider-output time rather than turn age.
+{
+  const dom = installDom();
+  const live = { id: "assistant-1", text: "x".repeat(40), reasoning: "", reasoningComplete: false };
+  const { root } = await renderComposer({
+    running: true,
+    tabId: "tab-tps",
+    turnStartAt: Date.now() - 60_000,
+    turnTokens: 8,
+    turnOutputTokens: 10,
+    turnOutputCharsAtUsage: 0,
+    turnModelActiveMs: 2_000,
+    liveStore: {
+      subscribe: () => () => {},
+      getSnapshot: () => live,
+    },
+  });
+
+  const ticker = document.querySelector(".composer-run-strip")?.textContent ?? "";
+  ok(ticker.includes("10 tokens/s"), "streaming TPS uses provider-output time instead of full turn age");
+  ok(ticker.includes("18 tokens"), "streaming token total adds the current request estimate to completed usage");
+
+  await act(async () => {
+    root.unmount();
+  });
+  dom.window.close();
+}
+
 // Resize consistency: --composer-height always carries the logical height in
 // every writer (React render, live drag, keyboard), with the run strip's
 // reservation isolated in a CSS calc — so dragging a resized composer during a

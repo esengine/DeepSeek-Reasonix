@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -522,9 +523,6 @@ func (s *Store) CaptureAfter(path string, opts CaptureAfterOpts) {
 	}
 	// Update after fingerprint on the most recent snap of this path.
 	updated := false
-	for i := len(s.curFilesLocked()) - 1; i >= 0; i-- {
-		// search in cur first, then done reverse
-	}
 	if s.cur != nil {
 		for i := range s.cur.Files {
 			if NormalizeRelPath(s.root, s.cur.Files[i].Path) != pathKey {
@@ -546,8 +544,8 @@ func (s *Store) CaptureAfter(path string, opts CaptureAfterOpts) {
 	// Path might only appear in earlier turns; still record after on earliest?
 	// Ownership after is per-path last write — update the latest checkpoint that
 	// has this path.
-	for i := len(s.done) - 1; i >= 0; i-- {
-		c := s.done[i]
+	for _, v := range slices.Backward(s.done) {
+		c := v
 		for j := range c.Files {
 			if NormalizeRelPath(s.root, c.Files[j].Path) != pathKey {
 				continue
@@ -561,13 +559,6 @@ func (s *Store) CaptureAfter(path string, opts CaptureAfterOpts) {
 			return
 		}
 	}
-}
-
-func (s *Store) curFilesLocked() []FileSnap {
-	if s.cur == nil {
-		return nil
-	}
-	return s.cur.Files
 }
 
 // RecordGap appends a coverage gap to the current checkpoint.

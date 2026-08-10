@@ -32,6 +32,7 @@ WINDOWS_CLINAME="reasonix-cli" # Windows cannot store Reasonix.exe and reasonix.
 GUARDNAME="reasonix-guard"
 LAUNCHERNAME="reasonix-launcher"
 windows_resource_tool_dir=""
+windows_host_include=""
 
 # desktop/ is a nested Go module, so the Go toolchain cannot discover the
 # repository VCS revision for the Wails binary. Link the same source identity
@@ -41,12 +42,19 @@ SOURCE_REVISION="$(git -C "$ROOT" rev-parse --verify HEAD)"
 if ! git -C "$ROOT" diff-index --quiet HEAD --; then
 	SOURCE_REVISION="$SOURCE_REVISION+dirty"
 fi
+# Short commit + real UTC build clock for CLI `version --verbose/--json`.
+GIT_COMMIT="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+BUILD_TIME_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # The remote protocol source-revision ldflag was removed with Remote Workbench.
 product_docs_ldflags="-X reasonix/internal/productdocs.linkedVersion=$VERSION -X reasonix/internal/productdocs.linkedRevision=$SOURCE_REVISION"
+cli_identity_ldflags="-X main.version=$VERSION -X main.gitCommit=$GIT_COMMIT -X main.buildTimeUTC=$BUILD_TIME_UTC $product_docs_ldflags"
 
 cleanup() {
 	if [ -n "$windows_resource_tool_dir" ]; then
 		rm -rf "$windows_resource_tool_dir"
+	fi
+	if [ -n "$windows_host_include" ]; then
+		rm -f "$windows_host_include"
 	fi
 }
 trap cleanup EXIT
@@ -75,12 +83,12 @@ build_cli() {
 	mkdir -p "$(dirname "$cli_out")"
 	if [ "$arch" = universal ]; then
 		cli_tmp=$(mktemp -d)
-		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $product_docs_ldflags" -o "$cli_tmp/amd64" ./cmd/reasonix)
-		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $product_docs_ldflags" -o "$cli_tmp/arm64" ./cmd/reasonix)
+		(cd "$ROOT" && GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $cli_identity_ldflags" -o "$cli_tmp/amd64" ./cmd/reasonix)
+		(cd "$ROOT" && GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $cli_identity_ldflags" -o "$cli_tmp/arm64" ./cmd/reasonix)
 		lipo -create "$cli_tmp/amd64" "$cli_tmp/arm64" -output "$cli_out"
 		rm -rf "$cli_tmp"
 	else
-		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$VERSION $product_docs_ldflags" -o "$cli_out" ./cmd/reasonix)
+		(cd "$ROOT" && GOOS="$os" GOARCH="$arch" CGO_ENABLED=0 go build -trimpath -ldflags="-s -w $cli_identity_ldflags" -o "$cli_out" ./cmd/reasonix)
 	fi
 }
 
@@ -112,6 +120,15 @@ ldflags="-X main.version=$VERSION -X main.channel=$CHANNEL $product_docs_ldflags
 UPDATE_HELPER="reasonix-update-helper.exe"
 if [ "$os" = windows ]; then
 	windows_resource_tool_dir=$(mktemp -d)
+	windows_host_include="$ROOT/desktop/build/windows/installer/reasonix_host.nsh"
+	case "$(uname -s 2>/dev/null || printf '%s' unknown)" in
+		Darwin* | Linux* | FreeBSD*)
+			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''/bin/cp -f "%1" "reasonix-uninstall.exe"'\''' >"$windows_host_include"
+			;;
+		*)
+			printf '%s\n' '!define REASONIX_UNINST_FINALIZE '\''cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'\''' >"$windows_host_include"
+			;;
+	esac
 	windows_resource_tool="$windows_resource_tool_dir/reasonix-windows-resource.exe"
 	echo "==> build Windows resource stamper"
 	go build -trimpath -o "$windows_resource_tool" ./cmd/windows-resource

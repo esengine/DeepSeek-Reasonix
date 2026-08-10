@@ -52,10 +52,8 @@ func TestRewindConcurrentWithHistoryReads(t *testing.T) {
 
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 4 {
+		wg.Go(func() {
 			for {
 				select {
 				case <-stop:
@@ -65,7 +63,7 @@ func TestRewindConcurrentWithHistoryReads(t *testing.T) {
 					_ = c.CheckpointHasBoundary(lastTurn)
 				}
 			}
-		}()
+		})
 	}
 
 	err := c.Rewind(lastTurn, RewindConversation)

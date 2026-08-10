@@ -28,7 +28,7 @@ func collectDeviceInfo() deviceInfo {
 }
 
 func parseCPUModel(cpuinfo string) string {
-	for _, line := range strings.Split(cpuinfo, "\n") {
+	for line := range strings.SplitSeq(cpuinfo, "\n") {
 		if name, ok := strings.CutPrefix(line, "model name"); ok {
 			if _, v, ok := strings.Cut(name, ":"); ok {
 				return strings.TrimSpace(v)
@@ -39,7 +39,7 @@ func parseCPUModel(cpuinfo string) string {
 }
 
 func parseMemTotalBytes(meminfo string) uint64 {
-	for _, line := range strings.Split(meminfo, "\n") {
+	for line := range strings.SplitSeq(meminfo, "\n") {
 		if rest, ok := strings.CutPrefix(line, "MemTotal:"); ok {
 			kb, err := strconv.ParseUint(strings.TrimSuffix(strings.TrimSpace(rest), " kB"), 10, 64)
 			if err != nil {
@@ -52,7 +52,7 @@ func parseMemTotalBytes(meminfo string) uint64 {
 }
 
 func parseOSReleasePrettyName(osRelease string) string {
-	for _, line := range strings.Split(osRelease, "\n") {
+	for line := range strings.SplitSeq(osRelease, "\n") {
 		if v, ok := strings.CutPrefix(line, "PRETTY_NAME="); ok {
 			return strings.Trim(strings.TrimSpace(v), `"`)
 		}

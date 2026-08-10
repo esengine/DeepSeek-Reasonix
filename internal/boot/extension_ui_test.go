@@ -63,7 +63,7 @@ func TestBootExtensionUIHubWired(t *testing.T) {
 	res := bootWithFakeUIPlugin(t, "uibootplugin", map[string]any{
 		"capabilities": []string{"ui"},
 		"env": map[string]string{
-			bootFakeEnvInitResult: `{"protocolVersion":"1","name":"uibootplugin","version":"1.0.0","stateSchemaVersion":0,` +
+			bootFakeEnvInitResult: `{"protocolVersion":"2","name":"uibootplugin","version":"1.0.0","stateSchemaVersion":0,` +
 				`"uiActions":[{"actionId":"act1","label":"Act one"}]}`,
 			bootFakeEnvUIPublish: "1",
 		},
@@ -151,7 +151,7 @@ func TestRebuildRebindsExtensionUIHub(t *testing.T) {
 	old := bootWithFakePlugin(t, "rebuilduiplugin", map[string]any{
 		"capabilities": []string{"ui"},
 		"env": map[string]string{
-			bootFakeEnvInitResult: `{"protocolVersion":"1","name":"rebuilduiplugin","version":"1.0.0","stateSchemaVersion":0,` +
+			bootFakeEnvInitResult: `{"protocolVersion":"2","name":"rebuilduiplugin","version":"1.0.0","stateSchemaVersion":0,` +
 				`"uiActions":[{"actionId":"act1"}]}`,
 		},
 	})

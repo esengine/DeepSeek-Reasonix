@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 
 	"reasonix/internal/provider"
@@ -68,7 +69,7 @@ type ConflictPolicy int
 
 const (
 	// ConflictFail is the default: a disputed ID aborts the build with a
-	// ConflictError. v1 extensions use it — a package must never silently
+	// ConflictError. v2 extensions use it — a package must never silently
 	// override another package's capability.
 	ConflictFail ConflictPolicy = iota
 	// ConflictCollect keeps the deterministic winner (highest tier, then
@@ -408,9 +409,7 @@ func (b *Builder) assemble(resolved []Contribution, replacements map[Slot]Contri
 	}
 
 	repl := make(map[Slot]ContributionSource, len(replacements))
-	for slot, owner := range replacements {
-		repl[slot] = owner
-	}
+	maps.Copy(repl, replacements)
 
 	diagnostics := make([]string, 0, len(conflicts))
 	for i := range conflicts {

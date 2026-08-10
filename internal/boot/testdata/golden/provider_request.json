@@ -2,7 +2,7 @@
   "Messages": [
     {
       "role": "system",
-      "content": "BASE SYSTEM PROMPT\n\nUser-owned choices: when a consequential decision has no safe, obvious default, call the ask tool so the user can choose. Otherwise proceed with a sensible reversible default. Do not ask in prose when ask is available. In non-interactive runs, state the assumption and take the safest reversible path.\n\nReply in the same language the user is using in their most recent message: if they write in Chinese answer in Chinese, in English answer in English, and switch whenever they switch. Let this also guide the language you think in. Always keep code, identifiers, file paths, shell commands, and technical terms in their original form — never translate them.\n\nCurrent workspace: \"\u003cROOT\u003e\"\n\n# Skills — playbooks you can invoke\n\nOne-liner index. Before non-trivial work, scan it: if an untagged (inline) skill is even plausibly relevant to the task, invoke it before continuing instead of pre-judging — loading one imperfect inline skill is cheap. Skills tagged `[🧬 subagent]` are the heavy path; reach for them only when the task genuinely needs context-heavy work, not on weak relevance. Each entry is a built-in or a user-authored playbook. Call `run_skill({ name: \"\u003cskill-name\u003e\", arguments: \"\u003ctask\u003e\" })` — `name` is JUST the identifier (e.g. `\"explore\"`), NOT the `[🧬 subagent]` tag that follows it. Prefer the dedicated top-level tool when one exists for a built-in subagent skill. Entries tagged `[🧬 subagent]` spawn an isolated subagent — its tool calls and reasoning never enter your context, only its final answer does; use them for context-heavy work (deep exploration, multi-step research) where you only need the conclusion. Untagged skills are inlined: the body becomes a tool result you read and act on directly. The user can also invoke a skill via `/\u003cname\u003e`.\n\n```\n- explore [🧬 subagent] — Explore the codebase in an isolated subagent — wide-net read-only investigation that returns one distilled an…\n- init — Bootstrap or refresh this project's AGENTS.md — analyze the codebase (structure, build/test commands, architecture, conventio…\n- install-capability — Install or uninstall Reasonix MCP servers and skills from a URL, GitHub/raw file, local path/folder, .mcp.json,…\n- reasonix-guide — Troubleshoot and configure Reasonix capabilities: Skills (project/custom/global/builtin priority, discovery dirs), …\n- research [🧬 subagent] — Research a question by combining web_fetch + code reading in an isolated subagent. Best for: 'is X supported…\n- review [🧬 subagent] — Review the pending changes (current branch diff by default) in an isolated subagent — flags correctness, secur…\n- security-review [🧬 subagent] — Security-focused review of the current branch diff in an isolated subagent — flags injection/authz/se…\n- test — Run the project's test suite, diagnose failures, propose+apply fixes, re-run until green (or stop after 2 attempts on the sam…\n```"
+      "content": "BASE SYSTEM PROMPT\n\nUser-owned choices: when a consequential decision has no safe, obvious default, call the ask tool so the user can choose. Otherwise proceed with a sensible reversible default. Do not ask in prose when ask is available. In non-interactive runs, state the assumption and take the safest reversible path.\n\nWork practices: when the request or a linked discussion names a specific approach or expected behavior, implement exactly that; if you believe a different approach is better, state the trade-off explicitly instead of silently substituting it. Keep scratch work (repro scripts, probes, generated output) out of the repository — use a temp directory or clean up before finishing — and review the final diff before declaring done: only the intended changes, no leftovers, and no known regressions. Scale verification to the change: reproduce the problem and run the most relevant focused tests.\n\nReply in the same language the user is using in their most recent message: if they write in Chinese answer in Chinese, in English answer in English, and switch whenever they switch. Let this also guide the language you think in. Always keep code, identifiers, file paths, shell commands, and technical terms in their original form — never translate them.\n\nCurrent workspace: \"\u003cROOT\u003e\"\n\n# Skills — playbooks you can invoke\n\nOne-liner index. Before non-trivial work, scan it: if an untagged (inline) skill is even plausibly relevant to the task, invoke it before continuing instead of pre-judging — loading one imperfect inline skill is cheap. Skills tagged `[🧬 subagent]` are the heavy path; reach for them only when the task genuinely needs context-heavy work, not on weak relevance. Each entry is a built-in or a user-authored playbook. Call `run_skill({ name: \"\u003cskill-name\u003e\", arguments: \"\u003ctask\u003e\" })` — `name` is JUST the identifier (e.g. `\"explore\"`), NOT the `[🧬 subagent]` tag that follows it. Prefer the dedicated top-level tool when one exists for a built-in subagent skill. Entries tagged `[🧬 subagent]` spawn an isolated subagent — its tool calls and reasoning never enter your context, only its final answer does; use them for context-heavy work (deep exploration, multi-step research) where you only need the conclusion. Untagged skills are inlined: the body becomes a tool result you read and act on directly. The user can also invoke a skill via `/\u003cname\u003e`.\n\n```\n- explore [🧬 subagent] — Explore the codebase in an isolated subagent — wide-net read-only investigation that returns one distilled an…\n- init — Bootstrap or refresh this project's AGENTS.md — analyze the codebase (structure, build/test commands, architecture, conventio…\n- install-capability — Install or uninstall Reasonix MCP servers and skills from a URL, GitHub/raw file, local path/folder, .mcp.json,…\n- reasonix-guide — Troubleshoot and configure Reasonix capabilities: Skills (project/custom/global/builtin priority, discovery dirs), …\n- research [🧬 subagent] — Research a question by combining web_fetch + code reading in an isolated subagent. Best for: 'is X supported…\n- review [🧬 subagent] — Review the pending changes (current branch diff by default) in an isolated subagent — flags correctness, secur…\n- security-review [🧬 subagent] — Security-focused review of the current branch diff in an isolated subagent — flags injection/authz/se…\n- test — Run the project's test suite, diagnose failures, propose+apply fixes, re-run until green (or stop after 2 attempts on the sam…\n```"
     },
     {
       "role": "user",
@@ -238,6 +238,39 @@
         "required": [
           "evidence",
           "result"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "compress",
+      "description": "Compress a selected part of the current model-visible conversation without deleting visible history. Use only when the user explicitly asks for context compression. Choose `before` to summarize everything before the uniquely matched user turn while keeping that turn and later context, or `after` to summarize from that turn through the last completed turn while keeping the active turn. The anchor must be an exact, unique excerpt from a real user message; use a longer excerpt if the tool reports multiple matches.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "anchor": {
+            "description": "An exact, unique excerpt from one real user message in the current model-visible conversation.",
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "direction": {
+            "description": "Which side of the anchor user turn to compress.",
+            "enum": [
+              "before",
+              "after"
+            ],
+            "type": "string"
+          },
+          "focus": {
+            "description": "Optional guidance about facts or decisions the summary must preserve.",
+            "maxLength": 2000,
+            "type": "string"
+          }
+        },
+        "required": [
+          "anchor",
+          "direction"
         ],
         "type": "object"
       }
@@ -1291,6 +1324,14 @@
       "description": "Save a durable background fact so it survives across sessions. Use for things worth remembering long-term: who the user is and their preferences (type \"user\"); guidance on how to work, including the why (type \"feedback\"); ongoing goals or constraints not derivable from the code (type \"project\"); or pointers to external resources (type \"reference\"). For feedback/project, structure the body with a \"**Why:**\" line and a \"**How to apply:**\" line so the fact is actionable later; link related memories inline with [[their-name]]. Do NOT save what the repo already records (code structure, git history) or facts that only matter to the current conversation; if asked to remember one of those, save instead the non-obvious point behind it. Choose scope \"project\" for the current workspace (the safe default) or \"global\" only when the fact should affect every project. Standing rules that must always be followed belong in project or global REASONIX.md/AGENTS.md instructions, not background memory. Before saving, check the loaded memory index for an entry that already covers this — reuse that name to update it rather than create a near-duplicate, and use `forget` to drop one that is now wrong. The saved index loads into context at the start of each session.",
       "parameters": {
         "properties": {
+          "activation": {
+            "description": "How the fact reaches the model: relevant (the default) is retrieval-only; pinned loads the body into every session's stable prefix. Use pinned ONLY when the user explicitly asks for an always-available fact — pinned space is budget-limited, and rules that must always hold belong in REASONIX.md/AGENTS.md instructions instead. Omit on update to preserve the current choice.",
+            "enum": [
+              "relevant",
+              "pinned"
+            ],
+            "type": "string"
+          },
           "body": {
             "description": "The fact itself (Markdown). For feedback/project, include a \"**Why:**\" line and a \"**How to apply:**\" line; link related memories with [[their-name]].",
             "type": "string"
@@ -1304,8 +1345,16 @@
             "minimum": 1,
             "type": "integer"
           },
+          "expires_at": {
+            "description": "Hard expiry as RFC3339 or YYYY-MM-DD. Past this moment the fact stops being auto-recalled entirely. Set it when the fact has a known end of life. Omit on update to preserve; \"never\" clears an existing expiry.",
+            "type": "string"
+          },
           "id": {
             "description": "Stable memory id for an update. Prefer this over name when supplied by memory search/read.",
+            "type": "string"
+          },
+          "keywords": {
+            "description": "Space-separated search aliases a future query might use where the body's own words would miss: synonyms, translations of key terms (recall matching is lexical, so give Chinese facts English aliases and vice versa), related command or tool names. Omit when the body already carries the likely query words. When updating, omit to preserve existing keywords.",
             "type": "string"
           },
           "name": {
@@ -1320,6 +1369,10 @@
             ],
             "type": "string"
           },
+          "subject_key": {
+            "description": "Dotted key naming the question this fact answers, e.g. project.package_manager, project.release_branch, user.response_style. One active value per scope+subject: saving a new fact for a held subject is rejected with the holder's id — update that id so the change becomes a revision, not a contradiction. Search existing memories first and reuse their keys; omit for narrative facts that are not a single-valued answer.",
+            "type": "string"
+          },
           "title": {
             "description": "Short human-readable label shown in the memory index, e.g. \"Prefers tabs\". Omit to derive one from the name.",
             "type": "string"
@@ -1331,6 +1384,19 @@
               "feedback",
               "project",
               "reference"
+            ],
+            "type": "string"
+          },
+          "verified": {
+            "description": "Set true only when you have JUST re-confirmed the fact still holds (checked the file, ran the command). Renews the freshness clock without changing the meaning of updated_at.",
+            "type": "boolean"
+          },
+          "volatility": {
+            "description": "How fast the fact ages, independent of type: volatile for facts that die in days (a current release branch, this week's task), stable for slow-changing ones, evergreen for facts that never age (a README location, a fixed preference). Omit to use the type default, or on update to preserve the current choice.",
+            "enum": [
+              "evergreen",
+              "stable",
+              "volatile"
             ],
             "type": "string"
           }
@@ -1554,9 +1620,36 @@
     },
     {
       "name": "update_goal",
-      "description": "Report this turn's disposition for the active goal. Call it at the end of every goal turn instead of using prose markers: `continue` (work is ongoing — give a concrete next_action), `complete` (the request is fully done, output format and constraints satisfied, and verification was attempted or reported unavailable), or `blocked` (only the user can unblock: missing user-only information, an irreversible/externally visible operation, or changed scope). The host validates your claim against Delivery acceptance criteria and decides whether to continue automatically. Fields: `status` (required, one of continue|complete|blocked), `reason` (required for continue and blocked, optional for complete), `next_action` (optional concrete next step; recommended for continue).",
+      "description": "Report this turn's disposition for the active goal. Call it at the end of every goal turn instead of using prose markers: `continue` (work is ongoing — give a concrete next_action), `complete` (the request is fully done, output format and constraints satisfied, and verification was attempted or reported unavailable), or `blocked` (only the user can unblock: missing user-only information, an irreversible/externally visible operation, or changed scope). The host validates your claim against Delivery acceptance criteria and decides whether to continue automatically. Fields: `status` (required, one of continue|complete|blocked), `reason` (required for continue and blocked, optional for complete), `next_action` (optional concrete next step; recommended for continue), `completion` (recommended with complete: `verified` is checked against real receipts, while `unverified` and `risks` are yours to declare and never count against you).",
       "parameters": {
         "properties": {
+          "completion": {
+            "description": "Your own account of the finished work.",
+            "properties": {
+              "risks": {
+                "description": "Known risks to carry forward.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "unverified": {
+                "description": "What you did NOT verify. The host cannot infer what you skipped, so stating it is the only way it is known — and it never blocks completion.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "verified": {
+                "description": "Commands you ran as proof, as they actually ran. One that never ran, failed, or predates your latest change is recorded as an unbacked claim.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "type": "object"
+          },
           "next_action": {
             "description": "Optional concrete next step. Recommended for continue so the host can guide the next turn.",
             "type": "string"

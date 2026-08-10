@@ -5,10 +5,13 @@ import { DiffView } from "./DiffView";
 import { useT } from "../lib/i18n";
 import { diffsFor, languageForToolArgs, subjectOf, summarize, summarizeFileDiff } from "../lib/tools";
 import { useShellExpand } from "../lib/shellExpand";
-import { useGSAPCollapse } from "../lib/useGSAPCollapse";
+import { app } from "../lib/bridge";
+import { useCollapseAnimation } from "../lib/useCollapseAnimation";
 import { isTerminalSubagentPhase, type Item, type SubagentPhase } from "../lib/useController";
 import type { Translator } from "../lib/i18n";
 import { ReadOnlyBatch } from "./ReadOnlyBatch";
+import { Markdown } from "./Markdown";
+import { ReasoningSummary } from "./ReasoningSummary";
 
 type ToolItem = Extract<Item, { kind: "tool" }>;
 
@@ -48,6 +51,76 @@ function pretty(json: string): string {
 function formatToolDuration(ms?: number): string {
   if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "";
   return `${Math.round(ms)} ms`;
+}
+
+function shellDisplayName(execution?: { shell?: string; shellVersion?: string }): string {
+  switch (execution?.shell) {
+    case "git-bash":
+      return "Git Bash";
+    case "powershell":
+      return "Windows PowerShell";
+    case "pwsh":
+      return "PowerShell 7+";
+    case "bash":
+      return "bash";
+    default:
+      return execution?.shell || "bash";
+  }
+}
+
+function shellSettledSummary(
+  t: Translator,
+  execution: NonNullable<ToolItem["execution"]>,
+  durationMs?: number,
+): string {
+  const parts: string[] = [];
+  if (typeof execution.exitCode === "number") {
+    parts.push(t("tool.shell.exitCode", { code: execution.exitCode }));
+  }
+  if (execution.failurePhase) {
+    parts.push(execution.failurePhase);
+  }
+  const ms = execution.durationMs || durationMs;
+  if (typeof ms === "number" && Number.isFinite(ms) && ms >= 0) {
+    parts.push(formatToolDuration(ms));
+  }
+  return parts.join(" · ");
+}
+
+function shellVerificationLabel(t: Translator, verification?: string): string {
+  switch (verification) {
+    case "passed":
+      return t("tool.shell.verificationPassed");
+    case "failed":
+      return t("tool.shell.verificationFailed");
+    case "not_run":
+      return t("tool.shell.verificationNotRun");
+    default:
+      return "";
+  }
+}
+
+function shellRiskLabel(t: Translator, execution?: ToolItem["execution"]): string {
+  if (!execution) return "";
+  const phase = execution.failurePhase || "";
+  // Pre-run / not-started phases never touched disk.
+  if (phase === "preflight" || phase === "authorization" || phase === "dependency" || phase === "launch") {
+    return t("tool.shell.notExecuted");
+  }
+  // Backend marks failed, timed_out, and cancelled execution as may_be_partial
+  // when the process may already have written files. Show the warning for any
+  // such risk, not only state=failed.
+  if (execution.mutationRisk === "may_be_partial") {
+    return t("tool.shell.mayBePartial");
+  }
+  return "";
+}
+
+function firstTailLine(tail?: string): string {
+  if (!tail) return "";
+  const line = tail.replace(/\r\n/g, "\n").trim().split("\n")[0]?.trim() ?? "";
+  if (line.length <= ERROR_SUMMARY_MAX_CHARS) return line;
+  return `${line.slice(0, ERROR_SUMMARY_MAX_CHARS - 1)}…`;
 }
 
 function formatArgChars(chars: number): string {
@@ -144,16 +217,26 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   openRef.current = open;
   const [showAll, setShowAll] = useState(false);
   const [showErrorDetails, setShowErrorDetails] = useState(false);
+  // The sub-agent reasoning preview opens as a one-line summary; the full
+  // Markdown only mounts after the user expands the reasoning section.
+  const [subagentReasoningOpen, setSubagentReasoningOpen] = useState(false);
   // Lazy-load full tool data from the backend when the card is expanded and
   // the in-memory copy was archived for memory efficiency.
-  const [fullData, setFullData] = useState<{ args: string; output?: string } | null>(null);
+  const [fullData, setFullData] = useState<{ args: string; output?: string; execution?: ToolItem["execution"] } | null>(null);
   const archivedWithoutFullData = Boolean(item.dataArchived && !fullData);
   const effectiveArgs = archivedWithoutFullData ? "" : fullData?.args ?? item.args;
   const effectiveOutput = fullData?.output ?? item.output;
+  const execution = fullData?.execution ?? item.execution;
+  const isShellCard = Boolean(item.isShell || item.name === "bash" || execution);
   const displayOutput = toolOutputDuplicatesError(effectiveOutput, item.error) ? undefined : effectiveOutput;
   const previewDiff = item.fileDiff?.diff ? item.fileDiff : undefined;
   const diffs = previewDiff || archivedWithoutFullData ? [] : diffsFor(item.name, effectiveArgs);
   const subject = fullData ? subjectOf(item.name, effectiveArgs) : item.subject || subjectOf(item.name, effectiveArgs);
+  const shellName = isShellCard ? shellDisplayName(execution) : (displayName ?? item.name);
+  const shellSummary = execution && item.status !== "running" ? shellSettledSummary(t, execution, item.durationMs) : "";
+  const verificationLabel = shellVerificationLabel(t, execution?.verification);
+  const riskLabel = shellRiskLabel(t, execution);
+  const tailSummary = firstTailLine(execution?.outputTail);
   // Reset cached fullData when the item identity changes (e.g. after rewind).
   useEffect(() => {
     return () => setFullData(null);
@@ -166,20 +249,19 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const hasArgsOrOutput = !previewDiff && diffs.length === 0 && (!!effectiveArgs || !!displayOutput || hasArchivedOnDemandBody);
 
   // Shell output: split into preview + "show all" toggle.
-  const shellOutput = item.isShell && displayOutput ? displayOutput : null;
+  const shellOutput = isShellCard && displayOutput ? displayOutput : null;
   const shellPreview = shellOutput ? splitPreview(shellOutput, SHELL_PREVIEW_LINES) : null;
-  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error || hasSubagentPreview);
+  const hasStderrDetails = Boolean(execution?.outputTail && execution.outputTail.trim());
+  const hasBody = Boolean(previewDiff || diffs.length || hasNested || shellPreview || (!shellPreview && hasArgsOrOutput) || item.error || hasSubagentPreview || hasStderrDetails || riskLabel || verificationLabel);
   const errorText = item.error ? normalizeErrorText(item.error) : "";
   const errorSummary = errorText ? summarizeToolError(errorText, t("tool.errorReceiptMismatch")) : "";
   const hasErrorDetails = errorText ? errorNeedsDetails(errorText, errorSummary) : false;
   useEffect(() => {
     if (!open || !item.dataArchived || fullData || !tabId) return;
     let cancelled = false;
-    import("../lib/bridge").then(({ app }) =>
-      app.ToolResultForTab(tabId, item.id).then((d) => {
-        if (!cancelled && d) setFullData(d);
-      }).catch(() => {}),
-    ).catch(() => {});
+    void app.ToolResultForTab(tabId, item.id).then((d) => {
+      if (!cancelled && d) setFullData(d);
+    }).catch(() => {});
     return () => { cancelled = true; };
   }, [open, item.id, item.dataArchived, fullData, tabId]);
 
@@ -188,9 +270,9 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   // registered closure flipping the current state, not a stale one.
   const shellExpand = useShellExpand();
   useEffect(() => {
-    if (!item.isShell || !shellExpand) return;
+    if (!isShellCard || !shellExpand) return;
     return shellExpand.register(item.id, () => setUserOpen(!openRef.current));
-  }, [item.isShell, item.id, shellExpand]);
+  }, [isShellCard, item.id, shellExpand]);
 
   // Read-only "research" calls (read/grep/ls/glob/web_fetch) are hidden after
   // completion so they don't clutter the transcript. During execution they still
@@ -198,27 +280,33 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
   const quiet =
     item.readOnly && !hasNested && item.status !== "error" && item.status !== "stopped";
 
-  const duration = item.status === "running" ? "" : formatToolDuration(item.durationMs);
+  const duration = item.status === "running" ? "" : (shellSummary || formatToolDuration(item.durationMs));
   // While the model is still streaming this call's arguments (partial
   // dispatch), show the received volume as the live subject so a long
   // write_file body reads as progress instead of a silent stall.
   const streamingArgs = item.status === "running" && !item.args && (item.argChars ?? 0) > 0
     ? t("tool.receivingArgs", { chars: formatArgChars(item.argChars ?? 0) })
     : "";
-  const summary = item.status === "running" ? streamingArgs : item.summary || summarizeFileDiff(item.fileDiff) || (item.error ? errorSummary : archivedWithoutFullData ? "" : summarize(item.name, effectiveArgs, displayOutput, item.error));
+  const summary = item.status === "running"
+    ? streamingArgs
+    : (verificationLabel || item.summary || summarizeFileDiff(item.fileDiff) || (item.error ? (tailSummary || errorSummary) : archivedWithoutFullData ? "" : summarize(item.name, effectiveArgs, displayOutput, item.error)));
+  const a11yLabel = isShellCard
+    ? `${shellName} ${item.status}${shellSummary || summary ? ` ${shellSummary || summary}` : ""}`
+    : undefined;
 
-  // GSAP-driven collapse/expand for tool body
+  // Native collapse/expand for the tool body.
   const toolBodyRef = useRef<HTMLDivElement>(null);
-  useGSAPCollapse(toolBodyRef, open);
+  useCollapseAnimation(toolBodyRef, open);
 
   return (
-    <div className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}${open && hasBody ? " tool--open" : ""}`} data-entrance={item.id}>
+    <div className={`tool${quiet ? " tool--quiet" : ""}${isSubagent ? " tool--subagent" : ""}${open && hasBody ? " tool--open" : ""}`} data-entrance={item.id} data-shell={isShellCard ? execution?.shell || "bash" : undefined}>
       <button
         type="button"
         className="tool__head"
         data-running={item.status === "running" ? "" : undefined}
         onClick={() => hasBody && setUserOpen(!open)}
         aria-expanded={hasBody ? open : undefined}
+        aria-label={a11yLabel}
       >
         <span className="tool__label-group">
           {hasNested && (
@@ -230,7 +318,7 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           {item.status === "error" && <span className="tool__status-icon tool__status-icon--err">✗</span>}
           {item.status === "done" && <span className="tool__status-icon tool__status-icon--ok">✓</span>}
           {item.status === "stopped" && <span className="tool__status-icon tool__status-icon--stopped">—</span>}
-          <span className="tool__name">{displayName ?? item.name}</span>
+          <span className="tool__name">{isShellCard ? shellName : (displayName ?? item.name)}</span>
           {subject && <span className="tool__subject">{subject}</span>}
         </span>
         {profileText && <span className="tool__profile">{profileText}</span>}
@@ -268,12 +356,29 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           ))
         )}
 
-        {hasSubagentPreview && sp && (
+        {open && hasSubagentPreview && sp && (
           <div className="tool__subagent-preview">
             {sp.reasoning && (
               <div className="tool__subagent-preview-section">
-                <div className="tool__subagent-preview-label">{t("subagent.preview.reasoning")}</div>
-                <pre className="tool__subagent-preview-text">{sp.reasoning}</pre>
+                <button
+                  type="button"
+                  className="tool__subagent-preview-label tool__subagent-preview-label--toggle"
+                  onClick={() => setSubagentReasoningOpen((v) => !v)}
+                  aria-expanded={subagentReasoningOpen}
+                >
+                  {t("subagent.preview.reasoning")}
+                </button>
+                {subagentReasoningOpen ? (
+                  <div className="tool__subagent-preview-text tool__subagent-preview-text--markdown">
+                    <Markdown text={sp.reasoning} streaming={sp.phase === "reasoning"} />
+                  </div>
+                ) : (
+                  <ReasoningSummary
+                    text={sp.reasoning}
+                    streaming={sp.phase === "reasoning"}
+                    onOpen={() => setSubagentReasoningOpen(true)}
+                  />
+                )}
               </div>
             )}
             {sp.text && (
@@ -316,6 +421,12 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
           </div>
         )}
 
+        {isShellCard && (riskLabel || verificationLabel) && (
+          <div className="tool__note" role="status">
+            {[riskLabel, verificationLabel].filter(Boolean).join(" · ")}
+          </div>
+        )}
+
         {shellPreview && (
           <>
             <CodeViewer value={showAll ? shellOutput! : shellPreview.preview} maxHeight={showAll ? 480 : 260} />
@@ -326,6 +437,13 @@ export const ToolCard = memo(function ToolCard({ item, subcalls, tabId, displayN
             )}
             {item.truncated && <div className="tool__note">{t("tool.truncated")}</div>}
           </>
+        )}
+
+        {hasStderrDetails && (
+          <details className="tool__error-details">
+            <summary>{tailSummary || t("tool.showErrorDetails")}</summary>
+            <CodeViewer value={execution!.outputTail!} maxHeight={240} />
+          </details>
         )}
 
         {!shellPreview && hasArgsOrOutput && (

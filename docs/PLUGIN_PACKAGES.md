@@ -256,16 +256,25 @@ Plugin hook execution is explicit:
   Reasonix shell-command behavior. `shellCommand: true` remains supported as
   the legacy spelling of shell form.
 
-## Manifest v1 (Extensions)
+## Manifest v2 (Extensions)
 
-A plugin can opt into the v1 manifest by declaring an `apiVersion`:
+Native Reasonix extensions use the exact v2 `apiVersion`:
 
 ```json
 {
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "example",
   "version": "1.0.0",
   "description": "Example extension",
+  "requires": [],
+  "provides": [
+    {
+      "namespace": "plugin/example",
+      "kind": "interceptors",
+      "id": "default",
+      "version": "1.0.0"
+    }
+  ],
   "contributes": {
     "skills": ["skills"],
     "agents": ["agents"],
@@ -282,21 +291,31 @@ A plugin can opt into the v1 manifest by declaring an `apiVersion`:
     "required": true,
     "priority": 0,
     "intercepts": ["input.receive", "tool.before"],
-    "replaces": ["system_prompt"],
-    "capabilities": ["interceptors", "strategies", "providers", "ui"]
+    "replaces": [],
+    "capabilities": ["interceptors"]
   }
 }
 ```
 
 Parsing rules:
 
-- Manifests **without** `apiVersion` parse exactly as before (legacy format,
-  unknown fields ignored).
-- v1 is strict: any unknown field — at the root or nested under
+- Native `reasonix-plugin.json` manifests must declare the exact
+  `reasonix.io/plugin/v2` value. v1 and missing versions are rejected; there
+  is no v1 dual-read or automatic migration path.
+- v2 is strict: any unknown field — at the root or nested under
   `contributes`/`runtime` — is an error naming the field path, so typos fail
   loudly instead of silently disabling a capability.
-- Unknown major versions (`reasonix.io/plugin/v2`, …) are rejected.
-- v1 may mix legacy top-level fields (`skills`, `hooks`, `mcpServers`, …)
+- v2 resource discovery is explicit. Reasonix loads only the skills, agents,
+  commands, prompts, hooks, MCP servers, themes, and runtime declared by the
+  native manifest. Host-specific sidecars such as a root `CLAUDE.md`,
+  `hooks/hooks.json`, `.claude/settings.json`, or `.mcp.json` are not imported
+  implicitly.
+- Minor aliases (`reasonix.io/plugin/v2.0`, `v2.1`, …) and unknown major
+  versions are rejected.
+- `requires` and `provides` declare dependency constraints and the capability
+  ceiling enforced against the Sidecar handshake.
+- v2 may mix the supported top-level resource fields (`skills`, `hooks`,
+  `mcpServers`, …)
   with `contributes`: identical paths are deduplicated; the same key with two
   different definitions is a manifest error naming the key.
 - All relative paths and globs must stay inside the plugin root: traversal,
@@ -373,8 +392,10 @@ before anything is written. Set the optional install name to a marketplace
 plugin name to select only that entry. Object sources are accepted only for a
 GitHub repository URL pinned to a full commit SHA. Unpinned external strings,
 npm, `strict: false`, and other advanced marketplace protocols are skipped in
-a bulk install and rejected when selected by name. For packages
-such as Superpowers and Claude-style skill packs, Reasonix maps:
+a bulk install and rejected when selected by name. For packages such as
+Superpowers and Claude-style skill packs, Reasonix maps the following
+compatibility conventions. Native v2 manifests use only their explicit
+declarations and do not apply these fallbacks:
 
 - `skills` to Reasonix skill roots. A Claude manifest that declares no
   `skills` field falls back to the conventional `skills/` (or `.claude/skills/`)
@@ -402,8 +423,10 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   Agents use `/<plugin>:agent:<name>`, so an upstream agent and skill may share
   the same name without shadowing one another.
 - `hooks/session-start-codex` to the Reasonix `SessionStart` hook when present.
-- A plugin-root `CLAUDE.md` file to a built-in `SessionStart` context hook. The
-  file is read directly by Reasonix, without spawning a shell command.
+- For Codex compatibility packages, a plugin-root `CLAUDE.md` file to a built-in
+  `SessionStart` context hook. The file is read directly by Reasonix, without
+  spawning a shell command. Claude plugin manifests ignore this file, matching
+  Claude Code's plugin contract.
 - `.claude/settings.json` and `hooks/hooks.json` command hooks to Reasonix hook
   events when the event names match. `matcher`, `args`, `shell`, `async`,
   `env`, and timeout are preserved. Claude's execution contract is retained:
@@ -451,7 +474,9 @@ such as Superpowers and Claude-style skill packs, Reasonix maps:
   unbraced `$NAME` and Windows `%NAME%` spellings), so plugin-relative paths
   do not depend on the target shell's environment-variable syntax. On Windows,
   shell-form hooks without an explicit shell use the same Git Bash-first,
-  PowerShell-fallback selection as Reasonix's shell tool. Explicit Bash hooks
+  PowerShell-fallback selection as Reasonix's shell tool; when a hook points to
+  a POSIX-shebang script file, the host also converts Windows paths to a Bash-
+  compatible form. Explicit Bash hooks
   and legacy bare `sh -c`/`bash -c` hooks are routed through a discovered Git
   for Windows Bash even when it is not on `cmd.exe`'s `PATH`; an explicit
   interpreter path remains untouched. If no usable Bash is installed, the hook

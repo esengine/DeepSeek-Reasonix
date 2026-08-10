@@ -61,8 +61,13 @@ type updateSink struct {
 	// reasonix.extensionSurface support: structured surfaces go out as vendor
 	// session/update payloads on top of the always-sent text fallback.
 	extensionSurface bool
-	mu               sync.Mutex
-	turnCtx          context.Context
+	// speculativeToolIDs tracks parent-sampling tool IDs published under the
+	// active stream_attempt (attempt-scoped partials only). Guarded by mu —
+	// parent sampling and background sub-agents may Emit concurrently.
+	speculativeToolIDs map[string]struct{}
+	activeAttemptID    string
+	mu                 sync.Mutex
+	turnCtx            context.Context
 }
 
 func newUpdateSink(conn notifier, sessionID string) *updateSink {
@@ -137,12 +142,30 @@ func (s *updateSink) Emit(e event.Event) {
 		}
 		s.send(messageChunk{SessionUpdate: "agent_message_chunk", Content: textBlock(e.Text)})
 
+	case event.StreamAttempt:
+		// Attempt bookkeeping only. ACP still skips partial ToolDispatch (no
+		// pending card until full args arrive after commit), so discard must not
+		// invent failures for unpublished IDs. Full dispatches and parentId
+		// nested tools are real work and are never speculative.
+		s.mu.Lock()
+		switch e.StreamAttempt.Action {
+		case event.StreamAttemptBegin:
+			s.activeAttemptID = e.StreamAttempt.ID
+			s.speculativeToolIDs = nil
+		case event.StreamAttemptCommit, event.StreamAttemptDiscard:
+			s.activeAttemptID = ""
+			s.speculativeToolIDs = nil
+		}
+		s.mu.Unlock()
+
 	case event.ToolDispatch:
 		// Skip the early (Partial) dispatch and later same-ID preview refresh: ACP
 		// expects one pending tool_call and has no file-diff update payload.
 		if e.Tool.Partial || e.Tool.Refreshed {
 			return
 		}
+		// Full dispatches only arrive after a committed sampling attempt (or from
+		// nested sub-agents). Never mark them speculative.
 		// todo_write is the agent's task list; mirror it as an ACP plan update so
 		// the client renders structured progress alongside the tool_call.
 		if e.Tool.Name == "todo_write" {
@@ -166,6 +189,11 @@ func (s *updateSink) Emit(e event.Event) {
 		if e.Tool.Err != "" {
 			status = "failed"
 			text = e.Tool.Err
+		}
+		if e.Tool.ID != "" {
+			s.mu.Lock()
+			delete(s.speculativeToolIDs, e.Tool.ID)
+			s.mu.Unlock()
 		}
 		s.send(toolCallUpdateMsg{
 			SessionUpdate: "tool_call_update",

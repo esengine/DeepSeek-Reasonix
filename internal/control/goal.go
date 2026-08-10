@@ -6,18 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"reasonix/internal/agent"
 	"reasonix/internal/evidence"
-	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/goaleval"
-	"reasonix/internal/provider"
 	"reasonix/internal/store"
+	"reasonix/internal/taskintent"
 	"reasonix/internal/tool"
 )
 
@@ -30,65 +28,56 @@ const (
 	defaultNoProgressLimit = 4
 )
 
-// Budget classes. The class only selects turn/token quotas; it never gates
-// permissions or whether writes are allowed.
+// Budget class aliases; classification and quotas live in taskintent.
 const (
-	budgetClassSimple   = "simple"
-	budgetClassWrite    = "write"
-	budgetClassResearch = "research"
+	budgetClassSimple   = taskintent.BudgetClassSimple
+	budgetClassWrite    = taskintent.BudgetClassWrite
+	budgetClassResearch = taskintent.BudgetClassResearch
 )
 
-// Stop causes distinguish a safe pause (blocked + stopCause) from a genuine
-// task block (blocked with empty stopCause). Old clients see blocked either
-// way and never fail open.
+// Stop causes distinguish a safe pause from a genuine block. Old clients see
+// blocked either way. stopCauseBudgetTokens is only for recognizing and
+// auto-resuming old token-limit pauses.
 const (
-	stopCauseBudgetTurns  = "budget_turns"
-	stopCauseBudgetTokens = "budget_tokens"
-	stopCauseNoProgress   = "no_progress"
-	stopCauseEvaluator    = "evaluator_unavailable"
-	stopCauseManual       = "manual"
+	stopCauseBudgetTurns   = "budget_turns"
+	stopCauseBudgetTokens  = "budget_tokens" // legacy; never written by current runtime
+	stopCauseNoProgress    = "no_progress"
+	stopCauseEvaluator     = "evaluator_unavailable"
+	stopCauseLegacyArchive = "legacy_archive"
+	stopCauseManual        = "manual"
 )
 
-// budgetQuota returns the default turn/token quota for a budget class.
-func budgetQuota(class string) (turns, tokens int) {
-	switch class {
-	case budgetClassResearch:
-		return 40, 800_000
-	case budgetClassWrite:
-		return 20, 400_000
-	default:
-		return 10, 200_000
-	}
+// budgetQuota returns the default turn quota for a budget class. Token hard
+// limits were removed; callers no longer receive a token ceiling.
+func budgetQuota(class string) (turns int) {
+	return taskintent.BudgetTurns(class)
 }
 
-// budgetClassFor derives a goal's budget class: AutoResearch always means
-// research; otherwise the existing task-intent classification decides whether
-// the goal requires mutation (write) or not (simple).
-func budgetClassFor(goal string, researchMode GoalResearchMode) string {
-	if shouldUseAutoResearch(goal, researchMode) {
+// budgetClassForLegacyMode translates old sidecars and deprecated CLI flags at
+// the compatibility boundary. The active Goal runtime stores only budgetClass.
+func budgetClassForLegacyMode(goal string, researchMode GoalResearchMode) string {
+	switch researchMode {
+	case GoalResearchOn:
 		return budgetClassResearch
+	case GoalResearchOff:
+		if taskintent.GoalNeedsWriteBudget(goal) {
+			return budgetClassWrite
+		}
+		return budgetClassSimple
+	default:
+		return taskintent.ClassifyGoalBudget(goal)
 	}
-	if agent.TaskNeedsMutation(goal) {
-		return budgetClassWrite
-	}
-	return budgetClassSimple
 }
 
-// goalMachine owns the active goal's finite-state machine and its persistence.
-// It is a strict leaf: its methods take only the machine's own locks and never
-// call back into the Controller, so the controller may hold c.mu while invoking
-// a getter without risking lock inversion. The FSM is pure — advance() takes
-// already-gathered inputs (the update_goal report, readiness, evaluator verdict,
-// budget/progress state) and returns what to persist plus a notice, so no disk
-// or executor work happens under mu.
+// goalMachine owns the active goal FSM and its persistence. It is a strict
+// leaf: methods take only machine locks and never call back into Controller.
+// advance() takes already-gathered inputs so no disk/executor work holds mu.
 type goalMachine struct {
 	// mu guards the FSM fields below; every critical section under it is short
 	// and non-blocking (no disk I/O, no executor calls).
 	mu                 sync.Mutex
 	goal               string
 	status             string
-	researchMode       GoalResearchMode
-	autoResearchTaskID string
 	scopeID            string
 	deliveryCheckpoint evidence.DeliveryCheckpoint
 	block              string
@@ -96,17 +85,24 @@ type goalMachine struct {
 	continuationEpoch  uint64
 
 	// Runtime budget state, persisted across turns and restarts.
+	// tokensUsed is observational only (no hard limit). tokensLimit is kept at
+	// 0 for wire/sidecar compatibility and is never enforced.
 	budgetClass            string
 	turnsUsed              int
 	turnsLimit             int
 	tokensUsed             int
-	tokensLimit            int
+	tokensLimit            int // always 0 at runtime; deprecated hard limit
 	noProgressTurns        int
 	noProgressLimit        int
 	lastContinuationReason string
 	lastEvaluatorReason    string
 	stopCause              string
-	budgetExtensions       int
+	budgetExtensions       int // turn extensions from resume (compat field name)
+	// legacyTaskID is retained only while a historical AutoResearch archive is
+	// awaiting migration. It is serialized on fail-closed blocked sidecars so a
+	// restart can retry the migration without treating the raw archive path as a
+	// new Goal.
+	legacyTaskID string
 
 	// statePath is the persisted goal-state sidecar; empty disables persistence.
 	statePath string
@@ -144,33 +140,19 @@ type goalState struct {
 	BudgetExtensions       int    `json:"budgetExtensions,omitempty"`
 }
 
-// goalMachineSnapshot is an in-memory rollback point for durable Goal updates.
-// Persistence paths and mutexes are deliberately excluded.
-type goalMachineSnapshot struct {
-	goal               string
-	status             string
-	researchMode       GoalResearchMode
-	autoResearchTaskID string
-	scopeID            string
-	deliveryCheckpoint evidence.DeliveryCheckpoint
-	block              string
-	strict             bool
-}
-
 // goalAdvanceInput carries everything the FSM needs for one continuation step,
 // gathered by the caller off the machine's lock. The FSM is the exclusive
 // decision point: it applies readiness, budget, and no-progress gates and
 // decides complete / continue / blocked / pause.
 type goalAdvanceInput struct {
-	report               *goalTurnReport // validated update_goal report; nil when none
-	readiness            agent.ReadinessResult
-	evaluator            *goalEvaluatorVerdict // evaluator verdict; nil when not run
-	evaluatorFailed      string                // evaluator error/timeout text; pause fail-closed
-	budgetRequestBlocked string                // request-level budget admission failure; pause before another provider call
-	todos                []evidence.TodoItem
-	progressBefore       string // host progress signature captured before the turn
-	progressAfter        string // host progress signature captured after the turn
-	expectedEpoch        *uint64
+	report          *goalTurnReport // validated update_goal report; nil when none
+	readiness       agent.ReadinessResult
+	evaluator       *goalEvaluatorVerdict // evaluator verdict; nil when not run
+	evaluatorFailed string                // evaluator error/timeout text; pause fail-closed
+	todos           []evidence.TodoItem
+	progressBefore  string // host progress signature captured before the turn
+	progressAfter   string // host progress signature captured after the turn
+	expectedEpoch   *uint64
 }
 
 // goalEvaluatorVerdict is the bounded evaluator's structured outcome.
@@ -198,10 +180,8 @@ type goalAdvanceResult struct {
 // state admitted for its synthetic turn. The orchestrator uses these captured
 // fields throughout the turn instead of re-reading a possibly replaced Goal.
 type goalContinuationSnapshot struct {
-	goal               string
-	researchMode       GoalResearchMode
-	autoResearchTaskID string
-	scopeID            string
+	goal    string
+	scopeID string
 }
 
 // goalStatePath derives a session's persisted goal-state sidecar.
@@ -215,47 +195,17 @@ func (g *goalMachine) setStatePath(path string) {
 	g.mu.Unlock()
 }
 
-func (g *goalMachine) capture() goalMachineSnapshot {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return goalMachineSnapshot{
-		goal: g.goal, status: g.status, researchMode: g.researchMode,
-		autoResearchTaskID: g.autoResearchTaskID, scopeID: g.scopeID,
-		deliveryCheckpoint: g.deliveryCheckpoint, block: g.block,
-		strict: g.strict,
-	}
-}
-
-func (g *goalMachine) restore(snapshot goalMachineSnapshot) {
-	g.mu.Lock()
-	g.goal, g.status, g.researchMode = snapshot.goal, snapshot.status, snapshot.researchMode
-	g.autoResearchTaskID, g.scopeID = snapshot.autoResearchTaskID, snapshot.scopeID
-	g.deliveryCheckpoint, g.block = snapshot.deliveryCheckpoint, snapshot.block
-	g.strict = snapshot.strict
-	g.continuationEpoch++
-	g.mu.Unlock()
-}
-
 // snapshot returns the fields Compose injects into outgoing turns.
-func (g *goalMachine) snapshot() (goal, status string, mode GoalResearchMode, autoResearchTaskID string) {
+func (g *goalMachine) snapshot() (goal, status string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.goal, g.status, g.researchMode, g.autoResearchTaskID
+	return g.goal, g.status
 }
 
 func (g *goalMachine) goalText() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.goal
-}
-
-func (g *goalMachine) currentAutoResearchTaskID() string {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if strings.TrimSpace(g.goal) == "" || g.status != GoalStatusRunning {
-		return ""
-	}
-	return g.autoResearchTaskID
 }
 
 // continuationToken captures the Goal lifecycle that owns an outgoing turn.
@@ -315,25 +265,58 @@ func (g *goalMachine) statusForDisplay() string {
 	return g.status
 }
 
-// budgetExhausted reports whether the goal's turn or token budget is spent.
+// budgetExhausted reports whether the goal's turn budget is spent. Token usage
+// never exhausts the goal by itself.
 func (g *goalMachine) budgetExhausted() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return (g.turnsLimit > 0 && g.turnsUsed >= g.turnsLimit) ||
-		(g.tokensLimit > 0 && g.tokensUsed >= g.tokensLimit)
+	return g.turnsLimit > 0 && g.turnsUsed >= g.turnsLimit
 }
 
 // set installs a session-scoped goal (or clears it when goal is empty), resets
 // the per-goal budget/runtime counters, and returns the state to persist. ok is
 // false (no persistence) when the goal is unchanged or no state path is
 // configured.
-func (g *goalMachine) set(goal string, mode GoalResearchMode, autoResearchTaskID string, todos []evidence.TodoItem) (string, []byte, bool) {
+func (g *goalMachine) set(goal, preferredBudgetClass string, todos []evidence.TodoItem) (string, []byte, bool) {
 	goal = strings.TrimSpace(goal)
+	if goal != "" && preferredBudgetClass == "" {
+		preferredBudgetClass = taskintent.ClassifyGoalBudget(goal)
+	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if goal != "" && g.goal == goal && g.status == GoalStatusRunning && g.researchMode == mode && g.autoResearchTaskID == autoResearchTaskID {
+	if goal != "" && g.goal == goal && g.status == GoalStatusRunning && g.budgetClass == preferredBudgetClass {
 		return "", nil, false
 	}
+	g.installGoalLocked(goal, preferredBudgetClass)
+	return g.buildStateLocked(todos)
+}
+
+// setLegacyArchiveBlocked atomically installs and blocks an explicit legacy
+// archive goal. A concurrent Goal replacement cannot be blocked between two
+// separate FSM mutations.
+func (g *goalMachine) setLegacyArchiveBlocked(goal, preferredBudgetClass, reason string, todos []evidence.TodoItem) (string, []byte, bool) {
+	return g.setLegacyArchiveBlockedWithTaskID(goal, preferredBudgetClass, reason, "", todos)
+}
+
+func (g *goalMachine) setLegacyArchiveBlockedWithTaskID(goal, preferredBudgetClass, reason, taskID string, todos []evidence.TodoItem) (string, []byte, bool) {
+	goal = strings.TrimSpace(goal)
+	taskID = strings.TrimSpace(taskID)
+	if goal != "" && preferredBudgetClass == "" {
+		preferredBudgetClass = taskintent.ClassifyGoalBudget(goal)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.installGoalLocked(goal, preferredBudgetClass)
+	if goal != "" {
+		g.status = GoalStatusBlocked
+	}
+	g.stopCause = stopCauseLegacyArchive
+	g.block = clipGoalReason(reason)
+	g.legacyTaskID = taskID
+	return g.buildStateLocked(todos)
+}
+
+func (g *goalMachine) installGoalLocked(goal, preferredBudgetClass string) {
 	g.continuationEpoch++
 	g.turnsUsed, g.tokensUsed, g.noProgressTurns = 0, 0, 0
 	g.block = ""
@@ -341,18 +324,21 @@ func (g *goalMachine) set(goal string, mode GoalResearchMode, autoResearchTaskID
 	g.stopCause = ""
 	g.budgetExtensions = 0
 	if goal == "" {
-		g.goal, g.status, g.researchMode, g.autoResearchTaskID = "", GoalStatusStopped, GoalResearchAuto, ""
+		g.goal, g.status = "", GoalStatusStopped
+		g.budgetClass = ""
 		g.scopeID = ""
 		g.deliveryCheckpoint = evidence.DeliveryCheckpoint{}
 	} else {
-		g.goal, g.status, g.researchMode, g.autoResearchTaskID = goal, GoalStatusRunning, mode, autoResearchTaskID
+		g.goal, g.status = goal, GoalStatusRunning
 		g.scopeID = newGoalScopeID()
 		g.deliveryCheckpoint = evidence.DeliveryCheckpoint{ScopeID: g.scopeID}
-		g.budgetClass = budgetClassFor(goal, mode)
-		g.turnsLimit, g.tokensLimit = budgetQuota(g.budgetClass)
+		g.budgetClass = preferredBudgetClass
+		g.turnsLimit = budgetQuota(g.budgetClass)
+		g.tokensLimit = 0 // no token hard limit
 		g.noProgressLimit = defaultNoProgressLimit
 	}
-	return g.buildStateLocked(todos)
+	// Installing a normal Goal always abandons any pending legacy migration.
+	g.legacyTaskID = ""
 }
 
 func (g *goalMachine) setStrict(strict bool, todos []evidence.TodoItem) (string, []byte, bool) {
@@ -393,37 +379,40 @@ func (g *goalMachine) pauseFor(stopCause, reason string, todos []evidence.TodoIt
 	return g.buildStateLocked(todos)
 }
 
-// resume re-enters a recoverable blocked/stopped goal without resetting its
-// delivery evidence scope, AutoResearch identity, or budget history. Budget
-// pauses (and any pause whose original quota is already spent) append one
-// quota slice of the current budget class; no-progress counting resets but the
-// accumulated consumption and budget_extensions are preserved.
+// resume re-enters a recoverable blocked/stopped goal without resetting scope
+// or runtime history. Budget pauses append one turn slice of the current class;
+// token hard limits no longer exist.
 func (g *goalMachine) resume(todos []evidence.TodoItem) (path string, data []byte, persist, resumed, extended bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.stopCause == stopCauseLegacyArchive {
+		// A legacy archive block is recoverable only through the read-only
+		// archive boundary; never reinterpret it as an ordinary Goal resume.
+		return "", nil, false, false, false
+	}
 	if strings.TrimSpace(g.goal) == "" || g.status == GoalStatusComplete {
 		return "", nil, false, false, false
 	}
+	// Legacy budget_tokens pauses are treated like turn-budget pauses so users
+	// can resume without understanding the removed hard limit.
 	extend := g.stopCause == stopCauseBudgetTurns ||
 		g.stopCause == stopCauseBudgetTokens ||
 		g.stopCause == stopCauseNoProgress ||
-		(g.turnsLimit > 0 && g.turnsUsed >= g.turnsLimit) ||
-		(g.tokensLimit > 0 && g.tokensUsed >= g.tokensLimit)
+		(g.turnsLimit > 0 && g.turnsUsed >= g.turnsLimit)
 	g.continuationEpoch++
 	g.status = GoalStatusRunning
 	g.block = ""
 	g.stopCause = ""
 	g.noProgressTurns = 0
+	g.tokensLimit = 0
 	if g.scopeID == "" {
 		g.scopeID = newGoalScopeID()
 	}
 	if extend {
 		if g.budgetClass == "" {
-			g.budgetClass = budgetClassFor(g.goal, g.researchMode)
+			g.budgetClass = taskintent.ClassifyGoalBudget(g.goal)
 		}
-		turns, tokens := budgetQuota(g.budgetClass)
-		g.turnsLimit += turns
-		g.tokensLimit += tokens
+		g.turnsLimit += budgetQuota(g.budgetClass)
 		g.budgetExtensions++
 	}
 	path, data, persist = g.buildStateLocked(todos)
@@ -478,10 +467,8 @@ func (g *goalMachine) admitContinuation(res goalAdvanceResult) (goalContinuation
 		g.scopeID = newGoalScopeID()
 	}
 	return goalContinuationSnapshot{
-		goal:               g.goal,
-		researchMode:       g.researchMode,
-		autoResearchTaskID: g.autoResearchTaskID,
-		scopeID:            g.scopeID,
+		goal:    g.goal,
+		scopeID: g.scopeID,
 	}, true
 }
 
@@ -493,12 +480,11 @@ func (g *goalMachine) admitContinuation(res goalAdvanceResult) (goalContinuation
 //  1. complete + readiness ready (report or evaluator) → complete
 //  2. blocked (report or evaluator) → blocked immediately (no triple confirm)
 //  3. evaluator failed/uncertain → safe pause (fail closed, never default to continue)
-//  4. evaluator failed/uncertain → safe pause (fail closed, never default to continue)
-//  5. budget exhausted → safe pause (also vetoes complete claims rejected by
+//  4. budget exhausted → safe pause (also vetoes complete claims rejected by
 //     readiness: those would continue, and continuation past the budget is a
 //     pause)
-//  6. no-progress limit reached → safe pause
-//  7. otherwise continue, carrying the missing requirements (complete rejected
+//  5. no-progress limit reached → safe pause
+//  6. otherwise continue, carrying the missing requirements (complete rejected
 //     by readiness, or no report with an explicit missing list) or the report's
 //     next_action as the next turn's prompt.
 func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
@@ -566,12 +552,6 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		g.stopCause = ""
 		g.lastContinuationReason, g.lastEvaluatorReason = "", ""
 		notice = goalCompleteNotice
-	case in.budgetRequestBlocked != "":
-		reason := clipGoalReason(in.budgetRequestBlocked)
-		g.status = GoalStatusBlocked
-		g.stopCause = stopCauseBudgetTokens
-		g.block = reason
-		notice = "goal paused: " + reason
 	case in.evaluatorFailed != "" || (in.evaluator != nil && in.evaluator.outcome == goaleval.OutcomeUncertain):
 		// Fail closed: an unavailable, erroring, or uncertain evaluator pauses
 		// the goal instead of defaulting to continue.
@@ -588,12 +568,6 @@ func (g *goalMachine) advance(in goalAdvanceInput) goalAdvanceResult {
 		reason := fmt.Sprintf("turn budget exhausted (%d/%d turns used)", g.turnsUsed, g.turnsLimit)
 		g.status = GoalStatusBlocked
 		g.stopCause = stopCauseBudgetTurns
-		g.block = clipGoalReason(reason)
-		notice = "goal paused: " + reason
-	case g.tokensLimit > 0 && g.tokensUsed >= g.tokensLimit:
-		reason := fmt.Sprintf("token budget exhausted (%d/%d tokens used)", g.tokensUsed, g.tokensLimit)
-		g.status = GoalStatusBlocked
-		g.stopCause = stopCauseBudgetTokens
 		g.block = clipGoalReason(reason)
 		notice = "goal paused: " + reason
 	case g.noProgressLimit > 0 && g.noProgressTurns >= g.noProgressLimit:
@@ -666,8 +640,6 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 	state := goalState{
 		Goal:                   g.goal,
 		Status:                 g.status,
-		ResearchMode:           g.researchMode,
-		AutoResearchTaskID:     g.autoResearchTaskID,
 		ScopeID:                g.scopeID,
 		DeliveryCheckpoint:     g.deliveryCheckpoint,
 		Turns:                  g.turnsUsed,
@@ -686,27 +658,21 @@ func (g *goalMachine) buildStateLocked(todos []evidence.TodoItem) (path string, 
 		StopCause:              g.stopCause,
 		BudgetExtensions:       g.budgetExtensions,
 	}
+	// GoalResearchOff is a downgrade fence for ordinary Goal sidecars. A
+	// fail-closed legacy migration keeps its task identity and compatibility mode
+	// until the archive has been validated and the Goal-only state is committed.
+	if g.legacyTaskID != "" && g.status == GoalStatusBlocked && g.stopCause == stopCauseLegacyArchive {
+		state.AutoResearchTaskID = g.legacyTaskID
+		state.ResearchMode = GoalResearchOn
+	} else {
+		state.ResearchMode = GoalResearchOff
+	}
 	b, err := json.Marshal(state)
 	if err != nil {
 		slog.Warn("controller: marshal goal state", "err", err)
 		return "", nil, false
 	}
 	return g.statePath, b, true
-}
-
-// writeStateErr persists pre-marshaled goal-state bytes to disk, OFF mu and
-// serialized by writeMu so concurrent saves don't interleave or land out of
-// order. Atomic replacement keeps the prior state intact when a write fails.
-func (g *goalMachine) writeStateErr(path string, data []byte) error {
-	if path == "" || data == nil {
-		return nil
-	}
-	g.writeMu.Lock()
-	defer g.writeMu.Unlock()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return fileutil.AtomicWriteFile(path, data, 0o644)
 }
 
 // writeState preserves the existing best-effort behavior for background Goal
@@ -761,28 +727,29 @@ func (g *goalMachine) terminalTodosFromState(sessionPath string) ([]evidence.Tod
 	return append([]evidence.TodoItem(nil), state.Todos...), true
 }
 
-// restoreFromState reloads Goal state from the persisted sidecar during resume.
-// The sidecar is authoritative when present: a stale tab profile must not turn
-// a blocked or stopped Goal back into a running one during a controller rebuild.
-// Recoverable terminal states retain their scope for an explicit ResumeGoal.
-// Old sidecars missing the budget fields get their defaults re-derived: the
-// existing Turns count carries into the new turn budget, tokens start from 0,
-// and the budget class is recomputed from the goal text.
-func (g *goalMachine) restoreFromState(sessionPath string) {
+// restoreFromState reloads Goal state from the sidecar. The sidecar is
+// authoritative; missing budget fields are re-derived. migrated means path/data
+// need an immediate rewrite (no provider call). legacyTaskID is returned only
+// so Controller can fill missing goal text from a historical archive.
+func (g *goalMachine) restoreFromState(sessionPath string) (path string, data []byte, migrated bool, legacy legacyGoalRestore) {
 	if strings.TrimSpace(sessionPath) == "" {
-		return
+		return "", nil, false, legacyGoalRestore{}
 	}
-	data, err := fileencoding.ReadFileUTF8(goalStatePath(sessionPath))
+	// Ensure write path is bound even when the controller rebuilds.
+	if g.statePath == "" {
+		g.setStatePath(goalStatePath(sessionPath))
+	}
+	raw, err := fileencoding.ReadFileUTF8(goalStatePath(sessionPath))
 	if err != nil {
 		if !os.IsNotExist(err) {
 			slog.Warn("controller: read goal state", "err", err)
 		}
-		return
+		return "", nil, false, legacyGoalRestore{}
 	}
 	var state goalState
-	if err := json.Unmarshal(data, &state); err != nil {
+	if err := json.Unmarshal(raw, &state); err != nil {
 		slog.Warn("controller: parse goal state", "err", err)
-		return
+		return "", nil, false, legacyGoalRestore{}
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -791,9 +758,30 @@ func (g *goalMachine) restoreFromState(sessionPath string) {
 	if g.status == "" {
 		g.status = GoalStatusStopped
 	}
-	g.researchMode = state.ResearchMode
-	g.autoResearchTaskID = strings.TrimSpace(state.AutoResearchTaskID)
+	// Legacy task identity is migration-only compatibility data. It is returned to
+	// the Controller's archive boundary and retained in the machine only while a
+	// fail-closed migration remains pending.
+	legacy = legacyGoalRestore{
+		taskID: strings.TrimSpace(state.AutoResearchTaskID),
+		todos:  append([]evidence.TodoItem(nil), state.Todos...),
+	}
+	// A task id is pending only when the sidecar has no Goal text. A legacy
+	// sidecar that already contains an objective can be migrated directly and
+	// must serialize as ordinary Goal state on the first write.
+	if g.goal == "" {
+		g.legacyTaskID = legacy.taskID
+	} else {
+		g.legacyTaskID = ""
+	}
+	if legacy.taskID != "" && g.goal != "" {
+		// Sidecars that already carry the Goal objective do not depend on the
+		// historical archive. Complete the migration immediately.
+		migrated = true
+	}
 	g.scopeID = strings.TrimSpace(state.ScopeID)
+	if g.scopeID == "" {
+		g.scopeID = strings.TrimSpace(state.DeliveryCheckpoint.ScopeID)
+	}
 	if g.goal != "" && g.scopeID == "" {
 		g.scopeID = newGoalScopeID()
 	}
@@ -818,29 +806,55 @@ func (g *goalMachine) restoreFromState(sessionPath string) {
 		g.turnsUsed = state.Turns
 	}
 	g.tokensUsed = state.TokensUsed
+	g.budgetClass = normalizeBudgetClass(g.goal, state.BudgetClass, state.ResearchMode)
+	g.turnsLimit = state.TurnsLimit
+	g.noProgressTurns = state.NoProgressTurns
+	g.noProgressLimit = state.NoProgressLimit
+	// Token hard limits are gone: keep the field at 0. Old non-zero sidecar
+	// values are read and ignored so downgrade/upgrade never loses other state.
+	g.tokensLimit = 0
+	if goalStateNeedsMigration(state, g.budgetClass) {
+		migrated = true
+	}
 	if g.goal != "" {
-		g.budgetClass = state.BudgetClass
 		if g.budgetClass == "" {
-			g.budgetClass = budgetClassFor(g.goal, g.researchMode)
+			g.budgetClass = budgetClassForLegacyMode(g.goal, state.ResearchMode)
 		}
-		if state.TurnsLimit > 0 {
-			g.turnsLimit = state.TurnsLimit
-		} else {
-			g.turnsLimit, _ = budgetQuota(g.budgetClass)
+		if legacy.taskID != "" {
+			g.budgetClass = budgetClassResearch
 		}
-		if state.TokensLimit > 0 {
-			g.tokensLimit = state.TokensLimit
-		} else {
-			_, g.tokensLimit = budgetQuota(g.budgetClass)
+		if g.turnsLimit == 0 {
+			g.turnsLimit = budgetQuota(g.budgetClass)
 		}
-		if state.NoProgressLimit > 0 {
-			g.noProgressLimit = state.NoProgressLimit
-		} else {
+		if g.noProgressLimit == 0 {
 			g.noProgressLimit = defaultNoProgressLimit
 		}
-		g.noProgressTurns = state.NoProgressTurns
+		// Auto-clear legacy token-budget pauses so the next user turn can
+		// continue without a manual resume. Loading itself never calls a
+		// provider.
+		if g.status == GoalStatusBlocked && g.stopCause == stopCauseBudgetTokens {
+			g.status = GoalStatusRunning
+			g.stopCause = ""
+			// The stop cause proves the block belongs to the removed token gate;
+			// do not leave a stale blocked reason attached to a running goal.
+			g.block = ""
+			migrated = true
+		}
+		// Also rewrite sidecars that still store a non-zero tokensLimit so the
+		// next load does not re-surface the deprecated hard ceiling in status.
 	}
 	g.continuationEpoch++
+	legacy.epoch = g.continuationEpoch
+	pendingLegacyGoal := legacy.taskID != "" && g.goal == ""
+	if migrated && !pendingLegacyGoal {
+		// Migration rewrites only the removed budget state. Preserve the todo
+		// snapshot carried by the authoritative sidecar instead of clearing it.
+		path, data, ok := g.buildStateLocked(state.Todos)
+		if ok {
+			return path, data, true, legacy
+		}
+	}
+	return "", nil, false, legacy
 }
 
 // formatIncompleteTodos renders the reminder shown when a complete claim
@@ -919,6 +933,14 @@ func (c *Controller) persistGoalState(path string, data []byte, ok bool) {
 	c.goals.writeState(path, data)
 }
 
+func (c *Controller) persistGoalStateAtEpoch(epoch uint64, todos []evidence.TodoItem) (bool, error) {
+	applied, err := c.goals.writeStateAtEpoch(epoch, todos)
+	if err != nil {
+		slog.Warn("controller: write goal state", "err", err)
+	}
+	return applied, err
+}
+
 func (c *Controller) restoreTerminalGoalTodos(sessionPath string) {
 	if c.executor == nil {
 		return
@@ -955,7 +977,7 @@ func (g *goalMachine) runtimeView() GoalRuntimeView {
 		TurnsUsed:        g.turnsUsed,
 		TurnsLimit:       g.turnsLimit,
 		TokensUsed:       g.tokensUsed,
-		TokensLimit:      g.tokensLimit,
+		TokensLimit:      0, // deprecated: no hard token limit
 		NoProgressTurns:  g.noProgressTurns,
 		NoProgressLimit:  g.noProgressLimit,
 		LastReason:       last,
@@ -976,15 +998,15 @@ func (g *goalMachine) lastContinuationReasonText() string {
 func (g *goalMachine) budgetStatusText() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return fmt.Sprintf("turns: %d/%d used, tokens: %d/%d, no-progress turns: %d/%d",
-		g.turnsUsed, g.turnsLimit, g.tokensUsed, g.tokensLimit, g.noProgressTurns, g.noProgressLimit)
+	return fmt.Sprintf("turns: %d/%d used, tokens: %d, no-progress turns: %d/%d",
+		g.turnsUsed, g.turnsLimit, g.tokensUsed, g.noProgressTurns, g.noProgressLimit)
 }
 
 // goalTurnRecorder is the per-turn recorder bound to one goal turn's scope and
 // epoch. update_goal calls land here as candidate state; the FSM commits them
 // only when the goal lifecycle still matches (scope + epoch), so late calls
 // from a replaced or cleared goal are rejected. Usage events emitted during the
-// turn are folded through the recorder into the goal's token budget.
+// turn are folded through the recorder into the goal's observational token total.
 type goalTurnRecorder struct {
 	mu             sync.Mutex
 	machine        *goalMachine
@@ -996,7 +1018,6 @@ type goalTurnRecorder struct {
 	reason         string
 	nextAction     string
 	tokensUsed     int
-	tokensReserved int
 	progressBefore string
 }
 
@@ -1063,108 +1084,6 @@ func (r *goalTurnRecorder) usageTokens() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.tokensUsed
-}
-
-// ReserveProviderRequest implements provider.RequestBudget. It reserves a
-// conservative input+output allowance before the network call, preventing
-// concurrent requests from spending the same remaining Goal budget. A zero
-// provider max keeps its existing wire behavior while reserving Reasonix's
-// conservative default output ceiling; near the boundary it is reduced to the
-// exact remaining output allowance.
-func (r *goalTurnRecorder) ReserveProviderRequest(estimatedInput, maxOutputTokens int) (int, provider.RequestBudgetReservation, error) {
-	if estimatedInput < 1 {
-		estimatedInput = 1
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.machine == nil {
-		return maxOutputTokens, noopGoalRequestReservation{}, nil
-	}
-	r.machine.mu.Lock()
-	defer r.machine.mu.Unlock()
-	if r.machine.scopeID != r.scopeID || r.machine.continuationEpoch != r.epoch || r.machine.status != GoalStatusRunning {
-		return 0, nil, &provider.RequestBudgetError{EstimatedInput: estimatedInput}
-	}
-	if r.machine.tokensLimit <= 0 {
-		return maxOutputTokens, noopGoalRequestReservation{}, nil
-	}
-	remaining := r.machine.tokensLimit - r.machine.tokensUsed - r.tokensReserved
-	if remaining <= estimatedInput {
-		return 0, nil, &provider.RequestBudgetError{
-			Used: r.machine.tokensUsed, Limit: r.machine.tokensLimit,
-			Remaining: maxInt(remaining, 0), EstimatedInput: estimatedInput,
-		}
-	}
-	availableOutput := remaining - estimatedInput
-	reserveOutput := maxOutputTokens
-	adjustedOutput := maxOutputTokens
-	if reserveOutput <= 0 {
-		reserveOutput = provider.DefaultReasoningOutputTokens
-	}
-	if reserveOutput > availableOutput {
-		reserveOutput = availableOutput
-		adjustedOutput = availableOutput
-	}
-	if reserveOutput <= 0 {
-		return 0, nil, &provider.RequestBudgetError{
-			Used: r.machine.tokensUsed, Limit: r.machine.tokensLimit,
-			Remaining: maxInt(remaining, 0), EstimatedInput: estimatedInput,
-		}
-	}
-	reserved := estimatedInput + reserveOutput
-	r.tokensReserved += reserved
-	return adjustedOutput, &goalRequestReservation{recorder: r, reserved: reserved}, nil
-}
-
-type goalRequestReservation struct {
-	once     sync.Once
-	recorder *goalTurnRecorder
-	reserved int
-}
-
-func (r *goalRequestReservation) Commit(tokens int) {
-	if r == nil {
-		return
-	}
-	r.once.Do(func() {
-		r.recorder.settleProviderRequest(r.reserved, tokens)
-	})
-}
-
-func (r *goalRequestReservation) Cancel() {
-	if r == nil {
-		return
-	}
-	r.once.Do(func() {
-		r.recorder.settleProviderRequest(r.reserved, 0)
-	})
-}
-
-type noopGoalRequestReservation struct{}
-
-func (noopGoalRequestReservation) Commit(int) {}
-func (noopGoalRequestReservation) Cancel()    {}
-
-func (r *goalTurnRecorder) settleProviderRequest(reserved, tokens int) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.tokensReserved -= reserved
-	if r.tokensReserved < 0 {
-		r.tokensReserved = 0
-	}
-	if tokens > 0 && r.machine.foldUsage(r.scopeID, r.epoch, tokens) {
-		r.tokensUsed += tokens
-	}
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 // validReport returns the recorded report only when the goal lifecycle still

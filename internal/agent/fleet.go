@@ -323,9 +323,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 			},
 		})
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			// Each fleet item runs as its own task-shaped execution so
 			// transcripts, evidence, and scheduler claims stay independent.
 			itemCtx := withCallContext(ctx, subID, subSinkFor(subID, sink), nil, false)
@@ -350,7 +348,7 @@ func (f *FleetTool) runFleet(ctx context.Context, sink event.Sink, specs []Profi
 				})
 			}
 			doneCh <- res
-		}()
+		})
 	}
 
 	// Mark only genuinely unstarted items skipped. Started items always publish

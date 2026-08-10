@@ -2,6 +2,7 @@ package extension
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 )
 
@@ -174,8 +175,6 @@ func (c *ReplaceClaims) Owner(slot Slot) (ContributionSource, bool) {
 // build state through the result.
 func (c *ReplaceClaims) Claims() map[Slot]ContributionSource {
 	out := make(map[Slot]ContributionSource, len(c.owners))
-	for slot, owner := range c.owners {
-		out[slot] = owner
-	}
+	maps.Copy(out, c.owners)
 	return out
 }

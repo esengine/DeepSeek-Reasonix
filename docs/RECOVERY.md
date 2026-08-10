@@ -53,6 +53,24 @@ If an older client is stuck on a pending update or Safe Mode loop:
 Do not manually delete `pending-update.json`, locks, or AppData as the recovery
 procedure.
 
+## In-app update stuck
+
+If Settings → Updates (or the top banner) reports that the previous update has
+not finished (`pending update already exists`, `awaiting startup health`, or
+`handoff backup` errors):
+
+1. Click **Discard previous update** in the banner or Settings, then **Retry**.
+2. If that button is missing or fails, quit Reasonix fully and start it once so
+   startup can commit or retire the probationary transaction, then retry the
+   in-app update.
+3. If in-app update still fails, download the latest signed installer from the
+   official download page and install it **over** the current copy without
+   uninstalling first.
+4. On macOS, also allow Reasonix under System Settings → Privacy & Security →
+   App Management when the dialog appears; a leftover
+   `Reasonix.app.reasonix-update-backup` that TCC will not let the app remove
+   may still require the official installer path.
+
 If the Windows installer reports `Reasonix layout activation failed`, expand
 the installer details and copy the lines under `Reasonix layout activator
 output:`. Current installers preserve the activator's concrete error instead of

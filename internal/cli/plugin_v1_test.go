@@ -9,13 +9,13 @@ import (
 	"reasonix/internal/pluginpkg"
 )
 
-// installV1RuntimePlugin writes a Manifest v1 package with a runtime into
+// installV2RuntimePlugin writes a Manifest v2 package with a runtime into
 // the test Reasonix home and registers it in plugin state.
-func installV1RuntimePlugin(t *testing.T, home string) string {
+func installV2RuntimePlugin(t *testing.T, home string) string {
 	t.Helper()
 	root := filepath.Join(home, "plugins", "example")
 	writePluginTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "example",
   "version": "1.0.0",
   "contributes": {
@@ -45,7 +45,7 @@ func installV1RuntimePlugin(t *testing.T, home string) string {
 func TestPluginShowRendersRuntimeFullTrust(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
-	installV1RuntimePlugin(t, home)
+	installV2RuntimePlugin(t, home)
 
 	out := captureStdout(t, func() {
 		if rc := pluginCommand([]string{"show", "example"}); rc != 0 {
@@ -70,10 +70,10 @@ func TestPluginShowRendersRuntimeFullTrust(t *testing.T) {
 	}
 }
 
-func TestPluginDoctorValidatesV1Runtime(t *testing.T) {
+func TestPluginDoctorValidatesV2Runtime(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
-	installV1RuntimePlugin(t, home)
+	installV2RuntimePlugin(t, home)
 
 	out := captureStdout(t, func() {
 		if rc := pluginCommand([]string{"doctor", "example"}); rc != 0 {
@@ -88,7 +88,7 @@ func TestPluginDoctorValidatesV1Runtime(t *testing.T) {
 func TestPluginDoctorFailsForMissingRuntimeCommand(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
-	root := installV1RuntimePlugin(t, home)
+	root := installV2RuntimePlugin(t, home)
 	// Remove the runtime binary so the command no longer resolves.
 	if err := os.Remove(filepath.Join(root, "bin", "example")); err != nil {
 		t.Fatal(err)
@@ -104,12 +104,12 @@ func TestPluginDoctorFailsForMissingRuntimeCommand(t *testing.T) {
 	}
 }
 
-func TestPluginDoctorReportsMissingV1PathsAsWarnings(t *testing.T) {
+func TestPluginDoctorReportsMissingV2PathsAsWarnings(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("REASONIX_HOME", home)
 	root := filepath.Join(home, "plugins", "gap")
 	writePluginTestFile(t, filepath.Join(root, pluginpkg.NativeManifest), `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "gap",
   "contributes": {
     "themes": ["themes/*.reasonix-theme"]

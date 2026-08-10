@@ -209,10 +209,12 @@ export function HeartbeatPanel({ open, onClose, startNew, onOpenTopic }: Heartbe
       try {
         await heartbeatSaveTasks(next);
       } catch {
-        // ignore
+        // A concurrent external edit wins; reload the authoritative config so
+        // the panel cannot continue editing a stale task list.
+        await loadTasks();
       }
     },
-    [],
+    [loadTasks],
   );
 
   const handleAdd = useCallback(async () => {

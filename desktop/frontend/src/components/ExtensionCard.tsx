@@ -37,7 +37,7 @@ export function ExtensionCard({ item, tabId }: { item: ExtensionItem; tabId?: st
   };
 
   return (
-    <div className="extension-card" data-entrance="true" data-extension-surface={item.surfaceKey}>
+    <div className="extension-card" data-entrance={item.id} data-extension-surface={item.surfaceKey}>
       <div className="extension-card__header">
         <Puzzle size={14} className="extension-card__icon" aria-hidden="true" />
         {card.title ? <span className="extension-card__title">{card.title}</span> : null}

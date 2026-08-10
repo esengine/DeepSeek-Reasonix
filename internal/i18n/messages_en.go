@@ -3,36 +3,33 @@ package i18n
 // English is the baseline catalogue. The drift-guard test reflects over its
 // fields, so every other catalogue must populate the same set.
 var English = Messages{
-	Subtitle:        "config + plugin driven coding agent",
 	WelcomeTitleFmt: "Welcome to %s",
 	NoConfigYet:     "No configuration found yet — let's set it up.",
-	StartingChatFmt: "Starting %s…",
-	SetKeyHint:      "Set your API key, then run `reasonix`.",
-	ConfigLabel:     "config",
-	ModelsLabel:     "models",
-	ConfigNotFound:  "not found — using built-in defaults",
-	ConfigErrorFmt:  "%s — error: %v",
-	NoKey:           "no key",
-	Ready:           "ready",
-	GetStarted:      "Get started",
-	StepScaffold:    "scaffold reasonix.toml",
-	StepSetKey:      "set API key",
 
-	InitHint:       "Project memory (AGENTS.md) is generated in-session: run `reasonix`, then `/init` — the model analyzes the codebase and writes it. For configuration, use `reasonix setup`.",
-	StepSetKeyHint: "run `reasonix setup`, or export DEEPSEEK_API_KEY=…",
-	StepChatDesc:   "interactive session",
-	StepRunDesc:    "one-shot task",
-	HelpFooter:     "reasonix help · all commands",
+	InitHint: "Project memory (AGENTS.md) is generated in-session: run `reasonix`, then `/init` — the model analyzes the codebase and writes it. For configuration, use `reasonix setup`.",
 
 	ChatTip:             "Context is kept across turns. Type 'exit' or Ctrl-D to quit.",
 	TurnCancelled:       "cancelled — back to prompt",
 	InterruptedRecovery: "This turn was interrupted. Partial output is kept for reference; only completed tool pairs and a bounded recovery summary enter the next model turn. Inspect the workspace before continuing or reverting changes.",
 	RecoveryPaused:      "Automatic retries paused. Reasonix stopped repeated attempts and kept completed work. Send “Continue” to start a fresh attempt, or add instructions to change direction.",
-	NoSessionToResume:   "no saved session to resume — start a new one with `reasonix`",
-	ResumeRequiresTTY:   "--resume needs an interactive terminal; pass --continue for the most recent session",
-	PickSessionLabel:    "Resume which session?",
+	ReceiptVerified:     "nothing left unverified",
+	ReceiptGapsHeader:   "not verified:",
+	ReceiptRisksHeader:  "declared risks:",
+	ReceiptMore:         "and %d more",
+	ReceiptGapKinds: map[string]string{
+		"unbacked_claim":      "claimed but unsupported",
+		"unproven_criterion":  "criterion without proof",
+		"missing_check":       "expected check never passed",
+		"failed_verification": "verification failed",
+		"stale_verification":  "verified before the last change",
+		"unverified_change":   "changed with nothing verifying it",
+		"unreviewed_change":   "changed, never looked at again",
+		"declared_unverified": "declared unverified",
+	},
+	NoSessionToResume: "no saved session to resume — start a new one with `reasonix`",
+	ResumeRequiresTTY: "--resume needs an interactive terminal; pass --continue for the most recent session",
+	PickSessionLabel:  "Resume which session?",
 
-	ResumeListHeader:    "sessions (/resume <n> to switch)",
 	ResumeBusy:          "finish or cancel the current turn before resuming",
 	ResumeBadIndexFmt:   "pick a session 1–%d (run /resume to list)",
 	ResumeAlreadyActive: "already in that session",
@@ -145,8 +142,6 @@ var English = Messages{
 	DiffFoldDisabled:                       "diff expanded — showing all lines (/diff-fold to fold)",
 
 	OutputStyleNone:           "no output styles available",
-	OutputStyleHeader:         "output styles:",
-	OutputStyleHint:           "set agent.output_style in reasonix.toml to apply one (takes effect next session)",
 	ThemeHeader:               "themes:",
 	ThemeHint:                 "switch with /theme <auto|light|dark|style>",
 	ThemeChangedFmt:           "theme switched to %s / %s",
@@ -168,7 +163,6 @@ var English = Messages{
 
 	ExtFormFieldsHint:         "fields are collected through the usual prompts",
 	ExtRunActionFmt:           "run %s",
-	SlashCompactDone:          "session compacted — older middle replaced by a summary, recent turns kept",
 	SlashCompactFailed:        "compaction failed",
 	SlashNewDone:              "new session started — previous transcript saved",
 	SlashNewFailed:            "could not start a new session",
@@ -176,19 +170,15 @@ var English = Messages{
 	SlashClearDone:            "current context cleared",
 	SlashClearFailed:          "could not clear current context",
 	SlashClsDone:              "screen cleared",
-	SlashUnavailable:          "command unavailable in this build",
 	SlashUnknown:              "unknown command",
 	SlashUnknownSentAsMessage: "sent as a regular message",
 	SlashTodoCleared:          "task list dismissed",
-	SlashHelp:                 "commands: /compact · /new · /clear · /resume · /rewind · /tree · /branch · /switch · /todo · /verbose · /model (switch model) · /effort · /theme · /language · /mcp · /skills · /plugins · /hooks · /paste-image · /docs · /memory · /migrate · /goal · /remember · /quit · /help · plus skills (/init, /explore, …)",
 
-	SkillPickerTitle:             "Skills",
 	SkillPickerAvailableFmt:      "%d available",
 	SkillPickerMatchingFmt:       "%d matching · %d total",
 	SkillPickerHint:              "↑↓ navigate · Space toggle · Enter save · / search · s sources · r rescan · Esc cancel",
 	SkillPickerDetailHint:        "↑↓ navigate · Enter select · Space toggle · Esc back",
 	SkillPickerSearchEmpty:       "No skills match your search",
-	SkillPickerSearchPrompt:      "search: ",
 	SkillPickerSearchPlaceholder: "Search skills...",
 	SkillPickerSourceTitle:       "Sources",
 	SkillPickerSourceActiveFmt:   "%d active",
@@ -285,6 +275,7 @@ var English = Messages{
 	CmdMouse:            "toggle in-app mouse capture (off = native terminal selection/right-click)",
 	CmdReasonLang:       "set visible reasoning language",
 	CmdHelp:             "list commands",
+	CmdWeb:              "continue this session in the Web UI",
 	CmdTodo:             "dismiss the task list",
 	CmdQuit:             "exit the session",
 	CmdCopy:             "pick a response to copy to clipboard",
@@ -294,13 +285,11 @@ var English = Messages{
 	SlashCopyListHeader: "pick a response to copy:",
 	SlashExportDoneFmt:  "session exported to %s",
 	SlashExportEmpty:    "no messages to export",
-	ArgSkillList:        "list skills",
 	ArgSkillShow:        "show a skill's body",
 	ArgSkillNew:         "scaffold a new skill",
 	ArgSkillPaths:       "show discovery paths",
 	ArgMcpAdd:           "connect a server",
 	ArgMcpRemove:        "disconnect a server",
-	ArgMcpList:          "show configured servers",
 	ArgMcpConnected:     "connected",
 	ArgHooksList:        "list active hooks",
 	ArgModelCurrent:     "current",
@@ -317,7 +306,6 @@ var English = Messages{
 
 	ListModelsHeaderFmt: "models (active: %s)",
 	ListModelsHint:      "switch with the model switcher, or type /model <provider/model>",
-	ListMemoryHeader:    "memory files",
 	ListMemorySaved:     "saved memories",
 	ListMemoryArchived:  "archived memories",
 	ListMemoryNone:      "memory: none — add with “/remember <note>” or run /init to generate AGENTS.md",
@@ -328,10 +316,6 @@ var English = Messages{
 	ListMcpHeader:       "mcp servers",
 	ListMcpNone:         "mcp: no servers connected — add one in reasonix.toml ([[plugins]]) or a project .mcp.json",
 
-	MemoryNone:                   "memory: none — add with “/remember <note>” or create REASONIX.md in the project root",
-	MemoryLoaded:                 "memory loaded:",
-	MemorySavedHeader:            "  saved memories (archive with “/forget <name>”):",
-	MemoryStoredUnderFmt:         "  stored under %s",
 	MemoryEditHint:               "edit doc files or use “/remember <note>”; doc edits apply next session",
 	ForgetUsage:                  "usage: /forget <name> — the slug shown under “saved memories” in /memory",
 	ForgetDoneFmt:                "forgot and archived memory: %s",
@@ -346,8 +330,8 @@ var English = Messages{
 	GoalPaused:                   "goal paused — /goal resume continues it",
 	GoalPausedReason:             "paused by the user",
 	GoalPausedFmt:                "goal is paused (%s) — use /goal resume to continue",
-	GoalBudgetExtended:           "goal resumed — one additional budget slice added",
-	GoalRuntimeFmt:               "runtime: turns %d/%d, tokens %d/%d, no-progress %d/%d, budget extensions %d",
+	GoalBudgetExtended:           "goal resumed — one additional turn slice added",
+	GoalRuntimeFmt:               "runtime: turns %d/%d, tokens %d, no-progress %d/%d, extensions %d",
 	GoalRuntimeLastReason:        "last reason",
 	ModelSwitchUnavailable:       "model switching is unavailable in this session",
 	ModelSwitchBusy:              "finish or cancel active work and stop background jobs before switching models",
@@ -378,9 +362,9 @@ var English = Messages{
 	RewindCodeConversation:       "Code + conversation",
 	RewindConversationOnly:       "Conversation only",
 	RewindCodeOnly:               "Code only",
-	RewindFork:                   "Fork (new branch, keep code)",
-	RewindSummarizeFrom:          "Summarize from here",
-	RewindSummarizeUpto:          "Summarize up to here",
+	RewindFork:                   "Fork",
+	RewindSummarizeFrom:          "Compress after here (history kept)",
+	RewindSummarizeUpto:          "Compress before here (history kept)",
 	RewindPickTitle:              "⟲ Rewind — pick a turn",
 	RewindPickHint:               "↑/↓ move · Enter choose · Esc close",
 	RewindRestoreTitleFmt:        "⟲ Restore to turn %d ",
@@ -391,16 +375,13 @@ var English = Messages{
 	RewindUnavailableFmt:         "rewind unavailable: %s",
 	RewindEmpty:                  "(empty)",
 
-	SelectProvidersLabel:     "Select providers to enable",
 	EnterAPIKeysHeader:       "Enter API keys (Enter to skip and set later):",
-	MissingKeyIntro:          "reasonix.toml is ready — just an API key away.",
 	WroteFileFmt:             "Wrote %s",
 	SetupComplete:            "Setup complete.",
 	SetupCancelled:           "setup cancelled.",
 	TryHintFmt:               "Try: %s",
 	NextHint:                 "Next: set your API key (run `reasonix setup` or export DEEPSEEK_API_KEY=...), then run `reasonix run \"your task\"`.",
 	ConfirmReconfigureFmt:    "%s already exists. Reconfigure and overwrite?",
-	KeepingExisting:          "Keeping existing config.",
 	NotOverwritingFmt:        "%s already exists; not overwriting",
 	SetupManagerTitle:        "Provider configuration",
 	SetupAddOpenAI:           "Add OpenAI-compatible provider",
@@ -441,19 +422,15 @@ var English = Messages{
 	FetchModelsSuccessFmt:      "Found %d models for %s",
 	FetchModelsFailedFmt:       "Failed to fetch models for %s: %v",
 	FetchModelsUsingPresetsFmt: "Live fetch unavailable for %s, using preset model list",
-	FamilyKeyPromptFmt:         "Enter your %s API key to list available models (Enter to skip):",
 	SelectModelsLabel:          "Select models to enable for %s",
-	NoModelsAvailableFmt:       "%s: no models available, skipping",
 	CustomFetchEmpty:           "/models returned an empty list — falling back to manual entry",
 	AnthropicFetchEmpty:        "/models returned an empty list — Anthropic-compatible providers usually don't expose one, falling back to manual entry",
-	SkipStaleCustomEntryFmt:    "skipping stale %q entry from reasonix.toml (pointing at %s) — please remove it from [[providers]]",
 	APIKeyAlreadySetFmt:        "reusing existing value for %s",
 	APIKeyResetPromptFmt:       "Re-enter %s?",
 	InvalidAPIKeyEnvFmt:        "%q is not a valid API Key variable name. Use letters, numbers, and underscores (for example, MY_PROVIDER_API_KEY); do not enter a model name.",
 	RepairedAPIKeyEnvFmt:       "provider %s: replaced invalid API Key variable name %q with %q",
 
 	// custom provider
-	CustomProviderLabel:  "Custom Model",
 	CustomProviderDesc:   "Add third-party OpenAI compatible model",
 	CustomAddMethodLabel: "Add third-party OpenAI compatible model - Select add method",
 	CustomMethodManual:   "Enter model name manually",
@@ -465,7 +442,6 @@ var English = Messages{
 	CustomAddedFmt:       "Added custom model: %s",
 
 	// Anthropic compatible provider
-	AnthropicProviderLabel:         "Custom Model 2",
 	AnthropicProviderDesc:          "Add third-party Anthropic compatible model",
 	AnthropicAddMethodLabel:        "Add third-party Anthropic compatible model - Select add method",
 	AnthropicMethodManual:          "Enter model name manually",
@@ -577,6 +553,7 @@ Usage:
   reasonix run [--model NAME] [--max-steps N] [-c|--continue] [--resume PATH] [--copy] [--output-format FORMAT] <task>
   reasonix run --events-jsonl [--model NAME] <task>      emit redacted structured events as JSONL
   reasonix review [--base BRANCH] [--commit SHA] [--model NAME]  AI-powered code review on local diffs
+  reasonix web [--model NAME] [--addr HOST:PORT] [--no-open]  start the local Web UI and open it in the default browser
   reasonix serve [--model NAME] [--addr HOST:PORT] [--auth none|token|password] [--token STR] [--password STR] [--hash-password]  serve over HTTP+SSE (with optional auth)
   reasonix acp [--model NAME]                           serve Agent Client Protocol over stdio (also: reasonix --acp)
   reasonix setup [path]                                 interactive config wizard; writes reasonix.toml (+ .env)
@@ -593,16 +570,20 @@ Usage:
   reasonix session show|status <machine-session-id> --json [--dir PATH]  query one redacted session
   reasonix session recovery [<machine-session-id>] --json [--dir PATH]  query redacted recovery state
   reasonix hook list|status --json [--dir PATH]         inspect redacted hook state
-  reasonix task list|show --json [--dir PATH]           inspect redacted task state
+  reasonix task list|show|status|events|stop|cancel|monitor|tmux --json [--dir PATH]
+                                                         inspect or control redacted tasks
   reasonix bot start|doctor|weixin-login                multi-channel IM bot gateway
   reasonix upgrade [--check] [--force]                   update to the latest official release (also: reasonix update)
-  reasonix version
+  reasonix completion bash|zsh|fish                     print a shell completion script to stdout
+  reasonix version [--verbose|--json]                   print version (single line) or build metadata
+  reasonix --version | -v                               single-line version (script-safe)
   reasonix help
 
 Examples:
   reasonix
   reasonix --continue
   reasonix --resume provider-config
+  reasonix web
   reasonix run "implement the TODOs in main.go"
   reasonix run --model mimo-pro "add unit tests for this function"
   reasonix -p "summarize this repository" --output-format json

@@ -130,7 +130,7 @@ func (closedStreamProvider) Stream(context.Context, provider.Request) (<-chan pr
 }
 
 func TestCanceledContextClosedProviderStreamReturnsCancel(t *testing.T) {
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
@@ -574,7 +574,7 @@ func TestCancelInsideLargeParallelBatchStopsSchedulingNewTools(t *testing.T) {
 	reg.Add(trackingTool{name: "readonly_tracking", readOnly: true})
 
 	var calls []provider.ToolCall
-	for i := 0; i < 12; i++ {
+	for i := range 12 {
 		calls = append(calls, provider.ToolCall{
 			ID:        fmt.Sprintf("call-%02d", i),
 			Name:      "readonly_tracking",

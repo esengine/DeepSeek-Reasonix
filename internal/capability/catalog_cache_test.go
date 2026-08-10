@@ -169,6 +169,68 @@ func TestCapabilityProxyRouteRenderKeepsConcreteMCPIDs(t *testing.T) {
 	}
 }
 
+func TestMCPServerEntriesPropagatesFailureToCachedTools(t *testing.T) {
+	entries := MCPServerEntries(CatalogOptions{
+		Plugins: []config.PluginEntry{{Name: "github", Type: "http", URL: "https://example.test/mcp"}},
+		Failed:  map[string]string{"github": "http 401"},
+		CachedTools: map[string][]plugin.CachedTool{
+			"github": {{Name: "search_issues", Description: "search issues", ReadOnly: true}},
+		},
+	})
+
+	for _, entry := range entries {
+		if entry.ID == "mcp-tool:github/search_issues" {
+			if entry.Status != StatusFailed {
+				t.Fatalf("cached tool status = %q, want %q", entry.Status, StatusFailed)
+			}
+			return
+		}
+	}
+	t.Fatal("cached MCP tool entry not found")
+}
+
+func TestBuildCatalogUnavailableServerOverridesRegistryCachedTool(t *testing.T) {
+	const server = "github"
+	tests := []struct {
+		name     string
+		failed   map[string]string
+		disabled map[string]bool
+		want     Status
+		reason   string
+	}{
+		{name: "failed", failed: map[string]string{server: "http 401"}, want: StatusFailed, reason: "http 401"},
+		{name: "disabled", disabled: map[string]bool{server: true}, want: StatusDisabled},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cat := BuildCatalog(CatalogOptions{
+				Tools: []tool.ContractEntry{{
+					Name:        plugin.ModelToolName(server, "search_issues"),
+					Description: "search issues",
+					ReadOnly:    true,
+				}},
+				Plugins:  []config.PluginEntry{{Name: server, Type: "http", URL: "https://example.test/mcp"}},
+				Failed:   tc.failed,
+				Disabled: tc.disabled,
+				CachedTools: map[string][]plugin.CachedTool{
+					server: {{Name: "search_issues", Description: "search issues", ReadOnly: true}},
+				},
+			})
+
+			entry, ok := cat.Lookup("mcp-tool:github/search_issues")
+			if !ok {
+				t.Fatal("registry-backed cached MCP tool missing from catalog")
+			}
+			if entry.Status != tc.want || entry.FailureReason != tc.reason {
+				t.Fatalf("registry-backed cached tool = %+v, want status=%q reason=%q", entry, tc.want, tc.reason)
+			}
+			if decision := Route("查一下 GitHub issue", cat.Entries); len(decision.Candidates) != 0 {
+				t.Fatalf("unavailable registry-backed cached MCP tool was routed: %+v", decision.Candidates)
+			}
+		})
+	}
+}
+
 func TestOrdinaryRouteRenderDeduplicatesCollapsedMCPSourceLines(t *testing.T) {
 	candidates := []RouteCandidate{
 		{
@@ -254,5 +316,20 @@ func TestCatalogKeepsProxyToolsAfterConnect(t *testing.T) {
 	// the proxy snapshot must not add a duplicate.
 	if count != 1 {
 		t.Fatalf("registry-backed server should have exactly one catalog entry, got %d", count)
+	}
+}
+
+func TestCatalogDoesNotRouteProxyToolsAfterFailure(t *testing.T) {
+	cat := BuildCatalog(CatalogOptions{
+		Plugins:     []config.PluginEntry{{Name: "gh", AutoStart: boolPtr(false)}},
+		Profile:     ProfileDelivery,
+		Failed:      map[string]string{"gh": "connection reset"},
+		Connected:   map[string]bool{"gh": true},
+		CachedTools: map[string][]plugin.CachedTool{"gh": {{Name: "search_issues"}}},
+		ProxyTools:  map[string][]plugin.CachedTool{"gh": {{Name: "search_issues"}}},
+	})
+	entry, ok := cat.Lookup("mcp-tool:gh/search_issues")
+	if !ok || entry.Status != StatusFailed {
+		t.Fatalf("failed server proxy tool = (%+v, %v), want failed catalog entry", entry, ok)
 	}
 }

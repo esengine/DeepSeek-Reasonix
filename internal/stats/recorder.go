@@ -174,6 +174,31 @@ func (r *Recorder) RecordProtocolRecovery(a event.ProtocolRecoveryAudit) {
 	event.RecordProtocolRecovery(r.inner, a)
 }
 
+// RecordContractShadow preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordContractShadow(a event.ContractShadowAudit) {
+	event.RecordContractShadow(r.inner, a)
+}
+
+// RecordCompletionReport preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordCompletionReport(a event.CompletionReportAudit) {
+	event.RecordCompletionReport(r.inner, a)
+}
+
+// RecordOutcomeProgress preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordOutcomeProgress(sample evidence.OutcomeSample) {
+	event.RecordOutcomeProgress(r.inner, sample)
+}
+
+// RecordMemoryRecall preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordMemoryRecall(a event.MemoryRecallAudit) {
+	event.RecordMemoryRecall(r.inner, a)
+}
+
+// RecordDelegationAdmission preserves the wrapped sink's audit capability.
+func (r *Recorder) RecordDelegationAdmission(a event.DelegationAdmissionAudit) {
+	event.RecordDelegationAdmission(r.inner, a)
+}
+
 func (r *Recorder) recordUsage(e event.Event) {
 	r.recordProviderUsage(e.ModelRef, e.Usage)
 }

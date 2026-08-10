@@ -233,6 +233,50 @@ func TestOfficialDeepSeekProviderStillGetsItsDefaults(t *testing.T) {
 	}
 }
 
+func TestMissingCanonicalDeepSeekUsesAnthropicDefault(t *testing.T) {
+	cfg := Default()
+	ensureDeepSeekOfficialProvider(cfg)
+	p, ok := cfg.Provider("deepseek")
+	if !ok {
+		t.Fatal("canonical DeepSeek provider missing after load")
+	}
+	if p.Kind != "anthropic" || p.BaseURL != deepSeekAnthropicBaseURL || !EffectiveWebSearch(p) {
+		t.Fatalf("canonical DeepSeek provider = kind:%q base_url:%q web_search:%t, want Anthropic-compatible with web search", p.Kind, p.BaseURL, EffectiveWebSearch(p))
+	}
+}
+
+func TestExplicitOpenAIDeepSeekProviderIsNotMigrated(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	path := filepath.Join(home, "config.toml")
+	raw := `config_version = 1
+default_model = "deepseek-flash/deepseek-v4-flash"
+
+[[providers]]
+name        = "deepseek-flash"
+kind        = "openai"
+base_url    = "https://api.deepseek.com"
+model       = "deepseek-v4-flash"
+api_key_env = "DEEPSEEK_API_KEY"
+`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadForRootReadOnly(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, ok := cfg.Provider("deepseek-flash")
+	if !ok {
+		t.Fatal("explicit DeepSeek provider missing after load")
+	}
+	if p.Kind != "openai" || p.BaseURL != "https://api.deepseek.com" {
+		t.Fatalf("explicit DeepSeek provider migrated to kind:%q base_url:%q", p.Kind, p.BaseURL)
+	}
+}
+
 // TestOfficialDeepSeekBackfillRespectsDeclaredValues keeps the backfill from
 // overriding a user who deliberately narrowed the window or disabled the
 // balance readout for the official endpoint.

@@ -103,7 +103,7 @@ func TestParseToolResultImageOversizedOmitted(t *testing.T) {
 func TestParseToolResultImageCountCapped(t *testing.T) {
 	payload := base64.StdEncoding.EncodeToString([]byte("x"))
 	items := make([]string, 0, maxToolResultImages+1)
-	for i := 0; i < maxToolResultImages+1; i++ {
+	for range maxToolResultImages + 1 {
 		items = append(items, imageItem("image/png", payload))
 	}
 	res := `{"content":[` + strings.Join(items, ",") + `]}`

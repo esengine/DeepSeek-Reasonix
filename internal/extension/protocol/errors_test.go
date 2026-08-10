@@ -12,7 +12,9 @@ func TestErrorTableCoversRequiredReasons(t *testing.T) {
 		ErrProtocolError, ErrUnknownMethod, ErrInvalidParams, ErrFrameTooLarge,
 		ErrContentRefExpired, ErrUnsupportedVersion, ErrCapabilityNotDeclared,
 		ErrShutdownTimeout, ErrStreamGap, ErrStreamCancelled,
-		ErrProviderFailed, ErrProviderInterrupted, ErrInterceptTimeout, ErrInternal,
+		ErrProviderFailed, ErrProviderInterrupted, ErrInterceptTimeout,
+		ErrDependencyUnsatisfied, ErrDependencyCycle, ErrSchemaMismatch,
+		ErrActivationFailed, ErrStaleGeneration, ErrCleanupFailed, ErrInternal,
 	}
 	if len(frozenErrorSpecs) != len(required) {
 		t.Fatalf("frozen error table has %d entries, want %d", len(frozenErrorSpecs), len(required))

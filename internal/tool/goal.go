@@ -27,6 +27,11 @@ type GoalTurnRecorder interface {
 
 type goalTurnRecorderKey struct{}
 
+// noGoalTurnRecorder shadows an ancestor recorder while preserving the rest
+// of the context chain. Child agents must not report disposition for the
+// parent's goal turn.
+type noGoalTurnRecorder struct{}
+
 // WithGoalTurnRecorder stamps ctx with the per-turn goal recorder so the
 // update_goal tool can reach it from inside the run loop.
 func WithGoalTurnRecorder(ctx context.Context, r GoalTurnRecorder) context.Context {
@@ -34,6 +39,13 @@ func WithGoalTurnRecorder(ctx context.Context, r GoalTurnRecorder) context.Conte
 		return ctx
 	}
 	return context.WithValue(ctx, goalTurnRecorderKey{}, r)
+}
+
+// WithoutGoalTurnRecorder returns a child context that cannot access a goal
+// recorder inherited from its parent. Other values and cancellation continue
+// to flow through the context normally.
+func WithoutGoalTurnRecorder(ctx context.Context) context.Context {
+	return context.WithValue(ctx, goalTurnRecorderKey{}, noGoalTurnRecorder{})
 }
 
 // GoalTurnRecorderFromContext returns the active goal turn's recorder, if any.

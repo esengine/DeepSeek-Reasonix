@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"html"
 	"io"
@@ -136,7 +137,7 @@ func EscapeRefPath(path string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(path) + 8)
-	for i := 0; i < len(path); i++ {
+	for i := range len(path) {
 		if path[i] == ' ' || path[i] == '\t' {
 			b.WriteByte('\\')
 		}
@@ -153,7 +154,7 @@ func UnescapeRefPath(path string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(path))
-	for i := 0; i < len(path); i++ {
+	for i := range len(path) {
 		if path[i] == '\\' && i+1 < len(path) && (path[i+1] == ' ' || path[i+1] == '\t') {
 			continue
 		}
@@ -555,6 +556,13 @@ func (c *Controller) inputImages(line string) []string {
 	if !c.imageInputEnabled() {
 		return nil
 	}
+	return c.resolveInputImageCandidates(line)
+}
+
+// resolveInputImageCandidates resolves authorized image references without
+// consulting the active model capability. The parent controller uses this only
+// to hand candidates to a child; the child decides whether to embed them.
+func (c *Controller) resolveInputImageCandidates(line string) []string {
 	var urls []string
 	for _, r := range c.detectRefs(line) {
 		baseDir := c.workspaceRoot
@@ -1017,7 +1025,7 @@ func readFileRef(path, baseDir string) (content string, isDir bool, err error) {
 
 	buf := make([]byte, maxFileRefBytes+1)
 	n, rerr := io.ReadFull(f, buf)
-	if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
+	if rerr != nil && !errors.Is(rerr, io.ErrUnexpectedEOF) && !errors.Is(rerr, io.EOF) {
 		return "", false, rerr
 	}
 	data := buf[:n]
@@ -1096,7 +1104,7 @@ func readFileRefUnscoped(path string) (content string, isDir bool, err error) {
 
 	buf := make([]byte, maxFileRefBytes+1)
 	n, rerr := io.ReadFull(f, buf)
-	if rerr != nil && rerr != io.ErrUnexpectedEOF && rerr != io.EOF {
+	if rerr != nil && !errors.Is(rerr, io.ErrUnexpectedEOF) && !errors.Is(rerr, io.EOF) {
 		return "", false, rerr
 	}
 	data := buf[:n]
@@ -1230,14 +1238,14 @@ func extractPDFTextDefault(path string) (pdfExtractResult, error) {
 	python, err := findPython()
 	if err != nil {
 		if firstErr != nil {
-			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), and Python PDF libraries are not available", firstErr)
+			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%w), and Python PDF libraries are not available", firstErr)
 		}
 		return pdfExtractResult{}, fmt.Errorf("pdftotext and Python PDF libraries are not available")
 	}
 	text, truncated, err := runPDFTextCommand(python, []string{"-c", pythonPDFExtractScript, path})
 	if err != nil {
 		if firstErr != nil {
-			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%v), Python PDF extraction failed (%w)", firstErr, err)
+			return pdfExtractResult{}, fmt.Errorf("pdftotext failed (%w), Python PDF extraction failed (%w)", firstErr, err)
 		}
 		return pdfExtractResult{}, err
 	}
