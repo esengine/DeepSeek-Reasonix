@@ -10959,7 +10959,7 @@ body > .mermaid-diagram--fullscreen {
   background: rgba(0, 0, 0, 0.16);
 }
 
-/* ── command palette (⌘K) — centered modal over a dimmed backdrop ─────────── */
+/* ── command palette (F1) — centered modal over a dimmed backdrop ─────────── */
 .drawer-backdrop:has(> .palette) {
   justify-content: center;
   align-items: flex-start;
@@ -23346,7 +23346,7 @@ body > .mermaid-diagram--fullscreen {
   color: var(--fg);
 }
 
-/* L1: command-search bar — opens the ⌘K palette. Sits after the new-tab
+/* L1: command-search bar — opens the F1 palette. Sits after the new-tab
    button and fills the remaining strip width like the prototype. */
 .tabbar__command {
   flex: 1 1 auto;

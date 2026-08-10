@@ -3918,9 +3918,10 @@ export default function App() {
     return isNavigationIntentCurrent(navigationIntentSeq);
   }, [enqueueNavigationWithIntent, isNavigationIntentCurrent, noteNavigationIntent, singleSurfaceLayout, state.running, t]);
 
-  // Command palette: ⌘K / Ctrl+K opens a fuzzy navigator over commands and
-  // recent sessions. Sessions are snapshotted on open so the list is stable
-  // while the palette is up; extension actions follow the same snapshot rule.
+  // Command palette: F1 (every platform, matching VSCode) opens a fuzzy
+  // navigator over commands and recent sessions. Sessions are snapshotted on
+  // open so the list is stable while the palette is up; extension actions
+  // follow the same snapshot rule.
   const openPalette = useCallback(async () => {
     closeTransientOverlays();
     setPaletteOpen(true);

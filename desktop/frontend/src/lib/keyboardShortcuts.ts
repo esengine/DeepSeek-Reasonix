@@ -16,6 +16,7 @@ export type ShortcutAction =
   | "shell.toggle"
   | "terminal.toggle"
   | "terminal.newSession"
+  | "terminal.clear"
   | "sidebar.toggle"
   | "textSize.increase"
   | "textSize.decrease"
@@ -75,7 +76,10 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     section: "global",
     labelKey: "shortcuts.action.commandPalette",
     descriptionKey: "shortcuts.desc.commandPalette",
-    defaults: modCombo("k"),
+    // F1 on every platform matches VSCode's command palette. macOS keeps
+    // Cmd+K for the terminal's clear-screen-and-scrollback action; on
+    // Windows/Linux Ctrl+K belongs to the terminal for the same reason.
+    defaults: allPlatforms({ key: "F1" }),
     preventDefault: true,
     allowInEditable: true,
   },
@@ -176,6 +180,20 @@ export const SHORTCUT_DEFINITIONS: readonly ShortcutDefinition[] = [
     labelKey: "shortcuts.action.terminalNewSession",
     descriptionKey: "shortcuts.desc.terminalNewSession",
     defaults: allPlatforms({ key: "`", ctrl: true, shift: true }),
+    preventDefault: true,
+    allowInEditable: true,
+  },
+  {
+    action: "terminal.clear",
+    section: "view",
+    labelKey: "shortcuts.action.terminalClear",
+    descriptionKey: "shortcuts.desc.terminalClear",
+    // Matches VSCode's integrated terminal: Cmd+K / Ctrl+K while the terminal
+    // has focus clears the screen and the scrollback. The action is handled
+    // inside TerminalView (it is only meaningful while the terminal is
+    // focused), but it lives in the shared registry so users can rebind or
+    // inspect it from the shortcut settings like any other action.
+    defaults: modCombo("k"),
     preventDefault: true,
     allowInEditable: true,
   },
@@ -372,11 +390,30 @@ export function loadCustomShortcuts(): Partial<Record<ShortcutAction, ShortcutCo
   try {
     const raw = localStorage.getItem(SHORTCUTS_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : {};
-    cachedCustomShortcuts = normalizeCustomShortcuts(parsed);
+    cachedCustomShortcuts = migrateLegacyCustomShortcuts(parsed);
   } catch {
     cachedCustomShortcuts = {};
   }
   return cachedCustomShortcuts;
+}
+
+// Migrates stored custom shortcuts whose binding now collides with a new
+// default. The command palette moved to F1 on macOS (VSCode convention) and
+// Cmd+K became terminal.clear's default, so any user who had saved the old
+// macOS default (Cmd+K for the palette) would otherwise open the palette and
+// clear the terminal at once. Such a binding can no longer be saved through
+// the settings UI (conflict detection), so dropping it is safe: the new F1
+// default applies instead.
+export function migrateLegacyCustomShortcuts(
+  value: unknown,
+  platform: ShortcutPlatform = detectShortcutPlatform(),
+): Partial<Record<ShortcutAction, ShortcutCombo>> {
+  const out = normalizeCustomShortcuts(value);
+  if (platform !== "darwin") return out;
+  const legacyPaletteDefault: ShortcutCombo = { key: "k", meta: true };
+  const palette = out["commandPalette.open"];
+  if (palette && sameCombo(palette, legacyPaletteDefault)) delete out["commandPalette.open"];
+  return out;
 }
 
 export function saveCustomShortcut(action: ShortcutAction, combo: ShortcutCombo | null): void {

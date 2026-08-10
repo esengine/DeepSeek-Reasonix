@@ -9,6 +9,7 @@ import {
   isCloseTabShortcut,
   isReservedComposerHistoryShortcut,
   matchesShortcut,
+  migrateLegacyCustomShortcuts,
   shortcutAcceptsCombo,
   shortcutConflict,
   shortcutDefinition,
@@ -69,10 +70,21 @@ eq(isCloseTabShortcut(event("w", { ctrlKey: true }), "linux"), true, "Ctrl+W clo
 for (const platform of ["darwin", "windows", "linux"] satisfies ShortcutPlatform[]) {
   eq(isCloseTabShortcut(event("k", { ctrlKey: true, metaKey: true }), platform), false, `${platform} ignores non-W keys`);
   eq(isCloseTabShortcut(event("w"), platform), false, `${platform} requires the platform modifier`);
+  eq(matchesShortcut(event("F1"), "commandPalette.open", platform), true, `${platform} opens the palette on F1 (VSCode convention)`);
+  eq(matchesShortcut(event("k", { ctrlKey: true }), "commandPalette.open", platform), false, `${platform} Ctrl+K is not the palette`);
+  eq(matchesShortcut(event("k", { metaKey: true }), "commandPalette.open", platform), false, `${platform} Cmd+K is not the palette`);
+  eq(matchesShortcut(event("k", { metaKey: true }), "terminal.clear", "darwin"), true, "macOS terminal clear defaults to Cmd+K");
+  eq(matchesShortcut(event("k", { ctrlKey: true }), "terminal.clear", platform), platform === "darwin" ? false : true, `${platform} terminal clear matches the platform modifier`);
+  eq(matchesShortcut(event("k"), "terminal.clear", platform), false, `${platform} bare K is not the terminal clear chord`);
 }
-
-eq(matchesShortcut(event("k", { metaKey: true }), "commandPalette.open", "darwin"), true, "Cmd+K opens the palette on macOS");
-eq(matchesShortcut(event("k", { ctrlKey: true }), "commandPalette.open", "windows"), true, "Ctrl+K opens the palette on Windows");
+eq(formatShortcutCombo(defaultShortcutCombo("commandPalette.open", "darwin"), "darwin"), "F1", "formats the macOS palette shortcut as F1");
+eq(formatShortcutCombo(defaultShortcutCombo("commandPalette.open", "windows"), "windows"), "F1", "formats the Windows palette shortcut as F1");
+eq(formatShortcutCombo(defaultShortcutCombo("terminal.clear", "darwin"), "darwin"), "⌘K", "formats the macOS terminal clear shortcut as ⌘K");
+eq(formatShortcutCombo(defaultShortcutCombo("terminal.clear", "windows"), "windows"), "Ctrl+K", "formats the Windows terminal clear shortcut as Ctrl+K");
+eq(migrateLegacyCustomShortcuts({ "commandPalette.open": { key: "k", meta: true } }, "darwin")["commandPalette.open"], undefined, "legacy macOS Cmd+K palette binding is dropped so terminal.clear owns Cmd+K");
+eq(migrateLegacyCustomShortcuts({ "commandPalette.open": { key: "F2" } }, "darwin")["commandPalette.open"]?.key, "F2", "custom palette bindings other than legacy Cmd+K are kept");
+eq(migrateLegacyCustomShortcuts({ "commandPalette.open": { key: "k", ctrl: true } }, "darwin")["commandPalette.open"]?.key, "k", "non-darwin legacy bindings are only normalized, never dropped by the darwin migration");
+eq(migrateLegacyCustomShortcuts({ "commandPalette.open": { key: "k", meta: true } }, "windows")["commandPalette.open"]?.key, "k", "the migration is a no-op on non-darwin platforms");
 eq(matchesShortcut({ key: "?", shiftKey: true }, "shortcuts.show", "darwin"), true, "? opens shortcut help");
 eq(matchesShortcut({ key: "+", metaKey: true, shiftKey: true }, "textSize.increase", "darwin"), true, "Cmd+Plus still increases text size");
 eq(formatShortcutCombo(defaultShortcutCombo("settings.open", "darwin"), "darwin"), "⌘,", "formats mac settings shortcut");
