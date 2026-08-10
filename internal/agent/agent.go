@@ -1686,8 +1686,13 @@ func (a *Agent) finalReadinessCheckFor() finalReadinessCheck {
 		return out
 	}
 	{
+		// Latest-turn incomplete todos still block a writer turn's final answer.
+		// Delivery also falls back to canonical todos so open items cannot be
+		// abandoned across turns. Balanced/full deliberately skip that fallback:
+		// stale open todos were re-emitting "delivery checks incomplete" on every
+		// later turn even when the user was not in delivery mode (#7694, #7634).
 		incomplete, hasTodos := a.evidence.IncompleteLatestTodos()
-		if !hasTodos && a.evidence.HasAnySuccessfulReceipt() {
+		if a.deliveryProfile && !hasTodos && a.evidence.HasAnySuccessfulReceipt() {
 			incomplete, hasTodos = a.incompleteCanonicalTodos()
 		}
 		if hasTodos && len(incomplete) > 0 && a.evidence.HasSuccessfulTodoProgressReceipt() {

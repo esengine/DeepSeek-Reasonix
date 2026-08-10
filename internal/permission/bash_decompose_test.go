@@ -179,9 +179,9 @@ func TestPolicyDecideCompoundBash(t *testing.T) {
 		want    Decision
 	}{
 		{
-			name:    "compound of atomic-allowed segments passes",
+			name:    "compound with high-risk git push requires human",
 			subject: `git add . && git commit -m "wip" && git push`,
-			want:    Allow,
+			want:    Ask,
 		},
 		{
 			name:    "one uncovered segment turns into Ask",
@@ -231,9 +231,9 @@ func TestPolicyDecideCompoundBash(t *testing.T) {
 			want:    Ask,
 		},
 		{
-			name:    "atomic subject with matching prefix rule still allows",
+			name:    "atomic high-risk git push requires human even with prefix rule",
 			subject: "git push origin main",
-			want:    Allow,
+			want:    Ask,
 		},
 	}
 	for _, tt := range cases {

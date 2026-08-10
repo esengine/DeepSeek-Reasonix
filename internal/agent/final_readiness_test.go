@@ -41,8 +41,8 @@ func TestFinalReadinessFailureBranches(t *testing.T) {
 		{"writer without checks or todo never gates", nil, readinessLedger(writer), true, ""},
 		{"missing project check after writer is reported", []instruction.VerifyCheck{check}, readinessLedger(checkAfter, writer), false, "go test ./..."},
 		{"project check run after writer satisfies", []instruction.VerifyCheck{check}, readinessLedger(writer, checkAfter), true, ""},
-		{"todo writer without complete_step is reported", nil, readinessLedger(writer, todo), false, "incomplete items"},
-		{"complete_step without final todo update is reported", nil, readinessLedger(writer, todo, completeAfter), false, "latest successful todo_write"},
+		{"todo writer without complete_step is reported under delivery", nil, readinessLedger(writer, todo), false, "incomplete items"},
+		{"complete_step without final todo update is reported under delivery", nil, readinessLedger(writer, todo, completeAfter), false, "latest successful todo_write"},
 		{"todo writer with complete_step and completed todo satisfies", nil, readinessLedger(writer, todo, completeAfter, doneTodo), true, ""},
 	}
 	for _, tc := range cases {
@@ -99,6 +99,21 @@ func TestFinalReadinessCheckAuditsIncompleteTodos(t *testing.T) {
 	audit := got.audit(evidence.ReadinessBlocked, false)
 	if audit.IncompleteTodos != 1 {
 		t.Fatalf("audit.IncompleteTodos = %d, want 1", audit.IncompleteTodos)
+	}
+}
+
+func TestFinalReadinessDoesNotFallBackToCanonicalTodosOutsideDelivery(t *testing.T) {
+	// Stale open todos from earlier turns must not poison balanced/full sessions.
+	ran := evidence.Receipt{ToolName: "bash", Success: true, Command: "echo hi"}
+	open := []evidence.TodoItem{{Content: "leftover", Status: "pending"}}
+	a := &Agent{evidence: readinessLedger(ran), todoState: open}
+	if got := a.ReadinessResult(); !got.Ready {
+		t.Fatalf("ReadinessResult() = %+v, want ready without delivery canonical fallback", got)
+	}
+	// Delivery still falls back to the canonical list.
+	delivery := &Agent{evidence: readinessLedger(ran), todoState: open, deliveryProfile: true}
+	if got := delivery.ReadinessResult(); !strings.Contains(got.Reason, "incomplete") {
+		t.Fatalf("delivery ReadinessResult() = %+v, want incomplete canonical todos", got)
 	}
 }
 

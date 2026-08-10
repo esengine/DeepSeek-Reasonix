@@ -176,6 +176,29 @@ func TestTerminalTargetScopesSessionsToTheChatTab(t *testing.T) {
 	}
 }
 
+func TestTerminalWorkspaceListsInactiveTabSessions(t *testing.T) {
+	// Frontend switches optimistically and re-syncs before SetActiveTab returns.
+	// Listing must work for the previous tab so open terminals do not flash as
+	// "closed" during multi-session switches (#7744).
+	app := NewApp()
+	root := t.TempDir()
+	app.tabs["one"] = &WorkspaceTab{ID: "one", Scope: "project", WorkspaceRoot: root}
+	app.tabs["two"] = &WorkspaceTab{ID: "two", Scope: "project", WorkspaceRoot: root}
+	app.tabOrder = []string{"one", "two"}
+	app.activeTabID = "one"
+
+	if _, err := app.TerminalWorkspaceForTab("one"); err != nil {
+		t.Fatalf("active list: %v", err)
+	}
+	app.activeTabID = "two"
+	if _, err := app.TerminalWorkspaceForTab("one"); err != nil {
+		t.Fatalf("inactive list after switch: %v", err)
+	}
+	if _, err := app.CreateTerminalForTab("one", ".", "default"); !errors.Is(err, errTerminalStaleTab) {
+		t.Fatalf("inactive create error = %v, want errTerminalStaleTab", err)
+	}
+}
+
 func TestEmptyTerminalWorkspaceViewSerializesArrays(t *testing.T) {
 	view := emptyTerminalWorkspaceView()
 	raw, err := json.Marshal(view)

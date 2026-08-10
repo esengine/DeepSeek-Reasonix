@@ -158,7 +158,9 @@ func TestE2ECrossTurnCanonicalGateBlocksThenClears(t *testing.T) {
 			Arguments: `{"step":"beta","result":"done","evidence":[{"kind":"manual","summary":"verified by inspection"}]}`}}},
 		testutil.Turn{Text: "all done now"},
 	)
-	a := New(mp, evidenceRegistry(), sess, Options{}, event.Discard)
+	// Cross-turn canonical fallback is delivery-only: balanced/full must not
+	// re-block every later turn on stale open todos (#7694).
+	a := New(mp, evidenceRegistry(), sess, Options{DeliveryProfile: true}, event.Discard)
 	a.SetSession(sess) // rebuilds canonical {alpha in_progress, beta pending}
 
 	firstErr := a.Run(context.Background(), "finish up")

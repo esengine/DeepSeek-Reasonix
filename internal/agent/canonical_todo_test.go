@@ -14,20 +14,25 @@ func TestFinalReadinessFallsBackToCanonicalTodos(t *testing.T) {
 	open := []evidence.TodoItem{{Content: "push", Status: "completed"}, {Content: "rebase", Status: "pending"}}
 
 	// Turn did work (a successful bash) but issued no todo_write this turn, so the
-	// per-turn ledger has no list — the canonical state must still gate.
-	a := &Agent{evidence: readinessLedger(ran), todoState: open}
+	// per-turn ledger has no list — delivery falls back to the canonical state.
+	a := &Agent{evidence: readinessLedger(ran), todoState: open, deliveryProfile: true}
 	if got := a.ReadinessResult(); !strings.Contains(got.Reason, "incomplete") {
 		t.Fatalf("cross-turn gate = %q, want it to report incomplete canonical todos", got.Reason)
 	}
+	// Balanced/full must not fall back to stale canonical todos.
+	balanced := &Agent{evidence: readinessLedger(ran), todoState: open}
+	if got := balanced.ReadinessResult(); !got.Ready {
+		t.Fatalf("balanced mode gated on canonical todos: %+v", got)
+	}
 
 	// A turn that touched nothing (pure Q&A) must never gate on stale canonical state.
-	idle := &Agent{evidence: evidence.NewLedger(), todoState: open}
+	idle := &Agent{evidence: evidence.NewLedger(), todoState: open, deliveryProfile: true}
 	if got := idle.ReadinessResult(); !got.Ready {
 		t.Fatalf("no-work turn gated on canonical todos: %+v", got)
 	}
 
 	// All canonical items completed → no gate even after work.
-	done := &Agent{evidence: readinessLedger(ran), todoState: []evidence.TodoItem{{Content: "push", Status: "completed"}}}
+	done := &Agent{evidence: readinessLedger(ran), todoState: []evidence.TodoItem{{Content: "push", Status: "completed"}}, deliveryProfile: true}
 	if got := done.ReadinessResult(); !got.Ready {
 		t.Fatalf("completed canonical todos still gated: %+v", got)
 	}

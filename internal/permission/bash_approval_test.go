@@ -136,6 +136,28 @@ func TestPolicyDynamicBashShapesRequireExplicitApproval(t *testing.T) {
 	}
 }
 
+func TestHighRiskGitBashRequiresHumanEvenInAuto(t *testing.T) {
+	// Exact-looking destructive git must not auto-run under Auto (#7784).
+	p := New("allow", []string{"Bash"}, nil, nil)
+	for _, command := range []string{
+		"git checkout main",
+		"git checkout -f HEAD",
+		"git checkout -- src/main.go",
+		"git reset --hard HEAD",
+		"git push origin main",
+		"git clean -fd",
+		"env git checkout feature",
+	} {
+		if got := p.DecideSubject("bash", false, command); got != Ask {
+			t.Errorf("DecideSubject(%q) = %v, want Ask under Auto", command, got)
+		}
+	}
+	// Non-destructive git remains reusable under Auto.
+	if got := p.DecideSubject("bash", false, "git status --short"); got != Allow {
+		t.Fatalf("DecideSubject(git status) = %v, want Allow", got)
+	}
+}
+
 func TestPolicyExactOnlyBashUsesFallbackWithoutReusableAllow(t *testing.T) {
 	for _, command := range []string{
 		"git diff $REV",

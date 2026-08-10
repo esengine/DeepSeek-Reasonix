@@ -9787,11 +9787,13 @@ var (
 	// it only for the duration of a metadata rewrite (sub-millisecond); a
 	// concurrent tab build that races that probe must not surface a spurious
 	// "already open in another Reasonix window" error for a lease that is
-	// genuinely free once the probe releases it. A lease held by another
-	// window or process stays held for its whole lifetime, so the bounded
-	// retry still fails fast there.
-	sessionLeaseContentionRetryInterval = 50 * time.Millisecond
-	sessionLeaseContentionRetryAttempts = 2
+	// genuinely free once the probe releases it. Multi-project tab switching
+	// (#7732, #7592) can stack several short probes, so the budget is longer
+	// than a single sub-ms rewrite. A lease held by another window or process
+	// stays held for its whole lifetime, so the bounded retry still fails
+	// fast there.
+	sessionLeaseContentionRetryInterval = 40 * time.Millisecond
+	sessionLeaseContentionRetryAttempts = 8
 )
 
 // withSessionLeaseContentionRetry retries acquire while it fails with

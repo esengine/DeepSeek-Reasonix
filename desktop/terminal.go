@@ -253,12 +253,20 @@ func (a *App) terminalTargetForTab(tabID string, requireWritable bool) (terminal
 	if tabID == "" {
 		tabID = activeID
 	}
-	if tabID == "" || tabID != activeID {
+	if tabID == "" {
+		a.mu.RUnlock()
+		return terminalTarget{}, errTerminalStaleTab
+	}
+	// Mutations stay tied to the active tab so a background tab cannot drive
+	// PTY input. Listing/snapshot must work for any open tab: the frontend
+	// switches optimistically and re-syncs before SetActiveTab returns, and
+	// requiring active-only made restored tabs look "closed" (#7744).
+	if requireWritable && tabID != activeID {
 		a.mu.RUnlock()
 		return terminalTarget{}, errTerminalStaleTab
 	}
 	tab := a.tabByIDLocked(tabID)
-	if tab == nil {
+	if tab == nil || tab.removed {
 		a.mu.RUnlock()
 		return terminalTarget{}, errTerminalStaleTab
 	}
@@ -288,7 +296,10 @@ func (a *App) terminalTargetForTab(tabID string, requireWritable bool) (terminal
 func (a *App) revalidateTerminalTarget(target terminalTarget, requireWritable bool) error {
 	a.mu.RLock()
 	tab := a.tabByIDLocked(target.tabID)
-	valid := tab != nil && a.activeTabID == target.tabID
+	valid := tab != nil && !tab.removed
+	if requireWritable {
+		valid = valid && a.activeTabID == target.tabID
+	}
 	readOnly := valid && tab.ReadOnly
 	root := ""
 	if valid {

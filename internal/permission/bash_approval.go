@@ -60,11 +60,85 @@ func classifyBashSegmentApproval(subject string) bashApprovalClass {
 	if len(features.CommandPrefix) > 0 && isIndirectExecution(features.CommandPrefix) {
 		return bashApprovalRequireHuman
 	}
+	// Destructive git/file forms are exact-looking shell but must not auto-run
+	// under Auto: users report silent `git checkout` discarding work (#7784).
+	if bashSubjectIsHighRiskMutation(subject) {
+		return bashApprovalRequireHuman
+	}
 	if features.Expansion || features.Assignment || features.Redirection ||
 		shellparse.ContainsUnquotedGlob(subject) || hasEnvWrapperAssignment(features.CommandPrefix) {
 		return bashApprovalExactOnly
 	}
 	return bashApprovalReusable
+}
+
+// bashSubjectIsHighRiskMutation mirrors the recovery high-risk git classifier
+// without importing recovery (that package depends on agent → config →
+// permission). Keep destructive worktree/index rewrites behind a human prompt
+// even when the shell shape is "exact-only reusable" under Auto.
+func bashSubjectIsHighRiskMutation(subject string) bool {
+	features, ok := shellparse.AnalyzeApprovalFeatures(subject)
+	if !ok || len(features.CommandPrefix) == 0 {
+		return false
+	}
+	fields := features.CommandPrefix
+	// Strip env-style wrappers so `env git checkout` still matches.
+	for len(fields) > 0 {
+		base := executableBase(fields[0])
+		switch base {
+		case "env":
+			fields = fields[1:]
+			for len(fields) > 0 && isEnvironmentAssignment(fields[0]) {
+				fields = fields[1:]
+			}
+			continue
+		case "command", "builtin", "exec", "nohup", "sudo":
+			fields = fields[1:]
+			for len(fields) > 0 && strings.HasPrefix(fields[0], "-") {
+				fields = fields[1:]
+			}
+			continue
+		}
+		break
+	}
+	if len(fields) == 0 || executableBase(fields[0]) != "git" {
+		return false
+	}
+	args := fields[1:]
+	if containsFoldedArg(args, "push", "clean", "prune", "filter-branch", "filter-repo") {
+		return true
+	}
+	if containsFoldedArg(args, "reset") && containsFoldedArg(args, "--hard", "--merge", "--keep") {
+		return true
+	}
+	if containsFoldedArg(args, "checkout") {
+		return true
+	}
+	if containsFoldedArg(args, "switch") && containsFoldedArg(args, "--discard-changes") {
+		return true
+	}
+	if containsFoldedArg(args, "restore") && (!containsFoldedArg(args, "--staged") || containsFoldedArg(args, "--worktree")) {
+		return true
+	}
+	if containsFoldedArg(args, "branch") && containsFoldedArg(args, "-d", "--delete", "-f", "--force") {
+		return true
+	}
+	if containsFoldedArg(args, "stash") && containsFoldedArg(args, "clear", "drop") {
+		return true
+	}
+	return false
+}
+
+func containsFoldedArg(args []string, needles ...string) bool {
+	for _, arg := range args {
+		low := strings.ToLower(strings.TrimSpace(arg))
+		for _, needle := range needles {
+			if low == strings.ToLower(needle) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func isIndirectExecution(fields []string) bool {
