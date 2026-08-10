@@ -68,7 +68,7 @@ func extensionNotification[P any](name Method, class OperationClass) MethodSpec 
 
 func typeOf[T any]() reflect.Type { return reflect.TypeFor[T]() }
 
-// frozenRegistry is the Extension Protocol v1 method set. Adding, renaming,
+// frozenRegistry is the Extension Protocol v2 method set. Adding, renaming,
 // or redirecting a method is a conscious protocol change: ValidateRegistry
 // pins the counts and the generated schema hash changes.
 var frozenRegistry = []MethodSpec{
@@ -190,7 +190,7 @@ func ValidateRegistry() error {
 			return fmt.Errorf("method %s has invalid direction %q", spec.Name, spec.Direction)
 		}
 	}
-	// Extension Protocol v1: 8 lifecycle/intercept/provider/UI Host →
+	// Extension Protocol v2: 8 lifecycle/intercept/provider/UI Host →
 	// Extension requests, 3 Extension → Host requests (UI publish/request,
 	// content read), 3 Host → Extension notifications, 2 provider stream
 	// notifications.

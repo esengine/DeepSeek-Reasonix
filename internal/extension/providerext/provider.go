@@ -20,6 +20,7 @@ import (
 type Provider struct {
 	resolver   *Resolver
 	client     ProviderClient
+	owner      string // plugin package id; used to re-resolve live backends
 	ref        string
 	effort     *string
 	descriptor provider.Descriptor
@@ -71,23 +72,26 @@ func (p *Provider) MissingToolCallReasoningWarningIdentity() string {
 	}, "\x00")
 }
 
-// Stream opens one sidecar stream and returns its buffered chunk channel.
-// The channel closes on a clean end; failures arrive as a terminal ChunkError
-// (StreamInterruptedError for interruptions). Cancelling ctx aborts the
-// stream through extension/provider/stream/cancel. A crashed sidecar fails
-// fast — there is no fallback to another provider.
+// Stream opens one sidecar stream. Each call re-resolves the live backend so
+// rolling replacement keeps the same provider-visible ref (cache-stable).
 func (p *Provider) Stream(ctx context.Context, request provider.Request) (<-chan provider.Chunk, error) {
-	if p == nil || p.resolver == nil || p.client == nil {
+	if p == nil || p.resolver == nil {
 		return nil, fmt.Errorf("extension provider is unavailable")
 	}
-	return p.resolver.open(ctx, p, request)
+	client := p.client
+	if live := p.resolver.liveClient(p.owner); live != nil {
+		client = live
+	}
+	if client == nil {
+		return nil, fmt.Errorf("extension provider is unavailable")
+	}
+	return p.resolver.open(ctx, p, client, request)
 }
 
 // open registers the buffered stream, asks the sidecar to start it, and arms
 // the cancellation/disconnect watcher. The seq buffering, delivery, and gap
 // semantics mirror the broker's Host.open exactly.
-func (r *Resolver) open(ctx context.Context, p *Provider, request provider.Request) (<-chan provider.Chunk, error) {
-	client := p.client
+func (r *Resolver) open(ctx context.Context, p *Provider, client ProviderClient, request provider.Request) (<-chan provider.Chunk, error) {
 	if client.Crashed() {
 		return nil, &provider.StreamInterruptedError{Err: fmt.Errorf("extension sidecar %s crashed", client.PluginID())}
 	}
@@ -105,6 +109,24 @@ func (r *Resolver) open(ctx context.Context, p *Provider, request provider.Reque
 	r.streams[id] = stream
 	r.mu.Unlock()
 	go r.deliverStream(stream)
+
+	gen := r.owner.Gate.Published()
+	streamID := id
+	streamRef := stream
+	// Register before opening: a sidecar may emit stream/end or overflow while
+	// ProviderStreamOpen is still returning, and those paths must unregister.
+	unregisterDrainCancel := r.owner.Gate.RegisterDrainCancel(gen, func() {
+		r.mu.Lock()
+		if r.streams[streamID] == streamRef {
+			r.abortDeliveryLocked(streamRef)
+			r.finishLocked(streamID, streamRef, provider.Chunk{Type: provider.ChunkError, Err: &provider.StreamInterruptedError{
+				Err: fmt.Errorf("extension stream %s: generation %d drain timed out", streamID, gen),
+			}})
+		}
+		r.mu.Unlock()
+		go client.ProviderStreamCancel(streamID)
+	})
+	r.installDrainCancel(id, stream, unregisterDrainCancel)
 
 	effort := ""
 	if p.effort != nil {
@@ -128,8 +150,29 @@ func (r *Resolver) open(ctx context.Context, p *Provider, request provider.Reque
 		go client.ProviderStreamCancel(id)
 		return nil, fmt.Errorf("extension %s declined provider stream %q", client.PluginID(), p.ref)
 	}
+	// Provider request is already submitted to the sidecar — irreversible for
+	// recovery (never claim rollback of an in-flight provider call).
+	r.owner.RecordProviderSubmit(gen, id, client.PluginID())
 	go r.watchStream(ctx, id, stream)
 	return stream.out, nil
+}
+
+// installDrainCancel publishes the gate unregister callback under Resolver.mu.
+// If expiration already finished the stream, unregister immediately instead of
+// attaching cleanup state to a completed stream.
+func (r *Resolver) installDrainCancel(id string, stream *extensionStream, unregister func()) {
+	if unregister == nil {
+		return
+	}
+	r.mu.Lock()
+	if r.streams[id] == stream {
+		stream.unregisterDrainCancel = unregister
+		unregister = nil
+	}
+	r.mu.Unlock()
+	if unregister != nil {
+		unregister()
+	}
 }
 
 // mapStreamOpenError lifts the sidecar's provider_interrupted family into

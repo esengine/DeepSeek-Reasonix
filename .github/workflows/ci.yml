@@ -138,14 +138,21 @@ jobs:
       # filesystem contracts, plus cmd/. The full ./... sweep stays on pushes
       # to main-v2; the Unix legs always run the full suite. Keep the job-level
       # budget above normal 7-9 minute runner variance; each package test binary
-      # remains independently bounded by Go's 3 minute timeout below.
+      # remains independently bounded by Go's per-package timeout below.
+      #
+      # That timeout is 8m, not 3m: across four consecutive runs of the same
+      # code, internal/boot measured 133s, 146s, 162s and then hit 180s, and
+      # internal/agent 82s, 92s, 144s and 180s — a 2.2x spread from runner
+      # variance alone, with four heavy packages sharing four vCPUs. At 3m the
+      # step failed on slow runners without a code change; a hang still trips
+      # the 15 minute job budget above.
       - name: test (Windows smoke)
         if: env.RUN_STEPS == 'true' && runner.os == 'Windows' && github.event_name == 'pull_request'
         timeout-minutes: 15
         env:
           REASONIX_RELEASE_CACHE_GUARD: "1"
           WINDOWS_SANDBOX_WAIT_MS: "20000"
-        run: go test -p 4 -timeout=3m ./internal/agent/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
+        run: go test -p 4 -timeout=8m ./internal/agent/... ./internal/appidentity/... ./internal/boot/... ./internal/checkpoint/... ./internal/cli/... ./internal/control/... ./internal/desktoplauncher/... ./internal/filelock/... ./internal/fileutil/... ./internal/hook/... ./internal/instruction/... ./internal/mcplaunch/... ./internal/notify/... ./internal/proc/... ./internal/remote/... ./internal/repair/... ./internal/sandbox/... ./internal/sysproxy/... ./internal/workspacelease/... ./cmd/...
 
       # The general Windows PR smoke list intentionally omits internal/tool.
       # Keep the session-temp portability contract covered without widening the
@@ -314,7 +321,7 @@ jobs:
       - name: Install Wails CLI
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
 
       - name: gofmt
         run: |
@@ -442,7 +449,7 @@ jobs:
       - name: Install Wails CLI
         run: |
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-          go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat "$GITHUB_WORKSPACE/.wails-version")"
 
       # go:embed of frontend/dist needs a built frontend before the package
       # compiles, same as the ubuntu desktop leg.
@@ -485,10 +492,20 @@ jobs:
       - name: repo standards
         run: go run ./tools/repolint
 
+      - name: wails version pin
+        run: |
+          bash scripts/check-wails-pin.sh
+          bash scripts/check-wails-pin.test.sh
+
+      # `make lint-install` reads the same file, so a local run and this job
+      # cannot drift onto different linter versions.
+      - id: golangci
+        run: echo "version=$(cat .golangci-version)" >> "$GITHUB_OUTPUT"
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.12.2
+          version: ${{ steps.golangci.outputs.version }}
           args: --timeout=5m
 
       # The step above only type-checks the linux/amd64 build, so every

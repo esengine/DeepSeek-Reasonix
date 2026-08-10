@@ -325,7 +325,7 @@ func (a *Agent) executeBatch(ctx context.Context, calls []provider.ToolCall) bat
 		}
 	}
 	if !cancelled {
-		a.applyStormBreaker(calls, outcomes, results, receiptMark)
+		a.applyBatchGuards(calls, outcomes, results, receiptMark)
 	}
 	images := make([][]string, len(calls))
 	executions := make([]*tool.ShellExecution, len(calls))
@@ -446,7 +446,7 @@ func partitionToolCalls(r *tool.Registry, calls []provider.ToolCall) []toolCallB
 
 func parallelisable(r *tool.Registry, name string) bool {
 	switch name {
-	case "complete_step", "todo_write", "wait", "bash_output", "use_capability":
+	case "complete_step", "todo_write", "wait", "bash_output", "use_capability", "compress":
 		return false
 	}
 	t, _, ambiguous := r.ResolveCall(name)

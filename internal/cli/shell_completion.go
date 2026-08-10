@@ -107,20 +107,13 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		completionFlag("--version -v", cliCompletionNoValue),
 	}, help)}
 
+	serveFlags := cliServeCompletionFlags(model, profile, help)
+
 	root.subcommands = []cliCompletionSpec{
 		completionSpec("run", runFlags),
 		completionSpecWithAliases("chat", []string{"code"}, interactiveFlags),
-		completionSpec("serve", []cliCompletionFlag{
-			model, profile,
-			completionFlag("--max-steps", cliCompletionStaticValue),
-			completionFlag("--addr", cliCompletionStaticValue),
-			// serve loads the path with open/loadResumableSession — file path only,
-			// not branch IDs (SessionValue would complete IDs that fail at runtime).
-			completionFlag("--resume", cliCompletionPathValue),
-			completionFlag("--auth", cliCompletionStaticValue, "none", "token", "password"),
-			completionFlag("--token --password --port-file --token-file --pid-file", cliCompletionStaticValue),
-			completionFlag("--hash-password --behind-proxy", cliCompletionNoValue), help,
-		}),
+		completionSpec("serve", serveFlags),
+		completionSpec("web", serveFlags),
 		completionSpec("setup", []cliCompletionFlag{completionFlag("--local -l", cliCompletionNoValue), help}),
 		completionSpec("config", []cliCompletionFlag{help},
 			completionSpec("auto-plan", []cliCompletionFlag{completionFlag("--local", cliCompletionNoValue), help}),
@@ -290,6 +283,18 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		completionSpec("help", []cliCompletionFlag{help}),
 	}
 	return root
+}
+
+func cliServeCompletionFlags(model, profile, help cliCompletionFlag) []cliCompletionFlag {
+	return []cliCompletionFlag{
+		model, profile,
+		completionFlag("--max-steps --addr", cliCompletionStaticValue),
+		// Serve/Web resume accepts file paths, not branch IDs.
+		completionFlag("--resume", cliCompletionPathValue),
+		completionFlag("--auth", cliCompletionStaticValue, "none", "token", "password"),
+		completionFlag("--token --password --port-file --token-file --pid-file", cliCompletionStaticValue),
+		completionFlag("--hash-password --behind-proxy --open --no-open", cliCompletionNoValue), help,
+	}
 }
 
 func subagentCompletionFlags(model, effort, help cliCompletionFlag) []cliCompletionFlag {

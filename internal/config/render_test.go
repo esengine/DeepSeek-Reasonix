@@ -249,6 +249,7 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
 	orig.Skills.ExcludedPaths = []string{"~/.agents/skills"}
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
+	orig.Skills.DisableImplicitInvocation = true
 	orig.Skills.MaxDepth = 2
 	orig.Bot.ToolApprovalMode = "auto"
 	orig.Bot.Control = BotControlConfig{Enabled: true, Addr: "127.0.0.1:39001", TokenEnv: "BOT_CONTROL_TOKEN"}
@@ -516,6 +517,9 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	}
 	if len(got.Skills.DisabledSkills) != 2 || got.Skills.DisabledSkills[0] != "review" || got.Skills.DisabledSkills[1] != "explore" {
 		t.Errorf("skills.disabled_skills = %v", got.Skills.DisabledSkills)
+	}
+	if !got.Skills.DisableImplicitInvocation || got.ImplicitSkillInvocationEnabled() {
+		t.Error("skills.disable_implicit_invocation was not preserved")
 	}
 	if got.SkillMaxDepth() != 2 {
 		t.Errorf("skills.max_depth = %d, want 2", got.SkillMaxDepth())

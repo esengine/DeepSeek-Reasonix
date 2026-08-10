@@ -628,7 +628,7 @@ func TestReadFilePreviewBinaryClassification(t *testing.T) {
 	orig, _ := os.Getwd()
 	defer os.Chdir(orig)
 
-	dir := t.TempDir()
+	dir := robustTempDir(t)
 	if err := os.Chdir(dir); err != nil {
 		t.Fatal(err)
 	}

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 
+	"reasonix/internal/appidentity"
 	"reasonix/internal/installlayout"
 )
 
@@ -27,11 +28,17 @@ func Run(args []string, buildVersion string) int {
 			return 0
 		}
 	}
+	if err := appidentity.ApplyToCurrentProcess(); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: apply Windows app identity:", err)
+	}
 
 	installRoot, err := ResolveInstallRoot()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return 1
+	}
+	if err := appidentity.RepairOwnedShortcuts(installRoot); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: repair Windows shortcut identity:", err)
 	}
 	if err := runLegacyMigratorIfNeeded(installRoot); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)

@@ -148,6 +148,7 @@ stalled_warning_seconds = 900   # warn once per background job after this many q
 # [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra "custom"-scope skill roots
 # excluded_paths = ["~/.agents/skills"]         # hide convention roots without deleting folders
+# disable_implicit_invocation = true             # keep /skill explicit; hide skill discovery and tools from the model
 # disabled_skills = ["review"]                  # hide from prompt, slash invocation, and skill tools
 
 # Hooks run shell commands around the loop (PreToolUse / PostToolUse /

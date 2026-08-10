@@ -60,6 +60,7 @@ var acceptsDefaultSnip = map[string]bool{
 	"bash_output":   true, // streamed job output; tailing handled by the job, not the snip pass
 	"code_index":    true,
 	"complete_step": true,
+	"compress":      true,
 	"delete_range":  true,
 	"delete_symbol": true,
 	"edit_file":     true,

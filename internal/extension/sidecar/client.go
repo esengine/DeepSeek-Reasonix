@@ -29,10 +29,7 @@ const (
 	// queuedNotifications bounds the ordered notification queue (provider
 	// stream chunks). A full queue fails the connection rather than dropping.
 	queuedNotifications = 256
-	// defaultWriteStallBound caps any outbound write that makes no progress
-	// (sidecar alive but not reading stdin). A healthy sidecar drains frames
-	// continuously, so 10s of no progress means the reader is wedged; the
-	// connection then fails and the process is killed.
+	// defaultWriteStallBound caps stalled outbound writes (sidecar not reading).
 	defaultWriteStallBound = 10 * time.Second
 	// maxInterceptTimeout is the 60s ceiling every sync-intercept budget is
 	// clamped to, including manifest overrides.
@@ -149,6 +146,8 @@ type Client struct {
 	pluginID         string
 	version          string
 	rt               *pluginpkg.RuntimeSpec
+	requires         []pluginpkg.CapabilityRef // manifest v2 dependency requirements
+	provides         []pluginpkg.CapabilityRef // manifest v2 capability ceiling
 	session          protocol.SessionContext
 	uiHost           protocol.UIHostKind
 	handshakeTimeout time.Duration
@@ -231,6 +230,8 @@ func newClient(p *process, opts ClientOptions) *Client {
 		pluginID:         p.pluginID,
 		version:          version,
 		rt:               opts.Package.Manifest.Runtime,
+		requires:         append([]pluginpkg.CapabilityRef(nil), opts.Package.Manifest.Requires...),
+		provides:         append([]pluginpkg.CapabilityRef(nil), opts.Package.Manifest.Provides...),
 		session:          opts.Session,
 		uiHost:           uiHost,
 		handshakeTimeout: handshakeTimeout,
@@ -333,17 +334,7 @@ func (c *Client) handshake(ctx context.Context) error {
 func (c *Client) handshakeWithTimeout(ctx context.Context, timeout time.Duration) error {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	params := protocol.InitializeParams{
-		ProtocolVersion: protocol.ProtocolVersion,
-		ProtocolID:      protocol.ProtocolID,
-		Manifest:        c.manifestExpectation(),
-		Session:         c.session,
-		Capabilities: protocol.HostCapabilities{
-			ContentRefs:     true,
-			UIHost:          c.uiHost,
-			ProtocolVersion: protocol.ProtocolVersion,
-		},
-	}
+	params := c.initializeParams()
 	raw, err := c.conn.Request(tctx, string(protocol.MethodExtensionInitialize), params)
 	if err != nil {
 		if perr := c.poisonError(); perr != nil {
@@ -383,15 +374,6 @@ func (c *Client) poisonError() error {
 	return nil
 }
 
-func (c *Client) manifestExpectation() protocol.ManifestExpectation {
-	rt := c.rt
-	return protocol.ManifestExpectation{
-		Intercepts:   append([]string(nil), rt.Intercepts...),
-		Replaces:     append([]string(nil), rt.Replaces...),
-		Capabilities: append([]string(nil), rt.Capabilities...),
-	}
-}
-
 // validateHandshakeResult enforces the declaration contract: the sidecar's
 // protocol version must be supported, and every capability it activated must
 // be a subset of what its installed manifest declared.
@@ -426,6 +408,12 @@ func (c *Client) validateHandshakeResult(result protocol.InitializeResult) error
 	}
 	if len(result.UIActions) > 0 && !containsString(rt.Capabilities, "ui") {
 		return capabilityErr("extension %s declared UI actions without the ui capability", c.pluginID)
+	}
+	// Manifest provides is the capability ceiling: handshake must not claim
+	// capabilities the package never declared. Declared-but-missing provides
+	// stay Unavailable (no forge) — callers read Status via the lifecycle registry.
+	if err := validateProvidesCeiling(c.provides, result.Provides); err != nil {
+		return &protocol.ProtocolError{Reason: protocol.ErrCapabilityNotDeclared, Message: err.Error()}
 	}
 	return nil
 }
@@ -691,19 +679,21 @@ func (c *Client) Shutdown(_ context.Context, timeout time.Duration) error {
 		if timeout <= 0 {
 			timeout = defaultShutdownRequestTimeout
 		}
-		if wasReady && !c.crashed.Load() {
+		if wasReady && !c.crashed.Load() && c.conn != nil {
 			tctx, cancel := context.WithTimeout(context.Background(), timeout)
-			// Best effort: a wedged sidecar answers late or never, and the
-			// bounded process close below handles both.
 			_, _ = c.conn.Request(tctx, string(protocol.MethodExtensionShutdown), protocol.ShutdownParams{
 				TimeoutMillis: int(timeout.Milliseconds()),
 			})
 			cancel()
 		}
-		c.proc.close()
-		select {
-		case <-c.serveExited:
-		case <-time.After(closeWaitBudget):
+		if c.proc != nil {
+			c.proc.close()
+		}
+		if c.serveExited != nil {
+			select {
+			case <-c.serveExited:
+			case <-time.After(closeWaitBudget):
+			}
 		}
 	})
 	return nil

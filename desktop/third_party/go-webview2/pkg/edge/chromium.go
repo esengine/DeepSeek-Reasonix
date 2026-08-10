@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -29,6 +30,7 @@ type Rect = w32.Rect
 const (
 	shouldDetectMonitorScaleChanges = true
 	reasonixNoProxyServerBrowserArg = "--no-proxy-server"
+	reasonixProcessRecoveryCooldown = 30 * time.Second
 )
 
 func globalErrorHandler(err error) {
@@ -75,6 +77,8 @@ type Chromium struct {
 	acceleratorKeyPressed            *ICoreWebView2AcceleratorKeyPressedEventHandler
 	navigationCompleted              *ICoreWebView2NavigationCompletedEventHandler
 	processFailed                    *ICoreWebView2ProcessFailedEventHandler
+	processRecoveryMu                sync.Mutex
+	lastProcessRecovery              time.Time
 
 	environment            *ICoreWebView2Environment
 	webview2RuntimeVersion string
@@ -570,7 +574,33 @@ func (e *Chromium) ProcessFailed(sender *ICoreWebView2, args *ICoreWebView2Proce
 	if e.ProcessFailedCallback != nil {
 		e.ProcessFailedCallback(sender, args)
 	}
+
+	// WebView2 creates a replacement renderer after a main-frame renderer exit,
+	// but leaves it on an error page. A renderer reported as unresponsive also
+	// needs a native COM reload because JavaScript in that process may no longer
+	// run. Keep recovery below the public callback so Wails/Reasonix records the
+	// original failure first, and throttle it to avoid a crash/reload loop.
+	kind, err := args.GetProcessFailedKind()
+	if err == nil && e.shouldReloadFailedRenderer(kind, time.Now()) {
+		if err := sender.Reload(); err != nil {
+			e.errorCallback(fmt.Errorf("reload failed WebView2 renderer: %w", err))
+		}
+	}
 	return 0
+}
+
+func (e *Chromium) shouldReloadFailedRenderer(kind COREWEBVIEW2_PROCESS_FAILED_KIND, now time.Time) bool {
+	if kind != COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED &&
+		kind != COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE {
+		return false
+	}
+	e.processRecoveryMu.Lock()
+	defer e.processRecoveryMu.Unlock()
+	if !e.lastProcessRecovery.IsZero() && now.Sub(e.lastProcessRecovery) < reasonixProcessRecoveryCooldown {
+		return false
+	}
+	e.lastProcessRecovery = now
+	return true
 }
 
 func (e *Chromium) NotifyParentWindowPositionChanged() error {

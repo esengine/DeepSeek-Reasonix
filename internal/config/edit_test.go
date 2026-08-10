@@ -761,7 +761,7 @@ func TestEffectiveVisionDoesNotInferCustomMimoProxy(t *testing.T) {
 	}
 }
 
-func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModels(t *testing.T) {
+func TestEffectiveVisionRejectsOfficialDeepSeekOverridesButPreservesCustomGateways(t *testing.T) {
 	for _, endpoint := range []struct {
 		kind    string
 		baseURL string
@@ -771,19 +771,28 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		{kind: "openai", baseURL: "https://eu.deepseek.com/v1"},
 		{kind: "anthropic", baseURL: "https://api.deepseek.com/anthropic"},
 	} {
+		visionOn := true
 		official := &ProviderEntry{
 			Name:              "deepseek",
 			Kind:              endpoint.kind,
 			BaseURL:           endpoint.baseURL,
 			Model:             "deepseek-v4-pro",
 			Vision:            true,
+			VisionModels:      []string{"deepseek-v4-pro"},
+			visionOverride:    &visionOn,
 			ReasoningProtocol: ReasoningProtocolDeepSeek,
+		}
+		if CanConfigureVision(official) {
+			t.Fatalf("official DeepSeek endpoint %q must not allow vision configuration", endpoint.baseURL)
 		}
 		if EffectiveVision(official) {
 			t.Fatalf("official DeepSeek endpoint %q must remain text-only", endpoint.baseURL)
 		}
 		if ExplicitModelVision(official) {
-			t.Fatalf("provider-wide vision must not count as an explicit model capability for %q", endpoint.baseURL)
+			t.Fatalf("official DeepSeek endpoint %q must not expose ignored vision metadata as usable", endpoint.baseURL)
+		}
+		if !official.HasVisionModel("deepseek-v4-pro") {
+			t.Fatalf("official DeepSeek endpoint %q lost persisted vision metadata instead of ignoring it", endpoint.baseURL)
 		}
 	}
 
@@ -794,8 +803,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Model:        "deepseek-v5-vision",
 		VisionModels: []string{"deepseek-v5-vision"},
 	}
-	if !EffectiveVision(future) || !ExplicitModelVision(future) {
-		t.Fatal("model listed in vision_models must opt in on the official DeepSeek endpoint")
+	if EffectiveVision(future) {
+		t.Fatal("a future model name must not bypass the official DeepSeek wire constraint")
 	}
 
 	visionOn := true
@@ -812,8 +821,8 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 	if !ok {
 		t.Fatal("ResolveModel did not find explicit future DeepSeek model")
 	}
-	if !EffectiveVision(overridden) || !ExplicitModelVision(overridden) {
-		t.Fatal("model_overrides vision=true must opt in on the official DeepSeek endpoint")
+	if EffectiveVision(overridden) {
+		t.Fatal("model_overrides vision=true must not bypass the official DeepSeek wire constraint")
 	}
 
 	custom := &ProviderEntry{
@@ -824,8 +833,13 @@ func TestEffectiveVisionDefaultsOfficialDeepSeekToTextOnlyButAllowsExplicitModel
 		Vision:            true,
 		ReasoningProtocol: ReasoningProtocolDeepSeek,
 	}
-	if !EffectiveVision(custom) {
+	if !CanConfigureVision(custom) || !EffectiveVision(custom) {
 		t.Fatal("explicit vision=true must remain available for custom DeepSeek gateways")
+	}
+	custom.Vision = false
+	custom.VisionModels = []string{"deepseek-v4-pro"}
+	if !ExplicitModelVision(custom) {
+		t.Fatal("custom DeepSeek gateway must expose positive model-scoped vision metadata")
 	}
 }
 
@@ -1039,6 +1053,29 @@ func TestSkillPathMutators(t *testing.T) {
 	}
 }
 
+func TestSkillPathEnabledMutatorPreservesConfiguredPath(t *testing.T) {
+	c := Default()
+	root := t.TempDir()
+	if err := c.AddSkillPath(root); err != nil {
+		t.Fatalf("add skill path: %v", err)
+	}
+	if err := c.SetSkillPathEnabled(root, false); err != nil {
+		t.Fatalf("disable skill path: %v", err)
+	}
+	if len(c.Skills.Paths) != 1 || filepath.Clean(c.Skills.Paths[0]) != filepath.Clean(root) {
+		t.Fatalf("paths after disable = %v, want %q preserved", c.Skills.Paths, root)
+	}
+	if len(c.Skills.ExcludedPaths) != 1 || CanonicalSkillPath(c.Skills.ExcludedPaths[0]) != CanonicalSkillPath(root) {
+		t.Fatalf("excluded paths after disable = %v, want %q", c.Skills.ExcludedPaths, root)
+	}
+	if err := c.SetSkillPathEnabled(root, true); err != nil {
+		t.Fatalf("enable skill path: %v", err)
+	}
+	if len(c.Skills.Paths) != 1 || len(c.Skills.ExcludedPaths) != 0 {
+		t.Fatalf("state after enable = paths %v excluded %v", c.Skills.Paths, c.Skills.ExcludedPaths)
+	}
+}
+
 func TestSkillEnabledMutator(t *testing.T) {
 	c := Default()
 	if err := c.SetSkillEnabled("review", false); err != nil {
@@ -1061,6 +1098,21 @@ func TestSkillEnabledMutator(t *testing.T) {
 	}
 	if err := c.SetSkillEnabled("bad name", false); err == nil {
 		t.Fatal("invalid skill name should error")
+	}
+}
+
+func TestSkillImplicitInvocationMutator(t *testing.T) {
+	c := Default()
+	if !c.ImplicitSkillInvocationEnabled() {
+		t.Fatal("implicit skill invocation should be enabled by default")
+	}
+	c.SetSkillImplicitInvocation(false)
+	if c.ImplicitSkillInvocationEnabled() || !c.Skills.DisableImplicitInvocation {
+		t.Fatal("implicit skill invocation should be disabled")
+	}
+	c.SetSkillImplicitInvocation(true)
+	if !c.ImplicitSkillInvocationEnabled() || c.Skills.DisableImplicitInvocation {
+		t.Fatal("implicit skill invocation should be enabled")
 	}
 }
 
@@ -2004,6 +2056,178 @@ func TestSaveToExistingProjectPersistsTopLevelDelta(t *testing.T) {
 	}
 	if got.ConfigVersion != 2 {
 		t.Fatalf("config_version = %d, want 2", got.ConfigVersion)
+	}
+}
+
+func TestSaveToExistingProjectRemovesResetSkillOverrides(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		set   func(*Config)
+		reset func(*Config)
+	}{
+		{name: "paths", key: "paths", set: func(c *Config) { c.Skills.Paths = []string{"project-skills"} }, reset: func(c *Config) { c.Skills.Paths = nil }},
+		{name: "excluded paths", key: "excluded_paths", set: func(c *Config) { c.Skills.ExcludedPaths = []string{"project-skills"} }, reset: func(c *Config) { c.Skills.ExcludedPaths = nil }},
+		{name: "disabled skills", key: "disabled_skills", set: func(c *Config) { c.Skills.DisabledSkills = []string{"review"} }, reset: func(c *Config) { c.Skills.DisabledSkills = nil }},
+		{name: "implicit invocation", key: "disable_implicit_invocation", set: func(c *Config) { c.Skills.DisableImplicitInvocation = true }, reset: func(c *Config) { c.Skills.DisableImplicitInvocation = false }},
+		{name: "max depth", key: "max_depth", set: func(c *Config) { c.Skills.MaxDepth = 2 }, reset: func(c *Config) { c.Skills.MaxDepth = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+			cfg := Default()
+			tt.set(cfg)
+			if err := cfg.SaveTo(projectPath); err != nil {
+				t.Fatalf("initial SaveTo: %v", err)
+			}
+			loaded, err := LoadForEditReadOnlyStrict(projectPath)
+			if err != nil {
+				t.Fatalf("load project config: %v", err)
+			}
+			tt.reset(loaded)
+			if err := loaded.SaveTo(projectPath); err != nil {
+				t.Fatalf("reset SaveTo: %v", err)
+			}
+			body, err := os.ReadFile(projectPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(body), tt.key+" =") {
+				t.Fatalf("reset left stale %s override:\n%s", tt.key, body)
+			}
+			fresh, err := LoadForEditReadOnlyStrict(projectPath)
+			if err != nil {
+				t.Fatalf("reload reset project config: %v", err)
+			}
+			if fresh.Skills.Paths != nil || fresh.Skills.ExcludedPaths != nil || fresh.Skills.DisabledSkills != nil || fresh.Skills.DisableImplicitInvocation || fresh.Skills.MaxDepth != 0 {
+				t.Fatalf("reloaded skills retained reset override: %+v", fresh.Skills)
+			}
+		})
+	}
+}
+
+func TestSaveToExistingProjectPreservesExplicitSkillDefaults(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[skills]\npaths = [\"project-skills\"]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatalf("load project config: %v", err)
+	}
+	cfg.Skills.Paths = nil
+	cfg.Skills.ExcludedPaths = nil
+	cfg.Skills.DisabledSkills = nil
+	cfg.Skills.DisableImplicitInvocation = false
+	cfg.Skills.MaxDepth = 0
+	for _, key := range projectSkillKeys {
+		if err := cfg.KeepProjectSkillKey(key); err != nil {
+			t.Fatalf("keep %s: %v", key, err)
+		}
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("save explicit project defaults: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, want := range []string{
+		"paths = []",
+		"excluded_paths = []",
+		"disabled_skills = []",
+		"disable_implicit_invocation = false",
+		"max_depth = 0",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("explicit project default %q missing from:\n%s", want, text)
+		}
+	}
+}
+
+func TestUnrelatedProjectSavePreservesExplicitDefaultSkillOverride(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[skills]\ndisable_implicit_invocation = false\n\n[permissions]\nmode = \"ask\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SetDefaultModel("deepseek-pro"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "disable_implicit_invocation = false") {
+		t.Fatalf("explicit default override was removed:\n%s", body)
+	}
+}
+
+func TestExplicitProjectSkillDefaultOverridesUserConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	project := t.TempDir()
+	user := Default()
+	user.Skills.DisableImplicitInvocation = true
+	if err := user.SaveTo(UserConfigPath()); err != nil {
+		t.Fatalf("save user config: %v", err)
+	}
+	projectPath := filepath.Join(project, "reasonix.toml")
+	if err := os.WriteFile(projectPath, []byte("[skills]\ndisable_implicit_invocation = true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatalf("load project config: %v", err)
+	}
+	cfg.SetSkillImplicitInvocation(true)
+	if err := cfg.KeepProjectSkillKey("disable_implicit_invocation"); err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("save project override: %v", err)
+	}
+	effective, err := LoadForRootReadOnly(project)
+	if err != nil {
+		t.Fatalf("load effective config: %v", err)
+	}
+	if !effective.ImplicitSkillInvocationEnabled() {
+		t.Fatalf("project explicit false did not override user config: %+v", effective.Skills)
+	}
+}
+
+func TestSaveToExistingProjectRemovesMultilineSkillArray(t *testing.T) {
+	projectPath := filepath.Join(t.TempDir(), "reasonix.toml")
+	original := "[skills]\npaths = [\n  \"project-skills\",\n  \"shared-skills\",\n]\n\n[permissions]\nmode = \"ask\"\n"
+	if err := os.WriteFile(projectPath, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadForEditReadOnlyStrict(projectPath)
+	if err != nil {
+		t.Fatalf("load project config: %v", err)
+	}
+	cfg.Skills.Paths = nil
+	if err := cfg.SaveTo(projectPath); err != nil {
+		t.Fatalf("reset multiline paths: %v", err)
+	}
+	body, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "project-skills") || strings.Contains(string(body), "shared-skills") {
+		t.Fatalf("multiline skill array was only partially removed:\n%s", body)
+	}
+	if err := ValidateFile(projectPath); err != nil {
+		t.Fatalf("reset project config is invalid TOML: %v\n%s", err, body)
 	}
 }
 

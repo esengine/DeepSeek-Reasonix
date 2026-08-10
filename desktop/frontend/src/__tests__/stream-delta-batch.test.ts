@@ -87,7 +87,7 @@ const reasoning = (tabId: string, t: string): StreamDeltaEntry => ({ tabId, e: {
   const after = reducer(discarding, { type: "stream_batch", segments: [{ kind: "text", delta: "x" }] } as never);
   eq(after, discarding, "discardTurn swallows a stream_batch like per-delta events");
 
-  let retrying = { ...initialState, running: true, turnActive: true, retry: { attempt: 1, max: 3, observedAt: 1 } };
+  let retrying: typeof initialState = { ...initialState, running: true, turnActive: true, retry: { attempt: 1, max: 3, observedAt: 1 } };
   retrying = reducer(retrying, { type: "stream_batch", segments: [{ kind: "text", delta: "x" }] } as never);
   eq(retrying.retry, undefined, "stream_batch clears the retry indicator like per-delta events");
 }

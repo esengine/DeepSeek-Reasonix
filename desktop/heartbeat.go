@@ -11,7 +11,12 @@
 package main
 
 import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -23,6 +28,8 @@ import (
 	"reasonix/internal/config"
 	"reasonix/internal/control"
 	"reasonix/internal/event"
+	"reasonix/internal/filelock"
+	"reasonix/internal/fileutil"
 	"reasonix/internal/secrets"
 )
 
@@ -49,7 +56,44 @@ type HeartbeatTask struct {
 
 // heartbeatConfig is the on-disk format.
 type heartbeatConfig struct {
-	Tasks []HeartbeatTask `json:"tasks"`
+	Revision uint64          `json:"revision,omitempty"`
+	Tasks    []HeartbeatTask `json:"tasks"`
+}
+
+// ErrHeartbeatConfigConflict means another writer changed the config after
+// this engine last read it. Callers should reload before retrying the edit.
+var ErrHeartbeatConfigConflict = errors.New("heartbeat config changed concurrently")
+
+type heartbeatConfigSnapshot struct {
+	cfg    heartbeatConfig
+	digest [sha256.Size]byte
+	exists bool
+}
+
+// HeartbeatConfigView is the revisioned Wails contract used by current
+// frontends. ETag detects external editors that do not increment Revision.
+type HeartbeatConfigView struct {
+	Revision uint64          `json:"revision"`
+	ETag     string          `json:"etag"`
+	Tasks    []HeartbeatTask `json:"tasks"`
+}
+
+type HeartbeatConfigUpdate struct {
+	Revision uint64          `json:"revision"`
+	ETag     string          `json:"etag"`
+	Tasks    []HeartbeatTask `json:"tasks"`
+}
+
+func (s heartbeatConfigSnapshot) view() HeartbeatConfigView {
+	tasks := s.cfg.Tasks
+	if tasks == nil {
+		tasks = []HeartbeatTask{}
+	}
+	etag := ""
+	if s.exists {
+		etag = hex.EncodeToString(s.digest[:])
+	}
+	return HeartbeatConfigView{Revision: s.cfg.Revision, ETag: etag, Tasks: tasks}
 }
 
 // ── Engine ──────────────────────────────────────────────────────────────────
@@ -57,13 +101,18 @@ type heartbeatConfig struct {
 // HeartbeatEngine runs scheduled task execution in a background goroutine.
 // It is owned by App and started during App.startup.
 type HeartbeatEngine struct {
-	mu            sync.Mutex
-	tasks         []HeartbeatTask
-	cfgMod        time.Time                        // config-file mtime as of the engine's last read/write (external-edit probe)
-	pendingTopics map[string]heartbeatPendingTopic // in-memory retry/in-flight safety for NewConversationEachRun
-	done          chan struct{}
-	running       bool
-	app           *App // back-reference for topic creation, tab routing, and prompt submission
+	mu             sync.Mutex
+	tasks          []HeartbeatTask
+	cfgRevision    uint64                           // persisted config revision last observed
+	cfgDigest      [sha256.Size]byte                // decoded config bytes last observed
+	cfgKnown       bool                             // cfgDigest describes an existing file
+	cfgInitialized bool                             // engine has observed existing or missing config state
+	cfgDeleted     bool                             // an existing config was removed externally
+	pendingTopics  map[string]heartbeatPendingTopic // in-memory retry/in-flight safety for NewConversationEachRun
+	runningTasks   map[string]struct{}              // task-level execution reservation shared by tick and TriggerNow
+	done           chan struct{}
+	running        bool
+	app            *App // back-reference for topic creation, tab routing, and prompt submission
 }
 
 type heartbeatPendingTopic struct {
@@ -76,6 +125,7 @@ func newHeartbeatEngine(app *App) *HeartbeatEngine {
 		app:           app,
 		done:          make(chan struct{}),
 		pendingTopics: make(map[string]heartbeatPendingTopic),
+		runningTasks:  make(map[string]struct{}),
 	}
 }
 
@@ -90,60 +140,111 @@ func (e *HeartbeatEngine) configPath() string {
 
 // loadTasks reads tasks from disk.
 func (e *HeartbeatEngine) loadTasks() []HeartbeatTask {
-	b, err := readFileUTF8(e.configPath())
+	snapshot, err := e.readConfigSnapshot()
 	if err != nil {
 		return nil
 	}
+	return snapshot.cfg.Tasks
+}
+
+func (e *HeartbeatEngine) readConfigSnapshot() (heartbeatConfigSnapshot, error) {
+	path := e.configPath()
+	b, err := readFileUTF8(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return heartbeatConfigSnapshot{}, nil
+		}
+		return heartbeatConfigSnapshot{}, err
+	}
 	var cfg heartbeatConfig
 	if err := json.Unmarshal(b, &cfg); err != nil {
-		log.Printf("[heartbeat] invalid config: %v", err)
-		return nil
+		return heartbeatConfigSnapshot{}, fmt.Errorf("invalid config: %w", err)
 	}
-	return cfg.Tasks
+	snapshot := heartbeatConfigSnapshot{
+		cfg:    cfg,
+		digest: sha256.Sum256(b),
+		exists: true,
+	}
+	return snapshot, nil
 }
 
-// noteConfigModLocked records the config file's current mtime so the tick
-// external-edit probe does not re-read a file the engine itself just wrote.
-func (e *HeartbeatEngine) noteConfigModLocked() {
-	if info, err := os.Stat(e.configPath()); err == nil {
-		e.cfgMod = info.ModTime()
+func (e *HeartbeatEngine) recordConfigSnapshotLocked(snapshot heartbeatConfigSnapshot) {
+	e.cfgRevision = snapshot.cfg.Revision
+	e.cfgDigest = snapshot.digest
+	e.cfgKnown = snapshot.exists
+	e.cfgInitialized = true
+	if snapshot.exists {
+		e.cfgDeleted = false
 	}
 }
 
-// adoptExternalEditsLocked re-reads the config when its mtime moved since the
-// engine last touched the file: heartbeat-tasks.json is documented as human-
-// and AI-editable, so an external edit should be scheduled by the next tick
-// rather than waiting for a manual Refresh or an app restart.
+// adoptExternalEditsLocked compares the exact content digest so edits are
+// detected even on filesystems with coarse mtimes.
 func (e *HeartbeatEngine) adoptExternalEditsLocked() {
-	info, err := os.Stat(e.configPath())
-	if err != nil || info.ModTime().Equal(e.cfgMod) {
+	snapshot, err := e.readConfigSnapshot()
+	if err != nil {
+		log.Printf("[heartbeat] invalid external config: %v", err)
 		return
 	}
-	e.cfgMod = info.ModTime()
-	e.tasks = e.loadTasks()
+	if !snapshot.exists {
+		// A config that existed when this engine started was explicitly removed
+		// by the user. Treat that deletion as authoritative: retaining the old
+		// in-memory tasks would execute a side effect on the next tick and then
+		// recreate the file from stale state.
+		if e.cfgInitialized && e.cfgKnown {
+			e.tasks = nil
+			e.pendingTopics = make(map[string]heartbeatPendingTopic)
+			e.cfgDeleted = true
+			e.recordConfigSnapshotLocked(snapshot)
+		}
+		return
+	}
+	if e.cfgKnown && snapshot.digest == e.cfgDigest {
+		return
+	}
+	e.recordConfigSnapshotLocked(snapshot)
+	e.tasks = snapshot.cfg.Tasks
 	e.prunePendingTopicsLocked(e.tasks)
 }
 
 // saveTasks writes tasks to disk atomically.
 func (e *HeartbeatEngine) saveTasks(tasks []HeartbeatTask) error {
+	return e.writeTasks(tasks, heartbeatConfigSnapshot{}, false)
+}
+
+func (e *HeartbeatEngine) writeTasks(tasks []HeartbeatTask, expected heartbeatConfigSnapshot, compare bool) error {
 	if tasks == nil {
 		tasks = []HeartbeatTask{}
 	}
-	cfg := heartbeatConfig{Tasks: tasks}
+	path := e.configPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	lockCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	release, err := filelock.Acquire(lockCtx, path+".lock")
+	if err != nil {
+		return err
+	}
+	defer release()
+
+	current, err := e.readConfigSnapshot()
+	if err != nil {
+		return err
+	}
+	if compare && (current.exists != expected.exists || current.digest != expected.digest || current.cfg.Revision != expected.cfg.Revision) {
+		return ErrHeartbeatConfigConflict
+	}
+	revision := current.cfg.Revision + 1
+	if !current.exists {
+		revision = 1
+	}
+	cfg := heartbeatConfig{Revision: revision, Tasks: tasks}
 	b, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := e.configPath()
-	// Ensure the parent directory exists before writing.
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, path)
+	return fileutil.AtomicWriteFile(path, b, 0o644)
 }
 
 // Start launches the scheduler goroutine.
@@ -153,8 +254,13 @@ func (e *HeartbeatEngine) Start() {
 	if e.running {
 		return
 	}
-	e.tasks = e.loadTasks()
-	e.noteConfigModLocked()
+	snapshot, err := e.readConfigSnapshot()
+	if err != nil {
+		log.Printf("[heartbeat] invalid config: %v", err)
+	} else {
+		e.recordConfigSnapshotLocked(snapshot)
+		e.tasks = snapshot.cfg.Tasks
+	}
 	e.running = true
 	go e.loop()
 	log.Printf("[heartbeat] engine started (%d tasks)", len(e.tasks))
@@ -241,6 +347,59 @@ func heartbeatControllerBusy(ctrl heartbeatRuntimeStatus) bool {
 // On controller failure the task is returned WITHOUT updating LastRunAt,
 // so it will be retried on the next tick.
 func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
+	if !e.claimTask(t.ID) {
+		log.Printf("[heartbeat] task %q is already running, skipping overlapping trigger", t.Title)
+		return t
+	}
+	releaseLease, err := e.tryAcquireTaskLease(t.ID)
+	if err != nil {
+		log.Printf("[heartbeat] task %q is already owned by another runtime, skipping", t.Title)
+		e.releaseTask(t.ID)
+		return t
+	}
+	defer func() {
+		releaseLease()
+		e.releaseTask(t.ID)
+	}()
+	return e.executeTaskOwned(t)
+}
+
+// tryAcquireTaskLease extends the in-process reservation to other Reasonix
+// processes. The lease is held from before topic creation through prompt
+// submission, and the OS releases it automatically if the process is killed.
+func (e *HeartbeatEngine) tryAcquireTaskLease(taskID string) (func(), error) {
+	path := e.heartbeatTaskLeasePath(taskID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	return filelock.TryAcquire(path)
+}
+
+func (e *HeartbeatEngine) heartbeatTaskLeasePath(taskID string) string {
+	digest := sha256.Sum256([]byte(taskID))
+	return e.configPath() + "." + hex.EncodeToString(digest[:8]) + ".run.lock"
+}
+
+func (e *HeartbeatEngine) claimTask(id string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.runningTasks == nil {
+		e.runningTasks = make(map[string]struct{})
+	}
+	if _, exists := e.runningTasks[id]; exists {
+		return false
+	}
+	e.runningTasks[id] = struct{}{}
+	return true
+}
+
+func (e *HeartbeatEngine) releaseTask(id string) {
+	e.mu.Lock()
+	delete(e.runningTasks, id)
+	e.mu.Unlock()
+}
+
+func (e *HeartbeatEngine) executeTaskOwned(t HeartbeatTask) HeartbeatTask {
 	title := "Heartbeat: " + t.Title
 	scope := t.Scope
 	workspaceRoot := t.WorkspaceRoot
@@ -340,7 +499,7 @@ func (e *HeartbeatEngine) executeTask(t HeartbeatTask) HeartbeatTask {
 			delete(e.pendingTopics, t.ID)
 		}
 		e.mu.Unlock()
-		return e.executeTask(t)
+		return e.executeTaskOwned(t)
 	}
 
 	// Set the task's approval mode only after confirming the controller is idle.
@@ -396,25 +555,71 @@ func (e *HeartbeatEngine) ListTasks() []HeartbeatTask {
 
 // ReloadTasks reloads the task list from disk and replaces the in-memory copy.
 func (e *HeartbeatEngine) ReloadTasks() []HeartbeatTask {
+	return e.ReloadConfig().Tasks
+}
+
+func (e *HeartbeatEngine) ReloadConfig() HeartbeatConfigView {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.tasks = e.loadTasks()
-	e.noteConfigModLocked()
+	snapshot, err := e.readConfigSnapshot()
+	if err != nil {
+		log.Printf("[heartbeat] reload config: %v", err)
+		return heartbeatConfigSnapshot{cfg: heartbeatConfig{Tasks: []HeartbeatTask{}}}.view()
+	}
+	e.recordConfigSnapshotLocked(snapshot)
+	e.tasks = snapshot.cfg.Tasks
 	e.prunePendingTopicsLocked(e.tasks)
-	out := make([]HeartbeatTask, len(e.tasks))
-	copy(out, e.tasks)
-	return out
+	return snapshot.view()
 }
 
 // ReplaceTasks atomically replaces the task list and persists it.
 func (e *HeartbeatEngine) ReplaceTasks(tasks []HeartbeatTask) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	expected, err := e.readConfigSnapshot()
+	if err != nil {
+		return err
+	}
+	if e.cfgInitialized && (expected.exists != e.cfgKnown || expected.digest != e.cfgDigest || expected.cfg.Revision != e.cfgRevision) {
+		return ErrHeartbeatConfigConflict
+	}
+	if err := e.writeTasks(tasks, expected, true); err != nil {
+		return err
+	}
+	latest, err := e.readConfigSnapshot()
+	if err != nil {
+		return err
+	}
+	e.recordConfigSnapshotLocked(latest)
 	e.tasks = tasks
 	e.prunePendingTopicsLocked(tasks)
-	err := e.saveTasks(tasks)
-	e.noteConfigModLocked()
-	return err
+	return nil
+}
+
+// ReplaceConfig applies a frontend edit only when its revision and ETag still
+// identify the exact config the user edited. This prevents a stale panel from
+// overwriting an external or second-process change.
+func (e *HeartbeatEngine) ReplaceConfig(update HeartbeatConfigUpdate) (HeartbeatConfigView, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	expected, err := e.readConfigSnapshot()
+	if err != nil {
+		return HeartbeatConfigView{}, err
+	}
+	if expected.cfg.Revision != update.Revision || expected.view().ETag != update.ETag {
+		return expected.view(), ErrHeartbeatConfigConflict
+	}
+	if err := e.writeTasks(update.Tasks, expected, true); err != nil {
+		return expected.view(), err
+	}
+	latest, err := e.readConfigSnapshot()
+	if err != nil {
+		return HeartbeatConfigView{}, err
+	}
+	e.recordConfigSnapshotLocked(latest)
+	e.tasks = latest.cfg.Tasks
+	e.prunePendingTopicsLocked(e.tasks)
+	return latest.view(), nil
 }
 
 func (e *HeartbeatEngine) prunePendingTopicsLocked(tasks []HeartbeatTask) {
@@ -465,31 +670,72 @@ func (e *HeartbeatEngine) mergeRunUpdatesLocked(updates map[string]HeartbeatTask
 	// only the run-state fields (TopicID, LastRunAt, CreatedAt backfill);
 	// task definitions added, edited, or deleted externally are adopted from
 	// disk, so the save below can never silently roll an external edit back.
-	tasks := e.loadTasks()
-	if tasks == nil {
-		// Missing or unreadable file: fall back to the in-memory list so the
-		// run state still lands (the historical behavior).
-		tasks = append([]HeartbeatTask(nil), e.tasks...)
+	for range 3 {
+		expected, err := e.readConfigSnapshot()
+		if err != nil {
+			log.Printf("[heartbeat] cannot read config before run-state merge: %v", err)
+			return
+		}
+		tasks := expected.cfg.Tasks
+		if !expected.exists {
+			switch {
+			case e.cfgDeleted || (e.cfgInitialized && e.cfgKnown):
+				// Observe deletion in this CAS loop too. A run can finish before the
+				// next scheduler tick adopts external edits; relying only on tick
+				// would let that completion recreate a file the user just removed.
+				e.tasks = nil
+				e.pendingTopics = make(map[string]heartbeatPendingTopic)
+				e.cfgDeleted = true
+				e.recordConfigSnapshotLocked(expected)
+				return
+			case !e.cfgInitialized:
+				// Only an engine that has never observed disk may bootstrap from an
+				// in-memory list. Once a config existed, deletion is authoritative.
+				tasks = append([]HeartbeatTask(nil), e.tasks...)
+			}
+		}
+		mergeHeartbeatRunUpdates(tasks, updates)
+		if err := e.writeTasks(tasks, expected, true); err != nil {
+			if errors.Is(err, ErrHeartbeatConfigConflict) {
+				continue
+			}
+			log.Printf("[heartbeat] run-state merge failed: %v", err)
+			return
+		}
+		latest, err := e.readConfigSnapshot()
+		if err != nil {
+			log.Printf("[heartbeat] reload after run-state merge: %v", err)
+			return
+		}
+		e.recordConfigSnapshotLocked(latest)
+		e.tasks = tasks
+		e.prunePendingTopicsLocked(tasks)
+		return
 	}
+	log.Printf("[heartbeat] run-state merge lost repeated config races; next tick will retry")
+}
+
+func mergeHeartbeatRunUpdates(tasks []HeartbeatTask, updates map[string]HeartbeatTask) {
 	for i := range tasks {
 		update, ok := updates[tasks[i].ID]
 		if !ok {
 			continue
 		}
-		if update.TopicID != "" {
+		// Run state is monotonic. A runtime that lost the cross-process task
+		// lease returns the task snapshot it started with; if its later config
+		// merge lands after the owner, that stale completion must not roll back
+		// the owner's timestamp or fresh-conversation topic.
+		newerRun := update.LastRunAt > tasks[i].LastRunAt
+		if update.TopicID != "" && (tasks[i].TopicID == "" || newerRun) {
 			tasks[i].TopicID = update.TopicID
 		}
-		if update.LastRunAt != 0 {
+		if newerRun {
 			tasks[i].LastRunAt = update.LastRunAt
 		}
 		if tasks[i].CreatedAt == 0 && update.CreatedAt != 0 {
 			tasks[i].CreatedAt = update.CreatedAt
 		}
 	}
-	e.tasks = tasks
-	e.prunePendingTopicsLocked(tasks)
-	_ = e.saveTasks(tasks)
-	e.noteConfigModLocked()
 }
 
 // parseInterval converts a string like "5m", "1h", "30s" to time.Duration.
@@ -835,12 +1081,29 @@ func (a *App) HeartbeatReloadTasks() []HeartbeatTask {
 	return a.heartbeat.ReloadTasks()
 }
 
+// HeartbeatReloadConfig returns tasks with the CAS token used by current UIs.
+func (a *App) HeartbeatReloadConfig() HeartbeatConfigView {
+	if a.heartbeat == nil {
+		return HeartbeatConfigView{Tasks: []HeartbeatTask{}}
+	}
+	return a.heartbeat.ReloadConfig()
+}
+
 // HeartbeatSaveTasks replaces the full task list and persists it.
 func (a *App) HeartbeatSaveTasks(tasks []HeartbeatTask) error {
 	if a.heartbeat == nil {
 		return nil
 	}
 	return a.heartbeat.ReplaceTasks(tasks)
+}
+
+// HeartbeatSaveConfig replaces tasks only when the frontend's revision and
+// ETag still match the exact file it loaded.
+func (a *App) HeartbeatSaveConfig(update HeartbeatConfigUpdate) (HeartbeatConfigView, error) {
+	if a.heartbeat == nil {
+		return HeartbeatConfigView{Tasks: []HeartbeatTask{}}, nil
+	}
+	return a.heartbeat.ReplaceConfig(update)
 }
 
 // HeartbeatTriggerNow immediately executes the task with the given ID.

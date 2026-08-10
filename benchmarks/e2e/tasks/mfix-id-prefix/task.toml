@@ -1,0 +1,4 @@
+prompt = "index.py crashes on every id that ids.py produces — one side prefixes, the other parses raw integers. Fix the mismatch; make_id(7) must keep returning 'u-7'."
+class = "multi-file-bugfix"
+max_steps = 15
+timeout_sec = 240

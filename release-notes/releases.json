@@ -2,6 +2,1099 @@
   "schemaVersion": 1,
   "releases": [
     {
+      "version": "1.21.5",
+      "date": "2026-08-09",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix 1.21.5",
+        "zh": "Reasonix 1.21.5"
+      },
+      "summary": {
+        "en": "Faster session switching, stable WebView2 animations, and completion receipts that show what changed.",
+        "zh": "更快的会话切换、稳定的 WebView2 动画，以及显示变更内容的完成回执。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "WebView2 animation crashes resolved",
+            "zh": "修复 WebView2 动画崩溃"
+          },
+          "body": {
+            "en": "Replaced GSAP-specific motion helpers with CSS-compatible Web Animations tokens. Approval, collapse, and entrance animations now fail gracefully when WebView2 rejects or cancels an animation, preventing fatal errors.",
+            "zh": "将 GSAP 专用的动画辅助函数替换为兼容 CSS 的 Web Animations 标记。当 WebView2 拒绝或取消动画时，批准、折叠和入场动画现在会优雅降级，避免致命错误。"
+          },
+          "refs": [
+            8080
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Faster session switching",
+            "zh": "更快的会话切换"
+          },
+          "body": {
+            "en": "Reduced duplicate backend calls during session switches. The project tree no longer refetches on every switch, and read-only queries are coalesced within a 200ms window, cutting IPC time by up to 35%.",
+            "zh": "减少了会话切换时的重复后端调用。项目树不再在每次切换时重新获取，只读查询在 200 毫秒窗口内合并，IPC 时间最多减少 35%。"
+          },
+          "refs": [
+            8063,
+            8064
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Completion receipts show what changed",
+            "zh": "完成回执显示变更内容"
+          },
+          "body": {
+            "en": "The completion report now includes changed paths, verification commands and outcomes, and gap details. Delivered via TurnDone and eventwire, so streaming JSON and frontends receive it automatically.",
+            "zh": "完成报告现在包含变更路径、验证命令及其结果，以及差距详情。通过 TurnDone 和 eventwire 传递，流式 JSON 和前端会自动接收。"
+          },
+          "refs": [
+            8050
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Completion receipts",
+              "zh": "完成回执"
+            },
+            "body": {
+              "en": "TurnDone now includes a receipt with changed paths, verification commands, and gap details. Empty turns produce no receipt.",
+              "zh": "TurnDone 现在包含回执，其中包含变更路径、验证命令和差距详情。空回合不产生回执。"
+            },
+            "refs": [
+              8050
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Session switch performance",
+              "zh": "会话切换性能"
+            },
+            "body": {
+              "en": "Duplicate backend calls are coalesced within a 200ms window, and the project tree no longer refetches on every session switch.",
+              "zh": "在 200 毫秒窗口内合并重复的后端调用，项目树不再在每次会话切换时重新获取。"
+            },
+            "refs": [
+              8063,
+              8064
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "WebView2 animation crashes",
+              "zh": "WebView2 动画崩溃"
+            },
+            "body": {
+              "en": "GSAP easing tokens replaced with CSS-compatible syntax. Animations fail open when WebView2 rejects them, preventing fatal errors.",
+              "zh": "将 GSAP 缓动标记替换为兼容 CSS 的语法。当 WebView2 拒绝动画时，动画会优雅降级，避免致命错误。"
+            },
+            "refs": [
+              8080
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.21.5",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.21.4...desktop-v1.21.5",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.21.5",
+      "baseVersion": "1.21.5",
+      "status": "reviewed",
+      "previousRelease": "1.21.4",
+      "builds": {
+        "cli": "v1.21.5",
+        "desktop": "v1.21.5",
+        "npm": "1.21.5"
+      }
+    },
+    {
+      "version": "1.21.4",
+      "date": "2026-08-09",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix v1.21.4: Memory Dimensions, Completion Contracts, and Desktop Refinements",
+        "zh": "Reasonix v1.21.4：记忆维度、完成契约与桌面体验优化"
+      },
+      "summary": {
+        "en": "This release introduces completion contracts that make goal claims verifiable against receipts. Memory gains activation, volatility, subject keys, and CJK bigram retrieval. Desktop optimizations include session-switch performance, local file link handling, and IME-aware ESC behavior. Agent improvements bring incremental fold digest carry, compaction bounds, and a reasoning governor shadow mode.",
+        "zh": "本次发布引入完成契约，使目标声明可对照收据进行核查。记忆功能新增激活、易变性、主题键和 CJK 双字检索。桌面端优化了会话切换性能、本地文件链接处理和输入法感知的 ESC 行为。智能体改进包括增量折叠摘要携带、压缩边界和推理调控器影子模式。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [],
+      "highlights": [
+        {
+          "kind": "new",
+          "title": {
+            "en": "Completion Contracts: Verifiable Goal Claims",
+            "zh": "完成契约：可核查的目标声明"
+          },
+          "body": {
+            "en": "Goal completion now carries verifiable claims. Verified commands are reconciled against receipts; unbacked claims become gaps. Host-generated completion reports show missing proof without forcing verification loops.",
+            "zh": "目标完成现在携带可核查的声明。已验证的命令会与收据进行核对；无依据的声明会变成缺口。由主机生成的完成报告会显示缺失的证明，而不会强制进行验证循环。"
+          },
+          "refs": [
+            8036,
+            8035
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Memory Dimensions: Activation, Volatility, and Subject Keys",
+            "zh": "记忆维度：激活、易变性与主题键"
+          },
+          "body": {
+            "en": "Facts can be pinned to the stable prefix or used only for retrieval. Volatility windows (evergreen/stable/volatile) and expiry dates control freshness. Subject keys prevent silent contradictions by allowing only one active value per question.",
+            "zh": "事实可以固定到稳定前缀，或仅用于检索。易变性窗口（永久/稳定/易变）和过期日期控制新鲜度。主题键通过每个问题只允许一个活跃值来防止静默矛盾。"
+          },
+          "refs": [
+            7996,
+            7998,
+            8014
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Desktop: Session Switch Performance and Local File Links",
+            "zh": "桌面端：会话切换性能与本地文件链接"
+          },
+          "body": {
+            "en": "Large session histories and rapid topic switches no longer block the renderer. Local file paths in agent output are clickable to open, with right-click options for other apps and file manager.",
+            "zh": "大型会话历史和快速主题切换不再阻塞渲染器。智能体输出中的本地文件路径可点击打开，右键菜单提供其他应用和文件管理器选项。"
+          },
+          "refs": [
+            7999,
+            7985
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Agent: Incremental Fold Digest Carry and Compaction Bounds",
+            "zh": "智能体：增量折叠摘要携带与压缩边界"
+          },
+          "body": {
+            "en": "Incremental folds now carry previous digests verbatim, recovering 17 of 18 lost probes. Compaction inputs are bounded, ensuring long sessions can always fold and preventing session wedging.",
+            "zh": "增量折叠现在逐字携带之前的摘要，恢复了 18 个丢失探针中的 17 个。压缩输入有边界，确保长会话始终可以折叠，防止会话卡死。"
+          },
+          "refs": [
+            8031,
+            8021
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Desktop: IME-Aware ESC and Selection Release",
+            "zh": "桌面端：输入法感知的 ESC 与选区释放"
+          },
+          "body": {
+            "en": "Pressing ESC while an IME candidate window is open no longer cancels a running agent turn. Stale transcript selections are released on new clicks, and Add to Chat preserves the selection range during activation.",
+            "zh": "在输入法候选窗口打开时按 ESC 不再取消正在运行的智能体回合。过时的聊天记录选区会在新点击时释放，添加到聊天操作在激活期间保留选区范围。"
+          },
+          "refs": [
+            7919,
+            7988
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Completion Contracts",
+              "zh": "完成契约"
+            },
+            "body": {
+              "en": "Goal completion claims are now verifiable. The host-authored completion report identifies gaps between claims and receipts, making premature 'done' declarations transparent.",
+              "zh": "目标完成声明现在可核查。主机生成的完成报告可识别声明与收据之间的缺口，使过早的“完成”声明透明化。"
+            },
+            "refs": [
+              8036,
+              8035
+            ]
+          },
+          {
+            "title": {
+              "en": "Memory Activation and Subject Keys",
+              "zh": "记忆激活与主题键"
+            },
+            "body": {
+              "en": "Facts can be pinned to the stable prefix or used only for retrieval. Subject keys prevent contradictory facts on the same topic.",
+              "zh": "事实可固定到稳定前缀或仅用于检索。主题键可防止同一主题出现矛盾事实。"
+            },
+            "refs": [
+              7996,
+              8014
+            ]
+          },
+          {
+            "title": {
+              "en": "Memory Volatility and Expiry",
+              "zh": "记忆易变性与过期"
+            },
+            "body": {
+              "en": "Facts now support volatility windows (evergreen/stable/volatile) and explicit expiry dates for freshness control.",
+              "zh": "事实现在支持易变性窗口（永久/稳定/易变）和明确的过期日期，以控制新鲜度。"
+            },
+            "refs": [
+              7998
+            ]
+          },
+          {
+            "title": {
+              "en": "CJK Bigram Retrieval and Write-Time Keywords",
+              "zh": "CJK 双字检索与写入时关键词"
+            },
+            "body": {
+              "en": "Memory retrieval now uses CJK bigrams for better matching, and facts can include write-time keywords for semantic bridging.",
+              "zh": "记忆检索现在使用 CJK 双字以改善匹配，事实可包含写入时关键词以实现语义桥接。"
+            },
+            "refs": [
+              7994
+            ]
+          },
+          {
+            "title": {
+              "en": "Explicit Context Compression Tool",
+              "zh": "显式上下文压缩工具"
+            },
+            "body": {
+              "en": "A model-callable `compress` tool allows explicit range compaction without rewriting the canonical transcript.",
+              "zh": "模型可调用的 `compress` 工具允许显式范围压缩，而无需重写规范记录。"
+            },
+            "refs": [
+              8000
+            ]
+          },
+          {
+            "title": {
+              "en": "MCP OAuth and Failure-Aware Routing",
+              "zh": "MCP OAuth 与失败感知路由"
+            },
+            "body": {
+              "en": "First-party OAuth authorization for remote MCP servers, with sandbox-safe credential storage and failure-aware tool routing.",
+              "zh": "远程 MCP 服务器的第一方 OAuth 授权，具有沙箱安全的凭据存储和失败感知的工具路由。"
+            },
+            "refs": [
+              7932
+            ]
+          },
+          {
+            "title": {
+              "en": "Generation-Safe Runtime Composition",
+              "zh": "代际安全的运行时组合"
+            },
+            "body": {
+              "en": "Runtime composition with dependency graphs, lifecycle states, and atomic publish/commit for multi-session isolation.",
+              "zh": "具有依赖图、生命周期状态和原子发布/提交的运行时组合，用于多会话隔离。"
+            },
+            "refs": [
+              7902
+            ]
+          },
+          {
+            "title": {
+              "en": "Lazy Thinking Summaries",
+              "zh": "懒加载思考摘要"
+            },
+            "body": {
+              "en": "Collapsed reasoning traces now show a preview line, with full Markdown rendering deferred until expansion.",
+              "zh": "折叠的推理轨迹现在显示预览行，完整的 Markdown 渲染延迟到展开时。"
+            },
+            "refs": [
+              7966
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop Status Bar: TPS, Cache, and Output Tokens",
+              "zh": "桌面状态栏：TPS、缓存和输出令牌"
+            },
+            "body": {
+              "en": "Configurable status bar items show turn throughput, cache token counts, and output tokens.",
+              "zh": "可配置的状态栏项目显示回合吞吐量、缓存令牌计数和输出令牌。"
+            },
+            "refs": [
+              6931
+            ]
+          },
+          {
+            "title": {
+              "en": "Reasoning Governor Shadow Mode",
+              "zh": "推理调控器影子模式"
+            },
+            "body": {
+              "en": "A shadow reasoning governor measures exploration-phase efficiency without enforcing policy, preparing for future optimization.",
+              "zh": "影子推理调控器在不强制执行策略的情况下测量探索阶段效率，为未来优化做准备。"
+            },
+            "refs": [
+              7989,
+              7986,
+              7975
+            ]
+          },
+          {
+            "title": {
+              "en": "Evidence-Before-More-Mutation Nudge (Experimental)",
+              "zh": "先验证再变更提示（实验性）"
+            },
+            "body": {
+              "en": "An env-gated nudge encourages verification after several blind mutations, available for experimentation.",
+              "zh": "环境门控的提示在多次盲目变更后鼓励验证，可供实验使用。"
+            },
+            "refs": [
+              7952
+            ]
+          },
+          {
+            "title": {
+              "en": "Verification-Debt Telemetry",
+              "zh": "验证债务遥测"
+            },
+            "body": {
+              "en": "Shadow telemetry tracks how long mutations sit unverified, providing data for future policy decisions.",
+              "zh": "影子遥测跟踪变更未验证的时长，为未来策略决策提供数据。"
+            },
+            "refs": [
+              7947
+            ]
+          },
+          {
+            "title": {
+              "en": "Shadow Admission Control for Research Delegation",
+              "zh": "研究委托的影子准入控制"
+            },
+            "body": {
+              "en": "Shadow measurement of research delegation calls identifies unnecessary subagent usage without blocking.",
+              "zh": "研究委托调用的影子测量可识别不必要的子代理使用，而不会阻止。"
+            },
+            "refs": [
+              7946
+            ]
+          },
+          {
+            "title": {
+              "en": "Per-Round Cognition Telemetry",
+              "zh": "每轮认知遥测"
+            },
+            "body": {
+              "en": "Trajectory digests now include per-round token usage and slow-round census for performance analysis.",
+              "zh": "轨迹摘要现在包括每轮令牌使用情况和慢轮统计，用于性能分析。"
+            },
+            "refs": [
+              7943
+            ]
+          },
+          {
+            "title": {
+              "en": "Shadow Outcome Scorer",
+              "zh": "影子结果评分器"
+            },
+            "body": {
+              "en": "A shadow scorer decomposes per-round outcomes (exploration, verification, churn) to measure progress quality.",
+              "zh": "影子评分器分解每轮结果（探索、验证、变动）以衡量进展质量。"
+            },
+            "refs": [
+              7937
+            ]
+          },
+          {
+            "title": {
+              "en": "Eligibility-Point Counterfactual Fork Harness",
+              "zh": "资格点反事实分叉框架"
+            },
+            "body": {
+              "en": "Infrastructure for causal experiments by forking identical states into control and treatment arms.",
+              "zh": "通过将相同状态分叉为对照组和处理组来进行因果实验的基础设施。"
+            },
+            "refs": [
+              7958
+            ]
+          },
+          {
+            "title": {
+              "en": "Verification-Stress Benchmark Suite",
+              "zh": "验证压力基准测试套件"
+            },
+            "body": {
+              "en": "A benchmark suite measuring EBM trigger precision across positive, neutral, and negative scenarios.",
+              "zh": "一个基准测试套件，用于测量 EBM 触发器在正面、中性和负面场景中的精度。"
+            },
+            "refs": [
+              7953
+            ]
+          },
+          {
+            "title": {
+              "en": "MemoryBench: Paired Memory-Effectiveness Suite",
+              "zh": "MemoryBench：配对记忆有效性套件"
+            },
+            "body": {
+              "en": "A benchmark harness measuring memory utility delta with counterfactual arms and point-of-use markers.",
+              "zh": "一个基准测试框架，通过反事实臂和使用点标记测量记忆效用增量。"
+            },
+            "refs": [
+              8017
+            ]
+          },
+          {
+            "title": {
+              "en": "CompactionBench: Cost and Fidelity of Repeated Folds",
+              "zh": "CompactionBench：重复折叠的成本与保真度"
+            },
+            "body": {
+              "en": "A benchmark measuring the cost and information loss of repeated session folding.",
+              "zh": "一个基准测试，用于测量重复会话折叠的成本和信息丢失。"
+            },
+            "refs": [
+              8024
+            ]
+          },
+          {
+            "title": {
+              "en": "Live Flight-Recorder Dashboard",
+              "zh": "实时飞行记录仪表板"
+            },
+            "body": {
+              "en": "A local dashboard for live e2ebench runs with per-round traces and replay.",
+              "zh": "一个本地仪表板，用于实时 e2ebench 运行，具有每轮跟踪和回放功能。"
+            },
+            "refs": [
+              7979
+            ]
+          },
+          {
+            "title": {
+              "en": "Retrieval V2 Shadow",
+              "zh": "检索 V2 影子"
+            },
+            "body": {
+              "en": "A shadow retrieval system with BM25F, code symbols, and mixed CJK grams, measured against production BM25.",
+              "zh": "一个影子检索系统，具有 BM25F、代码符号和混合 CJK 分词，与生产 BM25 进行对比测量。"
+            },
+            "refs": [
+              8025
+            ]
+          },
+          {
+            "title": {
+              "en": "Session Recall Index and Crash-Safe Writers",
+              "zh": "会话召回索引与防崩溃写入器"
+            },
+            "body": {
+              "en": "Memory recall now uses a prebuilt index for zero disk IO per turn, with atomic file writes for durability.",
+              "zh": "记忆召回现在使用预构建索引，实现每轮零磁盘 IO，并通过原子文件写入确保持久性。"
+            },
+            "refs": [
+              8028
+            ]
+          },
+          {
+            "title": {
+              "en": "Goal as Sole Long-Task Runtime",
+              "zh": "Goal 成为唯一长任务运行时"
+            },
+            "body": {
+              "en": "Goal is now the only long-running task state machine; AutoResearch is reduced to a read-only compatibility reader.",
+              "zh": "Goal 现在是唯一的长任务状态机；AutoResearch 降级为只读兼容性读取器。"
+            },
+            "refs": [
+              7959
+            ]
+          },
+          {
+            "title": {
+              "en": "DeepSeek Anthropic Access Recommendation",
+              "zh": "推荐 DeepSeek Anthropic 接入"
+            },
+            "body": {
+              "en": "Fresh installs now default to the official DeepSeek Anthropic Messages endpoint, with legacy migration for existing configurations.",
+              "zh": "全新安装现在默认使用官方 DeepSeek Anthropic Messages 端点，并为现有配置提供旧版迁移。"
+            },
+            "refs": [
+              7945
+            ]
+          },
+          {
+            "title": {
+              "en": "Skills Settings Alignment",
+              "zh": "技能设置对齐"
+            },
+            "body": {
+              "en": "Desktop skills settings now match the MCP model, with implicit skill discovery as an explicit runtime policy.",
+              "zh": "桌面技能设置现在与 MCP 模型匹配，隐式技能发现作为显式运行时策略。"
+            },
+            "refs": [
+              7981
+            ]
+          },
+          {
+            "title": {
+              "en": "Animated Logo Variants",
+              "zh": "动画 Logo 变体"
+            },
+            "body": {
+              "en": "New animated SVG logo variants and updated README banner.",
+              "zh": "新的动画 SVG Logo 变体和更新的 README 横幅。"
+            },
+            "refs": [
+              7954
+            ]
+          },
+          {
+            "title": {
+              "en": "Site Hero Redesign",
+              "zh": "网站 Hero 重设计"
+            },
+            "body": {
+              "en": "Redesigned homepage hero install section with particles, unified fonts, and refreshed brand assets.",
+              "zh": "重新设计的首页 hero 安装部分，包含粒子效果、统一字体和更新的品牌资源。"
+            },
+            "refs": [
+              7984
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Desktop Session Switch Performance",
+              "zh": "桌面会话切换性能"
+            },
+            "body": {
+              "en": "Large histories and rapid topic switches no longer block the renderer, with virtual list and worker-based Markdown parsing.",
+              "zh": "大型历史和快速主题切换不再阻塞渲染器，采用虚拟列表和基于 Worker 的 Markdown 解析。"
+            },
+            "refs": [
+              7999
+            ]
+          },
+          {
+            "title": {
+              "en": "Local File Link Handling",
+              "zh": "本地文件链接处理"
+            },
+            "body": {
+              "en": "Local file paths in agent output are now clickable to open with the default app, with right-click context menu options.",
+              "zh": "智能体输出中的本地文件路径现在可点击以默认应用打开，并提供右键上下文菜单选项。"
+            },
+            "refs": [
+              7985
+            ]
+          },
+          {
+            "title": {
+              "en": "Incremental Fold Digest Carry",
+              "zh": "增量折叠摘要携带"
+            },
+            "body": {
+              "en": "Incremental folds now carry previous digests verbatim, recovering most lost probes and maintaining O(1) fold cost.",
+              "zh": "增量折叠现在逐字携带之前的摘要，恢复了大部分丢失的探针，并保持 O(1) 折叠成本。"
+            },
+            "refs": [
+              8031
+            ]
+          },
+          {
+            "title": {
+              "en": "Compaction Input Bounds",
+              "zh": "压缩输入边界"
+            },
+            "body": {
+              "en": "Summarizer input is now bounded, preventing session wedging by partitioning oversized folds.",
+              "zh": "摘要器输入现在有边界，通过分区超大折叠防止会话卡死。"
+            },
+            "refs": [
+              8021
+            ]
+          },
+          {
+            "title": {
+              "en": "Memory Index Scope Qualification",
+              "zh": "记忆索引作用域限定"
+            },
+            "body": {
+              "en": "The provider-visible memory index now uses scope-qualified references and annotates overrides, aligning with recall precedence.",
+              "zh": "提供者可见的记忆索引现在使用作用域限定的引用并注释覆盖，与召回优先级保持一致。"
+            },
+            "refs": [
+              8027
+            ]
+          },
+          {
+            "title": {
+              "en": "Desktop Edit Actions for Cancelled Turns",
+              "zh": "取消回合的桌面编辑操作"
+            },
+            "body": {
+              "en": "Cancelled turns now preserve edit, rewind, fork, and summary actions by rehydrating authoritative history.",
+              "zh": "取消的回合现在通过重新加载权威历史来保留编辑、回退、分叉和摘要操作。"
+            },
+            "refs": [
+              8001
+            ]
+          },
+          {
+            "title": {
+              "en": "Goal Contextual Tool Hardening",
+              "zh": "Goal 上下文工具加固"
+            },
+            "body": {
+              "en": "Context-dependent tools are now gated before execution, with child agent isolation and migration boundary fixes.",
+              "zh": "上下文相关工具现在在执行前进行门控，并修复了子代理隔离和迁移边界问题。"
+            },
+            "refs": [
+              8007
+            ]
+          },
+          {
+            "title": {
+              "en": "Crash Recovery WAL-Awareness",
+              "zh": "崩溃恢复 WAL 感知"
+            },
+            "body": {
+              "en": "Session persistence is now CAS/WAL-protected, preventing stale overwrites and ensuring monotonic state.",
+              "zh": "会话持久化现在受 CAS/WAL 保护，防止过时覆盖并确保状态单调。"
+            },
+            "refs": [
+              7982
+            ]
+          },
+          {
+            "title": {
+              "en": "Compaction Fold Region Partition Fix",
+              "zh": "压缩折叠区域分区修复"
+            },
+            "body": {
+              "en": "The fold region is now correctly partitioned, preventing user-stated constraints from being dropped.",
+              "zh": "折叠区域现在正确分区，防止用户声明的约束被丢弃。"
+            },
+            "refs": [
+              8019
+            ]
+          },
+          {
+            "title": {
+              "en": "MemoryBench Pipeline Observability",
+              "zh": "MemoryBench 管道可观测性"
+            },
+            "body": {
+              "en": "Fixed seeding and audit forwarding bugs, enabling the first real memory utility baseline.",
+              "zh": "修复了种子和审计转发错误，实现了第一个真实的内存效用基线。"
+            },
+            "refs": [
+              8022
+            ]
+          },
+          {
+            "title": {
+              "en": "Dependency Upgrades",
+              "zh": "依赖升级"
+            },
+            "body": {
+              "en": "Batched Dependabot upgrades for desktop frontend, site, and Go dependencies.",
+              "zh": "批量 Dependabot 升级桌面前端、网站和 Go 依赖。"
+            },
+            "refs": [
+              8003
+            ]
+          },
+          {
+            "title": {
+              "en": "CI Linter and Windows Timeout Fixes",
+              "zh": "CI 检查器和 Windows 超时修复"
+            },
+            "body": {
+              "en": "Local linting now matches CI, and Windows smoke test timeouts are increased to handle runner variance.",
+              "zh": "本地检查现在与 CI 匹配，Windows 冒烟测试超时增加以应对运行器差异。"
+            },
+            "refs": [
+              8033
+            ]
+          },
+          {
+            "title": {
+              "en": "Horizontal Wordmark Sizing Fix",
+              "zh": "横向标识尺寸修复"
+            },
+            "body": {
+              "en": "Fixed the homepage header logo rendering as a large square by declaring SVG intrinsic dimensions.",
+              "zh": "通过声明 SVG 固有尺寸，修复了首页头部 Logo 渲染为大正方形的问题。"
+            },
+            "refs": [
+              7997
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "IME-Aware ESC Behavior",
+              "zh": "输入法感知的 ESC 行为"
+            },
+            "body": {
+              "en": "Pressing ESC while an IME candidate window is open no longer cancels a running agent turn.",
+              "zh": "在输入法候选窗口打开时按 ESC 不再取消正在运行的智能体回合。"
+            },
+            "refs": [
+              7919
+            ]
+          },
+          {
+            "title": {
+              "en": "Transcript Selection Release",
+              "zh": "聊天记录选区释放"
+            },
+            "body": {
+              "en": "Stale transcript selections are now released on new clicks, and Add to Chat preserves the selection range during activation.",
+              "zh": "过时的聊天记录选区现在会在新点击时释放，添加到聊天操作在激活期间保留选区范围。"
+            },
+            "refs": [
+              7988
+            ]
+          },
+          {
+            "title": {
+              "en": "Windows Test Flakiness",
+              "zh": "Windows 测试不稳定"
+            },
+            "body": {
+              "en": "Hardened two tests that failed on Windows due to timing races on loaded CI runners.",
+              "zh": "加固了两个因 CI 运行器负载导致时序竞争而在 Windows 上失败的测试。"
+            },
+            "refs": [
+              8015
+            ]
+          },
+          {
+            "title": {
+              "en": "CI-Red Test Determinism",
+              "zh": "CI 红色测试确定性"
+            },
+            "body": {
+              "en": "Made three CI-red tests deterministic across platforms by gating Unix-specific assertions and skipping on Windows.",
+              "zh": "通过门控 Unix 特定断言并在 Windows 上跳过，使三个 CI 红色测试跨平台具有确定性。"
+            },
+            "refs": [
+              8048
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine",
+        "github-actions[bot]",
+        "chengoak",
+        "PMKang",
+        "Bernardxu123",
+        "HaoyueQin"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.21.4",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.21.3...desktop-v1.21.4",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.21.4",
+      "baseVersion": "1.21.4",
+      "status": "reviewed",
+      "previousRelease": "1.21.3",
+      "builds": {
+        "cli": "v1.21.4",
+        "desktop": "v1.21.4",
+        "npm": "1.21.4"
+      }
+    },
+    {
+      "version": "1.21.3",
+      "date": "2026-08-08",
+      "channel": "stable",
+      "title": {
+        "en": "Reasonix v1.21.3",
+        "zh": "Reasonix v1.21.3"
+      },
+      "summary": {
+        "en": "This release brings Markdown rendering to thinking traces, explicit Kimi K3 reasoning for custom gateways, visible storage paths, adaptive no-progress guard, and fixes for Windows install behavior, taskbar grouping, retry-inflated compaction, and stream coalescing.",
+        "zh": "此版本为思考过程带来 Markdown 渲染，为自定义网关提供显式 Kimi K3 推理支持，新增存储路径展示与自适应无进展防护，并修复 Windows 安装位置、任务栏分组、重试导致的提前压缩以及流合并问题。"
+      },
+      "surfaces": [
+        "desktop"
+      ],
+      "guides": [
+        {
+          "title": {
+            "en": "Custom Kimi K3 Gateway Setup",
+            "zh": "自定义 Kimi K3 网关设置"
+          },
+          "body": {
+            "en": "Learn how to configure a custom OpenAI-compatible gateway to use the Kimi K3 reasoning protocol.",
+            "zh": "了解如何配置自定义 OpenAI 兼容网关以使用 Kimi K3 推理协议。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/e2ef3f43a50ed5a645df9fa6a7e558f157431eb9/docs/REASONING_PROVIDERS.md"
+        },
+        {
+          "title": {
+            "en": "Custom Kimi K3 Gateway Setup (Chinese)",
+            "zh": "自定义 Kimi K3 网关设置（中文）"
+          },
+          "body": {
+            "en": "Learn how to configure a custom OpenAI-compatible gateway to use the Kimi K3 reasoning protocol.",
+            "zh": "了解如何配置自定义 OpenAI 兼容网关以使用 Kimi K3 推理协议。"
+          },
+          "href": "https://github.com/esengine/DeepSeek-Reasonix/blob/e2ef3f43a50ed5a645df9fa6a7e558f157431eb9/docs/REASONING_PROVIDERS.zh-CN.md"
+        }
+      ],
+      "highlights": [
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Thinking traces now render as Markdown",
+            "zh": "思考过程现在以 Markdown 渲染"
+          },
+          "body": {
+            "en": "Reasoning panels, folded turns, and sub-agent previews now correctly display headings, emphasis, lists, and code blocks. Streaming stops immediately after reasoning completes, and hidden content stays lightweight.",
+            "zh": "推理面板、折叠轮次和子代理预览现在可以正确显示标题、强调、列表和代码块。推理完成后立即停止流式传输，隐藏内容保持轻量。"
+          },
+          "refs": [
+            7940
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Storage paths are visible and Windows keeps its install location",
+            "zh": "存储路径可见，Windows 保留安装位置"
+          },
+          "body": {
+            "en": "Settings now shows the runtime-owned workspace, session and memory, cache, and extension paths as read-only values. Windows installs and updates continue using the user's existing install directory.",
+            "zh": "设置中现在会以只读方式显示运行时实际使用的工作区、会话与记忆、缓存和扩展路径。Windows 安装与更新会继续使用用户现有的安装目录。"
+          },
+          "refs": [
+            7942
+          ]
+        },
+        {
+          "kind": "new",
+          "title": {
+            "en": "Explicit Kimi K3 reasoning for custom gateways",
+            "zh": "自定义网关的显式 Kimi K3 推理"
+          },
+          "body": {
+            "en": "Custom OpenAI-compatible gateways can now select the Kimi K3 reasoning protocol directly in the provider editor. Reasoning history is preserved, and the curated OpenCode Go relay remains unchanged.",
+            "zh": "自定义 OpenAI 兼容网关现在可以在提供商编辑器中直接选择 Kimi K3 推理协议。推理历史得以保留，精选的 OpenCode Go 中继保持不变。"
+          },
+          "refs": [
+            7903
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Fix Windows taskbar icon grouping",
+            "zh": "修复 Windows 任务栏图标分组"
+          },
+          "body": {
+            "en": "Launching from a pinned shortcut now reuses the pinned icon instead of creating a second one. Existing shortcuts are repaired automatically, and the 0.53 build keeps its separate identity.",
+            "zh": "从固定快捷方式启动现在会重用固定图标，而不是创建第二个图标。现有快捷方式会自动修复，0.53 版本保持独立身份。"
+          },
+          "refs": [
+            7925
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Fix retry-inflated compaction decisions",
+            "zh": "修复重试导致的提前压缩决策"
+          },
+          "body": {
+            "en": "Automatic compaction now uses the latest single-request prompt size, preventing premature context folding when stream interruptions cause multiple attempts. Billing totals remain accurate.",
+            "zh": "自动压缩现在使用最新的单次请求提示大小，防止流中断导致多次尝试时过早折叠上下文。计费总额保持准确。"
+          },
+          "refs": [
+            7930
+          ]
+        },
+        {
+          "kind": "improved",
+          "title": {
+            "en": "Adaptive no-progress guard replaces fixed round count",
+            "zh": "自适应无进展防护取代固定轮次计数"
+          },
+          "body": {
+            "en": "The agent now escalates only when consecutive rounds add no new evidence; any progress resets the streak. This prevents unnecessary nudges and forced stops while progress is being made.",
+            "zh": "代理现在仅在连续轮次未添加新证据时升级，任何进展都会重置。这可以防止在取得进展时进行不必要的提示和强制停止。"
+          },
+          "refs": [
+            7915
+          ]
+        },
+        {
+          "kind": "fixed",
+          "title": {
+            "en": "Stream coalescing now active on the hot path",
+            "zh": "流合并现在在热路径上生效"
+          },
+          "body": {
+            "en": "Fixed a wiring issue so that the agent's token bursts are properly merged before reaching the frontend, reducing UI jitter and event volume.",
+            "zh": "修复了接线问题，确保代理的令牌突发在到达前端之前正确合并，减少 UI 抖动和事件量。"
+          },
+          "refs": [
+            7905
+          ]
+        }
+      ],
+      "changes": {
+        "new": [
+          {
+            "title": {
+              "en": "Explicit Kimi K3 reasoning for custom gateways",
+              "zh": "自定义网关的显式 Kimi K3 推理"
+            },
+            "body": {
+              "en": "Custom OpenAI-compatible gateways can now select the Kimi K3 reasoning protocol directly in the provider editor. Reasoning history is preserved, and the curated OpenCode Go relay remains unchanged.",
+              "zh": "自定义 OpenAI 兼容网关现在可以在提供商编辑器中直接选择 Kimi K3 推理协议。推理历史得以保留，精选的 OpenCode Go 中继保持不变。"
+            },
+            "refs": [
+              7903
+            ]
+          }
+        ],
+        "improved": [
+          {
+            "title": {
+              "en": "Thinking traces now render as Markdown",
+              "zh": "思考过程现在以 Markdown 渲染"
+            },
+            "body": {
+              "en": "Reasoning panels, folded turns, and sub-agent previews now correctly display headings, emphasis, lists, and code blocks. Streaming stops immediately after reasoning completes, and hidden content stays lightweight.",
+              "zh": "推理面板、折叠轮次和子代理预览现在可以正确显示标题、强调、列表和代码块。推理完成后立即停止流式传输，隐藏内容保持轻量。"
+            },
+            "refs": [
+              7940
+            ]
+          },
+          {
+            "title": {
+              "en": "Storage paths are visible and Windows keeps its install location",
+              "zh": "存储路径可见，Windows 保留安装位置"
+            },
+            "body": {
+              "en": "Settings now shows the runtime-owned workspace, session and memory, cache, and extension paths as read-only values. Windows installs and updates continue using the user's existing install directory.",
+              "zh": "设置中现在会以只读方式显示运行时实际使用的工作区、会话与记忆、缓存和扩展路径。Windows 安装与更新会继续使用用户现有的安装目录。"
+            },
+            "refs": [
+              7942
+            ]
+          },
+          {
+            "title": {
+              "en": "Adaptive no-progress guard replaces fixed round count",
+              "zh": "自适应无进展防护取代固定轮次计数"
+            },
+            "body": {
+              "en": "The agent now escalates only when consecutive rounds add no new evidence; any progress resets the streak. This prevents unnecessary nudges and forced stops while progress is being made.",
+              "zh": "代理现在仅在连续轮次未添加新证据时升级，任何进展都会重置。这可以防止在取得进展时进行不必要的提示和强制停止。"
+            },
+            "refs": [
+              7915
+            ]
+          }
+        ],
+        "fixed": [
+          {
+            "title": {
+              "en": "Fix Windows taskbar icon grouping",
+              "zh": "修复 Windows 任务栏图标分组"
+            },
+            "body": {
+              "en": "Launching from a pinned shortcut now reuses the pinned icon instead of creating a second one. Existing shortcuts are repaired automatically, and the 0.53 build keeps its separate identity.",
+              "zh": "从固定快捷方式启动现在会重用固定图标，而不是创建第二个图标。现有快捷方式会自动修复，0.53 版本保持独立身份。"
+            },
+            "refs": [
+              7925
+            ]
+          },
+          {
+            "title": {
+              "en": "Fix retry-inflated compaction decisions",
+              "zh": "修复重试导致的提前压缩决策"
+            },
+            "body": {
+              "en": "Automatic compaction now uses the latest single-request prompt size, preventing premature context folding when stream interruptions cause multiple attempts. Billing totals remain accurate.",
+              "zh": "自动压缩现在使用最新的单次请求提示大小，防止流中断导致多次尝试时过早折叠上下文。计费总额保持准确。"
+            },
+            "refs": [
+              7930
+            ]
+          },
+          {
+            "title": {
+              "en": "Stream coalescing now active on the hot path",
+              "zh": "流合并现在在热路径上生效"
+            },
+            "body": {
+              "en": "Fixed a wiring issue so that the agent's token bursts are properly merged before reaching the frontend, reducing UI jitter and event volume.",
+              "zh": "修复了接线问题，确保代理的令牌突发在到达前端之前正确合并，减少 UI 抖动和事件量。"
+            },
+            "refs": [
+              7905
+            ]
+          }
+        ]
+      },
+      "upgrade": [],
+      "risks": [],
+      "contributors": [
+        "SivanCola",
+        "esengine"
+      ],
+      "links": {
+        "github": "https://github.com/esengine/DeepSeek-Reasonix/releases/tag/desktop-v1.21.3",
+        "compare": "https://github.com/esengine/DeepSeek-Reasonix/compare/desktop-v1.21.2...desktop-v1.21.3",
+        "download": "https://reasonix.io/?download=desktop&channel=stable#start"
+      },
+      "releaseId": "1.21.3",
+      "baseVersion": "1.21.3",
+      "status": "reviewed",
+      "previousRelease": "1.21.2",
+      "builds": {
+        "cli": "v1.21.3",
+        "desktop": "v1.21.3",
+        "npm": "1.21.3"
+      }
+    },
+    {
       "version": "1.21.2",
       "date": "2026-08-07",
       "channel": "stable",

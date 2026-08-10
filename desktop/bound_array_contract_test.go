@@ -29,8 +29,6 @@ func TestBoundArrayPayloadsAreNonNilBeforeStartup(t *testing.T) {
 		{"ListTabs", app.ListTabs()},
 		{"ListProjectTree", app.ListProjectTree()},
 		{"AvailableSubagentTools", app.AvailableSubagentTools()},
-		{"AutoResearchList", app.AutoResearchList("missing")},
-		{"AutoResearchFindings", app.AutoResearchFindings("missing", 10)},
 		{"MCPServers", app.MCPServers()},
 		{"Plugins", app.Plugins()},
 		{"HeartbeatListTasks", app.HeartbeatListTasks()},

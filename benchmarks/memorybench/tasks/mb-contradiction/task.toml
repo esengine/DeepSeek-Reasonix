@@ -1,0 +1,5 @@
+prompt = "Write the command to install this project's dependencies into answer.txt."
+class = "contradiction"
+max_steps = 8
+timeout_sec = 180
+memory_markers = ["MEMKEY-CONTRA"]

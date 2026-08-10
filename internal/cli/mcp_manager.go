@@ -93,6 +93,7 @@ type mcpActionItem struct {
 type mcpExternalDoneMsg struct {
 	label  string
 	target string
+	server string
 	err    error
 }
 

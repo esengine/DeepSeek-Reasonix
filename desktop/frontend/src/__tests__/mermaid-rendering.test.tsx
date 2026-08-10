@@ -26,6 +26,7 @@ import { REMOTE_MARKDOWN_IMAGE_PATH } from "../lib/markdownImage";
 const testDir = dirname(fileURLToPath(import.meta.url));
 const styles = readFileSync(resolve(testDir, "../styles.css"), "utf8");
 const markdownRendererSource = readFileSync(resolve(testDir, "../components/MarkdownRenderer.tsx"), "utf8");
+const markdownComponentsSource = readFileSync(resolve(testDir, "../components/markdownComponents.tsx"), "utf8");
 const markdownSource = readFileSync(resolve(testDir, "../components/Markdown.tsx"), "utf8");
 const messageSource = readFileSync(resolve(testDir, "../components/Message.tsx"), "utf8");
 
@@ -152,12 +153,12 @@ console.log("\nmermaid rendering");
   ok(markdownSource.includes("streaming?: boolean"), "Markdown exposes an explicit streaming state");
   ok(messageSource.includes("streaming={item.streaming}"), "assistant messages pass streaming state to Markdown");
   ok(
-    markdownRendererSource.includes('lazy(() => import("./MermaidDiagram"))'),
-    "MarkdownRenderer lazy-loads the Mermaid renderer",
+    markdownComponentsSource.includes('lazy(() => import("./MermaidDiagram"))'),
+    "the shared components map lazy-loads the Mermaid renderer",
   );
   ok(
-    markdownRendererSource.includes('lang === "mermaid"'),
-    "MarkdownRenderer routes mermaid fenced code blocks to the Mermaid renderer",
+    markdownComponentsSource.includes('lang === "mermaid"'),
+    "the shared components map routes mermaid fenced code blocks to the Mermaid renderer",
   );
 }
 
@@ -256,6 +257,12 @@ console.log("\nmermaid rendering");
     await flushTimers();
   });
   eq(pendingFrame, undefined, "tail growth alone schedules no further parse");
+
+  await act(async () => {
+    root.render(<MarkdownTextProbe text={"...\nreplacement window"} streaming />);
+    await flushTimers();
+  });
+  eq(rootEl.textContent, "", "a rolling Markdown window drops its stale parsed prefix before paint");
 
   await act(async () => {
     root.render(<MarkdownTextProbe text="complete" streaming={false} />);

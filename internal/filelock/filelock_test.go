@@ -29,6 +29,34 @@ func TestAcquireHonorsDeadlineAndRecoversAfterRelease(t *testing.T) {
 	secondRelease()
 }
 
+func TestAcquireWithExternalTimeoutBoundsOnlyFileLockRetries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.lock")
+	releaseExternal, err := tryLockFile(path)
+	if err != nil {
+		t.Fatalf("hold external file lock: %v", err)
+	}
+	defer releaseExternal()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err = AcquireWithExternalTimeout(ctx, path, 60*time.Millisecond)
+	elapsed := time.Since(started)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("external acquire error = %v, want deadline exceeded", err)
+	}
+	if elapsed >= time.Second {
+		t.Fatalf("external acquire waited %v, want the short external budget", elapsed)
+	}
+}
+
+func TestAcquireWithExternalTimeoutRejectsInvalidBudget(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.lock")
+	if _, err := AcquireWithExternalTimeout(context.Background(), path, 0); err == nil {
+		t.Fatal("zero external timeout should be rejected")
+	}
+}
+
 func TestLocalRegistryReclaimsReleasedEntries(t *testing.T) {
 	before := RegistrySizeForTest()
 	path := filepath.Join(t.TempDir(), "ephemeral.lock")

@@ -297,9 +297,9 @@ func TestGoBuildUnderSandbox(t *testing.T) {
 }
 
 // fakeSandboxExec writes an executable named sandbox-exec into a fresh temp
-// dir, prepends that dir to PATH, and returns the binary's path. The probe
-// resolves the binary via PATH, so the fake shadows any real sandbox-exec on
-// the host.
+// dir and returns its path. Tests probe the returned path directly so they do
+// not depend on process-global PATH state while the package runs in parallel
+// with the rest of the repository.
 func fakeSandboxExec(t *testing.T, exitCode string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -307,7 +307,6 @@ func fakeSandboxExec(t *testing.T, exitCode string) string {
 	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit "+exitCode+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return path
 }
 
@@ -318,16 +317,16 @@ func fakeSandboxExec(t *testing.T, exitCode string) string {
 func TestAvailableFalseWhenSandboxExecUnusable(t *testing.T) {
 	path := fakeSandboxExec(t, "71")
 	sandboxExecUsability.Delete(path) // the fake is fresh per test; re-probe it
-	if Available() {
-		t.Fatal("Available() = true, want false: sandbox-exec on PATH but unusable (exit 71)")
+	if usableSandboxExecPath(path) {
+		t.Fatal("sandbox-exec probe = true, want false: executable is unusable (exit 71)")
 	}
 }
 
 func TestAvailableTrueWhenSandboxExecUsable(t *testing.T) {
 	path := fakeSandboxExec(t, "0")
 	sandboxExecUsability.Delete(path)
-	if !Available() {
-		t.Fatal("Available() = false, want true: working sandbox-exec")
+	if !usableSandboxExecPath(path) {
+		t.Fatal("sandbox-exec probe = false, want true: working sandbox-exec")
 	}
 }
 

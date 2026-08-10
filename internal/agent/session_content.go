@@ -10,6 +10,27 @@ import (
 	"reasonix/internal/store"
 )
 
+// ContentDigest returns the canonical digest used by the session WAL and
+// revision ledger for the current in-memory transcript.
+func (s *Session) ContentDigest() (string, error) {
+	if s == nil {
+		return "", fmt.Errorf("nil session")
+	}
+	return ContentDigestForMessages(s.Snapshot())
+}
+
+// ContentDigestForMessages returns the canonical transcript digest for an
+// immutable message snapshot. Frontends use it to bind a rendered history page
+// to the exact content it contains instead of sampling a sidecar revision that
+// may have advanced before or after the page was built.
+func ContentDigestForMessages(msgs []provider.Message) (string, error) {
+	digest, err := digestSessionMessages(msgs)
+	if err != nil {
+		return "", err
+	}
+	return digestString(digest), nil
+}
+
 // SessionsShareContent reports whether two saved sessions decode to the same
 // transcript. It replaces byte-comparing the .jsonl checkpoints, which stopped
 // implying transcript equality once the event log became authoritative: two

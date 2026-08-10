@@ -163,7 +163,7 @@ func routeCandidates(input string, entries []Entry) []RouteCandidate {
 	}
 	var candidates []RouteCandidate
 	for _, e := range entries {
-		if e.Status == StatusDisabled || negativeMatch(text, e.NegativeTriggers) {
+		if e.Status == StatusDisabled || e.Status == StatusFailed || negativeMatch(text, e.NegativeTriggers) {
 			continue
 		}
 		if policy, reason, ok := routeEntry(text, e); ok {

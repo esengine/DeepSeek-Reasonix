@@ -18,6 +18,10 @@ agent. It is the Reasonix analog of Claude Code's CLAUDE.md.
 - Cache-first: the system-prompt prefix (base prompt + tools + memory) must stay
   byte-stable across turns so DeepSeek's automatic prefix cache stays warm. Never
   mutate it mid-session — ride the turn tail instead (see `control.Compose`).
+- Performance features land with an effect test at their final boundary
+  (`internal/boot/effect_test.go` pattern): assert what actually reaches the
+  provider request, frontend sink, or trajectory through the real `boot.Build`
+  assembly. Component correctness is not system effectiveness.
 
 ## Comments
 
@@ -62,11 +66,14 @@ Run these **before every commit** to catch the fastest CI failures locally:
 ```bash
 gofmt -w .                          # catches gofmt (saves ~13s CI)
 go vet ./...                        # catches vet warnings (saves ~52s CI/lint)
-go run ./tools/repolint             # catches comment/size/layering regressions
+make lint                           # golangci-lint at CI's pin + repolint
 go test ./internal/tool/builtin/ ./internal/boot/  # catches tool/boot test breaks
 ```
 
-CI runs `golangci-lint` (not locally available), but gofmt + vet already block ~80% of fast-fail scenarios.
+`make lint` runs both gates CI runs, at the version in `.golangci-version`;
+`make lint-install` installs it. Do not skip it: a `modernize` finding never
+shows up in `go vet`, and the CI round trip that catches it instead costs ten
+minutes.
 
 ## Import cycle rule
 

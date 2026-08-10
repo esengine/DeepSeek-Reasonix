@@ -7,12 +7,12 @@ import (
 	"testing"
 )
 
-// writeRuntimePlugin writes a Manifest v1 plugin package with a runtime
+// writeRuntimePlugin writes a Manifest v2 plugin package with a runtime
 // declaration plus prompt and theme contributions.
 func writeRuntimePlugin(t *testing.T, root string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "reasonix-plugin.json"), `{
-  "apiVersion": "reasonix.io/plugin/v1",
+  "apiVersion": "reasonix.io/plugin/v2",
   "name": "rtsync",
   "version": "1.0.0",
   "contributes": {
@@ -102,7 +102,8 @@ func TestPluginRuntimePlanCarriesFullTrust(t *testing.T) {
 
 func TestPluginLegacyPlanOmitsRuntimeFields(t *testing.T) {
 	src := t.TempDir()
-	writeFile(t, filepath.Join(src, "reasonix-plugin.json"), `{"name": "legacy", "skills": ["skills"]}`)
+	// v2 without runtime: skills-only package has no Runtime plan fields.
+	writeFile(t, filepath.Join(src, "reasonix-plugin.json"), `{"apiVersion":"reasonix.io/plugin/v2","name":"legacy","skills":["skills"]}`)
 	writeFile(t, filepath.Join(src, "skills", "s", "SKILL.md"), "---\ndescription: s\n---\nS")
 
 	project := t.TempDir()
@@ -119,7 +120,7 @@ func TestPluginLegacyPlanOmitsRuntimeFields(t *testing.T) {
 	}
 	act := resp.Actions[0]
 	if act.Runtime != nil {
-		t.Fatalf("legacy package gained a runtime: %+v", act.Runtime)
+		t.Fatalf("skills-only package gained a runtime: %+v", act.Runtime)
 	}
 	if act.RiskLevel != RiskMedium {
 		t.Fatalf("RiskLevel = %q, want medium for a plain legacy package", act.RiskLevel)

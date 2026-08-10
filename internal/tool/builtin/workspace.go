@@ -50,6 +50,10 @@ type Workspace struct {
 	// shared by bash and ripgrep-backed grep. Nil leaves those tools without a
 	// session-private temp (platform defaults apply).
 	SessionTemp *sessiontemp.Manager
+	// FileWriteReceipt receives prior-state evidence after a successful
+	// write_file mutation. It is instance-scoped so concurrent runtimes never
+	// record into another session's recovery ledger.
+	FileWriteReceipt func(path string, hadPrior bool, prior []byte)
 }
 
 // Tools returns the built-in tools bound to the workspace, ready to Add to a
@@ -67,7 +71,7 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 
 	overrides := map[string]tool.Tool{
 		"read_file":     readFile{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
-		"write_file":    writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"write_file":    writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay, receipt: w.FileWriteReceipt},
 		"edit_file":     editFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
 		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
 		"move_file":     moveFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},

@@ -220,6 +220,7 @@ func memorySearchText(m Memory) string {
 		string(NormalizeType(string(m.Type))),
 		string(NormalizeFactScope(string(m.Scope))),
 		m.Description,
+		m.Keywords,
 		m.Body,
 	}, "\n")
 }

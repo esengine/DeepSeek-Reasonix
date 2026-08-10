@@ -1,3 +1,5 @@
+import { app } from "./bridge";
+
 // UI latency telemetry: turn-scoped, content-free counters and percentiles for
 // the streaming render pipeline. Everything reported is a bounded (signal,
 // bucket) pair — no message text, no timings tied to content — matching the
@@ -15,6 +17,16 @@ export const UI_PERF_BUDGETS = {
   inputLatencyP95Ms: 100, // typing while streaming
   markdownRenderP95Ms: 10,
   longTasks: 0, // main-thread tasks > 50ms per turn
+  // Session-switch/history pipeline gates (Phase F). Not turn-scoped: these
+  // are enforced by the real-DOM harness in bench/ (REASONIX_BENCH_* env
+  // overrides), not by the per-turn signal path below.
+  sessionFirstPaintP95Ms: 100, // cold open → surface first paint
+  sessionInteractiveP95Ms: 300, // cold open → input enabled + first slice rendered
+  inpP95Ms: 200, // interaction-to-next-paint probes during switching
+  mainThreadTaskP95Ms: 50, // long-task P95 while switching
+  mainThreadTaskMaxMs: 500, // hard cap on any single main-thread task
+  markdownWorkerMaxParseMs: 3_000, // 500KiB markdown-heavy fixture, cold Worker parse
+  switchHeapGrowthMiB: 20, // 100× alternating-switch retained-heap growth over warmup baseline
 } as const;
 
 export interface UIPerfSummary {
@@ -218,7 +230,15 @@ export class UIPerfTurnCollector {
 // uiPerfTracker is the app-wide instance; useController feeds it wire events,
 // state commits, and stream dispatches.
 export const uiPerfTracker: UIPerfTracker = createUIPerfTracker((signals) => {
-  void import("./bridge").then(({ app }) => app.RecordUIPerf(signals)).catch(() => {});
+  // Older shells and lightweight browser/test bridge doubles may not expose
+  // the optional telemetry endpoint. Diagnostics must never turn a completed
+  // turn into a rejected event handler in those environments.
+  if (typeof app.RecordUIPerf !== "function") return;
+  try {
+    void Promise.resolve(app.RecordUIPerf(signals)).catch(() => {});
+  } catch {
+    // A partially initialized Wails binding can still throw synchronously.
+  }
 });
 
 export interface UIPerfTracker {

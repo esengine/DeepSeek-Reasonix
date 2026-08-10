@@ -1,0 +1,4 @@
+prompt = "Exactly one function defined under lib/ is never reachable from main.py — no call path leads to it. Find it and write only its name to answer.txt."
+class = "repo-exploration"
+max_steps = 25
+timeout_sec = 420

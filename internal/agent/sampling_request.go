@@ -23,6 +23,7 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 		return samplingRequest{}, err
 	}
 	requestMessages := append([]provider.Message(nil), provider.ModelMessages(a.modelVisibleMessages())...)
+	requestMessages = a.providerProjectionMessages(requestMessages)
 	for i := range requestMessages {
 		requestMessages[i].CreatedAt = 0
 	}
@@ -39,6 +40,7 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 		MaxTokens:      a.maxOutputTokens,
 		Temperature:    provider.OptionalTemperature(a.temperature),
 		ResponseFormat: responseFormatFromRequest(ctx),
+		EffortOverride: a.governorOverride(),
 	}
 	// provider.request: the fully assembled request gets one last ruling
 	// (revalidated by the payload registry) before it goes on the wire.
@@ -46,7 +48,27 @@ func (a *Agent) prepareSamplingRequest(ctx context.Context) (samplingRequest, er
 	if err != nil {
 		return samplingRequest{}, err
 	}
+	// Enforce the shared-window invariant on the final extension-adjusted
+	// payload. This keeps prompt + output inside the provider context window
+	// without changing message bytes, tool order, or ordinary request defaults.
+	if budget, clipped, budgetErr := a.effectiveOutputBudget(req); budgetErr != nil {
+		return samplingRequest{}, budgetErr
+	} else if clipped {
+		req.MaxTokens = budget
+	}
+	shape := a.requestCalibrationShape(req)
+	a.activeReqShape.Store(&shape)
 	return samplingRequest{req: freezeProviderRequest(req)}, nil
+}
+
+// providerProjectionMessages applies provider-specific role compatibility to a
+// request copy. Projection sidecars retain logical user-turn boundaries so
+// explicit range compression can continue to resolve anchors across calls.
+func (a *Agent) providerProjectionMessages(msgs []provider.Message) []provider.Message {
+	if a != nil && a.strictAlternatingRoles {
+		return coalesceProjectionUserRuns(msgs)
+	}
+	return msgs
 }
 
 // freezeProviderRequest deep-copies the provider-visible request surface so

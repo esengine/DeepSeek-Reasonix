@@ -16,6 +16,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net/http"
 	"reflect"
 	"regexp"
 	"sort"
@@ -131,16 +132,15 @@ type Spec struct {
 	LauncherLocator         string
 	LauncherResolvedVersion string
 	LauncherDigest          string
-	// ProcessMode selects how an authorized stdio MCP process is launched.
-	// Empty defaults to host (trusted host process, no command sandbox).
-	// confined is reserved for internal managed deployments and tests; it is
-	// never exposed in common settings and never used as an automatic fallback.
+	// ProcessMode selects host mode (default) or confined mode, which is reserved
+	// for internal managed deployments and tests, never an automatic fallback.
 	ProcessMode MCPProcessMode
 	// Sandbox is only applied when ProcessMode is confined. Host-mode servers
 	// keep private state/cache/temp dirs without wrapping the process in the
 	// agent command sandbox.
-	Sandbox  sandbox.Spec
-	StateDir string
+	Sandbox         sandbox.Spec
+	StateDir        string
+	OAuthHTTPClient *http.Client
 	// StripRawPrefix, when non-empty, removes this prefix from each MCP tool's
 	// raw name before namespacing. For example, StripRawPrefix="server_" turns
 	// "server_search" into "search", yielding "mcp__search__search" instead of
@@ -191,6 +191,10 @@ type Host struct {
 	// discovered tools without issuing concurrent tools/list calls.
 	spawningMu sync.Mutex
 	spawning   map[string]*spawnAttempt
+
+	// proxies holds stable per-server backends for rolling replacement without
+	// changing provider-visible tool prefixes (spatiotemporal composability).
+	proxies map[string]*serverProxy
 
 	// Detached stats/schema-cache writers from Start; off the boot path but
 	// drained by Close so cleanup can't race a still-open cache file.
@@ -490,11 +494,17 @@ func (h *Host) Close() {
 	}
 	h.deferredWG.Wait()
 
-	h.mu.RLock()
-	clients := append([]*Client(nil), h.clients...) // snapshot; close outside the lock
-	h.mu.RUnlock()
+	h.mu.Lock()
+	clients := append([]*Client(nil), h.clients...)
+	proxies := h.proxies
+	h.proxies = nil
+	h.clients = nil
+	h.mu.Unlock()
+	closeServerProxies(proxies)
 	for _, c := range clients {
-		c.close()
+		if c != nil && c.t != nil {
+			c.close()
+		}
 	}
 	h.bgWrites.Wait() // drain detached stats/schema writers before returning
 }
@@ -1171,17 +1181,7 @@ func nonEmptyDurationMap(in map[string]time.Duration) map[string]time.Duration {
 	return in
 }
 
-// client returns the named connected client, or nil.
-func (h *Host) client(name string) *Client {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	for _, c := range h.clients {
-		if c.name == name {
-			return c
-		}
-	}
-	return nil
-}
+func (h *Host) client(name string) *Client { return h.lookupClient(name) }
 
 // Add connects one server live: it performs the MCP handshake, discovers the
 // server's tools (and prompts/resources when advertised), appends it to the

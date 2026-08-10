@@ -2,9 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
 	"reasonix/internal/event"
 	"strings"
 	"testing"
@@ -479,16 +476,19 @@ func TestRenderTranscriptRedactsToolCallArgs(t *testing.T) {
 	}
 }
 
-func TestInterruptedDisplayStaysVerbatimAndOutOfCompactionPrompt(t *testing.T) {
+// Display-only output stays verbatim in the canonical transcript by construction
+// (compaction only writes a projection); this pins the other half: it must never
+// reach the summarizer or the model-visible projection.
+func TestInterruptedDisplayStaysOutOfCompactionPromptAndProjection(t *testing.T) {
 	local := provider.Message{
 		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
 		LocalOnly: true, Content: "partial visible answer", ReasoningContent: "private partial reasoning",
 		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true},
 	}
 	a := &Agent{}
-	kept, fold := a.partitionFold([]provider.Message{local})
-	if len(kept) != 1 || !kept[0].LocalOnly || len(fold) != 0 {
-		t.Fatalf("compaction partition kept=%+v fold=%+v, want local display kept verbatim", kept, fold)
+	early, carried, kept, fold := a.partitionFoldForProjection([]provider.Message{local})
+	if len(early) != 0 || len(carried) != 0 || len(kept) != 0 || len(fold) != 0 {
+		t.Fatalf("compaction partition early=%+v carried=%+v kept=%+v fold=%+v, want display-only output in none of them", early, carried, kept, fold)
 	}
 	if transcript := renderTranscript([]provider.Message{local}); transcript != "" {
 		t.Fatalf("local interrupted output leaked into compaction prompt: %q", transcript)
@@ -526,79 +526,6 @@ func TestCompactKeepsActiveTurnVerbatim(t *testing.T) {
 	}
 	if sess.Messages[start].Content != "update a.txt" || sess.Messages[start+1].ToolCalls[0].Arguments != call.ToolCalls[0].Arguments || sess.Messages[start+2].Content != result.Content {
 		t.Fatalf("active turn changed during compaction: %+v", sess.Messages[start:])
-	}
-}
-
-func TestSummarizeFromPreservesLocalOnlyOutsideModelAndArchive(t *testing.T) {
-	archiveDir := t.TempDir()
-	local := provider.Message{
-		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
-		LocalOnly: true, Content: "visible interrupted output", ReasoningContent: "private interrupted reasoning",
-		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"bash"}},
-	}
-	prov := &fakeProvider{reply: "later summary"}
-	sess := &Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "task"},
-		local,
-		{Role: provider.RoleAssistant, Content: "safe answer"},
-	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{ArchiveDir: archiveDir}, event.Discard)
-
-	if err := a.SummarizeFrom(context.Background(), 1); err != nil {
-		t.Fatalf("SummarizeFrom: %v", err)
-	}
-	if len(sess.Messages) != 3 || !sess.Messages[2].LocalOnly || sess.Messages[2].Content != local.Content || sess.Messages[2].ReasoningContent != local.ReasoningContent || sess.Messages[2].InterruptedTurn == nil || !sess.Messages[2].InterruptedTurn.Pending {
-		t.Fatalf("local-only message was not preserved verbatim: %+v", sess.Messages)
-	}
-	assertLocalOnlyAbsentFromSummaryAndArchive(t, prov, archiveDir, local)
-}
-
-func TestSummarizeUpToPreservesLocalOnlyOutsideModelAndArchive(t *testing.T) {
-	archiveDir := t.TempDir()
-	local := provider.Message{
-		Role: provider.RoleTool, ToolCallID: provider.LocalOnlyToolID, Name: provider.LocalOnlyToolName,
-		LocalOnly: true, Content: "visible earlier interruption", ReasoningContent: "private earlier reasoning",
-		InterruptedTurn: &provider.InterruptedTurnRecovery{Pending: true, InterruptedTools: []string{"read_file"}},
-	}
-	prov := &fakeProvider{reply: "earlier summary"}
-	sess := &Session{Messages: []provider.Message{
-		{Role: provider.RoleSystem, Content: "sys"},
-		{Role: provider.RoleUser, Content: "old task"},
-		local,
-		{Role: provider.RoleAssistant, Content: "old answer"},
-		{Role: provider.RoleUser, Content: "new task"},
-		{Role: provider.RoleAssistant, Content: "new answer"},
-	}}
-	a := New(prov, tool.NewRegistry(), sess, Options{ArchiveDir: archiveDir}, event.Discard)
-
-	if err := a.SummarizeUpTo(context.Background(), 4); err != nil {
-		t.Fatalf("SummarizeUpTo: %v", err)
-	}
-	if len(sess.Messages) != 5 || !sess.Messages[2].LocalOnly || sess.Messages[2].Content != local.Content || sess.Messages[2].ReasoningContent != local.ReasoningContent || sess.Messages[3].Content != "new task" {
-		t.Fatalf("local-only message/tail ordering was not preserved: %+v", sess.Messages)
-	}
-	assertLocalOnlyAbsentFromSummaryAndArchive(t, prov, archiveDir, local)
-}
-
-func assertLocalOnlyAbsentFromSummaryAndArchive(t *testing.T, prov *fakeProvider, archiveDir string, local provider.Message) {
-	t.Helper()
-	if len(prov.got) < 2 || strings.Contains(prov.got[1].Content, local.Content) || strings.Contains(prov.got[1].Content, local.ReasoningContent) {
-		t.Fatalf("local-only output leaked into summarizer prompt: %+v", prov.got)
-	}
-	entries, err := os.ReadDir(archiveDir)
-	if err != nil {
-		t.Fatalf("ReadDir archive: %v", err)
-	}
-	if len(entries) != 1 {
-		t.Fatalf("archive entries = %d, want 1", len(entries))
-	}
-	b, err := os.ReadFile(filepath.Join(archiveDir, entries[0].Name()))
-	if err != nil {
-		t.Fatalf("ReadFile archive: %v", err)
-	}
-	if strings.Contains(string(b), local.Content) || strings.Contains(string(b), local.ReasoningContent) {
-		t.Fatalf("local-only output leaked into archive: %s", b)
 	}
 }
 
@@ -692,55 +619,6 @@ func TestMaybeCompactStillLatchesWhenPromptStaysAboveTrigger(t *testing.T) {
 	a.maybeCompact(context.Background(), &provider.Usage{PromptTokens: 17000})
 	if !a.compactStuck {
 		t.Fatalf("two consecutive over-trigger compactions must still latch: consecutiveCompacts=%d", a.consecutiveCompacts)
-	}
-}
-
-func TestPartitionFoldSmallTurnWindowIsPositionFixed(t *testing.T) {
-	// 25 small user turns in the region: the first 20 must be kept verbatim,
-	// the last 5 must fold. The window is position-fixed (first N), never
-	// "the most recent N" — a dynamic tail would rewrite the kept prefix on
-	// every compaction and crater the server-side prefix cache.
-	a := &Agent{}
-	var region []provider.Message
-	for i := range 25 {
-		region = append(region, provider.Message{Role: provider.RoleUser, Content: fmt.Sprintf("small turn %d", i)})
-	}
-	kept, fold := a.partitionFold(region)
-	if len(kept) != maxKeepSmallUserTurns {
-		t.Fatalf("kept %d small user turns, want %d (position-fixed window)", len(kept), maxKeepSmallUserTurns)
-	}
-	if len(fold) != 5 {
-		t.Fatalf("folded %d turns, want 5 (turns beyond the fixed window)", len(fold))
-	}
-	// The kept turns must be the FIRST ones in order (positions 0..19).
-	for i := range maxKeepSmallUserTurns {
-		want := fmt.Sprintf("small turn %d", i)
-		if got := UserMessageText(kept[i]); got != want {
-			t.Fatalf("kept[%d]=%q, want %q — keep window must be the leading turns", i, got, want)
-		}
-	}
-	// Folded turns are the oldest beyond the window (positions 20..24).
-	for i, m := range fold {
-		want := fmt.Sprintf("small turn %d", 20+i)
-		if got := UserMessageText(m); got != want {
-			t.Fatalf("fold[%d]=%q, want %q", i, got, want)
-		}
-	}
-}
-
-func TestPartitionFoldLargeTurnsStillFold(t *testing.T) {
-	// Large user turns are not pinnable regardless of window position.
-	a := &Agent{}
-	region := []provider.Message{
-		{Role: provider.RoleUser, Content: strings.Repeat("big", 4000)}, // 12000 chars ×0.25 = 3000 > 1500 → not pinnable
-		{Role: provider.RoleUser, Content: "small"},
-	}
-	kept, fold := a.partitionFold(region)
-	if len(kept) != 1 || UserMessageText(kept[0]) != "small" {
-		t.Fatalf("kept=%+v, want only the small turn", kept)
-	}
-	if len(fold) != 1 {
-		t.Fatalf("fold=%d, want the large turn folded", len(fold))
 	}
 }
 

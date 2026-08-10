@@ -24,7 +24,7 @@ func (s *tabEventSink) turnInFlightSnapshot() bool {
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.turnInFlight
+	return s.turn.inFlight
 }
 
 func (s *tabEventSink) checkpointTelemetry(tab *WorkspaceTab, sessionPath string, force bool) {

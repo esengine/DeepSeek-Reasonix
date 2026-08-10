@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +11,7 @@ import (
 
 	"reasonix/internal/agent"
 	"reasonix/internal/event"
+	"reasonix/internal/fileutil"
 	fileencoding "reasonix/internal/fileutil/encoding"
 	"reasonix/internal/nilutil"
 	"reasonix/internal/provider"
@@ -286,7 +286,7 @@ func (gs *Session) Save(path string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(cp, data, 0o644); err != nil {
+		if err := fileutil.AtomicWriteFile(cp, data, 0o644); err != nil {
 			return err
 		}
 	}

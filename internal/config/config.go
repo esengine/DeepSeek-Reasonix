@@ -76,11 +76,36 @@ type Config struct {
 	pluginPackageOwners        map[string]string
 	pluginPackageSkillOwners   map[string][]string
 	pluginPackageAgentOwners   map[string][]string
-	editLoadErr                error
+	// explicitProjectSkillKeys records project-level skill fields that the
+	// settings UI intentionally owns even when their value equals the built-in
+	// default. It is transient edit metadata and is never serialized directly.
+	explicitProjectSkillKeys map[string]bool
+	editLoadErr              error
 	// loadWarnings are non-fatal issues observed while loading config (corrupt
 	// user/project files recovered via last-known-good or defaults). They never
 	// rewrite the original file; the UI may surface them for doctor repair.
 	loadWarnings []string
+}
+
+// KeepProjectSkillKey marks a skill field as an intentional project override.
+// An explicit empty/false project value must still be written so it can
+// override a non-default user setting in the layered configuration.
+func (c *Config) KeepProjectSkillKey(key string) error {
+	key = strings.TrimSpace(key)
+	switch key {
+	case "paths", "excluded_paths", "disabled_skills", "disable_implicit_invocation", "max_depth":
+	default:
+		return fmt.Errorf("unknown project skill key %q", key)
+	}
+	if c.explicitProjectSkillKeys == nil {
+		c.explicitProjectSkillKeys = make(map[string]bool)
+	}
+	c.explicitProjectSkillKeys[key] = true
+	return nil
+}
+
+func (c *Config) keepsProjectSkillKey(key string) bool {
+	return c != nil && c.explicitProjectSkillKeys[key]
 }
 
 type promptFileSource uint8
@@ -531,6 +556,9 @@ var defaultDesktopStatusBarItems = []string{
 	"cache_avg",
 	"session_tokens",
 	"turn_tokens",
+	"turn_tps",
+	"turn_output_tokens",
+	"turn_cache_tokens",
 	"turn_cost",
 	"session_turns",
 	"context",
@@ -1003,12 +1031,22 @@ func (c *Config) NetworkProxyMode() string {
 // the global roots. ExcludedPaths hides matching discovery roots without deleting
 // folders. ~, relative paths, and ${VAR} expansion are supported. DisabledSkills
 // hides named skills from the agent prompt, slash invocation, and skill tools
-// while keeping them manageable.
+// while keeping them manageable. DisableImplicitInvocation keeps skills
+// discoverable to the host for explicit /skill use and management, but hides
+// their index and model-facing invocation tools.
 type SkillsConfig struct {
-	Paths          []string `toml:"paths"`
-	ExcludedPaths  []string `toml:"excluded_paths"`
-	DisabledSkills []string `toml:"disabled_skills"`
-	MaxDepth       int      `toml:"max_depth"`
+	Paths                     []string `toml:"paths"`
+	ExcludedPaths             []string `toml:"excluded_paths"`
+	DisabledSkills            []string `toml:"disabled_skills"`
+	DisableImplicitInvocation bool     `toml:"disable_implicit_invocation"`
+	MaxDepth                  int      `toml:"max_depth"`
+}
+
+// ImplicitSkillInvocationEnabled reports whether the model may discover and
+// invoke skills without an explicit user slash command. The zero value keeps
+// the historical default enabled for old configs.
+func (c *Config) ImplicitSkillInvocationEnabled() bool {
+	return c == nil || !c.Skills.DisableImplicitInvocation
 }
 
 // SkillCustomPaths returns the configured custom skill roots with ${VAR}
@@ -1351,17 +1389,17 @@ type ProviderEntry struct {
 	WebSearch *bool `toml:"web_search"`
 	// ReasoningProtocol selects the request shape for OpenAI-compatible reasoning
 	// models. Empty/auto uses the model capability registry plus endpoint
-	// heuristics; glm selects GLM's thinking.type toggle; none disables automatic
-	// reasoning controls for this provider.
+	// heuristics. Explicit values select DeepSeek, GLM, Kimi K3, or standard
+	// OpenAI reasoning contracts; none disables automatic reasoning controls.
 	ReasoningProtocol string `toml:"reasoning_protocol"`
 	// SupportedEfforts lists the /effort levels this provider/model exposes.
-	// When non-empty, it overrides the built-in defaults derived from
-	// Kind/BaseURL and makes /effort configurable. "auto" is the implicit
-	// prefix — always accepted. DefaultEffort resolves it; omit DefaultEffort
-	// (or set one outside this list) to fall back to SupportedEfforts[0].
+	// Non-empty values override built-in Kind/BaseURL defaults except for fixed
+	// Kimi K3 reasoning. "auto" is the implicit prefix — always accepted.
+	// DefaultEffort resolves it; omit DefaultEffort (or set one outside this
+	// list) to fall back to SupportedEfforts[0].
 	SupportedEfforts []string `toml:"supported_efforts"`
 	// DefaultEffort is the /effort level used when the user picks "auto" or
-	// has not set Effort. Ignored when SupportedEfforts is empty.
+	// has not set Effort. Ignored for empty SupportedEfforts or fixed Kimi K3.
 	DefaultEffort string `toml:"default_effort"`
 	// ModelOverrides customizes capability metadata after ResolveModel selects a
 	// concrete model from a multi-model provider. Use it when a gateway exposes
@@ -1867,9 +1905,25 @@ func Default() *Config {
 			Feishu:             FeishuBotConfig{Domain: "feishu", AppSecretEnv: "FEISHU_BOT_APP_SECRET", Mode: "webhook", WebhookPort: 8080, RequireMention: true},
 			Weixin:             WeixinBotConfig{AccountID: "default", TokenEnv: "WEIXIN_BOT_TOKEN", APIBase: "https://ilinkai.weixin.qq.com"},
 		},
+		// New installs use DeepSeek's Anthropic-compatible Messages endpoint so
+		// provider-executed web search is available by default. Existing explicit
+		// provider entries are merged on top of these defaults and keep their
+		// configured protocol unchanged.
 		Providers: []ProviderEntry{
-			{Name: "deepseek-flash", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD()},
-			{Name: "deepseek-pro", Kind: "openai", BaseURL: "https://api.deepseek.com", Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY", BalanceURL: "https://api.deepseek.com/user/balance", ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD()},
+			{
+				Name: "deepseek-flash", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
+				Model: "deepseek-v4-flash", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "low", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4FlashPriceUSD(),
+			},
+			{
+				Name: "deepseek-pro", Kind: "anthropic", BaseURL: deepSeekAnthropicBaseURL,
+				Model: "deepseek-v4-pro", APIKeyEnv: "DEEPSEEK_API_KEY",
+				BalanceURL: "https://api.deepseek.com/user/balance", Thinking: "enabled",
+				WebSearch: boolPointer(true), SupportedEfforts: []string{"disabled", "high", "max"}, DefaultEffort: "high",
+				ContextWindow: 1_000_000, Price: deepSeekV4ProPriceUSD(),
+			},
 		},
 	}
 }
@@ -1907,6 +1961,9 @@ func (c *Config) ResolveModel(ref string) (*ProviderEntry, bool) {
 		return nil, false
 	}
 	if access := desktopProviderAccessMap(c.Desktop.ProviderAccess); len(access) > 0 {
+		if access["deepseek"] && !canCanonicalizeLegacyDeepSeekProviders(c) {
+			delete(access, "deepseek")
+		}
 		ref = retargetDesktopOfficialRef(ref, access)
 	}
 	// "provider/model"

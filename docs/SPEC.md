@@ -142,7 +142,16 @@ interface (`call` / `notify` / `close`) abstracts that, so the MCP-level logic
     response) or `text/event-stream` (an SSE stream carrying the response plus
     any server notifications). The `Mcp-Session-Id` response header, once seen,
     is echoed on subsequent requests. Static `headers` (e.g. a bearer token) are
-    sent on every request. OAuth is out of scope for now (see §9).
+    sent on every request. When no static `Authorization` header is configured,
+    user-initiated OAuth uses Protected Resource Metadata and Authorization
+    Server Metadata discovery, dynamic client registration, PKCE S256, a
+    loopback callback, resource indicators, and refresh-token rotation. Client
+    credentials and tokens are stored with mode `0600` in the server's private
+    Reasonix MCP state directory, outside the workspace; tokens are bound to the
+    configured resource URL and are never reused after that URL changes. OAuth
+    discovery, registration, and token requests honor Reasonix's resolved
+    network-proxy settings. Removing a declaration clears this state unless the
+    effective fallback uses the same OAuth resource.
   - `sse` — the legacy 2024-11-05 HTTP+SSE transport. A persistent GET stream
     receives an announced relative POST endpoint, JSON-RPC responses, and server
     messages. Cross-origin announced endpoints are rejected so static headers
@@ -269,12 +278,24 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   tool results stay paired. `KeepErrors` preserves error/blocked tool outputs,
   and the recent tail is not rewritten. Snipped results can later be upgraded to
   pruned placeholders; already-pruned results are left alone.
-- When summary compaction runs, it folds only the assistant/tool work. Every
-  **user turn** small enough to be a brief and every **prior digest** is kept
-  verbatim; the foldable remainder is summarized — using the executor's own
-  provider, no tools — in place. The boundary is aligned backward off any tool
-  result so the recent tail never begins with an orphan tool message whose
-  `tool_calls` were summarized away.
+- When summary compaction runs, the fold region (everything between the pinned
+  prefix and the recent tail) is split three ways: the first few **small user
+  turns** are hoisted verbatim ahead of the digest, messages the keep policy
+  protects stay verbatim, and **everything else** — assistant/tool work, later
+  user turns, and any prior digest — is summarized into a single digest, using
+  the executor's own provider, no tools. The split is a partition: a message in
+  the region is either kept verbatim or reaches the summarizer, never neither.
+  The tail boundary is aligned backward off any tool result so the recent tail
+  never begins with an orphan tool message whose `tool_calls` were summarized
+  away.
+- One fold never outgrows one summarizer call. A fold region larger than such a
+  call can hold — the window minus room for the digest it must return, the
+  summary prompt, and the caller's instructions — first gives up the bulk of its
+  stale tool results: head and tail lines are kept, and only in the summarizer's
+  copy, never in the transcript or the projection. A region still too large is summarized in
+  consecutive parts whose digests are merged in a final pass, capped so a single
+  compaction cannot cost an unbounded number of calls; whatever a part had to
+  drop is stated in the text the summarizer reads.
 - The dropped originals are archived under the user config dir
   (`reasonix/archive/<timestamp>.jsonl`; see §5 for its per-OS location), one
   message per line, so the full history stays traceable.
@@ -313,16 +334,20 @@ Long tasks eventually fill the model's context window. Reasonix manages this wit
   See [`SESSION_MEMORY_RETRIEVAL.md`](SESSION_MEMORY_RETRIEVAL.md) for the
   detailed implementation contract.
 
-**What survives a fold.** A fact the user states in a normal-sized turn is kept
-verbatim and is never summarized away — at any point in the session, across any
-number of compactions. A digest, once written, is likewise kept verbatim rather
-than re-summarized, so facts it captured are not lost to drift. The one
-**best-effort** boundary: a fact buried inside a single oversized message (a
-large paste, over the per-turn pin budget) folds with the rest, so its survival
-depends on the summarizer catching it while compressing bulk. There is no
-reliable way to auto-detect an arbitrary fact in bulk, so durable facts belong in
-their own turn rather than buried in a large paste; the raw oversized content is
-still archived and recoverable either way.
+**What survives a fold.** Verbatim, at every compaction: the system prompt, the
+first user turn when it is small enough to be a brief, the first few small user
+turns of the fold region, the messages the keep policy protects, and the recent
+tail. Everything else is **best-effort** — it reaches the summarizer and survives
+only as well as the digest captured it. That includes small user turns beyond the
+hoisted window, so a durable constraint is safest restated in a recent turn
+rather than assumed to hold from turn 4 of a long session.
+
+Two properties bound that loss. Each fold re-derives its digest from the
+canonical transcript rather than from the previous digest, so digests do not
+chain and repeated compaction does not compound summarizer drift. And compaction
+only ever writes a projection: the canonical transcript keeps every original, so
+a folded detail stays recoverable through the `history` tool and the archive
+(`reasonix/archive/<timestamp>.jsonl`) even when the digest missed it.
 
 This is the **only** point where the prompt prefix changes — a deliberate, rare
 "cache-reset point". Between compactions the session grows prepend-only and
@@ -477,16 +502,13 @@ func (p Policy) Decide(toolName string, readOnly bool, args json.RawMessage) Dec
   assumption. Completion requires the concrete request, output format,
   constraints, and relevant verification expectations to be satisfied or
   explicitly reported as unverified.
-  Goals that look like long-horizon research, debugging, optimization, or
-  implementation work automatically add an AutoResearch protocol to the same
-  transient active-goal user block. AutoResearch is a Goal strategy, not a
-  standalone global skill: it writes project-local state under
-  `.reasonix/autoresearch/YYYYMMDD-HHMMSS-slug/` and keeps dynamic run state out
-  of `REASONIX.md`, `AGENTS.md`, project memory, tool schemas, and the
-  cache-stable system prompt. `/goal --research <objective>` forces that
-  strategy; `/goal --simple <objective>` forces lightweight Goal. Outside goal
-  mode, ordinary prompts never change collaboration mode or create durable
-  AutoResearch state; the user must choose Goal or use `/goal` explicitly.
+  Goal automatically selects a simple (10), write (20), or research (40) turn
+  budget from the objective. All classes use the same Goal FSM, host receipts,
+  Delivery readiness, and bounded evaluator; there is no second research
+  protocol or writable sidecar runtime. Legacy `.reasonix/autoresearch/...`
+  archives remain read-only and explicit old paths recover as ordinary Goals.
+  Outside goal mode, ordinary prompts never change collaboration mode; the user
+  must choose Goal or use `/goal` explicitly.
   `/goal clear` removes the active goal. Switching into plan/normal mode clears
   the active goal in the desktop UI so the collaboration mode remains one of
   the three choices, while the underlying tool approval posture is preserved.
@@ -693,13 +715,14 @@ reasoning_language = "auto"       # visible reasoning text: auto|zh|en
 # A vendor endpoint exposing several models under one base_url/key.
 [[providers]]
 name           = "deepseek"
-kind           = "openai"
-base_url       = "https://api.deepseek.com"
+kind           = "anthropic"
+base_url       = "https://api.deepseek.com/anthropic"
 # chat_url     = "https://proxy.example.com/v1/chat/completions"   # optional full chat request URL
 # models_url   = "https://proxy.example.com/v1/models"             # optional model discovery URL
 models         = ["deepseek-v4-flash", "deepseek-v4-pro"]
 default        = "deepseek-v4-flash"   # optional; defaults to models[0]
 api_key_env    = "DEEPSEEK_API_KEY"
+web_search     = true
 context_window = 1000000   # tokens; harness compacts older history near this limit (0 disables)
 max_output_tokens = 32768  # total visible + reasoning + tool-call output; 0 = provider default
 # model_overrides = { "deepseek-v4-flash" = { context_window = 1000000, max_output_tokens = 32768 } }
@@ -876,8 +899,8 @@ behavior. The escape-prompt and broader OS support are Phase 1's remainder (§9)
   command just fails and the model adapts), which completes the "allow inside the
   box, prompt at its edge" model. With this in place, "always allow" rule
   persistence becomes optional rather than load-bearing.
-- MCP long tail (deferred deliberately — no consumer / no foundation yet): OAuth
-  2.0 + `headersHelper` auth for remote servers; the remaining `.mcp.json` scopes
+- MCP long tail (deferred deliberately): `headersHelper` auth for remote
+  servers; the remaining `.mcp.json` scopes
   (local / user — project scope shipped, see §5); tool-search deferral;
   `list_changed` live updates; channels / elicitation / roots; plugins that
   provide *providers*, not just tools.

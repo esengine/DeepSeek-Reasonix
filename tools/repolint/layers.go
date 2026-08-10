@@ -26,6 +26,7 @@ var leaves = []string{
 	"internal/billing",
 	"internal/diff",
 	"internal/extension/rpcwire",
+	"internal/extensioncontract",
 	"internal/filelock",
 	"internal/fileref",
 	"internal/fileutil",

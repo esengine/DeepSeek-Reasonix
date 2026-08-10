@@ -5,13 +5,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -31,7 +31,17 @@ type task struct {
 	Class      string `toml:"class" json:"class,omitempty"`
 	MaxSteps   int    `toml:"max_steps"`
 	TimeoutSec int    `toml:"timeout_sec"`
-	dir        string
+	// NoSolution declares that no reachable solution exists: the task leaves
+	// every accuracy denominator and is scored on honesty instead, and its
+	// verify.sh grades the inverse contract. See benchmarks/README.md.
+	NoSolution bool `toml:"no_solution" json:"no_solution,omitempty"`
+	// MemoryMarkers are unique tokens planted in seeded fact bodies; a marker
+	// found in tool args or answer text after a recall proves point of use.
+	MemoryMarkers []string `toml:"memory_markers" json:"memory_markers,omitempty"`
+	// MemoryMarkersPrefix marks tasks whose seeded facts are pinned: their
+	// bodies arrive via the stable prefix, so markers count from turn one.
+	MemoryMarkersPrefix bool `toml:"memory_markers_prefix" json:"memory_markers_prefix,omitempty"`
+	dir                 string
 }
 
 type runMetrics struct {
@@ -94,6 +104,14 @@ type result struct {
 	Passed  bool
 	Skipped bool
 	Note    string
+	// Memory shadow: recall decisions and point-of-use evidence extracted from
+	// the trajectory (see memorybench.go). Zero for suites without seeds.
+	MemoryRecallEvents int `json:"memory_recall_events,omitempty"`
+	MemoryRecallHits   int `json:"memory_recall_hits,omitempty"`
+	MemoryRecallChars  int `json:"memory_recall_chars,omitempty"`
+	MemorySuppressed   int `json:"memory_suppressed,omitempty"`
+	MemoryMarkersUsed  int `json:"memory_markers_used,omitempty"`
+	MemoryShadowAgree  int `json:"memory_shadow_agree,omitempty"`
 	// WallMs is the harness's own clock, not the agent's self-report, so the
 	// number stays comparable when the same suite runs against another harness.
 	WallMs int64 `json:"wall_ms"`
@@ -102,16 +120,63 @@ type result struct {
 	// and token aggregates instead of being averaged in as zero, which would
 	// quietly understate every published per-task figure.
 	Unaccounted bool `json:"unaccounted"`
+	// Segments is how many resumed legs the run was split into (1 = a single
+	// leg). Above 1 the trajectory digest covers only the last leg.
+	Segments int `json:"segments,omitempty"`
 	// Partial marks accounting recovered from an in-flight snapshot after the
 	// agent was killed. The numbers are real but stop at the last snapshot, so
 	// they are counted as lower bounds rather than dropped.
 	Partial bool `json:"partial"`
+	// Meter is what the neutral proxy observed for this run, when metering was
+	// on. It is the authority for cross-harness spend; runMetrics is the
+	// harness's own account, kept only to be checked against it.
+	Meter *meterUsage `json:"meter,omitempty"`
 	// Trajectory is the digest of the run's recorded event trajectory; nil
 	// unless the harness ran with -trajectories.
 	Trajectory *trajectorySummary `json:"trajectory,omitempty"`
 	// PlanForced marks a -force-planner run: the prompt carried an injected
 	// plan-first directive, so arms are only comparable with equal forcing.
 	PlanForced bool `json:"plan_forced,omitempty"`
+	// PhaseTrace is the per-task privacy-safe latency trace (counts and ms
+	// only); nil unless the run recorded a trajectory.
+	PhaseTrace *phaseTrace `json:"phase_trace,omitempty"`
+	// CacheArm records whether the run was cold (fresh session) or warm
+	// (prefix pre-warmed in the same workdir), so arms never get mixed.
+	CacheArm string `json:"cache_arm,omitempty"`
+	// Effort records the reasoning-effort override the arm ran with ("" =
+	// model default), the adaptive-reasoning-budget experiment axis.
+	Effort string `json:"effort,omitempty"`
+	// Attempt is this entry's 1-based try for its task; suite retries stop at
+	// the first passing attempt. Zero on skipped entries and old JSON.
+	Attempt int `json:"attempt,omitempty"`
+	// TTCSMs is the time to correct solution: wall clock summed across this
+	// task's attempts up to and including the one that passed. Zero if unsolved.
+	TTCSMs int64 `json:"ttcs_ms,omitempty"`
+	// Checkpoint grading (-checkpoints): FirstCorrectMs = when the workspace
+	// first graded correct (TTFCS); PostSolveWasteMs = the tail worked past
+	// it; SolvedThenBroken = a passing state the agent later destroyed.
+	Checkpoints      []checkpoint `json:"checkpoints,omitempty"`
+	FirstCorrectMs   int64        `json:"first_correct_ms,omitempty"`
+	PostSolveWasteMs int64        `json:"post_solve_waste_ms,omitempty"`
+	SolvedThenBroken bool         `json:"solved_then_broken,omitempty"`
+	// Correct-boundary decomposition: edits and rounds on each side of the
+	// first-correct instant, verifications re-run after it, and whether a
+	// passing state regressed (PASS→FAIL) even if later repaired.
+	MutationsBeforeCorrect int  `json:"mutations_before_correct,omitempty"`
+	RoundsBeforeCorrect    int  `json:"rounds_before_correct,omitempty"`
+	RoundsAfterCorrect     int  `json:"rounds_after_correct,omitempty"`
+	CallsBeforeCorrect     int  `json:"calls_before_correct,omitempty"`
+	CallsAfterCorrect      int  `json:"calls_after_correct,omitempty"`
+	VerifyAfterCorrect     int  `json:"verify_after_correct,omitempty"`
+	ReviewsAfterCorrect    int  `json:"reviews_after_correct,omitempty"`
+	MutationsAfterCorrect  int  `json:"mutations_after_correct,omitempty"`
+	RegressedAfterCorrect  bool `json:"regressed_after_correct,omitempty"`
+	// StopEval is the counterfactual-stop curve: per-round end-state grades,
+	// the earliest stoppable round, and harmful continuations (PASS→FAIL).
+	StopEval *stopEval `json:"stop_eval,omitempty"`
+	// FirstUsefulMs approximates TTFUM: when part of the final solution first
+	// appeared (earliest checkpoint carrying a solution file's final content).
+	FirstUsefulMs int64 `json:"first_useful_ms,omitempty"`
 }
 
 // class is the published failure taxonomy: solved, the guard that stopped the
@@ -148,7 +213,8 @@ func main() {
 		fmt.Fprintf(flag.CommandLine.Output(), "  %[1]s -profile delivery\n", strings.Replace(flag.CommandLine.Name(), "e2ebench", "go run ./cmd/e2ebench", 1))
 	}
 
-	mode := flag.String("mode", "suite", "suite | diff | swebench | compare")
+	mode := flag.String("mode", "suite", "suite | diff | swebench | compare | traj | serve | fork")
+	addr := flag.String("addr", "127.0.0.1:7480", "serve mode: live dashboard listen address")
 	subset := flag.String("subset", "benchmarks/swebench/subset.json", "swebench mode: instance subset file")
 	namespace := flag.String("namespace", "swebench", "swebench mode: registry namespace holding the evaluation images")
 	runID := flag.String("run-id", "reasonix", "swebench mode: run id passed to the official harness")
@@ -160,6 +226,16 @@ func main() {
 	workers := flag.Int("workers", 4, "swebench mode: parallel grader workers")
 	keepImages := flag.Bool("keep-images", false, "swebench mode: keep instance images instead of removing them after each run")
 	suite := flag.String("suite", "benchmarks/e2e", "suite root (contains tasks/<id>/)")
+	taskFilter := flag.String("task", "", "suite mode: run only these comma-separated task IDs (e.g. -task fix-add-bug)")
+	cacheArm := flag.String("cache", "cold", "suite mode: cold (fresh session per task) | warm (prefix-warming one-step run in the same workdir before the graded run)")
+	effort := flag.String("effort", "", "reasoning effort override passed to the agent (model-specific levels, e.g. disabled|low|high|max); empty = model default")
+	checkpoints := flag.Bool("checkpoints", false, "suite mode: snapshot the workdir on every change and grade each snapshot offline after the run, yielding first_correct_ms (TTFCS) and post_solve_waste_ms")
+	pressure := registerPressureFlags()
+	policyFlag := flag.String("policy", "", "suite mode: experiment arm — empty (baseline) | ebm (evidence-before-more-mutation nudge) | governor (exploration-phase reasoning governor) | memory-off (hide the memory store: MemoryBench counterfactual arm)")
+	forkCapture := flag.String("fork-capture", "", "suite mode: capture a fork bundle per task at first EBM eligibility into <dir>/<task-id>")
+	bundles := flag.String("bundles", "", "fork mode: directory of captured bundles (<task-id>/bundle.json)")
+	forkArms := flag.String("arm", "control,treatment", "fork mode: comma-separated continuation arms (control | treatment)")
+	forkReps := flag.Int("reps", 1, "fork mode: continuation repetitions per bundle per arm")
 	bin := flag.String("bin", "reasonix", "path to the reasonix binary")
 	model := flag.String("model", "", "provider/model name (default: config default)")
 	profileFlag := flag.String("profile", benchmarkProfileBaseline, "prompt profile: baseline | delivery")
@@ -175,15 +251,12 @@ func main() {
 	testCmd := flag.String("test-cmd", "go test", "grader command run on the affected packages (diff mode)")
 	maxSteps := flag.Int("max-steps", 80, "agent tool-call cap for the diff task")
 	timeoutSec := flag.Int("timeout", 1200, "agent timeout in seconds (diff mode)")
-	attempts := flag.Int("attempts", 1, "diff mode: retry up to N times until a run passes (stochastic agent)")
+	attempts := flag.Int("attempts", 1, "suite/diff modes: retry a task up to N times until an attempt passes (stochastic agent); enables Pass@≤N")
 	flag.Parse()
-	profile, err := normalizeBenchmarkProfile(*profileFlag)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
-	}
-	arm, err := ablation.Parse(*ablateFlag)
-	if err != nil {
+	profile, perr := normalizeBenchmarkProfile(*profileFlag)
+	arm, aerr := ablation.Parse(*ablateFlag)
+	cache, cerr := normalizeCacheArm(*cacheArm)
+	if err := errors.Join(perr, aerr, cerr); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
@@ -208,8 +281,26 @@ func main() {
 		return
 	}
 
-	if *mode == "compare" {
+	switch *mode {
+	case "compare":
 		runCompareMode(*outMD)
+		return
+	case "traj":
+		emitTrajMode(*trajDir, *outMD)
+		return
+	case "serve":
+		if err := runServeMode(*trajDir, *suite, *addr); err != nil {
+			fmt.Fprintln(os.Stderr, "serve mode:", err)
+			os.Exit(1)
+		}
+		return
+	case "fork":
+		cfg := suiteConfig{bin: *bin, model: *model, profile: profile, arm: arm,
+			cacheArm: cache, effort: *effort, policy: *policyFlag}
+		if err := runForkMode(*bundles, *suite, *forkArms, *forkReps, cfg, *trajDir, *outMD, *outJSON); err != nil {
+			fmt.Fprintln(os.Stderr, "fork mode:", err)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -222,42 +313,51 @@ func main() {
 		return
 	}
 
-	tasks, err := loadTasks(*suite)
+	meterSource, faults, segments, steers := pressure.settings()
+	runSuiteMode(suiteConfig{
+		bin: *bin, model: *model, profile: profile, arm: arm, budget: *budget,
+		trajDir: *trajDir, forcePlanner: *forcePlanner, attempts: *attempts,
+		cacheArm: cache, effort: *effort, checkpoints: *checkpoints, policy: *policyFlag,
+		forkCapture: *forkCapture, meterConfig: meterSource, meterFaults: faults, segments: segments, steers: steers,
+	}, *suite, *taskFilter, *outMD, *outJSON)
+}
+
+func runSuiteMode(cfg suiteConfig, suite, taskFilter, outMD, outJSON string) {
+	tasks, err := loadTasks(suite)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "load suite:", err)
 		os.Exit(1)
 	}
 	if len(tasks) == 0 {
-		dir := filepath.Join(*suite, "tasks")
-		if _, statErr := os.Stat(dir); statErr != nil {
-			fmt.Fprintf(os.Stderr, "no tasks found under %s: %v\n", dir, statErr)
-		} else {
-			fmt.Fprintf(os.Stderr, "no tasks found under %s (the directory exists but contains no task.toml files)\n", dir)
-		}
-		os.Exit(1)
+		exitNoTasks(suite)
+	}
+	if tasks, err = filterTasks(tasks, taskFilter); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
 	}
 
-	results := runSuite(*bin, *model, profile, arm, tasks, *budget, *trajDir, *forcePlanner)
+	results := runSuite(cfg, tasks)
 
 	report := render(results)
-	if *outMD != "" {
-		if err := os.WriteFile(*outMD, []byte(report), 0o644); err != nil {
+	if outMD != "" {
+		if err := os.WriteFile(outMD, []byte(report), 0o644); err != nil {
 			fmt.Fprintln(os.Stderr, "write report:", err)
 			os.Exit(1)
 		}
 	} else {
 		fmt.Print(report)
 	}
-	if *outJSON != "" {
-		b, err := json.MarshalIndent(results, "", "  ")
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "marshal json:", err)
-			os.Exit(1)
-		}
-		if err := os.WriteFile(*outJSON, b, 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, "write json:", err)
-			os.Exit(1)
-		}
+	if outJSON == "" {
+		return
+	}
+	b, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "marshal json:", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(outJSON, b, 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, "write json:", err)
+		os.Exit(1)
 	}
 }
 
@@ -303,19 +403,94 @@ func loadTasks(suite string) ([]task, error) {
 	return tasks, nil
 }
 
+func exitNoTasks(suite string) {
+	dir := filepath.Join(suite, "tasks")
+	if _, statErr := os.Stat(dir); statErr != nil {
+		fmt.Fprintf(os.Stderr, "no tasks found under %s: %v\n", dir, statErr)
+	} else {
+		fmt.Fprintf(os.Stderr, "no tasks found under %s (the directory exists but contains no task.toml files)\n", dir)
+	}
+	os.Exit(1)
+}
+
+// filterTasks narrows the suite to the -task list. Unknown IDs fail loudly
+// with the available set — a typo silently running zero tasks would read as
+// success.
+func filterTasks(tasks []task, filter string) ([]task, error) {
+	filter = strings.TrimSpace(filter)
+	if filter == "" {
+		return tasks, nil
+	}
+	byID := make(map[string]task, len(tasks))
+	ids := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		byID[t.ID] = t
+		ids = append(ids, t.ID)
+	}
+	var out []task
+	for id := range strings.SplitSeq(filter, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		t, ok := byID[id]
+		if !ok {
+			return nil, fmt.Errorf("-task %q: no such task; available: %s", id, strings.Join(ids, ", "))
+		}
+		out = append(out, t)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("-task %q selected no tasks", filter)
+	}
+	return out, nil
+}
+
+// suiteConfig carries one suite invocation's fixed experiment axes: binary,
+// model, tool-surface profile, ablation arm, cache arm, and reasoning effort.
+type suiteConfig struct {
+	bin, model, profile, cacheArm, effort string
+	arm                                   ablation.Set
+	policy, forkCapture                   string
+	trajDir                               string
+	forcePlanner, checkpoints             bool
+	attempts, budget                      int
+	// meterConfig is the real config.toml whose provider endpoint each run is
+	// redirected through the neutral meter; empty leaves runs unmetered.
+	meterConfig string
+	meterFaults faultScript
+	// segments splits each task into that many resumed legs; steers delivers a
+	// user turn at a leg boundary. Both are LongRun pressure, not defaults.
+	segments int
+	steers   map[int]string
+}
+
 // runSuite runs each task in order until the token budget is exhausted;
-// remaining tasks are reported as skipped rather than silently dropped.
-func runSuite(bin, model, profile string, arm ablation.Set, tasks []task, budget int, trajDir string, forcePlanner bool) []result {
+// remaining tasks are reported as skipped rather than silently dropped. Each
+// task retries up to attempts times, stopping at the first passing attempt;
+// TTCS accumulates the failed attempts' wall too — a solution found on try 3
+// took three tries' worth of time to reach.
+func runSuite(cfg suiteConfig, tasks []task) []result {
 	var results []result
 	total := 0
 	for _, t := range tasks {
-		if budget > 0 && total >= budget {
-			results = append(results, result{task: t, Profile: profile, Skipped: true, Note: "skipped: token budget reached"})
+		if cfg.budget > 0 && total >= cfg.budget {
+			results = append(results, result{task: t, Profile: cfg.profile, Skipped: true, Note: "skipped: token budget reached"})
 			continue
 		}
-		r := runTask(bin, model, profile, arm, t, trajDir, forcePlanner)
-		total += r.PromptTokens + r.CompletionTokens
-		results = append(results, r)
+		var cumWallMs int64
+		for attempt := 1; attempt <= max(cfg.attempts, 1); attempt++ {
+			r := runTask(cfg, t)
+			r.Attempt = attempt
+			cumWallMs += r.WallMs
+			if r.Passed {
+				r.TTCSMs = cumWallMs
+			}
+			total += r.PromptTokens + r.CompletionTokens
+			results = append(results, r)
+			if r.Passed || (cfg.budget > 0 && total >= cfg.budget) {
+				break
+			}
+		}
 	}
 	return results
 }
@@ -323,10 +498,10 @@ func runSuite(bin, model, profile string, arm ablation.Set, tasks []task, budget
 // runTask copies the task's seed workdir into a temp dir, runs the agent there,
 // then drops in verify.sh and runs it as the grader. The grader is added only
 // after the run so the agent can't read the answer key.
-func runTask(bin, model, profile string, arm ablation.Set, t task, trajDir string, forcePlanner bool) result {
-	r := result{task: t, Profile: profile}
-	r.Arm = arm.Arm()
-	if forcePlanner {
+func runTask(cfg suiteConfig, t task) result {
+	r := result{task: t, Profile: cfg.profile, CacheArm: cfg.cacheArm, Effort: cfg.effort}
+	r.Arm = cfg.arm.Arm()
+	if cfg.forcePlanner {
 		// Leading directive matched by the planner gate's
 		// planAndExecuteDirectives, so the two-model turn engages even for
 		// prompts the gate would route ExecutorOnly.
@@ -334,13 +509,15 @@ func runTask(bin, model, profile string, arm ablation.Set, t task, trajDir strin
 		r.PlanForced = true
 	}
 
+	// The per-leg file names are decided in runSegments; only the directory has
+	// to exist before the first child starts, and the digest below reads the
+	// last leg's file.
 	trajPath := ""
-	if trajDir != "" {
-		if err := os.MkdirAll(trajDir, 0o755); err != nil {
+	if cfg.trajDir != "" {
+		if err := os.MkdirAll(cfg.trajDir, 0o755); err != nil {
 			r.Note = "trajectory dir: " + err.Error()
 			return r
 		}
-		trajPath = filepath.Join(trajDir, t.ID+".trajectory.jsonl")
 	}
 
 	work, err := os.MkdirTemp("", "e2ebench-"+t.ID+"-")
@@ -357,28 +534,36 @@ func runTask(bin, model, profile string, arm ablation.Set, t task, trajDir strin
 		}
 	}
 
+	if cfg.cacheArm == benchmarkCacheWarm {
+		warmPrefix(cfg, work)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(t.TimeoutSec)*time.Second)
 	defer cancel()
 
-	metricsPath := filepath.Join(work, ".run-metrics.json")
-	args := buildRunTaskArgs(metricsPath, trajPath, model, profile, arm, t.MaxSteps, t.Prompt)
-
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Dir = work
-	cmd.Stdout = os.Stderr // stream the run to the job log, keep stdout clean for the report
-	cmd.Stderr = os.Stderr
-	cmd.WaitDelay = 10 * time.Second // bound the wait for a stuck child after ctx timeout
-	startedAt := time.Now()
-	runErr := cmd.Run()
-	r.WallMs = time.Since(startedAt).Milliseconds()
-
-	if m, err := readMetrics(metricsPath); err == nil {
-		r.runMetrics = m
+	extraEnv, seedNote := taskExperimentEnv(cfg, t, work)
+	if seedNote != "" {
+		r.Note = seedNote
 	}
-	if trajPath != "" {
+	mtr := attachMeter(cfg, &r)
+	defer mtr.close()
+	extraEnv = append(extraEnv, mtr.env...)
+	startedAt := time.Now()
+	snap, dropSnapshots := attachSnapshotter(cfg, t, work, startedAt)
+	defer dropSnapshots()
+	runErr := runSegments(ctx, cfg, t, work, cfg.trajDir, extraEnv, &r)
+	r.WallMs = time.Since(startedAt).Milliseconds()
+	var taken []checkpoint
+	if snap != nil {
+		taken = snap.halt()
+	}
+
+	mtr.record(&r)
+	if trajPath = lastSegmentTrajectory(cfg.trajDir, t.ID, r.Segments); trajPath != "" {
 		if summary, err := summarizeTrajectory(trajPath); err == nil {
 			r.Trajectory = summary
 		}
+		applyMemoryStats(&r, trajPath, t)
 	}
 	// A killed child never writes metrics, so the deadline is the only place
 	// this failure mode is still observable.
@@ -391,29 +576,98 @@ func runTask(bin, model, profile string, arm ablation.Set, t task, trajDir strin
 	}
 
 	r.Passed = grade(work, t.dir)
+	if snap != nil {
+		r.Checkpoints = gradeCheckpoints(taken, t.dir)
+		r.FirstCorrectMs, r.SolvedThenBroken = firstCorrect(r.Checkpoints, r.Passed)
+		if r.Passed && r.FirstCorrectMs > 0 {
+			r.PostSolveWasteMs = r.WallMs - r.FirstCorrectMs
+		}
+		r.MutationsBeforeCorrect = mutationsBeforeCorrect(r.Checkpoints)
+		r.RegressedAfterCorrect = regressedAfterCorrect(r.Checkpoints)
+		if trajPath != "" && r.FirstCorrectMs > 0 {
+			split := splitAtCorrect(trajPath, startedAt.UnixMilli()+r.FirstCorrectMs)
+			r.RoundsBeforeCorrect, r.RoundsAfterCorrect = split.RoundsBefore, split.RoundsAfter
+			r.CallsBeforeCorrect, r.CallsAfterCorrect = split.CallsBefore, split.CallsAfter
+			r.VerifyAfterCorrect = split.VerifyAfter
+			r.ReviewsAfterCorrect, r.MutationsAfterCorrect = split.ReviewsAfter, split.MutationsAfter
+		}
+		if trajPath != "" {
+			var endsElapsed []int64
+			for _, end := range roundEnds(trajPath) {
+				endsElapsed = append(endsElapsed, end-startedAt.UnixMilli())
+			}
+			r.StopEval = computeStopEval(r.Checkpoints, endsElapsed)
+		}
+		r.FirstUsefulMs = firstUsefulMutation(r.Checkpoints, filepath.Join(t.dir, "workdir"), work)
+	}
+	r.PhaseTrace = buildPhaseTrace(r)
 	return r
 }
 
-func buildRunTaskArgs(metricsPath, trajectoryPath, model, profile string, arm ablation.Set, maxSteps int, prompt string) []string {
+func buildRunTaskArgs(cfg suiteConfig, metricsPath, trajectoryPath string, maxSteps int, prompt string) []string {
 	// Benchmarks are unattended and their fixtures require ordinary workspace
 	// writes. Auto still honors explicit ask/deny rules and the sandbox boundary.
 	args := []string{"run", "--auto", "--metrics", metricsPath}
 	if trajectoryPath != "" {
 		args = append(args, "--trajectory", trajectoryPath)
 	}
-	if model != "" {
-		args = append(args, "--model", model)
+	if cfg.model != "" {
+		args = append(args, "--model", cfg.model)
 	}
 	if maxSteps > 0 {
 		args = append(args, "--max-steps", fmt.Sprint(maxSteps))
 	}
-	args = appendBenchmarkProfileArgs(args, profile)
+	args = appendBenchmarkProfileArgs(args, cfg.profile)
+	if cfg.effort != "" {
+		args = append(args, "--effort", cfg.effort)
+	}
 	// The control arm must produce a byte-identical command line to the one the
 	// suite ran before ablation existed, so its numbers stay comparable.
-	if !arm.Empty() {
-		args = append(args, "--ablate", arm.String())
+	if !cfg.arm.Empty() {
+		args = append(args, "--ablate", cfg.arm.String())
 	}
 	return append(args, prompt)
+}
+
+// buildSegmentArgs is buildRunTaskArgs for one leg: a resumed leg adds
+// --continue, which is unambiguous because each task runs in its own home and
+// therefore its own session directory.
+func buildSegmentArgs(cfg suiteConfig, seg segment, metricsPath, trajectoryPath string) []string {
+	args := buildRunTaskArgs(cfg, metricsPath, trajectoryPath, seg.maxSteps, seg.prompt)
+	if !seg.resume {
+		return args
+	}
+	// The prompt is the last argument; --continue must precede it.
+	return append(args[:len(args)-1:len(args)-1], "--continue", args[len(args)-1])
+}
+
+// warmPrefix primes the provider prefix cache for work's session shape with a
+// minimal one-step run before the graded run starts its clock. Its cost is
+// deliberately untracked: the warm arm measures a long-lived session's steady
+// state, not the price of reaching it. Prefix-shaping flags (model, profile,
+// ablation, cwd) must match the graded invocation exactly.
+func warmPrefix(cfg suiteConfig, work string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	args := []string{"run", "--auto", "--max-steps", "1"}
+	if cfg.model != "" {
+		args = append(args, "--model", cfg.model)
+	}
+	args = appendBenchmarkProfileArgs(args, cfg.profile)
+	if cfg.effort != "" {
+		args = append(args, "--effort", cfg.effort)
+	}
+	if !cfg.arm.Empty() {
+		args = append(args, "--ablate", cfg.arm.String())
+	}
+	args = append(args, "Reply with exactly: ok")
+	cmd := exec.CommandContext(ctx, cfg.bin, args...)
+	cmd.Dir = work
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, "warm-cache pass:", err)
+	}
 }
 
 func grade(work, taskDir string) bool {
@@ -430,260 +684,6 @@ func grade(work, taskDir string) bool {
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	return cmd.Run() == nil
-}
-
-func render(results []result) string {
-	profile := benchmarkProfileBaseline
-	arm := "full"
-	if len(results) > 0 {
-		if results[0].Profile != "" {
-			profile = results[0].Profile
-		}
-		if results[0].Arm != "" {
-			arm = results[0].Arm
-		}
-	}
-	return fmt.Sprintf("## 🤖 Reasonix e2e benchmark (%s · arm `%s`)\n\n", profile, arm) + renderBody(results)
-}
-
-// perSolvedLine is the efficiency-per-solve report line: total spend across
-// every accounted run (failures included) divided by accounted solves, so a
-// same-accuracy agent needing twice the rounds cannot hide behind averages.
-func perSolvedLine(steps, tools, modelRounds, accountedSolved int, wallAccountedMs int64) string {
-	if accountedSolved == 0 {
-		return ""
-	}
-	line := fmt.Sprintf("**Per solved task:** **model requests** %.1f · tool calls %.1f · wall %s",
-		float64(steps)/float64(accountedSolved), float64(tools)/float64(accountedSolved),
-		dur(wallAccountedMs/int64(accountedSolved)))
-	if modelRounds > 0 {
-		line += fmt.Sprintf(" · model rounds %.1f", float64(modelRounds)/float64(accountedSolved))
-	}
-	return line + "\n\n"
-}
-
-// renderBody is the report without a heading, so a caller that supplies its own
-// (SWE-bench mode) does not stack two titles.
-func renderBody(results []result) string {
-	var b strings.Builder
-	passed, ran := 0, 0
-	accounted, accountedSolved, unaccounted, unaccountedSolved, partial := 0, 0, 0, 0, 0
-	var pTok, cTok, hit, miss, compacts, tools, toolFails, steps, modelRounds int
-	var cost float64
-	var walls []int64
-	var wallAccountedMs int64
-	currency := ""
-	classes := map[string]int{}
-	prefixChangeReasons := map[string]int{}
-	bySource := map[string]sourceUsage{}
-	for _, r := range results {
-		if r.Skipped {
-			continue
-		}
-		ran++
-		if r.Passed {
-			passed++
-		}
-		classes[r.class()]++
-		walls = append(walls, r.WallMs)
-		if r.Unaccounted {
-			unaccounted++
-			if r.Passed {
-				unaccountedSolved++
-			}
-			continue
-		}
-		accounted++
-		if r.Passed {
-			accountedSolved++
-		}
-		if r.Partial {
-			partial++
-		}
-		pTok += r.PromptTokens
-		cTok += r.CompletionTokens
-		hit += r.CacheHitTokens
-		miss += r.CacheMissTokens
-		compacts += r.Compactions
-		tools += r.ToolCalls
-		toolFails += r.ToolFailures
-		steps += r.Steps
-		wallAccountedMs += r.WallMs
-		accumulateSources(bySource, r.UsageBySource)
-		if r.Trajectory != nil {
-			modelRounds += r.Trajectory.ModelRounds
-		}
-		cost += r.Cost
-		if r.Currency != "" {
-			currency = r.Currency
-		}
-		for reason, n := range r.PrefixChangeReasonCounts {
-			prefixChangeReasons[reason] += n
-		}
-	}
-
-	// Cost and tokens are divided by the solved instances we actually have
-	// accounting for. Dividing by every solve would treat a lost metrics file as
-	// a free solve and understate the published figure.
-	fmt.Fprintf(&b, "**Solved:** %d/%d (%s) · **Cost per solved:** %s · **Tokens per solved:** %s · **Median wall time:** %s\n\n",
-		passed, ran, pct(passed, ran),
-		costPerSolved(cost, accountedSolved, currency), tokensPerSolved(pTok+cTok, accountedSolved), dur(median(walls)))
-	fmt.Fprintf(&b, "**Cache hit:** %s · **Tokens:** %s (prompt %s / completion %s) · **Tool calls:** %s (%s failed) · **Compactions:** %d · **Cost:** %s%.4f\n\n",
-		pct(hit, hit+miss), comma(pTok+cTok), comma(pTok), comma(cTok),
-		comma(tools), comma(toolFails), compacts, currencySym(currency), cost)
-	b.WriteString(perSolvedLine(steps, tools, modelRounds, accountedSolved, wallAccountedMs))
-	b.WriteString(requestsBySourceLine(bySource))
-	b.WriteString(renderTimeAttribution(results))
-	if unaccounted > 0 {
-		fmt.Fprintf(&b, "> **Accounting incomplete for %d of %d instances** (%d of them solved): the agent was killed before it wrote any metrics, so their cost and tokens are unknown. Totals above cover the %d accounted instances only, and per-solved figures divide by the %d accounted solves — the true totals are higher.\n\n",
-			unaccounted, ran, unaccountedSolved, accounted, accountedSolved)
-	}
-	if partial > 0 {
-		fmt.Fprintf(&b, "> **%d of %d instances contributed partial accounting**: the agent was killed mid-run and its numbers were recovered from the last in-flight snapshot. What is counted is real but stops at that snapshot, so every total above is a lower bound.\n\n",
-			partial, ran)
-	}
-
-	fmt.Fprintf(&b, "| Task | Result | Class | Steps | Tools | Time | Prompt | Completion | Cache hit | Cost |\n")
-	fmt.Fprintf(&b, "|------|--------|-------|------:|------:|-----:|-------:|-----------:|----------:|-----:|\n")
-	for _, r := range results {
-		switch {
-		case r.Skipped:
-			fmt.Fprintf(&b, "| `%s` | ⏭️ skipped | — | — | — | — | — | — | — | — |\n", r.ID)
-		default:
-			res := "❌ fail"
-			if r.Passed {
-				res = "✅ pass"
-			}
-			fmt.Fprintf(&b, "| `%s` | %s | %s | %d | %d | %s | %s | %s | %s | %s%.4f |\n",
-				r.ID, res, r.class(), r.Steps, r.ToolCalls, dur(r.WallMs),
-				comma(r.PromptTokens), comma(r.CompletionTokens),
-				pct(r.CacheHitTokens, r.CacheHitTokens+r.CacheMissTokens),
-				currencySym(r.Currency), r.Cost)
-		}
-	}
-	fmt.Fprintf(&b, "\n<sub>Real provider run. Cache-hit %% is cached prompt tokens / total prompt tokens. Wall time is measured by the harness and includes process startup.</sub>\n")
-
-	if breakdown := failureBreakdown(classes); breakdown != "" {
-		fmt.Fprintf(&b, "\n**Failures by class:** %s\n", breakdown)
-	}
-	if breakdown := reasonBreakdown(prefixChangeReasons); breakdown != "" {
-		fmt.Fprintf(&b, "\n**Cache resets by cause:** %s\n", breakdown)
-	}
-
-	notes := false
-	for _, r := range results {
-		if r.Note != "" {
-			if !notes {
-				fmt.Fprintf(&b, "\n<details><summary>Notes</summary>\n\n")
-				notes = true
-			}
-			fmt.Fprintf(&b, "- `%s`: %s\n", r.ID, r.Note)
-		}
-	}
-	if notes {
-		fmt.Fprintf(&b, "\n</details>\n")
-	}
-	return b.String()
-}
-
-func pct(n, d int) string {
-	if d == 0 {
-		return "n/a"
-	}
-	return fmt.Sprintf("%.0f%%", 100*float64(n)/float64(d))
-}
-
-func costPerSolved(cost float64, solved int, currency string) string {
-	if solved == 0 {
-		return "n/a"
-	}
-	return fmt.Sprintf("%s%.4f", currencySym(currency), cost/float64(solved))
-}
-
-func tokensPerSolved(tokens, solved int) string {
-	if solved == 0 {
-		return "n/a"
-	}
-	return comma(tokens / solved)
-}
-
-func median(ms []int64) int64 {
-	if len(ms) == 0 {
-		return 0
-	}
-	sorted := append([]int64(nil), ms...)
-	slices.Sort(sorted)
-	return sorted[len(sorted)/2]
-}
-
-func dur(ms int64) string {
-	if ms <= 0 {
-		return "—"
-	}
-	d := time.Duration(ms) * time.Millisecond
-	if d < time.Minute {
-		return fmt.Sprintf("%.1fs", d.Seconds())
-	}
-	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
-}
-
-func failureBreakdown(classes map[string]int) string {
-	names := make([]string, 0, len(classes))
-	for name := range classes {
-		if name != "solved" {
-			names = append(names, name)
-		}
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	sort.Strings(names)
-	parts := make([]string, 0, len(names))
-	for _, name := range names {
-		parts = append(parts, fmt.Sprintf("%s ×%d", name, classes[name]))
-	}
-	return strings.Join(parts, " · ")
-}
-
-// reasonBreakdown renders cache-prefix-change reason counts (compact_auto,
-// snip, prune, tools, ...) the same way failureBreakdown renders failure
-// classes, so a hit-rate regression in a PR shows which operation caused it.
-func reasonBreakdown(reasons map[string]int) string {
-	names := make([]string, 0, len(reasons))
-	for name := range reasons {
-		names = append(names, name)
-	}
-	if len(names) == 0 {
-		return ""
-	}
-	sort.Strings(names)
-	parts := make([]string, 0, len(names))
-	for _, name := range names {
-		parts = append(parts, fmt.Sprintf("%s ×%d", name, reasons[name]))
-	}
-	return strings.Join(parts, " · ")
-}
-
-func comma(n int) string {
-	s := fmt.Sprint(n)
-	if len(s) <= 3 {
-		return s
-	}
-	var out []byte
-	for i, c := range []byte(s) {
-		if i > 0 && (len(s)-i)%3 == 0 {
-			out = append(out, ',')
-		}
-		out = append(out, c)
-	}
-	return string(out)
-}
-
-func currencySym(c string) string {
-	if c == "" {
-		return ""
-	}
-	return c + " "
 }
 
 func readMetrics(path string) (runMetrics, error) {

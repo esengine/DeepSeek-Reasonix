@@ -135,7 +135,7 @@ func TestLoadSessionIgnoresForeignEventLog(t *testing.T) {
 	}
 }
 
-func TestForceSaveLeavesLegacyEventTranscriptUntouched(t *testing.T) {
+func TestSaveLeavesLegacyEventTranscriptUntouched(t *testing.T) {
 	// The v0.x migration reconstructs sessions from legacy Claude-style
 	// ".events.jsonl" transcripts that live in the SAME directory the native
 	// session is imported into — i.e. exactly at the native event-log path.
@@ -154,7 +154,7 @@ func TestForceSaveLeavesLegacyEventTranscriptUntouched(t *testing.T) {
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "hello from v0.x"})
 	s.Add(provider.Message{Role: provider.RoleAssistant, Content: "hi"})
 	if err := s.Save(path); err != nil {
-		t.Fatalf("force Save beside legacy transcript: %v", err)
+		t.Fatalf("Save beside legacy transcript: %v", err)
 	}
 
 	got, err := os.ReadFile(logPath)
@@ -516,47 +516,36 @@ func TestLoadSessionMessagesAcceptsReorderedEventHeader(t *testing.T) {
 	}
 }
 
-func TestForceSaveDoesNotBootstrapEventLog(t *testing.T) {
+func TestDefaultSaveBootstrapsEventLog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	s := NewSession("sys")
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "one-shot"})
 	if err := s.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if _, err := os.Stat(store.SessionEventLog(path)); !os.IsNotExist(err) {
-		t.Fatalf("force save created an event log (err=%v); one-shot copies must stay single-file", err)
+	if _, err := os.Stat(store.SessionEventLog(path)); err != nil {
+		t.Fatalf("default save did not create an event log: %v", err)
 	}
-	if _, err := os.Stat(store.SessionEventIndex(path)); !os.IsNotExist(err) {
-		t.Fatalf("force save created an event index (err=%v)", err)
+	if _, err := os.Stat(store.SessionEventIndex(path)); err != nil {
+		t.Fatalf("default save did not create an event index: %v", err)
 	}
 }
 
-func TestForceSaveCompactsExistingEventLog(t *testing.T) {
+func TestDefaultSaveRejectsDivergedOverwrite(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
-	sessionWithTurns(t, path, 3)
+	winner := sessionWithTurns(t, path, 3).Snapshot()
 
-	forced := NewSession("sys")
-	forced.Add(provider.Message{Role: provider.RoleUser, Content: "forced state"})
-	if err := forced.Save(path); err != nil {
-		t.Fatalf("force Save: %v", err)
-	}
-	events := readSessionEventsForTest(t, path)
-	if len(events) != 1 || events[0].Type != sessionEventTypeReplace {
-		t.Fatalf("events after force save = %+v, want single replace", events)
+	stale := NewSession("sys")
+	stale.Add(provider.Message{Role: provider.RoleUser, Content: "stale state"})
+	if err := stale.Save(path); !errors.Is(err, ErrSessionSnapshotConflict) {
+		t.Fatalf("diverged Save error = %v, want ErrSessionSnapshotConflict", err)
 	}
 	loaded, err := LoadSession(path)
 	if err != nil {
 		t.Fatalf("LoadSession: %v", err)
 	}
-	if len(loaded.Messages) != 2 || loaded.Messages[1].Content != "forced state" {
-		t.Fatalf("loaded after force save = %+v, want forced transcript", loaded.Messages)
-	}
-	anchor, err := loadSessionMessagesFromJSONL(path)
-	if err != nil {
-		t.Fatalf("read anchor: %v", err)
-	}
-	if len(anchor) != 2 || anchor[1].Content != "forced state" {
-		t.Fatalf("anchor after force save = %+v, want refreshed", anchor)
+	if !messagesEqualForStorageList(loaded.Messages, winner) {
+		t.Fatalf("default Save replaced newer transcript: got %d messages, want %d", len(loaded.Messages), len(winner))
 	}
 }
 
@@ -672,16 +661,23 @@ func TestSessionsShareContentSeesEventLogDivergence(t *testing.T) {
 		t.Fatal("identical transcripts reported as different")
 	}
 
-	// Grow A through the event log only — the .jsonl checkpoints stay
-	// byte-identical, which is exactly the trap byte comparison fell into.
+	// Grow A normally, then restore its old compatibility checkpoint to model a
+	// crash or an older Reasonix build that did not advance the display read
+	// model. Transcript equality must still follow the event log.
+	anchorB, err := os.ReadFile(pathB)
+	if err != nil {
+		t.Fatalf("read checkpoint B: %v", err)
+	}
 	a.Add(provider.Message{Role: provider.RoleUser, Content: "diverged"})
 	if err := a.SaveSnapshot(pathA); err != nil {
 		t.Fatalf("SaveSnapshot diverge: %v", err)
 	}
+	if err := os.WriteFile(pathA, anchorB, 0o600); err != nil {
+		t.Fatalf("restore stale checkpoint A: %v", err)
+	}
 	anchorA, _ := os.ReadFile(pathA)
-	anchorB, _ := os.ReadFile(pathB)
 	if string(anchorA) != string(anchorB) {
-		t.Skip("checkpoints diverged on disk; byte-compare trap not reproducible here")
+		t.Fatal("test setup did not preserve byte-identical checkpoints")
 	}
 	same, err = SessionsShareContent(pathA, pathB)
 	if err != nil {
@@ -815,13 +811,17 @@ func TestSessionDigestIgnoresUserCreatedAt(t *testing.T) {
 func TestSessionContentModTimeTracksEventLog(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "session.jsonl")
 	s := sessionWithTurns(t, path, 1)
-	old := time.Now().Add(-24 * time.Hour)
-	if err := os.Chtimes(path, old, old); err != nil {
-		t.Fatalf("age anchor: %v", err)
-	}
 	s.Add(provider.Message{Role: provider.RoleUser, Content: "new"})
 	if err := s.SaveSnapshot(path); err != nil {
 		t.Fatalf("SaveSnapshot: %v", err)
+	}
+	// Filesystems such as macOS can expose coarse mtime resolution, so the
+	// checkpoint and event log written by one save are allowed to have the
+	// same timestamp. Make the ordering under test explicit after the save:
+	// the checkpoint is a stale anchor while the event log remains current.
+	old := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatalf("age anchor: %v", err)
 	}
 	anchorInfo, err := os.Stat(path)
 	if err != nil {

@@ -77,7 +77,21 @@ func BuildCatalog(opts CatalogOptions) Catalog {
 		profile = ProfileBalanced
 	}
 	var entries []Entry
-	entries = append(entries, ToolEntries(opts.Tools)...)
+	toolEntries := ToolEntries(opts.Tools)
+	for i := range toolEntries {
+		if toolEntries[i].Kind != KindMCPTool {
+			continue
+		}
+		name := toolEntries[i].Source
+		switch {
+		case opts.Disabled != nil && opts.Disabled[name]:
+			toolEntries[i].Status = StatusDisabled
+		case opts.Failed != nil && opts.Failed[name] != "":
+			toolEntries[i].Status = StatusFailed
+			toolEntries[i].FailureReason = opts.Failed[name]
+		}
+	}
+	entries = append(entries, toolEntries...)
 	entries = append(entries, SkillEntriesFiltered(opts.Skills, opts.Tools, profile)...)
 	entries = append(entries, MCPServerEntries(opts)...)
 
@@ -175,16 +189,15 @@ func MCPServerEntries(opts CatalogOptions) []Entry {
 		var toolSrc []plugin.CachedTool
 		toolStatus := StatusConfigured
 		switch {
-		case len(opts.ProxyTools[name]) > 0 && !registryHasTools:
+		case status == StatusReady && len(opts.ProxyTools[name]) > 0 && !registryHasTools:
 			toolSrc = opts.ProxyTools[name]
 			toolStatus = StatusReady
 		case status != StatusReady:
 			toolSrc = opts.CachedTools[name]
-			// A schema-cache-key mismatch marked the server stale; its
-			// tools carry the same staleness so routing prompts expose it.
-			if status == StatusStale {
-				toolStatus = StatusStale
-			}
+			// Cached tools share the server lifecycle. A failed or disabled
+			// server cannot make a stale schema actionable, and a cache-key
+			// mismatch keeps the same staleness on every cached tool.
+			toolStatus = status
 		}
 		for _, ct := range toolSrc {
 			raw := strings.TrimSpace(ct.Name)

@@ -366,6 +366,15 @@ func (i *ICoreWebView2) Navigate(url string) error {
 	return nil
 }
 
+func (i *ICoreWebView2) Reload() error {
+	hr, _, _ := i.vtbl.Reload.Call(uintptr(unsafe.Pointer(i)))
+	if windows.Handle(hr) != windows.S_OK {
+		return windows.Errno(hr)
+	}
+
+	return nil
+}
+
 func (i *ICoreWebView2) NavigateToString(htmlContent string) error {
 	u16Html, err := windows.UTF16PtrFromString(htmlContent)
 	if err != nil {

@@ -361,7 +361,7 @@ func (c *Coordinator) Run(ctx context.Context, input string) error {
 		return c.executor.Run(ctx, input)
 	}
 	c.sink.Emit(event.Event{Kind: event.Phase, Text: c.planner.Name() + " · planning", Detail: routeDetail, Source: event.UsageSourcePlanner})
-	plannerCtx := ctx
+	plannerCtx := tool.WithoutGoalTurnRecorder(ctx)
 	if decision.MaxResearchRounds > 0 {
 		plannerCtx = withRunStepLimit(plannerCtx, decision.MaxResearchRounds, "planner research rounds")
 	}
@@ -833,7 +833,10 @@ func (c *Coordinator) plan(ctx context.Context, input string) (string, error) {
 		}
 	}()
 
-	ch, err := c.planner.Stream(ctx, provider.Request{
+	planCtx, planCancel := context.WithCancel(ctx)
+	defer planCancel()
+	defer trackPublishedHostStream(planCtx, planCancel)()
+	ch, err := c.planner.Stream(planCtx, provider.Request{
 		Messages:    provider.ModelMessages(c.plannerSess.Messages),
 		Temperature: provider.OptionalTemperature(c.temperature),
 	})

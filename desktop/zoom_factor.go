@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"reasonix/internal/config"
+	"reasonix/internal/fileutil"
 )
 
 // DesktopZoomFactor persists the user's WebView2 zoom factor preference across
@@ -66,7 +67,7 @@ func (a *App) SetDesktopZoomFactor(factor float64) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644)
+	return fileutil.AtomicWriteFile(path, data, 0o644)
 }
 
 // RestartApplication saves the zoom and restarts the whole process so the new

@@ -1,11 +1,11 @@
-# Reasonix Extension Protocol v1
+# Reasonix Extension Protocol v2
 
 Extension Protocol 是 Reasonix（**宿主**）与以独立进程运行的代码型扩展
 （**Sidecar**）之间的稳定线上契约。安装了带有 `runtime` 块的插件后，
 它通过该协议拦截运行时事件、持有替换策略、提供流式模型 Provider、发布
 结构化 UI——全程不链接进宿主二进制。
 
-- 协议 ID：`reasonix.extension.v1`
+- 协议 ID：`reasonix.extension.v2`
 - 机器可读 Schema：`internal/extension/protocol/schema.generated.json`
 - 方法/事件/限额/错误索引：`docs/EXTENSION_PROTOCOL.generated.md`
   （生成产物，CI 防漂移校验）
@@ -111,7 +111,7 @@ retryable、action）；`protocol_error`、`unknown_method`、
 
 ## 稳定性契约
 
-major v1 内只允许：新增 optional 字段、新增枚举值、新增方法。既有
+major v2 内只允许：新增 optional 字段、新增枚举值、新增方法。既有
 必填字段、方向、限额、错误 reason 与语义永不改变。canonical Schema
 及其 SHA-256 hash 由 `cmd/extension-protocol-gen` 产生；CI 的
 `go test ./...` 会运行确定性生成测试（

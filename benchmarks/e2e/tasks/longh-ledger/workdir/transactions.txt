@@ -1,0 +1,8 @@
+deposit korrin 100
+deposit selby 50
+withdraw korrin 30
+transfer korrin selby 40
+withdraw selby 200
+transfer selby korrin 60
+deposit ashwick 5
+withdraw ashwick 10

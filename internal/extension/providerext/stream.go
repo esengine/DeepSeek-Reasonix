@@ -21,21 +21,22 @@ import (
 // freezes the terminal boundary (LastSeq) and a gap timer converts a missing
 // tail chunk into an interruption instead of a hang.
 type extensionStream struct {
-	client        ProviderClient
-	out           chan provider.Chunk
-	done          chan struct{}
-	abortDelivery chan struct{}
-	nextSeq       int64
-	pending       map[int64]provider.Chunk
-	ended         bool
-	endSeq        int64
-	endError      string
-	interrupted   bool
-	gapTimer      bool
-	closeOnce     sync.Once
-	delivery      []provider.Chunk
-	deliveryWake  chan struct{}
-	deliveryFinal bool
+	client                ProviderClient
+	out                   chan provider.Chunk
+	done                  chan struct{}
+	abortDelivery         chan struct{}
+	nextSeq               int64
+	pending               map[int64]provider.Chunk
+	ended                 bool
+	endSeq                int64
+	endError              string
+	interrupted           bool
+	gapTimer              bool
+	closeOnce             sync.Once
+	delivery              []provider.Chunk
+	deliveryWake          chan struct{}
+	deliveryFinal         bool
+	unregisterDrainCancel func()
 }
 
 // deliveryQueueLimit bounds the per-stream delivery queue without applying
@@ -52,8 +53,17 @@ const pendingWindowLimit = 256
 
 // RouteStreamChunk implements sidecar.StreamRouter. Unknown stream IDs are
 // dropped with a debug log — a sidecar can legitimately race a late chunk
-// against the host's cancel or its own crash teardown.
+// against the host's cancel or its own crash teardown. Stale-generation
+// chunks (after publish of a newer runtime) are also dropped.
 func (r *Resolver) RouteStreamChunk(p protocol.StreamChunkParams) {
+	gen := p.Generation
+	if gen == 0 {
+		gen = p.Chunk.Generation
+	}
+	if r.owner.Gate.DropStale(gen, "provider_chunk") {
+		slog.Debug("providerext: dropping stale-generation chunk", "stream", p.StreamID, "seq", p.Seq, "generation", gen)
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	stream := r.streams[p.StreamID]
@@ -175,6 +185,10 @@ func (r *Resolver) finishLocked(id string, stream *extensionStream, terminal pro
 	}
 	delete(r.streams, id)
 	stream.closeOnce.Do(func() {
+		if stream.unregisterDrainCancel != nil {
+			stream.unregisterDrainCancel()
+			stream.unregisterDrainCancel = nil
+		}
 		if terminal.Err != nil || terminal.Type != 0 {
 			stream.delivery = append(stream.delivery, terminal)
 		}

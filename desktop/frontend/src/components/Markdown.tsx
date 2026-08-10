@@ -1,6 +1,7 @@
-import { lazy, memo, startTransition, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, startTransition, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 const MarkdownRenderer = lazy(() => import("./MarkdownRenderer"));
+const MarkdownHistory = lazy(() => import("./MarkdownHistory"));
 const STREAMING_TAIL_THRESHOLD = 8_000;
 const FINALIZE_SETTLE_MS = 50;
 const FINALIZE_IDLE_TIMEOUT_MS = 1_000;
@@ -170,7 +171,7 @@ export function streamingCommitTarget(text: string): string {
   return fence || displayMath ? text : text.slice(0, boundary);
 }
 
-export function useRenderedMarkdownText(text: string, streaming: boolean): string {
+export function useRenderedMarkdownText(text: string, streaming: boolean, holdIdleFinalization = false): string {
   const [renderedText, setRenderedText] = useState(text);
   const latestTextRef = useRef(text);
   const frameRef = useRef<number | null>(null);
@@ -191,6 +192,13 @@ export function useRenderedMarkdownText(text: string, streaming: boolean): strin
       cancelFinalizationRef.current?.();
       cancelFinalizationRef.current = null;
       finalizingTextRef.current = null;
+      // A bounded live preview occasionally advances its window and drops an
+      // old prefix. Discard the stale parsed tree before paint; the complete
+      // replacement stays visible through StreamingMarkdownTail and is parsed
+      // later under the normal adaptive budget.
+      if (renderedText !== "" && !text.startsWith(renderedText)) {
+        setRenderedText("");
+      }
       return;
     }
     lastCommitAtRef.current = 0;
@@ -223,6 +231,10 @@ export function useRenderedMarkdownText(text: string, streaming: boolean): strin
       text.length >= STREAMING_TAIL_THRESHOLD &&
       text.startsWith(renderedText);
     if (canFinalizeWhenIdle) {
+      // The worker path owns the final parse of a completed stream: holding
+      // here keeps the committed prefix frozen instead of re-parsing the full
+      // document on the main thread at idle time.
+      if (holdIdleFinalization) return;
       if (finalizingTextRef.current === text) return;
       cancelFinalizationRef.current?.();
       finalizingTextRef.current = text;
@@ -239,7 +251,7 @@ export function useRenderedMarkdownText(text: string, streaming: boolean): strin
     cancelFinalizationRef.current = null;
     finalizingTextRef.current = null;
     setRenderedText(text);
-  }, [renderedText, streaming, text]);
+  }, [renderedText, streaming, text, holdIdleFinalization]);
 
   useLayoutEffect(() => {
     if (streaming) lastCommitAtRef.current = performance.now();
@@ -297,17 +309,55 @@ export const Markdown = memo(function Markdown({
   text,
   plainStatusBlocks = false,
   streaming = false,
+  entryId,
 }: {
   text: string;
   plainStatusBlocks?: boolean;
   streaming?: boolean;
+  /** History entry id (`he:<entryId>` rows) — enables the parsed-block cache. */
+  entryId?: string;
 }) {
-  const renderedText = useRenderedMarkdownText(text, streaming);
+  // legacyMode: the worker/inline pipeline failed (Worker unavailable AND the
+  // in-process parse threw) — fall back to the pre-Phase-E behavior:
+  // the idle-time main-thread finalization below parses the full document.
+  const [legacyMode, setLegacyMode] = useState(false);
+  const handleWorkerError = useCallback(() => setLegacyMode(true), []);
+  // While the worker owns the final parse of a completed stream, hold the
+  // idle finalization so the full document is not ALSO parsed main-thread.
+  const holdIdleFinalization = !streaming && !legacyMode;
+  const renderedText = useRenderedMarkdownText(text, streaming, holdIdleFinalization);
   const sections = useMemo(() => splitStableMarkdownSections(renderedText), [renderedText]);
   const pendingText = (streaming || text.length >= STREAMING_TAIL_THRESHOLD) && text.startsWith(renderedText)
     ? text.slice(renderedText.length)
     : "";
-  return (
+  // A row that ever streamed keeps its already-parsed committed sections as
+  // the parse-in-flight fallback; a fresh history mount shows the full text
+  // as plain first (never truncated) until worker blocks swap in.
+  const wasStreamingRef = useRef(false);
+  if (streaming) wasStreamingRef.current = true;
+
+  // Finalize timing parity with the old idle path: measure from stream
+  // completion (or mount, for history) to the worker blocks swapping in.
+  const finalizeStartRef = useRef(0);
+  const finalizeLengthRef = useRef(0);
+  useEffect(() => {
+    if (streaming || legacyMode || finalizeStartRef.current > 0) return;
+    if (text.length < STREAMING_TAIL_THRESHOLD) return;
+    finalizeStartRef.current = performance.now();
+    finalizeLengthRef.current = text.length;
+  }, [streaming, legacyMode, text]);
+  const handleWorkerParsed = useCallback(() => {
+    if (finalizeStartRef.current === 0) return;
+    performance.measure("reasonix:markdown-finalize", {
+      start: finalizeStartRef.current,
+      end: performance.now(),
+      detail: { textLength: finalizeLengthRef.current },
+    });
+    finalizeStartRef.current = 0;
+    finalizeLengthRef.current = 0;
+  }, []);
+
+  const committedView = (
     <>
       <Suspense fallback={<div className="md">{renderedText}</div>}>
         {sections.length === 1 ? (
@@ -322,5 +372,20 @@ export const Markdown = memo(function Markdown({
       </Suspense>
       {pendingText && <StreamingMarkdownTail text={pendingText} />}
     </>
+  );
+
+  if (streaming || legacyMode) return committedView;
+
+  return (
+    <Suspense fallback={<div className="md">{text}</div>}>
+      <MarkdownHistory
+        text={text}
+        plainStatusBlocks={plainStatusBlocks}
+        entryId={entryId}
+        fallback={wasStreamingRef.current ? committedView : <div className="md">{text}</div>}
+        onParsed={handleWorkerParsed}
+        onError={handleWorkerError}
+      />
+    </Suspense>
   );
 });

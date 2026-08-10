@@ -28,6 +28,9 @@ type writeFile struct {
 	// and only for plain-UTF-8 targets (the overlay is text-only, so non-UTF-8
 	// files keep the local encoding-preserving path).
 	overlay FileOverlay
+	// receipt is an optional per-runtime effect hook. hadPrior means an existing
+	// file was overwritten; prior is its previous content.
+	receipt func(path string, hadPrior bool, prior []byte)
 }
 
 func (writeFile) Name() string { return "write_file" }
@@ -73,6 +76,9 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 			if werr != nil {
 				return "", fmt.Errorf("write %s: %w", p.Path, werr)
 			}
+			if w.receipt != nil {
+				w.receipt(p.Path, rerr == nil, []byte(src.content))
+			}
 			return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil
 		}
 	}
@@ -81,8 +87,27 @@ func (w writeFile) Execute(ctx context.Context, args json.RawMessage) (string, e
 			return "", fmt.Errorf("mkdir %s: %w", dir, err)
 		}
 	}
+	hadPrior := rerr == nil
+	var prior []byte
+	if hadPrior {
+		prior = []byte(src.content)
+	}
 	if err := writeFileEncoded(p.Path, p.Content, src.enc); err != nil {
 		return "", fmt.Errorf("write %s: %w", p.Path, err)
 	}
+	if w.receipt != nil {
+		w.receipt(p.Path, hadPrior, prior)
+	}
 	return fmt.Sprintf("wrote %d bytes to %s", len(p.Content), p.Path), nil
+}
+
+// BindFileWriteReceipt returns t with a per-runtime write receipt callback when
+// t is write_file. Other tools are returned unchanged.
+func BindFileWriteReceipt(t tool.Tool, receipt func(path string, hadPrior bool, prior []byte)) tool.Tool {
+	w, ok := t.(writeFile)
+	if !ok {
+		return t
+	}
+	w.receipt = receipt
+	return w
 }

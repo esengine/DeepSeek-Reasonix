@@ -38,6 +38,16 @@
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 
+# The build script writes this host-specific include before invoking makensis.
+# Keep a Windows fallback so opening this script directly still behaves like a
+# native Windows build.
+!if /FileExists "reasonix_host.nsh"
+!include "reasonix_host.nsh"
+!endif
+!ifndef REASONIX_UNINST_FINALIZE
+!define REASONIX_UNINST_FINALIZE 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'
+!endif
+
 # The version information for this two must consist of 4 parts
 VIProductVersion "${INFO_PRODUCTVERSION}.0"
 VIFileVersion    "${INFO_PRODUCTVERSION}.0"
@@ -88,7 +98,7 @@ LangString reasonixUpdateSubtitle ${LANG_TRADCHINESE} "正在安裝已驗證的�
 ## The second pass provides ARG_REASONIX_SIGNED_UNINSTALLER and embeds that
 ## signed binary instead of generating another unsigned uninstaller.
 !ifndef ARG_REASONIX_SIGNED_UNINSTALLER
-!uninstfinalize 'cmd.exe /C copy /Y "%1" "reasonix-uninstall.exe" >NUL'
+!uninstfinalize '${REASONIX_UNINST_FINALIZE}'
 !endif
 #!finalize 'signtool --file "%1"'
 

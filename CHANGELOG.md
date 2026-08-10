@@ -8,6 +8,20 @@ branch.
 
 ### Fixed
 
+- Goal is now the sole long-task runtime. Historical AutoResearch sidecars
+  migrate transactionally into research-budget Goals. Invalid archives block
+  fail closed and remain read-only, retaining the task id and compatibility mode
+  for a restart or `/goal resume` retry; successful Goal-only sidecars omit the
+  old task id and write an explicit downgrade fence so previous readers cannot
+  reactivate the removed runtime.
+
+- Context-dependent workflow tools now share one host-side execution boundary.
+  Goal, Plan sign-off, and background-job calls cannot reach permissions,
+  hooks, leases, or Execute outside their owning context; mixed batches execute
+  valid calls once and stop safely after one repair. Child agents also isolate
+  inherited Goal, Jobs, and live memory queues, while persisted tool identity
+  records the effective child schema projection.
+
 - **Issue #7575:** Linux Bash under bubblewrap no longer mounts a fresh empty
   `--tmpfs /tmp` on every call. Consecutive commands in the same logical session
   now share a private temporary directory (bound at `/tmp` on Linux, exported via

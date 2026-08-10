@@ -162,8 +162,8 @@ type PluginPackageInfo struct {
 	Commands     int    `json:"commands"`
 	Hooks        int    `json:"hooks"`
 	MCPServers   int    `json:"mcp_servers"`
-	// Prompts, Themes, and Runtime are the Manifest v1 additions. They stay
-	// omitempty so schema v1 consumers see no shape change for legacy
+	// Prompts, Themes, and Runtime are native Manifest v2 fields. They stay
+	// omitempty so older diagnostic consumers see no shape change for legacy
 	// packages.
 	Prompts  int      `json:"prompts,omitempty"`
 	Themes   int      `json:"themes,omitempty"`

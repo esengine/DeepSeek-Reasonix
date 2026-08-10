@@ -56,10 +56,9 @@ type Message struct {
 	ProviderContent  string   `json:"provider_content,omitempty"`
 	Images           []string `json:"images,omitempty"`            // data URLs (data:<mime>;base64,…) on user (attachments) and tool (MCP image results) messages; embedded only for vision-capable models
 	ReasoningContent string   `json:"reasoning_content,omitempty"` // assistant: thinking-mode chain-of-thought, round-tripped on multi-turn
-	// ReasoningID is the provider-issued identifier of the reasoning item
-	// (OpenAI Responses schema: Reasoning.id is required on input items).
-	// Captured from the streamed output item and round-tripped back into
-	// the input on subsequent turns, matching the wire schema.
+	// ReasoningID is the provider-issued reasoning-item id (OpenAI Responses:
+	// Reasoning.id is required on input items), captured from the streamed
+	// output item and round-tripped back into later inputs.
 	ReasoningID string `json:"reasoning_id,omitempty"`
 	// ReasoningStatus is the final status of the reasoning item
 	// ("in_progress" | "completed") as issued by the server's done event,
@@ -221,6 +220,7 @@ type Request struct {
 	// output (Responses: text.format.type=json_object). Nil omits the field
 	// entirely — the common path must stay byte-stable for prompt caching.
 	ResponseFormat *ResponseFormat `json:"ResponseFormat,omitempty"`
+	EffortOverride string          `json:"EffortOverride,omitempty"` // per-call reasoning-depth override; adapters apply it only when the endpoint's effort vocabulary accepts it
 }
 
 // ResponseFormat asks a provider to constrain its output shape.
@@ -758,9 +758,9 @@ func (u *Usage) ContextFillTokens() int {
 	return u.PromptTokens + u.CompletionTokens
 }
 
-// ContextPromptForGauge returns the latest-attempt prompt size for context
-// displays. Falls back to PromptTokens when ContextPromptTokens is unset.
-func (u *Usage) ContextPromptForGauge() int {
+// LatestPromptTokens returns the latest-attempt prompt size for context-aware
+// runtime decisions. Falls back to PromptTokens for single-attempt legacy usage.
+func (u *Usage) LatestPromptTokens() int {
 	if u == nil {
 		return 0
 	}

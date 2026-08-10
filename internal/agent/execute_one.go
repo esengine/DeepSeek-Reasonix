@@ -63,6 +63,7 @@ type toolCallPlan struct {
 // — the caller emits ToolDispatch/ToolResult — so it is safe to invoke from
 // parallel goroutines. Stages: parse → policy → prepare → finish.
 func (a *Agent) executeOne(ctx context.Context, call provider.ToolCall) (out toolOutcome) {
+	ctx = a.withAgentContext(ctx)
 	plan := &toolCallPlan{call: call}
 	defer func() {
 		if plan.mutationObserved && !plan.mutationAfterDone {
@@ -170,6 +171,9 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, plan *toolCallPlan) (tool
 	if blocked, early := a.applyPlanModeAndProxy(ctx, plan); early {
 		return blocked, true
 	}
+	if blocked, early := a.applyContextualToolGate(ctx, plan); early {
+		return blocked, true
+	}
 	if blocked, early := a.applyDeliveryPolicyGates(plan); early {
 		return blocked, true
 	}
@@ -184,6 +188,38 @@ func (a *Agent) resolveToolPolicy(ctx context.Context, plan *toolCallPlan) (tool
 		return blocked, true
 	}
 	return toolOutcome{}, false
+}
+
+func (a *Agent) applyContextualToolGate(ctx context.Context, plan *toolCallPlan) (toolOutcome, bool) {
+	if plan == nil || plan.tool == nil {
+		return toolOutcome{}, false
+	}
+	if outcome, blocked := contextualToolGateOutcome(ctx, plan.tool, plan.canonicalName); blocked {
+		return outcome, true
+	}
+	if plan.execTool != nil {
+		if outcome, blocked := contextualToolGateOutcome(ctx, plan.execTool, plan.permName); blocked {
+			return outcome, true
+		}
+	}
+	return toolOutcome{}, false
+}
+
+func contextualToolGateOutcome(ctx context.Context, target tool.Tool, name string) (toolOutcome, bool) {
+	contextual, ok := target.(tool.ContextualTool)
+	if !ok || contextual.ProviderVisible(ctx) {
+		return toolOutcome{}, false
+	}
+	msg := fmt.Sprintf("blocked: tool %q is unavailable in the current workflow context", name)
+	switch name {
+	case "update_goal":
+		msg = "update_goal is only available while an active goal turn is running — no goal state was changed"
+	case "complete_step":
+		msg = "blocked: complete_step is only available after plan approval. While planning, keep task state with todo_write and present the plan for user approval."
+	case "bash_output", "wait", "kill_shell":
+		msg = "background jobs are not available in this context"
+	}
+	return toolOutcome{output: msg, blocked: true, errMsg: firstLine(msg)}, true
 }
 
 // applyMutationDependencyBarrier blocks later mutations and verifications in the
@@ -271,6 +307,9 @@ func (a *Agent) applyPlanModeAndProxy(ctx context.Context, plan *toolCallPlan) (
 		}
 		if rc.Target != nil {
 			plan.execTool = rc.Target
+		}
+		if outcome, blocked := contextualToolGateOutcome(ctx, plan.execTool, plan.permName); blocked {
+			return outcome, true
 		}
 		plan.readOnly = rc.ReadOnly
 		if outcome, blocked := a.readOnlyExecutionBlock(t, &rc); blocked {
@@ -630,7 +669,7 @@ func (a *Agent) prepareToolExecution(ctx context.Context, plan *toolCallPlan) (t
 			}, true
 		}
 	}
-	cctx := withCallContext(ctx, plan.call.ID, a.sink, a.asker, a.planMode.Load())
+	cctx := tool.WithContextCompressor(withCallContext(ctx, plan.call.ID, a.sink, a.asker, a.planMode.Load()), a)
 	cctx = WithSubagentDepth(cctx, a.subagentDepth)
 	if a.evidence != nil {
 		cctx = evidence.WithLedger(cctx, a.evidence)

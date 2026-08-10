@@ -3,6 +3,8 @@
 package agent
 
 import (
+	"bytes"
+	"strings"
 	"sync"
 
 	"reasonix/internal/provider"
@@ -274,6 +276,25 @@ func (s *Session) Len() int {
 	return len(s.Messages)
 }
 
+// MessageRange returns a copy of the messages in [start, end), clamped to the
+// current log bounds, safe to read from another goroutine while a turn
+// appends. Paging frontends use it to fetch a display window without paying
+// for a Snapshot of the whole history.
+func (s *Session) MessageRange(start, end int) []provider.Message {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if start < 0 {
+		start = 0
+	}
+	if end > len(s.Messages) {
+		end = len(s.Messages)
+	}
+	if start >= end {
+		return []provider.Message{}
+	}
+	return append([]provider.Message(nil), s.Messages[start:end]...)
+}
+
 // CloneWithMessages returns a fresh Session carrying msgs while preserving the
 // persistence baseline of the source session. Resume paths use this when they
 // need to adjust loaded history before a rewrite; dropping persisted would make
@@ -373,6 +394,32 @@ func (s *Session) NeedsRewriteSave() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.rewriteVersion > s.persistedRewriteVersion
+}
+
+// HasUnsavedChanges reports whether the in-memory transcript contains storage
+// changes that have not been durably recorded at path. It is intentionally
+// conservative when no verified baseline exists: an idle controller must not
+// replace an in-memory conversation with a possibly older disk copy after a
+// bounded lock failure or an interrupted save.
+func (s *Session) HasUnsavedChanges(path string) bool {
+	if s == nil || strings.TrimSpace(path) == "" {
+		return false
+	}
+	msgs, _, rewriteVersion := s.snapshotWithVersion()
+	digest, err := digestSessionMessages(msgs)
+	if err != nil {
+		return true
+	}
+	key := canonicalSessionSavePath(path)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !s.persisted.ok || s.persisted.path != key {
+		return true
+	}
+	if s.normalizedDirty || s.eventLogDamaged || rewriteVersion > s.persistedRewriteVersion {
+		return true
+	}
+	return !bytes.Equal(digest[:], s.persisted.digest[:])
 }
 
 // IncrementRewrite bumps the rewrite version by 1.

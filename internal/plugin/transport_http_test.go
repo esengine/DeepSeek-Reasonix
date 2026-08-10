@@ -222,6 +222,45 @@ func TestHTTPTransportDoesNotRedirectCredentialsAcrossOrigins(t *testing.T) {
 	}
 }
 
+func TestHTTPTransportDoesNotLoadOAuthStateWithStaticAPIKey(t *testing.T) {
+	stateDir := t.TempDir()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-API-Key"); got != "configured" {
+			t.Errorf("API key = %q, want configured", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("stale OAuth authorization leaked alongside static credentials: %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	defer server.Close()
+	if err := saveMCPOAuthState(stateDir, mcpOAuthState{
+		Version: 1, Resource: server.URL, AccessToken: "stale-oauth", TokenType: "Bearer",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	transport, err := newHTTPTransport(Spec{
+		Name: "remote", Type: "http", URL: server.URL, StateDir: stateDir,
+		Headers: map[string]string{"X-API-Key": "configured"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transport.close()
+	if transport.oauth != nil {
+		t.Fatal("static authentication must disable Reasonix OAuth state")
+	}
+	resp, err := transport.do(context.Background(), []byte(`{}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("transport status = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestHTTPTransportReinitializesExpiredSession(t *testing.T) {
 	var initializeCount atomic.Int32
 	var toolCallCount atomic.Int32

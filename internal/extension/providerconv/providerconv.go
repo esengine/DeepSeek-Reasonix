@@ -1,5 +1,5 @@
 // Package providerconv holds the host-side conversions between
-// internal/provider values and the public Extension Protocol v1 wire DTOs.
+// internal/provider values and the public Extension Protocol v2 wire DTOs.
 // The protocol package deliberately does not import internal/provider, so
 // every host surface that moves provider data across the extension boundary —
 // the agent's intercept wiring (stage 6b2) and the sidecar provider adapter

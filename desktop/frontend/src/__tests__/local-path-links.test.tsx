@@ -61,6 +61,12 @@ eq(firstPath("see file:///D:/Project/report/05-final.md"), "file:///D:/Project/r
 eq(firstPath("见 file:///D:/Project/中停时分析/05-静态验收.md"), "file:///D:/Project/中停时分析/05-静态验收.md",
   "file URL with CJK dirs");
 eq(firstPath("see file:///D:/x/y.md. done"), "file:///D:/x/y.md", "file URL trailing period stripped");
+eq(firstPath("see file://nas/share/report.md"), "file://nas/share/report.md",
+  "authority-form UNC text becomes a local link");
+eq(pathCount("see file:///D:/x/%zz"), 0, "malformed file URL is not linkified");
+eq(pathCount("see file://./PhysicalDrive0"), 0, "device-authority file URL is not linkified");
+eq(pathCount("see file:///C:/safe.txt:payload"), 0, "alternate data stream file URL is not linkified");
+eq(pathCount("see file:///tmp/report.md?download=1"), 0, "file URL with a query is not partially linkified");
 eq(firstPath("see \\nas\\share\\docs\\report.md done"), "\\\\nas\\share\\docs\\report.md",
   "UNC path matched whole and \\\\ prefix restored");
 
@@ -70,11 +76,22 @@ eq(pathCount("C: drive"), 0, "bare drive letter is not a path");
 eq(pathCount("at 10:30 now"), 0, "clock time is not a path");
 eq(pathCount("version 1.2.3 released"), 0, "version string is not a path");
 eq(pathCount("http://example.com 正常"), 0, "http URL untouched (GFM handles it)");
+eq(pathCount("profile://nas/share/report.md"), 0, "custom URI containing file:// is not partially linkified");
+eq(pathCount("http://file:///tmp/report.md"), 0, "file:// inside another URI is not linkified");
+eq(pathCount("foo://host?file:///tmp/report.md"), 0, "file:// in a URI query is not linkified");
+eq(pathCount("foo://host#file:///tmp/report.md"), 0, "file:// in a URI fragment is not linkified");
+eq(pathCount("foo://host&file:///tmp/report.md"), 0, "file:// after an ampersand is not linkified");
+eq(pathCount("foo://host=file:///tmp/report.md"), 0, "file:// after an equals sign is not linkified");
 eq(pathCount("prefixD:\\x\\y.md"), 0, "drive path after a letter is rejected without lookbehind");
 eq(pathCount("file:///D:/x/y.md"), 1, "file URL drive segment is not double-matched");
 eq(pathCount("a\\b\\c.md 讨论"), 0, "share-less backslash path in prose is not a UNC path");
 eq(pathCount("C:\\nas\\share\\x.md"), 1, "drive path does not also become a UNC match");
 eq(firstPath("见 \\nas\\share\\x.md"), "\\\\nas\\share\\x.md", "real UNC path still matches");
+eq(pathCount("see C:\\safe.txt:payload"), 0, "alternate data stream drive path stays inert");
+eq(pathCount("see \\.\\PhysicalDrive0"), 0, "device namespace path stays inert");
+eq(pathCount("see C:\\docs\\NUL.txt"), 0, "reserved DOS device path stays inert");
+eq(pathCount("see C:\\docs\\COM1.log"), 0, "numbered DOS device path stays inert");
+eq(firstPath("see C:\\docs\\nullifier.txt"), "C:\\docs\\nullifier.txt", "ordinary device-like name remains linkable");
 eq(firstPath("见 C:\\Program\\ Files\\ (x86) 完成"), "C:\\Program Files (x86)", "escaped-space path with (x86) keeps its closing paren");
 
 console.log("\nsegment alternation");
@@ -95,12 +112,32 @@ eq(localPathHref("D:\\Project\\中停时分析\\05-静态验收.md"), "file:///D
 eq(localPathHref("D:\\a\\b#c.md"), "file:///D:/a/b%23c.md", "hash escaped for URL safety");
 eq(localPathHref("file:///C:/a/b.txt"), "file:///C:/a/b.txt", "already-absolute file URL is not double-prefixed");
 eq(localPathHref("file:///D:/a%20b.txt"), "file:///D:/a%20b.txt", "literal %xx in a file URL is not double-encoded");
+eq(localPathHref("file://nas/share/report.md"), "file://nas/share/report.md",
+  "authority-form UNC URL is preserved");
+eq(localPathHref("file:////nas/share/report.md"), "file:////nas/share/report.md",
+  "slash-form UNC URL is preserved");
 eq(localPathFromHref("file:///D:/a%20b.txt"), "D:/a b.txt", "decoded %20 becomes a real space");
 
 eq(localPathFromHref("file:///D:/x/y.md"), "D:/x/y.md", "decodes plain path");
+eq(localPathFromHref("file:///Users/liangkang/notes/readme.md"), "/Users/liangkang/notes/readme.md", "preserves the leading slash for Unix paths");
+eq(localPathFromHref("file://nas/share/report.md"), "//nas/share/report.md", "parses authority-form UNC URLs");
+eq(localPathFromHref("file:////nas/share/report.md"), "//nas/share/report.md", "normalizes four-slash UNC URLs");
+eq(localPathFromHref("file://///nas/share/report.md"), "//nas/share/report.md", "normalizes generated five-slash UNC URLs");
+eq(localPathFromHref("file://./PhysicalDrive0"), null, "rejects device-namespace authority");
+eq(localPathFromHref("file:////./PhysicalDrive0"), null, "rejects slash-form device namespace");
+eq(localPathFromHref("file:////%2E/PhysicalDrive0"), null, "rejects encoded slash-form device namespace");
+eq(localPathFromHref("file:////?/C:/Windows"), null, "rejects query-form device namespace");
+eq(localPathFromHref("file:////%3F/C:/Windows"), null, "rejects encoded query-form device namespace");
+eq(localPathFromHref("file:///C:/safe.txt:payload"), null, "rejects alternate data stream file URL");
+eq(localPathFromHref("file:///C:/docs/NUL.txt"), null, "rejects reserved DOS device file URL");
+eq(localPathFromHref("file:///C:/docs/COM1.log"), null, "rejects numbered DOS device file URL");
+eq(localPathFromHref("file:///tmp/NUL.txt"), "/tmp/NUL.txt", "keeps Unix files named like DOS devices");
+eq(localPathFromHref("file:///tmp/report.md?download=1"), null, "rejects file URL query strings");
+eq(localPathFromHref("file:///tmp/report.md#section"), null, "rejects file URL fragments");
 eq(localPathFromHref("file:///D:/Project/%E4%B8%AD%E5%81%9C%E6%97%B6%E5%88%86%E6%9E%90/05-%E9%9D%99%E6%80%81%E9%AA%8C%E6%94%B6.md"),
   "D:/Project/中停时分析/05-静态验收.md", "decodes percent-encoded CJK");
 eq(localPathFromHref("file:///D:/x/%zz"), null, "malformed escapes yield null");
+eq(localPathFromHref("FILE:///Users/a.md"), null, "uppercase file scheme is not a local URL");
 eq(localPathFromHref("https://example.com/x"), null, "http URL is not local");
 eq(localPathFromHref(undefined), null, "undefined href is not local");
 
@@ -110,9 +147,10 @@ import React from "react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// Mirrors MarkdownRenderer: file:/// anchors survive the default sanitizer.
+// Mirrors MarkdownRenderer: valid local file anchors survive the default
+// sanitizer, including authority-form UNC links.
 const markdownUrlTransform = (value: string) =>
-  value.startsWith("file:///") ? value : defaultUrlTransform(value);
+  localPathFromHref(value) !== null ? value : defaultUrlTransform(value);
 
 const html = renderToStaticMarkup(
   <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
@@ -130,6 +168,13 @@ const mixed = renderToStaticMarkup(
 );
 ok(mixed.includes('href="file:///D:/x/y.md"'), "CJK comma boundary renders drive link");
 ok(mixed.includes('href="file:///C:/a/b.txt"'), "explicit file URL renders its own anchor");
+
+const unc = renderToStaticMarkup(
+  <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>
+    {"[共享盘](file://nas/share/report.md)"}
+  </ReactMarkdown>,
+);
+ok(unc.includes('href="file://nas/share/report.md"'), "authority-form UNC link survives URL sanitization");
 
 const plain = renderToStaticMarkup(
   <ReactMarkdown remarkPlugins={[remarkLocalPathLinks]} urlTransform={markdownUrlTransform}>

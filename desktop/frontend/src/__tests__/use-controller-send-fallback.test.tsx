@@ -121,6 +121,9 @@ window.go = {
       SubmitToTab: async (tabId: string) => {
         submitCalls += tabId === "tab-send" ? 1 : 0;
       },
+      SubmitToTabWithID: async (tabId: string) => {
+        submitCalls += tabId === "tab-send" ? 1 : 0;
+      },
     } as Partial<AppBindings> as AppBindings,
   },
 };
