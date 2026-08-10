@@ -55,9 +55,6 @@ jobs:
           old = '''    allowAll: bot.allowlist.allowAll,
               allowlistEnabled: bot.allowlist.enabled,
               allowlistUsers,'''
-          # The compact source has two equivalent global allowlist blocks. Mark
-          # the QQ one so the integration transform can target the generic
-          # connection block unambiguously.
           if text.count(old) == 2:
               text = text.replace(old, old.replace("allowlistUsers,", "allowlistUsers, // nextcloud-transform-keep-qq"), 1)
           path.write_text(text, encoding="utf-8")
@@ -101,35 +98,41 @@ jobs:
             desktop/nextcloud_talk_bot_test.go
           git diff --check
 
-      - name: Run root Go tests
-        run: go test ./...
-
-      - name: Run desktop Go tests
-        working-directory: desktop
-        run: go test ./...
-
-      - name: Install frontend dependencies
-        working-directory: desktop/frontend
-        run: pnpm install --frozen-lockfile
-
-      - name: Typecheck desktop frontend
-        working-directory: desktop/frontend
-        run: pnpm typecheck
-
-      - name: Verify Nextcloud integration is present
+      - name: Verify transformed integration is present
         run: |
           grep -q 'PlatformNextcloudTalk' internal/botruntime/runtime.go
           grep -q 'nextcloud-talk' internal/cli/bot.go
           grep -q 'settings.botNextcloudTalk' desktop/frontend/src/components/SettingsPanel.tsx
           grep -q 'nextcloud-talk' desktop/frontend/src/App.tsx
 
-      - name: Remove temporary integration helpers
-        run: rm -f scripts/apply_nextcloud_talk_integration.py .github/workflows/apply-nextcloud-talk-integration.yml
-
-      - name: Commit verified integration
+      - name: Persist integration and remove temporary helpers
         run: |
+          rm -f scripts/apply_nextcloud_talk_integration.py .github/workflows/apply-nextcloud-talk-integration.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
           git commit -m "feat(bot): finish Nextcloud Talk integration"
           git push origin feature/nextcloud-talk-bot
+
+      - name: Run root Go tests
+        run: go test ./...
+
+      - name: Install Wails CLI
+        run: |
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          go install "github.com/wailsapp/wails/v2/cmd/wails@$(cat .wails-version)"
+
+      - name: Generate Wails bindings and build frontend
+        working-directory: desktop
+        run: |
+          wails generate module
+          pnpm --dir frontend install --frozen-lockfile
+          pnpm --dir frontend build
+
+      - name: Run desktop Go tests
+        working-directory: desktop
+        run: go test ./...
+
+      - name: Typecheck desktop frontend
+        working-directory: desktop/frontend
+        run: pnpm typecheck
