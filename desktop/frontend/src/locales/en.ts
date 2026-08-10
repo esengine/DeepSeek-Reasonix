@@ -296,6 +296,7 @@ export const en = {
   "workspace.deleted": "Deleted",
   "workspace.fileDeleted": "This file was deleted from the workspace.",
   "workspace.revealInFileManager": "Show in file manager",
+  "workspace.openWithDefaultApp": "Open with default app",
   "workspace.openInTerminal": "Open in integrated terminal",
   "terminal.title": "Terminal",
   "terminal.sessions": "Terminal sessions",

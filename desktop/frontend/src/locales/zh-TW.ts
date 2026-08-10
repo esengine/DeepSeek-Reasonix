@@ -2335,6 +2335,7 @@ export const zhTW: Record<DictKey, string> = {
   "workspace.clearFileScope": "顯示完整檔案樹",
   "workspace.clearChangeScope": "顯示全部改動",
   "workspace.revealInFileManager": "在檔案管理器中顯示",
+  "workspace.openWithDefaultApp": "用預設應用程式開啟",
   "workspace.openInTerminal": "在內建終端機開啟",
   "terminal.title": "終端機",
   "terminal.sessions": "終端機工作階段",

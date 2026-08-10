@@ -297,6 +297,7 @@ export const zh: Record<DictKey, string> = {
   "workspace.deleted": "已删除",
   "workspace.fileDeleted": "该文件已从工作区删除。",
   "workspace.revealInFileManager": "在文件管理器中显示",
+  "workspace.openWithDefaultApp": "用默认应用打开",
   "workspace.openInTerminal": "在内置终端打开",
   "terminal.title": "终端",
   "terminal.sessions": "终端会话",

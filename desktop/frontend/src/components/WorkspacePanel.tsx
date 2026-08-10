@@ -11,6 +11,7 @@ import type {
 import {
   ChevronDown,
   ChevronRight,
+  ExternalLink,
   FileText,
   Folder,
   FolderOpen,
@@ -1403,6 +1404,12 @@ export function WorkspacePanel({
     void app.RevealWorkspacePathForTab(workspaceTabId, treeMenu.path).catch(() => {});
   };
 
+  const openWithDefaultApp = () => {
+    if (!treeMenu) return;
+    setTreeMenu(null);
+    void app.OpenWorkspacePathForTab(workspaceTabId, treeMenu.path).catch(() => {});
+  };
+
   const renderNormalRow = (row: TreeRow) => {
     const { path, depth, entry, isOpen, active, compactPaths = [path], displayName = entry.name } = row;
     return (
@@ -2160,21 +2167,15 @@ export function WorkspacePanel({
         >
           <FloatingMenuItems
             items={[
-              {
-                icon: <MessageSquarePlus size={14} />,
-                label: treeMenu.isDir ? t("workspace.addFolderReferenceToChat") : t("workspace.addFileReferenceToChat"),
-                onSelect: addTreeReferenceToChat,
-              },
               ...(treeMenu.isDir
                 ? []
                 : [
                     {
-                      icon: <FileText size={14} />,
-                      label: t("workspace.addFileContentToChat"),
-                      onSelect: () => void addTreeFileToChat(),
+                      icon: <ExternalLink size={14} />,
+                      label: t("workspace.openWithDefaultApp"),
+                      onSelect: openWithDefaultApp,
                     },
                   ]),
-              ...workspacePathCopyMenuItems({ path: treeMenu.path, resolveAbsolutePath: () => app.ResolveWorkspacePathForTab(workspaceTabId, treeMenu.path), isScopeCurrent: () => currentWorkspaceScopeKeyRef.current === workspaceScopeKey, close: () => setTreeMenu(null), relativeLabel: t("workspace.copyRelativePath"), absoluteLabel: t("workspace.copyAbsolutePath") }),
               {
                 icon: <FolderOpen size={14} />,
                 label: t("workspace.revealInFileManager"),
@@ -2191,6 +2192,22 @@ export function WorkspacePanel({
                     },
                   }]
                 : []),
+              ...workspacePathCopyMenuItems({ path: treeMenu.path, resolveAbsolutePath: () => app.ResolveWorkspacePathForTab(workspaceTabId, treeMenu.path), isScopeCurrent: () => currentWorkspaceScopeKeyRef.current === workspaceScopeKey, close: () => setTreeMenu(null), relativeLabel: t("workspace.copyRelativePath"), absoluteLabel: t("workspace.copyAbsolutePath") }),
+              { separator: true },
+              {
+                icon: <MessageSquarePlus size={14} />,
+                label: treeMenu.isDir ? t("workspace.addFolderReferenceToChat") : t("workspace.addFileReferenceToChat"),
+                onSelect: addTreeReferenceToChat,
+              },
+              ...(treeMenu.isDir
+                ? []
+                : [
+                    {
+                      icon: <FileText size={14} />,
+                      label: t("workspace.addFileContentToChat"),
+                      onSelect: () => void addTreeFileToChat(),
+                    },
+                  ]),
             ]}
           />
         </FloatingMenu>

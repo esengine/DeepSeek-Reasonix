@@ -10174,6 +10174,11 @@ body > .mermaid-diagram--fullscreen {
 .floating-menu button:hover {
   background: var(--bg-soft);
 }
+.floating-menu__separator {
+  height: 1px;
+  margin: 5px 4px;
+  background: var(--border-soft);
+}
 .tooltip-trigger {
   display: inline-flex;
   min-width: 0;
