@@ -1,4 +1,4 @@
-// Package bot 实现 Reasonix 多渠道 IM bot 消息网关，支持 QQ、飞书、微信。
+// Package bot 实现 Reasonix 多渠道 IM bot 消息网关，支持 QQ、飞书、微信、Nextcloud Talk。
 // 架构参考 Hermes Agent 的 gateway/adapter/session 模式。
 package bot
 
@@ -12,9 +12,10 @@ import (
 type Platform string
 
 const (
-	PlatformQQ     Platform = "qq"
-	PlatformFeishu Platform = "feishu"
-	PlatformWeixin Platform = "weixin"
+	PlatformQQ            Platform = "qq"
+	PlatformFeishu        Platform = "feishu"
+	PlatformWeixin        Platform = "weixin"
+	PlatformNextcloudTalk Platform = "nextcloud-talk"
 )
 
 // ChatType 标识会话类型。

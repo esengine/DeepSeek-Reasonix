@@ -1669,6 +1669,18 @@ func renderBotCredential(cred BotConnectionCredential) string {
 	if cred.TokenEnv != "" {
 		parts["token_env"] = cred.TokenEnv
 	}
+	if cred.ServerURL != "" {
+		parts["server_url"] = cred.ServerURL
+	}
+	if cred.ListenAddr != "" {
+		parts["listen_addr"] = cred.ListenAddr
+	}
+	if cred.WebhookPath != "" {
+		parts["webhook_path"] = cred.WebhookPath
+	}
+	if cred.SecretEnv != "" {
+		parts["secret_env"] = cred.SecretEnv
+	}
 	if len(parts) == 0 {
 		return ""
 	}

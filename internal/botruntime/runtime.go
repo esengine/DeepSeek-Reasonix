@@ -9,6 +9,7 @@ import (
 
 	"reasonix/internal/bot"
 	"reasonix/internal/bot/feishu"
+	"reasonix/internal/bot/nextcloudtalk"
 	"reasonix/internal/bot/qq"
 	"reasonix/internal/bot/weixin"
 	"reasonix/internal/config"
@@ -29,6 +30,8 @@ func EnabledPlatforms(cfg *config.Config, channels []string) (map[bot.Platform]b
 				enabled[bot.PlatformFeishu] = PlatformConfigured(cfg, bot.PlatformFeishu)
 			case bot.PlatformWeixin:
 				enabled[bot.PlatformWeixin] = PlatformConfigured(cfg, bot.PlatformWeixin)
+			case bot.PlatformNextcloudTalk:
+				enabled[bot.PlatformNextcloudTalk] = PlatformConfigured(cfg, bot.PlatformNextcloudTalk)
 			default:
 				if strings.EqualFold(ch, "lark") {
 					enabled[bot.PlatformFeishu] = PlatformConfigured(cfg, bot.PlatformFeishu)
@@ -42,6 +45,7 @@ func EnabledPlatforms(cfg *config.Config, channels []string) (map[bot.Platform]b
 	enabled[bot.PlatformQQ] = PlatformConfigured(cfg, bot.PlatformQQ)
 	enabled[bot.PlatformFeishu] = PlatformConfigured(cfg, bot.PlatformFeishu)
 	enabled[bot.PlatformWeixin] = PlatformConfigured(cfg, bot.PlatformWeixin)
+	enabled[bot.PlatformNextcloudTalk] = PlatformConfigured(cfg, bot.PlatformNextcloudTalk)
 	return enabled, warnings
 }
 
@@ -116,7 +120,7 @@ func ChannelConfigs(connections []config.BotConnectionConfig, includeModel bool,
 		}
 		plat := bot.Platform(strings.TrimSpace(conn.Provider))
 		switch plat {
-		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin:
+		case bot.PlatformQQ, bot.PlatformFeishu, bot.PlatformWeixin, bot.PlatformNextcloudTalk:
 		default:
 			continue
 		}
@@ -343,6 +347,18 @@ func AdapterBindings(cfg *config.Config, enabled map[bot.Platform]bool, feishuDo
 			weixinCfg.AccountID = firstNonEmptyString(strings.TrimSpace(conn.Credential.AccountID), weixinCfg.AccountID)
 			weixinCfg.TokenEnv = firstNonEmptyString(strings.TrimSpace(conn.Credential.TokenEnv), weixinCfg.TokenEnv)
 			bindings = append(bindings, bot.AdapterBinding{ID: id, Domain: strings.TrimSpace(conn.Domain), Platform: platform, Adapter: weixin.New(weixinCfg, logger)})
+			hasConnection[platform] = true
+		case bot.PlatformNextcloudTalk:
+			talkCfg := nextcloudtalk.Config{
+				ServerURL:    strings.TrimSpace(conn.Credential.ServerURL),
+				ListenAddr:   strings.TrimSpace(conn.Credential.ListenAddr),
+				WebhookPath:  strings.TrimSpace(conn.Credential.WebhookPath),
+				SecretEnv:    strings.TrimSpace(conn.Credential.SecretEnv),
+				ConnectionID: id,
+			}
+			bindings = append(bindings, bot.AdapterBinding{
+				ID: id, Domain: "nextcloud-talk", Platform: platform, Adapter: nextcloudtalk.New(talkCfg, logger),
+			})
 			hasConnection[platform] = true
 		}
 	}

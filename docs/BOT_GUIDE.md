@@ -14,7 +14,7 @@
 
 - [What the bot does](#what-the-bot-does)
 - [Where it runs](#where-it-runs)
-- [Connect the four channels](#connect-the-four-channels)
+- [Connect the channels](#connect-the-channels)
 - [Run the bot headlessly](#run-the-bot-headlessly)
 - [Usage flow](#usage-flow)
 - [Channel interaction differences](#channel-interaction-differences)
@@ -59,7 +59,7 @@ The normal `reasonix run` command does not automatically start the IM gateway.
 Remote bot behavior is active only while the desktop bot runtime is running or
 while a `reasonix bot start` process is alive.
 
-## Connect the four channels
+## Connect the channels
 
 Open the Reasonix desktop app and go to **Settings -> Bots**. In **Add IM Bot**,
 choose a channel and scan the QR code.
@@ -140,6 +140,32 @@ the App ID and App Secret manually. The adapter reads only the configured
 environment variable. QQ and WeChat HTTP calls use bounded clients so a stalled
 provider request cannot block the gateway indefinitely.
 
+### Nextcloud Talk
+
+Nextcloud Talk uses its official signed bot webhook API. In **Settings -> Bots**,
+choose **Nextcloud Talk** and enter:
+
+1. The Nextcloud server URL, for example `https://cloud.example.com`.
+2. The local webhook listen address (default `127.0.0.1:38017`).
+3. The webhook path (default `/reasonix/nextcloud-talk`).
+4. An environment-variable name for the shared secret and the secret value.
+
+Register the webhook bot on the Nextcloud server with the same shared secret and
+the externally reachable callback URL:
+
+```sh
+php occ talk:bot:install -- "Reasonix" "CHANGE_ME_SHARED_SECRET" \
+  "https://reasonix.example.com/reasonix/nextcloud-talk" "Reasonix bot"
+```
+
+If Nextcloud cannot reach the Reasonix machine directly, place the loopback
+listener behind an HTTPS reverse proxy. Incoming webhook requests are rejected
+unless their Talk HMAC signature verifies. Outbound messages use the same shared
+secret and Talk's signed bot-message endpoint.
+
+Nextcloud Talk uses Reasonix's normal per-connection access settings, routing,
+session mappings, text approvals, and `/answer` command flow.
+
 ## Run the bot headlessly
 
 The desktop app is the easiest way to create and test bot connections, but the
@@ -148,7 +174,7 @@ runtime itself can also run as a long-lived headless gateway:
 ```sh
 reasonix bot doctor
 reasonix bot doctor --deep
-reasonix bot start --channels qq,feishu,lark,weixin --dir /path/to/project
+reasonix bot start --channels qq,feishu,lark,weixin,nextcloud-talk --dir /path/to/project
 ```
 
 Use `--channels` to choose which configured IM inputs to accept. `feishu` and
