@@ -2877,6 +2877,73 @@ func TestResumeSessionRejectsCleanupPending(t *testing.T) {
 	}
 }
 
+func TestResumeSessionRejectsTrashedSessionPath(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	activePath := filepath.Join(dir, "active.jsonl")
+	trashedPath := filepath.Join(dir, "trashed.jsonl")
+	for _, path := range []string{activePath, trashedPath} {
+		if err := os.WriteFile(path, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	if err := deleteSessionFile(dir, trashedPath); err != nil {
+		t.Fatalf("trash session: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "trashed.jsonl", "trashed.jsonl")
+
+	app := NewApp()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: activePath, Label: "test"})
+	app.setTestCtrl(ctrl, "")
+	defer app.activeCtrl().Close()
+
+	if _, err := app.ResumeSession(trashPath); err == nil {
+		t.Fatal("ResumeSession should reject a trashed transcript path")
+	}
+	if _, err := app.OpenChannelSessionForTab("test", trashPath); err == nil {
+		t.Fatal("OpenChannelSessionForTab should reject a trashed transcript path")
+	}
+	if got := app.activeCtrl().SessionPath(); filepath.Clean(got) != filepath.Clean(activePath) {
+		t.Fatalf("active session path after rejected trash resume = %q, want %q", got, activePath)
+	}
+	if preview, err := app.PreviewSession(trashPath); err != nil || !hasHistoryContent(preview, "hello") {
+		t.Fatalf("PreviewSession should still read trashed sessions, got %#v, err %v", preview, err)
+	}
+}
+
+func TestRenameSessionRejectsTrashedSessionPath(t *testing.T) {
+	isolateDesktopUserDirs(t)
+
+	dir := config.SessionDir()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir session dir: %v", err)
+	}
+	sessionPath := filepath.Join(dir, "rename-trash.jsonl")
+	if err := os.WriteFile(sessionPath, []byte(`{"role":"user","content":"hello"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("write session: %v", err)
+	}
+	if err := deleteSessionFile(dir, sessionPath); err != nil {
+		t.Fatalf("trash session: %v", err)
+	}
+	trashPath := filepath.Join(dir, sessionTrashDir, "rename-trash.jsonl", "rename-trash.jsonl")
+
+	app := NewApp()
+	ctrl := control.New(control.Options{SessionDir: dir, SessionPath: filepath.Join(dir, "active.jsonl"), Label: "test"})
+	app.setTestCtrl(ctrl, "")
+	defer app.activeCtrl().Close()
+
+	if err := app.RenameSession(trashPath, "Should Not Stick"); err == nil {
+		t.Fatal("RenameSession should reject a trashed transcript path")
+	}
+	if got := loadSessionTitles(dir)["rename-trash.jsonl"]; got != "" {
+		t.Fatalf("trash rename wrote title %q, want none", got)
+	}
+}
+
 func TestResumeSessionRejectsPathOutsideControllerSessionDir(t *testing.T) {
 	dirA := t.TempDir()
 	dirB := t.TempDir()

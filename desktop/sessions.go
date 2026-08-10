@@ -92,7 +92,7 @@ func saveSessionTitles(dir string, m map[string]string) error {
 
 // setSessionTitle sets (or, with an empty title, clears) a session's custom name.
 func setSessionTitle(dir, sessionPath, title string) error {
-	sessionPath, _, err := validateSessionPath(dir, sessionPath)
+	sessionPath, _, err := validateLiveSessionPath(dir, sessionPath)
 	if err != nil {
 		return err
 	}
@@ -113,7 +113,7 @@ func setSessionTitle(dir, sessionPath, title string) error {
 // trash. Title/display sidecars stay in place so trash previews and restores can
 // preserve the user's labels.
 func deleteSessionFile(dir, sessionPath string) error {
-	sessionPath, key, err := validateSessionPath(dir, sessionPath)
+	sessionPath, key, err := validateLiveSessionPath(dir, sessionPath)
 	if err != nil {
 		return err
 	}
@@ -168,7 +168,7 @@ func trashSessionArtifacts(dir, sessionPath, key string) error {
 func reconcileDesktopCleanupPending(dir string) error {
 	return agent.ReconcileCleanupPending(dir, func(item agent.CleanupPendingInfo) error {
 		if strings.TrimSpace(item.Meta.Operation) == "delete" {
-			sessionPath, key, err := validateSessionPath(dir, item.SessionPath)
+			sessionPath, key, err := validateLiveSessionPath(dir, item.SessionPath)
 			if err != nil {
 				return err
 			}
@@ -600,6 +600,30 @@ func validateSessionPath(dir, sessionPath string) (string, string, error) {
 		return "", "", err
 	}
 	return absPath, filepath.Base(absPath), nil
+}
+
+func validateLiveSessionPath(dir, sessionPath string) (string, string, error) {
+	path, key, err := validateSessionPath(dir, sessionPath)
+	if err != nil {
+		return "", "", err
+	}
+	if isPathUnderDir(sessionTrashPath(dir), path) {
+		return "", "", fmt.Errorf("session path is in trash: %s", sessionPath)
+	}
+	return path, key, nil
+}
+
+func isPathUnderDir(dir, path string) bool {
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absDir, absPath)
+	return err == nil && rel != "." && rel != ".." && !filepath.IsAbs(rel) && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func validateTrashedSessionPath(dir, sessionPath string) (string, string, string, error) {

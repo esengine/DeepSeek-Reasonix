@@ -2006,7 +2006,7 @@ func (a *App) pinnedSessionMeta(sessionPath string) (string, agent.BranchMeta, b
 		return "", agent.BranchMeta{}, false
 	}
 	for _, dir := range a.knownSessionDirs() {
-		path, _, err := validateSessionPath(dir, sessionPath)
+		path, _, err := validateLiveSessionPath(dir, sessionPath)
 		if err != nil {
 			continue
 		}
@@ -2036,7 +2036,7 @@ func (a *App) pinnedSessionMeta(sessionPath string) (string, agent.BranchMeta, b
 		candidateDirs = append(candidateDirs, desktopSessionDir(globalWorkspaceRoot()), config.SessionDir())
 	}
 	for _, dir := range candidateDirs {
-		validPath, _, err := validateSessionPath(dir, path)
+		validPath, _, err := validateLiveSessionPath(dir, path)
 		if err == nil {
 			return validPath, meta, true
 		}
@@ -4168,7 +4168,7 @@ func (a *App) topicTrashTargets(topicID string) ([]topicTrashTarget, error) {
 	var targets []topicTrashTarget
 	seen := map[string]bool{}
 	addTarget := func(dir, path string) error {
-		sessionPath, key, err := validateSessionPath(dir, path)
+		sessionPath, key, err := validateLiveSessionPath(dir, path)
 		if err != nil {
 			return err
 		}
@@ -4897,13 +4897,13 @@ func pinnedTabSessionPath(dir, sessionPath string) (string, bool) {
 	if sessionPath == "" || dir == "" {
 		return "", false
 	}
-	path, _, err := validateSessionPath(dir, sessionPath)
+	path, _, err := validateLiveSessionPath(dir, sessionPath)
 	if err != nil {
 		base := filepath.Base(sessionPath)
 		if base == "." || base == string(filepath.Separator) || !strings.HasSuffix(base, ".jsonl") {
 			return "", false
 		}
-		path, _, err = validateSessionPath(dir, filepath.Join(dir, base))
+		path, _, err = validateLiveSessionPath(dir, filepath.Join(dir, base))
 		if err != nil {
 			return "", false
 		}
@@ -4935,7 +4935,7 @@ func canonicalTabSessionPath(path string) string {
 	if path == "" {
 		return ""
 	}
-	if validPath, _, err := validateSessionPath(config.SessionDir(), path); err == nil {
+	if validPath, _, err := validateLiveSessionPath(config.SessionDir(), path); err == nil {
 		return validPath
 	}
 	return path

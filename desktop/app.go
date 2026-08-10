@@ -1491,7 +1491,20 @@ func (a *App) trashedSessionDir(path string) (string, error) {
 
 func (a *App) sessionDirForPath(path string) (string, string, error) {
 	for _, dir := range a.knownSessionDirs() {
-		sessionPath, _, err := validateSessionPath(dir, path)
+		sessionPath, _, err := validateLiveSessionPath(dir, path)
+		if err == nil {
+			return dir, sessionPath, nil
+		}
+	}
+	return "", "", fmt.Errorf("session path outside known session dirs: %s", path)
+}
+
+func (a *App) sessionDirForPreviewPath(path string) (string, string, error) {
+	if dir, sessionPath, err := a.sessionDirForPath(path); err == nil {
+		return dir, sessionPath, nil
+	}
+	for _, dir := range a.knownSessionDirs() {
+		sessionPath, _, _, err := validateTrashedSessionPath(dir, path)
 		if err == nil {
 			return dir, sessionPath, nil
 		}
@@ -1556,7 +1569,7 @@ func channelSessionRoutesForDir(dir string) map[string]channelSessionRoute {
 			if sessionPath == "" {
 				continue
 			}
-			validPath, _, err := validateSessionPath(dir, sessionPath)
+			validPath, _, err := validateLiveSessionPath(dir, sessionPath)
 			if err != nil {
 				continue
 			}
@@ -1618,7 +1631,7 @@ func channelDisplayName(provider, domain string) string {
 // autosave cannot recreate or append to the deleted file later.
 func (a *App) DeleteSession(path string) error {
 	dir := a.activeSessionDir()
-	sessionPath, key, err := validateSessionPath(dir, path)
+	sessionPath, key, err := validateLiveSessionPath(dir, path)
 	if err != nil {
 		return err
 	}
@@ -1783,7 +1796,7 @@ func tabMatchesSession(tab *WorkspaceTab, dir, sessionPath string) bool {
 	if tab == nil || tabSessionDir(tab) != dir {
 		return false
 	}
-	currentPath, _, err := validateSessionPath(dir, tab.currentSessionPath())
+	currentPath, _, err := validateLiveSessionPath(dir, tab.currentSessionPath())
 	return err == nil && currentPath == sessionPath
 }
 
@@ -1983,7 +1996,7 @@ func (a *App) openSessionPaths(dir string) map[string]struct{} {
 
 	out := make(map[string]struct{}, len(paths))
 	for _, path := range paths {
-		currentPath, _, err := validateSessionPath(dir, path)
+		currentPath, _, err := validateLiveSessionPath(dir, path)
 		if err == nil {
 			out[currentPath] = struct{}{}
 		}
@@ -1998,7 +2011,7 @@ func (a *App) activeSessionPath(dir string) string {
 		path = tab.currentSessionPath()
 	}
 	a.mu.RUnlock()
-	currentPath, _, err := validateSessionPath(dir, path)
+	currentPath, _, err := validateLiveSessionPath(dir, path)
 	if err != nil {
 		return ""
 	}
@@ -2086,7 +2099,7 @@ func (a *App) ResumeSessionForTab(tabID, path string) ([]HistoryMessage, error) 
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
 	ctrl := tab.Ctrl
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	sessionPath, _, err := validateLiveSessionPath(controllerSessionDir(ctrl), path)
 	if err != nil {
 		return nil, err
 	}
@@ -2112,7 +2125,7 @@ func (a *App) OpenChannelSessionForTab(tabID, path string) ([]HistoryMessage, er
 		return []HistoryMessage{}, fmt.Errorf("tab is not ready")
 	}
 	ctrl := tab.Ctrl
-	sessionPath, _, err := validateSessionPath(controllerSessionDir(ctrl), path)
+	sessionPath, _, err := validateLiveSessionPath(controllerSessionDir(ctrl), path)
 	if err != nil {
 		return nil, err
 	}
@@ -2231,7 +2244,7 @@ func loadResumableSession(sessionPath string) (*agent.Session, error) {
 // PreviewSession reads a saved session for display only. It does not snapshot or
 // swap the active controller, so the history drawer can call it while a turn runs.
 func (a *App) PreviewSession(path string) ([]HistoryMessage, error) {
-	sessionDir, sessionPath, err := a.sessionDirForPath(path)
+	sessionDir, sessionPath, err := a.sessionDirForPreviewPath(path)
 	if err != nil {
 		return nil, err
 	}
@@ -2325,7 +2338,7 @@ func promptHistoryLimit(limit int) int {
 
 func (a *App) promptHistoryTapeForLocked(dir, sessionPath string) (*promptHistoryTape, error) {
 	currentPath := ""
-	if path, _, err := validateSessionPath(dir, sessionPath); err == nil {
+	if path, _, err := validateLiveSessionPath(dir, sessionPath); err == nil {
 		currentPath = path
 	}
 	if a.promptHistoryTape != nil && a.promptHistoryTape.dir == dir && a.promptHistoryTape.currentPath == currentPath {
