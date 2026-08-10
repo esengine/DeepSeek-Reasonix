@@ -190,6 +190,7 @@ func (a *Agent) compressVisibleRange(
 	res, err := a.foldToSummary(ctx, prepared.fold, prepared.instructions)
 	summary := res.Text
 	tele := compactionTelemetryFromSummary(trigger, a.CacheState(), result.SourceTokens, res, a.tokPerChar())
+	tele.Reason = a.lastFoldReason
 	if err != nil {
 		tele.Error = err.Error()
 		a.emitCompactionTelemetry(tele)

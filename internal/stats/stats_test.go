@@ -642,3 +642,36 @@ func TestRecorderPersistsCompactionNoop(t *testing.T) {
 		t.Fatalf("record fields wrong: %+v", rec.CompactionRecord)
 	}
 }
+
+// TestRecorderPersistsPrefixHash pins the TTL-diagnosis field: each usage row
+// carries CacheDiagnostics.PrefixHash so post-hoc analysis can tell a cache
+// miss from a changed prefix (hash differs) apart from one caused by
+// server-side cache expiry (hash identical across the gap).
+func TestRecorderPersistsPrefixHash(t *testing.T) {
+	dir := t.TempDir()
+	r := NewRecorder(&spySink{}, dir, "desktop")
+	u := usageEvent("deepseek/deepseek-v4-flash", 1000, 50, 10, 900, 100, 1050)
+	u.CacheDiagnostics = &event.CacheDiagnostics{
+		PrefixHash: "abc123", PrefixChanged: true, PrefixChangeReasons: []string{"log_rewrite"},
+	}
+	u.EstTokens = 1600
+	r.Emit(u)
+	flushRecorder(t, r)
+
+	data, err := os.ReadFile(filepath.Join(dir, dailyJSONLFiles(t, dir)[0].Name()))
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if !strings.Contains(string(data), `"prefix_hash":"abc123"`) {
+		t.Fatalf("row missing prefix_hash: %s", data)
+	}
+	if !strings.Contains(string(data), `"prefix_changed":true`) {
+		t.Fatalf("row missing prefix_changed: %s", data)
+	}
+	if !strings.Contains(string(data), `"prefix_reasons":["log_rewrite"]`) {
+		t.Fatalf("row missing prefix_reasons: %s", data)
+	}
+	if !strings.Contains(string(data), `"est":1600`) {
+		t.Fatalf("row missing est: %s", data)
+	}
+}

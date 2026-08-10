@@ -143,6 +143,7 @@ type CompactionState struct {
 // compaction attempt. Sensitive transcript content is intentionally omitted.
 type CompactionTelemetry struct {
 	Trigger    string  `json:"trigger"`
+	Reason     string  `json:"reason,omitempty"` // fold admission: manual|overflow|force|fold
 	CacheState string  `json:"cache_state"`
 	Mode       string  `json:"mode"`
 	Status     string  `json:"status,omitempty"` // installed | noop | aborted; "" on legacy paths

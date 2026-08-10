@@ -52,6 +52,17 @@ func TestCompactionNoopEmitsTelemetry(t *testing.T) {
 	if !found {
 		t.Fatalf("no status=noop telemetry emitted; notices: %v", sink.notices)
 	}
+	foundReason := false
+	for _, d := range sink.notices {
+		if strings.Contains(d, "reason=manual") {
+			foundReason = true
+		}
+	}
+	if !foundReason {
+		t.Fatalf("no reason=manual in telemetry; notices: %v", sink.notices)
+	}
+	// The fold admission reason rides through to the row (set by foldContext;
+	// the manual path here leaves the last admission label untouched).
 }
 
 // TestCompactionTelemetrySourceTokensCalibrated pins the 2026-08-09 display

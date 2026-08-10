@@ -42,7 +42,13 @@ type record struct {
 	CacheMiss  int       `json:"cache_miss,omitempty"`
 	Total      int       `json:"total,omitempty"`
 	Requests   int       `json:"requests,omitempty"` // provider requests represented by this row
-	Turn       bool      `json:"turn,omitempty"`     // true for TurnDone marker rows
+	Est        int       `json:"est,omitempty"`      // Prepare admission estimate; est vs prompt exposes estimate drift
+	// PrefixHash fingerprints the sent request prefix (CacheDiagnostics),
+	// distinguishing a miss from a changed prefix vs server-side expiry.
+	PrefixHash    string   `json:"prefix_hash,omitempty"`
+	PrefixChanged bool     `json:"prefix_changed,omitempty"`
+	PrefixReasons []string `json:"prefix_reasons,omitempty"`
+	Turn          bool     `json:"turn,omitempty"` // true for TurnDone marker rows
 	// Compaction records one context-compaction pass (agent compaction
 	// telemetry). Nil on usage/turn rows; Query aggregation skips them.
 	Compaction *CompactionRecord `json:"compaction,omitempty"`

@@ -542,6 +542,7 @@ type Event struct {
 	// Usage's single-turn numbers.
 	SessionHit      int                      // Usage: cumulative cache-hit prompt tokens this session
 	SessionMiss     int                      // Usage: cumulative cache-miss prompt tokens this session
+	EstTokens       int                      // Usage: Prepare admission estimate for this request (0 = none)
 	Level           Level                    // Notice
 	Audience        NoticeAudience           // Notice: empty = ordinary frontend delivery; operator = no end-user chat forwarding
 	Approval        Approval                 // ApprovalRequest

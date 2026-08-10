@@ -109,6 +109,18 @@ func (m ContextManager) prepareOnce(ctx context.Context, policy ContextPreparePo
 
 func (m ContextManager) foldContext(ctx context.Context, prepared PreparedContext, policy ContextPreparePolicy, inputHash string, est, fold, hard int, forceFold bool) (PreparedContext, error) {
 	a := m.agent
+	reason := "fold"
+	switch {
+	case policy.Trigger == CompactionTriggerManual || policy.Force:
+		reason = "manual"
+	case policy.Trigger == CompactionTriggerOverflow:
+		reason = "overflow"
+	case est >= force:
+		reason = "force"
+	case est >= fold:
+		reason = "fold"
+	}
+	a.lastFoldReason = reason
 	outcome, err := a.compactToProjection(ctx, policy.Trigger, policy.Instructions, forceFold)
 	if err != nil {
 		if errors.Is(err, errCompressStaleContext) && policy.Trigger != CompactionTriggerManual {

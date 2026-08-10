@@ -103,6 +103,7 @@ func (a *Agent) buildSamplingRequest(ctx context.Context, trigger string) (sampl
 	if err != nil {
 		return samplingRequest{}, err
 	}
+	a.lastEstTokens = prepared.InputTokens
 	requestMessages := append([]provider.Message(nil), provider.ModelMessages(prepared.Messages)...)
 	requestMessages = a.providerProjectionMessages(requestMessages)
 	for i := range requestMessages {
