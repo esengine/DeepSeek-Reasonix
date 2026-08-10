@@ -6,7 +6,7 @@
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",
-    "test": "node --test src/scripts/asset-graph.test.mjs src/scripts/ip-platform-state.test.mjs src/scripts/ip-platform-contract.test.mjs src/scripts/enterprise-contract.test.mjs src/scripts/user-guide-contract.test.mjs server/*.test.mjs e2e/internet-corpus-source.test.mjs",
+    "test": "node --test src/scripts/asset-graph.test.mjs src/scripts/agent-workbench.test.mjs src/scripts/ip-platform-state.test.mjs src/scripts/ip-platform-contract.test.mjs src/scripts/enterprise-contract.test.mjs src/scripts/user-guide-contract.test.mjs server/*.test.mjs e2e/internet-corpus-source.test.mjs",
     "test:upstream": "node --test src/scripts/*.test.mjs",
     "test:e2e": "node e2e/platform.e2e.mjs",
     "test:e2e:smb": "node e2e/smb-auth-wiki.e2e.mjs",
@@ -15,10 +15,12 @@
     "test:e2e:modules": "node e2e/module-tour.e2e.mjs",
     "test:e2e:real": "node e2e/real-platform.e2e.mjs",
     "test:e2e:internet": "node e2e/internet-corpus.e2e.mjs",
+    "test:e2e:agent": "node e2e/bounded-agent.e2e.mjs",
+    "test:e2e:agent:real": "node e2e/real-agent.e2e.mjs",
     "test:graph:performance": "node e2e/asset-graph-performance.mjs",
     "start:real": "node server/real-analysis-server.mjs",
     "security:scan": "node server/credential-scan.mjs",
-    "verify": "npm test && npm run build && npm run test:e2e",
+    "verify": "npm test && npm run build && npm run test:e2e && npm run test:e2e:agent",
     "verify:real": "npm test && npm run build && npm run test:e2e:real"
   },
   "dependencies": {

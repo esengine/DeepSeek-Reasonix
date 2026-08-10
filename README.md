@@ -2,7 +2,7 @@
 
 > Enterprise long-document IP analysis and Wiki governance, rebuilt on the open-source Reasonix foundation for intelifar.
 
-The primary web surface in `site/` supports both deterministic offline acceptance and a real server-side MinerU + DeepSeek workflow for document intake, schema extraction, Wiki generation, redaction, provenance, lifecycle governance, and immutable audit evidence. API keys remain inside the same-origin Node gateway.
+The primary web surface in `site/` supports both deterministic offline acceptance and a real server-side MinerU + DeepSeek workflow for document intake, schema extraction, Wiki generation, redaction, provenance, lifecycle governance, immutable audit evidence, and a bounded natural-language IP task agent. The task agent is limited to authorized document/IP/Wiki analysis, read-only domain tools, evidence-grounded results, and draft-only Wiki suggestions; it is not exposed as a coding agent. API keys remain inside the same-origin Node gateway.
 
 ```powershell
 cd site
@@ -14,6 +14,8 @@ npm run test:e2e:smb
 npm run test:e2e:operations
 npm run test:e2e:collaboration
 npm run test:e2e:modules
+npm run test:e2e:agent
+npm run test:e2e:agent:real
 npm run test:e2e:real
 ```
 

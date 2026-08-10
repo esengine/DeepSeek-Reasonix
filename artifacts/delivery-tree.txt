@@ -14,8 +14,6 @@ intelifar-ip-wiki/
 |   |-- e2e/platform.e2e.mjs          # desktop, keyboard and mobile scenarios
 |   |-- e2e/asset-graph-performance.mjs # 10k nodes / 100k edges gate
 |   |-- e2e/real-platform.e2e.mjs     # MinerU + DeepSeek live scenario
-|   |-- e2e/internet-corpus*.mjs      # fixed-source, allowlisted 3-document live E2E
-|   |-- server/long-document-sampler.mjs # section-balanced long-document coverage
 |   |-- server/                       # gateway, providers and publication registry
 |   `-- dist/                         # production static build
 `-- artifacts/
@@ -25,6 +23,5 @@ intelifar-ip-wiki/
     |-- enterprise-95-scorecard.md
     |-- enterprise-95-review/          # final desktop/mobile visual review
     |-- real-e2e/                      # sanitized live-provider publication evidence
-    |-- internet-corpus/               # source hashes, batch results, UI proof and acceptance
     |-- ip-asset-graph/                # panorama, performance and structure proof
     `-- screenshots/                   # full product browser evidence

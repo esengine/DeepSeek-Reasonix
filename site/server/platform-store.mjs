@@ -6,6 +6,7 @@ import { createAssetGraphStore } from "./asset-graph-store.mjs";
 
 const ROLES = new Set(["owner", "admin", "editor", "viewer"]);
 const TERMINAL_JOB_STATES = new Set(["complete", "failed", "interrupted", "cancelled", "blocked"]);
+const TERMINAL_AGENT_TASK_STATES = new Set(["complete", "needs_review", "failed", "interrupted", "cancelled", "blocked"]);
 
 function nowIso() {
   return new Date().toISOString();
@@ -108,6 +109,18 @@ function shareRow(row) {
   };
 }
 
+function agentTaskEventRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    type: row.event_type,
+    stepId: row.step_id ?? null,
+    detail: parseJson(row.detail_json, {}),
+    createdAt: row.created_at,
+  };
+}
+
 export function createPlatformStore(options = {}) {
   const dbPath = path.resolve(options.dbPath ?? path.resolve(process.cwd(), ".runtime", "intelifar.sqlite"));
   mkdirSync(path.dirname(dbPath), { recursive: true });
@@ -184,6 +197,29 @@ export function createPlatformStore(options = {}) {
       PRIMARY KEY(workspace_id, id)
     );
     CREATE INDEX IF NOT EXISTS analysis_jobs_workspace_updated ON analysis_jobs(workspace_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS agent_tasks (
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      state TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(workspace_id, id)
+    );
+    CREATE INDEX IF NOT EXISTS agent_tasks_creator_updated ON agent_tasks(workspace_id, created_by, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS agent_task_events (
+      sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT NOT NULL UNIQUE,
+      workspace_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      step_id TEXT,
+      detail_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(workspace_id, task_id) REFERENCES agent_tasks(workspace_id, id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS agent_task_events_task_sequence ON agent_task_events(workspace_id, task_id, sequence);
     CREATE TABLE IF NOT EXISTS publications (
       workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
       id TEXT NOT NULL,
@@ -298,6 +334,23 @@ export function createPlatformStore(options = {}) {
     getJob: database.prepare("SELECT payload_json, upload_path FROM analysis_jobs WHERE workspace_id = ? AND id = ?"),
     listJobs: database.prepare("SELECT payload_json, upload_path FROM analysis_jobs WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT ?"),
     unfinishedJobs: database.prepare("SELECT workspace_id, id, payload_json, upload_path FROM analysis_jobs"),
+    saveAgentTask: database.prepare(`
+      INSERT INTO agent_tasks(workspace_id, id, created_by, state, payload_json, created_at, updated_at)
+      VALUES(@workspaceId, @id, @createdBy, @state, @payloadJson, @createdAt, @updatedAt)
+      ON CONFLICT(workspace_id, id) DO UPDATE SET
+        state = excluded.state,
+        payload_json = excluded.payload_json,
+        updated_at = excluded.updated_at
+    `),
+    getAgentTask: database.prepare("SELECT payload_json FROM agent_tasks WHERE workspace_id = ? AND id = ?"),
+    getAgentTaskForCreator: database.prepare("SELECT payload_json FROM agent_tasks WHERE workspace_id = ? AND id = ? AND created_by = ?"),
+    listAgentTasksForCreator: database.prepare("SELECT payload_json FROM agent_tasks WHERE workspace_id = ? AND created_by = ? ORDER BY updated_at DESC LIMIT ?"),
+    unfinishedAgentTasks: database.prepare("SELECT workspace_id, id, payload_json FROM agent_tasks"),
+    insertAgentTaskEvent: database.prepare(`
+      INSERT INTO agent_task_events(id, workspace_id, task_id, event_type, step_id, detail_json, created_at)
+      VALUES(@id, @workspaceId, @taskId, @eventType, @stepId, @detailJson, @createdAt)
+    `),
+    listAgentTaskEvents: database.prepare("SELECT * FROM agent_task_events WHERE workspace_id = ? AND task_id = ? ORDER BY sequence ASC"),
     savePublication: database.prepare(`
       INSERT OR IGNORE INTO publications(workspace_id, id, source_job_id, payload_json, created_at)
       VALUES(@workspaceId, @id, @sourceJobId, @payloadJson, @createdAt)
@@ -627,6 +680,63 @@ export function createPlatformStore(options = {}) {
           updatedAt: nowIso(),
         };
         statements.saveJob.run({ workspaceId: row.workspace_id, id: row.id, state: updated.state, payloadJson: JSON.stringify(updated), uploadPath: row.upload_path, createdAt: updated.createdAt || updated.updatedAt, updatedAt: updated.updatedAt });
+        count += 1;
+      }
+      return count;
+    },
+    saveAgentTask(workspaceId, task) {
+      const item = clone(task);
+      statements.saveAgentTask.run({
+        workspaceId: String(workspaceId),
+        id: String(item.id),
+        createdBy: String(item.createdBy),
+        state: String(item.state),
+        payloadJson: JSON.stringify(item),
+        createdAt: item.createdAt || nowIso(),
+        updatedAt: item.updatedAt || nowIso(),
+      });
+      return clone(item);
+    },
+    getAgentTask(workspaceId, id, createdBy = null) {
+      const row = createdBy == null
+        ? statements.getAgentTask.get(String(workspaceId), String(id))
+        : statements.getAgentTaskForCreator.get(String(workspaceId), String(id), String(createdBy));
+      return row ? parseJson(row.payload_json) : null;
+    },
+    listAgentTasks(workspaceId, createdBy, limit = 50) {
+      return statements.listAgentTasksForCreator
+        .all(String(workspaceId), String(createdBy), Math.max(1, Math.min(100, Number(limit) || 50)))
+        .map((row) => parseJson(row.payload_json)).filter(Boolean);
+    },
+    appendAgentTaskEvent(workspaceId, taskId, event) {
+      const item = {
+        id: String(event.id || `AGE-${randomUUID()}`),
+        workspaceId: String(workspaceId),
+        taskId: String(taskId),
+        eventType: String(event.type),
+        stepId: event.stepId == null ? null : String(event.stepId),
+        detailJson: JSON.stringify(event.detail ?? {}),
+        createdAt: event.createdAt || nowIso(),
+      };
+      statements.insertAgentTaskEvent.run(item);
+      return { id: item.id, taskId: item.taskId, type: item.eventType, stepId: item.stepId, detail: clone(event.detail ?? {}), createdAt: item.createdAt };
+    },
+    listAgentTaskEvents(workspaceId, taskId) {
+      return statements.listAgentTaskEvents.all(String(workspaceId), String(taskId)).map(agentTaskEventRow);
+    },
+    markInterruptedAgentTasks() {
+      let count = 0;
+      for (const row of statements.unfinishedAgentTasks.all()) {
+        const task = parseJson(row.payload_json, {});
+        if (TERMINAL_AGENT_TASK_STATES.has(task.state)) continue;
+        const updated = {
+          ...task,
+          state: "interrupted",
+          stageLabel: "服务重启后已安全中断",
+          error: "任务在服务重启时中断，未自动重放模型或工具调用",
+          updatedAt: nowIso(),
+        };
+        statements.saveAgentTask.run({ workspaceId: row.workspace_id, id: row.id, createdBy: String(updated.createdBy), state: updated.state, payloadJson: JSON.stringify(updated), createdAt: updated.createdAt || updated.updatedAt, updatedAt: updated.updatedAt });
         count += 1;
       }
       return count;

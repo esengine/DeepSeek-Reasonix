@@ -9,12 +9,14 @@ import {
   validateShare,
 } from "./ip-platform-state.mjs";
 import { ASSET_TYPE_COLORS, RELATION_LABELS, edgePath, layoutAssetGraph, relatedAssetIds } from "./asset-graph.mjs";
+import { createAgentWorkbench } from "./agent-workbench.mjs";
 
 const storageKey = "intelifar-ip-platform-v1";
 const titles = {
   overview: "企业 IP 指挥台",
   documents: "文档中心",
   analysis: "智能分析工作室",
+  agent: "IP 任务助手",
   assets: "IP 资产库",
   wiki: "IP Wiki",
   redaction: "脱敏与溯源",
@@ -49,6 +51,7 @@ let graphFocusId = null;
 let selectedGraphNode = null;
 let selectedGraphRelationship = null;
 let graphScale = 1;
+let agentWorkbench = null;
 const qs = (selector, root = document) => root.querySelector(selector);
 const qsa = (selector, root = document) => [...root.querySelectorAll(selector)];
 
@@ -64,6 +67,9 @@ function applySession(session, mode = "local-session") {
   setText("#profile-avatar", (session.user?.name || session.user?.email || "U").trim().slice(0, 1));
   setText("#profile-role", roleLabels[session.user?.role] || session.user?.role || "成员");
   const canEdit = ["owner", "admin", "editor"].includes(session.user?.role);
+  const wikiDraftTemplate = qs('[data-agent-template="wiki_draft"]');
+  wikiDraftTemplate.disabled = !canEdit;
+  wikiDraftTemplate.title = canEdit ? "只生成更新建议，不会保存正式 Wiki" : "需要知识编辑者、空间管理员或空间所有者权限";
   qs("#wiki-edit").disabled = !canEdit;
   qs("#open-share").disabled = !canEdit;
   qs("#share-wiki").disabled = !canEdit;
@@ -573,7 +579,7 @@ qs("#login-form").addEventListener("submit", async (event) => {
     if (!response.ok || !payload.session) throw new Error(response.status === 401 ? "邮箱或密码不正确" : payload.error || "暂时无法登录");
     form.reset();
     applySession(payload.session);
-    await Promise.all([loadPublishedAssets(), loadOperations(), loadShares(), loadMembers()]);
+    await initializeAuthenticatedWorkspace();
     showToast("已进入安全工作空间", `${payload.session.workspace.name} · ${roleLabels[payload.session.user.role] || payload.session.user.role}`);
   } catch (error) {
     setText("#session-error", String(error.message || "暂时无法登录"));
@@ -796,6 +802,48 @@ function renderEvidence(evidence, trigger = document.activeElement) {
   setText("#evidence-integrity-title", evidence.verified ? "证据完整性记录已生成" : "证据等待人工校验");
   setText("#evidence-integrity-copy", evidence.verified ? "引用哈希、整文档哈希与 MinerU 任务已绑定；当前定位精度不夸大为页码。" : "此证据尚未形成完整哈希链。");
   openDrawer(qs("#provenance-drawer"), trigger);
+}
+
+async function openAgentSource(sourceId, trigger) {
+  const id = String(sourceId || "");
+  try {
+    if (id.startsWith("EV-")) {
+      const response = await fetch(`/api/evidence/${encodeURIComponent(id)}`, { headers: { accept: "application/json" } });
+      if (response.status === 401) { lockWorkspace(); return; }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || !payload.evidence) throw new Error("当前权限范围内无法读取该证据");
+      renderEvidence(payload.evidence, trigger);
+      return;
+    }
+    const assetId = id.startsWith("WIKI:") ? id.slice(5) : id.startsWith("IP-") ? id : "";
+    if (assetId) {
+      let asset = currentPublishedAssets.find((item) => item.id === assetId);
+      if (!asset && currentSession?.mode !== "static-demo") {
+        const response = await fetch(`/api/assets/${encodeURIComponent(assetId)}`, { headers: { accept: "application/json" } });
+        if (response.ok) asset = (await response.json()).asset;
+      }
+      if (asset && id.startsWith("WIKI:")) { renderDynamicWiki(asset); navigate("wiki"); return; }
+      if (asset) { populateAssetDrawer(asset, trigger); return; }
+      const demoRow = Array.from(document.querySelectorAll("[data-asset-id]")).find((row) => row.dataset.assetId === assetId);
+      if (demoRow && ["static-demo", "loopback-demo"].includes(currentSession?.mode)) {
+        if (id.startsWith("WIKI:")) navigate("wiki");
+        else { navigate("assets"); openDrawer(qs("#asset-drawer"), trigger); }
+        showToast("已打开任务来源", `${assetId} · 当前演示空间`);
+        return;
+      }
+      navigate("assets");
+      qs("#asset-search").value = assetId;
+      qs("#asset-search").dispatchEvent(new Event("input"));
+      showToast("已定位到资产库", `请在当前权限范围内复核 ${assetId}`);
+      return;
+    }
+    if (id.startsWith("REL-")) {
+      navigate("assets");
+      qs("#graph-search").value = id;
+      renderAssetGraph();
+      showToast("已打开关系全景", `关系收据 ${id}`);
+    }
+  } catch (error) { showToast("无法打开任务来源", String(error.message || error), "error"); }
 }
 
 function populateAssetDrawer(asset, trigger = document.activeElement) {
@@ -1950,6 +1998,7 @@ qs("#refresh-operations").addEventListener("click", loadOperations);
 qs('[data-nav="system"]').addEventListener("click", loadOperations);
 qs('[data-nav="lifecycle"]').addEventListener("click", loadShares);
 qs('[data-nav="assets"]').addEventListener("click", loadAssetGraph);
+qs('[data-nav="agent"]').addEventListener("click", () => agentWorkbench?.loadTasks());
 
 qs("#refresh-health").addEventListener("click", async (event) => {
   event.currentTarget.disabled = true;
@@ -1964,7 +2013,17 @@ const hashView = location.hash.slice(1);
 navigate(titles[hashView] ? hashView : state.activeView, false);
 updateAnalysisUI();
 await refreshProviderHealth();
-if (await initializeSession()) {
-  await Promise.all([loadPublishedAssets(), loadAssetGraph(), loadOperations(), loadShares(), loadMembers()]);
+async function initializeAuthenticatedWorkspace() {
+  if (!agentWorkbench) {
+  agentWorkbench = createAgentWorkbench({
+    root: document,
+    modeProvider: () => currentSession?.mode || "local-session",
+    onSource: openAgentSource,
+    onAuthRequired: () => lockWorkspace(),
+    onToast: showToast,
+  });
+  }
+  await Promise.all([loadPublishedAssets(), loadAssetGraph(), loadOperations(), loadShares(), loadMembers(), agentWorkbench.loadTasks()]);
   await loadRecentRealJobs();
 }
+if (await initializeSession()) await initializeAuthenticatedWorkspace();

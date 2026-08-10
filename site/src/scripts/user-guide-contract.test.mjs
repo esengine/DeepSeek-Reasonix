@@ -12,7 +12,7 @@ test("user guide is written for external small-business users", () => {
   assert.match(guide, /^# intelifar /);
   assert.doesNotMatch(guide, /Inteli[F]ar|Obsidian/);
   for (const reader of ["企业负责人或管理员", "内容维护者", "阅读成员", "外部收件人"]) assert.match(guide, new RegExp(reader));
-  for (const task of ["第一次登录", "把一份文档变成知识页面", "检查分析结果并发布", "查找和核对知识", "修改已有 Wiki", "把脱敏内容发给客户", "邀请同事", "每周管理员检查", "遇到问题怎么办"]) assert.match(guide, new RegExp(task));
+  for (const task of ["第一次登录", "把一份文档变成知识页面", "检查分析结果并发布", "查找和核对知识", "IP 任务助手", "修改已有 Wiki", "把脱敏内容发给客户", "邀请同事", "每周管理员检查", "遇到问题怎么办"]) assert.match(guide, new RegExp(task));
 });
 
 test("user guide keeps the working path clear and avoids engineering jargon", () => {
@@ -32,6 +32,9 @@ test("user guide places enough real screenshots next to user tasks", () => {
     "artifacts/internet-corpus/01-real-asset-panorama.png",
     "artifacts/internet-corpus/03-real-relationship-review.png",
     "artifacts/internet-corpus/04-real-relationship-evidence.png",
+    "artifacts/ip-agent/01-agent-workbench.png",
+    "artifacts/ip-agent/02-grounded-delivery.png",
+    "artifacts/ip-agent/04-boundary-block.png",
     "artifacts/enterprise-95-review/06-real-wiki-final.png",
     "artifacts/smb-p0d-review/01-team-invitation.png",
     "artifacts/smb-p0d-review/05-double-credential-share.png",

@@ -169,7 +169,7 @@ export function createPublicationRegistry(options = {}) {
     async search(query, workspaceId = defaultWorkspaceId, optionsForSearch = {}) {
       const normalized = safeText(query).toLocaleLowerCase("zh-CN");
       if (!normalized) return [];
-      return (await this.listAssets(workspaceId, optionsForSearch)).filter((asset) => [asset.id, asset.title, asset.type, asset.summary, asset.owner, asset.document?.title, asset.document?.sourceName, asset.wiki?.title, asset.wiki?.executiveSummary, asset.wiki?.keyMechanism, ...asset.tags, ...asset.evidence.map((item) => `${item.section} ${item.quote}`)].join(" ").toLocaleLowerCase("zh-CN").includes(normalized));
+      return (await this.listAssets(workspaceId, optionsForSearch)).filter((asset) => [asset.id, asset.title, asset.type, asset.summary, asset.owner, asset.document?.title, asset.document?.sourceName, asset.wiki?.title, asset.wiki?.executiveSummary, asset.wiki?.keyMechanism, ...(Array.isArray(asset.tags) ? asset.tags : []), ...(Array.isArray(asset.evidence) ? asset.evidence : []).map((item) => `${item.section} ${item.quote}`)].join(" ").toLocaleLowerCase("zh-CN").includes(normalized));
     },
     async getAssetGraph(workspaceId = defaultWorkspaceId, optionsForGraph = {}) {
       if (platformStore) return platformStore.getAssetGraph(workspaceId, optionsForGraph);

@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { createAgentModelClient } from "./agent-model-client.mjs";
+import { createAgentService } from "./agent-service.mjs";
+import { createAgentTools } from "./agent-tools.mjs";
 import { createAnalysisService } from "./analysis-service.mjs";
 import { createAuthService } from "./auth-service.mjs";
 import { createBackupService } from "./backup-service.mjs";
@@ -159,6 +162,22 @@ export async function createRealAnalysisServer(options = {}) {
   });
   const analysisService = options.analysisService ?? createAnalysisService({ mineruClient, deepseekClient, fileSecurityService, jobStore: platformStore, uploadRoot: options.uploadRoot, defaultWorkspaceId });
   const publicationRegistry = options.publicationRegistry ?? createPublicationRegistry({ rootDir: options.registryRoot, store: platformStore, defaultWorkspaceId });
+  const agentModelClient = options.agentModelClient ?? (platformStore ? createAgentModelClient({ apiKey: config.deepseekApiKey, model: config.deepseekModel, timeoutMs: options.agentModelTimeoutMs }) : null);
+  const agentTools = options.agentTools ?? (platformStore ? createAgentTools({ publicationRegistry }) : null);
+  const agentService = options.agentService ?? (platformStore ? createAgentService({
+    store: platformStore,
+    modelClient: agentModelClient,
+    tools: agentTools,
+    resolveContext: async ({ workspaceId, userId, role }) => {
+      if (!authRequired) return { workspaceId, userId, role: role || "owner", active: true };
+      const user = platformStore.getUserById(userId);
+      return user ? { workspaceId: user.workspaceId, userId: user.id, role: user.role, active: !user.disabledAt } : null;
+    },
+    onAudit: (event) => {
+      if (!authRequired) return;
+      platformStore.appendAudit(event.workspaceId, { actorUserId: event.actorUserId, action: event.action, objectType: event.objectType, objectId: event.objectId, detail: event.detail });
+    },
+  }) : null);
   const shareService = options.shareService ?? (platformStore ? createShareService({ store: platformStore }) : null);
   const backupService = options.backupService ?? (platformStore ? createBackupService({ store: platformStore, backupRoot: options.backupRoot, retention: options.backupRetention }) : null);
   const distRoot = path.resolve(options.distRoot ?? DEFAULT_DIST);
@@ -168,7 +187,9 @@ export async function createRealAnalysisServer(options = {}) {
   const rateWindows = new Map();
   const loginRateWindows = new Map();
   const publicRateWindows = new Map();
+  const agentRateWindows = new Map();
   const publicAccessRateLimit = Math.max(1, Number(options.publicAccessRateLimit ?? 20));
+  const agentRateLimit = Math.max(1, Number(options.agentRateLimit ?? 12));
 
   function allowWindow(windows, identity, limit) {
     const now = Date.now();
@@ -207,7 +228,8 @@ export async function createRealAnalysisServer(options = {}) {
           providers: { mineru: "configured", deepseek: "configured" },
           model: config.deepseekModel,
           auth: { required: authRequired, mode: authRequired ? "local-session" : "loopback-demo" },
-          storage: { adapter: platformStore ? "sqlite" : "atomic-json", durableJobs: Boolean(platformStore), wikiVersions: Boolean(platformStore), verifiedBackups: Boolean(backupService), memberLifecycle: Boolean(platformStore), secureShares: Boolean(shareService) },
+          storage: { adapter: platformStore ? "sqlite" : "atomic-json", durableJobs: Boolean(platformStore), wikiVersions: Boolean(platformStore), verifiedBackups: Boolean(backupService), memberLifecycle: Boolean(platformStore), secureShares: Boolean(shareService), agentTasks: Boolean(agentService) },
+          agent: { available: Boolean(agentService), boundary: "document-ip-wiki-readonly", maxSteps: 6, maxToolCalls: 12, formalKnowledgeMutation: false },
           fileSecurity: fileSecurityService.status(),
           dataBoundary: { gateway: "local", externalProcessors: ["MinerU", "DeepSeek"], disclosure: "Documents are sent to MinerU for parsing; bounded parsed text is sent to DeepSeek for structured analysis." },
         });
@@ -385,6 +407,39 @@ export async function createRealAnalysisServer(options = {}) {
         sendJson(response, 202, { job });
         return;
       }
+      if (request.method === "POST" && url.pathname === "/api/agent/tasks") {
+        if (!requireRole("viewer")) return;
+        if (!agentService) { sendJson(response, 409, { error: "Persistent IP task agent is unavailable in this storage mode" }); return; }
+        const identity = authRequired ? `${workspaceId}:${session.user.id}` : request.socket.remoteAddress || "unknown";
+        if (!allowWindow(agentRateWindows, identity, agentRateLimit)) {
+          response.setHeader("retry-after", "60");
+          sendJson(response, 429, { error: "Too many Agent tasks; retry in 60 seconds" });
+          return;
+        }
+        const task = await agentService.submit(await readJson(request), { workspaceId, userId: session.user.id, role: session.user.role });
+        sendJson(response, task.state === "blocked" ? 200 : 202, { task });
+        return;
+      }
+      if (request.method === "GET" && url.pathname === "/api/agent/tasks") {
+        if (!requireRole("viewer")) return;
+        if (!agentService) { sendJson(response, 200, { tasks: [] }); return; }
+        sendJson(response, 200, { tasks: agentService.list({ workspaceId, userId: session.user.id }, url.searchParams.get("limit")) });
+        return;
+      }
+      const agentTaskMatch = request.method === "GET" && url.pathname.match(/^\/api\/agent\/tasks\/(AGT-[A-Za-z0-9-]{1,100})$/);
+      if (agentTaskMatch) {
+        if (!requireRole("viewer")) return;
+        const task = agentService?.get(agentTaskMatch[1], { workspaceId, userId: session.user.id });
+        sendJson(response, task ? 200 : 404, task ? { task } : { error: "Agent task not found" });
+        return;
+      }
+      const agentCancelMatch = request.method === "POST" && url.pathname.match(/^\/api\/agent\/tasks\/(AGT-[A-Za-z0-9-]{1,100})\/cancel$/);
+      if (agentCancelMatch) {
+        if (!requireRole("viewer")) return;
+        const task = agentService?.cancel(agentCancelMatch[1], { workspaceId, userId: session.user.id });
+        sendJson(response, task ? 200 : 404, task ? { task } : { error: "Agent task not found" });
+        return;
+      }
       if (request.method === "GET" && url.pathname === "/api/analysis") {
         if (!requireRole("editor")) return;
         sendJson(response, 200, { jobs: analysisService.list(workspaceId) });
@@ -548,6 +603,7 @@ export async function createRealAnalysisServer(options = {}) {
   return {
     server,
     analysisService,
+    agentService,
     publicationRegistry,
     fileSecurityService,
     backupService,

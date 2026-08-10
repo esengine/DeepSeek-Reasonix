@@ -23,10 +23,20 @@ test("platform uses the official intelifar brand assets and baseline color", asy
 });
 
 test("all report acceptance surfaces are available from primary navigation", () => {
-  for (const view of ["documents", "analysis", "assets", "wiki", "redaction", "lifecycle", "audit", "system"]) {
+  for (const view of ["documents", "analysis", "agent", "assets", "wiki", "redaction", "lifecycle", "audit", "system"]) {
     assert.match(source, new RegExp(`data-nav="${view}"`));
     assert.match(source, new RegExp(`data-view="${view}"`));
   }
+});
+
+test("bounded Agent workbench exposes natural-language tasks without generic execution", () => {
+  assert.match(source, /data-testid="agent-workbench"/);
+  assert.match(source, /data-testid="agent-prompt"/);
+  assert.match(source, /只读执行/);
+  assert.match(source, /不自动发布/);
+  assert.match(behavior, /createAgentWorkbench/);
+  assert.match(styles, /\.agent-workbench/);
+  assert.doesNotMatch(source, /coding agent|代码代理/i);
 });
 
 test("provenance, redaction, share and audit actions are wired", () => {

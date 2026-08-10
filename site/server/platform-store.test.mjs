@@ -78,6 +78,52 @@ test("persists jobs and marks unfinished work as safely retryable after restart"
   }
 });
 
+test("persists creator-scoped Agent tasks and append-only step receipts", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    fx.store.ensureWorkspace({ id: "WS-B", name: "乙公司" });
+    const task = {
+      id: "AGT-1",
+      state: "running",
+      prompt: "盘点知识抽取资产",
+      createdBy: "USR-A",
+      createdAt: "2026-08-10T08:00:00.000Z",
+      updatedAt: "2026-08-10T08:00:01.000Z",
+    };
+    fx.store.saveAgentTask("WS-A", task);
+    fx.store.appendAgentTaskEvent("WS-A", task.id, { id: "AGE-1", type: "plan.ready", stepId: null, detail: { stepCount: 2 }, createdAt: "2026-08-10T08:00:02.000Z" });
+    fx.store.appendAgentTaskEvent("WS-A", task.id, { id: "AGE-2", type: "step.complete", stepId: "S1", detail: { tool: "search_assets", resultCount: 3 }, createdAt: "2026-08-10T08:00:03.000Z" });
+
+    assert.equal(fx.store.getAgentTask("WS-A", "AGT-1", "USR-A").prompt, task.prompt);
+    assert.equal(fx.store.getAgentTask("WS-A", "AGT-1", "USR-OTHER"), null);
+    assert.equal(fx.store.getAgentTask("WS-B", "AGT-1", "USR-A"), null);
+    assert.equal(fx.store.listAgentTasks("WS-A", "USR-A").length, 1);
+    assert.equal(fx.store.listAgentTasks("WS-A", "USR-OTHER").length, 0);
+    assert.deepEqual(fx.store.listAgentTaskEvents("WS-A", "AGT-1").map((event) => [event.type, event.stepId]), [["plan.ready", null], ["step.complete", "S1"]]);
+    assert.throws(() => fx.store.appendAgentTaskEvent("WS-B", task.id, { id: "AGE-X", type: "step.complete", detail: {} }));
+  } finally {
+    await fx.close();
+  }
+});
+
+test("marks in-flight Agent tasks interrupted without replaying them", async () => {
+  const fx = await fixture();
+  try {
+    fx.store.ensureWorkspace({ id: "WS-A", name: "甲公司" });
+    for (const [id, state] of [["AGT-PLANNING", "planning"], ["AGT-RUNNING", "running"], ["AGT-DONE", "complete"], ["AGT-BLOCKED", "blocked"]]) {
+      fx.store.saveAgentTask("WS-A", { id, state, prompt: "任务", createdBy: "USR-A", createdAt: "2026-08-10T08:00:00.000Z", updatedAt: "2026-08-10T08:00:00.000Z" });
+    }
+    assert.equal(fx.store.markInterruptedAgentTasks(), 2);
+    assert.equal(fx.store.getAgentTask("WS-A", "AGT-PLANNING", "USR-A").state, "interrupted");
+    assert.equal(fx.store.getAgentTask("WS-A", "AGT-RUNNING", "USR-A").state, "interrupted");
+    assert.equal(fx.store.getAgentTask("WS-A", "AGT-DONE", "USR-A").state, "complete");
+    assert.equal(fx.store.getAgentTask("WS-A", "AGT-BLOCKED", "USR-A").state, "blocked");
+  } finally {
+    await fx.close();
+  }
+});
+
 test("publishes idempotently per workspace and isolates identical asset ids", async () => {
   const fx = await fixture();
   try {

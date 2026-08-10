@@ -49,6 +49,7 @@ const assets = [
           <button class="nav-item is-active" data-nav="overview" data-testid="nav-overview" aria-controls="view-overview" aria-current="page"><span class="nav-icon">⌂</span><span>指挥台</span></button>
           <button class="nav-item" data-nav="documents" data-testid="nav-documents" aria-controls="view-documents"><span class="nav-icon">▤</span><span>文档中心</span><span class="nav-badge">17</span></button>
           <button class="nav-item" data-nav="analysis" data-testid="nav-analysis" aria-controls="view-analysis"><span class="nav-icon">◇</span><span>智能分析</span><span class="live-dot" title="运行中"></span></button>
+          <button class="nav-item" data-nav="agent" data-testid="nav-agent" aria-controls="view-agent"><span class="nav-icon">✦</span><span>IP 任务助手</span><span class="agent-nav-mark">受控</span></button>
           <button class="nav-item" data-nav="assets" data-testid="nav-assets" aria-controls="view-assets"><span class="nav-icon">⬡</span><span>IP 资产库</span></button>
           <button class="nav-item" data-nav="wiki" data-testid="nav-wiki" aria-controls="view-wiki"><span class="nav-icon">⌘</span><span>IP Wiki</span></button>
 
@@ -183,6 +184,56 @@ const assets = [
               <article class="panel source-preview"><div class="panel-head"><div><span class="kicker">SOURCE DOCUMENT</span><h2>原文定位</h2></div><span class="page-chip">第 48 / 326 页</span></div><div class="paper-page"><div class="paper-heading">3.2 稀疏专家路由机制</div><p>在大规模推理负载下，传统静态路由难以兼顾吞吐与专家负载均衡。本方案提出一种基于实时 token 密度的动态路由机制……</p><p class="source-highlight" data-open-provenance>系统在每个推理批次开始前计算专家负载向量，并通过二阶平滑窗口预测下一周期的拥塞概率。路由器依据预测结果动态调整 Top‑K 专家集合。<span>[S-048-03]</span></p><p>实验表明，在相同硬件条件下，方案将 P99 延迟降低 31.6%，并将专家间负载方差控制在 0.08 以内。</p></div></article>
               <article class="panel schema-preview"><div class="panel-head"><div><span class="kicker">SCHEMA EXTRACTION</span><h2>结构化提取结果</h2></div><span class="schema-chip">WHITEPAPER_V4</span></div><dl class="schema-list"><div><dt>技术名称</dt><dd>稀疏专家路由与动态负载均衡方法 <button data-open-provenance>S-048-03 ↗</button></dd></div><div><dt>核心问题</dt><dd>推理峰值下专家节点冷热不均 <button data-open-provenance>S-047-06 ↗</button></dd></div><div><dt>关键机制</dt><dd><span>负载向量预测</span><span>Top-K 动态调整</span><span>二阶平滑窗口</span></dd></div><div><dt>效果指标</dt><dd><strong>P99 延迟 −31.6%</strong><button data-open-provenance>S-049-01 ↗</button></dd></div><div><dt>综合置信度</dt><dd><span class="confidence-bar"><i style="width:98.6%"></i></span>98.6%</dd></div></dl></article>
             </div>
+          </section>
+
+          <section class="view agent-view" id="view-agent" data-view="agent" hidden>
+            <div class="page-intro agent-page-intro">
+              <div><p class="eyebrow">BOUNDED IP TASK ENGINE</p><h1>IP 任务助手</h1><p>用自然语言委托复杂的资产、证据、关系与 Wiki 任务，获得结构固定、来源可核验的结果包。</p></div>
+              <div class="agent-safety-stamps" aria-label="任务助手能力边界"><span><i>◇</i> 只读执行</span><span><i>✓</i> 证据约束</span><span><i>○</i> 不自动发布</span></div>
+            </div>
+
+            <div class="agent-workbench" id="agent-workbench" data-testid="agent-workbench">
+              <article class="agent-command panel">
+                <header class="agent-command-head"><div><span class="kicker">TASK CONTRACT</span><h2>描述要完成的业务任务</h2><p>助手会先生成最多 6 步的受控计划，再读取当前账号有权访问的知识。</p></div><span class="agent-engine-badge"><i></i> Reasonix 任务语义</span></header>
+                <div class="agent-template-grid" id="agent-template-grid" aria-label="常用任务模板">
+                  <button type="button" data-agent-template="asset_inventory" data-agent-prompt="盘点当前知识空间中的核心 IP 资产，按类型、权属和证据覆盖列出缺口"><span>01</span><strong>资产盘点</strong><small>分类 · 权属 · 证据缺口</small></button>
+                  <button type="button" data-agent-template="impact_analysis" data-agent-prompt="分析目标资产的上下游依赖、替代与冲突关系，列出影响路径和证据"><span>02</span><strong>影响分析</strong><small>依赖 · 替代 · 风险断点</small></button>
+                  <button type="button" data-agent-template="evidence_review" data-agent-prompt="核查相关 IP 资产的事实结论是否都有原文证据，并列出待核实项"><span>03</span><strong>证据核查</strong><small>引用 · 覆盖 · 待核实</small></button>
+                  <button type="button" data-agent-template="document_comparison" data-agent-prompt="比较两项已入库资产的定位、机制、指标与关系差异，并标明依据"><span>04</span><strong>资产对比</strong><small>机制 · 指标 · 差异</small></button>
+                  <button type="button" data-agent-template="wiki_draft" data-agent-role="editor" data-agent-prompt="为目标资产生成 Wiki 更新草案，保留现有事实并标记缺少证据的内容"><span>05</span><strong>Wiki 草案</strong><small>编辑者可用 · 不保存</small></button>
+                  <button type="button" data-agent-template="risk_gap_review" data-agent-prompt="梳理当前资料中的知识产权风险、信息缺口和需要负责人复核的事项"><span>06</span><strong>风险缺口</strong><small>风险 · 缺口 · 责任动作</small></button>
+                  <button type="button" data-agent-template="due_diligence_pack" data-agent-prompt="整理一份面向客户尽调的 IP 资产说明材料，所有事实必须附来源"><span>07</span><strong>尽调材料</strong><small>客户答复 · 事实来源</small></button>
+                </div>
+                <form id="agent-task-form" class="agent-task-form">
+                  <label for="agent-prompt"><span>任务委托</span><small id="agent-prompt-count">0 / 4,000</small></label>
+                  <textarea id="agent-prompt" name="prompt" rows="5" maxlength="4000" placeholder="例如：分析知识抽取引擎依赖哪些资产，如果版面解析能力变化，会影响哪些 Wiki 结论？" required data-testid="agent-prompt"></textarea>
+                  <input id="agent-template-id" name="templateId" type="hidden" />
+                  <div class="agent-form-foot"><p><span>◆</span> 文档内容仅作为不可信证据数据；越界指令不会改变能力边界。</p><button class="primary-btn agent-run-button" type="submit" data-testid="agent-submit"><span>委托任务</span> <b>→</b></button></div>
+                  <p class="agent-form-message" id="agent-form-message" role="status" aria-live="polite"></p>
+                </form>
+              </article>
+
+              <aside class="agent-history panel" aria-label="我的任务历史">
+                <div class="panel-head"><div><span class="kicker">MY TASKS</span><h2>任务记录</h2></div><button class="icon-btn small" id="agent-refresh" type="button" aria-label="刷新任务">↻</button></div>
+                <p class="agent-history-boundary">仅显示你本人在当前企业空间创建的任务。</p>
+                <div class="agent-history-list" id="agent-history-list" data-testid="agent-history-list"><div class="agent-history-empty"><span>✦</span><strong>还没有任务记录</strong><small>选择模板或直接描述业务任务。</small></div></div>
+              </aside>
+            </div>
+
+            <article class="agent-task-detail panel" id="agent-task-detail" data-testid="agent-task-detail" hidden>
+              <header class="agent-task-hero"><div><span class="agent-task-state" id="agent-task-state" data-testid="agent-task-state" data-state="planning"><i></i><b>正在规划</b></span><h2 id="agent-task-title">IP 智能任务</h2><p id="agent-task-summary">系统正在把自然语言目标转换为受控任务契约。</p></div><div class="agent-task-hero-actions"><span id="agent-task-id">AGT-—</span><button class="secondary-btn small" id="agent-cancel" type="button">取消任务</button></div></header>
+              <div class="agent-detail-grid">
+                <section class="agent-plan-section"><div class="agent-section-head"><div><span class="kicker">EXECUTION LEDGER</span><h3>计划与步骤收据</h3></div><span id="agent-plan-count">等待计划</span></div><ol class="agent-step-list" id="agent-step-list"><li class="is-pending"><span>01</span><div><strong>生成领域计划</strong><small>只会选择允许的 IP/Wiki 工具</small></div><b>…</b></li></ol></section>
+                <section class="agent-boundary-card"><span class="kicker">HARD BOUNDARY</span><h3>本任务不会做什么</h3><ul><li>不执行代码、命令或任意外网访问</li><li>不保存、删除、分享或发布正式知识</li><li>不修改成员权限或自动确认关系</li><li>不展示模型隐藏推理，只展示步骤收据</li></ul><div><i>6</i><span>最大步骤</span><i>12</i><span>最大工具调用</span></div></section>
+              </div>
+              <section class="agent-result" id="agent-result" data-testid="agent-result" hidden>
+                <div class="agent-result-head"><div><span class="kicker">DELIVERY PACKAGE</span><h3 id="agent-result-title">任务结果包</h3></div><div class="agent-quality"><span><small>证据覆盖</small><strong id="agent-evidence-coverage">—</strong></span><span><small>确定结论</small><strong id="agent-grounded-count">—</strong></span></div></div>
+                <p class="agent-result-summary" id="agent-result-summary"></p>
+                <div class="agent-result-grid"><section><h4>有依据的发现</h4><div id="agent-findings" class="agent-finding-list"></div></section><section><h4>待核实与下一步</h4><div id="agent-uncertainties" class="agent-uncertainty-list"></div><div id="agent-next-actions" class="agent-next-list"></div></section></div>
+                <section class="agent-deliverables"><h4>交付物</h4><div id="agent-deliverable-list"></div></section>
+                <footer class="agent-result-boundary"><span>✓</span><p><strong>交付门禁已执行</strong><small id="agent-excluded-actions">未改变任何正式知识。</small></p></footer>
+              </section>
+            </article>
           </section>
 
           <section class="view" id="view-assets" data-view="assets" hidden>
